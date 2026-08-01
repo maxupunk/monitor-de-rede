@@ -1,7 +1,7 @@
 import type { CheckResult } from './contracts/check_result.js'
 
 export class MonitorRunner {
-  async runMonitor(type: string, config: unknown): Promise<CheckResult> {
+  async runMonitor(type: string, _config: unknown): Promise<CheckResult> {
     const startedAt = new Date()
     const finishedAt = new Date()
     return {

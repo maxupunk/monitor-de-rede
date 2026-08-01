@@ -10,7 +10,7 @@ export interface SnmpSystemInfo {
 }
 
 export class SystemCollector {
-  async collect(client: SnmpClient): Promise<SnmpSystemInfo> {
+  async collect(_client: SnmpClient): Promise<SnmpSystemInfo> {
     return {}
   }
 }

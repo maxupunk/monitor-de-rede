@@ -4,7 +4,14 @@
  */
 
 export const controllers = {
-  AccessTokens: () => import('#controllers/access_tokens_controller'),
-  NewAccount: () => import('#controllers/new_account_controller'),
-  Profile: () => import('#controllers/profile_controller'),
+  Alerts: () => import('#controllers/alerts_controller'),
+  Auth: () => import('#controllers/auth_controller'),
+  Devices: () => import('#controllers/devices_controller'),
+  Discovery: () => import('#controllers/discovery_controller'),
+  Events: () => import('#controllers/events_controller'),
+  Monitors: () => import('#controllers/monitors_controller'),
+  Networks: () => import('#controllers/networks_controller'),
+  Probes: () => import('#controllers/probes_controller'),
+  Sites: () => import('#controllers/sites_controller'),
+  Topology: () => import('#controllers/topology_controller'),
 }

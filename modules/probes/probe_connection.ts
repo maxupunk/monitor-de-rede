@@ -1,5 +1,5 @@
 export class ProbeConnection {
-  async connect(serverUrl: string, token: string): Promise<boolean> {
+  async connect(_serverUrl: string, _token: string): Promise<boolean> {
     return true
   }
 }

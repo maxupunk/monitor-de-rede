@@ -6,7 +6,7 @@ export interface Hop {
 }
 
 export class RouteResolver {
-  async resolveRoute(targetIp: string): Promise<Hop[]> {
+  async resolveRoute(_targetIp: string): Promise<Hop[]> {
     return []
   }
 }

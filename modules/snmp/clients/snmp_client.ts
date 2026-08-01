@@ -12,13 +12,13 @@ export interface SnmpConfig {
 }
 
 export class SnmpClient {
-  constructor(private config: SnmpConfig) {}
+  constructor(public config: SnmpConfig) {}
 
-  async get(oids: string[]): Promise<Record<string, unknown>> {
+  async get(_oids: string[]): Promise<Record<string, unknown>> {
     return {}
   }
 
-  async walk(oid: string): Promise<Record<string, unknown>[]> {
+  async walk(_oid: string): Promise<Record<string, unknown>[]> {
     return []
   }
 }

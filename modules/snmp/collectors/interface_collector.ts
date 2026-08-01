@@ -13,7 +13,7 @@ export interface SnmpInterface {
 }
 
 export class InterfaceCollector {
-  async collect(client: SnmpClient): Promise<SnmpInterface[]> {
+  async collect(_client: SnmpClient): Promise<SnmpInterface[]> {
     return []
   }
 }

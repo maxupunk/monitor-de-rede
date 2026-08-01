@@ -8,7 +8,7 @@ export interface LldpNeighbor {
 }
 
 export class LldpCollector {
-  async collect(client: SnmpClient): Promise<LldpNeighbor[]> {
+  async collect(_client: SnmpClient): Promise<LldpNeighbor[]> {
     return []
   }
 }

@@ -6,7 +6,7 @@ export interface ProbeTask {
 }
 
 export class ProbeTaskDispatcher {
-  async dispatchTask(probeId: string, task: ProbeTask): Promise<void> {
+  async dispatchTask(_probeId: string, _task: ProbeTask): Promise<void> {
     // Despachar tarefa para probe
   }
 }

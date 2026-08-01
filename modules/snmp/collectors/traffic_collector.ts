@@ -10,7 +10,7 @@ export interface InterfaceTraffic {
 }
 
 export class TrafficCollector {
-  async collect(client: SnmpClient): Promise<InterfaceTraffic[]> {
+  async collect(_client: SnmpClient): Promise<InterfaceTraffic[]> {
     return []
   }
 }
