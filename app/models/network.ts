@@ -1,5 +1,9 @@
 import { DateTime } from 'luxon'
-import { BaseModel, column } from '@adonisjs/lucid/orm'
+import { BaseModel, column, belongsTo, hasMany } from '@adonisjs/lucid/orm'
+import type { BelongsTo, HasMany } from '@adonisjs/lucid/types/relations'
+import Site from '#models/site'
+import Probe from '#models/probe'
+import Device from '#models/device'
 
 export default class Network extends BaseModel {
   @column({ isPrimary: true })
@@ -23,8 +27,11 @@ export default class Network extends BaseModel {
   @column()
   declare vlan: number | null
 
-  @column()
-  declare dnsServers: string | null
+  @column({
+    prepare: (value: unknown) => (value ? JSON.stringify(value) : null),
+    consume: (value: string | unknown) => (typeof value === 'string' ? JSON.parse(value) : value),
+  })
+  declare dnsServers: string[] | null
 
   @column()
   declare scanEnabled: boolean
@@ -40,4 +47,13 @@ export default class Network extends BaseModel {
 
   @column.dateTime({ autoCreate: true, autoUpdate: true })
   declare updatedAt: DateTime
+
+  @belongsTo(() => Site)
+  declare site: BelongsTo<typeof Site>
+
+  @belongsTo(() => Probe)
+  declare probe: BelongsTo<typeof Probe>
+
+  @hasMany(() => Device)
+  declare devices: HasMany<typeof Device>
 }

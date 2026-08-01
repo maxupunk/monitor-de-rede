@@ -1,10 +1,73 @@
+import { DateTime } from 'luxon'
 import type { DiscoveredHost } from './scanners/icmp_scanner.js'
+import { IcmpScanner } from './scanners/icmp_scanner.js'
+import { ArpScanner } from './scanners/arp_scanner.js'
+import { PortScanner } from './scanners/port_scanner.js'
 import { DiscoveryMerger } from './discovery_merger.js'
+import DiscoveryRun from '#models/discovery_run'
+import DiscoveryResult from '#models/discovery_result'
 
 export class DiscoveryService {
+  private icmpScanner = new IcmpScanner()
+  private arpScanner = new ArpScanner()
+  private portScanner = new PortScanner()
   private merger = new DiscoveryMerger()
 
-  async runDiscovery(_cidr: string): Promise<DiscoveredHost[]> {
-    return this.merger.mergeResults([])
+  async runDiscovery(cidr: string, networkId?: number, probeId?: number | null): Promise<DiscoveredHost[]> {
+    let runRecord: DiscoveryRun | null = null
+
+    if (networkId) {
+      runRecord = await DiscoveryRun.create({
+        networkId,
+        probeId: probeId || null,
+        status: 'running',
+        startedAt: DateTime.now(),
+        configuration: { cidr },
+      })
+    }
+
+    try {
+      const [icmpRes, arpRes] = await Promise.all([
+        this.icmpScanner.scanNetwork(cidr),
+        this.arpScanner.scanNetwork(),
+      ])
+
+      const mergedBasic = this.merger.mergeResults([icmpRes, arpRes])
+      const finalHosts = await this.portScanner.scanHosts(mergedBasic)
+
+      if (runRecord) {
+        const now = DateTime.now()
+        for (const host of finalHosts) {
+          await DiscoveryResult.create({
+            discoveryRunId: runRecord.id,
+            ipAddress: host.ipAddress,
+            macAddress: host.macAddress || null,
+            hostname: host.hostname || null,
+            mdnsName: host.mdnsName || null,
+            vendor: host.vendor || null,
+            deviceType: host.deviceType || 'unknown',
+            confidence: host.confidence || 50,
+            status: 'pending',
+            data: host.data || {},
+            firstSeenAt: now,
+            lastSeenAt: now,
+          })
+        }
+
+        runRecord.status = 'completed'
+        runRecord.finishedAt = now
+        await runRecord.save()
+      }
+
+      return finalHosts
+    } catch (err: unknown) {
+      if (runRecord) {
+        runRecord.status = 'failed'
+        runRecord.finishedAt = DateTime.now()
+        runRecord.error = err instanceof Error ? err.message : String(err)
+        await runRecord.save()
+      }
+      throw err
+    }
   }
 }

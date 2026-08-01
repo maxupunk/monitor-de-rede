@@ -12,6 +12,7 @@ services:
       - APP_KEY=secret_app_key_32_characters_long_str
       - APP_URL=http://localhost:3333
       - SESSION_DRIVER=cookie
+      - DB_CONNECTION=pg
       - DB_HOST=postgres
       - DB_PORT=5432
       - DB_USER=netmonitor
@@ -34,8 +35,14 @@ services:
       - APP_KEY=secret_app_key_32_characters_long_str
       - APP_URL=http://localhost:3333
       - SESSION_DRIVER=cookie
+      - DB_CONNECTION=pg
       - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=netmonitor
+      - DB_PASSWORD=secret
+      - DB_DATABASE=netmonitor
       - REDIS_HOST=redis
+      - REDIS_PORT=6379
     depends_on:
       - postgres
       - redis
@@ -51,8 +58,14 @@ services:
       - APP_KEY=secret_app_key_32_characters_long_str
       - APP_URL=http://localhost:3333
       - SESSION_DRIVER=cookie
+      - DB_CONNECTION=pg
       - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=netmonitor
+      - DB_PASSWORD=secret
+      - DB_DATABASE=netmonitor
       - REDIS_HOST=redis
+      - REDIS_PORT=6379
     depends_on:
       - postgres
       - redis

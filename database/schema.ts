@@ -7,19 +7,66 @@
 import { BaseModel, column } from '@adonisjs/lucid/orm'
 import { DateTime } from 'luxon'
 
+export class AlertEventSchema extends BaseModel {
+  static $columns = ['alertRuleId', 'createdAt', 'data', 'deviceId', 'id', 'message', 'monitorId', 'resolvedAt', 'severity', 'startedAt', 'status', 'updatedAt'] as const
+  $columns = AlertEventSchema.$columns
+  @column()
+  declare alertRuleId: number
+  @column.dateTime({ autoCreate: true })
+  declare createdAt: DateTime
+  @column()
+  declare data: any | null
+  @column()
+  declare deviceId: number | null
+  @column({ isPrimary: true })
+  declare id: number
+  @column()
+  declare message: string | null
+  @column()
+  declare monitorId: number | null
+  @column.dateTime()
+  declare resolvedAt: DateTime | null
+  @column()
+  declare severity: string
+  @column.dateTime()
+  declare startedAt: DateTime
+  @column()
+  declare status: string
+  @column.dateTime({ autoCreate: true, autoUpdate: true })
+  declare updatedAt: DateTime | null
+}
+
+export class AlertRuleSchema extends BaseModel {
+  static $columns = ['condition', 'createdAt', 'deviceId', 'durationSeconds', 'enabled', 'id', 'monitorId', 'name', 'severity', 'siteId', 'type', 'updatedAt'] as const
+  $columns = AlertRuleSchema.$columns
+  @column()
+  declare condition: any
+  @column.dateTime({ autoCreate: true })
+  declare createdAt: DateTime
+  @column()
+  declare deviceId: number | null
+  @column()
+  declare durationSeconds: number
+  @column()
+  declare enabled: boolean
+  @column({ isPrimary: true })
+  declare id: number
+  @column()
+  declare monitorId: number | null
+  @column()
+  declare name: string
+  @column()
+  declare severity: string
+  @column()
+  declare siteId: number | null
+  @column()
+  declare type: string
+  @column.dateTime({ autoCreate: true, autoUpdate: true })
+  declare updatedAt: DateTime | null
+}
+
 export class AuthAccessTokenSchema extends BaseModel {
-  static $columns = [
-    'abilities',
-    'createdAt',
-    'expiresAt',
-    'hash',
-    'id',
-    'lastUsedAt',
-    'name',
-    'tokenableId',
-    'type',
-    'updatedAt',
-  ] as const
+  static $columns = ['abilities', 'createdAt', 'expiresAt', 'hash', 'id', 'lastUsedAt', 'name', 'tokenableId', 'type', 'updatedAt'] as const
   $columns = AuthAccessTokenSchema.$columns
   @column()
   declare abilities: string
@@ -39,6 +86,367 @@ export class AuthAccessTokenSchema extends BaseModel {
   declare tokenableId: number
   @column()
   declare type: string
+  @column.dateTime({ autoCreate: true, autoUpdate: true })
+  declare updatedAt: DateTime | null
+}
+
+export class DeviceAddressSchema extends BaseModel {
+  static $columns = ['address', 'createdAt', 'deviceId', 'family', 'hostname', 'id', 'isPrimary', 'lastSeenAt', 'updatedAt'] as const
+  $columns = DeviceAddressSchema.$columns
+  @column()
+  declare address: string
+  @column.dateTime({ autoCreate: true })
+  declare createdAt: DateTime
+  @column()
+  declare deviceId: number
+  @column()
+  declare family: string
+  @column()
+  declare hostname: string | null
+  @column({ isPrimary: true })
+  declare id: number
+  @column()
+  declare isPrimary: boolean
+  @column.dateTime()
+  declare lastSeenAt: DateTime | null
+  @column.dateTime({ autoCreate: true, autoUpdate: true })
+  declare updatedAt: DateTime | null
+}
+
+export class DeviceInterfaceSchema extends BaseModel {
+  static $columns = ['adminStatus', 'alias', 'createdAt', 'description', 'deviceId', 'id', 'lastSeenAt', 'macAddress', 'name', 'operStatus', 'snmpIndex', 'speed', 'type', 'updatedAt'] as const
+  $columns = DeviceInterfaceSchema.$columns
+  @column()
+  declare adminStatus: string | null
+  @column()
+  declare alias: string | null
+  @column.dateTime({ autoCreate: true })
+  declare createdAt: DateTime
+  @column()
+  declare description: string | null
+  @column()
+  declare deviceId: number
+  @column({ isPrimary: true })
+  declare id: number
+  @column.dateTime()
+  declare lastSeenAt: DateTime | null
+  @column()
+  declare macAddress: string | null
+  @column()
+  declare name: string
+  @column()
+  declare operStatus: string | null
+  @column()
+  declare snmpIndex: number | null
+  @column()
+  declare speed: bigint | number | null
+  @column()
+  declare type: string | null
+  @column.dateTime({ autoCreate: true, autoUpdate: true })
+  declare updatedAt: DateTime | null
+}
+
+export class DeviceLinkSchema extends BaseModel {
+  static $columns = ['confidence', 'confirmed', 'createdAt', 'discoveryMethod', 'id', 'lastSeenAt', 'linkType', 'sourceDeviceId', 'sourceInterfaceId', 'targetDeviceId', 'targetInterfaceId', 'updatedAt'] as const
+  $columns = DeviceLinkSchema.$columns
+  @column()
+  declare confidence: number
+  @column()
+  declare confirmed: boolean
+  @column.dateTime({ autoCreate: true })
+  declare createdAt: DateTime
+  @column()
+  declare discoveryMethod: string
+  @column({ isPrimary: true })
+  declare id: number
+  @column.dateTime()
+  declare lastSeenAt: DateTime | null
+  @column()
+  declare linkType: string
+  @column()
+  declare sourceDeviceId: number
+  @column()
+  declare sourceInterfaceId: number | null
+  @column()
+  declare targetDeviceId: number
+  @column()
+  declare targetInterfaceId: number | null
+  @column.dateTime({ autoCreate: true, autoUpdate: true })
+  declare updatedAt: DateTime | null
+}
+
+export class DeviceMacSchema extends BaseModel {
+  static $columns = ['address', 'createdAt', 'deviceId', 'id', 'interfaceName', 'lastSeenAt', 'updatedAt', 'vendor'] as const
+  $columns = DeviceMacSchema.$columns
+  @column()
+  declare address: string
+  @column.dateTime({ autoCreate: true })
+  declare createdAt: DateTime
+  @column()
+  declare deviceId: number
+  @column({ isPrimary: true })
+  declare id: number
+  @column()
+  declare interfaceName: string | null
+  @column.dateTime()
+  declare lastSeenAt: DateTime | null
+  @column.dateTime({ autoCreate: true, autoUpdate: true })
+  declare updatedAt: DateTime | null
+  @column()
+  declare vendor: string | null
+}
+
+export class DeviceSchema extends BaseModel {
+  static $columns = ['createdAt', 'description', 'id', 'lastSeenAt', 'model', 'name', 'networkId', 'serialNumber', 'siteId', 'status', 'type', 'updatedAt', 'vendor'] as const
+  $columns = DeviceSchema.$columns
+  @column.dateTime({ autoCreate: true })
+  declare createdAt: DateTime
+  @column()
+  declare description: string | null
+  @column({ isPrimary: true })
+  declare id: number
+  @column.dateTime()
+  declare lastSeenAt: DateTime | null
+  @column()
+  declare model: string | null
+  @column()
+  declare name: string
+  @column()
+  declare networkId: number | null
+  @column()
+  declare serialNumber: string | null
+  @column()
+  declare siteId: number
+  @column()
+  declare status: string
+  @column()
+  declare type: string
+  @column.dateTime({ autoCreate: true, autoUpdate: true })
+  declare updatedAt: DateTime | null
+  @column()
+  declare vendor: string | null
+}
+
+export class DiscoveryResultSchema extends BaseModel {
+  static $columns = ['confidence', 'createdAt', 'data', 'deviceType', 'discoveryRunId', 'firstSeenAt', 'hostname', 'id', 'ipAddress', 'lastSeenAt', 'macAddress', 'mdnsName', 'status', 'updatedAt', 'vendor'] as const
+  $columns = DiscoveryResultSchema.$columns
+  @column()
+  declare confidence: number
+  @column.dateTime({ autoCreate: true })
+  declare createdAt: DateTime
+  @column()
+  declare data: any | null
+  @column()
+  declare deviceType: string | null
+  @column()
+  declare discoveryRunId: number
+  @column.dateTime()
+  declare firstSeenAt: DateTime
+  @column()
+  declare hostname: string | null
+  @column({ isPrimary: true })
+  declare id: number
+  @column()
+  declare ipAddress: string
+  @column.dateTime()
+  declare lastSeenAt: DateTime
+  @column()
+  declare macAddress: string | null
+  @column()
+  declare mdnsName: string | null
+  @column()
+  declare status: string
+  @column.dateTime({ autoCreate: true, autoUpdate: true })
+  declare updatedAt: DateTime | null
+  @column()
+  declare vendor: string | null
+}
+
+export class DiscoveryRunSchema extends BaseModel {
+  static $columns = ['configuration', 'createdAt', 'error', 'finishedAt', 'id', 'networkId', 'probeId', 'startedAt', 'status', 'updatedAt'] as const
+  $columns = DiscoveryRunSchema.$columns
+  @column()
+  declare configuration: any | null
+  @column.dateTime({ autoCreate: true })
+  declare createdAt: DateTime
+  @column()
+  declare error: string | null
+  @column.dateTime()
+  declare finishedAt: DateTime | null
+  @column({ isPrimary: true })
+  declare id: number
+  @column()
+  declare networkId: number
+  @column()
+  declare probeId: number | null
+  @column.dateTime()
+  declare startedAt: DateTime
+  @column()
+  declare status: string
+  @column.dateTime({ autoCreate: true, autoUpdate: true })
+  declare updatedAt: DateTime | null
+}
+
+export class MetricSchema extends BaseModel {
+  static $columns = ['createdAt', 'deviceId', 'id', 'interfaceId', 'monitorId', 'name', 'recordedAt', 'unit', 'value'] as const
+  $columns = MetricSchema.$columns
+  @column.dateTime({ autoCreate: true })
+  declare createdAt: DateTime
+  @column()
+  declare deviceId: number
+  @column({ isPrimary: true })
+  declare id: number
+  @column()
+  declare interfaceId: number | null
+  @column()
+  declare monitorId: number | null
+  @column()
+  declare name: string
+  @column.dateTime()
+  declare recordedAt: DateTime
+  @column()
+  declare unit: string
+  @column()
+  declare value: number
+}
+
+export class MonitorResultSchema extends BaseModel {
+  static $columns = ['createdAt', 'data', 'durationMs', 'finishedAt', 'id', 'latencyMs', 'message', 'monitorId', 'probeId', 'startedAt', 'status'] as const
+  $columns = MonitorResultSchema.$columns
+  @column.dateTime({ autoCreate: true })
+  declare createdAt: DateTime
+  @column()
+  declare data: any | null
+  @column()
+  declare durationMs: number
+  @column.dateTime()
+  declare finishedAt: DateTime
+  @column({ isPrimary: true })
+  declare id: number
+  @column()
+  declare latencyMs: number | null
+  @column()
+  declare message: string | null
+  @column()
+  declare monitorId: number
+  @column()
+  declare probeId: number | null
+  @column.dateTime()
+  declare startedAt: DateTime
+  @column()
+  declare status: string
+}
+
+export class MonitorSchema extends BaseModel {
+  static $columns = ['configuration', 'createdAt', 'deviceId', 'enabled', 'id', 'intervalSeconds', 'lastRunAt', 'name', 'nextRunAt', 'probeId', 'retryCount', 'status', 'timeoutSeconds', 'type', 'updatedAt'] as const
+  $columns = MonitorSchema.$columns
+  @column()
+  declare configuration: any
+  @column.dateTime({ autoCreate: true })
+  declare createdAt: DateTime
+  @column()
+  declare deviceId: number
+  @column()
+  declare enabled: boolean
+  @column({ isPrimary: true })
+  declare id: number
+  @column()
+  declare intervalSeconds: number
+  @column.dateTime()
+  declare lastRunAt: DateTime | null
+  @column()
+  declare name: string
+  @column.dateTime()
+  declare nextRunAt: DateTime | null
+  @column()
+  declare probeId: number | null
+  @column()
+  declare retryCount: number
+  @column()
+  declare status: string
+  @column()
+  declare timeoutSeconds: number
+  @column()
+  declare type: string
+  @column.dateTime({ autoCreate: true, autoUpdate: true })
+  declare updatedAt: DateTime | null
+}
+
+export class NetworkSchema extends BaseModel {
+  static $columns = ['active', 'cidr', 'createdAt', 'dnsServers', 'gateway', 'id', 'name', 'probeId', 'scanEnabled', 'scanInterval', 'siteId', 'updatedAt', 'vlan'] as const
+  $columns = NetworkSchema.$columns
+  @column()
+  declare active: boolean
+  @column()
+  declare cidr: string
+  @column.dateTime({ autoCreate: true })
+  declare createdAt: DateTime
+  @column()
+  declare dnsServers: any | null
+  @column()
+  declare gateway: string | null
+  @column({ isPrimary: true })
+  declare id: number
+  @column()
+  declare name: string
+  @column()
+  declare probeId: number | null
+  @column()
+  declare scanEnabled: boolean
+  @column()
+  declare scanInterval: number
+  @column()
+  declare siteId: number
+  @column.dateTime({ autoCreate: true, autoUpdate: true })
+  declare updatedAt: DateTime | null
+  @column()
+  declare vlan: number | null
+}
+
+export class ProbeSchema extends BaseModel {
+  static $columns = ['configuration', 'createdAt', 'id', 'lastSeenAt', 'name', 'registeredAt', 'revokedAt', 'siteId', 'status', 'tokenHash', 'updatedAt', 'version'] as const
+  $columns = ProbeSchema.$columns
+  @column()
+  declare configuration: any | null
+  @column.dateTime({ autoCreate: true })
+  declare createdAt: DateTime
+  @column({ isPrimary: true })
+  declare id: number
+  @column.dateTime()
+  declare lastSeenAt: DateTime | null
+  @column()
+  declare name: string
+  @column.dateTime()
+  declare registeredAt: DateTime | null
+  @column.dateTime()
+  declare revokedAt: DateTime | null
+  @column()
+  declare siteId: number | null
+  @column()
+  declare status: string
+  @column()
+  declare tokenHash: string
+  @column.dateTime({ autoCreate: true, autoUpdate: true })
+  declare updatedAt: DateTime | null
+  @column()
+  declare version: string | null
+}
+
+export class SiteSchema extends BaseModel {
+  static $columns = ['active', 'createdAt', 'description', 'id', 'location', 'name', 'updatedAt'] as const
+  $columns = SiteSchema.$columns
+  @column()
+  declare active: boolean
+  @column.dateTime({ autoCreate: true })
+  declare createdAt: DateTime
+  @column()
+  declare description: string | null
+  @column({ isPrimary: true })
+  declare id: number
+  @column()
+  declare location: string | null
+  @column()
+  declare name: string
   @column.dateTime({ autoCreate: true, autoUpdate: true })
   declare updatedAt: DateTime | null
 }

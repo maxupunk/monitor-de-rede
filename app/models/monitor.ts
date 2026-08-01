@@ -1,5 +1,9 @@
 import { DateTime } from 'luxon'
-import { BaseModel, column } from '@adonisjs/lucid/orm'
+import { BaseModel, column, belongsTo, hasMany } from '@adonisjs/lucid/orm'
+import type { BelongsTo, HasMany } from '@adonisjs/lucid/types/relations'
+import Device from '#models/device'
+import Probe from '#models/probe'
+import MonitorResult from '#models/monitor_result'
 
 export default class Monitor extends BaseModel {
   @column({ isPrimary: true })
@@ -18,8 +22,9 @@ export default class Monitor extends BaseModel {
   declare name: string
 
   @column({
-    prepare: (value: Record<string, unknown>) => JSON.stringify(value),
-    consume: (value: string) => (value ? JSON.parse(value) : {}),
+    prepare: (value: Record<string, unknown>) => (value ? JSON.stringify(value) : null),
+    consume: (value: string | Record<string, unknown>) =>
+      typeof value === 'string' ? JSON.parse(value) : value || {},
   })
   declare configuration: Record<string, unknown>
 
@@ -49,4 +54,13 @@ export default class Monitor extends BaseModel {
 
   @column.dateTime({ autoCreate: true, autoUpdate: true })
   declare updatedAt: DateTime
+
+  @belongsTo(() => Device)
+  declare device: BelongsTo<typeof Device>
+
+  @belongsTo(() => Probe)
+  declare probe: BelongsTo<typeof Probe>
+
+  @hasMany(() => MonitorResult)
+  declare results: HasMany<typeof MonitorResult>
 }

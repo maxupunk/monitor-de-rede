@@ -1,5 +1,9 @@
 import { DateTime } from 'luxon'
-import { BaseModel, column } from '@adonisjs/lucid/orm'
+import { BaseModel, column, belongsTo, hasMany } from '@adonisjs/lucid/orm'
+import type { BelongsTo, HasMany } from '@adonisjs/lucid/types/relations'
+import Site from '#models/site'
+import Network from '#models/network'
+import Monitor from '#models/monitor'
 
 export default class Device extends BaseModel {
   @column({ isPrimary: true })
@@ -40,4 +44,13 @@ export default class Device extends BaseModel {
 
   @column.dateTime({ autoCreate: true, autoUpdate: true })
   declare updatedAt: DateTime
+
+  @belongsTo(() => Site)
+  declare site: BelongsTo<typeof Site>
+
+  @belongsTo(() => Network)
+  declare network: BelongsTo<typeof Network>
+
+  @hasMany(() => Monitor)
+  declare monitors: HasMany<typeof Monitor>
 }

@@ -1,37 +1,28 @@
 import { DateTime } from 'luxon'
 import { BaseModel, column, belongsTo, hasMany } from '@adonisjs/lucid/orm'
 import type { BelongsTo, HasMany } from '@adonisjs/lucid/types/relations'
-import Site from '#models/site'
 import Network from '#models/network'
-import Monitor from '#models/monitor'
+import Probe from '#models/probe'
+import DiscoveryResult from '#models/discovery_result'
 
-export default class Probe extends BaseModel {
+export default class DiscoveryRun extends BaseModel {
   @column({ isPrimary: true })
   declare id: number
 
   @column()
-  declare siteId: number | null
+  declare networkId: number
 
   @column()
-  declare name: string
+  declare probeId: number | null
 
   @column()
-  declare tokenHash: string
-
-  @column()
-  declare status: 'online' | 'offline' | 'busy' | 'revoked' | 'pending'
-
-  @column()
-  declare version: string | null
+  declare status: 'pending' | 'running' | 'completed' | 'failed'
 
   @column.dateTime()
-  declare lastSeenAt: DateTime | null
+  declare startedAt: DateTime
 
   @column.dateTime()
-  declare registeredAt: DateTime | null
-
-  @column.dateTime()
-  declare revokedAt: DateTime | null
+  declare finishedAt: DateTime | null
 
   @column({
     prepare: (value: Record<string, unknown>) => (value ? JSON.stringify(value) : null),
@@ -40,18 +31,21 @@ export default class Probe extends BaseModel {
   })
   declare configuration: Record<string, unknown> | null
 
+  @column()
+  declare error: string | null
+
   @column.dateTime({ autoCreate: true })
   declare createdAt: DateTime
 
   @column.dateTime({ autoCreate: true, autoUpdate: true })
   declare updatedAt: DateTime
 
-  @belongsTo(() => Site)
-  declare site: BelongsTo<typeof Site>
+  @belongsTo(() => Network)
+  declare network: BelongsTo<typeof Network>
 
-  @hasMany(() => Network)
-  declare networks: HasMany<typeof Network>
+  @belongsTo(() => Probe)
+  declare probe: BelongsTo<typeof Probe>
 
-  @hasMany(() => Monitor)
-  declare monitors: HasMany<typeof Monitor>
+  @hasMany(() => DiscoveryResult)
+  declare results: HasMany<typeof DiscoveryResult>
 }
