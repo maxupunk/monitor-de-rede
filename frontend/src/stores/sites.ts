@@ -17,7 +17,10 @@ export const useSitesStore = defineStore('sites', () => {
     loading.value = true
     try {
       const res = await fetch('/api/sites')
-      if (res.ok) sites.value = await res.json()
+      if (res.ok) {
+        const data = (await res.json()) as Site[]
+        sites.value = data
+      }
     } finally {
       loading.value = false
     }

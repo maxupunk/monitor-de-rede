@@ -1,0 +1,9 @@
+node_modules
+frontend/node_modules
+frontend/dist
+build
+dist
+tmp
+.git
+.env
+.DS_Store

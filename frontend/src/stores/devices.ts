@@ -20,7 +20,10 @@ export const useDevicesStore = defineStore('devices', () => {
     loading.value = true
     try {
       const res = await fetch('/api/devices')
-      if (res.ok) devices.value = await res.json()
+      if (res.ok) {
+        const data = (await res.json()) as Device[]
+        devices.value = data
+      }
     } finally {
       loading.value = false
     }

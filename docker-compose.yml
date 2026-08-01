@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   server:
     build: .
@@ -9,6 +7,11 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3333
+      - HOST=0.0.0.0
+      - LOG_LEVEL=info
+      - APP_KEY=secret_app_key_32_characters_long_str
+      - APP_URL=http://localhost:3333
+      - SESSION_DRIVER=cookie
       - DB_HOST=postgres
       - DB_PORT=5432
       - DB_USER=netmonitor
@@ -25,6 +28,12 @@ services:
     command: node ace queue:work
     environment:
       - NODE_ENV=production
+      - PORT=3333
+      - HOST=0.0.0.0
+      - LOG_LEVEL=info
+      - APP_KEY=secret_app_key_32_characters_long_str
+      - APP_URL=http://localhost:3333
+      - SESSION_DRIVER=cookie
       - DB_HOST=postgres
       - REDIS_HOST=redis
     depends_on:
@@ -36,6 +45,12 @@ services:
     command: node ace scheduler:run
     environment:
       - NODE_ENV=production
+      - PORT=3333
+      - HOST=0.0.0.0
+      - LOG_LEVEL=info
+      - APP_KEY=secret_app_key_32_characters_long_str
+      - APP_URL=http://localhost:3333
+      - SESSION_DRIVER=cookie
       - DB_HOST=postgres
       - REDIS_HOST=redis
     depends_on:
@@ -45,10 +60,15 @@ services:
   probe:
     build: .
     command: node ace probe:run
-    network_mode: host
     environment:
       - NODE_ENV=production
-      - SERVER_URL=http://localhost:3333
+      - PORT=3333
+      - HOST=0.0.0.0
+      - LOG_LEVEL=info
+      - APP_KEY=secret_app_key_32_characters_long_str
+      - APP_URL=http://server:3333
+      - SESSION_DRIVER=cookie
+      - SERVER_URL=http://server:3333
     depends_on:
       - server
 

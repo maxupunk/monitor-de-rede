@@ -9,7 +9,10 @@ export const useProbesStore = defineStore('probes', () => {
     loading.value = true
     try {
       const res = await fetch('/api/probes')
-      if (res.ok) probes.value = await res.json()
+      if (res.ok) {
+        const data = (await res.json()) as Array<Record<string, unknown>>
+        probes.value = data
+      }
     } finally {
       loading.value = false
     }

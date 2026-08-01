@@ -9,7 +9,10 @@ export const useDiscoveryStore = defineStore('discovery', () => {
     loading.value = true
     try {
       const res = await fetch('/api/discovery/results')
-      if (res.ok) results.value = await res.json()
+      if (res.ok) {
+        const data = (await res.json()) as Array<Record<string, unknown>>
+        results.value = data
+      }
     } finally {
       loading.value = false
     }

@@ -18,7 +18,10 @@ export const useMonitorsStore = defineStore('monitors', () => {
     loading.value = true
     try {
       const res = await fetch('/api/monitors')
-      if (res.ok) monitors.value = await res.json()
+      if (res.ok) {
+        const data = (await res.json()) as Monitor[]
+        monitors.value = data
+      }
     } finally {
       loading.value = false
     }

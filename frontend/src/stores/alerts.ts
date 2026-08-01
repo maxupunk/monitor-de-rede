@@ -9,7 +9,10 @@ export const useAlertsStore = defineStore('alerts', () => {
     loading.value = true
     try {
       const res = await fetch('/api/alerts')
-      if (res.ok) alerts.value = await res.json()
+      if (res.ok) {
+        const data = (await res.json()) as Array<Record<string, unknown>>
+        alerts.value = data
+      }
     } finally {
       loading.value = false
     }

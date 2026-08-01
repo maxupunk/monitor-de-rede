@@ -17,7 +17,10 @@ export const useNetworksStore = defineStore('networks', () => {
     loading.value = true
     try {
       const res = await fetch('/api/networks')
-      if (res.ok) networks.value = await res.json()
+      if (res.ok) {
+        const data = (await res.json()) as Network[]
+        networks.value = data
+      }
     } finally {
       loading.value = false
     }
