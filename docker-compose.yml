@@ -1,15 +1,26 @@
+x-app-env: &app-env
+  NODE_ENV: production
+  PORT: 3333
+  HOST: 0.0.0.0
+  LOG_LEVEL: info
+  APP_KEY: secret_app_key_32_characters_long_str
+  APP_URL: http://localhost:3333
+  SESSION_DRIVER: cookie
+  DB_CONNECTION: pg
+  DB_HOST: postgres
+  DB_PORT: 5432
+  DB_USER: netmonitor
+  DB_PASSWORD: secret
+  DB_DATABASE: netmonitor
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+
 services:
   migration:
     build: .
     command: node ace.js migration:run --force
     environment:
-      - NODE_ENV=production
-      - DB_CONNECTION=pg
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_USER=netmonitor
-      - DB_PASSWORD=secret
-      - DB_DATABASE=netmonitor
+      <<: *app-env
     depends_on:
       postgres:
         condition: service_healthy
@@ -21,21 +32,7 @@ services:
     ports:
       - "${API_PORT:-3333}:3333"
     environment:
-      - NODE_ENV=production
-      - PORT=3333
-      - HOST=0.0.0.0
-      - LOG_LEVEL=info
-      - APP_KEY=secret_app_key_32_characters_long_str
-      - APP_URL=http://localhost:3333
-      - SESSION_DRIVER=cookie
-      - DB_CONNECTION=pg
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_USER=netmonitor
-      - DB_PASSWORD=secret
-      - DB_DATABASE=netmonitor
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
+      <<: *app-env
     depends_on:
       postgres:
         condition: service_healthy
@@ -48,21 +45,7 @@ services:
     build: .
     command: node ace.js queue:work
     environment:
-      - NODE_ENV=production
-      - PORT=3333
-      - HOST=0.0.0.0
-      - LOG_LEVEL=info
-      - APP_KEY=secret_app_key_32_characters_long_str
-      - APP_URL=http://localhost:3333
-      - SESSION_DRIVER=cookie
-      - DB_CONNECTION=pg
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_USER=netmonitor
-      - DB_PASSWORD=secret
-      - DB_DATABASE=netmonitor
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
+      <<: *app-env
     depends_on:
       postgres:
         condition: service_healthy
@@ -75,21 +58,7 @@ services:
     build: .
     command: node ace.js scheduler:run
     environment:
-      - NODE_ENV=production
-      - PORT=3333
-      - HOST=0.0.0.0
-      - LOG_LEVEL=info
-      - APP_KEY=secret_app_key_32_characters_long_str
-      - APP_URL=http://localhost:3333
-      - SESSION_DRIVER=cookie
-      - DB_CONNECTION=pg
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_USER=netmonitor
-      - DB_PASSWORD=secret
-      - DB_DATABASE=netmonitor
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
+      <<: *app-env
     depends_on:
       postgres:
         condition: service_healthy
@@ -102,15 +71,10 @@ services:
     build: .
     command: node ace.js probe:run
     environment:
-      - NODE_ENV=production
-      - PORT=3333
-      - HOST=0.0.0.0
-      - LOG_LEVEL=info
-      - APP_KEY=secret_app_key_32_characters_long_str
-      - APP_URL=http://server:3333
-      - SESSION_DRIVER=cookie
-      - PROBE_SERVER_URL=http://server:3333
-      - SERVER_URL=http://server:3333
+      <<: *app-env
+      APP_URL: http://server:3333
+      PROBE_SERVER_URL: http://server:3333
+      SERVER_URL: http://server:3333
     depends_on:
       - server
 
