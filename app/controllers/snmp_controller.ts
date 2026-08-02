@@ -1,0 +1,71 @@
+import type { HttpContext } from '@adonisjs/core/http'
+import Device from '#models/device'
+import DeviceInterface from '#models/device_interface'
+import { SnmpService } from '#modules/snmp/snmp_service'
+import vine from '@vinejs/vine'
+
+export default class SnmpController {
+  private snmpService = new SnmpService()
+
+  /**
+   * POST /api/devices/:id/snmp/poll
+   * Executa varredura SNMP sob demanda para um dispositivo.
+   */
+  async poll({ params, request, response }: HttpContext) {
+    const device = await Device.find(params.id)
+    if (!device) {
+      return response.notFound({ message: 'Dispositivo não encontrado' })
+    }
+
+    const schema = vine.object({
+      host: vine.string().optional(),
+      version: vine.enum(['v1', 'v2c', 'v3']).optional(),
+      community: vine.string().optional(),
+      port: vine.number().optional(),
+    })
+
+    const payload = await vine.validate({
+      schema,
+      data: request.all(),
+    })
+
+    const config = {
+      host: payload.host || device.name,
+      version: payload.version || 'v2c',
+      community: payload.community || 'public',
+      port: payload.port || 161,
+    }
+
+    try {
+      const result = await this.snmpService.pollDevice(device, config)
+      return response.ok({
+        message: 'Varredura SNMP executada com sucesso',
+        result,
+      })
+    } catch (error) {
+      return response.badRequest({
+        message: 'Falha ao executar varredura SNMP',
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  /**
+   * GET /api/devices/:id/interfaces
+   * Retorna a lista de interfaces de um dispositivo com métricas de tráfego.
+   */
+  async interfaces({ params, response }: HttpContext) {
+    const device = await Device.find(params.id)
+    if (!device) {
+      return response.notFound({ message: 'Dispositivo não encontrado' })
+    }
+
+    const interfaces = await DeviceInterface.query()
+      .where('deviceId', device.id)
+      .preload('metrics', (q) => {
+        q.orderBy('recordedAt', 'desc').limit(10)
+      })
+
+    return response.ok(interfaces)
+  }
+}

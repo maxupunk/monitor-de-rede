@@ -1,12 +1,40 @@
-import type { NetworkLink } from './link_resolver.js'
+export interface TopologyNode {
+  id: number
+  name: string
+  type: string
+  status: 'online' | 'offline' | 'warning' | 'unknown'
+  siteId?: number
+  siteName?: string
+  ipAddress?: string
+  interfaceCount?: number
+  activeAlertCount?: number
+}
+
+export interface TopologyEdge {
+  id?: number | string
+  source: number
+  target: number
+  sourceInterfaceId?: number | null
+  sourceInterfaceName?: string
+  targetInterfaceId?: number | null
+  targetInterfaceName?: string
+  linkType: string
+  discoveryMethod: string
+  confidence: number
+  confirmed: boolean
+  status: 'up' | 'down' | 'degraded'
+}
 
 export interface TopologyGraph {
-  nodes: Array<{ id: string; name: string; type: string; status: string }>
-  edges: NetworkLink[]
+  nodes: TopologyNode[]
+  edges: TopologyEdge[]
 }
 
 export class TopologyBuilder {
-  buildGraph(nodes: Array<{ id: string; name: string; type: string; status: string }>, links: NetworkLink[]): TopologyGraph {
-    return { nodes, edges: links }
+  buildGraph(nodes: TopologyNode[], edges: TopologyEdge[]): TopologyGraph {
+    return {
+      nodes,
+      edges,
+    }
   }
 }

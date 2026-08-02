@@ -21,7 +21,7 @@ export class ProbeAgent {
   private isRunning = false
 
   constructor(options?: ProbeAgentOptions) {
-    this.serverUrl = options?.serverUrl || process.env.PROBE_SERVER_URL || 'http://localhost:3333'
+    this.serverUrl = options?.serverUrl || process.env.PROBE_SERVER_URL || process.env.SERVER_URL || 'http://localhost:3333'
     this.probeToken = options?.probeToken || process.env.PROBE_TOKEN || ''
     this.intervalMs = options?.intervalMs || Number(process.env.PROBE_INTERVAL_MS) || 5000
     this.version = options?.version || '1.0.0'

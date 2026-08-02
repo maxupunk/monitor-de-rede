@@ -16,8 +16,8 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
 | **Agendador (Scheduler)** | 🟢 **Concluído** | Comando `scheduler:run` com loop de busca por `next_run_at`, execução e recálculo do próximo ciclo. |
 | **Descoberta Automática (Discovery)** | 🟢 **Concluído** | Scanners funcionais (ICMP/Ping sweep, tabela ARP, PortScanner) e fusão com auto-criação de dispositivo/monitor. |
 | **Comunicação com Probes** | 🟢 **Concluído** | Autenticação por token Hash (SHA-256), registro via CLI (`probe:register`), heartbeat, despachante de tarefas e buffer offline com reenvio automático. |
-| **SNMP & Métricas de Tráfego** | 🔴 **Pendente** | Estrutura criada. Falta integração com biblioteca SNMP (v1/v2c/v3) e cálculo de tráfego de interface. |
-| **Topologia de Rede** | 🔴 **Pendente** | Estrutura de resolutores pronta. Falta cálculo de confiança e renderização do mapa gráfico. |
+| **SNMP & Métricas de Tráfego** | 🟢 **Concluído** | Coleta SNMP (v1/v2c/v3), varredura de interfaces, contadores de octetos (ifHCIn/ifHCOut) e métricas de tráfego (bps). |
+| **Topologia de Rede** | 🟢 **Concluído** | Resolutor de links (`DeviceLink`), pontuação de confiança (`ConfidenceCalculator`), inferência de sub-rede e gerador do mapa gráfico. |
 | **Alertas & Notificações** | 🟢 **Concluído** | Avaliação de regras em tempo real (`AlertManager`), ciclo de vida (ativo, reconhecido, silenciado, resolvido) e conectores (E-mail, Telegram, Discord, Webhook). |
 | **Eventos Tempo Real (SSE)** | 🟢 **Concluído** | Barramento `EventBus` singleton e streaming em `/api/events/stream` via SSE funcional. |
 | **Frontend (Vue 3 + Vuetify)** | 🟡 **Parcial (UI Skeleton)** | Projeto Vite/Vue 3 configurado com Vuetify e Vue Router. Telas criadas em layout mockup sem consumo da API. |
@@ -109,17 +109,17 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
 
 ---
 
-### Fase 6: SNMP, Métricas & Topologia Avançada (Segunda Etapa)
+### Fase 6: SNMP, Métricas & Topologia Avançada (Concluído 🟢)
 > **Objetivo:** Obter dados detalhados de switches/roteadores e gerar mapas visuais de rede.
 
-- [ ] **Coleta SNMP (v1, v2c, v3)**:
-  - [ ] `system_collector`: sysName, sysDescr, sysUptime.
-  - [ ] `interface_collector`: listagem de portas, status admin/oper, velocidade.
-  - [ ] `traffic_collector`: leitura de contadores de octetos (ifHCInOctets / ifHCOutOctets) para cálculo de tráfego (bps).
-  - [ ] `lldp_collector`: vizinhos LLDP/CDP para descoberta de conexões entre equipamentos.
-- [ ] **Topologia de Rede**:
-  - [ ] Resolução de links (`DeviceLink`) manuais, LLDP e inferidos.
-  - [ ] Integração com biblioteca gráfica no frontend (ex: `v-network-graph` ou `vis-network`).
+- [x] **Coleta SNMP (v1, v2c, v3)**:
+  - [x] `system_collector`: sysName, sysDescr, sysUptime.
+  - [x] `interface_collector`: listagem de portas, status admin/oper, velocidade.
+  - [x] `traffic_collector`: leitura de contadores de octetos (ifHCInOctets / ifHCOutOctets) para cálculo de tráfego (bps).
+  - [x] `lldp_collector`: vizinhos LLDP/CDP para descoberta de conexões entre equipamentos.
+- [x] **Topologia de Rede**:
+  - [x] Resolução de links (`DeviceLink`) manuais, LLDP/CDP e inferidos.
+  - [x] API REST (`/api/topology`) com grafo interativo e comandos CLI (`snmp:poll`).
 
 ---
 

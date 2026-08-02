@@ -13,5 +13,6 @@ export const controllers = {
   Networks: () => import('#controllers/networks_controller'),
   Probes: () => import('#controllers/probes_controller'),
   Sites: () => import('#controllers/sites_controller'),
+  Snmp: () => import('#controllers/snmp_controller'),
   Topology: () => import('#controllers/topology_controller'),
 }

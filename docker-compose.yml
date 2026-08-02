@@ -1,4 +1,20 @@
 services:
+  migration:
+    build: .
+    command: node ace.js migration:run --force
+    environment:
+      - NODE_ENV=production
+      - DB_CONNECTION=pg
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=netmonitor
+      - DB_PASSWORD=secret
+      - DB_DATABASE=netmonitor
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   server:
     build: .
     command: node bin/server.js
@@ -21,12 +37,16 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      migration:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
 
   worker:
     build: .
-    command: node ace queue:work
+    command: node ace.js queue:work
     environment:
       - NODE_ENV=production
       - PORT=3333
@@ -44,12 +64,16 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      migration:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
 
   scheduler:
     build: .
-    command: node ace scheduler:run
+    command: node ace.js scheduler:run
     environment:
       - NODE_ENV=production
       - PORT=3333
@@ -67,12 +91,16 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      migration:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
 
   probe:
     build: .
-    command: node ace probe:run
+    command: node ace.js probe:run
     environment:
       - NODE_ENV=production
       - PORT=3333
@@ -81,6 +109,7 @@ services:
       - APP_KEY=secret_app_key_32_characters_long_str
       - APP_URL=http://server:3333
       - SESSION_DRIVER=cookie
+      - PROBE_SERVER_URL=http://server:3333
       - SERVER_URL=http://server:3333
     depends_on:
       - server
@@ -102,6 +131,11 @@ services:
       POSTGRES_DB: netmonitor
     ports:
       - "${DB_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U netmonitor -d netmonitor"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
     volumes:
       - pgdata:/var/lib/postgresql/data
 

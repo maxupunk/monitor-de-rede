@@ -4,6 +4,9 @@ import type { BelongsTo, HasMany } from '@adonisjs/lucid/types/relations'
 import Site from '#models/site'
 import Network from '#models/network'
 import Monitor from '#models/monitor'
+import DeviceInterface from '#models/device_interface'
+import Metric from '#models/metric'
+import DeviceLink from '#models/device_link'
 
 export default class Device extends BaseModel {
   @column({ isPrimary: true })
@@ -53,4 +56,17 @@ export default class Device extends BaseModel {
 
   @hasMany(() => Monitor)
   declare monitors: HasMany<typeof Monitor>
+
+  @hasMany(() => DeviceInterface)
+  declare interfaces: HasMany<typeof DeviceInterface>
+
+  @hasMany(() => Metric)
+  declare metrics: HasMany<typeof Metric>
+
+  @hasMany(() => DeviceLink, { foreignKey: 'sourceDeviceId' })
+  declare outgoingLinks: HasMany<typeof DeviceLink>
+
+  @hasMany(() => DeviceLink, { foreignKey: 'targetDeviceId' })
+  declare incomingLinks: HasMany<typeof DeviceLink>
 }
+

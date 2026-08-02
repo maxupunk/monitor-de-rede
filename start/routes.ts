@@ -13,6 +13,7 @@ const DevicesController = () => import('#controllers/devices_controller')
 const MonitorsController = () => import('#controllers/monitors_controller')
 const DiscoveryController = () => import('#controllers/discovery_controller')
 const TopologyController = () => import('#controllers/topology_controller')
+const SnmpController = () => import('#controllers/snmp_controller')
 const ProbesController = () => import('#controllers/probes_controller')
 const AlertsController = () => import('#controllers/alerts_controller')
 const EventsController = () => import('#controllers/events_controller')
@@ -36,7 +37,8 @@ router
     router.resource('networks', NetworksController).apiOnly()
 
     // Devices
-    router.get('devices/:id/interfaces', [DevicesController, 'interfaces'])
+    router.post('devices/:id/snmp/poll', [SnmpController, 'poll'])
+    router.get('devices/:id/interfaces', [SnmpController, 'interfaces'])
     router.get('devices/:id/monitors', [DevicesController, 'monitors'])
     router.get('devices/:id/metrics', [DevicesController, 'metrics'])
     router.get('devices/:id/events', [DevicesController, 'events'])
@@ -59,7 +61,7 @@ router
     // Topology
     router.get('topology', [TopologyController, 'index'])
     router.post('topology/links', [TopologyController, 'storeLink'])
-    router.put('topology/links/:id', [TopologyController, 'updateLink'])
+    router.post('topology/recalculate', [TopologyController, 'recalculate'])
     router.delete('topology/links/:id', [TopologyController, 'destroyLink'])
 
     // Probes
