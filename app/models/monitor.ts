@@ -1,5 +1,5 @@
 import { DateTime } from 'luxon'
-import { BaseModel, column, belongsTo, hasMany } from '@adonisjs/lucid/orm'
+import { BaseModel, column, belongsTo, hasMany, computed } from '@adonisjs/lucid/orm'
 import type { BelongsTo, HasMany } from '@adonisjs/lucid/types/relations'
 import Device from '#models/device'
 import Probe from '#models/probe'
@@ -22,11 +22,23 @@ export default class Monitor extends BaseModel {
   declare name: string
 
   @column({
-    prepare: (value: Record<string, unknown>) => (value ? JSON.stringify(value) : null),
+    prepare: (value: Record<string, unknown>) => (value ? JSON.stringify(value) : JSON.stringify({})),
     consume: (value: string | Record<string, unknown>) =>
       typeof value === 'string' ? JSON.parse(value) : value || {},
   })
   declare configuration: Record<string, unknown>
+
+  @computed()
+  get target(): string {
+    if (!this.configuration) return ''
+    return (this.configuration.host || this.configuration.url || this.configuration.domain || '') as string
+  }
+
+  @computed()
+  get port(): number | undefined {
+    if (!this.configuration) return undefined
+    return this.configuration.port as number | undefined
+  }
 
   @column()
   declare intervalSeconds: number
@@ -36,6 +48,11 @@ export default class Monitor extends BaseModel {
 
   @column()
   declare retryCount: number
+
+  @computed()
+  get isEnabled(): boolean {
+    return this.enabled
+  }
 
   @column()
   declare enabled: boolean

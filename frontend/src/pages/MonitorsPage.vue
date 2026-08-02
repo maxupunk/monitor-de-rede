@@ -209,9 +209,9 @@ function openDialog(monitor?: Monitor) {
     editedId.value = monitor.id
     formModel.deviceId = monitor.deviceId
     formModel.name = monitor.name
-    formModel.type = monitor.type
-    formModel.target = monitor.target
-    formModel.port = monitor.port
+    formModel.type = (monitor.type as 'ping' | 'http' | 'tcp' | 'dns') || 'ping'
+    formModel.target = monitor.target || (monitor.configuration?.host || monitor.configuration?.url || monitor.configuration?.domain || '') as string
+    formModel.port = monitor.port || (monitor.configuration?.port as number | undefined) || 80
     formModel.intervalSeconds = monitor.intervalSeconds
     formModel.timeoutSeconds = monitor.timeoutSeconds
   } else {
@@ -230,10 +230,27 @@ function openDialog(monitor?: Monitor) {
 async function save() {
   if (!formModel.name || !formModel.target) return
   saving.value = true
+
+  let configuration: Record<string, unknown> = {}
+  if (formModel.type === 'ping') {
+    configuration = { host: formModel.target }
+  } else if (formModel.type === 'http') {
+    configuration = { url: formModel.target.startsWith('http') ? formModel.target : `http://${formModel.target}` }
+  } else if (formModel.type === 'tcp') {
+    configuration = { host: formModel.target, port: formModel.port || 80 }
+  } else if (formModel.type === 'dns') {
+    configuration = { domain: formModel.target }
+  }
+
+  const payload = {
+    ...formModel,
+    configuration,
+  }
+
   if (editedId.value) {
-    await monitorsStore.updateMonitor(editedId.value, formModel)
+    await monitorsStore.updateMonitor(editedId.value, payload)
   } else {
-    await monitorsStore.createMonitor(formModel)
+    await monitorsStore.createMonitor(payload)
   }
   saving.value = false
   dialog.value = false

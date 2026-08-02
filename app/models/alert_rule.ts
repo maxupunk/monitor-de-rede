@@ -1,5 +1,5 @@
 import { DateTime } from 'luxon'
-import { BaseModel, column, belongsTo } from '@adonisjs/lucid/orm'
+import { BaseModel, column, belongsTo, computed } from '@adonisjs/lucid/orm'
 import type { BelongsTo } from '@adonisjs/lucid/types/relations'
 import Site from '#models/site'
 import Device from '#models/device'
@@ -36,6 +36,11 @@ export default class AlertRule extends BaseModel {
 
   @column()
   declare durationSeconds: number
+
+  @computed()
+  get isEnabled(): boolean {
+    return this.enabled
+  }
 
   @column()
   declare enabled: boolean

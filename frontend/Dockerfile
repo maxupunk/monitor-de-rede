@@ -1,5 +1,5 @@
 # Stage 1: Build da aplicação Vue + Vite PWA
-FROM node:22-alpine AS build-stage
+FROM node:24-alpine AS build-stage
 WORKDIR /app
 
 COPY package*.json ./
