@@ -4,6 +4,7 @@ import { DateTime } from 'luxon'
 import Monitor from '#models/monitor'
 import { MonitorRunner } from '#modules/monitoring/monitor_runner'
 import { ResultProcessor } from '#modules/monitoring/result_processor'
+import { ProbeTaskDispatcher } from '#modules/probes/probe_task_dispatcher'
 
 export default class SchedulerRun extends BaseCommand {
   static commandName = 'scheduler:run'
@@ -16,6 +17,7 @@ export default class SchedulerRun extends BaseCommand {
 
   private monitorRunner = new MonitorRunner()
   private resultProcessor = new ResultProcessor()
+  private probeTaskDispatcher = new ProbeTaskDispatcher()
 
   async run() {
     this.logger.info('Processo Scheduler de Monitoramento inicializado.')
@@ -59,10 +61,23 @@ export default class SchedulerRun extends BaseCommand {
 
   private async executeMonitorAsync(monitor: Monitor) {
     try {
-      this.logger.info(`[Scheduler] Executando monitor #${monitor.id} (${monitor.type}) - ${monitor.name}`)
-      const result = await this.monitorRunner.runMonitor(monitor.type, monitor.configuration)
-      await this.resultProcessor.processResult(monitor.id, result, monitor.probeId)
-      this.logger.info(`[Scheduler] Monitor #${monitor.id} finalizado: status=${result.status}`)
+      if (monitor.probeId) {
+        this.logger.info(
+          `[Scheduler] Despachando monitor #${monitor.id} (${monitor.type}) para Probe #${monitor.probeId}`
+        )
+        this.probeTaskDispatcher.dispatchTask(monitor.probeId, {
+          id: `task-${monitor.id}-${Date.now()}`,
+          monitorId: monitor.id,
+          type: monitor.type,
+          timeoutMs: (monitor.timeoutSeconds || 5) * 1000,
+          payload: monitor.configuration,
+        })
+      } else {
+        this.logger.info(`[Scheduler] Executando monitor #${monitor.id} (${monitor.type}) - ${monitor.name}`)
+        const result = await this.monitorRunner.runMonitor(monitor.type, monitor.configuration)
+        await this.resultProcessor.processResult(monitor.id, result, monitor.probeId)
+        this.logger.info(`[Scheduler] Monitor #${monitor.id} finalizado: status=${result.status}`)
+      }
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err)
       this.logger.error(`[Scheduler] Erro ao executar monitor #${monitor.id}: ${errorMsg}`)

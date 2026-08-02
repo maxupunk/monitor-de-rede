@@ -63,6 +63,9 @@ router
     router.delete('topology/links/:id', [TopologyController, 'destroyLink'])
 
     // Probes
+    router.post('probes/heartbeat', [ProbesController, 'heartbeat'])
+    router.get('probes/tasks', [ProbesController, 'getTasks'])
+    router.post('probes/results', [ProbesController, 'postResults'])
     router.post('probes/:id/revoke', [ProbesController, 'revoke'])
     router.post('probes/:id/test', [ProbesController, 'test'])
     router.resource('probes', ProbesController).apiOnly()

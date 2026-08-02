@@ -15,11 +15,11 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
 | **Worker & Queue System** | 🟢 **Concluído** | `ResultProcessor` grava resultados no banco, extrai métricas e atualiza estado dos dispositivos/monitores. |
 | **Agendador (Scheduler)** | 🟢 **Concluído** | Comando `scheduler:run` com loop de busca por `next_run_at`, execução e recálculo do próximo ciclo. |
 | **Descoberta Automática (Discovery)** | 🟢 **Concluído** | Scanners funcionais (ICMP/Ping sweep, tabela ARP, PortScanner) e fusão com auto-criação de dispositivo/monitor. |
-| **Comunicação com Probes** | 🔴 **Pendente** | Definido modelo e rotas. Falta autenticação por token, heartbeat, dispatcher de tarefas e buffer offline (SQLite). |
+| **Comunicação com Probes** | 🟢 **Concluído** | Autenticação por token Hash (SHA-256), registro via CLI (`probe:register`), heartbeat, despachante de tarefas e buffer offline com reenvio automático. |
 | **SNMP & Métricas de Tráfego** | 🔴 **Pendente** | Estrutura criada. Falta integração com biblioteca SNMP (v1/v2c/v3) e cálculo de tráfego de interface. |
 | **Topologia de Rede** | 🔴 **Pendente** | Estrutura de resolutores pronta. Falta cálculo de confiança e renderização do mapa gráfico. |
-| **Alertas & Notificações** | 🔴 **Pendente** | Evaluator stub criado. Faltam disparadores reais e conectores (Telegram, E-mail, Discord, Webhook). |
-| **Eventos Tempo Real (SSE)** | 🔴 **Pendente** | Rota `/api/events/stream` declarada, falta barramento de eventos SSE funcional. |
+| **Alertas & Notificações** | 🟢 **Concluído** | Avaliação de regras em tempo real (`AlertManager`), ciclo de vida (ativo, reconhecido, silenciado, resolvido) e conectores (E-mail, Telegram, Discord, Webhook). |
+| **Eventos Tempo Real (SSE)** | 🟢 **Concluído** | Barramento `EventBus` singleton e streaming em `/api/events/stream` via SSE funcional. |
 | **Frontend (Vue 3 + Vuetify)** | 🟡 **Parcial (UI Skeleton)** | Projeto Vite/Vue 3 configurado com Vuetify e Vue Router. Telas criadas em layout mockup sem consumo da API. |
 | **Infraestrutura Docker** | 🟢 **Concluído** | `docker-compose.yml` e `Dockerfile` configurados para todos os serviços (API, Worker, Scheduler, Probe, Postgres, Redis, Frontend). |
 
@@ -79,33 +79,33 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
 
 ---
 
-### Fase 4: Probes & Arquitetura Distribuída
+### Fase 4: Probes & Arquitetura Distribuída (Concluído 🟢)
 > **Objetivo:** Permitir que agentes leves rodem em outras redes ou no próprio container e enviem dados ao servidor central.
 
-- [ ] **Autenticação & Registro do Probe**:
-  - [ ] Fluxo de registro com token temporário `node ace probe:register`.
-  - [ ] Autenticação persistente com Token Hash.
-  - [ ] Heartbeat periódico (`probe.connected` / `probe.disconnected`).
-- [ ] **Despachante de Tarefas & Buffer Offline**:
-  - [ ] Despacho de verificações atribuídas a um `probe_id`.
-  - [ ] Armazenamento temporário de resultados em SQLite no Probe em caso de perda de conexão.
-  - [ ] Reenvio automático assim que a conexão com o servidor central for restabelecida.
+- [x] **Autenticação & Registro do Probe**:
+  - [x] Fluxo de registro com token temporário `node ace probe:register`.
+  - [x] Autenticação persistente com Token Hash (SHA-256).
+  - [x] Heartbeat periódico e status online/offline/revoked.
+- [x] **Despachante de Tarefas & Buffer Offline**:
+  - [x] Despacho de verificações atribuídas a um `probe_id` (`ProbeTaskDispatcher`).
+  - [x] Armazenamento temporário de resultados offline no Probe (`ProbeBuffer`) em caso de perda de conexão.
+  - [x] Reenvio automático assim que a conexão com o servidor central for restabelecida.
 
 ---
 
-### Fase 5: Alertas, Notificações & Eventos SSE em Tempo Real
+### Fase 5: Alertas, Notificações & Eventos SSE em Tempo Real (Concluído 🟢)
 > **Objetivo:** Notificar o usuário em tempo real sobre indisponibilidades e mudanças de estado.
 
-- [ ] **Serviço de Alertas (`rule_evaluator.ts`)**:
-  - [ ] Regras para dispositivo offline, latência alta, falha em serviço HTTP/TCP.
-  - [ ] Controle de tempo mínimo/falhas consecutivas e janela de silêncio.
-- [ ] **Canais de Notificação**:
-  - [ ] Conector de E-mail (AdonisJS Mail).
-  - [ ] Conector de Telegram Bot API.
-  - [ ] Conector de Discord Webhook.
-  - [ ] Conector de Webhooks Genéricos.
-- [ ] **Server-Sent Events (SSE)**:
-  - [ ] Barramento em tempo real em `/api/events/stream` para atualizar o frontend instantaneamente.
+- [x] **Serviço de Alertas (`rule_evaluator.ts` & `AlertManager`)**:
+  - [x] Regras para dispositivo offline, latência alta, falha em serviço HTTP/TCP.
+  - [x] Controle de tempo mínimo, janela de silêncio (`SilenceManager`) e recuperação automática (`RecoveryManager`).
+- [x] **Canais de Notificação**:
+  - [x] Conector de E-mail (`EmailChannel`).
+  - [x] Conector de Telegram Bot API (`TelegramChannel`).
+  - [x] Conector de Discord Webhook (`DiscordChannel`).
+  - [x] Conector de Webhooks Genéricos (`WebhookChannel`).
+- [x] **Server-Sent Events (SSE)**:
+  - [x] Barramento em tempo real `EventBus` e transmissão em `/api/events/stream` via SSE funcional.
 
 ---
 

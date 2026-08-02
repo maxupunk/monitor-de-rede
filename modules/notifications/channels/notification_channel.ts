@@ -6,5 +6,6 @@ export interface NotificationMessage {
 }
 
 export interface NotificationChannel {
-  send(message: NotificationMessage): Promise<void>
+  name: string
+  send(message: NotificationMessage): Promise<boolean>
 }

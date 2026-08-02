@@ -1,7 +1,33 @@
 import type { HttpContext } from '@adonisjs/core/http'
+import crypto from 'node:crypto'
+import { DateTime } from 'luxon'
 import Probe from '#models/probe'
+import { ProbeTaskDispatcher } from '#modules/probes/probe_task_dispatcher'
+import { ProbeResultReceiver } from '#modules/probes/probe_result_receiver'
 
 export default class ProbesController {
+  private taskDispatcher = new ProbeTaskDispatcher()
+  private resultReceiver = new ProbeResultReceiver()
+
+  private hashToken(rawToken: string): string {
+    return crypto.createHash('sha256').update(rawToken).digest('hex')
+  }
+
+  private async authenticateProbe(request: HttpContext['request']): Promise<Probe | null> {
+    const rawToken = request.header('x-probe-token') || request.input('token')
+    if (!rawToken || typeof rawToken !== 'string') {
+      return null
+    }
+
+    const tokenHash = this.hashToken(rawToken)
+    const probe = await Probe.query()
+      .where('tokenHash', tokenHash)
+      .whereNot('status', 'revoked')
+      .first()
+
+    return probe
+  }
+
   async index({ response }: HttpContext) {
     const probes = await Probe.all()
     return response.ok(probes)
@@ -9,6 +35,11 @@ export default class ProbesController {
 
   async store({ request, response }: HttpContext) {
     const data = request.only(['siteId', 'name', 'tokenHash', 'status', 'version', 'configuration'])
+    if (!data.status) data.status = 'pending'
+    if (!data.tokenHash) {
+      const rawSecret = crypto.randomBytes(32).toString('hex')
+      data.tokenHash = this.hashToken(rawSecret)
+    }
     const probe = await Probe.create(data)
     return response.created(probe)
   }
@@ -35,8 +66,49 @@ export default class ProbesController {
   async revoke({ params, response }: HttpContext) {
     const probe = await Probe.findOrFail(params.id)
     probe.status = 'revoked'
+    probe.revokedAt = DateTime.now()
     await probe.save()
     return response.ok(probe)
+  }
+
+  async heartbeat({ request, response }: HttpContext) {
+    const probe = await this.authenticateProbe(request)
+    if (!probe) {
+      return response.unauthorized({ error: 'Probe não encontrado ou token inválido' })
+    }
+
+    const body = request.body()
+    probe.status = 'online'
+    probe.lastSeenAt = DateTime.now()
+    if (body.version) probe.version = body.version
+    if (body.configuration) probe.configuration = body.configuration
+    await probe.save()
+
+    return response.ok({ status: 'ok', probeId: probe.id })
+  }
+
+  async getTasks({ request, response }: HttpContext) {
+    const probe = await this.authenticateProbe(request)
+    if (!probe) {
+      return response.unauthorized({ error: 'Probe não encontrado ou token inválido' })
+    }
+
+    const tasks = this.taskDispatcher.getPendingTasks(probe.id)
+    return response.ok({ tasks })
+  }
+
+  async postResults({ request, response }: HttpContext) {
+    const probe = await this.authenticateProbe(request)
+    if (!probe) {
+      return response.unauthorized({ error: 'Probe não encontrado ou token inválido' })
+    }
+
+    const { results } = request.only(['results'])
+    if (Array.isArray(results) && results.length > 0) {
+      await this.resultReceiver.receiveBatchResults(probe.id, results)
+    }
+
+    return response.ok({ status: 'processed', count: Array.isArray(results) ? results.length : 0 })
   }
 
   async test({ params, response }: HttpContext) {
