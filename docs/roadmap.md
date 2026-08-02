@@ -20,7 +20,7 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
 | **Topologia de Rede** | 🟢 **Concluído** | Resolutor de links (`DeviceLink`), pontuação de confiança (`ConfidenceCalculator`), inferência de sub-rede e gerador do mapa gráfico. |
 | **Alertas & Notificações** | 🟢 **Concluído** | Avaliação de regras em tempo real (`AlertManager`), ciclo de vida (ativo, reconhecido, silenciado, resolvido) e conectores (E-mail, Telegram, Discord, Webhook). |
 | **Eventos Tempo Real (SSE)** | 🟢 **Concluído** | Barramento `EventBus` singleton e streaming em `/api/events/stream` via SSE funcional. |
-| **Frontend (Vue 3 + Vuetify)** | 🟡 **Parcial (UI Skeleton)** | Projeto Vite/Vue 3 configurado com Vuetify e Vue Router. Telas criadas em layout mockup sem consumo da API. |
+| **Frontend (Vue 3 + Vuetify)** | 🟢 **Concluído** | SPA/PWA completa integrada à API REST AdonisJS v6, com Pinia, gráficos, topologia gráfica interativa e suporte a SSE em tempo real. |
 | **Infraestrutura Docker** | 🟢 **Concluído** | `docker-compose.yml` e `Dockerfile` configurados para todos os serviços (API, Worker, Scheduler, Probe, Postgres, Redis, Frontend). |
 
 ---
@@ -123,20 +123,20 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
 
 ---
 
-### Fase 7: Frontend Vue 3 + Vuetify Funcional
+### Fase 7: Frontend Vue 3 + Vuetify Funcional (Concluído 🟢)
 > **Objetivo:** Conectar a interface visual com a API e disponibilizar uma SPA/PWA completa.
 
-- [ ] **Integração HTTP / Axios & Stores Pinia**:
-  - [ ] Store de Autenticação (`authStore`) com login/logout.
-  - [ ] Stores de `sites`, `networks`, `devices`, `monitors`, `discovery`, `topology`, `alerts`, `probes`.
-- [ ] **Telas e Componentes Interativos**:
-  - [ ] **Dashboard**: cards de resumo alimentados por estatísticas em tempo real via SSE.
-  - [ ] **Gestão de Dispositivos**: listagem com filtros, status visual (online/offline) e modal de criação/edição.
-  - [ ] **Detalhes do Dispositivo**: abas com histórico de latência (gráficos), interfaces SNMP e monitores vinculados.
-  - [ ] **Central de Descoberta**: tabela para revisar, aceitar ou ignorar novos dispositivos encontrados.
-  - [ ] **Mapa de Topologia**: tela gráfica interativa para arrastar nós, visualizar tráfego e definir ligações.
-- [ ] **Suporte a PWA**:
-  - [ ] Manifest file, ícones de aplicativo e Service Worker para experiência instalável.
+- [x] **Integração HTTP & Stores Pinia**:
+  - [x] Serviço HTTP centralizado (`apiService.ts`) e Store de Autenticação (`authStore`) com login/logout.
+  - [x] Stores de `sites`, `networks`, `devices`, `deviceDetail`, `monitors`, `discovery`, `topology`, `alerts`, `probes`, `events`.
+- [x] **Telas e Componentes Interativos**:
+  - [x] **Dashboard**: cards de resumo alimentados por estatísticas em tempo real via SSE.
+  - [x] **Gestão de Dispositivos**: listagem com filtros, status visual (online/offline) e modal de criação/edição.
+  - [x] **Detalhes do Dispositivo**: abas com histórico de latência, interfaces SNMP, monitores vinculados e eventos.
+  - [x] **Central de Descoberta**: tabela para revisar, aceitar ou ignorar novos dispositivos encontrados.
+  - [x] **Mapa de Topologia**: tela gráfica interativa para arrastar nós, visualizar ligações e definir links manuais.
+- [x] **Suporte a PWA**:
+  - [x] Manifest file, ícones de aplicativo e Service Worker para experiência instalável.
 
 ---
 
