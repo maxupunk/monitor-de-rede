@@ -8,8 +8,19 @@ export default class MonitorsController {
   private resultProcessor = new ResultProcessor()
 
   async index({ response }: HttpContext) {
-    const monitors = await Monitor.query().preload('device').preload('probe')
-    return response.ok(monitors)
+    const monitors = await Monitor.query()
+      .preload('device')
+      .preload('probe')
+      .preload('results', (query) => query.orderBy('startedAt', 'desc').limit(30))
+
+    const formatted = monitors.map((mon) => {
+      const json = mon.serialize()
+      const results = mon.results || []
+      json.recentResults = [...results].reverse().map((r) => r.serialize())
+      return json
+    })
+
+    return response.ok(formatted)
   }
 
   private buildConfiguration(
@@ -85,8 +96,40 @@ export default class MonitorsController {
   }
 
   async show({ params, response }: HttpContext) {
-    const monitor = await Monitor.query().where('id', params.id).preload('device').preload('probe').firstOrFail()
-    return response.ok(monitor)
+    const monitor = await Monitor.query()
+      .where('id', params.id)
+      .preload('device')
+      .preload('probe')
+      .preload('results', (query) => query.orderBy('startedAt', 'desc').limit(100))
+      .firstOrFail()
+
+    const results = monitor.results || []
+    const latencies = results
+      .map((r) => r.latencyMs)
+      .filter((l): l is number => l !== null && l !== undefined)
+
+    const avgLatency = latencies.length > 0 ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length) : null
+    const minLatency = latencies.length > 0 ? Math.min(...latencies) : null
+    const maxLatency = latencies.length > 0 ? Math.max(...latencies) : null
+    const lastLatency = latencies.length > 0 ? latencies[0] : null
+
+    const totalChecks = results.length
+    const upChecks = results.filter((r) => r.status === 'up').length
+    const uptimePercentage = totalChecks > 0 ? Number(((upChecks / totalChecks) * 100).toFixed(1)) : 100
+
+    const json = monitor.serialize()
+    json.recentResults = [...results].reverse().map((r) => r.serialize())
+    json.stats = {
+      avgLatency,
+      minLatency,
+      maxLatency,
+      lastLatency,
+      uptimePercentage,
+      totalChecks,
+      upChecks,
+    }
+
+    return response.ok(json)
   }
 
   async update({ params, request, response }: HttpContext) {

@@ -135,6 +135,9 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
   - [x] **Detalhes do Dispositivo**: abas com histórico de latência, interfaces SNMP, monitores vinculados e eventos.
   - [x] **Central de Descoberta**: tabela para revisar, aceitar ou ignorar novos dispositivos encontrados.
   - [x] **Mapa de Topologia**: tela gráfica interativa para arrastar nós, visualizar ligações e definir links manuais.
+- [x] **Monitores com Histórico Estilo Uptime Kuma & Gráficos de Latência**:
+  - [x] Componente `MonitorTimelineBar.vue` com barras verticais coloridas (estilo Uptime Kuma) na lista de monitores (`/monitors`).
+  - [x] Página de detalhes/gráficos de monitor (`/monitors/:id`) com estatísticas de ping (médio, mín, máx), gráfico SVG de latência e log de verificações.
 - [x] **Suporte a PWA**:
   - [x] Manifest file, ícones de aplicativo e Service Worker para experiência instalável.
 

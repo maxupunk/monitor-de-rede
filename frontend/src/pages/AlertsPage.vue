@@ -41,7 +41,7 @@
               </template>
 
               <template #item.actions="{ item }">
-                <div class="d-flex gap-2">
+                <div class="d-flex ga-2" style="gap: 8px;">
                   <v-btn
                     size="small"
                     color="primary"

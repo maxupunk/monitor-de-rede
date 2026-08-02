@@ -3,7 +3,7 @@
     <div class="d-flex align-center justify-space-between mb-6">
       <div>
         <h1 class="text-h4 font-weight-bold">Monitores de Rede</h1>
-        <p class="text-subtitle-1 text-grey-darken-1">Gerenciamento de verificações ICMP (Ping), HTTP, TCP e DNS</p>
+        <p class="text-subtitle-1 text-grey-darken-1">Gerenciamento de verificações ICMP (Ping), HTTP, TCP e DNS com histórico em linha do tempo</p>
       </div>
       <v-btn color="primary" prepend-icon="mdi-plus" @click="openDialog()">
         Novo Monitor
@@ -32,6 +32,23 @@
         :loading="monitorsStore.loading"
         no-data-text="Nenhum monitor cadastrado"
       >
+        <!-- Custom Slot para Nome e Linha do Tempo Estilo Uptime Kuma -->
+        <template #item.name="{ item }">
+          <div class="py-2">
+            <router-link
+              :to="`/monitors/${item.id}`"
+              class="text-subtitle-1 font-weight-bold text-decoration-none text-primary hover-underline d-inline-block mb-1"
+            >
+              {{ item.name }}
+            </router-link>
+            <div>
+              <router-link :to="`/monitors/${item.id}`" class="text-decoration-none">
+                <MonitorTimelineBar :results="item.recentResults" :max-blocks="24" :height="20" :width="5" />
+              </router-link>
+            </div>
+          </div>
+        </template>
+
         <template #item.type="{ item }">
           <v-chip size="small" color="info" variant="tonal">
             {{ (item.type || 'N/A').toUpperCase() }}
@@ -60,11 +77,16 @@
             color="secondary"
             variant="tonal"
             prepend-icon="mdi-play"
-            class="mr-2"
+            class="mr-1"
             :loading="monitorsStore.runningId === item.id"
             @click="monitorsStore.runMonitor(item.id)"
           >
             Testar
+          </v-btn>
+
+          <v-btn icon size="small" variant="text" color="info" :to="`/monitors/${item.id}`">
+            <v-icon>mdi-chart-timeline-variant</v-icon>
+            <v-tooltip activator="parent" location="top">Ver Gráficos e Detalhes</v-tooltip>
           </v-btn>
 
           <v-btn icon size="small" variant="text" color="primary" @click="openDialog(item)">
@@ -155,6 +177,7 @@
 import { ref, onMounted, reactive } from 'vue'
 import { useMonitorsStore, type Monitor } from '@/stores/monitors'
 import { useDevicesStore } from '@/stores/devices'
+import MonitorTimelineBar from '@/components/MonitorTimelineBar.vue'
 
 const monitorsStore = useMonitorsStore()
 const devicesStore = useDevicesStore()
@@ -183,11 +206,11 @@ const formModel = reactive<{
 
 const headers = [
   { title: 'ID', key: 'id', width: '60px' },
-  { title: 'Nome', key: 'name' },
-  { title: 'Tipo', key: 'type', width: '100px' },
+  { title: 'Nome e Histórico (Uptime)', key: 'name' },
+  { title: 'Tipo', key: 'type', width: '90px' },
   { title: 'Alvo', key: 'target' },
-  { title: 'Status', key: 'status', width: '110px' },
-  { title: 'Ativo', key: 'isEnabled', width: '100px' },
+  { title: 'Status', key: 'status', width: '100px' },
+  { title: 'Ativo', key: 'isEnabled', width: '80px' },
   { title: 'Ações', key: 'actions', sortable: false, width: '220px' },
 ]
 
@@ -197,7 +220,9 @@ onMounted(async () => {
 
 function getStatusColor(status: string) {
   switch (status) {
+    case 'up':
     case 'online': return 'success'
+    case 'down':
     case 'offline': return 'error'
     case 'warning': return 'warning'
     default: return 'grey'
@@ -262,3 +287,9 @@ async function confirmDelete(id: number) {
   }
 }
 </script>
+
+<style scoped>
+.hover-underline:hover {
+  text-decoration: underline !important;
+}
+</style>

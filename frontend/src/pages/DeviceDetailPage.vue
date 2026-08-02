@@ -8,15 +8,21 @@
     <!-- Header do Dispositivo -->
     <v-card elevation="2" class="rounded-lg pa-4 mb-6">
       <div class="d-flex align-center justify-space-between flex-wrap gap-4">
-        <div class="d-flex align-center">
-          <v-avatar color="primary" size="48" class="mr-3">
+        <div class="d-flex align-center ga-4" style="gap: 16px;">
+          <v-avatar color="primary" size="48" class="mr-2">
             <v-icon color="white">mdi-router-network</v-icon>
           </v-avatar>
           <div>
-            <h1 class="text-h5 font-weight-bold">
-              {{ detailStore.device?.name || `Dispositivo #${deviceId}` }}
-            </h1>
-            <div class="text-subtitle-2 text-grey">
+            <div class="d-flex align-center ga-3 flex-wrap" style="gap: 12px;">
+              <h1 class="text-h5 font-weight-bold mr-2">
+                {{ detailStore.device?.name || `Dispositivo #${deviceId}` }}
+              </h1>
+              <v-chip :color="getStatusColor(detailStore.device?.status)" size="small" variant="tonal" class="px-3">
+                <v-icon start size="14">mdi-circle</v-icon>
+                {{ (detailStore.device?.status || 'UNKNOWN').toUpperCase() }}
+              </v-chip>
+            </div>
+            <div class="text-subtitle-2 text-grey mt-1">
               IP: {{ detailStore.device?.ipAddress || 'Não informado' }} |
               Tipo: {{ detailStore.device?.type }} |
               Fabricante: {{ detailStore.device?.vendor || 'Desconhecido' }}
@@ -24,12 +30,7 @@
           </div>
         </div>
 
-        <div class="d-flex align-center gap-3">
-          <v-chip :color="getStatusColor(detailStore.device?.status)" size="medium" variant="tonal">
-            <v-icon start size="14">mdi-circle</v-icon>
-            {{ (detailStore.device?.status || 'UNKNOWN').toUpperCase() }}
-          </v-chip>
-
+        <div class="d-flex align-center ga-3" style="gap: 12px;">
           <v-btn
             color="secondary"
             prepend-icon="mdi-refresh"

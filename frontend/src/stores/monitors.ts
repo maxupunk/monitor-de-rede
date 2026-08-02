@@ -2,12 +2,35 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { apiService } from '@/services/apiService'
 
+export interface MonitorResult {
+  id: number
+  monitorId: number
+  probeId?: number | null
+  status: 'up' | 'down' | 'warning' | 'unknown'
+  startedAt: string
+  finishedAt: string
+  durationMs: number
+  latencyMs: number | null
+  message?: string | null
+  data?: Record<string, unknown>
+}
+
+export interface MonitorStats {
+  avgLatency: number | null
+  minLatency: number | null
+  maxLatency: number | null
+  lastLatency: number | null
+  uptimePercentage: number
+  totalChecks: number
+  upChecks: number
+}
+
 export interface Monitor {
   id: number
   deviceId: number
   probeId?: number
   name: string
-  type: 'ping' | 'http' | 'tcp' | 'dns' | 'snmp'
+  type: 'ping' | 'http' | 'https' | 'tcp' | 'dns' | 'snmp'
   target: string
   port?: number
   configuration?: Record<string, unknown>
@@ -19,12 +42,16 @@ export interface Monitor {
   lastCheckedAt?: string
   lastLatencyMs?: number
   device?: { id: number; name: string }
+  probe?: { id: number; name: string }
+  recentResults?: MonitorResult[]
+  stats?: MonitorStats
   createdAt?: string
   updatedAt?: string
 }
 
 export const useMonitorsStore = defineStore('monitors', () => {
   const monitors = ref<Monitor[]>([])
+  const currentMonitor = ref<Monitor | null>(null)
   const loading = ref(false)
   const runningId = ref<number | null>(null)
   const error = ref<string | null>(null)
@@ -51,6 +78,22 @@ export const useMonitorsStore = defineStore('monitors', () => {
     }
   }
 
+  async function fetchMonitorById(id: number): Promise<Monitor | null> {
+    loading.value = true
+    error.value = null
+    try {
+      const data = await apiService.get<any>(`/monitors/${id}`)
+      const formatted = formatMonitor(data)
+      currentMonitor.value = formatted
+      return formatted
+    } catch (err: unknown) {
+      error.value = err instanceof Error ? err.message : 'Erro ao carregar detalhes do monitor'
+      return null
+    } finally {
+      loading.value = false
+    }
+  }
+
   async function createMonitor(payload: Partial<Monitor>): Promise<boolean> {
     try {
       const created = await apiService.post<any>('/monitors', payload)
@@ -65,9 +108,13 @@ export const useMonitorsStore = defineStore('monitors', () => {
   async function updateMonitor(id: number, payload: Partial<Monitor>): Promise<boolean> {
     try {
       const updated = await apiService.put<any>(`/monitors/${id}`, payload)
+      const formatted = formatMonitor(updated)
       const index = monitors.value.findIndex((m) => m.id === id)
       if (index !== -1) {
-        monitors.value[index] = formatMonitor(updated)
+        monitors.value[index] = formatted
+      }
+      if (currentMonitor.value?.id === id) {
+        currentMonitor.value = { ...currentMonitor.value, ...formatted }
       }
       return true
     } catch (err: unknown) {
@@ -80,6 +127,9 @@ export const useMonitorsStore = defineStore('monitors', () => {
     try {
       await apiService.delete(`/monitors/${id}`)
       monitors.value = monitors.value.filter((m) => m.id !== id)
+      if (currentMonitor.value?.id === id) {
+        currentMonitor.value = null
+      }
       return true
     } catch (err: unknown) {
       error.value = err instanceof Error ? err.message : 'Erro ao excluir monitor'
@@ -91,7 +141,11 @@ export const useMonitorsStore = defineStore('monitors', () => {
     runningId.value = id
     try {
       await apiService.post(`/monitors/${id}/run`)
-      await fetchMonitors()
+      if (currentMonitor.value?.id === id) {
+        await fetchMonitorById(id)
+      } else {
+        await fetchMonitors()
+      }
       return true
     } catch (err: unknown) {
       error.value = err instanceof Error ? err.message : 'Erro ao executar verificação do monitor'
@@ -111,6 +165,11 @@ export const useMonitorsStore = defineStore('monitors', () => {
         mon.isEnabled = enable
         if (!enable) mon.status = 'disabled'
       }
+      if (currentMonitor.value?.id === id) {
+        currentMonitor.value.enabled = enable
+        currentMonitor.value.isEnabled = enable
+        if (!enable) currentMonitor.value.status = 'disabled'
+      }
       return true
     } catch (err: unknown) {
       error.value = err instanceof Error ? err.message : 'Erro ao alterar estado do monitor'
@@ -120,10 +179,12 @@ export const useMonitorsStore = defineStore('monitors', () => {
 
   return {
     monitors,
+    currentMonitor,
     loading,
     runningId,
     error,
     fetchMonitors,
+    fetchMonitorById,
     createMonitor,
     updateMonitor,
     deleteMonitor,

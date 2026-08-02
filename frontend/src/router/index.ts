@@ -19,6 +19,7 @@ const routes = [
       { path: 'topology', name: 'topology', component: () => import('../pages/TopologyPage.vue') },
       { path: 'discovery', name: 'discovery', component: () => import('../pages/DiscoveryPage.vue') },
       { path: 'monitors', name: 'monitors', component: () => import('../pages/MonitorsPage.vue') },
+      { path: 'monitors/:id', name: 'monitor-detail', component: () => import('../pages/MonitorDetailPage.vue') },
       { path: 'alerts', name: 'alerts', component: () => import('../pages/AlertsPage.vue') },
       { path: 'events', name: 'events', component: () => import('../pages/EventsPage.vue') },
       { path: 'probes', name: 'probes', component: () => import('../pages/ProbesPage.vue') },

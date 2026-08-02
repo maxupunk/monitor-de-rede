@@ -48,7 +48,7 @@
               </template>
 
               <template #item.actions="{ item }">
-                <div v-if="item.status === 'pending'" class="d-flex gap-2">
+                <div v-if="item.status === 'pending'" class="d-flex ga-2" style="gap: 8px;">
                   <v-btn
                     size="small"
                     color="success"
