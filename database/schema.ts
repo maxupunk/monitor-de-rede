@@ -197,7 +197,7 @@ export class DeviceMacSchema extends BaseModel {
 }
 
 export class DeviceSchema extends BaseModel {
-  static $columns = ['createdAt', 'description', 'id', 'lastSeenAt', 'model', 'name', 'networkId', 'serialNumber', 'siteId', 'status', 'type', 'updatedAt', 'vendor'] as const
+  static $columns = ['createdAt', 'description', 'id', 'ipAddress', 'isMonitored', 'lastSeenAt', 'model', 'name', 'networkId', 'parentId', 'serialNumber', 'siteId', 'snmpCommunity', 'snmpEnabled', 'snmpVersion', 'status', 'type', 'updatedAt', 'vendor'] as const
   $columns = DeviceSchema.$columns
   @column.dateTime({ autoCreate: true })
   declare createdAt: DateTime
@@ -205,6 +205,10 @@ export class DeviceSchema extends BaseModel {
   declare description: string | null
   @column({ isPrimary: true })
   declare id: number
+  @column()
+  declare ipAddress: string | null
+  @column()
+  declare isMonitored: boolean
   @column.dateTime()
   declare lastSeenAt: DateTime | null
   @column()
@@ -214,9 +218,17 @@ export class DeviceSchema extends BaseModel {
   @column()
   declare networkId: number | null
   @column()
+  declare parentId: number | null
+  @column()
   declare serialNumber: string | null
   @column()
-  declare siteId: number
+  declare siteId: number | null
+  @column()
+  declare snmpCommunity: string | null
+  @column()
+  declare snmpEnabled: boolean
+  @column()
+  declare snmpVersion: string | null
   @column()
   declare status: string
   @column()

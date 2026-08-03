@@ -31,9 +31,7 @@
             </template>
             <v-list-item-title class="font-weight-bold">{{ evt.event }}</v-list-item-title>
             <v-list-item-subtitle class="font-mono">
-              {{
-                JSON.stringify(evt.data)
-              }}
+              {{ JSON.stringify(evt.data) }}
             </v-list-item-subtitle>
             <template #append>
               <span class="text-caption text-grey">{{ evt.timestamp || 'agora' }}</span>

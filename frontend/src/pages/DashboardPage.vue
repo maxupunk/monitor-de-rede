@@ -194,11 +194,9 @@
               </v-list>
             </div>
             <div v-else class="pa-8 text-center text-grey">
-              <v-icon size="48" color="grey-lighten-1" class="mb-2"
-              >
+              <v-icon size="48" color="grey-lighten-1" class="mb-2">
                 mdi-chart-timeline-variant-off
-              </v-icon
-              >
+              </v-icon>
               <div class="text-subtitle-1 font-weight-medium">Nenhum monitor cadastrado</div>
               <p class="text-caption text-grey-darken-1 mb-4">
                 Cadastre monitores ICMP, HTTP ou TCP para visualizar os gráficos em barras.
@@ -307,11 +305,9 @@
               </v-list>
             </div>
             <div v-else class="pa-6 text-center text-grey">
-              <v-icon size="44" color="grey-lighten-1" class="mb-2"
-              >
+              <v-icon size="44" color="grey-lighten-1" class="mb-2">
                 mdi-access-point-network
-              </v-icon
-              >
+              </v-icon>
               <div class="text-subtitle-2 font-weight-medium">
                 Aguardando eventos em tempo real...
               </div>

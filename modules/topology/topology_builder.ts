@@ -3,7 +3,7 @@ export interface TopologyNode {
   name: string
   type: string
   status: 'online' | 'offline' | 'warning' | 'unknown'
-  siteId?: number
+  siteId?: number | null
   siteName?: string
   ipAddress?: string
   interfaceCount?: number

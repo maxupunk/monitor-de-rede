@@ -131,7 +131,7 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
   - [x] Stores de `sites`, `networks`, `devices`, `deviceDetail`, `monitors`, `discovery`, `topology`, `alerts`, `probes`, `events`.
 - [x] **Telas e Componentes Interativos**:
   - [x] **Dashboard**: cards de resumo em tempo real, lista de monitores com barras verticais coloridas (estilo Uptime Kuma) e feed SSE de eventos simplificado e amigável.
-  - [x] **Gestão de Dispositivos**: listagem com filtros, status visual (online/offline) e modal de criação/edição.
+  - [x] **Gestão de Dispositivos**: listagem com filtros, status visual (online/offline), site opcional, modal reusável de site (`SiteDialog.vue`), campo "Está atrás de" (hierarquia/topologia) e opção de monitorar dispositivo (`isMonitored`).
   - [x] **Detalhes do Dispositivo**: abas com histórico de latência, interfaces SNMP, monitores vinculados e eventos.
   - [x] **Central de Descoberta**: tabela para revisar, aceitar ou ignorar novos dispositivos encontrados.
   - [x] **Mapa de Topologia**: tela gráfica interativa para arrastar nós, visualizar ligações e definir links manuais.

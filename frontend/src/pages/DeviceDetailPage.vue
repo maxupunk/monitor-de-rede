@@ -52,16 +52,12 @@
     <v-card elevation="2" class="rounded-lg">
       <v-tabs v-model="activeTab" color="primary" align-tabs="title">
         <v-tab value="overview" prepend-icon="mdi-information-outline">Visão Geral</v-tab>
-        <v-tab value="monitors" prepend-icon="mdi-heart-pulse"
-        >
+        <v-tab value="monitors" prepend-icon="mdi-heart-pulse">
           Monitores ({{ detailStore.monitors.length }})
-        </v-tab
-        >
-        <v-tab value="interfaces" prepend-icon="mdi-expansion-card"
-        >
+        </v-tab>
+        <v-tab value="interfaces" prepend-icon="mdi-expansion-card">
           Interfaces SNMP ({{ detailStore.interfaces.length }})
-        </v-tab
-        >
+        </v-tab>
         <v-tab value="metrics" prepend-icon="mdi-chart-line">Métricas & Tráfego</v-tab>
         <v-tab value="events" prepend-icon="mdi-history">Histórico de Eventos</v-tab>
       </v-tabs>
@@ -127,9 +123,7 @@
                   <td class="font-weight-bold">{{ mon.name }}</td>
                   <td>
                     <v-chip size="x-small" color="info">
-                      {{
-                        (mon.type || 'N/A').toUpperCase()
-                      }}
+                      {{ (mon.type || 'N/A').toUpperCase() }}
                     </v-chip>
                   </td>
                   <td>{{ mon.target }} {{ mon.port ? `:${mon.port}` : '' }}</td>

@@ -44,57 +44,20 @@
       </v-data-table>
     </v-card>
 
-    <!-- Modal Form de Criação/Edição -->
-    <v-dialog v-model="dialog" max-width="500">
-      <v-card class="rounded-lg pa-4">
-        <v-card-title class="font-weight-bold">
-          {{ editedId ? 'Editar Site' : 'Cadastrar Novo Site' }}
-        </v-card-title>
-        <v-card-text>
-          <v-form ref="form" @submit.prevent="save">
-            <v-text-field
-              v-model="formModel.name"
-              label="Nome do Local"
-              variant="outlined"
-              required
-            ></v-text-field>
-            <v-text-field
-              v-model="formModel.location"
-              label="Localização / Cidade / UF"
-              variant="outlined"
-            ></v-text-field>
-            <v-textarea
-              v-model="formModel.description"
-              label="Descrição"
-              variant="outlined"
-              rows="3"
-            ></v-textarea>
-          </v-form>
-        </v-card-text>
-        <v-card-actions class="justify-end">
-          <v-btn variant="text" @click="dialog = false">Cancelar</v-btn>
-          <v-btn color="primary" :loading="saving" @click="save">Salvar</v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
+    <!-- Componente Reusável Dialog de Site -->
+    <SiteDialog v-model="dialog" :site-to-edit="selectedSite" @saved="onSiteSaved" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, reactive } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useSitesStore, type Site } from '@/stores/sites'
+import SiteDialog from '@/components/SiteDialog.vue'
 
 const sitesStore = useSitesStore()
 const search = ref('')
 const dialog = ref(false)
-const saving = ref(false)
-const editedId = ref<number | null>(null)
-
-const formModel = reactive<{ name: string; location: string; description: string }>({
-  name: '',
-  location: '',
-  description: '',
-})
+const selectedSite = ref<Site | null>(null)
 
 const headers = [
   { title: 'ID', key: 'id', width: '80px' },
@@ -109,30 +72,12 @@ onMounted(() => {
 })
 
 function openDialog(site?: Site) {
-  if (site) {
-    editedId.value = site.id
-    formModel.name = site.name
-    formModel.location = site.location || ''
-    formModel.description = site.description || ''
-  } else {
-    editedId.value = null
-    formModel.name = ''
-    formModel.location = ''
-    formModel.description = ''
-  }
+  selectedSite.value = site || null
   dialog.value = true
 }
 
-async function save() {
-  if (!formModel.name) return
-  saving.value = true
-  if (editedId.value) {
-    await sitesStore.updateSite(editedId.value, formModel)
-  } else {
-    await sitesStore.createSite(formModel)
-  }
-  saving.value = false
-  dialog.value = false
+function onSiteSaved() {
+  sitesStore.fetchSites()
 }
 
 async function confirmDelete(id: number) {

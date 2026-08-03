@@ -13,10 +13,16 @@ export default class Device extends BaseModel {
   declare id: number
 
   @column()
-  declare siteId: number
+  declare siteId: number | null
 
   @column()
   declare networkId: number | null
+
+  @column()
+  declare parentId: number | null
+
+  @column()
+  declare ipAddress: string | null
 
   @column()
   declare name: string
@@ -37,6 +43,18 @@ export default class Device extends BaseModel {
   declare description: string | null
 
   @column()
+  declare isMonitored: boolean
+
+  @column()
+  declare snmpEnabled: boolean
+
+  @column()
+  declare snmpCommunity: string | null
+
+  @column()
+  declare snmpVersion: string | null
+
+  @column()
   declare status: 'online' | 'offline' | 'warning' | 'unknown'
 
   @column.dateTime()
@@ -50,6 +68,9 @@ export default class Device extends BaseModel {
 
   @belongsTo(() => Site)
   declare site: BelongsTo<typeof Site>
+
+  @belongsTo(() => Device, { foreignKey: 'parentId' })
+  declare parent: BelongsTo<typeof Device>
 
   @belongsTo(() => Network)
   declare network: BelongsTo<typeof Network>

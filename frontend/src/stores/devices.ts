@@ -4,19 +4,22 @@ import { apiService } from '@/services/apiService'
 
 export interface Device {
   id: number
-  siteId: number
-  networkId?: number
+  siteId?: number | null
+  networkId?: number | null
+  parentId?: number | null
   name: string
   type: string
   vendor?: string
   model?: string
   ipAddress?: string
   macAddress?: string
+  isMonitored?: boolean
   status: 'online' | 'offline' | 'warning' | 'unknown'
   snmpEnabled?: boolean
   snmpCommunity?: string
   snmpVersion?: 'v1' | 'v2c' | 'v3'
-  site?: { id: number; name: string }
+  site?: { id: number; name: string } | null
+  parent?: { id: number; name: string } | null
   network?: { id: number; name: string; cidr: string }
   createdAt?: string
   updatedAt?: string

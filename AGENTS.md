@@ -22,9 +22,12 @@
    - Não colocar comentários `<!-- -->` entre diretivas `v-if` e `v-else`.
    - Usar props `:title` e `:subtitle` no `<v-list-item>` do Vuetify 3 para evitar ambiguidades de slot.
 
-3. **Independência de Ambiente (Docker / Local)**:
+3. **Independência de Ambiente (Docker / Local) & Sincronização de Lockfile**:
    - Garanta a criação recursiva de diretórios temporários via `fs.mkdirSync(path, { recursive: true })`.
    - Suporte dinâmico para `DB_CONNECTION` (`sqlite` ou `pg`).
+   - **Alinhamento de Peer Dependencies**: Ao atualizar/adicionar dependências em `package.json`, garanta que dependências equivalentes (ex: `vue-eslint-parser` e `eslint-plugin-vue`) estejam em versões compatíveis para evitar erros `ERESOLVE` no npm.
+   - **Sincronização Obrigatória do `package-lock.json`**: Sempre que alterar qualquer `package.json` (raiz ou frontend), você **DEVE obrigatoriamente** rodar `npm install` ou `npm --prefix frontend install` para sincronizar o `package-lock.json`.
+   - **Configuração de Dockerfile**: Mantenha os Dockerfiles utilizando o padrão limpo `RUN npm ci`. Garantindo o alinhamento de dependências no `package.json` e a sincronização do `package-lock.json`, o build do Docker roda 100% nativo e performático sem a necessidade de flags ou contornos.
 
 4. **Práticas de Teste no Japa (Backend)**:
    - **Isolamento de Banco**: Inclua `group.each.setup(() => testUtils.db().truncate())` em testes funcionais.

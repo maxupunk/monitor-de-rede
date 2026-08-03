@@ -49,6 +49,29 @@ export class TopologyService {
       status: 'up',
     }))
 
+    // Add edges for devices with parentId ("Está atrás de")
+    for (const dev of devices) {
+      if (dev.parentId && deviceIds.includes(dev.parentId)) {
+        const existingEdge = edges.find(
+          (e) =>
+            (e.source === dev.parentId && e.target === dev.id) ||
+            (e.source === dev.id && e.target === dev.parentId)
+        )
+        if (!existingEdge) {
+          edges.push({
+            id: -(dev.id * 1000 + dev.parentId), // Virtual ID for graph
+            source: dev.parentId,
+            target: dev.id,
+            linkType: 'parent',
+            discoveryMethod: 'parent_hierarchy',
+            confidence: 100,
+            confirmed: true,
+            status: 'up',
+          })
+        }
+      }
+    }
+
     return this.builder.buildGraph(nodes, edges)
   }
 
