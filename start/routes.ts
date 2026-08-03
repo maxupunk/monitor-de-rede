@@ -38,6 +38,8 @@ router
 
     // Devices
     router.post('devices/:id/snmp/poll', [SnmpController, 'poll'])
+    router.post('devices/:id/snmp/scan', [SnmpController, 'scan'])
+    router.post('devices/:id/snmp/apply-monitors', [SnmpController, 'applyMonitors'])
     router.get('devices/:id/interfaces', [SnmpController, 'interfaces'])
     router.get('devices/:id/monitors', [DevicesController, 'monitors'])
     router.get('devices/:id/metrics', [DevicesController, 'metrics'])

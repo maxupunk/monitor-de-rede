@@ -56,6 +56,41 @@ export interface DeviceEvent {
   createdAt: string
 }
 
+export interface ScanInterfaceItem {
+  ifIndex: number
+  ifName: string
+  ifDescr?: string
+  macAddress?: string
+  ifSpeed?: number
+  ifAdminStatus?: string
+  ifOperStatus?: string
+  isMonitored: boolean
+}
+
+export interface ScanResult {
+  systemInfo: {
+    sysName?: string
+    sysDescr?: string
+    sysUpTime?: number
+  }
+  cpuInfo: {
+    usagePercent?: number
+    userPercent?: number
+    systemPercent?: number
+    idlePercent?: number
+    load1min?: number
+    coresCount?: number
+  }
+  memoryInfo: {
+    totalKb?: number
+    usedKb?: number
+    usedPercent?: number
+  }
+  interfaces: ScanInterfaceItem[]
+  hasCpuMonitor: boolean
+  hasMemoryMonitor: boolean
+}
+
 export const useDeviceDetailStore = defineStore('deviceDetail', () => {
   const device = ref<Device | null>(null)
   const interfaces = ref<DeviceInterface[]>([])
@@ -64,6 +99,8 @@ export const useDeviceDetailStore = defineStore('deviceDetail', () => {
   const events = ref<DeviceEvent[]>([])
   const loading = ref(false)
   const pollingSnmp = ref(false)
+  const scanningSnmp = ref(false)
+  const scanResult = ref<ScanResult | null>(null)
   const error = ref<string | null>(null)
 
   async function loadDeviceDetails(deviceId: number) {
@@ -112,6 +149,43 @@ export const useDeviceDetailStore = defineStore('deviceDetail', () => {
     }
   }
 
+  async function scanDeviceSnmp(deviceId: number): Promise<ScanResult | null> {
+    scanningSnmp.value = true
+    error.value = null
+    try {
+      const res = await apiService.post<ScanResult>(`/devices/${deviceId}/snmp/scan`)
+      scanResult.value = res
+      return res
+    } catch (err: unknown) {
+      error.value = err instanceof Error ? err.message : 'Erro ao escanear dispositivo via SNMP'
+      return null
+    } finally {
+      scanningSnmp.value = false
+    }
+  }
+
+  async function applySnmpMonitors(
+    deviceId: number,
+    options: {
+      enableCpuMonitor?: boolean
+      enableMemoryMonitor?: boolean
+      monitoredIfIndexes?: number[]
+    }
+  ): Promise<boolean> {
+    loading.value = true
+    try {
+      await apiService.post(`/devices/${deviceId}/snmp/apply-monitors`, options)
+      await loadDeviceDetails(deviceId)
+      return true
+    } catch (err: unknown) {
+      error.value =
+        err instanceof Error ? err.message : 'Erro ao aplicar configurações de monitoramento'
+      return false
+    } finally {
+      loading.value = false
+    }
+  }
+
   return {
     device,
     interfaces,
@@ -120,8 +194,12 @@ export const useDeviceDetailStore = defineStore('deviceDetail', () => {
     events,
     loading,
     pollingSnmp,
+    scanningSnmp,
+    scanResult,
     error,
     loadDeviceDetails,
     triggerSnmpPoll,
+    scanDeviceSnmp,
+    applySnmpMonitors,
   }
 })

@@ -37,6 +37,16 @@
 
         <div class="d-flex align-center ga-3" style="gap: 12px">
           <v-btn
+            color="info"
+            variant="tonal"
+            prepend-icon="mdi-radar"
+            :loading="detailStore.scanningSnmp"
+            @click="openScanModal"
+          >
+            Escanear SNMP
+          </v-btn>
+
+          <v-btn
             color="secondary"
             prepend-icon="mdi-refresh"
             :loading="detailStore.pollingSnmp"
@@ -137,7 +147,7 @@
                 </tr>
                 <tr v-if="detailStore.monitors.length === 0">
                   <td colspan="6" class="text-center text-grey py-4">
-                    Nenhum monitor configurado para este equipamento.
+                    Nenhum monitor configurado para este equipamento. Clique em "Escanear SNMP".
                   </td>
                 </tr>
               </tbody>
@@ -182,7 +192,7 @@
                 </tr>
                 <tr v-if="detailStore.interfaces.length === 0">
                   <td colspan="6" class="text-center text-grey py-4">
-                    Nenhuma interface SNMP encontrada. Clique em "Poll SNMP Agora".
+                    Nenhuma interface SNMP encontrada. Clique em "Escanear SNMP".
                   </td>
                 </tr>
               </tbody>
@@ -245,6 +255,175 @@
         </v-window>
       </v-card-text>
     </v-card>
+
+    <!-- Modal de Escaneamento SNMP -->
+    <v-dialog v-model="scanModalOpen" max-width="850px">
+      <v-card class="rounded-lg">
+        <v-card-title class="d-flex align-center justify-space-between pa-4 bg-primary text-white">
+          <div class="d-flex align-center ga-2" style="gap: 8px">
+            <v-icon>mdi-radar</v-icon>
+            <span>Escaneamento & Descoberta SNMP (OpenWrt)</span>
+          </div>
+          <v-btn icon variant="text" color="white" @click="scanModalOpen = false">
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
+        </v-card-title>
+
+        <v-card-text class="pa-6">
+          <div v-if="detailStore.scanningSnmp" class="text-center py-8">
+            <v-progress-circular
+              indeterminate
+              color="primary"
+              size="48"
+              class="mb-4"
+            ></v-progress-circular>
+            <div class="text-subtitle-1">
+              Escaneando dispositivo via SNMP em {{ detailStore.device?.ipAddress }}...
+            </div>
+            <div class="text-caption text-grey">
+              Consultando interfaces, uso de CPU e memória RAM...
+            </div>
+          </div>
+
+          <div v-else-if="detailStore.scanResult">
+            <!-- Dados do Sistema -->
+            <v-alert
+              type="info"
+              variant="tonal"
+              class="mb-4"
+              prepend-icon="mdi-router"
+              title="Dispositivo Conectado"
+              :subtitle="detailStore.scanResult.systemInfo.sysDescr || 'OpenWrt / Router Device'"
+            ></v-alert>
+
+            <!-- Recursos de CPU & Memória -->
+            <v-card variant="outlined" class="mb-6 rounded-lg pa-4">
+              <div
+                class="text-subtitle-1 font-weight-bold mb-3 d-flex align-center ga-2"
+                style="gap: 8px"
+              >
+                <v-icon color="primary">mdi-chip</v-icon>
+                Monitoramento de Recursos da CPU & Memória
+              </div>
+              <v-row>
+                <v-col cols="12" md="6">
+                  <v-switch
+                    v-model="selectedCpuMonitor"
+                    color="primary"
+                    label="Monitorar Uso de CPU (%)"
+                    hide-details
+                  ></v-switch>
+                  <div class="text-caption text-grey ml-8">
+                    {{
+                      detailStore.scanResult.cpuInfo.coresCount
+                        ? `${detailStore.scanResult.cpuInfo.coresCount} núcleos detectados`
+                        : 'Medição via MIB'
+                    }}
+                    <span v-if="detailStore.scanResult.cpuInfo.usagePercent !== undefined">
+                      - Uso Atual: {{ detailStore.scanResult.cpuInfo.usagePercent }}%
+                    </span>
+                  </div>
+                </v-col>
+                <v-col cols="12" md="6">
+                  <v-switch
+                    v-model="selectedMemoryMonitor"
+                    color="primary"
+                    label="Monitorar Memória RAM (%)"
+                    hide-details
+                  ></v-switch>
+                  <div class="text-caption text-grey ml-8">
+                    <span v-if="detailStore.scanResult.memoryInfo.totalKb">
+                      Total: {{ Math.round(detailStore.scanResult.memoryInfo.totalKb / 1024) }} MB
+                    </span>
+                    <span v-if="detailStore.scanResult.memoryInfo.usedPercent !== undefined">
+                      - Uso: {{ detailStore.scanResult.memoryInfo.usedPercent }}%
+                    </span>
+                  </div>
+                </v-col>
+              </v-row>
+            </v-card>
+
+            <!-- Lista de Interfaces Descobertas -->
+            <div class="d-flex align-center justify-space-between mb-3">
+              <div
+                class="text-subtitle-1 font-weight-bold d-flex align-center ga-2"
+                style="gap: 8px"
+              >
+                <v-icon color="primary">mdi-ethernet-cable</v-icon>
+                Interfaces de Rede Descobertas ({{ detailStore.scanResult.interfaces.length }})
+              </div>
+              <div class="d-flex align-center ga-2" style="gap: 8px">
+                <v-btn size="small" variant="text" color="primary" @click="selectAllInterfaces">
+                  Selecionar Todas
+                </v-btn>
+                <v-btn size="small" variant="text" color="grey" @click="unselectAllInterfaces">
+                  Desmarcar Todas
+                </v-btn>
+              </div>
+            </div>
+
+            <v-table border hover class="rounded-lg">
+              <thead>
+                <tr>
+                  <th style="width: 50px">Monitorar</th>
+                  <th>Index</th>
+                  <th>Nome Interface</th>
+                  <th>MAC Address</th>
+                  <th>Velocidade</th>
+                  <th>Status Operacional</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="iface in detailStore.scanResult.interfaces" :key="iface.ifIndex">
+                  <td>
+                    <v-checkbox
+                      :model-value="selectedIfIndexes.includes(iface.ifIndex)"
+                      color="primary"
+                      hide-details
+                      @update:model-value="toggleInterface(iface.ifIndex)"
+                    ></v-checkbox>
+                  </td>
+                  <td>{{ iface.ifIndex }}</td>
+                  <td class="font-weight-bold">{{ iface.ifName }}</td>
+                  <td>{{ iface.macAddress || 'N/A' }}</td>
+                  <td>
+                    {{ iface.ifSpeed ? `${(iface.ifSpeed / 1000000).toFixed(0)} Mbps` : 'N/A' }}
+                  </td>
+                  <td>
+                    <v-chip
+                      :color="iface.ifOperStatus === 'up' ? 'success' : 'error'"
+                      size="x-small"
+                    >
+                      {{ iface.ifOperStatus ? iface.ifOperStatus.toUpperCase() : 'DOWN' }}
+                    </v-chip>
+                  </td>
+                </tr>
+                <tr v-if="detailStore.scanResult.interfaces.length === 0">
+                  <td colspan="6" class="text-center text-grey py-4">
+                    Nenhuma interface respondeu na varredura SNMP.
+                  </td>
+                </tr>
+              </tbody>
+            </v-table>
+          </div>
+        </v-card-text>
+
+        <v-divider></v-divider>
+
+        <v-card-actions class="pa-4 justify-end">
+          <v-btn variant="text" @click="scanModalOpen = false">Cancelar</v-btn>
+          <v-btn
+            color="primary"
+            prepend-icon="mdi-check"
+            :loading="savingMonitors"
+            :disabled="!detailStore.scanResult || detailStore.scanningSnmp"
+            @click="saveMonitors"
+          >
+            Salvar Configurações de Monitoramento
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
@@ -256,6 +435,12 @@ import { useDeviceDetailStore } from '@/stores/deviceDetail'
 const route = useRoute()
 const detailStore = useDeviceDetailStore()
 const activeTab = ref('overview')
+const scanModalOpen = ref(false)
+const savingMonitors = ref(false)
+
+const selectedCpuMonitor = ref(true)
+const selectedMemoryMonitor = ref(true)
+const selectedIfIndexes = ref<number[]>([])
 
 const deviceId = computed(() => Number(route.params.id))
 
@@ -264,6 +449,51 @@ onMounted(() => {
     detailStore.loadDeviceDetails(deviceId.value)
   }
 })
+
+async function openScanModal() {
+  scanModalOpen.value = true
+  const res = await detailStore.scanDeviceSnmp(deviceId.value)
+  if (res) {
+    selectedCpuMonitor.value = res.hasCpuMonitor || true
+    selectedMemoryMonitor.value = res.hasMemoryMonitor || true
+    selectedIfIndexes.value = res.interfaces.filter((i) => i.isMonitored).map((i) => i.ifIndex)
+  }
+}
+
+function toggleInterface(ifIndex: number) {
+  const idx = selectedIfIndexes.value.indexOf(ifIndex)
+  if (idx > -1) {
+    selectedIfIndexes.value.splice(idx, 1)
+  } else {
+    selectedIfIndexes.value.push(ifIndex)
+  }
+}
+
+function selectAllInterfaces() {
+  if (detailStore.scanResult) {
+    selectedIfIndexes.value = detailStore.scanResult.interfaces.map((i) => i.ifIndex)
+  }
+}
+
+function unselectAllInterfaces() {
+  selectedIfIndexes.value = []
+}
+
+async function saveMonitors() {
+  savingMonitors.value = true
+  try {
+    const success = await detailStore.applySnmpMonitors(deviceId.value, {
+      enableCpuMonitor: selectedCpuMonitor.value,
+      enableMemoryMonitor: selectedMemoryMonitor.value,
+      monitoredIfIndexes: selectedIfIndexes.value,
+    })
+    if (success) {
+      scanModalOpen.value = false
+    }
+  } finally {
+    savingMonitors.value = false
+  }
+}
 
 function getStatusColor(status?: string) {
   switch (status?.toLowerCase()) {

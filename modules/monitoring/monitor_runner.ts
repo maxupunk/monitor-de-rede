@@ -3,12 +3,14 @@ import { PingChecker, type PingConfig } from './checkers/ping_checker.js'
 import { HttpChecker, type HttpConfig } from './checkers/http_checker.js'
 import { TcpChecker, type TcpConfig } from './checkers/tcp_checker.js'
 import { DnsChecker, type DnsConfig } from './checkers/dns_checker.js'
+import { SnmpChecker, type SnmpCheckerConfig } from './checkers/snmp_checker.js'
 
 export class MonitorRunner {
   private pingChecker = new PingChecker()
   private httpChecker = new HttpChecker()
   private tcpChecker = new TcpChecker()
   private dnsChecker = new DnsChecker()
+  private snmpChecker = new SnmpChecker()
 
   async runMonitor(type: string, config: unknown): Promise<CheckResult> {
     const normType = type.toLowerCase()
@@ -23,6 +25,8 @@ export class MonitorRunner {
         return this.tcpChecker.execute(config as TcpConfig)
       case 'dns':
         return this.dnsChecker.execute(config as DnsConfig)
+      case 'snmp':
+        return this.snmpChecker.execute(config as SnmpCheckerConfig)
       default:
         throw new Error(`Tipo de monitor desconhecido ou não suportado: ${type}`)
     }

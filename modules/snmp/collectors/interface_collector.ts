@@ -121,18 +121,49 @@ export class InterfaceCollector {
 
   private formatMac(value: unknown): string | undefined {
     if (!value) return undefined
-    if (typeof value === 'string') {
-      if (value.includes(':') || value.includes('-')) return value.toLowerCase()
-      // Buffer/binary string
+
+    if (Buffer.isBuffer(value)) {
+      if (value.length === 6) {
+        return Array.from(value)
+          .map((b) => b.toString(16).padStart(2, '0'))
+          .join(':')
+      }
+      if (value.length === 0) return undefined
+    }
+
+    const str = String(value).trim()
+    if (!str || str === '00:00:00:00:00:00') return undefined
+
+    // Endereço MAC já formatado e.g. "00:25:fe:26:96:7f" ou "00-25-fe-26-96-7f"
+    if (/^([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}$/.test(str)) {
+      return str.toLowerCase()
+    }
+
+    // String hexadecimal pura de 12 caracteres e.g. "0025fe26967f"
+    if (/^[0-9a-fA-F]{12}$/.test(str)) {
+      return str.match(/.{1,2}/g)!.join(':').toLowerCase()
+    }
+
+    // String binária bruta de 6 bytes
+    if (typeof value === 'string' && value.length === 6) {
       const buf = Buffer.from(value, 'binary')
       if (buf.length === 6) {
-        return Array.from(buf).map((b) => b.toString(16).padStart(2, '0')).join(':')
+        return Array.from(buf)
+          .map((b) => b.toString(16).padStart(2, '0'))
+          .join(':')
       }
-      return value
     }
-    if (Buffer.isBuffer(value) && value.length === 6) {
-      return Array.from(value).map((b) => b.toString(16).padStart(2, '0')).join(':')
+
+    // Se contém caracteres inválidos/substituição, tenta decodificar como binary buffer
+    if (typeof value === 'string' && (str.includes('\uFFFD') || /[\x00-\x1F]/.test(str))) {
+      const buf = Buffer.from(value, 'binary')
+      if (buf.length === 6) {
+        return Array.from(buf)
+          .map((b) => b.toString(16).padStart(2, '0'))
+          .join(':')
+      }
     }
-    return String(value)
+
+    return str
   }
 }

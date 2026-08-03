@@ -1,6 +1,7 @@
 import type { HttpContext } from '@adonisjs/core/http'
 import Device from '#models/device'
 import DeviceInterface from '#models/device_interface'
+import Monitor from '#models/monitor'
 import { SnmpService } from '#modules/snmp/snmp_service'
 import vine from '@vinejs/vine'
 
@@ -49,6 +50,189 @@ export default class SnmpController {
         error: error instanceof Error ? error.message : String(error),
       })
     }
+  }
+
+  /**
+   * POST /api/devices/:id/snmp/scan
+   * Escaneia e lista os componentes monitoráveis de um dispositivo (Interfaces, CPU, Memória).
+   */
+  async scan({ params, response }: HttpContext) {
+    const device = await Device.find(params.id)
+    if (!device) {
+      return response.notFound({ message: 'Dispositivo não encontrado' })
+    }
+
+    const config = {
+      host: device.ipAddress || device.name,
+      version: (device.snmpVersion || 'v2c') as 'v1' | 'v2c' | 'v3',
+      community: device.snmpCommunity || 'public',
+      port: 161,
+    }
+
+    try {
+      const scanResult = await this.snmpService.scanDevice(device, config)
+      return response.ok(scanResult)
+    } catch (error) {
+      return response.badRequest({
+        message: 'Falha ao escanear equipamento via SNMP',
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  /**
+   * POST /api/devices/:id/snmp/apply-monitors
+   * Salva e atualiza os itens de monitoramento selecionados (interfaces, CPU, memória).
+   */
+  async applyMonitors({ params, request, response }: HttpContext) {
+    const device = await Device.find(params.id)
+    if (!device) {
+      return response.notFound({ message: 'Dispositivo não encontrado' })
+    }
+
+    const schema = vine.object({
+      enableCpuMonitor: vine.boolean().optional(),
+      enableMemoryMonitor: vine.boolean().optional(),
+      monitoredIfIndexes: vine.array(vine.number()).optional(),
+    })
+
+    const payload = await vine.validate({
+      schema,
+      data: request.all(),
+    })
+
+    // Garante que o dispositivo tem SNMP habilitado
+    device.snmpEnabled = true
+    device.isMonitored = true
+    await device.save()
+
+    const config = {
+      host: device.ipAddress || device.name,
+      version: (device.snmpVersion || 'v2c') as 'v1' | 'v2c' | 'v3',
+      community: device.snmpCommunity || 'public',
+      port: 161,
+    }
+
+    // 1. Escaneia para obter a lista completa de interfaces
+    const scanResult = await this.snmpService.scanDevice(device, config)
+
+    // 2. Persiste e atualiza as interfaces e cria monitores correspondentes
+    const selectedIfIndexes = payload.monitoredIfIndexes || []
+    for (const scanIface of scanResult.interfaces) {
+      let iface = await DeviceInterface.query()
+        .where('deviceId', device.id)
+        .where('snmpIndex', scanIface.ifIndex)
+        .first()
+
+      const isSelected = selectedIfIndexes.includes(scanIface.ifIndex)
+
+      if (!iface) {
+        iface = new DeviceInterface()
+        iface.deviceId = device.id
+        iface.snmpIndex = scanIface.ifIndex
+      }
+
+      iface.name = scanIface.ifName
+      iface.description = scanIface.ifDescr || null
+      iface.macAddress = scanIface.macAddress || null
+      iface.speed = scanIface.ifSpeed || null
+      iface.adminStatus = isSelected ? 'up' : 'down'
+      iface.operStatus = scanIface.ifOperStatus
+      await iface.save()
+
+      // Trata criação do monitor da interface
+      const monitorName = `Interface ${scanIface.ifName}`
+      let ifaceMonitor = await Monitor.query()
+        .where('deviceId', device.id)
+        .where('name', monitorName)
+        .first()
+
+      if (isSelected) {
+        if (!ifaceMonitor) {
+          ifaceMonitor = new Monitor()
+          ifaceMonitor.deviceId = device.id
+          ifaceMonitor.type = 'snmp'
+          ifaceMonitor.name = monitorName
+          ifaceMonitor.configuration = {
+            host: device.ipAddress || device.name,
+            ifIndex: scanIface.ifIndex,
+            ifName: scanIface.ifName,
+          }
+          ifaceMonitor.intervalSeconds = 60
+          ifaceMonitor.timeoutSeconds = 5
+          ifaceMonitor.retryCount = 3
+        }
+        ifaceMonitor.enabled = true
+        ifaceMonitor.status = scanIface.ifOperStatus === 'up' ? 'up' : 'down'
+        await ifaceMonitor.save()
+      } else if (ifaceMonitor) {
+        ifaceMonitor.enabled = false
+        await ifaceMonitor.save()
+      }
+    }
+
+    // 3. Trata monitor de CPU
+    if (payload.enableCpuMonitor !== undefined) {
+      let cpuMonitor = await Monitor.query()
+        .where('deviceId', device.id)
+        .whereILike('name', '%cpu%')
+        .first()
+
+      if (payload.enableCpuMonitor) {
+        if (!cpuMonitor) {
+          cpuMonitor = new Monitor()
+          cpuMonitor.deviceId = device.id
+          cpuMonitor.type = 'snmp'
+          cpuMonitor.name = 'Monitor de Uso de CPU'
+          cpuMonitor.configuration = { host: device.ipAddress || device.name, metric: 'cpu_usage' }
+          cpuMonitor.intervalSeconds = 60
+          cpuMonitor.timeoutSeconds = 5
+          cpuMonitor.retryCount = 3
+        }
+        cpuMonitor.enabled = true
+        cpuMonitor.status = 'up'
+        await cpuMonitor.save()
+      } else if (cpuMonitor) {
+        cpuMonitor.enabled = false
+        await cpuMonitor.save()
+      }
+    }
+
+    // 4. Trata monitor de Memória
+    if (payload.enableMemoryMonitor !== undefined) {
+      let memMonitor = await Monitor.query()
+        .where('deviceId', device.id)
+        .whereILike('name', '%mem%')
+        .first()
+
+      if (payload.enableMemoryMonitor) {
+        if (!memMonitor) {
+          memMonitor = new Monitor()
+          memMonitor.deviceId = device.id
+          memMonitor.type = 'snmp'
+          memMonitor.name = 'Monitor de Uso de Memória'
+          memMonitor.configuration = { host: device.ipAddress || device.name, metric: 'memory_usage' }
+          memMonitor.intervalSeconds = 60
+          memMonitor.timeoutSeconds = 5
+          memMonitor.retryCount = 3
+        }
+        memMonitor.enabled = true
+        memMonitor.status = 'up'
+        await memMonitor.save()
+      } else if (memMonitor) {
+        memMonitor.enabled = false
+        await memMonitor.save()
+      }
+    }
+
+    // 5. Executa poll inicial imediatamente para atualizar métricas e status
+    try {
+      await this.snmpService.pollDevice(device, config)
+    } catch {}
+
+    return response.ok({
+      message: 'Configurações de monitoramento atualizadas com sucesso',
+    })
   }
 
   /**
