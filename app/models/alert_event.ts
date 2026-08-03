@@ -10,7 +10,7 @@ export default class AlertEvent extends BaseModel {
   declare id: number
 
   @column()
-  declare alertRuleId: number
+  declare alertRuleId: number | null
 
   @column()
   declare deviceId: number | null

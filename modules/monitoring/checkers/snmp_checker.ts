@@ -32,6 +32,42 @@ export class SnmpChecker {
     })
 
     try {
+      if (config.ifIndex !== undefined && config.ifIndex !== null) {
+        const operStatusOid = `1.3.6.1.2.1.2.2.1.8.${config.ifIndex}`
+        const speedOid = `1.3.6.1.2.1.2.2.1.5.${config.ifIndex}`
+        const ifResponse = await client.get([operStatusOid, speedOid])
+        const endTime = Date.now()
+        const durationMs = endTime - startTime
+        const finishedAt = new Date()
+
+        const operStatusVal = Number(ifResponse[operStatusOid])
+        const isOperUp = operStatusVal === 1
+        const speedVal = Number(ifResponse[speedOid] || 0)
+
+        return {
+          success: isOperUp,
+          status: isOperUp ? 'up' : 'down',
+          startedAt,
+          finishedAt,
+          durationMs,
+          message: isOperUp
+            ? `Interface #${config.ifIndex} operacional (UP)`
+            : `Interface #${config.ifIndex} inoperante (DOWN)`,
+          metrics: [
+            {
+              name: 'if_oper_status',
+              value: operStatusVal,
+              unit: 'status',
+            },
+            {
+              name: 'if_speed',
+              value: speedVal,
+              unit: 'bps',
+            },
+          ],
+        }
+      }
+
       const response = await client.get([SystemCollector.OID_SYS_UPTIME])
       const endTime = Date.now()
       const durationMs = endTime - startTime

@@ -12,6 +12,7 @@ import Metric from '#models/metric'
 import Monitor from '#models/monitor'
 import { DateTime } from 'luxon'
 import { TopologyService } from '#modules/topology/topology_service'
+import { InterfaceMonitoringService } from '#modules/monitoring/interface_monitoring_service'
 
 export class SnmpService {
   private factory = new SnmpSessionFactory()
@@ -22,6 +23,7 @@ export class SnmpService {
   private cpuCollector = new CpuCollector()
   private memoryCollector = new MemoryCollector()
   private topologyService = new TopologyService()
+  private interfaceMonitoringService = new InterfaceMonitoringService()
 
   async scanDevice(device: Device, config: SnmpConfig) {
     const client = this.factory.createSession(config)
@@ -93,6 +95,9 @@ export class SnmpService {
         .where('snmpIndex', ifaceData.ifIndex)
         .first()
 
+      const previousOperStatus = iface ? iface.operStatus : null
+      const previousSpeed = iface ? iface.speed : null
+
       if (!iface) {
         iface = new DeviceInterface()
         iface.deviceId = device.id
@@ -110,6 +115,15 @@ export class SnmpService {
 
       await iface.save()
       savedIfaces.push(iface)
+
+      if (iface.adminStatus === 'up') {
+        await this.interfaceMonitoringService.evaluateInterfaceState(
+          device,
+          iface,
+          previousOperStatus,
+          previousSpeed
+        )
+      }
     }
 
     // Consulta monitores ativos para o dispositivo

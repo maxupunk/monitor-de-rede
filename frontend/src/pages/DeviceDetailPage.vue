@@ -164,7 +164,7 @@
                   <th>Monitoramento</th>
                   <th>Status Operacional</th>
                   <th>MAC Address</th>
-                  <th>Velocidade (bps)</th>
+                  <th>Velocidade de Negociação</th>
                 </tr>
               </thead>
               <tbody>
@@ -190,11 +190,9 @@
                   </td>
                   <td>{{ intf.macAddress || 'N/A' }}</td>
                   <td>
-                    {{
-                      intf.ifSpeed || intf.speed
-                        ? `${((intf.ifSpeed || intf.speed)! / 1000000).toFixed(0)} Mbps`
-                        : 'N/A'
-                    }}
+                    <v-chip size="x-small" variant="tonal" color="info">
+                      {{ formatSpeedNegotiation(intf.ifSpeed || intf.speed) }}
+                    </v-chip>
                   </td>
                 </tr>
                 <tr v-if="detailStore.interfaces.length === 0">
@@ -547,7 +545,9 @@
                   <td class="font-weight-bold">{{ iface.ifName }}</td>
                   <td>{{ iface.macAddress || 'N/A' }}</td>
                   <td>
-                    {{ iface.ifSpeed ? `${(iface.ifSpeed / 1000000).toFixed(0)} Mbps` : 'N/A' }}
+                    <v-chip size="x-small" variant="tonal" color="info">
+                      {{ formatSpeedNegotiation(iface.ifSpeed) }}
+                    </v-chip>
                   </td>
                   <td>
                     <v-chip
@@ -695,6 +695,23 @@ function formatBps(bps?: number): string {
   const sizes = ['bps', 'Kbps', 'Mbps', 'Gbps']
   const i = Math.floor(Math.log(bps) / Math.log(k))
   return parseFloat((bps / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+}
+
+function formatSpeedNegotiation(bps?: number | null): string {
+  if (!bps || bps <= 0) return 'N/A'
+  if (bps >= 1_000_000_000) {
+    const gbps = bps / 1_000_000_000
+    return `${Number.isInteger(gbps) ? gbps : gbps.toFixed(1)} Gbps`
+  }
+  if (bps >= 1_000_000) {
+    const mbps = bps / 1_000_000
+    return `${Number.isInteger(mbps) ? mbps : mbps.toFixed(1)} Mbps`
+  }
+  if (bps >= 1_000) {
+    const kbps = bps / 1_000
+    return `${Number.isInteger(kbps) ? kbps : kbps.toFixed(1)} Kbps`
+  }
+  return `${bps} bps`
 }
 
 function formatMetricValue(metric: DeviceMetric): string {
