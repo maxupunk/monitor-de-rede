@@ -28,6 +28,8 @@ export interface DeviceInterface {
 export interface DeviceMetric {
   id: number
   deviceId: number
+  interfaceId?: number | null
+  interfaceName?: string | null
   metricName: string
   metricValue: number
   unit?: string

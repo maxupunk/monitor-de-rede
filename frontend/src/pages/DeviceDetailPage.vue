@@ -161,9 +161,9 @@
                 <tr>
                   <th>Index</th>
                   <th>Nome Interface</th>
-                  <th>Status Admin / Oper</th>
+                  <th>Monitoramento</th>
+                  <th>Status Operacional</th>
                   <th>MAC Address</th>
-                  <th>IP Address</th>
                   <th>Velocidade (bps)</th>
                 </tr>
               </thead>
@@ -173,15 +173,22 @@
                   <td class="font-weight-bold">{{ intf.ifName || intf.name || '-' }}</td>
                   <td>
                     <v-chip
+                      :color="intf.adminStatus === 'up' ? 'primary' : 'grey'"
+                      size="x-small"
+                      variant="tonal"
+                    >
+                      {{ intf.adminStatus === 'up' ? 'MONITORADA' : 'NÃO MONITORADA' }}
+                    </v-chip>
+                  </td>
+                  <td>
+                    <v-chip
                       :color="(intf.ifOperStatus || intf.operStatus) === 'up' ? 'success' : 'error'"
                       size="x-small"
-                      class="mr-1"
                     >
                       Oper: {{ intf.ifOperStatus || intf.operStatus || 'unknown' }}
                     </v-chip>
                   </td>
                   <td>{{ intf.macAddress || 'N/A' }}</td>
-                  <td>{{ intf.ipAddress || 'N/A' }}</td>
                   <td>
                     {{
                       intf.ifSpeed || intf.speed
@@ -199,22 +206,175 @@
             </v-table>
           </v-window-item>
 
-          <!-- Aba Métricas -->
+          <!-- Aba Métricas & Tráfego -->
           <v-window-item value="metrics">
-            <v-row>
-              <v-col v-for="met in detailStore.metrics" :key="met.id" cols="12" sm="6" md="4">
+            <!-- 1. KPIs de Recursos do Sistema -->
+            <div
+              class="text-subtitle-1 font-weight-bold mb-3 d-flex align-center ga-2"
+              style="gap: 8px"
+            >
+              <v-icon color="primary">mdi-chip</v-icon>
+              Recursos de Hardware & Processamento
+            </div>
+
+            <v-row class="mb-6">
+              <!-- CPU Card -->
+              <v-col cols="12" md="6">
                 <v-card border flat class="pa-4 rounded-lg">
-                  <div class="text-caption text-grey">{{ met.metricName }}</div>
-                  <div class="text-h4 font-weight-bold my-1">
-                    {{ met.metricValue }} <span class="text-caption">{{ met.unit || '' }}</span>
+                  <div class="d-flex align-center justify-space-between mb-2">
+                    <span class="text-subtitle-2 font-weight-bold">Uso de CPU</span>
+                    <v-chip
+                      size="x-small"
+                      :color="isCpuMonitored ? getCpuColor(cpuUsageValue) : 'grey'"
+                    >
+                      {{
+                        isCpuMonitored
+                          ? cpuUsageValue !== null
+                            ? `${cpuUsageValue}%`
+                            : 'Sem dados'
+                          : 'Não Monitorado'
+                      }}
+                    </v-chip>
                   </div>
-                  <div class="text-caption text-grey">{{ met.createdAt }}</div>
+                  <v-progress-linear
+                    :model-value="isCpuMonitored ? cpuUsageValue || 0 : 0"
+                    height="10"
+                    rounded
+                    :color="isCpuMonitored ? getCpuColor(cpuUsageValue) : 'grey-lighten-2'"
+                    class="mb-3"
+                  ></v-progress-linear>
+                  <div class="d-flex align-center justify-space-between text-caption text-grey">
+                    <span v-if="isCpuMonitored"
+                    >Load 1 min:
+                      {{ cpuLoadValue !== null ? `${cpuLoadValue} load` : 'N/A' }}</span
+                    >
+                    <span v-else>Recurso desativado na varredura</span>
+                    <span>Coleta: {{ cpuUsageMetric?.createdAt || 'N/A' }}</span>
+                  </div>
                 </v-card>
               </v-col>
-              <v-col v-if="detailStore.metrics.length === 0" cols="12">
-                <div class="text-center text-grey py-6">Nenhuma métrica coletada recentemente.</div>
+
+              <!-- Memória RAM Card -->
+              <v-col cols="12" md="6">
+                <v-card border flat class="pa-4 rounded-lg">
+                  <div class="d-flex align-center justify-space-between mb-2">
+                    <span class="text-subtitle-2 font-weight-bold">Uso de Memória RAM</span>
+                    <v-chip
+                      size="x-small"
+                      :color="isMemoryMonitored ? getMemoryColor(memoryUsageValue) : 'grey'"
+                    >
+                      {{
+                        isMemoryMonitored
+                          ? memoryUsageValue !== null
+                            ? `${memoryUsageValue}%`
+                            : 'Sem dados'
+                          : 'Não Monitorado'
+                      }}
+                    </v-chip>
+                  </div>
+                  <v-progress-linear
+                    :model-value="isMemoryMonitored ? memoryUsageValue || 0 : 0"
+                    height="10"
+                    rounded
+                    :color="isMemoryMonitored ? getMemoryColor(memoryUsageValue) : 'grey-lighten-2'"
+                    class="mb-3"
+                  ></v-progress-linear>
+                  <div class="d-flex align-center justify-space-between text-caption text-grey">
+                    <span v-if="isMemoryMonitored">Percentual Utilizado</span>
+                    <span v-else>Recurso desativado na varredura</span>
+                    <span>Coleta: {{ memoryUsageMetric?.createdAt || 'N/A' }}</span>
+                  </div>
+                </v-card>
               </v-col>
             </v-row>
+
+            <!-- 2. Tabela de Tráfego por Interface Monitorada -->
+            <div
+              class="text-subtitle-1 font-weight-bold mb-3 d-flex align-center ga-2"
+              style="gap: 8px"
+            >
+              <v-icon color="primary">mdi-swap-horizontal</v-icon>
+              Tráfego de Rede por Interface (Apenas Itens Monitorados)
+            </div>
+
+            <v-table border hover class="rounded-lg mb-6">
+              <thead>
+                <tr>
+                  <th>Interface</th>
+                  <th>Status Operacional</th>
+                  <th>Taxa de Download (IN)</th>
+                  <th>Taxa de Upload (OUT)</th>
+                  <th>Volumetria Entrada</th>
+                  <th>Volumetria Saída</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in interfaceTrafficSummaries" :key="item.ifIndex">
+                  <td class="font-weight-bold">
+                    <v-icon size="18" class="mr-1">mdi-ethernet-cable</v-icon>
+                    {{ item.ifName }}
+                  </td>
+                  <td>
+                    <v-chip :color="item.operStatus === 'up' ? 'success' : 'error'" size="x-small">
+                      {{ item.operStatus.toUpperCase() }}
+                    </v-chip>
+                  </td>
+                  <td class="font-weight-medium text-success">
+                    <v-icon size="14" start>mdi-arrow-down-bold</v-icon>
+                    {{ item.inBpsFormatted }}
+                  </td>
+                  <td class="font-weight-medium text-primary">
+                    <v-icon size="14" start>mdi-arrow-up-bold</v-icon>
+                    {{ item.outBpsFormatted }}
+                  </td>
+                  <td class="text-grey-darken-1">{{ item.inBytesFormatted }}</td>
+                  <td class="text-grey-darken-1">{{ item.outBytesFormatted }}</td>
+                </tr>
+                <tr v-if="interfaceTrafficSummaries.length === 0">
+                  <td colspan="6" class="text-center text-grey py-6">
+                    Nenhuma interface selecionada para monitoramento de tráfego. Clique em "Escanear
+                    SNMP" para selecionar.
+                  </td>
+                </tr>
+              </tbody>
+            </v-table>
+
+            <!-- 3. Tabela do Histórico Bruto de Registros Recentes -->
+            <v-expansion-panels flat variant="inset">
+              <v-expansion-panel class="rounded-lg border">
+                <v-expansion-panel-title class="font-weight-bold text-subtitle-2">
+                  <v-icon start color="primary">mdi-history</v-icon>
+                  Histórico de Registros Brutos (Métricas de Itens Monitorados)
+                </v-expansion-panel-title>
+                <v-expansion-panel-text>
+                  <v-table density="compact" hover>
+                    <thead>
+                      <tr>
+                        <th>Nome da Métrica</th>
+                        <th>Interface / Contexto</th>
+                        <th>Valor</th>
+                        <th>Unidade</th>
+                        <th>Data/Hora</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="met in detailStore.metrics" :key="met.id">
+                        <td class="font-weight-medium">{{ met.metricName }}</td>
+                        <td>{{ met.interfaceName || 'Sistema / Geral' }}</td>
+                        <td class="font-weight-bold">{{ formatMetricValue(met) }}</td>
+                        <td>{{ met.unit || '-' }}</td>
+                        <td class="text-grey">{{ met.createdAt }}</td>
+                      </tr>
+                      <tr v-if="detailStore.metrics.length === 0">
+                        <td colspan="5" class="text-center text-grey py-4">
+                          Nenhum histórico de métricas capturado ainda.
+                        </td>
+                      </tr>
+                    </tbody>
+                  </v-table>
+                </v-expansion-panel-text>
+              </v-expansion-panel>
+            </v-expansion-panels>
           </v-window-item>
 
           <!-- Aba Eventos -->
@@ -430,7 +590,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { useDeviceDetailStore } from '@/stores/deviceDetail'
+import { useDeviceDetailStore, type DeviceMetric } from '@/stores/deviceDetail'
 
 const route = useRoute()
 const detailStore = useDeviceDetailStore()
@@ -449,6 +609,116 @@ onMounted(() => {
     detailStore.loadDeviceDetails(deviceId.value)
   }
 })
+
+const isCpuMonitored = computed(() =>
+  detailStore.monitors.some((m) => m.name.toLowerCase().includes('cpu') && m.status !== 'disabled')
+)
+
+const isMemoryMonitored = computed(() =>
+  detailStore.monitors.some(
+    (m) =>
+      (m.name.toLowerCase().includes('memoria') || m.name.toLowerCase().includes('memory')) &&
+      m.status !== 'disabled'
+  )
+)
+
+// Métricas de CPU
+const cpuUsageMetric = computed(() => detailStore.metrics.find((m) => m.metricName === 'cpu_usage'))
+const cpuUsageValue = computed(() =>
+  cpuUsageMetric.value !== undefined ? Number(cpuUsageMetric.value.metricValue) : null
+)
+
+const cpuLoadMetric = computed(() =>
+  detailStore.metrics.find((m) => m.metricName === 'cpu_load_1min')
+)
+const cpuLoadValue = computed(() =>
+  cpuLoadMetric.value !== undefined ? Number(cpuLoadMetric.value.metricValue) : null
+)
+
+// Métricas de Memória
+const memoryUsageMetric = computed(() =>
+  detailStore.metrics.find((m) => m.metricName === 'memory_usage')
+)
+const memoryUsageValue = computed(() =>
+  memoryUsageMetric.value !== undefined ? Number(memoryUsageMetric.value.metricValue) : null
+)
+
+// Resumo de tráfego por Interface — exibe apenas interfaces selecionadas para monitoramento (adminStatus === 'up')
+const interfaceTrafficSummaries = computed(() => {
+  return detailStore.interfaces
+    .filter((intf) => intf.adminStatus === 'up')
+    .map((intf) => {
+      const inOctetsMetric = detailStore.metrics.find(
+        (m) => m.metricName === 'ifHCInOctets' && m.interfaceId === intf.id
+      )
+      const outOctetsMetric = detailStore.metrics.find(
+        (m) => m.metricName === 'ifHCOutOctets' && m.interfaceId === intf.id
+      )
+      const inBpsMetric = detailStore.metrics.find(
+        (m) => m.metricName === 'inBps' && m.interfaceId === intf.id
+      )
+      const outBpsMetric = detailStore.metrics.find(
+        (m) => m.metricName === 'outBps' && m.interfaceId === intf.id
+      )
+
+      const inOctets = inOctetsMetric ? Number(inOctetsMetric.metricValue) : 0
+      const outOctets = outOctetsMetric ? Number(outOctetsMetric.metricValue) : 0
+      const inBps = inBpsMetric ? Number(inBpsMetric.metricValue) : 0
+      const outBps = outBpsMetric ? Number(outBpsMetric.metricValue) : 0
+
+      return {
+        id: intf.id,
+        ifIndex: intf.snmpIndex ?? intf.ifIndex ?? 0,
+        ifName: intf.ifName || intf.name || `if-${intf.id}`,
+        operStatus: intf.ifOperStatus || intf.operStatus || 'unknown',
+        inBpsFormatted: formatBps(inBps),
+        outBpsFormatted: formatBps(outBps),
+        inBytesFormatted: formatBytes(inOctets),
+        outBytesFormatted: formatBytes(outOctets),
+      }
+    })
+})
+
+function formatBytes(bytes?: number): string {
+  if (bytes === undefined || bytes === null || isNaN(bytes)) return '0 B'
+  if (bytes === 0) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+}
+
+function formatBps(bps?: number): string {
+  if (bps === undefined || bps === null || isNaN(bps)) return '0 bps'
+  if (bps === 0) return '0 bps'
+  const k = 1000
+  const sizes = ['bps', 'Kbps', 'Mbps', 'Gbps']
+  const i = Math.floor(Math.log(bps) / Math.log(k))
+  return parseFloat((bps / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+}
+
+function formatMetricValue(metric: DeviceMetric): string {
+  const val = Number(metric.metricValue)
+  if (isNaN(val)) return String(metric.metricValue)
+
+  if (metric.unit === 'bytes') return formatBytes(val)
+  if (metric.unit === 'bps') return formatBps(val)
+  return `${val} ${metric.unit || ''}`.trim()
+}
+
+function getCpuColor(usage?: number | null) {
+  if (usage === null || usage === undefined) return 'grey'
+  if (usage > 85) return 'error'
+  if (usage > 65) return 'warning'
+  return 'success'
+}
+
+function getMemoryColor(usage?: number | null) {
+  if (usage === null || usage === undefined) return 'grey'
+  if (usage > 90) return 'error'
+  if (usage > 75) return 'warning'
+  return 'success'
+}
 
 async function openScanModal() {
   scanModalOpen.value = true

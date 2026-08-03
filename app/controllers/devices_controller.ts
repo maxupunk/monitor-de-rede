@@ -128,21 +128,31 @@ export default class DevicesController {
   async metrics({ params, response }: HttpContext) {
     const metrics = await Metric.query()
       .where('deviceId', params.id)
+      .preload('interface')
       .orderBy('recordedAt', 'desc')
-      .limit(50)
+      .limit(200)
 
-    const formatted = metrics.map((met) => {
-      return {
-        id: met.id,
-        deviceId: met.deviceId,
-        metricName: met.name,
-        metricValue: met.value,
-        unit: met.unit,
-        createdAt: met.recordedAt
-          ? met.recordedAt.toFormat('dd/MM/yyyy HH:mm:ss')
-          : met.createdAt.toFormat('dd/MM/yyyy HH:mm:ss'),
-      }
-    })
+    const formatted = metrics
+      .filter((met) => {
+        if (met.interfaceId && met.interface) {
+          return met.interface.adminStatus === 'up'
+        }
+        return true
+      })
+      .map((met) => {
+        return {
+          id: met.id,
+          deviceId: met.deviceId,
+          interfaceId: met.interfaceId,
+          interfaceName: met.interface ? met.interface.name : null,
+          metricName: met.name,
+          metricValue: met.value,
+          unit: met.unit,
+          createdAt: met.recordedAt
+            ? met.recordedAt.toFormat('dd/MM/yyyy HH:mm:ss')
+            : met.createdAt.toFormat('dd/MM/yyyy HH:mm:ss'),
+        }
+      })
 
     return response.ok(formatted)
   }

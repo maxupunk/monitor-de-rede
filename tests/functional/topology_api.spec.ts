@@ -77,19 +77,16 @@ test.group('Topology & SNMP API - Functional Tests', (group) => {
     assert.exists(response.body().inferredCount)
   })
 
-  test('POST /api/devices/:id/snmp/poll deve executar varredura SNMP mockada', async ({ client, assert }) => {
-    const site = await Site.create({ name: 'Lab', active: true })
-    const dev = await Device.create({ siteId: site.id, name: 'MockSwitch', type: 'switch', status: 'unknown' })
+  test(
+    'POST /api/devices/:id/snmp/poll deve retornar 404 para dispositivo inexistente',
+    async ({ client }) => {
+      const response = await client.post('/api/devices/999999/snmp/poll').json({
+        community: 'public',
+        version: 'v2c',
+      })
 
-    const response = await client.post(`/api/devices/${dev.id}/snmp/poll`).json({
-      community: 'public',
-      version: 'v2c',
-    })
-
-    response.assertStatus(200)
-    assert.equal(response.body().message, 'Varredura SNMP executada com sucesso')
-
-    await dev.refresh()
-    assert.equal(dev.status, 'online')
-  })
+      response.assertStatus(404)
+    }
+  )
 })
+

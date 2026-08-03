@@ -2,6 +2,7 @@ import type { HttpContext } from '@adonisjs/core/http'
 import Device from '#models/device'
 import DeviceInterface from '#models/device_interface'
 import Monitor from '#models/monitor'
+import Metric from '#models/metric'
 import { SnmpService } from '#modules/snmp/snmp_service'
 import vine from '@vinejs/vine'
 
@@ -165,9 +166,13 @@ export default class SnmpController {
         ifaceMonitor.enabled = true
         ifaceMonitor.status = scanIface.ifOperStatus === 'up' ? 'up' : 'down'
         await ifaceMonitor.save()
-      } else if (ifaceMonitor) {
-        ifaceMonitor.enabled = false
-        await ifaceMonitor.save()
+      } else {
+        if (ifaceMonitor) {
+          ifaceMonitor.enabled = false
+          await ifaceMonitor.save()
+        }
+        // Remove métricas acumuladas de interfaces não selecionadas para não poluir relatórios
+        await Metric.query().where('interfaceId', iface.id).delete()
       }
     }
 
@@ -192,9 +197,15 @@ export default class SnmpController {
         cpuMonitor.enabled = true
         cpuMonitor.status = 'up'
         await cpuMonitor.save()
-      } else if (cpuMonitor) {
-        cpuMonitor.enabled = false
-        await cpuMonitor.save()
+      } else {
+        if (cpuMonitor) {
+          cpuMonitor.enabled = false
+          await cpuMonitor.save()
+        }
+        await Metric.query()
+          .where('deviceId', device.id)
+          .whereIn('name', ['cpu_usage', 'cpu_load_1min'])
+          .delete()
       }
     }
 
@@ -219,13 +230,16 @@ export default class SnmpController {
         memMonitor.enabled = true
         memMonitor.status = 'up'
         await memMonitor.save()
-      } else if (memMonitor) {
-        memMonitor.enabled = false
-        await memMonitor.save()
+      } else {
+        if (memMonitor) {
+          memMonitor.enabled = false
+          await memMonitor.save()
+        }
+        await Metric.query().where('deviceId', device.id).where('name', 'memory_usage').delete()
       }
     }
 
-    // 5. Executa poll inicial imediatamente para atualizar métricas e status
+    // 5. Executa poll inicial imediatamente para atualizar métricas e status dos itens selecionados
     try {
       await this.snmpService.pollDevice(device, config)
     } catch {}

@@ -2,7 +2,7 @@ import { SnmpSessionFactory } from './snmp_session_factory.js'
 import type { SnmpConfig } from './clients/snmp_client.js'
 import { SystemCollector } from './collectors/system_collector.js'
 import { InterfaceCollector } from './collectors/interface_collector.js'
-import { TrafficCollector } from './collectors/traffic_collector.js'
+import { TrafficCollector, type InterfaceTraffic } from './collectors/traffic_collector.js'
 import { LldpCollector } from './collectors/lldp_collector.js'
 import { CpuCollector } from './collectors/cpu_collector.js'
 import { MemoryCollector } from './collectors/memory_collector.js'
@@ -83,7 +83,7 @@ export class SnmpService {
     device.lastSeenAt = DateTime.now()
     await device.save()
 
-    // 2. Interfaces
+    // 2. Interfaces (Preserva adminStatus configurado pelo usuário para monitoramento)
     const discoveredIfaces = await this.interfaceCollector.collect(client)
     const savedIfaces: DeviceInterface[] = []
 
@@ -97,6 +97,7 @@ export class SnmpService {
         iface = new DeviceInterface()
         iface.deviceId = device.id
         iface.snmpIndex = ifaceData.ifIndex
+        iface.adminStatus = ifaceData.ifAdminStatus === 1 ? 'up' : 'down'
       }
 
       iface.name = ifaceData.ifName || `if-${ifaceData.ifIndex}`
@@ -104,7 +105,6 @@ export class SnmpService {
       iface.alias = ifaceData.ifAlias || null
       iface.macAddress = ifaceData.macAddress || null
       iface.speed = ifaceData.ifSpeed || null
-      iface.adminStatus = ifaceData.ifAdminStatus === 1 ? 'up' : 'down'
       iface.operStatus = ifaceData.ifOperStatus === 1 ? 'up' : 'down'
       iface.lastSeenAt = DateTime.now()
 
@@ -112,13 +112,68 @@ export class SnmpService {
       savedIfaces.push(iface)
     }
 
-    // 3. Traffic Metrics
+    // Consulta monitores ativos para o dispositivo
+    const activeMonitors = await Monitor.query()
+      .where('deviceId', device.id)
+      .where('enabled', true)
+
+    const hasCpuMonitor = activeMonitors.some((m) => m.name.toLowerCase().includes('cpu'))
+    const hasMemoryMonitor = activeMonitors.some(
+      (m) => m.name.toLowerCase().includes('memoria') || m.name.toLowerCase().includes('memory')
+    )
+
+    // 3. Traffic Metrics (Apenas para interfaces selecionadas/monitoradas)
     const trafficList = await this.trafficCollector.collect(client)
     let metricCount = 0
 
     for (const traffic of trafficList) {
       const targetIface = savedIfaces.find((i) => i.snmpIndex === traffic.ifIndex)
       if (!targetIface) continue
+
+      // Verifica se a interface está configurada para monitoramento
+      const isMonitored =
+        targetIface.adminStatus === 'up' ||
+        activeMonitors.some(
+          (m) =>
+            m.name.toLowerCase().includes(targetIface.name.toLowerCase()) ||
+            ((m.configuration as Record<string, unknown>)?.ifIndex &&
+              (m.configuration as Record<string, unknown>).ifIndex === targetIface.snmpIndex)
+        )
+
+      if (!isMonitored) {
+        continue
+      }
+
+      const lastIn = await Metric.query()
+        .where('deviceId', device.id)
+        .where('interfaceId', targetIface.id)
+        .where('name', 'ifHCInOctets')
+        .orderBy('recordedAt', 'desc')
+        .first()
+
+      const lastOut = await Metric.query()
+        .where('deviceId', device.id)
+        .where('interfaceId', targetIface.id)
+        .where('name', 'ifHCOutOctets')
+        .orderBy('recordedAt', 'desc')
+        .first()
+
+      let inBps = 0
+      let outBps = 0
+
+      if (lastIn && lastOut && lastIn.recordedAt) {
+        const prevTraffic: InterfaceTraffic = {
+          ifIndex: traffic.ifIndex,
+          inOctets: lastIn.value,
+          outOctets: lastOut.value,
+          inErrors: 0,
+          outErrors: 0,
+          recordedAt: lastIn.recordedAt.toJSDate(),
+        }
+        const rates = this.trafficCollector.calculateRates(prevTraffic, traffic)
+        inBps = rates.inBps
+        outBps = rates.outBps
+      }
 
       await Metric.create({
         deviceId: device.id,
@@ -138,42 +193,68 @@ export class SnmpService {
         recordedAt: DateTime.fromJSDate(traffic.recordedAt),
       })
 
-      metricCount += 2
+      if (inBps >= 0) {
+        await Metric.create({
+          deviceId: device.id,
+          interfaceId: targetIface.id,
+          name: 'inBps',
+          value: inBps,
+          unit: 'bps',
+          recordedAt: DateTime.fromJSDate(traffic.recordedAt),
+        })
+      }
+
+      if (outBps >= 0) {
+        await Metric.create({
+          deviceId: device.id,
+          interfaceId: targetIface.id,
+          name: 'outBps',
+          value: outBps,
+          unit: 'bps',
+          recordedAt: DateTime.fromJSDate(traffic.recordedAt),
+        })
+      }
+
+      metricCount += 4
     }
 
-    // 4. CPU & Memory Metrics
-    const cpuInfo = await this.cpuCollector.collect(client)
-    if (cpuInfo.usagePercent !== undefined) {
-      await Metric.create({
-        deviceId: device.id,
-        name: 'cpu_usage',
-        value: cpuInfo.usagePercent,
-        unit: '%',
-        recordedAt: DateTime.now(),
-      })
-      metricCount++
-    }
-    if (cpuInfo.load1min !== undefined) {
-      await Metric.create({
-        deviceId: device.id,
-        name: 'cpu_load_1min',
-        value: cpuInfo.load1min,
-        unit: 'load',
-        recordedAt: DateTime.now(),
-      })
-      metricCount++
+    // 4. CPU & Memory Metrics (Apenas se o monitoramento de CPU / Memória estiver ativo)
+    if (hasCpuMonitor || activeMonitors.length === 0) {
+      const cpuInfo = await this.cpuCollector.collect(client)
+      if (cpuInfo.usagePercent !== undefined) {
+        await Metric.create({
+          deviceId: device.id,
+          name: 'cpu_usage',
+          value: cpuInfo.usagePercent,
+          unit: '%',
+          recordedAt: DateTime.now(),
+        })
+        metricCount++
+      }
+      if (cpuInfo.load1min !== undefined) {
+        await Metric.create({
+          deviceId: device.id,
+          name: 'cpu_load_1min',
+          value: cpuInfo.load1min,
+          unit: 'load',
+          recordedAt: DateTime.now(),
+        })
+        metricCount++
+      }
     }
 
-    const memoryInfo = await this.memoryCollector.collect(client)
-    if (memoryInfo.usedPercent !== undefined) {
-      await Metric.create({
-        deviceId: device.id,
-        name: 'memory_usage',
-        value: memoryInfo.usedPercent,
-        unit: '%',
-        recordedAt: DateTime.now(),
-      })
-      metricCount++
+    if (hasMemoryMonitor || activeMonitors.length === 0) {
+      const memoryInfo = await this.memoryCollector.collect(client)
+      if (memoryInfo.usedPercent !== undefined) {
+        await Metric.create({
+          deviceId: device.id,
+          name: 'memory_usage',
+          value: memoryInfo.usedPercent,
+          unit: '%',
+          recordedAt: DateTime.now(),
+        })
+        metricCount++
+      }
     }
 
     // 5. LLDP / CDP Neighbors
@@ -184,9 +265,7 @@ export class SnmpService {
 
     return {
       systemInfo,
-      cpuInfo,
-      memoryInfo,
-      interfaceCount: savedIfaces.length,
+      interfaceCount: savedIfaces.filter((i) => i.adminStatus === 'up').length,
       metricCount,
       neighborCount: neighbors.length,
     }
