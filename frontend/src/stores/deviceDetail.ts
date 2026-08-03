@@ -6,11 +6,16 @@ import type { Device } from './devices'
 export interface DeviceInterface {
   id: number
   deviceId: number
-  ifIndex: number
-  ifName: string
+  snmpIndex?: number
+  ifIndex?: number
+  name?: string
+  ifName?: string
   ifType?: string
+  adminStatus?: string
   ifAdminStatus?: 'up' | 'down' | 'testing'
+  operStatus?: string
   ifOperStatus?: 'up' | 'down' | 'testing'
+  speed?: number
   ifSpeed?: number
   macAddress?: string
   ipAddress?: string
@@ -37,7 +42,7 @@ export interface DeviceMonitor {
   target: string
   port?: number
   intervalSeconds?: number
-  status: 'online' | 'offline' | 'warning' | 'disabled'
+  status: 'online' | 'offline' | 'up' | 'down' | 'warning' | 'disabled' | 'unknown'
   lastCheckedAt?: string
   latencyMs?: number
 }
@@ -74,10 +79,18 @@ export const useDeviceDetailStore = defineStore('deviceDetail', () => {
       ])
 
       if (devData.status === 'fulfilled') device.value = devData.value
-      if (intfData.status === 'fulfilled') interfaces.value = intfData.value
-      if (monData.status === 'fulfilled') monitors.value = monData.value
-      if (metData.status === 'fulfilled') metrics.value = metData.value
-      if (evtData.status === 'fulfilled') events.value = evtData.value
+      if (intfData.status === 'fulfilled') {
+        interfaces.value = Array.isArray(intfData.value) ? intfData.value : []
+      }
+      if (monData.status === 'fulfilled') {
+        monitors.value = Array.isArray(monData.value) ? monData.value : []
+      }
+      if (metData.status === 'fulfilled') {
+        metrics.value = Array.isArray(metData.value) ? metData.value : []
+      }
+      if (evtData.status === 'fulfilled') {
+        events.value = Array.isArray(evtData.value) ? evtData.value : []
+      }
     } catch (err: unknown) {
       error.value = err instanceof Error ? err.message : 'Erro ao carregar detalhes do dispositivo'
     } finally {

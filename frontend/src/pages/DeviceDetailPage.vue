@@ -159,21 +159,25 @@
               </thead>
               <tbody>
                 <tr v-for="intf in detailStore.interfaces" :key="intf.id">
-                  <td>{{ intf.ifIndex }}</td>
-                  <td class="font-weight-bold">{{ intf.ifName }}</td>
+                  <td>{{ intf.ifIndex ?? intf.snmpIndex ?? '-' }}</td>
+                  <td class="font-weight-bold">{{ intf.ifName || intf.name || '-' }}</td>
                   <td>
                     <v-chip
-                      :color="intf.ifOperStatus === 'up' ? 'success' : 'error'"
+                      :color="(intf.ifOperStatus || intf.operStatus) === 'up' ? 'success' : 'error'"
                       size="x-small"
                       class="mr-1"
                     >
-                      Oper: {{ intf.ifOperStatus }}
+                      Oper: {{ intf.ifOperStatus || intf.operStatus || 'unknown' }}
                     </v-chip>
                   </td>
                   <td>{{ intf.macAddress || 'N/A' }}</td>
                   <td>{{ intf.ipAddress || 'N/A' }}</td>
                   <td>
-                    {{ intf.ifSpeed ? `${(intf.ifSpeed / 1000000).toFixed(0)} Mbps` : 'N/A' }}
+                    {{
+                      intf.ifSpeed || intf.speed
+                        ? `${((intf.ifSpeed || intf.speed)! / 1000000).toFixed(0)} Mbps`
+                        : 'N/A'
+                    }}
                   </td>
                 </tr>
                 <tr v-if="detailStore.interfaces.length === 0">
@@ -262,10 +266,12 @@ onMounted(() => {
 })
 
 function getStatusColor(status?: string) {
-  switch (status) {
+  switch (status?.toLowerCase()) {
     case 'online':
+    case 'up':
       return 'success'
     case 'offline':
+    case 'down':
       return 'error'
     case 'warning':
       return 'warning'

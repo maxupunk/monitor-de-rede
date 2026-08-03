@@ -29,10 +29,11 @@ export default class SnmpController {
       data: request.all(),
     })
 
+    const version = (payload.version || device.snmpVersion || 'v2c') as 'v1' | 'v2c' | 'v3'
     const config = {
-      host: payload.host || device.name,
-      version: payload.version || 'v2c',
-      community: payload.community || 'public',
+      host: payload.host || device.ipAddress || device.name,
+      version,
+      community: payload.community || device.snmpCommunity || 'public',
       port: payload.port || 161,
     }
 
@@ -66,6 +67,20 @@ export default class SnmpController {
         q.orderBy('recordedAt', 'desc').limit(10)
       })
 
-    return response.ok(interfaces)
+    const formatted = interfaces.map((intf) => {
+      const json = intf.serialize()
+      return {
+        ...json,
+        ifIndex: intf.snmpIndex,
+        ifName: intf.name,
+        ifDescr: intf.description,
+        ifAdminStatus: intf.adminStatus,
+        ifOperStatus: intf.operStatus,
+        ifSpeed: intf.speed,
+        ifType: intf.type,
+      }
+    })
+
+    return response.ok(formatted)
   }
 }

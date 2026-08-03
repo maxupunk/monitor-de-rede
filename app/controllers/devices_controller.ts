@@ -1,6 +1,8 @@
 import type { HttpContext } from '@adonisjs/core/http'
 import Device from '#models/device'
 import Monitor from '#models/monitor'
+import Metric from '#models/metric'
+import AlertEvent from '#models/alert_event'
 
 export default class DevicesController {
   async index({ response }: HttpContext) {
@@ -105,14 +107,63 @@ export default class DevicesController {
   }
 
   async monitors({ params, response }: HttpContext) {
-    return response.ok({ deviceId: params.id, monitors: [] })
+    const monitors = await Monitor.query()
+      .where('deviceId', params.id)
+      .preload('results', (query) => query.orderBy('startedAt', 'desc').limit(1))
+
+    const formatted = monitors.map((mon) => {
+      const json = mon.serialize()
+      const latestResult = mon.results?.[0]
+      return {
+        ...json,
+        target: mon.target,
+        port: mon.port,
+        latencyMs: latestResult?.latencyMs ?? undefined,
+      }
+    })
+
+    return response.ok(formatted)
   }
 
   async metrics({ params, response }: HttpContext) {
-    return response.ok({ deviceId: params.id, metrics: [] })
+    const metrics = await Metric.query()
+      .where('deviceId', params.id)
+      .orderBy('recordedAt', 'desc')
+      .limit(50)
+
+    const formatted = metrics.map((met) => {
+      return {
+        id: met.id,
+        deviceId: met.deviceId,
+        metricName: met.name,
+        metricValue: met.value,
+        unit: met.unit,
+        createdAt: met.recordedAt
+          ? met.recordedAt.toFormat('dd/MM/yyyy HH:mm:ss')
+          : met.createdAt.toFormat('dd/MM/yyyy HH:mm:ss'),
+      }
+    })
+
+    return response.ok(formatted)
   }
 
   async events({ params, response }: HttpContext) {
-    return response.ok({ deviceId: params.id, events: [] })
+    const events = await AlertEvent.query()
+      .where('deviceId', params.id)
+      .orderBy('createdAt', 'desc')
+      .limit(50)
+
+    const formatted = events.map((evt) => {
+      return {
+        id: evt.id,
+        deviceId: evt.deviceId,
+        eventType: evt.status,
+        severity: evt.severity,
+        message: evt.message || 'Sem mensagem de detalhes',
+        createdAt: evt.createdAt ? evt.createdAt.toFormat('dd/MM/yyyy HH:mm:ss') : '',
+      }
+    })
+
+    return response.ok(formatted)
   }
 }
