@@ -3,7 +3,9 @@
     <div class="d-flex align-center justify-space-between mb-6">
       <div>
         <h1 class="text-h4 font-weight-bold">Agentes Remotos (Probes)</h1>
-        <p class="text-subtitle-1 text-grey-darken-1">Status de probes distribuídos e gerenciamento de autenticação</p>
+        <p class="text-subtitle-1 text-grey-darken-1">
+          Status de probes distribuídos e gerenciamento de autenticação
+        </p>
       </div>
       <v-btn color="primary" prepend-icon="mdi-refresh" @click="probesStore.fetchProbes()">
         Atualizar Probes
@@ -25,7 +27,7 @@
         </template>
 
         <template #item.actions="{ item }">
-          <div class="d-flex ga-2" style="gap: 8px;">
+          <div class="d-flex ga-2" style="gap: 8px">
             <v-btn
               size="small"
               color="secondary"
@@ -74,10 +76,14 @@ onMounted(() => {
 
 function getStatusColor(status: string) {
   switch (status) {
-    case 'online': return 'success'
-    case 'offline': return 'error'
-    case 'revoked': return 'grey'
-    default: return 'warning'
+    case 'online':
+      return 'success'
+    case 'offline':
+      return 'error'
+    case 'revoked':
+      return 'grey'
+    default:
+      return 'warning'
   }
 }
 

@@ -6,23 +6,34 @@
     </v-btn>
 
     <!-- Loading State -->
-    <v-card v-if="monitorsStore.loading && !monitorsStore.currentMonitor" elevation="2" class="pa-8 text-center rounded-lg">
+    <v-card
+      v-if="monitorsStore.loading && !monitorsStore.currentMonitor"
+      elevation="2"
+      class="pa-8 text-center rounded-lg"
+    >
       <v-progress-circular indeterminate color="primary" size="48"></v-progress-circular>
-      <div class="mt-4 text-subtitle-1 text-grey">Carregando métricas e histórico do monitor...</div>
+      <div class="mt-4 text-subtitle-1 text-grey">
+        Carregando métricas e histórico do monitor...
+      </div>
     </v-card>
 
     <div v-else-if="monitorsStore.currentMonitor">
       <!-- Header do Monitor -->
       <v-card elevation="2" class="rounded-lg pa-6 mb-6">
         <div class="d-flex align-center justify-space-between flex-wrap gap-4">
-          <div class="d-flex align-center ga-4" style="gap: 16px;">
+          <div class="d-flex align-center ga-4" style="gap: 16px">
             <v-avatar :color="getStatusColor(monitor.status)" size="56" class="text-white mr-2">
               <v-icon size="32">{{ getTypeIcon(monitor.type) }}</v-icon>
             </v-avatar>
             <div>
-              <div class="d-flex align-center ga-3 flex-wrap" style="gap: 12px;">
+              <div class="d-flex align-center ga-3 flex-wrap" style="gap: 12px">
                 <h1 class="text-h4 font-weight-bold mr-3">{{ monitor.name }}</h1>
-                <v-chip :color="getStatusColor(monitor.status)" size="small" variant="flat" class="font-weight-bold px-3">
+                <v-chip
+                  :color="getStatusColor(monitor.status)"
+                  size="small"
+                  variant="flat"
+                  class="font-weight-bold px-3"
+                >
                   <v-icon start size="14">mdi-circle</v-icon>
                   {{ statusText }}
                 </v-chip>
@@ -31,15 +42,16 @@
                 </v-chip>
               </div>
               <div class="text-subtitle-1 text-grey-darken-1 mt-1">
-                Alvo: <strong class="text-high-emphasis">{{ formattedTarget }}</strong> |
-                Intervalo: {{ monitor.intervalSeconds }}s |
-                Timeout: {{ monitor.timeoutSeconds }}s
-                <span v-if="monitor.device"> | Dispositivo: <strong>{{ monitor.device.name }}</strong></span>
+                Alvo: <strong class="text-high-emphasis">{{ formattedTarget }}</strong> | Intervalo:
+                {{ monitor.intervalSeconds }}s | Timeout: {{ monitor.timeoutSeconds }}s
+                <span v-if="monitor.device">
+                  | Dispositivo: <strong>{{ monitor.device.name }}</strong></span
+                >
               </div>
             </div>
           </div>
 
-          <div class="d-flex align-center ga-3" style="gap: 12px;">
+          <div class="d-flex align-center ga-3" style="gap: 12px">
             <v-btn
               color="primary"
               prepend-icon="mdi-play"
@@ -75,7 +87,10 @@
                 <v-icon size="20">mdi-speedometer</v-icon>
               </v-avatar>
             </div>
-            <div class="text-h4 font-weight-bold my-1" :class="stats.lastLatency !== null ? 'text-primary' : 'text-grey'">
+            <div
+              class="text-h4 font-weight-bold my-1"
+              :class="stats.lastLatency !== null ? 'text-primary' : 'text-grey'"
+            >
               {{ lastLatencyText }}
             </div>
             <div class="text-caption text-grey">Última resposta registrada</div>
@@ -102,7 +117,9 @@
         <v-col cols="12" sm="6" md="3">
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
-              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium">Ping Mín / Máx</span>
+              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
+              >Ping Mín / Máx</span
+              >
               <v-avatar color="purple" variant="tonal" size="36">
                 <v-icon size="20">mdi-swap-vertical</v-icon>
               </v-avatar>
@@ -120,7 +137,9 @@
         <v-col cols="12" sm="6" md="3">
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
-              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium">Taxa de Uptime</span>
+              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
+              >Taxa de Uptime</span
+              >
               <v-avatar color="success" variant="tonal" size="36">
                 <v-icon size="20">mdi-check-decagram</v-icon>
               </v-avatar>
@@ -154,7 +173,9 @@
               <span class="status-indicator-dot bg-success"></span> UP ({{ stats.upChecks }})
             </span>
             <span class="d-flex align-center gap-1">
-              <span class="status-indicator-dot bg-error"></span> DOWN ({{ stats.totalChecks - stats.upChecks }})
+              <span class="status-indicator-dot bg-error"></span> DOWN ({{
+                stats.totalChecks - stats.upChecks
+              }})
             </span>
             <span class="text-grey font-weight-bold">Total: {{ stats.totalChecks }}</span>
           </div>
@@ -178,7 +199,9 @@
               <v-icon color="info">mdi-sine-wave</v-icon>
               Gráfico de Tempo de Resposta (Ping Latency)
             </h2>
-            <div class="text-subtitle-2 text-grey">Variação da latência em milissegundos (ms) ao longo do tempo</div>
+            <div class="text-subtitle-2 text-grey">
+              Variação da latência em milissegundos (ms) ao longo do tempo
+            </div>
           </div>
           <v-chip v-if="stats.avgLatency" color="info" size="small" variant="outlined">
             Média: {{ stats.avgLatency }} ms
@@ -197,10 +220,14 @@
 
             <!-- Linhas de Grade de Fundo (Grid Lines) -->
             <line x1="75" y1="30" x2="785" y2="30" stroke="#E0E0E0" stroke-dasharray="3,3" />
-            <text x="68" y="34" font-size="11" fill="#9E9E9E" text-anchor="end">{{ chartMaxMs }}ms</text>
+            <text x="68" y="34" font-size="11" fill="#9E9E9E" text-anchor="end">
+              {{ chartMaxMs }}ms
+            </text>
 
             <line x1="75" y1="110" x2="785" y2="110" stroke="#E0E0E0" stroke-dasharray="3,3" />
-            <text x="68" y="114" font-size="11" fill="#9E9E9E" text-anchor="end">{{ halfMaxMs }}ms</text>
+            <text x="68" y="114" font-size="11" fill="#9E9E9E" text-anchor="end">
+              {{ halfMaxMs }}ms
+            </text>
 
             <line x1="75" y1="190" x2="785" y2="190" stroke="#E0E0E0" stroke-width="1.5" />
             <text x="68" y="194" font-size="11" fill="#9E9E9E" text-anchor="end">0ms</text>
@@ -221,7 +248,13 @@
             <polygon :points="svgAreaPoints" fill="url(#latencyGradient)" />
 
             <!-- Linha principal do gráfico -->
-            <polyline :points="svgPolylinePoints" fill="none" stroke="#2196F3" stroke-width="2.5" stroke-linecap="round" />
+            <polyline
+              :points="svgPolylinePoints"
+              fill="none"
+              stroke="#2196F3"
+              stroke-width="2.5"
+              stroke-linecap="round"
+            />
 
             <!-- Pontos (Data Circles com Tooltip) -->
             <g v-for="(pt, idx) in latencyDataPoints" :key="idx">
@@ -239,14 +272,18 @@
                   />
                 </template>
                 <div class="pa-2 text-white" style="font-size: 12px">
-                  <div class="font-weight-bold mb-1 d-flex align-center gap-1" style="font-size: 13px; color: #38BDF8">
-                    <span class="status-indicator-dot" :style="{ backgroundColor: pt.status === 'up' ? '#4CAF50' : '#F44336' }"></span>
+                  <div
+                    class="font-weight-bold mb-1 d-flex align-center gap-1"
+                    style="font-size: 13px; color: #38bdf8"
+                  >
+                    <span
+                      class="status-indicator-dot"
+                      :style="{ backgroundColor: pt.status === 'up' ? '#4CAF50' : '#F44336' }"
+                    ></span>
                     Latência: {{ pt.latency }} ms
                   </div>
-                  <div style="font-size: 11px; color: #94A3B8">
-                    Data: {{ pt.time }}
-                  </div>
-                  <div style="font-size: 11px; color: #E2E8F0" class="mt-1">
+                  <div style="font-size: 11px; color: #94a3b8">Data: {{ pt.time }}</div>
+                  <div style="font-size: 11px; color: #e2e8f0" class="mt-1">
                     Status: {{ pt.status.toUpperCase() }}
                   </div>
                 </div>
@@ -257,7 +294,9 @@
 
         <div v-else class="text-center text-grey py-8 border rounded-lg bg-grey-lighten-5">
           <v-icon size="40" color="grey-lighten-1">mdi-chart-line-variant</v-icon>
-          <div class="mt-2 text-subtitle-2">Histórico insuficiente para gerar o gráfico de latência.</div>
+          <div class="mt-2 text-subtitle-2">
+            Histórico insuficiente para gerar o gráfico de latência.
+          </div>
           <div class="text-caption">Execute mais verificações clicando em "Testar Agora".</div>
         </div>
       </v-card>
@@ -303,19 +342,24 @@
           no-data-text="Nenhum histórico registrado para este monitor."
         >
           <template #item.status="{ item }">
-            <v-chip :color="getStatusColor(item.status)" size="x-small" variant="flat" class="font-weight-bold">
+            <v-chip
+              :color="getStatusColor(item.status)"
+              size="x-small"
+              variant="flat"
+              class="font-weight-bold"
+            >
               {{ (item.status || 'UNKNOWN').toUpperCase() }}
             </v-chip>
           </template>
 
           <template #item.latencyMs="{ item }">
-            <span v-if="item.latencyMs !== null" class="font-weight-bold text-primary">{{ item.latencyMs }} ms</span>
+            <span v-if="item.latencyMs !== null" class="font-weight-bold text-primary"
+            >{{ item.latencyMs }} ms</span
+            >
             <span v-else class="text-grey-darken-1">N/A</span>
           </template>
 
-          <template #item.durationMs="{ item }">
-            {{ item.durationMs }} ms
-          </template>
+          <template #item.durationMs="{ item }"> {{ item.durationMs }} ms </template>
 
           <template #item.finishedAt="{ item }">
             {{ formatDate(item.finishedAt || item.startedAt) }}
@@ -342,30 +386,36 @@ const monitorsStore = useMonitorsStore()
 const searchHistory = ref('')
 
 const monitorId = computed(() => Number(route.params.id))
-const monitor = computed<Monitor>(() => monitorsStore.currentMonitor || {
-  id: 0,
-  deviceId: 0,
-  name: '',
-  type: 'ping',
-  target: '',
-  intervalSeconds: 60,
-  timeoutSeconds: 5,
-  status: 'unknown',
-  isEnabled: true,
-  device: undefined,
-  recentResults: [],
-  stats: undefined,
-})
+const monitor = computed<Monitor>(
+  () =>
+    monitorsStore.currentMonitor || {
+      id: 0,
+      deviceId: 0,
+      name: '',
+      type: 'ping',
+      target: '',
+      intervalSeconds: 60,
+      timeoutSeconds: 5,
+      status: 'unknown',
+      isEnabled: true,
+      device: undefined,
+      recentResults: [],
+      stats: undefined,
+    }
+)
 
-const stats = computed(() => monitor.value.stats || {
-  avgLatency: null,
-  minLatency: null,
-  maxLatency: null,
-  lastLatency: null,
-  uptimePercentage: 100,
-  totalChecks: 0,
-  upChecks: 0,
-})
+const stats = computed(
+  () =>
+    monitor.value.stats || {
+      avgLatency: null,
+      minLatency: null,
+      maxLatency: null,
+      lastLatency: null,
+      uptimePercentage: 100,
+      totalChecks: 0,
+      upChecks: 0,
+    }
+)
 
 const historyHeaders = [
   { title: 'Status', key: 'status', width: '110px' },
@@ -545,7 +595,9 @@ const svgAreaPoints = computed(() => {
 }
 
 .chart-point {
-  transition: r 0.2s ease, fill 0.2s ease;
+  transition:
+    r 0.2s ease,
+    fill 0.2s ease;
   cursor: pointer;
 }
 

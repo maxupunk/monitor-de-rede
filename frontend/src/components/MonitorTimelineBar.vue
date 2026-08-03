@@ -1,14 +1,10 @@
 <template>
   <div class="timeline-bar-wrapper d-inline-flex align-center gap-1">
-    <div
-      v-for="(block, idx) in formattedBlocks"
-      :key="idx"
-      class="timeline-block-container"
-    >
+    <div v-for="(block, idx) in formattedBlocks" :key="idx" class="timeline-block-container">
       <v-tooltip location="top" :disabled="!block.hasData" color="#0F172A">
-        <template #activator="{ props }">
+        <template #activator="{ props: tooltipProps }">
           <div
-            v-bind="props"
+            v-bind="tooltipProps"
             class="timeline-block"
             :class="{ 'empty-block': !block.hasData }"
             :style="{
@@ -21,17 +17,25 @@
         <div v-if="block.hasData" class="custom-tooltip-content pa-2">
           <div class="d-flex align-center gap-2 mb-1">
             <span class="status-dot" :style="{ backgroundColor: block.color }"></span>
-            <span class="font-weight-bold" style="font-size: 13px; color: #FFFFFF">
+            <span class="font-weight-bold" style="font-size: 13px; color: #ffffff">
               {{ block.statusText.toUpperCase() }}
             </span>
-            <span v-if="block.latencyMs !== null" class="font-weight-bold" style="font-size: 13px; color: #38BDF8">
+            <span
+              v-if="block.latencyMs !== null"
+              class="font-weight-bold"
+              style="font-size: 13px; color: #38bdf8"
+            >
               ({{ block.latencyMs }} ms)
             </span>
           </div>
-          <div style="font-size: 11px; color: #94A3B8">
+          <div style="font-size: 11px; color: #94a3b8">
             {{ block.formattedTime }}
           </div>
-          <div v-if="block.message" class="mt-1 pt-1" style="font-size: 11px; color: #E2E8F0; border-top: 1px solid #334155">
+          <div
+            v-if="block.message"
+            class="mt-1 pt-1"
+            style="font-size: 11px; color: #e2e8f0; border-top: 1px solid #334155"
+          >
             {{ block.message }}
           </div>
         </div>
@@ -153,7 +157,9 @@ const formattedBlocks = computed<BlockItem[]>(() => {
 
 .timeline-block {
   border-radius: 3px;
-  transition: transform 0.15s ease, opacity 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    opacity 0.15s ease;
   cursor: pointer;
 }
 

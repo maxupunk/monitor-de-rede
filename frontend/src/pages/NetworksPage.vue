@@ -3,11 +3,11 @@
     <div class="d-flex align-center justify-space-between mb-6">
       <div>
         <h1 class="text-h4 font-weight-bold">Sub-redes (Networks)</h1>
-        <p class="text-subtitle-1 text-grey-darken-1">Faixas de IP CIDR e gatilhos de descoberta automática</p>
+        <p class="text-subtitle-1 text-grey-darken-1">
+          Faixas de IP CIDR e gatilhos de descoberta automática
+        </p>
       </div>
-      <v-btn color="primary" prepend-icon="mdi-plus" @click="openDialog()">
-        Nova Rede
-      </v-btn>
+      <v-btn color="primary" prepend-icon="mdi-plus" @click="openDialog()"> Nova Rede </v-btn>
     </div>
 
     <!-- Tabela de Sub-redes -->

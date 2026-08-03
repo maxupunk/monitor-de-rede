@@ -54,7 +54,10 @@ export const useDiscoveryStore = defineStore('discovery', () => {
     }
   }
 
-  async function acceptResult(resultId: number, payload?: { siteId?: number; name?: string }): Promise<boolean> {
+  async function acceptResult(
+    resultId: number,
+    payload?: { siteId?: number; name?: string }
+  ): Promise<boolean> {
     try {
       await apiService.post(`/discovery/results/${resultId}/accept`, payload)
       const res = results.value.find((r) => r.id === resultId)
@@ -85,7 +88,8 @@ export const useDiscoveryStore = defineStore('discovery', () => {
       if (res) res.status = 'merged'
       return true
     } catch (err: unknown) {
-      error.value = err instanceof Error ? err.message : 'Erro ao mesclar resultado com dispositivo existente'
+      error.value =
+        err instanceof Error ? err.message : 'Erro ao mesclar resultado com dispositivo existente'
       return false
     }
   }

@@ -19,7 +19,9 @@ export const useEventsStore = defineStore('events', () => {
     if (eventSource) return
 
     const token = localStorage.getItem('auth_token')
-    const url = token ? `/api/events/stream?token=${encodeURIComponent(token)}` : '/api/events/stream'
+    const url = token
+      ? `/api/events/stream?token=${encodeURIComponent(token)}`
+      : '/api/events/stream'
 
     eventSource = new EventSource(url)
 

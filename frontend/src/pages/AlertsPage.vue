@@ -3,7 +3,9 @@
     <div class="d-flex align-center justify-space-between mb-6">
       <div>
         <h1 class="text-h4 font-weight-bold">Central de Alertas</h1>
-        <p class="text-subtitle-1 text-grey-darken-1">Gerenciamento de eventos ativos e definição de regras de notificação</p>
+        <p class="text-subtitle-1 text-grey-darken-1">
+          Gerenciamento de eventos ativos e definição de regras de notificação
+        </p>
       </div>
       <v-btn color="primary" prepend-icon="mdi-plus" @click="ruleDialog = true">
         Nova Regra de Alerta
@@ -41,7 +43,7 @@
               </template>
 
               <template #item.actions="{ item }">
-                <div class="d-flex ga-2" style="gap: 8px;">
+                <div class="d-flex ga-2" style="gap: 8px">
                   <v-btn
                     size="small"
                     color="primary"
@@ -79,7 +81,13 @@
               </template>
 
               <template #item.actions="{ item }">
-                <v-btn icon size="small" variant="text" color="error" @click="confirmDeleteRule(item.id)">
+                <v-btn
+                  icon
+                  size="small"
+                  variant="text"
+                  color="error"
+                  @click="confirmDeleteRule(item.id)"
+                >
                   <v-icon>mdi-delete</v-icon>
                 </v-btn>
               </template>
@@ -119,7 +127,12 @@
         <v-card-title class="font-weight-bold">Cadastrar Regra de Alerta</v-card-title>
         <v-card-text>
           <v-form @submit.prevent="saveRule">
-            <v-text-field v-model="newRule.name" label="Nome da Regra" variant="outlined" required></v-text-field>
+            <v-text-field
+              v-model="newRule.name"
+              label="Nome da Regra"
+              variant="outlined"
+              required
+            ></v-text-field>
             <v-select
               v-model="newRule.metric"
               :items="['latency_ms', 'packet_loss', 'http_status', 'interface_status']"
@@ -132,7 +145,12 @@
               label="Condição"
               variant="outlined"
             ></v-select>
-            <v-text-field v-model.number="newRule.threshold" label="Valor Limite (Threshold)" type="number" variant="outlined"></v-text-field>
+            <v-text-field
+              v-model.number="newRule.threshold"
+              label="Valor Limite (Threshold)"
+              type="number"
+              variant="outlined"
+            ></v-text-field>
             <v-select
               v-model="newRule.severity"
               :items="['info', 'warning', 'error', 'critical']"
@@ -201,10 +219,14 @@ onMounted(() => {
 
 function getSeverityColor(sev: string) {
   switch (sev) {
-    case 'critical': return 'error'
-    case 'error': return 'deep-orange'
-    case 'warning': return 'warning'
-    default: return 'info'
+    case 'critical':
+      return 'error'
+    case 'error':
+      return 'deep-orange'
+    case 'warning':
+      return 'warning'
+    default:
+      return 'info'
   }
 }
 

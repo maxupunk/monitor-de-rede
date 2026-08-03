@@ -3,7 +3,9 @@
     <div class="d-flex align-center justify-space-between mb-6 flex-wrap gap-4">
       <div>
         <h1 class="text-h4 font-weight-bold">Dashboard</h1>
-        <p class="text-subtitle-1 text-grey-darken-1">Visão geral do monitoramento e status em tempo real</p>
+        <p class="text-subtitle-1 text-grey-darken-1">
+          Visão geral do monitoramento e status em tempo real
+        </p>
       </div>
       <div class="d-flex align-center gap-3">
         <v-chip
@@ -42,7 +44,9 @@
       <v-col cols="12" sm="6" md="3">
         <v-card elevation="2" class="pa-4 rounded-lg">
           <div class="d-flex align-center justify-space-between mb-2">
-            <span class="text-subtitle-2 text-grey-darken-1 font-weight-bold">Monitores de Rede</span>
+            <span class="text-subtitle-2 text-grey-darken-1 font-weight-bold"
+            >Monitores de Rede</span
+            >
             <v-avatar color="info" variant="tonal" size="36">
               <v-icon color="info">mdi-chart-timeline-variant</v-icon>
             </v-avatar>
@@ -75,7 +79,9 @@
               <v-icon color="warning">mdi-bell-ring-outline</v-icon>
             </v-avatar>
           </div>
-          <div class="text-h4 font-weight-bold text-warning">{{ alertsStore.activeAlerts.length }}</div>
+          <div class="text-h4 font-weight-bold text-warning">
+            {{ alertsStore.activeAlerts.length }}
+          </div>
           <div class="text-caption text-warning mt-1">Requerem atenção</div>
         </v-card>
       </v-col>
@@ -113,7 +119,10 @@
                   class="px-4 py-3 border-b"
                 >
                   <div class="d-flex align-center justify-space-between flex-wrap gap-3 w-100">
-                    <div class="monitor-info d-flex align-center gap-3" style="min-width: 220px; flex: 1;">
+                    <div
+                      class="monitor-info d-flex align-center gap-3"
+                      style="min-width: 220px; flex: 1"
+                    >
                       <v-avatar
                         :color="getStatusColor(monitor.status)"
                         size="10"
@@ -136,20 +145,31 @@
                       </div>
                     </div>
 
-                    <div class="monitor-timeline d-flex align-center gap-3 justify-center" style="flex: 2; min-width: 280px;">
+                    <div
+                      class="monitor-timeline d-flex align-center gap-3 justify-center"
+                      style="flex: 2; min-width: 280px"
+                    >
                       <router-link :to="'/monitors/' + monitor.id" class="text-decoration-none">
-                        <MonitorTimelineBar :results="monitor.recentResults" :max-blocks="24" :height="20" :width="5"></MonitorTimelineBar>
+                        <MonitorTimelineBar
+                          :results="monitor.recentResults"
+                          :max-blocks="24"
+                          :height="20"
+                          :width="5"
+                        ></MonitorTimelineBar>
                       </router-link>
                       <span
                         v-if="monitor.lastLatencyMs !== undefined && monitor.lastLatencyMs !== null"
                         class="text-caption font-weight-bold text-info"
-                        style="min-width: 55px; text-align: right;"
+                        style="min-width: 55px; text-align: right"
                       >
                         {{ monitor.lastLatencyMs }} ms
                       </span>
                     </div>
 
-                    <div class="monitor-actions d-flex align-center gap-2 justify-end" style="min-width: 140px;">
+                    <div
+                      class="monitor-actions d-flex align-center gap-2 justify-end"
+                      style="min-width: 140px"
+                    >
                       <v-chip
                         :color="getStatusColor(monitor.status)"
                         size="small"
@@ -174,9 +194,15 @@
               </v-list>
             </div>
             <div v-else class="pa-8 text-center text-grey">
-              <v-icon size="48" color="grey-lighten-1" class="mb-2">mdi-chart-timeline-variant-off</v-icon>
+              <v-icon size="48" color="grey-lighten-1" class="mb-2"
+              >
+                mdi-chart-timeline-variant-off
+              </v-icon
+              >
               <div class="text-subtitle-1 font-weight-medium">Nenhum monitor cadastrado</div>
-              <p class="text-caption text-grey-darken-1 mb-4">Cadastre monitores ICMP, HTTP ou TCP para visualizar os gráficos em barras.</p>
+              <p class="text-caption text-grey-darken-1 mb-4">
+                Cadastre monitores ICMP, HTTP ou TCP para visualizar os gráficos em barras.
+              </p>
               <v-btn color="primary" prepend-icon="mdi-plus" to="/monitors">
                 Cadastrar Monitor
               </v-btn>
@@ -205,7 +231,14 @@
                   class="px-4 py-2 border-b"
                 >
                   <template #prepend>
-                    <v-avatar :color="alert.severity === 'critical' || alert.severity === 'error' ? 'error' : 'warning'" size="36">
+                    <v-avatar
+                      :color="
+                        alert.severity === 'critical' || alert.severity === 'error'
+                          ? 'error'
+                          : 'warning'
+                      "
+                      size="36"
+                    >
                       <v-icon color="white">mdi-alert</v-icon>
                     </v-avatar>
                   </template>
@@ -258,7 +291,12 @@
                   class="px-4 py-2 border-b"
                 >
                   <template #prepend>
-                    <v-avatar :color="formatEventDetails(evt).color" size="32" variant="tonal" class="mr-3">
+                    <v-avatar
+                      :color="formatEventDetails(evt).color"
+                      size="32"
+                      variant="tonal"
+                      class="mr-3"
+                    >
                       <v-icon size="18">{{ formatEventDetails(evt).icon }}</v-icon>
                     </v-avatar>
                   </template>
@@ -269,9 +307,17 @@
               </v-list>
             </div>
             <div v-else class="pa-6 text-center text-grey">
-              <v-icon size="44" color="grey-lighten-1" class="mb-2">mdi-access-point-network</v-icon>
-              <div class="text-subtitle-2 font-weight-medium">Aguardando eventos em tempo real...</div>
-              <div class="text-caption">Mudanças de status e verificações aparecerão aqui automaticamente.</div>
+              <v-icon size="44" color="grey-lighten-1" class="mb-2"
+              >
+                mdi-access-point-network
+              </v-icon
+              >
+              <div class="text-subtitle-2 font-weight-medium">
+                Aguardando eventos em tempo real...
+              </div>
+              <div class="text-caption">
+                Mudanças de status e verificações aparecerão aqui automaticamente.
+              </div>
             </div>
           </v-card-text>
         </v-card>
@@ -309,9 +355,7 @@ async function refreshData() {
 }
 
 const monitorsOnlineCount = computed(() => {
-  return monitorsStore.monitors.filter(
-    (m) => m.status === 'online' || m.status === 'up'
-  ).length
+  return monitorsStore.monitors.filter((m) => m.status === 'online' || m.status === 'up').length
 })
 
 const globalUptime = computed(() => {
@@ -340,8 +384,16 @@ function getStatusColor(status?: string): string {
 function formatEventDetails(evt: RealtimeEventPayload) {
   const d = (evt.data || {}) as Record<string, any>
   const dateStr = evt.timestamp
-    ? new Date(evt.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-    : new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    ? new Date(evt.timestamp).toLocaleTimeString('pt-BR', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      })
+    : new Date().toLocaleTimeString('pt-BR', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      })
 
   switch (evt.event) {
     case 'monitor.checked':
@@ -382,7 +434,11 @@ function formatEventDetails(evt: RealtimeEventPayload) {
       }
     }
     default: {
-      const summary = d.name || d.title || d.message || (Object.keys(d).length ? JSON.stringify(d).slice(0, 60) : 'Evento de sistema')
+      const summary =
+        d.name ||
+        d.title ||
+        d.message ||
+        (Object.keys(d).length ? JSON.stringify(d).slice(0, 60) : 'Evento de sistema')
       return {
         title: evt.event || 'Evento do Sistema',
         message: String(summary),
@@ -400,8 +456,16 @@ function formatEventDetails(evt: RealtimeEventPayload) {
   text-decoration: underline !important;
 }
 
-.gap-1 { gap: 4px; }
-.gap-2 { gap: 8px; }
-.gap-3 { gap: 12px; }
-.gap-4 { gap: 16px; }
+.gap-1 {
+  gap: 4px;
+}
+.gap-2 {
+  gap: 8px;
+}
+.gap-3 {
+  gap: 12px;
+}
+.gap-4 {
+  gap: 16px;
+}
 </style>

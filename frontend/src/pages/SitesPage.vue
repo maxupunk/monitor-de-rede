@@ -3,11 +3,11 @@
     <div class="d-flex align-center justify-space-between mb-6">
       <div>
         <h1 class="text-h4 font-weight-bold">Sites (Locais)</h1>
-        <p class="text-subtitle-1 text-grey-darken-1">Gerenciamento de locais físicos e filiais monitoradas</p>
+        <p class="text-subtitle-1 text-grey-darken-1">
+          Gerenciamento de locais físicos e filiais monitoradas
+        </p>
       </div>
-      <v-btn color="primary" prepend-icon="mdi-plus" @click="openDialog()">
-        Novo Site
-      </v-btn>
+      <v-btn color="primary" prepend-icon="mdi-plus" @click="openDialog()"> Novo Site </v-btn>
     </div>
 
     <!-- Tabela de Sites -->

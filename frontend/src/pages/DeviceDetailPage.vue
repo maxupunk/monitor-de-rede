@@ -8,29 +8,34 @@
     <!-- Header do Dispositivo -->
     <v-card elevation="2" class="rounded-lg pa-4 mb-6">
       <div class="d-flex align-center justify-space-between flex-wrap gap-4">
-        <div class="d-flex align-center ga-4" style="gap: 16px;">
+        <div class="d-flex align-center ga-4" style="gap: 16px">
           <v-avatar color="primary" size="48" class="mr-2">
             <v-icon color="white">mdi-router-network</v-icon>
           </v-avatar>
           <div>
-            <div class="d-flex align-center ga-3 flex-wrap" style="gap: 12px;">
+            <div class="d-flex align-center ga-3 flex-wrap" style="gap: 12px">
               <h1 class="text-h5 font-weight-bold mr-2">
                 {{ detailStore.device?.name || `Dispositivo #${deviceId}` }}
               </h1>
-              <v-chip :color="getStatusColor(detailStore.device?.status)" size="small" variant="tonal" class="px-3">
+              <v-chip
+                :color="getStatusColor(detailStore.device?.status)"
+                size="small"
+                variant="tonal"
+                class="px-3"
+              >
                 <v-icon start size="14">mdi-circle</v-icon>
                 {{ (detailStore.device?.status || 'UNKNOWN').toUpperCase() }}
               </v-chip>
             </div>
             <div class="text-subtitle-2 text-grey mt-1">
-              IP: {{ detailStore.device?.ipAddress || 'Não informado' }} |
-              Tipo: {{ detailStore.device?.type }} |
-              Fabricante: {{ detailStore.device?.vendor || 'Desconhecido' }}
+              IP: {{ detailStore.device?.ipAddress || 'Não informado' }} | Tipo:
+              {{ detailStore.device?.type }} | Fabricante:
+              {{ detailStore.device?.vendor || 'Desconhecido' }}
             </div>
           </div>
         </div>
 
-        <div class="d-flex align-center ga-3" style="gap: 12px;">
+        <div class="d-flex align-center ga-3" style="gap: 12px">
           <v-btn
             color="secondary"
             prepend-icon="mdi-refresh"
@@ -47,8 +52,16 @@
     <v-card elevation="2" class="rounded-lg">
       <v-tabs v-model="activeTab" color="primary" align-tabs="title">
         <v-tab value="overview" prepend-icon="mdi-information-outline">Visão Geral</v-tab>
-        <v-tab value="monitors" prepend-icon="mdi-heart-pulse">Monitores ({{ detailStore.monitors.length }})</v-tab>
-        <v-tab value="interfaces" prepend-icon="mdi-expansion-card">Interfaces SNMP ({{ detailStore.interfaces.length }})</v-tab>
+        <v-tab value="monitors" prepend-icon="mdi-heart-pulse"
+        >
+          Monitores ({{ detailStore.monitors.length }})
+        </v-tab
+        >
+        <v-tab value="interfaces" prepend-icon="mdi-expansion-card"
+        >
+          Interfaces SNMP ({{ detailStore.interfaces.length }})
+        </v-tab
+        >
         <v-tab value="metrics" prepend-icon="mdi-chart-line">Métricas & Tráfego</v-tab>
         <v-tab value="events" prepend-icon="mdi-history">Histórico de Eventos</v-tab>
       </v-tabs>
@@ -63,16 +76,34 @@
               <v-col cols="12" md="6">
                 <v-list border class="rounded-lg">
                   <v-list-item title="Nome" :subtitle="detailStore.device?.name"></v-list-item>
-                  <v-list-item title="Endereço IP" :subtitle="detailStore.device?.ipAddress"></v-list-item>
-                  <v-list-item title="Endereço MAC" :subtitle="detailStore.device?.macAddress || 'Não cadastrado'"></v-list-item>
-                  <v-list-item title="Fabricante / Modelo" :subtitle="`${detailStore.device?.vendor || 'N/A'} - ${detailStore.device?.model || 'N/A'}`"></v-list-item>
+                  <v-list-item
+                    title="Endereço IP"
+                    :subtitle="detailStore.device?.ipAddress"
+                  ></v-list-item>
+                  <v-list-item
+                    title="Endereço MAC"
+                    :subtitle="detailStore.device?.macAddress || 'Não cadastrado'"
+                  ></v-list-item>
+                  <v-list-item
+                    title="Fabricante / Modelo"
+                    :subtitle="`${detailStore.device?.vendor || 'N/A'} - ${detailStore.device?.model || 'N/A'}`"
+                  ></v-list-item>
                 </v-list>
               </v-col>
               <v-col cols="12" md="6">
                 <v-list border class="rounded-lg">
-                  <v-list-item title="SNMP Habilitado" :subtitle="detailStore.device?.snmpEnabled ? 'Sim' : 'Não'"></v-list-item>
-                  <v-list-item title="Versão / Comunidade SNMP" :subtitle="`${detailStore.device?.snmpVersion || 'v2c'} / ${detailStore.device?.snmpCommunity || 'public'}`"></v-list-item>
-                  <v-list-item title="Data de Cadastro" :subtitle="detailStore.device?.createdAt || 'Desconhecida'"></v-list-item>
+                  <v-list-item
+                    title="SNMP Habilitado"
+                    :subtitle="detailStore.device?.snmpEnabled ? 'Sim' : 'Não'"
+                  ></v-list-item>
+                  <v-list-item
+                    title="Versão / Comunidade SNMP"
+                    :subtitle="`${detailStore.device?.snmpVersion || 'v2c'} / ${detailStore.device?.snmpCommunity || 'public'}`"
+                  ></v-list-item>
+                  <v-list-item
+                    title="Data de Cadastro"
+                    :subtitle="detailStore.device?.createdAt || 'Desconhecida'"
+                  ></v-list-item>
                 </v-list>
               </v-col>
             </v-row>
@@ -94,7 +125,13 @@
               <tbody>
                 <tr v-for="mon in detailStore.monitors" :key="mon.id">
                   <td class="font-weight-bold">{{ mon.name }}</td>
-                  <td><v-chip size="x-small" color="info">{{ (mon.type || 'N/A').toUpperCase() }}</v-chip></td>
+                  <td>
+                    <v-chip size="x-small" color="info">
+                      {{
+                        (mon.type || 'N/A').toUpperCase()
+                      }}
+                    </v-chip>
+                  </td>
                   <td>{{ mon.target }} {{ mon.port ? `:${mon.port}` : '' }}</td>
                   <td>{{ mon.intervalSeconds }}s</td>
                   <td>
@@ -105,7 +142,9 @@
                   <td>{{ mon.latencyMs !== undefined ? `${mon.latencyMs} ms` : 'N/A' }}</td>
                 </tr>
                 <tr v-if="detailStore.monitors.length === 0">
-                  <td colspan="6" class="text-center text-grey py-4">Nenhum monitor configurado para este equipamento.</td>
+                  <td colspan="6" class="text-center text-grey py-4">
+                    Nenhum monitor configurado para este equipamento.
+                  </td>
                 </tr>
               </tbody>
             </v-table>
@@ -129,16 +168,24 @@
                   <td>{{ intf.ifIndex }}</td>
                   <td class="font-weight-bold">{{ intf.ifName }}</td>
                   <td>
-                    <v-chip :color="intf.ifOperStatus === 'up' ? 'success' : 'error'" size="x-small" class="mr-1">
+                    <v-chip
+                      :color="intf.ifOperStatus === 'up' ? 'success' : 'error'"
+                      size="x-small"
+                      class="mr-1"
+                    >
                       Oper: {{ intf.ifOperStatus }}
                     </v-chip>
                   </td>
                   <td>{{ intf.macAddress || 'N/A' }}</td>
                   <td>{{ intf.ipAddress || 'N/A' }}</td>
-                  <td>{{ intf.ifSpeed ? `${(intf.ifSpeed / 1000000).toFixed(0)} Mbps` : 'N/A' }}</td>
+                  <td>
+                    {{ intf.ifSpeed ? `${(intf.ifSpeed / 1000000).toFixed(0)} Mbps` : 'N/A' }}
+                  </td>
                 </tr>
                 <tr v-if="detailStore.interfaces.length === 0">
-                  <td colspan="6" class="text-center text-grey py-4">Nenhuma interface SNMP encontrada. Clique em "Poll SNMP Agora".</td>
+                  <td colspan="6" class="text-center text-grey py-4">
+                    Nenhuma interface SNMP encontrada. Clique em "Poll SNMP Agora".
+                  </td>
                 </tr>
               </tbody>
             </v-table>
@@ -175,7 +222,14 @@
               <tbody>
                 <tr v-for="evt in detailStore.events" :key="evt.id">
                   <td>
-                    <v-chip :color="evt.severity === 'critical' || evt.severity === 'error' ? 'error' : 'warning'" size="x-small">
+                    <v-chip
+                      :color="
+                        evt.severity === 'critical' || evt.severity === 'error'
+                          ? 'error'
+                          : 'warning'
+                      "
+                      size="x-small"
+                    >
                       {{ (evt.severity || 'INFO').toUpperCase() }}
                     </v-chip>
                   </td>
@@ -183,7 +237,9 @@
                   <td>{{ evt.createdAt }}</td>
                 </tr>
                 <tr v-if="detailStore.events.length === 0">
-                  <td colspan="3" class="text-center text-grey py-4">Nenhum evento registrado para este dispositivo.</td>
+                  <td colspan="3" class="text-center text-grey py-4">
+                    Nenhum evento registrado para este dispositivo.
+                  </td>
                 </tr>
               </tbody>
             </v-table>
@@ -213,10 +269,14 @@ onMounted(() => {
 
 function getStatusColor(status?: string) {
   switch (status) {
-    case 'online': return 'success'
-    case 'offline': return 'error'
-    case 'warning': return 'warning'
-    default: return 'grey'
+    case 'online':
+      return 'success'
+    case 'offline':
+      return 'error'
+    case 'warning':
+      return 'warning'
+    default:
+      return 'grey'
   }
 }
 </script>

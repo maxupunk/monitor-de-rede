@@ -2,7 +2,9 @@
   <div>
     <div class="mb-6">
       <h1 class="text-h4 font-weight-bold">Configurações do Sistema</h1>
-      <p class="text-subtitle-1 text-grey-darken-1">Preferências globais, parâmetros de monitoramento e notificações</p>
+      <p class="text-subtitle-1 text-grey-darken-1">
+        Preferências globais, parâmetros de monitoramento e notificações
+      </p>
     </div>
 
     <v-row>
@@ -18,17 +20,17 @@
               label="Intervalo Padrão de Ping (segundos)"
               type="number"
               variant="outlined"
-            ></v-text-field>
+            />
             <v-text-field
               v-model="defaultSnmpCommunity"
               label="Comunidade SNMP Padrão"
               variant="outlined"
-            ></v-text-field>
+            />
             <v-switch
               v-model="autoDiscovery"
               label="Habilitar Descoberta Automática Periódica"
               color="primary"
-            ></v-switch>
+            />
           </v-card-text>
           <v-card-actions class="justify-end">
             <v-btn color="primary" @click="saveSettings">Salvar Preferências</v-btn>
@@ -44,7 +46,9 @@
           </v-card-title>
           <v-card-text class="mt-2">
             <p class="text-body-2 text-grey-darken-1 mb-4">
-              Esta plataforma suporta PWA (Progressive Web App). Você pode instalá-la como um aplicativo nativo no seu computador ou dispositivo móvel para receber notificações e acesso offline rápido.
+              Esta plataforma suporta PWA (Progressive Web App). Você pode instalá-la como um
+              aplicativo nativo no seu computador ou dispositivo móvel para receber notificações e
+              acesso offline rápido.
             </p>
             <v-chip color="success" size="small" variant="tonal" class="mb-4">
               Service Worker PWA Registrado

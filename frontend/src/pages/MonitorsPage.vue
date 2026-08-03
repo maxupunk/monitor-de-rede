@@ -3,11 +3,11 @@
     <div class="d-flex align-center justify-space-between mb-6">
       <div>
         <h1 class="text-h4 font-weight-bold">Monitores de Rede</h1>
-        <p class="text-subtitle-1 text-grey-darken-1">Gerenciamento de verificações ICMP (Ping), HTTP, TCP e DNS com histórico em linha do tempo</p>
+        <p class="text-subtitle-1 text-grey-darken-1">
+          Gerenciamento de verificações ICMP (Ping), HTTP, TCP e DNS com histórico em linha do tempo
+        </p>
       </div>
-      <v-btn color="primary" prepend-icon="mdi-plus" @click="openDialog()">
-        Novo Monitor
-      </v-btn>
+      <v-btn color="primary" prepend-icon="mdi-plus" @click="openDialog()"> Novo Monitor </v-btn>
     </div>
 
     <!-- Tabela de Monitores -->
@@ -43,7 +43,12 @@
             </router-link>
             <div>
               <router-link :to="`/monitors/${item.id}`" class="text-decoration-none">
-                <MonitorTimelineBar :results="item.recentResults" :max-blocks="24" :height="20" :width="5" />
+                <MonitorTimelineBar
+                  :results="item.recentResults"
+                  :max-blocks="24"
+                  :height="20"
+                  :width="5"
+                />
               </router-link>
             </div>
           </div>
@@ -221,11 +226,15 @@ onMounted(async () => {
 function getStatusColor(status: string) {
   switch (status) {
     case 'up':
-    case 'online': return 'success'
+    case 'online':
+      return 'success'
     case 'down':
-    case 'offline': return 'error'
-    case 'warning': return 'warning'
-    default: return 'grey'
+    case 'offline':
+      return 'error'
+    case 'warning':
+      return 'warning'
+    default:
+      return 'grey'
   }
 }
 
@@ -235,7 +244,12 @@ function openDialog(monitor?: Monitor) {
     formModel.deviceId = monitor.deviceId
     formModel.name = monitor.name
     formModel.type = (monitor.type as 'ping' | 'http' | 'tcp' | 'dns') || 'ping'
-    formModel.target = monitor.target || (monitor.configuration?.host || monitor.configuration?.url || monitor.configuration?.domain || '') as string
+    formModel.target =
+      monitor.target ||
+      ((monitor.configuration?.host ||
+        monitor.configuration?.url ||
+        monitor.configuration?.domain ||
+        '') as string)
     formModel.port = monitor.port || (monitor.configuration?.port as number | undefined) || 80
     formModel.intervalSeconds = monitor.intervalSeconds
     formModel.timeoutSeconds = monitor.timeoutSeconds
@@ -260,7 +274,9 @@ async function save() {
   if (formModel.type === 'ping') {
     configuration = { host: formModel.target }
   } else if (formModel.type === 'http') {
-    configuration = { url: formModel.target.startsWith('http') ? formModel.target : `http://${formModel.target}` }
+    configuration = {
+      url: formModel.target.startsWith('http') ? formModel.target : `http://${formModel.target}`,
+    }
   } else if (formModel.type === 'tcp') {
     configuration = { host: formModel.target, port: formModel.port || 80 }
   } else if (formModel.type === 'dns') {

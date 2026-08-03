@@ -3,7 +3,9 @@
     <div class="d-flex align-center justify-space-between mb-6">
       <div>
         <h1 class="text-h4 font-weight-bold">Central de Descoberta (Discovery)</h1>
-        <p class="text-subtitle-1 text-grey-darken-1">Revise equipamentos encontrados na rede para aprovação ou mesclagem</p>
+        <p class="text-subtitle-1 text-grey-darken-1">
+          Revise equipamentos encontrados na rede para aprovação ou mesclagem
+        </p>
       </div>
       <v-btn color="primary" prepend-icon="mdi-refresh" @click="refreshData">
         Atualizar Descobertas
@@ -48,7 +50,7 @@
               </template>
 
               <template #item.actions="{ item }">
-                <div v-if="item.status === 'pending'" class="d-flex ga-2" style="gap: 8px;">
+                <div v-if="item.status === 'pending'" class="d-flex ga-2" style="gap: 8px">
                   <v-btn
                     size="small"
                     color="success"
@@ -128,10 +130,14 @@ function refreshData() {
 
 function getStatusColor(status: string) {
   switch (status) {
-    case 'accepted': return 'success'
-    case 'ignored': return 'grey'
-    case 'merged': return 'info'
-    default: return 'warning'
+    case 'accepted':
+      return 'success'
+    case 'ignored':
+      return 'grey'
+    case 'merged':
+      return 'info'
+    default:
+      return 'warning'
   }
 }
 

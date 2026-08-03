@@ -3,7 +3,9 @@
     <div class="d-flex align-center justify-space-between mb-6">
       <div>
         <h1 class="text-h4 font-weight-bold">Dispositivos</h1>
-        <p class="text-subtitle-1 text-grey-darken-1">Gerenciamento de equipamentos e servidores monitorados</p>
+        <p class="text-subtitle-1 text-grey-darken-1">
+          Gerenciamento de equipamentos e servidores monitorados
+        </p>
       </div>
       <v-btn color="primary" prepend-icon="mdi-plus" @click="openDialog()">
         Cadastrar Dispositivo
@@ -206,10 +208,14 @@ onMounted(async () => {
 
 function getStatusColor(status: string) {
   switch (status) {
-    case 'online': return 'success'
-    case 'offline': return 'error'
-    case 'warning': return 'warning'
-    default: return 'grey'
+    case 'online':
+      return 'success'
+    case 'offline':
+      return 'error'
+    case 'warning':
+      return 'warning'
+    default:
+      return 'grey'
   }
 }
 

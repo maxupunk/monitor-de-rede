@@ -12,7 +12,7 @@
         </div>
       </div>
 
-      <v-divider class="mb-2"></v-divider>
+      <v-divider class="mb-2" />
 
       <v-list density="compact" nav class="px-2">
         <v-list-item
@@ -24,7 +24,7 @@
           color="primary"
           rounded="lg"
           class="mb-1 font-weight-medium"
-        ></v-list-item>
+        />
       </v-list>
 
       <template #append>
@@ -36,13 +36,13 @@
 
     <!-- App Bar Superior -->
     <v-app-bar flat border="b" density="comfortable" class="px-2">
-      <v-app-bar-nav-icon @click="drawer = !drawer"></v-app-bar-nav-icon>
-      
+      <v-app-bar-nav-icon @click="drawer = !drawer" />
+
       <v-toolbar-title class="text-subtitle-1 font-weight-bold text-grey-darken-3">
         Plataforma de Monitoramento de Redes
       </v-toolbar-title>
 
-      <v-spacer></v-spacer>
+      <v-spacer />
 
       <!-- Status SSE Tempo Real -->
       <v-chip
@@ -69,15 +69,19 @@
           </v-btn>
         </template>
         <v-list width="200" rounded="lg" elevation="4">
-          <v-list-item prepend-icon="mdi-account-circle-outline" title="Meu Perfil" subtitle="admin@monitor.local"></v-list-item>
-          <v-divider class="my-1"></v-divider>
+          <v-list-item
+            prepend-icon="mdi-account-circle-outline"
+            title="Meu Perfil"
+            subtitle="admin@monitor.local"
+          />
+          <v-divider class="my-1" />
           <v-list-item
             prepend-icon="mdi-logout"
             title="Sair da Conta"
             color="error"
             class="text-error font-weight-bold"
             @click="handleLogout"
-          ></v-list-item>
+          />
         </v-list>
       </v-menu>
     </v-app-bar>
@@ -85,7 +89,7 @@
     <!-- Conteúdo Principal da Página -->
     <v-main class="bg-grey-lighten-4">
       <v-container fluid class="pa-6 max-w-1600">
-        <router-view></router-view>
+        <router-view />
       </v-container>
     </v-main>
   </v-app>

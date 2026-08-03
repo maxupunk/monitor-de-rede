@@ -14,7 +14,7 @@ class ApiService {
   private getHeaders(): HeadersInit {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      'Accept': 'application/json',
+      Accept: 'application/json',
     }
     const token = localStorage.getItem('auth_token')
     if (token) {

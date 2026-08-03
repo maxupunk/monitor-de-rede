@@ -18,9 +18,7 @@ const count = ref(0)
       <h1>Get started</h1>
       <p>Edit <code>src/App.vue</code> and save to test <code>HMR</code></p>
     </div>
-    <button type="button" class="counter" @click="count++">
-      Count is {{ count }}
-    </button>
+    <button type="button" class="counter" @click="count++">Count is {{ count }}</button>
   </section>
 
   <div class="ticks"></div>
@@ -28,7 +26,7 @@ const count = ref(0)
   <section id="next-steps">
     <div id="docs">
       <svg class="icon" role="presentation" aria-hidden="true">
-        <use href="/icons.svg#documentation-icon"></use>
+        <use href="/icons.svg#documentation-icon" />
       </svg>
       <h2>Documentation</h2>
       <p>Your questions, answered</p>
@@ -49,7 +47,7 @@ const count = ref(0)
     </div>
     <div id="social">
       <svg class="icon" role="presentation" aria-hidden="true">
-        <use href="/icons.svg#social-icon"></use>
+        <use href="/icons.svg#social-icon" />
       </svg>
       <h2>Connect with us</h2>
       <p>Join the Vite community</p>
@@ -57,7 +55,7 @@ const count = ref(0)
         <li>
           <a href="https://github.com/vitejs/vite" target="_blank">
             <svg class="button-icon" role="presentation" aria-hidden="true">
-              <use href="/icons.svg#github-icon"></use>
+              <use href="/icons.svg#github-icon" />
             </svg>
             GitHub
           </a>
@@ -65,7 +63,7 @@ const count = ref(0)
         <li>
           <a href="https://chat.vite.dev/" target="_blank">
             <svg class="button-icon" role="presentation" aria-hidden="true">
-              <use href="/icons.svg#discord-icon"></use>
+              <use href="/icons.svg#discord-icon" />
             </svg>
             Discord
           </a>
@@ -73,7 +71,7 @@ const count = ref(0)
         <li>
           <a href="https://x.com/vite_js" target="_blank">
             <svg class="button-icon" role="presentation" aria-hidden="true">
-              <use href="/icons.svg#x-icon"></use>
+              <use href="/icons.svg#x-icon" />
             </svg>
             X.com
           </a>
@@ -81,7 +79,7 @@ const count = ref(0)
         <li>
           <a href="https://bsky.app/profile/vite.dev" target="_blank">
             <svg class="button-icon" role="presentation" aria-hidden="true">
-              <use href="/icons.svg#bluesky-icon"></use>
+              <use href="/icons.svg#bluesky-icon" />
             </svg>
             Bluesky
           </a>

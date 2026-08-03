@@ -10,7 +10,13 @@
           <p class="text-subtitle-2 text-grey-darken-1">Plataforma de Monitoramento de Redes</p>
         </div>
 
-        <v-alert v-if="authStore.error" type="error" variant="tonal" class="mb-4 rounded-lg" closable>
+        <v-alert
+          v-if="authStore.error"
+          type="error"
+          variant="tonal"
+          class="mb-4 rounded-lg"
+          closable
+        >
           {{ authStore.error }}
         </v-alert>
 
@@ -24,7 +30,7 @@
             density="comfortable"
             class="mb-2"
             required
-          ></v-text-field>
+          />
 
           <v-text-field
             v-model="password"
@@ -35,7 +41,7 @@
             density="comfortable"
             class="mb-4"
             required
-          ></v-text-field>
+          />
 
           <v-btn
             type="submit"

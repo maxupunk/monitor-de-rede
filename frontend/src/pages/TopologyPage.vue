@@ -3,7 +3,9 @@
     <div class="d-flex align-center justify-space-between mb-6">
       <div>
         <h1 class="text-h4 font-weight-bold">Mapa de Topologia de Rede</h1>
-        <p class="text-subtitle-1 text-grey-darken-1">Visualização de vizinhos LLDP/CDP, sub-redes e links físicos</p>
+        <p class="text-subtitle-1 text-grey-darken-1">
+          Visualização de vizinhos LLDP/CDP, sub-redes e links físicos
+        </p>
       </div>
       <div class="d-flex gap-2">
         <v-btn
@@ -21,7 +23,11 @@
     </div>
 
     <!-- Container do Mapa Gráfico -->
-    <v-card elevation="2" class="rounded-lg overflow-hidden position-relative" style="height: 600px;">
+    <v-card
+      elevation="2"
+      class="rounded-lg overflow-hidden position-relative"
+      style="height: 600px"
+    >
       <!-- Canvas / Overlay SVG de Topologia -->
       <svg width="100%" height="100%" class="topology-canvas">
         <!-- Areias/Conexões (Edges) -->
@@ -57,11 +63,16 @@
       </div>
 
       <!-- Sem dados ou carregando -->
-      <div v-if="topologyStore.nodes.length === 0" class="d-flex align-center justify-center fill-height text-grey">
+      <div
+        v-if="topologyStore.nodes.length === 0"
+        class="d-flex align-center justify-center fill-height text-grey"
+      >
         <div class="text-center">
           <v-icon size="64" color="grey-lighten-1" class="mb-2">mdi-sitemap</v-icon>
           <div class="text-h6">Nenhum equipamento mapeado na topologia</div>
-          <p class="text-caption">Clique em "Recalcular Topologia" ou cadastre dispositivos e sub-redes.</p>
+          <p class="text-caption">
+            Clique em "Recalcular Topologia" ou cadastre dispositivos e sub-redes.
+          </p>
         </div>
       </div>
     </v-card>
@@ -203,29 +214,41 @@ function selectNode(node: TopologyNode) {
 
 function getNodeColor(status: string) {
   switch (status) {
-    case 'online': return 'success'
-    case 'offline': return 'error'
-    case 'warning': return 'warning'
-    default: return 'grey'
+    case 'online':
+      return 'success'
+    case 'offline':
+      return 'error'
+    case 'warning':
+      return 'warning'
+    default:
+      return 'grey'
   }
 }
 
 function getNodeIcon(type: string) {
   switch (type?.toLowerCase()) {
-    case 'router': return 'mdi-router'
-    case 'switch': return 'mdi-expansion-card'
-    case 'server': return 'mdi-server'
-    case 'firewall': return 'mdi-shield-check'
-    default: return 'mdi-desktop-tower'
+    case 'router':
+      return 'mdi-router'
+    case 'switch':
+      return 'mdi-expansion-card'
+    case 'server':
+      return 'mdi-server'
+    case 'firewall':
+      return 'mdi-shield-check'
+    default:
+      return 'mdi-desktop-tower'
   }
 }
 
 function getLinkColor(type: string) {
   switch (type) {
     case 'lldp':
-    case 'cdp': return '#4CAF50'
-    case 'manual': return '#2196F3'
-    default: return '#FF9800'
+    case 'cdp':
+      return '#4CAF50'
+    case 'manual':
+      return '#2196F3'
+    default:
+      return '#FF9800'
   }
 }
 
@@ -251,6 +274,6 @@ async function saveLink() {
 }
 .node-label {
   white-space: nowrap;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }
 </style>
