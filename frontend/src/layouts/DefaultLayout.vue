@@ -15,18 +15,41 @@
       <v-divider class="mb-2" />
 
       <v-list density="compact" nav class="px-2">
-        <v-list-item
-          v-for="item in navItems"
-          :key="item.to"
-          :prepend-icon="item.icon"
-          :title="item.title"
-          :to="item.to"
-          color="primary"
-          rounded="lg"
-          class="mb-1 font-weight-medium"
-        />
-      </v-list>
+        <template v-for="item in navItems" :key="item.title">
+          <v-list-item
+            v-if="!item.children"
+            :prepend-icon="item.icon"
+            :title="item.title"
+            :to="item.to"
+            color="primary"
+            rounded="lg"
+            class="mb-1 font-weight-medium"
+          />
 
+          <v-list-group v-else :value="item.title">
+            <template #activator="{ props }">
+              <v-list-item
+                v-bind="props"
+                :prepend-icon="item.icon"
+                :title="item.title"
+                rounded="lg"
+                class="mb-1 font-weight-medium"
+              />
+            </template>
+
+            <v-list-item
+              v-for="sub in item.children"
+              :key="sub.to"
+              :prepend-icon="sub.icon"
+              :title="sub.title"
+              :to="sub.to"
+              color="primary"
+              rounded="lg"
+              class="mb-1 font-weight-medium pl-6"
+            />
+          </v-list-group>
+        </template>
+      </v-list>
       <template #append>
         <div class="pa-4 text-center text-caption text-grey border-t">
           &copy; 2026 Master Sistemas
@@ -101,22 +124,41 @@ import { useRouter } from 'vue-router'
 import { useEventsStore } from '@/stores/events'
 import { useAuthStore } from '@/stores/auth'
 
+interface NavSubItem {
+  title: string
+  icon: string
+  to: string
+}
+
+interface NavItem {
+  title: string
+  icon: string
+  to?: string
+  children?: NavSubItem[]
+}
+
 const drawer = ref(true)
 const eventsStore = useEventsStore()
 const authStore = useAuthStore()
 const router = useRouter()
 
-const navItems = [
+const navItems: NavItem[] = [
   { title: 'Dashboard', icon: 'mdi-view-dashboard', to: '/' },
-  { title: 'Sites', icon: 'mdi-domain', to: '/sites' },
-  { title: 'Redes', icon: 'mdi-lan', to: '/networks' },
   { title: 'Dispositivos', icon: 'mdi-devices', to: '/devices' },
-  { title: 'Topologia', icon: 'mdi-sitemap', to: '/topology' },
-  { title: 'Descoberta', icon: 'mdi-radar', to: '/discovery' },
   { title: 'Monitores', icon: 'mdi-heart-pulse', to: '/monitors' },
   { title: 'Alertas', icon: 'mdi-bell-outline', to: '/alerts' },
+  { title: 'Descoberta', icon: 'mdi-radar', to: '/discovery' },
   { title: 'Eventos', icon: 'mdi-history', to: '/events' },
-  { title: 'Probes', icon: 'mdi-router-wireless', to: '/probes' },
+  {
+    title: 'Infraestrutura',
+    icon: 'mdi-server-network',
+    children: [
+      { title: 'Sites', icon: 'mdi-domain', to: '/sites' },
+      { title: 'Redes', icon: 'mdi-lan', to: '/networks' },
+      { title: 'Topologia', icon: 'mdi-sitemap', to: '/topology' },
+      { title: 'Probes', icon: 'mdi-router-wireless', to: '/probes' },
+    ],
+  },
   { title: 'Configurações', icon: 'mdi-cog', to: '/settings' },
 ]
 
