@@ -191,7 +191,7 @@
         </div>
       </v-card>
 
-      <!-- Gráfico de Latência / Tempo de Resposta (Ping Line Chart) -->
+      <!-- Gráfico Unificado de Latência / Tempo de Resposta -->
       <v-card elevation="2" class="rounded-lg pa-6 mb-6">
         <div class="d-flex align-center justify-space-between mb-4">
           <div>
@@ -208,89 +208,14 @@
           </v-chip>
         </div>
 
-        <!-- Renderização do Gráfico SVG de Latência -->
-        <div v-if="latencyDataPoints.length > 1" class="chart-container relative pa-2">
-          <svg class="w-100 latency-svg" viewBox="0 0 800 240" preserveAspectRatio="none">
-            <defs>
-              <linearGradient id="latencyGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stop-color="#2196F3" stop-opacity="0.4" />
-                <stop offset="100%" stop-color="#2196F3" stop-opacity="0.0" />
-              </linearGradient>
-            </defs>
-
-            <!-- Linhas de Grade de Fundo (Grid Lines) -->
-            <line x1="75" y1="30" x2="785" y2="30" stroke="#E0E0E0" stroke-dasharray="3,3" />
-            <text x="68" y="34" font-size="11" fill="#9E9E9E" text-anchor="end">
-              {{ chartMaxMs }}ms
-            </text>
-
-            <line x1="75" y1="110" x2="785" y2="110" stroke="#E0E0E0" stroke-dasharray="3,3" />
-            <text x="68" y="114" font-size="11" fill="#9E9E9E" text-anchor="end">
-              {{ halfMaxMs }}ms
-            </text>
-
-            <line x1="75" y1="190" x2="785" y2="190" stroke="#E0E0E0" stroke-width="1.5" />
-            <text x="68" y="194" font-size="11" fill="#9E9E9E" text-anchor="end">0ms</text>
-
-            <!-- Linha Média Tracejada -->
-            <line
-              v-if="stats.avgLatency"
-              x1="75"
-              :y1="getSvgY(stats.avgLatency)"
-              x2="785"
-              :y2="getSvgY(stats.avgLatency)"
-              stroke="#FF9800"
-              stroke-width="1.5"
-              stroke-dasharray="4,4"
-            />
-
-            <!-- Área sob a Curva com Preenchimento Gradiente -->
-            <polygon :points="svgAreaPoints" fill="url(#latencyGradient)" />
-
-            <!-- Linha principal do gráfico -->
-            <polyline
-              :points="svgPolylinePoints"
-              fill="none"
-              stroke="#2196F3"
-              stroke-width="2.5"
-              stroke-linecap="round"
-            />
-
-            <!-- Pontos (Data Circles com Tooltip) -->
-            <g v-for="(pt, idx) in latencyDataPoints" :key="idx">
-              <v-tooltip location="top" color="#0F172A">
-                <template #activator="{ props }">
-                  <circle
-                    v-bind="props"
-                    :cx="pt.x"
-                    :cy="pt.y"
-                    r="5"
-                    :fill="pt.status === 'up' ? '#2196F3' : '#F44336'"
-                    stroke="#FFFFFF"
-                    stroke-width="2"
-                    class="chart-point"
-                  />
-                </template>
-                <div class="pa-2 text-white" style="font-size: 12px">
-                  <div
-                    class="font-weight-bold mb-1 d-flex align-center gap-1"
-                    style="font-size: 13px; color: #38bdf8"
-                  >
-                    <span
-                      class="status-indicator-dot"
-                      :style="{ backgroundColor: pt.status === 'up' ? '#4CAF50' : '#F44336' }"
-                    ></span>
-                    Latência: {{ pt.latency }} ms
-                  </div>
-                  <div style="font-size: 11px; color: #94a3b8">Data: {{ pt.time }}</div>
-                  <div style="font-size: 11px; color: #e2e8f0" class="mt-1">
-                    Status: {{ pt.status.toUpperCase() }}
-                  </div>
-                </div>
-              </v-tooltip>
-            </g>
-          </svg>
-        </div>
+        <!-- Renderização do Gráfico Unificado BaseMetricChart -->
+        <BaseMetricChart
+          v-if="latencySeries.length > 0 && latencySeries[0].data.length > 0"
+          :series="latencySeries"
+          unit-type="latency"
+          :show-avg-line="true"
+          :avg-value="stats.avgLatency || undefined"
+        />
 
         <div v-else class="text-center text-grey py-8 border rounded-lg bg-grey-lighten-5">
           <v-icon size="40" color="grey-lighten-1">mdi-chart-line-variant</v-icon>
@@ -301,92 +226,91 @@
         </div>
       </v-card>
 
-      <!-- Tabela de Histórico Detalhado de Verificações com Paginação -->
-      <v-card elevation="2" class="rounded-lg">
-        <v-card-title class="pa-4 d-flex align-center justify-space-between flex-wrap gap-4">
-          <div class="d-flex align-center gap-3">
-            <span class="font-weight-bold text-h6">Histórico de Execuções</span>
-            <v-chip size="small" color="primary" variant="tonal" class="font-weight-bold">
-              {{ formattedHistory.length }} registros
-            </v-chip>
+      <!-- Tabela com Histórico de Verificações Recentes -->
+      <v-card elevation="2" class="rounded-lg pa-6">
+        <div class="d-flex align-center justify-space-between mb-4">
+          <div>
+            <h2 class="text-h6 font-weight-bold d-flex align-center gap-2">
+              <v-icon color="primary">mdi-history</v-icon>
+              Histórico de Execuções Recentes
+            </h2>
+            <div class="text-subtitle-2 text-grey">Resultados das últimas verificações</div>
           </div>
-
-          <div class="d-flex align-center gap-3">
-            <v-text-field
-              v-model="searchHistory"
-              prepend-inner-icon="mdi-magnify"
-              label="Buscar mensagem ou status"
-              single-line
-              hide-details
-              variant="outlined"
-              density="compact"
-              style="width: 240px"
-            ></v-text-field>
-
-            <v-btn icon variant="text" size="small" @click="refreshData">
-              <v-icon>mdi-refresh</v-icon>
-              <v-tooltip activator="parent" location="top">Atualizar Histórico</v-tooltip>
-            </v-btn>
-          </div>
-        </v-card-title>
-
-        <v-divider></v-divider>
+          <v-btn
+            size="small"
+            variant="text"
+            prepend-icon="mdi-refresh"
+            :loading="monitorsStore.loading"
+            @click="refreshData"
+          >
+            Atualizar
+          </v-btn>
+        </div>
 
         <v-data-table
           :headers="historyHeaders"
           :items="formattedHistory"
-          :search="searchHistory"
-          :items-per-page="10"
-          :items-per-page-options="[10, 25, 50, 100]"
-          density="compact"
-          no-data-text="Nenhum histórico registrado para este monitor."
+          density="comfortable"
+          hover
+          class="rounded-lg border"
         >
           <template #item.status="{ item }">
-            <v-chip
-              :color="getStatusColor(item.status)"
-              size="x-small"
-              variant="flat"
-              class="font-weight-bold"
-            >
-              {{ (item.status || 'UNKNOWN').toUpperCase() }}
+            <v-chip :color="getStatusColor(item.status)" size="x-small" variant="flat">
+              {{ item.status ? item.status.toUpperCase() : 'UNKNOWN' }}
             </v-chip>
           </template>
 
           <template #item.latencyMs="{ item }">
-            <span v-if="item.latencyMs !== null" class="font-weight-bold text-primary"
-            >{{ item.latencyMs }} ms</span
+            <span
+              v-if="item.latencyMs !== undefined && item.latencyMs !== null"
+              class="font-weight-medium"
             >
-            <span v-else class="text-grey-darken-1">N/A</span>
+              {{ item.latencyMs }} ms
+            </span>
+            <span v-else class="text-grey">-</span>
           </template>
 
-          <template #item.durationMs="{ item }"> {{ item.durationMs }} ms </template>
+          <template #item.durationMs="{ item }">
+            <span class="text-grey">{{ item.durationMs }} ms</span>
+          </template>
 
           <template #item.finishedAt="{ item }">
-            {{ formatDate(item.finishedAt || item.startedAt) }}
+            <span>{{ formatDate(item.finishedAt) }}</span>
           </template>
 
           <template #item.message="{ item }">
-            <span class="text-caption text-grey-darken-1">{{ item.message || '-' }}</span>
+            <span :class="item.status === 'down' ? 'text-error font-weight-medium' : 'text-body-2'">
+              {{ item.message || '-' }}
+            </span>
           </template>
         </v-data-table>
       </v-card>
     </div>
+
+    <!-- State de Erro / Não Encontrado -->
+    <v-card v-else elevation="2" class="pa-8 text-center rounded-lg">
+      <v-icon size="64" color="error" class="mb-4">mdi-alert-circle-outline</v-icon>
+      <div class="text-h6 text-error">Monitor não encontrado</div>
+      <div class="text-body-2 text-grey mt-1">O monitor solicitado não existe ou foi removido.</div>
+      <v-btn color="primary" class="mt-4" to="/monitors">Voltar para Monitores</v-btn>
+    </v-card>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useMonitorsStore, type Monitor } from '@/stores/monitors'
+import { useMonitorsStore } from '@/stores/monitors'
 import MonitorTimelineBar from '@/components/MonitorTimelineBar.vue'
+import BaseMetricChart, { type ChartSeriesInput } from '@/components/BaseMetricChart.vue'
 
 const route = useRoute()
 const router = useRouter()
 const monitorsStore = useMonitorsStore()
-const searchHistory = ref('')
 
 const monitorId = computed(() => Number(route.params.id))
-const monitor = computed<Monitor>(
+
+const monitor = computed(
   () =>
     monitorsStore.currentMonitor || {
       id: 0,
@@ -394,6 +318,7 @@ const monitor = computed<Monitor>(
       name: '',
       type: 'ping',
       target: '',
+      port: undefined as number | undefined,
       intervalSeconds: 60,
       timeoutSeconds: 5,
       status: 'unknown',
@@ -512,72 +437,30 @@ async function confirmDelete() {
   }
 }
 
-// CÁLCULO E RENDERIZAÇÃO DO GRÁFICO SVG DE LATÊNCIA
-const chartMaxMs = computed(() => {
-  const max = stats.value.maxLatency || 100
-  return Math.max(max + 20, 50)
-})
-
-const halfMaxMs = computed(() => Math.round(chartMaxMs.value / 2))
-
-interface DataPoint {
-  x: number
-  y: number
-  latency: number
-  time: string
-  status: string
-}
-
-const latencyDataPoints = computed<DataPoint[]>(() => {
-  const results = monitor.value.recentResults || []
+// Estrutura unificada de dados para o componente BaseMetricChart
+const latencySeries = computed<ChartSeriesInput[]>(() => {
+  const results = (monitor.value.recentResults || []).slice().reverse()
   if (results.length === 0) return []
 
-  const maxMs = chartMaxMs.value
-  const paddingLeft = 75
-  const paddingRight = 785
-  const paddingTop = 30
-  const paddingBottom = 190
-
-  const width = paddingRight - paddingLeft
-  const height = paddingBottom - paddingTop
-
-  const stepX = results.length > 1 ? width / (results.length - 1) : 0
-
-  return results.map((res, idx) => {
-    const latency = res.latencyMs ?? 0
-    const ratio = Math.min(latency / maxMs, 1)
-    const x = paddingLeft + idx * stepX
-    const y = paddingBottom - ratio * height
-
-    return {
-      x: Math.round(x * 10) / 10,
-      y: Math.round(y * 10) / 10,
-      latency,
-      time: formatDate(res.finishedAt || res.startedAt),
-      status: res.status,
-    }
-  })
-})
-
-function getSvgY(latency: number): number {
-  const maxMs = chartMaxMs.value
-  const paddingTop = 30
-  const paddingBottom = 190
-  const height = paddingBottom - paddingTop
-  const ratio = Math.min(latency / maxMs, 1)
-  return Math.round((paddingBottom - ratio * height) * 10) / 10
-}
-
-const svgPolylinePoints = computed(() => {
-  return latencyDataPoints.value.map((p) => `${p.x},${p.y}`).join(' ')
-})
-
-const svgAreaPoints = computed(() => {
-  if (latencyDataPoints.value.length === 0) return ''
-  const first = latencyDataPoints.value[0]
-  const last = latencyDataPoints.value[latencyDataPoints.value.length - 1]
-  const line = svgPolylinePoints.value
-  return `${first.x},190 ${line} ${last.x},190`
+  return [
+    {
+      id: 'latency',
+      label: 'Tempo de Resposta',
+      color: '#2196F3',
+      fillArea: true,
+      data: results.map((r) => {
+        const val = r.latencyMs || 0
+        const status = r.status || (val > 0 ? 'up' : 'down')
+        return {
+          time: formatDate(r.finishedAt),
+          value: val,
+          formattedValue: `${val} ms`,
+          status,
+          color: status === 'down' ? '#F44336' : '#2196F3',
+        }
+      }),
+    },
+  ]
 })
 </script>
 
@@ -587,21 +470,5 @@ const svgAreaPoints = computed(() => {
   height: 10px;
   border-radius: 50%;
   display: inline-block;
-}
-
-.latency-svg {
-  width: 100%;
-  height: 240px;
-}
-
-.chart-point {
-  transition:
-    r 0.2s ease,
-    fill 0.2s ease;
-  cursor: pointer;
-}
-
-.chart-point:hover {
-  r: 7;
 }
 </style>

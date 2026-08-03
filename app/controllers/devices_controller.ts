@@ -130,7 +130,7 @@ export default class DevicesController {
       .where('deviceId', params.id)
       .preload('interface')
       .orderBy('recordedAt', 'desc')
-      .limit(200)
+      .limit(1000)
 
     const formatted = metrics
       .filter((met) => {

@@ -110,4 +110,32 @@ test.group('Interface Monitoring - Unit Tests', (group) => {
     assert.equal(events[0].severity, 'info')
     assert.include(events[0].message!, '100 Mbps ➔ 1 Gbps')
   })
+
+  test('evaluateInterfaceState NÃO deve gerar evento quando a velocidade não for alterada (ex: 1Gbps para 1Gbps)', async ({
+    assert,
+  }) => {
+    const device = await Device.create({
+      name: 'Router-Core-02',
+      ipAddress: '192.168.1.3',
+      type: 'router',
+      status: 'online',
+    })
+
+    const iface = await DeviceInterface.create({
+      deviceId: device.id,
+      snmpIndex: 1,
+      name: 'wan',
+      speed: 1_000_000_000,
+      adminStatus: 'up',
+      operStatus: 'up',
+    })
+
+    const service = new InterfaceMonitoringService()
+
+    // Mesma velocidade: 1 Gbps -> 1 Gbps
+    await service.evaluateInterfaceState(device, iface, 'up', 1_000_000_000)
+
+    const events = await AlertEvent.query().where('deviceId', device.id)
+    assert.equal(events.length, 0)
+  })
 })

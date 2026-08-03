@@ -33,7 +33,20 @@
         :search="search"
         :loading="devicesStore.loading"
         no-data-text="Nenhum dispositivo cadastrado"
+        hover
+        class="row-pointer"
+        @click:row="onRowClick"
       >
+        <template #item.name="{ item }">
+          <router-link
+            :to="'/devices/' + item.id"
+            class="text-decoration-none text-primary font-weight-medium"
+            @click.stop
+          >
+            {{ item.name }}
+          </router-link>
+        </template>
+
         <template #item.site="{ item }">
           <span>{{ item.site ? item.site.name : '-' }}</span>
         </template>
@@ -57,21 +70,30 @@
 
         <template #item.actions="{ item }">
           <v-btn
+            icon
             size="small"
+            variant="text"
             color="info"
-            variant="tonal"
-            prepend-icon="mdi-eye"
-            class="mr-2"
-            :to="`/devices/${item.id}`"
+            :to="'/devices/' + item.id"
+            @click.stop
           >
-            Detalhes
+            <v-icon>mdi-eye</v-icon>
+            <v-tooltip activator="parent" location="top">Detalhes</v-tooltip>
           </v-btn>
 
-          <v-btn icon size="small" variant="text" color="primary" @click="openDialog(item)">
+          <v-btn icon size="small" variant="text" color="primary" @click.stop="openDialog(item)">
             <v-icon>mdi-pencil</v-icon>
+            <v-tooltip activator="parent" location="top">Editar</v-tooltip>
           </v-btn>
-          <v-btn icon size="small" variant="text" color="error" @click="confirmDelete(item.id)">
+          <v-btn
+            icon
+            size="small"
+            variant="text"
+            color="error"
+            @click.stop="confirmDelete(item.id)"
+          >
             <v-icon>mdi-delete</v-icon>
+            <v-tooltip activator="parent" location="top">Excluir</v-tooltip>
           </v-btn>
         </template>
       </v-data-table>
@@ -239,10 +261,12 @@
 
 <script setup lang="ts">
 import { ref, onMounted, reactive, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { useDevicesStore, type Device } from '@/stores/devices'
 import { useSitesStore, type Site } from '@/stores/sites'
 import SiteDialog from '@/components/SiteDialog.vue'
 
+const router = useRouter()
 const devicesStore = useDevicesStore()
 const sitesStore = useSitesStore()
 const search = ref('')
@@ -286,7 +310,7 @@ const headers = [
   { title: 'Está atrás de', key: 'parent' },
   { title: 'Monitorado', key: 'isMonitored', width: '100px' },
   { title: 'Status', key: 'status', width: '120px' },
-  { title: 'Ações', key: 'actions', sortable: false, width: '200px' },
+  { title: 'Ações', key: 'actions', sortable: false, width: '140px' },
 ]
 
 const availableParentDevices = computed(() => {
@@ -296,6 +320,12 @@ const availableParentDevices = computed(() => {
 onMounted(async () => {
   await Promise.all([devicesStore.fetchDevices(), sitesStore.fetchSites()])
 })
+
+function onRowClick(_event: MouseEvent, row: { item: Device }) {
+  if (row?.item?.id) {
+    router.push('/devices/' + row.item.id)
+  }
+}
 
 function getStatusColor(status: string) {
   switch (status) {
@@ -371,3 +401,9 @@ async function confirmDelete(id: number) {
   }
 }
 </script>
+
+<style scoped>
+.row-pointer :deep(tbody tr) {
+  cursor: pointer;
+}
+</style>

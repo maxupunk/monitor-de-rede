@@ -44,6 +44,7 @@ export interface DeviceMonitor {
   target: string
   port?: number
   intervalSeconds?: number
+  enabled?: boolean
   status: 'online' | 'offline' | 'up' | 'down' | 'warning' | 'disabled' | 'unknown'
   lastCheckedAt?: string
   latencyMs?: number

@@ -218,71 +218,113 @@
             <v-row class="mb-6">
               <!-- CPU Card -->
               <v-col cols="12" md="6">
-                <v-card border flat class="pa-4 rounded-lg">
-                  <div class="d-flex align-center justify-space-between mb-2">
-                    <span class="text-subtitle-2 font-weight-bold">Uso de CPU</span>
-                    <v-chip
-                      size="x-small"
-                      :color="isCpuMonitored ? getCpuColor(cpuUsageValue) : 'grey'"
+                <v-tooltip location="top" color="#0F172A" :disabled="!isCpuMonitored">
+                  <template #activator="{ props: tooltipProps }">
+                    <v-card
+                      v-bind="tooltipProps"
+                      border
+                      flat
+                      class="pa-4 rounded-lg cursor-pointer"
                     >
-                      {{
-                        isCpuMonitored
-                          ? cpuUsageValue !== null
-                            ? `${cpuUsageValue}%`
-                            : 'Sem dados'
-                          : 'Não Monitorado'
-                      }}
-                    </v-chip>
+                      <div class="d-flex align-center justify-space-between mb-2">
+                        <span class="text-subtitle-2 font-weight-bold">Uso de CPU</span>
+                        <v-chip
+                          size="x-small"
+                          :color="isCpuMonitored ? getCpuColor(cpuUsageValue) : 'grey'"
+                        >
+                          {{
+                            isCpuMonitored
+                              ? cpuUsageValue !== null
+                                ? `${cpuUsageValue}%`
+                                : 'Sem dados'
+                              : 'Não Monitorado'
+                          }}
+                        </v-chip>
+                      </div>
+                      <v-progress-linear
+                        :model-value="isCpuMonitored ? cpuUsageValue || 0 : 0"
+                        height="10"
+                        rounded
+                        :color="isCpuMonitored ? getCpuColor(cpuUsageValue) : 'grey-lighten-2'"
+                        class="mb-3"
+                      ></v-progress-linear>
+                      <div class="d-flex align-center justify-space-between text-caption text-grey">
+                        <span v-if="isCpuMonitored"
+                        >Load 1 min:
+                          {{ cpuLoadValue !== null ? `${cpuLoadValue} load` : 'N/A' }}</span
+                        >
+                        <span v-else>Recurso desativado na varredura</span>
+                        <span>Coleta: {{ cpuUsageMetric?.createdAt || 'N/A' }}</span>
+                      </div>
+                    </v-card>
+                  </template>
+                  <div class="pa-2 text-white" style="font-size: 12px">
+                    <div class="font-weight-bold mb-1" style="font-size: 13px; color: #38bdf8">
+                      Consumo de CPU: {{ cpuUsageValue !== null ? `${cpuUsageValue}%` : 'N/A' }}
+                    </div>
+                    <div style="font-size: 11px; color: #cbd5e1" class="mb-1">
+                      <v-icon size="12" color="#94a3b8" class="mr-1">mdi-clock-outline</v-icon>
+                      Data e Hora: {{ cpuUsageMetric?.createdAt || 'N/A' }}
+                    </div>
+                    <div style="font-size: 11px; color: #94a3b8">
+                      Load 1 min: {{ cpuLoadValue !== null ? `${cpuLoadValue} load` : 'N/A' }}
+                    </div>
                   </div>
-                  <v-progress-linear
-                    :model-value="isCpuMonitored ? cpuUsageValue || 0 : 0"
-                    height="10"
-                    rounded
-                    :color="isCpuMonitored ? getCpuColor(cpuUsageValue) : 'grey-lighten-2'"
-                    class="mb-3"
-                  ></v-progress-linear>
-                  <div class="d-flex align-center justify-space-between text-caption text-grey">
-                    <span v-if="isCpuMonitored"
-                    >Load 1 min:
-                      {{ cpuLoadValue !== null ? `${cpuLoadValue} load` : 'N/A' }}</span
-                    >
-                    <span v-else>Recurso desativado na varredura</span>
-                    <span>Coleta: {{ cpuUsageMetric?.createdAt || 'N/A' }}</span>
-                  </div>
-                </v-card>
+                </v-tooltip>
               </v-col>
 
               <!-- Memória RAM Card -->
               <v-col cols="12" md="6">
-                <v-card border flat class="pa-4 rounded-lg">
-                  <div class="d-flex align-center justify-space-between mb-2">
-                    <span class="text-subtitle-2 font-weight-bold">Uso de Memória RAM</span>
-                    <v-chip
-                      size="x-small"
-                      :color="isMemoryMonitored ? getMemoryColor(memoryUsageValue) : 'grey'"
+                <v-tooltip location="top" color="#0F172A" :disabled="!isMemoryMonitored">
+                  <template #activator="{ props: tooltipProps }">
+                    <v-card
+                      v-bind="tooltipProps"
+                      border
+                      flat
+                      class="pa-4 rounded-lg cursor-pointer"
                     >
-                      {{
-                        isMemoryMonitored
-                          ? memoryUsageValue !== null
-                            ? `${memoryUsageValue}%`
-                            : 'Sem dados'
-                          : 'Não Monitorado'
-                      }}
-                    </v-chip>
+                      <div class="d-flex align-center justify-space-between mb-2">
+                        <span class="text-subtitle-2 font-weight-bold">Uso de Memória RAM</span>
+                        <v-chip
+                          size="x-small"
+                          :color="isMemoryMonitored ? getMemoryColor(memoryUsageValue) : 'grey'"
+                        >
+                          {{
+                            isMemoryMonitored
+                              ? memoryUsageValue !== null
+                                ? `${memoryUsageValue}%`
+                                : 'Sem dados'
+                              : 'Não Monitorado'
+                          }}
+                        </v-chip>
+                      </div>
+                      <v-progress-linear
+                        :model-value="isMemoryMonitored ? memoryUsageValue || 0 : 0"
+                        height="10"
+                        rounded
+                        :color="
+                          isMemoryMonitored ? getMemoryColor(memoryUsageValue) : 'grey-lighten-2'
+                        "
+                        class="mb-3"
+                      ></v-progress-linear>
+                      <div class="d-flex align-center justify-space-between text-caption text-grey">
+                        <span v-if="isMemoryMonitored">Percentual Utilizado</span>
+                        <span v-else>Recurso desativado na varredura</span>
+                        <span>Coleta: {{ memoryUsageMetric?.createdAt || 'N/A' }}</span>
+                      </div>
+                    </v-card>
+                  </template>
+                  <div class="pa-2 text-white" style="font-size: 12px">
+                    <div class="font-weight-bold mb-1" style="font-size: 13px; color: #38bdf8">
+                      Consumo de Memória RAM:
+                      {{ memoryUsageValue !== null ? `${memoryUsageValue}%` : 'N/A' }}
+                    </div>
+                    <div style="font-size: 11px; color: #cbd5e1">
+                      <v-icon size="12" color="#94a3b8" class="mr-1">mdi-clock-outline</v-icon>
+                      Data e Hora: {{ memoryUsageMetric?.createdAt || 'N/A' }}
+                    </div>
                   </div>
-                  <v-progress-linear
-                    :model-value="isMemoryMonitored ? memoryUsageValue || 0 : 0"
-                    height="10"
-                    rounded
-                    :color="isMemoryMonitored ? getMemoryColor(memoryUsageValue) : 'grey-lighten-2'"
-                    class="mb-3"
-                  ></v-progress-linear>
-                  <div class="d-flex align-center justify-space-between text-caption text-grey">
-                    <span v-if="isMemoryMonitored">Percentual Utilizado</span>
-                    <span v-else>Recurso desativado na varredura</span>
-                    <span>Coleta: {{ memoryUsageMetric?.createdAt || 'N/A' }}</span>
-                  </div>
-                </v-card>
+                </v-tooltip>
               </v-col>
             </v-row>
 
@@ -309,8 +351,24 @@
               <tbody>
                 <tr v-for="item in interfaceTrafficSummaries" :key="item.ifIndex">
                   <td class="font-weight-bold">
-                    <v-icon size="18" class="mr-1">mdi-ethernet-cable</v-icon>
-                    {{ item.ifName }}
+                    <div class="d-flex align-center justify-space-between ga-1">
+                      <span>
+                        <v-icon size="18" class="mr-1">mdi-ethernet-cable</v-icon>
+                        {{ item.ifName }}
+                      </span>
+                      <v-btn
+                        icon
+                        size="x-small"
+                        variant="text"
+                        color="primary"
+                        @click="openTrafficChart(item, 'combined')"
+                      >
+                        <v-icon size="16">mdi-chart-line</v-icon>
+                        <v-tooltip activator="parent" location="top">
+                          Ver Gráfico Combinado
+                        </v-tooltip>
+                      </v-btn>
+                    </div>
                   </td>
                   <td>
                     <v-chip :color="item.operStatus === 'up' ? 'success' : 'error'" size="x-small">
@@ -318,15 +376,79 @@
                     </v-chip>
                   </td>
                   <td class="font-weight-medium text-success">
-                    <v-icon size="14" start>mdi-arrow-down-bold</v-icon>
-                    {{ item.inBpsFormatted }}
+                    <div class="d-flex align-center justify-space-between ga-1">
+                      <span>
+                        <v-icon size="14" start>mdi-arrow-down-bold</v-icon>
+                        {{ item.inBpsFormatted }}
+                      </span>
+                      <v-btn
+                        icon
+                        size="x-small"
+                        variant="text"
+                        color="success"
+                        @click="openTrafficChart(item, 'inBps')"
+                      >
+                        <v-icon size="16">mdi-chart-areaspline</v-icon>
+                        <v-tooltip activator="parent" location="top">
+                          Gráfico de Download (IN)
+                        </v-tooltip>
+                      </v-btn>
+                    </div>
                   </td>
                   <td class="font-weight-medium text-primary">
-                    <v-icon size="14" start>mdi-arrow-up-bold</v-icon>
-                    {{ item.outBpsFormatted }}
+                    <div class="d-flex align-center justify-space-between ga-1">
+                      <span>
+                        <v-icon size="14" start>mdi-arrow-up-bold</v-icon>
+                        {{ item.outBpsFormatted }}
+                      </span>
+                      <v-btn
+                        icon
+                        size="x-small"
+                        variant="text"
+                        color="primary"
+                        @click="openTrafficChart(item, 'outBps')"
+                      >
+                        <v-icon size="16">mdi-chart-areaspline</v-icon>
+                        <v-tooltip activator="parent" location="top">
+                          Gráfico de Upload (OUT)
+                        </v-tooltip>
+                      </v-btn>
+                    </div>
                   </td>
-                  <td class="text-grey-darken-1">{{ item.inBytesFormatted }}</td>
-                  <td class="text-grey-darken-1">{{ item.outBytesFormatted }}</td>
+                  <td class="text-grey-darken-1">
+                    <div class="d-flex align-center justify-space-between ga-1">
+                      <span>{{ item.inBytesFormatted }}</span>
+                      <v-btn
+                        icon
+                        size="x-small"
+                        variant="text"
+                        color="info"
+                        @click="openTrafficChart(item, 'inOctets')"
+                      >
+                        <v-icon size="16">mdi-chart-box-outline</v-icon>
+                        <v-tooltip activator="parent" location="top">
+                          Gráfico Volumetria Entrada
+                        </v-tooltip>
+                      </v-btn>
+                    </div>
+                  </td>
+                  <td class="text-grey-darken-1">
+                    <div class="d-flex align-center justify-space-between ga-1">
+                      <span>{{ item.outBytesFormatted }}</span>
+                      <v-btn
+                        icon
+                        size="x-small"
+                        variant="text"
+                        color="info"
+                        @click="openTrafficChart(item, 'outOctets')"
+                      >
+                        <v-icon size="16">mdi-chart-box-outline</v-icon>
+                        <v-tooltip activator="parent" location="top">
+                          Gráfico Volumetria Saída
+                        </v-tooltip>
+                      </v-btn>
+                    </div>
+                  </td>
                 </tr>
                 <tr v-if="interfaceTrafficSummaries.length === 0">
                   <td colspan="6" class="text-center text-grey py-6">
@@ -584,6 +706,15 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <!-- Modal de Gráfico de Tráfego de Interface -->
+    <TrafficChartDialog
+      v-model="chartDialogOpen"
+      :interface-id="selectedChartInterfaceId"
+      :interface-name="selectedChartInterfaceName"
+      :initial-metric="selectedChartMetricType"
+      :metrics="detailStore.metrics"
+    />
   </div>
 </template>
 
@@ -591,12 +722,30 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useDeviceDetailStore, type DeviceMetric } from '@/stores/deviceDetail'
+import TrafficChartDialog from '@/components/TrafficChartDialog.vue'
 
 const route = useRoute()
 const detailStore = useDeviceDetailStore()
 const activeTab = ref('overview')
 const scanModalOpen = ref(false)
 const savingMonitors = ref(false)
+
+const chartDialogOpen = ref(false)
+const selectedChartInterfaceId = ref<number | null>(null)
+const selectedChartInterfaceName = ref('')
+const selectedChartMetricType = ref<'inBps' | 'outBps' | 'inOctets' | 'outOctets' | 'combined'>(
+  'inBps'
+)
+
+function openTrafficChart(
+  item: { id: number; ifName: string },
+  metricType: 'inBps' | 'outBps' | 'inOctets' | 'outOctets' | 'combined'
+) {
+  selectedChartInterfaceId.value = item.id
+  selectedChartInterfaceName.value = item.ifName
+  selectedChartMetricType.value = metricType
+  chartDialogOpen.value = true
+}
 
 const selectedCpuMonitor = ref(true)
 const selectedMemoryMonitor = ref(true)
@@ -615,11 +764,17 @@ const isCpuMonitored = computed(() =>
 )
 
 const isMemoryMonitored = computed(() =>
-  detailStore.monitors.some(
-    (m) =>
-      (m.name.toLowerCase().includes('memoria') || m.name.toLowerCase().includes('memory')) &&
+  detailStore.monitors.some((m) => {
+    const name = m.name
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+    return (
+      (name.includes('memoria') || name.includes('memory')) &&
+      m.enabled !== false &&
       m.status !== 'disabled'
-  )
+    )
+  })
 )
 
 // Métricas de CPU
@@ -649,10 +804,14 @@ const interfaceTrafficSummaries = computed(() => {
     .filter((intf) => intf.adminStatus === 'up')
     .map((intf) => {
       const inOctetsMetric = detailStore.metrics.find(
-        (m) => m.metricName === 'ifHCInOctets' && m.interfaceId === intf.id
+        (m) =>
+          (m.metricName === 'ifHCInOctets' || m.metricName === 'ifInOctets') &&
+          m.interfaceId === intf.id
       )
       const outOctetsMetric = detailStore.metrics.find(
-        (m) => m.metricName === 'ifHCOutOctets' && m.interfaceId === intf.id
+        (m) =>
+          (m.metricName === 'ifHCOutOctets' || m.metricName === 'ifOutOctets') &&
+          m.interfaceId === intf.id
       )
       const inBpsMetric = detailStore.metrics.find(
         (m) => m.metricName === 'inBps' && m.interfaceId === intf.id

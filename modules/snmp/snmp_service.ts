@@ -132,9 +132,10 @@ export class SnmpService {
       .where('enabled', true)
 
     const hasCpuMonitor = activeMonitors.some((m) => m.name.toLowerCase().includes('cpu'))
-    const hasMemoryMonitor = activeMonitors.some(
-      (m) => m.name.toLowerCase().includes('memoria') || m.name.toLowerCase().includes('memory')
-    )
+    const hasMemoryMonitor = activeMonitors.some((m) => {
+      const name = m.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+      return name.includes('memoria') || name.includes('memory')
+    })
 
     // 3. Traffic Metrics (Apenas para interfaces selecionadas/monitoradas)
     const trafficList = await this.trafficCollector.collect(client)
@@ -161,14 +162,14 @@ export class SnmpService {
       const lastIn = await Metric.query()
         .where('deviceId', device.id)
         .where('interfaceId', targetIface.id)
-        .where('name', 'ifHCInOctets')
+        .whereIn('name', ['ifHCInOctets', 'ifInOctets'])
         .orderBy('recordedAt', 'desc')
         .first()
 
       const lastOut = await Metric.query()
         .where('deviceId', device.id)
         .where('interfaceId', targetIface.id)
-        .where('name', 'ifHCOutOctets')
+        .whereIn('name', ['ifHCOutOctets', 'ifOutOctets'])
         .orderBy('recordedAt', 'desc')
         .first()
 
@@ -176,17 +177,26 @@ export class SnmpService {
       let outBps = 0
 
       if (lastIn && lastOut && lastIn.recordedAt) {
-        const prevTraffic: InterfaceTraffic = {
-          ifIndex: traffic.ifIndex,
-          inOctets: lastIn.value,
-          outOctets: lastOut.value,
-          inErrors: 0,
-          outErrors: 0,
-          recordedAt: lastIn.recordedAt.toJSDate(),
-        }
-        const rates = this.trafficCollector.calculateRates(prevTraffic, traffic)
-        inBps = rates.inBps
-        outBps = rates.outBps
+        try {
+          const parseDate = (val: unknown): Date => {
+            if (val instanceof Date) return val
+            if (val && typeof (val as any).toJSDate === 'function') return (val as any).toJSDate()
+            if (typeof val === 'string') return new Date(val)
+            return new Date()
+          }
+
+          const prevTraffic: InterfaceTraffic = {
+            ifIndex: traffic.ifIndex,
+            inOctets: Number(lastIn.value) || 0,
+            outOctets: Number(lastOut.value) || 0,
+            inErrors: 0,
+            outErrors: 0,
+            recordedAt: parseDate(lastIn.recordedAt),
+          }
+          const rates = this.trafficCollector.calculateRates(prevTraffic, traffic)
+          inBps = rates.inBps
+          outBps = rates.outBps
+        } catch {}
       }
 
       await Metric.create({

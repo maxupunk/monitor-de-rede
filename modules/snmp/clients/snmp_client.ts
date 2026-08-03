@@ -127,15 +127,21 @@ export class SnmpClient {
 
   async walk(baseOid: string): Promise<SnmpWalkEntry[]> {
     if (this.mockWalkResponses.size > 0) {
+      let entries: SnmpWalkEntry[] = []
       if (this.mockWalkResponses.has(baseOid)) {
-        return this.mockWalkResponses.get(baseOid)!
-      }
-      for (const [key, entries] of this.mockWalkResponses.entries()) {
-        if (key.startsWith(baseOid) || baseOid.startsWith(key)) {
-          return entries
+        entries = this.mockWalkResponses.get(baseOid)!
+      } else {
+        for (const [key, itemEntries] of this.mockWalkResponses.entries()) {
+          if (key.startsWith(baseOid) || baseOid.startsWith(key)) {
+            entries = itemEntries
+            break
+          }
         }
       }
-      return []
+      return entries.map((entry) => ({
+        oid: entry.oid,
+        value: this.formatVarbindValue(entry.value),
+      }))
     }
 
     return new Promise((resolve) => {
@@ -185,6 +191,14 @@ export class SnmpClient {
         return Array.from(value)
           .map((b) => b.toString(16).padStart(2, '0'))
           .join(':')
+      }
+
+      if (value.length === 8) {
+        // Formatar Buffer de 8 bytes como valor numérico de contador 64-bit (Counter64 / net-snmp)
+        try {
+          const bigVal = value.readBigUInt64BE(0)
+          return Number(bigVal)
+        } catch {}
       }
 
       if (value.length === 0) return ''

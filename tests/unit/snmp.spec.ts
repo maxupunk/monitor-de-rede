@@ -166,4 +166,20 @@ test.group('SNMP Collectors - Unit Tests', () => {
     assert.equal(memInfo.usedKb, 1024000)
     assert.equal(memInfo.usedPercent, 50)
   })
+
+  test('SnmpClient deve formatar Buffer de 8 bytes (Counter64) para número sem retornar NaN', async ({
+    assert,
+  }) => {
+    const client = new SnmpClient({ host: '127.0.0.1', version: 'v2c' })
+    // Buffer representando o número 5000000000 em 64-bit (0x000000012A05F200)
+    const buf64 = Buffer.from([0x00, 0x00, 0x00, 0x01, 0x2a, 0x05, 0xf2, 0x00])
+    client.setMockWalk('1.3.6.1.2.1.31.1.1.1.6', [
+      { oid: '1.3.6.1.2.1.31.1.1.1.6.1', value: buf64 },
+    ])
+
+    const entries = await client.walk('1.3.6.1.2.1.31.1.1.1.6')
+    assert.equal(entries.length, 1)
+    assert.equal(entries[0].value, 5000000000)
+    assert.isNotNaN(entries[0].value)
+  })
 })

@@ -1,6 +1,8 @@
 import type { CheckResult } from '../contracts/check_result.js'
 import { SnmpClient } from '#modules/snmp/clients/snmp_client'
 import { SystemCollector } from '#modules/snmp/collectors/system_collector'
+import Device from '#models/device'
+import { SnmpService } from '#modules/snmp/snmp_service'
 
 export interface SnmpCheckerConfig {
   host: string
@@ -13,6 +15,8 @@ export interface SnmpCheckerConfig {
 }
 
 export class SnmpChecker {
+  private snmpService = new SnmpService()
+
   async execute(config: SnmpCheckerConfig): Promise<CheckResult> {
     const startedAt = new Date()
     const startTime = Date.now()
@@ -30,6 +34,18 @@ export class SnmpChecker {
       port,
       timeoutMs,
     })
+
+    // Atualização de métricas do dispositivo em segundo plano (se o dispositivo existir cadastrado)
+    try {
+      const device = await Device.query()
+        .where('ipAddress', host)
+        .orWhere('name', host)
+        .first()
+
+      if (device && device.snmpEnabled) {
+        await this.snmpService.pollDevice(device, { host, version, community, port, timeoutMs })
+      }
+    } catch {}
 
     try {
       if (config.ifIndex !== undefined && config.ifIndex !== null) {

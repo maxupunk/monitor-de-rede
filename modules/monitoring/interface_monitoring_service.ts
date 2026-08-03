@@ -82,95 +82,102 @@ export class InterfaceMonitoringService {
     }
 
     // 2. Verificação de alteração na negociação de velocidade (Link Speed Negotiation)
+    const prevNumSpeed = previousSpeed !== null ? Number(previousSpeed) : null
+    const currNumSpeed = currentSpeed !== null ? Number(currentSpeed) : null
+
     if (
-      previousSpeed !== null &&
-      previousSpeed > 0 &&
-      currentSpeed !== null &&
-      currentSpeed > 0 &&
-      currentSpeed !== previousSpeed
+      prevNumSpeed !== null &&
+      prevNumSpeed > 0 &&
+      currNumSpeed !== null &&
+      currNumSpeed > 0 &&
+      prevNumSpeed !== currNumSpeed
     ) {
-      const isDowngrade = currentSpeed < previousSpeed
-      const prevSpeedFormatted = formatSpeed(previousSpeed)
-      const currentSpeedFormatted = formatSpeed(currentSpeed)
+      const prevSpeedFormatted = formatSpeed(prevNumSpeed)
+      const currentSpeedFormatted = formatSpeed(currNumSpeed)
 
-      if (isDowngrade) {
-        // ALERTA DE DOWNGRADE (ex: 1 Gbps -> 100 Mbps ou 2.5 Gbps -> 1 Gbps)
-        const message = `🚨 ALERTA DE DOWNGRADE: Interface ${iface.name} sofreu downgrade de velocidade de ${prevSpeedFormatted} para ${currentSpeedFormatted}`
+      // Somente gera evento se houver mudança real na velocidade formatada (exclui 1 Gbps -> 1 Gbps)
+      if (prevSpeedFormatted !== currentSpeedFormatted) {
+        const isDowngrade = currNumSpeed < prevNumSpeed
 
-        const alertEvent = await AlertEvent.create({
-          deviceId: device.id,
-          alertRuleId: null,
-          monitorId: null,
-          status: 'active',
-          severity: 'warning',
-          startedAt: DateTime.now(),
-          message,
-          data: {
-            eventType: 'interface_speed_downgrade',
+        if (isDowngrade) {
+          // ALERTA DE DOWNGRADE (ex: 1 Gbps -> 100 Mbps ou 2.5 Gbps -> 1 Gbps)
+          const message = `🚨 ALERTA DE DOWNGRADE: Interface ${iface.name} sofreu downgrade de velocidade de ${prevSpeedFormatted} para ${currentSpeedFormatted}`
+
+          const alertEvent = await AlertEvent.create({
+            deviceId: device.id,
+            alertRuleId: null,
+            monitorId: null,
+            status: 'active',
+            severity: 'warning',
+            startedAt: DateTime.now(),
+            message,
+            data: {
+              eventType: 'interface_speed_downgrade',
+              interfaceId: iface.id,
+              ifIndex: iface.snmpIndex,
+              ifName: iface.name,
+              previousSpeed: prevNumSpeed,
+              currentSpeed: currNumSpeed,
+              previousSpeedFormatted: prevSpeedFormatted,
+              currentSpeedFormatted: currentSpeedFormatted,
+            },
+          })
+
+          this.eventBus.emit('interface:speed_downgrade', {
+            alertEventId: alertEvent.id,
+            deviceId: device.id,
             interfaceId: iface.id,
-            ifIndex: iface.snmpIndex,
             ifName: iface.name,
-            previousSpeed,
-            currentSpeed,
+            previousSpeed: prevNumSpeed,
+            currentSpeed: currNumSpeed,
             previousSpeedFormatted: prevSpeedFormatted,
             currentSpeedFormatted: currentSpeedFormatted,
-          },
-        })
+            message,
+          })
 
-        this.eventBus.emit('interface:speed_downgrade', {
-          alertEventId: alertEvent.id,
-          deviceId: device.id,
-          interfaceId: iface.id,
-          ifName: iface.name,
-          previousSpeed,
-          currentSpeed,
-          previousSpeedFormatted: prevSpeedFormatted,
-          currentSpeedFormatted: currentSpeedFormatted,
-          message,
-        })
+          await this.notificationService.notify({
+            title: `🚨 Downgrade de Interface em ${device.name}`,
+            body: `Interface ${iface.name} sofreu downgrade na velocidade de negociação de ${prevSpeedFormatted} para ${currentSpeedFormatted}`,
+            severity: 'warning',
+            metadata: { alertEventId: alertEvent.id, deviceId: device.id, interfaceId: iface.id },
+          })
+        } else {
+          // EVENTO DE UPGRADE OU ALTERAÇÃO DE VELOCIDADE PARA CIMA (ex: 100 Mbps -> 1 Gbps)
+          const message = `Interface ${iface.name} alterou negociação de velocidade: ${prevSpeedFormatted} ➔ ${currentSpeedFormatted}`
 
-        await this.notificationService.notify({
-          title: `🚨 Downgrade de Interface em ${device.name}`,
-          body: `Interface ${iface.name} sofreu downgrade na velocidade de negociação de ${prevSpeedFormatted} para ${currentSpeedFormatted}`,
-          severity: 'warning',
-          metadata: { alertEventId: alertEvent.id, deviceId: device.id, interfaceId: iface.id },
-        })
-      } else {
-        // EVENTO DE UPGRADE OU ALTERAÇÃO DE VELOCIDADE PARA CIMA (ex: 100 Mbps -> 1 Gbps)
-        const message = `Interface ${iface.name} alterou negociação de velocidade: ${prevSpeedFormatted} ➔ ${currentSpeedFormatted}`
+          const alertEvent = await AlertEvent.create({
+            deviceId: device.id,
+            alertRuleId: null,
+            monitorId: null,
+            status: 'resolved',
+            severity: 'info',
+            startedAt: DateTime.now(),
+            resolvedAt: DateTime.now(),
+            message,
+            data: {
+              eventType: 'interface_speed_upgrade',
+              interfaceId: iface.id,
+              ifIndex: iface.snmpIndex,
+              ifName: iface.name,
+              previousSpeed: prevNumSpeed,
+              currentSpeed: currNumSpeed,
+              previousSpeedFormatted: prevSpeedFormatted,
+              currentSpeedFormatted: currentSpeedFormatted,
+            },
+          })
 
-        const alertEvent = await AlertEvent.create({
-          deviceId: device.id,
-          alertRuleId: null,
-          monitorId: null,
-          status: 'resolved',
-          severity: 'info',
-          startedAt: DateTime.now(),
-          resolvedAt: DateTime.now(),
-          message,
-          data: {
-            eventType: 'interface_speed_upgrade',
+          this.eventBus.emit('interface:speed_change', {
+            alertEventId: alertEvent.id,
+            deviceId: device.id,
             interfaceId: iface.id,
-            ifIndex: iface.snmpIndex,
             ifName: iface.name,
-            previousSpeed,
-            currentSpeed,
+            previousSpeed: prevNumSpeed,
+            currentSpeed: currNumSpeed,
             previousSpeedFormatted: prevSpeedFormatted,
             currentSpeedFormatted: currentSpeedFormatted,
-          },
-        })
-
-        this.eventBus.emit('interface:speed_change', {
-          alertEventId: alertEvent.id,
-          deviceId: device.id,
-          interfaceId: iface.id,
-          ifName: iface.name,
-          previousSpeed,
-          currentSpeed,
-          previousSpeedFormatted: prevSpeedFormatted,
-          currentSpeedFormatted: currentSpeedFormatted,
-          message,
-        })
+            message,
+          })
+        }
       }
     }
   }

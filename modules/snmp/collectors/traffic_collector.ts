@@ -87,12 +87,20 @@ export class TrafficCollector {
       const item = getOrCreate(index)
 
       switch (column) {
-        case TrafficCollector.COL_IF_HC_IN_OCTETS:
-          item.inOctets = Number(entry.value) || 0
+        case TrafficCollector.COL_IF_HC_IN_OCTETS: {
+          const val = Number(entry.value) || 0
+          if (val > 0 || item.inOctets === 0) {
+            item.inOctets = val
+          }
           break
-        case TrafficCollector.COL_IF_HC_OUT_OCTETS:
-          item.outOctets = Number(entry.value) || 0
+        }
+        case TrafficCollector.COL_IF_HC_OUT_OCTETS: {
+          const val = Number(entry.value) || 0
+          if (val > 0 || item.outOctets === 0) {
+            item.outOctets = val
+          }
           break
+        }
       }
     }
 
@@ -107,17 +115,33 @@ export class TrafficCollector {
 
     let inDiff = current.inOctets - previous.inOctets
     if (inDiff < 0) {
-      // Counter wrap-around
-      inDiff += 4_294_967_296 // 2^32 standard rollover
+      if (previous.inOctets > 4_294_967_296) {
+        // Rollover de contador de 64 bits (2^64)
+        inDiff += 18_446_744_073_709_551_616
+      } else {
+        // Rollover padrão de 32 bits (2^32)
+        inDiff += 4_294_967_296
+      }
+      if (inDiff < 0) {
+        // Reinício do equipamento (reboot) ou contador reinicializado
+        inDiff = current.inOctets
+      }
     }
 
     let outDiff = current.outOctets - previous.outOctets
     if (outDiff < 0) {
-      outDiff += 4_294_967_296
+      if (previous.outOctets > 4_294_967_296) {
+        outDiff += 18_446_744_073_709_551_616
+      } else {
+        outDiff += 4_294_967_296
+      }
+      if (outDiff < 0) {
+        outDiff = current.outOctets
+      }
     }
 
-    const inBps = Math.round((inDiff * 8) / timeDeltaSec)
-    const outBps = Math.round((outDiff * 8) / timeDeltaSec)
+    const inBps = Math.max(0, Math.round((inDiff * 8) / timeDeltaSec))
+    const outBps = Math.max(0, Math.round((outDiff * 8) / timeDeltaSec))
 
     return { inBps, outBps }
   }
