@@ -56,7 +56,9 @@ test.group('SNMP Collectors - Unit Tests', () => {
     assert.equal(traffic[0].inOctets, 100000)
     assert.equal(traffic[0].outOctets, 50000)
 
-    const prevDate = new Date(Date.now() - 10000) // 10 segundos atrás
+    const now = Date.now()
+    traffic[0].recordedAt = new Date(now)
+    const prevDate = new Date(now - 10000) // exatamente 10 segundos atrás
     const rates = collector.calculateRates(
       { ifIndex: 1, inOctets: 50000, outOctets: 25000, inErrors: 0, outErrors: 0, recordedAt: prevDate },
       traffic[0]

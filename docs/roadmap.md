@@ -130,7 +130,7 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
   - [x] Serviço HTTP centralizado (`apiService.ts`) e Store de Autenticação (`authStore`) com login/logout.
   - [x] Stores de `sites`, `networks`, `devices`, `deviceDetail`, `monitors`, `discovery`, `topology`, `alerts`, `probes`, `events`.
 - [x] **Telas e Componentes Interativos**:
-  - [x] **Dashboard**: cards de resumo alimentados por estatísticas em tempo real via SSE.
+  - [x] **Dashboard**: cards de resumo em tempo real, lista de monitores com barras verticais coloridas (estilo Uptime Kuma) e feed SSE de eventos simplificado e amigável.
   - [x] **Gestão de Dispositivos**: listagem com filtros, status visual (online/offline) e modal de criação/edição.
   - [x] **Detalhes do Dispositivo**: abas com histórico de latência, interfaces SNMP, monitores vinculados e eventos.
   - [x] **Central de Descoberta**: tabela para revisar, aceitar ou ignorar novos dispositivos encontrados.
