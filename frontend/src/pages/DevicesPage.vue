@@ -14,7 +14,7 @@
 
     <!-- Tabela de Dispositivos -->
     <v-card elevation="2" class="rounded-lg">
-      <v-card-title class="pa-4 d-flex align-center gap-4">
+      <v-card-title class="pa-4 d-flex align-center ga-4">
         <v-text-field
           v-model="search"
           prepend-inner-icon="mdi-magnify"
@@ -140,7 +140,7 @@
 
               <!-- Seleção de Site Opcional com Botão para Novo Site -->
               <v-col cols="12" sm="6">
-                <div class="d-flex align-center gap-2">
+                <div class="d-flex align-center ga-2">
                   <v-select
                     v-model="formModel.siteId"
                     :items="sitesStore.sites"

@@ -1,5 +1,5 @@
 <template>
-  <div class="timeline-bar-wrapper d-inline-flex align-center gap-1">
+  <div class="timeline-bar-wrapper d-inline-flex align-center ga-1">
     <div v-for="(block, idx) in formattedBlocks" :key="idx" class="timeline-block-container">
       <v-tooltip location="top" :disabled="!block.hasData" color="#0F172A">
         <template #activator="{ props: tooltipProps }">
@@ -15,7 +15,7 @@
           ></div>
         </template>
         <div v-if="block.hasData" class="custom-tooltip-content pa-2">
-          <div class="d-flex align-center gap-2 mb-1">
+          <div class="d-flex align-center ga-2 mb-1">
             <span class="status-dot" :style="{ backgroundColor: block.color }"></span>
             <span class="font-weight-bold" style="font-size: 13px; color: #ffffff">
               {{ block.statusText.toUpperCase() }}

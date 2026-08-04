@@ -7,7 +7,7 @@
 
     <!-- Header do Dispositivo -->
     <v-card elevation="2" class="rounded-lg pa-4 mb-6">
-      <div class="d-flex align-center justify-space-between flex-wrap gap-4">
+      <div class="d-flex align-center justify-space-between flex-wrap ga-4">
         <div class="d-flex align-center ga-4" style="gap: 16px">
           <v-avatar color="primary" size="48" class="mr-2">
             <v-icon color="white">mdi-router-network</v-icon>

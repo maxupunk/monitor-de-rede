@@ -1,13 +1,13 @@
 <template>
   <div>
-    <div class="d-flex align-center justify-space-between mb-6 flex-wrap gap-4">
+    <div class="d-flex align-center justify-space-between mb-6 flex-wrap ga-4">
       <div>
         <h1 class="text-h4 font-weight-bold">Dashboard</h1>
         <p class="text-subtitle-1 text-grey-darken-1">
           Visão geral do monitoramento e status em tempo real
         </p>
       </div>
-      <div class="d-flex align-center gap-3">
+      <div class="d-flex align-center ga-3">
         <v-chip
           :color="eventsStore.isConnected ? 'success' : 'warning'"
           variant="tonal"
@@ -90,7 +90,7 @@
     <v-row class="mb-6">
       <v-col cols="12">
         <v-card elevation="2" class="rounded-lg">
-          <v-card-title class="d-flex align-center justify-space-between py-3 px-4 flex-wrap gap-2">
+          <v-card-title class="d-flex align-center justify-space-between py-3 px-4 flex-wrap ga-2">
             <div class="d-flex align-center">
               <v-icon start color="primary">mdi-chart-timeline-variant</v-icon>
               <span class="font-weight-bold text-h6">Monitores de Rede</span>
@@ -118,9 +118,9 @@
                   :key="monitor.id"
                   class="px-4 py-3 border-b"
                 >
-                  <div class="d-flex align-center justify-space-between flex-wrap gap-3 w-100">
+                  <div class="d-flex align-center justify-space-between flex-wrap ga-3 w-100">
                     <div
-                      class="monitor-info d-flex align-center gap-3"
+                      class="monitor-info d-flex align-center ga-3"
                       style="min-width: 220px; flex: 1"
                     >
                       <v-avatar
@@ -136,7 +136,7 @@
                           {{ monitor.name }}
                         </router-link>
 
-                        <div class="d-flex align-center gap-2 mt-1">
+                        <div class="d-flex align-center ga-2 mt-1">
                           <v-chip size="x-small" color="info" variant="tonal">
                             {{ (monitor.type || 'N/A').toUpperCase() }}
                           </v-chip>
@@ -146,7 +146,7 @@
                     </div>
 
                     <div
-                      class="monitor-timeline d-flex align-center gap-3 justify-center"
+                      class="monitor-timeline d-flex align-center ga-3 justify-center"
                       style="flex: 2; min-width: 280px"
                     >
                       <router-link :to="'/monitors/' + monitor.id" class="text-decoration-none">
@@ -167,7 +167,7 @@
                     </div>
 
                     <div
-                      class="monitor-actions d-flex align-center gap-2 justify-end"
+                      class="monitor-actions d-flex align-center ga-2 justify-end"
                       style="min-width: 140px"
                     >
                       <v-chip
@@ -452,16 +452,16 @@ function formatEventDetails(evt: RealtimeEventPayload) {
   text-decoration: underline !important;
 }
 
-.gap-1 {
+.ga-1 {
   gap: 4px;
 }
-.gap-2 {
+.ga-2 {
   gap: 8px;
 }
-.gap-3 {
+.ga-3 {
   gap: 12px;
 }
-.gap-4 {
+.ga-4 {
   gap: 16px;
 }
 </style>

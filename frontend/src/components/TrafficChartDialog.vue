@@ -18,7 +18,7 @@
 
       <v-card-text class="pa-6">
         <!-- Seletor de Tipo de Métrica -->
-        <div class="d-flex align-center justify-space-between flex-wrap mb-6 gap-3">
+        <div class="d-flex align-center justify-space-between flex-wrap mb-6 ga-3">
           <v-btn-toggle
             v-model="selectedTab"
             color="primary"

@@ -7,7 +7,7 @@
           Visualização de vizinhos LLDP/CDP, sub-redes e links físicos
         </p>
       </div>
-      <div class="d-flex gap-2">
+      <div class="d-flex ga-2">
         <v-btn
           color="secondary"
           prepend-icon="mdi-calculator"
