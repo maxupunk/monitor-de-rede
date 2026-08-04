@@ -11,7 +11,7 @@ export class AlertEventSchema extends BaseModel {
   static $columns = ['alertRuleId', 'createdAt', 'data', 'deviceId', 'id', 'message', 'monitorId', 'resolvedAt', 'severity', 'startedAt', 'status', 'updatedAt'] as const
   $columns = AlertEventSchema.$columns
   @column()
-  declare alertRuleId: number
+  declare alertRuleId: number | null
   @column.dateTime({ autoCreate: true })
   declare createdAt: DateTime
   @column()
@@ -208,7 +208,7 @@ export class DeviceSchema extends BaseModel {
   @column()
   declare ipAddress: string | null
   @column()
-  declare isMonitored: boolean
+  declare isMonitored: boolean | null
   @column.dateTime()
   declare lastSeenAt: DateTime | null
   @column()
@@ -226,7 +226,7 @@ export class DeviceSchema extends BaseModel {
   @column()
   declare snmpCommunity: string | null
   @column()
-  declare snmpEnabled: boolean
+  declare snmpEnabled: boolean | null
   @column()
   declare snmpVersion: string | null
   @column()
@@ -476,6 +476,70 @@ export class UserSchema extends BaseModel {
   declare id: number
   @column({ serializeAs: null })
   declare password: string
+  @column.dateTime({ autoCreate: true, autoUpdate: true })
+  declare updatedAt: DateTime | null
+}
+
+export class VpnPeerSchema extends BaseModel {
+  static $columns = ['bytesRx', 'bytesTx', 'createdAt', 'deviceId', 'deviceProfile', 'enabled', 'id', 'lastHandshakeAt', 'persistentKeepalive', 'presharedKeyEncrypted', 'publicKey', 'updatedAt', 'vpnServerId'] as const
+  $columns = VpnPeerSchema.$columns
+  @column()
+  declare bytesRx: bigint | number
+  @column()
+  declare bytesTx: bigint | number
+  @column.dateTime({ autoCreate: true })
+  declare createdAt: DateTime
+  @column()
+  declare deviceId: number
+  @column()
+  declare deviceProfile: string
+  @column()
+  declare enabled: boolean
+  @column({ isPrimary: true })
+  declare id: number
+  @column.dateTime()
+  declare lastHandshakeAt: DateTime | null
+  @column()
+  declare persistentKeepalive: number
+  @column()
+  declare presharedKeyEncrypted: string | null
+  @column()
+  declare publicKey: string
+  @column.dateTime({ autoCreate: true, autoUpdate: true })
+  declare updatedAt: DateTime | null
+  @column()
+  declare vpnServerId: number
+}
+
+export class VpnServerSchema extends BaseModel {
+  static $columns = ['active', 'allowPeerToPeer', 'createdAt', 'dnsServers', 'id', 'interfaceName', 'lastSyncedAt', 'listenPort', 'mtu', 'networkId', 'privateKeyEncrypted', 'publicEndpoint', 'publicKey', 'updatedAt'] as const
+  $columns = VpnServerSchema.$columns
+  @column()
+  declare active: boolean
+  @column()
+  declare allowPeerToPeer: boolean
+  @column.dateTime({ autoCreate: true })
+  declare createdAt: DateTime
+  @column()
+  declare dnsServers: string | null
+  @column({ isPrimary: true })
+  declare id: number
+  @column()
+  declare interfaceName: string
+  @column.dateTime()
+  declare lastSyncedAt: DateTime | null
+  @column()
+  declare listenPort: number
+  @column()
+  declare mtu: number
+  @column()
+  declare networkId: number
+  @column()
+  declare privateKeyEncrypted: string
+  @column()
+  declare publicEndpoint: string | null
+  @column()
+  declare publicKey: string
   @column.dateTime({ autoCreate: true, autoUpdate: true })
   declare updatedAt: DateTime | null
 }

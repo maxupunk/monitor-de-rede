@@ -24,15 +24,21 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    networks: [netmonitor-net]
     restart: "no"
 
   server:
     build: .
     command: node bin/server.js
     ports:
-      - "${API_PORT:-3333}:3333"
+      - "${API_EXTERNAL_PORT:-3333}:3333"
     environment:
       <<: *app-env
+      # Volume compartilhado com o container WireGuard (hot-reload por arquivo)
+      WG_CONFIG_DIR: /config
+      VPN_PROBE_TOKEN: ${VPN_PROBE_TOKEN:-}
+    volumes:
+      - wg-config:/config
     depends_on:
       postgres:
         condition: service_healthy
@@ -40,6 +46,7 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_started
+    networks: [netmonitor-net]
 
   worker:
     build: .
@@ -53,6 +60,7 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_started
+    networks: [netmonitor-net]
 
   scheduler:
     build: .
@@ -66,6 +74,7 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_started
+    networks: [netmonitor-net]
 
   probe:
     build: .
@@ -77,15 +86,58 @@ services:
       SERVER_URL: http://server:3333
     depends_on:
       - server
+    networks: [netmonitor-net]
+
+  # Servidor WireGuard: único container com NET_ADMIN e única porta publicada.
+  wireguard:
+    image: linuxserver/wireguard:latest
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      net.ipv4.ip_forward: 1
+      net.ipv4.conf.all.src_valid_mark: 1
+    environment:
+      PUID: 1000
+      PGID: 1000
+      TZ: ${TZ:-UTC}
+      WG_INTERFACE: wg0
+    ports:
+      # Mapeada 1:1 de propósito: é a porta que os roteadores usam como Endpoint,
+      # e precisa ser a mesma configurada em "Porta UDP" na tela /vpn.
+      - "${WG_EXTERNAL_PORT:-51820}:${WG_EXTERNAL_PORT:-51820}/udp"
+    volumes:
+      - wg-config:/config
+      - ./docker/wireguard/custom-cont-init.d:/custom-cont-init.d:ro
+      - ./docker/wireguard/scripts:/custom-scripts:ro
+    networks: [netmonitor-net]
+    restart: unless-stopped
+
+  # Probe dedicado que enxerga a interface wg0 — o probe da LAN segue intocado.
+  vpn-probe:
+    build: .
+    command: node ace.js probe:run
+    environment:
+      <<: *app-env
+      APP_URL: http://server:3333
+      PROBE_SERVER_URL: http://server:3333
+      SERVER_URL: http://server:3333
+      PROBE_TOKEN: ${VPN_PROBE_TOKEN:-}
+    network_mode: "service:wireguard"
+    depends_on:
+      - wireguard
+      - server
+    restart: unless-stopped
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
     ports:
-      - "${FRONTEND_PORT:-80}:80"
+      - "${FRONTEND_EXTERNAL_PORT:-8081}:80"
     depends_on:
       - server
+    networks: [netmonitor-net]
 
   postgres:
     image: postgres:16-alpine
@@ -94,7 +146,7 @@ services:
       POSTGRES_PASSWORD: secret
       POSTGRES_DB: netmonitor
     ports:
-      - "${DB_PORT:-5432}:5432"
+      - "${POSTGRES_EXTERNAL_PORT:-5433}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U netmonitor -d netmonitor"]
       interval: 3s
@@ -102,11 +154,16 @@ services:
       retries: 5
     volumes:
       - pgdata:/var/lib/postgresql/data
+    networks: [netmonitor-net]
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
+    networks: [netmonitor-net]
 
 volumes:
   pgdata:
+  wg-config:
+
+networks:
+  netmonitor-net:
+    driver: bridge

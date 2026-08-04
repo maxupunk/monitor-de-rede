@@ -1,0 +1,189 @@
+import type { HttpContext } from '@adonisjs/core/http'
+import QRCode from 'qrcode'
+import { VpnPeerService } from '#modules/vpn/vpn_peer_service'
+import { VpnServerService } from '#modules/vpn/vpn_server_service'
+import { IpAllocator } from '#modules/vpn/ip_allocator'
+import { profileRegistry } from '#modules/vpn/profiles/profile_registry'
+import { sensitiveEndpointLimiter, vpnAuditLogger } from '#modules/vpn/access_control'
+
+/**
+ * Peers da VPN: listagem com telemetria, wizard de criação, artefatos de
+ * configuração, rotação de chaves e revogação.
+ */
+export default class VpnPeersController {
+  private peerService = new VpnPeerService()
+  private serverService = new VpnServerService()
+  private ipAllocator = new IpAllocator()
+
+  /** Identidade usada em rate limit e auditoria dos endpoints sensíveis. */
+  private requesterId(ctx: HttpContext): string {
+    const userId = (ctx.auth?.user as { id?: number | string } | undefined)?.id
+    return userId ? `user:${userId}` : `ip:${ctx.request.ip()}`
+  }
+
+  private enforceRateLimit(ctx: HttpContext, scope: string): boolean {
+    const decision = sensitiveEndpointLimiter.consume(`${scope}:${this.requesterId(ctx)}`)
+    if (decision.allowed) return true
+
+    ctx.response.header('Retry-After', String(decision.retryAfterSeconds))
+    ctx.response.tooManyRequests({
+      message: `Muitas solicitações de configuração. Tente novamente em ${decision.retryAfterSeconds}s.`,
+    })
+    return false
+  }
+
+  private audit(
+    ctx: HttpContext,
+    action: Parameters<typeof vpnAuditLogger.log>[0]['action'],
+    peerId: number | null,
+    details?: Record<string, unknown>
+  ): void {
+    vpnAuditLogger.log({
+      action,
+      peerId,
+      userId: (ctx.auth?.user as { id?: number | string } | undefined)?.id ?? null,
+      ipAddress: ctx.request.ip(),
+      details,
+    })
+  }
+
+  /** GET /api/vpn/peers */
+  async index({ response }: HttpContext) {
+    const items = await this.peerService.list()
+
+    return response.ok(
+      items.map(({ peer, needsFirewallHint }) => ({
+        ...peer.serialize(),
+        connectionStatus: peer.connectionStatus,
+        needsFirewallHint,
+        device: peer.device?.serialize() ?? null,
+      }))
+    )
+  }
+
+  /** GET /api/vpn/peers/next-ip — sugestão de IP livre para o wizard. */
+  async nextIp({ response }: HttpContext) {
+    const server = await this.serverService.find()
+    if (!server) {
+      return response.badRequest({ message: 'Servidor VPN ainda não foi configurado' })
+    }
+
+    try {
+      const ipAddress = await this.ipAllocator.findNextFree(server.networkId, server.network.cidr)
+      return response.ok({ ipAddress, cidr: server.network.cidr })
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      return response.badRequest({ message })
+    }
+  }
+
+  /** POST /api/vpn/peers — cria peer, aloca IP e provisiona device + monitores. */
+  async store(ctx: HttpContext) {
+    const { request, response } = ctx
+    const payload = request.only([
+      'name',
+      'profile',
+      'ipAddress',
+      'siteId',
+      'snmpEnabled',
+      'snmpCommunity',
+      'snmpVersion',
+      'description',
+    ])
+
+    if (!payload.name || !payload.profile) {
+      return response.badRequest({
+        message: 'Informe o nome do dispositivo e o perfil do equipamento',
+      })
+    }
+
+    try {
+      const { peer, artifact } = await this.peerService.create(payload)
+      this.audit(ctx, 'peer_created', peer.id, { profile: peer.deviceProfile })
+
+      return response.created({
+        peer: { ...peer.serialize(), connectionStatus: peer.connectionStatus },
+        device: peer.device?.serialize() ?? null,
+        artifact,
+      })
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      return response.badRequest({ message })
+    }
+  }
+
+  /** GET /api/vpn/peers/:id/config — 🔒 credencial de acesso à rede. */
+  async config(ctx: HttpContext) {
+    if (!this.enforceRateLimit(ctx, 'config')) return
+
+    const { params, response } = ctx
+    const artifact = await this.peerService.buildArtifact(Number(params.id))
+    this.audit(ctx, 'config_download', Number(params.id), { profile: artifact.profile })
+
+    return response.ok(artifact)
+  }
+
+  /** GET /api/vpn/peers/:id/qrcode — 🔒 apenas perfis móveis. */
+  async qrcode(ctx: HttpContext) {
+    if (!this.enforceRateLimit(ctx, 'qrcode')) return
+
+    const { params, response } = ctx
+    const artifact = await this.peerService.buildArtifact(Number(params.id))
+
+    if (!artifact.supportsQrCode) {
+      return response.badRequest({
+        message: `O perfil ${artifact.label} não utiliza QR Code — copie o script gerado.`,
+      })
+    }
+
+    const svg = await QRCode.toString(artifact.content, { type: 'svg', margin: 1, width: 320 })
+    this.audit(ctx, 'qrcode_download', Number(params.id), { profile: artifact.profile })
+
+    return response.ok({ profile: artifact.profile, fileName: artifact.fileName, svg })
+  }
+
+  /** POST /api/vpn/peers/:id/rotate */
+  async rotate(ctx: HttpContext) {
+    if (!this.enforceRateLimit(ctx, 'rotate')) return
+
+    const { params, response } = ctx
+
+    try {
+      const { peer, artifact } = await this.peerService.rotateKeys(Number(params.id))
+      this.audit(ctx, 'key_rotation', peer.id, { profile: peer.deviceProfile })
+
+      return response.ok({
+        message: 'Novo par de chaves gerado. A configuração anterior foi invalidada.',
+        peer: { ...peer.serialize(), connectionStatus: peer.connectionStatus },
+        artifact,
+      })
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      return response.badRequest({ message })
+    }
+  }
+
+  /** POST /api/vpn/peers/:id/firewall-hints — diagnóstico do erro nº 1. */
+  async firewallHints({ params, response }: HttpContext) {
+    const hints = await this.peerService.firewallHints(Number(params.id))
+    const generator = profileRegistry.resolve(hints.profile)
+
+    return response.ok({
+      profile: hints.profile,
+      label: generator.label,
+      content: hints.content,
+      message:
+        'Túnel conectado, mas o dispositivo não responde a ping? Copie as regras abaixo e aplique no equipamento.',
+    })
+  }
+
+  /** DELETE /api/vpn/peers/:id — revoga e libera o IP. */
+  async destroy(ctx: HttpContext) {
+    const { params, response } = ctx
+
+    await this.peerService.revoke(Number(params.id))
+    this.audit(ctx, 'peer_revoked', Number(params.id))
+
+    return response.ok({ message: 'Peer revogado. O acesso foi cortado imediatamente.' })
+  }
+}

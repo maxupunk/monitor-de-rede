@@ -44,7 +44,11 @@ export class PingChecker implements MonitorChecker<PingConfig> {
         if (lossMatch && lossMatch[1]) {
           packetLoss = Number.parseInt(lossMatch[1], 10)
         }
-        const rttMatch = stdout.match(/rtt min\/avg\/max\/mdev = [\d.]+\/([\d.]+)\//i)
+        // iputils imprime "rtt min/avg/max/mdev = ..." e o BusyBox (Alpine, usado
+        // nas imagens Docker) imprime "round-trip min/avg/max = ...".
+        const rttMatch =
+          stdout.match(/rtt min\/avg\/max\/mdev = [\d.]+\/([\d.]+)\//i) ||
+          stdout.match(/round-trip min\/avg\/max\s*=\s*[\d.]+\/([\d.]+)\//i)
         if (rttMatch && rttMatch[1]) {
           latencyMs = Number.parseFloat(rttMatch[1])
         }

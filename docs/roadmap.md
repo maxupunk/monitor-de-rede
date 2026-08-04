@@ -22,6 +22,7 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
 | **Eventos Tempo Real (SSE)** | 🟢 **Concluído** | Barramento `EventBus` singleton e streaming em `/api/events/stream` via SSE funcional. |
 | **Frontend (Vue 3 + Vuetify)** | 🟢 **Concluído** | SPA/PWA completa integrada à API REST AdonisJS v6, com Pinia, gráficos, topologia gráfica interativa e suporte a SSE em tempo real. |
 | **Infraestrutura Docker** | 🟢 **Concluído** | `docker-compose.yml` e `Dockerfile` configurados para todos os serviços (API, Worker, Scheduler, Probe, Postgres, Redis, Frontend). |
+| **Módulo WireGuard (VPN)** | 🟢 **Concluído (Fases 1–4)** | Modelo de dados, geração nativa de chaves X25519, IPAM transacional, scripts por perfil (MikroTik/OpenWrt/Linux/Windows/Mobile), container WireGuard com hot-reload por `syncconf`, `vpn-probe` dedicado e telas de servidor/dispositivos/wizard. Falta apenas a validação E2E com hardware real ([roadmap_vpn.md](file:///d:/Projetos/Master%20sistemas/opensource/monitor%20de%20rede/docs/roadmap_vpn.md)). |
 
 ---
 
@@ -143,10 +144,22 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
 
 ---
 
+### Fase 8: Módulo WireGuard para Roteadores Remotos (Fases 1–4 Concluídas 🟢)
+> **Objetivo:** Monitorar roteadores MikroTik (RouterOS v7+) e OpenWrt fora da rede local via túnel WireGuard, com gestão de chaves e configuração 100% pela interface do sistema.
+
+Especificação completa em [roadmap_vpn.md](file:///d:/Projetos/Master%20sistemas/opensource/monitor%20de%20rede/docs/roadmap_vpn.md).
+
+- [x] **Modelo de Dados**: tabelas `vpn_servers` e `vpn_peers`, índice UNIQUE `(network_id, ip_address)` em `devices` para o IPAM, com chaves privadas e PSKs cifradas via `APP_KEY`.
+- [x] **Core Backend**: geração de chaves X25519 nativa no Node (sem binário `wg`), alocador de IP transacional com retry, geradores de configuração por perfil (MikroTik, OpenWrt, Linux, Windows, Mobile), parser de `wg show dump` e API `/api/vpn/...`.
+- [x] **Provisionamento automático**: ao concluir o wizard, o sistema cria `Device`, `VpnPeer`, monitor de Ping e (opcional) monitor SNMP em uma única transação, atribuídos ao `vpn-probe`.
+- [x] **Docker**: container WireGuard com hot-reload via `wg syncconf` (sem `docker.sock`), probe dedicado `vpn-probe` e rede nomeada `netmonitor-net` aplicada a todos os serviços.
+- [x] **Frontend**: painel do servidor VPN com teste de pré-voo (detecção de CGNAT), lista de peers com status de handshake e diagnóstico de firewall, e wizard de adição por perfil de equipamento com "Copiar tudo".
+- [ ] **Validação E2E**: conexão real de MikroTik e OpenWrt com ICMP e SNMP pelo túnel (exige host Linux com IP público ou port-forward UDP).
+
+---
+
 ## 📌 Próximos Passos Recomendados (Ordem de Prioridade)
 
-1. **Criar e executar as Migrations das tabelas de negócio no PostgreSQL.**
-2. **Implementar a lógica real dos Checkers de Monitoramento (Ping, HTTP, TCP, DNS).**
-3. **Conectar os Workers e o Scheduler com a fila Redis para execução assíncrona dos checks.**
-4. **Implementar as rotas da API REST conectadas aos dados do banco.**
-5. **Conectar as telas do Frontend Vue 3 com a API REST usando Pinia.**
+1. **Provisionar ambiente de validação com IP público** (host Linux ou VPS) e executar a Fase 5 do `docs/roadmap_vpn.md` com um MikroTik e um OpenWrt reais.
+2. **Aplicar o middleware `auth` ao grupo `/api`** quando a autenticação real substituir o `AuthController` stub — os endpoints sensíveis da VPN já têm rate limit e auditoria preparados.
+3. ~~Verificar o parsing de latência do `PingChecker` na imagem Alpine~~ — **resolvido**: o checker aceita os formatos do iputils e do BusyBox.

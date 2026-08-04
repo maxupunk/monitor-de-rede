@@ -1,12 +1,13 @@
 import { DateTime } from 'luxon'
-import { BaseModel, column, belongsTo, hasMany } from '@adonisjs/lucid/orm'
-import type { BelongsTo, HasMany } from '@adonisjs/lucid/types/relations'
+import { BaseModel, column, belongsTo, hasMany, hasOne } from '@adonisjs/lucid/orm'
+import type { BelongsTo, HasMany, HasOne } from '@adonisjs/lucid/types/relations'
 import Site from '#models/site'
 import Network from '#models/network'
 import Monitor from '#models/monitor'
 import DeviceInterface from '#models/device_interface'
 import Metric from '#models/metric'
 import DeviceLink from '#models/device_link'
+import VpnPeer from '#models/vpn_peer'
 
 export default class Device extends BaseModel {
   @column({ isPrimary: true })
@@ -89,5 +90,8 @@ export default class Device extends BaseModel {
 
   @hasMany(() => DeviceLink, { foreignKey: 'targetDeviceId' })
   declare incomingLinks: HasMany<typeof DeviceLink>
+
+  @hasOne(() => VpnPeer)
+  declare vpnPeer: HasOne<typeof VpnPeer>
 }
 

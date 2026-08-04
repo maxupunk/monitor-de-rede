@@ -17,6 +17,8 @@ const SnmpController = () => import('#controllers/snmp_controller')
 const ProbesController = () => import('#controllers/probes_controller')
 const AlertsController = () => import('#controllers/alerts_controller')
 const EventsController = () => import('#controllers/events_controller')
+const VpnServersController = () => import('#controllers/vpn_servers_controller')
+const VpnPeersController = () => import('#controllers/vpn_peers_controller')
 
 router.get('/', () => {
   return { status: 'online', service: 'Network Monitor API', version: '1.0.0' }
@@ -83,6 +85,21 @@ router
     router.get('alerts', [AlertsController, 'index'])
     router.post('alerts/:id/acknowledge', [AlertsController, 'acknowledge'])
     router.post('alerts/:id/silence', [AlertsController, 'silence'])
+
+    // VPN WireGuard
+    router.get('vpn/server', [VpnServersController, 'show'])
+    router.put('vpn/server', [VpnServersController, 'update'])
+    router.post('vpn/server/preflight', [VpnServersController, 'preflight'])
+    router.post('vpn/server/detect-endpoint', [VpnServersController, 'detectEndpoint'])
+
+    router.get('vpn/peers', [VpnPeersController, 'index'])
+    router.get('vpn/peers/next-ip', [VpnPeersController, 'nextIp'])
+    router.post('vpn/peers', [VpnPeersController, 'store'])
+    router.get('vpn/peers/:id/config', [VpnPeersController, 'config'])
+    router.get('vpn/peers/:id/qrcode', [VpnPeersController, 'qrcode'])
+    router.post('vpn/peers/:id/rotate', [VpnPeersController, 'rotate'])
+    router.post('vpn/peers/:id/firewall-hints', [VpnPeersController, 'firewallHints'])
+    router.delete('vpn/peers/:id', [VpnPeersController, 'destroy'])
 
     // Realtime Events (SSE)
     router.get('events/stream', [EventsController, 'stream'])

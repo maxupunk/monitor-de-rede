@@ -159,6 +159,14 @@ const navItems: NavItem[] = [
       { title: 'Probes', icon: 'mdi-router-wireless', to: '/probes' },
     ],
   },
+  {
+    title: 'VPN WireGuard',
+    icon: 'mdi-shield-lock-outline',
+    children: [
+      { title: 'Servidor VPN', icon: 'mdi-server-security', to: '/vpn' },
+      { title: 'Dispositivos VPN', icon: 'mdi-lan-connect', to: '/vpn/devices' },
+    ],
+  },
   { title: 'Configurações', icon: 'mdi-cog', to: '/settings' },
 ]
 

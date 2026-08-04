@@ -15,4 +15,6 @@ export const controllers = {
   Sites: () => import('#controllers/sites_controller'),
   Snmp: () => import('#controllers/snmp_controller'),
   Topology: () => import('#controllers/topology_controller'),
+  VpnPeers: () => import('#controllers/vpn_peers_controller'),
+  VpnServers: () => import('#controllers/vpn_servers_controller'),
 }

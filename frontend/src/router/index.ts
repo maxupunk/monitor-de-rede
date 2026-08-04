@@ -35,6 +35,16 @@ const routes = [
       { path: 'alerts', name: 'alerts', component: () => import('../pages/AlertsPage.vue') },
       { path: 'events', name: 'events', component: () => import('../pages/EventsPage.vue') },
       { path: 'probes', name: 'probes', component: () => import('../pages/ProbesPage.vue') },
+      {
+        path: 'vpn',
+        name: 'vpn-server',
+        component: () => import('../pages/vpn/VpnServerPage.vue'),
+      },
+      {
+        path: 'vpn/devices',
+        name: 'vpn-devices',
+        component: () => import('../pages/vpn/VpnDevicesPage.vue'),
+      },
       { path: 'settings', name: 'settings', component: () => import('../pages/SettingsPage.vue') },
     ],
   },
