@@ -60,6 +60,7 @@ export interface VpnPeer {
   enabled: boolean
   connectionStatus: VpnConnectionStatus
   needsFirewallHint: boolean
+  pingMonitorId: number | null
   device: VpnPeerDevice | null
 }
 
@@ -95,6 +96,64 @@ export interface CreateVpnPeerPayload {
   snmpEnabled?: boolean
   snmpCommunity?: string | null
   description?: string | null
+}
+
+/** Fonte única de rótulo/ícone por perfil — reutilizada em qualquer tela que liste peers da VPN. */
+export const VPN_PROFILE_LABELS: Record<VpnDeviceProfile, string> = {
+  mikrotik: 'MikroTik',
+  openwrt: 'OpenWrt',
+  linux: 'Linux',
+  windows: 'Windows',
+  mobile: 'Celular',
+}
+
+export const VPN_PROFILE_ICONS: Record<VpnDeviceProfile, string> = {
+  mikrotik: 'mdi-router-network',
+  openwrt: 'mdi-router-wireless',
+  linux: 'mdi-linux',
+  windows: 'mdi-microsoft-windows',
+  mobile: 'mdi-cellphone',
+}
+
+export const VPN_STATUS_LABELS: Record<VpnConnectionStatus, string> = {
+  connected: 'Conectado',
+  unstable: 'Instável',
+  disconnected: 'Desconectado',
+  awaiting: 'Aguardando',
+}
+
+export const VPN_STATUS_COLORS: Record<VpnConnectionStatus, string> = {
+  connected: 'success',
+  unstable: 'warning',
+  disconnected: 'error',
+  awaiting: 'grey',
+}
+
+export function vpnProfileLabel(profile: VpnDeviceProfile): string {
+  return VPN_PROFILE_LABELS[profile] || profile
+}
+
+export function vpnProfileIcon(profile: VpnDeviceProfile): string {
+  return VPN_PROFILE_ICONS[profile] || 'mdi-devices'
+}
+
+export function vpnStatusLabel(status: VpnConnectionStatus): string {
+  return VPN_STATUS_LABELS[status] || status
+}
+
+export function vpnStatusColor(status: VpnConnectionStatus): string {
+  return VPN_STATUS_COLORS[status] || 'grey'
+}
+
+/** Formata um timestamp ISO como tempo relativo em português ("há 2 min", "nunca"). */
+export function vpnRelativeTime(value: string | null): string {
+  if (!value) return 'nunca'
+
+  const elapsedSeconds = Math.floor((Date.now() - new Date(value).getTime()) / 1000)
+  if (elapsedSeconds < 60) return `há ${elapsedSeconds}s`
+  if (elapsedSeconds < 3600) return `há ${Math.floor(elapsedSeconds / 60)} min`
+  if (elapsedSeconds < 86400) return `há ${Math.floor(elapsedSeconds / 3600)} h`
+  return `há ${Math.floor(elapsedSeconds / 86400)} dias`
 }
 
 export const useVpnStore = defineStore('vpn', () => {

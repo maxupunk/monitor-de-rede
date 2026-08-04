@@ -1,6 +1,21 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { apiService } from '@/services/apiService'
+import type { VpnDeviceProfile, VpnConnectionStatus } from './vpn'
+
+export interface DeviceVpnPeer {
+  id: number
+  vpnServerId: number
+  deviceId: number
+  publicKey: string
+  deviceProfile: VpnDeviceProfile
+  persistentKeepalive: number
+  lastHandshakeAt: string | null
+  bytesRx: number
+  bytesTx: number
+  enabled: boolean
+  connectionStatus: VpnConnectionStatus
+}
 
 export interface Device {
   id: number
@@ -21,6 +36,7 @@ export interface Device {
   site?: { id: number; name: string } | null
   parent?: { id: number; name: string } | null
   network?: { id: number; name: string; cidr: string }
+  vpnPeer?: DeviceVpnPeer | null
   createdAt?: string
   updatedAt?: string
 }

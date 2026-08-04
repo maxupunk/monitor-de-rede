@@ -5,6 +5,10 @@ import Monitor from '#models/monitor'
 import { MonitorRunner } from '#modules/monitoring/monitor_runner'
 import { ResultProcessor } from '#modules/monitoring/result_processor'
 import { ProbeTaskDispatcher } from '#modules/probes/probe_task_dispatcher'
+import { VpnTrafficRecorder } from '#modules/vpn/vpn_traffic_recorder'
+
+/** Cadência da gravação de histórico de tráfego VPN — não precisa ser tão fina quanto o polling de monitores. */
+const VPN_TRAFFIC_INTERVAL_SECONDS = 30
 
 export default class SchedulerRun extends BaseCommand {
   static commandName = 'scheduler:run'
@@ -18,6 +22,8 @@ export default class SchedulerRun extends BaseCommand {
   private monitorRunner = new MonitorRunner()
   private resultProcessor = new ResultProcessor()
   private probeTaskDispatcher = new ProbeTaskDispatcher()
+  private vpnTrafficRecorder = new VpnTrafficRecorder()
+  private nextVpnTrafficSyncAt: DateTime | null = null
 
   async run() {
     this.logger.info('Processo Scheduler de Monitoramento inicializado.')
@@ -30,8 +36,23 @@ export default class SchedulerRun extends BaseCommand {
         this.logger.error(`Erro durante ciclo do scheduler: ${errorMsg}`)
       }
 
+      try {
+        await this.syncVpnTrafficIfDue()
+      } catch (err: unknown) {
+        const errorMsg = err instanceof Error ? err.message : String(err)
+        this.logger.error(`Erro ao sincronizar tráfego VPN: ${errorMsg}`)
+      }
+
       await new Promise((resolve) => setTimeout(resolve, 5000))
     }
+  }
+
+  private async syncVpnTrafficIfDue() {
+    const now = DateTime.now()
+    if (this.nextVpnTrafficSyncAt && now < this.nextVpnTrafficSyncAt) return
+
+    await this.vpnTrafficRecorder.recordAll()
+    this.nextVpnTrafficSyncAt = now.plus({ seconds: VPN_TRAFFIC_INTERVAL_SECONDS })
   }
 
   private async checkDueMonitors() {

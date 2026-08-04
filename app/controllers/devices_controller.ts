@@ -36,7 +36,12 @@ export default class DevicesController {
   }
 
   async show({ params, response }: HttpContext) {
-    const device = await Device.query().where('id', params.id).preload('site').preload('parent').firstOrFail()
+    const device = await Device.query()
+      .where('id', params.id)
+      .preload('site')
+      .preload('parent')
+      .preload('vpnPeer')
+      .firstOrFail()
     return response.ok(device)
   }
 

@@ -20,7 +20,7 @@
     <div v-else-if="monitorsStore.currentMonitor">
       <!-- Header do Monitor -->
       <v-card elevation="2" class="rounded-lg pa-6 mb-6">
-        <div class="d-flex align-center justify-space-between flex-wrap gap-4">
+        <div class="d-flex align-center justify-space-between flex-wrap ga-4">
           <div class="d-flex align-center ga-4" style="gap: 16px">
             <v-avatar :color="getStatusColor(monitor.status)" size="56" class="text-white mr-2">
               <v-icon size="32">{{ getTypeIcon(monitor.type) }}</v-icon>
@@ -52,6 +52,14 @@
           </div>
 
           <div class="d-flex align-center ga-3" style="gap: 12px">
+            <v-btn
+              v-if="monitor.device"
+              variant="tonal"
+              prepend-icon="mdi-router-network"
+              :to="{ name: 'device-detail', params: { id: monitor.device.id } }"
+            >
+              Ver dispositivo
+            </v-btn>
             <v-btn
               color="primary"
               prepend-icon="mdi-play"
@@ -160,19 +168,19 @@
 
       <!-- Linha do Tempo de Uptime (Bar Timeline - Estilo Uptime Kuma) -->
       <v-card elevation="2" class="rounded-lg pa-6 mb-6">
-        <div class="d-flex align-center justify-space-between mb-4 flex-wrap gap-2">
+        <div class="d-flex align-center justify-space-between mb-4 flex-wrap ga-2">
           <div>
-            <h2 class="text-h6 font-weight-bold d-flex align-center gap-2">
+            <h2 class="text-h6 font-weight-bold d-flex align-center ga-2">
               <v-icon color="primary">mdi-chart-timeline-variant</v-icon>
               Linha do Tempo de Disponibilidade
             </h2>
             <div class="text-subtitle-2 text-grey">Histórico recente de verificações de status</div>
           </div>
-          <div class="d-flex align-center gap-4 text-caption">
-            <span class="d-flex align-center gap-1">
+          <div class="d-flex align-center ga-4 text-caption">
+            <span class="d-flex align-center ga-1">
               <span class="status-indicator-dot bg-success"></span> UP ({{ stats.upChecks }})
             </span>
-            <span class="d-flex align-center gap-1">
+            <span class="d-flex align-center ga-1">
               <span class="status-indicator-dot bg-error"></span> DOWN ({{
                 stats.totalChecks - stats.upChecks
               }})
@@ -195,7 +203,7 @@
       <v-card elevation="2" class="rounded-lg pa-6 mb-6">
         <div class="d-flex align-center justify-space-between mb-4">
           <div>
-            <h2 class="text-h6 font-weight-bold d-flex align-center gap-2">
+            <h2 class="text-h6 font-weight-bold d-flex align-center ga-2">
               <v-icon color="info">mdi-sine-wave</v-icon>
               Gráfico de Tempo de Resposta (Ping Latency)
             </h2>
@@ -230,7 +238,7 @@
       <v-card elevation="2" class="rounded-lg pa-6">
         <div class="d-flex align-center justify-space-between mb-4">
           <div>
-            <h2 class="text-h6 font-weight-bold d-flex align-center gap-2">
+            <h2 class="text-h6 font-weight-bold d-flex align-center ga-2">
               <v-icon color="primary">mdi-history</v-icon>
               Histórico de Execuções Recentes
             </h2>

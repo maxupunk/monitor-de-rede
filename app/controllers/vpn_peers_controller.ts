@@ -52,10 +52,11 @@ export default class VpnPeersController {
     const items = await this.peerService.list()
 
     return response.ok(
-      items.map(({ peer, needsFirewallHint }) => ({
+      items.map(({ peer, needsFirewallHint, pingMonitorId }) => ({
         ...peer.serialize(),
         connectionStatus: peer.connectionStatus,
         needsFirewallHint,
+        pingMonitorId,
         device: peer.device?.serialize() ?? null,
       }))
     )

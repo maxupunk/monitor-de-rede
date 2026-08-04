@@ -83,6 +83,23 @@
 
         <template #item.actions="{ item }">
           <div class="d-flex" style="gap: 4px">
+            <v-tooltip text="Ver histórico de conectividade (ping)">
+              <template #activator="{ props }">
+                <v-btn
+                  v-bind="props"
+                  size="small"
+                  icon="mdi-heart-pulse"
+                  variant="text"
+                  :disabled="!item.pingMonitorId"
+                  :to="
+                    item.pingMonitorId
+                      ? { name: 'monitor-detail', params: { id: item.pingMonitorId } }
+                      : undefined
+                  "
+                ></v-btn>
+              </template>
+            </v-tooltip>
+
             <v-tooltip text="Copiar script / configuração">
               <template #activator="{ props }">
                 <v-btn
@@ -145,31 +162,7 @@
 
     <VpnScriptViewer v-model="viewerOpen" :artifact="vpnStore.lastArtifact" :qr-svg="qrSvg" />
 
-    <v-dialog v-model="firewallOpen" max-width="680">
-      <v-card class="rounded-lg">
-        <v-card-title class="font-weight-bold">Regras de firewall</v-card-title>
-        <v-card-subtitle>
-          Aplique no equipamento para liberar ICMP e SNMP na interface WireGuard.
-        </v-card-subtitle>
-        <v-card-text>
-          <v-sheet class="rounded-lg pa-4" color="grey-darken-4">
-            <pre class="script-content">{{ firewallContent }}</pre>
-          </v-sheet>
-        </v-card-text>
-        <v-card-actions class="px-4 pb-4">
-          <v-spacer></v-spacer>
-          <v-btn variant="text" @click="firewallOpen = false">Fechar</v-btn>
-          <v-btn
-            color="primary"
-            variant="flat"
-            prepend-icon="mdi-content-copy"
-            @click="copyFirewall"
-          >
-            Copiar regras
-          </v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
+    <VpnFirewallHintsDialog v-model="firewallOpen" :content="firewallContent" />
   </div>
 </template>
 
@@ -177,10 +170,14 @@
 import { onMounted, ref } from 'vue'
 import VpnPeerWizard from '@/components/VpnPeerWizard.vue'
 import VpnScriptViewer from '@/components/VpnScriptViewer.vue'
+import VpnFirewallHintsDialog from '@/components/VpnFirewallHintsDialog.vue'
 import {
   useVpnStore,
-  type VpnConnectionStatus,
-  type VpnDeviceProfile,
+  vpnProfileIcon,
+  vpnProfileLabel,
+  vpnStatusColor,
+  vpnStatusLabel,
+  vpnRelativeTime,
   type VpnPeer,
 } from '@/stores/vpn'
 
@@ -202,55 +199,15 @@ const headers = [
   { title: 'Ações', key: 'actions', sortable: false, width: '200px' },
 ]
 
-const profileLabels: Record<VpnDeviceProfile, string> = {
-  mikrotik: 'MikroTik',
-  openwrt: 'OpenWrt',
-  linux: 'Linux',
-  windows: 'Windows',
-  mobile: 'Celular',
-}
-
-const profileIcons: Record<VpnDeviceProfile, string> = {
-  mikrotik: 'mdi-router-network',
-  openwrt: 'mdi-router-wireless',
-  linux: 'mdi-linux',
-  windows: 'mdi-microsoft-windows',
-  mobile: 'mdi-cellphone',
-}
-
-const statusLabels: Record<VpnConnectionStatus, string> = {
-  connected: 'Conectado',
-  unstable: 'Instável',
-  disconnected: 'Desconectado',
-  awaiting: 'Aguardando',
-}
-
-const statusColors: Record<VpnConnectionStatus, string> = {
-  connected: 'success',
-  unstable: 'warning',
-  disconnected: 'error',
-  awaiting: 'grey',
-}
-
 onMounted(async () => {
   await Promise.all([vpnStore.fetchServer(), vpnStore.fetchPeers()])
 })
 
-function profileLabel(profile: VpnDeviceProfile): string {
-  return profileLabels[profile] || profile
-}
-
-function profileIcon(profile: VpnDeviceProfile): string {
-  return profileIcons[profile] || 'mdi-devices'
-}
-
-function statusLabel(status: VpnConnectionStatus): string {
-  return statusLabels[status] || status
-}
-
-function statusColor(status: VpnConnectionStatus): string {
-  return statusColors[status] || 'grey'
-}
+const profileLabel = vpnProfileLabel
+const profileIcon = vpnProfileIcon
+const statusLabel = vpnStatusLabel
+const statusColor = vpnStatusColor
+const relativeTime = vpnRelativeTime
 
 function isMobile(peer: VpnPeer): boolean {
   return peer.deviceProfile === 'mobile'
@@ -261,16 +218,6 @@ function formatBytes(value: number): string {
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
   const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1)
   return `${(value / 1024 ** index).toFixed(index === 0 ? 0 : 1)} ${units[index]}`
-}
-
-function relativeTime(value: string | null): string {
-  if (!value) return 'nunca'
-
-  const elapsedSeconds = Math.floor((Date.now() - new Date(value).getTime()) / 1000)
-  if (elapsedSeconds < 60) return `há ${elapsedSeconds}s`
-  if (elapsedSeconds < 3600) return `há ${Math.floor(elapsedSeconds / 60)} min`
-  if (elapsedSeconds < 86400) return `há ${Math.floor(elapsedSeconds / 3600)} h`
-  return `há ${Math.floor(elapsedSeconds / 86400)} dias`
 }
 
 function onPeerCreated() {
@@ -319,23 +266,4 @@ async function showFirewallHints(peer: VpnPeer) {
   firewallContent.value = content
   firewallOpen.value = true
 }
-
-async function copyFirewall() {
-  try {
-    await navigator.clipboard.writeText(firewallContent.value)
-  } catch {
-    // navegador sem permissão de área de transferência
-  }
-}
 </script>
-
-<style scoped>
-.script-content {
-  color: #e0e0e0;
-  font-family: 'Consolas', 'Monaco', monospace;
-  font-size: 12px;
-  line-height: 1.6;
-  margin: 0;
-  white-space: pre-wrap;
-}
-</style>

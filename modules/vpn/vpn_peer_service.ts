@@ -38,6 +38,8 @@ export interface PeerListItem {
   peer: VpnPeer
   /** Túnel ativo, mas o ping falha: provável firewall bloqueando na interface WG. */
   needsFirewallHint: boolean
+  /** Monitor de ping provisionado automaticamente para o peer (§4.7) — usado para navegar ao histórico de conectividade. */
+  pingMonitorId: number | null
 }
 
 export class VpnPeerService {
@@ -104,6 +106,7 @@ export class VpnPeerService {
       return {
         peer,
         needsFirewallHint: peer.connectionStatus === 'connected' && monitor?.status === 'down',
+        pingMonitorId: monitor?.id ?? null,
       }
     })
   }

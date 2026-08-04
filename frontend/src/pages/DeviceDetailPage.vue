@@ -70,6 +70,7 @@
         </v-tab>
         <v-tab value="metrics" prepend-icon="mdi-chart-line">Métricas & Tráfego</v-tab>
         <v-tab value="events" prepend-icon="mdi-history">Histórico de Eventos</v-tab>
+        <v-tab v-if="vpnPeer" value="vpn" prepend-icon="mdi-shield-lock-outline">VPN</v-tab>
       </v-tabs>
 
       <v-divider></v-divider>
@@ -532,6 +533,150 @@
               </tbody>
             </v-table>
           </v-window-item>
+
+          <!-- Aba VPN -->
+          <v-window-item v-if="vpnPeer" value="vpn">
+            <v-alert
+              v-if="vpnNeedsFirewallHint"
+              type="warning"
+              variant="tonal"
+              class="mb-6"
+              density="comfortable"
+            >
+              <div class="font-weight-bold mb-1">
+                Túnel conectado, mas o dispositivo não responde a ping.
+              </div>
+              <div class="text-body-2 mb-2">
+                Provavelmente falta liberar o tráfego na interface WireGuard.
+              </div>
+              <v-btn size="small" color="warning" variant="flat" @click="showVpnFirewallHints">
+                Copiar regras de firewall
+              </v-btn>
+            </v-alert>
+
+            <v-row class="mb-2">
+              <v-col cols="12" md="6">
+                <v-list border class="rounded-lg">
+                  <v-list-item title="Perfil do equipamento">
+                    <template #subtitle>
+                      <v-chip size="small" variant="tonal" class="mt-1">
+                        <v-icon start size="14">{{ vpnProfileIconValue }}</v-icon>
+                        {{ vpnProfileLabelValue }}
+                      </v-chip>
+                    </template>
+                  </v-list-item>
+                  <v-list-item title="Status do túnel">
+                    <template #subtitle>
+                      <v-chip :color="vpnStatusColorValue" size="small" variant="flat" class="mt-1">
+                        {{ vpnStatusLabelValue }}
+                      </v-chip>
+                    </template>
+                  </v-list-item>
+                  <v-list-item
+                    title="Endereço na VPN"
+                    :subtitle="detailStore.device?.ipAddress || 'Não informado'"
+                  ></v-list-item>
+                  <v-list-item
+                    title="Último handshake"
+                    :subtitle="vpnLastHandshakeText"
+                  ></v-list-item>
+                </v-list>
+              </v-col>
+              <v-col cols="12" md="6">
+                <v-list border class="rounded-lg">
+                  <v-list-item
+                    title="Keepalive persistente"
+                    :subtitle="`${vpnPeer.persistentKeepalive}s`"
+                  ></v-list-item>
+                  <v-list-item
+                    title="Chave pública do peer"
+                    :subtitle="vpnPeer.publicKey"
+                    class="text-truncate"
+                  ></v-list-item>
+                  <v-list-item
+                    title="Sub-rede da VPN"
+                    :subtitle="vpnStore.state?.cidr || 'Não configurada'"
+                  ></v-list-item>
+                  <v-list-item
+                    title="Acesso"
+                    :subtitle="vpnPeer.enabled ? 'Habilitado' : 'Revogado'"
+                  ></v-list-item>
+                </v-list>
+              </v-col>
+            </v-row>
+
+            <div
+              class="text-subtitle-1 font-weight-bold mb-3 mt-4 d-flex align-center ga-2"
+              style="gap: 8px"
+            >
+              <v-icon color="primary">mdi-swap-horizontal</v-icon>
+              Tráfego do Túnel WireGuard
+            </div>
+
+            <v-row class="mb-4">
+              <v-col cols="12" sm="6">
+                <v-card border flat class="pa-4 rounded-lg text-center">
+                  <div class="text-caption text-grey">Total Recebido (RX)</div>
+                  <div class="text-h6 font-weight-bold text-success">
+                    {{ formatBytes(vpnPeer.bytesRx) }}
+                  </div>
+                </v-card>
+              </v-col>
+              <v-col cols="12" sm="6">
+                <v-card border flat class="pa-4 rounded-lg text-center">
+                  <div class="text-caption text-grey">Total Enviado (TX)</div>
+                  <div class="text-h6 font-weight-bold text-primary">
+                    {{ formatBytes(vpnPeer.bytesTx) }}
+                  </div>
+                </v-card>
+              </v-col>
+            </v-row>
+
+            <BaseMetricChart
+              v-if="vpnTrafficSeries.length > 0"
+              :series="vpnTrafficSeries"
+              unit-type="bandwidth"
+            />
+            <div v-else class="text-center text-grey py-10 border rounded-lg bg-grey-lighten-5">
+              <v-icon size="40" color="grey-lighten-1">mdi-chart-line-variant</v-icon>
+              <div class="mt-2 text-subtitle-2">
+                Sem amostras de tráfego ainda. O histórico é coletado a cada 30s pelo scheduler.
+              </div>
+            </div>
+
+            <v-divider class="my-6"></v-divider>
+
+            <div class="d-flex flex-wrap ga-3" style="gap: 12px">
+              <v-btn
+                color="primary"
+                variant="tonal"
+                prepend-icon="mdi-content-copy"
+                @click="openVpnConfig"
+              >
+                Copiar configuração
+              </v-btn>
+              <v-btn
+                color="warning"
+                variant="tonal"
+                prepend-icon="mdi-key-change"
+                @click="rotateVpnKeys"
+              >
+                Rotacionar chaves
+              </v-btn>
+              <v-btn
+                color="error"
+                variant="tonal"
+                prepend-icon="mdi-cancel"
+                @click="revokeVpnAccess"
+              >
+                Revogar acesso
+              </v-btn>
+              <v-spacer></v-spacer>
+              <v-btn variant="text" prepend-icon="mdi-open-in-new" :to="{ name: 'vpn-devices' }">
+                Ver todos os dispositivos VPN
+              </v-btn>
+            </div>
+          </v-window-item>
         </v-window>
       </v-card-text>
     </v-card>
@@ -715,17 +860,34 @@
       :initial-metric="selectedChartMetricType"
       :metrics="detailStore.metrics"
     />
+
+    <!-- Modais da aba VPN -->
+    <VpnScriptViewer v-model="vpnViewerOpen" :artifact="vpnStore.lastArtifact" :qr-svg="null" />
+    <VpnFirewallHintsDialog v-model="vpnFirewallOpen" :content="vpnFirewallContent" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useDeviceDetailStore, type DeviceMetric } from '@/stores/deviceDetail'
 import TrafficChartDialog from '@/components/TrafficChartDialog.vue'
+import BaseMetricChart, { type ChartSeriesInput } from '@/components/BaseMetricChart.vue'
+import VpnScriptViewer from '@/components/VpnScriptViewer.vue'
+import VpnFirewallHintsDialog from '@/components/VpnFirewallHintsDialog.vue'
+import {
+  useVpnStore,
+  vpnProfileIcon,
+  vpnProfileLabel,
+  vpnStatusColor,
+  vpnStatusLabel,
+  vpnRelativeTime,
+} from '@/stores/vpn'
 
 const route = useRoute()
+const router = useRouter()
 const detailStore = useDeviceDetailStore()
+const vpnStore = useVpnStore()
 const activeTab = ref('overview')
 const scanModalOpen = ref(false)
 const savingMonitors = ref(false)
@@ -736,6 +898,10 @@ const selectedChartInterfaceName = ref('')
 const selectedChartMetricType = ref<'inBps' | 'outBps' | 'inOctets' | 'outOctets' | 'combined'>(
   'inBps'
 )
+
+const vpnViewerOpen = ref(false)
+const vpnFirewallOpen = ref(false)
+const vpnFirewallContent = ref('')
 
 function openTrafficChart(
   item: { id: number; ifName: string },
@@ -756,8 +922,115 @@ const deviceId = computed(() => Number(route.params.id))
 onMounted(() => {
   if (deviceId.value) {
     detailStore.loadDeviceDetails(deviceId.value)
+    // Traz CIDR e keepalive do servidor VPN para contextualizar a aba VPN, se existir.
+    vpnStore.fetchServer()
   }
 })
+
+// --- Aba VPN ---------------------------------------------------------------
+
+const vpnPeer = computed(() => detailStore.device?.vpnPeer ?? null)
+const vpnProfileLabelValue = computed(() =>
+  vpnPeer.value ? vpnProfileLabel(vpnPeer.value.deviceProfile) : ''
+)
+const vpnProfileIconValue = computed(() =>
+  vpnPeer.value ? vpnProfileIcon(vpnPeer.value.deviceProfile) : ''
+)
+const vpnStatusLabelValue = computed(() =>
+  vpnPeer.value ? vpnStatusLabel(vpnPeer.value.connectionStatus) : ''
+)
+const vpnStatusColorValue = computed(() =>
+  vpnPeer.value ? vpnStatusColor(vpnPeer.value.connectionStatus) : 'grey'
+)
+const vpnLastHandshakeText = computed(() =>
+  vpnPeer.value ? vpnRelativeTime(vpnPeer.value.lastHandshakeAt) : 'nunca'
+)
+
+const vpnNeedsFirewallHint = computed(() => {
+  const peer = vpnPeer.value
+  if (!peer || peer.connectionStatus !== 'connected') return false
+  const pingMonitor = detailStore.monitors.find((m) => m.type === 'ping')
+  return pingMonitor?.status === 'down'
+})
+
+// Série de bps do túnel a partir do histórico gravado pelo scheduler (vpn_rx_bps / vpn_tx_bps).
+const vpnTrafficSeries = computed<ChartSeriesInput[]>(() => {
+  const rx = detailStore.metrics
+    .filter((m) => m.metricName === 'vpn_rx_bps')
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+  const tx = detailStore.metrics
+    .filter((m) => m.metricName === 'vpn_tx_bps')
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+
+  const series: ChartSeriesInput[] = []
+  if (rx.length > 0) {
+    series.push({
+      id: 'vpn_rx_bps',
+      label: 'Recebido (RX)',
+      color: '#4CAF50',
+      fillArea: false,
+      data: rx.map((m) => ({ time: m.createdAt, value: Number(m.metricValue) || 0 })),
+    })
+  }
+  if (tx.length > 0) {
+    series.push({
+      id: 'vpn_tx_bps',
+      label: 'Enviado (TX)',
+      color: '#2196F3',
+      fillArea: false,
+      data: tx.map((m) => ({ time: m.createdAt, value: Number(m.metricValue) || 0 })),
+    })
+  }
+  return series
+})
+
+async function openVpnConfig() {
+  if (!vpnPeer.value) return
+  const artifact = await vpnStore.fetchConfig(vpnPeer.value.id)
+  if (artifact) vpnViewerOpen.value = true
+}
+
+async function rotateVpnKeys() {
+  if (!vpnPeer.value) return
+  if (
+    !confirm(
+      `Gerar novas chaves para "${detailStore.device?.name}"? A configuração atual deixará de funcionar.`
+    )
+  ) {
+    return
+  }
+
+  const artifact = await vpnStore.rotateKeys(vpnPeer.value.id)
+  if (artifact) {
+    vpnViewerOpen.value = true
+    await detailStore.loadDeviceDetails(deviceId.value)
+  }
+}
+
+async function revokeVpnAccess() {
+  if (!vpnPeer.value) return
+  if (
+    !confirm(
+      `Revogar o acesso VPN de "${detailStore.device?.name}"? O túnel cai imediatamente, o IP é liberado e este dispositivo será removido.`
+    )
+  ) {
+    return
+  }
+
+  const success = await vpnStore.revokePeer(vpnPeer.value.id)
+  if (success) {
+    router.push({ name: 'vpn-devices' })
+  }
+}
+
+async function showVpnFirewallHints() {
+  if (!vpnPeer.value) return
+  const content = await vpnStore.fetchFirewallHints(vpnPeer.value.id)
+  if (!content) return
+
+  vpnFirewallContent.value = content
+  vpnFirewallOpen.value = true
+}
 
 const isCpuMonitored = computed(() =>
   detailStore.monitors.some((m) => m.name.toLowerCase().includes('cpu') && m.status !== 'disabled')
