@@ -64,7 +64,7 @@ export default class Monitor extends BaseModel {
   declare lastRunAt: DateTime | null
 
   @column()
-  declare status: 'up' | 'down' | 'warning' | 'unknown'
+  declare status: 'up' | 'down' | 'warning' | 'unknown' | 'disabled'
 
   @column.dateTime({ autoCreate: true })
   declare createdAt: DateTime

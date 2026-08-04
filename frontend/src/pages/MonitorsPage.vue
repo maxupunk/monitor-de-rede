@@ -32,16 +32,43 @@
         :loading="monitorsStore.loading"
         no-data-text="Nenhum monitor cadastrado"
       >
-        <!-- Custom Slot para Nome e Linha do Tempo Estilo Uptime Kuma -->
+        <!-- Custom Slot para Nome, Dispositivo e Linha do Tempo/Uso -->
         <template #item.name="{ item }">
           <div class="py-2">
             <router-link
               :to="`/monitors/${item.id}`"
-              class="text-subtitle-1 font-weight-bold text-decoration-none text-primary hover-underline d-inline-block mb-1"
+              class="text-subtitle-1 font-weight-bold text-decoration-none text-primary hover-underline d-inline-block"
             >
               {{ item.name }}
             </router-link>
-            <div>
+            <div class="text-caption text-grey-darken-1 mb-1 d-flex align-center ga-1">
+              <v-icon size="12">mdi-router-network</v-icon>
+              {{ item.device?.name || 'Dispositivo não vinculado' }}
+            </div>
+
+            <!-- Monitores de uso (CPU/Memória via SNMP) não são checagens up/down: mostramos a leitura atual -->
+            <div v-if="isGaugeMonitor(item)" class="d-flex align-center ga-2" style="max-width: 220px">
+              <v-progress-linear
+                :model-value="item.gaugeMetric?.value ?? 0"
+                height="10"
+                rounded
+                :color="gaugeColor(item)"
+                style="flex: 1"
+              ></v-progress-linear>
+              <span class="text-caption font-weight-medium" style="min-width: 34px">
+                {{ item.gaugeMetric ? `${Math.round(item.gaugeMetric.value)}%` : 'N/D' }}
+              </span>
+            </div>
+            <template v-else>
+              <!-- Interface de rede: up/down não conta a história toda, então mostramos a velocidade negociada -->
+              <div v-if="isInterfaceMonitor(item)" class="text-caption mb-1">
+                <v-icon size="13" :color="interfaceStatusInfo(item).color">
+                  {{
+                    interfaceStatusInfo(item).icon
+                  }}
+                </v-icon>
+                {{ interfaceStatusInfo(item).label }}
+              </div>
               <router-link :to="`/monitors/${item.id}`" class="text-decoration-none">
                 <MonitorTimelineBar
                   :results="item.recentResults"
@@ -50,18 +77,31 @@
                   :width="5"
                 />
               </router-link>
-            </div>
+            </template>
           </div>
         </template>
 
         <template #item.type="{ item }">
           <v-chip size="small" color="info" variant="tonal">
-            {{ (item.type || 'N/A').toUpperCase() }}
+            {{
+              isGaugeMonitor(item)
+                ? gaugeTypeLabel(item)
+                : isInterfaceMonitor(item)
+                  ? 'INTERFACE'
+                  : (item.type || 'N/A').toUpperCase()
+            }}
           </v-chip>
         </template>
 
         <template #item.status="{ item }">
-          <v-chip :color="getStatusColor(item.status)" size="small">
+          <v-chip v-if="isGaugeMonitor(item)" :color="gaugeColor(item)" size="small">
+            {{ item.gaugeMetric ? `${Math.round(item.gaugeMetric.value)}%` : 'SEM DADOS' }}
+          </v-chip>
+          <v-chip v-else-if="isInterfaceMonitor(item)" :color="interfaceStatusInfo(item).color" size="small">
+            <v-icon start size="14">{{ interfaceStatusInfo(item).icon }}</v-icon>
+            {{ interfaceStatusInfo(item).label }}
+          </v-chip>
+          <v-chip v-else :color="getStatusColor(item.status)" size="small">
             {{ (item.status || 'UNKNOWN').toUpperCase() }}
           </v-chip>
         </template>
@@ -183,6 +223,15 @@ import { ref, onMounted, reactive } from 'vue'
 import { useMonitorsStore, type Monitor } from '@/stores/monitors'
 import { useDevicesStore } from '@/stores/devices'
 import MonitorTimelineBar from '@/components/MonitorTimelineBar.vue'
+import {
+  isGaugeMonitor,
+  gaugeTypeLabel,
+  gaugeMetricName,
+  gaugeColor as gaugeColorFor,
+  isInterfaceMonitor,
+  interfaceStatusInfo as interfaceStatusInfoFor,
+  latestResultData,
+} from '@/utils/monitorPresentation'
 
 const monitorsStore = useMonitorsStore()
 const devicesStore = useDevicesStore()
@@ -211,7 +260,7 @@ const formModel = reactive<{
 
 const headers = [
   { title: 'ID', key: 'id', width: '60px' },
-  { title: 'Nome e Histórico (Uptime)', key: 'name' },
+  { title: 'Nome, Dispositivo e Histórico', key: 'name' },
   { title: 'Tipo', key: 'type', width: '90px' },
   { title: 'Alvo', key: 'target' },
   { title: 'Status', key: 'status', width: '100px' },
@@ -236,6 +285,14 @@ function getStatusColor(status: string) {
     default:
       return 'grey'
   }
+}
+
+function gaugeColor(item: Monitor): string {
+  return gaugeColorFor(item.gaugeMetric?.value ?? null, gaugeMetricName(item))
+}
+
+function interfaceStatusInfo(item: Monitor) {
+  return interfaceStatusInfoFor(item.status, latestResultData(item.recentResults))
 }
 
 function openDialog(monitor?: Monitor) {

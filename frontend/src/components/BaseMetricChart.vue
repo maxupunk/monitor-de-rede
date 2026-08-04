@@ -162,7 +162,7 @@ export interface ChartSeriesInput {
 const props = withDefaults(
   defineProps<{
     series: ChartSeriesInput[]
-    unitType?: 'bandwidth' | 'bytes' | 'latency' | 'generic'
+    unitType?: 'bandwidth' | 'bytes' | 'latency' | 'percentage' | 'generic'
     customUnit?: string
     showAvgLine?: boolean
     avgValue?: number
@@ -236,6 +236,7 @@ const maxPointCount = computed(() => {
 const maxVal = computed(() => {
   if (allValues.value.length === 0) return 100
   const max = Math.max(...allValues.value)
+  if (props.unitType === 'percentage') return Math.min(100, max > 0 ? max * 1.15 : 100)
   return max > 0 ? max * 1.15 : 100
 })
 
@@ -263,6 +264,7 @@ function formatUnitValue(val: number): string {
   if (props.unitType === 'bandwidth') return formatBps(val)
   if (props.unitType === 'bytes') return formatBytes(val)
   if (props.unitType === 'latency') return `${val.toFixed(1)} ms`
+  if (props.unitType === 'percentage') return `${val.toFixed(1)}%`
   return `${val} ${props.customUnit}`.trim()
 }
 

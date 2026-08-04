@@ -15,7 +15,7 @@ export default class MonitorResult extends BaseModel {
   declare probeId: number | null
 
   @column()
-  declare status: 'up' | 'down' | 'warning' | 'unknown'
+  declare status: 'up' | 'down' | 'warning' | 'unknown' | 'disabled'
 
   @column.dateTime()
   declare startedAt: DateTime

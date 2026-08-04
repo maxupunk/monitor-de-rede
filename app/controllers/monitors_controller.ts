@@ -1,11 +1,62 @@
 import type { HttpContext } from '@adonisjs/core/http'
 import Monitor from '#models/monitor'
+import Metric from '#models/metric'
 import { MonitorRunner } from '#modules/monitoring/monitor_runner'
 import { ResultProcessor } from '#modules/monitoring/result_processor'
+
+const GAUGE_METRIC_NAMES = ['cpu_usage', 'memory_usage']
 
 export default class MonitorsController {
   private monitorRunner = new MonitorRunner()
   private resultProcessor = new ResultProcessor()
+
+  /**
+   * Monitores SNMP de uso de CPU/Memória não são checagens de disponibilidade
+   * (up/down) e sim leituras de percentual de uso — identifica esse tipo aqui
+   * para que possamos anexar a última leitura em vez de um status up/down.
+   */
+  private gaugeMetricName(monitor: Monitor): string | null {
+    if (monitor.type !== 'snmp') return null
+    const metric = (monitor.configuration as Record<string, unknown> | null)?.metric
+    return typeof metric === 'string' && GAUGE_METRIC_NAMES.includes(metric) ? metric : null
+  }
+
+  private async fetchLatestGaugeMetrics(monitors: Monitor[]) {
+    const gaugeMonitors = monitors
+      .map((mon) => ({ mon, metricName: this.gaugeMetricName(mon) }))
+      .filter((entry): entry is { mon: Monitor; metricName: string } => entry.metricName !== null)
+
+    const map = new Map<number, { name: string; value: number; unit: string; recordedAt: string }>()
+    if (gaugeMonitors.length === 0) return map
+
+    const deviceIds = [...new Set(gaugeMonitors.map((entry) => entry.mon.deviceId))]
+    const metricNames = [...new Set(gaugeMonitors.map((entry) => entry.metricName))]
+
+    const rows = await Metric.query()
+      .whereIn('deviceId', deviceIds)
+      .whereIn('name', metricNames)
+      .orderBy('recordedAt', 'desc')
+
+    const latestByDeviceMetric = new Map<string, Metric>()
+    for (const row of rows) {
+      const key = `${row.deviceId}:${row.name}`
+      if (!latestByDeviceMetric.has(key)) latestByDeviceMetric.set(key, row)
+    }
+
+    for (const { mon, metricName } of gaugeMonitors) {
+      const row = latestByDeviceMetric.get(`${mon.deviceId}:${metricName}`)
+      if (row) {
+        map.set(mon.id, {
+          name: row.name,
+          value: row.value,
+          unit: row.unit,
+          recordedAt: row.recordedAt.toISO()!,
+        })
+      }
+    }
+
+    return map
+  }
 
   async index({ response }: HttpContext) {
     const monitors = await Monitor.query()
@@ -13,10 +64,13 @@ export default class MonitorsController {
       .preload('probe')
       .preload('results', (query) => query.orderBy('startedAt', 'desc').limit(30))
 
+    const gaugeMetrics = await this.fetchLatestGaugeMetrics(monitors)
+
     const formatted = monitors.map((mon) => {
       const json = mon.serialize()
       const results = mon.results || []
       json.recentResults = [...results].reverse().map((r) => r.serialize())
+      json.gaugeMetric = gaugeMetrics.get(mon.id) || null
       return json
     })
 
@@ -117,8 +171,11 @@ export default class MonitorsController {
     const upChecks = results.filter((r) => r.status === 'up').length
     const uptimePercentage = totalChecks > 0 ? Number(((upChecks / totalChecks) * 100).toFixed(1)) : 100
 
+    const gaugeMetrics = await this.fetchLatestGaugeMetrics([monitor])
+
     const json = monitor.serialize()
     json.recentResults = [...results].reverse().map((r) => r.serialize())
+    json.gaugeMetric = gaugeMetrics.get(monitor.id) || null
     json.stats = {
       avgLatency,
       minLatency,

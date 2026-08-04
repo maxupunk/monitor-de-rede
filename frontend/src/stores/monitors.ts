@@ -6,7 +6,7 @@ export interface MonitorResult {
   id: number
   monitorId: number
   probeId?: number | null
-  status: 'up' | 'down' | 'warning' | 'unknown'
+  status: 'up' | 'down' | 'warning' | 'unknown' | 'disabled'
   startedAt: string
   finishedAt: string
   durationMs: number
@@ -45,6 +45,7 @@ export interface Monitor {
   probe?: { id: number; name: string }
   recentResults?: MonitorResult[]
   stats?: MonitorStats
+  gaugeMetric?: { name: string; value: number; unit: string; recordedAt: string } | null
   createdAt?: string
   updatedAt?: string
 }

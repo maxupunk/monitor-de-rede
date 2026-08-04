@@ -1,4 +1,4 @@
-export type MonitorStatus = 'up' | 'down' | 'warning' | 'unknown'
+export type MonitorStatus = 'up' | 'down' | 'warning' | 'unknown' | 'disabled'
 
 export interface CheckMetric {
   name: string

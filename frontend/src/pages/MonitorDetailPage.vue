@@ -22,20 +22,20 @@
       <v-card elevation="2" class="rounded-lg pa-6 mb-6">
         <div class="d-flex align-center justify-space-between flex-wrap ga-4">
           <div class="d-flex align-center ga-4" style="gap: 16px">
-            <v-avatar :color="getStatusColor(monitor.status)" size="56" class="text-white mr-2">
-              <v-icon size="32">{{ getTypeIcon(monitor.type) }}</v-icon>
+            <v-avatar :color="headerChip.color" size="56" class="text-white mr-2">
+              <v-icon size="32">{{ typeIcon }}</v-icon>
             </v-avatar>
             <div>
               <div class="d-flex align-center ga-3 flex-wrap" style="gap: 12px">
                 <h1 class="text-h4 font-weight-bold mr-3">{{ monitor.name }}</h1>
                 <v-chip
-                  :color="getStatusColor(monitor.status)"
+                  :color="headerChip.color"
                   size="small"
                   variant="flat"
                   class="font-weight-bold px-3"
                 >
-                  <v-icon start size="14">mdi-circle</v-icon>
-                  {{ statusText }}
+                  <v-icon start size="14">{{ headerChip.icon }}</v-icon>
+                  {{ headerChip.label }}
                 </v-chip>
                 <v-chip size="small" color="info" variant="tonal" class="px-3">
                   {{ typeText }}
@@ -84,8 +84,144 @@
         </div>
       </v-card>
 
-      <!-- Cards de Métricas KPI (Ping Médio, Ping Atual, Ping Mín/Máx, Uptime %) -->
-      <v-row class="mb-6">
+      <!-- Cards de Métricas KPI: variam conforme o tipo de monitor (Ping, Uso de Recurso ou Interface) -->
+      <v-row v-if="isGaugeMonitor" class="mb-6">
+        <v-col cols="12" sm="6" md="3">
+          <v-card elevation="2" class="rounded-lg pa-4 h-100">
+            <div class="d-flex align-center justify-space-between mb-2">
+              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium">Uso Atual</span>
+              <v-avatar :color="gaugeColorValue" variant="tonal" size="36">
+                <v-icon size="20">mdi-gauge</v-icon>
+              </v-avatar>
+            </div>
+            <div class="text-h4 font-weight-bold my-1" :class="`text-${gaugeColorValue}`">
+              {{ gaugeCurrentText }}
+            </div>
+            <div class="text-caption text-grey">Última leitura SNMP</div>
+          </v-card>
+        </v-col>
+
+        <v-col cols="12" sm="6" md="3">
+          <v-card elevation="2" class="rounded-lg pa-4 h-100">
+            <div class="d-flex align-center justify-space-between mb-2">
+              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium">Uso Médio</span>
+              <v-avatar color="info" variant="tonal" size="36">
+                <v-icon size="20">mdi-chart-line</v-icon>
+              </v-avatar>
+            </div>
+            <div class="text-h4 font-weight-bold my-1 text-info">
+              {{ gaugeAvgText }}
+            </div>
+            <div class="text-caption text-grey">Média do histórico coletado</div>
+          </v-card>
+        </v-col>
+
+        <v-col cols="12" sm="6" md="3">
+          <v-card elevation="2" class="rounded-lg pa-4 h-100">
+            <div class="d-flex align-center justify-space-between mb-2">
+              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium">Uso Mín / Máx</span>
+              <v-avatar color="purple" variant="tonal" size="36">
+                <v-icon size="20">mdi-swap-vertical</v-icon>
+              </v-avatar>
+            </div>
+            <div class="text-h5 font-weight-bold my-1 text-purple">
+              <span>{{ gaugeMinText }}</span>
+              <span class="text-grey-darken-1 font-weight-regular text-subtitle-1 mx-1">/</span>
+              <span>{{ gaugeMaxText }}</span>
+            </div>
+            <div class="text-caption text-grey">Mínimo e máximo do período</div>
+          </v-card>
+        </v-col>
+
+        <v-col cols="12" sm="6" md="3">
+          <v-card elevation="2" class="rounded-lg pa-4 h-100">
+            <div class="d-flex align-center justify-space-between mb-2">
+              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
+              >Agente SNMP Disponível</span
+              >
+              <v-avatar color="success" variant="tonal" size="36">
+                <v-icon size="20">mdi-check-decagram</v-icon>
+              </v-avatar>
+            </div>
+            <div class="text-h4 font-weight-bold my-1 text-success">
+              {{ stats.uptimePercentage }}%
+            </div>
+            <div class="text-caption text-grey">% de coletas SNMP com resposta</div>
+          </v-card>
+        </v-col>
+      </v-row>
+
+      <v-row v-else-if="isInterfaceMonitor" class="mb-6">
+        <v-col cols="12" sm="6" md="3">
+          <v-card elevation="2" class="rounded-lg pa-4 h-100">
+            <div class="d-flex align-center justify-space-between mb-2">
+              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
+              >Velocidade Negociada</span
+              >
+              <v-avatar :color="headerChip.color" variant="tonal" size="36">
+                <v-icon size="20">{{ headerChip.icon }}</v-icon>
+              </v-avatar>
+            </div>
+            <div class="text-h4 font-weight-bold my-1" :class="`text-${headerChip.color}`">
+              {{ interfaceSpeedText }}
+            </div>
+            <div class="text-caption text-grey">Última verificação SNMP</div>
+          </v-card>
+        </v-col>
+
+        <v-col cols="12" sm="6" md="3">
+          <v-card elevation="2" class="rounded-lg pa-4 h-100">
+            <div class="d-flex align-center justify-space-between mb-2">
+              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
+              >Status Operacional</span
+              >
+              <v-avatar color="info" variant="tonal" size="36">
+                <v-icon size="20">mdi-information-outline</v-icon>
+              </v-avatar>
+            </div>
+            <div class="text-h5 font-weight-bold my-1 text-info">
+              {{ interfaceOperText }}
+            </div>
+            <div class="text-caption text-grey">ifOperStatus / ifAdminStatus (SNMP)</div>
+          </v-card>
+        </v-col>
+
+        <v-col cols="12" sm="6" md="3">
+          <v-card elevation="2" class="rounded-lg pa-4 h-100">
+            <div class="d-flex align-center justify-space-between mb-2">
+              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
+              >Estabilidade do Link</span
+              >
+              <v-avatar color="success" variant="tonal" size="36">
+                <v-icon size="20">mdi-check-decagram</v-icon>
+              </v-avatar>
+            </div>
+            <div class="text-h4 font-weight-bold my-1 text-success">
+              {{ stats.uptimePercentage }}%
+            </div>
+            <div class="text-caption text-grey">% de verificações com link Up</div>
+          </v-card>
+        </v-col>
+
+        <v-col cols="12" sm="6" md="3">
+          <v-card elevation="2" class="rounded-lg pa-4 h-100">
+            <div class="d-flex align-center justify-space-between mb-2">
+              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
+              >Alterações de Estado</span
+              >
+              <v-avatar :color="interfaceFlapCount > 0 ? 'warning' : 'grey'" variant="tonal" size="36">
+                <v-icon size="20">mdi-swap-horizontal</v-icon>
+              </v-avatar>
+            </div>
+            <div class="text-h4 font-weight-bold my-1" :class="interfaceFlapCount > 0 ? 'text-warning' : 'text-grey'">
+              {{ interfaceFlapCount }}
+            </div>
+            <div class="text-caption text-grey">Trocas de status no período exibido</div>
+          </v-card>
+        </v-col>
+      </v-row>
+
+      <v-row v-else class="mb-6">
         <!-- Ping Atual -->
         <v-col cols="12" sm="6" md="3">
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
@@ -166,24 +302,36 @@
         </v-col>
       </v-row>
 
-      <!-- Linha do Tempo de Uptime (Bar Timeline - Estilo Uptime Kuma) -->
-      <v-card elevation="2" class="rounded-lg pa-6 mb-6">
+      <!-- Linha do Tempo de Status (Bar Timeline - Estilo Uptime Kuma) -->
+      <!-- Monitores de uso (CPU/Memória) não têm uma noção de up/down por execução, então a timeline não se aplica -->
+      <v-card v-if="!isGaugeMonitor" elevation="2" class="rounded-lg pa-6 mb-6">
         <div class="d-flex align-center justify-space-between mb-4 flex-wrap ga-2">
           <div>
             <h2 class="text-h6 font-weight-bold d-flex align-center ga-2">
               <v-icon color="primary">mdi-chart-timeline-variant</v-icon>
-              Linha do Tempo de Disponibilidade
+              Linha do Tempo de Status
             </h2>
             <div class="text-subtitle-2 text-grey">Histórico recente de verificações de status</div>
           </div>
-          <div class="d-flex align-center ga-4 text-caption">
-            <span class="d-flex align-center ga-1">
-              <span class="status-indicator-dot bg-success"></span> UP ({{ stats.upChecks }})
+          <div class="d-flex align-center ga-4 text-caption flex-wrap">
+            <span v-if="statusBreakdown.up" class="d-flex align-center ga-1">
+              <span class="status-indicator-dot bg-success"></span> UP ({{ statusBreakdown.up }})
             </span>
-            <span class="d-flex align-center ga-1">
-              <span class="status-indicator-dot bg-error"></span> DOWN ({{
-                stats.totalChecks - stats.upChecks
+            <span v-if="statusBreakdown.down" class="d-flex align-center ga-1">
+              <span class="status-indicator-dot bg-error"></span> DOWN ({{ statusBreakdown.down }})
+            </span>
+            <span v-if="statusBreakdown.warning" class="d-flex align-center ga-1">
+              <span class="status-indicator-dot bg-warning"></span> INSTÁVEL ({{
+                statusBreakdown.warning
               }})
+            </span>
+            <span v-if="statusBreakdown.disabled" class="d-flex align-center ga-1">
+              <span class="status-indicator-dot" style="background-color: #9e9e9e"></span>
+              DESABILITADA ({{ statusBreakdown.disabled }})
+            </span>
+            <span v-if="statusBreakdown.unknown" class="d-flex align-center ga-1">
+              <span class="status-indicator-dot" style="background-color: #b0bec5"></span>
+              DESCONHECIDO ({{ statusBreakdown.unknown }})
             </span>
             <span class="text-grey font-weight-bold">Total: {{ stats.totalChecks }}</span>
           </div>
@@ -199,8 +347,44 @@
         </div>
       </v-card>
 
-      <!-- Gráfico Unificado de Latência / Tempo de Resposta -->
-      <v-card elevation="2" class="rounded-lg pa-6 mb-6">
+      <!-- Gráfico de Uso ao Longo do Tempo (CPU/Memória) -->
+      <v-card v-if="isGaugeMonitor" elevation="2" class="rounded-lg pa-6 mb-6">
+        <div class="d-flex align-center justify-space-between mb-4">
+          <div>
+            <h2 class="text-h6 font-weight-bold d-flex align-center ga-2">
+              <v-icon color="info">mdi-sine-wave</v-icon>
+              Gráfico de Uso de {{ gaugeTypeLabel(monitor) === 'MEMÓRIA' ? 'Memória' : 'CPU' }}
+            </h2>
+            <div class="text-subtitle-2 text-grey">
+              Percentual de uso coletado via SNMP no dispositivo ao longo do tempo
+            </div>
+          </div>
+          <v-chip v-if="gaugeStats.avg !== null" color="info" size="small" variant="outlined">
+            Média: {{ gaugeStats.avg }}%
+          </v-chip>
+        </div>
+
+        <BaseMetricChart
+          v-if="gaugeSeries.length > 0 && gaugeSeries[0].data.length > 0"
+          :series="gaugeSeries"
+          unit-type="percentage"
+          :show-avg-line="true"
+          :avg-value="gaugeStats.avg ?? undefined"
+        />
+
+        <div v-else class="text-center text-grey py-8 border rounded-lg bg-grey-lighten-5">
+          <v-icon size="40" color="grey-lighten-1">mdi-chart-line-variant</v-icon>
+          <div class="mt-2 text-subtitle-2">
+            Histórico insuficiente para gerar o gráfico de uso.
+          </div>
+          <div class="text-caption">
+            As amostras vêm da varredura SNMP periódica do dispositivo.
+          </div>
+        </div>
+      </v-card>
+
+      <!-- Gráfico Unificado de Latência / Tempo de Resposta (não se aplica a monitores de uso ou de interface) -->
+      <v-card v-if="!isGaugeMonitor && !isInterfaceMonitor" elevation="2" class="rounded-lg pa-6 mb-6">
         <div class="d-flex align-center justify-space-between mb-4">
           <div>
             <h2 class="text-h6 font-weight-bold d-flex align-center ga-2">
@@ -306,11 +490,22 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useMonitorsStore } from '@/stores/monitors'
+import { useMonitorsStore, type Monitor } from '@/stores/monitors'
+import { apiService } from '@/services/apiService'
+import type { DeviceMetric } from '@/stores/deviceDetail'
 import MonitorTimelineBar from '@/components/MonitorTimelineBar.vue'
 import BaseMetricChart, { type ChartSeriesInput } from '@/components/BaseMetricChart.vue'
+import {
+  isGaugeMonitor as isGaugeMonitorFn,
+  gaugeMetricName,
+  gaugeTypeLabel,
+  gaugeColor as gaugeColorFn,
+  isInterfaceMonitor as isInterfaceMonitorFn,
+  interfaceStatusInfo,
+  latestResultData,
+} from '@/utils/monitorPresentation'
 
 const route = useRoute()
 const router = useRouter()
@@ -318,24 +513,25 @@ const monitorsStore = useMonitorsStore()
 
 const monitorId = computed(() => Number(route.params.id))
 
-const monitor = computed(
-  () =>
-    monitorsStore.currentMonitor || {
-      id: 0,
-      deviceId: 0,
-      name: '',
-      type: 'ping',
-      target: '',
-      port: undefined as number | undefined,
-      intervalSeconds: 60,
-      timeoutSeconds: 5,
-      status: 'unknown',
-      isEnabled: true,
-      device: undefined,
-      recentResults: [],
-      stats: undefined,
-    }
-)
+const emptyMonitor: Monitor = {
+  id: 0,
+  deviceId: 0,
+  name: '',
+  type: 'ping',
+  target: '',
+  port: undefined,
+  configuration: {},
+  intervalSeconds: 60,
+  timeoutSeconds: 5,
+  status: 'unknown',
+  isEnabled: true,
+  device: undefined,
+  recentResults: [],
+  stats: undefined,
+  gaugeMetric: null,
+}
+
+const monitor = computed<Monitor>(() => monitorsStore.currentMonitor || emptyMonitor)
 
 const stats = computed(
   () =>
@@ -370,7 +566,55 @@ const formattedTarget = computed(() => {
 })
 
 const statusText = computed(() => (monitor.value.status || 'UNKNOWN').toUpperCase())
-const typeText = computed(() => (monitor.value.type || 'PING').toUpperCase())
+
+const isGaugeMonitor = computed(() => isGaugeMonitorFn(monitor.value))
+const isInterfaceMonitor = computed(() => isInterfaceMonitorFn(monitor.value))
+
+const typeText = computed(() => {
+  if (isGaugeMonitor.value) return gaugeTypeLabel(monitor.value)
+  if (isInterfaceMonitor.value) return 'INTERFACE'
+  return (monitor.value.type || 'PING').toUpperCase()
+})
+
+const gaugeColorValue = computed(() =>
+  gaugeColorFn(monitor.value.gaugeMetric?.value ?? null, gaugeMetricName(monitor.value))
+)
+
+// Unifica a apresentação do status no header: um monitor de uso mostra % em vez de UP/DOWN,
+// e uma interface mostra o estado real (Up/Down/Desabilitada/Instável) com a velocidade negociada.
+const headerChip = computed(() => {
+  if (isGaugeMonitor.value) {
+    const val = monitor.value.gaugeMetric?.value
+    return {
+      label: val !== null && val !== undefined ? `${Math.round(val)}%` : 'SEM DADOS',
+      color: gaugeColorValue.value,
+      icon: 'mdi-gauge',
+    }
+  }
+  if (isInterfaceMonitor.value) {
+    const info = interfaceStatusInfo(monitor.value.status, latestResultData(monitor.value.recentResults))
+    return { label: info.label.toUpperCase(), color: info.color, icon: info.icon }
+  }
+  return { label: statusText.value, color: getStatusColor(monitor.value.status), icon: 'mdi-circle' }
+})
+
+const typeIcon = computed(() => {
+  if (isGaugeMonitor.value) {
+    return gaugeMetricName(monitor.value) === 'memory_usage' ? 'mdi-memory' : 'mdi-chip'
+  }
+  if (isInterfaceMonitor.value) return headerChip.value.icon
+  switch (monitor.value.type) {
+    case 'http':
+    case 'https':
+      return 'mdi-web'
+    case 'tcp':
+      return 'mdi-ethernet-cable'
+    case 'dns':
+      return 'mdi-dns'
+    default:
+      return 'mdi-ping'
+  }
+})
 
 const lastLatencyText = computed(() => {
   return stats.value.lastLatency !== null ? `${stats.value.lastLatency} ms` : 'N/A'
@@ -385,15 +629,121 @@ const maxLatencyText = computed(() => {
   return stats.value.maxLatency !== null ? `${stats.value.maxLatency}ms` : 'N/A'
 })
 
+// --- Monitores de Interface (ethernet): status vem enriquecido do checker SNMP com
+// velocidade negociada e o motivo real de não estar "up" (admin down, teste, dormente, etc.) ---
+const interfaceLatestData = computed(() => latestResultData(monitor.value.recentResults))
+
+const interfaceSpeedText = computed(() => {
+  const data = interfaceLatestData.value
+  return (data?.speedFormatted as string | undefined) || headerChip.value.label
+})
+
+const interfaceOperText = computed(() => {
+  const data = interfaceLatestData.value
+  return (data?.operStatusText as string | undefined) || headerChip.value.label
+})
+
+const interfaceFlapCount = computed(() => {
+  const results = monitor.value.recentResults || []
+  let flaps = 0
+  for (let i = 1; i < results.length; i++) {
+    if (results[i].status !== results[i - 1].status) flaps++
+  }
+  return flaps
+})
+
+const statusBreakdown = computed(() => {
+  const results = monitor.value.recentResults || []
+  const counts = { up: 0, down: 0, warning: 0, disabled: 0, unknown: 0 }
+  for (const r of results) {
+    const key = (r.status && r.status in counts ? r.status : 'unknown') as keyof typeof counts
+    counts[key]++
+  }
+  return counts
+})
+
+// --- Monitores de Uso (CPU/Memória via SNMP): não são checagens up/down, e sim leituras
+// percentuais — o histórico vem das mesmas métricas de dispositivo usadas no DeviceDetailPage ---
+const gaugeHistory = ref<DeviceMetric[]>([])
+
+const gaugeHistoryFiltered = computed(() => {
+  const name = gaugeMetricName(monitor.value)
+  return gaugeHistory.value
+    .filter((m) => m.metricName === name)
+    .slice()
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+})
+
+const gaugeStats = computed(() => {
+  const values = gaugeHistoryFiltered.value.map((m) => Number(m.metricValue)).filter((v) => !isNaN(v))
+  const current =
+    monitor.value.gaugeMetric?.value ?? (values.length > 0 ? values[values.length - 1] : null)
+  if (values.length === 0) {
+    return { current, avg: null as number | null, min: null as number | null, max: null as number | null }
+  }
+  const avg = Number((values.reduce((a, b) => a + b, 0) / values.length).toFixed(1))
+  return { current, avg, min: Math.min(...values), max: Math.max(...values) }
+})
+
+const gaugeCurrentText = computed(() => {
+  const v = gaugeStats.value.current
+  return v !== null && v !== undefined ? `${Number(v).toFixed(1)}%` : 'N/A'
+})
+const gaugeAvgText = computed(() => (gaugeStats.value.avg !== null ? `${gaugeStats.value.avg}%` : 'N/A'))
+const gaugeMinText = computed(() =>
+  gaugeStats.value.min !== null ? `${gaugeStats.value.min!.toFixed(1)}%` : 'N/A'
+)
+const gaugeMaxText = computed(() =>
+  gaugeStats.value.max !== null ? `${gaugeStats.value.max!.toFixed(1)}%` : 'N/A'
+)
+
+const gaugeSeries = computed<ChartSeriesInput[]>(() => {
+  const list = gaugeHistoryFiltered.value
+  if (list.length === 0) return []
+  const name = gaugeMetricName(monitor.value)
+  return [
+    {
+      id: name,
+      label: name === 'memory_usage' ? 'Uso de Memória' : 'Uso de CPU',
+      color: name === 'memory_usage' ? '#9C27B0' : '#2196F3',
+      fillArea: true,
+      data: list.map((m) => {
+        const val = Number(m.metricValue) || 0
+        return {
+          time: formatDate(m.createdAt),
+          value: val,
+          formattedValue: `${val.toFixed(1)}%`,
+        }
+      }),
+    },
+  ]
+})
+
+async function loadGaugeHistory() {
+  if (!monitor.value.deviceId) {
+    gaugeHistory.value = []
+    return
+  }
+  try {
+    gaugeHistory.value = await apiService.get<DeviceMetric[]>(
+      `/devices/${monitor.value.deviceId}/metrics`
+    )
+  } catch {
+    gaugeHistory.value = []
+  }
+}
+
 onMounted(async () => {
   if (monitorId.value) {
     await monitorsStore.fetchMonitorById(monitorId.value)
+    if (isGaugeMonitor.value) await loadGaugeHistory()
   }
 })
 
 async function refreshData() {
   if (monitorId.value) {
     await monitorsStore.fetchMonitorById(monitorId.value)
+    if (isGaugeMonitor.value) await loadGaugeHistory()
   }
 }
 
@@ -409,20 +759,6 @@ function getStatusColor(status?: string): string {
       return 'warning'
     default:
       return 'grey'
-  }
-}
-
-function getTypeIcon(type?: string): string {
-  switch (type) {
-    case 'http':
-    case 'https':
-      return 'mdi-web'
-    case 'tcp':
-      return 'mdi-ethernet-cable'
-    case 'dns':
-      return 'mdi-dns'
-    default:
-      return 'mdi-ping'
   }
 }
 
