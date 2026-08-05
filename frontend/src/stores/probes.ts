@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { apiService } from '@/services/apiService'
+import { useCrudResource } from './crudResource'
 
 export interface Probe {
   id: number
@@ -13,21 +14,13 @@ export interface Probe {
 }
 
 export const useProbesStore = defineStore('probes', () => {
-  const probes = ref<Probe[]>([])
-  const loading = ref(false)
+  const resource = useCrudResource<Probe>('/probes', { fetch: 'Erro ao carregar probes' })
+  const probes = resource.items
   const testingId = ref<number | null>(null)
-  const error = ref<string | null>(null)
+  const error = resource.error
 
   async function fetchProbes() {
-    loading.value = true
-    error.value = null
-    try {
-      probes.value = await apiService.get<Probe[]>('/probes')
-    } catch (err: unknown) {
-      error.value = err instanceof Error ? err.message : 'Erro ao carregar probes'
-    } finally {
-      loading.value = false
-    }
+    await resource.fetchAll()
   }
 
   async function revokeProbe(probeId: number): Promise<boolean> {
@@ -73,7 +66,7 @@ export const useProbesStore = defineStore('probes', () => {
 
   return {
     probes,
-    loading,
+    loading: resource.loading,
     testingId,
     error,
     applyRealtimeStatus,

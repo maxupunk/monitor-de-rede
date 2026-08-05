@@ -142,6 +142,7 @@
 
 <script setup lang="ts">
 import { ref, computed, type CSSProperties } from 'vue'
+import { formatBps, formatBytes } from '@/utils/formatters'
 
 export interface ChartDataPoint {
   time: string
@@ -382,24 +383,6 @@ const tooltipStyle = computed<CSSProperties>(() => {
     transition: 'left 0.08s ease-out, top 0.08s ease-out',
   }
 })
-
-function formatBytes(bytes?: number): string {
-  if (bytes === undefined || bytes === null || isNaN(bytes)) return '0 B'
-  if (bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
-}
-
-function formatBps(bps?: number): string {
-  if (bps === undefined || bps === null || isNaN(bps)) return '0 bps'
-  if (bps === 0) return '0 bps'
-  const k = 1000
-  const sizes = ['bps', 'Kbps', 'Mbps', 'Gbps']
-  const i = Math.floor(Math.log(bps) / Math.log(k))
-  return parseFloat((bps / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
-}
 </script>
 
 <style scoped>

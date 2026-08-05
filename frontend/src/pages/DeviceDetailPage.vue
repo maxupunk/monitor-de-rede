@@ -213,7 +213,7 @@
                   <td>{{ intf.macAddress || 'N/A' }}</td>
                   <td>
                     <v-chip size="x-small" variant="tonal" color="info">
-                      {{ formatSpeedNegotiation(intf.ifSpeed || intf.speed) }}
+                      {{ formatLinkSpeed(intf.ifSpeed || intf.speed) }}
                     </v-chip>
                   </td>
                 </tr>
@@ -928,7 +928,7 @@
                   <td>{{ iface.macAddress || 'N/A' }}</td>
                   <td>
                     <v-chip size="x-small" variant="tonal" color="info">
-                      {{ formatSpeedNegotiation(iface.ifSpeed) }}
+                      {{ formatLinkSpeed(iface.ifSpeed) }}
                     </v-chip>
                   </td>
                   <td>
@@ -1009,12 +1009,18 @@ import PortScanDialog from '@/components/PortScanDialog.vue'
 import MonitorFormDialog from '@/components/MonitorFormDialog.vue'
 import { getStatusColor } from '@/utils/monitorPresentation'
 import {
+  formatBps,
+  formatBytes,
+  formatLinkSpeed,
+  formatMeasuredValue,
+  formatRelativeTime,
+} from '@/utils/formatters'
+import {
   useVpnStore,
   vpnProfileIcon,
   vpnProfileLabel,
   vpnStatusColor,
   vpnStatusLabel,
-  vpnRelativeTime,
 } from '@/stores/vpn'
 
 const route = useRoute()
@@ -1103,7 +1109,7 @@ const vpnStatusColorValue = computed(() =>
   vpnPeer.value ? vpnStatusColor(vpnPeer.value.connectionStatus) : 'grey'
 )
 const vpnLastHandshakeText = computed(() =>
-  vpnPeer.value ? vpnRelativeTime(vpnPeer.value.lastHandshakeAt) : 'nunca'
+  vpnPeer.value ? formatRelativeTime(vpnPeer.value.lastHandshakeAt) : 'nunca'
 )
 
 const vpnNeedsFirewallHint = computed(() => {
@@ -1296,48 +1302,8 @@ const interfaceTrafficSummaries = computed(() => {
     })
 })
 
-function formatBytes(bytes?: number): string {
-  if (bytes === undefined || bytes === null || isNaN(bytes)) return '0 B'
-  if (bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
-}
-
-function formatBps(bps?: number): string {
-  if (bps === undefined || bps === null || isNaN(bps)) return '0 bps'
-  if (bps === 0) return '0 bps'
-  const k = 1000
-  const sizes = ['bps', 'Kbps', 'Mbps', 'Gbps']
-  const i = Math.floor(Math.log(bps) / Math.log(k))
-  return parseFloat((bps / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
-}
-
-function formatSpeedNegotiation(bps?: number | null): string {
-  if (!bps || bps <= 0) return 'N/A'
-  if (bps >= 1_000_000_000) {
-    const gbps = bps / 1_000_000_000
-    return `${Number.isInteger(gbps) ? gbps : gbps.toFixed(1)} Gbps`
-  }
-  if (bps >= 1_000_000) {
-    const mbps = bps / 1_000_000
-    return `${Number.isInteger(mbps) ? mbps : mbps.toFixed(1)} Mbps`
-  }
-  if (bps >= 1_000) {
-    const kbps = bps / 1_000
-    return `${Number.isInteger(kbps) ? kbps : kbps.toFixed(1)} Kbps`
-  }
-  return `${bps} bps`
-}
-
 function formatMetricValue(metric: DeviceMetric): string {
-  const val = Number(metric.metricValue)
-  if (isNaN(val)) return String(metric.metricValue)
-
-  if (metric.unit === 'bytes') return formatBytes(val)
-  if (metric.unit === 'bps') return formatBps(val)
-  return `${val} ${metric.unit || ''}`.trim()
+  return formatMeasuredValue(metric.metricValue, metric.unit)
 }
 
 function getCpuColor(usage?: number | null) {

@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import type { CheckResult, MonitorChecker } from '../contracts/check_result.js'
+import { errorMessage } from '#modules/shared/errors'
 
 const execFileAsync = promisify(execFile)
 
@@ -74,15 +75,13 @@ export class PingChecker implements MonitorChecker<PingConfig> {
     } catch (err: unknown) {
       const finishedAt = new Date()
       const durationMs = finishedAt.getTime() - startedAt.getTime()
-      const errorMessage = err instanceof Error ? err.message : String(err)
-
       return {
         success: false,
         status: 'down',
         startedAt,
         finishedAt,
         durationMs,
-        message: `Falha ao executar ping em ${config.host}: ${errorMessage}`,
+        message: `Falha ao executar ping em ${config.host}: ${errorMessage(err)}`,
         metrics: [
           { name: 'latency', value: 0, unit: 'ms' },
           { name: 'packet_loss', value: 100, unit: '%' },

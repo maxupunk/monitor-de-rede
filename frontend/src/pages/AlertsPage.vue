@@ -331,6 +331,7 @@ import {
   describeRule,
   type AlertOperator,
 } from '@/utils/alertPresentation'
+import { formatDateTime } from '@/utils/formatters'
 
 const alertsStore = useAlertsStore()
 const eventsStore = useEventsStore()
@@ -409,12 +410,6 @@ function onCatalogApplied(summary: { created: number; skipped: number }) {
 
 function durationLabel(seconds?: number): string {
   return ALERT_DURATIONS.find((d) => d.value === (seconds ?? 0))?.title ?? `${seconds}s`
-}
-
-function formatDateTime(value?: string): string {
-  if (!value) return '—'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('pt-BR')
 }
 
 function onMetricChange(field: string) {

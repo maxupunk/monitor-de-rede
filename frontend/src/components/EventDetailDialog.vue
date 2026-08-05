@@ -145,7 +145,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { RealtimeEventPayload } from '@/stores/events'
-import { formatEventDetails, formatHumanReadableValue } from '@/utils/eventPresentation'
+import { formatEventDetails } from '@/utils/eventPresentation'
+import { formatMeasuredValue } from '@/utils/formatters'
 
 const props = defineProps<{
   modelValue: boolean
@@ -204,7 +205,7 @@ const filteredMetrics = computed(() => {
 })
 
 function humanFormatted(val: any, unit?: string): string {
-  return formatHumanReadableValue(val, unit)
+  return formatMeasuredValue(val, unit)
 }
 
 const formattedFullDate = computed(() => {

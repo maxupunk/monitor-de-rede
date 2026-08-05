@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
-import { apiService } from '@/services/apiService'
+import { computed } from 'vue'
+import { useCrudResource } from './crudResource'
 import type { VpnDeviceProfile, VpnConnectionStatus } from './vpn'
 
 export interface DeviceVpnPeer {
@@ -62,9 +62,13 @@ export interface Device {
 }
 
 export const useDevicesStore = defineStore('devices', () => {
-  const devices = ref<Device[]>([])
-  const loading = ref(false)
-  const error = ref<string | null>(null)
+  const resource = useCrudResource<Device>('/devices', {
+    fetch: 'Erro ao carregar dispositivos',
+    create: 'Erro ao criar dispositivo',
+    update: 'Erro ao atualizar dispositivo',
+    delete: 'Erro ao excluir dispositivo',
+  })
+  const devices = resource.items
 
   const totalCount = computed(() => devices.value.length)
   const onlineCount = computed(() => devices.value.filter((d) => d.status === 'online').length)
@@ -72,51 +76,19 @@ export const useDevicesStore = defineStore('devices', () => {
   const warningCount = computed(() => devices.value.filter((d) => d.status === 'warning').length)
 
   async function fetchDevices() {
-    loading.value = true
-    error.value = null
-    try {
-      devices.value = await apiService.get<Device[]>('/devices')
-    } catch (err: unknown) {
-      error.value = err instanceof Error ? err.message : 'Erro ao carregar dispositivos'
-    } finally {
-      loading.value = false
-    }
+    await resource.fetchAll()
   }
 
   async function createDevice(payload: Partial<Device>): Promise<boolean> {
-    try {
-      const created = await apiService.post<Device>('/devices', payload)
-      devices.value.push(created)
-      return true
-    } catch (err: unknown) {
-      error.value = err instanceof Error ? err.message : 'Erro ao criar dispositivo'
-      return false
-    }
+    return (await resource.create(payload)) !== null
   }
 
   async function updateDevice(id: number, payload: Partial<Device>): Promise<boolean> {
-    try {
-      const updated = await apiService.put<Device>(`/devices/${id}`, payload)
-      const index = devices.value.findIndex((d) => d.id === id)
-      if (index !== -1) {
-        devices.value[index] = updated
-      }
-      return true
-    } catch (err: unknown) {
-      error.value = err instanceof Error ? err.message : 'Erro ao atualizar dispositivo'
-      return false
-    }
+    return (await resource.update(id, payload)) !== null
   }
 
   async function deleteDevice(id: number): Promise<boolean> {
-    try {
-      await apiService.delete(`/devices/${id}`)
-      devices.value = devices.value.filter((d) => d.id !== id)
-      return true
-    } catch (err: unknown) {
-      error.value = err instanceof Error ? err.message : 'Erro ao excluir dispositivo'
-      return false
-    }
+    return resource.remove(id)
   }
 
   function updateDeviceStatus(id: number, status: Device['status']) {
@@ -140,8 +112,8 @@ export const useDevicesStore = defineStore('devices', () => {
 
   return {
     devices,
-    loading,
-    error,
+    loading: resource.loading,
+    error: resource.error,
     totalCount,
     onlineCount,
     offlineCount,

@@ -6,6 +6,7 @@ import { PortScanner } from './scanners/port_scanner.js'
 import { DiscoveryMerger } from './discovery_merger.js'
 import DiscoveryRun from '#models/discovery_run'
 import DiscoveryResult from '#models/discovery_result'
+import { errorMessage } from '#modules/shared/errors'
 import { EventBus } from '#modules/events/event_bus'
 
 export class DiscoveryService {
@@ -83,7 +84,7 @@ export class DiscoveryService {
 
       return finalHosts
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = errorMessage(err)
       if (runRecord) {
         runRecord.status = 'failed'
         runRecord.finishedAt = DateTime.now()

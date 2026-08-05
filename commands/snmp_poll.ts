@@ -2,6 +2,7 @@ import { BaseCommand, args, flags } from '@adonisjs/core/ace'
 import type { CommandOptions } from '@adonisjs/core/types/ace'
 import Device from '#models/device'
 import { SnmpService } from '#modules/snmp/snmp_service'
+import { errorMessage } from '#modules/shared/errors'
 
 export default class SnmpPoll extends BaseCommand {
   static commandName = 'snmp:poll'
@@ -68,7 +69,7 @@ export default class SnmpPoll extends BaseCommand {
           )
         } catch (error) {
           this.logger.error(
-            `Falha na varredura do dispositivo #${device.id}: ${error instanceof Error ? error.message : String(error)}`
+            `Falha na varredura do dispositivo #${device.id}: ${errorMessage(error)}`
           )
         }
       }

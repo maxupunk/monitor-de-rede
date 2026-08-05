@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { apiService } from '@/services/apiService'
+import { useCrudResource } from './crudResource'
 
 export interface Network {
   id: number
@@ -16,57 +17,28 @@ export interface Network {
 }
 
 export const useNetworksStore = defineStore('networks', () => {
-  const networks = ref<Network[]>([])
-  const loading = ref(false)
+  const resource = useCrudResource<Network>('/networks', {
+    fetch: 'Erro ao carregar redes',
+    create: 'Erro ao criar rede',
+    update: 'Erro ao atualizar rede',
+    delete: 'Erro ao excluir rede',
+  })
   const scanningId = ref<number | null>(null)
-  const error = ref<string | null>(null)
 
   async function fetchNetworks() {
-    loading.value = true
-    error.value = null
-    try {
-      networks.value = await apiService.get<Network[]>('/networks')
-    } catch (err: unknown) {
-      error.value = err instanceof Error ? err.message : 'Erro ao carregar redes'
-    } finally {
-      loading.value = false
-    }
+    await resource.fetchAll()
   }
 
   async function createNetwork(payload: Partial<Network>): Promise<boolean> {
-    try {
-      const created = await apiService.post<Network>('/networks', payload)
-      networks.value.push(created)
-      return true
-    } catch (err: unknown) {
-      error.value = err instanceof Error ? err.message : 'Erro ao criar rede'
-      return false
-    }
+    return (await resource.create(payload)) !== null
   }
 
   async function updateNetwork(id: number, payload: Partial<Network>): Promise<boolean> {
-    try {
-      const updated = await apiService.put<Network>(`/networks/${id}`, payload)
-      const index = networks.value.findIndex((n) => n.id === id)
-      if (index !== -1) {
-        networks.value[index] = updated
-      }
-      return true
-    } catch (err: unknown) {
-      error.value = err instanceof Error ? err.message : 'Erro ao atualizar rede'
-      return false
-    }
+    return (await resource.update(id, payload)) !== null
   }
 
   async function deleteNetwork(id: number): Promise<boolean> {
-    try {
-      await apiService.delete(`/networks/${id}`)
-      networks.value = networks.value.filter((n) => n.id !== id)
-      return true
-    } catch (err: unknown) {
-      error.value = err instanceof Error ? err.message : 'Erro ao excluir rede'
-      return false
-    }
+    return resource.remove(id)
   }
 
   async function scanNetwork(id: number): Promise<boolean> {
@@ -75,7 +47,8 @@ export const useNetworksStore = defineStore('networks', () => {
       await apiService.post(`/networks/${id}/scan`)
       return true
     } catch (err: unknown) {
-      error.value = err instanceof Error ? err.message : 'Erro ao iniciar varredura da rede'
+      resource.error.value =
+        err instanceof Error ? err.message : 'Erro ao iniciar varredura da rede'
       return false
     } finally {
       scanningId.value = null
@@ -83,10 +56,10 @@ export const useNetworksStore = defineStore('networks', () => {
   }
 
   return {
-    networks,
-    loading,
+    networks: resource.items,
+    loading: resource.loading,
     scanningId,
-    error,
+    error: resource.error,
     fetchNetworks,
     createNetwork,
     updateNetwork,

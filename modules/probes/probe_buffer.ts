@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { errorMessage } from '#modules/shared/errors'
 
 export interface BufferedResult {
   taskId: string
@@ -21,7 +22,7 @@ export class ProbeBuffer {
         fs.mkdirSync(dir, { recursive: true })
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
+      const msg = errorMessage(err)
       console.error(`[ProbeBuffer] Erro ao criar diretório do buffer: ${msg}`)
     }
   }
@@ -38,7 +39,7 @@ export class ProbeBuffer {
       current.push(newItem)
       fs.writeFileSync(this.filePath, JSON.stringify(current, null, 2), 'utf-8')
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
+      const msg = errorMessage(err)
       console.error(`[ProbeBuffer] Erro ao salvar resultado offline: ${msg}`)
     }
   }
@@ -54,7 +55,7 @@ export class ProbeBuffer {
       }
       return JSON.parse(raw) as BufferedResult[]
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
+      const msg = errorMessage(err)
       console.error(`[ProbeBuffer] Erro ao ler resultados offline: ${msg}`)
       return []
     }
@@ -66,7 +67,7 @@ export class ProbeBuffer {
         fs.unlinkSync(this.filePath)
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
+      const msg = errorMessage(err)
       console.error(`[ProbeBuffer] Erro ao limpar resultados offline: ${msg}`)
     }
   }

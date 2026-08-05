@@ -1,6 +1,7 @@
 import { DateTime } from 'luxon'
 import EventOutbox from '#models/event_outbox'
 import { EventBus, PROCESS_ORIGIN, type SystemEvent } from './event_bus.js'
+import { errorMessage } from '#modules/shared/errors'
 
 /** Frequência de leitura da caixa de saída */
 const POLL_INTERVAL_MS = 1000
@@ -103,7 +104,7 @@ export class EventRelay {
         this.eventBus.dispatch(event)
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
+      const msg = errorMessage(err)
       console.error(`[EventRelay] Falha ao ler a caixa de saída de eventos: ${msg}`)
     } finally {
       this.polling = false
@@ -117,7 +118,7 @@ export class EventRelay {
         .where('createdAt', '<', DateTime.now().minus({ minutes: RETENTION_MINUTES }).toJSDate())
         .delete()
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
+      const msg = errorMessage(err)
       console.error(`[EventRelay] Falha ao limpar a caixa de saída de eventos: ${msg}`)
     }
   }

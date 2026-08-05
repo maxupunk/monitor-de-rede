@@ -11,6 +11,7 @@
 
 import logger from '@adonisjs/core/services/logger'
 import { VpnProbeRegistrar } from '#modules/vpn/vpn_probe_registrar'
+import { errorMessage } from '#modules/shared/errors'
 
 const registrar = new VpnProbeRegistrar()
 
@@ -24,6 +25,6 @@ try {
   }
 } catch (error: unknown) {
   // Falha aqui não pode impedir a API de subir (ex.: banco ainda migrando).
-  const message = error instanceof Error ? error.message : String(error)
+  const message = errorMessage(error)
   logger.warn(`[VPN] não foi possível registrar o vpn-probe automaticamente: ${message}`)
 }

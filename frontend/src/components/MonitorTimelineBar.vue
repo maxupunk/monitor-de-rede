@@ -47,6 +47,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { MonitorResult } from '@/stores/monitors'
+import { getStatusHexColor } from '@/utils/monitorPresentation'
+import { formatShortDateTime } from '@/utils/formatters'
 
 const props = withDefaults(
   defineProps<{
@@ -70,39 +72,6 @@ interface BlockItem {
   latencyMs: number | null
   formattedTime: string
   message?: string
-}
-
-function getStatusColor(status?: string): string {
-  switch (status) {
-    case 'up':
-    case 'online':
-      return '#4CAF50'
-    case 'down':
-    case 'offline':
-      return '#F44336'
-    case 'warning':
-      return '#FF9800'
-    case 'disabled':
-      return '#9E9E9E'
-    default:
-      return '#B0BEC5'
-  }
-}
-
-function formatDate(dateStr?: string): string {
-  if (!dateStr) return ''
-  try {
-    const d = new Date(dateStr)
-    return d.toLocaleString('pt-BR', {
-      day: '2-digit',
-      month: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    })
-  } catch {
-    return dateStr
-  }
 }
 
 const formattedBlocks = computed<BlockItem[]>(() => {
@@ -131,9 +100,9 @@ const formattedBlocks = computed<BlockItem[]>(() => {
     items.push({
       hasData: true,
       statusText: item.status || 'unknown',
-      color: getStatusColor(item.status),
+      color: getStatusHexColor(item.status),
       latencyMs: item.latencyMs ?? null,
-      formattedTime: formatDate(item.finishedAt || item.startedAt),
+      formattedTime: formatShortDateTime(item.finishedAt || item.startedAt),
       message: item.message || undefined,
     })
   }

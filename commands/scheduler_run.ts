@@ -6,6 +6,7 @@ import { MonitorRunner } from '#modules/monitoring/monitor_runner'
 import { ResultProcessor } from '#modules/monitoring/result_processor'
 import { ProbeTaskDispatcher } from '#modules/probes/probe_task_dispatcher'
 import { VpnTrafficRecorder } from '#modules/vpn/vpn_traffic_recorder'
+import { errorMessage } from '#modules/shared/errors'
 
 /** Cadência da gravação de histórico de tráfego VPN — não precisa ser tão fina quanto o polling de monitores. */
 const VPN_TRAFFIC_INTERVAL_SECONDS = 30
@@ -32,14 +33,14 @@ export default class SchedulerRun extends BaseCommand {
       try {
         await this.checkDueMonitors()
       } catch (err: unknown) {
-        const errorMsg = err instanceof Error ? err.message : String(err)
+        const errorMsg = errorMessage(err)
         this.logger.error(`Erro durante ciclo do scheduler: ${errorMsg}`)
       }
 
       try {
         await this.syncVpnTrafficIfDue()
       } catch (err: unknown) {
-        const errorMsg = err instanceof Error ? err.message : String(err)
+        const errorMsg = errorMessage(err)
         this.logger.error(`Erro ao sincronizar tráfego VPN: ${errorMsg}`)
       }
 
@@ -106,7 +107,7 @@ export default class SchedulerRun extends BaseCommand {
         this.logger.info(`[Scheduler] Monitor #${monitor.id} finalizado: status=${result.status}`)
       }
     } catch (err: unknown) {
-      const errorMsg = err instanceof Error ? err.message : String(err)
+      const errorMsg = errorMessage(err)
       this.logger.error(`[Scheduler] Erro ao executar monitor #${monitor.id}: ${errorMsg}`)
     }
   }

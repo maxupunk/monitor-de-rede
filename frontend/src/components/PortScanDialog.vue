@@ -193,6 +193,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { usePortScanStore, type PortScanItem, type PortProtocol } from '@/stores/portScan'
+import { getStatusColor } from '@/utils/monitorPresentation'
 
 const props = defineProps<{
   modelValue: boolean
@@ -292,11 +293,7 @@ function resolvePorts(): number[] {
   return protocol.value === 'tcp' ? TCP_COMMON_PORTS : UDP_COMMON_PORTS
 }
 
-function statusColor(status: PortScanItem['status']) {
-  if (status === 'open') return 'success'
-  if (status === 'closed') return 'grey'
-  return 'warning'
-}
+const statusColor = getStatusColor
 
 function statusLabel(status: PortScanItem['status']) {
   if (status === 'open') return 'ABERTA'

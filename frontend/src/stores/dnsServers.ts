@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { apiService } from '@/services/apiService'
+import { useCrudResource } from './crudResource'
 import type { DnsProtocol } from '@/utils/monitorTypes'
 
 export interface DnsServer {
@@ -19,10 +19,14 @@ export interface DnsServer {
 export type DnsServerPayload = Omit<DnsServer, 'id' | 'createdAt' | 'updatedAt'>
 
 export const useDnsServersStore = defineStore('dnsServers', () => {
-  const servers = ref<DnsServer[]>([])
-  const loading = ref(false)
+  const resource = useCrudResource<DnsServer>('/dns/servers', {
+    fetch: 'Erro ao carregar os servidores DNS',
+    create: 'Erro ao cadastrar o servidor DNS',
+    update: 'Erro ao atualizar o servidor DNS',
+    delete: 'Erro ao excluir o servidor DNS',
+  })
+  const servers = resource.items
   const saving = ref(false)
-  const error = ref<string | null>(null)
   const loaded = ref(false)
 
   const benchmarkServers = computed(() => servers.value.filter((server) => server.isDefault))
@@ -38,30 +42,15 @@ export const useDnsServersStore = defineStore('dnsServers', () => {
 
   async function fetchServers(force = false): Promise<boolean> {
     if (loaded.value && !force) return true
-    loading.value = true
-    error.value = null
-    try {
-      servers.value = await apiService.get<DnsServer[]>('/dns/servers')
-      loaded.value = true
-      return true
-    } catch (err: unknown) {
-      error.value = err instanceof Error ? err.message : 'Erro ao carregar os servidores DNS'
-      return false
-    } finally {
-      loading.value = false
-    }
+    const ok = await resource.fetchAll()
+    if (ok) loaded.value = true
+    return ok
   }
 
   async function createServer(payload: DnsServerPayload): Promise<DnsServer | null> {
     saving.value = true
-    error.value = null
     try {
-      const created = await apiService.post<DnsServer>('/dns/servers', payload)
-      servers.value.push(created)
-      return created
-    } catch (err: unknown) {
-      error.value = err instanceof Error ? err.message : 'Erro ao cadastrar o servidor DNS'
-      return null
+      return await resource.create(payload)
     } finally {
       saving.value = false
     }
@@ -72,15 +61,8 @@ export const useDnsServersStore = defineStore('dnsServers', () => {
     payload: Partial<DnsServerPayload>
   ): Promise<DnsServer | null> {
     saving.value = true
-    error.value = null
     try {
-      const updated = await apiService.put<DnsServer>(`/dns/servers/${id}`, payload)
-      const index = servers.value.findIndex((server) => server.id === id)
-      if (index !== -1) servers.value[index] = updated
-      return updated
-    } catch (err: unknown) {
-      error.value = err instanceof Error ? err.message : 'Erro ao atualizar o servidor DNS'
-      return null
+      return await resource.update(id, payload)
     } finally {
       saving.value = false
     }
@@ -88,14 +70,8 @@ export const useDnsServersStore = defineStore('dnsServers', () => {
 
   async function deleteServer(id: number): Promise<boolean> {
     saving.value = true
-    error.value = null
     try {
-      await apiService.delete(`/dns/servers/${id}`)
-      servers.value = servers.value.filter((server) => server.id !== id)
-      return true
-    } catch (err: unknown) {
-      error.value = err instanceof Error ? err.message : 'Erro ao excluir o servidor DNS'
-      return false
+      return await resource.remove(id)
     } finally {
       saving.value = false
     }
@@ -127,9 +103,9 @@ export const useDnsServersStore = defineStore('dnsServers', () => {
 
   return {
     servers,
-    loading,
+    loading: resource.loading,
     saving,
-    error,
+    error: resource.error,
     loaded,
     benchmarkServers,
     findByAddress,

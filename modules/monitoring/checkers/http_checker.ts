@@ -1,4 +1,5 @@
 import type { CheckResult, MonitorChecker } from '../contracts/check_result.js'
+import { errorMessage } from '#modules/shared/errors'
 
 export interface HttpConfig {
   url: string
@@ -46,7 +47,6 @@ export class HttpChecker implements MonitorChecker<HttpConfig> {
     } catch (err: unknown) {
       const finishedAt = new Date()
       const durationMs = finishedAt.getTime() - startedAt.getTime()
-      const errorMessage = err instanceof Error ? err.message : String(err)
 
       return {
         success: false,
@@ -54,7 +54,7 @@ export class HttpChecker implements MonitorChecker<HttpConfig> {
         startedAt,
         finishedAt,
         durationMs,
-        message: `Falha na requisição HTTP ${method} para ${config.url}: ${errorMessage}`,
+        message: `Falha na requisição HTTP ${method} para ${config.url}: ${errorMessage(err)}`,
         metrics: [{ name: 'response_time', value: durationMs, unit: 'ms' }],
       }
     }

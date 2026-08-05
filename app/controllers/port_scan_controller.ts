@@ -1,6 +1,7 @@
 import type { HttpContext } from '@adonisjs/core/http'
 import vine from '@vinejs/vine'
 import { PortScannerService } from '#modules/network_tools/port_scanner_service'
+import { errorMessage } from '#modules/shared/errors'
 
 export default class PortScanController {
   private portScannerService = new PortScannerService()
@@ -62,7 +63,7 @@ export default class PortScanController {
     } catch (error) {
       writeLine({
         type: 'error',
-        message: error instanceof Error ? error.message : String(error),
+        message: errorMessage(error),
       })
     } finally {
       rawRes.end()

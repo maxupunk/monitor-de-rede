@@ -82,41 +82,81 @@ export function latestResultData(
 }
 
 /**
+ * Categorias de estado reconhecidas na UI. Todo status textual vindo do backend
+ * (dispositivo, monitor, alerta, interface, porta, probe) é reduzido a uma
+ * destas categorias antes de virar cor — assim a mesma situação nunca aparece
+ * verde numa tela e cinza em outra.
+ */
+export type StatusTone = 'success' | 'error' | 'warning' | 'info' | 'neutral'
+
+const STATUS_TONES: Record<string, StatusTone> = {
+  up: 'success',
+  online: 'success',
+  success: 'success',
+  ok: 'success',
+  active: 'success',
+  accepted: 'success',
+  open: 'success',
+  connected: 'success',
+  down: 'error',
+  offline: 'error',
+  error: 'error',
+  critical: 'error',
+  failed: 'error',
+  disconnected: 'error',
+  warning: 'warning',
+  degraded: 'warning',
+  unstable: 'warning',
+  instável: 'warning',
+  silenced: 'warning',
+  filtered: 'warning',
+  merged: 'info',
+  disabled: 'neutral',
+  desabilitada: 'neutral',
+  inactive: 'neutral',
+  revoked: 'neutral',
+  unknown: 'neutral',
+  pending: 'neutral',
+  closed: 'neutral',
+  awaiting: 'neutral',
+}
+
+/** Cores do tema Vuetify por categoria */
+const TONE_THEME_COLORS: Record<StatusTone, string> = {
+  success: 'success',
+  error: 'error',
+  warning: 'warning',
+  info: 'info',
+  neutral: 'grey',
+}
+
+/**
+ * Cores literais para contextos que não resolvem o tema do Vuetify — SVG,
+ * canvas e estilos inline.
+ */
+const TONE_HEX_COLORS: Record<StatusTone, string> = {
+  success: '#4CAF50',
+  error: '#F44336',
+  warning: '#FF9800',
+  info: '#2196F3',
+  neutral: '#B0BEC5',
+}
+
+/** Classifica qualquer status textual numa das categorias visuais */
+export function statusTone(status?: string | null): StatusTone {
+  if (!status) return 'neutral'
+  return STATUS_TONES[status.toLowerCase().trim()] ?? 'neutral'
+}
+
+/**
  * Retorna a cor do Vuetify correspondente ao estado/status de um dispositivo,
  * monitor, alerta ou interface de forma unificada.
  */
 export function getStatusColor(status?: string | null): string {
-  if (!status) return 'grey'
-  const normalized = status.toLowerCase().trim()
-  switch (normalized) {
-    case 'up':
-    case 'online':
-    case 'success':
-    case 'ok':
-    case 'active':
-    case 'accepted':
-      return 'success'
-    case 'down':
-    case 'offline':
-    case 'error':
-    case 'critical':
-    case 'failed':
-      return 'error'
-    case 'warning':
-    case 'degraded':
-    case 'unstable':
-    case 'instável':
-    case 'silenced':
-      return 'warning'
-    case 'merged':
-      return 'info'
-    case 'disabled':
-    case 'desabilitada':
-    case 'inactive':
-    case 'revoked':
-    case 'unknown':
-    case 'pending':
-    default:
-      return 'grey'
-  }
+  return TONE_THEME_COLORS[statusTone(status)]
+}
+
+/** Mesma classificação de `getStatusColor`, em hexadecimal para SVG/canvas */
+export function getStatusHexColor(status?: string | null): string {
+  return TONE_HEX_COLORS[statusTone(status)]
 }

@@ -179,9 +179,9 @@ import {
   vpnProfileLabel,
   vpnStatusColor,
   vpnStatusLabel,
-  vpnRelativeTime,
   type VpnPeer,
 } from '@/stores/vpn'
+import { formatBytes, formatRelativeTime } from '@/utils/formatters'
 
 const vpnStore = useVpnStore()
 
@@ -209,17 +209,10 @@ const profileLabel = vpnProfileLabel
 const profileIcon = vpnProfileIcon
 const statusLabel = vpnStatusLabel
 const statusColor = vpnStatusColor
-const relativeTime = vpnRelativeTime
+const relativeTime = formatRelativeTime
 
 function isMobile(peer: VpnPeer): boolean {
   return peer.deviceProfile === 'mobile'
-}
-
-function formatBytes(value: number): string {
-  if (!value) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1)
-  return `${(value / 1024 ** index).toFixed(index === 0 ? 0 : 1)} ${units[index]}`
 }
 
 function onPeerCreated() {

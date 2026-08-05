@@ -3,6 +3,7 @@ import { VpnServerService } from '#modules/vpn/vpn_server_service'
 import { PreflightService } from '#modules/vpn/preflight'
 import { profileRegistry } from '#modules/vpn/profiles/profile_registry'
 import { PERSISTENT_KEEPALIVE_SECONDS } from '#modules/vpn/profiles/profile_contract'
+import { errorMessage } from '#modules/shared/errors'
 
 /**
  * Painel do servidor WireGuard: configuração, estado dos túneis, auto-detecção
@@ -55,7 +56,7 @@ export default class VpnServersController {
         serverAddress: this.serverService.serverAddress(server),
       })
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = errorMessage(error)
       return response.badRequest({ message })
     }
   }

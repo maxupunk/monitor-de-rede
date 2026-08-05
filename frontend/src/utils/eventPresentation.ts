@@ -1,4 +1,5 @@
 import type { RealtimeEventPayload } from '@/stores/events'
+import { formatClockTime, formatMeasuredValue } from '@/utils/formatters'
 
 export interface FormattedEventDetails {
   title: string
@@ -15,36 +16,9 @@ export interface FormattedEventDetails {
   rawJson: string
 }
 
-export function formatHumanReadableValue(val: any, unit?: string): string {
-  if (typeof val !== 'number' || Number.isNaN(val)) return String(val ?? '')
-  if (unit === 'bytes' || unit === 'B') {
-    if (val >= 1_073_741_824) return `${(val / 1_073_741_824).toFixed(2)} GB`
-    if (val >= 1_048_576) return `${(val / 1_048_576).toFixed(2)} MB`
-    if (val >= 1024) return `${(val / 1024).toFixed(2)} KB`
-    return `${val} bytes`
-  }
-  if (unit === 'bps') {
-    if (val >= 1_000_000_000) return `${(val / 1_000_000_000).toFixed(2)} Gbps`
-    if (val >= 1_000_000) return `${(val / 1_000_000).toFixed(2)} Mbps`
-    if (val >= 1000) return `${(val / 1000).toFixed(2)} Kbps`
-    return `${val} bps`
-  }
-  return `${val}${unit ? ' ' + unit : ''}`
-}
-
 export function formatEventDetails(evt: RealtimeEventPayload): FormattedEventDetails {
   const d = (evt.data || {}) as Record<string, any>
-  const dateStr = evt.timestamp
-    ? new Date(evt.timestamp).toLocaleTimeString('pt-BR', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-      })
-    : new Date().toLocaleTimeString('pt-BR', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-      })
+  const dateStr = formatClockTime(evt.timestamp)
 
   const rawJson = JSON.stringify(d, null, 2)
 
@@ -78,13 +52,13 @@ export function formatEventDetails(evt: RealtimeEventPayload): FormattedEventDet
         } else if (interfaceIds.length > 0) {
           const firstIf = metrics.find((m: any) => m.interfaceId != null)
           const firstVal = firstIf
-            ? `${firstIf.name} #${firstIf.interfaceId}: ${formatHumanReadableValue(firstIf.value, firstIf.unit)}`
+            ? `${firstIf.name} #${firstIf.interfaceId}: ${formatMeasuredValue(firstIf.value, firstIf.unit)}`
             : ''
           message = `${metrics.length} métrica(s) em ${interfaceIds.length} interface(s) (${firstVal})`
         } else {
           const formattedList = metrics
             .slice(0, 3)
-            .map((m: any) => `${m.name}: ${formatHumanReadableValue(m.value, m.unit)}`)
+            .map((m: any) => `${m.name}: ${formatMeasuredValue(m.value, m.unit)}`)
             .join(', ')
           const moreCount = metrics.length > 3 ? ` (+${metrics.length - 3} mais)` : ''
           message = `${metrics.length} métrica${metrics.length > 1 ? 's' : ''}: ${formattedList}${moreCount}`

@@ -1,6 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
-import { apiService } from '@/services/apiService'
+import { useCrudResource } from './crudResource'
 
 export interface Site {
   id: number
@@ -14,57 +13,36 @@ export interface Site {
 }
 
 export const useSitesStore = defineStore('sites', () => {
-  const sites = ref<Site[]>([])
-  const loading = ref(false)
-  const error = ref<string | null>(null)
+  const resource = useCrudResource<Site>('/sites', {
+    fetch: 'Erro ao carregar sites',
+    create: 'Erro ao criar site',
+    update: 'Erro ao atualizar site',
+    delete: 'Erro ao excluir site',
+  })
 
   async function fetchSites() {
-    loading.value = true
-    error.value = null
-    try {
-      sites.value = await apiService.get<Site[]>('/sites')
-    } catch (err: unknown) {
-      error.value = err instanceof Error ? err.message : 'Erro ao carregar sites'
-    } finally {
-      loading.value = false
-    }
+    await resource.fetchAll()
   }
 
   async function createSite(payload: Partial<Site>): Promise<boolean> {
-    try {
-      const created = await apiService.post<Site>('/sites', payload)
-      sites.value.push(created)
-      return true
-    } catch (err: unknown) {
-      error.value = err instanceof Error ? err.message : 'Erro ao criar site'
-      return false
-    }
+    return (await resource.create(payload)) !== null
   }
 
   async function updateSite(id: number, payload: Partial<Site>): Promise<boolean> {
-    try {
-      const updated = await apiService.put<Site>(`/sites/${id}`, payload)
-      const index = sites.value.findIndex((s) => s.id === id)
-      if (index !== -1) {
-        sites.value[index] = updated
-      }
-      return true
-    } catch (err: unknown) {
-      error.value = err instanceof Error ? err.message : 'Erro ao atualizar site'
-      return false
-    }
+    return (await resource.update(id, payload)) !== null
   }
 
   async function deleteSite(id: number): Promise<boolean> {
-    try {
-      await apiService.delete(`/sites/${id}`)
-      sites.value = sites.value.filter((s) => s.id !== id)
-      return true
-    } catch (err: unknown) {
-      error.value = err instanceof Error ? err.message : 'Erro ao excluir site'
-      return false
-    }
+    return resource.remove(id)
   }
 
-  return { sites, loading, error, fetchSites, createSite, updateSite, deleteSite }
+  return {
+    sites: resource.items,
+    loading: resource.loading,
+    error: resource.error,
+    fetchSites,
+    createSite,
+    updateSite,
+    deleteSite,
+  }
 })

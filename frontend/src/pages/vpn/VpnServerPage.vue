@@ -240,6 +240,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useVpnStore } from '@/stores/vpn'
 import { useSitesStore } from '@/stores/sites'
+import { formatBytes } from '@/utils/formatters'
 
 const vpnStore = useVpnStore()
 const sitesStore = useSitesStore()
@@ -281,13 +282,6 @@ watch(
 onMounted(async () => {
   await Promise.all([vpnStore.fetchServer(), sitesStore.fetchSites()])
 })
-
-function formatBytes(value: number): string {
-  if (!value) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1)
-  return `${(value / 1024 ** index).toFixed(index === 0 ? 0 : 1)} ${units[index]}`
-}
 
 async function detectEndpoint() {
   const detected = await vpnStore.detectEndpoint()

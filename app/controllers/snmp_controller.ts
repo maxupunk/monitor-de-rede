@@ -5,6 +5,7 @@ import Monitor from '#models/monitor'
 import Metric from '#models/metric'
 import { SnmpService } from '#modules/snmp/snmp_service'
 import { syncZabbixTemplateMonitor } from '#modules/zabbix/zabbix_template_monitor_sync'
+import { errorMessage } from '#modules/shared/errors'
 import vine from '@vinejs/vine'
 
 export default class SnmpController {
@@ -55,7 +56,7 @@ export default class SnmpController {
     } catch (error) {
       return response.badRequest({
         message: 'Falha ao executar varredura SNMP',
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage(error),
       })
     }
   }
@@ -98,7 +99,7 @@ export default class SnmpController {
     } catch (error) {
       return response.badRequest({
         message: 'Falha ao testar conexão SNMP',
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage(error),
       })
     }
   }
@@ -128,7 +129,7 @@ export default class SnmpController {
     } catch (error) {
       return response.badRequest({
         message: 'Falha ao escanear equipamento via SNMP',
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage(error),
       })
     }
   }

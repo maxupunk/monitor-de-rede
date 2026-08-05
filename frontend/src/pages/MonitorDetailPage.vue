@@ -482,7 +482,7 @@
           </template>
 
           <template #item.finishedAt="{ item }">
-            <span>{{ formatDate(item.finishedAt) }}</span>
+            <span>{{ formatDateTime(item.finishedAt, '-') }}</span>
           </template>
 
           <template #item.message="{ item }">
@@ -523,6 +523,7 @@ import {
   latestResultData,
   getStatusColor,
 } from '@/utils/monitorPresentation'
+import { formatDateTime } from '@/utils/formatters'
 
 const route = useRoute()
 const router = useRouter()
@@ -744,7 +745,7 @@ const gaugeSeries = computed<ChartSeriesInput[]>(() => {
       data: list.map((m) => {
         const val = Number(m.metricValue) || 0
         return {
-          time: formatDate(m.createdAt),
+          time: formatDateTime(m.createdAt, '-'),
           value: val,
           formattedValue: `${val.toFixed(1)}%`,
         }
@@ -812,16 +813,6 @@ async function refreshData() {
   }
 }
 
-function formatDate(dateStr?: string): string {
-  if (!dateStr) return '-'
-  try {
-    const d = new Date(dateStr)
-    return d.toLocaleString('pt-BR')
-  } catch {
-    return dateStr
-  }
-}
-
 async function confirmDelete() {
   if (confirm('Tem certeza de que deseja excluir este monitor?')) {
     const success = await monitorsStore.deleteMonitor(monitorId.value)
@@ -846,7 +837,7 @@ const latencySeries = computed<ChartSeriesInput[]>(() => {
         const val = r.latencyMs || 0
         const status = r.status || (val > 0 ? 'up' : 'down')
         return {
-          time: formatDate(r.finishedAt),
+          time: formatDateTime(r.finishedAt, '-'),
           value: val,
           formattedValue: `${val} ms`,
           status,

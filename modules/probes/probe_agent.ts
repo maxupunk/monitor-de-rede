@@ -2,6 +2,7 @@ import { MonitorRunner } from '#modules/monitoring/monitor_runner'
 import { ProbeBuffer } from './probe_buffer.js'
 import type { ProbeTask } from './probe_task_dispatcher.js'
 import type { CheckResult } from '#modules/monitoring/contracts/check_result'
+import { errorMessage } from '#modules/shared/errors'
 
 export interface ProbeAgentOptions {
   serverUrl?: string
@@ -40,7 +41,7 @@ export class ProbeAgent {
       try {
         await this.step()
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err)
+        const msg = errorMessage(err)
         console.error(`[ProbeAgent] Erro no ciclo de execução: ${msg}`)
       }
       await new Promise((resolve) => setTimeout(resolve, this.intervalMs))
@@ -114,7 +115,7 @@ export class ProbeAgent {
         timeoutMs: task.timeoutMs,
       })
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
+      const msg = errorMessage(err)
       const now = new Date()
       result = {
         success: false,

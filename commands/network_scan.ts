@@ -1,6 +1,7 @@
 import { BaseCommand, flags } from '@adonisjs/core/ace'
 import type { CommandOptions } from '@adonisjs/core/types/ace'
 import { DiscoveryService } from '#modules/discovery/discovery_service'
+import { errorMessage } from '#modules/shared/errors'
 
 export default class NetworkScan extends BaseCommand {
   static commandName = 'network:scan'
@@ -29,7 +30,7 @@ export default class NetworkScan extends BaseCommand {
         )
       }
     } catch (err: unknown) {
-      const errorMsg = err instanceof Error ? err.message : String(err)
+      const errorMsg = errorMessage(err)
       this.logger.error(`Erro ao executar varredura de rede: ${errorMsg}`)
     }
   }

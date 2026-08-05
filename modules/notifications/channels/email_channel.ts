@@ -1,4 +1,5 @@
 import type { NotificationChannel, NotificationMessage } from './notification_channel.js'
+import { errorMessage } from '#modules/shared/errors'
 
 export class EmailChannel implements NotificationChannel {
   name = 'email'
@@ -15,8 +16,7 @@ export class EmailChannel implements NotificationChannel {
       )
       return true
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
-      console.error(`[EmailChannel] Erro ao enviar e-mail: ${msg}`)
+      console.error(`[EmailChannel] Erro ao enviar e-mail: ${errorMessage(err)}`)
       return false
     }
   }

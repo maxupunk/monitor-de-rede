@@ -5,6 +5,7 @@ import { InterfaceCollector } from '#modules/snmp/collectors/interface_collector
 import Device from '#models/device'
 import { SnmpService } from '#modules/snmp/snmp_service'
 import { formatSpeed } from '#modules/monitoring/interface_monitoring_service'
+import { errorMessage } from '#modules/shared/errors'
 
 export interface SnmpCheckerConfig {
   host: string
@@ -198,7 +199,7 @@ export class SnmpChecker {
         startedAt,
         finishedAt,
         durationMs,
-        message: error instanceof Error ? error.message : String(error),
+        message: errorMessage(error),
         metrics: [],
       }
     }

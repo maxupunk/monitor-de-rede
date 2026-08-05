@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { apiService } from '@/services/apiService'
+import { useCrudResource } from './crudResource'
 import type { ZabbixTemplateItemSummary } from './devices'
 
 export interface ZabbixTemplate {
@@ -22,26 +23,20 @@ export interface ZabbixImportResult {
 }
 
 export const useZabbixTemplatesStore = defineStore('zabbixTemplates', () => {
-  const templates = ref<ZabbixTemplate[]>([])
-  const loading = ref(false)
+  const resource = useCrudResource<ZabbixTemplate>('/zabbix-templates', {
+    fetch: 'Erro ao carregar templates Zabbix',
+    delete: 'Erro ao excluir template Zabbix',
+  })
+  const templates = resource.items
   const importing = ref(false)
-  const error = ref<string | null>(null)
 
   async function fetchTemplates() {
-    loading.value = true
-    error.value = null
-    try {
-      templates.value = await apiService.get<ZabbixTemplate[]>('/zabbix-templates')
-    } catch (err: unknown) {
-      error.value = err instanceof Error ? err.message : 'Erro ao carregar templates Zabbix'
-    } finally {
-      loading.value = false
-    }
+    await resource.fetchAll()
   }
 
   async function importTemplate(content: string): Promise<ZabbixImportResult[] | null> {
     importing.value = true
-    error.value = null
+    resource.error.value = null
     try {
       const result = await apiService.post<{ templates: ZabbixImportResult[] }>(
         '/zabbix-templates',
@@ -52,7 +47,7 @@ export const useZabbixTemplatesStore = defineStore('zabbixTemplates', () => {
       await fetchTemplates()
       return result.templates
     } catch (err: unknown) {
-      error.value = err instanceof Error ? err.message : 'Erro ao importar template Zabbix'
+      resource.error.value = err instanceof Error ? err.message : 'Erro ao importar template Zabbix'
       return null
     } finally {
       importing.value = false
@@ -60,21 +55,14 @@ export const useZabbixTemplatesStore = defineStore('zabbixTemplates', () => {
   }
 
   async function deleteTemplate(id: number): Promise<boolean> {
-    try {
-      await apiService.delete(`/zabbix-templates/${id}`)
-      templates.value = templates.value.filter((t) => t.id !== id)
-      return true
-    } catch (err: unknown) {
-      error.value = err instanceof Error ? err.message : 'Erro ao excluir template Zabbix'
-      return false
-    }
+    return resource.remove(id)
   }
 
   return {
     templates,
-    loading,
+    loading: resource.loading,
     importing,
-    error,
+    error: resource.error,
     fetchTemplates,
     importTemplate,
     deleteTemplate,

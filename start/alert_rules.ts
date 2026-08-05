@@ -15,6 +15,7 @@
 
 import logger from '@adonisjs/core/services/logger'
 import { AlertRuleCatalogService } from '#modules/alerts/catalog/alert_rule_catalog_service'
+import { errorMessage } from '#modules/shared/errors'
 
 try {
   const { created } = await new AlertRuleCatalogService().ensureDefaults()
@@ -24,6 +25,6 @@ try {
   }
 } catch (error: unknown) {
   // Falha aqui não pode impedir a API de subir (ex.: banco ainda migrando).
-  const message = error instanceof Error ? error.message : String(error)
+  const message = errorMessage(error)
   logger.warn(`[Alertas] não foi possível provisionar as regras básicas: ${message}`)
 }

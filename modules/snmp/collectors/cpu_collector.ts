@@ -1,4 +1,5 @@
 import type { SnmpClient } from '../clients/snmp_client.js'
+import { snmpNumber } from './snmp_value.js'
 
 export interface CpuCoreLoad {
   coreIndex: number
@@ -59,40 +60,22 @@ export class CpuCollector {
       CpuCollector.OID_LA_LOAD_15,
     ])
 
-    const user =
-      ucdResponse[CpuCollector.OID_SS_CPU_USER] !== null &&
-      ucdResponse[CpuCollector.OID_SS_CPU_USER] !== undefined
-        ? Number(ucdResponse[CpuCollector.OID_SS_CPU_USER])
-        : undefined
-    const sys =
-      ucdResponse[CpuCollector.OID_SS_CPU_SYSTEM] !== null &&
-      ucdResponse[CpuCollector.OID_SS_CPU_SYSTEM] !== undefined
-        ? Number(ucdResponse[CpuCollector.OID_SS_CPU_SYSTEM])
-        : undefined
-    const idle =
-      ucdResponse[CpuCollector.OID_SS_CPU_IDLE] !== null &&
-      ucdResponse[CpuCollector.OID_SS_CPU_IDLE] !== undefined
-        ? Number(ucdResponse[CpuCollector.OID_SS_CPU_IDLE])
-        : undefined
+    const user = snmpNumber(ucdResponse[CpuCollector.OID_SS_CPU_USER])
+    const sys = snmpNumber(ucdResponse[CpuCollector.OID_SS_CPU_SYSTEM])
+    const idle = snmpNumber(ucdResponse[CpuCollector.OID_SS_CPU_IDLE])
 
-    if (user !== undefined && !Number.isNaN(user)) result.userPercent = user
-    if (sys !== undefined && !Number.isNaN(sys)) result.systemPercent = sys
-    if (idle !== undefined && !Number.isNaN(idle)) {
+    if (user !== undefined) result.userPercent = user
+    if (sys !== undefined) result.systemPercent = sys
+    if (idle !== undefined) {
       result.idlePercent = idle
       if (result.usagePercent === undefined) {
         result.usagePercent = Math.max(0, Math.min(100, 100 - idle))
       }
     }
 
-    const parseLoad = (val: unknown) => {
-      if (!val) return undefined
-      const num = Number.parseFloat(String(val))
-      return Number.isNaN(num) ? undefined : num
-    }
-
-    result.load1min = parseLoad(ucdResponse[CpuCollector.OID_LA_LOAD_1])
-    result.load5min = parseLoad(ucdResponse[CpuCollector.OID_LA_LOAD_5])
-    result.load15min = parseLoad(ucdResponse[CpuCollector.OID_LA_LOAD_15])
+    result.load1min = snmpNumber(ucdResponse[CpuCollector.OID_LA_LOAD_1])
+    result.load5min = snmpNumber(ucdResponse[CpuCollector.OID_LA_LOAD_5])
+    result.load15min = snmpNumber(ucdResponse[CpuCollector.OID_LA_LOAD_15])
 
     return result
   }

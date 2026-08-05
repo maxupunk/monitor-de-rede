@@ -1,5 +1,6 @@
 import crypto from 'node:crypto'
 import EventOutbox from '#models/event_outbox'
+import { errorMessage } from '#modules/shared/errors'
 
 export interface SystemEvent {
   type: string
@@ -71,7 +72,7 @@ export class EventBus {
       // evento, mas rastreado para que `flush` não deixe nada para trás.
       const write = EventOutbox.create({ type, origin: PROCESS_ORIGIN, payload: data })
         .catch((err: unknown) => {
-          const msg = err instanceof Error ? err.message : String(err)
+          const msg = errorMessage(err)
           console.error(`[EventBus] Falha ao publicar "${type}" na caixa de saída: ${msg}`)
         })
         .finally(() => {
@@ -98,7 +99,7 @@ export class EventBus {
       try {
         listener(event)
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err)
+        const msg = errorMessage(err)
         console.error(`[EventBus] Erro ao notificar ouvinte: ${msg}`)
       }
     }

@@ -1,18 +1,23 @@
-import type { NotificationChannel, NotificationMessage } from './notification_channel.js'
+import {
+  HttpNotificationChannel,
+  type ChannelRequest,
+  type NotificationMessage,
+} from './notification_channel.js'
 
-export class DiscordChannel implements NotificationChannel {
-  name = 'discord'
+export class DiscordChannel extends HttpNotificationChannel {
+  readonly name = 'discord'
   private webhookUrl: string
 
   constructor(webhookUrl?: string) {
+    super()
     this.webhookUrl = webhookUrl || process.env.DISCORD_WEBHOOK_URL || ''
   }
 
-  async send(message: NotificationMessage): Promise<boolean> {
-    if (!this.webhookUrl) {
-      return false
-    }
+  protected isConfigured(): boolean {
+    return Boolean(this.webhookUrl)
+  }
 
+  protected buildRequest(message: NotificationMessage): ChannelRequest {
     const color =
       message.severity === 'critical'
         ? 15158332
@@ -20,28 +25,18 @@ export class DiscordChannel implements NotificationChannel {
           ? 16776960
           : 3447003
 
-    const payload = {
-      embeds: [
-        {
-          title: message.title,
-          description: message.body,
-          color,
-          timestamp: new Date().toISOString(),
-        },
-      ],
-    }
-
-    try {
-      const res = await fetch(this.webhookUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-      return res.ok
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
-      console.error(`[DiscordChannel] Erro ao enviar mensagem para Discord Webhook: ${msg}`)
-      return false
+    return {
+      url: this.webhookUrl,
+      body: {
+        embeds: [
+          {
+            title: message.title,
+            description: message.body,
+            color,
+            timestamp: new Date().toISOString(),
+          },
+        ],
+      },
     }
   }
 }

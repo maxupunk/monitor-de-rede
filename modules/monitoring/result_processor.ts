@@ -6,6 +6,7 @@ import Device from '#models/device'
 import { AlertManager } from '#modules/alerts/alert_manager'
 import { EventBus } from '#modules/events/event_bus'
 import { DeviceStatusService, type DeviceStatus } from './device_status_service.js'
+import { errorMessage } from '#modules/shared/errors'
 
 /**
  * Leitura que um único resultado sugere para o dispositivo. Serve de reserva
@@ -94,7 +95,7 @@ export class ResultProcessor {
     try {
       await this.alertManager.evaluateMonitorResult(monitor, result)
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
+      const msg = errorMessage(err)
       console.error(`[ResultProcessor] Erro ao avaliar alertas do monitor #${monitor.id}: ${msg}`)
     }
 

@@ -1,5 +1,6 @@
 import { ResultProcessor } from '#modules/monitoring/result_processor'
 import type { CheckResult } from '#modules/monitoring/contracts/check_result'
+import { errorMessage } from '#modules/shared/errors'
 
 export interface ProbeResultPayload {
   monitorId: number
@@ -14,7 +15,7 @@ export class ProbeResultReceiver {
     try {
       await this.resultProcessor.processResult(monitorId, result, probeId)
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
+      const msg = errorMessage(err)
       console.error(
         `[ProbeResultReceiver] Erro ao processar resultado do monitor #${monitorId} (Probe #${probeId}): ${msg}`
       )

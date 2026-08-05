@@ -3,6 +3,7 @@ import { EmailChannel } from './channels/email_channel.js'
 import { TelegramChannel } from './channels/telegram_channel.js'
 import { DiscordChannel } from './channels/discord_channel.js'
 import { WebhookChannel } from './channels/webhook_channel.js'
+import { errorMessage } from '#modules/shared/errors'
 
 export class NotificationService {
   private channels: NotificationChannel[] = []
@@ -29,8 +30,7 @@ export class NotificationService {
       try {
         await channel.send(message)
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err)
-        console.error(`[NotificationService] Falha no canal ${channel.name}: ${msg}`)
+        console.error(`[NotificationService] Falha no canal ${channel.name}: ${errorMessage(err)}`)
       }
     }
   }

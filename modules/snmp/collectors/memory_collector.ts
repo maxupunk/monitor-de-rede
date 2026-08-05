@@ -1,4 +1,5 @@
 import type { SnmpClient } from '../clients/snmp_client.js'
+import { snmpNumber } from './snmp_value.js'
 
 export interface SnmpMemoryInfo {
   totalKb?: number
@@ -20,21 +21,9 @@ export class MemoryCollector {
       MemoryCollector.OID_MEM_TOTAL_FREE,
     ])
 
-    const totalKb =
-      response[MemoryCollector.OID_MEM_TOTAL_REAL] !== null &&
-      response[MemoryCollector.OID_MEM_TOTAL_REAL] !== undefined
-        ? Number(response[MemoryCollector.OID_MEM_TOTAL_REAL])
-        : undefined
-    const availKb =
-      response[MemoryCollector.OID_MEM_AVAIL_REAL] !== null &&
-      response[MemoryCollector.OID_MEM_AVAIL_REAL] !== undefined
-        ? Number(response[MemoryCollector.OID_MEM_AVAIL_REAL])
-        : undefined
-    const freeKb =
-      response[MemoryCollector.OID_MEM_TOTAL_FREE] !== null &&
-      response[MemoryCollector.OID_MEM_TOTAL_FREE] !== undefined
-        ? Number(response[MemoryCollector.OID_MEM_TOTAL_FREE])
-        : undefined
+    const totalKb = snmpNumber(response[MemoryCollector.OID_MEM_TOTAL_REAL])
+    const availKb = snmpNumber(response[MemoryCollector.OID_MEM_AVAIL_REAL])
+    const freeKb = snmpNumber(response[MemoryCollector.OID_MEM_TOTAL_FREE])
 
     const result: SnmpMemoryInfo = { totalKb, availKb, freeKb }
 

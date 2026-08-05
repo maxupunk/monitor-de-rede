@@ -6,6 +6,7 @@ import { VpnPeerService } from '#modules/vpn/vpn_peer_service'
 import { VpnServerService } from '#modules/vpn/vpn_server_service'
 import { IpAllocator } from '#modules/vpn/ip_allocator'
 import { profileRegistry } from '#modules/vpn/profiles/profile_registry'
+import { errorMessage } from '#modules/shared/errors'
 import { sensitiveEndpointLimiter, vpnAuditLogger } from '#modules/vpn/access_control'
 
 /**
@@ -76,6 +77,10 @@ export default class VpnPeersController {
     return false
   }
 
+  private badRequestFromError(ctx: HttpContext, error: unknown) {
+    return ctx.response.badRequest({ message: errorMessage(error) })
+  }
+
   private audit(
     ctx: HttpContext,
     action: Parameters<typeof vpnAuditLogger.log>[0]['action'],
@@ -106,7 +111,8 @@ export default class VpnPeersController {
   }
 
   /** GET /api/vpn/peers/next-ip — sugestão de IP livre para o wizard. */
-  async nextIp({ response }: HttpContext) {
+  async nextIp(ctx: HttpContext) {
+    const { response } = ctx
     const server = await this.serverService.find()
     if (!server) {
       return response.badRequest({ message: 'Servidor VPN ainda não foi configurado' })
@@ -116,8 +122,7 @@ export default class VpnPeersController {
       const ipAddress = await this.ipAllocator.findNextFree(server.networkId, server.network.cidr)
       return response.ok({ ipAddress, cidr: server.network.cidr })
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
-      return response.badRequest({ message })
+      return this.badRequestFromError(ctx, error)
     }
   }
 
@@ -151,8 +156,7 @@ export default class VpnPeersController {
         artifact,
       })
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
-      return response.badRequest({ message })
+      return this.badRequestFromError(ctx, error)
     }
   }
 
@@ -202,8 +206,7 @@ export default class VpnPeersController {
         artifact,
       })
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
-      return response.badRequest({ message })
+      return this.badRequestFromError(ctx, error)
     }
   }
 

@@ -1,33 +1,30 @@
-import type { NotificationChannel, NotificationMessage } from './notification_channel.js'
+import {
+  HttpNotificationChannel,
+  type ChannelRequest,
+  type NotificationMessage,
+} from './notification_channel.js'
 
-export class WebhookChannel implements NotificationChannel {
-  name = 'webhook'
+export class WebhookChannel extends HttpNotificationChannel {
+  readonly name = 'webhook'
   private url: string
 
   constructor(url?: string) {
+    super()
     this.url = url || process.env.GENERIC_WEBHOOK_URL || ''
   }
 
-  async send(message: NotificationMessage): Promise<boolean> {
-    if (!this.url) {
-      return false
-    }
+  protected isConfigured(): boolean {
+    return Boolean(this.url)
+  }
 
-    try {
-      const res = await fetch(this.url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          event: 'notification',
-          timestamp: new Date().toISOString(),
-          message,
-        }),
-      })
-      return res.ok
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
-      console.error(`[WebhookChannel] Erro ao enviar para Webhook genérico: ${msg}`)
-      return false
+  protected buildRequest(message: NotificationMessage): ChannelRequest {
+    return {
+      url: this.url,
+      body: {
+        event: 'notification',
+        timestamp: new Date().toISOString(),
+        message,
+      },
     }
   }
 }
