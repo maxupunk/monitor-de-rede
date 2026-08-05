@@ -5,6 +5,25 @@ import AlertEvent from '#models/alert_event'
 import { NotificationService } from '#modules/notifications/notification_service'
 import { EventBus } from '#modules/events/event_bus'
 
+/**
+ * `ifSpeed` é um contador de 32 bits: agentes que não expõem `ifHighSpeed`
+ * devolvem o teto (4.294.967.295) para links acima de ~4,29 Gbps. Tratar esse
+ * valor como velocidade real produzia falso downgrade/upgrade sempre que a
+ * leitura alternava entre o teto e o valor verdadeiro.
+ */
+const IF_SPEED_SATURATED = 4_294_967_295
+
+/** Converte a leitura crua em bps utilizável, ou `null` quando não é conclusiva. */
+export function normalizeSpeed(bps: number | string | null | undefined): number | null {
+  if (bps === null || bps === undefined) return null
+
+  const value = Number(bps)
+  if (!Number.isFinite(value) || value <= 0) return null
+  if (value >= IF_SPEED_SATURATED) return null
+
+  return value
+}
+
 export function formatSpeed(bps: number | null | undefined): string {
   if (bps === null || bps === undefined || isNaN(bps) || bps <= 0) {
     return 'Desconhecido'
@@ -82,16 +101,10 @@ export class InterfaceMonitoringService {
     }
 
     // 2. Verificação de alteração na negociação de velocidade (Link Speed Negotiation)
-    const prevNumSpeed = previousSpeed !== null ? Number(previousSpeed) : null
-    const currNumSpeed = currentSpeed !== null ? Number(currentSpeed) : null
+    const prevNumSpeed = normalizeSpeed(previousSpeed)
+    const currNumSpeed = normalizeSpeed(currentSpeed)
 
-    if (
-      prevNumSpeed !== null &&
-      prevNumSpeed > 0 &&
-      currNumSpeed !== null &&
-      currNumSpeed > 0 &&
-      prevNumSpeed !== currNumSpeed
-    ) {
+    if (prevNumSpeed !== null && currNumSpeed !== null && prevNumSpeed !== currNumSpeed) {
       const prevSpeedFormatted = formatSpeed(prevNumSpeed)
       const currentSpeedFormatted = formatSpeed(currNumSpeed)
 

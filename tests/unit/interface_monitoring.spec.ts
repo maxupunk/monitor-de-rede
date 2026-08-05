@@ -1,5 +1,9 @@
 import { test } from '@japa/runner'
-import { formatSpeed, InterfaceMonitoringService } from '#modules/monitoring/interface_monitoring_service'
+import {
+  formatSpeed,
+  normalizeSpeed,
+  InterfaceMonitoringService,
+} from '#modules/monitoring/interface_monitoring_service'
 import Device from '#models/device'
 import DeviceInterface from '#models/device_interface'
 import AlertEvent from '#models/alert_event'
@@ -16,6 +20,43 @@ test.group('Interface Monitoring - Unit Tests', (group) => {
     assert.equal(formatSpeed(10_000_000_000), '10 Gbps')
     assert.equal(formatSpeed(0), 'Desconhecido')
     assert.equal(formatSpeed(null), 'Desconhecido')
+  })
+
+  test('normalizeSpeed deve descartar leituras não conclusivas de ifSpeed', ({ assert }) => {
+    assert.equal(normalizeSpeed(2_500_000_000), 2_500_000_000)
+    assert.equal(normalizeSpeed('1000000000'), 1_000_000_000)
+    assert.isNull(normalizeSpeed(0))
+    assert.isNull(normalizeSpeed(null))
+    // Teto do contador de 32 bits: link acima de 4,29 Gbps sem `ifHighSpeed`
+    assert.isNull(normalizeSpeed(4_294_967_295))
+  })
+
+  test('evaluateInterfaceState NÃO deve gerar evento quando a leitura satura em 32 bits', async ({
+    assert,
+  }) => {
+    const device = await Device.create({
+      name: 'Switch-Core-10G',
+      ipAddress: '192.168.1.4',
+      type: 'switch',
+      status: 'online',
+    })
+
+    const iface = await DeviceInterface.create({
+      deviceId: device.id,
+      snmpIndex: 3,
+      name: 'Te0/1',
+      speed: 4_294_967_295,
+      adminStatus: 'up',
+      operStatus: 'up',
+    })
+
+    const service = new InterfaceMonitoringService()
+
+    // 10 Gbps reais -> teto do ifSpeed: leitura do agente, não renegociação
+    await service.evaluateInterfaceState(device, iface, 'up', 10_000_000_000)
+
+    const events = await AlertEvent.query().where('deviceId', device.id)
+    assert.equal(events.length, 0)
   })
 
   test('evaluateInterfaceState deve registrar evento quando o status alterar de DOWN para UP ou UP para DOWN', async ({

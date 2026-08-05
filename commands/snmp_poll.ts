@@ -41,7 +41,7 @@ export default class SnmpPoll extends BaseCommand {
 
       this.logger.info(`Iniciando varredura SNMP para o dispositivo #${device.id} (${device.name})...`)
       const res = await this.snmpService.pollDevice(device, {
-        host: device.name,
+        host: device.ipAddress || device.name,
         version,
         community,
       })
@@ -54,7 +54,7 @@ export default class SnmpPoll extends BaseCommand {
       for (const device of devices) {
         try {
           const res = await this.snmpService.pollDevice(device, {
-            host: device.name,
+            host: device.ipAddress || device.name,
             version,
             community,
           })

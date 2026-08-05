@@ -20,6 +20,9 @@ export const VPN_METRIC_TX_BPS = 'vpn_tx_bps'
 export class VpnTrafficRecorder {
   private eventBus = EventBus.getInstance()
 
+  /** Último quadro publicado por servidor, para não repetir um estado idêntico */
+  private lastPublished = new Map<number, string>()
+
   constructor(private peerStatusService = new PeerStatusService()) {}
 
   /** Sincroniza o status de todos os servidores ativos e grava um snapshot de tráfego por peer. */
@@ -43,19 +46,23 @@ export class VpnTrafficRecorder {
     }
 
     if (peers.length > 0) {
+      const snapshot = peers.map((peer) => ({
+        id: peer.id,
+        deviceId: peer.deviceId,
+        connectionStatus: peer.connectionStatus,
+        lastHandshakeAt: peer.lastHandshakeAt?.toISO() ?? null,
+        bytesRx: peer.bytesRx,
+        bytesTx: peer.bytesTx,
+      }))
+
       // Um único evento por servidor: a tela de VPN repinta status e contadores
-      // sem esperar o operador recarregar a página.
-      this.eventBus.emit('vpn:peers_updated', {
-        vpnServerId,
-        peers: peers.map((peer) => ({
-          id: peer.id,
-          deviceId: peer.deviceId,
-          connectionStatus: peer.connectionStatus,
-          lastHandshakeAt: peer.lastHandshakeAt?.toISO() ?? null,
-          bytesRx: peer.bytesRx,
-          bytesTx: peer.bytesTx,
-        })),
-      })
+      // sem esperar o operador recarregar a página. Túnel parado repete o mesmo
+      // quadro a cada 30s — nesse caso não há o que repintar.
+      const fingerprint = JSON.stringify(snapshot)
+      if (this.lastPublished.get(vpnServerId) !== fingerprint) {
+        this.lastPublished.set(vpnServerId, fingerprint)
+        this.eventBus.emit('vpn:peers_updated', { vpnServerId, peers: snapshot })
+      }
     }
 
     return peers.length

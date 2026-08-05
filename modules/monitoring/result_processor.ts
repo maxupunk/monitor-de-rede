@@ -5,9 +5,22 @@ import MonitorResult from '#models/monitor_result'
 import Device from '#models/device'
 import { AlertManager } from '#modules/alerts/alert_manager'
 import { EventBus } from '#modules/events/event_bus'
+import { DeviceStatusService, type DeviceStatus } from './device_status_service.js'
+
+/**
+ * Leitura que um único resultado sugere para o dispositivo. Serve de reserva
+ * quando não há monitor habilitado para consolidar; `unknown` e `disabled` não
+ * traduzem disponibilidade e por isso ficam de fora.
+ */
+const OBSERVED_DEVICE_STATUS: Record<string, DeviceStatus | undefined> = {
+  up: 'online',
+  down: 'offline',
+  warning: 'warning',
+}
 
 export class ResultProcessor {
   private alertManager = new AlertManager()
+  private deviceStatusService = new DeviceStatusService()
   private eventBus = EventBus.getInstance()
 
   async processResult(monitorId: number, result: CheckResult, probeId?: number | null): Promise<void> {
@@ -43,19 +56,14 @@ export class ResultProcessor {
     await monitor.save()
 
     const device = await Device.find(monitor.deviceId)
-    let deviceStatusChanged = false
     if (device) {
-      const previousDeviceStatus = device.status
-      if (result.status === 'up') {
-        device.status = 'online'
-        device.lastSeenAt = finishedAt
-      } else if (result.status === 'down') {
-        device.status = 'offline'
-      } else if (result.status === 'warning') {
-        device.status = 'warning'
-      }
-      deviceStatusChanged = previousDeviceStatus !== device.status
-      await device.save()
+      // Consolida todos os monitores do dispositivo (o status deste já foi
+      // gravado acima). O próprio serviço decide se houve transição e só então
+      // publica `device:status`.
+      await this.deviceStatusService.refreshFromMonitors(device, {
+        seenAt: result.status === 'up' ? finishedAt : null,
+        observedStatus: OBSERVED_DEVICE_STATUS[result.status],
+      })
     }
 
     try {
@@ -81,16 +89,5 @@ export class ResultProcessor {
       startedAt: startedAt.toISO()!,
       finishedAt: finishedAt.toISO()!,
     })
-
-    if (device && deviceStatusChanged) {
-      this.eventBus.emit('device:status', {
-        id: device.id,
-        deviceId: device.id,
-        name: device.name,
-        status: device.status,
-        ipAddress: device.ipAddress ?? null,
-        lastSeenAt: device.lastSeenAt?.toISO() ?? null,
-      })
-    }
   }
 }

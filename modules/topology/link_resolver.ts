@@ -14,6 +14,14 @@ export interface NetworkLink {
   confirmed?: boolean
 }
 
+export interface PersistedLinks {
+  links: DeviceLink[]
+  /** Enlaces inéditos */
+  created: number
+  /** Enlaces já existentes cujos dados mudaram (ignorando `lastSeenAt`) */
+  updated: number
+}
+
 export class LinkResolver {
   private confidenceCalc = new ConfidenceCalculator()
 
@@ -43,8 +51,21 @@ export class LinkResolver {
   }
 
   async persistResolvedLinks(links: NetworkLink[]): Promise<DeviceLink[]> {
+    const { links: saved } = await this.persistResolvedLinksDetailed(links)
+    return saved
+  }
+
+  /**
+   * Mesma persistência, informando quantos enlaces realmente mudaram.
+   * `lastSeenAt` avança em toda varredura e não conta como alteração — sem essa
+   * distinção, cada coleta LLDP/CDP publicaria `topology:updated` mesmo com o
+   * mapa idêntico ao anterior.
+   */
+  async persistResolvedLinksDetailed(links: NetworkLink[]): Promise<PersistedLinks> {
     const resolved = this.resolveLinks(links)
     const savedLinks: DeviceLink[] = []
+    let created = 0
+    let updated = 0
 
     for (const linkData of resolved) {
       let link = await DeviceLink.query()
@@ -71,12 +92,19 @@ export class LinkResolver {
       link.discoveryMethod = linkData.discoveryMethod
       link.confidence = linkData.confidence ?? 100
       link.confirmed = linkData.confirmed ?? false
-      link.lastSeenAt = DateTime.now()
 
+      const isNew = !link.$isPersisted
+      const hasMaterialChange = isNew || link.$isDirty
+
+      link.lastSeenAt = DateTime.now()
       await link.save()
+
+      if (isNew) created++
+      else if (hasMaterialChange) updated++
+
       savedLinks.push(link)
     }
 
-    return savedLinks
+    return { links: savedLinks, created, updated }
   }
 }

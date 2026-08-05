@@ -118,14 +118,18 @@ export class TopologyService {
       })
     }
 
-    const links = await this.linkResolver.persistResolvedLinks(rawLinks)
+    const { links, created, updated } =
+      await this.linkResolver.persistResolvedLinksDetailed(rawLinks)
 
-    if (links.length > 0) {
+    if (created > 0 || updated > 0) {
       // A varredura SNMP roda em background; sem o evento, o mapa de topologia
-      // só mostraria os novos enlaces após recarregar a tela.
+      // só mostraria os novos enlaces após recarregar a tela. Uma varredura que
+      // reencontra exatamente os mesmos enlaces não muda o mapa e não publica.
       this.eventBus.emit('topology:updated', {
         sourceDeviceId: sourceDevice.id,
         linkCount: links.length,
+        createdCount: created,
+        updatedCount: updated,
         discoveryMethod: 'snmp_lldp_cdp',
       })
     }

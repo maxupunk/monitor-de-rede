@@ -72,6 +72,10 @@ const EVENT_LABELS: Record<string, string> = {
   'interface:status_change': 'Interface mudou de estado',
   'interface:speed_change': 'Interface renegociou velocidade',
   'interface:speed_downgrade': 'Interface sofreu downgrade de velocidade',
+  'device:updated': 'Dispositivo atualizado',
+  'metric:recorded': 'Métricas coletadas',
+  'vpn:peers_updated': 'Peers de VPN atualizados',
+  'topology:updated': 'Topologia atualizada',
 }
 
 function eventTypeLabel(type: string): string {

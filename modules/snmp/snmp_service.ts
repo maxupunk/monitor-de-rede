@@ -13,6 +13,7 @@ import Monitor from '#models/monitor'
 import { DateTime } from 'luxon'
 import { TopologyService } from '#modules/topology/topology_service'
 import { InterfaceMonitoringService } from '#modules/monitoring/interface_monitoring_service'
+import { DeviceStatusService } from '#modules/monitoring/device_status_service'
 import { ZabbixTemplateCollector } from '#modules/zabbix/zabbix_template_collector'
 import { EventBus } from '#modules/events/event_bus'
 
@@ -34,6 +35,7 @@ export class SnmpService {
   private memoryCollector = new MemoryCollector()
   private topologyService = new TopologyService()
   private interfaceMonitoringService = new InterfaceMonitoringService()
+  private deviceStatusService = new DeviceStatusService()
   private zabbixTemplateCollector = new ZabbixTemplateCollector()
   private eventBus = EventBus.getInstance()
 
@@ -136,9 +138,18 @@ export class SnmpService {
     if (systemInfo.sysDescr) {
       device.description = systemInfo.sysDescr
     }
-    device.status = 'online'
-    device.lastSeenAt = DateTime.now()
-    await device.save()
+
+    // Só há evidência de contato se algum OID de sistema respondeu — marcar
+    // "online" incondicionalmente aqui criava uma falsa transição: a coleta
+    // subia o dispositivo em silêncio e o ping seguinte o derrubava de novo,
+    // publicando `device:status` a cada ciclo sem que nada tivesse mudado.
+    const responded = Boolean(
+      systemInfo.sysName || systemInfo.sysDescr || systemInfo.sysUpTime !== undefined
+    )
+    await this.deviceStatusService.refreshFromMonitors(device, {
+      seenAt: responded ? DateTime.now() : null,
+      observedStatus: responded ? 'online' : undefined,
+    })
 
     // 2. Interfaces (Preserva adminStatus configurado pelo usuário para monitoramento)
     const discoveredIfaces = await this.interfaceCollector.collect(client)
