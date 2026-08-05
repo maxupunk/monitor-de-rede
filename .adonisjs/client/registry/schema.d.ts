@@ -199,6 +199,90 @@ export interface Registry {
       errorResponse: ExtractErrorResponse<Awaited<ReturnType<import('#controllers/port_scan_controller').default['scan']>>> | { status: 422; response: { errors: SimpleError[] } }
     }
   }
+  'dns.benchmark': {
+    methods: ["POST"]
+    pattern: '/api/dns/benchmark'
+    types: {
+      body: ExtractBody<InferInput<(typeof import('@vinejs/vine').default)>>
+      paramsTuple: []
+      params: {}
+      query: ExtractQuery<InferInput<(typeof import('@vinejs/vine').default)>>
+      response: ExtractResponse<Awaited<ReturnType<import('#controllers/dns_controller').default['benchmark']>>>
+      errorResponse: ExtractErrorResponse<Awaited<ReturnType<import('#controllers/dns_controller').default['benchmark']>>> | { status: 422; response: { errors: SimpleError[] } }
+    }
+  }
+  'dns.lookup': {
+    methods: ["POST"]
+    pattern: '/api/dns/lookup'
+    types: {
+      body: ExtractBody<InferInput<(typeof import('@vinejs/vine').default)>>
+      paramsTuple: []
+      params: {}
+      query: ExtractQuery<InferInput<(typeof import('@vinejs/vine').default)>>
+      response: ExtractResponse<Awaited<ReturnType<import('#controllers/dns_controller').default['lookup']>>>
+      errorResponse: ExtractErrorResponse<Awaited<ReturnType<import('#controllers/dns_controller').default['lookup']>>> | { status: 422; response: { errors: SimpleError[] } }
+    }
+  }
+  'dns.performance': {
+    methods: ["GET","HEAD"]
+    pattern: '/api/dns/performance'
+    types: {
+      body: {}
+      paramsTuple: []
+      params: {}
+      query: {}
+      response: ExtractResponse<Awaited<ReturnType<import('#controllers/dns_controller').default['performance']>>>
+      errorResponse: ExtractErrorResponse<Awaited<ReturnType<import('#controllers/dns_controller').default['performance']>>>
+    }
+  }
+  'dns_servers.index': {
+    methods: ["GET","HEAD"]
+    pattern: '/api/dns/servers'
+    types: {
+      body: {}
+      paramsTuple: []
+      params: {}
+      query: {}
+      response: ExtractResponse<Awaited<ReturnType<import('#controllers/dns_servers_controller').default['index']>>>
+      errorResponse: ExtractErrorResponse<Awaited<ReturnType<import('#controllers/dns_servers_controller').default['index']>>>
+    }
+  }
+  'dns_servers.store': {
+    methods: ["POST"]
+    pattern: '/api/dns/servers'
+    types: {
+      body: ExtractBody<InferInput<(typeof import('@vinejs/vine').default)>>
+      paramsTuple: []
+      params: {}
+      query: ExtractQuery<InferInput<(typeof import('@vinejs/vine').default)>>
+      response: ExtractResponse<Awaited<ReturnType<import('#controllers/dns_servers_controller').default['store']>>>
+      errorResponse: ExtractErrorResponse<Awaited<ReturnType<import('#controllers/dns_servers_controller').default['store']>>> | { status: 422; response: { errors: SimpleError[] } }
+    }
+  }
+  'dns_servers.update': {
+    methods: ["PUT"]
+    pattern: '/api/dns/servers/:id'
+    types: {
+      body: ExtractBody<InferInput<(typeof import('@vinejs/vine').default)>>
+      paramsTuple: [ParamValue]
+      params: { id: ParamValue }
+      query: ExtractQuery<InferInput<(typeof import('@vinejs/vine').default)>>
+      response: ExtractResponse<Awaited<ReturnType<import('#controllers/dns_servers_controller').default['update']>>>
+      errorResponse: ExtractErrorResponse<Awaited<ReturnType<import('#controllers/dns_servers_controller').default['update']>>> | { status: 422; response: { errors: SimpleError[] } }
+    }
+  }
+  'dns_servers.destroy': {
+    methods: ["DELETE"]
+    pattern: '/api/dns/servers/:id'
+    types: {
+      body: {}
+      paramsTuple: [ParamValue]
+      params: { id: ParamValue }
+      query: {}
+      response: ExtractResponse<Awaited<ReturnType<import('#controllers/dns_servers_controller').default['destroy']>>>
+      errorResponse: ExtractErrorResponse<Awaited<ReturnType<import('#controllers/dns_servers_controller').default['destroy']>>>
+    }
+  }
   'snmp.poll': {
     methods: ["POST"]
     pattern: '/api/devices/:id/snmp/poll'

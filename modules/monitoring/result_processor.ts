@@ -1,5 +1,5 @@
 import { DateTime } from 'luxon'
-import type { CheckResult } from './contracts/check_result.js'
+import type { CheckMetric, CheckResult } from './contracts/check_result.js'
 import Monitor from '#models/monitor'
 import MonitorResult from '#models/monitor_result'
 import Device from '#models/device'
@@ -18,6 +18,27 @@ const OBSERVED_DEVICE_STATUS: Record<string, DeviceStatus | undefined> = {
   warning: 'warning',
 }
 
+/**
+ * Métrica de cada checker que representa o tempo de resposta exibido nos
+ * gráficos e KPIs, em ordem de precedência. Sem DNS e TCP nesta lista o
+ * `latencyMs` desses monitores ficava nulo e a linha do tempo saía vazia.
+ */
+const LATENCY_METRIC_PRECEDENCE = [
+  'latency',
+  'response_time',
+  'dns_lookup_time',
+  'resolution_time',
+  'connect_time',
+]
+
+export function pickLatencyMetric(metrics: CheckMetric[] | undefined): CheckMetric | undefined {
+  for (const name of LATENCY_METRIC_PRECEDENCE) {
+    const metric = metrics?.find((candidate) => candidate.name === name)
+    if (metric) return metric
+  }
+  return undefined
+}
+
 export class ResultProcessor {
   private alertManager = new AlertManager()
   private deviceStatusService = new DeviceStatusService()
@@ -31,9 +52,7 @@ export class ResultProcessor {
     const monitor = await Monitor.find(monitorId)
     if (!monitor) return
 
-    const latencyMetric = result.metrics?.find(
-      (m) => m.name === 'latency' || m.name === 'response_time'
-    )
+    const latencyMetric = pickLatencyMetric(result.metrics)
 
     const parseDate = (val: unknown): DateTime => {
       if (val instanceof Date) return DateTime.fromJSDate(val)
@@ -61,7 +80,7 @@ export class ResultProcessor {
     monitor.lastRunAt = finishedAt
     await monitor.save()
 
-    const device = await Device.find(monitor.deviceId)
+    const device = monitor.deviceId ? await Device.find(monitor.deviceId) : null
     if (device) {
       // Consolida todos os monitores do dispositivo (o status deste já foi
       // gravado acima). O próprio serviço decide se houve transição e só então

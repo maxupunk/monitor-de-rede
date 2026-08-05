@@ -14,6 +14,7 @@ const METRIC_FIELD_MAP: Record<string, string> = {
   status_code: ALERT_FIELDS.statusCode,
   connect_time: ALERT_FIELDS.connectTimeMs,
   resolution_time: ALERT_FIELDS.resolutionTimeMs,
+  dns_lookup_time: ALERT_FIELDS.resolutionTimeMs,
   if_oper_status: ALERT_FIELDS.ifOperStatus,
   if_speed: ALERT_FIELDS.ifSpeed,
   snmp_uptime: ALERT_FIELDS.snmpUptime,

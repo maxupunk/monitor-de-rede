@@ -305,6 +305,62 @@ export class DiscoveryRunSchema extends BaseModel {
   declare updatedAt: DateTime | null
 }
 
+export class DnsLatencySampleSchema extends BaseModel {
+  static $columns = ['address', 'createdAt', 'errorCode', 'hostname', 'id', 'label', 'lookupTimeMs', 'message', 'rcode', 'recordType', 'recordedAt', 'server', 'success', 'transport', 'ttlSeconds'] as const
+  $columns = DnsLatencySampleSchema.$columns
+  @column()
+  declare address: string | null
+  @column.dateTime({ autoCreate: true })
+  declare createdAt: DateTime
+  @column()
+  declare errorCode: string | null
+  @column()
+  declare hostname: string
+  @column({ isPrimary: true })
+  declare id: number
+  @column()
+  declare label: string | null
+  @column()
+  declare lookupTimeMs: number | null
+  @column()
+  declare message: string | null
+  @column()
+  declare rcode: string | null
+  @column()
+  declare recordType: string
+  @column.dateTime()
+  declare recordedAt: DateTime
+  @column()
+  declare server: string
+  @column()
+  declare success: boolean
+  @column()
+  declare transport: string
+  @column()
+  declare ttlSeconds: number | null
+}
+
+export class DnsServerSchema extends BaseModel {
+  static $columns = ['address', 'createdAt', 'description', 'id', 'isDefault', 'name', 'protocol', 'updatedAt'] as const
+  $columns = DnsServerSchema.$columns
+  @column()
+  declare address: string
+  @column.dateTime({ autoCreate: true })
+  declare createdAt: DateTime
+  @column()
+  declare description: string | null
+  @column({ isPrimary: true })
+  declare id: number
+  @column()
+  declare isDefault: boolean
+  @column()
+  declare name: string
+  @column()
+  declare protocol: string
+  @column.dateTime({ autoCreate: true, autoUpdate: true })
+  declare updatedAt: DateTime | null
+}
+
 export class EventOutboxSchema extends BaseModel {
   static $columns = ['createdAt', 'id', 'origin', 'payload', 'type'] as const
   $columns = EventOutboxSchema.$columns
@@ -378,7 +434,7 @@ export class MonitorSchema extends BaseModel {
   @column.dateTime({ autoCreate: true })
   declare createdAt: DateTime
   @column()
-  declare deviceId: number
+  declare deviceId: number | null
   @column()
   declare enabled: boolean
   @column({ isPrimary: true })

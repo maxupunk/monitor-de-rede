@@ -31,7 +31,17 @@ export default class MonitorsController {
     const map = new Map<number, { name: string; value: number; unit: string; recordedAt: string }>()
     if (gaugeMonitors.length === 0) return map
 
-    const deviceIds = [...new Set(gaugeMonitors.map((entry) => entry.mon.deviceId))]
+    // Leituras de uso sempre pertencem a um equipamento; monitores sem vínculo
+    // (checagens externas) não têm métrica de gauge para buscar.
+    const deviceIds = [
+      ...new Set(
+        gaugeMonitors
+          .map((entry) => entry.mon.deviceId)
+          .filter((deviceId): deviceId is number => deviceId !== null)
+      ),
+    ]
+    if (deviceIds.length === 0) return map
+
     const metricNames = [...new Set(gaugeMonitors.map((entry) => entry.metricName))]
 
     const rows = await Metric.query()
@@ -263,7 +273,7 @@ export default class MonitorsController {
     monitor.enabled = true
     await monitor.save()
 
-    const device = await Device.find(monitor.deviceId)
+    const device = monitor.deviceId ? await Device.find(monitor.deviceId) : null
     if (device) {
       await new DeviceStatusService().refreshFromMonitors(device)
     }
@@ -276,7 +286,7 @@ export default class MonitorsController {
     monitor.enabled = false
     await monitor.save()
 
-    const device = await Device.find(monitor.deviceId)
+    const device = monitor.deviceId ? await Device.find(monitor.deviceId) : null
     if (device) {
       await new DeviceStatusService().refreshFromMonitors(device)
     }

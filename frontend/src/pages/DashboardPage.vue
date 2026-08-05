@@ -210,6 +210,12 @@
       </v-col>
     </v-row>
 
+    <v-row class="mb-6">
+      <v-col cols="12">
+        <DnsLatencyCard></DnsLatencyCard>
+      </v-col>
+    </v-row>
+
     <v-row>
       <v-col cols="12" md="6">
         <v-card elevation="2" class="rounded-lg fill-height">
@@ -329,6 +335,7 @@ import { useAlertsStore } from '@/stores/alerts'
 import { useEventsStore, type RealtimeEventPayload } from '@/stores/events'
 import { useMonitorsStore } from '@/stores/monitors'
 import MonitorTimelineBar from '@/components/MonitorTimelineBar.vue'
+import DnsLatencyCard from '@/components/DnsLatencyCard.vue'
 
 const devicesStore = useDevicesStore()
 const alertsStore = useAlertsStore()

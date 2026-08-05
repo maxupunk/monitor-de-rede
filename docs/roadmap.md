@@ -11,7 +11,7 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
 | **Documentação Técnica** | 🟢 **Concluído** | Especificação completa da arquitetura (`arquitetura.md`) e requisitos (`base.md`). |
 | **Estrutura do Projeto Backend** | 🟢 **Concluído** | Estrutura de diretórios AdonisJS v6, rotas da API, controllers e modelos definidos. |
 | **Banco de Dados & Migrations** | 🟢 **Concluído** | Criadas todas as 15+ tabelas de negócio e atualizados os modelos Lucid com relacionamentos. |
-| **Motor de Monitoramento (Checkers)** | 🟢 **Concluído** | Checkers reais de Ping (ICMP/RTT), HTTP/HTTPS (Fetch/Status/Latência), TCP (Sockets) e DNS (`node:dns`). |
+| **Motor de Monitoramento (Checkers)** | 🟢 **Concluído** | Checkers reais de Ping (ICMP/RTT), HTTP/HTTPS (Fetch/Status/Latência), TCP (Sockets), SNMP (uptime/CPU/memória/interface) e DNS com medição de latência de resolução via UDP, TCP e DoH. |
 | **Worker & Queue System** | 🟢 **Concluído** | `ResultProcessor` grava resultados no banco, extrai métricas e atualiza estado dos dispositivos/monitores. |
 | **Agendador (Scheduler)** | 🟢 **Concluído** | Comando `scheduler:run` com loop de busca por `next_run_at`, execução e recálculo do próximo ciclo. |
 | **Descoberta Automática (Discovery)** | 🟢 **Concluído** | Scanners funcionais (ICMP/Ping sweep, tabela ARP, PortScanner) e fusão com auto-criação de dispositivo/monitor. |
@@ -54,7 +54,10 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
   - [x] `PingChecker`: integração com ICMP nativo / pacotes raw ping com cálculo real de RTT e packet loss.
   - [x] `HttpChecker`: requisições HTTP/HTTPS com validação de status code, tempo de resposta e expiração SSL.
   - [x] `TcpChecker`: conexão socket TCP com medição de timeout e abertura de porta.
-  - [x] `DnsChecker`: resolução de registros DNS (A, AAAA, CNAME, MX, TXT) via `node:dns`.
+  - [x] `DnsChecker`: resolução de registros DNS (A, AAAA, CNAME, MX, TXT, NS) com medição de latência.
+  - [x] **Latência de resolução DNS**: consultas em wire format próprio (RFC 1035) sobre UDP, TCP e DoH (RFC 8484), cronometradas com `performance.now()`; medição de múltiplos hostnames por checagem, limiar de latência configurável e ranking dos servidores mais rápidos no dashboard (`/api/dns/performance`, `/api/dns/benchmark`, `/api/dns/lookup`).
+  - [x] **Cadastro de servidores DNS** (`/api/dns/servers`): CRUD com semeadura dos resolvedores públicos no primeiro acesso, autocomplete no formulário de monitores e seleção de quais participam da comparação do dashboard.
+- [x] **Vínculo com dispositivo opcional**: checagens externas (DNS público, sites de terceiros) deixam de exigir um equipamento cadastrado; o SNMP segue exigindo. A origem da execução (servidor da aplicação ou probe) passou a ser escolhida no próprio formulário.
 - [x] **Sistema de Filas & Worker Process**:
   - [x] `ResultProcessor` para processar resultados, calcular métricas e atualizar status de `Device` e `Monitor`.
   - [x] Comando `monitor:test` para execução e validação via CLI por ID de monitor.

@@ -29,6 +29,9 @@ export type DnsRecordType = 'A' | 'AAAA' | 'MX' | 'TXT' | 'CNAME' | 'NS'
 export type HttpMethod = 'GET' | 'HEAD' | 'POST'
 export type SnmpVersion = 'v1' | 'v2c' | 'v3'
 
+/** Transporte da consulta DNS — espelha `dns_latency_service` no backend */
+export type DnsProtocol = 'system' | 'udp' | 'tcp' | 'doh'
+
 /** Regra de validação no formato aceito pelo Vuetify */
 export type FieldRule = (value: unknown) => true | string
 
@@ -93,6 +96,14 @@ export interface MonitorKindDefinition {
   defaultPort?: number
   /** O IP do dispositivo selecionado é um alvo natural para o tipo */
   suggestsDeviceIp: boolean
+  /**
+   * A checagem só faz sentido vinculada a um equipamento cadastrado (SNMP lê o
+   * agente do próprio dispositivo e grava métricas nele). Nos demais tipos o
+   * vínculo é apenas organizacional e fica opcional.
+   */
+  requiresDevice: boolean
+  /** Explica para que serve o vínculo com o dispositivo neste tipo */
+  deviceHint: string
 }
 
 /** Remove espaços e caracteres que nunca aparecem em host/IP/hostname */
@@ -183,6 +194,9 @@ export const MONITOR_KINDS: MonitorKindDefinition[] = [
     },
     usesPort: false,
     suggestsDeviceIp: true,
+    requiresDevice: false,
+    deviceHint:
+      'Opcional. Vincule ao equipamento pingado para o status dele refletir esta checagem.',
   },
   {
     kind: 'http',
@@ -219,6 +233,8 @@ export const MONITOR_KINDS: MonitorKindDefinition[] = [
     },
     usesPort: false,
     suggestsDeviceIp: false,
+    requiresDevice: false,
+    deviceHint: 'Opcional. Use para agrupar a checagem sob o servidor que hospeda o site.',
   },
   {
     kind: 'tcp',
@@ -241,6 +257,8 @@ export const MONITOR_KINDS: MonitorKindDefinition[] = [
     usesPort: true,
     defaultPort: 443,
     suggestsDeviceIp: true,
+    requiresDevice: false,
+    deviceHint: 'Opcional. Vincule ao equipamento que expõe a porta.',
   },
   {
     kind: 'dns',
@@ -268,6 +286,9 @@ export const MONITOR_KINDS: MonitorKindDefinition[] = [
     },
     usesPort: false,
     suggestsDeviceIp: false,
+    requiresDevice: false,
+    deviceHint:
+      'Opcional. A consulta parte deste servidor (ou do probe escolhido), não do equipamento.',
   },
   {
     kind: 'snmp',
@@ -289,6 +310,9 @@ export const MONITOR_KINDS: MonitorKindDefinition[] = [
     },
     usesPort: false,
     suggestsDeviceIp: true,
+    requiresDevice: true,
+    deviceHint:
+      'Obrigatório: as leituras SNMP (CPU, memória, interfaces) são gravadas neste equipamento.',
   },
 ]
 
@@ -338,6 +362,76 @@ export const SNMP_MODES: SnmpModeDefinition[] = [
   },
 ]
 
+export interface DnsProtocolDefinition {
+  value: DnsProtocol
+  label: string
+  icon: string
+  description: string
+  /** Exige o IP de um servidor DNS alvo */
+  requiresServer: boolean
+  /** Exige um endpoint DNS over HTTPS */
+  requiresEndpoint: boolean
+}
+
+export const DNS_PROTOCOLS: DnsProtocolDefinition[] = [
+  {
+    value: 'udp',
+    label: 'UDP (padrão)',
+    icon: 'mdi-lightning-bolt-outline',
+    description:
+      'Consulta direta ao servidor escolhido — o transporte usado pela maioria das redes.',
+    requiresServer: true,
+    requiresEndpoint: false,
+  },
+  {
+    value: 'tcp',
+    label: 'TCP',
+    icon: 'mdi-transit-connection-variant',
+    description:
+      'Mesma consulta sobre TCP. Útil para respostas grandes ou redes que bloqueiam UDP.',
+    requiresServer: true,
+    requiresEndpoint: false,
+  },
+  {
+    value: 'doh',
+    label: 'DoH (DNS over HTTPS)',
+    icon: 'mdi-lock-outline',
+    description: 'Consulta criptografada via HTTPS, no formato wire da RFC 8484.',
+    requiresServer: false,
+    requiresEndpoint: true,
+  },
+  {
+    value: 'system',
+    label: 'Resolvedor do sistema',
+    icon: 'mdi-server-outline',
+    description:
+      'Usa o DNS configurado no servidor da aplicação — mede o que a rede local entrega.',
+    requiresServer: false,
+    requiresEndpoint: false,
+  },
+]
+
+const DNS_PROTOCOL_BY_VALUE = new Map(DNS_PROTOCOLS.map((def) => [def.value, def]))
+
+export function dnsProtocol(value: DnsProtocol): DnsProtocolDefinition {
+  return DNS_PROTOCOL_BY_VALUE.get(value) ?? DNS_PROTOCOLS[0]!
+}
+
+/** Resolvedores públicos oferecidos como atalho (espelha DEFAULT_DNS_SERVERS) */
+export const PUBLIC_DNS_SERVERS: Array<{ server: string; label: string }> = [
+  { server: '1.1.1.1', label: 'Cloudflare' },
+  { server: '8.8.8.8', label: 'Google' },
+  { server: '9.9.9.9', label: 'Quad9' },
+  { server: '208.67.222.222', label: 'OpenDNS' },
+  { server: '94.140.14.14', label: 'AdGuard' },
+]
+
+export const PUBLIC_DOH_ENDPOINTS: Array<{ url: string; label: string }> = [
+  { url: 'https://cloudflare-dns.com/dns-query', label: 'Cloudflare' },
+  { url: 'https://dns.google/dns-query', label: 'Google' },
+  { url: 'https://dns.quad9.net/dns-query', label: 'Quad9' },
+]
+
 export const DNS_RECORD_TYPES: Array<{ value: DnsRecordType; title: string; subtitle: string }> = [
   { value: 'A', title: 'A', subtitle: 'Endereço IPv4' },
   { value: 'AAAA', title: 'AAAA', subtitle: 'Endereço IPv6' },
@@ -377,6 +471,8 @@ export function formatSeconds(seconds: number): string {
 
 export interface MonitorFormModel {
   deviceId: number | null
+  /** Probe que executa a checagem. `null` = servidor da aplicação */
+  probeId: number | null
   kind: MonitorKind
   name: string
   target: string
@@ -394,6 +490,12 @@ export interface MonitorFormModel {
   // DNS
   recordType: DnsRecordType
   dnsServer: string
+  dnsProtocol: DnsProtocol
+  dohUrl: string
+  /** Nomes adicionais medidos na mesma checagem, além do alvo principal */
+  extraHostnames: string[]
+  /** Latência média a partir da qual o monitor entra em warning */
+  dnsWarningThresholdMs: number | null
   // SNMP
   snmpMode: SnmpMode
   snmpVersion: SnmpVersion
@@ -408,6 +510,7 @@ export const DEFAULT_ACCEPTED_STATUS_CODES = [200, 201, 202, 204, 301, 302]
 export function createMonitorForm(deviceId?: number | null): MonitorFormModel {
   return {
     deviceId: deviceId ?? null,
+    probeId: null,
     kind: 'ping',
     name: '',
     target: '',
@@ -421,7 +524,11 @@ export function createMonitorForm(deviceId?: number | null): MonitorFormModel {
     acceptedStatusCodes: [...DEFAULT_ACCEPTED_STATUS_CODES],
     validateCertificate: true,
     recordType: 'A',
-    dnsServer: '',
+    dnsServer: '1.1.1.1',
+    dnsProtocol: 'udp',
+    dohUrl: '',
+    extraHostnames: [],
+    dnsWarningThresholdMs: null,
     snmpMode: 'availability',
     snmpVersion: 'v2c',
     snmpCommunity: 'public',
@@ -463,6 +570,7 @@ export function monitorToForm(monitor: Monitor): MonitorFormModel {
   const form = createMonitorForm(monitor.deviceId)
 
   form.kind = kind
+  form.probeId = monitor.probeId ?? null
   form.name = monitor.name || ''
   form.intervalSeconds = asNumber(monitor.intervalSeconds, 60)
   form.timeoutSeconds = asNumber(monitor.timeoutSeconds, 5)
@@ -486,10 +594,22 @@ export function monitorToForm(monitor: Monitor): MonitorFormModel {
     case 'tcp':
       form.port = asNumber(config.port ?? monitor.port, 443)
       break
-    case 'dns':
+    case 'dns': {
       form.recordType = ((config.recordType as DnsRecordType) || 'A').toUpperCase() as DnsRecordType
       form.dnsServer = (config.dnsServer as string) || ''
+      form.dohUrl = (config.dohUrl as string) || ''
+      form.dnsProtocol =
+        (config.protocol as DnsProtocol) ||
+        (config.dohUrl ? 'doh' : config.dnsServer ? 'udp' : 'system')
+
+      // `domains` inclui o alvo principal; a UI só edita os nomes extras
+      const domains = Array.isArray(config.domains) ? (config.domains as string[]) : []
+      form.extraHostnames = domains.filter((domain) => domain && domain !== form.target)
+
+      form.dnsWarningThresholdMs =
+        typeof config.warningThresholdMs === 'number' ? config.warningThresholdMs : null
       break
+    }
     case 'snmp':
       form.snmpMode = resolveSnmpMode(config)
       form.snmpVersion = (config.version as SnmpVersion) || 'v2c'
@@ -540,11 +660,26 @@ export function buildConfiguration(form: MonitorFormModel): Record<string, unkno
       }
     case 'dns': {
       const config: Record<string, unknown> = {
+        // `domain` é mantido sempre: é dele que sai o alvo exibido nas listas
         domain: target,
         recordType: form.recordType,
+        protocol: form.dnsProtocol,
         timeoutMs,
       }
-      if (form.dnsServer.trim()) config.dnsServer = form.dnsServer.trim()
+
+      const extras = form.extraHostnames.map((name) => name.trim()).filter(Boolean)
+      if (extras.length > 0) config.domains = [target, ...extras]
+
+      if (form.dnsProtocol === 'doh') {
+        config.dohUrl = form.dohUrl.trim()
+      } else if (form.dnsProtocol !== 'system' && form.dnsServer.trim()) {
+        config.dnsServer = form.dnsServer.trim()
+      }
+
+      if (form.dnsWarningThresholdMs && form.dnsWarningThresholdMs > 0) {
+        config.warningThresholdMs = form.dnsWarningThresholdMs
+      }
+
       return config
     }
     case 'snmp': {
@@ -574,6 +709,7 @@ export function formToPayload(form: MonitorFormModel): Record<string, unknown> {
 
   return {
     deviceId: form.deviceId,
+    probeId: form.probeId,
     type: apiTypeFor(form),
     name: form.name.trim(),
     configuration,
@@ -639,10 +775,21 @@ export function describeMonitor(form: MonitorFormModel): string {
       return `${form.httpMethod} em ${normalizeUrl(target)}, ${every}, aceitando ${form.acceptedStatusCodes.join(', ')}.`
     case 'tcp':
       return `Conexão TCP em ${target}:${form.port || '—'}, ${every}.`
-    case 'dns':
-      return `Consulta ${form.recordType} de ${target}${
-        form.dnsServer ? ` em ${form.dnsServer}` : ''
-      }, ${every}.`
+    case 'dns': {
+      const protocol = dnsProtocol(form.dnsProtocol)
+      const via =
+        form.dnsProtocol === 'doh'
+          ? ` via DoH em ${form.dohUrl || '—'}`
+          : form.dnsProtocol === 'system'
+            ? ' pelo resolvedor do sistema'
+            : ` em ${form.dnsServer || '—'} (${protocol.label.split(' ')[0]})`
+      const names = form.extraHostnames.filter(Boolean).length
+      const scope = names > 0 ? ` e mais ${names} nome(s)` : ''
+      const threshold = form.dnsWarningThresholdMs
+        ? ` Alerta acima de ${form.dnsWarningThresholdMs}ms.`
+        : ''
+      return `Tempo de resolução ${form.recordType} de ${target}${scope}${via}, ${every}.${threshold}`
+    }
     case 'snmp': {
       const mode = SNMP_MODES.find((m) => m.value === form.snmpMode)
       const suffix =
@@ -661,7 +808,9 @@ export function validateMonitorForm(form: MonitorFormModel): string[] {
   const errors: string[] = []
   const definition = monitorKind(form.kind)
 
-  if (!form.deviceId) errors.push('Selecione o dispositivo associado')
+  if (definition.requiresDevice && !form.deviceId) {
+    errors.push('Selecione o equipamento que será consultado via SNMP')
+  }
   if (!form.name.trim()) errors.push('Informe um nome para o monitor')
 
   const targetCheck = definition.target.rule(form.target)
@@ -681,8 +830,33 @@ export function validateMonitorForm(form: MonitorFormModel): string[] {
     if (!isValidPort(form.snmpPort)) errors.push('Porta SNMP inválida')
   }
 
-  if (form.kind === 'dns' && form.dnsServer.trim() && !isIpAddress(form.dnsServer.trim())) {
-    errors.push('Servidor DNS deve ser um endereço IP')
+  if (form.kind === 'dns') {
+    const protocol = dnsProtocol(form.dnsProtocol)
+    const server = form.dnsServer.trim()
+
+    if (protocol.requiresServer && !server) {
+      errors.push('Informe o servidor DNS que será medido')
+    }
+    if (
+      server &&
+      !isIpAddress(server.split(':')[0] ?? '') &&
+      !isHostname(server.split(':')[0] ?? '')
+    ) {
+      errors.push('Servidor DNS deve ser um IP ou hostname (opcionalmente com :porta)')
+    }
+    if (protocol.requiresEndpoint && !/^https:\/\/.+/i.test(form.dohUrl.trim())) {
+      errors.push('Informe um endpoint DoH https://')
+    }
+
+    const invalidExtra = form.extraHostnames
+      .map((name) => name.trim())
+      .filter(Boolean)
+      .find((name) => !isDomain(name) && !isHostname(name))
+    if (invalidExtra) errors.push(`Hostname adicional inválido: ${invalidExtra}`)
+
+    if (form.dnsWarningThresholdMs !== null && form.dnsWarningThresholdMs < 0) {
+      errors.push('O limite de latência não pode ser negativo')
+    }
   }
 
   if (!(form.intervalSeconds >= 10)) errors.push('O intervalo mínimo é de 10 segundos')

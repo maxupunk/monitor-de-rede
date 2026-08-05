@@ -62,7 +62,8 @@ export class AlertManager {
 
   /** Adapta o resultado de um monitor ao contrato genérico de avaliação. */
   async evaluateMonitorResult(monitor: Monitor, result: CheckResult): Promise<void> {
-    const device = await Device.find(monitor.deviceId)
+    // Monitores de checagem externa não têm dispositivo vinculado
+    const device = monitor.deviceId ? await Device.find(monitor.deviceId) : null
 
     await this.evaluate({
       scope: {

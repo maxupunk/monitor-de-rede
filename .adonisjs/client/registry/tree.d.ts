@@ -32,6 +32,17 @@ export interface ApiDefinition {
   portScan: {
     scan: typeof routes['port_scan.scan']
   }
+  dns: {
+    benchmark: typeof routes['dns.benchmark']
+    lookup: typeof routes['dns.lookup']
+    performance: typeof routes['dns.performance']
+  }
+  dnsServers: {
+    index: typeof routes['dns_servers.index']
+    store: typeof routes['dns_servers.store']
+    update: typeof routes['dns_servers.update']
+    destroy: typeof routes['dns_servers.destroy']
+  }
   devices: {
     monitors: typeof routes['devices.monitors']
     metrics: typeof routes['devices.metrics']

@@ -9,8 +9,12 @@ export default class Monitor extends BaseModel {
   @column({ isPrimary: true })
   declare id: number
 
+  /**
+   * Opcional: checagens externas (DNS público, site de terceiros) não pertencem
+   * a nenhum equipamento cadastrado.
+   */
   @column()
-  declare deviceId: number
+  declare deviceId: number | null
 
   @column()
   declare probeId: number | null

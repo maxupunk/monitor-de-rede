@@ -20,6 +20,13 @@ export type ScannedRoutes = {
     'networks.destroy': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
     'snmp.test': { paramsTuple?: []; params?: {} }
     'port_scan.scan': { paramsTuple?: []; params?: {} }
+    'dns.benchmark': { paramsTuple?: []; params?: {} }
+    'dns.lookup': { paramsTuple?: []; params?: {} }
+    'dns.performance': { paramsTuple?: []; params?: {} }
+    'dns_servers.index': { paramsTuple?: []; params?: {} }
+    'dns_servers.store': { paramsTuple?: []; params?: {} }
+    'dns_servers.update': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
+    'dns_servers.destroy': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
     'snmp.poll': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
     'snmp.scan': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
     'snmp.apply_monitors': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
@@ -93,6 +100,8 @@ export type ScannedRoutes = {
     'sites.show': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
     'networks.index': { paramsTuple?: []; params?: {} }
     'networks.show': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
+    'dns.performance': { paramsTuple?: []; params?: {} }
+    'dns_servers.index': { paramsTuple?: []; params?: {} }
     'snmp.interfaces': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
     'devices.monitors': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
     'devices.metrics': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
@@ -126,6 +135,8 @@ export type ScannedRoutes = {
     'sites.show': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
     'networks.index': { paramsTuple?: []; params?: {} }
     'networks.show': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
+    'dns.performance': { paramsTuple?: []; params?: {} }
+    'dns_servers.index': { paramsTuple?: []; params?: {} }
     'snmp.interfaces': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
     'devices.monitors': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
     'devices.metrics': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
@@ -161,6 +172,9 @@ export type ScannedRoutes = {
     'networks.store': { paramsTuple?: []; params?: {} }
     'snmp.test': { paramsTuple?: []; params?: {} }
     'port_scan.scan': { paramsTuple?: []; params?: {} }
+    'dns.benchmark': { paramsTuple?: []; params?: {} }
+    'dns.lookup': { paramsTuple?: []; params?: {} }
+    'dns_servers.store': { paramsTuple?: []; params?: {} }
     'snmp.poll': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
     'snmp.scan': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
     'snmp.apply_monitors': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
@@ -193,6 +207,7 @@ export type ScannedRoutes = {
   PUT: {
     'sites.update': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
     'networks.update': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
+    'dns_servers.update': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
     'devices.update': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
     'monitors.update': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
     'probes.update': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
@@ -209,6 +224,7 @@ export type ScannedRoutes = {
   DELETE: {
     'sites.destroy': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
     'networks.destroy': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
+    'dns_servers.destroy': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
     'devices.destroy': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
     'monitors.destroy': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
     'topology.destroy_link': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }

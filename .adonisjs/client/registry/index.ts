@@ -102,6 +102,48 @@ const routes = {
     tokens: [{"old":"/api/port-scan","type":0,"val":"api","end":""},{"old":"/api/port-scan","type":0,"val":"port-scan","end":""}],
     types: placeholder as Registry['port_scan.scan']['types'],
   },
+  'dns.benchmark': {
+    methods: ["POST"],
+    pattern: '/api/dns/benchmark',
+    tokens: [{"old":"/api/dns/benchmark","type":0,"val":"api","end":""},{"old":"/api/dns/benchmark","type":0,"val":"dns","end":""},{"old":"/api/dns/benchmark","type":0,"val":"benchmark","end":""}],
+    types: placeholder as Registry['dns.benchmark']['types'],
+  },
+  'dns.lookup': {
+    methods: ["POST"],
+    pattern: '/api/dns/lookup',
+    tokens: [{"old":"/api/dns/lookup","type":0,"val":"api","end":""},{"old":"/api/dns/lookup","type":0,"val":"dns","end":""},{"old":"/api/dns/lookup","type":0,"val":"lookup","end":""}],
+    types: placeholder as Registry['dns.lookup']['types'],
+  },
+  'dns.performance': {
+    methods: ["GET","HEAD"],
+    pattern: '/api/dns/performance',
+    tokens: [{"old":"/api/dns/performance","type":0,"val":"api","end":""},{"old":"/api/dns/performance","type":0,"val":"dns","end":""},{"old":"/api/dns/performance","type":0,"val":"performance","end":""}],
+    types: placeholder as Registry['dns.performance']['types'],
+  },
+  'dns_servers.index': {
+    methods: ["GET","HEAD"],
+    pattern: '/api/dns/servers',
+    tokens: [{"old":"/api/dns/servers","type":0,"val":"api","end":""},{"old":"/api/dns/servers","type":0,"val":"dns","end":""},{"old":"/api/dns/servers","type":0,"val":"servers","end":""}],
+    types: placeholder as Registry['dns_servers.index']['types'],
+  },
+  'dns_servers.store': {
+    methods: ["POST"],
+    pattern: '/api/dns/servers',
+    tokens: [{"old":"/api/dns/servers","type":0,"val":"api","end":""},{"old":"/api/dns/servers","type":0,"val":"dns","end":""},{"old":"/api/dns/servers","type":0,"val":"servers","end":""}],
+    types: placeholder as Registry['dns_servers.store']['types'],
+  },
+  'dns_servers.update': {
+    methods: ["PUT"],
+    pattern: '/api/dns/servers/:id',
+    tokens: [{"old":"/api/dns/servers/:id","type":0,"val":"api","end":""},{"old":"/api/dns/servers/:id","type":0,"val":"dns","end":""},{"old":"/api/dns/servers/:id","type":0,"val":"servers","end":""},{"old":"/api/dns/servers/:id","type":1,"val":"id","end":""}],
+    types: placeholder as Registry['dns_servers.update']['types'],
+  },
+  'dns_servers.destroy': {
+    methods: ["DELETE"],
+    pattern: '/api/dns/servers/:id',
+    tokens: [{"old":"/api/dns/servers/:id","type":0,"val":"api","end":""},{"old":"/api/dns/servers/:id","type":0,"val":"dns","end":""},{"old":"/api/dns/servers/:id","type":0,"val":"servers","end":""},{"old":"/api/dns/servers/:id","type":1,"val":"id","end":""}],
+    types: placeholder as Registry['dns_servers.destroy']['types'],
+  },
   'snmp.poll': {
     methods: ["POST"],
     pattern: '/api/devices/:id/snmp/poll',

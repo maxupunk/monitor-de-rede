@@ -127,6 +127,17 @@
 
           <!-- Aba Monitores -->
           <v-window-item value="monitors">
+            <div class="d-flex justify-end pa-3">
+              <v-btn
+                color="primary"
+                variant="tonal"
+                size="small"
+                prepend-icon="mdi-plus"
+                @click="openMonitorDialog()"
+              >
+                Novo monitor neste equipamento
+              </v-btn>
+            </div>
             <v-table hover>
               <thead>
                 <tr>
@@ -157,7 +168,8 @@
                 </tr>
                 <tr v-if="detailStore.monitors.length === 0">
                   <td colspan="6" class="text-center text-grey py-4">
-                    Nenhum monitor configurado para este equipamento. Clique em "Escanear SNMP".
+                    Nenhum monitor configurado para este equipamento. Crie um acima ou use "Escanear
+                    SNMP" para descobrir automaticamente.
                   </td>
                 </tr>
               </tbody>
@@ -974,6 +986,14 @@
       :host="detailStore.device?.ipAddress"
       :device-name="detailStore.device?.name"
     />
+
+    <!-- Novo monitor já vinculado a este equipamento -->
+    <MonitorFormDialog
+      v-model="monitorDialog"
+      :default-device-id="deviceId"
+      lock-device
+      @saved="onMonitorSaved"
+    />
   </div>
 </template>
 
@@ -986,6 +1006,7 @@ import BaseMetricChart, { type ChartSeriesInput } from '@/components/BaseMetricC
 import VpnScriptViewer from '@/components/VpnScriptViewer.vue'
 import VpnFirewallHintsDialog from '@/components/VpnFirewallHintsDialog.vue'
 import PortScanDialog from '@/components/PortScanDialog.vue'
+import MonitorFormDialog from '@/components/MonitorFormDialog.vue'
 import {
   useVpnStore,
   vpnProfileIcon,
@@ -1052,6 +1073,18 @@ onMounted(() => {
     vpnStore.fetchServer()
   }
 })
+
+// --- Criação de monitor a partir do próprio equipamento ---------------------
+
+const monitorDialog = ref(false)
+
+function openMonitorDialog() {
+  monitorDialog.value = true
+}
+
+async function onMonitorSaved() {
+  if (deviceId.value) await detailStore.loadDeviceDetails(deviceId.value)
+}
 
 // --- Aba VPN ---------------------------------------------------------------
 

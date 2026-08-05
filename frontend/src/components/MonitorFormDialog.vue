@@ -49,24 +49,21 @@
           ></v-alert>
 
           <!-- Etapa 2: alvo da verificação -->
-          <div class="text-overline text-medium-emphasis mt-5 mb-2">2 · Alvo da verificação</div>
-          <v-row dense>
-            <v-col cols="12" :md="definition.usesPort ? 6 : 12">
+          <div class="text-overline text-medium-emphasis mt-8 mb-3">2 · Alvo da verificação</div>
+          <v-row class="form-rows">
+            <v-col v-if="definition.requiresDevice" cols="12">
               <v-select
                 v-model="form.deviceId"
                 :items="devicesStore.devices"
                 item-title="name"
                 item-value="id"
-                label="Dispositivo associado *"
+                label="Equipamento consultado *"
                 prepend-inner-icon="mdi-router-network"
                 variant="outlined"
                 density="comfortable"
-                :rules="[(v: unknown) => !!v || 'Selecione o dispositivo associado']"
-                :hint="
-                  selectedDevice?.ipAddress
-                    ? `IP cadastrado: ${selectedDevice.ipAddress}`
-                    : 'Dispositivo sem IP cadastrado'
-                "
+                :disabled="deviceLocked"
+                :rules="[(v: unknown) => !!v || 'Selecione o equipamento']"
+                :hint="definition.deviceHint"
                 persistent-hint
               >
                 <template #item="{ props: itemProps, item }">
@@ -75,7 +72,7 @@
               </v-select>
             </v-col>
 
-            <v-col cols="12" :md="definition.usesPort ? 6 : 12">
+            <v-col cols="12">
               <v-text-field
                 :model-value="form.target"
                 :label="`${definition.target.label} *`"
@@ -200,6 +197,29 @@
 
             <v-col v-if="form.kind === 'dns'" cols="12" md="6">
               <v-select
+                v-model="form.dnsProtocol"
+                :items="DNS_PROTOCOLS"
+                item-title="label"
+                item-value="value"
+                label="Transporte da consulta"
+                prepend-inner-icon="mdi-transit-connection"
+                variant="outlined"
+                density="comfortable"
+                :hint="dnsProtocolDefinition.description"
+                persistent-hint
+              >
+                <template #item="{ props: itemProps, item }">
+                  <v-list-item
+                    v-bind="itemProps"
+                    :subtitle="itemField(item, 'description')"
+                    :prepend-icon="itemField(item, 'icon')"
+                  ></v-list-item>
+                </template>
+              </v-select>
+            </v-col>
+
+            <v-col v-if="form.kind === 'dns'" cols="12" md="6">
+              <v-select
                 v-model="form.recordType"
                 :items="DNS_RECORD_TYPES"
                 item-title="title"
@@ -219,18 +239,86 @@
               </v-select>
             </v-col>
 
-            <v-col v-if="form.kind === 'dns'" cols="12" md="6">
-              <v-text-field
-                v-model="form.dnsServer"
-                label="Servidor DNS (opcional)"
-                placeholder="8.8.8.8"
-                prepend-inner-icon="mdi-server"
-                variant="outlined"
-                density="comfortable"
-                :rules="[dnsServerRule]"
-                hint="Em branco, usa o resolvedor do sistema"
-                persistent-hint
-              ></v-text-field>
+            <v-col v-if="form.kind === 'dns' && dnsProtocolDefinition.requiresServer" cols="12">
+              <div class="d-flex align-start ga-2">
+                <v-combobox
+                  :model-value="form.dnsServer"
+                  :items="dnsServerItems"
+                  item-title="title"
+                  item-value="value"
+                  :return-object="false"
+                  label="Servidor DNS medido *"
+                  placeholder="Escolha um cadastrado ou digite um novo"
+                  prepend-inner-icon="mdi-server"
+                  variant="outlined"
+                  density="comfortable"
+                  class="flex-grow-1"
+                  :loading="dnsServersStore.loading"
+                  :rules="[dnsServerRule]"
+                  :hint="dnsServerHint"
+                  persistent-hint
+                  @update:model-value="onDnsServerChange"
+                >
+                  <template #item="{ props: itemProps, item }">
+                    <v-list-item
+                      v-bind="itemProps"
+                      :subtitle="itemField(item, 'subtitle')"
+                      :prepend-icon="itemField(item, 'icon')"
+                    ></v-list-item>
+                  </template>
+                </v-combobox>
+                <v-btn
+                  icon
+                  variant="tonal"
+                  color="deep-purple"
+                  density="comfortable"
+                  class="mt-1"
+                  @click="openServersDialog"
+                >
+                  <v-icon>mdi-cog-outline</v-icon>
+                  <v-tooltip activator="parent" location="top">Gerenciar servidores DNS</v-tooltip>
+                </v-btn>
+              </div>
+            </v-col>
+
+            <v-col v-if="form.kind === 'dns' && dnsProtocolDefinition.requiresEndpoint" cols="12">
+              <div class="d-flex align-start ga-2">
+                <v-combobox
+                  :model-value="form.dohUrl"
+                  :items="dohEndpointItems"
+                  item-title="title"
+                  item-value="value"
+                  :return-object="false"
+                  label="Endpoint DoH *"
+                  placeholder="https://cloudflare-dns.com/dns-query"
+                  prepend-inner-icon="mdi-lock-outline"
+                  variant="outlined"
+                  density="comfortable"
+                  class="flex-grow-1"
+                  :rules="[dohUrlRule]"
+                  :hint="dohEndpointHint"
+                  persistent-hint
+                  @update:model-value="onDohUrlChange"
+                >
+                  <template #item="{ props: itemProps, item }">
+                    <v-list-item
+                      v-bind="itemProps"
+                      :subtitle="itemField(item, 'subtitle')"
+                    ></v-list-item>
+                  </template>
+                </v-combobox>
+                <v-btn
+                  icon
+                  variant="tonal"
+                  color="deep-purple"
+                  density="comfortable"
+                  class="mt-1"
+                  @click="openServersDialog"
+                >
+                  <v-icon>mdi-cog-outline</v-icon>
+                  <v-tooltip activator="parent" location="top">Gerenciar servidores DNS</v-tooltip>
+                </v-btn>
+              </div>
             </v-col>
 
             <v-col v-if="form.kind === 'http'" cols="12" md="6">
@@ -265,9 +353,56 @@
             </v-col>
           </v-row>
 
-          <!-- Etapa 3: frequência e ajustes finos -->
-          <div class="text-overline text-medium-emphasis mt-5 mb-2">3 · Frequência</div>
-          <v-row dense>
+          <!-- Etapa 3: de onde a checagem parte e a que equipamento pertence -->
+          <div class="text-overline text-medium-emphasis mt-8 mb-3">3 · Origem e vínculo</div>
+          <v-row class="form-rows">
+            <v-col cols="12" md="6">
+              <v-select
+                v-model="form.probeId"
+                :items="probeItems"
+                item-title="title"
+                item-value="value"
+                label="Executar a partir de"
+                prepend-inner-icon="mdi-play-network-outline"
+                variant="outlined"
+                density="comfortable"
+                hint="Ponto da rede que dispara a checagem e mede o tempo"
+                persistent-hint
+              >
+                <template #item="{ props: itemProps, item }">
+                  <v-list-item
+                    v-bind="itemProps"
+                    :subtitle="itemField(item, 'subtitle')"
+                  ></v-list-item>
+                </template>
+              </v-select>
+            </v-col>
+
+            <v-col v-if="!definition.requiresDevice" cols="12" md="6">
+              <v-select
+                v-model="form.deviceId"
+                :items="devicesStore.devices"
+                item-title="name"
+                item-value="id"
+                label="Vincular a um equipamento (opcional)"
+                prepend-inner-icon="mdi-link-variant"
+                variant="outlined"
+                density="comfortable"
+                clearable
+                :disabled="deviceLocked"
+                :hint="definition.deviceHint"
+                persistent-hint
+              >
+                <template #item="{ props: itemProps, item }">
+                  <v-list-item v-bind="itemProps" :subtitle="deviceSubtitle(item)"></v-list-item>
+                </template>
+              </v-select>
+            </v-col>
+          </v-row>
+
+          <!-- Etapa 4: frequência e ajustes finos -->
+          <div class="text-overline text-medium-emphasis mt-8 mb-3">4 · Frequência</div>
+          <v-row class="form-rows">
             <v-col cols="12" md="6">
               <v-select
                 v-model="form.intervalSeconds"
@@ -304,7 +439,7 @@
                 Opções avançadas de {{ definition.label }}
               </v-expansion-panel-title>
               <v-expansion-panel-text>
-                <v-row dense class="pt-2">
+                <v-row class="form-rows pt-2">
                   <v-col v-if="form.kind === 'ping'" cols="12" md="6">
                     <v-text-field
                       v-model.number="form.packetCount"
@@ -342,6 +477,35 @@
                       label="Validar certificado TLS"
                       hide-details
                     ></v-switch>
+                  </v-col>
+
+                  <v-col v-if="form.kind === 'dns'" cols="12" md="8">
+                    <v-combobox
+                      :model-value="form.extraHostnames"
+                      label="Outros nomes medidos na mesma checagem"
+                      placeholder="Digite e pressione Enter"
+                      variant="outlined"
+                      density="comfortable"
+                      multiple
+                      chips
+                      closable-chips
+                      hint="A latência publicada é a média de todos os nomes"
+                      persistent-hint
+                      @update:model-value="onExtraHostnamesChange"
+                    ></v-combobox>
+                  </v-col>
+                  <v-col v-if="form.kind === 'dns'" cols="12" md="4">
+                    <v-text-field
+                      v-model.number="form.dnsWarningThresholdMs"
+                      label="Alertar acima de (ms)"
+                      type="number"
+                      min="0"
+                      variant="outlined"
+                      density="comfortable"
+                      clearable
+                      hint="Em branco, só falhas geram alerta"
+                      persistent-hint
+                    ></v-text-field>
                   </v-col>
 
                   <v-col v-if="form.kind === 'snmp'" cols="12" md="4">
@@ -459,6 +623,12 @@
         </v-btn>
       </v-card-actions>
     </v-card>
+
+    <DnsServersDialog
+      v-model="serversDialog"
+      :prefill-address="prefillAddress"
+      @saved="onServerSaved"
+    ></DnsServersDialog>
   </v-dialog>
 </template>
 
@@ -466,10 +636,14 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { useMonitorsStore, type Monitor } from '@/stores/monitors'
 import { useDevicesStore } from '@/stores/devices'
+import { useProbesStore } from '@/stores/probes'
+import { useDnsServersStore, type DnsServer } from '@/stores/dnsServers'
 import { apiService } from '@/services/apiService'
 import type { DeviceInterface } from '@/stores/deviceDetail'
+import DnsServersDialog from '@/components/DnsServersDialog.vue'
 import {
   COMMON_TCP_PORTS,
+  DNS_PROTOCOLS,
   DNS_RECORD_TYPES,
   INTERVAL_PRESETS,
   MONITOR_KINDS,
@@ -477,8 +651,10 @@ import {
   TIMEOUT_PRESETS,
   createMonitorForm,
   describeMonitor,
+  dnsProtocol,
   formToPayload,
   formatSeconds,
+  isHostname,
   isIpAddress,
   isValidPort,
   monitorKind,
@@ -493,6 +669,8 @@ const props = defineProps<{
   modelValue: boolean
   monitor?: Monitor | null
   defaultDeviceId?: number | null
+  /** Aberto de dentro de um equipamento: o vínculo já vem definido e travado */
+  lockDevice?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -502,6 +680,66 @@ const emit = defineEmits<{
 
 const monitorsStore = useMonitorsStore()
 const devicesStore = useDevicesStore()
+const probesStore = useProbesStore()
+const dnsServersStore = useDnsServersStore()
+
+const serversDialog = ref(false)
+const deviceLocked = computed(() => props.lockDevice === true)
+
+const probeItems = computed(() => [
+  {
+    title: 'Servidor da aplicação',
+    value: null,
+    subtitle: 'A checagem parte de onde o sistema está instalado',
+  },
+  ...probesStore.probes
+    .filter((probe) => probe.status !== 'revoked')
+    .map((probe) => ({
+      title: probe.name,
+      value: probe.id as number | null,
+      subtitle: `${probe.location || 'Sem localização'} · ${probe.status}`,
+    })),
+])
+
+/** Cadastrados no transporte atual + o valor digitado que ainda não existe */
+const dnsServerItems = computed(() =>
+  dnsServersStore.servers
+    .filter((server) => server.protocol === form.dnsProtocol)
+    .map((server) => ({
+      title: server.address,
+      value: server.address,
+      subtitle: server.description ? `${server.name} · ${server.description}` : server.name,
+      icon: 'mdi-server',
+    }))
+)
+
+const dohEndpointItems = computed(() =>
+  dnsServersStore.servers
+    .filter((server) => server.protocol === 'doh')
+    .map((server) => ({
+      title: server.address,
+      value: server.address,
+      subtitle: server.name,
+    }))
+)
+
+/** Avisa quando o endereço digitado será cadastrado junto com o monitor */
+function registryHint(address: string, fallback: string): string {
+  const trimmed = address.trim()
+  if (!trimmed) return fallback
+  const known = dnsServersStore.findByAddress(trimmed, form.dnsProtocol)
+  return known
+    ? `${known.name}${known.description ? ` · ${known.description}` : ''}`
+    : 'Servidor novo — será adicionado à sua lista ao salvar'
+}
+
+const dnsServerHint = computed(() =>
+  registryHint(form.dnsServer, 'Escolha um servidor cadastrado ou digite um novo')
+)
+
+const dohEndpointHint = computed(() =>
+  registryHint(form.dohUrl, 'Consulta enviada em POST no formato wire da RFC 8484')
+)
 
 const form = reactive<MonitorFormModel>(createMonitorForm())
 const saving = ref<'save' | 'test' | null>(null)
@@ -587,18 +825,66 @@ function deviceSubtitle(item: unknown): string {
   return itemField(item, 'ipAddress') || 'Sem IP cadastrado'
 }
 
+const dnsProtocolDefinition = computed(() => dnsProtocol(form.dnsProtocol))
+
 const dnsServerRule = (value: unknown) => {
   const text = String(value ?? '').trim()
-  if (!text) return true
-  return isIpAddress(text) || 'Informe um endereço IP válido (ex: 8.8.8.8)'
+  if (!text) {
+    return dnsProtocolDefinition.value.requiresServer ? 'Informe o servidor DNS medido' : true
+  }
+  const host = text.split(':')[0] ?? ''
+  return isIpAddress(host) || isHostname(host) || 'Informe um IP ou hostname válido (ex: 1.1.1.1)'
+}
+
+const dohUrlRule = (value: unknown) => {
+  const text = String(value ?? '').trim()
+  if (!text) return 'Informe o endpoint DoH'
+  return /^https:\/\/.+/i.test(text) || 'O endpoint DoH precisa começar com https://'
+}
+
+function onDnsServerChange(value: unknown) {
+  form.dnsServer =
+    typeof value === 'string' ? value.trim() : ((value as { value?: string })?.value ?? '')
+}
+
+function onDohUrlChange(value: unknown) {
+  form.dohUrl =
+    typeof value === 'string' ? value.trim() : ((value as { value?: string })?.value ?? '')
+}
+
+/** Leva o que já foi digitado para o diálogo de cadastro */
+const prefillAddress = computed(() =>
+  form.dnsProtocol === 'doh' ? form.dohUrl.trim() : form.dnsServer.trim()
+)
+
+function openServersDialog() {
+  serversDialog.value = true
+}
+
+/** Servidor recém-cadastrado no diálogo já entra selecionado no formulário */
+function onServerSaved(server: DnsServer) {
+  if (server.protocol === 'doh') {
+    form.dnsProtocol = 'doh'
+    form.dohUrl = server.address
+  } else {
+    form.dnsProtocol = server.protocol
+    form.dnsServer = server.address
+  }
+}
+
+function onExtraHostnamesChange(value: unknown) {
+  const list = Array.isArray(value) ? value : []
+  form.extraHostnames = list.map((item) => String(item).trim().toLowerCase()).filter(Boolean)
 }
 
 function resetForm() {
   errorMessage.value = null
   interfaces.value = []
 
-  // Permite abrir o diálogo a partir de telas que ainda não carregaram os dispositivos
+  // Permite abrir o diálogo a partir de telas que ainda não carregaram os dados
   if (devicesStore.devices.length === 0) devicesStore.fetchDevices()
+  if (probesStore.probes.length === 0) probesStore.fetchProbes()
+  dnsServersStore.fetchServers()
 
   if (props.monitor) {
     Object.assign(form, monitorToForm(props.monitor))
@@ -629,16 +915,19 @@ function selectKind(kind: MonitorKind) {
   const nextDefinition = monitorKind(kind)
   form.port = nextDefinition.usesPort ? (form.port ?? nextDefinition.defaultPort ?? null) : null
 
-  // Reaproveita o alvo quando ainda faz sentido; senão, parte do IP do dispositivo
+  // Tenta reaproveitar o alvo no formato do novo tipo (URL vira host, etc.)
   if (form.target && nextDefinition.target.rule(form.target) !== true) {
     const coerced = nextDefinition.target.coerce(form.target)
     form.target = coerced.target
     if (coerced.port && nextDefinition.usesPort) form.port = coerced.port
   }
-  if (!form.target) applyDeviceTarget()
-  if (nextDefinition.target.rule(form.target) !== true && nextDefinition.suggestsDeviceIp) {
-    applyDeviceTarget()
+
+  // Continua inválido? Melhor esvaziar do que deixar um IP num campo de domínio
+  if (form.target && nextDefinition.target.rule(form.target) !== true) {
+    form.target = ''
   }
+
+  if (!form.target && nextDefinition.suggestsDeviceIp) applyDeviceTarget()
 }
 
 function applyDeviceTarget() {
@@ -732,6 +1021,12 @@ async function save(runAfterSave: boolean) {
   monitorsStore.error = null
 
   try {
+    // Endereço digitado à mão entra no cadastro para virar atalho da próxima vez
+    if (form.kind === 'dns' && form.dnsProtocol !== 'system') {
+      const address = form.dnsProtocol === 'doh' ? form.dohUrl : form.dnsServer
+      await dnsServersStore.ensureServer(address, form.dnsProtocol)
+    }
+
     const payload = formToPayload(form)
     let savedId: number | null = props.monitor?.id ?? null
     let succeeded = false
@@ -764,6 +1059,13 @@ async function save(runAfterSave: boolean) {
   min-width: 140px;
   cursor: pointer;
   transition: transform 0.12s ease;
+}
+
+/* Respiro entre os campos: com dicas persistentes o padrão do Vuetify fica apertado */
+.form-rows > .v-col,
+.form-rows > [class*='v-col-'] {
+  padding-top: 10px;
+  padding-bottom: 10px;
 }
 
 .kind-card:hover {

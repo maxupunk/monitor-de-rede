@@ -21,6 +21,8 @@ const VpnServersController = () => import('#controllers/vpn_servers_controller')
 const VpnPeersController = () => import('#controllers/vpn_peers_controller')
 const ZabbixTemplatesController = () => import('#controllers/zabbix_templates_controller')
 const PortScanController = () => import('#controllers/port_scan_controller')
+const DnsController = () => import('#controllers/dns_controller')
+const DnsServersController = () => import('#controllers/dns_servers_controller')
 
 router.get('/', () => {
   return { status: 'online', service: 'Network Monitor API', version: '1.0.0' }
@@ -45,6 +47,17 @@ router
 
     // Port Scanner (ferramenta reutilizável de varredura de portas TCP/UDP)
     router.post('port-scan', [PortScanController, 'scan'])
+
+    // DNS (latência de resolução: medição avulsa, comparação e ranking histórico)
+    router.post('dns/benchmark', [DnsController, 'benchmark'])
+    router.post('dns/lookup', [DnsController, 'lookup'])
+    router.get('dns/performance', [DnsController, 'performance'])
+
+    // Cadastro de servidores DNS usados nos monitores e na comparação
+    router.get('dns/servers', [DnsServersController, 'index'])
+    router.post('dns/servers', [DnsServersController, 'store'])
+    router.put('dns/servers/:id', [DnsServersController, 'update'])
+    router.delete('dns/servers/:id', [DnsServersController, 'destroy'])
 
     // Devices
     router.post('devices/:id/snmp/poll', [SnmpController, 'poll'])
