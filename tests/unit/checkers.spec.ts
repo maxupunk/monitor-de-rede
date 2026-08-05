@@ -3,7 +3,7 @@ import { PingChecker } from '#modules/monitoring/checkers/ping_checker'
 import { HttpChecker } from '#modules/monitoring/checkers/http_checker'
 import { TcpChecker } from '#modules/monitoring/checkers/tcp_checker'
 import { DnsChecker } from '#modules/monitoring/checkers/dns_checker'
-import { MonitorRunner } from '#modules/monitoring/monitor_runner'
+import { MonitorRunner, mergeTimeout } from '#modules/monitoring/monitor_runner'
 
 test.group('Checkers de Monitoramento - Unit Tests', () => {
   test('PingChecker deve retornar um resultado de check estruturado', async ({ assert }) => {
@@ -78,4 +78,26 @@ test.group('Checkers de Monitoramento - Unit Tests', () => {
       await runner.runMonitor('invalido', {})
     }, 'Tipo de monitor desconhecido ou não suportado: invalido')
   }).timeout(10000)
+
+  test('mergeTimeout deve aplicar o timeout do monitor quando o configuration não define o seu', ({
+    assert,
+  }) => {
+    const merged = mergeTimeout<{ host: string; timeoutMs?: number }>({ host: '127.0.0.1' }, 8000)
+
+    assert.equal(merged.timeoutMs, 8000)
+    assert.equal(merged.host, '127.0.0.1')
+  })
+
+  test('mergeTimeout deve preservar o timeoutMs já presente no configuration', ({ assert }) => {
+    const merged = mergeTimeout<{ timeoutMs?: number }>({ timeoutMs: 1500 }, 8000)
+
+    assert.equal(merged.timeoutMs, 1500)
+  })
+
+  test('mergeTimeout deve ignorar timeouts ausentes ou inválidos', ({ assert }) => {
+    assert.deepEqual(mergeTimeout({ host: '127.0.0.1' }), { host: '127.0.0.1' })
+    assert.deepEqual(mergeTimeout({ host: '127.0.0.1' }, 0), { host: '127.0.0.1' })
+    assert.deepEqual(mergeTimeout({ host: '127.0.0.1' }, -1), { host: '127.0.0.1' })
+    assert.deepEqual(mergeTimeout(null, 5000), { timeoutMs: 5000 })
+  })
 })

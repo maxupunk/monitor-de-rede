@@ -247,7 +247,9 @@ export default class MonitorsController {
 
   async run({ params, response }: HttpContext) {
     const monitor = await Monitor.findOrFail(params.id)
-    const result = await this.monitorRunner.runMonitor(monitor.type, monitor.configuration)
+    const result = await this.monitorRunner.runMonitor(monitor.type, monitor.configuration, {
+      timeoutMs: (monitor.timeoutSeconds || 5) * 1000,
+    })
     await this.resultProcessor.processResult(monitor.id, result, monitor.probeId)
 
     return response.ok({

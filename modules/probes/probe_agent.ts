@@ -110,7 +110,9 @@ export class ProbeAgent {
   private async executeAndReportTask(task: ProbeTask): Promise<void> {
     let result: CheckResult
     try {
-      result = await this.runner.runMonitor(task.type, task.payload)
+      result = await this.runner.runMonitor(task.type, task.payload, {
+        timeoutMs: task.timeoutMs,
+      })
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
       const now = new Date()

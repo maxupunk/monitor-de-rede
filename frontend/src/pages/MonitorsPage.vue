@@ -4,7 +4,7 @@
       <div>
         <h1 class="text-h4 font-weight-bold">Monitores de Rede</h1>
         <p class="text-subtitle-1 text-grey-darken-1">
-          Gerenciamento de verificações ICMP (Ping), HTTP, TCP e DNS com histórico em linha do tempo
+          Verificações de Ping, HTTP, TCP, DNS e SNMP com histórico em linha do tempo
         </p>
       </div>
       <v-btn color="primary" prepend-icon="mdi-plus" @click="openDialog()"> Novo Monitor </v-btn>
@@ -84,15 +84,14 @@
         </template>
 
         <template #item.type="{ item }">
-          <v-chip size="small" color="info" variant="tonal">
-            {{
-              isGaugeMonitor(item)
-                ? gaugeTypeLabel(item)
-                : isInterfaceMonitor(item)
-                  ? 'INTERFACE'
-                  : (item.type || 'N/A').toUpperCase()
-            }}
+          <v-chip size="small" :color="typeChip(item).color" variant="tonal">
+            <v-icon start size="14">{{ typeChip(item).icon }}</v-icon>
+            {{ typeChip(item).label }}
           </v-chip>
+        </template>
+
+        <template #item.target="{ item }">
+          <span class="text-body-2">{{ formatTarget(item) }}</span>
         </template>
 
         <template #item.status="{ item }">
@@ -159,73 +158,33 @@
     </v-card>
 
     <!-- Modal Form de Monitor -->
-    <v-dialog v-model="dialog" max-width="550">
-      <v-card class="rounded-lg pa-4">
-        <v-card-title class="font-weight-bold">
-          {{ editedId ? 'Editar Monitor' : 'Cadastrar Novo Monitor' }}
-        </v-card-title>
+    <MonitorFormDialog
+      v-model="dialog"
+      :monitor="editingMonitor"
+      @saved="onSaved"
+    ></MonitorFormDialog>
+
+    <!-- Confirmação de exclusão -->
+    <v-dialog v-model="deleteDialog" max-width="440">
+      <v-card class="rounded-lg pa-2">
+        <v-card-item>
+          <template #prepend>
+            <v-avatar color="error" variant="tonal" rounded="lg">
+              <v-icon>mdi-delete-alert-outline</v-icon>
+            </v-avatar>
+          </template>
+          <v-card-title class="font-weight-bold">Excluir monitor</v-card-title>
+        </v-card-item>
         <v-card-text>
-          <v-form @submit.prevent="save">
-            <v-select
-              v-model="formModel.deviceId"
-              :items="devicesStore.devices"
-              item-title="name"
-              item-value="id"
-              label="Dispositivo Associado"
-              variant="outlined"
-              required
-            ></v-select>
-            <v-text-field
-              v-model="formModel.name"
-              label="Nome do Monitor"
-              placeholder="Ex: Ping Google DNS"
-              variant="outlined"
-              required
-            ></v-text-field>
-            <v-select
-              v-model="formModel.type"
-              :items="['ping', 'http', 'tcp', 'dns']"
-              label="Tipo de Checagem"
-              variant="outlined"
-              required
-            ></v-select>
-            <v-text-field
-              v-model="formModel.target"
-              label="Alvo (IP / Hostname / URL)"
-              placeholder="8.8.8.8 ou https://meusite.com"
-              variant="outlined"
-              required
-            ></v-text-field>
-            <v-text-field
-              v-if="formModel.type === 'tcp'"
-              v-model.number="formModel.port"
-              label="Porta TCP"
-              type="number"
-              variant="outlined"
-            ></v-text-field>
-            <v-row>
-              <v-col cols="6">
-                <v-text-field
-                  v-model.number="formModel.intervalSeconds"
-                  label="Intervalo (s)"
-                  type="number"
-                  variant="outlined"
-                ></v-text-field>
-              </v-col>
-              <v-col cols="6">
-                <v-text-field
-                  v-model.number="formModel.timeoutSeconds"
-                  label="Timeout (s)"
-                  type="number"
-                  variant="outlined"
-                ></v-text-field>
-              </v-col>
-            </v-row>
-          </v-form>
+          O monitor <strong>{{ monitorToDelete?.name }}</strong> e todo o seu histórico de
+          verificações serão removidos permanentemente. Para apenas parar as checagens, desative-o
+          na coluna "Ativo".
         </v-card-text>
         <v-card-actions class="justify-end">
-          <v-btn variant="text" @click="dialog = false">Cancelar</v-btn>
-          <v-btn color="primary" :loading="saving" @click="save">Salvar</v-btn>
+          <v-btn variant="text" @click="deleteDialog = false">Cancelar</v-btn>
+          <v-btn color="error" variant="flat" :loading="deleting" @click="executeDelete">
+            Excluir
+          </v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -233,44 +192,29 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, reactive } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useMonitorsStore, type Monitor } from '@/stores/monitors'
 import { useDevicesStore } from '@/stores/devices'
 import MonitorTimelineBar from '@/components/MonitorTimelineBar.vue'
+import MonitorFormDialog from '@/components/MonitorFormDialog.vue'
 import {
   isGaugeMonitor,
-  gaugeTypeLabel,
   gaugeMetricName,
   gaugeColor as gaugeColorFor,
   isInterfaceMonitor,
   interfaceStatusInfo as interfaceStatusInfoFor,
   latestResultData,
 } from '@/utils/monitorPresentation'
+import { monitorKind, resolveKind, resolveSnmpMode, SNMP_MODES } from '@/utils/monitorTypes'
 
 const monitorsStore = useMonitorsStore()
 const devicesStore = useDevicesStore()
 const search = ref('')
 const dialog = ref(false)
-const saving = ref(false)
-const editedId = ref<number | null>(null)
-
-const formModel = reactive<{
-  deviceId: number
-  name: string
-  type: 'ping' | 'http' | 'tcp' | 'dns'
-  target: string
-  port?: number
-  intervalSeconds: number
-  timeoutSeconds: number
-}>({
-  deviceId: 1,
-  name: '',
-  type: 'ping',
-  target: '',
-  port: 80,
-  intervalSeconds: 60,
-  timeoutSeconds: 5,
-})
+const editingMonitor = ref<Monitor | null>(null)
+const deleteDialog = ref(false)
+const deleting = ref(false)
+const monitorToDelete = ref<Monitor | null>(null)
 
 const headers = [
   { title: 'ID', key: 'id', width: '60px' },
@@ -309,68 +253,69 @@ function interfaceStatusInfo(item: Monitor) {
   return interfaceStatusInfoFor(item.status, latestResultData(item.recentResults))
 }
 
-function openDialog(monitor?: Monitor) {
-  if (monitor) {
-    editedId.value = monitor.id
-    formModel.deviceId = monitor.deviceId
-    formModel.name = monitor.name
-    formModel.type = (monitor.type as 'ping' | 'http' | 'tcp' | 'dns') || 'ping'
-    formModel.target =
-      monitor.target ||
-      ((monitor.configuration?.host ||
-        monitor.configuration?.url ||
-        monitor.configuration?.domain ||
-        '') as string)
-    formModel.port = monitor.port || (monitor.configuration?.port as number | undefined) || 80
-    formModel.intervalSeconds = monitor.intervalSeconds
-    formModel.timeoutSeconds = monitor.timeoutSeconds
-  } else {
-    editedId.value = null
-    formModel.deviceId = devicesStore.devices[0]?.id || 1
-    formModel.name = ''
-    formModel.type = 'ping'
-    formModel.target = ''
-    formModel.port = 80
-    formModel.intervalSeconds = 60
-    formModel.timeoutSeconds = 5
+/**
+ * O chip de tipo usa o mesmo catálogo do formulário, com o detalhe de que
+ * monitores SNMP se desdobram em leituras diferentes (CPU, memória, interface).
+ */
+function typeChip(item: Monitor): { label: string; icon: string; color: string } {
+  const definition = monitorKind(resolveKind(item.type))
+
+  if (item.type === 'snmp') {
+    const mode = resolveSnmpMode(item.configuration)
+    const modeDefinition = SNMP_MODES.find((m) => m.value === mode)
+    if (mode !== 'availability' && modeDefinition) {
+      return {
+        label:
+          mode === 'interface' ? 'INTERFACE' : isGaugeMonitor(item) ? gaugeLabel(item) : 'SNMP',
+        icon: modeDefinition.icon,
+        color: definition.color,
+      }
+    }
   }
+
+  return { label: definition.short, icon: definition.icon, color: definition.color }
+}
+
+function gaugeLabel(item: Monitor): string {
+  return gaugeMetricName(item) === 'memory_usage' ? 'MEMÓRIA' : 'CPU'
+}
+
+function formatTarget(item: Monitor): string {
+  const config = item.configuration || {}
+  if (item.type === 'tcp') {
+    const port = item.port ?? (config.port as number | undefined)
+    return port ? `${item.target}:${port}` : item.target
+  }
+  if (item.type === 'dns') {
+    const recordType = (config.recordType as string) || 'A'
+    return `${item.target} (${recordType})`
+  }
+  return item.target || '—'
+}
+
+function openDialog(monitor?: Monitor) {
+  editingMonitor.value = monitor ?? null
   dialog.value = true
 }
 
-async function save() {
-  if (!formModel.name || !formModel.target) return
-  saving.value = true
-
-  let configuration: Record<string, unknown> = {}
-  if (formModel.type === 'ping') {
-    configuration = { host: formModel.target }
-  } else if (formModel.type === 'http') {
-    configuration = {
-      url: formModel.target.startsWith('http') ? formModel.target : `http://${formModel.target}`,
-    }
-  } else if (formModel.type === 'tcp') {
-    configuration = { host: formModel.target, port: formModel.port || 80 }
-  } else if (formModel.type === 'dns') {
-    configuration = { domain: formModel.target }
-  }
-
-  const payload = {
-    ...formModel,
-    configuration,
-  }
-
-  if (editedId.value) {
-    await monitorsStore.updateMonitor(editedId.value, payload)
-  } else {
-    await monitorsStore.createMonitor(payload)
-  }
-  saving.value = false
-  dialog.value = false
+async function onSaved() {
+  await monitorsStore.fetchMonitors()
 }
 
-async function confirmDelete(id: number) {
-  if (confirm('Tem certeza de que deseja excluir este monitor?')) {
-    await monitorsStore.deleteMonitor(id)
+function confirmDelete(id: number) {
+  monitorToDelete.value = monitorsStore.monitors.find((m) => m.id === id) ?? null
+  deleteDialog.value = true
+}
+
+async function executeDelete() {
+  if (!monitorToDelete.value) return
+  deleting.value = true
+  try {
+    await monitorsStore.deleteMonitor(monitorToDelete.value.id)
+    deleteDialog.value = false
+    monitorToDelete.value = null
+  } finally {
+    deleting.value = false
   }
 }
 </script>
