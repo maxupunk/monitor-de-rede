@@ -73,22 +73,35 @@ const UDP_SERVICE_NAMES: Record<number, string> = {
 // Concorrência mais baixa é mais lenta em varreduras grandes, mas os resultados são confiáveis.
 const DEFAULT_CONCURRENCY = 16
 
+export interface PortScanOptions {
+  // Chamado assim que cada porta individual termina de ser verificada — permite ao
+  // chamador transmitir o progresso em tempo real, em vez de esperar a varredura inteira.
+  onResult?: (item: PortScanItem) => void
+  // Quando abortado, os workers param de retirar novas portas da fila — o lote (até
+  // DEFAULT_CONCURRENCY) que já estava em voo termina normalmente, mas nada novo é iniciado.
+  signal?: AbortSignal
+}
+
 export class PortScannerService {
   async scan(
     host: string,
     ports: number[],
     protocol: PortProtocol,
-    timeoutMs = 1500
+    timeoutMs = 1500,
+    options: PortScanOptions = {}
   ): Promise<PortScanItem[]> {
+    const { onResult, signal } = options
     const results: PortScanItem[] = []
     const queue = [...ports]
     const scanPort = protocol === 'tcp' ? this.scanTcpPort.bind(this) : this.scanUdpPort.bind(this)
 
     const worker = async () => {
-      while (queue.length > 0) {
+      while (queue.length > 0 && !signal?.aborted) {
         const port = queue.shift()
         if (port === undefined) break
-        results.push(await scanPort(host, port, timeoutMs))
+        const item = await scanPort(host, port, timeoutMs)
+        results.push(item)
+        onResult?.(item)
       }
     }
 

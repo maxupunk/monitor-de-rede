@@ -9,6 +9,10 @@ export default class PortScanController {
    * POST /api/port-scan
    * Executa uma varredura de portas TCP ou UDP sob demanda em um host — ferramenta
    * reutilizável (não exige que o host já esteja cadastrado como dispositivo).
+   *
+   * A resposta é transmitida como NDJSON (uma linha JSON por porta verificada), para que o
+   * frontend acompanhe o progresso em tempo real em vez de esperar a varredura inteira.
+   * Se o cliente cancelar (fechar a conexão), interrompemos a varredura no próximo lote.
    */
   async scan({ request, response }: HttpContext) {
     const schema = vine.object({
@@ -23,19 +27,45 @@ export default class PortScanController {
 
     const payload = await vine.validate({ schema, data: request.all() })
 
+    const rawRes = response.response
+    rawRes.writeHead(200, {
+      'Content-Type': 'application/x-ndjson',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    })
+
+    const abortController = new AbortController()
+    request.request.on('close', () => abortController.abort())
+
+    const writeLine = (obj: unknown) => {
+      try {
+        rawRes.write(JSON.stringify(obj) + '\n')
+      } catch {
+        // Conexão já encerrada pelo cliente
+      }
+    }
+
     try {
-      const results = await this.portScannerService.scan(
+      await this.portScannerService.scan(
         payload.host,
         payload.ports,
         payload.protocol,
-        payload.timeoutMs
+        payload.timeoutMs,
+        {
+          signal: abortController.signal,
+          onResult: (item) => writeLine({ type: 'result', ...item }),
+        }
       )
-      return response.ok({ host: payload.host, protocol: payload.protocol, results })
+      if (!abortController.signal.aborted) {
+        writeLine({ type: 'done' })
+      }
     } catch (error) {
-      return response.badRequest({
-        message: 'Falha ao executar varredura de portas',
-        error: error instanceof Error ? error.message : String(error),
+      writeLine({
+        type: 'error',
+        message: error instanceof Error ? error.message : String(error),
       })
+    } finally {
+      rawRes.end()
     }
   }
 }

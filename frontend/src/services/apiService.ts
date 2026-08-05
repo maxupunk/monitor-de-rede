@@ -82,6 +82,24 @@ class ApiService {
     })
     return this.handleResponse<T>(response)
   }
+
+  /**
+   * POST que retorna a Response crua (sem consumir/parsear o corpo), para endpoints que
+   * transmitem a resposta em streaming (ex: NDJSON) em vez de um único JSON final.
+   * Aceita um AbortSignal para permitir cancelamento pelo chamador.
+   */
+  async postStream(path: string, body: unknown, signal?: AbortSignal): Promise<Response> {
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(body),
+      signal,
+    })
+    if (!response.ok) {
+      await this.handleResponse(response)
+    }
+    return response
+  }
 }
 
 export const apiService = new ApiService()

@@ -20,6 +20,7 @@
               placeholder="Ex: 192.168.1.1"
               variant="outlined"
               density="comfortable"
+              :disabled="portScanStore.scanning"
               hide-details
             ></v-text-field>
           </v-col>
@@ -33,6 +34,7 @@
               label="Protocolo"
               variant="outlined"
               density="comfortable"
+              :disabled="portScanStore.scanning"
               hide-details
             ></v-select>
           </v-col>
@@ -47,6 +49,7 @@
               label="Intervalo"
               variant="outlined"
               density="comfortable"
+              :disabled="portScanStore.scanning"
               hide-details
             ></v-select>
           </v-col>
@@ -60,6 +63,7 @@
               persistent-hint
               variant="outlined"
               density="comfortable"
+              :disabled="portScanStore.scanning"
             ></v-text-field>
           </v-col>
         </v-row>
@@ -76,19 +80,34 @@
           fechada.
         </v-alert>
 
-        <v-alert v-if="scanError" type="error" variant="tonal" density="compact" class="mt-2 mb-4">
+        <v-alert
+          v-if="scanError"
+          :type="scanErrorIsWarningOnly ? 'info' : 'error'"
+          variant="tonal"
+          density="compact"
+          class="mt-2 mb-4"
+        >
           {{ scanError }}
         </v-alert>
 
         <div class="d-flex align-center justify-space-between flex-wrap ga-3 mt-2 mb-4">
           <v-btn
+            v-if="!portScanStore.scanning"
             color="primary"
             prepend-icon="mdi-play"
-            :loading="portScanStore.scanning"
             :disabled="!hostModel"
             @click="startScan"
           >
             Iniciar Varredura
+          </v-btn>
+          <v-btn
+            v-else
+            color="error"
+            variant="tonal"
+            prepend-icon="mdi-stop-circle-outline"
+            @click="cancelScan"
+          >
+            Cancelar Varredura
           </v-btn>
 
           <v-checkbox
@@ -101,12 +120,19 @@
           ></v-checkbox>
         </div>
 
-        <v-progress-linear
-          v-if="portScanStore.scanning"
-          indeterminate
-          color="primary"
-          class="mb-4"
-        ></v-progress-linear>
+        <div v-if="portScanStore.scanning" class="mb-4">
+          <v-progress-linear
+            :model-value="progressPercent"
+            color="primary"
+            height="8"
+            rounded
+            class="mb-2"
+          ></v-progress-linear>
+          <div class="text-caption text-grey-darken-1">
+            {{ results?.length ?? 0 }} / {{ totalPortsBeingScanned }} portas verificadas
+            <span v-if="openCount > 0"> — {{ openCount }} aberta(s) encontrada(s) até agora</span>
+          </div>
+        </div>
 
         <div v-if="results !== null">
           <div class="text-caption text-grey-darken-1 mb-2">
@@ -137,7 +163,11 @@
               </tr>
               <tr v-if="filteredResults.length === 0">
                 <td colspan="5" class="text-center text-grey py-4">
-                  Nenhuma porta aberta encontrada{{ onlyOpen ? ' (com o filtro ativo)' : '' }}.
+                  {{
+                    portScanStore.scanning
+                      ? 'Aguardando resultados...'
+                      : `Nenhuma porta aberta encontrada${onlyOpen ? ' (com o filtro ativo)' : ''}.`
+                  }}
                 </td>
               </tr>
             </tbody>
@@ -184,6 +214,8 @@ const customPortsInput = ref('')
 const onlyOpen = ref(true)
 const results = ref<PortScanItem[] | null>(null)
 const scanError = ref<string | null>(null)
+const scanErrorIsWarningOnly = ref(false)
+const totalPortsBeingScanned = ref(0)
 
 const TCP_COMMON_PORTS = [
   21, 22, 23, 25, 53, 80, 110, 111, 135, 139, 143, 161, 389, 443, 445, 465, 587, 993, 995, 1433,
@@ -204,18 +236,26 @@ watch(
       onlyOpen.value = true
       results.value = null
       scanError.value = null
+      scanErrorIsWarningOnly.value = false
+      totalPortsBeingScanned.value = 0
+    } else if (portScanStore.scanning) {
+      portScanStore.cancelScan()
     }
   }
 )
 
-const openCount = computed(
-  () => results.value?.filter((r) => r.status === 'open').length ?? 0
-)
+const openCount = computed(() => results.value?.filter((r) => r.status === 'open').length ?? 0)
+
+const progressPercent = computed(() => {
+  if (!totalPortsBeingScanned.value) return 0
+  return ((results.value?.length ?? 0) / totalPortsBeingScanned.value) * 100
+})
 
 const filteredResults = computed(() => {
   if (!results.value) return []
-  if (!onlyOpen.value) return results.value
-  return results.value.filter((r) => r.status !== 'closed')
+  const sorted = [...results.value].sort((a, b) => a.port - b.port)
+  if (!onlyOpen.value) return sorted
+  return sorted.filter((r) => r.status !== 'closed')
 })
 
 function parsePortsInput(input: string): number[] {
@@ -271,6 +311,7 @@ async function startScan() {
   let ports = resolvePorts()
   if (ports.length === 0) {
     scanError.value = 'Informe ao menos uma porta válida.'
+    scanErrorIsWarningOnly.value = false
     return
   }
 
@@ -281,20 +322,33 @@ async function startScan() {
   }
 
   scanError.value = null
-  results.value = null
+  scanErrorIsWarningOnly.value = false
+  results.value = []
+  totalPortsBeingScanned.value = ports.length
 
-  const res = await portScanStore.scanPorts({
-    host: hostModel.value,
-    protocol: protocol.value,
-    ports,
-  })
+  const completed = await portScanStore.scanPorts(
+    { host: hostModel.value, protocol: protocol.value, ports },
+    (item) => {
+      results.value?.push(item)
+    }
+  )
 
-  if (res) {
-    results.value = res
-    if (truncatedNote) scanError.value = `Varredura concluída${truncatedNote}.`
+  if (completed) {
+    if (truncatedNote) {
+      scanError.value = `Varredura concluída${truncatedNote}.`
+      scanErrorIsWarningOnly.value = true
+    }
+  } else if (portScanStore.error) {
+    scanError.value = portScanStore.error
+    scanErrorIsWarningOnly.value = false
   } else {
-    scanError.value = portScanStore.error || 'Erro ao executar varredura de portas.'
+    scanError.value = `Varredura cancelada (${results.value?.length ?? 0}/${totalPortsBeingScanned.value} portas verificadas).`
+    scanErrorIsWarningOnly.value = true
   }
+}
+
+function cancelScan() {
+  portScanStore.cancelScan()
 }
 
 function onUpdateModelValue(val: boolean) {
@@ -302,6 +356,7 @@ function onUpdateModelValue(val: boolean) {
 }
 
 function close() {
+  if (portScanStore.scanning) portScanStore.cancelScan()
   emit('update:modelValue', false)
 }
 </script>
