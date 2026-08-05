@@ -8,8 +8,11 @@ import {
   parseZabbixTemplateExport,
   ZabbixTemplateParseError,
 } from '#modules/zabbix/zabbix_template_parser'
+import { ResourceCleanupService } from '#services/resource_cleanup_service'
 
 export default class ZabbixTemplatesController {
+  private cleanupService = new ResourceCleanupService()
+
   async index({ response }: HttpContext) {
     const templates = await ZabbixTemplate.query().preload('items').orderBy('name', 'asc')
 
@@ -144,7 +147,7 @@ export default class ZabbixTemplatesController {
 
   async destroy({ params, response }: HttpContext) {
     const template = await ZabbixTemplate.findOrFail(params.id)
-    await template.delete()
+    await this.cleanupService.deleteZabbixTemplate(template.id)
     return response.noContent()
   }
 }

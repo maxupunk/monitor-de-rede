@@ -4,8 +4,11 @@ import Monitor from '#models/monitor'
 import Metric from '#models/metric'
 import AlertEvent from '#models/alert_event'
 import { syncZabbixTemplateMonitor } from '#modules/zabbix/zabbix_template_monitor_sync'
+import { ResourceCleanupService } from '#services/resource_cleanup_service'
 
 export default class DevicesController {
+  private cleanupService = new ResourceCleanupService()
+
   async index({ response }: HttpContext) {
     const devices = await Device.query().preload('site').preload('parent')
     return response.ok(devices)
@@ -109,7 +112,7 @@ export default class DevicesController {
 
   async destroy({ params, response }: HttpContext) {
     const device = await Device.findOrFail(params.id)
-    await device.delete()
+    await this.cleanupService.deleteDevice(device.id)
     return response.noContent()
   }
 

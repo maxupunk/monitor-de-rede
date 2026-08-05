@@ -15,6 +15,8 @@ import {
   type PeerConfigContext,
 } from './profiles/profile_contract.js'
 
+import { ResourceCleanupService } from '#services/resource_cleanup_service'
+
 /**
  * Regras de negócio dos peers: criação com provisionamento completo, rotação de
  * chaves, revogação e geração dos artefatos por perfil.
@@ -43,6 +45,8 @@ export interface PeerListItem {
 }
 
 export class VpnPeerService {
+  private cleanupService = new ResourceCleanupService()
+
   constructor(
     private serverService = new VpnServerService(),
     private ipAllocator = new IpAllocator(),
@@ -224,15 +228,12 @@ export class VpnPeerService {
   async revoke(peerId: number): Promise<void> {
     const { peer, server } = await this.loadPeer(peerId)
 
-    await db.transaction(async (trx) => {
-      peer.useTransaction(trx)
-      await peer.delete()
+    const deviceId = peer.deviceId
+    await peer.delete()
 
-      if (peer.device) {
-        peer.device.useTransaction(trx)
-        await peer.device.delete()
-      }
-    })
+    if (deviceId) {
+      await this.cleanupService.deleteDevice(deviceId)
+    }
 
     clientKeyStore.consume(this.secretKey(peerId))
     await this.serverService.applyConfiguration(server)

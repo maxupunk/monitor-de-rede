@@ -6,6 +6,7 @@ import { MonitorRunner } from '#modules/monitoring/monitor_runner'
 import { ResultProcessor } from '#modules/monitoring/result_processor'
 import { DeviceStatusService } from '#modules/monitoring/device_status_service'
 import { RecoveryManager } from '#modules/alerts/recovery_manager'
+import { ResourceCleanupService } from '#services/resource_cleanup_service'
 
 const GAUGE_METRIC_NAMES = ['cpu_usage', 'memory_usage']
 
@@ -254,10 +255,12 @@ export default class MonitorsController {
     return response.ok(monitor)
   }
 
+  private cleanupService = new ResourceCleanupService()
+
   async destroy({ params, response }: HttpContext) {
     const monitor = await Monitor.findOrFail(params.id)
     await this.recoveryManager.resolveAlertsForMonitor(monitor.id, 'Monitor removido')
-    await monitor.delete()
+    await this.cleanupService.deleteMonitor(monitor.id)
     return response.noContent()
   }
 

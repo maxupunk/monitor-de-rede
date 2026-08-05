@@ -5,11 +5,13 @@ import Probe from '#models/probe'
 import { ProbeTaskDispatcher } from '#modules/probes/probe_task_dispatcher'
 import { ProbeResultReceiver } from '#modules/probes/probe_result_receiver'
 import { EventBus } from '#modules/events/event_bus'
+import { ResourceCleanupService } from '#services/resource_cleanup_service'
 
 export default class ProbesController {
   private taskDispatcher = new ProbeTaskDispatcher()
   private resultReceiver = new ProbeResultReceiver()
   private eventBus = EventBus.getInstance()
+  private cleanupService = new ResourceCleanupService()
 
   private hashToken(rawToken: string): string {
     return crypto.createHash('sha256').update(rawToken).digest('hex')
@@ -76,7 +78,7 @@ export default class ProbesController {
 
   async destroy({ params, response }: HttpContext) {
     const probe = await Probe.findOrFail(params.id)
-    await probe.delete()
+    await this.cleanupService.deleteProbe(probe.id)
     return response.noContent()
   }
 

@@ -1,7 +1,10 @@
 import type { HttpContext } from '@adonisjs/core/http'
 import Site from '#models/site'
+import { ResourceCleanupService } from '#services/resource_cleanup_service'
 
 export default class SitesController {
+  private cleanupService = new ResourceCleanupService()
+
   async index({ response }: HttpContext) {
     const sites = await Site.all()
     return response.ok(sites)
@@ -28,7 +31,7 @@ export default class SitesController {
 
   async destroy({ params, response }: HttpContext) {
     const site = await Site.findOrFail(params.id)
-    await site.delete()
+    await this.cleanupService.deleteSite(site.id)
     return response.noContent()
   }
 }

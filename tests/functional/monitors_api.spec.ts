@@ -169,4 +169,48 @@ test.group('Monitors API - Functional Tests', (group) => {
     assert.equal(enableRes.body().isEnabled, true)
     assert.equal(enableRes.body().status, 'up')
   })
+
+  test('DELETE /api/monitors/:id deve apagar o monitor e TODO o seu histórico de resultados', async ({
+    client,
+    assert,
+  }) => {
+    const site = await Site.create({ name: 'Site Exclusão', active: true })
+    const device = await Device.create({
+      siteId: site.id,
+      name: 'Servidor Exclusão',
+      type: 'server',
+      status: 'online',
+    })
+
+    const monitor = await Monitor.create({
+      deviceId: device.id,
+      type: 'ping',
+      name: 'Ping Exclusão',
+      configuration: { host: '127.0.0.1' },
+      intervalSeconds: 60,
+      timeoutSeconds: 5,
+      enabled: true,
+      status: 'up',
+    })
+
+    const now = DateTime.now()
+    await MonitorResult.create({
+      monitorId: monitor.id,
+      status: 'up',
+      startedAt: now,
+      finishedAt: now,
+      durationMs: 10,
+      latencyMs: 5,
+      message: 'OK',
+    })
+
+    const deleteRes = await client.delete(`/api/monitors/${monitor.id}`)
+    deleteRes.assertStatus(204)
+
+    const remainingResults = await MonitorResult.query().where('monitorId', monitor.id)
+    assert.isEmpty(remainingResults)
+
+    const remainingMonitors = await Monitor.query().where('id', monitor.id)
+    assert.isEmpty(remainingMonitors)
+  })
 })
