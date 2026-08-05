@@ -8,6 +8,7 @@ import DeviceInterface from '#models/device_interface'
 import Metric from '#models/metric'
 import DeviceLink from '#models/device_link'
 import VpnPeer from '#models/vpn_peer'
+import ZabbixTemplate from '#models/zabbix_template'
 
 export default class Device extends BaseModel {
   @column({ isPrimary: true })
@@ -56,6 +57,9 @@ export default class Device extends BaseModel {
   declare snmpVersion: string | null
 
   @column()
+  declare zabbixTemplateId: number | null
+
+  @column()
   declare status: 'online' | 'offline' | 'warning' | 'unknown'
 
   @column.dateTime()
@@ -93,5 +97,7 @@ export default class Device extends BaseModel {
 
   @hasOne(() => VpnPeer)
   declare vpnPeer: HasOne<typeof VpnPeer>
-}
 
+  @belongsTo(() => ZabbixTemplate, { foreignKey: 'zabbixTemplateId' })
+  declare zabbixTemplate: BelongsTo<typeof ZabbixTemplate>
+}

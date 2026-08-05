@@ -37,7 +37,10 @@ export class SnmpClient {
   private createSession(): any {
     const baseOptions = {
       port: this.config.port || 161,
-      retries: 1,
+      // UDP não garante entrega — 1 retry só era margem curta demais para varreduras
+      // interativas (usuário clicando "Escanear" uma vez); 2 dá mais resiliência a perda
+      // de pacote sem estender demais o tempo total de uma consulta que já falhou de vez.
+      retries: 2,
       timeout: this.config.timeoutMs || 4000,
     }
 

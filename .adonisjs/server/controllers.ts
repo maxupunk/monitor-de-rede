@@ -17,4 +17,5 @@ export const controllers = {
   Topology: () => import('#controllers/topology_controller'),
   VpnPeers: () => import('#controllers/vpn_peers_controller'),
   VpnServers: () => import('#controllers/vpn_servers_controller'),
+  ZabbixTemplates: () => import('#controllers/zabbix_templates_controller'),
 }

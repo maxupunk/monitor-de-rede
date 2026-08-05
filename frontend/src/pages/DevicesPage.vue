@@ -244,6 +244,33 @@
                   density="comfortable"
                 ></v-select>
               </v-col>
+              <v-col v-if="formModel.snmpEnabled" cols="12">
+                <div class="d-flex align-center ga-2">
+                  <v-select
+                    v-model="formModel.zabbixTemplateId"
+                    :items="zabbixTemplatesStore.templates"
+                    item-title="name"
+                    item-value="id"
+                    label="Template Zabbix (Opcional)"
+                    hint="Define quais OIDs SNMP são coletados (tensão, corrente, etc.) além de CPU/Memória/Interfaces."
+                    persistent-hint
+                    variant="outlined"
+                    density="comfortable"
+                    clearable
+                    class="flex-grow-1"
+                  ></v-select>
+                  <v-btn
+                    icon
+                    color="primary"
+                    variant="tonal"
+                    density="comfortable"
+                    to="/zabbix-templates"
+                  >
+                    <v-icon>mdi-upload</v-icon>
+                    <v-tooltip activator="parent" location="top">Importar Novo Template</v-tooltip>
+                  </v-btn>
+                </div>
+              </v-col>
             </v-row>
           </v-form>
         </v-card-text>
@@ -264,11 +291,13 @@ import { ref, onMounted, reactive, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useDevicesStore, type Device } from '@/stores/devices'
 import { useSitesStore, type Site } from '@/stores/sites'
+import { useZabbixTemplatesStore } from '@/stores/zabbixTemplates'
 import SiteDialog from '@/components/SiteDialog.vue'
 
 const router = useRouter()
 const devicesStore = useDevicesStore()
 const sitesStore = useSitesStore()
+const zabbixTemplatesStore = useZabbixTemplatesStore()
 const search = ref('')
 const dialog = ref(false)
 const siteDialog = ref(false)
@@ -287,6 +316,7 @@ const formModel = reactive<{
   snmpEnabled: boolean
   snmpCommunity: string
   snmpVersion: 'v1' | 'v2c' | 'v3'
+  zabbixTemplateId: number | null
 }>({
   name: '',
   ipAddress: '',
@@ -299,6 +329,7 @@ const formModel = reactive<{
   snmpEnabled: false,
   snmpCommunity: 'public',
   snmpVersion: 'v2c',
+  zabbixTemplateId: null,
 })
 
 const headers = [
@@ -318,7 +349,11 @@ const availableParentDevices = computed(() => {
 })
 
 onMounted(async () => {
-  await Promise.all([devicesStore.fetchDevices(), sitesStore.fetchSites()])
+  await Promise.all([
+    devicesStore.fetchDevices(),
+    sitesStore.fetchSites(),
+    zabbixTemplatesStore.fetchTemplates(),
+  ])
 })
 
 function onRowClick(_event: MouseEvent, row: { item: Device }) {
@@ -354,6 +389,7 @@ function openDialog(device?: Device) {
     formModel.snmpEnabled = Boolean(device.snmpEnabled)
     formModel.snmpCommunity = device.snmpCommunity || 'public'
     formModel.snmpVersion = device.snmpVersion || 'v2c'
+    formModel.zabbixTemplateId = device.zabbixTemplateId ?? null
   } else {
     editedId.value = null
     formModel.name = ''
@@ -367,6 +403,7 @@ function openDialog(device?: Device) {
     formModel.snmpEnabled = false
     formModel.snmpCommunity = 'public'
     formModel.snmpVersion = 'v2c'
+    formModel.zabbixTemplateId = null
   }
   dialog.value = true
 }

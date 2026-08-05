@@ -329,6 +329,36 @@
               </v-col>
             </v-row>
 
+            <!-- 1.5 Métricas do Template Zabbix (genérico) — apenas se o dispositivo tiver um template vinculado -->
+            <template v-if="templateMetricCards.length > 0">
+              <div
+                class="text-subtitle-1 font-weight-bold mb-3 d-flex align-center ga-2"
+                style="gap: 8px"
+              >
+                <v-icon color="primary">mdi-file-cog-outline</v-icon>
+                {{ detailStore.device?.zabbixTemplate?.name || 'Métricas do Template' }}
+              </div>
+
+              <v-row class="mb-6">
+                <v-col v-for="card in templateMetricCards" :key="card.label" cols="12" sm="6" md="3">
+                  <v-card border flat class="pa-4 rounded-lg h-100">
+                    <div class="d-flex align-center justify-space-between mb-2">
+                      <span class="text-caption text-grey-darken-1 font-weight-medium">{{
+                        card.label
+                      }}</span>
+                      <v-avatar color="info" variant="tonal" size="30">
+                        <v-icon size="16">mdi-gauge</v-icon>
+                      </v-avatar>
+                    </div>
+                    <div class="text-h6 font-weight-bold text-info">
+                      {{ card.value }}
+                    </div>
+                    <div class="text-caption text-grey">{{ card.createdAt || 'Sem dados' }}</div>
+                  </v-card>
+                </v-col>
+              </v-row>
+            </template>
+
             <!-- 2. Tabela de Tráfego por Interface Monitorada -->
             <div
               class="text-subtitle-1 font-weight-bold mb-3 d-flex align-center ga-2"
@@ -687,7 +717,7 @@
         <v-card-title class="d-flex align-center justify-space-between pa-4 bg-primary text-white">
           <div class="d-flex align-center ga-2" style="gap: 8px">
             <v-icon>mdi-radar</v-icon>
-            <span>Escaneamento & Descoberta SNMP (OpenWrt)</span>
+            <span>Escaneamento & Descoberta SNMP</span>
           </div>
           <v-btn icon variant="text" color="white" @click="scanModalOpen = false">
             <v-icon>mdi-close</v-icon>
@@ -706,23 +736,35 @@
               Escaneando dispositivo via SNMP em {{ detailStore.device?.ipAddress }}...
             </div>
             <div class="text-caption text-grey">
-              Consultando interfaces, uso de CPU e memória RAM...
+              Consultando interfaces, uso de CPU/memória e itens do template Zabbix vinculado...
             </div>
           </div>
 
           <div v-else-if="detailStore.scanResult">
+            <!-- Alerta de Ausência Total de Resposta SNMP -->
+            <v-alert
+              v-if="!detailStore.scanResult.snmpResponded"
+              type="warning"
+              variant="tonal"
+              class="mb-4"
+              prepend-icon="mdi-alert-circle-outline"
+              title="Nenhuma resposta SNMP"
+              text="O dispositivo não respondeu a nenhum OID consultado, mesmo os padrão (sysDescr/sysName). Confira: (1) SNMP está habilitado no próprio equipamento — não só aqui no cadastro; (2) a community configurada aqui bate com a community de leitura configurada no equipamento; (3) a versão SNMP (v1/v2c/v3) está correta; (4) a porta 161/UDP chega ao equipamento a partir deste servidor (sem firewall/NAT no meio)."
+            ></v-alert>
+
             <!-- Dados do Sistema -->
             <v-alert
+              v-else
               type="info"
               variant="tonal"
               class="mb-4"
               prepend-icon="mdi-router"
               title="Dispositivo Conectado"
-              :subtitle="detailStore.scanResult.systemInfo.sysDescr || 'OpenWrt / Router Device'"
+              :subtitle="detailStore.scanResult.systemInfo.sysDescr || 'Dispositivo SNMP'"
             ></v-alert>
 
-            <!-- Recursos de CPU & Memória -->
-            <v-card variant="outlined" class="mb-6 rounded-lg pa-4">
+            <!-- Recursos de CPU & Memória (apenas se o dispositivo de fato expôs esses dados) -->
+            <v-card v-if="hasCpuData || hasMemoryData" variant="outlined" class="mb-6 rounded-lg pa-4">
               <div
                 class="text-subtitle-1 font-weight-bold mb-3 d-flex align-center ga-2"
                 style="gap: 8px"
@@ -731,7 +773,7 @@
                 Monitoramento de Recursos da CPU & Memória
               </div>
               <v-row>
-                <v-col cols="12" md="6">
+                <v-col v-if="hasCpuData" cols="12" md="6">
                   <v-switch
                     v-model="selectedCpuMonitor"
                     color="primary"
@@ -749,7 +791,7 @@
                     </span>
                   </div>
                 </v-col>
-                <v-col cols="12" md="6">
+                <v-col v-if="hasMemoryData" cols="12" md="6">
                   <v-switch
                     v-model="selectedMemoryMonitor"
                     color="primary"
@@ -763,6 +805,44 @@
                     <span v-if="detailStore.scanResult.memoryInfo.usedPercent !== undefined">
                       - Uso: {{ detailStore.scanResult.memoryInfo.usedPercent }}%
                     </span>
+                  </div>
+                </v-col>
+              </v-row>
+            </v-card>
+
+            <!-- Itens do Template Zabbix vinculado (tensão, corrente, etc.) -->
+            <v-card
+              v-if="detailStore.scanResult.zabbixTemplateItems.length > 0"
+              variant="outlined"
+              class="mb-6 rounded-lg pa-4"
+            >
+              <div
+                class="text-subtitle-1 font-weight-bold mb-3 d-flex align-center ga-2"
+                style="gap: 8px"
+              >
+                <v-icon color="primary">mdi-file-cog-outline</v-icon>
+                Itens do Template Zabbix — {{ detailStore.device?.zabbixTemplate?.name }}
+              </div>
+              <div class="text-caption text-grey mb-3">
+                Coletados automaticamente a cada ciclo de polling — não é preciso habilitar
+                individualmente.
+              </div>
+              <v-row>
+                <v-col
+                  v-for="item in detailStore.scanResult.zabbixTemplateItems"
+                  :key="item.id"
+                  cols="12"
+                  sm="6"
+                  md="4"
+                >
+                  <div class="pa-3 border rounded-lg">
+                    <div class="text-caption text-grey-darken-1">{{ item.name }}</div>
+                    <div
+                      class="text-subtitle-1 font-weight-bold"
+                      :class="item.value !== null ? 'text-primary' : 'text-grey'"
+                    >
+                      {{ item.value !== null ? `${item.value}${item.units ? ` ${item.units}` : ''}` : 'Sem resposta' }}
+                    </div>
                   </div>
                 </v-col>
               </v-row>
@@ -915,6 +995,20 @@ function openTrafficChart(
 
 const selectedCpuMonitor = ref(true)
 const selectedMemoryMonitor = ref(true)
+
+// O equipamento pode simplesmente não expor essas MIBs (ex: controlador solar sem CPU/RAM) —
+// só faz sentido oferecer o toggle quando a varredura de fato encontrou o dado correspondente.
+const hasCpuData = computed(() => {
+  const cpu = detailStore.scanResult?.cpuInfo
+  return Boolean(
+    cpu &&
+      (cpu.usagePercent !== undefined || cpu.coresCount !== undefined || cpu.load1min !== undefined)
+  )
+})
+const hasMemoryData = computed(() => {
+  const mem = detailStore.scanResult?.memoryInfo
+  return Boolean(mem && (mem.usedPercent !== undefined || mem.totalKb !== undefined))
+})
 const selectedIfIndexes = ref<number[]>([])
 
 const deviceId = computed(() => Number(route.params.id))
@@ -1071,6 +1165,31 @@ const memoryUsageValue = computed(() =>
   memoryUsageMetric.value !== undefined ? Number(memoryUsageMetric.value.metricValue) : null
 )
 
+// --- Métricas dirigidas por Template Zabbix (genérico) ---
+// O dispositivo pode ter um Template Zabbix importado vinculado (ver /zabbix-templates);
+// cada item do template vira um card com o valor mais recente coletado via SNMP
+// (ver modules/zabbix/zabbix_template_collector.ts).
+interface TemplateMetricCard {
+  label: string
+  value: string
+  createdAt?: string
+}
+
+const templateMetricCards = computed<TemplateMetricCard[]>(() => {
+  const items = detailStore.device?.zabbixTemplate?.items
+  if (!items || items.length === 0) return []
+
+  return items.map((item) => {
+    const metric = detailStore.metrics.find((m) => m.metricName === item.key)
+    const value = metric ? Number(metric.metricValue) : NaN
+    return {
+      label: item.name,
+      value: !isNaN(value) ? `${value}${item.units ? ` ${item.units}` : ''}` : 'N/A',
+      createdAt: metric?.createdAt,
+    }
+  })
+})
+
 // Resumo de tráfego por Interface — exibe apenas interfaces selecionadas para monitoramento (adminStatus === 'up')
 const interfaceTrafficSummaries = computed(() => {
   return detailStore.interfaces
@@ -1173,8 +1292,10 @@ async function openScanModal() {
   scanModalOpen.value = true
   const res = await detailStore.scanDeviceSnmp(deviceId.value)
   if (res) {
-    selectedCpuMonitor.value = res.hasCpuMonitor || true
-    selectedMemoryMonitor.value = res.hasMemoryMonitor || true
+    // Reflete o estado real: já monitorado (true), detectado agora mas ainda não habilitado
+    // (default ligado, só quando há dado de fato), ou não suportado pelo equipamento (false).
+    selectedCpuMonitor.value = res.hasCpuMonitor || res.cpuInfo.usagePercent !== undefined
+    selectedMemoryMonitor.value = res.hasMemoryMonitor || res.memoryInfo.usedPercent !== undefined
     selectedIfIndexes.value = res.interfaces.filter((i) => i.isMonitored).map((i) => i.ifIndex)
   }
 }

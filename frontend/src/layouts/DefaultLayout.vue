@@ -157,6 +157,7 @@ const navItems: NavItem[] = [
       { title: 'Redes', icon: 'mdi-lan', to: '/networks' },
       { title: 'Topologia', icon: 'mdi-sitemap', to: '/topology' },
       { title: 'Probes', icon: 'mdi-router-wireless', to: '/probes' },
+      { title: 'Templates Zabbix', icon: 'mdi-file-cog-outline', to: '/zabbix-templates' },
     ],
   },
   {

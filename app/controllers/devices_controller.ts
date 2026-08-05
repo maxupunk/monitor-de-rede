@@ -3,6 +3,7 @@ import Device from '#models/device'
 import Monitor from '#models/monitor'
 import Metric from '#models/metric'
 import AlertEvent from '#models/alert_event'
+import { syncZabbixTemplateMonitor } from '#modules/zabbix/zabbix_template_monitor_sync'
 
 export default class DevicesController {
   async index({ response }: HttpContext) {
@@ -27,10 +28,12 @@ export default class DevicesController {
       'snmpEnabled',
       'snmpCommunity',
       'snmpVersion',
+      'zabbixTemplateId',
     ])
 
     const device = await Device.create(data)
     await this.syncDeviceMonitor(device)
+    await syncZabbixTemplateMonitor(device)
 
     return response.created(device)
   }
@@ -41,6 +44,7 @@ export default class DevicesController {
       .preload('site')
       .preload('parent')
       .preload('vpnPeer')
+      .preload('zabbixTemplate', (query) => query.preload('items'))
       .firstOrFail()
     return response.ok(device)
   }
@@ -63,11 +67,13 @@ export default class DevicesController {
       'snmpEnabled',
       'snmpCommunity',
       'snmpVersion',
+      'zabbixTemplateId',
     ])
 
     device.merge(data)
     await device.save()
     await this.syncDeviceMonitor(device)
+    await syncZabbixTemplateMonitor(device)
 
     return response.ok(device)
   }

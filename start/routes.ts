@@ -19,6 +19,7 @@ const AlertsController = () => import('#controllers/alerts_controller')
 const EventsController = () => import('#controllers/events_controller')
 const VpnServersController = () => import('#controllers/vpn_servers_controller')
 const VpnPeersController = () => import('#controllers/vpn_peers_controller')
+const ZabbixTemplatesController = () => import('#controllers/zabbix_templates_controller')
 
 router.get('/', () => {
   return { status: 'online', service: 'Network Monitor API', version: '1.0.0' }
@@ -100,6 +101,12 @@ router
     router.post('vpn/peers/:id/rotate', [VpnPeersController, 'rotate'])
     router.post('vpn/peers/:id/firewall-hints', [VpnPeersController, 'firewallHints'])
     router.delete('vpn/peers/:id', [VpnPeersController, 'destroy'])
+
+    // Templates Zabbix (import/gestão)
+    router.get('zabbix-templates', [ZabbixTemplatesController, 'index'])
+    router.post('zabbix-templates', [ZabbixTemplatesController, 'store'])
+    router.get('zabbix-templates/:id', [ZabbixTemplatesController, 'show'])
+    router.delete('zabbix-templates/:id', [ZabbixTemplatesController, 'destroy'])
 
     // Realtime Events (SSE)
     router.get('events/stream', [EventsController, 'stream'])

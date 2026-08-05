@@ -6,13 +6,14 @@ import { TrafficCollector, type InterfaceTraffic } from './collectors/traffic_co
 import { LldpCollector } from './collectors/lldp_collector.js'
 import { CpuCollector } from './collectors/cpu_collector.js'
 import { MemoryCollector } from './collectors/memory_collector.js'
-import Device from '#models/device'
+import type Device from '#models/device'
 import DeviceInterface from '#models/device_interface'
 import Metric from '#models/metric'
 import Monitor from '#models/monitor'
 import { DateTime } from 'luxon'
 import { TopologyService } from '#modules/topology/topology_service'
 import { InterfaceMonitoringService } from '#modules/monitoring/interface_monitoring_service'
+import { ZabbixTemplateCollector } from '#modules/zabbix/zabbix_template_collector'
 
 export class SnmpService {
   private factory = new SnmpSessionFactory()
@@ -24,15 +25,18 @@ export class SnmpService {
   private memoryCollector = new MemoryCollector()
   private topologyService = new TopologyService()
   private interfaceMonitoringService = new InterfaceMonitoringService()
+  private zabbixTemplateCollector = new ZabbixTemplateCollector()
 
   async scanDevice(device: Device, config: SnmpConfig) {
     const client = this.factory.createSession(config)
-    const [systemInfo, discoveredIfaces, cpuInfo, memoryInfo] = await Promise.all([
-      this.systemCollector.collect(client),
-      this.interfaceCollector.collect(client),
-      this.cpuCollector.collect(client),
-      this.memoryCollector.collect(client),
-    ])
+    const [systemInfo, discoveredIfaces, cpuInfo, memoryInfo, zabbixTemplateItems] =
+      await Promise.all([
+        this.systemCollector.collect(client),
+        this.interfaceCollector.collect(client),
+        this.cpuCollector.collect(client),
+        this.memoryCollector.collect(client),
+        this.zabbixTemplateCollector.preview(device, client),
+      ])
 
     const existingIfaces = await DeviceInterface.query().where('deviceId', device.id)
     const existingMonitors = await Monitor.query().where('deviceId', device.id)
@@ -60,6 +64,20 @@ export class SnmpService {
         m.enabled
     )
 
+    // Sinaliza para a UI se o dispositivo de fato respondeu a algum OID — evita mostrar um
+    // resultado "vazio, mas aparentemente normal" quando o SNMP simplesmente não respondeu
+    // (IP errado, community incorreta, timeout, firewall etc.).
+    const hasSystemInfo = Boolean(
+      systemInfo.sysName || systemInfo.sysDescr || systemInfo.sysUpTime !== undefined
+    )
+    const hasZabbixData = zabbixTemplateItems.some((item) => item.value !== null)
+    const snmpResponded =
+      hasSystemInfo ||
+      interfaces.length > 0 ||
+      cpuInfo.usagePercent !== undefined ||
+      memoryInfo.usedPercent !== undefined ||
+      hasZabbixData
+
     return {
       systemInfo,
       cpuInfo,
@@ -67,6 +85,8 @@ export class SnmpService {
       interfaces,
       hasCpuMonitor,
       hasMemoryMonitor,
+      zabbixTemplateItems,
+      snmpResponded,
     }
   }
 
@@ -127,13 +147,14 @@ export class SnmpService {
     }
 
     // Consulta monitores ativos para o dispositivo
-    const activeMonitors = await Monitor.query()
-      .where('deviceId', device.id)
-      .where('enabled', true)
+    const activeMonitors = await Monitor.query().where('deviceId', device.id).where('enabled', true)
 
     const hasCpuMonitor = activeMonitors.some((m) => m.name.toLowerCase().includes('cpu'))
     const hasMemoryMonitor = activeMonitors.some((m) => {
-      const name = m.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+      const name = m.name
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
       return name.includes('memoria') || name.includes('memory')
     })
 
@@ -285,6 +306,11 @@ export class SnmpService {
     const neighbors = await this.lldpCollector.collect(client)
     if (neighbors.length > 0) {
       await this.topologyService.resolveDiscoveredNeighbors(device, neighbors)
+    }
+
+    // 6. Itens de Template Zabbix (genérico) — apenas se o dispositivo tiver um template vinculado
+    if (device.zabbixTemplateId) {
+      metricCount += await this.zabbixTemplateCollector.collect(device, client)
     }
 
     return {

@@ -4,6 +4,7 @@ import DeviceInterface from '#models/device_interface'
 import Monitor from '#models/monitor'
 import Metric from '#models/metric'
 import { SnmpService } from '#modules/snmp/snmp_service'
+import { syncZabbixTemplateMonitor } from '#modules/zabbix/zabbix_template_monitor_sync'
 import vine from '@vinejs/vine'
 
 export default class SnmpController {
@@ -18,6 +19,12 @@ export default class SnmpController {
     if (!device) {
       return response.notFound({ message: 'Dispositivo não encontrado' })
     }
+
+    // Autocorrige dispositivos com template vinculado antes de existir o monitor de
+    // sincronização (ver comentário em syncZabbixTemplateMonitor) — assim um clique
+    // manual em "Poll SNMP Agora" já resolve a coleta periódica também, sem precisar
+    // reabrir e salvar o formulário do dispositivo.
+    await syncZabbixTemplateMonitor(device)
 
     const schema = vine.object({
       host: vine.string().optional(),
@@ -62,6 +69,8 @@ export default class SnmpController {
     if (!device) {
       return response.notFound({ message: 'Dispositivo não encontrado' })
     }
+
+    await syncZabbixTemplateMonitor(device)
 
     const config = {
       host: device.ipAddress || device.name,

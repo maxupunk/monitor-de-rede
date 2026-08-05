@@ -70,6 +70,14 @@ export interface ScanInterfaceItem {
   isMonitored: boolean
 }
 
+export interface ScanZabbixTemplateItem {
+  id: number
+  name: string
+  key: string
+  units: string | null
+  value: number | null
+}
+
 export interface ScanResult {
   systemInfo: {
     sysName?: string
@@ -92,6 +100,8 @@ export interface ScanResult {
   interfaces: ScanInterfaceItem[]
   hasCpuMonitor: boolean
   hasMemoryMonitor: boolean
+  zabbixTemplateItems: ScanZabbixTemplateItem[]
+  snmpResponded: boolean
 }
 
 export const useDeviceDetailStore = defineStore('deviceDetail', () => {

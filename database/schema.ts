@@ -197,7 +197,7 @@ export class DeviceMacSchema extends BaseModel {
 }
 
 export class DeviceSchema extends BaseModel {
-  static $columns = ['createdAt', 'description', 'id', 'ipAddress', 'isMonitored', 'lastSeenAt', 'model', 'name', 'networkId', 'parentId', 'serialNumber', 'siteId', 'snmpCommunity', 'snmpEnabled', 'snmpVersion', 'status', 'type', 'updatedAt', 'vendor'] as const
+  static $columns = ['createdAt', 'description', 'id', 'ipAddress', 'isMonitored', 'lastSeenAt', 'model', 'name', 'networkId', 'parentId', 'serialNumber', 'siteId', 'snmpCommunity', 'snmpEnabled', 'snmpVersion', 'status', 'type', 'updatedAt', 'vendor', 'zabbixTemplateId'] as const
   $columns = DeviceSchema.$columns
   @column.dateTime({ autoCreate: true })
   declare createdAt: DateTime
@@ -237,6 +237,8 @@ export class DeviceSchema extends BaseModel {
   declare updatedAt: DateTime | null
   @column()
   declare vendor: string | null
+  @column()
+  declare zabbixTemplateId: number | null
 }
 
 export class DiscoveryResultSchema extends BaseModel {
@@ -542,4 +544,52 @@ export class VpnServerSchema extends BaseModel {
   declare publicKey: string
   @column.dateTime({ autoCreate: true, autoUpdate: true })
   declare updatedAt: DateTime | null
+}
+
+export class ZabbixTemplateItemSchema extends BaseModel {
+  static $columns = ['createdAt', 'id', 'key', 'multiplier', 'name', 'snmpOid', 'templateId', 'units', 'valueType', 'zabbixUuid'] as const
+  $columns = ZabbixTemplateItemSchema.$columns
+  @column.dateTime({ autoCreate: true })
+  declare createdAt: DateTime
+  @column({ isPrimary: true })
+  declare id: number
+  @column()
+  declare key: string
+  @column()
+  declare multiplier: number | null
+  @column()
+  declare name: string
+  @column()
+  declare snmpOid: string
+  @column()
+  declare templateId: number
+  @column()
+  declare units: string | null
+  @column()
+  declare valueType: string
+  @column()
+  declare zabbixUuid: string | null
+}
+
+export class ZabbixTemplateSchema extends BaseModel {
+  static $columns = ['createdAt', 'description', 'id', 'importedAt', 'name', 'rawExport', 'updatedAt', 'zabbixUuid', 'zabbixVersion'] as const
+  $columns = ZabbixTemplateSchema.$columns
+  @column.dateTime({ autoCreate: true })
+  declare createdAt: DateTime
+  @column()
+  declare description: string | null
+  @column({ isPrimary: true })
+  declare id: number
+  @column.dateTime()
+  declare importedAt: DateTime
+  @column()
+  declare name: string
+  @column()
+  declare rawExport: any
+  @column.dateTime({ autoCreate: true, autoUpdate: true })
+  declare updatedAt: DateTime
+  @column()
+  declare zabbixUuid: string | null
+  @column()
+  declare zabbixVersion: string | null
 }

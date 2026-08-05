@@ -33,6 +33,12 @@ const bodyParserConfig = defineConfig({
     convertEmptyStringsToNull: true,
 
     /**
+     * Maximum accepted payload size for JSON requests. Bumped from the 1mb
+     * default so larger Zabbix template exports can be imported as JSON text.
+     */
+    limit: '5mb',
+
+    /**
      * Content types handled by the JSON parser.
      */
     types: [
