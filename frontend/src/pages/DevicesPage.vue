@@ -89,6 +89,16 @@
             icon
             size="small"
             variant="text"
+            color="purple"
+            @click.stop="openPortScan(item)"
+          >
+            <v-icon>mdi-lan-connect</v-icon>
+            <v-tooltip activator="parent" location="top">Escanear Portas</v-tooltip>
+          </v-btn>
+          <v-btn
+            icon
+            size="small"
+            variant="text"
             color="error"
             @click.stop="confirmDelete(item.id)"
           >
@@ -245,6 +255,41 @@
                 ></v-select>
               </v-col>
               <v-col v-if="formModel.snmpEnabled" cols="12">
+                <div class="d-flex align-center flex-wrap ga-2">
+                  <v-btn
+                    variant="tonal"
+                    color="primary"
+                    size="small"
+                    prepend-icon="mdi-lan-check"
+                    :loading="snmpTestStore.testing"
+                    :disabled="!formModel.ipAddress"
+                    @click="testSnmp(false)"
+                  >
+                    Testar SNMP
+                  </v-btn>
+                  <v-btn
+                    variant="text"
+                    color="primary"
+                    size="small"
+                    prepend-icon="mdi-auto-fix"
+                    :loading="snmpTestStore.testing"
+                    :disabled="!formModel.ipAddress"
+                    @click="testSnmp(true)"
+                  >
+                    Detectar Automaticamente
+                  </v-btn>
+                </div>
+                <v-alert
+                  v-if="snmpTestResult"
+                  :type="snmpTestResult.ok ? 'success' : 'warning'"
+                  variant="tonal"
+                  density="compact"
+                  class="mt-2"
+                >
+                  {{ snmpTestResult.message }}
+                </v-alert>
+              </v-col>
+              <v-col v-if="formModel.snmpEnabled" cols="12">
                 <div class="d-flex align-center ga-2">
                   <v-select
                     v-model="formModel.zabbixTemplateId"
@@ -252,11 +297,10 @@
                     item-title="name"
                     item-value="id"
                     label="Template Zabbix (Opcional)"
-                    hint="Define quais OIDs SNMP são coletados (tensão, corrente, etc.) além de CPU/Memória/Interfaces."
-                    persistent-hint
                     variant="outlined"
                     density="comfortable"
                     clearable
+                    hide-details
                     class="flex-grow-1"
                   ></v-select>
                   <v-btn
@@ -269,6 +313,10 @@
                     <v-icon>mdi-upload</v-icon>
                     <v-tooltip activator="parent" location="top">Importar Novo Template</v-tooltip>
                   </v-btn>
+                </div>
+                <div class="text-caption text-grey-darken-1 mt-1">
+                  Define quais OIDs SNMP são coletados (tensão, corrente, etc.) além de
+                  CPU/Memória/Interfaces.
                 </div>
               </v-col>
             </v-row>
@@ -283,6 +331,13 @@
 
     <!-- Componente Reusável Modal de Cadastro de Site -->
     <SiteDialog v-model="siteDialog" @saved="onSiteCreated" />
+
+    <!-- Componente Reusável Modal de Scanner de Portas -->
+    <PortScanDialog
+      v-model="portScanDialog"
+      :host="portScanHost"
+      :device-name="portScanDeviceName"
+    />
   </div>
 </template>
 
@@ -292,17 +347,25 @@ import { useRouter } from 'vue-router'
 import { useDevicesStore, type Device } from '@/stores/devices'
 import { useSitesStore, type Site } from '@/stores/sites'
 import { useZabbixTemplatesStore } from '@/stores/zabbixTemplates'
+import { useSnmpTestStore } from '@/stores/snmpTest'
 import SiteDialog from '@/components/SiteDialog.vue'
+import PortScanDialog from '@/components/PortScanDialog.vue'
 
 const router = useRouter()
 const devicesStore = useDevicesStore()
 const sitesStore = useSitesStore()
 const zabbixTemplatesStore = useZabbixTemplatesStore()
+const snmpTestStore = useSnmpTestStore()
 const search = ref('')
 const dialog = ref(false)
 const siteDialog = ref(false)
 const saving = ref(false)
 const editedId = ref<number | null>(null)
+const snmpTestResult = ref<{ ok: boolean; message: string } | null>(null)
+
+const portScanDialog = ref(false)
+const portScanHost = ref('')
+const portScanDeviceName = ref('')
 
 const formModel = reactive<{
   name: string
@@ -376,6 +439,7 @@ function getStatusColor(status: string) {
 }
 
 function openDialog(device?: Device) {
+  snmpTestResult.value = null
   if (device) {
     editedId.value = device.id
     formModel.name = device.name
@@ -410,6 +474,51 @@ function openDialog(device?: Device) {
 
 function onSiteCreated(newSite: Site) {
   formModel.siteId = newSite.id
+}
+
+function openPortScan(device: Device) {
+  portScanHost.value = device.ipAddress || ''
+  portScanDeviceName.value = device.name
+  portScanDialog.value = true
+}
+
+async function testSnmp(autoDetect = false) {
+  snmpTestResult.value = null
+  if (!formModel.ipAddress) {
+    snmpTestResult.value = { ok: false, message: 'Informe o Endereço IP antes de testar.' }
+    return
+  }
+
+  const res = await snmpTestStore.testConnection({
+    host: formModel.ipAddress,
+    version: formModel.snmpVersion,
+    community: formModel.snmpCommunity,
+    autoDetect,
+  })
+
+  if (!res) {
+    snmpTestResult.value = {
+      ok: false,
+      message: snmpTestStore.error || 'Falha ao testar conexão SNMP.',
+    }
+    return
+  }
+
+  if (res.responded) {
+    if (autoDetect && res.version) formModel.snmpVersion = res.version
+    if (autoDetect && res.community) formModel.snmpCommunity = res.community
+    snmpTestResult.value = {
+      ok: true,
+      message: `SNMP respondeu (${res.version || formModel.snmpVersion}/${res.community || formModel.snmpCommunity}): ${res.sysDescr || res.sysName || 'dispositivo detectado'}`,
+    }
+  } else {
+    snmpTestResult.value = {
+      ok: false,
+      message: autoDetect
+        ? 'Nenhuma combinação comum de versão/comunidade respondeu (public/private em v1/v2c).'
+        : 'O dispositivo não respondeu com essa versão/comunidade em SNMP.',
+    }
+  }
 }
 
 async function save() {

@@ -20,6 +20,7 @@ const EventsController = () => import('#controllers/events_controller')
 const VpnServersController = () => import('#controllers/vpn_servers_controller')
 const VpnPeersController = () => import('#controllers/vpn_peers_controller')
 const ZabbixTemplatesController = () => import('#controllers/zabbix_templates_controller')
+const PortScanController = () => import('#controllers/port_scan_controller')
 
 router.get('/', () => {
   return { status: 'online', service: 'Network Monitor API', version: '1.0.0' }
@@ -38,6 +39,12 @@ router
     // Networks
     router.post('networks/:id/scan', [NetworksController, 'scan'])
     router.resource('networks', NetworksController).apiOnly()
+
+    // SNMP (teste avulso, sem exigir dispositivo cadastrado)
+    router.post('snmp/test', [SnmpController, 'test'])
+
+    // Port Scanner (ferramenta reutilizável de varredura de portas TCP/UDP)
+    router.post('port-scan', [PortScanController, 'scan'])
 
     // Devices
     router.post('devices/:id/snmp/poll', [SnmpController, 'poll'])

@@ -11,6 +11,7 @@ export const controllers = {
   Events: () => import('#controllers/events_controller'),
   Monitors: () => import('#controllers/monitors_controller'),
   Networks: () => import('#controllers/networks_controller'),
+  PortScan: () => import('#controllers/port_scan_controller'),
   Probes: () => import('#controllers/probes_controller'),
   Sites: () => import('#controllers/sites_controller'),
   Snmp: () => import('#controllers/snmp_controller'),

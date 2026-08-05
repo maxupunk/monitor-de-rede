@@ -61,6 +61,49 @@ export default class SnmpController {
   }
 
   /**
+   * POST /api/snmp/test
+   * Testa conectividade SNMP com um host arbitrário, sem exigir um dispositivo já
+   * cadastrado — usado pelo botão "Testar SNMP" no formulário de cadastro/edição.
+   * Com `autoDetect`, tenta combinações comuns de versão/comunidade (public/private,
+   * v1/v2c) e retorna a primeira que responder, para auto-preencher o formulário.
+   */
+  async test({ request, response }: HttpContext) {
+    const schema = vine.object({
+      host: vine.string().trim().minLength(1),
+      port: vine.number().range([1, 65535]).optional(),
+      version: vine.enum(['v1', 'v2c', 'v3']).optional(),
+      community: vine.string().optional(),
+      autoDetect: vine.boolean().optional(),
+    })
+
+    const payload = await vine.validate({ schema, data: request.all() })
+    const port = payload.port || 161
+
+    try {
+      if (payload.autoDetect) {
+        const result = await this.snmpService.detectConnection(payload.host, port, {
+          version: payload.version,
+          community: payload.community,
+        })
+        return response.ok(result)
+      }
+
+      const result = await this.snmpService.testConnection({
+        host: payload.host,
+        port,
+        version: (payload.version || 'v2c') as 'v1' | 'v2c' | 'v3',
+        community: payload.community || 'public',
+      })
+      return response.ok(result)
+    } catch (error) {
+      return response.badRequest({
+        message: 'Falha ao testar conexão SNMP',
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  /**
    * POST /api/devices/:id/snmp/scan
    * Escaneia e lista os componentes monitoráveis de um dispositivo (Interfaces, CPU, Memória).
    */
@@ -231,7 +274,10 @@ export default class SnmpController {
           memMonitor.deviceId = device.id
           memMonitor.type = 'snmp'
           memMonitor.name = 'Monitor de Uso de Memória'
-          memMonitor.configuration = { host: device.ipAddress || device.name, metric: 'memory_usage' }
+          memMonitor.configuration = {
+            host: device.ipAddress || device.name,
+            metric: 'memory_usage',
+          }
           memMonitor.intervalSeconds = 60
           memMonitor.timeoutSeconds = 5
           memMonitor.retryCount = 3

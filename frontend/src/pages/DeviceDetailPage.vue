@@ -54,6 +54,15 @@
           >
             Poll SNMP Agora
           </v-btn>
+
+          <v-btn
+            color="purple"
+            variant="tonal"
+            prepend-icon="mdi-lan-connect"
+            @click="portScanOpen = true"
+          >
+            Escanear Portas
+          </v-btn>
         </div>
       </div>
     </v-card>
@@ -944,6 +953,13 @@
     <!-- Modais da aba VPN -->
     <VpnScriptViewer v-model="vpnViewerOpen" :artifact="vpnStore.lastArtifact" :qr-svg="null" />
     <VpnFirewallHintsDialog v-model="vpnFirewallOpen" :content="vpnFirewallContent" />
+
+    <!-- Modal de Scanner de Portas TCP/UDP -->
+    <PortScanDialog
+      v-model="portScanOpen"
+      :host="detailStore.device?.ipAddress"
+      :device-name="detailStore.device?.name"
+    />
   </div>
 </template>
 
@@ -955,6 +971,7 @@ import TrafficChartDialog from '@/components/TrafficChartDialog.vue'
 import BaseMetricChart, { type ChartSeriesInput } from '@/components/BaseMetricChart.vue'
 import VpnScriptViewer from '@/components/VpnScriptViewer.vue'
 import VpnFirewallHintsDialog from '@/components/VpnFirewallHintsDialog.vue'
+import PortScanDialog from '@/components/PortScanDialog.vue'
 import {
   useVpnStore,
   vpnProfileIcon,
@@ -971,6 +988,7 @@ const vpnStore = useVpnStore()
 const activeTab = ref('overview')
 const scanModalOpen = ref(false)
 const savingMonitors = ref(false)
+const portScanOpen = ref(false)
 
 const chartDialogOpen = ref(false)
 const selectedChartInterfaceId = ref<number | null>(null)

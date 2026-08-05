@@ -320,4 +320,70 @@ export class SnmpService {
       neighborCount: neighbors.length,
     }
   }
+
+  /**
+   * Testa conectividade SNMP com a versão/comunidade informadas, sem persistir nada —
+   * usado pelo botão "Testar SNMP" no formulário de cadastro/edição de dispositivo
+   * (inclusive antes de o dispositivo existir no banco).
+   */
+  async testConnection(config: SnmpConfig): Promise<{
+    responded: boolean
+    sysName?: string
+    sysDescr?: string
+    sysUpTime?: number
+  }> {
+    const client = this.factory.createSession(config)
+    const systemInfo = await this.systemCollector.collect(client)
+    const responded = Boolean(
+      systemInfo.sysName || systemInfo.sysDescr || systemInfo.sysUpTime !== undefined
+    )
+    return { responded, ...systemInfo }
+  }
+
+  /**
+   * Tenta detectar automaticamente a versão/comunidade SNMP de um host, testando a
+   * combinação informada (se houver) e depois as combinações mais comuns (public/private
+   * em v2c/v1) em paralelo. Não cobre v3 pois exige credenciais de usuário específicas.
+   */
+  async detectConnection(
+    host: string,
+    port: number,
+    preferred?: { version?: 'v1' | 'v2c' | 'v3'; community?: string }
+  ): Promise<{
+    responded: boolean
+    version?: 'v1' | 'v2c'
+    community?: string
+    sysName?: string
+    sysDescr?: string
+    sysUpTime?: number
+  }> {
+    const candidates: Array<{ version: 'v1' | 'v2c'; community: string }> = []
+
+    if (preferred?.community && preferred.version !== 'v3') {
+      candidates.push({
+        version: preferred.version === 'v1' ? 'v1' : 'v2c',
+        community: preferred.community,
+      })
+    }
+    for (const version of ['v2c', 'v1'] as const) {
+      for (const community of ['public', 'private']) {
+        if (!candidates.some((c) => c.version === version && c.community === community)) {
+          candidates.push({ version, community })
+        }
+      }
+    }
+
+    const attempts = candidates.map(async (candidate) => {
+      const client = this.factory.createSession({ host, port, timeoutMs: 2500, ...candidate })
+      const systemInfo = await this.systemCollector.collect(client)
+      const responded = Boolean(
+        systemInfo.sysName || systemInfo.sysDescr || systemInfo.sysUpTime !== undefined
+      )
+      return responded ? { ...candidate, ...systemInfo } : null
+    })
+
+    const results = await Promise.all(attempts)
+    const found = results.find((r) => r !== null)
+    return found ? { responded: true, ...found } : { responded: false }
+  }
 }

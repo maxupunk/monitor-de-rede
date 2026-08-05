@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "bin/**/*",
+    "app/**/*",
+    "config/**/*",
+    "database/**/*",
+    "start/**/*",
+    "commands/**/*",
+    "modules/**/*",
+    "providers/**/*",
+    "adonisrc.ts",
+    "ace.js"
+  ]
+}

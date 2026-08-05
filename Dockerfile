@@ -6,7 +6,7 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 COPY . .
-RUN node ace build
+RUN node ace build --tsconfig=tsconfig.build.json
 
 # Stage 2: Production runner
 FROM base AS runner
