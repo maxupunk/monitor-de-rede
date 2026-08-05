@@ -21,9 +21,11 @@
             :prepend-icon="item.icon"
             :title="item.title"
             :to="item.to"
+            :exact="item.to === '/'"
             color="primary"
             rounded="lg"
             class="mb-1 font-weight-medium"
+            @click="item.click ? item.click() : undefined"
           />
 
           <v-list-group v-else :value="item.title">
@@ -39,13 +41,15 @@
 
             <v-list-item
               v-for="sub in item.children"
-              :key="sub.to"
+              :key="sub.title"
               :prepend-icon="sub.icon"
               :title="sub.title"
               :to="sub.to"
+              :exact="sub.to ? true : undefined"
               color="primary"
               rounded="lg"
               class="mb-1 font-weight-medium pl-6"
+              @click="sub.click ? sub.click() : undefined"
             />
           </v-list-group>
         </template>
@@ -115,6 +119,9 @@
         <router-view />
       </v-container>
     </v-main>
+
+    <!-- Modal Gerenciamento de Servidores DNS -->
+    <DnsServersDialog v-model="dnsServersDialog" />
   </v-app>
 </template>
 
@@ -123,21 +130,25 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useEventsStore } from '@/stores/events'
 import { useAuthStore } from '@/stores/auth'
+import DnsServersDialog from '@/components/DnsServersDialog.vue'
 
 interface NavSubItem {
   title: string
   icon: string
-  to: string
+  to?: string
+  click?: () => void
 }
 
 interface NavItem {
   title: string
   icon: string
   to?: string
+  click?: () => void
   children?: NavSubItem[]
 }
 
 const drawer = ref(true)
+const dnsServersDialog = ref(false)
 const eventsStore = useEventsStore()
 const authStore = useAuthStore()
 const router = useRouter()
@@ -157,6 +168,13 @@ const navItems: NavItem[] = [
       { title: 'Redes', icon: 'mdi-lan', to: '/networks' },
       { title: 'Topologia', icon: 'mdi-sitemap', to: '/topology' },
       { title: 'Probes', icon: 'mdi-router-wireless', to: '/probes' },
+      {
+        title: 'Servidores DNS',
+        icon: 'mdi-dns-outline',
+        click: () => {
+          dnsServersDialog.value = true
+        },
+      },
       { title: 'Templates Zabbix', icon: 'mdi-file-cog-outline', to: '/zabbix-templates' },
     ],
   },

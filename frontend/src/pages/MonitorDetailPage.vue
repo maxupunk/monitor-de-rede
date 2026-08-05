@@ -455,6 +455,8 @@
         <v-data-table
           :headers="historyHeaders"
           :items="formattedHistory"
+          :items-per-page="-1"
+          hide-default-footer
           density="comfortable"
           hover
           class="rounded-lg border"

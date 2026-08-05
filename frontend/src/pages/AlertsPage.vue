@@ -47,6 +47,8 @@
               :headers="activeHeaders"
               :items="alertsStore.activeAlerts"
               :loading="alertsStore.loading"
+              :items-per-page="-1"
+              hide-default-footer
               no-data-text="Nenhum alerta ativo no momento!"
             >
               <template #item.severity="{ item }">
@@ -112,6 +114,8 @@
               :headers="rulesHeaders"
               :items="alertsStore.alertRules"
               :loading="alertsStore.loading"
+              :items-per-page="-1"
+              hide-default-footer
               no-data-text="Nenhuma regra configurada"
             >
               <template #item.name="{ item }">

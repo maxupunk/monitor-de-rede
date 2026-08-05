@@ -28,6 +28,8 @@
               :headers="resultsHeaders"
               :items="discoveryStore.results"
               :loading="discoveryStore.loading"
+              :items-per-page="-1"
+              hide-default-footer
               no-data-text="Nenhum novo dispositivo pendente de aprovação"
             >
               <template #item.confidenceScore="{ item }">
@@ -79,6 +81,8 @@
               :headers="runsHeaders"
               :items="discoveryStore.runs"
               :loading="discoveryStore.loading"
+              :items-per-page="-1"
+              hide-default-footer
               no-data-text="Nenhuma varredura recente"
             >
               <template #item.status="{ item }">

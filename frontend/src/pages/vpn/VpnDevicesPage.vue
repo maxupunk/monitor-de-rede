@@ -37,6 +37,8 @@
         :headers="headers"
         :items="vpnStore.peers"
         :loading="vpnStore.loading"
+        :items-per-page="-1"
+        hide-default-footer
         no-data-text="Nenhum dispositivo VPN cadastrado"
       >
         <template #item.name="{ item }">

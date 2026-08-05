@@ -146,7 +146,7 @@
                     </div>
 
                     <div
-                      class="monitor-timeline d-flex align-center ga-3 justify-center"
+                      class="monitor-timeline d-flex align-center justify-center"
                       style="flex: 2; min-width: 280px"
                     >
                       <router-link :to="'/monitors/' + monitor.id" class="text-decoration-none">
@@ -157,13 +157,6 @@
                           :width="5"
                         ></MonitorTimelineBar>
                       </router-link>
-                      <span
-                        v-if="monitor.lastLatencyMs !== undefined && monitor.lastLatencyMs !== null"
-                        class="text-caption font-weight-bold text-info"
-                        style="min-width: 55px; text-align: right"
-                      >
-                        {{ monitor.lastLatencyMs }} ms
-                      </span>
                     </div>
 
                     <div

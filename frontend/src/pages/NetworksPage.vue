@@ -29,6 +29,8 @@
         :items="networksStore.networks"
         :search="search"
         :loading="networksStore.loading"
+        :items-per-page="-1"
+        hide-default-footer
         no-data-text="Nenhuma rede cadastrada"
       >
         <template #item.site="{ item }">

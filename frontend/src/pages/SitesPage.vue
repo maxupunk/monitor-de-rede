@@ -30,6 +30,8 @@
         :items="sitesStore.sites"
         :search="search"
         :loading="sitesStore.loading"
+        :items-per-page="-1"
+        hide-default-footer
         no-data-text="Nenhum site cadastrado"
         class="elevation-0"
       >

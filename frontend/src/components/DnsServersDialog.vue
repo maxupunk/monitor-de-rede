@@ -31,80 +31,82 @@
         ></v-alert>
 
         <!-- Formulário de cadastro / edição -->
-        <v-sheet border rounded class="pa-4 mb-5">
-          <div class="text-overline text-medium-emphasis mb-3">
-            {{ editingId ? 'Editando servidor' : 'Adicionar servidor' }}
-          </div>
-          <v-row>
-            <v-col cols="12" md="4">
-              <v-text-field
-                v-model="form.name"
-                label="Nome *"
-                placeholder="Ex: DNS da Matriz"
-                variant="outlined"
-                density="comfortable"
-                :rules="[(v: string) => !!(v || '').trim() || 'Informe um nome']"
-                hide-details="auto"
-              ></v-text-field>
-            </v-col>
-            <v-col cols="12" md="3">
-              <v-select
-                v-model="form.protocol"
-                :items="PROTOCOL_OPTIONS"
-                item-title="label"
-                item-value="value"
-                label="Transporte"
-                variant="outlined"
-                density="comfortable"
-                hide-details="auto"
-              ></v-select>
-            </v-col>
-            <v-col cols="12" md="5">
-              <v-text-field
-                v-model="form.address"
-                :label="form.protocol === 'doh' ? 'Endpoint DoH *' : 'Endereço IP *'"
-                :placeholder="
-                  form.protocol === 'doh' ? 'https://cloudflare-dns.com/dns-query' : '1.1.1.1'
-                "
-                variant="outlined"
-                density="comfortable"
-                :rules="[addressRule]"
-                hide-details="auto"
-              ></v-text-field>
-            </v-col>
-            <v-col cols="12" md="8">
-              <v-text-field
-                v-model="form.description"
-                label="Descrição (opcional)"
-                variant="outlined"
-                density="comfortable"
-                hide-details="auto"
-              ></v-text-field>
-            </v-col>
-            <v-col cols="12" md="4" class="d-flex align-center">
-              <v-switch
-                v-model="form.isDefault"
-                color="deep-purple"
-                density="comfortable"
-                label="Comparar no dashboard"
-                hide-details
-              ></v-switch>
-            </v-col>
-          </v-row>
+        <v-form ref="formRef" validate-on="submit lazy" @submit.prevent="submit">
+          <v-sheet border rounded class="pa-4 mb-5">
+            <div class="text-overline text-medium-emphasis mb-3">
+              {{ editingId ? 'Editando servidor' : 'Adicionar servidor' }}
+            </div>
+            <v-row>
+              <v-col cols="12" md="4">
+                <v-text-field
+                  v-model="form.name"
+                  label="Nome *"
+                  placeholder="Ex: DNS da Matriz"
+                  variant="outlined"
+                  density="comfortable"
+                  :rules="[(v: string) => !!(v || '').trim() || 'Informe um nome']"
+                  hide-details="auto"
+                ></v-text-field>
+              </v-col>
+              <v-col cols="12" md="3">
+                <v-select
+                  v-model="form.protocol"
+                  :items="PROTOCOL_OPTIONS"
+                  item-title="label"
+                  item-value="value"
+                  label="Transporte"
+                  variant="outlined"
+                  density="comfortable"
+                  hide-details="auto"
+                ></v-select>
+              </v-col>
+              <v-col cols="12" md="5">
+                <v-text-field
+                  v-model="form.address"
+                  :label="form.protocol === 'doh' ? 'Endpoint DoH *' : 'Endereço IP *'"
+                  :placeholder="
+                    form.protocol === 'doh' ? 'https://cloudflare-dns.com/dns-query' : '1.1.1.1'
+                  "
+                  variant="outlined"
+                  density="comfortable"
+                  :rules="[addressRule]"
+                  hide-details="auto"
+                ></v-text-field>
+              </v-col>
+              <v-col cols="12" md="8">
+                <v-text-field
+                  v-model="form.description"
+                  label="Descrição (opcional)"
+                  variant="outlined"
+                  density="comfortable"
+                  hide-details="auto"
+                ></v-text-field>
+              </v-col>
+              <v-col cols="12" md="4" class="d-flex align-center">
+                <v-switch
+                  v-model="form.isDefault"
+                  color="deep-purple"
+                  density="comfortable"
+                  label="Comparar no dashboard"
+                  hide-details
+                ></v-switch>
+              </v-col>
+            </v-row>
 
-          <div class="d-flex justify-end ga-2 mt-3">
-            <v-btn v-if="editingId" variant="text" @click="resetForm">Cancelar edição</v-btn>
-            <v-btn
-              color="deep-purple"
-              variant="flat"
-              :loading="store.saving"
-              :disabled="!canSubmit"
-              @click="submit"
-            >
-              {{ editingId ? 'Salvar alterações' : 'Adicionar' }}
-            </v-btn>
-          </div>
-        </v-sheet>
+            <div class="d-flex justify-end ga-2 mt-3">
+              <v-btn v-if="editingId" variant="text" @click="resetForm">Cancelar edição</v-btn>
+              <v-btn
+                color="deep-purple"
+                variant="flat"
+                :loading="store.saving"
+                :disabled="!canSubmit"
+                type="submit"
+              >
+                {{ editingId ? 'Salvar alterações' : 'Adicionar' }}
+              </v-btn>
+            </div>
+          </v-sheet>
+        </v-form>
 
         <!-- Lista cadastrada -->
         <div class="text-overline text-medium-emphasis mb-2">
@@ -189,11 +191,15 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <v-snackbar v-model="feedback.show" :color="feedback.color" timeout="3000" location="top">
+      {{ feedback.text }}
+    </v-snackbar>
   </v-dialog>
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useDnsServersStore, type DnsServer } from '@/stores/dnsServers'
 import { isHostname, isIpAddress } from '@/utils/monitorTypes'
 
@@ -216,9 +222,16 @@ const PROTOCOL_OPTIONS = [
   { value: 'doh', label: 'DoH (HTTPS)' },
 ] as const
 
+const formRef = ref<any>(null)
 const editingId = ref<number | null>(null)
 const deleteDialog = ref(false)
 const serverToDelete = ref<DnsServer | null>(null)
+
+const feedback = ref<{ show: boolean; text: string; color: string }>({
+  show: false,
+  text: '',
+  color: 'success',
+})
 
 const form = reactive<{
   name: string
@@ -267,7 +280,7 @@ function protocolIcon(protocol: string): string {
   return 'mdi-lightning-bolt-outline'
 }
 
-function resetForm() {
+async function resetForm() {
   editingId.value = null
   form.name = ''
   form.address = ''
@@ -275,18 +288,25 @@ function resetForm() {
   form.isDefault = true
   form.description = ''
   store.error = null
+  await nextTick()
+  formRef.value?.resetValidation()
 }
 
-function startEdit(server: DnsServer) {
+async function startEdit(server: DnsServer) {
   editingId.value = server.id
   form.name = server.name
   form.address = server.address
   form.protocol = server.protocol
   form.isDefault = server.isDefault
   form.description = server.description || ''
+  await nextTick()
+  formRef.value?.resetValidation()
 }
 
 async function submit() {
+  const { valid } = (await formRef.value?.validate()) || { valid: true }
+  if (!valid) return
+
   const payload = {
     name: form.name.trim(),
     address: form.address.trim(),
@@ -295,13 +315,21 @@ async function submit() {
     description: form.description.trim() || null,
   }
 
+  const isEditing = !!editingId.value
   const saved = editingId.value
     ? await store.updateServer(editingId.value, payload)
     : await store.createServer(payload)
 
   if (saved) {
     emit('saved', saved)
-    resetForm()
+    await resetForm()
+    feedback.value = {
+      show: true,
+      text: isEditing
+        ? 'Servidor DNS atualizado com sucesso!'
+        : 'Servidor DNS cadastrado com sucesso!',
+      color: 'success',
+    }
   }
 }
 
@@ -315,9 +343,14 @@ async function executeDelete() {
   const removedId = serverToDelete.value.id
   const success = await store.deleteServer(removedId)
   if (success) {
-    if (editingId.value === removedId) resetForm()
+    if (editingId.value === removedId) await resetForm()
     deleteDialog.value = false
     serverToDelete.value = null
+    feedback.value = {
+      show: true,
+      text: 'Servidor DNS removido com sucesso!',
+      color: 'info',
+    }
   }
 }
 </script>

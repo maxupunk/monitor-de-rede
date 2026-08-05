@@ -32,6 +32,8 @@
         :items="devicesStore.devices"
         :search="search"
         :loading="devicesStore.loading"
+        :items-per-page="-1"
+        hide-default-footer
         no-data-text="Nenhum dispositivo cadastrado"
         hover
         class="row-pointer"

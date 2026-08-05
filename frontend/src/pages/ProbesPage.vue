@@ -18,6 +18,8 @@
         :headers="headers"
         :items="probesStore.probes"
         :loading="probesStore.loading"
+        :items-per-page="-1"
+        hide-default-footer
         no-data-text="Nenhum probe cadastrado ou conectado"
       >
         <template #item.status="{ item }">

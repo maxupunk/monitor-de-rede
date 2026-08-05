@@ -30,6 +30,8 @@
         :items="monitorsStore.monitors"
         :search="search"
         :loading="monitorsStore.loading"
+        :items-per-page="-1"
+        hide-default-footer
         no-data-text="Nenhum monitor cadastrado"
       >
         <!-- Custom Slot para Nome, Dispositivo e Linha do Tempo/Uso -->

@@ -19,6 +19,8 @@
         :headers="headers"
         :items="templatesStore.templates"
         :loading="templatesStore.loading"
+        :items-per-page="-1"
+        hide-default-footer
         no-data-text="Nenhum template Zabbix importado ainda"
       >
         <template #item.name="{ item }">
