@@ -88,128 +88,6 @@
     </v-row>
 
     <v-row class="mb-6">
-      <v-col cols="12">
-        <v-card elevation="2" class="rounded-lg">
-          <v-card-title class="d-flex align-center justify-space-between py-3 px-4 flex-wrap ga-2">
-            <div class="d-flex align-center">
-              <v-icon start color="primary">mdi-chart-timeline-variant</v-icon>
-              <span class="font-weight-bold text-h6">Monitores de Rede</span>
-              <v-chip size="x-small" color="primary" class="ml-2" variant="tonal">
-                {{ monitorsStore.monitors.length }}
-              </v-chip>
-            </div>
-            <v-btn
-              variant="text"
-              color="primary"
-              size="small"
-              append-icon="mdi-arrow-right"
-              to="/monitors"
-            >
-              Ver Todos os Monitores
-            </v-btn>
-          </v-card-title>
-          <v-divider></v-divider>
-
-          <v-card-text class="pa-0">
-            <div v-if="monitorsStore.monitors.length > 0">
-              <v-list>
-                <v-list-item
-                  v-for="monitor in monitorsStore.monitors"
-                  :key="monitor.id"
-                  class="px-4 py-3 border-b"
-                >
-                  <div class="d-flex align-center justify-space-between flex-wrap ga-3 w-100">
-                    <div
-                      class="monitor-info d-flex align-center ga-3"
-                      style="min-width: 220px; flex: 1"
-                    >
-                      <v-avatar
-                        :color="getStatusColor(monitor.status)"
-                        size="10"
-                        class="mr-1"
-                      ></v-avatar>
-                      <div>
-                        <router-link
-                          :to="'/monitors/' + monitor.id"
-                          class="text-subtitle-1 font-weight-bold text-decoration-none text-primary hover-underline d-block"
-                        >
-                          {{ monitor.name }}
-                        </router-link>
-
-                        <div class="d-flex align-center ga-2 mt-1">
-                          <v-chip size="x-small" color="info" variant="tonal">
-                            {{ (monitor.type || 'N/A').toUpperCase() }}
-                          </v-chip>
-                          <span class="text-caption text-grey-darken-1">{{ monitor.target }}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div
-                      class="monitor-timeline d-flex align-center justify-center"
-                      style="flex: 2; min-width: 280px"
-                    >
-                      <router-link :to="'/monitors/' + monitor.id" class="text-decoration-none">
-                        <MonitorTimelineBar
-                          :results="monitor.recentResults"
-                          :max-blocks="24"
-                          :height="20"
-                          :width="5"
-                        ></MonitorTimelineBar>
-                      </router-link>
-                    </div>
-
-                    <div
-                      class="monitor-actions d-flex align-center ga-2 justify-end"
-                      style="min-width: 140px"
-                    >
-                      <v-chip
-                        :color="getStatusColor(monitor.status)"
-                        size="small"
-                        variant="tonal"
-                        class="font-weight-medium"
-                      >
-                        {{ (monitor.status || 'UNKNOWN').toUpperCase() }}
-                      </v-chip>
-                      <v-btn
-                        size="small"
-                        color="primary"
-                        variant="outlined"
-                        prepend-icon="mdi-play"
-                        :loading="monitorsStore.runningId === monitor.id"
-                        @click="monitorsStore.runMonitor(monitor.id)"
-                      >
-                        Testar
-                      </v-btn>
-                    </div>
-                  </div>
-                </v-list-item>
-              </v-list>
-            </div>
-            <div v-else class="pa-8 text-center text-grey">
-              <v-icon size="48" color="grey-lighten-1" class="mb-2">
-                mdi-chart-timeline-variant-off
-              </v-icon>
-              <div class="text-subtitle-1 font-weight-medium">Nenhum monitor cadastrado</div>
-              <p class="text-caption text-grey-darken-1 mb-4">
-                Cadastre monitores ICMP, HTTP ou TCP para visualizar os gráficos em barras.
-              </p>
-              <v-btn color="primary" prepend-icon="mdi-plus" to="/monitors">
-                Cadastrar Monitor
-              </v-btn>
-            </div>
-          </v-card-text>
-        </v-card>
-      </v-col>
-    </v-row>
-
-    <v-row class="mb-6">
-      <v-col cols="12">
-        <DnsLatencyCard></DnsLatencyCard>
-      </v-col>
-    </v-row>
-
-    <v-row>
       <v-col cols="12" md="6">
         <v-card elevation="2" class="rounded-lg fill-height">
           <v-card-title class="d-flex align-center py-3 px-4">
@@ -344,6 +222,129 @@
             </div>
           </v-card-text>
         </v-card>
+      </v-col>
+    </v-row>
+
+    <v-row class="mb-6">
+      <v-col cols="12">
+        <v-card elevation="2" class="rounded-lg">
+          <v-card-title class="d-flex align-center justify-space-between py-3 px-4 flex-wrap ga-2">
+            <div class="d-flex align-center">
+              <v-icon start color="primary">mdi-chart-timeline-variant</v-icon>
+              <span class="font-weight-bold text-h6">Monitores de Rede</span>
+              <v-chip size="x-small" color="primary" class="ml-2" variant="tonal">
+                {{ monitorsStore.monitors.length }}
+              </v-chip>
+            </div>
+            <v-btn
+              variant="text"
+              color="primary"
+              size="small"
+              append-icon="mdi-arrow-right"
+              to="/monitors"
+            >
+              Ver Todos os Monitores
+            </v-btn>
+          </v-card-title>
+          <v-divider></v-divider>
+
+          <v-card-text class="pa-0">
+            <div v-if="monitorsStore.monitors.length > 0">
+              <v-list>
+                <v-list-item
+                  v-for="monitor in monitorsStore.monitors"
+                  :key="monitor.id"
+                  :title="undefined"
+                  class="px-4 py-3 border-b"
+                >
+                  <div class="d-flex align-center justify-space-between flex-wrap ga-3 w-100">
+                    <div
+                      class="monitor-info d-flex align-center ga-3"
+                      style="min-width: 220px; flex: 1"
+                    >
+                      <v-avatar
+                        :color="getStatusColor(monitor.status)"
+                        size="10"
+                        class="mr-1"
+                      ></v-avatar>
+                      <div>
+                        <router-link
+                          :to="'/monitors/' + monitor.id"
+                          class="text-subtitle-1 font-weight-bold text-decoration-none text-primary hover-underline d-block"
+                        >
+                          {{ monitor.name }}
+                        </router-link>
+
+                        <div class="d-flex align-center ga-2 mt-1">
+                          <v-chip size="x-small" color="info" variant="tonal">
+                            {{ (monitor.type || 'N/A').toUpperCase() }}
+                          </v-chip>
+                          <span class="text-caption text-grey-darken-1">{{ monitor.target }}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div
+                      class="monitor-timeline d-flex align-center justify-center"
+                      style="flex: 2; min-width: 280px"
+                    >
+                      <router-link :to="'/monitors/' + monitor.id" class="text-decoration-none">
+                        <MonitorTimelineBar
+                          :results="monitor.recentResults"
+                          :max-blocks="24"
+                          :height="20"
+                          :width="5"
+                        ></MonitorTimelineBar>
+                      </router-link>
+                    </div>
+
+                    <div
+                      class="monitor-actions d-flex align-center ga-2 justify-end"
+                      style="min-width: 140px"
+                    >
+                      <v-chip
+                        :color="getStatusColor(monitor.status)"
+                        size="small"
+                        variant="tonal"
+                        class="font-weight-medium"
+                      >
+                        {{ (monitor.status || 'UNKNOWN').toUpperCase() }}
+                      </v-chip>
+                      <v-btn
+                        size="small"
+                        color="primary"
+                        variant="outlined"
+                        prepend-icon="mdi-play"
+                        :loading="monitorsStore.runningId === monitor.id"
+                        @click="monitorsStore.runMonitor(monitor.id)"
+                      >
+                        Testar
+                      </v-btn>
+                    </div>
+                  </div>
+                </v-list-item>
+              </v-list>
+            </div>
+            <div v-else class="pa-8 text-center text-grey">
+              <v-icon size="48" color="grey-lighten-1" class="mb-2">
+                mdi-chart-timeline-variant-off
+              </v-icon>
+              <div class="text-subtitle-1 font-weight-medium">Nenhum monitor cadastrado</div>
+              <p class="text-caption text-grey-darken-1 mb-4">
+                Cadastre monitores ICMP, HTTP ou TCP para visualizar os gráficos em barras.
+              </p>
+              <v-btn color="primary" prepend-icon="mdi-plus" to="/monitors">
+                Cadastrar Monitor
+              </v-btn>
+            </div>
+          </v-card-text>
+        </v-card>
+      </v-col>
+    </v-row>
+
+    <v-row class="mb-6">
+      <v-col cols="12">
+        <DnsLatencyCard></DnsLatencyCard>
       </v-col>
     </v-row>
 
