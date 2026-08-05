@@ -191,7 +191,8 @@
                   :key="idx"
                   :title="formatEventDetails(evt).title"
                   :subtitle="formatEventDetails(evt).message"
-                  class="px-4 py-2 border-b"
+                  class="px-4 py-2 border-b cursor-pointer"
+                  @click="openEventDetail(evt)"
                 >
                   <template #prepend>
                     <v-avatar
@@ -350,6 +351,9 @@
 
     <!-- Modal Silenciar Alerta -->
     <AlertSilenceDialog v-model="silenceDialog" :alert-id="silenceTargetId" />
+
+    <!-- Modal Detalhes do Evento -->
+    <EventDetailDialog v-model="eventDetailDialog" :event="selectedEventPayload" />
   </div>
 </template>
 
@@ -362,7 +366,10 @@ import { useMonitorsStore } from '@/stores/monitors'
 import MonitorTimelineBar from '@/components/MonitorTimelineBar.vue'
 import DnsLatencyCard from '@/components/DnsLatencyCard.vue'
 import AlertSilenceDialog from '@/components/AlertSilenceDialog.vue'
+import EventDetailDialog from '@/components/EventDetailDialog.vue'
 import { statusLabel } from '@/utils/alertPresentation'
+import { formatEventDetails } from '@/utils/eventPresentation'
+import { getStatusColor } from '@/utils/monitorPresentation'
 
 const devicesStore = useDevicesStore()
 const alertsStore = useAlertsStore()
@@ -373,9 +380,17 @@ const loading = ref(false)
 const silenceDialog = ref(false)
 const silenceTargetId = ref<number | null>(null)
 
+const eventDetailDialog = ref(false)
+const selectedEventPayload = ref<RealtimeEventPayload | null>(null)
+
 function openSilenceDialog(id: number) {
   silenceTargetId.value = id
   silenceDialog.value = true
+}
+
+function openEventDetail(evt: RealtimeEventPayload) {
+  selectedEventPayload.value = evt
+  eventDetailDialog.value = true
 }
 
 function getAlertLink(alert: { monitorId?: number | null; deviceId?: number | null }): string {
@@ -407,118 +422,6 @@ const globalUptime = computed(() => {
   const up = monitorsOnlineCount.value
   return Math.round((up / monitorsStore.monitors.length) * 100)
 })
-
-function getStatusColor(status?: string): string {
-  switch (status) {
-    case 'up':
-    case 'online':
-      return 'success'
-    case 'down':
-    case 'offline':
-      return 'error'
-    case 'warning':
-      return 'warning'
-    case 'disabled':
-      return 'grey'
-    default:
-      return 'blue-grey'
-  }
-}
-
-function formatEventDetails(evt: RealtimeEventPayload) {
-  const d = (evt.data || {}) as Record<string, any>
-  const dateStr = evt.timestamp
-    ? new Date(evt.timestamp).toLocaleTimeString('pt-BR', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-      })
-    : new Date().toLocaleTimeString('pt-BR', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-      })
-
-  switch (evt.type) {
-    case 'monitor:result': {
-      const name = d.name || d.monitorName || `Monitor #${d.monitorId || d.id || ''}`
-      const status = String(d.status || '').toLowerCase()
-      const isUp = status === 'up' || status === 'online'
-      const latency = d.latencyMs !== undefined && d.latencyMs !== null ? `${d.latencyMs} ms` : null
-      return {
-        title: name,
-        message: `${isUp ? 'Verificação OK (ONLINE)' : 'Falha na Verificação (OFFLINE)'}${latency ? ` • Latência: ${latency}` : ''}`,
-        icon: isUp ? 'mdi-check-circle' : 'mdi-alert-circle',
-        color: isUp ? 'success' : 'error',
-        time: dateStr,
-      }
-    }
-    case 'device:status': {
-      const name = d.name || d.deviceName || `Dispositivo #${d.id || ''}`
-      const status = String(d.status || '').toLowerCase()
-      const isOnline = status === 'online'
-      return {
-        title: name,
-        message: `Status do equipamento alterado para ${status.toUpperCase()}`,
-        icon: isOnline ? 'mdi-lan-connect' : 'mdi-lan-disconnect',
-        color: isOnline ? 'success' : 'error',
-        time: dateStr,
-      }
-    }
-    case 'alert:triggered': {
-      return {
-        title: d.title || 'Novo Alerta Disparado',
-        message: d.message || 'Aviso de incidente registrado no sistema',
-        icon: 'mdi-bell-ring',
-        color: 'warning',
-        time: dateStr,
-      }
-    }
-    case 'alert:resolved': {
-      return {
-        title: d.title || 'Alerta Normalizado',
-        message: d.message || 'A condição que gerou o alerta foi restabelecida',
-        icon: 'mdi-check-decagram',
-        color: 'success',
-        time: dateStr,
-      }
-    }
-    case 'interface:status_change':
-    case 'interface:speed_change':
-    case 'interface:speed_downgrade': {
-      return {
-        title: `Interface ${d.ifName || ''}`.trim(),
-        message: String(d.message || 'Alteração detectada na interface'),
-        icon: 'mdi-ethernet-cable',
-        color: evt.type === 'interface:speed_change' ? 'info' : 'warning',
-        time: dateStr,
-      }
-    }
-    case 'probe:status': {
-      return {
-        title: String(d.name || `Probe #${d.id || ''}`),
-        message: `Probe passou para o estado ${String(d.status || '').toUpperCase()}`,
-        icon: 'mdi-router-wireless',
-        color: d.status === 'online' ? 'success' : 'warning',
-        time: dateStr,
-      }
-    }
-    default: {
-      const summary =
-        d.name ||
-        d.title ||
-        d.message ||
-        (Object.keys(d).length ? JSON.stringify(d).slice(0, 60) : 'Evento de sistema')
-      return {
-        title: evt.type || 'Evento do Sistema',
-        message: String(summary),
-        icon: 'mdi-pulse',
-        color: 'info',
-        time: dateStr,
-      }
-    }
-  }
-}
 </script>
 
 <style scoped>

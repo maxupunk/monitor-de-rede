@@ -346,6 +346,7 @@ import { useZabbixTemplatesStore } from '@/stores/zabbixTemplates'
 import { useSnmpTestStore } from '@/stores/snmpTest'
 import SiteDialog from '@/components/SiteDialog.vue'
 import PortScanDialog from '@/components/PortScanDialog.vue'
+import { getStatusColor } from '@/utils/monitorPresentation'
 
 const router = useRouter()
 const devicesStore = useDevicesStore()
@@ -418,19 +419,6 @@ onMounted(async () => {
 function onRowClick(_event: MouseEvent, row: { item: Device }) {
   if (row?.item?.id) {
     router.push('/devices/' + row.item.id)
-  }
-}
-
-function getStatusColor(status: string) {
-  switch (status) {
-    case 'online':
-      return 'success'
-    case 'offline':
-      return 'error'
-    case 'warning':
-      return 'warning'
-    default:
-      return 'grey'
   }
 }
 

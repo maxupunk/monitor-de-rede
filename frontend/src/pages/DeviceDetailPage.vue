@@ -1007,6 +1007,7 @@ import VpnScriptViewer from '@/components/VpnScriptViewer.vue'
 import VpnFirewallHintsDialog from '@/components/VpnFirewallHintsDialog.vue'
 import PortScanDialog from '@/components/PortScanDialog.vue'
 import MonitorFormDialog from '@/components/MonitorFormDialog.vue'
+import { getStatusColor } from '@/utils/monitorPresentation'
 import {
   useVpnStore,
   vpnProfileIcon,
@@ -1397,21 +1398,6 @@ async function saveMonitors() {
     }
   } finally {
     savingMonitors.value = false
-  }
-}
-
-function getStatusColor(status?: string) {
-  switch (status?.toLowerCase()) {
-    case 'online':
-    case 'up':
-      return 'success'
-    case 'offline':
-    case 'down':
-      return 'error'
-    case 'warning':
-      return 'warning'
-    default:
-      return 'grey'
   }
 }
 </script>

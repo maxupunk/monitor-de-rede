@@ -101,6 +101,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useDiscoveryStore } from '@/stores/discovery'
+import { getStatusColor } from '@/utils/monitorPresentation'
 
 const discoveryStore = useDiscoveryStore()
 const tab = ref('results')
@@ -130,19 +131,6 @@ onMounted(() => {
 function refreshData() {
   discoveryStore.fetchDiscoveryResults()
   discoveryStore.fetchDiscoveryRuns()
-}
-
-function getStatusColor(status: string) {
-  switch (status) {
-    case 'accepted':
-      return 'success'
-    case 'ignored':
-      return 'grey'
-    case 'merged':
-      return 'info'
-    default:
-      return 'warning'
-  }
 }
 
 async function handleAccept(id: number) {

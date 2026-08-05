@@ -206,6 +206,7 @@ import {
   isInterfaceMonitor,
   interfaceStatusInfo as interfaceStatusInfoFor,
   latestResultData,
+  getStatusColor,
 } from '@/utils/monitorPresentation'
 import { monitorKind, resolveKind, resolveSnmpMode, SNMP_MODES } from '@/utils/monitorTypes'
 
@@ -231,21 +232,6 @@ const headers = [
 onMounted(async () => {
   await Promise.all([monitorsStore.fetchMonitors(), devicesStore.fetchDevices()])
 })
-
-function getStatusColor(status: string) {
-  switch (status) {
-    case 'up':
-    case 'online':
-      return 'success'
-    case 'down':
-    case 'offline':
-      return 'error'
-    case 'warning':
-      return 'warning'
-    default:
-      return 'grey'
-  }
-}
 
 function gaugeColor(item: Monitor): string {
   return gaugeColorFor(item.gaugeMetric?.value ?? null, gaugeMetricName(item))

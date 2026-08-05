@@ -59,6 +59,7 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import { useProbesStore } from '@/stores/probes'
+import { getStatusColor } from '@/utils/monitorPresentation'
 
 const probesStore = useProbesStore()
 
@@ -75,19 +76,6 @@ const headers = [
 onMounted(() => {
   probesStore.fetchProbes()
 })
-
-function getStatusColor(status: string) {
-  switch (status) {
-    case 'online':
-      return 'success'
-    case 'offline':
-      return 'error'
-    case 'revoked':
-      return 'grey'
-    default:
-      return 'warning'
-  }
-}
 
 async function confirmRevoke(id: number) {
   if (confirm('Tem certeza de que deseja revogar o token deste Probe?')) {

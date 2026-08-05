@@ -521,6 +521,7 @@ import {
   isInterfaceMonitor as isInterfaceMonitorFn,
   interfaceStatusInfo,
   latestResultData,
+  getStatusColor,
 } from '@/utils/monitorPresentation'
 
 const route = useRoute()
@@ -808,21 +809,6 @@ async function refreshData() {
   if (monitorId.value) {
     await monitorsStore.fetchMonitorById(monitorId.value)
     if (isGaugeMonitor.value) await loadGaugeHistory()
-  }
-}
-
-function getStatusColor(status?: string): string {
-  switch (status) {
-    case 'up':
-    case 'online':
-      return 'success'
-    case 'down':
-    case 'offline':
-      return 'error'
-    case 'warning':
-      return 'warning'
-    default:
-      return 'grey'
   }
 }
 

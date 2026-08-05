@@ -80,3 +80,43 @@ export function latestResultData(
   if (!results || results.length === 0) return undefined
   return results[results.length - 1]?.data
 }
+
+/**
+ * Retorna a cor do Vuetify correspondente ao estado/status de um dispositivo,
+ * monitor, alerta ou interface de forma unificada.
+ */
+export function getStatusColor(status?: string | null): string {
+  if (!status) return 'grey'
+  const normalized = status.toLowerCase().trim()
+  switch (normalized) {
+    case 'up':
+    case 'online':
+    case 'success':
+    case 'ok':
+    case 'active':
+    case 'accepted':
+      return 'success'
+    case 'down':
+    case 'offline':
+    case 'error':
+    case 'critical':
+    case 'failed':
+      return 'error'
+    case 'warning':
+    case 'degraded':
+    case 'unstable':
+    case 'instável':
+    case 'silenced':
+      return 'warning'
+    case 'merged':
+      return 'info'
+    case 'disabled':
+    case 'desabilitada':
+    case 'inactive':
+    case 'revoked':
+    case 'unknown':
+    case 'pending':
+    default:
+      return 'grey'
+  }
+}
