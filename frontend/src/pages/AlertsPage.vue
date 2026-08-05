@@ -82,6 +82,7 @@
                     size="small"
                     color="warning"
                     variant="outlined"
+                    :disabled="item.status === 'silenced'"
                     @click="openSilenceDialog(item.id)"
                   >
                     Silenciar
@@ -194,28 +195,7 @@
     </v-snackbar>
 
     <!-- Modal Silenciar Alerta -->
-    <v-dialog v-model="silenceDialog" max-width="400">
-      <v-card class="rounded-lg pa-4">
-        <v-card-title class="font-weight-bold">Silenciar Alerta</v-card-title>
-        <v-card-text>
-          <v-select
-            v-model="silenceDuration"
-            :items="[
-              { title: '15 minutos', value: 15 },
-              { title: '1 hora', value: 60 },
-              { title: '4 horas', value: 240 },
-              { title: '24 horas', value: 1440 },
-            ]"
-            label="Duração do Silenciamento"
-            variant="outlined"
-          ></v-select>
-        </v-card-text>
-        <v-card-actions class="justify-end">
-          <v-btn variant="text" @click="silenceDialog = false">Cancelar</v-btn>
-          <v-btn color="warning" @click="confirmSilence">Confirmar Silêncio</v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
+    <AlertSilenceDialog v-model="silenceDialog" :alert-id="silenceTargetId" />
 
     <!-- Modal Form de Regra -->
     <v-dialog v-model="ruleDialog" max-width="620">
@@ -335,6 +315,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useAlertsStore, type AlertRule } from '@/stores/alerts'
 import { useEventsStore } from '@/stores/events'
 import AlertRuleCatalogDialog from '@/components/AlertRuleCatalogDialog.vue'
+import AlertSilenceDialog from '@/components/AlertSilenceDialog.vue'
 import {
   ALERT_METRICS,
   ALERT_DURATIONS,
@@ -359,7 +340,6 @@ const catalogDialog = ref(false)
 const feedback = reactive({ visible: false, message: '', color: 'success' })
 const silenceDialog = ref(false)
 const silenceTargetId = ref<number | null>(null)
-const silenceDuration = ref(60)
 
 const ruleDialog = ref(false)
 const editingRuleId = ref<number | null>(null)
@@ -468,13 +448,6 @@ function openRuleDialog(rule?: AlertRule) {
 function openSilenceDialog(id: number) {
   silenceTargetId.value = id
   silenceDialog.value = true
-}
-
-async function confirmSilence() {
-  if (silenceTargetId.value) {
-    await alertsStore.silenceAlert(silenceTargetId.value, silenceDuration.value)
-  }
-  silenceDialog.value = false
 }
 
 function buildPayload(): Partial<AlertRule> {

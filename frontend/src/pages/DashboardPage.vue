@@ -225,6 +225,7 @@
                   :key="alert.id"
                   :title="alert.title"
                   :subtitle="alert.message"
+                  :to="getAlertLink(alert)"
                   class="px-4 py-2 border-b"
                 >
                   <template #prepend>
@@ -240,14 +241,41 @@
                     </v-avatar>
                   </template>
                   <template #append>
-                    <v-btn
-                      size="small"
-                      variant="outlined"
-                      color="primary"
-                      @click="alertsStore.acknowledgeAlert(alert.id)"
-                    >
-                      Reconhecer
-                    </v-btn>
+                    <div class="d-flex align-center ga-2">
+                      <v-chip variant="outlined" size="x-small" class="font-weight-medium">
+                        {{ statusLabel(alert.status) }}
+                      </v-chip>
+                      <v-tooltip text="Reconhecer alerta">
+                        <template #activator="{ props: tooltipProps }">
+                          <v-btn
+                            v-bind="tooltipProps"
+                            icon
+                            size="small"
+                            variant="text"
+                            color="primary"
+                            :disabled="alert.status === 'acknowledged'"
+                            @click.stop="alertsStore.acknowledgeAlert(alert.id)"
+                          >
+                            <v-icon>mdi-check-circle-outline</v-icon>
+                          </v-btn>
+                        </template>
+                      </v-tooltip>
+                      <v-tooltip text="Silenciar alerta">
+                        <template #activator="{ props: tooltipProps }">
+                          <v-btn
+                            v-bind="tooltipProps"
+                            icon
+                            size="small"
+                            variant="text"
+                            color="warning"
+                            :disabled="alert.status === 'silenced'"
+                            @click.stop="openSilenceDialog(alert.id)"
+                          >
+                            <v-icon>mdi-bell-off-outline</v-icon>
+                          </v-btn>
+                        </template>
+                      </v-tooltip>
+                    </div>
                   </template>
                 </v-list-item>
               </v-list>
@@ -318,6 +346,9 @@
         </v-card>
       </v-col>
     </v-row>
+
+    <!-- Modal Silenciar Alerta -->
+    <AlertSilenceDialog v-model="silenceDialog" :alert-id="silenceTargetId" />
   </div>
 </template>
 
@@ -329,12 +360,28 @@ import { useEventsStore, type RealtimeEventPayload } from '@/stores/events'
 import { useMonitorsStore } from '@/stores/monitors'
 import MonitorTimelineBar from '@/components/MonitorTimelineBar.vue'
 import DnsLatencyCard from '@/components/DnsLatencyCard.vue'
+import AlertSilenceDialog from '@/components/AlertSilenceDialog.vue'
+import { statusLabel } from '@/utils/alertPresentation'
 
 const devicesStore = useDevicesStore()
 const alertsStore = useAlertsStore()
 const eventsStore = useEventsStore()
 const monitorsStore = useMonitorsStore()
 const loading = ref(false)
+
+const silenceDialog = ref(false)
+const silenceTargetId = ref<number | null>(null)
+
+function openSilenceDialog(id: number) {
+  silenceTargetId.value = id
+  silenceDialog.value = true
+}
+
+function getAlertLink(alert: { monitorId?: number | null; deviceId?: number | null }): string {
+  if (alert.monitorId) return '/monitors/' + alert.monitorId
+  if (alert.deviceId) return '/devices/' + alert.deviceId
+  return '/alerts'
+}
 
 onMounted(async () => {
   await refreshData()

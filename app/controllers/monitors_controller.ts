@@ -5,12 +5,14 @@ import Device from '#models/device'
 import { MonitorRunner } from '#modules/monitoring/monitor_runner'
 import { ResultProcessor } from '#modules/monitoring/result_processor'
 import { DeviceStatusService } from '#modules/monitoring/device_status_service'
+import { RecoveryManager } from '#modules/alerts/recovery_manager'
 
 const GAUGE_METRIC_NAMES = ['cpu_usage', 'memory_usage']
 
 export default class MonitorsController {
   private monitorRunner = new MonitorRunner()
   private resultProcessor = new ResultProcessor()
+  private recoveryManager = new RecoveryManager()
 
   /**
    * Monitores SNMP de uso de CPU/Memória não são checagens de disponibilidade
@@ -246,11 +248,15 @@ export default class MonitorsController {
 
     monitor.merge(data)
     await monitor.save()
+    if (enabled === false) {
+      await this.recoveryManager.resolveAlertsForMonitor(monitor.id, 'Monitor desativado')
+    }
     return response.ok(monitor)
   }
 
   async destroy({ params, response }: HttpContext) {
     const monitor = await Monitor.findOrFail(params.id)
+    await this.recoveryManager.resolveAlertsForMonitor(monitor.id, 'Monitor removido')
     await monitor.delete()
     return response.noContent()
   }
@@ -285,6 +291,8 @@ export default class MonitorsController {
     const monitor = await Monitor.findOrFail(params.id)
     monitor.enabled = false
     await monitor.save()
+
+    await this.recoveryManager.resolveAlertsForMonitor(monitor.id, 'Monitor desativado')
 
     const device = monitor.deviceId ? await Device.find(monitor.deviceId) : null
     if (device) {

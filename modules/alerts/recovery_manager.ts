@@ -15,7 +15,15 @@ export class RecoveryManager {
 
   async resolveScope(scopeKey: string, message = 'Monitoramento normalizado'): Promise<void> {
     const activeEvents = await AlertEvent.query()
-      .where('scopeKey', scopeKey)
+      .where((query) => {
+        query.where('scopeKey', scopeKey)
+        if (scopeKey.startsWith('monitor:')) {
+          const monitorId = Number(scopeKey.split(':')[1])
+          if (!isNaN(monitorId)) {
+            query.orWhere('monitorId', monitorId)
+          }
+        }
+      })
       .whereIn('status', ['active', 'acknowledged', 'silenced'])
 
     for (const event of activeEvents) {
