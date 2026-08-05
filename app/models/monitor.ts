@@ -22,7 +22,8 @@ export default class Monitor extends BaseModel {
   declare name: string
 
   @column({
-    prepare: (value: Record<string, unknown>) => (value ? JSON.stringify(value) : JSON.stringify({})),
+    prepare: (value: Record<string, unknown>) =>
+      value ? JSON.stringify(value) : JSON.stringify({}),
     consume: (value: string | Record<string, unknown>) =>
       typeof value === 'string' ? JSON.parse(value) : value || {},
   })
@@ -31,7 +32,10 @@ export default class Monitor extends BaseModel {
   @computed()
   get target(): string {
     if (!this.configuration) return ''
-    return (this.configuration.host || this.configuration.url || this.configuration.domain || '') as string
+    return (this.configuration.host ||
+      this.configuration.url ||
+      this.configuration.domain ||
+      '') as string
   }
 
   @computed()

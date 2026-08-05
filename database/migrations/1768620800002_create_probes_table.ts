@@ -6,7 +6,13 @@ export default class extends BaseSchema {
   async up() {
     this.schema.createTable(this.tableName, (table) => {
       table.increments('id').notNullable()
-      table.integer('site_id').unsigned().references('id').inTable('sites').onDelete('CASCADE').nullable()
+      table
+        .integer('site_id')
+        .unsigned()
+        .references('id')
+        .inTable('sites')
+        .onDelete('CASCADE')
+        .nullable()
       table.string('name').notNullable()
       table.string('token_hash').notNullable()
       table.string('status').defaultTo('pending').notNullable()

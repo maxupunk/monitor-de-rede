@@ -20,7 +20,9 @@ export class DiscoveryMerger {
             hostname: host.hostname || existing.hostname,
             mdnsName: host.mdnsName || existing.mdnsName,
             vendor: host.vendor || existing.vendor,
-            openPorts: Array.from(new Set([...(existing.openPorts || []), ...(host.openPorts || [])])),
+            openPorts: Array.from(
+              new Set([...(existing.openPorts || []), ...(host.openPorts || [])])
+            ),
             confidence: Math.max(existing.confidence, host.confidence),
             data: { ...(existing.data || {}), ...(host.data || {}) },
           }

@@ -85,6 +85,8 @@ router
     router.resource('probes', ProbesController).apiOnly()
 
     // Alerts
+    router.get('alert-rules/catalog', [AlertsController, 'catalogIndex'])
+    router.post('alert-rules/catalog', [AlertsController, 'catalogApply'])
     router.get('alert-rules', [AlertsController, 'rulesIndex'])
     router.post('alert-rules', [AlertsController, 'rulesStore'])
     router.put('alert-rules/:id', [AlertsController, 'rulesUpdate'])

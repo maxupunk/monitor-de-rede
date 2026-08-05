@@ -84,14 +84,48 @@ export class VpnTrafficRecorder {
         .first(),
     ])
 
-    const rxBps = this.computeRate(Number(lastRx?.value ?? 0), lastRx?.recordedAt ?? null, peer.bytesRx, now)
-    const txBps = this.computeRate(Number(lastTx?.value ?? 0), lastTx?.recordedAt ?? null, peer.bytesTx, now)
+    const rxBps = this.computeRate(
+      Number(lastRx?.value ?? 0),
+      lastRx?.recordedAt ?? null,
+      peer.bytesRx,
+      now
+    )
+    const txBps = this.computeRate(
+      Number(lastTx?.value ?? 0),
+      lastTx?.recordedAt ?? null,
+      peer.bytesTx,
+      now
+    )
 
     await Metric.createMany([
-      { deviceId: peer.deviceId, name: VPN_METRIC_BYTES_RX, value: peer.bytesRx, unit: 'bytes', recordedAt: now },
-      { deviceId: peer.deviceId, name: VPN_METRIC_BYTES_TX, value: peer.bytesTx, unit: 'bytes', recordedAt: now },
-      { deviceId: peer.deviceId, name: VPN_METRIC_RX_BPS, value: rxBps, unit: 'bps', recordedAt: now },
-      { deviceId: peer.deviceId, name: VPN_METRIC_TX_BPS, value: txBps, unit: 'bps', recordedAt: now },
+      {
+        deviceId: peer.deviceId,
+        name: VPN_METRIC_BYTES_RX,
+        value: peer.bytesRx,
+        unit: 'bytes',
+        recordedAt: now,
+      },
+      {
+        deviceId: peer.deviceId,
+        name: VPN_METRIC_BYTES_TX,
+        value: peer.bytesTx,
+        unit: 'bytes',
+        recordedAt: now,
+      },
+      {
+        deviceId: peer.deviceId,
+        name: VPN_METRIC_RX_BPS,
+        value: rxBps,
+        unit: 'bps',
+        recordedAt: now,
+      },
+      {
+        deviceId: peer.deviceId,
+        name: VPN_METRIC_TX_BPS,
+        value: txBps,
+        unit: 'bps',
+        recordedAt: now,
+      },
     ])
   }
 

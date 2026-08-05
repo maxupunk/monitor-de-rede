@@ -6,9 +6,27 @@ export default class extends BaseSchema {
   async up() {
     this.schema.createTable(this.tableName, (table) => {
       table.increments('id').notNullable()
-      table.integer('site_id').unsigned().references('id').inTable('sites').onDelete('CASCADE').nullable()
-      table.integer('device_id').unsigned().references('id').inTable('devices').onDelete('CASCADE').nullable()
-      table.integer('monitor_id').unsigned().references('id').inTable('monitors').onDelete('CASCADE').nullable()
+      table
+        .integer('site_id')
+        .unsigned()
+        .references('id')
+        .inTable('sites')
+        .onDelete('CASCADE')
+        .nullable()
+      table
+        .integer('device_id')
+        .unsigned()
+        .references('id')
+        .inTable('devices')
+        .onDelete('CASCADE')
+        .nullable()
+      table
+        .integer('monitor_id')
+        .unsigned()
+        .references('id')
+        .inTable('monitors')
+        .onDelete('CASCADE')
+        .nullable()
       table.string('name').notNullable()
       table.string('type').notNullable()
       table.jsonb('condition').notNullable()

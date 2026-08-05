@@ -342,6 +342,18 @@ const routes = {
     tokens: [{"old":"/api/probes/:id","type":0,"val":"api","end":""},{"old":"/api/probes/:id","type":0,"val":"probes","end":""},{"old":"/api/probes/:id","type":1,"val":"id","end":""}],
     types: placeholder as Registry['probes.destroy']['types'],
   },
+  'alerts.catalog_index': {
+    methods: ["GET","HEAD"],
+    pattern: '/api/alert-rules/catalog',
+    tokens: [{"old":"/api/alert-rules/catalog","type":0,"val":"api","end":""},{"old":"/api/alert-rules/catalog","type":0,"val":"alert-rules","end":""},{"old":"/api/alert-rules/catalog","type":0,"val":"catalog","end":""}],
+    types: placeholder as Registry['alerts.catalog_index']['types'],
+  },
+  'alerts.catalog_apply': {
+    methods: ["POST"],
+    pattern: '/api/alert-rules/catalog',
+    tokens: [{"old":"/api/alert-rules/catalog","type":0,"val":"api","end":""},{"old":"/api/alert-rules/catalog","type":0,"val":"alert-rules","end":""},{"old":"/api/alert-rules/catalog","type":0,"val":"catalog","end":""}],
+    types: placeholder as Registry['alerts.catalog_apply']['types'],
+  },
   'alerts.rules_index': {
     methods: ["GET","HEAD"],
     pattern: '/api/alert-rules',

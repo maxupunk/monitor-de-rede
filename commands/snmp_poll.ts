@@ -5,7 +5,8 @@ import { SnmpService } from '#modules/snmp/snmp_service'
 
 export default class SnmpPoll extends BaseCommand {
   static commandName = 'snmp:poll'
-  static description = 'Executa varredura e coleta SNMP em um dispositivo específico ou em todos os dispositivos'
+  static description =
+    'Executa varredura e coleta SNMP em um dispositivo específico ou em todos os dispositivos'
 
   @args.string({ description: 'ID do dispositivo (opcional)', required: false })
   declare deviceId?: string
@@ -39,14 +40,18 @@ export default class SnmpPoll extends BaseCommand {
         return
       }
 
-      this.logger.info(`Iniciando varredura SNMP para o dispositivo #${device.id} (${device.name})...`)
+      this.logger.info(
+        `Iniciando varredura SNMP para o dispositivo #${device.id} (${device.name})...`
+      )
       const res = await this.snmpService.pollDevice(device, {
         host: device.ipAddress || device.name,
         version,
         community,
       })
 
-      this.logger.success(`Coleta concluída: ${res.interfaceCount} interfaces, ${res.metricCount} métricas, ${res.neighborCount} vizinhos.`)
+      this.logger.success(
+        `Coleta concluída: ${res.interfaceCount} interfaces, ${res.metricCount} métricas, ${res.neighborCount} vizinhos.`
+      )
     } else {
       const devices = await Device.all()
       this.logger.info(`Iniciando varredura SNMP para ${devices.length} dispositivo(s)...`)
@@ -58,9 +63,13 @@ export default class SnmpPoll extends BaseCommand {
             version,
             community,
           })
-          this.logger.info(`Dispositivo #${device.id} (${device.name}): ${res.interfaceCount} interfaces, ${res.metricCount} métricas, ${res.neighborCount} vizinhos.`)
+          this.logger.info(
+            `Dispositivo #${device.id} (${device.name}): ${res.interfaceCount} interfaces, ${res.metricCount} métricas, ${res.neighborCount} vizinhos.`
+          )
         } catch (error) {
-          this.logger.error(`Falha na varredura do dispositivo #${device.id}: ${error instanceof Error ? error.message : String(error)}`)
+          this.logger.error(
+            `Falha na varredura do dispositivo #${device.id}: ${error instanceof Error ? error.message : String(error)}`
+          )
         }
       }
       this.logger.success('Varredura SNMP finalizada.')

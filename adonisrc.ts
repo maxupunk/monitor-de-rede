@@ -77,6 +77,11 @@ export default defineConfig({
       file: () => import('#start/vpn_probe'),
       environment: ['web'],
     },
+    {
+      // Provisiona as regras básicas de alerta em instalações novas.
+      file: () => import('#start/alert_rules'),
+      environment: ['web'],
+    },
   ],
 
   /*

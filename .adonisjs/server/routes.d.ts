@@ -60,6 +60,8 @@ export type ScannedRoutes = {
     'probes.show': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
     'probes.update': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
     'probes.destroy': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
+    'alerts.catalog_index': { paramsTuple?: []; params?: {} }
+    'alerts.catalog_apply': { paramsTuple?: []; params?: {} }
     'alerts.rules_index': { paramsTuple?: []; params?: {} }
     'alerts.rules_store': { paramsTuple?: []; params?: {} }
     'alerts.rules_update': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
@@ -106,6 +108,7 @@ export type ScannedRoutes = {
     'probes.get_tasks': { paramsTuple?: []; params?: {} }
     'probes.index': { paramsTuple?: []; params?: {} }
     'probes.show': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
+    'alerts.catalog_index': { paramsTuple?: []; params?: {} }
     'alerts.rules_index': { paramsTuple?: []; params?: {} }
     'alerts.index': { paramsTuple?: []; params?: {} }
     'vpn_servers.show': { paramsTuple?: []; params?: {} }
@@ -138,6 +141,7 @@ export type ScannedRoutes = {
     'probes.get_tasks': { paramsTuple?: []; params?: {} }
     'probes.index': { paramsTuple?: []; params?: {} }
     'probes.show': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
+    'alerts.catalog_index': { paramsTuple?: []; params?: {} }
     'alerts.rules_index': { paramsTuple?: []; params?: {} }
     'alerts.index': { paramsTuple?: []; params?: {} }
     'vpn_servers.show': { paramsTuple?: []; params?: {} }
@@ -175,6 +179,7 @@ export type ScannedRoutes = {
     'probes.revoke': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
     'probes.test': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
     'probes.store': { paramsTuple?: []; params?: {} }
+    'alerts.catalog_apply': { paramsTuple?: []; params?: {} }
     'alerts.rules_store': { paramsTuple?: []; params?: {} }
     'alerts.acknowledge': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
     'alerts.silence': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }

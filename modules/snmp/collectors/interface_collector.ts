@@ -48,10 +48,10 @@ export class InterfaceCollector {
     for (const entry of entries) {
       const parts = entry.oid.split('.')
       if (parts.length < 2) continue
-      const index = parseInt(parts[parts.length - 1], 10)
-      const column = parseInt(parts[parts.length - 2], 10)
+      const index = Number.parseInt(parts[parts.length - 1], 10)
+      const column = Number.parseInt(parts[parts.length - 2], 10)
 
-      if (isNaN(index) || isNaN(column)) continue
+      if (Number.isNaN(index) || Number.isNaN(column)) continue
 
       const item = getOrCreate(index)
 
@@ -80,10 +80,10 @@ export class InterfaceCollector {
     for (const entry of xEntries) {
       const parts = entry.oid.split('.')
       if (parts.length < 2) continue
-      const index = parseInt(parts[parts.length - 1], 10)
-      const column = parseInt(parts[parts.length - 2], 10)
+      const index = Number.parseInt(parts[parts.length - 1], 10)
+      const column = Number.parseInt(parts[parts.length - 2], 10)
 
-      if (isNaN(index) || isNaN(column)) continue
+      if (Number.isNaN(index) || Number.isNaN(column)) continue
 
       const item = getOrCreate(index)
 
@@ -141,7 +141,10 @@ export class InterfaceCollector {
 
     // String hexadecimal pura de 12 caracteres e.g. "0025fe26967f"
     if (/^[0-9a-fA-F]{12}$/.test(str)) {
-      return str.match(/.{1,2}/g)!.join(':').toLowerCase()
+      return str
+        .match(/.{1,2}/g)!
+        .join(':')
+        .toLowerCase()
     }
 
     // String binária bruta de 6 bytes
@@ -154,7 +157,10 @@ export class InterfaceCollector {
       }
     }
 
-    // Se contém caracteres inválidos/substituição, tenta decodificar como binary buffer
+    // Se contém caracteres inválidos/substituição, tenta decodificar como binary buffer.
+    // A faixa de controle no padrão é intencional: é justamente ela que denuncia
+    // um MAC entregue como bytes crus em vez de texto.
+    // eslint-disable-next-line no-control-regex
     if (typeof value === 'string' && (str.includes('\uFFFD') || /[\x00-\x1F]/.test(str))) {
       const buf = Buffer.from(value, 'binary')
       if (buf.length === 6) {

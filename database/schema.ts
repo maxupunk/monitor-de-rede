@@ -8,7 +8,7 @@ import { BaseModel, column } from '@adonisjs/lucid/orm'
 import { DateTime } from 'luxon'
 
 export class AlertEventSchema extends BaseModel {
-  static $columns = ['alertRuleId', 'createdAt', 'data', 'deviceId', 'id', 'message', 'monitorId', 'resolvedAt', 'severity', 'startedAt', 'status', 'updatedAt'] as const
+  static $columns = ['alertRuleId', 'createdAt', 'data', 'deviceId', 'id', 'message', 'monitorId', 'resolvedAt', 'scopeKey', 'severity', 'startedAt', 'status', 'updatedAt'] as const
   $columns = AlertEventSchema.$columns
   @column()
   declare alertRuleId: number | null
@@ -27,6 +27,8 @@ export class AlertEventSchema extends BaseModel {
   @column.dateTime()
   declare resolvedAt: DateTime | null
   @column()
+  declare scopeKey: string | null
+  @column()
   declare severity: string
   @column.dateTime()
   declare startedAt: DateTime
@@ -37,7 +39,7 @@ export class AlertEventSchema extends BaseModel {
 }
 
 export class AlertRuleSchema extends BaseModel {
-  static $columns = ['condition', 'createdAt', 'deviceId', 'durationSeconds', 'enabled', 'id', 'monitorId', 'name', 'severity', 'siteId', 'type', 'updatedAt'] as const
+  static $columns = ['condition', 'createdAt', 'deviceId', 'durationSeconds', 'enabled', 'id', 'monitorId', 'name', 'severity', 'siteId', 'templateKey', 'type', 'updatedAt'] as const
   $columns = AlertRuleSchema.$columns
   @column()
   declare condition: any
@@ -59,6 +61,8 @@ export class AlertRuleSchema extends BaseModel {
   declare severity: string
   @column()
   declare siteId: number | null
+  @column()
+  declare templateKey: string | null
   @column()
   declare type: string
   @column.dateTime({ autoCreate: true, autoUpdate: true })

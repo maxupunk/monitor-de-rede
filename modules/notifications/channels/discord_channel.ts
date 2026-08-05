@@ -13,7 +13,12 @@ export class DiscordChannel implements NotificationChannel {
       return false
     }
 
-    const color = message.severity === 'critical' ? 15158332 : message.severity === 'warning' ? 16776960 : 3447003
+    const color =
+      message.severity === 'critical'
+        ? 15158332
+        : message.severity === 'warning'
+          ? 16776960
+          : 3447003
 
     const payload = {
       embeds: [

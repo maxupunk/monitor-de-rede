@@ -31,7 +31,9 @@ export default class MonitorTest extends BaseCommand {
       return
     }
 
-    this.logger.info(`Executando teste no monitor #${monitor.id} (${monitor.type}) - ${monitor.name}...`)
+    this.logger.info(
+      `Executando teste no monitor #${monitor.id} (${monitor.type}) - ${monitor.name}...`
+    )
 
     const result = await this.monitorRunner.runMonitor(monitor.type, monitor.configuration)
     await this.resultProcessor.processResult(monitor.id, result, monitor.probeId)

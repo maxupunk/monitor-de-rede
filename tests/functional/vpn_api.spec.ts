@@ -14,7 +14,7 @@ test.group('VPN API - Functional Tests', (group) => {
   async function configureServer(httpClient: ApiClient) {
     const site = await Site.create({ name: 'Matriz', active: true })
 
-    const response = await httpClient.put('/api/vpn/server').json({
+    const response = await httpClient.visit('vpn_servers.update').json({
       siteId: site.id,
       cidr: '10.8.0.0/24',
       listenPort: 51820,
@@ -50,7 +50,7 @@ test.group('VPN API - Functional Tests', (group) => {
   }) => {
     await configureServer(httpClient)
 
-    const response = await httpClient.post('/api/vpn/peers').json({
+    const response = await httpClient.visit('vpn_peers.store').json({
       name: 'MikroTik Filial',
       profile: 'mikrotik',
       snmpEnabled: true,
@@ -86,7 +86,7 @@ test.group('VPN API - Functional Tests', (group) => {
     await configureServer(httpClient)
 
     for (const name of ['Peer A', 'Peer B', 'Peer C']) {
-      const response = await httpClient.post('/api/vpn/peers').json({ name, profile: 'openwrt' })
+      const response = await httpClient.visit('vpn_peers.store').json({ name, profile: 'openwrt' })
       response.assertStatus(201)
     }
 
@@ -104,17 +104,17 @@ test.group('VPN API - Functional Tests', (group) => {
     await configureServer(httpClient)
 
     const created = await httpClient
-      .post('/api/vpn/peers')
+      .visit('vpn_peers.store')
       .json({ name: 'Peer Linux', profile: 'linux' })
     const peerId = created.body().peer.id
 
-    const first = await httpClient.get(`/api/vpn/peers/${peerId}/config`)
+    const first = await httpClient.visit('vpn_peers.config', { id: peerId })
     first.assertStatus(200)
-    assert.notInclude(first.body().content, 'CHAVE-PRIVADA-INDISPONIVEL')
+    assert.notInclude(first.body()!.content, 'CHAVE-PRIVADA-INDISPONIVEL')
 
-    const second = await httpClient.get(`/api/vpn/peers/${peerId}/config`)
+    const second = await httpClient.visit('vpn_peers.config', { id: peerId })
     second.assertStatus(200)
-    assert.include(second.body().content, 'CHAVE-PRIVADA-INDISPONIVEL')
+    assert.include(second.body()!.content, 'CHAVE-PRIVADA-INDISPONIVEL')
   })
 
   test('POST /api/vpn/peers/:id/rotate deve trocar a chave pública do peer', async ({
@@ -124,17 +124,17 @@ test.group('VPN API - Functional Tests', (group) => {
     await configureServer(httpClient)
 
     const created = await httpClient
-      .post('/api/vpn/peers')
+      .visit('vpn_peers.store')
       .json({ name: 'Peer Rotativo', profile: 'linux' })
     const peerId = created.body().peer.id
     const originalPublicKey = created.body().peer.publicKey
 
-    const rotated = await httpClient.post(`/api/vpn/peers/${peerId}/rotate`)
+    const rotated = await httpClient.visit('vpn_peers.rotate', { id: peerId })
     rotated.assertStatus(200)
-    assert.notEqual(rotated.body().peer.publicKey, originalPublicKey)
+    assert.notEqual(rotated.body()!.peer.publicKey, originalPublicKey)
 
     const peer = await VpnPeer.findOrFail(peerId)
-    assert.equal(peer.publicKey, rotated.body().peer.publicKey)
+    assert.equal(peer.publicKey, rotated.body()!.peer.publicKey)
   })
 
   test('POST /api/vpn/peers/:id/firewall-hints deve devolver as regras do perfil', async ({
@@ -144,12 +144,12 @@ test.group('VPN API - Functional Tests', (group) => {
     await configureServer(httpClient)
 
     const created = await httpClient
-      .post('/api/vpn/peers')
+      .visit('vpn_peers.store')
       .json({ name: 'Peer MikroTik', profile: 'mikrotik' })
 
-    const response = await httpClient.post(
-      `/api/vpn/peers/${created.body().peer.id}/firewall-hints`
-    )
+    const response = await httpClient.visit('vpn_peers.firewall_hints', {
+      id: created.body().peer.id,
+    })
 
     response.assertStatus(200)
     assert.include(response.body().content, 'protocol=icmp')
@@ -163,11 +163,11 @@ test.group('VPN API - Functional Tests', (group) => {
     await configureServer(httpClient)
 
     const created = await httpClient
-      .post('/api/vpn/peers')
+      .visit('vpn_peers.store')
       .json({ name: 'Peer Revogado', profile: 'linux' })
     const peerId = created.body().peer.id
 
-    const response = await httpClient.delete(`/api/vpn/peers/${peerId}`)
+    const response = await httpClient.visit('vpn_peers.destroy', { id: peerId })
     response.assertStatus(200)
 
     assert.isNull(await VpnPeer.find(peerId))
@@ -175,7 +175,7 @@ test.group('VPN API - Functional Tests', (group) => {
 
     // IP liberado: o próximo peer reaproveita o endereço.
     const recreated = await httpClient
-      .post('/api/vpn/peers')
+      .visit('vpn_peers.store')
       .json({ name: 'Peer Novo', profile: 'linux' })
     assert.equal(recreated.body().device.ipAddress, '10.8.0.2')
   })
@@ -185,9 +185,9 @@ test.group('VPN API - Functional Tests', (group) => {
     assert,
   }) => {
     await configureServer(httpClient)
-    await httpClient.post('/api/vpn/peers').json({ name: 'Peer Estado', profile: 'linux' })
+    await httpClient.visit('vpn_peers.store').json({ name: 'Peer Estado', profile: 'linux' })
 
-    const response = await httpClient.get('/api/vpn/server')
+    const response = await httpClient.visit('vpn_servers.show')
 
     response.assertStatus(200)
     assert.isTrue(response.body().configured)

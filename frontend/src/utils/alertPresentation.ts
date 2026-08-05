@@ -14,7 +14,7 @@ export interface AlertMetricOption {
   /** Explicação curta mostrada abaixo do campo */
   hint: string
   /** Define quais operadores fazem sentido e como o valor é digitado */
-  kind: 'number' | 'enum'
+  kind: 'number' | 'enum' | 'text'
   /** Sufixo exibido no campo de valor (ms, %, ...) */
   unit?: string
   /** Opções fixas quando `kind === 'enum'` */
@@ -121,6 +121,59 @@ export const ALERT_METRICS: AlertMetricOption[] = [
     defaultOperator: 'lt',
     defaultValue: 6000,
   },
+  {
+    field: 'interfaceStatusTransition',
+    title: 'Mudança de estado da interface (SNMP)',
+    hint: 'Comparação entre a coleta anterior e a atual das interfaces do equipamento.',
+    kind: 'enum',
+    options: [
+      { value: 'up_to_down', title: 'A interface caiu (UP ➔ DOWN)' },
+      { value: 'down_to_up', title: 'A interface voltou (DOWN ➔ UP)' },
+    ],
+    defaultOperator: 'eq',
+    defaultValue: 'up_to_down',
+  },
+  {
+    field: 'interfaceSpeedTransition',
+    title: 'Renegociação de velocidade da interface',
+    hint: 'Downgrade indica queda na velocidade negociada (ex.: 1 Gbps ➔ 100 Mbps).',
+    kind: 'enum',
+    options: [
+      { value: 'downgrade', title: 'Downgrade (negociou para menos)' },
+      { value: 'upgrade', title: 'Upgrade (negociou para mais)' },
+    ],
+    defaultOperator: 'eq',
+    defaultValue: 'downgrade',
+  },
+  {
+    field: 'interfaceSpeedBps',
+    title: 'Velocidade atual da interface (bps)',
+    hint: 'Velocidade negociada na última coleta. Ex.: 1000000000 = 1 Gbps.',
+    kind: 'number',
+    unit: 'bps',
+    defaultOperator: 'lt',
+    defaultValue: 1000000000,
+  },
+  {
+    field: 'interfaceOperStatus',
+    title: 'Estado atual da interface (SNMP)',
+    hint: 'Situação da interface na última coleta, independentemente de ter mudado.',
+    kind: 'enum',
+    options: [
+      { value: 'up', title: 'Operando (up)' },
+      { value: 'down', title: 'Inativa (down)' },
+    ],
+    defaultOperator: 'eq',
+    defaultValue: 'down',
+  },
+  {
+    field: 'interfaceName',
+    title: 'Nome da interface',
+    hint: 'Restringe a regra a interfaces específicas. Ex.: contiver "uplink" ou "wan".',
+    kind: 'text',
+    defaultOperator: 'contains',
+    defaultValue: '',
+  },
 ]
 
 interface OperatorOption {
@@ -146,14 +199,19 @@ export const ALERT_OPERATORS: OperatorOption[] = [
     phrase: 'for menor ou igual a',
     kinds: ['number'],
   },
-  { value: 'eq', title: 'For igual a', phrase: 'for igual a', kinds: ['number', 'enum'] },
+  { value: 'eq', title: 'For igual a', phrase: 'for igual a', kinds: ['number', 'enum', 'text'] },
   {
     value: 'neq',
     title: 'For diferente de',
     phrase: 'for diferente de',
-    kinds: ['number', 'enum'],
+    kinds: ['number', 'enum', 'text'],
   },
-  { value: 'contains', title: 'Contiver o texto', phrase: 'contiver o texto', kinds: ['enum'] },
+  {
+    value: 'contains',
+    title: 'Contiver o texto',
+    phrase: 'contiver o texto',
+    kinds: ['enum', 'text'],
+  },
 ]
 
 export const ALERT_SEVERITIES = [

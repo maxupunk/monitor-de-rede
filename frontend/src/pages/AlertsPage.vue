@@ -17,6 +17,14 @@
           <v-icon start size="12">mdi-circle</v-icon>
           {{ eventsStore.isConnected ? 'Atualizando em tempo real' : 'Reconectando...' }}
         </v-chip>
+        <v-btn
+          color="primary"
+          variant="tonal"
+          prepend-icon="mdi-playlist-check"
+          @click="catalogDialog = true"
+        >
+          Regras Pré-configuradas
+        </v-btn>
         <v-btn color="primary" prepend-icon="mdi-plus" @click="openRuleDialog()">
           Nova Regra de Alerta
         </v-btn>
@@ -83,12 +91,42 @@
 
           <!-- Regras Configuradas -->
           <v-window-item value="rules">
+            <v-alert
+              v-if="!alertsStore.loading && alertsStore.alertRules.length === 0"
+              type="info"
+              variant="tonal"
+              density="comfortable"
+              class="mb-4"
+            >
+              Nenhuma regra configurada. Comece pelas
+              <a
+                class="font-weight-bold text-primary"
+                href="#"
+                @click.prevent="catalogDialog = true"
+              >regras pré-configuradas</a
+              >
+              para cobrir indisponibilidade, latência, perda de pacotes e quedas de interface.
+            </v-alert>
+
             <v-data-table
               :headers="rulesHeaders"
               :items="alertsStore.alertRules"
               :loading="alertsStore.loading"
               no-data-text="Nenhuma regra configurada"
             >
+              <template #item.name="{ item }">
+                <div class="d-flex align-center ga-2">
+                  <span>{{ item.name }}</span>
+                  <v-tooltip v-if="item.templateKey" text="Criada a partir do catálogo de regras">
+                    <template #activator="{ props: tooltipProps }">
+                      <v-icon v-bind="tooltipProps" size="16" color="primary">
+                        mdi-playlist-check
+                      </v-icon>
+                    </template>
+                  </v-tooltip>
+                </div>
+              </template>
+
               <template #item.metric="{ item }">
                 {{ metricLabel(item.condition?.field) }}
               </template>
@@ -143,6 +181,13 @@
         </v-window>
       </v-card-text>
     </v-card>
+
+    <!-- Modal Regras Pré-configuradas -->
+    <AlertRuleCatalogDialog v-model="catalogDialog" @applied="onCatalogApplied" />
+
+    <v-snackbar v-model="feedback.visible" :color="feedback.color" timeout="5000">
+      {{ feedback.message }}
+    </v-snackbar>
 
     <!-- Modal Silenciar Alerta -->
     <v-dialog v-model="silenceDialog" max-width="400">
@@ -225,6 +270,13 @@
                   variant="outlined"
                 ></v-select>
                 <v-text-field
+                  v-else-if="selectedMetric?.kind === 'text'"
+                  v-model="form.value"
+                  label="Valor de referência"
+                  placeholder="Ex.: uplink"
+                  variant="outlined"
+                ></v-text-field>
+                <v-text-field
                   v-else
                   v-model.number="form.value"
                   label="Valor de referência"
@@ -278,6 +330,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useAlertsStore, type AlertRule } from '@/stores/alerts'
 import { useEventsStore } from '@/stores/events'
+import AlertRuleCatalogDialog from '@/components/AlertRuleCatalogDialog.vue'
 import {
   ALERT_METRICS,
   ALERT_DURATIONS,
@@ -298,6 +351,8 @@ const alertsStore = useAlertsStore()
 const eventsStore = useEventsStore()
 
 const tab = ref('active')
+const catalogDialog = ref(false)
+const feedback = reactive({ visible: false, message: '', color: 'success' })
 const silenceDialog = ref(false)
 const silenceTargetId = ref<number | null>(null)
 const silenceDuration = ref(60)
@@ -348,6 +403,25 @@ onMounted(() => {
   alertsStore.fetchActiveAlerts()
   alertsStore.fetchAlertRules()
 })
+
+function notify(message: string, color = 'success') {
+  feedback.message = message
+  feedback.color = color
+  feedback.visible = true
+}
+
+function onCatalogApplied(summary: { created: number; skipped: number }) {
+  tab.value = 'rules'
+
+  if (summary.created === 0) {
+    notify('Nenhuma regra nova: as selecionadas já estavam configuradas.', 'info')
+    return
+  }
+
+  const skippedNote =
+    summary.skipped > 0 ? ` (${summary.skipped} já existia${summary.skipped > 1 ? 'm' : ''})` : ''
+  notify(`${summary.created} regra(s) adicionada(s)${skippedNote}.`)
+}
 
 function durationLabel(seconds?: number): string {
   return ALERT_DURATIONS.find((d) => d.value === (seconds ?? 0))?.title ?? `${seconds}s`

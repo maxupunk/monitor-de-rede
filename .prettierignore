@@ -1,3 +1,9 @@
 .adonisjs
 node_modules
 build
+
+# Artefatos gerados: bundle do frontend (tem toolchain própria) e schema do Lucid
+frontend/dist
+frontend/dev-dist
+database/schema.ts
+tmp

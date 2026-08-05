@@ -71,10 +71,7 @@ export class SnmpChecker {
 
     // Atualização de métricas do dispositivo em segundo plano (se o dispositivo existir cadastrado)
     try {
-      const device = await Device.query()
-        .where('ipAddress', host)
-        .orWhere('name', host)
-        .first()
+      const device = await Device.query().where('ipAddress', host).orWhere('name', host).first()
 
       if (device && device.snmpEnabled) {
         await this.snmpService.pollDevice(device, { host, version, community, port, timeoutMs })
@@ -132,9 +129,9 @@ export class SnmpChecker {
           message,
           data: {
             ifIndex: config.ifIndex,
-            adminStatusCode: isNaN(adminStatusVal) ? null : adminStatusVal,
+            adminStatusCode: Number.isNaN(adminStatusVal) ? null : adminStatusVal,
             adminStatusText: adminLabel,
-            operStatusCode: isNaN(operStatusVal) ? null : operStatusVal,
+            operStatusCode: Number.isNaN(operStatusVal) ? null : operStatusVal,
             operStatusText: operLabel,
             speedBps: effectiveSpeedBps > 0 ? effectiveSpeedBps : null,
             speedFormatted,
@@ -142,7 +139,7 @@ export class SnmpChecker {
           metrics: [
             {
               name: 'if_oper_status',
-              value: isNaN(operStatusVal) ? 0 : operStatusVal,
+              value: Number.isNaN(operStatusVal) ? 0 : operStatusVal,
               unit: 'status',
             },
             {

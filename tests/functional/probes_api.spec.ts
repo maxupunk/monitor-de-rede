@@ -14,7 +14,10 @@ test.group('Probes API - Functional Tests', (group) => {
   const rawToken = 'secret-test-token-123'
   const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex')
 
-  test('POST /api/probes/heartbeat deve atualizar o status do probe para online', async ({ client, assert }) => {
+  test('POST /api/probes/heartbeat deve atualizar o status do probe para online', async ({
+    client,
+    assert,
+  }) => {
     const probe = await Probe.create({
       name: 'Probe Remoto 1',
       tokenHash,
@@ -38,7 +41,10 @@ test.group('Probes API - Functional Tests', (group) => {
     assert.equal(probe.version, '1.2.0')
   })
 
-  test('GET /api/probes/tasks deve retornar as tarefas pendentes para o probe', async ({ client, assert }) => {
+  test('GET /api/probes/tasks deve retornar as tarefas pendentes para o probe', async ({
+    client,
+    assert,
+  }) => {
     const probe = await Probe.create({
       name: 'Probe Remoto 2',
       tokenHash,
@@ -54,9 +60,7 @@ test.group('Probes API - Functional Tests', (group) => {
       payload: { host: '127.0.0.1' },
     })
 
-    const response = await client
-      .get('/api/probes/tasks')
-      .header('x-probe-token', rawToken)
+    const response = await client.get('/api/probes/tasks').header('x-probe-token', rawToken)
 
     response.assertStatus(200)
     assert.isArray(response.body().tasks)
@@ -64,7 +68,10 @@ test.group('Probes API - Functional Tests', (group) => {
     assert.equal(response.body().tasks[0].id, 'task-test-1')
   })
 
-  test('POST /api/probes/results deve gravar os resultados do monitor enviado pelo probe', async ({ client, assert }) => {
+  test('POST /api/probes/results deve gravar os resultados do monitor enviado pelo probe', async ({
+    client,
+    assert,
+  }) => {
     const probe = await Probe.create({
       name: 'Probe Remoto 3',
       tokenHash,
@@ -127,7 +134,10 @@ test.group('Probes API - Functional Tests', (group) => {
     assert.equal(dbResult?.probeId, probe.id)
   })
 
-  test('POST /api/probes/:id/revoke deve revogar o probe e barrar acessos futuros', async ({ client, assert }) => {
+  test('POST /api/probes/:id/revoke deve revogar o probe e barrar acessos futuros', async ({
+    client,
+    assert,
+  }) => {
     const probe = await Probe.create({
       name: 'Probe Cancelado',
       tokenHash,

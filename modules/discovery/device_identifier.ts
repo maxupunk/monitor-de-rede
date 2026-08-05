@@ -5,7 +5,12 @@ export class DeviceIdentifier {
     const hostname = (host.hostname || host.mdnsName || '').toLowerCase()
     const ports = host.openPorts || []
 
-    if (hostname.includes('router') || hostname.includes('gateway') || hostname.includes('mikrotik') || ports.includes(8291)) {
+    if (
+      hostname.includes('router') ||
+      hostname.includes('gateway') ||
+      hostname.includes('mikrotik') ||
+      ports.includes(8291)
+    ) {
       return 'router'
     }
     if (hostname.includes('switch')) {
@@ -14,13 +19,23 @@ export class DeviceIdentifier {
     if (hostname.includes('ap') || hostname.includes('accesspoint') || hostname.includes('unifi')) {
       return 'access_point'
     }
-    if (hostname.includes('print') || hostname.includes('epson') || hostname.includes('hp') || ports.includes(9100)) {
+    if (
+      hostname.includes('print') ||
+      hostname.includes('epson') ||
+      hostname.includes('hp') ||
+      ports.includes(9100)
+    ) {
       return 'printer'
     }
     if (hostname.includes('camera') || hostname.includes('cam') || ports.includes(554)) {
       return 'camera'
     }
-    if (hostname.includes('server') || hostname.includes('nas') || ports.includes(445) || ports.includes(22)) {
+    if (
+      hostname.includes('server') ||
+      hostname.includes('nas') ||
+      ports.includes(445) ||
+      ports.includes(22)
+    ) {
       return 'server'
     }
     if (ports.includes(80) || ports.includes(443)) {

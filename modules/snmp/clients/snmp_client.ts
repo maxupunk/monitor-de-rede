@@ -209,6 +209,10 @@ export class SnmpClient {
       // Verificar se é uma string ASCII/UTF-8 válida sem caracteres nulos ou controle
       if (!value.includes(0x00)) {
         const str = value.toString('utf-8')
+        // Os caracteres de controle no padrão são intencionais: tab, LF e CR são
+        // os únicos aceitáveis numa string SNMP legível; os demais indicam
+        // payload binário e devem cair no tratamento hexadecimal abaixo.
+        // eslint-disable-next-line no-control-regex
         if (!str.includes('\uFFFD') && /^[\x09\x0A\x0D\x20-\x7E\u00A0-\uFFFF]*$/.test(str)) {
           return str.trim()
         }

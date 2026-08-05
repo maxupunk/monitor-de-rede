@@ -38,8 +38,8 @@ export class MemoryCollector {
 
     const result: SnmpMemoryInfo = { totalKb, availKb, freeKb }
 
-    const available = availKb !== undefined && !isNaN(availKb) ? availKb : freeKb
-    if (totalKb && totalKb > 0 && available !== undefined && !isNaN(available)) {
+    const available = availKb !== undefined && !Number.isNaN(availKb) ? availKb : freeKb
+    if (totalKb && totalKb > 0 && available !== undefined && !Number.isNaN(available)) {
       result.usedKb = Math.max(0, totalKb - available)
       result.usedPercent = Math.round((result.usedKb / totalKb) * 100)
     }

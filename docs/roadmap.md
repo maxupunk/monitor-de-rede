@@ -18,7 +18,7 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
 | **Comunicação com Probes** | 🟢 **Concluído** | Autenticação por token Hash (SHA-256), registro via CLI (`probe:register`), heartbeat, despachante de tarefas e buffer offline com reenvio automático. |
 | **SNMP & Métricas de Tráfego** | 🟢 **Concluído** | Coleta SNMP (v1/v2c/v3), varredura de interfaces, contadores de octetos (ifHCIn/ifHCOut) e métricas de tráfego (bps). |
 | **Topologia de Rede** | 🟢 **Concluído** | Resolutor de links (`DeviceLink`), pontuação de confiança (`ConfidenceCalculator`), inferência de sub-rede e gerador do mapa gráfico. |
-| **Alertas & Notificações** | 🟢 **Concluído** | Avaliação de regras em tempo real (`AlertManager`), ciclo de vida (ativo, reconhecido, silenciado, resolvido) e conectores (E-mail, Telegram, Discord, Webhook). |
+| **Alertas & Notificações** | 🟢 **Concluído** | Avaliação de regras em tempo real (`AlertManager`), catálogo de regras pré-configuradas com aplicação idempotente (`AlertRuleCatalogService`), ciclo de vida (ativo, reconhecido, silenciado, resolvido) e conectores (E-mail, Telegram, Discord, Webhook). |
 | **Eventos Tempo Real (SSE)** | 🟢 **Concluído** | Barramento `EventBus` singleton e streaming em `/api/events/stream` via SSE funcional. |
 | **Frontend (Vue 3 + Vuetify)** | 🟢 **Concluído** | SPA/PWA completa integrada à API REST AdonisJS v6, com Pinia, gráficos, topologia gráfica interativa e suporte a SSE em tempo real. |
 | **Infraestrutura Docker** | 🟢 **Concluído** | `docker-compose.yml` e `Dockerfile` configurados para todos os serviços (API, Worker, Scheduler, Probe, Postgres, Redis, Frontend). |
@@ -100,6 +100,12 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
 - [x] **Serviço de Alertas (`rule_evaluator.ts` & `AlertManager`)**:
   - [x] Regras para dispositivo offline, latência alta, falha em serviço HTTP/TCP.
   - [x] Controle de tempo mínimo, janela de silêncio (`SilenceManager`) e recuperação automática (`RecoveryManager`).
+  - [x] Avaliação genérica por contexto (`AlertEvaluationContext`): qualquer produtor de fatos — resultado de monitor ou coleta SNMP de interfaces — é avaliado pelo mesmo motor, com deduplicação e normalização por `scopeKey`.
+- [x] **Catálogo de Regras Pré-configuradas (`AlertRuleCatalogService`)**:
+  - [x] Templates versionados em código (`alert_rule_templates.ts`) cobrindo disponibilidade, desempenho, serviços, interfaces e equipamento.
+  - [x] Provisionamento automático do conjunto básico em instalações novas (`start/alert_rules.ts`), sem ressuscitar regras removidas de propósito.
+  - [x] Aplicação idempotente via `GET/POST /api/alert-rules/catalog` e diálogo de seleção na Central de Alertas — regra já existente (por template ou por condição equivalente) nunca é duplicada.
+  - [x] Políticas antes fixas no código (queda de interface e downgrade de negociação Ethernet) migradas para o catálogo, ajustáveis pelo operador.
 - [x] **Canais de Notificação**:
   - [x] Conector de E-mail (`EmailChannel`).
   - [x] Conector de Telegram Bot API (`TelegramChannel`).

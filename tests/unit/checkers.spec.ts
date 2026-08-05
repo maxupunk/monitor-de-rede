@@ -16,7 +16,9 @@ test.group('Checkers de Monitoramento - Unit Tests', () => {
     assert.isArray(result.metrics)
   })
 
-  test('HttpChecker deve executar requisição HTTP e medir o tempo de resposta', async ({ assert }) => {
+  test('HttpChecker deve executar requisição HTTP e medir o tempo de resposta', async ({
+    assert,
+  }) => {
     const checker = new HttpChecker()
     const result = await checker.execute({
       url: 'http://127.0.0.1:3333/',
@@ -53,13 +55,23 @@ test.group('Checkers de Monitoramento - Unit Tests', () => {
     assert.isNumber(result.durationMs)
   })
 
-  test('MonitorRunner deve despachar para o checker correto baseado no tipo', async ({ assert }) => {
+  test('MonitorRunner deve despachar para o checker correto baseado no tipo', async ({
+    assert,
+  }) => {
     const runner = new MonitorRunner()
 
-    const pingResult = await runner.runMonitor('ping', { host: '127.0.0.1', packetCount: 1, timeoutMs: 500 })
+    const pingResult = await runner.runMonitor('ping', {
+      host: '127.0.0.1',
+      packetCount: 1,
+      timeoutMs: 500,
+    })
     assert.exists(pingResult.startedAt)
 
-    const tcpResult = await runner.runMonitor('tcp', { host: '127.0.0.1', port: 3333, timeoutMs: 500 })
+    const tcpResult = await runner.runMonitor('tcp', {
+      host: '127.0.0.1',
+      port: 3333,
+      timeoutMs: 500,
+    })
     assert.exists(tcpResult.startedAt)
 
     await assert.rejects(async () => {

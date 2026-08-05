@@ -6,7 +6,10 @@ import Monitor from '#models/monitor'
 
 export default class DiscoveryController {
   async runs({ response }: HttpContext) {
-    const runs = await DiscoveryRun.query().preload('network').preload('probe').orderBy('id', 'desc')
+    const runs = await DiscoveryRun.query()
+      .preload('network')
+      .preload('probe')
+      .orderBy('id', 'desc')
     return response.ok(runs)
   }
 

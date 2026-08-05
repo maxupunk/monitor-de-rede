@@ -13,12 +13,18 @@ export class ArpScanner {
       const lines = stdout.split('\n')
 
       for (const line of lines) {
-        const ipMacMatch = line.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+([0-9a-fA-F:-]{11,17})/)
+        const ipMacMatch = line.match(
+          /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+([0-9a-fA-F:-]{11,17})/
+        )
         if (ipMacMatch) {
           const ipAddress = ipMacMatch[1]
           let macAddress = ipMacMatch[2].toUpperCase().replace(/-/g, ':')
 
-          if (macAddress !== 'FF:FF:FF:FF:FF:FF' && !macAddress.startsWith('224.') && !ipAddress.startsWith('224.')) {
+          if (
+            macAddress !== 'FF:FF:FF:FF:FF:FF' &&
+            !macAddress.startsWith('224.') &&
+            !ipAddress.startsWith('224.')
+          ) {
             discovered.push({
               ipAddress,
               macAddress,

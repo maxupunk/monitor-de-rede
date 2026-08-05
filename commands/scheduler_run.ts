@@ -69,7 +69,9 @@ export default class SchedulerRun extends BaseCommand {
       return
     }
 
-    this.logger.info(`Scheduler encontrou ${dueMonitors.length} monitor(es) vencidos para execução.`)
+    this.logger.info(
+      `Scheduler encontrou ${dueMonitors.length} monitor(es) vencidos para execução.`
+    )
 
     for (const monitor of dueMonitors) {
       const nextRun = now.plus({ seconds: monitor.intervalSeconds || 60 })
@@ -94,7 +96,9 @@ export default class SchedulerRun extends BaseCommand {
           payload: monitor.configuration,
         })
       } else {
-        this.logger.info(`[Scheduler] Executando monitor #${monitor.id} (${monitor.type}) - ${monitor.name}`)
+        this.logger.info(
+          `[Scheduler] Executando monitor #${monitor.id} (${monitor.type}) - ${monitor.name}`
+        )
         const result = await this.monitorRunner.runMonitor(monitor.type, monitor.configuration)
         await this.resultProcessor.processResult(monitor.id, result, monitor.probeId)
         this.logger.info(`[Scheduler] Monitor #${monitor.id} finalizado: status=${result.status}`)

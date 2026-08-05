@@ -52,10 +52,10 @@ export class TrafficCollector {
     for (const entry of entries) {
       const parts = entry.oid.split('.')
       if (parts.length < 2) continue
-      const index = parseInt(parts[parts.length - 1], 10)
-      const column = parseInt(parts[parts.length - 2], 10)
+      const index = Number.parseInt(parts[parts.length - 1], 10)
+      const column = Number.parseInt(parts[parts.length - 2], 10)
 
-      if (isNaN(index) || isNaN(column)) continue
+      if (Number.isNaN(index) || Number.isNaN(column)) continue
 
       const item = getOrCreate(index)
 
@@ -79,10 +79,10 @@ export class TrafficCollector {
     for (const entry of xEntries) {
       const parts = entry.oid.split('.')
       if (parts.length < 2) continue
-      const index = parseInt(parts[parts.length - 1], 10)
-      const column = parseInt(parts[parts.length - 2], 10)
+      const index = Number.parseInt(parts[parts.length - 1], 10)
+      const column = Number.parseInt(parts[parts.length - 2], 10)
 
-      if (isNaN(index) || isNaN(column)) continue
+      if (Number.isNaN(index) || Number.isNaN(column)) continue
 
       const item = getOrCreate(index)
 
@@ -107,7 +107,10 @@ export class TrafficCollector {
     return Array.from(map.values())
   }
 
-  public calculateRates(previous: InterfaceTraffic, current: InterfaceTraffic): { inBps: number; outBps: number } {
+  public calculateRates(
+    previous: InterfaceTraffic,
+    current: InterfaceTraffic
+  ): { inBps: number; outBps: number } {
     const timeDeltaSec = (current.recordedAt.getTime() - previous.recordedAt.getTime()) / 1000.0
     if (timeDeltaSec <= 0) {
       return { inBps: 0, outBps: 0 }

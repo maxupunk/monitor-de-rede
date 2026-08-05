@@ -8,7 +8,7 @@ test.group('Sites API - Functional Tests', (group) => {
   test('GET /api/sites deve retornar lista de sites cadastrados', async ({ client, assert }) => {
     await Site.create({ name: 'Matriz SP', description: 'Escritório Central', active: true })
 
-    const response = await client.get('/api/sites')
+    const response = await client.visit('sites.index')
 
     response.assertStatus(200)
     assert.isArray(response.body())
@@ -17,7 +17,7 @@ test.group('Sites API - Functional Tests', (group) => {
   })
 
   test('POST /api/sites deve criar um novo site com sucesso', async ({ client, assert }) => {
-    const response = await client.post('/api/sites').json({
+    const response = await client.visit('sites.store').json({
       name: 'Filial RJ',
       description: 'Unidade Comercial',
       location: 'Rio de Janeiro - RJ',
@@ -36,7 +36,7 @@ test.group('Sites API - Functional Tests', (group) => {
   test('PUT /api/sites/:id deve atualizar os dados de um site', async ({ client, assert }) => {
     const site = await Site.create({ name: 'Site Antigo', active: true })
 
-    const response = await client.put(`/api/sites/${site.id}`).json({
+    const response = await client.visit('sites.update', { id: site.id }).json({
       name: 'Site Atualizado',
       description: 'Descrição nova',
       active: false,
@@ -52,7 +52,7 @@ test.group('Sites API - Functional Tests', (group) => {
   test('DELETE /api/sites/:id deve remover um site', async ({ client, assert }) => {
     const site = await Site.create({ name: 'Site Deletar', active: true })
 
-    const response = await client.delete(`/api/sites/${site.id}`)
+    const response = await client.visit('sites.destroy', { id: site.id })
 
     response.assertStatus(204) // 204 No Content
 

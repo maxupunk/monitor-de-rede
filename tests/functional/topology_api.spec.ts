@@ -9,8 +9,18 @@ test.group('Topology & SNMP API - Functional Tests', (group) => {
 
   test('GET /api/topology deve retornar o grafo de nós e arestas', async ({ client, assert }) => {
     const site = await Site.create({ name: 'Datacenter SP', active: true })
-    const dev1 = await Device.create({ siteId: site.id, name: 'R1-Core', type: 'router', status: 'online' })
-    const dev2 = await Device.create({ siteId: site.id, name: 'SW1-Access', type: 'switch', status: 'online' })
+    const dev1 = await Device.create({
+      siteId: site.id,
+      name: 'R1-Core',
+      type: 'router',
+      status: 'online',
+    })
+    const dev2 = await Device.create({
+      siteId: site.id,
+      name: 'SW1-Access',
+      type: 'switch',
+      status: 'online',
+    })
 
     await DeviceLink.create({
       sourceDeviceId: dev1.id,
@@ -30,10 +40,23 @@ test.group('Topology & SNMP API - Functional Tests', (group) => {
     assert.lengthOf(response.body().edges, 1)
   })
 
-  test('POST /api/topology/links deve criar uma nova ligação manual', async ({ client, assert }) => {
+  test('POST /api/topology/links deve criar uma nova ligação manual', async ({
+    client,
+    assert,
+  }) => {
     const site = await Site.create({ name: 'Matriz', active: true })
-    const dev1 = await Device.create({ siteId: site.id, name: 'Router-A', type: 'router', status: 'online' })
-    const dev2 = await Device.create({ siteId: site.id, name: 'Router-B', type: 'router', status: 'online' })
+    const dev1 = await Device.create({
+      siteId: site.id,
+      name: 'Router-A',
+      type: 'router',
+      status: 'online',
+    })
+    const dev2 = await Device.create({
+      siteId: site.id,
+      name: 'Router-B',
+      type: 'router',
+      status: 'online',
+    })
 
     const response = await client.post('/api/topology/links').json({
       source_device_id: dev1.id,
@@ -49,10 +72,23 @@ test.group('Topology & SNMP API - Functional Tests', (group) => {
     assert.exists(dbLink)
   })
 
-  test('DELETE /api/topology/links/:id deve remover uma ligação existente', async ({ client, assert }) => {
+  test('DELETE /api/topology/links/:id deve remover uma ligação existente', async ({
+    client,
+    assert,
+  }) => {
     const site = await Site.create({ name: 'Filial', active: true })
-    const dev1 = await Device.create({ siteId: site.id, name: 'Dev-1', type: 'generic', status: 'online' })
-    const dev2 = await Device.create({ siteId: site.id, name: 'Dev-2', type: 'generic', status: 'online' })
+    const dev1 = await Device.create({
+      siteId: site.id,
+      name: 'Dev-1',
+      type: 'generic',
+      status: 'online',
+    })
+    const dev2 = await Device.create({
+      siteId: site.id,
+      name: 'Dev-2',
+      type: 'generic',
+      status: 'online',
+    })
 
     const link = await DeviceLink.create({
       sourceDeviceId: dev1.id,
@@ -70,23 +106,24 @@ test.group('Topology & SNMP API - Functional Tests', (group) => {
     assert.isNull(deleted)
   })
 
-  test('POST /api/topology/recalculate deve executar a inferência e retornar contagem', async ({ client, assert }) => {
+  test('POST /api/topology/recalculate deve executar a inferência e retornar contagem', async ({
+    client,
+    assert,
+  }) => {
     const response = await client.post('/api/topology/recalculate')
 
     response.assertStatus(200)
     assert.exists(response.body().inferredCount)
   })
 
-  test(
-    'POST /api/devices/:id/snmp/poll deve retornar 404 para dispositivo inexistente',
-    async ({ client }) => {
-      const response = await client.post('/api/devices/999999/snmp/poll').json({
-        community: 'public',
-        version: 'v2c',
-      })
+  test('POST /api/devices/:id/snmp/poll deve retornar 404 para dispositivo inexistente', async ({
+    client,
+  }) => {
+    const response = await client.post('/api/devices/999999/snmp/poll').json({
+      community: 'public',
+      version: 'v2c',
+    })
 
-      response.assertStatus(404)
-    }
-  )
+    response.assertStatus(404)
+  })
 })
-

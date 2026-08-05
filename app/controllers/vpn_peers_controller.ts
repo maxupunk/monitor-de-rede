@@ -1,10 +1,35 @@
 import type { HttpContext } from '@adonisjs/core/http'
 import QRCode from 'qrcode'
+import type VpnPeer from '#models/vpn_peer'
+import type { VpnDeviceProfile, VpnPeerConnectionStatus } from '#models/vpn_peer'
 import { VpnPeerService } from '#modules/vpn/vpn_peer_service'
 import { VpnServerService } from '#modules/vpn/vpn_server_service'
 import { IpAllocator } from '#modules/vpn/ip_allocator'
 import { profileRegistry } from '#modules/vpn/profiles/profile_registry'
 import { sensitiveEndpointLimiter, vpnAuditLogger } from '#modules/vpn/access_control'
+
+/**
+ * Contrato de resposta de um peer.
+ *
+ * Declarado campo a campo em vez de espalhar `peer.serialize()`: além de tornar
+ * a resposta verificável pelo TypeScript, garante que material sensível — a
+ * chave pré-compartilhada — não escape por descuido em nenhuma rota.
+ */
+export interface SerializedVpnPeer {
+  id: number
+  vpnServerId: number
+  deviceId: number
+  publicKey: string
+  deviceProfile: VpnDeviceProfile
+  persistentKeepalive: number
+  lastHandshakeAt: string | null
+  bytesRx: number
+  bytesTx: number
+  enabled: boolean
+  createdAt: string | null
+  updatedAt: string | null
+  connectionStatus: VpnPeerConnectionStatus
+}
 
 /**
  * Peers da VPN: listagem com telemetria, wizard de criação, artefatos de
@@ -14,6 +39,25 @@ export default class VpnPeersController {
   private peerService = new VpnPeerService()
   private serverService = new VpnServerService()
   private ipAllocator = new IpAllocator()
+
+  /** Ponto único de serialização do peer — usado por listagem, criação e rotação. */
+  private serializePeer(peer: VpnPeer): SerializedVpnPeer {
+    return {
+      id: peer.id,
+      vpnServerId: peer.vpnServerId,
+      deviceId: peer.deviceId,
+      publicKey: peer.publicKey,
+      deviceProfile: peer.deviceProfile,
+      persistentKeepalive: peer.persistentKeepalive,
+      lastHandshakeAt: peer.lastHandshakeAt?.toISO() ?? null,
+      bytesRx: peer.bytesRx,
+      bytesTx: peer.bytesTx,
+      enabled: peer.enabled,
+      createdAt: peer.createdAt?.toISO() ?? null,
+      updatedAt: peer.updatedAt?.toISO() ?? null,
+      connectionStatus: peer.connectionStatus,
+    }
+  }
 
   /** Identidade usada em rate limit e auditoria dos endpoints sensíveis. */
   private requesterId(ctx: HttpContext): string {
@@ -53,8 +97,7 @@ export default class VpnPeersController {
 
     return response.ok(
       items.map(({ peer, needsFirewallHint, pingMonitorId }) => ({
-        ...peer.serialize(),
-        connectionStatus: peer.connectionStatus,
+        ...this.serializePeer(peer),
         needsFirewallHint,
         pingMonitorId,
         device: peer.device?.serialize() ?? null,
@@ -103,7 +146,7 @@ export default class VpnPeersController {
       this.audit(ctx, 'peer_created', peer.id, { profile: peer.deviceProfile })
 
       return response.created({
-        peer: { ...peer.serialize(), connectionStatus: peer.connectionStatus },
+        peer: this.serializePeer(peer),
         device: peer.device?.serialize() ?? null,
         artifact,
       })
@@ -155,7 +198,7 @@ export default class VpnPeersController {
 
       return response.ok({
         message: 'Novo par de chaves gerado. A configuração anterior foi invalidada.',
-        peer: { ...peer.serialize(), connectionStatus: peer.connectionStatus },
+        peer: this.serializePeer(peer),
         artifact,
       })
     } catch (error: unknown) {

@@ -23,11 +23,17 @@ export class ResultProcessor {
   private deviceStatusService = new DeviceStatusService()
   private eventBus = EventBus.getInstance()
 
-  async processResult(monitorId: number, result: CheckResult, probeId?: number | null): Promise<void> {
+  async processResult(
+    monitorId: number,
+    result: CheckResult,
+    probeId?: number | null
+  ): Promise<void> {
     const monitor = await Monitor.find(monitorId)
     if (!monitor) return
 
-    const latencyMetric = result.metrics?.find((m) => m.name === 'latency' || m.name === 'response_time')
+    const latencyMetric = result.metrics?.find(
+      (m) => m.name === 'latency' || m.name === 'response_time'
+    )
 
     const parseDate = (val: unknown): DateTime => {
       if (val instanceof Date) return DateTime.fromJSDate(val)

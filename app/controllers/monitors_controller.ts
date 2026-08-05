@@ -164,14 +164,18 @@ export default class MonitorsController {
       .map((r) => r.latencyMs)
       .filter((l): l is number => l !== null && l !== undefined)
 
-    const avgLatency = latencies.length > 0 ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length) : null
+    const avgLatency =
+      latencies.length > 0
+        ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length)
+        : null
     const minLatency = latencies.length > 0 ? Math.min(...latencies) : null
     const maxLatency = latencies.length > 0 ? Math.max(...latencies) : null
     const lastLatency = latencies.length > 0 ? latencies[0] : null
 
     const totalChecks = results.length
     const upChecks = results.filter((r) => r.status === 'up').length
-    const uptimePercentage = totalChecks > 0 ? Number(((upChecks / totalChecks) * 100).toFixed(1)) : 100
+    const uptimePercentage =
+      totalChecks > 0 ? Number(((upChecks / totalChecks) * 100).toFixed(1)) : 100
 
     const gaugeMetrics = await this.fetchLatestGaugeMetrics([monitor])
 

@@ -7,7 +7,13 @@ export default class extends BaseSchema {
     this.schema.alterTable(this.tableName, (table) => {
       table.integer('site_id').nullable().alter()
       table.string('ip_address').nullable()
-      table.integer('parent_id').unsigned().references('id').inTable('devices').onDelete('SET NULL').nullable()
+      table
+        .integer('parent_id')
+        .unsigned()
+        .references('id')
+        .inTable('devices')
+        .onDelete('SET NULL')
+        .nullable()
       table.boolean('is_monitored').defaultTo(false)
       table.boolean('snmp_enabled').defaultTo(false)
       table.string('snmp_community').nullable()

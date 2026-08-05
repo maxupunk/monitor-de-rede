@@ -1,50 +1,31 @@
-import { DateTime } from 'luxon'
-import Device from '#models/device'
-import DeviceInterface from '#models/device_interface'
-import AlertEvent from '#models/alert_event'
-import { NotificationService } from '#modules/notifications/notification_service'
+import type Device from '#models/device'
+import type DeviceInterface from '#models/device_interface'
+import { AlertManager } from '#modules/alerts/alert_manager'
+import { AlertScopeKey } from '#modules/alerts/contracts/alert_evaluation'
+import { ALERT_FIELDS } from '#modules/alerts/alert_fields'
+import {
+  buildInterfaceStateDataset,
+  describeInterfaceState,
+  hasInterfaceTransition,
+  isInterfaceRecovery,
+} from '#modules/alerts/datasets/interface_state_dataset'
 import { EventBus } from '#modules/events/event_bus'
+import { formatSpeed, normalizeSpeed } from './link_speed.js'
+
+// Reexportados por compatibilidade: `link_speed.ts` é a origem das funções.
+export { formatSpeed, normalizeSpeed }
 
 /**
- * `ifSpeed` é um contador de 32 bits: agentes que não expõem `ifHighSpeed`
- * devolvem o teto (4.294.967.295) para links acima de ~4,29 Gbps. Tratar esse
- * valor como velocidade real produzia falso downgrade/upgrade sempre que a
- * leitura alternava entre o teto e o valor verdadeiro.
+ * Observa o estado das interfaces coletadas via SNMP.
+ *
+ * O serviço não decide mais o que é alerta: ele publica os fatos no feed em
+ * tempo real e entrega o mesmo conjunto ao motor de alertas. Políticas como
+ * "downgrade de negociação é um aviso" agora vivem em "Regras Configuradas"
+ * (catálogo `interface_speed_downgrade`), podendo ser ajustadas ou desligadas
+ * pelo operador sem alterar código.
  */
-const IF_SPEED_SATURATED = 4_294_967_295
-
-/** Converte a leitura crua em bps utilizável, ou `null` quando não é conclusiva. */
-export function normalizeSpeed(bps: number | string | null | undefined): number | null {
-  if (bps === null || bps === undefined) return null
-
-  const value = Number(bps)
-  if (!Number.isFinite(value) || value <= 0) return null
-  if (value >= IF_SPEED_SATURATED) return null
-
-  return value
-}
-
-export function formatSpeed(bps: number | null | undefined): string {
-  if (bps === null || bps === undefined || isNaN(bps) || bps <= 0) {
-    return 'Desconhecido'
-  }
-  if (bps >= 1_000_000_000) {
-    const gbps = bps / 1_000_000_000
-    return `${Number.isInteger(gbps) ? gbps : gbps.toFixed(1)} Gbps`
-  }
-  if (bps >= 1_000_000) {
-    const mbps = bps / 1_000_000
-    return `${Number.isInteger(mbps) ? mbps : mbps.toFixed(1)} Mbps`
-  }
-  if (bps >= 1_000) {
-    const kbps = bps / 1_000
-    return `${Number.isInteger(kbps) ? kbps : kbps.toFixed(1)} Kbps`
-  }
-  return `${bps} bps`
-}
-
 export class InterfaceMonitoringService {
-  private notificationService = new NotificationService()
+  private alertManager = new AlertManager()
   private eventBus = EventBus.getInstance()
 
   async evaluateInterfaceState(
@@ -53,145 +34,71 @@ export class InterfaceMonitoringService {
     previousOperStatus: string | null,
     previousSpeed: number | null
   ): Promise<void> {
-    const currentOperStatus = iface.operStatus
-    const currentSpeed = iface.speed
+    const dataset = buildInterfaceStateDataset(iface, previousOperStatus, previousSpeed)
+    const message = describeInterfaceState(dataset)
 
-    // 1. Verificação de alteração de status operacional (UP <-> DOWN)
-    if (previousOperStatus !== null && currentOperStatus && currentOperStatus !== previousOperStatus) {
-      const isDown = currentOperStatus === 'down'
-      const message = `Interface ${iface.name} alterou status: ${previousOperStatus.toUpperCase()} ➔ ${currentOperStatus.toUpperCase()}`
-
-      const alertEvent = await AlertEvent.create({
-        deviceId: device.id,
-        alertRuleId: null,
-        monitorId: null,
-        status: isDown ? 'active' : 'resolved',
-        severity: isDown ? 'warning' : 'info',
-        startedAt: DateTime.now(),
-        resolvedAt: isDown ? null : DateTime.now(),
-        message,
-        data: {
-          eventType: 'interface_status_change',
-          interfaceId: iface.id,
-          ifIndex: iface.snmpIndex,
-          ifName: iface.name,
-          previousStatus: previousOperStatus,
-          currentStatus: currentOperStatus,
-        },
-      })
-
-      this.eventBus.emit('interface:status_change', {
-        alertEventId: alertEvent.id,
-        deviceId: device.id,
-        interfaceId: iface.id,
-        ifName: iface.name,
-        previousStatus: previousOperStatus,
-        currentStatus: currentOperStatus,
-        message,
-      })
-
-      if (isDown) {
-        await this.notificationService.notify({
-          title: `⚠️ Queda de Interface em ${device.name}`,
-          body: `Interface ${iface.name} alterou status de ${previousOperStatus.toUpperCase()} para ${currentOperStatus.toUpperCase()}`,
-          severity: 'warning',
-          metadata: { alertEventId: alertEvent.id, deviceId: device.id, interfaceId: iface.id },
-        })
-      }
+    if (hasInterfaceTransition(dataset)) {
+      this.publishTransitions(device, iface, dataset, message)
     }
 
-    // 2. Verificação de alteração na negociação de velocidade (Link Speed Negotiation)
-    const prevNumSpeed = normalizeSpeed(previousSpeed)
-    const currNumSpeed = normalizeSpeed(currentSpeed)
+    await this.alertManager.evaluate({
+      scope: { siteId: device.siteId ?? null, deviceId: device.id, monitorId: null },
+      scopeKey: AlertScopeKey.interface(iface.id),
+      targetLabel: `${device.name} / ${iface.name}`,
+      dataset,
+      message,
+      data: {
+        eventType: 'interface_state',
+        interfaceId: iface.id,
+        ifIndex: iface.snmpIndex,
+        ...dataset,
+      },
+      recovered: isInterfaceRecovery(dataset),
+    })
+  }
 
-    if (prevNumSpeed !== null && currNumSpeed !== null && prevNumSpeed !== currNumSpeed) {
-      const prevSpeedFormatted = formatSpeed(prevNumSpeed)
-      const currentSpeedFormatted = formatSpeed(currNumSpeed)
+  /** Feed em tempo real: os fatos observados, independentemente de alertar. */
+  private publishTransitions(
+    device: Device,
+    iface: DeviceInterface,
+    dataset: Record<string, unknown>,
+    message: string
+  ): void {
+    const base = {
+      deviceId: device.id,
+      deviceName: device.name,
+      interfaceId: iface.id,
+      ifName: iface.name,
+      ifIndex: iface.snmpIndex,
+      message,
+    }
 
-      // Somente gera evento se houver mudança real na velocidade formatada (exclui 1 Gbps -> 1 Gbps)
-      if (prevSpeedFormatted !== currentSpeedFormatted) {
-        const isDowngrade = currNumSpeed < prevNumSpeed
+    const statusTransition = dataset[ALERT_FIELDS.interfaceStatusTransition]
+    if (statusTransition) {
+      this.eventBus.emit('interface:status_change', {
+        ...base,
+        previousStatus: dataset.interfacePreviousOperStatus ?? null,
+        currentStatus: dataset[ALERT_FIELDS.interfaceOperStatus] ?? null,
+        transition: statusTransition,
+      })
+    }
 
-        if (isDowngrade) {
-          // ALERTA DE DOWNGRADE (ex: 1 Gbps -> 100 Mbps ou 2.5 Gbps -> 1 Gbps)
-          const message = `🚨 ALERTA DE DOWNGRADE: Interface ${iface.name} sofreu downgrade de velocidade de ${prevSpeedFormatted} para ${currentSpeedFormatted}`
+    const speedTransition = dataset[ALERT_FIELDS.interfaceSpeedTransition]
+    if (speedTransition) {
+      const previousSpeedBps = (dataset.interfacePreviousSpeedBps as number) ?? null
+      const currentSpeedBps = (dataset[ALERT_FIELDS.interfaceSpeedBps] as number) ?? null
 
-          const alertEvent = await AlertEvent.create({
-            deviceId: device.id,
-            alertRuleId: null,
-            monitorId: null,
-            status: 'active',
-            severity: 'warning',
-            startedAt: DateTime.now(),
-            message,
-            data: {
-              eventType: 'interface_speed_downgrade',
-              interfaceId: iface.id,
-              ifIndex: iface.snmpIndex,
-              ifName: iface.name,
-              previousSpeed: prevNumSpeed,
-              currentSpeed: currNumSpeed,
-              previousSpeedFormatted: prevSpeedFormatted,
-              currentSpeedFormatted: currentSpeedFormatted,
-            },
-          })
-
-          this.eventBus.emit('interface:speed_downgrade', {
-            alertEventId: alertEvent.id,
-            deviceId: device.id,
-            interfaceId: iface.id,
-            ifName: iface.name,
-            previousSpeed: prevNumSpeed,
-            currentSpeed: currNumSpeed,
-            previousSpeedFormatted: prevSpeedFormatted,
-            currentSpeedFormatted: currentSpeedFormatted,
-            message,
-          })
-
-          await this.notificationService.notify({
-            title: `🚨 Downgrade de Interface em ${device.name}`,
-            body: `Interface ${iface.name} sofreu downgrade na velocidade de negociação de ${prevSpeedFormatted} para ${currentSpeedFormatted}`,
-            severity: 'warning',
-            metadata: { alertEventId: alertEvent.id, deviceId: device.id, interfaceId: iface.id },
-          })
-        } else {
-          // EVENTO DE UPGRADE OU ALTERAÇÃO DE VELOCIDADE PARA CIMA (ex: 100 Mbps -> 1 Gbps)
-          const message = `Interface ${iface.name} alterou negociação de velocidade: ${prevSpeedFormatted} ➔ ${currentSpeedFormatted}`
-
-          const alertEvent = await AlertEvent.create({
-            deviceId: device.id,
-            alertRuleId: null,
-            monitorId: null,
-            status: 'resolved',
-            severity: 'info',
-            startedAt: DateTime.now(),
-            resolvedAt: DateTime.now(),
-            message,
-            data: {
-              eventType: 'interface_speed_upgrade',
-              interfaceId: iface.id,
-              ifIndex: iface.snmpIndex,
-              ifName: iface.name,
-              previousSpeed: prevNumSpeed,
-              currentSpeed: currNumSpeed,
-              previousSpeedFormatted: prevSpeedFormatted,
-              currentSpeedFormatted: currentSpeedFormatted,
-            },
-          })
-
-          this.eventBus.emit('interface:speed_change', {
-            alertEventId: alertEvent.id,
-            deviceId: device.id,
-            interfaceId: iface.id,
-            ifName: iface.name,
-            previousSpeed: prevNumSpeed,
-            currentSpeed: currNumSpeed,
-            previousSpeedFormatted: prevSpeedFormatted,
-            currentSpeedFormatted: currentSpeedFormatted,
-            message,
-          })
+      this.eventBus.emit(
+        speedTransition === 'downgrade' ? 'interface:speed_downgrade' : 'interface:speed_change',
+        {
+          ...base,
+          previousSpeed: previousSpeedBps,
+          currentSpeed: currentSpeedBps,
+          previousSpeedFormatted: formatSpeed(previousSpeedBps),
+          currentSpeedFormatted: formatSpeed(currentSpeedBps),
+          transition: speedTransition,
         }
-      }
+      )
     }
   }
 }

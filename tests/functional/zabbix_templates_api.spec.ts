@@ -54,7 +54,7 @@ test.group('Zabbix Templates API - Functional Tests', (group) => {
     assert,
   }) => {
     const response = await client
-      .post('/api/zabbix-templates')
+      .visit('zabbix_templates.store')
       .json({ content: JSON.stringify(buildVoltMpptExport()) })
 
     response.assertStatus(201)
@@ -72,7 +72,9 @@ test.group('Zabbix Templates API - Functional Tests', (group) => {
   test('POST /api/zabbix-templates deve rejeitar conteúdo que não seja um export Zabbix válido', async ({
     client,
   }) => {
-    const response = await client.post('/api/zabbix-templates').json({ content: '{"foo": "bar"}' })
+    const response = await client
+      .visit('zabbix_templates.store')
+      .json({ content: '{"foo": "bar"}' })
     response.assertStatus(422)
   })
 
@@ -81,7 +83,7 @@ test.group('Zabbix Templates API - Functional Tests', (group) => {
     assert,
   }) => {
     await client
-      .post('/api/zabbix-templates')
+      .visit('zabbix_templates.store')
       .json({ content: JSON.stringify(buildVoltMpptExport()) })
     const template = await ZabbixTemplate.firstOrFail()
     await Device.create({
@@ -91,7 +93,7 @@ test.group('Zabbix Templates API - Functional Tests', (group) => {
       zabbixTemplateId: template.id,
     })
 
-    const response = await client.get('/api/zabbix-templates')
+    const response = await client.visit('zabbix_templates.index')
 
     response.assertStatus(200)
     const [item] = response.body()
@@ -104,13 +106,13 @@ test.group('Zabbix Templates API - Functional Tests', (group) => {
     assert,
   }) => {
     await client
-      .post('/api/zabbix-templates')
+      .visit('zabbix_templates.store')
       .json({ content: JSON.stringify(buildVoltMpptExport()) })
 
     const exportData = buildVoltMpptExport()
     // Remove um item na reimportação, simulando uma nova versão do template
     exportData.zabbix_export.templates[0].items.pop()
-    await client.post('/api/zabbix-templates').json({ content: JSON.stringify(exportData) })
+    await client.visit('zabbix_templates.store').json({ content: JSON.stringify(exportData) })
 
     const templates = await ZabbixTemplate.query().preload('items')
     assert.lengthOf(templates, 1, 'não deve duplicar o template ao reimportar o mesmo uuid')
@@ -122,7 +124,7 @@ test.group('Zabbix Templates API - Functional Tests', (group) => {
     assert,
   }) => {
     await client
-      .post('/api/zabbix-templates')
+      .visit('zabbix_templates.store')
       .json({ content: JSON.stringify(buildVoltMpptExport()) })
     const template = await ZabbixTemplate.firstOrFail()
     const device = await Device.create({
@@ -132,7 +134,7 @@ test.group('Zabbix Templates API - Functional Tests', (group) => {
       zabbixTemplateId: template.id,
     })
 
-    const response = await client.delete(`/api/zabbix-templates/${template.id}`)
+    const response = await client.visit('zabbix_templates.destroy', { id: template.id })
     response.assertStatus(204)
 
     assert.isNull(await ZabbixTemplate.find(template.id))
@@ -145,7 +147,7 @@ test.group('Zabbix Templates API - Functional Tests', (group) => {
     assert,
   }) => {
     await client
-      .post('/api/zabbix-templates')
+      .visit('zabbix_templates.store')
       .json({ content: JSON.stringify(buildVoltMpptExport()) })
     const template = await ZabbixTemplate.firstOrFail()
 
@@ -163,7 +165,7 @@ test.group('Zabbix Templates API - Functional Tests', (group) => {
       .first()
     assert.isNull(monitor)
 
-    const response = await client.put(`/api/devices/${device.id}`).json({
+    const response = await client.visit('devices.update', { id: device.id }).json({
       name: device.name,
       ipAddress: device.ipAddress,
       type: device.type,
@@ -182,7 +184,7 @@ test.group('Zabbix Templates API - Functional Tests', (group) => {
     assert.equal((monitor!.configuration as { host?: string }).host, '10.0.0.34')
 
     // Desvincular o template deve desabilitar (não apagar) o monitor de coleta.
-    await client.put(`/api/devices/${device.id}`).json({
+    await client.visit('devices.update', { id: device.id }).json({
       name: device.name,
       ipAddress: device.ipAddress,
       type: device.type,

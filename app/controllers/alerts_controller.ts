@@ -2,7 +2,38 @@ import type { HttpContext } from '@adonisjs/core/http'
 import AlertRule from '#models/alert_rule'
 import AlertEvent from '#models/alert_event'
 import { SilenceManager } from '#modules/alerts/silence_manager'
+import { AlertRuleCatalogService } from '#modules/alerts/catalog/alert_rule_catalog_service'
+import { ALERT_RULE_CATEGORY_LABELS } from '#modules/alerts/catalog/alert_rule_templates'
 import { EventBus } from '#modules/events/event_bus'
+
+/** Referência enxuta a uma entidade relacionada no payload de alertas */
+interface RelatedSummary {
+  id: number
+  name: string
+}
+
+/** Contrato de resposta de `GET /api/alerts` */
+export interface SerializedAlertEvent {
+  id: number
+  alertRuleId: number | null
+  deviceId: number | null
+  monitorId: number | null
+  scopeKey: string | null
+  status: AlertEvent['status']
+  severity: AlertEvent['severity']
+  message: string | null
+  data: Record<string, unknown> | null
+  startedAt: string | null
+  resolvedAt: string | null
+  createdAt: string | null
+  updatedAt: string | null
+  /** Derivado: nome da regra + alvo, com fallback para o título gravado no evento */
+  title: string
+  alertRule: RelatedSummary | null
+  device: RelatedSummary | null
+  monitor: RelatedSummary | null
+  silencedUntil: string | null
+}
 
 const RULE_FIELDS = [
   'siteId',
@@ -18,6 +49,7 @@ const RULE_FIELDS = [
 
 export default class AlertsController {
   private silenceManager = new SilenceManager()
+  private catalog = new AlertRuleCatalogService()
   private eventBus = EventBus.getInstance()
 
   /**
@@ -37,6 +69,7 @@ export default class AlertsController {
       id: rule.id,
       name: rule.name,
       type: rule.type,
+      templateKey: rule.templateKey ?? null,
       condition: rule.condition,
       severity: rule.severity,
       durationSeconds: rule.durationSeconds,
@@ -48,6 +81,36 @@ export default class AlertsController {
   async rulesIndex({ response }: HttpContext) {
     const rules = await AlertRule.query().orderBy('id', 'asc')
     return response.ok(rules)
+  }
+
+  /** Catálogo de regras pré-configuradas, já marcando o que existe no banco. */
+  async catalogIndex({ response }: HttpContext) {
+    return response.ok({
+      categories: ALERT_RULE_CATEGORY_LABELS,
+      templates: await this.catalog.describe(),
+    })
+  }
+
+  /**
+   * Aplica as regras escolhidas no catálogo. Idempotente: o que já existe é
+   * reportado em `skipped` em vez de ser duplicado.
+   */
+  async catalogApply({ request, response }: HttpContext) {
+    const keys = request.input('keys')
+
+    if (!Array.isArray(keys) || keys.length === 0) {
+      return response.unprocessableEntity({
+        error: 'Selecione ao menos uma regra pré-configurada para aplicar.',
+      })
+    }
+
+    const result = await this.catalog.apply(keys.map((key: unknown) => String(key)))
+
+    for (const rule of result.created) {
+      this.eventBus.emit('alert_rule:created', this.ruleEventPayload(rule))
+    }
+
+    return response.created({ created: result.created, skipped: result.skipped })
   }
 
   async rulesStore({ request, response }: HttpContext) {
@@ -112,15 +175,34 @@ export default class AlertsController {
     return response.ok(events.map((event) => this.serializeEvent(event)))
   }
 
-  /** Achata as relações e deriva o título exibido na Central de Alertas */
-  private serializeEvent(event: AlertEvent) {
+  /**
+   * Achata as relações e deriva o título exibido na Central de Alertas.
+   *
+   * A forma é declarada explicitamente (`SerializedAlertEvent`) em vez de
+   * espalhar `event.serialize()`: assim o contrato do endpoint é verificável
+   * pelo TypeScript, tanto aqui quanto em quem consome o cliente tipado.
+   */
+  private serializeEvent(event: AlertEvent): SerializedAlertEvent {
     const storedTitle = event.data?.title as string | undefined
     const ruleName = event.alertRule?.name ?? (event.data?.ruleName as string | undefined)
     const target = event.device?.name ?? event.monitor?.name ?? null
 
     return {
-      ...event.serialize(),
+      id: event.id,
+      alertRuleId: event.alertRuleId,
+      deviceId: event.deviceId,
+      monitorId: event.monitorId,
+      scopeKey: event.scopeKey ?? null,
+      status: event.status,
+      severity: event.severity,
+      message: event.message,
+      data: event.data ?? null,
+      startedAt: event.startedAt?.toISO() ?? null,
+      resolvedAt: event.resolvedAt?.toISO() ?? null,
+      createdAt: event.createdAt?.toISO() ?? null,
+      updatedAt: event.updatedAt?.toISO() ?? null,
       title: storedTitle || [ruleName, target].filter(Boolean).join(' — ') || 'Alerta do sistema',
+      alertRule: event.alertRule ? { id: event.alertRule.id, name: event.alertRule.name } : null,
       device: event.device ? { id: event.device.id, name: event.device.name } : null,
       monitor: event.monitor ? { id: event.monitor.id, name: event.monitor.name } : null,
       silencedUntil: (event.data?.silencedUntil as string | undefined) ?? null,

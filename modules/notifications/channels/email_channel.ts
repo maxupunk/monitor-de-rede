@@ -10,7 +10,9 @@ export class EmailChannel implements NotificationChannel {
 
   async send(message: NotificationMessage): Promise<boolean> {
     try {
-      console.log(`[EmailChannel] Enviando e-mail para ${this.recipient}: [${message.severity.toUpperCase()}] ${message.title} - ${message.body}`)
+      console.log(
+        `[EmailChannel] Enviando e-mail para ${this.recipient}: [${message.severity.toUpperCase()}] ${message.title} - ${message.body}`
+      )
       return true
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)

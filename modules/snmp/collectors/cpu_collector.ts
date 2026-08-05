@@ -37,7 +37,7 @@ export class CpuCollector {
       processorEntries.forEach((entry, idx) => {
         const val = Number(entry.value)
         // Validar porcentagem entre 0 e 100 por núcleo
-        if (!isNaN(val) && val >= 0 && val <= 100) {
+        if (!Number.isNaN(val) && val >= 0 && val <= 100) {
           cores.push({ coreIndex: idx + 1, loadPercent: val })
           totalLoad += val
         }
@@ -75,9 +75,9 @@ export class CpuCollector {
         ? Number(ucdResponse[CpuCollector.OID_SS_CPU_IDLE])
         : undefined
 
-    if (user !== undefined && !isNaN(user)) result.userPercent = user
-    if (sys !== undefined && !isNaN(sys)) result.systemPercent = sys
-    if (idle !== undefined && !isNaN(idle)) {
+    if (user !== undefined && !Number.isNaN(user)) result.userPercent = user
+    if (sys !== undefined && !Number.isNaN(sys)) result.systemPercent = sys
+    if (idle !== undefined && !Number.isNaN(idle)) {
       result.idlePercent = idle
       if (result.usagePercent === undefined) {
         result.usagePercent = Math.max(0, Math.min(100, 100 - idle))
@@ -86,8 +86,8 @@ export class CpuCollector {
 
     const parseLoad = (val: unknown) => {
       if (!val) return undefined
-      const num = parseFloat(String(val))
-      return isNaN(num) ? undefined : num
+      const num = Number.parseFloat(String(val))
+      return Number.isNaN(num) ? undefined : num
     }
 
     result.load1min = parseLoad(ucdResponse[CpuCollector.OID_LA_LOAD_1])

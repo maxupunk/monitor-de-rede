@@ -15,7 +15,11 @@ export class DiscoveryService {
   private merger = new DiscoveryMerger()
   private eventBus = EventBus.getInstance()
 
-  async runDiscovery(cidr: string, networkId?: number, probeId?: number | null): Promise<DiscoveredHost[]> {
+  async runDiscovery(
+    cidr: string,
+    networkId?: number,
+    probeId?: number | null
+  ): Promise<DiscoveredHost[]> {
     let runRecord: DiscoveryRun | null = null
 
     if (networkId) {

@@ -79,6 +79,8 @@ export interface ApiDefinition {
     destroy: typeof routes['probes.destroy']
   }
   alerts: {
+    catalogIndex: typeof routes['alerts.catalog_index']
+    catalogApply: typeof routes['alerts.catalog_apply']
     rulesIndex: typeof routes['alerts.rules_index']
     rulesStore: typeof routes['alerts.rules_store']
     rulesUpdate: typeof routes['alerts.rules_update']

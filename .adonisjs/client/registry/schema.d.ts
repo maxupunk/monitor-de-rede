@@ -679,6 +679,30 @@ export interface Registry {
       errorResponse: ExtractErrorResponse<Awaited<ReturnType<import('#controllers/probes_controller').default['destroy']>>>
     }
   }
+  'alerts.catalog_index': {
+    methods: ["GET","HEAD"]
+    pattern: '/api/alert-rules/catalog'
+    types: {
+      body: {}
+      paramsTuple: []
+      params: {}
+      query: {}
+      response: ExtractResponse<Awaited<ReturnType<import('#controllers/alerts_controller').default['catalogIndex']>>>
+      errorResponse: ExtractErrorResponse<Awaited<ReturnType<import('#controllers/alerts_controller').default['catalogIndex']>>>
+    }
+  }
+  'alerts.catalog_apply': {
+    methods: ["POST"]
+    pattern: '/api/alert-rules/catalog'
+    types: {
+      body: {}
+      paramsTuple: []
+      params: {}
+      query: {}
+      response: ExtractResponse<Awaited<ReturnType<import('#controllers/alerts_controller').default['catalogApply']>>>
+      errorResponse: ExtractErrorResponse<Awaited<ReturnType<import('#controllers/alerts_controller').default['catalogApply']>>>
+    }
+  }
   'alerts.rules_index': {
     methods: ["GET","HEAD"]
     pattern: '/api/alert-rules'

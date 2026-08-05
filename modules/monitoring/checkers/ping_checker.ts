@@ -35,7 +35,8 @@ export class PingChecker implements MonitorChecker<PingConfig> {
         if (lossMatch && lossMatch[1]) {
           packetLoss = Number.parseInt(lossMatch[1], 10)
         }
-        const timeMatch = stdout.match(/Average\s*=\s*(\d+)ms/i) || stdout.match(/M[eé]dia\s*=\s*(\d+)ms/i)
+        const timeMatch =
+          stdout.match(/Average\s*=\s*(\d+)ms/i) || stdout.match(/M[eé]dia\s*=\s*(\d+)ms/i)
         if (timeMatch && timeMatch[1]) {
           latencyMs = Number.parseFloat(timeMatch[1])
         }

@@ -18,6 +18,13 @@ export default class AlertEvent extends BaseModel {
   @column()
   declare monitorId: number | null
 
+  /**
+   * Alvo concreto do alerta (`monitor:12`, `interface:34`). Deduplica eventos
+   * ativos e delimita a normalização automática.
+   */
+  @column()
+  declare scopeKey: string | null
+
   @column()
   declare status: 'active' | 'acknowledged' | 'silenced' | 'resolved'
 

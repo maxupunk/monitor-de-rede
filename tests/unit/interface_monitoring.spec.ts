@@ -4,15 +4,27 @@ import {
   normalizeSpeed,
   InterfaceMonitoringService,
 } from '#modules/monitoring/interface_monitoring_service'
+import { AlertRuleCatalogService } from '#modules/alerts/catalog/alert_rule_catalog_service'
 import Device from '#models/device'
 import DeviceInterface from '#models/device_interface'
 import AlertEvent from '#models/alert_event'
 import testUtils from '@adonisjs/core/services/test_utils'
 
+/**
+ * O serviço de interfaces não decide mais o que é alerta: ele publica fatos e o
+ * motor aplica as regras cadastradas. Por isso cada cenário abaixo aplica antes
+ * a regra do catálogo correspondente.
+ */
+function applyRules(...keys: string[]) {
+  return new AlertRuleCatalogService().apply(keys)
+}
+
 test.group('Interface Monitoring - Unit Tests', (group) => {
   group.each.setup(() => testUtils.db().truncate())
 
-  test('formatSpeed deve formatar corretamente conexões de 2.5 Gbps, 1 Gbps, 100 Mbps e 10 Mbps', ({ assert }) => {
+  test('formatSpeed deve formatar corretamente conexões de 2.5 Gbps, 1 Gbps, 100 Mbps e 10 Mbps', ({
+    assert,
+  }) => {
     assert.equal(formatSpeed(2_500_000_000), '2.5 Gbps')
     assert.equal(formatSpeed(1_000_000_000), '1 Gbps')
     assert.equal(formatSpeed(100_000_000), '100 Mbps')
@@ -34,6 +46,8 @@ test.group('Interface Monitoring - Unit Tests', (group) => {
   test('evaluateInterfaceState NÃO deve gerar evento quando a leitura satura em 32 bits', async ({
     assert,
   }) => {
+    await applyRules('interface_speed_downgrade', 'interface_speed_upgrade')
+
     const device = await Device.create({
       name: 'Switch-Core-10G',
       ipAddress: '192.168.1.4',
@@ -59,9 +73,11 @@ test.group('Interface Monitoring - Unit Tests', (group) => {
     assert.equal(events.length, 0)
   })
 
-  test('evaluateInterfaceState deve registrar evento quando o status alterar de DOWN para UP ou UP para DOWN', async ({
+  test('evaluateInterfaceState deve registrar evento quando o status alterar de UP para DOWN', async ({
     assert,
   }) => {
+    await applyRules('interface_link_down')
+
     const device = await Device.create({
       name: 'Router-Core-01',
       ipAddress: '192.168.1.1',
@@ -86,12 +102,15 @@ test.group('Interface Monitoring - Unit Tests', (group) => {
     const events = await AlertEvent.query().where('deviceId', device.id)
     assert.equal(events.length, 1)
     assert.equal(events[0].severity, 'warning')
+    assert.equal(events[0].scopeKey, `interface:${iface.id}`)
     assert.include(events[0].message!, 'eth0 alterou status: UP ➔ DOWN')
   })
 
   test('evaluateInterfaceState deve gerar ALERTA DE DOWNGRADE quando a negociação cair de 1Gbps para 100Mbps', async ({
     assert,
   }) => {
+    await applyRules('interface_speed_downgrade')
+
     const device = await Device.create({
       name: 'Switch-Access-01',
       ipAddress: '192.168.1.2',
@@ -117,13 +136,42 @@ test.group('Interface Monitoring - Unit Tests', (group) => {
     assert.equal(events.length, 1)
     assert.equal(events[0].status, 'active')
     assert.equal(events[0].severity, 'warning')
-    assert.include(events[0].message!, 'ALERTA DE DOWNGRADE')
-    assert.include(events[0].message!, 'de 1 Gbps para 100 Mbps')
+    assert.include(events[0].message!, 'sofreu downgrade de velocidade: 1 Gbps ➔ 100 Mbps')
   })
 
-  test('evaluateInterfaceState deve gerar EVENTO de UPGRADE quando a negociação subir de 100Mbps para 1Gbps', async ({
+  test('sem a regra de downgrade aplicada, o downgrade não vira alerta', async ({ assert }) => {
+    const device = await Device.create({
+      name: 'Switch-Access-02',
+      ipAddress: '192.168.1.5',
+      type: 'switch',
+      status: 'online',
+    })
+
+    const iface = await DeviceInterface.create({
+      deviceId: device.id,
+      snmpIndex: 2,
+      name: 'Gi0/2',
+      speed: 100_000_000,
+      adminStatus: 'up',
+      operStatus: 'up',
+    })
+
+    await new InterfaceMonitoringService().evaluateInterfaceState(
+      device,
+      iface,
+      'up',
+      1_000_000_000
+    )
+
+    const events = await AlertEvent.query().where('deviceId', device.id)
+    assert.equal(events.length, 0)
+  })
+
+  test('evaluateInterfaceState deve registrar renegociação para cima quando a regra informativa está ativa', async ({
     assert,
   }) => {
+    await applyRules('interface_speed_upgrade')
+
     const device = await Device.create({
       name: 'Switch-Access-01',
       ipAddress: '192.168.1.2',
@@ -147,14 +195,46 @@ test.group('Interface Monitoring - Unit Tests', (group) => {
 
     const events = await AlertEvent.query().where('deviceId', device.id)
     assert.equal(events.length, 1)
-    assert.equal(events[0].status, 'resolved')
     assert.equal(events[0].severity, 'info')
     assert.include(events[0].message!, '100 Mbps ➔ 1 Gbps')
+  })
+
+  test('retorno do link deve normalizar o alerta aberto da interface', async ({ assert }) => {
+    await applyRules('interface_link_down')
+
+    const device = await Device.create({
+      name: 'Router-Core-03',
+      ipAddress: '192.168.1.6',
+      type: 'router',
+      status: 'online',
+    })
+
+    const iface = await DeviceInterface.create({
+      deviceId: device.id,
+      snmpIndex: 1,
+      name: 'eth1',
+      speed: 1_000_000_000,
+      adminStatus: 'up',
+      operStatus: 'down',
+    })
+
+    const service = new InterfaceMonitoringService()
+    await service.evaluateInterfaceState(device, iface, 'up', 1_000_000_000)
+
+    iface.operStatus = 'up'
+    await iface.save()
+    await service.evaluateInterfaceState(device, iface, 'down', 1_000_000_000)
+
+    const events = await AlertEvent.query().where('deviceId', device.id)
+    assert.equal(events.length, 1)
+    assert.equal(events[0].status, 'resolved')
   })
 
   test('evaluateInterfaceState NÃO deve gerar evento quando a velocidade não for alterada (ex: 1Gbps para 1Gbps)', async ({
     assert,
   }) => {
+    await applyRules('interface_speed_downgrade', 'interface_speed_upgrade', 'interface_link_down')
+
     const device = await Device.create({
       name: 'Router-Core-02',
       ipAddress: '192.168.1.3',

@@ -21,7 +21,11 @@ export class ProbeAgent {
   private isRunning = false
 
   constructor(options?: ProbeAgentOptions) {
-    this.serverUrl = options?.serverUrl || process.env.PROBE_SERVER_URL || process.env.SERVER_URL || 'http://localhost:3333'
+    this.serverUrl =
+      options?.serverUrl ||
+      process.env.PROBE_SERVER_URL ||
+      process.env.SERVER_URL ||
+      'http://localhost:3333'
     this.probeToken = options?.probeToken || process.env.PROBE_TOKEN || ''
     this.intervalMs = options?.intervalMs || Number(process.env.PROBE_INTERVAL_MS) || 5000
     this.version = options?.version || '1.0.0'
@@ -128,7 +132,11 @@ export class ProbeAgent {
     }
   }
 
-  private async reportResult(monitorId: number, taskId: string, result: CheckResult): Promise<boolean> {
+  private async reportResult(
+    monitorId: number,
+    taskId: string,
+    result: CheckResult
+  ): Promise<boolean> {
     try {
       const res = await fetch(`${this.serverUrl}/api/probes/results`, {
         method: 'POST',

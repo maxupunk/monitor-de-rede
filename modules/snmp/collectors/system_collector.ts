@@ -30,12 +30,26 @@ export class SystemCollector {
     const response = await client.get(oids)
 
     return {
-      sysDescr: response[SystemCollector.OID_SYS_DESCR] ? String(response[SystemCollector.OID_SYS_DESCR]) : undefined,
-      sysObjectID: response[SystemCollector.OID_SYS_OBJECT_ID] ? String(response[SystemCollector.OID_SYS_OBJECT_ID]) : undefined,
-      sysUpTime: response[SystemCollector.OID_SYS_UPTIME] !== undefined && response[SystemCollector.OID_SYS_UPTIME] !== null ? Number(response[SystemCollector.OID_SYS_UPTIME]) : undefined,
-      sysContact: response[SystemCollector.OID_SYS_CONTACT] ? String(response[SystemCollector.OID_SYS_CONTACT]) : undefined,
-      sysName: response[SystemCollector.OID_SYS_NAME] ? String(response[SystemCollector.OID_SYS_NAME]) : undefined,
-      sysLocation: response[SystemCollector.OID_SYS_LOCATION] ? String(response[SystemCollector.OID_SYS_LOCATION]) : undefined,
+      sysDescr: response[SystemCollector.OID_SYS_DESCR]
+        ? String(response[SystemCollector.OID_SYS_DESCR])
+        : undefined,
+      sysObjectID: response[SystemCollector.OID_SYS_OBJECT_ID]
+        ? String(response[SystemCollector.OID_SYS_OBJECT_ID])
+        : undefined,
+      sysUpTime:
+        response[SystemCollector.OID_SYS_UPTIME] !== undefined &&
+        response[SystemCollector.OID_SYS_UPTIME] !== null
+          ? Number(response[SystemCollector.OID_SYS_UPTIME])
+          : undefined,
+      sysContact: response[SystemCollector.OID_SYS_CONTACT]
+        ? String(response[SystemCollector.OID_SYS_CONTACT])
+        : undefined,
+      sysName: response[SystemCollector.OID_SYS_NAME]
+        ? String(response[SystemCollector.OID_SYS_NAME])
+        : undefined,
+      sysLocation: response[SystemCollector.OID_SYS_LOCATION]
+        ? String(response[SystemCollector.OID_SYS_LOCATION])
+        : undefined,
     }
   }
 }

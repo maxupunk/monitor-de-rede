@@ -42,7 +42,7 @@ export class LinkResolver {
         linkMap.set(pairKey, {
           ...raw,
           confidence,
-          confirmed: raw.confirmed ?? (raw.linkType === 'manual'),
+          confirmed: raw.confirmed ?? raw.linkType === 'manual',
         })
       }
     }

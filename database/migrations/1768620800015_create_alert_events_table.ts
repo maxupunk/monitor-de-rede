@@ -6,9 +6,27 @@ export default class extends BaseSchema {
   async up() {
     this.schema.createTable(this.tableName, (table) => {
       table.increments('id').notNullable()
-      table.integer('alert_rule_id').unsigned().references('id').inTable('alert_rules').onDelete('CASCADE').notNullable()
-      table.integer('device_id').unsigned().references('id').inTable('devices').onDelete('SET NULL').nullable()
-      table.integer('monitor_id').unsigned().references('id').inTable('monitors').onDelete('SET NULL').nullable()
+      table
+        .integer('alert_rule_id')
+        .unsigned()
+        .references('id')
+        .inTable('alert_rules')
+        .onDelete('CASCADE')
+        .notNullable()
+      table
+        .integer('device_id')
+        .unsigned()
+        .references('id')
+        .inTable('devices')
+        .onDelete('SET NULL')
+        .nullable()
+      table
+        .integer('monitor_id')
+        .unsigned()
+        .references('id')
+        .inTable('monitors')
+        .onDelete('SET NULL')
+        .nullable()
       table.string('status').notNullable()
       table.string('severity').notNullable()
       table.timestamp('started_at').notNullable()

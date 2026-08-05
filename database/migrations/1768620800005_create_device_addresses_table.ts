@@ -6,7 +6,13 @@ export default class extends BaseSchema {
   async up() {
     this.schema.createTable(this.tableName, (table) => {
       table.increments('id').notNullable()
-      table.integer('device_id').unsigned().references('id').inTable('devices').onDelete('CASCADE').notNullable()
+      table
+        .integer('device_id')
+        .unsigned()
+        .references('id')
+        .inTable('devices')
+        .onDelete('CASCADE')
+        .notNullable()
       table.string('address').notNullable()
       table.string('family').defaultTo('ipv4').notNullable()
       table.string('hostname').nullable()

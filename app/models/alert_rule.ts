@@ -24,6 +24,13 @@ export default class AlertRule extends BaseModel {
   @column()
   declare type: 'device_offline' | 'latency_high' | 'http_failure' | 'tcp_failure' | 'custom'
 
+  /**
+   * Item do catálogo que originou a regra. `null` para regras criadas à mão.
+   * É a chave de idempotência do provisionamento de regras pré-configuradas.
+   */
+  @column()
+  declare templateKey: string | null
+
   @column({
     prepare: (value: Record<string, unknown>) => (value ? JSON.stringify(value) : null),
     consume: (value: string | Record<string, unknown>) =>

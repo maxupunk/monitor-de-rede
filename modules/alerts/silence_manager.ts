@@ -1,5 +1,5 @@
 import { DateTime } from 'luxon'
-import AlertEvent from '#models/alert_event'
+import type AlertEvent from '#models/alert_event'
 
 export class SilenceManager {
   isSilenced(event: AlertEvent): boolean {

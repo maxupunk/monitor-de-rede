@@ -9,18 +9,50 @@ export interface AlertRuleCondition {
   value: number | string
 }
 
+export type AlertRuleType =
+  'device_offline' | 'latency_high' | 'http_failure' | 'tcp_failure' | 'custom'
+
 export interface AlertRule {
   id: number
   siteId?: number | null
   deviceId?: number | null
   monitorId?: number | null
   name: string
-  type: 'device_offline' | 'latency_high' | 'http_failure' | 'tcp_failure' | 'custom'
+  type: AlertRuleType
+  /** Item do catálogo que originou a regra; nulo quando criada à mão */
+  templateKey?: string | null
   condition: AlertRuleCondition
   severity: 'info' | 'warning' | 'critical'
   durationSeconds: number
   enabled: boolean
   isEnabled: boolean
+}
+
+/** Regra pré-configurada do catálogo, já marcada com o que existe no banco */
+export interface AlertRuleTemplate {
+  key: string
+  name: string
+  description: string
+  category: string
+  type: AlertRuleType
+  condition: AlertRuleCondition
+  severity: AlertRule['severity']
+  durationSeconds: number
+  /** Faz parte do conjunto básico aplicado por padrão */
+  recommended: boolean
+  /** Já existe regra equivalente: aplicar de novo não cria duplicata */
+  applied: boolean
+  ruleId: number | null
+}
+
+export interface AlertRuleCatalog {
+  categories: Record<string, string>
+  templates: AlertRuleTemplate[]
+}
+
+export interface CatalogApplicationResult {
+  created: AlertRule[]
+  skipped: Array<{ key: string; reason: 'already_exists' | 'unknown_template' }>
 }
 
 export interface AlertEvent {
@@ -44,6 +76,9 @@ export interface AlertEvent {
 export const useAlertsStore = defineStore('alerts', () => {
   const alertEvents = ref<AlertEvent[]>([])
   const alertRules = ref<AlertRule[]>([])
+  const ruleTemplates = ref<AlertRuleTemplate[]>([])
+  const ruleCategories = ref<Record<string, string>>({})
+  const catalogLoading = ref(false)
   const loading = ref(false)
   const error = ref<string | null>(null)
   /** Marca a última mutação vinda do SSE, útil para feedback visual */
@@ -78,6 +113,45 @@ export const useAlertsStore = defineStore('alerts', () => {
       error.value = err instanceof Error ? err.message : 'Erro ao carregar regras de alerta'
     } finally {
       loading.value = false
+    }
+  }
+
+  /** Catálogo de regras pré-configuradas mantido pelo backend */
+  async function fetchRuleCatalog(): Promise<boolean> {
+    catalogLoading.value = true
+    error.value = null
+    try {
+      const catalog = await apiService.get<AlertRuleCatalog>('/alert-rules/catalog')
+      ruleTemplates.value = catalog.templates ?? []
+      ruleCategories.value = catalog.categories ?? {}
+      return true
+    } catch (err: unknown) {
+      error.value = err instanceof Error ? err.message : 'Erro ao carregar o catálogo de regras'
+      return false
+    } finally {
+      catalogLoading.value = false
+    }
+  }
+
+  /**
+   * Aplica as regras escolhidas. O backend é idempotente: chaves já
+   * configuradas voltam em `skipped` em vez de virar regra duplicada.
+   */
+  async function applyCatalogRules(keys: string[]): Promise<CatalogApplicationResult | null> {
+    catalogLoading.value = true
+    error.value = null
+    try {
+      const result = await apiService.post<CatalogApplicationResult>('/alert-rules/catalog', {
+        keys,
+      })
+      result.created.forEach((rule) => upsertAlertRule(rule))
+      await fetchRuleCatalog()
+      return result
+    } catch (err: unknown) {
+      error.value = err instanceof Error ? err.message : 'Erro ao aplicar regras pré-configuradas'
+      return null
+    } finally {
+      catalogLoading.value = false
     }
   }
 
@@ -179,11 +253,16 @@ export const useAlertsStore = defineStore('alerts', () => {
     activeAlerts,
     criticalCount,
     alertRules,
+    ruleTemplates,
+    ruleCategories,
+    catalogLoading,
     loading,
     error,
     lastRealtimeUpdateAt,
     fetchActiveAlerts,
     fetchAlertRules,
+    fetchRuleCatalog,
+    applyCatalogRules,
     acknowledgeAlert,
     silenceAlert,
     createAlertRule,

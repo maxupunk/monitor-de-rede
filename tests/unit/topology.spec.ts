@@ -13,11 +13,27 @@ test.group('Network Topology - Unit Tests', () => {
     assert.equal(calc.calculateConfidence('inferred'), 50)
   })
 
-  test('LinkResolver deve desduplicar ligações bidirecionais mantendo a de maior confiança', ({ assert }) => {
+  test('LinkResolver deve desduplicar ligações bidirecionais mantendo a de maior confiança', ({
+    assert,
+  }) => {
     const resolver = new LinkResolver()
     const resolved = resolver.resolveLinks([
-      { sourceDeviceId: 1, targetDeviceId: 2, linkType: 'inferred', discoveryMethod: 'subnet', confidence: 50, confirmed: false },
-      { sourceDeviceId: 2, targetDeviceId: 1, linkType: 'lldp', discoveryMethod: 'snmp_lldp', confidence: 95, confirmed: false },
+      {
+        sourceDeviceId: 1,
+        targetDeviceId: 2,
+        linkType: 'inferred',
+        discoveryMethod: 'subnet',
+        confidence: 50,
+        confirmed: false,
+      },
+      {
+        sourceDeviceId: 2,
+        targetDeviceId: 1,
+        linkType: 'lldp',
+        discoveryMethod: 'snmp_lldp',
+        confidence: 95,
+        confirmed: false,
+      },
     ])
 
     assert.equal(resolved.length, 1)
@@ -28,8 +44,21 @@ test.group('Network Topology - Unit Tests', () => {
   test('TopologyBuilder deve estruturar o grafo com nós e arestas', ({ assert }) => {
     const builder = new TopologyBuilder()
     const graph = builder.buildGraph(
-      [{ id: 1, name: 'Router-01', type: 'router', status: 'online' }, { id: 2, name: 'Switch-01', type: 'switch', status: 'online' }],
-      [{ source: 1, target: 2, linkType: 'lldp', discoveryMethod: 'snmp_lldp', confidence: 95, confirmed: true, status: 'up' }]
+      [
+        { id: 1, name: 'Router-01', type: 'router', status: 'online' },
+        { id: 2, name: 'Switch-01', type: 'switch', status: 'online' },
+      ],
+      [
+        {
+          source: 1,
+          target: 2,
+          linkType: 'lldp',
+          discoveryMethod: 'snmp_lldp',
+          confidence: 95,
+          confirmed: true,
+          status: 'up',
+        },
+      ]
     )
 
     assert.equal(graph.nodes.length, 2)

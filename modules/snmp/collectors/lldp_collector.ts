@@ -26,14 +26,17 @@ export class LldpCollector {
 
     // 1. LLDP Collection
     const lldpEntries = await client.walk(LldpCollector.BASE_LLDP_REM_TABLE)
-    const lldpMap = new Map<string, { localPort: string; remotePort?: string; remoteSysName?: string }>()
+    const lldpMap = new Map<
+      string,
+      { localPort: string; remotePort?: string; remoteSysName?: string }
+    >()
 
     for (const entry of lldpEntries) {
       const parts = entry.oid.split('.')
       if (parts.length < 13) continue
 
       // In LLDP remTable (1.0.8802.1.1.2.1.4.1.1.[column].[timeMark].[localPort].[remIndex])
-      const column = parseInt(parts[10], 10)
+      const column = Number.parseInt(parts[10], 10)
       const localPortNum = parts[parts.length - 2]
       const remIndex = parts[parts.length - 1]
       const key = `${localPortNum}_${remIndex}`
@@ -64,14 +67,17 @@ export class LldpCollector {
 
     // 2. CDP Collection
     const cdpEntries = await client.walk(LldpCollector.BASE_CDP_CACHE_TABLE)
-    const cdpMap = new Map<string, { localPort: string; remotePort?: string; remoteSysName?: string; remoteMgmtAddress?: string }>()
+    const cdpMap = new Map<
+      string,
+      { localPort: string; remotePort?: string; remoteSysName?: string; remoteMgmtAddress?: string }
+    >()
 
     for (const entry of cdpEntries) {
       const parts = entry.oid.split('.')
       if (parts.length < 12) continue
 
       // In CDP cacheTable (1.3.6.1.4.1.9.9.23.1.2.1.1.[column].[ifIndex].[cdpIndex])
-      const column = parseInt(parts[11], 10)
+      const column = Number.parseInt(parts[11], 10)
       const ifIndex = parts[parts.length - 2]
       const key = `${ifIndex}`
 

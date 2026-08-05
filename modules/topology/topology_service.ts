@@ -1,4 +1,9 @@
-import { TopologyBuilder, type TopologyGraph, type TopologyNode, type TopologyEdge } from './topology_builder.js'
+import {
+  TopologyBuilder,
+  type TopologyGraph,
+  type TopologyNode,
+  type TopologyEdge,
+} from './topology_builder.js'
 import { LinkResolver, type NetworkLink } from './link_resolver.js'
 import Device from '#models/device'
 import DeviceLink from '#models/device_link'
@@ -77,7 +82,10 @@ export class TopologyService {
     return this.builder.buildGraph(nodes, edges)
   }
 
-  async resolveDiscoveredNeighbors(sourceDevice: Device, neighbors: LldpNeighbor[]): Promise<DeviceLink[]> {
+  async resolveDiscoveredNeighbors(
+    sourceDevice: Device,
+    neighbors: LldpNeighbor[]
+  ): Promise<DeviceLink[]> {
     const rawLinks: NetworkLink[] = []
 
     for (const n of neighbors) {
@@ -151,8 +159,12 @@ export class TopologyService {
 
     for (const [, netDevices] of bySubnet.entries()) {
       // Connect routers/switches to end devices in same subnet
-      const infrastructure = netDevices.filter((d) => ['router', 'switch', 'firewall'].includes(d.type))
-      const endDevices = netDevices.filter((d) => !['router', 'switch', 'firewall'].includes(d.type))
+      const infrastructure = netDevices.filter((d) =>
+        ['router', 'switch', 'firewall'].includes(d.type)
+      )
+      const endDevices = netDevices.filter(
+        (d) => !['router', 'switch', 'firewall'].includes(d.type)
+      )
 
       for (const infra of infrastructure) {
         for (const endDev of endDevices) {
