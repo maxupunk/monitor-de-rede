@@ -43,9 +43,12 @@ export const useZabbixTemplatesStore = defineStore('zabbixTemplates', () => {
     importing.value = true
     error.value = null
     try {
-      const result = await apiService.post<{ templates: ZabbixImportResult[] }>('/zabbix-templates', {
-        content,
-      })
+      const result = await apiService.post<{ templates: ZabbixImportResult[] }>(
+        '/zabbix-templates',
+        {
+          content,
+        }
+      )
       await fetchTemplates()
       return result.templates
     } catch (err: unknown) {

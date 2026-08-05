@@ -180,8 +180,8 @@
                       </v-chip>
                       <v-btn
                         size="small"
-                        color="secondary"
-                        variant="tonal"
+                        color="primary"
+                        variant="outlined"
                         prepend-icon="mdi-play"
                         :loading="monitorsStore.runningId === monitor.id"
                         @click="monitorsStore.runMonitor(monitor.id)"

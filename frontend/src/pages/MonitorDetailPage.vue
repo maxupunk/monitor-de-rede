@@ -119,7 +119,9 @@
         <v-col cols="12" sm="6" md="3">
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
-              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium">Uso Mín / Máx</span>
+              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
+              >Uso Mín / Máx</span
+              >
               <v-avatar color="purple" variant="tonal" size="36">
                 <v-icon size="20">mdi-swap-vertical</v-icon>
               </v-avatar>
@@ -209,11 +211,18 @@
               <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
               >Alterações de Estado</span
               >
-              <v-avatar :color="interfaceFlapCount > 0 ? 'warning' : 'grey'" variant="tonal" size="36">
+              <v-avatar
+                :color="interfaceFlapCount > 0 ? 'warning' : 'grey'"
+                variant="tonal"
+                size="36"
+              >
                 <v-icon size="20">mdi-swap-horizontal</v-icon>
               </v-avatar>
             </div>
-            <div class="text-h4 font-weight-bold my-1" :class="interfaceFlapCount > 0 ? 'text-warning' : 'text-grey'">
+            <div
+              class="text-h4 font-weight-bold my-1"
+              :class="interfaceFlapCount > 0 ? 'text-warning' : 'text-grey'"
+            >
               {{ interfaceFlapCount }}
             </div>
             <div class="text-caption text-grey">Trocas de status no período exibido</div>
@@ -384,7 +393,11 @@
       </v-card>
 
       <!-- Gráfico Unificado de Latência / Tempo de Resposta (não se aplica a monitores de uso ou de interface) -->
-      <v-card v-if="!isGaugeMonitor && !isInterfaceMonitor" elevation="2" class="rounded-lg pa-6 mb-6">
+      <v-card
+        v-if="!isGaugeMonitor && !isInterfaceMonitor"
+        elevation="2"
+        class="rounded-lg pa-6 mb-6"
+      >
         <div class="d-flex align-center justify-space-between mb-4">
           <div>
             <h2 class="text-h6 font-weight-bold d-flex align-center ga-2">
@@ -594,10 +607,17 @@ const headerChip = computed(() => {
     }
   }
   if (isInterfaceMonitor.value) {
-    const info = interfaceStatusInfo(monitor.value.status, latestResultData(monitor.value.recentResults))
+    const info = interfaceStatusInfo(
+      monitor.value.status,
+      latestResultData(monitor.value.recentResults)
+    )
     return { label: info.label.toUpperCase(), color: info.color, icon: info.icon }
   }
-  return { label: statusText.value, color: getStatusColor(monitor.value.status), icon: 'mdi-circle' }
+  return {
+    label: statusText.value,
+    color: getStatusColor(monitor.value.status),
+    icon: 'mdi-circle',
+  }
 })
 
 const typeIcon = computed(() => {
@@ -677,11 +697,18 @@ const gaugeHistoryFiltered = computed(() => {
 })
 
 const gaugeStats = computed(() => {
-  const values = gaugeHistoryFiltered.value.map((m) => Number(m.metricValue)).filter((v) => !isNaN(v))
+  const values = gaugeHistoryFiltered.value
+    .map((m) => Number(m.metricValue))
+    .filter((v) => !isNaN(v))
   const current =
     monitor.value.gaugeMetric?.value ?? (values.length > 0 ? values[values.length - 1] : null)
   if (values.length === 0) {
-    return { current, avg: null as number | null, min: null as number | null, max: null as number | null }
+    return {
+      current,
+      avg: null as number | null,
+      min: null as number | null,
+      max: null as number | null,
+    }
   }
   const avg = Number((values.reduce((a, b) => a + b, 0) / values.length).toFixed(1))
   return { current, avg, min: Math.min(...values), max: Math.max(...values) }
@@ -691,7 +718,9 @@ const gaugeCurrentText = computed(() => {
   const v = gaugeStats.value.current
   return v !== null && v !== undefined ? `${Number(v).toFixed(1)}%` : 'N/A'
 })
-const gaugeAvgText = computed(() => (gaugeStats.value.avg !== null ? `${gaugeStats.value.avg}%` : 'N/A'))
+const gaugeAvgText = computed(() =>
+  gaugeStats.value.avg !== null ? `${gaugeStats.value.avg}%` : 'N/A'
+)
 const gaugeMinText = computed(() =>
   gaugeStats.value.min !== null ? `${gaugeStats.value.min!.toFixed(1)}%` : 'N/A'
 )

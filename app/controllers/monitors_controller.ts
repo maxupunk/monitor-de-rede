@@ -1,8 +1,10 @@
 import type { HttpContext } from '@adonisjs/core/http'
 import Monitor from '#models/monitor'
 import Metric from '#models/metric'
+import Device from '#models/device'
 import { MonitorRunner } from '#modules/monitoring/monitor_runner'
 import { ResultProcessor } from '#modules/monitoring/result_processor'
+import { DeviceStatusService } from '#modules/monitoring/device_status_service'
 
 const GAUGE_METRIC_NAMES = ['cpu_usage', 'memory_usage']
 
@@ -254,6 +256,12 @@ export default class MonitorsController {
     const monitor = await Monitor.findOrFail(params.id)
     monitor.enabled = true
     await monitor.save()
+
+    const device = await Device.find(monitor.deviceId)
+    if (device) {
+      await new DeviceStatusService().refreshFromMonitors(device)
+    }
+
     return response.ok(monitor)
   }
 
@@ -261,6 +269,12 @@ export default class MonitorsController {
     const monitor = await Monitor.findOrFail(params.id)
     monitor.enabled = false
     await monitor.save()
+
+    const device = await Device.find(monitor.deviceId)
+    if (device) {
+      await new DeviceStatusService().refreshFromMonitors(device)
+    }
+
     return response.ok(monitor)
   }
 }

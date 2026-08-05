@@ -85,13 +85,7 @@
             <v-icon>mdi-pencil</v-icon>
             <v-tooltip activator="parent" location="top">Editar</v-tooltip>
           </v-btn>
-          <v-btn
-            icon
-            size="small"
-            variant="text"
-            color="purple"
-            @click.stop="openPortScan(item)"
-          >
+          <v-btn icon size="small" variant="text" color="purple" @click.stop="openPortScan(item)">
             <v-icon>mdi-lan-connect</v-icon>
             <v-tooltip activator="parent" location="top">Escanear Portas</v-tooltip>
           </v-btn>

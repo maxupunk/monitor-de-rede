@@ -175,8 +175,8 @@
           {{ editingRuleId ? 'Editar Regra de Alerta' : 'Cadastrar Regra de Alerta' }}
         </v-card-title>
         <v-card-subtitle class="pb-2">
-          Monte a regra em linguagem simples: escolha o que medir, como comparar e a partir de
-          qual valor o alerta deve disparar.
+          Monte a regra em linguagem simples: escolha o que medir, como comparar e a partir de qual
+          valor o alerta deve disparar.
         </v-card-subtitle>
 
         <v-card-text>

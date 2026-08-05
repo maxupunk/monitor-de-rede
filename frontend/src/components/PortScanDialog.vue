@@ -75,9 +75,8 @@
           density="compact"
           class="mt-2 mb-4"
         >
-          Varreduras UDP não garantem resposta: portas sem retorno aparecem como
-          "Aberta/Filtrada" — isso é esperado e não indica necessariamente que a porta esteja
-          fechada.
+          Varreduras UDP não garantem resposta: portas sem retorno aparecem como "Aberta/Filtrada" —
+          isso é esperado e não indica necessariamente que a porta esteja fechada.
         </v-alert>
 
         <v-alert

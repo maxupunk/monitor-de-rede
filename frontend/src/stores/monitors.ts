@@ -162,17 +162,18 @@ export const useMonitorsStore = defineStore('monitors', () => {
   async function toggleMonitorEnabled(id: number, enable: boolean): Promise<boolean> {
     try {
       const endpoint = enable ? `/monitors/${id}/enable` : `/monitors/${id}/disable`
-      await apiService.post(endpoint)
+      const updated = await apiService.post<any>(endpoint)
+      const formatted = formatMonitor(updated)
       const mon = monitors.value.find((m) => m.id === id)
       if (mon) {
-        mon.enabled = enable
-        mon.isEnabled = enable
-        if (!enable) mon.status = 'disabled'
+        mon.enabled = formatted.isEnabled
+        mon.isEnabled = formatted.isEnabled
+        mon.status = formatted.status
       }
       if (currentMonitor.value?.id === id) {
-        currentMonitor.value.enabled = enable
-        currentMonitor.value.isEnabled = enable
-        if (!enable) currentMonitor.value.status = 'disabled'
+        currentMonitor.value.enabled = formatted.isEnabled
+        currentMonitor.value.isEnabled = formatted.isEnabled
+        currentMonitor.value.status = formatted.status
       }
       return true
     } catch (err: unknown) {
@@ -199,8 +200,7 @@ export const useMonitorsStore = defineStore('monitors', () => {
       maxLatency: latencies.length > 0 ? Math.max(...latencies) : null,
       // `results` está do mais antigo para o mais recente
       lastLatency: latencies.length > 0 ? latencies[latencies.length - 1] : null,
-      uptimePercentage:
-        totalChecks > 0 ? Number(((upChecks / totalChecks) * 100).toFixed(1)) : 100,
+      uptimePercentage: totalChecks > 0 ? Number(((upChecks / totalChecks) * 100).toFixed(1)) : 100,
       totalChecks,
       upChecks,
     }

@@ -30,8 +30,8 @@
           <div class="d-flex ga-2" style="gap: 8px">
             <v-btn
               size="small"
-              color="secondary"
-              variant="tonal"
+              color="primary"
+              variant="outlined"
               prepend-icon="mdi-lightning-bolt"
               :loading="probesStore.testingId === item.id"
               @click="probesStore.testProbe(item.id)"

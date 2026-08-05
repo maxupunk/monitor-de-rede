@@ -111,4 +111,30 @@ test.group('Monitors API - Functional Tests', (group) => {
     assert.equal(showRes.body().stats.uptimePercentage, 100)
     assert.equal(showRes.body().stats.totalChecks, 2)
   })
+
+  test('POST /api/monitors/:id/disable e /enable devem atualizar isEnabled mantendo o status do monitor', async ({ client, assert }) => {
+    const site = await Site.create({ name: 'Site Teste', active: true })
+    const device = await Device.create({ siteId: site.id, name: 'Servidor 2', type: 'server', status: 'online' })
+
+    const monitor = await Monitor.create({
+      deviceId: device.id,
+      type: 'ping',
+      name: 'Ping Servidor 2',
+      configuration: { host: '127.0.0.1' },
+      intervalSeconds: 60,
+      timeoutSeconds: 5,
+      enabled: true,
+      status: 'up',
+    })
+
+    const disableRes = await client.post(`/api/monitors/${monitor.id}/disable`)
+    disableRes.assertStatus(200)
+    assert.equal(disableRes.body().isEnabled, false)
+    assert.equal(disableRes.body().status, 'up')
+
+    const enableRes = await client.post(`/api/monitors/${monitor.id}/enable`)
+    enableRes.assertStatus(200)
+    assert.equal(enableRes.body().isEnabled, true)
+    assert.equal(enableRes.body().status, 'up')
+  })
 })

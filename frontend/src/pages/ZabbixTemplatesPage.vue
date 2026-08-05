@@ -5,10 +5,13 @@
         <h1 class="text-h4 font-weight-bold">Templates Zabbix</h1>
         <p class="text-subtitle-1 text-grey-darken-1">
           Importe templates oficiais do Zabbix (export JSON) para que novos dispositivos herdem os
-          itens SNMP monitorados — tensão, corrente e outras grandezas viram métricas automaticamente.
+          itens SNMP monitorados — tensão, corrente e outras grandezas viram métricas
+          automaticamente.
         </p>
       </div>
-      <v-btn color="primary" prepend-icon="mdi-upload" @click="openImportDialog"> Importar Template </v-btn>
+      <v-btn color="primary" prepend-icon="mdi-upload" @click="openImportDialog">
+        Importar Template
+      </v-btn>
     </div>
 
     <v-card elevation="2" class="rounded-lg">
@@ -26,7 +29,9 @@
         </template>
 
         <template #item.zabbixVersion="{ item }">
-          <v-chip size="small" color="info" variant="tonal">Zabbix {{ item.zabbixVersion || '?' }}</v-chip>
+          <v-chip size="small" color="info" variant="tonal">
+            Zabbix {{ item.zabbixVersion || '?' }}
+          </v-chip>
         </template>
 
         <template #item.items="{ item }">
@@ -55,9 +60,9 @@
         <v-card-title class="font-weight-bold">Importar Template Zabbix</v-card-title>
         <v-card-text>
           <p class="text-body-2 text-grey-darken-1 mb-4">
-            Selecione o arquivo JSON exportado do Zabbix (Data collection → Templates → Export). Apenas
-            itens SNMP_AGENT (com OID) são importados — outros tipos de item são listados como
-            ignorados após a importação.
+            Selecione o arquivo JSON exportado do Zabbix (Data collection → Templates → Export).
+            Apenas itens SNMP_AGENT (com OID) são importados — outros tipos de item são listados
+            como ignorados após a importação.
           </p>
           <v-file-input
             v-model="selectedFile"
@@ -70,7 +75,13 @@
             @update:model-value="fileError = ''"
           ></v-file-input>
 
-          <v-alert v-if="templatesStore.error" type="error" variant="tonal" density="compact" class="mt-2">
+          <v-alert
+            v-if="templatesStore.error"
+            type="error"
+            variant="tonal"
+            density="compact"
+            class="mt-2"
+          >
             {{ templatesStore.error }}
           </v-alert>
         </v-card-text>
@@ -99,7 +110,8 @@
           <div v-for="result in importResults" :key="result.id" class="mb-4">
             <div class="text-subtitle-1 font-weight-bold">{{ result.name }}</div>
             <div class="text-body-2 text-grey-darken-1">
-              {{ result.itemCount }} {{ result.itemCount === 1 ? 'item importado' : 'itens importados' }}
+              {{ result.itemCount }}
+              {{ result.itemCount === 1 ? 'item importado' : 'itens importados' }}
             </div>
             <v-alert
               v-if="result.skippedItems.length > 0"
@@ -157,7 +169,11 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { useZabbixTemplatesStore, type ZabbixTemplate, type ZabbixImportResult } from '@/stores/zabbixTemplates'
+import {
+  useZabbixTemplatesStore,
+  type ZabbixTemplate,
+  type ZabbixImportResult,
+} from '@/stores/zabbixTemplates'
 
 const templatesStore = useZabbixTemplatesStore()
 

@@ -47,7 +47,11 @@
             </div>
 
             <!-- Monitores de uso (CPU/Memória via SNMP) não são checagens up/down: mostramos a leitura atual -->
-            <div v-if="isGaugeMonitor(item)" class="d-flex align-center ga-2" style="max-width: 220px">
+            <div
+              v-if="isGaugeMonitor(item)"
+              class="d-flex align-center ga-2"
+              style="max-width: 220px"
+            >
               <v-progress-linear
                 :model-value="item.gaugeMetric?.value ?? 0"
                 height="10"
@@ -63,9 +67,7 @@
               <!-- Interface de rede: up/down não conta a história toda, então mostramos a velocidade negociada -->
               <div v-if="isInterfaceMonitor(item)" class="text-caption mb-1">
                 <v-icon size="13" :color="interfaceStatusInfo(item).color">
-                  {{
-                    interfaceStatusInfo(item).icon
-                  }}
+                  {{ interfaceStatusInfo(item).icon }}
                 </v-icon>
                 {{ interfaceStatusInfo(item).label }}
               </div>
@@ -94,16 +96,28 @@
         </template>
 
         <template #item.status="{ item }">
-          <v-chip v-if="isGaugeMonitor(item)" :color="gaugeColor(item)" size="small">
-            {{ item.gaugeMetric ? `${Math.round(item.gaugeMetric.value)}%` : 'SEM DADOS' }}
-          </v-chip>
-          <v-chip v-else-if="isInterfaceMonitor(item)" :color="interfaceStatusInfo(item).color" size="small">
-            <v-icon start size="14">{{ interfaceStatusInfo(item).icon }}</v-icon>
-            {{ interfaceStatusInfo(item).label }}
-          </v-chip>
-          <v-chip v-else :color="getStatusColor(item.status)" size="small">
-            {{ (item.status || 'UNKNOWN').toUpperCase() }}
-          </v-chip>
+          <div class="d-flex flex-column align-start py-1">
+            <v-chip v-if="isGaugeMonitor(item)" :color="gaugeColor(item)" size="small">
+              {{ item.gaugeMetric ? `${Math.round(item.gaugeMetric.value)}%` : 'SEM DADOS' }}
+            </v-chip>
+            <v-chip
+              v-else-if="isInterfaceMonitor(item)"
+              :color="interfaceStatusInfo(item).color"
+              size="small"
+            >
+              <v-icon start size="14">{{ interfaceStatusInfo(item).icon }}</v-icon>
+              {{ interfaceStatusInfo(item).label }}
+            </v-chip>
+            <v-chip v-else :color="getStatusColor(item.status)" size="small">
+              {{ (item.status || 'UNKNOWN').toUpperCase() }}
+            </v-chip>
+            <span v-if="!item.isEnabled" class="text-caption text-grey-darken-1 mt-1 font-italic">
+              Última informação
+              <v-tooltip activator="parent" location="top">
+                Monitor desativado - exibindo última informação registrada
+              </v-tooltip>
+            </span>
+          </div>
         </template>
 
         <template #item.isEnabled="{ item }">
@@ -119,8 +133,8 @@
         <template #item.actions="{ item }">
           <v-btn
             size="small"
-            color="secondary"
-            variant="tonal"
+            color="primary"
+            variant="outlined"
             prepend-icon="mdi-play"
             class="mr-1"
             :loading="monitorsStore.runningId === item.id"

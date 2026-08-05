@@ -349,7 +349,13 @@
               </div>
 
               <v-row class="mb-6">
-                <v-col v-for="card in templateMetricCards" :key="card.label" cols="12" sm="6" md="3">
+                <v-col
+                  v-for="card in templateMetricCards"
+                  :key="card.label"
+                  cols="12"
+                  sm="6"
+                  md="3"
+                >
                   <v-card border flat class="pa-4 rounded-lg h-100">
                     <div class="d-flex align-center justify-space-between mb-2">
                       <span class="text-caption text-grey-darken-1 font-weight-medium">{{
@@ -773,7 +779,11 @@
             ></v-alert>
 
             <!-- Recursos de CPU & Memória (apenas se o dispositivo de fato expôs esses dados) -->
-            <v-card v-if="hasCpuData || hasMemoryData" variant="outlined" class="mb-6 rounded-lg pa-4">
+            <v-card
+              v-if="hasCpuData || hasMemoryData"
+              variant="outlined"
+              class="mb-6 rounded-lg pa-4"
+            >
               <div
                 class="text-subtitle-1 font-weight-bold mb-3 d-flex align-center ga-2"
                 style="gap: 8px"
@@ -850,7 +860,11 @@
                       class="text-subtitle-1 font-weight-bold"
                       :class="item.value !== null ? 'text-primary' : 'text-grey'"
                     >
-                      {{ item.value !== null ? `${item.value}${item.units ? ` ${item.units}` : ''}` : 'Sem resposta' }}
+                      {{
+                        item.value !== null
+                          ? `${item.value}${item.units ? ` ${item.units}` : ''}`
+                          : 'Sem resposta'
+                      }}
                     </div>
                   </div>
                 </v-col>
@@ -1020,7 +1034,7 @@ const hasCpuData = computed(() => {
   const cpu = detailStore.scanResult?.cpuInfo
   return Boolean(
     cpu &&
-      (cpu.usagePercent !== undefined || cpu.coresCount !== undefined || cpu.load1min !== undefined)
+    (cpu.usagePercent !== undefined || cpu.coresCount !== undefined || cpu.load1min !== undefined)
   )
 })
 const hasMemoryData = computed(() => {

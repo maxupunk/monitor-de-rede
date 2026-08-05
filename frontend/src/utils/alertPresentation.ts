@@ -133,11 +133,26 @@ interface OperatorOption {
 
 export const ALERT_OPERATORS: OperatorOption[] = [
   { value: 'gt', title: 'For maior que', phrase: 'for maior que', kinds: ['number'] },
-  { value: 'gte', title: 'For maior ou igual a', phrase: 'for maior ou igual a', kinds: ['number'] },
+  {
+    value: 'gte',
+    title: 'For maior ou igual a',
+    phrase: 'for maior ou igual a',
+    kinds: ['number'],
+  },
   { value: 'lt', title: 'For menor que', phrase: 'for menor que', kinds: ['number'] },
-  { value: 'lte', title: 'For menor ou igual a', phrase: 'for menor ou igual a', kinds: ['number'] },
+  {
+    value: 'lte',
+    title: 'For menor ou igual a',
+    phrase: 'for menor ou igual a',
+    kinds: ['number'],
+  },
   { value: 'eq', title: 'For igual a', phrase: 'for igual a', kinds: ['number', 'enum'] },
-  { value: 'neq', title: 'For diferente de', phrase: 'for diferente de', kinds: ['number', 'enum'] },
+  {
+    value: 'neq',
+    title: 'For diferente de',
+    phrase: 'for diferente de',
+    kinds: ['number', 'enum'],
+  },
   { value: 'contains', title: 'Contiver o texto', phrase: 'contiver o texto', kinds: ['enum'] },
 ]
 

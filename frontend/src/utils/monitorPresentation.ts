@@ -13,7 +13,11 @@ export function isGaugeMonitor(
 }
 
 export function gaugeMetricName(monitor: Pick<Monitor, 'configuration' | 'gaugeMetric'>): string {
-  return (monitor.configuration?.metric as string | undefined) || monitor.gaugeMetric?.name || 'cpu_usage'
+  return (
+    (monitor.configuration?.metric as string | undefined) ||
+    monitor.gaugeMetric?.name ||
+    'cpu_usage'
+  )
 }
 
 export function gaugeTypeLabel(monitor: Pick<Monitor, 'configuration' | 'gaugeMetric'>): string {
