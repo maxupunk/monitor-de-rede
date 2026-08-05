@@ -4,10 +4,12 @@ import Device from '#models/device'
 import DeviceLink from '#models/device_link'
 import DeviceInterface from '#models/device_interface'
 import type { LldpNeighbor } from '#modules/snmp/collectors/lldp_collector'
+import { EventBus } from '#modules/events/event_bus'
 
 export class TopologyService {
   private builder = new TopologyBuilder()
   private linkResolver = new LinkResolver()
+  private eventBus = EventBus.getInstance()
 
   async getTopology(siteId?: number): Promise<TopologyGraph> {
     const query = Device.query().preload('site').preload('interfaces')
@@ -116,7 +118,19 @@ export class TopologyService {
       })
     }
 
-    return this.linkResolver.persistResolvedLinks(rawLinks)
+    const links = await this.linkResolver.persistResolvedLinks(rawLinks)
+
+    if (links.length > 0) {
+      // A varredura SNMP roda em background; sem o evento, o mapa de topologia
+      // só mostraria os novos enlaces após recarregar a tela.
+      this.eventBus.emit('topology:updated', {
+        sourceDeviceId: sourceDevice.id,
+        linkCount: links.length,
+        discoveryMethod: 'snmp_lldp_cdp',
+      })
+    }
+
+    return links
   }
 
   async inferSubnetLinks(): Promise<DeviceLink[]> {

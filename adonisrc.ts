@@ -68,6 +68,12 @@ export default defineConfig({
     () => import('#start/kernel'),
     () => import('#start/validator'),
     {
+      // Ponte de eventos entre processos: vale para o servidor HTTP e para os
+      // comandos de longa duração (scheduler, worker, probe).
+      file: () => import('#start/events'),
+      environment: ['web', 'console'],
+    },
+    {
       file: () => import('#start/vpn_probe'),
       environment: ['web'],
     },

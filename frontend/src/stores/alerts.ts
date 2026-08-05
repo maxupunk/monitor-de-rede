@@ -1,45 +1,67 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { apiService } from '@/services/apiService'
+import type { AlertOperator } from '@/utils/alertPresentation'
+
+export interface AlertRuleCondition {
+  field: string
+  operator: AlertOperator
+  value: number | string
+}
 
 export interface AlertRule {
   id: number
+  siteId?: number | null
+  deviceId?: number | null
+  monitorId?: number | null
   name: string
-  metric: string
-  condition: 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'neq'
-  threshold: number
-  severity: 'info' | 'warning' | 'error' | 'critical'
-  channels?: string[]
+  type: 'device_offline' | 'latency_high' | 'http_failure' | 'tcp_failure' | 'custom'
+  condition: AlertRuleCondition
+  severity: 'info' | 'warning' | 'critical'
+  durationSeconds: number
+  enabled: boolean
   isEnabled: boolean
 }
 
 export interface AlertEvent {
   id: number
-  alertRuleId?: number
-  deviceId?: number
-  monitorId?: number
+  alertRuleId?: number | null
+  deviceId?: number | null
+  monitorId?: number | null
   severity: 'info' | 'warning' | 'error' | 'critical'
   status: 'active' | 'acknowledged' | 'silenced' | 'resolved'
   title: string
   message: string
   acknowledgedBy?: string
   silencedUntil?: string
-  device?: { id: number; name: string }
+  device?: { id: number; name: string } | null
+  monitor?: { id: number; name: string } | null
+  startedAt?: string
   createdAt: string
-  resolvedAt?: string
+  resolvedAt?: string | null
 }
 
 export const useAlertsStore = defineStore('alerts', () => {
-  const activeAlerts = ref<AlertEvent[]>([])
+  const alertEvents = ref<AlertEvent[]>([])
   const alertRules = ref<AlertRule[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
+  /** Marca a última mutação vinda do SSE, útil para feedback visual */
+  const lastRealtimeUpdateAt = ref<string | null>(null)
+
+  /** Somente eventos que ainda demandam atenção do operador */
+  const activeAlerts = computed(() => alertEvents.value.filter((a) => a.status !== 'resolved'))
+
+  const criticalCount = computed(
+    () =>
+      activeAlerts.value.filter((a) => a.severity === 'critical' || a.severity === 'error').length
+  )
 
   async function fetchActiveAlerts() {
     loading.value = true
     error.value = null
     try {
-      activeAlerts.value = await apiService.get<AlertEvent[]>('/alerts')
+      alertEvents.value = await apiService.get<AlertEvent[]>('/alerts')
     } catch (err: unknown) {
       error.value = err instanceof Error ? err.message : 'Erro ao carregar alertas'
     } finally {
@@ -62,8 +84,7 @@ export const useAlertsStore = defineStore('alerts', () => {
   async function acknowledgeAlert(alertId: number): Promise<boolean> {
     try {
       await apiService.post(`/alerts/${alertId}/acknowledge`)
-      const al = activeAlerts.value.find((a) => a.id === alertId)
-      if (al) al.status = 'acknowledged'
+      patchAlertEvent(alertId, { status: 'acknowledged' })
       return true
     } catch (err: unknown) {
       error.value = err instanceof Error ? err.message : 'Erro ao reconhecer alerta'
@@ -73,9 +94,11 @@ export const useAlertsStore = defineStore('alerts', () => {
 
   async function silenceAlert(alertId: number, durationMinutes: number): Promise<boolean> {
     try {
-      await apiService.post(`/alerts/${alertId}/silence`, { durationMinutes })
-      const al = activeAlerts.value.find((a) => a.id === alertId)
-      if (al) al.status = 'silenced'
+      await apiService.post(`/alerts/${alertId}/silence`, {
+        minutes: durationMinutes,
+        durationMinutes,
+      })
+      patchAlertEvent(alertId, { status: 'silenced' })
       return true
     } catch (err: unknown) {
       error.value = err instanceof Error ? err.message : 'Erro ao silenciar alerta'
@@ -86,7 +109,7 @@ export const useAlertsStore = defineStore('alerts', () => {
   async function createAlertRule(payload: Partial<AlertRule>): Promise<boolean> {
     try {
       const created = await apiService.post<AlertRule>('/alert-rules', payload)
-      alertRules.value.push(created)
+      upsertAlertRule(created)
       return true
     } catch (err: unknown) {
       error.value = err instanceof Error ? err.message : 'Erro ao criar regra de alerta'
@@ -97,8 +120,7 @@ export const useAlertsStore = defineStore('alerts', () => {
   async function updateAlertRule(id: number, payload: Partial<AlertRule>): Promise<boolean> {
     try {
       const updated = await apiService.put<AlertRule>(`/alert-rules/${id}`, payload)
-      const index = alertRules.value.findIndex((r) => r.id === id)
-      if (index !== -1) alertRules.value[index] = updated
+      upsertAlertRule(updated)
       return true
     } catch (err: unknown) {
       error.value = err instanceof Error ? err.message : 'Erro ao atualizar regra'
@@ -109,7 +131,7 @@ export const useAlertsStore = defineStore('alerts', () => {
   async function deleteAlertRule(id: number): Promise<boolean> {
     try {
       await apiService.delete(`/alert-rules/${id}`)
-      alertRules.value = alertRules.value.filter((r) => r.id !== id)
+      removeAlertRule(id)
       return true
     } catch (err: unknown) {
       error.value = err instanceof Error ? err.message : 'Erro ao remover regra'
@@ -117,11 +139,49 @@ export const useAlertsStore = defineStore('alerts', () => {
     }
   }
 
+  // --- Mutações aplicadas pelo fluxo SSE (sem refetch da lista inteira) ---
+
+  function upsertAlertEvent(event: AlertEvent) {
+    const index = alertEvents.value.findIndex((a) => a.id === event.id)
+    if (index === -1) {
+      alertEvents.value.unshift(event)
+    } else {
+      alertEvents.value[index] = { ...alertEvents.value[index], ...event }
+    }
+    lastRealtimeUpdateAt.value = new Date().toISOString()
+  }
+
+  function patchAlertEvent(id: number, patch: Partial<AlertEvent>) {
+    const current = alertEvents.value.find((a) => a.id === id)
+    if (!current) return
+    Object.assign(current, patch)
+    lastRealtimeUpdateAt.value = new Date().toISOString()
+  }
+
+  function upsertAlertRule(rule: AlertRule) {
+    const normalized: AlertRule = { ...rule, isEnabled: rule.isEnabled ?? rule.enabled }
+    const index = alertRules.value.findIndex((r) => r.id === normalized.id)
+    if (index === -1) {
+      alertRules.value.push(normalized)
+    } else {
+      alertRules.value[index] = normalized
+    }
+    lastRealtimeUpdateAt.value = new Date().toISOString()
+  }
+
+  function removeAlertRule(id: number) {
+    alertRules.value = alertRules.value.filter((r) => r.id !== id)
+    lastRealtimeUpdateAt.value = new Date().toISOString()
+  }
+
   return {
+    alertEvents,
     activeAlerts,
+    criticalCount,
     alertRules,
     loading,
     error,
+    lastRealtimeUpdateAt,
     fetchActiveAlerts,
     fetchAlertRules,
     acknowledgeAlert,
@@ -129,5 +189,9 @@ export const useAlertsStore = defineStore('alerts', () => {
     createAlertRule,
     updateAlertRule,
     deleteAlertRule,
+    upsertAlertEvent,
+    patchAlertEvent,
+    upsertAlertRule,
+    removeAlertRule,
   }
 })

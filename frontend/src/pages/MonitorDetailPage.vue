@@ -490,9 +490,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useMonitorsStore, type Monitor } from '@/stores/monitors'
+import { useEventsStore } from '@/stores/events'
 import { apiService } from '@/services/apiService'
 import type { DeviceMetric } from '@/stores/deviceDetail'
 import MonitorTimelineBar from '@/components/MonitorTimelineBar.vue'
@@ -510,6 +511,7 @@ import {
 const route = useRoute()
 const router = useRouter()
 const monitorsStore = useMonitorsStore()
+const eventsStore = useEventsStore()
 
 const monitorId = computed(() => Number(route.params.id))
 
@@ -733,11 +735,42 @@ async function loadGaugeHistory() {
   }
 }
 
+/**
+ * O histórico de uso (CPU/Memória) é estado local desta tela, então ela mesma
+ * assina o evento de coleta SNMP para acompanhar as novas amostras ao vivo.
+ * Os demais dados (timeline, latência, KPIs) vêm patchados pela store.
+ */
+let stopMetricsListener: (() => void) | null = null
+
 onMounted(async () => {
-  if (monitorId.value) {
-    await monitorsStore.fetchMonitorById(monitorId.value)
-    if (isGaugeMonitor.value) await loadGaugeHistory()
-  }
+  if (!monitorId.value) return
+
+  await monitorsStore.fetchMonitorById(monitorId.value)
+  if (isGaugeMonitor.value) await loadGaugeHistory()
+
+  stopMetricsListener = eventsStore.onEvent('metric:recorded', (data) => {
+    if (!isGaugeMonitor.value) return
+    if (Number(data.deviceId) !== monitor.value.deviceId) return
+
+    const name = gaugeMetricName(monitor.value)
+    const samples = (data.metrics as Array<Record<string, unknown>>) || []
+
+    for (const sample of samples) {
+      if (sample.name !== name) continue
+      gaugeHistory.value.push({
+        id: Date.now() + gaugeHistory.value.length,
+        deviceId: monitor.value.deviceId,
+        metricName: String(sample.name),
+        metricValue: Number(sample.value),
+        unit: String(sample.unit ?? '%'),
+        createdAt: String(sample.recordedAt),
+      })
+    }
+  })
+})
+
+onUnmounted(() => {
+  stopMetricsListener?.()
 })
 
 async function refreshData() {

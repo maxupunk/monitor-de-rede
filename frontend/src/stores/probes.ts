@@ -55,11 +55,28 @@ export const useProbesStore = defineStore('probes', () => {
     }
   }
 
+  /** Aplica o payload SSE `probe:status` no probe já carregado */
+  function applyRealtimeStatus(data: Record<string, unknown>) {
+    const id = Number(data.id ?? data.probeId)
+    if (!id) return
+    const probe = probes.value.find((p) => p.id === id)
+    if (!probe) {
+      // Probe novo (ex.: primeiro heartbeat) — recarrega a lista
+      fetchProbes()
+      return
+    }
+
+    if (data.status) probe.status = data.status as Probe['status']
+    if (data.name) probe.name = String(data.name)
+    if (data.lastSeenAt) probe.lastHeartbeatAt = String(data.lastSeenAt)
+  }
+
   return {
     probes,
     loading,
     testingId,
     error,
+    applyRealtimeStatus,
     fetchProbes,
     revokeProbe,
     testProbe,

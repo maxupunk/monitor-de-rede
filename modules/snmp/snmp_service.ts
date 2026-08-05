@@ -14,6 +14,15 @@ import { DateTime } from 'luxon'
 import { TopologyService } from '#modules/topology/topology_service'
 import { InterfaceMonitoringService } from '#modules/monitoring/interface_monitoring_service'
 import { ZabbixTemplateCollector } from '#modules/zabbix/zabbix_template_collector'
+import { EventBus } from '#modules/events/event_bus'
+
+interface RecordedMetric {
+  name: string
+  value: number
+  unit: string
+  interfaceId?: number | null
+  recordedAt: string
+}
 
 export class SnmpService {
   private factory = new SnmpSessionFactory()
@@ -26,6 +35,32 @@ export class SnmpService {
   private topologyService = new TopologyService()
   private interfaceMonitoringService = new InterfaceMonitoringService()
   private zabbixTemplateCollector = new ZabbixTemplateCollector()
+  private eventBus = EventBus.getInstance()
+
+  /**
+   * Persiste a métrica e a acumula para o evento `metric:recorded`, que
+   * alimenta os gráficos de CPU/Memória e tráfego em tempo real.
+   */
+  private async recordMetric(
+    collected: RecordedMetric[],
+    payload: {
+      deviceId: number
+      interfaceId?: number
+      name: string
+      value: number
+      unit: string
+      recordedAt: DateTime
+    }
+  ): Promise<void> {
+    await Metric.create(payload)
+    collected.push({
+      name: payload.name,
+      value: payload.value,
+      unit: payload.unit,
+      interfaceId: payload.interfaceId ?? null,
+      recordedAt: payload.recordedAt.toISO()!,
+    })
+  }
 
   async scanDevice(device: Device, config: SnmpConfig) {
     const client = this.factory.createSession(config)
@@ -161,6 +196,7 @@ export class SnmpService {
     // 3. Traffic Metrics (Apenas para interfaces selecionadas/monitoradas)
     const trafficList = await this.trafficCollector.collect(client)
     let metricCount = 0
+    const collected: RecordedMetric[] = []
 
     for (const traffic of trafficList) {
       const targetIface = savedIfaces.find((i) => i.snmpIndex === traffic.ifIndex)
@@ -220,7 +256,7 @@ export class SnmpService {
         } catch {}
       }
 
-      await Metric.create({
+      await this.recordMetric(collected, {
         deviceId: device.id,
         interfaceId: targetIface.id,
         name: 'ifHCInOctets',
@@ -229,7 +265,7 @@ export class SnmpService {
         recordedAt: DateTime.fromJSDate(traffic.recordedAt),
       })
 
-      await Metric.create({
+      await this.recordMetric(collected, {
         deviceId: device.id,
         interfaceId: targetIface.id,
         name: 'ifHCOutOctets',
@@ -239,7 +275,7 @@ export class SnmpService {
       })
 
       if (inBps >= 0) {
-        await Metric.create({
+        await this.recordMetric(collected, {
           deviceId: device.id,
           interfaceId: targetIface.id,
           name: 'inBps',
@@ -250,7 +286,7 @@ export class SnmpService {
       }
 
       if (outBps >= 0) {
-        await Metric.create({
+        await this.recordMetric(collected, {
           deviceId: device.id,
           interfaceId: targetIface.id,
           name: 'outBps',
@@ -267,7 +303,7 @@ export class SnmpService {
     if (hasCpuMonitor || activeMonitors.length === 0) {
       const cpuInfo = await this.cpuCollector.collect(client)
       if (cpuInfo.usagePercent !== undefined) {
-        await Metric.create({
+        await this.recordMetric(collected, {
           deviceId: device.id,
           name: 'cpu_usage',
           value: cpuInfo.usagePercent,
@@ -277,7 +313,7 @@ export class SnmpService {
         metricCount++
       }
       if (cpuInfo.load1min !== undefined) {
-        await Metric.create({
+        await this.recordMetric(collected, {
           deviceId: device.id,
           name: 'cpu_load_1min',
           value: cpuInfo.load1min,
@@ -291,7 +327,7 @@ export class SnmpService {
     if (hasMemoryMonitor || activeMonitors.length === 0) {
       const memoryInfo = await this.memoryCollector.collect(client)
       if (memoryInfo.usedPercent !== undefined) {
-        await Metric.create({
+        await this.recordMetric(collected, {
           deviceId: device.id,
           name: 'memory_usage',
           value: memoryInfo.usedPercent,
@@ -311,6 +347,14 @@ export class SnmpService {
     // 6. Itens de Template Zabbix (genérico) — apenas se o dispositivo tiver um template vinculado
     if (device.zabbixTemplateId) {
       metricCount += await this.zabbixTemplateCollector.collect(device, client)
+    }
+
+    if (collected.length > 0) {
+      this.eventBus.emit('metric:recorded', {
+        deviceId: device.id,
+        deviceName: device.name,
+        metrics: collected,
+      })
     }
 
     return {

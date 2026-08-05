@@ -6,12 +6,14 @@ import { PortScanner } from './scanners/port_scanner.js'
 import { DiscoveryMerger } from './discovery_merger.js'
 import DiscoveryRun from '#models/discovery_run'
 import DiscoveryResult from '#models/discovery_result'
+import { EventBus } from '#modules/events/event_bus'
 
 export class DiscoveryService {
   private icmpScanner = new IcmpScanner()
   private arpScanner = new ArpScanner()
   private portScanner = new PortScanner()
   private merger = new DiscoveryMerger()
+  private eventBus = EventBus.getInstance()
 
   async runDiscovery(cidr: string, networkId?: number, probeId?: number | null): Promise<DiscoveredHost[]> {
     let runRecord: DiscoveryRun | null = null
@@ -25,6 +27,14 @@ export class DiscoveryService {
         configuration: { cidr },
       })
     }
+
+    this.eventBus.emit('discovery:started', {
+      runId: runRecord?.id ?? null,
+      networkId: networkId ?? null,
+      probeId: probeId ?? null,
+      cidr,
+      status: 'running',
+    })
 
     try {
       const [icmpRes, arpRes] = await Promise.all([
@@ -59,14 +69,32 @@ export class DiscoveryService {
         await runRecord.save()
       }
 
+      this.eventBus.emit('discovery:completed', {
+        runId: runRecord?.id ?? null,
+        networkId: networkId ?? null,
+        cidr,
+        status: 'completed',
+        hostsFound: finalHosts.length,
+      })
+
       return finalHosts
     } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
       if (runRecord) {
         runRecord.status = 'failed'
         runRecord.finishedAt = DateTime.now()
-        runRecord.error = err instanceof Error ? err.message : String(err)
+        runRecord.error = message
         await runRecord.save()
       }
+
+      this.eventBus.emit('discovery:failed', {
+        runId: runRecord?.id ?? null,
+        networkId: networkId ?? null,
+        cidr,
+        status: 'failed',
+        error: message,
+      })
+
       throw err
     }
   }

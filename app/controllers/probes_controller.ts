@@ -4,13 +4,28 @@ import { DateTime } from 'luxon'
 import Probe from '#models/probe'
 import { ProbeTaskDispatcher } from '#modules/probes/probe_task_dispatcher'
 import { ProbeResultReceiver } from '#modules/probes/probe_result_receiver'
+import { EventBus } from '#modules/events/event_bus'
 
 export default class ProbesController {
   private taskDispatcher = new ProbeTaskDispatcher()
   private resultReceiver = new ProbeResultReceiver()
+  private eventBus = EventBus.getInstance()
 
   private hashToken(rawToken: string): string {
     return crypto.createHash('sha256').update(rawToken).digest('hex')
+  }
+
+  /** Publica no SSE apenas quando o estado do probe realmente muda */
+  private emitProbeStatus(probe: Probe, previousStatus?: Probe['status']) {
+    if (previousStatus !== undefined && previousStatus === probe.status) return
+    this.eventBus.emit('probe:status', {
+      id: probe.id,
+      probeId: probe.id,
+      name: probe.name,
+      status: probe.status,
+      version: probe.version ?? null,
+      lastSeenAt: probe.lastSeenAt?.toISO() ?? null,
+    })
   }
 
   private async authenticateProbe(request: HttpContext['request']): Promise<Probe | null> {
@@ -51,9 +66,11 @@ export default class ProbesController {
 
   async update({ params, request, response }: HttpContext) {
     const probe = await Probe.findOrFail(params.id)
+    const previousStatus = probe.status
     const data = request.only(['siteId', 'name', 'status', 'version', 'configuration'])
     probe.merge(data)
     await probe.save()
+    this.emitProbeStatus(probe, previousStatus)
     return response.ok(probe)
   }
 
@@ -65,9 +82,11 @@ export default class ProbesController {
 
   async revoke({ params, response }: HttpContext) {
     const probe = await Probe.findOrFail(params.id)
+    const previousStatus = probe.status
     probe.status = 'revoked'
     probe.revokedAt = DateTime.now()
     await probe.save()
+    this.emitProbeStatus(probe, previousStatus)
     return response.ok(probe)
   }
 
@@ -78,11 +97,14 @@ export default class ProbesController {
     }
 
     const body = request.body()
+    const previousStatus = probe.status
     probe.status = 'online'
     probe.lastSeenAt = DateTime.now()
     if (body.version) probe.version = body.version
     if (body.configuration) probe.configuration = body.configuration
     await probe.save()
+
+    this.emitProbeStatus(probe, previousStatus)
 
     return response.ok({ status: 'ok', probeId: probe.id })
   }

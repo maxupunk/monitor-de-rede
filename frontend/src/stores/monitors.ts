@@ -50,6 +50,9 @@ export interface Monitor {
   updatedAt?: string
 }
 
+/** Teto do histórico mantido em memória — acompanha o limite do backend */
+const HISTORY_LIMIT = 100
+
 export const useMonitorsStore = defineStore('monitors', () => {
   const monitors = ref<Monitor[]>([])
   const currentMonitor = ref<Monitor | null>(null)
@@ -178,12 +181,107 @@ export const useMonitorsStore = defineStore('monitors', () => {
     }
   }
 
+  /** Mesmo cálculo do MonitorsController.show, para os KPIs não ficarem defasados */
+  function computeStats(results: MonitorResult[]): MonitorStats {
+    const latencies = results
+      .map((r) => r.latencyMs)
+      .filter((l): l is number => l !== null && l !== undefined)
+
+    const totalChecks = results.length
+    const upChecks = results.filter((r) => r.status === 'up').length
+
+    return {
+      avgLatency:
+        latencies.length > 0
+          ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length)
+          : null,
+      minLatency: latencies.length > 0 ? Math.min(...latencies) : null,
+      maxLatency: latencies.length > 0 ? Math.max(...latencies) : null,
+      // `results` está do mais antigo para o mais recente
+      lastLatency: latencies.length > 0 ? latencies[latencies.length - 1] : null,
+      uptimePercentage:
+        totalChecks > 0 ? Number(((upChecks / totalChecks) * 100).toFixed(1)) : 100,
+      totalChecks,
+      upChecks,
+    }
+  }
+
+  /**
+   * Aplica o payload SSE `monitor:result` diretamente no monitor em memória:
+   * status, última latência, barra de histórico, gráfico e KPIs. Evita que a
+   * tela dependa de recarregamento manual para refletir o monitoramento.
+   */
+  function applyRealtimeResult(data: Record<string, unknown>) {
+    const id = Number(data.monitorId ?? data.id)
+    if (!id) return
+
+    const status = data.status as Monitor['status']
+    const latencyMs = data.latencyMs === null ? undefined : (data.latencyMs as number | undefined)
+    const finishedAt = String(data.finishedAt ?? new Date().toISOString())
+
+    const result: MonitorResult = {
+      // Id sintético: o registro real só chega no próximo carregamento da lista
+      id: Date.now(),
+      monitorId: id,
+      status: status as MonitorResult['status'],
+      startedAt: String(data.startedAt ?? finishedAt),
+      finishedAt,
+      durationMs: Number(data.durationMs ?? 0),
+      latencyMs: latencyMs ?? null,
+      message: (data.message as string | null) ?? null,
+    }
+
+    const patch = (target: Monitor, withStats: boolean) => {
+      if (status) target.status = status
+      target.lastLatencyMs = latencyMs
+      target.lastCheckedAt = finishedAt
+
+      // A timeline exibe do mais antigo para o mais recente
+      const history = [...(target.recentResults || []), result].slice(-HISTORY_LIMIT)
+      target.recentResults = history
+
+      if (withStats) target.stats = computeStats(history)
+    }
+
+    const listed = monitors.value.find((m) => m.id === id)
+    if (listed) patch(listed, false)
+    if (currentMonitor.value?.id === id) patch(currentMonitor.value, true)
+  }
+
+  /** Atualiza a última leitura de CPU/Memória exibida nos monitores de uso */
+  function applyRealtimeMetrics(data: Record<string, unknown>) {
+    const deviceId = Number(data.deviceId)
+    const metrics = (data.metrics as Array<Record<string, unknown>>) || []
+    if (!deviceId || metrics.length === 0) return
+
+    const apply = (target: Monitor) => {
+      if (target.deviceId !== deviceId) return
+      const name = target.gaugeMetric?.name
+      if (!name) return
+
+      const sample = [...metrics].reverse().find((m) => m.name === name)
+      if (!sample) return
+
+      target.gaugeMetric = {
+        name,
+        value: Number(sample.value),
+        unit: String(sample.unit ?? '%'),
+        recordedAt: String(sample.recordedAt),
+      }
+    }
+
+    for (const mon of monitors.value) apply(mon)
+    if (currentMonitor.value) apply(currentMonitor.value)
+  }
+
   return {
     monitors,
     currentMonitor,
     loading,
     runningId,
     error,
+    applyRealtimeResult,
+    applyRealtimeMetrics,
     fetchMonitors,
     fetchMonitorById,
     createMonitor,

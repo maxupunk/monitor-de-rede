@@ -3,6 +3,7 @@ import VpnServer from '#models/vpn_server'
 import VpnPeer from '#models/vpn_peer'
 import Metric from '#models/metric'
 import { PeerStatusService } from './peer_status.js'
+import { EventBus } from '#modules/events/event_bus'
 
 /**
  * Histórico de tráfego do túnel WireGuard, persistido em `metrics` — o mesmo
@@ -17,6 +18,8 @@ export const VPN_METRIC_RX_BPS = 'vpn_rx_bps'
 export const VPN_METRIC_TX_BPS = 'vpn_tx_bps'
 
 export class VpnTrafficRecorder {
+  private eventBus = EventBus.getInstance()
+
   constructor(private peerStatusService = new PeerStatusService()) {}
 
   /** Sincroniza o status de todos os servidores ativos e grava um snapshot de tráfego por peer. */
@@ -37,6 +40,22 @@ export class VpnTrafficRecorder {
 
     for (const peer of peers) {
       await this.recordPeer(peer)
+    }
+
+    if (peers.length > 0) {
+      // Um único evento por servidor: a tela de VPN repinta status e contadores
+      // sem esperar o operador recarregar a página.
+      this.eventBus.emit('vpn:peers_updated', {
+        vpnServerId,
+        peers: peers.map((peer) => ({
+          id: peer.id,
+          deviceId: peer.deviceId,
+          connectionStatus: peer.connectionStatus,
+          lastHandshakeAt: peer.lastHandshakeAt?.toISO() ?? null,
+          bytesRx: peer.bytesRx,
+          bytesTx: peer.bytesTx,
+        })),
+      })
     }
 
     return peers.length

@@ -91,12 +91,23 @@ export const useTopologyStore = defineStore('topology', () => {
     }
   }
 
+  /** Repinta o nó no mapa quando o dispositivo muda de estado */
+  function applyRealtimeStatus(data: Record<string, unknown>) {
+    const id = Number(data.id ?? data.deviceId)
+    if (!id) return
+    const node = nodes.value.find((n) => n.id === id)
+    if (node && data.status) {
+      node.status = data.status as TopologyNode['status']
+    }
+  }
+
   return {
     nodes,
     edges,
     loading,
     recalculating,
     error,
+    applyRealtimeStatus,
     fetchTopology,
     addLink,
     deleteLink,

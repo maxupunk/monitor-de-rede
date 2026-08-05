@@ -126,6 +126,18 @@ export const useDevicesStore = defineStore('devices', () => {
     }
   }
 
+  /** Aplica o payload SSE `device:status` sem recarregar a lista inteira */
+  function applyRealtimeStatus(data: Record<string, unknown>) {
+    const id = Number(data.id ?? data.deviceId)
+    if (!id) return
+    const dev = devices.value.find((d) => d.id === id)
+    if (!dev) return
+
+    if (data.status) dev.status = data.status as Device['status']
+    if (data.name) dev.name = String(data.name)
+    if (data.ipAddress) dev.ipAddress = String(data.ipAddress)
+  }
+
   return {
     devices,
     loading,
@@ -139,5 +151,6 @@ export const useDevicesStore = defineStore('devices', () => {
     updateDevice,
     deleteDevice,
     updateDeviceStatus,
+    applyRealtimeStatus,
   }
 })

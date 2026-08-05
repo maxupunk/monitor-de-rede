@@ -391,9 +391,8 @@ function formatEventDetails(evt: RealtimeEventPayload) {
         second: '2-digit',
       })
 
-  switch (evt.event) {
-    case 'monitor.checked':
-    case 'monitor.result': {
+  switch (evt.type) {
+    case 'monitor:result': {
       const name = d.name || d.monitorName || `Monitor #${d.monitorId || d.id || ''}`
       const status = String(d.status || '').toLowerCase()
       const isUp = status === 'up' || status === 'online'
@@ -406,8 +405,7 @@ function formatEventDetails(evt: RealtimeEventPayload) {
         time: dateStr,
       }
     }
-    case 'device.status':
-    case 'device.updated': {
+    case 'device:status': {
       const name = d.name || d.deviceName || `Dispositivo #${d.id || ''}`
       const status = String(d.status || '').toLowerCase()
       const isOnline = status === 'online'
@@ -419,13 +417,41 @@ function formatEventDetails(evt: RealtimeEventPayload) {
         time: dateStr,
       }
     }
-    case 'alert.triggered':
-    case 'alert.created': {
+    case 'alert:triggered': {
       return {
         title: d.title || 'Novo Alerta Disparado',
         message: d.message || 'Aviso de incidente registrado no sistema',
         icon: 'mdi-bell-ring',
         color: 'warning',
+        time: dateStr,
+      }
+    }
+    case 'alert:resolved': {
+      return {
+        title: d.title || 'Alerta Normalizado',
+        message: d.message || 'A condição que gerou o alerta foi restabelecida',
+        icon: 'mdi-check-decagram',
+        color: 'success',
+        time: dateStr,
+      }
+    }
+    case 'interface:status_change':
+    case 'interface:speed_change':
+    case 'interface:speed_downgrade': {
+      return {
+        title: `Interface ${d.ifName || ''}`.trim(),
+        message: String(d.message || 'Alteração detectada na interface'),
+        icon: 'mdi-ethernet-cable',
+        color: evt.type === 'interface:speed_change' ? 'info' : 'warning',
+        time: dateStr,
+      }
+    }
+    case 'probe:status': {
+      return {
+        title: String(d.name || `Probe #${d.id || ''}`),
+        message: `Probe passou para o estado ${String(d.status || '').toUpperCase()}`,
+        icon: 'mdi-router-wireless',
+        color: d.status === 'online' ? 'success' : 'warning',
         time: dateStr,
       }
     }
@@ -436,7 +462,7 @@ function formatEventDetails(evt: RealtimeEventPayload) {
         d.message ||
         (Object.keys(d).length ? JSON.stringify(d).slice(0, 60) : 'Evento de sistema')
       return {
-        title: evt.event || 'Evento do Sistema',
+        title: evt.type || 'Evento do Sistema',
         message: String(summary),
         icon: 'mdi-pulse',
         color: 'info',

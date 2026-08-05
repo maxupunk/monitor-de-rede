@@ -301,6 +301,21 @@ export class DiscoveryRunSchema extends BaseModel {
   declare updatedAt: DateTime | null
 }
 
+export class EventOutboxSchema extends BaseModel {
+  static $columns = ['createdAt', 'id', 'origin', 'payload', 'type'] as const
+  $columns = EventOutboxSchema.$columns
+  @column.dateTime({ autoCreate: true })
+  declare createdAt: DateTime
+  @column({ isPrimary: true })
+  declare id: number
+  @column()
+  declare origin: string
+  @column()
+  declare payload: any
+  @column()
+  declare type: string
+}
+
 export class MetricSchema extends BaseModel {
   static $columns = ['createdAt', 'deviceId', 'id', 'interfaceId', 'monitorId', 'name', 'recordedAt', 'unit', 'value'] as const
   $columns = MetricSchema.$columns

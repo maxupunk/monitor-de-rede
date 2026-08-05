@@ -25,8 +25,14 @@ export class RecoveryManager {
       })
 
       this.eventBus.emit('alert:resolved', {
+        id: event.id,
         alertEventId: event.id,
         monitorId,
+        deviceId: event.deviceId,
+        severity: event.severity,
+        status: event.status,
+        title: (event.data?.title as string) || `Alerta #${event.id}`,
+        message: event.message,
         resolvedAt: event.resolvedAt.toISO()!,
       })
     }

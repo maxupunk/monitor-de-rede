@@ -104,6 +104,9 @@ export interface ScanResult {
   snmpResponded: boolean
 }
 
+/** Teto de amostras mantidas em memória na tela de detalhe */
+const METRICS_LIMIT = 2000
+
 export const useDeviceDetailStore = defineStore('deviceDetail', () => {
   const device = ref<Device | null>(null)
   const interfaces = ref<DeviceInterface[]>([])
@@ -199,6 +202,87 @@ export const useDeviceDetailStore = defineStore('deviceDetail', () => {
     }
   }
 
+  // --- Aplicação dos eventos SSE na tela de detalhe aberta ---
+
+  /** Só reage a eventos do dispositivo atualmente carregado */
+  function isCurrentDevice(data: Record<string, unknown>): boolean {
+    const id = Number(data.deviceId ?? data.id)
+    return !!device.value && !!id && device.value.id === id
+  }
+
+  function applyDeviceStatus(data: Record<string, unknown>) {
+    if (!isCurrentDevice(data) || !device.value) return
+    if (data.status) device.value.status = data.status as Device['status']
+  }
+
+  function applyMonitorResult(data: Record<string, unknown>) {
+    if (!isCurrentDevice(data)) return
+    const monitorId = Number(data.monitorId ?? data.id)
+    const monitor = monitors.value.find((m) => m.id === monitorId)
+    if (!monitor) return
+
+    if (data.status) monitor.status = data.status as DeviceMonitor['status']
+    monitor.latencyMs = (data.latencyMs as number | undefined) ?? undefined
+    monitor.lastCheckedAt = String(data.finishedAt ?? new Date().toISOString())
+  }
+
+  /**
+   * Anexa as amostras do evento `metric:recorded` ao histórico já carregado,
+   * mantendo gráficos de CPU/Memória e tráfego vivos sem recarregar a página.
+   */
+  function applyRecordedMetrics(data: Record<string, unknown>) {
+    if (!isCurrentDevice(data)) return
+
+    const samples = (data.metrics as Array<Record<string, unknown>>) || []
+    if (samples.length === 0) return
+
+    const deviceId = Number(data.deviceId)
+    for (const sample of samples) {
+      metrics.value.push({
+        id: Date.now() + metrics.value.length,
+        deviceId,
+        interfaceId: (sample.interfaceId as number | null) ?? null,
+        interfaceName: null,
+        metricName: String(sample.name),
+        metricValue: Number(sample.value),
+        unit: String(sample.unit ?? ''),
+        createdAt: String(sample.recordedAt),
+      })
+    }
+
+    // Evita crescimento indefinido em telas deixadas abertas por horas
+    if (metrics.value.length > METRICS_LIMIT) {
+      metrics.value = metrics.value.slice(-METRICS_LIMIT)
+    }
+  }
+
+  function applyInterfaceChange(type: string, data: Record<string, unknown>) {
+    if (!isCurrentDevice(data)) return
+
+    const iface = interfaces.value.find((i) => i.id === Number(data.interfaceId))
+    if (iface) {
+      if (type === 'interface:status_change' && data.currentStatus) {
+        const status = String(data.currentStatus) as 'up' | 'down' | 'testing'
+        iface.operStatus = status
+        iface.ifOperStatus = status
+      }
+      if (type !== 'interface:status_change' && data.currentSpeed !== undefined) {
+        iface.speed = Number(data.currentSpeed)
+        iface.ifSpeed = Number(data.currentSpeed)
+      }
+    }
+
+    // O evento também vira um registro na aba de eventos do dispositivo
+    events.value.unshift({
+      id: Number(data.alertEventId ?? Date.now()),
+      deviceId: Number(data.deviceId),
+      eventType: type,
+      severity: type === 'interface:speed_change' ? 'info' : 'warning',
+      message: String(data.message ?? 'Alteração detectada na interface'),
+      createdAt: new Date().toISOString(),
+    })
+  }
+
   return {
     device,
     interfaces,
@@ -206,6 +290,10 @@ export const useDeviceDetailStore = defineStore('deviceDetail', () => {
     monitors,
     events,
     loading,
+    applyDeviceStatus,
+    applyMonitorResult,
+    applyRecordedMetrics,
+    applyInterfaceChange,
     pollingSnmp,
     scanningSnmp,
     scanResult,

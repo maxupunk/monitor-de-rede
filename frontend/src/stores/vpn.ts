@@ -175,6 +175,25 @@ export const useVpnStore = defineStore('vpn', () => {
     return null
   }
 
+  /**
+   * Aplica o snapshot de tráfego/handshake publicado pelo scheduler
+   * (`vpn:peers_updated`), mantendo a tela viva sem recarregamento.
+   */
+  function applyRealtimePeers(data: Record<string, unknown>) {
+    const incoming = (data.peers as Array<Record<string, unknown>>) || []
+    if (incoming.length === 0) return
+
+    for (const update of incoming) {
+      const peer = peers.value.find((p) => p.id === Number(update.id))
+      if (!peer) continue
+
+      peer.connectionStatus = update.connectionStatus as VpnConnectionStatus
+      peer.lastHandshakeAt = (update.lastHandshakeAt as string | null) ?? null
+      peer.bytesRx = Number(update.bytesRx ?? peer.bytesRx)
+      peer.bytesTx = Number(update.bytesTx ?? peer.bytesTx)
+    }
+  }
+
   async function fetchServer() {
     loading.value = true
     error.value = null
@@ -352,5 +371,6 @@ export const useVpnStore = defineStore('vpn', () => {
     rotateKeys,
     fetchFirewallHints,
     revokePeer,
+    applyRealtimePeers,
   }
 })

@@ -29,12 +29,15 @@
                 <v-icon color="primary">mdi-lightning-bolt</v-icon>
               </v-avatar>
             </template>
-            <v-list-item-title class="font-weight-bold">{{ evt.event }}</v-list-item-title>
+            <v-list-item-title class="font-weight-bold">
+              {{ eventTypeLabel(evt.type) }}
+              <span class="text-caption text-grey font-weight-regular ml-2">{{ evt.type }}</span>
+            </v-list-item-title>
             <v-list-item-subtitle class="font-mono">
               {{ JSON.stringify(evt.data) }}
             </v-list-item-subtitle>
             <template #append>
-              <span class="text-caption text-grey">{{ evt.timestamp || 'agora' }}</span>
+              <span class="text-caption text-grey">{{ formatTime(evt.timestamp) }}</span>
             </template>
           </v-list-item>
         </v-list>
@@ -51,4 +54,33 @@
 import { useEventsStore } from '@/stores/events'
 
 const eventsStore = useEventsStore()
+
+const EVENT_LABELS: Record<string, string> = {
+  'monitor:result': 'Verificação de monitor concluída',
+  'device:status': 'Status de dispositivo alterado',
+  'alert:triggered': 'Alerta disparado',
+  'alert:resolved': 'Alerta normalizado',
+  'alert:acknowledged': 'Alerta reconhecido',
+  'alert:silenced': 'Alerta silenciado',
+  'alert_rule:created': 'Regra de alerta criada',
+  'alert_rule:updated': 'Regra de alerta atualizada',
+  'alert_rule:deleted': 'Regra de alerta removida',
+  'probe:status': 'Status de probe alterado',
+  'discovery:started': 'Varredura de rede iniciada',
+  'discovery:completed': 'Varredura de rede concluída',
+  'discovery:failed': 'Varredura de rede falhou',
+  'interface:status_change': 'Interface mudou de estado',
+  'interface:speed_change': 'Interface renegociou velocidade',
+  'interface:speed_downgrade': 'Interface sofreu downgrade de velocidade',
+}
+
+function eventTypeLabel(type: string): string {
+  return EVENT_LABELS[type] ?? type
+}
+
+function formatTime(timestamp?: string): string {
+  if (!timestamp) return 'agora'
+  const date = new Date(timestamp)
+  return Number.isNaN(date.getTime()) ? timestamp : date.toLocaleTimeString('pt-BR')
+}
 </script>

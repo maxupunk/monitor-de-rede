@@ -37,12 +37,15 @@ export class ResultProcessor {
       data: result.data || {},
     })
 
+    const previousMonitorStatus = monitor.status
     monitor.status = result.status
     monitor.lastRunAt = finishedAt
     await monitor.save()
 
     const device = await Device.find(monitor.deviceId)
+    let deviceStatusChanged = false
     if (device) {
+      const previousDeviceStatus = device.status
       if (result.status === 'up') {
         device.status = 'online'
         device.lastSeenAt = finishedAt
@@ -51,6 +54,7 @@ export class ResultProcessor {
       } else if (result.status === 'warning') {
         device.status = 'warning'
       }
+      deviceStatusChanged = previousDeviceStatus !== device.status
       await device.save()
     }
 
@@ -63,10 +67,30 @@ export class ResultProcessor {
 
     this.eventBus.emit('monitor:result', {
       monitorId: monitor.id,
+      id: monitor.id,
+      name: monitor.name,
+      type: monitor.type,
       deviceId: monitor.deviceId,
+      deviceName: device?.name ?? null,
       status: result.status,
+      previousStatus: previousMonitorStatus,
+      statusChanged: previousMonitorStatus !== result.status,
       latencyMs: latencyMetric ? latencyMetric.value : null,
+      durationMs: Math.round(result.durationMs),
+      message: result.message || null,
+      startedAt: startedAt.toISO()!,
       finishedAt: finishedAt.toISO()!,
     })
+
+    if (device && deviceStatusChanged) {
+      this.eventBus.emit('device:status', {
+        id: device.id,
+        deviceId: device.id,
+        name: device.name,
+        status: device.status,
+        ipAddress: device.ipAddress ?? null,
+        lastSeenAt: device.lastSeenAt?.toISO() ?? null,
+      })
+    }
   }
 }
