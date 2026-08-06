@@ -824,7 +824,9 @@ async function confirmDelete() {
 
 // Estrutura unificada de dados para o componente BaseMetricChart
 const latencySeries = computed<ChartSeriesInput[]>(() => {
-  const results = (monitor.value.recentResults || []).slice().reverse()
+  // `recentResults` já vem do mais antigo para o mais recente (ver stores/monitors.ts) —
+  // não reverter aqui, ou o gráfico plota o tempo andando para trás.
+  const results = monitor.value.recentResults || []
   if (results.length === 0) return []
 
   return [

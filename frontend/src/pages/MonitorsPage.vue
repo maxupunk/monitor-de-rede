@@ -52,15 +52,16 @@
             <div
               v-if="isGaugeMonitor(item)"
               class="d-flex align-center ga-2"
-              style="max-width: 220px"
+              style="max-width: 260px"
             >
-              <v-progress-linear
-                :model-value="item.gaugeMetric?.value ?? 0"
-                height="10"
-                rounded
-                :color="gaugeColor(item)"
-                style="flex: 1"
-              ></v-progress-linear>
+              <!-- Largura igual à da MonitorTimelineBar abaixo (24 blocos de 5px + 23 gaps de 3px = 189px),
+                   para os dois estilos de linha ficarem visualmente alinhados na mesma coluna. -->
+              <MonitorSparkline
+                :data="item.gaugeHistory || []"
+                :color="gaugeSparklineColor(item)"
+                :width="189"
+                :height="28"
+              />
               <span class="text-caption font-weight-medium" style="min-width: 34px">
                 {{ item.gaugeMetric ? `${Math.round(item.gaugeMetric.value)}%` : 'N/D' }}
               </span>
@@ -198,11 +199,13 @@ import { ref, onMounted } from 'vue'
 import { useMonitorsStore, type Monitor } from '@/stores/monitors'
 import { useDevicesStore } from '@/stores/devices'
 import MonitorTimelineBar from '@/components/MonitorTimelineBar.vue'
+import MonitorSparkline from '@/components/MonitorSparkline.vue'
 import MonitorFormDialog from '@/components/MonitorFormDialog.vue'
 import {
   isGaugeMonitor,
   gaugeMetricName,
   gaugeColor as gaugeColorFor,
+  gaugeHexColor,
   isInterfaceMonitor,
   interfaceStatusInfo as interfaceStatusInfoFor,
   latestResultData,
@@ -235,6 +238,10 @@ onMounted(async () => {
 
 function gaugeColor(item: Monitor): string {
   return gaugeColorFor(item.gaugeMetric?.value ?? null, gaugeMetricName(item))
+}
+
+function gaugeSparklineColor(item: Monitor): string {
+  return gaugeHexColor(item.gaugeMetric?.value ?? null, gaugeMetricName(item))
 }
 
 function interfaceStatusInfo(item: Monitor) {

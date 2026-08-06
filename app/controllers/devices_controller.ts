@@ -123,7 +123,11 @@ export default class DevicesController {
   async monitors({ params, response }: HttpContext) {
     const monitors = await Monitor.query()
       .where('deviceId', params.id)
-      .preload('results', (query) => query.orderBy('startedAt', 'desc').limit(1))
+      // `.limit(1)` sozinho pegaria só 1 resultado no total entre TODOS os monitores do
+      // equipamento (não 1 por monitor) — `.groupLimit()` traz o último resultado de cada.
+      // `.groupOrderBy` precisa do nome da coluna no banco (`started_at`), não da
+      // propriedade do model (`startedAt`) — ele não passa pela conversão do Lucid.
+      .preload('results', (query) => query.groupLimit(1).groupOrderBy('started_at', 'desc'))
 
     const formatted = monitors.map((mon) => {
       const json = mon.serialize()

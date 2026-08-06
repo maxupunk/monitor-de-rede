@@ -43,6 +43,13 @@ export function gaugeColor(value: number | null | undefined, metricName: string)
   return 'success'
 }
 
+/** Mesmos limiares de `gaugeColor`, em hexadecimal para uso em SVG (ex: MonitorSparkline). */
+export function gaugeHexColor(value: number | null | undefined, metricName: string): string {
+  const tone = gaugeColor(value, metricName) as StatusTone | 'grey'
+  if (tone === 'grey') return TONE_HEX_COLORS.neutral
+  return TONE_HEX_COLORS[tone]
+}
+
 export function isInterfaceMonitor(monitor: Pick<Monitor, 'type' | 'configuration'>): boolean {
   const ifIndex = monitor.configuration?.ifIndex
   return monitor.type === 'snmp' && ifIndex !== undefined && ifIndex !== null

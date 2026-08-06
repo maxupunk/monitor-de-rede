@@ -289,8 +289,29 @@
                       class="monitor-timeline d-flex align-center justify-center"
                       style="flex: 2; min-width: 280px"
                     >
-                      <router-link :to="'/monitors/' + monitor.id" class="text-decoration-none">
+                      <router-link
+                        :to="'/monitors/' + monitor.id"
+                        class="text-decoration-none d-flex align-center ga-2"
+                      >
+                        <template v-if="isGaugeMonitor(monitor)">
+                          <!-- Largura igual à da MonitorTimelineBar abaixo (24 blocos de 5px + 23 gaps de 3px = 189px),
+                               para os dois estilos de linha ficarem visualmente alinhados na mesma coluna. -->
+                          <MonitorSparkline
+                            :data="monitor.gaugeHistory || []"
+                            :color="gaugeSparklineColor(monitor)"
+                            :width="189"
+                            :height="28"
+                          />
+                          <span class="text-caption font-weight-medium text-high-emphasis">
+                            {{
+                              monitor.gaugeMetric
+                                ? `${Math.round(monitor.gaugeMetric.value)}%`
+                                : 'N/D'
+                            }}
+                          </span>
+                        </template>
                         <MonitorTimelineBar
+                          v-else
                           :results="monitor.recentResults"
                           :max-blocks="24"
                           :height="20"
@@ -364,12 +385,19 @@ import { useAlertsStore } from '@/stores/alerts'
 import { useEventsStore, type RealtimeEventPayload } from '@/stores/events'
 import { useMonitorsStore } from '@/stores/monitors'
 import MonitorTimelineBar from '@/components/MonitorTimelineBar.vue'
+import MonitorSparkline from '@/components/MonitorSparkline.vue'
 import DnsLatencyCard from '@/components/DnsLatencyCard.vue'
 import AlertSilenceDialog from '@/components/AlertSilenceDialog.vue'
 import EventDetailDialog from '@/components/EventDetailDialog.vue'
 import { statusLabel } from '@/utils/alertPresentation'
 import { formatEventDetails } from '@/utils/eventPresentation'
-import { getStatusColor } from '@/utils/monitorPresentation'
+import {
+  getStatusColor,
+  isGaugeMonitor,
+  gaugeMetricName,
+  gaugeHexColor,
+} from '@/utils/monitorPresentation'
+import type { Monitor } from '@/stores/monitors'
 
 const devicesStore = useDevicesStore()
 const alertsStore = useAlertsStore()
@@ -411,6 +439,10 @@ async function refreshData() {
     monitorsStore.fetchMonitors(),
   ])
   loading.value = false
+}
+
+function gaugeSparklineColor(monitor: Monitor): string {
+  return gaugeHexColor(monitor.gaugeMetric?.value ?? null, gaugeMetricName(monitor))
 }
 
 const monitorsOnlineCount = computed(() => {

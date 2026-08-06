@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { apiService } from '@/services/apiService'
+import { gaugeMetricName, isGaugeMonitor } from '@/utils/monitorPresentation'
 
 export interface MonitorResult {
   id: number
@@ -47,12 +48,15 @@ export interface Monitor {
   recentResults?: MonitorResult[]
   stats?: MonitorStats
   gaugeMetric?: { name: string; value: number; unit: string; recordedAt: string } | null
+  gaugeHistory?: Array<{ value: number; recordedAt: string }>
   createdAt?: string
   updatedAt?: string
 }
 
 /** Teto do histórico mantido em memória — acompanha o limite do backend */
 const HISTORY_LIMIT = 100
+/** Mesmo teto do `historyLimit` usado em `fetchGaugeMetricsData` no backend */
+const GAUGE_HISTORY_LIMIT = 20
 
 export const useMonitorsStore = defineStore('monitors', () => {
   const monitors = ref<Monitor[]>([])
@@ -249,26 +253,38 @@ export const useMonitorsStore = defineStore('monitors', () => {
     if (currentMonitor.value?.id === id) patch(currentMonitor.value, true)
   }
 
-  /** Atualiza a última leitura de CPU/Memória exibida nos monitores de uso */
+  /**
+   * Atualiza a última leitura de CPU/Memória exibida nos monitores de uso e anexa a
+   * amostra ao histórico já carregado — o gráfico de tendência cresce a partir dos
+   * dados antigos em vez de recomeçar do zero a cada evento em tempo real.
+   */
   function applyRealtimeMetrics(data: Record<string, unknown>) {
     const deviceId = Number(data.deviceId)
     const metrics = (data.metrics as Array<Record<string, unknown>>) || []
     if (!deviceId || metrics.length === 0) return
 
     const apply = (target: Monitor) => {
-      if (target.deviceId !== deviceId) return
-      const name = target.gaugeMetric?.name
-      if (!name) return
+      if (target.deviceId !== deviceId || !isGaugeMonitor(target)) return
+      // Usa a configuração do monitor (não `gaugeMetric?.name`) para resolver a
+      // métrica: um monitor recém-criado ainda sem nenhuma leitura não teria
+      // `gaugeMetric` definido e nunca aplicaria sua primeira amostra em tempo real.
+      const name = gaugeMetricName(target)
 
       const sample = [...metrics].reverse().find((m) => m.name === name)
       if (!sample) return
 
+      const value = Number(sample.value)
+      const recordedAt = String(sample.recordedAt)
+
       target.gaugeMetric = {
         name,
-        value: Number(sample.value),
+        value,
         unit: String(sample.unit ?? '%'),
-        recordedAt: String(sample.recordedAt),
+        recordedAt,
       }
+      target.gaugeHistory = [...(target.gaugeHistory || []), { value, recordedAt }].slice(
+        -GAUGE_HISTORY_LIMIT
+      )
     }
 
     for (const mon of monitors.value) apply(mon)

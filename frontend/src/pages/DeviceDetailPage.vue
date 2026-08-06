@@ -270,6 +270,14 @@
                         :color="isCpuMonitored ? getCpuColor(cpuUsageValue) : 'grey-lighten-2'"
                         class="mb-3"
                       ></v-progress-linear>
+                      <MonitorSparkline
+                        v-if="isCpuMonitored && cpuUsageHistory.length > 1"
+                        :data="cpuUsageHistory"
+                        :color="getCpuHexColor(cpuUsageValue)"
+                        :width="220"
+                        :height="32"
+                        class="mb-3"
+                      />
                       <div class="d-flex align-center justify-space-between text-caption text-grey">
                         <span v-if="isCpuMonitored"
                         >Load 1 min:
@@ -329,6 +337,14 @@
                         "
                         class="mb-3"
                       ></v-progress-linear>
+                      <MonitorSparkline
+                        v-if="isMemoryMonitored && memoryUsageHistory.length > 1"
+                        :data="memoryUsageHistory"
+                        :color="getMemoryHexColor(memoryUsageValue)"
+                        :width="220"
+                        :height="32"
+                        class="mb-3"
+                      />
                       <div class="d-flex align-center justify-space-between text-caption text-grey">
                         <span v-if="isMemoryMonitored">Percentual Utilizado</span>
                         <span v-else>Recurso desativado na varredura</span>
@@ -1003,11 +1019,12 @@ import { useRoute, useRouter } from 'vue-router'
 import { useDeviceDetailStore, type DeviceMetric } from '@/stores/deviceDetail'
 import TrafficChartDialog from '@/components/TrafficChartDialog.vue'
 import BaseMetricChart, { type ChartSeriesInput } from '@/components/BaseMetricChart.vue'
+import MonitorSparkline from '@/components/MonitorSparkline.vue'
 import VpnScriptViewer from '@/components/VpnScriptViewer.vue'
 import VpnFirewallHintsDialog from '@/components/VpnFirewallHintsDialog.vue'
 import PortScanDialog from '@/components/PortScanDialog.vue'
 import MonitorFormDialog from '@/components/MonitorFormDialog.vue'
-import { getStatusColor } from '@/utils/monitorPresentation'
+import { getStatusColor, gaugeHexColor } from '@/utils/monitorPresentation'
 import {
   formatBps,
   formatBytes,
@@ -1236,6 +1253,30 @@ const memoryUsageMetric = computed(() =>
 const memoryUsageValue = computed(() =>
   memoryUsageMetric.value !== undefined ? Number(memoryUsageMetric.value.metricValue) : null
 )
+
+/** Teto de amostras exibidas na mini tendência dos cards de CPU/Memória */
+const GAUGE_SPARKLINE_LIMIT = 30
+
+// `detailStore.metrics` vem do mais recente para o mais antigo (ver devices_controller.ts) —
+// a mini tendência precisa do sentido contrário para o tempo fluir da esquerda para a direita.
+function gaugeSparklineHistory(metricName: string) {
+  return detailStore.metrics
+    .filter((m) => m.metricName === metricName)
+    .slice(0, GAUGE_SPARKLINE_LIMIT)
+    .reverse()
+    .map((m) => ({ value: Number(m.metricValue) || 0, recordedAt: m.createdAt }))
+}
+
+const cpuUsageHistory = computed(() => gaugeSparklineHistory('cpu_usage'))
+const memoryUsageHistory = computed(() => gaugeSparklineHistory('memory_usage'))
+
+function getCpuHexColor(usage?: number | null): string {
+  return gaugeHexColor(usage ?? null, 'cpu_usage')
+}
+
+function getMemoryHexColor(usage?: number | null): string {
+  return gaugeHexColor(usage ?? null, 'memory_usage')
+}
 
 // --- Métricas dirigidas por Template Zabbix (genérico) ---
 // O dispositivo pode ter um Template Zabbix importado vinculado (ver /zabbix-templates);
