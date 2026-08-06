@@ -2,7 +2,10 @@ import type { CheckResult, MonitorStatus } from '../contracts/check_result.js'
 import { SnmpClient } from '#modules/snmp/clients/snmp_client'
 import { SystemCollector } from '#modules/snmp/collectors/system_collector'
 import { InterfaceCollector } from '#modules/snmp/collectors/interface_collector'
+import { TrafficCollector } from '#modules/snmp/collectors/traffic_collector'
 import Device from '#models/device'
+import DeviceInterface from '#models/device_interface'
+import Metric from '#models/metric'
 import { SnmpService } from '#modules/snmp/snmp_service'
 import { formatSpeed } from '#modules/monitoring/interface_monitoring_service'
 import { errorMessage } from '#modules/shared/errors'
@@ -15,6 +18,7 @@ export interface SnmpCheckerConfig {
   timeoutMs?: number
   metric?: string
   ifIndex?: number
+  ifName?: string
 }
 
 /**
@@ -80,6 +84,10 @@ export class SnmpChecker {
     } catch {}
 
     try {
+      if (config.metric === 'interface_traffic' && config.ifIndex !== undefined && config.ifIndex !== null) {
+        return await this.executeInterfaceTraffic(client, config, host, startedAt, startTime)
+      }
+
       if (config.ifIndex !== undefined && config.ifIndex !== null) {
         const adminStatusOid = `1.3.6.1.2.1.2.2.1.7.${config.ifIndex}`
         const operStatusOid = `1.3.6.1.2.1.2.2.1.8.${config.ifIndex}`
@@ -203,5 +211,151 @@ export class SnmpChecker {
         metrics: [],
       }
     }
+  }
+
+  /**
+   * Coleta tráfego (in/out bps) de uma interface específica.
+   *
+   * Lê os contadores de octets (32-bit e 64-bit) via SNMP, busca a leitura
+   * anterior no banco de métricas e calcula a taxa usando `TrafficCollector`.
+   * Na primeira leitura (sem dado anterior) retorna 0 bps como baseline.
+   */
+  private async executeInterfaceTraffic(
+    client: SnmpClient,
+    config: SnmpCheckerConfig,
+    host: string,
+    startedAt: Date,
+    startTime: number
+  ): Promise<CheckResult> {
+    const ifIndex = config.ifIndex!
+
+    // OIDs de contadores de octets (32-bit ifTable + 64-bit ifXTable)
+    const inOctetsOid = `${TrafficCollector.BASE_IF_TABLE}.${TrafficCollector.COL_IF_IN_OCTETS}.${ifIndex}`
+    const outOctetsOid = `${TrafficCollector.BASE_IF_TABLE}.${TrafficCollector.COL_IF_OUT_OCTETS}.${ifIndex}`
+    const hcInOctetsOid = `${TrafficCollector.BASE_IF_XTABLE}.${TrafficCollector.COL_IF_HC_IN_OCTETS}.${ifIndex}`
+    const hcOutOctetsOid = `${TrafficCollector.BASE_IF_XTABLE}.${TrafficCollector.COL_IF_HC_OUT_OCTETS}.${ifIndex}`
+
+    const response = await client.get([inOctetsOid, outOctetsOid, hcInOctetsOid, hcOutOctetsOid])
+    const endTime = Date.now()
+    const durationMs = endTime - startTime
+    const finishedAt = new Date()
+
+    // Prefere contadores HC (64-bit) quando disponíveis
+    const rawIn32 = Number(response[inOctetsOid]) || 0
+    const rawOut32 = Number(response[outOctetsOid]) || 0
+    const rawInHc = Number(response[hcInOctetsOid]) || 0
+    const rawOutHc = Number(response[hcOutOctetsOid]) || 0
+    const currentInOctets = rawInHc > 0 ? rawInHc : rawIn32
+    const currentOutOctets = rawOutHc > 0 ? rawOutHc : rawOut32
+
+    const noData = currentInOctets === 0 && currentOutOctets === 0
+    if (noData) {
+      return {
+        success: false,
+        status: 'down',
+        startedAt,
+        finishedAt,
+        durationMs,
+        message: `Interface #${ifIndex} não retornou contadores de tráfego`,
+        metrics: [],
+      }
+    }
+
+    // Buscar leitura anterior no banco para calcular a taxa
+    let inBps = 0
+    let outBps = 0
+
+    try {
+      const device = await Device.query().where('ipAddress', host).orWhere('name', host).first()
+      if (device) {
+        const targetIface = await DeviceInterface.query()
+          .where('deviceId', device.id)
+          .where('snmpIndex', ifIndex)
+          .first()
+
+        if (targetIface) {
+          const lastIn = await Metric.query()
+            .where('deviceId', device.id)
+            .where('interfaceId', targetIface.id)
+            .whereIn('name', ['ifHCInOctets', 'ifInOctets'])
+            .orderBy('recordedAt', 'desc')
+            .first()
+
+          const lastOut = await Metric.query()
+            .where('deviceId', device.id)
+            .where('interfaceId', targetIface.id)
+            .whereIn('name', ['ifHCOutOctets', 'ifOutOctets'])
+            .orderBy('recordedAt', 'desc')
+            .first()
+
+          if (lastIn?.recordedAt && lastOut?.recordedAt) {
+            const trafficCollector = new TrafficCollector()
+            const parseDate = (val: unknown): Date => {
+              if (val instanceof Date) return val
+              if (val && typeof (val as { toJSDate?: () => Date }).toJSDate === 'function') {
+                return (val as { toJSDate: () => Date }).toJSDate()
+              }
+              if (typeof val === 'string') return new Date(val)
+              return new Date()
+            }
+
+            const prevTraffic = {
+              ifIndex,
+              inOctets: Number(lastIn.value) || 0,
+              outOctets: Number(lastOut.value) || 0,
+              inErrors: 0,
+              outErrors: 0,
+              recordedAt: parseDate(lastIn.recordedAt),
+            }
+            const currentTraffic = {
+              ifIndex,
+              inOctets: currentInOctets,
+              outOctets: currentOutOctets,
+              inErrors: 0,
+              outErrors: 0,
+              recordedAt: finishedAt,
+            }
+            const rates = trafficCollector.calculateRates(prevTraffic, currentTraffic)
+            inBps = rates.inBps
+            outBps = rates.outBps
+          }
+        }
+      }
+    } catch {
+      // Falha ao consultar histórico — retorna 0 bps como baseline
+    }
+
+    const ifLabel = config.ifName ? `${config.ifName} (#${ifIndex})` : `#${ifIndex}`
+
+    return {
+      success: true,
+      status: 'up',
+      startedAt,
+      finishedAt,
+      durationMs,
+      message: `Interface ${ifLabel}: ↓ ${this.formatBps(inBps)} / ↑ ${this.formatBps(outBps)}`,
+      data: {
+        ifIndex,
+        ifName: config.ifName ?? null,
+        inBps,
+        outBps,
+        inOctets: currentInOctets,
+        outOctets: currentOutOctets,
+      },
+      metrics: [
+        { name: 'inBps', value: inBps, unit: 'bps' },
+        { name: 'outBps', value: outBps, unit: 'bps' },
+        { name: 'ifHCInOctets', value: currentInOctets, unit: 'bytes' },
+        { name: 'ifHCOutOctets', value: currentOutOctets, unit: 'bytes' },
+      ],
+    }
+  }
+
+  /** Formata bps em unidade legível (bps, Kbps, Mbps, Gbps) */
+  private formatBps(bps: number): string {
+    if (bps >= 1_000_000_000) return `${(bps / 1_000_000_000).toFixed(2)} Gbps`
+    if (bps >= 1_000_000) return `${(bps / 1_000_000).toFixed(1)} Mbps`
+    if (bps >= 1_000) return `${(bps / 1_000).toFixed(0)} Kbps`
+    return `${bps} bps`
   }
 }

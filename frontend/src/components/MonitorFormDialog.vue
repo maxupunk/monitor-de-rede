@@ -155,7 +155,14 @@
               </v-select>
             </v-col>
 
-            <v-col v-if="form.kind === 'snmp' && form.snmpMode === 'interface'" cols="12" md="6">
+            <v-col
+              v-if="
+                form.kind === 'snmp' &&
+                  (form.snmpMode === 'interface' || form.snmpMode === 'interface_traffic')
+              "
+              cols="12"
+              md="6"
+            >
               <v-select
                 v-if="interfaceItems.length > 0"
                 v-model="form.ifIndex"
@@ -966,7 +973,12 @@ function onInterfaceSelected(value: unknown) {
 }
 
 async function loadInterfaces() {
-  if (form.kind !== 'snmp' || form.snmpMode !== 'interface' || !form.deviceId) return
+  if (
+    form.kind !== 'snmp' ||
+    (form.snmpMode !== 'interface' && form.snmpMode !== 'interface_traffic') ||
+    !form.deviceId
+  )
+    return
   loadingInterfaces.value = true
   try {
     const data = await apiService.get<DeviceInterface[]>(`/devices/${form.deviceId}/interfaces`)
@@ -981,7 +993,11 @@ async function loadInterfaces() {
 watch(
   () => [form.deviceId, form.snmpMode, form.kind],
   () => {
-    if (form.kind === 'snmp' && form.snmpMode === 'interface') loadInterfaces()
+    if (
+      form.kind === 'snmp' &&
+      (form.snmpMode === 'interface' || form.snmpMode === 'interface_traffic')
+    )
+      loadInterfaces()
   }
 )
 

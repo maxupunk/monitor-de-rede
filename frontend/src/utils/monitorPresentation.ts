@@ -9,7 +9,10 @@ export function isGaugeMonitor(
   monitor: Pick<Monitor, 'type' | 'configuration' | 'gaugeMetric'>
 ): boolean {
   const metric = (monitor.configuration?.metric as string | undefined) || monitor.gaugeMetric?.name
-  return monitor.type === 'snmp' && (metric === 'cpu_usage' || metric === 'memory_usage')
+  return (
+    monitor.type === 'snmp' &&
+    (metric === 'cpu_usage' || metric === 'memory_usage' || metric === 'interface_traffic')
+  )
 }
 
 export function gaugeMetricName(monitor: Pick<Monitor, 'configuration' | 'gaugeMetric'>): string {
@@ -21,7 +24,10 @@ export function gaugeMetricName(monitor: Pick<Monitor, 'configuration' | 'gaugeM
 }
 
 export function gaugeTypeLabel(monitor: Pick<Monitor, 'configuration' | 'gaugeMetric'>): string {
-  return gaugeMetricName(monitor) === 'memory_usage' ? 'MEMÓRIA' : 'CPU'
+  const name = gaugeMetricName(monitor)
+  if (name === 'memory_usage') return 'MEMÓRIA'
+  if (name === 'interface_traffic') return 'TRÁFEGO'
+  return 'CPU'
 }
 
 /** Limiares de alerta de uso replicados do card de CPU/Memória do DeviceDetailPage. */

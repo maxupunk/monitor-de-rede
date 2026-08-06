@@ -23,7 +23,8 @@ export type MonitorKind = 'ping' | 'http' | 'tcp' | 'dns' | 'snmp'
  * Tratamos isso como um sub-tipo explícito para o usuário não precisar saber
  * que "preencher ifIndex" muda o comportamento do monitor.
  */
-export type SnmpMode = 'availability' | 'cpu_usage' | 'memory_usage' | 'interface'
+export type SnmpMode =
+  'availability' | 'cpu_usage' | 'memory_usage' | 'interface' | 'interface_traffic'
 
 export type DnsRecordType = 'A' | 'AAAA' | 'MX' | 'TXT' | 'CNAME' | 'NS'
 export type HttpMethod = 'GET' | 'HEAD' | 'POST'
@@ -360,6 +361,13 @@ export const SNMP_MODES: SnmpModeDefinition[] = [
     description: 'Acompanha ifOperStatus e a velocidade negociada de uma porta específica.',
     isGauge: false,
   },
+  {
+    value: 'interface_traffic',
+    label: 'Tráfego de interface',
+    icon: 'mdi-swap-vertical-bold',
+    description: 'Coleta throughput (in/out bps) de uma interface. Exibido como medidor de banda.',
+    isGauge: true,
+  },
 ]
 
 export interface DnsProtocolDefinition {
@@ -546,9 +554,10 @@ export function resolveKind(type: string | undefined): MonitorKind {
 }
 
 export function resolveSnmpMode(configuration: Record<string, unknown> | undefined): SnmpMode {
+  const metric = configuration?.metric
+  if (metric === 'interface_traffic') return 'interface_traffic'
   const ifIndex = configuration?.ifIndex
   if (ifIndex !== undefined && ifIndex !== null && ifIndex !== '') return 'interface'
-  const metric = configuration?.metric
   if (metric === 'cpu_usage') return 'cpu_usage'
   if (metric === 'memory_usage') return 'memory_usage'
   return 'availability'
@@ -690,10 +699,17 @@ export function buildConfiguration(form: MonitorFormModel): Record<string, unkno
         port: Number(form.snmpPort) || 161,
         timeoutMs,
       }
-      if (form.snmpMode === 'cpu_usage' || form.snmpMode === 'memory_usage') {
+      if (
+        form.snmpMode === 'cpu_usage' ||
+        form.snmpMode === 'memory_usage' ||
+        form.snmpMode === 'interface_traffic'
+      ) {
         config.metric = form.snmpMode
       }
-      if (form.snmpMode === 'interface' && form.ifIndex !== null) {
+      if (
+        (form.snmpMode === 'interface' || form.snmpMode === 'interface_traffic') &&
+        form.ifIndex !== null
+      ) {
         config.ifIndex = Number(form.ifIndex)
         if (form.ifName) config.ifName = form.ifName
       }
@@ -754,6 +770,10 @@ export function suggestMonitorName(form: MonitorFormModel, deviceName?: string):
           return form.ifName
             ? `Interface ${form.ifName} — ${reference}`
             : `Interface — ${reference}`
+        case 'interface_traffic':
+          return form.ifName
+            ? `Tráfego ${form.ifName} — ${reference}`
+            : `Tráfego de interface — ${reference}`
         default:
           return `SNMP — ${reference}`
       }
@@ -793,7 +813,8 @@ export function describeMonitor(form: MonitorFormModel): string {
     case 'snmp': {
       const mode = SNMP_MODES.find((m) => m.value === form.snmpMode)
       const suffix =
-        form.snmpMode === 'interface' && form.ifIndex !== null
+        (form.snmpMode === 'interface' || form.snmpMode === 'interface_traffic') &&
+        form.ifIndex !== null
           ? ` (interface #${form.ifIndex}${form.ifName ? ` — ${form.ifName}` : ''})`
           : ''
       return `${mode?.label ?? 'SNMP'}${suffix} via ${form.snmpVersion} em ${target}, ${every}.`
@@ -822,7 +843,7 @@ export function validateMonitorForm(form: MonitorFormModel): string[] {
 
   if (form.kind === 'snmp') {
     if (
-      form.snmpMode === 'interface' &&
+      (form.snmpMode === 'interface' || form.snmpMode === 'interface_traffic') &&
       (form.ifIndex === null || !Number.isFinite(form.ifIndex))
     ) {
       errors.push('Selecione a interface que será monitorada')
