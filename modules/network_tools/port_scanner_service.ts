@@ -1,5 +1,6 @@
 import net from 'node:net'
 import dgram from 'node:dgram'
+import { UdpProbeRegistry } from './udp_probe_registry.js'
 
 export type PortProtocol = 'tcp' | 'udp'
 export type PortStatus = 'open' | 'closed' | 'open|filtered'
@@ -169,7 +170,8 @@ export class PortScannerService {
       })
 
       socket.connect(port, host, () => {
-        socket.send(Buffer.alloc(0), (err) => {
+        const probe = UdpProbeRegistry.getProbe(port)
+        socket.send(probe, (err) => {
           if (err) finish('closed')
         })
       })

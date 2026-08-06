@@ -109,14 +109,20 @@
             Cancelar Varredura
           </v-btn>
 
-          <v-checkbox
+          <v-select
             v-if="results !== null"
-            v-model="onlyOpen"
-            label="Mostrar apenas portas abertas / filtradas"
-            color="primary"
+            v-model="filterMode"
+            :items="[
+              { title: 'Apenas Abertas', value: 'open' },
+              { title: 'Abertas e Filtradas', value: 'open_filtered' },
+              { title: 'Todas as Portas', value: 'all' },
+            ]"
+            label="Exibir"
+            variant="outlined"
             density="compact"
+            style="max-width: 220px"
             hide-details
-          ></v-checkbox>
+          ></v-select>
         </div>
 
         <div v-if="portScanStore.scanning" class="mb-4">
@@ -135,7 +141,10 @@
 
         <div v-if="results !== null">
           <div class="text-caption text-grey-darken-1 mb-2">
-            {{ openCount }} porta(s) aberta(s) de {{ results.length }} escaneada(s)
+            {{ openCount }} porta(s) aberta(s)<span v-if="openFilteredCount > 0"
+            >, {{ openFilteredCount }} aberta(s)/filtrada(s)</span
+            >
+            de {{ results.length }} escaneada(s)
           </div>
 
           <v-table density="comfortable" hover class="rounded-lg border">
@@ -165,7 +174,7 @@
                   {{
                     portScanStore.scanning
                       ? 'Aguardando resultados...'
-                      : `Nenhuma porta aberta encontrada${onlyOpen ? ' (com o filtro ativo)' : ''}.`
+                      : 'Nenhuma porta encontrada para o filtro selecionado.'
                   }}
                 </td>
               </tr>
@@ -207,11 +216,13 @@ const emit = defineEmits<{
 
 const portScanStore = usePortScanStore()
 
+type DisplayFilter = 'open' | 'open_filtered' | 'all'
+
 const hostModel = ref('')
 const protocol = ref<PortProtocol>('tcp')
 const presetKey = ref<'common' | 'range1024' | 'custom'>('common')
 const customPortsInput = ref('')
-const onlyOpen = ref(true)
+const filterMode = ref<DisplayFilter>('open')
 const results = ref<PortScanItem[] | null>(null)
 const scanError = ref<string | null>(null)
 const scanErrorIsWarningOnly = ref(false)
@@ -233,7 +244,7 @@ watch(
       protocol.value = 'tcp'
       presetKey.value = 'common'
       customPortsInput.value = ''
-      onlyOpen.value = true
+      filterMode.value = 'open'
       results.value = null
       scanError.value = null
       scanErrorIsWarningOnly.value = false
@@ -246,6 +257,10 @@ watch(
 
 const openCount = computed(() => results.value?.filter((r) => r.status === 'open').length ?? 0)
 
+const openFilteredCount = computed(
+  () => results.value?.filter((r) => r.status === 'open|filtered').length ?? 0
+)
+
 const progressPercent = computed(() => {
   if (!totalPortsBeingScanned.value) return 0
   return ((results.value?.length ?? 0) / totalPortsBeingScanned.value) * 100
@@ -254,8 +269,13 @@ const progressPercent = computed(() => {
 const filteredResults = computed(() => {
   if (!results.value) return []
   const sorted = [...results.value].sort((a, b) => a.port - b.port)
-  if (!onlyOpen.value) return sorted
-  return sorted.filter((r) => r.status !== 'closed')
+  if (filterMode.value === 'open') {
+    return sorted.filter((r) => r.status === 'open')
+  }
+  if (filterMode.value === 'open_filtered') {
+    return sorted.filter((r) => r.status === 'open' || r.status === 'open|filtered')
+  }
+  return sorted
 })
 
 function parsePortsInput(input: string): number[] {
