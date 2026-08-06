@@ -260,6 +260,11 @@
                   placeholder="Ex.: uplink"
                   variant="outlined"
                 ></v-text-field>
+                <DataRateInput
+                  v-else-if="selectedMetric?.unit === 'bps'"
+                  v-model="bpsValue"
+                  label="Valor de referência"
+                ></DataRateInput>
                 <v-text-field
                   v-else
                   v-model.number="form.value"
@@ -316,6 +321,7 @@ import { useAlertsStore, type AlertRule } from '@/stores/alerts'
 import { useEventsStore } from '@/stores/events'
 import AlertRuleCatalogDialog from '@/components/AlertRuleCatalogDialog.vue'
 import AlertSilenceDialog from '@/components/AlertSilenceDialog.vue'
+import DataRateInput from '@/components/DataRateInput.vue'
 import {
   ALERT_METRICS,
   ALERT_DURATIONS,
@@ -358,6 +364,14 @@ const form = reactive({
 
 const selectedMetric = computed(() => findMetric(form.field))
 const availableOperators = computed(() => operatorsForMetric(form.field))
+
+/** Ponte tipada para o DataRateInput, que trabalha só em bps (number | null) */
+const bpsValue = computed<number | null>({
+  get: () => (typeof form.value === 'number' ? form.value : Number(form.value) || null),
+  set: (value) => {
+    form.value = value ?? 0
+  },
+})
 const rulePreview = computed(() =>
   describeRule(
     { field: form.field, operator: form.operator, value: form.value },

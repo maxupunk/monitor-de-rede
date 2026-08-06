@@ -4,6 +4,8 @@
  * chave produzida pelo AlertManager no backend (modules/alerts/alert_manager.ts).
  */
 
+import { formatBps } from './formatters'
+
 export type AlertOperator = 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'neq' | 'contains'
 
 export interface AlertMetricOption {
@@ -317,6 +319,8 @@ export function formatConditionValue(field?: string, value?: unknown): string {
     const match = metric.options?.find((opt) => opt.value === String(value))
     return match ? match.title : String(value ?? '—')
   }
+
+  if (metric.unit === 'bps') return formatBps(Number(value))
 
   return metric.unit ? `${value} ${metric.unit}` : String(value ?? '—')
 }

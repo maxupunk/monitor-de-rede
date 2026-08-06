@@ -331,20 +331,14 @@
                     ></v-select>
                   </v-col>
                   <v-col cols="12" md="4">
-                    <v-text-field
-                      v-model.number="form.trafficAlertValueMbps"
-                      label="Limite em Mbps *"
-                      type="number"
-                      min="1"
-                      suffix="Mbps"
-                      variant="outlined"
+                    <DataRateInput
+                      v-model="form.trafficAlertValueBps"
+                      label="Limite de tráfego *"
                       density="comfortable"
-                      :rules="[
-                        (v: unknown) => Number(v) > 0 || 'Informe um valor maior que 0 Mbps',
-                      ]"
+                      :rules="[(v: unknown) => Number(v) > 0 || 'Informe um valor maior que 0']"
                       hide-details="auto"
                       bg-color="surface"
-                    ></v-text-field>
+                    ></DataRateInput>
                   </v-col>
                   <v-col cols="12" md="6" class="mt-2">
                     <v-select
@@ -814,6 +808,7 @@ import { apiService } from '@/services/apiService'
 import type { DeviceInterface } from '@/stores/deviceDetail'
 import DnsServersDialog from '@/components/DnsServersDialog.vue'
 import DeviceDialog from '@/components/DeviceDialog.vue'
+import DataRateInput from '@/components/DataRateInput.vue'
 import { ALERT_DURATIONS, ALERT_SEVERITIES } from '@/utils/alertPresentation'
 import {
   COMMON_TCP_PORTS,
@@ -1094,7 +1089,7 @@ async function resetForm() {
       form.trafficAlertDirection = (existingRule.condition.field as 'inBps' | 'outBps') || 'inBps'
       form.trafficAlertOperator = (existingRule.condition.operator as 'gt' | 'lt') || 'gt'
       const rawVal = Number(existingRule.condition.value) || 0
-      form.trafficAlertValueMbps = Math.round(rawVal / 1_000_000) || 100
+      form.trafficAlertValueBps = rawVal || 100_000_000
       form.trafficAlertDurationSeconds = Number(existingRule.durationSeconds) ?? 60
       form.trafficAlertSeverity =
         (existingRule.severity as 'info' | 'warning' | 'critical') || 'warning'
@@ -1325,7 +1320,7 @@ async function save(runAfterSave: boolean) {
         form.snmpMode === 'interface_traffic' &&
         form.trafficAlertEnabled
       ) {
-        const bpsValue = Math.round((form.trafficAlertValueMbps || 100) * 1_000_000)
+        const bpsValue = form.trafficAlertValueBps || 100_000_000
         const rulePayload = {
           monitorId: savedId,
           deviceId: form.deviceId,

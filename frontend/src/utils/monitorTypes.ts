@@ -515,7 +515,7 @@ export interface MonitorFormModel {
   trafficAlertEnabled: boolean
   trafficAlertDirection: 'inBps' | 'outBps'
   trafficAlertOperator: 'gt' | 'lt'
-  trafficAlertValueMbps: number | null
+  trafficAlertValueBps: number | null
   trafficAlertDurationSeconds: number
   trafficAlertSeverity: 'info' | 'warning' | 'critical'
   trafficAlertRuleId: number | null
@@ -554,7 +554,7 @@ export function createMonitorForm(deviceId?: number | null): MonitorFormModel {
     trafficAlertEnabled: false,
     trafficAlertDirection: 'inBps',
     trafficAlertOperator: 'gt',
-    trafficAlertValueMbps: 100,
+    trafficAlertValueBps: 100_000_000,
     trafficAlertDurationSeconds: 60,
     trafficAlertSeverity: 'warning',
     trafficAlertRuleId: null,
@@ -867,9 +867,9 @@ export function validateMonitorForm(form: MonitorFormModel): string[] {
     if (
       form.snmpMode === 'interface_traffic' &&
       form.trafficAlertEnabled &&
-      (!form.trafficAlertValueMbps || form.trafficAlertValueMbps <= 0)
+      (!form.trafficAlertValueBps || form.trafficAlertValueBps <= 0)
     ) {
-      errors.push('Informe um valor limite de tráfego maior que 0 Mbps para o alerta')
+      errors.push('Informe um valor limite de tráfego maior que 0 para o alerta')
     }
   }
 
