@@ -175,7 +175,7 @@
                     size="small"
                     variant="text"
                     color="error"
-                    @click="confirmDeleteRule(item.id)"
+                    @click="confirmDeleteRule(item)"
                   >
                     <v-icon>mdi-delete</v-icon>
                   </v-btn>
@@ -479,9 +479,14 @@ async function toggleRule(rule: AlertRule, enabled: boolean | null) {
   await alertsStore.updateAlertRule(rule.id, { enabled: !!enabled })
 }
 
-async function confirmDeleteRule(id: number) {
-  if (confirm('Deseja excluir esta regra de alerta?')) {
-    await alertsStore.deleteAlertRule(id)
+async function confirmDeleteRule(rule: AlertRule) {
+  const isLinkedToMonitor = !!rule.monitorId
+  const promptMessage = isLinkedToMonitor
+    ? 'Atenção: Esta regra está vinculada a um monitor de tráfego. Ao excluí-la, o monitor deixará de gerar alertas de tráfego. Deseja continuar?'
+    : 'Deseja excluir esta regra de alerta?'
+
+  if (confirm(promptMessage)) {
+    await alertsStore.deleteAlertRule(rule.id)
   }
 }
 </script>

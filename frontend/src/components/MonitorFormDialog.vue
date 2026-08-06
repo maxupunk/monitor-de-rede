@@ -51,58 +51,105 @@
           <!-- Etapa 2: alvo da verificação -->
           <div class="text-overline text-medium-emphasis mt-8 mb-3">2 · Alvo da verificação</div>
           <v-row class="form-rows">
-            <v-col v-if="definition.requiresDevice" cols="12">
+            <v-col cols="12">
               <v-select
                 v-model="form.deviceId"
                 :items="devicesStore.devices"
                 item-title="name"
                 item-value="id"
-                label="Equipamento consultado *"
+                :label="
+                  definition.requiresDevice
+                    ? 'Equipamento consultado (opcional)'
+                    : 'Vincular a um equipamento (opcional)'
+                "
                 prepend-inner-icon="mdi-router-network"
                 variant="outlined"
                 density="comfortable"
+                clearable
                 :disabled="deviceLocked"
-                :rules="[(v: unknown) => !!v || 'Selecione o equipamento']"
                 :hint="definition.deviceHint"
                 persistent-hint
+                @update:model-value="onDeviceSelected"
               >
                 <template #item="{ props: itemProps, item }">
                   <v-list-item v-bind="itemProps" :subtitle="deviceSubtitle(item)"></v-list-item>
+                </template>
+                <template #append-inner>
+                  <v-btn
+                    icon
+                    size="x-small"
+                    variant="text"
+                    color="primary"
+                    density="comfortable"
+                    @click.stop="deviceDialog = true"
+                  >
+                    <v-icon size="18">mdi-plus-circle-outline</v-icon>
+                    <v-tooltip activator="parent" location="top">
+                      Cadastrar Novo Equipamento
+                    </v-tooltip>
+                  </v-btn>
                 </template>
               </v-select>
             </v-col>
 
             <v-col cols="12">
-              <v-text-field
-                :model-value="form.target"
-                :label="`${definition.target.label} *`"
-                :placeholder="definition.target.placeholder"
-                :hint="definition.target.hint"
-                :prepend-inner-icon="definition.target.icon"
-                :rules="[definition.target.rule]"
-                variant="outlined"
-                density="comfortable"
-                persistent-hint
-                spellcheck="false"
-                autocapitalize="off"
-                @update:model-value="onTargetInput"
-                @blur="onTargetBlur"
-              >
-                <template v-if="canFillFromDevice" #append-inner>
-                  <v-btn
-                    icon
-                    size="x-small"
-                    variant="text"
-                    density="comfortable"
-                    @click.stop="fillTargetFromDevice"
-                  >
-                    <v-icon size="18">mdi-auto-fix</v-icon>
-                    <v-tooltip activator="parent" location="top">
-                      Usar o IP do dispositivo ({{ selectedDevice?.ipAddress }})
-                    </v-tooltip>
-                  </v-btn>
-                </template>
-              </v-text-field>
+              <div class="d-flex align-start ga-2">
+                <v-text-field
+                  :model-value="form.target"
+                  :label="
+                    form.kind === 'snmp' ? 'IP do agente SNMP *' : `${definition.target.label} *`
+                  "
+                  :placeholder="definition.target.placeholder"
+                  :hint="
+                    form.kind === 'snmp' && form.deviceId
+                      ? 'IP herdado do equipamento consultado'
+                      : definition.target.hint
+                  "
+                  :prepend-inner-icon="definition.target.icon"
+                  :rules="[definition.target.rule]"
+                  :disabled="form.kind === 'snmp' && form.deviceId !== null"
+                  variant="outlined"
+                  density="comfortable"
+                  persistent-hint
+                  spellcheck="false"
+                  autocapitalize="off"
+                  class="flex-grow-1"
+                  @update:model-value="onTargetInput"
+                  @blur="onTargetBlur"
+                >
+                  <template v-if="canFillFromDevice" #append-inner>
+                    <v-btn
+                      icon
+                      size="x-small"
+                      variant="text"
+                      density="comfortable"
+                      @click.stop="fillTargetFromDevice"
+                    >
+                      <v-icon size="18">mdi-auto-fix</v-icon>
+                      <v-tooltip activator="parent" location="top">
+                        Usar o IP do dispositivo ({{ selectedDevice?.ipAddress }})
+                      </v-tooltip>
+                    </v-btn>
+                  </template>
+                </v-text-field>
+
+                <v-btn
+                  v-if="form.kind === 'snmp'"
+                  variant="tonal"
+                  color="primary"
+                  height="48"
+                  class="mt-0"
+                  :loading="scanningSnmp"
+                  :disabled="!form.target && !form.deviceId"
+                  @click="runSnmpScan"
+                >
+                  <v-icon start size="18">mdi-radar</v-icon>
+                  Escanear SNMP
+                  <v-tooltip activator="parent" location="top">
+                    Escanear interfaces e informações SNMP do IP
+                  </v-tooltip>
+                </v-btn>
+              </div>
             </v-col>
 
             <v-col v-if="definition.usesPort" cols="12">
@@ -173,7 +220,7 @@
                 prepend-inner-icon="mdi-ethernet"
                 variant="outlined"
                 density="comfortable"
-                :loading="loadingInterfaces"
+                :loading="loadingInterfaces || scanningSnmp"
                 :rules="[(v: unknown) => v !== null || 'Selecione a interface']"
                 hint="Interfaces descobertas no último scan SNMP do dispositivo"
                 persistent-hint
@@ -185,21 +232,152 @@
                     :subtitle="itemField(item, 'subtitle')"
                   ></v-list-item>
                 </template>
+                <template #append-inner>
+                  <v-btn
+                    icon
+                    size="x-small"
+                    variant="text"
+                    density="comfortable"
+                    :loading="scanningSnmp"
+                    :disabled="!form.target && !form.deviceId"
+                    @click.stop="runSnmpScan"
+                  >
+                    <v-icon size="18">mdi-radar</v-icon>
+                    <v-tooltip activator="parent" location="top">
+                      Escanear interfaces via SNMP
+                    </v-tooltip>
+                  </v-btn>
+                </template>
               </v-select>
-              <v-text-field
+
+              <v-card
                 v-else
-                v-model.number="form.ifIndex"
-                label="ifIndex da interface *"
-                type="number"
-                min="1"
-                prepend-inner-icon="mdi-ethernet"
                 variant="outlined"
-                density="comfortable"
-                :loading="loadingInterfaces"
-                :rules="[(v: unknown) => v !== null || 'Informe o ifIndex']"
-                hint="Nenhuma interface descoberta — rode um scan SNMP no dispositivo ou informe o índice manualmente"
-                persistent-hint
-              ></v-text-field>
+                class="pa-3 rounded-lg border-dashed d-flex align-center justify-space-between ga-2 flex-wrap"
+                style="min-height: 48px"
+              >
+                <div class="d-flex align-center ga-2 text-caption text-medium-emphasis">
+                  <v-icon size="20" color="warning">mdi-information-outline</v-icon>
+                  <span>Nenhuma interface descoberta para este dispositivo.</span>
+                </div>
+                <v-btn
+                  color="primary"
+                  variant="tonal"
+                  height="36"
+                  size="small"
+                  :loading="scanningSnmp || loadingInterfaces"
+                  :disabled="!form.target && !form.deviceId"
+                  @click="runSnmpScan"
+                >
+                  <v-icon start size="16">mdi-radar</v-icon>
+                  Escanear SNMP
+                </v-btn>
+              </v-card>
+            </v-col>
+
+            <v-col
+              v-if="
+                form.kind === 'snmp' &&
+                  form.snmpMode === 'interface_traffic' &&
+                  form.ifIndex !== null
+              "
+              cols="12"
+            >
+              <v-card color="warning" variant="tonal" class="pa-4 rounded-lg">
+                <div class="d-flex align-center justify-space-between mb-2">
+                  <div class="d-flex align-center ga-2">
+                    <v-icon size="20">mdi-bell-ring-outline</v-icon>
+                    <span class="font-weight-bold text-subtitle-1">Regra de alerta de tráfego</span>
+                  </div>
+                  <v-switch
+                    v-model="form.trafficAlertEnabled"
+                    color="warning"
+                    density="compact"
+                    hide-details
+                  ></v-switch>
+                </div>
+
+                <v-row v-if="form.trafficAlertEnabled" dense class="mt-2">
+                  <v-col cols="12" md="4">
+                    <v-select
+                      v-model="form.trafficAlertDirection"
+                      :items="[
+                        { title: 'Entrada (Download / inBps)', value: 'inBps' },
+                        { title: 'Saída (Upload / outBps)', value: 'outBps' },
+                      ]"
+                      item-title="title"
+                      item-value="value"
+                      label="Direção *"
+                      variant="outlined"
+                      density="comfortable"
+                      hide-details="auto"
+                      bg-color="surface"
+                    ></v-select>
+                  </v-col>
+                  <v-col cols="12" md="4">
+                    <v-select
+                      v-model="form.trafficAlertOperator"
+                      :items="[
+                        { title: 'Avisar quando passar de (>)', value: 'gt' },
+                        { title: 'Avisar quando for menor que (<)', value: 'lt' },
+                      ]"
+                      item-title="title"
+                      item-value="value"
+                      label="Condição *"
+                      variant="outlined"
+                      density="comfortable"
+                      hide-details="auto"
+                      bg-color="surface"
+                    ></v-select>
+                  </v-col>
+                  <v-col cols="12" md="4">
+                    <v-text-field
+                      v-model.number="form.trafficAlertValueMbps"
+                      label="Limite em Mbps *"
+                      type="number"
+                      min="1"
+                      suffix="Mbps"
+                      variant="outlined"
+                      density="comfortable"
+                      :rules="[
+                        (v: unknown) => Number(v) > 0 || 'Informe um valor maior que 0 Mbps',
+                      ]"
+                      hide-details="auto"
+                      bg-color="surface"
+                    ></v-text-field>
+                  </v-col>
+                  <v-col cols="12" md="6" class="mt-2">
+                    <v-select
+                      v-model="form.trafficAlertDurationSeconds"
+                      :items="ALERT_DURATIONS"
+                      item-title="title"
+                      item-value="value"
+                      label="Tolerância antes de disparar"
+                      variant="outlined"
+                      density="comfortable"
+                      hide-details="auto"
+                      bg-color="surface"
+                    ></v-select>
+                  </v-col>
+                  <v-col cols="12" md="6" class="mt-2">
+                    <v-select
+                      v-model="form.trafficAlertSeverity"
+                      :items="ALERT_SEVERITIES"
+                      item-title="title"
+                      item-value="value"
+                      label="Nível de severidade"
+                      variant="outlined"
+                      density="comfortable"
+                      hide-details="auto"
+                      bg-color="surface"
+                    ></v-select>
+                  </v-col>
+                </v-row>
+                <div v-else class="text-body-2 mt-1">
+                  Ative a opção acima para ser notificado automaticamente quando o tráfego desta
+                  interface atingir o limite configurado em Mbps.
+                </div>
+              </v-card>
             </v-col>
 
             <v-col v-if="form.kind === 'dns'" cols="12" md="6">
@@ -360,55 +538,38 @@
             </v-col>
           </v-row>
 
-          <!-- Etapa 3: de onde a checagem parte e a que equipamento pertence -->
-          <div class="text-overline text-medium-emphasis mt-8 mb-3">3 · Origem e vínculo</div>
-          <v-row class="form-rows">
-            <v-col cols="12" md="6">
-              <v-select
-                v-model="form.probeId"
-                :items="probeItems"
-                item-title="title"
-                item-value="value"
-                label="Executar a partir de"
-                prepend-inner-icon="mdi-play-network-outline"
-                variant="outlined"
-                density="comfortable"
-                hint="Ponto da rede que dispara a checagem e mede o tempo"
-                persistent-hint
-              >
-                <template #item="{ props: itemProps, item }">
-                  <v-list-item
-                    v-bind="itemProps"
-                    :subtitle="itemField(item, 'subtitle')"
-                  ></v-list-item>
-                </template>
-              </v-select>
-            </v-col>
+          <!-- Etapa 3: de onde a checagem parte (somente exibida se houver mais de 1 probe) -->
+          <template v-if="probeItems.length > 1">
+            <div class="text-overline text-medium-emphasis mt-8 mb-3">3 · Origem da checagem</div>
+            <v-row class="form-rows">
+              <v-col cols="12" md="6">
+                <v-select
+                  v-model="form.probeId"
+                  :items="probeItems"
+                  item-title="title"
+                  item-value="value"
+                  label="Executar a partir de"
+                  prepend-inner-icon="mdi-play-network-outline"
+                  variant="outlined"
+                  density="comfortable"
+                  hint="Ponto da rede que dispara a checagem e mede o tempo"
+                  persistent-hint
+                >
+                  <template #item="{ props: itemProps, item }">
+                    <v-list-item
+                      v-bind="itemProps"
+                      :subtitle="itemField(item, 'subtitle')"
+                    ></v-list-item>
+                  </template>
+                </v-select>
+              </v-col>
+            </v-row>
+          </template>
 
-            <v-col v-if="!definition.requiresDevice" cols="12" md="6">
-              <v-select
-                v-model="form.deviceId"
-                :items="devicesStore.devices"
-                item-title="name"
-                item-value="id"
-                label="Vincular a um equipamento (opcional)"
-                prepend-inner-icon="mdi-link-variant"
-                variant="outlined"
-                density="comfortable"
-                clearable
-                :disabled="deviceLocked"
-                :hint="definition.deviceHint"
-                persistent-hint
-              >
-                <template #item="{ props: itemProps, item }">
-                  <v-list-item v-bind="itemProps" :subtitle="deviceSubtitle(item)"></v-list-item>
-                </template>
-              </v-select>
-            </v-col>
-          </v-row>
-
-          <!-- Etapa 4: frequência e ajustes finos -->
-          <div class="text-overline text-medium-emphasis mt-8 mb-3">4 · Frequência</div>
+          <!-- Etapa de frequência e ajustes finos -->
+          <div class="text-overline text-medium-emphasis mt-8 mb-3">
+            {{ frequencyStepNumber }} · Frequência
+          </div>
           <v-row class="form-rows">
             <v-col cols="12" md="6">
               <v-select
@@ -636,18 +797,24 @@
       :prefill-address="prefillAddress"
       @saved="onServerSaved"
     ></DnsServersDialog>
+
+    <DeviceDialog v-model="deviceDialog" @saved="onDeviceCreated" />
   </v-dialog>
 </template>
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { useMonitorsStore, type Monitor } from '@/stores/monitors'
-import { useDevicesStore } from '@/stores/devices'
+import { useDevicesStore, type Device } from '@/stores/devices'
 import { useProbesStore } from '@/stores/probes'
 import { useDnsServersStore, type DnsServer } from '@/stores/dnsServers'
+import { useAlertsStore } from '@/stores/alerts'
+import { useSnmpTestStore } from '@/stores/snmpTest'
 import { apiService } from '@/services/apiService'
 import type { DeviceInterface } from '@/stores/deviceDetail'
 import DnsServersDialog from '@/components/DnsServersDialog.vue'
+import DeviceDialog from '@/components/DeviceDialog.vue'
+import { ALERT_DURATIONS, ALERT_SEVERITIES } from '@/utils/alertPresentation'
 import {
   COMMON_TCP_PORTS,
   DNS_PROTOCOLS,
@@ -670,6 +837,7 @@ import {
   validateMonitorForm,
   type MonitorFormModel,
   type MonitorKind,
+  type SnmpVersion,
 } from '@/utils/monitorTypes'
 
 const props = defineProps<{
@@ -689,8 +857,11 @@ const monitorsStore = useMonitorsStore()
 const devicesStore = useDevicesStore()
 const probesStore = useProbesStore()
 const dnsServersStore = useDnsServersStore()
+const alertsStore = useAlertsStore()
+const snmpTestStore = useSnmpTestStore()
 
 const serversDialog = ref(false)
+const deviceDialog = ref(false)
 const deviceLocked = computed(() => props.lockDevice === true)
 
 const probeItems = computed(() => [
@@ -707,6 +878,8 @@ const probeItems = computed(() => [
       subtitle: `${probe.location || 'Sem localização'} · ${probe.status}`,
     })),
 ])
+
+const frequencyStepNumber = computed(() => (probeItems.value.length > 1 ? 4 : 3))
 
 /** Cadastrados no transporte atual + o valor digitado que ainda não existe */
 const dnsServerItems = computed(() =>
@@ -793,8 +966,8 @@ function buildPresetItems(presets: number[], current: number) {
 const intervalItems = computed(() => buildPresetItems(INTERVAL_PRESETS, form.intervalSeconds))
 const timeoutItems = computed(() => buildPresetItems(TIMEOUT_PRESETS, form.timeoutSeconds))
 
-const interfaceItems = computed(() =>
-  interfaces.value
+const interfaceItems = computed(() => {
+  const items = interfaces.value
     .map((iface) => {
       const index = iface.ifIndex ?? iface.snmpIndex
       if (index === undefined || index === null) return null
@@ -810,7 +983,22 @@ const interfaceItems = computed(() =>
     .filter((item): item is { title: string; value: number; subtitle: string; name: string } =>
       Boolean(item)
     )
-)
+
+  if (
+    form.ifIndex !== null &&
+    form.ifIndex !== undefined &&
+    !items.some((i) => i.value === Number(form.ifIndex))
+  ) {
+    items.unshift({
+      title: `${form.ifName || 'Interface'} (#${form.ifIndex})`,
+      value: Number(form.ifIndex),
+      subtitle: 'Configurada no monitor',
+      name: form.ifName || '',
+    })
+  }
+
+  return items
+})
 
 /**
  * Nos slots de item o Vuetify entrega o objeto original dentro de `raw`, mas a
@@ -884,7 +1072,7 @@ function onExtraHostnamesChange(value: unknown) {
   form.extraHostnames = list.map((item) => String(item).trim().toLowerCase()).filter(Boolean)
 }
 
-function resetForm() {
+async function resetForm() {
   errorMessage.value = null
   interfaces.value = []
 
@@ -892,12 +1080,27 @@ function resetForm() {
   if (devicesStore.devices.length === 0) devicesStore.fetchDevices()
   if (probesStore.probes.length === 0) probesStore.fetchProbes()
   dnsServersStore.fetchServers()
+  await alertsStore.fetchAlertRules()
 
   if (props.monitor) {
     Object.assign(form, monitorToForm(props.monitor))
     nameTouched.value = true
+
+    // Reidratar a regra de alerta vinculada a este monitor, se houver
+    const existingRule = alertsStore.alertRules.find((r) => r.monitorId === props.monitor?.id)
+    if (existingRule && existingRule.condition) {
+      form.trafficAlertEnabled = true
+      form.trafficAlertRuleId = existingRule.id
+      form.trafficAlertDirection = (existingRule.condition.field as 'inBps' | 'outBps') || 'inBps'
+      form.trafficAlertOperator = (existingRule.condition.operator as 'gt' | 'lt') || 'gt'
+      const rawVal = Number(existingRule.condition.value) || 0
+      form.trafficAlertValueMbps = Math.round(rawVal / 1_000_000) || 100
+      form.trafficAlertDurationSeconds = Number(existingRule.durationSeconds) ?? 60
+      form.trafficAlertSeverity =
+        (existingRule.severity as 'info' | 'warning' | 'critical') || 'warning'
+    }
   } else {
-    Object.assign(form, createMonitorForm(props.defaultDeviceId ?? devicesStore.devices[0]?.id))
+    Object.assign(form, createMonitorForm(props.defaultDeviceId ?? null))
     nameTouched.value = false
     applyDeviceTarget()
     // O watcher de sugestão só dispara quando algum campo muda — ao reabrir o
@@ -967,9 +1170,66 @@ function onStatusCodesChange(value: unknown) {
     .filter((code) => Number.isInteger(code) && code >= 100 && code <= 599)
 }
 
+function onDeviceSelected(value: unknown) {
+  if (value !== null && value !== undefined && value !== '') {
+    const dev = devicesStore.devices.find((d) => d.id === Number(value))
+    if (dev) {
+      if (dev.ipAddress) form.target = dev.ipAddress
+      if (dev.snmpCommunity) form.snmpCommunity = dev.snmpCommunity
+      if (dev.snmpVersion) form.snmpVersion = dev.snmpVersion as SnmpVersion
+    }
+  }
+  if (
+    form.kind === 'snmp' &&
+    (form.snmpMode === 'interface' || form.snmpMode === 'interface_traffic')
+  ) {
+    loadInterfaces()
+  }
+}
+
+async function onDeviceCreated(newDevice: Device) {
+  await devicesStore.fetchDevices()
+  form.deviceId = newDevice.id
+  onDeviceSelected(newDevice.id)
+}
+
 function onInterfaceSelected(value: unknown) {
   const selected = interfaceItems.value.find((item) => item.value === Number(value))
   form.ifName = selected?.name ?? ''
+}
+
+const scanningSnmp = ref(false)
+
+async function runSnmpScan() {
+  if (form.deviceId) {
+    scanningSnmp.value = true
+    try {
+      await apiService.post(`/devices/${form.deviceId}/snmp/scan`)
+      await loadInterfaces()
+    } catch {
+      // Silencioso — se o dispositivo não tiver acesso SNMP ou falhar, não exibe alerta
+    } finally {
+      scanningSnmp.value = false
+    }
+  } else if (form.target) {
+    scanningSnmp.value = true
+    try {
+      const res = await snmpTestStore.testConnection({
+        host: form.target,
+        version: form.snmpVersion,
+        community: form.snmpCommunity,
+        autoDetect: true,
+      })
+      if (res?.responded) {
+        if (res.version) form.snmpVersion = res.version
+        if (res.community) form.snmpCommunity = res.community
+      }
+    } catch {
+      // Silencioso
+    } finally {
+      scanningSnmp.value = false
+    }
+  }
 }
 
 async function loadInterfaces() {
@@ -1057,6 +1317,38 @@ async function save(runAfterSave: boolean) {
     if (!succeeded) {
       errorMessage.value = monitorsStore.error || 'Não foi possível salvar o monitor'
       return
+    }
+
+    if (savedId) {
+      if (
+        form.kind === 'snmp' &&
+        form.snmpMode === 'interface_traffic' &&
+        form.trafficAlertEnabled
+      ) {
+        const bpsValue = Math.round((form.trafficAlertValueMbps || 100) * 1_000_000)
+        const rulePayload = {
+          monitorId: savedId,
+          deviceId: form.deviceId,
+          name: `Alerta tráfego ${form.ifName || ''} — ${form.name}`.trim(),
+          type: 'custom' as const,
+          condition: {
+            field: form.trafficAlertDirection,
+            operator: form.trafficAlertOperator,
+            value: bpsValue,
+          },
+          durationSeconds: form.trafficAlertDurationSeconds ?? 60,
+          severity: form.trafficAlertSeverity ?? 'warning',
+          enabled: true,
+        }
+
+        if (form.trafficAlertRuleId) {
+          await alertsStore.updateAlertRule(form.trafficAlertRuleId, rulePayload)
+        } else {
+          await alertsStore.createAlertRule(rulePayload)
+        }
+      } else if (form.trafficAlertRuleId) {
+        await alertsStore.deleteAlertRule(form.trafficAlertRuleId)
+      }
     }
 
     if (runAfterSave && savedId) await monitorsStore.runMonitor(savedId)

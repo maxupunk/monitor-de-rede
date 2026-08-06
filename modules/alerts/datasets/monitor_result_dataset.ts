@@ -18,6 +18,8 @@ const METRIC_FIELD_MAP: Record<string, string> = {
   if_oper_status: ALERT_FIELDS.ifOperStatus,
   if_speed: ALERT_FIELDS.ifSpeed,
   snmp_uptime: ALERT_FIELDS.snmpUptime,
+  inBps: ALERT_FIELDS.inBps,
+  outBps: ALERT_FIELDS.outBps,
 }
 
 /** Traduz o CheckResult de um monitor para o vocabulário avaliado pelas regras. */

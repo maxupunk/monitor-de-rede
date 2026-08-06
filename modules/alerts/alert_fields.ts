@@ -21,6 +21,8 @@ export const ALERT_FIELDS = {
   ifOperStatus: 'ifOperStatus',
   ifSpeed: 'ifSpeed',
   snmpUptime: 'snmpUptime',
+  inBps: 'inBps',
+  outBps: 'outBps',
 
   // --- Estado das interfaces coletadas via SNMP -----------------------------
   /** Nome da interface — permite restringir a regra a uplinks, por exemplo */

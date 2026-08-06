@@ -105,228 +105,8 @@
       </v-data-table>
     </v-card>
 
-    <!-- Modal Form de Dispositivo -->
-    <v-dialog v-model="dialog" max-width="650">
-      <v-card class="rounded-lg pa-4">
-        <v-card-title class="font-weight-bold">
-          {{ editedId ? 'Editar Dispositivo' : 'Cadastrar Novo Dispositivo' }}
-        </v-card-title>
-        <v-card-text>
-          <v-form @submit.prevent="save">
-            <v-row>
-              <v-col cols="12" sm="6">
-                <v-text-field
-                  v-model="formModel.name"
-                  label="Nome do Equipamento *"
-                  variant="outlined"
-                  density="comfortable"
-                  required
-                ></v-text-field>
-              </v-col>
-              <v-col cols="12" sm="6">
-                <v-text-field
-                  v-model="formModel.ipAddress"
-                  label="Endereço IP *"
-                  placeholder="Ex: 192.168.1.1"
-                  variant="outlined"
-                  density="comfortable"
-                  required
-                ></v-text-field>
-              </v-col>
-              <v-col cols="12" sm="6">
-                <v-select
-                  v-model="formModel.type"
-                  :items="['router', 'switch', 'server', 'firewall', 'printer', 'ap', 'other']"
-                  label="Tipo de Dispositivo"
-                  variant="outlined"
-                  density="comfortable"
-                  required
-                ></v-select>
-              </v-col>
-
-              <!-- Seleção de Site Opcional com Botão para Novo Site -->
-              <v-col cols="12" sm="6">
-                <div class="d-flex align-center ga-2">
-                  <v-select
-                    v-model="formModel.siteId"
-                    :items="sitesStore.sites"
-                    item-title="name"
-                    item-value="id"
-                    label="Site (Opcional)"
-                    variant="outlined"
-                    density="comfortable"
-                    clearable
-                    hide-details
-                    class="flex-grow-1"
-                  ></v-select>
-                  <v-btn
-                    icon
-                    color="primary"
-                    variant="tonal"
-                    density="comfortable"
-                    @click="siteDialog = true"
-                  >
-                    <v-icon>mdi-plus</v-icon>
-                    <v-tooltip activator="parent" location="top">Cadastrar Novo Site</v-tooltip>
-                  </v-btn>
-                </div>
-              </v-col>
-
-              <!-- Campo "Está atrás de" para Topologia -->
-              <v-col cols="12" sm="6">
-                <v-select
-                  v-model="formModel.parentId"
-                  :items="availableParentDevices"
-                  item-title="name"
-                  item-value="id"
-                  label="Está atrás de (Dispositivo Pai)"
-                  variant="outlined"
-                  density="comfortable"
-                  clearable
-                  hint="Indica a qual equipamento (ex: Switch/Roteador) este dispositivo está conectado."
-                  persistent-hint
-                >
-                  <template #append-inner>
-                    <v-icon size="small" color="grey-darken-1">mdi-help-circle-outline</v-icon>
-                    <v-tooltip activator="parent" location="top">
-                      Esta associação mapeia o caminho físico da rede para montar a estrutura de
-                      topologia.
-                    </v-tooltip>
-                  </template>
-                </v-select>
-              </v-col>
-
-              <v-col cols="12" sm="6">
-                <v-text-field
-                  v-model="formModel.vendor"
-                  label="Fabricante / Vendor"
-                  placeholder="Cisco, MikroTik, Ubiquiti"
-                  variant="outlined"
-                  density="comfortable"
-                ></v-text-field>
-              </v-col>
-
-              <v-col cols="12" sm="6">
-                <v-text-field
-                  v-model="formModel.model"
-                  label="Modelo"
-                  variant="outlined"
-                  density="comfortable"
-                ></v-text-field>
-              </v-col>
-
-              <!-- Opção de Monitorar -->
-              <v-col cols="12">
-                <v-checkbox
-                  v-model="formModel.isMonitored"
-                  label="Monitorar este dispositivo (Disponível em /monitors)"
-                  color="primary"
-                  hide-details
-                ></v-checkbox>
-              </v-col>
-
-              <v-col cols="12">
-                <v-checkbox
-                  v-model="formModel.snmpEnabled"
-                  label="Habilitar Coleta SNMP"
-                  color="primary"
-                  hide-details
-                ></v-checkbox>
-              </v-col>
-              <v-col v-if="formModel.snmpEnabled" cols="12" sm="6">
-                <v-text-field
-                  v-model="formModel.snmpCommunity"
-                  label="Comunidade SNMP"
-                  variant="outlined"
-                  density="comfortable"
-                ></v-text-field>
-              </v-col>
-              <v-col v-if="formModel.snmpEnabled" cols="12" sm="6">
-                <v-select
-                  v-model="formModel.snmpVersion"
-                  :items="['v1', 'v2c', 'v3']"
-                  label="Versão SNMP"
-                  variant="outlined"
-                  density="comfortable"
-                ></v-select>
-              </v-col>
-              <v-col v-if="formModel.snmpEnabled" cols="12">
-                <div class="d-flex align-center flex-wrap ga-2">
-                  <v-btn
-                    variant="tonal"
-                    color="primary"
-                    size="small"
-                    prepend-icon="mdi-lan-check"
-                    :loading="snmpTestStore.testing"
-                    :disabled="!formModel.ipAddress"
-                    @click="testSnmp(false)"
-                  >
-                    Testar SNMP
-                  </v-btn>
-                  <v-btn
-                    variant="text"
-                    color="primary"
-                    size="small"
-                    prepend-icon="mdi-auto-fix"
-                    :loading="snmpTestStore.testing"
-                    :disabled="!formModel.ipAddress"
-                    @click="testSnmp(true)"
-                  >
-                    Detectar Automaticamente
-                  </v-btn>
-                </div>
-                <v-alert
-                  v-if="snmpTestResult"
-                  :type="snmpTestResult.ok ? 'success' : 'warning'"
-                  variant="tonal"
-                  density="compact"
-                  class="mt-2"
-                >
-                  {{ snmpTestResult.message }}
-                </v-alert>
-              </v-col>
-              <v-col v-if="formModel.snmpEnabled" cols="12">
-                <div class="d-flex align-center ga-2">
-                  <v-select
-                    v-model="formModel.zabbixTemplateId"
-                    :items="zabbixTemplatesStore.templates"
-                    item-title="name"
-                    item-value="id"
-                    label="Template Zabbix (Opcional)"
-                    variant="outlined"
-                    density="comfortable"
-                    clearable
-                    hide-details
-                    class="flex-grow-1"
-                  ></v-select>
-                  <v-btn
-                    icon
-                    color="primary"
-                    variant="tonal"
-                    density="comfortable"
-                    to="/zabbix-templates"
-                  >
-                    <v-icon>mdi-upload</v-icon>
-                    <v-tooltip activator="parent" location="top">Importar Novo Template</v-tooltip>
-                  </v-btn>
-                </div>
-                <div class="text-caption text-grey-darken-1 mt-1">
-                  Define quais OIDs SNMP são coletados (tensão, corrente, etc.) além de
-                  CPU/Memória/Interfaces.
-                </div>
-              </v-col>
-            </v-row>
-          </v-form>
-        </v-card-text>
-        <v-card-actions class="justify-end">
-          <v-btn variant="text" @click="dialog = false">Cancelar</v-btn>
-          <v-btn color="primary" :loading="saving" @click="save">Salvar</v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
-
-    <!-- Componente Reusável Modal de Cadastro de Site -->
-    <SiteDialog v-model="siteDialog" @saved="onSiteCreated" />
+    <!-- Componente Reusável Modal de Dispositivo -->
+    <DeviceDialog v-model="dialog" :device-to-edit="deviceToEdit" @saved="onDeviceSaved" />
 
     <!-- Componente Reusável Modal de Scanner de Portas -->
     <PortScanDialog
@@ -338,59 +118,22 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, reactive, computed } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useDevicesStore, type Device } from '@/stores/devices'
-import { useSitesStore, type Site } from '@/stores/sites'
-import { useZabbixTemplatesStore } from '@/stores/zabbixTemplates'
-import { useSnmpTestStore } from '@/stores/snmpTest'
-import SiteDialog from '@/components/SiteDialog.vue'
+import DeviceDialog from '@/components/DeviceDialog.vue'
 import PortScanDialog from '@/components/PortScanDialog.vue'
 import { getStatusColor } from '@/utils/monitorPresentation'
 
 const router = useRouter()
 const devicesStore = useDevicesStore()
-const sitesStore = useSitesStore()
-const zabbixTemplatesStore = useZabbixTemplatesStore()
-const snmpTestStore = useSnmpTestStore()
 const search = ref('')
 const dialog = ref(false)
-const siteDialog = ref(false)
-const saving = ref(false)
-const editedId = ref<number | null>(null)
-const snmpTestResult = ref<{ ok: boolean; message: string } | null>(null)
+const deviceToEdit = ref<Device | null>(null)
 
 const portScanDialog = ref(false)
 const portScanHost = ref('')
 const portScanDeviceName = ref('')
-
-const formModel = reactive<{
-  name: string
-  ipAddress: string
-  type: string
-  siteId: number | null
-  parentId: number | null
-  vendor: string
-  model: string
-  isMonitored: boolean
-  snmpEnabled: boolean
-  snmpCommunity: string
-  snmpVersion: 'v1' | 'v2c' | 'v3'
-  zabbixTemplateId: number | null
-}>({
-  name: '',
-  ipAddress: '',
-  type: 'router',
-  siteId: null,
-  parentId: null,
-  vendor: '',
-  model: '',
-  isMonitored: true,
-  snmpEnabled: false,
-  snmpCommunity: 'public',
-  snmpVersion: 'v2c',
-  zabbixTemplateId: null,
-})
 
 const headers = [
   { title: 'ID', key: 'id', width: '60px' },
@@ -404,16 +147,8 @@ const headers = [
   { title: 'Ações', key: 'actions', sortable: false, width: '140px' },
 ]
 
-const availableParentDevices = computed(() => {
-  return devicesStore.devices.filter((d) => d.id !== editedId.value)
-})
-
 onMounted(async () => {
-  await Promise.all([
-    devicesStore.fetchDevices(),
-    sitesStore.fetchSites(),
-    zabbixTemplatesStore.fetchTemplates(),
-  ])
+  await devicesStore.fetchDevices()
 })
 
 function onRowClick(_event: MouseEvent, row: { item: Device }) {
@@ -423,106 +158,18 @@ function onRowClick(_event: MouseEvent, row: { item: Device }) {
 }
 
 function openDialog(device?: Device) {
-  snmpTestResult.value = null
-  if (device) {
-    editedId.value = device.id
-    formModel.name = device.name
-    formModel.ipAddress = device.ipAddress || ''
-    formModel.type = device.type || 'router'
-    formModel.siteId = device.siteId ?? null
-    formModel.parentId = device.parentId ?? null
-    formModel.vendor = device.vendor || ''
-    formModel.model = device.model || ''
-    formModel.isMonitored = Boolean(device.isMonitored)
-    formModel.snmpEnabled = Boolean(device.snmpEnabled)
-    formModel.snmpCommunity = device.snmpCommunity || 'public'
-    formModel.snmpVersion = device.snmpVersion || 'v2c'
-    formModel.zabbixTemplateId = device.zabbixTemplateId ?? null
-  } else {
-    editedId.value = null
-    formModel.name = ''
-    formModel.ipAddress = ''
-    formModel.type = 'router'
-    formModel.siteId = null
-    formModel.parentId = null
-    formModel.vendor = ''
-    formModel.model = ''
-    formModel.isMonitored = true
-    formModel.snmpEnabled = false
-    formModel.snmpCommunity = 'public'
-    formModel.snmpVersion = 'v2c'
-    formModel.zabbixTemplateId = null
-  }
+  deviceToEdit.value = device || null
   dialog.value = true
 }
 
-function onSiteCreated(newSite: Site) {
-  formModel.siteId = newSite.id
+function onDeviceSaved() {
+  devicesStore.fetchDevices()
 }
 
 function openPortScan(device: Device) {
   portScanHost.value = device.ipAddress || ''
   portScanDeviceName.value = device.name
   portScanDialog.value = true
-}
-
-async function testSnmp(autoDetect = false) {
-  snmpTestResult.value = null
-  if (!formModel.ipAddress) {
-    snmpTestResult.value = { ok: false, message: 'Informe o Endereço IP antes de testar.' }
-    return
-  }
-
-  const res = await snmpTestStore.testConnection({
-    host: formModel.ipAddress,
-    version: formModel.snmpVersion,
-    community: formModel.snmpCommunity,
-    autoDetect,
-  })
-
-  if (!res) {
-    snmpTestResult.value = {
-      ok: false,
-      message: snmpTestStore.error || 'Falha ao testar conexão SNMP.',
-    }
-    return
-  }
-
-  if (res.responded) {
-    if (autoDetect && res.version) formModel.snmpVersion = res.version
-    if (autoDetect && res.community) formModel.snmpCommunity = res.community
-    snmpTestResult.value = {
-      ok: true,
-      message: `SNMP respondeu (${res.version || formModel.snmpVersion}/${res.community || formModel.snmpCommunity}): ${res.sysDescr || res.sysName || 'dispositivo detectado'}`,
-    }
-  } else {
-    snmpTestResult.value = {
-      ok: false,
-      message: autoDetect
-        ? 'Nenhuma combinação comum de versão/comunidade respondeu (public/private em v1/v2c).'
-        : 'O dispositivo não respondeu com essa versão/comunidade em SNMP.',
-    }
-  }
-}
-
-async function save() {
-  if (!formModel.name || !formModel.ipAddress) return
-  saving.value = true
-  if (editedId.value) {
-    await devicesStore.updateDevice(editedId.value, formModel)
-  } else {
-    await devicesStore.createDevice(payloadForCreate())
-  }
-  await devicesStore.fetchDevices()
-  saving.value = false
-  dialog.value = false
-}
-
-function payloadForCreate() {
-  return {
-    ...formModel,
-    status: 'unknown' as const,
-  }
 }
 
 async function confirmDelete(id: number) {

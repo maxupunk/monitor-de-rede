@@ -311,9 +311,9 @@ export const MONITOR_KINDS: MonitorKindDefinition[] = [
     },
     usesPort: false,
     suggestsDeviceIp: true,
-    requiresDevice: true,
+    requiresDevice: false,
     deviceHint:
-      'Obrigatório: as leituras SNMP (CPU, memória, interfaces) são gravadas neste equipamento.',
+      'Opcional. Selecione o equipamento cadastrado ou informe o IP do agente SNMP abaixo.',
   },
 ]
 
@@ -511,6 +511,14 @@ export interface MonitorFormModel {
   snmpPort: number
   ifIndex: number | null
   ifName: string
+  // Regra de alerta de tráfego (criada junto com o monitor)
+  trafficAlertEnabled: boolean
+  trafficAlertDirection: 'inBps' | 'outBps'
+  trafficAlertOperator: 'gt' | 'lt'
+  trafficAlertValueMbps: number | null
+  trafficAlertDurationSeconds: number
+  trafficAlertSeverity: 'info' | 'warning' | 'critical'
+  trafficAlertRuleId: number | null
 }
 
 export const DEFAULT_ACCEPTED_STATUS_CODES = [200, 201, 202, 204, 301, 302]
@@ -543,6 +551,13 @@ export function createMonitorForm(deviceId?: number | null): MonitorFormModel {
     snmpPort: 161,
     ifIndex: null,
     ifName: '',
+    trafficAlertEnabled: false,
+    trafficAlertDirection: 'inBps',
+    trafficAlertOperator: 'gt',
+    trafficAlertValueMbps: 100,
+    trafficAlertDurationSeconds: 60,
+    trafficAlertSeverity: 'warning',
+    trafficAlertRuleId: null,
   }
 }
 
@@ -829,9 +844,6 @@ export function validateMonitorForm(form: MonitorFormModel): string[] {
   const errors: string[] = []
   const definition = monitorKind(form.kind)
 
-  if (definition.requiresDevice && !form.deviceId) {
-    errors.push('Selecione o equipamento que será consultado via SNMP')
-  }
   if (!form.name.trim()) errors.push('Informe um nome para o monitor')
 
   const targetCheck = definition.target.rule(form.target)
@@ -842,6 +854,9 @@ export function validateMonitorForm(form: MonitorFormModel): string[] {
   }
 
   if (form.kind === 'snmp') {
+    if (!form.snmpCommunity.trim()) {
+      errors.push('Informe a comunidade SNMP')
+    }
     if (
       (form.snmpMode === 'interface' || form.snmpMode === 'interface_traffic') &&
       (form.ifIndex === null || !Number.isFinite(form.ifIndex))
@@ -849,6 +864,13 @@ export function validateMonitorForm(form: MonitorFormModel): string[] {
       errors.push('Selecione a interface que será monitorada')
     }
     if (!isValidPort(form.snmpPort)) errors.push('Porta SNMP inválida')
+    if (
+      form.snmpMode === 'interface_traffic' &&
+      form.trafficAlertEnabled &&
+      (!form.trafficAlertValueMbps || form.trafficAlertValueMbps <= 0)
+    ) {
+      errors.push('Informe um valor limite de tráfego maior que 0 Mbps para o alerta')
+    }
   }
 
   if (form.kind === 'dns') {
