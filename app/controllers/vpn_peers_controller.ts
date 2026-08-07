@@ -2,10 +2,11 @@ import type { HttpContext } from '@adonisjs/core/http'
 import QRCode from 'qrcode'
 import type VpnPeer from '#models/vpn_peer'
 import type { VpnDeviceProfile, VpnPeerConnectionStatus } from '#models/vpn_peer'
-import { VpnPeerService } from '#modules/vpn/vpn_peer_service'
+import { PRIVATE_KEY_UNAVAILABLE, VpnPeerService } from '#modules/vpn/vpn_peer_service'
 import { VpnServerService } from '#modules/vpn/vpn_server_service'
 import { IpAllocator } from '#modules/vpn/ip_allocator'
 import { profileRegistry } from '#modules/vpn/profiles/profile_registry'
+import type { GeneratedArtifact } from '#modules/vpn/profiles/profile_contract'
 import { errorMessage } from '#modules/shared/errors'
 import { sensitiveEndpointLimiter, vpnAuditLogger } from '#modules/vpn/access_control'
 
@@ -16,6 +17,9 @@ import { sensitiveEndpointLimiter, vpnAuditLogger } from '#modules/vpn/access_co
  * a resposta verificável pelo TypeScript, garante que material sensível — a
  * chave pré-compartilhada — não escape por descuido em nenhuma rota.
  */
+/** Artefato entregue ao frontend — perfis móveis já vêm com o QR Code renderizado. */
+export type SerializedVpnArtifact = GeneratedArtifact & { qrSvg: string | null }
+
 export interface SerializedVpnPeer {
   id: number
   vpnServerId: number
@@ -24,6 +28,8 @@ export interface SerializedVpnPeer {
   deviceProfile: VpnDeviceProfile
   persistentKeepalive: number
   lastHandshakeAt: string | null
+  /** Último keepalive contabilizado — é o sinal de vida que sustenta o status. */
+  lastSeenAt: string | null
   bytesRx: number
   bytesTx: number
   enabled: boolean
@@ -51,6 +57,7 @@ export default class VpnPeersController {
       deviceProfile: peer.deviceProfile,
       persistentKeepalive: peer.persistentKeepalive,
       lastHandshakeAt: peer.lastHandshakeAt?.toISO() ?? null,
+      lastSeenAt: peer.lastSeenAt?.toISO() ?? null,
       bytesRx: peer.bytesRx,
       bytesTx: peer.bytesTx,
       enabled: peer.enabled,
@@ -58,6 +65,22 @@ export default class VpnPeersController {
       updatedAt: peer.updatedAt?.toISO() ?? null,
       connectionStatus: peer.connectionStatus,
     }
+  }
+
+  /**
+   * Renderiza o QR Code junto do artefato.
+   *
+   * Precisa acontecer na mesma resposta: a chave privada só existe até a
+   * primeira leitura (`clientKeyStore.consume`), então buscar o QR Code numa
+   * segunda requisição devolveria um código com o placeholder no lugar da chave.
+   */
+  private async serializeArtifact(artifact: GeneratedArtifact): Promise<SerializedVpnArtifact> {
+    // Sem a chave privada o QR Code levaria o celular a um túnel que nunca conecta.
+    const usable = artifact.supportsQrCode && !artifact.content.includes(PRIVATE_KEY_UNAVAILABLE)
+    if (!usable) return { ...artifact, qrSvg: null }
+
+    const qrSvg = await QRCode.toString(artifact.content, { type: 'svg', margin: 1, width: 320 })
+    return { ...artifact, qrSvg }
   }
 
   /** Identidade usada em rate limit e auditoria dos endpoints sensíveis. */
@@ -101,9 +124,10 @@ export default class VpnPeersController {
     const items = await this.peerService.list()
 
     return response.ok(
-      items.map(({ peer, needsFirewallHint, pingMonitorId }) => ({
+      items.map(({ peer, needsFirewallHint, pingOutsideTunnel, pingMonitorId }) => ({
         ...this.serializePeer(peer),
         needsFirewallHint,
+        pingOutsideTunnel,
         pingMonitorId,
         device: peer.device?.serialize() ?? null,
       }))
@@ -153,7 +177,28 @@ export default class VpnPeersController {
       return response.created({
         peer: this.serializePeer(peer),
         device: peer.device?.serialize() ?? null,
-        artifact,
+        artifact: await this.serializeArtifact(artifact),
+      })
+    } catch (error: unknown) {
+      return this.badRequestFromError(ctx, error)
+    }
+  }
+
+  /** PATCH /api/vpn/peers/:id — renomeia o dispositivo do peer. */
+  async update(ctx: HttpContext) {
+    const { params, request, response } = ctx
+    const name = request.input('name')
+
+    if (typeof name !== 'string' || !name.trim()) {
+      return response.badRequest({ message: 'Informe o nome do dispositivo' })
+    }
+
+    try {
+      const peer = await this.peerService.rename(Number(params.id), name)
+
+      return response.ok({
+        ...this.serializePeer(peer),
+        device: peer.device?.serialize() ?? null,
       })
     } catch (error: unknown) {
       return this.badRequestFromError(ctx, error)
@@ -168,7 +213,7 @@ export default class VpnPeersController {
     const artifact = await this.peerService.buildArtifact(Number(params.id))
     this.audit(ctx, 'config_download', Number(params.id), { profile: artifact.profile })
 
-    return response.ok(artifact)
+    return response.ok(await this.serializeArtifact(artifact))
   }
 
   /** GET /api/vpn/peers/:id/qrcode — 🔒 apenas perfis móveis. */
@@ -184,10 +229,17 @@ export default class VpnPeersController {
       })
     }
 
-    const svg = await QRCode.toString(artifact.content, { type: 'svg', margin: 1, width: 320 })
+    const { qrSvg } = await this.serializeArtifact(artifact)
+    if (!qrSvg) {
+      return response.conflict({
+        message:
+          'A chave privada deste dispositivo já foi entregue. Rotacione as chaves para gerar um novo QR Code.',
+      })
+    }
+
     this.audit(ctx, 'qrcode_download', Number(params.id), { profile: artifact.profile })
 
-    return response.ok({ profile: artifact.profile, fileName: artifact.fileName, svg })
+    return response.ok({ profile: artifact.profile, fileName: artifact.fileName, svg: qrSvg })
   }
 
   /** POST /api/vpn/peers/:id/rotate */
@@ -203,7 +255,7 @@ export default class VpnPeersController {
       return response.ok({
         message: 'Novo par de chaves gerado. A configuração anterior foi invalidada.',
         peer: this.serializePeer(peer),
-        artifact,
+        artifact: await this.serializeArtifact(artifact),
       })
     } catch (error: unknown) {
       return this.badRequestFromError(ctx, error)

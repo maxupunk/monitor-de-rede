@@ -23,7 +23,13 @@ const dbConfig = defineConfig({
       client: 'better-sqlite3',
 
       connection: {
-        filename: app.tmpPath('db.sqlite3'),
+        /**
+         * O arquivo é configurável porque a suíte funcional roda
+         * `testUtils.db().truncate()`: apontando para o mesmo `db.sqlite3` do
+         * desenvolvimento, um `node ace test` apaga os dados de trabalho.
+         * O `.env.test` isola o banco dos testes.
+         */
+        filename: app.tmpPath(env.get('DB_FILENAME') || 'db.sqlite3'),
       },
 
       useNullAsDefault: true,

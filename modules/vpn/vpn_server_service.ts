@@ -65,6 +65,22 @@ export class VpnServerService {
   }
 
   /**
+   * Traz o `wg show dump` publicado pelo container para dentro do banco.
+   *
+   * Precisa acontecer antes de qualquer leitura que exiba status ao operador:
+   * o scheduler sincroniza em background, mas quem acabou de abrir a tela não
+   * pode depender do próximo ciclo dele para ver o túnel que subiu agora.
+   * Falha na leitura do arquivo não derruba a resposta — os dados persistidos
+   * seguem válidos, só ficam um ciclo atrasados.
+   */
+  async syncTelemetry(): Promise<void> {
+    const server = await this.find()
+    if (!server) return
+
+    await this.peerStatusService.syncPeers(server.interfaceName, server.id).catch(() => 0)
+  }
+
+  /**
    * Cria a rede da VPN quando ainda não existe. `networks.site_id` é NOT NULL,
    * então é preciso um Site — usamos o informado ou o primeiro cadastrado.
    */
@@ -198,7 +214,7 @@ export class VpnServerService {
       }
     }
 
-    await this.peerStatusService.syncPeers(server.interfaceName, server.id).catch(() => 0)
+    await this.syncTelemetry()
 
     const peers = await VpnPeer.query().where('vpnServerId', server.id)
 

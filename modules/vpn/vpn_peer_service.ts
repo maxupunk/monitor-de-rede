@@ -11,6 +11,7 @@ import { clientKeyStore } from './secret_store.js'
 import { profileRegistry } from './profiles/profile_registry.js'
 import {
   PERSISTENT_KEEPALIVE_SECONDS,
+  PRIVATE_KEY_UNAVAILABLE,
   type GeneratedArtifact,
   type PeerConfigContext,
 } from './profiles/profile_contract.js'
@@ -22,8 +23,8 @@ import { ResourceCleanupService } from '#services/resource_cleanup_service'
  * chaves, revogação e geração dos artefatos por perfil.
  */
 
-/** Placeholder exibido quando a chave privada já foi entregue e descartada. */
-export const PRIVATE_KEY_UNAVAILABLE = '<CHAVE-PRIVADA-INDISPONIVEL-ROTACIONE-AS-CHAVES>'
+/** Reexportado por compatibilidade — a definição vive junto do contrato de perfis. */
+export { PRIVATE_KEY_UNAVAILABLE }
 
 export interface CreatePeerPayload {
   name: string
@@ -40,6 +41,12 @@ export interface PeerListItem {
   peer: VpnPeer
   /** Túnel ativo, mas o ping falha: provável firewall bloqueando na interface WG. */
   needsFirewallHint: boolean
+  /**
+   * Túnel ativo e ping falhando, mas o monitor não roda no `vpn-probe`: o ICMP
+   * sai da máquina da API, que não tem rota para dentro do túnel. O pacote nem
+   * chega ao equipamento — acusar o firewall dele seria diagnóstico falso.
+   */
+  pingOutsideTunnel: boolean
   /** Monitor de ping provisionado automaticamente para o peer (§4.7) — usado para navegar ao histórico de conectividade. */
   pingMonitorId: number | null
 }
@@ -95,6 +102,11 @@ export class VpnPeerService {
   }
 
   async list(): Promise<PeerListItem[]> {
+    // Sem isto a lista mostra o que o scheduler gravou no ciclo anterior: o
+    // operador que acabou de conectar o túnel precisaria recarregar a tela
+    // até o background alcançá-lo.
+    await this.serverService.syncTelemetry()
+
     const peers = await VpnPeer.query().preload('device').orderBy('id', 'asc')
     if (peers.length === 0) return []
 
@@ -107,9 +119,14 @@ export class VpnPeerService {
 
     return peers.map((peer) => {
       const monitor = pingMonitors.find((item) => item.deviceId === peer.deviceId)
+      const silentTunnel = peer.connectionStatus === 'connected' && monitor?.status === 'down'
+      // Sem probe, o ping é executado pela própria API (`scheduler_run`), fora do túnel.
+      const outsideTunnel = silentTunnel && !monitor?.probeId
+
       return {
         peer,
-        needsFirewallHint: peer.connectionStatus === 'connected' && monitor?.status === 'down',
+        needsFirewallHint: silentTunnel && !outsideTunnel,
+        pingOutsideTunnel: outsideTunnel,
         pingMonitorId: monitor?.id ?? null,
       }
     })
@@ -186,6 +203,47 @@ export class VpnPeerService {
     const artifact = this.generateArtifact(server, peer, peer.device, keyPair.privateKey)
 
     return { peer, artifact }
+  }
+
+  /**
+   * Renomeia o dispositivo do peer.
+   *
+   * Existe separado do `PUT /api/devices/:id` de propósito: aquele endpoint
+   * sincroniza "o primeiro monitor" do dispositivo, e um peer da VPN tem dois
+   * (ping e SNMP) — o SNMP perderia community e versão se caísse ali.
+   */
+  async rename(peerId: number, name: string): Promise<VpnPeer> {
+    const newName = name.trim()
+    if (!newName) {
+      throw new Error('Informe o nome do dispositivo')
+    }
+
+    const { peer, server } = await this.loadPeer(peerId)
+    const device = peer.device
+    const previousName = device.name
+    if (previousName === newName) return peer
+
+    await db.transaction(async (trx) => {
+      device.useTransaction(trx)
+      device.name = newName
+      await device.save()
+
+      // Só acompanha os monitores que ainda usam o nome gerado no
+      // provisionamento — um monitor renomeado à mão continua como está.
+      const monitors = await Monitor.query({ client: trx }).where('deviceId', device.id)
+      for (const monitor of monitors) {
+        const prefix = monitor.type === 'ping' ? 'Ping' : monitor.type === 'snmp' ? 'SNMP' : null
+        if (!prefix || monitor.name !== `${prefix} ${previousName}`) continue
+
+        monitor.name = `${prefix} ${newName}`
+        await monitor.save()
+      }
+    })
+
+    // O `wg0.conf` traz o nome como comentário de cada peer.
+    await this.serverService.applyConfiguration(server)
+
+    return peer
   }
 
   /** Gera novo par de chaves e PSK, invalidando imediatamente os anteriores. */

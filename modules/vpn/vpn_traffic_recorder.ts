@@ -25,7 +25,26 @@ export class VpnTrafficRecorder {
 
   constructor(private peerStatusService = new PeerStatusService()) {}
 
-  /** Sincroniza o status de todos os servidores ativos e grava um snapshot de tráfego por peer. */
+  /**
+   * Sincroniza o status de todos os servidores ativos e publica o quadro atual.
+   *
+   * Separado de `recordAll` de propósito: o status precisa de cadência fina
+   * para a tela acompanhar o túnel em tempo real, enquanto o histórico de
+   * tráfego não justifica quatro linhas em `metrics` por peer a cada ciclo.
+   */
+  async syncAll(): Promise<number> {
+    const servers = await VpnServer.query().where('active', true)
+    let synced = 0
+
+    for (const server of servers) {
+      await this.peerStatusService.syncPeers(server.interfaceName, server.id)
+      synced += await this.publishServerPeers(server.id)
+    }
+
+    return synced
+  }
+
+  /** Sincroniza o status e grava um snapshot de tráfego por peer. */
   async recordAll(): Promise<number> {
     const servers = await VpnServer.query().where('active', true)
     let recorded = 0
@@ -39,33 +58,47 @@ export class VpnTrafficRecorder {
   }
 
   private async recordServerPeers(vpnServerId: number): Promise<number> {
-    const peers = await VpnPeer.query().where('vpnServerId', vpnServerId).where('enabled', true)
+    const peers = await this.enabledPeers(vpnServerId)
 
     for (const peer of peers) {
       await this.recordPeer(peer)
     }
 
-    if (peers.length > 0) {
-      const snapshot = peers.map((peer) => ({
-        id: peer.id,
-        deviceId: peer.deviceId,
-        connectionStatus: peer.connectionStatus,
-        lastHandshakeAt: peer.lastHandshakeAt?.toISO() ?? null,
-        bytesRx: peer.bytesRx,
-        bytesTx: peer.bytesTx,
-      }))
-
-      // Um único evento por servidor: a tela de VPN repinta status e contadores
-      // sem esperar o operador recarregar a página. Túnel parado repete o mesmo
-      // quadro a cada 30s — nesse caso não há o que repintar.
-      const fingerprint = JSON.stringify(snapshot)
-      if (this.lastPublished.get(vpnServerId) !== fingerprint) {
-        this.lastPublished.set(vpnServerId, fingerprint)
-        this.eventBus.emit('vpn:peers_updated', { vpnServerId, peers: snapshot })
-      }
-    }
-
+    this.publishSnapshot(vpnServerId, peers)
     return peers.length
+  }
+
+  private async publishServerPeers(vpnServerId: number): Promise<number> {
+    const peers = await this.enabledPeers(vpnServerId)
+    this.publishSnapshot(vpnServerId, peers)
+    return peers.length
+  }
+
+  private async enabledPeers(vpnServerId: number): Promise<VpnPeer[]> {
+    return VpnPeer.query().where('vpnServerId', vpnServerId).where('enabled', true)
+  }
+
+  private publishSnapshot(vpnServerId: number, peers: VpnPeer[]): void {
+    if (peers.length === 0) return
+
+    const snapshot = peers.map((peer) => ({
+      id: peer.id,
+      deviceId: peer.deviceId,
+      connectionStatus: peer.connectionStatus,
+      lastHandshakeAt: peer.lastHandshakeAt?.toISO() ?? null,
+      lastSeenAt: peer.lastSeenAt?.toISO() ?? null,
+      bytesRx: peer.bytesRx,
+      bytesTx: peer.bytesTx,
+    }))
+
+    // Um único evento por servidor: a tela de VPN repinta status e contadores
+    // sem esperar o operador recarregar a página. Túnel parado repete o mesmo
+    // quadro a cada ciclo — nesse caso não há o que repintar.
+    const fingerprint = JSON.stringify(snapshot)
+    if (this.lastPublished.get(vpnServerId) === fingerprint) return
+
+    this.lastPublished.set(vpnServerId, fingerprint)
+    this.eventBus.emit('vpn:peers_updated', { vpnServerId, peers: snapshot })
   }
 
   private async recordPeer(peer: VpnPeer): Promise<void> {

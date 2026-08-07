@@ -64,6 +64,16 @@ export function parseWgDump(dump: string): WgPeerStatus[] {
   return peers
 }
 
+/**
+ * Sincronizações em voo por interface.
+ *
+ * A leitura acontece a cada request que exibe status — várias abas abertas, ou
+ * a tela de VPN pedindo servidor e peers ao mesmo tempo, disputariam a mesma
+ * escrita e um dos ciclos calcularia o delta de bytes contra um valor já
+ * atualizado pelo outro, perdendo o sinal de keepalive.
+ */
+const inFlightSyncs = new Map<string, Promise<number>>()
+
 export class PeerStatusService {
   constructor(private sink: VpnConfigSink = new FileConfigSink()) {}
 
@@ -74,24 +84,53 @@ export class PeerStatusService {
     return parseWgDump(dump)
   }
 
-  /** Atualiza handshake e contadores de tráfego dos peers persistidos. */
+  /** Atualiza handshake, contadores de tráfego e sinal de vida dos peers persistidos. */
   async syncPeers(interfaceName: string, vpnServerId: number): Promise<number> {
+    const key = `${interfaceName}:${vpnServerId}`
+    const running = inFlightSyncs.get(key)
+    if (running) return running
+
+    const sync = this.runSync(interfaceName, vpnServerId).finally(() => {
+      inFlightSyncs.delete(key)
+    })
+
+    inFlightSyncs.set(key, sync)
+    return sync
+  }
+
+  private async runSync(interfaceName: string, vpnServerId: number): Promise<number> {
     const statuses = await this.readStatus(interfaceName)
     if (statuses.length === 0) return 0
 
     const byPublicKey = new Map(statuses.map((status) => [status.publicKey, status]))
     const peers = await VpnPeer.query().where('vpnServerId', vpnServerId)
+    const now = DateTime.now()
     let updated = 0
 
     for (const peer of peers) {
       const status = byPublicKey.get(peer.publicKey)
       if (!status) continue
 
+      const previousRx = peer.bytesRx
+      const previousHandshake = peer.lastHandshakeAt
+
       peer.bytesRx = status.bytesRx
       peer.bytesTx = status.bytesTx
       peer.lastHandshakeAt = status.latestHandshakeAt
         ? DateTime.fromJSDate(status.latestHandshakeAt)
         : peer.lastHandshakeAt
+
+      // Contador de RX subiu desde a leitura anterior: chegou pelo menos um
+      // keepalive, então o túnel está vivo agora — independente de o handshake
+      // ser antigo. Queda de contador significa interface reiniciada, não vida.
+      const receivedNewBytes = status.bytesRx > previousRx
+      const renegotiated =
+        peer.lastHandshakeAt !== null &&
+        (previousHandshake === null || peer.lastHandshakeAt > previousHandshake)
+
+      if (receivedNewBytes || renegotiated) {
+        peer.lastSeenAt = now
+      }
 
       if (peer.$isDirty) {
         await peer.save()

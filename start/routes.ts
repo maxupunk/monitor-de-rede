@@ -119,6 +119,7 @@ router
     router.get('vpn/peers', [VpnPeersController, 'index'])
     router.get('vpn/peers/next-ip', [VpnPeersController, 'nextIp'])
     router.post('vpn/peers', [VpnPeersController, 'store'])
+    router.patch('vpn/peers/:id', [VpnPeersController, 'update'])
     router.get('vpn/peers/:id/config', [VpnPeersController, 'config'])
     router.get('vpn/peers/:id/qrcode', [VpnPeersController, 'qrcode'])
     router.post('vpn/peers/:id/rotate', [VpnPeersController, 'rotate'])

@@ -225,6 +225,7 @@ erDiagram
         string device_profile "mikrotik | openwrt | linux | windows | mobile"
         int persistent_keepalive "25"
         datetime last_handshake_at
+        datetime last_seen_at "ultimo keepalive contabilizado"
         bigint bytes_rx
         bigint bytes_tx
         boolean enabled
@@ -313,18 +314,33 @@ Painel único de configuração, sem abas por protocolo (só existe WireGuard na
 
 ### 4.2. Tela 2 — Dispositivos VPN (`/vpn/devices`)
 
-> ✅ **Entregue** em [`VpnDevicesPage.vue`](../frontend/src/pages/vpn/VpnDevicesPage.vue). Os limiares de 3 e 10 minutos vivem em `HANDSHAKE_CONNECTED_SECONDS` / `HANDSHAKE_UNSTABLE_SECONDS` ([`vpn_peer.ts`](../app/models/vpn_peer.ts)).
+> ✅ **Entregue** em [`VpnDevicesPage.vue`](../frontend/src/pages/vpn/VpnDevicesPage.vue). Os limiares vivem em [`vpn_peer.ts`](../app/models/vpn_peer.ts).
 
-Tabela com status derivado de `last_handshake_at`:
+Tabela com status derivado do **último sinal de vida** (`last_seen_at`), não do handshake.
+
+> ⚠️ O handshake **não** serve como sinal de vida. O WireGuard só renegocia
+> chaves quando tem dados para enviar, então um túnel ocioso e perfeitamente
+> saudável passa vários minutos sem handshake novo — com o critério antigo
+> (3 min) ele piscava "Instável" e voltava sozinho. Quem prova que o túnel está
+> de pé é o `PersistentKeepalive`: a cada 25s o servidor contabiliza bytes
+> novos, e é esse incremento que `peer_status.ts` carimba em `last_seen_at`.
 
 | Status | Regra | Significado |
 | :--- | :--- | :--- |
-| 🟢 Conectado | handshake < 3 min | Túnel ativo |
-| 🟡 Instável | handshake 3–10 min | Keepalive falhando |
-| 🔴 Desconectado | handshake > 10 min | Fora do ar |
-| ⚪ Aguardando | nunca houve handshake | Script ainda não aplicado no roteador |
+| 🟢 Conectado | sinal < 3 keepalives + folga da coleta (≈ 2 min) | Túnel ativo |
+| 🟡 Instável | sinal entre a janela de conectado e 15 min | Keepalive falhando |
+| 🔴 Desconectado | sinal > 15 min | Fora do ar |
+| ⚪ Aguardando | nunca houve sinal | Script ainda não aplicado no roteador |
 
-Colunas: Nome · Perfil (ícone) · IP fixo · Último handshake ("há 2 minutos") · Tráfego RX/TX · Ações.
+Peer sem `PersistentKeepalive` não tem sinal periódico: aí a régua volta a ser o
+handshake, com janela de `REJECT_AFTER_TIME` (180s) mais a folga da coleta.
+
+Colunas: Nome · Perfil (ícone) · IP fixo · Última atividade ("há 20 segundos", com o handshake no tooltip) · Tráfego RX/TX · Ações.
+
+**Frescor dos dados:** o watcher republica `wg show dump` a cada 5s, o scheduler
+sincroniza o status a cada 10s (o histórico de tráfego segue em 30s) e
+`GET /api/vpn/peers` sincroniza antes de responder — a lista nunca depende do
+próximo ciclo do background para mostrar um túnel que acabou de subir.
 
 **Ações por linha:** 📋 Copiar script · ⬇️ Baixar config · 📲 QR Code (só perfis móveis) · 🔄 Rotacionar chaves · 🚫 Revogar.
 
@@ -332,7 +348,7 @@ Colunas: Nome · Perfil (ícone) · IP fixo · Último handshake ("há 2 minutos
 
 O erro mais comum ao conectar um roteador é: **túnel sobe, mas o monitoramento não responde** — porque falta liberar ICMP/SNMP na chain `input` da interface WireGuard.
 
-> ✅ **Entregue.** O flag `needsFirewallHint` (handshake < 3 min **e** monitor de ping `down`) é calculado em [`vpn_peer_service.ts`](../modules/vpn/vpn_peer_service.ts) e o botão chama `POST /api/vpn/peers/:id/firewall-hints`, que devolve as regras do perfil do equipamento.
+> ✅ **Entregue.** O flag `needsFirewallHint` (túnel `connected` **e** monitor de ping `down`) é calculado em [`vpn_peer_service.ts`](../modules/vpn/vpn_peer_service.ts) e o botão chama `POST /api/vpn/peers/:id/firewall-hints`, que devolve as regras do perfil do equipamento.
 
 O sistema detecta isso automaticamente (handshake recente + ping falhando) e exibe um alerta acionável na linha:
 

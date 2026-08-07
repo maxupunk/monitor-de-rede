@@ -8,7 +8,13 @@ import { ProbeTaskDispatcher } from '#modules/probes/probe_task_dispatcher'
 import { VpnTrafficRecorder } from '#modules/vpn/vpn_traffic_recorder'
 import { errorMessage } from '#modules/shared/errors'
 
-/** Cadência da gravação de histórico de tráfego VPN — não precisa ser tão fina quanto o polling de monitores. */
+/**
+ * Cadência da leitura de status dos túneis. Fina de propósito: é o que faz a
+ * tela de dispositivos VPN acompanhar um túnel que acabou de subir.
+ */
+const VPN_STATUS_INTERVAL_SECONDS = 10
+
+/** Cadência da gravação de histórico de tráfego VPN — quatro linhas em `metrics` por peer, não precisa ser fina. */
 const VPN_TRAFFIC_INTERVAL_SECONDS = 30
 
 export default class SchedulerRun extends BaseCommand {
@@ -24,6 +30,7 @@ export default class SchedulerRun extends BaseCommand {
   private resultProcessor = new ResultProcessor()
   private probeTaskDispatcher = new ProbeTaskDispatcher()
   private vpnTrafficRecorder = new VpnTrafficRecorder()
+  private nextVpnStatusSyncAt: DateTime | null = null
   private nextVpnTrafficSyncAt: DateTime | null = null
 
   async run() {
@@ -50,10 +57,20 @@ export default class SchedulerRun extends BaseCommand {
 
   private async syncVpnTrafficIfDue() {
     const now = DateTime.now()
-    if (this.nextVpnTrafficSyncAt && now < this.nextVpnTrafficSyncAt) return
 
-    await this.vpnTrafficRecorder.recordAll()
-    this.nextVpnTrafficSyncAt = now.plus({ seconds: VPN_TRAFFIC_INTERVAL_SECONDS })
+    // O ciclo com histórico já sincroniza o status; roda primeiro para não
+    // gravar duas amostras de tráfego separadas por poucos segundos.
+    if (!this.nextVpnTrafficSyncAt || now >= this.nextVpnTrafficSyncAt) {
+      await this.vpnTrafficRecorder.recordAll()
+      this.nextVpnTrafficSyncAt = now.plus({ seconds: VPN_TRAFFIC_INTERVAL_SECONDS })
+      this.nextVpnStatusSyncAt = now.plus({ seconds: VPN_STATUS_INTERVAL_SECONDS })
+      return
+    }
+
+    if (this.nextVpnStatusSyncAt && now < this.nextVpnStatusSyncAt) return
+
+    await this.vpnTrafficRecorder.syncAll()
+    this.nextVpnStatusSyncAt = now.plus({ seconds: VPN_STATUS_INTERVAL_SECONDS })
   }
 
   private async checkDueMonitors() {

@@ -55,13 +55,34 @@ export interface VpnPeer {
   deviceProfile: VpnDeviceProfile
   persistentKeepalive: number
   lastHandshakeAt: string | null
+  /** Último keepalive contabilizado pelo servidor — sinal de vida do túnel. */
+  lastSeenAt: string | null
   bytesRx: number
   bytesTx: number
   enabled: boolean
   connectionStatus: VpnConnectionStatus
   needsFirewallHint: boolean
+  /** O ping não está saindo pelo túnel — o `vpn-probe` não assumiu o monitor. */
+  pingOutsideTunnel: boolean
   pingMonitorId: number | null
   device: VpnPeerDevice | null
+}
+
+export interface VpnArtifactSummaryItem {
+  label: string
+  value: string
+}
+
+/** Script de terminal alternativo — mesmo túnel, outro gerenciador de pacotes. */
+export interface VpnArtifactVariant {
+  id: string
+  label: string
+  hint: string
+  icon: string
+  fileName: string
+  language: string
+  content: string
+  instructions: string[]
 }
 
 export interface VpnArtifact {
@@ -73,6 +94,10 @@ export interface VpnArtifact {
   content: string
   instructions: string[]
   supportsQrCode: boolean
+  summary: VpnArtifactSummaryItem[]
+  variants: VpnArtifactVariant[]
+  /** Já vem renderizado nos perfis móveis — a chave privada só existe nesta resposta. */
+  qrSvg: string | null
 }
 
 export interface VpnPreflightResult {
@@ -178,6 +203,7 @@ export const useVpnStore = defineStore('vpn', () => {
 
       peer.connectionStatus = update.connectionStatus as VpnConnectionStatus
       peer.lastHandshakeAt = (update.lastHandshakeAt as string | null) ?? null
+      peer.lastSeenAt = (update.lastSeenAt as string | null) ?? null
       peer.bytesRx = Number(update.bytesRx ?? peer.bytesRx)
       peer.bytesTx = Number(update.bytesTx ?? peer.bytesTx)
     }
@@ -277,6 +303,23 @@ export const useVpnStore = defineStore('vpn', () => {
     }
   }
 
+  /** Renomeia o dispositivo do peer, mantendo a linha da tabela sincronizada. */
+  async function renamePeer(peerId: number, name: string): Promise<boolean> {
+    saving.value = true
+    error.value = null
+    try {
+      const updated = await apiService.patch<VpnPeer>(`/vpn/peers/${peerId}`, { name })
+      const peer = peers.value.find((item) => item.id === peerId)
+      if (peer && updated.device) peer.device = updated.device
+      return true
+    } catch (err: unknown) {
+      fail(err, 'Erro ao renomear o dispositivo VPN')
+      return false
+    } finally {
+      saving.value = false
+    }
+  }
+
   async function fetchConfig(peerId: number): Promise<VpnArtifact | null> {
     error.value = null
     try {
@@ -285,16 +328,6 @@ export const useVpnStore = defineStore('vpn', () => {
       return artifact
     } catch (err: unknown) {
       return fail(err, 'Erro ao obter a configuração do dispositivo')
-    }
-  }
-
-  async function fetchQrCode(peerId: number): Promise<string | null> {
-    error.value = null
-    try {
-      const result = await apiService.get<{ svg: string }>(`/vpn/peers/${peerId}/qrcode`)
-      return result.svg
-    } catch (err: unknown) {
-      return fail(err, 'Erro ao gerar o QR Code')
     }
   }
 
@@ -355,8 +388,8 @@ export const useVpnStore = defineStore('vpn', () => {
     fetchPeers,
     suggestNextIp,
     createPeer,
+    renamePeer,
     fetchConfig,
-    fetchQrCode,
     rotateKeys,
     fetchFirewallHints,
     revokePeer,

@@ -56,6 +56,23 @@
               Copiar regras de firewall
             </v-btn>
           </div>
+          <!-- O ICMP sai da máquina da API, que não tem rota para a VPN: o
+               equipamento nunca recebe o pacote, então não é caso de firewall. -->
+          <div
+            v-else-if="item.pingOutsideTunnel"
+            class="text-caption text-info d-flex align-center"
+          >
+            <v-icon size="14" start>mdi-lan-disconnect</v-icon>
+            O ping não sai pelo túnel — registre o vpn-probe
+            <v-tooltip
+              text="Este monitor está sendo executado pela API, fora da VPN. Defina VPN_PROBE_TOKEN e suba o serviço vpn-probe, depois recrie o dispositivo."
+              max-width="360"
+            >
+              <template #activator="{ props }">
+                <v-icon v-bind="props" size="14" class="ml-1">mdi-help-circle-outline</v-icon>
+              </template>
+            </v-tooltip>
+          </div>
         </template>
 
         <template #item.deviceProfile="{ item }">
@@ -75,8 +92,17 @@
           </v-chip>
         </template>
 
-        <template #item.lastHandshakeAt="{ item }">
-          {{ relativeTime(item.lastHandshakeAt) }}
+        <!-- O handshake é renegociado só quando há o que enviar: num túnel
+             ocioso ele fica minutos parado sem que nada esteja errado. O que
+             realmente indica vida é o keepalive, então é ele que aparece aqui. -->
+        <template #item.lastActivity="{ item }">
+          <v-tooltip :text="`Último handshake: ${relativeTime(item.lastHandshakeAt)}`">
+            <template #activator="{ props }">
+              <span v-bind="props">{{
+                relativeTime(item.lastSeenAt || item.lastHandshakeAt)
+              }}</span>
+            </template>
+          </v-tooltip>
         </template>
 
         <template #item.traffic="{ item }">
@@ -102,6 +128,18 @@
               </template>
             </v-tooltip>
 
+            <v-tooltip text="Renomear dispositivo">
+              <template #activator="{ props }">
+                <v-btn
+                  v-bind="props"
+                  size="small"
+                  icon="mdi-pencil"
+                  variant="text"
+                  @click="openRename(item)"
+                ></v-btn>
+              </template>
+            </v-tooltip>
+
             <v-tooltip text="Copiar script / configuração">
               <template #activator="{ props }">
                 <v-btn
@@ -121,7 +159,7 @@
                   size="small"
                   icon="mdi-qrcode"
                   variant="text"
-                  @click="openQrCode(item)"
+                  @click="openConfig(item)"
                 ></v-btn>
               </template>
             </v-tooltip>
@@ -160,9 +198,49 @@
       {{ vpnStore.error }}
     </v-alert>
 
+    <v-dialog v-model="renameOpen" max-width="460">
+      <v-card class="rounded-lg">
+        <v-card-title class="font-weight-bold d-flex align-center">
+          <v-icon start color="primary">mdi-pencil</v-icon>
+          Renomear dispositivo
+        </v-card-title>
+
+        <v-card-text>
+          <v-text-field
+            v-model="renameValue"
+            label="Nome do dispositivo *"
+            variant="outlined"
+            density="comfortable"
+            autofocus
+            :error-messages="renameError"
+            @keyup.enter="submitRename"
+          ></v-text-field>
+
+          <div class="text-caption text-medium-emphasis">
+            O IP na VPN e as chaves não mudam — o túnel continua no ar. Os monitores de ping e SNMP
+            acompanham o novo nome.
+          </div>
+        </v-card-text>
+
+        <v-card-actions class="px-4 pb-4">
+          <v-spacer></v-spacer>
+          <v-btn variant="text" @click="renameOpen = false">Cancelar</v-btn>
+          <v-btn
+            color="primary"
+            variant="flat"
+            :loading="vpnStore.saving"
+            :disabled="!renameValue.trim()"
+            @click="submitRename"
+          >
+            Salvar
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <VpnPeerWizard v-model="wizardOpen" @created="onPeerCreated" />
 
-    <VpnScriptViewer v-model="viewerOpen" :artifact="vpnStore.lastArtifact" :qr-svg="qrSvg" />
+    <VpnScriptViewer v-model="viewerOpen" :artifact="vpnStore.lastArtifact" />
 
     <VpnFirewallHintsDialog v-model="firewallOpen" :content="firewallContent" />
   </div>
@@ -189,14 +267,17 @@ const wizardOpen = ref(false)
 const viewerOpen = ref(false)
 const firewallOpen = ref(false)
 const firewallContent = ref('')
-const qrSvg = ref<string | null>(null)
+const renameOpen = ref(false)
+const renameValue = ref('')
+const renameError = ref('')
+const renamingPeerId = ref<number | null>(null)
 
 const headers = [
   { title: 'Nome', key: 'name' },
   { title: 'Perfil', key: 'deviceProfile', width: '180px' },
   { title: 'IP fixo', key: 'ipAddress', width: '130px' },
   { title: 'Status', key: 'connectionStatus', width: '140px' },
-  { title: 'Último handshake', key: 'lastHandshakeAt', width: '180px' },
+  { title: 'Última atividade', key: 'lastActivity', value: 'lastSeenAt', width: '180px' },
   { title: 'Tráfego RX/TX', key: 'traffic', width: '180px', sortable: false },
   { title: 'Ações', key: 'actions', sortable: false, width: '200px' },
 ]
@@ -216,22 +297,35 @@ function isMobile(peer: VpnPeer): boolean {
 }
 
 function onPeerCreated() {
-  qrSvg.value = null
   viewerOpen.value = true
 }
 
+function openRename(peer: VpnPeer) {
+  renamingPeerId.value = peer.id
+  renameValue.value = peer.device?.name || ''
+  renameError.value = ''
+  renameOpen.value = true
+}
+
+async function submitRename() {
+  const peerId = renamingPeerId.value
+  const name = renameValue.value.trim()
+  if (!peerId || !name) return
+
+  renameError.value = ''
+  const saved = await vpnStore.renamePeer(peerId, name)
+
+  if (saved) {
+    renameOpen.value = false
+  } else {
+    renameError.value = vpnStore.error || 'Não foi possível renomear'
+  }
+}
+
+/** O artefato já traz o QR Code dos perfis móveis — não há segunda requisição. */
 async function openConfig(peer: VpnPeer) {
-  qrSvg.value = null
   const artifact = await vpnStore.fetchConfig(peer.id)
   if (artifact) viewerOpen.value = true
-}
-
-async function openQrCode(peer: VpnPeer) {
-  const artifact = await vpnStore.fetchConfig(peer.id)
-  if (!artifact) return
-
-  qrSvg.value = await vpnStore.fetchQrCode(peer.id)
-  viewerOpen.value = true
 }
 
 async function rotate(peer: VpnPeer) {
@@ -240,7 +334,6 @@ async function rotate(peer: VpnPeer) {
     return
   }
 
-  qrSvg.value = null
   const artifact = await vpnStore.rotateKeys(peer.id)
   if (artifact) viewerOpen.value = true
 }

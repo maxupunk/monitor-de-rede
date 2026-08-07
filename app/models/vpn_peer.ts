@@ -8,11 +8,31 @@ import VpnServer from '#models/vpn_server'
 /** Perfis de equipamento suportados pelos geradores de configuração. */
 export type VpnDeviceProfile = 'mikrotik' | 'openwrt' | 'linux' | 'windows' | 'mobile'
 
-/** Estado do túnel derivado do último handshake. */
+/** Estado do túnel derivado do último sinal de vida recebido do peer. */
 export type VpnPeerConnectionStatus = 'connected' | 'unstable' | 'disconnected' | 'awaiting'
 
-export const HANDSHAKE_CONNECTED_SECONDS = 180
-export const HANDSHAKE_UNSTABLE_SECONDS = 600
+/**
+ * `REJECT_AFTER_TIME` do WireGuard: o keypair atual deixa de ser aceito depois
+ * disso. É o teto do intervalo entre handshakes de um túnel em uso — mas só de
+ * um túnel *em uso*: sem dados para enviar, o protocolo não renegocia nada.
+ */
+export const REJECT_AFTER_SECONDS = 180
+
+/**
+ * Folga do caminho até o banco: o watcher republica `wg show dump` a cada 5s e
+ * o scheduler sincroniza a cada 10s. Sem essa margem, um peer saudável cruzava
+ * o limite só por causa da latência da coleta.
+ */
+export const STATUS_PIPELINE_SLACK_SECONDS = 45
+
+/** Keepalives que podem faltar antes de o túnel virar suspeito. */
+export const KEEPALIVE_MISSES_ALLOWED = 3
+
+/** Janela usada quando não há keepalive contabilizado — resta olhar o handshake. */
+export const HANDSHAKE_CONNECTED_SECONDS = REJECT_AFTER_SECONDS + STATUS_PIPELINE_SLACK_SECONDS
+
+/** Acima disso o túnel é dado como caído, não apenas instável. */
+export const HANDSHAKE_UNSTABLE_SECONDS = 900
 
 /**
  * Peer WireGuard. Guarda apenas material criptográfico e telemetria — nome e IP
@@ -51,6 +71,14 @@ export default class VpnPeer extends BaseModel {
   @column.dateTime()
   declare lastHandshakeAt: DateTime | null
 
+  /**
+   * Último ciclo em que o servidor contabilizou bytes novos vindos do peer.
+   * Com `PersistentKeepalive` ativo isso acontece a cada 25s, o que torna esse
+   * carimbo um sinal de vida muito mais fiel que o handshake.
+   */
+  @column.dateTime()
+  declare lastSeenAt: DateTime | null
+
   // Postgres devolve colunas bigint como string para não perder precisão;
   // normaliza para number aqui para não vazar esse detalhe do driver à API/UI.
   @column({ consume: (value: string | number) => Number(value) })
@@ -74,12 +102,37 @@ export default class VpnPeer extends BaseModel {
   @belongsTo(() => Device)
   declare device: BelongsTo<typeof Device>
 
+  /**
+   * Sinal de vida mais recente: keepalive contabilizado ou renegociação de
+   * chaves, o que tiver acontecido por último.
+   */
+  get lastActivityAt(): DateTime | null {
+    if (!this.lastHandshakeAt) return this.lastSeenAt ?? null
+    if (!this.lastSeenAt) return this.lastHandshakeAt
+    return this.lastSeenAt > this.lastHandshakeAt ? this.lastSeenAt : this.lastHandshakeAt
+  }
+
+  /**
+   * Quanto tempo sem sinal ainda conta como conectado.
+   *
+   * Com keepalive ativo a régua é o próprio keepalive: três perdas seguidas mais
+   * a folga da coleta. Sem ele — peer que só fala quando tem tráfego — resta o
+   * handshake, cuja janela precisa ser bem mais larga.
+   */
+  private get connectedWindowSeconds(): number {
+    if (this.persistentKeepalive > 0 && this.lastSeenAt) {
+      return this.persistentKeepalive * KEEPALIVE_MISSES_ALLOWED + STATUS_PIPELINE_SLACK_SECONDS
+    }
+    return HANDSHAKE_CONNECTED_SECONDS
+  }
+
   @computed()
   get connectionStatus(): VpnPeerConnectionStatus {
-    if (!this.lastHandshakeAt) return 'awaiting'
+    const lastActivity = this.lastActivityAt
+    if (!lastActivity) return 'awaiting'
 
-    const elapsedSeconds = DateTime.now().diff(this.lastHandshakeAt, 'seconds').seconds
-    if (elapsedSeconds <= HANDSHAKE_CONNECTED_SECONDS) return 'connected'
+    const elapsedSeconds = DateTime.now().diff(lastActivity, 'seconds').seconds
+    if (elapsedSeconds <= this.connectedWindowSeconds) return 'connected'
     if (elapsedSeconds <= HANDSHAKE_UNSTABLE_SECONDS) return 'unstable'
     return 'disconnected'
   }

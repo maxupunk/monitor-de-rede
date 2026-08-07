@@ -558,7 +558,7 @@ export class UserSchema extends BaseModel {
 }
 
 export class VpnPeerSchema extends BaseModel {
-  static $columns = ['bytesRx', 'bytesTx', 'createdAt', 'deviceId', 'deviceProfile', 'enabled', 'id', 'lastHandshakeAt', 'persistentKeepalive', 'presharedKeyEncrypted', 'publicKey', 'updatedAt', 'vpnServerId'] as const
+  static $columns = ['bytesRx', 'bytesTx', 'createdAt', 'deviceId', 'deviceProfile', 'enabled', 'id', 'lastHandshakeAt', 'lastSeenAt', 'persistentKeepalive', 'presharedKeyEncrypted', 'publicKey', 'updatedAt', 'vpnServerId'] as const
   $columns = VpnPeerSchema.$columns
   @column()
   declare bytesRx: bigint | number
@@ -576,6 +576,8 @@ export class VpnPeerSchema extends BaseModel {
   declare id: number
   @column.dateTime()
   declare lastHandshakeAt: DateTime | null
+  @column.dateTime()
+  declare lastSeenAt: DateTime | null
   @column()
   declare persistentKeepalive: number
   @column()
