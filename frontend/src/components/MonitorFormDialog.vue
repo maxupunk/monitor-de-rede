@@ -841,6 +841,14 @@ const props = defineProps<{
   defaultDeviceId?: number | null
   /** Aberto de dentro de um equipamento: o vínculo já vem definido e travado */
   lockDevice?: boolean
+  /**
+   * Campos pré-preenchidos ao **criar** um monitor (ignorados na edição).
+   *
+   * Permite que outras telas — o ranking de DNS do dashboard, por exemplo —
+   * abram o formulário já apontando para o que o operador estava olhando, sem
+   * duplicar em cada lugar a lógica de montar e validar um monitor.
+   */
+  defaults?: Partial<MonitorFormModel> | null
 }>()
 
 const emit = defineEmits<{
@@ -1095,9 +1103,11 @@ async function resetForm() {
         (existingRule.severity as 'info' | 'warning' | 'critical') || 'warning'
     }
   } else {
-    Object.assign(form, createMonitorForm(props.defaultDeviceId ?? null))
+    Object.assign(form, createMonitorForm(props.defaultDeviceId ?? null), props.defaults ?? {})
     nameTouched.value = false
-    applyDeviceTarget()
+    // O alvo vindo em `defaults` é mais específico que o IP do equipamento —
+    // sobrescrevê-lo aqui anularia o pré-preenchimento.
+    if (!form.target) applyDeviceTarget()
     // O watcher de sugestão só dispara quando algum campo muda — ao reabrir o
     // diálogo com o mesmo estado anterior o nome ficaria vazio sem esta linha
     form.name = suggestedName.value

@@ -48,7 +48,7 @@
     </v-card>
 
     <!-- Feed de Eventos -->
-    <v-infinite-scroll :key="eventsScrollKey" @load="loadMoreEvents">
+    <v-infinite-scroll :key="historicalEvents.scrollKey.value" @load="historicalEvents.load">
       <v-list lines="two" class="pa-0 rounded-lg border">
         <v-list-item
           v-for="(evt, idx) in allFilteredEvents"
@@ -97,7 +97,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useEventsStore, type RealtimeEventPayload } from '@/stores/events'
-import { apiService } from '@/services/apiService'
+import { useInfiniteList } from '@/composables/useInfiniteList'
 import { formatEventDetails } from '@/utils/eventPresentation'
 import EventDetailDialog from '@/components/EventDetailDialog.vue'
 
@@ -121,52 +121,27 @@ const typeFilter = ref('all')
 const detailDialog = ref(false)
 const selectedEvent = ref<RealtimeEventPayload | null>(null)
 
-const historicalEvents = ref<RealtimeEventPayload[]>([])
-const historicalEventsPage = ref(1)
-const eventsScrollKey = ref(0)
+const historicalEvents = useInfiniteList<HistoricalEventRecord>(() => '/events', {
+  label: 'eventos históricos',
+})
 
-async function loadMoreEvents({
-  done,
-}: {
-  done: (status: 'ok' | 'empty' | 'loading' | 'error') => void
-}) {
-  try {
-    const res = await apiService.get<{
-      data: HistoricalEventRecord[]
-      meta: { currentPage: number; lastPage: number; total: number }
-    }>(`/events?page=${historicalEventsPage.value}&limit=20`)
-
-    if (res.data && res.data.length > 0) {
-      const converted: RealtimeEventPayload[] = res.data.map((evt) => ({
-        type: evt.status === 'active' ? 'alert:opened' : 'alert:resolved',
-        timestamp: evt.createdAt || new Date().toISOString(),
-        data: {
-          id: evt.id,
-          deviceId: evt.deviceId,
-          deviceName: evt.device?.name,
-          monitorId: evt.monitorId,
-          monitorName: evt.monitor?.name,
-          severity: evt.severity,
-          message: evt.message,
-          status: evt.status,
-        },
-      }))
-      historicalEvents.value.push(...converted)
-      historicalEventsPage.value++
-
-      if (res.meta && res.meta.currentPage >= res.meta.lastPage) {
-        done('empty')
-      } else {
-        done('ok')
-      }
-    } else {
-      done('empty')
-    }
-  } catch (err) {
-    console.error('Erro ao carregar eventos históricos:', err)
-    done('error')
-  }
-}
+/** Alertas persistidos entram no feed no mesmo formato dos eventos em tempo real */
+const historicalPayloads = computed<RealtimeEventPayload[]>(() =>
+  historicalEvents.items.value.map((evt) => ({
+    type: evt.status === 'active' ? 'alert:opened' : 'alert:resolved',
+    timestamp: evt.createdAt || new Date().toISOString(),
+    data: {
+      id: evt.id,
+      deviceId: evt.deviceId,
+      deviceName: evt.device?.name,
+      monitorId: evt.monitorId,
+      monitorName: evt.monitor?.name,
+      severity: evt.severity,
+      message: evt.message,
+      status: evt.status,
+    },
+  }))
+)
 
 const typeOptions = [
   { title: 'Todos os tipos', value: 'all' },
@@ -177,6 +152,7 @@ const typeOptions = [
   { title: 'Interfaces (interface:*)', value: 'interfaces' },
   { title: 'Status de Probe (probe:status)', value: 'probe:status' },
   { title: 'Varredura (discovery:*)', value: 'discovery' },
+  { title: 'Túneis VPN (vpn:*)', value: 'vpn' },
 ]
 
 const combinedEvents = computed(() => {
@@ -185,7 +161,7 @@ const combinedEvents = computed(() => {
     const key = `${evt.type}-${evt.timestamp}-${JSON.stringify(evt.data)}`
     map.set(key, evt)
   }
-  for (const evt of historicalEvents.value) {
+  for (const evt of historicalPayloads.value) {
     const key = `${evt.type}-${evt.timestamp}-${JSON.stringify(evt.data)}`
     if (!map.has(key)) {
       map.set(key, evt)
@@ -198,21 +174,19 @@ const allFilteredEvents = computed(() => {
   return combinedEvents.value.filter((evt) => {
     // 1. Filtro por tipo
     if (typeFilter.value !== 'all') {
-      if (typeFilter.value === 'alerts' && !evt.type.startsWith('alert:')) return false
-      if (typeFilter.value === 'interfaces' && !evt.type.startsWith('interface:')) return false
-      if (typeFilter.value === 'discovery' && !evt.type.startsWith('discovery:')) return false
-      if (
-        !typeFilter.value.includes('*') &&
-        evt.type !== typeFilter.value &&
-        !typeFilter.value.endsWith(':*')
-      ) {
-        if (
-          typeFilter.value !== 'alerts' &&
-          typeFilter.value !== 'interfaces' &&
-          typeFilter.value !== 'discovery'
-        ) {
-          return false
-        }
+      // Filtros de família agrupam vários tipos sob um prefixo; os demais
+      // comparam o tipo exato.
+      const families: Record<string, string> = {
+        alerts: 'alert:',
+        interfaces: 'interface:',
+        discovery: 'discovery:',
+        vpn: 'vpn:',
+      }
+      const prefix = families[typeFilter.value]
+      if (prefix) {
+        if (!evt.type.startsWith(prefix)) return false
+      } else if (evt.type !== typeFilter.value) {
+        return false
       }
     }
 

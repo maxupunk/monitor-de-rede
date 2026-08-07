@@ -164,14 +164,29 @@ export default class AlertsController {
     return response.noContent()
   }
 
-  async index({ response }: HttpContext) {
-    const events = await AlertEvent.query()
+  async index({ request, response }: HttpContext) {
+    const query = AlertEvent.query()
       .preload('alertRule')
       .preload('device')
       .preload('monitor')
       .orderBy('id', 'desc')
-      .limit(100)
 
+    // Paginação sob demanda: a aba "Ativos" continua carregando a lista curta de
+    // uma vez (ela filtra e ordena no cliente), enquanto o histórico completo —
+    // que cresce sem teto — pede página a página.
+    const pageParam = request.input('page')
+    if (pageParam) {
+      const page = Number(pageParam) || 1
+      const limit = Math.min(Number(request.input('limit', 20)), 100)
+      const paginated = await query.paginate(page, limit)
+
+      return response.ok({
+        data: paginated.all().map((event) => this.serializeEvent(event)),
+        meta: paginated.toJSON().meta,
+      })
+    }
+
+    const events = await query.limit(100)
     return response.ok(events.map((event) => this.serializeEvent(event)))
   }
 

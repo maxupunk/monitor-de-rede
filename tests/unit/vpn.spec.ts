@@ -1,6 +1,13 @@
 import { test } from '@japa/runner'
 import { DateTime } from 'luxon'
-import VpnPeer from '#models/vpn_peer'
+import VpnPeer, { type VpnPeerConnectionStatus } from '#models/vpn_peer'
+import {
+  buildVpnPeerDataset,
+  describeVpnPeerState,
+  hasVpnTransition,
+  isVpnRecovery,
+} from '#modules/alerts/datasets/vpn_peer_dataset'
+import { VPN_STATUS_TRANSITION } from '#modules/alerts/alert_fields'
 import {
   generateKeyPair,
   derivePublicKey,
@@ -620,5 +627,63 @@ test.group('VPN - Pré-voo de conectividade', () => {
     assert.isTrue(isPrivateAddress('172.20.5.1'))
     assert.isFalse(isPrivateAddress('172.32.5.1'))
     assert.isFalse(isPrivateAddress('200.150.10.1'))
+  })
+})
+
+test.group('VPN - Transições de estado do túnel (alertas)', () => {
+  const facts = (
+    status: VpnPeerConnectionStatus,
+    previousStatus: VpnPeerConnectionStatus | null,
+    secondsSinceActivity: number | null = 600
+  ) => ({ peerName: 'Roteador Filial', status, previousStatus, secondsSinceActivity })
+
+  test('queda do túnel deve produzir a transição alertável', ({ assert }) => {
+    const dataset = buildVpnPeerDataset(facts('disconnected', 'connected'))
+
+    assert.equal(dataset.vpnStatusTransition, VPN_STATUS_TRANSITION.disconnected)
+    assert.equal(dataset.vpnPeerStatus, 'disconnected')
+    assert.equal(dataset.vpnPreviousStatus, 'connected')
+    assert.isTrue(hasVpnTransition(dataset))
+    assert.isFalse(isVpnRecovery(dataset))
+    assert.include(describeVpnPeerState(dataset), 'caiu')
+  })
+
+  test('instabilidade deve ser distinguida da queda', ({ assert }) => {
+    const dataset = buildVpnPeerDataset(facts('unstable', 'connected'))
+
+    assert.equal(dataset.vpnStatusTransition, VPN_STATUS_TRANSITION.destabilized)
+    assert.include(describeVpnPeerState(dataset), 'instável')
+  })
+
+  test('degradação em cadeia (instável ➔ caído) ainda conta como queda', ({ assert }) => {
+    const dataset = buildVpnPeerDataset(facts('disconnected', 'unstable'))
+
+    assert.equal(dataset.vpnStatusTransition, VPN_STATUS_TRANSITION.disconnected)
+  })
+
+  test('retorno do túnel deve permitir a normalização do alerta', ({ assert }) => {
+    const dataset = buildVpnPeerDataset(facts('connected', 'disconnected', 5))
+
+    assert.equal(dataset.vpnStatusTransition, VPN_STATUS_TRANSITION.reconnected)
+    assert.isTrue(isVpnRecovery(dataset))
+  })
+
+  test('primeira conexão de um peer novo não deve alertar', ({ assert }) => {
+    const dataset = buildVpnPeerDataset(facts('awaiting', null, null))
+
+    assert.isFalse(hasVpnTransition(dataset))
+    assert.isUndefined(dataset.vpnSecondsSinceActivity)
+  })
+
+  test('estado inalterado não deve gerar transição a cada ciclo', ({ assert }) => {
+    const dataset = buildVpnPeerDataset(facts('disconnected', 'disconnected'))
+
+    assert.isFalse(hasVpnTransition(dataset))
+  })
+
+  test('sem estado anterior conhecido, o ciclo apenas estabelece a linha de base', ({ assert }) => {
+    const dataset = buildVpnPeerDataset(facts('disconnected', null))
+
+    assert.isFalse(hasVpnTransition(dataset))
   })
 })

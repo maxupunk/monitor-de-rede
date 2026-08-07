@@ -39,6 +39,28 @@
           </v-chip>
         </template>
 
+        <template #item.cidr="{ item }">
+          <div class="d-flex align-center ga-2">
+            <span class="font-weight-medium">{{ item.cidr }}</span>
+            <v-chip v-if="item.scannable" size="x-small" variant="tonal" color="grey-darken-1">
+              {{ item.usableHosts }} host(s)
+            </v-chip>
+            <v-chip v-else size="x-small" variant="tonal" color="error">
+              faixa inválida
+              <v-tooltip activator="parent" location="top">
+                Sem uma faixa CIDR válida (ex.: 192.168.1.0/24) não é possível varrer o bloco.
+              </v-tooltip>
+            </v-chip>
+          </div>
+        </template>
+
+        <template #item.lastScanAt="{ item }">
+          <span v-if="item.lastScanAt" class="text-body-2">
+            {{ formatDateTime(item.lastScanAt) }}
+          </span>
+          <span v-else class="text-caption text-grey">Nunca varrida</span>
+        </template>
+
         <template #item.actions="{ item }">
           <v-btn
             size="small"
@@ -46,8 +68,9 @@
             variant="tonal"
             prepend-icon="mdi-radar"
             class="mr-2"
+            :disabled="item.scannable === false"
             :loading="networksStore.scanningId === item.id"
-            @click="triggerScan(item.id)"
+            @click="triggerScan(item)"
           >
             Escanear
           </v-btn>
@@ -107,6 +130,13 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <v-snackbar v-model="feedback.visible" :color="feedback.color" timeout="7000">
+      {{ feedback.message }}
+      <template #actions>
+        <v-btn variant="text" to="/discovery">Ver Descoberta</v-btn>
+      </template>
+    </v-snackbar>
   </div>
 </template>
 
@@ -114,6 +144,10 @@
 import { ref, onMounted, reactive } from 'vue'
 import { useNetworksStore, type Network } from '@/stores/networks'
 import { useSitesStore } from '@/stores/sites'
+import { formatDateTime } from '@/utils/formatters'
+
+/** Espelha `MAX_SCAN_HOSTS` de `modules/discovery/cidr_range.ts` */
+const MAX_SCAN_HOSTS = 1024
 
 const networksStore = useNetworksStore()
 const sitesStore = useSitesStore()
@@ -121,6 +155,7 @@ const search = ref('')
 const dialog = ref(false)
 const saving = ref(false)
 const editedId = ref<number | null>(null)
+const feedback = reactive({ visible: false, message: '', color: 'success' })
 
 const formModel = reactive<{ siteId: number; name: string; cidr: string; gateway: string }>({
   siteId: 1,
@@ -135,6 +170,7 @@ const headers = [
   { title: 'Faixa CIDR', key: 'cidr' },
   { title: 'Gateway', key: 'gateway' },
   { title: 'Site', key: 'site' },
+  { title: 'Última varredura', key: 'lastScanAt', width: '170px' },
   { title: 'Ações', key: 'actions', sortable: false, width: '220px' },
 ]
 
@@ -171,8 +207,31 @@ async function save() {
   dialog.value = false
 }
 
-async function triggerScan(id: number) {
-  await networksStore.scanNetwork(id)
+/**
+ * O botão não devolve equipamentos: ele enfileira a varredura, que roda no
+ * scheduler. O feedback precisa dizer isso e apontar onde os achados aparecem —
+ * senão a tela parece não ter feito nada.
+ */
+async function triggerScan(network: Network) {
+  const result = await networksStore.scanNetwork(network.id)
+
+  if (!result) {
+    feedback.color = 'error'
+    feedback.message = networksStore.error || 'Não foi possível iniciar a varredura.'
+    feedback.visible = true
+    return
+  }
+
+  const truncationNote = result.truncated
+    ? ` A faixa tem ${result.usableHosts} endereços; apenas os primeiros ${MAX_SCAN_HOSTS} serão varridos.`
+    : ''
+
+  feedback.color = result.alreadyQueued ? 'warning' : 'success'
+  feedback.message = `${result.message}${truncationNote}`
+  feedback.visible = true
+
+  // A coluna "Última varredura" muda quando o scheduler concluir
+  await networksStore.fetchNetworks()
 }
 
 async function confirmDelete(id: number) {

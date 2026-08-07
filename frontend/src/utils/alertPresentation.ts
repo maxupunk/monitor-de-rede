@@ -194,6 +194,50 @@ export const ALERT_METRICS: AlertMetricOption[] = [
     defaultOperator: 'contains',
     defaultValue: '',
   },
+  {
+    field: 'vpnStatusTransition',
+    title: 'Mudança de estado do túnel VPN',
+    hint: 'Comparação entre o ciclo anterior e o atual da telemetria do WireGuard.',
+    kind: 'enum',
+    options: [
+      { value: 'connected_to_disconnected', title: 'O túnel caiu' },
+      { value: 'connected_to_unstable', title: 'O túnel ficou instável' },
+      { value: 'reconnected', title: 'O túnel voltou' },
+    ],
+    defaultOperator: 'eq',
+    defaultValue: 'connected_to_disconnected',
+  },
+  {
+    field: 'vpnPeerStatus',
+    title: 'Estado atual do túnel VPN',
+    hint: 'Situação do túnel na última sincronização, independentemente de ter mudado.',
+    kind: 'enum',
+    options: [
+      { value: 'connected', title: 'Conectado' },
+      { value: 'unstable', title: 'Instável' },
+      { value: 'disconnected', title: 'Desconectado' },
+      { value: 'awaiting', title: 'Aguardando primeira conexão' },
+    ],
+    defaultOperator: 'eq',
+    defaultValue: 'disconnected',
+  },
+  {
+    field: 'vpnSecondsSinceActivity',
+    title: 'Tempo sem sinal do túnel VPN (s)',
+    hint: 'Segundos desde o último keepalive ou handshake recebido do peer.',
+    kind: 'number',
+    unit: 's',
+    defaultOperator: 'gt',
+    defaultValue: 300,
+  },
+  {
+    field: 'vpnPeerName',
+    title: 'Nome do equipamento na VPN',
+    hint: 'Restringe a regra a túneis específicos. Ex.: contiver "filial".',
+    kind: 'text',
+    defaultOperator: 'contains',
+    defaultValue: '',
+  },
 ]
 
 interface OperatorOption {

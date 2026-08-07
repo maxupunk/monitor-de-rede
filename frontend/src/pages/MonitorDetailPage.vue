@@ -466,7 +466,7 @@
               class="history-scroll-container rounded-lg border overflow-y-auto"
               style="max-height: 450px"
             >
-              <v-infinite-scroll :key="infiniteScrollKey" :height="420" @load="loadMoreHistory">
+              <v-infinite-scroll :key="history.scrollKey.value" :height="420" @load="history.load">
                 <v-table density="comfortable" hover>
                   <thead>
                     <tr>
@@ -478,7 +478,7 @@
                     </tr>
                   </thead>
                   <tbody>
-                    <tr v-for="item in historyItems" :key="item.id">
+                    <tr v-for="item in history.items.value" :key="item.id">
                       <td>
                         <v-chip :color="getStatusColor(item.status)" size="x-small" variant="flat">
                           {{ item.status ? item.status.toUpperCase() : 'UNKNOWN' }}
@@ -539,6 +539,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useMonitorsStore, type Monitor, type MonitorResult } from '@/stores/monitors'
 import { useEventsStore } from '@/stores/events'
 import { apiService } from '@/services/apiService'
+import { useInfiniteList } from '@/composables/useInfiniteList'
 import type { DeviceMetric } from '@/stores/deviceDetail'
 import MonitorTimelineBar from '@/components/MonitorTimelineBar.vue'
 import BaseMetricChart, { type ChartSeriesInput } from '@/components/BaseMetricChart.vue'
@@ -595,50 +596,15 @@ const stats = computed(
 )
 
 const showHistory = ref(false)
-const historyItems = ref<MonitorResult[]>([])
-const historyPage = ref(1)
-const infiniteScrollKey = ref(0)
+const history = useInfiniteList<MonitorResult>(() => `/monitors/${monitorId.value}/results`, {
+  label: 'histórico de verificações',
+})
 
 function toggleShowHistory() {
   showHistory.value = !showHistory.value
-  if (showHistory.value) {
-    historyItems.value = []
-    historyPage.value = 1
-    infiniteScrollKey.value++
-  }
-}
-
-async function loadMoreHistory({
-  done,
-}: {
-  done: (status: 'ok' | 'empty' | 'loading' | 'error') => void
-}) {
-  if (!monitorId.value) {
-    done('empty')
-    return
-  }
-  try {
-    const res = await apiService.get<{
-      data: MonitorResult[]
-      meta: { currentPage: number; lastPage: number; total: number }
-    }>(`/monitors/${monitorId.value}/results?page=${historyPage.value}&limit=20`)
-
-    if (res.data && res.data.length > 0) {
-      historyItems.value.push(...res.data)
-      historyPage.value++
-
-      if (res.meta && res.meta.currentPage >= res.meta.lastPage) {
-        done('empty')
-      } else {
-        done('ok')
-      }
-    } else {
-      done('empty')
-    }
-  } catch (error) {
-    console.error('Erro ao carregar histórico de verificações:', error)
-    done('error')
-  }
+  // Reabrir o card recomeça da primeira página: o histórico pode ter crescido
+  // enquanto ele estava recolhido.
+  if (showHistory.value) history.reset()
 }
 
 const formattedTarget = computed(() => {
@@ -874,11 +840,7 @@ async function refreshData() {
   if (monitorId.value) {
     await monitorsStore.fetchMonitorById(monitorId.value)
     if (isGaugeMonitor.value) await loadGaugeHistory()
-    if (showHistory.value) {
-      historyItems.value = []
-      historyPage.value = 1
-      infiniteScrollKey.value++
-    }
+    if (showHistory.value) history.reset()
   }
 }
 

@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { apiService } from '@/services/apiService'
 import type { Device } from './devices'
+import type { Monitor } from './monitors'
 
 export interface DeviceInterface {
   id: number
@@ -36,19 +37,12 @@ export interface DeviceMetric {
   createdAt: string
 }
 
-export interface DeviceMonitor {
-  id: number
-  deviceId: number
-  type: string
-  name: string
-  target: string
-  port?: number
-  intervalSeconds?: number
-  enabled?: boolean
-  status: 'online' | 'offline' | 'up' | 'down' | 'warning' | 'disabled' | 'unknown'
-  lastCheckedAt?: string
-  latencyMs?: number
-}
+/**
+ * `GET /api/devices/:id/monitors` devolve o mesmo payload de `GET /api/monitors`
+ * (ver `modules/monitoring/monitor_presenter.ts`), porque a aba "Monitores" do
+ * equipamento usa o mesmo componente de listagem de `/monitors`.
+ */
+export type DeviceMonitor = Monitor
 
 export interface DeviceEvent {
   id: number
@@ -107,6 +101,9 @@ export interface ScanResult {
 /** Teto de amostras mantidas em memória na tela de detalhe */
 const METRICS_LIMIT = 2000
 
+/** Teto do histórico por monitor mantido em memória — acompanha o do backend */
+const MONITOR_HISTORY_LIMIT = 100
+
 export const useDeviceDetailStore = defineStore('deviceDetail', () => {
   const device = ref<Device | null>(null)
   const interfaces = ref<DeviceInterface[]>([])
@@ -118,6 +115,29 @@ export const useDeviceDetailStore = defineStore('deviceDetail', () => {
   const scanningSnmp = ref(false)
   const scanResult = ref<ScanResult | null>(null)
   const error = ref<string | null>(null)
+
+  /**
+   * O backend serializa `enabled`; a UI (e o `MonitorsTable`) lê `isEnabled`.
+   * Mesma normalização feita no store de monitores — sem ela o switch de
+   * ativação abriria desligado em monitores ativos.
+   */
+  function normalizeMonitors(payload: unknown): DeviceMonitor[] {
+    if (!Array.isArray(payload)) return []
+    return payload.map((mon: any) => {
+      const isEnabled = mon.isEnabled ?? mon.enabled ?? true
+      return { ...mon, enabled: isEnabled, isEnabled }
+    })
+  }
+
+  /** Recarrega apenas os monitores, após uma ação disparada pela listagem. */
+  async function reloadMonitors(deviceId: number): Promise<void> {
+    try {
+      const data = await apiService.get<DeviceMonitor[]>(`/devices/${deviceId}/monitors`)
+      monitors.value = normalizeMonitors(data)
+    } catch (err: unknown) {
+      error.value = err instanceof Error ? err.message : 'Erro ao recarregar os monitores'
+    }
+  }
 
   async function loadDeviceDetails(deviceId: number) {
     loading.value = true
@@ -136,7 +156,7 @@ export const useDeviceDetailStore = defineStore('deviceDetail', () => {
         interfaces.value = Array.isArray(intfData.value) ? intfData.value : []
       }
       if (monData.status === 'fulfilled') {
-        monitors.value = Array.isArray(monData.value) ? monData.value : []
+        monitors.value = normalizeMonitors(monData.value)
       }
       if (metData.status === 'fulfilled') {
         metrics.value = Array.isArray(metData.value) ? metData.value : []
@@ -221,9 +241,31 @@ export const useDeviceDetailStore = defineStore('deviceDetail', () => {
     const monitor = monitors.value.find((m) => m.id === monitorId)
     if (!monitor) return
 
+    const latencyMs = (data.latencyMs as number | null | undefined) ?? null
+    const finishedAt = String(data.finishedAt ?? new Date().toISOString())
+
     if (data.status) monitor.status = data.status as DeviceMonitor['status']
-    monitor.latencyMs = (data.latencyMs as number | undefined) ?? undefined
-    monitor.lastCheckedAt = String(data.finishedAt ?? new Date().toISOString())
+    monitor.latencyMs = latencyMs
+    monitor.lastLatencyMs = latencyMs ?? undefined
+    monitor.lastCheckedAt = finishedAt
+
+    // A listagem desta aba usa o mesmo componente de `/monitors`, que desenha a
+    // linha do tempo a partir de `recentResults` — sem anexar a amostra aqui, a
+    // barra ficaria congelada enquanto a tela estivesse aberta.
+    monitor.recentResults = [
+      ...(monitor.recentResults ?? []),
+      {
+        // Id sintético: o registro real só chega no próximo carregamento
+        id: Date.now(),
+        monitorId,
+        status: data.status as DeviceMonitor['status'] as any,
+        startedAt: String(data.startedAt ?? finishedAt),
+        finishedAt,
+        durationMs: Number(data.durationMs ?? 0),
+        latencyMs,
+        message: (data.message as string | null) ?? null,
+      },
+    ].slice(-MONITOR_HISTORY_LIMIT)
   }
 
   /**
@@ -299,6 +341,7 @@ export const useDeviceDetailStore = defineStore('deviceDetail', () => {
     scanResult,
     error,
     loadDeviceDetails,
+    reloadMonitors,
     triggerSnmpPoll,
     scanDeviceSnmp,
     applySnmpMonitors,

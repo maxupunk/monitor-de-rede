@@ -138,42 +138,14 @@
                 Novo monitor neste equipamento
               </v-btn>
             </div>
-            <v-table hover>
-              <thead>
-                <tr>
-                  <th>Nome</th>
-                  <th>Tipo</th>
-                  <th>Alvo / Porta</th>
-                  <th>Intervalo</th>
-                  <th>Status</th>
-                  <th>Última Latência</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="mon in detailStore.monitors" :key="mon.id">
-                  <td class="font-weight-bold">{{ mon.name }}</td>
-                  <td>
-                    <v-chip size="x-small" color="info">
-                      {{ (mon.type || 'N/A').toUpperCase() }}
-                    </v-chip>
-                  </td>
-                  <td>{{ mon.target }} {{ mon.port ? `:${mon.port}` : '' }}</td>
-                  <td>{{ mon.intervalSeconds }}s</td>
-                  <td>
-                    <v-chip :color="getStatusColor(mon.status)" size="x-small">
-                      {{ mon.status || 'UNKNOWN' }}
-                    </v-chip>
-                  </td>
-                  <td>{{ mon.latencyMs !== undefined ? `${mon.latencyMs} ms` : 'N/A' }}</td>
-                </tr>
-                <tr v-if="detailStore.monitors.length === 0">
-                  <td colspan="6" class="text-center text-grey py-4">
-                    Nenhum monitor configurado para este equipamento. Crie um acima ou use "Escanear
-                    SNMP" para descobrir automaticamente.
-                  </td>
-                </tr>
-              </tbody>
-            </v-table>
+            <MonitorsTable
+              :monitors="detailStore.monitors"
+              :loading="detailStore.loading"
+              variant="device"
+              no-data-text="Nenhum monitor configurado para este equipamento. Crie um acima ou use &quot;Escanear SNMP&quot; para descobrir automaticamente."
+              @edit="openMonitorDialog"
+              @changed="reloadMonitors"
+            ></MonitorsTable>
           </v-window-item>
 
           <!-- Aba Interfaces SNMP -->
@@ -555,9 +527,9 @@
                     style="max-height: 450px"
                   >
                     <v-infinite-scroll
-                      :key="metricsScrollKey"
+                      :key="metricsHistory.scrollKey.value"
                       :height="420"
-                      @load="loadMoreMetricsHistory"
+                      @load="metricsHistory.load"
                     >
                       <v-table density="compact" hover>
                         <thead>
@@ -570,7 +542,7 @@
                           </tr>
                         </thead>
                         <tbody>
-                          <tr v-for="met in metricsHistoryItems" :key="met.id">
+                          <tr v-for="met in metricsHistory.items.value" :key="met.id">
                             <td class="font-weight-medium">{{ met.metricName }}</td>
                             <td>{{ met.interfaceName || 'Sistema / Geral' }}</td>
                             <td class="font-weight-bold">{{ formatMetricValue(met) }}</td>
@@ -593,7 +565,7 @@
 
           <!-- Aba Eventos -->
           <v-window-item value="events">
-            <v-infinite-scroll :key="eventsScrollKey" @load="loadMoreEventsHistory">
+            <v-infinite-scroll :key="eventsHistory.scrollKey.value" @load="eventsHistory.load">
               <v-table hover density="comfortable" class="rounded-lg border">
                 <thead>
                   <tr>
@@ -603,7 +575,7 @@
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="evt in eventsHistoryItems" :key="evt.id">
+                  <tr v-for="evt in eventsHistory.items.value" :key="evt.id">
                     <td>
                       <v-chip
                         :color="
@@ -1025,9 +997,10 @@
       :device-name="detailStore.device?.name"
     />
 
-    <!-- Novo monitor já vinculado a este equipamento -->
+    <!-- Monitor deste equipamento: o vínculo já vem definido e travado -->
     <MonitorFormDialog
       v-model="monitorDialog"
+      :monitor="editingMonitor"
       :default-device-id="deviceId"
       lock-device
       @saved="onMonitorSaved"
@@ -1038,7 +1011,11 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useDeviceDetailStore, type DeviceMetric } from '@/stores/deviceDetail'
+import {
+  useDeviceDetailStore,
+  type DeviceMetric,
+  type DeviceMonitor,
+} from '@/stores/deviceDetail'
 import TrafficChartDialog from '@/components/TrafficChartDialog.vue'
 import BaseMetricChart, { type ChartSeriesInput } from '@/components/BaseMetricChart.vue'
 import MonitorSparkline from '@/components/MonitorSparkline.vue'
@@ -1046,6 +1023,7 @@ import VpnScriptViewer from '@/components/VpnScriptViewer.vue'
 import VpnFirewallHintsDialog from '@/components/VpnFirewallHintsDialog.vue'
 import PortScanDialog from '@/components/PortScanDialog.vue'
 import MonitorFormDialog from '@/components/MonitorFormDialog.vue'
+import MonitorsTable from '@/components/MonitorsTable.vue'
 import { getStatusColor, gaugeHexColor } from '@/utils/monitorPresentation'
 import {
   formatBps,
@@ -1062,7 +1040,7 @@ import {
   vpnStatusLabel,
 } from '@/stores/vpn'
 
-import { apiService } from '@/services/apiService'
+import { useInfiniteList } from '@/composables/useInfiniteList'
 
 interface DeviceEventItem {
   id: number
@@ -1084,87 +1062,21 @@ const portScanOpen = ref(false)
 
 // Histórico paginado de métricas SNMP
 const showMetricsHistory = ref(false)
-const metricsHistoryItems = ref<DeviceMetric[]>([])
-const metricsHistoryPage = ref(1)
-const metricsScrollKey = ref(0)
+const metricsHistory = useInfiniteList<DeviceMetric>(
+  () => `/devices/${deviceId.value}/metrics`,
+  { label: 'histórico de métricas' }
+)
 
 function toggleShowMetricsHistory() {
   showMetricsHistory.value = !showMetricsHistory.value
-  if (showMetricsHistory.value) {
-    metricsHistoryItems.value = []
-    metricsHistoryPage.value = 1
-    metricsScrollKey.value++
-  }
-}
-
-async function loadMoreMetricsHistory({
-  done,
-}: {
-  done: (status: 'ok' | 'empty' | 'loading' | 'error') => void
-}) {
-  if (!deviceId.value) {
-    done('empty')
-    return
-  }
-  try {
-    const res = await apiService.get<{
-      data: DeviceMetric[]
-      meta: { currentPage: number; lastPage: number; total: number }
-    }>(`/devices/${deviceId.value}/metrics?page=${metricsHistoryPage.value}&limit=20`)
-
-    if (res.data && res.data.length > 0) {
-      metricsHistoryItems.value.push(...res.data)
-      metricsHistoryPage.value++
-      if (res.meta && res.meta.currentPage >= res.meta.lastPage) {
-        done('empty')
-      } else {
-        done('ok')
-      }
-    } else {
-      done('empty')
-    }
-  } catch (err) {
-    console.error('Erro ao carregar métricas:', err)
-    done('error')
-  }
+  if (showMetricsHistory.value) metricsHistory.reset()
 }
 
 // Histórico paginado de eventos do dispositivo
-const eventsHistoryItems = ref<DeviceEventItem[]>([])
-const eventsHistoryPage = ref(1)
-const eventsScrollKey = ref(0)
-
-async function loadMoreEventsHistory({
-  done,
-}: {
-  done: (status: 'ok' | 'empty' | 'loading' | 'error') => void
-}) {
-  if (!deviceId.value) {
-    done('empty')
-    return
-  }
-  try {
-    const res = await apiService.get<{
-      data: DeviceEventItem[]
-      meta: { currentPage: number; lastPage: number; total: number }
-    }>(`/devices/${deviceId.value}/events?page=${eventsHistoryPage.value}&limit=20`)
-
-    if (res.data && res.data.length > 0) {
-      eventsHistoryItems.value.push(...res.data)
-      eventsHistoryPage.value++
-      if (res.meta && res.meta.currentPage >= res.meta.lastPage) {
-        done('empty')
-      } else {
-        done('ok')
-      }
-    } else {
-      done('empty')
-    }
-  } catch (err) {
-    console.error('Erro ao carregar eventos:', err)
-    done('error')
-  }
-}
+const eventsHistory = useInfiniteList<DeviceEventItem>(
+  () => `/devices/${deviceId.value}/events`,
+  { label: 'histórico de eventos' }
+)
 
 const chartDialogOpen = ref(false)
 const selectedChartInterfaceId = ref<number | null>(null)
@@ -1215,16 +1127,23 @@ onMounted(() => {
   }
 })
 
-// --- Criação de monitor a partir do próprio equipamento ---------------------
+// --- Monitores do próprio equipamento --------------------------------------
 
 const monitorDialog = ref(false)
+const editingMonitor = ref<DeviceMonitor | null>(null)
 
-function openMonitorDialog() {
+function openMonitorDialog(monitor?: DeviceMonitor) {
+  editingMonitor.value = monitor ?? null
   monitorDialog.value = true
 }
 
 async function onMonitorSaved() {
   if (deviceId.value) await detailStore.loadDeviceDetails(deviceId.value)
+}
+
+/** Ações da listagem (testar, ativar/desativar, excluir) só mexem em monitores. */
+async function reloadMonitors() {
+  if (deviceId.value) await detailStore.reloadMonitors(deviceId.value)
 }
 
 // --- Aba VPN ---------------------------------------------------------------

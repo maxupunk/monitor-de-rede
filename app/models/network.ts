@@ -42,6 +42,14 @@ export default class Network extends BaseModel {
   @column()
   declare active: boolean
 
+  /** Última varredura concluída nesta faixa */
+  @column.dateTime()
+  declare lastScanAt: DateTime | null
+
+  /** Quando o scheduler deve enfileirar a próxima varredura periódica */
+  @column.dateTime()
+  declare nextScanAt: DateTime | null
+
   @column.dateTime({ autoCreate: true })
   declare createdAt: DateTime
 

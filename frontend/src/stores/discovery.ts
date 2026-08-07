@@ -4,23 +4,39 @@ import { apiService } from '@/services/apiService'
 
 export interface DiscoveryRun {
   id: number
-  networkId?: number
+  networkId: number
+  probeId?: number | null
   status: 'pending' | 'running' | 'completed' | 'failed'
+  /** Derivado no backend a partir da contagem de `discovery_results` */
   devicesFound: number
+  /** Faixa varrida, vinda da configuração da run ou da rede */
+  cidr?: string | null
+  networkName?: string | null
   startedAt?: string
-  completedAt?: string
+  finishedAt?: string | null
+  error?: string | null
+  network?: { id: number; name: string; cidr: string } | null
 }
 
+/**
+ * Os nomes espelham as colunas de `discovery_results`. A versão anterior
+ * declarava `suggestedName` / `confidenceScore`, que a API nunca enviou — as
+ * colunas correspondentes na tela apareciam sempre vazias.
+ */
 export interface DiscoveryResult {
   id: number
   discoveryRunId: number
   ipAddress: string
-  macAddress?: string
-  suggestedName?: string
-  suggestedType?: string
-  suggestedVendor?: string
-  confidenceScore: number
+  macAddress?: string | null
+  hostname?: string | null
+  mdnsName?: string | null
+  vendor?: string | null
+  deviceType?: string | null
+  confidence: number
   status: 'pending' | 'accepted' | 'ignored' | 'merged'
+  discoveryRun?: DiscoveryRun | null
+  firstSeenAt?: string
+  lastSeenAt?: string
   createdAt?: string
 }
 

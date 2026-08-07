@@ -3,6 +3,7 @@ import {
   ALERT_FIELDS,
   INTERFACE_SPEED_TRANSITION,
   INTERFACE_STATUS_TRANSITION,
+  VPN_STATUS_TRANSITION,
 } from '../alert_fields.js'
 import type { AlertRuleCondition } from '../rule_evaluator.js'
 
@@ -16,7 +17,7 @@ import type { AlertRuleCondition } from '../rule_evaluator.js'
  */
 
 export type AlertRuleCategory =
-  'disponibilidade' | 'desempenho' | 'servicos' | 'interfaces' | 'equipamento'
+  'disponibilidade' | 'desempenho' | 'servicos' | 'interfaces' | 'equipamento' | 'vpn'
 
 export interface AlertRuleTemplate {
   /** Chave de idempotência: uma regra por template */
@@ -38,6 +39,7 @@ export const ALERT_RULE_CATEGORY_LABELS: Record<AlertRuleCategory, string> = {
   servicos: 'Serviços e aplicações',
   interfaces: 'Interfaces de rede (SNMP)',
   equipamento: 'Equipamento (SNMP)',
+  vpn: 'Túneis VPN (WireGuard)',
 }
 
 export const ALERT_RULE_TEMPLATES: readonly AlertRuleTemplate[] = [
@@ -230,6 +232,53 @@ export const ALERT_RULE_TEMPLATES: readonly AlertRuleTemplate[] = [
     // sysUpTime é reportado em centésimos de segundo: 60.000 = 10 minutos
     condition: { field: ALERT_FIELDS.snmpUptime, operator: 'lt', value: 60_000 },
     severity: 'warning',
+    durationSeconds: 0,
+    recommended: false,
+  },
+  {
+    key: 'vpn_peer_disconnected',
+    name: 'Túnel VPN caiu',
+    description:
+      'O equipamento remoto parou de responder pelo túnel WireGuard. Enquanto o túnel estiver fora, o monitoramento por trás dele fica cego.',
+    category: 'vpn',
+    type: 'custom',
+    condition: {
+      field: ALERT_FIELDS.vpnStatusTransition,
+      operator: 'eq',
+      value: VPN_STATUS_TRANSITION.disconnected,
+    },
+    severity: 'critical',
+    durationSeconds: 0,
+    recommended: true,
+  },
+  {
+    key: 'vpn_peer_unstable',
+    name: 'Túnel VPN instável',
+    description:
+      'O túnel ainda responde, mas os keepalives estão falhando — sintoma de link ruim ou NAT reciclando a porta do peer.',
+    category: 'vpn',
+    type: 'custom',
+    condition: {
+      field: ALERT_FIELDS.vpnStatusTransition,
+      operator: 'eq',
+      value: VPN_STATUS_TRANSITION.destabilized,
+    },
+    severity: 'warning',
+    durationSeconds: 0,
+    recommended: false,
+  },
+  {
+    key: 'vpn_peer_reconnected',
+    name: 'Túnel VPN restabelecido',
+    description: 'Registro informativo do retorno do túnel após uma queda.',
+    category: 'vpn',
+    type: 'custom',
+    condition: {
+      field: ALERT_FIELDS.vpnStatusTransition,
+      operator: 'eq',
+      value: VPN_STATUS_TRANSITION.reconnected,
+    },
+    severity: 'info',
     durationSeconds: 0,
     recommended: false,
   },

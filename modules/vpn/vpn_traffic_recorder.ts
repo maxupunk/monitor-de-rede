@@ -3,7 +3,9 @@ import VpnServer from '#models/vpn_server'
 import VpnPeer from '#models/vpn_peer'
 import Metric from '#models/metric'
 import { PeerStatusService } from './peer_status.js'
+import { VpnPeerStateWatcher } from './vpn_peer_state_watcher.js'
 import { EventBus } from '#modules/events/event_bus'
+import { errorMessage } from '#modules/shared/errors'
 
 /**
  * Histórico de tráfego do túnel WireGuard, persistido em `metrics` — o mesmo
@@ -23,7 +25,10 @@ export class VpnTrafficRecorder {
   /** Último quadro publicado por servidor, para não repetir um estado idêntico */
   private lastPublished = new Map<number, string>()
 
-  constructor(private peerStatusService = new PeerStatusService()) {}
+  constructor(
+    private peerStatusService = new PeerStatusService(),
+    private peerStateWatcher = new VpnPeerStateWatcher()
+  ) {}
 
   /**
    * Sincroniza o status de todos os servidores ativos e publica o quadro atual.
@@ -38,6 +43,7 @@ export class VpnTrafficRecorder {
 
     for (const server of servers) {
       await this.peerStatusService.syncPeers(server.interfaceName, server.id)
+      await this.watchPeerState(server.id)
       synced += await this.publishServerPeers(server.id)
     }
 
@@ -51,10 +57,26 @@ export class VpnTrafficRecorder {
 
     for (const server of servers) {
       await this.peerStatusService.syncPeers(server.interfaceName, server.id)
+      await this.watchPeerState(server.id)
       recorded += await this.recordServerPeers(server.id)
     }
 
     return recorded
+  }
+
+  /**
+   * A avaliação de alertas não pode derrubar a coleta de telemetria: uma regra
+   * mal formada ou uma notificação com falha deixaria o painel de VPN congelado,
+   * que é justamente o oposto do que o alerta existe para evitar.
+   */
+  private async watchPeerState(vpnServerId: number): Promise<void> {
+    try {
+      await this.peerStateWatcher.evaluateServerPeers(vpnServerId)
+    } catch (err: unknown) {
+      console.error(
+        `[VpnTrafficRecorder] Falha ao avaliar o estado dos túneis do servidor #${vpnServerId}: ${errorMessage(err)}`
+      )
+    }
   }
 
   private async recordServerPeers(vpnServerId: number): Promise<number> {

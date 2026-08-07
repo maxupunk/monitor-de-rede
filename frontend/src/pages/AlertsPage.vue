@@ -36,6 +36,7 @@
       <v-tabs v-model="tab" color="primary">
         <v-tab value="active">Alertas Ativos ({{ alertsStore.activeAlerts.length }})</v-tab>
         <v-tab value="rules">Regras Configuradas ({{ alertsStore.alertRules.length }})</v-tab>
+        <v-tab value="history">Histórico</v-tab>
       </v-tabs>
       <v-divider></v-divider>
 
@@ -183,6 +184,59 @@
               </template>
             </v-data-table>
           </v-window-item>
+
+          <!-- Histórico completo, incluindo alertas já normalizados -->
+          <v-window-item value="history">
+            <div class="d-flex align-center justify-space-between mb-3 flex-wrap ga-2">
+              <div class="text-body-2 text-grey-darken-1">
+                Todos os alertas já registrados, do mais recente para o mais antigo.
+              </div>
+              <v-chip v-if="history.total.value > 0" size="small" variant="outlined" color="primary">
+                {{ history.items.value.length }} de {{ history.total.value }}
+              </v-chip>
+            </div>
+
+            <v-infinite-scroll :key="history.scrollKey.value" @load="history.load">
+              <v-table hover density="comfortable" class="rounded-lg border">
+                <thead>
+                  <tr>
+                    <th style="width: 110px">Severidade</th>
+                    <th style="width: 120px">Situação</th>
+                    <th>Alerta</th>
+                    <th>Mensagem</th>
+                    <th style="width: 170px">Início</th>
+                    <th style="width: 170px">Normalizado em</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="alert in history.items.value" :key="alert.id">
+                    <td>
+                      <v-chip :color="severityColor(alert.severity)" size="x-small">
+                        {{ severityLabel(alert.severity) }}
+                      </v-chip>
+                    </td>
+                    <td>
+                      <v-chip variant="outlined" size="x-small">
+                        {{ statusLabel(alert.status) }}
+                      </v-chip>
+                    </td>
+                    <td class="font-weight-medium">{{ alert.title }}</td>
+                    <td class="text-body-2">{{ alert.message || '—' }}</td>
+                    <td>{{ formatDateTime(alert.startedAt || alert.createdAt) }}</td>
+                    <td>
+                      <span v-if="alert.resolvedAt">{{ formatDateTime(alert.resolvedAt) }}</span>
+                      <span v-else class="text-grey">Em aberto</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </v-table>
+              <template #empty>
+                <div class="text-caption text-grey text-center py-4">
+                  Nenhum outro alerta no histórico.
+                </div>
+              </template>
+            </v-infinite-scroll>
+          </v-window-item>
         </v-window>
       </v-card-text>
     </v-card>
@@ -317,8 +371,9 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
-import { useAlertsStore, type AlertRule } from '@/stores/alerts'
+import { useAlertsStore, type AlertEvent, type AlertRule } from '@/stores/alerts'
 import { useEventsStore } from '@/stores/events'
+import { useInfiniteList } from '@/composables/useInfiniteList'
 import AlertRuleCatalogDialog from '@/components/AlertRuleCatalogDialog.vue'
 import AlertSilenceDialog from '@/components/AlertSilenceDialog.vue'
 import DataRateInput from '@/components/DataRateInput.vue'
@@ -344,6 +399,9 @@ const eventsStore = useEventsStore()
 
 const tab = ref('active')
 const catalogDialog = ref(false)
+
+/** Histórico completo: cresce sem teto, então vem paginado do servidor */
+const history = useInfiniteList<AlertEvent>(() => '/alerts', { label: 'histórico de alertas' })
 const feedback = reactive({ visible: false, message: '', color: 'success' })
 const silenceDialog = ref(false)
 const silenceTargetId = ref<number | null>(null)

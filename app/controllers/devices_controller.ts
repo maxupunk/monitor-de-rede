@@ -3,6 +3,7 @@ import Device from '#models/device'
 import Monitor from '#models/monitor'
 import Metric from '#models/metric'
 import AlertEvent from '#models/alert_event'
+import { monitorListQuery, presentMonitors } from '#modules/monitoring/monitor_presenter'
 import { syncZabbixTemplateMonitor } from '#modules/zabbix/zabbix_template_monitor_sync'
 import { ResourceCleanupService } from '#services/resource_cleanup_service'
 
@@ -120,27 +121,21 @@ export default class DevicesController {
     return response.ok({ deviceId: params.id, interfaces: [] })
   }
 
+  /**
+   * Mesmo payload de `GET /api/monitors`, filtrado por equipamento.
+   *
+   * A aba "Monitores" de `/devices/:id` usa o mesmo componente de listagem de
+   * `/monitors`: se o contrato divergir, o componente perde linha do tempo e
+   * sparkline justamente na tela em que o operador está investigando um
+   * equipamento específico.
+   */
   async monitors({ params, response }: HttpContext) {
-    const monitors = await Monitor.query()
+    const monitors = await monitorListQuery()
       .where('deviceId', params.id)
-      // `.limit(1)` sozinho pegaria só 1 resultado no total entre TODOS os monitores do
-      // equipamento (não 1 por monitor) — `.groupLimit()` traz o último resultado de cada.
-      // `.groupOrderBy` precisa do nome da coluna no banco (`started_at`), não da
-      // propriedade do model (`startedAt`) — ele não passa pela conversão do Lucid.
-      .preload('results', (query) => query.groupLimit(1).groupOrderBy('started_at', 'desc'))
+      .preload('device')
+      .preload('probe')
 
-    const formatted = monitors.map((mon) => {
-      const json = mon.serialize()
-      const latestResult = mon.results?.[0]
-      return {
-        ...json,
-        target: mon.target,
-        port: mon.port,
-        latencyMs: latestResult?.latencyMs ?? undefined,
-      }
-    })
-
-    return response.ok(formatted)
+    return response.ok(await presentMonitors(monitors))
   }
 
   async metrics({ params, request, response }: HttpContext) {

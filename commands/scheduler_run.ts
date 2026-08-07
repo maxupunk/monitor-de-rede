@@ -8,6 +8,7 @@ import { ResultProcessor } from '#modules/monitoring/result_processor'
 import { ProbeTaskDispatcher } from '#modules/probes/probe_task_dispatcher'
 import { isProbeAlive, ProbeWatchdog } from '#modules/probes/probe_liveness'
 import { VpnTrafficRecorder } from '#modules/vpn/vpn_traffic_recorder'
+import { DiscoveryQueue } from '#modules/discovery/discovery_queue'
 import { errorMessage } from '#modules/shared/errors'
 
 /**
@@ -32,6 +33,7 @@ export default class SchedulerRun extends BaseCommand {
   private resultProcessor = new ResultProcessor()
   private probeTaskDispatcher = new ProbeTaskDispatcher()
   private vpnTrafficRecorder = new VpnTrafficRecorder()
+  private discoveryQueue = new DiscoveryQueue()
   private probeWatchdog = new ProbeWatchdog()
   private nextVpnStatusSyncAt: DateTime | null = null
   private nextVpnTrafficSyncAt: DateTime | null = null
@@ -63,6 +65,13 @@ export default class SchedulerRun extends BaseCommand {
         this.logger.error(`Erro ao sincronizar tráfego VPN: ${errorMsg}`)
       }
 
+      try {
+        await this.runDiscoveryQueue()
+      } catch (err: unknown) {
+        const errorMsg = errorMessage(err)
+        this.logger.error(`Erro na fila de descoberta de rede: ${errorMsg}`)
+      }
+
       await new Promise((resolve) => setTimeout(resolve, 5000))
     }
   }
@@ -83,6 +92,23 @@ export default class SchedulerRun extends BaseCommand {
 
     await this.vpnTrafficRecorder.syncAll()
     this.nextVpnStatusSyncAt = now.plus({ seconds: VPN_STATUS_INTERVAL_SECONDS })
+  }
+
+  /**
+   * Varreduras de rede: primeiro agenda as redes vencidas, depois executa o que
+   * estiver pendente — inclusive o que o operador enfileirou pelo botão
+   * "Escanear" em `/networks`, já que o processo HTTP não varre nada.
+   */
+  private async runDiscoveryQueue() {
+    const queued = await this.discoveryQueue.scheduleDueNetworks()
+    if (queued > 0) {
+      this.logger.info(`[Scheduler] ${queued} varredura(s) periódica(s) de rede agendada(s).`)
+    }
+
+    const processed = await this.discoveryQueue.processPendingRuns()
+    if (processed > 0) {
+      this.logger.info(`[Scheduler] ${processed} varredura(s) de rede executada(s).`)
+    }
   }
 
   private async checkDueMonitors() {

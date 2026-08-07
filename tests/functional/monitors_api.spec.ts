@@ -136,6 +136,65 @@ test.group('Monitors API - Functional Tests', (group) => {
     assert.equal(showRes.body().stats.totalChecks, 2)
   })
 
+  test('GET /api/devices/:id/monitors deve devolver o mesmo payload de GET /api/monitors', async ({
+    client,
+    assert,
+  }) => {
+    const site = await Site.create({ name: 'Site Paridade', active: true })
+    const device = await Device.create({
+      siteId: site.id,
+      name: 'Servidor Paridade',
+      type: 'server',
+      status: 'online',
+    })
+
+    const monitor = await Monitor.create({
+      deviceId: device.id,
+      type: 'ping',
+      name: 'Ping Paridade',
+      configuration: { host: '127.0.0.1' },
+      intervalSeconds: 60,
+      timeoutSeconds: 5,
+      enabled: true,
+      status: 'up',
+    })
+
+    const now = DateTime.now()
+    for (let i = 1; i <= 3; i++) {
+      await MonitorResult.create({
+        monitorId: monitor.id,
+        status: 'up',
+        startedAt: now.minus({ minutes: 10 - i }),
+        finishedAt: now.minus({ minutes: 10 - i }),
+        durationMs: 10 + i,
+        latencyMs: 5 + i,
+        message: `Execucao #${i}`,
+      })
+    }
+
+    // A aba "Monitores" de /devices/:id usa o mesmo componente de listagem de
+    // /monitors: se um dos endpoints parar de enviar histórico ou vínculos, a
+    // tela do equipamento perde a linha do tempo em silêncio.
+    const deviceRes = await client.get(`/api/devices/${device.id}/monitors`)
+    deviceRes.assertStatus(200)
+
+    const listRes = await client.visit('monitors.index')
+    listRes.assertStatus(200)
+
+    type ListedMonitor = Record<string, any> & { id: number }
+    const fromDevice = (deviceRes.body() as ListedMonitor[])[0]
+    const fromList = (listRes.body() as ListedMonitor[]).find((mon) => mon.id === monitor.id)!
+
+    assert.exists(fromDevice)
+    assert.exists(fromList)
+    assert.deepEqual(Object.keys(fromDevice).sort(), Object.keys(fromList).sort())
+    assert.equal(fromDevice.recentResults.length, 3)
+    assert.equal(fromDevice.device.id, device.id)
+    assert.equal(fromDevice.latencyMs, 8)
+    assert.equal(fromDevice.isEnabled, fromList.isEnabled)
+    assert.deepEqual(fromDevice.recentResults, fromList.recentResults)
+  })
+
   test('GET /api/monitors/:id/results deve retornar resultados paginados em ordem decrescente', async ({
     client,
     assert,
@@ -174,7 +233,10 @@ test.group('Monitors API - Functional Tests', (group) => {
 
     const resPage1 = await client.get(`/api/monitors/${monitor.id}/results?page=1&limit=20`)
     resPage1.assertStatus(200)
-    const body1 = resPage1.body() as { data: unknown[]; meta: { currentPage: number; lastPage: number; total: number } }
+    const body1 = resPage1.body() as {
+      data: unknown[]
+      meta: { currentPage: number; lastPage: number; total: number }
+    }
     assert.exists(body1.data)
     assert.equal(body1.data.length, 20)
     assert.equal(body1.meta.currentPage, 1)

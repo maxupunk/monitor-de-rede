@@ -184,6 +184,18 @@ export function formatEventDetails(evt: RealtimeEventPayload): FormattedEventDet
         rawJson,
       }
     }
+    case 'vpn:peer_status_change': {
+      const isRecovery = d.transition === 'reconnected'
+      const isDown = d.transition === 'connected_to_disconnected'
+      return {
+        title: `Túnel VPN · ${d.deviceName || `Peer #${d.vpnPeerId || ''}`}`,
+        message: String(d.message || 'O estado do túnel WireGuard mudou'),
+        icon: isRecovery ? 'mdi-shield-check-outline' : 'mdi-shield-off-outline',
+        color: isRecovery ? 'success' : isDown ? 'error' : 'warning',
+        time: dateStr,
+        rawJson,
+      }
+    }
     case 'vpn:peers_updated': {
       return {
         title: 'VPN WireGuard',

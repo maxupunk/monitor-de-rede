@@ -43,6 +43,8 @@ export interface Monitor {
   isEnabled: boolean
   lastCheckedAt?: string
   lastLatencyMs?: number
+  /** Latência do resultado mais recente, anexada pelo `MonitorPresenter` */
+  latencyMs?: number | null
   device?: { id: number; name: string }
   probe?: { id: number; name: string }
   recentResults?: MonitorResult[]

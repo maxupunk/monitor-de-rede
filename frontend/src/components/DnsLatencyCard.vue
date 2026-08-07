@@ -114,20 +114,44 @@
           </v-list-item-subtitle>
 
           <template #append>
-            <div class="text-right">
-              <div v-if="entry.avgLookupTimeMs !== null" class="d-flex align-baseline ga-1">
-                <span
-                  class="text-h6 font-weight-bold"
-                  :class="`text-${positionColor(index, entry)}`"
-                >
-                  {{ formatMs(entry.avgLookupTimeMs) }}
-                </span>
-                <span class="text-caption text-grey">ms</span>
+            <div class="d-flex align-center ga-3">
+              <div class="text-right">
+                <div v-if="entry.avgLookupTimeMs !== null" class="d-flex align-baseline ga-1">
+                  <span
+                    class="text-h6 font-weight-bold"
+                    :class="`text-${positionColor(index, entry)}`"
+                  >
+                    {{ formatMs(entry.avgLookupTimeMs) }}
+                  </span>
+                  <span class="text-caption text-grey">ms</span>
+                </div>
+                <v-chip v-else size="x-small" color="error" variant="tonal">sem resposta</v-chip>
+                <div v-if="entry.error" class="text-caption text-error" style="max-width: 190px">
+                  {{ entry.error }}
+                </div>
               </div>
-              <v-chip v-else size="x-small" color="error" variant="tonal">sem resposta</v-chip>
-              <div v-if="entry.error" class="text-caption text-error" style="max-width: 190px">
-                {{ entry.error }}
-              </div>
+
+              <!-- Atalho para acompanhar continuamente o servidor recém-medido -->
+              <v-chip v-if="isMonitored(entry)" size="small" color="success" variant="tonal">
+                <v-icon start size="14">mdi-check-circle-outline</v-icon>
+                Monitorado
+                <v-tooltip activator="parent" location="top">
+                  Já existe um monitor DNS para este servidor
+                </v-tooltip>
+              </v-chip>
+              <v-btn
+                v-else
+                icon
+                size="small"
+                variant="tonal"
+                color="deep-purple"
+                @click="startMonitoring(entry)"
+              >
+                <v-icon size="18">mdi-plus-circle-outline</v-icon>
+                <v-tooltip activator="parent" location="top">
+                  Adicionar ao monitoramento
+                </v-tooltip>
+              </v-btn>
             </div>
           </template>
         </v-list-item>
@@ -187,18 +211,33 @@
     </v-card-actions>
 
     <DnsServersDialog v-model="serversDialog" @saved="onServersChanged"></DnsServersDialog>
+
+    <!-- Criação do monitor DNS já apontando para o servidor escolhido no ranking -->
+    <MonitorFormDialog
+      v-model="monitorDialog"
+      :defaults="monitorDefaults"
+      @saved="onMonitorSaved"
+    ></MonitorFormDialog>
   </v-card>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useDnsPerformanceStore, type DnsRankingEntry } from '@/stores/dnsPerformance'
+import { useMonitorsStore, type Monitor } from '@/stores/monitors'
 import DnsServersDialog from '@/components/DnsServersDialog.vue'
-import type { DnsProtocol } from '@/utils/monitorTypes'
+import MonitorFormDialog from '@/components/MonitorFormDialog.vue'
+import type { DnsProtocol, MonitorFormModel } from '@/utils/monitorTypes'
 
 const store = useDnsPerformanceStore()
+const monitorsStore = useMonitorsStore()
 const mode = ref<'history' | 'benchmark'>('history')
 const serversDialog = ref(false)
+const monitorDialog = ref(false)
+const monitorDefaults = ref<Partial<MonitorFormModel> | null>(null)
+
+/** Nomes medidos quando a comparação ainda não definiu os seus */
+const FALLBACK_HOSTNAMES = ['google.com', 'cloudflare.com', 'globo.com']
 
 const PROTOCOL_LABELS: Record<DnsProtocol, string> = {
   udp: 'UDP',
@@ -209,7 +248,58 @@ const PROTOCOL_LABELS: Record<DnsProtocol, string> = {
 
 onMounted(() => {
   store.fetchPerformance()
+  // Necessário para saber quais servidores do ranking já estão sendo vigiados
+  if (monitorsStore.monitors.length === 0) monitorsStore.fetchMonitors()
 })
+
+/** Endereço de um monitor DNS já cadastrado, no formato usado pelo ranking */
+function monitorDnsServer(monitor: Monitor): { server: string; protocol: string } | null {
+  if (monitor.type !== 'dns') return null
+  const config = (monitor.configuration || {}) as Record<string, unknown>
+  const protocol = String(config.protocol ?? 'udp')
+  const server = String(protocol === 'doh' ? (config.dohUrl ?? '') : (config.dnsServer ?? ''))
+  return server ? { server, protocol } : null
+}
+
+/**
+ * No modo histórico o próprio ranking já sabe de quais monitores veio; no modo
+ * comparação a medição é avulsa, então a checagem passa pelos monitores
+ * cadastrados — endereço e transporte precisam bater, porque o mesmo IP medido
+ * por UDP e por DoH são dois monitores diferentes.
+ */
+function isMonitored(entry: DnsRankingEntry): boolean {
+  if (entry.monitorIds && entry.monitorIds.length > 0) return true
+
+  return monitorsStore.monitors.some((monitor) => {
+    const existing = monitorDnsServer(monitor)
+    return existing?.server === entry.server && existing.protocol === entry.protocol
+  })
+}
+
+function startMonitoring(entry: DnsRankingEntry) {
+  const hostnames = store.benchmarkHostnames.length
+    ? store.benchmarkHostnames
+    : FALLBACK_HOSTNAMES
+  const [primary, ...extras] = hostnames
+
+  monitorDefaults.value = {
+    kind: 'dns',
+    target: primary,
+    extraHostnames: extras,
+    dnsProtocol: entry.protocol,
+    dnsServer: entry.protocol === 'doh' ? '' : entry.server,
+    dohUrl: entry.protocol === 'doh' ? entry.server : '',
+    name: `DNS ${entry.label}`,
+  }
+  monitorDialog.value = true
+}
+
+async function onMonitorSaved() {
+  monitorDefaults.value = null
+  // O selo "Monitorado" e o ranking histórico dependem da lista atualizada
+  await monitorsStore.fetchMonitors()
+  refresh()
+}
 
 function protocolLabel(protocol: DnsProtocol): string {
   return PROTOCOL_LABELS[protocol] ?? String(protocol).toUpperCase()

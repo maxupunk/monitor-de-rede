@@ -103,8 +103,8 @@
                   :key="alert.id"
                   :title="alert.title"
                   :subtitle="alert.message"
-                  :to="getAlertLink(alert)"
-                  class="px-4 py-2 border-b"
+                  class="px-4 py-2 border-b cursor-pointer"
+                  @click="goToAlert(alert)"
                 >
                   <template #prepend>
                     <v-avatar
@@ -380,6 +380,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useDevicesStore } from '@/stores/devices'
 import { useAlertsStore } from '@/stores/alerts'
 import { useEventsStore, type RealtimeEventPayload } from '@/stores/events'
@@ -399,6 +400,7 @@ import {
 } from '@/utils/monitorPresentation'
 import type { Monitor } from '@/stores/monitors'
 
+const router = useRouter()
 const devicesStore = useDevicesStore()
 const alertsStore = useAlertsStore()
 const eventsStore = useEventsStore()
@@ -414,6 +416,10 @@ const selectedEventPayload = ref<RealtimeEventPayload | null>(null)
 function openSilenceDialog(id: number) {
   silenceTargetId.value = id
   silenceDialog.value = true
+}
+
+function goToAlert(alert: { monitorId?: number | null; deviceId?: number | null }) {
+  router.push(getAlertLink(alert))
 }
 
 function openEventDetail(evt: RealtimeEventPayload) {

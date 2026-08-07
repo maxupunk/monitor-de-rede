@@ -1,121 +1,26 @@
 import type { HttpContext } from '@adonisjs/core/http'
 import Monitor from '#models/monitor'
 import MonitorResult from '#models/monitor_result'
-import Metric from '#models/metric'
 import Device from '#models/device'
+import {
+  fetchGaugeMetricsData,
+  monitorListQuery,
+  presentMonitors,
+} from '#modules/monitoring/monitor_presenter'
 import { MonitorRunner } from '#modules/monitoring/monitor_runner'
 import { ResultProcessor } from '#modules/monitoring/result_processor'
 import { DeviceStatusService } from '#modules/monitoring/device_status_service'
 import { RecoveryManager } from '#modules/alerts/recovery_manager'
 import { ResourceCleanupService } from '#services/resource_cleanup_service'
 
-const GAUGE_METRIC_NAMES = ['cpu_usage', 'memory_usage']
-
 export default class MonitorsController {
   private monitorRunner = new MonitorRunner()
   private resultProcessor = new ResultProcessor()
   private recoveryManager = new RecoveryManager()
 
-  /**
-   * Monitores SNMP de uso de CPU/Memória não são checagens de disponibilidade
-   * (up/down) e sim leituras de percentual de uso — identifica esse tipo aqui
-   * para que possamos anexar a última leitura em vez de um status up/down.
-   */
-  private gaugeMetricName(monitor: Monitor): string | null {
-    if (monitor.type !== 'snmp') return null
-    const metric = (monitor.configuration as Record<string, unknown> | null)?.metric
-    return typeof metric === 'string' && GAUGE_METRIC_NAMES.includes(metric) ? metric : null
-  }
-
-  /**
-   * Traz a última leitura e um histórico limitado por monitor de uso (CPU/Memória),
-   * para que a lista de monitores (dashboard e /monitors) já abra com um gráfico de
-   * tendência em vez de só o valor mais recente — a mesma leitura em tempo real via
-   * SSE (`applyRealtimeMetrics` no store) só precisa então anexar a esse histórico.
-   */
-  private async fetchGaugeMetricsData(monitors: Monitor[], historyLimit = 20) {
-    const gaugeMonitors = monitors
-      .map((mon) => ({ mon, metricName: this.gaugeMetricName(mon) }))
-      .filter(
-        (entry): entry is { mon: Monitor; metricName: string } =>
-          entry.metricName !== null && entry.mon.deviceId !== null
-      )
-
-    const latestMap = new Map<
-      number,
-      { name: string; value: number; unit: string; recordedAt: string }
-    >()
-    const historyMap = new Map<number, Array<{ value: number; recordedAt: string }>>()
-    if (gaugeMonitors.length === 0) return { latestMap, historyMap }
-
-    // Uma leitura de uso pertence a (equipamento, métrica) — deduplica antes de
-    // consultar para não repetir a mesma busca quando dois monitores apontam para
-    // o mesmo par (ex: dois monitores de CPU no mesmo equipamento).
-    const pairs = new Map<string, { deviceId: number; metricName: string }>()
-    for (const { mon, metricName } of gaugeMonitors) {
-      pairs.set(`${mon.deviceId}:${metricName}`, { deviceId: mon.deviceId!, metricName })
-    }
-
-    const rowsByPair = new Map<string, Metric[]>()
-    await Promise.all(
-      [...pairs.entries()].map(async ([key, { deviceId, metricName }]) => {
-        const rows = await Metric.query()
-          .where('deviceId', deviceId)
-          .where('name', metricName)
-          .orderBy('recordedAt', 'desc')
-          .limit(historyLimit)
-        rowsByPair.set(key, rows)
-      })
-    )
-
-    for (const { mon, metricName } of gaugeMonitors) {
-      const rows = rowsByPair.get(`${mon.deviceId}:${metricName}`) ?? []
-      if (rows.length === 0) continue
-
-      // `rows` chega do mais recente para o mais antigo (orderBy desc) — inverte
-      // para o histórico ficar do mais antigo para o mais recente, como o resto da UI espera.
-      historyMap.set(
-        mon.id,
-        [...rows].reverse().map((r) => ({ value: r.value, recordedAt: r.recordedAt.toISO()! }))
-      )
-
-      const latest = rows[0]
-      latestMap.set(mon.id, {
-        name: latest.name,
-        value: latest.value,
-        unit: latest.unit,
-        recordedAt: latest.recordedAt.toISO()!,
-      })
-    }
-
-    return { latestMap, historyMap }
-  }
-
   async index({ response }: HttpContext) {
-    const monitors = await Monitor.query()
-      .preload('device')
-      .preload('probe')
-      // `.limit()` sozinho, com múltiplos monitores sendo carregados na mesma consulta,
-      // limita o total combinado entre TODOS os monitores (não por monitor) — poucos
-      // monitores "consomem" o limite inteiro e os demais ficam quase sem histórico.
-      // `.groupLimit()` usa ROW_NUMBER() OVER (PARTITION BY monitor_id) para trazer até
-      // N resultados de cada monitor individualmente. `.groupOrderBy` vai direto para SQL
-      // raw (sem passar pela conversão camelCase -> snake_case do Lucid), então precisa do
-      // nome da coluna no banco (`started_at`), não da propriedade do model (`startedAt`).
-      .preload('results', (query) => query.groupLimit(30).groupOrderBy('started_at', 'desc'))
-
-    const { latestMap, historyMap } = await this.fetchGaugeMetricsData(monitors)
-
-    const formatted = monitors.map((mon) => {
-      const json = mon.serialize()
-      const results = mon.results || []
-      json.recentResults = [...results].reverse().map((r) => r.serialize())
-      json.gaugeMetric = latestMap.get(mon.id) || null
-      json.gaugeHistory = historyMap.get(mon.id) || []
-      return json
-    })
-
-    return response.ok(formatted)
+    const monitors = await monitorListQuery().preload('device').preload('probe')
+    return response.ok(await presentMonitors(monitors))
   }
 
   private buildConfiguration(
@@ -216,7 +121,7 @@ export default class MonitorsController {
     const uptimePercentage =
       totalChecks > 0 ? Number(((upChecks / totalChecks) * 100).toFixed(1)) : 100
 
-    const { latestMap, historyMap } = await this.fetchGaugeMetricsData([monitor])
+    const { latestMap, historyMap } = await fetchGaugeMetricsData([monitor])
 
     const json = monitor.serialize()
     json.recentResults = [...results].reverse().map((r) => r.serialize())

@@ -90,6 +90,16 @@ export default class VpnPeer extends BaseModel {
   @column()
   declare enabled: boolean
 
+  /**
+   * Estado apurado no ciclo anterior de sincronização.
+   *
+   * `connectionStatus` é derivado da telemetria a cada leitura e por isso não
+   * guarda história: sem este carimbo não há como distinguir "o túnel está
+   * caído" de "o túnel *acabou de* cair" — e é a segunda leitura que vira alerta.
+   */
+  @column()
+  declare lastConnectionStatus: VpnPeerConnectionStatus | null
+
   @column.dateTime({ autoCreate: true })
   declare createdAt: DateTime
 

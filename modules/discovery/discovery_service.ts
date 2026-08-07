@@ -16,14 +16,26 @@ export class DiscoveryService {
   private merger = new DiscoveryMerger()
   private eventBus = EventBus.getInstance()
 
+  /**
+   * Executa a varredura de uma faixa.
+   *
+   * `existingRun` permite retomar uma execução já enfileirada — é assim que o
+   * scheduler processa as varreduras criadas por `POST /api/networks/:id/scan`
+   * sem gerar um segundo registro no histórico.
+   */
   async runDiscovery(
     cidr: string,
     networkId?: number,
-    probeId?: number | null
+    probeId?: number | null,
+    existingRun?: DiscoveryRun | null
   ): Promise<DiscoveredHost[]> {
-    let runRecord: DiscoveryRun | null = null
+    let runRecord: DiscoveryRun | null = existingRun ?? null
 
-    if (networkId) {
+    if (runRecord) {
+      runRecord.status = 'running'
+      runRecord.startedAt = DateTime.now()
+      await runRecord.save()
+    } else if (networkId) {
       runRecord = await DiscoveryRun.create({
         networkId,
         probeId: probeId || null,

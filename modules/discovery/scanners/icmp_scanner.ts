@@ -1,6 +1,7 @@
 import dns from 'node:dns/promises'
 import type { CheckResult } from '../../monitoring/contracts/check_result.js'
 import { PingChecker } from '../../monitoring/checkers/ping_checker.js'
+import { expandCidr } from '../cidr_range.js'
 
 export interface DiscoveredHost {
   ipAddress: string
@@ -65,37 +66,17 @@ export class IcmpScanner {
     }
   }
 
+  /**
+   * A expansão vive em `cidr_range.ts` porque a mesma resposta é usada fora do
+   * scanner — para validar o CIDR cadastrado na rede antes de agendar a
+   * varredura e para dizer à UI quantos hosts serão varridos.
+   */
   private parseCidrToIps(cidr: string): string[] {
-    if (!cidr.includes('/')) {
-      return [cidr.trim()]
+    try {
+      return expandCidr(cidr)
+    } catch {
+      // Faixa malformada: varre apenas o que foi informado, como antes.
+      return [String(cidr ?? '').trim()].filter(Boolean)
     }
-
-    const [baseIp, prefixStr] = cidr.split('/')
-    const prefix = Number.parseInt(prefixStr, 10)
-
-    if (Number.isNaN(prefix) || prefix < 16 || prefix > 30) {
-      return [baseIp.trim()]
-    }
-
-    const parts = baseIp.split('.').map((p) => Number.parseInt(p, 10))
-    if (parts.length !== 4) return [baseIp]
-
-    const ipNum = (parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]
-    const mask = ~((1 << (32 - prefix)) - 1)
-    const startNum = (ipNum & mask) + 1
-    const endNum = (ipNum | ~mask) - 1
-
-    const ips: string[] = []
-    const limit = Math.min(endNum, startNum + 254)
-
-    for (let current = startNum; current <= limit; current++) {
-      const p1 = (current >>> 24) & 255
-      const p2 = (current >>> 16) & 255
-      const p3 = (current >>> 8) & 255
-      const p4 = current & 255
-      ips.push(`${p1}.${p2}.${p3}.${p4}`)
-    }
-
-    return ips
   }
 }

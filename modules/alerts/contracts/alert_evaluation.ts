@@ -48,4 +48,5 @@ export interface AlertEvaluationContext {
 export const AlertScopeKey = {
   monitor: (monitorId: number): string => `monitor:${monitorId}`,
   interface: (interfaceId: number): string => `interface:${interfaceId}`,
+  vpnPeer: (vpnPeerId: number): string => `vpn_peer:${vpnPeerId}`,
 } as const

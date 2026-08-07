@@ -132,10 +132,20 @@ test.group('Alerts API - Functional Tests', (group) => {
 
     const listResponse = await client.visit('alerts.index')
     listResponse.assertStatus(200)
-    assert.isArray(listResponse.body())
-    assert.lengthOf(listResponse.body(), 1)
-    assert.equal(listResponse.body()[0].alertRuleId, rule.id)
-    assert.equal(listResponse.body()[0].status, 'active')
+
+    // Sem `page` o endpoint devolve o array cru; com `page`, o envelope paginado
+    // usado pelo histórico com scroll infinito.
+    const alerts = listResponse.body() as Array<{ alertRuleId: number | null; status: string }>
+    assert.isArray(alerts)
+    assert.lengthOf(alerts, 1)
+    assert.equal(alerts[0].alertRuleId, rule.id)
+    assert.equal(alerts[0].status, 'active')
+
+    const pagedResponse = await client.get('/api/alerts?page=1&limit=10')
+    pagedResponse.assertStatus(200)
+    const paged = pagedResponse.body() as { data: unknown[]; meta: { total: number } }
+    assert.lengthOf(paged.data, 1)
+    assert.equal(paged.meta.total, 1)
   })
 
   test('POST /api/alerts/:id/acknowledge e POST /api/alerts/:id/silence', async ({

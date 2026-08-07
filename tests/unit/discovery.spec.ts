@@ -1,6 +1,12 @@
 import { test } from '@japa/runner'
 import { DeviceIdentifier } from '#modules/discovery/device_identifier'
 import { DiscoveryMerger } from '#modules/discovery/discovery_merger'
+import {
+  expandCidr,
+  isScannableCidr,
+  parseCidrRange,
+  MAX_SCAN_HOSTS,
+} from '#modules/discovery/cidr_range'
 
 test.group('Descoberta de Dispositivos - Unit Tests', () => {
   test('DeviceIdentifier deve classificar corretamente o tipo de equipamento', ({ assert }) => {
@@ -36,5 +42,55 @@ test.group('Descoberta de Dispositivos - Unit Tests', () => {
     assert.equal(routerHost?.hostname, 'router.local')
     assert.equal(routerHost?.macAddress, 'AA:BB:CC:11:22:33')
     assert.equal(routerHost?.confidence, 80)
+  })
+})
+
+test.group('Descoberta - Expansão de faixas CIDR', () => {
+  test('deve expandir um /24 sem incluir rede e broadcast', ({ assert }) => {
+    const addresses = expandCidr('192.168.1.0/24')
+
+    assert.lengthOf(addresses, 254)
+    assert.equal(addresses[0], '192.168.1.1')
+    assert.equal(addresses[253], '192.168.1.254')
+    assert.notInclude(addresses, '192.168.1.0')
+    assert.notInclude(addresses, '192.168.1.255')
+  })
+
+  test('deve normalizar o endereço de rede quando vem um host da faixa', ({ assert }) => {
+    const range = parseCidrRange('192.168.1.77/24')
+
+    assert.equal(range.networkAddress, '192.168.1.0')
+    assert.equal(range.usableHosts, 254)
+    assert.isFalse(range.truncated)
+  })
+
+  test('deve preservar o primeiro octeto acima de 127', ({ assert }) => {
+    // Aritmética com `<<` em 32 bits com sinal produzia endereços negativos aqui
+    const addresses = expandCidr('200.150.10.0/30')
+
+    assert.deepEqual(addresses, ['200.150.10.1', '200.150.10.2'])
+  })
+
+  test('deve tratar host avulso como faixa de um endereço', ({ assert }) => {
+    assert.deepEqual(expandCidr('10.0.0.5'), ['10.0.0.5'])
+    assert.equal(parseCidrRange('10.0.0.5').prefix, 32)
+  })
+
+  test('faixa maior que o teto deve ser truncada e sinalizada', ({ assert }) => {
+    const range = parseCidrRange('10.0.0.0/16')
+    assert.equal(range.usableHosts, 65534)
+    assert.isTrue(range.truncated)
+
+    // Truncar sem avisar faria a varredura parecer completa cobrindo 1,5% da faixa
+    assert.lengthOf(expandCidr('10.0.0.0/16'), MAX_SCAN_HOSTS)
+  })
+
+  test('faixas malformadas devem ser rejeitadas', ({ assert }) => {
+    assert.isFalse(isScannableCidr('192.168.1.0/33'))
+    assert.isFalse(isScannableCidr('192.168.1.0/4'))
+    assert.isFalse(isScannableCidr('999.1.1.1/24'))
+    assert.isFalse(isScannableCidr('nao-e-um-ip'))
+    assert.isFalse(isScannableCidr(''))
+    assert.isTrue(isScannableCidr('172.16.0.0/22'))
   })
 })
