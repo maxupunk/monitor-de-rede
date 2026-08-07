@@ -98,9 +98,13 @@ const points = computed(() => {
   })
 })
 
-const lastPoint = computed(() => (points.value.length > 0 ? points.value[points.value.length - 1] : null))
+const lastPoint = computed(() =>
+  points.value.length > 0 ? points.value[points.value.length - 1] : null
+)
 
-const linePoints = computed(() => points.value.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' '))
+const linePoints = computed(() =>
+  points.value.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')
+)
 
 const areaPoints = computed(() => {
   if (points.value.length === 0) return ''

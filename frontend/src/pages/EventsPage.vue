@@ -41,62 +41,53 @@
         </v-col>
         <v-col cols="12" md="2" class="d-flex align-center justify-end">
           <v-chip variant="outlined" size="small" color="primary">
-            {{ filteredEvents.length }} de {{ eventsStore.recentEvents.length }} eventos
+            {{ allFilteredEvents.length }} de {{ combinedEvents.length }} eventos
           </v-chip>
         </v-col>
       </v-row>
     </v-card>
 
     <!-- Feed de Eventos -->
-    <v-card elevation="2" class="rounded-lg">
-      <v-card-title class="pa-4 font-weight-bold d-flex align-center justify-space-between">
-        <span>Transmissão em Tempo Real</span>
-        <span class="text-caption text-grey font-weight-regular">
-          Clique no evento para visualizar o payload detalhado
-        </span>
-      </v-card-title>
-      <v-divider />
-      <v-card-text class="pa-0">
-        <v-list lines="two" class="pa-0">
-          <v-list-item
-            v-for="(evt, idx) in filteredEvents"
-            :key="idx"
-            class="px-4 py-3 border-b cursor-pointer"
-            @click="openEventDetail(evt)"
-          >
-            <template #prepend>
-              <v-avatar
-                :color="formatEventDetails(evt).color"
-                variant="tonal"
-                size="36"
-                class="mr-3"
-              >
-                <v-icon size="20">{{ formatEventDetails(evt).icon }}</v-icon>
-              </v-avatar>
-            </template>
-            <v-list-item-title class="font-weight-bold">
-              {{ formatEventDetails(evt).title }}
-              <v-chip size="x-small" class="ml-2 font-weight-medium" variant="outlined">
-                {{ evt.type }}
-              </v-chip>
-            </v-list-item-title>
-            <v-list-item-subtitle class="text-body-2 mt-1">
-              {{ formatEventDetails(evt).message }}
-            </v-list-item-subtitle>
-            <template #append>
-              <span class="text-caption text-grey">{{ formatEventDetails(evt).time }}</span>
-            </template>
-          </v-list-item>
-        </v-list>
-        <div v-if="filteredEvents.length === 0" class="pa-8 text-center text-grey">
-          <v-icon size="48" color="grey-lighten-1" class="mb-2">mdi-filter-remove-outline</v-icon>
-          <div class="text-subtitle-2 font-weight-medium">Nenhum evento encontrado</div>
-          <div class="text-caption">
-            Tente ajustar os termos de busca ou remover o filtro selecionado.
-          </div>
+    <v-infinite-scroll :key="eventsScrollKey" @load="loadMoreEvents">
+      <v-list lines="two" class="pa-0 rounded-lg border">
+        <v-list-item
+          v-for="(evt, idx) in allFilteredEvents"
+          :key="idx"
+          class="px-4 py-3 border-b cursor-pointer"
+          @click="openEventDetail(evt)"
+        >
+          <template #prepend>
+            <v-avatar :color="formatEventDetails(evt).color" variant="tonal" size="36" class="mr-3">
+              <v-icon size="20">{{ formatEventDetails(evt).icon }}</v-icon>
+            </v-avatar>
+          </template>
+          <v-list-item-title class="font-weight-bold">
+            {{ formatEventDetails(evt).title }}
+            <v-chip size="x-small" class="ml-2 font-weight-medium" variant="outlined">
+              {{ evt.type }}
+            </v-chip>
+          </v-list-item-title>
+          <v-list-item-subtitle class="text-body-2 mt-1">
+            {{ formatEventDetails(evt).message }}
+          </v-list-item-subtitle>
+          <template #append>
+            <span class="text-caption text-grey">{{ formatEventDetails(evt).time }}</span>
+          </template>
+        </v-list-item>
+      </v-list>
+      <template #empty>
+        <div class="text-caption text-grey text-center py-4">
+          Nenhum outro evento registrado no histórico.
         </div>
-      </v-card-text>
-    </v-card>
+      </template>
+    </v-infinite-scroll>
+    <div v-if="allFilteredEvents.length === 0" class="pa-8 text-center text-grey">
+      <v-icon size="48" color="grey-lighten-1" class="mb-2">mdi-filter-remove-outline</v-icon>
+      <div class="text-subtitle-2 font-weight-medium">Nenhum evento encontrado</div>
+      <div class="text-caption">
+        Tente ajustar os termos de busca ou remover o filtro selecionado.
+      </div>
+    </div>
 
     <!-- Modal Detalhes do Evento -->
     <EventDetailDialog v-model="detailDialog" :event="selectedEvent" />
@@ -106,8 +97,22 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useEventsStore, type RealtimeEventPayload } from '@/stores/events'
+import { apiService } from '@/services/apiService'
 import { formatEventDetails } from '@/utils/eventPresentation'
 import EventDetailDialog from '@/components/EventDetailDialog.vue'
+
+interface HistoricalEventRecord {
+  id: number
+  alertRuleId?: number | null
+  deviceId?: number | null
+  monitorId?: number | null
+  status: string
+  severity: string
+  message: string
+  createdAt: string
+  device?: { id: number; name: string }
+  monitor?: { id: number; name: string }
+}
 
 const eventsStore = useEventsStore()
 
@@ -115,6 +120,53 @@ const searchQuery = ref('')
 const typeFilter = ref('all')
 const detailDialog = ref(false)
 const selectedEvent = ref<RealtimeEventPayload | null>(null)
+
+const historicalEvents = ref<RealtimeEventPayload[]>([])
+const historicalEventsPage = ref(1)
+const eventsScrollKey = ref(0)
+
+async function loadMoreEvents({
+  done,
+}: {
+  done: (status: 'ok' | 'empty' | 'loading' | 'error') => void
+}) {
+  try {
+    const res = await apiService.get<{
+      data: HistoricalEventRecord[]
+      meta: { currentPage: number; lastPage: number; total: number }
+    }>(`/events?page=${historicalEventsPage.value}&limit=20`)
+
+    if (res.data && res.data.length > 0) {
+      const converted: RealtimeEventPayload[] = res.data.map((evt) => ({
+        type: evt.status === 'active' ? 'alert:opened' : 'alert:resolved',
+        timestamp: evt.createdAt || new Date().toISOString(),
+        data: {
+          id: evt.id,
+          deviceId: evt.deviceId,
+          deviceName: evt.device?.name,
+          monitorId: evt.monitorId,
+          monitorName: evt.monitor?.name,
+          severity: evt.severity,
+          message: evt.message,
+          status: evt.status,
+        },
+      }))
+      historicalEvents.value.push(...converted)
+      historicalEventsPage.value++
+
+      if (res.meta && res.meta.currentPage >= res.meta.lastPage) {
+        done('empty')
+      } else {
+        done('ok')
+      }
+    } else {
+      done('empty')
+    }
+  } catch (err) {
+    console.error('Erro ao carregar eventos históricos:', err)
+    done('error')
+  }
+}
 
 const typeOptions = [
   { title: 'Todos os tipos', value: 'all' },
@@ -127,8 +179,23 @@ const typeOptions = [
   { title: 'Varredura (discovery:*)', value: 'discovery' },
 ]
 
-const filteredEvents = computed(() => {
-  return eventsStore.recentEvents.filter((evt) => {
+const combinedEvents = computed(() => {
+  const map = new Map<string, RealtimeEventPayload>()
+  for (const evt of eventsStore.recentEvents) {
+    const key = `${evt.type}-${evt.timestamp}-${JSON.stringify(evt.data)}`
+    map.set(key, evt)
+  }
+  for (const evt of historicalEvents.value) {
+    const key = `${evt.type}-${evt.timestamp}-${JSON.stringify(evt.data)}`
+    if (!map.has(key)) {
+      map.set(key, evt)
+    }
+  }
+  return Array.from(map.values())
+})
+
+const allFilteredEvents = computed(() => {
+  return combinedEvents.value.filter((evt) => {
     // 1. Filtro por tipo
     if (typeFilter.value !== 'all') {
       if (typeFilter.value === 'alerts' && !evt.type.startsWith('alert:')) return false

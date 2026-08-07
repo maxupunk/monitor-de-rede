@@ -1,5 +1,6 @@
 import type { HttpContext } from '@adonisjs/core/http'
 import Monitor from '#models/monitor'
+import MonitorResult from '#models/monitor_result'
 import Metric from '#models/metric'
 import Device from '#models/device'
 import { MonitorRunner } from '#modules/monitoring/monitor_runner'
@@ -329,5 +330,17 @@ export default class MonitorsController {
     }
 
     return response.ok(monitor)
+  }
+
+  async results({ params, request, response }: HttpContext) {
+    const page = Number(request.input('page', 1))
+    const limit = Math.min(Number(request.input('limit', 20)), 100)
+
+    const results = await MonitorResult.query()
+      .where('monitorId', params.id)
+      .orderBy('startedAt', 'desc')
+      .paginate(page, limit)
+
+    return response.ok(results)
   }
 }

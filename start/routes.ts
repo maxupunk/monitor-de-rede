@@ -70,6 +70,7 @@ router
     router.resource('devices', DevicesController).apiOnly()
 
     // Monitors
+    router.get('monitors/:id/results', [MonitorsController, 'results'])
     router.post('monitors/:id/run', [MonitorsController, 'run'])
     router.post('monitors/:id/enable', [MonitorsController, 'enable'])
     router.post('monitors/:id/disable', [MonitorsController, 'disable'])
@@ -130,7 +131,8 @@ router
     router.get('zabbix-templates/:id', [ZabbixTemplatesController, 'show'])
     router.delete('zabbix-templates/:id', [ZabbixTemplatesController, 'destroy'])
 
-    // Realtime Events (SSE)
+    // Realtime Events (SSE) & Historical Events
+    router.get('events', [EventsController, 'index'])
     router.get('events/stream', [EventsController, 'stream'])
   })
   .prefix('/api')

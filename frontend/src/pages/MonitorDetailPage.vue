@@ -441,56 +441,85 @@
             </h2>
             <div class="text-subtitle-2 text-grey">Resultados das últimas verificações</div>
           </div>
-          <v-btn
-            size="small"
-            variant="text"
-            prepend-icon="mdi-refresh"
-            :loading="monitorsStore.loading"
-            @click="refreshData"
-          >
-            Atualizar
-          </v-btn>
+          <div class="d-flex align-center ga-2">
+            <v-btn
+              size="small"
+              variant="text"
+              prepend-icon="mdi-refresh"
+              :loading="monitorsStore.loading"
+              @click="refreshData"
+            >
+              Atualizar
+            </v-btn>
+            <v-btn icon size="small" variant="text" @click="toggleShowHistory">
+              <v-icon>{{ showHistory ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
+              <v-tooltip activator="parent" location="top">
+                {{ showHistory ? 'Ocultar Histórico' : 'Mostrar Histórico' }}
+              </v-tooltip>
+            </v-btn>
+          </div>
         </div>
 
-        <v-data-table
-          :headers="historyHeaders"
-          :items="formattedHistory"
-          :items-per-page="-1"
-          hide-default-footer
-          density="comfortable"
-          hover
-          class="rounded-lg border"
-        >
-          <template #item.status="{ item }">
-            <v-chip :color="getStatusColor(item.status)" size="x-small" variant="flat">
-              {{ item.status ? item.status.toUpperCase() : 'UNKNOWN' }}
-            </v-chip>
-          </template>
-
-          <template #item.latencyMs="{ item }">
-            <span
-              v-if="item.latencyMs !== undefined && item.latencyMs !== null"
-              class="font-weight-medium"
+        <v-expand-transition>
+          <div v-if="showHistory">
+            <div
+              class="history-scroll-container rounded-lg border overflow-y-auto"
+              style="max-height: 450px"
             >
-              {{ item.latencyMs }} ms
-            </span>
-            <span v-else class="text-grey">-</span>
-          </template>
-
-          <template #item.durationMs="{ item }">
-            <span class="text-grey">{{ item.durationMs }} ms</span>
-          </template>
-
-          <template #item.finishedAt="{ item }">
-            <span>{{ formatDateTime(item.finishedAt, '-') }}</span>
-          </template>
-
-          <template #item.message="{ item }">
-            <span :class="item.status === 'down' ? 'text-error font-weight-medium' : 'text-body-2'">
-              {{ item.message || '-' }}
-            </span>
-          </template>
-        </v-data-table>
+              <v-infinite-scroll :key="infiniteScrollKey" :height="420" @load="loadMoreHistory">
+                <v-table density="comfortable" hover>
+                  <thead>
+                    <tr>
+                      <th style="width: 110px">Status</th>
+                      <th style="width: 140px">Latência (Ping)</th>
+                      <th style="width: 120px">Duração</th>
+                      <th style="width: 180px">Data e Hora</th>
+                      <th>Mensagem</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="item in historyItems" :key="item.id">
+                      <td>
+                        <v-chip :color="getStatusColor(item.status)" size="x-small" variant="flat">
+                          {{ item.status ? item.status.toUpperCase() : 'UNKNOWN' }}
+                        </v-chip>
+                      </td>
+                      <td>
+                        <span
+                          v-if="item.latencyMs !== undefined && item.latencyMs !== null"
+                          class="font-weight-medium"
+                        >
+                          {{ item.latencyMs }} ms
+                        </span>
+                        <span v-else class="text-grey">-</span>
+                      </td>
+                      <td>
+                        <span class="text-grey">{{ item.durationMs }} ms</span>
+                      </td>
+                      <td>
+                        <span>{{ formatDateTime(item.finishedAt, '-') }}</span>
+                      </td>
+                      <td>
+                        <span
+                          :class="
+                            item.status === 'down' ? 'text-error font-weight-medium' : 'text-body-2'
+                          "
+                        >
+                          {{ item.message || '-' }}
+                        </span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </v-table>
+                <template #empty>
+                  <div class="text-caption text-grey text-center py-3">
+                    Nenhum outro registro no histórico.
+                  </div>
+                </template>
+              </v-infinite-scroll>
+            </div>
+          </div>
+        </v-expand-transition>
       </v-card>
     </div>
 
@@ -507,7 +536,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useMonitorsStore, type Monitor } from '@/stores/monitors'
+import { useMonitorsStore, type Monitor, type MonitorResult } from '@/stores/monitors'
 import { useEventsStore } from '@/stores/events'
 import { apiService } from '@/services/apiService'
 import type { DeviceMetric } from '@/stores/deviceDetail'
@@ -565,17 +594,52 @@ const stats = computed(
     }
 )
 
-const historyHeaders = [
-  { title: 'Status', key: 'status', width: '110px' },
-  { title: 'Latência (Ping)', key: 'latencyMs', width: '140px' },
-  { title: 'Duração', key: 'durationMs', width: '120px' },
-  { title: 'Data e Hora', key: 'finishedAt', width: '180px' },
-  { title: 'Mensagem', key: 'message' },
-]
+const showHistory = ref(false)
+const historyItems = ref<MonitorResult[]>([])
+const historyPage = ref(1)
+const infiniteScrollKey = ref(0)
 
-const formattedHistory = computed(() => {
-  return (monitor.value.recentResults || []).slice().reverse()
-})
+function toggleShowHistory() {
+  showHistory.value = !showHistory.value
+  if (showHistory.value) {
+    historyItems.value = []
+    historyPage.value = 1
+    infiniteScrollKey.value++
+  }
+}
+
+async function loadMoreHistory({
+  done,
+}: {
+  done: (status: 'ok' | 'empty' | 'loading' | 'error') => void
+}) {
+  if (!monitorId.value) {
+    done('empty')
+    return
+  }
+  try {
+    const res = await apiService.get<{
+      data: MonitorResult[]
+      meta: { currentPage: number; lastPage: number; total: number }
+    }>(`/monitors/${monitorId.value}/results?page=${historyPage.value}&limit=20`)
+
+    if (res.data && res.data.length > 0) {
+      historyItems.value.push(...res.data)
+      historyPage.value++
+
+      if (res.meta && res.meta.currentPage >= res.meta.lastPage) {
+        done('empty')
+      } else {
+        done('ok')
+      }
+    } else {
+      done('empty')
+    }
+  } catch (error) {
+    console.error('Erro ao carregar histórico de verificações:', error)
+    done('error')
+  }
+}
 
 const formattedTarget = computed(() => {
   if (monitor.value.port) {
@@ -810,6 +874,11 @@ async function refreshData() {
   if (monitorId.value) {
     await monitorsStore.fetchMonitorById(monitorId.value)
     if (isGaugeMonitor.value) await loadGaugeHistory()
+    if (showHistory.value) {
+      historyItems.value = []
+      historyPage.value = 1
+      infiniteScrollKey.value++
+    }
   }
 }
 

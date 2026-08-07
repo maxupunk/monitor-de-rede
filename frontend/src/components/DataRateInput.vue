@@ -46,13 +46,7 @@ const props = withDefaults(
     modelValue: number | null
     label?: string
     variant?:
-      | 'outlined'
-      | 'filled'
-      | 'underlined'
-      | 'solo'
-      | 'solo-filled'
-      | 'solo-inverted'
-      | 'plain'
+      'outlined' | 'filled' | 'underlined' | 'solo' | 'solo-filled' | 'solo-inverted' | 'plain'
     density?: 'default' | 'comfortable' | 'compact'
     hideDetails?: boolean | 'auto'
     bgColor?: string
@@ -114,7 +108,10 @@ function onValueInput(raw: string | number) {
   displayValue.value = Number.isFinite(num) ? num : null
 
   suppressWatch = true
-  emit('update:modelValue', displayValue.value === null ? null : Math.round(displayValue.value * FACTORS[unit.value]))
+  emit(
+    'update:modelValue',
+    displayValue.value === null ? null : Math.round(displayValue.value * FACTORS[unit.value])
+  )
 }
 
 function onUnitChange(newUnit: RateUnit) {

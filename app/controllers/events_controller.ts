@@ -1,4 +1,5 @@
 import type { HttpContext } from '@adonisjs/core/http'
+import AlertEvent from '#models/alert_event'
 import { EventBus, type SystemEvent } from '#modules/events/event_bus'
 import { EventRelay } from '#modules/events/event_relay'
 
@@ -8,6 +9,19 @@ const HEARTBEAT_MS = 25_000
 export default class EventsController {
   /** Assinantes SSE ativos neste processo */
   private static subscribers = 0
+
+  async index({ request, response }: HttpContext) {
+    const page = Number(request.input('page', 1))
+    const limit = Math.min(Number(request.input('limit', 20)), 100)
+
+    const events = await AlertEvent.query()
+      .preload('device')
+      .preload('monitor')
+      .orderBy('createdAt', 'desc')
+      .paginate(page, limit)
+
+    return response.ok(events)
+  }
 
   async stream({ request, response }: HttpContext) {
     const rawRes = response.response

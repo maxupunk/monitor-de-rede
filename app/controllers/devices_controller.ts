@@ -143,7 +143,42 @@ export default class DevicesController {
     return response.ok(formatted)
   }
 
-  async metrics({ params, response }: HttpContext) {
+  async metrics({ params, request, response }: HttpContext) {
+    const pageParam = request.input('page')
+    if (pageParam) {
+      const page = Number(pageParam) || 1
+      const limit = Math.min(Number(request.input('limit', 20)), 100)
+
+      const paginated = await Metric.query()
+        .where('deviceId', params.id)
+        .preload('interface')
+        .orderBy('recordedAt', 'desc')
+        .paginate(page, limit)
+
+      const json = paginated.toJSON()
+      const data = (paginated.all() as Metric[])
+        .filter((met) => {
+          if (met.interfaceId && met.interface) {
+            return met.interface.adminStatus === 'up'
+          }
+          return true
+        })
+        .map((met) => ({
+          id: met.id,
+          deviceId: met.deviceId,
+          interfaceId: met.interfaceId,
+          interfaceName: met.interface ? met.interface.name : null,
+          metricName: met.name,
+          metricValue: met.value,
+          unit: met.unit,
+          createdAt: met.recordedAt
+            ? met.recordedAt.toFormat('dd/MM/yyyy HH:mm:ss')
+            : met.createdAt.toFormat('dd/MM/yyyy HH:mm:ss'),
+        }))
+
+      return response.ok({ data, meta: json.meta })
+    }
+
     const metrics = await Metric.query()
       .where('deviceId', params.id)
       .preload('interface')
@@ -175,7 +210,30 @@ export default class DevicesController {
     return response.ok(formatted)
   }
 
-  async events({ params, response }: HttpContext) {
+  async events({ params, request, response }: HttpContext) {
+    const pageParam = request.input('page')
+    if (pageParam) {
+      const page = Number(pageParam) || 1
+      const limit = Math.min(Number(request.input('limit', 20)), 100)
+
+      const paginated = await AlertEvent.query()
+        .where('deviceId', params.id)
+        .orderBy('createdAt', 'desc')
+        .paginate(page, limit)
+
+      const json = paginated.toJSON()
+      const data = (paginated.all() as AlertEvent[]).map((evt) => ({
+        id: evt.id,
+        deviceId: evt.deviceId,
+        eventType: evt.status,
+        severity: evt.severity,
+        message: evt.message || 'Sem mensagem de detalhes',
+        createdAt: evt.createdAt ? evt.createdAt.toFormat('dd/MM/yyyy HH:mm:ss') : '',
+      }))
+
+      return response.ok({ data, meta: json.meta })
+    }
+
     const events = await AlertEvent.query()
       .where('deviceId', params.id)
       .orderBy('createdAt', 'desc')

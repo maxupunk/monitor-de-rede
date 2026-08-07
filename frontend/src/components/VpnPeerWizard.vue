@@ -242,4 +242,16 @@ async function submit() {
 .cursor-pointer {
   cursor: pointer;
 }
+
+/*
+ * O v-stepper-window é um v-window (overflow: hidden) e o espaçamento padrão
+ * vem de margin, que fica fora da área de recorte. Com a margem negativa do
+ * v-row o primeiro campo encosta no topo e a label flutuante dos campos
+ * outlined (translateY(-50%) sobre a borda) era cortada pela metade.
+ * Trocamos parte da margem por padding para o recorte acontecer acima dela.
+ */
+:deep(.v-stepper-window) {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+}
 </style>

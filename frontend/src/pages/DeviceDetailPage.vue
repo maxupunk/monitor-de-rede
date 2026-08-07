@@ -534,77 +534,99 @@
             </v-table>
 
             <!-- 3. Tabela do Histórico Bruto de Registros Recentes -->
-            <v-expansion-panels flat variant="inset">
-              <v-expansion-panel class="rounded-lg border">
-                <v-expansion-panel-title class="font-weight-bold text-subtitle-2">
-                  <v-icon start color="primary">mdi-history</v-icon>
+            <v-card elevation="2" class="rounded-lg pa-4 border">
+              <div class="d-flex align-center justify-space-between">
+                <div class="font-weight-bold text-subtitle-2 d-flex align-center ga-2">
+                  <v-icon color="primary">mdi-history</v-icon>
                   Histórico de Registros Brutos (Métricas de Itens Monitorados)
-                </v-expansion-panel-title>
-                <v-expansion-panel-text>
-                  <v-table density="compact" hover>
-                    <thead>
-                      <tr>
-                        <th>Nome da Métrica</th>
-                        <th>Interface / Contexto</th>
-                        <th>Valor</th>
-                        <th>Unidade</th>
-                        <th>Data/Hora</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="met in detailStore.metrics" :key="met.id">
-                        <td class="font-weight-medium">{{ met.metricName }}</td>
-                        <td>{{ met.interfaceName || 'Sistema / Geral' }}</td>
-                        <td class="font-weight-bold">{{ formatMetricValue(met) }}</td>
-                        <td>{{ met.unit || '-' }}</td>
-                        <td class="text-grey">{{ met.createdAt }}</td>
-                      </tr>
-                      <tr v-if="detailStore.metrics.length === 0">
-                        <td colspan="5" class="text-center text-grey py-4">
-                          Nenhum histórico de métricas capturado ainda.
-                        </td>
-                      </tr>
-                    </tbody>
-                  </v-table>
-                </v-expansion-panel-text>
-              </v-expansion-panel>
-            </v-expansion-panels>
+                </div>
+                <v-btn icon size="small" variant="text" @click="toggleShowMetricsHistory">
+                  <v-icon>{{ showMetricsHistory ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
+                  <v-tooltip activator="parent" location="top">
+                    {{ showMetricsHistory ? 'Ocultar Histórico' : 'Mostrar Histórico' }}
+                  </v-tooltip>
+                </v-btn>
+              </div>
+
+              <v-expand-transition>
+                <div v-if="showMetricsHistory">
+                  <div
+                    class="history-scroll-container rounded-lg border overflow-y-auto mt-3"
+                    style="max-height: 450px"
+                  >
+                    <v-infinite-scroll
+                      :key="metricsScrollKey"
+                      :height="420"
+                      @load="loadMoreMetricsHistory"
+                    >
+                      <v-table density="compact" hover>
+                        <thead>
+                          <tr>
+                            <th>Nome da Métrica</th>
+                            <th>Interface / Contexto</th>
+                            <th>Valor</th>
+                            <th>Unidade</th>
+                            <th>Data/Hora</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr v-for="met in metricsHistoryItems" :key="met.id">
+                            <td class="font-weight-medium">{{ met.metricName }}</td>
+                            <td>{{ met.interfaceName || 'Sistema / Geral' }}</td>
+                            <td class="font-weight-bold">{{ formatMetricValue(met) }}</td>
+                            <td>{{ met.unit || '-' }}</td>
+                            <td class="text-grey">{{ met.createdAt }}</td>
+                          </tr>
+                        </tbody>
+                      </v-table>
+                      <template #empty>
+                        <div class="text-caption text-grey text-center py-3">
+                          Nenhum outro registro no histórico de métricas.
+                        </div>
+                      </template>
+                    </v-infinite-scroll>
+                  </div>
+                </div>
+              </v-expand-transition>
+            </v-card>
           </v-window-item>
 
           <!-- Aba Eventos -->
           <v-window-item value="events">
-            <v-table hover>
-              <thead>
-                <tr>
-                  <th>Severidade</th>
-                  <th>Mensagem</th>
-                  <th>Data/Hora</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="evt in detailStore.events" :key="evt.id">
-                  <td>
-                    <v-chip
-                      :color="
-                        evt.severity === 'critical' || evt.severity === 'error'
-                          ? 'error'
-                          : 'warning'
-                      "
-                      size="x-small"
-                    >
-                      {{ (evt.severity || 'INFO').toUpperCase() }}
-                    </v-chip>
-                  </td>
-                  <td>{{ evt.message }}</td>
-                  <td>{{ evt.createdAt }}</td>
-                </tr>
-                <tr v-if="detailStore.events.length === 0">
-                  <td colspan="3" class="text-center text-grey py-4">
-                    Nenhum evento registrado para este dispositivo.
-                  </td>
-                </tr>
-              </tbody>
-            </v-table>
+            <v-infinite-scroll :key="eventsScrollKey" @load="loadMoreEventsHistory">
+              <v-table hover density="comfortable" class="rounded-lg border">
+                <thead>
+                  <tr>
+                    <th>Severidade</th>
+                    <th>Mensagem</th>
+                    <th>Data/Hora</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="evt in eventsHistoryItems" :key="evt.id">
+                    <td>
+                      <v-chip
+                        :color="
+                          evt.severity === 'critical' || evt.severity === 'error'
+                            ? 'error'
+                            : 'warning'
+                        "
+                        size="x-small"
+                      >
+                        {{ (evt.severity || 'INFO').toUpperCase() }}
+                      </v-chip>
+                    </td>
+                    <td>{{ evt.message }}</td>
+                    <td>{{ evt.createdAt }}</td>
+                  </tr>
+                </tbody>
+              </v-table>
+              <template #empty>
+                <div class="text-caption text-grey text-center py-4">
+                  Nenhum outro evento registrado no histórico.
+                </div>
+              </template>
+            </v-infinite-scroll>
           </v-window-item>
 
           <!-- Aba VPN -->
@@ -1040,6 +1062,17 @@ import {
   vpnStatusLabel,
 } from '@/stores/vpn'
 
+import { apiService } from '@/services/apiService'
+
+interface DeviceEventItem {
+  id: number
+  deviceId: number
+  eventType: string
+  severity: string
+  message: string
+  createdAt: string
+}
+
 const route = useRoute()
 const router = useRouter()
 const detailStore = useDeviceDetailStore()
@@ -1048,6 +1081,90 @@ const activeTab = ref('overview')
 const scanModalOpen = ref(false)
 const savingMonitors = ref(false)
 const portScanOpen = ref(false)
+
+// Histórico paginado de métricas SNMP
+const showMetricsHistory = ref(false)
+const metricsHistoryItems = ref<DeviceMetric[]>([])
+const metricsHistoryPage = ref(1)
+const metricsScrollKey = ref(0)
+
+function toggleShowMetricsHistory() {
+  showMetricsHistory.value = !showMetricsHistory.value
+  if (showMetricsHistory.value) {
+    metricsHistoryItems.value = []
+    metricsHistoryPage.value = 1
+    metricsScrollKey.value++
+  }
+}
+
+async function loadMoreMetricsHistory({
+  done,
+}: {
+  done: (status: 'ok' | 'empty' | 'loading' | 'error') => void
+}) {
+  if (!deviceId.value) {
+    done('empty')
+    return
+  }
+  try {
+    const res = await apiService.get<{
+      data: DeviceMetric[]
+      meta: { currentPage: number; lastPage: number; total: number }
+    }>(`/devices/${deviceId.value}/metrics?page=${metricsHistoryPage.value}&limit=20`)
+
+    if (res.data && res.data.length > 0) {
+      metricsHistoryItems.value.push(...res.data)
+      metricsHistoryPage.value++
+      if (res.meta && res.meta.currentPage >= res.meta.lastPage) {
+        done('empty')
+      } else {
+        done('ok')
+      }
+    } else {
+      done('empty')
+    }
+  } catch (err) {
+    console.error('Erro ao carregar métricas:', err)
+    done('error')
+  }
+}
+
+// Histórico paginado de eventos do dispositivo
+const eventsHistoryItems = ref<DeviceEventItem[]>([])
+const eventsHistoryPage = ref(1)
+const eventsScrollKey = ref(0)
+
+async function loadMoreEventsHistory({
+  done,
+}: {
+  done: (status: 'ok' | 'empty' | 'loading' | 'error') => void
+}) {
+  if (!deviceId.value) {
+    done('empty')
+    return
+  }
+  try {
+    const res = await apiService.get<{
+      data: DeviceEventItem[]
+      meta: { currentPage: number; lastPage: number; total: number }
+    }>(`/devices/${deviceId.value}/events?page=${eventsHistoryPage.value}&limit=20`)
+
+    if (res.data && res.data.length > 0) {
+      eventsHistoryItems.value.push(...res.data)
+      eventsHistoryPage.value++
+      if (res.meta && res.meta.currentPage >= res.meta.lastPage) {
+        done('empty')
+      } else {
+        done('ok')
+      }
+    } else {
+      done('empty')
+    }
+  } catch (err) {
+    console.error('Erro ao carregar eventos:', err)
+    done('error')
+  }
+}
 
 const chartDialogOpen = ref(false)
 const selectedChartInterfaceId = ref<number | null>(null)

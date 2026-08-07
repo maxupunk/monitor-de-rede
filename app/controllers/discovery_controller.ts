@@ -5,7 +5,21 @@ import Device from '#models/device'
 import Monitor from '#models/monitor'
 
 export default class DiscoveryController {
-  async runs({ response }: HttpContext) {
+  async runs({ request, response }: HttpContext) {
+    const pageParam = request.input('page')
+    if (pageParam) {
+      const page = Number(pageParam) || 1
+      const limit = Math.min(Number(request.input('limit', 20)), 100)
+
+      const paginated = await DiscoveryRun.query()
+        .preload('network')
+        .preload('probe')
+        .orderBy('id', 'desc')
+        .paginate(page, limit)
+
+      return response.ok(paginated)
+    }
+
     const runs = await DiscoveryRun.query()
       .preload('network')
       .preload('probe')

@@ -136,6 +136,57 @@ test.group('Monitors API - Functional Tests', (group) => {
     assert.equal(showRes.body().stats.totalChecks, 2)
   })
 
+  test('GET /api/monitors/:id/results deve retornar resultados paginados em ordem decrescente', async ({
+    client,
+    assert,
+  }) => {
+    const site = await Site.create({ name: 'Site Paginacao', active: true })
+    const device = await Device.create({
+      siteId: site.id,
+      name: 'Servidor Paginacao',
+      type: 'server',
+      status: 'online',
+    })
+
+    const monitor = await Monitor.create({
+      deviceId: device.id,
+      type: 'ping',
+      name: 'Ping Paginacao',
+      configuration: { host: '127.0.0.1' },
+      intervalSeconds: 60,
+      timeoutSeconds: 5,
+      enabled: true,
+      status: 'up',
+    })
+
+    const now = DateTime.now()
+    for (let i = 1; i <= 25; i++) {
+      await MonitorResult.create({
+        monitorId: monitor.id,
+        status: 'up',
+        startedAt: now.minus({ minutes: 30 - i }),
+        finishedAt: now.minus({ minutes: 30 - i }),
+        durationMs: 10 + i,
+        latencyMs: 5 + i,
+        message: `Execucao #${i}`,
+      })
+    }
+
+    const resPage1 = await client.get(`/api/monitors/${monitor.id}/results?page=1&limit=20`)
+    resPage1.assertStatus(200)
+    const body1 = resPage1.body() as { data: unknown[]; meta: { currentPage: number; lastPage: number; total: number } }
+    assert.exists(body1.data)
+    assert.equal(body1.data.length, 20)
+    assert.equal(body1.meta.currentPage, 1)
+    assert.equal(body1.meta.lastPage, 2)
+    assert.equal(body1.meta.total, 25)
+
+    const resPage2 = await client.get(`/api/monitors/${monitor.id}/results?page=2&limit=20`)
+    resPage2.assertStatus(200)
+    const body2 = resPage2.body() as { data: unknown[] }
+    assert.equal(body2.data.length, 5)
+  })
+
   test('POST /api/monitors/:id/disable e /enable devem atualizar isEnabled mantendo o status do monitor', async ({
     client,
     assert,
