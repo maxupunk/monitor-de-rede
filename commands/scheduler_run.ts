@@ -2,9 +2,11 @@ import { BaseCommand } from '@adonisjs/core/ace'
 import type { CommandOptions } from '@adonisjs/core/types/ace'
 import { DateTime } from 'luxon'
 import Monitor from '#models/monitor'
+import Probe from '#models/probe'
 import { MonitorRunner } from '#modules/monitoring/monitor_runner'
 import { ResultProcessor } from '#modules/monitoring/result_processor'
 import { ProbeTaskDispatcher } from '#modules/probes/probe_task_dispatcher'
+import { isProbeAlive, ProbeWatchdog } from '#modules/probes/probe_liveness'
 import { VpnTrafficRecorder } from '#modules/vpn/vpn_traffic_recorder'
 import { errorMessage } from '#modules/shared/errors'
 
@@ -30,6 +32,7 @@ export default class SchedulerRun extends BaseCommand {
   private resultProcessor = new ResultProcessor()
   private probeTaskDispatcher = new ProbeTaskDispatcher()
   private vpnTrafficRecorder = new VpnTrafficRecorder()
+  private probeWatchdog = new ProbeWatchdog()
   private nextVpnStatusSyncAt: DateTime | null = null
   private nextVpnTrafficSyncAt: DateTime | null = null
 
@@ -37,6 +40,15 @@ export default class SchedulerRun extends BaseCommand {
     this.logger.info('Processo Scheduler de Monitoramento inicializado.')
 
     while (true) {
+      // Antes de despachar: um probe que caiu precisa aparecer como caído, ou o
+      // operador só vê monitores parados sem explicação.
+      try {
+        await this.probeWatchdog.markStaleProbesOffline()
+      } catch (err: unknown) {
+        const errorMsg = errorMessage(err)
+        this.logger.error(`Erro ao revisar a vida dos probes: ${errorMsg}`)
+      }
+
       try {
         await this.checkDueMonitors()
       } catch (err: unknown) {
@@ -103,10 +115,20 @@ export default class SchedulerRun extends BaseCommand {
   private async executeMonitorAsync(monitor: Monitor) {
     try {
       if (monitor.probeId) {
+        const probe = await Probe.find(monitor.probeId)
+
+        // Probe sem heartbeat não vai buscar tarefa nenhuma. Enfileirar em
+        // silêncio deixaria o monitor parado em `unknown` sem explicação — que
+        // é justamente como esse tipo de falha costuma passar despercebido.
+        if (!isProbeAlive(probe)) {
+          await this.reportProbeUnavailable(monitor, probe?.name ?? `#${monitor.probeId}`)
+          return
+        }
+
         this.logger.info(
           `[Scheduler] Despachando monitor #${monitor.id} (${monitor.type}) para Probe #${monitor.probeId}`
         )
-        this.probeTaskDispatcher.dispatchTask(monitor.probeId, {
+        await this.probeTaskDispatcher.dispatchTask(monitor.probeId, {
           id: `task-${monitor.id}-${Date.now()}`,
           monitorId: monitor.id,
           type: monitor.type,
@@ -127,5 +149,34 @@ export default class SchedulerRun extends BaseCommand {
       const errorMsg = errorMessage(err)
       this.logger.error(`[Scheduler] Erro ao executar monitor #${monitor.id}: ${errorMsg}`)
     }
+  }
+
+  /**
+   * Registra a impossibilidade de medir como resultado `unknown`.
+   *
+   * Não é `down`: o alvo pode estar perfeitamente no ar — quem sumiu foi o
+   * agente. Mas a checagem precisa deixar rastro no histórico, senão o operador
+   * vê apenas um monitor parado e sem motivo aparente.
+   */
+  private async reportProbeUnavailable(monitor: Monitor, probeLabel: string): Promise<void> {
+    this.logger.warning(
+      `[Scheduler] Monitor #${monitor.id} não executado: probe ${probeLabel} sem heartbeat`
+    )
+
+    const now = new Date()
+    await this.resultProcessor.processResult(
+      monitor.id,
+      {
+        success: false,
+        status: 'unknown',
+        durationMs: 0,
+        startedAt: now,
+        finishedAt: now,
+        message: `Probe ${probeLabel} está sem heartbeat — a checagem não pôde ser executada.`,
+        metrics: [],
+        data: { probeId: monitor.probeId, reason: 'probe_offline' },
+      },
+      monitor.probeId
+    )
   }
 }

@@ -492,6 +492,27 @@ export class NetworkSchema extends BaseModel {
   declare vlan: number | null
 }
 
+export class ProbeTaskSchema extends BaseModel {
+  static $columns = ['createdAt', 'id', 'monitorId', 'payload', 'probeId', 'taskId', 'timeoutMs', 'type'] as const
+  $columns = ProbeTaskSchema.$columns
+  @column.dateTime({ autoCreate: true })
+  declare createdAt: DateTime
+  @column({ isPrimary: true })
+  declare id: number
+  @column()
+  declare monitorId: number
+  @column()
+  declare payload: any
+  @column()
+  declare probeId: number
+  @column()
+  declare taskId: string
+  @column()
+  declare timeoutMs: number
+  @column()
+  declare type: string
+}
+
 export class ProbeSchema extends BaseModel {
   static $columns = ['configuration', 'createdAt', 'id', 'lastSeenAt', 'name', 'registeredAt', 'revokedAt', 'siteId', 'status', 'tokenHash', 'updatedAt', 'version'] as const
   $columns = ProbeSchema.$columns

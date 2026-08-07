@@ -183,6 +183,22 @@ Worker ou probe
 Resultado
 ```
 
+> A **fila precisa ser persistente**: quem enfileira é o `scheduler:run` e quem
+> entrega é o processo HTTP, que responde ao `GET /api/probes/tasks`. Ela vive na
+> tabela `probe_tasks` ([`probe_task_dispatcher.ts`](../modules/probes/probe_task_dispatcher.ts)) —
+> pelo mesmo motivo que os eventos SSE vivem em `event_outbox`. Uma fila em
+> memória funciona nos testes e nunca em produção: o probe consultaria uma fila
+> sempre vazia e todo monitor atribuído a probe ficaria parado em `unknown`.
+
+Um monitor tem no máximo **uma** tarefa pendente, e tarefa parada há mais de
+`TASK_TTL_SECONDS` é descartada: probe que volta depois de um tempo fora executa
+uma checagem atual por monitor, não uma avalanche de checagens vencidas.
+
+Probe sem heartbeat há mais de `PROBE_OFFLINE_AFTER_SECONDS` é marcado `offline`
+pelo `ProbeWatchdog` ([`probe_liveness.ts`](../modules/probes/probe_liveness.ts)), e
+o scheduler passa a registrar as checagens dele como `unknown` com o motivo — em
+vez de despachar em silêncio para um agente que não vai buscar nada.
+
 ## 4.4 Probe
 
 O probe será um processo AdonisJS executado dentro da rede monitorada.

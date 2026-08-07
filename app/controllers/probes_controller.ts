@@ -117,7 +117,7 @@ export default class ProbesController {
       return response.unauthorized({ error: 'Probe não encontrado ou token inválido' })
     }
 
-    const tasks = this.taskDispatcher.getPendingTasks(probe.id)
+    const tasks = await this.taskDispatcher.getPendingTasks(probe.id)
     return response.ok({ tasks })
   }
 
