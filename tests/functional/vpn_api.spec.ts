@@ -289,8 +289,10 @@ test.group('VPN API - Functional Tests', (group) => {
     assert.isNotNull(peer.lastSeenAt)
     assert.equal(peer.connectionStatus, 'connected')
 
-    // Contador parado: nenhum keepalive chegou desde a última leitura.
-    peer.lastSeenAt = DateTime.now().minus({ minutes: 5 })
+    // Contador parado: nenhum keepalive chegou desde a última leitura. Quatro
+    // minutos caem no meio da faixa instável (150s a 300s com keepalive) — na
+    // borda o teste passaria a depender do tempo de execução.
+    peer.lastSeenAt = DateTime.now().minus({ minutes: 4 })
     await peer.save()
     await statusService.syncPeers(server.interfaceName, server.id)
 

@@ -13,7 +13,6 @@
   },
   "scripts": {
     "start": "node bin/server.js",
-    "worker": "node ace queue:work",
     "scheduler": "node ace scheduler:run",
     "probe": "node ace probe:run",
     "build": "node ace build",
@@ -72,7 +71,6 @@
     "@adonisjs/core": "^7.3.3",
     "@adonisjs/cors": "^3.0.0",
     "@adonisjs/lucid": "^22.4.2",
-    "@adonisjs/redis": "^10.0.0",
     "@adonisjs/session": "^8.1.0",
     "@adonisjs/shield": "^9.0.0",
     "@japa/api-client": "^3.2.1",
@@ -80,7 +78,6 @@
     "@types/net-snmp": "^3.23.0",
     "@vinejs/vine": "^4.4.0",
     "better-sqlite3": "^12.10.0",
-    "bullmq": "^6.0.5",
     "luxon": "^3.7.2",
     "net-snmp": "^3.26.3",
     "pg": "^8.22.0",

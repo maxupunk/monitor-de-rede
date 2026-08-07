@@ -1,6 +1,6 @@
 import { DateTime } from 'luxon'
 import VpnPeer from '#models/vpn_peer'
-import { FileConfigSink, type VpnConfigSink } from './config_writer.js'
+import { FileConfigSink, resolveConfigDir, type VpnConfigSink } from './config_writer.js'
 
 /**
  * Telemetria dos túneis.
@@ -74,13 +74,40 @@ export function parseWgDump(dump: string): WgPeerStatus[] {
  */
 const inFlightSyncs = new Map<string, Promise<number>>()
 
+/**
+ * Interfaces cujo dump já foi reportado como ausente.
+ *
+ * Um `<iface>.status` ilegível é indistinguível de "nada mudou": o sink devolve
+ * `null` e a sincronização vira um no-op. Sem este aviso, um processo sem o
+ * volume compartilhado publica telemetria congelada indefinidamente e em
+ * silêncio — foi exatamente assim que o scheduler passou despercebido. Guarda
+ * o estado para avisar na transição, não a cada ciclo.
+ */
+const missingDumpWarned = new Set<string>()
+
 export class PeerStatusService {
   constructor(private sink: VpnConfigSink = new FileConfigSink()) {}
 
   /** Lê e interpreta o dump publicado pelo container WireGuard. */
   async readStatus(interfaceName: string): Promise<WgPeerStatus[]> {
     const dump = await this.sink.read(`${interfaceName}.status`)
-    if (!dump) return []
+
+    if (!dump) {
+      if (!missingDumpWarned.has(interfaceName)) {
+        missingDumpWarned.add(interfaceName)
+        console.warn(
+          `[PeerStatusService] ${interfaceName}.status não pôde ser lido em ${resolveConfigDir()} — ` +
+            'a telemetria dos túneis não será atualizada por este processo. ' +
+            'Verifique se o volume `wg-config` está montado neste container.'
+        )
+      }
+      return []
+    }
+
+    if (missingDumpWarned.delete(interfaceName)) {
+      console.info(`[PeerStatusService] ${interfaceName}.status voltou a ser legível.`)
+    }
+
     return parseWgDump(dump)
   }
 

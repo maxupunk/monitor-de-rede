@@ -9,6 +9,7 @@ import { VpnMonitorProvisioner } from './monitor_provisioner.js'
 import { VpnServerService } from './vpn_server_service.js'
 import { clientKeyStore } from './secret_store.js'
 import { profileRegistry } from './profiles/profile_registry.js'
+import { computePeerHints } from './peer_hints.js'
 import {
   PERSISTENT_KEEPALIVE_SECONDS,
   PRIVATE_KEY_UNAVAILABLE,
@@ -119,16 +120,7 @@ export class VpnPeerService {
 
     return peers.map((peer) => {
       const monitor = pingMonitors.find((item) => item.deviceId === peer.deviceId)
-      const silentTunnel = peer.connectionStatus === 'connected' && monitor?.status === 'down'
-      // Sem probe, o ping é executado pela própria API (`scheduler_run`), fora do túnel.
-      const outsideTunnel = silentTunnel && !monitor?.probeId
-
-      return {
-        peer,
-        needsFirewallHint: silentTunnel && !outsideTunnel,
-        pingOutsideTunnel: outsideTunnel,
-        pingMonitorId: monitor?.id ?? null,
-      }
+      return { peer, ...computePeerHints(peer, monitor) }
     })
   }
 

@@ -12,7 +12,8 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
 | **Estrutura do Projeto Backend** | 🟢 **Concluído** | Estrutura de diretórios AdonisJS v6, rotas da API, controllers e modelos definidos. |
 | **Banco de Dados & Migrations** | 🟢 **Concluído** | Criadas todas as 15+ tabelas de negócio e atualizados os modelos Lucid com relacionamentos. |
 | **Motor de Monitoramento (Checkers)** | 🟢 **Concluído** | Checkers reais de Ping (ICMP/RTT), HTTP/HTTPS (Fetch/Status/Latência), TCP (Sockets), SNMP (uptime/CPU/memória/interface) e DNS com medição de latência de resolução via UDP, TCP e DoH. |
-| **Worker & Queue System** | 🟢 **Concluído** | `ResultProcessor` grava resultados no banco, extrai métricas e atualiza estado dos dispositivos/monitores. |
+| **Processamento de Resultados** | 🟢 **Concluído** | `ResultProcessor` grava resultados no banco, extrai métricas e atualiza estado dos dispositivos/monitores. |
+| **Worker & Queue System** | 🔴 **Não implementado** | A fila do §4.2 da arquitetura nunca saiu do papel: o `scheduler` executa os monitores inline e os probes cuidam do resto. Ver a dívida de backpressure na Fase 2. |
 | **Agendador (Scheduler)** | 🟢 **Concluído** | Comando `scheduler:run` com loop de busca por `next_run_at`, execução e recálculo do próximo ciclo. |
 | **Descoberta Automática (Discovery)** | 🟢 **Concluído** | Scanners funcionais (ICMP/Ping sweep, tabela ARP, PortScanner) e fusão com auto-criação de dispositivo/monitor. |
 | **Comunicação com Probes** | 🟢 **Concluído** | Autenticação por token Hash (SHA-256), registro via CLI (`probe:register`), heartbeat, despachante de tarefas e buffer offline com reenvio automático. |
@@ -21,7 +22,7 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
 | **Alertas & Notificações** | 🟢 **Concluído** | Avaliação de regras em tempo real (`AlertManager`), catálogo de regras pré-configuradas com aplicação idempotente (`AlertRuleCatalogService`), ciclo de vida (ativo, reconhecido, silenciado, resolvido) e conectores (E-mail, Telegram, Discord, Webhook). |
 | **Eventos Tempo Real (SSE)** | 🟢 **Concluído** | Barramento `EventBus` singleton e streaming em `/api/events/stream` via SSE funcional. |
 | **Frontend (Vue 3 + Vuetify)** | 🟢 **Concluído** | SPA/PWA completa integrada à API REST AdonisJS v6, com Pinia, gráficos, topologia gráfica interativa e suporte a SSE em tempo real. |
-| **Infraestrutura Docker** | 🟢 **Concluído** | `docker-compose.yml` e `Dockerfile` configurados para todos os serviços (API, Worker, Scheduler, Probe, Postgres, Redis, Frontend). |
+| **Infraestrutura Docker** | 🟢 **Concluído** | `docker-compose.yml` e `Dockerfile` configurados para todos os serviços (API, Scheduler, Probe, vpn-probe, WireGuard, Postgres, Frontend). |
 | **Módulo WireGuard (VPN)** | 🟢 **Concluído (Fases 1–4)** | Modelo de dados, geração nativa de chaves X25519, IPAM transacional, scripts por perfil (MikroTik/OpenWrt/Linux/Windows/Mobile), container WireGuard com hot-reload por `syncconf`, `vpn-probe` dedicado e telas de servidor/dispositivos/wizard. Falta apenas a validação E2E com hardware real ([roadmap_vpn.md](file:///d:/Projetos/Master%20sistemas/opensource/monitor%20de%20rede/docs/roadmap_vpn.md)). |
 
 ---
@@ -58,12 +59,15 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
   - [x] **Latência de resolução DNS**: consultas em wire format próprio (RFC 1035) sobre UDP, TCP e DoH (RFC 8484), cronometradas com `performance.now()`; medição de múltiplos hostnames por checagem, limiar de latência configurável e ranking dos servidores mais rápidos no dashboard (`/api/dns/performance`, `/api/dns/benchmark`, `/api/dns/lookup`).
   - [x] **Cadastro de servidores DNS** (`/api/dns/servers`): CRUD com semeadura dos resolvedores públicos no primeiro acesso, autocomplete no formulário de monitores e seleção de quais participam da comparação do dashboard.
 - [x] **Vínculo com dispositivo opcional**: checagens externas (DNS público, sites de terceiros) deixam de exigir um equipamento cadastrado; o SNMP segue exigindo. A origem da execução (servidor da aplicação ou probe) passou a ser escolhida no próprio formulário.
-- [x] **Sistema de Filas & Worker Process**:
+- [x] **Processamento de resultados**:
   - [x] `ResultProcessor` para processar resultados, calcular métricas e atualizar status de `Device` e `Monitor`.
   - [x] Comando `monitor:test` para execução e validação via CLI por ID de monitor.
 - [x] **Agendador (`node ace scheduler:run`)**:
   - [x] Consulta otimizada por `next_run_at <= NOW()` com lock para evitar duplicação.
   - [x] Recálculo automático de `next_run_at`.
+- [ ] **Sistema de filas & worker process** — 🔴 **não implementado**. O `queue:work` existiu como esqueleto desde o commit inicial (registrava um log e encerrava com código 0) e foi removido junto com `bullmq`, `@adonisjs/redis` e o container `redis`, todos instalados e nunca usados. O §4.2 da [arquitetura](arquitetura.md) segue válido como desenho pretendido.
+
+  > **Dívida — backpressure no scheduler.** `checkDueMonitors` ([`scheduler_run.ts`](../commands/scheduler_run.ts)) busca até 50 monitores vencidos por tick de 5s e dispara `executeMonitorAsync` **sem `await`**. Não há controle de concorrência: se as execuções demorarem mais que o tick, o ciclo seguinte abre outras 50 sem saber que as anteriores ainda rodam. Com o volume atual isso não aparece — é um teto que chega sem aviso. **Gatilho para reviver a fila:** execuções acumulando além de um tick, ou o total de monitores vencidos encostando no `.limit(50)` de forma recorrente.
 
 ---
 

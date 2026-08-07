@@ -3,7 +3,7 @@ import { EventBus } from '#modules/events/event_bus'
 
 /**
  * O EventBus é um singleton em memória, mas o monitoramento roda em processos
- * separados do servidor HTTP (`scheduler:run`, `queue:work`, `probe:run`).
+ * separados do servidor HTTP (`scheduler:run`, `probe:run`).
  * Ligar a publicação na caixa de saída faz os eventos desses processos
  * chegarem às conexões SSE mantidas pelo servidor — sem isso, a interface só
  * atualizaria com recarregamento manual.

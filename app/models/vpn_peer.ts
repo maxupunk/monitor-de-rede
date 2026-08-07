@@ -19,6 +19,12 @@ export type VpnPeerConnectionStatus = 'connected' | 'unstable' | 'disconnected' 
 export const REJECT_AFTER_SECONDS = 180
 
 /**
+ * `KEEPALIVE_TIMEOUT` do WireGuard: quem recebe um pacote e não tem nada a
+ * devolver responde com um keepalive vazio depois desse tempo.
+ */
+export const KEEPALIVE_TIMEOUT_SECONDS = 10
+
+/**
  * Folga do caminho até o banco: o watcher republica `wg show dump` a cada 5s e
  * o scheduler sincroniza a cada 10s. Sem essa margem, um peer saudável cruzava
  * o limite só por causa da latência da coleta.
@@ -31,8 +37,24 @@ export const KEEPALIVE_MISSES_ALLOWED = 3
 /** Janela usada quando não há keepalive contabilizado — resta olhar o handshake. */
 export const HANDSHAKE_CONNECTED_SECONDS = REJECT_AFTER_SECONDS + STATUS_PIPELINE_SLACK_SECONDS
 
-/** Acima disso o túnel é dado como caído, não apenas instável. */
-export const HANDSHAKE_UNSTABLE_SECONDS = 900
+/**
+ * Sem keepalive o silêncio é ambíguo: um túnel ocioso é indistinguível de um
+ * túnel morto, porque o WireGuard só renegocia quando há o que enviar. Por isso
+ * a janela até "caído" é generosa aqui — é o mesmo valor adotado pelo wg-easy.
+ */
+export const HANDSHAKE_DISCONNECTED_SECONDS = 600
+
+/**
+ * Cadência real com que o RX cresce num peer com keepalive.
+ *
+ * Não é o `PersistentKeepalive` puro: o valor no dump é o intervalo do
+ * *servidor*, e o que faz o RX subir é a resposta do peer — um keepalive
+ * passivo emitido `KEEPALIVE_TIMEOUT` depois. Usar só o keepalive subestimava
+ * o intervalo e a janela de "conectado" valia ~2,4 perdas em vez de 3.
+ */
+export function effectiveKeepaliveSeconds(persistentKeepalive: number): number {
+  return persistentKeepalive + KEEPALIVE_TIMEOUT_SECONDS
+}
 
 /**
  * Peer WireGuard. Guarda apenas material criptográfico e telemetria — nome e IP
@@ -129,11 +151,54 @@ export default class VpnPeer extends BaseModel {
    * a folga da coleta. Sem ele — peer que só fala quando tem tráfego — resta o
    * handshake, cuja janela precisa ser bem mais larga.
    */
+  /** Há keepalive contabilizado, ou só resta o handshake como régua? */
+  private get hasKeepaliveHeartbeat(): boolean {
+    return this.persistentKeepalive > 0 && this.lastSeenAt !== null
+  }
+
   private get connectedWindowSeconds(): number {
-    if (this.persistentKeepalive > 0 && this.lastSeenAt) {
-      return this.persistentKeepalive * KEEPALIVE_MISSES_ALLOWED + STATUS_PIPELINE_SLACK_SECONDS
+    if (this.hasKeepaliveHeartbeat) {
+      return (
+        effectiveKeepaliveSeconds(this.persistentKeepalive) * KEEPALIVE_MISSES_ALLOWED +
+        STATUS_PIPELINE_SLACK_SECONDS
+      )
     }
     return HANDSHAKE_CONNECTED_SECONDS
+  }
+
+  /**
+   * Onde "instável" acaba e "caído" começa.
+   *
+   * Com keepalive existe batimento previsível, então o dobro da janela de
+   * conectado já é diagnóstico — não há motivo para esperar 15 minutos. Sem
+   * keepalive o silêncio não prova nada e a régua tem que ser generosa.
+   */
+  private get disconnectedWindowSeconds(): number {
+    if (this.hasKeepaliveHeartbeat) return this.connectedWindowSeconds * 2
+    return HANDSHAKE_DISCONNECTED_SECONDS
+  }
+
+  /**
+   * Janela curta para afirmar que o túnel está de pé **agora**.
+   *
+   * `connectionStatus` é tolerante de propósito, para o status não piscar com
+   * uma perda isolada de keepalive. Mas um diagnóstico como "o túnel está de
+   * pé, o bloqueio é do ICMP" precisa de prova recente, não de tolerância: um
+   * único batimento perdido já basta para calar o aviso.
+   */
+  private get proofOfLifeWindowSeconds(): number {
+    if (this.hasKeepaliveHeartbeat) {
+      return effectiveKeepaliveSeconds(this.persistentKeepalive) + STATUS_PIPELINE_SLACK_SECONDS
+    }
+    return HANDSHAKE_CONNECTED_SECONDS
+  }
+
+  /** O túnel deu sinal de vida recente o bastante para sustentar um diagnóstico. */
+  get hasFreshProofOfLife(): boolean {
+    const lastActivity = this.lastActivityAt
+    if (!lastActivity) return false
+
+    return DateTime.now().diff(lastActivity, 'seconds').seconds <= this.proofOfLifeWindowSeconds
   }
 
   @computed()
@@ -143,7 +208,7 @@ export default class VpnPeer extends BaseModel {
 
     const elapsedSeconds = DateTime.now().diff(lastActivity, 'seconds').seconds
     if (elapsedSeconds <= this.connectedWindowSeconds) return 'connected'
-    if (elapsedSeconds <= HANDSHAKE_UNSTABLE_SECONDS) return 'unstable'
+    if (elapsedSeconds <= this.disconnectedWindowSeconds) return 'unstable'
     return 'disconnected'
   }
 }

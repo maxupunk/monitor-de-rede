@@ -21,6 +21,8 @@ import {
   iterateUsableAddresses,
 } from '#modules/vpn/cidr'
 import { WireGuardConfigBuilder } from '#modules/vpn/config_builder'
+import { computePeerHints } from '#modules/vpn/peer_hints'
+import Monitor from '#models/monitor'
 import { MikrotikProfileGenerator } from '#modules/vpn/profiles/mikrotik'
 import { OpenWrtProfileGenerator } from '#modules/vpn/profiles/openwrt'
 import {
@@ -548,6 +550,17 @@ test.group('VPN - Estado do túnel', () => {
     assert.equal(peer.connectionStatus, 'connected')
   })
 
+  test('a janela de conectado deve tolerar três keepalives perdidos de verdade', ({ assert }) => {
+    // O que faz o RX subir não é o keepalive do servidor sozinho: é a resposta
+    // do peer, um keepalive passivo emitido KEEPALIVE_TIMEOUT depois. A cadência
+    // real é 25+10=35s, então três perdas são 105s — e não 75s.
+    const duasPerdas = peerWith({ lastSeenAt: DateTime.now().minus({ seconds: 80 }) })
+    const tresPerdas = peerWith({ lastSeenAt: DateTime.now().minus({ seconds: 140 }) })
+
+    assert.equal(duasPerdas.connectionStatus, 'connected')
+    assert.equal(tresPerdas.connectionStatus, 'connected')
+  })
+
   test('keepalives perdidos além da janela devem marcar instável', ({ assert }) => {
     const peer = peerWith({
       lastHandshakeAt: DateTime.now().minus({ minutes: 7 }),
@@ -555,6 +568,14 @@ test.group('VPN - Estado do túnel', () => {
     })
 
     assert.equal(peer.connectionStatus, 'unstable')
+  })
+
+  test('com keepalive, o dobro da janela já basta para dar o túnel como caído', ({ assert }) => {
+    // Há batimento previsível: esperar 15 minutos para admitir a queda só
+    // atrasava o diagnóstico de quem estava olhando a tela.
+    const peer = peerWith({ lastSeenAt: DateTime.now().minus({ seconds: 320 }) })
+
+    assert.equal(peer.connectionStatus, 'disconnected')
   })
 
   test('silêncio prolongado deve marcar desconectado', ({ assert }) => {
@@ -580,6 +601,121 @@ test.group('VPN - Estado do túnel', () => {
 
     assert.equal(recente.connectionStatus, 'connected')
     assert.equal(antigo.connectionStatus, 'unstable')
+  })
+
+  test('sem keepalive o silêncio é ambíguo e a janela até caído é mais longa', ({ assert }) => {
+    // Túnel ocioso sem keepalive é indistinguível de túnel morto: o WireGuard
+    // não renegocia sem ter o que enviar. Declarar queda cedo seria chute.
+    const dezMinutos = peerWith({
+      persistentKeepalive: 0,
+      lastHandshakeAt: DateTime.now().minus({ seconds: 590 }),
+    })
+    const alemDisso = peerWith({
+      persistentKeepalive: 0,
+      lastHandshakeAt: DateTime.now().minus({ seconds: 700 }),
+    })
+
+    assert.equal(dezMinutos.connectionStatus, 'unstable')
+    assert.equal(alemDisso.connectionStatus, 'disconnected')
+  })
+})
+
+test.group('VPN - Avisos de firewall/ping (computePeerHints)', () => {
+  function connectedPeer(): VpnPeer {
+    const peer = new VpnPeer()
+    peer.persistentKeepalive = 25
+    peer.lastHandshakeAt = DateTime.now().minus({ seconds: 10 })
+    peer.lastSeenAt = DateTime.now().minus({ seconds: 5 })
+    return peer
+  }
+
+  function disconnectedPeer(): VpnPeer {
+    const peer = new VpnPeer()
+    peer.persistentKeepalive = 25
+    peer.lastHandshakeAt = DateTime.now().minus({ minutes: 30 })
+    peer.lastSeenAt = DateTime.now().minus({ minutes: 30 })
+    return peer
+  }
+
+  /**
+   * O ponto exato da corrida relatada: o equipamento acabou de cair, o ping já
+   * falhou (roda a cada 60s e vira `down` no primeiro erro), mas o túnel ainda
+   * está dentro da janela tolerante de `connected`.
+   */
+  function justDroppedPeer(): VpnPeer {
+    const peer = new VpnPeer()
+    peer.persistentKeepalive = 25
+    peer.lastHandshakeAt = DateTime.now().minus({ seconds: 90 })
+    peer.lastSeenAt = DateTime.now().minus({ seconds: 90 })
+    return peer
+  }
+
+  function pingMonitor(fields: Partial<Monitor>): Monitor {
+    const monitor = new Monitor()
+    monitor.id = 1
+    monitor.type = 'ping'
+    monitor.status = 'up'
+    monitor.probeId = null
+    Object.assign(monitor, fields)
+    return monitor
+  }
+
+  test('túnel desconectado nunca deve acusar firewall, mesmo com o último ping conhecido down', ({
+    assert,
+  }) => {
+    // Reproduz o bug relatado: o peer caiu do WireGuard, mas o monitor de
+    // ping ainda carrega o último resultado (down) do ciclo anterior.
+    const hints = computePeerHints(disconnectedPeer(), pingMonitor({ status: 'down' }))
+
+    assert.isFalse(hints.needsFirewallHint)
+    assert.isFalse(hints.pingOutsideTunnel)
+  })
+
+  test('túnel ainda "conectado" mas sem batimento recente não deve acusar firewall', ({
+    assert,
+  }) => {
+    // Regressão do sintoma relatado: o peer caiu há 90s. `connectionStatus`
+    // ainda diz `connected` (janela de 150s, tolerante de propósito), mas já
+    // faltou batimento — afirmar "túnel conectado" aqui seria mentira.
+    const peer = justDroppedPeer()
+    assert.equal(peer.connectionStatus, 'connected')
+    assert.isFalse(peer.hasFreshProofOfLife)
+
+    const hints = computePeerHints(peer, pingMonitor({ status: 'down', probeId: 7 }))
+
+    assert.isFalse(hints.needsFirewallHint)
+    assert.isFalse(hints.pingOutsideTunnel)
+  })
+
+  test('túnel conectado com ping down e monitor via probe deve acusar firewall', ({ assert }) => {
+    const hints = computePeerHints(connectedPeer(), pingMonitor({ status: 'down', probeId: 7 }))
+
+    assert.isTrue(hints.needsFirewallHint)
+    assert.isFalse(hints.pingOutsideTunnel)
+  })
+
+  test('túnel conectado com ping down e monitor sem probe deve apontar ping fora do túnel', ({
+    assert,
+  }) => {
+    const hints = computePeerHints(connectedPeer(), pingMonitor({ status: 'down', probeId: null }))
+
+    assert.isFalse(hints.needsFirewallHint)
+    assert.isTrue(hints.pingOutsideTunnel)
+  })
+
+  test('túnel conectado com ping up não deve acusar nenhum aviso', ({ assert }) => {
+    const hints = computePeerHints(connectedPeer(), pingMonitor({ status: 'up' }))
+
+    assert.isFalse(hints.needsFirewallHint)
+    assert.isFalse(hints.pingOutsideTunnel)
+  })
+
+  test('sem monitor de ping associado nenhum aviso deve aparecer', ({ assert }) => {
+    const hints = computePeerHints(connectedPeer(), undefined)
+
+    assert.isFalse(hints.needsFirewallHint)
+    assert.isFalse(hints.pingOutsideTunnel)
+    assert.isNull(hints.pingMonitorId)
   })
 })
 

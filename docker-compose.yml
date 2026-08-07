@@ -12,8 +12,6 @@ x-app-env: &app-env
   DB_USER: netmonitor
   DB_PASSWORD: secret
   DB_DATABASE: netmonitor
-  REDIS_HOST: redis
-  REDIS_PORT: 6379
 
 services:
   migration:
@@ -44,37 +42,27 @@ services:
         condition: service_healthy
       migration:
         condition: service_completed_successfully
-      redis:
-        condition: service_started
     networks: [netmonitor-net]
-
-  worker:
-    build: .
-    command: node ace.js queue:work
-    environment:
-      <<: *app-env
-    depends_on:
-      postgres:
-        condition: service_healthy
-      migration:
-        condition: service_completed_successfully
-      redis:
-        condition: service_started
-    networks: [netmonitor-net]
+    restart: unless-stopped
 
   scheduler:
     build: .
     command: node ace.js scheduler:run
     environment:
       <<: *app-env
+      # É o scheduler quem sincroniza a telemetria dos túneis a cada 10s. Sem o
+      # mesmo volume do `server`, `wg0.status` não existe aqui e a sincronização
+      # vira um no-op silencioso: a tela recebe eventos com dados congelados.
+      WG_CONFIG_DIR: /config
+    volumes:
+      - wg-config:/config
     depends_on:
       postgres:
         condition: service_healthy
       migration:
         condition: service_completed_successfully
-      redis:
-        condition: service_started
     networks: [netmonitor-net]
+    restart: unless-stopped
 
   probe:
     build: .
@@ -87,6 +75,7 @@ services:
     depends_on:
       - server
     networks: [netmonitor-net]
+    restart: unless-stopped
 
   # Servidor WireGuard: único container com NET_ADMIN e única porta publicada.
   wireguard:
@@ -155,10 +144,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     networks: [netmonitor-net]
-
-  redis:
-    image: redis:7-alpine
-    networks: [netmonitor-net]
+    restart: unless-stopped
 
 volumes:
   pgdata:

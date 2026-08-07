@@ -206,6 +206,9 @@ export const useVpnStore = defineStore('vpn', () => {
       peer.lastSeenAt = (update.lastSeenAt as string | null) ?? null
       peer.bytesRx = Number(update.bytesRx ?? peer.bytesRx)
       peer.bytesTx = Number(update.bytesTx ?? peer.bytesTx)
+      peer.needsFirewallHint = Boolean(update.needsFirewallHint)
+      peer.pingOutsideTunnel = Boolean(update.pingOutsideTunnel)
+      peer.pingMonitorId = (update.pingMonitorId as number | null) ?? null
     }
   }
 

@@ -71,7 +71,7 @@ Cada processo será iniciado separadamente.
 
 ```bash
 node bin/server.js
-node ace queue:work
+node ace queue:work   # ⚠️ não implementado — ver §4.2
 node ace scheduler:run
 node ace probe:run
 ```
@@ -120,6 +120,20 @@ O servidor HTTP não deverá executar scans, ping, traceroute ou consultas SNMP 
 Operações demoradas deverão ser encaminhadas para uma fila ou para um probe.
 
 ## 4.2 Worker
+
+> 🔴 **Não implementado.** Esta seção descreve o desenho pretendido, não o que
+> existe hoje. O comando `queue:work` chegou a ser criado no commit inicial, mas
+> nunca passou de um esqueleto que registrava um log e encerrava — foi removido,
+> junto com `bullmq`, `@adonisjs/redis` e o container `redis`, que estavam
+> instalados e nunca foram importados.
+>
+> Na prática as responsabilidades abaixo foram absorvidas por outros processos:
+> o **scheduler** executa os monitores inline (`executeMonitorAsync`) e drena a
+> `DiscoveryQueue`, os **probes** executam checagens remotas, e o
+> `ResultProcessor` cuida de métricas, alertas e notificações.
+>
+> A dívida que justifica retomar este desenho é o **backpressure** — ver a
+> Fase 2 do [roadmap](roadmap.md).
 
 O worker será responsável por executar jobs assíncronos.
 
@@ -1309,6 +1323,10 @@ Não permitido:
 ```
 
 ## 19. Docker Compose inicial
+
+> ℹ️ Esboço original. O arquivo real é o [`docker-compose.yml`](../docker-compose.yml)
+> na raiz, que já divergiu deste: não há `worker` nem `redis` (ver §4.2), e
+> foram acrescentados `migration`, `wireguard`, `vpn-probe` e `frontend`.
 
 ```yaml
 services:

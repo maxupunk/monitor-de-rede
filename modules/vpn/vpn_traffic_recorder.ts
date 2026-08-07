@@ -2,8 +2,10 @@ import { DateTime } from 'luxon'
 import VpnServer from '#models/vpn_server'
 import VpnPeer from '#models/vpn_peer'
 import Metric from '#models/metric'
+import Monitor from '#models/monitor'
 import { PeerStatusService } from './peer_status.js'
 import { VpnPeerStateWatcher } from './vpn_peer_state_watcher.js'
+import { computePeerHints } from './peer_hints.js'
 import { EventBus } from '#modules/events/event_bus'
 import { errorMessage } from '#modules/shared/errors'
 
@@ -86,13 +88,13 @@ export class VpnTrafficRecorder {
       await this.recordPeer(peer)
     }
 
-    this.publishSnapshot(vpnServerId, peers)
+    await this.publishSnapshot(vpnServerId, peers)
     return peers.length
   }
 
   private async publishServerPeers(vpnServerId: number): Promise<number> {
     const peers = await this.enabledPeers(vpnServerId)
-    this.publishSnapshot(vpnServerId, peers)
+    await this.publishSnapshot(vpnServerId, peers)
     return peers.length
   }
 
@@ -100,18 +102,34 @@ export class VpnTrafficRecorder {
     return VpnPeer.query().where('vpnServerId', vpnServerId).where('enabled', true)
   }
 
-  private publishSnapshot(vpnServerId: number, peers: VpnPeer[]): void {
+  /**
+   * Recalcula os mesmos avisos de firewall/ping do `GET /vpn/peers`
+   * (via `computePeerHints`) para que o snapshot publicado por aqui nunca
+   * fique defasado em relação à carga inicial da tela.
+   */
+  private async publishSnapshot(vpnServerId: number, peers: VpnPeer[]): Promise<void> {
     if (peers.length === 0) return
 
-    const snapshot = peers.map((peer) => ({
-      id: peer.id,
-      deviceId: peer.deviceId,
-      connectionStatus: peer.connectionStatus,
-      lastHandshakeAt: peer.lastHandshakeAt?.toISO() ?? null,
-      lastSeenAt: peer.lastSeenAt?.toISO() ?? null,
-      bytesRx: peer.bytesRx,
-      bytesTx: peer.bytesTx,
-    }))
+    const pingMonitors = await Monitor.query()
+      .whereIn(
+        'deviceId',
+        peers.map((peer) => peer.deviceId)
+      )
+      .where('type', 'ping')
+
+    const snapshot = peers.map((peer) => {
+      const monitor = pingMonitors.find((item) => item.deviceId === peer.deviceId)
+      return {
+        id: peer.id,
+        deviceId: peer.deviceId,
+        connectionStatus: peer.connectionStatus,
+        lastHandshakeAt: peer.lastHandshakeAt?.toISO() ?? null,
+        lastSeenAt: peer.lastSeenAt?.toISO() ?? null,
+        bytesRx: peer.bytesRx,
+        bytesTx: peer.bytesTx,
+        ...computePeerHints(peer, monitor),
+      }
+    })
 
     // Um único evento por servidor: a tela de VPN repinta status e contadores
     // sem esperar o operador recarregar a página. Túnel parado repete o mesmo

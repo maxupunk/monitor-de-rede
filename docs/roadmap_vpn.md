@@ -325,15 +325,23 @@ Tabela com status derivado do **último sinal de vida** (`last_seen_at`), não d
 > de pé é o `PersistentKeepalive`: a cada 25s o servidor contabiliza bytes
 > novos, e é esse incremento que `peer_status.ts` carimba em `last_seen_at`.
 
-| Status | Regra | Significado |
-| :--- | :--- | :--- |
-| 🟢 Conectado | sinal < 3 keepalives + folga da coleta (≈ 2 min) | Túnel ativo |
-| 🟡 Instável | sinal entre a janela de conectado e 15 min | Keepalive falhando |
-| 🔴 Desconectado | sinal > 15 min | Fora do ar |
-| ⚪ Aguardando | nunca houve sinal | Script ainda não aplicado no roteador |
+A cadência do sinal não é o `PersistentKeepalive` puro. O valor que aparece no
+dump é o intervalo do *servidor*, e quem faz o RX subir é a resposta do peer —
+um keepalive passivo emitido `KEEPALIVE_TIMEOUT` (10s) depois. A régua real é
+`keepalive + 10s`, ou seja ≈ 35s no padrão de 25s.
 
-Peer sem `PersistentKeepalive` não tem sinal periódico: aí a régua volta a ser o
-handshake, com janela de `REJECT_AFTER_TIME` (180s) mais a folga da coleta.
+| Status | Regra (com keepalive) | Regra (só handshake) | Significado |
+| :--- | :--- | :--- | :--- |
+| 🟢 Conectado | sinal < 3 × 35s + folga (150s) | sinal < `REJECT_AFTER_TIME` + folga (225s) | Túnel ativo |
+| 🟡 Instável | entre a janela de conectado e o dobro dela (300s) | entre a janela de conectado e 600s | Keepalive falhando |
+| 🔴 Desconectado | sinal > 300s | sinal > 600s | Fora do ar |
+| ⚪ Aguardando | nunca houve sinal | nunca houve sinal | Script ainda não aplicado no roteador |
+
+As duas colunas existem porque o silêncio significa coisas diferentes em cada
+caso. Com keepalive há batimento previsível, então o dobro da janela de
+conectado já é diagnóstico. Sem keepalive um túnel ocioso é indistinguível de um
+túnel morto — o WireGuard não renegocia sem ter o que enviar — e declarar queda
+cedo seria chute; daí os 600s, o mesmo valor adotado pelo wg-easy.
 
 Colunas: Nome · Perfil (ícone) · IP fixo · Última atividade ("há 20 segundos", com o handshake no tooltip) · Tráfego RX/TX · Ações.
 
@@ -348,9 +356,16 @@ próximo ciclo do background para mostrar um túnel que acabou de subir.
 
 O erro mais comum ao conectar um roteador é: **túnel sobe, mas o monitoramento não responde** — porque falta liberar ICMP/SNMP na chain `input` da interface WireGuard.
 
-> ✅ **Entregue.** O flag `needsFirewallHint` (túnel `connected` **e** monitor de ping `down`) é calculado em [`vpn_peer_service.ts`](../modules/vpn/vpn_peer_service.ts) e o botão chama `POST /api/vpn/peers/:id/firewall-hints`, que devolve as regras do perfil do equipamento.
+> ✅ **Entregue.** O flag `needsFirewallHint` (prova fresca de vida do túnel **e** monitor de ping `down`) é calculado em [`peer_hints.ts`](../modules/vpn/peer_hints.ts), compartilhado entre `GET /vpn/peers` e o snapshot publicado em `vpn:peers_updated`. O botão chama `POST /api/vpn/peers/:id/firewall-hints`, que devolve as regras do perfil do equipamento.
 
-O sistema detecta isso automaticamente (handshake recente + ping falhando) e exibe um alerta acionável na linha:
+> ⚠️ A régua aqui é `hasFreshProofOfLife`, **não** `connectionStatus === 'connected'`.
+> O ping vira `down` no primeiro erro, enquanto a janela de conectado tolera
+> minutos de propósito para o status não piscar. Quem desconectasse o
+> equipamento caía na brecha entre as duas e via "túnel conectado, mas não
+> responde a ping" — afirmando o oposto do que havia acontecido. O aviso exige
+> um batimento dentro de uma única cadência de keepalive mais a folga da coleta.
+
+O sistema detecta isso automaticamente (túnel comprovadamente vivo + ping falhando) e exibe um alerta acionável na linha:
 
 > ⚠️ **Túnel conectado, mas o dispositivo não responde a ping.**
 > Provavelmente falta liberar o tráfego na interface WireGuard.
@@ -572,7 +587,7 @@ gantt
 
 | Ponto | Como ficou |
 | :--- | :--- |
-| **Telemetria dos túneis** | O watcher publica `wg show <iface> dump` em `/config/<iface>.status` no mesmo volume; a API lê e interpreta esse arquivo ([`peer_status.ts`](../modules/vpn/peer_status.ts)). Mantém a premissa de que o container da API não tem `NET_ADMIN` nem Docker socket. |
+| **Telemetria dos túneis** | O watcher publica `wg show <iface> dump` em `/config/<iface>.status` no mesmo volume; a API lê e interpreta esse arquivo ([`peer_status.ts`](../modules/vpn/peer_status.ts)). Mantém a premissa de que o container da API não tem `NET_ADMIN` nem Docker socket. **Todo processo que sincroniza telemetria precisa do volume `wg-config` e de `WG_CONFIG_DIR`** — vale para `server` *e* `scheduler`. Sem isso a leitura devolve vazio e a sincronização vira um no-op: o processo segue publicando `vpn:peers_updated` com dados congelados, e como `connectionStatus` é calculado ao vivo, a tela vê o status decair sozinho até "Desconectado" enquanto o F5 mostra o valor certo. `readStatus` passou a avisar no log quando o dump não pode ser lido. |
 | **Preflight** | Detecta CGNAT (faixa 100.64/10) e servidor atrás de NAT comparando o IP público com as interfaces locais. Sem um verificador externo não é possível *provar* que a porta UDP aceita entrada — por isso o resultado traz o campo `verified`, e a UI diz explicitamente que a confirmação final ocorre no primeiro handshake. |
 | **QR Code** | Gerado no backend em SVG (dependência `qrcode` adicionada ao `package.json` da raiz) e renderizado pelo `VpnScriptViewer`. |
 | **Chave privada do cliente** | Fica em memória em [`secret_store.ts`](../modules/vpn/secret_store.ts) com TTL de 15 min e é consumida na primeira leitura de `/config`. Depois disso o artefato traz um placeholder e a única saída é **Rotacionar chaves** — exatamente o comportamento descrito no §3.4. |
