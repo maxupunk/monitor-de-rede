@@ -232,6 +232,7 @@ import SiteDialog from '@/components/SiteDialog.vue'
 const props = defineProps<{
   modelValue: boolean
   deviceToEdit?: Device | null
+  prefillData?: Partial<Device> | null
 }>()
 
 const emit = defineEmits<{
@@ -302,6 +303,19 @@ watch(
         formModel.snmpCommunity = props.deviceToEdit.snmpCommunity || 'public'
         formModel.snmpVersion = props.deviceToEdit.snmpVersion || 'v2c'
         formModel.zabbixTemplateId = props.deviceToEdit.zabbixTemplateId ?? null
+      } else if (props.prefillData) {
+        formModel.name = props.prefillData.name || ''
+        formModel.ipAddress = props.prefillData.ipAddress || ''
+        formModel.type = (props.prefillData.type as string) || 'other'
+        formModel.siteId = props.prefillData.siteId ?? null
+        formModel.parentId = props.prefillData.parentId ?? null
+        formModel.vendor = props.prefillData.vendor || ''
+        formModel.model = props.prefillData.model || ''
+        formModel.isMonitored = props.prefillData.isMonitored ?? true
+        formModel.snmpEnabled = props.prefillData.snmpEnabled ?? false
+        formModel.snmpCommunity = props.prefillData.snmpCommunity || 'public'
+        formModel.snmpVersion = props.prefillData.snmpVersion || 'v2c'
+        formModel.zabbixTemplateId = props.prefillData.zabbixTemplateId ?? null
       } else {
         formModel.name = ''
         formModel.ipAddress = ''

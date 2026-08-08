@@ -15,7 +15,13 @@ export interface DiscoveryRun {
   startedAt?: string
   finishedAt?: string | null
   error?: string | null
-  network?: { id: number; name: string; cidr: string } | null
+  network?: {
+    id: number
+    name: string
+    cidr: string
+    siteId?: number
+    site?: { id: number; name: string }
+  } | null
 }
 
 /**
@@ -97,6 +103,18 @@ export const useDiscoveryStore = defineStore('discovery', () => {
     }
   }
 
+  async function markAccepted(resultId: number): Promise<boolean> {
+    try {
+      await apiService.post(`/discovery/results/${resultId}/mark-accepted`)
+      const res = results.value.find((r) => r.id === resultId)
+      if (res) res.status = 'accepted'
+      return true
+    } catch (err: unknown) {
+      error.value = err instanceof Error ? err.message : 'Erro ao marcar resultado como adicionado'
+      return false
+    }
+  }
+
   async function mergeResult(resultId: number, targetDeviceId: number): Promise<boolean> {
     try {
       await apiService.post(`/discovery/results/${resultId}/merge`, { targetDeviceId })
@@ -119,6 +137,7 @@ export const useDiscoveryStore = defineStore('discovery', () => {
     fetchDiscoveryResults,
     acceptResult,
     ignoreResult,
+    markAccepted,
     mergeResult,
   }
 })

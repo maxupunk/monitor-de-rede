@@ -63,6 +63,32 @@ export default class DiscoveryController {
     return response.ok(await query)
   }
 
+  /**
+   * GET /api/discovery/results/latest
+   * Retorna todos os resultados da varredura mais recente, independentemente
+   * do status, para a aba "Resultados Encontrados" da tela de descoberta.
+   */
+  async latestResults({ response }: HttpContext) {
+    const latestRun = await DiscoveryRun.query().orderBy('id', 'desc').first()
+
+    if (!latestRun) {
+      return response.ok({
+        data: [],
+        meta: { currentPage: 1, lastPage: 1, total: 0 },
+      })
+    }
+
+    const results = await DiscoveryResult.query()
+      .where('discoveryRunId', latestRun.id)
+      .preload('discoveryRun', (runQuery) => runQuery.preload('network', (n) => n.preload('site')))
+      .orderBy('id', 'desc')
+
+    return response.ok({
+      data: results,
+      meta: { currentPage: 1, lastPage: 1, total: results.length },
+    })
+  }
+
   async accept({ params, response }: HttpContext) {
     const result = await DiscoveryResult.findOrFail(params.id)
     const run = await DiscoveryRun.findOrFail(result.discoveryRunId)
@@ -102,6 +128,22 @@ export default class DiscoveryController {
     return response.ok({
       message: `Dispositivo ${device.name} criado com sucesso a partir da descoberta`,
       device,
+      result,
+    })
+  }
+
+  /**
+   * POST /api/discovery/results/:id/mark-accepted
+   * Marca um resultado de descoberta como aceito sem criar um novo dispositivo.
+   * Usado quando o operador cadastra o equipamento manualmente via DeviceDialog.
+   */
+  async markAccepted({ params, response }: HttpContext) {
+    const result = await DiscoveryResult.findOrFail(params.id)
+    result.status = 'accepted'
+    await result.save()
+
+    return response.ok({
+      message: 'Resultado de descoberta marcado como adicionado',
       result,
     })
   }

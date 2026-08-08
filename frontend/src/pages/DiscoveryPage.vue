@@ -110,10 +110,10 @@
                         <v-btn
                           size="small"
                           color="success"
-                          prepend-icon="mdi-check"
-                          @click="handleAccept(item.id)"
+                          prepend-icon="mdi-plus"
+                          @click="handleAdd(item)"
                         >
-                          Aceitar
+                          Adicionar
                         </v-btn>
                         <v-btn
                           size="small"
@@ -123,6 +123,9 @@
                         >
                           Ignorar
                         </v-btn>
+                      </div>
+                      <div v-else-if="item.status === 'accepted' || item.status === 'merged'">
+                        <v-chip size="small" color="success" variant="tonal">Já adicionado</v-chip>
                       </div>
                       <span v-else class="text-caption text-grey">Processado</span>
                     </td>
@@ -180,6 +183,8 @@
     <v-snackbar v-model="feedback.visible" :color="feedback.color" timeout="7000">
       {{ feedback.message }}
     </v-snackbar>
+
+    <DeviceDialog v-model="deviceDialogOpen" :prefill-data="dialogPrefill" @saved="onDeviceSaved" />
   </div>
 </template>
 
@@ -190,6 +195,8 @@ import { useNetworksStore } from '@/stores/networks'
 import { useInfiniteList } from '@/composables/useInfiniteList'
 import { getStatusColor } from '@/utils/monitorPresentation'
 import { formatDateTime } from '@/utils/formatters'
+import DeviceDialog from '@/components/DeviceDialog.vue'
+import type { Device } from '@/stores/devices'
 
 /** Espelha `MAX_SCAN_HOSTS` de `modules/discovery/cidr_range.ts` */
 const MAX_SCAN_HOSTS = 1024
@@ -199,8 +206,26 @@ const networksStore = useNetworksStore()
 const tab = ref('results')
 const selectedNetworkId = ref<number | null>(null)
 const feedback = reactive({ visible: false, message: '', color: 'success' })
+const deviceDialogOpen = ref(false)
+const selectedResult = ref<DiscoveryResult | null>(null)
 
-const results = useInfiniteList<DiscoveryResult>(() => '/discovery/results?status=pending', {
+const dialogPrefill = computed<Partial<Device> | null>(() => {
+  if (!selectedResult.value) return null
+  const result = selectedResult.value
+  return {
+    name: result.mdnsName || result.hostname || result.ipAddress,
+    ipAddress: result.ipAddress,
+    type: result.deviceType || 'other',
+    vendor: result.vendor || undefined,
+    macAddress: result.macAddress || undefined,
+    siteId: result.discoveryRun?.network?.siteId ?? null,
+    networkId: result.discoveryRun?.network?.id ?? null,
+    isMonitored: true,
+    snmpEnabled: false,
+  }
+})
+
+const results = useInfiniteList<DiscoveryResult>(() => '/discovery/results/latest', {
   label: 'resultados de descoberta',
 })
 const runs = useInfiniteList<DiscoveryRun>(() => '/discovery/runs', {
@@ -272,13 +297,23 @@ function runStatusColor(status: string): string {
   return RUN_STATUS[status]?.color ?? 'grey'
 }
 
-async function handleAccept(id: number) {
-  const ok = await discoveryStore.acceptResult(id)
+function handleAdd(item: DiscoveryResult) {
+  selectedResult.value = item
+  deviceDialogOpen.value = true
+}
+
+async function onDeviceSaved() {
+  if (!selectedResult.value) return
+
+  const ok = await discoveryStore.markAccepted(selectedResult.value.id)
   feedback.color = ok ? 'success' : 'error'
   feedback.message = ok
-    ? 'Dispositivo criado e monitor de ping cadastrado.'
-    : (discoveryStore.error ?? 'Não foi possível aceitar o resultado.')
+    ? 'Dispositivo cadastrado e resultado marcado como adicionado.'
+    : (discoveryStore.error ?? 'Dispositivo cadastrado, mas não foi possível marcar o resultado.')
   feedback.visible = true
+
+  selectedResult.value = null
+  deviceDialogOpen.value = false
   results.reset()
 }
 

@@ -205,7 +205,7 @@
             <v-col
               v-if="
                 form.kind === 'snmp' &&
-                  (form.snmpMode === 'interface' || form.snmpMode === 'interface_traffic')
+                (form.snmpMode === 'interface' || form.snmpMode === 'interface_traffic')
               "
               cols="12"
               md="6"
@@ -278,8 +278,8 @@
             <v-col
               v-if="
                 form.kind === 'snmp' &&
-                  form.snmpMode === 'interface_traffic' &&
-                  form.ifIndex !== null
+                form.snmpMode === 'interface_traffic' &&
+                form.ifIndex !== null
               "
               cols="12"
             >

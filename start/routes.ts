@@ -70,6 +70,7 @@ router
     router.resource('devices', DevicesController).apiOnly()
 
     // Monitors
+    router.get('monitors/:id/alerts', [MonitorsController, 'alerts'])
     router.get('monitors/:id/results', [MonitorsController, 'results'])
     router.post('monitors/:id/run', [MonitorsController, 'run'])
     router.post('monitors/:id/enable', [MonitorsController, 'enable'])
@@ -80,7 +81,9 @@ router
     router.get('discovery/runs', [DiscoveryController, 'runs'])
     router.get('discovery/runs/:id', [DiscoveryController, 'runDetails'])
     router.get('discovery/results', [DiscoveryController, 'results'])
+    router.get('discovery/results/latest', [DiscoveryController, 'latestResults'])
     router.post('discovery/results/:id/accept', [DiscoveryController, 'accept'])
+    router.post('discovery/results/:id/mark-accepted', [DiscoveryController, 'markAccepted'])
     router.post('discovery/results/:id/ignore', [DiscoveryController, 'ignore'])
     router.post('discovery/results/:id/merge', [DiscoveryController, 'merge'])
 

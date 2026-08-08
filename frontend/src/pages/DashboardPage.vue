@@ -45,7 +45,7 @@
         <v-card elevation="2" class="pa-4 rounded-lg">
           <div class="d-flex align-center justify-space-between mb-2">
             <span class="text-subtitle-2 text-grey-darken-1 font-weight-bold"
-            >Monitores de Rede</span
+              >Monitores de Rede</span
             >
             <v-avatar color="info" variant="tonal" size="36">
               <v-icon color="info">mdi-chart-timeline-variant</v-icon>

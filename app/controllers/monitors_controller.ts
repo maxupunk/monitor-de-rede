@@ -2,6 +2,7 @@ import type { HttpContext } from '@adonisjs/core/http'
 import Monitor from '#models/monitor'
 import MonitorResult from '#models/monitor_result'
 import Device from '#models/device'
+import AlertEvent from '#models/alert_event'
 import {
   fetchGaugeMetricsData,
   monitorListQuery,
@@ -247,5 +248,51 @@ export default class MonitorsController {
       .paginate(page, limit)
 
     return response.ok(results)
+  }
+
+  /**
+   * GET /api/monitors/:id/alerts
+   * Histórico de alertas vinculados a este monitor (incluindo resolvidos).
+   */
+  async alerts({ params, request, response }: HttpContext) {
+    const page = Number(request.input('page', 1))
+    const limit = Math.min(Number(request.input('limit', 20)), 100)
+
+    const events = await AlertEvent.query()
+      .where('monitorId', params.id)
+      .orWhere('scopeKey', `monitor:${params.id}`)
+      .preload('alertRule')
+      .preload('device')
+      .preload('monitor')
+      .orderBy('createdAt', 'desc')
+      .paginate(page, limit)
+
+    const data = events.all().map((event) => ({
+      id: event.id,
+      alertRuleId: event.alertRuleId,
+      deviceId: event.deviceId,
+      monitorId: event.monitorId,
+      scopeKey: event.scopeKey,
+      status: event.status,
+      severity: event.severity,
+      message: event.message,
+      data: event.data,
+      startedAt: event.startedAt?.toISO() ?? null,
+      resolvedAt: event.resolvedAt?.toISO() ?? null,
+      createdAt: event.createdAt?.toISO() ?? null,
+      updatedAt: event.updatedAt?.toISO() ?? null,
+      title:
+        (event.data?.title as string | undefined) ||
+        [event.alertRule?.name, event.device?.name ?? event.monitor?.name]
+          .filter(Boolean)
+          .join(' — ') ||
+        'Alerta do sistema',
+      alertRule: event.alertRule ? { id: event.alertRule.id, name: event.alertRule.name } : null,
+      device: event.device ? { id: event.device.id, name: event.device.name } : null,
+      monitor: event.monitor ? { id: event.monitor.id, name: event.monitor.name } : null,
+      silencedUntil: (event.data?.silencedUntil as string | undefined) ?? null,
+    }))
+
+    return response.ok({ data, meta: events.toJSON().meta })
   }
 }

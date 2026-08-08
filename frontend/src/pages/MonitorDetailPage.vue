@@ -120,7 +120,7 @@
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
               <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-              >Uso Mín / Máx</span
+                >Uso Mín / Máx</span
               >
               <v-avatar color="purple" variant="tonal" size="36">
                 <v-icon size="20">mdi-swap-vertical</v-icon>
@@ -139,7 +139,7 @@
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
               <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-              >Agente SNMP Disponível</span
+                >Agente SNMP Disponível</span
               >
               <v-avatar color="success" variant="tonal" size="36">
                 <v-icon size="20">mdi-check-decagram</v-icon>
@@ -158,7 +158,7 @@
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
               <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-              >Velocidade Negociada</span
+                >Velocidade Negociada</span
               >
               <v-avatar :color="headerChip.color" variant="tonal" size="36">
                 <v-icon size="20">{{ headerChip.icon }}</v-icon>
@@ -175,7 +175,7 @@
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
               <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-              >Status Operacional</span
+                >Status Operacional</span
               >
               <v-avatar color="info" variant="tonal" size="36">
                 <v-icon size="20">mdi-information-outline</v-icon>
@@ -192,7 +192,7 @@
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
               <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-              >Estabilidade do Link</span
+                >Estabilidade do Link</span
               >
               <v-avatar color="success" variant="tonal" size="36">
                 <v-icon size="20">mdi-check-decagram</v-icon>
@@ -209,7 +209,7 @@
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
               <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-              >Alterações de Estado</span
+                >Alterações de Estado</span
               >
               <v-avatar
                 :color="interfaceFlapCount > 0 ? 'warning' : 'grey'"
@@ -271,7 +271,7 @@
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
               <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-              >Ping Mín / Máx</span
+                >Ping Mín / Máx</span
               >
               <v-avatar color="purple" variant="tonal" size="36">
                 <v-icon size="20">mdi-swap-vertical</v-icon>
@@ -291,7 +291,7 @@
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
               <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-              >Taxa de Uptime</span
+                >Taxa de Uptime</span
               >
               <v-avatar color="success" variant="tonal" size="36">
                 <v-icon size="20">mdi-check-decagram</v-icon>
@@ -521,6 +521,114 @@
           </div>
         </v-expand-transition>
       </v-card>
+
+      <!-- Tabela com Histórico de Alertas -->
+      <v-card elevation="2" class="rounded-lg pa-6 mt-6">
+        <div class="d-flex align-center justify-space-between mb-4">
+          <div>
+            <h2 class="text-h6 font-weight-bold d-flex align-center ga-2">
+              <v-icon color="warning">mdi-bell-alert</v-icon>
+              Histórico de Alertas
+            </h2>
+            <div class="text-subtitle-2 text-grey">
+              Alertas disparados e normalizações deste monitor
+            </div>
+          </div>
+          <div class="d-flex align-center ga-2">
+            <v-btn
+              size="small"
+              variant="text"
+              prepend-icon="mdi-refresh"
+              :loading="monitorsStore.loading"
+              @click="refreshData"
+            >
+              Atualizar
+            </v-btn>
+            <v-btn icon size="small" variant="text" @click="toggleShowAlerts">
+              <v-icon>{{ showAlerts ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
+              <v-tooltip activator="parent" location="top">
+                {{ showAlerts ? 'Ocultar Alertas' : 'Mostrar Alertas' }}
+              </v-tooltip>
+            </v-btn>
+          </div>
+        </div>
+
+        <v-expand-transition>
+          <div v-if="showAlerts">
+            <div
+              class="history-scroll-container rounded-lg border overflow-y-auto"
+              style="max-height: 450px"
+            >
+              <v-infinite-scroll
+                :key="alertHistory.scrollKey.value"
+                :height="420"
+                @load="alertHistory.load"
+              >
+                <v-table density="comfortable" hover>
+                  <thead>
+                    <tr>
+                      <th style="width: 120px">Severidade</th>
+                      <th style="width: 120px">Status</th>
+                      <th>Título / Regra</th>
+                      <th>Mensagem</th>
+                      <th style="width: 180px">Início</th>
+                      <th style="width: 180px">Normalizado em</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="item in alertHistory.items.value" :key="item.id">
+                      <td>
+                        <v-chip :color="severityColor(item.severity)" size="x-small" variant="flat">
+                          {{ severityLabel(item.severity).toUpperCase() }}
+                        </v-chip>
+                      </td>
+                      <td>
+                        <v-chip
+                          :color="
+                            item.status === 'resolved' ? 'success' : severityColor(item.severity)
+                          "
+                          size="x-small"
+                          variant="tonal"
+                        >
+                          {{ statusLabel(item.status).toUpperCase() }}
+                        </v-chip>
+                      </td>
+                      <td class="font-weight-medium">
+                        {{ item.title || '—' }}
+                      </td>
+                      <td>
+                        <span
+                          :class="
+                            item.status === 'active'
+                              ? 'text-error font-weight-medium'
+                              : 'text-body-2'
+                          "
+                        >
+                          {{ item.message || '—' }}
+                        </span>
+                      </td>
+                      <td>
+                        {{ formatDateTime(item.startedAt, '—') }}
+                      </td>
+                      <td>
+                        <span v-if="item.resolvedAt" class="text-success font-weight-medium">
+                          {{ formatDateTime(item.resolvedAt, '—') }}
+                        </span>
+                        <span v-else class="text-grey">—</span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </v-table>
+                <template #empty>
+                  <div class="text-caption text-grey text-center py-3">
+                    Nenhum outro registro no histórico de alertas.
+                  </div>
+                </template>
+              </v-infinite-scroll>
+            </div>
+          </div>
+        </v-expand-transition>
+      </v-card>
     </div>
 
     <!-- State de Erro / Não Encontrado -->
@@ -553,7 +661,9 @@ import {
   latestResultData,
   getStatusColor,
 } from '@/utils/monitorPresentation'
+import { severityColor, severityLabel, statusLabel } from '@/utils/alertPresentation'
 import { formatDateTime } from '@/utils/formatters'
+import type { AlertEvent } from '@/stores/alerts'
 
 const route = useRoute()
 const router = useRouter()
@@ -600,11 +710,21 @@ const history = useInfiniteList<MonitorResult>(() => `/monitors/${monitorId.valu
   label: 'histórico de verificações',
 })
 
+const showAlerts = ref(false)
+const alertHistory = useInfiniteList<AlertEvent>(() => `/monitors/${monitorId.value}/alerts`, {
+  label: 'histórico de alertas',
+})
+
 function toggleShowHistory() {
   showHistory.value = !showHistory.value
   // Reabrir o card recomeça da primeira página: o histórico pode ter crescido
   // enquanto ele estava recolhido.
   if (showHistory.value) history.reset()
+}
+
+function toggleShowAlerts() {
+  showAlerts.value = !showAlerts.value
+  if (showAlerts.value) alertHistory.reset()
 }
 
 const formattedTarget = computed(() => {
@@ -830,6 +950,11 @@ onMounted(async () => {
       })
     }
   })
+
+  eventsStore.onEvent(['alert:triggered', 'alert:resolved'], (data) => {
+    if (Number(data.monitorId) !== monitorId.value) return
+    if (showAlerts.value) alertHistory.reset()
+  })
 })
 
 onUnmounted(() => {
@@ -841,6 +966,7 @@ async function refreshData() {
     await monitorsStore.fetchMonitorById(monitorId.value)
     if (isGaugeMonitor.value) await loadGaugeHistory()
     if (showHistory.value) history.reset()
+    if (showAlerts.value) alertHistory.reset()
   }
 }
 

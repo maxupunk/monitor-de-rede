@@ -107,7 +107,7 @@
                 class="font-weight-bold text-primary"
                 href="#"
                 @click.prevent="catalogDialog = true"
-              >regras pré-configuradas</a
+                >regras pré-configuradas</a
               >
               para cobrir indisponibilidade, latência, perda de pacotes e quedas de interface.
             </v-alert>
@@ -191,7 +191,12 @@
               <div class="text-body-2 text-grey-darken-1">
                 Todos os alertas já registrados, do mais recente para o mais antigo.
               </div>
-              <v-chip v-if="history.total.value > 0" size="small" variant="outlined" color="primary">
+              <v-chip
+                v-if="history.total.value > 0"
+                size="small"
+                variant="outlined"
+                color="primary"
+              >
                 {{ history.items.value.length }} de {{ history.total.value }}
               </v-chip>
             </div>

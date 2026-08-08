@@ -234,9 +234,7 @@ const headers = computed(() => [
   },
   { title: 'Tipo', key: 'type', width: '90px' },
   { title: 'Alvo', key: 'target' },
-  ...(showDevice.value
-    ? []
-    : [{ title: 'Intervalo', key: 'intervalSeconds', width: '100px' }]),
+  ...(showDevice.value ? [] : [{ title: 'Intervalo', key: 'intervalSeconds', width: '100px' }]),
   { title: 'Status', key: 'status', width: '100px' },
   { title: 'Ativo', key: 'isEnabled', width: '80px' },
   { title: 'Ações', key: 'actions', sortable: false, width: '220px' },
@@ -304,7 +302,8 @@ function typeChip(item: Monitor): { label: string; icon: string; color: string }
     const modeDefinition = SNMP_MODES.find((m) => m.value === mode)
     if (mode !== 'availability' && modeDefinition) {
       return {
-        label: mode === 'interface' ? 'INTERFACE' : isGaugeMonitor(item) ? gaugeLabel(item) : 'SNMP',
+        label:
+          mode === 'interface' ? 'INTERFACE' : isGaugeMonitor(item) ? gaugeLabel(item) : 'SNMP',
         icon: modeDefinition.icon,
         color: definition.color,
       }

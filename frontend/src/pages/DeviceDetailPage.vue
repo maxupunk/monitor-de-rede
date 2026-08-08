@@ -52,7 +52,7 @@
             :loading="detailStore.pollingSnmp"
             @click="detailStore.triggerSnmpPoll(deviceId)"
           >
-            Poll SNMP Agora
+            Coletar SNMP agora
           </v-btn>
 
           <v-btn
@@ -142,7 +142,7 @@
               :monitors="detailStore.monitors"
               :loading="detailStore.loading"
               variant="device"
-              no-data-text="Nenhum monitor configurado para este equipamento. Crie um acima ou use &quot;Escanear SNMP&quot; para descobrir automaticamente."
+              no-data-text='Nenhum monitor configurado para este equipamento. Crie um acima ou use "Escanear SNMP" para descobrir automaticamente.'
               @edit="openMonitorDialog"
               @changed="reloadMonitors"
             ></MonitorsTable>
@@ -252,7 +252,7 @@
                       />
                       <div class="d-flex align-center justify-space-between text-caption text-grey">
                         <span v-if="isCpuMonitored"
-                        >Load 1 min:
+                          >Load 1 min:
                           {{ cpuLoadValue !== null ? `${cpuLoadValue} load` : 'N/A' }}</span
                         >
                         <span v-else>Recurso desativado na varredura</span>
@@ -1011,11 +1011,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import {
-  useDeviceDetailStore,
-  type DeviceMetric,
-  type DeviceMonitor,
-} from '@/stores/deviceDetail'
+import { useDeviceDetailStore, type DeviceMetric, type DeviceMonitor } from '@/stores/deviceDetail'
 import TrafficChartDialog from '@/components/TrafficChartDialog.vue'
 import BaseMetricChart, { type ChartSeriesInput } from '@/components/BaseMetricChart.vue'
 import MonitorSparkline from '@/components/MonitorSparkline.vue'
@@ -1062,10 +1058,9 @@ const portScanOpen = ref(false)
 
 // Histórico paginado de métricas SNMP
 const showMetricsHistory = ref(false)
-const metricsHistory = useInfiniteList<DeviceMetric>(
-  () => `/devices/${deviceId.value}/metrics`,
-  { label: 'histórico de métricas' }
-)
+const metricsHistory = useInfiniteList<DeviceMetric>(() => `/devices/${deviceId.value}/metrics`, {
+  label: 'histórico de métricas',
+})
 
 function toggleShowMetricsHistory() {
   showMetricsHistory.value = !showMetricsHistory.value
@@ -1073,10 +1068,9 @@ function toggleShowMetricsHistory() {
 }
 
 // Histórico paginado de eventos do dispositivo
-const eventsHistory = useInfiniteList<DeviceEventItem>(
-  () => `/devices/${deviceId.value}/events`,
-  { label: 'histórico de eventos' }
-)
+const eventsHistory = useInfiniteList<DeviceEventItem>(() => `/devices/${deviceId.value}/events`, {
+  label: 'histórico de eventos',
+})
 
 const chartDialogOpen = ref(false)
 const selectedChartInterfaceId = ref<number | null>(null)

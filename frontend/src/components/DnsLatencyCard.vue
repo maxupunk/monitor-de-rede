@@ -277,9 +277,7 @@ function isMonitored(entry: DnsRankingEntry): boolean {
 }
 
 function startMonitoring(entry: DnsRankingEntry) {
-  const hostnames = store.benchmarkHostnames.length
-    ? store.benchmarkHostnames
-    : FALLBACK_HOSTNAMES
+  const hostnames = store.benchmarkHostnames.length ? store.benchmarkHostnames : FALLBACK_HOSTNAMES
   const [primary, ...extras] = hostnames
 
   monitorDefaults.value = {

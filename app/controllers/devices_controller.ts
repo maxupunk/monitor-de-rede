@@ -6,6 +6,8 @@ import AlertEvent from '#models/alert_event'
 import { monitorListQuery, presentMonitors } from '#modules/monitoring/monitor_presenter'
 import { syncZabbixTemplateMonitor } from '#modules/zabbix/zabbix_template_monitor_sync'
 import { ResourceCleanupService } from '#services/resource_cleanup_service'
+import { SnmpService } from '#modules/snmp/snmp_service'
+import logger from '@adonisjs/core/services/logger'
 
 export default class DevicesController {
   private cleanupService = new ResourceCleanupService()
@@ -38,6 +40,10 @@ export default class DevicesController {
     const device = await Device.create(data)
     await this.syncDeviceMonitor(device)
     await syncZabbixTemplateMonitor(device)
+
+    if (device.snmpEnabled) {
+      this.scheduleSnmpPoll(device)
+    }
 
     return response.created(device)
   }
@@ -79,6 +85,10 @@ export default class DevicesController {
     await this.syncDeviceMonitor(device)
     await syncZabbixTemplateMonitor(device)
 
+    if (device.snmpEnabled) {
+      this.scheduleSnmpPoll(device)
+    }
+
     return response.ok(device)
   }
 
@@ -109,6 +119,36 @@ export default class DevicesController {
       existingMonitor.enabled = false
       await existingMonitor.save()
     }
+  }
+
+  /**
+   * Dispara uma coleta SNMP inicial em segundo plano após criar/editar um
+   * dispositivo com SNMP habilitado. O poll é não bloqueante para não travar
+   * a resposta HTTP do formulário; falhas são apenas logadas.
+   */
+  private scheduleSnmpPoll(device: Device) {
+    const config = {
+      host: device.ipAddress || device.name,
+      version: (device.snmpVersion || 'v2c') as 'v1' | 'v2c' | 'v3',
+      community: device.snmpCommunity || 'public',
+      port: 161,
+    }
+
+    const snmpService = new SnmpService()
+    snmpService
+      .pollDevice(device, config)
+      .then((result) => {
+        logger.info(
+          { deviceId: device.id, metricCount: result.metricCount },
+          'Coleta SNMP inicial concluída após salvar dispositivo'
+        )
+      })
+      .catch((error) => {
+        logger.warn(
+          { deviceId: device.id, error: error.message },
+          'Falha na coleta SNMP inicial após salvar dispositivo'
+        )
+      })
   }
 
   async destroy({ params, response }: HttpContext) {
