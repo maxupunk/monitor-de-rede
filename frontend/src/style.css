@@ -21,3 +21,112 @@ body,
     'Helvetica Neue',
     sans-serif;
 }
+
+/* Garante que telas pequenas não estourem horizontalmente */
+.v-application {
+  overflow-x: hidden;
+}
+
+/* Tabelas com scroll horizontal controlado em containers pequenos */
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.table-responsive table {
+  min-width: 640px;
+}
+
+/* Cards de lista para mobile (full-bleed, aparência de app nativo) */
+.mobile-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mobile-card {
+  padding: 12px 16px;
+  border-radius: 0;
+}
+
+@media (min-width: 960px) {
+  .mobile-card-list {
+    gap: 12px;
+  }
+
+  .mobile-card {
+    border-radius: 8px;
+  }
+}
+
+/* Padding lateral de 5px no mobile (app portable) */
+.px-mobile-5 {
+  padding-left: 5px !important;
+  padding-right: 5px !important;
+}
+
+@media (min-width: 960px) {
+  .px-mobile-5 {
+    padding-left: 24px !important;
+    padding-right: 24px !important;
+  }
+}
+
+/* Container que no mobile vaza até as bordas da tela (aparência de app portable) */
+.mobile-full-bleed {
+  border-radius: 0 !important;
+}
+
+@media (max-width: 959px) {
+  .mobile-full-bleed > .v-card-title {
+    padding-inline: 5px !important;
+  }
+
+  .mobile-full-bleed > .v-card-text {
+    padding-inline: 5px !important;
+  }
+}
+
+@media (min-width: 960px) {
+  .mobile-full-bleed {
+    border-radius: 8px !important;
+  }
+
+  .mobile-full-bleed > .v-card-title {
+    padding-inline: 16px !important;
+  }
+
+  .mobile-full-bleed > .v-card-text {
+    padding-inline: 16px !important;
+  }
+}
+
+/* Ações em cards mobile: botões maiores e bem espaçados para toque */
+.mobile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.mobile-actions .v-btn {
+  min-height: 36px;
+}
+
+/* Quebra de texto em chips e títulos longos */
+.text-break {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* Espaçamento compacto em listas mobile */
+.compact-list .v-list-item {
+  padding-inline: 12px;
+}
+
+/* Timeline de monitores com scroll horizontal quando não couber */
+.monitor-timeline-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+}

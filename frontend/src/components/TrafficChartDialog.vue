@@ -1,7 +1,8 @@
 <template>
   <v-dialog
     :model-value="modelValue"
-    max-width="850px"
+    :max-width="$vuetify.display.xs ? undefined : 850"
+    :fullscreen="$vuetify.display.xs"
     @update:model-value="emit('update:modelValue', $event)"
   >
     <v-card class="rounded-lg">

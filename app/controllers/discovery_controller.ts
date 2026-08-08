@@ -45,29 +45,13 @@ export default class DiscoveryController {
     return response.ok(run)
   }
 
-  async results({ request, response }: HttpContext) {
-    const status = request.input('status', 'pending')
-    const query = DiscoveryResult.query()
-      .where('status', status)
-      .preload('discoveryRun', (runQuery) => runQuery.preload('network'))
-      .orderBy('id', 'desc')
-
-    // Paginação sob demanda: quem passa `page` recebe o envelope do Lucid, os
-    // demais continuam recebendo o array cru (o dashboard e o store legado).
-    const pageParam = request.input('page')
-    if (pageParam) {
-      const page = Number(pageParam) || 1
-      const limit = Math.min(Number(request.input('limit', 20)), 100)
-      return response.ok(await query.paginate(page, limit))
-    }
-
-    return response.ok(await query)
-  }
-
   /**
    * GET /api/discovery/results/latest
-   * Retorna todos os resultados da varredura mais recente, independentemente
-   * do status, para a aba "Resultados Encontrados" da tela de descoberta.
+   *
+   * Retorna os resultados da varredura mais recente, ignorando IPs que já
+   * existem na tabela devices. O discovery_result funciona apenas como cache
+   * do último scan; a fonte da verdade para "já adicionado" é a tabela
+   * devices.
    */
   async latestResults({ response }: HttpContext) {
     const latestRun = await DiscoveryRun.query().orderBy('id', 'desc').first()
@@ -79,24 +63,30 @@ export default class DiscoveryController {
       })
     }
 
+    const existingIps = await Device.query().select('ip_address')
+    const existingIpSet = new Set(existingIps.map((d) => d.ipAddress).filter(Boolean))
+
     const results = await DiscoveryResult.query()
       .where('discoveryRunId', latestRun.id)
       .preload('discoveryRun', (runQuery) => runQuery.preload('network', (n) => n.preload('site')))
       .orderBy('id', 'desc')
 
+    const filtered = results.filter((r) => !existingIpSet.has(r.ipAddress))
+
     return response.ok({
-      data: results,
-      meta: { currentPage: 1, lastPage: 1, total: results.length },
+      data: filtered,
+      meta: { currentPage: 1, lastPage: 1, total: filtered.length },
     })
   }
 
+  /**
+   * POST /api/discovery/results/:id/accept
+   *
+   * Cria um device a partir do resultado e remove o cache do discovery.
+   */
   async accept({ params, response }: HttpContext) {
     const result = await DiscoveryResult.findOrFail(params.id)
     const run = await DiscoveryRun.findOrFail(result.discoveryRunId)
-
-    // O site vem da rede varrida, não do id da rede: usar `networkId` como
-    // `siteId` fazia o equipamento nascer vinculado ao site errado (ou a um
-    // site inexistente), quebrando o escopo das regras de alerta por site.
     const network = await Network.find(run.networkId)
 
     const device = await Device.create({
@@ -123,37 +113,30 @@ export default class DiscoveryController {
       status: 'unknown',
     })
 
-    result.status = 'accepted'
-    await result.save()
+    await result.delete()
 
     return response.ok({
       message: `Dispositivo ${device.name} criado com sucesso a partir da descoberta`,
       device,
-      result,
     })
   }
 
   /**
-   * POST /api/discovery/results/:id/mark-accepted
-   * Marca um resultado de descoberta como aceito sem criar um novo dispositivo.
-   * Usado quando o operador cadastra o equipamento manualmente via DeviceDialog.
+   * POST /api/discovery/results/:id/merge
+   *
+   * Vincula o resultado a um device existente e remove o cache do discovery.
    */
-  async markAccepted({ params, response }: HttpContext) {
+  async merge({ params, request, response }: HttpContext) {
     const result = await DiscoveryResult.findOrFail(params.id)
-    result.status = 'accepted'
-    await result.save()
+    const targetDeviceId = request.input('targetDeviceId')
+
+    const device = await Device.findOrFail(targetDeviceId)
+    await result.delete()
 
     return response.ok({
-      message: 'Resultado de descoberta marcado como adicionado',
-      result,
+      message: `Resultado de descoberta mesclado com o dispositivo #${device.id}`,
+      device,
     })
-  }
-
-  async ignore({ params, response }: HttpContext) {
-    const result = await DiscoveryResult.findOrFail(params.id)
-    result.status = 'ignored'
-    await result.save()
-    return response.ok(result)
   }
 
   /**
@@ -178,21 +161,6 @@ export default class DiscoveryController {
     return response.ok({
       removedRuns: runIds.length,
       message: `${runIds.length} varredura(s) antiga(s) removida(s).`,
-    })
-  }
-
-  async merge({ params, request, response }: HttpContext) {
-    const result = await DiscoveryResult.findOrFail(params.id)
-    const targetDeviceId = request.input('targetDeviceId')
-
-    const device = await Device.findOrFail(targetDeviceId)
-    result.status = 'merged'
-    await result.save()
-
-    return response.ok({
-      message: `Resultado de descoberta mesclado com o dispositivo #${device.id}`,
-      device,
-      result,
     })
   }
 }

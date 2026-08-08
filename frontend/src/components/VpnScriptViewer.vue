@@ -1,5 +1,11 @@
 <template>
-  <v-dialog :model-value="modelValue" max-width="920" scrollable @update:model-value="emitOpen">
+  <v-dialog
+    :model-value="modelValue"
+    :max-width="$vuetify.display.xs ? undefined : 920"
+    :fullscreen="$vuetify.display.xs"
+    scrollable
+    @update:model-value="emitOpen"
+  >
     <v-card v-if="artifact" class="rounded-lg">
       <v-card-title class="d-flex align-center font-weight-bold">
         <v-icon start color="primary">mdi-check-decagram-outline</v-icon>

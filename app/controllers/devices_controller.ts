@@ -1,5 +1,6 @@
 import type { HttpContext } from '@adonisjs/core/http'
 import Device from '#models/device'
+import DiscoveryResult from '#models/discovery_result'
 import Monitor from '#models/monitor'
 import Metric from '#models/metric'
 import AlertEvent from '#models/alert_event'
@@ -40,6 +41,12 @@ export default class DevicesController {
     const device = await Device.create(data)
     await this.syncDeviceMonitor(device)
     await syncZabbixTemplateMonitor(device)
+
+    // Limpa resultados de discovery com o mesmo IP: o device agora é a fonte
+    // da verdade para esse endereço.
+    if (device.ipAddress) {
+      await DiscoveryResult.query().where('ip_address', device.ipAddress).delete()
+    }
 
     if (device.snmpEnabled) {
       this.scheduleSnmpPoll(device)

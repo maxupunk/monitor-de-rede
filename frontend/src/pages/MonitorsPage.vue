@@ -1,18 +1,20 @@
 <template>
   <div>
-    <div class="d-flex align-center justify-space-between mb-6">
-      <div>
-        <h1 class="text-h4 font-weight-bold">Monitores de Rede</h1>
-        <p class="text-subtitle-1 text-grey-darken-1">
-          Verificações de Ping, HTTP, TCP, DNS e SNMP com histórico em linha do tempo
-        </p>
-      </div>
-      <v-btn color="primary" prepend-icon="mdi-plus" @click="openDialog()"> Novo Monitor </v-btn>
-    </div>
+    <PageHeader
+      title="Monitores de Rede"
+      subtitle="Verificações de Ping, HTTP, TCP, DNS e SNMP com histórico em linha do tempo"
+    >
+      <template #actions>
+        <v-btn color="primary" prepend-icon="mdi-plus" @click="openDialog()">
+          <span class="hidden-sm-and-down">Novo Monitor</span>
+          <span class="hidden-md-and-up">Novo</span>
+        </v-btn>
+      </template>
+    </PageHeader>
 
     <!-- Tabela de Monitores -->
-    <v-card elevation="2" class="rounded-lg">
-      <v-card-title class="pa-4 d-flex align-center ga-4">
+    <v-card elevation="2" class="mobile-full-bleed">
+      <v-card-title class="pa-4 d-flex align-center">
         <v-text-field
           v-model="search"
           prepend-inner-icon="mdi-magnify"
@@ -21,7 +23,8 @@
           hide-details
           variant="outlined"
           density="compact"
-          class="max-w-300"
+          class="w-100"
+          style="max-width: 420px"
         ></v-text-field>
       </v-card-title>
 
@@ -50,6 +53,7 @@ import { useMonitorsStore, type Monitor } from '@/stores/monitors'
 import { useDevicesStore } from '@/stores/devices'
 import MonitorsTable from '@/components/MonitorsTable.vue'
 import MonitorFormDialog from '@/components/MonitorFormDialog.vue'
+import PageHeader from '@/components/PageHeader.vue'
 
 const monitorsStore = useMonitorsStore()
 const devicesStore = useDevicesStore()

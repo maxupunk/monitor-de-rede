@@ -1,7 +1,7 @@
 <template>
   <v-app class="bg-grey-darken-4">
     <v-container class="fill-height justify-center align-center" fluid>
-      <v-card class="pa-8 elevation-12 rounded-xl" max-width="440" width="100%">
+      <v-card class="pa-6 pa-md-8 elevation-12 rounded-xl mx-4" max-width="440" width="100%">
         <div class="text-center mb-6">
           <v-avatar color="primary" size="72" class="mb-4 elevation-4">
             <v-icon size="40" color="white">mdi-shield-network-outline</v-icon>

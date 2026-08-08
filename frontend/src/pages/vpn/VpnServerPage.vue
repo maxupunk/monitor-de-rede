@@ -1,21 +1,21 @@
 <template>
   <div>
-    <div class="d-flex align-center justify-space-between mb-6">
-      <div>
-        <h1 class="text-h4 font-weight-bold">Servidor VPN (WireGuard)</h1>
-        <p class="text-subtitle-1 text-grey-darken-1">
-          Túnel para monitorar roteadores MikroTik e OpenWrt fora da rede local
-        </p>
-      </div>
-      <v-btn
-        color="primary"
-        variant="tonal"
-        prepend-icon="mdi-lan-connect"
-        :to="{ name: 'vpn-devices' }"
-      >
-        Dispositivos VPN
-      </v-btn>
-    </div>
+    <PageHeader
+      title="Servidor VPN (WireGuard)"
+      subtitle="Túnel para monitorar roteadores MikroTik e OpenWrt fora da rede local"
+    >
+      <template #actions>
+        <v-btn
+          color="primary"
+          variant="tonal"
+          prepend-icon="mdi-lan-connect"
+          :to="{ name: 'vpn-devices' }"
+        >
+          <span class="hidden-sm-and-down">Dispositivos VPN</span>
+          <span class="hidden-md-and-up">Dispositivos</span>
+        </v-btn>
+      </template>
+    </PageHeader>
 
     <v-row>
       <!-- Estado do serviço -->
@@ -241,6 +241,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useVpnStore } from '@/stores/vpn'
 import { useSitesStore } from '@/stores/sites'
 import { formatBytes } from '@/utils/formatters'
+import PageHeader from '@/components/PageHeader.vue'
 
 const vpnStore = useVpnStore()
 const sitesStore = useSitesStore()

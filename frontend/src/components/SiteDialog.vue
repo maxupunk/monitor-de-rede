@@ -1,5 +1,10 @@
 <template>
-  <v-dialog :model-value="modelValue" max-width="500" @update:model-value="onUpdateModelValue">
+  <v-dialog
+    :model-value="modelValue"
+    :max-width="$vuetify.display.xs ? undefined : 500"
+    :fullscreen="$vuetify.display.xs"
+    @update:model-value="onUpdateModelValue"
+  >
     <v-card class="rounded-lg pa-4">
       <v-card-title class="font-weight-bold">
         {{ siteToEdit ? 'Editar Site' : 'Cadastrar Novo Site' }}

@@ -80,12 +80,9 @@ router
     // Discovery
     router.get('discovery/runs', [DiscoveryController, 'runs'])
     router.get('discovery/runs/:id', [DiscoveryController, 'runDetails'])
-    router.get('discovery/results', [DiscoveryController, 'results'])
     router.get('discovery/results/latest', [DiscoveryController, 'latestResults'])
     router.delete('discovery/cleanup', [DiscoveryController, 'cleanup'])
     router.post('discovery/results/:id/accept', [DiscoveryController, 'accept'])
-    router.post('discovery/results/:id/mark-accepted', [DiscoveryController, 'markAccepted'])
-    router.post('discovery/results/:id/ignore', [DiscoveryController, 'ignore'])
     router.post('discovery/results/:id/merge', [DiscoveryController, 'merge'])
 
     // Topology

@@ -1,5 +1,10 @@
 <template>
-  <v-dialog :model-value="modelValue" max-width="700" @update:model-value="onUpdateModelValue">
+  <v-dialog
+    :model-value="modelValue"
+    :max-width="$vuetify.display.xs ? undefined : 700"
+    :fullscreen="$vuetify.display.xs"
+    @update:model-value="onUpdateModelValue"
+  >
     <v-card v-if="result" class="rounded-lg">
       <v-card-title class="d-flex align-center justify-space-between pa-4 bg-primary text-white">
         <div class="d-flex align-center ga-2" style="gap: 8px">
@@ -30,8 +35,8 @@
               </div>
             </div>
           </div>
-          <v-chip :color="statusColor" size="small" variant="flat">
-            {{ statusLabel }}
+          <v-chip :color="isAdded ? 'success' : 'warning'" size="small" variant="flat">
+            {{ isAdded ? 'JÁ ADICIONADO' : 'PENDENTE' }}
           </v-chip>
         </div>
 
@@ -84,7 +89,7 @@
             >
               {{ port }}
               <span v-if="serviceName(port)" class="text-caption ml-1"
-                >({{ serviceName(port) }})</span
+              >({{ serviceName(port) }})</span
               >
             </v-chip>
           </div>
@@ -129,7 +134,7 @@
             <pre
               class="text-caption font-mono text-grey-darken-3 mb-0"
               style="white-space: pre-wrap; word-break: break-word"
-              >{{ rawJson }}</pre>
+            >{{ rawJson }}</pre>
           </v-card>
         </div>
       </v-card-text>
@@ -138,12 +143,7 @@
 
       <v-card-actions class="pa-4 justify-end">
         <v-btn variant="text" @click="close">Fechar</v-btn>
-        <v-btn
-          v-if="result.status === 'pending'"
-          color="success"
-          prepend-icon="mdi-plus"
-          @click="addDevice"
-        >
+        <v-btn v-if="!isAdded" color="success" prepend-icon="mdi-plus" @click="addDevice">
           Adicionar
         </v-btn>
       </v-card-actions>
@@ -153,6 +153,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useDevicesStore } from '@/stores/devices'
 import type { DiscoveryResult } from '@/stores/discovery'
 import { formatDateTime } from '@/utils/formatters'
 
@@ -166,30 +167,12 @@ const emit = defineEmits<{
   (e: 'add'): void
 }>()
 
+const devicesStore = useDevicesStore()
 const copied = ref(false)
 
-const statusColor = computed(() => {
-  switch (props.result?.status) {
-    case 'accepted':
-    case 'merged':
-      return 'success'
-    case 'ignored':
-      return 'grey'
-    default:
-      return 'warning'
-  }
-})
-
-const statusLabel = computed(() => {
-  switch (props.result?.status) {
-    case 'accepted':
-    case 'merged':
-      return 'JÁ ADICIONADO'
-    case 'ignored':
-      return 'IGNORADO'
-    default:
-      return 'PENDENTE'
-  }
+const isAdded = computed(() => {
+  if (!props.result) return false
+  return devicesStore.devices.some((d) => d.ipAddress === props.result?.ipAddress)
 })
 
 const deviceTypeLabel = computed(() => {

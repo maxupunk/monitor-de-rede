@@ -1,13 +1,7 @@
 <template>
   <div>
-    <div class="d-flex align-center justify-space-between mb-6 flex-wrap ga-4">
-      <div>
-        <h1 class="text-h4 font-weight-bold">Dashboard</h1>
-        <p class="text-subtitle-1 text-grey-darken-1">
-          Visão geral do monitoramento e status em tempo real
-        </p>
-      </div>
-      <div class="d-flex align-center ga-3">
+    <PageHeader title="Dashboard" subtitle="Visão geral do monitoramento e status em tempo real">
+      <template #actions>
         <v-chip
           :color="eventsStore.isConnected ? 'success' : 'warning'"
           variant="tonal"
@@ -17,13 +11,17 @@
           <v-icon start size="12" :color="eventsStore.isConnected ? 'success' : 'warning'">
             mdi-circle
           </v-icon>
-          {{ eventsStore.isConnected ? 'SSE Conectado' : 'SSE Reconectando...' }}
+          <span class="hidden-xs">{{
+            eventsStore.isConnected ? 'SSE Conectado' : 'SSE Reconectando...'
+          }}</span>
+          <span class="hidden-sm-and-up">{{ eventsStore.isConnected ? 'SSE' : '...' }}</span>
         </v-chip>
         <v-btn color="primary" prepend-icon="mdi-refresh" :loading="loading" @click="refreshData">
-          Atualizar Dados
+          <span class="hidden-sm-and-down">Atualizar Dados</span>
+          <span class="hidden-md-and-up">Atualizar</span>
         </v-btn>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <v-row class="mb-6">
       <v-col cols="12" sm="6" md="3">
@@ -45,7 +43,7 @@
         <v-card elevation="2" class="pa-4 rounded-lg">
           <div class="d-flex align-center justify-space-between mb-2">
             <span class="text-subtitle-2 text-grey-darken-1 font-weight-bold"
-              >Monitores de Rede</span
+            >Monitores de Rede</span
             >
             <v-avatar color="info" variant="tonal" size="36">
               <v-icon color="info">mdi-chart-timeline-variant</v-icon>
@@ -119,40 +117,42 @@
                     </v-avatar>
                   </template>
                   <template #append>
-                    <div class="d-flex align-center ga-2">
+                    <div class="d-flex flex-column flex-md-row align-end align-md-center ga-2">
                       <v-chip variant="outlined" size="x-small" class="font-weight-medium">
                         {{ statusLabel(alert.status) }}
                       </v-chip>
-                      <v-tooltip text="Reconhecer alerta">
-                        <template #activator="{ props: tooltipProps }">
-                          <v-btn
-                            v-bind="tooltipProps"
-                            icon
-                            size="small"
-                            variant="text"
-                            color="primary"
-                            :disabled="alert.status === 'acknowledged'"
-                            @click.stop="alertsStore.acknowledgeAlert(alert.id)"
-                          >
-                            <v-icon>mdi-check-circle-outline</v-icon>
-                          </v-btn>
-                        </template>
-                      </v-tooltip>
-                      <v-tooltip text="Silenciar alerta">
-                        <template #activator="{ props: tooltipProps }">
-                          <v-btn
-                            v-bind="tooltipProps"
-                            icon
-                            size="small"
-                            variant="text"
-                            color="warning"
-                            :disabled="alert.status === 'silenced'"
-                            @click.stop="openSilenceDialog(alert.id)"
-                          >
-                            <v-icon>mdi-bell-off-outline</v-icon>
-                          </v-btn>
-                        </template>
-                      </v-tooltip>
+                      <div class="d-flex ga-1">
+                        <v-tooltip text="Reconhecer alerta">
+                          <template #activator="{ props: tooltipProps }">
+                            <v-btn
+                              v-bind="tooltipProps"
+                              icon
+                              size="small"
+                              variant="text"
+                              color="primary"
+                              :disabled="alert.status === 'acknowledged'"
+                              @click.stop="alertsStore.acknowledgeAlert(alert.id)"
+                            >
+                              <v-icon>mdi-check-circle-outline</v-icon>
+                            </v-btn>
+                          </template>
+                        </v-tooltip>
+                        <v-tooltip text="Silenciar alerta">
+                          <template #activator="{ props: tooltipProps }">
+                            <v-btn
+                              v-bind="tooltipProps"
+                              icon
+                              size="small"
+                              variant="text"
+                              color="warning"
+                              :disabled="alert.status === 'silenced'"
+                              @click.stop="openSilenceDialog(alert.id)"
+                            >
+                              <v-icon>mdi-bell-off-outline</v-icon>
+                            </v-btn>
+                          </template>
+                        </v-tooltip>
+                      </div>
                     </div>
                   </template>
                 </v-list-item>
@@ -258,7 +258,9 @@
                   :title="undefined"
                   class="px-4 py-3 border-b"
                 >
-                  <div class="d-flex align-center justify-space-between flex-wrap ga-3 w-100">
+                  <div
+                    class="d-flex flex-column flex-md-row align-start align-md-center justify-space-between ga-3 w-100"
+                  >
                     <div
                       class="monitor-info d-flex align-center ga-3"
                       style="min-width: 220px; flex: 1"
@@ -286,7 +288,7 @@
                     </div>
 
                     <div
-                      class="monitor-timeline d-flex align-center justify-center"
+                      class="monitor-timeline d-flex align-center justify-start justify-md-center monitor-timeline-scroll"
                       style="flex: 2; min-width: 280px"
                     >
                       <router-link
@@ -321,7 +323,7 @@
                     </div>
 
                     <div
-                      class="monitor-actions d-flex align-center ga-2 justify-end"
+                      class="monitor-actions d-flex align-center ga-2 justify-start justify-md-end"
                       style="min-width: 140px"
                     >
                       <v-chip
@@ -390,6 +392,7 @@ import MonitorSparkline from '@/components/MonitorSparkline.vue'
 import DnsLatencyCard from '@/components/DnsLatencyCard.vue'
 import AlertSilenceDialog from '@/components/AlertSilenceDialog.vue'
 import EventDetailDialog from '@/components/EventDetailDialog.vue'
+import PageHeader from '@/components/PageHeader.vue'
 import { statusLabel } from '@/utils/alertPresentation'
 import { formatEventDetails } from '@/utils/eventPresentation'
 import {

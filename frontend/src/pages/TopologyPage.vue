@@ -1,33 +1,28 @@
 <template>
   <div>
-    <div class="d-flex align-center justify-space-between mb-6">
-      <div>
-        <h1 class="text-h4 font-weight-bold">Mapa de Topologia de Rede</h1>
-        <p class="text-subtitle-1 text-grey-darken-1">
-          Visualização de vizinhos LLDP/CDP, sub-redes e links físicos
-        </p>
-      </div>
-      <div class="d-flex ga-2">
+    <PageHeader
+      title="Mapa de Topologia de Rede"
+      subtitle="Visualização de vizinhos LLDP/CDP, sub-redes e links físicos"
+    >
+      <template #actions>
         <v-btn
           color="secondary"
           prepend-icon="mdi-calculator"
           :loading="topologyStore.recalculating"
           @click="topologyStore.recalculateTopology()"
         >
-          Recalcular Topologia
+          <span class="hidden-sm-and-down">Recalcular Topologia</span>
+          <span class="hidden-md-and-up">Recalcular</span>
         </v-btn>
         <v-btn color="primary" prepend-icon="mdi-plus" @click="linkDialog = true">
-          Adicionar Conexão
+          <span class="hidden-sm-and-down">Adicionar Conexão</span>
+          <span class="hidden-md-and-up">Conexão</span>
         </v-btn>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <!-- Container do Mapa Gráfico -->
-    <v-card
-      elevation="2"
-      class="rounded-lg overflow-hidden position-relative"
-      style="height: 600px"
-    >
+    <v-card elevation="2" class="rounded-lg overflow-hidden position-relative topology-map-card">
       <!-- Canvas / Overlay SVG de Topologia -->
       <svg width="100%" height="100%" class="topology-canvas">
         <!-- Areias/Conexões (Edges) -->
@@ -78,7 +73,11 @@
     </v-card>
 
     <!-- Drawer de Detalhes do Nó Selecionado -->
-    <v-dialog v-model="nodeDrawer" max-width="400">
+    <v-dialog
+      v-model="nodeDrawer"
+      :max-width="$vuetify.display.xs ? undefined : 400"
+      :fullscreen="$vuetify.display.xs"
+    >
       <v-card v-if="selectedNode" class="rounded-lg pa-4">
         <v-card-title class="d-flex align-center">
           <v-avatar :color="getNodeColor(selectedNode.status)" size="36" class="mr-3">
@@ -104,7 +103,11 @@
     </v-dialog>
 
     <!-- Modal para Adicionar Conexão Manual -->
-    <v-dialog v-model="linkDialog" max-width="500">
+    <v-dialog
+      v-model="linkDialog"
+      :max-width="$vuetify.display.xs ? undefined : 500"
+      :fullscreen="$vuetify.display.xs"
+    >
       <v-card class="rounded-lg pa-4">
         <v-card-title class="font-weight-bold">Adicionar Link de Topologia</v-card-title>
         <v-card-text>
@@ -141,6 +144,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, reactive } from 'vue'
 import { useTopologyStore, type TopologyNode, type TopologyEdge } from '@/stores/topology'
+import PageHeader from '@/components/PageHeader.vue'
 
 interface RenderedNode extends TopologyNode {
   x: number
@@ -260,6 +264,17 @@ async function saveLink() {
 </script>
 
 <style scoped>
+.topology-map-card {
+  height: 600px;
+}
+
+@media (max-width: 960px) {
+  .topology-map-card {
+    height: 70vh;
+    min-height: 400px;
+  }
+}
+
 .topology-canvas {
   position: absolute;
   top: 0;

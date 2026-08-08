@@ -25,9 +25,8 @@ export interface DiscoveryRun {
 }
 
 /**
- * Os nomes espelham as colunas de `discovery_results`. A versão anterior
- * declarava `suggestedName` / `confidenceScore`, que a API nunca enviou — as
- * colunas correspondentes na tela apareciam sempre vazias.
+ * Cache do último scan de descoberta. Não há status persistente: um resultado
+ * existe enquanto o IP ainda não foi transformado em device.
  */
 export interface DiscoveryResult {
   id: number
@@ -39,7 +38,6 @@ export interface DiscoveryResult {
   vendor?: string | null
   deviceType?: string | null
   confidence: number
-  status: 'pending' | 'accepted' | 'ignored' | 'merged'
   discoveryRun?: DiscoveryRun | null
   firstSeenAt?: string
   lastSeenAt?: string
@@ -49,7 +47,6 @@ export interface DiscoveryResult {
 
 export const useDiscoveryStore = defineStore('discovery', () => {
   const runs = ref<DiscoveryRun[]>([])
-  const results = ref<DiscoveryResult[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
 
@@ -65,26 +62,9 @@ export const useDiscoveryStore = defineStore('discovery', () => {
     }
   }
 
-  async function fetchDiscoveryResults() {
-    loading.value = true
-    error.value = null
+  async function acceptResult(resultId: number): Promise<boolean> {
     try {
-      results.value = await apiService.get<DiscoveryResult[]>('/discovery/results')
-    } catch (err: unknown) {
-      error.value = err instanceof Error ? err.message : 'Erro ao carregar resultados de descoberta'
-    } finally {
-      loading.value = false
-    }
-  }
-
-  async function acceptResult(
-    resultId: number,
-    payload?: { siteId?: number; name?: string }
-  ): Promise<boolean> {
-    try {
-      await apiService.post(`/discovery/results/${resultId}/accept`, payload)
-      const res = results.value.find((r) => r.id === resultId)
-      if (res) res.status = 'accepted'
+      await apiService.post(`/discovery/results/${resultId}/accept`)
       return true
     } catch (err: unknown) {
       error.value = err instanceof Error ? err.message : 'Erro ao aceitar resultado de descoberta'
@@ -92,26 +72,13 @@ export const useDiscoveryStore = defineStore('discovery', () => {
     }
   }
 
-  async function ignoreResult(resultId: number): Promise<boolean> {
+  async function mergeResult(resultId: number, targetDeviceId: number): Promise<boolean> {
     try {
-      await apiService.post(`/discovery/results/${resultId}/ignore`)
-      const res = results.value.find((r) => r.id === resultId)
-      if (res) res.status = 'ignored'
+      await apiService.post(`/discovery/results/${resultId}/merge`, { targetDeviceId })
       return true
     } catch (err: unknown) {
-      error.value = err instanceof Error ? err.message : 'Erro ao ignorar resultado'
-      return false
-    }
-  }
-
-  async function markAccepted(resultId: number): Promise<boolean> {
-    try {
-      await apiService.post(`/discovery/results/${resultId}/mark-accepted`)
-      const res = results.value.find((r) => r.id === resultId)
-      if (res) res.status = 'accepted'
-      return true
-    } catch (err: unknown) {
-      error.value = err instanceof Error ? err.message : 'Erro ao marcar resultado como adicionado'
+      error.value =
+        err instanceof Error ? err.message : 'Erro ao mesclar resultado com dispositivo existente'
       return false
     }
   }
@@ -127,29 +94,12 @@ export const useDiscoveryStore = defineStore('discovery', () => {
     }
   }
 
-  async function mergeResult(resultId: number, targetDeviceId: number): Promise<boolean> {
-    try {
-      await apiService.post(`/discovery/results/${resultId}/merge`, { targetDeviceId })
-      const res = results.value.find((r) => r.id === resultId)
-      if (res) res.status = 'merged'
-      return true
-    } catch (err: unknown) {
-      error.value =
-        err instanceof Error ? err.message : 'Erro ao mesclar resultado com dispositivo existente'
-      return false
-    }
-  }
-
   return {
     runs,
-    results,
     loading,
     error,
     fetchDiscoveryRuns,
-    fetchDiscoveryResults,
     acceptResult,
-    ignoreResult,
-    markAccepted,
     mergeResult,
     cleanup,
   }

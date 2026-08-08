@@ -1,7 +1,8 @@
 <template>
   <v-dialog
     :model-value="modelValue"
-    max-width="700"
+    :max-width="$vuetify.display.xs ? undefined : 700"
+    :fullscreen="$vuetify.display.xs"
     @update:model-value="emit('update:modelValue', $event)"
   >
     <v-card v-if="event" class="rounded-lg">
@@ -126,7 +127,7 @@
             <pre
               class="text-caption font-mono text-grey-darken-3 mb-0"
               style="white-space: pre-wrap; word-break: break-word"
-              >{{ details.rawJson }}</pre>
+            >{{ details.rawJson }}</pre>
           </v-card>
         </div>
       </v-card-text>

@@ -76,6 +76,11 @@ export class DiscoveryService {
 
       if (runRecord) {
         const now = DateTime.now()
+
+        // Discovery_results é apenas o cache do último scan: limpa resultados
+        // anteriores antes de salvar os novos.
+        await DiscoveryResult.query().delete()
+
         for (const host of finalHosts) {
           await DiscoveryResult.create({
             discoveryRunId: runRecord.id,
@@ -86,7 +91,6 @@ export class DiscoveryService {
             vendor: host.vendor || null,
             deviceType: host.deviceType || 'unknown',
             confidence: host.confidence || 50,
-            status: 'pending',
             data: host.data || {},
             firstSeenAt: now,
             lastSeenAt: now,

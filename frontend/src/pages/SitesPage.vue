@@ -1,17 +1,19 @@
 <template>
   <div>
-    <div class="d-flex align-center justify-space-between mb-6">
-      <div>
-        <h1 class="text-h4 font-weight-bold">Sites (Locais)</h1>
-        <p class="text-subtitle-1 text-grey-darken-1">
-          Gerenciamento de locais físicos e filiais monitoradas
-        </p>
-      </div>
-      <v-btn color="primary" prepend-icon="mdi-plus" @click="openDialog()"> Novo Site </v-btn>
-    </div>
+    <PageHeader
+      title="Sites (Locais)"
+      subtitle="Gerenciamento de locais físicos e filiais monitoradas"
+    >
+      <template #actions>
+        <v-btn color="primary" prepend-icon="mdi-plus" @click="openDialog()">
+          <span class="hidden-sm-and-down">Novo Site</span>
+          <span class="hidden-md-and-up">Novo</span>
+        </v-btn>
+      </template>
+    </PageHeader>
 
     <!-- Tabela de Sites -->
-    <v-card elevation="2" class="rounded-lg">
+    <v-card elevation="2" class="mobile-full-bleed">
       <v-card-title class="pa-4">
         <v-text-field
           v-model="search"
@@ -21,11 +23,12 @@
           hide-details
           variant="outlined"
           density="compact"
-          class="max-w-300"
+          class="w-100"
+          style="max-width: 420px"
         ></v-text-field>
       </v-card-title>
 
-      <v-data-table
+      <ResponsiveDataTable
         :headers="headers"
         :items="sitesStore.sites"
         :search="search"
@@ -33,17 +36,37 @@
         :items-per-page="-1"
         hide-default-footer
         no-data-text="Nenhum site cadastrado"
-        class="elevation-0"
+        :clickable="false"
       >
         <template #item.actions="{ item }">
-          <v-btn icon size="small" variant="text" color="primary" @click="openDialog(item)">
-            <v-icon>mdi-pencil</v-icon>
-          </v-btn>
-          <v-btn icon size="small" variant="text" color="error" @click="confirmDelete(item.id)">
-            <v-icon>mdi-delete</v-icon>
-          </v-btn>
+          <div class="d-flex ga-1">
+            <v-btn icon size="small" variant="text" color="primary" @click="openDialog(item)">
+              <v-icon>mdi-pencil</v-icon>
+            </v-btn>
+            <v-btn icon size="small" variant="text" color="error" @click="confirmDelete(item.id)">
+              <v-icon>mdi-delete</v-icon>
+            </v-btn>
+          </div>
         </template>
-      </v-data-table>
+
+        <template #mobile-item="{ item }">
+          <div class="d-flex align-start justify-space-between ga-2">
+            <div class="flex-grow-1 text-break">
+              <div class="text-subtitle-2 font-weight-bold">{{ item.name }}</div>
+              <div class="text-body-2 text-grey-darken-1">{{ item.location || '—' }}</div>
+              <div class="text-caption text-grey mt-1">{{ item.description || '—' }}</div>
+            </div>
+            <div class="d-flex ga-1">
+              <v-btn icon size="small" variant="text" color="primary" @click="openDialog(item)">
+                <v-icon>mdi-pencil</v-icon>
+              </v-btn>
+              <v-btn icon size="small" variant="text" color="error" @click="confirmDelete(item.id)">
+                <v-icon>mdi-delete</v-icon>
+              </v-btn>
+            </div>
+          </div>
+        </template>
+      </ResponsiveDataTable>
     </v-card>
 
     <!-- Componente Reusável Dialog de Site -->
@@ -55,6 +78,8 @@
 import { ref, onMounted } from 'vue'
 import { useSitesStore, type Site } from '@/stores/sites'
 import SiteDialog from '@/components/SiteDialog.vue'
+import PageHeader from '@/components/PageHeader.vue'
+import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 
 const sitesStore = useSitesStore()
 const search = ref('')

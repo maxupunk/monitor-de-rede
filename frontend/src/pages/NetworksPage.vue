@@ -1,17 +1,19 @@
 <template>
   <div>
-    <div class="d-flex align-center justify-space-between mb-6">
-      <div>
-        <h1 class="text-h4 font-weight-bold">Sub-redes (Networks)</h1>
-        <p class="text-subtitle-1 text-grey-darken-1">
-          Faixas de IP CIDR e gatilhos de descoberta automática
-        </p>
-      </div>
-      <v-btn color="primary" prepend-icon="mdi-plus" @click="openDialog()"> Nova Rede </v-btn>
-    </div>
+    <PageHeader
+      title="Sub-redes (Networks)"
+      subtitle="Faixas de IP CIDR e gatilhos de descoberta automática"
+    >
+      <template #actions>
+        <v-btn color="primary" prepend-icon="mdi-plus" @click="openDialog()">
+          <span class="hidden-sm-and-down">Nova Rede</span>
+          <span class="hidden-md-and-up">Nova</span>
+        </v-btn>
+      </template>
+    </PageHeader>
 
     <!-- Tabela de Sub-redes -->
-    <v-card elevation="2" class="rounded-lg">
+    <v-card elevation="2" class="mobile-full-bleed">
       <v-card-title class="pa-4">
         <v-text-field
           v-model="search"
@@ -21,10 +23,12 @@
           hide-details
           variant="outlined"
           density="compact"
+          class="w-100"
+          style="max-width: 420px"
         ></v-text-field>
       </v-card-title>
 
-      <v-data-table
+      <ResponsiveDataTable
         :headers="headers"
         :items="networksStore.networks"
         :search="search"
@@ -32,6 +36,7 @@
         :items-per-page="-1"
         hide-default-footer
         no-data-text="Nenhuma rede cadastrada"
+        :clickable="false"
       >
         <template #item.site="{ item }">
           <v-chip size="small" variant="tonal" color="info">
@@ -62,31 +67,86 @@
         </template>
 
         <template #item.actions="{ item }">
-          <v-btn
-            size="small"
-            color="secondary"
-            variant="tonal"
-            prepend-icon="mdi-radar"
-            class="mr-2"
-            :disabled="item.scannable === false"
-            :loading="networksStore.scanningId === item.id"
-            @click="triggerScan(item)"
-          >
-            Escanear
-          </v-btn>
+          <div class="d-flex ga-1">
+            <v-btn
+              size="small"
+              color="secondary"
+              variant="tonal"
+              prepend-icon="mdi-radar"
+              :disabled="item.scannable === false"
+              :loading="networksStore.scanningId === item.id"
+              @click="triggerScan(item)"
+            >
+              Escanear
+            </v-btn>
 
-          <v-btn icon size="small" variant="text" color="primary" @click="openDialog(item)">
-            <v-icon>mdi-pencil</v-icon>
-          </v-btn>
-          <v-btn icon size="small" variant="text" color="error" @click="confirmDelete(item.id)">
-            <v-icon>mdi-delete</v-icon>
-          </v-btn>
+            <v-btn icon size="small" variant="text" color="primary" @click="openDialog(item)">
+              <v-icon>mdi-pencil</v-icon>
+            </v-btn>
+            <v-btn icon size="small" variant="text" color="error" @click="confirmDelete(item.id)">
+              <v-icon>mdi-delete</v-icon>
+            </v-btn>
+          </div>
         </template>
-      </v-data-table>
+
+        <template #mobile-item="{ item }">
+          <div class="d-flex flex-column ga-2">
+            <div class="d-flex align-start justify-space-between ga-2">
+              <div class="flex-grow-1 text-break">
+                <div class="text-subtitle-2 font-weight-bold">{{ item.name }}</div>
+                <div class="d-flex flex-wrap align-center ga-2 mt-1">
+                  <span class="text-body-2 font-weight-medium">{{ item.cidr }}</span>
+                  <v-chip
+                    v-if="item.scannable"
+                    size="x-small"
+                    variant="tonal"
+                    color="grey-darken-1"
+                  >
+                    {{ item.usableHosts }} host(s)
+                  </v-chip>
+                  <v-chip v-else size="x-small" variant="tonal" color="error">
+                    faixa inválida
+                  </v-chip>
+                </div>
+                <div class="text-caption text-grey mt-1">
+                  Site: {{ item.site?.name || `Site #${item.siteId}` }}
+                </div>
+                <div class="text-caption text-grey">
+                  <span v-if="item.lastScanAt">{{ formatDateTime(item.lastScanAt) }}</span>
+                  <span v-else>Nunca varrida</span>
+                </div>
+              </div>
+            </div>
+            <div class="d-flex ga-1 mt-1">
+              <v-btn
+                size="small"
+                color="secondary"
+                variant="tonal"
+                prepend-icon="mdi-radar"
+                :disabled="item.scannable === false"
+                :loading="networksStore.scanningId === item.id"
+                @click="triggerScan(item)"
+              >
+                Escanear
+              </v-btn>
+              <v-btn icon size="small" variant="text" color="primary" @click="openDialog(item)">
+                <v-icon>mdi-pencil</v-icon>
+              </v-btn>
+              <v-btn icon size="small" variant="text" color="error" @click="confirmDelete(item.id)">
+                <v-icon>mdi-delete</v-icon>
+              </v-btn>
+            </div>
+          </div>
+        </template>
+      </ResponsiveDataTable>
     </v-card>
 
     <!-- Modal Form de Rede -->
-    <v-dialog v-model="dialog" max-width="500">
+    <v-dialog
+      v-model="dialog"
+      :max-width="$vuetify.display.xs ? undefined : 500"
+      :fullscreen="$vuetify.display.xs"
+    >
       <v-card class="rounded-lg pa-4">
         <v-card-title class="font-weight-bold">
           {{ editedId ? 'Editar Rede' : 'Cadastrar Nova Sub-rede' }}
@@ -145,6 +205,8 @@ import { ref, onMounted, reactive } from 'vue'
 import { useNetworksStore, type Network } from '@/stores/networks'
 import { useSitesStore } from '@/stores/sites'
 import { formatDateTime } from '@/utils/formatters'
+import PageHeader from '@/components/PageHeader.vue'
+import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 
 /** Espelha `MAX_SCAN_HOSTS` de `modules/discovery/cidr_range.ts` */
 const MAX_SCAN_HOSTS = 1024

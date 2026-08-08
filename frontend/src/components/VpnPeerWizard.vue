@@ -1,5 +1,10 @@
 <template>
-  <v-dialog :model-value="modelValue" max-width="760" persistent>
+  <v-dialog
+    :model-value="modelValue"
+    :max-width="$vuetify.display.xs ? undefined : 760"
+    :fullscreen="$vuetify.display.xs"
+    persistent
+  >
     <v-card class="rounded-lg">
       <v-card-title class="font-weight-bold d-flex align-center">
         <v-icon start color="primary">mdi-shield-plus-outline</v-icon>

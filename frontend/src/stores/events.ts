@@ -220,7 +220,6 @@ export const useEventsStore = defineStore('events', () => {
         const discoveryStore = useDiscoveryStore()
         scheduleRefresh('discovery', () => {
           discoveryStore.fetchDiscoveryRuns()
-          discoveryStore.fetchDiscoveryResults()
         })
         break
       }

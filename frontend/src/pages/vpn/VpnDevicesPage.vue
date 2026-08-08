@@ -1,15 +1,13 @@
 <template>
   <div>
-    <div class="d-flex align-center justify-space-between mb-6">
-      <div>
-        <h1 class="text-h4 font-weight-bold">Dispositivos VPN</h1>
-        <p class="text-subtitle-1 text-grey-darken-1">
-          Roteadores e clientes conectados ao NetMonitor pelo túnel WireGuard
-        </p>
-      </div>
-      <div class="d-flex" style="gap: 8px">
+    <PageHeader
+      title="Dispositivos VPN"
+      subtitle="Roteadores e clientes conectados ao NetMonitor pelo túnel WireGuard"
+    >
+      <template #actions>
         <v-btn variant="tonal" prepend-icon="mdi-cog-outline" :to="{ name: 'vpn-server' }">
-          Servidor VPN
+          <span class="hidden-sm-and-down">Servidor VPN</span>
+          <span class="hidden-md-and-up">Servidor</span>
         </v-btn>
         <v-btn
           color="primary"
@@ -17,10 +15,11 @@
           :disabled="!vpnStore.isConfigured"
           @click="wizardOpen = true"
         >
-          Adicionar dispositivo
+          <span class="hidden-sm-and-down">Adicionar dispositivo</span>
+          <span class="hidden-md-and-up">Novo</span>
         </v-btn>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <v-alert
       v-if="!vpnStore.isConfigured && !vpnStore.loading"
@@ -32,14 +31,15 @@
       Configure o servidor VPN antes de adicionar dispositivos.
     </v-alert>
 
-    <v-card elevation="2" class="rounded-lg">
-      <v-data-table
+    <v-card elevation="2" class="mobile-full-bleed">
+      <ResponsiveDataTable
         :headers="headers"
         :items="vpnStore.peers"
         :loading="vpnStore.loading"
         :items-per-page="-1"
         hide-default-footer
         no-data-text="Nenhum dispositivo VPN cadastrado"
+        :clickable="false"
       >
         <template #item.name="{ item }">
           <div class="font-weight-medium">{{ item.device?.name || '—' }}</div>
@@ -191,14 +191,106 @@
             </v-tooltip>
           </div>
         </template>
-      </v-data-table>
+
+        <template #mobile-item="{ item }">
+          <div class="d-flex flex-column ga-2">
+            <div class="d-flex align-start justify-space-between ga-2">
+              <div class="flex-grow-1 text-break">
+                <div class="text-subtitle-2 font-weight-bold">
+                  {{ item.device?.name || `Peer #${item.id}` }}
+                </div>
+                <div
+                  v-if="item.needsFirewallHint"
+                  class="text-caption text-warning d-flex align-center ga-1"
+                >
+                  <v-icon size="12">mdi-alert</v-icon>
+                  Túnel conectado, mas não responde a ping
+                </div>
+                <div
+                  v-else-if="item.pingOutsideTunnel"
+                  class="text-caption text-info d-flex align-center ga-1"
+                >
+                  <v-icon size="12">mdi-lan-disconnect</v-icon>
+                  Ping fora do túnel
+                </div>
+                <div class="d-flex flex-wrap align-center ga-2 mt-1">
+                  <v-chip size="x-small" variant="tonal">
+                    <v-icon start size="12">{{ profileIcon(item.deviceProfile) }}</v-icon>
+                    {{ profileLabel(item.deviceProfile) }}
+                  </v-chip>
+                  <span class="text-caption text-grey-darken-1">{{
+                    item.device?.ipAddress || '—'
+                  }}</span>
+                  <v-chip :color="statusColor(item.connectionStatus)" size="x-small" variant="flat">
+                    {{ statusLabel(item.connectionStatus) }}
+                  </v-chip>
+                </div>
+                <div class="text-caption text-grey mt-1">
+                  {{ formatBytes(item.bytesRx) }} ↓ / {{ formatBytes(item.bytesTx) }} ↑ ·
+                  {{ relativeTime(item.lastSeenAt || item.lastHandshakeAt) }}
+                </div>
+              </div>
+            </div>
+            <div class="d-flex flex-wrap justify-end ga-1 mt-1">
+              <v-btn
+                size="small"
+                icon="mdi-heart-pulse"
+                variant="text"
+                :disabled="!item.pingMonitorId"
+                :to="
+                  item.pingMonitorId
+                    ? { name: 'monitor-detail', params: { id: item.pingMonitorId } }
+                    : undefined
+                "
+              ></v-btn>
+              <v-btn
+                size="small"
+                icon="mdi-pencil"
+                variant="text"
+                @click="openRename(item)"
+              ></v-btn>
+              <v-btn
+                size="small"
+                icon="mdi-content-copy"
+                variant="text"
+                @click="openConfig(item)"
+              ></v-btn>
+              <v-btn
+                v-if="isMobile(item)"
+                size="small"
+                icon="mdi-qrcode"
+                variant="text"
+                @click="openConfig(item)"
+              ></v-btn>
+              <v-btn
+                size="small"
+                icon="mdi-key-change"
+                variant="text"
+                color="warning"
+                @click="rotate(item)"
+              ></v-btn>
+              <v-btn
+                size="small"
+                icon="mdi-cancel"
+                variant="text"
+                color="error"
+                @click="revoke(item)"
+              ></v-btn>
+            </div>
+          </div>
+        </template>
+      </ResponsiveDataTable>
     </v-card>
 
     <v-alert v-if="vpnStore.error" type="error" variant="tonal" class="mt-4" density="comfortable">
       {{ vpnStore.error }}
     </v-alert>
 
-    <v-dialog v-model="renameOpen" max-width="460">
+    <v-dialog
+      v-model="renameOpen"
+      :max-width="$vuetify.display.xs ? undefined : 460"
+      :fullscreen="$vuetify.display.xs"
+    >
       <v-card class="rounded-lg">
         <v-card-title class="font-weight-bold d-flex align-center">
           <v-icon start color="primary">mdi-pencil</v-icon>
@@ -251,6 +343,8 @@ import { onMounted, onUnmounted, ref } from 'vue'
 import VpnPeerWizard from '@/components/VpnPeerWizard.vue'
 import VpnScriptViewer from '@/components/VpnScriptViewer.vue'
 import VpnFirewallHintsDialog from '@/components/VpnFirewallHintsDialog.vue'
+import PageHeader from '@/components/PageHeader.vue'
+import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import {
   useVpnStore,
   vpnProfileIcon,

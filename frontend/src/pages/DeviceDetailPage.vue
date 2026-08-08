@@ -7,14 +7,16 @@
 
     <!-- Header do Dispositivo -->
     <v-card elevation="2" class="rounded-lg pa-4 mb-6">
-      <div class="d-flex align-center justify-space-between flex-wrap ga-4">
-        <div class="d-flex align-center ga-4" style="gap: 16px">
+      <div
+        class="d-flex flex-column flex-md-row align-start align-md-center justify-space-between ga-4"
+      >
+        <div class="d-flex align-center ga-3">
           <v-avatar color="primary" size="48" class="mr-2">
             <v-icon color="white">mdi-router-network</v-icon>
           </v-avatar>
           <div>
-            <div class="d-flex align-center ga-3 flex-wrap" style="gap: 12px">
-              <h1 class="text-h5 font-weight-bold mr-2">
+            <div class="d-flex align-center ga-2 flex-wrap">
+              <h1 class="text-h6 text-md-h5 font-weight-bold">
                 {{ detailStore.device?.name || `Dispositivo #${deviceId}` }}
               </h1>
               <v-chip
@@ -27,41 +29,50 @@
                 {{ (detailStore.device?.status || 'UNKNOWN').toUpperCase() }}
               </v-chip>
             </div>
-            <div class="text-subtitle-2 text-grey mt-1">
-              IP: {{ detailStore.device?.ipAddress || 'Não informado' }} | Tipo:
-              {{ detailStore.device?.type }} | Fabricante:
+            <div class="text-caption text-md-subtitle-2 text-grey mt-1 text-break">
+              IP: {{ detailStore.device?.ipAddress || 'Não informado' }} · Tipo:
+              {{ detailStore.device?.type }} · Fabricante:
               {{ detailStore.device?.vendor || 'Desconhecido' }}
             </div>
           </div>
         </div>
 
-        <div class="d-flex align-center ga-3" style="gap: 12px">
+        <div class="d-flex flex-wrap align-center ga-2 w-100 w-md-auto">
           <v-btn
             color="info"
             variant="tonal"
             prepend-icon="mdi-radar"
+            size="small"
             :loading="detailStore.scanningSnmp"
+            class="flex-grow-1 flex-md-grow-0"
             @click="openScanModal"
           >
-            Escanear SNMP
+            <span class="hidden-sm-and-down">Escanear SNMP</span>
+            <span class="hidden-md-and-up">SNMP</span>
           </v-btn>
 
           <v-btn
             color="secondary"
             prepend-icon="mdi-refresh"
+            size="small"
             :loading="detailStore.pollingSnmp"
+            class="flex-grow-1 flex-md-grow-0"
             @click="detailStore.triggerSnmpPoll(deviceId)"
           >
-            Coletar SNMP agora
+            <span class="hidden-sm-and-down">Coletar SNMP agora</span>
+            <span class="hidden-md-and-up">Coletar</span>
           </v-btn>
 
           <v-btn
             color="purple"
             variant="tonal"
             prepend-icon="mdi-lan-connect"
+            size="small"
+            class="flex-grow-1 flex-md-grow-0"
             @click="portScanOpen = true"
           >
-            Escanear Portas
+            <span class="hidden-sm-and-down">Escanear Portas</span>
+            <span class="hidden-md-and-up">Portas</span>
           </v-btn>
         </div>
       </div>
@@ -69,7 +80,13 @@
 
     <!-- Abas Interativas -->
     <v-card elevation="2" class="rounded-lg">
-      <v-tabs v-model="activeTab" color="primary" align-tabs="title">
+      <v-tabs
+        v-model="activeTab"
+        color="primary"
+        align-tabs="title"
+        show-arrows
+        density="comfortable"
+      >
         <v-tab value="overview" prepend-icon="mdi-information-outline">Visão Geral</v-tab>
         <v-tab value="monitors" prepend-icon="mdi-heart-pulse">
           Monitores ({{ detailStore.monitors.length }})
@@ -142,7 +159,7 @@
               :monitors="detailStore.monitors"
               :loading="detailStore.loading"
               variant="device"
-              no-data-text='Nenhum monitor configurado para este equipamento. Crie um acima ou use "Escanear SNMP" para descobrir automaticamente.'
+              no-data-text="Nenhum monitor configurado para este equipamento. Crie um acima ou use &quot;Escanear SNMP&quot; para descobrir automaticamente."
               @edit="openMonitorDialog"
               @changed="reloadMonitors"
             ></MonitorsTable>
@@ -150,52 +167,56 @@
 
           <!-- Aba Interfaces SNMP -->
           <v-window-item value="interfaces">
-            <v-table hover>
-              <thead>
-                <tr>
-                  <th>Index</th>
-                  <th>Nome Interface</th>
-                  <th>Monitoramento</th>
-                  <th>Status Operacional</th>
-                  <th>MAC Address</th>
-                  <th>Velocidade de Negociação</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="intf in detailStore.interfaces" :key="intf.id">
-                  <td>{{ intf.ifIndex ?? intf.snmpIndex ?? '-' }}</td>
-                  <td class="font-weight-bold">{{ intf.ifName || intf.name || '-' }}</td>
-                  <td>
-                    <v-chip
-                      :color="intf.adminStatus === 'up' ? 'primary' : 'grey'"
-                      size="x-small"
-                      variant="tonal"
-                    >
-                      {{ intf.adminStatus === 'up' ? 'MONITORADA' : 'NÃO MONITORADA' }}
-                    </v-chip>
-                  </td>
-                  <td>
-                    <v-chip
-                      :color="(intf.ifOperStatus || intf.operStatus) === 'up' ? 'success' : 'error'"
-                      size="x-small"
-                    >
-                      Oper: {{ intf.ifOperStatus || intf.operStatus || 'unknown' }}
-                    </v-chip>
-                  </td>
-                  <td>{{ intf.macAddress || 'N/A' }}</td>
-                  <td>
-                    <v-chip size="x-small" variant="tonal" color="info">
-                      {{ formatLinkSpeed(intf.ifSpeed || intf.speed) }}
-                    </v-chip>
-                  </td>
-                </tr>
-                <tr v-if="detailStore.interfaces.length === 0">
-                  <td colspan="6" class="text-center text-grey py-4">
-                    Nenhuma interface SNMP encontrada. Clique em "Escanear SNMP".
-                  </td>
-                </tr>
-              </tbody>
-            </v-table>
+            <div class="table-responsive">
+              <v-table hover>
+                <thead>
+                  <tr>
+                    <th>Index</th>
+                    <th>Nome Interface</th>
+                    <th>Monitoramento</th>
+                    <th>Status Operacional</th>
+                    <th>MAC Address</th>
+                    <th>Velocidade de Negociação</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="intf in detailStore.interfaces" :key="intf.id">
+                    <td>{{ intf.ifIndex ?? intf.snmpIndex ?? '-' }}</td>
+                    <td class="font-weight-bold">{{ intf.ifName || intf.name || '-' }}</td>
+                    <td>
+                      <v-chip
+                        :color="intf.adminStatus === 'up' ? 'primary' : 'grey'"
+                        size="x-small"
+                        variant="tonal"
+                      >
+                        {{ intf.adminStatus === 'up' ? 'MONITORADA' : 'NÃO MONITORADA' }}
+                      </v-chip>
+                    </td>
+                    <td>
+                      <v-chip
+                        :color="
+                          (intf.ifOperStatus || intf.operStatus) === 'up' ? 'success' : 'error'
+                        "
+                        size="x-small"
+                      >
+                        Oper: {{ intf.ifOperStatus || intf.operStatus || 'unknown' }}
+                      </v-chip>
+                    </td>
+                    <td>{{ intf.macAddress || 'N/A' }}</td>
+                    <td>
+                      <v-chip size="x-small" variant="tonal" color="info">
+                        {{ formatLinkSpeed(intf.ifSpeed || intf.speed) }}
+                      </v-chip>
+                    </td>
+                  </tr>
+                  <tr v-if="detailStore.interfaces.length === 0">
+                    <td colspan="6" class="text-center text-grey py-4">
+                      Nenhuma interface SNMP encontrada. Clique em "Escanear SNMP".
+                    </td>
+                  </tr>
+                </tbody>
+              </v-table>
+            </div>
           </v-window-item>
 
           <!-- Aba Métricas & Tráfego -->
@@ -252,7 +273,7 @@
                       />
                       <div class="d-flex align-center justify-space-between text-caption text-grey">
                         <span v-if="isCpuMonitored"
-                          >Load 1 min:
+                        >Load 1 min:
                           {{ cpuLoadValue !== null ? `${cpuLoadValue} load` : 'N/A' }}</span
                         >
                         <span v-else>Recurso desativado na varredura</span>
@@ -383,127 +404,132 @@
               Tráfego de Rede por Interface (Apenas Itens Monitorados)
             </div>
 
-            <v-table border hover class="rounded-lg mb-6">
-              <thead>
-                <tr>
-                  <th>Interface</th>
-                  <th>Status Operacional</th>
-                  <th>Taxa de Download (IN)</th>
-                  <th>Taxa de Upload (OUT)</th>
-                  <th>Volumetria Entrada</th>
-                  <th>Volumetria Saída</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="item in interfaceTrafficSummaries" :key="item.ifIndex">
-                  <td class="font-weight-bold">
-                    <div class="d-flex align-center justify-space-between ga-1">
-                      <span>
-                        <v-icon size="18" class="mr-1">mdi-ethernet-cable</v-icon>
-                        {{ item.ifName }}
-                      </span>
-                      <v-btn
-                        icon
+            <div class="table-responsive">
+              <v-table border hover class="rounded-lg mb-6">
+                <thead>
+                  <tr>
+                    <th>Interface</th>
+                    <th>Status Operacional</th>
+                    <th>Taxa de Download (IN)</th>
+                    <th>Taxa de Upload (OUT)</th>
+                    <th>Volumetria Entrada</th>
+                    <th>Volumetria Saída</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="item in interfaceTrafficSummaries" :key="item.ifIndex">
+                    <td class="font-weight-bold">
+                      <div class="d-flex align-center justify-space-between ga-1">
+                        <span>
+                          <v-icon size="18" class="mr-1">mdi-ethernet-cable</v-icon>
+                          {{ item.ifName }}
+                        </span>
+                        <v-btn
+                          icon
+                          size="x-small"
+                          variant="text"
+                          color="primary"
+                          @click="openTrafficChart(item, 'combined')"
+                        >
+                          <v-icon size="16">mdi-chart-line</v-icon>
+                          <v-tooltip activator="parent" location="top">
+                            Ver Gráfico Combinado
+                          </v-tooltip>
+                        </v-btn>
+                      </div>
+                    </td>
+                    <td>
+                      <v-chip
+                        :color="item.operStatus === 'up' ? 'success' : 'error'"
                         size="x-small"
-                        variant="text"
-                        color="primary"
-                        @click="openTrafficChart(item, 'combined')"
                       >
-                        <v-icon size="16">mdi-chart-line</v-icon>
-                        <v-tooltip activator="parent" location="top">
-                          Ver Gráfico Combinado
-                        </v-tooltip>
-                      </v-btn>
-                    </div>
-                  </td>
-                  <td>
-                    <v-chip :color="item.operStatus === 'up' ? 'success' : 'error'" size="x-small">
-                      {{ item.operStatus.toUpperCase() }}
-                    </v-chip>
-                  </td>
-                  <td class="font-weight-medium text-success">
-                    <div class="d-flex align-center justify-space-between ga-1">
-                      <span>
-                        <v-icon size="14" start>mdi-arrow-down-bold</v-icon>
-                        {{ item.inBpsFormatted }}
-                      </span>
-                      <v-btn
-                        icon
-                        size="x-small"
-                        variant="text"
-                        color="success"
-                        @click="openTrafficChart(item, 'inBps')"
-                      >
-                        <v-icon size="16">mdi-chart-areaspline</v-icon>
-                        <v-tooltip activator="parent" location="top">
-                          Gráfico de Download (IN)
-                        </v-tooltip>
-                      </v-btn>
-                    </div>
-                  </td>
-                  <td class="font-weight-medium text-primary">
-                    <div class="d-flex align-center justify-space-between ga-1">
-                      <span>
-                        <v-icon size="14" start>mdi-arrow-up-bold</v-icon>
-                        {{ item.outBpsFormatted }}
-                      </span>
-                      <v-btn
-                        icon
-                        size="x-small"
-                        variant="text"
-                        color="primary"
-                        @click="openTrafficChart(item, 'outBps')"
-                      >
-                        <v-icon size="16">mdi-chart-areaspline</v-icon>
-                        <v-tooltip activator="parent" location="top">
-                          Gráfico de Upload (OUT)
-                        </v-tooltip>
-                      </v-btn>
-                    </div>
-                  </td>
-                  <td class="text-grey-darken-1">
-                    <div class="d-flex align-center justify-space-between ga-1">
-                      <span>{{ item.inBytesFormatted }}</span>
-                      <v-btn
-                        icon
-                        size="x-small"
-                        variant="text"
-                        color="info"
-                        @click="openTrafficChart(item, 'inOctets')"
-                      >
-                        <v-icon size="16">mdi-chart-box-outline</v-icon>
-                        <v-tooltip activator="parent" location="top">
-                          Gráfico Volumetria Entrada
-                        </v-tooltip>
-                      </v-btn>
-                    </div>
-                  </td>
-                  <td class="text-grey-darken-1">
-                    <div class="d-flex align-center justify-space-between ga-1">
-                      <span>{{ item.outBytesFormatted }}</span>
-                      <v-btn
-                        icon
-                        size="x-small"
-                        variant="text"
-                        color="info"
-                        @click="openTrafficChart(item, 'outOctets')"
-                      >
-                        <v-icon size="16">mdi-chart-box-outline</v-icon>
-                        <v-tooltip activator="parent" location="top">
-                          Gráfico Volumetria Saída
-                        </v-tooltip>
-                      </v-btn>
-                    </div>
-                  </td>
-                </tr>
-                <tr v-if="interfaceTrafficSummaries.length === 0">
-                  <td colspan="6" class="text-center text-grey py-6">
-                    Nenhuma interface selecionada para monitoramento de tráfego. Clique em "Escanear
-                    SNMP" para selecionar.
-                  </td>
-                </tr>
-              </tbody>
-            </v-table>
+                        {{ item.operStatus.toUpperCase() }}
+                      </v-chip>
+                    </td>
+                    <td class="font-weight-medium text-success">
+                      <div class="d-flex align-center justify-space-between ga-1">
+                        <span>
+                          <v-icon size="14" start>mdi-arrow-down-bold</v-icon>
+                          {{ item.inBpsFormatted }}
+                        </span>
+                        <v-btn
+                          icon
+                          size="x-small"
+                          variant="text"
+                          color="success"
+                          @click="openTrafficChart(item, 'inBps')"
+                        >
+                          <v-icon size="16">mdi-chart-areaspline</v-icon>
+                          <v-tooltip activator="parent" location="top">
+                            Gráfico de Download (IN)
+                          </v-tooltip>
+                        </v-btn>
+                      </div>
+                    </td>
+                    <td class="font-weight-medium text-primary">
+                      <div class="d-flex align-center justify-space-between ga-1">
+                        <span>
+                          <v-icon size="14" start>mdi-arrow-up-bold</v-icon>
+                          {{ item.outBpsFormatted }}
+                        </span>
+                        <v-btn
+                          icon
+                          size="x-small"
+                          variant="text"
+                          color="primary"
+                          @click="openTrafficChart(item, 'outBps')"
+                        >
+                          <v-icon size="16">mdi-chart-areaspline</v-icon>
+                          <v-tooltip activator="parent" location="top">
+                            Gráfico de Upload (OUT)
+                          </v-tooltip>
+                        </v-btn>
+                      </div>
+                    </td>
+                    <td class="text-grey-darken-1">
+                      <div class="d-flex align-center justify-space-between ga-1">
+                        <span>{{ item.inBytesFormatted }}</span>
+                        <v-btn
+                          icon
+                          size="x-small"
+                          variant="text"
+                          color="info"
+                          @click="openTrafficChart(item, 'inOctets')"
+                        >
+                          <v-icon size="16">mdi-chart-box-outline</v-icon>
+                          <v-tooltip activator="parent" location="top">
+                            Gráfico Volumetria Entrada
+                          </v-tooltip>
+                        </v-btn>
+                      </div>
+                    </td>
+                    <td class="text-grey-darken-1">
+                      <div class="d-flex align-center justify-space-between ga-1">
+                        <span>{{ item.outBytesFormatted }}</span>
+                        <v-btn
+                          icon
+                          size="x-small"
+                          variant="text"
+                          color="info"
+                          @click="openTrafficChart(item, 'outOctets')"
+                        >
+                          <v-icon size="16">mdi-chart-box-outline</v-icon>
+                          <v-tooltip activator="parent" location="top">
+                            Gráfico Volumetria Saída
+                          </v-tooltip>
+                        </v-btn>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr v-if="interfaceTrafficSummaries.length === 0">
+                    <td colspan="6" class="text-center text-grey py-6">
+                      Nenhuma interface selecionada para monitoramento de tráfego. Clique em
+                      "Escanear SNMP" para selecionar.
+                    </td>
+                  </tr>
+                </tbody>
+              </v-table>
+            </div>
 
             <!-- 3. Tabela do Histórico Bruto de Registros Recentes -->
             <v-card elevation="2" class="rounded-lg pa-4 border">
@@ -531,26 +557,28 @@
                       :height="420"
                       @load="metricsHistory.load"
                     >
-                      <v-table density="compact" hover>
-                        <thead>
-                          <tr>
-                            <th>Nome da Métrica</th>
-                            <th>Interface / Contexto</th>
-                            <th>Valor</th>
-                            <th>Unidade</th>
-                            <th>Data/Hora</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <tr v-for="met in metricsHistory.items.value" :key="met.id">
-                            <td class="font-weight-medium">{{ met.metricName }}</td>
-                            <td>{{ met.interfaceName || 'Sistema / Geral' }}</td>
-                            <td class="font-weight-bold">{{ formatMetricValue(met) }}</td>
-                            <td>{{ met.unit || '-' }}</td>
-                            <td class="text-grey">{{ met.createdAt }}</td>
-                          </tr>
-                        </tbody>
-                      </v-table>
+                      <div class="table-responsive">
+                        <v-table density="compact" hover>
+                          <thead>
+                            <tr>
+                              <th>Nome da Métrica</th>
+                              <th>Interface / Contexto</th>
+                              <th>Valor</th>
+                              <th>Unidade</th>
+                              <th>Data/Hora</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr v-for="met in metricsHistory.items.value" :key="met.id">
+                              <td class="font-weight-medium">{{ met.metricName }}</td>
+                              <td>{{ met.interfaceName || 'Sistema / Geral' }}</td>
+                              <td class="font-weight-bold">{{ formatMetricValue(met) }}</td>
+                              <td>{{ met.unit || '-' }}</td>
+                              <td class="text-grey">{{ met.createdAt }}</td>
+                            </tr>
+                          </tbody>
+                        </v-table>
+                      </div>
                       <template #empty>
                         <div class="text-caption text-grey text-center py-3">
                           Nenhum outro registro no histórico de métricas.
@@ -566,33 +594,35 @@
           <!-- Aba Eventos -->
           <v-window-item value="events">
             <v-infinite-scroll :key="eventsHistory.scrollKey.value" @load="eventsHistory.load">
-              <v-table hover density="comfortable" class="rounded-lg border">
-                <thead>
-                  <tr>
-                    <th>Severidade</th>
-                    <th>Mensagem</th>
-                    <th>Data/Hora</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="evt in eventsHistory.items.value" :key="evt.id">
-                    <td>
-                      <v-chip
-                        :color="
-                          evt.severity === 'critical' || evt.severity === 'error'
-                            ? 'error'
-                            : 'warning'
-                        "
-                        size="x-small"
-                      >
-                        {{ (evt.severity || 'INFO').toUpperCase() }}
-                      </v-chip>
-                    </td>
-                    <td>{{ evt.message }}</td>
-                    <td>{{ evt.createdAt }}</td>
-                  </tr>
-                </tbody>
-              </v-table>
+              <div class="table-responsive">
+                <v-table hover density="comfortable" class="rounded-lg border">
+                  <thead>
+                    <tr>
+                      <th>Severidade</th>
+                      <th>Mensagem</th>
+                      <th>Data/Hora</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="evt in eventsHistory.items.value" :key="evt.id">
+                      <td>
+                        <v-chip
+                          :color="
+                            evt.severity === 'critical' || evt.severity === 'error'
+                              ? 'error'
+                              : 'warning'
+                          "
+                          size="x-small"
+                        >
+                          {{ (evt.severity || 'INFO').toUpperCase() }}
+                        </v-chip>
+                      </td>
+                      <td>{{ evt.message }}</td>
+                      <td>{{ evt.createdAt }}</td>
+                    </tr>
+                  </tbody>
+                </v-table>
+              </div>
               <template #empty>
                 <div class="text-caption text-grey text-center py-4">
                   Nenhum outro evento registrado no histórico.
@@ -713,11 +743,13 @@
 
             <v-divider class="my-6"></v-divider>
 
-            <div class="d-flex flex-wrap ga-3" style="gap: 12px">
+            <div class="d-flex flex-column flex-md-row flex-wrap ga-3">
               <v-btn
                 color="primary"
                 variant="tonal"
                 prepend-icon="mdi-content-copy"
+                size="small"
+                class="flex-grow-1 flex-md-grow-0"
                 @click="openVpnConfig"
               >
                 Copiar configuração
@@ -726,6 +758,8 @@
                 color="warning"
                 variant="tonal"
                 prepend-icon="mdi-key-change"
+                size="small"
+                class="flex-grow-1 flex-md-grow-0"
                 @click="rotateVpnKeys"
               >
                 Rotacionar chaves
@@ -734,12 +768,20 @@
                 color="error"
                 variant="tonal"
                 prepend-icon="mdi-cancel"
+                size="small"
+                class="flex-grow-1 flex-md-grow-0"
                 @click="revokeVpnAccess"
               >
                 Revogar acesso
               </v-btn>
-              <v-spacer></v-spacer>
-              <v-btn variant="text" prepend-icon="mdi-open-in-new" :to="{ name: 'vpn-devices' }">
+              <v-spacer class="hidden-sm-and-down"></v-spacer>
+              <v-btn
+                variant="text"
+                prepend-icon="mdi-open-in-new"
+                size="small"
+                class="flex-grow-1 flex-md-grow-0"
+                :to="{ name: 'vpn-devices' }"
+              >
                 Ver todos os dispositivos VPN
               </v-btn>
             </div>
@@ -749,7 +791,11 @@
     </v-card>
 
     <!-- Modal de Escaneamento SNMP -->
-    <v-dialog v-model="scanModalOpen" max-width="850px">
+    <v-dialog
+      v-model="scanModalOpen"
+      :max-width="$vuetify.display.xs ? undefined : 850"
+      :fullscreen="$vuetify.display.xs"
+    >
       <v-card class="rounded-lg">
         <v-card-title class="d-flex align-center justify-space-between pa-4 bg-primary text-white">
           <div class="d-flex align-center ga-2" style="gap: 8px">
@@ -912,51 +958,53 @@
               </div>
             </div>
 
-            <v-table border hover class="rounded-lg">
-              <thead>
-                <tr>
-                  <th style="width: 50px">Monitorar</th>
-                  <th>Index</th>
-                  <th>Nome Interface</th>
-                  <th>MAC Address</th>
-                  <th>Velocidade</th>
-                  <th>Status Operacional</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="iface in detailStore.scanResult.interfaces" :key="iface.ifIndex">
-                  <td>
-                    <v-checkbox
-                      :model-value="selectedIfIndexes.includes(iface.ifIndex)"
-                      color="primary"
-                      hide-details
-                      @update:model-value="toggleInterface(iface.ifIndex)"
-                    ></v-checkbox>
-                  </td>
-                  <td>{{ iface.ifIndex }}</td>
-                  <td class="font-weight-bold">{{ iface.ifName }}</td>
-                  <td>{{ iface.macAddress || 'N/A' }}</td>
-                  <td>
-                    <v-chip size="x-small" variant="tonal" color="info">
-                      {{ formatLinkSpeed(iface.ifSpeed) }}
-                    </v-chip>
-                  </td>
-                  <td>
-                    <v-chip
-                      :color="iface.ifOperStatus === 'up' ? 'success' : 'error'"
-                      size="x-small"
-                    >
-                      {{ iface.ifOperStatus ? iface.ifOperStatus.toUpperCase() : 'DOWN' }}
-                    </v-chip>
-                  </td>
-                </tr>
-                <tr v-if="detailStore.scanResult.interfaces.length === 0">
-                  <td colspan="6" class="text-center text-grey py-4">
-                    Nenhuma interface respondeu na varredura SNMP.
-                  </td>
-                </tr>
-              </tbody>
-            </v-table>
+            <div class="table-responsive">
+              <v-table border hover class="rounded-lg">
+                <thead>
+                  <tr>
+                    <th style="width: 50px">Monitorar</th>
+                    <th>Index</th>
+                    <th>Nome Interface</th>
+                    <th>MAC Address</th>
+                    <th>Velocidade</th>
+                    <th>Status Operacional</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="iface in detailStore.scanResult.interfaces" :key="iface.ifIndex">
+                    <td>
+                      <v-checkbox
+                        :model-value="selectedIfIndexes.includes(iface.ifIndex)"
+                        color="primary"
+                        hide-details
+                        @update:model-value="toggleInterface(iface.ifIndex)"
+                      ></v-checkbox>
+                    </td>
+                    <td>{{ iface.ifIndex }}</td>
+                    <td class="font-weight-bold">{{ iface.ifName }}</td>
+                    <td>{{ iface.macAddress || 'N/A' }}</td>
+                    <td>
+                      <v-chip size="x-small" variant="tonal" color="info">
+                        {{ formatLinkSpeed(iface.ifSpeed) }}
+                      </v-chip>
+                    </td>
+                    <td>
+                      <v-chip
+                        :color="iface.ifOperStatus === 'up' ? 'success' : 'error'"
+                        size="x-small"
+                      >
+                        {{ iface.ifOperStatus ? iface.ifOperStatus.toUpperCase() : 'DOWN' }}
+                      </v-chip>
+                    </td>
+                  </tr>
+                  <tr v-if="detailStore.scanResult.interfaces.length === 0">
+                    <td colspan="6" class="text-center text-grey py-4">
+                      Nenhuma interface respondeu na varredura SNMP.
+                    </td>
+                  </tr>
+                </tbody>
+              </v-table>
+            </div>
           </div>
         </v-card-text>
 

@@ -1,7 +1,13 @@
 <template>
   <v-app>
     <!-- Navigation Drawer Principal -->
-    <v-navigation-drawer v-model="drawer" elevation="2" class="border-none">
+    <v-navigation-drawer
+      v-model="drawer"
+      elevation="2"
+      class="border-none"
+      :temporary="$vuetify.display.mdAndDown"
+      :permanent="$vuetify.display.lgAndUp"
+    >
       <div class="pa-4 d-flex align-center">
         <v-avatar color="primary" size="42" class="mr-3 elevation-2">
           <v-icon color="white" size="24">mdi-shield-network</v-icon>
@@ -65,8 +71,9 @@
     <v-app-bar flat border="b" density="comfortable" class="px-2">
       <v-app-bar-nav-icon @click="drawer = !drawer" />
 
-      <v-toolbar-title class="text-subtitle-1 font-weight-bold text-grey-darken-3">
-        Plataforma de Monitoramento de Redes
+      <v-toolbar-title class="text-subtitle-1 font-weight-bold text-grey-darken-3 text-truncate">
+        <span class="hidden-sm-and-down">Plataforma de Monitoramento de Redes</span>
+        <span class="hidden-md-and-up">NetMonitor</span>
       </v-toolbar-title>
 
       <v-spacer />
@@ -115,7 +122,7 @@
 
     <!-- Conteúdo Principal da Página -->
     <v-main class="bg-grey-lighten-4">
-      <v-container fluid class="pa-6 max-w-1600">
+      <v-container fluid class="px-mobile-5 px-md-6 py-3 py-md-6 max-w-1600">
         <router-view />
       </v-container>
     </v-main>
@@ -128,6 +135,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { useDisplay } from 'vuetify'
 import { useEventsStore } from '@/stores/events'
 import { useAuthStore } from '@/stores/auth'
 import DnsServersDialog from '@/components/DnsServersDialog.vue'
@@ -147,7 +155,7 @@ interface NavItem {
   children?: NavSubItem[]
 }
 
-const drawer = ref(true)
+const drawer = ref(!useDisplay().mdAndDown)
 const dnsServersDialog = ref(false)
 const eventsStore = useEventsStore()
 const authStore = useAuthStore()

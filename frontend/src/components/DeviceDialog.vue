@@ -1,5 +1,10 @@
 <template>
-  <v-dialog :model-value="modelValue" max-width="650" @update:model-value="onUpdateModelValue">
+  <v-dialog
+    :model-value="modelValue"
+    :max-width="$vuetify.display.xs ? undefined : 650"
+    :fullscreen="$vuetify.display.xs"
+    @update:model-value="onUpdateModelValue"
+  >
     <v-card class="rounded-lg pa-4">
       <v-card-title class="font-weight-bold">
         {{ deviceToEdit ? 'Editar Dispositivo' : 'Cadastrar Novo Dispositivo' }}

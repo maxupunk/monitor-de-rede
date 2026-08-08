@@ -1,13 +1,10 @@
 <template>
   <div>
-    <div class="d-flex align-center justify-space-between mb-6 flex-wrap ga-4">
-      <div>
-        <h1 class="text-h4 font-weight-bold">Central de Alertas</h1>
-        <p class="text-subtitle-1 text-grey-darken-1">
-          Gerenciamento de eventos ativos e definição de regras de notificação
-        </p>
-      </div>
-      <div class="d-flex align-center ga-3">
+    <PageHeader
+      title="Central de Alertas"
+      subtitle="Gerenciamento de eventos ativos e definição de regras de notificação"
+    >
+      <template #actions>
         <v-chip
           :color="eventsStore.isConnected ? 'success' : 'warning'"
           size="small"
@@ -15,7 +12,10 @@
           class="font-weight-medium"
         >
           <v-icon start size="12">mdi-circle</v-icon>
-          {{ eventsStore.isConnected ? 'Atualizando em tempo real' : 'Reconectando...' }}
+          <span class="hidden-xs">{{
+            eventsStore.isConnected ? 'Atualizando em tempo real' : 'Reconectando...'
+          }}</span>
+          <span class="hidden-sm-and-up">{{ eventsStore.isConnected ? 'Ao vivo' : 'Off' }}</span>
         </v-chip>
         <v-btn
           color="primary"
@@ -23,16 +23,18 @@
           prepend-icon="mdi-playlist-check"
           @click="catalogDialog = true"
         >
-          Regras Pré-configuradas
+          <span class="hidden-sm-and-down">Regras Pré-configuradas</span>
+          <span class="hidden-md-and-up">Catálogo</span>
         </v-btn>
         <v-btn color="primary" prepend-icon="mdi-plus" @click="openRuleDialog()">
-          Nova Regra de Alerta
+          <span class="hidden-sm-and-down">Nova Regra de Alerta</span>
+          <span class="hidden-md-and-up">Nova</span>
         </v-btn>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <!-- Abas: Alertas Ativos & Regras de Alerta -->
-    <v-card elevation="2" class="rounded-lg">
+    <v-card elevation="2" class="mobile-full-bleed">
       <v-tabs v-model="tab" color="primary">
         <v-tab value="active">Alertas Ativos ({{ alertsStore.activeAlerts.length }})</v-tab>
         <v-tab value="rules">Regras Configuradas ({{ alertsStore.alertRules.length }})</v-tab>
@@ -44,13 +46,14 @@
         <v-window v-model="tab">
           <!-- Alertas Ativos -->
           <v-window-item value="active">
-            <v-data-table
+            <ResponsiveDataTable
               :headers="activeHeaders"
               :items="alertsStore.activeAlerts"
               :loading="alertsStore.loading"
               :items-per-page="-1"
               hide-default-footer
               no-data-text="Nenhum alerta ativo no momento!"
+              :clickable="false"
             >
               <template #item.severity="{ item }">
                 <v-chip :color="severityColor(item.severity)" size="small">
@@ -90,7 +93,49 @@
                   </v-btn>
                 </div>
               </template>
-            </v-data-table>
+
+              <template #mobile-item="{ item }">
+                <div class="d-flex flex-column ga-2">
+                  <div class="d-flex align-start justify-space-between ga-2">
+                    <div class="flex-grow-1 text-break">
+                      <div class="d-flex flex-wrap align-center ga-2">
+                        <v-chip :color="severityColor(item.severity)" size="x-small">
+                          {{ severityLabel(item.severity) }}
+                        </v-chip>
+                        <v-chip variant="outlined" size="x-small">
+                          {{ statusLabel(item.status) }}
+                        </v-chip>
+                      </div>
+                      <div class="text-subtitle-1 font-weight-bold mt-1">{{ item.title }}</div>
+                      <div class="text-body-2 text-grey-darken-1">{{ item.message }}</div>
+                      <div class="text-caption text-grey mt-1">
+                        {{ formatDateTime(item.startedAt || item.createdAt) }}
+                      </div>
+                    </div>
+                  </div>
+                  <div class="d-flex ga-2 mt-1">
+                    <v-btn
+                      size="small"
+                      color="primary"
+                      variant="tonal"
+                      :disabled="item.status === 'acknowledged'"
+                      @click="alertsStore.acknowledgeAlert(item.id)"
+                    >
+                      Reconhecer
+                    </v-btn>
+                    <v-btn
+                      size="small"
+                      color="warning"
+                      variant="outlined"
+                      :disabled="item.status === 'silenced'"
+                      @click="openSilenceDialog(item.id)"
+                    >
+                      Silenciar
+                    </v-btn>
+                  </div>
+                </div>
+              </template>
+            </ResponsiveDataTable>
           </v-window-item>
 
           <!-- Regras Configuradas -->
@@ -107,18 +152,19 @@
                 class="font-weight-bold text-primary"
                 href="#"
                 @click.prevent="catalogDialog = true"
-                >regras pré-configuradas</a
+              >regras pré-configuradas</a
               >
               para cobrir indisponibilidade, latência, perda de pacotes e quedas de interface.
             </v-alert>
 
-            <v-data-table
+            <ResponsiveDataTable
               :headers="rulesHeaders"
               :items="alertsStore.alertRules"
               :loading="alertsStore.loading"
               :items-per-page="-1"
               hide-default-footer
               no-data-text="Nenhuma regra configurada"
+              :clickable="false"
             >
               <template #item.name="{ item }">
                 <div class="d-flex align-center ga-2">
@@ -182,7 +228,54 @@
                   </v-btn>
                 </div>
               </template>
-            </v-data-table>
+
+              <template #mobile-item="{ item }">
+                <div class="d-flex flex-column ga-2">
+                  <div class="d-flex align-start justify-space-between ga-2">
+                    <div class="flex-grow-1 text-break">
+                      <div class="d-flex flex-wrap align-center ga-2">
+                        <span class="text-subtitle-2 font-weight-bold">{{ item.name }}</span>
+                        <v-chip :color="severityColor(item.severity)" size="x-small">
+                          {{ severityLabel(item.severity) }}
+                        </v-chip>
+                      </div>
+                      <div class="text-body-2 text-grey-darken-1 mt-1">
+                        {{ metricLabel(item.condition?.field) }}
+                        {{ operatorLabel(item.condition?.operator).toLowerCase() }}
+                        <strong>
+                          {{ formatConditionValue(item.condition?.field, item.condition?.value) }}
+                        </strong>
+                      </div>
+                      <div class="text-caption text-grey mt-1">
+                        Tolerância: {{ durationLabel(item.durationSeconds) }}
+                      </div>
+                    </div>
+                    <v-switch
+                      :model-value="item.isEnabled ?? item.enabled"
+                      color="success"
+                      density="compact"
+                      hide-details
+                      style="transform: scale(0.85); transform-origin: right top"
+                      @update:model-value="toggleRule(item, $event)"
+                    ></v-switch>
+                  </div>
+                  <div class="d-flex ga-1 mt-1">
+                    <v-btn icon size="small" variant="text" @click="openRuleDialog(item)">
+                      <v-icon>mdi-pencil</v-icon>
+                    </v-btn>
+                    <v-btn
+                      icon
+                      size="small"
+                      variant="text"
+                      color="error"
+                      @click="confirmDeleteRule(item)"
+                    >
+                      <v-icon>mdi-delete</v-icon>
+                    </v-btn>
+                  </div>
+                </div>
+              </template>
+            </ResponsiveDataTable>
           </v-window-item>
 
           <!-- Histórico completo, incluindo alertas já normalizados -->
@@ -202,39 +295,41 @@
             </div>
 
             <v-infinite-scroll :key="history.scrollKey.value" @load="history.load">
-              <v-table hover density="comfortable" class="rounded-lg border">
-                <thead>
-                  <tr>
-                    <th style="width: 110px">Severidade</th>
-                    <th style="width: 120px">Situação</th>
-                    <th>Alerta</th>
-                    <th>Mensagem</th>
-                    <th style="width: 170px">Início</th>
-                    <th style="width: 170px">Normalizado em</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="alert in history.items.value" :key="alert.id">
-                    <td>
-                      <v-chip :color="severityColor(alert.severity)" size="x-small">
-                        {{ severityLabel(alert.severity) }}
-                      </v-chip>
-                    </td>
-                    <td>
-                      <v-chip variant="outlined" size="x-small">
-                        {{ statusLabel(alert.status) }}
-                      </v-chip>
-                    </td>
-                    <td class="font-weight-medium">{{ alert.title }}</td>
-                    <td class="text-body-2">{{ alert.message || '—' }}</td>
-                    <td>{{ formatDateTime(alert.startedAt || alert.createdAt) }}</td>
-                    <td>
-                      <span v-if="alert.resolvedAt">{{ formatDateTime(alert.resolvedAt) }}</span>
-                      <span v-else class="text-grey">Em aberto</span>
-                    </td>
-                  </tr>
-                </tbody>
-              </v-table>
+              <div class="table-responsive">
+                <v-table hover density="comfortable" class="rounded-lg border">
+                  <thead>
+                    <tr>
+                      <th style="width: 110px">Severidade</th>
+                      <th style="width: 120px">Situação</th>
+                      <th>Alerta</th>
+                      <th>Mensagem</th>
+                      <th style="width: 170px">Início</th>
+                      <th style="width: 170px">Normalizado em</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="alert in history.items.value" :key="alert.id">
+                      <td>
+                        <v-chip :color="severityColor(alert.severity)" size="x-small">
+                          {{ severityLabel(alert.severity) }}
+                        </v-chip>
+                      </td>
+                      <td>
+                        <v-chip variant="outlined" size="x-small">
+                          {{ statusLabel(alert.status) }}
+                        </v-chip>
+                      </td>
+                      <td class="font-weight-medium">{{ alert.title }}</td>
+                      <td class="text-body-2">{{ alert.message || '—' }}</td>
+                      <td>{{ formatDateTime(alert.startedAt || alert.createdAt) }}</td>
+                      <td>
+                        <span v-if="alert.resolvedAt">{{ formatDateTime(alert.resolvedAt) }}</span>
+                        <span v-else class="text-grey">Em aberto</span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </v-table>
+              </div>
               <template #empty>
                 <div class="text-caption text-grey text-center py-4">
                   Nenhum outro alerta no histórico.
@@ -257,7 +352,11 @@
     <AlertSilenceDialog v-model="silenceDialog" :alert-id="silenceTargetId" />
 
     <!-- Modal Form de Regra -->
-    <v-dialog v-model="ruleDialog" max-width="620">
+    <v-dialog
+      v-model="ruleDialog"
+      :max-width="$vuetify.display.xs ? undefined : 620"
+      :fullscreen="$vuetify.display.xs"
+    >
       <v-card class="rounded-lg pa-4">
         <v-card-title class="font-weight-bold">
           {{ editingRuleId ? 'Editar Regra de Alerta' : 'Cadastrar Regra de Alerta' }}
@@ -382,6 +481,8 @@ import { useInfiniteList } from '@/composables/useInfiniteList'
 import AlertRuleCatalogDialog from '@/components/AlertRuleCatalogDialog.vue'
 import AlertSilenceDialog from '@/components/AlertSilenceDialog.vue'
 import DataRateInput from '@/components/DataRateInput.vue'
+import PageHeader from '@/components/PageHeader.vue'
+import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import {
   ALERT_METRICS,
   ALERT_DURATIONS,

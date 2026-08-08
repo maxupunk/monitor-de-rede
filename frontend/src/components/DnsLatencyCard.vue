@@ -114,9 +114,12 @@
           </v-list-item-subtitle>
 
           <template #append>
-            <div class="d-flex align-center ga-3">
+            <div class="d-flex flex-column flex-md-row align-end align-md-center ga-2">
               <div class="text-right">
-                <div v-if="entry.avgLookupTimeMs !== null" class="d-flex align-baseline ga-1">
+                <div
+                  v-if="entry.avgLookupTimeMs !== null"
+                  class="d-flex align-baseline ga-1 justify-end"
+                >
                   <span
                     class="text-h6 font-weight-bold"
                     :class="`text-${positionColor(index, entry)}`"
@@ -134,7 +137,8 @@
               <!-- Atalho para acompanhar continuamente o servidor recém-medido -->
               <v-chip v-if="isMonitored(entry)" size="small" color="success" variant="tonal">
                 <v-icon start size="14">mdi-check-circle-outline</v-icon>
-                Monitorado
+                <span class="hidden-sm-and-down">Monitorado</span>
+                <span class="hidden-md-and-up">OK</span>
                 <v-tooltip activator="parent" location="top">
                   Já existe um monitor DNS para este servidor
                 </v-tooltip>

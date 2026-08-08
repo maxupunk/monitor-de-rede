@@ -1,22 +1,22 @@
 <template>
   <div>
-    <div class="d-flex align-center justify-space-between mb-6 flex-wrap ga-3">
-      <div>
-        <h1 class="text-h4 font-weight-bold">Central de Descoberta (Discovery)</h1>
-        <p class="text-subtitle-1 text-grey-darken-1">
-          Revise equipamentos encontrados na rede para aprovação ou mesclagem
-        </p>
-      </div>
-      <v-btn color="primary" prepend-icon="mdi-refresh" @click="refreshData">
-        Atualizar Descobertas
-      </v-btn>
-    </div>
+    <PageHeader
+      title="Central de Descoberta (Discovery)"
+      subtitle="Revise equipamentos encontrados na rede para aprovação ou mesclagem"
+    >
+      <template #actions>
+        <v-btn color="primary" prepend-icon="mdi-refresh" @click="refreshData">
+          <span class="hidden-sm-and-down">Atualizar Descobertas</span>
+          <span class="hidden-md-and-up">Atualizar</span>
+        </v-btn>
+      </template>
+    </PageHeader>
 
     <!-- Disparo de varredura por faixa cadastrada em /networks -->
-    <v-card elevation="2" class="rounded-lg mb-6 pa-4">
-      <div class="d-flex align-center ga-4 flex-wrap">
-        <v-icon color="secondary" size="28">mdi-radar</v-icon>
-        <div class="flex-grow-1" style="min-width: 260px">
+    <v-card elevation="2" class="mobile-full-bleed mb-6 pa-4">
+      <div class="d-flex flex-column flex-md-row align-start align-md-center ga-3">
+        <v-icon color="secondary" size="28" class="hidden-sm-and-down">mdi-radar</v-icon>
+        <div class="flex-grow-1 w-100" style="min-width: 260px">
           <v-select
             v-model="selectedNetworkId"
             :items="scannableNetworks"
@@ -34,21 +34,33 @@
             "
           ></v-select>
         </div>
-        <v-btn
-          color="secondary"
-          prepend-icon="mdi-radar"
-          :disabled="selectedNetworkId === null"
-          :loading="networksStore.scanningId !== null"
-          @click="scanSelectedNetwork"
-        >
-          Escanear bloco
-        </v-btn>
-        <v-btn variant="text" prepend-icon="mdi-lan" to="/networks">Gerenciar redes</v-btn>
+        <div class="d-flex ga-2 w-100 w-md-auto">
+          <v-btn
+            color="secondary"
+            prepend-icon="mdi-radar"
+            :disabled="selectedNetworkId === null"
+            :loading="networksStore.scanningId !== null"
+            class="flex-grow-1 flex-md-grow-0"
+            @click="scanSelectedNetwork"
+          >
+            <span class="hidden-sm-and-down">Escanear bloco</span>
+            <span class="hidden-md-and-up">Escanear</span>
+          </v-btn>
+          <v-btn
+            variant="text"
+            prepend-icon="mdi-lan"
+            to="/networks"
+            class="flex-grow-1 flex-md-grow-0"
+          >
+            <span class="hidden-sm-and-down">Gerenciar redes</span>
+            <span class="hidden-md-and-up">Redes</span>
+          </v-btn>
+        </div>
       </div>
     </v-card>
 
     <!-- Abas: Resultados & Execuções -->
-    <v-card elevation="2" class="rounded-lg">
+    <v-card elevation="2" class="mobile-full-bleed">
       <v-tabs v-model="tab" color="primary">
         <v-tab value="results">Resultados Encontrados</v-tab>
         <v-tab value="runs">Histórico de Escaneamento</v-tab>
@@ -60,83 +72,110 @@
           <!-- Resultados Encontrados -->
           <v-window-item value="results">
             <v-infinite-scroll :key="results.scrollKey.value" @load="results.load">
-              <v-table hover density="comfortable" class="rounded-lg border">
-                <thead>
-                  <tr>
-                    <th>IP</th>
-                    <th>MAC Address</th>
-                    <th>Nome Sugerido</th>
-                    <th>Fabricante</th>
-                    <th>Rede</th>
-                    <th style="width: 140px">Confiança</th>
-                    <th style="width: 110px">Status</th>
-                    <th style="width: 200px">Ações</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr
-                    v-for="item in results.items.value"
-                    :key="item.id"
-                    class="cursor-pointer"
-                    @click="openDetailDialog(item)"
+              <ResponsiveDataTable
+                :headers="resultHeaders"
+                :items="results.items.value"
+                :items-per-page="-1"
+                hide-default-footer
+                no-data-text=""
+                clickable
+                @click:row="(_event, { item }) => openDetailDialog(item)"
+              >
+                <template #item.ipAddress="{ item }">
+                  <span class="font-weight-medium">{{ item.ipAddress }}</span>
+                </template>
+
+                <template #item.suggestedName="{ item }">
+                  <span>{{ item.mdnsName || item.hostname || '—' }}</span>
+                </template>
+
+                <template #item.network="{ item }">
+                  <span v-if="item.discoveryRun?.network" class="text-body-2">
+                    {{ item.discoveryRun.network.name }}
+                    <div class="text-caption text-grey">{{ item.discoveryRun.network.cidr }}</div>
+                  </span>
+                  <span v-else class="text-caption text-grey">—</span>
+                </template>
+
+                <template #item.confidence="{ item }">
+                  <v-progress-linear
+                    :model-value="item.confidence"
+                    color="success"
+                    height="18"
+                    rounded
                   >
-                    <td class="font-weight-medium">{{ item.ipAddress }}</td>
-                    <td>{{ item.macAddress || '—' }}</td>
-                    <td>{{ item.mdnsName || item.hostname || '—' }}</td>
-                    <td>{{ item.vendor || '—' }}</td>
-                    <td>
-                      <span v-if="item.discoveryRun?.network" class="text-body-2">
-                        {{ item.discoveryRun.network.name }}
-                        <div class="text-caption text-grey">
+                    <template #default="{ value }">
+                      <strong class="text-caption text-white">{{ Math.ceil(value) }}%</strong>
+                    </template>
+                  </v-progress-linear>
+                </template>
+
+                <template #item.actions="{ item }">
+                  <div v-if="!isIpAdded(item.ipAddress)" class="d-flex ga-2">
+                    <v-btn
+                      size="small"
+                      color="success"
+                      prepend-icon="mdi-plus"
+                      @click.stop="handleAdd(item)"
+                    >
+                      Adicionar
+                    </v-btn>
+                  </div>
+                  <div v-else>
+                    <v-chip size="small" color="success" variant="tonal">Já adicionado</v-chip>
+                  </div>
+                </template>
+
+                <template #mobile-item="{ item }">
+                  <div class="d-flex flex-column ga-2">
+                    <div class="d-flex align-start justify-space-between ga-2">
+                      <div class="flex-grow-1 text-break">
+                        <div class="text-subtitle-1 font-weight-bold text-primary">
+                          {{ item.ipAddress }}
+                        </div>
+                        <div class="text-caption text-grey-darken-1">
+                          {{ item.mdnsName || item.hostname || 'Dispositivo sem nome' }}
+                        </div>
+                        <div class="d-flex flex-wrap align-center ga-2 mt-1">
+                          <v-chip size="x-small" color="info" variant="tonal">
+                            {{ item.vendor || 'Fabricante desconhecido' }}
+                          </v-chip>
+                          <v-chip
+                            v-if="isIpAdded(item.ipAddress)"
+                            size="x-small"
+                            color="success"
+                            variant="tonal"
+                          >
+                            JÁ ADICIONADO
+                          </v-chip>
+                        </div>
+                        <div v-if="item.discoveryRun?.network" class="text-caption text-grey mt-1">
+                          {{ item.discoveryRun.network.name }} —
                           {{ item.discoveryRun.network.cidr }}
                         </div>
-                      </span>
-                      <span v-else class="text-caption text-grey">—</span>
-                    </td>
-                    <td>
-                      <v-progress-linear
-                        :model-value="item.confidence"
+                      </div>
+                      <div class="text-caption font-weight-medium text-success">
+                        {{ Math.ceil(item.confidence) }}%
+                      </div>
+                    </div>
+                    <div v-if="!isIpAdded(item.ipAddress)" class="d-flex ga-2 mt-1">
+                      <v-btn
+                        size="small"
                         color="success"
-                        height="18"
-                        rounded
+                        prepend-icon="mdi-plus"
+                        variant="flat"
+                        block
+                        @click.stop="handleAdd(item)"
                       >
-                        <template #default="{ value }">
-                          <strong class="text-caption text-white">{{ Math.ceil(value) }}%</strong>
-                        </template>
-                      </v-progress-linear>
-                    </td>
-                    <td>
-                      <v-chip :color="getStatusColor(item.status)" size="small" variant="tonal">
-                        {{ (item.status || 'PENDING').toUpperCase() }}
-                      </v-chip>
-                    </td>
-                    <td>
-                      <div v-if="item.status === 'pending'" class="d-flex ga-2">
-                        <v-btn
-                          size="small"
-                          color="success"
-                          prepend-icon="mdi-plus"
-                          @click="handleAdd(item)"
-                        >
-                          Adicionar
-                        </v-btn>
-                        <v-btn
-                          size="small"
-                          color="grey"
-                          variant="outlined"
-                          @click="handleIgnore(item.id)"
-                        >
-                          Ignorar
-                        </v-btn>
-                      </div>
-                      <div v-else-if="item.status === 'accepted' || item.status === 'merged'">
-                        <v-chip size="small" color="success" variant="tonal">Já adicionado</v-chip>
-                      </div>
-                      <span v-else class="text-caption text-grey">Processado</span>
-                    </td>
-                  </tr>
-                </tbody>
-              </v-table>
+                        Adicionar
+                      </v-btn>
+                    </div>
+                    <div v-else>
+                      <v-chip size="small" color="success" variant="tonal">Já adicionado</v-chip>
+                    </div>
+                  </div>
+                </template>
+              </ResponsiveDataTable>
               <template #empty>
                 <div class="text-caption text-grey text-center py-4">
                   Nenhum novo dispositivo pendente de aprovação.
@@ -163,32 +202,62 @@
               </v-btn>
             </div>
             <v-infinite-scroll :key="runs.scrollKey.value" @load="runs.load">
-              <v-table hover density="comfortable" class="rounded-lg border">
-                <thead>
-                  <tr>
-                    <th>ID Run</th>
-                    <th>Rede</th>
-                    <th>Faixa</th>
-                    <th>Dispositivos Encontrados</th>
-                    <th>Status</th>
-                    <th>Iniciado em</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="item in runs.items.value" :key="item.id">
-                    <td>#{{ item.id }}</td>
-                    <td>{{ item.networkName || `Rede #${item.networkId}` }}</td>
-                    <td>{{ item.cidr || '—' }}</td>
-                    <td>{{ item.devicesFound }}</td>
-                    <td>
-                      <v-chip :color="runStatusColor(item.status)" size="small">
-                        {{ runStatusLabel(item.status) }}
-                      </v-chip>
-                    </td>
-                    <td>{{ formatDateTime(item.startedAt) }}</td>
-                  </tr>
-                </tbody>
-              </v-table>
+              <ResponsiveDataTable
+                :headers="runHeaders"
+                :items="runs.items.value"
+                :items-per-page="-1"
+                hide-default-footer
+                no-data-text=""
+                :clickable="false"
+              >
+                <template #item.id="{ item }">
+                  <span class="font-weight-medium">#{{ item.id }}</span>
+                </template>
+
+                <template #item.network="{ item }">
+                  <span>{{ item.networkName || `Rede #${item.networkId}` }}</span>
+                </template>
+
+                <template #item.status="{ item }">
+                  <v-chip :color="runStatusColor(item.status)" size="small">
+                    {{ runStatusLabel(item.status) }}
+                  </v-chip>
+                </template>
+
+                <template #item.startedAt="{ item }">
+                  <span class="text-body-2">{{ formatDateTime(item.startedAt) }}</span>
+                </template>
+
+                <template #mobile-item="{ item }">
+                  <div class="d-flex flex-column ga-2">
+                    <div class="d-flex align-start justify-space-between ga-2">
+                      <div class="flex-grow-1 text-break">
+                        <div class="text-subtitle-1 font-weight-bold">
+                          {{ item.networkName || `Rede #${item.networkId}` }}
+                        </div>
+                        <div class="text-caption text-grey-darken-1">
+                          {{ item.cidr || '—' }}
+                        </div>
+                        <div class="d-flex flex-wrap align-center ga-2 mt-1">
+                          <v-chip
+                            :color="runStatusColor(item.status)"
+                            size="x-small"
+                            variant="tonal"
+                          >
+                            {{ runStatusLabel(item.status) }}
+                          </v-chip>
+                          <span class="text-caption text-grey">
+                            {{ formatDateTime(item.startedAt) }}
+                          </span>
+                        </div>
+                      </div>
+                      <div class="text-caption font-weight-medium">
+                        {{ item.devicesFound }} encontrados
+                      </div>
+                    </div>
+                  </div>
+                </template>
+              </ResponsiveDataTable>
               <template #empty>
                 <div class="text-caption text-grey text-center py-4">
                   Nenhuma outra varredura registrada.
@@ -218,11 +287,13 @@
 import { computed, ref, onMounted, reactive } from 'vue'
 import { useDiscoveryStore, type DiscoveryResult, type DiscoveryRun } from '@/stores/discovery'
 import { useNetworksStore } from '@/stores/networks'
+import { useDevicesStore } from '@/stores/devices'
 import { useInfiniteList } from '@/composables/useInfiniteList'
-import { getStatusColor } from '@/utils/monitorPresentation'
 import { formatDateTime } from '@/utils/formatters'
 import DeviceDialog from '@/components/DeviceDialog.vue'
 import DiscoveryResultDialog from '@/components/DiscoveryResultDialog.vue'
+import PageHeader from '@/components/PageHeader.vue'
+import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import type { Device } from '@/stores/devices'
 
 /** Espelha `MAX_SCAN_HOSTS` de `modules/discovery/cidr_range.ts` */
@@ -230,6 +301,7 @@ const MAX_SCAN_HOSTS = 1024
 
 const discoveryStore = useDiscoveryStore()
 const networksStore = useNetworksStore()
+const devicesStore = useDevicesStore()
 const tab = ref('results')
 const selectedNetworkId = ref<number | null>(null)
 const feedback = reactive({ visible: false, message: '', color: 'success' })
@@ -238,6 +310,12 @@ const selectedResult = ref<DiscoveryResult | null>(null)
 const resultDialogOpen = ref(false)
 const selectedDetailResult = ref<DiscoveryResult | null>(null)
 const cleanupLoading = ref(false)
+
+const addedIpSet = computed(() => new Set(devicesStore.devices.map((d) => d.ipAddress).filter(Boolean)))
+
+function isIpAdded(ip: string): boolean {
+  return addedIpSet.value.has(ip)
+}
 
 const dialogPrefill = computed<Partial<Device> | null>(() => {
   if (!selectedResult.value) return null
@@ -262,6 +340,25 @@ const runs = useInfiniteList<DiscoveryRun>(() => '/discovery/runs', {
   label: 'histórico de varreduras',
 })
 
+const resultHeaders = [
+  { title: 'IP', key: 'ipAddress' },
+  { title: 'MAC Address', key: 'macAddress' },
+  { title: 'Nome Sugerido', key: 'suggestedName' },
+  { title: 'Fabricante', key: 'vendor' },
+  { title: 'Rede', key: 'network' },
+  { title: 'Confiança', key: 'confidence', width: '140px' },
+  { title: 'Ações', key: 'actions', sortable: false, width: '200px' },
+]
+
+const runHeaders = [
+  { title: 'ID Run', key: 'id', width: '80px' },
+  { title: 'Rede', key: 'network' },
+  { title: 'Faixa', key: 'cidr' },
+  { title: 'Dispositivos Encontrados', key: 'devicesFound', width: '120px' },
+  { title: 'Status', key: 'status', width: '110px' },
+  { title: 'Iniciado em', key: 'startedAt', width: '160px' },
+]
+
 /** Só faz sentido oferecer redes cujo CIDR o backend consegue expandir */
 const scannableNetworks = computed(() =>
   networksStore.networks
@@ -284,6 +381,7 @@ const selectedNetworkHint = computed(() => {
 
 onMounted(() => {
   networksStore.fetchNetworks()
+  devicesStore.fetchDevices()
   refreshData()
 })
 
@@ -294,6 +392,10 @@ function refreshData() {
 
 async function scanSelectedNetwork() {
   if (selectedNetworkId.value === null) return
+
+  // Limpa os resultados anteriores imediatamente: após o scan só deve
+  // aparecer o resultado da última varredura.
+  results.reset()
 
   const result = await networksStore.scanNetwork(selectedNetworkId.value)
   if (!result) {
@@ -346,23 +448,17 @@ function handleDetailAdd() {
 }
 
 async function onDeviceSaved() {
-  if (!selectedResult.value) return
-
-  const ok = await discoveryStore.markAccepted(selectedResult.value.id)
-  feedback.color = ok ? 'success' : 'error'
-  feedback.message = ok
-    ? 'Dispositivo cadastrado e resultado marcado como adicionado.'
-    : (discoveryStore.error ?? 'Dispositivo cadastrado, mas não foi possível marcar o resultado.')
-  feedback.visible = true
-
   selectedResult.value = null
   deviceDialogOpen.value = false
-  results.reset()
-}
 
-async function handleIgnore(id: number) {
-  await discoveryStore.ignoreResult(id)
+  // O backend já remove o discovery_result ao criar o device. Recarrega as
+  // listas para refletir a alteração.
+  await devicesStore.fetchDevices()
   results.reset()
+
+  feedback.color = 'success'
+  feedback.message = 'Dispositivo cadastrado com sucesso.'
+  feedback.visible = true
 }
 
 async function handleCleanup() {

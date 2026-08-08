@@ -1,11 +1,9 @@
 <template>
   <div>
-    <div class="mb-6">
-      <h1 class="text-h4 font-weight-bold">Configurações do Sistema</h1>
-      <p class="text-subtitle-1 text-grey-darken-1">
-        Preferências globais, parâmetros de monitoramento e notificações
-      </p>
-    </div>
+    <PageHeader
+      title="Configurações do Sistema"
+      subtitle="Preferências globais, parâmetros de monitoramento e notificações"
+    />
 
     <v-row>
       <v-col cols="12" md="6">
@@ -62,6 +60,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import PageHeader from '@/components/PageHeader.vue'
 
 const defaultPingInterval = ref(60)
 const defaultSnmpCommunity = ref('public')

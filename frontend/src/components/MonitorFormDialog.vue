@@ -1,7 +1,8 @@
 <template>
   <v-dialog
     :model-value="modelValue"
-    max-width="860"
+    :max-width="$vuetify.display.xs ? undefined : 860"
+    :fullscreen="$vuetify.display.xs"
     scrollable
     @update:model-value="emit('update:modelValue', $event)"
   >
@@ -205,7 +206,7 @@
             <v-col
               v-if="
                 form.kind === 'snmp' &&
-                (form.snmpMode === 'interface' || form.snmpMode === 'interface_traffic')
+                  (form.snmpMode === 'interface' || form.snmpMode === 'interface_traffic')
               "
               cols="12"
               md="6"
@@ -278,8 +279,8 @@
             <v-col
               v-if="
                 form.kind === 'snmp' &&
-                form.snmpMode === 'interface_traffic' &&
-                form.ifIndex !== null
+                  form.snmpMode === 'interface_traffic' &&
+                  form.ifIndex !== null
               "
               cols="12"
             >

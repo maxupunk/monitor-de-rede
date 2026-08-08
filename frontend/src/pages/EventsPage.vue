@@ -1,22 +1,24 @@
 <template>
   <div>
-    <div class="d-flex align-center justify-space-between mb-6 flex-wrap ga-3">
-      <div>
-        <h1 class="text-h4 font-weight-bold">Feed de Eventos em Tempo Real</h1>
-        <p class="text-subtitle-1 text-grey-darken-1">
-          Fluxo contínuo de eventos transmitidos via Server-Sent Events (SSE)
-        </p>
-      </div>
-      <v-chip :color="eventsStore.isConnected ? 'success' : 'grey'" size="large" variant="tonal">
-        <v-icon start>mdi-radiobox-marked</v-icon>
-        {{ eventsStore.isConnected ? 'SSE Conectado' : 'SSE Desconectado' }}
-      </v-chip>
-    </div>
+    <PageHeader
+      title="Feed de Eventos em Tempo Real"
+      subtitle="Fluxo contínuo de eventos transmitidos via Server-Sent Events (SSE)"
+    >
+      <template #actions>
+        <v-chip :color="eventsStore.isConnected ? 'success' : 'grey'" size="large" variant="tonal">
+          <v-icon start>mdi-radiobox-marked</v-icon>
+          <span class="hidden-xs">{{
+            eventsStore.isConnected ? 'SSE Conectado' : 'SSE Desconectado'
+          }}</span>
+          <span class="hidden-sm-and-up">{{ eventsStore.isConnected ? 'On' : 'Off' }}</span>
+        </v-chip>
+      </template>
+    </PageHeader>
 
     <!-- Filtros e Busca -->
     <v-card elevation="2" class="rounded-lg mb-6 pa-4">
       <v-row density="compact">
-        <v-col cols="12" sm="8" md="6">
+        <v-col cols="12" md="6">
           <v-text-field
             v-model="searchQuery"
             placeholder="Buscar por dispositivo, mensagem, métrica ou conteúdo JSON..."
@@ -27,7 +29,7 @@
             variant="outlined"
           ></v-text-field>
         </v-col>
-        <v-col cols="12" sm="4" md="4">
+        <v-col cols="12" sm="6" md="4">
           <v-select
             v-model="typeFilter"
             :items="typeOptions"
@@ -39,7 +41,7 @@
             variant="outlined"
           ></v-select>
         </v-col>
-        <v-col cols="12" md="2" class="d-flex align-center justify-end">
+        <v-col cols="12" sm="6" md="2" class="d-flex align-center justify-start justify-md-end">
           <v-chip variant="outlined" size="small" color="primary">
             {{ allFilteredEvents.length }} de {{ combinedEvents.length }} eventos
           </v-chip>
@@ -100,6 +102,7 @@ import { useEventsStore, type RealtimeEventPayload } from '@/stores/events'
 import { useInfiniteList } from '@/composables/useInfiniteList'
 import { formatEventDetails } from '@/utils/eventPresentation'
 import EventDetailDialog from '@/components/EventDetailDialog.vue'
+import PageHeader from '@/components/PageHeader.vue'
 
 interface HistoricalEventRecord {
   id: number

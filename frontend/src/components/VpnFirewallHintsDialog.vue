@@ -1,5 +1,10 @@
 <template>
-  <v-dialog :model-value="modelValue" max-width="680" @update:model-value="onUpdateModelValue">
+  <v-dialog
+    :model-value="modelValue"
+    :max-width="$vuetify.display.xs ? undefined : 680"
+    :fullscreen="$vuetify.display.xs"
+    @update:model-value="onUpdateModelValue"
+  >
     <v-card class="rounded-lg">
       <v-card-title class="font-weight-bold">Regras de firewall</v-card-title>
       <v-card-subtitle>

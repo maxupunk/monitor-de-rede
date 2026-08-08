@@ -1,27 +1,26 @@
 <template>
   <div>
-    <div class="d-flex align-center justify-space-between mb-6">
-      <div>
-        <h1 class="text-h4 font-weight-bold">Templates Zabbix</h1>
-        <p class="text-subtitle-1 text-grey-darken-1">
-          Importe templates oficiais do Zabbix (export JSON) para que novos dispositivos herdem os
-          itens SNMP monitorados — tensão, corrente e outras grandezas viram métricas
-          automaticamente.
-        </p>
-      </div>
-      <v-btn color="primary" prepend-icon="mdi-upload" @click="openImportDialog">
-        Importar Template
-      </v-btn>
-    </div>
+    <PageHeader
+      title="Templates Zabbix"
+      subtitle="Importe templates oficiais do Zabbix (export JSON) para que novos dispositivos herdem os itens SNMP monitorados."
+    >
+      <template #actions>
+        <v-btn color="primary" prepend-icon="mdi-upload" @click="openImportDialog">
+          <span class="hidden-sm-and-down">Importar Template</span>
+          <span class="hidden-md-and-up">Importar</span>
+        </v-btn>
+      </template>
+    </PageHeader>
 
-    <v-card elevation="2" class="rounded-lg">
-      <v-data-table
+    <v-card elevation="2" class="mobile-full-bleed">
+      <ResponsiveDataTable
         :headers="headers"
         :items="templatesStore.templates"
         :loading="templatesStore.loading"
         :items-per-page="-1"
         hide-default-footer
         no-data-text="Nenhum template Zabbix importado ainda"
+        :clickable="false"
       >
         <template #item.name="{ item }">
           <div class="py-2">
@@ -53,11 +52,45 @@
             <v-icon>mdi-delete</v-icon>
           </v-btn>
         </template>
-      </v-data-table>
+
+        <template #mobile-item="{ item }">
+          <div class="d-flex align-start justify-space-between ga-2">
+            <div class="flex-grow-1 text-break">
+              <div class="text-subtitle-2 font-weight-bold">{{ item.name }}</div>
+              <div v-if="item.description" class="text-caption text-grey">
+                {{ item.description }}
+              </div>
+              <div class="d-flex flex-wrap align-center ga-2 mt-2">
+                <v-chip size="x-small" color="info" variant="tonal">
+                  Zabbix {{ item.zabbixVersion || '?' }}
+                </v-chip>
+                <v-btn size="x-small" variant="text" color="primary" @click="openItemsDialog(item)">
+                  {{ item.items.length }} {{ item.items.length === 1 ? 'item' : 'itens' }}
+                </v-btn>
+                <v-chip
+                  size="x-small"
+                  :color="item.deviceCount > 0 ? 'success' : 'grey'"
+                  variant="tonal"
+                >
+                  {{ item.deviceCount }}
+                  {{ item.deviceCount === 1 ? 'dispositivo' : 'dispositivos' }}
+                </v-chip>
+              </div>
+            </div>
+            <v-btn icon size="small" variant="text" color="error" @click="confirmDelete(item)">
+              <v-icon>mdi-delete</v-icon>
+            </v-btn>
+          </div>
+        </template>
+      </ResponsiveDataTable>
     </v-card>
 
     <!-- Dialog de Importação -->
-    <v-dialog v-model="importDialog" max-width="560">
+    <v-dialog
+      v-model="importDialog"
+      :max-width="$vuetify.display.xs ? undefined : 560"
+      :fullscreen="$vuetify.display.xs"
+    >
       <v-card class="rounded-lg pa-4">
         <v-card-title class="font-weight-bold">Importar Template Zabbix</v-card-title>
         <v-card-text>
@@ -102,7 +135,11 @@
     </v-dialog>
 
     <!-- Dialog de Resultado da Importação -->
-    <v-dialog v-model="resultDialog" max-width="560">
+    <v-dialog
+      v-model="resultDialog"
+      :max-width="$vuetify.display.xs ? undefined : 560"
+      :fullscreen="$vuetify.display.xs"
+    >
       <v-card class="rounded-lg pa-4">
         <v-card-title class="font-weight-bold d-flex align-center ga-2">
           <v-icon color="success">mdi-check-circle</v-icon>
@@ -138,7 +175,11 @@
     </v-dialog>
 
     <!-- Dialog de Itens do Template -->
-    <v-dialog v-model="itemsDialog" max-width="700">
+    <v-dialog
+      v-model="itemsDialog"
+      :max-width="$vuetify.display.xs ? undefined : 700"
+      :fullscreen="$vuetify.display.xs"
+    >
       <v-card class="rounded-lg pa-4">
         <v-card-title class="font-weight-bold">{{ selectedTemplate?.name }}</v-card-title>
         <v-card-text>
@@ -176,6 +217,8 @@ import {
   type ZabbixTemplate,
   type ZabbixImportResult,
 } from '@/stores/zabbixTemplates'
+import PageHeader from '@/components/PageHeader.vue'
+import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 
 const templatesStore = useZabbixTemplatesStore()
 

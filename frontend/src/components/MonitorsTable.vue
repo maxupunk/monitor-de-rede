@@ -1,5 +1,5 @@
 <template>
-  <v-data-table
+  <ResponsiveDataTable
     :headers="headers"
     :items="monitors"
     :search="search"
@@ -7,6 +7,7 @@
     :items-per-page="-1"
     hide-default-footer
     :no-data-text="noDataText"
+    :clickable="false"
   >
     <!-- Nome, dispositivo e histórico -->
     <template #item.name="{ item }">
@@ -136,7 +137,109 @@
         <v-tooltip activator="parent" location="top">Excluir monitor</v-tooltip>
       </v-btn>
     </template>
-  </v-data-table>
+
+    <template #mobile-item="{ item }">
+      <div class="d-flex flex-column ga-2">
+        <div class="d-flex align-start justify-space-between ga-2">
+          <div class="flex-grow-1 text-break">
+            <router-link
+              :to="`/monitors/${item.id}`"
+              class="text-subtitle-1 font-weight-bold text-decoration-none text-primary d-block"
+            >
+              {{ item.name }}
+            </router-link>
+            <div v-if="showDevice" class="text-caption text-grey-darken-1">
+              {{ item.device?.name || 'Dispositivo não vinculado' }}
+            </div>
+            <div class="d-flex flex-wrap align-center ga-2 mt-1">
+              <v-chip size="x-small" :color="typeChip(item).color" variant="tonal">
+                <v-icon start size="12">{{ typeChip(item).icon }}</v-icon>
+                {{ typeChip(item).label }}
+              </v-chip>
+              <span class="text-caption text-grey-darken-1">{{ formatTarget(item) }}</span>
+            </div>
+          </div>
+          <div class="d-flex flex-column align-end ga-1">
+            <v-chip
+              v-if="isGaugeMonitor(item)"
+              :color="gaugeColor(item)"
+              size="small"
+              variant="tonal"
+            >
+              {{ item.gaugeMetric ? `${Math.round(item.gaugeMetric.value)}%` : 'SEM DADOS' }}
+            </v-chip>
+            <v-chip
+              v-else-if="isInterfaceMonitor(item)"
+              :color="interfaceStatusInfo(item).color"
+              size="small"
+              variant="tonal"
+            >
+              {{ interfaceStatusInfo(item).label }}
+            </v-chip>
+            <v-chip v-else :color="getStatusColor(item.status)" size="small" variant="tonal">
+              {{ (item.status || 'UNKNOWN').toUpperCase() }}
+            </v-chip>
+            <v-switch
+              :model-value="item.isEnabled"
+              color="success"
+              hide-details
+              density="compact"
+              class="mt-1"
+              style="transform: scale(0.85); transform-origin: right center"
+              @update:model-value="(val) => toggle(item, Boolean(val))"
+            ></v-switch>
+          </div>
+        </div>
+
+        <div class="monitor-timeline-scroll">
+          <router-link :to="`/monitors/${item.id}`" class="text-decoration-none">
+            <template v-if="isGaugeMonitor(item)">
+              <div class="d-flex align-center ga-2">
+                <MonitorSparkline
+                  :data="item.gaugeHistory || []"
+                  :color="gaugeSparklineColor(item)"
+                  :width="220"
+                  :height="28"
+                />
+                <span class="text-caption font-weight-medium">
+                  {{ item.gaugeMetric ? `${Math.round(item.gaugeMetric.value)}%` : 'N/D' }}
+                </span>
+              </div>
+            </template>
+            <MonitorTimelineBar
+              v-else
+              :results="item.recentResults"
+              :max-blocks="24"
+              :height="20"
+              :width="5"
+            />
+          </router-link>
+        </div>
+
+        <div class="d-flex justify-end ga-1 mt-1">
+          <v-btn
+            size="small"
+            color="primary"
+            variant="outlined"
+            prepend-icon="mdi-play"
+            :loading="runningId === item.id"
+            @click="run(item)"
+          >
+            Testar
+          </v-btn>
+          <v-btn icon size="small" variant="text" color="info" :to="`/monitors/${item.id}`">
+            <v-icon>mdi-chart-timeline-variant</v-icon>
+          </v-btn>
+          <v-btn icon size="small" variant="text" color="primary" @click="emit('edit', item)">
+            <v-icon>mdi-pencil</v-icon>
+          </v-btn>
+          <v-btn icon size="small" variant="text" color="error" @click="confirmDelete(item)">
+            <v-icon>mdi-delete</v-icon>
+          </v-btn>
+        </div>
+      </div>
+    </template>
+  </ResponsiveDataTable>
 
   <!-- Confirmação de exclusão -->
   <v-dialog v-model="deleteDialog" max-width="440">
@@ -169,6 +272,7 @@ import { computed, ref } from 'vue'
 import { useMonitorsStore, type Monitor } from '@/stores/monitors'
 import MonitorTimelineBar from '@/components/MonitorTimelineBar.vue'
 import MonitorSparkline from '@/components/MonitorSparkline.vue'
+import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import {
   isGaugeMonitor,
   gaugeMetricName,

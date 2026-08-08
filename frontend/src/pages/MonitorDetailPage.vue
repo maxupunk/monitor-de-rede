@@ -19,15 +19,17 @@
 
     <div v-else-if="monitorsStore.currentMonitor">
       <!-- Header do Monitor -->
-      <v-card elevation="2" class="rounded-lg pa-6 mb-6">
-        <div class="d-flex align-center justify-space-between flex-wrap ga-4">
-          <div class="d-flex align-center ga-4" style="gap: 16px">
-            <v-avatar :color="headerChip.color" size="56" class="text-white mr-2">
-              <v-icon size="32">{{ typeIcon }}</v-icon>
+      <v-card elevation="2" class="rounded-lg pa-4 pa-md-6 mb-6">
+        <div
+          class="d-flex flex-column flex-md-row align-start align-md-center justify-space-between ga-4"
+        >
+          <div class="d-flex align-center ga-3">
+            <v-avatar :color="headerChip.color" size="48" size-md="56" class="text-white mr-2">
+              <v-icon size="28" size-md="32">{{ typeIcon }}</v-icon>
             </v-avatar>
             <div>
-              <div class="d-flex align-center ga-3 flex-wrap" style="gap: 12px">
-                <h1 class="text-h4 font-weight-bold mr-3">{{ monitor.name }}</h1>
+              <div class="d-flex align-center ga-2 flex-wrap">
+                <h1 class="text-h6 text-md-h4 font-weight-bold">{{ monitor.name }}</h1>
                 <v-chip
                   :color="headerChip.color"
                   size="small"
@@ -41,42 +43,50 @@
                   {{ typeText }}
                 </v-chip>
               </div>
-              <div class="text-subtitle-1 text-grey-darken-1 mt-1">
-                Alvo: <strong class="text-high-emphasis">{{ formattedTarget }}</strong> | Intervalo:
-                {{ monitor.intervalSeconds }}s | Timeout: {{ monitor.timeoutSeconds }}s
+              <div class="text-caption text-md-subtitle-1 text-grey-darken-1 mt-1 text-break">
+                Alvo: <strong class="text-high-emphasis">{{ formattedTarget }}</strong> · Intervalo:
+                {{ monitor.intervalSeconds }}s · Timeout: {{ monitor.timeoutSeconds }}s
                 <span v-if="monitor.device">
-                  | Dispositivo: <strong>{{ monitor.device.name }}</strong></span
+                  · Dispositivo: <strong>{{ monitor.device.name }}</strong></span
                 >
               </div>
             </div>
           </div>
 
-          <div class="d-flex align-center ga-3" style="gap: 12px">
+          <div class="d-flex flex-wrap align-center ga-2 w-100 w-md-auto">
             <v-btn
               v-if="monitor.device"
               variant="tonal"
               prepend-icon="mdi-router-network"
+              size="small"
+              class="flex-grow-1 flex-md-grow-0"
               :to="{ name: 'device-detail', params: { id: monitor.device.id } }"
             >
-              Ver dispositivo
+              <span class="hidden-sm-and-down">Ver dispositivo</span>
+              <span class="hidden-md-and-up">Dispositivo</span>
             </v-btn>
             <v-btn
               color="primary"
               prepend-icon="mdi-play"
+              size="small"
+              class="flex-grow-1 flex-md-grow-0"
               :loading="monitorsStore.runningId === monitor.id"
               @click="monitorsStore.runMonitor(monitor.id)"
             >
-              Testar Agora
+              <span class="hidden-sm-and-down">Testar Agora</span>
+              <span class="hidden-md-and-up">Testar</span>
             </v-btn>
             <v-btn
               :color="monitor.isEnabled ? 'warning' : 'success'"
               variant="outlined"
+              size="small"
+              class="flex-grow-1 flex-md-grow-0"
               :prepend-icon="monitor.isEnabled ? 'mdi-pause' : 'mdi-play-outline'"
               @click="monitorsStore.toggleMonitorEnabled(monitor.id, !monitor.isEnabled)"
             >
               {{ monitor.isEnabled ? 'Pausar' : 'Ativar' }}
             </v-btn>
-            <v-btn icon color="error" variant="text" @click="confirmDelete">
+            <v-btn icon color="error" variant="text" size="small" @click="confirmDelete">
               <v-icon>mdi-delete</v-icon>
               <v-tooltip activator="parent" location="top">Excluir Monitor</v-tooltip>
             </v-btn>
@@ -120,7 +130,7 @@
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
               <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-                >Uso Mín / Máx</span
+              >Uso Mín / Máx</span
               >
               <v-avatar color="purple" variant="tonal" size="36">
                 <v-icon size="20">mdi-swap-vertical</v-icon>
@@ -139,7 +149,7 @@
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
               <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-                >Agente SNMP Disponível</span
+              >Agente SNMP Disponível</span
               >
               <v-avatar color="success" variant="tonal" size="36">
                 <v-icon size="20">mdi-check-decagram</v-icon>
@@ -158,7 +168,7 @@
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
               <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-                >Velocidade Negociada</span
+              >Velocidade Negociada</span
               >
               <v-avatar :color="headerChip.color" variant="tonal" size="36">
                 <v-icon size="20">{{ headerChip.icon }}</v-icon>
@@ -175,7 +185,7 @@
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
               <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-                >Status Operacional</span
+              >Status Operacional</span
               >
               <v-avatar color="info" variant="tonal" size="36">
                 <v-icon size="20">mdi-information-outline</v-icon>
@@ -192,7 +202,7 @@
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
               <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-                >Estabilidade do Link</span
+              >Estabilidade do Link</span
               >
               <v-avatar color="success" variant="tonal" size="36">
                 <v-icon size="20">mdi-check-decagram</v-icon>
@@ -209,7 +219,7 @@
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
               <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-                >Alterações de Estado</span
+              >Alterações de Estado</span
               >
               <v-avatar
                 :color="interfaceFlapCount > 0 ? 'warning' : 'grey'"
@@ -271,7 +281,7 @@
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
               <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-                >Ping Mín / Máx</span
+              >Ping Mín / Máx</span
               >
               <v-avatar color="purple" variant="tonal" size="36">
                 <v-icon size="20">mdi-swap-vertical</v-icon>
@@ -291,7 +301,7 @@
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
               <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-                >Taxa de Uptime</span
+              >Taxa de Uptime</span
               >
               <v-avatar color="success" variant="tonal" size="36">
                 <v-icon size="20">mdi-check-decagram</v-icon>
@@ -346,7 +356,9 @@
           </div>
         </div>
 
-        <div class="pa-3 bg-grey-lighten-4 rounded-lg overflow-x-auto d-flex justify-center">
+        <div
+          class="pa-3 bg-grey-lighten-4 rounded-lg monitor-timeline-scroll d-flex justify-center"
+        >
           <MonitorTimelineBar
             :results="monitor.recentResults"
             :max-blocks="60"
@@ -467,50 +479,58 @@
               style="max-height: 450px"
             >
               <v-infinite-scroll :key="history.scrollKey.value" :height="420" @load="history.load">
-                <v-table density="comfortable" hover>
-                  <thead>
-                    <tr>
-                      <th style="width: 110px">Status</th>
-                      <th style="width: 140px">Latência (Ping)</th>
-                      <th style="width: 120px">Duração</th>
-                      <th style="width: 180px">Data e Hora</th>
-                      <th>Mensagem</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="item in history.items.value" :key="item.id">
-                      <td>
-                        <v-chip :color="getStatusColor(item.status)" size="x-small" variant="flat">
-                          {{ item.status ? item.status.toUpperCase() : 'UNKNOWN' }}
-                        </v-chip>
-                      </td>
-                      <td>
-                        <span
-                          v-if="item.latencyMs !== undefined && item.latencyMs !== null"
-                          class="font-weight-medium"
-                        >
-                          {{ item.latencyMs }} ms
-                        </span>
-                        <span v-else class="text-grey">-</span>
-                      </td>
-                      <td>
-                        <span class="text-grey">{{ item.durationMs }} ms</span>
-                      </td>
-                      <td>
-                        <span>{{ formatDateTime(item.finishedAt, '-') }}</span>
-                      </td>
-                      <td>
-                        <span
-                          :class="
-                            item.status === 'down' ? 'text-error font-weight-medium' : 'text-body-2'
-                          "
-                        >
-                          {{ item.message || '-' }}
-                        </span>
-                      </td>
-                    </tr>
-                  </tbody>
-                </v-table>
+                <div class="table-responsive">
+                  <v-table density="comfortable" hover>
+                    <thead>
+                      <tr>
+                        <th style="width: 110px">Status</th>
+                        <th style="width: 140px">Latência (Ping)</th>
+                        <th style="width: 120px">Duração</th>
+                        <th style="width: 180px">Data e Hora</th>
+                        <th>Mensagem</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="item in history.items.value" :key="item.id">
+                        <td>
+                          <v-chip
+                            :color="getStatusColor(item.status)"
+                            size="x-small"
+                            variant="flat"
+                          >
+                            {{ item.status ? item.status.toUpperCase() : 'UNKNOWN' }}
+                          </v-chip>
+                        </td>
+                        <td>
+                          <span
+                            v-if="item.latencyMs !== undefined && item.latencyMs !== null"
+                            class="font-weight-medium"
+                          >
+                            {{ item.latencyMs }} ms
+                          </span>
+                          <span v-else class="text-grey">-</span>
+                        </td>
+                        <td>
+                          <span class="text-grey">{{ item.durationMs }} ms</span>
+                        </td>
+                        <td>
+                          <span>{{ formatDateTime(item.finishedAt, '-') }}</span>
+                        </td>
+                        <td>
+                          <span
+                            :class="
+                              item.status === 'down'
+                                ? 'text-error font-weight-medium'
+                                : 'text-body-2'
+                            "
+                          >
+                            {{ item.message || '-' }}
+                          </span>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </v-table>
+                </div>
                 <template #empty>
                   <div class="text-caption text-grey text-center py-3">
                     Nenhum outro registro no histórico.
@@ -564,117 +584,123 @@
                 :height="420"
                 @load="alertHistory.load"
               >
-                <v-table density="comfortable" hover>
-                  <thead>
-                    <tr>
-                      <th style="width: 120px">Severidade</th>
-                      <th style="width: 120px">Status</th>
-                      <th>Título / Regra</th>
-                      <th>Mensagem</th>
-                      <th style="width: 180px">Início</th>
-                      <th style="width: 180px">Normalizado em</th>
-                      <th style="width: 160px">Ações</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="item in alertHistory.items.value" :key="item.id">
-                      <td>
-                        <v-chip :color="severityColor(item.severity)" size="x-small" variant="flat">
-                          {{ severityLabel(item.severity).toUpperCase() }}
-                        </v-chip>
-                      </td>
-                      <td>
-                        <v-chip
-                          :color="
-                            item.status === 'resolved' ? 'success' : severityColor(item.severity)
-                          "
-                          size="x-small"
-                          variant="tonal"
-                        >
-                          {{ statusLabel(item.status).toUpperCase() }}
-                        </v-chip>
-                      </td>
-                      <td class="font-weight-medium">
-                        {{ item.title || '—' }}
-                      </td>
-                      <td>
-                        <span
-                          :class="
-                            item.status === 'active'
-                              ? 'text-error font-weight-medium'
-                              : 'text-body-2'
-                          "
-                        >
-                          {{ item.message || '—' }}
-                        </span>
-                      </td>
-                      <td>
-                        {{ formatDateTime(item.startedAt, '—') }}
-                      </td>
-                      <td>
-                        <span v-if="item.resolvedAt" class="text-success font-weight-medium">
-                          {{ formatDateTime(item.resolvedAt, '—') }}
-                        </span>
-                        <span v-else class="text-grey">—</span>
-                      </td>
-                      <td>
-                        <div v-if="item.status === 'active'" class="d-flex ga-1">
-                          <v-btn
+                <div class="table-responsive">
+                  <v-table density="comfortable" hover>
+                    <thead>
+                      <tr>
+                        <th style="width: 120px">Severidade</th>
+                        <th style="width: 120px">Status</th>
+                        <th>Título / Regra</th>
+                        <th>Mensagem</th>
+                        <th style="width: 180px">Início</th>
+                        <th style="width: 180px">Normalizado em</th>
+                        <th style="width: 160px">Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="item in alertHistory.items.value" :key="item.id">
+                        <td>
+                          <v-chip
+                            :color="severityColor(item.severity)"
                             size="x-small"
-                            variant="text"
-                            prepend-icon="mdi-check-circle"
-                            color="success"
-                            :loading="alertsStore.loading"
-                            @click="acknowledgeAlertItem(item)"
+                            variant="flat"
                           >
-                            Reconhecer
-                          </v-btn>
-                          <v-menu location="bottom end">
-                            <template #activator="{ props: menuProps }">
-                              <v-btn
-                                size="x-small"
-                                variant="text"
-                                prepend-icon="mdi-bell-off"
-                                color="warning"
-                                v-bind="menuProps"
-                              >
-                                Silenciar
-                              </v-btn>
-                            </template>
-                            <v-list density="compact">
-                              <v-list-item
-                                v-for="duration in silenceDurations"
-                                :key="duration.minutes"
-                                :title="duration.label"
-                                :disabled="alertsStore.loading"
-                                @click="silenceAlertItem(item, duration.minutes)"
-                              ></v-list-item>
-                            </v-list>
-                          </v-menu>
-                        </div>
-                        <v-chip
-                          v-else-if="item.status === 'acknowledged'"
-                          size="x-small"
-                          color="info"
-                          variant="tonal"
-                          prepend-icon="mdi-check-circle"
-                        >
-                          Reconhecido
-                        </v-chip>
-                        <v-chip
-                          v-else-if="item.status === 'silenced'"
-                          size="x-small"
-                          color="warning"
-                          variant="tonal"
-                          prepend-icon="mdi-bell-off"
-                        >
-                          Silenciado
-                        </v-chip>
-                        <span v-else class="text-grey">—</span>
-                      </td>
-                    </tr>
-                  </tbody>
-                </v-table>
+                            {{ severityLabel(item.severity).toUpperCase() }}
+                          </v-chip>
+                        </td>
+                        <td>
+                          <v-chip
+                            :color="
+                              item.status === 'resolved' ? 'success' : severityColor(item.severity)
+                            "
+                            size="x-small"
+                            variant="tonal"
+                          >
+                            {{ statusLabel(item.status).toUpperCase() }}
+                          </v-chip>
+                        </td>
+                        <td class="font-weight-medium">
+                          {{ item.title || '—' }}
+                        </td>
+                        <td>
+                          <span
+                            :class="
+                              item.status === 'active'
+                                ? 'text-error font-weight-medium'
+                                : 'text-body-2'
+                            "
+                          >
+                            {{ item.message || '—' }}
+                          </span>
+                        </td>
+                        <td>
+                          {{ formatDateTime(item.startedAt, '—') }}
+                        </td>
+                        <td>
+                          <span v-if="item.resolvedAt" class="text-success font-weight-medium">
+                            {{ formatDateTime(item.resolvedAt, '—') }}
+                          </span>
+                          <span v-else class="text-grey">—</span>
+                        </td>
+                        <td>
+                          <div v-if="item.status === 'active'" class="d-flex ga-1">
+                            <v-btn
+                              size="x-small"
+                              variant="text"
+                              prepend-icon="mdi-check-circle"
+                              color="success"
+                              :loading="alertsStore.loading"
+                              @click="acknowledgeAlertItem(item)"
+                            >
+                              Reconhecer
+                            </v-btn>
+                            <v-menu location="bottom end">
+                              <template #activator="{ props: menuProps }">
+                                <v-btn
+                                  size="x-small"
+                                  variant="text"
+                                  prepend-icon="mdi-bell-off"
+                                  color="warning"
+                                  v-bind="menuProps"
+                                >
+                                  Silenciar
+                                </v-btn>
+                              </template>
+                              <v-list density="compact">
+                                <v-list-item
+                                  v-for="duration in silenceDurations"
+                                  :key="duration.minutes"
+                                  :title="duration.label"
+                                  :disabled="alertsStore.loading"
+                                  @click="silenceAlertItem(item, duration.minutes)"
+                                ></v-list-item>
+                              </v-list>
+                            </v-menu>
+                          </div>
+                          <v-chip
+                            v-else-if="item.status === 'acknowledged'"
+                            size="x-small"
+                            color="info"
+                            variant="tonal"
+                            prepend-icon="mdi-check-circle"
+                          >
+                            Reconhecido
+                          </v-chip>
+                          <v-chip
+                            v-else-if="item.status === 'silenced'"
+                            size="x-small"
+                            color="warning"
+                            variant="tonal"
+                            prepend-icon="mdi-bell-off"
+                          >
+                            Silenciado
+                          </v-chip>
+                          <span v-else class="text-grey">—</span>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </v-table>
+                </div>
                 <template #empty>
                   <div class="text-caption text-grey text-center py-3">
                     Nenhum outro registro no histórico de alertas.

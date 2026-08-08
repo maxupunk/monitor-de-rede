@@ -31,9 +31,6 @@ export default class DiscoveryResult extends BaseModel {
   @column()
   declare confidence: number
 
-  @column()
-  declare status: 'pending' | 'accepted' | 'ignored' | 'merged'
-
   @column({
     prepare: (value: Record<string, unknown>) => (value ? JSON.stringify(value) : null),
     consume: (value: string | Record<string, unknown>) =>

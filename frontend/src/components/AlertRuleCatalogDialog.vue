@@ -1,7 +1,8 @@
 <template>
   <v-dialog
     :model-value="modelValue"
-    max-width="820"
+    :max-width="$vuetify.display.xs ? undefined : 820"
+    :fullscreen="$vuetify.display.xs"
     scrollable
     @update:model-value="onUpdateModelValue"
   >

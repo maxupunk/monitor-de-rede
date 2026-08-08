@@ -1,5 +1,10 @@
 <template>
-  <v-dialog :model-value="modelValue" max-width="900" @update:model-value="onUpdateModelValue">
+  <v-dialog
+    :model-value="modelValue"
+    :max-width="$vuetify.display.xs ? undefined : 900"
+    :fullscreen="$vuetify.display.xs"
+    @update:model-value="onUpdateModelValue"
+  >
     <v-card class="rounded-lg">
       <v-card-title class="d-flex align-center justify-space-between pa-4 bg-primary text-white">
         <div class="d-flex align-center ga-2" style="gap: 8px">
@@ -142,44 +147,46 @@
         <div v-if="results !== null">
           <div class="text-caption text-grey-darken-1 mb-2">
             {{ openCount }} porta(s) aberta(s)<span v-if="openFilteredCount > 0"
-              >, {{ openFilteredCount }} aberta(s)/filtrada(s)</span
+            >, {{ openFilteredCount }} aberta(s)/filtrada(s)</span
             >
             de {{ results.length }} escaneada(s)
           </div>
 
-          <v-table density="comfortable" hover class="rounded-lg border">
-            <thead>
-              <tr>
-                <th>Porta</th>
-                <th>Protocolo</th>
-                <th>Serviço</th>
-                <th>Status</th>
-                <th>Latência</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="item in filteredResults" :key="`${item.protocol}-${item.port}`">
-                <td class="font-weight-bold">{{ item.port }}</td>
-                <td>{{ item.protocol.toUpperCase() }}</td>
-                <td>{{ item.service || '-' }}</td>
-                <td>
-                  <v-chip :color="statusColor(item.status)" size="x-small" variant="tonal">
-                    {{ statusLabel(item.status) }}
-                  </v-chip>
-                </td>
-                <td>{{ item.latencyMs }} ms</td>
-              </tr>
-              <tr v-if="filteredResults.length === 0">
-                <td colspan="5" class="text-center text-grey py-4">
-                  {{
-                    portScanStore.scanning
-                      ? 'Aguardando resultados...'
-                      : 'Nenhuma porta encontrada para o filtro selecionado.'
-                  }}
-                </td>
-              </tr>
-            </tbody>
-          </v-table>
+          <div class="table-responsive">
+            <v-table density="comfortable" hover class="rounded-lg border">
+              <thead>
+                <tr>
+                  <th>Porta</th>
+                  <th>Protocolo</th>
+                  <th>Serviço</th>
+                  <th>Status</th>
+                  <th>Latência</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in filteredResults" :key="`${item.protocol}-${item.port}`">
+                  <td class="font-weight-bold">{{ item.port }}</td>
+                  <td>{{ item.protocol.toUpperCase() }}</td>
+                  <td>{{ item.service || '-' }}</td>
+                  <td>
+                    <v-chip :color="statusColor(item.status)" size="x-small" variant="tonal">
+                      {{ statusLabel(item.status) }}
+                    </v-chip>
+                  </td>
+                  <td>{{ item.latencyMs }} ms</td>
+                </tr>
+                <tr v-if="filteredResults.length === 0">
+                  <td colspan="5" class="text-center text-grey py-4">
+                    {{
+                      portScanStore.scanning
+                        ? 'Aguardando resultados...'
+                        : 'Nenhuma porta encontrada para o filtro selecionado.'
+                    }}
+                  </td>
+                </tr>
+              </tbody>
+            </v-table>
+          </div>
         </div>
 
         <div v-else-if="!portScanStore.scanning" class="text-center text-grey py-8">
