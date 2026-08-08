@@ -5,7 +5,11 @@
         <v-icon start color="deep-purple">mdi-dns-outline</v-icon>
         <span class="font-weight-bold text-h6">Latência de DNS</span>
         <v-chip size="x-small" color="deep-purple" class="ml-2" variant="tonal">
-          menor tempo primeiro
+          Escala Alinhada ({{
+            store.slowestLatency > 0
+              ? `0-${Math.round(store.slowestLatency)}ms`
+              : 'menor tempo primeiro'
+          }})
         </v-chip>
       </div>
       <div class="d-flex align-center ga-1">

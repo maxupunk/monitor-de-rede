@@ -4,9 +4,27 @@ import { apiService } from '@/services/apiService'
 
 export type WidgetCategory = 'summary' | 'lists' | 'charts'
 export type SyncMode = 'server' | 'local'
+export type ResourceCompatibilityType =
+  'bandwidth' | 'dual-axis' | 'numeric' | 'binary' | 'dns-resolvers'
+
+export interface WidgetCustomConfig {
+  deviceId?: number | 'all' | null
+  interfaceId?: number | 'all' | null
+  interfaceName?: string | null
+  monitorId?: number | 'all' | null
+  targetHost?: string | null
+  dnsServerIds?: number[]
+  timeframe?: '5m' | '15m' | '1h' | '24h'
+  chartType?: 'line' | 'area' | 'bar' | 'gauge'
+  unit?: string
+  warningThreshold?: number
+  criticalThreshold?: number
+  [key: string]: unknown
+}
 
 export interface WidgetConfig {
   id: string
+  type?: string
   title: string
   category: WidgetCategory
   cols?: number
@@ -17,7 +35,87 @@ export interface WidgetConfig {
   order: number
   description: string
   icon: string
+  config?: WidgetCustomConfig
 }
+
+export interface CardTemplate {
+  type: string
+  title: string
+  category: WidgetCategory
+  icon: string
+  description: string
+  compatibleResourceTypes: ResourceCompatibilityType[]
+  allowMultiple: boolean
+  defaultCols: { cols?: number; sm?: number; md?: number; lg?: number }
+}
+
+export const CARD_TEMPLATES: CardTemplate[] = [
+  {
+    type: 'ether_bandwidth',
+    title: 'Consumo de Banda de Ether',
+    category: 'charts',
+    icon: 'mdi-swap-horizontal-bold',
+    description:
+      'Gráfico de tráfego de entrada e saída (Rx/Tx) para uma interface de rede específica.',
+    compatibleResourceTypes: ['bandwidth'],
+    allowMultiple: true,
+    defaultCols: { cols: 12, sm: 12, md: 6, lg: 6 },
+  },
+  {
+    type: 'bandwidth_vs_latency',
+    title: 'Consumo de Banda vs Latência',
+    category: 'charts',
+    icon: 'mdi-chart-multiaxis',
+    description:
+      'Gráfico correlacionado com eixo duplo comparando tráfego de rede (Mbps) e latência de ping (ms).',
+    compatibleResourceTypes: ['dual-axis', 'bandwidth', 'numeric'],
+    allowMultiple: true,
+    defaultCols: { cols: 12, sm: 12, md: 12, lg: 12 },
+  },
+  {
+    type: 'cpu_usage',
+    title: 'Uso de CPU',
+    category: 'charts',
+    icon: 'mdi-cpu-64-bit',
+    description:
+      'Monitoramento de utilização de CPU (%) com linha de tendência e alertas de limite.',
+    compatibleResourceTypes: ['numeric'],
+    allowMultiple: true,
+    defaultCols: { cols: 12, sm: 12, md: 6, lg: 6 },
+  },
+  {
+    type: 'ram_usage',
+    title: 'Uso de RAM',
+    category: 'charts',
+    icon: 'mdi-memory',
+    description: 'Monitoramento de utilização de memória RAM (%) e quantidade alocada.',
+    compatibleResourceTypes: ['numeric'],
+    allowMultiple: true,
+    defaultCols: { cols: 12, sm: 12, md: 6, lg: 6 },
+  },
+  {
+    type: 'dns_latency',
+    title: 'Latência de DNS (Alinhado)',
+    category: 'charts',
+    icon: 'mdi-dns-outline',
+    description:
+      'Gráfico e ranking comparativo com escala de latência unificada para resolvedores DNS.',
+    compatibleResourceTypes: ['dns-resolvers', 'numeric'],
+    allowMultiple: true,
+    defaultCols: { cols: 12, sm: 12, md: 6, lg: 6 },
+  },
+  {
+    type: 'binary_status',
+    title: 'Status Binário (Up/Down)',
+    category: 'lists',
+    icon: 'mdi-checkbox-blank-circle-outline',
+    description:
+      'Card binário exclusivo para estados booleanos (Online/Offline, Link Up/Down, Check Pass/Fail).',
+    compatibleResourceTypes: ['binary'],
+    allowMultiple: true,
+    defaultCols: { cols: 12, sm: 12, md: 6, lg: 6 },
+  },
+]
 
 const STORAGE_KEY = 'netmonitor_dashboard_layout_v1'
 const SYNC_MODE_KEY = 'netmonitor_dashboard_sync_mode'
@@ -26,6 +124,7 @@ const PROMPT_DISMISSED_KEY = 'netmonitor_dashboard_prompt_dismissed'
 export const DEFAULT_WIDGETS: WidgetConfig[] = [
   {
     id: 'stat_cards',
+    type: 'stat_cards',
     title: 'Cards de Resumo Estatístico',
     category: 'summary',
     cols: 12,
@@ -39,6 +138,7 @@ export const DEFAULT_WIDGETS: WidgetConfig[] = [
   },
   {
     id: 'health_gauge',
+    type: 'health_gauge',
     title: 'Saúde Global & Status dos Ativos',
     category: 'charts',
     cols: 12,
@@ -53,6 +153,7 @@ export const DEFAULT_WIDGETS: WidgetConfig[] = [
   },
   {
     id: 'latency_time_series',
+    type: 'latency_time_series',
     title: 'Latência & Perda de Pacotes',
     category: 'charts',
     cols: 12,
@@ -66,6 +167,7 @@ export const DEFAULT_WIDGETS: WidgetConfig[] = [
   },
   {
     id: 'active_alerts',
+    type: 'active_alerts',
     title: 'Alertas Críticos Ativos',
     category: 'lists',
     cols: 12,
@@ -79,6 +181,7 @@ export const DEFAULT_WIDGETS: WidgetConfig[] = [
   },
   {
     id: 'events_feed',
+    type: 'events_feed',
     title: 'Feed de Eventos Realtime',
     category: 'lists',
     cols: 12,
@@ -92,6 +195,7 @@ export const DEFAULT_WIDGETS: WidgetConfig[] = [
   },
   {
     id: 'network_monitors',
+    type: 'network_monitors',
     title: 'Monitores de Rede',
     category: 'lists',
     cols: 12,
@@ -105,6 +209,7 @@ export const DEFAULT_WIDGETS: WidgetConfig[] = [
   },
   {
     id: 'event_distribution',
+    type: 'event_distribution',
     title: 'Distribuição de Eventos por Hora',
     category: 'charts',
     cols: 12,
@@ -118,6 +223,7 @@ export const DEFAULT_WIDGETS: WidgetConfig[] = [
   },
   {
     id: 'dns_latency',
+    type: 'dns_latency',
     title: 'Latência e Benchmark de DNS',
     category: 'charts',
     cols: 12,
@@ -145,22 +251,52 @@ export const useDashboardStore = defineStore('dashboard', () => {
   const widgets = ref<WidgetConfig[]>(loadInitialLayout())
 
   function parseSavedList(savedList: Partial<WidgetConfig>[]): WidgetConfig[] {
-    const mapSaved = new Map(savedList.map((item) => [item.id, item]))
     const merged: WidgetConfig[] = []
+    const processedIds = new Set<string>()
 
     savedList.forEach((savedItem, index) => {
+      if (!savedItem.id) return
+
+      // Procura primeiro em DEFAULT_WIDGETS
       const def = DEFAULT_WIDGETS.find((w) => w.id === savedItem.id)
       if (def) {
         merged.push({
           ...def,
+          ...savedItem,
+          type: savedItem.type || def.type || def.id,
           visible: savedItem.visible ?? def.visible,
           order: typeof savedItem.order === 'number' ? savedItem.order : index,
         })
+        processedIds.add(def.id)
+      } else {
+        // É um card dinâmico customizado criado pelo usuário
+        const tmpl = CARD_TEMPLATES.find((t) => t.type === savedItem.type)
+        const baseCategory = tmpl ? tmpl.category : savedItem.category || 'charts'
+        const baseIcon = tmpl ? tmpl.icon : savedItem.icon || 'mdi-view-dashboard-customize'
+        const baseCols = tmpl ? tmpl.defaultCols : { cols: 12, sm: 12, md: 6, lg: 6 }
+
+        merged.push({
+          id: savedItem.id,
+          type: savedItem.type,
+          title: savedItem.title || (tmpl ? tmpl.title : 'Card Personalizado'),
+          category: baseCategory,
+          cols: savedItem.cols || baseCols.cols,
+          sm: savedItem.sm || baseCols.sm,
+          md: savedItem.md || baseCols.md,
+          lg: savedItem.lg || baseCols.lg,
+          visible: savedItem.visible ?? true,
+          order: typeof savedItem.order === 'number' ? savedItem.order : index,
+          description: savedItem.description || (tmpl ? tmpl.description : ''),
+          icon: baseIcon,
+          config: savedItem.config || {},
+        })
+        processedIds.add(savedItem.id)
       }
     })
 
+    // Adiciona widgets padrão que não estavam salvos no layout
     DEFAULT_WIDGETS.forEach((def) => {
-      if (!mapSaved.has(def.id)) {
+      if (!processedIds.has(def.id)) {
         merged.push({ ...def, order: merged.length })
       }
     })
@@ -181,14 +317,27 @@ export const useDashboardStore = defineStore('dashboard', () => {
     }
   }
 
+  function getExportableList(list: WidgetConfig[]) {
+    return list.map((w) => ({
+      id: w.id,
+      type: w.type || w.id,
+      title: w.title,
+      category: w.category,
+      cols: w.cols,
+      sm: w.sm,
+      md: w.md,
+      lg: w.lg,
+      visible: w.visible,
+      order: w.order,
+      description: w.description,
+      icon: w.icon,
+      config: w.config || {},
+    }))
+  }
+
   function saveLocalLayoutCache() {
     try {
-      const exportable = widgets.value.map((w) => ({
-        id: w.id,
-        visible: w.visible,
-        order: w.order,
-      }))
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(exportable))
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(getExportableList(widgets.value)))
     } catch {
       // Ignora erro no localStorage
     }
@@ -277,11 +426,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
   async function saveLayoutGlobally(): Promise<boolean> {
     savingGlobal.value = true
     try {
-      const exportable = widgets.value.map((w) => ({
-        id: w.id,
-        visible: w.visible,
-        order: w.order,
-      }))
+      const exportable = getExportableList(widgets.value)
 
       await apiService.post('/dashboard/layout', {
         layout: exportable,
@@ -308,7 +453,6 @@ export const useDashboardStore = defineStore('dashboard', () => {
     const parsed = parseSavedList(remoteLayout)
     serverLayoutData.value = parsed
 
-    // Se a alteração veio deste próprio navegador/aba, atualiza se estiver em modo servidor
     if (remoteClientId && remoteClientId === clientIdSession.value) {
       if (syncMode.value === 'server') {
         widgets.value = parsed
@@ -317,7 +461,6 @@ export const useDashboardStore = defineStore('dashboard', () => {
       return
     }
 
-    // Se o usuário já respondeu a preferência neste navegador (1x), respeita o modo escolhido sem perguntar de novo
     if (promptDismissed.value) {
       if (syncMode.value === 'server') {
         widgets.value = parsed
@@ -326,7 +469,6 @@ export const useDashboardStore = defineStore('dashboard', () => {
       return
     }
 
-    // Apenas se NUNCA respondeu a pergunta neste navegador, abre o prompt
     showServerPrompt.value = true
   }
 
@@ -338,6 +480,70 @@ export const useDashboardStore = defineStore('dashboard', () => {
     const item = widgets.value.find((w) => w.id === id)
     if (item) {
       item.visible = typeof visible === 'boolean' ? visible : !item.visible
+      saveLocalLayoutCache()
+      if (syncMode.value === 'server') {
+        void saveLayoutGlobally()
+      }
+    }
+  }
+
+  function removeWidget(id: string) {
+    const index = widgets.value.findIndex((w) => w.id === id)
+    if (index !== -1) {
+      const isDefault = DEFAULT_WIDGETS.some((def) => def.id === id)
+      if (isDefault) {
+        widgets.value[index].visible = false
+      } else {
+        widgets.value.splice(index, 1)
+      }
+      saveLocalLayoutCache()
+      if (syncMode.value === 'server') {
+        void saveLayoutGlobally()
+      }
+    }
+  }
+
+  function addCustomWidget(
+    templateType: string,
+    customConfig: WidgetCustomConfig,
+    customTitle?: string
+  ): WidgetConfig {
+    const tmpl = CARD_TEMPLATES.find((t) => t.type === templateType)
+    const id = `${templateType}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
+
+    const newWidget: WidgetConfig = {
+      id,
+      type: templateType,
+      title: customTitle || (tmpl ? tmpl.title : 'Card Personalizado'),
+      category: tmpl ? tmpl.category : 'charts',
+      cols: tmpl?.defaultCols.cols ?? 12,
+      sm: tmpl?.defaultCols.sm ?? 12,
+      md: tmpl?.defaultCols.md ?? 6,
+      lg: tmpl?.defaultCols.lg ?? 6,
+      visible: true,
+      order: widgets.value.length,
+      description: tmpl ? tmpl.description : '',
+      icon: tmpl ? tmpl.icon : 'mdi-view-dashboard-customize',
+      config: customConfig,
+    }
+
+    widgets.value.push(newWidget)
+    saveLocalLayoutCache()
+    if (syncMode.value === 'server') {
+      void saveLayoutGlobally()
+    }
+
+    return newWidget
+  }
+
+  function updateWidgetConfig(
+    id: string,
+    updates: { title?: string; config?: WidgetCustomConfig }
+  ) {
+    const item = widgets.value.find((w) => w.id === id)
+    if (item) {
+      if (updates.title) item.title = updates.title
+      if (updates.config) item.config = { ...(item.config || {}), ...updates.config }
       saveLocalLayoutCache()
       if (syncMode.value === 'server') {
         void saveLayoutGlobally()
@@ -413,6 +619,9 @@ export const useDashboardStore = defineStore('dashboard', () => {
     applyRealtimeServerLayout,
     toggleEditMode,
     toggleWidgetVisibility,
+    removeWidget,
+    addCustomWidget,
+    updateWidgetConfig,
     moveWidget,
     reorderWidgets,
     resetToDefaultLayout,

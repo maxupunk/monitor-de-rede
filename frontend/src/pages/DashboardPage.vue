@@ -164,7 +164,7 @@
           :is-last="idx === dashboardStore.visibleWidgets.length - 1"
           @move-up="dashboardStore.moveWidget(widget.id, 'up')"
           @move-down="dashboardStore.moveWidget(widget.id, 'down')"
-          @remove="dashboardStore.toggleWidgetVisibility(widget.id, false)"
+          @remove="dashboardStore.removeWidget(widget.id)"
           @reorder="handleReorder"
         >
           <!-- 1. Cards de Resumo Estatístico -->
@@ -526,10 +526,46 @@
           </v-card>
 
           <!-- 7. Distribuição de Eventos por Hora -->
-          <EventDistributionWidget v-else-if="widget.id === 'event_distribution'" />
+          <EventDistributionWidget
+            v-else-if="widget.id === 'event_distribution' || widget.type === 'event_distribution'"
+          />
 
           <!-- 8. Latência DNS -->
-          <DnsLatencyCard v-else-if="widget.id === 'dns_latency'" />
+          <DnsLatencyCard
+            v-else-if="widget.id === 'dns_latency' || widget.type === 'dns_latency'"
+          />
+
+          <!-- 9. Consumo de Banda de Ether -->
+          <EtherBandwidthWidget
+            v-else-if="widget.type === 'ether_bandwidth' || widget.id === 'ether_bandwidth'"
+            :widget="widget"
+          />
+
+          <!-- 10. Consumo de Banda vs Latência -->
+          <BandwidthVsLatencyWidget
+            v-else-if="
+              widget.type === 'bandwidth_vs_latency' || widget.id === 'bandwidth_vs_latency'
+            "
+            :widget="widget"
+          />
+
+          <!-- 11. Uso de CPU -->
+          <CpuUsageWidget
+            v-else-if="widget.type === 'cpu_usage' || widget.id === 'cpu_usage'"
+            :widget="widget"
+          />
+
+          <!-- 12. Uso de RAM -->
+          <RamUsageWidget
+            v-else-if="widget.type === 'ram_usage' || widget.id === 'ram_usage'"
+            :widget="widget"
+          />
+
+          <!-- 13. Status Binário -->
+          <BinaryStatusWidget
+            v-else-if="widget.type === 'binary_status' || widget.id === 'binary_status'"
+            :widget="widget"
+          />
         </DashboardWidgetWrapper>
       </v-col>
     </v-row>
@@ -562,6 +598,11 @@ import DashboardServerPromptDialog from '@/components/DashboardServerPromptDialo
 import GaugeHealthWidget from '@/components/widgets/GaugeHealthWidget.vue'
 import LatencyTimeSeriesWidget from '@/components/widgets/LatencyTimeSeriesWidget.vue'
 import EventDistributionWidget from '@/components/widgets/EventDistributionWidget.vue'
+import EtherBandwidthWidget from '@/components/widgets/EtherBandwidthWidget.vue'
+import BandwidthVsLatencyWidget from '@/components/widgets/BandwidthVsLatencyWidget.vue'
+import CpuUsageWidget from '@/components/widgets/CpuUsageWidget.vue'
+import RamUsageWidget from '@/components/widgets/RamUsageWidget.vue'
+import BinaryStatusWidget from '@/components/widgets/BinaryStatusWidget.vue'
 import MonitorTimelineBar from '@/components/MonitorTimelineBar.vue'
 import MonitorSparkline from '@/components/MonitorSparkline.vue'
 import DnsLatencyCard from '@/components/DnsLatencyCard.vue'

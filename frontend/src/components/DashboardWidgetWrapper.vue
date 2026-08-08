@@ -49,7 +49,7 @@
           </template>
         </v-tooltip>
 
-        <v-tooltip text="Ocultar do Dashboard">
+        <v-tooltip :text="isCustomCard ? 'Remover Card Permanentemente' : 'Ocultar do Dashboard'">
           <template #activator="{ props: tooltipProps }">
             <v-btn
               v-bind="tooltipProps"
@@ -59,7 +59,11 @@
               color="error"
               @click="$emit('remove')"
             >
-              <v-icon size="18">mdi-eye-off-outline</v-icon>
+              <v-icon size="18">
+                {{
+                  isCustomCard ? 'mdi-delete-outline' : 'mdi-eye-off-outline'
+                }}
+              </v-icon>
             </v-btn>
           </template>
         </v-tooltip>
@@ -73,8 +77,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-import type { WidgetConfig } from '@/stores/dashboard'
+import { ref, computed } from 'vue'
+import { DEFAULT_WIDGETS, type WidgetConfig } from '@/stores/dashboard'
 
 const props = defineProps<{
   widget: WidgetConfig
@@ -91,6 +95,10 @@ const emit = defineEmits<{
 }>()
 
 const isDragging = ref(false)
+
+const isCustomCard = computed(() => {
+  return !DEFAULT_WIDGETS.some((def) => def.id === props.widget.id)
+})
 
 function onDragStart(e: DragEvent) {
   if (!props.isEditMode) return
