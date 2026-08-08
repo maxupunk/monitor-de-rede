@@ -74,7 +74,12 @@
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="item in results.items.value" :key="item.id">
+                  <tr
+                    v-for="item in results.items.value"
+                    :key="item.id"
+                    class="cursor-pointer"
+                    @click="openDetailDialog(item)"
+                  >
                     <td class="font-weight-medium">{{ item.ipAddress }}</td>
                     <td>{{ item.macAddress || '—' }}</td>
                     <td>{{ item.mdnsName || item.hostname || '—' }}</td>
@@ -142,6 +147,21 @@
 
           <!-- Histórico de Varreduras -->
           <v-window-item value="runs">
+            <div class="d-flex align-center justify-space-between mb-4">
+              <div class="text-subtitle-2 text-grey">
+                Varreduras anteriores ficam aqui para auditoria.
+              </div>
+              <v-btn
+                size="small"
+                color="error"
+                variant="outlined"
+                prepend-icon="mdi-delete-sweep"
+                :loading="cleanupLoading"
+                @click="handleCleanup"
+              >
+                Limpar histórico antigo
+              </v-btn>
+            </div>
             <v-infinite-scroll :key="runs.scrollKey.value" @load="runs.load">
               <v-table hover density="comfortable" class="rounded-lg border">
                 <thead>
@@ -185,6 +205,12 @@
     </v-snackbar>
 
     <DeviceDialog v-model="deviceDialogOpen" :prefill-data="dialogPrefill" @saved="onDeviceSaved" />
+
+    <DiscoveryResultDialog
+      v-model="resultDialogOpen"
+      :result="selectedDetailResult"
+      @add="handleDetailAdd"
+    />
   </div>
 </template>
 
@@ -196,6 +222,7 @@ import { useInfiniteList } from '@/composables/useInfiniteList'
 import { getStatusColor } from '@/utils/monitorPresentation'
 import { formatDateTime } from '@/utils/formatters'
 import DeviceDialog from '@/components/DeviceDialog.vue'
+import DiscoveryResultDialog from '@/components/DiscoveryResultDialog.vue'
 import type { Device } from '@/stores/devices'
 
 /** Espelha `MAX_SCAN_HOSTS` de `modules/discovery/cidr_range.ts` */
@@ -208,6 +235,9 @@ const selectedNetworkId = ref<number | null>(null)
 const feedback = reactive({ visible: false, message: '', color: 'success' })
 const deviceDialogOpen = ref(false)
 const selectedResult = ref<DiscoveryResult | null>(null)
+const resultDialogOpen = ref(false)
+const selectedDetailResult = ref<DiscoveryResult | null>(null)
+const cleanupLoading = ref(false)
 
 const dialogPrefill = computed<Partial<Device> | null>(() => {
   if (!selectedResult.value) return null
@@ -302,6 +332,19 @@ function handleAdd(item: DiscoveryResult) {
   deviceDialogOpen.value = true
 }
 
+function openDetailDialog(item: DiscoveryResult) {
+  selectedDetailResult.value = item
+  resultDialogOpen.value = true
+}
+
+function handleDetailAdd() {
+  resultDialogOpen.value = false
+  if (selectedDetailResult.value) {
+    handleAdd(selectedDetailResult.value)
+  }
+  selectedDetailResult.value = null
+}
+
 async function onDeviceSaved() {
   if (!selectedResult.value) return
 
@@ -320,5 +363,27 @@ async function onDeviceSaved() {
 async function handleIgnore(id: number) {
   await discoveryStore.ignoreResult(id)
   results.reset()
+}
+
+async function handleCleanup() {
+  if (
+    !confirm('Isso apagará varreduras com mais de 7 dias e todos os seus resultados. Continuar?')
+  ) {
+    return
+  }
+
+  cleanupLoading.value = true
+  const result = await discoveryStore.cleanup(7)
+  cleanupLoading.value = false
+
+  feedback.color = result ? 'success' : 'error'
+  feedback.message = result
+    ? `${result.removedRuns} varredura(s) antiga(s) removida(s).`
+    : (discoveryStore.error ?? 'Não foi possível limpar o histórico.')
+  feedback.visible = true
+
+  if (result) {
+    runs.reset()
+  }
 }
 </script>

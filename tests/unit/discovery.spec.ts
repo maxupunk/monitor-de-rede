@@ -1,6 +1,7 @@
 import { test } from '@japa/runner'
 import { DeviceIdentifier } from '#modules/discovery/device_identifier'
 import { DiscoveryMerger } from '#modules/discovery/discovery_merger'
+import { lookupVendor } from '#modules/discovery/oui_lookup'
 import {
   expandCidr,
   isScannableCidr,
@@ -42,6 +43,22 @@ test.group('Descoberta de Dispositivos - Unit Tests', () => {
     assert.equal(routerHost?.hostname, 'router.local')
     assert.equal(routerHost?.macAddress, 'AA:BB:CC:11:22:33')
     assert.equal(routerHost?.confidence, 80)
+  })
+
+  test('OUILookup deve identificar vendor a partir do MAC', ({ assert }) => {
+    assert.equal(lookupVendor('00:0B:86:00:00:00'), 'Ubiquiti Networks')
+    assert.equal(lookupVendor('00:13:20:00:00:00'), 'MikroTik')
+    assert.equal(lookupVendor('00:50:56:00:00:00'), 'VMware')
+    assert.isNull(lookupVendor('FF:FF:FF:FF:FF:FF'))
+  })
+
+  test('DeviceIdentifier deve inferir tipo a partir do vendor', ({ assert }) => {
+    const identifier = new DeviceIdentifier()
+
+    assert.equal(identifier.identifyType({ vendor: 'MikroTik' }), 'router')
+    assert.equal(identifier.identifyType({ vendor: 'Ubiquiti Networks' }), 'access_point')
+    assert.equal(identifier.identifyType({ vendor: 'Synology' }), 'server')
+    assert.equal(identifier.identifyType({ vendor: 'Desconhecido' }), 'unknown')
   })
 })
 

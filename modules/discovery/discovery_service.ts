@@ -3,6 +3,9 @@ import type { DiscoveredHost } from './scanners/icmp_scanner.js'
 import { IcmpScanner } from './scanners/icmp_scanner.js'
 import { ArpScanner } from './scanners/arp_scanner.js'
 import { PortScanner } from './scanners/port_scanner.js'
+import { MdnsScanner } from './scanners/mdns_scanner.js'
+import { SsdpScanner } from './scanners/ssdp_scanner.js'
+import { SnmpDiscoveryScanner } from './scanners/snmp_discovery_scanner.js'
 import { DiscoveryMerger } from './discovery_merger.js'
 import DiscoveryRun from '#models/discovery_run'
 import DiscoveryResult from '#models/discovery_result'
@@ -13,6 +16,9 @@ export class DiscoveryService {
   private icmpScanner = new IcmpScanner()
   private arpScanner = new ArpScanner()
   private portScanner = new PortScanner()
+  private mdnsScanner = new MdnsScanner()
+  private ssdpScanner = new SsdpScanner()
+  private snmpDiscoveryScanner = new SnmpDiscoveryScanner()
   private merger = new DiscoveryMerger()
   private eventBus = EventBus.getInstance()
 
@@ -54,13 +60,19 @@ export class DiscoveryService {
     })
 
     try {
-      const [icmpRes, arpRes] = await Promise.all([
-        this.icmpScanner.scanNetwork(cidr),
-        this.arpScanner.scanNetwork(),
+      const icmpRes = await this.icmpScanner.scanNetwork(cidr)
+      const icmpIps = icmpRes.map((h) => h.ipAddress)
+
+      const [arpRes, mdnsRes, ssdpRes] = await Promise.all([
+        this.arpScanner.scanNetwork(icmpIps),
+        this.mdnsScanner.scanMdns(),
+        this.ssdpScanner.scanSsdp(),
       ])
 
-      const mergedBasic = this.merger.mergeResults([icmpRes, arpRes])
-      const finalHosts = await this.portScanner.scanHosts(mergedBasic)
+      const mergedBasic = this.merger.mergeResults([icmpRes, arpRes, mdnsRes, ssdpRes])
+      const portScannedHosts = await this.portScanner.scanHosts(mergedBasic)
+      const snmpHosts = await this.snmpDiscoveryScanner.scanHosts(portScannedHosts)
+      const finalHosts = this.merger.mergeResults([portScannedHosts, snmpHosts])
 
       if (runRecord) {
         const now = DateTime.now()

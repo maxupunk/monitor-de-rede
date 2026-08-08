@@ -1,4 +1,5 @@
 import type { HttpContext } from '@adonisjs/core/http'
+import { DateTime } from 'luxon'
 import DiscoveryRun from '#models/discovery_run'
 import DiscoveryResult from '#models/discovery_result'
 import Device from '#models/device'
@@ -153,6 +154,31 @@ export default class DiscoveryController {
     result.status = 'ignored'
     await result.save()
     return response.ok(result)
+  }
+
+  /**
+   * DELETE /api/discovery/cleanup?olderThanDays=7
+   * Remove runs (e seus resultados em cascata) mais antigas que o prazo.
+   * Útil para evitar acúmulo de legados na tabela de descoberta.
+   */
+  async cleanup({ request, response }: HttpContext) {
+    const olderThanDays = Math.max(1, Number(request.input('olderThanDays', 7)))
+    const cutoff = DateTime.now().minus({ days: olderThanDays })
+
+    const runsToDelete = await DiscoveryRun.query().where('createdAt', '<=', cutoff.toSQL()).select('id')
+    const runIds = runsToDelete.map((run) => run.id)
+
+    if (runIds.length === 0) {
+      return response.ok({ removedRuns: 0, removedResults: 0 })
+    }
+
+    // A FK já tem ON DELETE CASCADE; deletar as runs limpa os resultados.
+    await DiscoveryRun.query().whereIn('id', runIds).delete()
+
+    return response.ok({
+      removedRuns: runIds.length,
+      message: `${runIds.length} varredura(s) antiga(s) removida(s).`,
+    })
   }
 
   async merge({ params, request, response }: HttpContext) {

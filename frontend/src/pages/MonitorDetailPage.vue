@@ -573,6 +573,7 @@
                       <th>Mensagem</th>
                       <th style="width: 180px">Início</th>
                       <th style="width: 180px">Normalizado em</th>
+                      <th style="width: 160px">Ações</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -616,6 +617,61 @@
                         </span>
                         <span v-else class="text-grey">—</span>
                       </td>
+                      <td>
+                        <div v-if="item.status === 'active'" class="d-flex ga-1">
+                          <v-btn
+                            size="x-small"
+                            variant="text"
+                            prepend-icon="mdi-check-circle"
+                            color="success"
+                            :loading="alertsStore.loading"
+                            @click="acknowledgeAlertItem(item)"
+                          >
+                            Reconhecer
+                          </v-btn>
+                          <v-menu location="bottom end">
+                            <template #activator="{ props: menuProps }">
+                              <v-btn
+                                size="x-small"
+                                variant="text"
+                                prepend-icon="mdi-bell-off"
+                                color="warning"
+                                v-bind="menuProps"
+                              >
+                                Silenciar
+                              </v-btn>
+                            </template>
+                            <v-list density="compact">
+                              <v-list-item
+                                v-for="duration in silenceDurations"
+                                :key="duration.minutes"
+                                :title="duration.label"
+                                :disabled="alertsStore.loading"
+                                @click="silenceAlertItem(item, duration.minutes)"
+                              ></v-list-item>
+                            </v-list>
+                          </v-menu>
+                        </div>
+                        <v-chip
+                          v-else-if="item.status === 'acknowledged'"
+                          size="x-small"
+                          color="info"
+                          variant="tonal"
+                          prepend-icon="mdi-check-circle"
+                        >
+                          Reconhecido
+                        </v-chip>
+                        <v-chip
+                          v-else-if="item.status === 'silenced'"
+                          size="x-small"
+                          color="warning"
+                          variant="tonal"
+                          prepend-icon="mdi-bell-off"
+                        >
+                          Silenciado
+                        </v-chip>
+                        <span v-else class="text-grey">—</span>
+                      </td>
                     </tr>
                   </tbody>
                 </v-table>
@@ -646,6 +702,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useMonitorsStore, type Monitor, type MonitorResult } from '@/stores/monitors'
 import { useEventsStore } from '@/stores/events'
+import { useAlertsStore } from '@/stores/alerts'
 import { apiService } from '@/services/apiService'
 import { useInfiniteList } from '@/composables/useInfiniteList'
 import type { DeviceMetric } from '@/stores/deviceDetail'
@@ -669,6 +726,7 @@ const route = useRoute()
 const router = useRouter()
 const monitorsStore = useMonitorsStore()
 const eventsStore = useEventsStore()
+const alertsStore = useAlertsStore()
 
 const monitorId = computed(() => Number(route.params.id))
 
@@ -714,6 +772,13 @@ const showAlerts = ref(false)
 const alertHistory = useInfiniteList<AlertEvent>(() => `/monitors/${monitorId.value}/alerts`, {
   label: 'histórico de alertas',
 })
+
+const silenceDurations = [
+  { minutes: 30, label: '30 minutos' },
+  { minutes: 60, label: '1 hora' },
+  { minutes: 240, label: '4 horas' },
+  { minutes: 1440, label: '24 horas' },
+]
 
 function toggleShowHistory() {
   showHistory.value = !showHistory.value
@@ -951,10 +1016,13 @@ onMounted(async () => {
     }
   })
 
-  eventsStore.onEvent(['alert:triggered', 'alert:resolved'], (data) => {
-    if (Number(data.monitorId) !== monitorId.value) return
-    if (showAlerts.value) alertHistory.reset()
-  })
+  eventsStore.onEvent(
+    ['alert:triggered', 'alert:resolved', 'alert:acknowledged', 'alert:silenced'],
+    (data) => {
+      if (Number(data.monitorId) !== monitorId.value) return
+      if (showAlerts.value) alertHistory.reset()
+    }
+  )
 })
 
 onUnmounted(() => {
@@ -967,6 +1035,20 @@ async function refreshData() {
     if (isGaugeMonitor.value) await loadGaugeHistory()
     if (showHistory.value) history.reset()
     if (showAlerts.value) alertHistory.reset()
+  }
+}
+
+async function acknowledgeAlertItem(item: AlertEvent) {
+  const success = await alertsStore.acknowledgeAlert(item.id)
+  if (success && showAlerts.value) {
+    alertHistory.reset()
+  }
+}
+
+async function silenceAlertItem(item: AlertEvent, minutes: number) {
+  const success = await alertsStore.silenceAlert(item.id, minutes)
+  if (success && showAlerts.value) {
+    alertHistory.reset()
   }
 }
 

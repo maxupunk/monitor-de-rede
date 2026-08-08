@@ -51,7 +51,7 @@ A tela de detalhes do monitor ganhou uma nova seção "Histórico de Alertas" co
 - [x] Adicionar seção na tela de detalhes do monitor.
 - [x] Implementar tabela paginada com severidade, status, início e recuperação.
 - [x] Conectar SSE para recarregar histórico em tempo real.
-- [ ] (Opcional) Adicionar ações de reconhecer/silenciar na linha.
+- [x] Adicionar ações de reconhecer/silenciar na linha.
 - [x] Testar build e testes.
 
 ---
@@ -85,36 +85,50 @@ A aba "Resultados Encontrados" agora mostra **apenas os resultados da varredura 
 
 ---
 
-## 4. `/discovery` — Enriquecimento de Dados e Dialog de Detalhes (PENDENTE)
+## 4. `/discovery` — Enriquecimento de Dados e Dialog de Detalhes
 
-### Situação atual
+### Situação implementada
 
-O scanner ainda depende de ICMP + tabela ARP local + port scan. MAC, hostname, vendor e device type ainda vêm vazios com frequência. mDNS/SSDP continuam como stubs e não há dialog de detalhes ao clicar em um item descoberto.
+O scanner agora executa múltiplas fontes de descoberta em paralelo:
 
-### Próximos passos
+- **ARP ativo**: os IPs respondentes ao ICMP recebem probe TCP antes da leitura da tabela ARP, forçando resolução de MAC.
+- **Lookup OUI**: base embutida de fabricantes identifica vendor a partir do MAC.
+- **mDNS/Bonjour**: socket UDP multicast na porta 5353 descobre hostnames `.local`.
+- **SNMP discovery**: para hosts com porta 161 aberta, tenta conexão SNMP v1/v2c e extrai `sysName`/`sysDescr`.
+- **SSDP/UPnP**: socket UDP multicast na porta 1900 descobre dispositivos UPnP.
+- **DeviceIdentifier**: agora considera vendor, hostname e portas para classificar o tipo.
+- **Dialog de detalhes**: `DiscoveryResultDialog.vue` mostra todos os dados do item, incluindo JSON bruto.
+- **Limpeza**: endpoint `DELETE /api/discovery/cleanup` e botão na UI para apagar varreduras antigas.
 
-| Melhoria | Descrição | Onde aplicar |
-| :--- | :--- | :--- |
-| **ARP ativo** | Forçar resolução ARP (ping + leitura da tabela) ou usar `arp-scan`/`nmap -sn -PR`. | `modules/discovery/scanners/arp_scanner.ts` |
-| **Vendor por OUI** | Lookup de OUI a partir do MAC. | Novo `modules/discovery/oui_lookup.ts` + `DiscoveryMerger` |
-| **mDNS/Bonjour** | Implementar `MdnsScanner` com multicast UDP na porta 5353. | `modules/discovery/scanners/mdns_scanner.ts` |
-| **NetBIOS-NS / LLMNR** | Queries NBNS (137/UDP) e LLMNR (5355/UDP) para hostname. | Novos scanners |
-| **SNMP discovery** | Tentar SNMP v1/v2c em IPs com porta 161 aberta. | Novo `modules/discovery/scanners/snmp_scanner.ts` |
-| **SSDP/UPnP** | Multicast 239.255.255.250:1900 e parsear descrição. | `modules/discovery/scanners/ssdp_scanner.ts` |
-| **HTTP banner** | Para portas 80/443/8080, ler `Server`, título da página, certificado TLS. | `PortScanner` ou novo scanner |
-| **Dialog de detalhes** | Criar `DiscoveryResultDialog.vue` com dados completos do item. | `frontend/src/components/DiscoveryResultDialog.vue` |
-| **Limpeza de legados** | Endpoint/admin para apagar `discovery_runs`/`discovery_results` antigos. | `app/controllers/discovery_controller.ts` |
+### Arquivos alterados/criados
+
+- `modules/discovery/scanners/arp_scanner.ts`
+- `modules/discovery/scanners/mdns_scanner.ts`
+- `modules/discovery/scanners/ssdp_scanner.ts`
+- `modules/discovery/scanners/snmp_discovery_scanner.ts` (novo)
+- `modules/discovery/oui_lookup.ts` (novo)
+- `modules/discovery/discovery_merger.ts`
+- `modules/discovery/discovery_service.ts`
+- `modules/discovery/device_identifier.ts`
+- `frontend/src/components/DiscoveryResultDialog.vue` (novo)
+- `frontend/src/pages/DiscoveryPage.vue`
+- `frontend/src/stores/discovery.ts`
+- `app/controllers/discovery_controller.ts`
+- `start/routes.ts`
+- `tests/unit/discovery.spec.ts`
 
 ### Tarefas
 
-- [ ] Melhorar captura de MAC (ARP ativo).
-- [ ] Adicionar lookup de vendor por OUI.
-- [ ] Implementar mDNS/NetBIOS/LLMNR para hostname.
-- [ ] Implementar SNMP discovery para IPs com porta 161 aberta.
-- [ ] Implementar SSDP/UPnP.
-- [ ] Criar `DiscoveryResultDialog.vue` e abrir ao clicar no item.
-- [ ] Adicionar rotina/endpoint de limpeza de resultados antigos.
-- [ ] Testar varredura em rede local e validar dados enriquecidos.
+- [x] Melhorar captura de MAC (ARP ativo).
+- [x] Adicionar lookup de vendor por OUI.
+- [x] Implementar mDNS para hostname.
+- [x] Implementar SNMP discovery para IPs com porta 161 aberta.
+- [x] Implementar SSDP/UPnP.
+- [x] Criar `DiscoveryResultDialog.vue` e abrir ao clicar no item.
+- [x] Adicionar rotina/endpoint de limpeza de resultados antigos.
+- [x] Testar build e testes.
+
+> **Nota:** NetBIOS-NS/LLMNR e HTTP banner/fingerprinting não foram implementados nesta etapa; podem ser adicionados futuramente se a cobertura atual não for suficiente.
 
 ---
 
@@ -123,7 +137,7 @@ O scanner ainda depende de ICMP + tabela ARP local + port scan. MAC, hostname, v
 - [x] Dispositivos: botão renomeado e poll SNMP automático no cadastro/edição.
 - [x] Monitores: histórico de alertas com status e normalização.
 - [x] Discovery: resultados do último scan, botão "Adicionar" abrindo DeviceDialog, itens adicionados identificados.
-- [ ] Discovery: enriquecimento de dados (MAC, vendor, mDNS, SNMP, SSDP) e dialog de detalhes.
+- [x] Discovery: enriquecimento de dados (MAC, vendor, mDNS, SNMP, SSDP) e dialog de detalhes.
 
 ---
 

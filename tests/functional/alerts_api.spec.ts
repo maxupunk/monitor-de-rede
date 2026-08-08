@@ -202,4 +202,52 @@ test.group('Alerts API - Functional Tests', (group) => {
     await event.refresh()
     assert.equal(event.status, 'silenced')
   })
+
+  test('GET /api/monitors/:id/alerts reflete acknowledge e silence do alerta', async ({
+    client,
+    assert,
+  }) => {
+    const site = await Site.create({ name: 'Site Monitor Alerts', active: true })
+    const device = await Device.create({
+      siteId: site.id,
+      name: 'Servidor Monitor',
+      type: 'server',
+      status: 'online',
+    })
+    const monitor = await Monitor.create({
+      deviceId: device.id,
+      type: 'ping',
+      name: 'Ping Servidor',
+      configuration: {},
+      intervalSeconds: 60,
+      timeoutSeconds: 5,
+      retryCount: 1,
+      enabled: true,
+      status: 'up',
+    })
+
+    const event = await AlertEvent.create({
+      monitorId: monitor.id,
+      status: 'active',
+      severity: 'critical',
+      startedAt: DateTime.now(),
+      message: 'Servidor sem resposta',
+    })
+
+    const historyBefore = await client.get(`/api/monitors/${monitor.id}/alerts?page=1&limit=10`)
+    historyBefore.assertStatus(200)
+    assert.equal(historyBefore.body().data[0].status, 'active')
+
+    await client.visit('alerts.acknowledge', { id: event.id })
+
+    const historyAck = await client.get(`/api/monitors/${monitor.id}/alerts?page=1&limit=10`)
+    historyAck.assertStatus(200)
+    assert.equal(historyAck.body().data[0].status, 'acknowledged')
+
+    await client.visit('alerts.silence', { id: event.id }).json({ minutes: 30 })
+
+    const historySilenced = await client.get(`/api/monitors/${monitor.id}/alerts?page=1&limit=10`)
+    historySilenced.assertStatus(200)
+    assert.equal(historySilenced.body().data[0].status, 'silenced')
+  })
 })

@@ -44,6 +44,7 @@ export interface DiscoveryResult {
   firstSeenAt?: string
   lastSeenAt?: string
   createdAt?: string
+  data?: Record<string, unknown> | null
 }
 
 export const useDiscoveryStore = defineStore('discovery', () => {
@@ -115,6 +116,17 @@ export const useDiscoveryStore = defineStore('discovery', () => {
     }
   }
 
+  async function cleanup(olderThanDays = 7): Promise<{ removedRuns: number } | null> {
+    try {
+      return await apiService.delete<{ removedRuns: number }>(
+        `/discovery/cleanup?olderThanDays=${olderThanDays}`
+      )
+    } catch (err: unknown) {
+      error.value = err instanceof Error ? err.message : 'Erro ao limpar histórico de descoberta'
+      return null
+    }
+  }
+
   async function mergeResult(resultId: number, targetDeviceId: number): Promise<boolean> {
     try {
       await apiService.post(`/discovery/results/${resultId}/merge`, { targetDeviceId })
@@ -139,5 +151,6 @@ export const useDiscoveryStore = defineStore('discovery', () => {
     ignoreResult,
     markAccepted,
     mergeResult,
+    cleanup,
   }
 })

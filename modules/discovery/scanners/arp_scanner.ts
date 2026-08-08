@@ -1,11 +1,59 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import net from 'node:net'
 import type { DiscoveredHost } from './icmp_scanner.js'
 
 const execFileAsync = promisify(execFile)
 
+const ARP_BATCH_SIZE = 20
+const ARP_PROBE_TIMEOUT_MS = 800
+
 export class ArpScanner {
-  async scanNetwork(): Promise<DiscoveredHost[]> {
+  /**
+   * Lê a tabela ARP do sistema. Quando `targetIps` é fornecido, dispara probes
+   * TCP (porta 80/443/22 fallback) contra cada IP antes da leitura para forçar
+   * a resolução ARP ativa e aumentar a chance de encontrar MACs fora do cache.
+   */
+  async scanNetwork(targetIps?: string[]): Promise<DiscoveredHost[]> {
+    if (targetIps && targetIps.length > 0) {
+      await this.probeHosts(targetIps)
+    }
+
+    return this.readArpTable()
+  }
+
+  private async probeHosts(ips: string[]): Promise<void> {
+    for (let i = 0; i < ips.length; i += ARP_BATCH_SIZE) {
+      const batch = ips.slice(i, i + ARP_BATCH_SIZE)
+      await Promise.all(batch.map((ip) => this.probeHost(ip)))
+    }
+  }
+
+  private probeHost(ip: string): Promise<void> {
+    return new Promise((resolve) => {
+      const socket = new net.Socket()
+      socket.setTimeout(ARP_PROBE_TIMEOUT_MS)
+
+      socket.on('connect', () => {
+        socket.destroy()
+        resolve()
+      })
+      socket.on('timeout', () => {
+        socket.destroy()
+        resolve()
+      })
+      socket.on('error', () => {
+        socket.destroy()
+        resolve()
+      })
+
+      // Portas comuns: a conexão falha rapidamente se fechada, mas já gera o
+      // pacote ARP necessário para popular o cache local.
+      socket.connect(80, ip)
+    })
+  }
+
+  private async readArpTable(): Promise<DiscoveredHost[]> {
     const discovered: DiscoveredHost[] = []
 
     try {
@@ -22,7 +70,8 @@ export class ArpScanner {
 
           if (
             macAddress !== 'FF:FF:FF:FF:FF:FF' &&
-            !macAddress.startsWith('224.') &&
+            !macAddress.startsWith('01:00:5E') &&
+            !macAddress.startsWith('33:33') &&
             !ipAddress.startsWith('224.')
           ) {
             discovered.push({

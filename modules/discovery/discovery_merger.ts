@@ -1,5 +1,6 @@
 import type { DiscoveredHost } from './scanners/icmp_scanner.js'
 import { DeviceIdentifier } from './device_identifier.js'
+import { lookupVendor } from './oui_lookup.js'
 
 export class DiscoveryMerger {
   private identifier = new DeviceIdentifier()
@@ -39,6 +40,15 @@ export class DiscoveryMerger {
       }
     }
 
-    return Array.from(ipMap.values())
+    const hosts = Array.from(ipMap.values())
+
+    // Resolve vendor por OUI quando não foi descoberto por outra fonte.
+    for (const host of hosts) {
+      if (!host.vendor && host.macAddress) {
+        host.vendor = lookupVendor(host.macAddress) ?? host.vendor
+      }
+    }
+
+    return hosts
   }
 }
