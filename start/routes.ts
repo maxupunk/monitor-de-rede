@@ -23,6 +23,7 @@ const ZabbixTemplatesController = () => import('#controllers/zabbix_templates_co
 const PortScanController = () => import('#controllers/port_scan_controller')
 const DnsController = () => import('#controllers/dns_controller')
 const DnsServersController = () => import('#controllers/dns_servers_controller')
+const DashboardController = () => import('#controllers/dashboard_controller')
 
 router.get('/', () => {
   return { status: 'online', service: 'Network Monitor API', version: '1.0.0' }
@@ -30,6 +31,10 @@ router.get('/', () => {
 
 router
   .group(() => {
+    // Dashboard Layout (Sincronização Global)
+    router.get('dashboard/layout', [DashboardController, 'getLayout'])
+    router.post('dashboard/layout', [DashboardController, 'saveLayout'])
+
     // Auth
     router.post('auth/login', [AuthController, 'login'])
     router.post('auth/logout', [AuthController, 'logout'])

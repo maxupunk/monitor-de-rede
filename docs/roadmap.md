@@ -24,6 +24,7 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
 | **Frontend (Vue 3 + Vuetify)** | 🟢 **Concluído** | SPA/PWA completa integrada à API REST AdonisJS v6, com Pinia, gráficos, topologia gráfica interativa e suporte a SSE em tempo real. |
 | **Infraestrutura Docker** | 🟢 **Concluído** | `docker-compose.yml` e `Dockerfile` configurados para todos os serviços (API, Scheduler, Probe, vpn-probe, WireGuard, Postgres, Frontend). |
 | **Módulo WireGuard (VPN)** | 🟢 **Concluído (Fases 1–4)** | Modelo de dados, geração nativa de chaves X25519, IPAM transacional, scripts por perfil (MikroTik/OpenWrt/Linux/Windows/Mobile), container WireGuard com hot-reload por `syncconf`, `vpn-probe` dedicado e telas de servidor/dispositivos/wizard. Falta apenas a validação E2E com hardware real ([roadmap_vpn.md](file:///d:/Projetos/Master%20sistemas/opensource/monitor%20de%20rede/docs/roadmap_vpn.md)). |
+| **Dashboard Grafana Customizável** | 🟢 **Concluído** | Dashboard modular com reordenação de widgets, adicionar/remover cards, limitação de altura e scroll no card de monitores e novos gráficos temporais ([roadmap_dashboard_grafana.md](file:///d:/Projetos/Master%20sistemas/opensource/monitor%20de%20rede/docs/roadmap_dashboard_grafana.md)). |
 
 ---
 

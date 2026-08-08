@@ -152,7 +152,7 @@
                 class="font-weight-bold text-primary"
                 href="#"
                 @click.prevent="catalogDialog = true"
-                >regras pré-configuradas</a
+              >regras pré-configuradas</a
               >
               para cobrir indisponibilidade, latência, perda de pacotes e quedas de interface.
             </v-alert>
