@@ -42,11 +42,11 @@ body,
 .mobile-card-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
 }
 
 .mobile-card {
-  padding: 12px 16px;
+  padding: 10px 5px;
   border-radius: 0;
 }
 
@@ -57,6 +57,7 @@ body,
 
   .mobile-card {
     border-radius: 8px;
+    padding: 12px 16px;
   }
 }
 
@@ -79,6 +80,10 @@ body,
 }
 
 @media (max-width: 959px) {
+  .mobile-full-bleed {
+    margin-inline: -5px !important;
+  }
+
   .mobile-full-bleed > .v-card-title {
     padding-inline: 5px !important;
   }
@@ -91,6 +96,7 @@ body,
 @media (min-width: 960px) {
   .mobile-full-bleed {
     border-radius: 8px !important;
+    margin-inline: 0 !important;
   }
 
   .mobile-full-bleed > .v-card-title {
@@ -129,4 +135,19 @@ body,
 .monitor-timeline-scroll {
   overflow-x: auto;
   max-width: 100%;
+}
+
+/* Log de progresso em scans (discovery, port scan, etc.) */
+.font-mono {
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+.scan-log-line {
+  line-height: 1.4;
+  opacity: 0.85;
+}
+
+.scan-log-line:last-child {
+  opacity: 1;
+  color: rgba(var(--v-theme-primary), 1);
 }

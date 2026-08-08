@@ -12,7 +12,13 @@ export class SnmpDiscoveryScanner {
   private snmpService = new SnmpService()
   private identifier = new DeviceIdentifier()
 
-  async scanHosts(hosts: DiscoveredHost[]): Promise<DiscoveredHost[]> {
+  async scanHosts(hosts: DiscoveredHost[], signal?: AbortSignal): Promise<DiscoveredHost[]> {
+    if (signal?.aborted) {
+      const error = new Error('Varredura cancelada.')
+      error.name = 'AbortError'
+      throw error
+    }
+
     const snmpCandidates = hosts.filter(
       (h) => h.openPorts?.includes(161) || h.openPorts?.includes(162)
     )
@@ -22,6 +28,11 @@ export class SnmpDiscoveryScanner {
     const discovered: DiscoveredHost[] = []
 
     for (let i = 0; i < snmpCandidates.length; i += SNMP_BATCH_SIZE) {
+      if (signal?.aborted) {
+        const error = new Error('Varredura cancelada.')
+        error.name = 'AbortError'
+        throw error
+      }
       const batch = snmpCandidates.slice(i, i + SNMP_BATCH_SIZE)
       const results = await Promise.all(batch.map((h) => this.probeHost(h)))
       for (const res of results) {

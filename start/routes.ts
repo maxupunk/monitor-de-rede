@@ -78,12 +78,14 @@ router
     router.resource('monitors', MonitorsController).apiOnly()
 
     // Discovery
+    router.get('discovery/scan-state', [DiscoveryController, 'scanState'])
+    router.get('discovery/scan-stream', [DiscoveryController, 'scanStream'])
+    router.post('discovery/scan', [DiscoveryController, 'scan'])
+    router.post('discovery/scan-cancel', [DiscoveryController, 'scanCancel'])
     router.get('discovery/runs', [DiscoveryController, 'runs'])
     router.get('discovery/runs/:id', [DiscoveryController, 'runDetails'])
-    router.get('discovery/results/latest', [DiscoveryController, 'latestResults'])
+
     router.delete('discovery/cleanup', [DiscoveryController, 'cleanup'])
-    router.post('discovery/results/:id/accept', [DiscoveryController, 'accept'])
-    router.post('discovery/results/:id/merge', [DiscoveryController, 'merge'])
 
     // Topology
     router.get('topology', [TopologyController, 'index'])

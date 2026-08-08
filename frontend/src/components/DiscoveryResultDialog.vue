@@ -29,7 +29,7 @@
               </div>
               <div class="text-caption text-grey">
                 IP: {{ result.ipAddress }}
-                <span v-if="result.discoveryRun?.network">
+                <span v-if="'discoveryRun' in result && result.discoveryRun?.network">
                   — {{ result.discoveryRun.network.name }} ({{ result.discoveryRun.network.cidr }})
                 </span>
               </div>
@@ -89,14 +89,18 @@
             >
               {{ port }}
               <span v-if="serviceName(port)" class="text-caption ml-1"
-              >({{ serviceName(port) }})</span
+                >({{ serviceName(port) }})</span
               >
             </v-chip>
           </div>
         </v-card>
 
         <!-- Datas -->
-        <v-card variant="outlined" class="rounded-lg pa-4 mb-4">
+        <v-card
+          v-if="result.firstSeenAt || result.lastSeenAt"
+          variant="outlined"
+          class="rounded-lg pa-4 mb-4"
+        >
           <div class="text-subtitle-2 font-weight-bold mb-3 d-flex align-center ga-2">
             <v-icon size="18" color="info">mdi-clock-outline</v-icon>
             Linha do Tempo
@@ -134,7 +138,7 @@
             <pre
               class="text-caption font-mono text-grey-darken-3 mb-0"
               style="white-space: pre-wrap; word-break: break-word"
-            >{{ rawJson }}</pre>
+              >{{ rawJson }}</pre>
           </v-card>
         </div>
       </v-card-text>
@@ -154,12 +158,12 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useDevicesStore } from '@/stores/devices'
-import type { DiscoveryResult } from '@/stores/discovery'
+import type { DiscoveryResult, StreamedDiscoveryHost } from '@/stores/discovery'
 import { formatDateTime } from '@/utils/formatters'
 
 const props = defineProps<{
   modelValue: boolean
-  result: DiscoveryResult | null
+  result: DiscoveryResult | StreamedDiscoveryHost | null
 }>()
 
 const emit = defineEmits<{
@@ -192,9 +196,13 @@ const deviceTypeLabel = computed(() => {
 })
 
 const openPorts = computed(() => {
-  const data = props.result?.data
-  if (!data || !Array.isArray(data.openPorts)) return []
-  return data.openPorts as number[]
+  const result = props.result
+  if (result && Array.isArray(result.openPorts) && result.openPorts.length > 0) {
+    return result.openPorts
+  }
+  const data = result?.data
+  if (data && Array.isArray(data.openPorts)) return data.openPorts as number[]
+  return []
 })
 
 const rawJson = computed(() => {

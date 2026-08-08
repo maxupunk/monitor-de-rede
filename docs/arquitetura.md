@@ -1164,12 +1164,13 @@ POST   /api/monitors/:id/disable
 ## 15.6 Descoberta
 
 ```text
-GET  /api/discovery/runs
-GET  /api/discovery/runs/:id
-GET  /api/discovery/results
-POST /api/discovery/results/:id/accept
-POST /api/discovery/results/:id/ignore
-POST /api/discovery/results/:id/merge
+GET    /api/discovery/scan-state
+GET    /api/discovery/scan-stream   (SSE)
+POST   /api/discovery/scan
+POST   /api/discovery/scan-cancel
+GET    /api/discovery/runs
+GET    /api/discovery/runs/:id
+DELETE /api/discovery/cleanup
 ```
 
 ## 15.7 Topologia

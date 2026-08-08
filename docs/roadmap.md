@@ -83,7 +83,9 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
   - [x] Fusão de registros por IP/MAC no `DiscoveryMerger`.
 - [x] **Fluxo da API de Descoberta**:
   - [x] Comando CLI `network:scan` para varredura imediata.
-  - [x] Controller e rotas para listar execuções, aceitar (gerando dispositivo e monitor de ping automaticamente) ou ignorar/mesclar resultados.
+  - [x] `POST /api/discovery/scan-stream` transmite progresso e hosts encontrados em tempo real via NDJSON.
+  - [x] `discovery_results` funciona apenas como cache do último scan; "já adicionado" é determinado verificando se o IP existe em `devices`.
+  - [x] Controller e rotas para listar execuções e criar dispositivo a partir do resultado (sem botão ignorar/mesclar).
 
 ---
 
@@ -147,8 +149,10 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
   - [x] **Dashboard**: cards de resumo em tempo real, lista de monitores com barras verticais coloridas (estilo Uptime Kuma) e feed SSE de eventos simplificado e amigável.
   - [x] **Gestão de Dispositivos**: listagem com filtros, status visual (online/offline), site opcional, modal reusável de site (`SiteDialog.vue`), campo "Está atrás de" (hierarquia/topologia) e opção de monitorar dispositivo (`isMonitored`).
   - [x] **Detalhes do Dispositivo**: abas com histórico de latência, interfaces SNMP, monitores vinculados e eventos.
-  - [x] **Central de Descoberta**: tabela para revisar, aceitar ou ignorar novos dispositivos encontrados.
+  - [x] **Central de Descoberta**: listagem do último scan com progresso em tempo real e botão para adicionar dispositivo; cache do último scan é limpo a cada nova varredura.
   - [x] **Mapa de Topologia**: tela gráfica interativa para arrastar nós, visualizar ligações e definir links manuais.
+- [x] **Layout Mobile/Desktop otimizado**:
+  - [x] Tabelas usam `ResponsiveDataTable` com visual de cards no mobile, sem bordas arredondadas e com margens reduzidas (~5px) para aparência de app portable.
 - [x] **Monitores com Histórico Estilo Uptime Kuma & Gráficos de Latência**:
   - [x] Componente `MonitorTimelineBar.vue` com barras verticais coloridas (estilo Uptime Kuma) na lista de monitores (`/monitors`).
   - [x] Página de detalhes/gráficos de monitor (`/monitors/:id`) com estatísticas de ping (médio, mín, máx), gráfico SVG de latência e log de verificações.

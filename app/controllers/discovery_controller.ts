@@ -1,18 +1,185 @@
 import type { HttpContext } from '@adonisjs/core/http'
 import { DateTime } from 'luxon'
+import vine from '@vinejs/vine'
 import DiscoveryRun from '#models/discovery_run'
-import DiscoveryResult from '#models/discovery_result'
-import Device from '#models/device'
-import Monitor from '#models/monitor'
 import Network from '#models/network'
+import { DiscoveryService } from '#modules/discovery/discovery_service'
+import {
+  scanSessionService,
+  type ScannedHost,
+} from '#modules/discovery/scan_session_service'
+import { isScannableCidr } from '#modules/discovery/cidr_range'
+import { errorMessage } from '#modules/shared/errors'
 
 export default class DiscoveryController {
+  private discoveryService = new DiscoveryService()
+
+  /**
+   * GET /api/discovery/scan-state
+   *
+   * Retorna o estado atual da varredura em memória. Permite que o frontend
+   * restaure o progresso e os hosts encontrados ao voltar para a página.
+   */
+  async scanState({ response }: HttpContext) {
+    const state = scanSessionService.getState()
+    return response.ok({
+      data: this.serializeScanState(state),
+    })
+  }
+
+  /**
+   * GET /api/discovery/scan-stream
+   *
+   * Server-Sent Events (SSE) com progresso, hosts encontrados e conclusão da
+   * varredura ativa. Reconectar funciona: o listener recebe o estado completo
+   * a cada mudança.
+   */
+  async scanStream({ response, request }: HttpContext) {
+    const rawRes = response.response
+    rawRes.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    })
+
+    const sendState = () => {
+      try {
+        const state = scanSessionService.getState()
+        rawRes.write(`data: ${JSON.stringify(this.serializeScanState(state))}\n\n`)
+      } catch {
+        // Cliente desconectado.
+      }
+    }
+
+    // Envia o estado imediatamente ao conectar.
+    sendState()
+
+    const unsubscribe = scanSessionService.subscribe(sendState)
+
+    request.request.on('close', () => {
+      unsubscribe()
+    })
+  }
+
+  /**
+   * POST /api/discovery/scan
+   *
+   * Inicia uma varredura de forma assíncrona. O scan continua rodando no
+   * servidor mesmo se o frontend fechar a conexão. Iniciar um novo scan limpa
+   * a sessão anterior.
+   */
+  async scan({ request, response }: HttpContext) {
+    const schema = vine.object({
+      networkId: vine.number(),
+    })
+    const { networkId } = await vine.validate({ schema, data: request.all() })
+
+    const network = await Network.findOrFail(networkId)
+    if (!isScannableCidr(network.cidr)) {
+      return response.badRequest({
+        message: `A rede "${network.name}" não tem uma faixa CIDR varredurável (valor atual: "${network.cidr}").`,
+      })
+    }
+
+    const runRecord = await DiscoveryRun.create({
+      networkId: network.id,
+      probeId: network.probeId ?? null,
+      status: 'running',
+      startedAt: DateTime.now(),
+      configuration: { cidr: network.cidr },
+    })
+
+    const signal = scanSessionService.startSession(runRecord.id, network.id)
+
+    // Executa o scan em background, desacoplado da request.
+    this.runDiscoveryInBackground(network.cidr, network.id, network.probeId ?? null, runRecord, signal)
+
+    return response.accepted({
+      runId: runRecord.id,
+      status: 'running',
+    })
+  }
+
+  /**
+   * POST /api/discovery/scan-cancel
+   *
+   * Cancela a varredura em andamento.
+   */
+  async scanCancel({ response }: HttpContext) {
+    scanSessionService.cancel()
+    return response.ok({ status: 'cancelled' })
+  }
+
+  private async runDiscoveryInBackground(
+    cidr: string,
+    networkId: number,
+    probeId: number | null,
+    runRecord: DiscoveryRun,
+    signal?: AbortSignal
+  ) {
+    try {
+      await this.discoveryService.runDiscovery(
+        cidr,
+        networkId,
+        probeId,
+        runRecord,
+        scanSessionService.asCallbacks(),
+        signal
+      )
+      scanSessionService.complete()
+    } catch (err: unknown) {
+      const message = errorMessage(err)
+      if (err instanceof Error && err.name === 'AbortError') {
+        runRecord.status = 'failed'
+        runRecord.finishedAt = DateTime.now()
+        runRecord.error = 'Varredura cancelada.'
+        await runRecord.save()
+        scanSessionService.cancel()
+        return
+      }
+
+      runRecord.status = 'failed'
+      runRecord.finishedAt = DateTime.now()
+      runRecord.error = message
+      await runRecord.save()
+      scanSessionService.fail(message)
+    }
+  }
+
+  private serializeScanState(state: ReturnType<typeof scanSessionService.getState>) {
+    return {
+      runId: state.runId,
+      networkId: state.networkId,
+      status: state.status,
+      phase: state.phase,
+      progressCurrent: state.progressCurrent,
+      progressTotal: state.progressTotal,
+      hosts: state.hosts.map((host) => this.serializeHost(host)),
+      logs: state.logs,
+      error: state.error,
+      startedAt: state.startedAt,
+      finishedAt: state.finishedAt,
+    }
+  }
+
+  private serializeHost(host: ScannedHost) {
+    return {
+      ipAddress: host.ipAddress,
+      macAddress: host.macAddress ?? null,
+      hostname: host.hostname ?? null,
+      mdnsName: host.mdnsName ?? null,
+      vendor: host.vendor ?? null,
+      deviceType: host.deviceType ?? null,
+      openPorts: host.openPorts ?? null,
+      confidence: host.confidence,
+      data: host.data ?? null,
+    }
+  }
+
   async runs({ request, response }: HttpContext) {
     const query = DiscoveryRun.query()
       .preload('network')
       .preload('probe')
-      // A coluna "Dispositivos encontrados" do histórico vinha vazia: o total
-      // não é campo da run, é a contagem dos resultados que ela gerou.
       .withCount('results')
       .orderBy('id', 'desc')
 
@@ -46,103 +213,8 @@ export default class DiscoveryController {
   }
 
   /**
-   * GET /api/discovery/results/latest
-   *
-   * Retorna os resultados da varredura mais recente, ignorando IPs que já
-   * existem na tabela devices. O discovery_result funciona apenas como cache
-   * do último scan; a fonte da verdade para "já adicionado" é a tabela
-   * devices.
-   */
-  async latestResults({ response }: HttpContext) {
-    const latestRun = await DiscoveryRun.query().orderBy('id', 'desc').first()
-
-    if (!latestRun) {
-      return response.ok({
-        data: [],
-        meta: { currentPage: 1, lastPage: 1, total: 0 },
-      })
-    }
-
-    const existingIps = await Device.query().select('ip_address')
-    const existingIpSet = new Set(existingIps.map((d) => d.ipAddress).filter(Boolean))
-
-    const results = await DiscoveryResult.query()
-      .where('discoveryRunId', latestRun.id)
-      .preload('discoveryRun', (runQuery) => runQuery.preload('network', (n) => n.preload('site')))
-      .orderBy('id', 'desc')
-
-    const filtered = results.filter((r) => !existingIpSet.has(r.ipAddress))
-
-    return response.ok({
-      data: filtered,
-      meta: { currentPage: 1, lastPage: 1, total: filtered.length },
-    })
-  }
-
-  /**
-   * POST /api/discovery/results/:id/accept
-   *
-   * Cria um device a partir do resultado e remove o cache do discovery.
-   */
-  async accept({ params, response }: HttpContext) {
-    const result = await DiscoveryResult.findOrFail(params.id)
-    const run = await DiscoveryRun.findOrFail(result.discoveryRunId)
-    const network = await Network.find(run.networkId)
-
-    const device = await Device.create({
-      siteId: network?.siteId ?? null,
-      networkId: network?.id ?? null,
-      ipAddress: result.ipAddress,
-      name: result.mdnsName || result.hostname || result.ipAddress,
-      type: result.deviceType || 'unknown',
-      vendor: result.vendor || null,
-      status: 'online',
-      isMonitored: true,
-      lastSeenAt: result.lastSeenAt,
-    })
-
-    await Monitor.create({
-      deviceId: device.id,
-      probeId: run.probeId,
-      type: 'ping',
-      name: `Ping ${device.name}`,
-      configuration: { host: result.ipAddress },
-      intervalSeconds: 60,
-      timeoutSeconds: 5,
-      enabled: true,
-      status: 'unknown',
-    })
-
-    await result.delete()
-
-    return response.ok({
-      message: `Dispositivo ${device.name} criado com sucesso a partir da descoberta`,
-      device,
-    })
-  }
-
-  /**
-   * POST /api/discovery/results/:id/merge
-   *
-   * Vincula o resultado a um device existente e remove o cache do discovery.
-   */
-  async merge({ params, request, response }: HttpContext) {
-    const result = await DiscoveryResult.findOrFail(params.id)
-    const targetDeviceId = request.input('targetDeviceId')
-
-    const device = await Device.findOrFail(targetDeviceId)
-    await result.delete()
-
-    return response.ok({
-      message: `Resultado de descoberta mesclado com o dispositivo #${device.id}`,
-      device,
-    })
-  }
-
-  /**
    * DELETE /api/discovery/cleanup?olderThanDays=7
    * Remove runs (e seus resultados em cascata) mais antigas que o prazo.
-   * Útil para evitar acúmulo de legados na tabela de descoberta.
    */
   async cleanup({ request, response }: HttpContext) {
     const olderThanDays = Math.max(1, Number(request.input('olderThanDays', 7)))
@@ -155,7 +227,6 @@ export default class DiscoveryController {
       return response.ok({ removedRuns: 0, removedResults: 0 })
     }
 
-    // A FK já tem ON DELETE CASCADE; deletar as runs limpa os resultados.
     await DiscoveryRun.query().whereIn('id', runIds).delete()
 
     return response.ok({

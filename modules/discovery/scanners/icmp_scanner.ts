@@ -18,20 +18,37 @@ export interface DiscoveredHost {
 export class IcmpScanner {
   private pingChecker = new PingChecker()
 
-  async scanNetwork(cidr: string): Promise<DiscoveredHost[]> {
+  async scanNetwork(
+    cidr: string,
+    callbacks?: {
+      onProgress?: (current: number, total: number) => void
+      onResult?: (host: DiscoveredHost) => void
+      signal?: AbortSignal
+    }
+  ): Promise<DiscoveredHost[]> {
     const ips = this.parseCidrToIps(cidr)
     const discovered: DiscoveredHost[] = []
+    let processed = 0
 
     const batchSize = 20
     for (let i = 0; i < ips.length; i += batchSize) {
+      if (callbacks?.signal?.aborted) {
+        const error = new Error('Varredura cancelada.')
+        error.name = 'AbortError'
+        throw error
+      }
       const batch = ips.slice(i, i + batchSize)
       const results = await Promise.all(batch.map((ip) => this.checkHost(ip)))
 
       for (const res of results) {
         if (res) {
           discovered.push(res)
+          callbacks?.onResult?.(res)
         }
       }
+
+      processed += batch.length
+      callbacks?.onProgress?.(processed, ips.length)
     }
 
     return discovered

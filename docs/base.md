@@ -263,8 +263,6 @@ Para cada equipamento descoberto, o sistema poderá apresentar:
 O usuário poderá:
 
 * Adicionar o dispositivo ao inventário.
-* Ignorar o dispositivo.
-* Relacioná-lo com um dispositivo existente.
 * Definir seu tipo.
 * Informar atrás de qual roteador ou switch ele está.
 * Ativar monitores automaticamente.

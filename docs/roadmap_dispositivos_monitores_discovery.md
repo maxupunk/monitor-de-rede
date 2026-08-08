@@ -60,27 +60,30 @@ A tela de detalhes do monitor ganhou uma nova seção "Histórico de Alertas" co
 
 ### Situação implementada
 
-- **Frontend:** `frontend/src/pages/DiscoveryPage.vue`, `frontend/src/components/DeviceDialog.vue`
-- **Backend:** `app/controllers/discovery_controller.ts`
-- **Rotas:** `GET /api/discovery/results/latest`, `POST /api/discovery/results/:id/mark-accepted`
+- **Frontend:** `frontend/src/pages/DiscoveryPage.vue`, `frontend/src/components/DeviceDialog.vue`, `frontend/src/components/DiscoveryResultDialog.vue`
+- **Backend:** `app/controllers/discovery_controller.ts`, `modules/discovery/discovery_service.ts`, `modules/discovery/scan_session_service.ts`
+- **Rotas:** `GET /api/discovery/scan-state`, `GET /api/discovery/scan-stream` (SSE), `POST /api/discovery/scan`, `POST /api/discovery/scan-cancel`, `GET /api/discovery/runs`, `DELETE /api/discovery/cleanup`
 
-A aba "Resultados Encontrados" agora mostra **apenas os resultados da varredura mais recente**, independentemente do status. O botão "Aceitar" foi renomeado para **"Adicionar"** e agora abre o formulário `DeviceDialog` pré-preenchendo nome, IP, tipo, fabricante, MAC e site vindos da descoberta. Itens já adicionados (`accepted`/`merged`) não exibem o botão "Adicionar"; em vez disso, mostram um chip "Já adicionado". A aba "Histórico de Escaneamento" foi mantida.
+A aba "Resultados Encontrados" mostra **apenas os resultados da varredura atual**. O scan roda de forma assíncrona no backend e seu estado (fase, progresso, hosts encontrados e logs) é mantido em memória no `ScanSessionService`. Isso permite que o usuário saia da página e, ao voltar, recupere o progresso via `GET /api/discovery/scan-state` e continue recebendo atualizações em tempo real pelo SSE `GET /api/discovery/scan-stream`. Iniciar um novo scan limpa a sessão anterior. O botão "Adicionar" abre o formulário `DeviceDialog` pré-preenchendo nome, IP, tipo, fabricante, MAC e site. A verificação de "já adicionado" compara o IP diretamente com a tabela `devices`. A aba "Histórico de Escaneamento" continua listando as execuções passadas.
 
 ### Arquivos alterados
 
 - `start/routes.ts`
 - `app/controllers/discovery_controller.ts`
+- `app/models/discovery_result.ts`
 - `frontend/src/pages/DiscoveryPage.vue`
 - `frontend/src/components/DeviceDialog.vue`
+- `frontend/src/components/DiscoveryResultDialog.vue`
 - `frontend/src/stores/discovery.ts`
 
 ### Tarefas
 
 - [x] Manter aba "Histórico de Escaneamento".
-- [x] "Resultados Encontrados" mostrar apenas o último scan.
+- [x] "Resultados Encontrados" mostrar apenas o scan atual em memória.
+- [x] Limpar resultados anteriores ao iniciar novo scan.
 - [x] Renomear "Aceitar" para "Adicionar" e abrir `DeviceDialog` ao clicar.
-- [x] Esconder botão "Adicionar" para itens já adicionados.
-- [x] Criar endpoint `mark-accepted` para marcar resultado após cadastro manual.
+- [x] Esconder botão "Adicionar" para itens já adicionados (verificado via tabela `devices`).
+- [x] Remover endpoint legado `/discovery/results/latest` e lógica de status `pending`/`accepted`/`merged`.
 - [x] Testar build e testes.
 
 ---

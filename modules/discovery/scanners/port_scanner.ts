@@ -4,11 +4,16 @@ import type { DiscoveredHost } from './icmp_scanner.js'
 export class PortScanner {
   private commonPorts = [80, 443, 22, 445, 8080, 8000, 3389, 161]
 
-  async scanHosts(hosts: DiscoveredHost[]): Promise<DiscoveredHost[]> {
+  async scanHosts(hosts: DiscoveredHost[], signal?: AbortSignal): Promise<DiscoveredHost[]> {
     const updatedHosts: DiscoveredHost[] = []
 
     for (const host of hosts) {
-      const openPorts = await this.scanPortsForIp(host.ipAddress)
+      if (signal?.aborted) {
+        const error = new Error('Varredura cancelada.')
+        error.name = 'AbortError'
+        throw error
+      }
+      const openPorts = await this.scanPortsForIp(host.ipAddress, signal)
       updatedHosts.push({
         ...host,
         openPorts,
@@ -19,7 +24,12 @@ export class PortScanner {
     return updatedHosts
   }
 
-  private async scanPortsForIp(ip: string): Promise<number[]> {
+  async scanPortsForIp(ip: string, signal?: AbortSignal): Promise<number[]> {
+    if (signal?.aborted) {
+      const error = new Error('Varredura cancelada.')
+      error.name = 'AbortError'
+      throw error
+    }
     const openPorts: number[] = []
 
     const portChecks = this.commonPorts.map(
