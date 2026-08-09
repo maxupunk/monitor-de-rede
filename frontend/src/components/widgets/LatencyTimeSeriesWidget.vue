@@ -329,9 +329,9 @@ interface SamplePoint {
 
 const monitorOptions = computed(() => {
   const options: Array<{ id: number | 'all'; name: string }> = [
-    { id: 'all', name: 'Todos os Monitores (Média Global)' },
+    { id: 'all', name: 'Todos os Monitores Ping (Média Global)' },
   ]
-  for (const m of monitorsStore.monitors) {
+  for (const m of monitorsStore.monitors.filter((m) => m.type === 'ping')) {
     options.push({
       id: m.id,
       name: `${m.name} (${m.target})`,
@@ -345,28 +345,30 @@ const selectedMonitor = computed(() => {
   return monitorsStore.monitors.find((m) => m.id === selectedMonitorId.value) || null
 })
 
+const pingMonitors = computed(() => monitorsStore.monitors.filter((m) => m.type === 'ping'))
+
 const sourceDescription = computed(() => {
   if (selectedMonitor.value) {
-    return `${selectedMonitor.value.name} — ${selectedMonitor.value.target} (${(selectedMonitor.value.type || 'ICMP').toUpperCase()})`
+    return `${selectedMonitor.value.name} — ${selectedMonitor.value.target} (PING ICMP)`
   }
-  const total = monitorsStore.monitors.length
+  const total = pingMonitors.value.length
   return total > 0
-    ? `Média consolidada dos ${total} monitores de rede ativos`
-    : 'Média consolidada dos monitores de rede'
+    ? `Média consolidada dos ${total} monitores Ping (ICMP) ativos`
+    : 'Média consolidada dos monitores Ping (ICMP)'
 })
 
 const targetLabel = computed(() => {
   if (selectedMonitor.value) {
     return `Alvo: ${selectedMonitor.value.target}`
   }
-  return 'Origem: Média Global dos Monitores'
+  return 'Origem: Média Global dos Monitores Ping'
 })
 
-// Compila amostras com base no filtro selecionado (específico ou todos os monitores)
+// Compila amostras com base no filtro selecionado (específico ou apenas monitores de ping)
 const samples = computed<SamplePoint[]>(() => {
   const targetMonitors =
     selectedMonitorId.value === 'all'
-      ? monitorsStore.monitors
+      ? pingMonitors.value
       : monitorsStore.monitors.filter((m) => m.id === selectedMonitorId.value)
 
   const allResults: Array<{
@@ -419,7 +421,7 @@ const samples = computed<SamplePoint[]>(() => {
               id: 1,
               name: 'Gateway Principal',
               target: '192.168.1.1',
-              type: 'icmp',
+              type: 'ping',
               status: 'up',
               latencyMs: 12,
               lossPct: 0,

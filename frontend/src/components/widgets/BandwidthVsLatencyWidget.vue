@@ -220,7 +220,7 @@
         <div class="d-flex align-center ga-1">
           <span class="dot-indicator bg-amber"></span>
           <span
-          >Latência: {{ currentLatency.toFixed(1) }} ms (Média:
+            >Latência: {{ currentLatency.toFixed(1) }} ms (Média:
             {{ avgLatency.toFixed(1) }} ms)</span
           >
         </div>
@@ -266,9 +266,9 @@ onMounted(async () => {
 
 const monitorOptions = computed(() => {
   const options: Array<{ id: number | 'all'; name: string }> = [
-    { id: 'all', name: 'Todos os Monitores (Média Latência)' },
+    { id: 'all', name: 'Todos os Monitores Ping (Média Latência)' },
   ]
-  for (const m of monitorsStore.monitors) {
+  for (const m of monitorsStore.monitors.filter((m) => m.type === 'ping')) {
     options.push({ id: m.id, name: `${m.name} (${m.target})` })
   }
   return options

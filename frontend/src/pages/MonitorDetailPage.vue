@@ -130,7 +130,7 @@
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
               <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-              >Uso Mín / Máx</span
+                >Uso Mín / Máx</span
               >
               <v-avatar color="purple" variant="tonal" size="36">
                 <v-icon size="20">mdi-swap-vertical</v-icon>
@@ -149,7 +149,7 @@
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
               <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-              >Agente SNMP Disponível</span
+                >Agente SNMP Disponível</span
               >
               <v-avatar color="success" variant="tonal" size="36">
                 <v-icon size="20">mdi-check-decagram</v-icon>
@@ -168,7 +168,7 @@
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
               <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-              >Velocidade Negociada</span
+                >Velocidade Negociada</span
               >
               <v-avatar :color="headerChip.color" variant="tonal" size="36">
                 <v-icon size="20">{{ headerChip.icon }}</v-icon>
@@ -185,7 +185,7 @@
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
               <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-              >Status Operacional</span
+                >Status Operacional</span
               >
               <v-avatar color="info" variant="tonal" size="36">
                 <v-icon size="20">mdi-information-outline</v-icon>
@@ -202,7 +202,7 @@
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
               <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-              >Estabilidade do Link</span
+                >Estabilidade do Link</span
               >
               <v-avatar color="success" variant="tonal" size="36">
                 <v-icon size="20">mdi-check-decagram</v-icon>
@@ -219,7 +219,7 @@
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
               <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-              >Alterações de Estado</span
+                >Alterações de Estado</span
               >
               <v-avatar
                 :color="interfaceFlapCount > 0 ? 'warning' : 'grey'"
@@ -241,11 +241,13 @@
       </v-row>
 
       <v-row v-else class="mb-6">
-        <!-- Ping Atual -->
+        <!-- Tempo de Resposta / Ping / Tempo de Consulta Atual -->
         <v-col cols="12" sm="6" md="3">
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
-              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium">Ping Atual</span>
+              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium">{{
+                latencyKpiTitles.current
+              }}</span>
               <v-avatar color="primary" variant="tonal" size="36">
                 <v-icon size="20">mdi-speedometer</v-icon>
               </v-avatar>
@@ -256,15 +258,17 @@
             >
               {{ lastLatencyText }}
             </div>
-            <div class="text-caption text-grey">Última resposta registrada</div>
+            <div class="text-caption text-grey">{{ latencyKpiTitles.currentCaption }}</div>
           </v-card>
         </v-col>
 
-        <!-- Ping Médio -->
+        <!-- Tempo Médio -->
         <v-col cols="12" sm="6" md="3">
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
-              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium">Ping Médio</span>
+              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium">{{
+                latencyKpiTitles.avg
+              }}</span>
               <v-avatar color="info" variant="tonal" size="36">
                 <v-icon size="20">mdi-chart-line</v-icon>
               </v-avatar>
@@ -272,17 +276,17 @@
             <div class="text-h4 font-weight-bold my-1 text-info">
               {{ avgLatencyText }}
             </div>
-            <div class="text-caption text-grey">Média das verificações recentes</div>
+            <div class="text-caption text-grey">{{ latencyKpiTitles.avgCaption }}</div>
           </v-card>
         </v-col>
 
-        <!-- Ping Mínimo / Máximo -->
+        <!-- Tempo Mínimo / Máximo -->
         <v-col cols="12" sm="6" md="3">
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
-              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-              >Ping Mín / Máx</span
-              >
+              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium">{{
+                latencyKpiTitles.minMax
+              }}</span>
               <v-avatar color="purple" variant="tonal" size="36">
                 <v-icon size="20">mdi-swap-vertical</v-icon>
               </v-avatar>
@@ -292,7 +296,7 @@
               <span class="text-grey-darken-1 font-weight-regular text-subtitle-1 mx-1">/</span>
               <span>{{ maxLatencyText }}</span>
             </div>
-            <div class="text-caption text-grey">Mínima e máxima de latência</div>
+            <div class="text-caption text-grey">{{ latencyKpiTitles.minMaxCaption }}</div>
           </v-card>
         </v-col>
 
@@ -301,7 +305,7 @@
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
               <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-              >Taxa de Uptime</span
+                >Taxa de Uptime</span
               >
               <v-avatar color="success" variant="tonal" size="36">
                 <v-icon size="20">mdi-check-decagram</v-icon>
@@ -894,6 +898,37 @@ const minLatencyText = computed(() => {
 })
 const maxLatencyText = computed(() => {
   return stats.value.maxLatency !== null ? `${stats.value.maxLatency}ms` : 'N/A'
+})
+
+const latencyKpiTitles = computed(() => {
+  if (monitor.value?.type === 'ping') {
+    return {
+      current: 'Ping Atual',
+      avg: 'Ping Médio',
+      minMax: 'Ping Mín / Máx',
+      currentCaption: 'Última resposta registrada',
+      avgCaption: 'Média das verificações recentes',
+      minMaxCaption: 'Mínima e máxima de latência',
+    }
+  }
+  if (monitor.value?.type === 'dns') {
+    return {
+      current: 'Tempo de Consulta Atual',
+      avg: 'Tempo de Consulta Médio',
+      minMax: 'Consulta Mín / Máx',
+      currentCaption: 'Última consulta DNS registrada',
+      avgCaption: 'Média dos tempos de resolução',
+      minMaxCaption: 'Mínimo e máximo tempo de consulta',
+    }
+  }
+  return {
+    current: 'Tempo de Resposta Atual',
+    avg: 'Tempo de Resposta Médio',
+    minMax: 'Resposta Mín / Máx',
+    currentCaption: 'Última resposta registrada',
+    avgCaption: 'Média das verificações recentes',
+    minMaxCaption: 'Mínimo e máximo tempo de resposta',
+  }
 })
 
 // --- Monitores de Interface (ethernet): status vem enriquecido do checker SNMP com

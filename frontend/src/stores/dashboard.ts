@@ -95,11 +95,11 @@ export const CARD_TEMPLATES: CardTemplate[] = [
   },
   {
     type: 'dns_latency',
-    title: 'Latência de DNS (Alinhado)',
+    title: 'Tempo de Resolução DNS (Alinhado)',
     category: 'charts',
     icon: 'mdi-dns-outline',
     description:
-      'Gráfico e ranking comparativo com escala de latência unificada para resolvedores DNS.',
+      'Gráfico e ranking comparativo com escala de tempo de consulta unificada para resolvedores DNS.',
     compatibleResourceTypes: ['dns-resolvers', 'numeric'],
     allowMultiple: true,
     defaultCols: { cols: 12, sm: 12, md: 6, lg: 6 },
@@ -224,7 +224,7 @@ export const DEFAULT_WIDGETS: WidgetConfig[] = [
   {
     id: 'dns_latency',
     type: 'dns_latency',
-    title: 'Latência e Benchmark de DNS',
+    title: 'Tempo de Consulta e Benchmark DNS',
     category: 'charts',
     cols: 12,
     sm: 12,
@@ -233,7 +233,7 @@ export const DEFAULT_WIDGETS: WidgetConfig[] = [
     visible: true,
     order: 7,
     icon: 'mdi-dns-outline',
-    description: 'Ranking comparativo e histórico de performance de resolvedores DNS.',
+    description: 'Ranking comparativo e histórico de tempo de consulta de resolvedores DNS.',
   },
 ]
 

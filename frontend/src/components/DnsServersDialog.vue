@@ -15,7 +15,7 @@
         </template>
         <v-card-title class="font-weight-bold text-h6">Servidores DNS</v-card-title>
         <v-card-subtitle>
-          Usados no autocomplete dos monitores e na comparação de latência do dashboard.
+          Usados no autocomplete dos monitores e na comparação de tempo de consulta do dashboard.
         </v-card-subtitle>
       </v-card-item>
 

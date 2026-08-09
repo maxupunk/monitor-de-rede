@@ -3,12 +3,12 @@
     <v-card-title class="d-flex align-center justify-space-between py-3 px-4 flex-wrap ga-2">
       <div class="d-flex align-center">
         <v-icon start color="deep-purple">mdi-dns-outline</v-icon>
-        <span class="font-weight-bold text-h6">Latência de DNS</span>
+        <span class="font-weight-bold text-h6">Tempo de Resolução DNS</span>
         <v-chip size="x-small" color="deep-purple" class="ml-2" variant="tonal">
           Escala Alinhada ({{
             store.slowestLatency > 0
               ? `0-${Math.round(store.slowestLatency)}ms`
-              : 'menor tempo primeiro'
+              : 'menor tempo de consulta primeiro'
           }})
         </v-chip>
       </div>

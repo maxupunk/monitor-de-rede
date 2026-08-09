@@ -9,7 +9,7 @@ export interface DnsServer {
   /** IP, `ip:porta` (UDP/TCP) ou endpoint https (DoH) */
   address: string
   protocol: Exclude<DnsProtocol, 'system'>
-  /** Participa da comparação de latência do dashboard */
+  /** Participa da comparação de tempo de consulta do dashboard */
   isDefault: boolean
   description: string | null
   createdAt?: string

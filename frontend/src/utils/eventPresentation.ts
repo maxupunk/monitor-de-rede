@@ -77,12 +77,15 @@ export function formatEventDetails(evt: RealtimeEventPayload): FormattedEventDet
     }
     case 'monitor:result': {
       const name = d.name || d.monitorName || `Monitor #${d.monitorId || d.id || ''}`
+      const type = String(d.type || '').toLowerCase()
       const status = String(d.status || '').toLowerCase()
       const isUp = status === 'up' || status === 'online'
       const latency = d.latencyMs !== undefined && d.latencyMs !== null ? `${d.latencyMs} ms` : null
+      const metricLabel =
+        type === 'dns' ? 'Tempo de consulta' : type === 'ping' ? 'Latência' : 'Tempo de resposta'
       return {
         title: name,
-        message: `${isUp ? 'Verificação OK (ONLINE)' : 'Falha na Verificação (OFFLINE)'}${latency ? ` • Latência: ${latency}` : ''}`,
+        message: `${isUp ? 'Verificação OK (ONLINE)' : 'Falha na Verificação (OFFLINE)'}${latency ? ` • ${metricLabel}: ${latency}` : ''}`,
         icon: isUp ? 'mdi-check-circle' : 'mdi-alert-circle',
         color: isUp ? 'success' : 'error',
         time: dateStr,
