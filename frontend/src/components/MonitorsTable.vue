@@ -48,7 +48,10 @@
             </v-icon>
             {{ interfaceStatusInfo(item).label }}
           </div>
-          <router-link :to="`/monitors/${item.id}`" class="text-decoration-none">
+          <router-link
+            :to="`/monitors/${item.id}`"
+            class="text-decoration-none d-inline-flex align-center"
+          >
             <MonitorTimelineBar
               :results="item.recentResults"
               :max-blocks="24"
@@ -192,7 +195,10 @@
         </div>
 
         <div class="monitor-timeline-scroll">
-          <router-link :to="`/monitors/${item.id}`" class="text-decoration-none">
+          <router-link
+            :to="`/monitors/${item.id}`"
+            class="text-decoration-none d-inline-flex align-center"
+          >
             <template v-if="isGaugeMonitor(item)">
               <div class="d-flex align-center ga-2">
                 <MonitorSparkline

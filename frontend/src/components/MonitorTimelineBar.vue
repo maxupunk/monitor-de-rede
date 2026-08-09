@@ -1,7 +1,14 @@
 <template>
   <div class="timeline-bar-wrapper d-inline-flex align-center ga-1">
-    <div v-for="(block, idx) in formattedBlocks" :key="idx" class="timeline-block-container">
-      <v-tooltip location="top" :disabled="!block.hasData" color="#0F172A">
+    <div v-for="block in formattedBlocks" :key="block.id" class="timeline-block-container">
+      <v-tooltip
+        location="top"
+        :disabled="!block.hasData"
+        color="#0F172A"
+        :open-delay="60"
+        :close-delay="40"
+        offset="6"
+      >
         <template #activator="{ props: tooltipProps }">
           <div
             v-bind="tooltipProps"
@@ -66,6 +73,7 @@ const props = withDefaults(
 )
 
 interface BlockItem {
+  id: string
   hasData: boolean
   statusText: string
   color: string
@@ -87,6 +95,7 @@ const formattedBlocks = computed<BlockItem[]>(() => {
   // Preencher slots vazios à esquerda se houver menos execuções
   for (let i = 0; i < padLength; i++) {
     items.push({
+      id: `empty-${i}`,
       hasData: false,
       statusText: 'Sem dados',
       color: '#E0E0E0',
@@ -96,8 +105,10 @@ const formattedBlocks = computed<BlockItem[]>(() => {
   }
 
   // Adicionar dados reais
-  for (const item of sliced) {
+  for (let i = 0; i < sliced.length; i++) {
+    const item = sliced[i]
     items.push({
+      id: `real-${item.id || i}-${item.finishedAt || item.startedAt || i}`,
       hasData: true,
       statusText: item.status || 'unknown',
       color: getStatusHexColor(item.status),
@@ -117,24 +128,30 @@ const formattedBlocks = computed<BlockItem[]>(() => {
   align-items: center;
   gap: 3px;
   user-select: none;
+  padding: 4px 2px;
+  box-sizing: border-box;
 }
 
 .timeline-block-container {
   display: flex;
   align-items: center;
+  justify-content: center;
 }
 
 .timeline-block {
   border-radius: 3px;
   transition:
-    transform 0.15s ease,
-    opacity 0.15s ease;
+    transform 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.15s ease,
+    filter 0.15s ease;
   cursor: pointer;
+  transform-origin: center center;
 }
 
 .timeline-block:hover {
-  transform: scaleY(1.25);
-  opacity: 0.85;
+  transform: scaleY(1.15) scaleX(1.1);
+  opacity: 0.95;
+  filter: brightness(1.2);
 }
 
 .empty-block {
@@ -151,5 +168,6 @@ const formattedBlocks = computed<BlockItem[]>(() => {
 
 .custom-tooltip-content {
   max-width: 280px;
+  pointer-events: none;
 }
 </style>

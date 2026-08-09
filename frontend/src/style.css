@@ -134,6 +134,7 @@ body,
 /* Timeline de monitores com scroll horizontal quando não couber */
 .monitor-timeline-scroll {
   overflow-x: auto;
+  overflow-y: hidden;
   max-width: 100%;
 }
 

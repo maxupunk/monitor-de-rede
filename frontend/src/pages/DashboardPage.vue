@@ -173,7 +173,7 @@
               <v-card elevation="2" class="pa-4 rounded-lg">
                 <div class="d-flex align-center justify-space-between mb-2">
                   <span class="text-subtitle-2 text-grey-darken-1 font-weight-bold"
-                    >Dispositivos</span
+                  >Dispositivos</span
                   >
                   <v-avatar color="primary" variant="tonal" size="36">
                     <v-icon color="primary">mdi-devices</v-icon>
@@ -190,7 +190,7 @@
               <v-card elevation="2" class="pa-4 rounded-lg">
                 <div class="d-flex align-center justify-space-between mb-2">
                   <span class="text-subtitle-2 text-grey-darken-1 font-weight-bold"
-                    >Monitores de Rede</span
+                  >Monitores de Rede</span
                   >
                   <v-avatar color="info" variant="tonal" size="36">
                     <v-icon color="info">mdi-chart-timeline-variant</v-icon>
@@ -207,7 +207,7 @@
               <v-card elevation="2" class="pa-4 rounded-lg">
                 <div class="d-flex align-center justify-space-between mb-2">
                   <span class="text-subtitle-2 text-grey-darken-1 font-weight-bold"
-                    >Disponibilidade</span
+                  >Disponibilidade</span
                   >
                   <v-avatar color="success" variant="tonal" size="36">
                     <v-icon color="success">mdi-check-circle-outline</v-icon>
@@ -222,7 +222,7 @@
               <v-card elevation="2" class="pa-4 rounded-lg">
                 <div class="d-flex align-center justify-space-between mb-2">
                   <span class="text-subtitle-2 text-grey-darken-1 font-weight-bold"
-                    >Alertas Ativos</span
+                  >Alertas Ativos</span
                   >
                   <v-avatar color="warning" variant="tonal" size="36">
                     <v-icon color="warning">mdi-bell-ring-outline</v-icon>
