@@ -956,7 +956,16 @@ const canFillFromDevice = computed(
 )
 
 const timeoutError = computed(() =>
-  form.timeoutSeconds >= form.intervalSeconds ? 'Deve ser menor que o intervalo' : undefined
+  form.timeoutSeconds > form.intervalSeconds ? 'Deve ser menor ou igual ao intervalo' : undefined
+)
+
+watch(
+  () => form.intervalSeconds,
+  (newInterval) => {
+    if (form.timeoutSeconds > newInterval) {
+      form.timeoutSeconds = newInterval
+    }
+  }
 )
 
 /** Mantém valores fora dos presets (monitores antigos) visíveis no select */

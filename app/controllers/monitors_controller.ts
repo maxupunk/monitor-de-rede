@@ -85,7 +85,7 @@ export default class MonitorsController {
       type: rawData.type,
       name: rawData.name,
       configuration,
-      intervalSeconds: rawData.intervalSeconds ?? 60,
+      intervalSeconds: rawData.intervalSeconds ?? 15,
       timeoutSeconds: rawData.timeoutSeconds ?? 10,
       retryCount: rawData.retryCount ?? 3,
       enabled,

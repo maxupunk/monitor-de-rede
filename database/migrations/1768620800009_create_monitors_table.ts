@@ -23,7 +23,7 @@ export default class extends BaseSchema {
       table.string('type').notNullable()
       table.string('name').notNullable()
       table.jsonb('configuration').notNullable()
-      table.integer('interval_seconds').defaultTo(60).notNullable()
+      table.integer('interval_seconds').defaultTo(15).notNullable()
       table.integer('timeout_seconds').defaultTo(10).notNullable()
       table.integer('retry_count').defaultTo(3).notNullable()
       table.boolean('enabled').defaultTo(true).notNullable()
