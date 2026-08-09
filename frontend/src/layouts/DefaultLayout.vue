@@ -82,7 +82,7 @@
       <v-chip
         :color="eventsStore.isConnected ? 'success' : 'grey-darken-1'"
         size="small"
-        class="mr-3 font-weight-bold"
+        class="mr-2 font-weight-bold"
         variant="tonal"
       >
         <v-icon start size="12">
@@ -90,6 +90,29 @@
         </v-icon>
         {{ eventsStore.isConnected ? 'Tempo Real Ativo' : 'Conectando SSE...' }}
       </v-chip>
+
+      <!-- Botão de Notificações PWA -->
+      <v-tooltip location="bottom" text="Notificações PWA do Navegador">
+        <template #activator="{ props: tooltipProps }">
+          <v-btn
+            v-bind="tooltipProps"
+            icon
+            size="small"
+            variant="text"
+            class="mr-2"
+            :color="permissionState === 'granted' && notificationsEnabled ? 'primary' : 'grey'"
+            @click="handleNotificationClick"
+          >
+            <v-icon>
+              {{
+                permissionState === 'granted' && notificationsEnabled
+                  ? 'mdi-bell-ring-outline'
+                  : 'mdi-bell-off-outline'
+              }}
+            </v-icon>
+          </v-btn>
+        </template>
+      </v-tooltip>
 
       <!-- Menu do Usuário -->
       <v-menu location="bottom end" transition="scale-transition">
@@ -138,6 +161,7 @@ import { useRouter } from 'vue-router'
 import { useDisplay } from 'vuetify'
 import { useEventsStore } from '@/stores/events'
 import { useAuthStore } from '@/stores/auth'
+import { useNotifications } from '@/composables/useNotifications'
 import DnsServersDialog from '@/components/DnsServersDialog.vue'
 
 interface NavSubItem {
@@ -160,6 +184,18 @@ const dnsServersDialog = ref(false)
 const eventsStore = useEventsStore()
 const authStore = useAuthStore()
 const router = useRouter()
+const { permissionState, notificationsEnabled, requestPermission, setNotificationsEnabled } =
+  useNotifications()
+
+async function handleNotificationClick() {
+  if (permissionState.value === 'default') {
+    await requestPermission()
+  } else if (permissionState.value === 'granted') {
+    setNotificationsEnabled(!notificationsEnabled.value)
+  } else {
+    router.push('/settings')
+  }
+}
 
 const navItems: NavItem[] = [
   { title: 'Dashboard', icon: 'mdi-view-dashboard', to: '/' },

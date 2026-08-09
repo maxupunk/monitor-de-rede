@@ -38,8 +38,11 @@
               :stroke-dasharray="`${seg.dash} ${seg.gap}`"
               :stroke-dashoffset="seg.offset"
               stroke-linecap="round"
-              class="gauge-circle"
-            />
+              class="gauge-circle cursor-pointer"
+              @click="navigateToStatus(seg.status)"
+            >
+              <title>Ver monitores {{ seg.label }}</title>
+            </circle>
           </svg>
 
           <!-- Central Text -->
@@ -52,7 +55,8 @@
         <!-- Legend / Stats breakdown -->
         <div class="legend-box d-flex flex-column ga-2 w-100 w-sm-auto">
           <div
-            class="d-flex align-center justify-space-between ga-4 pa-2 rounded bg-surface-variant"
+            class="d-flex align-center justify-space-between ga-4 pa-2 rounded bg-surface-variant cursor-pointer hover-card"
+            @click="navigateToStatus('up')"
           >
             <div class="d-flex align-center ga-2">
               <v-avatar color="success" size="10"></v-avatar>
@@ -62,7 +66,8 @@
           </div>
 
           <div
-            class="d-flex align-center justify-space-between ga-4 pa-2 rounded bg-surface-variant"
+            class="d-flex align-center justify-space-between ga-4 pa-2 rounded bg-surface-variant cursor-pointer hover-card"
+            @click="navigateToStatus('warning')"
           >
             <div class="d-flex align-center ga-2">
               <v-avatar color="warning" size="10"></v-avatar>
@@ -72,7 +77,8 @@
           </div>
 
           <div
-            class="d-flex align-center justify-space-between ga-4 pa-2 rounded bg-surface-variant"
+            class="d-flex align-center justify-space-between ga-4 pa-2 rounded bg-surface-variant cursor-pointer hover-card"
+            @click="navigateToStatus('down')"
           >
             <div class="d-flex align-center ga-2">
               <v-avatar color="error" size="10"></v-avatar>
@@ -82,7 +88,8 @@
           </div>
 
           <div
-            class="d-flex align-center justify-space-between ga-4 pa-2 rounded bg-surface-variant"
+            class="d-flex align-center justify-space-between ga-4 pa-2 rounded bg-surface-variant cursor-pointer hover-card"
+            @click="navigateToStatus('unknown')"
           >
             <div class="d-flex align-center ga-2">
               <v-avatar color="grey-darken-1" size="10"></v-avatar>
@@ -98,9 +105,17 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { useMonitorsStore } from '@/stores/monitors'
 
+const router = useRouter()
 const monitorsStore = useMonitorsStore()
+
+type StatusKey = 'up' | 'warning' | 'down' | 'unknown'
+
+function navigateToStatus(status: StatusKey) {
+  router.push({ path: '/monitors', query: { status } })
+}
 
 const counts = computed(() => {
   let up = 0
@@ -132,11 +147,11 @@ const strokeSegments = computed(() => {
   const C = 2 * Math.PI * R
   const total = counts.value.total || 1
 
-  const items = [
-    { count: counts.value.up, color: '#22c55e' },
-    { count: counts.value.warning, color: '#f59e0b' },
-    { count: counts.value.down, color: '#ef4444' },
-    { count: counts.value.unknown, color: '#64748b' },
+  const items: Array<{ count: number; color: string; status: StatusKey; label: string }> = [
+    { count: counts.value.up, color: '#22c55e', status: 'up', label: 'Operacionais' },
+    { count: counts.value.warning, color: '#f59e0b', status: 'warning', label: 'Em Alerta' },
+    { count: counts.value.down, color: '#ef4444', status: 'down', label: 'Fora do Ar' },
+    { count: counts.value.unknown, color: '#64748b', status: 'unknown', label: 'Desconhecidos' },
   ]
 
   let currentOffset = 0
@@ -151,6 +166,8 @@ const strokeSegments = computed(() => {
 
     result.push({
       color: item.color,
+      status: item.status,
+      label: item.label,
       dash: dash.toFixed(1),
       gap: gap.toFixed(1),
       offset: offset.toFixed(1),
@@ -179,7 +196,23 @@ const strokeSegments = computed(() => {
 .gauge-circle {
   transition:
     stroke-dasharray 0.5s ease,
-    stroke-dashoffset 0.5s ease;
+    stroke-dashoffset 0.5s ease,
+    stroke-width 0.2s ease;
+}
+
+.gauge-circle:hover {
+  stroke-width: 18;
+}
+
+.hover-card {
+  transition:
+    transform 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.hover-card:hover {
+  transform: translateX(4px);
+  background-color: rgba(255, 255, 255, 0.08) !important;
 }
 
 .absolute-center {

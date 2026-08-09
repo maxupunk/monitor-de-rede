@@ -213,7 +213,7 @@ export default class SnmpController {
             ifName: scanIface.ifName,
           }
           ifaceMonitor.intervalSeconds = 60
-          ifaceMonitor.timeoutSeconds = 5
+          ifaceMonitor.timeoutSeconds = 10
           ifaceMonitor.retryCount = 3
         }
         ifaceMonitor.enabled = true
@@ -244,7 +244,7 @@ export default class SnmpController {
           cpuMonitor.name = 'Monitor de Uso de CPU'
           cpuMonitor.configuration = { host: device.ipAddress || device.name, metric: 'cpu_usage' }
           cpuMonitor.intervalSeconds = 60
-          cpuMonitor.timeoutSeconds = 5
+          cpuMonitor.timeoutSeconds = 10
           cpuMonitor.retryCount = 3
         }
         cpuMonitor.enabled = true
@@ -280,7 +280,7 @@ export default class SnmpController {
             metric: 'memory_usage',
           }
           memMonitor.intervalSeconds = 60
-          memMonitor.timeoutSeconds = 5
+          memMonitor.timeoutSeconds = 10
           memMonitor.retryCount = 3
         }
         memMonitor.enabled = true

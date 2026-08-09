@@ -462,7 +462,7 @@ export const COMMON_TCP_PORTS: Array<{ port: number; label: string }> = [
 ]
 
 export const INTERVAL_PRESETS = [1, 5, 15, 30, 60, 120, 300, 600, 900, 1800, 3600]
-export const TIMEOUT_PRESETS = [1, 2, 3, 5, 10, 15, 30, 60]
+export const TIMEOUT_PRESETS = [5, 10, 15, 30, 60]
 
 export function formatSeconds(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return '—'
@@ -532,7 +532,7 @@ export function createMonitorForm(deviceId?: number | null): MonitorFormModel {
     target: '',
     port: null,
     intervalSeconds: 15,
-    timeoutSeconds: 5,
+    timeoutSeconds: 10,
     retryCount: 3,
     enabled: true,
     packetCount: 3,
@@ -597,7 +597,7 @@ export function monitorToForm(monitor: Monitor): MonitorFormModel {
   form.probeId = monitor.probeId ?? null
   form.name = monitor.name || ''
   form.intervalSeconds = asNumber(monitor.intervalSeconds, 15)
-  form.timeoutSeconds = asNumber(monitor.timeoutSeconds, 5)
+  form.timeoutSeconds = asNumber(monitor.timeoutSeconds, 10)
   form.retryCount = Number.isFinite(Number(monitor.retryCount)) ? Number(monitor.retryCount) : 3
   form.enabled = monitor.isEnabled ?? monitor.enabled ?? true
 
@@ -903,9 +903,13 @@ export function validateMonitorForm(form: MonitorFormModel): string[] {
   }
 
   if (!(form.intervalSeconds >= 1)) errors.push('O intervalo mínimo é de 1 segundo')
-  if (!(form.timeoutSeconds >= 1)) errors.push('O timeout mínimo é de 1 segundo')
-  if (form.timeoutSeconds > form.intervalSeconds) {
-    errors.push('O timeout precisa ser menor ou igual ao intervalo entre checagens')
+  if (!(form.timeoutSeconds >= 5)) {
+    errors.push('O tempo de resposta (timeout) mínimo é de 5 segundos')
+  }
+  if (form.intervalSeconds <= form.timeoutSeconds) {
+    errors.push(
+      'O campo "verificar a cada" (intervalo) deve ser maior do que o campo "Aguardar resposta por até" (timeout)'
+    )
   }
 
   return errors

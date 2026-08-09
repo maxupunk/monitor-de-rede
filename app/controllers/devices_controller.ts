@@ -116,7 +116,7 @@ export default class DevicesController {
           type: 'ping',
           configuration: { host: targetHost },
           intervalSeconds: 60,
-          timeoutSeconds: 5,
+          timeoutSeconds: 10,
           retryCount: 3,
           enabled: true,
           status: 'unknown',

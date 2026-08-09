@@ -955,15 +955,19 @@ const canFillFromDevice = computed(
     form.target !== selectedDevice.value.ipAddress
 )
 
-const timeoutError = computed(() =>
-  form.timeoutSeconds > form.intervalSeconds ? 'Deve ser menor ou igual ao intervalo' : undefined
-)
+const timeoutError = computed(() => {
+  if (form.timeoutSeconds < 5) return 'A checagem deve demorar pelo menos 5 segundos'
+  if (form.intervalSeconds <= form.timeoutSeconds) {
+    return 'O campo "verificar a cada" deve ser maior do que "Aguardar resposta por até"'
+  }
+  return undefined
+})
 
 watch(
   () => form.intervalSeconds,
   (newInterval) => {
-    if (form.timeoutSeconds > newInterval) {
-      form.timeoutSeconds = newInterval
+    if (form.timeoutSeconds >= newInterval) {
+      form.timeoutSeconds = Math.max(5, newInterval - 1)
     }
   }
 )
