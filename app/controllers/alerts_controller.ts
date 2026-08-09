@@ -1,10 +1,13 @@
 import type { HttpContext } from '@adonisjs/core/http'
 import AlertRule from '#models/alert_rule'
 import AlertEvent from '#models/alert_event'
+import Monitor from '#models/monitor'
 import { SilenceManager } from '#modules/alerts/silence_manager'
 import { AlertRuleCatalogService } from '#modules/alerts/catalog/alert_rule_catalog_service'
 import { ALERT_RULE_CATEGORY_LABELS } from '#modules/alerts/catalog/alert_rule_templates'
 import { EventBus } from '#modules/events/event_bus'
+import { MonitorRunner } from '#modules/monitoring/monitor_runner'
+import { ResultProcessor } from '#modules/monitoring/result_processor'
 
 /** Referência enxuta a uma entidade relacionada no payload de alertas */
 interface RelatedSummary {
@@ -51,6 +54,8 @@ export default class AlertsController {
   private silenceManager = new SilenceManager()
   private catalog = new AlertRuleCatalogService()
   private eventBus = EventBus.getInstance()
+  private monitorRunner = new MonitorRunner()
+  private resultProcessor = new ResultProcessor()
 
   /**
    * O front envia a regra em linguagem simples (métrica/operador/valor); aqui
@@ -224,8 +229,50 @@ export default class AlertsController {
     }
   }
 
+  /**
+   * Executa a checagem em tempo real do alvo do alerta (se for um monitor)
+   * e se recuperar, finaliza o alerta automaticamente.
+   */
+  private async checkAndResolveAlert(event: AlertEvent): Promise<boolean> {
+    if ((event.status as string) === 'resolved') return true
+
+    if (event.monitorId) {
+      const monitor = await Monitor.find(event.monitorId)
+      if (monitor && monitor.enabled) {
+        try {
+          const result = await this.monitorRunner.runMonitor(monitor.type, monitor.configuration, {
+            timeoutMs: (monitor.timeoutSeconds || 5) * 1000,
+          })
+          await this.resultProcessor.processResult(monitor.id, result, monitor.probeId)
+          await event.refresh()
+          if ((event.status as string) === 'resolved') {
+            return true
+          }
+        } catch {
+          // Se houver erro de execução na checagem, mantém avaliação pelo estado atual
+        }
+      }
+    }
+
+    return (event.status as string) === 'resolved'
+  }
+
   async acknowledge({ params, response }: HttpContext) {
     const event = await AlertEvent.findOrFail(params.id)
+    await event.load('alertRule')
+    await event.load('device')
+    await event.load('monitor')
+
+    const isResolved = await this.checkAndResolveAlert(event)
+
+    if (isResolved) {
+      return response.ok({
+        message: `Alerta #${event.id} foi verificado e resolvido automaticamente`,
+        event: this.serializeEvent(event),
+        resolved: true,
+      })
+    }
+
     await this.silenceManager.acknowledgeAlert(event)
 
     this.eventBus.emit('alert:acknowledged', {
@@ -238,7 +285,51 @@ export default class AlertsController {
       message: event.message,
     })
 
-    return response.ok({ message: `Alerta #${event.id} reconhecido`, event })
+    return response.ok({
+      message: `Alerta #${event.id} reconhecido`,
+      event: this.serializeEvent(event),
+      resolved: false,
+    })
+  }
+
+  async verify({ params, response }: HttpContext) {
+    const event = await AlertEvent.findOrFail(params.id)
+    await event.load('alertRule')
+    await event.load('device')
+    await event.load('monitor')
+
+    const isResolved = await this.checkAndResolveAlert(event)
+
+    return response.ok({
+      message: isResolved
+        ? `Alerta #${event.id} resolvido com sucesso!`
+        : `Alerta #${event.id} continua ativo.`,
+      event: this.serializeEvent(event),
+      resolved: isResolved,
+    })
+  }
+
+  async verifyAll({ response }: HttpContext) {
+    const activeEvents = await AlertEvent.query()
+      .whereIn('status', ['active', 'acknowledged', 'silenced'])
+      .preload('alertRule')
+      .preload('device')
+      .preload('monitor')
+
+    let resolvedCount = 0
+
+    for (const event of activeEvents) {
+      const isResolved = await this.checkAndResolveAlert(event)
+      if (isResolved) {
+        resolvedCount++
+      }
+    }
+
+    return response.ok({
+      message: `${resolvedCount} de ${activeEvents.length} alerta(s) pendente(s) resolvido(s)`,
+      totalChecked: activeEvents.length,
+      resolvedCount,
+    })
   }
 
   async silence({ params, request, response }: HttpContext) {

@@ -203,6 +203,89 @@ test.group('Alerts API - Functional Tests', (group) => {
     assert.equal(event.status, 'silenced')
   })
 
+  test('POST /api/alerts/:id/acknowledge deve resolver automaticamente o alerta se o monitor responder UP', async ({
+    client,
+    assert,
+  }) => {
+    const site = await Site.create({ name: 'Site AutoResolve', active: true })
+    const device = await Device.create({
+      siteId: site.id,
+      name: 'Host Localhost',
+      type: 'server',
+      status: 'online',
+    })
+    const monitor = await Monitor.create({
+      deviceId: device.id,
+      type: 'ping',
+      name: 'Ping Localhost',
+      configuration: { host: '127.0.0.1' },
+      intervalSeconds: 60,
+      timeoutSeconds: 5,
+      retryCount: 1,
+      enabled: true,
+      status: 'down',
+    })
+
+    const rule = await AlertRule.create({
+      monitorId: monitor.id,
+      name: 'Host indisponivel',
+      type: 'device_offline',
+      condition: { field: 'status', operator: 'eq', value: 'down' },
+      severity: 'critical',
+      enabled: true,
+    })
+
+    const event = await AlertEvent.create({
+      alertRuleId: rule.id,
+      deviceId: device.id,
+      monitorId: monitor.id,
+      scopeKey: `monitor:${monitor.id}`,
+      status: 'active',
+      severity: 'critical',
+      startedAt: DateTime.now(),
+      message: 'Ping falhou',
+    })
+
+    // Ao reconhecer um alerta de monitor que está UP (127.0.0.1 responde ping), ele resolve automaticamente
+    const ackRes = await client.visit('alerts.acknowledge', { id: event.id })
+    ackRes.assertStatus(200)
+    assert.isTrue(ackRes.body().resolved)
+
+    await event.refresh()
+    assert.equal(event.status, 'resolved')
+    assert.exists(event.resolvedAt)
+  })
+
+  test('POST /api/alerts/verify-all deve verificar todos os alertas pendentes', async ({
+    client,
+    assert,
+  }) => {
+    const site = await Site.create({ name: 'Site VerifyAll', active: true })
+    const device = await Device.create({ siteId: site.id, name: 'Servidor Teste', type: 'server' })
+    const monitor = await Monitor.create({
+      deviceId: device.id,
+      type: 'ping',
+      name: 'Ping Local',
+      configuration: { host: '127.0.0.1' },
+      enabled: true,
+      status: 'down',
+    })
+
+    await AlertEvent.create({
+      monitorId: monitor.id,
+      scopeKey: `monitor:${monitor.id}`,
+      status: 'active',
+      severity: 'critical',
+      startedAt: DateTime.now(),
+      message: 'Indisponivel',
+    })
+
+    const verifyRes = await client.post('/api/alerts/verify-all')
+    verifyRes.assertStatus(200)
+    assert.isNumber(verifyRes.body().resolvedCount)
+    assert.isAbove(verifyRes.body().resolvedCount, 0)
+  })
+
   test('GET /api/monitors/:id/alerts reflete acknowledge e silence do alerta', async ({
     client,
     assert,

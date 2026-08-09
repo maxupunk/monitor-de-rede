@@ -248,9 +248,27 @@
             elevation="2"
             class="rounded-lg fill-height"
           >
-            <v-card-title class="d-flex align-center py-3 px-4">
-              <v-icon start color="warning">mdi-bell-outline</v-icon>
-              <span class="font-weight-bold text-h6">Alertas Críticos Ativos</span>
+            <v-card-title
+              class="d-flex align-center justify-space-between py-3 px-4 flex-wrap ga-2"
+            >
+              <div class="d-flex align-center">
+                <v-icon start color="warning">mdi-bell-outline</v-icon>
+                <span class="font-weight-bold text-h6">Alertas Críticos Ativos</span>
+                <v-chip size="x-small" color="warning" class="ml-2" variant="tonal">
+                  {{ alertsStore.activeAlerts.length }}
+                </v-chip>
+              </div>
+              <v-btn
+                v-if="alertsStore.activeAlerts.length > 0"
+                size="small"
+                color="primary"
+                variant="outlined"
+                prepend-icon="mdi-refresh"
+                :loading="verifyingAll"
+                @click="handleVerifyAllAlerts"
+              >
+                Verificar Todos
+              </v-btn>
             </v-card-title>
             <v-divider></v-divider>
             <v-card-text class="pa-0">
@@ -282,7 +300,22 @@
                           {{ statusLabel(alert.status) }}
                         </v-chip>
                         <div class="d-flex ga-1">
-                          <v-tooltip text="Reconhecer alerta">
+                          <v-tooltip text="Verificar se resolveu">
+                            <template #activator="{ props: tooltipProps }">
+                              <v-btn
+                                v-bind="tooltipProps"
+                                icon
+                                size="small"
+                                variant="text"
+                                color="info"
+                                :loading="verifyingId === alert.id"
+                                @click.stop="handleVerifyAlert(alert.id)"
+                              >
+                                <v-icon>mdi-refresh</v-icon>
+                              </v-btn>
+                            </template>
+                          </v-tooltip>
+                          <v-tooltip text="Reconhecer alerta (testa e remove se resolvido)">
                             <template #activator="{ props: tooltipProps }">
                               <v-btn
                                 v-bind="tooltipProps"
@@ -291,7 +324,8 @@
                                 variant="text"
                                 color="primary"
                                 :disabled="alert.status === 'acknowledged'"
-                                @click.stop="alertsStore.acknowledgeAlert(alert.id)"
+                                :loading="verifyingId === alert.id"
+                                @click.stop="handleAcknowledgeAlert(alert.id)"
                               >
                                 <v-icon>mdi-check-circle-outline</v-icon>
                               </v-btn>
@@ -581,6 +615,10 @@
 
     <!-- Modal Boas-vindas / Prompt de Escolha do Servidor (Exibido 1x por navegador) -->
     <DashboardServerPromptDialog />
+
+    <v-snackbar v-model="snackbar" :color="snackbarColor" location="bottom right" timeout="4000">
+      {{ snackbarText }}
+    </v-snackbar>
   </div>
 </template>
 
@@ -633,6 +671,68 @@ const silenceTargetId = ref<number | null>(null)
 
 const eventDetailDialog = ref(false)
 const selectedEventPayload = ref<RealtimeEventPayload | null>(null)
+
+const verifyingId = ref<number | null>(null)
+const verifyingAll = ref(false)
+const snackbar = ref(false)
+const snackbarText = ref('')
+const snackbarColor = ref('success')
+
+async function handleAcknowledgeAlert(id: number) {
+  verifyingId.value = id
+  const result = await alertsStore.acknowledgeAlert(id)
+  verifyingId.value = null
+
+  if (result.resolved) {
+    snackbarText.value = `Alerta #${id} verificado e resolvido automaticamente!`
+    snackbarColor.value = 'success'
+    snackbar.value = true
+  } else if (result.success) {
+    snackbarText.value = `Alerta #${id} reconhecido (continua em falha).`
+    snackbarColor.value = 'info'
+    snackbar.value = true
+  } else {
+    snackbarText.value = result.message || 'Erro ao reconhecer alerta.'
+    snackbarColor.value = 'error'
+    snackbar.value = true
+  }
+}
+
+async function handleVerifyAlert(id: number) {
+  verifyingId.value = id
+  const result = await alertsStore.verifyAlert(id)
+  verifyingId.value = null
+
+  if (result.resolved) {
+    snackbarText.value = `Alerta #${id} verificado e resolvido!`
+    snackbarColor.value = 'success'
+    snackbar.value = true
+  } else if (result.success) {
+    snackbarText.value = `Alerta #${id} re-verificado: continua com falha.`
+    snackbarColor.value = 'warning'
+    snackbar.value = true
+  } else {
+    snackbarText.value = result.message || 'Erro ao verificar alerta.'
+    snackbarColor.value = 'error'
+    snackbar.value = true
+  }
+}
+
+async function handleVerifyAllAlerts() {
+  verifyingAll.value = true
+  const result = await alertsStore.verifyAllAlerts()
+  verifyingAll.value = false
+
+  if (result.success) {
+    snackbarText.value = result.message || 'Verificação concluída.'
+    snackbarColor.value = result.resolvedCount && result.resolvedCount > 0 ? 'success' : 'info'
+    snackbar.value = true
+  } else {
+    snackbarText.value = result.message || 'Erro ao verificar alertas.'
+    snackbarColor.value = 'error'
+    snackbar.value = true
+  }
+}
 
 function openSilenceDialog(id: number) {
   silenceTargetId.value = id

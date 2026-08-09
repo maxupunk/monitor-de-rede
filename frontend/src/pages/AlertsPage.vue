@@ -33,26 +33,61 @@
       </template>
     </PageHeader>
 
-    <!-- Abas: Alertas Ativos & Regras de Alerta -->
+    <!-- Abas: Alertas Ativos, Resolvidos, Regras e Histórico -->
     <v-card elevation="2" class="mobile-full-bleed">
       <v-tabs v-model="tab" color="primary">
-        <v-tab value="active">Alertas Ativos ({{ alertsStore.activeAlerts.length }})</v-tab>
+        <v-tab value="active">Alertas Pendentes ({{ alertsStore.activeAlerts.length }})</v-tab>
+        <v-tab value="resolved">Alertas Resolvidos ({{ alertsStore.resolvedAlerts.length }})</v-tab>
         <v-tab value="rules">Regras Configuradas ({{ alertsStore.alertRules.length }})</v-tab>
-        <v-tab value="history">Histórico</v-tab>
+        <v-tab value="history">Histórico Completo</v-tab>
       </v-tabs>
       <v-divider></v-divider>
 
       <v-card-text class="pa-4">
         <v-window v-model="tab">
-          <!-- Alertas Ativos -->
+          <!-- Alertas Ativos / Pendentes -->
           <v-window-item value="active">
+            <div
+              class="d-flex flex-column flex-sm-row align-start align-sm-center justify-space-between ga-3 mb-4"
+            >
+              <v-btn-toggle
+                v-model="activeSubFilter"
+                density="compact"
+                variant="outlined"
+                color="primary"
+                mandatory
+              >
+                <v-btn value="all" size="small">
+                  Todos ({{ alertsStore.activeAlerts.length }})
+                </v-btn>
+                <v-btn value="unacknowledged" size="small">
+                  Não Reconhecidos ({{ alertsStore.pendingAlerts.length }})
+                </v-btn>
+                <v-btn value="acknowledged" size="small">
+                  Reconhecidos ({{ alertsStore.acknowledgedAlerts.length }})
+                </v-btn>
+              </v-btn-toggle>
+
+              <v-btn
+                v-if="alertsStore.activeAlerts.length > 0"
+                size="small"
+                color="primary"
+                variant="tonal"
+                prepend-icon="mdi-refresh"
+                :loading="verifyingAll"
+                @click="handleVerifyAllAlerts"
+              >
+                Verificar Todos os Pendentes
+              </v-btn>
+            </div>
+
             <ResponsiveDataTable
               :headers="activeHeaders"
-              :items="alertsStore.activeAlerts"
+              :items="filteredActiveAlerts"
               :loading="alertsStore.loading"
               :items-per-page="-1"
               hide-default-footer
-              no-data-text="Nenhum alerta ativo no momento!"
+              no-data-text="Nenhum alerta pendente no momento!"
               :clickable="false"
             >
               <template #item.severity="{ item }">
@@ -72,15 +107,25 @@
               </template>
 
               <template #item.actions="{ item }">
-                <div class="d-flex ga-2">
+                <div class="d-flex ga-1 flex-wrap">
                   <v-btn
                     size="small"
                     color="primary"
                     variant="tonal"
                     :disabled="item.status === 'acknowledged'"
-                    @click="alertsStore.acknowledgeAlert(item.id)"
+                    :loading="verifyingId === item.id"
+                    @click="handleAcknowledgeAlert(item.id)"
                   >
                     Reconhecer
+                  </v-btn>
+                  <v-btn
+                    size="small"
+                    color="info"
+                    variant="outlined"
+                    :loading="verifyingId === item.id"
+                    @click="handleVerifyAlert(item.id)"
+                  >
+                    Verificar
                   </v-btn>
                   <v-btn
                     size="small"
@@ -113,15 +158,25 @@
                       </div>
                     </div>
                   </div>
-                  <div class="d-flex ga-2 mt-1">
+                  <div class="d-flex ga-1 flex-wrap mt-1">
                     <v-btn
                       size="small"
                       color="primary"
                       variant="tonal"
                       :disabled="item.status === 'acknowledged'"
-                      @click="alertsStore.acknowledgeAlert(item.id)"
+                      :loading="verifyingId === item.id"
+                      @click="handleAcknowledgeAlert(item.id)"
                     >
                       Reconhecer
+                    </v-btn>
+                    <v-btn
+                      size="small"
+                      color="info"
+                      variant="outlined"
+                      :loading="verifyingId === item.id"
+                      @click="handleVerifyAlert(item.id)"
+                    >
+                      Verificar
                     </v-btn>
                     <v-btn
                       size="small"
@@ -132,6 +187,53 @@
                     >
                       Silenciar
                     </v-btn>
+                  </div>
+                </div>
+              </template>
+            </ResponsiveDataTable>
+          </v-window-item>
+
+          <!-- Alertas Resolvidos -->
+          <v-window-item value="resolved">
+            <ResponsiveDataTable
+              :headers="resolvedHeaders"
+              :items="alertsStore.resolvedAlerts"
+              :loading="alertsStore.loading"
+              :items-per-page="-1"
+              hide-default-footer
+              no-data-text="Nenhum alerta resolvido na sessão atual."
+              :clickable="false"
+            >
+              <template #item.severity="{ item }">
+                <v-chip :color="severityColor(item.severity)" size="small">
+                  {{ severityLabel(item.severity) }}
+                </v-chip>
+              </template>
+
+              <template #item.createdAt="{ item }">
+                {{ formatDateTime(item.startedAt || item.createdAt) }}
+              </template>
+
+              <template #item.resolvedAt="{ item }">
+                <v-chip color="success" variant="tonal" size="small">
+                  <v-icon start size="14">mdi-check-circle</v-icon>
+                  {{ item.resolvedAt ? formatDateTime(item.resolvedAt) : 'Resolvido' }}
+                </v-chip>
+              </template>
+
+              <template #mobile-item="{ item }">
+                <div class="d-flex flex-column ga-2 pa-1">
+                  <div class="d-flex align-center ga-2">
+                    <v-chip :color="severityColor(item.severity)" size="x-small">
+                      {{ severityLabel(item.severity) }}
+                    </v-chip>
+                    <v-chip color="success" variant="tonal" size="x-small"> Resolvido </v-chip>
+                  </div>
+                  <div class="text-subtitle-1 font-weight-bold">{{ item.title }}</div>
+                  <div class="text-body-2 text-grey-darken-1">{{ item.message }}</div>
+                  <div class="text-caption text-grey">
+                    Início: {{ formatDateTime(item.startedAt || item.createdAt) }} | Resolvido:
+                    {{ item.resolvedAt ? formatDateTime(item.resolvedAt) : 'Sim' }}
                   </div>
                 </div>
               </template>
@@ -506,6 +608,63 @@ const eventsStore = useEventsStore()
 const tab = ref('active')
 const catalogDialog = ref(false)
 
+const verifyingId = ref<number | null>(null)
+const verifyingAll = ref(false)
+const activeSubFilter = ref<'all' | 'unacknowledged' | 'acknowledged'>('all')
+
+const filteredActiveAlerts = computed(() => {
+  if (activeSubFilter.value === 'unacknowledged') {
+    return alertsStore.pendingAlerts
+  }
+  if (activeSubFilter.value === 'acknowledged') {
+    return alertsStore.acknowledgedAlerts
+  }
+  return alertsStore.activeAlerts
+})
+
+async function handleAcknowledgeAlert(id: number) {
+  verifyingId.value = id
+  const result = await alertsStore.acknowledgeAlert(id)
+  verifyingId.value = null
+
+  if (result.resolved) {
+    notify(`Alerta #${id} verificado e resolvido automaticamente!`, 'success')
+  } else if (result.success) {
+    notify(`Alerta #${id} reconhecido (continua em falha).`, 'info')
+  } else {
+    notify(result.message || 'Erro ao reconhecer alerta.', 'error')
+  }
+}
+
+async function handleVerifyAlert(id: number) {
+  verifyingId.value = id
+  const result = await alertsStore.verifyAlert(id)
+  verifyingId.value = null
+
+  if (result.resolved) {
+    notify(`Alerta #${id} verificado e resolvido!`, 'success')
+  } else if (result.success) {
+    notify(`Alerta #${id} re-verificado: continua com falha.`, 'warning')
+  } else {
+    notify(result.message || 'Erro ao verificar alerta.', 'error')
+  }
+}
+
+async function handleVerifyAllAlerts() {
+  verifyingAll.value = true
+  const result = await alertsStore.verifyAllAlerts()
+  verifyingAll.value = false
+
+  if (result.success) {
+    notify(
+      result.message || 'Verificação de alertas concluída.',
+      result.resolvedCount ? 'success' : 'info'
+    )
+  } else {
+    notify(result.message || 'Erro ao verificar alertas.', 'error')
+  }
+}
+
 /** Histórico completo: cresce sem teto, então vem paginado do servidor */
 const history = useInfiniteList<AlertEvent>(() => '/alerts', { label: 'histórico de alertas' })
 const feedback = reactive({ visible: false, message: '', color: 'success' })
@@ -549,7 +708,15 @@ const activeHeaders = [
   { title: 'Mensagem', key: 'message' },
   { title: 'Status', key: 'status', width: '130px' },
   { title: 'Data/Hora', key: 'createdAt', width: '170px' },
-  { title: 'Ações', key: 'actions', sortable: false, width: '220px' },
+  { title: 'Ações', key: 'actions', sortable: false, width: '280px' },
+]
+
+const resolvedHeaders = [
+  { title: 'Severidade', key: 'severity', width: '120px' },
+  { title: 'Título', key: 'title' },
+  { title: 'Mensagem', key: 'message' },
+  { title: 'Data de Início', key: 'createdAt', width: '170px' },
+  { title: 'Resolvido Em', key: 'resolvedAt', width: '170px' },
 ]
 
 const rulesHeaders = [

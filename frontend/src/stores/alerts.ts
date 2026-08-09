@@ -87,6 +87,17 @@ export const useAlertsStore = defineStore('alerts', () => {
   /** Somente eventos que ainda demandam atenção do operador */
   const activeAlerts = computed(() => alertEvents.value.filter((a) => a.status !== 'resolved'))
 
+  /** Alertas ativos ainda não reconhecidos nem silenciados */
+  const pendingAlerts = computed(() => alertEvents.value.filter((a) => a.status === 'active'))
+
+  /** Alertas reconhecidos pelo operador */
+  const acknowledgedAlerts = computed(() =>
+    alertEvents.value.filter((a) => a.status === 'acknowledged')
+  )
+
+  /** Alertas que foram resolvidos */
+  const resolvedAlerts = computed(() => alertEvents.value.filter((a) => a.status === 'resolved'))
+
   const criticalCount = computed(
     () =>
       activeAlerts.value.filter((a) => a.severity === 'critical' || a.severity === 'error').length
@@ -155,14 +166,66 @@ export const useAlertsStore = defineStore('alerts', () => {
     }
   }
 
-  async function acknowledgeAlert(alertId: number): Promise<boolean> {
+  async function acknowledgeAlert(
+    alertId: number
+  ): Promise<{ success: boolean; resolved?: boolean; message?: string }> {
     try {
-      await apiService.post(`/alerts/${alertId}/acknowledge`)
-      patchAlertEvent(alertId, { status: 'acknowledged' })
-      return true
+      const res = await apiService.post<{
+        event?: AlertEvent
+        resolved?: boolean
+        message?: string
+      }>(`/alerts/${alertId}/acknowledge`)
+      if (res.event) {
+        upsertAlertEvent(res.event)
+      } else {
+        patchAlertEvent(alertId, { status: res.resolved ? 'resolved' : 'acknowledged' })
+      }
+      return { success: true, resolved: res.resolved, message: res.message }
     } catch (err: unknown) {
-      error.value = err instanceof Error ? err.message : 'Erro ao reconhecer alerta'
-      return false
+      const msg = err instanceof Error ? err.message : 'Erro ao reconhecer alerta'
+      error.value = msg
+      return { success: false, message: msg }
+    }
+  }
+
+  async function verifyAlert(
+    alertId: number
+  ): Promise<{ success: boolean; resolved?: boolean; message?: string }> {
+    try {
+      const res = await apiService.post<{
+        event?: AlertEvent
+        resolved?: boolean
+        message?: string
+      }>(`/alerts/${alertId}/verify`)
+      if (res.event) {
+        upsertAlertEvent(res.event)
+      }
+      return { success: true, resolved: res.resolved, message: res.message }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Erro ao verificar alerta'
+      error.value = msg
+      return { success: false, message: msg }
+    }
+  }
+
+  async function verifyAllAlerts(): Promise<{
+    success: boolean
+    resolvedCount?: number
+    message?: string
+  }> {
+    loading.value = true
+    try {
+      const res = await apiService.post<{ message: string; resolvedCount: number }>(
+        '/alerts/verify-all'
+      )
+      await fetchActiveAlerts()
+      return { success: true, resolvedCount: res.resolvedCount, message: res.message }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Erro ao verificar alertas'
+      error.value = msg
+      return { success: false, message: msg }
+    } finally {
+      loading.value = false
     }
   }
 
@@ -251,6 +314,9 @@ export const useAlertsStore = defineStore('alerts', () => {
   return {
     alertEvents,
     activeAlerts,
+    pendingAlerts,
+    acknowledgedAlerts,
+    resolvedAlerts,
     criticalCount,
     alertRules,
     ruleTemplates,
@@ -264,6 +330,8 @@ export const useAlertsStore = defineStore('alerts', () => {
     fetchRuleCatalog,
     applyCatalogRules,
     acknowledgeAlert,
+    verifyAlert,
+    verifyAllAlerts,
     silenceAlert,
     createAlertRule,
     updateAlertRule,

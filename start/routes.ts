@@ -115,7 +115,9 @@ router
     router.delete('alert-rules/:id', [AlertsController, 'rulesDestroy'])
 
     router.get('alerts', [AlertsController, 'index'])
+    router.post('alerts/verify-all', [AlertsController, 'verifyAll'])
     router.post('alerts/:id/acknowledge', [AlertsController, 'acknowledge'])
+    router.post('alerts/:id/verify', [AlertsController, 'verify'])
     router.post('alerts/:id/silence', [AlertsController, 'silence'])
 
     // VPN WireGuard
