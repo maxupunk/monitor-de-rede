@@ -23,4 +23,9 @@ export default await Env.create(new URL('../', import.meta.url), {
   DB_USER: Env.schema.string.optional(),
   DB_PASSWORD: Env.schema.string.optional(),
   DB_DATABASE: Env.schema.string.optional(),
+
+  // Retention Policies (Days)
+  RETENTION_MONITOR_RESULTS_DAYS: Env.schema.number.optional(),
+  RETENTION_METRICS_DAYS: Env.schema.number.optional(),
+  RETENTION_DISCOVERY_DAYS: Env.schema.number.optional(),
 })

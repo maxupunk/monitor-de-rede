@@ -9,6 +9,7 @@ import { ProbeTaskDispatcher } from '#modules/probes/probe_task_dispatcher'
 import { isProbeAlive, ProbeWatchdog } from '#modules/probes/probe_liveness'
 import { VpnTrafficRecorder } from '#modules/vpn/vpn_traffic_recorder'
 import { DiscoveryQueue } from '#modules/discovery/discovery_queue'
+import { DataPrunerService } from '#services/data_pruner_service'
 import { errorMessage } from '#modules/shared/errors'
 
 /**
@@ -35,8 +36,10 @@ export default class SchedulerRun extends BaseCommand {
   private vpnTrafficRecorder = new VpnTrafficRecorder()
   private discoveryQueue = new DiscoveryQueue()
   private probeWatchdog = new ProbeWatchdog()
+  private dataPrunerService = new DataPrunerService()
   private nextVpnStatusSyncAt: DateTime | null = null
   private nextVpnTrafficSyncAt: DateTime | null = null
+  private nextDataPruneAt: DateTime | null = null
 
   async run() {
     this.logger.info('Processo Scheduler de Monitoramento inicializado.')
@@ -72,6 +75,13 @@ export default class SchedulerRun extends BaseCommand {
         this.logger.error(`Erro na fila de descoberta de rede: ${errorMsg}`)
       }
 
+      try {
+        await this.runDataPrunerIfDue()
+      } catch (err: unknown) {
+        const errorMsg = errorMessage(err)
+        this.logger.error(`Erro ao executar purga de dados antigos: ${errorMsg}`)
+      }
+
       await new Promise((resolve) => setTimeout(resolve, 5000))
     }
   }
@@ -92,6 +102,23 @@ export default class SchedulerRun extends BaseCommand {
 
     await this.vpnTrafficRecorder.syncAll()
     this.nextVpnStatusSyncAt = now.plus({ seconds: VPN_STATUS_INTERVAL_SECONDS })
+  }
+
+  private async runDataPrunerIfDue() {
+    const now = DateTime.now()
+    if (this.nextDataPruneAt && now < this.nextDataPruneAt) return
+
+    const stats = await this.dataPrunerService.pruneAll()
+    const totalDeleted =
+      stats.outboxDeleted + stats.resultsDeleted + stats.metricsDeleted + stats.discoveryDeleted
+
+    if (totalDeleted > 0) {
+      this.logger.info(
+        `[DataPruner] Purga de dados antigos executada: outbox=${stats.outboxDeleted}, resultados=${stats.resultsDeleted}, métricas=${stats.metricsDeleted}, descoberta=${stats.discoveryDeleted}`
+      )
+    }
+
+    this.nextDataPruneAt = now.plus({ hours: 1 })
   }
 
   /**
@@ -116,6 +143,7 @@ export default class SchedulerRun extends BaseCommand {
 
     const dueMonitors = await Monitor.query()
       .where('enabled', true)
+      .preload('probe')
       .where((query) => {
         query.whereNull('next_run_at').orWhere('next_run_at', '<=', now.toSQL()!)
       })
@@ -141,7 +169,7 @@ export default class SchedulerRun extends BaseCommand {
   private async executeMonitorAsync(monitor: Monitor) {
     try {
       if (monitor.probeId) {
-        const probe = await Probe.find(monitor.probeId)
+        const probe = monitor.probe ?? (await Probe.find(monitor.probeId))
 
         // Probe sem heartbeat não vai buscar tarefa nenhuma. Enfileirar em
         // silêncio deixaria o monitor parado em `unknown` sem explicação — que

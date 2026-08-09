@@ -57,6 +57,10 @@ const dbConfig = defineConfig({
         password: env.get('DB_PASSWORD', 'secret'),
         database: env.get('DB_DATABASE', 'netmonitor'),
       },
+      pool: {
+        min: 1,
+        max: 5,
+      },
       migrations: {
         naturalSort: true,
         paths: ['database/migrations'],

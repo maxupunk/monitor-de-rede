@@ -323,6 +323,10 @@ export const useDeviceDetailStore = defineStore('deviceDetail', () => {
       message: String(data.message ?? 'Alteração detectada na interface'),
       createdAt: new Date().toISOString(),
     })
+
+    if (events.value.length > 100) {
+      events.value.length = 100
+    }
   }
 
   return {

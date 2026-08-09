@@ -60,9 +60,7 @@
               @click="$emit('remove')"
             >
               <v-icon size="18">
-                {{
-                  isCustomCard ? 'mdi-delete-outline' : 'mdi-eye-off-outline'
-                }}
+                {{ isCustomCard ? 'mdi-delete-outline' : 'mdi-eye-off-outline' }}
               </v-icon>
             </v-btn>
           </template>
