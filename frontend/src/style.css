@@ -38,6 +38,25 @@ body,
   min-width: 640px;
 }
 
+/*
+ * `<v-infinite-scroll>` com altura fixa é um flex column: o conteúdo do slot
+ * vira um flex item e, por padrão, pode encolher. Quando esse conteúdo é um
+ * container de rolagem — `.table-responsive` é, porque `overflow-x: auto` faz o
+ * `overflow-y` computar como `auto` — sua altura mínima automática é 0, então
+ * ele era espremido até sumir: a tabela passava a rolar por dentro dele e o
+ * `scrollHeight` do infinite-scroll nunca crescia. Com o sentinela
+ * permanentemente visível, o componente pedia página após página sem o usuário
+ * rolar nada.
+ *
+ * A regra vale para qualquer conteúdo do slot (o seletor exclui só os elementos
+ * internos do próprio componente), para que o problema não volte com um wrapper
+ * diferente de `.table-responsive`. Sem altura fixa nada encolhe, então aqui é
+ * inócua.
+ */
+.v-infinite-scroll--vertical > *:not(.v-infinite-scroll__side):not(.v-infinite-scroll-intersect) {
+  flex: none;
+}
+
 /* Cards de lista para mobile (full-bleed, aparência de app nativo) */
 .mobile-card-list {
   display: flex;
