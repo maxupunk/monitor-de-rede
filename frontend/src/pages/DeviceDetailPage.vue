@@ -74,6 +74,18 @@
             <span class="hidden-sm-and-down">Escanear Portas</span>
             <span class="hidden-md-and-up">Portas</span>
           </v-btn>
+
+          <v-btn
+            color="primary"
+            variant="outlined"
+            prepend-icon="mdi-pencil"
+            size="small"
+            class="flex-grow-1 flex-md-grow-0"
+            @click="editDeviceDialog = true"
+          >
+            <span class="hidden-sm-and-down">Editar Dispositivo</span>
+            <span class="hidden-md-and-up">Editar</span>
+          </v-btn>
         </div>
       </div>
     </v-card>
@@ -1053,6 +1065,13 @@
       lock-device
       @saved="onMonitorSaved"
     />
+
+    <!-- Modal de Edição do Equipamento -->
+    <DeviceDialog
+      v-model="editDeviceDialog"
+      :device-to-edit="detailStore.device"
+      @saved="onDeviceSaved"
+    />
   </div>
 </template>
 
@@ -1067,6 +1086,7 @@ import VpnScriptViewer from '@/components/VpnScriptViewer.vue'
 import VpnFirewallHintsDialog from '@/components/VpnFirewallHintsDialog.vue'
 import PortScanDialog from '@/components/PortScanDialog.vue'
 import MonitorFormDialog from '@/components/MonitorFormDialog.vue'
+import DeviceDialog from '@/components/DeviceDialog.vue'
 import MonitorsTable from '@/components/MonitorsTable.vue'
 import { getStatusColor, gaugeHexColor } from '@/utils/monitorPresentation'
 import {
@@ -1103,6 +1123,13 @@ const activeTab = ref('overview')
 const scanModalOpen = ref(false)
 const savingMonitors = ref(false)
 const portScanOpen = ref(false)
+const editDeviceDialog = ref(false)
+
+async function onDeviceSaved() {
+  if (deviceId.value) {
+    await detailStore.loadDeviceDetails(deviceId.value)
+  }
+}
 
 // Histórico paginado de métricas SNMP
 const showMetricsHistory = ref(false)

@@ -77,6 +77,16 @@
               <span class="hidden-md-and-up">Testar</span>
             </v-btn>
             <v-btn
+              variant="outlined"
+              color="primary"
+              prepend-icon="mdi-pencil"
+              size="small"
+              class="flex-grow-1 flex-md-grow-0"
+              @click="editDialog = true"
+            >
+              Editar
+            </v-btn>
+            <v-btn
               :color="monitor.isEnabled ? 'warning' : 'success'"
               variant="outlined"
               size="small"
@@ -724,6 +734,13 @@
       <div class="text-body-2 text-grey mt-1">O monitor solicitado não existe ou foi removido.</div>
       <v-btn color="primary" class="mt-4" to="/monitors">Voltar para Monitores</v-btn>
     </v-card>
+
+    <!-- Dialog de Edição do Monitor -->
+    <MonitorFormDialog
+      v-model="editDialog"
+      :monitor="monitorsStore.currentMonitor"
+      @saved="refreshData"
+    ></MonitorFormDialog>
   </div>
 </template>
 
@@ -738,6 +755,7 @@ import { useInfiniteList } from '@/composables/useInfiniteList'
 import type { DeviceMetric } from '@/stores/deviceDetail'
 import MonitorTimelineBar from '@/components/MonitorTimelineBar.vue'
 import BaseMetricChart, { type ChartSeriesInput } from '@/components/BaseMetricChart.vue'
+import MonitorFormDialog from '@/components/MonitorFormDialog.vue'
 import {
   isGaugeMonitor as isGaugeMonitorFn,
   gaugeMetricName,
@@ -759,6 +777,7 @@ const eventsStore = useEventsStore()
 const alertsStore = useAlertsStore()
 
 const monitorId = computed(() => Number(route.params.id))
+const editDialog = ref(false)
 
 const emptyMonitor: Monitor = {
   id: 0,
