@@ -17,6 +17,8 @@ export interface VpnProbeRegistration {
   token?: string
 }
 
+export const DEFAULT_VPN_PROBE_TOKEN = 'default_vpn_probe_token'
+
 export class VpnProbeRegistrar {
   static hashToken(rawToken: string): string {
     return crypto.createHash('sha256').update(rawToken).digest('hex')
@@ -24,15 +26,10 @@ export class VpnProbeRegistrar {
 
   /**
    * Cria ou atualiza o probe dedicado.
-   * Retorna `null` quando não há token configurado — nesse caso o operador
-   * registra manualmente com `node ace vpn:probe-register`.
+   * Utiliza `VPN_PROBE_TOKEN` do ambiente ou o `DEFAULT_VPN_PROBE_TOKEN` como fallback.
    */
-  async register(rawToken?: string | null): Promise<VpnProbeRegistration | null> {
-    const token = rawToken || process.env.VPN_PROBE_TOKEN || null
-    if (!token) {
-      // Sem token configurado: o operador registra com `node ace vpn:probe-register`.
-      return null
-    }
+  async register(rawToken?: string | null): Promise<VpnProbeRegistration> {
+    const token = rawToken || process.env.VPN_PROBE_TOKEN || DEFAULT_VPN_PROBE_TOKEN
 
     const tokenHash = VpnProbeRegistrar.hashToken(token)
     const existing = await Probe.query().where('name', VPN_PROBE_NAME).first()

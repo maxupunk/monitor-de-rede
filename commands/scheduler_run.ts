@@ -171,24 +171,38 @@ export default class SchedulerRun extends BaseCommand {
       if (monitor.probeId) {
         const probe = monitor.probe ?? (await Probe.find(monitor.probeId))
 
-        // Probe sem heartbeat não vai buscar tarefa nenhuma. Enfileirar em
-        // silêncio deixaria o monitor parado em `unknown` sem explicação — que
-        // é justamente como esse tipo de falha costuma passar despercebido.
-        if (!isProbeAlive(probe)) {
-          await this.reportProbeUnavailable(monitor, probe?.name ?? `#${monitor.probeId}`)
+        if (isProbeAlive(probe)) {
+          this.logger.info(
+            `[Scheduler] Despachando monitor #${monitor.id} (${monitor.type}) para Probe #${monitor.probeId}`
+          )
+          await this.probeTaskDispatcher.dispatchTask(monitor.probeId, {
+            id: `task-${monitor.id}-${Date.now()}`,
+            monitorId: monitor.id,
+            type: monitor.type,
+            timeoutMs: (monitor.timeoutSeconds || 5) * 1000,
+            payload: monitor.configuration,
+          })
           return
         }
 
-        this.logger.info(
-          `[Scheduler] Despachando monitor #${monitor.id} (${monitor.type}) para Probe #${monitor.probeId}`
-        )
-        await this.probeTaskDispatcher.dispatchTask(monitor.probeId, {
-          id: `task-${monitor.id}-${Date.now()}`,
-          monitorId: monitor.id,
-          type: monitor.type,
-          timeoutMs: (monitor.timeoutSeconds || 5) * 1000,
-          payload: monitor.configuration,
-        })
+        // Tenta execução local como fallback caso o probe esteja offline.
+        // Se o servidor/host tiver rota para o alvo, a checagem é realizada em vez de congelar em UNKNOWN.
+        try {
+          const result = await this.monitorRunner.runMonitor(monitor.type, monitor.configuration, {
+            timeoutMs: (monitor.timeoutSeconds || 5) * 1000,
+          })
+          if (result.success) {
+            await this.resultProcessor.processResult(monitor.id, result, monitor.probeId)
+            this.logger.info(
+              `[Scheduler] Monitor #${monitor.id} executado via fallback local (Probe #${monitor.probeId} offline): status=${result.status}`
+            )
+            return
+          }
+        } catch {
+          // Em caso de falha no fallback, reporta probe indisponível como esperado
+        }
+
+        await this.reportProbeUnavailable(monitor, probe?.name ?? `#${monitor.probeId}`)
       } else {
         this.logger.info(
           `[Scheduler] Executando monitor #${monitor.id} (${monitor.type}) - ${monitor.name}`

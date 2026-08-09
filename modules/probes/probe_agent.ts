@@ -1,4 +1,5 @@
 import { MonitorRunner } from '#modules/monitoring/monitor_runner'
+import { DEFAULT_VPN_PROBE_TOKEN } from '#modules/vpn/vpn_probe_registrar'
 import { ProbeBuffer } from './probe_buffer.js'
 import type { ProbeTask } from './probe_task_dispatcher.js'
 import type { CheckResult } from '#modules/monitoring/contracts/check_result'
@@ -27,7 +28,11 @@ export class ProbeAgent {
       process.env.PROBE_SERVER_URL ||
       process.env.SERVER_URL ||
       'http://localhost:3333'
-    this.probeToken = options?.probeToken || process.env.PROBE_TOKEN || ''
+    this.probeToken =
+      options?.probeToken ||
+      process.env.PROBE_TOKEN ||
+      process.env.VPN_PROBE_TOKEN ||
+      DEFAULT_VPN_PROBE_TOKEN
     this.intervalMs = options?.intervalMs || Number(process.env.PROBE_INTERVAL_MS) || 5000
     this.version = options?.version || '1.0.0'
     this.buffer = new ProbeBuffer(options?.bufferPath)

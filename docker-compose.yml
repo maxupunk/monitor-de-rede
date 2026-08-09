@@ -35,7 +35,7 @@ services:
       <<: *app-env
       # Volume compartilhado com o container WireGuard (hot-reload por arquivo)
       WG_CONFIG_DIR: /config
-      VPN_PROBE_TOKEN: ${VPN_PROBE_TOKEN:-}
+      VPN_PROBE_TOKEN: ${VPN_PROBE_TOKEN:-default_vpn_probe_token}
     volumes:
       - wg-config:/config
     depends_on:
@@ -112,7 +112,7 @@ services:
       APP_URL: http://server:3333
       PROBE_SERVER_URL: http://server:3333
       SERVER_URL: http://server:3333
-      PROBE_TOKEN: ${VPN_PROBE_TOKEN:-}
+      PROBE_TOKEN: ${VPN_PROBE_TOKEN:-default_vpn_probe_token}
     network_mode: "service:wireguard"
     depends_on:
       - wireguard

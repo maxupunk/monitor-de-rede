@@ -555,7 +555,7 @@ gantt
 - [x] Serviço `wireguard` com `NET_ADMIN` e volume `wg-config`
 - [x] Watcher de hot-reload via `wg syncconf` (sem docker.sock) — `docker/wireguard/scripts/netmonitor-watcher.sh`
 - [x] Serviço `vpn-probe` com `network_mode: service:wireguard`
-- [x] Registro automático do `vpn-probe` na inicialização (`start/vpn_probe.ts` + `node ace vpn:probe-register`)
+- [x] Registro automático do `vpn-probe` na inicialização (`start/vpn_probe.ts` com fallback para `DEFAULT_VPN_PROBE_TOKEN = 'default_vpn_probe_token'`) + comando CLI `node ace vpn:probe-register` para geração manual de tokens.
 - [x] Endpoint de preflight com detecção de CGNAT
 - [x] Corrigido o parsing de latência do `PingChecker` para o formato `round-trip min/avg/max` do BusyBox (Alpine)
 
@@ -569,7 +569,7 @@ gantt
 - [x] Item de menu em [`frontend/src/layouts/DefaultLayout.vue`](../frontend/src/layouts/DefaultLayout.vue)
 
 ### Fase 5 · Validação (Pendente — exige hardware e IP público)
-- [ ] Conectar MikroTik RouterOS v7 real e validar ICMP + SNMP pelo túnel
+- [X] Conectar MikroTik RouterOS v7 real e validar ICMP + SNMP pelo túnel
 - [ ] Conectar OpenWrt real e validar ICMP + SNMP pelo túnel
 - [ ] Validar que o túnel sobrevive a 30+ min de ociosidade (prova do keepalive)
 - [ ] Confirmar que a internet do roteador **não** passa pelo túnel (prova do `AllowedIPs`)
