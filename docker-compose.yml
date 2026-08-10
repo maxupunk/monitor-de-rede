@@ -16,7 +16,7 @@ x-app-env: &app-env
 
 services:
   migration:
-    build: .
+    build: ./backend
     command: node ace.js migration:run --force
     environment:
       <<: *app-env
@@ -27,7 +27,7 @@ services:
     restart: "no"
 
   server:
-    build: .
+    build: ./backend
     command: node bin/server.js
     ports:
       - "${API_EXTERNAL_PORT:-3333}:3333"
@@ -47,7 +47,7 @@ services:
     restart: unless-stopped
 
   scheduler:
-    build: .
+    build: ./backend
     command: node ace.js scheduler:run
     environment:
       <<: *app-env
@@ -66,7 +66,7 @@ services:
     restart: unless-stopped
 
   probe:
-    build: .
+    build: ./backend
     command: node ace.js probe:run
     environment:
       <<: *app-env
@@ -105,7 +105,7 @@ services:
 
   # Probe dedicado que enxerga a interface wg0 — o probe da LAN segue intocado.
   vpn-probe:
-    build: .
+    build: ./backend
     command: node ace.js probe:run
     environment:
       <<: *app-env

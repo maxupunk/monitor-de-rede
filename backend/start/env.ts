@@ -1,6 +1,11 @@
 import { Env } from '@adonisjs/core/env'
+import fs from 'node:fs'
 
-export default await Env.create(new URL('../', import.meta.url), {
+const backendDir = new URL('../', import.meta.url)
+const rootDir = new URL('../../', import.meta.url)
+const envLocation = fs.existsSync(new URL('.env', rootDir)) ? rootDir : backendDir
+
+export default await Env.create(envLocation, {
   // Node
   NODE_ENV: Env.schema.enum(['development', 'production', 'test'] as const),
   PORT: Env.schema.number(),
