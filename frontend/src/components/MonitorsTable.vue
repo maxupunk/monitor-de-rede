@@ -14,7 +14,7 @@
       <div class="py-2">
         <router-link
           :to="`/monitors/${item.id}`"
-          class="text-subtitle-1 font-weight-bold text-decoration-none text-primary hover-underline d-inline-block"
+          class="text-subtitle-1 font-weight-bold text-decoration-none text-primary hover-underline d-block mb-1"
         >
           {{ item.name }}
         </router-link>
