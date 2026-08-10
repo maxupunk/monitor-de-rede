@@ -25,3 +25,11 @@ yarn-error.log
 
 # Platform specific
 .DS_Store
+
+# Rust / Loco.rs
+target/
+*.sqlite
+*.sqlite3
+*.sqlite-*
+master.key
+
