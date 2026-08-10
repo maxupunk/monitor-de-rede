@@ -1,0 +1,8 @@
+target/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.git/
+.github/
+frontend/
+docs/

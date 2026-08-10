@@ -259,8 +259,11 @@ async fn resend_verification_email(
 }
 
 pub fn routes() -> Routes {
+    // Prefixo relativo: o `/api` vem do `AppRoutes::prefix` em `app.rs`, para o
+    // grupo de negócio inteiro ter uma origem única (§5.6). O scaffold trazia
+    // `/api/auth` embutido, o que duplicaria o prefixo.
     Routes::new()
-        .prefix("/api/auth")
+        .prefix("/auth")
         .add("/register", post(register))
         .add("/verify/{token}", get(verify))
         .add("/login", post(login))

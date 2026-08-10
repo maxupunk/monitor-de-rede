@@ -72,10 +72,20 @@ funcional total com o backend AdonisJS, substituindo:
 
 ### 1.3 Princípios inegociáveis
 
-1. **O contrato HTTP é sagrado.** O frontend não sabe que o backend mudou. Toda resposta
-   JSON mantém nomes de campo, formato de data, envelope de paginação e códigos HTTP.
-   Onde isso for impossível, o desvio vai para [§12](#12-ajustes-necessários-no-frontend) com
-   o patch de frontend correspondente.
+0. **O padrão do backend Rust tem precedência.** *(Decisão do responsável pelo projeto,
+   Fase 0 — [ADR 006](adr/006-prioridade-do-padrao-rust.md). Lê-se antes do princípio 1 e o
+   qualifica.)* O frontend Vue é nosso e fica no mesmo repositório: a diretriz é **aproveitá-lo
+   e apenas adaptá-lo**. Onde preservar um formato herdado do AdonisJS custar contorcer o Rust
+   — `rename` manual campo a campo, wrapper para imitar um envelope, serialização que o
+   `sea-orm` não produz naturalmente —, vale o idiomático do backend e o frontend é ajustado.
+   Em ordem: (a) preservar quando não custa nada; (b) adaptar quando custa; (c) **registrar
+   sempre** na [§12](#12-ajustes-necessários-no-frontend); (d) adaptação é cirúrgica — mudar o
+   tipo lido ou o nome de um campo, nunca redesenhar tela.
+
+1. **O contrato HTTP é sagrado** — dentro do limite do princípio 0. O frontend não sabe que o
+   backend mudou. Toda resposta JSON mantém nomes de campo, formato de data, envelope de
+   paginação e códigos HTTP. Onde isso for impossível **ou caro**, o desvio vai para
+   [§12](#12-ajustes-necessários-no-frontend) com o patch de frontend correspondente.
 2. **Padrões Loco.rs.** Nada de "framework dentro do framework". Controllers em
    `src/controllers/`, entidades geradas em `src/models/_entities/`, regras em
    `src/models/*.rs`, migrations em `migration/src/`, jobs em `src/tasks/` e `src/workers/`,
@@ -134,7 +144,10 @@ futures = { version = "0.3" }
 
 # --- rede: ICMP nativo (substitui execFile('ping')) ---
 surge-ping = { version = "0.8" }
-socket2 = { version = "0.5" }          # sock_type_hint / fallback DGRAM
+# ⚠️ 0.6, e não 0.5: `surge-ping` 0.8 depende de `socket2 ^0.6`, e
+# `sock_type_hint` recebe o `socket2::Type` daquela versão. Com as duas majors
+# na árvore o tipo não unifica e o ICMP DGRAM não compila (ADR 003).
+socket2 = { version = "0.6" }          # sock_type_hint / fallback DGRAM
 rand = { version = "0.8" }             # identifier/sequence do ICMP
 
 # --- rede: DNS (wire format + DoH) ---
@@ -156,6 +169,7 @@ hex = { version = "0.4" }
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 
 # --- utilitários ---
+anyhow = { version = "1" }             # AppError::Internal (§8.1) — faltava nesta lista
 ipnet = { version = "2.9" }            # CIDR IPv4 (discovery + VPN)
 serde_yaml = { version = "0.9" }       # fixtures / seeds
 thiserror = { version = "2" }
@@ -192,9 +206,11 @@ Regras de implementação:
    - Linux (produção/Docker): `CAP_NET_RAW` no container, **ou** socket `SOCK_DGRAM` ICMP
      (`Config::builder().sock_type_hint(socket2::Type::DGRAM)`) com
      `sysctl net.ipv4.ping_group_range="0 2147483647"`. **Preferir DGRAM** — dispensa capability.
-   - Windows (dev local): raw socket exige processo elevado. Implementar `#[cfg(windows)]`
-     *fallback* para o binário `ping.exe` **apenas em `development`**, com o mesmo parsing do
-     backend atual, e log `WARN` explícito. Nunca em `production`.
+   - ~~Windows (dev local): raw socket exige processo elevado. Implementar `#[cfg(windows)]`
+     *fallback* para o binário `ping.exe`…~~ **Cancelado pelo SPIKE-03 (ADR 003):** medido,
+     o `SOCK_DGRAM` funciona no Windows sem elevação. O *fallback* **não deve ser escrito** —
+     um caminho alternativo que nunca é exercitado é dívida garantida, e o parsing por idioma
+     do SO é justamente o defeito que esta migração remove.
 4. **Resultado idêntico ao atual**: `metrics = [latency(ms), packet_loss(%)]`;
    `status = up` (0% perda) / `warning` (perda parcial) / `down` (100%).
    Mensagens em português, mesmo texto.
@@ -263,17 +279,28 @@ Regras:
 dezenas de segundos), sem falso negativo em relação ao `nmap -sT`; NDJSON chega ao frontend
 porta a porta.
 
-### 3.4 Spikes obrigatórios da Fase 0
+### 3.4 Spikes obrigatórios da Fase 0 — 🟢 **concluídos**
 
-| ID | Assunto | Pergunta a responder | Saída |
+| ID | Assunto | Resposta | ADR |
 | :--- | :--- | :--- | :--- |
-| **SPIKE-01** | Cliente SNMP | `rasn-snmp` (v1/v2c/v3 + USM, transporte próprio em `tokio::net::UdpSocket`) atende `get` e `walk` (GETNEXT/GETBULK)? Alternativa: `snmp2` síncrono em `spawn_blocking`. | ADR + protótipo que lê `sysDescr` e faz walk de `ifTable` |
-| **SPIKE-02** | RustScan como crate | A crate `rustscan` é embutível? | ADR: crate vs. algoritmo próprio |
-| **SPIKE-03** | ICMP sem privilégio | `surge-ping` com `SOCK_DGRAM` funciona no container base escolhido? | Dockerfile com `sysctl`/capability decidido |
-| **SPIKE-04** | DNS wire | `hickory-proto` permite encode/decode manual mantendo o cronômetro só na etapa de resolução (`Instant`)? | Protótipo UDP + TCP + DoH |
-| **SPIKE-05** | Scheduler | `cargo loco task` de loop infinito é o padrão certo, ou `Initializer` + `tokio::spawn`? | Decisão registrada em [§9](#9-processos-de-background) |
+| **SPIKE-01** | Cliente SNMP | **Sim**, `rasn-snmp` 0.18 cobre `get` e `walk` com transporte próprio em `tokio`. Achado: `EncodeError`/`DecodeError` não implementam `std::error::Error` — o cliente precisa de um `SnmpError` com `From` explícito. | [001](adr/001-snmp-client.md) |
+| **SPIKE-02** | RustScan como crate | **Não embutir.** A crate é `GPL-3.0-only` (o projeto é MIT) e `Scanner::run() -> Vec<SocketAddr>` não entrega resultado incremental nem aceita cancelamento — o NDJSON da §7.15 e o `CancellationToken` da §3.3.6 são impossíveis com ela. Implementar o algoritmo. | [002](adr/002-rustscan-embedding.md) |
+| **SPIKE-03** | ICMP sem privilégio | **Sim**, `SOCK_DGRAM` sem `CAP_NET_RAW`, como usuário não-root, com latência a ~3% do `ping` do sistema. O *fallback* Windows foi cancelado. | [003](adr/003-icmp-dgram.md) |
+| **SPIKE-04** | DNS wire | **Sim**, um encoder só serve UDP, TCP e DoH; o `Instant` fica isolado no round-trip. | [004](adr/004-dns-wire.md) |
+| **SPIKE-05** | Scheduler | Task de **um ciclo** disparada pelo scheduler nativo, em processo separado — confirma a [§9.1](#91-topologia-de-processos-espelha-o-docker-composeyml). Boot medido: ~25 ms num tique de 5 s (0,5%). | [005](adr/005-scheduler-loco.md) |
 
-Cada spike vira um arquivo `docs/adr/NNN-*.md` com decisão, alternativas e justificativa.
+Protótipos executáveis em `backend-rust/examples/spikes/`:
+
+```sh
+cargo run --example spike_snmp_v2c      # offline; SNMP_TARGET=host:161 para ao vivo
+cargo run --example spike_dns_wire      # UDP + TCP + DoH
+cargo run --example spike_icmp_dgram -- 1.1.1.1
+docker compose -f docker-compose.icmp-spike.yml run --rm icmp-dgram     # SPIKE-03 em Linux
+docker compose -f docker-compose.icmp-spike.yml run --rm icmp-restrito  # contraprova
+```
+
+Além dos cinco, a Fase 0 registrou o [ADR 006](adr/006-prioridade-do-padrao-rust.md), que
+define a precedência entre o padrão do backend Rust e o contrato herdado do AdonisJS.
 
 ---
 
@@ -520,7 +547,7 @@ snackbars). Implementar `src/services/shared/errors.rs` com um `AppError` `thise
   para o grupo de negócio; `GET /` mantém `{"status":"online","service":"Network Monitor API","version":"1.0.0"}`.
 - CORS liberado para a origem do frontend (`config/*.yaml`, middleware `cors` do Loco).
 - **`server.port` = 3333** em todos os ambientes (o proxy do Vite e o docker-compose apontam
-  para 3333). O scaffold vem com 5150 — corrigir na Fase 1.
+  para 3333). O scaffold vinha com 5150 — 🟢 corrigido na Fase 0 nos três ambientes.
 
 ---
 
@@ -1326,10 +1353,17 @@ pub async fn delete_zabbix_template(db, id) -> Result<()>;
 | `probe` | `backend_rust-cli task probe_run` | Agente da LAN |
 | `vpn-probe` | `backend_rust-cli task probe_run` | Agente no namespace do WireGuard |
 
-> **Decisão SPIKE-05 (ADR 005):** `scheduler_run` é uma task de **um ciclo**, invocada pelo
-> scheduler nativo do Loco a cada 5 s (`run every 5 seconds`). Isso preserva o ciclo de vida do
-> framework, isola falhas no processo `scheduler` e evita um loop infinito ou `tokio::spawn` no
-> processo HTTP.
+> **Decisão SPIKE-05 (🟢 [ADR 005](adr/005-scheduler-loco.md), confirmada na Fase 0):**
+> `scheduler_run` é uma task de **um ciclo**, invocada pelo scheduler nativo do Loco a cada 5 s
+> (`run every 5 seconds`). Isso preserva o ciclo de vida do framework, isola falhas no processo
+> `scheduler` e evita um loop infinito ou `tokio::spawn` no processo HTTP.
+>
+> A objeção óbvia — o scheduler do Loco faz `fork`+`exec` a cada disparo — foi **medida**:
+> ~25 ms de boot (binário release, SQLite) num tique de 5 000 ms, ou 0,5%. Duas consequências
+> que a §9.2 já cobre e que só existem por causa desta decisão: um ciclo que passe de 5 s é
+> **atropelado pelo seguinte** (daí gravar `next_run_at` *antes* de executar e o
+> `probe_tasks.monitor_id UNIQUE`), e o `EventBus` em memória não atravessa o processo — daí a
+> tabela `event_outbox`.
 
 ### 9.2 `tasks/scheduler_run.rs` — um ciclo central
 
@@ -1472,8 +1506,10 @@ Ao final: `{"type":"done"}`; em erro: `{"type":"error","message":"…"}`. Cancel
 
 ## 12. Ajustes necessários no frontend
 
-A regra é **não mexer**. Estes são os únicos pontos onde o backend Rust não consegue (ou não
-deve) reproduzir o comportamento atual, com o patch mínimo correspondente.
+A regra é **mexer o mínimo**, e sempre registrado aqui. Pelo princípio
+[§1.3.0](#13-princípios-inegociáveis) ([ADR 006](adr/006-prioridade-do-padrao-rust.md)), quando
+reproduzir o comportamento atual custaria contorcer o backend Rust, quem se adapta é o
+frontend — e a linha entra nesta tabela.
 
 | # | Arquivo | Mudança | Motivo | Fase |
 | :-: | :--- | :--- | :--- | :---: |
@@ -1484,9 +1520,17 @@ deve) reproduzir o comportamento atual, com o patch mínimo correspondente.
 | **F5** | `src/composables/useInfiniteList.ts` | Nenhuma — mantido o envelope Lucid. | Registrado aqui para deixar explícito que o **backend** é que se adapta ([§5.4](#54-paginação)). | — |
 | **F6** | `src/stores/portScan.ts` | Nenhuma esperada. **Validar** que o parser NDJSON tolera chegada muito mais rápida (RustScan é ordens de grandeza mais veloz). | Risco de *race* no acúmulo reativo. | 4 |
 | **F7** | `src/types/` *(novo, opcional)* | Consumir `frontend/src/bindings/*.ts` gerados por `ts-rs`. | Ganho de tipagem ponta a ponta. Opcional, não bloqueia o corte. | 8 |
+| **F8** 🟢 | `src/bindings/*.ts` *(novo)* | Destino dos bindings `ts-rs` passa a ser `frontend/src/bindings/`. Gerados: `LucidMeta`, `LucidPage`, `ApiError`, `ApiFieldError`, `ServiceInfo`. | O scaffold exportava para `backend-rust/frontend/`, diretório que ninguém consome. Agora o struct Rust é a fonte da verdade do tipo TS. | 0 |
+| **F9** 🟢 | `src/composables/useInfiniteList.ts` | `PaginatedResponse.meta` passa a usar o `LucidMeta` gerado, em vez do tipo redigitado à mão. Comportamento em runtime **inalterado**. | Se o backend mudar um campo do `meta`, o `vue-tsc` acusa — em vez de a lista infinita parar sozinha em produção. Substitui a nota "nenhuma mudança" do F5. | 0 |
+
+> **F5 revisado:** a linha original dizia "nenhuma mudança — o backend é que se adapta". O
+> envelope Lucid continua sendo do backend (o princípio 1 se aplica: reproduzi-lo custou um
+> struct); o que mudou foi só a **origem do tipo** no TypeScript. Ver F9.
 
 **Nada além disso.** Qualquer outra divergência encontrada durante a migração é **bug do
-backend Rust**, não pedido de mudança no frontend. Registrar em issue e corrigir no Rust.
+backend Rust** — a não ser que se enquadre no princípio [§1.3.0](#13-princípios-inegociáveis),
+e nesse caso vira uma linha nova nesta tabela, com motivo escrito. Mudança silenciosa no
+frontend, nunca.
 
 ---
 
@@ -1496,7 +1540,7 @@ backend Rust**, não pedido de mudança no frontend. Registrar em issue e corrig
 
 ```yaml
 server:
-  port: 3333            # ⚠️ o scaffold vem com 5150 — corrigir
+  port: 3333            # 🟢 Fase 0 — aplicado nos três ambientes
   binding: 0.0.0.0
   middlewares:
     cors:
@@ -1600,16 +1644,52 @@ O scaffold já traz `loco-rs[testing]`, `rstest`, `insta`, `serial_test`.
 > Marcar `[x]` + badge 🟢 conforme conclusão, seguindo a convenção de `docs/roadmap.md`
 > (AGENTS.md §5).
 
-### Fase 0 — Fundação e spikes (🔴)
+### Fase 0 — Fundação e spikes (🟢 **Concluída** — 2026-08-10)
 
-- [ ] Executar **SPIKE-01..05** e publicar os ADRs em `docs/adr/`
-- [ ] Fechar o `Cargo.toml` e travar o `Cargo.lock`
-- [ ] Corrigir `server.port` para 3333 nos 3 ambientes; configurar CORS
-- [ ] `src/services/shared/{errors,crypto,pagination}.rs` + testes
-- [ ] `LucidPage`/`LucidMeta`/`MaybePaged` validados contra o `useInfiniteList` real
-- [ ] Convenção `#[serde(rename_all="camelCase")]` aplicada e verificada por um teste que
+- [x] Executar **SPIKE-01..05** e publicar os ADRs em `docs/adr/`
+      — [001](adr/001-snmp-client.md), [002](adr/002-rustscan-embedding.md),
+      [003](adr/003-icmp-dgram.md), [004](adr/004-dns-wire.md),
+      [005](adr/005-scheduler-loco.md). Protótipos em `backend-rust/examples/spikes/`,
+      executáveis por `cargo run --example spike_{icmp_dgram,snmp_v2c,dns_wire}`.
+- [x] Fechar o `Cargo.toml` e travar o `Cargo.lock`
+      — bloco da [§3.1](#31-cargotoml-alvo) aplicado, com duas correções registradas
+      ali: `socket2` 0.6 (ADR 003) e `anyhow` (exigido pelo `AppError` da [§8.1](#81-shared--srcservicesshared)).
+- [x] Corrigir `server.port` para 3333 nos 3 ambientes; configurar CORS
+      — `config/{development,test,production}.yaml`.
+- [x] `src/services/shared/{errors,crypto,pagination}.rs` + testes
+      — 21 testes unitários; `AppError` com `IntoResponse` próprio (ver nota abaixo).
+- [x] `LucidPage`/`LucidMeta`/`MaybePaged` validados contra o `useInfiniteList` real
+      — testes replicam o laço `currentPage >= lastPage` do composable, em memória e
+      contra banco (`tests/models/pagination.rs`).
+- [x] Convenção `#[serde(rename_all="camelCase")]` aplicada e verificada por um teste que
       falha se um DTO esquecer o atributo
-- [ ] `Hooks::truncate` cobrindo as 23 tabelas
+      — `tests/conventions/camel_case.rs`. Já pegou dois DTOs do scaffold (`LoginResponse`,
+      `CurrentResponse`), corrigidos.
+- [x] `Hooks::truncate` cobrindo as 23 tabelas
+      — lista única em `src/models/tables.rs` (`CREATION_ORDER`), limpeza na ordem inversa,
+      pulando tabelas ainda não migradas. Nenhuma tabela nova precisa ser lembrada no `app.rs`.
+
+**Extras entregues nesta fase** (não estavam na lista, viraram pré-requisito):
+
+- `GET /` e o prefixo `/api` da [§5.6](#56-prefixo-e-cors) — `src/controllers/root.rs`;
+  o prefixo saiu do controller de auth e passou para o `AppRoutes` (padrão Loco).
+- `Dockerfile` (multi-estágio, usuário não-root, sem `CAP_NET_RAW`) e
+  `docker-compose.icmp-spike.yml` — exigidos por SPIKE-03.
+- Bindings `ts-rs` passam a ser gerados em `frontend/src/bindings/` (antes iam para um
+  diretório órfão dentro de `backend-rust/`).
+
+> **Desvio consciente da [§1.3.4](#13-princípios-inegociáveis).** Os handlers devolvem
+> `Result<_, AppError>`, não `Result<_, loco_rs::Error>`. O `IntoResponse` do Loco serializa
+> `{"error","description"}`; o frontend lê `message` (`apiService.handleResponse`), então todo
+> erro viraria o texto genérico `"Erro HTTP 422: ..."` nos snackbars. `AppError` converte nos
+> dois sentidos (`From<loco_rs::Error>` e `From<AppError> for loco_rs::Error`), então tasks e
+> workers continuam com a assinatura do framework. É o que a [§5.5](#55-erros) e a
+> [§8.1](#81-shared--srcservicesshared) já mandavam; a §1.3.4 continua valendo no que importa —
+> nada de `unwrap()` fora de `OnceLock`/constantes.
+
+**Validação:** `cargo build --all-targets` limpo, `cargo test` com 63 testes verdes,
+`cargo fmt --check` e `cargo clippy -- -D warnings` limpos, `npm run typecheck` do frontend
+limpo.
 
 ### Fase 1 — Esquema e entidades (🔴)
 

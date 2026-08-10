@@ -5,7 +5,7 @@ use loco_rs::{
     boot::{create_app, BootResult, StartMode},
     config::Config,
     controller::AppRoutes,
-    db::{self, truncate_table},
+    db,
     environment::Environment,
     task::Tasks,
     Result,
@@ -14,7 +14,10 @@ use migration::Migrator;
 use std::path::Path;
 
 #[allow(unused_imports)]
-use crate::{controllers, models::_entities::users, tasks, workers::downloader::DownloadWorker};
+use crate::{
+    controllers, models::_entities::users, models::tables, tasks,
+    workers::downloader::DownloadWorker,
+};
 
 pub struct App;
 #[async_trait]
@@ -46,7 +49,14 @@ impl Hooks for App {
     }
 
     fn routes(_ctx: &AppContext) -> AppRoutes {
-        AppRoutes::with_default_routes() // controller routes below
+        // `prefix` só vale para as rotas adicionadas depois dele (`add_route`
+        // funde o prefixo no momento da adição). Por isso `GET /` entra antes:
+        // ele tem de continuar na raiz, junto com o `_ping`/`_health` que o
+        // `with_default_routes` já registrou. Tudo que é negócio vem depois,
+        // sob `/api` (§5.6).
+        AppRoutes::with_default_routes()
+            .add_route(controllers::root::routes())
+            .prefix("/api")
             .add_route(controllers::auth::routes())
     }
     async fn connect_workers(ctx: &AppContext, queue: &Queue) -> Result<()> {
@@ -59,9 +69,14 @@ impl Hooks for App {
         // tasks-inject (do not remove)
         tasks.register(tasks::user_create::UserCreate);
     }
+    /// Limpa o esquema inteiro entre testes.
+    ///
+    /// A lista vive em [`tables::CREATION_ORDER`] e é percorrida ao contrário
+    /// (filhos antes de pais). Tabelas ainda não migradas são puladas, então a
+    /// lista já está completa desde a Fase 0 — nenhuma tabela nova precisa ser
+    /// lembrada aqui depois.
     async fn truncate(ctx: &AppContext) -> Result<()> {
-        truncate_table(&ctx.db, users::Entity).await?;
-        Ok(())
+        tables::truncate_all(&ctx.db).await
     }
     async fn seed(ctx: &AppContext, base: &Path) -> Result<()> {
         db::seed::<users::ActiveModel>(&ctx.db, &base.join("users.yaml").display().to_string())

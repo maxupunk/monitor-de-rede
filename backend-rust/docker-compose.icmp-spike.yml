@@ -1,0 +1,41 @@
+# SPIKE-03 — ICMP sem privilégio (§3.4 do roadmap).
+#
+# Roda o protótipo `examples/spikes/icmp_dgram.rs` dentro da mesma base da
+# imagem de produção, como usuário não-root e **sem** `cap_add: NET_RAW`.
+# Se passar aqui, passa em produção.
+#
+#   docker compose -f docker-compose.icmp-spike.yml run --rm --build icmp-dgram
+#
+# `icmp-restrito` é a contraprova: mesma imagem, mas com `ping_group_range`
+# fechado. Ele **deve** falhar — é o que mostra que quem libera o socket é o
+# sysctl, e não algum privilégio herdado por acidente.
+
+services:
+  # Explícito de propósito. O Docker moderno já entrega
+  # `ping_group_range = 0 2147483647` por padrão no container (medido: 29.6.2),
+  # então esta linha é redundante *neste* runtime — e é justamente por isso que
+  # ela fica: em Kubernetes com PSP/`allowedUnsafeSysctls` restrito, ou num
+  # dockerd antigo, o default é `1 0` e o socket não abre.
+  icmp-dgram:
+    build:
+      context: .
+      target: spike
+    sysctls:
+      net.ipv4.ping_group_range: "0 2147483647"
+    command: ["spike_icmp_dgram", "1.1.1.1", "8.8.8.8"]
+
+  icmp-restrito:
+    build:
+      context: .
+      target: spike
+    # `1 0` é o intervalo vazio — o default do kernel Linux sem Docker.
+    # Esperado: EACCES na abertura do socket.
+    sysctls:
+      net.ipv4.ping_group_range: "1 0"
+    command: ["spike_icmp_dgram", "1.1.1.1"]
+
+  dns-wire:
+    build:
+      context: .
+      target: spike
+    command: ["spike_dns_wire", "example.com", "1.1.1.1"]

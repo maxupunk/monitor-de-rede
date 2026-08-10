@@ -2,7 +2,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::models::_entities::users;
 
+/// `is_verified` viraria `is_verified` no JSON sem o `rename_all`, e o frontend
+/// lê `isVerified`. A forma completa do §7.2 (`user` aninhado com `fullName` e
+/// `role`) entra na Fase 6, junto com o login real.
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LoginResponse {
     pub token: String,
     pub pid: String,
@@ -23,6 +27,7 @@ impl LoginResponse {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CurrentResponse {
     pub pid: String,
     pub name: String,

@@ -1,5 +1,6 @@
 import { ref, type Ref } from 'vue'
 import { apiService } from '@/services/apiService'
+import type { LucidMeta } from '@/bindings/LucidMeta'
 
 /**
  * Lista paginada consumida por `<v-infinite-scroll>`.
@@ -18,10 +19,21 @@ import { apiService } from '@/services/apiService'
  * ```
  */
 
-/** Envelope de paginação devolvido pelo Lucid (`.paginate()`) */
+/**
+ * Envelope de paginação do backend (§5.4 do roadmap do backend Rust).
+ *
+ * `LucidMeta` é gerado pelo `ts-rs` a partir do struct Rust
+ * (`backend-rust/src/services/shared/pagination.rs`) — se o backend mudar um
+ * campo do `meta`, o `vue-tsc` acusa aqui em vez de a lista infinita parar
+ * sozinha em produção.
+ *
+ * `meta` continua opcional porque os endpoints de modo dual devolvem array cru
+ * quando `?page` está ausente; este composable sempre manda `page`, mas a
+ * defesa custa nada.
+ */
 interface PaginatedResponse<T> {
   data: T[]
-  meta?: { currentPage: number; lastPage: number; total: number }
+  meta?: LucidMeta
 }
 
 type LoadStatus = 'ok' | 'empty' | 'loading' | 'error'
