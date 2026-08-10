@@ -114,31 +114,34 @@
     </template>
 
     <template #item.actions="{ item }">
-      <v-btn
-        size="small"
-        color="primary"
-        variant="outlined"
-        prepend-icon="mdi-play"
-        class="mr-1"
-        :loading="runningId === item.id"
-        @click="run(item)"
-      >
-        Testar
-      </v-btn>
+      <!-- Botão com rótulo e botões-ícone têm alturas diferentes: o flex com
+           `align-center` mantém todos na mesma linha de base. -->
+      <div class="d-flex align-center ga-1">
+        <v-btn
+          size="small"
+          color="primary"
+          variant="outlined"
+          prepend-icon="mdi-play"
+          :loading="runningId === item.id"
+          @click="run(item)"
+        >
+          Testar
+        </v-btn>
 
-      <v-btn icon size="small" variant="text" color="info" :to="`/monitors/${item.id}`">
-        <v-icon>mdi-chart-timeline-variant</v-icon>
-        <v-tooltip activator="parent" location="top">Ver Gráficos e Detalhes</v-tooltip>
-      </v-btn>
+        <v-btn icon size="small" variant="text" color="info" :to="`/monitors/${item.id}`">
+          <v-icon>mdi-chart-timeline-variant</v-icon>
+          <v-tooltip activator="parent" location="top">Ver Gráficos e Detalhes</v-tooltip>
+        </v-btn>
 
-      <v-btn icon size="small" variant="text" color="primary" @click="emit('edit', item)">
-        <v-icon>mdi-pencil</v-icon>
-        <v-tooltip activator="parent" location="top">Editar monitor</v-tooltip>
-      </v-btn>
-      <v-btn icon size="small" variant="text" color="error" @click="confirmDelete(item)">
-        <v-icon>mdi-delete</v-icon>
-        <v-tooltip activator="parent" location="top">Excluir monitor</v-tooltip>
-      </v-btn>
+        <v-btn icon size="small" variant="text" color="primary" @click="emit('edit', item)">
+          <v-icon>mdi-pencil</v-icon>
+          <v-tooltip activator="parent" location="top">Editar monitor</v-tooltip>
+        </v-btn>
+        <v-btn icon size="small" variant="text" color="error" @click="confirmDelete(item)">
+          <v-icon>mdi-delete</v-icon>
+          <v-tooltip activator="parent" location="top">Excluir monitor</v-tooltip>
+        </v-btn>
+      </div>
     </template>
 
     <template #mobile-item="{ item }">

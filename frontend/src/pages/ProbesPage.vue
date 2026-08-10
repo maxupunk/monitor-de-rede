@@ -30,7 +30,7 @@
         </template>
 
         <template #item.actions="{ item }">
-          <div class="d-flex ga-2">
+          <div class="d-flex align-center ga-2">
             <v-btn
               size="small"
               color="primary"
@@ -69,7 +69,7 @@
                 {{ (item.status || 'UNKNOWN').toUpperCase() }}
               </v-chip>
             </div>
-            <div class="d-flex ga-2 mt-1">
+            <div class="d-flex align-center ga-2 mt-1">
               <v-btn
                 size="small"
                 color="primary"

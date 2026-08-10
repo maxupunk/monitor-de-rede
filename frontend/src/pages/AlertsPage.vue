@@ -107,7 +107,7 @@
               </template>
 
               <template #item.actions="{ item }">
-                <div class="d-flex ga-1 flex-wrap">
+                <div class="d-flex align-center ga-1 flex-wrap">
                   <v-btn
                     size="small"
                     color="primary"
@@ -158,7 +158,7 @@
                       </div>
                     </div>
                   </div>
-                  <div class="d-flex ga-1 flex-wrap mt-1">
+                  <div class="d-flex align-center ga-1 flex-wrap mt-1">
                     <v-btn
                       size="small"
                       color="primary"

@@ -37,8 +37,8 @@
             <div class="text-overline text-medium-emphasis mb-3">
               {{ editingId ? 'Editando servidor' : 'Adicionar servidor' }}
             </div>
-            <v-row>
-              <v-col cols="12" md="4">
+            <v-row dense>
+              <v-col cols="12" md="5">
                 <v-text-field
                   v-model="form.name"
                   label="Nome *"
@@ -49,7 +49,7 @@
                   hide-details="auto"
                 ></v-text-field>
               </v-col>
-              <v-col cols="12" md="3">
+              <v-col cols="12" sm="4" md="3">
                 <v-select
                   v-model="form.protocol"
                   :items="PROTOCOL_OPTIONS"
@@ -61,7 +61,7 @@
                   hide-details="auto"
                 ></v-select>
               </v-col>
-              <v-col cols="12" md="5">
+              <v-col cols="12" sm="8" md="4">
                 <v-text-field
                   v-model="form.address"
                   :label="form.protocol === 'doh' ? 'Endpoint DoH *' : 'Endereço IP *'"
@@ -74,37 +74,41 @@
                   hide-details="auto"
                 ></v-text-field>
               </v-col>
-              <v-col cols="12" md="8">
+              <v-col cols="12">
                 <v-text-field
                   v-model="form.description"
                   label="Descrição (opcional)"
+                  placeholder="Onde este resolvedor é usado"
                   variant="outlined"
                   density="comfortable"
                   hide-details="auto"
                 ></v-text-field>
               </v-col>
-              <v-col cols="12" md="4" class="d-flex align-center">
-                <v-switch
-                  v-model="form.isDefault"
-                  color="deep-purple"
-                  density="comfortable"
-                  label="Comparar no dashboard"
-                  hide-details
-                ></v-switch>
-              </v-col>
             </v-row>
 
-            <div class="d-flex justify-end ga-2 mt-3">
-              <v-btn v-if="editingId" variant="text" @click="resetForm">Cancelar edição</v-btn>
-              <v-btn
+            <v-divider class="my-4"></v-divider>
+
+            <!-- Barra de ações: o switch sai da grade de campos e divide a linha
+                 com os botões, em vez de dividir a coluna com "Adicionar". -->
+            <div
+              class="d-flex flex-column flex-sm-row align-start align-sm-center justify-space-between ga-3"
+            >
+              <v-switch
+                v-model="form.isDefault"
                 color="deep-purple"
-                variant="flat"
-                :loading="store.saving"
-                :disabled="!canSubmit"
-                type="submit"
-              >
-                {{ editingId ? 'Salvar alterações' : 'Adicionar' }}
-              </v-btn>
+                density="compact"
+                label="Comparar no dashboard"
+                inset
+                hide-details
+                class="flex-grow-0 ms-1"
+              ></v-switch>
+
+              <div class="d-flex align-center justify-end ga-2 w-100 w-sm-auto">
+                <v-btn v-if="editingId" variant="text" @click="resetForm">Cancelar edição</v-btn>
+                <v-btn color="deep-purple" variant="flat" :loading="store.saving" type="submit">
+                  {{ editingId ? 'Salvar alterações' : 'Adicionar' }}
+                </v-btn>
+              </div>
             </div>
           </v-sheet>
         </v-form>
@@ -200,7 +204,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { nextTick, reactive, ref, watch } from 'vue'
 import { useDnsServersStore, type DnsServer } from '@/stores/dnsServers'
 import { isHostname, isIpAddress } from '@/utils/monitorTypes'
 
@@ -257,10 +261,6 @@ const addressRule = (value: unknown) => {
   const host = text.split(':')[0] ?? ''
   return isIpAddress(host) || isHostname(host) || 'Informe um IP ou hostname válido'
 }
-
-const canSubmit = computed(
-  () => !!form.name.trim() && addressRule(form.address) === true && !store.saving
-)
 
 watch(
   () => props.modelValue,

@@ -23,10 +23,9 @@
             item-title="label"
             item-value="id"
             label="Varrer o bloco de IP de uma rede cadastrada"
-            :hint="selectedNetworkHint"
-            persistent-hint
             variant="outlined"
             density="compact"
+            hide-details
             :no-data-text="
               networksStore.networks.length === 0
                 ? 'Nenhuma rede cadastrada — cadastre uma em Redes'
@@ -427,24 +426,26 @@ const runHeaders = [
   { title: 'Iniciado em', key: 'startedAt', width: '160px' },
 ]
 
+/**
+ * O tamanho da faixa entra no próprio rótulo da opção: como `hint` renderiza
+ * uma linha extra sob o campo, ele desalinhava o select dos botões ao lado.
+ */
 const scannableNetworks = computed(() =>
   networksStore.networks
     .filter((network) => network.scannable !== false)
-    .map((network) => ({
-      id: network.id,
-      label: `${network.name} — ${network.cidr}`,
-      usableHosts: network.usableHosts ?? 0,
-    }))
+    .map((network) => {
+      const usableHosts = network.usableHosts ?? 0
+      const scope =
+        usableHosts > MAX_SCAN_HOSTS
+          ? `${usableHosts} endereços (varre os primeiros ${MAX_SCAN_HOSTS})`
+          : `${usableHosts} endereço(s)`
+
+      return {
+        id: network.id,
+        label: `${network.name} — ${network.cidr} · ${scope}`,
+      }
+    })
 )
-
-const selectedNetworkHint = computed(() => {
-  const selected = scannableNetworks.value.find((n) => n.id === selectedNetworkId.value)
-  if (!selected) return 'A varredura roda no scheduler; os achados aparecem aqui.'
-
-  return selected.usableHosts > MAX_SCAN_HOSTS
-    ? `${selected.usableHosts} endereços na faixa — serão varridos os primeiros ${MAX_SCAN_HOSTS}.`
-    : `${selected.usableHosts} endereço(s) serão varridos.`
-})
 
 onMounted(async () => {
   networksStore.fetchNetworks()
