@@ -177,7 +177,7 @@ Auditoria contra as migrations existentes revelou quatro pontos a tratar:
 | :--- | :--- |
 | `networks.site_id` é **NOT NULL** | O wizard exige/oferece criação de Site para a rede VPN (reusar [`SiteDialog.vue`](../frontend/src/components/SiteDialog.vue)) |
 | `devices.ip_address` **sem índice UNIQUE** | Adicionar índice composto — sem ele o IPAM tem condição de corrida |
-| Tabela `device_addresses` já existe e era ignorada | Continua sendo a fonte para IPs secundários; `devices.ip_address` é o IP primário da VPN |
+| Tabela `device_addresses` existia e nunca foi usada | Removida: `devices.ip_address` é o IP primário da VPN e endereços secundários, quando necessários, vêm de `device_interfaces` |
 | Projeto usa prefixo `/api` (sem `/v1`) | Endpoints padronizados como `/api/vpn/...` |
 
 **Migration de integridade do IPAM:**

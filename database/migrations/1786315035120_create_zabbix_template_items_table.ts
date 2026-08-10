@@ -13,7 +13,6 @@ export default class extends BaseSchema {
         .inTable('zabbix_templates')
         .onDelete('CASCADE')
         .notNullable()
-
       table.string('zabbix_uuid').nullable()
       table.string('name').notNullable()
       table.string('key').notNullable()
@@ -23,6 +22,8 @@ export default class extends BaseSchema {
       table.float('multiplier').nullable()
 
       table.timestamp('created_at').notNullable()
+
+      table.index(['template_id'], 'zabbix_template_items_template_id_index')
     })
   }
 

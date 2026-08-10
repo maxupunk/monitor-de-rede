@@ -1,20 +1,18 @@
 import { BaseSchema } from '@adonisjs/lucid/schema'
 
 export default class extends BaseSchema {
-  protected tableName = 'zabbix_templates'
+  protected tableName = 'users'
 
   async up() {
     this.schema.createTable(this.tableName, (table) => {
       table.increments('id').notNullable()
-      table.string('zabbix_uuid').nullable()
       table.string('name').notNullable()
-      table.text('description').nullable()
-      table.string('zabbix_version').nullable()
-      table.jsonb('raw_export').notNullable()
+      table.string('email', 254).notNullable().unique()
+      table.string('password').notNullable()
+      table.boolean('active').defaultTo(true).notNullable()
 
-      table.timestamp('imported_at').notNullable()
       table.timestamp('created_at').notNullable()
-      table.timestamp('updated_at').notNullable()
+      table.timestamp('updated_at').nullable()
     })
   }
 

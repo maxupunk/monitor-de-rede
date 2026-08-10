@@ -29,6 +29,12 @@ export default class extends BaseSchema {
         .nullable()
       table.string('name').notNullable()
       table.string('type').notNullable()
+      /**
+       * `template_key` liga a regra ao item do catálogo que a originou. É a
+       * chave de idempotência usada ao aplicar as regras pré-configuradas: uma
+       * regra já derivada de um template nunca é recriada.
+       */
+      table.string('template_key').nullable()
       table.jsonb('condition').notNullable()
       table.string('severity').notNullable()
       table.integer('duration_seconds').defaultTo(0).notNullable()
@@ -36,6 +42,8 @@ export default class extends BaseSchema {
 
       table.timestamp('created_at').notNullable()
       table.timestamp('updated_at').nullable()
+
+      table.index(['template_key'], 'alert_rules_template_key_index')
     })
   }
 

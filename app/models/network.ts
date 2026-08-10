@@ -10,7 +10,7 @@ export default class Network extends BaseModel {
   declare id: number
 
   @column()
-  declare siteId: number
+  declare siteId: number | null
 
   @column()
   declare probeId: number | null

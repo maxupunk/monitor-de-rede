@@ -1,4 +1,5 @@
 import { test } from '@japa/runner'
+import { DateTime } from 'luxon'
 import testUtils from '@adonisjs/core/services/test_utils'
 import Site from '#models/site'
 import Network from '#models/network'
@@ -74,6 +75,104 @@ test.group('Networks API - Varredura por bloco de IP', (group) => {
 
     const runs = await DiscoveryRun.query().where('networkId', network.id)
     assert.lengthOf(runs, 0)
+  })
+
+  test('PUT /api/networks/:id deve devolver o mesmo formato do índice', async ({
+    client,
+    assert,
+  }) => {
+    // A store do frontend substitui a linha da tabela pela resposta do PUT. Se
+    // ela vier sem os campos derivados, a rede recém-editada passa a exibir
+    // "faixa inválida" e "Site #undefined" até um novo GET.
+    const network = await createNetwork('10.0.0.0/20')
+
+    const response = await client
+      .put(`/api/networks/${network.id}`)
+      .json({ cidr: '10.0.0.0/24', name: 'LAN Matriz', gateway: '10.0.0.1' })
+
+    response.assertStatus(200)
+    const body = response.body() as {
+      cidr: string
+      scannable: boolean
+      usableHosts: number
+      site: { name: string } | null
+    }
+
+    assert.equal(body.cidr, '10.0.0.0/24')
+    assert.isTrue(body.scannable)
+    assert.equal(body.usableHosts, 254)
+    assert.equal(body.site?.name, 'Matriz')
+  })
+
+  test('POST /api/networks deve devolver os campos derivados e aceitar rede sem site', async ({
+    client,
+    assert,
+  }) => {
+    const response = await client
+      .post('/api/networks')
+      .json({ name: 'Sem local', cidr: '172.16.0.0/24' })
+
+    response.assertStatus(201)
+    const body = response.body() as {
+      siteId: number | null
+      scannable: boolean
+      usableHosts: number
+      site: unknown
+    }
+
+    assert.isNotOk(body.siteId)
+    assert.isTrue(body.scannable)
+    assert.equal(body.usableHosts, 254)
+    assert.isNull(body.site)
+  })
+
+  test('corrigir o CIDR deve atualizar a varredura pendente em vez de manter a faixa antiga', async ({
+    client,
+    assert,
+  }) => {
+    const network = await createNetwork('10.0.0.0/20')
+
+    const first = await client.post(`/api/networks/${network.id}/scan`)
+    const runId = (first.body() as { run: { id: number } }).run.id
+    const queued = await DiscoveryRun.findOrFail(runId)
+    assert.equal(queued.configuration?.cidr, '10.0.0.0/20')
+
+    await client.put(`/api/networks/${network.id}`).json({ cidr: '10.0.0.0/24' })
+    const second = await client.post(`/api/networks/${network.id}/scan`)
+
+    const body = second.body() as { alreadyQueued: boolean; usableHosts: number }
+    assert.isTrue(body.alreadyQueued)
+    assert.equal(body.usableHosts, 254)
+
+    // A run reaproveitada precisa apontar para a faixa corrigida.
+    const run = await DiscoveryRun.findOrFail(runId)
+    assert.equal(run.configuration?.cidr, '10.0.0.0/24')
+    assert.equal(run.configuration?.usableHosts, 254)
+  })
+
+  test('varredura abandonada não deve bloquear novos pedidos da mesma rede', async ({
+    client,
+    assert,
+  }) => {
+    const network = await createNetwork('192.168.90.0/24')
+
+    // Simula o scan ao vivo de /discovery cujo processo morreu no meio.
+    const stuck = await DiscoveryRun.create({
+      networkId: network.id,
+      status: 'running',
+      startedAt: DateTime.now().minus({ hours: 2 }),
+      configuration: { cidr: network.cidr },
+    })
+
+    const response = await client.post(`/api/networks/${network.id}/scan`)
+    response.assertStatus(202)
+
+    const body = response.body() as { alreadyQueued: boolean; run: { id: number } }
+    assert.isFalse(body.alreadyQueued)
+    assert.notEqual(body.run.id, stuck.id)
+
+    await stuck.refresh()
+    assert.equal(stuck.status, 'failed')
   })
 
   test('GET /api/networks deve informar se a faixa é varredurável', async ({ client, assert }) => {

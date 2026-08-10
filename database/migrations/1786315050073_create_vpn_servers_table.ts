@@ -17,6 +17,7 @@ export default class extends BaseSchema {
       table.integer('listen_port').defaultTo(51820).notNullable()
       table.string('public_endpoint').nullable()
       table.string('public_key').notNullable()
+      /** Cifrada em repouso com a APP_KEY — ver `VpnServer.privateKey`. */
       table.text('private_key_encrypted').notNullable()
       table.boolean('allow_peer_to_peer').defaultTo(false).notNullable()
       table.integer('mtu').defaultTo(1420).notNullable()

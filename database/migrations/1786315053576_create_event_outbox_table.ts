@@ -13,9 +13,10 @@ export default class extends BaseSchema {
     this.schema.createTable(this.tableName, (table) => {
       table.bigIncrements('id').notNullable()
       table.string('type').notNullable()
-      // Identifica o processo emissor para que ele não reprocesse o próprio evento
+      /** Identifica o processo emissor para que ele não reprocesse o próprio evento */
       table.string('origin').notNullable()
       table.jsonb('payload').notNullable()
+
       table.timestamp('created_at').notNullable()
 
       table.index(['created_at'], 'event_outbox_created_at_index')

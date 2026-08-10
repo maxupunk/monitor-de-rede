@@ -24,6 +24,13 @@ export default class extends BaseSchema {
 
       table.timestamp('created_at').notNullable()
       table.timestamp('updated_at').nullable()
+
+      /**
+       * Autentica todo `POST /heartbeat`, `GET /tasks` e `POST /results`. Não é
+       * UNIQUE de propósito: o `DEFAULT_VPN_PROBE_TOKEN` permite que mais de um
+       * agente zero-config compartilhe o mesmo token.
+       */
+      table.index(['token_hash'], 'probes_token_hash_index')
     })
   }
 

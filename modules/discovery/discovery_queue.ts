@@ -24,6 +24,17 @@ const RUNS_PER_CYCLE = 1
 /** Piso do intervalo de varredura periódica, para não saturar a rede. */
 export const MIN_SCAN_INTERVAL_SECONDS = 300
 
+/**
+ * Tempo após o qual uma run `running` é considerada abandonada.
+ *
+ * A varredura ao vivo de `/discovery` roda dentro do processo HTTP: se ele cai
+ * no meio, a linha fica `running` para sempre e passa a bloquear todo novo
+ * pedido de varredura daquela rede — o botão "Escanear" responde "já existe uma
+ * varredura em andamento" indefinidamente, e nenhum resultado aparece. Uma faixa
+ * de /22 (o teto de `MAX_SCAN_HOSTS`) não passa de alguns minutos.
+ */
+const RUNNING_RUN_TIMEOUT_MINUTES = 15
+
 export class DiscoveryQueue {
   constructor(private discoveryService = new DiscoveryService()) {}
 
@@ -43,15 +54,38 @@ export class DiscoveryQueue {
       )
     }
 
+    const range = parseCidrRange(network.cidr)
+
     const pending = await DiscoveryRun.query()
       .where('networkId', network.id)
       .whereIn('status', ['pending', 'running'])
       .orderBy('id', 'desc')
       .first()
 
-    if (pending) return { run: pending, alreadyQueued: true }
+    if (pending && !this.isAbandoned(pending)) {
+      // A faixa pode ter sido corrigida depois que a run foi enfileirada.
+      // Sem esta atualização o scheduler varreria o CIDR antigo, gravado em
+      // `configuration`, e a edição do operador seria silenciosamente ignorada.
+      if (pending.status === 'pending' && pending.configuration?.cidr !== network.cidr) {
+        pending.configuration = {
+          ...(pending.configuration ?? {}),
+          cidr: network.cidr,
+          usableHosts: range.usableHosts,
+          truncated: range.truncated,
+        }
+        await pending.save()
+      }
 
-    const range = parseCidrRange(network.cidr)
+      return { run: pending, alreadyQueued: true }
+    }
+
+    if (pending) {
+      pending.status = 'failed'
+      pending.finishedAt = DateTime.now()
+      pending.error = `Varredura abandonada (sem conclusão após ${RUNNING_RUN_TIMEOUT_MINUTES} min).`
+      await pending.save()
+    }
+
     const run = await DiscoveryRun.create({
       networkId: network.id,
       probeId: network.probeId ?? null,
@@ -65,6 +99,19 @@ export class DiscoveryQueue {
     })
 
     return { run, alreadyQueued: false }
+  }
+
+  /**
+   * `true` quando a run está `running` há tempo demais para ainda estar viva.
+   * Runs `pending` nunca são abandonadas: elas apenas aguardam o scheduler.
+   */
+  private isAbandoned(run: DiscoveryRun): boolean {
+    if (run.status !== 'running') return false
+
+    const startedAt = run.startedAt ?? run.createdAt
+    if (!startedAt) return true
+
+    return startedAt.diffNow('minutes').minutes < -RUNNING_RUN_TIMEOUT_MINUTES
   }
 
   /**

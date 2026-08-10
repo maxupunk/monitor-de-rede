@@ -1,5 +1,10 @@
 import { BaseSchema } from '@adonisjs/lucid/schema'
 
+/**
+ * Cache do último scan de cada rede, sem histórico persistente de status: um
+ * resultado existe enquanto não foi transformado em device, e a verificação de
+ * "já adicionado" é feita comparando o IP com a tabela `devices`.
+ */
 export default class extends BaseSchema {
   protected tableName = 'discovery_results'
 
@@ -20,13 +25,15 @@ export default class extends BaseSchema {
       table.string('vendor').nullable()
       table.string('device_type').nullable()
       table.integer('confidence').defaultTo(0).notNullable()
-      table.string('status').defaultTo('pending').notNullable()
       table.jsonb('data').nullable()
       table.timestamp('first_seen_at').notNullable()
       table.timestamp('last_seen_at').notNullable()
 
       table.timestamp('created_at').notNullable()
       table.timestamp('updated_at').nullable()
+
+      /** Sustenta o `withCount('results')` da tela de Descoberta e o CASCADE. */
+      table.index(['discovery_run_id'], 'discovery_results_discovery_run_id_index')
     })
   }
 

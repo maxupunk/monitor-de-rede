@@ -7,6 +7,30 @@ import { errorMessage } from '#modules/shared/errors'
 export default class NetworksController {
   private discoveryQueue = new DiscoveryQueue()
 
+  /**
+   * Formato único de resposta para todas as rotas de rede.
+   *
+   * `scannable` e `usableHosts` são derivados, e o `site` vem de um preload —
+   * nada disso existe no model cru. Enquanto só o `index` enriquecia, a store
+   * do frontend substituía a linha da tabela pela resposta do `PUT` e a rede
+   * recém-editada passava a exibir "faixa inválida" e "Site #undefined".
+   */
+  private async serialize(network: Network) {
+    // O Lucid recusa o preload quando a FK é `undefined` — o que acontece numa
+    // rede criada sem site, já que a coluna nunca chega a ser atribuída.
+    if (network.siteId) {
+      await network.load('site')
+    } else {
+      network.siteId = null
+    }
+
+    const json = network.serialize()
+    json.site = json.site ?? null
+    json.scannable = isScannableCidr(network.cidr)
+    json.usableHosts = json.scannable ? parseCidrRange(network.cidr).usableHosts : 0
+    return json
+  }
+
   async index({ response }: HttpContext) {
     const networks = await Network.query().preload('site')
 
@@ -36,12 +60,12 @@ export default class NetworksController {
       'active',
     ])
     const network = await Network.create(data)
-    return response.created(network)
+    return response.created(await this.serialize(network))
   }
 
   async show({ params, response }: HttpContext) {
     const network = await Network.findOrFail(params.id)
-    return response.ok(network)
+    return response.ok(await this.serialize(network))
   }
 
   async update({ params, request, response }: HttpContext) {
@@ -60,7 +84,7 @@ export default class NetworksController {
     ])
     network.merge(data)
     await network.save()
-    return response.ok(network)
+    return response.ok(await this.serialize(network))
   }
 
   async destroy({ params, response }: HttpContext) {

@@ -36,14 +36,19 @@ export default class extends BaseSchema {
         .onDelete('CASCADE')
         .notNullable()
         .unique()
-      // Identificador que o probe devolve junto do resultado.
+      /** Identificador que o probe devolve junto do resultado. */
       table.string('task_id').notNullable()
       table.string('type').notNullable()
       table.integer('timeout_ms').notNullable()
       table.jsonb('payload').notNullable()
+
       table.timestamp('created_at').notNullable()
 
-      table.index(['probe_id', 'created_at'], 'probe_tasks_probe_id_created_at_index')
+      /**
+       * A entrega é `where(probe_id) order by id` — `created_at` só é lido para
+       * descartar tarefas vencidas, em memória, e por isso não entra no índice.
+       */
+      table.index(['probe_id', 'id'], 'probe_tasks_probe_id_id_index')
     })
   }
 

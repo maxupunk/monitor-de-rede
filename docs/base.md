@@ -866,8 +866,6 @@ Site
 Network
 Probe
 Device
-DeviceAddress
-DeviceMac
 DeviceInterface
 DeviceService
 DeviceCredential

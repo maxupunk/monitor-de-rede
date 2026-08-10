@@ -5,7 +5,7 @@ import { useCrudResource } from './crudResource'
 
 export interface Network {
   id: number
-  siteId: number
+  siteId: number | null
   probeId?: number | null
   name: string
   cidr: string

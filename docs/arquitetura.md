@@ -625,48 +625,34 @@ configuration
 
 ## 8.5 Device
 
-Representa um equipamento.
+Representa um equipamento. `ip_address` é o endereço primário e é único dentro
+da rede (`unique(network_id, ip_address)`); endereços secundários e MACs, quando
+necessários, são derivados das interfaces em `DeviceInterface`.
 
 ```text
 id
 site_id
 network_id
+parent_id
+zabbix_template_id
+ip_address
 name
 type
 vendor
 model
 serial_number
 description
+is_monitored
+snmp_enabled
+snmp_community
+snmp_version
 status
 last_seen_at
 created_at
 updated_at
 ```
 
-## 8.6 DeviceAddress
-
-```text
-id
-device_id
-address
-family
-hostname
-is_primary
-last_seen_at
-```
-
-## 8.7 DeviceMac
-
-```text
-id
-device_id
-address
-vendor
-interface_name
-last_seen_at
-```
-
-## 8.8 DeviceInterface
+## 8.6 DeviceInterface
 
 ```text
 id
@@ -683,7 +669,7 @@ oper_status
 last_seen_at
 ```
 
-## 8.9 DeviceLink
+## 8.7 DeviceLink
 
 ```text
 id
@@ -699,7 +685,7 @@ last_seen_at
 created_at
 ```
 
-## 8.10 Monitor
+## 8.8 Monitor
 
 ```text
 id
@@ -742,7 +728,7 @@ Exemplo de monitor HTTP:
 }
 ```
 
-## 8.11 MonitorResult
+## 8.9 MonitorResult
 
 ```text
 id
@@ -758,7 +744,7 @@ data
 created_at
 ```
 
-## 8.12 Metric
+## 8.10 Metric
 
 ```text
 id
@@ -771,7 +757,7 @@ unit
 recorded_at
 ```
 
-## 8.13 DiscoveryRun
+## 8.11 DiscoveryRun
 
 ```text
 id
@@ -784,7 +770,7 @@ configuration
 error
 ```
 
-## 8.14 DiscoveryResult
+## 8.12 DiscoveryResult
 
 ```text
 id
@@ -802,7 +788,7 @@ first_seen_at
 last_seen_at
 ```
 
-## 8.15 AlertRule
+## 8.13 AlertRule
 
 ```text
 id
@@ -819,7 +805,7 @@ created_at
 updated_at
 ```
 
-## 8.16 AlertEvent
+## 8.14 AlertEvent
 
 ```text
 id

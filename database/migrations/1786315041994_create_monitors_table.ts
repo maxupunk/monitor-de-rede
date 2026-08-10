@@ -6,13 +6,18 @@ export default class extends BaseSchema {
   async up() {
     this.schema.createTable(this.tableName, (table) => {
       table.increments('id').notNullable()
+      /**
+       * Nem toda checagem pertence a um equipamento: medir a latência de um
+       * servidor DNS público ou a disponibilidade de um site externo não
+       * depende de um dispositivo cadastrado.
+       */
       table
         .integer('device_id')
         .unsigned()
         .references('id')
         .inTable('devices')
         .onDelete('CASCADE')
-        .notNullable()
+        .nullable()
       table
         .integer('probe_id')
         .unsigned()
@@ -33,6 +38,10 @@ export default class extends BaseSchema {
 
       table.timestamp('created_at').notNullable()
       table.timestamp('updated_at').nullable()
+
+      /** Seleção dos monitores vencidos: o laço central do `scheduler:run`. */
+      table.index(['enabled', 'next_run_at'], 'monitors_enabled_next_run_at_index')
+      table.index(['device_id', 'enabled'], 'monitors_device_id_enabled_index')
     })
   }
 

@@ -42,6 +42,13 @@ export default class extends BaseSchema {
 
       table.timestamp('created_at').notNullable()
       table.timestamp('updated_at').nullable()
+
+      /**
+       * O enlace é procurado nos dois sentidos (`source→target` e o inverso),
+       * daí o índice composto mais o índice isolado no destino.
+       */
+      table.index(['source_device_id', 'target_device_id'], 'device_links_source_target_index')
+      table.index(['target_device_id'], 'device_links_target_device_id_index')
     })
   }
 

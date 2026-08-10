@@ -40,7 +40,7 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
   - [x] `sites` (locais monitorados).
   - [x] `networks` (sub-redes e faixas CIDR).
   - [x] `probes` (agentes locais/remotos).
-  - [x] `devices`, `device_addresses`, `device_macs`, `device_interfaces`, `device_links`.
+  - [x] `devices`, `device_interfaces`, `device_links`.
   - [x] `monitors` e `monitor_results`.
   - [x] `metrics` e `discovery_runs` / `discovery_results`.
   - [x] `alert_rules` e `alert_events`.

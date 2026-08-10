@@ -39,9 +39,10 @@
         :clickable="false"
       >
         <template #item.site="{ item }">
-          <v-chip size="small" variant="tonal" color="info">
+          <v-chip v-if="item.site?.name || item.siteId" size="small" variant="tonal" color="info">
             {{ item.site?.name || `Site #${item.siteId}` }}
           </v-chip>
+          <span v-else class="text-caption text-grey">Sem site</span>
         </template>
 
         <template #item.cidr="{ item }">
@@ -71,7 +72,7 @@
             <v-btn
               size="small"
               color="secondary"
-              variant="tonal"
+              variant="flat"
               prepend-icon="mdi-radar"
               :disabled="item.scannable === false"
               :loading="networksStore.scanningId === item.id"
@@ -109,7 +110,7 @@
                   </v-chip>
                 </div>
                 <div class="text-caption text-grey mt-1">
-                  Site: {{ item.site?.name || `Site #${item.siteId}` }}
+                  Site: {{ item.site?.name || (item.siteId ? `Site #${item.siteId}` : 'sem site') }}
                 </div>
                 <div class="text-caption text-grey">
                   <span v-if="item.lastScanAt">{{ formatDateTime(item.lastScanAt) }}</span>
@@ -121,7 +122,7 @@
               <v-btn
                 size="small"
                 color="secondary"
-                variant="tonal"
+                variant="flat"
                 prepend-icon="mdi-radar"
                 :disabled="item.scannable === false"
                 :loading="networksStore.scanningId === item.id"
@@ -153,15 +154,32 @@
         </v-card-title>
         <v-card-text>
           <v-form @submit.prevent="save">
-            <v-select
-              v-model="formModel.siteId"
-              :items="sitesStore.sites"
-              item-title="name"
-              item-value="id"
-              label="Site de Origem"
-              variant="outlined"
-              required
-            ></v-select>
+            <div class="d-flex align-start ga-2">
+              <v-select
+                v-model="formModel.siteId"
+                :items="sitesStore.sites"
+                item-title="name"
+                item-value="id"
+                label="Site de Origem (opcional)"
+                placeholder="Sem site"
+                variant="outlined"
+                clearable
+                persistent-hint
+                hint="Deixe em branco para cadastrar a faixa sem vincular a um local."
+                class="flex-grow-1"
+              ></v-select>
+              <v-btn
+                icon="mdi-plus"
+                color="secondary"
+                variant="flat"
+                class="mt-1"
+                aria-label="Cadastrar novo site"
+                @click="siteDialog = true"
+              >
+                <v-icon>mdi-plus</v-icon>
+                <v-tooltip activator="parent" location="top">Cadastrar novo site</v-tooltip>
+              </v-btn>
+            </div>
             <v-text-field
               v-model="formModel.name"
               label="Nome da Rede"
@@ -191,6 +209,9 @@
       </v-card>
     </v-dialog>
 
+    <!-- Cadastro de Site sem sair do formulário da rede -->
+    <SiteDialog v-model="siteDialog" @saved="onSiteCreated" />
+
     <v-snackbar v-model="feedback.visible" :color="feedback.color" timeout="7000">
       {{ feedback.message }}
       <template #actions>
@@ -203,10 +224,11 @@
 <script setup lang="ts">
 import { ref, onMounted, reactive } from 'vue'
 import { useNetworksStore, type Network } from '@/stores/networks'
-import { useSitesStore } from '@/stores/sites'
+import { useSitesStore, type Site } from '@/stores/sites'
 import { formatDateTime } from '@/utils/formatters'
 import PageHeader from '@/components/PageHeader.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
+import SiteDialog from '@/components/SiteDialog.vue'
 
 /** Espelha `MAX_SCAN_HOSTS` de `modules/discovery/cidr_range.ts` */
 const MAX_SCAN_HOSTS = 1024
@@ -215,12 +237,18 @@ const networksStore = useNetworksStore()
 const sitesStore = useSitesStore()
 const search = ref('')
 const dialog = ref(false)
+const siteDialog = ref(false)
 const saving = ref(false)
 const editedId = ref<number | null>(null)
 const feedback = reactive({ visible: false, message: '', color: 'success' })
 
-const formModel = reactive<{ siteId: number; name: string; cidr: string; gateway: string }>({
-  siteId: 1,
+const formModel = reactive<{
+  siteId: number | null
+  name: string
+  cidr: string
+  gateway: string
+}>({
+  siteId: null,
   name: '',
   cidr: '',
   gateway: '',
@@ -243,18 +271,25 @@ onMounted(async () => {
 function openDialog(network?: Network) {
   if (network) {
     editedId.value = network.id
-    formModel.siteId = network.siteId
+    formModel.siteId = network.siteId ?? null
     formModel.name = network.name
     formModel.cidr = network.cidr
     formModel.gateway = network.gateway || ''
   } else {
     editedId.value = null
-    formModel.siteId = sitesStore.sites[0]?.id || 1
+    // Sem pré-seleção: o vínculo é opcional e escolher um site por conta
+    // própria esconderia do operador que ele pode ficar sem nenhum.
+    formModel.siteId = null
     formModel.name = ''
     formModel.cidr = ''
     formModel.gateway = ''
   }
   dialog.value = true
+}
+
+/** Site recém-criado no diálogo aninhado já entra selecionado. */
+function onSiteCreated(site: Site) {
+  formModel.siteId = site.id
 }
 
 async function save() {

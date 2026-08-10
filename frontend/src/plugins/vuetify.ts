@@ -13,7 +13,13 @@ export default createVuetify({
       dark: {
         colors: {
           primary: '#1976D2',
-          secondary: '#424242',
+          /**
+           * Ações secundárias ("Escanear", "Escanear bloco", "Atualizar"...)
+           * usam este token. Era `#424242` — um cinza-escuro que, no tema
+           * escuro, ficava praticamente indistinguível de um botão desabilitado.
+           * Cor de ação é sempre uma cor viva: cinza só para estado desligado.
+           */
+          secondary: '#00ACC1',
           accent: '#82B1FF',
           error: '#FF5252',
           info: '#2196F3',

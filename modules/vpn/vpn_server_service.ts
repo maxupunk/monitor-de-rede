@@ -81,8 +81,10 @@ export class VpnServerService {
   }
 
   /**
-   * Cria a rede da VPN quando ainda não existe. `networks.site_id` é NOT NULL,
-   * então é preciso um Site — usamos o informado ou o primeiro cadastrado.
+   * Cria a rede da VPN quando ainda não existe. `networks.site_id` é opcional:
+   * usamos o Site informado ou o primeiro cadastrado, e seguimos sem vínculo
+   * quando não há nenhum — inventar um Site "Matriz" só para satisfazer a FK
+   * poluía a lista de locais de quem nunca cadastrou um.
    */
   private async resolveNetwork(payload: VpnServerPayload): Promise<Network> {
     const cidr = payload.cidr || DEFAULT_VPN_CIDR
@@ -97,10 +99,8 @@ export class VpnServerService {
 
     let siteId = payload.siteId ?? null
     if (!siteId) {
-      const site =
-        (await Site.query().orderBy('id', 'asc').first()) ??
-        (await Site.create({ name: 'Matriz', active: true }))
-      siteId = site.id
+      const site = await Site.query().orderBy('id', 'asc').first()
+      siteId = site?.id ?? null
     }
 
     return Network.create({

@@ -6,13 +6,18 @@ export default class extends BaseSchema {
   async up() {
     this.schema.createTable(this.tableName, (table) => {
       table.increments('id').notNullable()
+      /**
+       * Opcional: uma sub-rede pode ser cadastrada antes de existir um Site.
+       * Exigir o vínculo obrigava a inventar um Site só para poder varrer uma
+       * faixa — ver `VpnServerService.resolveNetwork`.
+       */
       table
         .integer('site_id')
         .unsigned()
         .references('id')
         .inTable('sites')
         .onDelete('CASCADE')
-        .notNullable()
+        .nullable()
       table
         .integer('probe_id')
         .unsigned()
@@ -28,6 +33,14 @@ export default class extends BaseSchema {
       table.boolean('scan_enabled').defaultTo(true).notNullable()
       table.integer('scan_interval').defaultTo(3600).notNullable()
       table.boolean('active').defaultTo(true).notNullable()
+
+      /**
+       * Rastreamento das varreduras periódicas: sem saber quando a rede foi
+       * varrida pela última vez o scheduler não tem como decidir quais estão
+       * vencidas — mesmo par `last_run_at` / `next_run_at` dos monitores.
+       */
+      table.timestamp('last_scan_at').nullable()
+      table.timestamp('next_scan_at').nullable()
 
       table.timestamp('created_at').notNullable()
       table.timestamp('updated_at').nullable()

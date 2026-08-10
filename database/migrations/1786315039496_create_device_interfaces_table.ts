@@ -26,6 +26,13 @@ export default class extends BaseSchema {
 
       table.timestamp('created_at').notNullable()
       table.timestamp('updated_at').nullable()
+
+      /**
+       * Uma consulta por interface a cada coleta SNMP — o laço mais quente do
+       * módulo. Não é UNIQUE porque `snmp_index` é opcional em interfaces
+       * criadas manualmente.
+       */
+      table.index(['device_id', 'snmp_index'], 'device_interfaces_device_id_snmp_index_index')
     })
   }
 
