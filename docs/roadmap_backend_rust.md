@@ -1782,10 +1782,10 @@ Configurações sem erro de console, apontando para o backend Rust.
 
 ### Fase 5 — SNMP, discovery e topologia (🟡 Parcial — entregas registradas em 2026-08-11)
 
-- [x] 🟢 **Concluído (base v2c)** — `SnmpClient` assíncrono sobre `tokio::net::UdpSocket` usando `rasn` + `rasn-snmp`, com `get`, `walk`, tentativas, `SnmpService` (`scan`/`poll`/`test`/`detect`) e coletores iniciais de sistema, interfaces, CPU e memória.
-- [ ] Cliente SNMP v1/v3, coleta completa de tráfego/LLDP/CDP, persistência de polling e detecção de reboot.
-- [x] 🟢 **Concluído (base)** — `SnmpChecker` para uptime, estado e contador de tráfego; cálculo de rollover de contador de 32 bits coberto por teste unitário.
-- [ ] Completar os três modos do `SnmpChecker` com semântica RFC 2863, contador de 64 bits e preservação de `adminStatus`.
+- [x] 🟢 **Concluído** — `SnmpClient` assíncrono sobre `tokio::net::UdpSocket` usando `rasn` + `rasn-snmp`, com `get`, `walk`, tentativas e `SnmpService` (`scan`/`poll`/`test`/`detect`); SNMP v1, v2c e v3 `noAuthNoPriv` têm codificação unitariamente coberta.
+- [x] 🟢 **Concluído** — Coleta de tráfego HC/32 bits, LLDP/CDP, persistência de polling, métricas CPU/memória, detecção de reboot e rollover de 32/64 bits; links físicos são reconciliados para dispositivos já registrados.
+- [ ] SNMPv3 USM com `authNoPriv` e `authPriv` (HMAC e privacidade) em equipamento real.
+- [x] 🟢 **Concluído** — `SnmpChecker` para uptime, estado RFC 2863, tráfego HC/32 bits, CPU e memória; preserva `adminStatus` e trata interface administrativamente desabilitada como `Disabled`.
 - [x] 🟢 **Concluído (base)** — **Scanners de Discovery** assíncronos e desacoplados para ICMP, ARP, portas, mDNS, SSDP e SNMP.
   - [x] ICMP sweep via `surge-ping` sobre `SOCK_DGRAM`.
   - [x] ARP via `/proc/net/arp` no Linux após pré-probe TCP nas portas 80 e 443.
@@ -1793,26 +1793,24 @@ Configurações sem erro de console, apontando para o backend Rust.
   - [x] mDNS em `224.0.0.251:5353`, com decodificação DNS por `hickory-proto`.
   - [x] SSDP em `239.255.255.250:1900`.
   - [x] SNMP sweep na porta 161.
-- [x] 🟢 **Concluído** — **Reconciliação e identificação**: `merger`, `oui_lookup` O(1) com `phf` e heurística `device_identifier`.
+- [x] 🟢 **Concluído** — **Reconciliação e identificação**: `merger`, `oui_lookup` O(1) com `phf` (120 entradas) e heurística `device_identifier`.
 - [x] 🟢 **Concluído** — **Serviço de varredura**: expansão CIDR, `DiscoveryQueue`, `ScanSessionService`, cancelamento e SSE de progresso ao vivo; resultados são persistidos como cache por execução.
-- [x] 🟢 **Concluído (base)** — **Serviço de topologia** sobre `petgraph`, com links manuais, inferência por sub-rede, deduplicação e controle de confiança.
-- [ ] Leitura de MIBs LLDP/CDP e inferência de links físicos via SNMP.
-- [ ] **Templates Zabbix**: parser JSON/XML, coletor de métricas customizadas e `zabbix_template_monitor_sync`.
+- [x] 🟢 **Concluído** — **Serviço de topologia** sobre `petgraph`, com links manuais, inferência por sub-rede, deduplicação, controle de confiança e resolução de vizinhos LLDP/CDP via SNMP.
+- [x] 🟢 **Concluído** — **Templates Zabbix**: parser JSON/XML, filtragem de `SNMP_AGENT`, multiplicador, coleta em lotes de 6 OIDs e `zabbix_template_monitor_sync` autocorretivo.
 
-**Aceite pendente:** validar uma faixa `/24` no Docker sem root, completar o poll SNMP com métricas e LLDP/CDP, e concluir a integração de templates Zabbix antes de declarar a Fase 5 encerrada.
+**Aceite pendente:** validar uma faixa `/24` no Docker sem root e validar `authNoPriv`/`authPriv` do SNMPv3 em agente real antes de declarar a Fase 5 encerrada.
 
-### Fase 6 — Alertas, eventos e autenticação (🔴)
+### Fase 6 — Alertas, eventos e autenticação (🟡 Parcial — base entregue em 2026-08-11)
 
-- [ ] `EventBus` + `EventRelay` + `/api/events/stream` (SSE)
+- [x] 🟢 **Concluído** — `EventBus` + `EventRelay` + `/api/events/stream` (SSE), outbox entre processos, buffer de 1.024 eventos, keep-alive e recuperação de lag por `stream:resync`.
 - [ ] Motor de alertas completo (manager, evaluator, repository, datasets, recovery, silence)
 - [ ] Catálogo com os **18 templates** e `ensure_defaults`
 - [ ] 4 canais de notificação
-- [ ] JWT ligado em todas as rotas + extractor `JwtFromHeaderOrQuery` para SSE
-- [ ] Patches **F1–F4** no frontend
-- [ ] Seed do usuário inicial
+- [x] 🟢 **Concluído** — JWT ligado às rotas de negócio; o Loco aceita `Authorization: Bearer` e fallback `?token=` para SSE. Login, `me` e logout usam o contrato consumido pela SPA.
+- [x] 🟢 **Concluído** — Patches **F1–F4** no frontend: usuário persistido e reidratado, logout remoto, guarda de rota e redirecionamento em 401.
+- [x] 🟢 **Concluído (development/test)** — seed `admin@monitor.local` / `admin123` e teste de autenticação correspondente.
 
-**Aceite:** alerta dispara, notifica, aparece na tela em tempo real e normaliza sozinho;
-login/logout reais funcionando; F5 mantém a sessão.
+**Aceite pendente:** login/logout reais e persistência de sessão estão validados; alerta, notificação, recuperação e catálogo ainda dependem do motor de alertas e dos canais desta fase.
 
 ### Fase 7 — Probes (🔴)
 

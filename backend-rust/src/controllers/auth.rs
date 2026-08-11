@@ -4,7 +4,7 @@ use crate::{
         _entities::users,
         users::{LoginParams, RegisterParams},
     },
-    views::auth::{CurrentResponse, LoginResponse},
+    views::auth::{LoginResponse, UserResponse},
 };
 use loco_rs::prelude::*;
 use regex::Regex;
@@ -161,7 +161,13 @@ async fn login(State(ctx): State<AppContext>, Json(params): Json<LoginParams>) -
 #[debug_handler]
 async fn current(auth: auth::JWT, State(ctx): State<AppContext>) -> Result<Response> {
     let user = users::Model::find_by_pid(&ctx.db, &auth.claims.pid).await?;
-    format::json(CurrentResponse::new(&user))
+    format::json(UserResponse::new(&user))
+}
+
+/// JWT é stateless: o logout confirma a operação e o cliente descarta o token.
+#[debug_handler]
+async fn logout(_auth: auth::JWT, State(_ctx): State<AppContext>) -> Result<Response> {
+    format::json(serde_json::json!({ "message": "Sessão encerrada com sucesso" }))
 }
 
 /// Magic link authentication provides a secure and passwordless way to log in to the application.
@@ -270,6 +276,8 @@ pub fn routes() -> Routes {
         .add("/forgot", post(forgot))
         .add("/reset", post(reset))
         .add("/current", get(current))
+        .add("/me", get(current))
+        .add("/logout", post(logout))
         .add("/magic-link", post(magic_link))
         .add("/magic-link/{token}", get(magic_link_verify))
         .add("/resend-verification-mail", post(resend_verification_email))

@@ -30,7 +30,7 @@ pub struct EventBus {
 impl EventBus {
     #[must_use]
     pub fn create() -> Self {
-        let (sender, _) = broadcast::channel(256);
+        let (sender, _) = broadcast::channel(1024);
         Self {
             sender,
             origin: Uuid::new_v4().to_string(),

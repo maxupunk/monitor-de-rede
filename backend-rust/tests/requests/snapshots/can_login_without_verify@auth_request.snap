@@ -2,4 +2,4 @@
 source: tests/requests/auth.rs
 expression: login_response.text()
 ---
-"{\"token\":\"TOKEN\",\"pid\":\"PID\",\"name\":\"loco\",\"isVerified\":false}"
+"{\"token\":\"TOKEN\",\"user\":{\"id\":1,\"email\":\"test@loco.com\",\"fullName\":\"loco\",\"role\":\"admin\"}}"

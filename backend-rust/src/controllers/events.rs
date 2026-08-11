@@ -1,5 +1,6 @@
 //! Historico de alertas e stream SSE de eventos de dominio.
 
+use axum::http::{header, HeaderValue};
 use axum::response::{
     sse::{Event, KeepAlive, Sse},
     IntoResponse,
@@ -40,9 +41,24 @@ async fn stream(State(ctx): State<AppContext>) -> AppResult<Response> {
         if sender.send(connected).await.is_err() {
             return;
         }
-        while let Ok(event) = updates.recv().await {
-            if sender.send(event).await.is_err() {
-                return;
+        loop {
+            match updates.recv().await {
+                Ok(event) => {
+                    if sender.send(event).await.is_err() {
+                        return;
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                    let resync = DomainEvent {
+                        event_type: "stream:resync".into(),
+                        payload: serde_json::json!({ "skipped": skipped }),
+                        occurred_at: Utc::now().to_rfc3339(),
+                    };
+                    if sender.send(resync).await.is_err() {
+                        return;
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
             }
         }
     });
@@ -51,13 +67,21 @@ async fn stream(State(ctx): State<AppContext>) -> AppResult<Response> {
             Event::default().data(serde_json::to_string(&event).unwrap_or_else(|_| "{}".into())),
         )
     });
-    Ok(Sse::new(stream)
+    let mut response = Sse::new(stream)
         .keep_alive(
             KeepAlive::new()
                 .interval(std::time::Duration::from_secs(25))
                 .text("keep-alive"),
         )
-        .into_response())
+        .into_response();
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("no-cache, no-transform"),
+    );
+    headers.insert(header::CONNECTION, HeaderValue::from_static("keep-alive"));
+    headers.insert("x-accel-buffering", HeaderValue::from_static("no"));
+    Ok(response)
 }
 
 pub fn routes() -> Routes {

@@ -20,3 +20,12 @@
   active: true
   created_at: "2023-11-12T12:34:56.789Z"
   updated_at: "2023-11-12T12:34:56.789Z"
+- id: 3
+  pid: 33333333-3333-3333-3333-333333333333
+  email: admin@monitor.local
+  password: "$argon2id$v=19$m=19456,t=2,p=1$mbvOW21E7zylV+6gSQCWUw$isvRGfgXSnUOLVhl/bfC5TnBg+IHVoeplSokgPX2Az4"
+  api_key: lo-6a8f6f91-6be5-4b9f-9a93-3cde89dac5df
+  name: Admin
+  active: true
+  created_at: "2026-08-11T00:00:00.000Z"
+  updated_at: "2026-08-11T00:00:00.000Z"

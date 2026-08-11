@@ -48,30 +48,32 @@ impl Hooks for App {
         Ok(vec![Box::new(MonitoringInitializer)])
     }
 
-    fn routes(_ctx: &AppContext) -> AppRoutes {
+    fn routes(ctx: &AppContext) -> AppRoutes {
         // `prefix` só vale para as rotas adicionadas depois dele (`add_route`
         // funde o prefixo no momento da adição). Por isso `GET /` entra antes:
         // ele tem de continuar na raiz, junto com o `_ping`/`_health` que o
         // `with_default_routes` já registrou. Tudo que é negócio vem depois,
         // sob `/api` (§5.6).
+        let business_auth =
+            axum::middleware::from_fn_with_state(ctx.clone(), controllers::auth_guard::require_jwt);
         AppRoutes::with_default_routes()
             .add_route(controllers::root::routes())
             .prefix("/api")
             .add_route(controllers::auth::routes())
-            .add_route(controllers::dashboard::routes())
-            .add_route(controllers::sites::routes())
-            .add_route(controllers::networks::routes())
-            .add_route(controllers::devices::routes())
-            .add_route(controllers::monitors::routes())
-            .add_route(controllers::discovery::routes())
-            .add_route(controllers::topology::routes())
-            .add_route(controllers::snmp::routes())
-            .add_route(controllers::probes::routes())
-            .add_route(controllers::port_scan::routes())
-            .add_route(controllers::dns::routes())
-            .add_route(controllers::dns_servers::routes())
-            .add_route(controllers::events::routes())
-            .add_route(controllers::zabbix_templates::routes())
+            .add_route(controllers::dashboard::routes().layer(business_auth.clone()))
+            .add_route(controllers::sites::routes().layer(business_auth.clone()))
+            .add_route(controllers::networks::routes().layer(business_auth.clone()))
+            .add_route(controllers::devices::routes().layer(business_auth.clone()))
+            .add_route(controllers::monitors::routes().layer(business_auth.clone()))
+            .add_route(controllers::discovery::routes().layer(business_auth.clone()))
+            .add_route(controllers::topology::routes().layer(business_auth.clone()))
+            .add_route(controllers::snmp::routes().layer(business_auth.clone()))
+            .add_route(controllers::probes::routes().layer(business_auth.clone()))
+            .add_route(controllers::port_scan::routes().layer(business_auth.clone()))
+            .add_route(controllers::dns::routes().layer(business_auth.clone()))
+            .add_route(controllers::dns_servers::routes().layer(business_auth.clone()))
+            .add_route(controllers::events::routes().layer(business_auth.clone()))
+            .add_route(controllers::zabbix_templates::routes().layer(business_auth))
     }
     async fn connect_workers(ctx: &AppContext, queue: &Queue) -> Result<()> {
         queue.register(DownloadWorker::build(ctx)).await?;

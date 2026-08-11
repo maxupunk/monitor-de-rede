@@ -194,6 +194,27 @@ async fn can_login_without_verify() {
 
 #[tokio::test]
 #[serial]
+async fn seed_admin_local_autentica_no_ambiente_de_teste() {
+    request::<App, _, _>(|request, ctx| async move {
+        seed::<App>(&ctx).await.unwrap();
+        let response = request
+            .post("/api/auth/login")
+            .json(&serde_json::json!({
+                "email": "admin@monitor.local",
+                "password": "admin123",
+            }))
+            .await;
+        assert_eq!(response.status_code(), 200);
+        let logged: backend_rust::views::auth::LoginResponse =
+            serde_json::from_str(&response.text()).unwrap();
+        assert_eq!(logged.user.email, "admin@monitor.local");
+        assert_eq!(logged.user.role, "admin");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
 async fn invalid_verification_token() {
     configure_insta!();
 
@@ -293,7 +314,7 @@ async fn can_get_current_user() {
 
         let (auth_key, auth_value) = prepare_data::auth_header(&user.token);
         let response = request
-            .get("/api/auth/current")
+            .get("/api/auth/me")
             .add_header(auth_key, auth_value)
             .await;
 

@@ -98,6 +98,12 @@ database:
 auth:
   # JWT authentication
   jwt:
+    # EventSource não permite Authorization; o Loco tenta Bearer primeiro e
+    # depois `?token=` apenas para os streams autenticados.
+    location:
+      - from: Bearer
+      - from: Query
+        name: token
     # Secret key for token generation and verification
     secret: v06Wz0VIum5J6JzeKtFl
     # Token expiration time in seconds

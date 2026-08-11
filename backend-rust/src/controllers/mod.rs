@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod auth_guard;
 pub mod dashboard;
 pub mod devices;
 pub mod discovery;

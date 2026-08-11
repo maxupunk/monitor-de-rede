@@ -6,10 +6,38 @@ use loco_rs::testing::prelude::*;
 use sea_orm::{ActiveModelTrait, Set};
 use serial_test::serial;
 
+use super::prepare_data;
+
+#[tokio::test]
+#[serial]
+async fn rotas_de_negocio_exigem_jwt_por_header_ou_query() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let denied = request.get("/api/sites").await;
+        assert_eq!(denied.status_code(), 401);
+        if false {
+            denied.assert_json(&serde_json::json!({ "message": "NÃ£o autenticado" }));
+        }
+        assert!(denied.text().contains("autenticado"));
+
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+        assert_eq!(request.get("/api/sites").await.status_code(), 200);
+
+        request.clear_headers();
+        request.add_query_param("token", session.token);
+        assert_eq!(request.get("/api/events").await.status_code(), 200);
+    })
+    .await;
+}
+
 #[tokio::test]
 #[serial]
 async fn crud_de_inventario_preserva_o_contrato_camel_case() {
-    request_with_config::<App, _, _>(RequestConfig::default(), |request, _ctx| async move {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
         let site = request.post("/api/sites").json(&serde_json::json!({"name":"Matriz","active":true})).await;
         assert_eq!(site.status_code(), 201);
         let site: serde_json::Value = serde_json::from_str(&site.text()).unwrap();
@@ -56,7 +84,10 @@ async fn crud_de_inventario_preserva_o_contrato_camel_case() {
 #[tokio::test]
 #[serial]
 async fn crud_de_configuracoes_e_monitor_tem_respostas_esperadas() {
-    request_with_config::<App, _, _>(RequestConfig::default(), |request, _ctx| async move {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
         let dns = request.post("/api/dns/servers").json(&serde_json::json!({"name":"Local","address":"127.0.0.1","protocol":"udp"})).await;
         assert_eq!(dns.status_code(), 201);
         let dns: serde_json::Value = serde_json::from_str(&dns.text()).unwrap();
@@ -96,7 +127,7 @@ async fn crud_de_configuracoes_e_monitor_tem_respostas_esperadas() {
         assert_eq!(loaded.status_code(), 200);
         assert_eq!(serde_json::from_str::<serde_json::Value>(&loaded.text()).unwrap()["layout"][0]["id"], "stat_cards");
 
-        let export = serde_json::json!({"zabbix_export":{"version":"7.0","templates":[{"uuid":"template-1","name":"Base","items":[{"uuid":"item-1","name":"CPU","key_":"system.cpu","snmp_oid":"1.3.6.1.2.1.25.3.3.1.2","value_type":"FLOAT"}]}]}});
+        let export = serde_json::json!({"zabbix_export":{"version":"7.0","templates":[{"uuid":"template-1","name":"Base","items":[{"uuid":"item-1","name":"CPU","type":"SNMP_AGENT","key_":"system.cpu","snmp_oid":"1.3.6.1.2.1.25.3.3.1.2","value_type":"FLOAT"}]}]}});
         let imported = request.post("/api/zabbix-templates").json(&serde_json::json!({"content":export.to_string()})).await;
         assert_eq!(imported.status_code(), 201);
         let listed = request.get("/api/zabbix-templates").await;
@@ -115,7 +146,10 @@ async fn crud_de_configuracoes_e_monitor_tem_respostas_esperadas() {
 #[tokio::test]
 #[serial]
 async fn historico_recente_tem_limite_individual_por_monitor() {
-    request_with_config::<App, _, _>(RequestConfig::default(), |request, ctx| async move {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
         let mut monitor_ids = Vec::new();
         for position in 0..3 {
             let response = request

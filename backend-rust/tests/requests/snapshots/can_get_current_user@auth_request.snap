@@ -4,5 +4,5 @@ expression: "(response.status_code(), response.text())"
 ---
 (
     200,
-    "{\"pid\":\"PID\",\"name\":\"loco\",\"email\":\"test@loco.com\"}",
+    "{\"id\":1,\"email\":\"test@loco.com\",\"fullName\":\"loco\",\"role\":\"admin\"}",
 )

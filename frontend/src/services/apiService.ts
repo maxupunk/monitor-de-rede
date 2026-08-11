@@ -38,6 +38,10 @@ class ApiService {
       }
       if (response.status === 401) {
         localStorage.removeItem('auth_token')
+        localStorage.removeItem('auth_user')
+        if (window.location.pathname !== '/login') {
+          window.location.assign('/login')
+        }
       }
       throw new Error(errorMessage)
     }

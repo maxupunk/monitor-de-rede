@@ -91,6 +91,10 @@ database:
 auth:
   # JWT authentication
   jwt:
+    location:
+      - from: Bearer
+      - from: Query
+        name: token
     # Secret key for token generation and verification
     secret: y7YMSmRyVT0tlcb4PX9s
     # Token expiration time in seconds
