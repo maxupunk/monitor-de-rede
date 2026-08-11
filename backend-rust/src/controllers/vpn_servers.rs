@@ -17,7 +17,7 @@ use crate::{
             server_service::{self, VpnServerPayload, DEFAULT_LISTEN_PORT},
         },
     },
-    views::vpn::VpnServerResponse,
+    views::vpn::{VpnServerResponse, VpnServerStateResponse},
 };
 
 #[derive(Debug, Default, Deserialize)]
@@ -60,18 +60,18 @@ struct PreflightInput {
 /// `GET /api/vpn/server` — sincroniza a telemetria antes de responder.
 async fn show(State(ctx): State<AppContext>) -> AppResult<Response> {
     let state = server_service::get_state(&ctx.db).await?;
-    Ok(format::json(json!({
-        "configured": state.server.is_some(),
-        "server": state.server.map(VpnServerResponse::from),
-        "cidr": state.cidr,
-        "serverAddress": state.server_address,
-        "peersTotal": state.peers_total,
-        "peersConnected": state.peers_connected,
-        "bytesRx": state.bytes_rx,
-        "bytesTx": state.bytes_tx,
-        "persistentKeepalive": PERSISTENT_KEEPALIVE_SECONDS,
-        "profiles": registry::list(),
-    }))?)
+    Ok(format::json(VpnServerStateResponse {
+        configured: state.server.is_some(),
+        server: state.server.map(VpnServerResponse::from),
+        cidr: state.cidr,
+        server_address: state.server_address,
+        peers_total: state.peers_total,
+        peers_connected: state.peers_connected,
+        bytes_rx: state.bytes_rx,
+        bytes_tx: state.bytes_tx,
+        persistent_keepalive: PERSISTENT_KEEPALIVE_SECONDS,
+        profiles: registry::list(),
+    })?)
 }
 
 /// `PUT /api/vpn/server` — salva e aplica via arquivo compartilhado + `syncconf`.

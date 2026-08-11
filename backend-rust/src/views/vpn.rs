@@ -4,18 +4,29 @@
 //! de tornar a resposta verificável pelo compilador, garante que material
 //! sensível — a chave pré-compartilhada — não escape por descuido em rota
 //! nenhuma. `preshared_key_encrypted` simplesmente não tem lugar aqui.
+//!
+//! **Bindings (F7).** Todo struct daqui é fonte da verdade do tipo TypeScript
+//! equivalente em `frontend/src/bindings/`: `frontend/src/stores/vpn.ts`
+//! reexporta o que o `ts-rs` gera em vez de redigitar os campos à mão. Trocar o
+//! tipo de um campo aqui passa a quebrar o `vue-tsc`, e não a tela em produção.
+//! Campos `i64` levam `#[ts(type = "number")]` porque o padrão do `ts-rs` para
+//! inteiros de 64 bits é `bigint` — e `JSON.parse` nunca produz `bigint`.
 
 use serde::Serialize;
+use ts_rs::TS;
 
 use crate::{
     models::{vpn_peers, vpn_servers},
-    services::vpn::GeneratedArtifact,
+    services::vpn::{peer_hints::PeerHints, profiles::registry::ProfileCard, GeneratedArtifact},
 };
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct VpnServerResponse {
+    #[ts(type = "number")]
     pub id: i64,
+    #[ts(type = "number")]
     pub network_id: i64,
     pub interface_name: String,
     pub listen_port: i32,
@@ -50,11 +61,15 @@ impl From<vpn_servers::Model> for VpnServerResponse {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct VpnPeerResponse {
+    #[ts(type = "number")]
     pub id: i64,
+    #[ts(type = "number")]
     pub vpn_server_id: i64,
+    #[ts(type = "number")]
     pub device_id: i64,
     pub public_key: String,
     pub device_profile: String,
@@ -62,7 +77,9 @@ pub struct VpnPeerResponse {
     pub last_handshake_at: Option<String>,
     /// Último keepalive contabilizado — é o sinal de vida que sustenta o status.
     pub last_seen_at: Option<String>,
+    #[ts(type = "number")]
     pub bytes_rx: i64,
+    #[ts(type = "number")]
     pub bytes_tx: i64,
     pub enabled: bool,
     pub created_at: String,
@@ -93,12 +110,83 @@ impl From<&vpn_peers::Model> for VpnPeerResponse {
 
 /// Artefato entregue ao frontend — perfis móveis já vêm com o QR Code
 /// renderizado, porque a chave privada não sobrevive a uma segunda requisição.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct SerializedVpnArtifact {
     #[serde(flatten)]
     pub artifact: GeneratedArtifact,
     pub qr_svg: Option<String>,
+}
+
+/// Recorte do `device` que as telas de VPN leem da linha do peer.
+///
+/// O corpo em runtime é o `devices::present` inteiro — este struct **não** é
+/// serializado, existe só para dar nome ao que a tabela de dispositivos VPN
+/// consome. Descrever menos campos do que a resposta traz é seguro (o
+/// TypeScript é estrutural); descrever campos que não existem não seria, e é
+/// justamente isso que o tipo redigitado à mão arriscava.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct VpnPeerDeviceView {
+    #[ts(type = "number")]
+    pub id: i64,
+    pub name: String,
+    pub ip_address: Option<String>,
+    pub snmp_enabled: bool,
+    pub status: String,
+}
+
+/// Linha de `GET /api/vpn/peers`: o peer, os avisos de diagnóstico e o
+/// dispositivo, achatados num objeto só — que é como a tela sempre leu.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct VpnPeerListItem {
+    #[serde(flatten)]
+    pub peer: VpnPeerResponse,
+    #[serde(flatten)]
+    pub hints: PeerHints,
+    /// `null` quando o dispositivo do peer já foi removido — a linha continua
+    /// aparecendo para que o operador consiga revogá-la.
+    #[ts(as = "Option<VpnPeerDeviceView>")]
+    pub device: Option<serde_json::Value>,
+}
+
+/// Corpo de `PATCH /api/vpn/peers/:id` — peer + dispositivo renomeado.
+///
+/// Sem os avisos de diagnóstico: quem os calcula é a listagem, e acrescentá-los
+/// aqui mudaria a resposta que o backend AdonisJS devolve (§16, paridade).
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct VpnPeerWithDevice {
+    #[serde(flatten)]
+    pub peer: VpnPeerResponse,
+    #[ts(as = "Option<VpnPeerDeviceView>")]
+    pub device: Option<serde_json::Value>,
+}
+
+/// Corpo de `GET /api/vpn/server` — o painel inteiro numa requisição.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct VpnServerStateResponse {
+    pub configured: bool,
+    pub server: Option<VpnServerResponse>,
+    pub cidr: Option<String>,
+    pub server_address: Option<String>,
+    #[ts(type = "number")]
+    pub peers_total: usize,
+    #[ts(type = "number")]
+    pub peers_connected: usize,
+    #[ts(type = "number")]
+    pub bytes_rx: i64,
+    #[ts(type = "number")]
+    pub bytes_tx: i64,
+    pub persistent_keepalive: i32,
+    pub profiles: Vec<ProfileCard>,
 }
 
 #[cfg(test)]

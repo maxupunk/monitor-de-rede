@@ -21,7 +21,7 @@ use crate::{
             server_service, GeneratedArtifact, PRIVATE_KEY_UNAVAILABLE,
         },
     },
-    views::vpn::{SerializedVpnArtifact, VpnPeerResponse},
+    views::vpn::{SerializedVpnArtifact, VpnPeerListItem, VpnPeerResponse, VpnPeerWithDevice},
 };
 
 /// Lado **mínimo** do QR Code em pixels — o mesmo alvo do backend anterior,
@@ -145,24 +145,14 @@ async fn index(State(ctx): State<AppContext>) -> AppResult<Response> {
     let mut payload = Vec::with_capacity(items.len());
     for item in items {
         let device = match item.device {
-            Some(device) => present_device(&ctx.db, device).await?,
-            None => serde_json::Value::Null,
+            Some(device) => Some(present_device(&ctx.db, device).await?),
+            None => None,
         };
-        let mut value =
-            serde_json::to_value(VpnPeerResponse::from(&item.peer)).unwrap_or_else(|_| json!({}));
-        if let serde_json::Value::Object(object) = &mut value {
-            object.insert(
-                "needsFirewallHint".into(),
-                json!(item.hints.needs_firewall_hint),
-            );
-            object.insert(
-                "pingOutsideTunnel".into(),
-                json!(item.hints.ping_outside_tunnel),
-            );
-            object.insert("pingMonitorId".into(), json!(item.hints.ping_monitor_id));
-            object.insert("device".into(), device);
-        }
-        payload.push(value);
+        payload.push(VpnPeerListItem {
+            peer: VpnPeerResponse::from(&item.peer),
+            hints: item.hints,
+            device,
+        });
     }
     Ok(format::json(payload)?)
 }
@@ -259,15 +249,13 @@ async fn update(
 
     let (peer, device) = peer_service::rename(&ctx.db, id, name).await?;
     let device = match device {
-        Some(device) => present_device(&ctx.db, device).await?,
-        None => serde_json::Value::Null,
+        Some(device) => Some(present_device(&ctx.db, device).await?),
+        None => None,
     };
-    let mut value =
-        serde_json::to_value(VpnPeerResponse::from(&peer)).unwrap_or_else(|_| json!({}));
-    if let serde_json::Value::Object(object) = &mut value {
-        object.insert("device".into(), device);
-    }
-    Ok(format::json(value)?)
+    Ok(format::json(VpnPeerWithDevice {
+        peer: VpnPeerResponse::from(&peer),
+        device,
+    })?)
 }
 
 /// `GET /api/vpn/peers/:id/config` — 🔒 credencial de acesso à rede.

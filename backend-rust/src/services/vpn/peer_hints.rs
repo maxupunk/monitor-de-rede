@@ -1,11 +1,13 @@
 //! Avisos derivados de VPN + ping (§8.10.4).
 
 use serde::Serialize;
+use ts_rs::TS;
 
 use crate::models::{monitors, vpn_peers};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct PeerHints {
     /// Túnel ativo, mas o ping falha: provável firewall bloqueando na interface WG.
     pub needs_firewall_hint: bool,
@@ -16,6 +18,7 @@ pub struct PeerHints {
     pub ping_outside_tunnel: bool,
     /// Monitor de ping provisionado automaticamente para o peer — usado para
     /// navegar ao histórico de conectividade.
+    #[ts(type = "number | null")]
     pub ping_monitor_id: Option<i64>,
 }
 

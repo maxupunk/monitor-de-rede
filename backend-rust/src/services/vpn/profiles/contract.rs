@@ -4,6 +4,7 @@
 //! implementação e registrá-la — nenhuma existente é alterada (OCP).
 
 use serde::Serialize;
+use ts_rs::TS;
 
 pub use crate::services::vpn::secret_store::PRIVATE_KEY_UNAVAILABLE;
 
@@ -64,8 +65,9 @@ impl PeerConfigContext {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "lowercase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
 pub enum ArtifactDelivery {
     Copy,
     Download,
@@ -73,8 +75,9 @@ pub enum ArtifactDelivery {
 }
 
 /// Par rótulo/valor exibido no resumo "os dados do túnel" antes do script.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct ArtifactSummaryItem {
     pub label: String,
     pub value: String,
@@ -83,8 +86,9 @@ pub struct ArtifactSummaryItem {
 /// Alternativa de instalação entregue ao lado do artefato principal — o mesmo
 /// túnel, porém escrito para outro gerenciador de pacotes. Cada variante é
 /// autocontida: instala o cliente, grava o perfil e sobe o túnel.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct ArtifactVariant {
     /// Identificador estável usado como chave de aba no frontend.
     pub id: String,
@@ -98,8 +102,9 @@ pub struct ArtifactVariant {
     pub instructions: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct GeneratedArtifact {
     pub profile: String,
     /// Rótulo amigável do equipamento.

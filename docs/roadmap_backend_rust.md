@@ -1529,9 +1529,10 @@ frontend — e a linha entra nesta tabela.
 | **F4** | `src/services/apiService.ts` | Em 401, além de limpar o token, redirecionar para `/login`. | Sessão expirada hoje deixa a tela em estado morto. | 6 |
 | **F5** | `src/composables/useInfiniteList.ts` | Nenhuma — mantido o envelope Lucid. | Registrado aqui para deixar explícito que o **backend** é que se adapta ([§5.4](#54-paginação)). | — |
 | **F6** | `src/stores/portScan.ts` | Nenhuma esperada. **Validar** que o parser NDJSON tolera chegada muito mais rápida (RustScan é ordens de grandeza mais veloz). | Risco de *race* no acúmulo reativo. | 4 |
-| **F7** | `src/types/` *(novo, opcional)* | Consumir `frontend/src/bindings/*.ts` gerados por `ts-rs`. | Ganho de tipagem ponta a ponta. Opcional, não bloqueia o corte. | 8 |
+| **F7** 🟢 | `src/stores/vpn.ts` | Os tipos da VPN passam a ser **apelidos** dos bindings `ts-rs` (`VpnPeerListItem`, `VpnServerStateResponse`, `SerializedVpnArtifact`, `PreflightResult`, `ProfileCard`, `VpnPeerConnectionStatus`, `VpnPeerDeviceView`, `VpnPeerWithDevice`, `ArtifactSummaryItem`, `ArtifactVariant`, `VpnServerResponse`) em vez de interfaces redigitadas à mão. `CreateVpnPeerPayload` continua manual — no Rust todo campo do `CreatePeerInput` é opcional, e o binding tornaria `name`/`profile` opcionais no wizard. Nenhuma mudança de runtime. | Ganho de tipagem ponta a ponta: trocar um campo no backend passa a quebrar o `vue-tsc` em vez da tela. Fecha o item aberto da Fase 8. | 8 |
 | **F8** 🟢 | `src/bindings/*.ts` *(novo)* | Destino dos bindings `ts-rs` passa a ser `frontend/src/bindings/`. Gerados: `LucidMeta`, `LucidPage`, `ApiError`, `ApiFieldError`, `ServiceInfo`. | O scaffold exportava para `backend-rust/frontend/`, diretório que ninguém consome. Agora o struct Rust é a fonte da verdade do tipo TS. | 0 |
 | **F9** 🟢 | `src/composables/useInfiniteList.ts` | `PaginatedResponse.meta` passa a usar o `LucidMeta` gerado, em vez do tipo redigitado à mão. Comportamento em runtime **inalterado**. | Se o backend mudar um campo do `meta`, o `vue-tsc` acusa — em vez de a lista infinita parar sozinha em produção. Substitui a nota "nenhuma mudança" do F5. | 0 |
+| **F10** 🟢 | `src/stores/vpn.ts`, `src/components/VpnPeerWizard.vue` | `vpnProfileLabel`/`vpnProfileIcon` e `form.profile` do wizard passam a receber `string` em vez da união `VpnDeviceProfile`. A união continua exportada, agora só como chave das tabelas de rótulo/ícone. | Consequência do F7: quem decide os perfis aceitos é o `registry.rs`, então o backend serializa `deviceProfile` como `string`. Um perfil novo no Rust já aparecia no wizard em runtime (a lista vem do `GET /vpn/server`) — a união em TS é que o recusaria na compilação. As duas funções já tinham o fallback (`\|\| profile`, `\|\| 'mdi-devices'`); só o tipo mentia. | 8 |
 
 > **F5 revisado:** a linha original dizia "nenhuma mudança — o backend é que se adapta". O
 > envelope Lucid continua sendo do backend (o princípio 1 se aplica: reproduzi-lo custou um
@@ -1887,7 +1888,11 @@ reportado vira histórico do monitor. Validação em container fica para a Fase 
       (matriz #44) e trilha de auditoria estruturada nas cinco ações sensíveis.
 - [x] 🟢 **Concluído** — `probe_registrar` + `tasks/vpn_probe_register.rs` ⚠️, com o fallback
       para `DEFAULT_VPN_PROBE_TOKEN` preservado (matriz #43) e registro idempotente no boot.
-- [ ] `ts-rs` exportando bindings dos DTOs de VPN (F7, opcional — não bloqueia o corte).
+- [x] 🟢 **Concluído** — `ts-rs` exportando os DTOs de VPN (F7/F10): 17 bindings em
+      `frontend/src/bindings/`, com `GET /api/vpn/server` e `GET|PATCH /api/vpn/peers`
+      passando a serializar structs (`VpnServerStateResponse`, `VpnPeerListItem`,
+      `VpnPeerWithDevice`) no lugar do `json!` montado à mão — o corpo em runtime é
+      byte a byte o mesmo, mas agora tem tipo. O `stores/vpn.ts` consome os bindings.
 
 **Extras entregues nesta fase** (viraram pré-requisito):
 
@@ -1933,7 +1938,9 @@ e confirmar o `syncconf` sem derrubar túneis ativos.
 - [ ] **Arquivar `backend/`** (tag git + remoção) — irreversível; §5 do runbook. Só depois de
       a paridade fechar em zero e o ciclo de sombra passar.
 
-**Aceite:** diff de paridade vazio; frontend inalterado além de F1–F4; `backend/` removido.
+**Aceite:** diff de paridade vazio; frontend inalterado além do que a
+[§12](#12-ajustes-necessários-no-frontend) registra (F1–F4 de comportamento, F7–F10 só de
+tipo); `backend/` removido.
 
 ---
 
@@ -1950,7 +1957,7 @@ verificação manual registrada).
 | 4 | `device.status` só é escrito pelo `DeviceStatusService` e só emite evento na transição | `device_status_service.ts` | teste de integração |
 | 5 | `recentResults` traz até 30 **por monitor** | `monitor_presenter.ts` | teste com 3 monitores × 50 resultados |
 | 6 | Scheduler grava `next_run_at` antes de executar | `scheduler_run.ts` | teste |
-| 7 | Probe offline → fallback local → resultado `unknown` (não `down`) | `scheduler_run.ts` | ✅ `scheduler_run::report_probe_unavailable` + teste de ciclo (F7) |
+| 7 | Probe offline → fallback local → resultado `unknown` (não `down`) | `scheduler_run.ts` | ✅ `scheduler_run::report_probe_unavailable` + `o_ciclo_do_scheduler_despacha_para_probe_vivo_e_marca_o_morto_offline` |
 | 8 | Tarefa de probe vencida (>120 s) é descartada, não executada | `probe_task_dispatcher.ts` | ✅ `tarefa_vencida_e_descartada_e_nao_reentregue` |
 | 9 | Uma tarefa pendente por monitor (substituição, não acúmulo) | migration + dispatcher | ✅ `uma_tarefa_pendente_por_monitor` |
 | 10 | Faixa > 1024 hosts é truncada e a UI é avisada (`truncated`) | `cidr_range.ts` | unitário |
@@ -2022,7 +2029,7 @@ Desvios conscientes em relação ao backend AdonisJS. Qualquer outro desvio é b
 | D4 | ARP lido de `/proc/net/arp` no Linux | Mais confiável que parsear `arp -a` | Nenhum |
 | D5 | Autenticação real (JWT) substituindo o stub | O stub era placeholder; o frontend já esperava JWT | F1–F4 |
 | D6 | Cifra de campo com XChaCha20-Poly1305 em vez do encryption do Adonis | Não há equivalente; formato interno, nunca exposto | Nenhum. **Requer re-cifrar** os campos VPN na migração de dados (Fase 9) |
-| D7 | `ts-rs` gerando bindings TypeScript | Ganho novo | Opcional (F7) |
+| D7 🟢 | `ts-rs` gerando bindings TypeScript | Ganho novo | Aplicado: F8/F9 (paginação) e F7/F10 (VPN). Só tipo — runtime inalterado |
 | D8 | Sem "Worker & Queue System" formal | Já era 🔴 no roadmap atual — o scheduler executa inline. Não regride nem avança | Nenhum |
 | D9 | `RouteResolver` (traceroute) continua stub | Já é stub hoje (`resolveRoute` devolve `[]`) | Nenhum |
 | D10 | `ProbeAuthenticator`/`ProbeConnection` não são portados | São stubs mortos (`return true`) — a autenticação real está no controller | Nenhum |
@@ -2056,7 +2063,8 @@ Uma fase só é marcada 🟢 quando **todos** os itens abaixo são verdadeiros:
 
 **Aceite final do projeto:**
 
-- O frontend roda contra `backend-rust` com as mudanças F1–F4 e nada mais.
+- O frontend roda contra `backend-rust` com as mudanças da §12 e nada mais — F1–F4 mexem em
+  comportamento; F7–F10 são só tipagem vinda dos bindings `ts-rs`.
 - As 50 linhas da matriz de paridade estão verdes.
 - `docker compose up` sobe `migration`, `server`, `scheduler`, `probe`, `wireguard`,
   `vpn-probe`, `frontend`, `postgres` — todos saudáveis.

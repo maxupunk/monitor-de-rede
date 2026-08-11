@@ -1,121 +1,59 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { apiService } from '@/services/apiService'
+import type { ArtifactSummaryItem } from '@/bindings/ArtifactSummaryItem'
+import type { ArtifactVariant } from '@/bindings/ArtifactVariant'
+import type { PreflightResult } from '@/bindings/PreflightResult'
+import type { ProfileCard } from '@/bindings/ProfileCard'
+import type { SerializedVpnArtifact } from '@/bindings/SerializedVpnArtifact'
+import type { VpnPeerConnectionStatus } from '@/bindings/VpnPeerConnectionStatus'
+import type { VpnPeerDeviceView } from '@/bindings/VpnPeerDeviceView'
+import type { VpnPeerListItem } from '@/bindings/VpnPeerListItem'
+import type { VpnPeerWithDevice } from '@/bindings/VpnPeerWithDevice'
+import type { VpnServerResponse } from '@/bindings/VpnServerResponse'
+import type { VpnServerStateResponse } from '@/bindings/VpnServerStateResponse'
 
+/**
+ * Os tipos da VPN são gerados pelo `ts-rs` a partir dos structs Rust
+ * (`backend-rust/src/views/vpn.rs` e `services/vpn/`) — desvio D7 / ajuste F7
+ * do roadmap do backend Rust. Aqui ficam só os **apelidos** com os nomes que as
+ * telas já usam, para que trocar um campo no backend quebre o `vue-tsc` em vez
+ * da tela em produção.
+ *
+ * O que continua escrito à mão está marcado caso a caso, sempre com o motivo.
+ */
+export type VpnConnectionStatus = VpnPeerConnectionStatus
+export type VpnProfileOption = ProfileCard
+export type VpnServer = VpnServerResponse
+export type VpnServerState = VpnServerStateResponse
+export type VpnPeerDevice = VpnPeerDeviceView
+export type VpnPeer = VpnPeerListItem
+export type VpnPeerRenamed = VpnPeerWithDevice
+export type VpnArtifactSummaryItem = ArtifactSummaryItem
+export type VpnArtifactVariant = ArtifactVariant
+export type VpnArtifact = SerializedVpnArtifact
+export type VpnPreflightResult = PreflightResult
+
+/**
+ * Perfis com rótulo e ícone próprios nesta interface.
+ *
+ * **Não** é o contrato: quem decide os perfis aceitos é o registro do backend
+ * (`services/vpn/profiles/registry.rs`), e por isso `deviceProfile` chega como
+ * `string`. Esta união existe só para tipar as tabelas de apresentação abaixo —
+ * um perfil novo no backend aparece no wizard sozinho e cai no rótulo padrão
+ * até ganhar um ícone aqui.
+ */
 export type VpnDeviceProfile = 'mikrotik' | 'openwrt' | 'linux' | 'windows' | 'mobile'
-export type VpnConnectionStatus = 'connected' | 'unstable' | 'disconnected' | 'awaiting'
 
-export interface VpnProfileOption {
-  profile: VpnDeviceProfile
-  label: string
-  icon: string
-  supportsQrCode: boolean
-}
-
-export interface VpnServer {
-  id: number
-  networkId: number
-  interfaceName: string
-  listenPort: number
-  publicEndpoint: string | null
-  publicKey: string
-  allowPeerToPeer: boolean
-  mtu: number
-  dnsServers: string | null
-  active: boolean
-  lastSyncedAt: string | null
-}
-
-export interface VpnServerState {
-  configured: boolean
-  server: VpnServer | null
-  cidr: string | null
-  serverAddress: string | null
-  peersTotal: number
-  peersConnected: number
-  bytesRx: number
-  bytesTx: number
-  persistentKeepalive: number
-  profiles: VpnProfileOption[]
-}
-
-export interface VpnPeerDevice {
-  id: number
-  name: string
-  ipAddress: string | null
-  snmpEnabled: boolean
-  status: string
-}
-
-export interface VpnPeer {
-  id: number
-  vpnServerId: number
-  deviceId: number
-  publicKey: string
-  deviceProfile: VpnDeviceProfile
-  persistentKeepalive: number
-  lastHandshakeAt: string | null
-  /** Último keepalive contabilizado pelo servidor — sinal de vida do túnel. */
-  lastSeenAt: string | null
-  bytesRx: number
-  bytesTx: number
-  enabled: boolean
-  connectionStatus: VpnConnectionStatus
-  needsFirewallHint: boolean
-  /** O ping não está saindo pelo túnel — o `vpn-probe` não assumiu o monitor. */
-  pingOutsideTunnel: boolean
-  pingMonitorId: number | null
-  device: VpnPeerDevice | null
-}
-
-export interface VpnArtifactSummaryItem {
-  label: string
-  value: string
-}
-
-/** Script de terminal alternativo — mesmo túnel, outro gerenciador de pacotes. */
-export interface VpnArtifactVariant {
-  id: string
-  label: string
-  hint: string
-  icon: string
-  fileName: string
-  language: string
-  content: string
-  instructions: string[]
-}
-
-export interface VpnArtifact {
-  profile: VpnDeviceProfile
-  label: string
-  delivery: 'copy' | 'download' | 'qrcode'
-  fileName: string
-  language: string
-  content: string
-  instructions: string[]
-  supportsQrCode: boolean
-  summary: VpnArtifactSummaryItem[]
-  variants: VpnArtifactVariant[]
-  /** Já vem renderizado nos perfis móveis — a chave privada só existe nesta resposta. */
-  qrSvg: string | null
-}
-
-export interface VpnPreflightResult {
-  status: 'reachable' | 'port_forward_required' | 'cgnat' | 'unknown'
-  level: 'success' | 'warning' | 'error'
-  message: string
-  recommendation: string
-  publicIp: string | null
-  resolvedIp: string | null
-  port: number
-  isCgnat: boolean
-  behindNat: boolean
-  verified: boolean
-}
-
+/**
+ * Corpo de `POST /api/vpn/peers`, escrito à mão de propósito: no Rust todo
+ * campo do `CreatePeerInput` é opcional (a validação e a mensagem em português
+ * ficam no controller), e gerar o binding daria um tipo em que `name` e
+ * `profile` seriam opcionais — o oposto do que o wizard precisa exigir.
+ */
 export interface CreateVpnPeerPayload {
   name: string
-  profile: VpnDeviceProfile
+  profile: string
   ipAddress?: string | null
   siteId?: number | null
   snmpEnabled?: boolean
@@ -154,12 +92,17 @@ export const VPN_STATUS_COLORS: Record<VpnConnectionStatus, string> = {
   awaiting: 'grey',
 }
 
-export function vpnProfileLabel(profile: VpnDeviceProfile): string {
-  return VPN_PROFILE_LABELS[profile] || profile
+/**
+ * Recebem `string`, e não a união: o perfil vem do registro do backend, então
+ * um perfil ainda sem rótulo aqui precisa cair no padrão — que é o que estas
+ * funções sempre fizeram em runtime.
+ */
+export function vpnProfileLabel(profile: string): string {
+  return VPN_PROFILE_LABELS[profile as VpnDeviceProfile] || profile
 }
 
-export function vpnProfileIcon(profile: VpnDeviceProfile): string {
-  return VPN_PROFILE_ICONS[profile] || 'mdi-devices'
+export function vpnProfileIcon(profile: string): string {
+  return VPN_PROFILE_ICONS[profile as VpnDeviceProfile] || 'mdi-devices'
 }
 
 export function vpnStatusLabel(status: VpnConnectionStatus): string {
@@ -311,7 +254,7 @@ export const useVpnStore = defineStore('vpn', () => {
     saving.value = true
     error.value = null
     try {
-      const updated = await apiService.patch<VpnPeer>(`/vpn/peers/${peerId}`, { name })
+      const updated = await apiService.patch<VpnPeerRenamed>(`/vpn/peers/${peerId}`, { name })
       const peer = peers.value.find((item) => item.id === peerId)
       if (peer && updated.device) peer.device = updated.device
       return true

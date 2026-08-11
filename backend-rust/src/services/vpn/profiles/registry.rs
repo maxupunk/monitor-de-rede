@@ -5,6 +5,7 @@
 use std::sync::OnceLock;
 
 use serde::Serialize;
+use ts_rs::TS;
 
 use super::{
     contract::VpnProfileGenerator,
@@ -15,8 +16,9 @@ use super::{
 use crate::services::shared::errors::{AppError, AppResult};
 
 /// Card do wizard: o que a tela precisa saber sobre cada perfil.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct ProfileCard {
     pub profile: String,
     pub label: String,

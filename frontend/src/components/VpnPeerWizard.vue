@@ -151,7 +151,7 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { useVpnStore, type VpnArtifact, type VpnDeviceProfile } from '@/stores/vpn'
+import { useVpnStore, type VpnArtifact } from '@/stores/vpn'
 import { useSitesStore } from '@/stores/sites'
 
 const props = defineProps<{
@@ -170,7 +170,9 @@ const step = ref(1)
 const stepLabels = ['Equipamento', 'Identificação']
 
 const form = reactive<{
-  profile: VpnDeviceProfile | null
+  // O perfil vem do registro do backend (`vpnStore.profiles`), não de uma união
+  // redigitada aqui — quem valida a chave é o controller Rust.
+  profile: string | null
   name: string
   ipAddress: string
   siteId: number | null

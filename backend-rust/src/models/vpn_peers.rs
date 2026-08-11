@@ -8,6 +8,7 @@
 use chrono::Utc;
 use sea_orm::{entity::prelude::*, QueryOrder};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 pub use super::_entities::vpn_peers::{ActiveModel, Column, Entity, Model};
 
@@ -51,8 +52,9 @@ pub fn effective_keepalive_seconds(persistent_keepalive: i64) -> i64 {
     persistent_keepalive + KEEPALIVE_TIMEOUT_SECONDS
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
 pub enum VpnPeerConnectionStatus {
     Connected,
     Unstable,

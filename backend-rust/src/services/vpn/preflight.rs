@@ -7,6 +7,7 @@
 use std::{net::Ipv4Addr, time::Duration};
 
 use serde::Serialize;
+use ts_rs::TS;
 
 /// Serviços públicos usados para descobrir o IP visto pela internet.
 const PUBLIC_IP_ENDPOINTS: [&str; 2] = [
@@ -42,8 +43,9 @@ const PRIVATE_RANGES: [(Ipv4Addr, Ipv4Addr); 5] = [
     ),
 ];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
 pub enum PreflightStatus {
     Reachable,
     PortForwardRequired,
@@ -51,16 +53,18 @@ pub enum PreflightStatus {
     Unknown,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "lowercase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
 pub enum PreflightLevel {
     Success,
     Warning,
     Error,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct PreflightResult {
     pub status: PreflightStatus,
     pub level: PreflightLevel,
