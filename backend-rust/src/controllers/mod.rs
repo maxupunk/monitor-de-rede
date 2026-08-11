@@ -1,9 +1,12 @@
 pub mod auth;
 pub mod dashboard;
 pub mod devices;
+pub mod discovery;
+pub mod dns;
 pub mod dns_servers;
 pub mod monitors;
 pub mod networks;
+pub mod port_scan;
 pub mod probes;
 pub mod root;
 pub mod sites;

@@ -6,6 +6,7 @@ use serde_json::Value;
 use crate::services::{
     monitoring::{
         checkers::{
+            dns::{DnsChecker, DnsConfig},
             http::{HttpChecker, HttpConfig},
             ping::{PingChecker, PingConfig},
             tcp::{TcpChecker, TcpConfig},
@@ -62,7 +63,12 @@ pub async fn run_monitor(
                 .execute(parse_config::<HttpConfig>(&configuration, "http")?)
                 .await
         }
-        "dns" | "snmp" => {
+        "dns" => {
+            DnsChecker
+                .execute(parse_config::<DnsConfig>(&configuration, "dns")?)
+                .await
+        }
+        "snmp" => {
             return Err(AppError::business_rule(format!(
                 "Tipo de monitor ainda não disponível nesta fase: {kind}"
             )))

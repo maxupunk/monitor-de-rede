@@ -27,6 +27,7 @@ tokio = { version = "1.45", default-features = false, features = [
   "process",
   "fs",
   "signal",
+  "io-util",
 ] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 tokio-util = { version = "0.7" }
@@ -88,6 +89,14 @@ ipnet = { version = "2.9" }            # CIDR IPv4 (discovery + VPN)
 serde_yaml = { version = "0.9" }       # fixtures / seeds
 thiserror = { version = "2" }
 num_cpus = { version = "1.16" }
+
+# --- discovery e topologia (Fase 5) ---
+mdns-sd = { version = "0.13" }
+# A 0.4 exige generators nightly (`futures-async-stream`) e não compila no
+# Rust estável usado pelo Loco. A API 2.x mantém SSDP assíncrono sem esse risco.
+ssdp-client = { version = "2.1" }
+petgraph = { version = "0.7" }
+phf = { version = "0.11", features = ["macros"] }
 
 [[bin]]
 name = "backend_rust-cli"

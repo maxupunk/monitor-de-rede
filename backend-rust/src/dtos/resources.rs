@@ -88,6 +88,65 @@ pub struct DnsServerInput {
     pub description: Option<String>,
 }
 
+/// Payload da ferramenta de varredura. A validação semântica fica no
+/// controller para que a mensagem continue compatível com o frontend.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PortScanInput {
+    pub host: String,
+    pub protocol: String,
+    pub ports: Vec<u16>,
+    pub timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DnsLookupInput {
+    pub hostname: String,
+    pub server: Option<String>,
+    pub protocol: Option<String>,
+    pub doh_url: Option<String>,
+    pub record_type: Option<String>,
+    pub timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DnsBenchmarkServerInput {
+    pub server: String,
+    pub label: Option<String>,
+    pub protocol: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DnsBenchmarkInput {
+    pub servers: Option<Vec<DnsBenchmarkServerInput>>,
+    pub hostnames: Option<Vec<String>>,
+    pub record_type: Option<String>,
+    pub timeout_ms: Option<u64>,
+    pub rounds: Option<u8>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveryScanInput {
+    pub network_id: i64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopologyLinkInput {
+    #[serde(alias = "source_device_id")]
+    pub source_device_id: i64,
+    #[serde(alias = "target_device_id")]
+    pub target_device_id: i64,
+    #[serde(alias = "source_interface_id")]
+    pub source_interface_id: Option<i64>,
+    #[serde(alias = "target_interface_id")]
+    pub target_interface_id: Option<i64>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DashboardLayoutInput {

@@ -5,3 +5,8 @@
 //! e a sessão ao vivo entram na Fase 5.
 
 pub mod cidr_range;
+pub mod device_identifier;
+pub mod merger;
+pub mod oui_lookup;
+pub mod scanners;
+pub mod service;

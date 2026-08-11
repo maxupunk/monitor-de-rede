@@ -9,6 +9,8 @@
 //! precisa. O `expand_cidr` (lista de endereços, com truncamento em
 //! [`MAX_SCAN_HOSTS`]) entra na Fase 5, junto com os scanners.
 
+use std::net::Ipv4Addr;
+
 use crate::services::shared::errors::AppError;
 
 /// Teto de endereços varridos por execução — /22 completo.
@@ -117,6 +119,24 @@ pub fn parse_cidr_range(cidr: &str) -> Result<CidrRange, AppError> {
 #[must_use]
 pub fn is_scannable_cidr(cidr: &str) -> bool {
     parse_cidr_range(cidr).is_ok()
+}
+
+/// Expande somente endereços utilizáveis e limita a memória/tempo da operação.
+/// Em /31 e /32 todos os endereços pertencem ao enlace conforme RFC 3021.
+pub fn expand_cidr(cidr: &str, max_hosts: usize) -> Result<Vec<Ipv4Addr>, AppError> {
+    let range = parse_cidr_range(cidr)?;
+    let base = to_number(&range.network_address).expect("rede normalizada é IPv4 válido");
+    let size = 1u64 << (32 - u32::from(range.prefix));
+    let (first, last) = if range.prefix >= 31 {
+        (base as u64, base as u64 + size - 1)
+    } else {
+        (base as u64 + 1, base as u64 + size - 2)
+    };
+    let limit = max_hosts.min(MAX_SCAN_HOSTS as usize);
+    Ok((first..=last)
+        .take(limit)
+        .map(|address| Ipv4Addr::from(address as u32))
+        .collect())
 }
 
 #[cfg(test)]

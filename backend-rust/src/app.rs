@@ -63,7 +63,10 @@ impl Hooks for App {
             .add_route(controllers::networks::routes())
             .add_route(controllers::devices::routes())
             .add_route(controllers::monitors::routes())
+            .add_route(controllers::discovery::routes())
             .add_route(controllers::probes::routes())
+            .add_route(controllers::port_scan::routes())
+            .add_route(controllers::dns::routes())
             .add_route(controllers::dns_servers::routes())
             .add_route(controllers::zabbix_templates::routes())
     }
