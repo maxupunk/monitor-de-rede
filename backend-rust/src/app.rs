@@ -60,6 +60,9 @@ impl Hooks for App {
             .add_route(controllers::root::routes())
             .prefix("/api")
             .add_route(controllers::auth::routes())
+            // O agente do probe não tem sessão de usuário: autentica-se pelo
+            // `X-Probe-Token` dentro do handler (§7.10). Fora do guarda JWT.
+            .add_route(controllers::probes::agent_routes())
             .add_route(controllers::dashboard::routes().layer(business_auth.clone()))
             .add_route(controllers::sites::routes().layer(business_auth.clone()))
             .add_route(controllers::networks::routes().layer(business_auth.clone()))
@@ -73,6 +76,8 @@ impl Hooks for App {
             .add_route(controllers::dns::routes().layer(business_auth.clone()))
             .add_route(controllers::dns_servers::routes().layer(business_auth.clone()))
             .add_route(controllers::events::routes().layer(business_auth.clone()))
+            .add_route(controllers::alerts::rules_routes().layer(business_auth.clone()))
+            .add_route(controllers::alerts::routes().layer(business_auth.clone()))
             .add_route(controllers::zabbix_templates::routes().layer(business_auth))
     }
     async fn connect_workers(ctx: &AppContext, queue: &Queue) -> Result<()> {
@@ -85,6 +90,8 @@ impl Hooks for App {
         // tasks-inject (do not remove)
         tasks.register(tasks::user_create::UserCreate);
         tasks.register(SchedulerRun);
+        tasks.register(tasks::probe_run::ProbeRun);
+        tasks.register(tasks::probe_register::ProbeRegister);
     }
     /// Limpa o esquema inteiro entre testes.
     ///

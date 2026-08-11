@@ -5,6 +5,7 @@ use futures::future;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 
 use crate::services::{
+    monitoring::interface_monitoring,
     shared::errors::{AppError, AppResult},
     snmp::{
         client::{SnmpClient, SnmpConfig, SnmpError, SnmpVersion},
@@ -129,7 +130,19 @@ pub async fn poll_device(
     let mut interfaces = std::collections::BTreeMap::new();
     for interface in &scan.interfaces {
         let saved = sync_interface(&ctx.db, device.id, interface).await?;
-        interfaces.insert(interface.if_index, saved);
+        // Só interface administrativamente habilitada é avaliada: uma porta
+        // que o operador desligou não pode gerar alerta de queda de link.
+        if saved.interface.admin_status.as_deref() == Some("up") {
+            interface_monitoring::evaluate_interface_state(
+                ctx,
+                device,
+                &saved.interface,
+                saved.previous_oper_status.as_deref(),
+                saved.previous_speed,
+            )
+            .await?;
+        }
+        interfaces.insert(interface.if_index, saved.interface);
     }
     let previous_uptime = latest_device_metric(&ctx.db, device.id, "snmp_uptime")
         .await?
@@ -196,7 +209,7 @@ pub async fn apply_monitors(
         .into_iter()
         .collect::<std::collections::BTreeSet<_>>();
     for source in &scan.interfaces {
-        let interface = sync_interface(&ctx.db, device.id, source).await?;
+        let interface = sync_interface(&ctx.db, device.id, source).await?.interface;
         let enabled = selected.contains(&source.if_index);
         device_interfaces::ActiveModel {
             id: Set(interface.id),
@@ -334,11 +347,22 @@ fn version_name(version: SnmpVersion) -> &'static str {
     }
 }
 
+/// Uma interface persistida junto do estado que ela tinha antes da coleta.
+///
+/// O "antes" é lido aqui e não pelo chamador porque é a última janela em que
+/// ele ainda existe: depois do `update` a linha já carrega o estado novo, e o
+/// motor de alertas não teria como saber que houve transição.
+pub struct SyncedInterface {
+    pub interface: device_interfaces::Model,
+    pub previous_oper_status: Option<String>,
+    pub previous_speed: Option<i64>,
+}
+
 async fn sync_interface(
     db: &sea_orm::DatabaseConnection,
     device_id: i64,
     source: &SnmpInterface,
-) -> AppResult<device_interfaces::Model> {
+) -> AppResult<SyncedInterface> {
     let existing = device_interfaces::Entity::find()
         .filter(device_interfaces_entity::Column::DeviceId.eq(device_id))
         .filter(device_interfaces_entity::Column::SnmpIndex.eq(Some(source.if_index)))
@@ -346,6 +370,8 @@ async fn sync_interface(
         .await?;
     let now = Utc::now();
     let admin_status = existing.as_ref().and_then(|row| row.admin_status.clone());
+    let previous_oper_status = existing.as_ref().and_then(|row| row.oper_status.clone());
+    let previous_speed = existing.as_ref().and_then(|row| row.speed);
     let model = device_interfaces::ActiveModel {
         id: existing.as_ref().map(|row| Set(row.id)).unwrap_or_default(),
         device_id: Set(device_id),
@@ -362,10 +388,15 @@ async fn sync_interface(
         last_seen_at: Set(Some(now.into())),
         ..Default::default()
     };
-    Ok(if existing.is_some() {
+    let interface = if existing.is_some() {
         model.update(db).await?
     } else {
         model.insert(db).await?
+    };
+    Ok(SyncedInterface {
+        interface,
+        previous_oper_status,
+        previous_speed,
     })
 }
 

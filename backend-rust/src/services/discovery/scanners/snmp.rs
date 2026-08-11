@@ -7,7 +7,7 @@ use crate::services::{
 use futures::{stream, StreamExt};
 
 pub async fn enrich(hosts: Vec<DiscoveredHost>) -> Vec<DiscoveredHost> {
-    stream::iter(hosts.into_iter())
+    stream::iter(hosts)
         .map(|mut host| async move {
             if let Ok(result) =
                 test_connection(SnmpConfig::v2c(host.ip_address.clone(), "public", 161)).await

@@ -1798,30 +1798,72 @@ Configurações sem erro de console, apontando para o backend Rust.
 - [x] 🟢 **Concluído** — **Serviço de topologia** sobre `petgraph`, com links manuais, inferência por sub-rede, deduplicação, controle de confiança e resolução de vizinhos LLDP/CDP via SNMP.
 - [x] 🟢 **Concluído** — **Templates Zabbix**: parser JSON/XML, filtragem de `SNMP_AGENT`, multiplicador, coleta em lotes de 6 OIDs e `zabbix_template_monitor_sync` autocorretivo.
 
+**Correção de arrasto (feita na Fase 6):** uma varredura cancelada pelo operador gravava
+`status = "failed"` na `discovery_run` — os dois ramos do `if` eram idênticos. Agora grava
+`"cancelled"`, como manda a [§7.7](#77-discovery); a tela deixa de mostrar erro onde houve uma
+decisão deliberada.
+
 **Aceite pendente:** validar uma faixa `/24` no Docker sem root e validar `authNoPriv`/`authPriv` do SNMPv3 em agente real antes de declarar a Fase 5 encerrada.
 
-### Fase 6 — Alertas, eventos e autenticação (🟡 Parcial — base entregue em 2026-08-11)
+### Fase 6 — Alertas, eventos e autenticação (🟢 **Concluída** — 2026-08-11)
 
 - [x] 🟢 **Concluído** — `EventBus` + `EventRelay` + `/api/events/stream` (SSE), outbox entre processos, buffer de 1.024 eventos, keep-alive e recuperação de lag por `stream:resync`.
-- [ ] Motor de alertas completo (manager, evaluator, repository, datasets, recovery, silence)
-- [ ] Catálogo com os **18 templates** e `ensure_defaults`
-- [ ] 4 canais de notificação
+- [x] 🟢 **Concluído** — Motor de alertas completo em `src/services/alerts/`: `fields`, `contracts`,
+      `evaluator`, `repository`, `manager`, `recovery`, `silence` e os três `datasets`
+      (`monitor_result`, `interface_state`, `vpn_peer`). O `evaluator` preserva o `===` do
+      JavaScript (matriz #28), o `manager` guarda `pendingSince` em memória para o
+      `durationSeconds` (matriz #24) e deduplica por (regra, `scopeKey`) (matriz #25).
+- [x] 🟢 **Concluído** — Catálogo com os **18 templates** (`catalog/templates.rs`), idempotência
+      por `templateKey` **ou** assinatura `field|operator|value|site|device|monitor` (matriz #26)
+      e `ensure_defaults` que só age em banco sem regra alguma (matriz #27), ligado ao
+      `MonitoringInitializer` — falha não impede o boot.
+- [x] 🟢 **Concluído** — 4 canais de notificação (`email` via mailer do Loco, `telegram`,
+      `discord`, `webhook`). Canal sem configuração devolve `false` sem tentar; falha de canal
+      nunca propaga.
+- [x] 🟢 **Concluído** — `src/controllers/alerts.rs` com `/api/alert-rules[/catalog]`,
+      `/api/alerts` (modo dual, teto 100), `acknowledge`, `verify`, `verify-all`, `silence`, mais
+      `GET /api/monitors/:id/alerts`. `GET /api/events` passou a devolver o envelope Lucid com
+      `device`/`monitor` achatados (§7.12).
+- [x] 🟢 **Concluído** — `interface_monitoring` + `link_speed` ligados ao poll SNMP: só interface
+      com `adminStatus = up` é avaliada, `ifSpeed` saturado não vira falso downgrade (matriz #18)
+      e as transições saem no feed (`interface:status_change`, `interface:speed_change`,
+      `interface:speed_downgrade`).
 - [x] 🟢 **Concluído** — JWT ligado às rotas de negócio; o Loco aceita `Authorization: Bearer` e fallback `?token=` para SSE. Login, `me` e logout usam o contrato consumido pela SPA.
 - [x] 🟢 **Concluído** — Patches **F1–F4** no frontend: usuário persistido e reidratado, logout remoto, guarda de rota e redirecionamento em 401.
 - [x] 🟢 **Concluído (development/test)** — seed `admin@monitor.local` / `admin123` e teste de autenticação correspondente.
 
-**Aceite pendente:** login/logout reais e persistência de sessão estão validados; alerta, notificação, recuperação e catálogo ainda dependem do motor de alertas e dos canais desta fase.
+**Correção de contrato entregue nesta fase.** O `DomainEvent` serializava
+`{type, payload, occurredAt}`; a §11.1 e o `stores/events.ts` leem `{type, data, timestamp}`.
+Com os nomes antigos **todo** `case` do despachante do frontend recebia `{}` — sem erro visível
+em nenhum dos dois lados. Corrigido no `EventBus`, com teste que trava os três nomes. Na mesma
+passagem: `monitor:updated` virou `monitor:result` (o nome que o frontend despacha), com o
+payload completo que a timeline consome, e o primeiro quadro do SSE passou a carregar
+`retry: 3000`.
 
-### Fase 7 — Probes (🔴)
+**Aceite:** ✅ regra do catálogo dispara alerta em monitor caído, o alerta não duplica no ciclo
+seguinte, desabilitar/remover o monitor normaliza os abertos, reconhecer e silenciar mudam o
+estado sem fechar, e a Central de Alertas recebe `title`/`silencedUntil` derivados.
 
-- [ ] Autenticação por token, `heartbeat`, `tasks`, `results`
-- [ ] `ProbeTaskDispatcher` com TTL de 120 s e substituição por monitor
-- [ ] `ProbeWatchdog` (90 s) com evento de transição
-- [ ] `tasks/probe_run.rs` (agente) + buffer offline
-- [ ] `tasks/probe_register.rs`
+### Fase 7 — Probes (🟢 **Concluída** — 2026-08-11)
 
-**Aceite:** container `probe` registra, recebe tarefas, executa e reporta; derrubar o probe o
-marca `offline` e os monitores caem no fallback local.
+- [x] 🟢 **Concluído** — Autenticação por token (`X-Probe-Token` ou `token` no corpo),
+      `heartbeat`, `tasks` e `results`. As três rotas ficam **fora** do guarda JWT
+      (`probes::agent_routes`), porque o agente não tem sessão de usuário.
+- [x] 🟢 **Concluído** — `dispatcher` com TTL de 120 s (matriz #8) e substituição por monitor
+      via `DELETE` + `INSERT`, respeitando o `UNIQUE(monitor_id)` (matriz #9).
+- [x] 🟢 **Concluído** — `liveness` (90 s) com `probe:status` só na transição; revogar um probe
+      esvazia a fila dele.
+- [x] 🟢 **Concluído** — `tasks/probe_run.rs` (agente com heartbeat → flush → tarefas → reporte)
+      + buffer offline em `tmp/probe_buffer.json`, tolerante a arquivo corrompido.
+- [x] 🟢 **Concluído** — `tasks/probe_register.rs`, imprimindo o token cru uma única vez.
+- [x] 🟢 **Concluído** — `scheduler_run` despacha para probe vivo, cai no **fallback local**
+      quando ele está offline e só então grava `unknown` com `reason: "probe_offline"`
+      (matriz #7). O watchdog roda antes do despacho.
+
+**Aceite:** ✅ coberto por teste de requisição — o ciclo do scheduler enfileira a tarefa para o
+probe com heartbeat, rebaixa para `offline` o que ficou mudo, o agente autentica com o token
+compartilhado do `vpn-probe`, a tarefa vencida é descartada sem reentrega e o resultado
+reportado vira histórico do monitor. Validação em container fica para a Fase 9.
 
 ### Fase 8 — VPN WireGuard (🔴)
 
@@ -1866,9 +1908,9 @@ verificação manual registrada).
 | 4 | `device.status` só é escrito pelo `DeviceStatusService` e só emite evento na transição | `device_status_service.ts` | teste de integração |
 | 5 | `recentResults` traz até 30 **por monitor** | `monitor_presenter.ts` | teste com 3 monitores × 50 resultados |
 | 6 | Scheduler grava `next_run_at` antes de executar | `scheduler_run.ts` | teste |
-| 7 | Probe offline → fallback local → resultado `unknown` (não `down`) | `scheduler_run.ts` | teste |
-| 8 | Tarefa de probe vencida (>120 s) é descartada, não executada | `probe_task_dispatcher.ts` | unitário |
-| 9 | Uma tarefa pendente por monitor (substituição, não acúmulo) | migration + dispatcher | teste |
+| 7 | Probe offline → fallback local → resultado `unknown` (não `down`) | `scheduler_run.ts` | ✅ `scheduler_run::report_probe_unavailable` + teste de ciclo (F7) |
+| 8 | Tarefa de probe vencida (>120 s) é descartada, não executada | `probe_task_dispatcher.ts` | ✅ `tarefa_vencida_e_descartada_e_nao_reentregue` |
+| 9 | Uma tarefa pendente por monitor (substituição, não acúmulo) | migration + dispatcher | ✅ `uma_tarefa_pendente_por_monitor` |
 | 10 | Faixa > 1024 hosts é truncada e a UI é avisada (`truncated`) | `cidr_range.ts` | unitário |
 | 11 | `/31` e `/32` sem rede/broadcast reservados | `cidr_range.ts` | unitário |
 | 12 | HTTP não varre: `POST /networks/:id/scan` só enfileira | `networks_controller.ts` | teste de requisição |
@@ -1877,18 +1919,18 @@ verificação manual registrada).
 | 15 | `discovery_results` é cache: limpo a cada scan concluído | `discovery_service.ts` | teste |
 | 16 | Rollover de contador SNMP 2³²/2⁶⁴ e detecção de reboot | `traffic_collector.ts` | unitário com 3 cenários |
 | 17 | `ifHighSpeed` (Mbps) prevalece sobre `ifSpeed` saturado | `interface_collector.ts` / `snmp_checker.ts` | unitário |
-| 18 | `ifSpeed == 4294967295` → velocidade desconhecida (sem falso downgrade) | `link_speed.ts` | unitário |
+| 18 | `ifSpeed == 4294967295` → velocidade desconhecida (sem falso downgrade) | `link_speed.ts` | ✅ `link_speed` + `interface_state` (unitários) |
 | 19 | Poll SNMP só marca `online` se algum OID respondeu | `snmp_service.ts` | teste |
 | 20 | `adminStatus` definido pelo usuário é preservado no poll | `snmp_service.ts` | teste |
 | 21 | Itens Zabbix lidos em lote de 6 OIDs | `zabbix_template_collector.ts` | unitário |
 | 22 | Reimport de template por `uuid` preserva o `id` (e os devices vinculados) | `zabbix_templates_controller.ts` | teste |
 | 23 | Monitor "Coleta de Template Zabbix" é autocorretivo | `zabbix_template_monitor_sync.ts` | teste |
-| 24 | `durationSeconds` só dispara após condição sustentada | `alert_manager.ts` | unitário com relógio controlado |
-| 25 | Um alerta aberto por (regra, `scopeKey`) | `alert_manager.ts` | teste |
-| 26 | Catálogo é idempotente por `templateKey` **ou** assinatura | `alert_rule_catalog_service.ts` | teste |
-| 27 | `ensure_defaults` não ressuscita regra apagada | idem | teste |
-| 28 | `eq` compara sem coerção (template usa `"2"` string) | `rule_evaluator.ts` | unitário |
-| 29 | Recuperação fecha alertas por `scopeKey` + `monitorId` | `recovery_manager.ts` | teste |
+| 24 | `durationSeconds` só dispara após condição sustentada | `alert_manager.ts` | ✅ `manager::has_sustained_condition` (unitário) |
+| 25 | Um alerta aberto por (regra, `scopeKey`) | `alert_manager.ts` | ✅ `monitor_caido_dispara_alerta_e_a_volta_o_resolve` |
+| 26 | Catálogo é idempotente por `templateKey` **ou** assinatura | `alert_rule_catalog_service.ts` | ✅ `o_catalogo_e_idempotente_e_traz_os_dezoito_templates` |
+| 27 | `ensure_defaults` não ressuscita regra apagada | idem | ✅ `catalog::service::ensure_defaults` (guarda por `count`) |
+| 28 | `eq` compara sem coerção (template usa `"2"` string) | `rule_evaluator.ts` | ✅ `eq_compara_sem_coercao_como_o_javascript` |
+| 29 | Recuperação fecha alertas por `scopeKey` + `monitorId` | `recovery_manager.ts` | ✅ `recovery::resolve_scope` + teste de disable |
 | 30 | Eventos de background chegam ao SSE via `event_outbox` | `event_relay.ts` | teste com 2 processos |
 | 31 | Relay ignora eventos da própria origem | `event_relay.ts` | unitário |
 | 32 | Relay só consulta o banco com assinante SSE conectado | `events_controller.ts` | teste |
@@ -1905,7 +1947,7 @@ verificação manual registrada).
 | 43 | `DEFAULT_VPN_PROBE_TOKEN` como fallback ⚠️ | `vpn_probe_registrar.ts` | teste |
 | 44 | Rate limit 10/60 s + `Retry-After` nos endpoints sensíveis | `access_control.ts` | teste |
 | 45 | Pruner respeita as 3 variáveis de retenção | `data_pruner_service.ts` | teste |
-| 46 | Modo dual array/paginado nos 4 endpoints | vários controllers | teste de requisição |
+| 46 | Modo dual array/paginado nos 4 endpoints | vários controllers | ✅ `/api/alerts` coberto em `monitor_caido_dispara_alerta_e_a_volta_o_resolve`; demais na Fase 2 |
 | 47 | `createdAt` em `dd/MM/yyyy HH:mm:ss` em metrics/events de device | `devices_controller.ts` | teste |
 | 48 | `topology` cria aresta virtual para `parentId` com id negativo | `topology_service.ts` | teste |
 | 49 | `last_seen_at` do link não conta como alteração | `link_resolver.ts` | unitário |

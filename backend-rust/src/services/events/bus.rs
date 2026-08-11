@@ -11,12 +11,20 @@ use crate::{
     services::shared::errors::{AppError, AppResult},
 };
 
+/// Evento de domínio no formato exato que o `EventSource` do frontend lê.
+///
+/// Os três nomes são contrato (§11.1): `stores/events.ts` faz
+/// `raw.type`, `raw.data` e `raw.timestamp` — um `payload`/`occurredAt`
+/// idiomático em Rust chegaria como `undefined` e todo `case` do despachante
+/// receberia `{}`, sem erro visível em lugar nenhum.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DomainEvent {
     #[serde(rename = "type")]
     pub event_type: String,
+    #[serde(rename = "data")]
     pub payload: serde_json::Value,
+    #[serde(rename = "timestamp")]
     pub occurred_at: String,
 }
 
@@ -101,15 +109,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn serializa_tipo_no_contrato_sse() {
+    fn serializa_no_contrato_sse_do_frontend() {
         let event = DomainEvent {
-            event_type: "monitor:updated".into(),
+            event_type: "monitor:result".into(),
             payload: serde_json::json!({ "id": 7 }),
             occurred_at: "2026-08-11T00:00:00Z".into(),
         };
-        assert_eq!(
-            serde_json::to_value(event).unwrap()["type"],
-            "monitor:updated"
-        );
+        let json = serde_json::to_value(event).unwrap();
+        // `stores/events.ts` lê exatamente estes três nomes.
+        assert_eq!(json["type"], "monitor:result");
+        assert_eq!(json["data"]["id"], 7);
+        assert_eq!(json["timestamp"], "2026-08-11T00:00:00Z");
+        assert!(json.get("payload").is_none());
+        assert!(json.get("occurredAt").is_none());
     }
 }

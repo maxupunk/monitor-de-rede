@@ -80,9 +80,11 @@ impl Checker for DnsChecker {
             .collect();
         let total = samples.len().max(1);
         let rate = successful.len() as f64 * 100.0 / total as f64;
-        let average = (!successful.is_empty())
-            .then(|| successful.iter().sum::<f64>() / successful.len() as f64)
-            .unwrap_or(0.0);
+        let average = if successful.is_empty() {
+            0.0
+        } else {
+            successful.iter().sum::<f64>() / successful.len() as f64
+        };
         let min = successful.iter().copied().reduce(f64::min).unwrap_or(0.0);
         let max = successful.iter().copied().reduce(f64::max).unwrap_or(0.0);
         let threshold = config.warning_threshold_ms.unwrap_or(f64::INFINITY);

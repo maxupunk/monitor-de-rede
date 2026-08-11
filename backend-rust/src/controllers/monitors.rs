@@ -10,6 +10,7 @@ use crate::{
     dtos::resources::{MonitorInput, PaginationQuery},
     models::{monitor_results, monitors},
     services::{
+        alerts::recovery,
         maintenance::resource_cleanup::ResourceCleanupService,
         monitoring::{
             device_status,
@@ -211,7 +212,11 @@ async fn update(
     }
     .update(&ctx.db)
     .await?;
-    if !enabled { /* A resolução dos alertas é adicionada pelo motor da Fase 6. */ }
+    // Desabilitar um monitor cala a fonte do alerta: manter o evento aberto
+    // deixaria a Central de Alertas apontando para algo que ninguém mais mede.
+    if !enabled {
+        recovery::resolve_alerts_for_monitor(&ctx, id, "Monitor desativado").await?;
+    }
     let mut output = present_monitors(&ctx.db, vec![row], RECENT_RESULTS_LIMIT).await?;
     Ok(format::json(output.remove(0))?)
 }
@@ -221,6 +226,9 @@ async fn destroy(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResul
         .one(&ctx.db)
         .await?
         .ok_or_else(|| AppError::not_found("Monitor não encontrado"))?;
+    // Resolver **antes** de apagar: o cleanup remove os `alert_events` do
+    // monitor, e sem esta passagem a notificação de normalização nunca sairia.
+    recovery::resolve_alerts_for_monitor(&ctx, id, "Monitor removido").await?;
     ResourceCleanupService::delete_monitor(&ctx.db, id).await?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
@@ -257,6 +265,11 @@ async fn toggle(
     let mut active: monitors::ActiveModel = current.clone().into();
     active.enabled = Set(enabled);
     let row = active.update(&ctx.db).await?;
+    // Desabilitar cala a fonte do alerta: manter o evento aberto deixaria a
+    // Central de Alertas apontando para algo que ninguém mais mede.
+    if !enabled {
+        recovery::resolve_alerts_for_monitor(&ctx, id, "Monitor desativado").await?;
+    }
     if let Some(device_id) = row.device_id {
         if let Some(device) = crate::models::devices::Entity::find_by_id(device_id)
             .one(&ctx.db)
@@ -300,6 +313,21 @@ async fn results(
     Ok(format::json(data)?)
 }
 
+/// Histórico de alertas do monitor (§7.6), sempre paginado.
+async fn alerts(
+    State(ctx): State<AppContext>,
+    Path(id): Path<i64>,
+    Query(query): Query<PaginationQuery>,
+) -> AppResult<Response> {
+    monitors::Entity::find_by_id(id)
+        .one(&ctx.db)
+        .await?
+        .ok_or_else(|| AppError::not_found("Monitor não encontrado"))?;
+    Ok(format::json(
+        crate::controllers::alerts::alerts_for_monitor(&ctx, id, &query).await?,
+    )?)
+}
+
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("/monitors")
@@ -309,4 +337,5 @@ pub fn routes() -> Routes {
         .add("/{id}/enable", post(enable))
         .add("/{id}/disable", post(disable))
         .add("/{id}/results", get(results))
+        .add("/{id}/alerts", get(alerts))
 }

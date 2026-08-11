@@ -78,6 +78,41 @@ pub struct ProbeInput {
     pub configuration: Option<serde_json::Value>,
 }
 
+/// Regra de alerta vinda da tela "Regras Configuradas".
+///
+/// Todo campo é opcional porque o `PUT` é parcial: o botão de ligar/desligar
+/// da lista manda só `{ "enabled": false }`, e o restante da regra tem de
+/// sobreviver — é o mesmo `request.only(...)` + `merge` do AdonisJS.
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AlertRuleInput {
+    pub site_id: Option<i64>,
+    pub device_id: Option<i64>,
+    pub monitor_id: Option<i64>,
+    pub name: Option<String>,
+    #[serde(rename = "type")]
+    pub rule_type: Option<String>,
+    pub condition: Option<serde_json::Value>,
+    pub severity: Option<String>,
+    pub duration_seconds: Option<i32>,
+    pub enabled: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogApplyInput {
+    pub keys: Option<Vec<String>>,
+}
+
+/// `POST /api/alerts/:id/silence`. O frontend manda `minutes`; `durationMinutes`
+/// é aceito por compatibilidade com integrações antigas, como no AdonisJS.
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SilenceInput {
+    pub minutes: Option<i64>,
+    pub duration_minutes: Option<i64>,
+}
+
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct DnsServerInput {

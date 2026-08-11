@@ -101,8 +101,11 @@ async fn scan(
             }
             Err(error) => {
                 let message = error.to_string();
+                // Cancelamento não é falha: a run interrompida pelo operador
+                // precisa aparecer como `cancelled` na lista (§7.7), senão a
+                // tela mostra erro onde houve uma decisão deliberada.
                 let status = if cancel.is_cancelled() {
-                    "failed"
+                    "cancelled"
                 } else {
                     "failed"
                 };

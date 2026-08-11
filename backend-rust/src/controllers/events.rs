@@ -1,5 +1,6 @@
 //! Historico de alertas e stream SSE de eventos de dominio.
 
+use axum::extract::Query;
 use axum::http::{header, HeaderValue};
 use axum::response::{
     sse::{Event, KeepAlive, Sse},
@@ -13,19 +14,37 @@ use tokio::sync::mpsc;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
 use crate::{
+    dtos::resources::PaginationQuery,
     models::alert_events,
     services::{
         events::{DomainEvent, EventBus},
-        shared::errors::AppResult,
+        shared::{
+            errors::AppResult,
+            pagination::{paginate_compat, LucidPage},
+        },
     },
+    views::alerts::serialize_events,
 };
 
-async fn index(State(ctx): State<AppContext>) -> AppResult<Response> {
-    let events = alert_events::Entity::find()
-        .order_by_desc(crate::models::_entities::alert_events::Column::CreatedAt)
-        .all(&ctx.db)
-        .await?;
-    Ok(format::json(events)?)
+/// `GET /api/events` (§7.12) — histórico paginado no envelope do Lucid, com
+/// `device` e `monitor` achatados como na Central de Alertas.
+async fn index(
+    State(ctx): State<AppContext>,
+    Query(query): Query<PaginationQuery>,
+) -> AppResult<Response> {
+    let page = paginate_compat(
+        &ctx.db,
+        alert_events::Entity::find()
+            .order_by_desc(crate::models::_entities::alert_events::Column::CreatedAt),
+        query.page.unwrap_or(1),
+        query.limit.unwrap_or(20),
+        |row| row,
+    )
+    .await?;
+    Ok(format::json(LucidPage {
+        data: serialize_events(&ctx.db, page.data).await?,
+        meta: page.meta,
+    })?)
 }
 
 async fn stream(State(ctx): State<AppContext>) -> AppResult<Response> {
@@ -38,13 +57,16 @@ async fn stream(State(ctx): State<AppContext>) -> AppResult<Response> {
             payload: serde_json::json!({}),
             occurred_at: Utc::now().to_rfc3339(),
         };
-        if sender.send(connected).await.is_err() {
+        // `retry` vai junto do primeiro quadro (§11.1): o `EventSource` do
+        // navegador tem backoff próprio, e sem esta linha uma queda de rede
+        // pode deixar o painel mudo por muito mais do que os 3 s combinados.
+        if sender.send((connected, true)).await.is_err() {
             return;
         }
         loop {
             match updates.recv().await {
                 Ok(event) => {
-                    if sender.send(event).await.is_err() {
+                    if sender.send((event, false)).await.is_err() {
                         return;
                     }
                 }
@@ -54,7 +76,7 @@ async fn stream(State(ctx): State<AppContext>) -> AppResult<Response> {
                         payload: serde_json::json!({ "skipped": skipped }),
                         occurred_at: Utc::now().to_rfc3339(),
                     };
-                    if sender.send(resync).await.is_err() {
+                    if sender.send((resync, false)).await.is_err() {
                         return;
                     }
                 }
@@ -62,10 +84,14 @@ async fn stream(State(ctx): State<AppContext>) -> AppResult<Response> {
             }
         }
     });
-    let stream = ReceiverStream::new(receiver).map(|event| {
-        Ok::<Event, Infallible>(
-            Event::default().data(serde_json::to_string(&event).unwrap_or_else(|_| "{}".into())),
-        )
+    let stream = ReceiverStream::new(receiver).map(|(event, first)| {
+        let frame =
+            Event::default().data(serde_json::to_string(&event).unwrap_or_else(|_| "{}".into()));
+        Ok::<Event, Infallible>(if first {
+            frame.retry(std::time::Duration::from_millis(3_000))
+        } else {
+            frame
+        })
     });
     let mut response = Sse::new(stream)
         .keep_alive(
