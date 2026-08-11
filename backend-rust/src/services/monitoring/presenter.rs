@@ -200,8 +200,8 @@ pub async fn present_monitors(
     Ok(output)
 }
 
-/// Busca os Ãºltimos resultados com uma window function, preservando o limite
-/// por monitor em uma Ãºnica consulta nos dois dialetos suportados.
+/// Busca os últimos resultados com uma window function, preservando o limite
+/// por monitor em uma única consulta nos dois dialetos suportados.
 async fn fetch_recent_results(
     db: &DatabaseConnection,
     monitors: &[monitors::Model],

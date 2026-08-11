@@ -22,6 +22,20 @@ pub struct ZabbixTemplateItemReading {
     pub unit: Option<String>,
 }
 
+/// Agrupa os OIDs dos itens em lotes de [`OID_BATCH_SIZE`].
+///
+/// O tamanho não é arbitrário e não deve ser "otimizado": é o mesmo do backend
+/// anterior. Um `GET` SNMP com varbinds demais estoura o PDU de agentes
+/// embarcados, que respondem `tooBig` e derrubam a coleta **inteira** — em vez
+/// de devolver o que caberia.
+#[must_use]
+pub fn oid_batches(items: &[zabbix_template_items::Model]) -> Vec<Vec<&str>> {
+    items
+        .chunks(OID_BATCH_SIZE)
+        .map(|batch| batch.iter().map(|item| item.snmp_oid.as_str()).collect())
+        .collect()
+}
+
 pub async fn preview(
     db: &sea_orm::DatabaseConnection,
     device: &devices::Model,
@@ -35,8 +49,8 @@ pub async fn preview(
         .all(db)
         .await?;
     let mut readings = Vec::with_capacity(items.len());
-    for batch in items.chunks(OID_BATCH_SIZE) {
-        let oids: Vec<_> = batch.iter().map(|item| item.snmp_oid.as_str()).collect();
+    let batches = oid_batches(&items);
+    for (batch, oids) in items.chunks(OID_BATCH_SIZE).zip(batches) {
         let values = client.get(&oids).await.ok();
         readings.extend(batch.iter().map(|item| {
             ZabbixTemplateItemReading {
@@ -129,4 +143,48 @@ pub async fn sync_zabbix_template_monitor(
         .await?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(indice: u32) -> zabbix_template_items::Model {
+        zabbix_template_items::Model {
+            id: i64::from(indice),
+            template_id: 1,
+            zabbix_uuid: None,
+            name: format!("Item {indice}"),
+            key: format!("item.{indice}"),
+            snmp_oid: format!("1.3.6.1.4.1.9.{indice}"),
+            value_type: "FLOAT".into(),
+            units: None,
+            multiplier: None,
+            created_at: Utc::now().into(),
+        }
+    }
+
+    #[test]
+    fn os_oids_saem_em_lote_de_seis() {
+        let items: Vec<_> = (1..=13).map(item).collect();
+        let batches = oid_batches(&items);
+
+        // 13 itens = 6 + 6 + 1.
+        assert_eq!(batches.len(), 3);
+        assert_eq!(batches[0].len(), OID_BATCH_SIZE);
+        assert_eq!(batches[1].len(), OID_BATCH_SIZE);
+        assert_eq!(batches[2], vec!["1.3.6.1.4.1.9.13"]);
+
+        // Nenhum OID se perde nem se repete no fatiamento.
+        let todos: Vec<_> = batches.concat();
+        assert_eq!(todos.len(), items.len());
+        assert_eq!(todos[0], "1.3.6.1.4.1.9.1");
+    }
+
+    #[test]
+    fn lote_exato_nao_cria_requisicao_vazia() {
+        let items: Vec<_> = (1..=6).map(item).collect();
+        assert_eq!(oid_batches(&items).len(), 1);
+        assert!(oid_batches(&[]).is_empty());
+    }
 }

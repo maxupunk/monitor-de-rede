@@ -76,8 +76,7 @@ pub async fn test_connection(config: SnmpConfig) -> AppResult<SnmpTestResult> {
     let system = collect_system(&super::client::SnmpClient::new(config))
         .await
         .map_err(map_error)?;
-    let success =
-        system.sys_descr.is_some() || system.sys_name.is_some() || system.sys_up_time.is_some();
+    let success = system.responded();
     Ok(SnmpTestResult {
         success,
         system,
@@ -101,9 +100,7 @@ pub async fn scan(config: SnmpConfig) -> AppResult<SnmpScanResult> {
     );
     let system = system.map_err(map_error)?;
     Ok(SnmpScanResult {
-        snmp_responded: system.sys_descr.is_some()
-            || system.sys_name.is_some()
-            || system.sys_up_time.is_some(),
+        snmp_responded: system.responded(),
         system,
         interfaces: interfaces.unwrap_or_default(),
         traffic: traffic.unwrap_or_default(),
@@ -360,7 +357,11 @@ pub struct SyncedInterface {
     pub previous_speed: Option<i64>,
 }
 
-async fn sync_interface(
+/// Espelha uma interface lida do agente na tabela local.
+///
+/// Público porque a matriz de paridade #20 — o `adminStatus` escolhido pelo
+/// operador sobrevive ao poll — só se prova contra o banco.
+pub async fn sync_interface(
     db: &sea_orm::DatabaseConnection,
     device_id: i64,
     source: &SnmpInterface,
@@ -384,7 +385,7 @@ async fn sync_interface(
         mac_address: Set(source.mac_address.clone()),
         r#type: Set(source.if_type.map(|kind| kind.to_string())),
         speed: Set(source.if_speed.and_then(|speed| i64::try_from(speed).ok())),
-        // Uma escolha manual do usuÃ¡rio prevalece sobre o valor observado no poll.
+        // Uma escolha manual do usuário prevalece sobre o valor observado no poll.
         admin_status: Set(admin_status.or_else(|| source.if_admin_status.map(status_label))),
         oper_status: Set(source.if_oper_status.map(status_label)),
         last_seen_at: Set(Some(now.into())),

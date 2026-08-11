@@ -54,9 +54,9 @@ pub async fn scan(allowed: &[Ipv4Addr]) -> Vec<DiscoveredHost> {
     }
 }
 
-/// Dispara conexÃµes curtas para que o kernel possa resolver os vizinhos antes
-/// de lermos o cache ARP. A conexÃ£o nÃ£o precisa completar: a tentativa TCP jÃ¡
-/// Ã© suficiente para provocar ARP e cada alvo continua estritamente limitado.
+/// Dispara conexões curtas para que o kernel possa resolver os vizinhos antes
+/// de lermos o cache ARP. A conexão não precisa completar: a tentativa TCP já
+/// é suficiente para provocar ARP e cada alvo continua estritamente limitado.
 #[cfg(target_os = "linux")]
 async fn prime_arp_cache(allowed: &[Ipv4Addr]) {
     stream::iter(

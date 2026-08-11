@@ -1932,9 +1932,16 @@ e confirmar o `syncconf` sem derrubar túneis ativos.
 - [x] 🟢 **Concluído** — `docs/roadmap.md` e `docs/arquitetura.md` com o aviso de migração e o
       ponteiro para este roadmap. A `arquitetura.md` continua válida no modelo de domínio;
       só a camada de framework envelheceu.
+- [x] 🟢 **Concluído** — Matriz de paridade fechada: **49 das 50 linhas com evidência**
+      nomeada. As 19 que faltavam viraram 35 testes novos (`tests/requests/phase9.rs` +
+      unitários), e 4 delas expuseram regressões reais, corrigidas antes de a linha ser
+      marcada. A #42 (corrida de IP concorrente) segue 🟡 por decisão anterior: a colisão
+      real só aparece com dois processos disputando o mesmo `UNIQUE`, o que fica para a
+      validação em container.
 - [ ] **Rodar os dois em paralelo por 1 ciclo de validação (shadow)**, comparando alertas
       gerados — exige os dois processos no ar contra o mesmo banco. Procedimento no §3 do
-      runbook.
+      runbook. ⚠️ Depende de restaurar `backend/` (`git checkout adonisjs-final -- backend/`),
+      que foi removido antes deste passo.
 - [x] 🟠 **Executado por decisão explícita do operador — 2026-08-11, fora de ordem.** `backend/`
       arquivado na tag `adonisjs-final` (commit `bf8fb72`) e removido da árvore em `340eecf`.
       As duas pré-condições do §5 do runbook **não** estavam atendidas: a paridade não fechou
@@ -1975,35 +1982,35 @@ verificação manual registrada).
 | 1 | Ping mede RTT e perda, `warning` em perda parcial | `ping_checker.ts` | ✅ `checkers::ping::summarize` (4 cenários: entrega total, perda parcial → `warning`, perda total → `down`, arredondamento da mensagem) |
 | 2 | Timeout do monitor sobrepõe o default do checker, salvo `timeoutMs` explícito | `monitor_runner.ts:mergeTimeout` | ✅ `runner::timeout_do_checker_tem_precedencia` |
 | 3 | `latencyMs` sai do primeiro nome da lista de precedência | `result_processor.ts` | ✅ `result_processor::precedencia_inclui_tcp_e_dns` + `datasets::monitor_result` (5 cenários) |
-| 4 | `device.status` só é escrito pelo `DeviceStatusService` e só emite evento na transição | `device_status_service.ts` | 🟡 **regressão corrigida** — o Rust não emitia `device:status` e o poll SNMP gravava o status direto. Falta o teste de integração da transição |
-| 5 | `recentResults` traz até 30 **por monitor** | `monitor_presenter.ts` | teste com 3 monitores × 50 resultados |
-| 6 | Scheduler grava `next_run_at` antes de executar | `scheduler_run.ts` | teste |
+| 4 | `device.status` só é escrito pelo `DeviceStatusService` e só emite evento na transição | `device_status_service.ts` | ✅ **regressão corrigida** — `a_transicao_de_status_publica_device_status_uma_unica_vez` + `prova_de_vida_avanca_sem_publicar_transicao`. O Rust não emitia `device:status` e o poll SNMP gravava o status direto |
+| 5 | `recentResults` traz até 30 **por monitor** | `monitor_presenter.ts` | ✅ `o_historico_recente_tem_trinta_itens_por_monitor` (3 monitores × 50 resultados) |
+| 6 | Scheduler grava `next_run_at` antes de executar | `scheduler_run.ts` | ✅ `o_scheduler_reserva_o_monitor_antes_de_executar` |
 | 7 | Probe offline → fallback local → resultado `unknown` (não `down`) | `scheduler_run.ts` | ✅ `scheduler_run::report_probe_unavailable` + `o_ciclo_do_scheduler_despacha_para_probe_vivo_e_marca_o_morto_offline` |
 | 8 | Tarefa de probe vencida (>120 s) é descartada, não executada | `probe_task_dispatcher.ts` | ✅ `tarefa_vencida_e_descartada_e_nao_reentregue` |
 | 9 | Uma tarefa pendente por monitor (substituição, não acúmulo) | migration + dispatcher | ✅ `uma_tarefa_pendente_por_monitor` |
 | 10 | Faixa > 1024 hosts é truncada e a UI é avisada (`truncated`) | `cidr_range.ts` | ✅ `cidr_range::marca_truncamento_acima_do_teto` + `queue::a_configuracao_da_run_avisa_o_truncamento` (**regressão corrigida**: a run gravava só `{cidr}`, sem `usableHosts`/`truncated`) |
 | 11 | `/31` e `/32` sem rede/broadcast reservados | `cidr_range.ts` | ✅ `cidr_range::rfc_3021_nao_reserva_rede_e_broadcast` + `expansao_respeita_rfc_3021_e_limite` |
-| 12 | HTTP não varre: `POST /networks/:id/scan` só enfileira | `networks_controller.ts` | teste de requisição |
+| 12 | HTTP não varre: `POST /networks/:id/scan` só enfileira | `networks_controller.ts` | ✅ `o_endpoint_de_scan_apenas_enfileira` (202 + nenhum resultado gravado + reaproveita a run) |
 | 13 | Run `running` há > 15 min é considerada abandonada | `discovery_queue.ts` | ✅ `queue::is_abandoned` (3 testes) — **não existia no Rust**: `enqueue_network_scan` só olhava `pending`, então varredura órfã nunca era fechada e dois cliques criavam runs concorrentes |
-| 14 | CIDR corrigido atualiza a run `pending` já enfileirada | `discovery_queue.ts` | teste |
-| 15 | `discovery_results` é cache: limpo a cada scan concluído | `discovery_service.ts` | teste |
+| 14 | CIDR corrigido atualiza a run `pending` já enfileirada | `discovery_queue.ts` | ✅ `cidr_corrigido_atualiza_a_run_pendente` |
+| 15 | `discovery_results` é cache: limpo a cada scan concluído | `discovery_service.ts` | ✅ `discovery_results_e_cache_e_nao_acumula_entre_execucoes` |
 | 16 | Rollover de contador SNMP 2³²/2⁶⁴ e detecção de reboot | `traffic_collector.ts` | ✅ `collectors::calcula_rollover_de_32_bits` + `_de_64_bits` + `nao_interpreta_reboot_como_rollover` |
-| 17 | `ifHighSpeed` (Mbps) prevalece sobre `ifSpeed` saturado | `interface_collector.ts` / `snmp_checker.ts` | unitário |
+| 17 | `ifHighSpeed` (Mbps) prevalece sobre `ifSpeed` saturado | `interface_collector.ts` / `snmp_checker.ts` | ✅ `collectors::parse_interfaces` (4 testes, incluindo `ifHighSpeed=0` não apagando a leitura real) |
 | 18 | `ifSpeed == 4294967295` → velocidade desconhecida (sem falso downgrade) | `link_speed.ts` | ✅ `link_speed` + `interface_state` (unitários) |
-| 19 | Poll SNMP só marca `online` se algum OID respondeu | `snmp_service.ts` | teste |
-| 20 | `adminStatus` definido pelo usuário é preservado no poll | `snmp_service.ts` | teste |
-| 21 | Itens Zabbix lidos em lote de 6 OIDs | `zabbix_template_collector.ts` | unitário |
-| 22 | Reimport de template por `uuid` preserva o `id` (e os devices vinculados) | `zabbix_templates_controller.ts` | teste |
-| 23 | Monitor "Coleta de Template Zabbix" é autocorretivo | `zabbix_template_monitor_sync.ts` | teste |
+| 19 | Poll SNMP só marca `online` se algum OID respondeu | `snmp_service.ts` | ✅ `so_oid_de_identidade_prova_contato_com_o_agente` (`SnmpSystemInfo::responded`) |
+| 20 | `adminStatus` definido pelo usuário é preservado no poll | `snmp_service.ts` | ✅ `admin_status_escolhido_pelo_operador_sobrevive_ao_poll` |
+| 21 | Itens Zabbix lidos em lote de 6 OIDs | `zabbix_template_collector.ts` | ✅ `os_oids_saem_em_lote_de_seis` + `lote_exato_nao_cria_requisicao_vazia` |
+| 22 | Reimport de template por `uuid` preserva o `id` (e os devices vinculados) | `zabbix_templates_controller.ts` | ✅ `reimportar_template_por_uuid_preserva_o_id_e_os_devices_vinculados` |
+| 23 | Monitor "Coleta de Template Zabbix" é autocorretivo | `zabbix_template_monitor_sync.ts` | ✅ `o_monitor_de_template_zabbix_se_conserta_sozinho` (não duplica, religa, recria e remove ao desvincular) |
 | 24 | `durationSeconds` só dispara após condição sustentada | `alert_manager.ts` | ✅ `manager::has_sustained_condition` (unitário) |
 | 25 | Um alerta aberto por (regra, `scopeKey`) | `alert_manager.ts` | ✅ `monitor_caido_dispara_alerta_e_a_volta_o_resolve` |
 | 26 | Catálogo é idempotente por `templateKey` **ou** assinatura | `alert_rule_catalog_service.ts` | ✅ `o_catalogo_e_idempotente_e_traz_os_dezoito_templates` |
 | 27 | `ensure_defaults` não ressuscita regra apagada | idem | ✅ `catalog::service::ensure_defaults` (guarda por `count`) |
 | 28 | `eq` compara sem coerção (template usa `"2"` string) | `rule_evaluator.ts` | ✅ `eq_compara_sem_coercao_como_o_javascript` |
 | 29 | Recuperação fecha alertas por `scopeKey` + `monitorId` | `recovery_manager.ts` | ✅ `recovery::resolve_scope` + teste de disable |
-| 30 | Eventos de background chegam ao SSE via `event_outbox` | `event_relay.ts` | teste com 2 processos |
-| 31 | Relay ignora eventos da própria origem | `event_relay.ts` | unitário |
-| 32 | Relay só consulta o banco com assinante SSE conectado | `events_controller.ts` | teste |
+| 30 | Eventos de background chegam ao SSE via `event_outbox` | `event_relay.ts` | ✅ `o_relay_so_trabalha_com_assinante_e_entrega_evento_de_outro_processo` |
+| 31 | Relay ignora eventos da própria origem | `event_relay.ts` | ✅ `o_relay_ignora_evento_da_propria_origem` |
+| 32 | Relay só consulta o banco com assinante SSE conectado | `events_controller.ts` | ✅ coberto no mesmo `o_relay_so_trabalha_com_assinante_...` (sem assinante devolve 0) |
 | 33 | Chave privada do peer entregue **uma única vez** | `secret_store.ts` | ✅ `o_wizard_cria_o_peer_com_device_monitores_e_artefato` |
 | 34 | QR só quando o perfil suporta e a chave ainda existe (senão 409) | `vpn_peers_controller.ts` | ✅ `rotacionar_entrega_chave_nova_e_qrcode_so_no_perfil_movel` |
 | 35 | `wg0.conf` escrito atomicamente (tmp + rename) | `config_writer.ts` | ✅ `escreve_o_arquivo_e_nao_deixa_temporario_para_tras` |
@@ -2018,10 +2025,10 @@ verificação manual registrada).
 | 44 | Rate limit 10/60 s + `Retry-After` nos endpoints sensíveis | `access_control.ts` | ✅ `o_rate_limit_devolve_429_com_retry_after` |
 | 45 | Pruner respeita as 3 variáveis de retenção | `data_pruner_service.ts` | ✅ `a_retencao_vem_do_ambiente_com_padrao` + `valor_invalido_ou_zerado_nao_desliga_a_purga` |
 | 46 | Modo dual array/paginado nos 4 endpoints | vários controllers | ✅ `/api/alerts` coberto em `monitor_caido_dispara_alerta_e_a_volta_o_resolve`; demais na Fase 2 |
-| 47 | `createdAt` em `dd/MM/yyyy HH:mm:ss` em metrics/events de device | `devices_controller.ts` | teste |
-| 48 | `topology` cria aresta virtual para `parentId` com id negativo | `topology_service.ts` | teste |
-| 49 | `last_seen_at` do link não conta como alteração | `link_resolver.ts` | unitário |
-| 50 | UDP: `open` / `closed` (ECONNREFUSED) / `open\|filtered` | `port_scanner_service.ts` | teste |
+| 47 | `createdAt` em `dd/MM/yyyy HH:mm:ss` em metrics/events de device | `devices_controller.ts` | ✅ `metricas_e_eventos_do_dispositivo_saem_no_formato_brasileiro` |
+| 48 | `topology` cria aresta virtual para `parentId` com id negativo | `topology_service.ts` | ✅ `topology::service` (4 testes: id negativo, não duplica enlace real, pai fora do recorte, sem pai) |
+| 49 | `last_seen_at` do link não conta como alteração | `link_resolver.ts` | ✅ `last_seen_at_nao_conta_como_alteracao` + `troca_de_porta_ou_de_confianca_conta_como_alteracao` |
+| 50 | UDP: `open` / `closed` (ECONNREFUSED) / `open\|filtered` | `port_scanner_service.ts` | ✅ `udp_so_afirma_fechada_com_icmp_port_unreachable` |
 
 ### Índice de comandos CLI (paridade)
 
@@ -2086,7 +2093,7 @@ Uma fase só é marcada 🟢 quando **todos** os itens abaixo são verdadeiros:
 
 - O frontend roda contra `backend-rust` com as mudanças da §12 e nada mais — F1–F4 mexem em
   comportamento; F7–F10 são só tipagem vinda dos bindings `ts-rs`.
-- As 50 linhas da matriz de paridade estão verdes.
+- As 50 linhas da matriz de paridade estão verdes — hoje 49, com a #42 pendente de validação em container.
 - `docker compose up` sobe `migration`, `server`, `scheduler`, `probe`, `wireguard`,
   `vpn-probe`, `frontend`, `postgres` — todos saudáveis.
 - Um ciclo completo funciona ponta a ponta: **descobrir** uma faixa → **cadastrar** um

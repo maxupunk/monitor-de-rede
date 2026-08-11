@@ -165,9 +165,27 @@ async fn scan_tcp(host: IpAddr, port: u16, timeout: Duration) -> PortScanItem {
     }
 }
 
+/// Traduz o desfecho de uma sondagem UDP no vocabulário do `nmap`.
+///
+/// UDP não tem handshake: silêncio é ambíguo por natureza — pode ser porta
+/// aberta que não responde àquele payload, ou firewall descartando o pacote. Só
+/// o `ICMP port unreachable`, que o SO entrega como `ECONNREFUSED`, prova que a
+/// porta está fechada. Por isso o padrão é `open|filtered` e **não** `closed`:
+/// afirmar "fechada" no escuro esconderia serviço ativo do operador.
+#[must_use]
+pub fn classify_udp_outcome(outcome: Result<io::Result<()>, ()>) -> &'static str {
+    match outcome {
+        // Estouro do timeout: ninguém respondeu, e isso não decide nada.
+        Err(()) => "open|filtered",
+        Ok(Ok(())) => "open",
+        Ok(Err(error)) if error.kind() == io::ErrorKind::ConnectionRefused => "closed",
+        Ok(Err(_)) => "open|filtered",
+    }
+}
+
 async fn scan_udp(host: IpAddr, port: u16, timeout: Duration) -> PortScanItem {
     let started = Instant::now();
-    let status = match tokio::time::timeout(timeout, async {
+    let outcome = tokio::time::timeout(timeout, async {
         let bind = if host.is_ipv4() {
             "0.0.0.0:0"
         } else {
@@ -180,12 +198,8 @@ async fn scan_udp(host: IpAddr, port: u16, timeout: Duration) -> PortScanItem {
         socket.recv(&mut reply).await.map(|_| ())
     })
     .await
-    {
-        Err(_) => "open|filtered",
-        Ok(Ok(())) => "open",
-        Ok(Err(error)) if error.kind() == io::ErrorKind::ConnectionRefused => "closed",
-        Ok(Err(_)) => "open|filtered",
-    };
+    .map_err(|_| ());
+    let status = classify_udp_outcome(outcome);
     PortScanItem {
         port,
         protocol: "udp".into(),
@@ -305,6 +319,27 @@ mod tests {
             started.elapsed() < Duration::from_secs(3),
             "o scan local levou {:?}",
             started.elapsed()
+        );
+    }
+
+    #[test]
+    fn udp_so_afirma_fechada_com_icmp_port_unreachable() {
+        // Matriz de paridade #50. O ECONNREFUSED é a tradução que o SO dá ao
+        // ICMP port unreachable — a única prova de porta fechada em UDP.
+        assert_eq!(
+            classify_udp_outcome(Ok(Err(io::Error::from(io::ErrorKind::ConnectionRefused)))),
+            "closed"
+        );
+        assert_eq!(classify_udp_outcome(Ok(Ok(()))), "open");
+        // Timeout e qualquer outro erro de rede não decidem nada.
+        assert_eq!(classify_udp_outcome(Err(())), "open|filtered");
+        assert_eq!(
+            classify_udp_outcome(Ok(Err(io::Error::from(io::ErrorKind::PermissionDenied)))),
+            "open|filtered"
+        );
+        assert_eq!(
+            classify_udp_outcome(Ok(Err(io::Error::from(io::ErrorKind::HostUnreachable)))),
+            "open|filtered"
         );
     }
 }

@@ -25,6 +25,19 @@ pub struct SnmpSystemInfo {
     pub sys_location: Option<String>,
 }
 
+impl SnmpSystemInfo {
+    /// Houve contato real com o agente? (matriz de paridade #19)
+    ///
+    /// Só `sysDescr`, `sysName` e `sysUpTime` contam. `sysContact` e
+    /// `sysLocation` ficam de fora de propósito: são campos de texto livre que
+    /// muitos agentes devolvem vazios, e aceitá-los como prova marcaria o
+    /// equipamento "online" sem que nenhum OID de identidade tivesse respondido.
+    #[must_use]
+    pub const fn responded(&self) -> bool {
+        self.sys_descr.is_some() || self.sys_name.is_some() || self.sys_up_time.is_some()
+    }
+}
+
 pub async fn collect_system(client: &SnmpClient) -> Result<SnmpSystemInfo, SnmpError> {
     let values = client
         .get(&[
@@ -63,8 +76,21 @@ pub struct SnmpInterface {
 pub async fn collect_interfaces(client: &SnmpClient) -> Result<Vec<SnmpInterface>, SnmpError> {
     let entries = client.walk("1.3.6.1.2.1.2.2.1").await?;
     let extended = client.walk("1.3.6.1.2.1.31.1.1.1").await?;
+    Ok(parse_interfaces(entries.into_iter().chain(extended)))
+}
+
+/// Monta as interfaces a partir das linhas cruas das duas tabelas
+/// (`ifTable` e `ifXTable`), sem transporte no meio.
+///
+/// Separado do `collect_interfaces` porque é aqui que vive a regra da matriz de
+/// paridade #17 — `ifHighSpeed` prevalece sobre `ifSpeed` — e provar isso pede
+/// linhas montadas à mão, não um agente SNMP de verdade.
+#[must_use]
+pub fn parse_interfaces(
+    entries: impl IntoIterator<Item = super::client::SnmpWalkEntry>,
+) -> Vec<SnmpInterface> {
     let mut values = BTreeMap::<i32, BTreeMap<u32, SnmpValue>>::new();
-    for entry in entries.into_iter().chain(extended) {
+    for entry in entries {
         let parts: Vec<u32> = entry
             .oid
             .split('.')
@@ -77,9 +103,13 @@ pub async fn collect_interfaces(client: &SnmpClient) -> Result<Vec<SnmpInterface
                 .insert(parts[parts.len() - 2], entry.value);
         }
     }
-    Ok(values
+    values
         .into_iter()
         .map(|(index, fields)| {
+            // `ifHighSpeed` (col. 15 da ifXTable) vem em Mbps e é a única leitura
+            // confiável acima de ~4,29 Gbps, onde o `ifSpeed` de 32 bits satura.
+            // O filtro `> 0` importa: agente que não implementa a coluna devolve
+            // 0, e aceitá-lo apagaria a velocidade real vinda do `ifSpeed`.
             let high_speed = fields
                 .get(&15)
                 .and_then(SnmpValue::number)
@@ -101,7 +131,7 @@ pub async fn collect_interfaces(client: &SnmpClient) -> Result<Vec<SnmpInterface
                 mac_address: fields.get(&6).map(SnmpValue::text),
             }
         })
-        .collect())
+        .collect()
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -457,5 +487,90 @@ mod tests {
             table_column_and_index("1.0.8802.1.1.2.1.4.1.1.9.10.4.2", "1.0.8802.1.1.2.1.4.1.1"),
             Some((9, vec![10, 4, 2]))
         );
+    }
+
+    fn linha(coluna: u32, indice: i32, value: SnmpValue) -> super::super::client::SnmpWalkEntry {
+        super::super::client::SnmpWalkEntry {
+            oid: format!("1.3.6.1.2.1.2.2.1.{coluna}.{indice}"),
+            value,
+        }
+    }
+
+    /// `ifSpeed` saturado (col. 5 = 4294967295) com `ifHighSpeed` (col. 15) real.
+    #[test]
+    fn if_high_speed_prevalece_sobre_if_speed_saturado() {
+        let interfaces = parse_interfaces([
+            linha(1, 1, SnmpValue::Text("Gi0/1".into())),
+            linha(5, 1, SnmpValue::Number(4_294_967_295)),
+            // 10 Gbps expressos em Mbps, como manda a MIB.
+            linha(15, 1, SnmpValue::Number(10_000)),
+        ]);
+        assert_eq!(interfaces.len(), 1);
+        assert_eq!(interfaces[0].if_speed, Some(10_000_000_000));
+    }
+
+    #[test]
+    fn sem_if_high_speed_a_leitura_cai_para_if_speed() {
+        let interfaces = parse_interfaces([
+            linha(1, 1, SnmpValue::Text("Fa0/1".into())),
+            linha(5, 1, SnmpValue::Number(100_000_000)),
+        ]);
+        assert_eq!(interfaces[0].if_speed, Some(100_000_000));
+    }
+
+    #[test]
+    fn if_high_speed_zerado_nao_apaga_a_velocidade_real() {
+        // Agente que não implementa a coluna devolve 0: aceitá-lo faria uma
+        // interface de 1 Gbps aparecer como velocidade desconhecida.
+        let interfaces = parse_interfaces([
+            linha(1, 1, SnmpValue::Text("Gi0/2".into())),
+            linha(5, 1, SnmpValue::Number(1_000_000_000)),
+            linha(15, 1, SnmpValue::Number(0)),
+        ]);
+        assert_eq!(interfaces[0].if_speed, Some(1_000_000_000));
+    }
+
+    #[test]
+    fn interface_sem_nome_recebe_rotulo_derivado_do_indice() {
+        let interfaces = parse_interfaces([linha(5, 7, SnmpValue::Number(1_000))]);
+        assert_eq!(interfaces[0].if_name, "eth7");
+        // Sem as colunas de status, o padrão é "1" (up) nos dois — é o que o
+        // backend anterior assumia para não inventar queda de link.
+        assert_eq!(interfaces[0].if_admin_status, Some(1));
+        assert_eq!(interfaces[0].if_oper_status, Some(1));
+    }
+
+    #[test]
+    fn so_oid_de_identidade_prova_contato_com_o_agente() {
+        // Matriz de paridade #19: sem isso o poll marcaria "online" no escuro e
+        // o ping seguinte derrubaria o dispositivo, publicando transição a cada
+        // ciclo.
+        let mudo = SnmpSystemInfo::default();
+        assert!(!mudo.responded());
+
+        for info in [
+            SnmpSystemInfo {
+                sys_descr: Some("Cisco IOS".into()),
+                ..Default::default()
+            },
+            SnmpSystemInfo {
+                sys_name: Some("sw-core".into()),
+                ..Default::default()
+            },
+            SnmpSystemInfo {
+                sys_up_time: Some(0),
+                ..Default::default()
+            },
+        ] {
+            assert!(info.responded(), "OID de identidade ignorado: {info:?}");
+        }
+
+        // Texto livre nao conta como prova de vida.
+        let so_texto_livre = SnmpSystemInfo {
+            sys_contact: Some("noc@exemplo".into()),
+            sys_location: Some("Rack 3".into()),
+            ..Default::default()
+        };
+        assert!(!so_texto_livre.responded());
     }
 }

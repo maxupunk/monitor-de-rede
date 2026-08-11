@@ -101,7 +101,7 @@ async fn poll(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<R
     let device = devices::Entity::find_by_id(id)
         .one(&ctx.db)
         .await?
-        .ok_or_else(|| AppError::not_found("Dispositivo nÃ£o encontrado"))?;
+        .ok_or_else(|| AppError::not_found("Dispositivo não encontrado"))?;
     let device_config = config(
         device
             .ip_address

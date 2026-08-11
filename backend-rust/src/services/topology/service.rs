@@ -50,6 +50,49 @@ pub struct TopologyGraph {
     pub edges: Vec<TopologyEdge>,
 }
 
+/// Acrescenta a aresta virtual do `parentId` quando não existe enlace real
+/// entre pai e filho (matriz de paridade #48).
+///
+/// O `id` é **negativo** de propósito: a tela usa o id da aresta para abrir o
+/// enlace, e um id positivo aqui apontaria para uma linha de `device_links` que
+/// não existe — o clique daria 404. O sinal é o que distingue "hierarquia
+/// declarada pelo operador" de "enlace descoberto".
+///
+/// A aresta só entra se pai e filho estiverem **ambos** no recorte pedido: um
+/// pai de outro site viraria nó fantasma no grafo.
+fn append_parent_edges(
+    edges: &mut Vec<TopologyEdge>,
+    devices: &[devices::Model],
+    ids: &BTreeSet<i64>,
+) {
+    for device in devices {
+        let Some(parent) = device.parent_id.filter(|parent| ids.contains(parent)) else {
+            continue;
+        };
+        // Um enlace real entre os dois já descreve a ligação — duplicar
+        // desenharia duas linhas entre o mesmo par de nós.
+        let ja_ligados = edges.iter().any(|edge| {
+            (edge.source == parent && edge.target == device.id)
+                || (edge.target == parent && edge.source == device.id)
+        });
+        if ja_ligados {
+            continue;
+        }
+        edges.push(TopologyEdge {
+            id: -(device.id * 1000 + parent),
+            source: parent,
+            target: device.id,
+            source_interface_id: None,
+            target_interface_id: None,
+            link_type: "parent".into(),
+            discovery_method: "parent_hierarchy".into(),
+            confidence: 100,
+            confirmed: true,
+            status: "up".into(),
+        });
+    }
+}
+
 pub async fn get_topology(
     db: &sea_orm::DatabaseConnection,
     site_id: Option<i64>,
@@ -94,27 +137,7 @@ pub async fn get_topology(
     let _has_cycle = is_cyclic_directed(&graph);
 
     let mut edges: Vec<_> = links.into_iter().map(edge).collect();
-    for device in &devices {
-        if let Some(parent) = device.parent_id.filter(|parent| ids.contains(parent)) {
-            if !edges.iter().any(|edge| {
-                (edge.source == parent && edge.target == device.id)
-                    || (edge.target == parent && edge.source == device.id)
-            }) {
-                edges.push(TopologyEdge {
-                    id: -(device.id * 1000 + parent),
-                    source: parent,
-                    target: device.id,
-                    source_interface_id: None,
-                    target_interface_id: None,
-                    link_type: "parent".into(),
-                    discovery_method: "parent_hierarchy".into(),
-                    confidence: 100,
-                    confirmed: true,
-                    status: "up".into(),
-                });
-            }
-        }
-    }
+    append_parent_edges(&mut edges, &devices, &ids);
     Ok(TopologyGraph {
         nodes: devices
             .into_iter()
@@ -221,8 +244,8 @@ pub async fn infer_subnet_links(db: &sea_orm::DatabaseConnection) -> AppResult<u
 }
 
 /// Converte os vizinhos LLDP/CDP observados no poll SNMP em enlaces persistidos.
-/// O nome e o endereÃ§o de gerÃªncia sÃ£o usados apenas para relacionar dispositivos
-/// jÃ¡ cadastrados; uma resposta externa nunca cria um dispositivo implicitamente.
+/// O nome e o endereço de gerência são usados apenas para relacionar dispositivos
+/// já cadastrados; uma resposta externa nunca cria um dispositivo implicitamente.
 pub async fn resolve_discovered_neighbors(
     ctx: &loco_rs::app::AppContext,
     source: &devices::Model,
@@ -293,4 +316,100 @@ pub async fn resolve_discovered_neighbors(
         });
     }
     Ok(persist_resolved_links_detailed(&ctx.db, raw).await?.links)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dispositivo(id: i64, parent_id: Option<i64>) -> devices::Model {
+        devices::Model {
+            id,
+            site_id: None,
+            network_id: None,
+            parent_id,
+            zabbix_template_id: None,
+            ip_address: None,
+            name: format!("dev-{id}"),
+            r#type: "switch".into(),
+            vendor: None,
+            model: None,
+            serial_number: None,
+            description: None,
+            is_monitored: true,
+            snmp_enabled: false,
+            snmp_community: None,
+            snmp_version: None,
+            status: "online".into(),
+            last_seen_at: None,
+            created_at: chrono::Utc::now().into(),
+            updated_at: chrono::Utc::now().into(),
+        }
+    }
+
+    fn aresta_real(id: i64, source: i64, target: i64) -> TopologyEdge {
+        TopologyEdge {
+            id,
+            source,
+            target,
+            source_interface_id: None,
+            target_interface_id: None,
+            link_type: "snmp".into(),
+            discovery_method: "lldp".into(),
+            confidence: 90,
+            confirmed: true,
+            status: "up".into(),
+        }
+    }
+
+    #[test]
+    fn parent_id_vira_aresta_virtual_com_id_negativo() {
+        let devices = vec![dispositivo(1, None), dispositivo(7, Some(1))];
+        let ids = BTreeSet::from([1, 7]);
+        let mut edges = Vec::new();
+        append_parent_edges(&mut edges, &devices, &ids);
+
+        assert_eq!(edges.len(), 1);
+        let aresta = &edges[0];
+        // Matriz de paridade #48: id negativo distingue hierarquia de enlace real.
+        assert_eq!(aresta.id, -(7 * 1000 + 1));
+        assert!(aresta.id < 0);
+        assert_eq!(aresta.source, 1);
+        assert_eq!(aresta.target, 7);
+        assert_eq!(aresta.link_type, "parent");
+        assert_eq!(aresta.discovery_method, "parent_hierarchy");
+    }
+
+    #[test]
+    fn enlace_real_existente_dispensa_a_aresta_virtual() {
+        let devices = vec![dispositivo(1, None), dispositivo(7, Some(1))];
+        let ids = BTreeSet::from([1, 7]);
+
+        // Nos dois sentidos: o enlace descoberto pode ter nascido de qualquer lado.
+        for real in [aresta_real(50, 1, 7), aresta_real(50, 7, 1)] {
+            let mut edges = vec![real];
+            append_parent_edges(&mut edges, &devices, &ids);
+            assert_eq!(edges.len(), 1, "aresta virtual duplicou um enlace real");
+            assert_eq!(edges[0].id, 50);
+        }
+    }
+
+    #[test]
+    fn pai_fora_do_recorte_nao_vira_no_fantasma() {
+        // O filho está no site pedido, o pai não. Desenhar a aresta criaria um
+        // nó que a lista de `nodes` não contém.
+        let devices = vec![dispositivo(7, Some(99))];
+        let ids = BTreeSet::from([7]);
+        let mut edges = Vec::new();
+        append_parent_edges(&mut edges, &devices, &ids);
+        assert!(edges.is_empty());
+    }
+
+    #[test]
+    fn dispositivo_sem_pai_nao_gera_aresta() {
+        let devices = vec![dispositivo(1, None)];
+        let mut edges = Vec::new();
+        append_parent_edges(&mut edges, &devices, &BTreeSet::from([1]));
+        assert!(edges.is_empty());
+    }
 }
