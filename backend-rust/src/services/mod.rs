@@ -3,4 +3,5 @@
 //! Regra do §1.3.3: o controller extrai, valida, delega e serializa. Toda regra
 //! de negócio vive aqui e é testável sem HTTP.
 
+pub mod discovery;
 pub mod shared;

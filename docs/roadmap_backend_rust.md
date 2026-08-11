@@ -158,6 +158,12 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 rasn = { version = "0.18" }
 rasn-snmp = { version = "0.18" }
 
+# --- rede: discovery e topologia ---
+mdns-sd = { version = "0.13" }         # mDNS service discovery assíncrono (224.0.0.251:5353)
+ssdp-client = { version = "0.4" }      # SSDP / UPnP device discovery (239.255.255.250:1900)
+petgraph = { version = "0.7" }         # Grafo de topologia (ciclos, menor caminho, componentes)
+phf = { version = "0.11", features = ["macros"] } # Tabela OUI (MAC vendor) O(1) sem alocação
+
 # --- criptografia ---
 x25519-dalek = { version = "2", features = ["static_secrets"] }
 chacha20poly1305 = { version = "0.10" }
@@ -586,7 +592,10 @@ snackbars). Implementar `src/services/shared/errors.rs` com um `AppError` `thise
 | 22 | `m…_system_settings` | `system_settings` | `key varchar(100) UNIQUE`, `value text?` |
 | 23 | `m…_auth_tokens` | *(opcional)* | Só se a Fase 6 optar por tokens opacos em vez de JWT puro. Ver [§10](#10-autenticação-e-autorização) |
 
-Depois de cada migration: `cargo loco db entities` para regenerar `src/models/_entities/`.
+Depois de cada migration: `cargo loco db entities` para regenerar `src/models/_entities/`
+— **contra o PostgreSQL**, nunca contra o SQLite (ver a nota de portabilidade na
+[Fase 1](#fase-1--esquema-e-entidades-)). Em seguida,
+`cargo run --example schema_parity` para conferir a paridade com o esquema do AdonisJS.
 
 ### 6.1 Regras de modelo (`src/models/*.rs`)
 
@@ -943,16 +952,15 @@ Regras portadas: `/31` e `/32` sem rede/broadcast reservados (RFC 3021); prefixo
 | `scanners/icmp.rs` | `surge-ping` compartilhado, `for_each_concurrent(64)`, `packet_count=1`, `timeout=1500ms`; PTR reverso via `hickory-resolver` (best effort); `confidence: 50` |
 | `scanners/arp.rs` | **Linux: ler `/proc/net/arp`** (mais confiável que parsear `arp -a`); Windows: `arp -a` via `tokio::process`. Antes, *probe* TCP:80 em lote de 20 (timeout 800 ms) para popular o cache. Filtra broadcast/multicast. `confidence: 80` |
 | `scanners/ports.rs` | Reusa `network_tools::port_scanner` com `COMMON_PORTS=[80,443,22,445,8080,8000,3389,161]`; `+20` de confiança quando há porta aberta (cap 100) |
-| `scanners/mdns.rs` | `tokio::net::UdpSocket` multicast `224.0.0.251:5353`, query PTR `_services._dns-sd._udp.local`, janela 2 s. Decode com `hickory-proto` (substitui o parser manual) — extrai nomes `.local` e registros A. `confidence: 70` |
-| `scanners/ssdp.rs` | UDP multicast `239.255.255.250:1900`, `M-SEARCH ST: ssdp:all`, janela 2 s; extrai `SERVER`, `LOCATION`, `USN`, `ST`; mapa de vendors por substring. `confidence: 60` |
-| `scanners/snmp.rs` | Só hosts com 161/162 abertos; `detect_connection` (v2c/v1 × public/private); extrai vendor de `sysDescr` (22 fabricantes mapeados). `confidence: 95` |
+| `scanners/mdns.rs` | `mdns-sd` (0.13) + `tokio::net::UdpSocket` multicast `224.0.0.251:5353`, query PTR `_services._dns-sd._udp.local`, janela 2 s. Decode com `hickory-proto` (substitui o parser manual binário) — extrai nomes `.local` e registros A. `confidence: 70` |
+| `scanners/ssdp.rs` | `ssdp-client` (0.4) + UDP multicast `239.255.255.250:1900`, `M-SEARCH ST: ssdp:all`, janela 2 s; extrai `SERVER`, `LOCATION`, `USN`, `ST`; mapa de vendors por substring. `confidence: 60` |
+| `scanners/snmp.rs` | `rasn-snmp` (0.18) assíncrono; só hosts com 161/162 abertos; `detect_connection` (v2c/v1 × public/private); extrai vendor de `sysDescr` (22 fabricantes mapeados). `confidence: 95` |
 
 **`device_identifier.rs`** — heurística de tipo (`router`, `switch`, `access_point`, `printer`,
 `camera`, `server`, `web_device`, `unknown`) por hostname + vendor + portas. Portar a ordem
 exata das regras (é significativa: `router` antes de `server` etc.).
 
-**`oui_lookup.rs`** — mapa OUI embutido (~120 entradas). Portar como `phf_map!` ou array
-estático ordenado + busca binária.
+**`oui_lookup.rs`** — mapa OUI embutido (~120 entradas). Implementar com a crate `phf` (`phf_map!`), garantindo busca O(1) em tempo de compilação sem alocação dinâmica.
 
 **`merger.rs`** — funde listas por IP: `macAddress`/`hostname`/`mdnsName`/`vendor` do mais
 recente prevalecem; `openPorts` são união; `confidence` é o máximo; `data` é merge; reclassifica
@@ -1026,6 +1034,8 @@ pub async fn detect_connection(host, port, preferred) -> Result<SnmpDetectResult
 ```
 
 ### 8.6 `topology` — `src/services/topology/`
+
+Uso da crate [`petgraph`](https://crates.io/crates/petgraph) (`0.7`) para construção do modelo em memória (`Graph<DeviceNode, LinkEdge>`). Permite detecção de ciclos, verificação de caminhos e agrupamento de componentes conectados antes de serializar o grafo de saída.
 
 ```rust
 pub async fn get_topology(db, site_id: Option<i32>) -> Result<TopologyGraph>;
@@ -1691,16 +1701,51 @@ O scaffold já traz `loco-rs[testing]`, `rstest`, `insta`, `serial_test`.
 `cargo fmt --check` e `cargo clippy -- -D warnings` limpos, `npm run typecheck` do frontend
 limpo.
 
-### Fase 1 — Esquema e entidades (🔴)
+### Fase 1 — Esquema e entidades (🟢 **Concluída** — 2026-08-10)
 
-- [ ] 23 migrations SeaORM com **todos** os índices, uniques e FKs de [§6](#6-modelo-de-dados--migrations)
-- [ ] `cargo loco db entities` gerando `src/models/_entities/`
-- [ ] `src/models/*.rs` com computados, cifra de campo (`private_key_encrypted`,
+- [x] 23 migrations SeaORM com **todos** os índices, uniques e FKs de [§6](#6-modelo-de-dados--migrations)
+      — 23 migrations registradas em `migration/src/lib.rs`: a `users` do scaffold, mais 22
+      novas (21 tabelas de negócio + a coluna `active` da §6 #01). A #23 `auth_tokens` não é
+      criada; ver abaixo.
+      FKs declaradas à mão em `migration/src/shared.rs`: o helper `refs` do Loco deriva a ação
+      da nulabilidade (anulável → `SET NULL`), e seis FKs do esquema são **anuláveis com
+      `CASCADE`** (`probes.site_id`, `networks.site_id`, `devices.site_id`, `monitors.device_id`
+      e as três de `alert_rules`).
+- [x] `cargo loco db entities` gerando `src/models/_entities/`
+      — geradas **a partir do PostgreSQL**, não do SQLite. Ver a nota de portabilidade abaixo.
+- [x] `src/models/*.rs` com computados, cifra de campo (`private_key_encrypted`,
       `preshared_key_encrypted`) e queries nomeadas
-- [ ] Migração testada em **SQLite e PostgreSQL**
-- [ ] Script de verificação comparando o esquema gerado com o do Adonis (colunas, tipos, índices)
+      — `Network::{scannable,usable_hosts,scan_truncated}`, `Monitor::{target,port,is_enabled}`,
+      `AlertRule::is_enabled`, a máquina de estados de `VpnPeer::connection_status`
+      ([§8.10.3](#8103-status-do-túnel-porte-literal), porte literal com os comentários),
+      `VpnServer::{private_key,set_private_key}`, `VpnPeer::{preshared_key,set_preshared_key}`,
+      `Probe::find_by_token`, `Monitor::find_due`, `Device::find_by_ip_or_name`,
+      `DnsServer::find_by_address`, `SystemSetting::{get,set}`.
+- [x] Migração testada em **SQLite e PostgreSQL**
+- [x] Script de verificação comparando o esquema gerado com o do Adonis (colunas, tipos, índices)
+      — `cargo run --example schema_parity`. Ele **parseia as migrations `.ts` do AdonisJS** e
+      compara com o catálogo do banco vivo; não é uma transcrição minha conferida contra ela
+      mesma. Resultado: **21 tabelas, 0 divergências não declaradas.**
 
-**Aceite:** `db migrate` + `db entities` idempotentes; diff de esquema vazio.
+**Divergências deliberadas** (todas declaradas no `schema_parity`, que falha se aparecer
+qualquer outra):
+
+| Onde | Divergência | Por quê |
+| :--- | :--- | :--- |
+| todas | PK e FK em `bigint` (i64), não `integer` | Padrão do Loco 0.17+. `metrics` e `monitor_results` são séries temporais — o teto de 2³¹ linhas é alcançável, e migrar o tipo depois exige parada. |
+| todas | `updated_at` `NOT NULL DEFAULT now()` | O `timestamps_tz` do Loco. Uma linha sempre tem instante de última escrita; `null` ali só produz ramo morto em quem lê. |
+| `monitor_results.latency_ms` | `double precision`, não `real` | A [§5.3](#53-tipos-numéricos) define `latencyMs` como `f64`. Ler um `real` como f64 injetaria ruído de precisão num número exibido com casas decimais. |
+| `devices.is_monitored`, `devices.snmp_enabled` | `NOT NULL DEFAULT false` | O Adonis esqueceu o `.notNullable()` e o knex deixou anulável. `NULL` não tem significado distinto de `false`; a coluna vira `bool` em vez de `Option<bool>`. |
+| `users` | fica a do scaffold Loco + `active` | [§6 #01](#6-modelo-de-dados--migrations). |
+| `auth_access_tokens` / `auth_tokens` | não criada | A [§10.2](#102-decisão) optou por `loco_rs::auth::JWT`, que não guarda token no banco. O nome segue em `CREATION_ORDER` caso a Fase 6 volte atrás. |
+
+> **Nota de portabilidade — gere as entidades do PostgreSQL.** O SQLite é dinamicamente tipado e
+> reporta todo inteiro como `INTEGER`; o `db entities` rodado contra ele produz `i64` para
+> colunas que em Postgres são `INT4`, e aí o `sqlx` recusa a leitura em produção. O caminho
+> inverso é seguro (o SQLite aceita ler `i32`), então as entidades saem do Postgres e os testes
+> continuam em SQLite. Isso vale para toda regeneração futura.
+
+**Aceite:** `db migrate` + `db entities` idempotentes; diff de esquema vazio. ✅
 
 ### Fase 2 — CRUDs e contrato base (🔴)
 
@@ -1737,15 +1782,21 @@ Configurações sem erro de console, apontando para o backend Rust.
 
 ### Fase 5 — SNMP, discovery e topologia (🔴)
 
-- [ ] `SnmpClient` (v1/v2c/v3) + 6 coletores + `SnmpService` (`scan`/`poll`/`test`/`detect`)
-- [ ] `SnmpChecker` (3 modos)
-- [ ] 6 scanners de discovery + `merger` + `oui_lookup` + `device_identifier`
-- [ ] `DiscoveryService`, `DiscoveryQueue`, `ScanSessionService` + SSE de scan
-- [ ] Topologia completa (LLDP/CDP, inferência, links manuais, grafo)
-- [ ] Templates Zabbix (parser, collector, monitor sync)
+- [ ] **Cliente SNMP v1/v2c/v3**: `SnmpClient` assíncrono sobre `tokio::net::UdpSocket` usando `rasn` + `rasn-snmp` (0.18) (SPIKE-01/ADR 001, sem `libsnmp` C e sem `spawn_blocking`) + 6 coletores (`system`, `interface`, `traffic`, `cpu`, `memory`, `lldp`) + `SnmpService` (`scan`/`poll`/`test`/`detect`)
+- [ ] **`SnmpChecker`**: 3 modos (status de interface, tráfego e uptime) com mapeamento RFC 2863 e tratamento de rollover 32/64-bits
+- [ ] **Scanners de Discovery**: 6 coletores assíncronos desacoplados otimizados para Linux/Docker:
+  - ICMP sweep via `surge-ping` (0.8) sobre `SOCK_DGRAM` (`ping_group_range="0 2147483647"`, sem `CAP_NET_RAW` / sem root)
+  - ARP via leitura direta de `/proc/net/arp` no Linux após pré-probe TCP porta 80/443
+  - Port sweep com concorrência adaptativa (estratégia RustScan sobre `tokio`)
+  - mDNS via `mdns-sd` (0.13) + `hickory-proto` (0.24) em `224.0.0.251:5353`
+  - SSDP via `ssdp-client` (0.4) em `239.255.255.250:1900`
+  - SNMP sweep via `rasn-snmp` (0.18) na porta 161
+- [ ] **Reconciliação e Identificação**: `merger`, `oui_lookup` (O(1) sem alocação com `phf`), `device_identifier` (heurística de tipos)
+- [ ] **Serviço de Varredura**: `DiscoveryService`, `DiscoveryQueue`, `ScanSessionService` + SSE de progresso ao vivo
+- [ ] **Serviço de Topologia**: `TopologyService` construído sobre `petgraph` (`0.7`), com leitura de MIBs LLDP (`1.0.8802...`) / CDP (`1.3.6.1.4.1.9...`) via `rasn-snmp`, inferência de sub-redes, links manuais e deduplicação de grafo
+- [ ] **Templates Zabbix**: Parser JSON/XML, collector de métricas customizadas e `zabbix_template_monitor_sync`
 
-**Aceite:** `/discovery` varre uma faixa /24 com progresso ao vivo; `/topology` desenha o
-grafo; poll SNMP grava métricas e detecta vizinhos.
+**Aceite:** `/discovery` varre uma faixa /24 com progresso ao vivo em Linux no Docker sem privilégio root; `/topology` desenha o grafo com `petgraph`; poll SNMP assíncrono grava métricas e detecta vizinhos LLDP/CDP.
 
 ### Fase 6 — Alertas, eventos e autenticação (🔴)
 

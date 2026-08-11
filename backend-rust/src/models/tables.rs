@@ -40,7 +40,9 @@ pub const CREATION_ORDER: [&str; 23] = [
     "event_outbox",
     "probe_tasks",
     "system_settings",
-    // Opcional (§6 #23 / §10): só existe se a Fase 6 optar por tokens opacos.
+    // Opcional (§6 #23 / §10). **Não migrada:** a §10.2 optou por
+    // `loco_rs::auth::JWT`, que não guarda token no banco. Fica listada porque
+    // a limpeza pula tabelas inexistentes e a Fase 6 ainda pode voltar atrás.
     "auth_tokens",
 ];
 

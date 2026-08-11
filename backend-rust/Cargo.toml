@@ -111,6 +111,12 @@ path = "examples/spikes/snmp_v2c.rs"
 name = "spike_dns_wire"
 path = "examples/spikes/dns_wire.rs"
 
+# Verificador de paridade de esquema (§15 Fase 1). Exemplo e não teste porque a
+# verificação completa exige um Postgres — que nem toda máquina de dev tem.
+[[example]]
+name = "schema_parity"
+path = "examples/schema_parity.rs"
+
 [dev-dependencies]
 loco-rs = { workspace = true, features = ["testing"] }
 serial_test = { version = "3.1.1" }
