@@ -144,6 +144,18 @@ nenhum alerta que ele geraria e o Rust não gerou.
 
 ## 5. Descomissionamento do `backend/`
 
+> 🟠 **Executado em 2026-08-11**, por decisão explícita do operador e **fora de ordem** —
+> os critérios acima não estavam atendidos. Tag `adonisjs-final` (`bf8fb72`), remoção em
+> `340eecf`. Para consultar o AdonisJS sem restaurar nada:
+> `git show adonisjs-final:backend/modules/<...>`.
+>
+> **Duas pendências que a remoção não elimina:**
+> 1. `git push origin adonisjs-final` — a tag ainda é local; sem o push, a remoção deixa
+>    de ser reversível em qualquer outro clone.
+> 2. O passo 2.2 abaixo (`node ace vpn:export-secrets`) vive no diretório removido. Se a
+>    migração de dados ainda não rodou, faça `git checkout adonisjs-final -- backend/`
+>    antes — sem ele os segredos da VPN não decifram.
+
 ⚠️ **Passo irreversível — só depois de todos os critérios acima.**
 
 ```sh

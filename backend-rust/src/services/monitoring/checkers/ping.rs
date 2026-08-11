@@ -98,7 +98,7 @@ impl Checker for PingChecker {
                         return failed_result(
                             started_at,
                             &host,
-                            "nenhum endereÃ§o IPv4 foi encontrado no DNS".into(),
+                            "nenhum endereço IPv4 foi encontrado no DNS".into(),
                         )
                     }
                 },
@@ -121,48 +121,64 @@ impl Checker for PingChecker {
             }
         }
 
-        let finished_at = Utc::now();
-        let duration_ms = (finished_at - started_at).num_milliseconds().max(0);
-        let packet_loss = 100.0 * (f64::from(count) - latencies.len() as f64) / f64::from(count);
-        let latency_ms = if latencies.is_empty() {
-            0.0
-        } else {
-            latencies.iter().map(Duration::as_secs_f64).sum::<f64>() * 1_000.0
-                / latencies.len() as f64
-        };
-        let status = if latencies.is_empty() {
-            MonitorStatus::Down
-        } else if packet_loss > 0.0 {
-            MonitorStatus::Warning
-        } else {
-            MonitorStatus::Up
-        };
-        let message = if status == MonitorStatus::Down {
-            format!("Host {host} inacessível (100% perda de pacotes)")
-        } else {
-            format!("Ping para {host} finalizado em {latency_ms:.1}ms ({packet_loss:.0}% perda)")
-        };
-        CheckResult {
-            success: status != MonitorStatus::Down,
-            status,
-            started_at,
-            finished_at,
-            duration_ms,
-            message: Some(message),
-            metrics: vec![
-                CheckMetric {
-                    name: "latency".into(),
-                    value: latency_ms,
-                    unit: "ms".into(),
-                },
-                CheckMetric {
-                    name: "packet_loss".into(),
-                    value: packet_loss,
-                    unit: "%".into(),
-                },
-            ],
-            data: serde_json::json!({}),
-        }
+        summarize(started_at, Utc::now(), &host, count, &latencies)
+    }
+}
+
+/// Converte as respostas recebidas na observação que o resto do sistema lê.
+///
+/// Separado do `execute` porque é aqui que mora a regra da matriz de paridade
+/// #1 — perda parcial é `warning`, perda total é `down` — e a única forma de
+/// provar isso de forma determinística é sem socket ICMP no meio: um teste que
+/// dependesse da rede do executor mediria o ambiente, não a regra.
+#[must_use]
+pub fn summarize(
+    started_at: chrono::DateTime<Utc>,
+    finished_at: chrono::DateTime<Utc>,
+    host: &str,
+    sent: u16,
+    latencies: &[Duration],
+) -> CheckResult {
+    let sent = sent.max(1);
+    let received = latencies.len();
+    let packet_loss = 100.0 * (f64::from(sent) - received as f64) / f64::from(sent);
+    let latency_ms = if latencies.is_empty() {
+        0.0
+    } else {
+        latencies.iter().map(Duration::as_secs_f64).sum::<f64>() * 1_000.0 / received as f64
+    };
+    let status = if latencies.is_empty() {
+        MonitorStatus::Down
+    } else if packet_loss > 0.0 {
+        MonitorStatus::Warning
+    } else {
+        MonitorStatus::Up
+    };
+    let message = if status == MonitorStatus::Down {
+        format!("Host {host} inacessível (100% perda de pacotes)")
+    } else {
+        format!("Ping para {host} finalizado em {latency_ms:.1}ms ({packet_loss:.0}% perda)")
+    };
+    CheckResult {
+        success: status != MonitorStatus::Down,
+        status,
+        started_at,
+        finished_at,
+        duration_ms: (finished_at - started_at).num_milliseconds().max(0),
+        message: Some(message),
+        metrics: vec![
+            CheckMetric {
+                name: "latency".into(),
+                value: latency_ms,
+                unit: "ms".into(),
+            },
+            CheckMetric {
+                name: "packet_loss".into(),
+                value: packet_loss,
+                unit: "%".into(),
+            },
+        ],
+        data: serde_json::json!({}),
     }
 }
 
@@ -188,5 +204,76 @@ fn failed_result(started_at: chrono::DateTime<Utc>, host: &str, error: String) -
             },
         ],
         data: serde_json::json!({}),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn medida(ms: u64) -> Duration {
+        Duration::from_millis(ms)
+    }
+
+    fn resumo(sent: u16, latencies: &[Duration]) -> CheckResult {
+        let started_at = Utc::now();
+        summarize(started_at, started_at, "192.0.2.10", sent, latencies)
+    }
+
+    fn metrica(result: &CheckResult, name: &str) -> f64 {
+        result
+            .metrics
+            .iter()
+            .find(|metric| metric.name == name)
+            .map(|metric| metric.value)
+            .expect("métrica presente")
+    }
+
+    #[test]
+    fn resposta_completa_mede_a_media_e_fica_up() {
+        let result = resumo(3, &[medida(10), medida(20), medida(30)]);
+        assert_eq!(result.status, MonitorStatus::Up);
+        assert!(result.success);
+        assert!((metrica(&result, "latency") - 20.0).abs() < 0.001);
+        assert!((metrica(&result, "packet_loss") - 0.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn perda_parcial_e_warning_e_nao_down() {
+        // Matriz de paridade #1: o host respondeu, então ele está acessível —
+        // rebaixar para `down` abriria alerta de queda num link só degradado.
+        let result = resumo(3, &[medida(10), medida(20)]);
+        assert_eq!(result.status, MonitorStatus::Warning);
+        assert!(result.success);
+        assert!((metrica(&result, "packet_loss") - 100.0 / 3.0).abs() < 0.001);
+        assert!((metrica(&result, "latency") - 15.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn perda_total_e_down_com_a_mensagem_do_backend_anterior() {
+        let result = resumo(3, &[]);
+        assert_eq!(result.status, MonitorStatus::Down);
+        assert!(!result.success);
+        assert!((metrica(&result, "packet_loss") - 100.0).abs() < 0.001);
+        // Sem resposta a latência é 0, e não uma média de conjunto vazio (NaN).
+        assert!((metrica(&result, "latency") - 0.0).abs() < 0.001);
+        assert_eq!(
+            result.message.as_deref(),
+            Some("Host 192.0.2.10 inacessível (100% perda de pacotes)")
+        );
+    }
+
+    #[test]
+    fn a_mensagem_de_sucesso_arredonda_como_o_backend_anterior() {
+        let result = resumo(2, &[medida(12), medida(13)]);
+        assert_eq!(
+            result.message.as_deref(),
+            Some("Ping para 192.0.2.10 finalizado em 12.5ms (0% perda)")
+        );
+        // Perda parcial arredonda o percentual para inteiro, como o `toFixed(0)`.
+        assert_eq!(
+            resumo(3, &[medida(12), medida(13)]).message.as_deref(),
+            Some("Ping para 192.0.2.10 finalizado em 12.5ms (33% perda)")
+        );
     }
 }

@@ -1935,8 +1935,29 @@ e confirmar o `syncconf` sem derrubar túneis ativos.
 - [ ] **Rodar os dois em paralelo por 1 ciclo de validação (shadow)**, comparando alertas
       gerados — exige os dois processos no ar contra o mesmo banco. Procedimento no §3 do
       runbook.
-- [ ] **Arquivar `backend/`** (tag git + remoção) — irreversível; §5 do runbook. Só depois de
-      a paridade fechar em zero e o ciclo de sombra passar.
+- [x] 🟠 **Executado por decisão explícita do operador — 2026-08-11, fora de ordem.** `backend/`
+      arquivado na tag `adonisjs-final` (commit `bf8fb72`) e removido da árvore em `340eecf`.
+      As duas pré-condições do §5 do runbook **não** estavam atendidas: a paridade não fechou
+      em zero (19 das 50 linhas seguem sem evidência) e o ciclo de sombra não rodou.
+      Consequências registradas:
+    - A referência de comportamento continua legível — `git show adonisjs-final:backend/...`
+      ou `git checkout adonisjs-final -- backend/` — e é ela que sustenta as 19 linhas
+      restantes da matriz. **Foi lendo o AdonisJS que as 4 regressões abaixo apareceram.**
+    - ⚠️ `node ace vpn:export-secrets` (§2.2 do runbook, re-cifra dos segredos da VPN) só
+      existe no diretório removido. **Se a migração de dados ainda não rodou, restaure
+      `backend/` antes de migrar** — sem ele os segredos VPN não decifram.
+    - A tag é local. `git push origin adonisjs-final` ainda precisa ser feito, senão a
+      remoção deixa de ser reversível para qualquer outro clone.
+
+**Regressões encontradas ao auditar a matriz** (todas corrigidas, todas invisíveis para o
+`parity_check` porque vivem em background, não no corpo HTTP):
+
+| # | Regressão | Efeito na tela |
+| :-: | :--- | :--- |
+| #4a | `device_status::apply` nunca publicava `device:status` — o comentário "será acoplada ao EventBus na Fase 6" ficou para trás | O frontend escuta esse evento em 5 pontos: lista de dispositivos ao vivo, detalhe, topologia, feed e notificação de queda. Todos mudos |
+| #4b | O poll SNMP gravava `device.status = "online"` direto, sem passar pela agregação | É exatamente o bug de alternância que o `DeviceStatusService` foi criado para eliminar: a coleta subia o equipamento e o ping seguinte o derrubava |
+| #13 | `enqueue_network_scan` só consultava runs `pending` | Run órfã nunca era fechada e dois cliques em "Escanear" criavam varreduras concorrentes da mesma faixa |
+| #10 | A run gravava só `{cidr}` na `configuration` | A UI perde `usableHosts`/`truncated` — o aviso de faixa truncada some. Também faltava validar o CIDR antes de enfileirar |
 
 **Aceite:** diff de paridade vazio; frontend inalterado além do que a
 [§12](#12-ajustes-necessários-no-frontend) registra (F1–F4 de comportamento, F7–F10 só de
@@ -1951,22 +1972,22 @@ verificação manual registrada).
 
 | # | Comportamento | Onde vive hoje | Verificação |
 | :-: | :--- | :--- | :--- |
-| 1 | Ping mede RTT e perda, `warning` em perda parcial | `ping_checker.ts` | teste vs. `ping` do SO |
-| 2 | Timeout do monitor sobrepõe o default do checker, salvo `timeoutMs` explícito | `monitor_runner.ts:mergeTimeout` | unitário |
-| 3 | `latencyMs` sai do primeiro nome da lista de precedência | `result_processor.ts` | unitário |
-| 4 | `device.status` só é escrito pelo `DeviceStatusService` e só emite evento na transição | `device_status_service.ts` | teste de integração |
+| 1 | Ping mede RTT e perda, `warning` em perda parcial | `ping_checker.ts` | ✅ `checkers::ping::summarize` (4 cenários: entrega total, perda parcial → `warning`, perda total → `down`, arredondamento da mensagem) |
+| 2 | Timeout do monitor sobrepõe o default do checker, salvo `timeoutMs` explícito | `monitor_runner.ts:mergeTimeout` | ✅ `runner::timeout_do_checker_tem_precedencia` |
+| 3 | `latencyMs` sai do primeiro nome da lista de precedência | `result_processor.ts` | ✅ `result_processor::precedencia_inclui_tcp_e_dns` + `datasets::monitor_result` (5 cenários) |
+| 4 | `device.status` só é escrito pelo `DeviceStatusService` e só emite evento na transição | `device_status_service.ts` | 🟡 **regressão corrigida** — o Rust não emitia `device:status` e o poll SNMP gravava o status direto. Falta o teste de integração da transição |
 | 5 | `recentResults` traz até 30 **por monitor** | `monitor_presenter.ts` | teste com 3 monitores × 50 resultados |
 | 6 | Scheduler grava `next_run_at` antes de executar | `scheduler_run.ts` | teste |
 | 7 | Probe offline → fallback local → resultado `unknown` (não `down`) | `scheduler_run.ts` | ✅ `scheduler_run::report_probe_unavailable` + `o_ciclo_do_scheduler_despacha_para_probe_vivo_e_marca_o_morto_offline` |
 | 8 | Tarefa de probe vencida (>120 s) é descartada, não executada | `probe_task_dispatcher.ts` | ✅ `tarefa_vencida_e_descartada_e_nao_reentregue` |
 | 9 | Uma tarefa pendente por monitor (substituição, não acúmulo) | migration + dispatcher | ✅ `uma_tarefa_pendente_por_monitor` |
-| 10 | Faixa > 1024 hosts é truncada e a UI é avisada (`truncated`) | `cidr_range.ts` | unitário |
-| 11 | `/31` e `/32` sem rede/broadcast reservados | `cidr_range.ts` | unitário |
+| 10 | Faixa > 1024 hosts é truncada e a UI é avisada (`truncated`) | `cidr_range.ts` | ✅ `cidr_range::marca_truncamento_acima_do_teto` + `queue::a_configuracao_da_run_avisa_o_truncamento` (**regressão corrigida**: a run gravava só `{cidr}`, sem `usableHosts`/`truncated`) |
+| 11 | `/31` e `/32` sem rede/broadcast reservados | `cidr_range.ts` | ✅ `cidr_range::rfc_3021_nao_reserva_rede_e_broadcast` + `expansao_respeita_rfc_3021_e_limite` |
 | 12 | HTTP não varre: `POST /networks/:id/scan` só enfileira | `networks_controller.ts` | teste de requisição |
-| 13 | Run `running` há > 15 min é considerada abandonada | `discovery_queue.ts` | unitário |
+| 13 | Run `running` há > 15 min é considerada abandonada | `discovery_queue.ts` | ✅ `queue::is_abandoned` (3 testes) — **não existia no Rust**: `enqueue_network_scan` só olhava `pending`, então varredura órfã nunca era fechada e dois cliques criavam runs concorrentes |
 | 14 | CIDR corrigido atualiza a run `pending` já enfileirada | `discovery_queue.ts` | teste |
 | 15 | `discovery_results` é cache: limpo a cada scan concluído | `discovery_service.ts` | teste |
-| 16 | Rollover de contador SNMP 2³²/2⁶⁴ e detecção de reboot | `traffic_collector.ts` | unitário com 3 cenários |
+| 16 | Rollover de contador SNMP 2³²/2⁶⁴ e detecção de reboot | `traffic_collector.ts` | ✅ `collectors::calcula_rollover_de_32_bits` + `_de_64_bits` + `nao_interpreta_reboot_como_rollover` |
 | 17 | `ifHighSpeed` (Mbps) prevalece sobre `ifSpeed` saturado | `interface_collector.ts` / `snmp_checker.ts` | unitário |
 | 18 | `ifSpeed == 4294967295` → velocidade desconhecida (sem falso downgrade) | `link_speed.ts` | ✅ `link_speed` + `interface_state` (unitários) |
 | 19 | Poll SNMP só marca `online` se algum OID respondeu | `snmp_service.ts` | teste |

@@ -5,7 +5,10 @@ use futures::future;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 
 use crate::services::{
-    monitoring::interface_monitoring,
+    monitoring::{
+        device_status::{self, DeviceStatus},
+        interface_monitoring,
+    },
     shared::errors::{AppError, AppResult},
     snmp::{
         client::{SnmpClient, SnmpConfig, SnmpError, SnmpVersion},
@@ -169,14 +172,13 @@ pub async fn poll_device(
     crate::services::zabbix::collector::sync_zabbix_template_monitor(&ctx.db, device).await?;
     metrics_recorded +=
         crate::services::zabbix::collector::collect(&ctx.db, device, &client).await? as usize;
-    devices::ActiveModel {
-        id: Set(device.id),
-        status: Set("online".into()),
-        last_seen_at: Set(Some(Utc::now().into())),
-        ..Default::default()
-    }
-    .update(&ctx.db)
-    .await?;
+    // O status **não** é escrito aqui (matriz de paridade #4): quem decide é o
+    // `device_status`, agregando todos os monitores habilitados. Gravar "online"
+    // direto era o bug de alternância — a coleta subia o dispositivo em silêncio
+    // e o ping seguinte o derrubava, publicando transição a cada ciclo. A coleta
+    // entra como `observed_status`, que só prevalece quando não há monitor algum.
+    device_status::refresh_from_monitors(ctx, device, Some(DeviceStatus::Online), Some(Utc::now()))
+        .await?;
     let links_resolved = topology::resolve_discovered_neighbors(ctx, device, &scan.neighbors)
         .await?
         .len();

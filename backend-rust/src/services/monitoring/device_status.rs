@@ -6,7 +6,7 @@ use sea_orm::{ActiveModelTrait, Set};
 
 use crate::{
     models::{devices, monitors},
-    services::{monitoring::contracts::MonitorStatus, shared::errors::AppResult},
+    services::{events::EventBus, monitoring::contracts::MonitorStatus, shared::errors::AppResult},
 };
 
 /// Estado agregado que o frontend usa para um equipamento.
@@ -103,7 +103,12 @@ pub async fn refresh_from_monitors(
     apply(ctx, device, next, seen_at).await
 }
 
-/// Persiste o estado decidido. A emissão SSE será acoplada ao EventBus na Fase 6.
+/// Persiste o estado decidido e publica `device:status` **apenas na transição**.
+///
+/// `last_seen_at` é telemetria — o dispositivo continua sendo visto a cada ciclo
+/// — e por isso avança sem gerar evento. Emitir a cada gravação republicaria
+/// "offline ➔ offline" a cada varredura, que é justamente o ruído que
+/// concentrar a decisão aqui elimina.
 pub async fn apply(
     ctx: &AppContext,
     device: &devices::Model,
@@ -112,19 +117,55 @@ pub async fn apply(
 ) -> AppResult<DeviceStatusTransition> {
     let previous_status = DeviceStatus::parse(&device.status);
     let changed = previous_status != status;
+    let mut last_seen_at = device.last_seen_at;
     if changed || seen_at.is_some() {
         let mut active: devices::ActiveModel = device.clone().into();
         active.status = Set(status.as_str().to_string());
         if let Some(seen_at) = seen_at {
-            active.last_seen_at = Set(Some(seen_at.into()));
+            last_seen_at = Some(seen_at.into());
+            active.last_seen_at = Set(last_seen_at);
         }
         active.update(&ctx.db).await?;
+    }
+    if changed {
+        publish_transition(ctx, device, status, last_seen_at).await;
     }
     Ok(DeviceStatusTransition {
         changed,
         previous_status,
         status,
     })
+}
+
+/// Publica a transição no mesmo contrato do backend anterior.
+///
+/// Best-effort pelo mesmo motivo do `result_processor`: o status já está
+/// gravado, e uma falha de barramento não pode desfazer isso nem propagar erro
+/// para quem só pediu a atualização.
+async fn publish_transition(
+    ctx: &AppContext,
+    device: &devices::Model,
+    status: DeviceStatus,
+    last_seen_at: Option<chrono::DateTime<chrono::FixedOffset>>,
+) {
+    let Ok(events) = EventBus::from_context(ctx) else {
+        return;
+    };
+    // `id` e `deviceId` carregam o mesmo valor: `stores/devices.ts` lê
+    // `data.id ?? data.deviceId` e o feed de eventos lê `d.id`.
+    let payload = serde_json::json!({
+        "id": device.id,
+        "deviceId": device.id,
+        "name": device.name,
+        "status": status.as_str(),
+        "previousStatus": DeviceStatus::parse(&device.status).as_str(),
+        "ipAddress": device.ip_address,
+        "lastSeenAt": last_seen_at.map(|value| value.to_rfc3339()),
+        "changedAt": Utc::now().to_rfc3339(),
+    });
+    if let Err(error) = events.publish(&ctx.db, "device:status", payload).await {
+        tracing::warn!(%error, device_id = device.id, "falha ao publicar device:status");
+    }
 }
 
 #[cfg(test)]
