@@ -7,6 +7,7 @@ use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 use crate::{
     models::{devices, monitor_results, monitors},
     services::{
+        events::EventBus,
         monitoring::{
             contracts::{CheckMetric, CheckResult, MonitorStatus},
             device_status::{self, DeviceStatus},
@@ -79,9 +80,25 @@ pub async fn process_result(
         }
     }
 
-    // Alertas e SSE são consumidores desacoplados da observação e entram na
-    // Fase 6. A gravação jamais depende deles: perder um notificador não pode
-    // abortar nem apagar o resultado técnico da medição.
+    // Publicação e persistência de SSE são best-effort: uma falha de relay não
+    // pode abortar nem apagar a observação técnica já gravada.
+    if let Ok(events) = EventBus::from_context(ctx) {
+        if let Err(error) = events
+            .publish(
+                &ctx.db,
+                "monitor:updated",
+                serde_json::json!({
+                    "monitorId": monitor.id,
+                    "deviceId": monitor.device_id,
+                    "resultId": stored.id,
+                    "status": result.status.as_str(),
+                }),
+            )
+            .await
+        {
+            tracing::warn!(%error, monitor_id = monitor.id, "falha ao publicar evento de monitor");
+        }
+    }
     let _processed_at = Utc::now();
     Ok(Some(stored))
 }

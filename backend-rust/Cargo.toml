@@ -72,6 +72,7 @@ reqwest = { version = "0.12", default-features = false, features = [
 # --- rede: SNMP (§3.4 SPIKE-01) ---
 rasn = { version = "0.18" }
 rasn-snmp = { version = "0.18" }
+rasn-smi = { version = "0.18" }
 
 # --- criptografia ---
 x25519-dalek = { version = "2", features = ["static_secrets"] }
@@ -97,6 +98,7 @@ mdns-sd = { version = "0.13" }
 ssdp-client = { version = "2.1" }
 petgraph = { version = "0.7" }
 phf = { version = "0.11", features = ["macros"] }
+quick-xml = { version = "0.37", features = ["serialize"] }
 
 [[bin]]
 name = "backend_rust-cli"

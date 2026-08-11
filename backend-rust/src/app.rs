@@ -70,6 +70,7 @@ impl Hooks for App {
             .add_route(controllers::port_scan::routes())
             .add_route(controllers::dns::routes())
             .add_route(controllers::dns_servers::routes())
+            .add_route(controllers::events::routes())
             .add_route(controllers::zabbix_templates::routes())
     }
     async fn connect_workers(ctx: &AppContext, queue: &Queue) -> Result<()> {

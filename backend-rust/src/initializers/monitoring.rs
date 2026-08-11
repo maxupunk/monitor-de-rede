@@ -7,8 +7,8 @@ use loco_rs::{
 };
 
 use crate::services::{
-    discovery::service::ScanSessionService, monitoring::checkers::ping::PingClient,
-    network_tools::dns::registry::DnsServerRegistry,
+    discovery::service::ScanSessionService, events::EventBus,
+    monitoring::checkers::ping::PingClient, network_tools::dns::registry::DnsServerRegistry,
 };
 
 /// Abre uma vez o socket ICMP compartilhado por checkers e discovery.
@@ -23,6 +23,7 @@ impl Initializer for MonitoringInitializer {
     async fn before_run(&self, ctx: &AppContext) -> Result<()> {
         ctx.shared_store.insert(PingClient::create()?);
         ctx.shared_store.insert(ScanSessionService::create());
+        ctx.shared_store.insert(EventBus::create());
         // Cadastro é uma conveniência de boot: banco indisponível não impede o
         // processo HTTP de subir, e a operação é idempotente em banco vazio.
         if let Err(error) = DnsServerRegistry::ensure_defaults(&ctx.db).await {

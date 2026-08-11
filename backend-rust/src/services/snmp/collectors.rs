@@ -104,34 +104,125 @@ pub async fn collect_interfaces(client: &SnmpClient) -> Result<Vec<SnmpInterface
         .collect())
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InterfaceTraffic {
     pub if_index: i32,
     pub in_octets: u64,
     pub out_octets: u64,
     pub in_errors: u64,
     pub out_errors: u64,
+    pub counter_bits: u8,
     pub recorded_at: DateTime<Utc>,
+}
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TrafficRates {
+    pub in_bps: f64,
+    pub out_bps: f64,
+    pub reboot_detected: bool,
+}
+
+pub async fn collect_traffic(client: &SnmpClient) -> Result<Vec<InterfaceTraffic>, SnmpError> {
+    let (base, high_capacity) = tokio::join!(
+        client.walk("1.3.6.1.2.1.2.2.1"),
+        client.walk("1.3.6.1.2.1.31.1.1.1")
+    );
+    let mut counters = BTreeMap::<i32, BTreeMap<u32, u64>>::new();
+    for entry in base? {
+        if let (Some((column, index)), Some(value)) =
+            (oid_column_and_index(&entry.oid), entry.value.number())
+        {
+            counters.entry(index).or_default().insert(column, value);
+        }
+    }
+    let mut high = BTreeMap::<i32, BTreeMap<u32, u64>>::new();
+    for entry in high_capacity? {
+        if let (Some((column, index)), Some(value)) =
+            (oid_column_and_index(&entry.oid), entry.value.number())
+        {
+            high.entry(index).or_default().insert(column, value);
+        }
+    }
+    let recorded_at = Utc::now();
+    Ok(counters
+        .into_iter()
+        .filter_map(|(if_index, fields)| {
+            let hc = high.get(&if_index);
+            let in_octets = hc
+                .and_then(|values| values.get(&6))
+                .copied()
+                .or_else(|| fields.get(&10).copied())?;
+            let out_octets = hc
+                .and_then(|values| values.get(&10))
+                .copied()
+                .or_else(|| fields.get(&16).copied())?;
+            Some(InterfaceTraffic {
+                if_index,
+                in_octets,
+                out_octets,
+                in_errors: fields.get(&14).copied().unwrap_or_default(),
+                out_errors: fields.get(&20).copied().unwrap_or_default(),
+                counter_bits: if hc
+                    .map(|values| values.contains_key(&6) || values.contains_key(&10))
+                    .unwrap_or(false)
+                {
+                    64
+                } else {
+                    32
+                },
+                recorded_at,
+            })
+        })
+        .collect())
 }
 #[must_use]
 pub fn calculate_rates(previous: &InterfaceTraffic, current: &InterfaceTraffic) -> (f64, f64) {
-    let seconds = (current.recorded_at - previous.recorded_at).num_milliseconds() as f64 / 1_000.0;
-    if seconds <= 0.0 {
-        return (0.0, 0.0);
-    }
-    (
-        counter_diff(previous.in_octets, current.in_octets) as f64 * 8.0 / seconds,
-        counter_diff(previous.out_octets, current.out_octets) as f64 * 8.0 / seconds,
-    )
+    let rates = calculate_rates_detailed(previous, current, None, None);
+    (rates.in_bps, rates.out_bps)
 }
-fn counter_diff(previous: u64, current: u64) -> u64 {
+#[must_use]
+pub fn calculate_rates_detailed(
+    previous: &InterfaceTraffic,
+    current: &InterfaceTraffic,
+    previous_uptime: Option<u64>,
+    current_uptime: Option<u64>,
+) -> TrafficRates {
+    let seconds = (current.recorded_at - previous.recorded_at).num_milliseconds() as f64 / 1_000.0;
+    let reboot_detected = previous_uptime
+        .zip(current_uptime)
+        .map(|(previous, current)| current < previous)
+        .unwrap_or(false);
+    if seconds <= 0.0 || reboot_detected {
+        return TrafficRates {
+            in_bps: 0.0,
+            out_bps: 0.0,
+            reboot_detected,
+        };
+    }
+    let counter_bits = previous.counter_bits.max(current.counter_bits);
+    TrafficRates {
+        in_bps: counter_diff(previous.in_octets, current.in_octets, counter_bits) as f64 * 8.0
+            / seconds,
+        out_bps: counter_diff(previous.out_octets, current.out_octets, counter_bits) as f64 * 8.0
+            / seconds,
+        reboot_detected,
+    }
+}
+fn counter_diff(previous: u64, current: u64, counter_bits: u8) -> u64 {
     if current >= previous {
         current - previous
-    } else if previous > u32::MAX as u64 {
+    } else if counter_bits >= 64 {
         current.wrapping_sub(previous)
     } else {
         current + (u32::MAX as u64 + 1) - previous
     }
+}
+
+fn oid_column_and_index(oid: &str) -> Option<(u32, i32)> {
+    let mut parts = oid.rsplit('.');
+    let index = parts.next()?.parse().ok()?;
+    let column = parts.next()?.parse().ok()?;
+    Some((column, index))
 }
 
 #[derive(Debug, Default, serde::Serialize)]
@@ -194,8 +285,82 @@ pub struct LldpNeighbor {
     pub remote_mgmt_address: Option<String>,
     pub protocol: String,
 }
-pub async fn collect_lldp(_client: &SnmpClient) -> Result<Vec<LldpNeighbor>, SnmpError> {
-    Ok(vec![])
+pub async fn collect_lldp(client: &SnmpClient) -> Result<Vec<LldpNeighbor>, SnmpError> {
+    const LLDP_REMOTE: &str = "1.0.8802.1.1.2.1.4.1.1";
+    const CDP_CACHE: &str = "1.3.6.1.4.1.9.9.23.1.2.1.1";
+    let (lldp, cdp) = tokio::join!(client.walk(LLDP_REMOTE), client.walk(CDP_CACHE));
+    let mut neighbors = Vec::new();
+
+    let mut lldp_fields = BTreeMap::<(i32, i32), BTreeMap<u32, String>>::new();
+    for entry in lldp.unwrap_or_default() {
+        if let Some((column, index)) = table_column_and_index(&entry.oid, LLDP_REMOTE) {
+            if index.len() >= 3 {
+                lldp_fields
+                    .entry((index[1] as i32, index[2] as i32))
+                    .or_default()
+                    .insert(column, entry.value.text());
+            }
+        }
+    }
+    neighbors.extend(lldp_fields.into_iter().filter_map(
+        |((local_port, _remote_index), fields)| {
+            let remote_sys_name = fields.get(&9).cloned();
+            let remote_port = fields.get(&7).cloned();
+            (remote_sys_name.is_some() || remote_port.is_some()).then(|| LldpNeighbor {
+                local_port: local_port.to_string(),
+                remote_port,
+                remote_sys_name,
+                remote_mgmt_address: fields.get(&4).cloned(),
+                protocol: "lldp".into(),
+            })
+        },
+    ));
+
+    let mut cdp_fields = BTreeMap::<(i32, i32), BTreeMap<u32, String>>::new();
+    for entry in cdp.unwrap_or_default() {
+        if let Some((column, index)) = table_column_and_index(&entry.oid, CDP_CACHE) {
+            if index.len() >= 2 {
+                cdp_fields
+                    .entry((index[0] as i32, index[1] as i32))
+                    .or_default()
+                    .insert(column, entry.value.text());
+            }
+        }
+    }
+    neighbors.extend(
+        cdp_fields
+            .into_iter()
+            .filter_map(|((local_port, _remote_index), fields)| {
+                let remote_sys_name = fields.get(&6).cloned();
+                let remote_port = fields.get(&7).cloned();
+                (remote_sys_name.is_some() || remote_port.is_some()).then(|| LldpNeighbor {
+                    local_port: local_port.to_string(),
+                    remote_port,
+                    remote_sys_name,
+                    remote_mgmt_address: fields.get(&3).cloned(),
+                    protocol: "cdp".into(),
+                })
+            }),
+    );
+    Ok(neighbors)
+}
+
+fn table_column_and_index(oid: &str, base: &str) -> Option<(u32, Vec<u32>)> {
+    let oid = oid
+        .split('.')
+        .map(str::parse)
+        .collect::<Result<Vec<u32>, _>>()
+        .ok()?;
+    let base = base
+        .split('.')
+        .map(str::parse)
+        .collect::<Result<Vec<u32>, _>>()
+        .ok()?;
+    oid.starts_with(&base).then_some(()).and_then(|_| {
+        oid.get(base.len())
+            .copied()
+            .map(|column| (column, oid[base.len() + 1..].to_vec()))
+    })
 }
 
 fn number(values: &BTreeMap<String, Option<SnmpValue>>, oid: &str) -> Option<u64> {
@@ -222,6 +387,7 @@ mod tests {
             out_octets: u32::MAX as u64 - 3,
             in_errors: 0,
             out_errors: 0,
+            counter_bits: 32,
             recorded_at: Utc::now(),
         };
         let current = InterfaceTraffic {
@@ -230,8 +396,66 @@ mod tests {
             out_octets: 4,
             in_errors: 0,
             out_errors: 0,
+            counter_bits: 32,
             recorded_at: previous.recorded_at + chrono::Duration::seconds(1),
         };
         assert_eq!(calculate_rates(&previous, &current), (64.0, 64.0));
+    }
+
+    #[test]
+    fn calcula_rollover_de_64_bits() {
+        let previous = InterfaceTraffic {
+            if_index: 1,
+            in_octets: u64::MAX - 3,
+            out_octets: u64::MAX - 3,
+            in_errors: 0,
+            out_errors: 0,
+            counter_bits: 64,
+            recorded_at: Utc::now(),
+        };
+        let current = InterfaceTraffic {
+            in_octets: 4,
+            out_octets: 4,
+            recorded_at: previous.recorded_at + chrono::Duration::seconds(1),
+            ..previous.clone()
+        };
+
+        assert_eq!(calculate_rates(&previous, &current), (64.0, 64.0));
+    }
+
+    #[test]
+    fn nao_interpreta_reboot_como_rollover() {
+        let previous = InterfaceTraffic {
+            if_index: 1,
+            in_octets: 1_000,
+            out_octets: 1_000,
+            in_errors: 0,
+            out_errors: 0,
+            counter_bits: 64,
+            recorded_at: Utc::now(),
+        };
+        let current = InterfaceTraffic {
+            in_octets: 10,
+            out_octets: 10,
+            recorded_at: previous.recorded_at + chrono::Duration::seconds(1),
+            ..previous.clone()
+        };
+
+        assert_eq!(
+            calculate_rates_detailed(&previous, &current, Some(10_000), Some(20)),
+            TrafficRates {
+                in_bps: 0.0,
+                out_bps: 0.0,
+                reboot_detected: true,
+            }
+        );
+    }
+
+    #[test]
+    fn identifica_coluna_e_indices_de_tabela_snmp() {
+        assert_eq!(
+            table_column_and_index("1.0.8802.1.1.2.1.4.1.1.9.10.4.2", "1.0.8802.1.1.2.1.4.1.1"),
+            Some((9, vec![10, 4, 2]))
+        );
     }
 }

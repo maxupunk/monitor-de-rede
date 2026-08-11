@@ -8,6 +8,7 @@ use crate::{
     models::{monitors, probes},
     services::{
         discovery::queue::{process_pending_runs, schedule_due_networks},
+        events::relay::relay_pending,
         monitoring::{
             contracts::{CheckResult, MonitorStatus},
             result_processor::process_result,
@@ -57,6 +58,9 @@ pub async fn run_cycle(ctx: &AppContext) -> AppResult<usize> {
     }
     if let Err(error) = process_pending_runs(ctx).await {
         tracing::warn!(%error, "falha ao processar discovery");
+    }
+    if let Err(error) = relay_pending(ctx).await {
+        tracing::warn!(%error, "falha ao retransmitir eventos");
     }
     Ok(due.len())
 }

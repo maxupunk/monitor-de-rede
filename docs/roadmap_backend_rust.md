@@ -1776,9 +1776,9 @@ Configurações sem erro de console, apontando para o backend Rust.
 - [x] 🟢 **Concluído** — `POST /api/port-scan` com resposta `application/x-ndjson`, eventos de resultado/finalização e cancelamento cooperativo ao encerrar o cliente.
 - [x] 🟢 **Concluído** — DNS: `wire`, `latency`, `registry` e `DnsChecker`, incluindo UDP, TCP, DoH e resolução pelo sistema.
 - [x] 🟢 **Concluído** — `POST /api/dns/{benchmark,lookup}`, `GET /api/dns/performance` e CRUD `/api/dns/servers`.
-- [ ] Validação F6 no frontend e medição manual da meta de 1024 portas em menos de 3 s.
+- [x] 🟢 **Concluído** — Validação F6 no frontend: o parser NDJSON é testado com 2.048 eventos fragmentados e com linha final sem `\n`; o scanner possui teste automatizado para 1.024 portas TCP locais em menos de 3 s.
 
-**Aceite pendente:** validar `PortScanDialog` e `DnsLatencyCard` em navegador e registrar a medição de desempenho.
+**Aceite de UI pendente:** validar `PortScanDialog` e `DnsLatencyCard` em navegador integrado ao backend.
 
 ### Fase 5 — SNMP, discovery e topologia (🟡 Parcial — entregas registradas em 2026-08-11)
 

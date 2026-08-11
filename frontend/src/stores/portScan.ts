@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { apiService } from '@/services/apiService'
+import { drainNdjson } from '@/services/ndjson'
 
 export type PortProtocol = 'tcp' | 'udp'
 export type PortStatus = 'open' | 'closed' | 'open|filtered'
@@ -45,20 +46,27 @@ export const usePortScanStore = defineStore('portScan', () => {
         if (done) break
         buffer += decoder.decode(value, { stream: true })
 
-        let newlineIndex = buffer.indexOf('\n')
-        while (newlineIndex >= 0) {
-          const line = buffer.slice(0, newlineIndex).trim()
-          buffer = buffer.slice(newlineIndex + 1)
-          newlineIndex = buffer.indexOf('\n')
-          if (!line) continue
-
-          const parsed = JSON.parse(line)
+        const parsedChunk = drainNdjson<{ type?: string; message?: string } & PortScanItem>(buffer)
+        buffer = parsedChunk.remainder
+        for (const parsed of parsedChunk.events) {
           if (parsed.type === 'result') {
             delete parsed.type
             onResult(parsed as PortScanItem)
           } else if (parsed.type === 'error') {
             error.value = parsed.message || 'Erro durante a varredura de portas'
           }
+        }
+      }
+
+      const finalChunk = drainNdjson<{ type?: string; message?: string } & PortScanItem>(buffer, {
+        final: true,
+      })
+      for (const parsed of finalChunk.events) {
+        if (parsed.type === 'result') {
+          delete parsed.type
+          onResult(parsed as PortScanItem)
+        } else if (parsed.type === 'error') {
+          error.value = parsed.message || 'Erro durante a varredura de portas'
         }
       }
 

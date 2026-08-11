@@ -1,4 +1,4 @@
-//! Importação e gerenciamento dos templates Zabbix.
+//! Importacao e gerenciamento de templates Zabbix.
 
 use axum::{http::StatusCode, response::IntoResponse};
 use chrono::Utc;
@@ -13,94 +13,10 @@ use crate::{
     services::{
         maintenance::resource_cleanup::ResourceCleanupService,
         shared::errors::{AppError, AppResult},
+        zabbix::parser,
     },
 };
 
-#[derive(Debug)]
-struct ParsedItem {
-    uuid: Option<String>,
-    name: String,
-    key: String,
-    snmp_oid: String,
-    value_type: String,
-    units: Option<String>,
-    multiplier: Option<f32>,
-}
-#[derive(Debug)]
-struct ParsedTemplate {
-    uuid: Option<String>,
-    name: String,
-    description: Option<String>,
-    version: Option<String>,
-    items: Vec<ParsedItem>,
-    skipped: usize,
-}
-fn string_at(value: &serde_json::Value, keys: &[&str]) -> Option<String> {
-    keys.iter()
-        .find_map(|key| {
-            value
-                .get(*key)
-                .and_then(serde_json::Value::as_str)
-                .map(ToString::to_string)
-        })
-        .filter(|text| !text.trim().is_empty())
-}
-fn parse_export(raw: &serde_json::Value) -> AppResult<Vec<ParsedTemplate>> {
-    let root = raw.get("zabbix_export").unwrap_or(raw);
-    let list = root
-        .get("templates")
-        .and_then(serde_json::Value::as_array)
-        .ok_or_else(|| AppError::validation("O export do Zabbix não contém templates"))?;
-    let mut output = Vec::new();
-    for value in list {
-        let name = string_at(value, &["name", "template"])
-            .ok_or_else(|| AppError::validation("Template Zabbix sem nome"))?;
-        let mut items = Vec::new();
-        let mut skipped = 0;
-        for item in value
-            .get("items")
-            .and_then(serde_json::Value::as_array)
-            .into_iter()
-            .flatten()
-        {
-            let Some(key) = string_at(item, &["key_", "key"]) else {
-                skipped += 1;
-                continue;
-            };
-            let Some(oid) = string_at(item, &["snmp_oid", "snmpOid"]) else {
-                skipped += 1;
-                continue;
-            };
-            items.push(ParsedItem {
-                uuid: string_at(item, &["uuid"]),
-                name: string_at(item, &["name"]).unwrap_or_else(|| key.clone()),
-                key,
-                snmp_oid: oid,
-                value_type: string_at(item, &["value_type", "valueType"])
-                    .unwrap_or_else(|| "FLOAT".into()),
-                units: string_at(item, &["units"]),
-                multiplier: item
-                    .get("multiplier")
-                    .and_then(serde_json::Value::as_f64)
-                    .map(|value| value as f32),
-            });
-        }
-        output.push(ParsedTemplate {
-            uuid: string_at(value, &["uuid"]),
-            name,
-            description: string_at(value, &["description"]),
-            version: string_at(root, &["version"]),
-            items,
-            skipped,
-        });
-    }
-    if output.is_empty() {
-        return Err(AppError::validation(
-            "Nenhum template Zabbix foi encontrado",
-        ));
-    }
-    Ok(output)
-}
 async fn index(State(ctx): State<AppContext>) -> AppResult<Response> {
     let templates = zabbix_templates::Entity::find()
         .order_by_asc(zabbix_templates::Column::Name)
@@ -116,10 +32,28 @@ async fn index(State(ctx): State<AppContext>) -> AppResult<Response> {
             .filter(devices::Column::ZabbixTemplateId.eq(template.id))
             .count(&ctx.db)
             .await?;
-        output.push(serde_json::json!({"id":template.id,"zabbixUuid":template.zabbix_uuid,"name":template.name,"description":template.description,"zabbixVersion":template.zabbix_version,"importedAt":template.imported_at.to_rfc3339(),"deviceCount":count,"items":items.into_iter().map(|item|serde_json::json!({"id":item.id,"name":item.name,"key":item.key,"snmpOid":item.snmp_oid,"valueType":item.value_type,"units":item.units,"multiplier":item.multiplier})).collect::<Vec<_>>() }));
+        output.push(serde_json::json!({
+            "id": template.id,
+            "zabbixUuid": template.zabbix_uuid,
+            "name": template.name,
+            "description": template.description,
+            "zabbixVersion": template.zabbix_version,
+            "importedAt": template.imported_at.to_rfc3339(),
+            "deviceCount": count,
+            "items": items.into_iter().map(|item| serde_json::json!({
+                "id": item.id,
+                "name": item.name,
+                "key": item.key,
+                "snmpOid": item.snmp_oid,
+                "valueType": item.value_type,
+                "units": item.units,
+                "multiplier": item.multiplier,
+            })).collect::<Vec<_>>(),
+        }));
     }
     Ok(format::json(output)?)
 }
+
 async fn show(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
     let template = zabbix_templates::Entity::find_by_id(id)
         .one(&ctx.db)
@@ -129,20 +63,27 @@ async fn show(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<R
         .filter(zabbix_template_items::Column::TemplateId.eq(id))
         .all(&ctx.db)
         .await?;
-    Ok(format::json(
-        serde_json::json!({"id":template.id,"zabbixUuid":template.zabbix_uuid,"name":template.name,"description":template.description,"zabbixVersion":template.zabbix_version,"rawExport":template.raw_export,"importedAt":template.imported_at.to_rfc3339(),"items":items}),
-    )?)
+    Ok(format::json(serde_json::json!({
+        "id": template.id,
+        "zabbixUuid": template.zabbix_uuid,
+        "name": template.name,
+        "description": template.description,
+        "zabbixVersion": template.zabbix_version,
+        "rawExport": template.raw_export,
+        "importedAt": template.imported_at.to_rfc3339(),
+        "items": items,
+    }))?)
 }
+
 async fn store(
     State(ctx): State<AppContext>,
     Json(input): Json<ZabbixImportInput>,
 ) -> AppResult<Response> {
-    let raw: serde_json::Value = serde_json::from_str(&input.content)
-        .map_err(|_| AppError::business_rule("O conteúdo enviado não é um JSON válido."))?;
-    let parsed = parse_export(&raw)?;
+    let parsed = parser::parse_zabbix_template_export(&input.content)
+        .map_err(|error| AppError::validation(error.to_string()))?;
     let txn = ctx.db.begin().await?;
     let mut imported = Vec::new();
-    for template in parsed {
+    for template in parsed.templates {
         let existing = match &template.uuid {
             Some(uuid) => {
                 zabbix_templates::Entity::find()
@@ -161,7 +102,7 @@ async fn store(
             active.name = Set(template.name.clone());
             active.description = Set(template.description.clone());
             active.zabbix_version = Set(template.version.clone());
-            active.raw_export = Set(raw.clone());
+            active.raw_export = Set(parsed.raw_export.clone());
             active.imported_at = Set(Utc::now().into());
             active.update(&txn).await?
         } else {
@@ -170,7 +111,7 @@ async fn store(
                 name: Set(template.name.clone()),
                 description: Set(template.description.clone()),
                 zabbix_version: Set(template.version.clone()),
-                raw_export: Set(raw.clone()),
+                raw_export: Set(parsed.raw_export.clone()),
                 imported_at: Set(Utc::now().into()),
                 ..Default::default()
             }
@@ -193,15 +134,21 @@ async fn store(
             .insert(&txn)
             .await?;
         }
-        imported.push(serde_json::json!({"id":row.id,"name":row.name,"itemCount":item_count,"skippedItems":template.skipped}));
+        imported.push(serde_json::json!({
+            "id": row.id,
+            "name": row.name,
+            "itemCount": item_count,
+            "skippedItems": template.skipped_items,
+        }));
     }
     txn.commit().await?;
     Ok((
         StatusCode::CREATED,
-        Json(serde_json::json!({"templates": imported})),
+        Json(serde_json::json!({ "templates": imported })),
     )
         .into_response())
 }
+
 async fn destroy(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
     zabbix_templates::Entity::find_by_id(id)
         .one(&ctx.db)
@@ -210,6 +157,7 @@ async fn destroy(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResul
     ResourceCleanupService::delete_zabbix_template(&ctx.db, id).await?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
+
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("/zabbix-templates")

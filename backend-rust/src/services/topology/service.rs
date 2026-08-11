@@ -3,12 +3,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use petgraph::{algo::is_cyclic_directed, graph::Graph};
-use sea_orm::EntityTrait;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
 use crate::{
-    models::{device_links, devices},
+    models::{
+        _entities::device_interfaces as device_interfaces_entity, device_interfaces, device_links,
+        devices,
+    },
     services::{
         shared::errors::{AppError, AppResult},
+        snmp::collectors::LldpNeighbor,
         topology::link_resolver::{persist_resolved_links_detailed, NetworkLink},
     },
 };
@@ -214,4 +218,79 @@ pub async fn infer_subnet_links(db: &sea_orm::DatabaseConnection) -> AppResult<u
         }
     }
     Ok(persist_resolved_links_detailed(db, raw).await?.links.len())
+}
+
+/// Converte os vizinhos LLDP/CDP observados no poll SNMP em enlaces persistidos.
+/// O nome e o endereÃ§o de gerÃªncia sÃ£o usados apenas para relacionar dispositivos
+/// jÃ¡ cadastrados; uma resposta externa nunca cria um dispositivo implicitamente.
+pub async fn resolve_discovered_neighbors(
+    ctx: &loco_rs::app::AppContext,
+    source: &devices::Model,
+    neighbors: &[LldpNeighbor],
+) -> AppResult<Vec<device_links::Model>> {
+    let candidates = devices::Entity::find().all(&ctx.db).await?;
+    let source_interfaces = device_interfaces::Entity::find()
+        .filter(device_interfaces_entity::Column::DeviceId.eq(source.id))
+        .all(&ctx.db)
+        .await?;
+    let mut raw = Vec::new();
+    for neighbor in neighbors {
+        let target = candidates.iter().find(|device| {
+            device.id != source.id
+                && (neighbor.remote_sys_name.as_ref().is_some_and(|name| {
+                    device.name.eq_ignore_ascii_case(name)
+                        || device
+                            .ip_address
+                            .as_ref()
+                            .is_some_and(|ip| ip.eq_ignore_ascii_case(name))
+                }) || neighbor
+                    .remote_mgmt_address
+                    .as_ref()
+                    .is_some_and(|address| {
+                        device.ip_address.as_ref().is_some_and(|ip| ip == address)
+                    }))
+        });
+        let Some(target) = target else {
+            continue;
+        };
+        let target_interfaces = device_interfaces::Entity::find()
+            .filter(device_interfaces_entity::Column::DeviceId.eq(target.id))
+            .all(&ctx.db)
+            .await?;
+        let source_interface_id = neighbor
+            .local_port
+            .parse::<i32>()
+            .ok()
+            .and_then(|index| {
+                source_interfaces
+                    .iter()
+                    .find(|interface| interface.snmp_index == Some(index))
+            })
+            .map(|interface| interface.id);
+        let target_interface_id = neighbor.remote_port.as_ref().and_then(|port| {
+            target_interfaces
+                .iter()
+                .find(|interface| {
+                    interface.name.eq_ignore_ascii_case(port)
+                        || interface.alias.as_ref().is_some_and(|alias| alias == port)
+                })
+                .map(|interface| interface.id)
+        });
+        let (confidence, method) = if neighbor.protocol == "lldp" {
+            (95, "lldp")
+        } else {
+            (90, "cdp")
+        };
+        raw.push(NetworkLink {
+            source_device_id: source.id,
+            target_device_id: target.id,
+            source_interface_id,
+            target_interface_id,
+            link_type: neighbor.protocol.clone(),
+            discovery_method: method.into(),
+            confidence,
+            confirmed: false,
+        });
+    }
+    Ok(persist_resolved_links_detailed(&ctx.db, raw).await?.links)
 }

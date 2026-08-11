@@ -4,6 +4,7 @@ pub mod devices;
 pub mod discovery;
 pub mod dns;
 pub mod dns_servers;
+pub mod events;
 pub mod monitors;
 pub mod networks;
 pub mod port_scan;

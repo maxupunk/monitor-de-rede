@@ -284,4 +284,27 @@ mod tests {
         );
         assert_eq!(scan.await.unwrap()[0].status, "open");
     }
+
+    #[tokio::test]
+    async fn varre_1024_portas_tcp_locais_em_menos_de_tres_segundos() {
+        let ports: Vec<_> = (1..=MAX_PORTS_PER_SCAN as u16).collect();
+        let (sender, _receiver) = mpsc::channel(MAX_PORTS_PER_SCAN);
+        let started = Instant::now();
+        let results = scan(
+            "127.0.0.1".parse().unwrap(),
+            &ports,
+            PortProtocol::Tcp,
+            ScanStrategy::with_timeout(500),
+            sender,
+            CancellationToken::new(),
+        )
+        .await;
+
+        assert_eq!(results.len(), MAX_PORTS_PER_SCAN);
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "o scan local levou {:?}",
+            started.elapsed()
+        );
+    }
 }
