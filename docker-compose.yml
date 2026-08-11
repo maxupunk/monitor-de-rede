@@ -1,23 +1,30 @@
+# Stack do NetMonitor — backend Rust (Loco.rs).
+#
+# O corte do AdonisJS aconteceu na Fase 9 do `docs/roadmap_backend_rust.md`.
+# Os cinco processos abaixo são os mesmos de antes, com os comandos traduzidos:
+# `node ace migration:run` → `db migrate`, `scheduler:run` → o scheduler nativo
+# do Loco, `probe:run` → `task probe_run`.
 x-app-env: &app-env
-  NODE_OPTIONS: "--max-old-space-size=256"
-  NODE_ENV: production
+  LOCO_ENV: production
   PORT: 3333
   HOST: 0.0.0.0
   LOG_LEVEL: info
+  # Cifra em repouso dos segredos da VPN (§8.10) — 32 caracteres.
   APP_KEY: secret_app_key_32_characters_long_str
-  APP_URL: http://localhost:3333
-  SESSION_DRIVER: cookie
-  DB_CONNECTION: pg
-  DB_HOST: postgres
-  DB_PORT: 5432
-  DB_USER: netmonitor
-  DB_PASSWORD: secret
-  DB_DATABASE: netmonitor
+  # Assinatura do JWT (§10). Trocar em produção.
+  JWT_SECRET: ${JWT_SECRET:-troque_este_segredo_em_producao_por_favor}
+  DATABASE_URL: postgres://netmonitor:secret@postgres:5432/netmonitor
+
+# `ping_group_range` habilita o socket ICMP `SOCK_DGRAM` sem `CAP_NET_RAW`
+# (SPIKE-03 / ADR 003). Vale para todo processo que pinga: `server` (checagem
+# manual e discovery), `scheduler` (o ciclo de monitores) e `probe`.
+x-icmp-sysctls: &icmp-sysctls
+  net.ipv4.ping_group_range: "0 2147483647"
 
 services:
   migration:
-    build: ./backend
-    command: node ace.js migration:run --force
+    build: ./backend-rust
+    command: ["backend_rust-cli", "db", "migrate"]
     environment:
       <<: *app-env
     depends_on:
@@ -27,8 +34,8 @@ services:
     restart: "no"
 
   server:
-    build: ./backend
-    command: node bin/server.js
+    build: ./backend-rust
+    command: ["backend_rust-cli", "start"]
     ports:
       - "${API_EXTERNAL_PORT:-3333}:3333"
     environment:
@@ -36,6 +43,13 @@ services:
       # Volume compartilhado com o container WireGuard (hot-reload por arquivo)
       WG_CONFIG_DIR: /config
       VPN_PROBE_TOKEN: ${VPN_PROBE_TOKEN:-default_vpn_probe_token}
+    sysctls:
+      <<: *icmp-sysctls
+    ulimits:
+      # O batch do port scanner deriva do limite de descritores (§3.3.1).
+      nofile:
+        soft: 8192
+        hard: 65536
     volumes:
       - wg-config:/config
     depends_on:
@@ -47,14 +61,22 @@ services:
     restart: unless-stopped
 
   scheduler:
-    build: ./backend
-    command: node ace.js scheduler:run
+    build: ./backend-rust
+    # O scheduler nativo do Loco dispara `scheduler_run` a cada 5 s
+    # (ADR 005): cada tique é um ciclo, não um laço infinito.
+    command: ["backend_rust-cli", "scheduler", "--config", "config/scheduler.yaml"]
     environment:
       <<: *app-env
       # É o scheduler quem sincroniza a telemetria dos túneis a cada 10s. Sem o
       # mesmo volume do `server`, `wg0.status` não existe aqui e a sincronização
       # vira um no-op silencioso: a tela recebe eventos com dados congelados.
       WG_CONFIG_DIR: /config
+    sysctls:
+      <<: *icmp-sysctls
+    ulimits:
+      nofile:
+        soft: 8192
+        hard: 65536
     volumes:
       - wg-config:/config
     depends_on:
@@ -66,13 +88,14 @@ services:
     restart: unless-stopped
 
   probe:
-    build: ./backend
-    command: node ace.js probe:run
+    build: ./backend-rust
+    command: ["backend_rust-cli", "task", "probe_run"]
     environment:
       <<: *app-env
-      APP_URL: http://server:3333
       PROBE_SERVER_URL: http://server:3333
       SERVER_URL: http://server:3333
+    sysctls:
+      <<: *icmp-sysctls
     depends_on:
       - server
     networks: [netmonitor-net]
@@ -105,14 +128,18 @@ services:
 
   # Probe dedicado que enxerga a interface wg0 — o probe da LAN segue intocado.
   vpn-probe:
-    build: ./backend
-    command: node ace.js probe:run
+    build: ./backend-rust
+    command: ["backend_rust-cli", "task", "probe_run"]
     environment:
       <<: *app-env
-      APP_URL: http://server:3333
       PROBE_SERVER_URL: http://server:3333
       SERVER_URL: http://server:3333
       PROBE_TOKEN: ${VPN_PROBE_TOKEN:-default_vpn_probe_token}
+      # A telemetria do túnel é lida do volume compartilhado, nunca por
+      # `docker exec` — é o que mantém o servidor sem acesso ao socket do Docker.
+      WG_CONFIG_DIR: /config
+    volumes:
+      - wg-config:/config
     network_mode: "service:wireguard"
     depends_on:
       - wireguard

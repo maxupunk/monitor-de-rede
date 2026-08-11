@@ -1,0 +1,95 @@
+---
+source: src/services/vpn/profiles/variants.rs
+expression: "windows_winget_variant(&contexto(), CONF).content"
+---
+# === NetMonitor - WireGuard - filial-01 ===
+# 1) Abra o PowerShell como ADMINISTRADOR: menu Iniciar > digite "powershell" > botao direito em "Windows PowerShell" > "Executar como administrador".
+# 2) Cole este bloco inteiro e pressione Enter.
+
+& {
+  $ErrorActionPreference = 'Stop'
+
+  $Tunnel = 'netmonitor'
+  $WgHome = Join-Path $env:ProgramFiles 'WireGuard'
+  $WgExe  = Join-Path $WgHome 'wireguard.exe'
+  $ServiceName = "WireGuardTunnel`$$Tunnel"
+
+  $Conf = @'
+[Interface]
+PrivateKey = CHAVE
+Address = 10.8.0.11/24
+'@
+
+  # 1/5 - Confere o terreno antes de mexer em qualquer coisa
+  $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+  $isAdmin = ([Security.Principal.WindowsPrincipal]$identity).IsInRole(
+    [Security.Principal.WindowsBuiltInRole]::Administrator)
+  if (-not $isAdmin) {
+    throw 'Este bloco precisa de um PowerShell ADMINISTRADOR: menu Iniciar > digite "powershell" > botao direito em "Windows PowerShell" > "Executar como administrador".'
+  }
+  if ($Conf -match 'CHAVE-PRIVADA-INDISPONIVEL') {
+    throw 'A chave privada deste dispositivo ja foi entregue e nao pode ser exibida outra vez. No NetMonitor, use "Rotacionar chaves" e copie o script novo.'
+  }
+  if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+    throw 'winget nao encontrado. Instale o "Instalador de Aplicativo" pela Microsoft Store ou baixe o cliente em https://www.wireguard.com/install/'
+  }
+
+  # 2/5 - Instala o cliente oficial WireGuard
+  winget install --exact --id WireGuard.WireGuard --silent `
+    --accept-source-agreements --accept-package-agreements
+  # winget termina em erro quando o pacote ja esta instalado: o que importa e o executavel existir.
+  if (-not (Test-Path $WgExe)) {
+    throw "WireGuard nao encontrado em $WgHome. Verifique se a instalacao foi concluida."
+  }
+
+  # 3/4 - Desfaz instalacoes anteriores feitas por este script
+  # Um servico proprio (/installtunnelservice) e o tunel gerenciado pela
+  # janela do WireGuard disputam o mesmo adaptador: os dois nao coexistem.
+  if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {
+    & $WgExe /uninstalltunnelservice $Tunnel
+    Start-Sleep -Seconds 3
+  }
+  $Legacy = Join-Path $env:ProgramData 'NetMonitor'
+  if (Test-Path $Legacy) {
+    # Versoes antigas deixavam o perfil aqui com uma ACL de leitura que nao
+    # inclui DELETE - nem o administrador apagava sem tomar posse antes.
+    $stale = @(Get-ChildItem $Legacy -Force -Recurse -ErrorAction SilentlyContinue |
+      ForEach-Object { $_.FullName }) + @($Legacy)
+    foreach ($item in $stale) {
+      takeown /f $item /a | Out-Null
+      icacls $item /reset | Out-Null
+    }
+    Remove-Item -Path $Legacy -Recurse -Force -ErrorAction SilentlyContinue
+  }
+
+  # 4/4 - Grava o perfil no cofre do proprio WireGuard
+  # O gerenciador monitora essa pasta e lista o tunel na hora, sem reiniciar.
+  # Ao ativar, ele cria o servico (que sobe no boot) e cifra o perfil como
+  # .conf.dpapi - por isso o arquivo nao pode ser dono de servico nenhum aqui.
+  $Store = Join-Path $WgHome 'Data\Configurations'
+  if (-not (Test-Path $Store)) {
+    New-Item -ItemType Directory -Path $Store -Force | Out-Null
+    icacls $Store /inheritance:r /grant:r "*S-1-5-18:(F)" "*S-1-5-32-544:(F)" | Out-Null
+  }
+
+  # O nome do arquivo vira o nome do tunel: precisa ser <tunel>.conf
+  $File = Join-Path $Store "$Tunnel.conf"
+  # Um .conf.dpapi de importacao anterior tem prioridade sobre o .conf e
+  # manteria o perfil velho no lugar do novo.
+  Remove-Item -Path "$File.dpapi" -Force -ErrorAction SilentlyContinue
+  Remove-Item -Path $File -Force -ErrorAction SilentlyContinue
+  $Conf | Set-Content -Path $File -Encoding ascii
+  # A chave privada fica em texto puro ate o WireGuard cifrar o perfil: so
+  # SYSTEM (que roda o gerenciador) e Administradores enxergam nesse meio tempo.
+  # (SIDs no lugar dos nomes, para funcionar em Windows de qualquer idioma.)
+  icacls $File /inheritance:r /grant:r "*S-1-5-18:(F)" "*S-1-5-32-544:(F)" | Out-Null
+
+  # Abre a janela do WireGuard com o tunel ja na lista
+  Start-Process -FilePath $WgExe
+  Write-Host ''
+  Write-Host 'Perfil "netmonitor" instalado no WireGuard.'
+  Write-Host 'Na janela que abriu, selecione "netmonitor" e clique em Ativar.'
+  Write-Host 'Dai em diante o WireGuard gerencia o tunel e ele volta sozinho a cada boot.'
+}
+
+# Para remover depois: basta excluir o tunel "netmonitor" na janela do WireGuard.

@@ -1865,31 +1865,73 @@ probe com heartbeat, rebaixa para `offline` o que ficou mudo, o agente autentica
 compartilhado do `vpn-probe`, a tarefa vencida é descartada sem reentrega e o resultado
 reportado vira histórico do monitor. Validação em container fica para a Fase 9.
 
-### Fase 8 — VPN WireGuard (🔴)
+### Fase 8 — VPN WireGuard (🟢 **Concluída** — 2026-08-11)
 
-- [ ] `key_generator` (X25519 nativo), `cidr`, `ip_allocator`
-- [ ] `config_builder`, `config_writer` (escrita atômica), `peer_status` (`wg show dump`)
-- [ ] `server_service`, `peer_service`, `secret_store`, `monitor_provisioner`
-- [ ] 5 perfis com scripts **portados literalmente** + `variants` + QR Code
-- [ ] `traffic_recorder`, `state_watcher`, `peer_hints`, `preflight`
-- [ ] `access_control` (rate limit + auditoria)
-- [ ] `probe_registrar` + `tasks/vpn_probe_register.rs` ⚠️
-- [ ] `ts-rs` exportando bindings (F7, opcional)
+- [x] 🟢 **Concluído** — `key_generator` (X25519 nativo via `x25519-dalek`, com o *clamping*
+      que o `wg genkey` também aplica), `cidr` (parse/iteração sem teto) e `ip_allocator`
+      (retentativa em colisão de `UNIQUE(network_id, ip_address)`, matriz #42).
+- [x] 🟢 **Concluído** — `config_builder` (função pura, com snapshot do `wg0.conf` inteiro),
+      `config_writer` (escrita **atômica** `tmp` + `rename`, matriz #35) e `peer_status`
+      (parser de `wg show dump`, com o aviso único quando o `.status` está ilegível).
+- [x] 🟢 **Concluído** — `server_service`, `peer_service` (criação transacional de
+      device + peer + monitores), `secret_store` (a chave privada só sai **uma vez**,
+      matriz #33) e `monitor_provisioner` (ping + SNMP opcional, atribuídos ao `vpn-probe`).
+- [x] 🟢 **Concluído** — 5 perfis com os scripts **portados literalmente**, `variants` por
+      gerenciador de pacotes e QR Code na mesma resposta do artefato. Cinco snapshots `insta`
+      travam o texto: RouterOS, UCI/OpenWrt, `wg-quick`, Bash multi-distro e PowerShell.
+- [x] 🟢 **Concluído** — `traffic_recorder` (status a cada 10 s, histórico a cada 30 s, com
+      *fingerprint* para não repetir quadro idêntico), `state_watcher` (transições de túnel →
+      motor de alertas), `peer_hints` (matriz #39 e #40) e `preflight` (CGNAT por RFC 6598,
+      com `verified` honesto).
+- [x] 🟢 **Concluído** — `access_control`: janela deslizante 10 req/60 s com `Retry-After`
+      (matriz #44) e trilha de auditoria estruturada nas cinco ações sensíveis.
+- [x] 🟢 **Concluído** — `probe_registrar` + `tasks/vpn_probe_register.rs` ⚠️, com o fallback
+      para `DEFAULT_VPN_PROBE_TOKEN` preservado (matriz #43) e registro idempotente no boot.
+- [ ] `ts-rs` exportando bindings dos DTOs de VPN (F7, opcional — não bloqueia o corte).
 
-**Aceite:** wizard cria peer, entrega script/QR uma única vez, `wg0.conf` é aplicado por
-`syncconf` sem derrubar túneis, telemetria atualiza a tela, rotação invalida o anterior.
+**Extras entregues nesta fase** (viraram pré-requisito):
 
-### Fase 9 — Corte e descomissionamento (🔴)
+- `services/maintenance/data_pruner.rs` (§8.13, matriz #45) e as cadências de VPN e purga no
+  `scheduler_run`, completando a §9.2. O `data_pruner` não estava em nenhuma lista de fase,
+  mas sem ele `metrics` e `monitor_results` crescem sem teto.
+- O guarda JWT passou a propagar a identidade do usuário para o handler, porque a auditoria e
+  o rate limit da §7.13 precisam saber *quem* pediu.
+- `controllers::devices::present` virou `pub(crate)`: as telas de VPN devolvem o mesmo objeto
+  `device`, e duplicar a lista de campos faria as duas versões divergirem no primeiro campo
+  novo — além de o `Model` do `sea-orm` serializar em `snake_case`, quebrando a §5.1.
 
-- [ ] Suíte de paridade: script que bate **todos** os endpoints nos dois backends e compara os
-      JSONs normalizados (ordem de chave e timestamps ignorados)
-- [ ] Plano de migração de dados (o esquema é idêntico → `pg_dump`/`pg_restore` direto;
-      validar `jsonb` e `bigint`)
-- [ ] `docker-compose.yml` apontando para `backend-rust`
-- [ ] Rodar os dois em paralelo por 1 ciclo de validação (shadow), comparando alertas gerados
-- [ ] Atualizar `AGENTS.md` (comandos de validação viram `cargo fmt`/`clippy`/`test`)
-- [ ] Atualizar `docs/roadmap.md` e `docs/arquitetura.md`
-- [ ] Arquivar `backend/` (tag git + remoção)
+**Aceite:** ✅ coberto por teste de requisição — o wizard cria peer com device e monitores, o
+artefato entrega a chave uma única vez (a segunda leitura traz o placeholder e o aviso), o QR
+Code sai só no perfil móvel e vira 409 depois de consumido, rotacionar invalida a chave
+anterior, revogar libera o IP e tira o peer do `wg0.conf`, e o arquivo é escrito com
+isolamento entre peers. **Pendente de hardware:** aplicar os scripts em MikroTik/OpenWrt reais
+e confirmar o `syncconf` sem derrubar túneis ativos.
+
+### Fase 9 — Corte e descomissionamento (🟡 **Preparada** — falta a execução com o sistema no ar)
+
+- [x] 🟢 **Concluído** — Suíte de paridade: `cargo run --example parity_check` bate 20 endpoints
+      nos dois backends e compara os JSONs normalizados. Normaliza `id`, timestamps, chaves
+      públicas, conteúdo de artefato e a ordem das chaves; **não** normaliza nome de campo,
+      tipo, presença de chave nem formato de data — que é o que quebra tela. Sai com código
+      ≠ 0 enquanto houver divergência, então serve de portão em CI.
+- [x] 🟢 **Concluído** — Plano de migração de dados em
+      [corte_backend_rust.md](corte_backend_rust.md), incluindo a re-cifra dos segredos da VPN
+      (desvio **D6**): `node ace vpn:export-secrets` no AdonisJS →
+      `backend_rust-cli task vpn_secrets_import` no Rust, com conferência final que **falha**
+      se algum segredo não decifrar.
+- [x] 🟢 **Concluído** — `docker-compose.yml` apontando para `backend-rust` nos cinco serviços,
+      com `sysctls: ping_group_range` (ADR 003) e `ulimits: nofile` (§3.3.1).
+- [x] 🟢 **Concluído** — `AGENTS.md` atualizado: validação vira `cargo fmt`/`clippy`/`test`,
+      as regras do `vpn-probe` apontam para os arquivos Rust e as fronteiras do projeto
+      (sem `docker exec`, sem `CAP_NET_RAW`, chave privada fora do banco) estão escritas.
+- [x] 🟢 **Concluído** — `docs/roadmap.md` e `docs/arquitetura.md` com o aviso de migração e o
+      ponteiro para este roadmap. A `arquitetura.md` continua válida no modelo de domínio;
+      só a camada de framework envelheceu.
+- [ ] **Rodar os dois em paralelo por 1 ciclo de validação (shadow)**, comparando alertas
+      gerados — exige os dois processos no ar contra o mesmo banco. Procedimento no §3 do
+      runbook.
+- [ ] **Arquivar `backend/`** (tag git + remoção) — irreversível; §5 do runbook. Só depois de
+      a paridade fechar em zero e o ciclo de sombra passar.
 
 **Aceite:** diff de paridade vazio; frontend inalterado além de F1–F4; `backend/` removido.
 
@@ -1934,19 +1976,19 @@ verificação manual registrada).
 | 30 | Eventos de background chegam ao SSE via `event_outbox` | `event_relay.ts` | teste com 2 processos |
 | 31 | Relay ignora eventos da própria origem | `event_relay.ts` | unitário |
 | 32 | Relay só consulta o banco com assinante SSE conectado | `events_controller.ts` | teste |
-| 33 | Chave privada do peer entregue **uma única vez** | `secret_store.ts` | teste |
-| 34 | QR só quando o perfil suporta e a chave ainda existe (senão 409) | `vpn_peers_controller.ts` | teste |
-| 35 | `wg0.conf` escrito atomicamente (tmp + rename) | `config_writer.ts` | teste |
-| 36 | Isolamento entre peers via PostUp/PostDown (não `syncconf`) | `config_builder.ts` | snapshot |
-| 37 | Status do túnel usa keepalive quando existe; handshake senão | `vpn_peer.ts` | unitário, 6 cenários |
-| 38 | Transição de VPN exige estado anterior (1º ciclo é linha de base) | `vpn_peer_dataset.ts` | unitário |
-| 39 | `needsFirewallHint` usa `hasFreshProofOfLife`, não `connected` | `peer_hints.ts` | unitário |
-| 40 | `pingOutsideTunnel` quando o monitor não roda no `vpn-probe` | `peer_hints.ts` | unitário |
-| 41 | IP liberado ao revogar o peer (device removido) | `vpn_peer_service.ts` | teste |
-| 42 | Colisão de IP concorrente é retentada (até 10×) | `ip_allocator.ts` | teste concorrente |
-| 43 | `DEFAULT_VPN_PROBE_TOKEN` como fallback ⚠️ | `vpn_probe_registrar.ts` | teste |
-| 44 | Rate limit 10/60 s + `Retry-After` nos endpoints sensíveis | `access_control.ts` | teste |
-| 45 | Pruner respeita as 3 variáveis de retenção | `data_pruner_service.ts` | teste |
+| 33 | Chave privada do peer entregue **uma única vez** | `secret_store.ts` | ✅ `o_wizard_cria_o_peer_com_device_monitores_e_artefato` |
+| 34 | QR só quando o perfil suporta e a chave ainda existe (senão 409) | `vpn_peers_controller.ts` | ✅ `rotacionar_entrega_chave_nova_e_qrcode_so_no_perfil_movel` |
+| 35 | `wg0.conf` escrito atomicamente (tmp + rename) | `config_writer.ts` | ✅ `escreve_o_arquivo_e_nao_deixa_temporario_para_tras` |
+| 36 | Isolamento entre peers via PostUp/PostDown (não `syncconf`) | `config_builder.ts` | ✅ snapshot `o_arquivo_inteiro_bate_com_o_esperado` |
+| 37 | Status do túnel usa keepalive quando existe; handshake senão | `vpn_peer.ts` | ✅ `models::vpn_peers` (6 cenários, Fase 1) |
+| 38 | Transição de VPN exige estado anterior (1º ciclo é linha de base) | `vpn_peer_dataset.ts` | ✅ `sem_estado_anterior_o_ciclo_so_estabelece_a_linha_de_base` |
+| 39 | `needsFirewallHint` usa `hasFreshProofOfLife`, não `connected` | `peer_hints.ts` | ✅ `tunel_sem_prova_de_vida_recente_nao_gera_aviso` |
+| 40 | `pingOutsideTunnel` quando o monitor não roda no `vpn-probe` | `peer_hints.ts` | ✅ `ping_fora_do_tunel_nao_acusa_o_firewall_do_equipamento` |
+| 41 | IP liberado ao revogar o peer (device removido) | `vpn_peer_service.ts` | ✅ `revogar_libera_o_ip_e_tira_o_peer_do_wg0_conf` |
+| 42 | Colisão de IP concorrente é retentada (até 10×) | `ip_allocator.ts` | 🟡 `is_unique_violation` unitário; a corrida real fica para a validação em container |
+| 43 | `DEFAULT_VPN_PROBE_TOKEN` como fallback ⚠️ | `vpn_probe_registrar.ts` | ✅ `o_token_compartilhado_do_vpn_probe_autentica` + `o_token_cai_para_o_compartilhado_do_vpn_probe` |
+| 44 | Rate limit 10/60 s + `Retry-After` nos endpoints sensíveis | `access_control.ts` | ✅ `o_rate_limit_devolve_429_com_retry_after` |
+| 45 | Pruner respeita as 3 variáveis de retenção | `data_pruner_service.ts` | ✅ `a_retencao_vem_do_ambiente_com_padrao` + `valor_invalido_ou_zerado_nao_desliga_a_purga` |
 | 46 | Modo dual array/paginado nos 4 endpoints | vários controllers | ✅ `/api/alerts` coberto em `monitor_caido_dispara_alerta_e_a_volta_o_resolve`; demais na Fase 2 |
 | 47 | `createdAt` em `dd/MM/yyyy HH:mm:ss` em metrics/events de device | `devices_controller.ts` | teste |
 | 48 | `topology` cria aresta virtual para `parentId` com id negativo | `topology_service.ts` | teste |

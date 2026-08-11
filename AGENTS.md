@@ -1,5 +1,11 @@
 # Diretrizes do Projeto para Agentes IA
 
+> **O backend é Rust (Loco.rs), em `backend-rust/`.** A migração do AdonisJS
+> está descrita em [roadmap_backend_rust.md](docs/roadmap_backend_rust.md) e o
+> procedimento de corte em [corte_backend_rust.md](docs/corte_backend_rust.md).
+> Enquanto `backend/` existir, ele é **referência de comportamento** — a fonte
+> da verdade das regras portadas —, não alvo de novas features.
+
 ## 🧪 Padrões Obrigatórios de Teste & Estabilidade
 
 1. **Validação Obrigatória Pré-Finalização**:
@@ -10,11 +16,16 @@
      npm --prefix frontend run lint
      npm --prefix frontend run build
      ```
-   - **Backend**:
+   - **Backend (Rust)**:
      ```bash
-     npm --prefix backend run typecheck
-     npm --prefix backend run test
+     cargo fmt --all --check
+     cargo clippy --all-targets -- -D warnings
+     cargo test
+     cargo build --release
      ```
+     Rodados a partir de `backend-rust/`. Os quatro precisam passar — a
+     [§18](docs/roadmap_backend_rust.md#18-critérios-de-aceite-definition-of-done)
+     trata isso como critério de aceite, não como sugestão.
 
 2. **Regras de Qualidade Vue / Template HTML**:
    - Fechamento estrito de tags Vuetify (ex: `<v-row></v-row>`).
@@ -22,24 +33,61 @@
    - Não colocar comentários `<!-- -->` entre diretivas `v-if` e `v-else`.
    - Usar props `:title` e `:subtitle` no `<v-list-item>` do Vuetify 3 para evitar ambiguidades de slot.
 
-3. **Independência de Ambiente (Docker / Local) & Sincronização de Lockfile**:
-   - Garanta a criação recursiva de diretórios temporários via `fs.mkdirSync(path, { recursive: true })`.
-   - Suporte dinâmico para `DB_CONNECTION` (`sqlite` ou `pg`).
-   - **Alinhamento de Peer Dependencies**: Ao atualizar/adicionar dependências em `package.json`, garanta que dependências equivalentes (ex: `vue-eslint-parser` e `eslint-plugin-vue`) estejam em versões compatíveis para evitar erros `ERESOLVE` no npm.
-   - **Sincronização Obrigatória do `package-lock.json`**: Sempre que alterar qualquer `package.json` (backend ou frontend), você **DEVE obrigatoriamente** rodar `npm --prefix backend install` ou `npm --prefix frontend install` para sincronizar o `package-lock.json`.
-   - **Configuração de Dockerfile**: Mantenha os Dockerfiles utilizando o padrão limpo `RUN npm ci`. Garantindo o alinhamento de dependências no `package.json` e a sincronização do `package-lock.json`, o build do Docker roda 100% nativo e performático sem a necessidade de flags ou contornos.
+3. **Independência de Ambiente (Docker / Local)**:
+   - O backend Rust roda em SQLite (teste/dev) e PostgreSQL (produção). Toda
+     consulta precisa valer nos dois dialetos.
+   - **Entidades do `sea-orm` são geradas contra o PostgreSQL**, nunca contra o
+     SQLite: o SQLite reporta todo inteiro como `INTEGER` e o `db entities`
+     rodado contra ele produz `i64` onde o Postgres tem `INT4` — e aí o `sqlx`
+     recusa a leitura em produção.
+   - **Alinhamento de Peer Dependencies (frontend)**: ao atualizar/adicionar
+     dependências em `package.json`, garanta versões compatíveis para evitar
+     `ERESOLVE`, e rode `npm --prefix frontend install` para sincronizar o
+     `package-lock.json`.
 
-4. **Práticas de Teste no Japa (Backend)**:
-   - **Isolamento de Banco**: Inclua `group.each.setup(() => testUtils.db().truncate())` em testes funcionais.
-   - **Timeouts**: Defina `.timeout(5000)` para testes de rede nativos (`ping`, `socket`).
-   - **Ambiente Local**: Utilize apenas `127.0.0.1` ou `localhost`.
+4. **Práticas de Teste (Rust)**:
+   - **Isolamento de Banco**: testes de requisição usam
+     `request_with_config::<App, _, _>`; o `Hooks::truncate` limpa as 23 tabelas
+     entre eles.
+   - **`#[serial]`** em tudo que toca estado global de processo: `ScanSessionService`,
+     o cofre de chaves da VPN, o rate limiter e qualquer teste que mexa em
+     variável de ambiente.
+   - **Timeouts**: 5 s por teste de rede nativo (`ping`, `socket`).
+   - **Ambiente Local**: apenas `127.0.0.1` ou `localhost` — nada de alvo externo.
+   - Funções puras têm teste unitário no próprio módulo (`#[cfg(test)] mod tests`);
+     artefatos textuais (scripts de VPN, `wg0.conf`) usam snapshot `insta`.
 
 5. **Documentação & Roadmap**:
-   - Atualize `docs/roadmap.md` marcando itens concluídos com `[x]` e badge `🟢 Concluído`.
-   - Consulte [diretrizes_qualidade_e_checklist.md](file:///d:/Projetos/Master%20sistemas/opensource/monitor%20de%20rede/docs/diretrizes_qualidade_e_checklist.md) e [diretrizes_testes.md](file:///d:/Projetos/Master%20sistemas/opensource/monitor%20de%20rede/docs/diretrizes_testes.md).
+   - Atualize `docs/roadmap.md` e `docs/roadmap_backend_rust.md` marcando itens
+     concluídos com `[x]` e badge `🟢 Concluído`.
+   - Consulte [diretrizes_qualidade_e_checklist.md](docs/diretrizes_qualidade_e_checklist.md) e [diretrizes_testes.md](docs/diretrizes_testes.md).
 
 6. **Preservação e Regras de Negócio do Módulo `vpn-probe`**:
-   - **Agente Dedicado (`vpn-probe`)**: O `vpn-probe` compartilha o namespace de rede do WireGuard (`network_mode: "service:wireguard"`) para realizar medições ICMP/SNMP na faixa `10.8.0.x`.
-   - **Token Fallback Padrão (`DEFAULT_VPN_PROBE_TOKEN`)**: `VpnProbeRegistrar` e `ProbeAgent` **DEVEM** utilizar `DEFAULT_VPN_PROBE_TOKEN = 'default_vpn_probe_token'` como fallback padrão se `VPN_PROBE_TOKEN` / `PROBE_TOKEN` não for definido no `.env`. **NUNCA remova este fallback**, pois ele garante registro e autenticação zero-config em containers Docker.
-   - **Comando CLI de Registro (`node ace vpn:probe-register`)**: O comando `node ace vpn:probe-register` ([vpn_probe_register.ts](file:///d:/Projetos/Master%20sistemas/opensource/monitor%20de%20rede/commands/vpn_probe_register.ts)) gera (ou reutiliza) um token de registro do probe no banco de dados e o exibe no terminal. **NÃO remover este comando CLI ou suas dependências em `VpnProbeRegistrar`**.
-   - **Fallback de Execução Local no Agendador (`scheduler_run.ts`)**: Se o `vpn-probe` estiver offline por qualquer motivo, o agendador **DEVE** tentar a execução local via `monitorRunner.runMonitor` antes de desmarcar o monitor e reportar `UNKNOWN`. **NÃO remover essa tratativa de fallback**.
+   - **Agente Dedicado (`vpn-probe`)**: compartilha o namespace de rede do
+     WireGuard (`network_mode: "service:wireguard"`) para medir ICMP/SNMP na
+     faixa `10.8.0.x`.
+   - **Token Fallback Padrão (`DEFAULT_VPN_PROBE_TOKEN`)**: o registrador
+     (`services/vpn/probe_registrar.rs`) e o agente (`services/probes/agent.rs`)
+     **DEVEM** usar `DEFAULT_VPN_PROBE_TOKEN = "default_vpn_probe_token"` como
+     fallback quando `VPN_PROBE_TOKEN`/`PROBE_TOKEN` não estiverem definidos.
+     **NUNCA remova este fallback**: é ele que garante registro e autenticação
+     zero-config em containers Docker. É também a razão de
+     `probes.token_hash` não ter índice único.
+   - **Comando CLI de Registro**: `backend_rust-cli task vpn_probe_register`
+     (`src/tasks/vpn_probe_register.rs`) gera ou reutiliza o token do probe e o
+     exibe no terminal. **NÃO remover** este comando nem o `probe_registrar`.
+   - **Fallback de Execução Local no Agendador** (`src/tasks/scheduler_run.rs`):
+     se o probe estiver offline por qualquer motivo, o agendador **DEVE** tentar
+     a execução local via `run_monitor` antes de reportar `unknown`. **NÃO
+     remover essa tratativa.**
+
+7. **Fronteiras que não se atravessam**:
+   - O processo da API **nunca** executa `wg` nem `docker exec`. Ele escreve
+     `<iface>.conf` e lê `<iface>.status` num volume compartilhado; quem aplica
+     é o container do WireGuard. É isso que mantém o servidor sem `NET_ADMIN`.
+   - O ping usa socket ICMP `SOCK_DGRAM` (ADR 003) — sem `CAP_NET_RAW` e sem
+     `execFile('ping')`. O `sysctl net.ipv4.ping_group_range` está no compose.
+   - A chave privada de um peer **nunca** vai ao banco: vive no cofre em memória
+     até a primeira leitura. Depois disso, só rotacionando.
+   - Controller extrai, valida, delega e serializa. Regra de negócio vive em
+     `src/services/`, testável sem HTTP.

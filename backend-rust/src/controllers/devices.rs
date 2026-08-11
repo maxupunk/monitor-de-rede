@@ -28,7 +28,13 @@ use crate::{
     },
 };
 
-async fn present(
+/// Serialização canônica de um dispositivo para a API.
+///
+/// É `pub(crate)` porque as telas de VPN devolvem o mesmo objeto dentro de
+/// `{peer, device}` (§7.13). Duplicar a lista de campos lá faria as duas
+/// versões divergirem no primeiro campo novo — e o `Model` do `sea-orm`
+/// serializa em `snake_case`, o que quebraria o contrato camelCase da §5.1.
+pub(crate) async fn present(
     db: &sea_orm::DatabaseConnection,
     device: devices::Model,
 ) -> AppResult<serde_json::Value> {

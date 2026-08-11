@@ -9,7 +9,7 @@ use loco_rs::{
 use crate::services::{
     alerts::catalog::service as alert_catalog, discovery::service::ScanSessionService,
     events::EventBus, monitoring::checkers::ping::PingClient,
-    network_tools::dns::registry::DnsServerRegistry,
+    network_tools::dns::registry::DnsServerRegistry, vpn::probe_registrar as vpn_probe_registrar,
 };
 
 /// Abre uma vez o socket ICMP compartilhado por checkers e discovery.
@@ -45,6 +45,13 @@ impl Initializer for MonitoringInitializer {
             Err(error) => {
                 tracing::warn!(%error, "não foi possível provisionar as regras básicas de alerta");
             }
+        }
+        // Registro idempotente do `vpn-probe` (§9.5). Também não impede o boot:
+        // o container do túnel pode subir depois, e o registro é refeito no
+        // próximo start. ⚠️ O fallback para o token compartilhado é o que
+        // permite o `vpn-probe` autenticar sem configuração (matriz #43).
+        if let Err(error) = vpn_probe_registrar::register(&ctx.db, None).await {
+            tracing::warn!(%error, "não foi possível registrar o probe dedicado da VPN");
         }
         Ok(())
     }

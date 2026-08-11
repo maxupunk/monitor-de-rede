@@ -14,4 +14,5 @@ pub mod probes;
 pub mod shared;
 pub mod snmp;
 pub mod topology;
+pub mod vpn;
 pub mod zabbix;

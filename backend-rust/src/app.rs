@@ -78,6 +78,8 @@ impl Hooks for App {
             .add_route(controllers::events::routes().layer(business_auth.clone()))
             .add_route(controllers::alerts::rules_routes().layer(business_auth.clone()))
             .add_route(controllers::alerts::routes().layer(business_auth.clone()))
+            .add_route(controllers::vpn_servers::routes().layer(business_auth.clone()))
+            .add_route(controllers::vpn_peers::routes().layer(business_auth.clone()))
             .add_route(controllers::zabbix_templates::routes().layer(business_auth))
     }
     async fn connect_workers(ctx: &AppContext, queue: &Queue) -> Result<()> {
@@ -92,6 +94,8 @@ impl Hooks for App {
         tasks.register(SchedulerRun);
         tasks.register(tasks::probe_run::ProbeRun);
         tasks.register(tasks::probe_register::ProbeRegister);
+        tasks.register(tasks::vpn_probe_register::VpnProbeRegister);
+        tasks.register(tasks::vpn_secrets_import::VpnSecretsImport);
     }
     /// Limpa o esquema inteiro entre testes.
     ///

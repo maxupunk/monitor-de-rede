@@ -1,5 +1,31 @@
 # Arquitetura Técnica Inicial
 
+> ## ⚠️ Documento histórico — a implementação migrou para Rust
+>
+> **O backend em produção é Rust sobre [Loco.rs](https://loco.rs/), em
+> `backend-rust/`.** A migração está descrita em
+> [roadmap_backend_rust.md](roadmap_backend_rust.md) e o corte em
+> [corte_backend_rust.md](corte_backend_rust.md).
+>
+> O que continua **válido** neste documento: o modelo de domínio, o esquema de
+> dados, a topologia de processos (server / scheduler / probe / vpn-probe /
+> wireguard) e as regras de negócio de cada módulo. Foi tudo portado sem
+> alteração de comportamento — as divergências deliberadas estão na
+> [§17 do roadmap Rust](roadmap_backend_rust.md#17-não-objetivos-e-desvios-aceitos).
+>
+> O que está **desatualizado**: tudo que fala de AdonisJS, Lucid, Japa,
+> `node ace` e da estrutura de diretórios TypeScript. O mapa de tradução termo a
+> termo está na
+> [§2 do roadmap Rust](roadmap_backend_rust.md#2-mapa-de-tradução-adonisjs--locors).
+>
+> Três decisões substituíram o que este documento descrevia:
+>
+> | Aqui | Agora | Por quê |
+> | :--- | :--- | :--- |
+> | Ping por `execFile('ping')` | Socket ICMP `SOCK_DGRAM` (`surge-ping`) | Elimina o parsing por idioma do SO e o `fork()` por checagem — [ADR 003](adr/003-icmp-dgram.md) |
+> | Port scan com concorrência fixa 16 | Estratégia RustScan sobre `tokio` | Varredura de 1024 portas em < 3 s — [ADR 002](adr/002-rustscan-embedding.md) |
+> | Fila/worker formal do §4.2 | Nunca existiu; o scheduler executa inline | Registrado como desvio **D8** — não regride nem avança |
+
 ## Sistema de Monitoramento de Redes com AdonisJS
 
 ## 1. Objetivo

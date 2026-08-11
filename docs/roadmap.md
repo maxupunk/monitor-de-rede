@@ -2,6 +2,14 @@
 
 Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificação base (`docs/base.md`), este documento mapeia o status atual do projeto, detalhando o que já foi estruturado e as etapas necessárias para tornar o sistema 100% funcional.
 
+> **Backend reescrito em Rust.** Os módulos abaixo continuam descrevendo o
+> comportamento correto do produto, mas a implementação vive em `backend-rust/`
+> (Loco.rs) desde a Fase 9 da migração. O roadmap da reescrita, item a item, é
+> o [roadmap_backend_rust.md](roadmap_backend_rust.md); o procedimento de corte
+> é o [corte_backend_rust.md](corte_backend_rust.md). Onde este documento diz
+> "AdonisJS", "Lucid" ou `node ace`, leia a
+> [§2 do roadmap Rust](roadmap_backend_rust.md#2-mapa-de-tradução-adonisjs--locors).
+
 ---
 
 ## 📊 Visão Geral do Status Atual
@@ -9,7 +17,8 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
 | Componente / Módulo | Status Atual | Descrição |
 | :--- | :---: | :--- |
 | **Documentação Técnica** | 🟢 **Concluído** | Especificação completa da arquitetura (`arquitetura.md`) e requisitos (`base.md`). |
-| **Estrutura do Projeto Backend** | 🟢 **Concluído** | Estrutura de diretórios AdonisJS v6, rotas da API, controllers e modelos definidos. |
+| **Backend em Rust (Loco.rs)** | 🟢 **Concluído** | Reescrita completa em `backend-rust/`: 23 migrations, ~90 endpoints, 5 checkers, discovery, SNMP, topologia, alertas, probes e VPN. Ver [roadmap_backend_rust.md](roadmap_backend_rust.md). |
+| **Estrutura do Projeto Backend** | 🟢 **Concluído** | Controllers em `src/controllers/`, domínio em `src/services/`, entidades `sea-orm` em `src/models/_entities/`. |
 | **Banco de Dados & Migrations** | 🟢 **Concluído** | Criadas todas as 15+ tabelas de negócio e atualizados os modelos Lucid com relacionamentos. |
 | **Motor de Monitoramento (Checkers)** | 🟢 **Concluído** | Checkers reais de Ping (ICMP/RTT), HTTP/HTTPS (Fetch/Status/Latência), TCP (Sockets), SNMP (uptime/CPU/memória/interface) e DNS com medição de latência de resolução via UDP, TCP e DoH. |
 | **Processamento de Resultados** | 🟢 **Concluído** | `ResultProcessor` grava resultados no banco, extrai métricas e atualiza estado dos dispositivos/monitores. |

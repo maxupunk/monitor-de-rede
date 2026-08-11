@@ -15,4 +15,6 @@ pub mod root;
 pub mod sites;
 pub mod snmp;
 pub mod topology;
+pub mod vpn_peers;
+pub mod vpn_servers;
 pub mod zabbix_templates;

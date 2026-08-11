@@ -128,6 +128,12 @@ path = "examples/spikes/dns_wire.rs"
 name = "schema_parity"
 path = "examples/schema_parity.rs"
 
+# Suíte de paridade de contrato HTTP (§15 Fase 9). Exemplo porque exige os dois
+# backends no ar — um `cargo test` não pode depender disso.
+[[example]]
+name = "parity_check"
+path = "examples/parity_check.rs"
+
 [dev-dependencies]
 loco-rs = { workspace = true, features = ["testing"] }
 serial_test = { version = "3.1.1" }

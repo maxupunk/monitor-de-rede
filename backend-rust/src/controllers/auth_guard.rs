@@ -5,21 +5,48 @@
 
 use axum::{
     extract::{Request, State},
-    http::StatusCode,
+    http::{HeaderValue, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
 };
 use loco_rs::{app::AppContext, controller::extractor::auth};
 
-pub async fn require_jwt(State(ctx): State<AppContext>, request: Request, next: Next) -> Response {
-    let (parts, body) = request.into_parts();
-    if let Err(error) = auth::extract_jwt_from_request_parts(&parts, &ctx) {
-        tracing::warn!(%error, path = %parts.uri.path(), "requisição de negócio sem JWT válido");
-        return (
-            StatusCode::UNAUTHORIZED,
-            axum::Json(serde_json::json!({ "message": "Não autenticado" })),
-        )
-            .into_response();
+/// Cabeçalho interno com a identidade de quem passou pelo guarda.
+///
+/// Existe porque a auditoria e o rate limit da VPN (§7.13) precisam saber
+/// *quem* pediu, e o guarda é o único ponto que já validou o token. Escrever no
+/// próprio `Request` (em vez de uma extensão tipada) mantém os handlers com
+/// extratores infalíveis: um `HeaderMap` nunca falha, uma `Extension` ausente
+/// vira 500.
+///
+/// É um cabeçalho de **requisição**, escrito por nós depois da validação —
+/// nada que o cliente mande com esse nome sobrevive, porque a linha abaixo o
+/// sobrescreve.
+pub const AUTHENTICATED_USER_HEADER: &str = "x-authenticated-user";
+
+pub async fn require_jwt(
+    State(ctx): State<AppContext>,
+    mut request: Request,
+    next: Next,
+) -> Response {
+    let (mut parts, body) = request.into_parts();
+    let claims = match auth::extract_jwt_from_request_parts(&parts, &ctx) {
+        Ok(claims) => claims,
+        Err(error) => {
+            tracing::warn!(%error, path = %parts.uri.path(), "requisição de negócio sem JWT válido");
+            return (
+                StatusCode::UNAUTHORIZED,
+                axum::Json(serde_json::json!({ "message": "Não autenticado" })),
+            )
+                .into_response();
+        }
+    };
+
+    parts.headers.remove(AUTHENTICATED_USER_HEADER);
+    if let Ok(value) = HeaderValue::from_str(&claims.claims.pid) {
+        parts.headers.insert(AUTHENTICATED_USER_HEADER, value);
     }
-    next.run(Request::from_parts(parts, body)).await
+
+    request = Request::from_parts(parts, body);
+    next.run(request).await
 }

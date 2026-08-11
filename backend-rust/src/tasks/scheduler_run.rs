@@ -1,6 +1,11 @@
 //! Um ciclo do scheduler de monitores, acionado pelo scheduler nativo do Loco.
 
-use chrono::Utc;
+use std::{
+    collections::HashMap,
+    sync::{Mutex, OnceLock},
+};
+
+use chrono::{DateTime, Utc};
 use loco_rs::prelude::*;
 use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
@@ -9,6 +14,7 @@ use crate::{
     services::{
         discovery::queue::{process_pending_runs, schedule_due_networks},
         events::relay::relay_pending,
+        maintenance::data_pruner,
         monitoring::{
             contracts::{CheckResult, MonitorStatus},
             result_processor::process_result,
@@ -19,6 +25,7 @@ use crate::{
             liveness::{is_probe_alive, mark_stale_probes_offline},
         },
         shared::errors::AppResult,
+        vpn::traffic_recorder,
     },
 };
 
@@ -66,6 +73,9 @@ pub async fn run_cycle(ctx: &AppContext) -> AppResult<usize> {
             tracing::warn!(%error, monitor_id = monitor.id, "falha ao executar monitor");
         }
     }
+    if let Err(error) = sync_vpn_traffic_if_due(ctx).await {
+        tracing::warn!(%error, "falha ao sincronizar tráfego VPN");
+    }
     // A fila de discovery é persistente: o scheduler apenas enfileira as redes
     // vencidas e processa uma por ciclo para não saturar a LAN.
     if let Err(error) = schedule_due_networks(&ctx.db).await {
@@ -74,10 +84,84 @@ pub async fn run_cycle(ctx: &AppContext) -> AppResult<usize> {
     if let Err(error) = process_pending_runs(ctx).await {
         tracing::warn!(%error, "falha ao processar discovery");
     }
+    if let Err(error) = run_data_pruner_if_due(ctx).await {
+        tracing::warn!(%error, "falha ao executar purga de dados antigos");
+    }
     if let Err(error) = relay_pending(ctx).await {
         tracing::warn!(%error, "falha ao retransmitir eventos");
     }
     Ok(due.len())
+}
+
+/// Cadência da leitura de status dos túneis. Fina de propósito: é o que faz a
+/// tela de dispositivos VPN acompanhar um túnel que acabou de subir.
+const VPN_STATUS_INTERVAL_SECONDS: i64 = 10;
+
+/// Cadência da gravação de histórico de tráfego VPN — quatro linhas em
+/// `metrics` por peer, não precisa ser fina.
+const VPN_TRAFFIC_INTERVAL_SECONDS: i64 = 30;
+
+const DATA_PRUNE_INTERVAL_SECONDS: i64 = 3_600;
+
+/// Próximo instante de cada tarefa periódica do ciclo.
+///
+/// O `scheduler_run` é uma task de **um ciclo** (ADR 005): cada disparo é um
+/// processo novo, então esta memória não sobrevive entre execuções em produção.
+/// Ela existe para o caso de o ciclo ser chamado em laço dentro do mesmo
+/// processo (teste, ou um futuro modo embutido) — sem ela, o pruner rodaria a
+/// cada 5 s ali. A cadência real em produção vem do `config/scheduler.yaml`.
+fn next_run_at() -> &'static Mutex<HashMap<&'static str, DateTime<Utc>>> {
+    static NEXT: OnceLock<Mutex<HashMap<&'static str, DateTime<Utc>>>> = OnceLock::new();
+    NEXT.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// `true` quando a tarefa venceu; já reserva o próximo horário.
+fn is_due(key: &'static str, interval_seconds: i64, now: DateTime<Utc>) -> bool {
+    let Ok(mut next) = next_run_at().lock() else {
+        return true;
+    };
+    match next.get(key) {
+        Some(scheduled) if now < *scheduled => false,
+        _ => {
+            next.insert(key, now + chrono::Duration::seconds(interval_seconds));
+            true
+        }
+    }
+}
+
+/// Status a cada 10 s, histórico a cada 30 s.
+///
+/// O ciclo com histórico já sincroniza o status; roda primeiro para não gravar
+/// duas amostras de tráfego separadas por poucos segundos.
+async fn sync_vpn_traffic_if_due(ctx: &AppContext) -> AppResult<()> {
+    let now = Utc::now();
+    if is_due("vpn_traffic", VPN_TRAFFIC_INTERVAL_SECONDS, now) {
+        traffic_recorder::record_all(ctx).await?;
+        // O histórico já cobriu o status: adia o próximo ciclo curto.
+        is_due("vpn_status", VPN_STATUS_INTERVAL_SECONDS, now);
+        return Ok(());
+    }
+    if is_due("vpn_status", VPN_STATUS_INTERVAL_SECONDS, now) {
+        traffic_recorder::sync_all(ctx).await?;
+    }
+    Ok(())
+}
+
+async fn run_data_pruner_if_due(ctx: &AppContext) -> AppResult<()> {
+    if !is_due("data_pruner", DATA_PRUNE_INTERVAL_SECONDS, Utc::now()) {
+        return Ok(());
+    }
+    let stats = data_pruner::prune_all(&ctx.db).await?;
+    if stats.total() > 0 {
+        tracing::info!(
+            outbox = stats.outbox_deleted,
+            resultados = stats.results_deleted,
+            metricas = stats.metrics_deleted,
+            descoberta = stats.discovery_deleted,
+            "purga de dados antigos executada"
+        );
+    }
+    Ok(())
 }
 
 /// Despacho de um monitor, na ordem portada integralmente do backend anterior

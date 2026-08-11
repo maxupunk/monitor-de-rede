@@ -1,0 +1,67 @@
+---
+source: src/services/vpn/profiles/variants.rs
+expression: "linux_bash_variant(&contexto(), CONF).content"
+---
+#!/usr/bin/env bash
+# === NetMonitor - WireGuard - filial-01 ===
+# Salve como netmonitor-vpn.sh e execute:  sudo bash netmonitor-vpn.sh
+set -euo pipefail
+
+IFACE='netmonitor'
+CONF="/etc/wireguard/${IFACE}.conf"
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo 'Execute como root: sudo bash netmonitor-vpn.sh' >&2
+  exit 1
+fi
+
+# 1/4 · Instala o wireguard-tools pelo gerenciador de pacotes da distribuição
+if command -v apt-get >/dev/null 2>&1; then   # Debian, Ubuntu, Mint, Raspberry Pi OS
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq
+  apt-get install -y wireguard-tools
+elif command -v dnf >/dev/null 2>&1; then   # Fedora, RHEL 8+, Rocky, AlmaLinux
+  dnf install -y wireguard-tools
+elif command -v yum >/dev/null 2>&1; then   # CentOS 7, RHEL 7
+  yum install -y epel-release || true
+  yum install -y wireguard-tools
+elif command -v zypper >/dev/null 2>&1; then   # openSUSE, SLES
+  zypper --non-interactive install wireguard-tools
+elif command -v pacman >/dev/null 2>&1; then   # Arch, Manjaro
+  pacman -Sy --noconfirm wireguard-tools
+elif command -v apk >/dev/null 2>&1; then   # Alpine
+  apk add --no-cache wireguard-tools
+else
+  echo 'Gerenciador de pacotes não reconhecido — instale o wireguard-tools manualmente.' >&2
+  exit 1
+fi
+
+# 2/4 · Grava o perfil (a chave privada fica legível apenas pelo root)
+install -d -m 700 /etc/wireguard
+umask 077
+cat > "$CONF" <<'EOF'
+[Interface]
+PrivateKey = CHAVE
+Address = 10.8.0.11/24
+EOF
+chmod 600 "$CONF"
+
+# Sem a chave privada o tunel nunca fecha — melhor parar aqui do que deixar
+# um wg-quick habilitado no boot tentando subir uma configuracao invalida.
+if grep -q CHAVE-PRIVADA-INDISPONIVEL "$CONF"; then
+  rm -f "$CONF"
+  echo 'A chave privada deste dispositivo ja foi entregue. No NetMonitor, use "Rotacionar chaves" e copie o script novo.' >&2
+  exit 1
+fi
+
+# 3/4 · Sobe o túnel agora e a cada reinício
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl enable --now "wg-quick@${IFACE}"
+else
+  wg-quick up "$IFACE"   # sem systemd (OpenRC): rc-update add wg-quick.${IFACE}
+fi
+
+# 4/4 · Conferência — "latest handshake" deve aparecer em poucos segundos
+wg show "$IFACE"
+
+echo 'Túnel netmonitor ativo. O dispositivo aparece como conectado no NetMonitor.'
