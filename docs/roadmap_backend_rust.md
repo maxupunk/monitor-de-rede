@@ -1770,33 +1770,36 @@ Configurações sem erro de console, apontando para o backend Rust.
 **Aceite:** monitores executam, gravam histórico, atualizam status de device; a tela
 `/monitors` mostra linha do tempo e sparkline corretos.
 
-### Fase 4 — Ferramentas de rede (🔴)
+### Fase 4 — Ferramentas de rede (🟡 Backend concluído; validação de UI pendente)
 
-- [ ] **Port scanner RustScan/tokio** ([§3.3](#33-decisão-port-scanner-estilo-rustscan-sobre-tokio-obrigatório)) + `UdpProbeRegistry`
-- [ ] `POST /api/port-scan` com NDJSON e cancelamento
-- [ ] DNS: `wire`, `latency`, `registry`, `DnsChecker`
-- [ ] `POST /api/dns/{benchmark,lookup}`, `GET /api/dns/performance`, CRUD `/api/dns/servers`
-- [ ] Validação F6 no frontend
+- [x] 🟢 **Concluído** — **Port scanner RustScan/tokio** ([§3.3](#33-decisão-port-scanner-estilo-rustscan-sobre-tokio-obrigatório)) + `UdpProbeRegistry`, com limites de entrada, concorrência adaptativa e scan TCP/UDP.
+- [x] 🟢 **Concluído** — `POST /api/port-scan` com resposta `application/x-ndjson`, eventos de resultado/finalização e cancelamento cooperativo ao encerrar o cliente.
+- [x] 🟢 **Concluído** — DNS: `wire`, `latency`, `registry` e `DnsChecker`, incluindo UDP, TCP, DoH e resolução pelo sistema.
+- [x] 🟢 **Concluído** — `POST /api/dns/{benchmark,lookup}`, `GET /api/dns/performance` e CRUD `/api/dns/servers`.
+- [ ] Validação F6 no frontend e medição manual da meta de 1024 portas em menos de 3 s.
 
-**Aceite:** `PortScanDialog` e `DnsLatencyCard` funcionam; varredura de 1024 portas < 3 s.
+**Aceite pendente:** validar `PortScanDialog` e `DnsLatencyCard` em navegador e registrar a medição de desempenho.
 
-### Fase 5 — SNMP, discovery e topologia (🔴)
+### Fase 5 — SNMP, discovery e topologia (🟡 Parcial — entregas registradas em 2026-08-11)
 
-- [ ] **Cliente SNMP v1/v2c/v3**: `SnmpClient` assíncrono sobre `tokio::net::UdpSocket` usando `rasn` + `rasn-snmp` (0.18) (SPIKE-01/ADR 001, sem `libsnmp` C e sem `spawn_blocking`) + 6 coletores (`system`, `interface`, `traffic`, `cpu`, `memory`, `lldp`) + `SnmpService` (`scan`/`poll`/`test`/`detect`)
-- [ ] **`SnmpChecker`**: 3 modos (status de interface, tráfego e uptime) com mapeamento RFC 2863 e tratamento de rollover 32/64-bits
-- [ ] **Scanners de Discovery**: 6 coletores assíncronos desacoplados otimizados para Linux/Docker:
-  - ICMP sweep via `surge-ping` (0.8) sobre `SOCK_DGRAM` (`ping_group_range="0 2147483647"`, sem `CAP_NET_RAW` / sem root)
-  - ARP via leitura direta de `/proc/net/arp` no Linux após pré-probe TCP porta 80/443
-  - Port sweep com concorrência adaptativa (estratégia RustScan sobre `tokio`)
-  - mDNS via `mdns-sd` (0.13) + `hickory-proto` (0.24) em `224.0.0.251:5353`
-  - SSDP via `ssdp-client` (0.4) em `239.255.255.250:1900`
-  - SNMP sweep via `rasn-snmp` (0.18) na porta 161
-- [ ] **Reconciliação e Identificação**: `merger`, `oui_lookup` (O(1) sem alocação com `phf`), `device_identifier` (heurística de tipos)
-- [ ] **Serviço de Varredura**: `DiscoveryService`, `DiscoveryQueue`, `ScanSessionService` + SSE de progresso ao vivo
-- [ ] **Serviço de Topologia**: `TopologyService` construído sobre `petgraph` (`0.7`), com leitura de MIBs LLDP (`1.0.8802...`) / CDP (`1.3.6.1.4.1.9...`) via `rasn-snmp`, inferência de sub-redes, links manuais e deduplicação de grafo
-- [ ] **Templates Zabbix**: Parser JSON/XML, collector de métricas customizadas e `zabbix_template_monitor_sync`
+- [x] 🟢 **Concluído (base v2c)** — `SnmpClient` assíncrono sobre `tokio::net::UdpSocket` usando `rasn` + `rasn-snmp`, com `get`, `walk`, tentativas, `SnmpService` (`scan`/`poll`/`test`/`detect`) e coletores iniciais de sistema, interfaces, CPU e memória.
+- [ ] Cliente SNMP v1/v3, coleta completa de tráfego/LLDP/CDP, persistência de polling e detecção de reboot.
+- [x] 🟢 **Concluído (base)** — `SnmpChecker` para uptime, estado e contador de tráfego; cálculo de rollover de contador de 32 bits coberto por teste unitário.
+- [ ] Completar os três modos do `SnmpChecker` com semântica RFC 2863, contador de 64 bits e preservação de `adminStatus`.
+- [x] 🟢 **Concluído (base)** — **Scanners de Discovery** assíncronos e desacoplados para ICMP, ARP, portas, mDNS, SSDP e SNMP.
+  - [x] ICMP sweep via `surge-ping` sobre `SOCK_DGRAM`.
+  - [x] ARP via `/proc/net/arp` no Linux após pré-probe TCP nas portas 80 e 443.
+  - [x] Port sweep com concorrência adaptativa sobre `tokio`.
+  - [x] mDNS em `224.0.0.251:5353`, com decodificação DNS por `hickory-proto`.
+  - [x] SSDP em `239.255.255.250:1900`.
+  - [x] SNMP sweep na porta 161.
+- [x] 🟢 **Concluído** — **Reconciliação e identificação**: `merger`, `oui_lookup` O(1) com `phf` e heurística `device_identifier`.
+- [x] 🟢 **Concluído** — **Serviço de varredura**: expansão CIDR, `DiscoveryQueue`, `ScanSessionService`, cancelamento e SSE de progresso ao vivo; resultados são persistidos como cache por execução.
+- [x] 🟢 **Concluído (base)** — **Serviço de topologia** sobre `petgraph`, com links manuais, inferência por sub-rede, deduplicação e controle de confiança.
+- [ ] Leitura de MIBs LLDP/CDP e inferência de links físicos via SNMP.
+- [ ] **Templates Zabbix**: parser JSON/XML, coletor de métricas customizadas e `zabbix_template_monitor_sync`.
 
-**Aceite:** `/discovery` varre uma faixa /24 com progresso ao vivo em Linux no Docker sem privilégio root; `/topology` desenha o grafo com `petgraph`; poll SNMP assíncrono grava métricas e detecta vizinhos LLDP/CDP.
+**Aceite pendente:** validar uma faixa `/24` no Docker sem root, completar o poll SNMP com métricas e LLDP/CDP, e concluir a integração de templates Zabbix antes de declarar a Fase 5 encerrada.
 
 ### Fase 6 — Alertas, eventos e autenticação (🔴)
 

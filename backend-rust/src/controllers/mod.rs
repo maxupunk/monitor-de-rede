@@ -10,4 +10,6 @@ pub mod port_scan;
 pub mod probes;
 pub mod root;
 pub mod sites;
+pub mod snmp;
+pub mod topology;
 pub mod zabbix_templates;

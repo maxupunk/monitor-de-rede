@@ -213,4 +213,16 @@ mod tests {
             assert!(is_scannable_cidr(cidr), "`{cidr}` devia ser varredurável");
         }
     }
+
+    #[test]
+    fn expansao_respeita_rfc_3021_e_limite() {
+        assert_eq!(
+            expand_cidr("10.0.0.0/31", 1024).unwrap(),
+            vec![
+                "10.0.0.0".parse::<Ipv4Addr>().unwrap(),
+                "10.0.0.1".parse::<Ipv4Addr>().unwrap()
+            ]
+        );
+        assert_eq!(expand_cidr("192.168.1.0/24", 2).unwrap().len(), 2);
+    }
 }

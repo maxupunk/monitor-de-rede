@@ -1,15 +1,14 @@
 //! CRUD de redes e enfileiramento persistente de discovery.
 
 use axum::{http::StatusCode, response::IntoResponse};
-use chrono::Utc;
 use loco_rs::prelude::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
+use sea_orm::{ActiveModelTrait, EntityTrait, QueryOrder, Set};
 
 use crate::{
     dtos::resources::NetworkInput,
-    models::{_entities::discovery_runs, networks, sites},
+    models::{networks, sites},
     services::{
-        discovery::cidr_range::parse_cidr_range,
+        discovery::{cidr_range::parse_cidr_range, queue::enqueue_network_scan},
         shared::errors::{AppError, AppResult},
     },
 };
@@ -185,28 +184,7 @@ async fn scan(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<R
         .ok_or_else(|| AppError::not_found("Rede não encontrada"))?;
     let range = parse_cidr_range(&network.cidr)
         .map_err(|_| AppError::validation("CIDR inválido para varredura"))?;
-    let existing = discovery_runs::Entity::find()
-        .filter(discovery_runs::Column::NetworkId.eq(id))
-        .filter(discovery_runs::Column::Status.eq("pending"))
-        .one(&ctx.db)
-        .await?;
-    let (run, already_queued) = if let Some(run) = existing {
-        (run, true)
-    } else {
-        (
-            discovery_runs::ActiveModel {
-                network_id: Set(id),
-                probe_id: Set(network.probe_id),
-                status: Set("pending".into()),
-                started_at: Set(Utc::now().into()),
-                configuration: Set(Some(serde_json::json!({ "cidr": network.cidr }))),
-                ..Default::default()
-            }
-            .insert(&ctx.db)
-            .await?,
-            false,
-        )
-    };
+    let (run, already_queued) = enqueue_network_scan(&ctx.db, &network).await?;
     Ok((StatusCode::ACCEPTED, Json(serde_json::json!({ "message": "Varredura de rede enfileirada", "alreadyQueued": already_queued,
         "run": { "id": run.id, "status": run.status }, "usableHosts": range.usable_hosts, "truncated": range.truncated }))).into_response())
 }

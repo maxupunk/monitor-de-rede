@@ -7,6 +7,7 @@ use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 use crate::{
     models::{monitors, probes},
     services::{
+        discovery::queue::{process_pending_runs, schedule_due_networks},
         monitoring::{
             contracts::{CheckResult, MonitorStatus},
             result_processor::process_result,
@@ -48,6 +49,14 @@ pub async fn run_cycle(ctx: &AppContext) -> AppResult<usize> {
     }
     for monitor in &due {
         execute_one(ctx, monitor).await?;
+    }
+    // A fila de discovery é persistente: o scheduler apenas enfileira as redes
+    // vencidas e processa uma por ciclo para não saturar a LAN.
+    if let Err(error) = schedule_due_networks(&ctx.db).await {
+        tracing::warn!(%error, "falha ao agendar discovery");
+    }
+    if let Err(error) = process_pending_runs(ctx).await {
+        tracing::warn!(%error, "falha ao processar discovery");
     }
     Ok(due.len())
 }

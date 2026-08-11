@@ -9,6 +9,7 @@ use crate::services::{
             dns::{DnsChecker, DnsConfig},
             http::{HttpChecker, HttpConfig},
             ping::{PingChecker, PingConfig},
+            snmp::{SnmpChecker, SnmpCheckerConfig},
             tcp::{TcpChecker, TcpConfig},
         },
         contracts::{CheckResult, Checker},
@@ -69,9 +70,9 @@ pub async fn run_monitor(
                 .await
         }
         "snmp" => {
-            return Err(AppError::business_rule(format!(
-                "Tipo de monitor ainda não disponível nesta fase: {kind}"
-            )))
+            SnmpChecker
+                .execute(parse_config::<SnmpCheckerConfig>(&configuration, "snmp")?)
+                .await
         }
         _ => {
             return Err(AppError::business_rule(format!(

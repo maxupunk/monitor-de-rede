@@ -57,7 +57,8 @@ pub async fn persist_resolved_links_detailed(
     let mut updated = 0;
     for link in resolve_links(links) {
         let row = existing.iter().find(|row| {
-            (row.source_device_id == link.source_device_id && row.target_device_id == link.target_device_id)
+            (row.source_device_id == link.source_device_id
+                && row.target_device_id == link.target_device_id)
                 || (row.source_device_id == link.target_device_id
                     && row.target_device_id == link.source_device_id)
         });
@@ -83,7 +84,9 @@ pub async fn persist_resolved_links_detailed(
             }
             .update(db)
             .await?;
-            if changed { updated += 1; }
+            if changed {
+                updated += 1;
+            }
             saved.push(saved_row);
         } else {
             let saved_row = device_links::ActiveModel {
@@ -104,5 +107,41 @@ pub async fn persist_resolved_links_detailed(
             saved.push(saved_row);
         }
     }
-    Ok(PersistedLinks { links: saved, created, updated })
+    Ok(PersistedLinks {
+        links: saved,
+        created,
+        updated,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn deduplica_par_bidirecional_pela_maior_confianca() {
+        let links = resolve_links(vec![
+            NetworkLink {
+                source_device_id: 1,
+                target_device_id: 2,
+                source_interface_id: None,
+                target_interface_id: None,
+                link_type: "snmp".into(),
+                discovery_method: "x".into(),
+                confidence: 80,
+                confirmed: false,
+            },
+            NetworkLink {
+                source_device_id: 2,
+                target_device_id: 1,
+                source_interface_id: None,
+                target_interface_id: None,
+                link_type: "manual".into(),
+                discovery_method: "x".into(),
+                confidence: 100,
+                confirmed: true,
+            },
+        ]);
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].link_type, "manual");
+    }
 }

@@ -41,3 +41,16 @@ pub fn probe_for(port: u16) -> Vec<u8> {
         _ => vec![0],
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn mantem_payload_ntp_de_48_bytes() {
+        assert_eq!(probe_for(123).len(), 48);
+    }
+    #[test]
+    fn usa_fallback_neutro() {
+        assert_eq!(probe_for(9999), vec![0]);
+    }
+}

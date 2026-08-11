@@ -367,3 +367,53 @@ pub fn sort_by_latency(mut values: Vec<DnsServerRanking>) -> Vec<DnsServerRankin
     });
     values
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preserva_ipv6_entre_colchetes() {
+        assert_eq!(
+            parse_server_address("[2606:4700:4700::1111]:5353").unwrap(),
+            ("2606:4700:4700::1111".into(), 5353)
+        );
+        assert_eq!(
+            parse_server_address("2001:db8::1").unwrap(),
+            ("2001:db8::1".into(), 53)
+        );
+    }
+
+    #[test]
+    fn ordena_latencia_nula_no_fim() {
+        let values = vec![
+            DnsServerRanking {
+                server: "b".into(),
+                label: "b".into(),
+                protocol: "udp".into(),
+                avg_lookup_time_ms: None,
+                min_lookup_time_ms: None,
+                max_lookup_time_ms: None,
+                median_lookup_time_ms: None,
+                success_rate: 0.0,
+                total_queries: 1,
+                failed_queries: 1,
+                error: None,
+            },
+            DnsServerRanking {
+                server: "a".into(),
+                label: "a".into(),
+                protocol: "udp".into(),
+                avg_lookup_time_ms: Some(2.0),
+                min_lookup_time_ms: Some(2.0),
+                max_lookup_time_ms: Some(2.0),
+                median_lookup_time_ms: Some(2.0),
+                success_rate: 1.0,
+                total_queries: 1,
+                failed_queries: 0,
+                error: None,
+            },
+        ];
+        assert_eq!(sort_by_latency(values)[0].server, "a");
+    }
+}

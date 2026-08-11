@@ -257,3 +257,31 @@ fn udp_service(port: u16) -> Option<&'static str> {
         _ => return None,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn encontra_porta_tcp_local_aberta() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (sender, mut receiver) = mpsc::channel(4);
+        let scan = tokio::spawn(async move {
+            scan(
+                "127.0.0.1".parse().unwrap(),
+                &[port],
+                PortProtocol::Tcp,
+                ScanStrategy::with_timeout(500),
+                sender,
+                CancellationToken::new(),
+            )
+            .await
+        });
+        let event = receiver.recv().await.unwrap();
+        assert!(
+            matches!(event, PortScanEvent::Result(PortScanItem { status, .. }) if status == "open")
+        );
+        assert_eq!(scan.await.unwrap()[0].status, "open");
+    }
+}

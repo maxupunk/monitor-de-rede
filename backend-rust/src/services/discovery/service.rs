@@ -14,7 +14,7 @@ use crate::{
         discovery::{
             cidr_range::expand_cidr,
             merger::{merge_hosts, DiscoveredHost},
-            scanners::{arp, icmp, ports},
+            scanners::{arp, icmp, mdns, ports, snmp, ssdp},
         },
         monitoring::checkers::ping::PingClient,
         shared::errors::{AppError, AppResult},
@@ -122,25 +122,27 @@ impl ScanSessionService {
         self.publish(&state);
     }
     pub async fn finish(&self, error: Option<String>) {
-        let mut state = self.state.write().await;
-        state.status = if error.is_some() {
-            "failed"
-        } else if state.status == "cancelled" {
-            "cancelled"
-        } else {
-            "completed"
+        {
+            let mut state = self.state.write().await;
+            state.status = if error.is_some() {
+                "failed"
+            } else if state.status == "cancelled" {
+                "cancelled"
+            } else {
+                "completed"
+            }
+            .into();
+            state.error = error;
+            state.finished_at = Some(Utc::now().to_rfc3339());
+            state.phase = "idle".into();
+            let completed = state.status == "completed";
+            state.logs.push(if completed {
+                "Varredura finalizada.".into()
+            } else {
+                "Varredura encerrada.".into()
+            });
+            self.publish(&state);
         }
-        .into();
-        state.error = error;
-        state.finished_at = Some(Utc::now().to_rfc3339());
-        state.phase = "idle".into();
-        let completed = state.status == "completed";
-        state.logs.push(if completed {
-            "Varredura finalizada.".into()
-        } else {
-            "Varredura encerrada.".into()
-        });
-        self.publish(&state);
         *self.cancel.write().await = None;
     }
     fn publish(&self, state: &ScanSessionState) {
@@ -162,9 +164,10 @@ pub async fn run_discovery(
     session
         .progress("discovery", icmp_hosts.len(), hosts.len())
         .await;
-    // ARP é complementar ao ping e lê o cache recém-populado no Linux.
-    let arp_hosts = arp::scan(&hosts).await;
-    let mut merged = merge_hosts([icmp_hosts, arp_hosts]);
+    // Os três coletores de descoberta são independentes e best-effort.
+    let (arp_hosts, mdns_hosts, ssdp_hosts) =
+        tokio::join!(arp::scan(&hosts), mdns::scan(), ssdp::scan());
+    let mut merged = merge_hosts([icmp_hosts, arp_hosts, mdns_hosts, ssdp_hosts]);
     session.hosts(&merged).await;
     if !cancel.is_cancelled() {
         session.progress("ports", 0, merged.len()).await;
@@ -175,7 +178,9 @@ pub async fn run_discovery(
     if cancel.is_cancelled() {
         return Err(AppError::BusinessRule("Varredura cancelada.".into()));
     }
-    session.progress("snmp", merged.len(), merged.len()).await;
+    session.progress("snmp", 0, merged.len()).await;
+    merged = merge_hosts([snmp::enrich(merged).await]);
+    session.hosts(&merged).await;
     persist_results(&ctx.db, run_id, &merged).await?;
     Ok(merged)
 }

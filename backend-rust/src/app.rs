@@ -64,6 +64,8 @@ impl Hooks for App {
             .add_route(controllers::devices::routes())
             .add_route(controllers::monitors::routes())
             .add_route(controllers::discovery::routes())
+            .add_route(controllers::topology::routes())
+            .add_route(controllers::snmp::routes())
             .add_route(controllers::probes::routes())
             .add_route(controllers::port_scan::routes())
             .add_route(controllers::dns::routes())
