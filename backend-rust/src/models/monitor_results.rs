@@ -1,4 +1,4 @@
-pub use super::_entities::monitor_results::{ActiveModel, Entity, Model};
+pub use super::_entities::monitor_results::{ActiveModel, Column, Entity, Model};
 use sea_orm::entity::prelude::*;
 pub type MonitorResults = Entity;
 

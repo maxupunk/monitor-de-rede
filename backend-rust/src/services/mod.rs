@@ -4,4 +4,6 @@
 //! de negócio vive aqui e é testável sem HTTP.
 
 pub mod discovery;
+pub mod maintenance;
+pub mod monitoring;
 pub mod shared;

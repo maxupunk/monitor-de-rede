@@ -1,0 +1,7 @@
+scheduler:
+  output: stdout
+  jobs:
+    monitoring_cycle:
+      run: scheduler_run
+      schedule: run every 5 seconds
+      tags: [monitoring]

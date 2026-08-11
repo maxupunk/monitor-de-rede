@@ -1,0 +1,116 @@
+//! Persistência atômica da observação de um monitor e atualização do dispositivo.
+
+use chrono::Utc;
+use loco_rs::app::AppContext;
+use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+
+use crate::{
+    models::{devices, monitor_results, monitors},
+    services::{
+        monitoring::{
+            contracts::{CheckMetric, CheckResult, MonitorStatus},
+            device_status::{self, DeviceStatus},
+        },
+        shared::errors::AppResult,
+    },
+};
+
+/// Extrai a medida que alimenta os gráficos de latência, na mesma precedência
+/// usada pelo backend anterior para não zerar monitores TCP ou DNS.
+#[must_use]
+pub fn pick_latency_metric(metrics: &[CheckMetric]) -> Option<&CheckMetric> {
+    const PRECEDENCE: [&str; 5] = [
+        "latency",
+        "response_time",
+        "dns_lookup_time",
+        "resolution_time",
+        "connect_time",
+    ];
+    PRECEDENCE
+        .iter()
+        .find_map(|name| metrics.iter().find(|metric| metric.name == *name))
+}
+
+/// Persiste uma observação e retorna `None` quando o monitor foi apagado entre
+/// a execução e a gravação — condição normal em uma operação concorrente.
+pub async fn process_result(
+    ctx: &AppContext,
+    monitor_id: i64,
+    result: &CheckResult,
+    probe_id: Option<i64>,
+) -> AppResult<Option<monitor_results::Model>> {
+    let Some(monitor) = monitors::Entity::find_by_id(monitor_id)
+        .one(&ctx.db)
+        .await?
+    else {
+        return Ok(None);
+    };
+    let latency = pick_latency_metric(&result.metrics).map(|metric| metric.value);
+    let stored = monitor_results::ActiveModel {
+        monitor_id: Set(monitor.id),
+        probe_id: Set(probe_id.or(monitor.probe_id)),
+        status: Set(result.status.as_str().to_string()),
+        started_at: Set(result.started_at.into()),
+        finished_at: Set(result.finished_at.into()),
+        duration_ms: Set(result.duration_ms.clamp(0, i64::from(i32::MAX)) as i32),
+        latency_ms: Set(latency),
+        message: Set(result.message.clone()),
+        data: Set(Some(result.data.clone())),
+        ..Default::default()
+    }
+    .insert(&ctx.db)
+    .await?;
+
+    let mut active: monitors::ActiveModel = monitor.clone().into();
+    active.status = Set(result.status.as_str().to_string());
+    active.last_run_at = Set(Some(result.finished_at.into()));
+    active.update(&ctx.db).await?;
+
+    if let Some(device_id) = monitor.device_id {
+        if let Some(device) = devices::Entity::find_by_id(device_id).one(&ctx.db).await? {
+            let observed = match result.status {
+                MonitorStatus::Up => Some(DeviceStatus::Online),
+                MonitorStatus::Down => Some(DeviceStatus::Offline),
+                MonitorStatus::Warning => Some(DeviceStatus::Warning),
+                MonitorStatus::Unknown | MonitorStatus::Disabled => None,
+            };
+            let seen_at = (result.status == MonitorStatus::Up).then_some(result.finished_at);
+            device_status::refresh_from_monitors(ctx, &device, observed, seen_at).await?;
+        }
+    }
+
+    // Alertas e SSE são consumidores desacoplados da observação e entram na
+    // Fase 6. A gravação jamais depende deles: perder um notificador não pode
+    // abortar nem apagar o resultado técnico da medição.
+    let _processed_at = Utc::now();
+    Ok(Some(stored))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn precedencia_inclui_tcp_e_dns() {
+        let metrics = vec![
+            CheckMetric {
+                name: "connect_time".into(),
+                value: 4.0,
+                unit: "ms".into(),
+            },
+            CheckMetric {
+                name: "latency".into(),
+                value: 2.0,
+                unit: "ms".into(),
+            },
+        ];
+        assert_eq!(
+            pick_latency_metric(&metrics).map(|metric| metric.value),
+            Some(2.0)
+        );
+        assert_eq!(
+            pick_latency_metric(&metrics[..1]).map(|metric| metric.value),
+            Some(4.0)
+        );
+    }
+}

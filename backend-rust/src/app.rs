@@ -15,8 +15,8 @@ use std::path::Path;
 
 #[allow(unused_imports)]
 use crate::{
-    controllers, models::_entities::users, models::tables, tasks,
-    workers::downloader::DownloadWorker,
+    controllers, initializers::monitoring::MonitoringInitializer, models::_entities::users,
+    models::tables, tasks, tasks::scheduler_run::SchedulerRun, workers::downloader::DownloadWorker,
 };
 
 pub struct App;
@@ -45,7 +45,7 @@ impl Hooks for App {
     }
 
     async fn initializers(_ctx: &AppContext) -> Result<Vec<Box<dyn Initializer>>> {
-        Ok(vec![])
+        Ok(vec![Box::new(MonitoringInitializer)])
     }
 
     fn routes(_ctx: &AppContext) -> AppRoutes {
@@ -58,6 +58,14 @@ impl Hooks for App {
             .add_route(controllers::root::routes())
             .prefix("/api")
             .add_route(controllers::auth::routes())
+            .add_route(controllers::dashboard::routes())
+            .add_route(controllers::sites::routes())
+            .add_route(controllers::networks::routes())
+            .add_route(controllers::devices::routes())
+            .add_route(controllers::monitors::routes())
+            .add_route(controllers::probes::routes())
+            .add_route(controllers::dns_servers::routes())
+            .add_route(controllers::zabbix_templates::routes())
     }
     async fn connect_workers(ctx: &AppContext, queue: &Queue) -> Result<()> {
         queue.register(DownloadWorker::build(ctx)).await?;
@@ -68,6 +76,7 @@ impl Hooks for App {
     fn register_tasks(tasks: &mut Tasks) {
         // tasks-inject (do not remove)
         tasks.register(tasks::user_create::UserCreate);
+        tasks.register(SchedulerRun);
     }
     /// Limpa o esquema inteiro entre testes.
     ///

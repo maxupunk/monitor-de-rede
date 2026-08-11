@@ -1747,25 +1747,25 @@ qualquer outra):
 
 **Aceite:** `db migrate` + `db entities` idempotentes; diff de esquema vazio. ✅
 
-### Fase 2 — CRUDs e contrato base (🔴)
+### Fase 2 — CRUDs e contrato base (🟢 Concluído)
 
-- [ ] `sites`, `networks`, `devices`, `monitors`, `probes`, `dns_servers`,
+- [x] `sites`, `networks`, `devices`, `monitors`, `probes`, `dns_servers`,
       `zabbix_templates`, `dashboard`
-- [ ] `ResourceCleanupService` completo (5 funções)
-- [ ] Serialização enriquecida: `scannable`/`usableHosts`, `target`/`port`/`isEnabled`
-- [ ] Testes de requisição para todos os endpoints desta fase
+- [x] `ResourceCleanupService` completo (5 funções)
+- [x] Serialização enriquecida: `scannable`/`usableHosts`, `target`/`port`/`isEnabled`
+- [x] Testes de requisição para todos os endpoints desta fase
 
 **Aceite:** o frontend navega em Sites, Redes, Dispositivos, Monitores, Probes, Templates e
 Configurações sem erro de console, apontando para o backend Rust.
 
-### Fase 3 — Motor de monitoramento (🔴)
+### Fase 3 — Motor de monitoramento (🟢 Concluído)
 
-- [ ] `contracts.rs`, `runner.rs`, `result_processor.rs`, `device_status.rs`, `presenter.rs`
-- [ ] **`PingChecker` com `surge-ping`** ([§3.2](#32-decisão-ping-via-surge-ping-obrigatório))
-- [ ] `TcpChecker`, `HttpChecker`
-- [ ] `tasks/scheduler_run.rs` com o laço completo e o **fallback local de probe offline**
-- [ ] `presenter` com window function validada (30 resultados **por monitor**)
-- [ ] Endpoints `run`/`enable`/`disable`/`results`
+- [x] `contracts.rs`, `runner.rs`, `result_processor.rs`, `device_status.rs`, `presenter.rs`
+- [x] **`PingChecker` com `surge-ping`** ([§3.2](#32-decisão-ping-via-surge-ping-obrigatório))
+- [x] `TcpChecker`, `HttpChecker`
+- [x] `tasks/scheduler_run.rs` com o laço completo e o **fallback local de probe offline**
+- [x] `presenter` com window function validada (30 resultados **por monitor**)
+- [x] Endpoints `run`/`enable`/`disable`/`results`
 
 **Aceite:** monitores executam, gravam histórico, atualizam status de device; a tela
 `/monitors` mostra linha do tempo e sparkline corretos.

@@ -1,6 +1,6 @@
 use sea_orm::entity::prelude::*;
 
-pub use super::_entities::networks::{ActiveModel, Entity, Model};
+pub use super::_entities::networks::{ActiveModel, Column, Entity, Model};
 
 use crate::services::discovery::cidr_range::{is_scannable_cidr, parse_cidr_range};
 

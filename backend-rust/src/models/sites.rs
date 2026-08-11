@@ -1,4 +1,4 @@
-pub use super::_entities::sites::{ActiveModel, Entity, Model};
+pub use super::_entities::sites::{ActiveModel, Column, Entity, Model};
 use sea_orm::entity::prelude::*;
 pub type Sites = Entity;
 
