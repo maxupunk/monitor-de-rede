@@ -158,27 +158,13 @@
                 ></v-text-field>
               </v-col>
 
-              <v-col cols="12" md="5">
+              <v-col cols="12" md="9">
                 <v-text-field
                   v-model="form.dnsServers"
                   label="Servidores DNS (opcional)"
                   variant="outlined"
                   density="comfortable"
                 ></v-text-field>
-              </v-col>
-
-              <v-col cols="12" md="4">
-                <v-select
-                  v-model="form.siteId"
-                  :items="sitesStore.sites"
-                  item-title="name"
-                  item-value="id"
-                  label="Site da rede VPN"
-                  variant="outlined"
-                  density="comfortable"
-                  :disabled="vpnStore.isConfigured"
-                  clearable
-                ></v-select>
               </v-col>
 
               <v-col cols="12">
@@ -239,12 +225,10 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useVpnStore } from '@/stores/vpn'
-import { useSitesStore } from '@/stores/sites'
 import { formatBytes } from '@/utils/formatters'
 import PageHeader from '@/components/PageHeader.vue'
 
 const vpnStore = useVpnStore()
-const sitesStore = useSitesStore()
 const savedMessage = ref<string | null>(null)
 
 const form = reactive({
@@ -253,7 +237,6 @@ const form = reactive({
   cidr: '10.8.0.0/24',
   mtu: 1420,
   dnsServers: '',
-  siteId: null as number | null,
   allowPeerToPeer: false,
 })
 
@@ -281,7 +264,7 @@ watch(
 )
 
 onMounted(async () => {
-  await Promise.all([vpnStore.fetchServer(), sitesStore.fetchSites()])
+  await vpnStore.fetchServer()
 })
 
 async function detectEndpoint() {
@@ -301,7 +284,6 @@ async function save() {
     cidr: form.cidr,
     mtu: form.mtu,
     dnsServers: form.dnsServers || null,
-    siteId: form.siteId,
     allowPeerToPeer: form.allowPeerToPeer,
   })
 
