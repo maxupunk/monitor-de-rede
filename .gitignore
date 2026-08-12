@@ -1,7 +1,7 @@
-# Dependencies and AdonisJS build
+# Dependências do frontend
 node_modules
-build
-.adonisjs
+
+# Diretório de trabalho local (ex.: ./tmp/wireguard quando se roda fora do Docker)
 tmp/*
 !tmp/.gitkeep
 
@@ -10,9 +10,6 @@ tmp/*
 .env.local
 .env.production.local
 .env.development.local
-
-# Frontend assets compiled code
-public/assets
 
 # Build tools specific
 npm-debug.log
@@ -32,4 +29,3 @@ target/
 *.sqlite3
 *.sqlite-*
 master.key
-

@@ -1,7 +1,10 @@
-scheduler:
-  output: stdout
-  jobs:
-    monitoring_cycle:
-      run: scheduler_run
-      schedule: run every 5 seconds
-      tags: [monitoring]
+# Passado ao CLI por `scheduler --config config/scheduler.yaml`. Nesse formato o
+# Loco desserializa o arquivo inteiro como a configuração do scheduler, então
+# `output` e `jobs` ficam na raiz — o wrapper `scheduler:` só vale quando a
+# seção mora dentro de um `config/<env>.yaml`.
+output: stdout
+jobs:
+  monitoring_cycle:
+    run: scheduler_run
+    schedule: run every 5 seconds
+    tags: [monitoring]

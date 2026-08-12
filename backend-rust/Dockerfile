@@ -65,8 +65,12 @@ USER app
 ENV LOCO_ENV=production
 EXPOSE 3333
 
-# `GET /` é o mesmo health check do backend AdonisJS (§5.6).
+# `--production` é obrigatório aqui, não um detalhe de gosto: sem ele o `doctor`
+# roda `check_deps()`, que lê o `Cargo.lock` — e a imagem de runtime só recebe o
+# binário e o `config/`. O check falha com `VersionCheck(LockfileError(...))` e
+# todo container nasce `unhealthy` mesmo com a API respondendo. Com a flag,
+# sobra o que interessa em produção: a conexão com o banco.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["/usr/local/bin/backend_rust-cli", "doctor"]
+    CMD ["/usr/local/bin/backend_rust-cli", "doctor", "--production"]
 
 CMD ["/usr/local/bin/backend_rust-cli", "start", "--server-and-worker"]

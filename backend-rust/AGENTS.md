@@ -73,7 +73,8 @@ Fixadas na Fase 0 da migração. Ver `docs/roadmap_backend_rust.md` e `docs/adr/
 - **`cargo loco db entities` roda contra o PostgreSQL**, nunca contra o SQLite:
   o SQLite reporta todo inteiro como `INTEGER` e a entidade sai com `i64` onde
   o Postgres tem `INT4` — o `sqlx` recusa a leitura em produção. Depois de
-  gerar, rode `cargo run --example schema_parity` (também contra o Postgres).
+  gerar, confira o diff das entidades e rode `cargo test` (também contra o
+  Postgres).
 - **Porta 3333** nos três ambientes — o proxy do Vite aponta para ela.
 
 ## Learn more

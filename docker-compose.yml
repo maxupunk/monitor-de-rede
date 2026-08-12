@@ -11,8 +11,11 @@ x-app-env: &app-env
   LOG_LEVEL: info
   # Cifra em repouso dos segredos da VPN (§8.10) — 32 caracteres.
   APP_KEY: secret_app_key_32_characters_long_str
-  # Assinatura do JWT (§10). Trocar em produção.
-  JWT_SECRET: ${JWT_SECRET:-troque_este_segredo_em_producao_por_favor}
+  # Assinatura do JWT (§10). Trocar em produção — e o valor **precisa ser base64
+  # válido**: o Loco assina com `EncodingKey::from_base64_secret` (HS512). Um
+  # segredo não-base64 não derruba o servidor; ele faz `generate_jwt` falhar e
+  # todo login responder 401 com a mesma mensagem de senha inválida.
+  JWT_SECRET: ${JWT_SECRET:-Y2hhbmdlLW1lLXRoaXMtaXMtYS1wbGFjZWhvbGRlci1zZWNyZXQtdmFsdWUtMDAwMQ==}
   DATABASE_URL: postgres://netmonitor:secret@postgres:5432/netmonitor
 
 # `ping_group_range` habilita o socket ICMP `SOCK_DGRAM` sem `CAP_NET_RAW`
