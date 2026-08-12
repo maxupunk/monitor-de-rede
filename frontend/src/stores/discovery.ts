@@ -147,7 +147,14 @@ export const useDiscoveryStore = defineStore('discovery', () => {
       onError?: (message: string) => void
     } = {}
   ): () => void {
-    const eventSource = new EventSource('/api/discovery/scan-stream')
+    // `EventSource` não manda o header Authorization; o backend aceita o JWT
+    // em `?token=` justamente para os streams (ver config `auth.jwt.location`).
+    const token = localStorage.getItem('auth_token')
+    const url = token
+      ? `/api/discovery/scan-stream?token=${encodeURIComponent(token)}`
+      : '/api/discovery/scan-stream'
+
+    const eventSource = new EventSource(url)
 
     eventSource.onmessage = (event) => {
       try {
