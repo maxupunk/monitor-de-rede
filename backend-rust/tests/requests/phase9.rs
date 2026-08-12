@@ -722,6 +722,91 @@ async fn admin_status_escolhido_pelo_operador_sobrevive_ao_poll() {
     assert_eq!(repolada.previous_oper_status.as_deref(), Some("up"));
 }
 
+/// A aba "Interfaces SNMP" marca a porta pelo monitor, não pelo `adminStatus`.
+///
+/// Os dois campos parecem dizer a mesma coisa e não dizem: o `adminStatus` da
+/// linha nova sai do que o *agente* reportou, então toda porta ligada no
+/// equipamento apareceria como monitorada — mesmo sem ninguém coletá-la. Quem
+/// responde "está sendo monitorada?" é o monitor `Interface X` habilitado.
+#[tokio::test]
+#[serial]
+async fn a_interface_so_conta_como_monitorada_quando_tem_monitor_habilitado() {
+    use backend_rust::services::snmp::{
+        client::SnmpConfig,
+        collectors::SnmpInterface,
+        service::{
+            interface_monitor_name, list_interfaces, set_interface_monitoring, sync_interface,
+            DeviceInterfaceView,
+        },
+    };
+
+    let boot = boot_test::<App>().await.expect("subir app de teste");
+    let ctx = &boot.app_context;
+    let device = dispositivo(&ctx.db, "sw-listagem", "online").await;
+
+    let criada = sync_interface(
+        &ctx.db,
+        device.id,
+        &SnmpInterface {
+            if_index: 3,
+            if_name: "Gi0/3".into(),
+            if_descr: None,
+            if_alias: None,
+            if_type: Some(6),
+            if_speed: Some(1_000_000_000),
+            // A porta está ligada no equipamento — mas ninguém pediu para coletá-la.
+            if_admin_status: Some(1),
+            if_oper_status: Some(1),
+            mac_address: None,
+            is_monitored: false,
+        },
+    )
+    .await
+    .expect("registrar a interface")
+    .interface;
+
+    async fn listada(ctx: &loco_rs::app::AppContext, device_id: i64) -> DeviceInterfaceView {
+        list_interfaces(ctx, device_id)
+            .await
+            .expect("listar interfaces")
+            .pop()
+            .expect("a interface registrada some da listagem")
+    }
+
+    let antes = listada(ctx, device.id).await;
+    assert_eq!(antes.admin_status.as_deref(), Some("up"));
+    assert!(
+        !antes.is_monitored,
+        "porta sem monitor apareceu como monitorada só porque o agente a reportou ligada"
+    );
+    // O `id` é o que liga a interface às suas métricas — sem ele o diálogo de
+    // gráficos não tem por onde filtrar.
+    assert_eq!(antes.id, criada.id);
+    assert_eq!(antes.snmp_index, Some(3));
+
+    monitor(&ctx.db, device.id, &interface_monitor_name("Gi0/3")).await;
+    assert!(
+        listada(ctx, device.id).await.is_monitored,
+        "monitor habilitado não refletiu na listagem"
+    );
+
+    // Remover do monitoramento desliga o monitor e a coluna, sem passar pela
+    // tela de descoberta. (Só a inclusão precisa falar com o agente.)
+    set_interface_monitoring(
+        ctx,
+        &device,
+        SnmpConfig::v2c("10.0.0.1", "public", 161),
+        criada.id,
+        false,
+    )
+    .await
+    .expect("remover do monitoramento");
+
+    let depois = listada(ctx, device.id).await;
+    assert!(!depois.is_monitored);
+    assert_eq!(depois.admin_status.as_deref(), Some("down"));
+}
+
 const EXPORT_ZABBIX: &str = r#"{"zabbix_export":{"version":"7.0","templates":[{"uuid":"uuid-roteador","name":"Roteador","items":[{"type":"SNMP_AGENT","key_":"if.in","snmp_oid":"1.3.6.1.2.1.2.2.1.10.1"}]}]}}"#;
 const EXPORT_ZABBIX_RENOMEADO: &str = r#"{"zabbix_export":{"version":"7.0","templates":[{"uuid":"uuid-roteador","name":"Roteador Core","items":[{"type":"SNMP_AGENT","key_":"if.in","snmp_oid":"1.3.6.1.2.1.2.2.1.10.1"},{"type":"SNMP_AGENT","key_":"if.out","snmp_oid":"1.3.6.1.2.1.2.2.1.16.1"}]}]}}"#;
 

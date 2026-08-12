@@ -47,8 +47,12 @@
             class="flex-grow-1 flex-md-grow-0"
             @click="openScanModal"
           >
-            <span class="hidden-sm-and-down">Escanear SNMP</span>
-            <span class="hidden-md-and-up">SNMP</span>
+            <span class="hidden-sm-and-down">Configurar Monitoramento</span>
+            <span class="hidden-md-and-up">Configurar</span>
+            <v-tooltip activator="parent" location="bottom" max-width="300">
+              Varre o equipamento via SNMP e abre a tela onde você escolhe <b>o que</b> monitorar
+              (interfaces, CPU e memória). Descobre portas novas.
+            </v-tooltip>
           </v-btn>
 
           <v-btn
@@ -59,8 +63,12 @@
             class="flex-grow-1 flex-md-grow-0"
             @click="detailStore.triggerSnmpPoll(deviceId)"
           >
-            <span class="hidden-sm-and-down">Coletar SNMP agora</span>
+            <span class="hidden-sm-and-down">Coletar Agora</span>
             <span class="hidden-md-and-up">Coletar</span>
+            <v-tooltip activator="parent" location="bottom" max-width="300">
+              Executa agora uma leitura das métricas do que <b>já está</b> monitorado, sem alterar a
+              configuração. É o mesmo que o agendador faz a cada ciclo.
+            </v-tooltip>
           </v-btn>
 
           <v-btn
@@ -171,7 +179,7 @@
               :monitors="detailStore.monitors"
               :loading="detailStore.loading"
               variant="device"
-              no-data-text="Nenhum monitor configurado para este equipamento. Crie um acima ou use &quot;Escanear SNMP&quot; para descobrir automaticamente."
+              no-data-text='Nenhum monitor configurado para este equipamento. Crie um acima ou use "Configurar Monitoramento" para descobrir automaticamente.'
               @edit="openMonitorDialog"
               @changed="reloadMonitors"
             ></MonitorsTable>
@@ -179,6 +187,10 @@
 
           <!-- Aba Interfaces SNMP -->
           <v-window-item value="interfaces">
+            <div class="text-caption text-grey mb-3">
+              Clique em uma interface para ver o histórico de tráfego e incluí-la ou removê-la do
+              monitoramento.
+            </div>
             <div class="table-responsive">
               <v-table hover>
                 <thead>
@@ -189,19 +201,25 @@
                     <th>Status Operacional</th>
                     <th>MAC Address</th>
                     <th>Velocidade de Negociação</th>
+                    <th style="width: 56px"></th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="intf in detailStore.interfaces" :key="intf.id">
+                  <tr
+                    v-for="intf in detailStore.interfaces"
+                    :key="intf.id"
+                    class="cursor-pointer"
+                    @click="openInterfaceChart(intf)"
+                  >
                     <td>{{ intf.ifIndex ?? intf.snmpIndex ?? '-' }}</td>
-                    <td class="font-weight-bold">{{ intf.ifName || intf.name || '-' }}</td>
+                    <td class="font-weight-bold">{{ interfaceLabel(intf) }}</td>
                     <td>
                       <v-chip
-                        :color="intf.adminStatus === 'up' ? 'primary' : 'grey'"
+                        :color="intf.isMonitored ? 'primary' : 'grey'"
                         size="x-small"
                         variant="tonal"
                       >
-                        {{ intf.adminStatus === 'up' ? 'MONITORADA' : 'NÃO MONITORADA' }}
+                        {{ intf.isMonitored ? 'MONITORADA' : 'NÃO MONITORADA' }}
                       </v-chip>
                     </td>
                     <td>
@@ -220,10 +238,19 @@
                         {{ formatLinkSpeed(intf.ifSpeed || intf.speed) }}
                       </v-chip>
                     </td>
+                    <td>
+                      <v-btn icon size="x-small" variant="text" color="primary">
+                        <v-icon size="18">mdi-chart-line</v-icon>
+                        <v-tooltip activator="parent" location="top">
+                          Ver gráficos e gerenciar monitoramento
+                        </v-tooltip>
+                      </v-btn>
+                    </td>
                   </tr>
                   <tr v-if="detailStore.interfaces.length === 0">
-                    <td colspan="6" class="text-center text-grey py-4">
-                      Nenhuma interface SNMP encontrada. Clique em "Escanear SNMP".
+                    <td colspan="7" class="text-center text-grey py-4">
+                      Nenhuma interface SNMP registrada ainda. Use "Configurar Monitoramento" para
+                      descobri-las.
                     </td>
                   </tr>
                 </tbody>
@@ -285,7 +312,7 @@
                       />
                       <div class="d-flex align-center justify-space-between text-caption text-grey">
                         <span v-if="isCpuMonitored"
-                        >Load 1 min:
+                          >Load 1 min:
                           {{ cpuLoadValue !== null ? `${cpuLoadValue} load` : 'N/A' }}</span
                         >
                         <span v-else>Recurso desativado na varredura</span>
@@ -441,7 +468,7 @@
                           size="x-small"
                           variant="text"
                           color="primary"
-                          @click="openTrafficChart(item, 'combined')"
+                          @click="openInterfaceChart(item.source, 'combined')"
                         >
                           <v-icon size="16">mdi-chart-line</v-icon>
                           <v-tooltip activator="parent" location="top">
@@ -469,7 +496,7 @@
                           size="x-small"
                           variant="text"
                           color="success"
-                          @click="openTrafficChart(item, 'inBps')"
+                          @click="openInterfaceChart(item.source, 'inBps')"
                         >
                           <v-icon size="16">mdi-chart-areaspline</v-icon>
                           <v-tooltip activator="parent" location="top">
@@ -489,7 +516,7 @@
                           size="x-small"
                           variant="text"
                           color="primary"
-                          @click="openTrafficChart(item, 'outBps')"
+                          @click="openInterfaceChart(item.source, 'outBps')"
                         >
                           <v-icon size="16">mdi-chart-areaspline</v-icon>
                           <v-tooltip activator="parent" location="top">
@@ -506,7 +533,7 @@
                           size="x-small"
                           variant="text"
                           color="info"
-                          @click="openTrafficChart(item, 'inOctets')"
+                          @click="openInterfaceChart(item.source, 'inOctets')"
                         >
                           <v-icon size="16">mdi-chart-box-outline</v-icon>
                           <v-tooltip activator="parent" location="top">
@@ -523,7 +550,7 @@
                           size="x-small"
                           variant="text"
                           color="info"
-                          @click="openTrafficChart(item, 'outOctets')"
+                          @click="openInterfaceChart(item.source, 'outOctets')"
                         >
                           <v-icon size="16">mdi-chart-box-outline</v-icon>
                           <v-tooltip activator="parent" location="top">
@@ -535,8 +562,8 @@
                   </tr>
                   <tr v-if="interfaceTrafficSummaries.length === 0">
                     <td colspan="6" class="text-center text-grey py-6">
-                      Nenhuma interface selecionada para monitoramento de tráfego. Clique em
-                      "Escanear SNMP" para selecionar.
+                      Nenhuma interface no monitoramento de tráfego. Selecione-as na aba "Interfaces
+                      SNMP" ou em "Configurar Monitoramento".
                     </td>
                   </tr>
                 </tbody>
@@ -1040,10 +1067,14 @@
     <!-- Modal de Gráfico de Tráfego de Interface -->
     <TrafficChartDialog
       v-model="chartDialogOpen"
-      :interface-id="selectedChartInterfaceId"
-      :interface-name="selectedChartInterfaceName"
+      :interface-id="selectedInterface?.id ?? null"
+      :interface-name="selectedInterface ? interfaceLabel(selectedInterface) : ''"
       :initial-metric="selectedChartMetricType"
       :metrics="detailStore.metrics"
+      can-manage-monitoring
+      :is-monitored="selectedInterface?.isMonitored === true"
+      :busy="detailStore.updatingInterfaceId === selectedInterface?.id"
+      @toggle-monitoring="toggleInterfaceMonitoring"
     />
 
     <!-- Modais da aba VPN -->
@@ -1078,7 +1109,12 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useDeviceDetailStore, type DeviceMetric, type DeviceMonitor } from '@/stores/deviceDetail'
+import {
+  useDeviceDetailStore,
+  type DeviceInterface,
+  type DeviceMetric,
+  type DeviceMonitor,
+} from '@/stores/deviceDetail'
 import TrafficChartDialog from '@/components/TrafficChartDialog.vue'
 import BaseMetricChart, { type ChartSeriesInput } from '@/components/BaseMetricChart.vue'
 import MonitorSparkline from '@/components/MonitorSparkline.vue'
@@ -1148,8 +1184,7 @@ const eventsHistory = useInfiniteList<DeviceEventItem>(() => `/devices/${deviceI
 })
 
 const chartDialogOpen = ref(false)
-const selectedChartInterfaceId = ref<number | null>(null)
-const selectedChartInterfaceName = ref('')
+const selectedInterface = ref<DeviceInterface | null>(null)
 const selectedChartMetricType = ref<'inBps' | 'outBps' | 'inOctets' | 'outOctets' | 'combined'>(
   'inBps'
 )
@@ -1158,14 +1193,34 @@ const vpnViewerOpen = ref(false)
 const vpnFirewallOpen = ref(false)
 const vpnFirewallContent = ref('')
 
-function openTrafficChart(
-  item: { id: number; ifName: string },
-  metricType: 'inBps' | 'outBps' | 'inOctets' | 'outOctets' | 'combined'
+function interfaceLabel(intf: DeviceInterface): string {
+  return intf.ifName || intf.name || `if-${intf.id}`
+}
+
+function openInterfaceChart(
+  intf: DeviceInterface,
+  metricType: 'inBps' | 'outBps' | 'inOctets' | 'outOctets' | 'combined' = 'combined'
 ) {
-  selectedChartInterfaceId.value = item.id
-  selectedChartInterfaceName.value = item.ifName
+  selectedInterface.value = intf
   selectedChartMetricType.value = metricType
   chartDialogOpen.value = true
+}
+
+/**
+ * Inclui/remove a interface aberta no diálogo. O recarregamento troca os
+ * objetos de `detailStore.interfaces`, então a seleção precisa ser reapontada
+ * para o registro novo — sem isso o diálogo continuaria mostrando o estado
+ * anterior.
+ */
+async function toggleInterfaceMonitoring(enabled: boolean) {
+  const target = selectedInterface.value
+  if (!target) return
+
+  const success = await detailStore.setInterfaceMonitoring(deviceId.value, target.id, enabled)
+  if (success) {
+    selectedInterface.value =
+      detailStore.interfaces.find((intf) => intf.id === target.id) ?? selectedInterface.value
+  }
 }
 
 const selectedCpuMonitor = ref(true)
@@ -1407,10 +1462,12 @@ const templateMetricCards = computed<TemplateMetricCard[]>(() => {
   })
 })
 
-// Resumo de tráfego por Interface — exibe apenas interfaces selecionadas para monitoramento (adminStatus === 'up')
+// Resumo de tráfego por Interface — só as que de fato têm monitor coletando.
+// `adminStatus` não serve de filtro aqui: o próprio equipamento o preenche na
+// primeira coleta, e toda porta ligada apareceria como monitorada.
 const interfaceTrafficSummaries = computed(() => {
   return detailStore.interfaces
-    .filter((intf) => intf.adminStatus === 'up')
+    .filter((intf) => intf.isMonitored)
     .map((intf) => {
       const inOctetsMetric = detailStore.metrics.find(
         (m) =>
@@ -1436,8 +1493,11 @@ const interfaceTrafficSummaries = computed(() => {
 
       return {
         id: intf.id,
+        // O registro de origem viaja junto: é dele que o diálogo tira o estado
+        // de monitoramento para oferecer a remoção.
+        source: intf,
         ifIndex: intf.snmpIndex ?? intf.ifIndex ?? 0,
-        ifName: intf.ifName || intf.name || `if-${intf.id}`,
+        ifName: interfaceLabel(intf),
         operStatus: intf.ifOperStatus || intf.operStatus || 'unknown',
         inBpsFormatted: formatBps(inBps),
         outBpsFormatted: formatBps(outBps),

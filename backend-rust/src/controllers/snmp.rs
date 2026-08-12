@@ -35,6 +35,11 @@ struct SnmpApplyInput {
     enable_memory_monitor: Option<bool>,
     monitored_if_indexes: Option<Vec<i32>>,
 }
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InterfaceMonitoringInput {
+    enabled: bool,
+}
 
 fn config(
     host: impl Into<String>,
@@ -130,11 +135,25 @@ async fn apply_monitors(
         "message": "Configurações de monitoramento atualizadas com sucesso",
     }))?)
 }
-/// Só a lista de interfaces: usa a coleta pura de propósito, já que nada aqui
-/// lê os itens do template Zabbix — e cada item deles custa um `GET` SNMP.
+/// Só a lista de interfaces já conhecidas — sem tocar no agente SNMP. Quem
+/// descobre porta nova é `scan`/`poll`.
 async fn interfaces(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
-    let (_, config) = device_with_config(&ctx, id).await?;
-    Ok(format::json(service::scan(config).await?.interfaces)?)
+    Ok(format::json(service::list_interfaces(&ctx, id).await?)?)
+}
+async fn set_interface_monitoring(
+    State(ctx): State<AppContext>,
+    Path((id, interface_id)): Path<(i64, i64)>,
+    Json(input): Json<InterfaceMonitoringInput>,
+) -> AppResult<Response> {
+    let (device, config) = device_with_config(&ctx, id).await?;
+    service::set_interface_monitoring(&ctx, &device, config, interface_id, input.enabled).await?;
+    Ok(format::json(serde_json::json!({
+        "message": if input.enabled {
+            "Interface adicionada ao monitoramento"
+        } else {
+            "Interface removida do monitoramento"
+        },
+    }))?)
 }
 pub fn routes() -> Routes {
     Routes::new()
@@ -143,4 +162,8 @@ pub fn routes() -> Routes {
         .add("/devices/{id}/snmp/poll", post(poll))
         .add("/devices/{id}/snmp/apply-monitors", post(apply_monitors))
         .add("/devices/{id}/interfaces", get(interfaces))
+        .add(
+            "/devices/{id}/interfaces/{interface_id}/monitoring",
+            patch(set_interface_monitoring),
+        )
 }

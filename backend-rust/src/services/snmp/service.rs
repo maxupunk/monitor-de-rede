@@ -257,39 +257,14 @@ pub async fn apply_monitors(
         .collect::<std::collections::BTreeSet<_>>();
     for source in &scan.interfaces {
         let interface = sync_interface(&ctx.db, device.id, source).await?.interface;
-        let enabled = selected.contains(&source.if_index);
-        device_interfaces::ActiveModel {
-            id: Set(interface.id),
-            admin_status: Set(Some(if enabled { "up" } else { "down" }.into())),
-            ..Default::default()
-        }
-        .update(&ctx.db)
-        .await?;
-        let name = interface_monitor_name(&source.if_name);
-        sync_monitor(
+        set_monitoring(
             &ctx.db,
             device.id,
-            &name,
-            enabled,
-            serde_json::json!({
-                "host": config.host.clone(),
-                "version": version_name(config.version),
-                "community": config.community.clone(),
-                "port": config.port,
-                "timeoutMs": config.timeout_ms,
-                "ifIndex": source.if_index,
-                "ifName": source.if_name,
-                "metric": "traffic",
-            }),
-            source.if_oper_status == Some(1),
+            &config,
+            &interface,
+            selected.contains(&source.if_index),
         )
         .await?;
-        if !enabled {
-            metrics::Entity::delete_many()
-                .filter(metrics_entity::Column::InterfaceId.eq(Some(interface.id)))
-                .exec(&ctx.db)
-                .await?;
-        }
     }
     if let Some(enabled) = options.enable_cpu_monitor {
         sync_monitor(
@@ -330,6 +305,146 @@ pub async fn apply_monitors(
     // Um poll inicial deixa a configuracao e a primeira visualizacao coerentes.
     let _ = poll_device(ctx, device, config).await;
     Ok(())
+}
+
+/// Liga ou desliga o monitoramento de **uma** interface já persistida.
+///
+/// São duas escritas que precisam andar juntas: o `admin_status` — a escolha do
+/// operador, que o poll respeita (matriz de paridade #20) e o listador usa para
+/// decidir o que aparece nas métricas — e o monitor `Interface X`, que é quem
+/// faz o agendador coletar a porta. Separá-las era como as duas telas
+/// divergiam: a interface aparecia marcada sem monitor por trás.
+async fn set_monitoring(
+    db: &sea_orm::DatabaseConnection,
+    device_id: i64,
+    config: &SnmpConfig,
+    interface: &device_interfaces::Model,
+    enabled: bool,
+) -> AppResult<()> {
+    device_interfaces::ActiveModel {
+        id: Set(interface.id),
+        admin_status: Set(Some(if enabled { "up" } else { "down" }.into())),
+        ..Default::default()
+    }
+    .update(db)
+    .await?;
+    sync_monitor(
+        db,
+        device_id,
+        &interface_monitor_name(&interface.name),
+        enabled,
+        serde_json::json!({
+            "host": config.host.clone(),
+            "version": version_name(config.version),
+            "community": config.community.clone(),
+            "port": config.port,
+            "timeoutMs": config.timeout_ms,
+            "ifIndex": interface.snmp_index,
+            "ifName": interface.name,
+            "metric": "traffic",
+        }),
+        interface.oper_status.as_deref() == Some("up"),
+    )
+    .await?;
+    if !enabled {
+        metrics::Entity::delete_many()
+            .filter(metrics_entity::Column::InterfaceId.eq(Some(interface.id)))
+            .exec(db)
+            .await?;
+    }
+    Ok(())
+}
+
+/// Inclui ou remove uma interface do monitoramento sem refazer a descoberta.
+///
+/// A tela de descoberta continua existindo para achar portas novas; este
+/// caminho é para quem já as tem listadas e só quer ligar mais uma — refazer a
+/// varredura inteira (e reenviar a seleção completa) só para isso é o que
+/// tornava a operação penosa.
+pub async fn set_interface_monitoring(
+    ctx: &loco_rs::app::AppContext,
+    device: &devices::Model,
+    config: SnmpConfig,
+    interface_id: i64,
+    enabled: bool,
+) -> AppResult<()> {
+    let interface = device_interfaces::Entity::find_by_id(interface_id)
+        .one(&ctx.db)
+        .await?
+        .filter(|row| row.device_id == device.id)
+        .ok_or_else(|| AppError::not_found("Interface não encontrada neste dispositivo"))?;
+    if interface.snmp_index.is_none() {
+        return Err(AppError::validation(
+            "Interface sem índice SNMP: execute uma coleta antes de monitorá-la",
+        ));
+    }
+    set_monitoring(&ctx.db, device.id, &config, &interface, enabled).await?;
+    // Sem uma coleta agora o gráfico abriria vazio até o próximo ciclo do
+    // agendador, e o operador leria isso como falha. Desligar não tem o que
+    // coletar. Falha de coleta não invalida a escolha já gravada.
+    if enabled {
+        let _ = poll_device(ctx, device, config).await;
+    }
+    Ok(())
+}
+
+/// Uma interface como a aba "Interfaces SNMP" a lê: o registro local mais o que
+/// só o banco sabe — se existe monitor habilitado para ela.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceInterfaceView {
+    pub id: i64,
+    pub device_id: i64,
+    pub snmp_index: Option<i32>,
+    pub name: String,
+    pub description: Option<String>,
+    pub alias: Option<String>,
+    pub mac_address: Option<String>,
+    pub speed: Option<i64>,
+    pub admin_status: Option<String>,
+    pub oper_status: Option<String>,
+    pub is_monitored: bool,
+}
+
+/// Interfaces já conhecidas do equipamento.
+///
+/// Lê do banco de propósito: a listagem é carregada a cada abertura da tela de
+/// detalhe, e resolvê-la com uma varredura SNMP ao vivo — como era antes —
+/// custava um `walk` inteiro por visita e ainda devolvia registros sem `id`,
+/// sem o qual nada consegue ligar a interface às suas métricas.
+pub async fn list_interfaces(
+    ctx: &loco_rs::app::AppContext,
+    device_id: i64,
+) -> AppResult<Vec<DeviceInterfaceView>> {
+    let interfaces = device_interfaces::Entity::find()
+        .filter(device_interfaces_entity::Column::DeviceId.eq(device_id))
+        .order_by_asc(device_interfaces_entity::Column::SnmpIndex)
+        .all(&ctx.db)
+        .await?;
+    let monitored = monitors::Entity::find()
+        .filter(monitors_entity::Column::DeviceId.eq(Some(device_id)))
+        .filter(monitors_entity::Column::Enabled.eq(true))
+        .all(&ctx.db)
+        .await?
+        .into_iter()
+        .map(|monitor| monitor.name)
+        .collect::<std::collections::BTreeSet<_>>();
+    Ok(interfaces
+        .into_iter()
+        .map(|row| DeviceInterfaceView {
+            is_monitored: monitored.contains(&interface_monitor_name(&row.name)),
+            id: row.id,
+            device_id: row.device_id,
+            snmp_index: row.snmp_index,
+            name: row.name,
+            description: row.description,
+            alias: row.alias,
+            mac_address: row.mac_address,
+            speed: row.speed,
+            admin_status: row.admin_status,
+            oper_status: row.oper_status,
+        })
+        .collect())
 }
 
 fn monitor_configuration(config: &SnmpConfig, metric: &str) -> serde_json::Value {

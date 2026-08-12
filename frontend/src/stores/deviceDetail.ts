@@ -12,6 +12,8 @@ export interface DeviceInterface {
   name?: string
   ifName?: string
   ifType?: string
+  description?: string | null
+  alias?: string | null
   adminStatus?: string
   ifAdminStatus?: 'up' | 'down' | 'testing'
   operStatus?: string
@@ -24,6 +26,13 @@ export interface DeviceInterface {
   outOctets?: number
   inBps?: number
   outBps?: number
+  /**
+   * Há monitor habilitado coletando esta interface? Vem do backend
+   * (`services::snmp::service::list_interfaces`) e é o que decide se a
+   * interface gera métricas — não confundir com `adminStatus`, que o próprio
+   * equipamento também preenche na primeira coleta.
+   */
+  isMonitored?: boolean
 }
 
 export interface DeviceMetric {
@@ -120,6 +129,7 @@ export const useDeviceDetailStore = defineStore('deviceDetail', () => {
   const loading = ref(false)
   const pollingSnmp = ref(false)
   const scanningSnmp = ref(false)
+  const updatingInterfaceId = ref<number | null>(null)
   const scanResult = ref<ScanResult | null>(null)
   const error = ref<string | null>(null)
 
@@ -226,6 +236,33 @@ export const useDeviceDetailStore = defineStore('deviceDetail', () => {
       return false
     } finally {
       loading.value = false
+    }
+  }
+
+  /**
+   * Inclui/remove uma única interface do monitoramento, sem passar pela tela de
+   * descoberta. Ao habilitar, o backend já executa uma coleta — por isso a
+   * chamada demora e tem indicador próprio.
+   */
+  async function setInterfaceMonitoring(
+    deviceId: number,
+    interfaceId: number,
+    enabled: boolean
+  ): Promise<boolean> {
+    updatingInterfaceId.value = interfaceId
+    error.value = null
+    try {
+      await apiService.patch(`/devices/${deviceId}/interfaces/${interfaceId}/monitoring`, {
+        enabled,
+      })
+      await loadDeviceDetails(deviceId)
+      return true
+    } catch (err: unknown) {
+      error.value =
+        err instanceof Error ? err.message : 'Erro ao alterar o monitoramento da interface'
+      return false
+    } finally {
+      updatingInterfaceId.value = null
     }
   }
 
@@ -349,6 +386,7 @@ export const useDeviceDetailStore = defineStore('deviceDetail', () => {
     applyInterfaceChange,
     pollingSnmp,
     scanningSnmp,
+    updatingInterfaceId,
     scanResult,
     error,
     loadDeviceDetails,
@@ -356,5 +394,6 @@ export const useDeviceDetailStore = defineStore('deviceDetail', () => {
     triggerSnmpPoll,
     scanDeviceSnmp,
     applySnmpMonitors,
+    setInterfaceMonitoring,
   }
 })

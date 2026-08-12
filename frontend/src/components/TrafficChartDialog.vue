@@ -18,6 +18,60 @@
       </v-card-title>
 
       <v-card-text class="pa-6">
+        <!-- Estado de monitoramento da interface: dá para ligar/desligar daqui,
+             sem refazer a descoberta SNMP inteira -->
+        <template v-if="canManageMonitoring">
+          <v-alert
+            v-if="!isMonitored"
+            type="info"
+            variant="tonal"
+            density="comfortable"
+            class="mb-6"
+          >
+            <div
+              class="d-flex flex-column flex-sm-row align-start align-sm-center justify-space-between ga-3"
+            >
+              <div>
+                <div class="font-weight-bold">Interface fora do monitoramento</div>
+                <div class="text-caption">
+                  Nenhuma métrica é coletada para ela. Adicione ao monitoramento para começar a
+                  gerar histórico de tráfego.
+                </div>
+              </div>
+              <v-btn
+                color="primary"
+                variant="flat"
+                prepend-icon="mdi-plus-circle-outline"
+                :loading="busy"
+                class="flex-shrink-0"
+                @click="emit('toggle-monitoring', true)"
+              >
+                Adicionar ao monitoramento
+              </v-btn>
+            </div>
+          </v-alert>
+
+          <div
+            v-else
+            class="d-flex flex-wrap align-center justify-space-between ga-3 mb-6 pa-3 border rounded-lg"
+          >
+            <v-chip color="success" variant="tonal" size="small">
+              <v-icon start size="14">mdi-check-circle-outline</v-icon>
+              Interface monitorada
+            </v-chip>
+            <v-btn
+              color="error"
+              variant="tonal"
+              size="small"
+              prepend-icon="mdi-minus-circle-outline"
+              :loading="busy"
+              @click="emit('toggle-monitoring', false)"
+            >
+              Remover do monitoramento
+            </v-btn>
+          </div>
+        </template>
+
         <!-- Seletor de Tipo de Métrica -->
         <div class="d-flex align-center justify-space-between flex-wrap mb-6 ga-3">
           <v-btn-toggle
@@ -89,7 +143,11 @@
             Nenhuma métrica capturada ainda para este filtro.
           </div>
           <div class="text-caption">
-            Clique em "Poll SNMP Agora" na página do equipamento para gerar amostras.
+            {{
+              canManageMonitoring && !isMonitored
+                ? 'Adicione a interface ao monitoramento acima para que as amostras passem a ser coletadas.'
+                : 'Use "Coletar Agora" na página do equipamento para gerar amostras.'
+            }}
           </div>
         </div>
       </v-card-text>
@@ -117,14 +175,23 @@ interface Props {
   interfaceName: string
   initialMetric?: 'inBps' | 'outBps' | 'inOctets' | 'outOctets' | 'combined'
   metrics: DeviceMetric[]
+  /** Exibe os controles de incluir/remover do monitoramento */
+  canManageMonitoring?: boolean
+  isMonitored?: boolean
+  /** Uma alteração de monitoramento está em curso (a inclusão dispara coleta) */
+  busy?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   initialMetric: 'inBps',
+  canManageMonitoring: false,
+  isMonitored: false,
+  busy: false,
 })
 
 const emit = defineEmits<{
   (e: 'update:modelValue', value: boolean): void
+  (e: 'toggle-monitoring', enabled: boolean): void
 }>()
 
 const selectedTab = ref<'inBps' | 'outBps' | 'inOctets' | 'outOctets' | 'combined'>('inBps')
