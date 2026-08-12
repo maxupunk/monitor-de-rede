@@ -1,7 +1,15 @@
 <!doctype html>
-<html lang="en">
+<html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
+    <!--
+      Sem esta linha o celular assume um viewport virtual de 980 px e desenha a
+      página inteira reduzida, como se fosse um site de desktop — as media
+      queries do Vuetify nunca entram no modo compacto e nada disso aparece no
+      navegador do desenvolvedor. `viewport-fit=cover` acompanha o
+      `display: standalone` do PWA em telas com recorte.
+    -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="theme-color" content="#121212" />
     <meta name="description" content="Plataforma de Monitoramento de Redes em Tempo Real" />

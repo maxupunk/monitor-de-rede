@@ -30,46 +30,81 @@ use crate::services::shared::errors::{AppError, AppResult};
 /// "normal", de 12 bytes, exigiria um contador persistido).
 const NONCE_LEN: usize = 24;
 
-/// Chave usada quando `APP_KEY` não está definida fora de produção. Existe só
-/// para `cargo test`/`cargo loco start` funcionarem numa cópia recém-clonada.
-const DEV_APP_KEY: &str = "netmonitor-development-app-key-do-not-use-in-production";
+/// Variável que guarda a chave de cifra.
+pub const ENCRYPTION_KEY_ENV: &str = "ENCRYPTION_KEY";
 
-static APP_KEY: OnceLock<[u8; 32]> = OnceLock::new();
-
-/// Chave simétrica de 32 bytes derivada de `APP_KEY` por SHA-256.
+/// Nome anterior da mesma variável.
 ///
-/// Deriva por SHA-256 em vez de exigir 32 bytes exatos: assim `APP_KEY` pode
+/// `APP_KEY` é convenção do AdonisJS, e ficou no repositório por inércia depois
+/// que o backend virou Rust. O nome mudou; o **valor** não pode mudar, porque é
+/// dele que sai a chave que decifra as chaves privadas do WireGuard já gravadas.
+/// Por isso o fallback continua sendo lido: uma instalação existente que só
+/// tenha `APP_KEY` no ambiente segue funcionando, com um aviso pedindo a
+/// renomeação. Remover este fallback torna ilegível todo peer VPN já cadastrado.
+const LEGACY_ENCRYPTION_KEY_ENV: &str = "APP_KEY";
+
+/// Chave usada quando nenhuma das duas está definida fora de produção. Existe só
+/// para `cargo test`/`cargo loco start` funcionarem numa cópia recém-clonada.
+const DEV_ENCRYPTION_KEY: &str = "netmonitor-development-app-key-do-not-use-in-production";
+
+static ENCRYPTION_KEY: OnceLock<[u8; 32]> = OnceLock::new();
+
+/// Chave simétrica de 32 bytes derivada de [`ENCRYPTION_KEY_ENV`] por SHA-256.
+///
+/// Deriva por SHA-256 em vez de exigir 32 bytes exatos: assim a variável pode
 /// ser uma string de tamanho livre, e ninguém precisa contar caracteres para
 /// subir o serviço.
 ///
 /// # Panics
 ///
-/// Em `production` sem `APP_KEY` definida. É intencional: subir o serviço com
-/// uma chave conhecida publicamente exporia as chaves privadas do WireGuard.
+/// Em `production` sem chave definida (nem no nome novo, nem no antigo). É
+/// intencional: subir o serviço com uma chave que está no código-fonte exporia
+/// as chaves privadas do WireGuard.
 #[must_use]
-pub fn app_key() -> &'static [u8; 32] {
-    APP_KEY.get_or_init(|| {
-        let secret = std::env::var("APP_KEY").unwrap_or_else(|_| {
-            let is_production = std::env::var("LOCO_ENV")
-                .map(|env| env == "production")
-                .unwrap_or(false);
-            assert!(
-                !is_production,
-                "APP_KEY é obrigatória em production: sem ela as chaves privadas do WireGuard \
-                 seriam cifradas com uma chave que está no código-fonte"
-            );
-            tracing::warn!("APP_KEY não definida — usando a chave de desenvolvimento");
-            DEV_APP_KEY.to_string()
-        });
+pub fn encryption_key() -> &'static [u8; 32] {
+    ENCRYPTION_KEY.get_or_init(|| {
+        let secret = resolve_secret();
         Sha256::digest(secret.as_bytes()).into()
     })
+}
+
+fn resolve_secret() -> String {
+    if let Some(secret) = non_empty_env(ENCRYPTION_KEY_ENV) {
+        return secret;
+    }
+
+    if let Some(secret) = non_empty_env(LEGACY_ENCRYPTION_KEY_ENV) {
+        tracing::warn!(
+            "{LEGACY_ENCRYPTION_KEY_ENV} está obsoleta (era o nome do AdonisJS): renomeie para \
+             {ENCRYPTION_KEY_ENV} mantendo o MESMO valor — trocar o valor torna ilegível tudo \
+             que já foi cifrado"
+        );
+        return secret;
+    }
+
+    let is_production = std::env::var("LOCO_ENV").map(|env| env == "production") == Ok(true);
+    assert!(
+        !is_production,
+        "{ENCRYPTION_KEY_ENV} é obrigatória em production: sem ela as chaves privadas do \
+         WireGuard seriam cifradas com uma chave que está no código-fonte"
+    );
+    tracing::warn!("{ENCRYPTION_KEY_ENV} não definida — usando a chave de desenvolvimento");
+    DEV_ENCRYPTION_KEY.to_string()
+}
+
+/// Lê uma variável tratando string vazia como ausente — um `ENCRYPTION_KEY=`
+/// esquecido no `.env` não pode virar uma chave válida de zero bytes.
+fn non_empty_env(key: &str) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
 }
 
 fn cipher() -> XChaCha20Poly1305 {
     // `new_from_slice` em vez de `Key::from_slice`: o segundo é `GenericArray`,
     // depreciado na transição do `generic-array` 1.x. O tamanho é infalível —
-    // `app_key()` devolve exatamente 32 bytes por construção.
-    XChaCha20Poly1305::new_from_slice(app_key()).expect("app_key tem 32 bytes")
+    // `encryption_key()` devolve exatamente 32 bytes por construção.
+    XChaCha20Poly1305::new_from_slice(encryption_key()).expect("encryption_key tem 32 bytes")
 }
 
 /// Cifra `plain` e devolve `base64(nonce || ciphertext)`.
@@ -201,6 +236,12 @@ mod tests {
         // Só o nonce, sem criptograma.
         let so_nonce = base64::engine::general_purpose::STANDARD.encode([0u8; NONCE_LEN]);
         assert!(decrypt(&so_nonce).is_err());
+    }
+
+    #[test]
+    fn variavel_vazia_conta_como_ausente() {
+        // Um `ENCRYPTION_KEY=` esquecido no `.env` não pode virar chave válida.
+        assert!(non_empty_env("VARIAVEL_QUE_NAO_EXISTE_NO_AMBIENTE").is_none());
     }
 
     #[test]

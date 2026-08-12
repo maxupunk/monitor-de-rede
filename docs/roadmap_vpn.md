@@ -208,7 +208,7 @@ erDiagram
         int listen_port "51820"
         string public_endpoint "IP publico ou FQDN DDNS"
         string public_key "chave publica do servidor"
-        text private_key_encrypted "cifrada via APP_KEY"
+        text private_key_encrypted "cifrada via ENCRYPTION_KEY"
         boolean allow_peer_to_peer "visibilidade entre clientes"
         int mtu "1420"
         string dns_servers
@@ -271,7 +271,7 @@ export const generatePresharedKey = () => randomBytes(32).toString('base64')
 
 | Chave | Onde vive | Justificativa |
 | :--- | :--- | :--- |
-| Privada do **servidor** | Banco, **cifrada** com XChaCha20-Poly1305, chave derivada do `APP_KEY` (`services/shared/crypto.rs`) | Necessária para reconstruir `wg0.conf` |
+| Privada do **servidor** | Banco, **cifrada** com XChaCha20-Poly1305, chave derivada do `ENCRYPTION_KEY` (`services/shared/crypto.rs`) | Necessária para reconstruir `wg0.conf` |
 | Privada do **cliente** | **Nunca persistida.** Gerada em memória, entregue uma vez, descartada | Vazamento do banco não compromete clientes |
 | Pública do cliente | Banco, texto puro | É pública por definição |
 | Preshared key | Banco, **cifrada** | Simétrica — o servidor precisa dela no `wg0.conf` |
@@ -601,7 +601,7 @@ gantt
 
 1. **Exposição mínima:** apenas UDP 51820 é publicada. `NET_ADMIN` fica restrito ao container WireGuard.
 2. **Sem Docker socket na API:** hot-reload por arquivo compartilhado + watcher (seção 2.4).
-3. **Chaves privadas de cliente nunca persistidas;** chaves do servidor e PSKs cifradas via `APP_KEY`.
+3. **Chaves privadas de cliente nunca persistidas;** chaves do servidor e PSKs cifradas via `ENCRYPTION_KEY`.
 4. **Revogação imediata:** excluir o peer reescreve `wg0.conf` e o `syncconf` derruba o acesso na hora.
 5. **Auditoria** de todo download de configuração.
 6. **Isolamento configurável** entre peers:

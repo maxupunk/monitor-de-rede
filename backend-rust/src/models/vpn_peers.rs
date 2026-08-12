@@ -87,7 +87,7 @@ impl Model {
     ///
     /// # Errors
     ///
-    /// Falha se a `APP_KEY` mudou depois da gravação ou o dado foi adulterado.
+    /// Falha se a `ENCRYPTION_KEY` mudou depois da gravação ou o dado foi adulterado.
     pub fn preshared_key(&self) -> AppResult<Option<String>> {
         self.preshared_key_encrypted
             .as_deref()

@@ -17,8 +17,10 @@ x-backend: &backend
 
 x-app-env: &app-env
   LOCO_ENV: production
-  # Cifra em repouso dos segredos da VPN — 32 caracteres.
-  APP_KEY: ${APP_KEY:-secret_app_key_32_characters_long_str}
+  # Cifra em repouso dos segredos da VPN. Trocar o valor torna ilegível tudo que
+  # já foi cifrado com o anterior. O fallback para `APP_KEY` (nome antigo, do
+  # AdonisJS) existe para não quebrar quem já tem a variável no `.env`.
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY:-${APP_KEY:-secret_app_key_32_characters_long_str}}
   # Assinatura do JWT. Trocar em produção — e o valor **precisa ser base64
   # válido**: o Loco assina com `EncodingKey::from_base64_secret` (HS512). Um
   # segredo não-base64 não derruba o servidor; ele faz `generate_jwt` falhar e

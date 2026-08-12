@@ -32,7 +32,7 @@ impl Model {
     ///
     /// # Errors
     ///
-    /// Falha se a `APP_KEY` mudou depois da gravação ou o dado foi adulterado.
+    /// Falha se a `ENCRYPTION_KEY` mudou depois da gravação ou o dado foi adulterado.
     pub fn private_key(&self) -> AppResult<String> {
         crypto::decrypt(&self.private_key_encrypted)
     }

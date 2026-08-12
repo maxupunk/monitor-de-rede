@@ -342,7 +342,7 @@ exatamente esse o bug corrigido pela [ADR 007](adr/007-scheduler-processo-unico.
 - A **chave privada de um peer nunca vai ao banco**: vive num cofre em memória
   até a primeira leitura. Depois disso, só rotacionando.
 - Os segredos do servidor ficam cifrados em repouso com XChaCha20-Poly1305,
-  chave derivada de `APP_KEY` (`services/shared/crypto.rs`).
+  chave derivada de `ENCRYPTION_KEY` (`services/shared/crypto.rs`).
 - A telemetria do túnel é lida do arquivo `<iface>.status` no volume
   compartilhado — nunca por `docker exec`.
 - O `vpn-probe` compartilha o namespace de rede do WireGuard
@@ -356,7 +356,8 @@ exatamente esse o bug corrigido pela [ADR 007](adr/007-scheduler-processo-unico.
 - Autenticação JWT; `JWT_SECRET` **precisa ser base64 válido** (HS512). Um valor
   que não seja base64 faz todo login responder 401.
 - Tokens de probe guardados como `sha256`, revogáveis.
-- Credenciais e chaves privadas cifradas em repouso com `APP_KEY`. Sem `APP_KEY`
+- Credenciais e chaves privadas cifradas em repouso com `ENCRYPTION_KEY` (nome
+  anterior: `APP_KEY`, do AdonisJS, ainda aceito com aviso). Sem ela
   em produção o serviço **não sobe** — é intencional.
 - Validação em toda entrada; rate limit; timeout por operação; limite de
   concorrência.

@@ -186,7 +186,7 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
 
 Especificação completa em [roadmap_vpn.md](roadmap_vpn.md).
 
-- [x] **Modelo de Dados**: tabelas `vpn_servers` e `vpn_peers`, índice UNIQUE `(network_id, ip_address)` em `devices` para o IPAM, com chaves privadas e PSKs cifradas via `APP_KEY`.
+- [x] **Modelo de Dados**: tabelas `vpn_servers` e `vpn_peers`, índice UNIQUE `(network_id, ip_address)` em `devices` para o IPAM, com chaves privadas e PSKs cifradas via `ENCRYPTION_KEY`.
 - [x] **Core Backend**: geração de chaves X25519 em Rust puro, via `x25519-dalek` (sem binário `wg`), alocador de IP transacional com retry, geradores de configuração por perfil (MikroTik, OpenWrt, Linux, Windows, Mobile), parser de `wg show dump` e API `/api/vpn/...`.
 - [x] **Provisionamento automático**: ao concluir o wizard, o sistema cria `Device`, `VpnPeer`, monitor de Ping e (opcional) monitor SNMP em uma única transação, atribuídos ao `vpn-probe`.
 - [x] **Docker**: container WireGuard com hot-reload via `wg syncconf` (sem `docker.sock`), probe dedicado `vpn-probe` e rede nomeada `netmonitor-net` aplicada a todos os serviços.

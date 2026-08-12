@@ -1,77 +1,79 @@
 <template>
-  <v-app class="bg-grey-darken-4">
-    <v-container class="fill-height justify-center align-center" fluid>
-      <v-card class="pa-6 pa-md-8 elevation-12 rounded-xl mx-4" max-width="440" width="100%">
-        <div class="text-center mb-6">
-          <v-avatar color="primary" size="72" class="mb-4 elevation-4">
-            <v-icon size="40" color="white">mdi-shield-network-outline</v-icon>
-          </v-avatar>
-          <h1 class="text-h4 font-weight-bold mb-1">NetMonitor</h1>
-          <p class="text-subtitle-2 text-medium-emphasis">Plataforma de Monitoramento de Redes</p>
-        </div>
+  <AuthShell title="Entrar" subtitle="Informe suas credenciais para acessar o painel.">
+    <v-expand-transition>
+      <v-alert
+        v-if="authStore.error"
+        type="error"
+        variant="tonal"
+        density="comfortable"
+        class="mb-5"
+        rounded="lg"
+        closable
+        @click:close="authStore.clearError()"
+      >
+        {{ authStore.error }}
+      </v-alert>
+    </v-expand-transition>
 
-        <v-alert
-          v-if="authStore.error"
-          type="error"
-          variant="tonal"
-          class="mb-4 rounded-lg"
-          closable
-          @click:close="authStore.clearError()"
-        >
-          {{ authStore.error }}
-        </v-alert>
+    <v-form ref="formRef" validate-on="submit" @submit.prevent="handleLogin">
+      <v-text-field
+        v-model="email"
+        label="E-mail"
+        type="email"
+        autocomplete="username"
+        autofocus
+        prepend-inner-icon="mdi-email-outline"
+        variant="solo-filled"
+        density="comfortable"
+        flat
+        rounded="lg"
+        class="mb-3"
+        hide-details="auto"
+        :rules="emailRules"
+        @update:model-value="authStore.clearError()"
+      ></v-text-field>
 
-        <v-form ref="formRef" validate-on="submit" @submit.prevent="handleLogin">
-          <v-text-field
-            v-model="email"
-            label="E-mail"
-            type="email"
-            autocomplete="username"
-            prepend-inner-icon="mdi-email-outline"
-            variant="outlined"
-            density="comfortable"
-            class="mb-2"
-            :rules="emailRules"
-          ></v-text-field>
+      <v-text-field
+        v-model="password"
+        label="Senha"
+        :type="showPassword ? 'text' : 'password'"
+        autocomplete="current-password"
+        prepend-inner-icon="mdi-lock-outline"
+        :append-inner-icon="showPassword ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
+        variant="solo-filled"
+        density="comfortable"
+        flat
+        rounded="lg"
+        class="mb-6"
+        hide-details="auto"
+        :rules="passwordRules"
+        @click:append-inner="showPassword = !showPassword"
+        @update:model-value="authStore.clearError()"
+      ></v-text-field>
 
-          <v-text-field
-            v-model="password"
-            label="Senha"
-            :type="showPassword ? 'text' : 'password'"
-            autocomplete="current-password"
-            prepend-inner-icon="mdi-lock-outline"
-            :append-inner-icon="showPassword ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
-            variant="outlined"
-            density="comfortable"
-            class="mb-4"
-            :rules="passwordRules"
-            @click:append-inner="showPassword = !showPassword"
-          ></v-text-field>
-
-          <v-btn
-            type="submit"
-            color="primary"
-            block
-            size="large"
-            elevation="2"
-            class="text-none font-weight-bold rounded-lg"
-            :loading="authStore.loading"
-          >
-            Entrar no Sistema
-          </v-btn>
-        </v-form>
-      </v-card>
-    </v-container>
-  </v-app>
+      <v-btn
+        type="submit"
+        color="primary"
+        block
+        size="large"
+        variant="flat"
+        rounded="lg"
+        class="text-none font-weight-bold"
+        :loading="authStore.loading"
+        append-icon="mdi-arrow-right"
+      >
+        Entrar no sistema
+      </v-btn>
+    </v-form>
+  </AuthShell>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import AuthShell from '@/components/auth/AuthShell.vue'
 import { useAuthStore } from '@/stores/auth'
-
-type ValidationRule = (value: string) => true | string
-type VuetifyForm = { validate: () => Promise<{ valid: boolean }> }
+import { emailRule, requiredRule, type ValidationRule, type VuetifyForm } from '@/utils/formRules'
 
 const authStore = useAuthStore()
 const router = useRouter()
@@ -82,10 +84,8 @@ const email = ref('')
 const password = ref('')
 const showPassword = ref(false)
 
-const emailRules: ValidationRule[] = [
-  (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim()) || 'Informe um e-mail válido.',
-]
-const passwordRules: ValidationRule[] = [(value) => value.length > 0 || 'Informe a senha.']
+const emailRules: ValidationRule[] = [emailRule()]
+const passwordRules: ValidationRule[] = [requiredRule('Informe a senha.')]
 
 /**
  * Volta para onde o guard interrompeu a navegação.

@@ -3,8 +3,9 @@
 //!
 //! **Por que este comando existe.** O backend AdonisJS cifrava
 //! `vpn_servers.private_key_encrypted` e `vpn_peers.preshared_key_encrypted`
-//! com o `encryption` do framework (AES-256-CBC + HMAC sobre a `APP_KEY`); este
-//! backend usa XChaCha20-Poly1305 com chave derivada da mesma `APP_KEY`. Os dois
+//! com o `encryption` do framework (AES-256-CBC + HMAC sobre a `APP_KEY` dele);
+//! este backend usa XChaCha20-Poly1305 com chave derivada da `ENCRYPTION_KEY` —
+//! que costuma ser o mesmo valor, só rebatizado. Os dois
 //! formatos não se leem, e um `pg_dump`/`pg_restore` carrega o criptograma
 //! antigo intacto — que, deste lado, ninguém consegue abrir.
 //!
@@ -20,7 +21,7 @@
 //! git checkout adonisjs-final -- backend/
 //! npm --prefix backend install
 //!
-//! # 1) Com a APP_KEY original no ambiente, exporta em claro.
+//! # 1) Com a APP_KEY original do Adonis no ambiente, exporta em claro.
 //! node ace vpn:export-secrets > /tmp/vpn-secrets.json
 //!
 //! # 2) Aqui, já com o banco restaurado:
@@ -30,7 +31,7 @@
 //! shred -u /tmp/vpn-secrets.json
 //! ```
 //!
-//! Sem o passo 1 (por exemplo, se a `APP_KEY` antiga se perdeu), a saída é
+//! Sem o passo 1 (por exemplo, se a chave antiga se perdeu), a saída é
 //! rotacionar: `POST /api/vpn/peers/:id/rotate` em cada peer e reconfigurar o
 //! servidor. O comando avisa quanto sobrou por fazer.
 
@@ -125,7 +126,7 @@ impl Task for VpnSecretsImport {
         // não quando um cliente tentar reconectar.
         let pending = pending_reencryption(ctx).await?;
         if pending.is_empty() {
-            println!("Todos os segredos da VPN decifram com a APP_KEY atual.");
+            println!("Todos os segredos da VPN decifram com a ENCRYPTION_KEY atual.");
         } else {
             println!("\nATENÇÃO — ainda ilegíveis, precisam de rotação manual:");
             for item in &pending {

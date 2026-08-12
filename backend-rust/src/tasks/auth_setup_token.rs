@@ -30,18 +30,18 @@ impl Task for AuthSetupToken {
             return Ok(());
         }
 
-        println!("----------------------------------------------------");
         match service.token_origin() {
             SetupTokenOrigin::Environment => {
+                println!();
                 println!("O token vem da variável de ambiente {SETUP_TOKEN_ENV}.");
                 println!("Consulte o valor onde ela foi definida (.env, compose, secret).");
+                println!();
             }
             SetupTokenOrigin::Generated => {
-                println!("SETUP_TOKEN: {}", service.token().await?);
-                println!("Use-o na tela de cadastro do primeiro usuário.");
+                // Mesmo quadro do boot: quem já viu um reconhece o outro.
+                crate::initializers::setup::banner_do_token(&service.token().await?);
             }
         }
-        println!("----------------------------------------------------");
 
         Ok(())
     }
