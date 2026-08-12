@@ -234,12 +234,20 @@ impl Model {
         db: &DatabaseConnection,
         params: &RegisterParams,
     ) -> ModelResult<Self> {
+        // Único ponto de gravação de usuário no sistema, e por isso o lugar
+        // certo para normalizar o e-mail. `find_by_email` compara por igualdade
+        // exata: sem isto, quem se cadastrasse como `Admin@Casa.com` nunca mais
+        // entraria digitando `admin@casa.com`, e o mesmo endereço em duas
+        // caixas diferentes passaria pela checagem de duplicidade abaixo.
+        let email = params.email.trim().to_lowercase();
+        let name = params.name.trim().to_string();
+
         let txn = db.begin().await?;
 
         if users::Entity::find()
             .filter(
                 model::query::condition()
-                    .eq(users::Column::Email, &params.email)
+                    .eq(users::Column::Email, &email)
                     .build(),
             )
             .one(&txn)
@@ -252,9 +260,9 @@ impl Model {
         let password_hash =
             hash::hash_password(&params.password).map_err(|e| ModelError::Any(e.into()))?;
         let user = users::ActiveModel {
-            email: ActiveValue::set(params.email.clone()),
+            email: ActiveValue::set(email),
             password: ActiveValue::set(password_hash),
-            name: ActiveValue::set(params.name.clone()),
+            name: ActiveValue::set(name),
             ..Default::default()
         }
         .insert(&txn)

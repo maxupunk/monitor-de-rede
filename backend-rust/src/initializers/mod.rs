@@ -8,3 +8,4 @@
 
 pub mod monitoring;
 pub mod process_deps;
+pub mod setup;

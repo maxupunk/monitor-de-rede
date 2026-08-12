@@ -241,9 +241,12 @@ onUnmounted(() => {
   eventsStore.disconnect()
 })
 
-function handleLogout() {
-  authStore.logout()
-  router.push('/login')
+async function handleLogout() {
+  // O `await` não é cosmético: `logout()` só limpa o token depois da chamada à
+  // API. Navegar antes disso deixa o guard vendo uma sessão ainda válida, e ele
+  // devolve o operador ao dashboard — a tela de saída que nunca sai.
+  await authStore.logout()
+  await router.push('/login')
 }
 </script>
 

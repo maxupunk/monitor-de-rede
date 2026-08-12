@@ -8,6 +8,15 @@ export interface ApiErrorResponse {
   errors?: Array<{ field?: string; message: string }>
 }
 
+/**
+ * Endpoints em que um 401 é resposta de negócio, não sessão expirada.
+ *
+ * Sem esta lista, errar a senha no login ou o token de instalação no cadastro
+ * inicial dispararia o redirecionamento de "sua sessão acabou" — e a mensagem
+ * do backend sumiria da tela junto com o formulário preenchido.
+ */
+const CREDENTIAL_PATHS = ['/auth/login', '/auth/setup']
+
 class ApiService {
   private baseUrl = '/api'
 
@@ -23,7 +32,7 @@ class ApiService {
     return headers
   }
 
-  private async handleResponse<T>(response: Response): Promise<T> {
+  private async handleResponse<T>(response: Response, path = ''): Promise<T> {
     if (!response.ok) {
       let errorMessage = `Erro HTTP ${response.status}: ${response.statusText}`
       try {
@@ -36,7 +45,7 @@ class ApiService {
       } catch {
         // Fallback for non-JSON error responses
       }
-      if (response.status === 401) {
+      if (response.status === 401 && !CREDENTIAL_PATHS.includes(path)) {
         localStorage.removeItem('auth_token')
         localStorage.removeItem('auth_user')
         if (window.location.pathname !== '/login') {
@@ -58,7 +67,7 @@ class ApiService {
       method: 'GET',
       headers: this.getHeaders(),
     })
-    return this.handleResponse<T>(response)
+    return this.handleResponse<T>(response, path)
   }
 
   async post<T>(path: string, body?: unknown): Promise<T> {
@@ -67,7 +76,7 @@ class ApiService {
       headers: this.getHeaders(),
       body: body ? JSON.stringify(body) : undefined,
     })
-    return this.handleResponse<T>(response)
+    return this.handleResponse<T>(response, path)
   }
 
   async put<T>(path: string, body?: unknown): Promise<T> {
@@ -76,7 +85,7 @@ class ApiService {
       headers: this.getHeaders(),
       body: body ? JSON.stringify(body) : undefined,
     })
-    return this.handleResponse<T>(response)
+    return this.handleResponse<T>(response, path)
   }
 
   async patch<T>(path: string, body?: unknown): Promise<T> {
@@ -85,7 +94,7 @@ class ApiService {
       headers: this.getHeaders(),
       body: body ? JSON.stringify(body) : undefined,
     })
-    return this.handleResponse<T>(response)
+    return this.handleResponse<T>(response, path)
   }
 
   async delete<T>(path: string): Promise<T> {
@@ -93,7 +102,7 @@ class ApiService {
       method: 'DELETE',
       headers: this.getHeaders(),
     })
-    return this.handleResponse<T>(response)
+    return this.handleResponse<T>(response, path)
   }
 
   /**
@@ -109,7 +118,7 @@ class ApiService {
       signal,
     })
     if (!response.ok) {
-      await this.handleResponse(response)
+      await this.handleResponse(response, path)
     }
     return response
   }

@@ -9,6 +9,12 @@ const routes = [
     meta: { public: true },
   },
   {
+    path: '/setup',
+    name: 'setup',
+    component: () => import('../pages/SetupPage.vue'),
+    meta: { public: true },
+  },
+  {
     path: '/',
     component: () => import('../layouts/DefaultLayout.vue'),
     children: [
@@ -61,9 +67,31 @@ export const router = createRouter({
   routes,
 })
 
-router.beforeEach((to) => {
+/**
+ * Três destinos possíveis para quem chega, nesta ordem:
+ *
+ * 1. **Autenticado** — segue para onde pediu; login e cadastro inicial viram
+ *    dashboard, porque não há o que fazer neles com sessão aberta.
+ * 2. **Instalação pendente** (banco sem nenhum usuário) — vai para `/setup`.
+ *    Mandar para o login seria pedir uma credencial que ainda não existe, que
+ *    é exatamente o beco sem saída de uma instalação nova.
+ * 3. **Resto** — login, guardando o destino original em `?redirect` para
+ *    devolver o operador ao lugar certo depois de entrar.
+ */
+router.beforeEach(async (to) => {
   const auth = useAuthStore()
-  if (!to.meta.public && !auth.isAuthenticated) return { name: 'login' }
-  if (to.name === 'login' && auth.isAuthenticated) return { name: 'dashboard' }
+
+  if (auth.isAuthenticated) {
+    if (to.name === 'login' || to.name === 'setup') return { name: 'dashboard' }
+    return true
+  }
+
+  if (await auth.ensureSetupStatus()) {
+    return to.name === 'setup' ? true : { name: 'setup' }
+  }
+
+  // Instalação concluída: `/setup` não tem mais função.
+  if (to.name === 'setup') return { name: 'login' }
+  if (!to.meta.public) return { name: 'login', query: { redirect: to.fullPath } }
   return true
 })

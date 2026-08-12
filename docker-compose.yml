@@ -25,6 +25,11 @@ x-app-env: &app-env
   # todo login responder 401 com a mesma mensagem de senha inválida.
   JWT_SECRET: ${JWT_SECRET:-Y2hhbmdlLW1lLXRoaXMtaXMtYS1wbGFjZWhvbGRlci1zZWNyZXQtdmFsdWUtMDAwMQ==}
   DATABASE_URL: postgres://netmonitor:secret@postgres:5432/netmonitor
+  # Token exigido no cadastro do primeiro usuário. Deixe vazio e o servidor
+  # sorteia um no primeiro boot, imprimindo-o no log (`docker compose logs
+  # server | grep setup_token`). Definir aqui só interessa a provisionamento
+  # automatizado, que precisa conhecer o valor antes de o container subir.
+  SETUP_TOKEN: ${SETUP_TOKEN:-}
   LOG_LEVEL: ${LOG_LEVEL:-info}
   # Origem liberada no CORS. Precisa bater com a porta publicada do frontend.
   FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:8081}

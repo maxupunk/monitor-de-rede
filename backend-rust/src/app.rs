@@ -18,6 +18,7 @@ use crate::{
     controllers,
     initializers::monitoring::MonitoringInitializer,
     initializers::process_deps,
+    initializers::setup::SetupInitializer,
     models::_entities::users,
     models::tables,
     tasks,
@@ -63,7 +64,10 @@ impl Hooks for App {
     }
 
     async fn initializers(_ctx: &AppContext) -> Result<Vec<Box<dyn Initializer>>> {
-        Ok(vec![Box::new(MonitoringInitializer)])
+        Ok(vec![
+            Box::new(SetupInitializer),
+            Box::new(MonitoringInitializer),
+        ])
     }
 
     fn routes(ctx: &AppContext) -> AppRoutes {
@@ -110,6 +114,7 @@ impl Hooks for App {
     fn register_tasks(tasks: &mut Tasks) {
         // tasks-inject (do not remove)
         tasks.register(tasks::user_create::UserCreate);
+        tasks.register(tasks::auth_setup_token::AuthSetupToken);
         tasks.register(SchedulerRun);
         tasks.register(SchedulerLoop);
         tasks.register(tasks::probe_run::ProbeRun);

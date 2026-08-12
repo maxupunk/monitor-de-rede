@@ -21,6 +21,15 @@ impl LoginResponse {
     }
 }
 
+/// Estado da instalação, consultado antes de decidir entre a tela de login e a
+/// de cadastro inicial.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetupStatusResponse {
+    /// `true` enquanto o banco não tiver nenhum usuário.
+    pub needs_setup: bool,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserResponse {

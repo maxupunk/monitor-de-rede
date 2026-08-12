@@ -134,6 +134,26 @@ pub fn sha256_hex(input: &str) -> String {
     hex::encode(Sha256::digest(input.as_bytes()))
 }
 
+/// Compara dois segredos sem vazar, pelo tempo gasto, o quanto eles se parecem.
+///
+/// O `==` de `&str` para no primeiro byte diferente. Quem consegue medir o
+/// tempo de resposta descobre com isso quantos bytes iniciais do palpite estão
+/// certos e reconstrói o segredo byte a byte, em vez de tentar o espaço
+/// inteiro. Comparar os digests em vez das entradas resolve de uma vez o
+/// tamanho: `Sha256` sempre devolve 32 bytes, então o laço roda o mesmo número
+/// de vezes mesmo quando os textos têm comprimentos diferentes — e o próprio
+/// comprimento do segredo deixa de ser observável.
+#[must_use]
+pub fn constant_time_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (Sha256::digest(a.as_bytes()), Sha256::digest(b.as_bytes()));
+    // O `fold` acumula com OR: qualquer byte diferente acende um bit que os
+    // seguintes não conseguem apagar, e nenhum caminho sai do laço mais cedo.
+    a.iter()
+        .zip(b.iter())
+        .fold(0u8, |diff, (x, y)| diff | (x ^ y))
+        == 0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -181,6 +201,26 @@ mod tests {
         // Só o nonce, sem criptograma.
         let so_nonce = base64::engine::general_purpose::STANDARD.encode([0u8; NONCE_LEN]);
         assert!(decrypt(&so_nonce).is_err());
+    }
+
+    #[test]
+    fn constant_time_eq_so_aceita_o_segredo_exato() {
+        assert!(constant_time_eq(
+            "token-de-instalacao",
+            "token-de-instalacao"
+        ));
+        assert!(constant_time_eq("", ""));
+        // Prefixo correto não passa: é justamente o caso que o `==` entregaria
+        // pelo tempo de resposta.
+        assert!(!constant_time_eq(
+            "token-de-instalaca",
+            "token-de-instalacao"
+        ));
+        assert!(!constant_time_eq(
+            "token-de-instalacaO",
+            "token-de-instalacao"
+        ));
+        assert!(!constant_time_eq("", "token-de-instalacao"));
     }
 
     #[test]

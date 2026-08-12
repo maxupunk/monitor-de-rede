@@ -231,6 +231,12 @@ Notas que valem mais que a lista:
   `migration/src/shared.rs`, e não pelo `refs` do Loco, que derivaria a ação da
   nulabilidade.
 - **`auth_tokens` não existe.** A autenticação é JWT stateless.
+- **Não existe usuário semeado em produção.** Banco vazio significa instalação
+  pendente: o frontend manda para `/setup` e o primeiro usuário nasce ali,
+  autorizado pelo token de instalação (`SETUP_TOKEN` ou sorteado no boot e
+  guardado em `system_settings`, chave `auth.setup_token`). Ver
+  `services/auth/setup.rs`. As fixtures com `admin@monitor.local` valem só para
+  `cargo loco db seed` em teste/desenvolvimento.
 - Os índices têm **nome explícito**, nunca o que o banco derivaria.
 
 ## 8. API
@@ -243,10 +249,18 @@ Tudo abaixo de `/api` passa pelo guarda JWT (`controllers/auth_guard.rs`), com
 duas exceções: `/api/auth/*` e as rotas de agente do probe, que se autenticam
 por `X-Probe-Token` dentro do handler.
 
+`POST /api/auth/register` é a exceção da exceção: fica sob `/api/auth/*`, mas
+exige sessão no próprio handler (`auth::JWT`). Cadastro aberto num sistema que
+enxerga a rede inteira transformaria o token de instalação em teatro — bastaria
+pular a tela de `/setup` e chamar `register`.
+
 ```text
 GET  /                              identificação do serviço (health check)
 
-POST /api/auth/login | /register | /forgot | /reset | /logout
+GET  /api/auth/setup                a instalação ainda espera o 1º usuário?
+POST /api/auth/setup                cria o 1º usuário (token de instalação)
+POST /api/auth/login | /forgot | /reset | /logout
+POST /api/auth/register             ← exige JWT
 GET  /api/auth/me | /current | /verify/{token} | /magic-link/{token}
 
 GET|POST         /api/sites                 GET|PUT|DELETE /api/sites/{id}

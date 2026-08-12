@@ -1,7 +1,8 @@
-use backend_rust::{app::App, models::users};
+use backend_rust::{app::App, models::users, services::auth::setup::SetupService};
 use insta::{assert_debug_snapshot, with_settings};
 use loco_rs::testing::prelude::*;
 use rstest::rstest;
+use sea_orm::IntoActiveModel;
 use serial_test::serial;
 
 use super::prepare_data;
@@ -17,12 +18,198 @@ macro_rules! configure_insta {
     };
 }
 
+/// Payload do cadastro inicial com o token vigente da instalação.
+fn setup_payload(token: &str) -> serde_json::Value {
+    serde_json::json!({
+        "name": "Operador",
+        "email": "admin@netmonitor.local",
+        "password": "senha-bem-forte",
+        "token": token,
+    })
+}
+
+#[tokio::test]
+#[serial]
+async fn banco_vazio_reporta_instalacao_pendente() {
+    request::<App, _, _>(|request, _ctx| async move {
+        let response = request.get("/api/auth/setup").await;
+        assert_eq!(response.status_code(), 200);
+        response.assert_json(&serde_json::json!({ "needsSetup": true }));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn setup_cria_o_primeiro_usuario_e_ja_devolve_a_sessao() {
+    request::<App, _, _>(|request, ctx| async move {
+        let token = SetupService::new(&ctx.db).token().await.unwrap();
+
+        let response = request
+            .post("/api/auth/setup")
+            .json(&setup_payload(&token))
+            .await;
+        assert_eq!(response.status_code(), 200, "{}", response.text());
+
+        let session: backend_rust::views::auth::LoginResponse =
+            serde_json::from_str(&response.text()).unwrap();
+        assert_eq!(session.user.email, "admin@netmonitor.local");
+        assert!(!session.token.is_empty());
+
+        // A sessão devolvida precisa valer de imediato — é com ela que o
+        // frontend entra no dashboard sem passar pela tela de login.
+        let (auth_key, auth_value) = prepare_data::auth_header(&session.token);
+        let me = request
+            .get("/api/auth/me")
+            .add_header(auth_key, auth_value)
+            .await;
+        assert_eq!(me.status_code(), 200);
+
+        // Sem SMTP numa instalação nova, o primeiro usuário já nasce verificado.
+        let user = users::Model::find_by_email(&ctx.db, "admin@netmonitor.local")
+            .await
+            .unwrap();
+        assert!(user.email_verified_at.is_some());
+
+        // E a porta se fecha atrás dele.
+        let status = request.get("/api/auth/setup").await;
+        status.assert_json(&serde_json::json!({ "needsSetup": false }));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn setup_recusa_token_invalido_sem_criar_usuario() {
+    request::<App, _, _>(|request, ctx| async move {
+        let response = request
+            .post("/api/auth/setup")
+            .json(&setup_payload("token-errado"))
+            .await;
+
+        assert_eq!(response.status_code(), 401);
+        response.assert_json(&serde_json::json!({ "message": "Token de instalação inválido." }));
+        assert!(SetupService::new(&ctx.db).is_pending().await.unwrap());
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn setup_recusa_senha_curta_por_campo() {
+    request::<App, _, _>(|request, ctx| async move {
+        let token = SetupService::new(&ctx.db).token().await.unwrap();
+        let mut payload = setup_payload(&token);
+        payload["password"] = serde_json::json!("1234");
+
+        let response = request.post("/api/auth/setup").json(&payload).await;
+
+        assert_eq!(response.status_code(), 422);
+        let body: serde_json::Value = serde_json::from_str(&response.text()).unwrap();
+        assert_eq!(body["errors"][0]["field"], "password");
+        assert!(SetupService::new(&ctx.db).is_pending().await.unwrap());
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn setup_fecha_depois_do_primeiro_usuario() {
+    request::<App, _, _>(|request, ctx| async move {
+        let token = SetupService::new(&ctx.db).token().await.unwrap();
+        prepare_data::create_user(&ctx, "quem chegou antes", "primeiro@loco.com", "12341234").await;
+
+        let response = request
+            .post("/api/auth/setup")
+            .json(&setup_payload(&token))
+            .await;
+
+        // 409 mesmo com o token certo: instalação concluída não reabre.
+        assert_eq!(response.status_code(), 409);
+        assert!(
+            users::Model::find_by_email(&ctx.db, "admin@netmonitor.local")
+                .await
+                .is_err()
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn register_exige_sessao() {
+    request::<App, _, _>(|request, _ctx| async move {
+        let response = request
+            .post("/api/auth/register")
+            .json(&serde_json::json!({
+                "name": "intruso",
+                "email": "intruso@loco.com",
+                "password": "12341234"
+            }))
+            .await;
+
+        assert_eq!(
+            response.status_code(),
+            401,
+            "cadastro aberto tornaria o token de instalação inútil"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn login_recusa_usuario_desativado() {
+    request::<App, _, _>(|request, ctx| async move {
+        let user = prepare_data::create_user(&ctx, "desligado", "ex@loco.com", "12341234").await;
+        let mut active = user.into_active_model();
+        active.active = sea_orm::ActiveValue::Set(false);
+        sea_orm::ActiveModelTrait::update(active, &ctx.db)
+            .await
+            .unwrap();
+
+        let response = request
+            .post("/api/auth/login")
+            .json(&serde_json::json!({
+                "email": "ex@loco.com",
+                "password": "12341234"
+            }))
+            .await;
+
+        assert_eq!(response.status_code(), 401);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn login_ignora_caixa_do_email() {
+    request::<App, _, _>(|request, ctx| async move {
+        prepare_data::create_user(&ctx, "maiuscula", "Admin@Casa.com", "12341234").await;
+
+        let response = request
+            .post("/api/auth/login")
+            .json(&serde_json::json!({
+                "email": "  ADMIN@casa.com  ",
+                "password": "12341234"
+            }))
+            .await;
+
+        assert_eq!(response.status_code(), 200, "{}", response.text());
+    })
+    .await;
+}
+
 #[tokio::test]
 #[serial]
 async fn can_register() {
     configure_insta!();
 
     request::<App, _, _>(|request, ctx| async move {
+        // O cadastro deixou de ser aberto: quem cria usuário é quem já entrou.
+        let operator = prepare_data::init_operator(&ctx).await;
+        let (auth_key, auth_value) = prepare_data::auth_header(&operator.token);
+
         let email = "test@loco.com";
         let payload = serde_json::json!({
             "name": "loco",
@@ -30,7 +217,11 @@ async fn can_register() {
             "password": "12341234"
         });
 
-        let response = request.post("/api/auth/register").json(&payload).await;
+        let response = request
+            .post("/api/auth/register")
+            .add_header(auth_key, auth_value)
+            .json(&payload)
+            .await;
         assert_eq!(
             response.status_code(),
             200,
@@ -66,25 +257,14 @@ async fn can_login_with_verify(#[case] test_name: &str, #[case] password: &str) 
 
     request::<App, _, _>(|request, ctx| async move {
         let email = "test@loco.com";
-        let register_payload = serde_json::json!({
-            "name": "loco",
-            "email": email,
-            "password": "12341234"
-        });
 
-        //Creating a new user
-        let register_response = request
-            .post("/api/auth/register")
-            .json(&register_payload)
-            .await;
+        let user = prepare_data::create_user(&ctx, "loco", email, "12341234").await;
+        let user = user
+            .into_active_model()
+            .set_email_verification_sent(&ctx.db)
+            .await
+            .expect("Email verification token should be generated");
 
-        assert_eq!(
-            register_response.status_code(),
-            200,
-            "Register request should succeed"
-        );
-
-        let user = users::Model::find_by_email(&ctx.db, email).await.unwrap();
         let email_verification_token = user
             .email_verification_token
             .expect("Email verification token should be generated");
@@ -127,7 +307,6 @@ async fn login_with_un_existing_email() {
     configure_insta!();
 
     request::<App, _, _>(|request, _ctx| async move {
-
         let login_response = request
             .post("/api/auth/login")
             .json(&serde_json::json!({
@@ -136,8 +315,15 @@ async fn login_with_un_existing_email() {
             }))
             .await;
 
-        assert_eq!(login_response.status_code(), 401, "Login request should return 401");
-        login_response.assert_json(&serde_json::json!({"error": "unauthorized", "description": "You do not have permission to access this resource"}));
+        assert_eq!(
+            login_response.status_code(),
+            401,
+            "Login request should return 401"
+        );
+        // Mensagem única para e-mail inexistente e senha errada: distinguir os
+        // dois entregaria a lista de quem tem conta. O corpo usa `message`
+        // porque é o campo que o `apiService` do frontend lê (§5.5).
+        login_response.assert_json(&serde_json::json!({"message": "E-mail ou senha inválidos."}));
     })
     .await;
 }
@@ -147,28 +333,13 @@ async fn login_with_un_existing_email() {
 async fn can_login_without_verify() {
     configure_insta!();
 
-    request::<App, _, _>(|request, _ctx| async move {
+    request::<App, _, _>(|request, ctx| async move {
         let email = "test@loco.com";
         let password = "12341234";
-        let register_payload = serde_json::json!({
-            "name": "loco",
-            "email": email,
-            "password": password
-        });
 
-        //Creating a new user
-        let register_response = request
-            .post("/api/auth/register")
-            .json(&register_payload)
-            .await;
+        // Usuário sem verificação de e-mail nenhuma: o login não a exige.
+        prepare_data::create_user(&ctx, "loco", email, password).await;
 
-        assert_eq!(
-            register_response.status_code(),
-            200,
-            "Register request should succeed"
-        );
-
-        //verify user request
         let login_response = request
             .post("/api/auth/login")
             .json(&serde_json::json!({
@@ -431,6 +602,9 @@ async fn can_resend_verification_email() {
     configure_insta!();
 
     request::<App, _, _>(|request, ctx| async move {
+        let operator = prepare_data::init_operator(&ctx).await;
+        let (auth_key, auth_value) = prepare_data::auth_header(&operator.token);
+
         let email = "test@loco.com";
         let payload = serde_json::json!({
             "name": "loco",
@@ -438,7 +612,11 @@ async fn can_resend_verification_email() {
             "password": "12341234"
         });
 
-        let response = request.post("/api/auth/register").json(&payload).await;
+        let response = request
+            .post("/api/auth/register")
+            .add_header(auth_key, auth_value)
+            .json(&payload)
+            .await;
         assert_eq!(
             response.status_code(),
             200,
@@ -484,6 +662,9 @@ async fn cannot_resend_email_if_already_verified() {
     configure_insta!();
 
     request::<App, _, _>(|request, ctx| async move {
+        let operator = prepare_data::init_operator(&ctx).await;
+        let (auth_key, auth_value) = prepare_data::auth_header(&operator.token);
+
         let email = "verified@loco.com";
         let payload = serde_json::json!({
             "name": "verified",
@@ -491,7 +672,11 @@ async fn cannot_resend_email_if_already_verified() {
             "password": "12341234"
         });
 
-        request.post("/api/auth/register").json(&payload).await;
+        request
+            .post("/api/auth/register")
+            .add_header(auth_key, auth_value)
+            .json(&payload)
+            .await;
 
         // Verify user
         let user = users::Model::find_by_email(&ctx.db, email).await.unwrap();

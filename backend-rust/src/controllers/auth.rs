@@ -4,7 +4,11 @@ use crate::{
         _entities::users,
         users::{LoginParams, RegisterParams},
     },
-    views::auth::{LoginResponse, UserResponse},
+    services::{
+        auth::setup::{map_model_error, SetupParams, SetupService},
+        shared::errors::{AppError, AppResult},
+    },
+    views::auth::{LoginResponse, SetupStatusResponse, UserResponse},
 };
 use loco_rs::prelude::*;
 use regex::Regex;
@@ -40,35 +44,59 @@ pub struct ResendVerificationParams {
     pub email: String,
 }
 
-/// Register function creates a new user with the given parameters and sends a
-/// welcome email to the user
+/// Diz se a instalação ainda espera o primeiro usuário.
+///
+/// Público de propósito — é a pergunta que o frontend faz **antes** de ter
+/// qualquer credencial, para escolher entre a tela de login e a de cadastro
+/// inicial. Não revela nada além de um booleano que qualquer um descobriria
+/// tentando entrar.
+#[debug_handler]
+async fn setup_status(State(ctx): State<AppContext>) -> AppResult<Response> {
+    let needs_setup = SetupService::new(&ctx.db).is_pending().await?;
+    Ok(format::json(SetupStatusResponse { needs_setup })?)
+}
+
+/// Cadastra o primeiro usuário e já devolve a sessão.
+///
+/// Devolver o `LoginResponse` (em vez de mandar o operador para a tela de
+/// login) fecha o fluxo numa tela só: quem acabou de provar a posse do token de
+/// instalação não tem o que reprovar num login logo em seguida.
+#[debug_handler]
+async fn setup(
+    State(ctx): State<AppContext>,
+    Json(params): Json<SetupParams>,
+) -> AppResult<Response> {
+    let user = SetupService::new(&ctx.db).complete(&params).await?;
+    Ok(format::json(issue_session(&ctx, &user)?)?)
+}
+
+/// Cria um usuário adicional.
+///
+/// **Exige sessão válida.** Cadastro aberto transformaria o token de instalação
+/// em teatro: bastaria pular a tela de setup e chamar este endpoint para entrar
+/// num sistema que enxerga a rede inteira. O primeiro usuário nasce em
+/// `POST /auth/setup`; daí em diante quem já está dentro cria os demais.
 #[debug_handler]
 async fn register(
+    _auth: auth::JWT,
     State(ctx): State<AppContext>,
     Json(params): Json<RegisterParams>,
-) -> Result<Response> {
-    let res = users::Model::create_with_password(&ctx.db, &params).await;
-
-    let user = match res {
-        Ok(user) => user,
-        Err(err) => {
-            tracing::info!(
-                message = err.to_string(),
-                user_email = &params.email,
-                "could not register user",
-            );
-            return format::json(());
-        }
-    };
+) -> AppResult<Response> {
+    let user = users::Model::create_with_password(&ctx.db, &params)
+        .await
+        .map_err(map_model_error)?;
 
     let user = user
         .into_active_model()
         .set_email_verification_sent(&ctx.db)
-        .await?;
+        .await
+        .map_err(map_model_error)?;
 
     AuthMailer::send_welcome(&ctx, &user).await?;
 
-    format::json(())
+    tracing::info!(user_pid = %user.pid, "usuário criado por um operador autenticado");
+
+    Ok(format::json(UserResponse::new(&user))?)
 }
 
 /// Verify register user. if the user not verified his email, he can't login to
@@ -132,30 +160,53 @@ async fn reset(State(ctx): State<AppContext>, Json(params): Json<ResetParams>) -
     format::json(())
 }
 
-/// Creates a user login and returns a token
+/// Emite o JWT do usuário e monta a resposta de sessão.
+///
+/// Existe fora dos handlers porque três caminhos chegam ao mesmo lugar — login,
+/// magic link e cadastro inicial. Duplicar a leitura do `jwt` de configuração
+/// em cada um é como uma expiração passa a divergir da outra sem ninguém notar.
+fn issue_session(ctx: &AppContext, user: &users::Model) -> AppResult<LoginResponse> {
+    let jwt = ctx.config.get_jwt_config().map_err(AppError::from)?;
+    let token = user
+        .generate_jwt(&jwt.secret, jwt.expiration)
+        .map_err(map_model_error)?;
+    Ok(LoginResponse::new(user, &token))
+}
+
+/// Autentica por e-mail e senha.
+///
+/// Todas as recusas devolvem a **mesma** mensagem: distinguir "e-mail não
+/// existe" de "senha errada" entrega ao atacante a lista de quem tem conta, que
+/// é metade do trabalho de invadir uma. O motivo real fica no log.
 #[debug_handler]
-async fn login(State(ctx): State<AppContext>, Json(params): Json<LoginParams>) -> Result<Response> {
-    let Ok(user) = users::Model::find_by_email(&ctx.db, &params.email).await else {
-        tracing::debug!(
-            email = params.email,
-            "login attempt with non-existent email"
-        );
-        return unauthorized("Invalid credentials!");
+async fn login(
+    State(ctx): State<AppContext>,
+    Json(params): Json<LoginParams>,
+) -> AppResult<Response> {
+    const RECUSA: &str = "E-mail ou senha inválidos.";
+
+    let email = params.email.trim().to_lowercase();
+    let Ok(user) = users::Model::find_by_email(&ctx.db, &email).await else {
+        tracing::debug!(email, "login recusado: e-mail sem cadastro");
+        return Err(AppError::unauthorized(RECUSA));
     };
 
-    let valid = user.verify_password(&params.password);
-
-    if !valid {
-        return unauthorized("unauthorized!");
+    if !user.verify_password(&params.password) {
+        tracing::debug!(email, "login recusado: senha incorreta");
+        return Err(AppError::unauthorized(RECUSA));
     }
 
-    let jwt_secret = ctx.config.get_jwt_config()?;
+    // Desativar um operador precisa valer imediatamente. Sem esta checagem a
+    // coluna `active` seria decorativa: quem foi desligado continuaria
+    // entrando.
+    if !user.active {
+        tracing::info!(user_pid = %user.pid, "login recusado: usuário desativado");
+        return Err(AppError::unauthorized(
+            "Este usuário está desativado. Procure um administrador.",
+        ));
+    }
 
-    let token = user
-        .generate_jwt(&jwt_secret.secret, jwt_secret.expiration)
-        .or_else(|_| unauthorized("unauthorized!"))?;
-
-    format::json(LoginResponse::new(&user, &token))
+    Ok(format::json(issue_session(&ctx, &user)?)?)
 }
 
 #[debug_handler]
@@ -214,22 +265,20 @@ async fn magic_link(
 async fn magic_link_verify(
     Path(token): Path<String>,
     State(ctx): State<AppContext>,
-) -> Result<Response> {
+) -> AppResult<Response> {
     let Ok(user) = users::Model::find_by_magic_token(&ctx.db, &token).await else {
         // we don't want to expose our users email. if the email is invalid we still
         // returning success to the caller
-        return unauthorized("unauthorized!");
+        return Err(AppError::unauthorized("Link inválido ou expirado."));
     };
 
-    let user = user.into_active_model().clear_magic_link(&ctx.db).await?;
+    let user = user
+        .into_active_model()
+        .clear_magic_link(&ctx.db)
+        .await
+        .map_err(map_model_error)?;
 
-    let jwt_secret = ctx.config.get_jwt_config()?;
-
-    let token = user
-        .generate_jwt(&jwt_secret.secret, jwt_secret.expiration)
-        .or_else(|_| unauthorized("unauthorized!"))?;
-
-    format::json(LoginResponse::new(&user, &token))
+    Ok(format::json(issue_session(&ctx, &user)?)?)
 }
 
 #[debug_handler]
@@ -270,6 +319,8 @@ pub fn routes() -> Routes {
     // `/api/auth` embutido, o que duplicaria o prefixo.
     Routes::new()
         .prefix("/auth")
+        // Instalação: a única rota que serve para algo antes de haver usuário.
+        .add("/setup", get(setup_status).post(setup))
         .add("/register", post(register))
         .add("/verify/{token}", get(verify))
         .add("/login", post(login))
