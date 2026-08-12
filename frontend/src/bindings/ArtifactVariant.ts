@@ -5,12 +5,19 @@
  * túnel, porém escrito para outro gerenciador de pacotes. Cada variante é
  * autocontida: instala o cliente, grava o perfil e sobe o túnel.
  */
-export type ArtifactVariant = { 
-/**
- * Identificador estável usado como chave de aba no frontend.
- */
-id: string, label: string, 
-/**
- * Onde essa variante se aplica (ex.: "Debian, Ubuntu, Mint").
- */
-hint: string, icon: string, fileName: string, language: string, content: string, instructions: Array<string>, };
+export type ArtifactVariant = {
+  /**
+   * Identificador estável usado como chave de aba no frontend.
+   */
+  id: string
+  label: string
+  /**
+   * Onde essa variante se aplica (ex.: "Debian, Ubuntu, Mint").
+   */
+  hint: string
+  icon: string
+  fileName: string
+  language: string
+  content: string
+  instructions: Array<string>
+}

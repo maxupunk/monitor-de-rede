@@ -127,7 +127,7 @@
             <pre
               class="text-caption font-mono text-grey-darken-3 mb-0"
               style="white-space: pre-wrap; word-break: break-word"
-            >{{ details.rawJson }}</pre>
+              >{{ details.rawJson }}</pre>
           </v-card>
         </div>
       </v-card-text>

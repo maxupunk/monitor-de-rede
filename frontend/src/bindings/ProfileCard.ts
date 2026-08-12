@@ -3,4 +3,4 @@
 /**
  * Card do wizard: o que a tela precisa saber sobre cada perfil.
  */
-export type ProfileCard = { profile: string, label: string, icon: string, supportsQrCode: boolean, };
+export type ProfileCard = { profile: string; label: string; icon: string; supportsQrCode: boolean }

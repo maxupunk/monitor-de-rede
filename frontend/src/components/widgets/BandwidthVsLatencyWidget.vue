@@ -220,7 +220,7 @@
         <div class="d-flex align-center ga-1">
           <span class="dot-indicator bg-amber"></span>
           <span
-          >Latência: {{ currentLatency.toFixed(1) }} ms (Média:
+            >Latência: {{ currentLatency.toFixed(1) }} ms (Média:
             {{ avgLatency.toFixed(1) }} ms)</span
           >
         </div>

@@ -1,9 +1,9 @@
 //! `VpnPeer` — telemetria do túnel e o estado derivado dela.
 //!
-//! A máquina de estados abaixo é porte **literal** de
-//! `backend/app/models/vpn_peer.ts` (§8.10.3 do roadmap), comentários
-//! inclusive. Os números vêm do protocolo WireGuard e da cadência real do
-//! pipeline de coleta; mexer neles sem medir faz o status piscar na tela.
+//! A máquina de estados abaixo reproduz o comportamento do modelo original
+//! (§8.10.3 do roadmap), comentários inclusive. Os números vêm do protocolo
+//! WireGuard e da cadência real do pipeline de coleta; mexer neles sem medir
+//! faz o status piscar na tela.
 
 use chrono::Utc;
 use sea_orm::{entity::prelude::*, QueryOrder};

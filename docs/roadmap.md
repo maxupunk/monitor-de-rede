@@ -198,4 +198,4 @@ Especificação completa em [roadmap_vpn.md](roadmap_vpn.md).
 
 1. **Provisionar ambiente de validação com IP público** (host Linux ou VPS) e executar a Fase 5 do `docs/roadmap_vpn.md` com um MikroTik e um OpenWrt reais.
 2. **Aplicar o middleware `auth` ao grupo `/api`** quando a autenticação real substituir o `AuthController` stub — os endpoints sensíveis da VPN já têm rate limit e auditoria preparados.
-3. ~~Verificar o parsing de latência do `PingChecker` na imagem Alpine~~ — **resolvido**: o checker aceita os formatos do iputils e do BusyBox.
+3. ~~Verificar o parsing de latência do `PingChecker` nos dois formatos de saída~~ — **resolvido**: o checker aceita os formatos do iputils (`rtt min/avg/max/mdev`) e do BusyBox (`round-trip min/avg/max`).

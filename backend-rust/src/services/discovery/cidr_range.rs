@@ -1,9 +1,8 @@
 //! Expansão de faixas CIDR IPv4 para a varredura de descoberta.
 //!
-//! Porte de `backend/modules/discovery/cidr_range.ts`. Vive fora dos scanners
-//! porque três lugares precisam da mesma resposta: o scanner ICMP (quais IPs
-//! pingar), o endpoint que dispara a varredura de uma rede (o CIDR cadastrado é
-//! utilizável?) e a UI (quantos hosts serão varridos).
+//! Vive fora dos scanners porque três lugares precisam da mesma resposta: o
+//! scanner ICMP (quais IPs pingar), o endpoint que dispara a varredura de uma
+//! rede (o CIDR cadastrado é utilizável?) e a UI (quantos hosts serão varridos).
 //!
 //! A Fase 1 usa daqui só o que o `Network.scannable`/`usableHosts` do §6.1
 //! precisa. O `expand_cidr` (lista de endereços, com truncamento em

@@ -236,7 +236,7 @@ erDiagram
 
 ### 3.3. Geração de Chaves — Nativa, sem binário `wg`
 
-✅ **Implementado e coberto por teste:** [`key_generator.ts`](../backend-rust/src/services/vpn/key_generator.rs). O teste `derivePublicKey deve reproduzir a pública do par` prova a equivalência com `wg pubkey`. Único ajuste em relação ao trecho abaixo: a derivação passa por `createPrivateKey()` antes do `createPublicKey()`, exigência de tipagem do Node — o resultado é idêntico.
+✅ **Implementado e coberto por teste:** [`key_generator.rs`](../backend-rust/src/services/vpn/key_generator.rs). O teste `derivePublicKey deve reproduzir a pública do par` prova a equivalência com `wg pubkey`. O trecho abaixo mostra a implementação de referência em Node/`node:crypto`, usada na versão anterior do sistema; o resultado é idêntico.
 
 ```ts
 // modules/vpn/key_generator.ts
@@ -575,11 +575,11 @@ gantt
 - [ ] Confirmar que a internet do roteador **não** passa pelo túnel (prova do `AllowedIPs`)
 - [ ] Validar isolamento peer-to-peer nos dois modos
 - [ ] Confirmar que `syncconf` não derruba túneis ao adicionar peer
-- [x] Rotina obrigatória executada e **100% verde** na época desta fase (backend AdonisJS, 84 testes). A rotina atual é `cargo fmt --all --check` · `cargo clippy --all-targets -- -D warnings` · `cargo test` · `npm --prefix frontend run typecheck` · `format` · `lint` · `build` · `docker compose config`
+- [x] Rotina obrigatória executada e **100% verde** na época desta fase. A rotina atual é `cargo fmt --all --check` · `cargo clippy --all-targets -- -D warnings` · `cargo test` · `npm --prefix frontend run typecheck` · `format` · `lint` · `build` · `docker compose config`
 
 > **Nota sobre ambiente de testes:** as Fases 1, 2 e 4 rodam integralmente em Windows local. A Fase 5 exige host Linux com IP público ou port-forward UDP — não é validável em Docker Desktop sem exposição externa.
 
-> **Achado paralelo — resolvido na Fase 3:** o [`PingChecker`](../backend-rust/src/services/monitoring/checkers/ping.rs) fazia regex apenas em `rtt min/avg/max/mdev` (iputils), mas a imagem é `node:24-alpine`, cujo `ping` é BusyBox e imprime `round-trip min/avg/max`. O checker agora aceita os dois formatos, então a latência deixa de cair no fallback `durationMs / count` dentro do Docker.
+> **Achado paralelo — resolvido na Fase 3:** o [`PingChecker`](../backend-rust/src/services/monitoring/checkers/ping.rs) precisou aprender a ler ambos os formatos de saída de latência: `rtt min/avg/max/mdev` (iputils) e `round-trip min/avg/max` (BusyBox). No backend Rust o ping é feito por socket ICMP DGRAM (`surge-ping`), sem depender do binário `ping` da imagem; a imagem de runtime é `debian:bookworm-slim`, não a imagem Node Alpine usada pelo frontend.
 
 ---
 
@@ -587,12 +587,12 @@ gantt
 
 | Ponto | Como ficou |
 | :--- | :--- |
-| **Telemetria dos túneis** | O watcher publica `wg show <iface> dump` em `/config/<iface>.status` no mesmo volume; a API lê e interpreta esse arquivo ([`peer_status.ts`](../backend-rust/src/services/vpn/peer_status.rs)). Mantém a premissa de que o container da API não tem `NET_ADMIN` nem Docker socket. **Todo processo que sincroniza telemetria precisa do volume `wg-config` e de `WG_CONFIG_DIR`** — vale para `server` *e* `scheduler`. Sem isso a leitura devolve vazio e a sincronização vira um no-op: o processo segue publicando `vpn:peers_updated` com dados congelados, e como `connectionStatus` é calculado ao vivo, a tela vê o status decair sozinho até "Desconectado" enquanto o F5 mostra o valor certo. `readStatus` passou a avisar no log quando o dump não pode ser lido. |
+| **Telemetria dos túneis** | O watcher publica `wg show <iface> dump` em `/config/<iface>.status` no mesmo volume; a API lê e interpreta esse arquivo ([`peer_status.rs`](../backend-rust/src/services/vpn/peer_status.rs)). Mantém a premissa de que o container da API não tem `NET_ADMIN` nem Docker socket. **Todo processo que sincroniza telemetria precisa do volume `wg-config` e de `WG_CONFIG_DIR`** — vale para `server` *e* `scheduler`. Sem isso a leitura devolve vazio e a sincronização vira um no-op: o processo segue publicando `vpn:peers_updated` com dados congelados, e como `connectionStatus` é calculado ao vivo, a tela vê o status decair sozinho até "Desconectado" enquanto o F5 mostra o valor certo. `readStatus` passou a avisar no log quando o dump não pode ser lido. |
 | **Preflight** | Detecta CGNAT (faixa 100.64/10) e servidor atrás de NAT comparando o IP público com as interfaces locais. Sem um verificador externo não é possível *provar* que a porta UDP aceita entrada — por isso o resultado traz o campo `verified`, e a UI diz explicitamente que a confirmação final ocorre no primeiro handshake. |
-| **QR Code** | Gerado no backend em SVG (dependência `qrcode` adicionada ao `package.json` da raiz) e renderizado pelo `VpnScriptViewer`. |
-| **Chave privada do cliente** | Fica em memória em [`secret_store.ts`](../backend-rust/src/services/vpn/secret_store.rs) com TTL de 15 min e é consumida na primeira leitura de `/config`. Depois disso o artefato traz um placeholder e a única saída é **Rotacionar chaves** — exatamente o comportamento descrito no §3.4. |
+| **QR Code** | Gerado no backend em SVG (dependência `qrcode` adicionada ao `backend-rust/Cargo.toml`) e renderizado pelo `VpnScriptViewer`. |
+| **Chave privada do cliente** | Fica em memória em [`secret_store.rs`](../backend-rust/src/services/vpn/secret_store.rs) com TTL de 15 min e é consumida na primeira leitura de `/config`. Depois disso o artefato traz um placeholder e a única saída é **Rotacionar chaves** — exatamente o comportamento descrito no §3.4. |
 | **Revogação** | `DELETE /api/vpn/peers/:id` remove o peer **e** o `Device` correspondente (em transação), o que libera o IP para reuso, e em seguida reescreve o `wg0.conf`. |
-| **Autenticação** | As rotas `/api/vpn/...` seguem o mesmo padrão das demais rotas do projeto (sem o middleware `auth`, que hoje depende de um `AuthController` ainda stub). Os endpoints sensíveis já têm **rate limit por usuário/IP** e **log de auditoria** (`access_control.ts`); basta aplicar `middleware.auth()` ao grupo `/api` quando a autenticação real entrar. |
+| **Autenticação** | As rotas `/api/vpn/...` seguem o mesmo padrão das demais rotas do projeto (sem o middleware `auth`, que hoje depende de um `AuthController` ainda stub). Os endpoints sensíveis já têm **rate limit por usuário/IP** e **log de auditoria** (`access_control.rs`); basta aplicar `middleware.auth()` ao grupo `/api` quando a autenticação real entrar. |
 | **Isolamento entre peers** | Escrito como `PostUp`/`PostDown` no `wg0.conf`. Como `wg syncconf` aplica somente o delta de peers, a troca do modo de isolamento só vale quando a interface sobe — o watcher faz `wg-quick up` quando ela está fora do ar. |
 
 ---
