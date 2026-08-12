@@ -885,8 +885,8 @@
                         ? `${detailStore.scanResult.cpuInfo.coresCount} núcleos detectados`
                         : 'Medição via MIB'
                     }}
-                    <span v-if="detailStore.scanResult.cpuInfo.usagePercent !== undefined">
-                      - Uso Atual: {{ detailStore.scanResult.cpuInfo.usagePercent }}%
+                    <span v-if="detailStore.scanResult.cpuInfo.usagePercent != null">
+                      - Uso Atual: {{ detailStore.scanResult.cpuInfo.usagePercent.toFixed(1) }}%
                     </span>
                   </div>
                 </v-col>
@@ -901,8 +901,8 @@
                     <span v-if="detailStore.scanResult.memoryInfo.totalKb">
                       Total: {{ Math.round(detailStore.scanResult.memoryInfo.totalKb / 1024) }} MB
                     </span>
-                    <span v-if="detailStore.scanResult.memoryInfo.usedPercent !== undefined">
-                      - Uso: {{ detailStore.scanResult.memoryInfo.usedPercent }}%
+                    <span v-if="detailStore.scanResult.memoryInfo.usedPercent != null">
+                      - Uso: {{ detailStore.scanResult.memoryInfo.usedPercent.toFixed(1) }}%
                     </span>
                   </div>
                 </v-col>
@@ -938,10 +938,10 @@
                     <div class="text-caption text-grey-darken-1">{{ item.name }}</div>
                     <div
                       class="text-subtitle-1 font-weight-bold"
-                      :class="item.value !== null ? 'text-primary' : 'text-grey'"
+                      :class="item.value != null ? 'text-primary' : 'text-grey'"
                     >
                       {{
-                        item.value !== null
+                        item.value != null
                           ? `${item.value}${item.units ? ` ${item.units}` : ''}`
                           : 'Sem resposta'
                       }}
@@ -1176,13 +1176,12 @@ const selectedMemoryMonitor = ref(true)
 const hasCpuData = computed(() => {
   const cpu = detailStore.scanResult?.cpuInfo
   return Boolean(
-    cpu &&
-    (cpu.usagePercent !== undefined || cpu.coresCount !== undefined || cpu.load1min !== undefined)
+    cpu && (cpu.usagePercent != null || cpu.coresCount != null || cpu.load1min != null)
   )
 })
 const hasMemoryData = computed(() => {
   const mem = detailStore.scanResult?.memoryInfo
-  return Boolean(mem && (mem.usedPercent !== undefined || mem.totalKb !== undefined))
+  return Boolean(mem && (mem.usedPercent != null || mem.totalKb != null))
 })
 const selectedIfIndexes = ref<number[]>([])
 
@@ -1472,8 +1471,8 @@ async function openScanModal() {
   if (res) {
     // Reflete o estado real: já monitorado (true), detectado agora mas ainda não habilitado
     // (default ligado, só quando há dado de fato), ou não suportado pelo equipamento (false).
-    selectedCpuMonitor.value = res.hasCpuMonitor || res.cpuInfo.usagePercent !== undefined
-    selectedMemoryMonitor.value = res.hasMemoryMonitor || res.memoryInfo.usedPercent !== undefined
+    selectedCpuMonitor.value = res.hasCpuMonitor || res.cpuInfo.usagePercent != null
+    selectedMemoryMonitor.value = res.hasMemoryMonitor || res.memoryInfo.usedPercent != null
     selectedIfIndexes.value = res.interfaces.filter((i) => i.isMonitored).map((i) => i.ifIndex)
   }
 }

@@ -56,11 +56,13 @@ export interface DeviceEvent {
 export interface ScanInterfaceItem {
   ifIndex: number
   ifName: string
-  ifDescr?: string
-  macAddress?: string
-  ifSpeed?: number
-  ifAdminStatus?: string
-  ifOperStatus?: string
+  ifDescr?: string | null
+  ifAlias?: string | null
+  macAddress?: string | null
+  ifType?: number | null
+  ifSpeed?: number | null
+  ifAdminStatus?: string | null
+  ifOperStatus?: string | null
   isMonitored: boolean
 }
 
@@ -68,28 +70,33 @@ export interface ScanZabbixTemplateItem {
   id: number
   name: string
   key: string
-  units: string | null
-  value: number | null
+  units?: string | null
+  value?: number | null
 }
 
+/**
+ * `POST /api/devices/:id/snmp/scan` (`services::snmp::service::SnmpScanResult`).
+ *
+ * Os campos opcionais chegam como `null` — e não ausentes — quando o
+ * equipamento não expõe a MIB correspondente, porque o backend serializa
+ * `Option` como `null`. Por isso as verificações usam `!= null` em vez de
+ * comparar com `undefined`.
+ */
 export interface ScanResult {
   systemInfo: {
-    sysName?: string
-    sysDescr?: string
-    sysUpTime?: number
+    sysName?: string | null
+    sysDescr?: string | null
+    sysUpTime?: number | null
   }
   cpuInfo: {
-    usagePercent?: number
-    userPercent?: number
-    systemPercent?: number
-    idlePercent?: number
-    load1min?: number
-    coresCount?: number
+    usagePercent?: number | null
+    coresCount?: number | null
+    load1min?: number | null
   }
   memoryInfo: {
-    totalKb?: number
-    usedKb?: number
-    usedPercent?: number
+    totalKb?: number | null
+    usedKb?: number | null
+    usedPercent?: number | null
   }
   interfaces: ScanInterfaceItem[]
   hasCpuMonitor: boolean

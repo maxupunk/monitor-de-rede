@@ -17,9 +17,11 @@ pub const ZABBIX_TEMPLATE_MONITOR_NAME: &str = "Coleta de Template Zabbix";
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ZabbixTemplateItemReading {
+    pub id: i64,
+    pub name: String,
     pub key: String,
+    pub units: Option<String>,
     pub value: Option<f64>,
-    pub unit: Option<String>,
 }
 
 /// Agrupa os OIDs dos itens em lotes de [`OID_BATCH_SIZE`].
@@ -54,14 +56,16 @@ pub async fn preview(
         let values = client.get(&oids).await.ok();
         readings.extend(batch.iter().map(|item| {
             ZabbixTemplateItemReading {
+                id: item.id,
+                name: item.name.clone(),
                 key: item.key.clone(),
+                units: item.units.clone(),
                 value: values
                     .as_ref()
                     .and_then(|values| values.get(&item.snmp_oid))
                     .and_then(Option::as_ref)
                     .and_then(|value| value.number())
                     .map(|value| value as f64 * item.multiplier.unwrap_or(1.0) as f64),
-                unit: item.units.clone(),
             }
         }));
     }
@@ -86,7 +90,7 @@ pub async fn collect(
             monitor_id: Set(None),
             name: Set(reading.key),
             value: Set(value),
-            unit: Set(reading.unit.unwrap_or_default()),
+            unit: Set(reading.units.unwrap_or_default()),
             recorded_at: Set(recorded_at.into()),
             ..Default::default()
         }

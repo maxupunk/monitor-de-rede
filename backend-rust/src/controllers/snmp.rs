@@ -80,47 +80,7 @@ async fn test(Json(input): Json<SnmpTestInput>) -> AppResult<Response> {
         service::test_connection(config_from_test_input(&input, port)?).await?,
     )?)
 }
-async fn device_config(ctx: &AppContext, id: i64) -> AppResult<SnmpConfig> {
-    let device = devices::Entity::find_by_id(id)
-        .one(&ctx.db)
-        .await?
-        .ok_or_else(|| AppError::not_found("Dispositivo não encontrado"))?;
-    config(
-        device.ip_address.unwrap_or(device.name),
-        161,
-        device.snmp_version.as_deref(),
-        device.snmp_community.as_deref(),
-    )
-}
-async fn scan(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
-    Ok(format::json(
-        service::scan(device_config(&ctx, id).await?).await?,
-    )?)
-}
-async fn poll(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
-    let device = devices::Entity::find_by_id(id)
-        .one(&ctx.db)
-        .await?
-        .ok_or_else(|| AppError::not_found("Dispositivo não encontrado"))?;
-    let device_config = config(
-        device
-            .ip_address
-            .clone()
-            .unwrap_or_else(|| device.name.clone()),
-        161,
-        device.snmp_version.as_deref(),
-        device.snmp_community.as_deref(),
-    )?;
-    let result = service::poll_device(&ctx, &device, device_config).await?;
-    Ok(format::json(
-        serde_json::json!({ "message":"Varredura SNMP executada com sucesso", "result":result }),
-    )?)
-}
-async fn apply_monitors(
-    State(ctx): State<AppContext>,
-    Path(id): Path<i64>,
-    Json(input): Json<SnmpApplyInput>,
-) -> AppResult<Response> {
+async fn device_with_config(ctx: &AppContext, id: i64) -> AppResult<(devices::Model, SnmpConfig)> {
     let device = devices::Entity::find_by_id(id)
         .one(&ctx.db)
         .await?
@@ -134,6 +94,27 @@ async fn apply_monitors(
         device.snmp_version.as_deref(),
         device.snmp_community.as_deref(),
     )?;
+    Ok((device, config))
+}
+async fn scan(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
+    let (device, config) = device_with_config(&ctx, id).await?;
+    Ok(format::json(
+        service::scan_device(&ctx, &device, config).await?,
+    )?)
+}
+async fn poll(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
+    let (device, device_config) = device_with_config(&ctx, id).await?;
+    let result = service::poll_device(&ctx, &device, device_config).await?;
+    Ok(format::json(
+        serde_json::json!({ "message":"Varredura SNMP executada com sucesso", "result":result }),
+    )?)
+}
+async fn apply_monitors(
+    State(ctx): State<AppContext>,
+    Path(id): Path<i64>,
+    Json(input): Json<SnmpApplyInput>,
+) -> AppResult<Response> {
+    let (device, config) = device_with_config(&ctx, id).await?;
     service::apply_monitors(
         &ctx,
         &device,
@@ -149,9 +130,11 @@ async fn apply_monitors(
         "message": "Configurações de monitoramento atualizadas com sucesso",
     }))?)
 }
+/// Só a lista de interfaces: usa a coleta pura de propósito, já que nada aqui
+/// lê os itens do template Zabbix — e cada item deles custa um `GET` SNMP.
 async fn interfaces(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
-    let scan = service::scan(device_config(&ctx, id).await?).await?;
-    Ok(format::json(scan.interfaces)?)
+    let (_, config) = device_with_config(&ctx, id).await?;
+    Ok(format::json(service::scan(config).await?.interfaces)?)
 }
 pub fn routes() -> Routes {
     Routes::new()

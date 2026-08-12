@@ -59,6 +59,11 @@ pub async fn collect_system(client: &SnmpClient) -> Result<SnmpSystemInfo, SnmpE
     })
 }
 
+/// `ifTable` — RFC 1213.
+pub const OID_IF_TABLE: &str = "1.3.6.1.2.1.2.2.1";
+/// `ifXTable` — RFC 2863, contadores de 64 bits e nomes longos.
+pub const OID_IF_X_TABLE: &str = "1.3.6.1.2.1.31.1.1.1";
+
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SnmpInterface {
@@ -68,70 +73,122 @@ pub struct SnmpInterface {
     pub if_alias: Option<String>,
     pub if_type: Option<u64>,
     pub if_speed: Option<u64>,
+    // A UI lê "up"/"down", não o inteiro da MIB; a conversão fica na
+    // serialização para o campo continuar comparável dentro do backend.
+    #[serde(serialize_with = "serialize_status")]
     pub if_admin_status: Option<u64>,
+    #[serde(serialize_with = "serialize_status")]
     pub if_oper_status: Option<u64>,
     pub mac_address: Option<String>,
+    /// Já existe monitor habilitado para esta interface? Preenchido por quem
+    /// tem banco à mão (`service::scan_device`) — a coleta pura não sabe.
+    pub is_monitored: bool,
 }
 
 pub async fn collect_interfaces(client: &SnmpClient) -> Result<Vec<SnmpInterface>, SnmpError> {
-    let entries = client.walk("1.3.6.1.2.1.2.2.1").await?;
-    let extended = client.walk("1.3.6.1.2.1.31.1.1.1").await?;
-    Ok(parse_interfaces(entries.into_iter().chain(extended)))
+    let (base, extended) = tokio::join!(client.walk(OID_IF_TABLE), client.walk(OID_IF_X_TABLE));
+    Ok(parse_interfaces(base?, extended.unwrap_or_default()))
 }
 
-/// Monta as interfaces a partir das linhas cruas das duas tabelas
-/// (`ifTable` e `ifXTable`), sem transporte no meio.
+/// Monta as interfaces a partir das linhas cruas das duas tabelas, sem
+/// transporte no meio.
 ///
-/// Separado do `collect_interfaces` porque é aqui que vive a regra da matriz de
-/// paridade #17 — `ifHighSpeed` prevalece sobre `ifSpeed` — e provar isso pede
-/// linhas montadas à mão, não um agente SNMP de verdade.
+/// As tabelas entram separadas de propósito: elas numeram colunas do zero cada
+/// uma, então juntá-las num mapa só fazia `ifHCInUcastPkts` (col. 7 da
+/// `ifXTable`) sobrescrever `ifAdminStatus` (col. 7 da `ifTable`) e
+/// `ifHCInOctets` (col. 6) sobrescrever o MAC — era daí que saíam os status e
+/// endereços com valores de contador.
+///
+/// Separado do `collect_interfaces` também porque é aqui que vive a regra da
+/// matriz de paridade #17 — `ifHighSpeed` prevalece sobre `ifSpeed` — e provar
+/// isso pede linhas montadas à mão, não um agente SNMP de verdade.
 #[must_use]
 pub fn parse_interfaces(
-    entries: impl IntoIterator<Item = super::client::SnmpWalkEntry>,
+    base: impl IntoIterator<Item = super::client::SnmpWalkEntry>,
+    extended: impl IntoIterator<Item = super::client::SnmpWalkEntry>,
 ) -> Vec<SnmpInterface> {
-    let mut values = BTreeMap::<i32, BTreeMap<u32, SnmpValue>>::new();
-    for entry in entries {
-        let parts: Vec<u32> = entry
-            .oid
-            .split('.')
-            .filter_map(|part| part.parse().ok())
-            .collect();
-        if parts.len() >= 2 {
-            values
-                .entry(*parts.last().unwrap() as i32)
-                .or_default()
-                .insert(parts[parts.len() - 2], entry.value);
-        }
-    }
-    values
+    let base = table_rows(base);
+    let extended = table_rows(extended);
+    base.keys()
+        .chain(extended.keys())
+        .copied()
+        .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
-        .map(|(index, fields)| {
+        .map(|index| {
+            let row = base.get(&index);
+            let extra = extended.get(&index);
+            let column = |row: Option<&BTreeMap<u32, SnmpValue>>, column: u32| {
+                row.and_then(|fields| fields.get(&column)).cloned()
+            };
             // `ifHighSpeed` (col. 15 da ifXTable) vem em Mbps e é a única leitura
             // confiável acima de ~4,29 Gbps, onde o `ifSpeed` de 32 bits satura.
             // O filtro `> 0` importa: agente que não implementa a coluna devolve
             // 0, e aceitá-lo apagaria a velocidade real vinda do `ifSpeed`.
-            let high_speed = fields
-                .get(&15)
-                .and_then(SnmpValue::number)
+            let high_speed = column(extra, 15)
+                .and_then(|value| value.number())
                 .filter(|value| *value > 0)
                 .map(|value| value * 1_000_000);
             SnmpInterface {
                 if_index: index,
-                if_name: fields
-                    .get(&1)
-                    .map(SnmpValue::text)
-                    .or_else(|| fields.get(&2).map(SnmpValue::text))
+                if_name: column(extra, 1)
+                    .or_else(|| column(row, 2))
+                    .map(|value| value.text())
+                    .filter(|name| !name.is_empty())
                     .unwrap_or_else(|| format!("eth{index}")),
-                if_descr: fields.get(&2).map(SnmpValue::text),
-                if_alias: fields.get(&18).map(SnmpValue::text),
-                if_type: fields.get(&3).and_then(SnmpValue::number),
-                if_speed: high_speed.or_else(|| fields.get(&5).and_then(SnmpValue::number)),
-                if_admin_status: fields.get(&7).and_then(SnmpValue::number).or(Some(1)),
-                if_oper_status: fields.get(&8).and_then(SnmpValue::number).or(Some(1)),
-                mac_address: fields.get(&6).map(SnmpValue::text),
+                if_descr: non_empty_text(column(row, 2)),
+                if_alias: non_empty_text(column(extra, 18)),
+                if_type: column(row, 3).and_then(|value| value.number()),
+                if_speed: high_speed.or_else(|| column(row, 5).and_then(|value| value.number())),
+                if_admin_status: column(row, 7).and_then(|value| value.number()).or(Some(1)),
+                if_oper_status: column(row, 8).and_then(|value| value.number()).or(Some(1)),
+                mac_address: column(row, 6).and_then(|value| value.mac()),
+                is_monitored: false,
             }
         })
         .collect()
+}
+
+/// Indexa as linhas de uma tabela SNMP por `índice` e depois por `coluna`.
+fn table_rows(
+    entries: impl IntoIterator<Item = super::client::SnmpWalkEntry>,
+) -> BTreeMap<i32, BTreeMap<u32, SnmpValue>> {
+    let mut rows = BTreeMap::<i32, BTreeMap<u32, SnmpValue>>::new();
+    for entry in entries {
+        if let Some((column, index)) = oid_column_and_index(&entry.oid) {
+            rows.entry(index).or_default().insert(column, entry.value);
+        }
+    }
+    rows
+}
+
+fn non_empty_text(value: Option<SnmpValue>) -> Option<String> {
+    value
+        .map(|value| value.text())
+        .filter(|text| !text.is_empty())
+}
+
+/// Rótulo textual de `ifAdminStatus`/`ifOperStatus` (RFC 2863).
+#[must_use]
+pub const fn status_label(value: u64) -> &'static str {
+    match value {
+        1 => "up",
+        2 => "down",
+        3 => "testing",
+        5 => "dormant",
+        6 => "notPresent",
+        7 => "lowerLayerDown",
+        _ => "unknown",
+    }
+}
+
+fn serialize_status<S: serde::Serializer>(
+    value: &Option<u64>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    match value {
+        Some(value) => serializer.serialize_str(status_label(*value)),
+        None => serializer.serialize_none(),
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -153,10 +210,8 @@ pub struct TrafficRates {
 }
 
 pub async fn collect_traffic(client: &SnmpClient) -> Result<Vec<InterfaceTraffic>, SnmpError> {
-    let (base, high_capacity) = tokio::join!(
-        client.walk("1.3.6.1.2.1.2.2.1"),
-        client.walk("1.3.6.1.2.1.31.1.1.1")
-    );
+    let (base, high_capacity) =
+        tokio::join!(client.walk(OID_IF_TABLE), client.walk(OID_IF_X_TABLE));
     let mut counters = BTreeMap::<i32, BTreeMap<u32, u64>>::new();
     for entry in base? {
         if let (Some((column, index)), Some(value)) =
@@ -491,7 +546,13 @@ mod tests {
 
     fn linha(coluna: u32, indice: i32, value: SnmpValue) -> super::super::client::SnmpWalkEntry {
         super::super::client::SnmpWalkEntry {
-            oid: format!("1.3.6.1.2.1.2.2.1.{coluna}.{indice}"),
+            oid: format!("{OID_IF_TABLE}.{coluna}.{indice}"),
+            value,
+        }
+    }
+    fn linha_x(coluna: u32, indice: i32, value: SnmpValue) -> super::super::client::SnmpWalkEntry {
+        super::super::client::SnmpWalkEntry {
+            oid: format!("{OID_IF_X_TABLE}.{coluna}.{indice}"),
             value,
         }
     }
@@ -499,22 +560,27 @@ mod tests {
     /// `ifSpeed` saturado (col. 5 = 4294967295) com `ifHighSpeed` (col. 15) real.
     #[test]
     fn if_high_speed_prevalece_sobre_if_speed_saturado() {
-        let interfaces = parse_interfaces([
-            linha(1, 1, SnmpValue::Text("Gi0/1".into())),
-            linha(5, 1, SnmpValue::Number(4_294_967_295)),
+        let interfaces = parse_interfaces(
+            [
+                linha(2, 1, SnmpValue::Bytes(b"Gi0/1".to_vec())),
+                linha(5, 1, SnmpValue::Number(4_294_967_295)),
+            ],
             // 10 Gbps expressos em Mbps, como manda a MIB.
-            linha(15, 1, SnmpValue::Number(10_000)),
-        ]);
+            [linha_x(15, 1, SnmpValue::Number(10_000))],
+        );
         assert_eq!(interfaces.len(), 1);
         assert_eq!(interfaces[0].if_speed, Some(10_000_000_000));
     }
 
     #[test]
     fn sem_if_high_speed_a_leitura_cai_para_if_speed() {
-        let interfaces = parse_interfaces([
-            linha(1, 1, SnmpValue::Text("Fa0/1".into())),
-            linha(5, 1, SnmpValue::Number(100_000_000)),
-        ]);
+        let interfaces = parse_interfaces(
+            [
+                linha(2, 1, SnmpValue::Bytes(b"Fa0/1".to_vec())),
+                linha(5, 1, SnmpValue::Number(100_000_000)),
+            ],
+            [],
+        );
         assert_eq!(interfaces[0].if_speed, Some(100_000_000));
     }
 
@@ -522,22 +588,68 @@ mod tests {
     fn if_high_speed_zerado_nao_apaga_a_velocidade_real() {
         // Agente que não implementa a coluna devolve 0: aceitá-lo faria uma
         // interface de 1 Gbps aparecer como velocidade desconhecida.
-        let interfaces = parse_interfaces([
-            linha(1, 1, SnmpValue::Text("Gi0/2".into())),
-            linha(5, 1, SnmpValue::Number(1_000_000_000)),
-            linha(15, 1, SnmpValue::Number(0)),
-        ]);
+        let interfaces = parse_interfaces(
+            [
+                linha(2, 1, SnmpValue::Bytes(b"Gi0/2".to_vec())),
+                linha(5, 1, SnmpValue::Number(1_000_000_000)),
+            ],
+            [linha_x(15, 1, SnmpValue::Number(0))],
+        );
         assert_eq!(interfaces[0].if_speed, Some(1_000_000_000));
     }
 
     #[test]
     fn interface_sem_nome_recebe_rotulo_derivado_do_indice() {
-        let interfaces = parse_interfaces([linha(5, 7, SnmpValue::Number(1_000))]);
+        let interfaces = parse_interfaces([linha(5, 7, SnmpValue::Number(1_000))], []);
         assert_eq!(interfaces[0].if_name, "eth7");
         // Sem as colunas de status, o padrão é "1" (up) nos dois — é o que o
         // backend anterior assumia para não inventar queda de link.
         assert_eq!(interfaces[0].if_admin_status, Some(1));
         assert_eq!(interfaces[0].if_oper_status, Some(1));
+    }
+
+    /// As duas tabelas numeram colunas do zero cada uma: juntá-las num mapa só
+    /// fazia os contadores de 64 bits da `ifXTable` sobrescreverem status e MAC.
+    #[test]
+    fn contadores_da_if_x_table_nao_sobrescrevem_status_nem_mac() {
+        let interfaces = parse_interfaces(
+            [
+                linha(2, 2, SnmpValue::Bytes(b"eth0".to_vec())),
+                linha(3, 2, SnmpValue::Number(6)),
+                linha(
+                    6,
+                    2,
+                    SnmpValue::Bytes(vec![0x00, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e]),
+                ),
+                linha(7, 2, SnmpValue::Number(1)),
+                linha(8, 2, SnmpValue::Number(2)),
+            ],
+            [
+                linha_x(1, 2, SnmpValue::Bytes(b"br-lan".to_vec())),
+                // ifHCInOctets (col. 6) e ifHCInUcastPkts (col. 7).
+                linha_x(6, 2, SnmpValue::Number(8_382_243_847_261)),
+                linha_x(7, 2, SnmpValue::Number(1_874_150)),
+            ],
+        );
+
+        assert_eq!(interfaces[0].if_name, "br-lan");
+        assert_eq!(interfaces[0].if_descr.as_deref(), Some("eth0"));
+        assert_eq!(interfaces[0].if_type, Some(6));
+        assert_eq!(
+            interfaces[0].mac_address.as_deref(),
+            Some("00:1a:2b:3c:4d:5e")
+        );
+        assert_eq!(interfaces[0].if_admin_status, Some(1));
+        assert_eq!(interfaces[0].if_oper_status, Some(2));
+    }
+
+    #[test]
+    fn status_da_interface_sai_serializado_como_rotulo() {
+        let interfaces = parse_interfaces([linha(8, 1, SnmpValue::Number(2))], []);
+        let json = serde_json::to_value(&interfaces[0]).unwrap();
+
+        assert_eq!(json["ifOperStatus"], "down");
+        assert_eq!(json["ifAdminStatus"], "up");
     }
 
     #[test]

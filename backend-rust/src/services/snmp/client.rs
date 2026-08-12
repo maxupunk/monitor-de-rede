@@ -67,11 +67,17 @@ impl SnmpConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
-#[serde(untagged)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum SnmpValue {
     Number(u64),
     Text(String),
+    /// `OCTET STRING` cru, como veio do agente.
+    ///
+    /// Os bytes ficam intactos porque só o coletor sabe o que a coluna
+    /// significa: os mesmos seis bytes são um MAC em `ifPhysAddress` e o texto
+    /// "br-lan" em `ifName`. Decidir isso aqui, por heurística de tamanho,
+    /// transformava nomes de seis caracteres em hexadecimal.
+    Bytes(Vec<u8>),
 }
 impl SnmpValue {
     #[must_use]
@@ -79,13 +85,32 @@ impl SnmpValue {
         match self {
             Self::Number(value) => Some(*value),
             Self::Text(value) => first_number(value),
+            Self::Bytes(bytes) => first_number(&String::from_utf8_lossy(bytes)),
         }
     }
+    /// Leitura textual: imprimível vira texto, binário vira hexadecimal.
     #[must_use]
     pub fn text(&self) -> String {
         match self {
             Self::Number(value) => value.to_string(),
             Self::Text(value) => value.clone(),
+            Self::Bytes(bytes) => decode_text(bytes),
+        }
+    }
+    /// Leitura de endereço físico: seis bytes sempre saem como MAC.
+    #[must_use]
+    pub fn mac(&self) -> Option<String> {
+        match self {
+            Self::Bytes(bytes) if bytes.len() == 6 => Some(hex(bytes)),
+            other => Some(other.text()).filter(|text| !text.is_empty()),
+        }
+    }
+}
+impl serde::Serialize for SnmpValue {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Number(value) => serializer.serialize_u64(*value),
+            Self::Text(_) | Self::Bytes(_) => serializer.serialize_str(&self.text()),
         }
     }
 }
@@ -641,7 +666,7 @@ fn value(value: &VarBindValue) -> Option<SnmpValue> {
 fn value_v1(value: &V1ObjectSyntax) -> Option<SnmpValue> {
     match value {
         V1ObjectSyntax::Simple(V1SimpleSyntax::Number(value)) => integer(value.to_string()),
-        V1ObjectSyntax::Simple(V1SimpleSyntax::String(value)) => text_or_hex(value.as_ref()),
+        V1ObjectSyntax::Simple(V1SimpleSyntax::String(value)) => octet_string(value.as_ref()),
         V1ObjectSyntax::Simple(V1SimpleSyntax::Object(value)) => {
             Some(SnmpValue::Text(oid_string(value)))
         }
@@ -657,17 +682,17 @@ fn value_v1(value: &V1ObjectSyntax) -> Option<SnmpValue> {
         }
         V1ObjectSyntax::ApplicationWide(V1ApplicationSyntax::Address(value)) => {
             let rasn_smi::v1::NetworkAddress::Internet(ip) = value;
-            Some(SnmpValue::Text(hex(ip.0.as_ref())))
+            Some(SnmpValue::Text(ipv4(ip.0.as_ref())))
         }
         V1ObjectSyntax::ApplicationWide(V1ApplicationSyntax::Arbitrary(value)) => {
-            text_or_hex(value.as_ref())
+            octet_string(value.as_ref())
         }
     }
 }
 fn value_v2(value: &V2ObjectSyntax) -> Option<SnmpValue> {
     match value {
         V2ObjectSyntax::Simple(V2SimpleSyntax::Integer(value)) => integer(value.to_string()),
-        V2ObjectSyntax::Simple(V2SimpleSyntax::String(value)) => text_or_hex(value.as_ref()),
+        V2ObjectSyntax::Simple(V2SimpleSyntax::String(value)) => octet_string(value.as_ref()),
         V2ObjectSyntax::Simple(V2SimpleSyntax::ObjectId(value)) => {
             Some(SnmpValue::Text(oid_string(value)))
         }
@@ -684,30 +709,33 @@ fn value_v2(value: &V2ObjectSyntax) -> Option<SnmpValue> {
             Some(SnmpValue::Number(u64::from(value.0)))
         }
         V2ObjectSyntax::ApplicationWide(V2ApplicationSyntax::Address(value)) => {
-            Some(SnmpValue::Text(hex(value.0.as_ref())))
+            Some(SnmpValue::Text(ipv4(value.0.as_ref())))
         }
         V2ObjectSyntax::ApplicationWide(V2ApplicationSyntax::Arbitrary(value)) => {
-            text_or_hex(value.as_ref())
+            octet_string(value.as_ref())
         }
     }
 }
 fn integer(value: String) -> Option<SnmpValue> {
     value.parse::<u64>().ok().map(SnmpValue::Number)
 }
-fn text_or_hex(bytes: &[u8]) -> Option<SnmpValue> {
-    if bytes.is_empty() {
-        return Some(SnmpValue::Text(String::new()));
-    }
-    if bytes.len() == 6
-        || !bytes
-            .iter()
-            .all(|byte| byte.is_ascii_graphic() || byte.is_ascii_whitespace())
+fn octet_string(bytes: &[u8]) -> Option<SnmpValue> {
+    Some(SnmpValue::Bytes(bytes.to_vec()))
+}
+fn decode_text(bytes: &[u8]) -> String {
+    if bytes
+        .iter()
+        .all(|byte| byte.is_ascii_graphic() || byte.is_ascii_whitespace())
     {
-        return Some(SnmpValue::Text(hex(bytes)));
+        return String::from_utf8_lossy(bytes).trim().to_string();
     }
-    Some(SnmpValue::Text(
-        String::from_utf8_lossy(bytes).trim().to_string(),
-    ))
+    hex(bytes)
+}
+fn ipv4(bytes: &[u8]) -> String {
+    if let [a, b, c, d] = bytes {
+        return format!("{a}.{b}.{c}.{d}");
+    }
+    hex(bytes)
 }
 fn hex(bytes: &[u8]) -> String {
     bytes
@@ -742,15 +770,29 @@ mod tests {
     }
 
     #[test]
-    fn normaliza_mac_e_texto_binario_em_hex() {
+    fn endereco_fisico_sai_em_hexadecimal_e_texto_sai_limpo() {
+        let mac = SnmpValue::Bytes(vec![0x00, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e]);
+        assert_eq!(mac.mac(), Some("00:1a:2b:3c:4d:5e".into()));
         assert_eq!(
-            text_or_hex(&[0x00, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e]),
-            Some(SnmpValue::Text("00:1a:2b:3c:4d:5e".into()))
+            SnmpValue::Bytes(b" router-01 ".to_vec()).text(),
+            "router-01"
         );
-        assert_eq!(
-            text_or_hex(b" router-01 "),
-            Some(SnmpValue::Text("router-01".into()))
-        );
+        // Binário não imprimível continua legível como hexadecimal.
+        assert_eq!(SnmpValue::Bytes(vec![0x00, 0xff]).text(), "00:ff");
+    }
+
+    /// Seis bytes imprimíveis são um nome de interface, não um MAC: a heurística
+    /// antiga por tamanho devolvia `62:72:2d:6c:61:6e` no lugar de `br-lan`.
+    #[test]
+    fn nome_de_seis_caracteres_nao_vira_hexadecimal() {
+        let value = SnmpValue::Bytes(b"br-lan".to_vec());
+        assert_eq!(value.text(), "br-lan");
+        assert_eq!(value.mac(), Some("62:72:2d:6c:61:6e".into()));
+    }
+
+    #[test]
+    fn endereco_ip_sai_em_notacao_decimal() {
+        assert_eq!(ipv4(&[192, 168, 1, 10]), "192.168.1.10");
     }
 
     #[test]

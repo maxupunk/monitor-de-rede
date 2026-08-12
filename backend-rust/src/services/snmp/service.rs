@@ -14,10 +14,11 @@ use crate::services::{
         client::{SnmpClient, SnmpConfig, SnmpError, SnmpVersion},
         collectors::{
             collect_cpu, collect_interfaces, collect_lldp, collect_memory, collect_system,
-            collect_traffic, InterfaceTraffic, LldpNeighbor, SnmpCpuInfo, SnmpInterface,
-            SnmpMemoryInfo, SnmpSystemInfo,
+            collect_traffic, status_label, InterfaceTraffic, LldpNeighbor, SnmpCpuInfo,
+            SnmpInterface, SnmpMemoryInfo, SnmpSystemInfo,
         },
     },
+    zabbix::collector::ZabbixTemplateItemReading,
 };
 use crate::{
     models::{
@@ -41,12 +42,17 @@ pub struct SnmpTestResult {
 #[serde(rename_all = "camelCase")]
 pub struct SnmpScanResult {
     pub snmp_responded: bool,
-    pub system: SnmpSystemInfo,
+    pub system_info: SnmpSystemInfo,
     pub interfaces: Vec<SnmpInterface>,
     pub traffic: Vec<InterfaceTraffic>,
-    pub cpu: SnmpCpuInfo,
-    pub memory: SnmpMemoryInfo,
+    pub cpu_info: SnmpCpuInfo,
+    pub memory_info: SnmpMemoryInfo,
     pub neighbors: Vec<LldpNeighbor>,
+    /// Campos abaixo dependem do banco: a coleta pura os devolve zerados e
+    /// `scan_device` os preenche para a tela de descoberta.
+    pub has_cpu_monitor: bool,
+    pub has_memory_monitor: bool,
+    pub zabbix_template_items: Vec<ZabbixTemplateItemReading>,
 }
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -65,6 +71,17 @@ pub struct SnmpPollResult {
     pub links_resolved: usize,
     pub reboot_detected: bool,
 }
+/// Nomes dos monitores criados pela tela de descoberta. São a chave que liga o
+/// que o usuário marcou no diálogo ao que já existe no banco, então mudá-los
+/// desgarra os monitores já criados.
+pub const CPU_MONITOR_NAME: &str = "Monitor de Uso de CPU";
+pub const MEMORY_MONITOR_NAME: &str = "Monitor de Uso de Memoria";
+
+#[must_use]
+pub fn interface_monitor_name(if_name: &str) -> String {
+    format!("Interface {if_name}")
+}
+
 #[derive(Debug, Default)]
 pub struct SnmpApplyOptions {
     pub enable_cpu_monitor: Option<bool>,
@@ -101,13 +118,44 @@ pub async fn scan(config: SnmpConfig) -> AppResult<SnmpScanResult> {
     let system = system.map_err(map_error)?;
     Ok(SnmpScanResult {
         snmp_responded: system.responded(),
-        system,
+        system_info: system,
         interfaces: interfaces.unwrap_or_default(),
         traffic: traffic.unwrap_or_default(),
-        cpu: cpu.unwrap_or_default(),
-        memory: memory.unwrap_or_default(),
+        cpu_info: cpu.unwrap_or_default(),
+        memory_info: memory.unwrap_or_default(),
         neighbors: neighbors.unwrap_or_default(),
+        has_cpu_monitor: false,
+        has_memory_monitor: false,
+        zabbix_template_items: vec![],
     })
+}
+
+/// Varredura para a tela "Escaneamento & Descoberta SNMP".
+///
+/// É o `scan` puro mais o que só o banco sabe: quais monitores já estão
+/// habilitados — para o diálogo abrir refletindo o que já está configurado, em
+/// vez de propor tudo de novo — e a leitura dos itens do template Zabbix.
+pub async fn scan_device(
+    ctx: &loco_rs::app::AppContext,
+    device: &devices::Model,
+    config: SnmpConfig,
+) -> AppResult<SnmpScanResult> {
+    let client = SnmpClient::new(config.clone());
+    let mut scan = scan(config).await?;
+    let existing = monitors::Entity::find()
+        .filter(monitors_entity::Column::DeviceId.eq(Some(device.id)))
+        .filter(monitors_entity::Column::Enabled.eq(true))
+        .all(&ctx.db)
+        .await?;
+    let enabled = |name: &str| existing.iter().any(|monitor| monitor.name == name);
+    scan.has_cpu_monitor = enabled(CPU_MONITOR_NAME);
+    scan.has_memory_monitor = enabled(MEMORY_MONITOR_NAME);
+    for interface in &mut scan.interfaces {
+        interface.is_monitored = enabled(&interface_monitor_name(&interface.if_name));
+    }
+    scan.zabbix_template_items =
+        crate::services::zabbix::collector::preview(&ctx.db, device, &client).await?;
+    Ok(scan)
 }
 
 pub async fn poll_device(
@@ -159,7 +207,7 @@ pub async fn poll_device(
             interface,
             traffic,
             previous_uptime,
-            scan.system.sys_up_time,
+            scan.system_info.sys_up_time,
         )
         .await?;
         metrics_recorded += recorded;
@@ -217,7 +265,7 @@ pub async fn apply_monitors(
         }
         .update(&ctx.db)
         .await?;
-        let name = format!("Interface {}", source.if_name);
+        let name = interface_monitor_name(&source.if_name);
         sync_monitor(
             &ctx.db,
             device.id,
@@ -247,7 +295,7 @@ pub async fn apply_monitors(
         sync_monitor(
             &ctx.db,
             device.id,
-            "Monitor de Uso de CPU",
+            CPU_MONITOR_NAME,
             enabled,
             monitor_configuration(&config, "cpu_usage"),
             true,
@@ -265,7 +313,7 @@ pub async fn apply_monitors(
         sync_monitor(
             &ctx.db,
             device.id,
-            "Monitor de Uso de Memoria",
+            MEMORY_MONITOR_NAME,
             enabled,
             monitor_configuration(&config, "memory_usage"),
             true,
@@ -386,8 +434,14 @@ pub async fn sync_interface(
         r#type: Set(source.if_type.map(|kind| kind.to_string())),
         speed: Set(source.if_speed.and_then(|speed| i64::try_from(speed).ok())),
         // Uma escolha manual do usuário prevalece sobre o valor observado no poll.
-        admin_status: Set(admin_status.or_else(|| source.if_admin_status.map(status_label))),
-        oper_status: Set(source.if_oper_status.map(status_label)),
+        admin_status: Set(admin_status.or_else(|| {
+            source
+                .if_admin_status
+                .map(|value| status_label(value).into())
+        })),
+        oper_status: Set(source
+            .if_oper_status
+            .map(|value| status_label(value).into())),
         last_seen_at: Set(Some(now.into())),
         ..Default::default()
     };
@@ -483,11 +537,11 @@ async fn persist_system_metrics(
 ) -> AppResult<()> {
     let recorded_at = Utc::now();
     for (name, value, unit) in [
-        ("cpu_usage", scan.cpu.usage_percent, "percent"),
-        ("memory_used", scan.memory.used_percent, "percent"),
+        ("cpu_usage", scan.cpu_info.usage_percent, "percent"),
+        ("memory_used", scan.memory_info.used_percent, "percent"),
         (
             "snmp_uptime",
-            scan.system.sys_up_time.map(|uptime| uptime as f64),
+            scan.system_info.sys_up_time.map(|uptime| uptime as f64),
             "ticks",
         ),
     ] {
@@ -549,20 +603,6 @@ async fn record_metric(
     Ok(())
 }
 
-fn status_label(value: u64) -> String {
-    match value {
-        1 => "up",
-        2 => "down",
-        3 => "testing",
-        4 => "unknown",
-        5 => "dormant",
-        6 => "notPresent",
-        7 => "lowerLayerDown",
-        _ => "unknown",
-    }
-    .into()
-}
-
 pub async fn detect_connection(
     host: &str,
     port: u16,
@@ -617,4 +657,55 @@ pub async fn detect_connection(
 }
 fn map_error(error: SnmpError) -> AppError {
     AppError::BusinessRule(error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// O diálogo "Escaneamento & Descoberta SNMP" lê estes campos direto do
+    /// JSON. Quando eles saíam como `system`/`cpu`/`memory`, a tela quebrava em
+    /// `Cannot read properties of undefined` antes de renderizar qualquer coisa.
+    #[test]
+    fn a_varredura_sai_com_os_campos_que_a_tela_de_descoberta_le() {
+        let scan = SnmpScanResult {
+            snmp_responded: true,
+            system_info: SnmpSystemInfo::default(),
+            interfaces: vec![SnmpInterface {
+                if_index: 1,
+                if_name: "eth0".into(),
+                if_descr: None,
+                if_alias: None,
+                if_type: None,
+                if_speed: None,
+                if_admin_status: Some(1),
+                if_oper_status: Some(1),
+                mac_address: None,
+                is_monitored: true,
+            }],
+            traffic: vec![],
+            cpu_info: SnmpCpuInfo::default(),
+            memory_info: SnmpMemoryInfo::default(),
+            neighbors: vec![],
+            has_cpu_monitor: true,
+            has_memory_monitor: false,
+            zabbix_template_items: vec![],
+        };
+        let json = serde_json::to_value(&scan).unwrap();
+
+        for campo in [
+            "snmpResponded",
+            "systemInfo",
+            "cpuInfo",
+            "memoryInfo",
+            "interfaces",
+            "hasCpuMonitor",
+            "hasMemoryMonitor",
+            "zabbixTemplateItems",
+        ] {
+            assert!(json.get(campo).is_some(), "campo ausente: {campo}");
+        }
+        assert_eq!(json["interfaces"][0]["isMonitored"], true);
+        assert_eq!(json["hasCpuMonitor"], true);
+    }
 }

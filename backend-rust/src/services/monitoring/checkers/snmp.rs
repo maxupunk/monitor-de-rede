@@ -7,7 +7,7 @@ use crate::services::{
     monitoring::contracts::{CheckMetric, CheckResult, Checker, MonitorStatus},
     snmp::{
         client::{SnmpClient, SnmpConfig, SnmpVersion},
-        collectors::{collect_cpu, collect_memory, OID_SYS_UPTIME},
+        collectors::{collect_cpu, collect_memory, status_label, OID_SYS_UPTIME},
     },
 };
 
@@ -298,19 +298,6 @@ fn interface_monitor_status(admin: u64, oper: u64) -> MonitorStatus {
         MonitorStatus::Down
     } else {
         MonitorStatus::Warning
-    }
-}
-
-fn status_label(value: u64) -> &'static str {
-    match value {
-        1 => "up",
-        2 => "down",
-        3 => "testing",
-        4 => "unknown",
-        5 => "dormant",
-        6 => "notPresent",
-        7 => "lowerLayerDown",
-        _ => "unknown",
     }
 }
 

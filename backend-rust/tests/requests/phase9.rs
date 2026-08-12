@@ -689,6 +689,7 @@ async fn admin_status_escolhido_pelo_operador_sobrevive_ao_poll() {
         if_admin_status: Some(1),
         if_oper_status: Some(oper),
         mac_address: None,
+        is_monitored: false,
     };
 
     // Primeiro poll: cria a linha com o que o agente informou.
