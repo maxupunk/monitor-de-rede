@@ -171,7 +171,7 @@
               :monitors="detailStore.monitors"
               :loading="detailStore.loading"
               variant="device"
-              no-data-text='Nenhum monitor configurado para este equipamento. Crie um acima ou use "Escanear SNMP" para descobrir automaticamente.'
+              no-data-text="Nenhum monitor configurado para este equipamento. Crie um acima ou use &quot;Escanear SNMP&quot; para descobrir automaticamente."
               @edit="openMonitorDialog"
               @changed="reloadMonitors"
             ></MonitorsTable>
@@ -285,7 +285,7 @@
                       />
                       <div class="d-flex align-center justify-space-between text-caption text-grey">
                         <span v-if="isCpuMonitored"
-                          >Load 1 min:
+                        >Load 1 min:
                           {{ cpuLoadValue !== null ? `${cpuLoadValue} load` : 'N/A' }}</span
                         >
                         <span v-else>Recurso desativado na varredura</span>

@@ -623,3 +623,47 @@ esse arquivo vai começar errado.
 Executada nessa ordem, com uma inversão: a Fase 5.4 (comentários no código)
 entrou junto com a 5.3, antes da Fase 4, porque a varredura que as duas exigem é
 a mesma e fazê-la duas vezes seria desperdício.
+
+---
+
+## Apêndice — Revisão de resíduos (12/08/2026)
+
+Revisão posterior ao arquivamento encontrou e corrigiu referências que
+escaparam da varredura original:
+
+- **Comentários no código Rust ainda apontando para arquivos `.ts` do Adonis:**
+  - `backend-rust/src/models/vpn_peers.rs` — reescrito para referenciar o
+    comportamento do modelo original sem citar caminho inexistente.
+  - `backend-rust/src/services/discovery/cidr_range.rs` — removida a citação a
+    `backend/modules/discovery/cidr_range.ts`.
+  - `backend-rust/src/services/shared/errors.rs` — reescrito para descrever a
+    função sem apontar para `backend/modules/shared/errors.ts`.
+  - `backend-rust/src/services/vpn/profiles/mod.rs` — reescrito para não citar
+    `backend/modules/vpn/profiles/*.ts`.
+
+- **`docs/roadmap_vpn.md` — menções desatualizadas corrigidas:**
+  - [x] 🟢 Removida a citação "backend AdonisJS, 84 testes" da rotina de
+        validação.
+  - [x] 🟢 Corrigida a descrição do `PingChecker`: a imagem de runtime do
+        backend Rust é `debian:bookworm-slim`, não `node:24-alpine`, e o ping
+        usa socket ICMP DGRAM (`surge-ping`).
+  - [x] 🟢 QR code: a dependência `qrcode` está em
+        `backend-rust/Cargo.toml`, não no `package.json` da raiz.
+  - [x] 🟢 Textos de links corrigidos de `*.ts` para `*.rs`
+        (`key_generator.rs`, `peer_status.rs`, `secret_store.rs`,
+        `access_control.rs`).
+
+- **`docs/roadmap.md`:**
+  - [x] 🟢 Item riscado sobre `PingChecker` na "imagem Alpine" ajustado para
+        falar nos dois formatos de saída de latência, sem remeter a uma imagem
+        específica do backend.
+
+- **Verificações rodadas e aprovadas:**
+  - [x] 🟢 `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings`,
+        `cargo test` (398 testes) e `cargo build --release`.
+  - [x] 🟢 `npm --prefix frontend run typecheck`, `format`, `lint` e `build`.
+  - [x] 🟢 Varredura automatizada: nenhum link relativo quebrado em `.md` do
+        repositório (fora de `node_modules`/`target`).
+  - [x] 🟢 `git grep` não encontrou mais menções a caminhos `.ts` do Adonis
+        fora dos ponteiros históricos já documentados (`AGENTS.md`,
+        `README.md`, ADRs e comentários que explicam decisões de migração).
