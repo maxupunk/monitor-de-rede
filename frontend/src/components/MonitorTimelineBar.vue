@@ -32,7 +32,7 @@
               class="font-weight-bold"
               style="font-size: 13px; color: #38bdf8"
             >
-              ({{ block.latencyMs }} ms)
+              ({{ formatLatency(block.latencyMs) }})
             </span>
           </div>
           <div style="font-size: 11px; color: #94a3b8">
@@ -55,7 +55,7 @@
 import { computed } from 'vue'
 import type { MonitorResult } from '@/stores/monitors'
 import { getStatusHexColor } from '@/utils/monitorPresentation'
-import { formatShortDateTime } from '@/utils/formatters'
+import { formatLatency, formatShortDateTime } from '@/utils/formatters'
 
 const props = withDefaults(
   defineProps<{

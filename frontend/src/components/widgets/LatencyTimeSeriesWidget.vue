@@ -146,7 +146,7 @@
           :style="tooltipStyle"
         >
           <div class="text-caption font-weight-bold text-info">
-            Latência: {{ currentHoverItem.latency.toFixed(1) }} ms
+            Latência: {{ formatLatency(currentHoverItem.latency) }}
           </div>
           <div
             class="text-caption font-weight-medium"
@@ -177,7 +177,7 @@
           <span>Perda de Pacotes</span>
         </div>
       </div>
-      <span class="text-grey font-weight-bold">Média: {{ avgLatency }} ms</span>
+      <span class="text-grey font-weight-bold">Média: {{ formatLatency(avgLatency) }}</span>
     </v-card-actions>
 
     <!-- Diálogo de Detalhes da Amostragem Selecionada -->
@@ -204,7 +204,9 @@
             <v-col cols="12" sm="4">
               <v-card variant="tonal" color="info" class="pa-3 rounded-lg text-center">
                 <div class="text-caption font-weight-medium">Latência Registrada</div>
-                <div class="text-h6 font-weight-bold mt-1">{{ selectedSample.latency }} ms</div>
+                <div class="text-h6 font-weight-bold mt-1">
+                  {{ formatLatency(selectedSample.latency) }}
+                </div>
               </v-card>
             </v-col>
             <v-col cols="12" sm="4">
@@ -255,7 +257,7 @@
                   </v-chip>
                 </td>
                 <td class="font-weight-bold">
-                  {{ item.latencyMs !== null ? `${item.latencyMs} ms` : 'N/D' }}
+                  {{ formatLatency(item.latencyMs, 'N/D') }}
                 </td>
                 <td>
                   <v-chip
@@ -297,6 +299,7 @@
 import { ref, computed, type CSSProperties } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMonitorsStore } from '@/stores/monitors'
+import { formatLatency } from '@/utils/formatters'
 
 const timeframe = ref<'5m' | '15m' | '1h' | '24h'>('15m')
 const selectedMonitorId = ref<number | 'all'>('all')
@@ -516,8 +519,8 @@ const avgLatency = computed(() => {
   return Math.round(sum / samples.value.length)
 })
 
-const maxLatencyFormatted = computed(() => `${maxLatency.value} ms`)
-const midLatencyFormatted = computed(() => `${Math.round(maxLatency.value / 2)} ms`)
+const maxLatencyFormatted = computed(() => formatLatency(maxLatency.value))
+const midLatencyFormatted = computed(() => formatLatency(maxLatency.value / 2))
 
 const chartPoints = computed(() => {
   const left = 60

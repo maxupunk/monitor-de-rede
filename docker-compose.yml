@@ -27,6 +27,13 @@ x-app-env: &app-env
   # todo login responder 401 com a mesma mensagem de senha inválida.
   JWT_SECRET: ${JWT_SECRET:-Y2hhbmdlLW1lLXRoaXMtaXMtYS1wbGFjZWhvbGRlci1zZWNyZXQtdmFsdWUtMDAwMQ==}
   DATABASE_URL: postgres://netmonitor:secret@postgres:5432/netmonitor
+  # Pool de conexões, em milissegundos. Repassados aqui porque o `config/*.yaml`
+  # vai assado dentro da imagem: sem estas linhas, ajustar os tempos exigiria
+  # `--build`, e o `.env.example` prometeria um botão que não existe.
+  DB_CONNECT_TIMEOUT: ${DB_CONNECT_TIMEOUT:-5000}
+  DB_IDLE_TIMEOUT: ${DB_IDLE_TIMEOUT:-300000}
+  DB_MIN_CONNECTIONS: ${DB_MIN_CONNECTIONS:-1}
+  DB_MAX_CONNECTIONS: ${DB_MAX_CONNECTIONS:-10}
   # Token exigido no cadastro do primeiro usuário. Deixe vazio e o servidor
   # sorteia um no primeiro boot, imprimindo-o no log (`docker compose logs
   # server | grep setup_token`). Definir aqui só interessa a provisionamento

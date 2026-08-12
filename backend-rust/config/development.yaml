@@ -79,10 +79,15 @@ database:
   uri: {{ get_env(name="DATABASE_URL", default="sqlite://backend_rust_development.sqlite?mode=rwc") }}
   # When enabled, the sql query will be logged.
   enable_logging: false
-  # Set the timeout duration when acquiring a connection.
-  connect_timeout: {{ get_env(name="DB_CONNECT_TIMEOUT", default="500") }}
-  # Set the idle duration before closing a connection.
-  idle_timeout: {{ get_env(name="DB_IDLE_TIMEOUT", default="500") }}
+  # ⚠️ Os dois tempos abaixo são em **milissegundos** — o Loco os passa a
+  # `Duration::from_millis`, e o nome não denuncia isso. Os 500 do scaffold
+  # faziam a `idle_timeout` derrubar toda conexão meio segundo depois de ficar
+  # ociosa: o pool recriava o conjunto inteiro a cada poucos segundos, em todos
+  # os processos — inclusive no `probe`, que nunca consulta o banco mas ganha um
+  # pool assim mesmo. O Postgres registrava cada queda ("could not receive data
+  # from client: Connection reset by peer") e o log virava ruído contínuo.
+  connect_timeout: {{ get_env(name="DB_CONNECT_TIMEOUT", default="5000") }}
+  idle_timeout: {{ get_env(name="DB_IDLE_TIMEOUT", default="300000") }}
   # Minimum number of connections for a pool.
   min_connections: {{ get_env(name="DB_MIN_CONNECTIONS", default="1") }}
   # Maximum number of connections for a pool.

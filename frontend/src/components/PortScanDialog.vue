@@ -147,7 +147,7 @@
         <div v-if="results !== null">
           <div class="text-caption text-grey-darken-1 mb-2">
             {{ openCount }} porta(s) aberta(s)<span v-if="openFilteredCount > 0"
-            >, {{ openFilteredCount }} aberta(s)/filtrada(s)</span
+              >, {{ openFilteredCount }} aberta(s)/filtrada(s)</span
             >
             de {{ results.length }} escaneada(s)
           </div>
@@ -173,7 +173,7 @@
                       {{ statusLabel(item.status) }}
                     </v-chip>
                   </td>
-                  <td>{{ item.latencyMs }} ms</td>
+                  <td>{{ formatLatency(item.latencyMs) }}</td>
                 </tr>
                 <tr v-if="filteredResults.length === 0">
                   <td colspan="5" class="text-center text-grey py-4">
@@ -210,6 +210,7 @@
 import { ref, computed, watch } from 'vue'
 import { usePortScanStore, type PortScanItem, type PortProtocol } from '@/stores/portScan'
 import { getStatusColor } from '@/utils/monitorPresentation'
+import { formatLatency } from '@/utils/formatters'
 
 const props = defineProps<{
   modelValue: boolean

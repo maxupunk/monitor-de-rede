@@ -142,7 +142,7 @@
 
 <script setup lang="ts">
 import { ref, computed, type CSSProperties } from 'vue'
-import { formatBps, formatBytes } from '@/utils/formatters'
+import { formatBps, formatBytes, formatLatency } from '@/utils/formatters'
 
 export interface ChartDataPoint {
   time: string
@@ -264,7 +264,7 @@ const avgY = computed(() => {
 function formatUnitValue(val: number): string {
   if (props.unitType === 'bandwidth') return formatBps(val)
   if (props.unitType === 'bytes') return formatBytes(val)
-  if (props.unitType === 'latency') return `${val.toFixed(1)} ms`
+  if (props.unitType === 'latency') return formatLatency(val)
   if (props.unitType === 'percentage') return `${val.toFixed(1)}%`
   return `${val} ${props.customUnit}`.trim()
 }

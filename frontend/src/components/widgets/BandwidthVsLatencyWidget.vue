@@ -200,7 +200,7 @@
             Tráfego Banda: {{ formatBps(currentHoverItem.bwBps) }}
           </div>
           <div class="text-caption font-weight-bold text-amber">
-            Latência Ping: {{ currentHoverItem.latency.toFixed(1) }} ms
+            Latência Ping: {{ formatLatency(currentHoverItem.latency) }}
           </div>
           <div class="text-caption text-grey-lighten-1 mt-1">Hora: {{ currentHoverItem.time }}</div>
         </v-card>
@@ -220,8 +220,8 @@
         <div class="d-flex align-center ga-1">
           <span class="dot-indicator bg-amber"></span>
           <span
-          >Latência: {{ currentLatency.toFixed(1) }} ms (Média:
-            {{ avgLatency.toFixed(1) }} ms)</span
+            >Latência: {{ formatLatency(currentLatency) }} (Média:
+            {{ formatLatency(avgLatency) }})</span
           >
         </div>
       </div>
@@ -237,6 +237,7 @@ import { ref, computed, onMounted, type CSSProperties } from 'vue'
 import { useMonitorsStore } from '@/stores/monitors'
 import { useDevicesStore } from '@/stores/devices'
 import type { WidgetConfig } from '@/stores/dashboard'
+import { formatLatency } from '@/utils/formatters'
 
 const props = defineProps<{
   widget: WidgetConfig

@@ -128,7 +128,7 @@
                     class="text-h6 font-weight-bold"
                     :class="`text-${positionColor(index, entry)}`"
                   >
-                    {{ formatMs(entry.avgLookupTimeMs) }}
+                    {{ formatLatency(entry.avgLookupTimeMs, '—') }}
                   </span>
                   <span class="text-caption text-grey">ms</span>
                 </div>
@@ -236,6 +236,7 @@ import { useMonitorsStore, type Monitor } from '@/stores/monitors'
 import DnsServersDialog from '@/components/DnsServersDialog.vue'
 import MonitorFormDialog from '@/components/MonitorFormDialog.vue'
 import type { DnsProtocol, MonitorFormModel } from '@/utils/monitorTypes'
+import { formatLatency } from '@/utils/formatters'
 
 const store = useDnsPerformanceStore()
 const monitorsStore = useMonitorsStore()
@@ -311,10 +312,6 @@ function protocolLabel(protocol: DnsProtocol): string {
   return PROTOCOL_LABELS[protocol] ?? String(protocol).toUpperCase()
 }
 
-function formatMs(value: number): string {
-  return value >= 100 ? String(Math.round(value)) : value.toFixed(1)
-}
-
 /** Barra proporcional ao pior tempo do ranking — leitura comparativa imediata */
 function barValue(entry: DnsRankingEntry): number {
   if (entry.avgLookupTimeMs === null || store.slowestLatency <= 0) return 0
@@ -331,7 +328,7 @@ function positionColor(index: number, entry: DnsRankingEntry): string {
 
 function rangeLabel(entry: DnsRankingEntry): string {
   if (entry.minLookupTimeMs === null || entry.maxLookupTimeMs === null) return '—'
-  return `min ${formatMs(entry.minLookupTimeMs)} / máx ${formatMs(entry.maxLookupTimeMs)} ms`
+  return `min ${formatLatency(entry.minLookupTimeMs)} / máx ${formatLatency(entry.maxLookupTimeMs)}`
 }
 
 function sampleLabel(entry: DnsRankingEntry): string {

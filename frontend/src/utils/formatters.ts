@@ -59,6 +59,25 @@ export function formatLinkSpeed(bps?: number | null): string {
 }
 
 /**
+ * Latência em milissegundos: 6.903808999999999 ➔ "6.9 ms", 250.4 ➔ "250 ms".
+ *
+ * O RTT chega do backend como `f64` cru, com todo o lixo de ponto flutuante da
+ * conta que o produziu. Imprimir esse número direto — o que várias telas
+ * faziam — enche a interface de 16 dígitos que não significam nada: a medição
+ * não tem essa resolução.
+ *
+ * Acima de 100 ms a casa decimal também é ruído (a diferença entre 250 e 250,4
+ * não muda decisão nenhuma), então o valor vira inteiro. Abaixo disso ela
+ * importa, porque é onde vive uma rede local.
+ */
+export function formatLatency(value?: number | null, fallback = 'N/A'): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return fallback
+  const digits = Math.abs(value) >= 100 ? 0 : 1
+  // `parseFloat` remove o zero à direita (7.0 ➔ 7), como em `formatScaled`.
+  return `${Number.parseFloat(value.toFixed(digits))} ms`
+}
+
+/**
  * Formata um valor conforme a unidade que veio junto dele na métrica/evento.
  * Unidades desconhecidas são apenas concatenadas.
  */
@@ -68,6 +87,7 @@ export function formatMeasuredValue(value: unknown, unit?: string | null): strin
 
   if (unit === 'bytes' || unit === 'B') return formatBytes(numeric)
   if (unit === 'bps') return formatBps(numeric)
+  if (unit === 'ms') return formatLatency(numeric)
   return `${numeric}${unit ? ` ${unit}` : ''}`
 }
 
