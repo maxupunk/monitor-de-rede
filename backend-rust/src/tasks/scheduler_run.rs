@@ -1,4 +1,11 @@
-//! Um ciclo do scheduler de monitores, acionado pelo scheduler nativo do Loco.
+//! Um ciclo do scheduler de monitores.
+//!
+//! Duas tarefas moram aqui, e a diferença é só quem repete:
+//!
+//! * [`SchedulerRun`] (`task scheduler_run`) — **um** ciclo e sai. É o comando
+//!   manual, para depurar ou forçar uma passada.
+//! * [`SchedulerLoop`] (`task scheduler_loop`) — chama o mesmo ciclo em laço.
+//!   É o que roda no container `scheduler` (ADR 007).
 
 use std::{
     collections::HashMap,
@@ -13,7 +20,6 @@ use crate::{
     models::{monitors, probes},
     services::{
         discovery::queue::{process_pending_runs, schedule_due_networks},
-        events::relay::relay_pending,
         maintenance::data_pruner,
         monitoring::{
             contracts::{CheckResult, MonitorStatus},
@@ -29,7 +35,11 @@ use crate::{
     },
 };
 
-/// Task unitária: o Loco agenda processos, portanto não há loop infinito aqui.
+/// Intervalo padrão entre ciclos, em segundos. Ajustável por
+/// `SCHEDULER_INTERVAL_SECONDS` ou pelo argumento `interval_seconds`.
+pub const DEFAULT_CYCLE_SECONDS: u64 = 5;
+
+/// Executa **um** ciclo e sai. Comando manual.
 pub struct SchedulerRun;
 
 #[async_trait]
@@ -37,12 +47,64 @@ impl Task for SchedulerRun {
     fn task(&self) -> TaskInfo {
         TaskInfo {
             name: "scheduler_run".into(),
-            detail: "Executa um ciclo dos monitores vencidos".into(),
+            detail: "Executa um único ciclo dos monitores vencidos e sai".into(),
         }
     }
 
     async fn run(&self, ctx: &AppContext, _vars: &task::Vars) -> Result<()> {
         run_cycle(ctx).await.map(|_| ()).map_err(Into::into)
+    }
+}
+
+/// Processo de longa duração que repete [`run_cycle`]. É o `scheduler` do
+/// compose.
+///
+/// O ciclo roda **dentro** deste processo, e não como subprocesso por tique
+/// (ADR 007): assim o socket ICMP, o pool de conexões e as cadências internas
+/// (`is_due`) são abertos uma vez e sobrevivem entre ciclos.
+///
+/// Erro de um ciclo é registrado e o laço continua. Um ciclo que falha não pode
+/// derrubar o agendamento inteiro — a checagem seguinte pode muito bem passar.
+pub struct SchedulerLoop;
+
+#[async_trait]
+impl Task for SchedulerLoop {
+    fn task(&self) -> TaskInfo {
+        TaskInfo {
+            name: "scheduler_loop".into(),
+            detail: "Executa o ciclo dos monitores continuamente (processo do scheduler)".into(),
+        }
+    }
+
+    async fn run(&self, ctx: &AppContext, vars: &task::Vars) -> Result<()> {
+        let seconds = vars
+            .cli_arg("interval_seconds")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .or_else(|| {
+                std::env::var("SCHEDULER_INTERVAL_SECONDS")
+                    .ok()
+                    .and_then(|value| value.trim().parse::<u64>().ok())
+            })
+            .filter(|value| *value > 0)
+            .unwrap_or(DEFAULT_CYCLE_SECONDS);
+
+        tracing::info!(interval_seconds = seconds, "scheduler inicializado");
+
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(seconds));
+        // Ciclo que estourou o intervalo não pode gerar rajada de tiques
+        // atrasados: isso empilharia execuções em cima de um sistema que já
+        // está lento — exatamente a hora de não piorar.
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+        loop {
+            ticker.tick().await;
+            match run_cycle(ctx).await {
+                Ok(0) => {}
+                Ok(count) => tracing::debug!(monitores = count, "ciclo concluído"),
+                Err(error) => tracing::warn!(%error, "ciclo do scheduler falhou"),
+            }
+        }
     }
 }
 
@@ -87,9 +149,9 @@ pub async fn run_cycle(ctx: &AppContext) -> AppResult<usize> {
     if let Err(error) = run_data_pruner_if_due(ctx).await {
         tracing::warn!(%error, "falha ao executar purga de dados antigos");
     }
-    if let Err(error) = relay_pending(ctx).await {
-        tracing::warn!(%error, "falha ao retransmitir eventos");
-    }
+    // O relay do `event_outbox` **não** roda aqui. Ele é in-process e só
+    // entrega a quem tem conexão SSE aberta — o servidor. Ver
+    // `initializers::monitoring::spawn_event_relay`.
     Ok(due.len())
 }
 
@@ -105,11 +167,14 @@ const DATA_PRUNE_INTERVAL_SECONDS: i64 = 3_600;
 
 /// Próximo instante de cada tarefa periódica do ciclo.
 ///
-/// O `scheduler_run` é uma task de **um ciclo** (ADR 005): cada disparo é um
-/// processo novo, então esta memória não sobrevive entre execuções em produção.
-/// Ela existe para o caso de o ciclo ser chamado em laço dentro do mesmo
-/// processo (teste, ou um futuro modo embutido) — sem ela, o pruner rodaria a
-/// cada 5 s ali. A cadência real em produção vem do `config/scheduler.yaml`.
+/// É memória de processo, e em produção o processo é um só: o `scheduler_loop`
+/// chama `run_cycle` em laço (ADR 007). Por isso as cadências abaixo — VPN a
+/// cada 10 s, tráfego a cada 30 s, purga a cada hora — valem de verdade, em vez
+/// de rodarem a cada tique.
+///
+/// Rodando `task scheduler_run` à mão, o processo morre no fim do ciclo e o
+/// mapa nasce vazio: um disparo avulso executa tudo. É o comportamento que se
+/// espera de um comando manual.
 fn next_run_at() -> &'static Mutex<HashMap<&'static str, DateTime<Utc>>> {
     static NEXT: OnceLock<Mutex<HashMap<&'static str, DateTime<Utc>>>> = OnceLock::new();
     NEXT.get_or_init(|| Mutex::new(HashMap::new()))

@@ -21,7 +21,7 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
 | **Motor de Monitoramento (Checkers)** | 🟢 **Concluído** | Checkers reais de Ping (ICMP/RTT), HTTP/HTTPS (Fetch/Status/Latência), TCP (Sockets), SNMP (uptime/CPU/memória/interface) e DNS com medição de latência de resolução via UDP, TCP e DoH. |
 | **Processamento de Resultados** | 🟢 **Concluído** | `ResultProcessor` grava resultados no banco, extrai métricas e atualiza estado dos dispositivos/monitores. |
 | **Worker & Queue System** | 🔴 **Não implementado** | A fila do §4.2 da arquitetura nunca saiu do papel: o `scheduler` executa os monitores inline e os probes cuidam do resto. Ver a dívida de backpressure na Fase 2. |
-| **Agendador (Scheduler)** | 🟢 **Concluído** | Scheduler nativo do Loco dispara a tarefa `scheduler_run` a cada 5 s: busca por `next_run_at`, execução e recálculo do próximo ciclo. |
+| **Agendador (Scheduler)** | 🟢 **Concluído** | Processo `scheduler` (`task scheduler_loop`) repete o ciclo a cada 5 s: busca por `next_run_at`, execução e recálculo do próximo ciclo ([ADR 007](adr/007-scheduler-processo-unico.md)). |
 | **Descoberta Automática (Discovery)** | 🟢 **Concluído** | Scanners funcionais (ICMP/Ping sweep, tabela ARP, PortScanner) e fusão com auto-criação de dispositivo/monitor. |
 | **Comunicação com Probes** | 🟢 **Concluído** | Autenticação por token Hash (SHA-256), registro via CLI (`task probe_register`), heartbeat, despachante de tarefas e buffer offline com reenvio automático. |
 | **SNMP & Métricas de Tráfego** | 🟢 **Concluído** | Coleta SNMP (v1/v2c/v3), varredura de interfaces, contadores de octetos (ifHCIn/ifHCOut) e métricas de tráfego (bps). |

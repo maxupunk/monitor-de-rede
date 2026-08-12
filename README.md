@@ -44,7 +44,8 @@ cargo test
 ```
 
 Tarefas de CLI: `task user:create`, `task probe_register`,
-`task vpn_probe_register`, `task probe_run`, `task scheduler_run`.
+`task vpn_probe_register`, `task probe_run`, `task scheduler_loop` (o processo do
+scheduler) e `task scheduler_run` (um ciclo só, para depurar).
 
 ## Frontend — comandos
 

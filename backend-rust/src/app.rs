@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use loco_rs::{
     app::{AppContext, Hooks, Initializer},
-    bgworker::{BackgroundWorker, Queue},
+    bgworker::Queue,
     boot::{create_app, BootResult, StartMode},
     config::Config,
     controller::AppRoutes,
@@ -15,8 +15,13 @@ use std::path::Path;
 
 #[allow(unused_imports)]
 use crate::{
-    controllers, initializers::monitoring::MonitoringInitializer, models::_entities::users,
-    models::tables, tasks, tasks::scheduler_run::SchedulerRun, workers::downloader::DownloadWorker,
+    controllers,
+    initializers::monitoring::MonitoringInitializer,
+    initializers::process_deps,
+    models::_entities::users,
+    models::tables,
+    tasks,
+    tasks::scheduler_run::{SchedulerLoop, SchedulerRun},
 };
 
 pub struct App;
@@ -42,6 +47,19 @@ impl Hooks for App {
         config: Config,
     ) -> Result<BootResult> {
         create_app::<Self, Migrator>(mode, environment, config).await
+    }
+
+    /// Dependências de processo, disponíveis em **todos** os modos.
+    ///
+    /// Este é o único gancho do Loco que roda tanto no `start` quanto no
+    /// `task` e no `db migrate`: o `create_context` o chama antes de qualquer
+    /// coisa (`loco_rs::boot::create_context`). Os `Initializer` **não**
+    /// servem para isto — o `run_task` não os executa, e foi exatamente essa
+    /// suposição que deixou o `scheduler` e o `probe` sem cliente ICMP e sem
+    /// barramento de eventos, com todo monitor de ping caindo em `unknown`.
+    async fn after_context(ctx: AppContext) -> Result<AppContext> {
+        process_deps::install(&ctx);
+        Ok(ctx)
     }
 
     async fn initializers(_ctx: &AppContext) -> Result<Vec<Box<dyn Initializer>>> {
@@ -82,8 +100,9 @@ impl Hooks for App {
             .add_route(controllers::vpn_peers::routes().layer(business_auth.clone()))
             .add_route(controllers::zabbix_templates::routes().layer(business_auth))
     }
-    async fn connect_workers(ctx: &AppContext, queue: &Queue) -> Result<()> {
-        queue.register(DownloadWorker::build(ctx)).await?;
+    /// Nenhum worker de fila registrado — o trabalho de background é o ciclo do
+    /// `scheduler` e o agente do `probe`, ambos processos próprios.
+    async fn connect_workers(_ctx: &AppContext, _queue: &Queue) -> Result<()> {
         Ok(())
     }
 
@@ -92,6 +111,7 @@ impl Hooks for App {
         // tasks-inject (do not remove)
         tasks.register(tasks::user_create::UserCreate);
         tasks.register(SchedulerRun);
+        tasks.register(SchedulerLoop);
         tasks.register(tasks::probe_run::ProbeRun);
         tasks.register(tasks::probe_register::ProbeRegister);
         tasks.register(tasks::vpn_probe_register::VpnProbeRegister);

@@ -104,10 +104,6 @@ quick-xml = { version = "0.37", features = ["serialize"] }
 name = "backend_rust-cli"
 path = "src/bin/main.rs"
 required-features = []
-[[bin]]
-name = "tool"
-path = "src/bin/tool.rs"
-required-features = []
 
 # Protótipos dos spikes da Fase 0 (§3.4). Ficam em `examples/spikes/` para não
 # entrar no binário de produção; como não estão na raiz de `examples/`, o cargo

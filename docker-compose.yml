@@ -2,32 +2,51 @@
 #
 # São oito serviços: `migration` roda uma vez e sai; `server`, `scheduler`,
 # `probe`, `vpn-probe`, `wireguard`, `frontend` e `postgres` ficam de pé.
-# Os quatro processos do backend saem do mesmo binário, mudando só o comando:
-# `db migrate`, `start`, `scheduler --config config/scheduler.yaml` e
-# `task probe_run`.
+#
+# Os quatro papéis do backend saem do **mesmo binário e da mesma imagem** —
+# muda só o comando. Por isso `x-backend` fixa `build` e `image` iguais nos
+# quatro: o Compose reconhece a repetição e compila uma vez só.
+#
+# `networks` fica de fora deste anchor de propósito: o `vpn-probe` usa
+# `network_mode`, e os dois são mutuamente exclusivos no Compose.
+x-backend: &backend
+  build:
+    context: ./backend-rust
+    target: runtime
+  image: netmonitor-backend:latest
+
 x-app-env: &app-env
   LOCO_ENV: production
-  PORT: 3333
-  HOST: 0.0.0.0
-  LOG_LEVEL: info
-  # Cifra em repouso dos segredos da VPN (§8.10) — 32 caracteres.
-  APP_KEY: secret_app_key_32_characters_long_str
-  # Assinatura do JWT (§10). Trocar em produção — e o valor **precisa ser base64
+  # Cifra em repouso dos segredos da VPN — 32 caracteres.
+  APP_KEY: ${APP_KEY:-secret_app_key_32_characters_long_str}
+  # Assinatura do JWT. Trocar em produção — e o valor **precisa ser base64
   # válido**: o Loco assina com `EncodingKey::from_base64_secret` (HS512). Um
   # segredo não-base64 não derruba o servidor; ele faz `generate_jwt` falhar e
   # todo login responder 401 com a mesma mensagem de senha inválida.
   JWT_SECRET: ${JWT_SECRET:-Y2hhbmdlLW1lLXRoaXMtaXMtYS1wbGFjZWhvbGRlci1zZWNyZXQtdmFsdWUtMDAwMQ==}
   DATABASE_URL: postgres://netmonitor:secret@postgres:5432/netmonitor
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  # Origem liberada no CORS. Precisa bater com a porta publicada do frontend.
+  FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:8081}
 
 # `ping_group_range` habilita o socket ICMP `SOCK_DGRAM` sem `CAP_NET_RAW`
 # (SPIKE-03 / ADR 003). Vale para todo processo que pinga: `server` (checagem
 # manual e discovery), `scheduler` (o ciclo de monitores) e `probe`.
+#
+# O `migration` fica de fora de propósito: não pinga. O binário avisa no log
+# que o cliente ICMP não subiu e segue — ver `initializers::process_deps`.
 x-icmp-sysctls: &icmp-sysctls
   net.ipv4.ping_group_range: "0 2147483647"
 
+# O batch do port scanner deriva do limite de descritores.
+x-nofile: &nofile
+  nofile:
+    soft: 8192
+    hard: 65536
+
 services:
   migration:
-    build: ./backend-rust
+    <<: *backend
     command: ["backend_rust-cli", "db", "migrate"]
     environment:
       <<: *app-env
@@ -38,7 +57,7 @@ services:
     restart: "no"
 
   server:
-    build: ./backend-rust
+    <<: *backend
     command: ["backend_rust-cli", "start"]
     ports:
       - "${API_EXTERNAL_PORT:-3333}:3333"
@@ -50,10 +69,7 @@ services:
     sysctls:
       <<: *icmp-sysctls
     ulimits:
-      # O batch do port scanner deriva do limite de descritores (§3.3.1).
-      nofile:
-        soft: 8192
-        hard: 65536
+      <<: *nofile
     volumes:
       - wg-config:/config
     depends_on:
@@ -65,22 +81,23 @@ services:
     restart: unless-stopped
 
   scheduler:
-    build: ./backend-rust
-    # O scheduler nativo do Loco dispara `scheduler_run` a cada 5 s
-    # (ADR 005): cada tique é um ciclo, não um laço infinito.
-    command: ["backend_rust-cli", "scheduler", "--config", "config/scheduler.yaml"]
+    <<: *backend
+    # Processo de longa duração que repete o ciclo internamente (ADR 007).
+    # Não é o scheduler nativo do Loco: aquele dispara um subprocesso por
+    # tique, e um processo novo a cada 5 s reabria o socket ICMP e o pool de
+    # conexões, além de zerar as cadências internas do ciclo.
+    command: ["backend_rust-cli", "task", "scheduler_loop"]
     environment:
       <<: *app-env
-      # É o scheduler quem sincroniza a telemetria dos túneis a cada 10s. Sem o
-      # mesmo volume do `server`, `wg0.status` não existe aqui e a sincronização
-      # vira um no-op silencioso: a tela recebe eventos com dados congelados.
+      SCHEDULER_INTERVAL_SECONDS: ${SCHEDULER_INTERVAL_SECONDS:-5}
+      # É o scheduler quem sincroniza a telemetria dos túneis. Sem o mesmo
+      # volume do `server`, `wg0.status` não existe aqui e a sincronização vira
+      # um no-op silencioso: a tela recebe eventos com dados congelados.
       WG_CONFIG_DIR: /config
     sysctls:
       <<: *icmp-sysctls
     ulimits:
-      nofile:
-        soft: 8192
-        hard: 65536
+      <<: *nofile
     volumes:
       - wg-config:/config
     depends_on:
@@ -92,14 +109,15 @@ services:
     restart: unless-stopped
 
   probe:
-    build: ./backend-rust
+    <<: *backend
     command: ["backend_rust-cli", "task", "probe_run"]
     environment:
       <<: *app-env
       PROBE_SERVER_URL: http://server:3333
-      SERVER_URL: http://server:3333
     sysctls:
       <<: *icmp-sysctls
+    ulimits:
+      <<: *nofile
     depends_on:
       - server
     networks: [netmonitor-net]
@@ -132,18 +150,18 @@ services:
 
   # Probe dedicado que enxerga a interface wg0 — o probe da LAN segue intocado.
   vpn-probe:
-    build: ./backend-rust
+    <<: *backend
     command: ["backend_rust-cli", "task", "probe_run"]
     environment:
       <<: *app-env
       PROBE_SERVER_URL: http://server:3333
-      SERVER_URL: http://server:3333
       PROBE_TOKEN: ${VPN_PROBE_TOKEN:-default_vpn_probe_token}
       # A telemetria do túnel é lida do volume compartilhado, nunca por
       # `docker exec` — é o que mantém o servidor sem acesso ao socket do Docker.
       WG_CONFIG_DIR: /config
     volumes:
       - wg-config:/config
+    # Herda o namespace de rede do WireGuard; por isso não declara `networks`.
     network_mode: "service:wireguard"
     depends_on:
       - wireguard
@@ -154,11 +172,13 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    image: netmonitor-frontend:latest
     ports:
       - "${FRONTEND_EXTERNAL_PORT:-8081}:80"
     depends_on:
       - server
     networks: [netmonitor-net]
+    restart: unless-stopped
 
   postgres:
     image: postgres:16-alpine

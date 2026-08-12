@@ -1,8 +1,18 @@
 # ADR 005 — Scheduler: task de um ciclo, disparada pelo scheduler nativo do Loco
 
 - **Spike:** SPIKE-05 (§3.4 do `roadmap_backend_rust.md`)
-- **Status:** aceito — Fase 0. **Confirma** a decisão pré-registrada na §9.1.
+- **Status:** ⚠️ **SUPERSEDIDA** pela [ADR 007](007-scheduler-processo-unico.md)
+  em 2026-08-12. Aceita na Fase 0; confirmava a decisão pré-registrada na §9.1.
 - **Data:** 2026-08-10
+
+> **Leia a [ADR 007](007-scheduler-processo-unico.md) antes de usar este
+> documento.** A frase *"O `Initializer` `ping_client` roda no boot da task
+> igual roda no boot do servidor"*, na seção sobre o `surge_ping::Client`, é
+> **falsa**: o `run_task` do Loco não executa initializers. Foi essa suposição
+> que deixou todo monitor de ping gravando `unknown` em produção.
+>
+> O restante do documento — inclusive a medição de custo de boot — continua
+> correto e é registro de por que a decisão original fez sentido na época.
 
 ## Contexto
 

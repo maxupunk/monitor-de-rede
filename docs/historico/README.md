@@ -12,9 +12,11 @@ datado** vem para cá, intacto — reescrever apagaria o registro.
 | :--- | :--- |
 | [roadmap_backend_rust.md](roadmap_backend_rust.md) | O plano da reescrita do backend AdonisJS → Rust (Loco.rs), da Fase 0 ao corte. Concluído. |
 | [corte_backend_rust.md](corte_backend_rust.md) | O runbook do corte em si: migração de dados, re-cifra dos segredos da VPN, descomissionamento. Executado. |
+| [roadmap_limpeza_adonis.md](roadmap_limpeza_adonis.md) | A limpeza do rastro que o corte deixou — volume Postgres com esquema antigo, `backend/` em disco, config e docs na gramática do Adonis. Fases 0 a 6 concluídas em 12/08/2026, com os quatro defeitos que a verificação final revelou. |
 
-Ambos falam AdonisJS, Lucid, `node ace` e Japa no presente. Era o presente deles.
-Para o comportamento atual do sistema, leia [`../arquitetura.md`](../arquitetura.md).
+Os dois primeiros falam AdonisJS, Lucid, `node ace` e Japa no presente. Era o
+presente deles. O terceiro é o registro datado de uma execução. Para o
+comportamento atual do sistema, leia [`../arquitetura.md`](../arquitetura.md).
 
 Os **ADRs** ficam em [`../adr/`](../adr/), não aqui: eles seguem valendo como
 justificativa das decisões que ainda estão de pé.

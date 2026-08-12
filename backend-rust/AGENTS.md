@@ -66,6 +66,16 @@ Fixadas na Fase 0 da migração. Ver `docs/adr/` (decisões vivas) e
   que o `useInfiniteList` do frontend lê.
 - **Bindings TypeScript:** `#[ts(export, export_to = "../../frontend/src/bindings/")]`.
   Eles são gerados durante `cargo test`.
+- **Dependência de processo vai em `Hooks::after_context`, nunca num
+  `Initializer`.** O `run_task` do Loco **não** executa initializers — só o
+  `run_app` executa. Um `Initializer` só existe para o processo servidor. Foi
+  essa confusão que deixou `scheduler` e `probe` sem cliente ICMP, com todo
+  monitor de ping gravando `unknown` ([ADR 007](../docs/adr/007-scheduler-processo-unico.md)).
+  Regra prática: precisa no `task`? `after_context`. Só no servidor (laço de
+  SSE, seed de boot)? `Initializer`.
+- **Teste de coisa que roda em `task` não pode bootar por `request_with_config`**:
+  esse caminho passa pelo servidor e esconde exatamente essa classe de bug. Use
+  `loco_rs::boot::create_context::<App>` — ver `tests/requests/process_deps.rs`.
 - **Tabelas novas** entram em `src/models/tables.rs` (`CREATION_ORDER`). O
   `Hooks::truncate` já as cobre; não mexa no `app.rs`.
 - **Migrations:** use os helpers de `migration/src/shared.rs`. As FKs são

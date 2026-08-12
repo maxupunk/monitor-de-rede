@@ -10,8 +10,10 @@
 > `npm --prefix backend`, e docs/comentários escritos na gramática do Adonis.
 
 > **Status (12/08/2026):** todas as fases concluídas. Este documento virou
-> registro do que foi feito — pela regra da Fase 4, o lugar dele agora é
-> `docs/historico/`.
+> registro do que foi feito e, pela regra que a própria Fase 4 estabeleceu,
+> foi arquivado aqui em `docs/historico/`. Não vale como instrução de
+> trabalho. Para o estado atual do sistema, leia
+> [`../arquitetura.md`](../arquitetura.md).
 
 ---
 
@@ -524,10 +526,27 @@ que falhava: enquanto a stack não subia inteira, nada disso tinha como aparecer
 
 ---
 
-## 🔴 Aberto — `shared_store` não é inicializado nos processos de tarefa
+## 🟢 Resolvido — `shared_store` não era inicializado nos processos de tarefa
 
-**Não corrigido de propósito.** Está fora do escopo de uma limpeza de resíduo, e
-a correção envolve uma decisão de projeto que não cabe a este documento tomar.
+**Corrigido em 12/08/2026**, junto com um segundo defeito que a investigação
+revelou (o relay de SSE no processo errado). A decisão está registrada na
+[ADR 007](../adr/007-scheduler-processo-unico.md), que supersede a ADR 005.
+
+Resumo do que mudou:
+
+| Antes | Depois |
+| :--- | :--- |
+| Deps de processo num `Initializer` — que o `run_task` não executa | `Hooks::after_context`, o único gancho chamado em todos os modos |
+| `scheduler` = subprocesso do Loco por tique | `task scheduler_loop`, laço num processo só |
+| `relay_pending` dentro do `run_cycle` (nunca entregava) | Laço no `server`, subido pelo `MonitoringInitializer` |
+| Cadências internas (`is_due`) mortas: tudo rodava a cada 5 s | Valem de verdade: VPN 10 s, tráfego 30 s, purga 1 h |
+| Nenhum teste bootava fora do caminho do servidor | `tests/requests/process_deps.rs` cobre os dois defeitos |
+
+O diagnóstico original fica abaixo, como registro.
+
+---
+
+### Diagnóstico original
 
 ### O sintoma
 
@@ -570,22 +589,17 @@ consequência é direta.
 Os outros checkers (`tcp`, `http`, `dns`) não passam pelo `shared_store` e
 seguem funcionando.
 
-### Por que não foi corrigido aqui
+### Como foi corrigido
 
-A correção é pôr as mesmas dependências no `shared_store` dos processos de
-tarefa, e há mais de um jeito — com um trade-off real:
-
-- O **scheduler** é um processo **novo a cada 5 segundos**. Inicializar por
-  invocação abre um socket ICMP por tique.
-- O **probe** é de longa duração e inicializaria uma vez só.
-
-Ou seja: não é uma linha, é uma escolha sobre onde esse boot mora. E precisa de
-teste — hoje **nenhum** teste cobre isso, o que é exatamente a razão de o defeito
-ter atravessado a migração inteira sem ninguém notar.
-
-- [ ] Decidir onde inicializar o `shared_store` nos processos de tarefa
-- [ ] Teste que falhe se o ping executado pelo scheduler voltar a dar `unknown`
-- [ ] Teste que falhe se o relay de eventos parar de entregar
+- [x] 🟢 `shared_store` populado em `Hooks::after_context` — ver
+      `src/initializers/process_deps.rs`. A instalação do cliente ICMP é
+      best-effort: o container `migration` não tem o sysctl e não precisa dele,
+      e derrubar o `db migrate` por isso travaria a stack inteira.
+- [x] 🟢 Scheduler virou laço em processo único, o que também fez as cadências
+      internas do ciclo voltarem a valer (ADR 007).
+- [x] 🟢 Relay movido para o servidor.
+- [x] 🟢 `tests/requests/process_deps.rs` — dois testes que bootam pelo caminho
+      do `task` (`create_context`), que é onde a suíte era cega.
 
 ---
 

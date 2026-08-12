@@ -42,7 +42,7 @@ o comando. São **oito serviços** no `docker-compose.yml`:
 | :--- | :--- | :--- |
 | `migration` | `db migrate` | Roda as migrations e **sai**. Os outros esperam `service_completed_successfully`. |
 | `server` | `start` | API HTTP na porta 3333 e o barramento SSE. |
-| `scheduler` | `scheduler --config config/scheduler.yaml` | Dispara `scheduler_run` a cada 5 s. Cada tique é **um ciclo**, não um laço infinito. |
+| `scheduler` | `task scheduler_loop` | Processo de longa duração que repete o ciclo de monitores a cada 5 s ([ADR 007](adr/007-scheduler-processo-unico.md)). |
 | `probe` | `task probe_run` | Agente de coleta na LAN. Processo de longa duração. |
 | `vpn-probe` | `task probe_run` | Mesmo agente, mas no namespace de rede do WireGuard, para enxergar a `wg0`. |
 | `wireguard` | — | Único container com `NET_ADMIN` e única porta UDP publicada. |
@@ -91,13 +91,12 @@ backend-rust/
 │   ├── models/          entidades SeaORM (_entities/, geradas) + regras de modelo
 │   ├── views/           serialização de saída
 │   ├── dtos/            entrada e tipos de contrato
-│   ├── tasks/           comandos de CLI
-│   ├── workers/         jobs em background do Loco
-│   ├── initializers/    ganchos de inicialização
+│   ├── tasks/           comandos de CLI (inclui o laço do scheduler e o probe)
+│   ├── initializers/    process_deps (todos os modos) + monitoring (só servidor)
 │   ├── mailers/         templates de e-mail
 │   └── bin/             entrypoint
 ├── migration/           uma migration por tabela + helpers em shared.rs
-├── config/              development.yaml, test.yaml, production.yaml, scheduler.yaml
+├── config/              development.yaml, test.yaml, production.yaml
 ├── examples/spikes/     protótipos que sustentam as ADRs
 └── tests/               requests/, models/, conventions/
 ```
@@ -123,11 +122,12 @@ services/
 
 ## 5. O ciclo de monitoramento
 
-É o coração do sistema. O `scheduler` acorda a cada 5 s e roda **um** ciclo
-(`src/tasks/scheduler_run.rs`):
+É o coração do sistema. O processo `scheduler` roda `run_cycle` em laço, uma vez
+a cada `SCHEDULER_INTERVAL_SECONDS` (padrão 5 s), em
+`src/tasks/scheduler_run.rs`:
 
 ```text
-scheduler_run (a cada 5 s)
+run_cycle (a cada 5 s, no mesmo processo)
    │
    ├─ monitores vencidos (next_run_at <= now)
    │     ├─ monitor tem probe? → enfileira em `probe_tasks`
@@ -136,9 +136,20 @@ scheduler_run (a cada 5 s)
    ├─ discovery: processa runs pendentes, agenda redes vencidas
    ├─ VPN: sincroniza telemetria dos túneis
    ├─ watchdog: probe sem heartbeat vira `offline`
-   ├─ data_pruner (quando vencido): aplica as janelas de retenção
-   └─ relay: drena `event_outbox` para o barramento SSE
+   └─ data_pruner (a cada 1h): aplica as janelas de retenção
 ```
+
+O ciclo **não** drena o `event_outbox` — quem faz isso é o servidor. Ver
+[§9](#9-tempo-real).
+
+Rodar o ciclo em laço dentro de um processo, em vez de um subprocesso por tique,
+é o que faz as cadências internas valerem: telemetria de VPN a cada 10 s,
+histórico de tráfego a cada 30 s, purga a cada hora. Elas são memória de
+processo — com um processo novo por tique, todas rodariam a cada 5 s
+([ADR 007](adr/007-scheduler-processo-unico.md)).
+
+Para forçar uma passada à mão: `backend_rust-cli task scheduler_run`, que roda
+**um** ciclo e sai.
 
 Depois de executar, `next_run_at` avança a partir do horário **previsto**, não
 do horário real — é o que evita deslocamento acumulado.
@@ -302,7 +313,13 @@ e atualização de topologia.
 é o scheduler, num processo; quem tem a conexão SSE aberta é o `server`, em
 outro. Publicar direto na memória do processo que gerou faria o evento morrer ali
 — o relay (`services/events/relay.rs`) é a ponte, e a tabela é o que garante que
-nada se perde entre um tique e outro.
+nada se perde entre um ciclo e outro.
+
+**O relay roda no `server`**, num laço subido pelo `MonitoringInitializer`. Tem
+de ser ali: o barramento é in-process, e só o servidor tem assinantes SSE. O
+relay começa com `if !bus.has_subscribers() { return }` — chamado de qualquer
+outro processo, ele sai no primeiro `if` e o evento nunca chega à tela. Foi
+exatamente esse o bug corrigido pela [ADR 007](adr/007-scheduler-processo-unico.md).
 
 ## 10. Módulo VPN
 
@@ -342,7 +359,8 @@ ausente achando que ela está escondida:
 
 - **Não há worker nem fila externa.** Não existe Redis, BullMQ ou equivalente.
   O scheduler executa os monitores inline e a fila dos probes é a tabela
-  `probe_tasks`. Os `workers` do Loco rodam em `BackgroundAsync`, no processo.
+  `probe_tasks`. Não há nenhum worker registrado em `connect_workers`, e o
+  `start` roda **sem** `--server-and-worker`.
 - **A dívida disso é backpressure**: uma rajada de monitores vencidos não tem
   onde ser represada. Ver a Fase 2 do [roadmap](roadmap.md).
 - **Não há agregação de métricas** (rollup por hora/dia). A retenção é por
