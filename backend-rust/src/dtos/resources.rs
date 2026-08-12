@@ -82,7 +82,7 @@ pub struct ProbeInput {
 ///
 /// Todo campo é opcional porque o `PUT` é parcial: o botão de ligar/desligar
 /// da lista manda só `{ "enabled": false }`, e o restante da regra tem de
-/// sobreviver — é o mesmo `request.only(...)` + `merge` do AdonisJS.
+/// sobreviver. Campo ausente significa "não mexa", não "apague".
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct AlertRuleInput {
@@ -105,7 +105,7 @@ pub struct CatalogApplyInput {
 }
 
 /// `POST /api/alerts/:id/silence`. O frontend manda `minutes`; `durationMinutes`
-/// é aceito por compatibilidade com integrações antigas, como no AdonisJS.
+/// é aceito por compatibilidade com integrações antigas, que ainda o enviam.
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SilenceInput {

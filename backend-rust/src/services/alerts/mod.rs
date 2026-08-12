@@ -1,8 +1,8 @@
 //! Motor de alertas (§8.7).
 //!
-//! A divisão espelha a do backend AdonisJS: quem observa a rede publica
-//! *fatos* (`datasets`), o `evaluator` decide se um fato satisfaz uma regra, e
-//! o `manager` transforma isso em `alert_events`, notificação e evento SSE.
+//! A divisão é em três: quem observa a rede publica *fatos* (`datasets`), o
+//! `evaluator` decide se um fato satisfaz uma regra, e o `manager` transforma
+//! isso em `alert_events`, notificação e evento SSE.
 
 pub mod catalog;
 pub mod contracts;

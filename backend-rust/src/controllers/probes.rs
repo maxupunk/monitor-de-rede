@@ -107,9 +107,8 @@ async fn emit_status_if_changed(ctx: &AppContext, probe: &probes::Model, previou
 /// Autentica o agente por `sha256(token)`.
 ///
 /// O hash **não** é único (o `DEFAULT_VPN_PROBE_TOKEN` é compartilhado), então
-/// a consulta pode devolver mais de uma linha; fica com a primeira, como o
-/// `.first()` do Lucid. Probes revogados já são excluídos em
-/// `Probe::find_by_token`.
+/// a consulta pode devolver mais de uma linha e fica com a primeira. Probes
+/// revogados já são excluídos em `Probe::find_by_token`.
 async fn authenticate(
     ctx: &AppContext,
     headers: &HeaderMap,

@@ -1,4 +1,4 @@
-//! `cargo loco task vpn_probe_register` — paridade com `node ace vpn:probe-register`.
+//! `backend_rust-cli task vpn_probe_register` — registra o probe dedicado da VPN.
 //!
 //! ⚠️ **Não remover.** É o comando que deixa o `vpn-probe` pronto para o
 //! heartbeat antes de o container do WireGuard subir. Sem ele, os monitores dos

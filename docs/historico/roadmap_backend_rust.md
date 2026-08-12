@@ -73,7 +73,7 @@ funcional total com o backend AdonisJS, substituindo:
 ### 1.3 Princípios inegociáveis
 
 0. **O padrão do backend Rust tem precedência.** *(Decisão do responsável pelo projeto,
-   Fase 0 — [ADR 006](adr/006-prioridade-do-padrao-rust.md). Lê-se antes do princípio 1 e o
+   Fase 0 — [ADR 006](../adr/006-prioridade-do-padrao-rust.md). Lê-se antes do princípio 1 e o
    qualifica.)* O frontend Vue é nosso e fica no mesmo repositório: a diretriz é **aproveitá-lo
    e apenas adaptá-lo**. Onde preservar um formato herdado do AdonisJS custar contorcer o Rust
    — `rename` manual campo a campo, wrapper para imitar um envelope, serialização que o
@@ -289,11 +289,11 @@ porta a porta.
 
 | ID | Assunto | Resposta | ADR |
 | :--- | :--- | :--- | :--- |
-| **SPIKE-01** | Cliente SNMP | **Sim**, `rasn-snmp` 0.18 cobre `get` e `walk` com transporte próprio em `tokio`. Achado: `EncodeError`/`DecodeError` não implementam `std::error::Error` — o cliente precisa de um `SnmpError` com `From` explícito. | [001](adr/001-snmp-client.md) |
-| **SPIKE-02** | RustScan como crate | **Não embutir.** A crate é `GPL-3.0-only` (o projeto é MIT) e `Scanner::run() -> Vec<SocketAddr>` não entrega resultado incremental nem aceita cancelamento — o NDJSON da §7.15 e o `CancellationToken` da §3.3.6 são impossíveis com ela. Implementar o algoritmo. | [002](adr/002-rustscan-embedding.md) |
-| **SPIKE-03** | ICMP sem privilégio | **Sim**, `SOCK_DGRAM` sem `CAP_NET_RAW`, como usuário não-root, com latência a ~3% do `ping` do sistema. O *fallback* Windows foi cancelado. | [003](adr/003-icmp-dgram.md) |
-| **SPIKE-04** | DNS wire | **Sim**, um encoder só serve UDP, TCP e DoH; o `Instant` fica isolado no round-trip. | [004](adr/004-dns-wire.md) |
-| **SPIKE-05** | Scheduler | Task de **um ciclo** disparada pelo scheduler nativo, em processo separado — confirma a [§9.1](#91-topologia-de-processos-espelha-o-docker-composeyml). Boot medido: ~25 ms num tique de 5 s (0,5%). | [005](adr/005-scheduler-loco.md) |
+| **SPIKE-01** | Cliente SNMP | **Sim**, `rasn-snmp` 0.18 cobre `get` e `walk` com transporte próprio em `tokio`. Achado: `EncodeError`/`DecodeError` não implementam `std::error::Error` — o cliente precisa de um `SnmpError` com `From` explícito. | [001](../adr/001-snmp-client.md) |
+| **SPIKE-02** | RustScan como crate | **Não embutir.** A crate é `GPL-3.0-only` (o projeto é MIT) e `Scanner::run() -> Vec<SocketAddr>` não entrega resultado incremental nem aceita cancelamento — o NDJSON da §7.15 e o `CancellationToken` da §3.3.6 são impossíveis com ela. Implementar o algoritmo. | [002](../adr/002-rustscan-embedding.md) |
+| **SPIKE-03** | ICMP sem privilégio | **Sim**, `SOCK_DGRAM` sem `CAP_NET_RAW`, como usuário não-root, com latência a ~3% do `ping` do sistema. O *fallback* Windows foi cancelado. | [003](../adr/003-icmp-dgram.md) |
+| **SPIKE-04** | DNS wire | **Sim**, um encoder só serve UDP, TCP e DoH; o `Instant` fica isolado no round-trip. | [004](../adr/004-dns-wire.md) |
+| **SPIKE-05** | Scheduler | Task de **um ciclo** disparada pelo scheduler nativo, em processo separado — confirma a [§9.1](#91-topologia-de-processos-espelha-o-docker-composeyml). Boot medido: ~25 ms num tique de 5 s (0,5%). | [005](../adr/005-scheduler-loco.md) |
 
 Protótipos executáveis em `backend-rust/examples/spikes/`:
 
@@ -305,7 +305,7 @@ docker compose -f docker-compose.icmp-spike.yml run --rm icmp-dgram     # SPIKE-
 docker compose -f docker-compose.icmp-spike.yml run --rm icmp-restrito  # contraprova
 ```
 
-Além dos cinco, a Fase 0 registrou o [ADR 006](adr/006-prioridade-do-padrao-rust.md), que
+Além dos cinco, a Fase 0 registrou o [ADR 006](../adr/006-prioridade-do-padrao-rust.md), que
 define a precedência entre o padrão do backend Rust e o contrato herdado do AdonisJS.
 
 ---
@@ -1363,7 +1363,7 @@ pub async fn delete_zabbix_template(db, id) -> Result<()>;
 | `probe` | `backend_rust-cli task probe_run` | Agente da LAN |
 | `vpn-probe` | `backend_rust-cli task probe_run` | Agente no namespace do WireGuard |
 
-> **Decisão SPIKE-05 (🟢 [ADR 005](adr/005-scheduler-loco.md), confirmada na Fase 0):**
+> **Decisão SPIKE-05 (🟢 [ADR 005](../adr/005-scheduler-loco.md), confirmada na Fase 0):**
 > `scheduler_run` é uma task de **um ciclo**, invocada pelo scheduler nativo do Loco a cada 5 s
 > (`run every 5 seconds`). Isso preserva o ciclo de vida do framework, isola falhas no processo
 > `scheduler` e evita um loop infinito ou `tokio::spawn` no processo HTTP.
@@ -1517,7 +1517,7 @@ Ao final: `{"type":"done"}`; em erro: `{"type":"error","message":"…"}`. Cancel
 ## 12. Ajustes necessários no frontend
 
 A regra é **mexer o mínimo**, e sempre registrado aqui. Pelo princípio
-[§1.3.0](#13-princípios-inegociáveis) ([ADR 006](adr/006-prioridade-do-padrao-rust.md)), quando
+[§1.3.0](#13-princípios-inegociáveis) ([ADR 006](../adr/006-prioridade-do-padrao-rust.md)), quando
 reproduzir o comportamento atual custaria contorcer o backend Rust, quem se adapta é o
 frontend — e a linha entra nesta tabela.
 
@@ -1658,9 +1658,9 @@ O scaffold já traz `loco-rs[testing]`, `rstest`, `insta`, `serial_test`.
 ### Fase 0 — Fundação e spikes (🟢 **Concluída** — 2026-08-10)
 
 - [x] Executar **SPIKE-01..05** e publicar os ADRs em `docs/adr/`
-      — [001](adr/001-snmp-client.md), [002](adr/002-rustscan-embedding.md),
-      [003](adr/003-icmp-dgram.md), [004](adr/004-dns-wire.md),
-      [005](adr/005-scheduler-loco.md). Protótipos em `backend-rust/examples/spikes/`,
+      — [001](../adr/001-snmp-client.md), [002](../adr/002-rustscan-embedding.md),
+      [003](../adr/003-icmp-dgram.md), [004](../adr/004-dns-wire.md),
+      [005](../adr/005-scheduler-loco.md). Protótipos em `backend-rust/examples/spikes/`,
       executáveis por `cargo run --example spike_{icmp_dgram,snmp_v2c,dns_wire}`.
 - [x] Fechar o `Cargo.toml` e travar o `Cargo.lock`
       — bloco da [§3.1](#31-cargotoml-alvo) aplicado, com duas correções registradas

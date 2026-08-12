@@ -1,1539 +1,372 @@
-# Arquitetura Técnica Inicial
+# Arquitetura
 
-> ## ⚠️ Documento histórico — a implementação migrou para Rust
->
-> **O backend em produção é Rust sobre [Loco.rs](https://loco.rs/), em
-> `backend-rust/`.** A migração está descrita em
-> [roadmap_backend_rust.md](roadmap_backend_rust.md) e o corte em
-> [corte_backend_rust.md](corte_backend_rust.md).
->
-> O que continua **válido** neste documento: o modelo de domínio, o esquema de
-> dados, a topologia de processos (server / scheduler / probe / vpn-probe /
-> wireguard) e as regras de negócio de cada módulo. Foi tudo portado sem
-> alteração de comportamento — as divergências deliberadas estão na
-> [§17 do roadmap Rust](roadmap_backend_rust.md#17-não-objetivos-e-desvios-aceitos).
->
-> O que está **desatualizado**: tudo que fala de AdonisJS, Lucid, Japa,
-> `node ace` e da estrutura de diretórios TypeScript. O mapa de tradução termo a
-> termo está na
-> [§2 do roadmap Rust](roadmap_backend_rust.md#2-mapa-de-tradução-adonisjs--locors).
->
-> Três decisões substituíram o que este documento descrevia:
->
-> | Aqui | Agora | Por quê |
-> | :--- | :--- | :--- |
-> | Ping por `execFile('ping')` | Socket ICMP `SOCK_DGRAM` (`surge-ping`) | Elimina o parsing por idioma do SO e o `fork()` por checagem — [ADR 003](adr/003-icmp-dgram.md) |
-> | Port scan com concorrência fixa 16 | Estratégia RustScan sobre `tokio` | Varredura de 1024 portas em < 3 s — [ADR 002](adr/002-rustscan-embedding.md) |
-> | Fila/worker formal do §4.2 | Nunca existiu; o scheduler executa inline | Registrado como desvio **D8** — não regride nem avança |
+Descreve o sistema **como ele é hoje**. Quando este documento e o código
+divergirem, o código está certo e este arquivo está desatualizado.
 
-## Sistema de Monitoramento de Redes com AdonisJS
+O backend é **Rust sobre [Loco.rs](https://loco.rs/)**, em `backend-rust/`. O
+backend anterior era AdonisJS; ele saiu do repositório e o registro daquela
+migração está em [`historico/`](historico/). As decisões técnicas que continuam
+valendo estão em [`adr/`](adr/).
 
-## 1. Objetivo
+---
 
-Este documento define a arquitetura técnica inicial da plataforma de monitoramento de redes residenciais e de pequenas empresas.
+## 1. O que o sistema faz
 
-O backend será desenvolvido integralmente com AdonisJS, utilizando o framework para:
+Monitora redes residenciais e de pequenas empresas: descobre dispositivos,
+executa checagens de disponibilidade (ICMP, HTTP, TCP, DNS, SNMP), coleta
+métricas, monta topologia, avalia regras de alerta, notifica, e publica tudo em
+tempo real para uma SPA. Opcionalmente sobe um servidor WireGuard para alcançar
+redes remotas.
 
-* API.
-* Autenticação.
-* Persistência.
-* Filas.
-* Workers.
-* Agendamentos.
-* Probe local.
-* Probe remoto.
-* Comunicação em tempo real.
-* Comandos administrativos.
-* Configuração e logs.
+## 2. Stack
 
-Os módulos responsáveis pelas operações de rede também serão escritos em TypeScript dentro do projeto, mas organizados de forma independente das camadas HTTP e de persistência.
+| Camada | Tecnologia |
+| :--- | :--- |
+| API, scheduler, probe | Rust — [Loco.rs](https://loco.rs/) sobre `axum` e `tokio` |
+| ORM e migrations | SeaORM + `sea-orm-migration` |
+| Banco | PostgreSQL (produção e desenvolvimento em Docker); SQLite na suíte de testes |
+| Autenticação | JWT (`loco_rs::auth`), HS512 |
+| Tempo real | SSE |
+| Frontend | Vue 3 + TypeScript + Vite + Vuetify + Pinia + PWA |
+| Túnel | WireGuard (`linuxserver/wireguard`) |
+| Implantação | Docker Compose |
 
-## 2. Tecnologias
+Não há Redis, nem fila externa, nem broker. Ver [§12](#12-o-que-não-existe).
 
-### Backend
+## 3. Topologia de processos
 
-* Node.js.
-* TypeScript.
-* AdonisJS.
-* Lucid ORM.
-* PostgreSQL.
-* Sistema de filas do AdonisJS.
-* Redis, quando necessário.
-* SSE para comunicação com o frontend.
-* WebSocket ou HTTPS para comunicação com probes.
+Um único binário, `backend_rust-cli`, roda em quatro papéis diferentes conforme
+o comando. São **oito serviços** no `docker-compose.yml`:
 
-### Frontend
-
-* Vue 3.
-* TypeScript.
-* Vite.
-* Vuetify.
-* Pinia.
-* Vue Router.
-* PWA.
-
-### Implantação
-
-* Docker.
-* Docker Compose.
-* Linux como ambiente principal.
-* Instalação standalone.
-* Instalação centralizada com probes remotos.
-
-## 3. Visão geral da arquitetura
-
-O sistema utilizará o mesmo projeto AdonisJS para executar diferentes tipos de processo.
+| Serviço | Comando | Papel |
+| :--- | :--- | :--- |
+| `migration` | `db migrate` | Roda as migrations e **sai**. Os outros esperam `service_completed_successfully`. |
+| `server` | `start` | API HTTP na porta 3333 e o barramento SSE. |
+| `scheduler` | `scheduler --config config/scheduler.yaml` | Dispara `scheduler_run` a cada 5 s. Cada tique é **um ciclo**, não um laço infinito. |
+| `probe` | `task probe_run` | Agente de coleta na LAN. Processo de longa duração. |
+| `vpn-probe` | `task probe_run` | Mesmo agente, mas no namespace de rede do WireGuard, para enxergar a `wg0`. |
+| `wireguard` | — | Único container com `NET_ADMIN` e única porta UDP publicada. |
+| `frontend` | — | nginx servindo a SPA e fazendo proxy de `/api/` para `server:3333`. |
+| `postgres` | — | Banco. |
 
 ```text
-Aplicação AdonisJS
-├── API
-├── Worker
-├── Scheduler
-├── Probe local
-└── Comandos administrativos
+                    ┌──────────┐
+                    │ migration│  roda uma vez, sai
+                    └────┬─────┘
+                         │ (completed)
+     ┌───────────────────┼───────────────────┐
+     ▼                   ▼                   ▼
+┌─────────┐        ┌───────────┐       ┌──────────┐
+│ server  │◀──────▶│ scheduler │       │ postgres │
+│  :3333  │        └───────────┘       └──────────┘
+└────┬────┘              ▲  ▲
+     │ /api/probes/*     │  │
+     ├───────────────────┘  │
+     │                      │
+┌────▼────┐          ┌──────┴──────┐     ┌───────────┐
+│  probe  │          │  vpn-probe  │────▶│ wireguard │
+│  (LAN)  │          │  (túnel)    │     │   wg0     │
+└─────────┘          └─────────────┘     └───────────┘
 ```
 
-Cada processo será iniciado separadamente.
+**O `server` nunca executa `wg` nem `docker exec`.** Ele escreve `<iface>.conf`
+e lê `<iface>.status` num volume compartilhado; quem aplica é o container do
+WireGuard. É o que mantém o servidor sem `NET_ADMIN`.
 
-```bash
-node bin/server.js
-node ace queue:work   # ⚠️ não implementado — ver §4.2
-node ace scheduler:run
-node ace probe:run
-```
+### Modos de instalação
 
-Todos os processos poderão utilizar:
+- **Standalone** — tudo na mesma máquina, uma rede só. É o `docker compose up`.
+- **Central com probes remotos** — o `server` central e um `probe` por site. O
+  probe fala com o servidor por HTTP autenticado; **nunca** acessa o banco.
+- **Central com túnel** — as redes remotas chegam por WireGuard e o `vpn-probe`
+  mede dentro do túnel.
 
-* Configuração centralizada.
-* Logger.
-* Injeção de dependências.
-* Validação.
-* Criptografia.
-* Eventos.
-* Providers.
-* Repositórios.
-* Serviços compartilhados.
-* Lifecycle da aplicação.
-
-## 4. Processos principais
-
-## 4.1 Servidor API
-
-O servidor principal será responsável por:
-
-* Autenticação.
-* Usuários e permissões.
-* Sites.
-* Redes.
-* Dispositivos.
-* Interfaces.
-* Monitores.
-* Credenciais.
-* Alertas.
-* Eventos.
-* Topologia.
-* Recebimento de resultados dos probes.
-* Atualizações em tempo real para o frontend.
-
-Execução:
-
-```bash
-node bin/server.js
-```
-
-O servidor HTTP não deverá executar scans, ping, traceroute ou consultas SNMP diretamente.
-
-Operações demoradas deverão ser encaminhadas para uma fila ou para um probe.
-
-## 4.2 Worker
-
-> 🔴 **Não implementado.** Esta seção descreve o desenho pretendido, não o que
-> existe hoje. O comando `queue:work` chegou a ser criado no commit inicial, mas
-> nunca passou de um esqueleto que registrava um log e encerrava — foi removido,
-> junto com `bullmq`, `@adonisjs/redis` e o container `redis`, que estavam
-> instalados e nunca foram importados.
->
-> Na prática as responsabilidades abaixo foram absorvidas por outros processos:
-> o **scheduler** executa os monitores inline (`executeMonitorAsync`) e drena a
-> `DiscoveryQueue`, os **probes** executam checagens remotas, e o
-> `ResultProcessor` cuida de métricas, alertas e notificações.
->
-> A dívida que justifica retomar este desenho é o **backpressure** — ver a
-> Fase 2 do [roadmap](roadmap.md).
-
-O worker será responsável por executar jobs assíncronos.
-
-Execução:
-
-```bash
-node ace queue:work
-```
-
-Tipos de jobs:
-
-* Ping.
-* HTTP e HTTPS.
-* TCP.
-* DNS.
-* SNMP.
-* Descoberta de dispositivos.
-* Traceroute.
-* Processamento de métricas.
-* Avaliação de alertas.
-* Envio de notificações.
-* Limpeza de dados.
-* Agregação de histórico.
-
-O worker poderá executar checks quando estiver localizado na mesma rede dos dispositivos monitorados.
-
-## 4.3 Scheduler
-
-O scheduler será responsável por identificar tarefas que precisam ser executadas.
-
-Execução:
-
-```bash
-node ace scheduler:run
-```
-
-Responsabilidades:
-
-* Encontrar monitores vencidos.
-* Criar jobs de verificação.
-* Agendar scans periódicos.
-* Agendar coletas SNMP.
-* Executar limpeza de histórico.
-* Executar agregação de métricas.
-* Verificar probes desconectados.
-* Atualizar estados de alertas.
-
-O scheduler não deverá executar o monitoramento diretamente.
-
-Fluxo:
+## 4. Organização do código
 
 ```text
-Scheduler
-   ↓
-Cria job
-   ↓
-Fila
-   ↓
-Worker ou probe
-   ↓
-Resultado
-```
-
-> A **fila precisa ser persistente**: quem enfileira é o `scheduler:run` e quem
-> entrega é o processo HTTP, que responde ao `GET /api/probes/tasks`. Ela vive na
-> tabela `probe_tasks` ([`probe_task_dispatcher.ts`](../modules/probes/probe_task_dispatcher.ts)) —
-> pelo mesmo motivo que os eventos SSE vivem em `event_outbox`. Uma fila em
-> memória funciona nos testes e nunca em produção: o probe consultaria uma fila
-> sempre vazia e todo monitor atribuído a probe ficaria parado em `unknown`.
-
-Um monitor tem no máximo **uma** tarefa pendente, e tarefa parada há mais de
-`TASK_TTL_SECONDS` é descartada: probe que volta depois de um tempo fora executa
-uma checagem atual por monitor, não uma avalanche de checagens vencidas.
-
-Probe sem heartbeat há mais de `PROBE_OFFLINE_AFTER_SECONDS` é marcado `offline`
-pelo `ProbeWatchdog` ([`probe_liveness.ts`](../modules/probes/probe_liveness.ts)), e
-o scheduler passa a registrar as checagens dele como `unknown` com o motivo — em
-vez de despachar em silêncio para um agente que não vai buscar nada.
-
-## 4.4 Probe
-
-O probe será um processo AdonisJS executado dentro da rede monitorada.
-
-Execução:
-
-```bash
-node ace probe:run
-```
-
-Responsabilidades:
-
-* Registrar-se no servidor.
-* Manter conexão com o servidor.
-* Receber tarefas.
-* Executar verificações.
-* Realizar scans.
-* Consultar equipamentos SNMP.
-* Executar traceroute.
-* Enviar resultados.
-* Manter fila local em caso de perda de conexão.
-* Informar sua própria disponibilidade.
-
-O probe poderá ser executado:
-
-* No mesmo servidor.
-* Em um computador da rede.
-* Em um mini-PC.
-* Em um Raspberry Pi.
-* Em um container.
-* Em um servidor de filial.
-
-## 5. Modos de instalação
-
-## 5.1 Standalone
-
-Todos os serviços são executados no mesmo ambiente.
-
-```text
-Servidor
-├── API
-├── Scheduler
-├── Worker
-├── Probe
-├── PostgreSQL
-└── Redis
-```
-
-Indicado para:
-
-* Residências.
-* Pequenos escritórios.
-* Uma única rede.
-* Instalação simples.
-
-## 5.2 Servidor central com probe local
-
-```text
-Servidor central
-├── API
-├── Scheduler
-├── Worker
-└── Probe local
-```
-
-O probe local monitora a rede onde o servidor está instalado.
-
-## 5.3 Servidor central com probes remotos
-
-```text
-Servidor central
-├── API
-├── Scheduler
-└── Worker
-       │
-       ├── Probe residência
-       ├── Probe escritório
-       └── Probe filial
-```
-
-Cada probe terá acesso apenas ao site e às redes para as quais foi autorizado.
-
-## 6. Organização do projeto
-
-```text
-network-monitor/
-├── app/
-│   ├── controllers/
-│   ├── middleware/
-│   ├── models/
-│   ├── validators/
-│   ├── services/
-│   ├── repositories/
-│   ├── jobs/
-│   ├── events/
-│   ├── listeners/
-│   ├── policies/
-│   ├── exceptions/
-│   └── probes/
-│
-├── commands/
-│   ├── probe_run.ts
-│   ├── scheduler_run.ts
-│   ├── monitor_test.ts
-│   └── network_scan.ts
-│
-├── modules/
-│   ├── monitoring/
-│   ├── discovery/
-│   ├── snmp/
-│   ├── topology/
-│   ├── alerts/
-│   ├── notifications/
-│   └── probes/
-│
-├── config/
-├── database/
-│   ├── migrations/
-│   ├── seeders/
-│   └── factories/
-│
-├── providers/
-├── start/
-├── tests/
-├── frontend/
-└── docker/
-```
-
-## 7. Módulos principais
-
-## 7.1 Monitoring
-
-Responsável por executar verificações de disponibilidade.
-
-```text
-modules/monitoring/
-├── contracts/
-├── checkers/
-│   ├── ping_checker.ts
-│   ├── http_checker.ts
-│   ├── tcp_checker.ts
-│   └── dns_checker.ts
-├── monitor_runner.ts
-├── result_processor.ts
-└── status_calculator.ts
-```
-
-Contrato base:
-
-```ts
-export interface MonitorChecker<TConfig, TResult> {
-  execute(config: TConfig): Promise<TResult>
-}
-```
-
-Cada tipo de monitor terá uma implementação própria.
-
-```ts
-export class PingChecker
-  implements MonitorChecker<PingConfig, PingResult>
-{
-  async execute(config: PingConfig): Promise<PingResult> {
-    // Executa ping e retorna resultado normalizado
-  }
-}
-```
-
-## 7.2 Discovery
-
-Responsável pela descoberta de dispositivos.
-
-```text
-modules/discovery/
-├── scanners/
-│   ├── icmp_scanner.ts
-│   ├── arp_scanner.ts
-│   ├── mdns_scanner.ts
-│   ├── ssdp_scanner.ts
-│   └── port_scanner.ts
-├── device_identifier.ts
-├── discovery_merger.ts
-└── discovery_service.ts
-```
-
-O módulo deverá consolidar resultados provenientes de diferentes métodos.
-
-Exemplo:
-
-```text
-IP: 192.168.1.10
-MAC: AA:BB:CC:DD:EE:FF
-Hostname: notebook.local
-mDNS: Notebook de João
-Fabricante: Dell
-```
-
-Esses dados deverão formar um único resultado de descoberta.
-
-## 7.3 SNMP
-
-Responsável por inventário e métricas de equipamentos.
-
-```text
-modules/snmp/
-├── clients/
-├── profiles/
-├── mibs/
-├── collectors/
-│   ├── system_collector.ts
-│   ├── interface_collector.ts
-│   ├── traffic_collector.ts
-│   └── lldp_collector.ts
-├── snmp_session_factory.ts
-└── snmp_service.ts
-```
-
-O módulo deverá suportar:
-
-* SNMPv1.
-* SNMPv2c.
-* SNMPv3.
-* Get.
-* GetNext.
-* GetBulk.
-* Walk.
-* Contadores de 32 e 64 bits.
-
-As consultas devem ser agrupadas por dispositivo.
-
-```text
-Uma coleta SNMP
-├── Informações do sistema
-├── Lista de interfaces
-├── Estado das interfaces
-├── Contadores de tráfego
-└── Vizinhos LLDP
-```
-
-## 7.4 Topology
-
-Responsável pelas relações entre dispositivos.
-
-```text
-modules/topology/
-├── topology_service.ts
-├── link_resolver.ts
-├── route_resolver.ts
-├── confidence_calculator.ts
-└── topology_builder.ts
-```
-
-Tipos de ligação:
-
-* Manual.
-* LLDP.
-* CDP.
-* SNMP.
-* Inferida.
-* Traceroute.
-
-Cada ligação deverá possuir:
-
-* Origem.
-* Destino.
-* Interface de origem.
-* Interface de destino.
-* Método de descoberta.
-* Nível de confiança.
-* Data da descoberta.
-* Data da última confirmação.
-
-## 7.5 Alerts
-
-Responsável por avaliar e controlar alertas.
-
-```text
-modules/alerts/
-├── rule_evaluator.ts
-├── alert_manager.ts
-├── recovery_manager.ts
-└── silence_manager.ts
-```
-
-Exemplos de regras:
-
-* Dispositivo offline por mais de dois minutos.
-* Latência maior que 200 ms.
-* Interface com uso superior a 90%.
-* Certificado expirando.
-* Probe desconectado.
-* Novo dispositivo descoberto.
-
-## 7.6 Notifications
-
-Responsável por enviar notificações.
-
-```text
-modules/notifications/
-├── channels/
-│   ├── email_channel.ts
-│   ├── telegram_channel.ts
-│   ├── discord_channel.ts
-│   └── webhook_channel.ts
-├── notification_service.ts
-└── message_formatter.ts
-```
-
-Cada canal deverá implementar um contrato comum.
-
-```ts
-export interface NotificationChannel {
-  send(message: NotificationMessage): Promise<void>
-}
-```
-
-## 7.7 Probes
-
-Responsável pelo gerenciamento e comunicação com probes.
-
-```text
-modules/probes/
-├── probe_agent.ts
-├── probe_connection.ts
-├── probe_authenticator.ts
-├── probe_task_dispatcher.ts
-├── probe_result_receiver.ts
-└── probe_buffer.ts
-```
-
-O módulo deverá tratar:
-
-* Registro do probe.
-* Autenticação.
-* Heartbeat.
-* Recebimento de tarefas.
-* Cancelamento de tarefas.
-* Retorno de resultados.
-* Reconexão.
-* Atualização de versão.
-* Revogação.
-
-## 8. Models principais
-
-## 8.1 User
-
-Representa um usuário do sistema.
-
-Campos iniciais:
-
-```text
-id
-name
-email
-password
-active
-created_at
-updated_at
-```
-
-## 8.2 Site
-
-Representa um local monitorado.
-
-```text
-id
-name
-description
-location
-active
-created_at
-updated_at
-```
-
-## 8.3 Network
-
-Representa uma rede cadastrada.
-
-```text
-id
-site_id
-probe_id
-name
-cidr
-gateway
-vlan
-dns_servers
-scan_enabled
-scan_interval
-active
-created_at
-updated_at
-```
-
-## 8.4 Probe
-
-Representa um agente de monitoramento.
-
-```text
-id
-site_id
-name
-token_hash
-status
-version
-last_seen_at
-registered_at
-revoked_at
-configuration
-```
-
-## 8.5 Device
-
-Representa um equipamento. `ip_address` é o endereço primário e é único dentro
-da rede (`unique(network_id, ip_address)`); endereços secundários e MACs, quando
-necessários, são derivados das interfaces em `DeviceInterface`.
-
-```text
-id
-site_id
-network_id
-parent_id
-zabbix_template_id
-ip_address
-name
-type
-vendor
-model
-serial_number
-description
-is_monitored
-snmp_enabled
-snmp_community
-snmp_version
-status
-last_seen_at
-created_at
-updated_at
-```
-
-## 8.6 DeviceInterface
-
-```text
-id
-device_id
-snmp_index
-name
-description
-alias
-mac_address
-type
-speed
-admin_status
-oper_status
-last_seen_at
-```
-
-## 8.7 DeviceLink
-
-```text
-id
-source_device_id
-target_device_id
-source_interface_id
-target_interface_id
-link_type
-discovery_method
-confidence
-confirmed
-last_seen_at
-created_at
-```
-
-## 8.8 Monitor
-
-```text
-id
-device_id
-probe_id
-type
-name
-configuration
-interval_seconds
-timeout_seconds
-retry_count
-enabled
-next_run_at
-last_run_at
-status
-created_at
-updated_at
-```
-
-A configuração específica deverá ser armazenada inicialmente em JSON.
-
-Exemplo de monitor ping:
-
-```json
-{
-  "host": "192.168.1.1",
-  "packetCount": 3,
-  "packetSize": 56
-}
-```
-
-Exemplo de monitor HTTP:
-
-```json
-{
-  "url": "https://192.168.1.1",
-  "method": "GET",
-  "acceptedStatusCodes": [200, 301, 302],
-  "validateCertificate": false
-}
-```
-
-## 8.9 MonitorResult
-
-```text
-id
-monitor_id
-probe_id
-status
-started_at
-finished_at
-duration_ms
-latency_ms
-message
-data
-created_at
-```
-
-## 8.10 Metric
-
-```text
-id
-device_id
-interface_id
-monitor_id
-name
-value
-unit
-recorded_at
-```
-
-## 8.11 DiscoveryRun
-
-```text
-id
-network_id
-probe_id
-status
-started_at
-finished_at
-configuration
-error
-```
-
-## 8.12 DiscoveryResult
-
-```text
-id
-discovery_run_id
-ip_address
-mac_address
-hostname
-mdns_name
-vendor
-device_type
-confidence
-status
-data
-first_seen_at
-last_seen_at
-```
-
-## 8.13 AlertRule
-
-```text
-id
-site_id
-device_id
-monitor_id
-name
-type
-condition
-severity
-duration_seconds
-enabled
-created_at
-updated_at
-```
-
-## 8.14 AlertEvent
-
-```text
-id
-alert_rule_id
-device_id
-monitor_id
-status
-severity
-started_at
-resolved_at
-message
-data
-```
-
-## 9. Filas
-
-Filas iniciais:
-
-```text
-monitoring
-snmp
-discovery
-alerts
-notifications
-maintenance
-```
-
-### Monitoring
-
-* Ping.
-* HTTP.
-* HTTPS.
-* TCP.
-* DNS.
-
-### SNMP
-
-* Consulta básica.
-* Descoberta de interfaces.
-* Coleta de tráfego.
-* Descoberta LLDP.
-
-### Discovery
-
-* Scan de rede.
-* mDNS.
-* SSDP.
-* Identificação de equipamentos.
-
-### Alerts
-
-* Avaliação de regras.
-* Abertura de alertas.
-* Recuperação de alertas.
-
-### Notifications
-
-* E-mail.
-* Telegram.
-* Discord.
-* Webhook.
-
-### Maintenance
-
-* Limpeza.
-* Agregação.
-* Retenção.
-* Verificação de integridade.
-
-## 10. Jobs iniciais
-
-```text
-ExecuteMonitorJob
-PollSnmpDeviceJob
-ScanNetworkJob
-DiscoverMdnsJob
-DiscoverSsdpJob
-RunTracerouteJob
-ProcessMonitorResultJob
-EvaluateAlertRulesJob
-SendNotificationJob
-AggregateMetricsJob
-CleanupMetricsJob
-CheckProbeStatusJob
-```
-
-Exemplo de fluxo de monitoramento:
-
-```text
-Scheduler
-   ↓
-ExecuteMonitorJob
-   ↓
-PingChecker
-   ↓
-MonitorResult
-   ↓
-ProcessMonitorResultJob
-   ↓
-Atualiza estado
-   ↓
-EvaluateAlertRulesJob
-```
-
-## 11. Execução de checks
-
-Todos os resultados deverão utilizar uma estrutura normalizada.
-
-```ts
-export interface CheckResult {
-  success: boolean
-  status: 'up' | 'down' | 'warning' | 'unknown'
-  startedAt: Date
-  finishedAt: Date
-  durationMs: number
-  message?: string
-  metrics?: CheckMetric[]
-  data?: Record<string, unknown>
-}
-```
-
-Exemplo de métrica:
-
-```ts
-export interface CheckMetric {
-  name: string
-  value: number
-  unit: string
-}
-```
-
-Exemplo de resultado de ping:
-
-```json
-{
-  "success": true,
-  "status": "up",
-  "durationMs": 34,
-  "metrics": [
-    {
-      "name": "latency",
-      "value": 12.5,
-      "unit": "ms"
-    },
-    {
-      "name": "packet_loss",
-      "value": 0,
-      "unit": "percent"
-    }
-  ]
-}
-```
-
-## 12. Agendamento de monitores
-
-Cada monitor possuirá o campo:
-
-```text
-next_run_at
-```
-
-O scheduler buscará monitores vencidos.
-
-```sql
-SELECT *
-FROM monitors
-WHERE enabled = true
-  AND next_run_at <= NOW()
-ORDER BY next_run_at
-LIMIT 100;
-```
-
-Para evitar execução duplicada, o sistema deverá aplicar bloqueio durante a seleção.
-
-Após criar o job:
-
-```text
-next_run_at = next_run_at + intervalo
-```
-
-O próximo horário deverá ser calculado com base no horário originalmente previsto, reduzindo o deslocamento acumulado.
-
-## 13. Comunicação com probes
-
-## 13.1 Registro
-
-O probe será instalado com um token temporário.
-
-```bash
-node ace probe:register --token=TOKEN
-```
-
-O probe enviará:
-
-* Nome.
-* Identificador local.
-* Versão.
-* Sistema operacional.
-* Arquitetura.
-* Endereços locais.
-* Capacidades.
-
-O servidor retornará uma credencial permanente.
-
-## 13.2 Autenticação
-
-Cada probe deverá possuir:
-
-* Identificador próprio.
-* Token exclusivo.
-* Possibilidade de revogação.
-* Permissões limitadas.
-* Associação a um site.
-
-As credenciais deverão ser armazenadas com segurança.
-
-## 13.3 Heartbeat
-
-O probe enviará periodicamente:
-
-```json
-{
-  "probeId": "probe-01",
-  "version": "1.0.0",
-  "status": "online",
-  "runningTasks": 3,
-  "timestamp": "2026-08-01T15:00:00Z"
-}
-```
-
-## 13.4 Recebimento de tarefas
-
-Estrutura básica:
-
-```json
-{
-  "id": "task-123",
-  "type": "ping",
-  "timeout": 10000,
-  "payload": {
-    "host": "192.168.1.1"
-  }
-}
-```
-
-## 13.5 Retorno de resultados
-
-```json
-{
-  "taskId": "task-123",
-  "success": true,
-  "startedAt": "2026-08-01T15:00:00Z",
-  "finishedAt": "2026-08-01T15:00:01Z",
-  "result": {
-    "status": "up",
-    "latencyMs": 10
-  }
-}
-```
-
-## 14. Funcionamento offline do probe
-
-Caso o probe perca conexão com o servidor:
-
-* Os checks essenciais poderão continuar.
-* Os resultados serão armazenados localmente.
-* O probe tentará se reconectar.
-* Os resultados pendentes serão enviados depois.
-* Tarefas expiradas serão descartadas.
-* O buffer deverá possuir limite de tamanho.
-
-O armazenamento local poderá utilizar SQLite.
-
-```text
-Probe
-├── Fila de tarefas
-├── Resultados pendentes
-├── Configuração
-└── Credenciais
-```
-
-## 15. API inicial
-
-## 15.1 Autenticação
-
-```text
-POST /api/auth/login
-POST /api/auth/logout
-GET  /api/auth/me
-```
-
-## 15.2 Sites
-
-```text
-GET    /api/sites
-POST   /api/sites
-GET    /api/sites/:id
-PUT    /api/sites/:id
-DELETE /api/sites/:id
-```
-
-## 15.3 Redes
-
-```text
-GET    /api/networks
-POST   /api/networks
-GET    /api/networks/:id
-PUT    /api/networks/:id
-DELETE /api/networks/:id
-POST   /api/networks/:id/scan
-```
-
-## 15.4 Dispositivos
-
-```text
-GET    /api/devices
-POST   /api/devices
-GET    /api/devices/:id
-PUT    /api/devices/:id
-DELETE /api/devices/:id
-
-GET    /api/devices/:id/interfaces
-GET    /api/devices/:id/monitors
-GET    /api/devices/:id/metrics
-GET    /api/devices/:id/events
-```
-
-## 15.5 Monitores
-
-```text
-GET    /api/monitors
-POST   /api/monitors
-GET    /api/monitors/:id
-PUT    /api/monitors/:id
-DELETE /api/monitors/:id
-
-POST   /api/monitors/:id/run
-POST   /api/monitors/:id/enable
-POST   /api/monitors/:id/disable
-```
-
-## 15.6 Descoberta
-
-```text
-GET    /api/discovery/scan-state
-GET    /api/discovery/scan-stream   (SSE)
-POST   /api/discovery/scan
-POST   /api/discovery/scan-cancel
-GET    /api/discovery/runs
-GET    /api/discovery/runs/:id
-DELETE /api/discovery/cleanup
-```
-
-## 15.7 Topologia
-
-```text
-GET    /api/topology
-POST   /api/topology/links
-PUT    /api/topology/links/:id
-DELETE /api/topology/links/:id
-```
-
-## 15.8 Probes
-
-```text
-GET    /api/probes
-POST   /api/probes
-GET    /api/probes/:id
-PUT    /api/probes/:id
-DELETE /api/probes/:id
-
-POST /api/probes/:id/revoke
-POST /api/probes/:id/test
-```
-
-## 15.9 Alertas
-
-```text
-GET    /api/alert-rules
-POST   /api/alert-rules
-PUT    /api/alert-rules/:id
-DELETE /api/alert-rules/:id
-
-GET  /api/alerts
-POST /api/alerts/:id/acknowledge
-POST /api/alerts/:id/silence
-```
-
-## 16. Tempo real
-
-O frontend utilizará SSE para receber atualizações.
-
-Canal principal:
-
-```text
-GET /api/events/stream
-```
-
-Eventos iniciais:
-
-```text
-device.status.changed
-monitor.result.created
-alert.opened
-alert.resolved
-probe.connected
-probe.disconnected
-discovery.device.found
-scan.progress.updated
-topology.updated
-```
-
-Exemplo:
-
-```json
-{
-  "event": "device.status.changed",
-  "data": {
-    "deviceId": 10,
-    "previousStatus": "online",
-    "currentStatus": "offline"
-  }
-}
-```
-
-## 17. Frontend
-
-O frontend será desenvolvido em Vue com Vuetify.
-
-Estrutura:
-
-```text
-frontend/
+backend-rust/
 ├── src/
-│   ├── components/
-│   ├── layouts/
-│   ├── pages/
-│   ├── stores/
-│   ├── services/
-│   ├── composables/
-│   ├── router/
-│   ├── types/
-│   └── plugins/
+│   ├── controllers/     extrai, valida, delega, serializa — sem regra de negócio
+│   ├── services/        todo o domínio, testável sem HTTP
+│   ├── models/          entidades SeaORM (_entities/, geradas) + regras de modelo
+│   ├── views/           serialização de saída
+│   ├── dtos/            entrada e tipos de contrato
+│   ├── tasks/           comandos de CLI
+│   ├── workers/         jobs em background do Loco
+│   ├── initializers/    ganchos de inicialização
+│   ├── mailers/         templates de e-mail
+│   └── bin/             entrypoint
+├── migration/           uma migration por tabela + helpers em shared.rs
+├── config/              development.yaml, test.yaml, production.yaml, scheduler.yaml
+├── examples/spikes/     protótipos que sustentam as ADRs
+└── tests/               requests/, models/, conventions/
 ```
 
-Stores iniciais:
+`src/services/` é onde o sistema realmente vive:
 
 ```text
-auth
-sites
-networks
-devices
-monitors
-discovery
-topology
-alerts
-probes
-events
+services/
+├── monitoring/     checkers/, runner, result_processor, device_status, presenter
+├── discovery/      service, queue, merger, device_identifier, oui_lookup, cidr_range
+├── snmp/           sessões, coletores, perfis
+├── topology/       ligações e confiança
+├── alerts/         datasets → evaluator → manager (+ catalog, recovery, repository)
+├── notifications/  channels/ (telegram, discord, webhook, email) + formatter
+├── probes/         agent, dispatcher, receiver, liveness, buffer
+├── vpn/            peers, chaves, config_builder/writer, preflight, telemetria
+├── events/         bus (SSE) e relay (outbox → bus)
+├── network_tools/  port scanner e utilidades de rede
+├── maintenance/    data_pruner e limpeza de recursos
+├── zabbix/         importação de templates
+└── shared/         crypto, pagination, errors
 ```
 
-## 18. Segurança
+## 5. O ciclo de monitoramento
 
-O sistema deverá aplicar:
-
-* Autenticação.
-* Autorização por policy.
-* Validação em todas as entradas.
-* Rate limit.
-* Proteção contra tentativas de login.
-* Criptografia de credenciais.
-* Hash de tokens.
-* Registro de auditoria.
-* Isolamento por site.
-* Revogação de probes.
-* Restrição de scans.
-* Timeout de operações.
-* Limite de concorrência.
-* Proteção contra comandos arbitrários.
-
-O probe não receberá comandos de shell livres.
-
-As tarefas deverão ser baseadas em tipos previamente definidos.
-
-Permitido:
-
-```json
-{
-  "type": "ping",
-  "payload": {
-    "host": "192.168.1.1"
-  }
-}
-```
-
-Não permitido:
-
-```json
-{
-  "type": "shell",
-  "command": "qualquer comando"
-}
-```
-
-## 19. Docker Compose inicial
-
-> ℹ️ Esboço original. O arquivo real é o [`docker-compose.yml`](../docker-compose.yml)
-> na raiz, que já divergiu deste: não há `worker` nem `redis` (ver §4.2), e
-> foram acrescentados `migration`, `wireguard`, `vpn-probe` e `frontend`.
-
-```yaml
-services:
-  server:
-    build: .
-    command: node bin/server.js
-    depends_on:
-      - postgres
-      - redis
-
-  worker:
-    build: .
-    command: node ace queue:work
-    depends_on:
-      - postgres
-      - redis
-
-  scheduler:
-    build: .
-    command: node ace scheduler:run
-    depends_on:
-      - postgres
-      - redis
-
-  probe:
-    build: .
-    command: node ace probe:run
-    network_mode: host
-    depends_on:
-      - server
-
-  postgres:
-    image: postgres
-
-  redis:
-    image: redis
-```
-
-O modo de rede do probe dependerá do ambiente.
-
-Para funcionalidades como mDNS, ARP e descoberta local, poderá ser necessário:
-
-```yaml
-network_mode: host
-```
-
-ou executar o probe diretamente no sistema operacional.
-
-## 20. MVP técnico
-
-A primeira versão deverá implementar:
-
-### Backend
-
-* Aplicação AdonisJS.
-* PostgreSQL.
-* Autenticação.
-* Sites.
-* Redes.
-* Dispositivos.
-* Monitores.
-* Worker.
-* Scheduler.
-* Probe local.
-* SSE.
-
-### Monitoramento
-
-* Ping.
-* HTTP e HTTPS.
-* TCP.
-* DNS.
-
-### Descoberta
-
-* Scan IPv4.
-* Ping.
-* DNS reverso.
-* mDNS.
-* Identificação por MAC.
-
-### Interface
-
-* Dashboard.
-* Sites.
-* Redes.
-* Dispositivos.
-* Monitores.
-* Descoberta.
-* Topologia manual.
-* Alertas básicos.
-
-### Alertas
-
-* Dispositivo offline.
-* Serviço indisponível.
-* Recuperação.
-* Notificação por e-mail ou Telegram.
-
-## 21. Segunda etapa
-
-* Probes remotos.
-* Buffer offline.
-* SNMP.
-* Interfaces.
-* Tráfego.
-* LLDP.
-* Traceroute.
-* Topologia automática.
-* Múltiplos usuários.
-* Permissões.
-* Retenção configurável.
-* Agregação de métricas.
-
-## 22. Decisões técnicas principais
-
-### Todo o backend utilizará AdonisJS
-
-Isso inclui:
-
-* API.
-* Worker.
-* Scheduler.
-* Probe.
-* Comandos.
-* Configuração.
-* Logger.
-* Injeção de dependências.
-* Lifecycle.
-
-### Processos serão separados
-
-Mesmo usando o mesmo framework, API, worker, scheduler e probe não deverão executar no mesmo processo.
-
-### Módulos de rede serão isolados
-
-Ping, SNMP, discovery e traceroute não deverão ficar dentro de controllers ou models.
-
-### Probe remoto não acessará o banco central
-
-A comunicação acontecerá por API autenticada ou conexão persistente.
-
-### PostgreSQL será o banco principal
-
-SQLite poderá ser utilizado somente no buffer local do probe.
-
-### SSE será utilizado no frontend
-
-WebSocket será reservado principalmente para comunicação persistente com probes, caso necessário.
-
-## 23. Resumo final
+É o coração do sistema. O `scheduler` acorda a cada 5 s e roda **um** ciclo
+(`src/tasks/scheduler_run.rs`):
 
 ```text
-Frontend
-Vue 3 + Vuetify + PWA
-
-API
-AdonisJS
-
-Worker
-AdonisJS Queue
-
-Scheduler
-Comando ou serviço AdonisJS
-
-Probe
-Comando AdonisJS de longa duração
-
-Banco central
-PostgreSQL
-
-Buffer do probe
-SQLite
-
-Fila
-Redis
-
-Tempo real do frontend
-SSE
-
-Comunicação com probe
-HTTPS ou WebSocket autenticado
+scheduler_run (a cada 5 s)
+   │
+   ├─ monitores vencidos (next_run_at <= now)
+   │     ├─ monitor tem probe? → enfileira em `probe_tasks`
+   │     └─ não tem, ou o probe está offline? → executa local (`run_monitor`)
+   │
+   ├─ discovery: processa runs pendentes, agenda redes vencidas
+   ├─ VPN: sincroniza telemetria dos túneis
+   ├─ watchdog: probe sem heartbeat vira `offline`
+   ├─ data_pruner (quando vencido): aplica as janelas de retenção
+   └─ relay: drena `event_outbox` para o barramento SSE
 ```
 
-A arquitetura utilizará AdonisJS como base comum para todos os processos, reduzindo duplicação de configuração, logs, lifecycle e injeção de dependências.
+Depois de executar, `next_run_at` avança a partir do horário **previsto**, não
+do horário real — é o que evita deslocamento acumulado.
 
-A separação ocorrerá por responsabilidade e por processo, não pela remoção do framework.
+**Fallback local obrigatório.** Se o probe está offline, o scheduler tenta a
+execução local antes de reportar `unknown`. Não remova essa tratativa: sem ela,
+perder o probe significa perder o monitoramento inteiro em silêncio.
+
+### Contrato de resultado
+
+Todo checker devolve a mesma estrutura (`services/monitoring/contracts.rs`):
+status (`up`/`down`/`warning`/`unknown`), início, fim, duração, mensagem,
+métricas e dados livres. O `result_processor` grava `monitor_results`, extrai
+`metrics`, recalcula o estado do dispositivo e alimenta o motor de alertas.
+
+Os cinco checkers são `ping`, `http`, `tcp`, `dns` e `snmp`
+(`services/monitoring/checkers/`).
+
+## 6. Fila de tarefas dos probes
+
+A fila é **persistente**, na tabela `probe_tasks` — não em memória. Quem
+enfileira é o scheduler; quem entrega é a API, em `GET /api/probes/tasks`. Uma
+fila em memória funciona nos testes e nunca em produção: o probe consultaria uma
+fila sempre vazia e todo monitor atribuído a probe ficaria parado em `unknown`.
+
+- Um monitor tem no máximo **uma** tarefa pendente.
+- Tarefa parada além do TTL é descartada: probe que volta depois de um tempo
+  fora executa uma checagem atual por monitor, não uma avalanche de vencidas.
+- Probe sem heartbeat além do limite é marcado `offline` pelo watchdog
+  (`services/probes/liveness.rs`).
+
+### Ciclo de vida do probe
+
+1. **Registro** — `backend_rust-cli task probe_register` gera o token e o imprime
+   **uma única vez**; o banco guarda só o `sha256`.
+2. **Autenticação** — header `X-Probe-Token` em toda requisição. Fora do guarda
+   JWT: o probe não tem sessão de usuário.
+3. **Heartbeat** — `POST /api/probes/heartbeat`.
+4. **Tarefas** — `GET /api/probes/tasks`.
+5. **Resultados** — `POST /api/probes/results`.
+6. **Offline** — os resultados vão para um buffer local
+   (`services/probes/buffer.rs`) e sobem quando a conexão volta.
+
+O probe **não** recebe comando de shell. As tarefas são de tipos previamente
+definidos; qualquer coisa fora do catálogo é rejeitada.
+
+## 7. Esquema de dados
+
+23 tabelas. A ordem de criação está em `src/models/tables.rs` (`CREATION_ORDER`)
+e é a mesma das migrations — pai antes de filho, por causa das FKs. Um teste
+garante que a lista e as migrations não divirjam.
 
 ```text
-Mesmo código-base
-├── Processo API
-├── Processo worker
-├── Processo scheduler
-└── Processo probe
+users  sites  probes  networks
+zabbix_templates  zabbix_template_items
+devices  device_interfaces  device_links
+monitors  monitor_results  metrics
+discovery_runs  discovery_results
+alert_rules  alert_events
+vpn_servers  vpn_peers
+dns_servers  event_outbox  probe_tasks  system_settings
 ```
 
-Essa abordagem permite iniciar o projeto de forma simples e evoluir para múltiplas redes e probes remotos sem precisar reconstruir toda a arquitetura.
+Notas que valem mais que a lista:
+
+- **`devices.ip_address`** é o endereço primário, único dentro da rede
+  (`unique(network_id, ip_address)`). Endereços secundários e MACs vêm das
+  interfaces em `device_interfaces`.
+- **`monitors.configuration`** é JSON: cada tipo de monitor tem os seus campos
+  (`{"host", "packetCount"}` para ping, `{"url", "method",
+  "acceptedStatusCodes"}` para HTTP).
+- **Tabelas append-only** (`monitor_results`, `metrics`, `event_outbox`,
+  `probe_tasks`, `zabbix_template_items`) têm só `created_at`. As duas primeiras
+  são as de maior volume e recebem inserção em rajada; uma coluna de 8 bytes que
+  nunca é lida, vezes milhões de linhas, é escrita jogada fora.
+- **FKs anuláveis com `CASCADE`** existem de propósito (`probes.site_id`,
+  `networks.site_id`, `devices.site_id`, `monitors.device_id`, as três de
+  `alert_rules`). Por isso as FKs são declaradas à mão em
+  `migration/src/shared.rs`, e não pelo `refs` do Loco, que derivaria a ação da
+  nulabilidade.
+- **`auth_tokens` não existe.** A autenticação é JWT stateless.
+- Os índices têm **nome explícito**, nunca o que o banco derivaria.
+
+## 8. API
+
+Prefixo `/api`, vindo do `AppRoutes::prefix` em `src/app.rs` — não do
+controller. `GET /`, `_ping` e `_health` ficam **fora** do prefixo e fora da
+autenticação.
+
+Tudo abaixo de `/api` passa pelo guarda JWT (`controllers/auth_guard.rs`), com
+duas exceções: `/api/auth/*` e as rotas de agente do probe, que se autenticam
+por `X-Probe-Token` dentro do handler.
+
+```text
+GET  /                              identificação do serviço (health check)
+
+POST /api/auth/login | /register | /forgot | /reset | /logout
+GET  /api/auth/me | /current | /verify/{token} | /magic-link/{token}
+
+GET|POST         /api/sites                 GET|PUT|DELETE /api/sites/{id}
+GET|POST         /api/networks              GET|PUT|DELETE /api/networks/{id}
+POST             /api/networks/{id}/scan
+GET|POST         /api/devices               GET|PUT|DELETE /api/devices/{id}
+GET              /api/devices/{id}/monitors | /metrics | /events | /interfaces
+GET|POST         /api/monitors              GET|PUT|DELETE /api/monitors/{id}
+POST             /api/monitors/{id}/run | /enable | /disable
+GET              /api/monitors/{id}/results | /alerts
+
+GET  /api/discovery/scan-state | /runs | /runs/{id}
+GET  /api/discovery/scan-stream            (SSE)
+POST /api/discovery/scan | /scan-cancel
+DELETE /api/discovery/cleanup
+
+GET  /api/topology                         POST /api/topology/links
+POST /api/topology/recalculate             DELETE /api/topology/links/{id}
+
+GET|POST /api/probes                       GET|PUT|DELETE /api/probes/{id}
+POST     /api/probes/{id}/revoke | /test
+POST     /api/probes/heartbeat | /results  GET /api/probes/tasks   (X-Probe-Token)
+
+GET|POST /api/alert-rules                  PUT|DELETE /api/alert-rules/{id}
+GET      /api/alert-rules/catalog          POST /api/alert-rules/catalog
+GET      /api/alerts                       POST /api/alerts/{id}/acknowledge | /silence | /verify
+
+GET  /api/events                           GET /api/events/stream   (SSE)
+GET  /api/dashboard/layout                 POST /api/dashboard/layout
+
+POST /api/snmp/test                        POST /api/devices/{id}/snmp/scan | /poll | /apply-monitors
+POST /api/port-scan
+POST /api/dns/lookup | /benchmark          GET /api/dns/performance
+GET|POST /api/dns-servers                  PUT|DELETE /api/dns-servers/{id}
+
+GET|PUT  /api/vpn/server                   POST /api/vpn/server/preflight | /detect-endpoint
+GET|POST /api/vpn/peers                    PATCH|DELETE /api/vpn/peers/{id}
+GET      /api/vpn/peers/next-ip            GET /api/vpn/peers/{id}/config | /qrcode
+POST     /api/vpn/peers/{id}/rotate | /firewall-hints
+
+GET|POST /api/zabbix-templates             GET|DELETE /api/zabbix-templates/{id}
+```
+
+### Convenções de contrato
+
+- **`camelCase` em todo DTO.** Não é estilo: `tests/conventions/camel_case.rs`
+  falha se faltar. As duas exceções (`TopologyLinkRequest`, `TopologyQuery`)
+  estão listadas lá com justificativa.
+- **Erros** saem como `{"message": "..."}`, em português — é o que o frontend lê.
+- **Paginação** no envelope `{data, meta}` (`services/shared/pagination.rs`), e
+  não no `PaginationResponse` do Loco: o `useInfiniteList` do frontend decide o
+  fim da lista por `meta.currentPage >= meta.lastPage`.
+- **Modo dual**: endpoints de lista devolvem array cru sem `?page` e o envelope
+  paginado com `?page`.
+
+## 9. Tempo real
+
+O frontend consome `GET /api/events/stream` (SSE). Eventos publicados incluem
+mudança de estado de dispositivo, resultado de monitor, abertura e resolução de
+alerta, conexão e desconexão de probe, dispositivo descoberto, progresso de scan
+e atualização de topologia.
+
+**Os eventos passam por `event_outbox` antes do barramento.** Quem gera o evento
+é o scheduler, num processo; quem tem a conexão SSE aberta é o `server`, em
+outro. Publicar direto na memória do processo que gerou faria o evento morrer ali
+— o relay (`services/events/relay.rs`) é a ponte, e a tabela é o que garante que
+nada se perde entre um tique e outro.
+
+## 10. Módulo VPN
+
+- O `server` gera as chaves em Rust puro (`x25519-dalek`), sem depender do
+  binário `wg` e sem `NET_ADMIN`.
+- A **chave privada de um peer nunca vai ao banco**: vive num cofre em memória
+  até a primeira leitura. Depois disso, só rotacionando.
+- Os segredos do servidor ficam cifrados em repouso com XChaCha20-Poly1305,
+  chave derivada de `APP_KEY` (`services/shared/crypto.rs`).
+- A telemetria do túnel é lida do arquivo `<iface>.status` no volume
+  compartilhado — nunca por `docker exec`.
+- O `vpn-probe` compartilha o namespace de rede do WireGuard
+  (`network_mode: "service:wireguard"`) para medir ICMP/SNMP na faixa do túnel.
+- O token de fallback `DEFAULT_VPN_PROBE_TOKEN` **não pode ser removido**: é ele
+  que garante registro zero-config em Docker, e é a razão de `probes.token_hash`
+  não ter índice único.
+
+## 11. Segurança
+
+- Autenticação JWT; `JWT_SECRET` **precisa ser base64 válido** (HS512). Um valor
+  que não seja base64 faz todo login responder 401.
+- Tokens de probe guardados como `sha256`, revogáveis.
+- Credenciais e chaves privadas cifradas em repouso com `APP_KEY`. Sem `APP_KEY`
+  em produção o serviço **não sobe** — é intencional.
+- Validação em toda entrada; rate limit; timeout por operação; limite de
+  concorrência.
+- Isolamento por site: um probe só enxerga o site e as redes autorizadas.
+- Nenhum comando arbitrário chega ao probe.
+- Ping por socket ICMP `SOCK_DGRAM`, sem `CAP_NET_RAW` e sem `execFile('ping')`
+  — ver [ADR 003](adr/003-icmp-dgram.md). O `sysctl net.ipv4.ping_group_range`
+  no compose é o que habilita isso.
+
+## 12. O que não existe
+
+Registrar o que **não** foi construído evita que alguém procure por uma peça
+ausente achando que ela está escondida:
+
+- **Não há worker nem fila externa.** Não existe Redis, BullMQ ou equivalente.
+  O scheduler executa os monitores inline e a fila dos probes é a tabela
+  `probe_tasks`. Os `workers` do Loco rodam em `BackgroundAsync`, no processo.
+- **A dívida disso é backpressure**: uma rajada de monitores vencidos não tem
+  onde ser represada. Ver a Fase 2 do [roadmap](roadmap.md).
+- **Não há agregação de métricas** (rollup por hora/dia). A retenção é por
+  descarte, no `data_pruner`.
+- **Não há auditoria** nem permissões por papel — a autorização hoje é
+  "autenticado ou não".
+
+## 13. Decisões registradas
+
+| ADR | Decisão |
+| :--- | :--- |
+| [001](adr/001-snmp-client.md) | Cliente SNMP |
+| [002](adr/002-rustscan-embedding.md) | Estratégia de port scan sobre `tokio` |
+| [003](adr/003-icmp-dgram.md) | Ping por socket ICMP `SOCK_DGRAM` |
+| [004](adr/004-dns-wire.md) | Consultas DNS no formato wire |
+| [005](adr/005-scheduler-loco.md) | Scheduler nativo do Loco, um ciclo por tique |
+| [006](adr/006-prioridade-do-padrao-rust.md) | Preferir o idioma Rust ao espelhamento do código anterior |
+
+## 14. Configuração
+
+A configuração viva está em `backend-rust/config/{development,test,production}.yaml`.
+O `.env` só preenche os `get_env(...)` desses arquivos e as substituições do
+compose — [`.env.example`](../.env.example) lista todas as variáveis lidas, e só
+elas. O banco é apontado por **`DATABASE_URL`**, uma URL única.
+
+A porta é **3333** nos três ambientes: o proxy do Vite e o do nginx apontam para
+ela.

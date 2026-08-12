@@ -37,8 +37,9 @@ impl HttpChannelSpec for WebhookChannel {
     fn build_request(&self, message: &NotificationMessage) -> ChannelRequest {
         ChannelRequest {
             url: self.url.clone(),
-            // O corpo replica o do AdonisJS campo a campo: integrações de
-            // cliente já leem `message.title`/`message.severity`.
+            // Formato público: integrações de cliente já leem
+            // `message.title`/`message.severity`. Renomear campo aqui quebra
+            // do lado de fora, em silêncio.
             body: json!({
                 "event": "notification",
                 "timestamp": Utc::now().to_rfc3339(),

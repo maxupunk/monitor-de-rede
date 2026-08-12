@@ -57,8 +57,8 @@ pub const VPN_STATUS_TRANSITION: &str = "vpnStatusTransition";
 pub const VPN_SECONDS_SINCE_ACTIVITY: &str = "vpnSecondsSinceActivity";
 pub const VPN_PREVIOUS_STATUS: &str = "vpnPreviousStatus";
 
-/// Vocabulário completo oferecido na tela de regras, na ordem em que o
-/// AdonisJS o declarava.
+/// Vocabulário completo oferecido na tela de regras. A **ordem importa**: é a
+/// ordem em que os campos aparecem no seletor da interface.
 pub const ALERT_FIELDS: [&str; 24] = [
     STATUS,
     LATENCY_MS,

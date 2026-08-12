@@ -13,4 +13,4 @@ decisão cria.
 | [005](005-scheduler-loco.md) | Scheduler: task de um ciclo, disparada pelo scheduler nativo | SPIKE-05 | aceito |
 | [006](006-prioridade-do-padrao-rust.md) | Padrão do backend Rust tem precedência; o frontend adapta | — | aceito |
 
-Contexto geral: [`../roadmap_backend_rust.md`](../roadmap_backend_rust.md).
+Contexto geral: [`../historico/roadmap_backend_rust.md`](../historico/roadmap_backend_rust.md).

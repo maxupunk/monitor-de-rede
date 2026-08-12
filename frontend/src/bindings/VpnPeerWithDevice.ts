@@ -5,8 +5,9 @@ import type { VpnPeerDeviceView } from "./VpnPeerDeviceView";
 /**
  * Corpo de `PATCH /api/vpn/peers/:id` — peer + dispositivo renomeado.
  *
- * Sem os avisos de diagnóstico: quem os calcula é a listagem, e acrescentá-los
- * aqui mudaria a resposta que o backend AdonisJS devolve (§16, paridade).
+ * Sem os avisos de diagnóstico: quem os calcula é a listagem, que tem o
+ * contexto dos outros peers para isso. Um `PATCH` enxerga um peer só, então
+ * emitir os avisos aqui significaria emiti-los errados.
  */
 export type VpnPeerWithDevice = { device: VpnPeerDeviceView | null, id: number, vpnServerId: number, deviceId: number, publicKey: string, deviceProfile: string, persistentKeepalive: number, lastHandshakeAt: string | null, 
 /**

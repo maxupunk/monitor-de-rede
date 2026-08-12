@@ -48,20 +48,22 @@ cargo loco doctor           # check the environment
 
 ## Convenções deste projeto (além do padrão Loco)
 
-Fixadas na Fase 0 da migração. Ver `docs/roadmap_backend_rust.md` e `docs/adr/`.
+Fixadas na Fase 0 da migração. Ver `docs/adr/` (decisões vivas) e
+`docs/historico/roadmap_backend_rust.md` (o plano, encerrado).
 
 - **Prefixo `/api`** vem do `AppRoutes::prefix` em `src/app.rs`, não do controller.
   Um `Routes::new().prefix("/auth")` vira `/api/auth`. `GET /`, `_ping` e `_health`
   ficam na raiz porque são registrados **antes** do `prefix`.
-- **`src/services/`** guarda todo o domínio (o antigo `modules/` do AdonisJS).
-  Controller só extrai, valida, delega e serializa.
+- **`src/services/`** guarda todo o domínio. Controller só extrai, valida,
+  delega e serializa.
 - **Erros:** handlers devolvem `Result<_, AppError>`
   (`src/services/shared/errors.rs`), não `loco_rs::Error`. O corpo é
   `{"message": "..."}` porque é isso que o frontend lê. Mensagens em português.
 - **`#[serde(rename_all = "camelCase")]` em todo DTO.** Não é estilo: o teste
   `tests/conventions/camel_case.rs` falha se você esquecer.
 - **Paginação:** use `paginate_compat` (`services/shared/pagination.rs`). O
-  envelope é o do Lucid (`{data, meta}`), não o do Loco.
+  envelope é `{data, meta}`, não o `PaginationResponse` do Loco — é o formato
+  que o `useInfiniteList` do frontend lê.
 - **Bindings TypeScript:** `#[ts(export, export_to = "../../frontend/src/bindings/")]`.
   Eles são gerados durante `cargo test`.
 - **Tabelas novas** entram em `src/models/tables.rs` (`CREATION_ORDER`). O
@@ -69,7 +71,8 @@ Fixadas na Fase 0 da migração. Ver `docs/roadmap_backend_rust.md` e `docs/adr/
 - **Migrations:** use os helpers de `migration/src/shared.rs`. As FKs são
   declaradas à mão (`fk(...)` com a ação de `ON DELETE`) porque o parâmetro
   `refs` do `create_table` do Loco deriva a ação da nulabilidade, e o esquema
-  tem FKs anuláveis com `CASCADE`. Índices levam o **nome do Adonis**.
+  tem FKs anuláveis com `CASCADE`. Índices levam **nome explícito**, nunca o
+  que o banco derivaria.
 - **`cargo loco db entities` roda contra o PostgreSQL**, nunca contra o SQLite:
   o SQLite reporta todo inteiro como `INTEGER` e a entidade sai com `i64` onde
   o Postgres tem `INT4` — o `sqlx` recusa a leitura em produção. Depois de

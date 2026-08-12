@@ -1,74 +1,112 @@
-# 🧪 Diretrizes de Teste & Boas Práticas (Agentes & Devs)
+# 🧪 Diretrizes de Teste
 
 > [!IMPORTANT]
-> Todo novo recurso, refatoração ou correção de bug **DEVE** vir acompanhado de testes unitários ou funcionais. Nunca declare uma tarefa concluída sem rodar `node ace test` e `npx tsc --noEmit`.
+> Todo recurso novo, refatoração ou correção de bug **DEVE** vir acompanhado de
+> teste. E "concluído" significa que os quatro comandos abaixo passaram, rodados
+> de dentro de `backend-rust/`:
+>
+> ```powershell
+> cargo fmt --all --check
+> cargo clippy --all-targets -- -D warnings
+> cargo test
+> cargo build --release
+> ```
+>
+> No frontend: `npm --prefix frontend run typecheck | format | lint | build`.
 
 ---
 
-## 📌 1. Estrutura de Testes no Projeto
+## 1. Onde cada teste mora
 
-O projeto utiliza o **Japa Test Runner** integrado ao AdonisJS v6:
-
-| Tipo | Localização | Escopo & Regras |
+| Tipo | Localização | Escopo |
 | :--- | :--- | :--- |
-| **Unitários** | `tests/unit/**/*.spec.ts` | Testam funções puras, checkers, conversores e mergers isoladamente. **Não dependem do banco de dados nem da internet.** |
-| **Funcionais** | `tests/functional/**/*.spec.ts` | Testam endpoints HTTP da API REST e fluxos completos de banco de dados. Usam o cliente HTTP do Japa. |
+| **Unitário** | `#[cfg(test)] mod tests` **no próprio módulo** | Funções puras: parsers, cálculos, normalizações, formatação de mensagem. Sem banco, sem rede. |
+| **De requisição** | `backend-rust/tests/requests/` | Endpoints HTTP e fluxos completos com banco. |
+| **De modelo** | `backend-rust/tests/models/` | Regras de modelo e paginação, direto contra o banco. |
+| **De convenção** | `backend-rust/tests/conventions/` | Regras estruturais do código — hoje, `camelCase` em todo DTO. |
+| **De tarefa** | `backend-rust/tests/tasks/` | Comandos de CLI. |
+| **Snapshot** | `insta`, ao lado do teste | Artefatos textuais: scripts de VPN, `wg0.conf`, payloads longos. |
 
----
+Função pura tem teste no próprio arquivo. Isso não é preferência de
+organização: é o que faz o teste ser lido junto com o código que ele descreve.
 
-## ⚡ 2. Regras de Ouro para Criação de Testes
+O alvo `tests/mod.rs` agrega os submódulos — daí `cargo test --test mod <filtro>`
+para rodar um teste específico.
 
-### 1. Limpeza do Banco em Testes Funcionais
-Sempre utilize `group.each.setup(() => testUtils.db().truncate())` em suítes funcionais para evitar contaminação de estado entre os testes.
+## 2. Regras de ouro
 
-```ts
-import { test } from '@japa/runner'
-import testUtils from '@adonisjs/core/services/test_utils'
+### 2.1 Isolamento de banco
 
-test.group('Sites API - Functional Tests', (group) => {
-  group.each.setup(() => testUtils.db().truncate())
+Testes de requisição usam `request_with_config::<App, _, _>`, e o
+`Hooks::truncate` limpa as 23 tabelas entre eles. A lista está em
+`src/models/tables.rs` (`CREATION_ORDER`) — **tabela nova entra lá**, senão um
+teste passa a depender da sujeira deixada pelo anterior. Há um teste que falha
+se a lista divergir das migrations.
 
-  test('POST /api/sites deve criar site', async ({ client, assert }) => {
-    const response = await client.post('/api/sites').json({ name: 'Matriz' })
-    response.assertStatus(201)
-  })
-})
+```rust
+#[tokio::test]
+#[serial]
+async fn monitor_run_grava_resultado() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |request, ctx| async move {
+        let user = prepare_data::init_user_login(&request, &ctx).await;
+        let response = request.post("/api/monitors/1/run").await;
+        assert_eq!(response.status_code(), 200);
+    })
+    .await;
+}
 ```
 
-### 2. Evite Dependências de Rede Externa
+### 2.2 `#[serial]` em tudo que toca estado global de processo
+
+Obrigatório em testes que mexem em **variável de ambiente**, no
+`ScanSessionService`, no cofre de chaves da VPN e no rate limiter. Sem ele, dois
+testes paralelos disputam o mesmo estático e a falha aparece de forma
+intermitente — o pior tipo de teste quebrado.
+
+Quem seta variável de ambiente **remove no fim**, mesmo que o teste falhe no
+meio.
+
+### 2.3 Nada de rede externa
+
 > [!WARNING]
-> Nunca faça requisições para serviços externos (como `httpbin.org` ou `google.com`) em testes unitários automatizados. Isso gera instabilidade e falhas por latência/timeout.
+> Nunca aponte um teste para `google.com`, `httpbin.org` ou qualquer serviço de
+> terceiro. Isso troca uma verificação determinística por latência e disponibilidade
+> alheias, e o teste passa a falhar por motivos que não são o código.
 
-- Utilize `127.0.0.1`, `localhost` ou mock para testes de timeout.
-- Se o teste envolver execução assíncrona de processos do sistema (como `ping` nativo), ajuste o limite de tempo do Japa com `.timeout(5000)`.
+Use apenas `127.0.0.1` ou `localhost`. Testes de rede nativa (`ping`, socket)
+têm teto de **5 segundos**.
 
-```ts
-test('PingChecker deve medir latência local', async ({ assert }) => {
-  const checker = new PingChecker()
-  const result = await checker.execute({ host: '127.0.0.1', packetCount: 1, timeoutMs: 1000 })
-  assert.exists(result.startedAt)
-}).timeout(5000)
+### 2.4 Os dois dialetos
+
+A suíte roda em **SQLite**; produção é **PostgreSQL**. Toda consulta precisa
+valer nos dois. O ponto que mais morde: o SQLite reporta todo inteiro como
+`INTEGER`, então `cargo loco db entities` rodado contra ele gera `i64` onde o
+Postgres tem `INT4` — e aí o `sqlx` recusa a leitura em produção. **Gere
+entidades sempre contra o PostgreSQL.**
+
+### 2.5 Status codes explícitos
+
+Valide o código exato (`200`, `201`, `204`, `404`, `422`), não "não deu erro".
+
+### 2.6 Bindings TypeScript
+
+Os arquivos de `frontend/src/bindings/` são gerados por `ts-rs` **durante
+`cargo test`**. Não edite os `.ts` à mão: corrija o struct Rust e rode a suíte.
+
+## 3. Antes de considerar pronto
+
+```powershell
+cd backend-rust
+cargo fmt --all --check
+cargo clippy --all-targets -- -D warnings
+cargo test
+cargo build --release
+
+cd ..\frontend
+npm run typecheck
+npm run lint
+npm run build
 ```
 
-### 3. Independência de Ambiente (Docker / Local)
-- **Garantia de pastas**: Nunca assuma que diretórios temporários existem. Ao utilizar SQLite ou manipular arquivos locais em novos módulos, garanta a criação do diretório via `fs.mkdirSync(dir, { recursive: true })`.
-- **Status Codes Estritos**: Valide explicitamente os códigos HTTP de resposta (ex: `200` para OK, `201` para Criado, `204` para Exclusão sem conteúdo).
-
----
-
-## 🛠️ 3. Checklist de Verificação Antes do Commit
-
-Antes de considerar uma alteração pronta, execute os seguintes passos:
-
-1. **Checagem de Tipos (TypeScript)**:
-   ```bash
-   npx tsc --noEmit
-   ```
-2. **Suíte Completa de Testes**:
-   ```bash
-   node ace test
-   ```
-3. **Format & Lint**:
-   ```bash
-   npm run lint
-   ```
+`cargo test` recria `backend_rust_test.sqlite*` em `backend-rust/`. São
+ignorados pelo git; não precisam ser removidos, só não versionados.

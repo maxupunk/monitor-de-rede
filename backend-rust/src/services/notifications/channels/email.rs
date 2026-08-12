@@ -1,16 +1,15 @@
 //! Canal de e-mail (§8.9).
 //!
 //! Diferente dos outros três, este não é webhook: usa o `EmailSender` que o
-//! Loco já monta a partir de `config/*.yaml` (§8.9 — "SMTP via mailer do
-//! Loco"). O backend AdonisJS só escrevia a mensagem no log; aqui a entrega é
-//! real quando existe mailer configurado, e cai no mesmo log quando não existe
-//! — que é o caso do ambiente de teste, cujo mailer é `stub`.
+//! Loco monta a partir de `config/*.yaml`. A entrega é real quando existe
+//! mailer configurado e cai no log quando não existe — que é o caso do
+//! ambiente de teste, cujo mailer é `stub`, e o do compose, que não tem SMTP.
 
 use loco_rs::{app::AppContext, mailer::Email};
 
 use crate::services::notifications::contracts::{NotificationChannel, NotificationMessage};
 
-/// Destinatário padrão, igual ao do backend anterior.
+/// Destinatário usado quando `SMTP_TO` não está definido.
 const DEFAULT_RECIPIENT: &str = "admin@monitor.local";
 
 pub struct EmailChannel {
@@ -35,8 +34,8 @@ impl EmailChannel {
         }
     }
 
-    /// Assunto no mesmo formato do log do AdonisJS, para quem já filtra a
-    /// caixa por `[CRITICAL]` continuar filtrando.
+    /// Assunto prefixado pela severidade em maiúsculas: é o que permite filtrar
+    /// a caixa por `[CRITICAL]`. Formato observável — não reordene.
     fn subject(message: &NotificationMessage) -> String {
         format!(
             "[{}] {}",

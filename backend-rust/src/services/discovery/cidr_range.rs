@@ -28,8 +28,8 @@ pub struct CidrRange {
 }
 
 fn invalid(cidr: &str, reason: &str) -> AppError {
-    // Mensagem idêntica à do `InvalidCidrError` do Adonis: ela chega ao usuário
-    // no 422 de `POST /api/networks/:id/scan` (§7.4).
+    // Texto voltado ao operador, não ao log: esta mensagem chega à tela no 422
+    // de `POST /api/networks/:id/scan`. Mudá-la muda o que o usuário lê.
     AppError::validation(format!("Faixa CIDR inválida \"{cidr}\": {reason}"))
 }
 

@@ -13,9 +13,9 @@ use super::{
 
 /// Despachante de notificações.
 ///
-/// Os canais são montados a partir do ambiente, como no AdonisJS. Quem não
-/// tiver token/URL responde `false` sem tentar, então uma instalação que só
-/// usa Telegram não paga nada pelos outros três.
+/// Os canais são montados a partir do ambiente. Quem não tiver token/URL
+/// responde `false` sem tentar, então uma instalação que só usa Telegram não
+/// paga nada pelos outros três.
 pub struct NotificationService {
     channels: Vec<Box<dyn NotificationChannel>>,
 }

@@ -23,9 +23,9 @@ impl Severity {
         }
     }
 
-    /// Lê a severidade gravada na regra. Valor desconhecido vira `warning` —
-    /// o mesmo default do `rulesStore` do AdonisJS, para uma linha antiga
-    /// jamais silenciar a notificação.
+    /// Lê a severidade gravada na regra. Valor desconhecido vira `warning`, e
+    /// não `info`: uma linha antiga com severidade que ninguém reconhece mais
+    /// jamais pode acabar silenciando a notificação.
     #[must_use]
     pub fn parse(raw: &str) -> Self {
         match raw {
@@ -68,9 +68,9 @@ pub struct ChannelRequest {
 /// O que distingue um canal de webhook do outro.
 ///
 /// Telegram, Discord e webhook genérico fazem o mesmo `POST` JSON com o mesmo
-/// tratamento de erro; a única diferença é qual URL e qual corpo montar. No
-/// AdonisJS isso era uma classe base abstrata — aqui é composição:
-/// [`HttpNotificationChannel`] carrega o envio e o `spec` descreve o resto.
+/// tratamento de erro; a única diferença é qual URL e qual corpo montar. Daí
+/// composição em vez de herança: [`HttpNotificationChannel`] carrega o envio e
+/// o `spec` descreve só o que muda.
 pub trait HttpChannelSpec: Send + Sync {
     fn name(&self) -> &str;
 

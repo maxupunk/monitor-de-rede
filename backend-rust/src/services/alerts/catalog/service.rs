@@ -237,9 +237,9 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn assinatura_normaliza_valor_textual_e_numerico_como_o_adonis() {
-        // O original monta a chave com `String(value)`: `200` e `"200"` colidem
-        // de propósito, porque descrevem a mesma regra para o operador.
+    fn assinatura_normaliza_valor_textual_e_numerico_para_a_mesma_chave() {
+        // A chave é montada sobre o valor em texto: `200` e `"200"` colidem de
+        // propósito, porque descrevem a mesma regra para o operador.
         let numerica = signature(
             &json!({ "field": "latencyMs", "operator": "gt", "value": 200 }),
             None,

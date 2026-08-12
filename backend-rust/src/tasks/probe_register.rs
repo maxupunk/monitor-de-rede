@@ -1,7 +1,7 @@
-//! `cargo loco task probe_register` — registra um agente e imprime o token.
+//! `backend_rust-cli task probe_register` — registra um agente e imprime o token.
 //!
-//! Paridade com `node ace probe:register`. O token cru é exibido **uma única
-//! vez**: o banco guarda só o `sha256`, então não há como recuperá-lo depois.
+//! O token cru é exibido **uma única vez**: o banco guarda só o `sha256`, então
+//! não há como recuperá-lo depois.
 
 use chrono::Utc;
 use loco_rs::prelude::*;

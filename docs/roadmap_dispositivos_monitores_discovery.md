@@ -24,7 +24,7 @@ O botão foi renomeado para **"Coletar SNMP agora"** e a coleta SNMP agora tamb�
 - [x] Renomear botão no frontend para "Coletar SNMP agora".
 - [x] Adicionar `pollDevice` assíncrono no `store`/`update` do dispositivo quando SNMP estiver habilitado.
 - [x] Validar que falhas de SNMP não quebram o fluxo de cadastro/edição.
-- [x] Testar build e testes (`npx tsc --noEmit`, `node ace test`).
+- [x] Testar build e testes (validado com a rotina da época; a atual é `cargo clippy` + `cargo test`).
 
 ---
 

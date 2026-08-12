@@ -1,9 +1,9 @@
-//! Geração de chaves WireGuard (Curve25519) sem depender do binário `wg` (§8.10.1).
+//! Geração de chaves WireGuard (Curve25519) sem depender do binário `wg`.
 //!
-//! O backend AdonisJS já fazia isso em Node puro pelo mesmo motivo: permitir
-//! desenvolvimento fora do container, onde `wg genkey` não existe. Em Rust o
-//! `x25519-dalek` faz o mesmo trabalho e ainda dispensa o vaivém por PKCS#8 —
-//! a chave é literalmente o escalar de 32 bytes.
+//! O motivo é poder desenvolver fora do container, onde `wg genkey` não existe
+//! — e, no container, não precisar de `NET_ADMIN` só para gerar uma chave. O
+//! `x25519-dalek` resolve sem vaivém por PKCS#8: a chave é literalmente o
+//! escalar de 32 bytes.
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use rand::RngCore;

@@ -1,9 +1,9 @@
-//! §6 #01 — estende a tabela `users` do scaffold Loco com `active`.
+//! Estende a tabela `users` do scaffold Loco com a coluna `active`.
 //!
 //! A `users` do Loco (pid, api_key, tokens de verificação/reset/magic-link) é
-//! bem mais rica que a do AdonisJS e é ela que fica — a §6 manda estendê-la, e
-//! não recriá-la. O único campo que falta é o `active` do backend atual, usado
-//! para desligar um login sem apagar o histórico que aponta para o usuário.
+//! bem mais rica que a do esquema anterior, então é ela que fica: estender, não
+//! recriar. O único campo que faltava é o `active`, usado para desligar um
+//! login sem apagar o histórico que aponta para o usuário.
 //!
 //! Migration separada em vez de editar `m20220101_000001_users.rs`: mexer numa
 //! migration já aplicada deixa bancos existentes fora de sincronia sem que nada

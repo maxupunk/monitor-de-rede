@@ -2,13 +2,11 @@
 
 Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificação base (`docs/base.md`), este documento mapeia o status atual do projeto, detalhando o que já foi estruturado e as etapas necessárias para tornar o sistema 100% funcional.
 
-> **Backend reescrito em Rust.** Os módulos abaixo continuam descrevendo o
-> comportamento correto do produto, mas a implementação vive em `backend-rust/`
-> (Loco.rs) desde a Fase 9 da migração. O roadmap da reescrita, item a item, é
-> o [roadmap_backend_rust.md](roadmap_backend_rust.md); o procedimento de corte
-> é o [corte_backend_rust.md](corte_backend_rust.md). Onde este documento diz
-> "AdonisJS", "Lucid" ou `node ace`, leia a
-> [§2 do roadmap Rust](roadmap_backend_rust.md#2-mapa-de-tradução-adonisjs--locors).
+> **O backend é Rust (Loco.rs), em `backend-rust/`.** As fases abaixo registram
+> o que foi entregue — os nomes de arquivo e comando citados nelas são os da
+> época em que cada fase foi escrita. Para o estado atual, leia
+> [arquitetura.md](arquitetura.md); para o registro da reescrita,
+> [historico/](historico/).
 
 ---
 
@@ -17,23 +15,23 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
 | Componente / Módulo | Status Atual | Descrição |
 | :--- | :---: | :--- |
 | **Documentação Técnica** | 🟢 **Concluído** | Especificação completa da arquitetura (`arquitetura.md`) e requisitos (`base.md`). |
-| **Backend em Rust (Loco.rs)** | 🟢 **Concluído** | Reescrita completa em `backend-rust/`: 23 migrations, ~90 endpoints, 5 checkers, discovery, SNMP, topologia, alertas, probes e VPN. Ver [roadmap_backend_rust.md](roadmap_backend_rust.md). |
+| **Backend em Rust (Loco.rs)** | 🟢 **Concluído** | Reescrita completa em `backend-rust/`: 23 migrations, ~90 endpoints, 5 checkers, discovery, SNMP, topologia, alertas, probes e VPN. Ver [historico/roadmap_backend_rust.md](historico/roadmap_backend_rust.md). |
 | **Estrutura do Projeto Backend** | 🟢 **Concluído** | Controllers em `src/controllers/`, domínio em `src/services/`, entidades `sea-orm` em `src/models/_entities/`. |
-| **Banco de Dados & Migrations** | 🟢 **Concluído** | Criadas todas as 15+ tabelas de negócio e atualizados os modelos Lucid com relacionamentos. |
+| **Banco de Dados & Migrations** | 🟢 **Concluído** | 23 tabelas, uma migration por tabela em `backend-rust/migration/`, entidades `sea-orm` com os relacionamentos. |
 | **Motor de Monitoramento (Checkers)** | 🟢 **Concluído** | Checkers reais de Ping (ICMP/RTT), HTTP/HTTPS (Fetch/Status/Latência), TCP (Sockets), SNMP (uptime/CPU/memória/interface) e DNS com medição de latência de resolução via UDP, TCP e DoH. |
 | **Processamento de Resultados** | 🟢 **Concluído** | `ResultProcessor` grava resultados no banco, extrai métricas e atualiza estado dos dispositivos/monitores. |
 | **Worker & Queue System** | 🔴 **Não implementado** | A fila do §4.2 da arquitetura nunca saiu do papel: o `scheduler` executa os monitores inline e os probes cuidam do resto. Ver a dívida de backpressure na Fase 2. |
-| **Agendador (Scheduler)** | 🟢 **Concluído** | Comando `scheduler:run` com loop de busca por `next_run_at`, execução e recálculo do próximo ciclo. |
+| **Agendador (Scheduler)** | 🟢 **Concluído** | Scheduler nativo do Loco dispara a tarefa `scheduler_run` a cada 5 s: busca por `next_run_at`, execução e recálculo do próximo ciclo. |
 | **Descoberta Automática (Discovery)** | 🟢 **Concluído** | Scanners funcionais (ICMP/Ping sweep, tabela ARP, PortScanner) e fusão com auto-criação de dispositivo/monitor. |
-| **Comunicação com Probes** | 🟢 **Concluído** | Autenticação por token Hash (SHA-256), registro via CLI (`probe:register`), heartbeat, despachante de tarefas e buffer offline com reenvio automático. |
+| **Comunicação com Probes** | 🟢 **Concluído** | Autenticação por token Hash (SHA-256), registro via CLI (`task probe_register`), heartbeat, despachante de tarefas e buffer offline com reenvio automático. |
 | **SNMP & Métricas de Tráfego** | 🟢 **Concluído** | Coleta SNMP (v1/v2c/v3), varredura de interfaces, contadores de octetos (ifHCIn/ifHCOut) e métricas de tráfego (bps). |
 | **Topologia de Rede** | 🟢 **Concluído** | Resolutor de links (`DeviceLink`), pontuação de confiança (`ConfidenceCalculator`), inferência de sub-rede e gerador do mapa gráfico. |
 | **Alertas & Notificações** | 🟢 **Concluído** | Avaliação de regras em tempo real (`AlertManager`), catálogo de regras pré-configuradas com aplicação idempotente (`AlertRuleCatalogService`), ciclo de vida (ativo, reconhecido, silenciado, resolvido) e conectores (E-mail, Telegram, Discord, Webhook). |
 | **Eventos Tempo Real (SSE)** | 🟢 **Concluído** | Barramento `EventBus` singleton e streaming em `/api/events/stream` via SSE funcional. |
-| **Frontend (Vue 3 + Vuetify)** | 🟢 **Concluído** | SPA/PWA completa integrada à API REST AdonisJS v6, com Pinia, gráficos, topologia gráfica interativa e suporte a SSE em tempo real. |
+| **Frontend (Vue 3 + Vuetify)** | 🟢 **Concluído** | SPA/PWA completa integrada à API REST, com Pinia, gráficos, topologia gráfica interativa e suporte a SSE em tempo real. |
 | **Infraestrutura Docker** | 🟢 **Concluído** | `docker-compose.yml` e `Dockerfile` configurados para todos os serviços (API, Scheduler, Probe, vpn-probe, WireGuard, Postgres, Frontend). |
-| **Módulo WireGuard (VPN)** | 🟢 **Concluído (Fases 1–4)** | Modelo de dados, geração nativa de chaves X25519, IPAM transacional, scripts por perfil (MikroTik/OpenWrt/Linux/Windows/Mobile), container WireGuard com hot-reload por `syncconf`, `vpn-probe` dedicado e telas de servidor/dispositivos/wizard. Falta apenas a validação E2E com hardware real ([roadmap_vpn.md](file:///d:/Projetos/Master%20sistemas/opensource/monitor%20de%20rede/docs/roadmap_vpn.md)). |
-| **Dashboard Grafana Customizável** | 🟢 **Concluído** | Dashboard modular com reordenação de widgets, adicionar/remover cards, limitação de altura e scroll no card de monitores e novos gráficos temporais ([roadmap_dashboard_grafana.md](file:///d:/Projetos/Master%20sistemas/opensource/monitor%20de%20rede/docs/roadmap_dashboard_grafana.md)). |
+| **Módulo WireGuard (VPN)** | 🟢 **Concluído (Fases 1–4)** | Modelo de dados, geração nativa de chaves X25519, IPAM transacional, scripts por perfil (MikroTik/OpenWrt/Linux/Windows/Mobile), container WireGuard com hot-reload por `syncconf`, `vpn-probe` dedicado e telas de servidor/dispositivos/wizard. Falta apenas a validação E2E com hardware real ([roadmap_vpn.md](roadmap_vpn.md)). |
+| **Dashboard Grafana Customizável** | 🟢 **Concluído** | Dashboard modular com reordenação de widgets, adicionar/remover cards, limitação de altura e scroll no card de monitores e novos gráficos temporais ([roadmap_dashboard_grafana.md](roadmap_dashboard_grafana.md)). |
 
 ---
 
@@ -44,8 +42,8 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
 ### Fase 1: MVP Backend & Persistência de Dados (Concluído 🟢)
 > **Objetivo:** Ter a API REST 100% funcional com banco PostgreSQL populado e CRUDs reais.
 
-- [x] **Estrutura base AdonisJS v6** (Controllers, Routes, Service Providers).
-- [x] **Migrations Lucid ORM (Crítico)**:
+- [x] **Estrutura base do backend** (controllers, rotas, serviços de domínio).
+- [x] **Migrations do esquema (Crítico)**:
   - [x] `sites` (locais monitorados).
   - [x] `networks` (sub-redes e faixas CIDR).
   - [x] `probes` (agentes locais/remotos).
@@ -53,8 +51,8 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
   - [x] `monitors` e `monitor_results`.
   - [x] `metrics` e `discovery_runs` / `discovery_results`.
   - [x] `alert_rules` e `alert_events`.
-- [x] **Relacionamentos & Models Lucid**:
-  - [x] Tipagem de colunas e relacionamentos (`hasMany`, `belongsTo`) em todos os Models.
+- [x] **Relacionamentos & entidades**:
+  - [x] Tipagem de colunas e relacionamentos em todas as entidades `sea-orm`.
 
 ---
 
@@ -71,13 +69,24 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
 - [x] **Vínculo com dispositivo opcional**: checagens externas (DNS público, sites de terceiros) deixam de exigir um equipamento cadastrado; o SNMP segue exigindo. A origem da execução (servidor da aplicação ou probe) passou a ser escolhida no próprio formulário.
 - [x] **Processamento de resultados**:
   - [x] `ResultProcessor` para processar resultados, calcular métricas e atualizar status de `Device` e `Monitor`.
-  - [x] Comando `monitor:test` para execução e validação via CLI por ID de monitor.
-- [x] **Agendador (`node ace scheduler:run`)**:
+  - [x] Execução e validação de um monitor por ID via `POST /api/monitors/{id}/run`.
+- [x] **Agendador (tarefa `scheduler_run`)**:
   - [x] Consulta otimizada por `next_run_at <= NOW()` com lock para evitar duplicação.
   - [x] Recálculo automático de `next_run_at`.
-- [ ] **Sistema de filas & worker process** — 🔴 **não implementado**. O `queue:work` existiu como esqueleto desde o commit inicial (registrava um log e encerrava com código 0) e foi removido junto com `bullmq`, `@adonisjs/redis` e o container `redis`, todos instalados e nunca usados. O §4.2 da [arquitetura](arquitetura.md) segue válido como desenho pretendido.
+- [ ] **Sistema de filas & worker process** — 🔴 **não implementado**. Nunca saiu
+  do papel, e as dependências que existiam para ele (Redis e biblioteca de fila)
+  foram removidas por nunca terem sido importadas. Hoje o `scheduler` executa os
+  monitores inline e a fila dos probes é a tabela `probe_tasks`. Ver
+  [§12 da arquitetura](arquitetura.md#12-o-que-não-existe).
 
-  > **Dívida — backpressure no scheduler.** `checkDueMonitors` ([`scheduler_run.ts`](../commands/scheduler_run.ts)) busca até 50 monitores vencidos por tick de 5s e dispara `executeMonitorAsync` **sem `await`**. Não há controle de concorrência: se as execuções demorarem mais que o tick, o ciclo seguinte abre outras 50 sem saber que as anteriores ainda rodam. Com o volume atual isso não aparece — é um teto que chega sem aviso. **Gatilho para reviver a fila:** execuções acumulando além de um tick, ou o total de monitores vencidos encostando no `.limit(50)` de forma recorrente.
+  > **Dívida — backpressure no scheduler.** O ciclo
+  > (`backend-rust/src/tasks/scheduler_run.rs`) busca os monitores vencidos a
+  > cada tique de 5 s e dispara as execuções sem controle de concorrência: se
+  > elas demorarem mais que o tique, o ciclo seguinte abre outra leva sem saber
+  > que as anteriores ainda rodam. Com o volume atual isso não aparece — é um
+  > teto que chega sem aviso. **Gatilho para reviver a fila:** execuções
+  > acumulando além de um tique, ou o total de monitores vencidos encostando no
+  > limite por ciclo de forma recorrente.
 
 ---
 
@@ -103,7 +112,7 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
 > **Objetivo:** Permitir que agentes leves rodem em outras redes ou no próprio container e enviem dados ao servidor central.
 
 - [x] **Autenticação & Registro do Probe**:
-  - [x] Fluxo de registro com token temporário `node ace probe:register`.
+  - [x] Fluxo de registro com token temporário (`backend_rust-cli task probe_register`).
   - [x] Autenticação persistente com Token Hash (SHA-256).
   - [x] Heartbeat periódico e status online/offline/revoked.
 - [x] **Despachante de Tarefas & Buffer Offline**:
@@ -174,10 +183,10 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
 ### Fase 8: Módulo WireGuard para Roteadores Remotos (Fases 1–4 Concluídas 🟢)
 > **Objetivo:** Monitorar roteadores MikroTik (RouterOS v7+) e OpenWrt fora da rede local via túnel WireGuard, com gestão de chaves e configuração 100% pela interface do sistema.
 
-Especificação completa em [roadmap_vpn.md](file:///d:/Projetos/Master%20sistemas/opensource/monitor%20de%20rede/docs/roadmap_vpn.md).
+Especificação completa em [roadmap_vpn.md](roadmap_vpn.md).
 
 - [x] **Modelo de Dados**: tabelas `vpn_servers` e `vpn_peers`, índice UNIQUE `(network_id, ip_address)` em `devices` para o IPAM, com chaves privadas e PSKs cifradas via `APP_KEY`.
-- [x] **Core Backend**: geração de chaves X25519 nativa no Node (sem binário `wg`), alocador de IP transacional com retry, geradores de configuração por perfil (MikroTik, OpenWrt, Linux, Windows, Mobile), parser de `wg show dump` e API `/api/vpn/...`.
+- [x] **Core Backend**: geração de chaves X25519 em Rust puro, via `x25519-dalek` (sem binário `wg`), alocador de IP transacional com retry, geradores de configuração por perfil (MikroTik, OpenWrt, Linux, Windows, Mobile), parser de `wg show dump` e API `/api/vpn/...`.
 - [x] **Provisionamento automático**: ao concluir o wizard, o sistema cria `Device`, `VpnPeer`, monitor de Ping e (opcional) monitor SNMP em uma única transação, atribuídos ao `vpn-probe`.
 - [x] **Docker**: container WireGuard com hot-reload via `wg syncconf` (sem `docker.sock`), probe dedicado `vpn-probe` e rede nomeada `netmonitor-net` aplicada a todos os serviços.
 - [x] **Frontend**: painel do servidor VPN com teste de pré-voo (detecção de CGNAT), lista de peers com status de handshake e diagnóstico de firewall, e wizard de adição por perfil de equipamento com "Copiar tudo".

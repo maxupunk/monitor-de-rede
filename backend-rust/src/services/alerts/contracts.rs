@@ -92,7 +92,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn chaves_de_escopo_seguem_o_formato_do_adonis() {
+    fn chaves_de_escopo_usam_o_formato_tipo_dois_pontos_id() {
         assert_eq!(AlertScopeKey::monitor(12), "monitor:12");
         assert_eq!(AlertScopeKey::interface(34), "interface:34");
         assert_eq!(AlertScopeKey::vpn_peer(7), "vpn_peer:7");

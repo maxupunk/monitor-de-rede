@@ -35,9 +35,9 @@ impl Model {
 
     /// §6.1 — `usableHosts`: quantos endereços a varredura percorreria.
     ///
-    /// `0` quando a faixa é inválida — mesmo comportamento do
-    /// `networks_controller.serialize` do Adonis, que só chama o parser depois
-    /// de confirmar `scannable`.
+    /// `0` quando a faixa é inválida: a serialização não pode falhar por causa
+    /// de um CIDR malformado no banco — a linha precisa aparecer na tela para
+    /// que alguém consiga corrigi-la.
     #[must_use]
     pub fn usable_hosts(&self) -> u32 {
         parse_cidr_range(&self.cidr).map_or(0, |range| range.usable_hosts)

@@ -260,7 +260,7 @@ async fn monitor_caido_dispara_alerta_e_a_volta_o_resolve() {
         let ainda_um = json_of(&request.get("/api/alerts").await.text());
         assert_eq!(ainda_um.as_array().unwrap().len(), 1);
 
-        // Modo dual: com `?page` vem o envelope do Lucid.
+        // Modo dual: com `?page` vem o envelope `{ data, meta }`.
         let paginado = json_of(&request.get("/api/alerts?page=1&limit=10").await.text());
         assert_eq!(paginado["meta"]["total"], 1);
         assert_eq!(paginado["meta"]["currentPage"], 1);

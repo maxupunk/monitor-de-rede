@@ -1,7 +1,6 @@
-//! Cifra em repouso e hashes (§8.1 do roadmap).
+//! Cifra em repouso e hashes.
 //!
-//! Substitui o `encryption.encrypt/decrypt` do AdonisJS. Duas operações
-//! distintas convivem aqui e **não** podem ser confundidas:
+//! Duas operações distintas convivem aqui e **não** podem ser confundidas:
 //!
 //! * [`encrypt`]/[`decrypt`] — reversível, XChaCha20-Poly1305. Usado nas chaves
 //!   privadas do WireGuard (`vpn_servers.private_key_encrypted`,
@@ -10,9 +9,11 @@
 //! * [`sha256_hex`] — irreversível. Usado no `probes.token_hash`, comparado por
 //!   igualdade na autenticação de probe (§7.10).
 //!
-//! > **Migração de dados (Fase 9):** o formato de cifra do Adonis não é o
-//! > nosso. Os valores já gravados por `backend/` precisam ser re-cifrados no
-//! > corte — um `pg_dump` cru deixaria `private_key_encrypted` ilegível.
+//! > **Bancos anteriores ao corte para o backend Rust:** o formato de cifra do
+//! > backend AdonisJS não é este. Um `pg_dump` cru daquela época deixa
+//! > `private_key_encrypted` ilegível aqui; os valores precisam passar pelo
+//! > `task vpn_secrets_import`. Não se aplica a banco criado por estas
+//! > migrations. Ver `docs/historico/corte_backend_rust.md`.
 
 use base64::Engine as _;
 use chacha20poly1305::{
@@ -37,8 +38,9 @@ static APP_KEY: OnceLock<[u8; 32]> = OnceLock::new();
 
 /// Chave simétrica de 32 bytes derivada de `APP_KEY` por SHA-256.
 ///
-/// Derivar em vez de exigir 32 bytes exatos mantém a paridade com o Adonis,
-/// onde `APP_KEY` é uma string de tamanho livre.
+/// Deriva por SHA-256 em vez de exigir 32 bytes exatos: assim `APP_KEY` pode
+/// ser uma string de tamanho livre, e ninguém precisa contar caracteres para
+/// subir o serviço.
 ///
 /// # Panics
 ///
@@ -124,9 +126,9 @@ pub fn decrypt(cipher_text: &str) -> AppResult<String> {
         .map_err(|e| AppError::Internal(anyhow::anyhow!("texto decifrado não é UTF-8: {e}")))
 }
 
-/// SHA-256 em hexadecimal minúsculo — mesmo formato do `token_hash` gravado
-/// pelo backend AdonisJS, para os tokens de probe já emitidos continuarem
-/// valendo depois do corte.
+/// SHA-256 em hexadecimal minúsculo — o formato gravado em `probes.token_hash`.
+/// Mudar a codificação invalida todo token de probe já emitido, que não é
+/// recuperável: o banco não guarda o token cru.
 #[must_use]
 pub fn sha256_hex(input: &str) -> String {
     hex::encode(Sha256::digest(input.as_bytes()))

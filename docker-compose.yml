@@ -1,9 +1,10 @@
 # Stack do NetMonitor — backend Rust (Loco.rs).
 #
-# O corte do AdonisJS aconteceu na Fase 9 do `docs/roadmap_backend_rust.md`.
-# Os cinco processos abaixo são os mesmos de antes, com os comandos traduzidos:
-# `node ace migration:run` → `db migrate`, `scheduler:run` → o scheduler nativo
-# do Loco, `probe:run` → `task probe_run`.
+# São oito serviços: `migration` roda uma vez e sai; `server`, `scheduler`,
+# `probe`, `vpn-probe`, `wireguard`, `frontend` e `postgres` ficam de pé.
+# Os quatro processos do backend saem do mesmo binário, mudando só o comando:
+# `db migrate`, `start`, `scheduler --config config/scheduler.yaml` e
+# `task probe_run`.
 x-app-env: &app-env
   LOCO_ENV: production
   PORT: 3333

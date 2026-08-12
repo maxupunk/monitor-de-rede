@@ -9,7 +9,9 @@
 > `backend/` ignorado pelo git mas vivo em disco, scripts de raiz apontando para
 > `npm --prefix backend`, e docs/comentários escritos na gramática do Adonis.
 
-> **Status (12/08/2026):** Fases 0, 1, 2 e 3 concluídas. Fases 4, 5 e 6 pendentes.
+> **Status (12/08/2026):** todas as fases concluídas. Este documento virou
+> registro do que foi feito — pela regra da Fase 4, o lugar dele agora é
+> `docs/historico/`.
 
 ---
 
@@ -158,7 +160,7 @@ Reescrito para explicar a exigência real (era também um item da Fase 5.4).
 ### Rota alternativa: preservar os dados existentes
 
 Se em outro ambiente houver dados que importam, **não** apague o volume. O
-caminho é o do runbook `corte_backend_rust.md` §2 — `pg_dump` do banco Adonis,
+caminho é o do runbook `docs/historico/corte_backend_rust.md` §2 — `pg_dump` do banco Adonis,
 banco novo criado pelas migrations do Rust, `pg_restore --data-only`. Depois,
 limpar o resíduo:
 
@@ -350,11 +352,38 @@ diretrizes, roadmap ativo) precisa falar Rust. Documento que registra **uma
 decisão ou um procedimento datado** (ADR, runbook do corte) fica intacto e vai
 para `historico/`.
 
-- [ ] `docs/historico/` criado com os dois documentos da migração
-- [ ] `docs/arquitetura.md` atualizado
-- [ ] `docs/diretrizes_testes.md` atualizado
-- [ ] `docs/base.md`, `docs/roadmap.md`, `docs/roadmap_vpn.md` atualizados
-- [ ] Links quebrados conferidos após as movimentações
+- [x] 🟢 **Concluído** — `docs/historico/` criado com os dois documentos da
+      migração (movidos com `git mv`, conteúdo intacto) e um `README.md` que
+      explica a regra de corte e como recuperar o código pela tag.
+- [x] 🟢 **Concluído** — `docs/arquitetura.md` **reescrito**. Deixou de ser um
+      projeto em tempo futuro ("será", "deverá") de um sistema AdonisJS e passou
+      a descrever o que existe, em tempo presente: os 8 serviços, o ciclo do
+      scheduler, a fila em `probe_tasks`, as 23 tabelas, a API real levantada dos
+      controllers, o SSE via `event_outbox` e as fronteiras do módulo VPN.
+      Ganhou uma seção **"O que não existe"** — worker, fila externa, agregação
+      de métricas e auditoria —, porque metade da confusão do documento antigo
+      vinha de descrever como pronto o que nunca foi construído.
+- [x] 🟢 **Concluído** — `docs/diretrizes_testes.md` reescrito sobre `cargo test`,
+      `#[serial]`, `request_with_config`, `insta` e os dois dialetos SQLite/Postgres.
+- [x] 🟢 **Concluído** — `docs/base.md` (stack declarada nas §7.1, §7.2 e §16),
+      `docs/roadmap.md` e `docs/roadmap_vpn.md` atualizados.
+- [x] 🟢 **Concluído** — links conferidos por varredura de **todos** os links
+      relativos de **todo** `.md` do repositório. Corrigidos:
+      - 14 links para `adr/…` dentro do `roadmap_backend_rust.md`, que quebraram
+        **por causa da movimentação** para `historico/` (agora `../adr/…`);
+      - 20 links em `roadmap_vpn.md` e `roadmap_melhorias.md` que apontavam para
+        arquivos `.ts` do backend removido — reapontados para os equivalentes em
+        `backend-rust/src/`. **Já estavam quebrados antes desta limpeza**;
+      - 3 links `file:///d:/Projetos/...` absolutos no `roadmap.md`, que só
+        funcionavam na máquina de quem os escreveu;
+      - o link para `docs/diretrizes_qualidade_e_checklist.md` no `AGENTS.md` da
+        raiz e no `.agents/AGENTS.md` — **esse arquivo nunca existiu**.
+
+      Varredura final: **nenhum link relativo quebrado no repositório.**
+- [x] 🟢 **Concluído** — `docs/roadmap_melhorias.md`: além do ajuste pontual, as
+      tarefas **pendentes** citavam arquivos `.ts` a criar (`vpn_peer_dataset.ts`,
+      `vpn_peer_state_watcher.ts`, `monitor_presenter.ts`). Num roadmap ativo isso
+      mandaria alguém criar arquivo TypeScript no backend Rust; reapontados.
 
 ---
 
@@ -367,21 +396,39 @@ backend, e tem uma seção inteira de "Práticas de Teste no Japa". O `AGENTS.md
 da raiz já foi atualizado para `cargo fmt/clippy/test`; o de `.agents/` não.
 Enquanto os dois divergirem, qualquer agente pode seguir o errado.
 
-- [ ] Bloco "Backend" trocado por `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`
-- [ ] Seção "Práticas de Teste no Japa" substituída pelas diretrizes de teste do Rust
-- [ ] Decidido se `.agents/AGENTS.md` continua existindo ou vira um ponteiro para o `AGENTS.md` da raiz
+- [x] 🟢 **Decisão: virou ponteiro.** Em vez de reescrever os dois blocos, o
+      arquivo passou a apontar para o `AGENTS.md` da raiz. Reescrever produziria
+      uma segunda cópia correta *hoje* — e a divergência que causou este item
+      nasceu exatamente assim. Com um ponteiro, não há o que divergir.
+      Os dois itens abaixo ficam resolvidos por consequência:
+- [x] 🟢 **Concluído** — bloco "Backend" com `npx tsc`/`node ace test` não existe mais
+- [x] 🟢 **Concluído** — seção "Práticas de Teste no Japa" não existe mais; as
+      diretrizes de teste do Rust estão em `docs/diretrizes_testes.md`
 
 ### 5.2 `AGENTS.md` (raiz)
 
 O cabeçalho diz "Enquanto `backend/` existir, ele é referência de comportamento".
 Depois da Fase 1 ele não existe mais.
 
-- [ ] Parágrafo reescrito: fonte da verdade é `backend-rust/`, ponto; histórico via tag `adonisjs-final`
+- [x] 🟢 **Concluído** — parágrafo reescrito: fonte da verdade é `backend-rust/`,
+      ponto; histórico via tag `adonisjs-final` e `docs/historico/`. De quebra, o
+      link para `docs/diretrizes_qualidade_e_checklist.md` (arquivo inexistente)
+      foi trocado por `arquitetura.md`, e a referência à §18 do roadmap movido
+      virou texto.
 
 ### 5.3 Frontend
 
-- [ ] `frontend/nginx.conf:24` — comentário "Proxy de APIs para o Container AdonisJS"
-- [ ] `frontend/src/bindings/VpnPeerWithDevice.ts:9` — se for gerado por `ts-rs`, corrigir o doc comment **no struct Rust** e regerar; editar o `.ts` à mão é desfeito na próxima geração
+- [x] 🟢 **Concluído** — `frontend/nginx.conf:24` reescrito
+- [x] 🟢 **Concluído** — é gerado por `ts-rs`, sim. O doc comment foi corrigido em
+      `src/views/vpn.rs` e o arquivo regerado por `cargo test`.
+- [x] 🟢 **Concluído** — **não previsto no plano:** existem também
+      `LucidMeta.ts` e `LucidPage.ts`, do mesmo gerador. Os comentários foram
+      corrigidos em `services/shared/pagination.rs` e os arquivos regerados. Os
+      **nomes dos tipos** ficaram: renomeá-los é refatoração que atravessa
+      backend e frontend, não limpeza de resíduo. O doc do módulo agora explica
+      que o nome é histórico e que o que obriga a manter o formato é o
+      `useInfiniteList`, não o ORM que lhe deu nome.
+- [x] 🟢 **Concluído** — varredura confirma: nenhuma menção a Adonis no `frontend/`.
 
 ### 5.4 Comentários no código Rust (baixa prioridade)
 
@@ -395,16 +442,37 @@ dois tipos, e só um incomoda:
   `backend/modules/**`"), `Dockerfile:68` ("o mesmo health check do backend
   AdonisJS"). Apontam para um caminho que não existe mais. **Reescrever.**
 
-- [ ] Varredura feita com `git grep -n -i adonis -- backend-rust/src backend-rust/Dockerfile`
-- [ ] Comentários do segundo tipo reescritos sem referência a caminho morto
-      — o `Dockerfile:68` já saiu, junto com a correção do `HEALTHCHECK` (Fase 0)
+- [x] 🟢 **Concluído** — varredura feita em `backend-rust` inteiro (não só `src/`
+      e `Dockerfile`): também pegou `migration/`, `tests/` e o `AGENTS.md` do
+      backend.
+- [x] 🟢 **Concluído** — reescritos ~35 comentários do segundo tipo, em 25
+      arquivos. O `Dockerfile:68` saiu junto com a correção do `HEALTHCHECK`
+      (Fase 0). Dois nomes de **teste** também citavam o Adonis
+      (`chaves_de_escopo_seguem_o_formato_do_adonis`,
+      `limite_segue_a_regra_do_adonis`) — renomeados para descrever a regra em
+      vez da origem dela.
+- [x] 🟢 **Mantidos de propósito** (comentários do primeiro tipo, que explicam
+      uma decisão):
+      - `migration/src/lib.rs:42` — por que `auth_access_tokens` **não** existe;
+      - `services/shared/crypto.rs:13` — aviso de que banco anterior ao corte tem
+        segredo em formato ilegível aqui;
+      - `tasks/vpn_secrets_import.rs` — o comando **existe** por causa daquela
+        migração. O procedimento foi corrigido: citava `backend/` como "ainda
+        vivo", e agora manda restaurá-lo pela tag primeiro.
+
+      ⚠️ Isso contraria o critério literal da Fase 6 (`git grep -i adonis` só
+      retornar `historico/` e `adr/`). A regra desta fase é mais específica e
+      prevalece: apagar essas três explicações perderia informação que o código
+      não consegue recuperar sozinho.
 
 ---
 
 ## Fase 6 — Verificação final
 
 ```powershell
-# Nenhuma referência viva ao Adonis fora de docs/historico e docs/adr
+# Nenhuma referência viva ao Adonis fora de docs/historico e docs/adr.
+# Leia "viva" como "que aponta para algo que não existe mais": as menções que
+# explicam uma decisão ficam, e estão listadas na Fase 5.4.
 git grep -i -l "adonis" -- . ':!docs/historico' ':!docs/adr'
 
 # Backend
@@ -428,13 +496,96 @@ docker compose ps
 
 Critério de pronto:
 
-- [ ] `docker compose up` sobe os 8 serviços sem `migration` falhando
-- [ ] `GET http://localhost:3333/` responde o health check
-- [ ] Login funciona no frontend em `http://localhost:8081`
-- [ ] Um monitor executa e grava resultado (prova de que o `scheduler` está no ciclo)
-- [ ] `cargo test` e o build do frontend verdes
-- [ ] `git grep -i adonis` só retorna `docs/historico/` e `docs/adr/`
-- [ ] `backend/` não existe em disco e nada no repositório aponta para ele
+- [x] 🟢 `docker compose up` sobe os 8 serviços sem `migration` falhando
+- [x] 🟢 `GET http://localhost:3333/` responde o health check
+- [x] 🟢 Login funciona (`POST /api/auth/login` → 200; `/api/auth/me` com o token → 200)
+- [x] 🟡 Um monitor executa e grava resultado — **o scheduler está no ciclo, sim**
+      (dois resultados gravados nos horários exatos do intervalo de 10 s), mas a
+      checagem em si falhou. Ver o achado abaixo.
+- [x] 🟢 `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test` (396 testes)
+      e `typecheck`/`lint`/`build` do frontend, todos verdes
+- [x] 🟢 `git grep -i adonis` retorna `docs/historico/`, `docs/adr/`, este
+      documento, e as três explicações mantidas de propósito (Fase 5.4) mais os
+      dois ponteiros para a tag (`README.md`, `AGENTS.md`)
+- [x] 🟢 `backend/` não existe em disco e nada no repositório aponta para ele
+- [x] 🟢 **Acrescentado:** nenhum link relativo quebrado em nenhum `.md` do
+      repositório (varredura automatizada)
+
+### Achados que a verificação produziu
+
+A Fase 6 não foi carimbo. Três defeitos apareceram e foram corrigidos —
+`config/scheduler.yaml` com wrapper indevido, `JWT_SECRET` fora de base64
+derrubando 100% dos logins, e `HEALTHCHECK` marcando todo container como
+`unhealthy` (todos documentados na Fase 0). E um quarto apareceu, **não
+corrigido**, descrito abaixo.
+
+Nenhum é regressão desta limpeza. Todos estavam escondidos atrás do `migration`
+que falhava: enquanto a stack não subia inteira, nada disso tinha como aparecer.
+
+---
+
+## 🔴 Aberto — `shared_store` não é inicializado nos processos de tarefa
+
+**Não corrigido de propósito.** Está fora do escopo de uma limpeza de resíduo, e
+a correção envolve uma decisão de projeto que não cabe a este documento tomar.
+
+### O sintoma
+
+Um monitor de ping criado numa instalação limpa grava:
+
+```
+status  = unknown
+message = "A checagem não pôde ser executada localmente: Cliente ICMP não inicializado"
+```
+
+E o `scheduler` registra, a cada 5 segundos, sem parar:
+
+```
+WARN falha ao retransmitir eventos  error="Barramento de eventos não inicializado"
+```
+
+### A causa
+
+`MonitoringInitializer::before_run` (`src/initializers/monitoring.rs`) é quem
+coloca `PingClient`, `ScanSessionService` e `EventBus` no `ctx.shared_store`. Ele
+roda no boot do **servidor**.
+
+Mas `scheduler` e `probe` não são o servidor: são
+`backend_rust-cli task scheduler_run` e `... task probe_run`, processos de
+tarefa, onde os initializers do Loco não passam. Os três serviços compartilham o
+mesmo `AppContext`, e nos dois de tarefa o `shared_store` está vazio.
+
+Como `run_monitor` resolve o checker de ping por
+`PingChecker::from_context(ctx)` (`services/monitoring/runner.rs:53`), a
+consequência é direta.
+
+### O que isso quebra
+
+| Efeito | Alcance |
+| :--- | :--- |
+| **Nenhum monitor de ping funciona pelo scheduler** | O fallback local — aquele que o `AGENTS.md` marca como "**NÃO remover**" — está morto para ping. Instalação sem probe nunca vê um ping verde. |
+| **Nenhum monitor de ping funciona pelo probe** | `probes/agent.rs:178` chama o mesmo `run_monitor`, no mesmo tipo de processo. |
+| **O relay de SSE do scheduler nunca entrega** | Evento gerado no ciclo fica parado em `event_outbox`. A tela não recebe o que o scheduler produz — que é justamente mudança de estado de dispositivo e abertura de alerta. |
+
+Os outros checkers (`tcp`, `http`, `dns`) não passam pelo `shared_store` e
+seguem funcionando.
+
+### Por que não foi corrigido aqui
+
+A correção é pôr as mesmas dependências no `shared_store` dos processos de
+tarefa, e há mais de um jeito — com um trade-off real:
+
+- O **scheduler** é um processo **novo a cada 5 segundos**. Inicializar por
+  invocação abre um socket ICMP por tique.
+- O **probe** é de longa duração e inicializaria uma vez só.
+
+Ou seja: não é uma linha, é uma escolha sobre onde esse boot mora. E precisa de
+teste — hoje **nenhum** teste cobre isso, o que é exatamente a razão de o defeito
+ter atravessado a migração inteira sem ninguém notar.
+
+- [ ] Decidir onde inicializar o `shared_store` nos processos de tarefa
+- [ ] Teste que falhe se o ping executado pelo scheduler voltar a dar `unknown`
+- [ ] Teste que falhe se o relay de eventos parar de entregar
 
 ---
 
@@ -446,10 +597,15 @@ Fases 1→3 são mecânicas e podem ir num commit só. A Fase 4 é a mais demora
 enquanto `.agents/AGENTS.md` mandar rodar `node ace test`, todo agente que ler
 esse arquivo vai começar errado.
 
-| Ordem | Fase | Bloqueia o quê |
-| :---: | :--- | :--- |
-| 1º | Fase 0 — banco | tudo; a stack não sobe |
-| 2º | Fase 5.1 — `.agents/AGENTS.md` | qualidade de qualquer trabalho assistido |
-| 3º | Fases 1–3 — disco, config, examples | nada, mas é o grosso do ruído |
-| 4º | Fase 4 — docs | nada |
-| 5º | Fase 6 — verificação | fecha o ciclo |
+| Ordem | Fase | Bloqueia o quê | Estado |
+| :---: | :--- | :--- | :---: |
+| 1º | Fase 0 — banco | tudo; a stack não sobe | 🟢 |
+| 2º | Fase 5.1 — `.agents/AGENTS.md` | qualidade de qualquer trabalho assistido | 🟢 |
+| 3º | Fases 1–3 — disco, config, examples | nada, mas é o grosso do ruído | 🟢 |
+| 4º | Fase 4 — docs | nada | 🟢 |
+| 5º | Fase 5.2–5.4 — agentes, frontend, comentários | nada | 🟢 |
+| 6º | Fase 6 — verificação | fecha o ciclo | 🟢 |
+
+Executada nessa ordem, com uma inversão: a Fase 5.4 (comentários no código)
+entrou junto com a 5.3, antes da Fase 4, porque a varredura que as duas exigem é
+a mesma e fazê-la duas vezes seria desperdício.

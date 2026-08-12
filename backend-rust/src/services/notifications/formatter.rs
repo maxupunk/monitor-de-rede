@@ -1,8 +1,9 @@
 //! Formatação das mensagens de alerta (§8.9).
 //!
-//! Os textos são exibidos ao operador em Telegram/Discord/e-mail e batem, letra
-//! por letra, com os do backend AdonisJS — inclusive os emojis, que são o que
-//! diferencia disparo de recuperação numa lista longa de mensagens.
+//! Os textos são exibidos ao operador em Telegram/Discord/e-mail. Os emojis não
+//! são enfeite: numa lista longa de mensagens, são eles que distinguem disparo
+//! de recuperação à primeira vista. Mudar o formato muda o que já está no
+//! histórico de quem lê essas notificações há meses.
 
 use serde_json::Value;
 

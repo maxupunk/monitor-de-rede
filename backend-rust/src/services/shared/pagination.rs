@@ -1,15 +1,19 @@
-//! Envelope de paginação compatível com o Lucid (§5.4 do roadmap).
+//! Envelope de paginação `{ data, meta }`.
 //!
-//! O Loco tem seu próprio `PaginationResponse`, mas o frontend não muda: o
-//! `useInfiniteList` (`frontend/src/composables/useInfiniteList.ts`) lê
-//! `response.data` e decide o fim da lista por
-//! `meta.currentPage >= meta.lastPage`. Um envelope diferente faria toda lista
-//! infinita parar na primeira página — ou nunca parar. Daí a reimplementação
-//! literal do formato do `paginate()` do Lucid.
+//! O Loco tem seu próprio `PaginationResponse`, e ainda assim não é ele que sai
+//! daqui. Quem manda é o frontend: o `useInfiniteList`
+//! (`frontend/src/composables/useInfiniteList.ts`) lê `response.data` e decide
+//! o fim da lista por `meta.currentPage >= meta.lastPage`. Um envelope
+//! diferente faria toda lista infinita parar na primeira página — ou nunca
+//! parar.
 //!
-//! Os tipos moram aqui (e não em `dtos/common.rs`) porque §5.4 é a seção
-//! normativa da paginação; `crate::dtos::common` os reexporta para quem só
-//! precisa do DTO.
+//! O formato veio do `paginate()` do Lucid, o ORM do backend anterior, e é daí
+//! que sai o nome dos tipos (`LucidPage`, `LucidMeta`). O nome é histórico; a
+//! obrigação de manter o formato não é — ela vale enquanto o frontend ler estes
+//! campos.
+//!
+//! Os tipos moram aqui, e não em `dtos/common.rs`, porque este módulo é o dono
+//! da paginação; `crate::dtos::common` os reexporta para quem só precisa do DTO.
 
 use sea_orm::{ConnectionTrait, EntityTrait, FromQueryResult, PaginatorTrait, Select};
 use serde::{Deserialize, Serialize};
@@ -17,12 +21,12 @@ use ts_rs::TS;
 
 use crate::services::shared::errors::AppResult;
 
-/// Itens por página quando o cliente não manda `limit` — igual ao Adonis.
+/// Itens por página quando o cliente não manda `limit`.
 pub const DEFAULT_LIMIT: u64 = 20;
 /// Teto de itens por página. Protege o banco de um `?limit=100000`.
 pub const MAX_LIMIT: u64 = 100;
 
-/// `meta` do envelope do Lucid.
+/// O `meta` do envelope de paginação.
 ///
 /// O frontend usa `total`, `currentPage` e `lastPage`. Os demais campos são
 /// emitidos por compatibilidade defensiva: telas antigas e integrações externas
@@ -50,8 +54,8 @@ pub struct LucidMeta {
 impl LucidMeta {
     /// Monta o `meta` a partir dos três números que o banco devolve.
     ///
-    /// `last_page` nunca é 0: o Lucid devolve 1 para conjunto vazio, e o
-    /// `useInfiniteList` compara `currentPage >= lastPage` — com 0 ele pediria
+    /// `last_page` nunca é 0, é 1 mesmo para conjunto vazio: o
+    /// `useInfiniteList` compara `currentPage >= lastPage`, e com 0 ele pediria
     /// a página 1 para sempre.
     #[must_use]
     pub fn new(total: u64, per_page: u64, current_page: u64) -> Self {
@@ -81,11 +85,11 @@ pub struct LucidPage<T> {
     pub meta: LucidMeta,
 }
 
-/// Resposta dos endpoints de **modo dual** (§5.4): array cru quando `?page`
-/// está ausente, envelope paginado quando presente.
+/// Resposta dos endpoints de **modo dual**: array cru quando `?page` está
+/// ausente, envelope paginado quando presente.
 ///
 /// `untagged` faz o serde escolher pela forma do valor, sem campo
-/// discriminador — que é exatamente o que o Adonis produz hoje.
+/// discriminador — o cliente distingue os dois casos olhando o JSON.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum MaybePaged<T> {
@@ -93,7 +97,7 @@ pub enum MaybePaged<T> {
     List(Vec<T>),
 }
 
-/// Aplica a regra de `limit` do Adonis: default 20, teto 100, nunca 0.
+/// Aplica a regra de `limit`: default 20, teto 100, nunca 0.
 #[must_use]
 pub fn normalize_limit(limit: Option<u64>) -> u64 {
     limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT)
@@ -105,11 +109,11 @@ pub fn normalize_page(page: Option<u64>) -> u64 {
     page.unwrap_or(1).max(1)
 }
 
-/// Executa `query` paginada e devolve o envelope do Lucid.
+/// Executa `query` paginada e devolve o envelope `{ data, meta }`.
 ///
 /// `map` converte a linha do banco no DTO de saída — a conversão acontece
-/// depois da paginação, como no Adonis, para o `total` continuar contando
-/// linhas do banco e não itens filtrados.
+/// **depois** da paginação, para o `total` continuar contando linhas do banco
+/// e não itens filtrados.
 ///
 /// # Errors
 ///
@@ -231,7 +235,7 @@ mod tests {
     }
 
     #[test]
-    fn limite_segue_a_regra_do_adonis() {
+    fn limite_e_pagina_sao_saneados_com_default_teto_e_minimo() {
         assert_eq!(normalize_limit(None), 20);
         assert_eq!(normalize_limit(Some(50)), 50);
         assert_eq!(normalize_limit(Some(1_000)), 100);

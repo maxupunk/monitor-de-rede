@@ -1,21 +1,29 @@
-//! `cargo loco task vpn_secrets_import` — re-cifra os segredos da VPN na
-//! migração de dados (§17 D6, Fase 9).
+//! `backend_rust-cli task vpn_secrets_import` — re-cifra os segredos da VPN
+//! vindos de um banco anterior ao corte para o backend Rust.
 //!
-//! **Por que este comando existe.** O AdonisJS cifrava
+//! **Por que este comando existe.** O backend AdonisJS cifrava
 //! `vpn_servers.private_key_encrypted` e `vpn_peers.preshared_key_encrypted`
-//! com o `encryption` do framework (AES-256-CBC + HMAC sobre a `APP_KEY`); o
-//! backend Rust usa XChaCha20-Poly1305 com chave derivada da mesma `APP_KEY`.
-//! Os dois formatos não se leem, e um `pg_dump`/`pg_restore` carrega o
-//! criptograma antigo intacto — que, depois do corte, ninguém consegue abrir.
+//! com o `encryption` do framework (AES-256-CBC + HMAC sobre a `APP_KEY`); este
+//! backend usa XChaCha20-Poly1305 com chave derivada da mesma `APP_KEY`. Os dois
+//! formatos não se leem, e um `pg_dump`/`pg_restore` carrega o criptograma
+//! antigo intacto — que, deste lado, ninguém consegue abrir.
 //!
-//! O caminho é em dois passos, e o primeiro **tem** de rodar no AdonisJS,
-//! porque só ele sabe decifrar:
+//! **Só é necessário migrando um banco daquela época.** Banco criado por estas
+//! migrations nunca teve segredo no formato antigo.
+//!
+//! O caminho é em dois passos, e o primeiro precisa do exportador do AdonisJS,
+//! porque só ele sabe decifrar. Esse código não está mais no repositório; é
+//! preciso trazê-lo de volta pela tag antes:
 //!
 //! ```sh
-//! # 1) No backend/ ainda vivo: exporta em claro para um arquivo temporário.
+//! # 0) Restaura o backend arquivado num diretório temporário.
+//! git checkout adonisjs-final -- backend/
+//! npm --prefix backend install
+//!
+//! # 1) Com a APP_KEY original no ambiente, exporta em claro.
 //! node ace vpn:export-secrets > /tmp/vpn-secrets.json
 //!
-//! # 2) No backend-rust/, já com o banco restaurado:
+//! # 2) Aqui, já com o banco restaurado:
 //! backend_rust-cli task vpn_secrets_import file:/tmp/vpn-secrets.json
 //!
 //! # 3) Apague o arquivo — ele contém as chaves em texto claro.
@@ -32,7 +40,8 @@ use serde::Deserialize;
 
 use crate::models::{vpn_peers, vpn_servers};
 
-/// Formato do arquivo produzido pelo exportador do AdonisJS.
+/// Formato do arquivo produzido pelo exportador do backend AdonisJS
+/// (`vpn:export-secrets`, recuperável pela tag `adonisjs-final`).
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SecretsFile {
@@ -64,7 +73,8 @@ impl Task for VpnSecretsImport {
     fn task(&self) -> TaskInfo {
         TaskInfo {
             name: "vpn_secrets_import".into(),
-            detail: "Re-cifra os segredos da VPN exportados do backend AdonisJS".into(),
+            detail: "Re-cifra os segredos da VPN exportados de um banco anterior ao backend Rust"
+                .into(),
         }
     }
 

@@ -115,7 +115,7 @@ impl ProbeAgent {
     }
 
     /// Laço principal. Só termina por sinal do sistema — é um processo de
-    /// longa duração, como o `probe:run` do AdonisJS.
+    /// longa duração, e não uma tarefa que roda e sai.
     pub async fn start(&self, ctx: &AppContext) {
         tracing::info!(server = %self.server_url, "agente probe inicializado");
         loop {

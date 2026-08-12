@@ -1,10 +1,13 @@
 # Diretrizes do Projeto para Agentes IA
 
-> **O backend é Rust (Loco.rs), em `backend-rust/`.** A migração do AdonisJS
-> está descrita em [roadmap_backend_rust.md](docs/roadmap_backend_rust.md) e o
-> procedimento de corte em [corte_backend_rust.md](docs/corte_backend_rust.md).
-> Enquanto `backend/` existir, ele é **referência de comportamento** — a fonte
-> da verdade das regras portadas —, não alvo de novas features.
+> **O backend é Rust (Loco.rs), em `backend-rust/`. Ponto.** Não existe outro
+> backend no repositório, nem "referência de comportamento" a consultar: se a
+> pergunta é como o sistema se comporta, a resposta está em `backend-rust/`.
+>
+> O backend anterior era AdonisJS. Ele saiu do repositório e continua
+> recuperável pela tag `adonisjs-final` (`git show adonisjs-final:backend/...`).
+> A migração está registrada em
+> [docs/historico/](docs/historico/) — leitura histórica, não guia de trabalho.
 
 ## 🧪 Padrões Obrigatórios de Teste & Estabilidade
 
@@ -23,9 +26,8 @@
      cargo test
      cargo build --release
      ```
-     Rodados a partir de `backend-rust/`. Os quatro precisam passar — a
-     [§18](docs/roadmap_backend_rust.md#18-critérios-de-aceite-definition-of-done)
-     trata isso como critério de aceite, não como sugestão.
+     Rodados a partir de `backend-rust/`. Os quatro precisam passar — é
+     critério de aceite, não sugestão.
 
 2. **Regras de Qualidade Vue / Template HTML**:
    - Fechamento estrito de tags Vuetify (ex: `<v-row></v-row>`).
@@ -58,9 +60,10 @@
      artefatos textuais (scripts de VPN, `wg0.conf`) usam snapshot `insta`.
 
 5. **Documentação & Roadmap**:
-   - Atualize `docs/roadmap.md` e `docs/roadmap_backend_rust.md` marcando itens
-     concluídos com `[x]` e badge `🟢 Concluído`.
-   - Consulte [diretrizes_qualidade_e_checklist.md](docs/diretrizes_qualidade_e_checklist.md) e [diretrizes_testes.md](docs/diretrizes_testes.md).
+   - Atualize `docs/roadmap.md` marcando itens concluídos com `[x]` e badge
+     `🟢 Concluído`. O `roadmap_backend_rust.md` está encerrado e mora em
+     `docs/historico/`; não escreva nele.
+   - Consulte [arquitetura.md](docs/arquitetura.md) e [diretrizes_testes.md](docs/diretrizes_testes.md).
 
 6. **Preservação e Regras de Negócio do Módulo `vpn-probe`**:
    - **Agente Dedicado (`vpn-probe`)**: compartilha o namespace de rede do

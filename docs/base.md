@@ -1,5 +1,9 @@
 # Sistema de Monitoramento de Redes
 
+> **Especificação de produto.** Descreve *o quê* e *para quem*, não *como*. A
+> implementação está descrita em [arquitetura.md](arquitetura.md) — quando os
+> dois discordarem sobre mecanismo, vale a arquitetura.
+
 ## 1. Visão geral
 
 O projeto consiste em uma plataforma simples de monitoramento de redes residenciais e de pequenas empresas.
@@ -761,20 +765,22 @@ As cores deverão ser acompanhadas de ícones e textos, evitando depender soment
 
 ## 7.1 Tecnologias
 
-O backend principal será desenvolvido com:
+O backend é desenvolvido com:
 
-* Node.js.
-* TypeScript.
-* AdonisJS.
+* Rust.
+* [Loco.rs](https://loco.rs/) (sobre `axum` e `tokio`).
+* SeaORM.
 * PostgreSQL.
-* Lucid ORM.
 * SSE.
-* Sistema de filas.
-* Processos de worker separados.
+* Processos separados por papel: API, scheduler e probe.
 
-## 7.2 Responsabilidades do AdonisJS
+> Não há fila externa nem worker dedicado — o scheduler executa os monitores
+> inline e a fila dos probes é uma tabela. Ver
+> [§12 da arquitetura](arquitetura.md#12-o-que-não-existe).
 
-O AdonisJS será responsável por:
+## 7.2 Responsabilidades do backend
+
+O backend é responsável por:
 
 * API.
 * Autenticação.
@@ -1005,7 +1011,7 @@ Frontend
 Vue 3 + TypeScript + Vuetify + PWA
 
 Backend
-AdonisJS + TypeScript
+Rust + Loco.rs
 
 Banco
 PostgreSQL
@@ -1014,10 +1020,10 @@ Tempo real
 SSE
 
 Monitoramento
-Workers Node.js separados
+Processo scheduler dedicado, um ciclo a cada 5 s
 
 Probe
-Node.js e TypeScript sem dependência direta do AdonisJS
+Mesmo binário do backend, rodando como agente de coleta
 
 Protocolos
 ICMP, HTTP, HTTPS, TCP, DNS, SNMP, mDNS, SSDP e LLDP

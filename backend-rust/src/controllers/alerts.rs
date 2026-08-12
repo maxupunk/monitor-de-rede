@@ -411,8 +411,8 @@ async fn silence_alert(
     }))?)
 }
 
-/// `GET /api/monitors/:id/alerts` (§7.6) — histórico do monitor, incluindo os
-/// resolvidos. Sempre paginado, no envelope do Lucid.
+/// `GET /api/monitors/:id/alerts` — histórico do monitor, incluindo os
+/// resolvidos. Sempre paginado, no envelope `{ data, meta }`.
 ///
 /// A busca é por `monitorId` **ou** `scopeKey`: eventos antigos só têm a
 /// coluna, e eventos de escopo só têm a chave.

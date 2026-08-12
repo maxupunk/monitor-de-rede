@@ -121,10 +121,10 @@ fn tem_camel_case(s: &StructDeclarado) -> bool {
         .any(|attr| attr.contains(CAMEL_CASE_ATTR))
 }
 
-/// Exceção documentada da §5.1: `POST /api/topology/links` e
+/// Exceções deliberadas: `POST /api/topology/links` e
 /// `GET /api/topology?site_id=` recebem snake_case porque é assim que o
-/// controller Adonis valida e o frontend envia. Qualquer struct listado aqui
-/// precisa de justificativa na §5.1 do roadmap.
+/// frontend envia hoje. Trocar para camelCase quebraria a tela sem aviso.
+/// Qualquer struct acrescentado aqui precisa vir com a justificativa escrita.
 const EXCECOES_SNAKE_CASE: &[&str] = &["TopologyLinkRequest", "TopologyQuery"];
 
 #[test]

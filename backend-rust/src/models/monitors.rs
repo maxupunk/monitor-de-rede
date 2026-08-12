@@ -48,8 +48,9 @@ impl Model {
     #[must_use]
     pub fn port(&self) -> Option<i64> {
         self.configuration.get("port").and_then(|v| {
-            // O frontend às vezes manda a porta como string ("8080"); o Adonis
-            // aceitava as duas formas porque o JSON não é tipado.
+            // O frontend às vezes manda a porta como string ("8080") — o campo
+            // vem de um `<input>` e o JSON não é tipado. Aceitar as duas formas
+            // é mais barato que caçar todos os pontos de origem.
             v.as_i64()
                 .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
         })

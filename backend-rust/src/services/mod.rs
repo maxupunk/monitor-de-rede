@@ -1,6 +1,6 @@
-//! Módulos de domínio — o equivalente de `backend/modules/**` do AdonisJS.
+//! Módulos de domínio.
 //!
-//! Regra do §1.3.3: o controller extrai, valida, delega e serializa. Toda regra
+//! A regra da casa: o controller extrai, valida, delega e serializa. Toda regra
 //! de negócio vive aqui e é testável sem HTTP.
 
 pub mod alerts;

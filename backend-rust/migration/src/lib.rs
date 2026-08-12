@@ -32,16 +32,15 @@ pub struct Migrator;
 
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
-    /// Ordem de criação da §6: uma tabela só nasce depois dos alvos das suas
-    /// FKs. A mesma ordem, invertida, está em `src/models/tables.rs` para a
-    /// limpeza entre testes — e um teste garante que as duas listas não
-    /// divirjam.
+    /// Ordem de criação: uma tabela só nasce depois dos alvos das suas FKs. A
+    /// mesma ordem, invertida, está em `src/models/tables.rs` para a limpeza
+    /// entre testes — e um teste garante que as duas listas não divirjam.
     ///
-    /// **`auth_tokens` (§6 #23) não é criada.** A §10.2 decidiu por
-    /// `loco_rs::auth::JWT`, que não guarda token no banco. A tabela
-    /// `auth_access_tokens` do AdonisJS existia por causa do `@adonisjs/auth`;
-    /// sem ela, são 22 tabelas. O nome segue listado em `CREATION_ORDER` para o
-    /// dia em que a Fase 6 optar por tokens opacos.
+    /// **`auth_tokens` não é criada.** A autenticação é `loco_rs::auth::JWT`,
+    /// que é stateless e não guarda token no banco. A tabela
+    /// `auth_access_tokens` que existia no esquema anterior vinha do
+    /// `@adonisjs/auth`, e sumiu junto com ele. O nome segue listado em
+    /// `CREATION_ORDER` para o dia em que a escolha for por tokens opacos.
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
         vec![
             Box::new(m20220101_000001_users::Migration),

@@ -26,7 +26,7 @@ use crate::{
     views::alerts::serialize_events,
 };
 
-/// `GET /api/events` (§7.12) — histórico paginado no envelope do Lucid, com
+/// `GET /api/events` — histórico paginado no envelope `{ data, meta }`, com
 /// `device` e `monitor` achatados como na Central de Alertas.
 async fn index(
     State(ctx): State<AppContext>,

@@ -1,4 +1,4 @@
-//! `cargo loco task probe_run` — o agente da LAN (paridade com `node ace probe:run`).
+//! `backend_rust-cli task probe_run` — o agente de coleta da LAN.
 
 use loco_rs::prelude::*;
 

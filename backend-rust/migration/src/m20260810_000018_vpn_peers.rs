@@ -16,8 +16,8 @@ impl MigrationTrait for Migration {
             .col(big_integer("device_id"))
             // `string("public_key")` + índice único nomeado abaixo, e não
             // `string_uniq`: o UNIQUE inline deixa o Postgres batizar a
-            // constraint (`vpn_peers_public_key_key`), e a §6 exige o nome do
-            // Adonis. Achado pelo `cargo run --example schema_parity`.
+            // constraint (`vpn_peers_public_key_key`), e este esquema nomeia
+            // seus índices à mão — ver `shared::index`.
             .col(string("public_key"))
             // Cifrada em repouso com a APP_KEY — ver `services::shared::crypto`.
             .col(text_null("preshared_key_encrypted"))

@@ -2,9 +2,8 @@
 //!
 //! O frontend (`stores/alerts.ts`) lê `AlertRule` e `AlertEvent` com estes
 //! nomes exatos. Duas derivações não vêm do banco e precisam ser calculadas
-//! aqui: `isEnabled`, espelho de `enabled` que o Lucid publicava como
-//! `@computed` (§6.1), e `title`, que a Central de Alertas exibe como cabeçalho
-//! de cada linha.
+//! aqui: `isEnabled`, espelho de `enabled` que a tela consome sob esse nome, e
+//! `title`, que a Central de Alertas exibe como cabeçalho de cada linha.
 
 use std::collections::HashMap;
 
@@ -115,8 +114,8 @@ pub struct SerializedAlertEvent {
 
 /// Nomes das entidades relacionadas, carregados de uma vez.
 ///
-/// O Lucid resolvia isso com `preload`; aqui é uma consulta por tabela para o
-/// conjunto inteiro da página, em vez de três por linha.
+/// Uma consulta por tabela para o conjunto inteiro da página, em vez de três
+/// por linha — é o que evita o N+1 na Central de Alertas.
 #[derive(Debug, Default)]
 pub struct AlertRelations {
     rules: HashMap<i64, String>,

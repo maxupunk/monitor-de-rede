@@ -1,10 +1,9 @@
 //! `GET /` — identificação do serviço (§5.6).
 //!
-//! Fica **fora** do prefixo `/api` e fora da autenticação: é o mesmo endpoint
-//! que o `docker-compose` usa como health check e que o AdonisJS servia em
-//! `start/routes.ts`. O corpo é literal, incluindo a versão `1.0.0` — não é a
-//! versão do crate; é o número que o backend atual publica, e mudá-lo alteraria
-//! um payload observável.
+//! Fica **fora** do prefixo `/api` e fora da autenticação: é por aqui que se
+//! confere, sem credencial, se o serviço está no ar. O corpo é literal,
+//! incluindo a versão `1.0.0` — não é a versão do crate; é o número que a API
+//! publica, e mudá-lo alteraria um payload observável.
 
 use loco_rs::prelude::*;
 
