@@ -12,7 +12,6 @@ pub struct Model {
     #[sea_orm(unique_key = "devices_network_ip_unique")]
     pub network_id: Option<i64>,
     pub parent_id: Option<i64>,
-    pub zabbix_template_id: Option<i64>,
     #[sea_orm(unique_key = "devices_network_ip_unique")]
     pub ip_address: Option<String>,
     pub name: String,
@@ -70,14 +69,6 @@ pub enum Relation {
     Sites,
     #[sea_orm(has_one = "super::vpn_peers::Entity")]
     VpnPeers,
-    #[sea_orm(
-        belongs_to = "super::zabbix_templates::Entity",
-        from = "Column::ZabbixTemplateId",
-        to = "super::zabbix_templates::Column::Id",
-        on_update = "Cascade",
-        on_delete = "SetNull"
-    )]
-    ZabbixTemplates,
 }
 
 impl Related<super::alert_events::Entity> for Entity {
@@ -125,11 +116,5 @@ impl Related<super::sites::Entity> for Entity {
 impl Related<super::vpn_peers::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::VpnPeers.def()
-    }
-}
-
-impl Related<super::zabbix_templates::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::ZabbixTemplates.def()
     }
 }

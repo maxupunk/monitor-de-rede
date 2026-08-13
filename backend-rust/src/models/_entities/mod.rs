@@ -22,5 +22,3 @@ pub mod system_settings;
 pub mod users;
 pub mod vpn_peers;
 pub mod vpn_servers;
-pub mod zabbix_template_items;
-pub mod zabbix_templates;

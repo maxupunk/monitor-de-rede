@@ -17,24 +17,6 @@ export interface DeviceVpnPeer {
   connectionStatus: VpnConnectionStatus
 }
 
-export interface ZabbixTemplateItemSummary {
-  id: number
-  name: string
-  key: string
-  snmpOid: string
-  valueType: 'FLOAT' | 'UNSIGNED' | 'TEXT' | 'CHAR' | 'LOG'
-  units: string | null
-  multiplier: number | null
-}
-
-export interface ZabbixTemplateSummary {
-  id: number
-  name: string
-  description: string | null
-  zabbixVersion: string | null
-  items: ZabbixTemplateItemSummary[]
-}
-
 export interface Device {
   id: number
   siteId?: number | null
@@ -51,8 +33,6 @@ export interface Device {
   snmpEnabled?: boolean
   snmpCommunity?: string
   snmpVersion?: 'v1' | 'v2c' | 'v3'
-  zabbixTemplateId?: number | null
-  zabbixTemplate?: ZabbixTemplateSummary | null
   site?: { id: number; name: string } | null
   parent?: { id: number; name: string } | null
   network?: { id: number; name: string; cidr: string }

@@ -15,9 +15,10 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
 | Componente / Módulo | Status Atual | Descrição |
 | :--- | :---: | :--- |
 | **Documentação Técnica** | 🟢 **Concluído** | Especificação completa da arquitetura (`arquitetura.md`) e requisitos (`base.md`). |
-| **Backend em Rust (Loco.rs)** | 🟢 **Concluído** | Reescrita completa em `backend-rust/`: 23 migrations, ~90 endpoints, 5 checkers, discovery, SNMP, topologia, alertas, probes e VPN. Ver [historico/roadmap_backend_rust.md](historico/roadmap_backend_rust.md). |
+| **Backend em Rust (Loco.rs)** | 🟢 **Concluído** | Reescrita completa em `backend-rust/`: 22 migrations, ~90 endpoints, 5 checkers, discovery, SNMP, topologia, alertas, probes e VPN. Ver [historico/roadmap_backend_rust.md](historico/roadmap_backend_rust.md). |
 | **Estrutura do Projeto Backend** | 🟢 **Concluído** | Controllers em `src/controllers/`, domínio em `src/services/`, entidades `sea-orm` em `src/models/_entities/`. |
-| **Banco de Dados & Migrations** | 🟢 **Concluído** | 23 tabelas, uma migration por tabela em `backend-rust/migration/`, entidades `sea-orm` com os relacionamentos. |
+| **Banco de Dados & Migrations** | 🟢 **Concluído** | 21 tabelas, uma migration por tabela em `backend-rust/migration/`, entidades `sea-orm` com os relacionamentos. |
+| **Backup & Restauração** | 🟢 **Concluído** | `GET /api/backup/export` baixa as 12 tabelas de configuração em JSON; `POST /api/backup/preview` mostra o que o arquivo contém e `POST /api/backup/restore` o aplica em uma transação, preservando os ids. Telemetria e `users` ficam de fora. Card na tela `/settings`. |
 | **Motor de Monitoramento (Checkers)** | 🟢 **Concluído** | Checkers reais de Ping (ICMP/RTT), HTTP/HTTPS (Fetch/Status/Latência), TCP (Sockets), SNMP (uptime/CPU/memória/interface) e DNS com medição de latência de resolução via UDP, TCP e DoH. |
 | **Processamento de Resultados** | 🟢 **Concluído** | `ResultProcessor` grava resultados no banco, extrai métricas e atualiza estado dos dispositivos/monitores. |
 | **Worker & Queue System** | 🔴 **Não implementado** | A fila do §4.2 da arquitetura nunca saiu do papel: o `scheduler` executa os monitores inline e os probes cuidam do resto. Ver a dívida de backpressure na Fase 2. |
@@ -178,6 +179,9 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
   - [x] Página de detalhes/gráficos de monitor (`/monitors/:id`) com estatísticas de ping (médio, mín, máx), gráfico SVG de latência e log de verificações.
 - [x] **Suporte a PWA**:
   - [x] Manifest file, ícones de aplicativo e Service Worker para experiência instalável.
+- [x] **Backup e Restauração das Configurações** (`/settings`):
+  - [x] Exportação em JSON das 12 tabelas de configuração (sites, redes, dispositivos, interfaces, enlaces, monitores, regras de alerta, servidores DNS, servidor VPN e peers, preferências); telemetria e contas de acesso ficam de fora.
+  - [x] Prévia do arquivo antes de aplicar (contagem por tabela) e restauração transacional com os ids preservados — o que mantém intactas as FKs de monitores, regras e enlaces.
 
 ---
 

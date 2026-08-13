@@ -179,7 +179,7 @@
               :monitors="detailStore.monitors"
               :loading="detailStore.loading"
               variant="device"
-              no-data-text='Nenhum monitor configurado para este equipamento. Crie um acima ou use "Configurar Monitoramento" para descobrir automaticamente.'
+              no-data-text="Nenhum monitor configurado para este equipamento. Crie um acima ou use &quot;Configurar Monitoramento&quot; para descobrir automaticamente."
               @edit="openMonitorDialog"
               @changed="reloadMonitors"
             ></MonitorsTable>
@@ -312,7 +312,7 @@
                       />
                       <div class="d-flex align-center justify-space-between text-caption text-grey">
                         <span v-if="isCpuMonitored"
-                          >Load 1 min:
+                        >Load 1 min:
                           {{ cpuLoadValue !== null ? `${cpuLoadValue} load` : 'N/A' }}</span
                         >
                         <span v-else>Recurso desativado na varredura</span>
@@ -397,42 +397,6 @@
                 </v-tooltip>
               </v-col>
             </v-row>
-
-            <!-- 1.5 Métricas do Template Zabbix (genérico) — apenas se o dispositivo tiver um template vinculado -->
-            <template v-if="templateMetricCards.length > 0">
-              <div
-                class="text-subtitle-1 font-weight-bold mb-3 d-flex align-center ga-2"
-                style="gap: 8px"
-              >
-                <v-icon color="primary">mdi-file-cog-outline</v-icon>
-                {{ detailStore.device?.zabbixTemplate?.name || 'Métricas do Template' }}
-              </div>
-
-              <v-row class="mb-6">
-                <v-col
-                  v-for="card in templateMetricCards"
-                  :key="card.label"
-                  cols="12"
-                  sm="6"
-                  md="3"
-                >
-                  <v-card border flat class="pa-4 rounded-lg h-100">
-                    <div class="d-flex align-center justify-space-between mb-2">
-                      <span class="text-caption text-grey-darken-1 font-weight-medium">{{
-                        card.label
-                      }}</span>
-                      <v-avatar color="info" variant="tonal" size="30">
-                        <v-icon size="16">mdi-gauge</v-icon>
-                      </v-avatar>
-                    </div>
-                    <div class="text-h6 font-weight-bold text-info">
-                      {{ card.value }}
-                    </div>
-                    <div class="text-caption text-grey">{{ card.createdAt || 'Sem dados' }}</div>
-                  </v-card>
-                </v-col>
-              </v-row>
-            </template>
 
             <!-- 2. Tabela de Tráfego por Interface Monitorada -->
             <div
@@ -857,9 +821,7 @@
             <div class="text-subtitle-1">
               Escaneando dispositivo via SNMP em {{ detailStore.device?.ipAddress }}...
             </div>
-            <div class="text-caption text-grey">
-              Consultando interfaces, uso de CPU/memória e itens do template Zabbix vinculado...
-            </div>
+            <div class="text-caption text-grey">Consultando interfaces e uso de CPU/memória...</div>
           </div>
 
           <div v-else-if="detailStore.scanResult">
@@ -931,48 +893,6 @@
                     <span v-if="detailStore.scanResult.memoryInfo.usedPercent != null">
                       - Uso: {{ detailStore.scanResult.memoryInfo.usedPercent.toFixed(1) }}%
                     </span>
-                  </div>
-                </v-col>
-              </v-row>
-            </v-card>
-
-            <!-- Itens do Template Zabbix vinculado (tensão, corrente, etc.) -->
-            <v-card
-              v-if="detailStore.scanResult.zabbixTemplateItems.length > 0"
-              variant="outlined"
-              class="mb-6 rounded-lg pa-4"
-            >
-              <div
-                class="text-subtitle-1 font-weight-bold mb-3 d-flex align-center ga-2"
-                style="gap: 8px"
-              >
-                <v-icon color="primary">mdi-file-cog-outline</v-icon>
-                Itens do Template Zabbix — {{ detailStore.device?.zabbixTemplate?.name }}
-              </div>
-              <div class="text-caption text-grey mb-3">
-                Coletados automaticamente a cada ciclo de polling — não é preciso habilitar
-                individualmente.
-              </div>
-              <v-row>
-                <v-col
-                  v-for="item in detailStore.scanResult.zabbixTemplateItems"
-                  :key="item.id"
-                  cols="12"
-                  sm="6"
-                  md="4"
-                >
-                  <div class="pa-3 border rounded-lg">
-                    <div class="text-caption text-grey-darken-1">{{ item.name }}</div>
-                    <div
-                      class="text-subtitle-1 font-weight-bold"
-                      :class="item.value != null ? 'text-primary' : 'text-grey'"
-                    >
-                      {{
-                        item.value != null
-                          ? `${item.value}${item.units ? ` ${item.units}` : ''}`
-                          : 'Sem resposta'
-                      }}
-                    </div>
                   </div>
                 </v-col>
               </v-row>
@@ -1436,31 +1356,6 @@ function getCpuHexColor(usage?: number | null): string {
 function getMemoryHexColor(usage?: number | null): string {
   return gaugeHexColor(usage ?? null, 'memory_usage')
 }
-
-// --- Métricas dirigidas por Template Zabbix (genérico) ---
-// O dispositivo pode ter um Template Zabbix importado vinculado (ver /zabbix-templates);
-// cada item do template vira um card com o valor mais recente coletado via SNMP
-// (ver modules/zabbix/zabbix_template_collector.ts).
-interface TemplateMetricCard {
-  label: string
-  value: string
-  createdAt?: string
-}
-
-const templateMetricCards = computed<TemplateMetricCard[]>(() => {
-  const items = detailStore.device?.zabbixTemplate?.items
-  if (!items || items.length === 0) return []
-
-  return items.map((item) => {
-    const metric = detailStore.metrics.find((m) => m.metricName === item.key)
-    const value = metric ? Number(metric.metricValue) : NaN
-    return {
-      label: item.name,
-      value: !isNaN(value) ? `${value}${item.units ? ` ${item.units}` : ''}` : 'N/A',
-      createdAt: metric?.createdAt,
-    }
-  })
-})
 
 // Resumo de tráfego por Interface — só as que de fato têm monitor coletando.
 // `adminStatus` não serve de filtro aqui: o próprio equipamento o preenche na

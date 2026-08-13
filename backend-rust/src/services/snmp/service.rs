@@ -11,14 +11,13 @@ use crate::services::{
     },
     shared::errors::{AppError, AppResult},
     snmp::{
-        client::{SnmpClient, SnmpConfig, SnmpError, SnmpVersion},
+        client::{SnmpConfig, SnmpError, SnmpVersion},
         collectors::{
             collect_cpu, collect_interfaces, collect_lldp, collect_memory, collect_system,
             collect_traffic, status_label, InterfaceTraffic, LldpNeighbor, SnmpCpuInfo,
             SnmpInterface, SnmpMemoryInfo, SnmpSystemInfo,
         },
     },
-    zabbix::collector::ZabbixTemplateItemReading,
 };
 use crate::{
     models::{
@@ -52,7 +51,6 @@ pub struct SnmpScanResult {
     /// `scan_device` os preenche para a tela de descoberta.
     pub has_cpu_monitor: bool,
     pub has_memory_monitor: bool,
-    pub zabbix_template_items: Vec<ZabbixTemplateItemReading>,
 }
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -126,7 +124,6 @@ pub async fn scan(config: SnmpConfig) -> AppResult<SnmpScanResult> {
         neighbors: neighbors.unwrap_or_default(),
         has_cpu_monitor: false,
         has_memory_monitor: false,
-        zabbix_template_items: vec![],
     })
 }
 
@@ -134,13 +131,12 @@ pub async fn scan(config: SnmpConfig) -> AppResult<SnmpScanResult> {
 ///
 /// É o `scan` puro mais o que só o banco sabe: quais monitores já estão
 /// habilitados — para o diálogo abrir refletindo o que já está configurado, em
-/// vez de propor tudo de novo — e a leitura dos itens do template Zabbix.
+/// vez de propor tudo de novo.
 pub async fn scan_device(
     ctx: &loco_rs::app::AppContext,
     device: &devices::Model,
     config: SnmpConfig,
 ) -> AppResult<SnmpScanResult> {
-    let client = SnmpClient::new(config.clone());
     let mut scan = scan(config).await?;
     let existing = monitors::Entity::find()
         .filter(monitors_entity::Column::DeviceId.eq(Some(device.id)))
@@ -153,8 +149,6 @@ pub async fn scan_device(
     for interface in &mut scan.interfaces {
         interface.is_monitored = enabled(&interface_monitor_name(&interface.if_name));
     }
-    scan.zabbix_template_items =
-        crate::services::zabbix::collector::preview(&ctx.db, device, &client).await?;
     Ok(scan)
 }
 
@@ -163,7 +157,6 @@ pub async fn poll_device(
     device: &devices::Model,
     config: SnmpConfig,
 ) -> AppResult<SnmpPollResult> {
-    let client = SnmpClient::new(config.clone());
     let scan = scan(config).await?;
     if !scan.snmp_responded {
         return Ok(SnmpPollResult {
@@ -214,9 +207,6 @@ pub async fn poll_device(
         reboot_detected |= reboot;
     }
     persist_system_metrics(&ctx.db, device.id, &scan).await?;
-    crate::services::zabbix::collector::sync_zabbix_template_monitor(&ctx.db, device).await?;
-    metrics_recorded +=
-        crate::services::zabbix::collector::collect(&ctx.db, device, &client).await? as usize;
     // O status **não** é escrito aqui (matriz de paridade #4): quem decide é o
     // `device_status`, agregando todos os monitores habilitados. Gravar "online"
     // direto era o bug de alternância — a coleta subia o dispositivo em silêncio
@@ -817,7 +807,6 @@ mod tests {
             neighbors: vec![],
             has_cpu_monitor: true,
             has_memory_monitor: false,
-            zabbix_template_items: vec![],
         };
         let json = serde_json::to_value(&scan).unwrap();
 
@@ -829,7 +818,6 @@ mod tests {
             "interfaces",
             "hasCpuMonitor",
             "hasMemoryMonitor",
-            "zabbixTemplateItems",
         ] {
             assert!(json.get(campo).is_some(), "campo ausente: {campo}");
         }

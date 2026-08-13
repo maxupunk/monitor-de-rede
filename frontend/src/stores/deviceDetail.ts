@@ -75,14 +75,6 @@ export interface ScanInterfaceItem {
   isMonitored: boolean
 }
 
-export interface ScanZabbixTemplateItem {
-  id: number
-  name: string
-  key: string
-  units?: string | null
-  value?: number | null
-}
-
 /**
  * `POST /api/devices/:id/snmp/scan` (`services::snmp::service::SnmpScanResult`).
  *
@@ -110,7 +102,6 @@ export interface ScanResult {
   interfaces: ScanInterfaceItem[]
   hasCpuMonitor: boolean
   hasMemoryMonitor: boolean
-  zabbixTemplateItems: ScanZabbixTemplateItem[]
   snmpResponded: boolean
 }
 

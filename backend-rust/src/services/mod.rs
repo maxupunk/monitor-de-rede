@@ -5,6 +5,7 @@
 
 pub mod alerts;
 pub mod auth;
+pub mod backup;
 pub mod discovery;
 pub mod events;
 pub mod maintenance;
@@ -16,4 +17,3 @@ pub mod shared;
 pub mod snmp;
 pub mod topology;
 pub mod vpn;
-pub mod zabbix;

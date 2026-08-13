@@ -12,9 +12,8 @@ use crate::{
     models::{
         _entities::{
             alert_events, alert_rules, device_interfaces, device_links, metrics, monitor_results,
-            zabbix_template_items,
         },
-        devices, monitors, probes, zabbix_templates,
+        devices, monitors, probes,
     },
     services::shared::errors::AppResult,
 };
@@ -132,26 +131,6 @@ impl ResourceCleanupService {
             .exec(db)
             .await?;
         probes::Entity::delete_by_id(probe_id).exec(db).await?;
-        Ok(())
-    }
-
-    /// Remove um template, seus itens e desvincula os dispositivos existentes.
-    pub async fn delete_zabbix_template(
-        db: &DatabaseConnection,
-        template_id: i64,
-    ) -> AppResult<()> {
-        devices::Entity::update_many()
-            .col_expr(devices::Column::ZabbixTemplateId, Expr::value(None::<i64>))
-            .filter(devices::Column::ZabbixTemplateId.eq(template_id))
-            .exec(db)
-            .await?;
-        zabbix_template_items::Entity::delete_many()
-            .filter(zabbix_template_items::Column::TemplateId.eq(template_id))
-            .exec(db)
-            .await?;
-        zabbix_templates::Entity::delete_by_id(template_id)
-            .exec(db)
-            .await?;
         Ok(())
     }
 }

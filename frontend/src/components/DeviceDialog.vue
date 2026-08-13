@@ -183,36 +183,6 @@
                 {{ snmpTestResult.message }}
               </v-alert>
             </v-col>
-            <v-col v-if="formModel.snmpEnabled" cols="12">
-              <div class="d-flex align-center ga-2">
-                <v-select
-                  v-model="formModel.zabbixTemplateId"
-                  :items="zabbixTemplatesStore.templates"
-                  item-title="name"
-                  item-value="id"
-                  label="Template Zabbix (Opcional)"
-                  variant="outlined"
-                  density="comfortable"
-                  clearable
-                  hide-details
-                  class="flex-grow-1"
-                ></v-select>
-                <v-btn
-                  icon
-                  color="primary"
-                  variant="tonal"
-                  density="comfortable"
-                  to="/zabbix-templates"
-                >
-                  <v-icon>mdi-upload</v-icon>
-                  <v-tooltip activator="parent" location="top">Importar Novo Template</v-tooltip>
-                </v-btn>
-              </div>
-              <div class="text-caption text-grey-darken-1 mt-1">
-                Define quais OIDs SNMP são coletados (tensão, corrente, etc.) além de
-                CPU/Memória/Interfaces.
-              </div>
-            </v-col>
           </v-row>
         </v-form>
       </v-card-text>
@@ -230,7 +200,6 @@
 import { ref, reactive, computed, watch } from 'vue'
 import { useDevicesStore, type Device } from '@/stores/devices'
 import { useSitesStore, type Site } from '@/stores/sites'
-import { useZabbixTemplatesStore } from '@/stores/zabbixTemplates'
 import { useSnmpTestStore } from '@/stores/snmpTest'
 import SiteDialog from '@/components/SiteDialog.vue'
 
@@ -247,7 +216,6 @@ const emit = defineEmits<{
 
 const devicesStore = useDevicesStore()
 const sitesStore = useSitesStore()
-const zabbixTemplatesStore = useZabbixTemplatesStore()
 const snmpTestStore = useSnmpTestStore()
 
 const siteDialog = ref(false)
@@ -266,7 +234,6 @@ const formModel = reactive<{
   snmpEnabled: boolean
   snmpCommunity: string
   snmpVersion: 'v1' | 'v2c' | 'v3'
-  zabbixTemplateId: number | null
 }>({
   name: '',
   ipAddress: '',
@@ -279,7 +246,6 @@ const formModel = reactive<{
   snmpEnabled: false,
   snmpCommunity: 'public',
   snmpVersion: 'v2c',
-  zabbixTemplateId: null,
 })
 
 const availableParentDevices = computed(() => {
@@ -292,7 +258,6 @@ watch(
     if (isOpen) {
       if (devicesStore.devices.length === 0) devicesStore.fetchDevices()
       if (sitesStore.sites.length === 0) sitesStore.fetchSites()
-      if (zabbixTemplatesStore.templates.length === 0) zabbixTemplatesStore.fetchTemplates()
 
       snmpTestResult.value = null
       if (props.deviceToEdit) {
@@ -307,7 +272,6 @@ watch(
         formModel.snmpEnabled = Boolean(props.deviceToEdit.snmpEnabled)
         formModel.snmpCommunity = props.deviceToEdit.snmpCommunity || 'public'
         formModel.snmpVersion = props.deviceToEdit.snmpVersion || 'v2c'
-        formModel.zabbixTemplateId = props.deviceToEdit.zabbixTemplateId ?? null
       } else if (props.prefillData) {
         formModel.name = props.prefillData.name || ''
         formModel.ipAddress = props.prefillData.ipAddress || ''
@@ -320,7 +284,6 @@ watch(
         formModel.snmpEnabled = props.prefillData.snmpEnabled ?? false
         formModel.snmpCommunity = props.prefillData.snmpCommunity || 'public'
         formModel.snmpVersion = props.prefillData.snmpVersion || 'v2c'
-        formModel.zabbixTemplateId = props.prefillData.zabbixTemplateId ?? null
       } else {
         formModel.name = ''
         formModel.ipAddress = ''
@@ -333,7 +296,6 @@ watch(
         formModel.snmpEnabled = false
         formModel.snmpCommunity = 'public'
         formModel.snmpVersion = 'v2c'
-        formModel.zabbixTemplateId = null
       }
     }
   }

@@ -328,7 +328,6 @@ mod tests {
             site_id: None,
             network_id: None,
             parent_id,
-            zabbix_template_id: None,
             ip_address: None,
             name: format!("dev-{id}"),
             r#type: "switch".into(),

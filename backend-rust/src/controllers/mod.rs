@@ -1,6 +1,7 @@
 pub mod alerts;
 pub mod auth;
 pub mod auth_guard;
+pub mod backup;
 pub mod dashboard;
 pub mod devices;
 pub mod discovery;
@@ -17,4 +18,3 @@ pub mod snmp;
 pub mod topology;
 pub mod vpn_peers;
 pub mod vpn_servers;
-pub mod zabbix_templates;

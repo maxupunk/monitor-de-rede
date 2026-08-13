@@ -2,8 +2,8 @@ import { ref, type Ref } from 'vue'
 import { apiService } from '@/services/apiService'
 
 /**
- * Toda store de cadastro simples (sites, redes, dispositivos, servidores DNS,
- * templates Zabbix) repetia o mesmo par fetch/create/update/delete contra
+ * Toda store de cadastro simples (sites, redes, dispositivos, servidores DNS)
+ * repetia o mesmo par fetch/create/update/delete contra
  * `apiService`, só trocando o path e as mensagens de erro. Esta factory
  * centraliza esse padrão — cada store mantém seu próprio `defineStore` e pode
  * adicionar estado/ações extras por cima do que é devolvido aqui.

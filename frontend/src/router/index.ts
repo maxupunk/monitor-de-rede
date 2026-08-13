@@ -29,11 +29,6 @@ const routes = [
       },
       { path: 'topology', name: 'topology', component: () => import('../pages/TopologyPage.vue') },
       {
-        path: 'zabbix-templates',
-        name: 'zabbix-templates',
-        component: () => import('../pages/ZabbixTemplatesPage.vue'),
-      },
-      {
         path: 'discovery',
         name: 'discovery',
         component: () => import('../pages/DiscoveryPage.vue'),

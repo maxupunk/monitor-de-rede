@@ -16,14 +16,12 @@ use std::collections::HashSet;
 use loco_rs::Result;
 use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 
-/// As 23 tabelas do esquema, na ordem de criação da §6 (pais antes de filhos).
-pub const CREATION_ORDER: [&str; 23] = [
+/// As 21 tabelas do esquema, na ordem de criação da §6 (pais antes de filhos).
+pub const CREATION_ORDER: [&str; 21] = [
     "users",
     "sites",
     "probes",
     "networks",
-    "zabbix_templates",
-    "zabbix_template_items",
     "devices",
     "device_interfaces",
     "device_links",
@@ -120,10 +118,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cobre_as_23_tabelas_sem_repetir() {
-        assert_eq!(CREATION_ORDER.len(), 23);
+    fn cobre_as_21_tabelas_sem_repetir() {
+        assert_eq!(CREATION_ORDER.len(), 21);
         let unicas: HashSet<&&str> = CREATION_ORDER.iter().collect();
-        assert_eq!(unicas.len(), 23, "há nome de tabela repetido");
+        assert_eq!(unicas.len(), 21, "há nome de tabela repetido");
     }
 
     #[test]

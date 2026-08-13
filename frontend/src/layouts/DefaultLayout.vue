@@ -219,7 +219,6 @@ const navItems: NavItem[] = [
           dnsServersDialog.value = true
         },
       },
-      { title: 'Templates Zabbix', icon: 'mdi-file-cog-outline', to: '/zabbix-templates' },
     ],
   },
   {

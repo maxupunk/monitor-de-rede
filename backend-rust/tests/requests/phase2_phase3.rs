@@ -127,16 +127,6 @@ async fn crud_de_configuracoes_e_monitor_tem_respostas_esperadas() {
         assert_eq!(loaded.status_code(), 200);
         assert_eq!(serde_json::from_str::<serde_json::Value>(&loaded.text()).unwrap()["layout"][0]["id"], "stat_cards");
 
-        let export = serde_json::json!({"zabbix_export":{"version":"7.0","templates":[{"uuid":"template-1","name":"Base","items":[{"uuid":"item-1","name":"CPU","type":"SNMP_AGENT","key_":"system.cpu","snmp_oid":"1.3.6.1.2.1.25.3.3.1.2","value_type":"FLOAT"}]}]}});
-        let imported = request.post("/api/zabbix-templates").json(&serde_json::json!({"content":export.to_string()})).await;
-        assert_eq!(imported.status_code(), 201);
-        let listed = request.get("/api/zabbix-templates").await;
-        assert_eq!(listed.status_code(), 200);
-        let listed: serde_json::Value = serde_json::from_str(&listed.text()).unwrap();
-        assert_eq!(listed[0]["items"].as_array().unwrap().len(), 1);
-        let template_id = listed[0]["id"].as_i64().unwrap();
-        assert_eq!(request.get(&format!("/api/zabbix-templates/{template_id}")).await.status_code(), 200);
-        assert_eq!(request.delete(&format!("/api/zabbix-templates/{template_id}")).await.status_code(), 204);
         assert_eq!(request.delete(&format!("/api/monitors/{}", monitor["id"])).await.status_code(), 204);
         assert_eq!(request.delete(&format!("/api/probes/{}", probe["id"])).await.status_code(), 204);
         assert_eq!(request.delete(&format!("/api/dns/servers/{}", dns["id"])).await.status_code(), 204);

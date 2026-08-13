@@ -1,4 +1,5 @@
 mod auth;
+mod backup;
 mod phase2_phase3;
 mod phase6_phase7;
 mod phase8;

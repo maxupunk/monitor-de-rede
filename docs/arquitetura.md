@@ -116,7 +116,7 @@ services/
 ├── events/         bus (SSE) e relay (outbox → bus)
 ├── network_tools/  port scanner e utilidades de rede
 ├── maintenance/    data_pruner e limpeza de recursos
-├── zabbix/         importação de templates
+├── backup/         export/restore das configurações
 └── shared/         crypto, pagination, errors
 ```
 
@@ -198,13 +198,12 @@ definidos; qualquer coisa fora do catálogo é rejeitada.
 
 ## 7. Esquema de dados
 
-23 tabelas. A ordem de criação está em `src/models/tables.rs` (`CREATION_ORDER`)
+21 tabelas. A ordem de criação está em `src/models/tables.rs` (`CREATION_ORDER`)
 e é a mesma das migrations — pai antes de filho, por causa das FKs. Um teste
 garante que a lista e as migrations não divirjam.
 
 ```text
 users  sites  probes  networks
-zabbix_templates  zabbix_template_items
 devices  device_interfaces  device_links
 monitors  monitor_results  metrics
 discovery_runs  discovery_results
@@ -222,7 +221,7 @@ Notas que valem mais que a lista:
   (`{"host", "packetCount"}` para ping, `{"url", "method",
   "acceptedStatusCodes"}` para HTTP).
 - **Tabelas append-only** (`monitor_results`, `metrics`, `event_outbox`,
-  `probe_tasks`, `zabbix_template_items`) têm só `created_at`. As duas primeiras
+  `probe_tasks`) têm só `created_at`. As duas primeiras
   são as de maior volume e recebem inserção em rajada; uma coluna de 8 bytes que
   nunca é lida, vezes milhões de linhas, é escrita jogada fora.
 - **FKs anuláveis com `CASCADE`** existem de propósito (`probes.site_id`,
@@ -290,6 +289,7 @@ GET      /api/alerts                       POST /api/alerts/{id}/acknowledge | /
 
 GET  /api/events                           GET /api/events/stream   (SSE)
 GET  /api/dashboard/layout                 POST /api/dashboard/layout
+GET  /api/backup/export                    POST /api/backup/preview | /restore
 
 POST /api/snmp/test                        POST /api/devices/{id}/snmp/scan | /poll | /apply-monitors
 POST /api/port-scan
@@ -300,9 +300,28 @@ GET|PUT  /api/vpn/server                   POST /api/vpn/server/preflight | /det
 GET|POST /api/vpn/peers                    PATCH|DELETE /api/vpn/peers/{id}
 GET      /api/vpn/peers/next-ip            GET /api/vpn/peers/{id}/config | /qrcode
 POST     /api/vpn/peers/{id}/rotate | /firewall-hints
-
-GET|POST /api/zabbix-templates             GET|DELETE /api/zabbix-templates/{id}
 ```
+
+### Backup de configuração
+
+`GET /api/backup/export` devolve um JSON com as 12 tabelas de configuração
+(`services::backup::service::BACKED_UP_TABLES`). Ficam de fora a telemetria — é
+histórico, cresce sem limite e volta a ser produzida no ciclo seguinte — e
+`users`, porque conta de acesso não é configuração e restaurá-la trocaria as
+credenciais de quem está operando.
+
+`POST /api/backup/restore` apaga a configuração atual e o histórico que depende
+dela, e recarrega o arquivo **preservando os ids**. Preservar o id não é
+detalhe: `monitors`, `alert_rules`, `device_links` e `vpn_peers` guardam FKs, e
+renumerar significaria reescrever cada referência — inclusive as que vivem
+dentro de JSON. Tudo roda em uma transação; no PostgreSQL as sequências são
+realinhadas no fim, senão o próximo cadastro feito pela tela colidiria com um id
+restaurado.
+
+O arquivo carrega `probes.token_hash`, `devices.snmp_community` e as chaves da
+VPN cifradas com a `ENCRYPTION_KEY` da instalação — restaurar em outra
+instalação só devolve VPN funcional com a mesma chave.
+
 
 ### Convenções de contrato
 

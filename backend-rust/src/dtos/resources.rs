@@ -32,7 +32,6 @@ pub struct DeviceInput {
     pub site_id: Option<i64>,
     pub network_id: Option<i64>,
     pub parent_id: Option<i64>,
-    pub zabbix_template_id: Option<i64>,
     pub ip_address: Option<String>,
     pub name: Option<String>,
     #[serde(rename = "type")]
@@ -187,12 +186,6 @@ pub struct TopologyLinkInput {
 pub struct DashboardLayoutInput {
     pub layout: Vec<serde_json::Value>,
     pub client_id: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ZabbixImportInput {
-    pub content: String,
 }
 
 #[derive(Debug, Deserialize, Default)]

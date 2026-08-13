@@ -14,7 +14,6 @@ use crate::{
     models::{
         _entities::{
             alert_events, device_interfaces, discovery_results, metrics as metrics_entity,
-            zabbix_templates,
         },
         devices, monitors, sites,
     },
@@ -52,15 +51,14 @@ pub(crate) async fn present(
             .map(|row| serde_json::json!({"id": row.id, "name": row.name})),
         None => None,
     };
-    let zabbix_template = match device.zabbix_template_id { Some(id) => zabbix_templates::Entity::find_by_id(id).one(db).await?.map(|row| serde_json::json!({"id": row.id, "name": row.name, "description": row.description, "zabbixVersion": row.zabbix_version, "items": []})), None => None };
     Ok(serde_json::json!({
         "id": device.id, "siteId": device.site_id, "networkId": device.network_id, "parentId": device.parent_id,
-        "zabbixTemplateId": device.zabbix_template_id, "ipAddress": device.ip_address, "name": device.name,
+        "ipAddress": device.ip_address, "name": device.name,
         "type": device.r#type, "vendor": device.vendor, "model": device.model, "serialNumber": device.serial_number,
         "description": device.description, "isMonitored": device.is_monitored, "snmpEnabled": device.snmp_enabled,
         "snmpCommunity": device.snmp_community, "snmpVersion": device.snmp_version, "status": device.status,
         "lastSeenAt": device.last_seen_at.map(|v| v.to_rfc3339()), "createdAt": device.created_at.to_rfc3339(),
-        "updatedAt": device.updated_at.to_rfc3339(), "site": site, "parent": parent, "zabbixTemplate": zabbix_template,
+        "updatedAt": device.updated_at.to_rfc3339(), "site": site, "parent": parent,
         "vpnPeer": serde_json::Value::Null
     }))
 }
@@ -144,7 +142,6 @@ async fn store(
         site_id: Set(input.site_id),
         network_id: Set(input.network_id),
         parent_id: Set(input.parent_id),
-        zabbix_template_id: Set(input.zabbix_template_id),
         ip_address: Set(input.ip_address),
         name: Set(name),
         r#type: Set(kind),
@@ -207,7 +204,6 @@ async fn update(
         site_id: Set(input.site_id.or(current.site_id)),
         network_id: Set(input.network_id.or(current.network_id)),
         parent_id: Set(input.parent_id.or(current.parent_id)),
-        zabbix_template_id: Set(input.zabbix_template_id.or(current.zabbix_template_id)),
         ip_address: Set(input.ip_address.or(current.ip_address)),
         name: Set(name),
         r#type: Set(kind),

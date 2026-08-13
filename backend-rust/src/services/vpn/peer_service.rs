@@ -498,7 +498,6 @@ mod tests {
             site_id: None,
             network_id: Some(1),
             parent_id: None,
-            zabbix_template_id: None,
             ip_address: Some("10.8.0.11".into()),
             name: name.into(),
             r#type: "host".into(),

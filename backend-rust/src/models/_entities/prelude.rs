@@ -20,5 +20,3 @@ pub use super::system_settings::Entity as SystemSettings;
 pub use super::users::Entity as Users;
 pub use super::vpn_peers::Entity as VpnPeers;
 pub use super::vpn_servers::Entity as VpnServers;
-pub use super::zabbix_template_items::Entity as ZabbixTemplateItems;
-pub use super::zabbix_templates::Entity as ZabbixTemplates;

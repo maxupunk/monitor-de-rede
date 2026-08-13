@@ -98,7 +98,6 @@ mdns-sd = { version = "0.13" }
 ssdp-client = { version = "2.1" }
 petgraph = { version = "0.7" }
 phf = { version = "0.11", features = ["macros"] }
-quick-xml = { version = "0.37", features = ["serialize"] }
 
 [[bin]]
 name = "backend_rust-cli"

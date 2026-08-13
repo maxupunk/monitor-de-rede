@@ -9,8 +9,6 @@ mod m20260810_000001_users_active;
 mod m20260810_000002_sites;
 mod m20260810_000003_probes;
 mod m20260810_000004_networks;
-mod m20260810_000005_zabbix_templates;
-mod m20260810_000006_zabbix_template_items;
 mod m20260810_000007_devices;
 mod m20260810_000008_device_interfaces;
 mod m20260810_000009_device_links;
@@ -27,8 +25,69 @@ mod m20260810_000019_dns_servers;
 mod m20260810_000020_event_outbox;
 mod m20260810_000021_probe_tasks;
 mod m20260810_000022_system_settings;
+mod m20260812_000001_drop_zabbix_templates;
 
 pub struct Migrator;
+
+/// Migrations que existiram, foram aplicadas em bancos reais e depois saíram do
+/// repositório.
+///
+/// O `sea-orm-migration` aborta o `up()` quando encontra em `seaql_migrations`
+/// uma versão sem arquivo correspondente ("migration file of version … is
+/// missing"). Como o esquema de templates Zabbix foi removido inteiro, os
+/// bancos que já rodaram aquelas duas migrations precisam ter o registro
+/// apagado **antes** do migrator rodar — é o que
+/// [`crate::purge_removed_migrations`] faz, chamado no `after_context` do
+/// `App`.
+pub const REMOVED_MIGRATIONS: [&str; 2] = [
+    "m20260810_000005_zabbix_templates",
+    "m20260810_000006_zabbix_template_items",
+];
+
+/// Apaga de `seaql_migrations` os registros das migrations em
+/// [`REMOVED_MIGRATIONS`].
+///
+/// Roda antes do migrator e é idempotente: num banco novo a tabela ainda não
+/// existe e a função não faz nada.
+///
+/// # Errors
+///
+/// Propaga falha do banco ao consultar ou limpar `seaql_migrations`.
+pub async fn purge_removed_migrations<C: sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<(), sea_orm::DbErr> {
+    use sea_orm::{DatabaseBackend, Statement};
+
+    let backend = db.get_database_backend();
+    let exists = match backend {
+        DatabaseBackend::Sqlite => {
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'seaql_migrations'"
+        }
+        _ => {
+            "SELECT table_name FROM information_schema.tables \
+              WHERE table_schema = current_schema() AND table_name = 'seaql_migrations'"
+        }
+    };
+    if db
+        .query_all_raw(Statement::from_string(backend, exists))
+        .await?
+        .is_empty()
+    {
+        return Ok(());
+    }
+
+    let list = REMOVED_MIGRATIONS
+        .iter()
+        .map(|name| format!("'{name}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    db.execute_raw(Statement::from_string(
+        backend,
+        format!("DELETE FROM seaql_migrations WHERE version IN ({list})"),
+    ))
+    .await?;
+    Ok(())
+}
 
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
@@ -48,8 +107,6 @@ impl MigratorTrait for Migrator {
             Box::new(m20260810_000002_sites::Migration),
             Box::new(m20260810_000003_probes::Migration),
             Box::new(m20260810_000004_networks::Migration),
-            Box::new(m20260810_000005_zabbix_templates::Migration),
-            Box::new(m20260810_000006_zabbix_template_items::Migration),
             Box::new(m20260810_000007_devices::Migration),
             Box::new(m20260810_000008_device_interfaces::Migration),
             Box::new(m20260810_000009_device_links::Migration),
@@ -66,6 +123,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260810_000020_event_outbox::Migration),
             Box::new(m20260810_000021_probe_tasks::Migration),
             Box::new(m20260810_000022_system_settings::Migration),
+            Box::new(m20260812_000001_drop_zabbix_templates::Migration),
             // inject-above (do not remove this comment)
         ]
     }

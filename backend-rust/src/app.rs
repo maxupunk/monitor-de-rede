@@ -58,8 +58,18 @@ impl Hooks for App {
     /// servem para isto — o `run_task` não os executa, e foi exatamente essa
     /// suposição que deixou o `scheduler` e o `probe` sem cliente ICMP e sem
     /// barramento de eventos, com todo monitor de ping caindo em `unknown`.
+    ///
+    /// É também o único ponto que roda **antes** do migrator: o `create_app`
+    /// chama `create_context` e só depois `db::converge`. É daí que
+    /// [`migration::purge_removed_migrations`] tira a chance de apagar o
+    /// registro das migrations que saíram do repositório — sem isso, o
+    /// `sea-orm-migration` aborta o boot de qualquer banco que já as tenha
+    /// aplicado.
     async fn after_context(ctx: AppContext) -> Result<AppContext> {
         process_deps::install(&ctx);
+        migration::purge_removed_migrations(&ctx.db)
+            .await
+            .map_err(loco_rs::Error::DB)?;
         Ok(ctx)
     }
 
@@ -86,6 +96,7 @@ impl Hooks for App {
             // `X-Probe-Token` dentro do handler (§7.10). Fora do guarda JWT.
             .add_route(controllers::probes::agent_routes())
             .add_route(controllers::dashboard::routes().layer(business_auth.clone()))
+            .add_route(controllers::backup::routes().layer(business_auth.clone()))
             .add_route(controllers::sites::routes().layer(business_auth.clone()))
             .add_route(controllers::networks::routes().layer(business_auth.clone()))
             .add_route(controllers::devices::routes().layer(business_auth.clone()))
@@ -101,8 +112,7 @@ impl Hooks for App {
             .add_route(controllers::alerts::rules_routes().layer(business_auth.clone()))
             .add_route(controllers::alerts::routes().layer(business_auth.clone()))
             .add_route(controllers::vpn_servers::routes().layer(business_auth.clone()))
-            .add_route(controllers::vpn_peers::routes().layer(business_auth.clone()))
-            .add_route(controllers::zabbix_templates::routes().layer(business_auth))
+            .add_route(controllers::vpn_peers::routes().layer(business_auth))
     }
     /// Nenhum worker de fila registrado — o trabalho de background é o ciclo do
     /// `scheduler` e o agente do `probe`, ambos processos próprios.

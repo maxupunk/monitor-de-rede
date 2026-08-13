@@ -44,8 +44,8 @@ pub fn with_timestamps(stmt: TableCreateStatement) -> TableCreateStatement {
 
 /// Fecha uma tabela **append-only** com apenas `created_at`.
 ///
-/// Vale para `monitor_results`, `metrics`, `zabbix_template_items`,
-/// `event_outbox` e `probe_tasks`. Não é economia estética: as duas primeiras
+/// Vale para `monitor_results`, `metrics`, `event_outbox` e `probe_tasks`.
+/// Não é economia estética: as duas primeiras
 /// são as tabelas de maior volume do sistema e recebem inserção em rajada a
 /// cada coleta. Uma coluna de 8 bytes que nunca é lida, multiplicada por
 /// milhões de linhas, é largura de banda de escrita jogada fora.

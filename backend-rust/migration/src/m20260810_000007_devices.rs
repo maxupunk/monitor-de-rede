@@ -15,7 +15,6 @@ impl MigrationTrait for Migration {
             .col(big_integer_null("site_id"))
             .col(big_integer_null("network_id"))
             .col(big_integer_null("parent_id"))
-            .col(big_integer_null("zabbix_template_id"))
             .col(string_null("ip_address"))
             .col(string("name"))
             .col(string("type"))
@@ -48,12 +47,6 @@ impl MigrationTrait for Migration {
                 "parent_id",
                 "devices",
                 ForeignKeyAction::SetNull,
-            ))
-            .foreign_key(&mut fk(
-                "devices",
-                "zabbix_template_id",
-                "zabbix_templates",
-                ForeignKeyAction::SetNull,
             ));
 
         m.create_table(with_timestamps(stmt.take())).await?;
@@ -80,12 +73,6 @@ impl MigrationTrait for Migration {
             .await?;
         m.create_index(index("devices_site_id_index", "devices", &["site_id"]))
             .await?;
-        m.create_index(index(
-            "devices_zabbix_template_id_index",
-            "devices",
-            &["zabbix_template_id"],
-        ))
-        .await?;
         Ok(())
     }
 
