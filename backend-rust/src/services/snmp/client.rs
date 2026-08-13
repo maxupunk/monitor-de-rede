@@ -134,6 +134,8 @@ pub enum SnmpError {
     Network(String),
     #[error("Versão SNMP {0} ainda não possui segurança USM configurada")]
     UnsupportedVersion(&'static str),
+    #[error("Agente SNMPv3 recusou a consulta: {0}")]
+    Usm(&'static str),
     #[error("Configuração SNMP inválida: {0}")]
     InvalidConfig(String),
     #[error("Agente SNMP devolveu erro {0}")]
@@ -416,10 +418,14 @@ impl SnmpClient {
         let v3::ScopedPduData::CleartextPdu(scoped) = message.scoped_data else {
             return Err(SnmpError::UnsupportedVersion("v3 com privacidade"));
         };
-        if let v3::Pdus::Response(response) = scoped.data {
-            Ok(response.0)
-        } else {
-            Err(SnmpError::Decode("PDU v3 nao e uma resposta".into()))
+        match scoped.data {
+            v3::Pdus::Response(response) => Ok(response.0),
+            // O agente recusa em Report, não em erro de PDU: é assim que ele
+            // diz "esse usuário não existe" ou "esse nível de segurança não
+            // serve". Tratar isso como falha de decodificação transformava uma
+            // configuração errada numa mensagem sobre ASN.1 na tela.
+            v3::Pdus::Report(report) => Err(SnmpError::Usm(usm_report_reason(&report.0))),
+            _ => Err(SnmpError::Decode("PDU v3 nao e uma resposta".into())),
         }
     }
     async fn discover_v3(&self) -> Result<V3Context, SnmpError> {
@@ -548,6 +554,26 @@ impl SnmpClient {
         Err(SnmpError::Timeout)
     }
 }
+/// Traduz o contador `usmStats*` de um Report v3 (RFC 3414 §5) no motivo real
+/// da recusa. Sem isso, todo problema de credencial v3 chegava à tela como
+/// "PDU v3 nao e uma resposta", que não diz ao operador o que corrigir.
+fn usm_report_reason(pdu: &Pdu) -> &'static str {
+    let oid = pdu
+        .variable_bindings
+        .first()
+        .map(|bind| oid_string(&bind.name))
+        .unwrap_or_default();
+    match oid.trim_end_matches(".0") {
+        "1.3.6.1.6.3.15.1.1.1" => "nível de segurança não suportado pelo agente",
+        "1.3.6.1.6.3.15.1.1.2" => "horário fora da janela do engine (relógio dessincronizado)",
+        "1.3.6.1.6.3.15.1.1.3" => "usuário desconhecido no agente",
+        "1.3.6.1.6.3.15.1.1.4" => "snmpEngineID desconhecido",
+        "1.3.6.1.6.3.15.1.1.5" => "autenticação inválida (authKey/protocolo)",
+        "1.3.6.1.6.3.15.1.1.6" => "falha ao decifrar (privKey/protocolo)",
+        _ => "credenciais v3 recusadas",
+    }
+}
+
 fn v3_message(
     data: v3::Pdus,
     context: &V3Context,
@@ -821,6 +847,27 @@ mod tests {
         assert_eq!(decoded.version, 3.into());
         assert_eq!(security.user_name.as_ref(), b"monitor");
         assert_eq!(security.authoritative_engine_id.as_ref(), context.engine_id);
+    }
+
+    /// Report é a forma que o agente v3 tem de recusar credencial. A mensagem
+    /// precisa nomear o que está errado — o operador corrige a partir dela.
+    #[test]
+    fn report_v3_vira_motivo_legivel_da_recusa() {
+        let report = |oid: &str| usm_report_reason(&pdu(1, &[oid]).unwrap());
+
+        assert_eq!(
+            report("1.3.6.1.6.3.15.1.1.3.0"),
+            "usuário desconhecido no agente"
+        );
+        assert_eq!(
+            report("1.3.6.1.6.3.15.1.1.1.0"),
+            "nível de segurança não suportado pelo agente"
+        );
+        assert_eq!(report("1.3.6.1.2.1.1.3.0"), "credenciais v3 recusadas");
+        assert_eq!(
+            usm_report_reason(&pdu(1, &[]).unwrap()),
+            "credenciais v3 recusadas"
+        );
     }
 
     const OID_SYS_UPTIME: &str = "1.3.6.1.2.1.1.3.0";

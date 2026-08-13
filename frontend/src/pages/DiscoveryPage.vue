@@ -314,6 +314,7 @@
 
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted, reactive } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import {
   useDiscoveryStore,
   type DiscoveryResult,
@@ -350,6 +351,8 @@ const PHASE_SUBTITLES: Record<DiscoveryPhase, string> = {
   snmp: 'Consultando informações do sistema via SNMP.',
 }
 
+const route = useRoute()
+const router = useRouter()
 const discoveryStore = useDiscoveryStore()
 const networksStore = useNetworksStore()
 const devicesStore = useDevicesStore()
@@ -448,11 +451,52 @@ const scannableNetworks = computed(() =>
 )
 
 onMounted(async () => {
-  networksStore.fetchNetworks()
   devicesStore.fetchDevices()
+  // A rede precisa estar carregada antes de honrar o `?networkId=` da URL:
+  // sem a lista, não há como saber se o bloco pedido existe e é varredurável.
+  await networksStore.fetchNetworks()
   await loadRuns()
   await restoreScanState()
+  await applyRouteIntent()
 })
+
+/**
+ * O botão "Escanear" de /networks manda o operador para cá com o bloco já
+ * escolhido (`networkId`) e, quando o clique pediu a varredura, com `scan=1`.
+ * A ordem é consumida uma única vez — a query sai da URL antes do disparo,
+ * senão recarregar a página iniciaria uma varredura nova a cada F5.
+ */
+async function applyRouteIntent() {
+  const requestedId = Number(route.query.networkId)
+  if (!Number.isInteger(requestedId) || requestedId <= 0) return
+
+  const shouldScan = route.query.scan === '1'
+  if (shouldScan) {
+    await router.replace({ path: '/discovery', query: { networkId: String(requestedId) } })
+  }
+
+  if (!scannableNetworks.value.some((network) => network.id === requestedId)) {
+    feedback.color = 'warning'
+    feedback.message = 'A rede escolhida não tem uma faixa CIDR varredurável.'
+    feedback.visible = true
+    return
+  }
+
+  // A varredura é uma só no servidor: trocar a seleção enquanto outra roda
+  // mostraria o progresso de um bloco no rótulo de outro.
+  if (scanning.value) {
+    feedback.color = 'warning'
+    feedback.message =
+      'Já existe uma varredura em andamento — aguarde ou cancele para iniciar outra.'
+    feedback.visible = true
+    return
+  }
+
+  selectedNetworkId.value = requestedId
+  if (shouldScan) {
+    await scanSelectedNetwork()
+  }
+}
 
 onUnmounted(() => {
   unsubscribeScanStream?.()

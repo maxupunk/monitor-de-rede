@@ -75,7 +75,6 @@
               variant="flat"
               prepend-icon="mdi-radar"
               :disabled="item.scannable === false"
-              :loading="networksStore.scanningId === item.id"
               @click="triggerScan(item)"
             >
               Escanear
@@ -125,7 +124,6 @@
                 variant="flat"
                 prepend-icon="mdi-radar"
                 :disabled="item.scannable === false"
-                :loading="networksStore.scanningId === item.id"
                 @click="triggerScan(item)"
               >
                 Escanear
@@ -211,18 +209,12 @@
 
     <!-- Cadastro de Site sem sair do formulário da rede -->
     <SiteDialog v-model="siteDialog" @saved="onSiteCreated" />
-
-    <v-snackbar v-model="feedback.visible" :color="feedback.color" timeout="7000">
-      {{ feedback.message }}
-      <template #actions>
-        <v-btn variant="text" to="/discovery">Ver Descoberta</v-btn>
-      </template>
-    </v-snackbar>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, reactive } from 'vue'
+import { useRouter } from 'vue-router'
 import { useNetworksStore, type Network } from '@/stores/networks'
 import { useSitesStore, type Site } from '@/stores/sites'
 import { formatDateTime } from '@/utils/formatters'
@@ -230,9 +222,7 @@ import PageHeader from '@/components/PageHeader.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import SiteDialog from '@/components/SiteDialog.vue'
 
-/** Espelha `MAX_SCAN_HOSTS` de `modules/discovery/cidr_range.ts` */
-const MAX_SCAN_HOSTS = 1024
-
+const router = useRouter()
 const networksStore = useNetworksStore()
 const sitesStore = useSitesStore()
 const search = ref('')
@@ -240,7 +230,6 @@ const dialog = ref(false)
 const siteDialog = ref(false)
 const saving = ref(false)
 const editedId = ref<number | null>(null)
-const feedback = reactive({ visible: false, message: '', color: 'success' })
 
 const formModel = reactive<{
   siteId: number | null
@@ -305,30 +294,13 @@ async function save() {
 }
 
 /**
- * O botão não devolve equipamentos: ele enfileira a varredura, que roda no
- * scheduler. O feedback precisa dizer isso e apontar onde os achados aparecem —
- * senão a tela parece não ter feito nada.
+ * Varrer é acompanhar: o progresso, o log e os equipamentos achados só existem
+ * em /discovery. Por isso o botão leva o operador para lá com o bloco já
+ * escolhido (`networkId`) e a ordem de disparar na chegada (`scan=1`), em vez
+ * de enfileirar a varredura numa tela que não mostra nada do que aconteceu.
  */
-async function triggerScan(network: Network) {
-  const result = await networksStore.scanNetwork(network.id)
-
-  if (!result) {
-    feedback.color = 'error'
-    feedback.message = networksStore.error || 'Não foi possível iniciar a varredura.'
-    feedback.visible = true
-    return
-  }
-
-  const truncationNote = result.truncated
-    ? ` A faixa tem ${result.usableHosts} endereços; apenas os primeiros ${MAX_SCAN_HOSTS} serão varridos.`
-    : ''
-
-  feedback.color = result.alreadyQueued ? 'warning' : 'success'
-  feedback.message = `${result.message}${truncationNote}`
-  feedback.visible = true
-
-  // A coluna "Última varredura" muda quando o scheduler concluir
-  await networksStore.fetchNetworks()
+function triggerScan(network: Network) {
+  router.push({ path: '/discovery', query: { networkId: String(network.id), scan: '1' } })
 }
 
 async function confirmDelete(id: number) {

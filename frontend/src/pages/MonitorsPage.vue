@@ -74,6 +74,15 @@
           >
             Desconhecido ({{ counts.unknown }})
           </v-chip>
+          <v-chip
+            :color="statusFilter === 'disabled' ? 'grey-darken-1' : 'default'"
+            :variant="statusFilter === 'disabled' ? 'flat' : 'outlined'"
+            size="small"
+            class="font-weight-medium cursor-pointer"
+            @click="setStatusFilter('disabled')"
+          >
+            Desativados ({{ counts.disabled }})
+          </v-chip>
         </div>
       </v-card-title>
 
@@ -104,6 +113,7 @@ import { useDevicesStore } from '@/stores/devices'
 import MonitorsTable from '@/components/MonitorsTable.vue'
 import MonitorFormDialog from '@/components/MonitorFormDialog.vue'
 import PageHeader from '@/components/PageHeader.vue'
+import { monitorHealthBucket, monitorHealthCounts } from '@/utils/monitorPresentation'
 
 const route = useRoute()
 const router = useRouter()
@@ -116,7 +126,7 @@ const editingMonitor = ref<Monitor | null>(null)
 
 const statusFilter = computed(() => {
   const s = String(route.query.status || 'all').toLowerCase()
-  if (['up', 'warning', 'down', 'unknown'].includes(s)) return s
+  if (['up', 'warning', 'down', 'unknown', 'disabled'].includes(s)) return s
   return 'all'
 })
 
@@ -129,33 +139,17 @@ function setStatusFilter(val: string) {
   })
 }
 
+// Mesma classificação da Saúde Global do dashboard: o número do card e o da
+// lista que ele abre têm de bater, inclusive na exclusão dos desativados.
 const counts = computed(() => {
-  let up = 0
-  let warning = 0
-  let down = 0
-  let unknown = 0
-
-  for (const m of monitorsStore.monitors) {
-    if (m.status === 'online' || m.status === 'up') up++
-    else if (m.status === 'warning') warning++
-    else if (m.status === 'offline' || m.status === 'down') down++
-    else unknown++
-  }
-
-  return { all: monitorsStore.monitors.length, up, warning, down, unknown }
+  const health = monitorHealthCounts(monitorsStore.monitors)
+  return { ...health, all: health.total }
 })
 
 const filteredMonitors = computed(() => {
   const f = statusFilter.value
   if (f === 'all') return monitorsStore.monitors
-
-  return monitorsStore.monitors.filter((m) => {
-    if (f === 'up') return m.status === 'online' || m.status === 'up'
-    if (f === 'warning') return m.status === 'warning'
-    if (f === 'down') return m.status === 'offline' || m.status === 'down'
-    if (f === 'unknown') return m.status === 'unknown' || !m.status
-    return true
-  })
+  return monitorsStore.monitors.filter((m) => monitorHealthBucket(m) === f)
 })
 
 onMounted(async () => {

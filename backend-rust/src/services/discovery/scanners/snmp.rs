@@ -1,13 +1,14 @@
 //! Identifica agentes SNMPv2c públicos durante discovery. Falhas são esperadas.
 
 use crate::services::{
-    discovery::merger::DiscoveredHost,
+    discovery::{merger::DiscoveredHost, progress::ScanReporter},
     snmp::{client::SnmpConfig, service::test_connection},
 };
 use futures::{stream, StreamExt};
 
-pub async fn enrich(hosts: Vec<DiscoveredHost>) -> Vec<DiscoveredHost> {
-    stream::iter(hosts)
+pub async fn enrich(hosts: Vec<DiscoveredHost>, reporter: &ScanReporter) -> Vec<DiscoveredHost> {
+    let total = hosts.len();
+    let mut queried = stream::iter(hosts)
         .map(|mut host| async move {
             if let Ok(result) =
                 test_connection(SnmpConfig::v2c(host.ip_address.clone(), "public", 161)).await
@@ -22,7 +23,12 @@ pub async fn enrich(hosts: Vec<DiscoveredHost>) -> Vec<DiscoveredHost> {
             }
             host
         })
-        .buffer_unordered(32)
-        .collect()
-        .await
+        .buffer_unordered(32);
+
+    let mut enriched = Vec::with_capacity(total);
+    while let Some(host) = queried.next().await {
+        enriched.push(host);
+        reporter.progress("snmp", enriched.len(), total);
+    }
+    enriched
 }

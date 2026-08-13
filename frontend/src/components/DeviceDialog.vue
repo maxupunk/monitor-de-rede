@@ -381,11 +381,15 @@ async function testSnmp(autoDetect = false) {
       message: `SNMP respondeu (${res.version || formModel.snmpVersion}/${res.community || formModel.snmpCommunity}): ${res.sysDescr || res.sysName || 'dispositivo detectado'}`,
     }
   } else {
+    // O backend sabe se o agente calou ou se recusou a credencial; só quando
+    // ele não diz nada é que cabe o texto genérico.
     snmpTestResult.value = {
       ok: false,
-      message: autoDetect
-        ? 'Nenhuma combinação comum de versão/comunidade respondeu (public/private em v1/v2c).'
-        : 'O dispositivo não respondeu com essa versão/comunidade em SNMP.',
+      message:
+        res.message ||
+        (autoDetect
+          ? 'Nenhuma combinação comum de versão/comunidade respondeu (public/private em v1/v2c).'
+          : 'O dispositivo não respondeu com essa versão/comunidade em SNMP.'),
     }
   }
 }

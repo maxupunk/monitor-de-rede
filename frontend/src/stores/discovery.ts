@@ -76,6 +76,9 @@ export interface ScanSessionState {
   finishedAt: string | null
 }
 
+/** Espera antes de reabrir o SSE da varredura depois de uma queda */
+const RECONNECT_DELAY_MS = 3_000
+
 export const useDiscoveryStore = defineStore('discovery', () => {
   const runs = ref<DiscoveryRun[]>([])
   const loading = ref(false)
@@ -154,26 +157,42 @@ export const useDiscoveryStore = defineStore('discovery', () => {
       ? `/api/discovery/scan-stream?token=${encodeURIComponent(token)}`
       : '/api/discovery/scan-stream'
 
-    const eventSource = new EventSource(url)
+    let source: EventSource | null = null
+    let retry: ReturnType<typeof setTimeout> | null = null
+    let unsubscribed = false
 
-    eventSource.onmessage = (event) => {
-      try {
-        const state = JSON.parse(event.data) as ScanSessionState
-        callbacks.onState?.(state)
-      } catch (err) {
-        console.error('Erro ao parsear evento SSE:', err)
+    const connect = () => {
+      if (unsubscribed) return
+      const eventSource = new EventSource(url)
+      source = eventSource
+
+      eventSource.onmessage = (event) => {
+        try {
+          const state = JSON.parse(event.data) as ScanSessionState
+          callbacks.onState?.(state)
+        } catch (err) {
+          console.error('Erro ao parsear evento SSE:', err)
+        }
+      }
+
+      // Uma varredura leva minutos: se a conexão cai no meio, deixar por isso
+      // mesmo congela a barra de progresso até o operador recarregar a página.
+      // Cada reconexão recebe o estado atual inteiro no primeiro evento.
+      eventSource.onerror = () => {
+        eventSource.close()
+        callbacks.onError?.('Conexão com o stream de descoberta caiu; reconectando...')
+        if (!unsubscribed) {
+          retry = setTimeout(connect, RECONNECT_DELAY_MS)
+        }
       }
     }
 
-    eventSource.onerror = () => {
-      // Fecha a conexão em caso de erro; o frontend pode reconectar se
-      // o scan ainda estiver ativo.
-      eventSource.close()
-      callbacks.onError?.('Conexão com o stream de descoberta foi encerrada.')
-    }
+    connect()
 
     return () => {
-      eventSource.close()
+      unsubscribed = true
+      if (retry) clearTimeout(retry)
+      source?.close()
     }
   }
 

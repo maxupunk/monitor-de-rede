@@ -748,17 +748,23 @@ pub async fn detect_connection(
         test_connection(config).await.map(|result| (label, result))
     });
     let outcomes = future::join_all(attempts).await;
-    match outcomes.into_iter().find_map(Result::ok) {
+    // A ordem das tentativas é a de preferência, mas quem vence é quem
+    // respondeu: pegar o primeiro `Ok` devolvia "não detectado" quando a
+    // combinação preferida falava com o agente sem entregar OID nenhum, mesmo
+    // havendo outra combinação logo atrás que funcionava.
+    let mut answered = None;
+    let mut fallback = None;
+    for outcome in outcomes.into_iter().flatten() {
+        if outcome.1.success {
+            answered = Some(outcome);
+            break;
+        }
+        fallback.get_or_insert(outcome);
+    }
+    match answered.or(fallback) {
         Some(((version, community), result)) => Ok(SnmpDetectResult {
             detected: result.success,
-            version: Some(
-                match version {
-                    SnmpVersion::V1 => "v1",
-                    SnmpVersion::V2c => "v2c",
-                    SnmpVersion::V3 => "v3",
-                }
-                .into(),
-            ),
+            version: Some(version_label(version).into()),
             community: Some(community),
             result: Some(result),
         }),
@@ -768,6 +774,13 @@ pub async fn detect_connection(
             community: None,
             result: None,
         }),
+    }
+}
+const fn version_label(version: SnmpVersion) -> &'static str {
+    match version {
+        SnmpVersion::V1 => "v1",
+        SnmpVersion::V2c => "v2c",
+        SnmpVersion::V3 => "v3",
     }
 }
 fn map_error(error: SnmpError) -> AppError {

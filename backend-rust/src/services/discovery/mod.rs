@@ -8,6 +8,7 @@ pub mod cidr_range;
 pub mod device_identifier;
 pub mod merger;
 pub mod oui_lookup;
+pub mod progress;
 pub mod queue;
 pub mod scanners;
 pub mod service;

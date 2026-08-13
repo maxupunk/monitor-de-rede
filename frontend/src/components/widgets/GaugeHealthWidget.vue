@@ -97,6 +97,21 @@
             </div>
             <span class="text-caption font-weight-bold text-grey">{{ counts.unknown }}</span>
           </div>
+
+          <div
+            v-if="counts.disabled > 0"
+            class="d-flex align-center justify-space-between ga-4 pa-2 rounded bg-surface-variant cursor-pointer hover-card"
+            @click="navigateToStatus('disabled')"
+          >
+            <div class="d-flex align-center ga-2">
+              <v-avatar color="grey-lighten-1" size="10"></v-avatar>
+              <span class="text-caption font-weight-bold">Desativados</span>
+              <v-tooltip activator="parent" location="top">
+                Monitores desligados pelo operador — fora da conta de disponibilidade
+              </v-tooltip>
+            </div>
+            <span class="text-caption font-weight-bold text-grey">{{ counts.disabled }}</span>
+          </div>
         </div>
       </div>
     </v-card-text>
@@ -107,36 +122,24 @@
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMonitorsStore } from '@/stores/monitors'
+import {
+  monitorHealthCounts,
+  monitorUptimePercent,
+  type MonitorHealthBucket,
+} from '@/utils/monitorPresentation'
 
 const router = useRouter()
 const monitorsStore = useMonitorsStore()
 
-type StatusKey = 'up' | 'warning' | 'down' | 'unknown'
+type StatusKey = MonitorHealthBucket
 
 function navigateToStatus(status: StatusKey) {
   router.push({ path: '/monitors', query: { status } })
 }
 
-const counts = computed(() => {
-  let up = 0
-  let warning = 0
-  let down = 0
-  let unknown = 0
+const counts = computed(() => monitorHealthCounts(monitorsStore.monitors))
 
-  for (const m of monitorsStore.monitors) {
-    if (m.status === 'online' || m.status === 'up') up++
-    else if (m.status === 'warning') warning++
-    else if (m.status === 'offline' || m.status === 'down') down++
-    else unknown++
-  }
-
-  return { up, warning, down, unknown, total: monitorsStore.monitors.length }
-})
-
-const globalUptime = computed(() => {
-  if (counts.value.total === 0) return 100
-  return Math.round((counts.value.up / counts.value.total) * 100)
-})
+const globalUptime = computed(() => monitorUptimePercent(counts.value))
 
 /**
  * Calculates SVG stroke-dasharray and stroke-dashoffset for each arc segment on a circle with radius 62.
@@ -145,7 +148,9 @@ const globalUptime = computed(() => {
 const strokeSegments = computed(() => {
   const R = 62
   const C = 2 * Math.PI * R
-  const total = counts.value.total || 1
+  // O anel mostra o que está sendo verificado: monitor desativado não ocupa
+  // fatia, do mesmo jeito que não entra na disponibilidade do centro.
+  const total = counts.value.monitored || 1
 
   const items: Array<{ count: number; color: string; status: StatusKey; label: string }> = [
     { count: counts.value.up, color: '#22c55e', status: 'up', label: 'Operacionais' },

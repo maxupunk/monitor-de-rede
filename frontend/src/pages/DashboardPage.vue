@@ -170,7 +170,11 @@
           <!-- 1. Cards de Resumo Estatístico -->
           <v-row v-if="widget.id === 'stat_cards'">
             <v-col cols="12" sm="6" md="3">
-              <v-card elevation="2" class="pa-4 rounded-lg">
+              <v-card
+                elevation="2"
+                class="pa-4 rounded-lg stat-card"
+                :to="statCardLink('/devices')"
+              >
                 <div class="d-flex align-center justify-space-between mb-2">
                   <span class="text-subtitle-2 text-grey-darken-1 font-weight-bold"
                   >Dispositivos</span
@@ -187,7 +191,11 @@
             </v-col>
 
             <v-col cols="12" sm="6" md="3">
-              <v-card elevation="2" class="pa-4 rounded-lg">
+              <v-card
+                elevation="2"
+                class="pa-4 rounded-lg stat-card"
+                :to="statCardLink('/monitors')"
+              >
                 <div class="d-flex align-center justify-space-between mb-2">
                   <span class="text-subtitle-2 text-grey-darken-1 font-weight-bold"
                   >Monitores de Rede</span
@@ -198,13 +206,20 @@
                 </div>
                 <div class="text-h4 font-weight-bold">{{ monitorsStore.monitors.length }}</div>
                 <div class="text-caption text-info font-weight-medium mt-1">
-                  {{ monitorsOnlineCount }} operacionais
+                  {{ healthCounts.up }} operacionais
+                  <template v-if="healthCounts.disabled > 0">
+                    · {{ healthCounts.disabled }} desativado(s)
+                  </template>
                 </div>
               </v-card>
             </v-col>
 
             <v-col cols="12" sm="6" md="3">
-              <v-card elevation="2" class="pa-4 rounded-lg">
+              <v-card
+                elevation="2"
+                class="pa-4 rounded-lg stat-card"
+                :to="statCardLink({ path: '/monitors', query: { status: 'down' } })"
+              >
                 <div class="d-flex align-center justify-space-between mb-2">
                   <span class="text-subtitle-2 text-grey-darken-1 font-weight-bold"
                   >Disponibilidade</span
@@ -214,12 +229,14 @@
                   </v-avatar>
                 </div>
                 <div class="text-h4 font-weight-bold text-success">{{ globalUptime }}%</div>
-                <div class="text-caption text-grey mt-1">Taxa de sucesso nas checagens</div>
+                <div class="text-caption text-grey mt-1">
+                  {{ healthCounts.up }} de {{ healthCounts.monitored }} monitor(es) ativo(s) no ar
+                </div>
               </v-card>
             </v-col>
 
             <v-col cols="12" sm="6" md="3">
-              <v-card elevation="2" class="pa-4 rounded-lg">
+              <v-card elevation="2" class="pa-4 rounded-lg stat-card" :to="statCardLink('/alerts')">
                 <div class="d-flex align-center justify-space-between mb-2">
                   <span class="text-subtitle-2 text-grey-darken-1 font-weight-bold"
                   >Alertas Ativos</span
@@ -624,7 +641,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, type RouteLocationRaw } from 'vue-router'
 import { useDashboardStore } from '@/stores/dashboard'
 import { useDevicesStore } from '@/stores/devices'
 import { useAlertsStore } from '@/stores/alerts'
@@ -654,6 +671,8 @@ import {
   isGaugeMonitor,
   gaugeMetricName,
   gaugeHexColor,
+  monitorHealthCounts,
+  monitorUptimePercent,
 } from '@/utils/monitorPresentation'
 import type { Monitor } from '@/stores/monitors'
 
@@ -789,15 +808,18 @@ function gaugeSparklineColor(monitor: Monitor): string {
   return gaugeHexColor(monitor.gaugeMetric?.value ?? null, gaugeMetricName(monitor))
 }
 
-const monitorsOnlineCount = computed(() => {
-  return monitorsStore.monitors.filter((m) => m.status === 'online' || m.status === 'up').length
-})
+/**
+ * Cada card de resumo abre a tela que responde por aquele número. Em modo de
+ * edição o link some: ali o clique é para arrastar e reordenar o painel, não
+ * para sair do dashboard.
+ */
+function statCardLink(target: string | RouteLocationRaw): RouteLocationRaw | undefined {
+  return dashboardStore.isEditMode ? undefined : target
+}
 
-const globalUptime = computed(() => {
-  if (monitorsStore.monitors.length === 0) return 100
-  const up = monitorsOnlineCount.value
-  return Math.round((up / monitorsStore.monitors.length) * 100)
-})
+const healthCounts = computed(() => monitorHealthCounts(monitorsStore.monitors))
+
+const globalUptime = computed(() => monitorUptimePercent(healthCounts.value))
 </script>
 
 <style scoped>
@@ -807,6 +829,17 @@ const globalUptime = computed(() => {
 
 .edit-banner {
   border: 2px dashed rgba(var(--v-theme-info), 0.6);
+}
+
+/* O card leva a uma tela: precisa reagir ao ponteiro para parecer clicável. */
+.stat-card {
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.stat-card:hover {
+  transform: translateY(-2px);
 }
 
 .monitors-scroll-container {

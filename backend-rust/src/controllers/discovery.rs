@@ -10,7 +10,7 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, Set,
 };
 use std::{collections::BTreeMap, convert::Infallible};
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
 use crate::{
@@ -40,9 +40,19 @@ async fn scan_stream(State(ctx): State<AppContext>) -> AppResult<Response> {
         if sender.send(initial).await.is_err() {
             return;
         }
-        while let Ok(state) = updates.recv().await {
-            if sender.send(state).await.is_err() {
-                return;
+        loop {
+            match updates.recv().await {
+                Ok(state) => {
+                    if sender.send(state).await.is_err() {
+                        return;
+                    }
+                }
+                // Cada evento carrega o estado inteiro: ficar para trás custa
+                // quadros da animação, não informação. Abortar o stream aqui
+                // era o que congelava a barra de progresso na tela até o fim
+                // da varredura.
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => return,
             }
         }
     });

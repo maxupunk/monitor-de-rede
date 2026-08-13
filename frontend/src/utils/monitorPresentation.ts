@@ -87,6 +87,58 @@ export function interfaceStatusInfo(
   }
 }
 
+/** Categorias do resumo de saúde (dashboard e filtros de /monitors). */
+export type MonitorHealthBucket = 'up' | 'warning' | 'down' | 'unknown' | 'disabled'
+
+/**
+ * Um monitor desativado guarda o último status conhecido para a tela mostrar
+ * "última informação" — mas ninguém está mais checando aquele alvo. Contá-lo
+ * como "fora do ar" encheria a Saúde Global de equipamentos que o operador
+ * desligou de propósito, então ele sai das quatro categorias de saúde e vira
+ * uma quinta, `disabled`.
+ */
+export function monitorHealthBucket(
+  monitor: Pick<Monitor, 'status'> & { isEnabled?: boolean; enabled?: boolean }
+): MonitorHealthBucket {
+  if (monitor.isEnabled === false || monitor.enabled === false) return 'disabled'
+  if (monitor.status === 'online' || monitor.status === 'up') return 'up'
+  if (monitor.status === 'warning') return 'warning'
+  if (monitor.status === 'offline' || monitor.status === 'down') return 'down'
+  return 'unknown'
+}
+
+export interface MonitorHealthCounts extends Record<MonitorHealthBucket, number> {
+  /** Todos os monitores cadastrados, inclusive os desativados */
+  total: number
+  /** Só os que estão sendo verificados — base da disponibilidade */
+  monitored: number
+}
+
+export function monitorHealthCounts(
+  monitors: Array<Pick<Monitor, 'status'> & { isEnabled?: boolean; enabled?: boolean }>
+): MonitorHealthCounts {
+  const counts: MonitorHealthCounts = {
+    up: 0,
+    warning: 0,
+    down: 0,
+    unknown: 0,
+    disabled: 0,
+    total: monitors.length,
+    monitored: 0,
+  }
+  for (const monitor of monitors) {
+    counts[monitorHealthBucket(monitor)]++
+  }
+  counts.monitored = counts.total - counts.disabled
+  return counts
+}
+
+/** Disponibilidade global: monitor desativado não entra na conta, nem como falha. */
+export function monitorUptimePercent(counts: MonitorHealthCounts): number {
+  if (counts.monitored === 0) return 100
+  return Math.round((counts.up / counts.monitored) * 100)
+}
+
 export function latestResultData(
   results: MonitorResult[] | undefined
 ): Record<string, unknown> | undefined {

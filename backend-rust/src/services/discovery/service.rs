@@ -14,6 +14,7 @@ use crate::{
         discovery::{
             cidr_range::expand_cidr,
             merger::{merge_hosts, DiscoveredHost},
+            progress::{ScanEvent, ScanReporter},
             scanners::{arp, icmp, mdns, ports, snmp, ssdp},
         },
         monitoring::checkers::ping::PingClient,
@@ -63,7 +64,9 @@ pub struct ScanSessionService {
 impl ScanSessionService {
     #[must_use]
     pub fn create() -> Self {
-        let (updates, _) = broadcast::channel(32);
+        // Uma varredura publica dezenas de atualizações por fase; um buffer
+        // curto faria o assinante do SSE ficar para trás logo no sweep ICMP.
+        let (updates, _) = broadcast::channel(256);
         Self {
             state: Arc::new(RwLock::new(ScanSessionState::default())),
             updates,
@@ -157,32 +160,62 @@ pub async fn run_discovery(
     cancel: CancellationToken,
 ) -> AppResult<Vec<DiscoveredHost>> {
     let session = ScanSessionService::from_context(ctx)?;
+    let (reporter, events) = ScanReporter::channel();
+    let pump = tokio::spawn(pump_events(session.clone(), events));
+    let outcome = scan_phases(ctx, cidr, cancel, &reporter).await;
+    // Derrubar o repórter fecha o canal e encerra o pump: só depois disso o
+    // estado publicado é o final, e não uma atualização atrasada de fase.
+    drop(reporter);
+    let _ = pump.await;
+
+    let merged = outcome?;
+    session.hosts(&merged).await;
+    persist_results(&ctx.db, run_id, &merged).await?;
+    Ok(merged)
+}
+
+/// Aplica na sessão o que os scanners relatam, na ordem em que chega.
+async fn pump_events(
+    session: ScanSessionService,
+    mut events: tokio::sync::mpsc::UnboundedReceiver<ScanEvent>,
+) {
+    while let Some(event) = events.recv().await {
+        match event {
+            ScanEvent::Progress {
+                phase,
+                current,
+                total,
+            } => session.progress(phase, current, total).await,
+            ScanEvent::Hosts(hosts) => session.hosts(&hosts).await,
+        }
+    }
+}
+
+async fn scan_phases(
+    ctx: &AppContext,
+    cidr: &str,
+    cancel: CancellationToken,
+    reporter: &ScanReporter,
+) -> AppResult<Vec<DiscoveredHost>> {
     let hosts = expand_cidr(cidr, 1024)?;
-    session.progress("icmp", 0, hosts.len()).await;
+    reporter.phase("icmp", 0, hosts.len());
     let ping = PingClient::from_context(ctx)?;
-    let icmp_hosts = icmp::scan(&ping, &hosts).await?;
-    session
-        .progress("discovery", icmp_hosts.len(), hosts.len())
-        .await;
+    let icmp_hosts = icmp::scan(&ping, &hosts, reporter).await?;
+    reporter.phase("discovery", icmp_hosts.len(), hosts.len());
     // Os três coletores de descoberta são independentes e best-effort.
     let (arp_hosts, mdns_hosts, ssdp_hosts) =
         tokio::join!(arp::scan(&hosts), mdns::scan(), ssdp::scan());
     let mut merged = merge_hosts([icmp_hosts, arp_hosts, mdns_hosts, ssdp_hosts]);
-    session.hosts(&merged).await;
+    reporter.hosts(&merged);
     if !cancel.is_cancelled() {
-        session.progress("ports", 0, merged.len()).await;
-        merged = ports::enrich(merged, cancel.clone()).await;
-        merged = merge_hosts([merged]);
-        session.hosts(&merged).await;
+        merged = merge_hosts([ports::enrich(merged, cancel.clone(), reporter).await]);
+        reporter.hosts(&merged);
     }
     if cancel.is_cancelled() {
         return Err(AppError::BusinessRule("Varredura cancelada.".into()));
     }
-    session.progress("snmp", 0, merged.len()).await;
-    merged = merge_hosts([snmp::enrich(merged).await]);
-    session.hosts(&merged).await;
-    persist_results(&ctx.db, run_id, &merged).await?;
-    Ok(merged)
+    reporter.phase("snmp", 0, merged.len());
+    Ok(merge_hosts([snmp::enrich(merged, reporter).await]))
 }
 
 async fn persist_results(
