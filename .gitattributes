@@ -1,0 +1,6 @@
+# Scripts que entram na imagem precisam de LF mesmo quando o clone é feito no
+# Windows com `core.autocrlf=true`. Um CR no fim do shebang faz o kernel do
+# container procurar por `/bin/sh\r` e o container morre com "no such file or
+# directory" — mensagem que não diz nada sobre a causa real.
+*.sh text eol=lf
+Dockerfile text eol=lf

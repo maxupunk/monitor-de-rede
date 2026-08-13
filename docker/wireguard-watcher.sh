@@ -1,21 +1,28 @@
-#!/usr/bin/with-contenv bash
+#!/bin/bash
 # ---------------------------------------------------------------------------
 # NetMonitor · watcher de hot-reload do WireGuard
 #
-# O container da API escreve /config/<iface>.conf no volume compartilhado e este
-# watcher aplica a mudança com `wg syncconf`, que altera apenas o delta de peers
-# — os túneis já estabelecidos continuam de pé.
+# A aplicação escreve ${WG_CONFIG_DIR}/<iface>.conf e este watcher aplica a
+# mudança com `wg syncconf`, que altera apenas o delta de peers — os túneis já
+# estabelecidos continuam de pé.
 #
-# Nenhum acesso ao socket do Docker é necessário: a comunicação é o arquivo.
+# Também publica <iface>.status (saída de `wg show <iface> dump`) para que a
+# aplicação leia handshake e contadores de tráfego sem privilégio de rede.
 #
-# Também publica /config/<iface>.status (saída de `wg show <iface> dump`) para
-# que a API leia handshake e contadores de tráfego sem privilégio de rede.
+# Este é o único processo do container que roda como root, e existe justamente
+# para que o outro não precise: o canal entre os dois é o arquivo, nunca uma
+# chamada de `wg` feita pela API (§7 do AGENTS.md).
+#
+# Antes rodava dentro do container `linuxserver/wireguard`, disparado pelo init
+# customizado daquela imagem. O `#!/usr/bin/with-contenv bash` de lá não existe
+# aqui — o ambiente vem do próprio entrypoint.
 # ---------------------------------------------------------------------------
 set -u
 
 IFACE="${WG_INTERFACE:-wg0}"
-CONFIG="/config/${IFACE}.conf"
-STATUS="/config/${IFACE}.status"
+DIR="${WG_CONFIG_DIR:-/data/wg}"
+CONFIG="${DIR}/${IFACE}.conf"
+STATUS="${DIR}/${IFACE}.status"
 INTERVAL="${WG_WATCH_INTERVAL:-5}"
 LAST_CHECKSUM=""
 
@@ -33,8 +40,8 @@ while true; do
       log "interface ${IFACE} fora do ar — subindo com wg-quick"
       # Passa o caminho completo do arquivo, não o nome da interface: wg-quick
       # procura por padrão em /etc/wireguard/<iface>.conf, mas nosso config vive
-      # no volume compartilhado /config. Com o caminho completo, wg-quick deriva
-      # o nome da interface do próprio nome do arquivo (wg0.conf -> wg0).
+      # em ${WG_CONFIG_DIR}. Com o caminho completo, wg-quick deriva o nome da
+      # interface do próprio nome do arquivo (wg0.conf -> wg0).
       if wg-quick up "${CONFIG}"; then
         LAST_CHECKSUM="${CHECKSUM}"
       fi

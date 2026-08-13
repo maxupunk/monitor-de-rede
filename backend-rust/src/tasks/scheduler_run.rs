@@ -5,7 +5,18 @@
 //! * [`SchedulerRun`] (`task scheduler_run`) — **um** ciclo e sai. É o comando
 //!   manual, para depurar ou forçar uma passada.
 //! * [`SchedulerLoop`] (`task scheduler_loop`) — chama o mesmo ciclo em laço.
-//!   É o que roda no container `scheduler` (ADR 007).
+//!
+//! O laço em si é [`run_forever`], e quem o hospeda em produção é o **próprio
+//! servidor** (`initializers::monitoring`). O container `scheduler` deixou de
+//! existir: ele nunca precisou ser outro processo — o que o ADR 007 exige é que
+//! o ciclo rode *dentro* de um processo longevo, e não como subprocesso por
+//! tique. O servidor é longevo, tem o mesmo pool e o mesmo socket ICMP, e ainda
+//! ganha uma vantagem que o container separado nunca teve: os eventos que o
+//! ciclo publica nascem no mesmo processo que mantém as conexões SSE.
+//!
+//! A tarefa `scheduler_loop` continua registrada para quem quiser o ciclo em um
+//! processo à parte (`SCHEDULER_ENABLED=false` no servidor + um container só
+//! com a tarefa).
 
 use std::{
     collections::HashMap,
@@ -56,8 +67,22 @@ impl Task for SchedulerRun {
     }
 }
 
-/// Processo de longa duração que repete [`run_cycle`]. É o `scheduler` do
-/// compose.
+/// Intervalo entre ciclos: argumento da CLI, `SCHEDULER_INTERVAL_SECONDS` ou o
+/// padrão. Zero é descartado — pararia o ticker do tokio com um panic.
+#[must_use]
+pub fn resolve_interval_seconds(explicit: Option<&str>) -> u64 {
+    explicit
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .or_else(|| {
+            std::env::var("SCHEDULER_INTERVAL_SECONDS")
+                .ok()
+                .and_then(|value| value.trim().parse::<u64>().ok())
+        })
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_CYCLE_SECONDS)
+}
+
+/// Repete [`run_cycle`] para sempre. Nunca retorna.
 ///
 /// O ciclo roda **dentro** deste processo, e não como subprocesso por tique
 /// (ADR 007): assim o socket ICMP, o pool de conexões e as cadências internas
@@ -65,6 +90,26 @@ impl Task for SchedulerRun {
 ///
 /// Erro de um ciclo é registrado e o laço continua. Um ciclo que falha não pode
 /// derrubar o agendamento inteiro — a checagem seguinte pode muito bem passar.
+pub async fn run_forever(ctx: &AppContext, interval_seconds: u64) {
+    tracing::info!(interval_seconds, "scheduler inicializado");
+
+    let mut ticker = tokio::time::interval(std::time::Duration::from_secs(interval_seconds));
+    // Ciclo que estourou o intervalo não pode gerar rajada de tiques atrasados:
+    // isso empilharia execuções em cima de um sistema que já está lento —
+    // exatamente a hora de não piorar.
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+    loop {
+        ticker.tick().await;
+        match run_cycle(ctx).await {
+            Ok(0) => {}
+            Ok(count) => tracing::debug!(monitores = count, "ciclo concluído"),
+            Err(error) => tracing::warn!(%error, "ciclo do scheduler falhou"),
+        }
+    }
+}
+
+/// O mesmo laço como tarefa da CLI, para rodar o ciclo num processo à parte.
 pub struct SchedulerLoop;
 
 #[async_trait]
@@ -72,39 +117,14 @@ impl Task for SchedulerLoop {
     fn task(&self) -> TaskInfo {
         TaskInfo {
             name: "scheduler_loop".into(),
-            detail: "Executa o ciclo dos monitores continuamente (processo do scheduler)".into(),
+            detail: "Executa o ciclo dos monitores continuamente (processo dedicado)".into(),
         }
     }
 
     async fn run(&self, ctx: &AppContext, vars: &task::Vars) -> Result<()> {
-        let seconds = vars
-            .cli_arg("interval_seconds")
-            .ok()
-            .and_then(|value| value.parse::<u64>().ok())
-            .or_else(|| {
-                std::env::var("SCHEDULER_INTERVAL_SECONDS")
-                    .ok()
-                    .and_then(|value| value.trim().parse::<u64>().ok())
-            })
-            .filter(|value| *value > 0)
-            .unwrap_or(DEFAULT_CYCLE_SECONDS);
-
-        tracing::info!(interval_seconds = seconds, "scheduler inicializado");
-
-        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(seconds));
-        // Ciclo que estourou o intervalo não pode gerar rajada de tiques
-        // atrasados: isso empilharia execuções em cima de um sistema que já
-        // está lento — exatamente a hora de não piorar.
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-
-        loop {
-            ticker.tick().await;
-            match run_cycle(ctx).await {
-                Ok(0) => {}
-                Ok(count) => tracing::debug!(monitores = count, "ciclo concluído"),
-                Err(error) => tracing::warn!(%error, "ciclo do scheduler falhou"),
-            }
-        }
+        let seconds = resolve_interval_seconds(vars.cli_arg("interval_seconds").ok());
+        run_forever(ctx, seconds).await;
+        Ok(())
     }
 }
 

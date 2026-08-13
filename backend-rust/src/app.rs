@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use axum::Router as AxumRouter;
 use loco_rs::{
     app::{AppContext, Hooks, Initializer},
     bgworker::Queue,
@@ -11,6 +12,7 @@ use loco_rs::{
     Result,
 };
 use migration::Migrator;
+use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 use std::path::Path;
 
 #[allow(unused_imports)]
@@ -21,7 +23,7 @@ use crate::{
     initializers::setup::SetupInitializer,
     models::_entities::users,
     models::tables,
-    tasks,
+    spa, tasks,
     tasks::scheduler_run::{SchedulerLoop, SchedulerRun},
 };
 
@@ -67,6 +69,7 @@ impl Hooks for App {
     /// aplicado.
     async fn after_context(ctx: AppContext) -> Result<AppContext> {
         process_deps::install(&ctx);
+        enable_sqlite_wal(&ctx).await;
         migration::purge_removed_migrations(&ctx.db)
             .await
             .map_err(loco_rs::Error::DB)?;
@@ -82,15 +85,16 @@ impl Hooks for App {
 
     fn routes(ctx: &AppContext) -> AppRoutes {
         // `prefix` só vale para as rotas adicionadas depois dele (`add_route`
-        // funde o prefixo no momento da adição). Por isso `GET /` entra antes:
-        // ele tem de continuar na raiz, junto com o `_ping`/`_health` que o
-        // `with_default_routes` já registrou. Tudo que é negócio vem depois,
-        // sob `/api` (§5.6).
+        // funde o prefixo no momento da adição). Tudo que é negócio vem depois,
+        // sob `/api` (§5.6) — inclusive a identificação do serviço, que morava
+        // em `GET /`. A raiz agora é da SPA (ver `Hooks::after_routes`), e uma
+        // rota registrada vence o `fallback_service`: mantê-la lá devolveria
+        // JSON a quem abrisse o endereço no navegador.
         let business_auth =
             axum::middleware::from_fn_with_state(ctx.clone(), controllers::auth_guard::require_jwt);
         AppRoutes::with_default_routes()
-            .add_route(controllers::root::routes())
             .prefix("/api")
+            .add_route(controllers::root::routes())
             .add_route(controllers::auth::routes())
             // O agente do probe não tem sessão de usuário: autentica-se pelo
             // `X-Probe-Token` dentro do handler (§7.10). Fora do guarda JWT.
@@ -113,6 +117,15 @@ impl Hooks for App {
             .add_route(controllers::alerts::routes().layer(business_auth.clone()))
             .add_route(controllers::vpn_servers::routes().layer(business_auth.clone()))
             .add_route(controllers::vpn_peers::routes().layer(business_auth))
+    }
+
+    /// Monta a SPA depois das rotas — e só depois delas.
+    ///
+    /// O `fallback_service` do [`spa::mount`] atende o que não casou com rota
+    /// nenhuma; qualquer caminho sob `/api` continua sendo da API. É esta
+    /// inversão que aposenta o nginx: um processo, uma porta, uma origem.
+    async fn after_routes(router: AxumRouter, _ctx: &AppContext) -> Result<AxumRouter> {
+        Ok(spa::mount(router, &spa::web_root()))
     }
     /// Nenhum worker de fila registrado — o trabalho de background é o ciclo do
     /// `scheduler` e o agente do `probe`, ambos processos próprios.
@@ -145,5 +158,31 @@ impl Hooks for App {
         db::seed::<users::ActiveModel>(&ctx.db, &base.join("users.yaml").display().to_string())
             .await?;
         Ok(())
+    }
+}
+
+/// Liga o WAL quando o banco é SQLite.
+///
+/// No modo padrão (`delete`) um `INSERT` bloqueia toda leitura, e o servidor
+/// virou um processo só: o ciclo do scheduler grava resultados enquanto a tela
+/// consulta o histórico. Com WAL, leitor e escritor convivem — é a diferença
+/// entre o SQLite servir de banco de produção e não servir.
+///
+/// `journal_mode` é propriedade **do arquivo**, não da conexão: gravado uma
+/// vez, vale para sempre e para todo processo que abrir o banco. Por isso um
+/// `PRAGMA` no boot basta, e por isso ele não precisa entrar no pool.
+///
+/// O `busy_timeout` de 5 s que serializa dois escritores já vem do `sqlx`.
+///
+/// Falha aqui não derruba o boot: um banco em modo `delete` é mais lento, não
+/// inutilizável — e no Postgres a função nem chega a executar.
+async fn enable_sqlite_wal(ctx: &AppContext) {
+    if ctx.db.get_database_backend() != DatabaseBackend::Sqlite {
+        return;
+    }
+    let pragma = Statement::from_string(DatabaseBackend::Sqlite, "PRAGMA journal_mode = WAL;");
+    match ctx.db.query_one_raw(pragma).await {
+        Ok(_) => tracing::debug!("SQLite em WAL"),
+        Err(error) => tracing::warn!(%error, "não foi possível ligar o WAL do SQLite"),
     }
 }

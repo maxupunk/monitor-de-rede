@@ -31,6 +31,9 @@ tokio = { version = "1.45", default-features = false, features = [
 ] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 tokio-util = { version = "0.7" }
+# Serve o `dist` da SPA no lugar do nginx (ver `src/spa.rs`). Já está na árvore
+# via Loco; entra como dependência direta porque o `ServeDir` é usado aqui.
+tower-http = { version = "0.6", features = ["fs", "set-header"] }
 futures = { version = "0.3" }
 async-trait = { version = "0.1" }
 axum = { version = "0.8" }

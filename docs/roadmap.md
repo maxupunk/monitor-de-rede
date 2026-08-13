@@ -30,7 +30,7 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
 | **Alertas & Notificações** | 🟢 **Concluído** | Avaliação de regras em tempo real (`AlertManager`), catálogo de regras pré-configuradas com aplicação idempotente (`AlertRuleCatalogService`), ciclo de vida (ativo, reconhecido, silenciado, resolvido) e conectores (E-mail, Telegram, Discord, Webhook). |
 | **Eventos Tempo Real (SSE)** | 🟢 **Concluído** | Barramento `EventBus` singleton e streaming em `/api/events/stream` via SSE funcional. |
 | **Frontend (Vue 3 + Vuetify)** | 🟢 **Concluído** | SPA/PWA completa integrada à API REST, com Pinia, gráficos, topologia gráfica interativa e suporte a SSE em tempo real. |
-| **Infraestrutura Docker** | 🟢 **Concluído** | `docker-compose.yml` e `Dockerfile` configurados para todos os serviços (API, Scheduler, Probe, vpn-probe, WireGuard, Postgres, Frontend). |
+| **Infraestrutura Docker** | 🟢 **Concluído** | **Um container**: API, SPA, ciclo de monitores, SQLite em WAL e WireGuard. Oito serviços viraram um — nginx, Postgres, migration, scheduler, probe e vpn-probe saíram ([arquitetura.md §3](arquitetura.md#3-topologia-de-processos)). |
 | **Módulo WireGuard (VPN)** | 🟢 **Concluído (Fases 1–4)** | Modelo de dados, geração nativa de chaves X25519, IPAM transacional, scripts por perfil (MikroTik/OpenWrt/Linux/Windows/Mobile), container WireGuard com hot-reload por `syncconf`, `vpn-probe` dedicado e telas de servidor/dispositivos/wizard. Falta apenas a validação E2E com hardware real ([roadmap_vpn.md](roadmap_vpn.md)). |
 | **Dashboard Grafana Customizável** | 🟢 **Concluído** | Dashboard modular com reordenação de widgets, adicionar/remover cards, limitação de altura e scroll no card de monitores e novos gráficos temporais ([roadmap_dashboard_grafana.md](roadmap_dashboard_grafana.md)). |
 
@@ -192,8 +192,8 @@ Especificação completa em [roadmap_vpn.md](roadmap_vpn.md).
 
 - [x] **Modelo de Dados**: tabelas `vpn_servers` e `vpn_peers`, índice UNIQUE `(network_id, ip_address)` em `devices` para o IPAM, com chaves privadas e PSKs cifradas via `ENCRYPTION_KEY`.
 - [x] **Core Backend**: geração de chaves X25519 em Rust puro, via `x25519-dalek` (sem binário `wg`), alocador de IP transacional com retry, geradores de configuração por perfil (MikroTik, OpenWrt, Linux, Windows, Mobile), parser de `wg show dump` e API `/api/vpn/...`.
-- [x] **Provisionamento automático**: ao concluir o wizard, o sistema cria `Device`, `VpnPeer`, monitor de Ping e (opcional) monitor SNMP em uma única transação, atribuídos ao `vpn-probe`.
-- [x] **Docker**: container WireGuard com hot-reload via `wg syncconf` (sem `docker.sock`), probe dedicado `vpn-probe` e rede nomeada `netmonitor-net` aplicada a todos os serviços.
+- [x] **Provisionamento automático**: ao concluir o wizard, o sistema cria `Device`, `VpnPeer`, monitor de Ping e (opcional) monitor SNMP em uma única transação. Com o túnel no mesmo container, os monitores rodam locais; com `VPN_PROBE_EXTERNAL=true`, ficam com o `vpn-probe`.
+- [x] **Docker**: hot-reload via `wg syncconf` (sem `docker.sock`) por um watcher root dentro do container único. O processo da API segue sem capability alguma (`CapEff` zerado) — a fronteira do §7 do AGENTS.md mudou de container para processo, não de conteúdo.
 - [x] **Frontend**: painel do servidor VPN com teste de pré-voo (detecção de CGNAT), lista de peers com status de handshake e diagnóstico de firewall, e wizard de adição por perfil de equipamento com "Copiar tudo".
 - [ ] **Validação E2E**: conexão real de MikroTik e OpenWrt com ICMP e SNMP pelo túnel (exige host Linux com IP público ou port-forward UDP).
 

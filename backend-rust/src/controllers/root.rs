@@ -1,9 +1,14 @@
-//! `GET /` — identificação do serviço (§5.6).
+//! `GET /api/info` — identificação do serviço (§5.6).
 //!
-//! Fica **fora** do prefixo `/api` e fora da autenticação: é por aqui que se
-//! confere, sem credencial, se o serviço está no ar. O corpo é literal,
-//! incluindo a versão `1.0.0` — não é a versão do crate; é o número que a API
-//! publica, e mudá-lo alteraria um payload observável.
+//! Fica fora da autenticação: é por aqui que se confere, sem credencial, se o
+//! serviço está no ar. O corpo é literal, incluindo a versão `1.0.0` — não é a
+//! versão do crate; é o número que a API publica, e mudá-lo alteraria um
+//! payload observável.
+//!
+//! Morava em `GET /`. Saiu de lá quando a SPA passou a ser servida pelo próprio
+//! processo (ver `spa`): a raiz é o `index.html`, e uma rota registrada vence o
+//! `fallback_service` — quem abrisse o endereço no navegador receberia este
+//! JSON no lugar da aplicação.
 
 use loco_rs::prelude::*;
 
@@ -22,5 +27,5 @@ pub async fn index() -> Result<Response> {
 }
 
 pub fn routes() -> Routes {
-    Routes::new().add("/", get(index))
+    Routes::new().add("/info", get(index))
 }

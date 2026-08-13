@@ -6,10 +6,14 @@ export type PeerHints = {
    */
   needsFirewallHint: boolean
   /**
-   * Túnel ativo e ping falhando, mas o monitor **não** roda no `vpn-probe`: o
-   * ICMP sai da máquina da API, que não tem rota para dentro do túnel. O
-   * pacote nem chega ao equipamento — acusar o firewall dele seria
-   * diagnóstico falso.
+   * Túnel ativo e ping falhando, mas o monitor **não** roda no `vpn-probe` —
+   * e o túnel está em outro namespace de rede. O ICMP sai da máquina da API,
+   * que não tem rota para dentro do túnel: o pacote nem chega ao
+   * equipamento, e acusar o firewall dele seria diagnóstico falso.
+   *
+   * Nunca é `true` quando o WireGuard sobe junto com a API (o padrão): ali a
+   * `wg0` é do próprio processo, o pacote entra no túnel, e quem falha em
+   * responder é mesmo o equipamento.
    */
   pingOutsideTunnel: boolean
   /**

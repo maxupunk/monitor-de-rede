@@ -24,62 +24,89 @@ redes remotas.
 | :--- | :--- |
 | API, scheduler, probe | Rust — [Loco.rs](https://loco.rs/) sobre `axum` e `tokio` |
 | ORM e migrations | SeaORM + `sea-orm-migration` |
-| Banco | PostgreSQL (produção e desenvolvimento em Docker); SQLite na suíte de testes |
+| Banco | SQLite em WAL (produção e testes); PostgreSQL suportado por `DATABASE_URL` |
 | Autenticação | JWT (`loco_rs::auth`), HS512 |
 | Tempo real | SSE |
-| Frontend | Vue 3 + TypeScript + Vite + Vuetify + Pinia + PWA |
-| Túnel | WireGuard (`linuxserver/wireguard`) |
-| Implantação | Docker Compose |
+| Frontend | Vue 3 + TypeScript + Vite + Vuetify + Pinia + PWA, servido pela própria API |
+| Túnel | WireGuard (`wireguard-tools` no mesmo container) |
+| Implantação | Docker Compose — **um serviço** |
 
 Não há Redis, nem fila externa, nem broker. Ver [§12](#12-o-que-não-existe).
 
 ## 3. Topologia de processos
 
-Um único binário, `backend_rust-cli`, roda em quatro papéis diferentes conforme
-o comando. São **oito serviços** no `docker-compose.yml`:
+**Um container.** Dentro dele, dois processos e uma divisão de privilégio:
 
-| Serviço | Comando | Papel |
+| Processo | Usuário | Papel |
 | :--- | :--- | :--- |
-| `migration` | `db migrate` | Roda as migrations e **sai**. Os outros esperam `service_completed_successfully`. |
-| `server` | `start` | API HTTP na porta 3333 e o barramento SSE. |
-| `scheduler` | `task scheduler_loop` | Processo de longa duração que repete o ciclo de monitores a cada 5 s ([ADR 007](adr/007-scheduler-processo-unico.md)). |
-| `probe` | `task probe_run` | Agente de coleta na LAN. Processo de longa duração. |
-| `vpn-probe` | `task probe_run` | Mesmo agente, mas no namespace de rede do WireGuard, para enxergar a `wg0`. |
-| `wireguard` | — | Único container com `NET_ADMIN` e única porta UDP publicada. |
-| `frontend` | — | nginx servindo a SPA e fazendo proxy de `/api/` para `server:3333`. |
-| `postgres` | — | Banco. |
+| `backend_rust-cli start` | `app` | API HTTP na 3333, SPA na mesma porta, barramento SSE e o ciclo de monitores. Sem capability alguma. |
+| `wireguard-watcher.sh` | `root` | Aplica `wg0.conf` com `wg syncconf` e publica `wg0.status`. É quem usa o `NET_ADMIN`. |
 
 ```text
-                    ┌──────────┐
-                    │ migration│  roda uma vez, sai
-                    └────┬─────┘
-                         │ (completed)
-     ┌───────────────────┼───────────────────┐
-     ▼                   ▼                   ▼
-┌─────────┐        ┌───────────┐       ┌──────────┐
-│ server  │◀──────▶│ scheduler │       │ postgres │
-│  :3333  │        └───────────┘       └──────────┘
-└────┬────┘              ▲  ▲
-     │ /api/probes/*     │  │
-     ├───────────────────┘  │
-     │                      │
-┌────▼────┐          ┌──────┴──────┐     ┌───────────┐
-│  probe  │          │  vpn-probe  │────▶│ wireguard │
-│  (LAN)  │          │  (túnel)    │     │   wg0     │
-└─────────┘          └─────────────┘     └───────────┘
+┌──────────────────────────── container netmonitor ────────────────────────────┐
+│                                                                              │
+│   :3333 ──▶ SPA (/app/web)  ─┐                                               │
+│             API (/api/*)    ─┤  backend_rust-cli start   (usuário `app`)     │
+│             SSE             ─┤    └─ ciclo de monitores a cada 5 s           │
+│                              │    └─ relay do event_outbox                   │
+│                              └────────────┬──────────────┐                   │
+│                                           │ wg0.conf     │ SQLite (WAL)      │
+│                                           ▼              ▼                   │
+│                              wireguard-watcher.sh    /data/netmonitor.sqlite │
+│                              (root, NET_ADMIN)                               │
+│                                     │  ▲                                     │
+│                                     ▼  │ wg0.status                          │
+│   :51820/udp ◀────────────────── wg0 ──┘                                     │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**O `server` nunca executa `wg` nem `docker exec`.** Ele escreve `<iface>.conf`
-e lê `<iface>.status` num volume compartilhado; quem aplica é o container do
-WireGuard. É o que mantém o servidor sem `NET_ADMIN`.
+Eram oito serviços. O que aconteceu com cada um:
+
+| Serviço | Para onde foi |
+| :--- | :--- |
+| `migration` | `auto_migrate` no boot do servidor. `create_app` migra, `run_task` não — um probe remoto continua sem tocar no esquema. |
+| `scheduler` | Laço in-process (`initializers::monitoring`). O [ADR 007](adr/007-scheduler-processo-unico.md) exige um processo longevo, não um container próprio — e no mesmo processo os eventos do ciclo nascem onde estão as conexões SSE. |
+| `probe` (LAN) | Redundante: enxergava exatamente a mesma rede que o servidor. Monitores sem `probe_id` rodam no próprio servidor. |
+| `vpn-probe` | A `wg0` passou a ser do próprio processo. Não é mais registrado no boot, e os monitores da VPN rodam locais. |
+| `wireguard` | O watcher virou um processo deste container. |
+| `frontend` | A SPA é servida pela API (`src/spa.rs`): mesma porta, mesma origem, sem proxy e sem CORS. |
+| `postgres` | SQLite em WAL no volume. |
+
+**O processo da API continua sem executar `wg` e sem `docker exec`.** Ele
+escreve `<iface>.conf` e lê `<iface>.status` num diretório combinado
+(`WG_CONFIG_DIR`); quem aplica é o watcher. O que mudou foi a distância entre os
+dois — de container para processo vizinho —, não o contrato. O entrypoint chama
+a aplicação com `setpriv --inh-caps=-all`: o `NET_ADMIN` concedido ao container
+não chega a ela.
+
+### Estáticos
+
+O `dist` da SPA é copiado para `/app/web` e servido pelo `ServeDir`:
+
+- `/assets/*` — nomes com hash, `Cache-Control: public, max-age=31536000, immutable`;
+- o resto (`index.html`, `sw.js`, ícones) — `no-cache`, isto é, guarde mas
+  revalide. Um service worker servido de cache trava a versão do app no
+  navegador;
+- o `.gz` de cada arquivo é gerado **no build da imagem** e entregue pelo
+  `precompressed_gzip` a quem aceita gzip. Comprimir por request gastaria CPU
+  para produzir sempre o mesmo byte.
+
+Rota virtual do Vue Router funciona pelo `fallback` do `ServeDir` para o
+`index.html`. Rotas registradas vencem o fallback, então `/api/*` nunca é
+confundido com arquivo — e é por isso que a identificação do serviço saiu de
+`GET /` para `GET /api/info`.
 
 ### Modos de instalação
 
-- **Standalone** — tudo na mesma máquina, uma rede só. É o `docker compose up`.
-- **Central com probes remotos** — o `server` central e um `probe` por site. O
-  probe fala com o servidor por HTTP autenticado; **nunca** acessa o banco.
-- **Central com túnel** — as redes remotas chegam por WireGuard e o `vpn-probe`
-  mede dentro do túnel.
+- **Standalone** — `docker compose up -d --build`. Um container, um volume.
+- **Central com probes remotos** — a mesma imagem em outro site, com
+  `backend_rust-cli task probe_run` e `PROBE_SERVER_URL` apontando para o
+  servidor. O probe fala por HTTP autenticado; **nunca** acessa o banco.
+- **Central com túnel** — os equipamentos remotos chegam pela `wg0` do próprio
+  container e são medidos direto.
+- **Instalação grande** — `DATABASE_URL` para um Postgres externo e, se o ciclo
+  de monitores começar a disputar CPU com a API, `SCHEDULER_ENABLED=false` no
+  servidor mais um container só com `task scheduler_loop`.
 
 ## 4. Organização do código
 
@@ -362,10 +389,13 @@ exatamente esse o bug corrigido pela [ADR 007](adr/007-scheduler-processo-unico.
   até a primeira leitura. Depois disso, só rotacionando.
 - Os segredos do servidor ficam cifrados em repouso com XChaCha20-Poly1305,
   chave derivada de `ENCRYPTION_KEY` (`services/shared/crypto.rs`).
-- A telemetria do túnel é lida do arquivo `<iface>.status` no volume
-  compartilhado — nunca por `docker exec`.
-- O `vpn-probe` compartilha o namespace de rede do WireGuard
-  (`network_mode: "service:wireguard"`) para medir ICMP/SNMP na faixa do túnel.
+- A telemetria do túnel é lida do arquivo `<iface>.status` escrito pelo watcher
+  — nunca por `docker exec`.
+- A `wg0` sobe no namespace de rede do próprio container, então ICMP e SNMP na
+  faixa do túnel saem direto do processo da API. `VPN_PROBE_EXTERNAL=true`
+  descreve o arranjo antigo — túnel em outro namespace, medido por um
+  `vpn-probe` dedicado — e é o que reativa o registro do agente no boot e o
+  aviso `pingOutsideTunnel`.
 - O token de fallback `DEFAULT_VPN_PROBE_TOKEN` **não pode ser removido**: é ele
   que garante registro zero-config em Docker, e é a razão de `probes.token_hash`
   não ter índice único.
@@ -420,5 +450,7 @@ O `.env` só preenche os `get_env(...)` desses arquivos e as substituições do
 compose — [`.env.example`](../.env.example) lista todas as variáveis lidas, e só
 elas. O banco é apontado por **`DATABASE_URL`**, uma URL única.
 
-A porta é **3333** nos três ambientes: o proxy do Vite e o do nginx apontam para
-ela.
+A porta é **3333** nos três ambientes, e agora é a única publicada além da UDP
+do WireGuard: interface web e API dividem a mesma. Em desenvolvimento o Vite
+serve a SPA na 5173 e faz proxy de `/api` para a 3333 — a produção não tem
+proxy nenhum.

@@ -13,9 +13,13 @@ use loco_rs::{
     Result,
 };
 
-use crate::services::{
-    alerts::catalog::service as alert_catalog, events::relay::relay_pending,
-    network_tools::dns::registry::DnsServerRegistry, vpn::probe_registrar as vpn_probe_registrar,
+use crate::{
+    services::{
+        alerts::catalog::service as alert_catalog, events::relay::relay_pending,
+        network_tools::dns::registry::DnsServerRegistry, vpn::probe_is_external,
+        vpn::probe_registrar as vpn_probe_registrar,
+    },
+    tasks::scheduler_run,
 };
 
 /// Com que frequência o servidor drena o `event_outbox` para o barramento SSE.
@@ -35,6 +39,7 @@ impl Initializer for MonitoringInitializer {
 
     async fn before_run(&self, ctx: &AppContext) -> Result<()> {
         spawn_event_relay(ctx.clone());
+        spawn_scheduler(ctx.clone());
 
         // Cadastro é uma conveniência de boot: banco indisponível não impede o
         // processo HTTP de subir, e a operação é idempotente em banco vazio.
@@ -57,15 +62,51 @@ impl Initializer for MonitoringInitializer {
                 tracing::warn!(%error, "não foi possível provisionar as regras básicas de alerta");
             }
         }
-        // Registro idempotente do `vpn-probe`. Também não impede o boot: o
-        // container do túnel pode subir depois, e o registro é refeito no
-        // próximo start. ⚠️ O fallback para o token compartilhado é o que
-        // permite o `vpn-probe` autenticar sem configuração.
-        if let Err(error) = vpn_probe_registrar::register(&ctx.db, None).await {
-            tracing::warn!(%error, "não foi possível registrar o probe dedicado da VPN");
+        // Registro idempotente do `vpn-probe`, e **só** quando o túnel está em
+        // outro container. Na topologia padrão o WireGuard sobe ao lado da API,
+        // no mesmo namespace de rede: registrar o agente ali criaria um probe
+        // que nunca bate heartbeat — vermelho permanente na tela e todo monitor
+        // da VPN caindo no fallback local a cada ciclo.
+        //
+        // Sem o registro, `monitor_provisioner::resolve_probe_id` devolve
+        // `None` e os monitores rodam locais, que é exatamente o certo: a `wg0`
+        // é do próprio processo.
+        //
+        // ⚠️ O fallback para o token compartilhado é o que permite o
+        // `vpn-probe` autenticar sem configuração — ver §6 do AGENTS.md.
+        if probe_is_external() {
+            if let Err(error) = vpn_probe_registrar::register(&ctx.db, None).await {
+                tracing::warn!(%error, "não foi possível registrar o probe dedicado da VPN");
+            }
         }
         Ok(())
     }
+}
+
+/// Sobe o ciclo do scheduler dentro do processo do servidor.
+///
+/// `SCHEDULER_ENABLED=false` desliga — é o que permite tirar o ciclo daqui e
+/// pô-lo num processo próprio (`task scheduler_loop`) numa instalação grande,
+/// sem que os dois disputem os mesmos monitores.
+fn spawn_scheduler(ctx: AppContext) {
+    if !scheduler_enabled() {
+        tracing::info!("scheduler desligado neste processo (SCHEDULER_ENABLED=false)");
+        return;
+    }
+    let seconds = scheduler_run::resolve_interval_seconds(None);
+    tokio::spawn(async move { scheduler_run::run_forever(&ctx, seconds).await });
+}
+
+/// Ligado por padrão. Só `false`/`0` desligam — qualquer outro valor mantém o
+/// ciclo de pé, porque um erro de digitação aqui pararia o monitoramento
+/// inteiro em silêncio.
+fn scheduler_enabled() -> bool {
+    std::env::var("SCHEDULER_ENABLED").map_or(true, |value| {
+        !matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "false" | "0" | "no" | "off"
+        )
+    })
 }
 
 /// Sobe o laço que replica o `event_outbox` para os clientes SSE.
@@ -94,4 +135,26 @@ fn spawn_event_relay(ctx: AppContext) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serial_test::serial;
+
+    #[test]
+    #[serial]
+    fn o_scheduler_vem_ligado_e_so_um_no_explicito_desliga() {
+        std::env::remove_var("SCHEDULER_ENABLED");
+        assert!(scheduler_enabled(), "ausente = ligado");
+        std::env::set_var("SCHEDULER_ENABLED", "false");
+        assert!(!scheduler_enabled());
+        std::env::set_var("SCHEDULER_ENABLED", "0");
+        assert!(!scheduler_enabled());
+        // Valor que não é uma negação conhecida mantém o ciclo de pé: um erro
+        // de digitação no compose não pode parar o monitoramento em silêncio.
+        std::env::set_var("SCHEDULER_ENABLED", "sim");
+        assert!(scheduler_enabled());
+        std::env::remove_var("SCHEDULER_ENABLED");
+    }
 }

@@ -122,13 +122,14 @@ async fn publish_snapshot(ctx: &AppContext, vpn_server_id: i64) -> AppResult<usi
         .all(&ctx.db)
         .await?;
 
+    let probe_external = super::probe_is_external();
     let snapshot: Vec<_> = peers
         .iter()
         .map(|peer| {
             let monitor = ping_monitors
                 .iter()
                 .find(|monitor| monitor.device_id == Some(peer.device_id));
-            let hints = compute_peer_hints(peer, monitor);
+            let hints = compute_peer_hints(peer, monitor, probe_external);
             json!({
                 "id": peer.id,
                 "deviceId": peer.device_id,

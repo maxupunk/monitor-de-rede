@@ -1,4 +1,4 @@
-//! Contrato de `GET /` e do prefixo `/api` (§5.6).
+//! Contrato de `GET /api/info` e do prefixo `/api` (§5.6).
 
 use backend_rust::app::App;
 use loco_rs::testing::prelude::*;
@@ -6,9 +6,9 @@ use serial_test::serial;
 
 #[tokio::test]
 #[serial]
-async fn raiz_identifica_o_servico() {
+async fn info_identifica_o_servico() {
     request::<App, _, _>(|request, _ctx| async move {
-        let response = request.get("/").await;
+        let response = request.get("/api/info").await;
 
         assert_eq!(response.status_code(), 200);
         let body: serde_json::Value = serde_json::from_str(&response.text()).unwrap();
@@ -19,8 +19,21 @@ async fn raiz_identifica_o_servico() {
                 "service": "Network Monitor API",
                 "version": "1.0.0"
             }),
-            "o payload da raiz é observável — o docker-compose usa como health check"
+            "o payload é observável — quem monitora a API de fora depende dele"
         );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn a_raiz_fica_livre_para_a_spa() {
+    request::<App, _, _>(|request, _ctx| async move {
+        // Sem `dist` no ambiente de teste, `spa::mount` não monta nada e a raiz
+        // responde 404. O que este teste protege é o inverso: que **não** haja
+        // rota registrada em `/` — uma rota venceria o `fallback_service` da
+        // SPA e devolveria JSON a quem abrisse o endereço no navegador.
+        assert_eq!(request.get("/").await.status_code(), 404);
     })
     .await;
 }

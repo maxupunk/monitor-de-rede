@@ -36,8 +36,10 @@
    - Usar props `:title` e `:subtitle` no `<v-list-item>` do Vuetify 3 para evitar ambiguidades de slot.
 
 3. **Independência de Ambiente (Docker / Local)**:
-   - O backend Rust roda em SQLite (teste/dev) e PostgreSQL (produção). Toda
-     consulta precisa valer nos dois dialetos.
+   - O backend Rust roda em **SQLite** (teste, dev e produção) e **PostgreSQL**
+     (instalações grandes, via `DATABASE_URL`). Toda consulta precisa valer nos
+     dois dialetos — a produção padrão passou a ser o SQLite, então quebrar o
+     dialeto dele agora quebra a instalação real, não só a suíte.
    - **Entidades do `sea-orm` são geradas contra o PostgreSQL**, nunca contra o
      SQLite: o SQLite reporta todo inteiro como `INTEGER` e o `db entities`
      rodado contra ele produz `i64` onde o Postgres tem `INT4` — e aí o `sqlx`
@@ -66,9 +68,13 @@
    - Consulte [arquitetura.md](docs/arquitetura.md) e [diretrizes_testes.md](docs/diretrizes_testes.md).
 
 6. **Preservação e Regras de Negócio do Módulo `vpn-probe`**:
-   - **Agente Dedicado (`vpn-probe`)**: compartilha o namespace de rede do
-     WireGuard (`network_mode: "service:wireguard"`) para medir ICMP/SNMP na
-     faixa `10.8.0.x`.
+   - **Agente Dedicado (`vpn-probe`)**: mede ICMP/SNMP na faixa `10.8.0.x` de
+     dentro do namespace de rede do WireGuard. Na topologia padrão esse
+     namespace é o do **próprio container** — a `wg0` é do processo da API, o
+     agente não é registrado no boot e os monitores da VPN rodam locais.
+     `VPN_PROBE_EXTERNAL=true` reativa o arranjo com o agente à parte. O código
+     do agente, do registrador e do provisionador continua obrigatório: é ele
+     que sustenta os dois arranjos.
    - **Token Fallback Padrão (`DEFAULT_VPN_PROBE_TOKEN`)**: o registrador
      (`services/vpn/probe_registrar.rs`) e o agente (`services/probes/agent.rs`)
      **DEVEM** usar `DEFAULT_VPN_PROBE_TOKEN = "default_vpn_probe_token"` como
@@ -86,8 +92,13 @@
 
 7. **Fronteiras que não se atravessam**:
    - O processo da API **nunca** executa `wg` nem `docker exec`. Ele escreve
-     `<iface>.conf` e lê `<iface>.status` num volume compartilhado; quem aplica
-     é o container do WireGuard. É isso que mantém o servidor sem `NET_ADMIN`.
+     `<iface>.conf` e lê `<iface>.status` em `WG_CONFIG_DIR`; quem aplica é o
+     watcher (`docker/wireguard-watcher.sh`), um processo root separado. O
+     container ganhou `NET_ADMIN` quando o WireGuard passou a morar nele, mas o
+     processo da API **não**: o entrypoint o chama com
+     `setpriv --inh-caps=-all` e ele roda com `CapEff` zerado. Mover o `wg`
+     para dentro da API atravessaria a fronteira; aproximar os dois processos,
+     não.
    - O ping usa socket ICMP `SOCK_DGRAM` (ADR 003) — sem `CAP_NET_RAW` e sem
      `execFile('ping')`. O `sysctl net.ipv4.ping_group_range` está no compose.
    - A chave privada de um peer **nunca** vai ao banco: vive no cofre em memória

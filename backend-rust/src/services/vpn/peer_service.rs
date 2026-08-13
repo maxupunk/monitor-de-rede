@@ -152,6 +152,8 @@ pub async fn list(db: &DatabaseConnection) -> AppResult<Vec<PeerListItem>> {
         .all(db)
         .await?;
 
+    // Uma leitura só da topologia para a lista inteira.
+    let probe_external = super::probe_is_external();
     Ok(peers
         .into_iter()
         .map(|peer| {
@@ -162,7 +164,7 @@ pub async fn list(db: &DatabaseConnection) -> AppResult<Vec<PeerListItem>> {
             let monitor = ping_monitors
                 .iter()
                 .find(|monitor| monitor.device_id == Some(peer.device_id));
-            let hints = compute_peer_hints(&peer, monitor);
+            let hints = compute_peer_hints(&peer, monitor, probe_external);
             PeerListItem {
                 peer,
                 device,

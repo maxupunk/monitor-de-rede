@@ -1,221 +1,94 @@
-# Stack do NetMonitor — backend Rust (Loco.rs).
+# Stack do NetMonitor — um serviço.
 #
-# São oito serviços: `migration` roda uma vez e sai; `server`, `scheduler`,
-# `probe`, `vpn-probe`, `wireguard`, `frontend` e `postgres` ficam de pé.
+# Eram oito: `migration`, `server`, `scheduler`, `probe`, `wireguard`,
+# `vpn-probe`, `frontend` (nginx) e `postgres`. O que aconteceu com cada um:
 #
-# Os quatro papéis do backend saem do **mesmo binário e da mesma imagem** —
-# muda só o comando. Por isso `x-backend` fixa `build` e `image` iguais nos
-# quatro: o Compose reconhece a repetição e compila uma vez só.
+# | saiu         | para onde foi                                                |
+# |--------------|--------------------------------------------------------------|
+# | `migration`  | `auto_migrate` no boot do próprio servidor                    |
+# | `scheduler`  | laço in-process (`initializers::monitoring`) — ADR 007 pedia  |
+# |              | processo longevo, não container próprio                        |
+# | `probe`      | redundante: enxergava a mesma rede que o servidor              |
+# | `vpn-probe`  | a `wg0` agora é do próprio processo                           |
+# | `wireguard`  | watcher como processo root deste container                    |
+# | `frontend`   | a SPA é servida pela API, mesma porta e mesma origem          |
+# | `postgres`   | SQLite em WAL no volume                                       |
 #
-# `networks` fica de fora deste anchor de propósito: o `vpn-probe` usa
-# `network_mode`, e os dois são mutuamente exclusivos no Compose.
-x-backend: &backend
-  build:
-    context: ./backend-rust
-    target: runtime
-  image: netmonitor-backend:latest
-
-x-app-env: &app-env
-  LOCO_ENV: production
-  # Cifra em repouso dos segredos da VPN. Trocar o valor torna ilegível tudo que
-  # já foi cifrado com o anterior. O fallback para `APP_KEY` (nome antigo, do
-  # AdonisJS) existe para não quebrar quem já tem a variável no `.env`.
-  ENCRYPTION_KEY: ${ENCRYPTION_KEY:-${APP_KEY:-secret_app_key_32_characters_long_str}}
-  # Assinatura do JWT. Trocar em produção — e o valor **precisa ser base64
-  # válido**: o Loco assina com `EncodingKey::from_base64_secret` (HS512). Um
-  # segredo não-base64 não derruba o servidor; ele faz `generate_jwt` falhar e
-  # todo login responder 401 com a mesma mensagem de senha inválida.
-  JWT_SECRET: ${JWT_SECRET:-Y2hhbmdlLW1lLXRoaXMtaXMtYS1wbGFjZWhvbGRlci1zZWNyZXQtdmFsdWUtMDAwMQ==}
-  DATABASE_URL: postgres://netmonitor:secret@postgres:5432/netmonitor
-  # Pool de conexões, em milissegundos. Repassados aqui porque o `config/*.yaml`
-  # vai assado dentro da imagem: sem estas linhas, ajustar os tempos exigiria
-  # `--build`, e o `.env.example` prometeria um botão que não existe.
-  DB_CONNECT_TIMEOUT: ${DB_CONNECT_TIMEOUT:-5000}
-  DB_IDLE_TIMEOUT: ${DB_IDLE_TIMEOUT:-300000}
-  DB_MIN_CONNECTIONS: ${DB_MIN_CONNECTIONS:-1}
-  DB_MAX_CONNECTIONS: ${DB_MAX_CONNECTIONS:-10}
-  # Token exigido no cadastro do primeiro usuário. Deixe vazio e o servidor
-  # sorteia um no primeiro boot, imprimindo-o no log (`docker compose logs
-  # server | grep setup_token`). Definir aqui só interessa a provisionamento
-  # automatizado, que precisa conhecer o valor antes de o container subir.
-  SETUP_TOKEN: ${SETUP_TOKEN:-}
-  LOG_LEVEL: ${LOG_LEVEL:-info}
-  # Origem liberada no CORS. Precisa bater com a porta publicada do frontend.
-  FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:8081}
-
-# `ping_group_range` habilita o socket ICMP `SOCK_DGRAM` sem `CAP_NET_RAW`
-# (SPIKE-03 / ADR 003). Vale para todo processo que pinga: `server` (checagem
-# manual e discovery), `scheduler` (o ciclo de monitores) e `probe`.
-#
-# O `migration` fica de fora de propósito: não pinga. O binário avisa no log
-# que o cliente ICMP não subiu e segue — ver `initializers::process_deps`.
-x-icmp-sysctls: &icmp-sysctls
-  net.ipv4.ping_group_range: "0 2147483647"
-
-# O batch do port scanner deriva do limite de descritores.
-x-nofile: &nofile
-  nofile:
-    soft: 8192
-    hard: 65536
+# Probe remoto continua existindo, e é a única razão legítima para um segundo
+# container: um agente na ponta da rede, onde este servidor não alcança. Sobe
+# com esta mesma imagem — ver `docs/arquitetura.md`.
 
 services:
-  migration:
-    <<: *backend
-    command: ["backend_rust-cli", "db", "migrate"]
-    environment:
-      <<: *app-env
-    depends_on:
-      postgres:
-        condition: service_healthy
-    networks: [netmonitor-net]
-    restart: "no"
-
-  server:
-    <<: *backend
-    command: ["backend_rust-cli", "start"]
-    ports:
-      - "${API_EXTERNAL_PORT:-3333}:3333"
-    environment:
-      <<: *app-env
-      # Volume compartilhado com o container WireGuard (hot-reload por arquivo)
-      WG_CONFIG_DIR: /config
-      VPN_PROBE_TOKEN: ${VPN_PROBE_TOKEN:-default_vpn_probe_token}
+  netmonitor:
+    build:
+      context: .
+      target: runtime
+    image: netmonitor:latest
+    # `ping_group_range` habilita o socket ICMP `SOCK_DGRAM` sem `CAP_NET_RAW`
+    # (SPIKE-03 / ADR 003) — é o que permite a aplicação pingar como `app`.
+    # Os outros dois são do WireGuard: roteamento entre peers e a marca de
+    # origem que o `wg-quick` exige.
     sysctls:
-      <<: *icmp-sysctls
-    ulimits:
-      <<: *nofile
-    volumes:
-      - wg-config:/config
-    depends_on:
-      postgres:
-        condition: service_healthy
-      migration:
-        condition: service_completed_successfully
-    networks: [netmonitor-net]
-    restart: unless-stopped
-
-  scheduler:
-    <<: *backend
-    # Processo de longa duração que repete o ciclo internamente (ADR 007).
-    # Não é o scheduler nativo do Loco: aquele dispara um subprocesso por
-    # tique, e um processo novo a cada 5 s reabria o socket ICMP e o pool de
-    # conexões, além de zerar as cadências internas do ciclo.
-    command: ["backend_rust-cli", "task", "scheduler_loop"]
-    environment:
-      <<: *app-env
-      SCHEDULER_INTERVAL_SECONDS: ${SCHEDULER_INTERVAL_SECONDS:-5}
-      # É o scheduler quem sincroniza a telemetria dos túneis. Sem o mesmo
-      # volume do `server`, `wg0.status` não existe aqui e a sincronização vira
-      # um no-op silencioso: a tela recebe eventos com dados congelados.
-      WG_CONFIG_DIR: /config
-    sysctls:
-      <<: *icmp-sysctls
-    ulimits:
-      <<: *nofile
-    volumes:
-      - wg-config:/config
-    depends_on:
-      postgres:
-        condition: service_healthy
-      migration:
-        condition: service_completed_successfully
-    networks: [netmonitor-net]
-    restart: unless-stopped
-
-  probe:
-    <<: *backend
-    command: ["backend_rust-cli", "task", "probe_run"]
-    environment:
-      <<: *app-env
-      PROBE_SERVER_URL: http://server:3333
-    sysctls:
-      <<: *icmp-sysctls
-    ulimits:
-      <<: *nofile
-    depends_on:
-      - server
-    networks: [netmonitor-net]
-    restart: unless-stopped
-
-  # Servidor WireGuard: único container com NET_ADMIN e única porta publicada.
-  wireguard:
-    image: linuxserver/wireguard:latest
-    cap_add:
-      - NET_ADMIN
-      - SYS_MODULE
-    sysctls:
+      net.ipv4.ping_group_range: "0 2147483647"
       net.ipv4.ip_forward: 1
       net.ipv4.conf.all.src_valid_mark: 1
-    environment:
-      PUID: 1000
-      PGID: 1000
-      TZ: ${TZ:-UTC}
-      WG_INTERFACE: wg0
+    # Fica com o watcher, o processo root do container. O entrypoint remove as
+    # capabilities antes de chamar a aplicação (`setpriv --inh-caps=-all`).
+    # Sem VPN? `WG_ENABLED=false` no `.env` e esta linha pode sair.
+    cap_add:
+      - NET_ADMIN
+    # O batch do port scanner deriva do limite de descritores.
+    ulimits:
+      nofile:
+        soft: 8192
+        hard: 65536
     ports:
-      # Mapeada 1:1 de propósito: é a porta que os roteadores usam como Endpoint,
-      # e precisa ser a mesma configurada em "Porta UDP" na tela /vpn.
+      # Interface web e API na mesma porta — não há mais duas.
+      - "${APP_EXTERNAL_PORT:-3333}:3333"
+      # Mapeada 1:1 de propósito: é a porta que os roteadores usam como
+      # Endpoint, e precisa ser a mesma configurada em "Porta UDP" na tela /vpn.
       - "${WG_EXTERNAL_PORT:-51820}:${WG_EXTERNAL_PORT:-51820}/udp"
-    volumes:
-      - wg-config:/config
-      - ./docker/wireguard/custom-cont-init.d:/custom-cont-init.d:ro
-      - ./docker/wireguard/scripts:/custom-scripts:ro
-    networks: [netmonitor-net]
-    restart: unless-stopped
-
-  # Probe dedicado que enxerga a interface wg0 — o probe da LAN segue intocado.
-  vpn-probe:
-    <<: *backend
-    command: ["backend_rust-cli", "task", "probe_run"]
     environment:
-      <<: *app-env
-      PROBE_SERVER_URL: http://server:3333
-      PROBE_TOKEN: ${VPN_PROBE_TOKEN:-default_vpn_probe_token}
-      # A telemetria do túnel é lida do volume compartilhado, nunca por
-      # `docker exec` — é o que mantém o servidor sem acesso ao socket do Docker.
-      WG_CONFIG_DIR: /config
+      LOCO_ENV: production
+      # Cifra em repouso dos segredos da VPN. Trocar o valor torna ilegível tudo
+      # que já foi cifrado com o anterior. O fallback para `APP_KEY` (nome
+      # antigo, do AdonisJS) existe para não quebrar quem já tem a variável.
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-${APP_KEY:-secret_app_key_32_characters_long_str}}
+      # Assinatura do JWT. Trocar em produção — e o valor **precisa ser base64
+      # válido**: o Loco assina com `EncodingKey::from_base64_secret` (HS512).
+      # Um segredo não-base64 não derruba o servidor; ele faz `generate_jwt`
+      # falhar e todo login responder 401 com a mensagem de senha inválida.
+      JWT_SECRET: ${JWT_SECRET:-Y2hhbmdlLW1lLXRoaXMtaXMtYS1wbGFjZWhvbGRlci1zZWNyZXQtdmFsdWUtMDAwMQ==}
+      # SQLite no volume. Sem interpolação de propósito: a `DATABASE_URL` do
+      # `.env` descreve o caminho visto **da máquina**, e ela não vale aqui
+      # dentro. Para apontar a um Postgres externo, edite esta linha.
+      DATABASE_URL: sqlite:///data/netmonitor.sqlite?mode=rwc
+      # Pool de conexões, em milissegundos. Repassados aqui porque o
+      # `config/*.yaml` vai assado dentro da imagem: sem estas linhas, ajustar
+      # os tempos exigiria `--build`.
+      DB_CONNECT_TIMEOUT: ${DB_CONNECT_TIMEOUT:-5000}
+      DB_IDLE_TIMEOUT: ${DB_IDLE_TIMEOUT:-300000}
+      DB_MIN_CONNECTIONS: ${DB_MIN_CONNECTIONS:-1}
+      DB_MAX_CONNECTIONS: ${DB_MAX_CONNECTIONS:-10}
+      # Token exigido no cadastro do primeiro usuário. Deixe vazio e o servidor
+      # sorteia um no primeiro boot, imprimindo-o no log (`docker compose logs
+      # netmonitor | grep setup_token`). Definir aqui só interessa a
+      # provisionamento automatizado, que precisa conhecer o valor antes de o
+      # container subir.
+      SETUP_TOKEN: ${SETUP_TOKEN:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SCHEDULER_INTERVAL_SECONDS: ${SCHEDULER_INTERVAL_SECONDS:-5}
+      # Origem liberada no CORS. Só importa a quem serve a SPA de outro
+      # endereço: servida daqui, a origem é a mesma e o CORS nem entra em cena.
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:3333}
+      # Token do probe remoto — o mesmo valor precisa ir no container de lá.
+      VPN_PROBE_TOKEN: ${VPN_PROBE_TOKEN:-default_vpn_probe_token}
     volumes:
-      - wg-config:/config
-    # Herda o namespace de rede do WireGuard; por isso não declara `networks`.
-    network_mode: "service:wireguard"
-    depends_on:
-      - wireguard
-      - server
-    restart: unless-stopped
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    image: netmonitor-frontend:latest
-    ports:
-      - "${FRONTEND_EXTERNAL_PORT:-8081}:80"
-    depends_on:
-      - server
-    networks: [netmonitor-net]
-    restart: unless-stopped
-
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: netmonitor
-      POSTGRES_PASSWORD: secret
-      POSTGRES_DB: netmonitor
-    ports:
-      - "${POSTGRES_EXTERNAL_PORT:-5433}:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U netmonitor -d netmonitor"]
-      interval: 3s
-      timeout: 3s
-      retries: 5
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    networks: [netmonitor-net]
+      # Um volume só: o banco em /data/netmonitor.sqlite e a configuração do
+      # túnel em /data/wg. O `wg0.conf` é reescrito a partir do banco a cada
+      # mudança de peer, então o que precisa mesmo sobreviver é o banco.
+      - netmonitor-data:/data
     restart: unless-stopped
 
 volumes:
-  pgdata:
-  wg-config:
-
-networks:
-  netmonitor-net:
-    driver: bridge
+  netmonitor-data:

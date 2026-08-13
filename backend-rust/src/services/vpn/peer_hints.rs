@@ -11,10 +11,14 @@ use crate::models::{monitors, vpn_peers};
 pub struct PeerHints {
     /// Túnel ativo, mas o ping falha: provável firewall bloqueando na interface WG.
     pub needs_firewall_hint: bool,
-    /// Túnel ativo e ping falhando, mas o monitor **não** roda no `vpn-probe`: o
-    /// ICMP sai da máquina da API, que não tem rota para dentro do túnel. O
-    /// pacote nem chega ao equipamento — acusar o firewall dele seria
-    /// diagnóstico falso.
+    /// Túnel ativo e ping falhando, mas o monitor **não** roda no `vpn-probe` —
+    /// e o túnel está em outro namespace de rede. O ICMP sai da máquina da API,
+    /// que não tem rota para dentro do túnel: o pacote nem chega ao
+    /// equipamento, e acusar o firewall dele seria diagnóstico falso.
+    ///
+    /// Nunca é `true` quando o WireGuard sobe junto com a API (o padrão): ali a
+    /// `wg0` é do próprio processo, o pacote entra no túnel, e quem falha em
+    /// responder é mesmo o equipamento.
     pub ping_outside_tunnel: bool,
     /// Monitor de ping provisionado automaticamente para o peer — usado para
     /// navegar ao histórico de conectividade.
@@ -32,11 +36,20 @@ pub struct PeerHints {
 /// tolera minutos de propósito: quem desconectasse o equipamento caía na brecha
 /// entre as duas e via "túnel conectado, mas não responde a ping" — afirmando
 /// justamente o contrário do que havia acontecido.
+///
+/// `probe_external` é a topologia (ver [`super::probe_is_external`]) e entra
+/// por parâmetro, não por variável de ambiente: a função é pura e os testes
+/// cobrem os dois arranjos sem `#[serial]`.
 #[must_use]
-pub fn compute_peer_hints(peer: &vpn_peers::Model, monitor: Option<&monitors::Model>) -> PeerHints {
+pub fn compute_peer_hints(
+    peer: &vpn_peers::Model,
+    monitor: Option<&monitors::Model>,
+    probe_external: bool,
+) -> PeerHints {
     let silent_tunnel =
         peer.has_fresh_proof_of_life() && monitor.is_some_and(|item| item.status == "down");
-    let outside_tunnel = silent_tunnel && monitor.is_some_and(|item| item.probe_id.is_none());
+    let outside_tunnel =
+        probe_external && silent_tunnel && monitor.is_some_and(|item| item.probe_id.is_none());
 
     PeerHints {
         needs_firewall_hint: silent_tunnel && !outside_tunnel,
@@ -92,9 +105,14 @@ mod tests {
         }
     }
 
+    /// Topologia com o `vpn-probe` num container à parte.
+    const EXTERNO: bool = true;
+    /// Topologia padrão: WireGuard no mesmo container da API.
+    const LOCAL: bool = false;
+
     #[test]
     fn tunel_vivo_com_ping_caido_no_vpn_probe_acusa_o_firewall() {
-        let hints = compute_peer_hints(&peer(Some(10)), Some(&monitor("down", Some(3))));
+        let hints = compute_peer_hints(&peer(Some(10)), Some(&monitor("down", Some(3))), EXTERNO);
         assert!(hints.needs_firewall_hint);
         assert!(!hints.ping_outside_tunnel);
         assert_eq!(hints.ping_monitor_id, Some(7));
@@ -103,30 +121,41 @@ mod tests {
     #[test]
     fn ping_fora_do_tunel_nao_acusa_o_firewall_do_equipamento() {
         // Matriz de paridade #40: sem `probeId`, o ICMP sai da API e nem chega.
-        let hints = compute_peer_hints(&peer(Some(10)), Some(&monitor("down", None)));
+        let hints = compute_peer_hints(&peer(Some(10)), Some(&monitor("down", None)), EXTERNO);
         assert!(!hints.needs_firewall_hint);
         assert!(hints.ping_outside_tunnel);
+    }
+
+    #[test]
+    fn com_o_tunel_no_mesmo_container_o_ping_local_acusa_o_firewall() {
+        // Mesmo cenário do teste acima, outra topologia: a `wg0` é do próprio
+        // processo, o pacote entra no túnel e quem não responde é o
+        // equipamento. Dizer "o ping saiu fora do túnel" aqui seria mentira —
+        // e mandaria o operador procurar o problema no lugar errado.
+        let hints = compute_peer_hints(&peer(Some(10)), Some(&monitor("down", None)), LOCAL);
+        assert!(hints.needs_firewall_hint);
+        assert!(!hints.ping_outside_tunnel);
     }
 
     #[test]
     fn tunel_sem_prova_de_vida_recente_nao_gera_aviso() {
         // 100 s: ainda "conectado" (janela de 150 s), mas fora da prova de vida
         // (80 s). É a brecha que o #39 fecha.
-        let hints = compute_peer_hints(&peer(Some(100)), Some(&monitor("down", Some(3))));
+        let hints = compute_peer_hints(&peer(Some(100)), Some(&monitor("down", Some(3))), EXTERNO);
         assert!(!hints.needs_firewall_hint);
         assert!(!hints.ping_outside_tunnel);
     }
 
     #[test]
     fn ping_saudavel_nunca_gera_aviso() {
-        let hints = compute_peer_hints(&peer(Some(10)), Some(&monitor("up", Some(3))));
+        let hints = compute_peer_hints(&peer(Some(10)), Some(&monitor("up", Some(3))), EXTERNO);
         assert!(!hints.needs_firewall_hint);
         assert!(!hints.ping_outside_tunnel);
     }
 
     #[test]
     fn sem_monitor_de_ping_nao_ha_diagnostico() {
-        let hints = compute_peer_hints(&peer(Some(10)), None);
+        let hints = compute_peer_hints(&peer(Some(10)), None, EXTERNO);
         assert!(!hints.needs_firewall_hint);
         assert!(!hints.ping_outside_tunnel);
         assert_eq!(hints.ping_monitor_id, None);
@@ -134,7 +163,7 @@ mod tests {
 
     #[test]
     fn serializa_em_camel_case_para_o_frontend() {
-        let json = serde_json::to_value(compute_peer_hints(&peer(None), None)).unwrap();
+        let json = serde_json::to_value(compute_peer_hints(&peer(None), None, EXTERNO)).unwrap();
         assert!(json.get("needsFirewallHint").is_some());
         assert!(json.get("pingOutsideTunnel").is_some());
         assert!(json.get("pingMonitorId").is_some());

@@ -6,6 +6,9 @@
 #
 #   docker compose -f docker-compose.icmp-spike.yml run --rm --build icmp-dgram
 #
+# O `context: ..` é a raiz do repositório: o Dockerfile passou a ser um só,
+# com a SPA e o backend no mesmo build. O estágio `spike` não depende da SPA.
+#
 # `icmp-restrito` é a contraprova: mesma imagem, mas com `ping_group_range`
 # fechado. Ele **deve** falhar — é o que mostra que quem libera o socket é o
 # sysctl, e não algum privilégio herdado por acidente.
@@ -18,7 +21,7 @@ services:
   # dockerd antigo, o default é `1 0` e o socket não abre.
   icmp-dgram:
     build:
-      context: .
+      context: ..
       target: spike
     sysctls:
       net.ipv4.ping_group_range: "0 2147483647"
@@ -26,7 +29,7 @@ services:
 
   icmp-restrito:
     build:
-      context: .
+      context: ..
       target: spike
     # `1 0` é o intervalo vazio — o default do kernel Linux sem Docker.
     # Esperado: EACCES na abertura do socket.
@@ -36,6 +39,6 @@ services:
 
   dns-wire:
     build:
-      context: .
+      context: ..
       target: spike
     command: ["spike_dns_wire", "example.com", "1.1.1.1"]
