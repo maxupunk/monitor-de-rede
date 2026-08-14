@@ -206,7 +206,7 @@
             <v-col
               v-if="
                 form.kind === 'snmp' &&
-                (form.snmpMode === 'interface' || form.snmpMode === 'interface_traffic')
+                  (form.snmpMode === 'interface' || form.snmpMode === 'interface_traffic')
               "
               cols="12"
               md="6"
@@ -279,8 +279,8 @@
             <v-col
               v-if="
                 form.kind === 'snmp' &&
-                form.snmpMode === 'interface_traffic' &&
-                form.ifIndex !== null
+                  form.snmpMode === 'interface_traffic' &&
+                  form.ifIndex !== null
               "
               cols="12"
             >
@@ -579,20 +579,6 @@
                 hide-details="auto"
               ></v-select>
             </v-col>
-            <v-col cols="12" md="6">
-              <v-select
-                v-model="form.timeoutSeconds"
-                :items="timeoutItems"
-                item-title="title"
-                item-value="value"
-                label="Aguardar resposta por até"
-                prepend-inner-icon="mdi-timer-alert-outline"
-                variant="outlined"
-                density="comfortable"
-                :error-messages="timeoutError"
-                hide-details="auto"
-              ></v-select>
-            </v-col>
           </v-row>
 
           <v-expansion-panels variant="accordion" class="mt-4">
@@ -703,6 +689,21 @@
                     ></v-text-field>
                   </v-col>
 
+                  <v-col cols="12" md="6">
+                    <v-text-field
+                      v-model.number="form.timeoutSeconds"
+                      label="Aguardar resposta por até (segundos)"
+                      type="number"
+                      min="1"
+                      variant="outlined"
+                      density="comfortable"
+                      :placeholder="`Automático (${smartTimeoutPreview}s)`"
+                      :hint="`Padrão: Automático (${smartTimeoutPreview}s calculados pelo intervalo e tipo)`"
+                      persistent-hint
+                      :error-messages="timeoutError"
+                      clearable
+                    ></v-text-field>
+                  </v-col>
                   <v-col cols="12" md="6">
                     <v-text-field
                       v-model.number="form.retryCount"
@@ -818,7 +819,7 @@ import {
   INTERVAL_PRESETS,
   MONITOR_KINDS,
   SNMP_MODES,
-  TIMEOUT_PRESETS,
+  calculateSmartTimeout,
   createMonitorForm,
   describeMonitor,
   dnsProtocol,
@@ -955,22 +956,21 @@ const canFillFromDevice = computed(
     form.target !== selectedDevice.value.ipAddress
 )
 
+const smartTimeoutPreview = computed(() => calculateSmartTimeout(form.kind, form.intervalSeconds))
+
 const timeoutError = computed(() => {
-  if (form.timeoutSeconds < 5) return 'A checagem deve demorar pelo menos 5 segundos'
-  if (form.intervalSeconds <= form.timeoutSeconds) {
-    return 'O campo "verificar a cada" deve ser maior do que "Aguardar resposta por até"'
+  if (
+    form.timeoutSeconds !== null &&
+    form.timeoutSeconds !== undefined &&
+    form.timeoutSeconds > 0
+  ) {
+    if (form.timeoutSeconds < 1) return 'A checagem deve demorar pelo menos 1 segundo'
+    if (form.intervalSeconds <= form.timeoutSeconds) {
+      return 'O timeout deve ser menor do que o intervalo de verificação'
+    }
   }
   return undefined
 })
-
-watch(
-  () => form.intervalSeconds,
-  (newInterval) => {
-    if (form.timeoutSeconds >= newInterval) {
-      form.timeoutSeconds = Math.max(5, newInterval - 1)
-    }
-  }
-)
 
 /** Mantém valores fora dos presets (monitores antigos) visíveis no select */
 function buildPresetItems(presets: number[], current: number) {
@@ -981,7 +981,6 @@ function buildPresetItems(presets: number[], current: number) {
 }
 
 const intervalItems = computed(() => buildPresetItems(INTERVAL_PRESETS, form.intervalSeconds))
-const timeoutItems = computed(() => buildPresetItems(TIMEOUT_PRESETS, form.timeoutSeconds))
 
 const interfaceItems = computed(() => {
   const items = interfaces.value

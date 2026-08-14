@@ -263,6 +263,16 @@ async fn check_and_resolve(
         return Ok(event);
     }
 
+    let Some(_guard) =
+        crate::services::monitoring::execution_guard::try_acquire_monitor(monitor.id)
+    else {
+        tracing::debug!(
+            monitor_id,
+            "verificação do alerta ignorada: monitor já em execução"
+        );
+        return Ok(event);
+    };
+
     // Falha de execução não invalida o alerta: mantém-se a avaliação pelo
     // estado atual, exatamente como no backend anterior.
     match run_monitor(

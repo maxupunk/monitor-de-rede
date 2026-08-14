@@ -4,4 +4,4 @@
  * Resposta de `GET /` (§5.6). Fora do prefixo `/api` e sem autenticação —
  * é o health check que o docker-compose usa.
  */
-export type ServiceInfo = { status: string; service: string; version: string }
+export type ServiceInfo = { status: string, service: string, version: string, };

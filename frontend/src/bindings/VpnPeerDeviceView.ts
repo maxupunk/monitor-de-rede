@@ -9,10 +9,4 @@
  * TypeScript é estrutural); descrever campos que não existem não seria, e é
  * justamente isso que o tipo redigitado à mão arriscava.
  */
-export type VpnPeerDeviceView = {
-  id: number
-  name: string
-  ipAddress: string | null
-  snmpEnabled: boolean
-  status: string
-}
+export type VpnPeerDeviceView = { id: number, name: string, ipAddress: string | null, snmpEnabled: boolean, status: string, };

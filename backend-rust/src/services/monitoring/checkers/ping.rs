@@ -111,7 +111,9 @@ impl Checker for PingChecker {
             .0
             .pinger(ip, PingIdentifier(rand::random()))
             .await;
-        pinger.timeout(Duration::from_millis(config.timeout_ms.max(1)));
+        let per_packet_timeout_ms =
+            (config.timeout_ms / u64::from(count)).clamp(200, config.timeout_ms.max(200));
+        pinger.timeout(Duration::from_millis(per_packet_timeout_ms));
         let payload = vec![0_u8; config.packet_size.clamp(1, 65_507)];
         let mut latencies = Vec::with_capacity(usize::from(count));
 

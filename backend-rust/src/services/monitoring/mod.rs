@@ -3,6 +3,7 @@
 pub mod checkers;
 pub mod contracts;
 pub mod device_status;
+pub mod execution_guard;
 pub mod interface_monitoring;
 pub mod link_speed;
 pub mod presenter;

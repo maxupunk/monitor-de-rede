@@ -14,6 +14,7 @@ use crate::{
         maintenance::resource_cleanup::ResourceCleanupService,
         monitoring::{
             device_status,
+            execution_guard::{calculate_smart_timeout_seconds, try_acquire_monitor},
             presenter::{present_monitors, MonitorResultPresentation, RECENT_RESULTS_LIMIT},
             result_processor::process_result,
             runner::{run_monitor, RunOptions},
@@ -101,6 +102,13 @@ async fn store(
     let kind = kind.to_string();
     let name = name.to_string();
     let enabled = input.enabled.or(input.is_enabled).unwrap_or(true);
+    let interval_seconds = input.interval_seconds.unwrap_or(15).max(1);
+    let timeout_seconds = input
+        .timeout_seconds
+        .filter(|&t| t > 0)
+        .unwrap_or_else(|| calculate_smart_timeout_seconds(&kind, interval_seconds))
+        .min((interval_seconds - 1).max(1))
+        .max(1);
     let config = build_configuration(
         &kind,
         input.configuration,
@@ -114,8 +122,8 @@ async fn store(
         r#type: Set(kind),
         name: Set(name),
         configuration: Set(config),
-        interval_seconds: Set(input.interval_seconds.unwrap_or(15).max(1)),
-        timeout_seconds: Set(input.timeout_seconds.unwrap_or(10).max(1)),
+        interval_seconds: Set(interval_seconds),
+        timeout_seconds: Set(timeout_seconds),
         retry_count: Set(input.retry_count.unwrap_or(3).max(0)),
         enabled: Set(enabled),
         status: Set(input.status.unwrap_or_else(|| "unknown".into())),
@@ -184,6 +192,16 @@ async fn update(
         .enabled
         .or(input.is_enabled)
         .unwrap_or(current.enabled);
+    let interval_seconds = input
+        .interval_seconds
+        .unwrap_or(current.interval_seconds)
+        .max(1);
+    let timeout_seconds = input
+        .timeout_seconds
+        .filter(|&t| t > 0)
+        .unwrap_or_else(|| calculate_smart_timeout_seconds(&kind, interval_seconds))
+        .min((interval_seconds - 1).max(1))
+        .max(1);
     let row = monitors::ActiveModel {
         id: Set(id),
         device_id: Set(input.device_id.or(current.device_id)),
@@ -197,14 +215,8 @@ async fn update(
             input.port,
             Some(&current.configuration),
         )),
-        interval_seconds: Set(input
-            .interval_seconds
-            .unwrap_or(current.interval_seconds)
-            .max(1)),
-        timeout_seconds: Set(input
-            .timeout_seconds
-            .unwrap_or(current.timeout_seconds)
-            .max(1)),
+        interval_seconds: Set(interval_seconds),
+        timeout_seconds: Set(timeout_seconds),
         retry_count: Set(input.retry_count.unwrap_or(current.retry_count).max(0)),
         enabled: Set(enabled),
         status: Set(input.status.unwrap_or(current.status)),
@@ -238,6 +250,9 @@ async fn run(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Re
         .one(&ctx.db)
         .await?
         .ok_or_else(|| AppError::not_found("Monitor não encontrado"))?;
+    let _guard = try_acquire_monitor(monitor.id).ok_or_else(|| {
+        AppError::conflict("Uma verificação para este monitor já está em andamento")
+    })?;
     let result = run_monitor(
         &ctx,
         &monitor.r#type,

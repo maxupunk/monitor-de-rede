@@ -6,6 +6,7 @@ use sea_orm::EntityTrait;
 use crate::{
     models::devices,
     services::{
+        monitoring::execution_guard::try_acquire_snmp_device,
         shared::errors::{AppError, AppResult},
         snmp::{
             client::{SnmpConfig, SnmpVersion},
@@ -102,12 +103,18 @@ async fn device_with_config(ctx: &AppContext, id: i64) -> AppResult<(devices::Mo
     Ok((device, config))
 }
 async fn scan(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
+    let _guard = try_acquire_snmp_device(id).ok_or_else(|| {
+        AppError::conflict("Já existe uma consulta SNMP em andamento para este dispositivo")
+    })?;
     let (device, config) = device_with_config(&ctx, id).await?;
     Ok(format::json(
         service::scan_device(&ctx, &device, config).await?,
     )?)
 }
 async fn poll(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
+    let _guard = try_acquire_snmp_device(id).ok_or_else(|| {
+        AppError::conflict("Já existe uma consulta SNMP em andamento para este dispositivo")
+    })?;
     let (device, device_config) = device_with_config(&ctx, id).await?;
     let result = service::poll_device(&ctx, &device, device_config).await?;
     Ok(format::json(

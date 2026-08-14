@@ -40,10 +40,18 @@ async fn scan(Json(input): Json<PortScanInput>) -> AppResult<Response> {
         ));
     }
 
+    let guard = crate::services::monitoring::execution_guard::try_acquire_port_scan(host)
+        .ok_or_else(|| {
+            AppError::conflict(
+                "Já existe uma varredura de portas em andamento para este endereço IP",
+            )
+        })?;
+
     let (sender, receiver) = mpsc::channel(32);
     let cancel = CancellationToken::new();
     let scan_cancel = cancel.clone();
     tokio::spawn(async move {
+        let _guard = guard;
         port_scanner::scan(
             host,
             &input.ports,

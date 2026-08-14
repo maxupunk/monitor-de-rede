@@ -34,6 +34,7 @@ use crate::{
         maintenance::data_pruner,
         monitoring::{
             contracts::{CheckResult, MonitorStatus},
+            execution_guard::try_acquire_monitor,
             result_processor::process_result,
             runner::{run_monitor, RunOptions},
         },
@@ -253,6 +254,13 @@ async fn run_data_pruner_if_due(ctx: &AppContext) -> AppResult<()> {
 /// (§9.2): probe vivo → tarefa remota; probe offline → tentativa local; nem
 /// isso → observação `unknown`.
 async fn execute_one(ctx: &AppContext, monitor: &monitors::Model) -> AppResult<()> {
+    let Some(_guard) = try_acquire_monitor(monitor.id) else {
+        tracing::debug!(
+            monitor_id = monitor.id,
+            "monitor já em execução; ciclo ignorado"
+        );
+        return Ok(());
+    };
     let timeout_ms = u64::from(monitor.timeout_seconds.max(1) as u32) * 1_000;
 
     if let Some(probe_id) = monitor.probe_id {
