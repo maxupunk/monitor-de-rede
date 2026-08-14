@@ -105,3 +105,8 @@
      até a primeira leitura. Depois disso, só rotacionando.
    - Controller extrai, valida, delega e serializa. Regra de negócio vive em
      `src/services/`, testável sem HTTP.
+
+8. **Edições Cirúrgicas e Preservação de Formatação / Indentação (Economia de Tokens)**:
+   - **Edições cirúrgicas**: Faça apenas modificações pontuais no escopo estrito da tarefa. **NUNCA** reformate arquivos inteiros nem altere a indentação, espaçamento ou quebras de linha de blocos de código não relacionados à mudança funcional.
+   - **Evitar retrabalho com formatadores**: O repositório já possui formatadores padronizados (`cargo fmt` no backend e `npm run format` / Prettier no frontend). Alterar indentação arbitrariamente faz com que a etapa de validação (`format`) precise desfazer ou reformatar tudo, inflando diffs e desperdiçando tokens desnecessariamente.
+   - **Respeite o estilo local**: Ao escrever código novo, siga rigorosamente o padrão de indentação e espaçamento já presente no arquivo para que o formatador não precise reformatar o bloco na validação final.
