@@ -267,12 +267,18 @@ export const useMonitorsStore = defineStore('monitors', () => {
 
     const apply = (target: Monitor) => {
       if (target.deviceId !== deviceId || !isGaugeMonitor(target)) return
-      // Usa a configuração do monitor (não `gaugeMetric?.name`) para resolver a
-      // métrica: um monitor recém-criado ainda sem nenhuma leitura não teria
-      // `gaugeMetric` definido e nunca aplicaria sua primeira amostra em tempo real.
       const name = gaugeMetricName(target)
+      const isTraffic = name === 'interface_traffic' || name === 'traffic'
+      const queryName = isTraffic ? 'inBps' : name
+      const ifName = target.configuration?.ifName as string | undefined
 
-      const sample = [...metrics].reverse().find((m) => m.name === name)
+      const sample = [...metrics].reverse().find((m) => {
+        if (m.name !== queryName) return false
+        if (isTraffic && ifName && m.interfaceName) {
+          return String(m.interfaceName).toLowerCase() === ifName.toLowerCase()
+        }
+        return true
+      })
       if (!sample) return
 
       const value = Number(sample.value)
@@ -281,7 +287,7 @@ export const useMonitorsStore = defineStore('monitors', () => {
       target.gaugeMetric = {
         name,
         value,
-        unit: String(sample.unit ?? '%'),
+        unit: String(sample.unit ?? (isTraffic ? 'bps' : '%')),
         recordedAt,
       }
       target.gaugeHistory = [...(target.gaugeHistory || []), { value, recordedAt }].slice(

@@ -570,11 +570,11 @@ export function resolveKind(type: string | undefined): MonitorKind {
 
 export function resolveSnmpMode(configuration: Record<string, unknown> | undefined): SnmpMode {
   const metric = configuration?.metric
-  if (metric === 'interface_traffic') return 'interface_traffic'
-  const ifIndex = configuration?.ifIndex
-  if (ifIndex !== undefined && ifIndex !== null && ifIndex !== '') return 'interface'
+  if (metric === 'interface_traffic' || metric === 'traffic') return 'interface_traffic'
   if (metric === 'cpu_usage') return 'cpu_usage'
   if (metric === 'memory_usage') return 'memory_usage'
+  const ifIndex = configuration?.ifIndex
+  if (ifIndex !== undefined && ifIndex !== null && ifIndex !== '') return 'interface'
   return 'availability'
 }
 

@@ -111,7 +111,7 @@ async fn execute_query(config: &SnmpCheckerConfig) -> Result<SnmpObservation, St
     let metric = config.metric.as_deref().unwrap_or("uptime");
     match metric {
         "interface_status" | "status" => interface_status(&client, config, metric).await,
-        "traffic" => interface_traffic(&client, config).await,
+        "traffic" | "interface_traffic" => interface_traffic(&client, config).await,
         "uptime" => uptime(&client).await,
         "cpu_usage" => cpu_usage(&client).await,
         "memory_usage" => memory_usage(&client).await,

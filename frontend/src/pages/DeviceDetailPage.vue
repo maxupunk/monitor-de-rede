@@ -179,7 +179,7 @@
               :monitors="detailStore.monitors"
               :loading="detailStore.loading"
               variant="device"
-              no-data-text="Nenhum monitor configurado para este equipamento. Crie um acima ou use &quot;Configurar Monitoramento&quot; para descobrir automaticamente."
+              no-data-text='Nenhum monitor configurado para este equipamento. Crie um acima ou use "Configurar Monitoramento" para descobrir automaticamente.'
               @edit="openMonitorDialog"
               @changed="reloadMonitors"
             ></MonitorsTable>
@@ -272,129 +272,87 @@
             <v-row class="mb-6">
               <!-- CPU Card -->
               <v-col cols="12" md="6">
-                <v-tooltip location="top" color="#0F172A" :disabled="!isCpuMonitored">
-                  <template #activator="{ props: tooltipProps }">
-                    <v-card
-                      v-bind="tooltipProps"
-                      border
-                      flat
-                      class="pa-4 rounded-lg cursor-pointer"
+                <v-card border flat class="pa-4 rounded-lg">
+                  <div class="d-flex align-center justify-space-between mb-2">
+                    <span class="text-subtitle-2 font-weight-bold">Uso de CPU</span>
+                    <v-chip
+                      size="x-small"
+                      :color="isCpuMonitored ? getCpuColor(cpuUsageValue) : 'grey'"
                     >
-                      <div class="d-flex align-center justify-space-between mb-2">
-                        <span class="text-subtitle-2 font-weight-bold">Uso de CPU</span>
-                        <v-chip
-                          size="x-small"
-                          :color="isCpuMonitored ? getCpuColor(cpuUsageValue) : 'grey'"
-                        >
-                          {{
-                            isCpuMonitored
-                              ? cpuUsageValue !== null
-                                ? `${cpuUsageValue}%`
-                                : 'Sem dados'
-                              : 'Não Monitorado'
-                          }}
-                        </v-chip>
-                      </div>
-                      <v-progress-linear
-                        :model-value="isCpuMonitored ? cpuUsageValue || 0 : 0"
-                        height="10"
-                        rounded
-                        :color="isCpuMonitored ? getCpuColor(cpuUsageValue) : 'grey-lighten-2'"
-                        class="mb-3"
-                      ></v-progress-linear>
-                      <MonitorSparkline
-                        v-if="isCpuMonitored && cpuUsageHistory.length > 1"
-                        :data="cpuUsageHistory"
-                        :color="getCpuHexColor(cpuUsageValue)"
-                        :width="220"
-                        :height="32"
-                        class="mb-3"
-                      />
-                      <div class="d-flex align-center justify-space-between text-caption text-grey">
-                        <span v-if="isCpuMonitored"
-                        >Load 1 min:
-                          {{ cpuLoadValue !== null ? `${cpuLoadValue} load` : 'N/A' }}</span
-                        >
-                        <span v-else>Recurso desativado na varredura</span>
-                        <span>Coleta: {{ cpuUsageMetric?.createdAt || 'N/A' }}</span>
-                      </div>
-                    </v-card>
-                  </template>
-                  <div class="pa-2 text-white" style="font-size: 12px">
-                    <div class="font-weight-bold mb-1" style="font-size: 13px; color: #38bdf8">
-                      Consumo de CPU: {{ cpuUsageValue !== null ? `${cpuUsageValue}%` : 'N/A' }}
-                    </div>
-                    <div style="font-size: 11px; color: #cbd5e1" class="mb-1">
-                      <v-icon size="12" color="#94a3b8" class="mr-1">mdi-clock-outline</v-icon>
-                      Data e Hora: {{ cpuUsageMetric?.createdAt || 'N/A' }}
-                    </div>
-                    <div style="font-size: 11px; color: #94a3b8">
-                      Load 1 min: {{ cpuLoadValue !== null ? `${cpuLoadValue} load` : 'N/A' }}
-                    </div>
+                      {{
+                        isCpuMonitored
+                          ? cpuUsageValue !== null
+                            ? `${cpuUsageValue}%`
+                            : 'Sem dados'
+                          : 'Não Monitorado'
+                      }}
+                    </v-chip>
                   </div>
-                </v-tooltip>
+                  <v-progress-linear
+                    :model-value="isCpuMonitored ? cpuUsageValue || 0 : 0"
+                    height="10"
+                    rounded
+                    :color="isCpuMonitored ? getCpuColor(cpuUsageValue) : 'grey-lighten-2'"
+                    class="mb-3"
+                  ></v-progress-linear>
+                  <MonitorSparkline
+                    v-if="isCpuMonitored && cpuUsageHistory.length > 1"
+                    :data="cpuUsageHistory"
+                    :color="getCpuHexColor(cpuUsageValue)"
+                    :width="220"
+                    :height="32"
+                    class="mb-3"
+                  />
+                  <div class="d-flex align-center justify-space-between text-caption text-grey">
+                    <span v-if="isCpuMonitored"
+                      >Load 1 min:
+                      {{ cpuLoadValue !== null ? `${cpuLoadValue} load` : 'N/A' }}</span
+                    >
+                    <span v-else>Recurso desativado na varredura</span>
+                    <span>Coleta: {{ cpuUsageMetric?.createdAt || 'N/A' }}</span>
+                  </div>
+                </v-card>
               </v-col>
 
               <!-- Memória RAM Card -->
               <v-col cols="12" md="6">
-                <v-tooltip location="top" color="#0F172A" :disabled="!isMemoryMonitored">
-                  <template #activator="{ props: tooltipProps }">
-                    <v-card
-                      v-bind="tooltipProps"
-                      border
-                      flat
-                      class="pa-4 rounded-lg cursor-pointer"
+                <v-card border flat class="pa-4 rounded-lg">
+                  <div class="d-flex align-center justify-space-between mb-2">
+                    <span class="text-subtitle-2 font-weight-bold">Uso de Memória RAM</span>
+                    <v-chip
+                      size="x-small"
+                      :color="isMemoryMonitored ? getMemoryColor(memoryUsageValue) : 'grey'"
                     >
-                      <div class="d-flex align-center justify-space-between mb-2">
-                        <span class="text-subtitle-2 font-weight-bold">Uso de Memória RAM</span>
-                        <v-chip
-                          size="x-small"
-                          :color="isMemoryMonitored ? getMemoryColor(memoryUsageValue) : 'grey'"
-                        >
-                          {{
-                            isMemoryMonitored
-                              ? memoryUsageValue !== null
-                                ? `${memoryUsageValue}%`
-                                : 'Sem dados'
-                              : 'Não Monitorado'
-                          }}
-                        </v-chip>
-                      </div>
-                      <v-progress-linear
-                        :model-value="isMemoryMonitored ? memoryUsageValue || 0 : 0"
-                        height="10"
-                        rounded
-                        :color="
-                          isMemoryMonitored ? getMemoryColor(memoryUsageValue) : 'grey-lighten-2'
-                        "
-                        class="mb-3"
-                      ></v-progress-linear>
-                      <MonitorSparkline
-                        v-if="isMemoryMonitored && memoryUsageHistory.length > 1"
-                        :data="memoryUsageHistory"
-                        :color="getMemoryHexColor(memoryUsageValue)"
-                        :width="220"
-                        :height="32"
-                        class="mb-3"
-                      />
-                      <div class="d-flex align-center justify-space-between text-caption text-grey">
-                        <span v-if="isMemoryMonitored">Percentual Utilizado</span>
-                        <span v-else>Recurso desativado na varredura</span>
-                        <span>Coleta: {{ memoryUsageMetric?.createdAt || 'N/A' }}</span>
-                      </div>
-                    </v-card>
-                  </template>
-                  <div class="pa-2 text-white" style="font-size: 12px">
-                    <div class="font-weight-bold mb-1" style="font-size: 13px; color: #38bdf8">
-                      Consumo de Memória RAM:
-                      {{ memoryUsageValue !== null ? `${memoryUsageValue}%` : 'N/A' }}
-                    </div>
-                    <div style="font-size: 11px; color: #cbd5e1">
-                      <v-icon size="12" color="#94a3b8" class="mr-1">mdi-clock-outline</v-icon>
-                      Data e Hora: {{ memoryUsageMetric?.createdAt || 'N/A' }}
-                    </div>
+                      {{
+                        isMemoryMonitored
+                          ? memoryUsageValue !== null
+                            ? `${memoryUsageValue}%`
+                            : 'Sem dados'
+                          : 'Não Monitorado'
+                      }}
+                    </v-chip>
                   </div>
-                </v-tooltip>
+                  <v-progress-linear
+                    :model-value="isMemoryMonitored ? memoryUsageValue || 0 : 0"
+                    height="10"
+                    rounded
+                    :color="isMemoryMonitored ? getMemoryColor(memoryUsageValue) : 'grey-lighten-2'"
+                    class="mb-3"
+                  ></v-progress-linear>
+                  <MonitorSparkline
+                    v-if="isMemoryMonitored && memoryUsageHistory.length > 1"
+                    :data="memoryUsageHistory"
+                    :color="getMemoryHexColor(memoryUsageValue)"
+                    :width="220"
+                    :height="32"
+                    class="mb-3"
+                  />
+                  <div class="d-flex align-center justify-space-between text-caption text-grey">
+                    <span v-if="isMemoryMonitored">Percentual Utilizado</span>
+                    <span v-else>Recurso desativado na varredura</span>
+                    <span>Coleta: {{ memoryUsageMetric?.createdAt || 'N/A' }}</span>
+                  </div>
+                </v-card>
               </v-col>
             </v-row>
 
@@ -1327,7 +1285,7 @@ const cpuLoadValue = computed(() =>
 
 // Métricas de Memória
 const memoryUsageMetric = computed(() =>
-  detailStore.metrics.find((m) => m.metricName === 'memory_usage')
+  detailStore.metrics.find((m) => m.metricName === 'memory_usage' || m.metricName === 'memory_used')
 )
 const memoryUsageValue = computed(() =>
   memoryUsageMetric.value !== undefined ? Number(memoryUsageMetric.value.metricValue) : null
@@ -1340,7 +1298,11 @@ const GAUGE_SPARKLINE_LIMIT = 30
 // a mini tendência precisa do sentido contrário para o tempo fluir da esquerda para a direita.
 function gaugeSparklineHistory(metricName: string) {
   return detailStore.metrics
-    .filter((m) => m.metricName === metricName)
+    .filter(
+      (m) =>
+        m.metricName === metricName ||
+        (metricName === 'memory_usage' && m.metricName === 'memory_used')
+    )
     .slice(0, GAUGE_SPARKLINE_LIMIT)
     .reverse()
     .map((m) => ({ value: Number(m.metricValue) || 0, recordedAt: m.createdAt }))

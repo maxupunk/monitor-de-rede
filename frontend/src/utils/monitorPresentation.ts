@@ -5,13 +5,28 @@ import type { Monitor, MonitorResult } from '@/stores/monitors'
  * checagens up/down — este helper identifica esses monitores para que a UI
  * mostre a leitura atual em vez de um status de disponibilidade.
  */
+export function isTrafficMonitor(
+  monitor: Pick<Monitor, 'type' | 'configuration' | 'gaugeMetric'>
+): boolean {
+  const metric = (monitor.configuration?.metric as string | undefined) || monitor.gaugeMetric?.name
+  return monitor.type === 'snmp' && (metric === 'traffic' || metric === 'interface_traffic')
+}
+
+/**
+ * Monitores SNMP de uso de CPU/Memória/Tráfego são leituras de gauge/taxa, não
+ * checagens puras up/down — este helper identifica esses monitores para que a UI
+ * mostre a leitura atual em vez de um status simples de disponibilidade.
+ */
 export function isGaugeMonitor(
   monitor: Pick<Monitor, 'type' | 'configuration' | 'gaugeMetric'>
 ): boolean {
   const metric = (monitor.configuration?.metric as string | undefined) || monitor.gaugeMetric?.name
   return (
     monitor.type === 'snmp' &&
-    (metric === 'cpu_usage' || metric === 'memory_usage' || metric === 'interface_traffic')
+    (metric === 'cpu_usage' ||
+      metric === 'memory_usage' ||
+      metric === 'interface_traffic' ||
+      metric === 'traffic')
   )
 }
 
@@ -26,13 +41,14 @@ export function gaugeMetricName(monitor: Pick<Monitor, 'configuration' | 'gaugeM
 export function gaugeTypeLabel(monitor: Pick<Monitor, 'configuration' | 'gaugeMetric'>): string {
   const name = gaugeMetricName(monitor)
   if (name === 'memory_usage') return 'MEMÓRIA'
-  if (name === 'interface_traffic') return 'TRÁFEGO'
+  if (name === 'interface_traffic' || name === 'traffic') return 'TRÁFEGO'
   return 'CPU'
 }
 
 /** Limiares de alerta de uso replicados do card de CPU/Memória do DeviceDetailPage. */
 export function gaugeColor(value: number | null | undefined, metricName: string): string {
   if (value === null || value === undefined) return 'grey'
+  if (metricName === 'interface_traffic' || metricName === 'traffic') return 'info'
   if (metricName === 'memory_usage') {
     if (value > 90) return 'error'
     if (value > 75) return 'warning'
@@ -50,7 +66,10 @@ export function gaugeHexColor(value: number | null | undefined, metricName: stri
   return TONE_HEX_COLORS[tone]
 }
 
-export function isInterfaceMonitor(monitor: Pick<Monitor, 'type' | 'configuration'>): boolean {
+export function isInterfaceMonitor(
+  monitor: Pick<Monitor, 'type' | 'configuration' | 'gaugeMetric'>
+): boolean {
+  if (isTrafficMonitor(monitor)) return false
   const ifIndex = monitor.configuration?.ifIndex
   return monitor.type === 'snmp' && ifIndex !== undefined && ifIndex !== null
 }

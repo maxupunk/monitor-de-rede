@@ -26,7 +26,7 @@
           {{ item.device?.name || 'Dispositivo não vinculado' }}
         </div>
 
-        <!-- Monitores de uso (CPU/Memória via SNMP) não são checagens up/down: mostramos a leitura atual -->
+        <!-- Monitores de uso (CPU/Memória/Tráfego via SNMP) não são checagens puras up/down: mostramos a leitura atual -->
         <div v-if="isGaugeMonitor(item)" class="d-flex align-center ga-2" style="max-width: 260px">
           <!-- Largura igual à da MonitorTimelineBar abaixo (24 blocos de 5px + 23 gaps de 3px = 189px),
                para os dois estilos de linha ficarem visualmente alinhados na mesma coluna. -->
@@ -35,9 +35,10 @@
             :color="gaugeSparklineColor(item)"
             :width="189"
             :height="28"
+            :unit="isTrafficMonitor(item) ? 'bps' : '%'"
           />
-          <span class="text-caption font-weight-medium" style="min-width: 34px">
-            {{ item.gaugeMetric ? `${Math.round(item.gaugeMetric.value)}%` : 'N/D' }}
+          <span class="text-caption font-weight-medium text-no-wrap" style="min-width: 44px">
+            {{ formatGaugeShortValue(item) }}
           </span>
         </div>
         <template v-else>
@@ -81,7 +82,7 @@
     <template #item.status="{ item }">
       <div class="d-flex flex-column align-start py-1">
         <v-chip v-if="isGaugeMonitor(item)" :color="gaugeColor(item)" size="small">
-          {{ item.gaugeMetric ? `${Math.round(item.gaugeMetric.value)}%` : 'SEM DADOS' }}
+          {{ formatGaugeValue(item) }}
         </v-chip>
         <v-chip
           v-else-if="isInterfaceMonitor(item)"
@@ -172,7 +173,7 @@
               size="small"
               variant="tonal"
             >
-              {{ item.gaugeMetric ? `${Math.round(item.gaugeMetric.value)}%` : 'SEM DADOS' }}
+              {{ formatGaugeValue(item) }}
             </v-chip>
             <v-chip
               v-else-if="isInterfaceMonitor(item)"
@@ -209,9 +210,10 @@
                   :color="gaugeSparklineColor(item)"
                   :width="220"
                   :height="28"
+                  :unit="isTrafficMonitor(item) ? 'bps' : '%'"
                 />
-                <span class="text-caption font-weight-medium">
-                  {{ item.gaugeMetric ? `${Math.round(item.gaugeMetric.value)}%` : 'N/D' }}
+                <span class="text-caption font-weight-medium text-no-wrap">
+                  {{ formatGaugeShortValue(item) }}
                 </span>
               </div>
             </template>
@@ -284,6 +286,7 @@ import MonitorSparkline from '@/components/MonitorSparkline.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import {
   isGaugeMonitor,
+  isTrafficMonitor,
   gaugeMetricName,
   gaugeColor as gaugeColorFor,
   gaugeHexColor,
@@ -292,6 +295,7 @@ import {
   latestResultData,
   getStatusColor,
 } from '@/utils/monitorPresentation'
+import { formatBps } from '@/utils/formatters'
 import { monitorKind, resolveKind, resolveSnmpMode, SNMP_MODES } from '@/utils/monitorTypes'
 
 /**
@@ -399,6 +403,22 @@ function gaugeSparklineColor(item: Monitor): string {
   return gaugeHexColor(item.gaugeMetric?.value ?? null, gaugeMetricName(item))
 }
 
+function formatGaugeValue(item: Monitor): string {
+  if (!item.gaugeMetric) return 'SEM DADOS'
+  if (isTrafficMonitor(item)) {
+    return formatBps(item.gaugeMetric.value)
+  }
+  return `${Math.round(item.gaugeMetric.value)}%`
+}
+
+function formatGaugeShortValue(item: Monitor): string {
+  if (!item.gaugeMetric) return 'N/D'
+  if (isTrafficMonitor(item)) {
+    return formatBps(item.gaugeMetric.value, { fractionDigits: 1 })
+  }
+  return `${Math.round(item.gaugeMetric.value)}%`
+}
+
 function interfaceStatusInfo(item: Monitor) {
   return interfaceStatusInfoFor(item.status, latestResultData(item.recentResults))
 }
@@ -427,7 +447,10 @@ function typeChip(item: Monitor): { label: string; icon: string; color: string }
 }
 
 function gaugeLabel(item: Monitor): string {
-  return gaugeMetricName(item) === 'memory_usage' ? 'MEMÓRIA' : 'CPU'
+  const name = gaugeMetricName(item)
+  if (name === 'memory_usage') return 'MEMÓRIA'
+  if (name === 'interface_traffic' || name === 'traffic') return 'TRÁFEGO'
+  return 'CPU'
 }
 
 function formatTarget(item: Monitor): string {

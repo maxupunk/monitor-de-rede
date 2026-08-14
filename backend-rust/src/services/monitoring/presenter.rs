@@ -9,7 +9,10 @@ use sea_orm::{
 use serde::Serialize;
 
 use crate::{
-    models::{_entities::metrics as metrics_entity, devices, monitor_results, monitors, probes},
+    models::{
+        _entities::metrics as metrics_entity, device_interfaces, devices, monitor_results,
+        monitors, probes,
+    },
     services::shared::errors::AppResult,
 };
 
@@ -119,7 +122,12 @@ pub fn gauge_metric_name(monitor: &monitors::Model) -> Option<&str> {
                 .and_then(serde_json::Value::as_str)
         })
         .flatten()
-        .filter(|name| matches!(*name, "cpu_usage" | "memory_usage"))
+        .filter(|name| {
+            matches!(
+                *name,
+                "cpu_usage" | "memory_usage" | "traffic" | "interface_traffic"
+            )
+        })
 }
 
 /// Busca e apresenta os monitores. Cada histórico é limitado individualmente;
@@ -258,15 +266,52 @@ async fn fetch_gauge_metrics(
     else {
         return Ok((None, Vec::new()));
     };
-    let rows = metrics_entity::Entity::find()
-        .filter(metrics_entity::Column::DeviceId.eq(device_id))
-        .filter(metrics_entity::Column::Name.eq(metric_name))
+
+    let is_traffic = matches!(metric_name, "traffic" | "interface_traffic");
+    let is_memory = metric_name == "memory_usage";
+
+    let mut query =
+        metrics_entity::Entity::find().filter(metrics_entity::Column::DeviceId.eq(device_id));
+
+    if is_traffic {
+        query = query.filter(metrics_entity::Column::Name.eq("inBps"));
+    } else if is_memory {
+        query = query.filter(metrics_entity::Column::Name.is_in(["memory_usage", "memory_used"]));
+    } else {
+        query = query.filter(metrics_entity::Column::Name.eq(metric_name));
+    }
+
+    if is_traffic {
+        if let Some(if_index) = monitor
+            .configuration
+            .get("ifIndex")
+            .and_then(serde_json::Value::as_i64)
+        {
+            if let Some(intf) = device_interfaces::Entity::find()
+                .filter(crate::models::_entities::device_interfaces::Column::DeviceId.eq(device_id))
+                .filter(
+                    crate::models::_entities::device_interfaces::Column::SnmpIndex
+                        .eq(Some(if_index as i32)),
+                )
+                .one(db)
+                .await?
+            {
+                query = query.filter(metrics_entity::Column::InterfaceId.eq(Some(intf.id)));
+            }
+        }
+    }
+
+    let rows = query
         .order_by_desc(metrics_entity::Column::RecordedAt)
         .limit(GAUGE_HISTORY_LIMIT)
         .all(db)
         .await?;
     let latest = rows.first().map(|row| GaugeReading {
-        name: row.name.clone(),
+        name: if is_traffic {
+            "interface_traffic".to_string()
+        } else {
+            row.name.clone()
+        },
         value: row.value,
         unit: row.unit.clone(),
         recorded_at: row.recorded_at.to_rfc3339(),

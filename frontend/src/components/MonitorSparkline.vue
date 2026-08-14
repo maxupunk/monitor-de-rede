@@ -112,7 +112,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { formatShortDateTime } from '@/utils/formatters'
+import { formatBps, formatBytes, formatLatency, formatShortDateTime } from '@/utils/formatters'
 
 export interface SparklinePoint {
   value: number
@@ -126,6 +126,7 @@ const props = withDefaults(
     width?: number
     height?: number
     unit?: string
+    formatValue?: (val: number) => string
   }>(),
   {
     data: () => [],
@@ -133,6 +134,7 @@ const props = withDefaults(
     width: 90,
     height: 28,
     unit: '%',
+    formatValue: undefined,
   }
 )
 
@@ -206,8 +208,20 @@ const columns = computed(() => {
 
 function formatPointValue(val?: number): string {
   if (val === undefined || val === null || isNaN(val)) return '—'
+  if (props.formatValue) {
+    return props.formatValue(val)
+  }
+  const u = (props.unit || '%').trim()
+  if (u.toLowerCase() === 'bps' || u.toLowerCase() === 'bit/s' || u.toLowerCase() === 'bits/s') {
+    return formatBps(val)
+  }
+  if (u.toLowerCase() === 'bytes' || u.toLowerCase() === 'b') {
+    return formatBytes(val)
+  }
+  if (u.toLowerCase() === 'ms') {
+    return formatLatency(val)
+  }
   const numeric = Number(val.toFixed(1))
-  const u = props.unit || '%'
   return u.startsWith('%') ? `${numeric}${u}` : `${numeric} ${u}`
 }
 </script>

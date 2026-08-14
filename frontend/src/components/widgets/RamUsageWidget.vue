@@ -262,7 +262,7 @@ onMounted(async () => {
       const devId = Number(data.deviceId)
       if (selectedDeviceId.value === 'all' || selectedDeviceId.value === devId) {
         for (const m of data.metrics) {
-          if (m.name === 'memory_usage') {
+          if (m.name === 'memory_usage' || m.name === 'memory_used') {
             const now = new Date()
             const ramVal = Math.round(Number(m.value) || 0)
             localSamples.value.push({
@@ -295,7 +295,9 @@ function buildSamples() {
   const metricsSource = deviceDetailStore.metrics
 
   if (metricsSource && metricsSource.length > 0) {
-    const ramMetrics = metricsSource.filter((m) => m.metricName === 'memory_usage')
+    const ramMetrics = metricsSource.filter(
+      (m) => m.metricName === 'memory_usage' || m.metricName === 'memory_used'
+    )
     for (const m of ramMetrics.slice(-25)) {
       const d = new Date(m.createdAt)
       const val = Math.round(Number(m.metricValue) || 0)

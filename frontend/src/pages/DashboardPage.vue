@@ -177,7 +177,7 @@
               >
                 <div class="d-flex align-center justify-space-between mb-2">
                   <span class="text-subtitle-2 text-grey-darken-1 font-weight-bold"
-                  >Dispositivos</span
+                    >Dispositivos</span
                   >
                   <v-avatar color="primary" variant="tonal" size="36">
                     <v-icon color="primary">mdi-devices</v-icon>
@@ -198,7 +198,7 @@
               >
                 <div class="d-flex align-center justify-space-between mb-2">
                   <span class="text-subtitle-2 text-grey-darken-1 font-weight-bold"
-                  >Monitores de Rede</span
+                    >Monitores de Rede</span
                   >
                   <v-avatar color="info" variant="tonal" size="36">
                     <v-icon color="info">mdi-chart-timeline-variant</v-icon>
@@ -222,7 +222,7 @@
               >
                 <div class="d-flex align-center justify-space-between mb-2">
                   <span class="text-subtitle-2 text-grey-darken-1 font-weight-bold"
-                  >Disponibilidade</span
+                    >Disponibilidade</span
                   >
                   <v-avatar color="success" variant="tonal" size="36">
                     <v-icon color="success">mdi-check-circle-outline</v-icon>
@@ -239,7 +239,7 @@
               <v-card elevation="2" class="pa-4 rounded-lg stat-card" :to="statCardLink('/alerts')">
                 <div class="d-flex align-center justify-space-between mb-2">
                   <span class="text-subtitle-2 text-grey-darken-1 font-weight-bold"
-                  >Alertas Ativos</span
+                    >Alertas Ativos</span
                   >
                   <v-avatar color="warning" variant="tonal" size="36">
                     <v-icon color="warning">mdi-bell-ring-outline</v-icon>
@@ -515,13 +515,12 @@
                               :color="gaugeSparklineColor(monitor)"
                               :width="189"
                               :height="28"
+                              :unit="isTrafficMonitor(monitor) ? 'bps' : '%'"
                             />
-                            <span class="text-caption font-weight-medium text-high-emphasis">
-                              {{
-                                monitor.gaugeMetric
-                                  ? `${Math.round(monitor.gaugeMetric.value)}%`
-                                  : 'N/D'
-                              }}
+                            <span
+                              class="text-caption font-weight-medium text-high-emphasis text-no-wrap"
+                            >
+                              {{ formatGaugeShortValue(monitor) }}
                             </span>
                           </template>
                           <MonitorTimelineBar
@@ -666,9 +665,11 @@ import EventDetailDialog from '@/components/EventDetailDialog.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import { statusLabel } from '@/utils/alertPresentation'
 import { formatEventDetails } from '@/utils/eventPresentation'
+import { formatBps } from '@/utils/formatters'
 import {
   getStatusColor,
   isGaugeMonitor,
+  isTrafficMonitor,
   gaugeMetricName,
   gaugeHexColor,
   monitorHealthCounts,
@@ -806,6 +807,14 @@ async function refreshData() {
 
 function gaugeSparklineColor(monitor: Monitor): string {
   return gaugeHexColor(monitor.gaugeMetric?.value ?? null, gaugeMetricName(monitor))
+}
+
+function formatGaugeShortValue(item: Monitor): string {
+  if (!item.gaugeMetric) return 'N/D'
+  if (isTrafficMonitor(item)) {
+    return formatBps(item.gaugeMetric.value, { fractionDigits: 1 })
+  }
+  return `${Math.round(item.gaugeMetric.value)}%`
 }
 
 /**

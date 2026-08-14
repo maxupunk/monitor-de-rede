@@ -643,7 +643,7 @@ async fn persist_system_metrics(
     let recorded_at = Utc::now();
     for (name, value, unit) in [
         ("cpu_usage", scan.cpu_info.usage_percent, "percent"),
-        ("memory_used", scan.memory_info.used_percent, "percent"),
+        ("memory_usage", scan.memory_info.used_percent, "percent"),
         (
             "snmp_uptime",
             scan.system_info.sys_up_time.map(|uptime| uptime as f64),

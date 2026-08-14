@@ -104,8 +104,78 @@
         </div>
       </v-card>
 
-      <!-- Cards de Métricas KPI: variam conforme o tipo de monitor (Ping, Uso de Recurso ou Interface) -->
-      <v-row v-if="isGaugeMonitor" class="mb-6">
+      <!-- Cards de Métricas KPI: variam conforme o tipo de monitor (Tráfego, CPU/Memória, Interface RFC 2863 ou Ping/HTTP/TCP/DNS) -->
+      <v-row v-if="isTrafficMonitor" class="mb-6">
+        <v-col cols="12" sm="6" md="3">
+          <v-card elevation="2" class="rounded-lg pa-4 h-100">
+            <div class="d-flex align-center justify-space-between mb-2">
+              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
+                >Download Atual (IN)</span
+              >
+              <v-avatar color="success" variant="tonal" size="36">
+                <v-icon size="20">mdi-arrow-down-bold</v-icon>
+              </v-avatar>
+            </div>
+            <div class="text-h4 font-weight-bold my-1 text-success">
+              {{ trafficInText }}
+            </div>
+            <div class="text-caption text-grey">Última taxa de recepção</div>
+          </v-card>
+        </v-col>
+
+        <v-col cols="12" sm="6" md="3">
+          <v-card elevation="2" class="rounded-lg pa-4 h-100">
+            <div class="d-flex align-center justify-space-between mb-2">
+              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
+                >Upload Atual (OUT)</span
+              >
+              <v-avatar color="primary" variant="tonal" size="36">
+                <v-icon size="20">mdi-arrow-up-bold</v-icon>
+              </v-avatar>
+            </div>
+            <div class="text-h4 font-weight-bold my-1 text-primary">
+              {{ trafficOutText }}
+            </div>
+            <div class="text-caption text-grey">Última taxa de transmissão</div>
+          </v-card>
+        </v-col>
+
+        <v-col cols="12" sm="6" md="3">
+          <v-card elevation="2" class="rounded-lg pa-4 h-100">
+            <div class="d-flex align-center justify-space-between mb-2">
+              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
+                >Velocidade da Interface</span
+              >
+              <v-avatar color="info" variant="tonal" size="36">
+                <v-icon size="20">mdi-speedometer</v-icon>
+              </v-avatar>
+            </div>
+            <div class="text-h4 font-weight-bold my-1 text-info">
+              {{ interfaceSpeedText }}
+            </div>
+            <div class="text-caption text-grey">Capacidade da porta negociada</div>
+          </v-card>
+        </v-col>
+
+        <v-col cols="12" sm="6" md="3">
+          <v-card elevation="2" class="rounded-lg pa-4 h-100">
+            <div class="d-flex align-center justify-space-between mb-2">
+              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
+                >Status Operacional</span
+              >
+              <v-avatar :color="headerChip.color" variant="tonal" size="36">
+                <v-icon size="20">{{ headerChip.icon }}</v-icon>
+              </v-avatar>
+            </div>
+            <div class="text-h5 font-weight-bold my-1" :class="`text-${headerChip.color}`">
+              {{ interfaceOperText }}
+            </div>
+            <div class="text-caption text-grey">Estado da interface no agente</div>
+          </v-card>
+        </v-col>
+      </v-row>
+
+      <v-row v-else-if="isGaugeMonitor" class="mb-6">
         <v-col cols="12" sm="6" md="3">
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
@@ -140,7 +210,7 @@
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
               <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-              >Uso Mín / Máx</span
+                >Uso Mín / Máx</span
               >
               <v-avatar color="purple" variant="tonal" size="36">
                 <v-icon size="20">mdi-swap-vertical</v-icon>
@@ -159,7 +229,7 @@
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
               <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-              >Agente SNMP Disponível</span
+                >Agente SNMP Disponível</span
               >
               <v-avatar color="success" variant="tonal" size="36">
                 <v-icon size="20">mdi-check-decagram</v-icon>
@@ -178,7 +248,7 @@
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
               <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-              >Velocidade Negociada</span
+                >Velocidade Negociada</span
               >
               <v-avatar :color="headerChip.color" variant="tonal" size="36">
                 <v-icon size="20">{{ headerChip.icon }}</v-icon>
@@ -195,7 +265,7 @@
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
               <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-              >Status Operacional</span
+                >Status Operacional</span
               >
               <v-avatar color="info" variant="tonal" size="36">
                 <v-icon size="20">mdi-information-outline</v-icon>
@@ -212,7 +282,7 @@
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
               <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-              >Estabilidade do Link</span
+                >Estabilidade do Link</span
               >
               <v-avatar color="success" variant="tonal" size="36">
                 <v-icon size="20">mdi-check-decagram</v-icon>
@@ -229,7 +299,7 @@
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
               <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-              >Alterações de Estado</span
+                >Alterações de Estado</span
               >
               <v-avatar
                 :color="interfaceFlapCount > 0 ? 'warning' : 'grey'"
@@ -315,7 +385,7 @@
           <v-card elevation="2" class="rounded-lg pa-4 h-100">
             <div class="d-flex align-center justify-space-between mb-2">
               <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-              >Taxa de Uptime</span
+                >Taxa de Uptime</span
               >
               <v-avatar color="success" variant="tonal" size="36">
                 <v-icon size="20">mdi-check-decagram</v-icon>
@@ -335,9 +405,61 @@
         </v-col>
       </v-row>
 
+      <!-- Gráfico de Tráfego de Rede (IN/OUT bps) -->
+      <v-card v-if="isTrafficMonitor" elevation="2" class="rounded-lg pa-6 mb-6">
+        <div class="d-flex align-center justify-space-between mb-4 flex-wrap ga-3">
+          <div>
+            <h2 class="text-h6 font-weight-bold d-flex align-center ga-2">
+              <v-icon color="primary">mdi-chart-areaspline</v-icon>
+              Histórico de Tráfego de Rede
+            </h2>
+            <div class="text-subtitle-2 text-grey">
+              Throughput de transmissão e recepção coletado via SNMP
+            </div>
+          </div>
+          <v-btn-toggle
+            v-model="trafficTab"
+            color="primary"
+            variant="outlined"
+            mandatory
+            density="compact"
+          >
+            <v-btn value="inBps" size="small" prepend-icon="mdi-arrow-down-bold">
+              Download (IN)
+            </v-btn>
+            <v-btn value="outBps" size="small" prepend-icon="mdi-arrow-up-bold">
+              Upload (OUT)
+            </v-btn>
+            <v-btn value="combined" size="small" prepend-icon="mdi-swap-horizontal">
+              Combinado
+            </v-btn>
+          </v-btn-toggle>
+        </div>
+
+        <BaseMetricChart
+          v-if="trafficSeries.length > 0 && trafficSeries[0].data.length > 0"
+          :series="trafficSeries"
+          unit-type="bandwidth"
+        />
+
+        <div v-else class="text-center text-grey py-8 border rounded-lg bg-grey-lighten-5">
+          <v-icon size="40" color="grey-lighten-1">mdi-chart-line-variant</v-icon>
+          <div class="mt-2 text-subtitle-2">
+            Histórico de tráfego insuficiente para gerar o gráfico.
+          </div>
+          <div class="text-caption">
+            As taxas são calculadas pela varredura SNMP periódica do dispositivo.
+          </div>
+        </div>
+      </v-card>
+
       <!-- Linha do Tempo de Status (Bar Timeline - Estilo Uptime Kuma) -->
-      <!-- Monitores de uso (CPU/Memória) não têm uma noção de up/down por execução, então a timeline não se aplica -->
-      <v-card v-if="!isGaugeMonitor" elevation="2" class="rounded-lg pa-6 mb-6">
+      <!-- Monitores de uso e tráfego não têm uma noção de up/down por execução, então a timeline não se aplica -->
+      <v-card
+        v-if="!isGaugeMonitor && !isTrafficMonitor"
+        elevation="2"
+        class="rounded-lg pa-6 mb-6"
+      >
         <div class="d-flex align-center justify-space-between mb-4 flex-wrap ga-2">
           <div>
             <h2 class="text-h6 font-weight-bold d-flex align-center ga-2">
@@ -383,7 +505,7 @@
       </v-card>
 
       <!-- Gráfico de Uso ao Longo do Tempo (CPU/Memória) -->
-      <v-card v-if="isGaugeMonitor" elevation="2" class="rounded-lg pa-6 mb-6">
+      <v-card v-if="isGaugeMonitor && !isTrafficMonitor" elevation="2" class="rounded-lg pa-6 mb-6">
         <div class="d-flex align-center justify-space-between mb-4">
           <div>
             <h2 class="text-h6 font-weight-bold d-flex align-center ga-2">
@@ -418,9 +540,9 @@
         </div>
       </v-card>
 
-      <!-- Gráfico Unificado de Latência / Tempo de Resposta (não se aplica a monitores de uso ou de interface) -->
+      <!-- Gráfico Unificado de Latência / Tempo de Resposta (não se aplica a monitores de uso, tráfego ou de interface) -->
       <v-card
-        v-if="!isGaugeMonitor && !isInterfaceMonitor"
+        v-if="!isGaugeMonitor && !isInterfaceMonitor && !isTrafficMonitor"
         elevation="2"
         class="rounded-lg pa-6 mb-6"
       >
@@ -758,6 +880,7 @@ import BaseMetricChart, { type ChartSeriesInput } from '@/components/BaseMetricC
 import MonitorFormDialog from '@/components/MonitorFormDialog.vue'
 import {
   isGaugeMonitor as isGaugeMonitorFn,
+  isTrafficMonitor as isTrafficMonitorFn,
   gaugeMetricName,
   gaugeTypeLabel,
   gaugeColor as gaugeColorFn,
@@ -767,7 +890,7 @@ import {
   getStatusColor,
 } from '@/utils/monitorPresentation'
 import { severityColor, severityLabel, statusLabel } from '@/utils/alertPresentation'
-import { formatDateTime, formatLatency } from '@/utils/formatters'
+import { formatDateTime, formatLatency, formatBps } from '@/utils/formatters'
 import type { AlertEvent } from '@/stores/alerts'
 
 const route = useRoute()
@@ -850,10 +973,12 @@ const formattedTarget = computed(() => {
 
 const statusText = computed(() => (monitor.value.status || 'UNKNOWN').toUpperCase())
 
-const isGaugeMonitor = computed(() => isGaugeMonitorFn(monitor.value))
+const isTrafficMonitor = computed(() => isTrafficMonitorFn(monitor.value))
+const isGaugeMonitor = computed(() => isGaugeMonitorFn(monitor.value) && !isTrafficMonitor.value)
 const isInterfaceMonitor = computed(() => isInterfaceMonitorFn(monitor.value))
 
 const typeText = computed(() => {
+  if (isTrafficMonitor.value) return 'TRÁFEGO'
   if (isGaugeMonitor.value) return gaugeTypeLabel(monitor.value)
   if (isInterfaceMonitor.value) return 'INTERFACE'
   return (monitor.value.type || 'PING').toUpperCase()
@@ -863,9 +988,20 @@ const gaugeColorValue = computed(() =>
   gaugeColorFn(monitor.value.gaugeMetric?.value ?? null, gaugeMetricName(monitor.value))
 )
 
-// Unifica a apresentação do status no header: um monitor de uso mostra % em vez de UP/DOWN,
-// e uma interface mostra o estado real (Up/Down/Desabilitada/Instável) com a velocidade negociada.
+// Unifica a apresentação do status no header: tráfego mostra taxa, gauge mostra %,
+// interface mostra o estado real e monitor tradicional mostra status textual.
 const headerChip = computed(() => {
+  if (isTrafficMonitor.value) {
+    const info = interfaceStatusInfo(
+      monitor.value.status,
+      latestResultData(monitor.value.recentResults)
+    )
+    return {
+      label: trafficInText.value !== 'N/D' ? `↓ ${trafficInText.value}` : info.label.toUpperCase(),
+      color: info.color,
+      icon: 'mdi-swap-vertical-bold',
+    }
+  }
   if (isGaugeMonitor.value) {
     const val = monitor.value.gaugeMetric?.value
     return {
@@ -889,6 +1025,7 @@ const headerChip = computed(() => {
 })
 
 const typeIcon = computed(() => {
+  if (isTrafficMonitor.value) return 'mdi-swap-vertical-bold'
   if (isGaugeMonitor.value) {
     return gaugeMetricName(monitor.value) === 'memory_usage' ? 'mdi-memory' : 'mdi-chip'
   }
@@ -944,8 +1081,7 @@ const latencyKpiTitles = computed(() => {
   }
 })
 
-// --- Monitores de Interface (ethernet): status vem enriquecido do checker SNMP com
-// velocidade negociada e o motivo real de não estar "up" (admin down, teste, dormente, etc.) ---
+// --- Monitores de Interface / Tráfego ---
 const interfaceLatestData = computed(() => latestResultData(monitor.value.recentResults))
 
 const interfaceSpeedText = computed(() => {
@@ -977,9 +1113,116 @@ const statusBreakdown = computed(() => {
   return counts
 })
 
-// --- Monitores de Uso (CPU/Memória via SNMP): não são checagens up/down, e sim leituras
-// percentuais — o histórico vem das mesmas métricas de dispositivo usadas no DeviceDetailPage ---
+// --- Histórico de Métricas (CPU/Memória/Tráfego de Interface) ---
 const gaugeHistory = ref<DeviceMetric[]>([])
+
+const trafficTab = ref<'inBps' | 'outBps' | 'combined'>('combined')
+
+const trafficMetrics = computed(() => {
+  const ifName = monitor.value.configuration?.ifName as string | undefined
+  return gaugeHistory.value
+    .filter((m) => {
+      if (m.metricName !== 'inBps' && m.metricName !== 'outBps') return false
+      if (ifName && m.interfaceName) {
+        return m.interfaceName.toLowerCase() === ifName.toLowerCase()
+      }
+      return true
+    })
+    .slice()
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+})
+
+const latestInBps = computed(() => {
+  const list = trafficMetrics.value.filter((m) => m.metricName === 'inBps')
+  if (list.length === 0) return null
+  return Number(list[list.length - 1].metricValue)
+})
+
+const latestOutBps = computed(() => {
+  const list = trafficMetrics.value.filter((m) => m.metricName === 'outBps')
+  if (list.length === 0) return null
+  return Number(list[list.length - 1].metricValue)
+})
+
+const trafficInText = computed(() => {
+  if (latestInBps.value !== null && Number.isFinite(latestInBps.value)) {
+    return formatBps(latestInBps.value)
+  }
+  if (monitor.value.gaugeMetric?.value) {
+    return formatBps(monitor.value.gaugeMetric.value)
+  }
+  return 'N/D'
+})
+
+const trafficOutText = computed(() => {
+  if (latestOutBps.value !== null && Number.isFinite(latestOutBps.value)) {
+    return formatBps(latestOutBps.value)
+  }
+  return 'N/D'
+})
+
+const trafficSeries = computed<ChartSeriesInput[]>(() => {
+  const inList = trafficMetrics.value.filter((m) => m.metricName === 'inBps')
+  const outList = trafficMetrics.value.filter((m) => m.metricName === 'outBps')
+
+  if (trafficTab.value === 'combined') {
+    const series: ChartSeriesInput[] = []
+    if (inList.length > 0) {
+      series.push({
+        id: 'inBps',
+        label: 'Download (IN)',
+        color: '#4CAF50',
+        fillArea: true,
+        data: inList.map((m) => {
+          const val = Number(m.metricValue) || 0
+          return {
+            time: formatDateTime(m.createdAt, '-'),
+            value: val,
+            formattedValue: formatBps(val),
+          }
+        }),
+      })
+    }
+    if (outList.length > 0) {
+      series.push({
+        id: 'outBps',
+        label: 'Upload (OUT)',
+        color: '#2196F3',
+        fillArea: false,
+        data: outList.map((m) => {
+          const val = Number(m.metricValue) || 0
+          return {
+            time: formatDateTime(m.createdAt, '-'),
+            value: val,
+            formattedValue: formatBps(val),
+          }
+        }),
+      })
+    }
+    return series
+  }
+
+  const isDownload = trafficTab.value === 'inBps'
+  const targetList = isDownload ? inList : outList
+  if (targetList.length === 0) return []
+
+  return [
+    {
+      id: trafficTab.value,
+      label: isDownload ? 'Download (IN)' : 'Upload (OUT)',
+      color: isDownload ? '#4CAF50' : '#2196F3',
+      fillArea: true,
+      data: targetList.map((m) => {
+        const val = Number(m.metricValue) || 0
+        return {
+          time: formatDateTime(m.createdAt, '-'),
+          value: val,
+          formattedValue: formatBps(val),
+        }
+      }),
+    },
+  ]
+})
 
 const gaugeHistoryFiltered = computed(() => {
   const name = gaugeMetricName(monitor.value)
@@ -1058,7 +1301,7 @@ async function loadGaugeHistory() {
 }
 
 /**
- * O histórico de uso (CPU/Memória) é estado local desta tela, então ela mesma
+ * O histórico de uso e tráfego é estado local desta tela, então ela mesma
  * assina o evento de coleta SNMP para acompanhar as novas amostras ao vivo.
  * Os demais dados (timeline, latência, KPIs) vêm patchados pela store.
  */
@@ -1068,24 +1311,24 @@ onMounted(async () => {
   if (!monitorId.value) return
 
   await monitorsStore.fetchMonitorById(monitorId.value)
-  if (isGaugeMonitor.value) await loadGaugeHistory()
+  if (isGaugeMonitor.value || isTrafficMonitor.value) await loadGaugeHistory()
 
   stopMetricsListener = eventsStore.onEvent('metric:recorded', (data) => {
-    if (!isGaugeMonitor.value) return
+    if (!isGaugeMonitor.value && !isTrafficMonitor.value) return
     if (Number(data.deviceId) !== monitor.value.deviceId) return
 
-    const name = gaugeMetricName(monitor.value)
     const samples = (data.metrics as Array<Record<string, unknown>>) || []
 
     for (const sample of samples) {
-      if (sample.name !== name) continue
       gaugeHistory.value.push({
         id: Date.now() + gaugeHistory.value.length,
         deviceId: monitor.value.deviceId,
+        interfaceId: sample.interfaceId as number | undefined,
+        interfaceName: sample.interfaceName as string | undefined,
         metricName: String(sample.name),
         metricValue: Number(sample.value),
-        unit: String(sample.unit ?? '%'),
-        createdAt: String(sample.recordedAt),
+        unit: String(sample.unit ?? ''),
+        createdAt: String(sample.recordedAt ?? new Date().toISOString()),
       })
     }
   })
@@ -1106,7 +1349,7 @@ onUnmounted(() => {
 async function refreshData() {
   if (monitorId.value) {
     await monitorsStore.fetchMonitorById(monitorId.value)
-    if (isGaugeMonitor.value) await loadGaugeHistory()
+    if (isGaugeMonitor.value || isTrafficMonitor.value) await loadGaugeHistory()
     if (showHistory.value) history.reset()
     if (showAlerts.value) alertHistory.reset()
   }
