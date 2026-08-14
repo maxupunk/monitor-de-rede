@@ -33,6 +33,7 @@ export interface Device {
   snmpEnabled?: boolean
   snmpCommunity?: string
   snmpVersion?: 'v1' | 'v2c' | 'v3'
+  snmpPollIntervalSeconds?: number
   site?: { id: number; name: string } | null
   parent?: { id: number; name: string } | null
   network?: { id: number; name: string; cidr: string }

@@ -8,13 +8,15 @@ use sea_orm::{
 
 use crate::{
     dtos::resources::{MonitorInput, PaginationQuery},
-    models::{monitor_results, monitors},
+    models::{devices, monitor_results, monitors},
     services::{
         alerts::recovery,
         maintenance::resource_cleanup::ResourceCleanupService,
         monitoring::{
             device_status,
-            execution_guard::{calculate_smart_timeout_seconds, try_acquire_monitor},
+            execution_guard::{
+                calculate_smart_timeout_seconds, try_acquire_monitor, try_acquire_snmp_device,
+            },
             presenter::{present_monitors, MonitorResultPresentation, RECENT_RESULTS_LIMIT},
             result_processor::process_result,
             runner::{run_monitor, RunOptions},
@@ -23,6 +25,7 @@ use crate::{
             errors::{AppError, AppResult},
             pagination::paginate_compat,
         },
+        snmp::service as snmp_service,
     },
 };
 
@@ -87,6 +90,28 @@ fn require_kind_name(input: &MonitorInput) -> AppResult<(&str, &str)> {
     Ok((kind, name))
 }
 
+async fn canonical_snmp_interval(
+    ctx: &AppContext,
+    device_id: Option<i64>,
+    supplied_interval: Option<i32>,
+) -> AppResult<Option<i32>> {
+    let Some(device_id) = device_id else {
+        return Ok(None);
+    };
+    let device = devices::Entity::find_by_id(device_id)
+        .one(&ctx.db)
+        .await?
+        .ok_or_else(|| AppError::not_found("Dispositivo não encontrado"))?;
+    if let Some(supplied_interval) = supplied_interval.map(|value| value.max(1)) {
+        if supplied_interval != device.snmp_poll_interval_seconds {
+            return Err(AppError::validation(
+                "O intervalo de coleta SNMP é definido no dispositivo e se aplica a todos os itens SNMP vinculados a ele",
+            ));
+        }
+    }
+    Ok(Some(device.snmp_poll_interval_seconds))
+}
+
 async fn index(State(ctx): State<AppContext>) -> AppResult<Response> {
     let rows = monitors::Entity::find()
         .order_by_asc(monitors::Column::Name)
@@ -105,7 +130,13 @@ async fn store(
     let kind = kind.to_string();
     let name = name.to_string();
     let enabled = input.enabled.or(input.is_enabled).unwrap_or(true);
-    let interval_seconds = input.interval_seconds.unwrap_or(15).max(1);
+    let interval_seconds = if kind.eq_ignore_ascii_case("snmp") {
+        canonical_snmp_interval(&ctx, input.device_id, input.interval_seconds)
+            .await?
+            .unwrap_or_else(|| input.interval_seconds.unwrap_or(60).max(1))
+    } else {
+        input.interval_seconds.unwrap_or(60).max(1)
+    };
     let timeout_seconds = calculate_smart_timeout_seconds(&kind, interval_seconds)
         .min((interval_seconds - 1).max(1))
         .max(1);
@@ -192,16 +223,28 @@ async fn update(
         .enabled
         .or(input.is_enabled)
         .unwrap_or(current.enabled);
-    let interval_seconds = input
-        .interval_seconds
-        .unwrap_or(current.interval_seconds)
-        .max(1);
+    let device_id = input.device_id.or(current.device_id);
+    let interval_seconds = if kind.eq_ignore_ascii_case("snmp") {
+        canonical_snmp_interval(&ctx, device_id, input.interval_seconds)
+            .await?
+            .unwrap_or_else(|| {
+                input
+                    .interval_seconds
+                    .unwrap_or(current.interval_seconds)
+                    .max(1)
+            })
+    } else {
+        input
+            .interval_seconds
+            .unwrap_or(current.interval_seconds)
+            .max(1)
+    };
     let timeout_seconds = calculate_smart_timeout_seconds(&kind, interval_seconds)
         .min((interval_seconds - 1).max(1))
         .max(1);
     let row = monitors::ActiveModel {
         id: Set(id),
-        device_id: Set(input.device_id.or(current.device_id)),
+        device_id: Set(device_id),
         probe_id: Set(input.probe_id.or(current.probe_id)),
         r#type: Set(kind.clone()),
         name: Set(name),
@@ -247,6 +290,35 @@ async fn run(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Re
         .one(&ctx.db)
         .await?
         .ok_or_else(|| AppError::not_found("Monitor não encontrado"))?;
+    if monitor.r#type == "snmp" {
+        if let Some(device_id) = monitor.device_id {
+            let _guard = try_acquire_snmp_device(device_id).ok_or_else(|| {
+                AppError::conflict("Já existe uma coleta SNMP em andamento para este dispositivo")
+            })?;
+            let device = devices::Entity::find_by_id(device_id)
+                .one(&ctx.db)
+                .await?
+                .ok_or_else(|| AppError::not_found("Dispositivo não encontrado"))?;
+            let related = monitors::Entity::find()
+                .filter(monitors::Column::DeviceId.eq(Some(device_id)))
+                .filter(monitors::Column::Type.eq("snmp"))
+                .all(&ctx.db)
+                .await?;
+            let results = snmp_service::poll_device_monitors(&ctx, &device, &related).await;
+            let selected = results
+                .iter()
+                .find(|(monitor_id, _)| *monitor_id == monitor.id)
+                .map(|(_, result)| result.clone())
+                .ok_or_else(|| AppError::not_found("Monitor SNMP não encontrado no dispositivo"))?;
+            for (monitor_id, result) in results {
+                process_result(&ctx, monitor_id, &result, None).await?;
+            }
+            return Ok(format::json(serde_json::json!({
+                "message": "Coleta SNMP consolidada do dispositivo concluída com sucesso",
+                "result": selected,
+            }))?);
+        }
+    }
     let _guard = try_acquire_monitor(monitor.id).ok_or_else(|| {
         AppError::conflict("Uma verificação para este monitor já está em andamento")
     })?;

@@ -19,22 +19,24 @@
 //! com a tarefa).
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Mutex, OnceLock},
 };
 
 use chrono::{DateTime, Utc};
 use loco_rs::prelude::*;
-use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 
 use crate::{
-    models::{monitors, probes},
+    models::{devices, monitors, probes},
     services::{
         discovery::queue::{process_pending_runs, schedule_due_networks},
         maintenance::data_pruner,
         monitoring::{
             contracts::{CheckResult, MonitorStatus},
-            execution_guard::{calculate_smart_timeout_seconds, try_acquire_monitor},
+            execution_guard::{
+                calculate_smart_timeout_seconds, try_acquire_monitor, try_acquire_snmp_device,
+            },
             result_processor::process_result,
             runner::{run_monitor, RunOptions},
         },
@@ -43,6 +45,7 @@ use crate::{
             liveness::{is_probe_alive, mark_stale_probes_offline},
         },
         shared::errors::AppResult,
+        snmp::service as snmp_service,
         vpn::traffic_recorder,
     },
 };
@@ -142,6 +145,7 @@ pub async fn run_cycle(ctx: &AppContext) -> AppResult<usize> {
 
     let now = Utc::now();
     let due = monitors::Entity::find_due(now.into()).all(&ctx.db).await?;
+    let local_snmp_devices: HashSet<i64> = due.iter().filter_map(local_snmp_device_id).collect();
     for monitor in &due {
         // Persistir primeiro evita que dois processos do scheduler executem a
         // mesma linha quando o ciclo seguinte começar antes de a rede responder.
@@ -152,8 +156,16 @@ pub async fn run_cycle(ctx: &AppContext) -> AppResult<usize> {
         active.update(&ctx.db).await?;
     }
     for monitor in &due {
+        if local_snmp_device_id(monitor).is_some_and(|id| local_snmp_devices.contains(&id)) {
+            continue;
+        }
         if let Err(error) = execute_one(ctx, monitor).await {
             tracing::warn!(%error, monitor_id = monitor.id, "falha ao executar monitor");
+        }
+    }
+    for device_id in local_snmp_devices {
+        if let Err(error) = execute_snmp_device_group(ctx, device_id, now).await {
+            tracing::warn!(%error, device_id, "falha ao executar coleta SNMP consolidada");
         }
     }
     if let Err(error) = sync_vpn_traffic_if_due(ctx).await {
@@ -174,6 +186,50 @@ pub async fn run_cycle(ctx: &AppContext) -> AppResult<usize> {
     // entrega a quem tem conexão SSE aberta — o servidor. Ver
     // `initializers::monitoring::spawn_event_relay`.
     Ok(due.len())
+}
+
+/// Monitores SNMP locais do mesmo dispositivo compartilham uma única coleta.
+/// O probe remoto mantém seu protocolo atual, no qual cada tarefa ainda é uma
+/// execução independente e não pode receber esta agregação sem novo contrato.
+fn local_snmp_device_id(monitor: &monitors::Model) -> Option<i64> {
+    (monitor.r#type == "snmp" && monitor.probe_id.is_none())
+        .then_some(monitor.device_id)
+        .flatten()
+}
+
+async fn execute_snmp_device_group(
+    ctx: &AppContext,
+    device_id: i64,
+    scheduled_at: DateTime<Utc>,
+) -> AppResult<()> {
+    let Some(_guard) = try_acquire_snmp_device(device_id) else {
+        tracing::debug!(device_id, "coleta SNMP do dispositivo já está em andamento");
+        return Ok(());
+    };
+    let Some(device) = devices::Entity::find_by_id(device_id).one(&ctx.db).await? else {
+        return Ok(());
+    };
+    let monitored_items = monitors::Entity::find()
+        .filter(monitors::Column::DeviceId.eq(Some(device_id)))
+        .filter(monitors::Column::Type.eq("snmp"))
+        .filter(monitors::Column::Enabled.eq(true))
+        .filter(monitors::Column::ProbeId.is_null())
+        .all(&ctx.db)
+        .await?;
+    let next_run_at = (scheduled_at
+        + chrono::Duration::seconds(i64::from(device.snmp_poll_interval_seconds.max(1))))
+    .into();
+    for monitor in &monitored_items {
+        let mut active: monitors::ActiveModel = monitor.clone().into();
+        active.next_run_at = Set(Some(next_run_at));
+        active.update(&ctx.db).await?;
+    }
+    for (monitor_id, result) in
+        snmp_service::poll_device_monitors(ctx, &device, &monitored_items).await
+    {
+        process_result(ctx, monitor_id, &result, None).await?;
+    }
+    Ok(())
 }
 
 /// Cadência da leitura de status dos túneis. Fina de propósito: é o que faz a

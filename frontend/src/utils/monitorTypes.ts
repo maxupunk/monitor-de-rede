@@ -528,7 +528,7 @@ export function createMonitorForm(deviceId?: number | null): MonitorFormModel {
     name: '',
     target: '',
     port: null,
-    intervalSeconds: 15,
+    intervalSeconds: 60,
     retryCount: 3,
     enabled: true,
     packetCount: 3,
@@ -726,6 +726,7 @@ export function buildConfiguration(form: MonitorFormModel): Record<string, unkno
 
 export function formToPayload(form: MonitorFormModel): Record<string, unknown> {
   const configuration = buildConfiguration(form)
+  const usesDeviceSnmpInterval = form.kind === 'snmp' && form.deviceId !== null
 
   return {
     deviceId: form.deviceId,
@@ -735,7 +736,7 @@ export function formToPayload(form: MonitorFormModel): Record<string, unknown> {
     configuration,
     target: form.target.trim(),
     port: form.kind === 'tcp' ? Number(form.port) || null : null,
-    intervalSeconds: form.intervalSeconds,
+    ...(usesDeviceSnmpInterval ? {} : { intervalSeconds: form.intervalSeconds }),
     retryCount: form.retryCount,
     enabled: form.enabled,
     isEnabled: form.enabled,
@@ -788,7 +789,10 @@ export function suggestMonitorName(form: MonitorFormModel, deviceName?: string):
 /** Frase de conferência exibida no rodapé do formulário */
 export function describeMonitor(form: MonitorFormModel): string {
   const definition = monitorKind(form.kind)
-  const every = `a cada ${formatSeconds(form.intervalSeconds)}`
+  const every =
+    form.kind === 'snmp' && form.deviceId !== null
+      ? 'no intervalo de coleta definido no dispositivo'
+      : `a cada ${formatSeconds(form.intervalSeconds)}`
   const target = form.target.trim() || '—'
 
   switch (form.kind) {
@@ -890,6 +894,8 @@ export function validateMonitorForm(form: MonitorFormModel): string[] {
     }
   }
 
-  if (!(form.intervalSeconds >= 1)) errors.push('O intervalo mínimo é de 1 segundo')
+  if (!(form.kind === 'snmp' && form.deviceId !== null) && !(form.intervalSeconds >= 1)) {
+    errors.push('O intervalo de coleta mínimo é de 1 segundo')
+  }
   return errors
 }

@@ -44,7 +44,12 @@
                 </v-chip>
               </div>
               <div class="text-caption text-md-subtitle-1 text-grey-darken-1 mt-1 text-break">
-                Alvo: <strong class="text-high-emphasis">{{ formattedTarget }}</strong> · Intervalo:
+                Alvo: <strong class="text-high-emphasis">{{ formattedTarget }}</strong> ·
+                {{
+                  monitor.type === 'snmp' && monitor.device
+                    ? 'Intervalo de coleta SNMP:'
+                    : 'Intervalo de coleta:'
+                }}
                 {{ monitor.intervalSeconds }}s
                 <span v-if="monitor.device">
                   · Dispositivo: <strong>{{ monitor.device.name }}</strong></span

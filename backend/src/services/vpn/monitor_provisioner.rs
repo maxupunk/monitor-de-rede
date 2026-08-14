@@ -93,7 +93,7 @@ pub async fn provision<C: ConnectionTrait>(
                     "community": options.snmp_community.as_deref().unwrap_or("public"),
                     "port": 161,
                 })),
-                interval_seconds: Set(interval),
+                interval_seconds: Set(device.snmp_poll_interval_seconds),
                 timeout_seconds: Set(5),
                 retry_count: Set(3),
                 enabled: Set(true),

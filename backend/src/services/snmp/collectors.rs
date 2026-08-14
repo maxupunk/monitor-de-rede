@@ -90,6 +90,19 @@ pub async fn collect_interfaces(client: &SnmpClient) -> Result<Vec<SnmpInterface
     Ok(parse_interfaces(base?, extended.unwrap_or_default()))
 }
 
+/// As interfaces e seus contadores pertencem às mesmas tabelas SNMP. Uma coleta
+/// consolidada lê cada tabela só uma vez e então deriva as duas visões locais.
+pub async fn collect_interfaces_and_traffic(
+    client: &SnmpClient,
+) -> Result<(Vec<SnmpInterface>, Vec<InterfaceTraffic>), SnmpError> {
+    let (base, extended) = tokio::join!(client.walk(OID_IF_TABLE), client.walk(OID_IF_X_TABLE));
+    let base = base?;
+    let extended = extended.unwrap_or_default();
+    let interfaces = parse_interfaces(base.clone(), extended.clone());
+    let traffic = parse_traffic(base, extended);
+    Ok((interfaces, traffic))
+}
+
 /// Monta as interfaces a partir das linhas cruas das duas tabelas, sem
 /// transporte no meio.
 ///
@@ -212,8 +225,19 @@ pub struct TrafficRates {
 pub async fn collect_traffic(client: &SnmpClient) -> Result<Vec<InterfaceTraffic>, SnmpError> {
     let (base, high_capacity) =
         tokio::join!(client.walk(OID_IF_TABLE), client.walk(OID_IF_X_TABLE));
+    Ok(parse_traffic(base?, high_capacity?))
+}
+
+/// Extrai contadores de tráfego das linhas já lidas de `ifTable` e `ifXTable`.
+/// Separar o parser do transporte permite reaproveitar as mesmas respostas na
+/// coleta consolidada do dispositivo.
+#[must_use]
+pub fn parse_traffic(
+    base: impl IntoIterator<Item = super::client::SnmpWalkEntry>,
+    high_capacity: impl IntoIterator<Item = super::client::SnmpWalkEntry>,
+) -> Vec<InterfaceTraffic> {
     let mut counters = BTreeMap::<i32, BTreeMap<u32, u64>>::new();
-    for entry in base? {
+    for entry in base {
         if let (Some((column, index)), Some(value)) =
             (oid_column_and_index(&entry.oid), entry.value.number())
         {
@@ -221,7 +245,7 @@ pub async fn collect_traffic(client: &SnmpClient) -> Result<Vec<InterfaceTraffic
         }
     }
     let mut high = BTreeMap::<i32, BTreeMap<u32, u64>>::new();
-    for entry in high_capacity? {
+    for entry in high_capacity {
         if let (Some((column, index)), Some(value)) =
             (oid_column_and_index(&entry.oid), entry.value.number())
         {
@@ -229,7 +253,7 @@ pub async fn collect_traffic(client: &SnmpClient) -> Result<Vec<InterfaceTraffic
         }
     }
     let recorded_at = Utc::now();
-    Ok(counters
+    counters
         .into_iter()
         .filter_map(|(if_index, fields)| {
             let hc = high.get(&if_index);
@@ -258,7 +282,7 @@ pub async fn collect_traffic(client: &SnmpClient) -> Result<Vec<InterfaceTraffic
                 recorded_at,
             })
         })
-        .collect())
+        .collect()
 }
 #[must_use]
 pub fn calculate_rates(previous: &InterfaceTraffic, current: &InterfaceTraffic) -> (f64, f64) {
@@ -555,6 +579,29 @@ mod tests {
             oid: format!("{OID_IF_X_TABLE}.{coluna}.{indice}"),
             value,
         }
+    }
+
+    #[test]
+    fn mesmos_walks_geram_interfaces_e_contadores_de_trafego() {
+        let base = [
+            linha(2, 4, SnmpValue::Bytes(b"uplink".to_vec())),
+            linha(10, 4, SnmpValue::Number(12)),
+            linha(16, 4, SnmpValue::Number(34)),
+        ];
+        let extended = [
+            linha_x(1, 4, SnmpValue::Bytes(b"uplink".to_vec())),
+            linha_x(6, 4, SnmpValue::Number(56)),
+            linha_x(10, 4, SnmpValue::Number(78)),
+        ];
+        let interfaces = parse_interfaces(base.clone(), extended.clone());
+        let traffic = parse_traffic(base, extended);
+
+        assert_eq!(interfaces[0].if_name, "uplink");
+        assert_eq!(traffic.len(), 1);
+        assert_eq!(traffic[0].if_index, 4);
+        assert_eq!(traffic[0].in_octets, 56);
+        assert_eq!(traffic[0].out_octets, 78);
+        assert_eq!(traffic[0].counter_bits, 64);
     }
 
     /// `ifSpeed` saturado (col. 5 = 4294967295) com `ifHighSpeed` (col. 15) real.

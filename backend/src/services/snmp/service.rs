@@ -1,20 +1,24 @@
 //! Casos de uso SNMP para controllers, scheduler e checker.
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use futures::future;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
+use sea_orm::{
+    sea_query::Expr, ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set,
+};
 
 use crate::services::{
     monitoring::{
+        contracts::{CheckResult, MonitorStatus},
         device_status::{self, DeviceStatus},
+        execution_guard::calculate_smart_timeout_seconds,
         interface_monitoring,
     },
     shared::errors::{AppError, AppResult},
     snmp::{
         client::{SnmpConfig, SnmpError, SnmpVersion},
         collectors::{
-            collect_cpu, collect_interfaces, collect_lldp, collect_memory, collect_system,
-            collect_traffic, status_label, InterfaceTraffic, LldpNeighbor, SnmpCpuInfo,
+            collect_cpu, collect_interfaces_and_traffic, collect_lldp, collect_memory,
+            collect_system, status_label, InterfaceTraffic, LldpNeighbor, SnmpCpuInfo,
             SnmpInterface, SnmpMemoryInfo, SnmpSystemInfo,
         },
     },
@@ -74,6 +78,7 @@ pub struct SnmpPollResult {
 /// desgarra os monitores já criados.
 pub const CPU_MONITOR_NAME: &str = "Monitor de Uso de CPU";
 pub const MEMORY_MONITOR_NAME: &str = "Monitor de Uso de Memoria";
+pub const DEFAULT_SNMP_POLL_INTERVAL_SECONDS: i32 = 15;
 
 #[must_use]
 pub fn interface_monitor_name(if_name: &str) -> String {
@@ -85,6 +90,52 @@ pub struct SnmpApplyOptions {
     pub enable_cpu_monitor: Option<bool>,
     pub enable_memory_monitor: Option<bool>,
     pub monitored_if_indexes: Vec<i32>,
+}
+
+/// Monta a configuração de coleta a partir do cadastro canônico do dispositivo.
+/// Os monitores SNMP vinculados a ele não devem manter credenciais ou alvos
+/// divergentes, pois todos participam da mesma coleta.
+pub fn device_config(device: &devices::Model) -> AppResult<SnmpConfig> {
+    let host = device
+        .ip_address
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| device.name.clone());
+    let mut config = SnmpConfig::v2c(
+        host,
+        device.snmp_community.as_deref().unwrap_or("public"),
+        161,
+    );
+    config.version = SnmpVersion::parse(device.snmp_version.as_deref().unwrap_or("v2c"))
+        .ok_or_else(|| AppError::validation("Versão SNMP inválida"))?;
+    Ok(config)
+}
+
+/// Mantém a cadência e o timeout de todos os itens SNMP do equipamento alinhados
+/// ao intervalo que pertence ao próprio dispositivo.
+pub async fn sync_monitor_intervals(
+    db: &sea_orm::DatabaseConnection,
+    device_id: i64,
+    interval_seconds: i32,
+) -> AppResult<()> {
+    let interval_seconds = interval_seconds.max(1);
+    let timeout_seconds = calculate_smart_timeout_seconds("snmp", interval_seconds)
+        .min((interval_seconds - 1).max(1))
+        .max(1);
+    monitors::Entity::update_many()
+        .col_expr(
+            monitors_entity::Column::IntervalSeconds,
+            Expr::value(interval_seconds),
+        )
+        .col_expr(
+            monitors_entity::Column::TimeoutSeconds,
+            Expr::value(timeout_seconds),
+        )
+        .filter(monitors_entity::Column::DeviceId.eq(Some(device_id)))
+        .filter(monitors_entity::Column::Type.eq("snmp"))
+        .exec(db)
+        .await?;
+    Ok(())
 }
 
 pub async fn test_connection(config: SnmpConfig) -> AppResult<SnmpTestResult> {
@@ -105,20 +156,20 @@ pub async fn test_connection(config: SnmpConfig) -> AppResult<SnmpTestResult> {
 
 pub async fn scan(config: SnmpConfig) -> AppResult<SnmpScanResult> {
     let client = super::client::SnmpClient::new(config);
-    let (system, interfaces, cpu, memory, traffic, neighbors) = tokio::join!(
+    let (system, interfaces_and_traffic, cpu, memory, neighbors) = tokio::join!(
         collect_system(&client),
-        collect_interfaces(&client),
+        collect_interfaces_and_traffic(&client),
         collect_cpu(&client),
         collect_memory(&client),
-        collect_traffic(&client),
         collect_lldp(&client)
     );
     let system = system.map_err(map_error)?;
+    let (interfaces, traffic) = interfaces_and_traffic.unwrap_or_default();
     Ok(SnmpScanResult {
         snmp_responded: system.responded(),
         system_info: system,
-        interfaces: interfaces.unwrap_or_default(),
-        traffic: traffic.unwrap_or_default(),
+        interfaces,
+        traffic,
         cpu_info: cpu.unwrap_or_default(),
         memory_info: memory.unwrap_or_default(),
         neighbors: neighbors.unwrap_or_default(),
@@ -226,6 +277,170 @@ pub async fn poll_device(
     })
 }
 
+/// Executa uma coleta única e deriva o resultado individual de cada monitor
+/// SNMP do dispositivo. Assim o histórico e os alertas continuam por item, mas
+/// CPU, memória, interfaces e tráfego não abrem consultas independentes.
+pub async fn poll_device_monitors(
+    ctx: &loco_rs::app::AppContext,
+    device: &devices::Model,
+    monitored_items: &[monitors::Model],
+) -> Vec<(i64, CheckResult)> {
+    let started_at = Utc::now();
+    let poll = match device_config(device) {
+        Ok(config) => poll_device(ctx, device, config).await,
+        Err(error) => Err(error),
+    };
+    let finished_at = Utc::now();
+    match poll {
+        Ok(poll) => monitored_items
+            .iter()
+            .map(|monitor| {
+                (
+                    monitor.id,
+                    monitor_result_from_poll(monitor, &poll, started_at, finished_at),
+                )
+            })
+            .collect(),
+        Err(error) => monitored_items
+            .iter()
+            .map(|monitor| {
+                (
+                    monitor.id,
+                    failed_monitor_result(error.to_string(), started_at, finished_at),
+                )
+            })
+            .collect(),
+    }
+}
+
+fn monitor_result_from_poll(
+    monitor: &monitors::Model,
+    poll: &SnmpPollResult,
+    started_at: DateTime<Utc>,
+    finished_at: DateTime<Utc>,
+) -> CheckResult {
+    let config = &monitor.configuration;
+    let if_index = config
+        .get("ifIndex")
+        .and_then(serde_json::Value::as_i64)
+        .and_then(|value| i32::try_from(value).ok());
+    let metric = config
+        .get("metric")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(if if_index.is_some() {
+            "interface_status"
+        } else {
+            "uptime"
+        });
+    let (status, message, data) = match metric {
+        "cpu_usage" if poll.scan.cpu_info.usage_percent.is_some() => (
+            MonitorStatus::Up,
+            "Uso de CPU coletado".to_string(),
+            serde_json::json!({ "usagePercent": poll.scan.cpu_info.usage_percent }),
+        ),
+        "memory_usage" if poll.scan.memory_info.used_percent.is_some() => (
+            MonitorStatus::Up,
+            "Uso de memória coletado".to_string(),
+            serde_json::json!({ "usedPercent": poll.scan.memory_info.used_percent }),
+        ),
+        "traffic" | "interface_traffic" => match if_index.and_then(|index| {
+            poll.scan
+                .traffic
+                .iter()
+                .find(|traffic| traffic.if_index == index)
+        }) {
+            Some(traffic) => (
+                MonitorStatus::Up,
+                "Tráfego de interface coletado".to_string(),
+                serde_json::json!({
+                    "ifIndex": traffic.if_index,
+                    "counterBits": traffic.counter_bits,
+                }),
+            ),
+            None => missing_measurement_result("contadores de tráfego da interface"),
+        },
+        "interface_status" | "status" => match if_index.and_then(|index| {
+            poll.scan
+                .interfaces
+                .iter()
+                .find(|interface| interface.if_index == index)
+        }) {
+            Some(interface) => {
+                let status = interface_monitor_status(
+                    interface.if_admin_status.unwrap_or(1),
+                    interface.if_oper_status.unwrap_or(1),
+                );
+                (
+                    status,
+                    "Estado da interface coletado".to_string(),
+                    serde_json::json!({
+                        "ifName": interface.if_name,
+                        "ifIndex": interface.if_index,
+                        "adminStatus": interface.if_admin_status.map(status_label),
+                        "operStatus": interface.if_oper_status.map(status_label),
+                    }),
+                )
+            }
+            None => missing_measurement_result("estado da interface"),
+        },
+        "cpu_usage" => missing_measurement_result("uso de CPU"),
+        "memory_usage" => missing_measurement_result("uso de memória"),
+        _ if poll.scan.snmp_responded => (
+            MonitorStatus::Up,
+            "Agente SNMP respondeu à coleta consolidada".to_string(),
+            serde_json::json!({ "sysUpTime": poll.scan.system_info.sys_up_time }),
+        ),
+        _ => missing_measurement_result("resposta do agente SNMP"),
+    };
+    CheckResult {
+        success: matches!(status, MonitorStatus::Up | MonitorStatus::Disabled),
+        status,
+        started_at,
+        finished_at,
+        duration_ms: (finished_at - started_at).num_milliseconds().max(0),
+        message: Some(message),
+        metrics: vec![],
+        data,
+    }
+}
+
+fn missing_measurement_result(measurement: &str) -> (MonitorStatus, String, serde_json::Value) {
+    (
+        MonitorStatus::Down,
+        format!("A coleta SNMP não informou {measurement}"),
+        serde_json::json!({ "reason": "measurement_missing", "measurement": measurement }),
+    )
+}
+
+fn failed_monitor_result(
+    error: String,
+    started_at: DateTime<Utc>,
+    finished_at: DateTime<Utc>,
+) -> CheckResult {
+    CheckResult {
+        success: false,
+        status: MonitorStatus::Down,
+        started_at,
+        finished_at,
+        duration_ms: (finished_at - started_at).num_milliseconds().max(0),
+        message: Some(format!("Falha na coleta SNMP consolidada: {error}")),
+        metrics: vec![],
+        data: serde_json::json!({ "reason": "snmp_poll_failed" }),
+    }
+}
+
+fn interface_monitor_status(admin: u64, oper: u64) -> MonitorStatus {
+    if admin == 2 {
+        MonitorStatus::Disabled
+    } else if oper == 1 {
+        MonitorStatus::Up
+    } else if oper == 2 {
+        MonitorStatus::Down
+    } else {
+        MonitorStatus::Warning
+    }
+}
+
 pub async fn apply_monitors(
     ctx: &loco_rs::app::AppContext,
     device: &devices::Model,
@@ -253,6 +468,7 @@ pub async fn apply_monitors(
             &config,
             &interface,
             selected.contains(&source.if_index),
+            device.snmp_poll_interval_seconds,
         )
         .await?;
     }
@@ -264,6 +480,7 @@ pub async fn apply_monitors(
             enabled,
             monitor_configuration(&config, "cpu_usage"),
             true,
+            device.snmp_poll_interval_seconds,
         )
         .await?;
         if !enabled {
@@ -282,6 +499,7 @@ pub async fn apply_monitors(
             enabled,
             monitor_configuration(&config, "memory_usage"),
             true,
+            device.snmp_poll_interval_seconds,
         )
         .await?;
         if !enabled {
@@ -310,6 +528,7 @@ async fn set_monitoring(
     config: &SnmpConfig,
     interface: &device_interfaces::Model,
     enabled: bool,
+    interval_seconds: i32,
 ) -> AppResult<()> {
     device_interfaces::ActiveModel {
         id: Set(interface.id),
@@ -333,6 +552,7 @@ async fn set_monitoring(
             "metric": "traffic",
         }),
         interface.oper_status.as_deref() == Some("up"),
+        interval_seconds,
     )
     .await?;
     if !enabled {
@@ -367,7 +587,15 @@ pub async fn set_interface_monitoring(
             "Interface sem índice SNMP: execute uma coleta antes de monitorá-la",
         ));
     }
-    set_monitoring(&ctx.db, device.id, &config, &interface, enabled).await?;
+    set_monitoring(
+        &ctx.db,
+        device.id,
+        &config,
+        &interface,
+        enabled,
+        device.snmp_poll_interval_seconds,
+    )
+    .await?;
     // Sem uma coleta agora o gráfico abriria vazio até o próximo ciclo do
     // agendador, e o operador leria isso como falha. Desligar não tem o que
     // coletar. Falha de coleta não invalida a escolha já gravada.
@@ -453,6 +681,7 @@ async fn sync_monitor(
     enabled: bool,
     configuration: serde_json::Value,
     up: bool,
+    interval_seconds: i32,
 ) -> AppResult<()> {
     let existing = monitors::Entity::find()
         .filter(monitors_entity::Column::DeviceId.eq(Some(device_id)))
@@ -463,6 +692,10 @@ async fn sync_monitor(
         monitors::ActiveModel {
             id: Set(existing.id),
             configuration: Set(configuration),
+            interval_seconds: Set(interval_seconds),
+            timeout_seconds: Set(calculate_smart_timeout_seconds("snmp", interval_seconds)
+                .min((interval_seconds - 1).max(1))
+                .max(1)),
             enabled: Set(enabled),
             status: Set(if up { "up" } else { "down" }.into()),
             ..Default::default()
@@ -476,8 +709,10 @@ async fn sync_monitor(
             r#type: Set("snmp".into()),
             name: Set(name.into()),
             configuration: Set(configuration),
-            interval_seconds: Set(60),
-            timeout_seconds: Set(10),
+            interval_seconds: Set(interval_seconds),
+            timeout_seconds: Set(calculate_smart_timeout_seconds("snmp", interval_seconds)
+                .min((interval_seconds - 1).max(1))
+                .max(1)),
             retry_count: Set(3),
             enabled: Set(enabled),
             status: Set(if up { "up" } else { "down" }.into()),
@@ -821,5 +1056,13 @@ mod tests {
         }
         assert_eq!(json["interfaces"][0]["isMonitored"], true);
         assert_eq!(json["hasCpuMonitor"], true);
+    }
+
+    #[test]
+    fn resultado_consolidado_respeita_o_estado_da_interface() {
+        assert_eq!(interface_monitor_status(2, 2), MonitorStatus::Disabled);
+        assert_eq!(interface_monitor_status(1, 1), MonitorStatus::Up);
+        assert_eq!(interface_monitor_status(1, 2), MonitorStatus::Down);
+        assert_eq!(interface_monitor_status(1, 7), MonitorStatus::Warning);
     }
 }

@@ -15,7 +15,7 @@
           <v-card-text class="mt-2">
             <v-text-field
               v-model="defaultPingInterval"
-              label="Intervalo Padrão de Ping (segundos)"
+              label="Intervalo padrão de coleta por Ping (segundos)"
               type="number"
               variant="outlined"
             />

@@ -44,6 +44,7 @@ pub struct DeviceInput {
     pub snmp_enabled: Option<bool>,
     pub snmp_community: Option<String>,
     pub snmp_version: Option<String>,
+    pub snmp_poll_interval_seconds: Option<i32>,
     pub status: Option<String>,
 }
 

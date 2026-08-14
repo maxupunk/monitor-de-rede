@@ -153,6 +153,7 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
   - [x] `interface_collector`: listagem de portas, status admin/oper, velocidade.
   - [x] `traffic_collector`: leitura de contadores de octetos (ifHCInOctets / ifHCOutOctets) para cálculo de tráfego (bps).
   - [x] `lldp_collector`: vizinhos LLDP/CDP para descoberta de conexões entre equipamentos.
+  - [x] 🟢 **Concluído** — intervalo de coleta SNMP centralizado no dispositivo, com confirmação ao propagar a mudança para todos os itens e execução local consolidada por dispositivo no scheduler; novos monitores usam 60 s como padrão recomendado.
 - [x] **Topologia de Rede**:
   - [x] Resolução de links (`DeviceLink`) manuais, LLDP/CDP e inferidos.
   - [x] API REST (`/api/topology`) com grafo interativo e comandos CLI (`snmp:poll`).

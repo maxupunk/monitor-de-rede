@@ -148,6 +148,31 @@
                 density="comfortable"
               ></v-select>
             </v-col>
+            <v-col v-if="formModel.snmpEnabled" cols="12" sm="6">
+              <v-select
+                v-model="formModel.snmpPollIntervalSeconds"
+                :items="snmpIntervalItems"
+                item-title="title"
+                item-value="value"
+                label="Intervalo de coleta SNMP"
+                prepend-inner-icon="mdi-timer-sync-outline"
+                variant="outlined"
+                density="comfortable"
+                hint="Uma coleta por dispositivo atualiza todas as métricas SNMP vinculadas."
+                persistent-hint
+              ></v-select>
+            </v-col>
+            <v-col v-if="formModel.snmpEnabled" cols="12">
+              <v-alert
+                type="info"
+                variant="tonal"
+                density="compact"
+                icon="mdi-database-refresh-outline"
+              >
+                CPU, memória e interfaces compartilham este intervalo. Para evitar consultas
+                repetidas, ajuste-o aqui — não em cada item SNMP.
+              </v-alert>
+            </v-col>
             <v-col v-if="formModel.snmpEnabled" cols="12">
               <div class="d-flex align-center flex-wrap ga-2">
                 <v-btn
@@ -193,6 +218,20 @@
     </v-card>
 
     <SiteDialog v-model="siteDialog" @saved="onSiteCreated" />
+
+    <v-dialog v-model="snmpIntervalConfirmation" max-width="520">
+      <v-card class="rounded-lg">
+        <v-card-title class="font-weight-bold">Aplicar intervalo SNMP?</v-card-title>
+        <v-card-text>
+          O intervalo de coleta SNMP será alterado para todos os itens SNMP deste dispositivo. Ping
+          e os demais monitores não serão modificados.
+        </v-card-text>
+        <v-card-actions class="justify-end">
+          <v-btn variant="text" @click="snmpIntervalConfirmation = false">Cancelar</v-btn>
+          <v-btn color="primary" @click="confirmSnmpIntervalChange">Aplicar a todos</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </v-dialog>
 </template>
 
@@ -202,6 +241,7 @@ import { useDevicesStore, type Device } from '@/stores/devices'
 import { useSitesStore, type Site } from '@/stores/sites'
 import { useSnmpTestStore } from '@/stores/snmpTest'
 import SiteDialog from '@/components/SiteDialog.vue'
+import { INTERVAL_PRESETS, formatSeconds } from '@/utils/monitorTypes'
 
 const props = defineProps<{
   modelValue: boolean
@@ -221,6 +261,12 @@ const snmpTestStore = useSnmpTestStore()
 const siteDialog = ref(false)
 const saving = ref(false)
 const snmpTestResult = ref<{ ok: boolean; message: string } | null>(null)
+const snmpIntervalConfirmation = ref(false)
+const originalSnmpPollIntervalSeconds = ref(15)
+const snmpIntervalItems = INTERVAL_PRESETS.map((value) => ({
+  value,
+  title: `A cada ${formatSeconds(value)}`,
+}))
 
 const formModel = reactive<{
   name: string
@@ -234,6 +280,7 @@ const formModel = reactive<{
   snmpEnabled: boolean
   snmpCommunity: string
   snmpVersion: 'v1' | 'v2c' | 'v3'
+  snmpPollIntervalSeconds: number
 }>({
   name: '',
   ipAddress: '',
@@ -246,6 +293,7 @@ const formModel = reactive<{
   snmpEnabled: false,
   snmpCommunity: 'public',
   snmpVersion: 'v2c',
+  snmpPollIntervalSeconds: 15,
 })
 
 const availableParentDevices = computed(() => {
@@ -272,6 +320,8 @@ watch(
         formModel.snmpEnabled = Boolean(props.deviceToEdit.snmpEnabled)
         formModel.snmpCommunity = props.deviceToEdit.snmpCommunity || 'public'
         formModel.snmpVersion = props.deviceToEdit.snmpVersion || 'v2c'
+        formModel.snmpPollIntervalSeconds = props.deviceToEdit.snmpPollIntervalSeconds || 15
+        originalSnmpPollIntervalSeconds.value = formModel.snmpPollIntervalSeconds
       } else if (props.prefillData) {
         formModel.name = props.prefillData.name || ''
         formModel.ipAddress = props.prefillData.ipAddress || ''
@@ -284,6 +334,8 @@ watch(
         formModel.snmpEnabled = props.prefillData.snmpEnabled ?? false
         formModel.snmpCommunity = props.prefillData.snmpCommunity || 'public'
         formModel.snmpVersion = props.prefillData.snmpVersion || 'v2c'
+        formModel.snmpPollIntervalSeconds = props.prefillData.snmpPollIntervalSeconds || 15
+        originalSnmpPollIntervalSeconds.value = formModel.snmpPollIntervalSeconds
       } else {
         formModel.name = ''
         formModel.ipAddress = ''
@@ -296,6 +348,8 @@ watch(
         formModel.snmpEnabled = false
         formModel.snmpCommunity = 'public'
         formModel.snmpVersion = 'v2c'
+        formModel.snmpPollIntervalSeconds = 15
+        originalSnmpPollIntervalSeconds.value = 15
       }
     }
   }
@@ -357,6 +411,23 @@ async function testSnmp(autoDetect = false) {
 }
 
 async function save() {
+  const intervalChanged =
+    props.deviceToEdit &&
+    formModel.snmpEnabled &&
+    formModel.snmpPollIntervalSeconds !== originalSnmpPollIntervalSeconds.value
+  if (intervalChanged) {
+    snmpIntervalConfirmation.value = true
+    return
+  }
+  await persist()
+}
+
+async function confirmSnmpIntervalChange() {
+  snmpIntervalConfirmation.value = false
+  await persist()
+}
+
+async function persist() {
   if (!formModel.name || !formModel.ipAddress) return
   saving.value = true
   try {

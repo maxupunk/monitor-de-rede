@@ -24,6 +24,7 @@ use crate::{
             errors::{AppError, AppResult},
             pagination::{paginate_compat, MaybePaged},
         },
+        snmp::service::{sync_monitor_intervals, DEFAULT_SNMP_POLL_INTERVAL_SECONDS},
     },
 };
 
@@ -56,7 +57,8 @@ pub(crate) async fn present(
         "ipAddress": device.ip_address, "name": device.name,
         "type": device.r#type, "vendor": device.vendor, "model": device.model, "serialNumber": device.serial_number,
         "description": device.description, "isMonitored": device.is_monitored, "snmpEnabled": device.snmp_enabled,
-        "snmpCommunity": device.snmp_community, "snmpVersion": device.snmp_version, "status": device.status,
+        "snmpCommunity": device.snmp_community, "snmpVersion": device.snmp_version,
+        "snmpPollIntervalSeconds": device.snmp_poll_interval_seconds, "status": device.status,
         "lastSeenAt": device.last_seen_at.map(|v| v.to_rfc3339()), "createdAt": device.created_at.to_rfc3339(),
         "updatedAt": device.updated_at.to_rfc3339(), "site": site, "parent": parent,
         "vpnPeer": serde_json::Value::Null
@@ -85,6 +87,7 @@ async fn sync_device_monitor(
 ) -> AppResult<()> {
     let existing = monitors::Entity::find()
         .filter(monitors::Column::DeviceId.eq(device.id))
+        .filter(monitors::Column::Type.eq("ping"))
         .one(db)
         .await?;
     if device.is_monitored {
@@ -153,6 +156,12 @@ async fn store(
         snmp_enabled: Set(input.snmp_enabled.unwrap_or(false)),
         snmp_community: Set(input.snmp_community),
         snmp_version: Set(input.snmp_version),
+        snmp_poll_interval_seconds: Set(std::cmp::max(
+            input
+                .snmp_poll_interval_seconds
+                .unwrap_or(DEFAULT_SNMP_POLL_INTERVAL_SECONDS),
+            1,
+        )),
         status: Set(input.status.unwrap_or_else(|| "unknown".into())),
         ..Default::default()
     }
@@ -199,6 +208,12 @@ async fn update(
         .filter(|kind| !kind.is_empty())
         .unwrap_or(&current.r#type)
         .to_string();
+    let snmp_poll_interval_seconds = std::cmp::max(
+        input
+            .snmp_poll_interval_seconds
+            .unwrap_or(current.snmp_poll_interval_seconds),
+        1,
+    );
     let row = devices::ActiveModel {
         id: Set(current.id),
         site_id: Set(input.site_id.or(current.site_id)),
@@ -215,12 +230,16 @@ async fn update(
         snmp_enabled: Set(input.snmp_enabled.unwrap_or(current.snmp_enabled)),
         snmp_community: Set(input.snmp_community.or(current.snmp_community)),
         snmp_version: Set(input.snmp_version.or(current.snmp_version)),
+        snmp_poll_interval_seconds: Set(snmp_poll_interval_seconds),
         status: Set(input.status.unwrap_or(current.status)),
         ..Default::default()
     }
     .update(&ctx.db)
     .await?;
     sync_device_monitor(&ctx.db, &row).await?;
+    if row.snmp_poll_interval_seconds != current.snmp_poll_interval_seconds {
+        sync_monitor_intervals(&ctx.db, row.id, row.snmp_poll_interval_seconds).await?;
+    }
     Ok(format::json(present(&ctx.db, row).await?)?)
 }
 

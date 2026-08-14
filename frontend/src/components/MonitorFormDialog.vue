@@ -561,18 +561,29 @@
             </v-row>
           </template>
 
-          <!-- Etapa de frequência e ajustes finos -->
+          <!-- Etapa de intervalo de coleta e ajustes finos -->
           <div class="text-overline text-medium-emphasis mt-8 mb-3">
-            {{ frequencyStepNumber }} · Frequência
+            {{ frequencyStepNumber }} · Intervalo de coleta
           </div>
           <v-row class="form-rows">
-            <v-col cols="12" md="6">
+            <v-col v-if="usesDeviceSnmpInterval" cols="12">
+              <v-alert
+                type="info"
+                variant="tonal"
+                density="compact"
+                icon="mdi-database-refresh-outline"
+              >
+                O intervalo de coleta SNMP é definido no dispositivo e compartilhado por CPU,
+                memória e interfaces. Edite o dispositivo para alterá-lo para todos os itens SNMP.
+              </v-alert>
+            </v-col>
+            <v-col v-else cols="12" md="6">
               <v-select
                 v-model="form.intervalSeconds"
                 :items="intervalItems"
                 item-title="title"
                 item-value="value"
-                label="Verificar a cada"
+                label="Intervalo de coleta"
                 prepend-inner-icon="mdi-timer-sync-outline"
                 variant="outlined"
                 density="comfortable"
@@ -923,6 +934,7 @@ const definition = computed(() => monitorKind(form.kind))
 const selectedDevice = computed(() =>
   devicesStore.devices.find((device) => device.id === form.deviceId)
 )
+const usesDeviceSnmpInterval = computed(() => form.kind === 'snmp' && form.deviceId !== null)
 const summary = computed(() => describeMonitor(form))
 const validationErrors = computed(() => validateMonitorForm(form))
 const canSave = computed(() => validationErrors.value.length === 0 && saving.value === null)

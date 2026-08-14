@@ -351,7 +351,9 @@ const headers = computed(() => [
   },
   { title: 'Tipo', key: 'type', width: '90px' },
   { title: 'Alvo', key: 'target' },
-  ...(showDevice.value ? [] : [{ title: 'Intervalo', key: 'intervalSeconds', width: '100px' }]),
+  ...(showDevice.value
+    ? []
+    : [{ title: 'Intervalo de coleta', key: 'intervalSeconds', width: '150px' }]),
   { title: 'Status', key: 'status', width: '100px' },
   { title: 'Ativo', key: 'isEnabled', width: '80px' },
   { title: 'Ações', key: 'actions', sortable: false, width: '220px' },

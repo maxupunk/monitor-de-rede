@@ -511,6 +511,7 @@ mod tests {
             snmp_enabled: snmp,
             snmp_community: snmp.then(|| "netmon".to_string()),
             snmp_version: snmp.then(|| "v2c".to_string()),
+            snmp_poll_interval_seconds: 60,
             status: "unknown".into(),
             last_seen_at: None,
             created_at: now.into(),

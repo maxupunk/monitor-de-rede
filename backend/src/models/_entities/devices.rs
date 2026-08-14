@@ -25,6 +25,7 @@ pub struct Model {
     pub snmp_enabled: bool,
     pub snmp_community: Option<String>,
     pub snmp_version: Option<String>,
+    pub snmp_poll_interval_seconds: i32,
     pub status: String,
     pub last_seen_at: Option<DateTimeWithTimeZone>,
     pub created_at: DateTimeWithTimeZone,

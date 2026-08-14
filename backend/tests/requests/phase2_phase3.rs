@@ -83,6 +83,118 @@ async fn crud_de_inventario_preserva_o_contrato_camel_case() {
 
 #[tokio::test]
 #[serial]
+async fn intervalo_snmp_do_dispositivo_alinha_todos_os_itens() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let device = request
+            .post("/api/devices")
+            .json(&serde_json::json!({
+                "name": "Switch SNMP",
+                "type": "switch",
+                "ipAddress": "127.0.0.1",
+                "snmpEnabled": true,
+            }))
+            .await;
+        assert_eq!(device.status_code(), 201);
+        let device: serde_json::Value = serde_json::from_str(&device.text()).unwrap();
+        let device_id = device["id"].as_i64().unwrap();
+        assert_eq!(device["snmpPollIntervalSeconds"], 15);
+
+        for (name, metric) in [
+            ("CPU do switch", "cpu_usage"),
+            ("Memória do switch", "memory_usage"),
+        ] {
+            let monitor = request
+                .post("/api/monitors")
+                .json(&serde_json::json!({
+                    "deviceId": device_id,
+                    "name": name,
+                    "type": "snmp",
+                    "configuration": { "host": "127.0.0.1", "metric": metric },
+                }))
+                .await;
+            assert_eq!(monitor.status_code(), 201);
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&monitor.text()).unwrap()
+                    ["intervalSeconds"],
+                15
+            );
+        }
+
+        let items = request
+            .get(&format!("/api/devices/{device_id}/monitors"))
+            .await;
+        assert_eq!(items.status_code(), 200);
+        let items: serde_json::Value = serde_json::from_str(&items.text()).unwrap();
+        let first_monitor_id = items[0]["id"].as_i64().unwrap();
+        assert!(items
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|monitor| monitor["intervalSeconds"] == 15));
+
+        let individual_change = request
+            .put(&format!("/api/monitors/{first_monitor_id}"))
+            .json(&serde_json::json!({ "intervalSeconds": 60 }))
+            .await;
+        assert_eq!(individual_change.status_code(), 422);
+
+        let updated = request
+            .put(&format!("/api/devices/{device_id}"))
+            .json(&serde_json::json!({ "snmpPollIntervalSeconds": 120 }))
+            .await;
+        assert_eq!(updated.status_code(), 200);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&updated.text()).unwrap()
+                ["snmpPollIntervalSeconds"],
+            120
+        );
+
+        let items = request
+            .get(&format!("/api/devices/{device_id}/monitors"))
+            .await;
+        assert_eq!(items.status_code(), 200);
+        assert!(serde_json::from_str::<serde_json::Value>(&items.text())
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|monitor| monitor["intervalSeconds"] == 120));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn novo_monitor_ping_usa_intervalo_recomendado_de_um_minuto() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let monitor = request
+            .post("/api/monitors")
+            .json(&serde_json::json!({
+                "name": "Ping padrão",
+                "type": "ping",
+                "configuration": { "host": "127.0.0.1" },
+            }))
+            .await;
+
+        assert_eq!(monitor.status_code(), 201);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&monitor.text()).unwrap()["intervalSeconds"],
+            60
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
 async fn crud_de_configuracoes_e_monitor_tem_respostas_esperadas() {
     request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
         let session = prepare_data::init_user_login(&request, &ctx).await;

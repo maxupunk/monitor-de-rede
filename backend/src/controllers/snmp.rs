@@ -91,15 +91,7 @@ async fn device_with_config(ctx: &AppContext, id: i64) -> AppResult<(devices::Mo
         .one(&ctx.db)
         .await?
         .ok_or_else(|| AppError::not_found("Dispositivo não encontrado"))?;
-    let config = config(
-        device
-            .ip_address
-            .clone()
-            .unwrap_or_else(|| device.name.clone()),
-        161,
-        device.snmp_version.as_deref(),
-        device.snmp_community.as_deref(),
-    )?;
+    let config = service::device_config(&device)?;
     Ok((device, config))
 }
 async fn scan(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
