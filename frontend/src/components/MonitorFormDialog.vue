@@ -691,21 +691,6 @@
 
                   <v-col cols="12" md="6">
                     <v-text-field
-                      v-model.number="form.timeoutSeconds"
-                      label="Aguardar resposta por até (segundos)"
-                      type="number"
-                      min="1"
-                      variant="outlined"
-                      density="comfortable"
-                      :placeholder="`Automático (${smartTimeoutPreview}s)`"
-                      :hint="`Padrão: Automático (${smartTimeoutPreview}s calculados pelo intervalo e tipo)`"
-                      persistent-hint
-                      :error-messages="timeoutError"
-                      clearable
-                    ></v-text-field>
-                  </v-col>
-                  <v-col cols="12" md="6">
-                    <v-text-field
                       v-model.number="form.retryCount"
                       label="Tentativas antes de marcar como offline"
                       type="number"
@@ -819,7 +804,6 @@ import {
   INTERVAL_PRESETS,
   MONITOR_KINDS,
   SNMP_MODES,
-  calculateSmartTimeout,
   createMonitorForm,
   describeMonitor,
   dnsProtocol,
@@ -955,22 +939,6 @@ const canFillFromDevice = computed(
     !!selectedDevice.value?.ipAddress &&
     form.target !== selectedDevice.value.ipAddress
 )
-
-const smartTimeoutPreview = computed(() => calculateSmartTimeout(form.kind, form.intervalSeconds))
-
-const timeoutError = computed(() => {
-  if (
-    form.timeoutSeconds !== null &&
-    form.timeoutSeconds !== undefined &&
-    form.timeoutSeconds > 0
-  ) {
-    if (form.timeoutSeconds < 1) return 'A checagem deve demorar pelo menos 1 segundo'
-    if (form.intervalSeconds <= form.timeoutSeconds) {
-      return 'O timeout deve ser menor do que o intervalo de verificação'
-    }
-  }
-  return undefined
-})
 
 /** Mantém valores fora dos presets (monitores antigos) visíveis no select */
 function buildPresetItems(presets: number[], current: number) {

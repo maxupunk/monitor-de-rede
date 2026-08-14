@@ -226,7 +226,7 @@ async fn monitor_caido_dispara_alerta_e_a_volta_o_resolve() {
                 .post("/api/monitors")
                 .json(&serde_json::json!({
                     "name": "TCP fechado", "type": "tcp",
-                    "target": "127.0.0.1", "port": 9, "timeoutSeconds": 1
+                    "target": "127.0.0.1", "port": 9
                 }))
                 .await
                 .text(),
@@ -303,7 +303,7 @@ async fn reconhecer_e_silenciar_alteram_o_estado_sem_fechar_o_alerta() {
                 .post("/api/monitors")
                 .json(&serde_json::json!({
                     "name": "TCP fechado", "type": "tcp",
-                    "target": "127.0.0.1", "port": 9, "timeoutSeconds": 1
+                    "target": "127.0.0.1", "port": 9
                 }))
                 .await
                 .text(),

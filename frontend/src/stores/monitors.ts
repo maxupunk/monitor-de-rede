@@ -36,7 +36,6 @@ export interface Monitor {
   port?: number
   configuration?: Record<string, unknown>
   intervalSeconds: number
-  timeoutSeconds: number
   retryCount?: number
   status: 'online' | 'offline' | 'warning' | 'disabled' | 'up' | 'down' | 'unknown'
   enabled?: boolean

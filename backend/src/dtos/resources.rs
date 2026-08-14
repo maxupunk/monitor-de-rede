@@ -59,7 +59,6 @@ pub struct MonitorInput {
     pub target: Option<String>,
     pub port: Option<i64>,
     pub interval_seconds: Option<i32>,
-    pub timeout_seconds: Option<i32>,
     pub retry_count: Option<i32>,
     pub enabled: Option<bool>,
     pub is_enabled: Option<bool>,

@@ -280,7 +280,13 @@ async fn check_and_resolve(
         &monitor.r#type,
         &monitor.configuration,
         RunOptions {
-            timeout_ms: Some(u64::from(monitor.timeout_seconds.max(1) as u32) * 1_000),
+            timeout_ms: Some(
+                crate::services::monitoring::execution_guard::calculate_smart_timeout_seconds(
+                    &monitor.r#type,
+                    monitor.interval_seconds,
+                ) as u64
+                    * 1_000,
+            ),
         },
     )
     .await

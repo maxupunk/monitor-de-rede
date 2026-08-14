@@ -45,7 +45,7 @@
               </div>
               <div class="text-caption text-md-subtitle-1 text-grey-darken-1 mt-1 text-break">
                 Alvo: <strong class="text-high-emphasis">{{ formattedTarget }}</strong> · Intervalo:
-                {{ monitor.intervalSeconds }}s · Timeout: {{ monitor.timeoutSeconds }}s
+                {{ monitor.intervalSeconds }}s
                 <span v-if="monitor.device">
                   · Dispositivo: <strong>{{ monitor.device.name }}</strong></span
                 >
@@ -911,7 +911,6 @@ const emptyMonitor: Monitor = {
   port: undefined,
   configuration: {},
   intervalSeconds: 60,
-  timeoutSeconds: 5,
   status: 'unknown',
   isEnabled: true,
   device: undefined,

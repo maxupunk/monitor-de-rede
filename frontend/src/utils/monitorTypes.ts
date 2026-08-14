@@ -462,29 +462,6 @@ export const COMMON_TCP_PORTS: Array<{ port: number; label: string }> = [
 ]
 
 export const INTERVAL_PRESETS = [1, 5, 15, 30, 60, 120, 300, 600, 900, 1800, 3600]
-export const TIMEOUT_PRESETS = [5, 10, 15, 30, 60]
-
-/**
- * Calcula de forma inteligente o timeout ótimo em segundos com base no tipo de monitor
- * e no intervalo de verificação configurado.
- */
-export function calculateSmartTimeout(kind: string, intervalSeconds: number): number {
-  const interval = Math.max(1, intervalSeconds)
-  if (interval <= 2) return 1
-
-  const maxAllowed = Math.max(1, interval - 1)
-  const normalizedKind = (kind || 'ping').toLowerCase()
-
-  if (normalizedKind === 'http' || normalizedKind === 'https') {
-    const calculated = Math.floor(interval / 2)
-    return Math.min(maxAllowed, Math.max(3, Math.min(10, calculated)))
-  }
-
-  // Ping, TCP, DNS, SNMP
-  const calculated = Math.floor(interval / 3)
-  return Math.min(maxAllowed, Math.max(2, Math.min(5, calculated)))
-}
-
 export function formatSeconds(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return '—'
   if (seconds < 60) return `${seconds} segundo${seconds === 1 ? '' : 's'}`
@@ -507,8 +484,6 @@ export interface MonitorFormModel {
   target: string
   port: number | null
   intervalSeconds: number
-  /** Timeout em segundos. `0` ou `null` = automático (calculado a partir do intervalo e tipo) */
-  timeoutSeconds: number | null
   retryCount: number
   enabled: boolean
   // Ping
@@ -554,7 +529,6 @@ export function createMonitorForm(deviceId?: number | null): MonitorFormModel {
     target: '',
     port: null,
     intervalSeconds: 15,
-    timeoutSeconds: null,
     retryCount: 3,
     enabled: true,
     packetCount: 3,
@@ -619,10 +593,6 @@ export function monitorToForm(monitor: Monitor): MonitorFormModel {
   form.probeId = monitor.probeId ?? null
   form.name = monitor.name || ''
   form.intervalSeconds = asNumber(monitor.intervalSeconds, 15)
-  form.timeoutSeconds =
-    monitor.timeoutSeconds && monitor.timeoutSeconds > 0
-      ? asNumber(monitor.timeoutSeconds, 0)
-      : null
   form.retryCount = Number.isFinite(Number(monitor.retryCount)) ? Number(monitor.retryCount) : 3
   form.enabled = monitor.isEnabled ?? monitor.enabled ?? true
 
@@ -681,11 +651,6 @@ export function apiTypeFor(form: MonitorFormModel): MonitorApiType {
 
 /** Monta o `configuration` no formato esperado pelo checker correspondente */
 export function buildConfiguration(form: MonitorFormModel): Record<string, unknown> {
-  const effectiveTimeout =
-    form.timeoutSeconds && form.timeoutSeconds > 0
-      ? form.timeoutSeconds
-      : calculateSmartTimeout(form.kind, form.intervalSeconds)
-  const timeoutMs = Math.max(1, effectiveTimeout) * 1000
   const target = form.target.trim()
 
   switch (form.kind) {
@@ -693,7 +658,6 @@ export function buildConfiguration(form: MonitorFormModel): Record<string, unkno
       return {
         host: target,
         packetCount: form.packetCount,
-        timeoutMs,
       }
     case 'http':
       return {
@@ -703,13 +667,11 @@ export function buildConfiguration(form: MonitorFormModel): Record<string, unkno
           ? form.acceptedStatusCodes
           : [...DEFAULT_ACCEPTED_STATUS_CODES],
         validateCertificate: form.validateCertificate,
-        timeoutMs,
       }
     case 'tcp':
       return {
         host: target,
         port: Number(form.port) || 443,
-        timeoutMs,
       }
     case 'dns': {
       const config: Record<string, unknown> = {
@@ -717,7 +679,6 @@ export function buildConfiguration(form: MonitorFormModel): Record<string, unkno
         domain: target,
         recordType: form.recordType,
         protocol: form.dnsProtocol,
-        timeoutMs,
       }
 
       const extras = form.extraHostnames.map((name) => name.trim()).filter(Boolean)
@@ -741,7 +702,6 @@ export function buildConfiguration(form: MonitorFormModel): Record<string, unkno
         version: form.snmpVersion,
         community: form.snmpCommunity.trim() || 'public',
         port: Number(form.snmpPort) || 161,
-        timeoutMs,
       }
       if (
         form.snmpMode === 'cpu_usage' ||
@@ -760,16 +720,12 @@ export function buildConfiguration(form: MonitorFormModel): Record<string, unkno
       return config
     }
     default:
-      return { host: target, timeoutMs }
+      return { host: target }
   }
 }
 
 export function formToPayload(form: MonitorFormModel): Record<string, unknown> {
   const configuration = buildConfiguration(form)
-  const effectiveTimeout =
-    form.timeoutSeconds && form.timeoutSeconds > 0
-      ? form.timeoutSeconds
-      : calculateSmartTimeout(form.kind, form.intervalSeconds)
 
   return {
     deviceId: form.deviceId,
@@ -780,7 +736,6 @@ export function formToPayload(form: MonitorFormModel): Record<string, unknown> {
     target: form.target.trim(),
     port: form.kind === 'tcp' ? Number(form.port) || null : null,
     intervalSeconds: form.intervalSeconds,
-    timeoutSeconds: effectiveTimeout,
     retryCount: form.retryCount,
     enabled: form.enabled,
     isEnabled: form.enabled,
@@ -936,18 +891,5 @@ export function validateMonitorForm(form: MonitorFormModel): string[] {
   }
 
   if (!(form.intervalSeconds >= 1)) errors.push('O intervalo mínimo é de 1 segundo')
-  if (
-    form.timeoutSeconds !== null &&
-    form.timeoutSeconds !== undefined &&
-    form.timeoutSeconds > 0
-  ) {
-    if (form.timeoutSeconds < 1) {
-      errors.push('O tempo de resposta (timeout) mínimo é de 1 segundo')
-    }
-    if (form.intervalSeconds <= form.timeoutSeconds) {
-      errors.push('O tempo de resposta (timeout) deve ser menor do que o intervalo de verificação')
-    }
-  }
-
   return errors
 }

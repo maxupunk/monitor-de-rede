@@ -34,7 +34,7 @@ use crate::{
         maintenance::data_pruner,
         monitoring::{
             contracts::{CheckResult, MonitorStatus},
-            execution_guard::try_acquire_monitor,
+            execution_guard::{calculate_smart_timeout_seconds, try_acquire_monitor},
             result_processor::process_result,
             runner::{run_monitor, RunOptions},
         },
@@ -261,7 +261,10 @@ async fn execute_one(ctx: &AppContext, monitor: &monitors::Model) -> AppResult<(
         );
         return Ok(());
     };
-    let timeout_ms = u64::from(monitor.timeout_seconds.max(1) as u32) * 1_000;
+    let timeout_ms =
+        u64::from(
+            calculate_smart_timeout_seconds(&monitor.r#type, monitor.interval_seconds) as u32,
+        ) * 1_000;
 
     if let Some(probe_id) = monitor.probe_id {
         let probe = probes::Entity::find_by_id(probe_id).one(&ctx.db).await?;

@@ -328,7 +328,6 @@ async fn set_monitoring(
             "version": version_name(config.version),
             "community": config.community.clone(),
             "port": config.port,
-            "timeoutMs": config.timeout_ms,
             "ifIndex": interface.snmp_index,
             "ifName": interface.name,
             "metric": "traffic",
@@ -443,7 +442,6 @@ fn monitor_configuration(config: &SnmpConfig, metric: &str) -> serde_json::Value
         "version": version_name(config.version),
         "community": config.community,
         "port": config.port,
-        "timeoutMs": config.timeout_ms,
         "metric": metric,
     })
 }

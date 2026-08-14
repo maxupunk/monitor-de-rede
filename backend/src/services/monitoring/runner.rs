@@ -23,10 +23,7 @@ pub struct RunOptions {
     pub timeout_ms: Option<u64>,
 }
 
-/// Injeta `timeoutMs` somente quando o checker não recebeu um timeout próprio.
-///
-/// A prioridade evita que um monitor HTTP com timeout explicitamente ajustado
-/// seja silenciosamente sobrescrito pelo valor genérico da linha `monitors`.
+/// Impõe o `timeoutMs` automático calculado para o monitor.
 #[must_use]
 pub fn merge_timeout(config: &Value, timeout_ms: Option<u64>) -> Value {
     let mut merged = config.clone();
@@ -34,8 +31,7 @@ pub fn merge_timeout(config: &Value, timeout_ms: Option<u64>) -> Value {
         return merged;
     };
     if let Value::Object(ref mut map) = merged {
-        map.entry("timeoutMs".to_string())
-            .or_insert_with(|| Value::from(timeout_ms));
+        map.insert("timeoutMs".to_string(), Value::from(timeout_ms));
     }
     merged
 }
@@ -96,10 +92,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn timeout_do_checker_tem_precedencia() {
+    fn timeout_automatico_substitui_valor_salvo_anteriormente() {
         assert_eq!(
             merge_timeout(&serde_json::json!({ "timeoutMs": 250 }), Some(1_000))["timeoutMs"],
-            250
+            1_000
         );
         assert_eq!(
             merge_timeout(&serde_json::json!({}), Some(1_000))["timeoutMs"],

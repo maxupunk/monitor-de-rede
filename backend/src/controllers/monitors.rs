@@ -39,6 +39,9 @@ fn build_configuration(
     let serde_json::Value::Object(ref mut object) = config else {
         return serde_json::json!({});
     };
+    // O limite de resposta é definido automaticamente a partir do tipo e do
+    // intervalo do monitor. Remove também valores salvos por versões antigas.
+    object.remove("timeoutMs");
     if let Some(target) = target.filter(|target| !target.trim().is_empty()) {
         match kind.to_lowercase().as_str() {
             "ping" | "snmp" => {
@@ -103,10 +106,7 @@ async fn store(
     let name = name.to_string();
     let enabled = input.enabled.or(input.is_enabled).unwrap_or(true);
     let interval_seconds = input.interval_seconds.unwrap_or(15).max(1);
-    let timeout_seconds = input
-        .timeout_seconds
-        .filter(|&t| t > 0)
-        .unwrap_or_else(|| calculate_smart_timeout_seconds(&kind, interval_seconds))
+    let timeout_seconds = calculate_smart_timeout_seconds(&kind, interval_seconds)
         .min((interval_seconds - 1).max(1))
         .max(1);
     let config = build_configuration(
@@ -196,10 +196,7 @@ async fn update(
         .interval_seconds
         .unwrap_or(current.interval_seconds)
         .max(1);
-    let timeout_seconds = input
-        .timeout_seconds
-        .filter(|&t| t > 0)
-        .unwrap_or_else(|| calculate_smart_timeout_seconds(&kind, interval_seconds))
+    let timeout_seconds = calculate_smart_timeout_seconds(&kind, interval_seconds)
         .min((interval_seconds - 1).max(1))
         .max(1);
     let row = monitors::ActiveModel {
@@ -258,7 +255,10 @@ async fn run(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Re
         &monitor.r#type,
         &monitor.configuration,
         RunOptions {
-            timeout_ms: Some(monitor.timeout_seconds.max(1) as u64 * 1000),
+            timeout_ms: Some(
+                calculate_smart_timeout_seconds(&monitor.r#type, monitor.interval_seconds) as u64
+                    * 1000,
+            ),
         },
     )
     .await?;
@@ -353,4 +353,22 @@ pub fn routes() -> Routes {
         .add("/{id}/disable", post(disable))
         .add("/{id}/results", get(results))
         .add("/{id}/alerts", get(alerts))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_configuration;
+
+    #[test]
+    fn configuracao_do_monitor_descarta_timeout_informado() {
+        let config = build_configuration(
+            "ping",
+            Some(serde_json::json!({ "host": "127.0.0.1", "timeoutMs": 60_000 })),
+            None,
+            None,
+            None,
+        );
+
+        assert!(config.get("timeoutMs").is_none());
+    }
 }
