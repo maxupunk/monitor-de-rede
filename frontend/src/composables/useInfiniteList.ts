@@ -23,7 +23,7 @@ import type { LucidMeta } from '@/bindings/LucidMeta'
  * Envelope de paginação do backend (§5.4 do roadmap do backend Rust).
  *
  * `LucidMeta` é gerado pelo `ts-rs` a partir do struct Rust
- * (`backend-rust/src/services/shared/pagination.rs`) — se o backend mudar um
+ * (`backend/src/services/shared/pagination.rs`) — se o backend mudar um
  * campo do `meta`, o `vue-tsc` acusa aqui em vez de a lista infinita parar
  * sozinha em produção.
  *

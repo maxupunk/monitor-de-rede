@@ -1,7 +1,7 @@
 # Corte para o backend Rust — runbook da Fase 9
 
 > Procedimento operacional do corte do `backend/` (AdonisJS) para o
-> `backend-rust/` (Loco.rs). Complementa a [§15 Fase 9](roadmap_backend_rust.md#fase-9--corte-e-descomissionamento).
+> `backend/` (Loco.rs). Complementa a [§15 Fase 9](roadmap_backend_rust.md#fase-9--corte-e-descomissionamento).
 >
 > **Este documento é para ser seguido com o sistema no ar.** Cada passo tem um
 > critério de parada: se ele não for atendido, o corte não avança.
@@ -33,7 +33,7 @@ endpoint a endpoint:
 # AdonisJS na 3333 (como já está) e Rust na 3334
 docker compose up -d server                    # AdonisJS, se ainda for o compose antigo
 PORT=3334 DATABASE_URL=postgres://netmonitor:secret@localhost:5433/netmonitor \
-  cargo run --release --bin backend_rust-cli -- start
+  cargo run --release --bin backend-cli -- start
 
 ADONIS_URL=http://localhost:3333 \
 RUST_URL=http://localhost:3334 \
@@ -81,9 +81,9 @@ o criptograma antigo intacto.
 # 1) No backend/ AINDA VIVO — só ele sabe decifrar:
 cd backend && node ace vpn:export-secrets > /tmp/vpn-secrets.json
 
-# 2) No backend-rust/, com o banco já restaurado:
-cd ../backend-rust
-backend_rust-cli task vpn_secrets_import file:/tmp/vpn-secrets.json
+# 2) No backend/, com o banco já restaurado:
+cd ../backend
+backend-cli task vpn_secrets_import file:/tmp/vpn-secrets.json
 
 # 3) Apague o arquivo — ele tem as chaves em texto claro:
 shred -u /tmp/vpn-secrets.json
@@ -111,7 +111,7 @@ Para isso, **desligue o scheduler de um dos dois** — os dois escrevendo
 
 ```sh
 docker compose stop scheduler          # o do AdonisJS
-backend_rust-cli scheduler --config config/scheduler.yaml
+backend-cli scheduler --config config/scheduler.yaml
 ```
 
 O que comparar ao final da janela:
@@ -131,7 +131,7 @@ nenhum alerta que ele geraria e o Rust não gerou.
 ## 4. Corte
 
 1. `docker compose down`
-2. O `docker-compose.yml` já aponta para `./backend-rust` nos cinco serviços
+2. O `docker-compose.yml` já aponta para `./backend` nos cinco serviços
    (`migration`, `server`, `scheduler`, `probe`, `vpn-probe`) — feito na Fase 9.
 3. `docker compose up -d --build`
 4. Conferir que os oito serviços sobem saudáveis:
@@ -180,12 +180,12 @@ grep -rn "backend/" --include=*.yml --include=*.json --include=*.md . | grep -v 
 
 | Antes | Agora |
 | :--- | :--- |
-| `node ace migration:run` | `backend_rust-cli db migrate` |
-| `node ace scheduler:run` | `backend_rust-cli scheduler --config config/scheduler.yaml` |
-| `node ace probe:run` | `backend_rust-cli task probe_run` |
-| `node ace probe:register --name=X` | `backend_rust-cli task probe_register name:X` |
-| `node ace vpn:probe-register` | `backend_rust-cli task vpn_probe_register` |
+| `node ace migration:run` | `backend-cli db migrate` |
+| `node ace scheduler:run` | `backend-cli scheduler --config config/scheduler.yaml` |
+| `node ace probe:run` | `backend-cli task probe_run` |
+| `node ace probe:register --name=X` | `backend-cli task probe_register name:X` |
+| `node ace vpn:probe-register` | `backend-cli task vpn_probe_register` |
 | `node ace vpn:export-secrets` | *(só no AdonisJS — passo 2.2)* |
-| — | `backend_rust-cli task vpn_secrets_import file:...` |
+| — | `backend-cli task vpn_secrets_import file:...` |
 | `npm run lint && npm run typecheck` | `cargo fmt --check && cargo clippy --all-targets -- -D warnings` |
 | `node ace test` | `cargo test` |

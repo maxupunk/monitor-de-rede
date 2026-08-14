@@ -3,7 +3,7 @@
 Descreve o sistema **como ele é hoje**. Quando este documento e o código
 divergirem, o código está certo e este arquivo está desatualizado.
 
-O backend é **Rust sobre [Loco.rs](https://loco.rs/)**, em `backend-rust/`. O
+O backend é **Rust sobre [Loco.rs](https://loco.rs/)**, em `backend/`. O
 backend anterior era AdonisJS; ele saiu do repositório e o registro daquela
 migração está em [`historico/`](historico/). As decisões técnicas que continuam
 valendo estão em [`adr/`](adr/).
@@ -39,14 +39,14 @@ Não há Redis, nem fila externa, nem broker. Ver [§12](#12-o-que-não-existe).
 
 | Processo | Usuário | Papel |
 | :--- | :--- | :--- |
-| `backend_rust-cli start` | `app` | API HTTP na 3333, SPA na mesma porta, barramento SSE e o ciclo de monitores. Sem capability alguma. |
+| `backend-cli start` | `app` | API HTTP na 3333, SPA na mesma porta, barramento SSE e o ciclo de monitores. Sem capability alguma. |
 | `wireguard-watcher.sh` | `root` | Aplica `wg0.conf` com `wg syncconf` e publica `wg0.status`. É quem usa o `NET_ADMIN`. |
 
 ```text
 ┌──────────────────────────── container netmonitor ────────────────────────────┐
 │                                                                              │
 │   :3333 ──▶ SPA (/app/web)  ─┐                                               │
-│             API (/api/*)    ─┤  backend_rust-cli start   (usuário `app`)     │
+│             API (/api/*)    ─┤  backend-cli start   (usuário `app`)     │
 │             SSE             ─┤    └─ ciclo de monitores a cada 5 s           │
 │                              │    └─ relay do event_outbox                   │
 │                              └────────────┬──────────────┐                   │
@@ -100,7 +100,7 @@ confundido com arquivo — e é por isso que a identificação do serviço saiu 
 
 - **Standalone** — `docker compose up -d --build`. Um container, um volume.
 - **Central com probes remotos** — a mesma imagem em outro site, com
-  `backend_rust-cli task probe_run` e `PROBE_SERVER_URL` apontando para o
+  `backend-cli task probe_run` e `PROBE_SERVER_URL` apontando para o
   servidor. O probe fala por HTTP autenticado; **nunca** acessa o banco.
 - **Central com túnel** — os equipamentos remotos chegam pela `wg0` do próprio
   container e são medidos direto.
@@ -111,7 +111,7 @@ confundido com arquivo — e é por isso que a identificação do serviço saiu 
 ## 4. Organização do código
 
 ```text
-backend-rust/
+backend/
 ├── src/
 │   ├── controllers/     extrai, valida, delega, serializa — sem regra de negócio
 │   ├── services/        todo o domínio, testável sem HTTP
@@ -175,7 +175,7 @@ histórico de tráfego a cada 30 s, purga a cada hora. Elas são memória de
 processo — com um processo novo por tique, todas rodariam a cada 5 s
 ([ADR 007](adr/007-scheduler-processo-unico.md)).
 
-Para forçar uma passada à mão: `backend_rust-cli task scheduler_run`, que roda
+Para forçar uma passada à mão: `backend-cli task scheduler_run`, que roda
 **um** ciclo e sai.
 
 Depois de executar, `next_run_at` avança a partir do horário **previsto**, não
@@ -210,7 +210,7 @@ fila sempre vazia e todo monitor atribuído a probe ficaria parado em `unknown`.
 
 ### Ciclo de vida do probe
 
-1. **Registro** — `backend_rust-cli task probe_register` gera o token e o imprime
+1. **Registro** — `backend-cli task probe_register` gera o token e o imprime
    **uma única vez**; o banco guarda só o `sha256`.
 2. **Autenticação** — header `X-Probe-Token` em toda requisição. Fora do guarda
    JWT: o probe não tem sessão de usuário.
@@ -445,7 +445,7 @@ ausente achando que ela está escondida:
 
 ## 14. Configuração
 
-A configuração viva está em `backend-rust/config/{development,test,production}.yaml`.
+A configuração viva está em `backend/config/{development,test,production}.yaml`.
 O `.env` só preenche os `get_env(...)` desses arquivos e as substituições do
 compose — [`.env.example`](../.env.example) lista todas as variáveis lidas, e só
 elas. O banco é apontado por **`DATABASE_URL`**, uma URL única.

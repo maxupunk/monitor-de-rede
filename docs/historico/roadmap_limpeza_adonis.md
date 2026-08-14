@@ -1,6 +1,6 @@
 # Roadmap de limpeza — remoção do AdonisJS
 
-> Objetivo: deixar o repositório rodando **só** com o `backend-rust/` (Loco.rs),
+> Objetivo: deixar o repositório rodando **só** com o `backend/` (Loco.rs),
 > sem resíduo do AdonisJS em disco, em configuração, em documentação ou **no
 > banco de dados** — que é onde está a causa do erro que trava o `docker compose up`.
 >
@@ -66,7 +66,7 @@ docker compose exec postgres psql -U netmonitor -d netmonitor -c "select count(*
 docker compose exec postgres psql -U netmonitor -d netmonitor -c "\dt"
 
 # 4. Cria o usuário administrador (o banco novo não tem nenhum)
-docker compose run --rm server backend_rust-cli task user:create `
+docker compose run --rm server backend-cli task user:create `
   email:admin@monitor.local name:"Admin" password:"troque-esta-senha"
 ```
 
@@ -137,8 +137,8 @@ agora porque esta é a primeira vez que a stack sobe inteira.
 #### Terceiro achado: `HEALTHCHECK` marcava todo container como `unhealthy`
 
 `server`, `scheduler`, `probe` e `vpn-probe` ficavam `unhealthy` com a API
-respondendo 200. O `HEALTHCHECK` do `backend-rust/Dockerfile` rodava
-`backend_rust-cli doctor` sem `--production`; nesse modo o `doctor` inclui
+respondendo 200. O `HEALTHCHECK` do `backend/Dockerfile` rodava
+`backend-cli doctor` sem `--production`; nesse modo o `doctor` inclui
 `check_deps()`, que lê o `Cargo.lock` — arquivo que a imagem de runtime não
 recebe (ela copia só o binário e o `config/`). Saída:
 `Error: VersionCheck(LockfileError("I/O operation failed: entity not found"))`,
@@ -198,8 +198,8 @@ Remove-Item -Recurse -Force "backend"
       só resíduo de build (`.adonisjs/`, `build/`, `node_modules/`): os fontes
       (`app/`, `config/`, `database/`, `ace.js`…) tinham saído no `340eecf`.
 - [x] 🟢 **Concluído** — tag `adonisjs-final` confirmada antes de apagar
-- [x] 🟢 **Concluído** — `backend_rust_development.sqlite` e `backend_rust_test.sqlite{,-shm,-wal}` removidos.
-      Nota: `cargo test` **recria** os `backend_rust_test.sqlite*` (é o banco da
+- [x] 🟢 **Concluído** — `netmonitor_development.sqlite` e `netmonitor_test.sqlite{,-shm,-wal}` removidos.
+      Nota: `cargo test` **recria** os `netmonitor_test.sqlite*` (é o banco da
       suíte, `config/test.yaml`). São ignorados pelo git; não é resíduo a caçar
       de novo, só não versionar.
 
@@ -234,7 +234,7 @@ cargo — ou remover os scripts de backend e deixar só os de frontend:
 - [x] 🟢 **Concluído** — `dev:backend`, `build:backend`, `test:backend`, `test`, `typecheck:backend`, `lint:backend`, `format:backend` removidos
 - [x] 🟢 **Concluído** — não existia README na raiz; foi criado um (`README.md`)
       com a estrutura do repositório, o `docker compose up`, os comandos `cargo`
-      de `backend-rust/` e os de npm do frontend.
+      de `backend/` e os de npm do frontend.
 
 ### 2.2 `.gitignore`
 
@@ -253,9 +253,9 @@ mais; `node_modules` continua válido por causa do `frontend/`.
 ### 2.3 `.dockerignore`
 
 Ignora `build`, `dist`, `tmp` — contexto do Adonis. O contexto de build hoje é
-`./backend-rust` e `./frontend`.
+`./backend` e `./frontend`.
 
-- [x] 🟢 **Concluído** — reescrito para `.git`, `.env`, `node_modules`, `frontend/node_modules`, `frontend/dist`, `backend-rust/target`, `.DS_Store`
+- [x] 🟢 **Concluído** — reescrito para `.git`, `.env`, `node_modules`, `frontend/node_modules`, `frontend/dist`, `backend/target`, `.DS_Store`
 
 ### 2.4 `.prettierignore`
 
@@ -280,7 +280,7 @@ não lê**:
 
 Faltando: `DATABASE_URL`, `JWT_SECRET`, `LOCO_ENV`. Comentários a corrigir:
 
-- `.env.example` — "gere com: `node ace vpn:probe-register`" → `backend_rust-cli task vpn_probe_register`
+- `.env.example` — "gere com: `node ace vpn:probe-register`" → `backend-cli task vpn_probe_register`
 - `.env.example` — "O DataPrunerService executa a cada 1h via `scheduler:run`" → scheduler nativo do Loco (`config/scheduler.yaml`)
 - ambos — menções ao **Redis**, que não existe em nenhum serviço do `docker-compose.yml`
 
@@ -295,21 +295,21 @@ Faltando: `DATABASE_URL`, `JWT_SECRET`, `LOCO_ENV`. Comentários a corrigir:
       serviço Redis no compose nem `redis` no `Cargo.toml`; os `workers` do Loco
       rodam em `BackgroundAsync`, in-process.
 - [x] 🟢 **Concluído** — comentários corrigidos: `node ace vpn:probe-register` →
-      `backend_rust-cli task vpn_probe_register`; e a nota do `DataPrunerService`
+      `backend-cli task vpn_probe_register`; e a nota do `DataPrunerService`
       agora descreve o que o código faz — a purga roda **dentro** do ciclo do
       `scheduler_run` (`is_due("data_pruner", …)`), não num processo à parte.
 
 ---
 
-## Fase 3 — Ferramentas de paridade dentro do `backend-rust/`
+## Fase 3 — Ferramentas de paridade dentro do `backend/`
 
 Duas ferramentas existiram só para provar que o Rust reproduzia o Adonis. Com o
 Adonis fora, elas não têm mais contra o quê rodar:
 
 | Arquivo | Função | Ação |
 | :--- | :--- | :--- |
-| `backend-rust/examples/parity_check.rs` | bate endpoint a endpoint contra `ADONIS_URL` | remover |
-| `backend-rust/examples/schema_parity.rs` | compara o esquema SeaORM com as migrations do Lucid (lê o código de `backend/`) | remover |
+| `backend/examples/parity_check.rs` | bate endpoint a endpoint contra `ADONIS_URL` | remover |
+| `backend/examples/schema_parity.rs` | compara o esquema SeaORM com as migrations do Lucid (lê o código do backend AdonisJS) | remover |
 
 O `schema_parity` lê o diretório `backend/`, então quebra em tempo de execução
 assim que a Fase 1 rodar. Vale conferir se `examples/playground.rs` e
@@ -322,7 +322,7 @@ assim que a Fase 1 rodar. Vale conferir se `examples/playground.rs` e
       `spike_*` e o `playground` ficaram — o playground é o scaffold do Loco
       (usado pelo alias `cargo playground`) e os spikes sustentam a ADR 003.
 - [x] 🟢 **Concluído** — `cargo build --examples` compila sem eles
-- [x] 🟢 **Concluído** — `backend-rust/AGENTS.md:76` já não manda rodar
+- [x] 🟢 **Concluído** — `backend/AGENTS.md:76` já não manda rodar
       `schema_parity` depois de `db entities`.
 - [ ] ⚠️ **Deixado de propósito** — as outras menções vivem em
       `docs/corte_backend_rust.md` e `docs/roadmap_backend_rust.md`, que a Fase 4
@@ -345,7 +345,7 @@ Contagem de menções a Adonis/Lucid/`node ace`/Japa por arquivo:
 | `docs/diretrizes_testes.md` | 7 | reescrever em cima de `cargo test` / `#[tokio::test]`, sem Japa |
 | `docs/roadmap.md` | 7 | remover a nota de topo "leia AdonisJS como…" e traduzir os termos no corpo |
 | `docs/base.md` | 5 | atualizar a stack declarada |
-| `docs/roadmap_vpn.md` | 5 | traduzir comandos `node ace` para `backend_rust-cli task` |
+| `docs/roadmap_vpn.md` | 5 | traduzir comandos `node ace` para `backend-cli task` |
 | `docs/adr/001`, `005`, `006` | — | **manter como estão** — ADR é registro histórico; reescrever apaga a decisão |
 | `docs/roadmap_melhorias.md`, `docs/roadmap_dispositivos_monitores_discovery.md` | 1 cada | ajuste pontual |
 
@@ -375,7 +375,7 @@ para `historico/`.
         **por causa da movimentação** para `historico/` (agora `../adr/…`);
       - 20 links em `roadmap_vpn.md` e `roadmap_melhorias.md` que apontavam para
         arquivos `.ts` do backend removido — reapontados para os equivalentes em
-        `backend-rust/src/`. **Já estavam quebrados antes desta limpeza**;
+        `backend/src/`. **Já estavam quebrados antes desta limpeza**;
       - 3 links `file:///d:/Projetos/...` absolutos no `roadmap.md`, que só
         funcionavam na máquina de quem os escreveu;
       - o link para `docs/diretrizes_qualidade_e_checklist.md` no `AGENTS.md` da
@@ -412,7 +412,7 @@ Enquanto os dois divergirem, qualquer agente pode seguir o errado.
 O cabeçalho diz "Enquanto `backend/` existir, ele é referência de comportamento".
 Depois da Fase 1 ele não existe mais.
 
-- [x] 🟢 **Concluído** — parágrafo reescrito: fonte da verdade é `backend-rust/`,
+- [x] 🟢 **Concluído** — parágrafo reescrito: fonte da verdade é `backend/`,
       ponto; histórico via tag `adonisjs-final` e `docs/historico/`. De quebra, o
       link para `docs/diretrizes_qualidade_e_checklist.md` (arquivo inexistente)
       foi trocado por `arquitetura.md`, e a referência à §18 do roadmap movido
@@ -434,7 +434,7 @@ Depois da Fase 1 ele não existe mais.
 
 ### 5.4 Comentários no código Rust (baixa prioridade)
 
-Cerca de 30 arquivos em `backend-rust/src/` citam o AdonisJS. Eles se dividem em
+Cerca de 30 arquivos em `backend/src/` citam o AdonisJS. Eles se dividem em
 dois tipos, e só um incomoda:
 
 - **Explicam uma decisão** — ex.: `migration/src/lib.rs:42` ("`auth_access_tokens`
@@ -444,7 +444,7 @@ dois tipos, e só um incomoda:
   `backend/modules/**`"), `Dockerfile:68` ("o mesmo health check do backend
   AdonisJS"). Apontam para um caminho que não existe mais. **Reescrever.**
 
-- [x] 🟢 **Concluído** — varredura feita em `backend-rust` inteiro (não só `src/`
+- [x] 🟢 **Concluído** — varredura feita em `backend` inteiro (não só `src/`
       e `Dockerfile`): também pegou `migration/`, `tests/` e o `AGENTS.md` do
       backend.
 - [x] 🟢 **Concluído** — reescritos ~35 comentários do segundo tipo, em 25
@@ -478,7 +478,7 @@ dois tipos, e só um incomoda:
 git grep -i -l "adonis" -- . ':!docs/historico' ':!docs/adr'
 
 # Backend
-cd backend-rust
+cd backend
 cargo fmt --all --check
 cargo clippy --all-targets -- -D warnings
 cargo test
@@ -570,7 +570,7 @@ coloca `PingClient`, `ScanSessionService` e `EventBus` no `ctx.shared_store`. El
 roda no boot do **servidor**.
 
 Mas `scheduler` e `probe` não são o servidor: são
-`backend_rust-cli task scheduler_run` e `... task probe_run`, processos de
+`backend-cli task scheduler_run` e `... task probe_run`, processos de
 tarefa, onde os initializers do Loco não passam. Os três serviços compartilham o
 mesmo `AppContext`, e nos dois de tarefa o `shared_store` está vazio.
 
@@ -632,13 +632,13 @@ Revisão posterior ao arquivamento encontrou e corrigiu referências que
 escaparam da varredura original:
 
 - **Comentários no código Rust ainda apontando para arquivos `.ts` do Adonis:**
-  - `backend-rust/src/models/vpn_peers.rs` — reescrito para referenciar o
+  - `backend/src/models/vpn_peers.rs` — reescrito para referenciar o
     comportamento do modelo original sem citar caminho inexistente.
-  - `backend-rust/src/services/discovery/cidr_range.rs` — removida a citação a
+  - `backend/src/services/discovery/cidr_range.rs` — removida a citação a
     `backend/modules/discovery/cidr_range.ts`.
-  - `backend-rust/src/services/shared/errors.rs` — reescrito para descrever a
+  - `backend/src/services/shared/errors.rs` — reescrito para descrever a
     função sem apontar para `backend/modules/shared/errors.ts`.
-  - `backend-rust/src/services/vpn/profiles/mod.rs` — reescrito para não citar
+  - `backend/src/services/vpn/profiles/mod.rs` — reescrito para não citar
     `backend/modules/vpn/profiles/*.ts`.
 
 - **`docs/roadmap_vpn.md` — menções desatualizadas corrigidas:**
@@ -648,7 +648,7 @@ escaparam da varredura original:
         backend Rust é `debian:bookworm-slim`, não `node:24-alpine`, e o ping
         usa socket ICMP DGRAM (`surge-ping`).
   - [x] 🟢 QR code: a dependência `qrcode` está em
-        `backend-rust/Cargo.toml`, não no `package.json` da raiz.
+        `backend/Cargo.toml`, não no `package.json` da raiz.
   - [x] 🟢 Textos de links corrigidos de `*.ts` para `*.rs`
         (`key_generator.rs`, `peer_status.rs`, `secret_store.rs`,
         `access_control.rs`).

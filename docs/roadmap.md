@@ -2,7 +2,7 @@
 
 Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificação base (`docs/base.md`), este documento mapeia o status atual do projeto, detalhando o que já foi estruturado e as etapas necessárias para tornar o sistema 100% funcional.
 
-> **O backend é Rust (Loco.rs), em `backend-rust/`.** As fases abaixo registram
+> **O backend é Rust (Loco.rs), em `backend/`.** As fases abaixo registram
 > o que foi entregue — os nomes de arquivo e comando citados nelas são os da
 > época em que cada fase foi escrita. Para o estado atual, leia
 > [arquitetura.md](arquitetura.md); para o registro da reescrita,
@@ -15,9 +15,9 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
 | Componente / Módulo | Status Atual | Descrição |
 | :--- | :---: | :--- |
 | **Documentação Técnica** | 🟢 **Concluído** | Especificação completa da arquitetura (`arquitetura.md`) e requisitos (`base.md`). |
-| **Backend em Rust (Loco.rs)** | 🟢 **Concluído** | Reescrita completa em `backend-rust/`: 22 migrations, ~90 endpoints, 5 checkers, discovery, SNMP, topologia, alertas, probes e VPN. Ver [historico/roadmap_backend_rust.md](historico/roadmap_backend_rust.md). |
+| **Backend em Rust (Loco.rs)** | 🟢 **Concluído** | Reescrita completa em `backend/`: 22 migrations, ~90 endpoints, 5 checkers, discovery, SNMP, topologia, alertas, probes e VPN. Ver [historico/roadmap_backend_rust.md](historico/roadmap_backend_rust.md). |
 | **Estrutura do Projeto Backend** | 🟢 **Concluído** | Controllers em `src/controllers/`, domínio em `src/services/`, entidades `sea-orm` em `src/models/_entities/`. |
-| **Banco de Dados & Migrations** | 🟢 **Concluído** | 21 tabelas, uma migration por tabela em `backend-rust/migration/`, entidades `sea-orm` com os relacionamentos. |
+| **Banco de Dados & Migrations** | 🟢 **Concluído** | 21 tabelas, uma migration por tabela em `backend/migration/`, entidades `sea-orm` com os relacionamentos. |
 | **Backup & Restauração** | 🟢 **Concluído** | `GET /api/backup/export` baixa as 12 tabelas de configuração em JSON; `POST /api/backup/preview` mostra o que o arquivo contém e `POST /api/backup/restore` o aplica em uma transação, preservando os ids. Telemetria e `users` ficam de fora. Card na tela `/settings`. |
 | **Motor de Monitoramento (Checkers)** | 🟢 **Concluído** | Checkers reais de Ping (ICMP/RTT), HTTP/HTTPS (Fetch/Status/Latência), TCP (Sockets), SNMP (uptime/CPU/memória/interface) e DNS com medição de latência de resolução via UDP, TCP e DoH. |
 | **Processamento de Resultados** | 🟢 **Concluído** | `ResultProcessor` grava resultados no banco, extrai métricas e atualiza estado dos dispositivos/monitores. |
@@ -81,7 +81,7 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
   [§12 da arquitetura](arquitetura.md#12-o-que-não-existe).
 
   > **Dívida — backpressure no scheduler.** O ciclo
-  > (`backend-rust/src/tasks/scheduler_run.rs`) busca os monitores vencidos a
+  > (`backend/src/tasks/scheduler_run.rs`) busca os monitores vencidos a
   > cada tique de 5 s e dispara as execuções sem controle de concorrência: se
   > elas demorarem mais que o tique, o ciclo seguinte abre outra leva sem saber
   > que as anteriores ainda rodam. Com o volume atual isso não aparece — é um
@@ -113,7 +113,7 @@ Baseado na documentação de arquitetura (`docs/arquitetura.md`) e especificaç�
 > **Objetivo:** Permitir que agentes leves rodem em outras redes ou no próprio container e enviem dados ao servidor central.
 
 - [x] **Autenticação & Registro do Probe**:
-  - [x] Fluxo de registro com token temporário (`backend_rust-cli task probe_register`).
+  - [x] Fluxo de registro com token temporário (`backend-cli task probe_register`).
   - [x] Autenticação persistente com Token Hash (SHA-256).
   - [x] Heartbeat periódico e status online/offline/revoked.
 - [x] **Despachante de Tarefas & Buffer Offline**:

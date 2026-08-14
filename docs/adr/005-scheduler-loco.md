@@ -29,7 +29,7 @@ Pergunta do spike: `cargo loco task` num laço infinito é o padrão certo, ou
 **Nenhum dos dois na forma proposta pela pergunta.** Vale o desenho da §9.1:
 
 - `src/tasks/scheduler_run.rs` executa **um ciclo** e termina;
-- o **scheduler nativo do Loco** (`backend_rust-cli scheduler`) o dispara a cada
+- o **scheduler nativo do Loco** (`backend-cli scheduler`) o dispara a cada
   5 s, num **processo `scheduler` separado** do `server` (topologia da §9.1).
 
 ## Evidência
@@ -55,7 +55,7 @@ ciclo seria o mesmo problema com outro nome. Então foi medido.
 ### Custo real do boot de uma task
 
 Binário release, `LOCO_ENV=development`, SQLite, 5 execuções de
-`backend_rust-cli task` (que faz boot completo do `AppContext`, incluindo o pool
+`backend-cli task` (que faz boot completo do `AppContext`, incluindo o pool
 de banco):
 
 ```
@@ -95,7 +95,7 @@ laço infinito dentro de uma task é um serviço disfarçado de tarefa.
 ## Consequências
 
 - `scheduler_run` é idempotente e **termina**. Isso a torna testável sem
-  servidor e invocável à mão (`backend_rust-cli task scheduler_run`) para
+  servidor e invocável à mão (`backend-cli task scheduler_run`) para
   depuração — o mesmo código que roda em produção.
 - Cada bloco do ciclo (§9.2) tem tratamento de erro próprio: falha em um não
   interrompe os outros, e o processo sai com status limpo para o scheduler não

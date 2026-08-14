@@ -3,8 +3,8 @@
 - **Spike:** SPIKE-03 (§3.4 do `roadmap_backend_rust.md`)
 - **Status:** aceito — Fase 0
 - **Data:** 2026-08-10
-- **Protótipo:** [`backend-rust/examples/spikes/icmp_dgram.rs`](../../backend-rust/examples/spikes/icmp_dgram.rs)
-- **Ambiente de teste:** [`backend-rust/docker-compose.icmp-spike.yml`](../../backend-rust/docker-compose.icmp-spike.yml)
+- **Protótipo:** [`backend/examples/spikes/icmp_dgram.rs`](../../backend/examples/spikes/icmp_dgram.rs)
+- **Ambiente de teste:** [`backend/docker-compose.icmp-spike.yml`](../../backend/docker-compose.icmp-spike.yml)
 
 ## Contexto
 

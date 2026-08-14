@@ -42,7 +42,7 @@ Regras de aplicação, em ordem:
 | Mudança | Onde | Por quê |
 | :--- | :--- | :--- |
 | `LoginResponse.is_verified` → `isVerified` | `src/views/auth.rs` | A §5.1 manda `camelCase` em **todo** DTO. Abrir exceção para o scaffold quebraria a regra que o teste de convenção fiscaliza. |
-| Bindings `ts-rs` passam a ser gerados em `frontend/src/bindings/` | `src/dtos/common.rs`, `src/services/shared/pagination.rs` | O scaffold exportava para `backend-rust/frontend/`, um diretório que ninguém consome. Agora o tipo do backend é a fonte da verdade do tipo do frontend. |
+| Bindings `ts-rs` passam a ser gerados em `frontend/src/bindings/` | `src/dtos/common.rs`, `src/services/shared/pagination.rs` | O scaffold exportava para `backend/frontend/`, um diretório que ninguém consome. Agora o tipo do backend é a fonte da verdade do tipo do frontend. |
 | `useInfiniteList` importa `LucidMeta` gerado | `frontend/src/composables/useInfiniteList.ts` | O `meta` deixa de ser redigitado à mão no TypeScript. Se o backend mudar um campo, o `vue-tsc` acusa — em vez de a lista infinita parar sozinha em produção. |
 | Prefixo `/api` sai do controller e vai para o `AppRoutes` | `src/controllers/auth.rs`, `src/app.rs` | `AppRoutes::prefix` é o mecanismo do Loco para agrupar rotas. O scaffold embutia `/api/auth` no controller. As URLs finais não mudaram. |
 

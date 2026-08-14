@@ -27,14 +27,14 @@ Legenda: ⬜ pendente · 🟡 parcial · 🟢 concluído
 ### 1.1. Situação atual
 
 O estado do túnel (`connected` · `unstable` · `disconnected` · `awaiting`) é **derivado em
-tempo de leitura** pelo getter `connectionStatus` de [`VpnPeer`](../backend-rust/src/models/vpn_peers.rs),
-a partir de `lastHandshakeAt`/`lastSeenAt`. O [`VpnTrafficRecorder`](../backend-rust/src/services/vpn/traffic_recorder.rs)
+tempo de leitura** pelo getter `connectionStatus` de [`VpnPeer`](../backend/src/models/vpn_peers.rs),
+a partir de `lastHandshakeAt`/`lastSeenAt`. O [`VpnTrafficRecorder`](../backend/src/services/vpn/traffic_recorder.rs)
 já sincroniza a telemetria a cada 10 s e publica `vpn:peers_updated` no SSE.
 
 Como o status nunca é **persistido**, não existe "estado anterior" para comparar — logo não
 há como detectar a *transição* `connected ➔ disconnected`, que é o fato que vira alerta.
 É exatamente o mesmo problema já resolvido para interfaces SNMP em
-[`interface_state_dataset.ts`](../backend-rust/src/services/alerts/datasets/interface_state.rs).
+[`interface_state_dataset.ts`](../backend/src/services/alerts/datasets/interface_state.rs).
 
 ### 1.2. Decisão de projeto
 
@@ -51,10 +51,10 @@ tolerância e até desligar a política sem tocar em código.
       estado *atual*.
 - [ ] `ALERT_FIELDS`: novos campos `vpnPeerStatus`, `vpnStatusTransition`, `vpnPeerName`,
       `vpnSecondsSinceHandshake`.
-- [ ] `backend-rust/src/services/alerts/datasets/vpn_peer.rs`: builder + `describe_vpn_peer_state()` +
+- [ ] `backend/src/services/alerts/datasets/vpn_peer.rs`: builder + `describe_vpn_peer_state()` +
       `hasVpnTransition()` + `isVpnRecovery()`.
 - [ ] `AlertScopeKey.vpnPeer(id)` para deduplicar o alerta por túnel.
-- [ ] `backend-rust/src/services/vpn/state_watcher.rs`: compara persistido × atual, publica
+- [ ] `backend/src/services/vpn/state_watcher.rs`: compara persistido × atual, publica
       `vpn:peer_status_change` no SSE e entrega o dataset ao `AlertManager`.
 - [ ] Ligar o watcher ao ciclo do `VpnTrafficRecorder` (`syncAll` e `recordAll`).
 - [ ] Catálogo de regras: categoria `vpn` com `vpn_peer_disconnected` (recomendada),
@@ -93,7 +93,7 @@ Duas extrações, uma de cada lado:
 
 ### 2.3. Tarefas
 
-- [ ] `backend-rust/src/services/monitoring/presenter.rs` extraído do controller de monitores.
+- [ ] `backend/src/services/monitoring/presenter.rs` extraído do controller de monitores.
 - [ ] `MonitorsController.index` passa a usar o presenter (sem mudança de contrato).
 - [ ] `DevicesController.monitors` passa a usar o presenter → mesmo payload de `/api/monitors`.
 - [ ] `frontend/src/components/MonitorsTable.vue` com as ações completas.
@@ -168,7 +168,7 @@ duplicação — o mesmo bloco de `loadMore` está copiado em cinco arquivos.
 `POST /api/networks/:id/scan` é um **stub**: responde `"Varredura iniciada"` e não faz nada.
 O botão *Escanear* em `/networks` chama esse endpoint e não produz resultado algum.
 
-O motor, porém, existe e funciona: [`DiscoveryService`](../backend-rust/src/services/discovery/service.rs)
+O motor, porém, existe e funciona: [`DiscoveryService`](../backend/src/services/discovery/service.rs)
 combina varredura ICMP da faixa, tabela ARP e port scan, mescla os achados e grava
 `discovery_runs` / `discovery_results`. Ele só nunca é acionado a partir de uma rede
 cadastrada.
@@ -238,7 +238,7 @@ da §4.3 da arquitetura.
 Conforme [`AGENTS.md`](../AGENTS.md) e [`diretrizes_testes.md`](diretrizes_testes.md):
 
 ```powershell
-cd backend-rust
+cd backend
 cargo fmt --all --check
 cargo clippy --all-targets -- -D warnings
 cargo test

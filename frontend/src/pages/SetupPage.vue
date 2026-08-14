@@ -228,7 +228,7 @@ const showHint = ref(true)
 
 const commands = [
   'docker compose logs server',
-  'docker compose exec server backend_rust-cli task auth_setup_token',
+  'docker compose exec server backend-cli task auth_setup_token',
 ]
 
 const strength = computed(() => passwordStrength(password.value))

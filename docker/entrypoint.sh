@@ -61,6 +61,6 @@ esac
 # --- 3. aplicação, sem privilégio -------------------------------------------
 # `--inh-caps=-all` esvazia o conjunto herdável: nem por engano a aplicação
 # recebe o NET_ADMIN que o watcher usa.
-log "iniciando ${1:-backend_rust-cli} como ${APP_USER}"
+log "iniciando ${1:-backend-cli} como ${APP_USER}"
 exec setpriv --reuid="${APP_USER}" --regid="${APP_USER}" --init-groups \
              --inh-caps=-all -- "$@"

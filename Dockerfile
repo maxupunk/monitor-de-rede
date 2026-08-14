@@ -50,7 +50,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends pkg-config libssl-dev ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY backend-rust/ .
+COPY backend/ .
 
 # Os dois `cache` mounts são o que separa "recompilar o projeto" de "recompilar
 # 400 crates de terceiros". Sem eles, qualquer alteração de fonte invalida o
@@ -61,11 +61,11 @@ COPY backend-rust/ .
 # que ele termina, o diretório some.
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/usr/src/app/target,sharing=locked \
-    cargo build --release --bin backend_rust-cli \
-    && cp target/release/backend_rust-cli /usr/local/bin/backend_rust-cli
+    cargo build --release --bin backend-cli \
+    && cp target/release/backend-cli /usr/local/bin/backend-cli
 
 # ----------------------------------------------------------------- spike ----
-# Estágio usado só por `backend-rust/docker-compose.icmp-spike.yml`. Compila os
+# Estágio usado só por `backend/docker-compose.icmp-spike.yml`. Compila os
 # protótipos da Fase 0 para poderem ser executados dentro do mesmo ambiente da
 # imagem final — que é justamente o que SPIKE-03 precisa responder.
 FROM builder AS spike-builder
@@ -106,7 +106,7 @@ RUN apt-get update \
 RUN useradd --create-home --shell /usr/sbin/nologin app
 WORKDIR /app
 
-COPY --from=builder /usr/local/bin/backend_rust-cli /usr/local/bin/backend_rust-cli
+COPY --from=builder /usr/local/bin/backend-cli /usr/local/bin/backend-cli
 COPY --from=builder /usr/src/app/config /app/config
 COPY --from=web /web/dist /app/web
 COPY docker/entrypoint.sh docker/wireguard-watcher.sh /usr/local/bin/
@@ -129,7 +129,7 @@ EXPOSE 51820/udp
 # com a API respondendo. Com a flag, sobra o que interessa em produção: a
 # conexão com o banco.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD ["/usr/local/bin/backend_rust-cli", "doctor", "--production"]
+    CMD ["/usr/local/bin/backend-cli", "doctor", "--production"]
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-CMD ["backend_rust-cli", "start"]
+CMD ["backend-cli", "start"]

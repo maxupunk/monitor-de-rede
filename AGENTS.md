@@ -1,8 +1,8 @@
 # Diretrizes do Projeto para Agentes IA
 
-> **O backend é Rust (Loco.rs), em `backend-rust/`. Ponto.** Não existe outro
+> **O backend é Rust (Loco.rs), em `backend/`. Ponto.** Não existe outro
 > backend no repositório, nem "referência de comportamento" a consultar: se a
-> pergunta é como o sistema se comporta, a resposta está em `backend-rust/`.
+> pergunta é como o sistema se comporta, a resposta está em `backend/`.
 >
 > O backend anterior era AdonisJS. Ele saiu do repositório e continua
 > recuperável pela tag `adonisjs-final` (`git show adonisjs-final:backend/...`).
@@ -26,7 +26,7 @@
      cargo test
      cargo build --release
      ```
-     Rodados a partir de `backend-rust/`. Os quatro precisam passar — é
+     Rodados a partir de `backend/`. Os quatro precisam passar — é
      critério de aceite, não sugestão.
 
 2. **Regras de Qualidade Vue / Template HTML**:
@@ -82,7 +82,7 @@
      **NUNCA remova este fallback**: é ele que garante registro e autenticação
      zero-config em containers Docker. É também a razão de
      `probes.token_hash` não ter índice único.
-   - **Comando CLI de Registro**: `backend_rust-cli task vpn_probe_register`
+   - **Comando CLI de Registro**: `backend-cli task vpn_probe_register`
      (`src/tasks/vpn_probe_register.rs`) gera ou reutiliza o token do probe e o
      exibe no terminal. **NÃO remover** este comando nem o `probe_registrar`.
    - **Fallback de Execução Local no Agendador** (`src/tasks/scheduler_run.rs`):

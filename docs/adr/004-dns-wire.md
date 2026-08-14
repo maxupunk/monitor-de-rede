@@ -3,7 +3,7 @@
 - **Spike:** SPIKE-04 (§3.4 do `roadmap_backend_rust.md`)
 - **Status:** aceito — Fase 0
 - **Data:** 2026-08-10
-- **Protótipo:** [`backend-rust/examples/spikes/dns_wire.rs`](../../backend-rust/examples/spikes/dns_wire.rs)
+- **Protótipo:** [`backend/examples/spikes/dns_wire.rs`](../../backend/examples/spikes/dns_wire.rs)
 
 ## Contexto
 

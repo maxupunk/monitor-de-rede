@@ -1,6 +1,6 @@
 # Roadmap de Implementação — Backend Rust (Loco.rs)
 
-> **Documento de execução.** Descreve, sem lacunas, tudo que precisa existir em `backend-rust/`
+> **Documento de execução.** Descreve, sem lacunas, tudo que precisa existir em `backend/`
 > para substituir integralmente o backend AdonisJS (`backend/`) mantendo o frontend Vue 3 +
 > Vuetify funcionando. Cada item é verificável: nome de arquivo, assinatura de função, rota,
 > payload e critério de aceite.
@@ -295,7 +295,7 @@ porta a porta.
 | **SPIKE-04** | DNS wire | **Sim**, um encoder só serve UDP, TCP e DoH; o `Instant` fica isolado no round-trip. | [004](../adr/004-dns-wire.md) |
 | **SPIKE-05** | Scheduler | Task de **um ciclo** disparada pelo scheduler nativo, em processo separado — confirma a [§9.1](#91-topologia-de-processos-espelha-o-docker-composeyml). Boot medido: ~25 ms num tique de 5 s (0,5%). | [005](../adr/005-scheduler-loco.md) |
 
-Protótipos executáveis em `backend-rust/examples/spikes/`:
+Protótipos executáveis em `backend/examples/spikes/`:
 
 ```sh
 cargo run --example spike_snmp_v2c      # offline; SNMP_TARGET=host:161 para ao vivo
@@ -313,7 +313,7 @@ define a precedência entre o padrão do backend Rust e o contrato herdado do Ad
 ## 4. Estrutura de diretórios
 
 ```
-backend-rust/
+backend/
 ├── Cargo.toml
 ├── config/
 │   ├── development.yaml
@@ -1357,11 +1357,11 @@ pub async fn delete_zabbix_template(db, id) -> Result<()>;
 
 | Processo | Comando | Papel |
 | :--- | :--- | :--- |
-| `server` | `backend_rust-cli start` | HTTP + SSE + sessão de scan ao vivo |
-| `migration` | `backend_rust-cli db migrate` | Roda uma vez |
-| `scheduler` | `backend_rust-cli scheduler --config config/scheduler.yaml` | Dispara `scheduler_run` a cada 5 s — monitores, VPN, discovery, pruner, watchdog |
-| `probe` | `backend_rust-cli task probe_run` | Agente da LAN |
-| `vpn-probe` | `backend_rust-cli task probe_run` | Agente no namespace do WireGuard |
+| `server` | `backend-cli start` | HTTP + SSE + sessão de scan ao vivo |
+| `migration` | `backend-cli db migrate` | Roda uma vez |
+| `scheduler` | `backend-cli scheduler --config config/scheduler.yaml` | Dispara `scheduler_run` a cada 5 s — monitores, VPN, discovery, pruner, watchdog |
+| `probe` | `backend-cli task probe_run` | Agente da LAN |
+| `vpn-probe` | `backend-cli task probe_run` | Agente no namespace do WireGuard |
 
 > **Decisão SPIKE-05 (🟢 [ADR 005](../adr/005-scheduler-loco.md), confirmada na Fase 0):**
 > `scheduler_run` é uma task de **um ciclo**, invocada pelo scheduler nativo do Loco a cada 5 s
@@ -1530,7 +1530,7 @@ frontend — e a linha entra nesta tabela.
 | **F5** | `src/composables/useInfiniteList.ts` | Nenhuma — mantido o envelope Lucid. | Registrado aqui para deixar explícito que o **backend** é que se adapta ([§5.4](#54-paginação)). | — |
 | **F6** | `src/stores/portScan.ts` | Nenhuma esperada. **Validar** que o parser NDJSON tolera chegada muito mais rápida (RustScan é ordens de grandeza mais veloz). | Risco de *race* no acúmulo reativo. | 4 |
 | **F7** 🟢 | `src/stores/vpn.ts` | Os tipos da VPN passam a ser **apelidos** dos bindings `ts-rs` (`VpnPeerListItem`, `VpnServerStateResponse`, `SerializedVpnArtifact`, `PreflightResult`, `ProfileCard`, `VpnPeerConnectionStatus`, `VpnPeerDeviceView`, `VpnPeerWithDevice`, `ArtifactSummaryItem`, `ArtifactVariant`, `VpnServerResponse`) em vez de interfaces redigitadas à mão. `CreateVpnPeerPayload` continua manual — no Rust todo campo do `CreatePeerInput` é opcional, e o binding tornaria `name`/`profile` opcionais no wizard. Nenhuma mudança de runtime. | Ganho de tipagem ponta a ponta: trocar um campo no backend passa a quebrar o `vue-tsc` em vez da tela. Fecha o item aberto da Fase 8. | 8 |
-| **F8** 🟢 | `src/bindings/*.ts` *(novo)* | Destino dos bindings `ts-rs` passa a ser `frontend/src/bindings/`. Gerados: `LucidMeta`, `LucidPage`, `ApiError`, `ApiFieldError`, `ServiceInfo`. | O scaffold exportava para `backend-rust/frontend/`, diretório que ninguém consome. Agora o struct Rust é a fonte da verdade do tipo TS. | 0 |
+| **F8** 🟢 | `src/bindings/*.ts` *(novo)* | Destino dos bindings `ts-rs` passa a ser `frontend/src/bindings/`. Gerados: `LucidMeta`, `LucidPage`, `ApiError`, `ApiFieldError`, `ServiceInfo`. | O scaffold exportava para `backend/frontend/`, diretório que ninguém consome. Agora o struct Rust é a fonte da verdade do tipo TS. | 0 |
 | **F9** 🟢 | `src/composables/useInfiniteList.ts` | `PaginatedResponse.meta` passa a usar o `LucidMeta` gerado, em vez do tipo redigitado à mão. Comportamento em runtime **inalterado**. | Se o backend mudar um campo do `meta`, o `vue-tsc` acusa — em vez de a lista infinita parar sozinha em produção. Substitui a nota "nenhuma mudança" do F5. | 0 |
 | **F10** 🟢 | `src/stores/vpn.ts`, `src/components/VpnPeerWizard.vue` | `vpnProfileLabel`/`vpnProfileIcon` e `form.profile` do wizard passam a receber `string` em vez da união `VpnDeviceProfile`. A união continua exportada, agora só como chave das tabelas de rótulo/ícone. | Consequência do F7: quem decide os perfis aceitos é o `registry.rs`, então o backend serializa `deviceProfile` como `string`. Um perfil novo no Rust já aparecia no wizard em runtime (a lista vem do `GET /vpn/server`) — a união em TS é que o recusaria na compilação. As duas funções já tinham o fallback (`\|\| profile`, `\|\| 'mdi-devices'`); só o tipo mentia. | 8 |
 
@@ -1602,19 +1602,20 @@ FROM rust:1-slim AS builder
 WORKDIR /app
 RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
 COPY . .
-RUN cargo build --release --bin backend_rust-cli
+RUN cargo build --release --bin backend-cli
 
 FROM debian:stable-slim
 RUN apt-get update && apt-get install -y ca-certificates iproute2 && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /app/target/release/backend_rust-cli /usr/local/bin/
+COPY --from=builder /app/target/release/backend-cli /usr/local/bin/
 COPY --from=builder /app/config /app/config
 WORKDIR /app
-CMD ["backend_rust-cli", "start"]
+CMD ["backend-cli", "start"]
 ```
 
 Ajustes no `docker-compose.yml` (Fase 9):
 
-- `build: ./backend` → `build: ./backend-rust` nos serviços `server`, `migration`, `scheduler`,
+- `build: ./backend` (AdonisJS) → `build: ./backend-rust` — diretório renomeado de
+  volta para `./backend` depois do corte — nos serviços `server`, `migration`, `scheduler`,
   `probe`, `vpn-probe`;
 - comandos: `db migrate`, `start`, `task scheduler_run`, `task probe_run`;
 - **`sysctls: net.ipv4.ping_group_range: "0 2147483647"`** nos serviços que pingam
@@ -1660,7 +1661,7 @@ O scaffold já traz `loco-rs[testing]`, `rstest`, `insta`, `serial_test`.
 - [x] Executar **SPIKE-01..05** e publicar os ADRs em `docs/adr/`
       — [001](../adr/001-snmp-client.md), [002](../adr/002-rustscan-embedding.md),
       [003](../adr/003-icmp-dgram.md), [004](../adr/004-dns-wire.md),
-      [005](../adr/005-scheduler-loco.md). Protótipos em `backend-rust/examples/spikes/`,
+      [005](../adr/005-scheduler-loco.md). Protótipos em `backend/examples/spikes/`,
       executáveis por `cargo run --example spike_{icmp_dgram,snmp_v2c,dns_wire}`.
 - [x] Fechar o `Cargo.toml` e travar o `Cargo.lock`
       — bloco da [§3.1](#31-cargotoml-alvo) aplicado, com duas correções registradas
@@ -1687,7 +1688,7 @@ O scaffold já traz `loco-rs[testing]`, `rstest`, `insta`, `serial_test`.
 - `Dockerfile` (multi-estágio, usuário não-root, sem `CAP_NET_RAW`) e
   `docker-compose.icmp-spike.yml` — exigidos por SPIKE-03.
 - Bindings `ts-rs` passam a ser gerados em `frontend/src/bindings/` (antes iam para um
-  diretório órfão dentro de `backend-rust/`).
+  diretório órfão dentro de `backend/`).
 
 > **Desvio consciente da [§1.3.4](#13-princípios-inegociáveis).** Os handlers devolvem
 > `Result<_, AppError>`, não `Result<_, loco_rs::Error>`. O `IntoResponse` do Loco serializa
@@ -1922,9 +1923,9 @@ e confirmar o `syncconf` sem derrubar túneis ativos.
 - [x] 🟢 **Concluído** — Plano de migração de dados em
       [corte_backend_rust.md](corte_backend_rust.md), incluindo a re-cifra dos segredos da VPN
       (desvio **D6**): `node ace vpn:export-secrets` no AdonisJS →
-      `backend_rust-cli task vpn_secrets_import` no Rust, com conferência final que **falha**
+      `backend-cli task vpn_secrets_import` no Rust, com conferência final que **falha**
       se algum segredo não decifrar.
-- [x] 🟢 **Concluído** — `docker-compose.yml` apontando para `backend-rust` nos cinco serviços,
+- [x] 🟢 **Concluído** — `docker-compose.yml` apontando para `backend` nos cinco serviços,
       com `sysctls: ping_group_range` (ADR 003) e `ulimits: nofile` (§3.3.1).
 - [x] 🟢 **Concluído** — `AGENTS.md` atualizado: validação vira `cargo fmt`/`clippy`/`test`,
       as regras do `vpn-probe` apontam para os arquivos Rust e as fronteiras do projeto
@@ -2034,14 +2035,14 @@ verificação manual registrada).
 
 | Adonis | Rust |
 | :--- | :--- |
-| `node ace scheduler:run` | `backend_rust-cli task scheduler_run` |
-| `node ace probe:run` | `backend_rust-cli task probe_run` |
-| `node ace probe:register` | `backend_rust-cli task probe_register` |
-| `node ace vpn:probe-register` ⚠️ | `backend_rust-cli task vpn_probe_register` |
-| `node ace network:scan` | `backend_rust-cli task network_scan` |
-| `node ace snmp:poll` | `backend_rust-cli task snmp_poll` |
-| `node ace monitor:test` | `backend_rust-cli task monitor_test` |
-| `node ace migration:run` | `backend_rust-cli db migrate` |
+| `node ace scheduler:run` | `backend-cli task scheduler_run` |
+| `node ace probe:run` | `backend-cli task probe_run` |
+| `node ace probe:register` | `backend-cli task probe_register` |
+| `node ace vpn:probe-register` ⚠️ | `backend-cli task vpn_probe_register` |
+| `node ace network:scan` | `backend-cli task network_scan` |
+| `node ace snmp:poll` | `backend-cli task snmp_poll` |
+| `node ace monitor:test` | `backend-cli task monitor_test` |
+| `node ace migration:run` | `backend-cli db migrate` |
 
 ---
 
@@ -2091,7 +2092,7 @@ Uma fase só é marcada 🟢 quando **todos** os itens abaixo são verdadeiros:
 
 **Aceite final do projeto:**
 
-- O frontend roda contra `backend-rust` com as mudanças da §12 e nada mais — F1–F4 mexem em
+- O frontend roda contra `backend` com as mudanças da §12 e nada mais — F1–F4 mexem em
   comportamento; F7–F10 são só tipagem vinda dos bindings `ts-rs`.
 - As 50 linhas da matriz de paridade estão verdes — hoje 49, com a #42 pendente de validação em container.
 - `docker compose up` sobe `migration`, `server`, `scheduler`, `probe`, `wireguard`,

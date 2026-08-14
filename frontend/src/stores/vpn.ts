@@ -15,7 +15,7 @@ import type { VpnServerStateResponse } from '@/bindings/VpnServerStateResponse'
 
 /**
  * Os tipos da VPN são gerados pelo `ts-rs` a partir dos structs Rust
- * (`backend-rust/src/views/vpn.rs` e `services/vpn/`) — desvio D7 / ajuste F7
+ * (`backend/src/views/vpn.rs` e `services/vpn/`) — desvio D7 / ajuste F7
  * do roadmap do backend Rust. Aqui ficam só os **apelidos** com os nomes que as
  * telas já usam, para que trocar um campo no backend quebre o `vue-tsc` em vez
  * da tela em produção.

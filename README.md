@@ -8,13 +8,13 @@ monitores, banco (SQLite) e servidor WireGuard.
 
 | Diretório | O que é | Toolchain |
 | :--- | :--- | :--- |
-| `backend-rust/` | API, scheduler, probe e migrations | `cargo` |
+| `backend/` | API, scheduler, probe e migrations | `cargo` |
 | `frontend/` | SPA Vue 3, servida pela própria API em produção | `npm` |
 | `docker/` | Entrypoint e watcher do WireGuard | — |
 | `docs/` | Arquitetura, roadmaps e ADRs | — |
 
 O `package.json` da raiz existe **só** para atalhos do frontend. Não há comando
-de backend em npm: o backend é `cargo`, rodado de dentro de `backend-rust/`.
+de backend em npm: o backend é `cargo`, rodado de dentro de `backend/`.
 
 ## Subir a stack
 
@@ -41,18 +41,18 @@ docker compose logs netmonitor | Select-String setup_token
 Se a linha já rolou para fora do terminal:
 
 ```powershell
-docker compose exec netmonitor backend_rust-cli task auth_setup_token
+docker compose exec netmonitor backend-cli task auth_setup_token
 ```
 
 Para fixá-lo de antemão (provisionamento automatizado), defina `SETUP_TOKEN` no
 `.env`. Concluído o cadastro o token deixa de ser aceito, e novos usuários
 passam a ser criados por quem já está autenticado.
 
-## Backend — comandos (`cd backend-rust`)
+## Backend — comandos (`cd backend`)
 
 ```powershell
-cargo run --bin backend_rust-cli -- start      # sobe a API
-cargo run --bin backend_rust-cli -- db migrate # aplica migrations
+cargo run --bin backend-cli -- start      # sobe a API
+cargo run --bin backend-cli -- db migrate # aplica migrations
 cargo fmt --all --check
 cargo clippy --all-targets -- -D warnings
 cargo test
@@ -72,7 +72,7 @@ alcança. Mesma imagem, outro comando:
 services:
   probe:
     image: netmonitor:latest
-    command: ["backend_rust-cli", "task", "probe_run"]
+    command: ["backend-cli", "task", "probe_run"]
     environment:
       PROBE_SERVER_URL: http://IP-DO-SERVIDOR:3333
       PROBE_TOKEN: <token gerado por `task probe_register`>
@@ -96,7 +96,7 @@ Os mesmos atalhos existem na raiz como `npm run dev:frontend`, `build:frontend`,
 ## Configuração
 
 `.env.example` lista todas as variáveis lidas — e só elas. A configuração viva
-do backend está em `backend-rust/config/{development,test,production}.yaml`;
+do backend está em `backend/config/{development,test,production}.yaml`;
 o `.env` apenas preenche os `get_env(...)` desses arquivos e as substituições do
 compose. O banco é apontado por **`DATABASE_URL`** (uma URL só, não campos
 separados): o padrão é o SQLite do volume, e apontar a variável para um

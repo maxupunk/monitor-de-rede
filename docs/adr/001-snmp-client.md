@@ -3,7 +3,7 @@
 - **Spike:** SPIKE-01 (§3.4 do `roadmap_backend_rust.md`)
 - **Status:** aceito — Fase 0
 - **Data:** 2026-08-10
-- **Protótipo:** [`backend-rust/examples/spikes/snmp_v2c.rs`](../../backend-rust/examples/spikes/snmp_v2c.rs)
+- **Protótipo:** [`backend/examples/spikes/snmp_v2c.rs`](../../backend/examples/spikes/snmp_v2c.rs)
 
 ## Contexto
 

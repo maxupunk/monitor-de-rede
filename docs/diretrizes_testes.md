@@ -3,7 +3,7 @@
 > [!IMPORTANT]
 > Todo recurso novo, refatoração ou correção de bug **DEVE** vir acompanhado de
 > teste. E "concluído" significa que os quatro comandos abaixo passaram, rodados
-> de dentro de `backend-rust/`:
+> de dentro de `backend/`:
 >
 > ```powershell
 > cargo fmt --all --check
@@ -21,10 +21,10 @@
 | Tipo | Localização | Escopo |
 | :--- | :--- | :--- |
 | **Unitário** | `#[cfg(test)] mod tests` **no próprio módulo** | Funções puras: parsers, cálculos, normalizações, formatação de mensagem. Sem banco, sem rede. |
-| **De requisição** | `backend-rust/tests/requests/` | Endpoints HTTP e fluxos completos com banco. |
-| **De modelo** | `backend-rust/tests/models/` | Regras de modelo e paginação, direto contra o banco. |
-| **De convenção** | `backend-rust/tests/conventions/` | Regras estruturais do código — hoje, `camelCase` em todo DTO. |
-| **De tarefa** | `backend-rust/tests/tasks/` | Comandos de CLI. |
+| **De requisição** | `backend/tests/requests/` | Endpoints HTTP e fluxos completos com banco. |
+| **De modelo** | `backend/tests/models/` | Regras de modelo e paginação, direto contra o banco. |
+| **De convenção** | `backend/tests/conventions/` | Regras estruturais do código — hoje, `camelCase` em todo DTO. |
+| **De tarefa** | `backend/tests/tasks/` | Comandos de CLI. |
 | **Snapshot** | `insta`, ao lado do teste | Artefatos textuais: scripts de VPN, `wg0.conf`, payloads longos. |
 
 Função pura tem teste no próprio arquivo. Isso não é preferência de
@@ -96,7 +96,7 @@ Os arquivos de `frontend/src/bindings/` são gerados por `ts-rs` **durante
 ## 3. Antes de considerar pronto
 
 ```powershell
-cd backend-rust
+cd backend
 cargo fmt --all --check
 cargo clippy --all-targets -- -D warnings
 cargo test
@@ -108,5 +108,5 @@ npm run lint
 npm run build
 ```
 
-`cargo test` recria `backend_rust_test.sqlite*` em `backend-rust/`. São
+`cargo test` recria `netmonitor_test.sqlite*` em `backend/`. São
 ignorados pelo git; não precisam ser removidos, só não versionados.
