@@ -13,7 +13,7 @@
     </PageHeader>
 
     <!-- Disparo de varredura por faixa cadastrada em /networks -->
-    <v-card elevation="2" class="mobile-full-bleed mb-4 mb-md-6 pa-2 pa-md-4">
+    <v-card elevation="2" rounded="lg" class="mb-4 mb-md-6 pa-2 pa-md-4">
       <div class="d-flex flex-column flex-md-row align-start align-md-center ga-3">
         <v-icon color="secondary" size="28" class="hidden-sm-and-down">mdi-radar</v-icon>
         <div class="flex-grow-1 w-100" style="min-width: 260px">
@@ -70,7 +70,7 @@
     </v-card>
 
     <!-- Abas: Resultados & Execuções -->
-    <v-card elevation="2" class="mobile-full-bleed">
+    <v-card elevation="2" rounded="lg">
       <v-tabs v-model="tab" color="primary">
         <v-tab value="results">Resultados Encontrados</v-tab>
         <v-tab value="runs">Histórico de Escaneamento</v-tab>
@@ -82,7 +82,7 @@
           <!-- Resultados Encontrados -->
           <v-window-item value="results">
             <!-- Card de progresso durante a varredura -->
-            <v-card v-if="scanning" variant="outlined" class="rounded-0 pa-3 mb-3">
+            <v-card v-if="scanning" variant="outlined" rounded="lg" class="pa-3 mb-3">
               <div
                 class="d-flex align-start align-md-center justify-space-between flex-column flex-md-row ga-2 mb-2"
               >
@@ -120,7 +120,8 @@
             <v-card
               v-if="streamedHosts.length === 0 && !scanning"
               variant="outlined"
-              class="rounded-0 pa-6 text-center text-grey"
+              rounded="lg"
+              class="pa-6 text-center text-grey"
             >
               <v-icon size="40" color="grey-lighten-1" class="mb-2">mdi-radar</v-icon>
               <div class="text-subtitle-2 font-weight-medium">Nenhum dispositivo encontrado.</div>
@@ -158,7 +159,8 @@
                 v-for="item in streamedHosts"
                 :key="item.ipAddress"
                 variant="outlined"
-                class="rounded-0 pa-3 cursor-pointer"
+                rounded="lg"
+                class="pa-3 cursor-pointer"
                 @click="openDetailDialog(item)"
               >
                 <div class="d-flex align-start justify-space-between ga-2">

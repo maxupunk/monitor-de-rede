@@ -13,7 +13,7 @@
     </PageHeader>
 
     <!-- Tabela de Sub-redes -->
-    <v-card elevation="2" class="mobile-full-bleed">
+    <v-card elevation="2" rounded="lg">
       <v-card-title class="pa-4">
         <v-text-field
           v-model="search"

@@ -34,7 +34,7 @@
     </PageHeader>
 
     <!-- Abas: Alertas Ativos, Resolvidos, Regras e Histórico -->
-    <v-card elevation="2" class="mobile-full-bleed">
+    <v-card elevation="2" rounded="lg">
       <v-tabs v-model="tab" color="primary">
         <v-tab value="active">Alertas Pendentes ({{ alertsStore.activeAlerts.length }})</v-tab>
         <v-tab value="resolved">Alertas Resolvidos ({{ alertsStore.resolvedAlerts.length }})</v-tab>

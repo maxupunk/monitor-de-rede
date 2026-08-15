@@ -13,7 +13,7 @@
     </PageHeader>
 
     <!-- Tabela de Probes -->
-    <v-card elevation="2" class="mobile-full-bleed">
+    <v-card elevation="2" rounded="lg">
       <ResponsiveDataTable
         :headers="headers"
         :items="probesStore.probes"

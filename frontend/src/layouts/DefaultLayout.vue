@@ -145,7 +145,7 @@
 
     <!-- Conteúdo Principal da Página -->
     <v-main class="bg-grey-lighten-4">
-      <v-container fluid class="px-mobile-5 px-md-6 py-3 py-md-6 max-w-1600">
+      <v-container fluid class="px-2 px-md-6 py-3 py-md-6 max-w-1600">
         <router-view />
       </v-container>
     </v-main>

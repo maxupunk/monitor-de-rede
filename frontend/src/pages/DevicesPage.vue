@@ -13,7 +13,7 @@
     </PageHeader>
 
     <!-- Tabela de Dispositivos -->
-    <v-card elevation="2" class="mobile-full-bleed">
+    <v-card elevation="2" rounded="lg">
       <v-card-title class="pa-4 d-flex align-center">
         <v-text-field
           v-model="search"

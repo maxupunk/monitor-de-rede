@@ -31,7 +31,7 @@
       Configure o servidor VPN antes de adicionar dispositivos.
     </v-alert>
 
-    <v-card elevation="2" class="mobile-full-bleed">
+    <v-card elevation="2" rounded="lg">
       <ResponsiveDataTable
         :headers="headers"
         :items="vpnStore.peers"

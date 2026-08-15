@@ -19,7 +19,7 @@
     </VDataTable>
 
     <!-- Mobile: lista de cards -->
-    <div v-else class="d-flex flex-column ga-2">
+    <div v-else class="d-flex flex-column ga-2 pa-2">
       <template v-if="items.length > 0">
         <!-- `border` porque o card do item fica dentro do card da página, com a
              mesma cor de surface: sem contorno os dois viram um bloco só, e com
@@ -28,7 +28,7 @@
           v-for="(item, index) in items"
           :key="itemKey ? itemKey(item) : index"
           border
-          rounded="0"
+          rounded="lg"
           class="pa-3"
           :class="{ 'cursor-pointer': clickable }"
           @click="clickable ? onCardClick(item) : undefined"
@@ -40,7 +40,7 @@
       <v-card
         v-else-if="!loading"
         variant="outlined"
-        rounded="0"
+        rounded="lg"
         class="pa-6 text-center text-grey"
       >
         <v-icon size="40" color="grey-lighten-1" class="mb-2">mdi-inbox-outline</v-icon>
