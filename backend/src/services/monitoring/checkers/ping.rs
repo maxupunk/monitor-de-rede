@@ -16,18 +16,34 @@ use crate::services::{
 /// Cliente único por processo. O socket compartilhado evita abrir um raw/DGRAM
 /// socket para cada monitor e o `PingIdentifier` faz a multiplexação segura.
 #[derive(Clone)]
-pub struct PingClient(pub Arc<Client>);
+pub struct PingClient {
+    ipv4: Arc<Client>,
+    ipv6: Option<Arc<Client>>,
+}
 
 impl PingClient {
     /// Cria o cliente com DGRAM, a modalidade que funciona sem `CAP_NET_RAW`.
     pub fn create() -> AppResult<Self> {
-        let config = Config::builder()
+        let ipv4_config = Config::builder()
             .kind(ICMP::V4)
             .sock_type_hint(Type::DGRAM)
             .build();
-        Client::new(&config)
-            .map(|client| Self(Arc::new(client)))
-            .map_err(|err| AppError::Internal(err.into()))
+        let ipv6_config = Config::builder()
+            .kind(ICMP::V6)
+            .sock_type_hint(Type::DGRAM)
+            .build();
+        let ipv4 = Client::new(&ipv4_config).map_err(|err| AppError::Internal(err.into()))?;
+        let ipv6 = Client::new(&ipv6_config)
+            .map(Arc::new)
+            .map_err(|error| {
+                tracing::warn!(%error, "socket ICMPv6 DGRAM indisponível; ICMPv4 permanece ativo");
+                error
+            })
+            .ok();
+        Ok(Self {
+            ipv4: Arc::new(ipv4),
+            ipv6,
+        })
     }
 
     /// Recupera o cliente inicializado pelo hook do Loco.
@@ -35,6 +51,14 @@ impl PingClient {
         ctx.shared_store
             .get::<Self>()
             .ok_or_else(|| AppError::Internal(anyhow::anyhow!("Cliente ICMP não inicializado")))
+    }
+
+    #[must_use]
+    pub fn for_ip(&self, ip: IpAddr) -> Option<Arc<Client>> {
+        match ip {
+            IpAddr::V4(_) => Some(Arc::clone(&self.ipv4)),
+            IpAddr::V6(_) => self.ipv6.clone(),
+        }
     }
 }
 
@@ -83,22 +107,15 @@ impl Checker for PingChecker {
         let started_at = Utc::now();
         let host = config.host.clone();
         let ip: IpAddr = match host.parse::<IpAddr>() {
-            Ok(ip) if ip.is_ipv4() => ip,
-            Ok(_) => {
-                return failed_result(
-                    started_at,
-                    &host,
-                    "o checker ICMP atual suporta apenas IPv4".into(),
-                )
-            }
+            Ok(ip) => ip,
             Err(_) => match tokio::net::lookup_host((host.as_str(), 0)).await {
-                Ok(mut addresses) => match addresses.find(|address| address.ip().is_ipv4()) {
+                Ok(mut addresses) => match addresses.next() {
                     Some(address) => address.ip(),
                     None => {
                         return failed_result(
                             started_at,
                             &host,
-                            "nenhum endereço IPv4 foi encontrado no DNS".into(),
+                            "nenhum endereço IP foi encontrado no DNS".into(),
                         )
                     }
                 },
@@ -106,11 +123,10 @@ impl Checker for PingChecker {
             },
         };
         let count = config.packet_count.clamp(1, 20);
-        let mut pinger = self
-            .client
-            .0
-            .pinger(ip, PingIdentifier(rand::random()))
-            .await;
+        let Some(client) = self.client.for_ip(ip) else {
+            return failed_result(started_at, &host, "socket ICMPv6 indisponível".into());
+        };
+        let mut pinger = client.pinger(ip, PingIdentifier(rand::random())).await;
         let per_packet_timeout_ms =
             (config.timeout_ms / u64::from(count)).clamp(200, config.timeout_ms.max(200));
         pinger.timeout(Duration::from_millis(per_packet_timeout_ms));

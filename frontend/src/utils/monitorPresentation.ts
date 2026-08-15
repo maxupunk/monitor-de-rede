@@ -194,6 +194,8 @@ const STATUS_TONES: Record<string, StatusTone> = {
   instável: 'warning',
   silenced: 'warning',
   filtered: 'warning',
+  'open|filtered': 'warning',
+  unreachable: 'error',
   merged: 'info',
   disabled: 'neutral',
   desabilitada: 'neutral',

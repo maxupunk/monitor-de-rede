@@ -18,7 +18,7 @@
 
       <v-card-text class="pa-6">
         <v-row>
-          <v-col cols="12" sm="5">
+          <v-col cols="12" sm="4">
             <v-text-field
               v-model="hostModel"
               label="Host / Endereço IP *"
@@ -29,7 +29,7 @@
               hide-details
             ></v-text-field>
           </v-col>
-          <v-col cols="6" sm="3">
+          <v-col cols="6" sm="2">
             <v-select
               v-model="protocol"
               :items="[
@@ -43,12 +43,13 @@
               hide-details
             ></v-select>
           </v-col>
-          <v-col cols="6" sm="4">
+          <v-col cols="6" sm="3">
             <v-select
               v-model="presetKey"
               :items="[
                 { title: 'Portas Comuns', value: 'common' },
                 { title: 'Bem Conhecidas (1-1024)', value: 'range1024' },
+                { title: 'Todas (1-65535)', value: 'all' },
                 { title: 'Personalizado', value: 'custom' },
               ]"
               label="Intervalo"
@@ -58,18 +59,49 @@
               hide-details
             ></v-select>
           </v-col>
+          <v-col cols="12" sm="3">
+            <v-select
+              v-model="profile"
+              :items="[
+                { title: 'Confiável', value: 'reliable' },
+                { title: 'Rápido', value: 'fast' },
+                { title: 'Completo', value: 'complete' },
+              ]"
+              label="Perfil"
+              variant="outlined"
+              density="comfortable"
+              :disabled="portScanStore.scanning"
+              hide-details
+            ></v-select>
+          </v-col>
+
+          <v-col cols="12" class="pt-0">
+            <div class="text-caption text-grey-darken-1">
+              {{ selectedPortCount.toLocaleString('pt-BR') }} porta(s) · pior caso aproximado:
+              {{ estimatedDuration }}. Portas que recusam conexão terminam antes.
+            </div>
+          </v-col>
 
           <v-col v-if="presetKey === 'custom'" cols="12">
             <v-text-field
               v-model="customPortsInput"
               label="Portas Personalizadas"
               placeholder="Ex: 22,80,443,8000-8100"
-              hint="Separe por vírgula. Use um traço para faixas (ex: 20-25). Limite de 1024 portas por varredura."
+              hint="Separe por vírgula. Use um traço para faixas (ex: 20-25). Faixas grandes são processadas em lotes."
               persistent-hint
               variant="outlined"
               density="comfortable"
               :disabled="portScanStore.scanning"
             ></v-text-field>
+            <v-alert
+              v-if="invalidCustomParts.length"
+              type="warning"
+              variant="tonal"
+              density="compact"
+              class="mt-2"
+            >
+              Itens fora de 1–65535 serão ignorados: {{ invalidCustomParts.join(', ') }}
+            </v-alert>
           </v-col>
         </v-row>
 
@@ -119,7 +151,7 @@
             v-model="filterMode"
             :items="[
               { title: 'Apenas Abertas', value: 'open' },
-              { title: 'Abertas e Filtradas', value: 'open_filtered' },
+              { title: 'Abertas e Inconclusivas', value: 'open_filtered' },
               { title: 'Todas as Portas', value: 'all' },
             ]"
             label="Exibir"
@@ -208,7 +240,12 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { usePortScanStore, type PortScanItem, type PortProtocol } from '@/stores/portScan'
+import {
+  usePortScanStore,
+  type PortScanItem,
+  type PortProtocol,
+  type PortScanProfile,
+} from '@/stores/portScan'
 import { getStatusColor } from '@/utils/monitorPresentation'
 import { formatLatency } from '@/utils/formatters'
 
@@ -228,7 +265,8 @@ type DisplayFilter = 'open' | 'open_filtered' | 'all'
 
 const hostModel = ref('')
 const protocol = ref<PortProtocol>('tcp')
-const presetKey = ref<'common' | 'range1024' | 'custom'>('common')
+const profile = ref<PortScanProfile>('reliable')
+const presetKey = ref<'common' | 'range1024' | 'all' | 'custom'>('common')
 const customPortsInput = ref('')
 const filterMode = ref<DisplayFilter>('open')
 const results = ref<PortScanItem[] | null>(null)
@@ -237,12 +275,10 @@ const scanErrorIsWarningOnly = ref(false)
 const totalPortsBeingScanned = ref(0)
 
 const TCP_COMMON_PORTS = [
-  21, 22, 23, 25, 53, 80, 110, 111, 135, 139, 143, 161, 389, 443, 445, 465, 587, 993, 995, 1433,
-  1521, 2049, 3306, 3389, 5060, 5432, 5900, 6379, 8000, 8080, 8443, 9000, 27017,
+  21, 22, 23, 25, 53, 80, 110, 111, 135, 139, 143, 389, 443, 445, 465, 554, 587, 993, 995, 1433,
+  1521, 2049, 3306, 3389, 5060, 5432, 5900, 6379, 8000, 8080, 8291, 8443, 9000, 9100, 27017,
 ]
 const UDP_COMMON_PORTS = [53, 67, 68, 69, 123, 137, 138, 161, 162, 500, 514, 520, 1900, 4500, 5353]
-
-const MAX_PORTS_PER_SCAN = 1024
 
 watch(
   () => props.modelValue,
@@ -250,6 +286,7 @@ watch(
     if (isOpen) {
       hostModel.value = props.host || ''
       protocol.value = 'tcp'
+      profile.value = 'reliable'
       presetKey.value = 'common'
       customPortsInput.value = ''
       filterMode.value = 'open'
@@ -266,12 +303,34 @@ watch(
 const openCount = computed(() => results.value?.filter((r) => r.status === 'open').length ?? 0)
 
 const openFilteredCount = computed(
-  () => results.value?.filter((r) => r.status === 'open|filtered').length ?? 0
+  () =>
+    results.value?.filter((r) => r.status === 'open|filtered' || r.status === 'filtered').length ??
+    0
 )
 
 const progressPercent = computed(() => {
   if (!totalPortsBeingScanned.value) return 0
   return ((results.value?.length ?? 0) / totalPortsBeingScanned.value) * 100
+})
+
+const selectedPortCount = computed(() => {
+  if (presetKey.value === 'range1024') return 1024
+  if (presetKey.value === 'all') return 65535
+  if (presetKey.value === 'custom') return parsePortsInput(customPortsInput.value).length
+  return protocol.value === 'tcp' ? TCP_COMMON_PORTS.length : UDP_COMMON_PORTS.length
+})
+
+const estimatedDuration = computed(() => {
+  const settings = {
+    fast: { concurrency: 512, perWaveSeconds: 1.5 },
+    reliable: { concurrency: 256, perWaveSeconds: 3.1 },
+    complete: { concurrency: 64, perWaveSeconds: 7.4 },
+  }[profile.value]
+  const seconds =
+    Math.ceil(selectedPortCount.value / settings.concurrency) * settings.perWaveSeconds
+  if (seconds < 60) return `${Math.max(1, Math.ceil(seconds))} s`
+  if (seconds < 3600) return `${Math.ceil(seconds / 60)} min`
+  return `${(seconds / 3600).toFixed(1)} h`
 })
 
 const filteredResults = computed(() => {
@@ -281,7 +340,9 @@ const filteredResults = computed(() => {
     return sorted.filter((r) => r.status === 'open')
   }
   if (filterMode.value === 'open_filtered') {
-    return sorted.filter((r) => r.status === 'open' || r.status === 'open|filtered')
+    return sorted.filter(
+      (r) => r.status === 'open' || r.status === 'open|filtered' || r.status === 'filtered'
+    )
   }
   return sorted
 })
@@ -299,8 +360,10 @@ function parsePortsInput(input: string): number[] {
       let start = Number(rangeMatch[1])
       let end = Number(rangeMatch[2])
       if (start > end) [start, end] = [end, start]
-      for (let p = start; p <= end; p++) {
-        if (p >= 1 && p <= 65535) ports.add(p)
+      const boundedStart = Math.max(1, start)
+      const boundedEnd = Math.min(65535, end)
+      for (let p = boundedStart; p <= boundedEnd; p++) {
+        ports.add(p)
       }
     } else {
       const p = Number(part)
@@ -311,12 +374,33 @@ function parsePortsInput(input: string): number[] {
   return Array.from(ports).sort((a, b) => a - b)
 }
 
+const invalidCustomParts = computed(() => {
+  if (presetKey.value !== 'custom') return []
+  return customPortsInput.value
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .filter((part) => {
+      const range = part.match(/^(\d+)\s*-\s*(\d+)$/)
+      if (range) {
+        const start = Number(range[1])
+        const end = Number(range[2])
+        return start < 1 || start > 65535 || end < 1 || end > 65535
+      }
+      const port = Number(part)
+      return !Number.isInteger(port) || port < 1 || port > 65535
+    })
+})
+
 function resolvePorts(): number[] {
   if (presetKey.value === 'custom') {
     return parsePortsInput(customPortsInput.value)
   }
   if (presetKey.value === 'range1024') {
     return Array.from({ length: 1024 }, (_, i) => i + 1)
+  }
+  if (presetKey.value === 'all') {
+    return Array.from({ length: 65535 }, (_, i) => i + 1)
   }
   return protocol.value === 'tcp' ? TCP_COMMON_PORTS : UDP_COMMON_PORTS
 }
@@ -326,23 +410,20 @@ const statusColor = getStatusColor
 function statusLabel(status: PortScanItem['status']) {
   if (status === 'open') return 'ABERTA'
   if (status === 'closed') return 'FECHADA'
-  return 'ABERTA/FILTRADA'
+  if (status === 'open|filtered') return 'ABERTA/FILTRADA'
+  if (status === 'filtered') return 'FILTRADA/TIMEOUT'
+  if (status === 'unreachable') return 'HOST INALCANÇÁVEL'
+  return 'ERRO LOCAL'
 }
 
 async function startScan() {
   if (!hostModel.value) return
 
-  let ports = resolvePorts()
+  const ports = resolvePorts()
   if (ports.length === 0) {
     scanError.value = 'Informe ao menos uma porta válida.'
     scanErrorIsWarningOnly.value = false
     return
-  }
-
-  let truncatedNote = ''
-  if (ports.length > MAX_PORTS_PER_SCAN) {
-    ports = ports.slice(0, MAX_PORTS_PER_SCAN)
-    truncatedNote = ` (lista truncada para o limite de ${MAX_PORTS_PER_SCAN} portas por varredura)`
   }
 
   scanError.value = null
@@ -351,21 +432,18 @@ async function startScan() {
   totalPortsBeingScanned.value = ports.length
 
   const completed = await portScanStore.scanPorts(
-    { host: hostModel.value, protocol: protocol.value, ports },
+    { host: hostModel.value, protocol: protocol.value, ports, profile: profile.value },
     (item) => {
       results.value?.push(item)
     }
   )
 
-  if (completed) {
-    if (truncatedNote) {
-      scanError.value = `Varredura concluída${truncatedNote}.`
-      scanErrorIsWarningOnly.value = true
+  if (!completed) {
+    if (portScanStore.error) {
+      scanError.value = portScanStore.error
+      scanErrorIsWarningOnly.value = false
+      return
     }
-  } else if (portScanStore.error) {
-    scanError.value = portScanStore.error
-    scanErrorIsWarningOnly.value = false
-  } else {
     scanError.value = `Varredura cancelada (${results.value?.length ?? 0}/${totalPortsBeingScanned.value} portas verificadas).`
     scanErrorIsWarningOnly.value = true
   }

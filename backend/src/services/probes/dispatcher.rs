@@ -5,13 +5,16 @@
 
 use chrono::{Duration, Utc};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder,
-    QuerySelect, Set,
+    sea_query::Expr, ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
+    QueryOrder, QuerySelect, Set,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    models::{_entities::probe_tasks as probe_tasks_entity, probe_tasks},
+    models::{
+        _entities::{discovery_runs as discovery_runs_entity, probe_tasks as probe_tasks_entity},
+        discovery_runs, probe_tasks,
+    },
     services::shared::errors::AppResult,
 };
 
@@ -37,6 +40,17 @@ pub struct ProbeTask {
     pub task_type: String,
     pub timeout_ms: i32,
     pub payload: serde_json::Value,
+}
+
+/// Contrato separado para discovery. Mantém compatibilidade com agentes que
+/// conhecem apenas tarefas de monitor e evita monitor fictício no banco.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbeDiscoveryTask {
+    pub id: String,
+    pub run_id: i64,
+    pub cidr: String,
+    pub timeout_ms: u64,
 }
 
 impl From<probe_tasks::Model> for ProbeTask {
@@ -120,6 +134,52 @@ pub async fn get_pending_tasks<C: ConnectionTrait>(
         .collect())
 }
 
+/// Entrega uma run remota pendente e a marca em execução. Uma única run por
+/// polling evita que um probe pequeno receba blocos grandes em paralelo.
+pub async fn get_pending_discovery_tasks<C: ConnectionTrait>(
+    db: &C,
+    probe_id: i64,
+) -> AppResult<Vec<ProbeDiscoveryTask>> {
+    let Some(run) = discovery_runs::Entity::find()
+        .filter(discovery_runs_entity::Column::ProbeId.eq(probe_id))
+        .filter(discovery_runs_entity::Column::Status.eq("pending"))
+        .order_by_asc(discovery_runs_entity::Column::Id)
+        .one(db)
+        .await?
+    else {
+        return Ok(Vec::new());
+    };
+    let cidr = run
+        .configuration
+        .as_ref()
+        .and_then(|value| value.get("cidr"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let claimed = discovery_runs::Entity::update_many()
+        .col_expr(
+            discovery_runs_entity::Column::Status,
+            Expr::value("running"),
+        )
+        .col_expr(
+            discovery_runs_entity::Column::StartedAt,
+            Expr::value(Utc::now()),
+        )
+        .filter(discovery_runs_entity::Column::Id.eq(run.id))
+        .filter(discovery_runs_entity::Column::Status.eq("pending"))
+        .exec(db)
+        .await?;
+    if claimed.rows_affected == 0 {
+        return Ok(Vec::new());
+    }
+    Ok(vec![ProbeDiscoveryTask {
+        id: format!("discovery-{}", run.id),
+        run_id: run.id,
+        cidr,
+        timeout_ms: 6 * 60 * 60 * 1_000,
+    }])
+}
+
 /// Esvazia a fila de um probe — usado ao revogar ou remover o agente.
 ///
 /// # Errors
@@ -167,5 +227,19 @@ mod tests {
     fn o_id_da_tarefa_carrega_monitor_e_instante() {
         let now = chrono::DateTime::from_timestamp_millis(1_700_000_000_000).expect("instante");
         assert_eq!(task_id(42, now), "task-42-1700000000000");
+    }
+
+    #[test]
+    fn discovery_usa_contrato_separado_de_monitor() {
+        let task = ProbeDiscoveryTask {
+            id: "discovery-9".into(),
+            run_id: 9,
+            cidr: "10.8.0.0/24".into(),
+            timeout_ms: 5_000,
+        };
+        let json = serde_json::to_value(task).unwrap();
+        assert_eq!(json["runId"], 9);
+        assert_eq!(json["cidr"], "10.8.0.0/24");
+        assert!(json.get("monitorId").is_none());
     }
 }

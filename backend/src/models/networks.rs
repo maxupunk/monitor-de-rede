@@ -95,9 +95,9 @@ mod tests {
     }
 
     #[test]
-    fn faixa_grande_marca_truncamento() {
+    fn faixa_grande_e_processada_em_lotes_sem_truncamento() {
         let network = com_cidr("10.0.0.0/16");
         assert!(network.scannable());
-        assert!(network.scan_truncated());
+        assert!(!network.scan_truncated());
     }
 }

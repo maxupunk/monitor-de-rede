@@ -160,7 +160,7 @@ run_cycle (a cada 5 s, no mesmo processo)
    │     ├─ monitor tem probe? → enfileira em `probe_tasks`
    │     └─ não tem, ou o probe está offline? → executa local (`run_monitor`)
    │
-   ├─ discovery: processa runs pendentes, agenda redes vencidas
+   ├─ discovery: processa runs locais pendentes e agenda redes vencidas
    ├─ VPN: sincroniza telemetria dos túneis
    ├─ watchdog: probe sem heartbeat vira `offline`
    └─ data_pruner (a cada 1h): aplica as janelas de retenção
@@ -202,6 +202,13 @@ enfileira é o scheduler; quem entrega é a API, em `GET /api/probes/tasks`. Uma
 fila em memória funciona nos testes e nunca em produção: o probe consultaria uma
 fila sempre vazia e todo monitor atribuído a probe ficaria parado em `unknown`.
 
+Discovery remoto não cria monitor fictício em `probe_tasks`: a própria linha
+`discovery_runs` com `probe_id` e status `pending` é a fila persistente. O
+endpoint entrega essas linhas em `discoveryTasks`; o agente executa os mesmos
+scanners puros, devolve `discoveryResults` e somente o servidor central grava
+`discovery_results`. Resultados de monitor e discovery usam buffers offline
+separados no probe.
+
 - Um monitor tem no máximo **uma** tarefa pendente.
 - Tarefa parada além do TTL é descartada: probe que volta depois de um tempo
   fora executa uma checagem atual por monitor, não uma avalanche de vencidas.
@@ -222,6 +229,19 @@ fila sempre vazia e todo monitor atribuído a probe ficaria parado em `unknown`.
 
 O probe **não** recebe comando de shell. As tarefas são de tipos previamente
 definidos; qualquer coisa fora do catálogo é rejeitada.
+
+### Varredura de rede
+
+- CIDRs IPv4 e IPv6 são expandidos em lotes de 1.024 até o fim, sem corte.
+- ICMP não é pré-condição: TCP e SNMP/UDP são testados em todos os IPs do lote.
+- O scanner TCP usa `tokio::net::TcpStream`, sem raw socket/capability, com
+  limite global e por host, retries transitórios e perfis de carga.
+- O cliente SNMP usa `async-snmp`: transporte UDP compartilhado, correlação de
+  origem/request ID, GETBULK com fallback GETNEXT e SNMPv3 USM com cache de
+  engine e chaves derivadas.
+- Credenciais automáticas de discovery vêm apenas de
+  `SNMP_DISCOVERY_COMMUNITIES` e `SNMP_DISCOVERY_V3_PROFILES`; nunca são
+  persistidas dentro do resultado descoberto.
 
 ## 7. Esquema de dados
 

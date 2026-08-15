@@ -5,14 +5,15 @@ use chrono::Utc;
 use loco_rs::app::AppContext;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::{broadcast, RwLock};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    models::discovery_results,
+    models::{discovery_results, discovery_runs},
     services::{
         discovery::{
-            cidr_range::expand_cidr,
+            cidr_range::{expand_cidr_batch, parse_cidr_range, MAX_SCAN_HOSTS},
             merger::{merge_hosts, DiscoveredHost},
             progress::{ScanEvent, ScanReporter},
             scanners::{arp, icmp, mdns, ports, snmp, ssdp},
@@ -112,6 +113,24 @@ impl ScanSessionService {
             self.publish(&state);
         }
     }
+    pub async fn wait_for_probe(&self) {
+        let mut state = self.state.write().await;
+        state.status = "pending".into();
+        state.phase = "probe".into();
+        state
+            .logs
+            .push("Aguardando execução pelo probe remoto.".into());
+        self.publish(&state);
+    }
+    pub async fn remote_started(&self, run_id: i64) {
+        let mut state = self.state.write().await;
+        if state.run_id == Some(run_id) && state.status == "pending" {
+            state.status = "running".into();
+            state.phase = "probe".into();
+            state.logs.push("Probe remoto iniciou a varredura.".into());
+            self.publish(&state);
+        }
+    }
     pub async fn progress(&self, phase: &str, current: usize, total: usize) {
         let mut state = self.state.write().await;
         state.phase = phase.into();
@@ -174,6 +193,66 @@ pub async fn run_discovery(
     Ok(merged)
 }
 
+/// Execução sem persistência usada pelo agente remoto. Os mesmos scanners e
+/// limites são reutilizados; somente o servidor central grava a run.
+pub async fn scan_network(
+    ctx: &AppContext,
+    cidr: &str,
+    cancel: CancellationToken,
+) -> AppResult<Vec<DiscoveredHost>> {
+    scan_phases(ctx, cidr, cancel, &ScanReporter::silent()).await
+}
+
+/// Valida e finaliza o resultado devolvido por um probe. O vínculo da run com
+/// o probe impede um agente de gravar dados na execução de outro.
+pub async fn complete_remote_discovery(
+    ctx: &AppContext,
+    probe_id: i64,
+    run_id: i64,
+    hosts: &[DiscoveredHost],
+    error: Option<&str>,
+) -> AppResult<()> {
+    let run = discovery_runs::Entity::find_by_id(run_id)
+        .one(&ctx.db)
+        .await?
+        .ok_or_else(|| AppError::not_found("Execução de discovery não encontrada"))?;
+    if run.probe_id != Some(probe_id) {
+        return Err(AppError::unauthorized(
+            "A execução de discovery pertence a outro probe",
+        ));
+    }
+    if run.status == "cancelled" || run.status == "completed" {
+        return Ok(());
+    }
+
+    if error.is_none() {
+        persist_results(&ctx.db, run_id, hosts).await?;
+    }
+    discovery_runs::ActiveModel {
+        id: Set(run_id),
+        status: Set(if error.is_some() {
+            "failed"
+        } else {
+            "completed"
+        }
+        .into()),
+        finished_at: Set(Some(Utc::now().into())),
+        error: Set(error.map(ToString::to_string)),
+        ..Default::default()
+    }
+    .update(&ctx.db)
+    .await?;
+
+    let session = ScanSessionService::from_context(ctx)?;
+    if session.state().await.run_id == Some(run_id) {
+        if error.is_none() {
+            session.hosts(hosts).await;
+        }
+        session.finish(error.map(ToString::to_string)).await;
+    }
+    Ok(())
+}
+
 /// Aplica na sessão o que os scanners relatam, na ordem em que chega.
 async fn pump_events(
     session: ScanSessionService,
@@ -197,25 +276,105 @@ async fn scan_phases(
     cancel: CancellationToken,
     reporter: &ScanReporter,
 ) -> AppResult<Vec<DiscoveredHost>> {
-    let hosts = expand_cidr(cidr, 1024)?;
-    reporter.phase("icmp", 0, hosts.len());
+    let range = parse_cidr_range(cidr)?;
+    let total = range.usable_hosts as usize;
+    reporter.phase("discovery", 0, total);
     let ping = PingClient::from_context(ctx)?;
-    let icmp_hosts = icmp::scan(&ping, &hosts, reporter).await?;
-    reporter.phase("discovery", icmp_hosts.len(), hosts.len());
-    // Os três coletores de descoberta são independentes e best-effort.
-    let (arp_hosts, mdns_hosts, ssdp_hosts) =
-        tokio::join!(arp::scan(&hosts), mdns::scan(), ssdp::scan());
-    let mut merged = merge_hosts([icmp_hosts, arp_hosts, mdns_hosts, ssdp_hosts]);
-    reporter.hosts(&merged);
-    if !cancel.is_cancelled() {
-        merged = merge_hosts([ports::enrich(merged, cancel.clone(), reporter).await]);
+    // Multicast pertence à interface, não a um lote do CIDR: executá-lo uma vez
+    // evita respostas duplicadas em faixas grandes.
+    let (mdns_hosts, ssdp_hosts) = tokio::join!(mdns::scan(), ssdp::scan());
+    let mut merged = merge_hosts([mdns_hosts, ssdp_hosts]);
+    let mut offset = 0_u32;
+
+    while offset < range.usable_hosts {
+        let batch_started = Instant::now();
+        if cancel.is_cancelled() {
+            return Err(AppError::BusinessRule("Varredura cancelada.".into()));
+        }
+        let addresses = expand_cidr_batch(cidr, offset, MAX_SCAN_HOSTS as usize)?;
+        if addresses.is_empty() {
+            break;
+        }
+        let completed = (offset as usize + addresses.len()).min(total);
+
+        reporter.phase("icmp", offset as usize, total);
+        let phase_started = Instant::now();
+        let icmp_hosts =
+            icmp::scan(&ping, &addresses, cancel.clone(), &ScanReporter::silent()).await?;
+        tracing::info!(
+            phase = "icmp",
+            cidr,
+            offset,
+            tested = addresses.len(),
+            found = icmp_hosts.len(),
+            duration_ms = phase_started.elapsed().as_millis(),
+            "fase de discovery concluída"
+        );
+        reporter.progress("icmp", completed, total);
+
+        reporter.phase("discovery", offset as usize, total);
+        let phase_started = Instant::now();
+        let arp_hosts = arp::scan(&addresses).await;
+        tracing::info!(
+            phase = "neighbors",
+            cidr,
+            offset,
+            found = arp_hosts.len(),
+            duration_ms = phase_started.elapsed().as_millis(),
+            "fase de discovery concluída"
+        );
+        merged = merge_hosts([merged, icmp_hosts, arp_hosts]);
+
+        // Equivalente seguro ao `-Pn`: portas-chave são testadas em todo IP,
+        // mesmo quando ICMP e ARP não produziram resposta.
+        reporter.phase("ports", offset as usize, total);
+        let candidates: Vec<_> = addresses
+            .iter()
+            .map(|ip| DiscoveredHost {
+                ip_address: ip.to_string(),
+                data: serde_json::json!({ "scanner": "tcp-connect" }),
+                ..Default::default()
+            })
+            .collect();
+        let phase_started = Instant::now();
+        let mut port_hosts =
+            ports::enrich(candidates.clone(), cancel.clone(), &ScanReporter::silent()).await;
+        port_hosts.retain(|host| !host.open_ports.is_empty());
+        let port_host_count = port_hosts.len();
+        merged = merge_hosts([merged, port_hosts]);
+        reporter.progress("ports", completed, total);
+        tracing::info!(
+            phase = "ports",
+            cidr,
+            offset,
+            found = port_host_count,
+            duration_ms = phase_started.elapsed().as_millis(),
+            "fase de discovery concluída"
+        );
+
+        reporter.phase("snmp", offset as usize, total);
+        let phase_started = Instant::now();
+        let mut snmp_hosts =
+            snmp::enrich(candidates, cancel.clone(), &ScanReporter::silent()).await;
+        snmp_hosts.retain(|host| host.data.get("snmp").is_some());
+        let snmp_host_count = snmp_hosts.len();
+        merged = merge_hosts([merged, snmp_hosts]);
+        reporter.progress("snmp", completed, total);
         reporter.hosts(&merged);
+        tracing::info!(
+            phase = "snmp",
+            cidr,
+            offset,
+            found = snmp_host_count,
+            duration_ms = phase_started.elapsed().as_millis(),
+            batch_duration_ms = batch_started.elapsed().as_millis(),
+            "fase de discovery concluída"
+        );
+
+        offset = offset.saturating_add(addresses.len() as u32);
     }
-    if cancel.is_cancelled() {
-        return Err(AppError::BusinessRule("Varredura cancelada.".into()));
-    }
-    reporter.phase("snmp", 0, merged.len());
-    Ok(merge_hosts([snmp::enrich(merged, reporter).await]))
+
+    Ok(merge_hosts([merged]))
 }
 
 async fn persist_results(

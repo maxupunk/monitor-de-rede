@@ -1,75 +1,50 @@
-# ADR 001 — Cliente SNMP: `rasn-snmp` com transporte próprio
+# ADR 001 — Cliente SNMP assíncrono compartilhado
 
-- **Spike:** SPIKE-01 (§3.4 do `roadmap_backend_rust.md`)
-- **Status:** aceito — Fase 0
-- **Data:** 2026-08-10
-- **Protótipo:** [`backend/examples/spikes/snmp_v2c.rs`](../../backend/examples/spikes/snmp_v2c.rs)
+- **Status:** aceito — revisado na Fase 9
+- **Data original:** 2026-08-10
+- **Revisão:** 2026-08-15
+- **Spike atual:** [`async_snmp.rs`](../../backend/examples/spikes/async_snmp.rs)
 
 ## Contexto
 
-O backend AdonisJS fala SNMP v1/v2c/v3 com 6 coletores (`system`, `interface`,
-`traffic`, `cpu`, `memory`, `lldp`). A migração precisa de um cliente Rust que
-faça `get` e `walk` (GETNEXT/GETBULK) sem bloquear o runtime `tokio`, já que o
-poll SNMP roda dentro do mesmo processo do scheduler.
-
-Duas opções foram consideradas:
-
-1. **`rasn` + `rasn-snmp`** — só o codec ASN.1/BER. O transporte é nosso, sobre
-   `tokio::net::UdpSocket`.
-2. **`snmp2`** — cliente completo, porém **síncrono**; exigiria envolver cada
-   chamada em `spawn_blocking`.
+O primeiro backend Rust usava `rasn-snmp` apenas como codec e mantinha socket,
+retry, correlação de resposta, walk e parte do USM dentro do projeto. A auditoria
+da Fase 9 encontrou os efeitos desse custo: socket novo por consulta/GETNEXT,
+retry fixo, ausência de GETBULK efetivo e SNMPv3 auth/priv incompleto.
 
 ## Decisão
 
-**`rasn-snmp` 0.18 com transporte próprio em `tokio::net::UdpSocket`.**
+Usar `async-snmp` atrás do contrato de domínio `SnmpClient`. Coletores continuam
+dependendo somente de `SnmpClient`, `SnmpValue` e `SnmpError`; tipos da biblioteca
+não atravessam essa fronteira.
+
+O adaptador configura:
+
+- um `UdpTransport` compartilhado por família IP no processo;
+- validação conjunta de endereço de origem e request ID feita pelo transporte;
+- retry exponencial com jitter;
+- GETBULK em v2c/v3 e GETNEXT em v1;
+- fallback para GETNEXT e detecção de OID não crescente em agentes defeituosos;
+- v3 `noAuthNoPriv`, `authNoPriv` e `authPriv`;
+- cache compartilhado de engine e de chaves-mestre derivadas;
+- limite de 20.000 itens por walk.
 
 ## Evidência
 
-O protótipo roda em dois modos. Offline (o que roda em CI):
-
-```
-$ cargo run --example spike_snmp_v2c
-[ok] GetRequest de sysDescr.0 codificado em 40 bytes
-[ok] round-trip BER preserva request_id, community e OID
-[ok] GetNextRequest (base do walk) também fecha o ciclo
-```
-
-Ao vivo (`SNMP_TARGET=host:161`), o mesmo binário lê `sysDescr.0` e percorre a
-coluna `ifDescr` da `ifTable` por GETNEXT, parando quando o OID devolvido sai de
-baixo do prefixo — que é exatamente o laço do `walk` do cliente definitivo.
-
-Os tipos necessários existem e são completos: `rasn_snmp::v2c::Message<T>`,
-`v2::{Pdus, GetRequest, GetNextRequest, GetBulkRequest, Pdu, VarBind,
-VarBindValue}` e `v3` com USM. Decodificar em `Message<Pdus>` (o `choice`)
-funciona sem saber de antemão qual PDU chega — requisito de um cliente real.
+O teste local sobe um agente UDP real em porta efêmera e consulta o mesmo OID em
+v1, v2c e v3 authPriv. O walk v3 percorre a MIB via GETBULK. Toda rede de teste é
+restrita a `127.0.0.1`.
 
 ## Consequências
 
-**Positivas**
+- O código do produto deixa de manter ASN.1/BER e remove `rasn`, `rasn-smi` e
+  `rasn-snmp` das dependências de produção.
+- Credenciais permanecem no modelo de domínio e nunca entram em logs ou
+  resultados de discovery.
+- `async-snmp` ainda é pré-1.0; o adaptador isolado reduz o custo de uma futura
+  atualização ou troca.
 
-- Sem `spawn_blocking`: o poll SNMP compartilha o runtime com os demais
-  checkers, sem uma thread pool paralela dimensionada no escuro.
-- Controle total de timeout, retry e concorrência por alvo — o `snmp2` impõe os
-  dele.
-- `rasn` cobre v1, v2c e v3/USM no mesmo codec, então as três versões do §7.9
-  usam um caminho só.
+## Decisão substituída
 
-**Negativas / trabalho extra que isto cria**
-
-- **O transporte é nosso.** Socket, `request_id`, correlação de resposta,
-  timeout e retry precisam ser escritos e testados. Vai em
-  `src/services/snmp/client.rs`.
-- **Achado do spike:** `EncodeError` e `DecodeError` do `rasn` 0.18 **não**
-  implementam `std::error::Error`. O `?` não converte para `anyhow` nem para
-  `Box<dyn Error>`. O cliente precisa de um `SnmpError` (`thiserror`) com
-  `From` explícito para cada um — não é opcional, é a única forma de propagar.
-- `version: 1` significa SNMP**v2c** (RFC 1901 desloca a numeração em um).
-  Trocar isso por engano faz o agente descartar o pacote **em silêncio**, sem
-  erro. Está comentado no protótipo e deve ser comentado no cliente.
-
-## Alternativa recusada
-
-`snmp2` em `spawn_blocking`: cada `get` ocuparia uma thread do pool bloqueante
-pelo tempo do timeout de rede (até 5 s). Com dezenas de dispositivos SNMP em
-poll simultâneo, o pool vira o gargalo — e a §1.3.5 exige que nenhum caminho de
-rede derrube ou trave a task.
+A escolha original por `rasn-snmp 0.18` com transporte próprio fica preservada
+no histórico Git anterior a esta revisão, mas não descreve mais o runtime.

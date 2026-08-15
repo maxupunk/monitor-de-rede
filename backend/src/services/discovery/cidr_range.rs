@@ -8,11 +8,11 @@
 //! precisa. O `expand_cidr` (lista de endereços, com truncamento em
 //! [`MAX_SCAN_HOSTS`]) entra na Fase 5, junto com os scanners.
 
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use crate::services::shared::errors::AppError;
 
-/// Teto de endereços varridos por execução — /22 completo.
+/// Tamanho de cada lote. A execução percorre todos os lotes do CIDR.
 pub const MAX_SCAN_HOSTS: u32 = 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,7 +22,7 @@ pub struct CidrRange {
     pub prefix: u8,
     /// Total de endereços utilizáveis na faixa, antes de qualquer truncamento
     pub usable_hosts: u32,
-    /// `true` quando `usable_hosts` excede [`MAX_SCAN_HOSTS`]
+    /// Mantido no contrato HTTP por compatibilidade. Não há mais corte silencioso.
     pub truncated: bool,
 }
 
@@ -81,8 +81,11 @@ pub fn parse_cidr_range(cidr: &str) -> Result<CidrRange, AppError> {
         None => (value, None),
     };
 
-    let base =
-        to_number(address.trim()).ok_or_else(|| invalid(cidr, "endereço IPv4 malformado"))?;
+    if address.contains(':') {
+        return parse_ipv6_range(cidr, address.trim(), prefix_part);
+    }
+
+    let base = to_number(address.trim()).ok_or_else(|| invalid(cidr, "endereço IP malformado"))?;
 
     // Host avulso: uma varredura de um endereço só é legítima (testar um alvo).
     let prefix: u8 = match prefix_part {
@@ -110,7 +113,41 @@ pub fn parse_cidr_range(cidr: &str) -> Result<CidrRange, AppError> {
         network_address: to_address(u32::try_from(network_number).unwrap_or(0)),
         prefix,
         usable_hosts,
-        truncated: usable_hosts > MAX_SCAN_HOSTS,
+        truncated: false,
+    })
+}
+
+fn parse_ipv6_range(
+    cidr: &str,
+    address: &str,
+    prefix_part: Option<&str>,
+) -> Result<CidrRange, AppError> {
+    let address: Ipv6Addr = address
+        .parse()
+        .map_err(|_| invalid(cidr, "endereço IP malformado"))?;
+    let prefix = match prefix_part {
+        None => 128,
+        Some(text) => text
+            .trim()
+            .parse::<u8>()
+            .map_err(|_| invalid(cidr, "prefixo IPv6 deve estar entre /112 e /128"))?,
+    };
+    if !(112..=128).contains(&prefix) {
+        return Err(invalid(cidr, "prefixo IPv6 deve estar entre /112 e /128"));
+    }
+    let host_bits = 128 - u32::from(prefix);
+    let size = 1_u128 << host_bits;
+    let mask = if prefix == 128 {
+        u128::MAX
+    } else {
+        u128::MAX << host_bits
+    };
+    let network = u128::from(address) & mask;
+    Ok(CidrRange {
+        network_address: Ipv6Addr::from(network).to_string(),
+        prefix,
+        usable_hosts: u32::try_from(size).unwrap_or(u32::MAX),
+        truncated: false,
     })
 }
 
@@ -122,8 +159,31 @@ pub fn is_scannable_cidr(cidr: &str) -> bool {
 
 /// Expande somente endereços utilizáveis e limita a memória/tempo da operação.
 /// Em /31 e /32 todos os endereços pertencem ao enlace conforme RFC 3021.
-pub fn expand_cidr(cidr: &str, max_hosts: usize) -> Result<Vec<Ipv4Addr>, AppError> {
+pub fn expand_cidr(cidr: &str, max_hosts: usize) -> Result<Vec<IpAddr>, AppError> {
+    expand_cidr_batch(cidr, 0, max_hosts)
+}
+
+/// Expande um lote do CIDR sem materializar a faixa inteira em memória.
+pub fn expand_cidr_batch(
+    cidr: &str,
+    offset: u32,
+    max_hosts: usize,
+) -> Result<Vec<IpAddr>, AppError> {
     let range = parse_cidr_range(cidr)?;
+    let limit = max_hosts.min(MAX_SCAN_HOSTS as usize);
+    if range.network_address.contains(':') {
+        let base = u128::from(
+            range
+                .network_address
+                .parse::<Ipv6Addr>()
+                .map_err(|_| invalid(cidr, "endereço IP malformado"))?,
+        );
+        return Ok((0..range.usable_hosts)
+            .skip(offset as usize)
+            .take(limit)
+            .map(|index| IpAddr::V6(Ipv6Addr::from(base + u128::from(index))))
+            .collect());
+    }
     let base = to_number(&range.network_address).expect("rede normalizada é IPv4 válido");
     let size = 1u64 << (32 - u32::from(range.prefix));
     let (first, last) = if range.prefix >= 31 {
@@ -131,10 +191,10 @@ pub fn expand_cidr(cidr: &str, max_hosts: usize) -> Result<Vec<Ipv4Addr>, AppErr
     } else {
         (base as u64 + 1, base as u64 + size - 2)
     };
-    let limit = max_hosts.min(MAX_SCAN_HOSTS as usize);
     Ok((first..=last)
+        .skip(offset as usize)
         .take(limit)
-        .map(|address| Ipv4Addr::from(address as u32))
+        .map(|address| IpAddr::V4(Ipv4Addr::from(address as u32)))
         .collect())
 }
 
@@ -169,10 +229,9 @@ mod tests {
     }
 
     #[test]
-    fn marca_truncamento_acima_do_teto() {
-        // /22 = 1022 utilizáveis, dentro do teto; /21 = 2046, acima.
+    fn faixas_grandes_nao_sao_mais_truncadas() {
         assert!(!parse_cidr_range("10.0.0.0/22").unwrap().truncated);
-        assert!(parse_cidr_range("10.0.0.0/21").unwrap().truncated);
+        assert!(!parse_cidr_range("10.0.0.0/21").unwrap().truncated);
     }
 
     #[test]
@@ -188,10 +247,10 @@ mod tests {
         for (cidr, trecho) in [
             ("", "valor vazio"),
             ("   ", "valor vazio"),
-            ("192.168.1", "endereço IPv4 malformado"),
-            ("192.168.1.256/24", "endereço IPv4 malformado"),
-            ("192.168.1.1.1/24", "endereço IPv4 malformado"),
-            ("abc/24", "endereço IPv4 malformado"),
+            ("192.168.1", "endereço IP malformado"),
+            ("192.168.1.256/24", "endereço IP malformado"),
+            ("192.168.1.1.1/24", "endereço IP malformado"),
+            ("abc/24", "endereço IP malformado"),
             ("10.0.0.0/7", "prefixo deve estar entre /8 e /32"),
             ("10.0.0.0/33", "prefixo deve estar entre /8 e /32"),
             ("10.0.0.0/abc", "prefixo deve estar entre /8 e /32"),
@@ -218,10 +277,25 @@ mod tests {
         assert_eq!(
             expand_cidr("10.0.0.0/31", 1024).unwrap(),
             vec![
-                "10.0.0.0".parse::<Ipv4Addr>().unwrap(),
-                "10.0.0.1".parse::<Ipv4Addr>().unwrap()
+                "10.0.0.0".parse::<IpAddr>().unwrap(),
+                "10.0.0.1".parse::<IpAddr>().unwrap()
             ]
         );
         assert_eq!(expand_cidr("192.168.1.0/24", 2).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn ipv6_e_normalizado_e_expandido_em_lotes() {
+        let range = parse_cidr_range("fd00::7/126").unwrap();
+        assert_eq!(range.network_address, "fd00::4");
+        assert_eq!(range.usable_hosts, 4);
+        assert_eq!(
+            expand_cidr_batch("fd00::7/126", 2, 2).unwrap(),
+            vec![
+                "fd00::6".parse::<IpAddr>().unwrap(),
+                "fd00::7".parse().unwrap()
+            ]
+        );
+        assert!(parse_cidr_range("fd00::/64").is_err());
     }
 }

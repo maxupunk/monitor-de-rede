@@ -4,7 +4,8 @@ import { apiService } from '@/services/apiService'
 import { drainNdjson } from '@/services/ndjson'
 
 export type PortProtocol = 'tcp' | 'udp'
-export type PortStatus = 'open' | 'closed' | 'open|filtered'
+export type PortScanProfile = 'fast' | 'reliable' | 'complete'
+export type PortStatus = 'open' | 'closed' | 'open|filtered' | 'filtered' | 'unreachable' | 'error'
 
 export interface PortScanItem {
   port: number
@@ -12,6 +13,8 @@ export interface PortScanItem {
   status: PortStatus
   service?: string
   latencyMs: number
+  attempts: number
+  error?: string
 }
 
 export const usePortScanStore = defineStore('portScan', () => {
@@ -25,7 +28,13 @@ export const usePortScanStore = defineStore('portScan', () => {
    * Retorna `true` se o stream terminou normalmente, `false` em caso de erro ou cancelamento.
    */
   async function scanPorts(
-    payload: { host: string; protocol: PortProtocol; ports: number[]; timeoutMs?: number },
+    payload: {
+      host: string
+      protocol: PortProtocol
+      ports: number[]
+      timeoutMs?: number
+      profile?: PortScanProfile
+    },
     onResult: (item: PortScanItem) => void
   ): Promise<boolean> {
     scanning.value = true
@@ -36,10 +45,11 @@ export const usePortScanStore = defineStore('portScan', () => {
     try {
       const response = await apiService.postStream('/port-scan', payload, controller.signal)
       const reader = response.body?.getReader()
-      if (!reader) return true
+      if (!reader) return false
 
       const decoder = new TextDecoder()
       let buffer = ''
+      let completed = false
 
       while (true) {
         const { done, value } = await reader.read()
@@ -54,6 +64,8 @@ export const usePortScanStore = defineStore('portScan', () => {
             onResult(parsed as PortScanItem)
           } else if (parsed.type === 'error') {
             error.value = parsed.message || 'Erro durante a varredura de portas'
+          } else if (parsed.type === 'done') {
+            completed = true
           }
         }
       }
@@ -67,10 +79,12 @@ export const usePortScanStore = defineStore('portScan', () => {
           onResult(parsed as PortScanItem)
         } else if (parsed.type === 'error') {
           error.value = parsed.message || 'Erro durante a varredura de portas'
+        } else if (parsed.type === 'done') {
+          completed = true
         }
       }
 
-      return true
+      return completed && !error.value
     } catch (err: unknown) {
       if (err instanceof DOMException && err.name === 'AbortError') {
         return false

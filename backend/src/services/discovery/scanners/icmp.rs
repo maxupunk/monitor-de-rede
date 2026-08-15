@@ -1,7 +1,8 @@
-use std::{net::Ipv4Addr, time::Duration};
+use std::{net::IpAddr, time::Duration};
 
 use futures::{stream, StreamExt};
 use surge_ping::{PingIdentifier, PingSequence};
+use tokio_util::sync::CancellationToken;
 
 use crate::services::{
     discovery::{merger::DiscoveredHost, progress::ScanReporter},
@@ -16,20 +17,24 @@ use crate::services::{
 /// ping, em vez de esperar a faixa inteira terminar para ver tudo de uma vez.
 pub async fn scan(
     client: &PingClient,
-    hosts: &[Ipv4Addr],
+    hosts: &[IpAddr],
+    cancel: CancellationToken,
     reporter: &ScanReporter,
 ) -> AppResult<Vec<DiscoveredHost>> {
     let total = hosts.len();
     let mut attempts = stream::iter(hosts.iter().copied())
         .map(|ip| {
             let client = client.clone();
+            let cancel = cancel.clone();
             async move {
-                let mut pinger = client
-                    .0
-                    .pinger(ip.into(), PingIdentifier(rand::random()))
-                    .await;
+                let client = client.for_ip(ip)?;
+                let mut pinger = client.pinger(ip, PingIdentifier(rand::random())).await;
                 pinger.timeout(Duration::from_millis(1_500));
-                match pinger.ping(PingSequence(0), &[]).await {
+                let result = tokio::select! {
+                    () = cancel.cancelled() => return None,
+                    result = pinger.ping(PingSequence(0), &[]) => result,
+                };
+                match result {
                     Ok(_) => Some(DiscoveredHost {
                         ip_address: ip.to_string(),
                         confidence: 50,

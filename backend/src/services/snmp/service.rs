@@ -51,6 +51,9 @@ pub struct SnmpScanResult {
     pub cpu_info: SnmpCpuInfo,
     pub memory_info: SnmpMemoryInfo,
     pub neighbors: Vec<LldpNeighbor>,
+    /// Falhas isoladas por coletor. Dados válidos dos demais coletores são
+    /// preservados e a UI consegue explicar por que uma seção ficou vazia.
+    pub collector_errors: std::collections::BTreeMap<String, String>,
     /// Campos abaixo dependem do banco: a coleta pura os devolve zerados e
     /// `scan_device` os preenche para a tela de descoberta.
     pub has_cpu_monitor: bool,
@@ -164,15 +167,35 @@ pub async fn scan(config: SnmpConfig) -> AppResult<SnmpScanResult> {
         collect_lldp(&client)
     );
     let system = system.map_err(map_error)?;
-    let (interfaces, traffic) = interfaces_and_traffic.unwrap_or_default();
+    let mut collector_errors = std::collections::BTreeMap::new();
+    let (interfaces, traffic) = match interfaces_and_traffic {
+        Ok(value) => value,
+        Err(error) => {
+            collector_errors.insert("interfaces".into(), error.to_string());
+            Default::default()
+        }
+    };
+    let cpu_info = cpu.unwrap_or_else(|error| {
+        collector_errors.insert("cpu".into(), error.to_string());
+        Default::default()
+    });
+    let memory_info = memory.unwrap_or_else(|error| {
+        collector_errors.insert("memory".into(), error.to_string());
+        Default::default()
+    });
+    let neighbors = neighbors.unwrap_or_else(|error| {
+        collector_errors.insert("neighbors".into(), error.to_string());
+        Default::default()
+    });
     Ok(SnmpScanResult {
         snmp_responded: system.responded(),
         system_info: system,
         interfaces,
         traffic,
-        cpu_info: cpu.unwrap_or_default(),
-        memory_info: memory.unwrap_or_default(),
-        neighbors: neighbors.unwrap_or_default(),
+        cpu_info,
+        memory_info,
+        neighbors,
+        collector_errors,
         has_cpu_monitor: false,
         has_memory_monitor: false,
     })
@@ -946,28 +969,45 @@ pub async fn detect_connection(
     port: u16,
     preferred: Option<SnmpConfig>,
 ) -> AppResult<SnmpDetectResult> {
+    let started = std::time::Instant::now();
     let mut candidates = Vec::new();
-    if let Some(config) = preferred {
+    if let Some(mut config) = preferred {
+        config.host = host.to_string();
+        config.port = port;
         candidates.push(config);
     }
-    for (version, community) in [
-        (SnmpVersion::V2c, "public"),
-        (SnmpVersion::V2c, "private"),
-        (SnmpVersion::V1, "public"),
-        (SnmpVersion::V1, "private"),
-    ] {
-        if !candidates
-            .iter()
-            .any(|config| config.version == version && config.community == community)
-        {
+    let timeout_ms = std::env::var("SNMP_DISCOVERY_TIMEOUT_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(800)
+        .clamp(100, 5_000);
+    let communities =
+        discovery_communities(std::env::var("SNMP_DISCOVERY_COMMUNITIES").ok().as_deref());
+    for (version, community) in
+        [SnmpVersion::V2c, SnmpVersion::V1]
+            .into_iter()
+            .flat_map(|version| {
+                communities
+                    .iter()
+                    .map(move |community| (version, community))
+            })
+    {
+        if !candidates.iter().any(|config| {
+            config.version == version && config.community.as_str() == community.as_str()
+        }) {
             let mut config = SnmpConfig::v2c(host, community, port);
             config.version = version;
-            config.timeout_ms = 2_500;
+            config.timeout_ms = timeout_ms;
             candidates.push(config);
         }
     }
+    candidates.extend(discovery_v3_profiles(host, port, timeout_ms));
+    let candidate_count = candidates.len();
     let attempts = candidates.into_iter().map(|config| async move {
-        let label = (config.version, config.community.clone());
+        let label = (
+            config.version,
+            (config.version != SnmpVersion::V3).then(|| config.community.clone()),
+        );
         test_connection(config).await.map(|result| (label, result))
     });
     let outcomes = future::join_all(attempts).await;
@@ -984,11 +1024,20 @@ pub async fn detect_connection(
         }
         fallback.get_or_insert(outcome);
     }
-    match answered.or(fallback) {
+    let detected = answered.or(fallback);
+    tracing::info!(
+        target = host,
+        port,
+        attempts = candidate_count,
+        success = detected.as_ref().is_some_and(|outcome| outcome.1.success),
+        duration_ms = started.elapsed().as_millis(),
+        "detecção SNMP concluída"
+    );
+    match detected {
         Some(((version, community), result)) => Ok(SnmpDetectResult {
             detected: result.success,
             version: Some(version_label(version).into()),
-            community: Some(community),
+            community,
             result: Some(result),
         }),
         None => Ok(SnmpDetectResult {
@@ -998,6 +1047,61 @@ pub async fn detect_connection(
             result: None,
         }),
     }
+}
+
+fn discovery_communities(value: Option<&str>) -> Vec<String> {
+    let mut communities = value
+        .unwrap_or("public")
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    communities.sort();
+    communities.dedup();
+    communities
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DiscoveryV3Profile {
+    username: String,
+    auth_protocol: Option<String>,
+    auth_key: Option<String>,
+    priv_protocol: Option<String>,
+    priv_key: Option<String>,
+}
+
+fn discovery_v3_profiles(host: &str, port: u16, timeout_ms: u64) -> Vec<SnmpConfig> {
+    let Some(raw) = std::env::var("SNMP_DISCOVERY_V3_PROFILES")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+    else {
+        return Vec::new();
+    };
+    let profiles = match serde_json::from_str::<Vec<DiscoveryV3Profile>>(&raw) {
+        Ok(profiles) => profiles,
+        Err(error) => {
+            tracing::warn!(%error, "SNMP_DISCOVERY_V3_PROFILES inválido; perfis ignorados");
+            return Vec::new();
+        }
+    };
+    profiles
+        .into_iter()
+        .filter(|profile| !profile.username.trim().is_empty())
+        .map(|profile| SnmpConfig {
+            host: host.to_string(),
+            version: SnmpVersion::V3,
+            community: String::new(),
+            username: Some(profile.username),
+            auth_protocol: profile.auth_protocol,
+            auth_key: profile.auth_key,
+            priv_protocol: profile.priv_protocol,
+            priv_key: profile.priv_key,
+            port,
+            timeout_ms,
+        })
+        .collect()
 }
 const fn version_label(version: SnmpVersion) -> &'static str {
     match version {
@@ -1038,6 +1142,7 @@ mod tests {
             cpu_info: SnmpCpuInfo::default(),
             memory_info: SnmpMemoryInfo::default(),
             neighbors: vec![],
+            collector_errors: Default::default(),
             has_cpu_monitor: true,
             has_memory_monitor: false,
         };

@@ -17,6 +17,16 @@ pub struct ProbeResultPayload {
     pub result: CheckResult,
 }
 
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbeDiscoveryResultPayload {
+    pub run_id: i64,
+    pub task_id: Option<String>,
+    #[serde(default)]
+    pub hosts: Vec<crate::services::discovery::merger::DiscoveredHost>,
+    pub error: Option<String>,
+}
+
 /// Processa um lote inteiro.
 ///
 /// Uma falha por item é registrada e o laço segue: um resultado malformado — ou
@@ -51,6 +61,34 @@ pub async fn receive_batch_results(
                     "erro ao processar resultado do probe"
                 );
             }
+        }
+    }
+    Ok(processed)
+}
+
+pub async fn receive_discovery_results(
+    ctx: &AppContext,
+    probe_id: i64,
+    payloads: &[ProbeDiscoveryResultPayload],
+) -> AppResult<usize> {
+    let mut processed = 0;
+    for item in payloads {
+        match crate::services::discovery::service::complete_remote_discovery(
+            ctx,
+            probe_id,
+            item.run_id,
+            &item.hosts,
+            item.error.as_deref(),
+        )
+        .await
+        {
+            Ok(()) => processed += 1,
+            Err(error) => tracing::warn!(
+                %error,
+                run_id = item.run_id,
+                probe_id,
+                "erro ao processar discovery do probe"
+            ),
         }
     }
     Ok(processed)
@@ -100,5 +138,28 @@ mod tests {
         }))
         .expect("payload sem taskId");
         assert!(payload.task_id.is_none());
+    }
+
+    #[test]
+    fn resultado_de_discovery_le_hosts_em_camel_case() {
+        let payload: ProbeDiscoveryResultPayload = serde_json::from_value(json!({
+            "runId": 8,
+            "taskId": "discovery-8",
+            "hosts": [{
+                "ipAddress": "10.8.0.2",
+                "macAddress": null,
+                "hostname": null,
+                "mdnsName": null,
+                "vendor": null,
+                "deviceType": null,
+                "openPorts": [22],
+                "confidence": 20,
+                "data": {}
+            }],
+            "error": null
+        }))
+        .expect("resultado discovery");
+        assert_eq!(payload.run_id, 8);
+        assert_eq!(payload.hosts[0].open_ports, vec![22]);
     }
 }

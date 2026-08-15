@@ -80,10 +80,11 @@ async fn scan(
             network.name, network.cidr
         ))
     })?;
+    let remote = network.probe_id.is_some();
     let run = discovery_runs::ActiveModel {
         network_id: Set(network.id),
         probe_id: Set(network.probe_id),
-        status: Set("running".into()),
+        status: Set(if remote { "pending" } else { "running" }.into()),
         started_at: Set(Utc::now().into()),
         configuration: Set(Some(serde_json::json!({ "cidr": network.cidr }))),
         ..Default::default()
@@ -92,6 +93,20 @@ async fn scan(
     .await?;
     let session = ScanSessionService::from_context(&ctx)?;
     let cancel = session.start(run.id, network.id).await;
+    if remote {
+        session.wait_for_probe().await;
+        return Ok((
+            axum::http::StatusCode::ACCEPTED,
+            axum::Json(serde_json::json!({
+                "runId": run.id,
+                "status": "pending",
+                "usableHosts": range.usable_hosts,
+                "truncated": false,
+                "execution": "probe",
+            })),
+        )
+            .into_response());
+    }
     let cidr = network.cidr.clone();
     let ctx_clone = ctx.clone();
     let session_clone = session.clone();
@@ -136,7 +151,27 @@ async fn scan(
 }
 
 async fn scan_cancel(State(ctx): State<AppContext>) -> AppResult<Response> {
-    ScanSessionService::from_context(&ctx)?.cancel().await;
+    let session = ScanSessionService::from_context(&ctx)?;
+    let run_id = session.state().await.run_id;
+    session.cancel().await;
+    if let Some(run_id) = run_id {
+        discovery_runs::Entity::update_many()
+            .col_expr(
+                crate::models::_entities::discovery_runs::Column::Status,
+                sea_orm::sea_query::Expr::value("cancelled"),
+            )
+            .col_expr(
+                crate::models::_entities::discovery_runs::Column::FinishedAt,
+                sea_orm::sea_query::Expr::value(Some(Utc::now())),
+            )
+            .filter(crate::models::_entities::discovery_runs::Column::Id.eq(run_id))
+            .filter(
+                crate::models::_entities::discovery_runs::Column::Status
+                    .is_in(["pending", "running"]),
+            )
+            .exec(&ctx.db)
+            .await?;
+    }
     Ok(format::json(serde_json::json!({ "status": "cancelled" }))?)
 }
 

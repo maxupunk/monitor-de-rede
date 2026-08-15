@@ -779,6 +779,20 @@
           </div>
 
           <div v-else-if="detailStore.scanResult">
+            <v-alert
+              v-if="Object.keys(detailStore.scanResult.collectorErrors || {}).length"
+              type="warning"
+              variant="tonal"
+              density="compact"
+              class="mb-4"
+            >
+              Coleta parcial:
+              {{
+                Object.entries(detailStore.scanResult.collectorErrors)
+                  .map(([collector, error]) => `${collector}: ${error}`)
+                  .join(' · ')
+              }}
+            </v-alert>
             <!-- Alerta de Ausência Total de Resposta SNMP -->
             <v-alert
               v-if="!detailStore.scanResult.snmpResponded"

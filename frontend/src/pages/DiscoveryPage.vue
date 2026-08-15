@@ -334,9 +334,6 @@ import PageHeader from '@/components/PageHeader.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import type { Device } from '@/stores/devices'
 
-/** Espelha `MAX_SCAN_HOSTS` de `modules/discovery/cidr_range.ts` */
-const MAX_SCAN_HOSTS = 1024
-
 const PHASE_LABELS: Record<DiscoveryPhase, string> = {
   idle: 'Aguardando',
   icmp: 'Ping (ICMP)',
@@ -440,10 +437,7 @@ const scannableNetworks = computed(() =>
     .filter((network) => network.scannable !== false)
     .map((network) => {
       const usableHosts = network.usableHosts ?? 0
-      const scope =
-        usableHosts > MAX_SCAN_HOSTS
-          ? `${usableHosts} endereços (varre os primeiros ${MAX_SCAN_HOSTS})`
-          : `${usableHosts} endereço(s)`
+      const scope = `${usableHosts} endereço(s), processados em lotes`
 
       return {
         id: network.id,

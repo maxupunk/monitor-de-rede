@@ -12,8 +12,8 @@ use loco_rs::app::AppContext;
 use serde_json::json;
 
 use super::{
-    buffer::{BufferedResult, ProbeBuffer},
-    dispatcher::ProbeTask,
+    buffer::{BufferedDiscoveryResult, BufferedResult, ProbeBuffer},
+    dispatcher::{ProbeDiscoveryTask, ProbeTask},
     DEFAULT_VPN_PROBE_TOKEN,
 };
 use crate::services::monitoring::{
@@ -132,8 +132,12 @@ impl ProbeAgent {
         if self.send_heartbeat().await {
             self.flush_offline_buffer().await;
         }
-        for task in self.fetch_tasks().await {
+        let tasks = self.fetch_tasks().await;
+        for task in tasks.monitors {
             self.execute_and_report(ctx, &task).await;
+        }
+        for task in tasks.discovery {
+            self.execute_discovery_and_report(ctx, &task).await;
         }
     }
 
@@ -148,7 +152,7 @@ impl ProbeAgent {
         self.post("/api/probes/heartbeat", &body).await.is_some()
     }
 
-    async fn fetch_tasks(&self) -> Vec<ProbeTask> {
+    async fn fetch_tasks(&self) -> ProbeTaskBatch {
         let response = self
             .client
             .get(format!("{}/api/probes/tasks", self.server_url))
@@ -156,21 +160,26 @@ impl ProbeAgent {
             .send()
             .await;
         let Ok(response) = response else {
-            return Vec::new();
+            return ProbeTaskBatch::default();
         };
         if !response.status().is_success() {
             tracing::warn!(status = %response.status(), "servidor recusou a busca de tarefas");
-            return Vec::new();
+            return ProbeTaskBatch::default();
         }
         #[derive(serde::Deserialize)]
         struct TasksEnvelope {
             #[serde(default)]
             tasks: Vec<ProbeTask>,
+            #[serde(default, rename = "discoveryTasks")]
+            discovery_tasks: Vec<ProbeDiscoveryTask>,
         }
         response
             .json::<TasksEnvelope>()
             .await
-            .map(|envelope| envelope.tasks)
+            .map(|envelope| ProbeTaskBatch {
+                monitors: envelope.tasks,
+                discovery: envelope.discovery_tasks,
+            })
             .unwrap_or_default()
     }
 
@@ -206,9 +215,46 @@ impl ProbeAgent {
         }
     }
 
+    async fn execute_discovery_and_report(&self, ctx: &AppContext, task: &ProbeDiscoveryTask) {
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let outcome = tokio::time::timeout(
+            Duration::from_millis(task.timeout_ms.max(1)),
+            crate::services::discovery::service::scan_network(ctx, &task.cidr, cancel),
+        )
+        .await;
+        let (hosts, error) = match outcome {
+            Ok(Ok(hosts)) => (hosts, None),
+            Ok(Err(error)) => (Vec::new(), Some(error.to_string())),
+            Err(_) => (
+                Vec::new(),
+                Some("tempo limite do discovery remoto excedido".into()),
+            ),
+        };
+        let body = json!({
+            "discoveryResults": [{
+                "runId": task.run_id,
+                "taskId": task.id,
+                "hosts": hosts,
+                "error": error,
+            }],
+        });
+        if self.post("/api/probes/results", &body).await.is_none() {
+            self.buffer
+                .save_discovery_result_offline(BufferedDiscoveryResult {
+                    task_id: task.id.clone(),
+                    run_id: task.run_id,
+                    hosts,
+                    error,
+                    timestamp: Utc::now().to_rfc3339(),
+                })
+                .await;
+        }
+    }
+
     async fn flush_offline_buffer(&self) {
         let pending = self.buffer.pending_results().await;
-        if pending.is_empty() {
+        let pending_discovery = self.buffer.pending_discovery_results().await;
+        if pending.is_empty() && pending_discovery.is_empty() {
             return;
         }
         let results: Vec<_> = pending
@@ -222,12 +268,16 @@ impl ProbeAgent {
             })
             .collect();
         if self
-            .post("/api/probes/results", &json!({ "results": results }))
+            .post(
+                "/api/probes/results",
+                &json!({ "results": results, "discoveryResults": pending_discovery }),
+            )
             .await
             .is_some()
         {
             tracing::info!(count = pending.len(), "buffer offline do probe reenviado");
             self.buffer.clear_pending_results().await;
+            self.buffer.clear_pending_discovery_results().await;
         }
     }
 
@@ -249,6 +299,12 @@ impl ProbeAgent {
             None
         }
     }
+}
+
+#[derive(Default)]
+struct ProbeTaskBatch {
+    monitors: Vec<ProbeTask>,
+    discovery: Vec<ProbeDiscoveryTask>,
 }
 
 /// Observação de falha na execução pelo probe.

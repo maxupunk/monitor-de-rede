@@ -27,29 +27,27 @@ pub fn merge_hosts(lists: impl IntoIterator<Item = Vec<DiscoveredHost>>) -> Vec<
         let current = by_ip
             .entry(host.ip_address.clone())
             .or_insert_with(|| host.clone());
-        if current.ip_address == host.ip_address && current.confidence != host.confidence {
-            if host.mac_address.is_some() {
-                current.mac_address = host.mac_address.clone();
-            }
-            if host.hostname.is_some() {
-                current.hostname = host.hostname.clone();
-            }
-            if host.mdns_name.is_some() {
-                current.mdns_name = host.mdns_name.clone();
-            }
-            if host.vendor.is_some() {
-                current.vendor = host.vendor.clone();
-            }
-            current.confidence = current.confidence.max(host.confidence);
-            let ports: BTreeSet<_> = current
-                .open_ports
-                .iter()
-                .chain(host.open_ports.iter())
-                .copied()
-                .collect();
-            current.open_ports = ports.into_iter().collect();
-            merge_json(&mut current.data, host.data);
+        if host.mac_address.is_some() {
+            current.mac_address = host.mac_address.clone();
         }
+        if host.hostname.is_some() {
+            current.hostname = host.hostname.clone();
+        }
+        if host.mdns_name.is_some() {
+            current.mdns_name = host.mdns_name.clone();
+        }
+        if host.vendor.is_some() {
+            current.vendor = host.vendor.clone();
+        }
+        current.confidence = current.confidence.max(host.confidence);
+        let ports: BTreeSet<_> = current
+            .open_ports
+            .iter()
+            .chain(host.open_ports.iter())
+            .copied()
+            .collect();
+        current.open_ports = ports.into_iter().collect();
+        merge_json(&mut current.data, host.data);
     }
     for host in by_ip.values_mut() {
         if host.vendor.is_none() {

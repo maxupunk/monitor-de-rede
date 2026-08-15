@@ -19,6 +19,16 @@ pub struct BufferedResult {
     pub timestamp: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BufferedDiscoveryResult {
+    pub task_id: String,
+    pub run_id: i64,
+    pub hosts: Vec<crate::services::discovery::merger::DiscoveredHost>,
+    pub error: Option<String>,
+    pub timestamp: String,
+}
+
 pub struct ProbeBuffer {
     file_path: PathBuf,
 }
@@ -102,6 +112,48 @@ impl ProbeBuffer {
             }
         }
     }
+
+    pub async fn save_discovery_result_offline(&self, item: BufferedDiscoveryResult) {
+        let mut pending = self.pending_discovery_results().await;
+        pending.push(item);
+        let path = self.discovery_path();
+        if let Some(parent) = path.parent() {
+            if let Err(error) = tokio::fs::create_dir_all(parent).await {
+                tracing::warn!(%error, "não foi possível criar o diretório do buffer discovery");
+                return;
+            }
+        }
+        match serde_json::to_vec_pretty(&pending) {
+            Ok(bytes) => {
+                if let Err(error) = tokio::fs::write(path, bytes).await {
+                    tracing::warn!(%error, "não foi possível gravar o buffer discovery");
+                }
+            }
+            Err(error) => tracing::warn!(%error, "buffer discovery não pôde ser serializado"),
+        }
+    }
+
+    pub async fn pending_discovery_results(&self) -> Vec<BufferedDiscoveryResult> {
+        let Ok(raw) = tokio::fs::read_to_string(self.discovery_path()).await else {
+            return Vec::new();
+        };
+        serde_json::from_str(&raw).unwrap_or_else(|error| {
+            tracing::warn!(%error, "buffer discovery ilegível; descartando o conteúdo");
+            Vec::new()
+        })
+    }
+
+    pub async fn clear_pending_discovery_results(&self) {
+        if let Err(error) = tokio::fs::remove_file(self.discovery_path()).await {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                tracing::warn!(%error, "não foi possível limpar o buffer discovery");
+            }
+        }
+    }
+
+    fn discovery_path(&self) -> PathBuf {
+        self.file_path.with_extension("discovery.json")
+    }
 }
 
 #[cfg(test)]
@@ -157,5 +209,27 @@ mod tests {
         buffer.save_result_offline(item("task-3")).await;
         assert_eq!(buffer.pending_results().await.len(), 1);
         let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn discovery_remoto_tem_buffer_separado() {
+        let dir =
+            std::env::temp_dir().join(format!("probe-discovery-buffer-{}", std::process::id()));
+        let buffer = ProbeBuffer::new(dir.join("probe_buffer.json"));
+        buffer.clear_pending_discovery_results().await;
+        buffer
+            .save_discovery_result_offline(BufferedDiscoveryResult {
+                task_id: "discovery-7".into(),
+                run_id: 7,
+                hosts: vec![],
+                error: None,
+                timestamp: "2026-08-15T10:00:00Z".into(),
+            })
+            .await;
+        let pending = buffer.pending_discovery_results().await;
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].run_id, 7);
+        buffer.clear_pending_discovery_results().await;
+        let _ = tokio::fs::remove_dir_all(dir).await;
     }
 }

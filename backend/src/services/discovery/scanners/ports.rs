@@ -2,13 +2,15 @@
 
 use crate::services::{
     discovery::{merger::DiscoveredHost, progress::ScanReporter},
-    network_tools::port_scanner::{self, PortProtocol, PortScanEvent, ScanStrategy},
+    network_tools::port_scanner::{self, PortProtocol, PortScanEvent, ScanProfile, ScanStrategy},
 };
 use std::net::IpAddr;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-pub const COMMON_PORTS: &[u16] = &[80, 443, 22, 445, 8080, 8000, 3389, 161];
+pub const COMMON_PORTS: &[u16] = &[
+    21, 22, 23, 53, 80, 139, 443, 445, 554, 3389, 8000, 8080, 8291, 8443, 9100,
+];
 
 /// Hosts sondados ao mesmo tempo.
 ///
@@ -62,7 +64,7 @@ async fn scan_host(mut host: DiscoveredHost, cancel: CancellationToken) -> Disco
             ip,
             &ports,
             PortProtocol::Tcp,
-            ScanStrategy::with_timeout(800),
+            ScanStrategy::for_profile(ScanProfile::Reliable, 1_200),
             sender,
             worker_cancel,
         )

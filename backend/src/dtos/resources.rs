@@ -131,6 +131,7 @@ pub struct PortScanInput {
     pub protocol: String,
     pub ports: Vec<u16>,
     pub timeout_ms: Option<u64>,
+    pub profile: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]

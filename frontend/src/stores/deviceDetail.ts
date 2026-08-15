@@ -100,6 +100,7 @@ export interface ScanResult {
     usedPercent?: number | null
   }
   interfaces: ScanInterfaceItem[]
+  collectorErrors: Record<string, string>
   hasCpuMonitor: boolean
   hasMemoryMonitor: boolean
   snmpResponded: boolean

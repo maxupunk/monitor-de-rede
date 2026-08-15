@@ -22,6 +22,7 @@ pub const MIN_SCAN_INTERVAL_SECONDS: i64 = 300;
 /// andamento" indefinidamente. Uma faixa de /22 (o teto de `MAX_SCAN_HOSTS`) não
 /// passa de alguns minutos.
 pub const RUNNING_RUN_TIMEOUT_MINUTES: i64 = 15;
+const MAX_RUNNING_RUN_TIMEOUT_MINUTES: i64 = 6 * 60;
 
 /// `true` quando a run está `running` há tempo demais para ainda estar viva.
 ///
@@ -32,7 +33,21 @@ pub fn is_abandoned(run: &discovery_runs::Model) -> bool {
         return false;
     }
     let started_at = run.started_at.with_timezone(&Utc);
-    (Utc::now() - started_at).num_minutes() > RUNNING_RUN_TIMEOUT_MINUTES
+    (Utc::now() - started_at).num_minutes() > running_timeout_minutes(run)
+}
+
+fn running_timeout_minutes(run: &discovery_runs::Model) -> i64 {
+    let usable_hosts = run
+        .configuration
+        .as_ref()
+        .and_then(|value| value.get("usableHosts"))
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(1);
+    let batches = usable_hosts.div_ceil(u64::from(
+        crate::services::discovery::cidr_range::MAX_SCAN_HOSTS,
+    ));
+    (RUNNING_RUN_TIMEOUT_MINUTES + batches.saturating_sub(1) as i64 * 5)
+        .min(MAX_RUNNING_RUN_TIMEOUT_MINUTES)
 }
 
 /// Configuração gravada na run — a UI lê `truncated` daqui para avisar que a
@@ -80,12 +95,13 @@ pub async fn enqueue_network_scan(
         if is_abandoned(&current) {
             // Fecha a órfã antes de enfileirar a nova, senão ela bloqueia a rede
             // para sempre.
+            let timeout_minutes = running_timeout_minutes(&current);
             discovery_runs::ActiveModel {
                 id: Set(current.id),
                 status: Set("failed".into()),
                 finished_at: Set(Some(Utc::now().into())),
                 error: Set(Some(format!(
-                    "Varredura abandonada (sem conclusão após {RUNNING_RUN_TIMEOUT_MINUTES} min)."
+                    "Varredura abandonada (sem conclusão após {timeout_minutes} min)."
                 ))),
                 ..Default::default()
             }
@@ -157,6 +173,7 @@ pub async fn schedule_due_networks(db: &sea_orm::DatabaseConnection) -> AppResul
 pub async fn process_pending_runs(ctx: &AppContext) -> AppResult<u64> {
     let Some(run) = discovery_runs::Entity::find()
         .filter(crate::models::_entities::discovery_runs::Column::Status.eq("pending"))
+        .filter(crate::models::_entities::discovery_runs::Column::ProbeId.is_null())
         .order_by_asc(crate::models::_entities::discovery_runs::Column::Id)
         .one(&ctx.db)
         .await?
@@ -237,7 +254,7 @@ mod tests {
     }
 
     #[test]
-    fn run_em_curso_vira_abandonada_depois_de_quinze_minutos() {
+    fn run_em_curso_vira_abandonada_depois_do_limite() {
         assert!(!is_abandoned(&run("running", 0)));
         assert!(!is_abandoned(&run("running", RUNNING_RUN_TIMEOUT_MINUTES)));
         assert!(is_abandoned(&run(
@@ -254,7 +271,7 @@ mod tests {
     }
 
     #[test]
-    fn a_configuracao_da_run_avisa_o_truncamento() {
+    fn a_configuracao_da_run_confirma_ausencia_de_truncamento() {
         // Matriz de paridade #10: a UI lê `truncated` da configuração da run.
         let mut network = networks::Model {
             id: 1,
@@ -278,10 +295,10 @@ mod tests {
         assert_eq!(config["usableHosts"], 254);
         assert_eq!(config["truncated"], false);
 
-        // /21 tem 2046 hosts utilizáveis — acima do teto de 1024.
+        // /21 tem 2046 hosts utilizáveis e será dividido em dois lotes.
         network.cidr = "10.0.0.0/21".into();
         let config = run_configuration(&network);
         assert_eq!(config["usableHosts"], 2_046);
-        assert_eq!(config["truncated"], true);
+        assert_eq!(config["truncated"], false);
     }
 }

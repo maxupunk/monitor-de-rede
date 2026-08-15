@@ -55,17 +55,17 @@ de retorno. `Scanner::new` também carrega parâmetros de CLI (`greppable`,
 
 ## Consequências
 
-- O algoritmo é reimplementado, não copiado: batch por `ulimit`
-  (`clamp(soft - 100, 16, 4096)`; 512 no Windows), `futures::stream::iter(...)
-  .for_each_concurrent(batch, ...)`, timeout adaptativo
-  `t = clamp(rtt_médio * 3, 100ms, timeout_ms)`.
+- O algoritmo é reimplementado, não copiado: lotes de 1.024,
+  `for_each_concurrent`, limite global configurável e limite por host.
+- O timeout adaptativo usa média móvel, variação e perda; perfis confiável e
+  completo mantêm pisos conservadores. Falhas transitórias recebem backoff com
+  jitter e `ConnectionRefused` nunca é repetido.
 - Sem dívida de licença e sem acoplamento a uma API que a montante pode quebrar
   entre patches (a crate é publicada para o binário; o `[lib]` é efeito
   colateral).
 - O comportamento externo é o descrito na §3.3 — este ADR não muda o roadmap.
-- Fica preservado o cap de segurança já documentado no backend atual:
-  equipamentos embarcados (`router`/`access_point`/`printer` na LAN) saturam com
-  concorrência alta, então `batch` cai para 64 nesses alvos.
+- Os perfis `rápido`, `confiável` e `completo` controlam concorrência, timeout e
+  retries sem duplicar o scanner.
 
-**Critério de aceite (inalterado):** 1024 portas TCP num host da LAN em < 3 s,
-sem falso negativo contra `nmap -sT`.
+**Critério de aceite:** nenhuma porta aberta da fixture local pode ser perdida;
+a comparação externa com `nmap -sT` roda no ambiente Linux de precisão.

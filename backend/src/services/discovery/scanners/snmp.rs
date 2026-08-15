@@ -1,27 +1,43 @@
-//! Identifica agentes SNMPv2c públicos durante discovery. Falhas são esperadas.
+//! Identifica agentes SNMP autorizados durante discovery. Falhas são esperadas.
 
 use crate::services::{
     discovery::{merger::DiscoveredHost, progress::ScanReporter},
-    snmp::{client::SnmpConfig, service::test_connection},
+    snmp::service::detect_connection,
 };
 use futures::{stream, StreamExt};
+use tokio_util::sync::CancellationToken;
 
-pub async fn enrich(hosts: Vec<DiscoveredHost>, reporter: &ScanReporter) -> Vec<DiscoveredHost> {
+pub async fn enrich(
+    hosts: Vec<DiscoveredHost>,
+    cancel: CancellationToken,
+    reporter: &ScanReporter,
+) -> Vec<DiscoveredHost> {
     let total = hosts.len();
     let mut queried = stream::iter(hosts)
-        .map(|mut host| async move {
-            if let Ok(result) =
-                test_connection(SnmpConfig::v2c(host.ip_address.clone(), "public", 161)).await
-            {
-                if result.success {
-                    host.confidence = host.confidence.max(95);
-                    if host.vendor.is_none() {
-                        host.vendor = result.system.sys_descr;
-                    }
-                    host.data["snmp"] = serde_json::json!(true);
+        .map(|mut host| {
+            let cancel = cancel.clone();
+            async move {
+                if cancel.is_cancelled() {
+                    return host;
                 }
+                if let Ok(result) = detect_connection(&host.ip_address, 161, None).await {
+                    if result.detected {
+                        host.confidence = host.confidence.max(95);
+                        if let Some(details) = result.result {
+                            if host.vendor.is_none() {
+                                host.vendor = details.system.sys_descr;
+                            }
+                        }
+                        host.data["snmp"] = serde_json::json!({
+                            "detected": true,
+                            "protocol": "udp",
+                            "port": 161,
+                            "version": result.version,
+                        });
+                    }
+                }
+                host
             }
-            host
         })
         .buffer_unordered(32);
 

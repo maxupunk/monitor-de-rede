@@ -73,9 +73,7 @@ reqwest = { version = "0.12", default-features = false, features = [
 ] }
 
 # --- rede: SNMP (§3.4 SPIKE-01) ---
-rasn = { version = "0.18" }
-rasn-snmp = { version = "0.18" }
-rasn-smi = { version = "0.18" }
+async-snmp = { version = "0.16", default-features = false, features = ["crypto-rustcrypto"] }
 
 # --- criptografia ---
 x25519-dalek = { version = "2", features = ["static_secrets"] }
@@ -114,13 +112,14 @@ required-features = []
 name = "spike_icmp_dgram"
 path = "examples/spikes/icmp_dgram.rs"
 [[example]]
-name = "spike_snmp_v2c"
-path = "examples/spikes/snmp_v2c.rs"
+name = "spike_async_snmp"
+path = "examples/spikes/async_snmp.rs"
 [[example]]
 name = "spike_dns_wire"
 path = "examples/spikes/dns_wire.rs"
 
 [dev-dependencies]
+async-snmp = { version = "0.16", default-features = false, features = ["agent", "crypto-rustcrypto"] }
 loco-rs = { workspace = true, features = ["testing"] }
 serial_test = { version = "3.1.1" }
 rstest = { version = "0.25" }

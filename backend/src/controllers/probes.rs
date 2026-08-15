@@ -23,7 +23,7 @@ use crate::{
         probes::{
             dispatcher,
             liveness::{status_payload, STATUS_ONLINE},
-            receiver::{self, ProbeResultPayload},
+            receiver::{self, ProbeDiscoveryResultPayload, ProbeResultPayload},
         },
         shared::{
             crypto::sha256_hex,
@@ -84,6 +84,8 @@ struct ProbeResultsInput {
     token: Option<String>,
     #[serde(default)]
     results: Vec<ProbeResultPayload>,
+    #[serde(default)]
+    discovery_results: Vec<ProbeDiscoveryResultPayload>,
 }
 
 /// Publica no SSE apenas quando o estado do probe realmente muda.
@@ -273,7 +275,18 @@ async fn heartbeat(
 async fn tasks(State(ctx): State<AppContext>, headers: HeaderMap) -> AppResult<Response> {
     let probe = authenticate(&ctx, &headers, None).await?;
     let tasks = dispatcher::get_pending_tasks(&ctx.db, probe.id).await?;
-    Ok(format::json(serde_json::json!({ "tasks": tasks }))?)
+    let discovery_tasks = dispatcher::get_pending_discovery_tasks(&ctx.db, probe.id).await?;
+    if let Some(task) = discovery_tasks.first() {
+        if let Ok(session) =
+            crate::services::discovery::service::ScanSessionService::from_context(&ctx)
+        {
+            session.remote_started(task.run_id).await;
+        }
+    }
+    Ok(format::json(serde_json::json!({
+        "tasks": tasks,
+        "discoveryTasks": discovery_tasks,
+    }))?)
 }
 
 /// `POST /api/probes/results` — o agente devolve o que mediu.
@@ -287,11 +300,14 @@ async fn results(
     if !input.results.is_empty() {
         receiver::receive_batch_results(&ctx, probe.id, &input.results).await?;
     }
+    if !input.discovery_results.is_empty() {
+        receiver::receive_discovery_results(&ctx, probe.id, &input.discovery_results).await?;
+    }
     // `count` é o que o agente mandou, não o que foi aceito: é assim que o
     // backend anterior responde, e o agente só usa isso para log.
     Ok(format::json(serde_json::json!({
         "status": "processed",
-        "count": input.results.len(),
+        "count": input.results.len() + input.discovery_results.len(),
     }))?)
 }
 
