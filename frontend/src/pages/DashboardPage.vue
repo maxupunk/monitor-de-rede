@@ -616,6 +616,11 @@
             v-else-if="widget.type === 'binary_status' || widget.id === 'binary_status'"
             :widget="widget"
           />
+
+          <!-- 14. Alvos Instáveis (oscilação por alvo na janela) -->
+          <UnstableTargetsWidget
+            v-else-if="widget.type === 'unstable_targets' || widget.id === 'unstable_targets'"
+          />
         </DashboardWidgetWrapper>
       </v-col>
     </v-row>
@@ -657,6 +662,7 @@ import BandwidthVsLatencyWidget from '@/components/widgets/BandwidthVsLatencyWid
 import CpuUsageWidget from '@/components/widgets/CpuUsageWidget.vue'
 import RamUsageWidget from '@/components/widgets/RamUsageWidget.vue'
 import BinaryStatusWidget from '@/components/widgets/BinaryStatusWidget.vue'
+import UnstableTargetsWidget from '@/components/widgets/UnstableTargetsWidget.vue'
 import MonitorTimelineBar from '@/components/MonitorTimelineBar.vue'
 import MonitorSparkline from '@/components/MonitorSparkline.vue'
 import DnsLatencyCard from '@/components/DnsLatencyCard.vue'

@@ -22,9 +22,10 @@ use crate::{
         alerts::{
             contracts::{AlertEvaluationContext, AlertEvaluationScope, AlertScopeKey, AlertStatus},
             datasets::monitor_result,
+            episode,
             evaluator::{self, AlertRuleCondition},
-            feed, recovery, repository, silence,
-            state_machine::{self, EpisodeInput, Transition},
+            feed, problem_kind, recovery, repository, silence,
+            state_machine::{self, EpisodeInput, EpisodePolicy, Transition},
         },
         monitoring::contracts::{CheckResult, MonitorStatus},
         notifications::{formatter, NotificationService, Severity},
@@ -68,12 +69,19 @@ pub async fn evaluate(ctx: &AppContext, context: &AlertEvaluationContext) -> App
 
         has_triggered_rule = true;
         if has_sustained_condition(&rule, &context.scope_key) {
-            trigger_alert(ctx, &rule, context).await?;
+            trigger_alert(ctx, &rule, &condition, context).await?;
         }
     }
 
-    if !has_triggered_rule && context.recovered {
-        recovery::resolve_scope(ctx, &context.scope_key, recovery::DEFAULT_REASON).await?;
+    if !has_triggered_rule {
+        if context.recovered {
+            recovery::resolve_scope(ctx, &context.scope_key, recovery::DEFAULT_REASON).await?;
+        } else if context.degraded {
+            // `warning` não dispara regra (o evaluator não bateu), mas conta
+            // como problema para a janela dos eventos abertos do escopo.
+            let kind = problem_kind::classify(None, &context.dataset);
+            recovery::note_degraded_scope(ctx, &context.scope_key, kind).await?;
+        }
     }
     Ok(())
 }
@@ -118,6 +126,7 @@ pub async fn evaluate_monitor_result(
             message: result.message.clone().filter(|text| !text.is_empty()),
             data,
             recovered: result.status == MonitorStatus::Up,
+            degraded: result.status == MonitorStatus::Warning,
         },
     )
     .await
@@ -160,6 +169,7 @@ fn has_sustained_condition(rule: &alert_rules::Model, scope_key: &str) -> bool {
 async fn trigger_alert(
     ctx: &AppContext,
     rule: &alert_rules::Model,
+    condition: &AlertRuleCondition,
     context: &AlertEvaluationContext,
 ) -> AppResult<()> {
     let already_open = alert_events::Entity::find()
@@ -169,7 +179,7 @@ async fn trigger_alert(
         .one(&ctx.db)
         .await?;
     if let Some(open) = already_open {
-        return update_open_event(ctx, &open, rule).await;
+        return update_open_event(ctx, &open, rule, condition, context).await;
     }
 
     let message = context
@@ -188,6 +198,10 @@ async fn trigger_alert(
         json!(started_at.to_rfc3339()),
     );
     data.insert(state_machine::RECURRENCE_COUNT.into(), json!(0));
+    // Classificação do problema (Fase 2): o que o alerta está observando —
+    // perda de pacotes, latência, DNS, interface, túnel — não só "caiu".
+    let kind = problem_kind::classify(Some(&condition.field), &context.dataset);
+    data.insert(problem_kind::PROBLEM_KIND.into(), json!(kind.as_str()));
 
     let event = alert_events::ActiveModel {
         alert_rule_id: Set(Some(rule.id)),
@@ -205,6 +219,7 @@ async fn trigger_alert(
     .await?;
 
     let severity = Severity::parse(&rule.severity);
+    let detail = problem_kind::detail(kind, &context.dataset);
     NotificationService::with_default_channels()
         .notify(
             ctx,
@@ -213,11 +228,13 @@ async fn trigger_alert(
                 &context.target_label,
                 &message,
                 severity,
+                Some(&detail),
                 json!({
                     "alertEventId": event.id,
                     "monitorId": context.scope.monitor_id,
                     "deviceId": context.scope.device_id,
                     "scopeKey": context.scope_key,
+                    "problemKind": kind.as_str(),
                 }),
             ),
         )
@@ -237,20 +254,28 @@ async fn trigger_alert(
 ///
 /// Em ambos os casos `lastProblemAt` avança para `now` — a janela de
 /// resolução conta do **último** problema. Nunca há notificação aqui: recaída
-/// é atualização silenciosa de tela (`alert:updated`), não alerta novo.
+/// é atualização silenciosa de tela (`alert:updated`), não alerta novo. A única
+/// exceção é a **declaração de flapping** (Fase 3), que avisa uma vez que o
+/// alvo é cronicamente instável e a partir daí volta ao silêncio. O
+/// `problemKind` é reavaliado a cada passagem: a recaída pode ter causa
+/// diferente da queda original.
 async fn update_open_event(
     ctx: &AppContext,
     open: &alert_events::Model,
     rule: &alert_rules::Model,
+    condition: &AlertRuleCondition,
+    context: &AlertEvaluationContext,
 ) -> AppResult<()> {
     let now = Utc::now();
+    let policy = EpisodePolicy::from(rule);
     let status = open.status.parse().unwrap_or(AlertStatus::Active);
     let transition = state_machine::decide(&EpisodeInput {
         status,
         data: open.data.as_ref().and_then(Value::as_object),
         started_at: open.started_at.with_timezone(&Utc),
-        recovery_window_seconds: i64::from(rule.recovery_window_seconds),
+        policy,
         condition_matched: true,
+        degraded: false,
         recovered: false,
         // Um silêncio pedido pelo operador sobrevive à entrada em recovering:
         // a recaída devolve o alerta a silenced enquanto o prazo vigorar.
@@ -264,27 +289,26 @@ async fn update_open_event(
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default();
+    let kind = problem_kind::classify(Some(&condition.field), &context.dataset);
+    data.insert(problem_kind::PROBLEM_KIND.into(), json!(kind.as_str()));
     match transition {
-        Transition::Relapse {
+        Transition::Relapse { recurrence, status } => {
+            episode::mark_relapse(&mut data, recurrence, now, policy);
+            let saved = episode::persist(ctx, open, status, data).await?;
+            feed::publish(ctx, "alert:updated", feed::event_payload(&saved)).await;
+        }
+        Transition::StartFlapping {
             recurrence,
-            silenced,
+            transitions,
         } => {
-            data.insert(state_machine::RECURRENCE_COUNT.into(), json!(recurrence));
+            episode::mark_relapse(&mut data, recurrence, now, policy);
             data.insert(
-                state_machine::LAST_PROBLEM_AT.into(),
+                state_machine::FLAPPING_SINCE.into(),
                 json!(now.to_rfc3339()),
             );
-            let mut active: alert_events::ActiveModel = open.clone().into();
-            active.status = Set(if silenced {
-                AlertStatus::Silenced
-            } else {
-                AlertStatus::Active
-            }
-            .as_str()
-            .into());
-            active.data = Set(Some(Value::Object(data)));
-            let saved = active.update(&ctx.db).await?;
+            let saved = episode::persist(ctx, open, AlertStatus::Flapping, data).await?;
             feed::publish(ctx, "alert:updated", feed::event_payload(&saved)).await;
+            notify_flapping(ctx, &saved, transitions, policy, context).await;
         }
         Transition::ProblemOngoing => {
             data.insert(
@@ -295,10 +319,38 @@ async fn update_open_event(
             active.data = Set(Some(Value::Object(data)));
             active.update(&ctx.db).await?;
         }
-        // Com a condição batendo a máquina só devolve os dois ramos acima.
+        // Com a condição batendo a máquina só devolve os três ramos acima.
         _ => {}
     }
     Ok(())
+}
+
+/// O aviso único de "alvo oscilando".
+async fn notify_flapping(
+    ctx: &AppContext,
+    event: &alert_events::Model,
+    transitions: u32,
+    policy: EpisodePolicy,
+    context: &AlertEvaluationContext,
+) {
+    NotificationService::with_default_channels()
+        .notify(
+            ctx,
+            &formatter::alert_flapping(
+                &episode::title_of(event, &context.target_label),
+                transitions,
+                policy.flap_window_seconds,
+                Severity::parse(&event.severity),
+                json!({
+                    "alertEventId": event.id,
+                    "monitorId": event.monitor_id,
+                    "deviceId": event.device_id,
+                    "scopeKey": event.scope_key,
+                    "transitions": transitions,
+                }),
+            ),
+        )
+        .await;
 }
 
 #[cfg(test)]
@@ -319,6 +371,8 @@ mod tests {
             severity: "warning".into(),
             duration_seconds,
             recovery_window_seconds: 0,
+            flap_threshold: 0,
+            flap_window_seconds: 900,
             enabled: true,
             created_at: now,
             updated_at: now,

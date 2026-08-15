@@ -97,6 +97,11 @@ pub struct AlertRuleInput {
     /// Janela de estabilidade antes de resolver (Fase 1 do roadmap de alertas
     /// inteligentes). `None` no PUT = mantém; `0` = resolve na primeira ok.
     pub recovery_window_seconds: Option<i32>,
+    /// Recaídas dentro da janela que declaram o alvo oscilando (Fase 3).
+    /// `None` no PUT = mantém; `0` = detecção desligada.
+    pub flap_threshold: Option<i32>,
+    /// Largura da janela deslizante da detecção de flapping (Fase 3).
+    pub flap_window_seconds: Option<i32>,
     pub enabled: Option<bool>,
 }
 
@@ -104,6 +109,17 @@ pub struct AlertRuleInput {
 #[serde(rename_all = "camelCase")]
 pub struct CatalogApplyInput {
     pub keys: Option<Vec<String>>,
+}
+
+/// `GET /api/alerts/instability` — histórico de oscilação por alvo (Fase 3).
+///
+/// Sem `scopeKey` devolve o ranking de todos os alvos; com ele, só o alvo
+/// pedido (é como a página do monitor consulta o próprio indicador).
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct InstabilityQuery {
+    pub hours: Option<i64>,
+    pub scope_key: Option<String>,
 }
 
 /// `POST /api/alerts/:id/silence`. O frontend manda `minutes`; `durationMinutes`

@@ -327,6 +327,69 @@ export const RECOVERY_WINDOWS = [
   },
 ]
 
+/**
+ * Limiares de oscilação: quantas recaídas dentro da janela declaram o alvo
+ * "cronicamente instável" (estado `flapping`). Zero desliga a detecção.
+ *
+ * A detecção acontece sobre o episódio, que só sobrevive à oscilação quando há
+ * janela de estabilização — por isso o formulário avisa quando o limiar está
+ * ligado com `recoveryWindowSeconds` em zero.
+ */
+export const FLAP_THRESHOLDS = [
+  {
+    value: 0,
+    title: 'Não detectar oscilação',
+    phrase: 'sem detecção de oscilação',
+  },
+  { value: 3, title: 'Após 3 recaídas na janela', phrase: 'marca como oscilando após 3 recaídas' },
+  { value: 5, title: 'Após 5 recaídas na janela', phrase: 'marca como oscilando após 5 recaídas' },
+  {
+    value: 10,
+    title: 'Após 10 recaídas na janela',
+    phrase: 'marca como oscilando após 10 recaídas',
+  },
+]
+
+/** Largura da janela deslizante em que as recaídas são contadas */
+export const FLAP_WINDOWS = [
+  { value: 300, title: 'Contar recaídas dos últimos 5 minutos', short: '5 min' },
+  { value: 900, title: 'Contar recaídas dos últimos 15 minutos', short: '15 min' },
+  { value: 3600, title: 'Contar recaídas da última hora', short: '1 hora' },
+  { value: 21600, title: 'Contar recaídas das últimas 6 horas', short: '6 horas' },
+]
+
+/**
+ * Classificação do problema que abriu o episódio, preenchida pelo backend em
+ * `AlertEvent.data.problemKind`. A união com `string & {}` mantém o
+ * autocomplete dos valores conhecidos sem rejeitar valores futuros.
+ */
+export type AlertProblemKind =
+  | 'down'
+  | 'packet_loss'
+  | 'latency'
+  | 'dns_failure'
+  | 'interface_flap'
+  | 'vpn_instability'
+  | (string & {})
+
+const PROBLEM_KIND_LABELS: Record<string, string> = {
+  down: 'Indisponível',
+  packet_loss: 'Perda de pacotes',
+  latency: 'Latência alta',
+  dns_failure: 'Falha de DNS',
+  interface_flap: 'Interface oscilando',
+  vpn_instability: 'Instabilidade VPN',
+}
+
+/**
+ * Rótulo pt-BR do tipo de problema. Ausente ou desconhecido retorna `null`:
+ * quem consome simplesmente não renderiza o chip.
+ */
+export function problemKindLabel(kind?: string | null): string | null {
+  if (!kind) return null
+  return PROBLEM_KIND_LABELS[kind] ?? null
+}
+
 export function findMetric(field?: string): AlertMetricOption | undefined {
   return ALERT_METRICS.find((m) => m.field === field)
 }
@@ -383,6 +446,8 @@ export function statusLabel(status?: string): string {
       return 'Silenciado'
     case 'recovering':
       return 'Estabilizando'
+    case 'flapping':
+      return 'Oscilando'
     case 'resolved':
       return 'Resolvido'
     default:
@@ -391,12 +456,12 @@ export function statusLabel(status?: string): string {
 }
 
 /**
- * Cor do chip de status do alerta, resolvida pelo StatusTone central. Só o
- * estado intermediário ganha cor própria: nos demais, a severidade continua
+ * Cor do chip de status do alerta, resolvida pelo StatusTone central. Só os
+ * estados intermediários ganham cor própria: nos demais, a severidade continua
  * sendo a cor dominante e o chip fica no outlined neutro.
  */
 export function statusColor(status?: string): string | undefined {
-  return status === 'recovering' ? getStatusColor(status) : undefined
+  return status === 'recovering' || status === 'flapping' ? getStatusColor(status) : undefined
 }
 
 /** Formata o valor levando em conta rótulos de enum e unidade da métrica */
@@ -430,7 +495,9 @@ export function describeCondition(condition?: RuleCondition | null): string {
 export function describeRule(
   condition?: RuleCondition | null,
   durationSeconds = 0,
-  recoveryWindowSeconds = 0
+  recoveryWindowSeconds = 0,
+  flapThreshold = 0,
+  flapWindowSeconds = 900
 ): string {
   const base = `Alertar quando ${describeCondition(condition)}`
   const duration = durationSeconds
@@ -439,5 +506,29 @@ export function describeRule(
   const recovery =
     RECOVERY_WINDOWS.find((w) => w.value === recoveryWindowSeconds)?.phrase ??
     `resolve após ${recoveryWindowSeconds}s sem recaída`
-  return `${base}${duration}; ${recovery}.`
+  // A cláusula de oscilação só aparece quando há detecção configurada: dizer
+  // "sem detecção de oscilação" em toda regra seria ruído.
+  const flap = flapThreshold
+    ? `; marca como oscilando após ${flapThreshold} recaídas em ${flapWindowLabel(flapWindowSeconds)}`
+    : ''
+  return `${base}${duration}; ${recovery}${flap}.`
+}
+
+/** "15 min" / "1 hora" — a janela de flap em texto curto */
+export function flapWindowLabel(seconds?: number): string {
+  const known = FLAP_WINDOWS.find((w) => w.value === seconds)
+  if (known) return known.short
+  return `${Math.round((seconds ?? 0) / 60)} min`
+}
+
+/**
+ * A detecção de flapping é medida sobre o episódio, e o episódio só sobrevive à
+ * oscilação quando existe janela de estabilização. Limiar ligado com janela
+ * zerada nunca dispara — o formulário precisa dizer isso antes de salvar.
+ */
+export function flapNeedsRecoveryWindow(
+  flapThreshold?: number,
+  recoveryWindowSeconds?: number
+): boolean {
+  return (flapThreshold ?? 0) > 0 && (recoveryWindowSeconds ?? 0) === 0
 }

@@ -70,6 +70,8 @@ pub async fn evaluate_interface_state(
             message: Some(message),
             data,
             recovered: interface_state::is_recovery(&dataset),
+            // Interface não tem "warning": ou houve transição ou voltou.
+            degraded: false,
         },
     )
     .await

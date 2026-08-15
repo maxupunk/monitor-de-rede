@@ -71,7 +71,9 @@
                     describeRule(
                       template.condition,
                       template.durationSeconds,
-                      template.recoveryWindowSeconds ?? 0
+                      template.recoveryWindowSeconds ?? 0,
+                      template.flapThreshold ?? 0,
+                      template.flapWindowSeconds ?? 900
                     )
                   }}
                 </div>

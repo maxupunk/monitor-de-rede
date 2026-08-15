@@ -48,6 +48,11 @@ pub struct AlertEvaluationContext {
     /// avaliação, os alertas abertos do escopo entram em observação de
     /// estabilidade ou resolvem, conforme a janela de cada regra.
     pub recovered: bool,
+
+    /// `true` quando o alvo respondeu degradado (`warning`: perda parcial de
+    /// pacotes, DNS parcial). Não dispara regra, mas conta como problema para
+    /// a janela de recuperação dos eventos abertos do escopo (Fase 2).
+    pub degraded: bool,
 }
 
 /// Ciclo de vida de `alert_events` (§2.2 da análise de monitoramento
@@ -58,7 +63,10 @@ pub struct AlertEvaluationContext {
 /// atualizar um ponto de decisão vira erro de compilação, não bug silencioso.
 /// `Recovering` é o estado da histerese de resolução (Fase 1): o alvo voltou,
 /// mas a janela da regra ainda não se esgotou — uma recaída o devolve a
-/// `Active`.
+/// `Active`. `Flapping` é o estado da Fase 3: o alvo recaiu tantas vezes dentro
+/// da janela de flap da regra que deixou de ser "um problema" e virou
+/// "cronicamente instável" — o episódio segue aberto, sem notificar a cada
+/// oscilação, até a contagem deslizante decair e a estabilidade voltar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AlertStatus {
@@ -66,20 +74,22 @@ pub enum AlertStatus {
     Acknowledged,
     Silenced,
     Recovering,
+    Flapping,
     Resolved,
 }
 
 impl AlertStatus {
     /// Os status que contam como alerta ainda aberto.
     ///
-    /// Reconhecer, silenciar ou estabilizar não fecha o alerta — só muda como
-    /// ele aparece. Por isso os quatro aparecem juntos tanto na deduplicação
-    /// quanto na recuperação.
-    pub const OPEN: [Self; 4] = [
+    /// Reconhecer, silenciar, estabilizar ou oscilar não fecha o alerta — só
+    /// muda como ele aparece. Por isso os cinco aparecem juntos tanto na
+    /// deduplicação quanto na recuperação.
+    pub const OPEN: [Self; 5] = [
         Self::Active,
         Self::Acknowledged,
         Self::Silenced,
         Self::Recovering,
+        Self::Flapping,
     ];
 
     /// Forma persistida na coluna `alert_events.status`.
@@ -90,6 +100,7 @@ impl AlertStatus {
             Self::Acknowledged => "acknowledged",
             Self::Silenced => "silenced",
             Self::Recovering => "recovering",
+            Self::Flapping => "flapping",
             Self::Resolved => "resolved",
         }
     }
@@ -100,7 +111,7 @@ impl AlertStatus {
     pub const fn is_open(self) -> bool {
         matches!(
             self,
-            Self::Active | Self::Acknowledged | Self::Silenced | Self::Recovering
+            Self::Active | Self::Acknowledged | Self::Silenced | Self::Recovering | Self::Flapping
         )
     }
 }
@@ -122,6 +133,7 @@ impl FromStr for AlertStatus {
             "acknowledged" => Ok(Self::Acknowledged),
             "silenced" => Ok(Self::Silenced),
             "recovering" => Ok(Self::Recovering),
+            "flapping" => Ok(Self::Flapping),
             "resolved" => Ok(Self::Resolved),
             _ => Err(()),
         }
@@ -196,6 +208,9 @@ mod tests {
         assert!(!AlertStatus::Resolved.is_open());
         assert!("triggered".parse::<AlertStatus>().is_err());
         assert_eq!(AlertStatus::Recovering.to_string(), "recovering");
+        // Flapping é aberto como os demais: entra na dedup e na recuperação.
+        assert_eq!(AlertStatus::Flapping.to_string(), "flapping");
+        assert!(AlertStatus::OPEN.contains(&AlertStatus::Flapping));
     }
 
     #[test]

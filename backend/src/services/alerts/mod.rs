@@ -7,10 +7,13 @@
 pub mod catalog;
 pub mod contracts;
 pub mod datasets;
+pub mod episode;
 pub mod evaluator;
 pub mod feed;
 pub mod fields;
+pub mod instability;
 pub mod manager;
+pub mod problem_kind;
 pub mod recovery;
 pub mod repository;
 pub mod silence;

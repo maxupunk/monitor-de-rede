@@ -109,9 +109,11 @@ Regras-chave:
   `data.last_problem_at`).
 - A resolução exige `now - last_problem_at >= recovery_window_seconds`
   **e** o status atual ok. Cada recaída reinicia o relógio.
-- Opcional e posterior: um terceiro estado `flapping` (via percentual de
-  transições, estilo Nagios, ou score com decaimento, estilo BGP) que
-  **suprime notificações** e sinaliza o alvo como cronicamente instável.
+- Terceiro estado `flapping` (implementado na Fase 3, via contagem deslizante
+  de recaídas na janela — estilo Nagios, não o score com decaimento do BGP):
+  **suprime notificações** e sinaliza o alvo como cronicamente instável. Só
+  alcançável a partir de `recovering`, e a saída é direto para `resolved`,
+  quando a contagem decai **e** a estabilidade se sustenta.
 
 ### 3.2 Dados que o alerta precisa carregar
 
@@ -204,31 +206,83 @@ A menor mudança que já elimina o par 🚨+✅ a cada oscilação.
 **1 notificação de problema + 1 de resolução**, e o alerta fica visível como
 "estabilizando" entre as duas.
 
-### Fase 2 — Classificação do problema e aviso de instabilidade `🔴 Não iniciado`
+### Fase 2 — Classificação do problema e aviso de instabilidade `🟢 Concluído`
 
-- [ ] Preencher `data.problem_kind` a partir do dataset do monitor
+> **Entrega (2026-08-15)**: classificação pura em
+> `services/alerts/problem_kind.rs` (`enum ProblemKind` + `classify`, com o
+> campo da condição mandando quando existe e o dataset decidindo no caminho do
+> `warning`); `data.problemKind` gravado no disparo e **reavaliado a cada
+> transição** (a recaída pode ter causa diferente da queda); `degraded` entrou
+> em `AlertEvaluationContext` e na máquina de estados, com
+> `recovery::note_degraded_scope` carimbando `lastProblemAt` sem notificar e
+> sem abrir evento novo; templates do catálogo com janelas por tipo (300 s para
+> degradação sustentada, 120 s para transições de interface/túnel); formatter
+> nomeando tipo e valor observado no disparo e na resolução; frontend com
+> `AlertProblemKind`, `problemKindLabel` e chip do tipo nas três views da
+> Central. Validação completa verde: fmt, clippy `-D warnings`, 390+102 testes;
+> typecheck, format, lint e build do frontend.
+
+- [x] Preencher `data.problem_kind` a partir do dataset do monitor
   (`datasets/monitor_result.rs`) e dos fatos de interface/VPN.
-- [ ] Tratar `warning` (perda parcial de pacotes, DNS parcial) como problema
+- [x] Tratar `warning` (perda parcial de pacotes, DNS parcial) como problema
   para a janela de recuperação — hoje só `down`/`recovered` movem o alerta.
-- [ ] Templates do catálogo (`alerts/catalog/templates.rs`) revisados:
+- [x] Templates do catálogo (`alerts/catalog/templates.rs`) revisados:
   perda de pacotes e latência ganham `recovery_window_seconds` coerente;
   transições de interface ganham regra própria de flap.
-- [ ] Formatter de notificação com o tipo e os detalhes do episódio
+- [x] Formatter de notificação com o tipo e os detalhes do episódio
   (perda %, latência, contagem de quedas).
 
-### Fase 3 — Detecção de flapping (supressão inteligente) `🔴 Não iniciado`
+### Fase 3 — Detecção de flapping (supressão inteligente) `🟢 Concluído`
 
 Para alvos **cronicamente** instáveis, onde nem a Fase 1 basta.
 
-- [ ] Contador deslizante de transições de estado por alvo (últimas N
+> **Entrega (2026-08-15)**: migration
+> `m20260815_000002_alert_rules_flap_detection` (`flap_threshold`,
+> `flap_window_seconds`); `AlertStatus::Flapping` como quinto estado aberto;
+> contador deslizante em `data.problemTimeline` (carimbo por recaída, podado
+> pela janela e limitado a 64 entradas) com a decisão inteira na máquina de
+> estados pura — `StartFlapping` notifica uma vez, as recaídas seguintes voltam
+> ao silêncio, e a saída exige **as duas coisas**: contagem decaída abaixo do
+> limiar *e* estabilidade por toda a `recovery_window_seconds`; `EpisodePolicy`
+> substituiu o `recovery_window_seconds` solto do `EpisodeInput`, reunindo os
+> parâmetros de regra num contrato só; `services/alerts/episode.rs` novo,
+> unificando a escrita de recaída que manager e recovery duplicavam desde a
+> Fase 2; `services/alerts/instability.rs` + `GET /api/alerts/instability`
+> agregando oscilações por escopo (episódios + recaídas); frontend com o status
+> "Oscilando", os dois campos no formulário de regra (com aviso quando o limiar
+> é ligado sem janela de estabilização), `InstabilityIndicator` na página do
+> monitor e widget "Alvos Instáveis" no dashboard. Validação completa verde:
+> fmt, clippy `-D warnings`, 413+107 testes; typecheck, format, lint e build do
+> frontend.
+>
+> **Decisão de design registrada**: a detecção é medida **sobre o episódio**,
+> não sobre `monitor_results`. O episódio já atravessa a oscilação desde a Fase
+> 1 e já vale para monitor, interface e túnel — `monitor_results` cobriria só o
+> primeiro. A consequência é explícita: flapping **pressupõe**
+> `recovery_window_seconds > 0`, porque sem janela o evento fecha na primeira
+> checagem ok e nunca chega a recair. Por isso o template `device_offline`
+> passou de janela 0 para 120 s: a indisponibilidade que cai e volta é *o* caso
+> de flapping, e mantê-la sem janela deixaria a feature inaplicável justamente
+> onde ela mais importa (além de ser o que o critério de aceite da Fase 1 já
+> pedia). O formulário de regra avisa quando o limiar é configurado sem janela.
+>
+> **Não** foi criado um score contínuo estilo BGP damping: a contagem
+> deslizante já decai sozinha (carimbos envelhecem para fora da janela) e
+> entrega a histerese com um parâmetro a menos para o usuário entender.
+
+- [x] Contador deslizante de transições de estado por alvo (últimas N
   checagens — cabe em memória + persistência leve, ou derivado de
   `monitor_results`).
-- [ ] Estado `flapping` no evento (ou score estilo BGP damping): acima do
+- [x] Estado `flapping` no evento (ou score estilo BGP damping): acima do
   limiar, suprime notificações recorrentes e emite um único aviso "alvo
   oscilando"; abaixo do limiar de retorno, avisa que estabilizou.
-- [ ] Limiares configuráveis por regra (ex.: >5 transições em 15 min).
-- [ ] Widget/indicador de instabilidade no frontend (página do monitor e
+- [x] Limiares configuráveis por regra (ex.: >5 transições em 15 min).
+- [x] Widget/indicador de instabilidade no frontend (página do monitor e
   dashboard): "este link oscilou 12x nas últimas 24h".
+
+**Critério de aceite**: alvo que cai e volta 5 vezes em 15 min gera **1
+notificação de problema + 1 aviso de oscilação + 1 de resolução**, e aparece
+como "Oscilando" na Central e no ranking de alvos instáveis do dashboard.
 
 ### Fase 4 — Higiene de notificações `🔴 Não iniciado`
 

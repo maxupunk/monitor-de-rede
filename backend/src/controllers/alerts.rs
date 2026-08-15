@@ -11,14 +11,16 @@ use serde_json::{json, Value};
 use crate::{
     dtos::{
         optional_body,
-        resources::{AlertRuleInput, CatalogApplyInput, PaginationQuery, SilenceInput},
+        resources::{
+            AlertRuleInput, CatalogApplyInput, InstabilityQuery, PaginationQuery, SilenceInput,
+        },
     },
     models::{_entities::alert_events as alert_events_entity, alert_events, alert_rules, monitors},
     services::{
         alerts::{
             catalog::{service as catalog, templates},
             contracts::AlertStatus,
-            silence,
+            instability, silence,
         },
         events::EventBus,
         monitoring::{
@@ -67,6 +69,24 @@ fn invalid_recovery_window() -> AppError {
     )
 }
 
+/// Mesma lógica da janela de recuperação: os limiares de flapping são
+/// contagens e tempos: negativos seriam tratados como "desligado" pela máquina
+/// de estados, e gravar um valor que não faz o que diz confunde quem configura.
+fn invalid_flap_settings() -> AppError {
+    AppError::validation(
+        "Limiar de oscilação inválido. Informe zero ou mais recaídas e uma janela não negativa.",
+    )
+}
+
+/// Aplica um campo opcional não negativo: ausente mantém o atual.
+fn non_negative(input: Option<i32>, current: i32) -> Result<i32, AppError> {
+    match input {
+        Some(value) if value < 0 => Err(invalid_flap_settings()),
+        Some(value) => Ok(value),
+        None => Ok(current),
+    }
+}
+
 /// Publicação de evento é best-effort: o CRUD já concluiu quando chegamos aqui.
 async fn publish(ctx: &AppContext, kind: &str, payload: Value) {
     if let Ok(bus) = EventBus::from_context(ctx) {
@@ -107,6 +127,10 @@ async fn rules_store(
     if recovery_window_seconds < 0 {
         return Err(invalid_recovery_window());
     }
+    // Default da coluna: detecção desligada, mas com uma janela sensata já
+    // pronta para quem só ligar o limiar depois.
+    let flap_threshold = non_negative(input.flap_threshold, 0)?;
+    let flap_window_seconds = non_negative(input.flap_window_seconds, 900)?;
 
     let rule = alert_rules::ActiveModel {
         site_id: Set(input.site_id),
@@ -118,6 +142,8 @@ async fn rules_store(
         severity: Set(input.severity.unwrap_or_else(|| "warning".into())),
         duration_seconds: Set(input.duration_seconds.unwrap_or(0)),
         recovery_window_seconds: Set(recovery_window_seconds),
+        flap_threshold: Set(flap_threshold),
+        flap_window_seconds: Set(flap_window_seconds),
         enabled: Set(input.enabled.unwrap_or(true)),
         ..Default::default()
     }
@@ -148,6 +174,8 @@ async fn rules_update(
         Some(value) => value,
         None => current.recovery_window_seconds,
     };
+    let flap_threshold = non_negative(input.flap_threshold, current.flap_threshold)?;
+    let flap_window_seconds = non_negative(input.flap_window_seconds, current.flap_window_seconds)?;
 
     let rule = alert_rules::ActiveModel {
         id: Set(id),
@@ -166,6 +194,8 @@ async fn rules_update(
         severity: Set(input.severity.unwrap_or(current.severity)),
         duration_seconds: Set(input.duration_seconds.unwrap_or(current.duration_seconds)),
         recovery_window_seconds: Set(recovery_window_seconds),
+        flap_threshold: Set(flap_threshold),
+        flap_window_seconds: Set(flap_window_seconds),
         enabled: Set(input.enabled.unwrap_or(current.enabled)),
         ..Default::default()
     }
@@ -255,6 +285,24 @@ async fn index(
         data: serialize_events(&ctx.db, events).await?,
         meta: LucidMeta::new(total, limit, page),
     })?)
+}
+
+/// `GET /api/alerts/instability` — "este link oscilou 12x nas últimas 24h".
+///
+/// O indicador que a página do monitor e o dashboard consomem (Fase 3). Sem
+/// `scopeKey`, o ranking dos alvos mais instáveis da janela.
+async fn instability_index(
+    State(ctx): State<AppContext>,
+    Query(query): Query<InstabilityQuery>,
+) -> AppResult<Response> {
+    Ok(format::json(
+        instability::load(
+            &ctx.db,
+            query.hours.unwrap_or(instability::DEFAULT_HOURS),
+            query.scope_key.as_deref(),
+        )
+        .await?,
+    )?)
 }
 
 /// Executa a checagem em tempo real do alvo do alerta (se for um monitor) e,
@@ -499,6 +547,7 @@ pub fn routes() -> Routes {
     Routes::new()
         .prefix("/alerts")
         .add("/", get(index))
+        .add("/instability", get(instability_index))
         .add("/verify-all", post(verify_all))
         .add("/{id}/acknowledge", post(acknowledge))
         .add("/{id}/verify", post(verify))

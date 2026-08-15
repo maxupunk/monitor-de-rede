@@ -122,6 +122,8 @@ pub async fn evaluate_peer(ctx: &AppContext, peer: vpn_peers::Model) -> AppResul
             message: Some(message),
             data,
             recovered: vpn_peer::is_recovery(&dataset),
+            // Túnel não tem "warning": a transição `destabilized` já é fato.
+            degraded: false,
         },
     )
     .await?;

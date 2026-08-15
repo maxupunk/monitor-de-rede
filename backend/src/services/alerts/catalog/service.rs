@@ -197,6 +197,8 @@ pub async fn apply<C: ConnectionTrait>(
             severity: Set(template.severity.to_string()),
             duration_seconds: Set(template.duration_seconds),
             recovery_window_seconds: Set(template.recovery_window_seconds),
+            flap_threshold: Set(template.flap_threshold),
+            flap_window_seconds: Set(template.flap_window_seconds),
             enabled: Set(true),
             ..Default::default()
         }

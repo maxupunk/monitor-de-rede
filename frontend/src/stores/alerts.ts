@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { apiService } from '@/services/apiService'
-import type { AlertOperator } from '@/utils/alertPresentation'
+import type { AlertOperator, AlertProblemKind } from '@/utils/alertPresentation'
 
 export interface AlertRuleCondition {
   field: string
@@ -26,6 +26,10 @@ export interface AlertRule {
   durationSeconds: number
   /** Janela de estabilização antes de resolver; 0 = resolve na 1ª checagem ok */
   recoveryWindowSeconds?: number
+  /** Recaídas na janela que declaram o alvo oscilando; 0 = detecção desligada */
+  flapThreshold?: number
+  /** Largura da janela deslizante em que as recaídas são contadas */
+  flapWindowSeconds?: number
   enabled: boolean
   isEnabled: boolean
 }
@@ -42,6 +46,9 @@ export interface AlertRuleTemplate {
   durationSeconds: number
   /** Janela de estabilização sugerida pelo template (0 = resolução imediata) */
   recoveryWindowSeconds?: number
+  /** Limiar de oscilação sugerido pelo template (0 = detecção desligada) */
+  flapThreshold?: number
+  flapWindowSeconds?: number
   /** Faz parte do conjunto básico aplicado por padrão */
   recommended: boolean
   /** Já existe regra equivalente: aplicar de novo não cria duplicata */
@@ -67,7 +74,25 @@ export interface AlertEventData {
   recurrenceCount?: number
   /** ISO até quando o evento está silenciado */
   silencedUntil?: string
+  /** Tipo do problema que abriu o episódio; valores novos são tolerados */
+  problemKind?: AlertProblemKind
+  /** ISO de quando o episódio foi declarado oscilante (estado `flapping`) */
+  flappingSince?: string
+  /** Carimbos ISO das recaídas dentro da janela de detecção de oscilação */
+  problemTimeline?: string[]
   [key: string]: unknown
+}
+
+/** Quanto um alvo oscilou na janela consultada (`GET /alerts/instability`) */
+export interface ScopeInstability {
+  /** `monitor:12`, `interface:34`, `vpn_peer:7` */
+  scopeKey: string
+  /** Quedas na janela: episódios abertos + recaídas acumuladas */
+  oscillations: number
+  episodes: number
+  /** O alvo está declarado oscilante agora */
+  flapping: boolean
+  lastProblemAt?: string | null
 }
 
 export interface AlertEvent {
@@ -76,8 +101,11 @@ export interface AlertEvent {
   deviceId?: number | null
   monitorId?: number | null
   severity: 'info' | 'warning' | 'error' | 'critical'
-  /** `recovering` é estado aberto: voltou, mas ainda dentro da janela de estabilização */
-  status: 'active' | 'acknowledged' | 'silenced' | 'recovering' | 'resolved'
+  /**
+   * `recovering` e `flapping` são estados abertos: o primeiro é "voltou, mas
+   * ainda dentro da janela de estabilização"; o segundo, "cai e volta demais".
+   */
+  status: 'active' | 'acknowledged' | 'silenced' | 'recovering' | 'flapping' | 'resolved'
   title: string
   message: string
   data?: AlertEventData | null
@@ -180,6 +208,29 @@ export const useAlertsStore = defineStore('alerts', () => {
       return null
     } finally {
       catalogLoading.value = false
+    }
+  }
+
+  /**
+   * Histórico de oscilação por alvo ("este link oscilou 12x nas últimas 24h").
+   *
+   * Sem `scopeKey` devolve o ranking geral; com ele, só o alvo pedido. Falha de
+   * rede devolve lista vazia: é um indicador de apoio, e derrubar a página do
+   * monitor por causa dele seria desproporcional.
+   */
+  async function fetchInstability(
+    options: { scopeKey?: string; hours?: number } = {}
+  ): Promise<ScopeInstability[]> {
+    const params = new URLSearchParams()
+    if (options.scopeKey) params.set('scopeKey', options.scopeKey)
+    if (options.hours) params.set('hours', String(options.hours))
+    const query = params.toString()
+    try {
+      return await apiService.get<ScopeInstability[]>(
+        `/alerts/instability${query ? `?${query}` : ''}`
+      )
+    } catch {
+      return []
     }
   }
 
@@ -346,6 +397,7 @@ export const useAlertsStore = defineStore('alerts', () => {
     fetchAlertRules,
     fetchRuleCatalog,
     applyCatalogRules,
+    fetchInstability,
     acknowledgeAlert,
     verifyAlert,
     verifyAllAlerts,

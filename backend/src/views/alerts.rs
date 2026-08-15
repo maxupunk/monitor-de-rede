@@ -37,6 +37,11 @@ pub struct AlertRuleResponse {
     /// Janela de estabilidade antes de resolver, em segundos (0 = resolve na
     /// primeira checagem ok). A tela de regras edita este campo.
     pub recovery_window_seconds: i32,
+    /// Recaídas dentro da janela de flap que declaram o alvo oscilando
+    /// (0 = detecção desligada). Fase 3.
+    pub flap_threshold: i32,
+    /// Largura da janela deslizante da detecção de flapping, em segundos.
+    pub flap_window_seconds: i32,
     pub enabled: bool,
     /// Espelho de `enabled` (§6.1) — o `AlertRule` do frontend lê os dois.
     pub is_enabled: bool,
@@ -58,6 +63,8 @@ impl From<alert_rules::Model> for AlertRuleResponse {
             severity: row.severity,
             duration_seconds: row.duration_seconds,
             recovery_window_seconds: row.recovery_window_seconds,
+            flap_threshold: row.flap_threshold,
+            flap_window_seconds: row.flap_window_seconds,
             enabled: row.enabled,
             is_enabled: row.enabled,
             created_at: row.created_at.to_rfc3339(),
@@ -78,6 +85,8 @@ pub fn rule_event_payload(rule: &alert_rules::Model) -> Value {
         "severity": rule.severity,
         "durationSeconds": rule.duration_seconds,
         "recoveryWindowSeconds": rule.recovery_window_seconds,
+        "flapThreshold": rule.flap_threshold,
+        "flapWindowSeconds": rule.flap_window_seconds,
         "enabled": rule.enabled,
         "isEnabled": rule.enabled,
     })
@@ -374,6 +383,8 @@ mod tests {
             severity: "critical".into(),
             duration_seconds: 0,
             recovery_window_seconds: 120,
+            flap_threshold: 5,
+            flap_window_seconds: 900,
             enabled: true,
             created_at: now,
             updated_at: now,
@@ -382,6 +393,8 @@ mod tests {
         assert_eq!(json["isEnabled"], true);
         assert_eq!(json["durationSeconds"], 0);
         assert_eq!(json["recoveryWindowSeconds"], 120);
+        assert_eq!(json["flapThreshold"], 5);
+        assert_eq!(json["flapWindowSeconds"], 900);
         assert_eq!(json["templateKey"], "device_offline");
         assert_eq!(json["type"], "custom");
     }

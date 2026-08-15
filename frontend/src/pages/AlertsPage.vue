@@ -103,12 +103,20 @@
               </template>
 
               <template #item.message="{ item }">
-                <div>{{ item.message }}</div>
-                <div
-                  v-if="item.status === 'recovering' && recoveringInfo(item)"
-                  class="text-caption text-warning"
-                >
-                  {{ recoveringInfo(item) }}
+                <div>
+                  <v-chip
+                    v-if="problemKindLabel(item.data?.problemKind)"
+                    size="x-small"
+                    variant="tonal"
+                    color="grey"
+                    class="mr-2"
+                  >
+                    {{ problemKindLabel(item.data?.problemKind) }}
+                  </v-chip>
+                  {{ item.message }}
+                </div>
+                <div v-if="episodeInfo(item)" class="text-caption text-warning">
+                  {{ episodeInfo(item) }}
                 </div>
               </template>
 
@@ -160,14 +168,19 @@
                         <v-chip :color="statusColor(item.status)" variant="outlined" size="x-small">
                           {{ statusLabel(item.status) }}
                         </v-chip>
+                        <v-chip
+                          v-if="problemKindLabel(item.data?.problemKind)"
+                          size="x-small"
+                          variant="tonal"
+                          color="grey"
+                        >
+                          {{ problemKindLabel(item.data?.problemKind) }}
+                        </v-chip>
                       </div>
                       <div class="text-subtitle-1 font-weight-bold mt-1">{{ item.title }}</div>
                       <div class="text-body-2 text-grey-darken-1">{{ item.message }}</div>
-                      <div
-                        v-if="item.status === 'recovering' && recoveringInfo(item)"
-                        class="text-caption text-warning"
-                      >
-                        {{ recoveringInfo(item) }}
+                      <div v-if="episodeInfo(item)" class="text-caption text-warning">
+                        {{ episodeInfo(item) }}
                       </div>
                       <div class="text-caption text-grey mt-1">
                         {{ formatDateTime(item.startedAt || item.createdAt) }}
@@ -441,7 +454,18 @@
                           {{ statusLabel(alert.status) }}
                         </v-chip>
                       </td>
-                      <td class="font-weight-medium">{{ alert.title }}</td>
+                      <td class="font-weight-medium">
+                        {{ alert.title }}
+                        <v-chip
+                          v-if="problemKindLabel(alert.data?.problemKind)"
+                          size="x-small"
+                          variant="tonal"
+                          color="grey"
+                          class="ml-2"
+                        >
+                          {{ problemKindLabel(alert.data?.problemKind) }}
+                        </v-chip>
+                      </td>
                       <td class="text-body-2">{{ alert.message || '—' }}</td>
                       <td>{{ formatDateTime(alert.startedAt || alert.createdAt) }}</td>
                       <td>
@@ -580,6 +604,44 @@
               class="mb-4"
             ></v-select>
 
+            <v-row dense class="mb-2">
+              <v-col cols="12" md="6">
+                <v-select
+                  v-model="form.flapThreshold"
+                  :items="FLAP_THRESHOLDS"
+                  item-title="title"
+                  item-value="value"
+                  label="Detecção de oscilação"
+                  hint="Alvo que recai demais é marcado como “oscilando” e para de notificar até estabilizar."
+                  persistent-hint
+                  variant="outlined"
+                ></v-select>
+              </v-col>
+              <v-col cols="12" md="6">
+                <v-select
+                  v-model="form.flapWindowSeconds"
+                  :items="FLAP_WINDOWS"
+                  item-title="title"
+                  item-value="value"
+                  label="Janela de contagem das recaídas"
+                  :disabled="!form.flapThreshold"
+                  variant="outlined"
+                ></v-select>
+              </v-col>
+            </v-row>
+
+            <v-alert
+              v-if="flapNeedsRecoveryWindow(form.flapThreshold, form.recoveryWindowSeconds)"
+              type="warning"
+              variant="tonal"
+              density="compact"
+              class="mb-4"
+            >
+              A detecção de oscilação é medida sobre o episódio do alerta, que só sobrevive à
+              oscilação quando há estabilização. Com “sem estabilização” o alerta resolve na
+              primeira checagem ok e nunca chega a recair — escolha uma janela acima.
+            </v-alert>
+
             <v-select
               v-model="form.severity"
               :items="ALERT_SEVERITIES"
@@ -621,6 +683,8 @@ import {
   ALERT_METRICS,
   ALERT_DURATIONS,
   RECOVERY_WINDOWS,
+  FLAP_THRESHOLDS,
+  FLAP_WINDOWS,
   ALERT_SEVERITIES,
   findMetric,
   operatorsForMetric,
@@ -630,6 +694,8 @@ import {
   severityColor,
   statusLabel,
   statusColor,
+  problemKindLabel,
+  flapNeedsRecoveryWindow,
   formatConditionValue,
   describeRule,
   type AlertOperator,
@@ -717,6 +783,8 @@ const form = reactive({
   value: 150 as number | string,
   durationSeconds: 0,
   recoveryWindowSeconds: 0,
+  flapThreshold: 0,
+  flapWindowSeconds: 900,
   severity: 'warning' as AlertRule['severity'],
 })
 
@@ -734,7 +802,9 @@ const rulePreview = computed(() =>
   describeRule(
     { field: form.field, operator: form.operator, value: form.value },
     form.durationSeconds,
-    form.recoveryWindowSeconds
+    form.recoveryWindowSeconds,
+    form.flapThreshold,
+    form.flapWindowSeconds
   )
 )
 
@@ -793,9 +863,18 @@ function durationLabel(seconds?: number): string {
   return ALERT_DURATIONS.find((d) => d.value === (seconds ?? 0))?.title ?? `${seconds}s`
 }
 
-/** Linha informativa do estado "Estabilizando": último problema e recaídas */
-function recoveringInfo(alert: AlertEvent): string {
+/**
+ * Linha informativa do episódio: último problema, recaídas e, quando o alvo foi
+ * declarado oscilante, desde quando. Vale para "Estabilizando" e "Oscilando" —
+ * os dois estados abertos em que a história do episódio explica a tela; nos
+ * demais não há episódio a contar e a função devolve string vazia.
+ */
+function episodeInfo(alert: AlertEvent): string {
+  if (alert.status !== 'recovering' && alert.status !== 'flapping') return ''
   const parts: string[] = []
+  if (alert.status === 'flapping' && alert.data?.flappingSince) {
+    parts.push(`oscilando desde ${formatRelativeTime(alert.data.flappingSince)}`)
+  }
   if (alert.data?.lastProblemAt) {
     parts.push(`último problema ${formatRelativeTime(alert.data.lastProblemAt)}`)
   }
@@ -822,6 +901,8 @@ function openRuleDialog(rule?: AlertRule) {
     form.value = rule.condition?.value ?? 0
     form.durationSeconds = rule.durationSeconds ?? 0
     form.recoveryWindowSeconds = rule.recoveryWindowSeconds ?? 0
+    form.flapThreshold = rule.flapThreshold ?? 0
+    form.flapWindowSeconds = rule.flapWindowSeconds ?? 900
     form.severity = rule.severity ?? 'warning'
   } else {
     editingRuleId.value = null
@@ -831,6 +912,8 @@ function openRuleDialog(rule?: AlertRule) {
     form.value = 150
     form.durationSeconds = 0
     form.recoveryWindowSeconds = 0
+    form.flapThreshold = 0
+    form.flapWindowSeconds = 900
     form.severity = 'warning'
   }
   ruleDialog.value = true
@@ -853,6 +936,8 @@ function buildPayload(): Partial<AlertRule> {
     condition: { field: form.field, operator: form.operator, value },
     durationSeconds: form.durationSeconds,
     recoveryWindowSeconds: form.recoveryWindowSeconds,
+    flapThreshold: form.flapThreshold,
+    flapWindowSeconds: form.flapWindowSeconds,
     severity: form.severity,
     enabled: true,
   }

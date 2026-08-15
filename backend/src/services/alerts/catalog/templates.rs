@@ -38,9 +38,30 @@ pub struct AlertRuleTemplate {
     pub condition: Value,
     pub severity: &'static str,
     pub duration_seconds: i32,
-    /// Janela de estabilidade antes de resolver (Fase 1). Zeros por ora: a
-    /// revisão dos valores por tipo de problema é Fase 2 do roadmap.
+    /// Janela de estabilidade antes de resolver (Fase 1), revisada por tipo de
+    /// problema na Fase 2: as regras de degradação sustentada (perda, latência)
+    /// ganham janela igual à tolerância de disparo (300 s); as transições de
+    /// interface/túnel ganham janela curta (120 s), para que uma recaída
+    /// imediata reabra o episódio em vez de gerar um novo par de alertas.
+    ///
+    /// Idempotência: a assinatura de dedup (`catalog/service.rs`) cobre só
+    /// condição + escopo — mudar a janela aqui **não** atualiza regras já
+    /// aplicadas em instalações existentes; só instalações novas (ou quem
+    /// ainda não aplicou o template) recebem o valor novo.
     pub recovery_window_seconds: i32,
+    /// Recaídas dentro de [`Self::flap_window_seconds`] que declaram o alvo
+    /// oscilando (Fase 3). `0` desliga a detecção.
+    ///
+    /// O default do catálogo é `5` em tudo que tem janela de estabilidade e `0`
+    /// no resto — e não é arbitrário: a detecção acontece **sobre o episódio**,
+    /// que só sobrevive à oscilação quando há janela. Template com
+    /// `recovery_window_seconds: 0` fecha o evento na primeira checagem ok e
+    /// nunca chega a recair, então limiar ali seria letra morta.
+    pub flap_threshold: i32,
+    /// Largura da janela deslizante da detecção de flapping. 900 s (15 min) em
+    /// todo o catálogo: é o horizonte em que "caiu de novo" ainda descreve o
+    /// mesmo problema.
+    pub flap_window_seconds: i32,
     /// Faz parte do conjunto básico provisionado por padrão.
     pub recommended: bool,
 }
@@ -62,7 +83,14 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             condition: json!({ "field": fields::STATUS, "operator": "eq", "value": "down" }),
             severity: "critical",
             duration_seconds: 0,
-            recovery_window_seconds: 0,
+            // Revisto na Fase 3: era 0. A indisponibilidade que cai e volta é
+            // *o* caso de flapping, e sem janela o evento fecha na primeira
+            // checagem ok — nunca chega a recair, nunca é detectado. 120 s
+            // também entrega o critério de aceite da Fase 1 (link caindo a cada
+            // 30 s gera um par de notificações, não vinte).
+            recovery_window_seconds: 120,
+            flap_threshold: 5,
+            flap_window_seconds: 900,
             recommended: true,
         },
         AlertRuleTemplate {
@@ -74,7 +102,9 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             condition: json!({ "field": fields::PACKET_LOSS, "operator": "gt", "value": 10 }),
             severity: "warning",
             duration_seconds: 300,
-            recovery_window_seconds: 0,
+            recovery_window_seconds: 300,
+            flap_threshold: 5,
+            flap_window_seconds: 900,
             recommended: true,
         },
         AlertRuleTemplate {
@@ -86,7 +116,9 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             condition: json!({ "field": fields::LATENCY_MS, "operator": "gt", "value": 200 }),
             severity: "warning",
             duration_seconds: 300,
-            recovery_window_seconds: 0,
+            recovery_window_seconds: 300,
+            flap_threshold: 5,
+            flap_window_seconds: 900,
             recommended: true,
         },
         AlertRuleTemplate {
@@ -98,7 +130,9 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             condition: json!({ "field": fields::LATENCY_MS, "operator": "gt", "value": 500 }),
             severity: "critical",
             duration_seconds: 300,
-            recovery_window_seconds: 0,
+            recovery_window_seconds: 300,
+            flap_threshold: 5,
+            flap_window_seconds: 900,
             recommended: false,
         },
         AlertRuleTemplate {
@@ -110,7 +144,9 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             condition: json!({ "field": fields::DURATION_MS, "operator": "gt", "value": 5000 }),
             severity: "info",
             duration_seconds: 300,
-            recovery_window_seconds: 0,
+            recovery_window_seconds: 300,
+            flap_threshold: 5,
+            flap_window_seconds: 900,
             recommended: false,
         },
         AlertRuleTemplate {
@@ -123,6 +159,8 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             severity: "critical",
             duration_seconds: 0,
             recovery_window_seconds: 0,
+            flap_threshold: 0,
+            flap_window_seconds: 900,
             recommended: true,
         },
         AlertRuleTemplate {
@@ -134,7 +172,9 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             condition: json!({ "field": fields::CONNECT_TIME_MS, "operator": "gt", "value": 1000 }),
             severity: "warning",
             duration_seconds: 300,
-            recovery_window_seconds: 0,
+            recovery_window_seconds: 300,
+            flap_threshold: 5,
+            flap_window_seconds: 900,
             recommended: false,
         },
         AlertRuleTemplate {
@@ -146,7 +186,9 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             condition: json!({ "field": fields::RESOLUTION_TIME_MS, "operator": "gt", "value": 800 }),
             severity: "warning",
             duration_seconds: 300,
-            recovery_window_seconds: 0,
+            recovery_window_seconds: 300,
+            flap_threshold: 5,
+            flap_window_seconds: 900,
             recommended: false,
         },
         AlertRuleTemplate {
@@ -162,7 +204,9 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             }),
             severity: "warning",
             duration_seconds: 0,
-            recovery_window_seconds: 0,
+            recovery_window_seconds: 120,
+            flap_threshold: 5,
+            flap_window_seconds: 900,
             recommended: true,
         },
         AlertRuleTemplate {
@@ -178,7 +222,9 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             }),
             severity: "warning",
             duration_seconds: 0,
-            recovery_window_seconds: 0,
+            recovery_window_seconds: 120,
+            flap_threshold: 5,
+            flap_window_seconds: 900,
             recommended: true,
         },
         AlertRuleTemplate {
@@ -195,6 +241,8 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             severity: "info",
             duration_seconds: 0,
             recovery_window_seconds: 0,
+            flap_threshold: 0,
+            flap_window_seconds: 900,
             recommended: false,
         },
         AlertRuleTemplate {
@@ -211,6 +259,8 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             severity: "info",
             duration_seconds: 0,
             recovery_window_seconds: 0,
+            flap_threshold: 0,
+            flap_window_seconds: 900,
             recommended: false,
         },
         AlertRuleTemplate {
@@ -227,6 +277,8 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             severity: "info",
             duration_seconds: 0,
             recovery_window_seconds: 0,
+            flap_threshold: 0,
+            flap_window_seconds: 900,
             recommended: false,
         },
         AlertRuleTemplate {
@@ -240,6 +292,8 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             severity: "warning",
             duration_seconds: 0,
             recovery_window_seconds: 0,
+            flap_threshold: 0,
+            flap_window_seconds: 900,
             recommended: false,
         },
         AlertRuleTemplate {
@@ -253,6 +307,8 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             severity: "warning",
             duration_seconds: 0,
             recovery_window_seconds: 0,
+            flap_threshold: 0,
+            flap_window_seconds: 900,
             recommended: false,
         },
         AlertRuleTemplate {
@@ -268,7 +324,9 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             }),
             severity: "critical",
             duration_seconds: 0,
-            recovery_window_seconds: 0,
+            recovery_window_seconds: 120,
+            flap_threshold: 5,
+            flap_window_seconds: 900,
             recommended: true,
         },
         AlertRuleTemplate {
@@ -284,7 +342,9 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             }),
             severity: "warning",
             duration_seconds: 0,
-            recovery_window_seconds: 0,
+            recovery_window_seconds: 120,
+            flap_threshold: 5,
+            flap_window_seconds: 900,
             recommended: false,
         },
         AlertRuleTemplate {
@@ -301,6 +361,8 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             severity: "info",
             duration_seconds: 0,
             recovery_window_seconds: 0,
+            flap_threshold: 0,
+            flap_window_seconds: 900,
             recommended: false,
         },
     ]
@@ -374,13 +436,55 @@ mod tests {
     }
 
     #[test]
+    fn janelas_revisadas_na_fase_2() {
+        let window = |key: &str| find(key).expect("template existe").recovery_window_seconds;
+        // Degradação sustentada: janela casa com a tolerância de disparo.
+        assert_eq!(window("packet_loss_high"), 300);
+        assert_eq!(window("latency_high"), 300);
+        assert_eq!(window("latency_critical"), 300);
+        assert_eq!(window("dns_resolution_slow"), 300);
+        // Transições de interface/túnel: janela curta.
+        assert_eq!(window("interface_link_down"), 120);
+        assert_eq!(window("interface_speed_downgrade"), 120);
+        assert_eq!(window("vpn_peer_disconnected"), 120);
+        assert_eq!(window("vpn_peer_unstable"), 120);
+        // Indisponibilidade: revista na Fase 3 (ver o comentário do template).
+        assert_eq!(window("device_offline"), 120);
+        // Registros informativos e de estado: resolvem na hora.
+        assert_eq!(window("http_error_response"), 0);
+        assert_eq!(window("vpn_peer_reconnected"), 0);
+    }
+
+    #[test]
+    fn a_deteccao_de_flapping_acompanha_a_janela_de_estabilidade() {
+        // A detecção acontece sobre o episódio, que só sobrevive à oscilação
+        // quando há janela: limiar sem janela seria letra morta.
+        for template in all() {
+            assert_eq!(
+                template.flap_window_seconds, 900,
+                "{} deve usar a janela padrão de 15 min",
+                template.key
+            );
+            let esperado = i32::from(template.recovery_window_seconds > 0) * 5;
+            assert_eq!(
+                template.flap_threshold, esperado,
+                "{} tem janela {} e limiar {}",
+                template.key, template.recovery_window_seconds, template.flap_threshold
+            );
+        }
+    }
+
+    #[test]
     fn serializa_em_camel_case_para_o_frontend() {
         let template = find("device_offline").expect("template existe");
         let json = serde_json::to_value(&template).unwrap();
         assert_eq!(json["durationSeconds"], 0);
-        assert_eq!(json["recoveryWindowSeconds"], 0);
+        assert_eq!(json["recoveryWindowSeconds"], 120);
+        assert_eq!(json["flapThreshold"], 5);
+        assert_eq!(json["flapWindowSeconds"], 900);
         assert_eq!(json["type"], "device_offline");
         assert!(json.get("duration_seconds").is_none());
+        assert!(json.get("flap_threshold").is_none());
         assert!(json.get("ruleType").is_none());
     }
 }

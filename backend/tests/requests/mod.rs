@@ -1,3 +1,5 @@
+mod alert_flapping;
+mod alert_problem_kind;
 mod alert_recovery;
 mod auth;
 mod backup;

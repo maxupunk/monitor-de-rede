@@ -22,10 +22,10 @@ use crate::{
     services::{
         alerts::{
             contracts::{AlertScopeKey, AlertStatus},
-            feed, silence,
-            state_machine::{self, EpisodeInput, Transition},
+            episode, feed, problem_kind, silence,
+            state_machine::{self, EpisodeInput, EpisodePolicy, Transition},
         },
-        notifications::{formatter, NotificationService},
+        notifications::{formatter, NotificationService, Severity},
         shared::errors::AppResult,
     },
 };
@@ -75,40 +75,190 @@ pub async fn resolve_alerts_for_monitor(
     close_scope(ctx, &AlertScopeKey::monitor(monitor_id), reason).await
 }
 
+/// Degradação observada (`warning`: perda parcial de pacotes, DNS parcial)
+/// num escopo com eventos abertos (Fase 2).
+///
+/// O alvo não está recuperado nem a regra bateu — mas o episódio não pode
+/// seguir contando estabilidade: cada evento aberto carimba
+/// `lastProblemAt = now` e, se estava em `recovering`, vira recaída (sem
+/// notificação, como qualquer recaída). Nenhum evento novo nasce aqui:
+/// `warning` nunca dispara uma regra cuja condição não bateu.
+///
+/// Devolve quantos eventos foram tocados.
+///
+/// # Errors
+///
+/// Propaga erro do banco.
+pub async fn note_degraded_scope(
+    ctx: &AppContext,
+    scope_key: &str,
+    kind: problem_kind::ProblemKind,
+) -> AppResult<usize> {
+    let open = open_events_of(ctx, scope_key).await?;
+    if open.is_empty() {
+        return Ok(0);
+    }
+    // A degradação também conta para a detecção de flapping (Fase 3), então
+    // precisa da política da regra — não basta a janela zerada da Fase 2.
+    let policies = policies_of(ctx, &open).await?;
+    let mut touched = 0;
+
+    for event in open {
+        let now = Utc::now();
+        let policy = policy_for(&policies, &event);
+        let status = event.status.parse().unwrap_or(AlertStatus::Active);
+        let transition = state_machine::decide(&EpisodeInput {
+            status,
+            data: event.data.as_ref().and_then(Value::as_object),
+            started_at: event.started_at.with_timezone(&Utc),
+            policy,
+            condition_matched: false,
+            degraded: true,
+            recovered: false,
+            silenced_now: silence::silenced_until(&event).is_some_and(|until| until > now),
+            now,
+        });
+
+        let mut data = event
+            .data
+            .as_ref()
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        // A degradação pode ter causa diferente da queda original.
+        data.insert(problem_kind::PROBLEM_KIND.into(), json!(kind.as_str()));
+
+        match transition {
+            Transition::Relapse { recurrence, status } => {
+                touched += 1;
+                episode::mark_relapse(&mut data, recurrence, now, policy);
+                let saved = episode::persist(ctx, &event, status, data).await?;
+                feed::publish(ctx, "alert:updated", feed::event_payload(&saved)).await;
+            }
+            Transition::StartFlapping {
+                recurrence,
+                transitions,
+            } => {
+                touched += 1;
+                episode::mark_relapse(&mut data, recurrence, now, policy);
+                data.insert(
+                    state_machine::FLAPPING_SINCE.into(),
+                    json!(now.to_rfc3339()),
+                );
+                let saved = episode::persist(ctx, &event, AlertStatus::Flapping, data).await?;
+                feed::publish(ctx, "alert:updated", feed::event_payload(&saved)).await;
+                notify_flapping(ctx, &saved, transitions, policy).await;
+            }
+            Transition::ProblemOngoing => {
+                touched += 1;
+                data.insert(
+                    state_machine::LAST_PROBLEM_AT.into(),
+                    json!(now.to_rfc3339()),
+                );
+                let mut active: alert_events::ActiveModel = event.into();
+                active.data = Set(Some(Value::Object(data)));
+                active.update(&ctx.db).await?;
+            }
+            // Evento fechado não é tocado; `Resolve`/`EnterRecovering` não
+            // aparecem neste caminho (`recovered` é falso aqui).
+            _ => {}
+        }
+    }
+
+    Ok(touched)
+}
+
+/// O aviso único de "alvo oscilando", emitido pela declaração de flapping.
+async fn notify_flapping(
+    ctx: &AppContext,
+    event: &alert_events::Model,
+    transitions: u32,
+    policy: EpisodePolicy,
+) {
+    let fallback = event.message.as_deref().unwrap_or("Alerta do sistema");
+    NotificationService::with_default_channels()
+        .notify(
+            ctx,
+            &formatter::alert_flapping(
+                &episode::title_of(event, fallback),
+                transitions,
+                policy.flap_window_seconds,
+                Severity::parse(&event.severity),
+                json!({
+                    "alertEventId": event.id,
+                    "monitorId": event.monitor_id,
+                    "deviceId": event.device_id,
+                    "scopeKey": event.scope_key,
+                    "transitions": transitions,
+                }),
+            ),
+        )
+        .await;
+}
+
+/// Os eventos abertos do escopo, incluindo a busca legada por `monitor_id`.
+async fn open_events_of(ctx: &AppContext, scope_key: &str) -> AppResult<Vec<alert_events::Model>> {
+    let mut target = Condition::any().add(alert_events_entity::Column::ScopeKey.eq(scope_key));
+    if let Some(monitor_id) = AlertScopeKey::monitor_id_of(scope_key) {
+        target = target.add(alert_events_entity::Column::MonitorId.eq(monitor_id));
+    }
+
+    Ok(alert_events::Entity::find()
+        .filter(target)
+        .filter(alert_events_entity::Column::Status.is_in(AlertStatus::OPEN))
+        .all(&ctx.db)
+        .await?)
+}
+
+/// As políticas das regras dos eventos, carregadas de uma vez.
+async fn policies_of(
+    ctx: &AppContext,
+    events: &[alert_events::Model],
+) -> AppResult<HashMap<i64, EpisodePolicy>> {
+    let rule_ids: Vec<i64> = events
+        .iter()
+        .filter_map(|event| event.alert_rule_id)
+        .collect();
+    if rule_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    Ok(alert_rules::Entity::find()
+        .filter(alert_rules::Column::Id.is_in(rule_ids))
+        .all(&ctx.db)
+        .await?
+        .iter()
+        .map(|rule| (rule.id, EpisodePolicy::from(rule)))
+        .collect())
+}
+
+/// A política do evento; regra apagada não tem janela nem limiar a respeitar.
+fn policy_for(
+    policies: &HashMap<i64, EpisodePolicy>,
+    event: &alert_events::Model,
+) -> EpisodePolicy {
+    event
+        .alert_rule_id
+        .and_then(|rule_id| policies.get(&rule_id))
+        .copied()
+        .unwrap_or_default()
+}
+
 async fn run(
     ctx: &AppContext,
     scope_key: &str,
     reason: &str,
     respect_windows: bool,
 ) -> AppResult<usize> {
-    let mut target = Condition::any().add(alert_events_entity::Column::ScopeKey.eq(scope_key));
-    if let Some(monitor_id) = AlertScopeKey::monitor_id_of(scope_key) {
-        target = target.add(alert_events_entity::Column::MonitorId.eq(monitor_id));
-    }
-
-    let open = alert_events::Entity::find()
-        .filter(target)
-        .filter(alert_events_entity::Column::Status.is_in(AlertStatus::OPEN))
-        .all(&ctx.db)
-        .await?;
+    let open = open_events_of(ctx, scope_key).await?;
     if open.is_empty() {
         return Ok(0);
     }
 
-    // A janela de cada evento vem da sua regra, carregada de uma vez. Regra
-    // apagada (ou fechamento administrativo) = janela 0: resolve na hora.
-    let windows: HashMap<i64, i32> = if respect_windows {
-        let rule_ids: Vec<i64> = open
-            .iter()
-            .filter_map(|event| event.alert_rule_id)
-            .collect();
-        alert_rules::Entity::find()
-            .filter(alert_rules::Column::Id.is_in(rule_ids))
-            .all(&ctx.db)
-            .await?
-            .into_iter()
-            .map(|rule| (rule.id, rule.recovery_window_seconds))
-            .collect()
+    // A política de cada evento vem da sua regra, carregada de uma vez. Regra
+    // apagada (ou fechamento administrativo) = política zerada: resolve na
+    // hora, sem janela e sem limiar de flap a respeitar.
+    let policies = if respect_windows {
+        policies_of(ctx, &open).await?
     } else {
         HashMap::new()
     };
@@ -118,11 +268,7 @@ async fn run(
 
     for event in open {
         let now = Utc::now();
-        let window = event
-            .alert_rule_id
-            .and_then(|rule_id| windows.get(&rule_id))
-            .copied()
-            .unwrap_or(0);
+        let policy = policy_for(&policies, &event);
         // Status fora do vocabulário (linha antiga) é tratado como `active`:
         // o pior caso é entrar em observação quando poderia fechar.
         let status = event.status.parse().unwrap_or(AlertStatus::Active);
@@ -130,8 +276,9 @@ async fn run(
             status,
             data: event.data.as_ref().and_then(Value::as_object),
             started_at: event.started_at.with_timezone(&Utc),
-            recovery_window_seconds: i64::from(window),
+            policy,
             condition_matched: false,
+            degraded: false,
             recovered: true,
             silenced_now: silence::silenced_until(&event).is_some_and(|until| until > now),
             now,
@@ -140,6 +287,12 @@ async fn run(
         match transition {
             Transition::Resolve { summary } => {
                 resolved += 1;
+                let problem = event
+                    .data
+                    .as_ref()
+                    .and_then(|data| data.get(problem_kind::PROBLEM_KIND))
+                    .and_then(Value::as_str)
+                    .and_then(problem_kind::ProblemKind::parse);
                 let saved = persist_resolve(ctx, event, now).await?;
                 notifications
                     .notify(
@@ -149,6 +302,7 @@ async fn run(
                             saved.message.as_deref(),
                             reason,
                             Some(summary),
+                            problem,
                             json!({
                                 "alertEventId": saved.id,
                                 "scopeKey": scope_key,

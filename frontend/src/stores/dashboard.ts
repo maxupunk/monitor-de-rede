@@ -235,6 +235,21 @@ export const DEFAULT_WIDGETS: WidgetConfig[] = [
     icon: 'mdi-dns-outline',
     description: 'Ranking comparativo e histórico de tempo de consulta de resolvedores DNS.',
   },
+  {
+    id: 'unstable_targets',
+    type: 'unstable_targets',
+    title: 'Alvos Instáveis',
+    category: 'lists',
+    cols: 12,
+    sm: 12,
+    md: 6,
+    lg: 6,
+    visible: true,
+    order: 8,
+    icon: 'mdi-sine-wave',
+    description:
+      'Ranking dos alvos que mais caíram e voltaram na janela — quem oscila não aparece na lista de alertas ativos.',
+  },
 ]
 
 export const useDashboardStore = defineStore('dashboard', () => {

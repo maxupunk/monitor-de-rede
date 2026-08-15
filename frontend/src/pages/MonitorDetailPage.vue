@@ -109,6 +109,9 @@
         </div>
       </v-card>
 
+      <!-- Instabilidade histórica do alvo: "oscilou 12x nas últimas 24h" -->
+      <InstabilityIndicator :scope-key="`monitor:${monitor.id}`" />
+
       <!-- Cards de Métricas KPI: variam conforme o tipo de monitor (Tráfego, CPU/Memória, Interface RFC 2863 ou Ping/HTTP/TCP/DNS) -->
       <v-row v-if="isTrafficMonitor" class="mb-6">
         <v-col cols="12" sm="6" md="3">
@@ -883,6 +886,7 @@ import type { DeviceMetric } from '@/stores/deviceDetail'
 import MonitorTimelineBar from '@/components/MonitorTimelineBar.vue'
 import BaseMetricChart, { type ChartSeriesInput } from '@/components/BaseMetricChart.vue'
 import MonitorFormDialog from '@/components/MonitorFormDialog.vue'
+import InstabilityIndicator from '@/components/InstabilityIndicator.vue'
 import {
   isGaugeMonitor as isGaugeMonitorFn,
   isTrafficMonitor as isTrafficMonitorFn,
