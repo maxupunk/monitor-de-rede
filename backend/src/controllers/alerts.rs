@@ -78,10 +78,22 @@ fn invalid_flap_settings() -> AppError {
     )
 }
 
+/// O cooldown é um intervalo de silêncio: negativo seria lido como "desligado"
+/// pela política de notificação — mesma recusa das outras janelas.
+fn invalid_cooldown() -> AppError {
+    AppError::validation(
+        "Intervalo entre notificações inválido. Informe zero ou mais segundos de silêncio.",
+    )
+}
+
 /// Aplica um campo opcional não negativo: ausente mantém o atual.
-fn non_negative(input: Option<i32>, current: i32) -> Result<i32, AppError> {
+fn non_negative(
+    input: Option<i32>,
+    current: i32,
+    invalid: fn() -> AppError,
+) -> Result<i32, AppError> {
     match input {
-        Some(value) if value < 0 => Err(invalid_flap_settings()),
+        Some(value) if value < 0 => Err(invalid()),
         Some(value) => Ok(value),
         None => Ok(current),
     }
@@ -129,8 +141,10 @@ async fn rules_store(
     }
     // Default da coluna: detecção desligada, mas com uma janela sensata já
     // pronta para quem só ligar o limiar depois.
-    let flap_threshold = non_negative(input.flap_threshold, 0)?;
-    let flap_window_seconds = non_negative(input.flap_window_seconds, 900)?;
+    let flap_threshold = non_negative(input.flap_threshold, 0, invalid_flap_settings)?;
+    let flap_window_seconds = non_negative(input.flap_window_seconds, 900, invalid_flap_settings)?;
+    let notification_cooldown_seconds =
+        non_negative(input.notification_cooldown_seconds, 0, invalid_cooldown)?;
 
     let rule = alert_rules::ActiveModel {
         site_id: Set(input.site_id),
@@ -144,6 +158,8 @@ async fn rules_store(
         recovery_window_seconds: Set(recovery_window_seconds),
         flap_threshold: Set(flap_threshold),
         flap_window_seconds: Set(flap_window_seconds),
+        notification_cooldown_seconds: Set(notification_cooldown_seconds),
+        inhibit_when_parent_down: Set(input.inhibit_when_parent_down.unwrap_or(false)),
         enabled: Set(input.enabled.unwrap_or(true)),
         ..Default::default()
     }
@@ -174,8 +190,21 @@ async fn rules_update(
         Some(value) => value,
         None => current.recovery_window_seconds,
     };
-    let flap_threshold = non_negative(input.flap_threshold, current.flap_threshold)?;
-    let flap_window_seconds = non_negative(input.flap_window_seconds, current.flap_window_seconds)?;
+    let flap_threshold = non_negative(
+        input.flap_threshold,
+        current.flap_threshold,
+        invalid_flap_settings,
+    )?;
+    let flap_window_seconds = non_negative(
+        input.flap_window_seconds,
+        current.flap_window_seconds,
+        invalid_flap_settings,
+    )?;
+    let notification_cooldown_seconds = non_negative(
+        input.notification_cooldown_seconds,
+        current.notification_cooldown_seconds,
+        invalid_cooldown,
+    )?;
 
     let rule = alert_rules::ActiveModel {
         id: Set(id),
@@ -196,6 +225,10 @@ async fn rules_update(
         recovery_window_seconds: Set(recovery_window_seconds),
         flap_threshold: Set(flap_threshold),
         flap_window_seconds: Set(flap_window_seconds),
+        notification_cooldown_seconds: Set(notification_cooldown_seconds),
+        inhibit_when_parent_down: Set(input
+            .inhibit_when_parent_down
+            .unwrap_or(current.inhibit_when_parent_down)),
         enabled: Set(input.enabled.unwrap_or(current.enabled)),
         ..Default::default()
     }

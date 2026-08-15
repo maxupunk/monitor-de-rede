@@ -643,6 +643,28 @@
             </v-alert>
 
             <v-select
+              v-model="form.notificationCooldownSeconds"
+              :items="NOTIFICATION_COOLDOWNS"
+              item-title="title"
+              item-value="value"
+              label="Intervalo entre notificações"
+              hint="Vale mesmo quando o alerta fecha e um novo abre. A resolução acompanha o disparo: se ele foi engolido, ela também é."
+              persistent-hint
+              variant="outlined"
+              class="mb-4"
+            ></v-select>
+
+            <v-switch
+              v-model="form.inhibitWhenParentDown"
+              color="primary"
+              label="Silenciar quando o equipamento-pai já está em alerta"
+              hint="Um roteador que cai leva junto tudo que está atrás dele. Com esta opção, só o alerta do pai chega ao canal."
+              persistent-hint
+              density="compact"
+              class="mb-4"
+            ></v-switch>
+
+            <v-select
               v-model="form.severity"
               :items="ALERT_SEVERITIES"
               item-title="title"
@@ -685,6 +707,7 @@ import {
   RECOVERY_WINDOWS,
   FLAP_THRESHOLDS,
   FLAP_WINDOWS,
+  NOTIFICATION_COOLDOWNS,
   ALERT_SEVERITIES,
   findMetric,
   operatorsForMetric,
@@ -785,6 +808,8 @@ const form = reactive({
   recoveryWindowSeconds: 0,
   flapThreshold: 0,
   flapWindowSeconds: 900,
+  notificationCooldownSeconds: 0,
+  inhibitWhenParentDown: false,
   severity: 'warning' as AlertRule['severity'],
 })
 
@@ -804,7 +829,11 @@ const rulePreview = computed(() =>
     form.durationSeconds,
     form.recoveryWindowSeconds,
     form.flapThreshold,
-    form.flapWindowSeconds
+    form.flapWindowSeconds,
+    {
+      notificationCooldownSeconds: form.notificationCooldownSeconds,
+      inhibitWhenParentDown: form.inhibitWhenParentDown,
+    }
   )
 )
 
@@ -903,6 +932,8 @@ function openRuleDialog(rule?: AlertRule) {
     form.recoveryWindowSeconds = rule.recoveryWindowSeconds ?? 0
     form.flapThreshold = rule.flapThreshold ?? 0
     form.flapWindowSeconds = rule.flapWindowSeconds ?? 900
+    form.notificationCooldownSeconds = rule.notificationCooldownSeconds ?? 0
+    form.inhibitWhenParentDown = rule.inhibitWhenParentDown ?? false
     form.severity = rule.severity ?? 'warning'
   } else {
     editingRuleId.value = null
@@ -914,6 +945,8 @@ function openRuleDialog(rule?: AlertRule) {
     form.recoveryWindowSeconds = 0
     form.flapThreshold = 0
     form.flapWindowSeconds = 900
+    form.notificationCooldownSeconds = 0
+    form.inhibitWhenParentDown = false
     form.severity = 'warning'
   }
   ruleDialog.value = true
@@ -938,6 +971,8 @@ function buildPayload(): Partial<AlertRule> {
     recoveryWindowSeconds: form.recoveryWindowSeconds,
     flapThreshold: form.flapThreshold,
     flapWindowSeconds: form.flapWindowSeconds,
+    notificationCooldownSeconds: form.notificationCooldownSeconds,
+    inhibitWhenParentDown: form.inhibitWhenParentDown,
     severity: form.severity,
     enabled: true,
   }

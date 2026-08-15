@@ -1,4 +1,6 @@
+mod alert_engine_robustness;
 mod alert_flapping;
+mod alert_notification_hygiene;
 mod alert_problem_kind;
 mod alert_recovery;
 mod auth;

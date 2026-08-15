@@ -13,6 +13,7 @@ pub use super::metrics::Entity as Metrics;
 pub use super::monitor_results::Entity as MonitorResults;
 pub use super::monitors::Entity as Monitors;
 pub use super::networks::Entity as Networks;
+pub use super::notification_outbox::Entity as NotificationOutbox;
 pub use super::probe_tasks::Entity as ProbeTasks;
 pub use super::probes::Entity as Probes;
 pub use super::sites::Entity as Sites;

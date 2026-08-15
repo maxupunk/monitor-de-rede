@@ -83,8 +83,9 @@ pub const BACKED_UP_TABLES: [&str; 12] = [
 /// id que passou a ser de outro equipamento — um gráfico de tráfego com os
 /// dados do vizinho. As FKs `CASCADE` resolveriam isso no PostgreSQL, mas o
 /// SQLite só as aplica com `foreign_keys=ON`; limpar à mão vale nos dois.
-const DEPENDENT_HISTORY: [&str; 7] = [
+const DEPENDENT_HISTORY: [&str; 8] = [
     "alert_events",
+    "notification_outbox",
     "monitor_results",
     "metrics",
     "discovery_results",

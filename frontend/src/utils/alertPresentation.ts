@@ -359,6 +359,39 @@ export const FLAP_WINDOWS = [
 ]
 
 /**
+ * Intervalo mínimo entre notificações de problema do mesmo alvo, **mesmo quando
+ * o alerta fecha e um novo abre**. É a lacuna que a estabilização não cobre: ela
+ * segura a oscilação dentro do episódio, mas nada impedia um episódio de fechar
+ * e outro abrir três minutos depois, com o par 🚨+✅ inteiro de novo.
+ *
+ * O ✅ acompanha o 🚨: quando o disparo é engolido pelo cooldown, a resolução
+ * dele também é — avisar que voltou algo que ninguém soube que caiu é ruído.
+ */
+export const NOTIFICATION_COOLDOWNS = [
+  {
+    value: 0,
+    title: 'Sem intervalo — notificar toda vez que reabrir',
+    phrase: 'notifica toda reabertura',
+  },
+  {
+    value: 300,
+    title: 'No máximo uma notificação a cada 5 min',
+    phrase: 'no máximo 1 aviso/5 min',
+  },
+  {
+    value: 900,
+    title: 'No máximo uma notificação a cada 15 min',
+    phrase: 'no máximo 1 aviso/15 min',
+  },
+  { value: 3600, title: 'No máximo uma notificação por hora', phrase: 'no máximo 1 aviso/hora' },
+  {
+    value: 21600,
+    title: 'No máximo uma notificação a cada 6 horas',
+    phrase: 'no máximo 1 aviso/6 h',
+  },
+]
+
+/**
  * Classificação do problema que abriu o episódio, preenchida pelo backend em
  * `AlertEvent.data.problemKind`. A união com `string & {}` mantém o
  * autocomplete dos valores conhecidos sem rejeitar valores futuros.
@@ -492,12 +525,20 @@ export function describeCondition(condition?: RuleCondition | null): string {
   return `${metricLabel(condition.field)} ${phrase ?? condition.operator} ${formatConditionValue(condition.field, condition.value)}`
 }
 
+export interface RuleNotificationOptions {
+  /** Intervalo mínimo entre notificações do mesmo alvo (0 = sem intervalo) */
+  notificationCooldownSeconds?: number
+  /** Suprimir quando o equipamento-pai já está em alerta */
+  inhibitWhenParentDown?: boolean
+}
+
 export function describeRule(
   condition?: RuleCondition | null,
   durationSeconds = 0,
   recoveryWindowSeconds = 0,
   flapThreshold = 0,
-  flapWindowSeconds = 900
+  flapWindowSeconds = 900,
+  notification: RuleNotificationOptions = {}
 ): string {
   const base = `Alertar quando ${describeCondition(condition)}`
   const duration = durationSeconds
@@ -511,7 +552,18 @@ export function describeRule(
   const flap = flapThreshold
     ? `; marca como oscilando após ${flapThreshold} recaídas em ${flapWindowLabel(flapWindowSeconds)}`
     : ''
-  return `${base}${duration}; ${recovery}${flap}.`
+  // Idem para as cláusulas de higiene de notificação: só entram na frase quando
+  // mudam o comportamento padrão.
+  const cooldown = notification.notificationCooldownSeconds
+    ? `; ${
+        NOTIFICATION_COOLDOWNS.find((c) => c.value === notification.notificationCooldownSeconds)
+          ?.phrase ?? `no máximo 1 aviso/${notification.notificationCooldownSeconds}s`
+      }`
+    : ''
+  const inhibition = notification.inhibitWhenParentDown
+    ? '; silencia quando o equipamento-pai já está em alerta'
+    : ''
+  return `${base}${duration}; ${recovery}${flap}${cooldown}${inhibition}.`
 }
 
 /** "15 min" / "1 hora" — a janela de flap em texto curto */

@@ -72,6 +72,44 @@ pub fn alert_flapping(
     }
 }
 
+/// Quantos itens a mensagem consolidada enumera antes de resumir o resto.
+///
+/// Dez cabe numa tela de celular; o que passa disso vira "e mais N". A conta
+/// completa continua no título, que é o número que importa.
+const DIGEST_PREVIEW: usize = 10;
+
+/// Mensagem consolidada do agrupamento (Fase 4): `🔔 [8 ALERTAS] <grupo>`.
+///
+/// É o que substitui oito mensagens seguidas quando um site inteiro se mexe ao
+/// mesmo tempo. O corpo enumera os alertas em vez de resumi-los: "8 alertas no
+/// site Matriz" sem dizer **quais** obrigaria o operador a abrir a Central para
+/// descobrir o óbvio.
+#[must_use]
+pub fn alert_digest(
+    group_label: &str,
+    items: &[(String, String)],
+    severity: Severity,
+) -> NotificationMessage {
+    let total = items.len();
+    let mut body = format!("{total} alertas em {group_label}:");
+    for (title, detail) in items.iter().take(DIGEST_PREVIEW) {
+        body.push_str(&format!("\n• {title} — {detail}"));
+    }
+    if total > DIGEST_PREVIEW {
+        body.push_str(&format!("\n… e mais {}.", total - DIGEST_PREVIEW));
+    }
+    NotificationMessage {
+        title: format!("🔔 [{total} ALERTAS] {group_label}"),
+        body,
+        severity,
+        metadata: serde_json::json!({
+            "digest": true,
+            "group": group_label,
+            "count": total,
+        }),
+    }
+}
+
 /// Mensagem de normalização. Severidade sempre `info`: o operador não precisa
 /// ser acordado porque algo **voltou**.
 ///
@@ -299,5 +337,38 @@ mod tests {
         assert_eq!(stable_for_text(45), "45 s");
         assert_eq!(stable_for_text(60), "1 min");
         assert_eq!(stable_for_text(359), "5 min");
+    }
+
+    #[test]
+    fn a_mensagem_consolidada_conta_e_enumera_os_alertas() {
+        let itens = vec![
+            (
+                "Queda — Roteador".to_string(),
+                "Host inacessível".to_string(),
+            ),
+            ("Queda — Switch".to_string(), "Host inacessível".to_string()),
+        ];
+        let digest = alert_digest("Matriz", &itens, Severity::Critical);
+        assert_eq!(digest.title, "🔔 [2 ALERTAS] Matriz");
+        assert_eq!(
+            digest.body,
+            "2 alertas em Matriz:\n\
+             • Queda — Roteador — Host inacessível\n\
+             • Queda — Switch — Host inacessível"
+        );
+        assert_eq!(digest.severity, Severity::Critical);
+        assert_eq!(digest.metadata["digest"], json!(true));
+        assert_eq!(digest.metadata["count"], json!(2));
+    }
+
+    #[test]
+    fn a_lista_da_consolidacao_para_no_decimo_item() {
+        let itens: Vec<(String, String)> = (0..14)
+            .map(|index| (format!("Alerta {index}"), "detalhe".to_string()))
+            .collect();
+        let digest = alert_digest("Matriz", &itens, Severity::Warning);
+        assert_eq!(digest.title, "🔔 [14 ALERTAS] Matriz");
+        assert_eq!(digest.body.matches("\n• ").count(), DIGEST_PREVIEW);
+        assert!(digest.body.ends_with("… e mais 4."));
     }
 }

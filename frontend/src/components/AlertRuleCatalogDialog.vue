@@ -73,7 +73,11 @@
                       template.durationSeconds,
                       template.recoveryWindowSeconds ?? 0,
                       template.flapThreshold ?? 0,
-                      template.flapWindowSeconds ?? 900
+                      template.flapWindowSeconds ?? 900,
+                      {
+                        notificationCooldownSeconds: template.notificationCooldownSeconds ?? 0,
+                        inhibitWhenParentDown: template.inhibitWhenParentDown ?? false,
+                      }
                     )
                   }}
                 </div>

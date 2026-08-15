@@ -102,6 +102,12 @@ pub struct AlertRuleInput {
     pub flap_threshold: Option<i32>,
     /// Largura da janela deslizante da detecção de flapping (Fase 3).
     pub flap_window_seconds: Option<i32>,
+    /// Intervalo mínimo entre notificações de problema do par (regra, alvo),
+    /// mesmo quando o evento fecha e reabre (Fase 4). `0` desliga.
+    pub notification_cooldown_seconds: Option<i32>,
+    /// Suprimir a notificação quando o pai declarado do dispositivo já está em
+    /// alerta (Fase 4).
+    pub inhibit_when_parent_down: Option<bool>,
     pub enabled: Option<bool>,
 }
 

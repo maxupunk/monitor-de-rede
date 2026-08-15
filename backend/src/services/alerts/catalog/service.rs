@@ -199,6 +199,8 @@ pub async fn apply<C: ConnectionTrait>(
             recovery_window_seconds: Set(template.recovery_window_seconds),
             flap_threshold: Set(template.flap_threshold),
             flap_window_seconds: Set(template.flap_window_seconds),
+            notification_cooldown_seconds: Set(template.notification_cooldown_seconds),
+            inhibit_when_parent_down: Set(template.inhibit_when_parent_down),
             enabled: Set(true),
             ..Default::default()
         }

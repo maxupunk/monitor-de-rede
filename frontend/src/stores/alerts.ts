@@ -30,6 +30,10 @@ export interface AlertRule {
   flapThreshold?: number
   /** Largura da janela deslizante em que as recaídas são contadas */
   flapWindowSeconds?: number
+  /** Intervalo mínimo entre notificações do alvo, mesmo se o alerta reabrir */
+  notificationCooldownSeconds?: number
+  /** Não notificar quando o equipamento-pai já está em alerta */
+  inhibitWhenParentDown?: boolean
   enabled: boolean
   isEnabled: boolean
 }
@@ -49,6 +53,10 @@ export interface AlertRuleTemplate {
   /** Limiar de oscilação sugerido pelo template (0 = detecção desligada) */
   flapThreshold?: number
   flapWindowSeconds?: number
+  /** Intervalo mínimo entre notificações sugerido pelo template */
+  notificationCooldownSeconds?: number
+  /** O template silencia o alvo quando o equipamento-pai está em alerta */
+  inhibitWhenParentDown?: boolean
   /** Faz parte do conjunto básico aplicado por padrão */
   recommended: boolean
   /** Já existe regra equivalente: aplicar de novo não cria duplicata */

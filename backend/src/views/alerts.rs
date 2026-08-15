@@ -42,6 +42,12 @@ pub struct AlertRuleResponse {
     pub flap_threshold: i32,
     /// Largura da janela deslizante da detecção de flapping, em segundos.
     pub flap_window_seconds: i32,
+    /// Intervalo mínimo entre notificações de problema do par (regra, alvo),
+    /// mesmo quando o evento fecha e reabre (0 = sem cooldown). Fase 4.
+    pub notification_cooldown_seconds: i32,
+    /// Suprimir a notificação quando o pai declarado do dispositivo já está em
+    /// alerta. Fase 4.
+    pub inhibit_when_parent_down: bool,
     pub enabled: bool,
     /// Espelho de `enabled` (§6.1) — o `AlertRule` do frontend lê os dois.
     pub is_enabled: bool,
@@ -65,6 +71,8 @@ impl From<alert_rules::Model> for AlertRuleResponse {
             recovery_window_seconds: row.recovery_window_seconds,
             flap_threshold: row.flap_threshold,
             flap_window_seconds: row.flap_window_seconds,
+            notification_cooldown_seconds: row.notification_cooldown_seconds,
+            inhibit_when_parent_down: row.inhibit_when_parent_down,
             enabled: row.enabled,
             is_enabled: row.enabled,
             created_at: row.created_at.to_rfc3339(),
@@ -87,6 +95,8 @@ pub fn rule_event_payload(rule: &alert_rules::Model) -> Value {
         "recoveryWindowSeconds": rule.recovery_window_seconds,
         "flapThreshold": rule.flap_threshold,
         "flapWindowSeconds": rule.flap_window_seconds,
+        "notificationCooldownSeconds": rule.notification_cooldown_seconds,
+        "inhibitWhenParentDown": rule.inhibit_when_parent_down,
         "enabled": rule.enabled,
         "isEnabled": rule.enabled,
     })
@@ -385,6 +395,8 @@ mod tests {
             recovery_window_seconds: 120,
             flap_threshold: 5,
             flap_window_seconds: 900,
+            notification_cooldown_seconds: 900,
+            inhibit_when_parent_down: true,
             enabled: true,
             created_at: now,
             updated_at: now,
@@ -395,6 +407,8 @@ mod tests {
         assert_eq!(json["recoveryWindowSeconds"], 120);
         assert_eq!(json["flapThreshold"], 5);
         assert_eq!(json["flapWindowSeconds"], 900);
+        assert_eq!(json["notificationCooldownSeconds"], 900);
+        assert_eq!(json["inhibitWhenParentDown"], true);
         assert_eq!(json["templateKey"], "device_offline");
         assert_eq!(json["type"], "custom");
     }

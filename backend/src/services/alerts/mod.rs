@@ -11,6 +11,8 @@ pub mod episode;
 pub mod evaluator;
 pub mod feed;
 pub mod fields;
+pub mod hysteresis;
+pub mod inhibition;
 pub mod instability;
 pub mod manager;
 pub mod problem_kind;

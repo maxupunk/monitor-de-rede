@@ -30,6 +30,7 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use crate::{
     models::{devices, monitors, probes},
     services::{
+        alerts::hysteresis,
         discovery::queue::{process_pending_runs, schedule_due_networks},
         maintenance::data_pruner,
         monitoring::{
@@ -40,6 +41,7 @@ use crate::{
             result_processor::process_result,
             runner::{run_monitor, RunOptions},
         },
+        notifications::outbox,
         probes::{
             dispatcher::{self, ProbeTask},
             liveness::{is_probe_alive, mark_stale_probes_offline},
@@ -179,6 +181,12 @@ pub async fn run_cycle(ctx: &AppContext) -> AppResult<usize> {
     if let Err(error) = process_pending_runs(ctx).await {
         tracing::warn!(%error, "falha ao processar discovery");
     }
+    // As notificações da Fase 4 saem daqui, e não do ponto onde o alerta nasce:
+    // a decisão de notificar virou linha em `notification_outbox`, e é o
+    // despachante que a entrega, agrupa ou engole (ver `notifications::outbox`).
+    if let Err(error) = dispatch_notifications(ctx).await {
+        tracing::warn!(%error, "falha ao despachar notificações pendentes");
+    }
     if let Err(error) = run_data_pruner_if_due(ctx).await {
         tracing::warn!(%error, "falha ao executar purga de dados antigos");
     }
@@ -289,6 +297,25 @@ async fn sync_vpn_traffic_if_due(ctx: &AppContext) -> AppResult<()> {
     Ok(())
 }
 
+/// Entrega o que a política de notificação liberou.
+///
+/// Roda **todo** ciclo, sem cadência própria: o atraso entre o alerta nascer e
+/// a mensagem sair já é o preço do outbox, e espaçar isso ainda mais só o
+/// tornaria perceptível. Quem represa de propósito é o agrupamento, que carimba
+/// o `deliver_after` de cada linha.
+async fn dispatch_notifications(ctx: &AppContext) -> AppResult<()> {
+    let stats = outbox::dispatch_pending(ctx).await?;
+    if stats.total() > 0 {
+        tracing::debug!(
+            entregues = stats.delivered,
+            agrupadas = stats.consolidated,
+            suprimidas = stats.suppressed,
+            "notificações despachadas"
+        );
+    }
+    Ok(())
+}
+
 async fn run_data_pruner_if_due(ctx: &AppContext) -> AppResult<()> {
     if !is_due("data_pruner", DATA_PRUNE_INTERVAL_SECONDS, Utc::now()) {
         return Ok(());
@@ -300,8 +327,20 @@ async fn run_data_pruner_if_due(ctx: &AppContext) -> AppResult<()> {
             resultados = stats.results_deleted,
             metricas = stats.metrics_deleted,
             descoberta = stats.discovery_deleted,
+            alertas = stats.alert_events_deleted,
+            notificacoes = stats.notifications_deleted,
             "purga de dados antigos executada"
         );
+    }
+    // A histerese de disparo vive em memória (ver `alerts::hysteresis`): a
+    // contagem de um par (regra, alvo) que ninguém mais avalia — regra apagada,
+    // monitor removido — ficaria no mapa até o processo morrer.
+    let esquecidas = hysteresis::sweep(
+        Utc::now(),
+        chrono::Duration::hours(hysteresis::IDLE_TTL_HOURS),
+    );
+    if esquecidas > 0 {
+        tracing::debug!(esquecidas, "contagens de histerese ociosas descartadas");
     }
     Ok(())
 }
@@ -362,7 +401,77 @@ async fn execute_one(ctx: &AppContext, monitor: &monitors::Model) -> AppResult<(
         return report_probe_unavailable(ctx, monitor, &label).await;
     }
 
-    let result = match run_monitor(
+    let result = run_local_confirming_failure(ctx, monitor, timeout_ms).await;
+    process_result(ctx, monitor.id, &result, monitor.probe_id).await?;
+    Ok(())
+}
+
+/// Teto de tentativas extras, independentemente do que a linha do monitor diga.
+///
+/// `monitors.retry_count` é campo do usuário e nasce com `3` em todo lugar; um
+/// valor absurdo digitado por engano não pode transformar um ciclo em dezenas
+/// de checagens do mesmo alvo.
+const MAX_RETRIES: i32 = 5;
+
+/// Executa a checagem local honrando `monitors.retry_count` (Fase 5 do roadmap).
+///
+/// O campo era gravado desde sempre e **nunca lido**: uma única falha bastava
+/// para declarar `down`, e metade dos falsos positivos que viravam flapping
+/// nascia aí — um pacote perdido, um SYN que não voltou. Agora a queda é
+/// **confirmada**: só depois de `retry_count` tentativas extras seguidas
+/// falhando é que o `down` é gravado.
+///
+/// Duas fronteiras mantêm isso honesto:
+///
+/// - **Só `down` é reconfirmado.** `warning` (perda parcial) é observação
+///   legítima, não falha de medição, e repetir a checagem só dobraria a carga
+///   sobre um alvo que já respondeu. `unknown` é falha do próprio executor —
+///   repetir não muda a configuração quebrada.
+/// - **O orçamento é o intervalo do monitor.** As tentativas são imediatas, sem
+///   espera entre elas, e param assim que o tempo gasto alcança
+///   `interval_seconds`: uma checagem nunca invade a cadência da seguinte.
+///
+/// O caminho do probe remoto não passa por aqui: lá a execução é assíncrona
+/// (despacho agora, resposta depois) e a repetição pertence ao protocolo do
+/// agente, não a este ciclo.
+async fn run_local_confirming_failure(
+    ctx: &AppContext,
+    monitor: &monitors::Model,
+    timeout_ms: u64,
+) -> CheckResult {
+    let attempts = 1 + monitor.retry_count.clamp(0, MAX_RETRIES);
+    let budget = chrono::Duration::seconds(i64::from(monitor.interval_seconds.max(1)));
+    let started = Utc::now();
+
+    let mut used = 1;
+    let mut result = run_local_once(ctx, monitor, timeout_ms).await;
+    while result.status == MonitorStatus::Down && used < attempts && Utc::now() - started < budget {
+        used += 1;
+        result = run_local_once(ctx, monitor, timeout_ms).await;
+    }
+
+    if used > 1 {
+        tracing::debug!(
+            monitor_id = monitor.id,
+            tentativas = used,
+            status = result.status.as_str(),
+            "queda reconfirmada antes de gravar o resultado"
+        );
+        // Fica no `data` para o operador saber que a queda foi confirmada, e
+        // não apurada num único pacote perdido.
+        if let Some(extras) = result.data.as_object_mut() {
+            extras.insert("attempts".into(), serde_json::json!(used));
+        }
+    }
+    result
+}
+
+async fn run_local_once(
+    ctx: &AppContext,
+    monitor: &monitors::Model,
+    timeout_ms: u64,
+) -> CheckResult {
+    match run_monitor(
         ctx,
         &monitor.r#type,
         &monitor.configuration,
@@ -374,9 +483,7 @@ async fn execute_one(ctx: &AppContext, monitor: &monitors::Model) -> AppResult<(
     {
         Ok(result) => result,
         Err(error) => unavailable_result(&error.to_string()),
-    };
-    process_result(ctx, monitor.id, &result, monitor.probe_id).await?;
-    Ok(())
+    }
 }
 
 /// Registra a impossibilidade de medir como resultado `unknown`.
@@ -433,5 +540,18 @@ mod tests {
     #[test]
     fn indisponibilidade_local_nao_vira_down() {
         assert_eq!(unavailable_result("x").status, MonitorStatus::Unknown);
+    }
+
+    #[test]
+    fn o_numero_de_tentativas_e_limitado_pelo_teto() {
+        // `retry_count` é campo do usuário: negativo não vira tentativa
+        // negativa e um valor absurdo não vira dezenas de checagens.
+        for (configurado, esperado) in [(-3, 1), (0, 1), (3, 4), (99, 1 + MAX_RETRIES)] {
+            assert_eq!(
+                1 + configurado.clamp(0, MAX_RETRIES),
+                esperado,
+                "retry_count {configurado} produziu contagem errada"
+            );
+        }
     }
 }

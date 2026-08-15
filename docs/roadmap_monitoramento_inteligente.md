@@ -284,29 +284,119 @@ Para alvos **cronicamente** instáveis, onde nem a Fase 1 basta.
 notificação de problema + 1 aviso de oscilação + 1 de resolução**, e aparece
 como "Oscilando" na Central e no ranking de alvos instáveis do dashboard.
 
-### Fase 4 — Higiene de notificações `🔴 Não iniciado`
+### Fase 4 — Higiene de notificações `🟢 Concluído`
 
-- [ ] Cooldown por (regra, scope_key): intervalo mínimo entre notificações
-  mesmo quando o evento reabre.
-- [ ] Agrupamento/digest: janela de N minutos consolidando alertas
-  correlatos numa mensagem só ("8 alertas no site X").
-- [ ] Inibição por dependência: dispositivo atrás de um link/roteador que
-  caiu não gera enxurrada — o alerta do pai suprime os filhos (requer
-  topologia; ver §5 sobre dependências).
-- [ ] Purga de `alert_events` no `data_pruner` (hoje a tabela cresce sem
-  teto — `scheduler_run.rs:292-307` cobre outras tabelas, não esta).
+> **Entrega (2026-08-15)**: migration
+> `m20260815_000003_notification_hygiene` (`alert_rules.notification_cooldown_seconds`,
+> `alert_rules.inhibit_when_parent_down`, tabela `notification_outbox`). O
+> pré-requisito arquitetural que a análise §2.3 pedia foi pago junto: **a
+> decisão de notificar deixou de ser efeito colateral do motor e virou
+> registro**. `manager`/`recovery` agora *pedem* a notificação
+> (`notifications::outbox::enqueue`), a política pura
+> (`notifications::policy.rs`) decide entre entregar, represar no digest ou
+> suprimir com motivo, e o ciclo do scheduler despacha
+> (`outbox::dispatch_pending`). Efeitos que caíram de graça: entrega ao menos
+> uma vez (crash entre o `INSERT` do alerta e o envio deixou de perder
+> notificação — F5), `NotificationService` construído uma vez por passagem em
+> vez de a cada alerta (F6), e o silêncio do operador passando a suprimir
+> também o ✅ da resolução (F8). O diário responde "por que não fui avisado?"
+> com `status` + `suppressReason`. Frontend com os dois campos no formulário
+> de regra e as cláusulas novas no `describeRule`. Validação completa verde:
+> fmt, clippy `-D warnings`, 424+116 testes, build release; typecheck, format,
+> lint e build do frontend.
+>
+> **Decisões de design registradas**:
+>
+> - **O cooldown é parâmetro de regra; o agrupamento, não.** O cooldown mede o
+>   par (regra, alvo) e cabe na tela de regras (§3.4). Já a janela do digest
+>   atravessa as regras — "8 alertas no site X" vem de regras diferentes —,
+>   então pendurá-la em uma delas seria arbitrário: mora em
+>   `NOTIFICATION_DIGEST_WAIT_SECONDS` / `NOTIFICATION_DIGEST_WINDOW_SECONDS`,
+>   ao lado da retenção do `data_pruner`, que é a outra configuração de
+>   infraestrutura do mesmo tipo. Os defaults são os do Alertmanager (30 s de
+>   espera, 300 s de janela) e `0` na janela devolve a entrega imediata.
+> - **Severidade crítica não paga a espera do grupo ocioso**, mas continua
+>   respeitando a janela: uma cascata de 200 críticos vira 1 mensagem imediata
+>   + 1 consolidada, não 200 mensagens nem 1 mensagem 5 min atrasada.
+> - **A inibição usa `devices.parent_id`, não `device_links`.** O enlace
+>   descoberto (LLDP/CDP/sub-rede) não é direcionado: ele diz que dois
+>   equipamentos se enxergam, não qual depende de qual — suprimir por enlace
+>   calaria o vizinho junto com o filho. `parent_id` é hierarquia declarada
+>   pelo operador e tem direção.
+> - **A inibição é julgada na entrega, não no enfileiramento.** O filho quase
+>   sempre é detectado antes do pai (intervalos e ordem de execução
+>   diferentes); decidir na hora de enfileirar perderia essa corrida em quase
+>   todo caso real. A linha inibível espera 120 s na fila e só então é julgada
+>   — se o pai voltou nesse meio-tempo, a mensagem do filho sai.
+> - **Default `false` na inibição, `0` no cooldown.** Parar de avisar alguém é
+>   o lado perigoso do erro: instalação existente não emudece sozinha. Quem
+>   liga é o catálogo (cooldown de 900 s em tudo que é `warning`/`critical`,
+>   inibição nas categorias que medem alcance ao alvo) ou o operador.
 
-### Fase 5 — Robustez do motor (dívidas que atrapalham as fases acima) `🔴 Não iniciado`
+- [x] Cooldown por (regra, scope_key): intervalo mínimo entre notificações
+  mesmo quando o evento reabre. O ✅ acompanha o 🚨: disparo engolido pelo
+  cooldown tem a resolução suprimida como `unannounced`, porque avisar que
+  voltou algo que ninguém soube que caiu é ruído.
+- [x] Agrupamento/digest: janela de N minutos consolidando alertas
+  correlatos numa mensagem só ("8 alertas no site X"). Correlação por site,
+  caindo para dispositivo e depois para global.
+- [x] Inibição por dependência: dispositivo atrás de um link/roteador que
+  caiu não gera enxurrada — o alerta do pai suprime os filhos (via
+  `devices.parent_id`; `recovering` no pai **não** inibe, porque um pai que
+  já voltou não explica mais nada).
+- [x] Purga de `alert_events` no `data_pruner` (90 dias, só episódio
+  **fechado** — alerta aberto nunca é apagado, por mais antigo que seja) e do
+  próprio `notification_outbox` (30 dias, só linha já resolvida).
 
-- [ ] Histerese de disparo (`pending_since`, `manager.rs:44-47`) persistida
-  ou reconstruída a partir de `monitor_results` no boot — hoje reiniciar o
-  processo zera tolerâncias.
-- [ ] Honrar `monitors.retry_count` na execução (gravado, nunca lido): N
-  falhas consecutivas antes de declarar `down` já elimina metade dos
-  falsos positivos que viram flap.
-- [ ] Avaliar `keep_firing_for` estilo Prometheus como alternativa mais
-  simples à máquina de 3 estados, **antes** de implementar a Fase 1, se a
-  equipe preferir menos estados.
+### Fase 5 — Robustez do motor (dívidas que atrapalham as fases acima) `🟢 Concluído`
+
+> **Entrega (2026-08-15)**: `services/alerts/hysteresis.rs` novo, com a
+> contagem de disparo em `DateTime<Utc>` injetável (o `Instant` de antes
+> tornava o caso "disparou após a tolerância" intestável — F3) e reconstrução a
+> partir de `monitor_results`; varredura de entradas ociosas fechando o
+> vazamento lento por (regra × alvo) — F7; `run_local_confirming_failure` no
+> `scheduler_run.rs` honrando `monitors.retry_count`. Validação completa verde
+> junto com a Fase 4.
+>
+> **Decisão de design registrada — a reconstrução só afirma o que a observação
+> gravada prova.** O comentário que mantinha `pending_since` em memória até
+> aqui estava certo: persistir o carimbo faria um restart herdar uma tolerância
+> que ninguém acompanhou. A saída não foi persistir, foi **ler o histórico** —
+> `monitor_results` guarda o que de fato foi observado. Uma linha de histórico
+> prova status, duração, latência e o `data` do checker, mas não as métricas
+> soltas: uma regra de `packetLoss` não acha o campo, a avaliação da linha mais
+> recente já dá `false` e a reconstrução simplesmente não acontece — a contagem
+> começa agora, exatamente como antes. A caminhada também exige continuidade
+> *observada*: um intervalo maior que 3× `interval_seconds` entre duas
+> observações rompe a cadeia. Nenhum caminho inventa continuidade.
+
+- [x] Histerese de disparo (`pending_since`) reconstruída a partir de
+  `monitor_results` — reiniciar o processo deixou de zerar tolerâncias, e a
+  contagem em memória continua sendo o caminho quente (o banco só entra
+  quando a memória não sabe).
+- [x] Honrar `monitors.retry_count` na execução: a queda é **reconfirmada**
+  antes de virar `down`, com duas fronteiras — só `down` é reconfirmado
+  (`warning` é observação legítima, `unknown` é falha do executor) e o
+  orçamento das tentativas é o próprio `interval_seconds`, para uma checagem
+  nunca invadir a cadência da seguinte. O número de tentativas fica em
+  `data.attempts` do resultado.
+- [x] Avaliar `keep_firing_for` estilo Prometheus como alternativa mais
+  simples à máquina de 3 estados. **Avaliado e recusado** (§4.1 da análise, na
+  decisão que precedeu a Fase 1): a máquina é mais expressiva porque o estado
+  "estabilizando" é *feature de UX*, não detalhe interno — o `keep_firing_for`
+  segura o alerta mas não dá ao operador a noção de progresso. A Fase 3
+  confirmou a escolha: `flapping` só existe porque havia um estado onde
+  pendurá-lo.
+
+> **Nem tudo que a análise pediu coube nas fases.** A §5 da
+> [análise](analise_monitoramento_inteligente.md) previa que a Fase 5
+> absorvesse também **F4** (dedup por índice único, hoje ainda
+> read-then-insert) e **F9** (query duplicada do device) — os dois ficaram de
+> fora, junto com boa parte da UI da §3.6 (filtros do histórico,
+> `silencedUntil` na tela) e a barra de progresso da estabilização (§3.1). A
+> lista completa, com o risco de cada item, está em **§5.1 da análise**. Não
+> pertencem a fase nenhuma deste roadmap: são a entrada da próxima rodada de
+> priorização.
 
 ## 5. Outros problemas prováveis neste tipo de sistema (avaliação)
 
@@ -314,9 +404,11 @@ Levantamento de o que mais costuma morder em monitores de rede, para
 priorização futura — não necessariamente neste roadmap:
 
 1. **Tempestade de alertas em cascata** — um roteador central cai e 200
-   dispositivos atrás dele alertam juntos. Solução: inibição por
-   topologia/dependência (Fase 4) ou correlação temporal ("tudo caiu no
-   mesmo segundo → provavelmente é o pai").
+   dispositivos atrás dele alertam juntos. *Atendido na Fase 4* pela inibição
+   por `devices.parent_id` (para quem declarou a hierarquia) e pelo digest
+   (para quem não declarou). O que fica em aberto é a **correlação temporal**
+   — "tudo caiu no mesmo segundo → provavelmente é o pai" —, que dispensaria a
+   hierarquia declarada.
 2. **Falso down por sobrecarga do próprio monitor** — rajada de monitores
    vencidos rodando inline (backpressure, já reconhecido em
    `arquitetura.md:448-449`) pode inflar latências e gerar downs espúrios,

@@ -21,6 +21,8 @@ pub struct Model {
     pub recovery_window_seconds: i32,
     pub flap_threshold: i32,
     pub flap_window_seconds: i32,
+    pub notification_cooldown_seconds: i32,
+    pub inhibit_when_parent_down: bool,
     pub enabled: bool,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,

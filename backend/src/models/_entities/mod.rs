@@ -15,6 +15,7 @@ pub mod metrics;
 pub mod monitor_results;
 pub mod monitors;
 pub mod networks;
+pub mod notification_outbox;
 pub mod probe_tasks;
 pub mod probes;
 pub mod sites;

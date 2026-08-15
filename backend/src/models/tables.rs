@@ -16,8 +16,8 @@ use std::collections::HashSet;
 use loco_rs::Result;
 use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 
-/// As 21 tabelas do esquema, na ordem de criação da §6 (pais antes de filhos).
-pub const CREATION_ORDER: [&str; 21] = [
+/// As 22 tabelas do esquema, na ordem de criação da §6 (pais antes de filhos).
+pub const CREATION_ORDER: [&str; 22] = [
     "users",
     "sites",
     "probes",
@@ -36,6 +36,9 @@ pub const CREATION_ORDER: [&str; 21] = [
     "vpn_peers",
     "dns_servers",
     "event_outbox",
+    // Fase 4 do roadmap de alertas inteligentes: o diário de notificações.
+    // Depois de `alert_rules` e `devices`, para quem ela referencia já existir.
+    "notification_outbox",
     "probe_tasks",
     "system_settings",
     // Opcional (§6 #23 / §10). **Não migrada:** a §10.2 optou por
@@ -118,10 +121,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cobre_as_21_tabelas_sem_repetir() {
-        assert_eq!(CREATION_ORDER.len(), 21);
+    fn cobre_as_22_tabelas_sem_repetir() {
+        assert_eq!(CREATION_ORDER.len(), 22);
         let unicas: HashSet<&&str> = CREATION_ORDER.iter().collect();
-        assert_eq!(unicas.len(), 21, "há nome de tabela repetido");
+        assert_eq!(unicas.len(), 22, "há nome de tabela repetido");
     }
 
     #[test]
@@ -133,6 +136,9 @@ mod tests {
         assert!(posicao("devices") < posicao("networks"));
         // `monitor_results` referencia `monitors`.
         assert!(posicao("monitor_results") < posicao("monitors"));
+        // `notification_outbox` referencia `alert_rules` e `devices`.
+        assert!(posicao("notification_outbox") < posicao("alert_rules"));
+        assert!(posicao("notification_outbox") < posicao("devices"));
         // `users` é a raiz: sempre por último.
         assert_eq!(*ordem.last().unwrap(), "users");
     }

@@ -36,7 +36,9 @@ use crate::{
 pub const DEFAULT_HOURS: i64 = 24;
 
 /// Teto da janela consultável — meses de histórico não cabem num indicador de
-/// tela, e a consulta varre `alert_events`, que cresce sem poda até a Fase 4.
+/// tela, e a consulta varre `alert_events`. Trinta dias também casam com a
+/// retenção da Fase 4 (`data_pruner` guarda 90 dias de episódio fechado): pedir
+/// mais que isso devolveria uma janela que o banco não promete ter inteira.
 pub const MAX_HOURS: i64 = 24 * 30;
 
 /// Quanto um alvo oscilou na janela consultada.

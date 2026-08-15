@@ -29,6 +29,7 @@ mod m20260812_000001_drop_zabbix_templates;
 mod m20260814_000001_device_snmp_poll_interval;
 mod m20260815_000001_alert_rules_recovery_window;
 mod m20260815_000002_alert_rules_flap_detection;
+mod m20260815_000003_notification_hygiene;
 
 pub struct Migrator;
 
@@ -130,6 +131,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260814_000001_device_snmp_poll_interval::Migration),
             Box::new(m20260815_000001_alert_rules_recovery_window::Migration),
             Box::new(m20260815_000002_alert_rules_flap_detection::Migration),
+            Box::new(m20260815_000003_notification_hygiene::Migration),
             // inject-above (do not remove this comment)
         ]
     }

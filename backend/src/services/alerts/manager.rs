@@ -5,12 +5,6 @@
 //! cadastradas — acrescentar um novo tipo de observação não exige tocar aqui,
 //! basta publicar um dataset com os campos correspondentes.
 
-use std::{
-    collections::HashMap,
-    sync::{Mutex, OnceLock},
-    time::Instant,
-};
-
 use chrono::Utc;
 use loco_rs::app::AppContext;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
@@ -24,25 +18,19 @@ use crate::{
             datasets::monitor_result,
             episode,
             evaluator::{self, AlertRuleCondition},
-            feed, problem_kind, recovery, repository, silence,
+            feed, hysteresis, problem_kind, recovery, repository, silence,
             state_machine::{self, EpisodeInput, EpisodePolicy, Transition},
         },
         monitoring::contracts::{CheckResult, MonitorStatus},
-        notifications::{formatter, NotificationService, Severity},
+        notifications::{
+            formatter,
+            outbox::{self, NotificationRequest},
+            policy::{NotificationKind, NotificationPolicy},
+            Severity,
+        },
         shared::errors::AppResult,
     },
 };
-
-/// Momento em que cada regra passou a bater continuamente, por alvo.
-///
-/// Mora em memória de propósito: `duration_seconds` mede *continuidade
-/// observada*, e o que interessa é o relógio monotônico do processo que está
-/// observando. Persistir isso faria uma reinicialização do scheduler herdar uma
-/// tolerância que ninguém acompanhou.
-fn pending_since() -> &'static Mutex<HashMap<(i64, String), Instant>> {
-    static PENDING: OnceLock<Mutex<HashMap<(i64, String), Instant>>> = OnceLock::new();
-    PENDING.get_or_init(|| Mutex::new(HashMap::new()))
-}
 
 /// Avalia um conjunto de fatos contra as regras aplicáveis ao alvo.
 ///
@@ -63,12 +51,12 @@ pub async fn evaluate(ctx: &AppContext, context: &AlertEvaluationContext) -> App
         };
 
         if !evaluator::evaluate(&condition, &context.dataset) {
-            forget_pending(rule.id, &context.scope_key);
+            hysteresis::forget(rule.id, &context.scope_key);
             continue;
         }
 
         has_triggered_rule = true;
-        if has_sustained_condition(&rule, &context.scope_key) {
+        if has_sustained_condition(ctx, &rule, &condition, context).await? {
             trigger_alert(ctx, &rule, &condition, context).await?;
         }
     }
@@ -132,33 +120,28 @@ pub async fn evaluate_monitor_result(
     .await
 }
 
-fn forget_pending(rule_id: i64, scope_key: &str) {
-    if let Ok(mut pending) = pending_since().lock() {
-        pending.remove(&(rule_id, scope_key.to_string()));
-    }
-}
-
 /// Só libera o disparo quando a condição se mantém pelo tempo configurado em
 /// `duration_seconds`, evitando alertas por oscilações momentâneas.
-fn has_sustained_condition(rule: &alert_rules::Model, scope_key: &str) -> bool {
-    let tolerance = i64::from(rule.duration_seconds);
-    if tolerance <= 0 {
-        return true;
-    }
-    let Ok(mut pending) = pending_since().lock() else {
-        // Um mutex envenenado não pode calar o alerta: na dúvida, dispara.
-        return true;
-    };
-    let key = (rule.id, scope_key.to_string());
-    match pending.get(&key) {
-        // Primeira ocorrência: começa a contar e ainda não dispara.
-        None => {
-            pending.insert(key, Instant::now());
-            false
-        }
-        #[allow(clippy::cast_sign_loss)]
-        Some(first_seen) => first_seen.elapsed().as_secs() >= tolerance as u64,
-    }
+///
+/// A contagem em si vive em [`hysteresis`], que desde a Fase 5 a reconstrói a
+/// partir de `monitor_results` quando a memória do processo não a tem — um
+/// restart do scheduler deixou de zerar a tolerância de todo mundo.
+async fn has_sustained_condition(
+    ctx: &AppContext,
+    rule: &alert_rules::Model,
+    condition: &AlertRuleCondition,
+    context: &AlertEvaluationContext,
+) -> AppResult<bool> {
+    hysteresis::observe(
+        &ctx.db,
+        rule.id,
+        i64::from(rule.duration_seconds),
+        &context.scope_key,
+        context.scope.monitor_id,
+        condition,
+        Utc::now(),
+    )
+    .await
 }
 
 /// Cria o evento, notifica os canais e publica no feed.
@@ -220,25 +203,35 @@ async fn trigger_alert(
 
     let severity = Severity::parse(&rule.severity);
     let detail = problem_kind::detail(kind, &context.dataset);
-    NotificationService::with_default_channels()
-        .notify(
-            ctx,
-            &formatter::alert_triggered(
-                &rule.name,
-                &context.target_label,
-                &message,
-                severity,
-                Some(&detail),
-                json!({
-                    "alertEventId": event.id,
-                    "monitorId": context.scope.monitor_id,
-                    "deviceId": context.scope.device_id,
-                    "scopeKey": context.scope_key,
-                    "problemKind": kind.as_str(),
-                }),
-            ),
-        )
-        .await;
+    // Desde a Fase 4 a notificação é **pedida**, não entregue: cooldown,
+    // agrupamento e inibição decidem se ela chega ao canal (§2.3 da análise).
+    // A falha aqui não desfaz o alerta já gravado — o `warn!` mantém a
+    // disciplina "acessório nunca derruba essencial" (§8.9).
+    let notification = NotificationRequest {
+        alert_rule_id: Some(rule.id),
+        scope_key: Some(context.scope_key.clone()),
+        device_id: context.scope.device_id,
+        kind: NotificationKind::Problem,
+        policy: NotificationPolicy::from(rule),
+        silenced: false,
+        message: formatter::alert_triggered(
+            &rule.name,
+            &context.target_label,
+            &message,
+            severity,
+            Some(&detail),
+            json!({
+                "alertEventId": event.id,
+                "monitorId": context.scope.monitor_id,
+                "deviceId": context.scope.device_id,
+                "scopeKey": context.scope_key,
+                "problemKind": kind.as_str(),
+            }),
+        ),
+    };
+    if let Err(error) = outbox::enqueue(ctx, notification).await {
+        tracing::warn!(%error, alert_event_id = event.id, "falha ao enfileirar notificação");
+    }
 
     let mut payload = feed::event_payload(&event);
     // O rótulo do alvo não vai ao `data` (só ao título), mas o feed em tempo
@@ -308,7 +301,7 @@ async fn update_open_event(
             );
             let saved = episode::persist(ctx, open, AlertStatus::Flapping, data).await?;
             feed::publish(ctx, "alert:updated", feed::event_payload(&saved)).await;
-            notify_flapping(ctx, &saved, transitions, policy, context).await;
+            notify_flapping(ctx, &saved, transitions, rule, policy, context).await;
         }
         Transition::ProblemOngoing => {
             data.insert(
@@ -330,87 +323,32 @@ async fn notify_flapping(
     ctx: &AppContext,
     event: &alert_events::Model,
     transitions: u32,
+    rule: &alert_rules::Model,
     policy: EpisodePolicy,
     context: &AlertEvaluationContext,
 ) {
-    NotificationService::with_default_channels()
-        .notify(
-            ctx,
-            &formatter::alert_flapping(
-                &episode::title_of(event, &context.target_label),
-                transitions,
-                policy.flap_window_seconds,
-                Severity::parse(&event.severity),
-                json!({
-                    "alertEventId": event.id,
-                    "monitorId": event.monitor_id,
-                    "deviceId": event.device_id,
-                    "scopeKey": event.scope_key,
-                    "transitions": transitions,
-                }),
-            ),
-        )
-        .await;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn regra(id: i64, duration_seconds: i32) -> alert_rules::Model {
-        let now = Utc::now().into();
-        alert_rules::Model {
-            id,
-            site_id: None,
-            device_id: None,
-            monitor_id: None,
-            name: "Regra".into(),
-            r#type: "custom".into(),
-            template_key: None,
-            condition: json!({ "field": "status", "operator": "eq", "value": "down" }),
-            severity: "warning".into(),
-            duration_seconds,
-            recovery_window_seconds: 0,
-            flap_threshold: 0,
-            flap_window_seconds: 900,
-            enabled: true,
-            created_at: now,
-            updated_at: now,
-        }
-    }
-
-    #[test]
-    fn sem_tolerancia_dispara_na_primeira_ocorrencia() {
-        assert!(has_sustained_condition(&regra(9_001, 0), "monitor:1"));
-    }
-
-    #[test]
-    fn com_tolerancia_a_primeira_ocorrencia_apenas_inicia_a_contagem() {
-        // Matriz de paridade #24: `durationSeconds` só dispara após a condição
-        // se sustentar — a primeira passagem nunca alerta.
-        let rule = regra(9_002, 300);
-        assert!(!has_sustained_condition(&rule, "monitor:2"));
-        assert!(!has_sustained_condition(&rule, "monitor:2"));
-        forget_pending(rule.id, "monitor:2");
-    }
-
-    #[test]
-    fn condicao_que_deixa_de_bater_reinicia_a_contagem() {
-        let rule = regra(9_003, 300);
-        assert!(!has_sustained_condition(&rule, "monitor:3"));
-        forget_pending(rule.id, "monitor:3");
-        // Recomeçou do zero: continua sem disparar.
-        assert!(!has_sustained_condition(&rule, "monitor:3"));
-        forget_pending(rule.id, "monitor:3");
-    }
-
-    #[test]
-    fn a_contagem_e_por_regra_e_por_alvo() {
-        let rule = regra(9_004, 300);
-        assert!(!has_sustained_condition(&rule, "monitor:10"));
-        // Alvo diferente tem contagem própria, também começando agora.
-        assert!(!has_sustained_condition(&rule, "monitor:11"));
-        forget_pending(rule.id, "monitor:10");
-        forget_pending(rule.id, "monitor:11");
+    let request = NotificationRequest {
+        alert_rule_id: event.alert_rule_id,
+        scope_key: event.scope_key.clone(),
+        device_id: event.device_id,
+        kind: NotificationKind::Flapping,
+        policy: NotificationPolicy::from(rule),
+        silenced: false,
+        message: formatter::alert_flapping(
+            &episode::title_of(event, &context.target_label),
+            transitions,
+            policy.flap_window_seconds,
+            Severity::parse(&event.severity),
+            json!({
+                "alertEventId": event.id,
+                "monitorId": event.monitor_id,
+                "deviceId": event.device_id,
+                "scopeKey": event.scope_key,
+                "transitions": transitions,
+            }),
+        ),
+    };
+    if let Err(error) = outbox::enqueue(ctx, request).await {
+        tracing::warn!(%error, alert_event_id = event.id, "falha ao enfileirar aviso de oscilação");
     }
 }

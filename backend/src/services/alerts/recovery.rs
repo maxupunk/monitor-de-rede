@@ -25,7 +25,12 @@ use crate::{
             episode, feed, problem_kind, silence,
             state_machine::{self, EpisodeInput, EpisodePolicy, Transition},
         },
-        notifications::{formatter, NotificationService, Severity},
+        notifications::{
+            formatter,
+            outbox::{self, NotificationRequest},
+            policy::{NotificationKind, NotificationPolicy},
+            Severity,
+        },
         shared::errors::AppResult,
     },
 };
@@ -105,7 +110,8 @@ pub async fn note_degraded_scope(
 
     for event in open {
         let now = Utc::now();
-        let policy = policy_for(&policies, &event);
+        let rule_policies = policy_for(&policies, &event);
+        let policy = rule_policies.episode;
         let status = event.status.parse().unwrap_or(AlertStatus::Active);
         let transition = state_machine::decide(&EpisodeInput {
             status,
@@ -147,7 +153,7 @@ pub async fn note_degraded_scope(
                 );
                 let saved = episode::persist(ctx, &event, AlertStatus::Flapping, data).await?;
                 feed::publish(ctx, "alert:updated", feed::event_payload(&saved)).await;
-                notify_flapping(ctx, &saved, transitions, policy).await;
+                notify_flapping(ctx, &saved, transitions, rule_policies).await;
             }
             Transition::ProblemOngoing => {
                 touched += 1;
@@ -173,27 +179,33 @@ async fn notify_flapping(
     ctx: &AppContext,
     event: &alert_events::Model,
     transitions: u32,
-    policy: EpisodePolicy,
+    policies: RulePolicies,
 ) {
     let fallback = event.message.as_deref().unwrap_or("Alerta do sistema");
-    NotificationService::with_default_channels()
-        .notify(
-            ctx,
-            &formatter::alert_flapping(
-                &episode::title_of(event, fallback),
-                transitions,
-                policy.flap_window_seconds,
-                Severity::parse(&event.severity),
-                json!({
-                    "alertEventId": event.id,
-                    "monitorId": event.monitor_id,
-                    "deviceId": event.device_id,
-                    "scopeKey": event.scope_key,
-                    "transitions": transitions,
-                }),
-            ),
-        )
-        .await;
+    let request = NotificationRequest {
+        alert_rule_id: event.alert_rule_id,
+        scope_key: event.scope_key.clone(),
+        device_id: event.device_id,
+        kind: NotificationKind::Flapping,
+        policy: policies.notification,
+        silenced: false,
+        message: formatter::alert_flapping(
+            &episode::title_of(event, fallback),
+            transitions,
+            policies.episode.flap_window_seconds,
+            Severity::parse(&event.severity),
+            json!({
+                "alertEventId": event.id,
+                "monitorId": event.monitor_id,
+                "deviceId": event.device_id,
+                "scopeKey": event.scope_key,
+                "transitions": transitions,
+            }),
+        ),
+    };
+    if let Err(error) = outbox::enqueue(ctx, request).await {
+        tracing::warn!(%error, alert_event_id = event.id, "falha ao enfileirar aviso de oscilação");
+    }
 }
 
 /// Os eventos abertos do escopo, incluindo a busca legada por `monitor_id`.
@@ -210,11 +222,21 @@ async fn open_events_of(ctx: &AppContext, scope_key: &str) -> AppResult<Vec<aler
         .await?)
 }
 
+/// Tudo que a regra dita sobre um episódio: como ele fecha e como ele avisa.
+///
+/// As duas viajam juntas porque saem da mesma linha e são lidas no mesmo laço —
+/// separá-las custaria uma segunda consulta às mesmas regras.
+#[derive(Debug, Clone, Copy, Default)]
+struct RulePolicies {
+    episode: EpisodePolicy,
+    notification: NotificationPolicy,
+}
+
 /// As políticas das regras dos eventos, carregadas de uma vez.
 async fn policies_of(
     ctx: &AppContext,
     events: &[alert_events::Model],
-) -> AppResult<HashMap<i64, EpisodePolicy>> {
+) -> AppResult<HashMap<i64, RulePolicies>> {
     let rule_ids: Vec<i64> = events
         .iter()
         .filter_map(|event| event.alert_rule_id)
@@ -227,15 +249,21 @@ async fn policies_of(
         .all(&ctx.db)
         .await?
         .iter()
-        .map(|rule| (rule.id, EpisodePolicy::from(rule)))
+        .map(|rule| {
+            (
+                rule.id,
+                RulePolicies {
+                    episode: EpisodePolicy::from(rule),
+                    notification: NotificationPolicy::from(rule),
+                },
+            )
+        })
         .collect())
 }
 
-/// A política do evento; regra apagada não tem janela nem limiar a respeitar.
-fn policy_for(
-    policies: &HashMap<i64, EpisodePolicy>,
-    event: &alert_events::Model,
-) -> EpisodePolicy {
+/// A política do evento; regra apagada não tem janela, limiar nem cooldown a
+/// respeitar.
+fn policy_for(policies: &HashMap<i64, RulePolicies>, event: &alert_events::Model) -> RulePolicies {
     event
         .alert_rule_id
         .and_then(|rule_id| policies.get(&rule_id))
@@ -263,15 +291,19 @@ async fn run(
         HashMap::new()
     };
 
-    let notifications = NotificationService::with_default_channels();
     let mut resolved = 0;
 
     for event in open {
         let now = Utc::now();
-        let policy = policy_for(&policies, &event);
+        let rule_policies = policy_for(&policies, &event);
+        let policy = rule_policies.episode;
         // Status fora do vocabulário (linha antiga) é tratado como `active`:
         // o pior caso é entrar em observação quando poderia fechar.
         let status = event.status.parse().unwrap_or(AlertStatus::Active);
+        // O silêncio é lido pelo prazo, não pelo status: um alerta silenciado
+        // que entrou em `recovering` perdeu o rótulo mas não o pedido do
+        // operador — era por aí que o ✅ furava o silêncio (F8 da análise).
+        let silenced = silence::silenced_until(&event).is_some_and(|until| until > now);
         let transition = state_machine::decide(&EpisodeInput {
             status,
             data: event.data.as_ref().and_then(Value::as_object),
@@ -280,7 +312,7 @@ async fn run(
             condition_matched: false,
             degraded: false,
             recovered: true,
-            silenced_now: silence::silenced_until(&event).is_some_and(|until| until > now),
+            silenced_now: silenced,
             now,
         });
 
@@ -294,23 +326,33 @@ async fn run(
                     .and_then(Value::as_str)
                     .and_then(problem_kind::ProblemKind::parse);
                 let saved = persist_resolve(ctx, event, now).await?;
-                notifications
-                    .notify(
-                        ctx,
-                        &formatter::alert_resolved(
-                            saved.id,
-                            saved.message.as_deref(),
-                            reason,
-                            Some(summary),
-                            problem,
-                            json!({
-                                "alertEventId": saved.id,
-                                "scopeKey": scope_key,
-                                "monitorId": saved.monitor_id,
-                            }),
-                        ),
-                    )
-                    .await;
+                let request = NotificationRequest {
+                    alert_rule_id: saved.alert_rule_id,
+                    scope_key: saved.scope_key.clone(),
+                    device_id: saved.device_id,
+                    kind: NotificationKind::Resolved,
+                    policy: rule_policies.notification,
+                    silenced,
+                    message: formatter::alert_resolved(
+                        saved.id,
+                        saved.message.as_deref(),
+                        reason,
+                        Some(summary),
+                        problem,
+                        json!({
+                            "alertEventId": saved.id,
+                            "scopeKey": scope_key,
+                            "monitorId": saved.monitor_id,
+                        }),
+                    ),
+                };
+                if let Err(error) = outbox::enqueue(ctx, request).await {
+                    tracing::warn!(
+                        %error,
+                        alert_event_id = saved.id,
+                        "falha ao enfileirar notificação de resolução"
+                    );
+                }
                 feed::publish(ctx, "alert:resolved", feed::event_payload(&saved)).await;
             }
             Transition::EnterRecovering => {

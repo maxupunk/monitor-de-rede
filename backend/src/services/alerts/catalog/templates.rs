@@ -62,6 +62,25 @@ pub struct AlertRuleTemplate {
     /// todo o catálogo: é o horizonte em que "caiu de novo" ainda descreve o
     /// mesmo problema.
     pub flap_window_seconds: i32,
+    /// Intervalo mínimo entre notificações de problema do par (regra, alvo),
+    /// mesmo quando o episódio fecha e um novo abre (Fase 4).
+    ///
+    /// 900 s em tudo que descreve **problema** (`warning`/`critical`) e `0` nos
+    /// registros informativos. O critério é o que a mensagem custa ao operador:
+    /// a janela de estabilização já cobre a oscilação *dentro* do episódio, mas
+    /// nada impedia um episódio de fechar e outro abrir três minutos depois,
+    /// com o par 🚨+✅ inteiro de novo. Registro informativo não precisa de
+    /// freio — ele já é raro por construção.
+    pub notification_cooldown_seconds: i32,
+    /// Suprimir a notificação quando o pai declarado do dispositivo já está em
+    /// alerta (Fase 4).
+    ///
+    /// Ligado nas categorias que medem "consigo falar com o alvo"
+    /// (disponibilidade, desempenho, serviços) — são exatamente as que um
+    /// roteador caído derruba em massa. Desligado nas que descrevem o estado do
+    /// próprio equipamento (interfaces, equipamento, VPN): ali o pai não explica
+    /// o filho, e calar seria esconder.
+    pub inhibit_when_parent_down: bool,
     /// Faz parte do conjunto básico provisionado por padrão.
     pub recommended: bool,
 }
@@ -91,6 +110,8 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             recovery_window_seconds: 120,
             flap_threshold: 5,
             flap_window_seconds: 900,
+            notification_cooldown_seconds: 900,
+            inhibit_when_parent_down: true,
             recommended: true,
         },
         AlertRuleTemplate {
@@ -105,6 +126,8 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             recovery_window_seconds: 300,
             flap_threshold: 5,
             flap_window_seconds: 900,
+            notification_cooldown_seconds: 900,
+            inhibit_when_parent_down: true,
             recommended: true,
         },
         AlertRuleTemplate {
@@ -119,6 +142,8 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             recovery_window_seconds: 300,
             flap_threshold: 5,
             flap_window_seconds: 900,
+            notification_cooldown_seconds: 900,
+            inhibit_when_parent_down: true,
             recommended: true,
         },
         AlertRuleTemplate {
@@ -133,6 +158,8 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             recovery_window_seconds: 300,
             flap_threshold: 5,
             flap_window_seconds: 900,
+            notification_cooldown_seconds: 900,
+            inhibit_when_parent_down: true,
             recommended: false,
         },
         AlertRuleTemplate {
@@ -147,6 +174,8 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             recovery_window_seconds: 300,
             flap_threshold: 5,
             flap_window_seconds: 900,
+            notification_cooldown_seconds: 0,
+            inhibit_when_parent_down: true,
             recommended: false,
         },
         AlertRuleTemplate {
@@ -161,6 +190,8 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             recovery_window_seconds: 0,
             flap_threshold: 0,
             flap_window_seconds: 900,
+            notification_cooldown_seconds: 900,
+            inhibit_when_parent_down: true,
             recommended: true,
         },
         AlertRuleTemplate {
@@ -175,6 +206,8 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             recovery_window_seconds: 300,
             flap_threshold: 5,
             flap_window_seconds: 900,
+            notification_cooldown_seconds: 900,
+            inhibit_when_parent_down: true,
             recommended: false,
         },
         AlertRuleTemplate {
@@ -189,6 +222,8 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             recovery_window_seconds: 300,
             flap_threshold: 5,
             flap_window_seconds: 900,
+            notification_cooldown_seconds: 900,
+            inhibit_when_parent_down: true,
             recommended: false,
         },
         AlertRuleTemplate {
@@ -207,6 +242,8 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             recovery_window_seconds: 120,
             flap_threshold: 5,
             flap_window_seconds: 900,
+            notification_cooldown_seconds: 900,
+            inhibit_when_parent_down: false,
             recommended: true,
         },
         AlertRuleTemplate {
@@ -225,6 +262,8 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             recovery_window_seconds: 120,
             flap_threshold: 5,
             flap_window_seconds: 900,
+            notification_cooldown_seconds: 900,
+            inhibit_when_parent_down: false,
             recommended: true,
         },
         AlertRuleTemplate {
@@ -243,6 +282,8 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             recovery_window_seconds: 0,
             flap_threshold: 0,
             flap_window_seconds: 900,
+            notification_cooldown_seconds: 0,
+            inhibit_when_parent_down: false,
             recommended: false,
         },
         AlertRuleTemplate {
@@ -261,6 +302,8 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             recovery_window_seconds: 0,
             flap_threshold: 0,
             flap_window_seconds: 900,
+            notification_cooldown_seconds: 0,
+            inhibit_when_parent_down: false,
             recommended: false,
         },
         AlertRuleTemplate {
@@ -279,6 +322,8 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             recovery_window_seconds: 0,
             flap_threshold: 0,
             flap_window_seconds: 900,
+            notification_cooldown_seconds: 0,
+            inhibit_when_parent_down: false,
             recommended: false,
         },
         AlertRuleTemplate {
@@ -294,6 +339,8 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             recovery_window_seconds: 0,
             flap_threshold: 0,
             flap_window_seconds: 900,
+            notification_cooldown_seconds: 900,
+            inhibit_when_parent_down: false,
             recommended: false,
         },
         AlertRuleTemplate {
@@ -309,6 +356,8 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             recovery_window_seconds: 0,
             flap_threshold: 0,
             flap_window_seconds: 900,
+            notification_cooldown_seconds: 900,
+            inhibit_when_parent_down: false,
             recommended: false,
         },
         AlertRuleTemplate {
@@ -327,6 +376,8 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             recovery_window_seconds: 120,
             flap_threshold: 5,
             flap_window_seconds: 900,
+            notification_cooldown_seconds: 900,
+            inhibit_when_parent_down: false,
             recommended: true,
         },
         AlertRuleTemplate {
@@ -345,6 +396,8 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             recovery_window_seconds: 120,
             flap_threshold: 5,
             flap_window_seconds: 900,
+            notification_cooldown_seconds: 900,
+            inhibit_when_parent_down: false,
             recommended: false,
         },
         AlertRuleTemplate {
@@ -363,6 +416,8 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             recovery_window_seconds: 0,
             flap_threshold: 0,
             flap_window_seconds: 900,
+            notification_cooldown_seconds: 0,
+            inhibit_when_parent_down: false,
             recommended: false,
         },
     ]
@@ -475,6 +530,36 @@ mod tests {
     }
 
     #[test]
+    fn o_cooldown_freia_problema_e_deixa_o_informativo_em_paz() {
+        for template in all() {
+            let esperado = if template.severity == "info" { 0 } else { 900 };
+            assert_eq!(
+                template.notification_cooldown_seconds, esperado,
+                "{} é {} e deveria ter cooldown {esperado}",
+                template.key, template.severity
+            );
+        }
+    }
+
+    #[test]
+    fn a_inibicao_vale_para_quem_mede_alcance_ao_alvo() {
+        // Um roteador caído derruba ping, HTTP, TCP e DNS de tudo que está
+        // atrás dele. Já o estado das interfaces e dos túneis descreve o
+        // próprio equipamento: ali o pai não explica o filho.
+        const ALCANCE: [&str; 3] = ["disponibilidade", "desempenho", "servicos"];
+        for template in all() {
+            assert_eq!(
+                template.inhibit_when_parent_down,
+                ALCANCE.contains(&template.category),
+                "{} está na categoria {} e tem inibição {}",
+                template.key,
+                template.category,
+                template.inhibit_when_parent_down
+            );
+        }
+    }
+
+    #[test]
     fn serializa_em_camel_case_para_o_frontend() {
         let template = find("device_offline").expect("template existe");
         let json = serde_json::to_value(&template).unwrap();
@@ -482,9 +567,12 @@ mod tests {
         assert_eq!(json["recoveryWindowSeconds"], 120);
         assert_eq!(json["flapThreshold"], 5);
         assert_eq!(json["flapWindowSeconds"], 900);
+        assert_eq!(json["notificationCooldownSeconds"], 900);
+        assert_eq!(json["inhibitWhenParentDown"], true);
         assert_eq!(json["type"], "device_offline");
         assert!(json.get("duration_seconds").is_none());
         assert!(json.get("flap_threshold").is_none());
+        assert!(json.get("notification_cooldown_seconds").is_none());
         assert!(json.get("ruleType").is_none());
     }
 }
