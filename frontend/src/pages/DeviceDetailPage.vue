@@ -37,63 +37,70 @@
           </div>
         </div>
 
-        <div class="d-flex flex-wrap align-center ga-2 w-100 w-md-auto">
-          <v-btn
-            color="info"
-            variant="tonal"
-            prepend-icon="mdi-radar"
-            size="small"
-            :loading="detailStore.scanningSnmp"
-            class="flex-grow-1 flex-md-grow-0"
-            @click="openScanModal"
-          >
-            <span class="hidden-sm-and-down">Configurar Monitoramento</span>
-            <span class="hidden-md-and-up">Configurar</span>
-            <v-tooltip activator="parent" location="bottom" max-width="300">
-              Varre o equipamento via SNMP e abre a tela onde você escolhe <b>o que</b> monitorar
-              (interfaces, CPU e memória). Descobre portas novas.
-            </v-tooltip>
-          </v-btn>
-
-          <v-btn
-            color="secondary"
-            prepend-icon="mdi-refresh"
-            size="small"
-            :loading="detailStore.pollingSnmp"
-            class="flex-grow-1 flex-md-grow-0"
-            @click="detailStore.triggerSnmpPoll(deviceId)"
-          >
-            <span class="hidden-sm-and-down">Coletar Agora</span>
-            <span class="hidden-md-and-up">Coletar</span>
-            <v-tooltip activator="parent" location="bottom" max-width="300">
-              Executa agora uma leitura das métricas do que <b>já está</b> monitorado, sem alterar a
-              configuração. É o mesmo que o agendador faz a cada ciclo.
-            </v-tooltip>
-          </v-btn>
-
-          <v-btn
-            color="purple"
-            variant="tonal"
-            prepend-icon="mdi-lan-connect"
-            size="small"
-            class="flex-grow-1 flex-md-grow-0"
-            @click="portScanOpen = true"
-          >
-            <span class="hidden-sm-and-down">Escanear Portas</span>
-            <span class="hidden-md-and-up">Portas</span>
-          </v-btn>
-
+        <div
+          class="d-flex flex-wrap align-center justify-start justify-md-end ga-2 w-100 w-md-auto"
+        >
           <v-btn
             color="primary"
-            variant="outlined"
-            prepend-icon="mdi-pencil"
+            prepend-icon="mdi-plus"
             size="small"
-            class="flex-grow-1 flex-md-grow-0"
-            @click="editDeviceDialog = true"
+            class="flex-grow-1 flex-sm-grow-0"
+            @click="openMonitorDialog()"
           >
-            <span class="hidden-sm-and-down">Editar Dispositivo</span>
-            <span class="hidden-md-and-up">Editar</span>
+            Novo monitor
           </v-btn>
+
+          <v-btn-group
+            color="primary"
+            density="comfortable"
+            variant="outlined"
+            divided
+            class="device-action-buttons"
+          >
+            <v-btn
+              prepend-icon="mdi-radar"
+              :loading="detailStore.scanningSnmp"
+              aria-label="Configurar monitoramento"
+              @click="openScanModal"
+            >
+              <span class="hidden-md-and-down">Configurar</span>
+              <v-tooltip activator="parent" location="bottom" max-width="300">
+                Varre o equipamento via SNMP e abre a tela onde você escolhe <b>o que</b> monitorar
+                (interfaces, CPU e memória). Descobre portas novas.
+              </v-tooltip>
+            </v-btn>
+
+            <v-btn
+              prepend-icon="mdi-refresh"
+              :loading="detailStore.pollingSnmp"
+              aria-label="Coletar agora"
+              @click="detailStore.triggerSnmpPoll(deviceId)"
+            >
+              <span class="hidden-md-and-down">Coletar</span>
+              <v-tooltip activator="parent" location="bottom" max-width="300">
+                Executa agora uma leitura das métricas do que <b>já está</b> monitorado, sem alterar
+                a configuração. É o mesmo que o agendador faz a cada ciclo.
+              </v-tooltip>
+            </v-btn>
+
+            <v-btn
+              prepend-icon="mdi-lan-connect"
+              aria-label="Escanear portas"
+              @click="portScanOpen = true"
+            >
+              <span class="hidden-md-and-down">Portas</span>
+              <v-tooltip activator="parent" location="bottom">Escanear portas</v-tooltip>
+            </v-btn>
+
+            <v-btn
+              prepend-icon="mdi-pencil"
+              aria-label="Editar dispositivo"
+              @click="editDeviceDialog = true"
+            >
+              <span class="hidden-md-and-down">Editar</span>
+              <v-tooltip activator="parent" location="bottom">Editar dispositivo</v-tooltip>
+            </v-btn>
+          </v-btn-group>
         </div>
       </div>
     </v-card>
@@ -164,22 +171,11 @@
 
           <!-- Aba Monitores -->
           <v-window-item value="monitors">
-            <div class="d-flex justify-end pa-3">
-              <v-btn
-                color="primary"
-                variant="tonal"
-                size="small"
-                prepend-icon="mdi-plus"
-                @click="openMonitorDialog()"
-              >
-                Novo monitor neste equipamento
-              </v-btn>
-            </div>
             <MonitorsTable
               :monitors="detailStore.monitors"
               :loading="detailStore.loading"
               variant="device"
-              no-data-text="Nenhum monitor configurado para este equipamento. Crie um acima ou use &quot;Configurar Monitoramento&quot; para descobrir automaticamente."
+              no-data-text="Nenhum monitor configurado para este equipamento. Use &quot;Novo monitor&quot; ou &quot;Configurar Monitoramento&quot; para descobrir automaticamente."
               @edit="openMonitorDialog"
               @changed="reloadMonitors"
             ></MonitorsTable>
@@ -1429,3 +1425,16 @@ async function saveMonitors() {
   }
 }
 </script>
+
+<style scoped>
+@media (max-width: 599.98px) {
+  .device-action-buttons {
+    width: 100%;
+  }
+
+  .device-action-buttons :deep(.v-btn) {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+}
+</style>

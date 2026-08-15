@@ -19,12 +19,17 @@
     </VDataTable>
 
     <!-- Mobile: lista de cards -->
-    <div v-else class="mobile-card-list">
+    <div v-else class="d-flex flex-column ga-2">
       <template v-if="items.length > 0">
+        <!-- `border` porque o card do item fica dentro do card da página, com a
+             mesma cor de surface: sem contorno os dois viram um bloco só, e com
+             um único item não há nem o espaçamento da lista para separá-los. -->
         <v-card
           v-for="(item, index) in items"
           :key="itemKey ? itemKey(item) : index"
-          class="mobile-card rounded-0"
+          border
+          rounded="0"
+          class="pa-3"
           :class="{ 'cursor-pointer': clickable }"
           @click="clickable ? onCardClick(item) : undefined"
         >
@@ -34,8 +39,9 @@
 
       <v-card
         v-else-if="!loading"
-        class="mobile-card pa-6 text-center text-grey"
         variant="outlined"
+        rounded="0"
+        class="pa-6 text-center text-grey"
       >
         <v-icon size="40" color="grey-lighten-1" class="mb-2">mdi-inbox-outline</v-icon>
         <div class="text-subtitle-2 font-weight-medium">{{ noDataText }}</div>
@@ -87,26 +93,3 @@ function onClickRow(event: MouseEvent, row: { item: any }) {
   emit('click:row', event, row)
 }
 </script>
-
-<style scoped>
-.mobile-card-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.mobile-card {
-  padding: 12px;
-}
-@media (min-width: 960px) {
-  .mobile-card-list {
-    gap: 12px;
-  }
-  .mobile-card {
-    border-radius: 8px;
-    padding: 12px 16px;
-  }
-}
-.cursor-pointer {
-  cursor: pointer;
-}
-</style>
