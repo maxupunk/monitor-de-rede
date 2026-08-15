@@ -5,6 +5,9 @@
 //! regras cadastradas. Este contrato é a fronteira entre os dois lados: nenhum
 //! produtor de fatos precisa conhecer `alert_events`, notificação ou severidade.
 
+use std::{fmt, str::FromStr};
+
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 /// Fatos observados no vocabulário avaliado pelas regras (`condition.field`).
@@ -42,20 +45,95 @@ pub struct AlertEvaluationContext {
     pub data: Map<String, Value>,
 
     /// `true` quando o alvo voltou ao normal. Se nenhuma regra disparar nesta
-    /// avaliação, os alertas abertos do escopo são resolvidos.
+    /// avaliação, os alertas abertos do escopo entram em observação de
+    /// estabilidade ou resolvem, conforme a janela de cada regra.
     pub recovered: bool,
 }
 
-/// Status de `alert_events` que contam como alerta ainda aberto.
+/// Ciclo de vida de `alert_events` (§2.2 da análise de monitoramento
+/// inteligente).
 ///
-/// Reconhecer ou silenciar não fecha o alerta — só muda como ele aparece. Por
-/// isso os três aparecem juntos tanto na deduplicação quanto na recuperação.
-pub const OPEN_STATUSES: [&str; 3] = ["active", "acknowledged", "silenced"];
+/// A coluna no banco continua string — o enum existe para que cada `match`
+/// obrigue o tratamento de todos os estados: acrescentar um status sem
+/// atualizar um ponto de decisão vira erro de compilação, não bug silencioso.
+/// `Recovering` é o estado da histerese de resolução (Fase 1): o alvo voltou,
+/// mas a janela da regra ainda não se esgotou — uma recaída o devolve a
+/// `Active`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AlertStatus {
+    Active,
+    Acknowledged,
+    Silenced,
+    Recovering,
+    Resolved,
+}
 
-pub const STATUS_ACTIVE: &str = "active";
-pub const STATUS_ACKNOWLEDGED: &str = "acknowledged";
-pub const STATUS_SILENCED: &str = "silenced";
-pub const STATUS_RESOLVED: &str = "resolved";
+impl AlertStatus {
+    /// Os status que contam como alerta ainda aberto.
+    ///
+    /// Reconhecer, silenciar ou estabilizar não fecha o alerta — só muda como
+    /// ele aparece. Por isso os quatro aparecem juntos tanto na deduplicação
+    /// quanto na recuperação.
+    pub const OPEN: [Self; 4] = [
+        Self::Active,
+        Self::Acknowledged,
+        Self::Silenced,
+        Self::Recovering,
+    ];
+
+    /// Forma persistida na coluna `alert_events.status`.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Acknowledged => "acknowledged",
+            Self::Silenced => "silenced",
+            Self::Recovering => "recovering",
+            Self::Resolved => "resolved",
+        }
+    }
+
+    /// Aberto = ainda conta para a deduplicação e para a recuperação
+    /// automática.
+    #[must_use]
+    pub const fn is_open(self) -> bool {
+        matches!(
+            self,
+            Self::Active | Self::Acknowledged | Self::Silenced | Self::Recovering
+        )
+    }
+}
+
+impl fmt::Display for AlertStatus {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl FromStr for AlertStatus {
+    /// Status gravado por fora do motor (linha antiga, escrita manual) não
+    /// pode derrubar a leitura: quem chama decide o fallback do `Err`.
+    type Err = ();
+
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        match raw {
+            "active" => Ok(Self::Active),
+            "acknowledged" => Ok(Self::Acknowledged),
+            "silenced" => Ok(Self::Silenced),
+            "recovering" => Ok(Self::Recovering),
+            "resolved" => Ok(Self::Resolved),
+            _ => Err(()),
+        }
+    }
+}
+
+/// Permite `Column::Status.is_in(AlertStatus::OPEN)` direto no `sea-orm`.
+impl From<AlertStatus> for sea_orm::Value {
+    fn from(status: AlertStatus) -> Self {
+        Self::String(Some(status.as_str().to_owned()))
+    }
+}
 
 /// Chaves de escopo — centralizadas para produtor e consumidor não divergirem.
 pub struct AlertScopeKey;
@@ -103,5 +181,32 @@ mod tests {
         assert_eq!(AlertScopeKey::monitor_id_of("monitor:12"), Some(12));
         assert_eq!(AlertScopeKey::monitor_id_of("interface:12"), None);
         assert_eq!(AlertScopeKey::monitor_id_of("monitor:abc"), None);
+    }
+
+    #[test]
+    fn status_faz_aida_e_volta_pela_string_persistida() {
+        for status in AlertStatus::OPEN {
+            assert_eq!(status.as_str().parse::<AlertStatus>(), Ok(status));
+            assert!(status.is_open());
+        }
+        assert_eq!(
+            AlertStatus::Resolved.as_str().parse::<AlertStatus>(),
+            Ok(AlertStatus::Resolved)
+        );
+        assert!(!AlertStatus::Resolved.is_open());
+        assert!("triggered".parse::<AlertStatus>().is_err());
+        assert_eq!(AlertStatus::Recovering.to_string(), "recovering");
+    }
+
+    #[test]
+    fn status_serializa_como_a_string_da_coluna() {
+        assert_eq!(
+            serde_json::to_value(AlertStatus::Recovering).unwrap(),
+            serde_json::json!("recovering")
+        );
+        assert_eq!(
+            serde_json::from_value::<AlertStatus>(serde_json::json!("silenced")).unwrap(),
+            AlertStatus::Silenced
+        );
     }
 }

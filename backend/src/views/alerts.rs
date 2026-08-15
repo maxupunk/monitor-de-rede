@@ -34,6 +34,9 @@ pub struct AlertRuleResponse {
     pub condition: Value,
     pub severity: String,
     pub duration_seconds: i32,
+    /// Janela de estabilidade antes de resolver, em segundos (0 = resolve na
+    /// primeira checagem ok). A tela de regras edita este campo.
+    pub recovery_window_seconds: i32,
     pub enabled: bool,
     /// Espelho de `enabled` (§6.1) — o `AlertRule` do frontend lê os dois.
     pub is_enabled: bool,
@@ -54,6 +57,7 @@ impl From<alert_rules::Model> for AlertRuleResponse {
             condition: row.condition,
             severity: row.severity,
             duration_seconds: row.duration_seconds,
+            recovery_window_seconds: row.recovery_window_seconds,
             enabled: row.enabled,
             is_enabled: row.enabled,
             created_at: row.created_at.to_rfc3339(),
@@ -73,6 +77,7 @@ pub fn rule_event_payload(rule: &alert_rules::Model) -> Value {
         "condition": rule.condition,
         "severity": rule.severity,
         "durationSeconds": rule.duration_seconds,
+        "recoveryWindowSeconds": rule.recovery_window_seconds,
         "enabled": rule.enabled,
         "isEnabled": rule.enabled,
     })
@@ -368,6 +373,7 @@ mod tests {
             condition: json!({ "field": "status", "operator": "eq", "value": "down" }),
             severity: "critical".into(),
             duration_seconds: 0,
+            recovery_window_seconds: 120,
             enabled: true,
             created_at: now,
             updated_at: now,
@@ -375,6 +381,7 @@ mod tests {
         let json = serde_json::to_value(&response).unwrap();
         assert_eq!(json["isEnabled"], true);
         assert_eq!(json["durationSeconds"], 0);
+        assert_eq!(json["recoveryWindowSeconds"], 120);
         assert_eq!(json["templateKey"], "device_offline");
         assert_eq!(json["type"], "custom");
     }

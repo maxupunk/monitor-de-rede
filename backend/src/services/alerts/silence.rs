@@ -9,10 +9,7 @@ use serde_json::{json, Value};
 
 use crate::{
     models::alert_events,
-    services::{
-        alerts::contracts::{STATUS_ACKNOWLEDGED, STATUS_SILENCED},
-        shared::errors::AppResult,
-    },
+    services::{alerts::contracts::AlertStatus, shared::errors::AppResult},
 };
 
 /// Duração padrão do silêncio, em minutos — igual à do backend anterior.
@@ -24,7 +21,7 @@ pub const DEFAULT_SILENCE_MINUTES: i64 = 60;
 /// que "silenciar por 60 minutos" vire "silenciar para sempre".
 #[must_use]
 pub fn is_silenced(event: &alert_events::Model, now: DateTime<Utc>) -> bool {
-    if event.status != STATUS_SILENCED {
+    if event.status != AlertStatus::Silenced.as_str() {
         return false;
     }
     silenced_until(event).is_some_and(|until| until > now)
@@ -63,7 +60,7 @@ pub async fn silence_alert<C: ConnectionTrait>(
     );
 
     let mut active: alert_events::ActiveModel = event.into();
-    active.status = Set(STATUS_SILENCED.into());
+    active.status = Set(AlertStatus::Silenced.as_str().into());
     active.data = Set(Some(data));
     Ok(active.update(db).await?)
 }
@@ -83,7 +80,7 @@ pub async fn acknowledge_alert<C: ConnectionTrait>(
         json!(Utc::now().to_rfc3339()),
     );
     let mut active: alert_events::ActiveModel = event.into();
-    active.status = Set(STATUS_ACKNOWLEDGED.into());
+    active.status = Set(AlertStatus::Acknowledged.as_str().into());
     active.data = Set(Some(data));
     Ok(active.update(db).await?)
 }
@@ -129,20 +126,32 @@ mod tests {
         let passado = (Utc::now() - Duration::minutes(1)).to_rfc3339();
         let futuro = (Utc::now() + Duration::minutes(1)).to_rfc3339();
         assert!(!is_silenced(
-            &evento(STATUS_SILENCED, Some(json!({ "silencedUntil": passado }))),
+            &evento(
+                AlertStatus::Silenced.as_str(),
+                Some(json!({ "silencedUntil": passado }))
+            ),
             Utc::now()
         ));
         assert!(is_silenced(
-            &evento(STATUS_SILENCED, Some(json!({ "silencedUntil": futuro }))),
+            &evento(
+                AlertStatus::Silenced.as_str(),
+                Some(json!({ "silencedUntil": futuro }))
+            ),
             Utc::now()
         ));
     }
 
     #[test]
     fn sem_prazo_ou_com_prazo_ilegivel_nao_conta_como_silenciado() {
-        assert!(!is_silenced(&evento(STATUS_SILENCED, None), Utc::now()));
         assert!(!is_silenced(
-            &evento(STATUS_SILENCED, Some(json!({ "silencedUntil": "ontem" }))),
+            &evento(AlertStatus::Silenced.as_str(), None),
+            Utc::now()
+        ));
+        assert!(!is_silenced(
+            &evento(
+                AlertStatus::Silenced.as_str(),
+                Some(json!({ "silencedUntil": "ontem" }))
+            ),
             Utc::now()
         ));
     }

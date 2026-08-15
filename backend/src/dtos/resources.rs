@@ -94,6 +94,9 @@ pub struct AlertRuleInput {
     pub condition: Option<serde_json::Value>,
     pub severity: Option<String>,
     pub duration_seconds: Option<i32>,
+    /// Janela de estabilidade antes de resolver (Fase 1 do roadmap de alertas
+    /// inteligentes). `None` no PUT = mantém; `0` = resolve na primeira ok.
+    pub recovery_window_seconds: Option<i32>,
     pub enabled: Option<bool>,
 }
 

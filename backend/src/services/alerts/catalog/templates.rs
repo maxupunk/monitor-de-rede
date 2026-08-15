@@ -38,6 +38,9 @@ pub struct AlertRuleTemplate {
     pub condition: Value,
     pub severity: &'static str,
     pub duration_seconds: i32,
+    /// Janela de estabilidade antes de resolver (Fase 1). Zeros por ora: a
+    /// revisão dos valores por tipo de problema é Fase 2 do roadmap.
+    pub recovery_window_seconds: i32,
     /// Faz parte do conjunto básico provisionado por padrão.
     pub recommended: bool,
 }
@@ -59,6 +62,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             condition: json!({ "field": fields::STATUS, "operator": "eq", "value": "down" }),
             severity: "critical",
             duration_seconds: 0,
+            recovery_window_seconds: 0,
             recommended: true,
         },
         AlertRuleTemplate {
@@ -70,6 +74,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             condition: json!({ "field": fields::PACKET_LOSS, "operator": "gt", "value": 10 }),
             severity: "warning",
             duration_seconds: 300,
+            recovery_window_seconds: 0,
             recommended: true,
         },
         AlertRuleTemplate {
@@ -81,6 +86,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             condition: json!({ "field": fields::LATENCY_MS, "operator": "gt", "value": 200 }),
             severity: "warning",
             duration_seconds: 300,
+            recovery_window_seconds: 0,
             recommended: true,
         },
         AlertRuleTemplate {
@@ -92,6 +98,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             condition: json!({ "field": fields::LATENCY_MS, "operator": "gt", "value": 500 }),
             severity: "critical",
             duration_seconds: 300,
+            recovery_window_seconds: 0,
             recommended: false,
         },
         AlertRuleTemplate {
@@ -103,6 +110,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             condition: json!({ "field": fields::DURATION_MS, "operator": "gt", "value": 5000 }),
             severity: "info",
             duration_seconds: 300,
+            recovery_window_seconds: 0,
             recommended: false,
         },
         AlertRuleTemplate {
@@ -114,6 +122,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             condition: json!({ "field": fields::STATUS_CODE, "operator": "gte", "value": 400 }),
             severity: "critical",
             duration_seconds: 0,
+            recovery_window_seconds: 0,
             recommended: true,
         },
         AlertRuleTemplate {
@@ -125,6 +134,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             condition: json!({ "field": fields::CONNECT_TIME_MS, "operator": "gt", "value": 1000 }),
             severity: "warning",
             duration_seconds: 300,
+            recovery_window_seconds: 0,
             recommended: false,
         },
         AlertRuleTemplate {
@@ -136,6 +146,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             condition: json!({ "field": fields::RESOLUTION_TIME_MS, "operator": "gt", "value": 800 }),
             severity: "warning",
             duration_seconds: 300,
+            recovery_window_seconds: 0,
             recommended: false,
         },
         AlertRuleTemplate {
@@ -151,6 +162,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             }),
             severity: "warning",
             duration_seconds: 0,
+            recovery_window_seconds: 0,
             recommended: true,
         },
         AlertRuleTemplate {
@@ -166,6 +178,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             }),
             severity: "warning",
             duration_seconds: 0,
+            recovery_window_seconds: 0,
             recommended: true,
         },
         AlertRuleTemplate {
@@ -181,6 +194,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             }),
             severity: "info",
             duration_seconds: 0,
+            recovery_window_seconds: 0,
             recommended: false,
         },
         AlertRuleTemplate {
@@ -196,6 +210,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             }),
             severity: "info",
             duration_seconds: 0,
+            recovery_window_seconds: 0,
             recommended: false,
         },
         AlertRuleTemplate {
@@ -211,6 +226,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             }),
             severity: "info",
             duration_seconds: 0,
+            recovery_window_seconds: 0,
             recommended: false,
         },
         AlertRuleTemplate {
@@ -223,6 +239,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             condition: json!({ "field": fields::IF_OPER_STATUS, "operator": "eq", "value": "2" }),
             severity: "warning",
             duration_seconds: 0,
+            recovery_window_seconds: 0,
             recommended: false,
         },
         AlertRuleTemplate {
@@ -235,6 +252,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             condition: json!({ "field": fields::SNMP_UPTIME, "operator": "lt", "value": 60_000 }),
             severity: "warning",
             duration_seconds: 0,
+            recovery_window_seconds: 0,
             recommended: false,
         },
         AlertRuleTemplate {
@@ -250,6 +268,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             }),
             severity: "critical",
             duration_seconds: 0,
+            recovery_window_seconds: 0,
             recommended: true,
         },
         AlertRuleTemplate {
@@ -265,6 +284,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             }),
             severity: "warning",
             duration_seconds: 0,
+            recovery_window_seconds: 0,
             recommended: false,
         },
         AlertRuleTemplate {
@@ -280,6 +300,7 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             }),
             severity: "info",
             duration_seconds: 0,
+            recovery_window_seconds: 0,
             recommended: false,
         },
     ]
@@ -357,6 +378,7 @@ mod tests {
         let template = find("device_offline").expect("template existe");
         let json = serde_json::to_value(&template).unwrap();
         assert_eq!(json["durationSeconds"], 0);
+        assert_eq!(json["recoveryWindowSeconds"], 0);
         assert_eq!(json["type"], "device_offline");
         assert!(json.get("duration_seconds").is_none());
         assert!(json.get("ruleType").is_none());

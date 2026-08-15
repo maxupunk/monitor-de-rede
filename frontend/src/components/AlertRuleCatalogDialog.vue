@@ -67,7 +67,13 @@
                   {{ template.description }}
                 </v-list-item-subtitle>
                 <div class="text-caption text-grey-darken-1 mt-1">
-                  {{ describeRule(template.condition, template.durationSeconds) }}
+                  {{
+                    describeRule(
+                      template.condition,
+                      template.durationSeconds,
+                      template.recoveryWindowSeconds ?? 0
+                    )
+                  }}
                 </div>
               </v-list-item>
             </v-list>

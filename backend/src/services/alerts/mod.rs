@@ -8,10 +8,12 @@ pub mod catalog;
 pub mod contracts;
 pub mod datasets;
 pub mod evaluator;
+pub mod feed;
 pub mod fields;
 pub mod manager;
 pub mod recovery;
 pub mod repository;
 pub mod silence;
+pub mod state_machine;
 
 pub use contracts::{AlertEvaluationContext, AlertEvaluationScope, AlertScopeKey};

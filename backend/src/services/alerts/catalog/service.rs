@@ -196,6 +196,7 @@ pub async fn apply<C: ConnectionTrait>(
             condition: Set(template.condition.clone()),
             severity: Set(template.severity.to_string()),
             duration_seconds: Set(template.duration_seconds),
+            recovery_window_seconds: Set(template.recovery_window_seconds),
             enabled: Set(true),
             ..Default::default()
         }

@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { useDevicesStore } from './devices'
-import { useAlertsStore } from './alerts'
+import { useAlertsStore, type AlertEvent } from './alerts'
 import { useMonitorsStore } from './monitors'
 import { useProbesStore } from './probes'
 import { useDiscoveryStore } from './discovery'
@@ -167,12 +167,20 @@ export const useEventsStore = defineStore('events', () => {
           deviceId: (data.deviceId as number) ?? null,
           monitorId: (data.monitorId as number) ?? null,
           severity: (data.severity as 'info' | 'warning' | 'critical') ?? 'warning',
-          status: 'active',
+          status: (data.status as AlertEvent['status']) ?? 'active',
           title: String(data.title ?? data.ruleName ?? 'Novo alerta'),
           message: String(data.message ?? ''),
+          data: (data.data as AlertEvent['data']) ?? null,
           startedAt: data.startedAt as string,
           createdAt: String(data.createdAt ?? data.startedAt ?? payload.timestamp),
         })
+        break
+      }
+
+      case 'alert:updated': {
+        const alertsStore = useAlertsStore()
+        // Payload é o evento serializado completo: patch em memória, sem refetch
+        alertsStore.upsertAlertEvent(data as never)
         break
       }
 

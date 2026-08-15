@@ -27,6 +27,7 @@ mod m20260810_000021_probe_tasks;
 mod m20260810_000022_system_settings;
 mod m20260812_000001_drop_zabbix_templates;
 mod m20260814_000001_device_snmp_poll_interval;
+mod m20260815_000001_alert_rules_recovery_window;
 
 pub struct Migrator;
 
@@ -126,6 +127,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260810_000022_system_settings::Migration),
             Box::new(m20260812_000001_drop_zabbix_templates::Migration),
             Box::new(m20260814_000001_device_snmp_poll_interval::Migration),
+            Box::new(m20260815_000001_alert_rules_recovery_window::Migration),
             // inject-above (do not remove this comment)
         ]
     }

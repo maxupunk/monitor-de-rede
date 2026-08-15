@@ -20,15 +20,12 @@ use crate::{
     models::{_entities::alert_events as alert_events_entity, alert_events, alert_rules, monitors},
     services::{
         alerts::{
-            contracts::{
-                AlertEvaluationContext, AlertEvaluationScope, AlertScopeKey, OPEN_STATUSES,
-                STATUS_ACTIVE,
-            },
+            contracts::{AlertEvaluationContext, AlertEvaluationScope, AlertScopeKey, AlertStatus},
             datasets::monitor_result,
             evaluator::{self, AlertRuleCondition},
-            recovery, repository,
+            feed, recovery, repository, silence,
+            state_machine::{self, EpisodeInput, Transition},
         },
-        events::EventBus,
         monitoring::contracts::{CheckResult, MonitorStatus},
         notifications::{formatter, NotificationService, Severity},
         shared::errors::AppResult,
@@ -158,7 +155,8 @@ fn has_sustained_condition(rule: &alert_rules::Model, scope_key: &str) -> bool {
 /// Cria o evento, notifica os canais e publica no feed.
 ///
 /// Um alerta aberto por (regra, `scope_key`): enquanto não for resolvido, novas
-/// ocorrências não geram evento nem notificação repetida (matriz #25).
+/// ocorrências não geram evento nem notificação repetida (matriz #25) — a
+/// máquina de estados decide se é recaída ou continuação do problema.
 async fn trigger_alert(
     ctx: &AppContext,
     rule: &alert_rules::Model,
@@ -167,11 +165,11 @@ async fn trigger_alert(
     let already_open = alert_events::Entity::find()
         .filter(alert_events_entity::Column::AlertRuleId.eq(rule.id))
         .filter(alert_events_entity::Column::ScopeKey.eq(context.scope_key.as_str()))
-        .filter(alert_events_entity::Column::Status.is_in(OPEN_STATUSES))
+        .filter(alert_events_entity::Column::Status.is_in(AlertStatus::OPEN))
         .one(&ctx.db)
         .await?;
-    if already_open.is_some() {
-        return Ok(());
+    if let Some(open) = already_open {
+        return update_open_event(ctx, &open, rule).await;
     }
 
     let message = context
@@ -180,17 +178,23 @@ async fn trigger_alert(
         .unwrap_or_else(|| format!("Alerta disparado pela regra: {}", rule.name));
     let title = format!("{} — {}", rule.name, context.target_label);
 
+    let started_at = Utc::now();
     let mut data = context.data.clone();
     data.insert("title".into(), json!(title));
     data.insert("ruleName".into(), json!(rule.name));
+    // O episódio nasce com o relógio da janela ancorado no disparo.
+    data.insert(
+        state_machine::LAST_PROBLEM_AT.into(),
+        json!(started_at.to_rfc3339()),
+    );
+    data.insert(state_machine::RECURRENCE_COUNT.into(), json!(0));
 
-    let started_at = Utc::now();
     let event = alert_events::ActiveModel {
         alert_rule_id: Set(Some(rule.id)),
         device_id: Set(context.scope.device_id),
         monitor_id: Set(context.scope.monitor_id),
         scope_key: Set(Some(context.scope_key.clone())),
-        status: Set(STATUS_ACTIVE.into()),
+        status: Set(AlertStatus::Active.as_str().into()),
         severity: Set(rule.severity.clone()),
         started_at: Set(started_at.into()),
         message: Set(Some(message.clone())),
@@ -219,28 +223,81 @@ async fn trigger_alert(
         )
         .await;
 
-    if let Ok(bus) = EventBus::from_context(ctx) {
-        let payload = json!({
-            "id": event.id,
-            "alertEventId": event.id,
-            "alertRuleId": rule.id,
-            "ruleName": rule.name,
-            "scopeKey": context.scope_key,
-            "monitorId": context.scope.monitor_id,
-            "deviceId": context.scope.device_id,
-            "targetLabel": context.target_label,
-            "severity": rule.severity,
-            "status": event.status,
-            "title": title,
-            "message": message,
-            "startedAt": started_at.to_rfc3339(),
-            "createdAt": event.created_at.to_rfc3339(),
-        });
-        if let Err(error) = bus.publish(&ctx.db, "alert:triggered", payload).await {
-            tracing::warn!(%error, alert_event_id = event.id, "falha ao publicar alert:triggered");
-        }
-    }
+    let mut payload = feed::event_payload(&event);
+    // O rótulo do alvo não vai ao `data` (só ao título), mas o feed em tempo
+    // real o consome solto — por isso ele entra só aqui, no disparo.
+    payload["targetLabel"] = json!(context.target_label);
+    feed::publish(ctx, "alert:triggered", payload).await;
 
+    Ok(())
+}
+
+/// Atualiza o evento já aberto de (regra, alvo): recaída dentro da janela ou
+/// simples continuação do problema.
+///
+/// Em ambos os casos `lastProblemAt` avança para `now` — a janela de
+/// resolução conta do **último** problema. Nunca há notificação aqui: recaída
+/// é atualização silenciosa de tela (`alert:updated`), não alerta novo.
+async fn update_open_event(
+    ctx: &AppContext,
+    open: &alert_events::Model,
+    rule: &alert_rules::Model,
+) -> AppResult<()> {
+    let now = Utc::now();
+    let status = open.status.parse().unwrap_or(AlertStatus::Active);
+    let transition = state_machine::decide(&EpisodeInput {
+        status,
+        data: open.data.as_ref().and_then(Value::as_object),
+        started_at: open.started_at.with_timezone(&Utc),
+        recovery_window_seconds: i64::from(rule.recovery_window_seconds),
+        condition_matched: true,
+        recovered: false,
+        // Um silêncio pedido pelo operador sobrevive à entrada em recovering:
+        // a recaída devolve o alerta a silenced enquanto o prazo vigorar.
+        silenced_now: silence::silenced_until(open).is_some_and(|until| until > now),
+        now,
+    });
+
+    let mut data = open
+        .data
+        .as_ref()
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    match transition {
+        Transition::Relapse {
+            recurrence,
+            silenced,
+        } => {
+            data.insert(state_machine::RECURRENCE_COUNT.into(), json!(recurrence));
+            data.insert(
+                state_machine::LAST_PROBLEM_AT.into(),
+                json!(now.to_rfc3339()),
+            );
+            let mut active: alert_events::ActiveModel = open.clone().into();
+            active.status = Set(if silenced {
+                AlertStatus::Silenced
+            } else {
+                AlertStatus::Active
+            }
+            .as_str()
+            .into());
+            active.data = Set(Some(Value::Object(data)));
+            let saved = active.update(&ctx.db).await?;
+            feed::publish(ctx, "alert:updated", feed::event_payload(&saved)).await;
+        }
+        Transition::ProblemOngoing => {
+            data.insert(
+                state_machine::LAST_PROBLEM_AT.into(),
+                json!(now.to_rfc3339()),
+            );
+            let mut active: alert_events::ActiveModel = open.clone().into();
+            active.data = Set(Some(Value::Object(data)));
+            active.update(&ctx.db).await?;
+        }
+        // Com a condição batendo a máquina só devolve os dois ramos acima.
+        _ => {}
+    }
     Ok(())
 }
 
@@ -261,6 +318,7 @@ mod tests {
             condition: json!({ "field": "status", "operator": "eq", "value": "down" }),
             severity: "warning".into(),
             duration_seconds,
+            recovery_window_seconds: 0,
             enabled: true,
             created_at: now,
             updated_at: now,

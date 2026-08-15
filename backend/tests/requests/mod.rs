@@ -1,3 +1,4 @@
+mod alert_recovery;
 mod auth;
 mod backup;
 mod phase2_phase3;

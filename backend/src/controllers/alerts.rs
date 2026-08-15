@@ -17,7 +17,7 @@ use crate::{
     services::{
         alerts::{
             catalog::{service as catalog, templates},
-            contracts::{OPEN_STATUSES, STATUS_RESOLVED},
+            contracts::AlertStatus,
             silence,
         },
         events::EventBus,
@@ -58,6 +58,15 @@ fn invalid_condition() -> AppError {
     )
 }
 
+/// A janela de recuperação é um tempo de estabilidade: negativo não faz
+/// sentido e seria tratado como zero pela máquina de estados — melhor recusar
+/// do que gravar um valor que não faz o que diz.
+fn invalid_recovery_window() -> AppError {
+    AppError::validation(
+        "Janela de recuperação inválida. Informe zero ou mais segundos de estabilidade exigida.",
+    )
+}
+
 /// Publicação de evento é best-effort: o CRUD já concluiu quando chegamos aqui.
 async fn publish(ctx: &AppContext, kind: &str, payload: Value) {
     if let Ok(bus) = EventBus::from_context(ctx) {
@@ -94,6 +103,10 @@ async fn rules_store(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| AppError::validation("Nome da regra é obrigatório"))?;
+    let recovery_window_seconds = input.recovery_window_seconds.unwrap_or(0);
+    if recovery_window_seconds < 0 {
+        return Err(invalid_recovery_window());
+    }
 
     let rule = alert_rules::ActiveModel {
         site_id: Set(input.site_id),
@@ -104,6 +117,7 @@ async fn rules_store(
         condition: Set(condition),
         severity: Set(input.severity.unwrap_or_else(|| "warning".into())),
         duration_seconds: Set(input.duration_seconds.unwrap_or(0)),
+        recovery_window_seconds: Set(recovery_window_seconds),
         enabled: Set(input.enabled.unwrap_or(true)),
         ..Default::default()
     }
@@ -129,6 +143,11 @@ async fn rules_update(
         Some(raw) => normalize_condition(raw).ok_or_else(invalid_condition)?,
         None => current.condition.clone(),
     };
+    let recovery_window_seconds = match input.recovery_window_seconds {
+        Some(value) if value < 0 => return Err(invalid_recovery_window()),
+        Some(value) => value,
+        None => current.recovery_window_seconds,
+    };
 
     let rule = alert_rules::ActiveModel {
         id: Set(id),
@@ -146,6 +165,7 @@ async fn rules_update(
         condition: Set(condition),
         severity: Set(input.severity.unwrap_or(current.severity)),
         duration_seconds: Set(input.duration_seconds.unwrap_or(current.duration_seconds)),
+        recovery_window_seconds: Set(recovery_window_seconds),
         enabled: Set(input.enabled.unwrap_or(current.enabled)),
         ..Default::default()
     }
@@ -238,7 +258,8 @@ async fn index(
 }
 
 /// Executa a checagem em tempo real do alvo do alerta (se for um monitor) e,
-/// se ele recuperou, o alerta é finalizado automaticamente pelo motor.
+/// se ele recuperou, o motor move o alerta na máquina de estados — resolvendo
+/// ou mandando para observação de estabilidade, conforme a janela da regra.
 ///
 /// Devolve o evento recarregado do banco: o `process_result` pode tê-lo
 /// resolvido por dentro, e responder com a cópia antiga mostraria ao operador
@@ -247,7 +268,7 @@ async fn check_and_resolve(
     ctx: &AppContext,
     event: alert_events::Model,
 ) -> AppResult<alert_events::Model> {
-    if event.status == STATUS_RESOLVED {
+    if event.status == AlertStatus::Resolved.as_str() {
         return Ok(event);
     }
     let Some(monitor_id) = event.monitor_id else {
@@ -324,7 +345,7 @@ async fn serialize_one(
 async fn acknowledge(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
     let event = check_and_resolve(&ctx, load_event(&ctx, id).await?).await?;
 
-    if event.status == STATUS_RESOLVED {
+    if event.status == AlertStatus::Resolved.as_str() {
         return Ok(format::json(json!({
             "message": format!("Alerta #{id} foi verificado e resolvido automaticamente"),
             "event": serialize_one(&ctx, &event).await?,
@@ -357,7 +378,7 @@ async fn acknowledge(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppR
 
 async fn verify(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
     let event = check_and_resolve(&ctx, load_event(&ctx, id).await?).await?;
-    let resolved = event.status == STATUS_RESOLVED;
+    let resolved = event.status == AlertStatus::Resolved.as_str();
     Ok(format::json(json!({
         "message": if resolved {
             format!("Alerta #{id} resolvido com sucesso!")
@@ -371,13 +392,13 @@ async fn verify(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult
 
 async fn verify_all(State(ctx): State<AppContext>) -> AppResult<Response> {
     let pending = alert_events::Entity::find()
-        .filter(alert_events_entity::Column::Status.is_in(OPEN_STATUSES))
+        .filter(alert_events_entity::Column::Status.is_in(AlertStatus::OPEN))
         .all(&ctx.db)
         .await?;
     let total_checked = pending.len();
     let mut resolved_count = 0;
     for event in pending {
-        if check_and_resolve(&ctx, event).await?.status == STATUS_RESOLVED {
+        if check_and_resolve(&ctx, event).await?.status == AlertStatus::Resolved.as_str() {
             resolved_count += 1;
         }
     }

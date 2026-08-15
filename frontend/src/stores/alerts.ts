@@ -24,6 +24,8 @@ export interface AlertRule {
   condition: AlertRuleCondition
   severity: 'info' | 'warning' | 'critical'
   durationSeconds: number
+  /** Janela de estabilização antes de resolver; 0 = resolve na 1ª checagem ok */
+  recoveryWindowSeconds?: number
   enabled: boolean
   isEnabled: boolean
 }
@@ -38,6 +40,8 @@ export interface AlertRuleTemplate {
   condition: AlertRuleCondition
   severity: AlertRule['severity']
   durationSeconds: number
+  /** Janela de estabilização sugerida pelo template (0 = resolução imediata) */
+  recoveryWindowSeconds?: number
   /** Faz parte do conjunto básico aplicado por padrão */
   recommended: boolean
   /** Já existe regra equivalente: aplicar de novo não cria duplicata */
@@ -55,15 +59,28 @@ export interface CatalogApplicationResult {
   skipped: Array<{ key: string; reason: 'already_exists' | 'unknown_template' }>
 }
 
+/** Metadados do episódio trafegados no JSON `data` do evento (extensível) */
+export interface AlertEventData {
+  /** ISO do último problema; cada recaída reinicia a janela de estabilização */
+  lastProblemAt?: string
+  /** Quantas recaídas o episódio teve desde a abertura */
+  recurrenceCount?: number
+  /** ISO até quando o evento está silenciado */
+  silencedUntil?: string
+  [key: string]: unknown
+}
+
 export interface AlertEvent {
   id: number
   alertRuleId?: number | null
   deviceId?: number | null
   monitorId?: number | null
   severity: 'info' | 'warning' | 'error' | 'critical'
-  status: 'active' | 'acknowledged' | 'silenced' | 'resolved'
+  /** `recovering` é estado aberto: voltou, mas ainda dentro da janela de estabilização */
+  status: 'active' | 'acknowledged' | 'silenced' | 'recovering' | 'resolved'
   title: string
   message: string
+  data?: AlertEventData | null
   acknowledgedBy?: string
   silencedUntil?: string
   device?: { id: number; name: string } | null

@@ -18,6 +18,7 @@ pub struct Model {
     pub condition: Json,
     pub severity: String,
     pub duration_seconds: i32,
+    pub recovery_window_seconds: i32,
     pub enabled: bool,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,

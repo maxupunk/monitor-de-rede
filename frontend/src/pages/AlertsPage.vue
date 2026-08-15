@@ -97,9 +97,19 @@
               </template>
 
               <template #item.status="{ item }">
-                <v-chip variant="outlined" size="small">
+                <v-chip :color="statusColor(item.status)" variant="outlined" size="small">
                   {{ statusLabel(item.status) }}
                 </v-chip>
+              </template>
+
+              <template #item.message="{ item }">
+                <div>{{ item.message }}</div>
+                <div
+                  v-if="item.status === 'recovering' && recoveringInfo(item)"
+                  class="text-caption text-warning"
+                >
+                  {{ recoveringInfo(item) }}
+                </div>
               </template>
 
               <template #item.createdAt="{ item }">
@@ -147,12 +157,18 @@
                         <v-chip :color="severityColor(item.severity)" size="x-small">
                           {{ severityLabel(item.severity) }}
                         </v-chip>
-                        <v-chip variant="outlined" size="x-small">
+                        <v-chip :color="statusColor(item.status)" variant="outlined" size="x-small">
                           {{ statusLabel(item.status) }}
                         </v-chip>
                       </div>
                       <div class="text-subtitle-1 font-weight-bold mt-1">{{ item.title }}</div>
                       <div class="text-body-2 text-grey-darken-1">{{ item.message }}</div>
+                      <div
+                        v-if="item.status === 'recovering' && recoveringInfo(item)"
+                        class="text-caption text-warning"
+                      >
+                        {{ recoveringInfo(item) }}
+                      </div>
                       <div class="text-caption text-grey mt-1">
                         {{ formatDateTime(item.startedAt || item.createdAt) }}
                       </div>
@@ -417,7 +433,11 @@
                         </v-chip>
                       </td>
                       <td>
-                        <v-chip variant="outlined" size="x-small">
+                        <v-chip
+                          :color="statusColor(alert.status)"
+                          variant="outlined"
+                          size="x-small"
+                        >
                           {{ statusLabel(alert.status) }}
                         </v-chip>
                       </td>
@@ -549,6 +569,18 @@
             ></v-select>
 
             <v-select
+              v-model="form.recoveryWindowSeconds"
+              :items="RECOVERY_WINDOWS"
+              item-title="title"
+              item-value="value"
+              label="Estabilização antes de resolver"
+              hint="Só resolve depois que o alvo se mantém estável por esse período; cada recaída reinicia a contagem."
+              persistent-hint
+              variant="outlined"
+              class="mb-4"
+            ></v-select>
+
+            <v-select
               v-model="form.severity"
               :items="ALERT_SEVERITIES"
               item-title="title"
@@ -588,6 +620,7 @@ import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import {
   ALERT_METRICS,
   ALERT_DURATIONS,
+  RECOVERY_WINDOWS,
   ALERT_SEVERITIES,
   findMetric,
   operatorsForMetric,
@@ -596,11 +629,12 @@ import {
   severityLabel,
   severityColor,
   statusLabel,
+  statusColor,
   formatConditionValue,
   describeRule,
   type AlertOperator,
 } from '@/utils/alertPresentation'
-import { formatDateTime } from '@/utils/formatters'
+import { formatDateTime, formatRelativeTime } from '@/utils/formatters'
 
 const alertsStore = useAlertsStore()
 const eventsStore = useEventsStore()
@@ -682,6 +716,7 @@ const form = reactive({
   operator: 'gt' as AlertOperator,
   value: 150 as number | string,
   durationSeconds: 0,
+  recoveryWindowSeconds: 0,
   severity: 'warning' as AlertRule['severity'],
 })
 
@@ -698,7 +733,8 @@ const bpsValue = computed<number | null>({
 const rulePreview = computed(() =>
   describeRule(
     { field: form.field, operator: form.operator, value: form.value },
-    form.durationSeconds
+    form.durationSeconds,
+    form.recoveryWindowSeconds
   )
 )
 
@@ -757,6 +793,19 @@ function durationLabel(seconds?: number): string {
   return ALERT_DURATIONS.find((d) => d.value === (seconds ?? 0))?.title ?? `${seconds}s`
 }
 
+/** Linha informativa do estado "Estabilizando": último problema e recaídas */
+function recoveringInfo(alert: AlertEvent): string {
+  const parts: string[] = []
+  if (alert.data?.lastProblemAt) {
+    parts.push(`último problema ${formatRelativeTime(alert.data.lastProblemAt)}`)
+  }
+  const recurrences = alert.data?.recurrenceCount ?? 0
+  if (recurrences > 0) {
+    parts.push(`${recurrences} ${recurrences === 1 ? 'recaída' : 'recaídas'}`)
+  }
+  return parts.join(' · ')
+}
+
 function onMetricChange(field: string) {
   const metric = findMetric(field)
   if (!metric) return
@@ -772,6 +821,7 @@ function openRuleDialog(rule?: AlertRule) {
     form.operator = (rule.condition?.operator ?? 'gt') as AlertOperator
     form.value = rule.condition?.value ?? 0
     form.durationSeconds = rule.durationSeconds ?? 0
+    form.recoveryWindowSeconds = rule.recoveryWindowSeconds ?? 0
     form.severity = rule.severity ?? 'warning'
   } else {
     editingRuleId.value = null
@@ -780,6 +830,7 @@ function openRuleDialog(rule?: AlertRule) {
     form.operator = 'gt'
     form.value = 150
     form.durationSeconds = 0
+    form.recoveryWindowSeconds = 0
     form.severity = 'warning'
   }
   ruleDialog.value = true
@@ -801,6 +852,7 @@ function buildPayload(): Partial<AlertRule> {
     type: 'custom',
     condition: { field: form.field, operator: form.operator, value },
     durationSeconds: form.durationSeconds,
+    recoveryWindowSeconds: form.recoveryWindowSeconds,
     severity: form.severity,
     enabled: true,
   }

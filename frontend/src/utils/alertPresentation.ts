@@ -5,6 +5,7 @@
  */
 
 import { formatBps } from './formatters'
+import { getStatusColor } from './monitorPresentation'
 
 export type AlertOperator = 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'neq' | 'contains'
 
@@ -293,6 +294,39 @@ export const ALERT_DURATIONS = [
   { value: 1800, title: 'Somente se persistir por 30 minutos' },
 ]
 
+/**
+ * Janelas de estabilização antes de resolver o alerta. Enquanto a janela não
+ * vence, o evento fica em `recovering`; cada recaída reinicia a contagem.
+ * `phrase` é a cláusula usada na frase-resumo de `describeRule`.
+ */
+export const RECOVERY_WINDOWS = [
+  {
+    value: 0,
+    title: 'Sem estabilização — resolve na 1ª checagem ok',
+    phrase: 'resolve na primeira checagem ok',
+  },
+  {
+    value: 120,
+    title: 'Resolver após 2 min sem recaída',
+    phrase: 'resolve após 2 min sem recaída',
+  },
+  {
+    value: 300,
+    title: 'Resolver após 5 min sem recaída',
+    phrase: 'resolve após 5 min sem recaída',
+  },
+  {
+    value: 900,
+    title: 'Resolver após 15 min sem recaída',
+    phrase: 'resolve após 15 min sem recaída',
+  },
+  {
+    value: 1800,
+    title: 'Resolver após 30 min sem recaída',
+    phrase: 'resolve após 30 min sem recaída',
+  },
+]
+
 export function findMetric(field?: string): AlertMetricOption | undefined {
   return ALERT_METRICS.find((m) => m.field === field)
 }
@@ -347,11 +381,22 @@ export function statusLabel(status?: string): string {
       return 'Reconhecido'
     case 'silenced':
       return 'Silenciado'
+    case 'recovering':
+      return 'Estabilizando'
     case 'resolved':
       return 'Resolvido'
     default:
       return (status || 'active').toUpperCase()
   }
+}
+
+/**
+ * Cor do chip de status do alerta, resolvida pelo StatusTone central. Só o
+ * estado intermediário ganha cor própria: nos demais, a severidade continua
+ * sendo a cor dominante e o chip fica no outlined neutro.
+ */
+export function statusColor(status?: string): string | undefined {
+  return status === 'recovering' ? getStatusColor(status) : undefined
 }
 
 /** Formata o valor levando em conta rótulos de enum e unidade da métrica */
@@ -382,9 +427,17 @@ export function describeCondition(condition?: RuleCondition | null): string {
   return `${metricLabel(condition.field)} ${phrase ?? condition.operator} ${formatConditionValue(condition.field, condition.value)}`
 }
 
-export function describeRule(condition?: RuleCondition | null, durationSeconds = 0): string {
+export function describeRule(
+  condition?: RuleCondition | null,
+  durationSeconds = 0,
+  recoveryWindowSeconds = 0
+): string {
   const base = `Alertar quando ${describeCondition(condition)}`
-  if (!durationSeconds) return `${base}.`
-  const window = ALERT_DURATIONS.find((d) => d.value === durationSeconds)
-  return `${base}, ${(window?.title ?? `por ${durationSeconds}s`).toLowerCase()}.`
+  const duration = durationSeconds
+    ? `, ${(ALERT_DURATIONS.find((d) => d.value === durationSeconds)?.title ?? `por ${durationSeconds}s`).toLowerCase()}`
+    : ''
+  const recovery =
+    RECOVERY_WINDOWS.find((w) => w.value === recoveryWindowSeconds)?.phrase ??
+    `resolve após ${recoveryWindowSeconds}s sem recaída`
+  return `${base}${duration}; ${recovery}.`
 }
