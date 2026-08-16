@@ -263,6 +263,72 @@ async fn as_fontes_vistas_incluem_contadores_e_desconhecidas() {
         // tela usa para dizer "nada chegou ainda" em vez de ficar em branco.
         assert!(corpo["metrics"]["received"].is_number());
         assert!(corpo["metrics"]["droppedUnknownSource"].is_number());
+        // O diagnóstico de NAT vem sempre, mesmo sem origem mascarada: é ele
+        // que permite a tela explicar um parque inteiro "desconhecido" sem o
+        // operador adivinhar.
+        assert!(corpo["nat"]["maskedCount"].is_number());
+        assert!(corpo["nat"]["containerized"].is_boolean());
+        assert!(corpo["nat"]["gateways"].is_array());
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn o_vinculo_recusa_o_gateway_do_docker_com_a_explicacao() {
+    // É o erro que a tela mais convida a cometer: a origem mascarada aparece
+    // como desconhecida, o seletor está ali, e vincular atribuiria o parque
+    // inteiro a um dispositivo. O estrago só apareceria depois, na aba de logs
+    // do aparelho errado e no alerta disparado no alvo errado.
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let device_id = dispositivo(&request).await;
+
+        let recusa = request
+            .post("/api/logs/sources/172.17.0.1/bind")
+            .json(&serde_json::json!({ "deviceId": device_id }))
+            .await;
+        assert_eq!(recusa.status_code(), 400, "{}", recusa.text());
+        assert!(
+            recusa.text().contains("gateway do Docker"),
+            "a recusa precisa dizer o motivo e o caminho certo: {}",
+            recusa.text()
+        );
+
+        // E nada foi gravado — recusar pela metade seria pior que não recusar.
+        let mapa = backend::services::syslog::resolver::bindings(&ctx.db)
+            .await
+            .expect("bindings");
+        assert!(!mapa.contains_key("172.17.0.1"));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn o_vinculo_por_hostname_e_aceito_e_persiste_com_o_prefixo() {
+    // O caminho que sobra atrás do NAT: o nome que o equipamento envia é a
+    // única coisa que ainda o distingue dos outros.
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let device_id = dispositivo(&request).await;
+
+        let vinculo = request
+            .post("/api/logs/sources/host%3AMikroTik-Borda/bind")
+            .json(&serde_json::json!({ "deviceId": device_id }))
+            .await;
+        assert_eq!(vinculo.status_code(), 200, "{}", vinculo.text());
+
+        let mapa = backend::services::syslog::resolver::bindings(&ctx.db)
+            .await
+            .expect("bindings");
+        assert_eq!(mapa.get("host:MikroTik-Borda"), Some(&device_id));
     })
     .await;
 }
@@ -348,6 +414,293 @@ async fn o_snippet_traz_o_endereco_informado_e_a_porta_publicada() {
         assert!(comandos.contains("192.168.1.10"), "{comandos}");
         assert!(comandos.contains("bsd-syslog=yes"), "{comandos}");
         assert!(!corpo.to_string().contains("5514"), "vazou a porta interna");
+    })
+    .await;
+}
+
+// --- Ativação automática do log no equipamento -------------------------------
+
+#[tokio::test]
+#[serial]
+async fn a_ativacao_recusa_dispositivo_sem_ip_antes_de_tentar_conectar() {
+    // Sem endereço não há para onde conectar, e o erro precisa dizer isso em
+    // vez de esperar o timeout de uma conexão que nunca foi tentada.
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let site = request
+            .post("/api/sites")
+            .json(&serde_json::json!({ "name": "Matriz" }))
+            .await;
+        let site: serde_json::Value = serde_json::from_str(&site.text()).unwrap();
+        let device = request
+            .post("/api/devices")
+            .json(&serde_json::json!({
+                "name": "sem-ip", "type": "router",
+                "siteId": site["id"].as_i64().unwrap()
+            }))
+            .await;
+        let device: serde_json::Value = serde_json::from_str(&device.text()).unwrap();
+        let device_id = device["id"].as_i64().unwrap();
+
+        let resposta = request
+            .post(&format!("/api/logs/devices/{device_id}/provision"))
+            .json(&serde_json::json!({
+                "protocol": "ssh", "username": "admin", "password": "x",
+                "serverAddress": "192.168.1.10"
+            }))
+            .await;
+        assert_eq!(resposta.status_code(), 400, "{}", resposta.text());
+        assert!(
+            resposta.text().contains("endereço IP"),
+            "{}",
+            resposta.text()
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn a_ativacao_valida_protocolo_e_credencial_antes_de_abrir_socket() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let device_id = dispositivo(&request).await;
+        let rota = format!("/api/logs/devices/{device_id}/provision");
+
+        let protocolo = request
+            .post(&rota)
+            .json(&serde_json::json!({
+                "protocol": "rlogin", "username": "admin", "password": "x",
+                "serverAddress": "192.168.1.10"
+            }))
+            .await;
+        assert_eq!(protocolo.status_code(), 422, "{}", protocolo.text());
+
+        let sem_senha = request
+            .post(&rota)
+            .json(&serde_json::json!({
+                "protocol": "ssh", "username": "admin", "password": "",
+                "serverAddress": "192.168.1.10"
+            }))
+            .await;
+        assert_eq!(sem_senha.status_code(), 422, "{}", sem_senha.text());
+
+        let sem_usuario = request
+            .post(&rota)
+            .json(&serde_json::json!({
+                "protocol": "ssh", "username": "  ", "password": "x",
+                "serverAddress": "192.168.1.10"
+            }))
+            .await;
+        assert_eq!(sem_usuario.status_code(), 422, "{}", sem_usuario.text());
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn a_ativacao_recusa_localhost_como_endereco_do_servidor() {
+    // O bug de campo: quem abre a interface em `http://localhost:3333` mandava
+    // `localhost` para dentro do roteador, que passava a enviar o syslog para
+    // si mesmo — sem erro em lugar nenhum e sem nada chegando.
+    //
+    // O alvo é `127.0.0.1:9` (fechada), então a recusa **precisa** vir antes de
+    // qualquer tentativa de conexão para o teste distinguir os dois erros.
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+        std::env::remove_var("FRONTEND_ORIGIN");
+
+        let site = request
+            .post("/api/sites")
+            .json(&serde_json::json!({ "name": "Matriz" }))
+            .await;
+        let site: serde_json::Value = serde_json::from_str(&site.text()).unwrap();
+        let device = request
+            .post("/api/devices")
+            .json(&serde_json::json!({
+                "name": "local", "type": "router", "ipAddress": "127.0.0.1",
+                "siteId": site["id"].as_i64().unwrap()
+            }))
+            .await;
+        let device: serde_json::Value = serde_json::from_str(&device.text()).unwrap();
+        let device_id = device["id"].as_i64().unwrap();
+
+        // `127.0.0.1` como alvo faz o palpite automático também cair no
+        // loopback, e o filtro precisa recusá-lo igualmente — senão o
+        // saneamento do campo seria contornado pela descoberta.
+        let resposta = request
+            .post(&format!("/api/logs/devices/{device_id}/provision"))
+            .json(&serde_json::json!({
+                "protocol": "telnet", "port": 9, "username": "admin", "password": "x",
+                "serverAddress": "localhost"
+            }))
+            .await;
+        assert_eq!(resposta.status_code(), 400, "{}", resposta.text());
+        assert!(
+            resposta.text().contains("Endereço deste servidor"),
+            "a recusa precisa dizer qual campo preencher: {}",
+            resposta.text()
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn o_mac_telnet_exige_mac_e_nao_exige_ip() {
+    // O MAC-Telnet existe justamente para o equipamento sem IP utilizável, então
+    // a falta de IP não pode barrá-lo. A falta de MAC, sim.
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let site = request
+            .post("/api/sites")
+            .json(&serde_json::json!({ "name": "Matriz" }))
+            .await;
+        let site: serde_json::Value = serde_json::from_str(&site.text()).unwrap();
+        let device = request
+            .post("/api/devices")
+            .json(&serde_json::json!({
+                "name": "sem-ip", "type": "router",
+                "siteId": site["id"].as_i64().unwrap()
+            }))
+            .await;
+        let device: serde_json::Value = serde_json::from_str(&device.text()).unwrap();
+        let device_id = device["id"].as_i64().unwrap();
+        let rota = format!("/api/logs/devices/{device_id}/provision");
+
+        let sem_mac = request
+            .post(&rota)
+            .json(&serde_json::json!({
+                "protocol": "mactelnet", "username": "admin", "password": "x",
+                "serverAddress": "192.168.1.10"
+            }))
+            .await;
+        assert_eq!(sem_mac.status_code(), 400, "{}", sem_mac.text());
+        assert!(sem_mac.text().contains("MAC"), "{}", sem_mac.text());
+
+        // MAC malformado é erro de entrada, não de rede.
+        let mac_ruim = request
+            .post(&rota)
+            .json(&serde_json::json!({
+                "protocol": "mactelnet", "username": "admin", "password": "x",
+                "serverAddress": "192.168.1.10", "macAddress": "não é mac"
+            }))
+            .await;
+        assert_eq!(mac_ruim.status_code(), 422, "{}", mac_ruim.text());
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn os_palpites_da_tela_nunca_sugerem_um_endereco_local() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+        // `FRONTEND_ORIGIN` apontando para localhost é o padrão do `.env` de
+        // desenvolvimento — e é por ele que o palpite ruim voltaria.
+        std::env::set_var("FRONTEND_ORIGIN", "http://localhost:5173");
+
+        let device_id = dispositivo(&request).await;
+        let resposta = request
+            .get(&format!("/api/logs/devices/{device_id}/provision-hints"))
+            .await;
+        assert_eq!(resposta.status_code(), 200, "{}", resposta.text());
+        let corpo: serde_json::Value = serde_json::from_str(&resposta.text()).unwrap();
+
+        assert!(corpo["serverPort"].is_number());
+        assert!(corpo["vendor"].is_string());
+        assert!(corpo["sshOpen"].is_boolean());
+        assert!(corpo["telnetOpen"].is_boolean());
+        assert!(corpo["layer2Reachable"].is_boolean());
+
+        if let Some(endereco) = corpo["serverAddress"].as_str() {
+            assert!(
+                !endereco.contains("localhost") && !endereco.starts_with("127."),
+                "sugeriu {endereco}, que aponta o roteador para ele mesmo"
+            );
+        }
+        std::env::remove_var("FRONTEND_ORIGIN");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn a_ativacao_recusa_dispositivo_inexistente() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let resposta = request
+            .post("/api/logs/devices/99999/provision")
+            .json(&serde_json::json!({
+                "protocol": "ssh", "username": "admin", "password": "x",
+                "serverAddress": "192.168.1.10"
+            }))
+            .await;
+        assert_eq!(resposta.status_code(), 404, "{}", resposta.text());
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn a_ativacao_falha_com_mensagem_de_operador_quando_a_porta_esta_fechada() {
+    // O alvo é `127.0.0.1` numa porta alta e fechada — nada sai da máquina,
+    // conforme as diretrizes de teste. O que importa é a **classe** do erro:
+    // porta fechada é problema do operador (400), não falha interna (500).
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let site = request
+            .post("/api/sites")
+            .json(&serde_json::json!({ "name": "Matriz" }))
+            .await;
+        let site: serde_json::Value = serde_json::from_str(&site.text()).unwrap();
+        let device = request
+            .post("/api/devices")
+            .json(&serde_json::json!({
+                "name": "local", "type": "router", "ipAddress": "127.0.0.1",
+                "siteId": site["id"].as_i64().unwrap()
+            }))
+            .await;
+        let device: serde_json::Value = serde_json::from_str(&device.text()).unwrap();
+        let device_id = device["id"].as_i64().unwrap();
+
+        let resposta = request
+            .post(&format!("/api/logs/devices/{device_id}/provision"))
+            .json(&serde_json::json!({
+                "protocol": "telnet", "port": 9, "username": "admin", "password": "x",
+                "serverAddress": "192.168.1.10"
+            }))
+            .await;
+        assert_eq!(
+            resposta.status_code(),
+            400,
+            "porta fechada é erro de operador: {}",
+            resposta.text()
+        );
+        assert!(
+            resposta.text().contains("acessar o equipamento"),
+            "{}",
+            resposta.text()
+        );
     })
     .await;
 }

@@ -82,6 +82,19 @@ async-snmp = { version = "0.16", default-features = false, features = ["crypto-r
 # como dependência transitiva; nenhum tipo dela cruza a fronteira do crate,
 # então não repete o problema de duas majors do `socket2` registrado acima.
 syslog_loose = { version = "0.23" }
+# Cliente SSH em Rust puro, para a ativação automática do log no roteador.
+# `default-features = false` de propósito: o padrão traz `aws-lc-rs`, que pede
+# cmake e clang no `builder` do Dockerfile (hoje só tem `pkg-config` e
+# `libssl-dev`) e nasm no Windows. O `ring` já está na árvore por causa do
+# `rustls` do `reqwest`/`sea-orm`, então reaproveitá-lo não acrescenta nenhum
+# requisito de toolchain. `rsa` fica ligado porque roteador antigo ainda
+# apresenta host key `ssh-rsa` — sem ela o handshake nem começa.
+russh = { version = "0.62", default-features = false, features = ["ring", "rsa"] }
+# MD5 é o que o MAC-Telnet da MikroTik define para a resposta ao desafio de
+# autenticação — não é escolha de projeto, e trocá-lo tornaria o cliente
+# incompatível. Já estava na árvore como transitiva do `async-snmp` e do
+# `sqlx-postgres`, então promovê-la a direta não acrescenta download nenhum.
+md-5 = { version = "0.11" }
 
 # --- criptografia ---
 x25519-dalek = { version = "2", features = ["static_secrets"] }

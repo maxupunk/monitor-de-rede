@@ -20,10 +20,14 @@ use tokio::sync::mpsc;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
 use crate::{
-    dtos::logs::{BindSourceInput, LogEntry, LogStreamQuery, LogsQuery},
+    dtos::logs::{
+        BindSourceInput, LogEntry, LogStreamQuery, LogsQuery, ProvisionHintsResponse,
+        ProvisionLoggingInput, ProvisionLoggingResponse,
+    },
     services::{
         shared::errors::{AppError, AppResult},
         syslog::{
+            hints, mactelnet, provision,
             repository::{self, Cursor, LogFilters, LogQuery},
             resolver, snippets, LogsDb, SyslogService,
         },
@@ -181,21 +185,45 @@ async fn sources(State(ctx): State<AppContext>) -> AppResult<Response> {
         servico.sources.list(),
         servico.sources.unknown_count(),
         servico.ingestor.metrics().snapshot(),
+        servico.ingestor.resolver().nat(),
     )
     .await?;
     Ok(format::json(resposta)?)
 }
 
-/// `POST /api/logs/sources/{ip}/bind` — vincula (ou desvincula) um IP.
+/// `POST /api/logs/sources/{key}/bind` — vincula (ou desvincula) uma origem.
+///
+/// A chave é um IP ou um hostname prefixado (`host:MikroTik-CCR`), que é o que
+/// a tela devolve quando a origem chega mascarada por NAT.
 async fn bind_source(
     State(ctx): State<AppContext>,
-    Path(ip): Path<String>,
+    Path(chave): Path<String>,
     body: String,
 ) -> AppResult<Response> {
     let entrada: BindSourceInput = crate::dtos::optional_body(&body);
+    let por_hostname = chave.starts_with(resolver::HOSTNAME_BIND_PREFIX);
 
-    ip.parse::<std::net::IpAddr>()
-        .map_err(|_| AppError::Validation(format!("`{ip}` não é um endereço IP válido.")))?;
+    if !por_hostname {
+        let endereco = chave
+            .parse::<std::net::IpAddr>()
+            .map_err(|_| AppError::Validation(format!("`{chave}` não é um endereço IP válido.")))?;
+
+        // Vincular o gateway do NAT atribuiria **todos** os equipamentos atrás
+        // dele ao mesmo dispositivo. É o erro que a tela mais convida a
+        // cometer — a origem aparece como desconhecida e o seletor está logo
+        // ali — e o estrago (aba contaminada, alerta no alvo errado) só
+        // aparece depois. Recusar e dizer o caminho certo é mais barato.
+        if let Ok(servico) = service(&ctx) {
+            if servico.ingestor.resolver().nat().is_masked(endereco) {
+                return Err(AppError::business_rule(format!(
+                    "`{chave}` é o gateway do Docker, não o endereço de um equipamento: todos os \
+                     roteadores chegam por ele. Vincular aqui atribuiria o parque inteiro a um \
+                     dispositivo só. Vincule pelo nome que o equipamento envia no syslog, ou use \
+                     `network_mode: host` no compose para que o endereço real chegue."
+                )));
+            }
+        }
+    }
 
     if let Some(device_id) = entrada.device_id {
         if crate::models::devices::Entity::find_by_id(device_id)
@@ -207,15 +235,182 @@ async fn bind_source(
         }
     }
 
-    resolver::bind(&ctx.db, &ip, entrada.device_id).await?;
+    resolver::bind(&ctx.db, &chave, entrada.device_id).await?;
     // O resolvedor guarda a decisão por 30 s; sem invalidar, o operador
     // vincularia o IP e continuaria vendo "fonte desconhecida" por meio minuto.
     if let Ok(servico) = service(&ctx) {
         servico.ingestor.resolver().invalidate().await;
     }
     Ok(format::json(
-        serde_json::json!({ "sourceIp": ip, "deviceId": entrada.device_id }),
+        serde_json::json!({ "bindKey": chave, "deviceId": entrada.device_id }),
     )?)
+}
+
+/// `POST /api/logs/devices/{id}/provision` — entra no equipamento e configura
+/// o envio de syslog.
+///
+/// A credencial vem no corpo, é usada uma vez e não é gravada em lugar nenhum
+/// — ver a nota do módulo [`crate::services::syslog::provision`].
+async fn provision_device(
+    State(ctx): State<AppContext>,
+    Path(id): Path<i64>,
+    Json(entrada): Json<ProvisionLoggingInput>,
+) -> AppResult<Response> {
+    let dispositivo = crate::models::devices::Entity::find_by_id(id)
+        .one(&ctx.db)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Dispositivo não encontrado.".into()))?;
+
+    if entrada.username.trim().is_empty() {
+        return Err(AppError::validation("Informe o usuário de acesso."));
+    }
+    if entrada.password.is_empty() {
+        return Err(AppError::validation("Informe a senha de acesso."));
+    }
+
+    let protocolo = provision::Protocol::parse(&entrada.protocol)?;
+
+    // O IP é obrigatório para SSH e Telnet, e **não** para o MAC-Telnet: chegar
+    // a um equipamento sem IP utilizável é justamente para o que ele serve.
+    let host = match dispositivo
+        .ip_address
+        .as_deref()
+        .map(str::trim)
+        .filter(|valor| !valor.is_empty())
+    {
+        Some(texto) => Some(texto.parse::<std::net::IpAddr>().map_err(|_| {
+            AppError::business_rule(
+                "O endereço cadastrado neste dispositivo não é um IP válido. Corrija o cadastro \
+                 antes de ativar o log.",
+            )
+        })?),
+        None if protocolo.by_mac() => None,
+        None => {
+            return Err(AppError::business_rule(
+                "Este dispositivo não tem endereço IP cadastrado — não há para onde conectar. \
+                 Use MAC-Telnet se o equipamento for MikroTik e estiver na mesma rede local.",
+            ))
+        }
+    };
+    let vendor = entrada
+        .vendor
+        .as_deref()
+        .map(str::trim)
+        .filter(|valor| !valor.is_empty())
+        .map_or_else(
+            || hints::deduz_vendor(dispositivo.vendor.as_deref(), dispositivo.model.as_deref()).0,
+            str::to_owned,
+        );
+
+    // O MAC-Telnet endereça por MAC, e `devices` não guarda MAC: ele vem das
+    // interfaces coletadas por SNMP ou do ARP do discovery. A tela pode mandar
+    // um digitado à mão, que vence os dois.
+    let mac = match entrada.mac_address.as_deref().map(str::trim) {
+        Some(texto) if !texto.is_empty() => Some(mactelnet::MacAddress::parse(texto)?),
+        _ => hints::mac_conhecido(&ctx.db, &dispositivo)
+            .await?
+            .as_deref()
+            .map(mactelnet::MacAddress::parse)
+            .transpose()?,
+    };
+    if protocolo.by_mac() && mac.is_none() {
+        return Err(AppError::business_rule(
+            "O MAC-Telnet endereça o equipamento pelo MAC, e não há um conhecido para este \
+             dispositivo. Rode uma coleta SNMP ou uma descoberta na rede, ou informe o MAC na \
+             tela.",
+        ));
+    }
+
+    // `localhost` é o motivo de este saneamento existir: é o host da barra de
+    // endereços de quem abre a interface na própria máquina, é aceito por todo
+    // comando de configuração, e faz o roteador mandar o syslog para si mesmo —
+    // sem erro, sem aviso e sem nada chegando. Ver `hints::sanitiza_endereco`.
+    let server_address = hints::sanitiza_endereco(entrada.server_address.as_deref())
+        .or_else(|| {
+            host.and_then(hints::local_address_toward)
+                .map(|ip| ip.to_string())
+        })
+        .or_else(|| hints::sanitiza_endereco(Some(&endereco_do_servidor())))
+        .ok_or_else(|| {
+            AppError::business_rule(
+                "Não foi possível determinar o endereço deste servidor que o equipamento deve \
+                 usar. Preencha o campo \"Endereço deste servidor\" com o IP pelo qual o roteador \
+                 alcança o NetMonitor — `localhost` não serve, porque aponta o roteador para ele \
+                 mesmo.",
+            )
+        })?;
+
+    let server_port = snippets::published_port();
+    let servico = service(&ctx).ok();
+    let pedido = provision::ProvisionRequest {
+        // Só o MAC-Telnet chega aqui sem IP, e ele não usa este campo.
+        host: host.unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED)),
+        mac,
+        port: entrada.port.unwrap_or_else(|| protocolo.default_port()),
+        protocol: protocolo,
+        username: entrada.username.trim().to_owned(),
+        password: entrada.password.clone(),
+        vendor: vendor.clone(),
+        server_address: server_address.clone(),
+        server_port,
+    };
+
+    let resultado = provision::run(&pedido, servico.as_ref().map(|s| &s.sources), id).await?;
+
+    Ok(format::json(ProvisionLoggingResponse {
+        vendor,
+        server_address,
+        server_port,
+        commands: resultado.commands,
+        transcript: resultado.transcript,
+        confirmed: resultado.confirmed,
+    })?)
+}
+
+/// `GET /api/logs/devices/{id}/provision-hints` — o que a tela consegue
+/// preencher sozinha antes de pedir qualquer coisa ao operador.
+///
+/// Sonda portas e consulta o SNMP, então custa alguns segundos no pior caso.
+/// Vale: os três campos que ele preenche — endereço do servidor, meio de acesso
+/// e fabricante — eram chute, e chute errado falha em silêncio dentro do
+/// roteador.
+async fn provision_hints(
+    State(ctx): State<AppContext>,
+    Path(id): Path<i64>,
+) -> AppResult<Response> {
+    let dispositivo = crate::models::devices::Entity::find_by_id(id)
+        .one(&ctx.db)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Dispositivo não encontrado.".into()))?;
+
+    let detector = service(&ctx).map_or_else(
+        |_| crate::services::syslog::NatDetector::detect(),
+        |servico| servico.ingestor.resolver().nat().clone(),
+    );
+    let dicas = hints::collect(&ctx.db, &dispositivo, &detector).await?;
+
+    // O palpite do servidor pode falhar (dispositivo sem IP, rota inexistente).
+    // Aí vale o último recurso da `FRONTEND_ORIGIN`, com o mesmo crivo — que é
+    // o que impede `localhost` de voltar pela porta dos fundos.
+    let (server_address, server_address_source) = match dicas.server_address.clone() {
+        Some(endereco) => (Some(endereco), dicas.server_address_source),
+        None => (
+            hints::sanitiza_endereco(Some(&endereco_do_servidor())),
+            "origem configurada",
+        ),
+    };
+
+    Ok(format::json(ProvisionHintsResponse {
+        server_address,
+        server_address_source: server_address_source.to_owned(),
+        server_port: snippets::published_port(),
+        vendor: dicas.vendor,
+        vendor_source: dicas.vendor_source.to_owned(),
+        ssh_open: dicas.ssh_open,
+        telnet_open: dicas.telnet_open,
+        mac_address: dicas.mac_address,
+        layer2_reachable: dicas.layer2_reachable,
+    })?)
 }
 
 /// `GET /api/logs/setup-snippet` — comandos prontos por fabricante.
@@ -269,6 +464,8 @@ pub fn routes() -> Routes {
         .add("/sources", get(sources))
         .add("/sources/{ip}/bind", post(bind_source))
         .add("/setup-snippet", get(setup_snippet))
+        .add("/devices/{id}/provision", post(provision_device))
+        .add("/devices/{id}/provision-hints", get(provision_hints))
 }
 
 #[cfg(test)]

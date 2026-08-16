@@ -19,10 +19,14 @@
 pub mod bus;
 pub mod config;
 pub mod db;
+pub mod hints;
 pub mod ingest;
 pub mod listener;
+pub mod mactelnet;
 pub mod matcher;
+pub mod nat;
 pub mod parser;
+pub mod provision;
 pub mod queue;
 pub mod repository;
 pub mod resolver;
@@ -41,6 +45,7 @@ pub use config::SyslogConfig;
 pub use db::LogsDb;
 pub use ingest::Ingestor;
 pub use matcher::PatternMatcher;
+pub use nat::NatDetector;
 pub use queue::{IngestMetrics, IngestSnapshot, LogQueue};
 pub use sources::SourceRegistry;
 

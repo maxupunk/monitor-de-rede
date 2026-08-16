@@ -27,6 +27,8 @@ do desenho original mudaram; estão marcados com **⚠** onde aparecem.
 | ⚠ `RETENTION_LOGS_MAX_MB=4096` | medido: 290 B/linha com os 3 índices → ~301 MB/dia, ~2,1 GB em 7 dias. 2048 MB ficaria no limite; o teto folgado só custa disco quando o disco é usado |
 | ⚠ Regra de log casa **na ingestão** | regex sobre janela não usa índice; na ingestão são ~120 regex/s |
 | ⚠ IP de origem verificado no spike | se o Docker mascarar a origem, nada é gravado e não há erro visível |
+| ⚠ **O Docker mascara mesmo** (Fase 7) | medido em produção. Resolvedor cai para o `HOSTNAME`, limitador e lista de fontes separam por nome, e o *bind* do gateway é recusado. `network_mode: host` é a correção de raiz |
+| ⚠ Credencial de ativação não é persistida | guardar a senha de admin de 30 roteadores para poupar um trabalho pontual inverte o custo/benefício |
 
 ---
 
@@ -95,8 +97,10 @@ device_logs_fts                       FTS5 de conteúdo externo (Fase 5)
 GET  /api/logs                     deviceId, severity, facility, from, to, q, cursor, limit
 GET  /api/logs/stream              SSE, live tail filtrado
 GET  /api/logs/sources             fontes vistas
-POST /api/logs/sources/{ip}/bind   vincula IP a device
+POST /api/logs/sources/{key}/bind  vincula origem a device (IP ou host:<nome>)
 GET  /api/logs/setup-snippet       comandos por fabricante
+POST /api/logs/devices/{id}/provision        ativa o log (SSH/Telnet/MAC-Telnet)
+GET  /api/logs/devices/{id}/provision-hints  palpites para preencher a tela
 ```
 
 Sob `business_auth`. Envelope de cursor:
@@ -385,6 +389,147 @@ resolver: sem isso ele ficaria aberto para sempre depois do primeiro disparo.
 O catálogo cobrou uma invariante que a implementação inicial violou: severidade
 `info` tem cooldown zero. `log_config_changed` é rastro de auditoria, não
 problema — e um teste já existente pegou.
+
+### Fase 7 — Origem mascarada e ativação automática 🟢 Concluída
+
+Duas coisas que só apareceram com o sistema em produção. A primeira era o risco
+número um do projeto desde a Fase 1; a segunda é o passo que sobrou de manual.
+
+#### O IP de origem atrás do Docker
+
+**A publicação `514:5514` reescreve o remetente.** Era a pergunta 3 do spike,
+nunca medida, marcada como o item de maior risco — e a resposta é a ruim. O
+pacote chega vindo do gateway da bridge, e o parque inteiro vira uma origem só.
+
+O que quebrava junto, e que a leitura inicial não previa: não era só o vínculo.
+O limitador por fonte passava a valer para todos os aparelhos somados, e o
+*bind* manual — o escape que a Fase 4 criou justamente para casos assim —
+virava uma armadilha, porque vincular o gateway atribuiria todo o parque a um
+dispositivo. **O escape era mais perigoso que o problema.**
+
+- [x] `nat.rs`: gateway lido do `/proc/net/route`, faixas que o Docker aloca
+      sozinho (`172.16/12` e o `192.168.65/24` do Docker Desktop) e
+      `SYSLOG_NAT_GATEWAYS` para o que a heurística não cobre
+- [x] `resolver.rs`: origem mascarada **pula** o casamento por IP e o CIDR, e
+      resolve pelo `HOSTNAME`. Vínculo manual passa a aceitar chave
+      `host:<nome>`, que vence o vínculo por endereço
+- [x] `ingest.rs`: chave do limitador inclui o hostname quando há mascaramento
+- [x] `sources.rs`: uma linha por hostname em vez de uma por IP — sem isso não
+      há como vincular um equipamento sem vincular todos
+- [x] `POST /sources/{key}/bind` recusa o IP do gateway com o motivo e o
+      caminho certo, em vez de aceitar e contaminar
+- [x] `SYSLOG_EXTERNAL_PORT`: a porta dos comandos gerados deixa de ser fixa em
+      514. Em `network_mode: host` não há mapeamento e a porta real é a 5514 —
+      o snippet apontava para o vazio
+- [x] Aviso nas telas `/logs`, no diálogo de origens e na aba do dispositivo,
+      antes do aviso de "origem desconhecida": ali a instrução "vincule cada
+      endereço" está errada, e segui-la é que faz o estrago
+- [x] `docker-compose.yml` documenta `network_mode: host` como a correção de
+      raiz
+
+Só a heurística de faixa não bastaria, e só o `/proc/net/route` também não: o
+primeiro erra em sub-rede fora do pool, o segundo não existe fora do Linux.
+Somados com a variável de escape, os três cobrem o que se sabe cobrir.
+
+**O que isto não conserta.** Equipamento que não manda `HOSTNAME` continua
+indistinguível atrás do NAT — e RouterOS sem `bsd-syslog=yes` é exatamente esse
+caso. A recomendação da ADR 008 deixou de ser conforto: virou o que separa um
+aparelho identificável de um anônimo.
+
+#### Ativação automática do log no equipamento
+
+- [x] `provision.rs`: sessão SSH (`russh`) ou Telnet, shell com PTY, comandos
+      enviados um por linha
+- [x] `POST /api/logs/devices/{id}/provision`, com a credencial vivendo só na
+      requisição
+- [x] `snippets.rs` passou a expor `commands_for` — a receita da tela e a do SSH
+      são a mesma lista, fixado em teste
+- [x] Confirmação de chegada: depois dos comandos, o servidor espera até 12 s
+      pela primeira mensagem do dispositivo. "Comandos aceitos" sem log chegando
+      é justamente o desfecho que este recurso existe para evitar
+- [x] `SyslogAutoSetupDialog.vue` e o botão na aba **Logs** do
+      `DeviceDetailPage`
+
+**A credencial não é guardada, e isso é decisão, não pendência.** Guardar a
+senha de administrador de trinta roteadores faria deste sistema o alvo mais
+valioso da rede que ele monitora, para poupar um trabalho que se faz uma vez por
+aparelho. O custo aceito é ter de digitar de novo ao reconfigurar; a tela avisa
+antes de pedir.
+
+Duas escolhas que a implementação cobrou:
+
+- **Shell com PTY, não `exec`.** O canal `exec` do SSH roda um comando e fecha,
+  e `configure` do EdgeOS é uma sessão com estado que os `set` seguintes
+  precisam encontrar aberta. O shell serve aos quatro fabricantes e ao Telnet
+  com o mesmo código.
+- **O fim de um comando é detectado por silêncio, não por prompt.** Cada
+  fabricante tem o seu, ele muda com o hostname, e `>`/`#` aparecem dentro da
+  saída. É frouxo de propósito: um falso "acabou" só antecipa o próximo comando,
+  enquanto um prompt não reconhecido travaria a sessão até o teto.
+
+#### Ajustes de campo (mesma fase, depois do primeiro uso real)
+
+O recurso subiu e cinco coisas apareceram só com alguém usando:
+
+- [x] **`localhost` ia para dentro do roteador.** A tela mandava
+      `window.location.hostname`, e quem abre a interface em
+      `http://localhost:3333` gravava `remote=localhost` no equipamento — que
+      passava a enviar o syslog para si mesmo. Sem erro, sem aviso, sem nada
+      chegando. Agora há campo próprio, preenchido pelo servidor via `connect`
+      de UDP até o equipamento (consulta a tabela de rotas sem transmitir
+      pacote), e loopback/link-local são recusados nas duas pontas
+- [x] **A porta padrão é setada ao trocar de protocolo**, não deixada em branco
+      com `placeholder`: campo vazio obriga a saber o padrão de cor para
+      conferir se está certo
+- [x] **`GET /devices/{id}/provision-hints`**: sonda 22 e 23 em paralelo, lê o
+      `sysDescr` por SNMP quando ele está ligado, e busca o MAC. A tela abre
+      preenchida e diz **de onde** veio cada palpite — chute apresentado como
+      informação é pior que campo vazio
+- [x] **Linha de teste depois da configuração.** Era a ambiguidade que fazia o
+      desfecho parecer falha: as regras enviadas cobrem tópicos que só falam
+      quando algo acontece, então silêncio não distinguia "roteador quieto" de
+      "firewall bloqueando". Agora o equipamento é mandado emitir uma linha na
+      severidade que ele acabou de encaminhar, e silêncio passa a significar
+      caminho bloqueado
+- [x] **A senha só é descartada ao fechar o diálogo.** Limpá-la logo após
+      aplicar deixava o campo vazio marcado como obrigatório ao lado da
+      mensagem de sucesso, e obrigava a redigitar para reaplicar. O botão de
+      destaque depois do resultado passou a ser "Concluir"; "Aplicar de novo"
+      ficou em segundo plano
+- [x] **MAC-Telnet** para MikroTik e OpenWRT — ver abaixo
+
+#### MAC-Telnet
+
+Acesso por MAC, sem IP, sobre UDP/20561: é o que alcança o equipamento cujo IP
+está errado, ausente ou fora do alcance deste servidor.
+
+- [x] `mactelnet.rs`: moldura, pacotes de controle, desafio MD5 e sessão
+- [x] `Protocol::MacTelnet` no mesmo laço de comandos do SSH e do Telnet
+- [x] O MAC vem de `device_interfaces` (SNMP) ou de `discovery_results` (ARP) —
+      **`devices` não tem coluna de MAC**, o que o `macAddress` da aba "Visão
+      Geral" mascarava mostrando "Não cadastrado" para todo mundo
+- [x] Sem IP deixa de ser impedimento para este protocolo, e passa a ser para os
+      outros dois com a mensagem certa
+
+Duas ressalvas que precisam sobreviver a este documento:
+
+- **Difusão não atravessa a ponte do Docker.** No arranjo padrão do compose o
+  pacote não chega ao equipamento. `nat.rs` sabe dizer se está nesse caso
+  (`bridged_container`) e a tela avisa antes de deixar escolher o meio. Só
+  `network_mode: host` torna o MAC-Telnet utilizável.
+- **O protocolo não é documentado pelo fabricante**, e o que está aqui vem da
+  implementação de referência de código aberto. A montagem e a leitura dos
+  pacotes têm teste unitário; o *handshake* completo contra um RouterOS real
+  **não foi verificado** — não há equipamento neste ambiente. Falha aparece como
+  sessão que não autentica, não como configuração errada gravada no aparelho.
+
+**A chave de host não é verificada.** Não há `known_hosts` a consultar numa
+conexão única, e recusar por não conhecer tornaria o recurso inútil. O que torna
+o custo aceitável: credencial de uso único, alvo na rede local que este mesmo
+sistema já monitora, e quem consegue se interpor ali tem caminhos mais curtos.
+`russh` entra com `default-features = false` e o backend `ring` — o padrão
+(`aws-lc-rs`) exigiria cmake e clang no `builder` do Dockerfile, e o `ring` já
+está na árvore pelo `rustls`.
 
 ---
 

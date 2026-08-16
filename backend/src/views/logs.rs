@@ -13,13 +13,14 @@ use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySe
 
 use crate::{
     dtos::logs::{
-        LogEntry, LogIngestMetrics, LogPageMeta, LogPageResponse, LogSourceCandidate,
-        LogSourceEntry, LogSourcesResponse,
+        LogEntry, LogIngestMetrics, LogNatDiagnostics, LogPageMeta, LogPageResponse,
+        LogSourceCandidate, LogSourceEntry, LogSourcesResponse,
     },
     models::{_entities::devices, logs::device_logs},
     services::{
         shared::errors::AppResult,
         syslog::{
+            nat::NatDetector,
             queue::IngestSnapshot,
             repository::{LogPage, LogQuery},
             sources::{SeenSource, SourceKind},
@@ -141,7 +142,9 @@ pub async fn serialize_sources(
     fontes: Vec<SeenSource>,
     unknown_count: usize,
     metrics: IngestSnapshot,
+    nat: &NatDetector,
 ) -> AppResult<LogSourcesResponse> {
+    let masked_count = fontes.iter().filter(|fonte| fonte.masked).count();
     let ids: HashSet<i64> = fontes
         .iter()
         .flat_map(|fonte| fonte.device_id.into_iter().chain(fonte.candidates.clone()))
@@ -172,6 +175,8 @@ pub async fn serialize_sources(
                     })
                     .collect(),
                 source_ip: fonte.source_ip,
+                bind_key: fonte.bind_key,
+                masked: fonte.masked,
                 device_id: fonte.device_id,
                 hostname: fonte.hostname,
                 message_count: fonte.message_count,
@@ -189,6 +194,11 @@ pub async fn serialize_sources(
             dropped_rate_limit: metrics.dropped_rate_limit,
             dropped_unknown_source: metrics.dropped_unknown_source,
             dropped_oversized: metrics.dropped_oversized,
+        },
+        nat: LogNatDiagnostics {
+            masked_count,
+            containerized: nat.containerized,
+            gateways: nat.gateways(),
         },
     })
 }

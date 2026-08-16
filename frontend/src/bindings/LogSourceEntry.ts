@@ -6,6 +6,18 @@
 export type LogSourceEntry = {
   sourceIp: string
   /**
+   * A chave a devolver no `bind` — o IP, ou `host:<hostname>` quando a
+   * origem chega mascarada por NAT. A tela não monta esta chave sozinha: só
+   * o servidor sabe se o endereço é gateway.
+   */
+  bindKey: string
+  /**
+   * Se o `sourceIp` é o gateway de um NAT em vez do remetente real. Quando
+   * verdadeiro, o endereço é o mesmo para todos os equipamentos e só o
+   * hostname os separa.
+   */
+  masked: boolean
+  /**
    * `device` | `network` | `ambiguous` | `unknown`.
    */
   kind: string

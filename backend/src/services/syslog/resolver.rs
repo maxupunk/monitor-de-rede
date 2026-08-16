@@ -20,6 +20,15 @@
 //! resolvedor **não adivinha**. Vincular ao dispositivo errado é pior do que
 //! não vincular — contamina a aba de logs do aparelho e, na Fase 6, dispararia
 //! alerta no alvo errado.
+//!
+//! **Origem mascarada por NAT inverte a ordem.** Quando o Docker reescreve o
+//! remetente para o gateway da bridge (ver [`super::nat`]), o `source_ip` deixa
+//! de identificar coisa alguma: o parque inteiro chega com um endereço só. Aí
+//! os passos 1 e 3 não são apenas inúteis, são perigosos — casar pelo IP
+//! atribuiria **todos** os roteadores ao mesmo dispositivo. Nesse caso o
+//! resolvedor pula direto para o hostname, que é a única coisa que ainda
+//! distingue um remetente do outro, e o vínculo manual passa a ser por nome
+//! (`host:<hostname>`) em vez de por endereço.
 
 use std::{
     collections::HashMap,
@@ -32,6 +41,7 @@ use ipnet::IpNet;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use tokio::sync::RwLock;
 
+use super::nat::NatDetector;
 use crate::{
     models::{
         _entities::{devices, networks},
@@ -47,6 +57,22 @@ use crate::{
 /// uma tabela nova custaria migration, entrada no `CREATION_ORDER` e uma FK que
 /// não pode existir (o log mora no outro banco).
 pub const BINDINGS_KEY: &str = "syslog.source_bindings";
+
+/// Prefixo que transforma uma chave de vínculo em vínculo **por hostname**.
+///
+/// O mapa é um só, `chave -> device_id`, com dois formatos de chave: um IP puro
+/// (`192.168.88.1`) ou um nome prefixado (`host:MikroTik-CCR`). Um mapa
+/// separado custaria uma segunda chave em `system_settings`, uma segunda
+/// leitura por resolução e uma segunda rota de escrita para responder à mesma
+/// pergunta. O prefixo não colide com IP porque `:` não aparece em IPv4 e IPv6
+/// nunca começa por `host`.
+pub const HOSTNAME_BIND_PREFIX: &str = "host:";
+
+/// Monta a chave de vínculo de um hostname.
+#[must_use]
+pub fn hostname_bind_key(hostname: &str) -> String {
+    format!("{HOSTNAME_BIND_PREFIX}{}", hostname.trim())
+}
 
 /// Por quanto tempo uma resolução vale sem reconsultar o banco.
 ///
@@ -93,12 +119,31 @@ impl Resolution {
 #[derive(Clone, Default)]
 pub struct Resolver {
     cache: Arc<RwLock<HashMap<String, (Resolution, Instant)>>>,
+    /// Quem sabe dizer se um endereço é gateway de NAT em vez de remetente.
+    nat: NatDetector,
 }
 
 impl Resolver {
+    /// Detecta o NAT do ambiente uma vez e guarda o resultado — o gateway de um
+    /// container não muda enquanto ele vive.
     #[must_use]
     pub fn create() -> Self {
-        Self::default()
+        Self::with_nat(NatDetector::detect())
+    }
+
+    #[must_use]
+    pub fn with_nat(nat: NatDetector) -> Self {
+        Self {
+            cache: Arc::default(),
+            nat,
+        }
+    }
+
+    /// O detector, para o `ingest` separar limitador e lista de fontes sem
+    /// refazer a conta.
+    #[must_use]
+    pub const fn nat(&self) -> &NatDetector {
+        &self.nat
     }
 
     /// Resolve, usando o cache quando ele ainda vale.
@@ -121,7 +166,7 @@ impl Resolver {
                 return Ok(resolucao.clone());
             }
         }
-        let resolucao = consulta(db, origem, hostname).await?;
+        let resolucao = consulta(db, origem, hostname, &self.nat).await?;
         self.cache
             .write()
             .await
@@ -141,21 +186,36 @@ async fn consulta(
     db: &DatabaseConnection,
     origem: IpAddr,
     hostname: Option<&str>,
+    nat: &NatDetector,
 ) -> AppResult<Resolution> {
     let texto = origem.to_string();
+    let nome = hostname.map(str::trim).filter(|valor| !valor.is_empty());
+    let mapa = bindings(db).await?;
 
     // O *bind* manual vence tudo: é a palavra do operador sobre um caso que a
     // heurística errou ou não soube decidir. Sem esta precedência, um roteador
     // com `src-address` diferente continuaria caindo em "desconhecida" mesmo
     // depois de vinculado na tela.
-    if let Some(device_id) = bindings(db).await?.get(&texto).copied() {
-        if devices::Entity::find_by_id(device_id)
-            .one(db)
-            .await?
-            .is_some()
-        {
-            return Ok(Resolution::Device(device_id));
+    //
+    // O vínculo por nome vem antes do vínculo por IP porque é o mais
+    // específico dos dois: atrás de NAT o IP é o mesmo para todo mundo, e um
+    // vínculo de endereço herdado de antes do mascaramento arrastaria o parque
+    // inteiro para um dispositivo só.
+    if let Some(nome) = nome {
+        if let Some(id) = vinculado(db, &mapa, &hostname_bind_key(nome)).await? {
+            return Ok(Resolution::Device(id));
         }
+    }
+
+    // Atrás de NAT o endereço de origem não identifica ninguém: pular os passos
+    // que dependem dele é o que impede o parque inteiro de virar um dispositivo
+    // só. Sobra o hostname — e, sem ele, a fonte é honestamente desconhecida.
+    if nat.is_masked(origem) {
+        return Ok(por_hostname(db, nome).await?.unwrap_or(Resolution::Unknown));
+    }
+
+    if let Some(id) = vinculado(db, &mapa, &texto).await? {
+        return Ok(Resolution::Device(id));
     }
 
     let candidatos = devices::Entity::find()
@@ -172,14 +232,8 @@ async fn consulta(
     // O roteador pode enviar por um IP que não é o cadastrado (RouterOS com
     // `src-address`, interface secundária). O nome que ele se dá continua
     // valendo.
-    if let Some(nome) = hostname.filter(|valor| !valor.is_empty()) {
-        let por_nome = devices::Entity::find()
-            .filter(devices::Column::Name.eq(nome))
-            .all(db)
-            .await?;
-        if por_nome.len() == 1 {
-            return Ok(Resolution::Device(por_nome[0].id));
-        }
+    if let Some(resolucao) = por_hostname(db, nome).await? {
+        return Ok(resolucao);
     }
 
     // Sem dispositivo, mas dentro de uma rede que este sistema administra: é
@@ -189,6 +243,46 @@ async fn consulta(
     }
 
     Ok(Resolution::Unknown)
+}
+
+/// O dispositivo de um vínculo manual, se a chave existir **e** o dispositivo
+/// ainda existir. Vínculo órfão (dispositivo apagado) é ignorado em silêncio:
+/// devolver o id apagado gravaria log apontando para lugar nenhum.
+async fn vinculado(
+    db: &DatabaseConnection,
+    mapa: &HashMap<String, i64>,
+    chave: &str,
+) -> AppResult<Option<i64>> {
+    let Some(device_id) = mapa.get(chave).copied() else {
+        return Ok(None);
+    };
+    Ok(devices::Entity::find_by_id(device_id)
+        .one(db)
+        .await?
+        .map(|dispositivo| dispositivo.id))
+}
+
+/// Casa o `HOSTNAME` do syslog com `devices.name`. Só decide quando o nome é
+/// de um dispositivo só — dois aparelhos com o mesmo nome empatam, e chutar
+/// aqui é o mesmo erro de chutar no IP repetido.
+async fn por_hostname(
+    db: &DatabaseConnection,
+    hostname: Option<&str>,
+) -> AppResult<Option<Resolution>> {
+    let Some(nome) = hostname else {
+        return Ok(None);
+    };
+    let por_nome = devices::Entity::find()
+        .filter(devices::Column::Name.eq(nome))
+        .all(db)
+        .await?;
+    Ok(match por_nome.len() {
+        1 => Some(Resolution::Device(por_nome[0].id)),
+        0 => None,
+        _ => Some(Resolution::Ambiguous(
+            por_nome.into_iter().map(|d| d.id).collect(),
+        )),
+    })
 }
 
 /// Mesmo IP em mais de um dispositivo: desempata pelo CIDR da rede de cada um.
@@ -251,22 +345,21 @@ pub async fn bindings(db: &DatabaseConnection) -> AppResult<HashMap<String, i64>
         .unwrap_or_default())
 }
 
-/// Grava (ou remove, com `device_id` nulo) o vínculo manual de um IP.
+/// Grava (ou remove, com `device_id` nulo) o vínculo manual de uma origem.
+///
+/// A chave é um IP (`192.168.88.1`) ou um hostname prefixado
+/// (`host:MikroTik-CCR`) — ver [`HOSTNAME_BIND_PREFIX`].
 ///
 /// # Errors
 ///
 /// Propaga erro do banco.
-pub async fn bind(
-    db: &DatabaseConnection,
-    source_ip: &str,
-    device_id: Option<i64>,
-) -> AppResult<()> {
+pub async fn bind(db: &DatabaseConnection, chave: &str, device_id: Option<i64>) -> AppResult<()> {
     use sea_orm::{ActiveModelTrait, ActiveValue::Set};
 
     let mut mapa = bindings(db).await?;
     match device_id {
-        Some(id) => mapa.insert(source_ip.to_owned(), id),
-        None => mapa.remove(source_ip),
+        Some(id) => mapa.insert(chave.to_owned(), id),
+        None => mapa.remove(chave),
     };
     let valor = serde_json::to_string(&mapa)
         .map_err(|error| crate::services::shared::errors::AppError::Internal(error.into()))?;
@@ -303,6 +396,159 @@ fn cidr_contem(cidr: &str, endereco: IpAddr) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use migration::{Migrator, MigratorTrait};
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+
+    async fn inventario() -> DatabaseConnection {
+        let db = sea_orm::Database::connect(
+            sea_orm::ConnectOptions::new("sqlite::memory:".to_owned())
+                .max_connections(1)
+                .min_connections(1)
+                .to_owned(),
+        )
+        .await
+        .expect("banco principal");
+        Migrator::up(&db, None).await.expect("migrations");
+        db
+    }
+
+    async fn dispositivo(db: &DatabaseConnection, nome: &str, ip: &str) -> i64 {
+        devices::ActiveModel {
+            name: Set(nome.to_owned()),
+            r#type: Set("router".to_owned()),
+            status: Set("online".to_owned()),
+            ip_address: Set(Some(ip.to_owned())),
+            ..Default::default()
+        }
+        .insert(db)
+        .await
+        .expect("dispositivo")
+        .id
+    }
+
+    fn ip(texto: &str) -> IpAddr {
+        texto.parse().expect("ip do teste")
+    }
+
+    /// Resolve sem cache, desembrulhando o erro de banco.
+    async fn resolve(db: &DatabaseConnection, origem: &str, hostname: Option<&str>) -> Resolution {
+        consulta(db, ip(origem), hostname, &nat())
+            .await
+            .expect("consulta")
+    }
+
+    /// Detector sem nada declarado no ambiente — a heurística das faixas de
+    /// bridge basta para `172.17.0.1` ser reconhecido como gateway, e é
+    /// justamente ela que precisa ser exercitada aqui.
+    fn nat() -> NatDetector {
+        NatDetector::none()
+    }
+
+    #[tokio::test]
+    async fn atras_do_nat_o_ip_de_origem_e_ignorado_e_o_hostname_decide() {
+        // O cenário real: dois roteadores, um único IP de origem. Casar pelo
+        // endereço atribuiria os dois ao mesmo dispositivo.
+        let db = inventario().await;
+        let borda = dispositivo(&db, "MikroTik-Borda", "192.168.88.1").await;
+        let filial = dispositivo(&db, "MikroTik-Filial", "192.168.99.1").await;
+
+        assert_eq!(
+            resolve(&db, "172.17.0.1", Some("MikroTik-Borda")).await,
+            Resolution::Device(borda)
+        );
+        assert_eq!(
+            resolve(&db, "172.17.0.1", Some("MikroTik-Filial")).await,
+            Resolution::Device(filial)
+        );
+    }
+
+    #[tokio::test]
+    async fn atras_do_nat_o_cidr_nao_serve_de_rede_conhecida() {
+        // Sem esta regra bastaria alguém cadastrar `172.17.0.0/16` para todo
+        // log do parque virar "rede conhecida" sem vínculo nenhum — pior que
+        // descartar, porque some da lista de pendências.
+        let db = inventario().await;
+        networks::ActiveModel {
+            name: Set("bridge do docker".to_owned()),
+            cidr: Set("172.17.0.0/16".to_owned()),
+            ..Default::default()
+        }
+        .insert(&db)
+        .await
+        .expect("rede");
+
+        assert_eq!(resolve(&db, "172.17.0.1", None).await, Resolution::Unknown);
+    }
+
+    #[tokio::test]
+    async fn atras_do_nat_o_vinculo_e_por_nome_e_o_de_ip_nao_contamina() {
+        // O operador que já tinha vinculado o IP do gateway antes do
+        // mascaramento ser detectado não pode arrastar o parque inteiro.
+        let db = inventario().await;
+        let errado = dispositivo(&db, "Vizinho", "10.0.0.9").await;
+        let certo = dispositivo(&db, "MikroTik-Borda", "192.168.88.1").await;
+        bind(&db, "172.17.0.1", Some(errado))
+            .await
+            .expect("bind ip");
+        bind(
+            &db,
+            &hostname_bind_key("Roteador-Sem-Cadastro"),
+            Some(certo),
+        )
+        .await
+        .expect("bind hostname");
+
+        // O vínculo de IP do gateway é ignorado.
+        assert_eq!(resolve(&db, "172.17.0.1", None).await, Resolution::Unknown);
+        // O de hostname vale, inclusive para nome que não é de dispositivo.
+        assert_eq!(
+            resolve(&db, "172.17.0.1", Some("Roteador-Sem-Cadastro")).await,
+            Resolution::Device(certo)
+        );
+    }
+
+    #[tokio::test]
+    async fn fora_do_nat_a_ordem_antiga_continua_valendo() {
+        let db = inventario().await;
+        let id = dispositivo(&db, "MikroTik-Borda", "192.168.88.1").await;
+        assert_eq!(
+            resolve(&db, "192.168.88.1", None).await,
+            Resolution::Device(id),
+            "o IP continua sendo o caminho preferencial fora do NAT"
+        );
+    }
+
+    #[tokio::test]
+    async fn hostname_repetido_empata_em_vez_de_chutar() {
+        // Dois aparelhos com o mesmo nome é o mesmo problema do IP repetido.
+        let db = inventario().await;
+        let a = dispositivo(&db, "roteador", "10.0.0.1").await;
+        let b = dispositivo(&db, "roteador", "10.0.1.1").await;
+        let resolucao = resolve(&db, "172.17.0.1", Some("roteador")).await;
+        assert_eq!(resolucao, Resolution::Ambiguous(vec![a, b]));
+        assert_eq!(resolucao.device_id(), None, "ambígua não chuta vínculo");
+    }
+
+    #[tokio::test]
+    async fn vinculo_para_dispositivo_apagado_e_ignorado() {
+        let db = inventario().await;
+        bind(&db, &hostname_bind_key("fantasma"), Some(4242))
+            .await
+            .expect("bind");
+        assert_eq!(
+            resolve(&db, "172.17.0.1", Some("fantasma")).await,
+            Resolution::Unknown,
+            "id órfão gravaria log apontando para lugar nenhum"
+        );
+    }
+
+    #[test]
+    fn a_chave_de_hostname_nao_colide_com_ip() {
+        assert_eq!(hostname_bind_key(" MikroTik "), "host:MikroTik");
+        assert!(hostname_bind_key("x").starts_with(HOSTNAME_BIND_PREFIX));
+        assert!("192.168.1.1".parse::<IpAddr>().is_ok());
+        assert!(hostname_bind_key("192.168.1.1").parse::<IpAddr>().is_err());
+    }
 
     #[test]
     fn o_cidr_decide_a_pertinencia_e_lixo_no_cadastro_nao_derruba() {

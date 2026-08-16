@@ -591,6 +591,65 @@
 
           <!-- Aba Logs: syslog recebido deste dispositivo -->
           <v-window-item value="logs">
+            <!--
+              Chamada para ação enquanto o equipamento nunca enviou nada. É o
+              estado em que a aba nasce para todo dispositivo recém-cadastrado,
+              e sem esta explicação ela parece quebrada em vez de vazia.
+            -->
+            <v-alert
+              v-if="logsNaoConfigurados"
+              type="info"
+              variant="tonal"
+              border="start"
+              class="mb-4"
+            >
+              <div class="d-flex align-center flex-wrap ga-3">
+                <div class="flex-grow-1">
+                  <div class="font-weight-bold mb-1">
+                    Este equipamento ainda não envia log para o servidor.
+                  </div>
+                  O envio de syslog é configurado no próprio roteador. O servidor pode fazer isso
+                  sozinho: ele acessa o equipamento, aplica os comandos e confirma a chegada da
+                  primeira mensagem.
+                </div>
+                <div class="d-flex ga-2">
+                  <v-btn color="primary" variant="flat" @click="autoSetupDialog = true">
+                    <v-icon start>mdi-flash</v-icon>
+                    Ativar log
+                  </v-btn>
+                  <v-btn color="primary" variant="tonal" @click="setupDialog = true">
+                    Ver comandos
+                  </v-btn>
+                </div>
+              </div>
+            </v-alert>
+
+            <!--
+              Mascaramento do Docker: o log pode estar chegando e mesmo assim
+              não aparecer aqui, porque a origem não resolve para este
+              dispositivo. Sem este aviso o operador refaz a configuração do
+              roteador, que já estava certa.
+            -->
+            <v-alert
+              v-if="logsStore.natMasking"
+              type="warning"
+              variant="tonal"
+              border="start"
+              class="mb-4"
+              density="comfortable"
+            >
+              <div class="font-weight-bold mb-1">
+                O Docker está reescrevendo o endereço de origem das mensagens.
+              </div>
+              Todos os equipamentos chegam como
+              <strong>{{
+                (logsStore.nat?.gateways ?? []).join(', ') || 'o gateway da bridge'
+              }}</strong
+              >, então o vínculo passa a depender do nome que cada um envia no syslog. Abra
+              <RouterLink to="/logs">Logs</RouterLink> para vincular por nome, ou publique o
+              servidor com <code>network_mode: host</code> para o endereço real chegar.
+            </v-alert>
+
             <div class="d-flex align-center flex-wrap ga-3 mb-4">
               <v-select
                 v-model="logSeverity"
@@ -618,6 +677,15 @@
                 @update:model-value="applyLogFilters"
               ></v-select>
               <v-spacer></v-spacer>
+              <!--
+                Continua disponível depois de configurado: é por aqui que se
+                reaplica a configuração num roteador que foi trocado ou
+                resetado.
+              -->
+              <v-btn color="primary" variant="tonal" size="small" @click="autoSetupDialog = true">
+                <v-icon start>mdi-flash</v-icon>
+                <span class="hidden-xs">Ativar log</span>
+              </v-btn>
               <v-btn
                 :color="logsStore.tailing ? 'success' : 'primary'"
                 :variant="logsStore.tailing ? 'flat' : 'tonal'"
@@ -1044,6 +1112,15 @@
       :device-to-edit="detailStore.device"
       @saved="onDeviceSaved"
     />
+
+    <!-- Modais da aba Logs -->
+    <SyslogAutoSetupDialog
+      v-model="autoSetupDialog"
+      :device-id="deviceId"
+      :device-name="detailStore.device?.name ?? ''"
+      :host="detailStore.device?.ipAddress"
+    />
+    <SyslogSetupDialog v-model="setupDialog" />
   </div>
 </template>
 
@@ -1083,6 +1160,8 @@ import {
 
 import { useInfiniteList } from '@/composables/useInfiniteList'
 import LogTable from '@/components/logs/LogTable.vue'
+import SyslogAutoSetupDialog from '@/components/logs/SyslogAutoSetupDialog.vue'
+import SyslogSetupDialog from '@/components/logs/SyslogSetupDialog.vue'
 import { useLogsStore, SEVERITY_OPTIONS, WINDOW_OPTIONS } from '@/stores/logs'
 
 interface DeviceEventItem {
@@ -1217,12 +1296,36 @@ function applyLogFilters(): void {
   if (estavaAoVivo) logsStore.startTail()
 }
 
+const autoSetupDialog = ref(false)
+const setupDialog = ref(false)
+
+/**
+ * Se este equipamento nunca enviou log.
+ *
+ * "Sem registros na janela" não basta: um roteador configurado pode passar
+ * horas em silêncio, e oferecer "ative o log" a quem já ativou seria ruído. O
+ * critério inclui a lista de origens — se alguma já resolveu para este
+ * dispositivo, ele está configurado, ainda que a janela atual esteja vazia.
+ *
+ * Enquanto as origens não carregaram, nada é afirmado: um aviso que aparece e
+ * some depois de meio segundo é pior do que aparecer meio segundo mais tarde.
+ */
+const logsNaoConfigurados = computed(() => {
+  if (!logsStore.sourcesLoaded) return false
+  if (logsStore.sources.some((fonte) => fonte.deviceId === deviceId.value)) return false
+  return logsStore.isEmpty
+})
+
 // A store é compartilhada com a tela `/logs`: entrar na aba sem fixar o
 // dispositivo mostraria o log do parque inteiro dentro da página de um
 // aparelho. Sair da aba desliga o tail, que senão seguiria empilhando.
 watch(activeTab, (aba, anterior) => {
-  if (aba === 'logs') applyLogFilters()
-  else if (anterior === 'logs') logsStore.stopTail()
+  if (aba === 'logs') {
+    applyLogFilters()
+    // As origens dizem se este equipamento já é conhecido pela ingestão, e o
+    // diagnóstico de NAT vem junto na mesma resposta.
+    void logsStore.fetchSources()
+  } else if (anterior === 'logs') logsStore.stopTail()
 })
 
 onUnmounted(() => logsStore.stopTail())

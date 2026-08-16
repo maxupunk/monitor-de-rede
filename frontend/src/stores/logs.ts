@@ -5,9 +5,19 @@ import { apiService } from '@/services/apiService'
 import type { LogEntry } from '@/bindings/LogEntry'
 import type { LogSourcesResponse } from '@/bindings/LogSourcesResponse'
 import type { LogSourceEntry } from '@/bindings/LogSourceEntry'
+import type { LogNatDiagnostics } from '@/bindings/LogNatDiagnostics'
+import type { ProvisionHintsResponse } from '@/bindings/ProvisionHintsResponse'
+import type { ProvisionLoggingResponse } from '@/bindings/ProvisionLoggingResponse'
 import type { SetupGuide } from '@/bindings/SetupGuide'
 
-export type { LogEntry, LogSourceEntry, SetupGuide }
+export type {
+  LogEntry,
+  LogSourceEntry,
+  LogNatDiagnostics,
+  ProvisionHintsResponse,
+  ProvisionLoggingResponse,
+  SetupGuide,
+}
 
 export interface LogFilters {
   deviceId: number | null
@@ -138,12 +148,14 @@ export const useLogsStore = defineStore('logs', () => {
   const sources = ref<LogSourceEntry[]>([])
   const unknownCount = ref(0)
   const sourcesLoaded = ref(false)
+  const nat = ref<LogNatDiagnostics | null>(null)
 
   async function fetchSources(): Promise<boolean> {
     try {
       const response = await apiService.get<LogSourcesResponse>('/logs/sources')
       sources.value = response.data ?? []
       unknownCount.value = response.unknownCount ?? 0
+      nat.value = response.nat ?? null
       sourcesLoaded.value = true
       return true
     } catch {
@@ -153,15 +165,86 @@ export const useLogsStore = defineStore('logs', () => {
     }
   }
 
-  async function bindSource(sourceIp: string, deviceId: number | null): Promise<boolean> {
+  /**
+   * Se o Docker está reescrevendo o endereço de origem das mensagens.
+   *
+   * Quando é verdade, todos os roteadores chegam com o mesmo IP e só o hostname
+   * os separa — o aviso da tela existe para o operador não tentar resolver isso
+   * vinculando o endereço do gateway, que atribuiria o parque inteiro a um
+   * dispositivo só.
+   */
+  const natMasking = computed(() => (nat.value?.maskedCount ?? 0) > 0)
+
+  /**
+   * `key` é o `bindKey` da origem, não o IP: atrás de NAT ele é `host:<nome>`.
+   * Montar a chave na tela duplicaria a decisão de "isto está mascarado?", que
+   * só o servidor sabe tomar.
+   */
+  async function bindSource(key: string, deviceId: number | null): Promise<boolean> {
     try {
-      await apiService.post(`/logs/sources/${encodeURIComponent(sourceIp)}/bind`, { deviceId })
+      await apiService.post(`/logs/sources/${encodeURIComponent(key)}/bind`, { deviceId })
       await fetchSources()
       list.reset()
       return true
     } catch {
       return false
     }
+  }
+
+  // --- ativação automática --------------------------------------------------
+
+  /**
+   * O que o servidor consegue descobrir sozinho sobre o equipamento.
+   *
+   * Sonda as portas de acesso e consulta o SNMP, então demora alguns segundos
+   * no pior caso — a tela abre antes e se preenche quando chega.
+   */
+  async function fetchProvisionHints(deviceId: number): Promise<ProvisionHintsResponse | null> {
+    try {
+      return await apiService.get<ProvisionHintsResponse>(
+        `/logs/devices/${deviceId}/provision-hints`
+      )
+    } catch {
+      // Palpite é conveniência: sem ele a tela ainda funciona, só exige que o
+      // operador preencha à mão.
+      return null
+    }
+  }
+
+  /**
+   * Manda o servidor entrar no equipamento e configurar o envio de syslog.
+   *
+   * A credencial vai no corpo e não é guardada em lugar nenhum — nem aqui, nem
+   * no backend. O chamador é responsável por descartá-la depois.
+   */
+  async function provisionDevice(
+    deviceId: number,
+    entrada: {
+      protocol: string
+      port: number | null
+      username: string
+      password: string
+      vendor: string | null
+      /**
+       * Endereço deste servidor que o **equipamento** deve usar. Vem do campo
+       * da tela, não do navegador: quem abre a interface em `localhost` mandava
+       * `localhost` para dentro do roteador, e o aparelho passava a enviar o
+       * log para si mesmo — sem erro e sem nada chegando aqui.
+       */
+      serverAddress: string | null
+      macAddress: string | null
+    }
+  ): Promise<ProvisionLoggingResponse> {
+    const resposta = await apiService.post<ProvisionLoggingResponse>(
+      `/logs/devices/${deviceId}/provision`,
+      entrada
+    )
+    // O que acabou de ser configurado muda a lista de origens e pode ter
+    // vinculado o dispositivo — recarregar aqui evita a tela mostrar o estado
+    // anterior logo depois de dizer "pronto".
+    await fetchSources()
+    list.reset()
+    return resposta
   }
 
   // --- guia de configuração -------------------------------------------------
@@ -201,8 +284,12 @@ export const useLogsStore = defineStore('logs', () => {
     sources,
     unknownCount,
     sourcesLoaded,
+    nat,
+    natMasking,
     fetchSources,
     bindSource,
+    fetchProvisionHints,
+    provisionDevice,
     setupGuide,
     fetchSetupGuide,
   }

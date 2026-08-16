@@ -80,8 +80,13 @@ impl Ingestor {
     pub async fn handle(&self, bruto: &[u8], origem: IpAddr) -> bool {
         self.metrics.record_received();
         let source_ip = origem.to_string();
+        let masked = self.resolver.nat().is_masked(origem);
 
-        if !self.limiter.allow(&source_ip) {
+        // Atrás de NAT o limite por fonte precisa esperar o parse: a chave
+        // deixa de ser o endereço — que é um só para o parque inteiro — e passa
+        // a incluir o hostname. Sem isso os 50 msg/s de **um** roteador viram o
+        // teto de todos, e trinta aparelhos dividiriam o orçamento de um.
+        if !masked && !self.limiter.allow(&source_ip) {
             self.metrics.record_rate_limited();
             return false;
         }
@@ -99,6 +104,17 @@ impl Ingestor {
         let texto = String::from_utf8_lossy(bruto);
         let parsed = parser::parse(texto.trim(), recebido_em);
 
+        if masked {
+            let chave = match parsed.hostname.as_deref() {
+                Some(nome) => format!("{source_ip}|{nome}"),
+                None => source_ip.clone(),
+            };
+            if !self.limiter.allow(&chave) {
+                self.metrics.record_rate_limited();
+                return false;
+            }
+        }
+
         let resolucao = match self
             .resolver
             .resolve(&self.inventory, origem, parsed.hostname.as_deref())
@@ -113,6 +129,7 @@ impl Ingestor {
 
         self.sources.record(
             &source_ip,
+            masked,
             &resolucao,
             parsed.hostname.as_deref(),
             &parsed.message,

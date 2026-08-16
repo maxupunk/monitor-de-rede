@@ -53,6 +53,25 @@ services:
       # `CapEff` zerado (`setpriv --inh-caps=-all`) e não abre porta
       # privilegiada. É esta linha que faz a ponte — sem `CAP_NET_BIND` na
       # aplicação, que atravessaria a fronteira do §7 do AGENTS.md.
+      #
+      # ⚠ **A publicação reescreve o IP de origem.** Era o item aberto da
+      # ADR 008 e está medido: no Docker Desktop (Windows e macOS) sempre, e no
+      # Linux sempre que o `userland-proxy` entra no caminho, o pacote chega ao
+      # container vindo do gateway da bridge — `172.17.0.1`, `192.168.65.1` — e
+      # não do roteador. Como o vínculo log→dispositivo é por endereço, o parque
+      # inteiro vira uma origem só.
+      #
+      # O servidor detecta isso sozinho (`services/syslog/nat.rs`), passa a
+      # resolver pelo `HOSTNAME` que o equipamento envia e avisa na tela. Isso
+      # faz o recurso funcionar, mas depende de cada aparelho mandar um nome
+      # distinto — RouterOS sem `bsd-syslog=yes` não manda.
+      #
+      # **Para receber o endereço real**, troque a publicação por rede do host:
+      # comente o bloco `ports:` inteiro, acrescente `network_mode: host` ao
+      # serviço e defina `SYSLOG_EXTERNAL_PORT=5514`. Sem mapeamento não há
+      # tradução, e o processo continua sem capability nenhuma — só que aí a
+      # porta que o roteador precisa usar é a 5514, e é por isso que a variável
+      # existe: é ela que entra nos comandos que a tela gera.
       - "${SYSLOG_EXTERNAL_PORT:-514}:5514/udp"
       - "${SYSLOG_EXTERNAL_PORT:-514}:5514/tcp"
     environment:
@@ -97,6 +116,15 @@ services:
       # /data/logs.sqlite.
       SYSLOG_ENABLED: ${SYSLOG_ENABLED:-true}
       SYSLOG_DB_URL: ${SYSLOG_DB_URL:-}
+      # A porta que o **roteador** deve usar — a publicada acima, não a de
+      # escuta. Entra nos comandos que a tela gera e no acesso automático por
+      # SSH. Em `network_mode: host` não há publicação e o valor certo é 5514.
+      SYSLOG_EXTERNAL_PORT: ${SYSLOG_EXTERNAL_PORT:-514}
+      # Endereços a tratar como gateway de NAT, além dos que o servidor descobre
+      # sozinho (a rota padrão do container e as faixas que o Docker aloca).
+      # Só é preciso preencher com `docker network create --subnet` fora do pool
+      # padrão, ou com um relay de syslog na frente. Lista separada por vírgula.
+      SYSLOG_NAT_GATEWAYS: ${SYSLOG_NAT_GATEWAYS:-}
       # Só grava log de IP que resolva para um dispositivo cadastrado ou que
       # caia no CIDR de uma rede cadastrada. Ligar isto faz um host solto na
       # rede encher o volume sozinho — a tela /logs mostra as fontes vistas

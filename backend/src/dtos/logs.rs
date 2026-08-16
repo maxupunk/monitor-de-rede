@@ -101,6 +101,14 @@ pub struct LogPageResponse {
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct LogSourceEntry {
     pub source_ip: String,
+    /// A chave a devolver no `bind` — o IP, ou `host:<hostname>` quando a
+    /// origem chega mascarada por NAT. A tela não monta esta chave sozinha: só
+    /// o servidor sabe se o endereço é gateway.
+    pub bind_key: String,
+    /// Se o `sourceIp` é o gateway de um NAT em vez do remetente real. Quando
+    /// verdadeiro, o endereço é o mesmo para todos os equipamentos e só o
+    /// hostname os separa.
+    pub masked: bool,
     /// `device` | `network` | `ambiguous` | `unknown`.
     pub kind: String,
     #[ts(type = "number | null")]
@@ -142,6 +150,24 @@ pub struct LogSourcesResponse {
     pub unknown_count: usize,
     /// Contadores de ingestão desde o boot.
     pub metrics: LogIngestMetrics,
+    /// Diagnóstico do NAT. Vem sempre, para a tela poder explicar um parque
+    /// inteiro "desconhecido" sem o operador ter de adivinhar.
+    pub nat: LogNatDiagnostics,
+}
+
+/// O que o servidor sabe sobre o mascaramento da origem.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct LogNatDiagnostics {
+    /// Quantas origens chegam com o endereço reescrito.
+    #[ts(type = "number")]
+    pub masked_count: usize,
+    /// Se o processo está dentro de um container — muda o texto da orientação,
+    /// não o comportamento.
+    pub containerized: bool,
+    /// Os endereços reconhecidos como gateway, para o aviso poder nomeá-los.
+    pub gateways: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]
@@ -170,6 +196,77 @@ pub struct LogIngestMetrics {
 #[serde(rename_all = "camelCase")]
 pub struct BindSourceInput {
     pub device_id: Option<i64>,
+}
+
+/// Corpo de `POST /api/logs/devices/{id}/provision`.
+///
+/// **Estes campos não são persistidos.** `username` e `password` existem
+/// enquanto a requisição dura e morrem com ela — não há coluna, cache nem
+/// `system_settings` que os receba, nem cifrados. Ver a nota do módulo
+/// [`crate::services::syslog::provision`]. O DTO fica sem `Debug` derivado de
+/// propósito: um `tracing` distraído despejaria a senha no log.
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProvisionLoggingInput {
+    /// `ssh`, `telnet` ou `mactelnet`.
+    pub protocol: String,
+    /// Ausente cai na porta padrão do protocolo (22, 23 ou 20561).
+    pub port: Option<u16>,
+    pub username: String,
+    pub password: String,
+    /// Chave do fabricante. Ausente, o servidor deduz do cadastro.
+    pub vendor: Option<String>,
+    /// Endereço deste servidor como o **equipamento** o alcança. Vazio, ou
+    /// `localhost`, faz o servidor descobrir sozinho: gravar `localhost` no
+    /// roteador o faria mandar o log para si mesmo, sem erro e sem nada
+    /// chegando aqui.
+    pub server_address: Option<String>,
+    /// MAC do equipamento, para o MAC-Telnet. Ausente, o servidor procura nas
+    /// interfaces coletadas e no resultado da descoberta.
+    pub mac_address: Option<String>,
+}
+
+/// O que a tela usa para se preencher antes de perguntar qualquer coisa.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct ProvisionHintsResponse {
+    /// Endereço deste servidor que o equipamento deve usar. `null` quando não
+    /// há resposta confiável — aí a tela exige que o operador digite.
+    pub server_address: Option<String>,
+    /// De onde veio o palpite, para a tela não apresentar chute como certeza.
+    pub server_address_source: String,
+    #[ts(type = "number")]
+    pub server_port: u16,
+    pub vendor: String,
+    pub vendor_source: String,
+    /// Porta 22 respondeu à sondagem.
+    pub ssh_open: bool,
+    /// Porta 23 respondeu à sondagem.
+    pub telnet_open: bool,
+    pub mac_address: Option<String>,
+    /// Se este processo alcança a camada 2 da rede do equipamento. Falso num
+    /// container em rede bridge, onde o MAC-Telnet não tem como funcionar.
+    pub layer2_reachable: bool,
+}
+
+/// O que a tela mostra depois da ativação automática.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct ProvisionLoggingResponse {
+    pub vendor: String,
+    /// O endereço que foi gravado no equipamento.
+    pub server_address: String,
+    #[ts(type = "number")]
+    pub server_port: u16,
+    /// Os comandos enviados. Nunca a credencial.
+    pub commands: Vec<String>,
+    /// O que o equipamento respondeu, com a senha raspada.
+    pub transcript: String,
+    /// Se chegou log do dispositivo antes do teto de espera. `null` quando não
+    /// havia como confirmar (ingestão desligada).
+    pub confirmed: Option<bool>,
 }
 
 /// Filtros do live tail (`GET /api/logs/stream`).

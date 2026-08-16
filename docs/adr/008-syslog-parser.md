@@ -160,7 +160,7 @@ com `<= 6` ele prefere `device_logs_received_at_index`, que já entrega a
 ordenação. Vinte vezes mais lento e ainda assim 25× abaixo do alvo — fica
 registrado por ser o número que cresce se a proporção de erros subir.
 
-### Pergunta 3 — o IP de origem no container: **não medida**
+### Pergunta 3 — o IP de origem no container: **respondida, e é o pior caso**
 
 O modo `listen` foi validado localmente e o caminho socket → parse funciona
 ponta a ponta:
@@ -172,11 +172,31 @@ origem 127.0.0.1:56138
   user admin logged in via winbox
 ```
 
-Isso prova o listener, **não** o comportamento do Docker. A pergunta que importa
-— se a publicação `514:5514/udp` preserva o IP de origem ou o reescreve para o
-gateway da bridge — exige a imagem de produção e um pacote vindo de outra
-máquina, e continua **em aberto**. Procedimento, para rodar na primeira
-implantação:
+Isso prova o listener, **não** o comportamento do Docker. A pergunta que
+importava — se a publicação `514:5514/udp` preserva o IP de origem ou o
+reescreve — ficou em aberto até a primeira implantação. **A publicação
+reescreve.** O pacote chega ao container vindo do gateway da bridge
+(`172.17.0.1`; `192.168.65.1` no Docker Desktop), e não do roteador.
+
+Isso quebra três coisas de uma vez, não uma:
+
+1. **o vínculo**: o passo 1 do resolvedor (`source_ip == devices.ip_address`)
+   não casa com ninguém e o passo 3 (CIDR das redes) também não — o gateway não
+   pertence a rede cadastrada nenhuma. Todo log vira fonte desconhecida e é
+   descartado, em silêncio, exatamente como o §3 do roadmap temia;
+2. **o limite por fonte**: os 50 msg/s passam a valer para o parque inteiro,
+   porque o limitador vê um remetente só;
+3. **o escape manual**: vincular `172.17.0.1` a um dispositivo na tela de
+   origens — o que o operador naturalmente tentaria — atribuiria **todos** os
+   roteadores àquele dispositivo. É a contaminação que o roadmap descreve como
+   pior do que não vincular.
+
+A correção de infraestrutura é `network_mode: host`, e ela está documentada no
+`docker-compose.yml`. Mas ela não podia ser a **única** resposta: exige editar o
+compose, não existe no Docker Desktop com a mesma semântica, e um sistema que
+descarta log em silêncio até alguém ler a documentação já falhou. Então o
+servidor passou a detectar o caso e a funcionar apesar dele — ver a Fase 7 do
+roadmap. Procedimento de verificação, se houver dúvida sobre um ambiente novo:
 
 ```sh
 # dentro do container
@@ -185,8 +205,8 @@ cargo run --example spike_syslog_parse -- listen 5514
 logger -n <ip-do-host> -P 514 -d "teste do spike"
 ```
 
-Se o IP impresso for `172.x.0.1` em vez do IP da máquina de origem, a publicação
-está mascarando a origem e o arranjo precisa de `network_mode: host`.
+IP impresso igual a `172.x.0.1` confirma o mascaramento. A tela `/logs` diz o
+mesmo sem exigir shell no container.
 
 ## Consequências
 
@@ -196,7 +216,13 @@ está mascarando a origem e o arranjo precisa de `network_mode: host`.
 - `services/syslog/parser.rs` carrega as duas correções (resgate do `<pri>`,
   severidade por tópico) e o resolvedor de ano. As três são código próprio, não
   configuração do crate.
-- O snippet do RouterOS recomenda `bsd-syslog=yes` sem exigi-la.
-- A verificação do IP de origem atrás do Docker fica como item aberto da
-  primeira implantação — é o único critério de saída do spike ainda não medido,
-  e é o de maior risco (ver §3 do roadmap).
+- O snippet do RouterOS recomenda `bsd-syslog=yes` sem exigi-la. **Depois da
+  resposta à pergunta 3 a recomendação ficou mais forte:** atrás do NAT o
+  `HOSTNAME` deixa de ser um reforço e passa a ser a única coisa que distingue
+  um equipamento do outro. Sem `bsd-syslog=yes` o RouterOS não manda hostname, e
+  o aparelho fica indistinguível dos demais.
+- O mascaramento do IP atrás do Docker é real e tratado em
+  `services/syslog/nat.rs`: o resolvedor pula os passos que dependem do endereço
+  e resolve por hostname, o limitador separa por hostname, a lista de origens
+  ganha uma linha por equipamento e o vínculo por IP do gateway é recusado com
+  explicação. `network_mode: host` continua sendo a correção de raiz.

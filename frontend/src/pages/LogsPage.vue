@@ -23,6 +23,28 @@
       </template>
     </PageHeader>
 
+    <!--
+      O aviso do NAT vem antes do de origem desconhecida, e não depois: quando
+      o Docker mascara a origem, "vincule cada endereço" é conselho errado — o
+      endereço é um só para o parque inteiro. Explicar a causa primeiro evita o
+      operador seguir a instrução que contamina todos os dispositivos.
+    -->
+    <v-alert v-if="logsStore.natMasking" type="warning" variant="tonal" class="mb-4" border="start">
+      <div class="d-flex align-center flex-wrap ga-2">
+        <div class="flex-grow-1">
+          <strong>O Docker está reescrevendo o endereço de origem das mensagens.</strong>
+          Os equipamentos chegam como
+          {{ (logsStore.nat?.gateways ?? []).join(', ') || 'o gateway da bridge' }}, e não pelo
+          próprio IP. O vínculo passa a ser pelo nome que cada um envia no syslog; quem não envia
+          nome não pode ser separado dos demais. Para receber o endereço real, publique o servidor
+          com <code>network_mode: host</code> no <code>docker-compose.yml</code>.
+        </div>
+        <v-btn color="warning" variant="flat" size="small" @click="openSources">
+          Ver origens
+        </v-btn>
+      </div>
+    </v-alert>
+
     <v-alert
       v-if="logsStore.unknownCount > 0"
       type="warning"
@@ -37,8 +59,8 @@
             {{ logsStore.unknownCount === 1 ? 'origem está enviando' : 'origens estão enviando' }}
             log e {{ logsStore.unknownCount === 1 ? 'não é reconhecida' : 'não são reconhecidas' }}.
           </strong>
-          Essas mensagens estão sendo descartadas para não encher o disco. Vincule cada endereço a
-          um dispositivo para começar a guardá-las.
+          Essas mensagens estão sendo descartadas para não encher o disco. Vincule cada origem a um
+          dispositivo para começar a guardá-las.
         </div>
         <v-btn color="warning" variant="flat" size="small" @click="openSources">
           Ver origens
