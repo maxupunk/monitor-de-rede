@@ -1,4 +1,5 @@
 pub mod common;
+pub mod logs;
 pub mod resources;
 
 /// Lê um corpo de requisição **opcional** sem deixá-lo mascarar o erro real.

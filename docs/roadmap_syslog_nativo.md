@@ -253,15 +253,37 @@ funcionou, mas não fez nada":
   o primeiro bloco levava o conjunto inteiro. Teto e bloco viraram parâmetros
   (`prune_with`), como o `writer::run_with` já fazia.
 
-### Fase 3 — Consulta 🔴 Pendente
+### Fase 3 — Consulta 🟢 Concluída
 
-- [ ] `repository.rs` com cursor de keyset sobre `(received_at, id)`
-- [ ] `GET /api/logs` + DTOs em camelCase
-- [ ] Hidratação de nome de dispositivo em duas consultas
-- [ ] `useInfiniteCursor.ts`
-- [ ] `LogsPage.vue` com filtros (dispositivo, severidade, período, texto)
-- [ ] `stores/logs.ts`
-- [ ] Aceite: filtro composto em 1 M de linhas responde em tempo de tela
+- [x] `repository.rs` com cursor de keyset sobre `(received_at, id)`
+- [x] `GET /api/logs` + DTOs em camelCase (`LogEntry`, `LogPageMeta`,
+      `LogPageResponse` exportados para o frontend)
+- [x] Hidratação de nome de dispositivo em duas consultas
+- [x] `useInfiniteCursor.ts`
+- [x] `LogsPage.vue` com filtros (dispositivo, severidade, período, texto) +
+      entrada no menu e rota `/logs`
+- [x] `stores/logs.ts`
+- [x] Aceite: **medido** com 1 M de linhas (283 MB, `spike_syslog_parse -- query`)
+
+| consulta | tempo |
+|---|---|
+| janela de 24 h, 1ª página | 0,19–0,91 ms |
+| janela + dispositivo | 0,15–0,68 ms |
+| janela + severidade (erro e acima) | 4,2–8,2 ms |
+| janela + severidade larga (info e acima) | 0,31 ms |
+| janela + `LIKE` (busca textual) | 0,32–0,55 ms |
+
+Alvo era ~200 ms; o pior caso ficou 25× abaixo. Duas leituras:
+
+- **A janela obrigatória é o que salva o `LIKE`.** Restrita a 24 h, a busca
+  textual varre ~6 000 linhas em vez de 1 M — 0,3 ms contra o que seria uma
+  varredura de 283 MB. A Fase 5 vira conforto, como previsto.
+- **O filtro estreito de severidade é o pior caso, não o largo.** Com
+  `severity <= 3` o planejador escolhe `(severity, received_at)` e varre todas
+  as severidades 0–3 de **todo** o período antes de recortar pela janela; com
+  `<= 6` ele prefere `received_at`, que já vem ordenado. Contraintuitivo e
+  irrelevante nesta escala, mas é o que cresce se o parque virar um parque de
+  erros.
 
 ### Fase 4 — Tempo real e diagnóstico 🔴 Pendente
 

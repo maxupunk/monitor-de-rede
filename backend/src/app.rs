@@ -123,6 +123,7 @@ impl Hooks for App {
             .add_route(controllers::dns::routes().layer(business_auth.clone()))
             .add_route(controllers::dns_servers::routes().layer(business_auth.clone()))
             .add_route(controllers::events::routes().layer(business_auth.clone()))
+            .add_route(controllers::logs::routes().layer(business_auth.clone()))
             .add_route(controllers::alerts::rules_routes().layer(business_auth.clone()))
             .add_route(controllers::alerts::routes().layer(business_auth.clone()))
             .add_route(controllers::vpn_servers::routes().layer(business_auth.clone()))

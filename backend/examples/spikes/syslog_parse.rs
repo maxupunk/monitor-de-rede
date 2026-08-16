@@ -2,7 +2,7 @@
 //!
 //! Resultados registrados em [`docs/adr/008-syslog-parser.md`].
 //!
-//! Três perguntas, uma por modo de execução:
+//! Quatro perguntas, uma por modo de execução:
 //!
 //! 1. `syslog_loose` parseia o que os roteadores realmente mandam — inclusive o
 //!    RouterOS **sem** `bsd-syslog=yes`, que não é RFC 3164 nem 5424?
@@ -11,11 +11,14 @@
 //!    "fonte desconhecida não grava" depende dele ser o IP do roteador; se a
 //!    publicação de porta do Docker mascarar a origem, o sistema não gravaria
 //!    nada e não haveria erro visível em lugar nenhum.
+//! 4. O filtro composto responde em tempo de tela com 1 M de linhas? — o
+//!    critério de aceite da Fase 3.
 //!
 //! ```sh
 //! cargo run --example spike_syslog_parse            # amostras
 //! cargo run --example spike_syslog_parse -- bench   # inserção em lote
 //! cargo run --example spike_syslog_parse -- listen [porta]
+//! cargo run --release --example spike_syslog_parse -- query
 //! ```
 
 use std::time::Instant;
@@ -384,6 +387,156 @@ async fn bench() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Critério de aceite da Fase 3: filtro composto em 1 M de linhas.
+///
+/// A pergunta não é se o SQLite aguenta a tabela, é se a **tela** responde. Por
+/// isso mede os três caminhos que a página realmente usa: janela de tempo pura
+/// (o caso comum), janela + severidade (o filtro que abre a tela) e janela +
+/// `LIKE` (a busca textual, a única que não usa índice em cima da mensagem).
+///
+/// ```sh
+/// cargo run --release --example spike_syslog_parse -- query
+/// ```
+async fn query() -> Result<(), Box<dyn std::error::Error>> {
+    const TOTAL: usize = 1_000_000;
+    const LOTE: usize = 1_000;
+
+    let arquivo = std::env::temp_dir().join("spike_syslog_query.sqlite");
+    let _ = std::fs::remove_file(&arquivo);
+    let url = format!("sqlite://{}?mode=rwc", arquivo.display());
+    let db = Database::connect(&url).await?;
+    for pragma in [
+        "PRAGMA auto_vacuum = INCREMENTAL;",
+        "PRAGMA journal_mode = WAL;",
+    ] {
+        db.query_one_raw(Statement::from_string(DatabaseBackend::Sqlite, pragma))
+            .await?;
+    }
+    db.execute_unprepared(
+        "CREATE TABLE device_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            device_id INTEGER, source_ip TEXT NOT NULL, received_at TEXT NOT NULL,
+            device_time TEXT, facility INTEGER, severity INTEGER, hostname TEXT,
+            app_name TEXT, pid INTEGER, topics TEXT, message TEXT NOT NULL
+        );
+        CREATE INDEX \"device_logs_device_received_index\" ON device_logs (device_id, received_at);
+        CREATE INDEX \"device_logs_received_at_index\" ON device_logs (received_at);
+        CREATE INDEX \"device_logs_severity_received_index\" ON device_logs (severity, received_at);",
+    )
+    .await?;
+
+    // Sete dias de retenção espalhados em 1 M de linhas — a densidade real de
+    // ~1,7 msg/s por 30 dispositivos.
+    println!("semeando {TOTAL} linhas...");
+    let base = Utc::now() - chrono::Duration::days(7);
+    let passo_ms = 7 * 24 * 3_600_000 / TOTAL as i64;
+    let inicio = Instant::now();
+    for bloco in 0..(TOTAL / LOTE) {
+        let mut sql = String::from(
+            "INSERT INTO device_logs (device_id, source_ip, received_at, severity, topics, message) VALUES ",
+        );
+        for indice in 0..LOTE {
+            if indice > 0 {
+                sql.push(',');
+            }
+            sql.push_str("(?,?,?,?,?,?)");
+        }
+        let mut valores: Vec<sea_orm::Value> = Vec::with_capacity(LOTE * 6);
+        for indice in 0..LOTE {
+            let n = bloco * LOTE + indice;
+            let instante = base + chrono::Duration::milliseconds(n as i64 * passo_ms);
+            valores.push(((n % 30) as i64 + 1).into());
+            valores.push(format!("192.168.88.{}", n % 30 + 1).into());
+            valores.push(instante.to_rfc3339().into());
+            // Distribuição parecida com a real: quase tudo é info, erro é raro.
+            valores.push(if n.is_multiple_of(200) { 3_i32 } else { 6_i32 }.into());
+            valores.push("system,info".into());
+            valores.push(
+                format!(
+                    "linha {n} interface ether{} status update para o enlace",
+                    n % 8
+                )
+                .into(),
+            );
+        }
+        db.execute_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Sqlite,
+            &sql,
+            valores,
+        ))
+        .await?;
+    }
+    println!("  semeadura em {:?}\n", inicio.elapsed());
+
+    let bytes = std::fs::metadata(&arquivo).map(|m| m.len()).unwrap_or(0);
+    #[allow(clippy::cast_precision_loss)]
+    let mb = bytes as f64 / 1024.0 / 1024.0;
+    println!("== consulta em 1 M de linhas ({mb:.0} MB) ==\n");
+
+    let desde = (Utc::now() - chrono::Duration::hours(24)).to_rfc3339();
+    let casos: [(&str, String); 5] = [
+        (
+            "janela de 24 h, 1ª página",
+            format!(
+                "SELECT * FROM device_logs WHERE received_at >= '{desde}' \
+                 ORDER BY received_at DESC, id DESC LIMIT 51"
+            ),
+        ),
+        (
+            "janela + dispositivo",
+            format!(
+                "SELECT * FROM device_logs WHERE received_at >= '{desde}' AND device_id = 7 \
+                 ORDER BY received_at DESC, id DESC LIMIT 51"
+            ),
+        ),
+        (
+            "janela + severidade (erro e acima)",
+            format!(
+                "SELECT * FROM device_logs WHERE received_at >= '{desde}' AND severity <= 3 \
+                 ORDER BY received_at DESC, id DESC LIMIT 51"
+            ),
+        ),
+        (
+            // O pior caso realista: o índice `(severity, received_at)` cobre
+            // mal um `<=` largo, porque a faixa na primeira coluna impede usar
+            // a segunda para a ordenação. "Erro e acima" pega 0,5% das linhas;
+            // "informação e acima" pega quase todas.
+            "janela + severidade larga (info e acima)",
+            format!(
+                "SELECT * FROM device_logs WHERE received_at >= '{desde}' AND severity <= 6 \
+                 ORDER BY received_at DESC, id DESC LIMIT 51"
+            ),
+        ),
+        (
+            "janela + LIKE (busca textual)",
+            format!(
+                "SELECT * FROM device_logs WHERE received_at >= '{desde}' \
+                 AND message LIKE '%ether3%' ESCAPE '\\' \
+                 ORDER BY received_at DESC, id DESC LIMIT 51"
+            ),
+        ),
+    ];
+
+    for (rotulo, sql) in &casos {
+        // Duas medições: a primeira paga o cache frio das páginas do índice.
+        let mut melhor = std::time::Duration::MAX;
+        for _ in 0..3 {
+            let inicio = Instant::now();
+            let linhas = db
+                .query_all_raw(Statement::from_string(DatabaseBackend::Sqlite, sql.clone()))
+                .await?;
+            let decorrido = inicio.elapsed();
+            melhor = melhor.min(decorrido);
+            assert!(!linhas.is_empty(), "{rotulo} não devolveu nada");
+        }
+        println!("  {rotulo:<38} {melhor:?}");
+    }
+
+    println!("\n  Alvo: cada caso abaixo de ~200 ms para a tela não parecer travada.");
+    let _ = std::fs::remove_file(&arquivo);
+    Ok(())
+}
+
 /// Escuta UDP e imprime o IP de origem **como o processo o vê**.
 ///
 /// É a medição que decide se a regra "fonte desconhecida não grava" é viável
@@ -418,6 +571,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let argumentos: Vec<String> = std::env::args().skip(1).collect();
     match argumentos.first().map(String::as_str) {
         Some("bench") => bench().await,
+        Some("query") => query().await,
         Some("listen") => {
             let porta = argumentos
                 .get(1)

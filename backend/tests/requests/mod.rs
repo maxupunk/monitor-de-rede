@@ -12,4 +12,5 @@ mod phase9;
 mod prepare_data;
 mod process_deps;
 mod root;
+mod syslog_api;
 mod syslog_ingest;

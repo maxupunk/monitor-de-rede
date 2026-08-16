@@ -22,6 +22,7 @@ pub mod ingest;
 pub mod listener;
 pub mod parser;
 pub mod queue;
+pub mod repository;
 pub mod resolver;
 pub mod retention;
 pub mod sources;

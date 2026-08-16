@@ -132,6 +132,34 @@ contradição apontada na análise é menor do que parecia. O padrão fica em **
 mesmo assim: a amostra medida é a mensagem de login (48 caracteres), e linha de
 firewall passa de 100. Teto folgado só custa disco quando o disco é usado.
 
+### Consulta em 1 M de linhas (acrescentado na Fase 3)
+
+```
+$ cargo run --release --example spike_syslog_parse -- query
+
+== consulta em 1 M de linhas (283 MB) ==
+
+  janela de 24 h, 1ª página                189.6µs
+  janela + dispositivo                     151.4µs
+  janela + severidade (erro e acima)       4.2262ms
+  janela + severidade larga (info e acima) 306.7µs
+  janela + LIKE (busca textual)            321.1µs
+```
+
+283 B/linha, consistente com os 290 B da medição de inserção.
+
+**A janela de tempo obrigatória é o que torna o `LIKE` viável.** Restrita a
+24 h, a busca textual varre ~6 000 linhas em vez de 1 M. Sem ela seria
+varredura de 283 MB por busca. Confirma a decisão de `from` valer 24 h por
+padrão e a janela ter teto de 7 dias.
+
+**O filtro estreito de severidade é o pior caso, não o largo.** Com
+`severity <= 3` o planejador escolhe o índice `(severity, received_at)` e varre
+todas as severidades 0–3 de **todo** o período antes de recortar pela janela;
+com `<= 6` ele prefere `device_logs_received_at_index`, que já entrega a
+ordenação. Vinte vezes mais lento e ainda assim 25× abaixo do alvo — fica
+registrado por ser o número que cresce se a proporção de erros subir.
+
 ### Pergunta 3 — o IP de origem no container: **não medida**
 
 O modo `listen` foi validado localmente e o caminho socket → parse funciona

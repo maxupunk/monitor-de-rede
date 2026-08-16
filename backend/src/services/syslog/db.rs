@@ -149,7 +149,21 @@ pub async fn install(ctx: &AppContext, database_url: &str) {
         tracing::debug!("ingestão de syslog desligada; banco de logs não aberto");
         return;
     }
-    let url = resolve_url(database_url);
+    // **Teste nunca toca em arquivo.** O `resolve_url` poria o banco de logs ao
+    // lado do de teste, e ali ele seria um arquivo só, compartilhado por toda a
+    // suíte: o `Hooks::truncate` não o alcança (é outro banco), então uma linha
+    // gravada por um teste sobreviveria para o seguinte. Em memória, cada
+    // contexto nasce com o seu — isolamento por construção, não por lembrar de
+    // limpar. `SYSLOG_DB_URL` explícita continua vencendo, para o teste que
+    // quiser um arquivo de verdade.
+    let url = if ctx.environment == loco_rs::environment::Environment::Test {
+        std::env::var("SYSLOG_DB_URL")
+            .ok()
+            .filter(|valor| !valor.trim().is_empty())
+            .unwrap_or_else(|| "sqlite::memory:".to_owned())
+    } else {
+        resolve_url(database_url)
+    };
     match connect(&url).await {
         Ok(db) => {
             ctx.shared_store.insert(db);

@@ -204,6 +204,7 @@ const navItems: NavItem[] = [
   { title: 'Alertas', icon: 'mdi-bell-outline', to: '/alerts' },
   { title: 'Descoberta', icon: 'mdi-radar', to: '/discovery' },
   { title: 'Eventos', icon: 'mdi-history', to: '/events' },
+  { title: 'Logs', icon: 'mdi-text-box-search-outline', to: '/logs' },
   {
     title: 'Infraestrutura',
     icon: 'mdi-server-network',
