@@ -239,6 +239,28 @@ export const ALERT_METRICS: AlertMetricOption[] = [
     defaultOperator: 'contains',
     defaultValue: '',
   },
+  // --- Padrões no log recebido por syslog (Fase 6 do roadmap de syslog) ---
+  //
+  // Só `logMatchCount` e `logSeverity` aparecem na tela. O `pattern` (a regex)
+  // e a `windowSeconds` moram na mesma `condition` da regra, mas são editados
+  // no formulário de padrão de log, não neste seletor genérico de campo — uma
+  // regex não cabe num campo de comparação.
+  {
+    field: 'logMatchCount',
+    title: 'Ocorrências do padrão no log',
+    hint: 'Quantas vezes o padrão apareceu dentro da janela configurada. Ex.: 5 falhas de login em 5 minutos.',
+    kind: 'number',
+    defaultOperator: 'gte',
+    defaultValue: 5,
+  },
+  {
+    field: 'logSeverity',
+    title: 'Severidade da linha de log',
+    hint: 'Nível do syslog: 0 = emergência, 3 = erro, 4 = aviso, 6 = informação. Número menor é mais grave.',
+    kind: 'number',
+    defaultOperator: 'lte',
+    defaultValue: 4,
+  },
 ]
 
 interface OperatorOption {

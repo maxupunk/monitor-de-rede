@@ -123,6 +123,7 @@
         </v-tab>
         <v-tab value="metrics" prepend-icon="mdi-chart-line">Métricas & Tráfego</v-tab>
         <v-tab value="events" prepend-icon="mdi-history">Histórico de Eventos</v-tab>
+        <v-tab value="logs" prepend-icon="mdi-text-box-search-outline">Logs</v-tab>
         <v-tab v-if="vpnPeer" value="vpn" prepend-icon="mdi-shield-lock-outline">VPN</v-tab>
       </v-tabs>
 
@@ -588,6 +589,58 @@
             </v-infinite-scroll>
           </v-window-item>
 
+          <!-- Aba Logs: syslog recebido deste dispositivo -->
+          <v-window-item value="logs">
+            <div class="d-flex align-center flex-wrap ga-3 mb-4">
+              <v-select
+                v-model="logSeverity"
+                :items="logSeverityOptions"
+                item-title="label"
+                item-value="value"
+                label="Severidade"
+                hide-details
+                clearable
+                density="compact"
+                variant="outlined"
+                style="max-width: 240px"
+                @update:model-value="applyLogFilters"
+              ></v-select>
+              <v-select
+                v-model="logHours"
+                :items="logWindowOptions"
+                item-title="label"
+                item-value="value"
+                label="Período"
+                hide-details
+                density="compact"
+                variant="outlined"
+                style="max-width: 200px"
+                @update:model-value="applyLogFilters"
+              ></v-select>
+              <v-spacer></v-spacer>
+              <v-btn
+                :color="logsStore.tailing ? 'success' : 'primary'"
+                :variant="logsStore.tailing ? 'flat' : 'tonal'"
+                size="small"
+                @click="logsStore.toggleTail()"
+              >
+                <v-icon start>
+                  {{ logsStore.tailing ? 'mdi-radiobox-marked' : 'mdi-play-circle-outline' }}
+                </v-icon>
+                {{ logsStore.tailing ? 'Ao vivo' : 'Acompanhar' }}
+              </v-btn>
+            </div>
+
+            <LogTable
+              :entries="logsStore.entries"
+              :scroll-key="logsStore.scrollKey"
+              :load="logsStore.load"
+              :error="logsStore.error"
+              :show-source="false"
+              empty-hint="Este dispositivo ainda não enviou syslog para o servidor."
+            />
+          </v-window-item>
+
           <!-- Aba VPN -->
           <v-window-item v-if="vpnPeer" value="vpn">
             <v-alert
@@ -995,7 +1048,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   useDeviceDetailStore,
@@ -1029,6 +1082,8 @@ import {
 } from '@/stores/vpn'
 
 import { useInfiniteList } from '@/composables/useInfiniteList'
+import LogTable from '@/components/logs/LogTable.vue'
+import { useLogsStore, SEVERITY_OPTIONS, WINDOW_OPTIONS } from '@/stores/logs'
 
 interface DeviceEventItem {
   id: number
@@ -1137,6 +1192,40 @@ onMounted(() => {
     vpnStore.fetchServer()
   }
 })
+
+// --- Aba de logs -----------------------------------------------------------
+//
+// A store de logs é a mesma da tela `/logs`, com o filtro fixado neste
+// dispositivo. Reaproveitar em vez de duplicar mantém uma única definição de
+// paginação por cursor e de live tail.
+
+const logsStore = useLogsStore()
+const logSeverity = ref<number | null>(null)
+const logHours = ref<number | null>(24)
+const logSeverityOptions = SEVERITY_OPTIONS
+const logWindowOptions = WINDOW_OPTIONS
+
+function applyLogFilters(): void {
+  const estavaAoVivo = logsStore.tailing
+  if (estavaAoVivo) logsStore.stopTail()
+  logsStore.applyFilters({
+    deviceId: deviceId.value,
+    severity: logSeverity.value,
+    hours: logHours.value,
+    search: '',
+  })
+  if (estavaAoVivo) logsStore.startTail()
+}
+
+// A store é compartilhada com a tela `/logs`: entrar na aba sem fixar o
+// dispositivo mostraria o log do parque inteiro dentro da página de um
+// aparelho. Sair da aba desliga o tail, que senão seguiria empilhando.
+watch(activeTab, (aba, anterior) => {
+  if (aba === 'logs') applyLogFilters()
+  else if (anterior === 'logs') logsStore.stopTail()
+})
+
+onUnmounted(() => logsStore.stopTail())
 
 // --- Monitores do próprio equipamento --------------------------------------
 

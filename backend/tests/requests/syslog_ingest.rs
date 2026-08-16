@@ -21,6 +21,7 @@ use backend::{
         db,
         ingest::Ingestor,
         listener,
+        matcher::PatternMatcher,
         queue::{IngestMetrics, LogQueue},
         sources::SourceRegistry,
         writer,
@@ -80,6 +81,7 @@ async fn pipeline(com_rede: bool, config: SyslogConfig) -> (DatabaseConnection, 
         config,
         queue,
         Arc::new(SourceRegistry::create()),
+        Arc::new(PatternMatcher::create()),
     );
 
     // Lote de 1 linha para o teste não depender do relógio: cada mensagem
@@ -93,6 +95,7 @@ async fn pipeline(com_rede: bool, config: SyslogConfig) -> (DatabaseConnection, 
             metrics,
             1,
             Duration::from_millis(10),
+            None,
         )
         .await;
     });

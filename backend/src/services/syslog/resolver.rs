@@ -33,9 +33,20 @@ use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use tokio::sync::RwLock;
 
 use crate::{
-    models::_entities::{devices, networks},
+    models::{
+        _entities::{devices, networks},
+        system_settings,
+    },
     services::shared::errors::AppResult,
 };
+
+/// Chave em `system_settings` com o mapa `ip -> device_id` do *bind* manual.
+///
+/// Em `system_settings`, e não numa tabela própria: são poucas linhas, escritas
+/// por ação manual do operador, e o resolvedor já consulta o banco principal —
+/// uma tabela nova custaria migration, entrada no `CREATION_ORDER` e uma FK que
+/// não pode existir (o log mora no outro banco).
+pub const BINDINGS_KEY: &str = "syslog.source_bindings";
 
 /// Por quanto tempo uma resolução vale sem reconsultar o banco.
 ///
@@ -133,6 +144,20 @@ async fn consulta(
 ) -> AppResult<Resolution> {
     let texto = origem.to_string();
 
+    // O *bind* manual vence tudo: é a palavra do operador sobre um caso que a
+    // heurística errou ou não soube decidir. Sem esta precedência, um roteador
+    // com `src-address` diferente continuaria caindo em "desconhecida" mesmo
+    // depois de vinculado na tela.
+    if let Some(device_id) = bindings(db).await?.get(&texto).copied() {
+        if devices::Entity::find_by_id(device_id)
+            .one(db)
+            .await?
+            .is_some()
+        {
+            return Ok(Resolution::Device(device_id));
+        }
+    }
+
     let candidatos = devices::Entity::find()
         .filter(devices::Column::IpAddress.eq(texto.clone()))
         .all(db)
@@ -204,6 +229,69 @@ async fn rede_que_contem(db: &DatabaseConnection, origem: IpAddr) -> AppResult<O
         .into_iter()
         .find(|rede| cidr_contem(&rede.cidr, origem))
         .map(|rede| rede.id))
+}
+
+/// Lê o mapa de *binds* manuais. Ausente ou corrompido vira mapa vazio: um
+/// JSON quebrado não pode calar a ingestão inteira.
+///
+/// # Errors
+///
+/// Propaga erro do banco.
+pub async fn bindings(db: &DatabaseConnection) -> AppResult<HashMap<String, i64>> {
+    let Some(linha) = system_settings::Entity::find()
+        .filter(system_settings::Column::Key.eq(BINDINGS_KEY))
+        .one(db)
+        .await?
+    else {
+        return Ok(HashMap::new());
+    };
+    Ok(linha
+        .value
+        .and_then(|texto| serde_json::from_str(&texto).ok())
+        .unwrap_or_default())
+}
+
+/// Grava (ou remove, com `device_id` nulo) o vínculo manual de um IP.
+///
+/// # Errors
+///
+/// Propaga erro do banco.
+pub async fn bind(
+    db: &DatabaseConnection,
+    source_ip: &str,
+    device_id: Option<i64>,
+) -> AppResult<()> {
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+
+    let mut mapa = bindings(db).await?;
+    match device_id {
+        Some(id) => mapa.insert(source_ip.to_owned(), id),
+        None => mapa.remove(source_ip),
+    };
+    let valor = serde_json::to_string(&mapa)
+        .map_err(|error| crate::services::shared::errors::AppError::Internal(error.into()))?;
+
+    match system_settings::Entity::find()
+        .filter(system_settings::Column::Key.eq(BINDINGS_KEY))
+        .one(db)
+        .await?
+    {
+        Some(linha) => {
+            let mut ativo: system_settings::ActiveModel = linha.into();
+            ativo.value = Set(Some(valor));
+            ativo.update(db).await?;
+        }
+        None => {
+            system_settings::ActiveModel {
+                key: Set(BINDINGS_KEY.to_owned()),
+                value: Set(Some(valor)),
+                ..Default::default()
+            }
+            .insert(db)
+            .await?;
+        }
+    }
+    Ok(())
 }
 
 /// CIDR inválido no cadastro não derruba a ingestão — só não casa com nada.

@@ -7,20 +7,25 @@
 //! linhas — cada nova mensagem desloca a janela inteira. O keyset sobre
 //! `(received_at, id)` não sofre de nenhum dos dois.
 //!
-//! **A janela de tempo é obrigatória.** `LIKE '%termo%'` não usa índice: em
-//! 7 M de linhas é varredura de ~1,5 GB, com o banco travado para o escritor
-//! durante a leitura longa. Com `from` valendo 24 h por padrão e a janela com
-//! teto, o índice `device_logs_received_at_index` limita a varredura antes de o
-//! `LIKE` entrar — e a busca full-text da Fase 5 vira otimização de conforto,
-//! não resgate de uma tela quebrada.
+//! **A janela de tempo é obrigatória.** A busca textual não usa índice de
+//! `received_at`: sem recorte, é varredura da tabela inteira com o banco
+//! travado para o escritor durante a leitura longa. Com `from` valendo 24 h por
+//! padrão e a janela com teto de 7 dias, o índice
+//! `device_logs_received_at_index` limita o conjunto antes de o filtro de texto
+//! entrar.
+//!
+//! A janela **não** basta sozinha, e a medição do SPIKE-06 mostrou por quê: num
+//! recorte de 7 dias, `LIKE` por termo que não casa com nada custa 847 ms — não
+//! há saída antecipada para provar ausência. Quem cobre esse caso é o índice de
+//! texto (`search`), que escolhe a estratégia por densidade do termo.
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::{DateTime, Duration, Utc};
 use sea_orm::{
-    sea_query::{Expr, ExprTrait, LikeExpr},
     ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
 };
 
+use super::search;
 use crate::{
     models::logs::device_logs,
     services::shared::errors::{AppError, AppResult},
@@ -176,7 +181,9 @@ pub async fn search(db: &DatabaseConnection, query: &LogQuery) -> AppResult<LogP
         condicao = condicao.add(device_logs::Column::Facility.eq(facility));
     }
     if let Some(termo) = &query.q {
-        condicao = condicao.add(busca_textual(termo));
+        // A implementação da busca é escolhida em tempo de execução — FTS5,
+        // `tsvector` ou `LIKE`, conforme o que o banco tem. Ver `search`.
+        condicao = condicao.add(search::select(db).await.condition(db, termo).await);
     }
     if let Some(cursor) = query.cursor {
         // A desigualdade composta do keyset. Sem o desempate por `id`, uma
@@ -218,20 +225,6 @@ pub async fn search(db: &DatabaseConnection, query: &LogQuery) -> AppResult<LogP
     };
 
     Ok(LogPage { rows, next_cursor })
-}
-
-/// `LIKE '%termo%'` com `%` e `_` do usuário escapados.
-///
-/// Sem o escape, procurar `pppoe_client` casaria com `pppoe-client` e
-/// `pppoeXclient` — o `_` do SQL vale por qualquer caractere, e sublinhado é
-/// corriqueiro em texto de log. O `ESCAPE` vale no SQLite e no PostgreSQL.
-fn busca_textual(termo: &str) -> Expr {
-    let escapado = termo
-        .replace('\\', "\\\\")
-        .replace('%', "\\%")
-        .replace('_', "\\_");
-    Expr::col(device_logs::Column::Message)
-        .like(LikeExpr::new(format!("%{escapado}%")).escape('\\'))
 }
 
 #[cfg(test)]

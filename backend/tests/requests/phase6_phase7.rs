@@ -63,7 +63,7 @@ async fn criar_monitor(ctx: &loco_rs::app::AppContext, name: &str, probe_id: Opt
 
 #[tokio::test]
 #[serial]
-async fn o_catalogo_e_idempotente_e_traz_os_dezoito_templates() {
+async fn o_catalogo_e_idempotente_e_traz_os_templates_dos_dois_roadmaps() {
     request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
         let session = prepare_data::init_user_login(&request, &ctx).await;
         let (header, value) = prepare_data::auth_header(&session.token);
@@ -71,19 +71,22 @@ async fn o_catalogo_e_idempotente_e_traz_os_dezoito_templates() {
 
         let catalogo = json_of(&request.get("/api/alert-rules/catalog").await.text());
         let templates = catalogo["templates"].as_array().expect("templates");
-        assert_eq!(templates.len(), 18);
+        // 18 do roadmap de alertas + 7 padrões de log (Fase 6 do de syslog).
+        assert_eq!(templates.len(), 25);
         assert_eq!(catalogo["categories"]["disponibilidade"], "Disponibilidade");
         // Campos que a tela lê em cada template.
         assert!(templates[0]["applied"].is_boolean());
         assert!(templates[0].get("durationSeconds").is_some());
 
-        // O `ensure_defaults` do initializer já provisionou os 7 recomendados
-        // no boot desta instalação nova: eles chegam marcados como aplicados.
+        // O `ensure_defaults` do initializer já provisionou os recomendados no
+        // boot desta instalação nova: eles chegam marcados como aplicados.
+        // São 13 — os 7 originais mais 6 padrões de log; `log_config_changed`
+        // fica de fora por ser rastro de auditoria, não problema.
         let recomendados: Vec<_> = templates
             .iter()
             .filter(|item| item["recommended"] == true)
             .collect();
-        assert_eq!(recomendados.len(), 7);
+        assert_eq!(recomendados.len(), 13);
         for template in &recomendados {
             assert_eq!(template["applied"], true, "{}", template["key"]);
             assert!(template["ruleId"].is_i64());

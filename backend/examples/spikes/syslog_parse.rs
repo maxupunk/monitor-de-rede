@@ -425,6 +425,19 @@ async fn query() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
+    // O índice de texto da Fase 5. Criado **antes** da semeadura para os
+    // gatilhos alimentarem o índice junto com a inserção, como em produção —
+    // assim o tempo de semeadura mede também o custo de escrita que ele impõe.
+    db.execute_unprepared(
+        "CREATE VIRTUAL TABLE device_logs_fts USING fts5(
+             message, content='device_logs', content_rowid='id', tokenize='unicode61'
+         );
+         CREATE TRIGGER device_logs_fts_insert AFTER INSERT ON device_logs BEGIN
+             INSERT INTO device_logs_fts(rowid, message) VALUES (new.id, new.message);
+         END;",
+    )
+    .await?;
+
     // Sete dias de retenção espalhados em 1 M de linhas — a densidade real de
     // ~1,7 msg/s por 30 dispositivos.
     println!("semeando {TOTAL} linhas...");
@@ -517,6 +530,47 @@ async fn query() -> Result<(), Box<dyn std::error::Error>> {
         ),
     ];
 
+    // O caso que decide a Fase 5: `LIKE` na janela **cheia**, sem o recorte de
+    // 24 h que torna a busca barata. Aqui o índice não ajuda em nada e a
+    // varredura é a tabela inteira.
+    let tudo = (Utc::now() - chrono::Duration::days(8)).to_rfc3339();
+    let casos_largos: [(&str, String); 4] = [
+        (
+            "7 dias + LIKE (com casamento)",
+            format!(
+                "SELECT * FROM device_logs WHERE received_at >= '{tudo}' \
+                 AND message LIKE '%ether3%' ESCAPE '\\' \
+                 ORDER BY received_at DESC, id DESC LIMIT 51"
+            ),
+        ),
+        (
+            "7 dias + LIKE sem casamento",
+            format!(
+                "SELECT * FROM device_logs WHERE received_at >= '{tudo}' \
+                 AND message LIKE '%termo-que-nao-existe%' ESCAPE '\\' \
+                 ORDER BY received_at DESC, id DESC LIMIT 51"
+            ),
+        ),
+        (
+            "7 dias + FTS5 (com casamento)",
+            format!(
+                "SELECT * FROM device_logs WHERE received_at >= '{tudo}' \
+                 AND id IN (SELECT rowid FROM device_logs_fts \
+                 WHERE device_logs_fts MATCH '\"ether3\"*') \
+                 ORDER BY received_at DESC, id DESC LIMIT 51"
+            ),
+        ),
+        (
+            "7 dias + FTS5 sem casamento",
+            format!(
+                "SELECT * FROM device_logs WHERE received_at >= '{tudo}' \
+                 AND id IN (SELECT rowid FROM device_logs_fts \
+                 WHERE device_logs_fts MATCH '\"termo-que-nao-existe\"*') \
+                 ORDER BY received_at DESC, id DESC LIMIT 51"
+            ),
+        ),
+    ];
+
     for (rotulo, sql) in &casos {
         // Duas medições: a primeira paga o cache frio das páginas do índice.
         let mut melhor = std::time::Duration::MAX;
@@ -528,6 +582,19 @@ async fn query() -> Result<(), Box<dyn std::error::Error>> {
             let decorrido = inicio.elapsed();
             melhor = melhor.min(decorrido);
             assert!(!linhas.is_empty(), "{rotulo} não devolveu nada");
+        }
+        println!("  {rotulo:<38} {melhor:?}");
+    }
+
+    println!();
+    for (rotulo, sql) in &casos_largos {
+        let mut melhor = std::time::Duration::MAX;
+        for _ in 0..3 {
+            let inicio = Instant::now();
+            let _ = db
+                .query_all_raw(Statement::from_string(DatabaseBackend::Sqlite, sql.clone()))
+                .await?;
+            melhor = melhor.min(inicio.elapsed());
         }
         println!("  {rotulo:<38} {melhor:?}");
     }

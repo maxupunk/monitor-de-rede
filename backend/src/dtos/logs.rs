@@ -94,3 +94,88 @@ pub struct LogPageResponse {
     pub data: Vec<LogEntry>,
     pub meta: LogPageMeta,
 }
+
+/// Uma origem vista pelo servidor desde o último reinício.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct LogSourceEntry {
+    pub source_ip: String,
+    /// `device` | `network` | `ambiguous` | `unknown`.
+    pub kind: String,
+    #[ts(type = "number | null")]
+    pub device_id: Option<i64>,
+    pub device_name: Option<String>,
+    /// Candidatos quando o mesmo IP existe em mais de um dispositivo. É o que a
+    /// tela oferece no vínculo manual.
+    #[ts(type = "Array<{ id: number, name: string }>")]
+    pub candidates: Vec<LogSourceCandidate>,
+    pub hostname: Option<String>,
+    #[ts(type = "number")]
+    pub message_count: u64,
+    /// Quantas foram descartadas por não resolver para nada cadastrado.
+    #[ts(type = "number")]
+    pub dropped_count: u64,
+    pub first_seen_at: String,
+    pub last_seen_at: String,
+    pub last_message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct LogSourceCandidate {
+    #[ts(type = "number")]
+    pub id: i64,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct LogSourcesResponse {
+    pub data: Vec<LogSourceEntry>,
+    /// Quantas origens estão descartando mensagem agora. É o número do banner
+    /// da tela — sem ele, a regra "fonte desconhecida não grava" vira um buraco
+    /// negro de suporte.
+    #[ts(type = "number")]
+    pub unknown_count: usize,
+    /// Contadores de ingestão desde o boot.
+    pub metrics: LogIngestMetrics,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct LogIngestMetrics {
+    #[ts(type = "number")]
+    pub received: u64,
+    #[ts(type = "number")]
+    pub stored: u64,
+    #[ts(type = "number")]
+    pub dropped_queue_full: u64,
+    #[ts(type = "number")]
+    pub dropped_rate_limit: u64,
+    #[ts(type = "number")]
+    pub dropped_unknown_source: u64,
+    #[ts(type = "number")]
+    pub dropped_oversized: u64,
+}
+
+/// Corpo de `POST /api/logs/sources/{ip}/bind`.
+///
+/// `deviceId` nulo **desfaz** o vínculo — é o mesmo endpoint, e não um `DELETE`
+/// separado, porque a tela oferece um seletor onde "nenhum" é uma opção.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BindSourceInput {
+    pub device_id: Option<i64>,
+}
+
+/// Filtros do live tail (`GET /api/logs/stream`).
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogStreamQuery {
+    pub device_id: Option<i64>,
+    pub severity: Option<i16>,
+}

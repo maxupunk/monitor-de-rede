@@ -8,18 +8,89 @@
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use crate::services::alerts::fields::{
-    self, interface_speed_transition, interface_status_transition, vpn_status_transition,
+use crate::services::{
+    alerts::fields::{
+        self, interface_speed_transition, interface_status_transition, vpn_status_transition,
+    },
+    syslog::matcher::RULE_TYPE as LOG_PATTERN_TYPE,
 };
 
+/// Monta um template de padrão de log.
+///
+/// A `condition` carrega duas coisas ao mesmo tempo: `field`/`operator`/`value`
+/// para o avaliador e `pattern`/`minSeverity`/`windowSeconds` para o matcher.
+/// O `AlertRuleCondition::from_json` ignora o que não conhece, então as duas
+/// convivem sem coluna nova no banco.
+///
+/// A regex é deliberadamente **case-insensitive** (`(?i)`): fabricante nenhum
+/// combina a caixa das mensagens, e um padrão que só casa em minúsculas passa
+/// despercebido no equipamento do vizinho.
+struct LogPatternSpec {
+    key: &'static str,
+    name: &'static str,
+    description: &'static str,
+    /// Regex sem o `(?i)`, que a função acrescenta.
+    pattern: &'static str,
+    /// Quantas ocorrências na janela para a regra bater.
+    ocorrencias: i64,
+    janela: i64,
+    severity: &'static str,
+    recommended: bool,
+}
+
+fn log_pattern(spec: LogPatternSpec) -> AlertRuleTemplate {
+    let LogPatternSpec {
+        key,
+        name,
+        description,
+        pattern,
+        ocorrencias,
+        janela,
+        severity,
+        recommended,
+    } = spec;
+    AlertRuleTemplate {
+        key,
+        name,
+        description,
+        category: "logs",
+        rule_type: LOG_PATTERN_TYPE,
+        condition: json!({
+            "field": fields::LOG_MATCH_COUNT,
+            "operator": "gte",
+            "value": ocorrencias,
+            "pattern": format!("(?i){pattern}"),
+            "windowSeconds": janela,
+        }),
+        severity,
+        // O sustento já vem da janela deslizante ("N vezes em M minutos"):
+        // exigir também `duration_seconds` pediria que a condição se
+        // mantivesse por mais um período depois de já ter se sustentado.
+        duration_seconds: 0,
+        // A janela do matcher já é a memória do episódio: o alerta só resolve
+        // quando a contagem zera, o que exige M minutos sem nenhuma ocorrência.
+        recovery_window_seconds: 0,
+        flap_threshold: 0,
+        flap_window_seconds: 900,
+        // Log repetido é o caso clássico de fadiga de notificação: um roteador
+        // sob ataque de força bruta gera centenas de linhas por minuto. O
+        // informativo fica de fora, como no resto do catálogo: ele não freia
+        // nada porque não interrompe ninguém.
+        notification_cooldown_seconds: if severity == "info" { 0 } else { 900 },
+        inhibit_when_parent_down: false,
+        recommended,
+    }
+}
+
 /// As seis categorias exibidas na tela, com os rótulos em português.
-pub const CATEGORY_LABELS: [(&str, &str); 6] = [
+pub const CATEGORY_LABELS: [(&str, &str); 7] = [
     ("disponibilidade", "Disponibilidade"),
     ("desempenho", "Desempenho"),
     ("servicos", "Serviços e aplicações"),
     ("interfaces", "Interfaces de rede (SNMP)"),
     ("equipamento", "Equipamento (SNMP)"),
     ("vpn", "Túneis VPN (WireGuard)"),
+    ("logs", "Padrões no log (syslog)"),
 ];
 
 /// Um item do catálogo. Os campos são exatamente os que o frontend lê em
@@ -420,6 +491,77 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             inhibit_when_parent_down: false,
             recommended: false,
         },
+        // --- Padrões no log (Fase 6 do roadmap de syslog) -------------------
+        log_pattern(LogPatternSpec {
+            key: "log_login_failure",
+            name: "Falhas de login no equipamento",
+            description: "Cinco tentativas de autenticação recusadas em cinco minutos — força bruta ou credencial desatualizada em algum sistema.",
+            pattern: r"login failure|failed password|authentication fail|invalid user",
+            ocorrencias: 5,
+            janela: 300,
+            severity: "warning",
+            recommended: true,
+        }),
+        log_pattern(LogPatternSpec {
+            key: "log_system_started",
+            name: "Equipamento reiniciou",
+            description: "O roteador anunciou que subiu. Reinício não programado costuma ser queda de energia, travamento ou atualização automática.",
+            pattern: r"system started|router (re)?booted|starting up",
+            ocorrencias: 1,
+            janela: 300,
+            severity: "critical",
+            recommended: true,
+        }),
+        log_pattern(LogPatternSpec {
+            key: "log_routing_down",
+            name: "Vizinhança de roteamento caiu",
+            description: "OSPF ou BGP perdeu adjacência. Costuma preceder a perda de rota para uma faixa inteira da rede.",
+            pattern: r"ospf.*(down|lost|expired)|bgp.*(down|closing|reset)|neighbor.*down",
+            ocorrencias: 1,
+            janela: 300,
+            severity: "critical",
+            recommended: true,
+        }),
+        log_pattern(LogPatternSpec {
+            key: "log_pppoe_flapping",
+            name: "PPPoE caindo repetidamente",
+            description: "Três quedas de sessão PPPoE em dez minutos. Link do provedor instável, e não queda limpa.",
+            pattern: r"pppoe.*(terminat|disconnect|down)|ppp.*link.*(terminated|down)",
+            ocorrencias: 3,
+            janela: 600,
+            severity: "warning",
+            recommended: true,
+        }),
+        log_pattern(LogPatternSpec {
+            key: "log_dhcp_pool_exhausted",
+            name: "Pool DHCP esgotado",
+            description: "Não há mais endereço para entregar. Cliente novo na rede simplesmente não conecta, sem erro visível para o usuário.",
+            pattern: r"no more (free )?addresses|pool.*(exhaust|full)|dhcp.*no free",
+            ocorrencias: 1,
+            janela: 600,
+            severity: "critical",
+            recommended: true,
+        }),
+        log_pattern(LogPatternSpec {
+            key: "log_out_of_memory",
+            name: "Equipamento sem memória",
+            description: "O roteador relatou falta de memória. É o aviso que antecede travamento e reinício.",
+            pattern: r"out of memory|no memory|memory (low|exhaust)|cannot allocate",
+            ocorrencias: 1,
+            janela: 600,
+            severity: "critical",
+            recommended: true,
+        }),
+        log_pattern(LogPatternSpec {
+            key: "log_config_changed",
+            name: "Configuração alterada",
+            description: "Alguém mudou a configuração do equipamento. Não é falha: é rastro de auditoria, útil para correlacionar com um problema que começou logo depois.",
+            pattern: r"config(uration)? (changed|saved|written)|commit.*complete",
+            ocorrencias: 1,
+            janela: 300,
+            severity: "info",
+            recommended: false,
+        }),
     ]
 }
 
@@ -440,20 +582,27 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
-    #[test]
-    fn o_catalogo_tem_os_dezoito_templates_do_roadmap() {
-        assert_eq!(all().len(), 18);
-    }
+    /// 18 do roadmap de alertas + 7 padrões de log (Fase 6 do roadmap de
+    /// syslog).
+    const TOTAL_TEMPLATES: usize = 25;
 
     #[test]
-    fn sete_templates_compoem_o_conjunto_basico() {
-        assert_eq!(recommended().len(), 7);
+    fn o_catalogo_tem_os_templates_dos_dois_roadmaps() {
+        assert_eq!(all().len(), TOTAL_TEMPLATES);
+    }
+
+    /// 7 do conjunto original + 6 dos padrões de log. Só `log_config_changed`
+    /// fica de fora: é rastro de auditoria, não problema, e ligá-lo por padrão
+    /// encheria a Central de alerta informativo.
+    #[test]
+    fn treze_templates_compoem_o_conjunto_basico() {
+        assert_eq!(recommended().len(), 13);
     }
 
     #[test]
     fn as_chaves_sao_unicas() {
         let keys: HashSet<&str> = all().iter().map(|template| template.key).collect();
-        assert_eq!(keys.len(), 18);
+        assert_eq!(keys.len(), TOTAL_TEMPLATES);
     }
 
     #[test]
@@ -466,7 +615,7 @@ mod tests {
                 template.category
             );
         }
-        assert_eq!(labels.len(), 6);
+        assert_eq!(labels.len(), 7);
     }
 
     #[test]

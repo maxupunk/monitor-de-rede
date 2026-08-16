@@ -12,11 +12,18 @@ use std::collections::{HashMap, HashSet};
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect};
 
 use crate::{
-    dtos::logs::{LogEntry, LogPageMeta, LogPageResponse},
+    dtos::logs::{
+        LogEntry, LogIngestMetrics, LogPageMeta, LogPageResponse, LogSourceCandidate,
+        LogSourceEntry, LogSourcesResponse,
+    },
     models::{_entities::devices, logs::device_logs},
     services::{
         shared::errors::AppResult,
-        syslog::repository::{LogPage, LogQuery},
+        syslog::{
+            queue::IngestSnapshot,
+            repository::{LogPage, LogQuery},
+            sources::{SeenSource, SourceKind},
+        },
     },
 };
 
@@ -88,6 +95,17 @@ async fn nomes_de_dispositivo(
     Ok(encontrados.into_iter().collect())
 }
 
+/// Serializa sem hidratar o nome do dispositivo.
+///
+/// É o caminho do live tail: o escritor está no meio da ingestão e consultar
+/// `devices` a cada lote para preencher um rótulo seria pagar uma ida ao banco
+/// principal por linha publicada. A tela já conhece os nomes — ela acabou de
+/// paginar — e completa o que faltar pelo `deviceId`.
+#[must_use]
+pub fn serialize_entry_sem_nome(linha: device_logs::Model) -> LogEntry {
+    serialize_entry(linha, &HashMap::new())
+}
+
 fn serialize_entry(linha: device_logs::Model, nomes: &HashMap<i64, String>) -> LogEntry {
     LogEntry {
         id: linha.id,
@@ -111,6 +129,86 @@ fn serialize_entry(linha: device_logs::Model, nomes: &HashMap<i64, String>) -> L
         }),
         message: linha.message,
     }
+}
+
+/// Serializa as fontes vistas, hidratando nome de dispositivo e candidatos.
+///
+/// # Errors
+///
+/// Propaga erro do banco principal.
+pub async fn serialize_sources(
+    inventory: &DatabaseConnection,
+    fontes: Vec<SeenSource>,
+    unknown_count: usize,
+    metrics: IngestSnapshot,
+) -> AppResult<LogSourcesResponse> {
+    let ids: HashSet<i64> = fontes
+        .iter()
+        .flat_map(|fonte| fonte.device_id.into_iter().chain(fonte.candidates.clone()))
+        .collect();
+    let nomes = nomes_por_id(inventory, ids).await?;
+
+    Ok(LogSourcesResponse {
+        data: fontes
+            .into_iter()
+            .map(|fonte| LogSourceEntry {
+                kind: match fonte.kind {
+                    SourceKind::Device => "device",
+                    SourceKind::Network => "network",
+                    SourceKind::Ambiguous => "ambiguous",
+                    SourceKind::Unknown => "unknown",
+                }
+                .to_owned(),
+                device_name: fonte.device_id.and_then(|id| nomes.get(&id)).cloned(),
+                candidates: fonte
+                    .candidates
+                    .iter()
+                    .map(|id| LogSourceCandidate {
+                        id: *id,
+                        name: nomes
+                            .get(id)
+                            .cloned()
+                            .unwrap_or_else(|| format!("Dispositivo {id}")),
+                    })
+                    .collect(),
+                source_ip: fonte.source_ip,
+                device_id: fonte.device_id,
+                hostname: fonte.hostname,
+                message_count: fonte.message_count,
+                dropped_count: fonte.dropped_count,
+                first_seen_at: fonte.first_seen_at.to_rfc3339(),
+                last_seen_at: fonte.last_seen_at.to_rfc3339(),
+                last_message: fonte.last_message,
+            })
+            .collect(),
+        unknown_count,
+        metrics: LogIngestMetrics {
+            received: metrics.received,
+            stored: metrics.queued,
+            dropped_queue_full: metrics.dropped_queue_full,
+            dropped_rate_limit: metrics.dropped_rate_limit,
+            dropped_unknown_source: metrics.dropped_unknown_source,
+            dropped_oversized: metrics.dropped_oversized,
+        },
+    })
+}
+
+async fn nomes_por_id(
+    inventory: &DatabaseConnection,
+    ids: HashSet<i64>,
+) -> AppResult<HashMap<i64, String>> {
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let encontrados: Vec<(i64, String)> = devices::Entity::find()
+        .select_only()
+        .column(devices::Column::Id)
+        .column(devices::Column::Name)
+        .filter(devices::Column::Id.is_in(ids))
+        .into_tuple()
+        .all(inventory)
+        .await?;
+    Ok(encontrados.into_iter().collect())
 }
 
 #[cfg(test)]

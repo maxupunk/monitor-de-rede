@@ -191,6 +191,15 @@ pub async fn run_cycle(ctx: &AppContext) -> AppResult<usize> {
     if let Err(error) = run_data_pruner_if_due(ctx).await {
         tracing::warn!(%error, "falha ao executar purga de dados antigos");
     }
+    // Padrões de log casam na ingestão; a avaliação das janelas acontece aqui,
+    // junto do resto do motor de alertas — é o que dá ao alerta de log a mesma
+    // histerese, detecção de flapping e higiene de notificação das demais
+    // regras (ver `syslog::matcher`).
+    if let Some(servico) = syslog::SyslogService::from_context(ctx) {
+        if let Err(error) = syslog::matcher::evaluate(ctx, &servico.matcher).await {
+            tracing::warn!(%error, "falha ao avaliar padrões de log");
+        }
+    }
     // O relay do `event_outbox` **não** roda aqui. Ele é in-process e só
     // entrega a quem tem conexão SSE aberta — o servidor. Ver
     // `initializers::monitoring::spawn_event_relay`.

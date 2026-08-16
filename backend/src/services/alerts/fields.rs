@@ -55,11 +55,25 @@ pub const VPN_PEER_STATUS: &str = "vpnPeerStatus";
 pub const VPN_STATUS_TRANSITION: &str = "vpnStatusTransition";
 /// Segundos desde o último sinal de vida (keepalive ou handshake).
 pub const VPN_SECONDS_SINCE_ACTIVITY: &str = "vpnSecondsSinceActivity";
+
+// --- Padrões no log recebido por syslog -------------------------------------
+
+/// Chave do padrão que casou, igual à do template (`log_login_failure`).
+pub const LOG_PATTERN_KEY: &str = "logPatternKey";
+/// Quantas vezes o padrão casou dentro da janela deslizante. É o campo que a
+/// regra compara ("N ocorrências em M minutos").
+pub const LOG_MATCH_COUNT: &str = "logMatchCount";
+/// Largura da janela observada, em segundos.
+pub const LOG_WINDOW_SECONDS: &str = "logWindowSeconds";
+/// A severidade mais grave entre as linhas que casaram (0 = emergência).
+pub const LOG_SEVERITY: &str = "logSeverity";
+/// A última mensagem que casou — vai para o texto do alerta.
+pub const LOG_MESSAGE: &str = "logMessage";
 pub const VPN_PREVIOUS_STATUS: &str = "vpnPreviousStatus";
 
 /// Vocabulário completo oferecido na tela de regras. A **ordem importa**: é a
 /// ordem em que os campos aparecem no seletor da interface.
-pub const ALERT_FIELDS: [&str; 24] = [
+pub const ALERT_FIELDS: [&str; 29] = [
     STATUS,
     LATENCY_MS,
     PACKET_LOSS,
@@ -82,6 +96,11 @@ pub const ALERT_FIELDS: [&str; 24] = [
     VPN_PEER_STATUS,
     VPN_STATUS_TRANSITION,
     VPN_SECONDS_SINCE_ACTIVITY,
+    LOG_PATTERN_KEY,
+    LOG_MATCH_COUNT,
+    LOG_WINDOW_SECONDS,
+    LOG_SEVERITY,
+    LOG_MESSAGE,
     // Fora da tela, mas avaliáveis: publicados pelos datasets.
     "success",
     "type",

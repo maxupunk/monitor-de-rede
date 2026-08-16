@@ -13,6 +13,7 @@ use sea_orm::DatabaseConnection;
 
 use super::{
     config::SyslogConfig,
+    matcher::PatternMatcher,
     parser,
     queue::{IngestMetrics, LogQueue, PendingLog, RateLimiter},
     resolver::Resolver,
@@ -30,6 +31,7 @@ pub struct Ingestor {
     limiter: Arc<RateLimiter>,
     pub sources: Arc<SourceRegistry>,
     metrics: Arc<IngestMetrics>,
+    matcher: Arc<PatternMatcher>,
 }
 
 impl Ingestor {
@@ -39,6 +41,7 @@ impl Ingestor {
         config: SyslogConfig,
         queue: LogQueue,
         sources: Arc<SourceRegistry>,
+        matcher: Arc<PatternMatcher>,
     ) -> Self {
         let metrics = Arc::clone(queue.metrics());
         let limiter = Arc::new(RateLimiter::new(config.rate_limit_per_source));
@@ -50,6 +53,7 @@ impl Ingestor {
             limiter,
             sources,
             metrics,
+            matcher,
         }
     }
 
@@ -120,6 +124,12 @@ impl Ingestor {
             return false;
         }
 
+        // O casamento de padrão acontece **aqui**, na ingestão, e não por
+        // consulta: regex sobre a janela não usa índice nenhum. Sai de graça
+        // quando não há regra de log cadastrada. Ver `matcher`.
+        self.matcher
+            .record(resolucao.device_id(), &parsed, recebido_em);
+
         self.queue.try_enqueue(PendingLog {
             device_id: resolucao.device_id(),
             source_ip,
@@ -158,7 +168,13 @@ mod tests {
         std::mem::forget(receiver);
         let sources = Arc::new(SourceRegistry::create());
         (
-            Ingestor::new(inventario, config, queue.clone(), sources),
+            Ingestor::new(
+                inventario,
+                config,
+                queue.clone(),
+                sources,
+                Arc::new(PatternMatcher::create()),
+            ),
             queue,
         )
     }

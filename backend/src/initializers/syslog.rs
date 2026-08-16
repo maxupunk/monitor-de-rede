@@ -30,19 +30,35 @@ impl Initializer for SyslogInitializer {
     }
 
     async fn before_run(&self, ctx: &AppContext) -> Result<()> {
-        if ctx.environment == Environment::Test {
-            return Ok(());
-        }
         let config = SyslogConfig::from_env();
         if !config.enabled {
             tracing::info!("servidor de syslog desligado (SYSLOG_ENABLED=false)");
             return Ok(());
         }
 
-        // Falha aqui **não** derruba o boot: porta ocupada ou banco de logs
-        // indisponível não podem impedir o monitoramento e a interface web de
-        // subirem. O erro fica no log e a tela de logs mostra o serviço parado.
-        match syslog::start(ctx, config).await {
+        // O pipeline sobe em **todo** ambiente, inclusive no de teste: ele não
+        // abre porta, e é dele que a API de logs depende. Falha aqui não
+        // derruba o boot — o monitoramento e a interface web precisam subir de
+        // qualquer forma.
+        let servico = match syslog::build(ctx, &config) {
+            Ok(servico) => servico,
+            Err(error) => {
+                tracing::error!(%error, "não foi possível montar o pipeline de syslog");
+                return Ok(());
+            }
+        };
+
+        // **Só o socket é barrado no teste.** O `request_with_config` sobe o
+        // servidor completo, initializers inclusive: sem esta trava, *todo*
+        // teste de requisição tentaria abrir a 5514 e os que rodam em paralelo
+        // colidiriam. A garantia é por construção — checagem de ambiente —,
+        // não por lembrar de definir uma variável em cada teste. Quem exercita
+        // o listener o faz direto, por `listener::spawn_udp` em porta 0.
+        if ctx.environment == Environment::Test {
+            return Ok(());
+        }
+
+        match syslog::spawn_listeners(&servico, &config).await {
             Ok((udp, tcp)) => {
                 tracing::info!(
                     udp,
@@ -51,7 +67,7 @@ impl Initializer for SyslogInitializer {
                 );
             }
             Err(error) => {
-                tracing::error!(%error, "não foi possível subir o servidor de syslog");
+                tracing::error!(%error, "não foi possível abrir as portas de syslog");
             }
         }
         Ok(())

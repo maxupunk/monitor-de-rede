@@ -1,9 +1,13 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { useInfiniteCursor } from '@/composables/useInfiniteCursor'
+import { apiService } from '@/services/apiService'
 import type { LogEntry } from '@/bindings/LogEntry'
+import type { LogSourcesResponse } from '@/bindings/LogSourcesResponse'
+import type { LogSourceEntry } from '@/bindings/LogSourceEntry'
+import type { SetupGuide } from '@/bindings/SetupGuide'
 
-export type { LogEntry }
+export type { LogEntry, LogSourceEntry, SetupGuide }
 
 export interface LogFilters {
   deviceId: number | null
@@ -80,6 +84,104 @@ export const useLogsStore = defineStore('logs', () => {
     list.reset()
   }
 
+  // --- live tail ------------------------------------------------------------
+
+  const tailing = ref(false)
+  let tailSource: EventSource | null = null
+
+  /**
+   * Liga o live tail.
+   *
+   * Stream **próprio**, não o `/api/events/stream` do painel: o barramento de
+   * log é separado justamente para que um tail atrasado não derrube eventos de
+   * domínio (ver `services/syslog/bus.rs` no backend).
+   */
+  function startTail(): void {
+    if (tailSource) return
+    const params = new URLSearchParams()
+    if (filters.value.deviceId !== null) params.set('deviceId', String(filters.value.deviceId))
+    if (filters.value.severity !== null) params.set('severity', String(filters.value.severity))
+    const token = localStorage.getItem('auth_token')
+    if (token) params.set('token', token)
+
+    tailSource = new EventSource(`/api/logs/stream?${params.toString()}`)
+    tailSource.onmessage = (msg) => {
+      try {
+        const bruto = JSON.parse(msg.data) as Record<string, unknown>
+        // O primeiro quadro é só o handshake com o `retry`.
+        if (bruto.type === 'stream:connected') return
+        list.prepend([bruto as unknown as LogEntry], (entry) => entry.id)
+      } catch {
+        // Quadro ilegível não pode derrubar o tail.
+      }
+    }
+    tailSource.onerror = () => {
+      // O `EventSource` reconecta sozinho; a bandeira só reflete o estado.
+      tailing.value = tailSource?.readyState !== EventSource.CLOSED
+    }
+    tailing.value = true
+  }
+
+  function stopTail(): void {
+    tailSource?.close()
+    tailSource = null
+    tailing.value = false
+  }
+
+  function toggleTail(): void {
+    if (tailing.value) stopTail()
+    else startTail()
+  }
+
+  // --- fontes vistas --------------------------------------------------------
+
+  const sources = ref<LogSourceEntry[]>([])
+  const unknownCount = ref(0)
+  const sourcesLoaded = ref(false)
+
+  async function fetchSources(): Promise<boolean> {
+    try {
+      const response = await apiService.get<LogSourcesResponse>('/logs/sources')
+      sources.value = response.data ?? []
+      unknownCount.value = response.unknownCount ?? 0
+      sourcesLoaded.value = true
+      return true
+    } catch {
+      // A ingestão pode estar desligada; a tela de logs continua útil.
+      sourcesLoaded.value = true
+      return false
+    }
+  }
+
+  async function bindSource(sourceIp: string, deviceId: number | null): Promise<boolean> {
+    try {
+      await apiService.post(`/logs/sources/${encodeURIComponent(sourceIp)}/bind`, { deviceId })
+      await fetchSources()
+      list.reset()
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  // --- guia de configuração -------------------------------------------------
+
+  const setupGuide = ref<SetupGuide | null>(null)
+
+  async function fetchSetupGuide(): Promise<void> {
+    try {
+      // O host da barra de endereços é o melhor palpite do endereço que o
+      // roteador alcança: de dentro do container o processo só enxerga o IP da
+      // bridge, que não serve para aparelho nenhum.
+      const address = window.location.hostname
+      setupGuide.value = await apiService.get<SetupGuide>(
+        `/logs/setup-snippet?address=${encodeURIComponent(address)}`
+      )
+    } catch {
+      setupGuide.value = null
+    }
+  }
+
   return {
     filters,
     entries: list.items,
@@ -92,6 +194,17 @@ export const useLogsStore = defineStore('logs', () => {
     prepend: list.prepend,
     applyFilters,
     clearFilters,
+    tailing,
+    startTail,
+    stopTail,
+    toggleTail,
+    sources,
+    unknownCount,
+    sourcesLoaded,
+    fetchSources,
+    bindSource,
+    setupGuide,
+    fetchSetupGuide,
   }
 })
 

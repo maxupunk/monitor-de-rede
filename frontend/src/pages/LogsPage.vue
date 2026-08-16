@@ -5,12 +5,46 @@
       subtitle="Mensagens de syslog recebidas dos roteadores e vinculadas ao inventário"
     >
       <template #actions>
-        <v-chip v-if="logsStore.window" color="primary" size="large" variant="tonal">
-          <v-icon start>mdi-clock-outline</v-icon>
-          <span class="hidden-xs">{{ windowLabel }}</span>
-        </v-chip>
+        <v-btn
+          :color="logsStore.tailing ? 'success' : 'primary'"
+          :variant="logsStore.tailing ? 'flat' : 'tonal'"
+          class="mr-2"
+          @click="logsStore.toggleTail()"
+        >
+          <v-icon start>
+            {{ logsStore.tailing ? 'mdi-radiobox-marked' : 'mdi-play-circle-outline' }}
+          </v-icon>
+          <span class="hidden-xs">{{ logsStore.tailing ? 'Ao vivo' : 'Acompanhar' }}</span>
+        </v-btn>
+        <v-btn color="primary" variant="tonal" @click="openSetup">
+          <v-icon start>mdi-cog-outline</v-icon>
+          <span class="hidden-xs">Configurar envio</span>
+        </v-btn>
       </template>
     </PageHeader>
+
+    <v-alert
+      v-if="logsStore.unknownCount > 0"
+      type="warning"
+      variant="tonal"
+      class="mb-4"
+      border="start"
+    >
+      <div class="d-flex align-center flex-wrap ga-2">
+        <div class="flex-grow-1">
+          <strong>
+            {{ logsStore.unknownCount }}
+            {{ logsStore.unknownCount === 1 ? 'origem está enviando' : 'origens estão enviando' }}
+            log e {{ logsStore.unknownCount === 1 ? 'não é reconhecida' : 'não são reconhecidas' }}.
+          </strong>
+          Essas mensagens estão sendo descartadas para não encher o disco. Vincule cada endereço a
+          um dispositivo para começar a guardá-las.
+        </div>
+        <v-btn color="warning" variant="flat" size="small" @click="openSources">
+          Ver origens
+        </v-btn>
+      </div>
+    </v-alert>
 
     <v-card elevation="2" class="rounded-lg mb-6 pa-4">
       <v-row density="compact">
@@ -38,7 +72,7 @@
             clearable
             density="compact"
             variant="outlined"
-            @update:model-value="logsStore.applyFilters({ deviceId })"
+            @update:model-value="onFilterChange({ deviceId })"
           ></v-select>
         </v-col>
         <v-col cols="12" sm="6" md="3">
@@ -52,7 +86,7 @@
             clearable
             density="compact"
             variant="outlined"
-            @update:model-value="logsStore.applyFilters({ severity })"
+            @update:model-value="onFilterChange({ severity })"
           ></v-select>
         </v-col>
         <v-col cols="12" sm="6" md="2">
@@ -65,92 +99,34 @@
             hide-details
             density="compact"
             variant="outlined"
-            @update:model-value="logsStore.applyFilters({ hours })"
+            @update:model-value="onFilterChange({ hours })"
           ></v-select>
         </v-col>
       </v-row>
+      <div v-if="windowLabel" class="text-caption text-grey mt-2">
+        Mostrando registros {{ windowLabel }}.
+      </div>
     </v-card>
 
-    <v-alert v-if="logsStore.error" type="error" variant="tonal" class="mb-4" border="start">
-      {{ logsStore.error }}
-    </v-alert>
+    <LogTable
+      :entries="logsStore.entries"
+      :scroll-key="logsStore.scrollKey"
+      :load="logsStore.load"
+      :error="logsStore.error"
+    />
 
-    <v-infinite-scroll :key="logsStore.scrollKey" @load="logsStore.load">
-      <v-table density="compact" class="rounded-lg border">
-        <thead>
-          <tr>
-            <th class="text-left" style="width: 170px">Recebido</th>
-            <th class="text-left" style="width: 110px">Severidade</th>
-            <th class="text-left" style="width: 200px">Origem</th>
-            <th class="text-left">Mensagem</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="entry in logsStore.entries" :key="entry.id">
-            <td class="text-caption text-no-wrap">{{ formatReceivedAt(entry.receivedAt) }}</td>
-            <td>
-              <v-chip
-                :color="severityColor(entry.severity)"
-                size="x-small"
-                variant="tonal"
-                class="text-capitalize"
-              >
-                {{ entry.severityLabel ?? 'sem nível' }}
-              </v-chip>
-            </td>
-            <td class="text-caption">
-              <RouterLink
-                v-if="entry.deviceId"
-                :to="{ name: 'device-detail', params: { id: entry.deviceId } }"
-                class="text-primary font-weight-medium text-decoration-none"
-              >
-                {{ entry.deviceName ?? `Dispositivo ${entry.deviceId}` }}
-              </RouterLink>
-              <span v-else class="text-grey">{{ entry.hostname ?? entry.sourceIp }}</span>
-              <div class="text-grey text-caption">{{ entry.sourceIp }}</div>
-            </td>
-            <td class="text-body-2">
-              <span class="log-message">{{ entry.message }}</span>
-              <div v-if="entry.topics.length > 0" class="mt-1">
-                <v-chip
-                  v-for="topic in entry.topics"
-                  :key="topic"
-                  size="x-small"
-                  variant="outlined"
-                  class="mr-1"
-                >
-                  {{ topic }}
-                </v-chip>
-              </div>
-              <div v-else-if="entry.appName" class="text-caption text-grey mt-1">
-                {{ entry.appName }}<template v-if="entry.pid">[{{ entry.pid }}]</template>
-              </div>
-            </td>
-          </tr>
-        </tbody>
-      </v-table>
-      <template #empty>
-        <div class="text-caption text-grey text-center py-4">
-          Não há mais registros no período consultado.
-        </div>
-      </template>
-    </v-infinite-scroll>
-
-    <div v-if="logsStore.isEmpty" class="pa-8 text-center text-grey">
-      <v-icon size="48" color="grey-lighten-1" class="mb-2">mdi-text-box-search-outline</v-icon>
-      <div class="text-subtitle-2 font-weight-medium">Nenhum registro encontrado</div>
-      <div class="text-caption">
-        Ajuste os filtros ou verifique se os roteadores estão enviando syslog para este servidor.
-      </div>
-    </div>
+    <LogSourcesDialog v-model="sourcesDialog" />
+    <SyslogSetupDialog v-model="setupDialog" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { RouterLink } from 'vue-router'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
-import { useLogsStore, severityColor, SEVERITY_OPTIONS, WINDOW_OPTIONS } from '@/stores/logs'
+import LogTable from '@/components/logs/LogTable.vue'
+import LogSourcesDialog from '@/components/logs/LogSourcesDialog.vue'
+import SyslogSetupDialog from '@/components/logs/SyslogSetupDialog.vue'
+import { useLogsStore, SEVERITY_OPTIONS, WINDOW_OPTIONS, type LogFilters } from '@/stores/logs'
 import { useDevicesStore } from '@/stores/devices'
 
 const logsStore = useLogsStore()
@@ -160,6 +136,8 @@ const search = ref('')
 const deviceId = ref<number | null>(null)
 const severity = ref<number | null>(null)
 const hours = ref<number | null>(24)
+const sourcesDialog = ref(false)
+const setupDialog = ref(false)
 
 const severityOptions = SEVERITY_OPTIONS
 const windowOptions = WINDOW_OPTIONS
@@ -179,28 +157,36 @@ const windowLabel = computed(() => {
   return `desde ${inicio.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}`
 })
 
-function applySearch(): void {
-  logsStore.applyFilters({ search: search.value ?? '' })
+/**
+ * Mudar o filtro reinicia o tail junto com a lista: o stream carrega os
+ * mesmos filtros, e mantê-lo com os antigos empilharia no topo linhas que a
+ * tabela abaixo não mostraria.
+ */
+function onFilterChange(next: Partial<LogFilters>): void {
+  const estavaAoVivo = logsStore.tailing
+  if (estavaAoVivo) logsStore.stopTail()
+  logsStore.applyFilters(next)
+  if (estavaAoVivo) logsStore.startTail()
 }
 
-function formatReceivedAt(value: string): string {
-  return new Date(value).toLocaleString('pt-BR', {
-    dateStyle: 'short',
-    timeStyle: 'medium',
-  })
+function applySearch(): void {
+  onFilterChange({ search: search.value ?? '' })
+}
+
+function openSources(): void {
+  sourcesDialog.value = true
+}
+
+function openSetup(): void {
+  setupDialog.value = true
 }
 
 onMounted(() => {
   void devicesStore.fetchDevices()
+  void logsStore.fetchSources()
 })
-</script>
 
-<style scoped>
-/* Mensagem de log é texto pré-formatado: quebrar palavra longa é melhor do que
-   estourar a largura da tabela com uma linha de firewall. */
-.log-message {
-  font-family: 'Roboto Mono', 'Courier New', monospace;
-  font-size: 0.8125rem;
-  word-break: break-word;
-}
-</style>
+// O `EventSource` sobrevive à troca de rota se ninguém o fechar — e ficaria
+// empilhando linhas numa lista que não está mais na tela.
+onUnmounted(() => logsStore.stopTail())
+</script>

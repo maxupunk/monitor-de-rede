@@ -17,12 +17,16 @@
 use sea_orm_migration::prelude::*;
 
 mod m20260815_000001_device_logs;
+mod m20260816_000001_device_logs_fts;
 
 pub struct LogsMigrator;
 
 #[async_trait::async_trait]
 impl MigratorTrait for LogsMigrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![Box::new(m20260815_000001_device_logs::Migration)]
+        vec![
+            Box::new(m20260815_000001_device_logs::Migration),
+            Box::new(m20260816_000001_device_logs_fts::Migration),
+        ]
     }
 }

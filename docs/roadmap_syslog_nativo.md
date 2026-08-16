@@ -20,7 +20,7 @@ do desenho original mudaram; estão marcados com **⚠** onde aparecem.
 | `syslog_loose` 0.23.0 (MIT, `nom 8` interno) | não devolve `Result` — linha ruim vira "tudo é mensagem" |
 | `received_at` é a verdade | RFC 3164 vem sem ano e sem fuso |
 | Fonte que não resolve não grava | um host solto enche o disco |
-| Só `LIKE` na busca | FTS5 é do SQLite; PostgreSQL precisa valer igual |
+| Busca atrás de trait, escolhida em runtime | FTS5 no SQLite, `tsvector` no PostgreSQL, `LIKE` de fundo. Medido: os dois perdem em lados opostos — ver Fase 5 |
 | ⚠ **`LogBus` dedicado**, não o `EventBus` | o `EventBus` é `broadcast` de 1024 compartilhado com o SSE do dashboard; 12 msg/s rola o anel em 85 s e o painel perde `monitor:result` |
 | ⚠ Fila cheia descarta o **mais novo** | `mpsc::try_send` devolve o mais novo; descartar o mais antigo exigiria ring próprio. Contador exposto do mesmo jeito |
 | ⚠ `from` padrão de 24 h, janela com teto | `LIKE '%q%'` sem janela varre ~1,5 GB em 7 M de linhas |
@@ -47,6 +47,8 @@ src/services/syslog/
   snippets.rs      comandos por fabricante
   repository.rs    consulta com cursor de keyset
   matcher.rs       Fase 6 — regex na ingestão
+  search.rs        Fase 5 — FTS5 / tsvector / LIKE por densidade
+  retention.rs     dias + tamanho, o que vencer primeiro
 src/controllers/logs.rs
 src/models/logs/           entidades escritas à mão (não geradas)
 src/dtos/logs.rs           camelCase
@@ -60,7 +62,7 @@ examples/spikes/syslog_parse.rs
 src/pages/LogsPage.vue
 src/stores/logs.ts
 src/composables/useInfiniteCursor.ts
-src/components/logs/LogTable.vue, LogFilters.vue, SyslogSetupCard.vue
+src/components/logs/LogTable.vue, LogSourcesDialog.vue, SyslogSetupDialog.vue
 ```
 
 Aba **Logs** no `DeviceDetailPage.vue`, já filtrada.
@@ -81,9 +83,10 @@ Payload cru só com `SYSLOG_STORE_RAW=true`.
 Índices:
 
 ```
-idx-device_logs-device-received     (device_id, received_at)
-idx-device_logs-received            (received_at)
-idx-device_logs-severity-received   (severity, received_at)
+device_logs_device_received_index     (device_id, received_at)
+device_logs_received_at_index         (received_at)
+device_logs_severity_received_index   (severity, received_at)
+device_logs_fts                       FTS5 de conteúdo externo (Fase 5)
 ```
 
 ### API
@@ -285,15 +288,32 @@ Alvo era ~200 ms; o pior caso ficou 25× abaixo. Duas leituras:
   irrelevante nesta escala, mas é o que cresce se o parque virar um parque de
   erros.
 
-### Fase 4 — Tempo real e diagnóstico 🔴 Pendente
+### Fase 4 — Tempo real e diagnóstico 🟢 Concluída
 
-- [ ] `bus.rs` (`LogBus` dedicado)
-- [ ] `GET /api/logs/stream` com filtro
-- [ ] Live tail ligável na `/logs`
-- [ ] Aba **Logs** no `DeviceDetailPage`
-- [ ] `GET /api/logs/sources` + `POST /api/logs/sources/{ip}/bind`
-- [ ] Banner na `/logs` enquanto houver fonte desconhecida descartando
-- [ ] `GET /api/logs/setup-snippet` + `SyslogSetupCard.vue`
+- [x] `bus.rs` (`LogBus` dedicado, anel de 512 separado do de domínio)
+- [x] `GET /api/logs/stream` com filtro por dispositivo e severidade
+- [x] Live tail ligável na `/logs`, com o filtro reiniciando o stream junto
+- [x] Aba **Logs** no `DeviceDetailPage`, reaproveitando a store e o `LogTable`
+- [x] `GET /api/logs/sources` + `POST /api/logs/sources/{ip}/bind`
+- [x] Banner na `/logs` enquanto houver fonte desconhecida descartando
+- [x] `GET /api/logs/setup-snippet` + `SyslogSetupDialog.vue` (4 fabricantes)
+
+Duas decisões que a implementação exigiu:
+
+- **O `bind` manual vence toda a heurística** e persiste em `system_settings`
+  (chave `syslog.source_bindings`). Tabela própria custaria migration, entrada
+  no `CREATION_ORDER` e uma FK que não pode existir — o log mora no outro banco.
+  Vincular invalida o cache do resolvedor na hora; sem isso o operador
+  continuaria vendo "desconhecida" por até 30 s.
+- **O pipeline subiu para fora da trava de teste.** A trava barrava o serviço
+  inteiro, e com ele a API de diagnóstico — `GET /api/logs/sources` respondia
+  400 em teste, e responderia 400 em produção se a porta estivesse ocupada,
+  justamente onde o operador iria procurar o motivo. Agora `build` monta o
+  pipeline em todo ambiente e só `spawn_listeners` é barrado.
+
+O live tail publica **depois** da gravação, com o `id` que o banco devolveu: é
+ele que permite à tela deduplicar na fronteira entre o tempo real e a
+paginação. O `RETURNING` extra só é pago quando há assinante.
 
 ```
 # RouterOS
@@ -308,28 +328,63 @@ uci set system.@system[0].log_port='514'
 uci commit system && /etc/init.d/log restart
 ```
 
-### Fase 5 — Full-text 🔴 Pendente
+### Fase 5 — Full-text 🟢 Concluída
 
-Só depois de a Fase 3 estar em uso e o `LIKE` com janela provar insuficiente.
+O gate desta fase era "o `LIKE` com janela provar insuficiente". **Provou** — e
+por um motivo que a medição da Fase 3 não tinha alcançado, porque só testou a
+janela de 24 h. Com 1 M de linhas e janela de 7 dias:
 
-- [ ] Trait `LogSearch`
-- [ ] Implementação FTS5 (SQLite)
-- [ ] Implementação `tsvector` (PostgreSQL)
-- [ ] `LIKE` como fallback
+| termo | `LIKE` | FTS5 |
+|---|---|---|
+| denso (casa em 12% das linhas) | 567 µs | **450 ms** |
+| esparso (não casa com nada) | **847 ms** | 164 µs |
 
-### Fase 6 — Alertas por padrão 🔴 Pendente
+Os dois perdem em lados opostos, e a causa é a mesma: o `LIMIT 51`. Com termo
+denso o `LIKE` enche a página nas primeiras linhas e sai cedo; o índice, não —
+precisa materializar as 125 mil linhas que casam antes de ordenar. Com termo
+esparso é o inverso: o `LIKE` só prova a ausência varrendo tudo. **E "não achei
+nada" é o resultado mais comum de quem procura um erro específico.**
 
-- [ ] Dataset `log_pattern` ao lado de `interface_state`, `monitor_result` e
-      `vpn_peer`
-- [ ] `matcher.rs`: regex compilada uma vez, casamento na ingestão
-- [ ] Contador de janela deslizante em memória por `(rule_id, device_id)`
-- [ ] Disparo alimentando o `manager` existente (herda histerese, flapping e
-      higiene de notificação — tempestade de log não vira tempestade de
-      notificação)
-- [ ] Catálogo: falha de login, `system started` inesperado, OSPF/BGP down,
-      PPPoE caindo, pool DHCP esgotado, `out of memory`, alteração de
-      configuração
-- [ ] Tela de regra de log no frontend
+- [x] Trait `LogSearch`
+- [x] Implementação FTS5 (SQLite), conteúdo externo + gatilhos
+- [x] Implementação `tsvector` + índice GIN (PostgreSQL)
+- [x] `LIKE` como fallback, escolhido em tempo de execução por sondagem do
+      catálogo — índice ausente não vira erro de SQL em toda busca
+- [x] **Escolha por densidade**: até 10 000 casamentos o filtro é a lista de
+      ids do índice; acima disso o termo é denso e o `LIKE` volta. Os dois
+      ramos ficam abaixo de 1 ms
+
+O que muda para o usuário: a busca passa a casar por **token com prefixo**, não
+por substring. `ethe` acha `ether1`; `ther1` não. É a troca que compra os
+847 ms, é a mesma semântica de qualquer ferramenta de log com índice, e está
+fixada em teste.
+
+### Fase 6 — Alertas por padrão 🟢 Concluída
+
+- [x] Dataset `log_pattern` ao lado de `interface_state`, `monitor_result` e
+      `vpn_peer`, com cinco campos novos no vocabulário das regras
+- [x] `matcher.rs`: regex compilada uma vez por recarga, casamento na ingestão
+- [x] Contador de janela deslizante em memória por `(rule_id, device_id)`, com
+      teto de 1 000 casamentos por chave
+- [x] Disparo alimentando o `manager` existente pelo ciclo do scheduler —
+      herda histerese, flapping e higiene de notificação
+- [x] Catálogo com os 7 padrões: falha de login, `system started` inesperado,
+      OSPF/BGP down, PPPoE caindo, pool DHCP esgotado, `out of memory`,
+      alteração de configuração
+- [x] Categoria "Padrões no log (syslog)" e os campos `logMatchCount` /
+      `logSeverity` no seletor de regras do frontend
+
+**A configuração do matcher mora na mesma `condition` da regra.** O
+`AlertRuleCondition::from_json` ignora chaves que não conhece, então `pattern`,
+`minSeverity` e `windowSeconds` convivem com `field`/`operator`/`value` — sem
+coluna nova, sem migration na base principal.
+
+**Zero casamentos na janela é a recuperação.** É o que permite ao alerta
+resolver: sem isso ele ficaria aberto para sempre depois do primeiro disparo.
+
+O catálogo cobrou uma invariante que a implementação inicial violou: severidade
+`info` tem cooldown zero. `log_config_changed` é rastro de auditoria, não
+problema — e um teste já existente pegou.
 
 ---
 

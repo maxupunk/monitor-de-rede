@@ -242,3 +242,112 @@ async fn a_rota_exige_sessao() {
 fn urlencoding(valor: &str) -> String {
     valor.replace('+', "%2B").replace(':', "%3A")
 }
+
+// --- Fase 4: fontes, vínculo manual e snippets -------------------------------
+
+#[tokio::test]
+#[serial]
+async fn as_fontes_vistas_incluem_contadores_e_desconhecidas() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let resposta = request.get("/api/logs/sources").await;
+        assert_eq!(resposta.status_code(), 200, "{}", resposta.text());
+        let corpo: serde_json::Value = serde_json::from_str(&resposta.text()).unwrap();
+
+        assert!(corpo["data"].is_array());
+        assert!(corpo["unknownCount"].is_number());
+        // Os contadores existem desde o boot, mesmo sem tráfego — é o que a
+        // tela usa para dizer "nada chegou ainda" em vez de ficar em branco.
+        assert!(corpo["metrics"]["received"].is_number());
+        assert!(corpo["metrics"]["droppedUnknownSource"].is_number());
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn o_vinculo_manual_persiste_e_pode_ser_desfeito() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let device_id = dispositivo(&request).await;
+
+        let vinculo = request
+            .post("/api/logs/sources/203.0.113.7/bind")
+            .json(&serde_json::json!({ "deviceId": device_id }))
+            .await;
+        assert_eq!(vinculo.status_code(), 200, "{}", vinculo.text());
+
+        let mapa = backend::services::syslog::resolver::bindings(&ctx.db)
+            .await
+            .expect("bindings");
+        assert_eq!(mapa.get("203.0.113.7"), Some(&device_id));
+
+        // `deviceId` nulo desfaz — mesmo endpoint, porque a tela oferece
+        // "nenhum" no mesmo seletor.
+        let desfaz = request
+            .post("/api/logs/sources/203.0.113.7/bind")
+            .json(&serde_json::json!({ "deviceId": serde_json::Value::Null }))
+            .await;
+        assert_eq!(desfaz.status_code(), 200, "{}", desfaz.text());
+        let mapa = backend::services::syslog::resolver::bindings(&ctx.db)
+            .await
+            .expect("bindings");
+        assert!(!mapa.contains_key("203.0.113.7"));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn o_vinculo_recusa_ip_invalido_e_dispositivo_inexistente() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let ip_ruim = request
+            .post("/api/logs/sources/nao-e-um-ip/bind")
+            .json(&serde_json::json!({ "deviceId": serde_json::Value::Null }))
+            .await;
+        assert_eq!(ip_ruim.status_code(), 422, "{}", ip_ruim.text());
+
+        let inexistente = request
+            .post("/api/logs/sources/10.0.0.1/bind")
+            .json(&serde_json::json!({ "deviceId": 99_999 }))
+            .await;
+        assert_eq!(inexistente.status_code(), 404, "{}", inexistente.text());
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn o_snippet_traz_o_endereco_informado_e_a_porta_publicada() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let resposta = request
+            .get("/api/logs/setup-snippet?address=192.168.1.10")
+            .await;
+        assert_eq!(resposta.status_code(), 200, "{}", resposta.text());
+        let corpo: serde_json::Value = serde_json::from_str(&resposta.text()).unwrap();
+
+        assert_eq!(corpo["serverAddress"], "192.168.1.10");
+        // 514 é a porta publicada pelo compose; 5514 é interna e não serve ao
+        // roteador.
+        assert_eq!(corpo["port"], 514);
+        let comandos = corpo["snippets"][0]["commands"].as_str().unwrap();
+        assert!(comandos.contains("192.168.1.10"), "{comandos}");
+        assert!(comandos.contains("bsd-syslog=yes"), "{comandos}");
+        assert!(!corpo.to_string().contains("5514"), "vazou a porta interna");
+    })
+    .await;
+}
