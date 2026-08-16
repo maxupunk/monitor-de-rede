@@ -21,8 +21,10 @@ use crate::{
     initializers::monitoring::MonitoringInitializer,
     initializers::process_deps,
     initializers::setup::SetupInitializer,
+    initializers::syslog::SyslogInitializer,
     models::_entities::users,
     models::tables,
+    services::syslog,
     spa, tasks,
     tasks::scheduler_run::{SchedulerLoop, SchedulerRun},
 };
@@ -73,6 +75,13 @@ impl Hooks for App {
         migration::purge_removed_migrations(&ctx.db)
             .await
             .map_err(loco_rs::Error::DB)?;
+        // O banco de logs é separado e tem migrator próprio. Fica aqui, e não
+        // num `Initializer`, porque a purga de retenção roda no ciclo do
+        // `scheduler` — que pode ser invocado como `task`, e o `run_task` não
+        // executa initializers (ADR 007). Os *listeners*, esses sim, são
+        // exclusivos do servidor e vivem em `initializers::syslog`.
+        let database_url = ctx.config.database.uri.clone();
+        syslog::db::install(&ctx, &database_url).await;
         Ok(ctx)
     }
 
@@ -80,6 +89,7 @@ impl Hooks for App {
         Ok(vec![
             Box::new(SetupInitializer),
             Box::new(MonitoringInitializer),
+            Box::new(SyslogInitializer),
         ])
     }
 

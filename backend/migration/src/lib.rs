@@ -4,6 +4,9 @@ pub use sea_orm_migration::prelude::*;
 
 mod shared;
 
+/// Migrator do banco de logs (`/data/logs.sqlite`), separado do principal.
+pub mod logs;
+
 mod m20220101_000001_users;
 mod m20260810_000001_users_active;
 mod m20260810_000002_sites;

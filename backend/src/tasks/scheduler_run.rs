@@ -48,6 +48,7 @@ use crate::{
         },
         shared::errors::AppResult,
         snmp::service as snmp_service,
+        syslog,
         vpn::traffic_recorder,
     },
 };
@@ -331,6 +332,23 @@ async fn run_data_pruner_if_due(ctx: &AppContext) -> AppResult<()> {
             notificacoes = stats.notifications_deleted,
             "purga de dados antigos executada"
         );
+    }
+    // O banco de logs tem purga própria: mora noutro arquivo, cresce por
+    // mensagem recebida (e não por ciclo de checagem) e é o único com corte por
+    // tamanho — o que salva o volume quando alguém liga o tópico `debug` num
+    // roteador e a taxa decuplica da noite para o dia. Ausência do banco não é
+    // erro: significa `SYSLOG_ENABLED=false`.
+    if let Ok(logs) = syslog::LogsDb::from_context(ctx) {
+        match syslog::retention::prune(logs.connection()).await {
+            Ok(stats) if stats.total() > 0 => tracing::info!(
+                por_idade = stats.by_age,
+                por_tamanho = stats.by_size,
+                bytes = stats.bytes_after,
+                "purga do banco de logs executada"
+            ),
+            Ok(_) => {}
+            Err(error) => tracing::warn!(%error, "falha ao purgar o banco de logs"),
+        }
     }
     // A histerese de disparo vive em memória (ver `alerts::hysteresis`): a
     // contagem de um par (regra, alvo) que ninguém mais avalia — regra apagada,

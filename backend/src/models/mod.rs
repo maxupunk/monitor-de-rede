@@ -8,6 +8,8 @@ pub mod discovery_results;
 pub mod discovery_runs;
 pub mod dns_servers;
 pub mod event_outbox;
+/// Entidades do banco de logs, separado do principal.
+pub mod logs;
 pub mod metrics;
 pub mod monitor_results;
 pub mod monitors;

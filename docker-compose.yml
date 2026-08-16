@@ -48,6 +48,13 @@ services:
       # Mapeada 1:1 de propósito: é a porta que os roteadores usam como
       # Endpoint, e precisa ser a mesma configurada em "Porta UDP" na tela /vpn.
       - "${WG_EXTERNAL_PORT:-51820}:${WG_EXTERNAL_PORT:-51820}/udp"
+      # Syslog. O roteador manda para a 514, que é o padrão do protocolo e o
+      # que todo firmware assume; o processo escuta na 5514 porque roda com
+      # `CapEff` zerado (`setpriv --inh-caps=-all`) e não abre porta
+      # privilegiada. É esta linha que faz a ponte — sem `CAP_NET_BIND` na
+      # aplicação, que atravessaria a fronteira do §7 do AGENTS.md.
+      - "${SYSLOG_EXTERNAL_PORT:-514}:5514/udp"
+      - "${SYSLOG_EXTERNAL_PORT:-514}:5514/tcp"
     environment:
       LOCO_ENV: production
       # Cifra em repouso dos segredos da VPN. Trocar o valor torna ilegível tudo
@@ -83,6 +90,22 @@ services:
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:3333}
       # Token do probe remoto — o mesmo valor precisa ir no container de lá.
       VPN_PROBE_TOKEN: ${VPN_PROBE_TOKEN:-default_vpn_probe_token}
+      # --- servidor de syslog ---
+      # Sem interpolação no caminho do banco, pelo mesmo motivo da
+      # `DATABASE_URL`: o `.env` descreve a máquina, não o container. Vazio
+      # (o padrão) faz o banco de logs nascer ao lado do principal, em
+      # /data/logs.sqlite.
+      SYSLOG_ENABLED: ${SYSLOG_ENABLED:-true}
+      SYSLOG_DB_URL: ${SYSLOG_DB_URL:-}
+      # Só grava log de IP que resolva para um dispositivo cadastrado ou que
+      # caia no CIDR de uma rede cadastrada. Ligar isto faz um host solto na
+      # rede encher o volume sozinho — a tela /logs mostra as fontes vistas
+      # justamente para não ser preciso.
+      SYSLOG_ACCEPT_UNKNOWN_SOURCES: ${SYSLOG_ACCEPT_UNKNOWN_SOURCES:-false}
+      # Retenção: dias e tamanho, o que vencer primeiro. Medido em ~290 B por
+      # linha com os três índices (ADR 008).
+      RETENTION_LOGS_DAYS: ${RETENTION_LOGS_DAYS:-7}
+      RETENTION_LOGS_MAX_MB: ${RETENTION_LOGS_MAX_MB:-4096}
     volumes:
       # Um volume só: o banco em /data/netmonitor.sqlite e a configuração do
       # túnel em /data/wg. O `wg0.conf` é reescrito a partir do banco a cada

@@ -1,0 +1,90 @@
+//! Servidor de syslog nativo — recebe log de roteador e vincula ao inventário.
+//!
+//! ```text
+//! udp/tcp:5514 → parser → resolvedor → fila(10k) → escritor em lote
+//!                            │                          ↓
+//!                       fontes vistas              logs.sqlite
+//! ```
+//!
+//! Roteiro completo em `docs/roadmap_syslog_nativo.md`; as decisões medidas, na
+//! [ADR 008](../../../../docs/adr/008-syslog-parser.md).
+//!
+//! **Onde cada peça é registrada, e por quê.** O `run_task` do Loco não executa
+//! `Initializer` (ADR 007): a conexão com o banco de logs vai em
+//! `Hooks::after_context`, porque a purga de retenção roda no ciclo do
+//! `scheduler`, que pode ser invocado como `task`. Os listeners vão num
+//! `Initializer`, porque abrir porta é coisa de servidor — um comando de CLI
+//! não deve fazê-lo.
+
+pub mod config;
+pub mod db;
+pub mod ingest;
+pub mod listener;
+pub mod parser;
+pub mod queue;
+pub mod resolver;
+pub mod retention;
+pub mod sources;
+pub mod writer;
+
+use std::sync::Arc;
+
+use loco_rs::app::AppContext;
+
+pub use config::SyslogConfig;
+pub use db::LogsDb;
+pub use ingest::Ingestor;
+pub use queue::{IngestMetrics, IngestSnapshot, LogQueue};
+pub use sources::SourceRegistry;
+
+use crate::services::shared::errors::AppResult;
+
+/// O serviço montado, guardado no `shared_store` para a API alcançar.
+#[derive(Clone)]
+pub struct SyslogService {
+    pub ingestor: Ingestor,
+    pub sources: Arc<SourceRegistry>,
+}
+
+impl SyslogService {
+    /// Recupera o serviço do contexto, se a ingestão estiver de pé.
+    #[must_use]
+    pub fn from_context(ctx: &AppContext) -> Option<Self> {
+        ctx.shared_store.get::<Self>()
+    }
+}
+
+/// Monta o pipeline e sobe os listeners.
+///
+/// Chamado do `Initializer`. Devolve as portas efetivas — no teste elas vêm de
+/// `porta 0`, e é assim que dois testes de rede não colidem.
+///
+/// # Errors
+///
+/// Falha ao abrir um dos sockets.
+pub async fn start(ctx: &AppContext, config: SyslogConfig) -> AppResult<(u16, u16)> {
+    let logs = LogsDb::from_context(ctx)?;
+    let metrics = Arc::new(IngestMetrics::default());
+    let (queue, receiver) = LogQueue::create(config.queue_capacity, metrics);
+    let sources = Arc::new(SourceRegistry::create());
+
+    let ingestor = Ingestor::new(
+        ctx.db.clone(),
+        config.clone(),
+        queue.clone(),
+        Arc::clone(&sources),
+    );
+
+    tokio::spawn(writer::run(
+        logs.connection().clone(),
+        receiver,
+        Arc::clone(queue.metrics()),
+    ));
+
+    let udp = listener::spawn_udp(config.udp_port, ingestor.clone()).await?;
+    let tcp = listener::spawn_tcp(config.tcp_port, ingestor.clone()).await?;
+
+    ctx.shared_store.insert(SyslogService { ingestor, sources });
+
+    Ok((udp, tcp))
+}

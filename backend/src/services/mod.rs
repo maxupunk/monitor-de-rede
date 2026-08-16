@@ -15,5 +15,6 @@ pub mod notifications;
 pub mod probes;
 pub mod shared;
 pub mod snmp;
+pub mod syslog;
 pub mod topology;
 pub mod vpn;
