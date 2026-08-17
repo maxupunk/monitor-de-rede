@@ -261,8 +261,11 @@ pub struct ProvisionHintsResponse {
     pub server_port: u16,
     /// Sistema em vigor — id do catálogo de `services::devices::systems`.
     pub operating_system: String,
-    /// De onde ele veio: `declarado`, `snmp`, `cadastro` ou `padrão`.
+    /// De onde ele veio: `declarado`, `snmp`, `sonda`, `cadastro` ou `padrão`.
     pub operating_system_source: String,
+    /// A frase que explica a conclusão — "o servidor SSH se identifica como
+    /// `dropbear`, que é o padrão do OpenWrt". Sem ela a tela só afirma.
+    pub operating_system_reason: String,
     /// Porta 22 respondeu à sondagem.
     pub ssh_open: bool,
     /// Porta 23 respondeu à sondagem.

@@ -680,6 +680,56 @@ substituído: ele diz quem fez a placa, e ainda alimenta a dedução quando não
 SNMP nem declaração. O que mudou é que ele deixou de ser a resposta a uma
 pergunta que não era a dele.
 
+#### O `sysDescr` genérico, e o desempate pelo `dropbear`
+
+Um OpenWrt real ficou identificado como Linux. O agente dele responde:
+
+```
+sysDescr:     Linux bpi-r3-assistencia 6.12.87 #0 SMP ... aarch64
+sysObjectId:  1.3.6.1.4.1.8072.3.2.10
+```
+
+Nada ali diz OpenWrt — é o `uname`, e o OID é o do **net-snmp**, que é o agente
+e não o sistema. A palavra "Linux" casava com o apelido de `linux` e a dedução
+encerrava aí, sem nunca consultar evidência mais específica.
+
+- [x] `OperatingSystem::generic`: só `linux` é marcado. Genérico decide **por
+      último**, depois que todo o resto se calou — a palavra que quase todo
+      firmware embarcado diz não pode encerrar a busca
+- [x] `sys_object_ids`: prefixo de empresa da IANA, que é registro e não prosa —
+      14988 (MikroTik), 41112 e 10002 (Ubiquiti), 311 (Microsoft). O 8072
+      (net-snmp) fica **fora** de propósito: mapeá-lo para `linux` reintroduziria
+      o mesmo erro por outro caminho
+- [x] `ssh_banners`: o `dropbear` é o desempate. É o servidor SSH padrão do
+      OpenWrt, e a linha de identificação chega **antes de qualquer
+      autenticação** — o mesmo `connect` que já sondava a porta 22 a traz de
+      graça, sem uma ida à rede a mais
+- [x] `systems::detect(&Evidence)` no lugar do `deduce(a, b, c)`: cada chamador
+      tem um subconjunto diferente de evidência, e `Default` deixa a chamada
+      legível em vez de uma fila de `None` posicionais
+- [x] Toda conclusão passa a vir com `reason` — a frase que permite conferir.
+      Foi a falta dela que deixou o erro passar: o campo afirmava "Linux" e não
+      havia onde ver que a razão era um `uname`
+
+A ordem final: declaração → `sysObjectId` → apelido específico no `sysDescr` →
+banner do SSH → apelido genérico no `sysDescr` → cadastro → padrão. O salto que
+importa é o banner vir **antes** do genérico.
+
+#### `POST /api/devices/identify`
+
+- [x] Botão ao lado do seletor de Sistema no cadastro, que consulta o
+      equipamento agora — SNMP e sonda SSH em paralelo — e **adota** o
+      resultado. Adotar e não só informar: quem clicou queria acertar o campo
+- [x] A resposta carrega a evidência crua (`sysDescr`, `sysObjectId`,
+      `sshBanner`) junto da conclusão, e a tela mostra as duas
+- [x] `probed` separa "detectei" de "recaí no cadastro". Sem ele a tela
+      anunciaria uma detecção que não aconteceu
+- [x] Recebe o **formulário**, não um id: identificar precisa funcionar antes de
+      salvar, e num cadastro novo não há dispositivo para consultar
+- [x] O campo Sistema passou a ocupar a linha inteira (os rótulos são longos e o
+      subtítulo carrega a conclusão com o motivo), e Fabricante desceu para
+      junto de Modelo — os dois descrevem o hardware
+
 ---
 
 ## 5. Aceite

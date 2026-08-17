@@ -64,6 +64,63 @@ async fn o_catalogo_e_servido_e_nao_colide_com_a_rota_de_id() {
 
 #[tokio::test]
 #[serial]
+async fn identificar_sem_evidencia_ao_vivo_recai_no_cadastro() {
+    // `127.0.0.1` só, conforme as diretrizes: nada sai da máquina. **Sem
+    // asserção sobre `probed`** — a máquina de quem roda o teste pode ter um
+    // servidor SSH ouvindo no loopback, e a sonda o encontraria. O que se
+    // afirma aqui é o que não depende do ambiente: nenhum servidor SSH comum
+    // (OpenSSH) está no catálogo de assinaturas, então a conclusão precisa
+    // continuar vindo do cadastro. Quem cobre o `probed` é o teste sem IP.
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        autenticado(&mut request, &ctx).await;
+
+        let resposta = request
+            .post("/api/devices/identify")
+            .json(&serde_json::json!({
+                "ipAddress": "127.0.0.1", "snmpEnabled": false, "vendor": "MikroTik"
+            }))
+            .await;
+        assert_eq!(resposta.status_code(), 200, "{}", resposta.text());
+        let corpo: Value = serde_json::from_str(&resposta.text()).expect("json");
+
+        assert_eq!(corpo["operatingSystem"], "routeros");
+        assert_eq!(corpo["source"], "cadastro");
+        assert!(corpo["sysDescr"].is_null(), "SNMP desligado não consulta");
+        assert!(
+            corpo["reason"]
+                .as_str()
+                .is_some_and(|texto| texto.contains("MikroTik")),
+            "o motivo precisa citar a evidência: {}",
+            corpo["reason"]
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn identificar_sem_ip_cai_no_cadastro_em_vez_de_falhar() {
+    // O botão fica desabilitado sem IP, mas a rota não pode depender disso: um
+    // 500 aqui viraria erro na tela por um caso que tem resposta boa.
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        autenticado(&mut request, &ctx).await;
+
+        let resposta = request
+            .post("/api/devices/identify")
+            .json(&serde_json::json!({ "model": "OpenWrt One" }))
+            .await;
+        assert_eq!(resposta.status_code(), 200, "{}", resposta.text());
+        let corpo: Value = serde_json::from_str(&resposta.text()).expect("json");
+        assert_eq!(corpo["operatingSystem"], "openwrt");
+        assert_eq!(corpo["probed"], false);
+        assert!(corpo["sysDescr"].is_null());
+        assert!(corpo["sshBanner"].is_null());
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
 async fn sem_declaracao_o_sistema_sai_do_texto_livre_do_cadastro() {
     request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
         autenticado(&mut request, &ctx).await;

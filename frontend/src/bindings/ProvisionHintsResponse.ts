@@ -42,9 +42,14 @@ export type ProvisionHintsResponse = {
    */
   operatingSystem: string
   /**
-   * De onde ele veio: `declarado`, `snmp`, `cadastro` ou `padrão`.
+   * De onde ele veio: `declarado`, `snmp`, `sonda`, `cadastro` ou `padrão`.
    */
   operatingSystemSource: string
+  /**
+   * A frase que explica a conclusão — "o servidor SSH se identifica como
+   * `dropbear`, que é o padrão do OpenWrt". Sem ela a tela só afirma.
+   */
+  operatingSystemReason: string
   /**
    * Porta 22 respondeu à sondagem.
    */

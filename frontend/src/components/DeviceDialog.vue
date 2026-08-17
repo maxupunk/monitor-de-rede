@@ -121,24 +121,100 @@
               syslog, se o MAC-Telnet é possível e qual perfil da VPN serve. O
               catálogo vem do servidor — é a mesma lista da ativação de log e do
               assistente da VPN.
+
+              Linha inteira porque os rótulos são longos ("Ubiquiti EdgeOS /
+              UniFi", "Celular (Android / iOS)") e o subtítulo do automático
+              carrega a conclusão com o motivo. Em meia coluna o texto que
+              importa era o que ficava cortado.
             -->
-            <v-col cols="12" sm="6">
-              <v-select
-                v-model="formModel.operatingSystem"
-                :items="operatingSystemItems"
-                item-title="title"
-                item-value="value"
-                :item-props="operatingSystemItemProps"
-                label="Sistema (Opcional)"
-                variant="outlined"
-                density="comfortable"
-                :loading="systemsStore.loading"
-                :prepend-inner-icon="operatingSystemIcon"
-                :hint="operatingSystemHint"
-                persistent-hint
-              ></v-select>
+            <v-col cols="12">
+              <div class="d-flex align-start ga-2">
+                <v-select
+                  v-model="formModel.operatingSystem"
+                  :items="operatingSystemItems"
+                  item-title="title"
+                  item-value="value"
+                  :item-props="operatingSystemItemProps"
+                  label="Sistema (Opcional)"
+                  variant="outlined"
+                  density="comfortable"
+                  :loading="systemsStore.loading"
+                  :prepend-inner-icon="operatingSystemIcon"
+                  :hint="operatingSystemHint"
+                  persistent-hint
+                  class="flex-grow-1 min-width-0"
+                ></v-select>
+                <!--
+                  `mt-1` alinha o botão (40px) ao controle (48px). Ele consulta
+                  o equipamento agora: SNMP e a identificação do servidor SSH.
+                -->
+                <v-btn
+                  icon
+                  color="primary"
+                  variant="tonal"
+                  density="comfortable"
+                  class="mt-1"
+                  :loading="systemsStore.identifying"
+                  :disabled="!formModel.ipAddress"
+                  @click="identificarSistema"
+                >
+                  <v-icon>mdi-magnify-scan</v-icon>
+                  <v-tooltip activator="parent" location="top">
+                    {{
+                      formModel.ipAddress
+                        ? 'Identificar o sistema consultando o equipamento'
+                        : 'Informe o Endereço IP para identificar'
+                    }}
+                  </v-tooltip>
+                </v-btn>
+              </div>
+
+              <!--
+                A conclusão vem com a evidência crua. Foi a falta disto que
+                deixou um OpenWrt passar por Linux: o campo afirmava o resultado
+                e não havia onde conferir de onde ele saiu.
+              -->
+              <v-alert
+                v-if="identificacao"
+                :type="identificacao.probed ? 'success' : 'warning'"
+                variant="tonal"
+                density="compact"
+                class="mt-3"
+              >
+                <div class="font-weight-bold mb-1">
+                  {{ identificacao.label }} — {{ identificacao.reason }}
+                </div>
+                <div v-if="!identificacao.probed" class="text-body-2 mb-1">
+                  O equipamento não respondeu nem por SNMP nem na porta 22. A conclusão saiu só do
+                  cadastro — confira antes de salvar.
+                </div>
+                <div v-if="identificacao.sysDescr" class="text-caption evidencia">
+                  sysDescr: {{ identificacao.sysDescr }}
+                </div>
+                <div v-if="identificacao.sysObjectId" class="text-caption evidencia">
+                  sysObjectId: {{ identificacao.sysObjectId }}
+                </div>
+                <div v-if="identificacao.sshBanner" class="text-caption evidencia">
+                  SSH: {{ identificacao.sshBanner }}
+                </div>
+              </v-alert>
+
+              <v-alert
+                v-if="identificacaoErro"
+                type="error"
+                variant="tonal"
+                density="compact"
+                class="mt-3"
+              >
+                {{ identificacaoErro }}
+              </v-alert>
             </v-col>
 
+            <!--
+              Fabricante e modelo descrevem o **hardware**, e ficam juntos por
+              isso. O fabricante ainda alimenta a dedução quando não há SNMP nem
+              declaração, mas ele responde outra pergunta que a de cima.
+            -->
             <v-col cols="12" sm="6">
               <v-text-field
                 v-model="formModel.vendor"
@@ -146,8 +222,6 @@
                 placeholder="Cisco, MikroTik, Ubiquiti"
                 variant="outlined"
                 density="comfortable"
-                hint="O nome do fabricante do equipamento — o sistema é o campo ao lado."
-                persistent-hint
               ></v-text-field>
             </v-col>
 
@@ -300,6 +374,7 @@ import {
   AUTO_OPERATING_SYSTEM,
   operatingSystemSourceLabel,
   useOperatingSystemsStore,
+  type IdentifyResult,
 } from '@/stores/operatingSystems'
 
 const props = defineProps<{
@@ -425,6 +500,39 @@ const operatingSystemIcon = computed(() =>
     : systemsStore.icon(formModel.operatingSystem)
 )
 
+const identificacao = ref<IdentifyResult | null>(null)
+const identificacaoErro = ref('')
+
+/**
+ * Consulta o equipamento e **adota** o resultado no seletor.
+ *
+ * Adotar, e não só informar: o operador clicou para acertar o campo, e deixá-lo
+ * escolher de novo na lista depois de já ter a resposta seria trabalho repetido.
+ * A conclusão fica visível com a evidência ao lado, então a adoção é conferível
+ * — que é o que faltava quando a dedução acontecia em silêncio.
+ */
+async function identificarSistema() {
+  identificacao.value = null
+  identificacaoErro.value = ''
+  try {
+    const achado = await systemsStore.identify({
+      ipAddress: formModel.ipAddress || null,
+      snmpEnabled: formModel.snmpEnabled,
+      snmpVersion: formModel.snmpVersion,
+      snmpCommunity: formModel.snmpCommunity || null,
+      vendor: formModel.vendor || null,
+      model: formModel.model || null,
+    })
+    identificacao.value = achado
+    formModel.operatingSystem = achado.operatingSystem
+  } catch (erro) {
+    identificacaoErro.value =
+      erro instanceof Error && erro.message.trim()
+        ? erro.message.trim()
+        : 'Não foi possível identificar o sistema.'
+  }
+}
+
 const operatingSystemHint = computed(() =>
   formModel.operatingSystem === AUTO_OPERATING_SYSTEM
     ? 'Declare apenas se a detecção errar — ela usa o SNMP quando disponível.'
@@ -448,6 +556,8 @@ watch(
       if (sitesStore.sites.length === 0) sitesStore.fetchSites()
 
       snmpTestResult.value = null
+      identificacao.value = null
+      identificacaoErro.value = ''
       // Sem isto a preferência só valeria depois de o operador visitar
       // Configurações na mesma sessão.
       void prefsStore.fetchAll()
@@ -630,3 +740,17 @@ async function persist() {
   }
 }
 </script>
+
+<style scoped>
+/* Sem isto o campo se recusa a encolher e empurra o botão para fora da coluna. */
+.min-width-0 {
+  min-width: 0;
+}
+
+/* A evidência é texto de equipamento: pode ser longa e não pode ser cortada. */
+.evidencia {
+  font-family: 'Roboto Mono', 'Courier New', monospace;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+}
+</style>

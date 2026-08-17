@@ -53,6 +53,29 @@ pub struct OperatingSystem {
     /// Palavras que identificam este sistema num texto livre — `sysDescr` do
     /// SNMP, campo de fabricante ou modelo do cadastro.
     pub aliases: &'static [&'static str],
+    /// Se os apelidos são **genéricos** — descrevem uma família inteira em vez
+    /// de um sistema.
+    ///
+    /// Só `linux` é. E é por isso que ele existe: quase todo firmware embarcado
+    /// roda Linux e diz isso no `sysDescr`. Um OpenWrt cujo agente responde
+    /// `Linux bpi-r3 6.12.87 aarch64` casava com `linux` e parava ali — a
+    /// palavra estava lá, e nenhuma evidência mais específica chegava a ser
+    /// consultada. O genérico só decide depois que todo o resto se calou.
+    pub generic: bool,
+    /// Prefixos de `sysObjectId` que pertencem a este sistema.
+    ///
+    /// É o número de empresa da IANA, e vale mais que qualquer texto: não é
+    /// prosa de firmware, é registro. `1.3.6.1.4.1.8072` (net-snmp) **não**
+    /// entra em lugar nenhum de propósito — é o agente, não o sistema, e ele
+    /// roda tanto no OpenWrt quanto num Debian.
+    pub sys_object_ids: &'static [&'static str],
+    /// Trechos da identificação que o servidor SSH anuncia ao conectar.
+    ///
+    /// O `dropbear` é o desempate que resolve o caso do OpenWrt: é o servidor
+    /// SSH padrão dele, e a linha de identificação chega **antes** de qualquer
+    /// autenticação — o mesmo `connect` que já sonda a porta 22 a traz de
+    /// graça. `openssh` não entra: roda em tudo e não separa nada.
+    pub ssh_banners: &'static [&'static str],
 }
 
 /// Valor que a API aceita para "não declarei — deduza".
@@ -79,6 +102,9 @@ const CATALOGO: &[OperatingSystem] = &[
         mac_telnet: true,
         vpn_profile: Some("mikrotik"),
         aliases: &["mikrotik", "routeros", "routerboard"],
+        generic: false,
+        sys_object_ids: &["1.3.6.1.4.1.14988"],
+        ssh_banners: &["rosssh", "mikrotik"],
     },
     OperatingSystem {
         id: "openwrt",
@@ -88,6 +114,9 @@ const CATALOGO: &[OperatingSystem] = &[
         mac_telnet: true,
         vpn_profile: Some("openwrt"),
         aliases: &["openwrt", "lede", "dd-wrt"],
+        generic: false,
+        sys_object_ids: &[],
+        ssh_banners: &["dropbear"],
     },
     OperatingSystem {
         id: "ubiquiti",
@@ -104,6 +133,9 @@ const CATALOGO: &[OperatingSystem] = &[
             "unifi",
             "vyatta",
         ],
+        generic: false,
+        sys_object_ids: &["1.3.6.1.4.1.41112", "1.3.6.1.4.1.10002"],
+        ssh_banners: &[],
     },
     OperatingSystem {
         id: "linux",
@@ -113,6 +145,10 @@ const CATALOGO: &[OperatingSystem] = &[
         mac_telnet: false,
         vpn_profile: Some("linux"),
         aliases: &["debian", "ubuntu", "rsyslog", "linux"],
+        // Ver a nota do campo: é a palavra que todo firmware embarcado diz.
+        generic: true,
+        sys_object_ids: &[],
+        ssh_banners: &[],
     },
     OperatingSystem {
         id: "windows",
@@ -122,6 +158,9 @@ const CATALOGO: &[OperatingSystem] = &[
         mac_telnet: false,
         vpn_profile: Some("windows"),
         aliases: &["windows", "microsoft"],
+        generic: false,
+        sys_object_ids: &["1.3.6.1.4.1.311"],
+        ssh_banners: &[],
     },
     OperatingSystem {
         id: "mobile",
@@ -131,6 +170,9 @@ const CATALOGO: &[OperatingSystem] = &[
         mac_telnet: false,
         vpn_profile: Some("mobile"),
         aliases: &["android", "iphone", "ipados", "ios"],
+        generic: false,
+        sys_object_ids: &[],
+        ssh_banners: &[],
     },
     OperatingSystem {
         id: "other",
@@ -142,6 +184,9 @@ const CATALOGO: &[OperatingSystem] = &[
         // Nenhum: `other` é escolha declarada, nunca dedução. Deduzir "outro"
         // seria o mesmo que não deduzir, com a aparência de conclusão.
         aliases: &[],
+        generic: false,
+        sys_object_ids: &[],
+        ssh_banners: &[],
     },
 ];
 
@@ -184,50 +229,193 @@ pub fn parse(bruto: &str) -> Result<Option<&'static OperatingSystem>, String> {
 pub mod source {
     /// O operador escolheu no cadastro.
     pub const DECLARED: &str = "declarado";
-    /// O `sysDescr` do SNMP identificou.
+    /// O SNMP identificou — `sysObjectId` ou `sysDescr`.
     pub const SNMP: &str = "snmp";
+    /// A identificação que o servidor SSH do equipamento anuncia.
+    pub const PROBE: &str = "sonda";
     /// Deduzido do fabricante/modelo em texto livre do cadastro.
     pub const REGISTRY: &str = "cadastro";
     /// Nada identificou — ver [`super::FALLBACK`].
     pub const DEFAULT: &str = "padrão";
 }
 
+/// Tudo que se tem sobre um equipamento na hora de decidir.
+///
+/// Struct e não uma lista de parâmetros porque cada chamador tem um subconjunto
+/// diferente: o cadastro só tem texto livre, a tela de log tem SNMP e sonda de
+/// porta. Com `Default`, cada um preenche o que sabe e o resto fica ausente em
+/// vez de virar `None` posicional que ninguém consegue ler na chamada.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Evidence<'a> {
+    pub declared: Option<&'a str>,
+    pub sys_object_id: Option<&'a str>,
+    pub sys_descr: Option<&'a str>,
+    /// A linha de identificação do servidor SSH (`SSH-2.0-dropbear_2022.82`).
+    pub ssh_banner: Option<&'a str>,
+    pub vendor: Option<&'a str>,
+    pub model: Option<&'a str>,
+}
+
+/// A conclusão, com o porquê.
+#[derive(Debug, Clone)]
+pub struct Detection {
+    pub system: &'static OperatingSystem,
+    pub source: &'static str,
+    /// A frase que a tela mostra. É ela que permite conferir a conclusão sem
+    /// abrir o código — e foi a falta dela que deixou um OpenWrt passar por
+    /// Linux sem ninguém entender de onde vinha.
+    pub reason: String,
+}
+
 /// Qual sistema atribuir a um equipamento, e com que confiança.
 ///
-/// A ordem é declaração → SNMP → cadastro → padrão. A declaração vem primeiro
-/// pelo mesmo motivo de [`super::access`]: quem declarou sabe de algo que o
-/// servidor não observa. Entre as duas evidências, o `sysDescr` ganha do texto
-/// livre porque o `vendor` do cadastro costuma vir do OUI do MAC — que
-/// identifica o fabricante da placa, não o sistema que roda nela.
+/// A ordem das evidências, da mais forte para a mais fraca:
+///
+/// 1. **a declaração do operador** — quem declarou sabe de algo que o servidor
+///    não observa;
+/// 2. **o `sysObjectId`** — número de empresa da IANA, registro e não prosa;
+/// 3. **um apelido específico no `sysDescr`** — "OpenWrt", "RouterOS", "EdgeOS";
+/// 4. **a identificação do servidor SSH** — `dropbear` é OpenWrt, `ROSSSH` é
+///    RouterOS. É o que resolve o firmware embarcado cujo agente SNMP responde
+///    só o `uname`;
+/// 5. **o apelido genérico no `sysDescr`** — a palavra "Linux", que quase todo
+///    firmware embarcado diz e que por isso só decide quando nada mais decidiu;
+/// 6. o fabricante/modelo do cadastro, específico antes de genérico;
+/// 7. o padrão.
+///
+/// O salto que importa é o 4 vir **antes** do 5. Um OpenWrt cujo `sysDescr` é
+/// `Linux bpi-r3 6.12.87 aarch64` casava com "linux" no passo 3 e parava ali.
 #[must_use]
-pub fn deduce(
-    declarado: Option<&str>,
-    vendor: Option<&str>,
-    descricao: Option<&str>,
-) -> (&'static OperatingSystem, &'static str) {
-    if let Some(sistema) = declarado.and_then(|bruto| parse(bruto).ok().flatten()) {
-        return (sistema, source::DECLARED);
+pub fn detect(evidencia: &Evidence) -> Detection {
+    if let Some(sistema) = evidencia
+        .declared
+        .and_then(|bruto| parse(bruto).ok().flatten())
+    {
+        return achado(
+            sistema,
+            source::DECLARED,
+            format!("definido no cadastro como \"{}\"", sistema.label),
+        );
     }
-    if let Some(sistema) = casa(descricao) {
-        return (sistema, source::SNMP);
+
+    if let Some((sistema, oid)) = casa_oid(evidencia.sys_object_id) {
+        return achado(
+            sistema,
+            source::SNMP,
+            format!(
+                "o sysObjectId do equipamento começa com {oid}, que é de {}",
+                sistema.label
+            ),
+        );
     }
-    if let Some(sistema) = casa(vendor) {
-        return (sistema, source::REGISTRY);
+
+    if let Some(sistema) = casa(evidencia.sys_descr, Especificidade::Especifico) {
+        return achado(
+            sistema,
+            source::SNMP,
+            format!("o sysDescr do SNMP identifica {}", sistema.label),
+        );
     }
-    (
+
+    if let Some((sistema, marca)) = casa_banner(evidencia.ssh_banner) {
+        return achado(
+            sistema,
+            source::PROBE,
+            format!(
+                "o servidor SSH se identifica como `{marca}`, que é o padrão do {}",
+                sistema.label
+            ),
+        );
+    }
+
+    if let Some(sistema) = casa(evidencia.sys_descr, Especificidade::Generico) {
+        return achado(
+            sistema,
+            source::SNMP,
+            format!(
+                "o sysDescr diz apenas {} — nenhum sistema mais específico se identificou",
+                sistema.label
+            ),
+        );
+    }
+
+    for nivel in [Especificidade::Especifico, Especificidade::Generico] {
+        for texto in [evidencia.vendor, evidencia.model] {
+            if let Some(sistema) = casa(texto, nivel) {
+                return achado(
+                    sistema,
+                    source::REGISTRY,
+                    format!(
+                        "deduzido de \"{}\" no cadastro",
+                        texto.unwrap_or_default().trim()
+                    ),
+                );
+            }
+        }
+    }
+
+    achado(
         find(FALLBACK).expect("o padrão precisa estar no catálogo"),
         source::DEFAULT,
+        "nada identificou o equipamento — confirme antes de aplicar".to_owned(),
     )
 }
 
-fn casa(texto: Option<&str>) -> Option<&'static OperatingSystem> {
+fn achado(system: &'static OperatingSystem, source: &'static str, reason: String) -> Detection {
+    Detection {
+        system,
+        source,
+        reason,
+    }
+}
+
+/// Se o apelido descreve um sistema ou uma família inteira. Ver
+/// [`OperatingSystem::generic`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Especificidade {
+    Especifico,
+    Generico,
+}
+
+fn casa(texto: Option<&str>, nivel: Especificidade) -> Option<&'static OperatingSystem> {
     let bruto = texto?.to_ascii_lowercase();
     if bruto.trim().is_empty() {
         return None;
     }
     CATALOGO
         .iter()
+        .filter(|sistema| sistema.generic == (nivel == Especificidade::Generico))
         .find(|sistema| sistema.aliases.iter().any(|agulha| bruto.contains(agulha)))
+}
+
+/// Casa pelo prefixo, e não por igualdade: o `sysObjectId` completo carrega a
+/// linha de produto depois do número da empresa (`…14988.1.1.3.11`).
+fn casa_oid(oid: Option<&str>) -> Option<(&'static OperatingSystem, &'static str)> {
+    let bruto = oid?.trim();
+    if bruto.is_empty() {
+        return None;
+    }
+    CATALOGO.iter().find_map(|sistema| {
+        sistema
+            .sys_object_ids
+            .iter()
+            .find(|prefixo| bruto.starts_with(*prefixo))
+            .map(|prefixo| (sistema, *prefixo))
+    })
+}
+
+fn casa_banner(banner: Option<&str>) -> Option<(&'static OperatingSystem, &'static str)> {
+    let bruto = banner?.to_ascii_lowercase();
+    if bruto.trim().is_empty() {
+        return None;
+    }
+    CATALOGO.iter().find_map(|sistema| {
+        sistema
+            .ssh_banners
+            .iter()
+            .find(|marca| bruto.contains(*marca))
+            .map(|marca| (sistema, *marca))
+    })
 }
 
 /// O que a tela recebe para montar o seletor.
@@ -244,6 +432,32 @@ pub struct OperatingSystemOption {
     pub supports_mac_telnet: bool,
     /// Perfil equivalente no assistente da VPN, quando existe.
     pub vpn_profile: Option<String>,
+}
+
+/// O resultado de `POST /api/devices/identify`.
+///
+/// Carrega **a evidência junto com a conclusão** de propósito. Foi a falta disso
+/// que deixou um OpenWrt passar por Linux sem ninguém entender por quê: o campo
+/// dizia "Linux" e não havia onde conferir que a razão era um `sysDescr` com o
+/// `uname` genérico.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct IdentifyResult {
+    pub operating_system: String,
+    pub label: String,
+    /// `declarado`, `snmp`, `sonda`, `cadastro` ou `padrão`.
+    pub source: String,
+    pub reason: String,
+    /// O que o SNMP respondeu, para a tela poder mostrar o texto cru.
+    pub sys_descr: Option<String>,
+    pub sys_object_id: Option<String>,
+    /// A identificação do servidor SSH, quando a porta 22 respondeu.
+    pub ssh_banner: Option<String>,
+    /// Se alguma evidência ao vivo chegou. Falso significa que a conclusão saiu
+    /// só do cadastro — e a tela precisa dizer isso em vez de anunciar uma
+    /// detecção que não aconteceu.
+    pub probed: bool,
 }
 
 #[must_use]
@@ -306,32 +520,133 @@ mod tests {
         }
     }
 
+    fn por_descricao(descricao: &str) -> Detection {
+        detect(&Evidence {
+            sys_descr: Some(descricao),
+            ..Evidence::default()
+        })
+    }
+
     #[test]
     fn o_snmp_tem_precedencia_sobre_o_texto_livre_do_cadastro() {
         // O `vendor` do cadastro costuma vir do OUI do MAC, que identifica o
         // fabricante da placa — não o sistema que roda nela.
-        let (sistema, origem) = deduce(None, Some("Routerboard"), Some("OpenWrt 23.05 Linux"));
-        assert_eq!((sistema.id, origem), ("openwrt", source::SNMP));
+        let achado = detect(&Evidence {
+            vendor: Some("Routerboard"),
+            sys_descr: Some("OpenWrt 23.05 Linux"),
+            ..Evidence::default()
+        });
+        assert_eq!((achado.system.id, achado.source), ("openwrt", source::SNMP));
     }
 
     #[test]
     fn a_declaracao_vence_ate_o_snmp() {
-        let (sistema, origem) = deduce(Some("linux"), Some("MikroTik"), Some("RouterOS 7.14"));
-        assert_eq!((sistema.id, origem), ("linux", source::DECLARED));
+        let achado = detect(&Evidence {
+            declared: Some("linux"),
+            vendor: Some("MikroTik"),
+            sys_descr: Some("RouterOS 7.14"),
+            ..Evidence::default()
+        });
+        assert_eq!(
+            (achado.system.id, achado.source),
+            ("linux", source::DECLARED)
+        );
     }
 
     #[test]
     fn declaracao_ilegivel_nao_derruba_a_deducao() {
-        let (sistema, origem) = deduce(Some("qualquer-coisa"), Some("MikroTik"), None);
-        assert_eq!((sistema.id, origem), ("routeros", source::REGISTRY));
+        let achado = detect(&Evidence {
+            declared: Some("qualquer-coisa"),
+            vendor: Some("MikroTik"),
+            ..Evidence::default()
+        });
+        assert_eq!(
+            (achado.system.id, achado.source),
+            ("routeros", source::REGISTRY)
+        );
     }
 
     #[test]
     fn sem_nada_o_padrao_e_declarado_como_padrao() {
-        let (sistema, origem) = deduce(None, None, None);
-        assert_eq!((sistema.id, origem), (FALLBACK, source::DEFAULT));
-        let (_, origem) = deduce(Some("   "), Some("   "), Some(""));
-        assert_eq!(origem, source::DEFAULT);
+        let achado = detect(&Evidence::default());
+        assert_eq!(
+            (achado.system.id, achado.source),
+            (FALLBACK, source::DEFAULT)
+        );
+        let achado = detect(&Evidence {
+            declared: Some("   "),
+            vendor: Some("   "),
+            sys_descr: Some(""),
+            ..Evidence::default()
+        });
+        assert_eq!(achado.source, source::DEFAULT);
+    }
+
+    #[test]
+    fn o_banner_do_ssh_separa_o_openwrt_do_linux_generico() {
+        // O caso real que motivou tudo isto: o agente SNMP de um OpenWrt
+        // responde só o `uname`, e a palavra "Linux" bastava para encerrar a
+        // dedução no sistema errado. O `dropbear` chega antes de qualquer
+        // autenticação, no mesmo `connect` que já sondava a porta 22.
+        let uname = "Linux bpi-r3-assistencia 6.12.87 #0 SMP Wed May 13 22:42:09 2026 aarch64";
+        assert_eq!(por_descricao(uname).system.id, "linux");
+
+        let achado = detect(&Evidence {
+            sys_descr: Some(uname),
+            ssh_banner: Some("SSH-2.0-dropbear_2022.82"),
+            ..Evidence::default()
+        });
+        assert_eq!(
+            (achado.system.id, achado.source),
+            ("openwrt", source::PROBE)
+        );
+        assert!(achado.reason.contains("dropbear"), "{}", achado.reason);
+    }
+
+    #[test]
+    fn a_descricao_especifica_vence_o_banner() {
+        // Um Debian rodando dropbear existe. Quando o `sysDescr` nomeia o
+        // sistema, ele é evidência mais direta do que o servidor SSH escolhido.
+        let achado = detect(&Evidence {
+            sys_descr: Some("RouterOS 7.14 on CCR2004"),
+            ssh_banner: Some("SSH-2.0-dropbear_2022.82"),
+            ..Evidence::default()
+        });
+        assert_eq!(
+            (achado.system.id, achado.source),
+            ("routeros", source::SNMP)
+        );
+    }
+
+    #[test]
+    fn o_sys_object_id_vence_qualquer_texto() {
+        // Número de empresa da IANA é registro, não prosa de firmware.
+        let achado = detect(&Evidence {
+            sys_object_id: Some("1.3.6.1.4.1.14988.1.1.3.11"),
+            sys_descr: Some("Linux router 5.6.3"),
+            ..Evidence::default()
+        });
+        assert_eq!(
+            (achado.system.id, achado.source),
+            ("routeros", source::SNMP)
+        );
+        assert!(achado.reason.contains("14988"), "{}", achado.reason);
+    }
+
+    #[test]
+    fn o_oid_do_net_snmp_nao_identifica_sistema_nenhum() {
+        // `1.3.6.1.4.1.8072` é o agente, não o sistema — e ele roda tanto num
+        // OpenWrt quanto num Debian. Mapeá-lo para `linux` reintroduziria o
+        // mesmo erro por outro caminho.
+        let achado = detect(&Evidence {
+            sys_object_id: Some("1.3.6.1.4.1.8072.3.2.10"),
+            ssh_banner: Some("SSH-2.0-dropbear_2022.82"),
+            ..Evidence::default()
+        });
+        assert_eq!(
+            (achado.system.id, achado.source),
+            ("openwrt", source::PROBE)
+        );
     }
 
     #[test]
@@ -346,8 +661,51 @@ mod tests {
             ("Linux servidor 6.1.0-18-amd64", "linux"),
             ("Microsoft Windows Server 2022", "windows"),
         ] {
-            let (sistema, _) = deduce(None, None, Some(descricao));
-            assert_eq!(sistema.id, esperado, "não reconheceu {descricao:?}");
+            assert_eq!(
+                por_descricao(descricao).system.id,
+                esperado,
+                "não reconheceu {descricao:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn so_o_linux_e_generico() {
+        // O genérico decide por último. Marcar outro sistema assim faria ele
+        // atropelar evidência mais específica sem ninguém perceber.
+        let genericos: Vec<&str> = catalog()
+            .iter()
+            .filter(|sistema| sistema.generic)
+            .map(|sistema| sistema.id)
+            .collect();
+        assert_eq!(genericos, vec!["linux"]);
+    }
+
+    #[test]
+    fn toda_conclusao_vem_com_um_motivo_legivel() {
+        // Sem o motivo, "está como Linux" não tem como ser conferido — que foi
+        // exatamente o que aconteceu com o OpenWrt identificado errado.
+        for evidencia in [
+            Evidence::default(),
+            Evidence {
+                declared: Some("openwrt"),
+                ..Evidence::default()
+            },
+            Evidence {
+                sys_descr: Some("Linux x 6.1"),
+                ..Evidence::default()
+            },
+            Evidence {
+                vendor: Some("MikroTik"),
+                ..Evidence::default()
+            },
+        ] {
+            let achado = detect(&evidencia);
+            assert!(
+                achado.reason.trim().len() > 10,
+                "motivo pobre: {:?}",
+                achado.reason
+            );
         }
     }
 

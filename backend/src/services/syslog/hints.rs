@@ -33,8 +33,8 @@ use crate::{
         devices::systems,
         shared::errors::AppResult,
         snmp::{
-            client::{SnmpClient, SnmpConfig},
-            collectors::collect_system,
+            client::{SnmpClient, SnmpConfig, SnmpVersion},
+            collectors::{collect_system, SnmpSystemInfo},
         },
     },
 };
@@ -60,6 +60,9 @@ pub struct ProvisionHints {
     pub operating_system: String,
     /// De onde veio — ver [`systems::source`].
     pub operating_system_source: &'static str,
+    /// A frase que explica **por que** este sistema, para a tela poder mostrar
+    /// a conclusão em vez de só afirmá-la.
+    pub operating_system_reason: String,
     pub mac_address: Option<String>,
     /// Se este processo consegue falar em camada 2 com a rede do equipamento.
     /// Falso dentro de um container em rede bridge — e é o que inviabiliza o
@@ -87,22 +90,33 @@ pub async fn collect(
     // A descrição do SNMP identifica o **sistema**; o `vendor` do cadastro
     // costuma vir do OUI do MAC, que identifica o fabricante da placa. Por isso
     // vale a consulta ao vivo quando o SNMP está ligado.
-    let descricao = match host {
-        Some(endereco) if dispositivo.snmp_enabled => sys_descr(endereco, dispositivo).await,
+    let sistema_snmp = match host {
+        Some(endereco) if dispositivo.snmp_enabled => sistema_por_snmp(endereco, dispositivo).await,
         _ => None,
     };
-    let (sistema, sistema_origem) = systems::deduce(
-        dispositivo.operating_system.as_deref(),
-        dispositivo.vendor.as_deref(),
-        descricao.as_deref().or(dispositivo.model.as_deref()),
-    );
 
     // As duas sondas em paralelo: em série elas somariam o teto de cada uma na
-    // abertura do diálogo.
-    let (ssh_open, telnet_open) = match host {
-        Some(endereco) => tokio::join!(porta_aberta(endereco, 22), porta_aberta(endereco, 23)),
-        None => (false, false),
+    // abertura do diálogo. A da 22 lê de quebra a identificação do servidor
+    // SSH, que é o que separa OpenWrt de Linux quando o agente SNMP responde só
+    // o `uname`.
+    let (ssh, telnet_open) = match host {
+        Some(endereco) => tokio::join!(sonda_ssh(endereco), porta_aberta(endereco, 23)),
+        None => ((false, None), false),
     };
+    let (ssh_open, ssh_banner) = ssh;
+
+    let deteccao = systems::detect(&systems::Evidence {
+        declared: dispositivo.operating_system.as_deref(),
+        sys_object_id: sistema_snmp
+            .as_ref()
+            .and_then(|info| info.sys_object_id.as_deref()),
+        sys_descr: sistema_snmp
+            .as_ref()
+            .and_then(|info| info.sys_descr.as_deref()),
+        ssh_banner: ssh_banner.as_deref(),
+        vendor: dispositivo.vendor.as_deref(),
+        model: dispositivo.model.as_deref(),
+    });
 
     let (server_address, server_address_source) = match host.and_then(local_address_toward) {
         Some(endereco) => (Some(endereco.to_string()), "rota até o equipamento"),
@@ -114,8 +128,9 @@ pub async fn collect(
         server_address_source,
         ssh_open,
         telnet_open,
-        operating_system: sistema.id.to_owned(),
-        operating_system_source: sistema_origem,
+        operating_system: deteccao.system.id.to_owned(),
+        operating_system_source: deteccao.source,
+        operating_system_reason: deteccao.reason,
         mac_address: mac_conhecido(db, dispositivo).await?,
         // A difusão do MAC-Telnet não atravessa a ponte do Docker.
         layer2_reachable: !nat.bridged_container(),
@@ -158,22 +173,38 @@ pub async fn mac_conhecido(
         .filter(|valor| !valor.trim().is_empty()))
 }
 
-/// Lê o `sysDescr` do equipamento. Falha vira `None` — é um palpite, e um
-/// agente SNMP fora do ar não pode impedir a tela de abrir.
-async fn sys_descr(host: IpAddr, dispositivo: &devices::Model) -> Option<String> {
-    let comunidade = dispositivo.snmp_community.clone().unwrap_or_default();
+/// Lê a identidade SNMP do equipamento — `sysDescr` **e** `sysObjectId`.
+///
+/// Os dois, e não só a descrição: o `sysObjectId` é o número de empresa da
+/// IANA, e num equipamento cuja descrição é o `uname` genérico ele é a única
+/// evidência que ainda diz alguma coisa.
+///
+/// Falha vira `None` — é um palpite, e um agente SNMP fora do ar não pode
+/// impedir a tela de abrir.
+pub async fn identidade_snmp(
+    host: IpAddr,
+    comunidade: &str,
+    versao: Option<&str>,
+) -> Option<SnmpSystemInfo> {
     if comunidade.trim().is_empty() {
         return None;
     }
-    let mut config = SnmpConfig::v2c(host.to_string(), comunidade, 161);
+    let mut config = SnmpConfig::v2c(host.to_string(), comunidade.to_owned(), 161);
+    if versao.map(str::trim) == Some("v1") {
+        config.version = SnmpVersion::V1;
+    }
     // Teto curto: isto roda na abertura de um diálogo, não num ciclo de coleta.
     config.timeout_ms = 1_500;
-    let cliente = SnmpClient::new(config);
-    collect_system(&cliente)
-        .await
-        .ok()
-        .and_then(|sistema| sistema.sys_descr)
-        .filter(|texto| !texto.trim().is_empty())
+    collect_system(&SnmpClient::new(config)).await.ok()
+}
+
+async fn sistema_por_snmp(host: IpAddr, dispositivo: &devices::Model) -> Option<SnmpSystemInfo> {
+    identidade_snmp(
+        host,
+        dispositivo.snmp_community.as_deref().unwrap_or_default(),
+        dispositivo.snmp_version.as_deref(),
+    )
+    .await
 }
 
 /// Descobre o endereço local que o sistema operacional usaria para falar com
@@ -255,6 +286,55 @@ pub async fn porta_aberta(host: IpAddr, porta: u16) -> bool {
         .await,
         Ok(Ok(_))
     )
+}
+
+/// Teto para ler a linha de identificação depois da conexão.
+///
+/// Separado do teto de conexão porque são esperas diferentes: conectar depende
+/// da rede, e a linha vem imediatamente depois — servidor que não a manda em
+/// meio segundo não vai mandar.
+const TETO_DO_BANNER: Duration = Duration::from_millis(600);
+
+/// Máximo que se lê da identificação. O RFC 4253 limita a 255 bytes.
+const TETO_DE_BYTES: usize = 255;
+
+/// Sonda a porta 22 e, de quebra, lê o que o servidor SSH anuncia.
+///
+/// A identificação (`SSH-2.0-dropbear_2022.82`) é a **primeira coisa** que o
+/// servidor envia, antes de qualquer negociação ou autenticação — o mesmo
+/// `connect` que já sondava a porta a traz de graça. E ela responde uma pergunta
+/// que o SNMP não responde: o agente de um OpenWrt costuma devolver só o `uname`
+/// (`Linux bpi-r3 6.12.87 aarch64`), enquanto o `dropbear` no banner diz
+/// exatamente qual firmware é.
+///
+/// Nada é enviado por este lado, e a conexão morre com o socket. Falha na
+/// leitura devolve `None` sem afetar o "a porta está aberta": são duas
+/// perguntas, e a segunda não pode estragar a primeira.
+pub async fn sonda_ssh(host: IpAddr) -> (bool, Option<String>) {
+    use tokio::io::AsyncReadExt;
+
+    let Ok(Ok(mut fluxo)) =
+        timeout(TETO_DA_SONDA, TcpStream::connect(SocketAddr::new(host, 22))).await
+    else {
+        return (false, None);
+    };
+
+    let mut buffer = [0_u8; TETO_DE_BYTES];
+    let lidos = match timeout(TETO_DO_BANNER, fluxo.read(&mut buffer)).await {
+        Ok(Ok(lidos)) if lidos > 0 => lidos,
+        _ => return (true, None),
+    };
+
+    // Só a primeira linha: o que vem depois já é a negociação binária, e
+    // arrastá-la para dentro de um texto de diagnóstico não ajuda ninguém.
+    let texto = String::from_utf8_lossy(&buffer[..lidos]);
+    let linha = texto
+        .lines()
+        .next()
+        .map(str::trim)
+        .filter(|linha| !linha.is_empty())
+        .map(str::to_owned);
+    (true, linha)
 }
 
 #[cfg(test)]

@@ -31,6 +31,7 @@ use crate::{
             pagination::{paginate_compat, MaybePaged},
         },
         snmp::service::{sync_monitor_intervals, DEFAULT_SNMP_POLL_INTERVAL_SECONDS},
+        syslog::hints,
     },
     views::vpn::VpnPeerResponse,
 };
@@ -172,11 +173,12 @@ fn corpo(
     // o `sysDescr` por SNMP de cada linha transformaria listar dispositivos numa
     // varredura. Quem precisa da versão com SNMP é a tela de ativação de log, e
     // ela pede um dispositivo de cada vez.
-    let (sistema, sistema_origem) = systems::deduce(
-        device.operating_system.as_deref(),
-        device.vendor.as_deref(),
-        device.model.as_deref(),
-    );
+    let sistema = systems::detect(&systems::Evidence {
+        declared: device.operating_system.as_deref(),
+        vendor: device.vendor.as_deref(),
+        model: device.model.as_deref(),
+        ..systems::Evidence::default()
+    });
     serde_json::json!({
         "id": device.id, "siteId": device.site_id, "networkId": device.network_id, "parentId": device.parent_id,
         "ipAddress": device.ip_address, "name": device.name,
@@ -186,8 +188,8 @@ fn corpo(
         "snmpPollIntervalSeconds": device.snmp_poll_interval_seconds, "status": device.status,
         "accessMode": device.access_mode, "effectiveAccessMode": acesso.mode.id(),
         "accessModeReason": acesso.reason, "accessModeDeclared": acesso.declared,
-        "operatingSystem": device.operating_system, "effectiveOperatingSystem": sistema.id,
-        "operatingSystemSource": sistema_origem,
+        "operatingSystem": device.operating_system, "effectiveOperatingSystem": sistema.system.id,
+        "operatingSystemSource": sistema.source, "operatingSystemReason": sistema.reason,
         "lastSeenAt": device.last_seen_at.map(|v| v.to_rfc3339()), "createdAt": device.created_at.to_rfc3339(),
         "updatedAt": device.updated_at.to_rfc3339(), "site": site, "parent": parent
     })
@@ -548,6 +550,84 @@ async fn events(
     Ok(format::json(body)?)
 }
 
+/// Corpo de `POST /api/devices/identify`.
+///
+/// Vem do **formulário**, e não de um id: o operador precisa poder identificar
+/// antes de salvar, e num cadastro novo ainda não há dispositivo para consultar.
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IdentifyInput {
+    ip_address: Option<String>,
+    snmp_enabled: Option<bool>,
+    snmp_version: Option<String>,
+    snmp_community: Option<String>,
+    vendor: Option<String>,
+    model: Option<String>,
+}
+
+/// `POST /api/devices/identify` — descobre o sistema **agora**, e diz como.
+///
+/// Consulta o SNMP (quando há comunidade) e lê a identificação do servidor SSH,
+/// as duas em paralelo. Devolve a evidência crua junto da conclusão: o campo que
+/// só afirma "Linux" não tem como ser conferido, e foi exatamente assim que um
+/// OpenWrt ficou identificado errado sem ninguém perceber.
+///
+/// **Não grava nada.** É consulta — quem decide o que fica é o formulário.
+async fn identify(Json(entrada): Json<IdentifyInput>) -> AppResult<Response> {
+    let host = entrada
+        .ip_address
+        .as_deref()
+        .map(str::trim)
+        .filter(|valor| !valor.is_empty())
+        .and_then(|texto| texto.parse::<std::net::IpAddr>().ok());
+
+    let comunidade = entrada
+        .snmp_community
+        .as_deref()
+        .map(str::trim)
+        .filter(|valor| !valor.is_empty());
+
+    let (snmp, ssh) = match host {
+        Some(endereco) => {
+            let consulta_snmp = async {
+                match comunidade {
+                    Some(chave) if entrada.snmp_enabled.unwrap_or(false) => {
+                        hints::identidade_snmp(endereco, chave, entrada.snmp_version.as_deref())
+                            .await
+                    }
+                    _ => None,
+                }
+            };
+            tokio::join!(consulta_snmp, hints::sonda_ssh(endereco))
+        }
+        None => (None, (false, None)),
+    };
+    let ssh_banner = ssh.1;
+
+    let achado = systems::detect(&systems::Evidence {
+        // A declaração fica de fora: o botão existe para dizer o que o
+        // **equipamento** é, e devolver de volta o que o operador acabou de
+        // escolher no seletor faria a detecção concordar consigo mesma.
+        declared: None,
+        sys_object_id: snmp.as_ref().and_then(|info| info.sys_object_id.as_deref()),
+        sys_descr: snmp.as_ref().and_then(|info| info.sys_descr.as_deref()),
+        ssh_banner: ssh_banner.as_deref(),
+        vendor: entrada.vendor.as_deref(),
+        model: entrada.model.as_deref(),
+    });
+
+    Ok(format::json(systems::IdentifyResult {
+        operating_system: achado.system.id.to_owned(),
+        label: achado.system.label.to_owned(),
+        source: achado.source.to_owned(),
+        reason: achado.reason,
+        sys_descr: snmp.as_ref().and_then(|info| info.sys_descr.clone()),
+        sys_object_id: snmp.as_ref().and_then(|info| info.sys_object_id.clone()),
+        probed: snmp.is_some() || ssh_banner.is_some(),
+        ssh_banner,
+    })?)
+}
+
 /// `GET /api/devices/systems` — o catálogo de sistemas.
 ///
 /// Vem do servidor em vez de ser uma constante duplicada no frontend: são as
@@ -564,6 +644,7 @@ pub fn routes() -> Routes {
         // Antes de `/{id}`: o `matchit` do axum prioriza segmento literal sobre
         // parâmetro, e um teste garante que a rota não seja engolida.
         .add("/systems", get(operating_systems))
+        .add("/identify", post(identify))
         .add("/{id}", get(show).put(update).delete(destroy))
         .add("/{id}/monitors", get(device_monitors))
         .add("/{id}/metrics", get(metrics))

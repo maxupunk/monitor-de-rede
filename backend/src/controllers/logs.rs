@@ -278,6 +278,24 @@ async fn bind_source(
     }))?)
 }
 
+/// Dedução do sistema a partir **só** do cadastro — sem tocar a rede.
+///
+/// A ativação já tem o que precisa em mãos: quando a tela mandou um sistema, a
+/// escolha é dela; quando não mandou, sondar SNMP e SSH de novo aqui repetiria o
+/// que o `provision-hints` acabou de fazer, e ainda atrasaria o começo da
+/// sessão que o operador está esperando.
+fn do_cadastro(
+    dispositivo: &crate::models::devices::Model,
+    declarado: Option<&str>,
+) -> systems::Detection {
+    systems::detect(&systems::Evidence {
+        declared: declarado,
+        vendor: dispositivo.vendor.as_deref(),
+        model: dispositivo.model.as_deref(),
+        ..systems::Evidence::default()
+    })
+}
+
 /// `POST /api/logs/devices/{id}/provision` — entra no equipamento e configura
 /// o envio de syslog.
 ///
@@ -335,25 +353,8 @@ async fn provision_device(
     {
         Some(escolhido) => systems::parse(escolhido)
             .map_err(AppError::validation)?
-            .map_or_else(
-                || {
-                    systems::deduce(
-                        None,
-                        dispositivo.vendor.as_deref(),
-                        dispositivo.model.as_deref(),
-                    )
-                    .0
-                },
-                |sistema| sistema,
-            ),
-        None => {
-            systems::deduce(
-                dispositivo.operating_system.as_deref(),
-                dispositivo.vendor.as_deref(),
-                dispositivo.model.as_deref(),
-            )
-            .0
-        }
+            .map_or_else(|| do_cadastro(&dispositivo, None).system, |sistema| sistema),
+        None => do_cadastro(&dispositivo, dispositivo.operating_system.as_deref()).system,
     };
     let operating_system = sistema.id.to_owned();
 
@@ -486,6 +487,7 @@ async fn provision_hints(
         server_port: snippets::published_port(),
         operating_system: dicas.operating_system,
         operating_system_source: dicas.operating_system_source.to_owned(),
+        operating_system_reason: dicas.operating_system_reason,
         ssh_open: dicas.ssh_open,
         telnet_open: dicas.telnet_open,
         mac_address: dicas.mac_address,
