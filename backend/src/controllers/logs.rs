@@ -25,6 +25,8 @@ use crate::{
         ProvisionLoggingInput, ProvisionLoggingResponse,
     },
     services::{
+        devices::{access, systems},
+        server_addresses,
         shared::errors::{AppError, AppResult},
         syslog::{
             hints, mactelnet, provision,
@@ -236,14 +238,44 @@ async fn bind_source(
     }
 
     resolver::bind(&ctx.db, &chave, entrada.device_id).await?;
-    // O resolvedor guarda a decisão por 30 s; sem invalidar, o operador
-    // vincularia o IP e continuaria vendo "fonte desconhecida" por meio minuto.
+
+    let mut resolvido = None;
     if let Ok(servico) = service(&ctx) {
+        // O resolvedor guarda a decisão por 30 s; sem invalidar, o operador
+        // vincularia o IP e continuaria vendo "fonte desconhecida" por meio
+        // minuto.
         servico.ingestor.resolver().invalidate().await;
+
+        // E o registro de origens guarda o que valia **quando a última linha
+        // chegou** — ele só aprende com mensagem nova. Num roteador que fala de
+        // hora em hora, a tela continuaria dizendo "Descartando" e o seletor
+        // voltaria a vazio: a resposta seria honesta e leria como se o vínculo
+        // não tivesse pegado. Reclassificar aqui é o que faz a escolha valer no
+        // mesmo instante.
+        //
+        // Resolvido de novo, e não assumido: no desvínculo o certo é o que a
+        // heurística disser agora — rede cadastrada, ambíguo ou desconhecido —
+        // e não "desconhecido" por decreto.
+        if let Some(fonte) = servico.sources.snapshot(&chave) {
+            if let Ok(origem) = fonte.source_ip.parse::<std::net::IpAddr>() {
+                let resolucao = servico
+                    .ingestor
+                    .resolver()
+                    .resolve(&ctx.db, origem, fonte.hostname.as_deref())
+                    .await?;
+                servico.sources.reclassify(&chave, &resolucao);
+                resolvido = resolucao.device_id();
+            }
+        }
     }
-    Ok(format::json(
-        serde_json::json!({ "bindKey": chave, "deviceId": entrada.device_id }),
-    )?)
+
+    Ok(format::json(serde_json::json!({
+        "bindKey": chave,
+        // O que o vínculo produziu de fato. No desvínculo pode não ser nulo: a
+        // origem volta a ser resolvida pelo cadastro, e a tela precisa mostrar
+        // isso em vez de um campo vazio que mente.
+        "deviceId": resolvido.or(entrada.device_id),
+    }))?)
 }
 
 /// `POST /api/logs/devices/{id}/provision` — entra no equipamento e configura
@@ -292,15 +324,38 @@ async fn provision_device(
             ))
         }
     };
-    let vendor = entrada
-        .vendor
+    // O que a tela mandou é uma escolha do catálogo, e um id fora dele é erro de
+    // validação — não um valor que segue adiante para virar "não há receita"
+    // três camadas abaixo. Ausente, vale a mesma dedução do cadastro.
+    let sistema = match entrada
+        .operating_system
         .as_deref()
         .map(str::trim)
         .filter(|valor| !valor.is_empty())
-        .map_or_else(
-            || hints::deduz_vendor(dispositivo.vendor.as_deref(), dispositivo.model.as_deref()).0,
-            str::to_owned,
-        );
+    {
+        Some(escolhido) => systems::parse(escolhido)
+            .map_err(AppError::validation)?
+            .map_or_else(
+                || {
+                    systems::deduce(
+                        None,
+                        dispositivo.vendor.as_deref(),
+                        dispositivo.model.as_deref(),
+                    )
+                    .0
+                },
+                |sistema| sistema,
+            ),
+        None => {
+            systems::deduce(
+                dispositivo.operating_system.as_deref(),
+                dispositivo.vendor.as_deref(),
+                dispositivo.model.as_deref(),
+            )
+            .0
+        }
+    };
+    let operating_system = sistema.id.to_owned();
 
     // O MAC-Telnet endereça por MAC, e `devices` não guarda MAC: ele vem das
     // interfaces coletadas por SNMP ou do ARP do discovery. A tela pode mandar
@@ -350,7 +405,7 @@ async fn provision_device(
         protocol: protocolo,
         username: entrada.username.trim().to_owned(),
         password: entrada.password.clone(),
-        vendor: vendor.clone(),
+        operating_system: operating_system.clone(),
         server_address: server_address.clone(),
         server_port,
     };
@@ -358,7 +413,7 @@ async fn provision_device(
     let resultado = provision::run(&pedido, servico.as_ref().map(|s| &s.sources), id).await?;
 
     Ok(format::json(ProvisionLoggingResponse {
-        vendor,
+        operating_system,
         server_address,
         server_port,
         commands: resultado.commands,
@@ -389,12 +444,32 @@ async fn provision_hints(
     );
     let dicas = hints::collect(&ctx.db, &dispositivo, &detector).await?;
 
-    // O palpite do servidor pode falhar (dispositivo sem IP, rota inexistente).
-    // Aí vale o último recurso da `FRONTEND_ORIGIN`, com o mesmo crivo — que é
-    // o que impede `localhost` de voltar pela porta dos fundos.
-    let (server_address, server_address_source) = match dicas.server_address.clone() {
-        Some(endereco) => (Some(endereco), dicas.server_address_source),
-        None => (
+    // A lista de endereços do servidor é a fonte preferencial: ela carrega o
+    // que o operador corrigiu à mão, e é ela que a tela oferece no seletor. A
+    // detecção por rota só decide **qual** delas serve a este equipamento.
+    let lista = server_addresses::list(&ctx.db, &detector).await?;
+    // A forma de acesso é resolvida uma vez e usada duas: para escolher o
+    // endereço e para explicar a escolha na tela. Resolver de novo lá dentro
+    // custaria as mesmas três consultas para chegar à mesma conclusão.
+    let acesso = access::AccessContext::load(&ctx.db)
+        .await?
+        .resolve(&dispositivo);
+    let sugestao = server_addresses::suggest_with(&ctx.db, &dispositivo, &lista, &acesso).await?;
+    let sugerido = sugestao.as_ref().and_then(|(id, _)| {
+        lista
+            .iter()
+            .find(|item| &item.id == id)
+            .and_then(|item| item.value.clone())
+    });
+
+    // Ordem dos palpites, do mais confiável para o menos: a entrada sugerida da
+    // lista, a rota até o equipamento, e por fim a `FRONTEND_ORIGIN` — esta
+    // última com o mesmo crivo das outras, que é o que impede `localhost` de
+    // voltar pela porta dos fundos.
+    let (server_address, server_address_source) = match (sugerido, dicas.server_address.clone()) {
+        (Some(endereco), _) => (Some(endereco), "endereços deste servidor"),
+        (None, Some(endereco)) => (Some(endereco), dicas.server_address_source),
+        (None, None) => (
             hints::sanitiza_endereco(Some(&endereco_do_servidor())),
             "origem configurada",
         ),
@@ -403,9 +478,14 @@ async fn provision_hints(
     Ok(format::json(ProvisionHintsResponse {
         server_address,
         server_address_source: server_address_source.to_owned(),
+        suggested_address_id: sugestao.as_ref().map(|(id, _)| id.clone()),
+        suggested_address_reason: sugestao.map(|(_, motivo)| motivo),
+        access_mode: acesso.mode.id().to_owned(),
+        access_mode_declared: acesso.declared,
+        access_mode_reason: acesso.reason,
         server_port: snippets::published_port(),
-        vendor: dicas.vendor,
-        vendor_source: dicas.vendor_source.to_owned(),
+        operating_system: dicas.operating_system,
+        operating_system_source: dicas.operating_system_source.to_owned(),
         ssh_open: dicas.ssh_open,
         telnet_open: dicas.telnet_open,
         mac_address: dicas.mac_address,

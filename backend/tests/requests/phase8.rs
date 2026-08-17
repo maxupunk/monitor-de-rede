@@ -238,6 +238,53 @@ async fn o_wizard_cria_o_peer_com_device_monitores_e_artefato() {
         assert!(!listagem.text().contains("presharedKey"));
         assert_eq!(peers[0]["needsFirewallHint"], false);
         assert_eq!(peers[0]["device"]["name"], "Filial 01");
+        // O `device` de dentro do peer **não** carrega o peer de volta: seria a
+        // mesma informação duas vezes em profundidades diferentes, e o
+        // `VpnPeerDeviceView` dos bindings nunca declarou este campo.
+        assert!(
+            peers[0]["device"].get("vpnPeer").is_none(),
+            "o vínculo voltou aninhado dentro dele mesmo"
+        );
+
+        // E o caminho inverso funciona: o dispositivo sabe do próprio túnel, que
+        // é o que liga a aba VPN da tela de detalhe.
+        let device_id = corpo["device"]["id"].as_i64().unwrap();
+        let dispositivo = json_of(
+            &request
+                .get(&format!("/api/devices/{device_id}"))
+                .await
+                .text(),
+        );
+        assert_eq!(dispositivo["vpnPeer"]["id"], peer_id);
+        assert_eq!(dispositivo["vpnPeer"]["deviceProfile"], "mikrotik");
+        assert_eq!(dispositivo["vpnPeer"]["connectionStatus"], "awaiting");
+        assert!(dispositivo["vpnPeer"]["publicKey"].is_string());
+        assert!(
+            !request
+                .get(&format!("/api/devices/{device_id}"))
+                .await
+                .text()
+                .contains("presharedKey"),
+            "a chave pré-compartilhada não pode vazar pelo dispositivo"
+        );
+
+        // Dispositivo sem túnel continua com o campo nulo — a aba VPN da tela
+        // depende disso para não aparecer onde não faz sentido.
+        let avulso = request
+            .post("/api/devices")
+            .json(&serde_json::json!({ "name": "sem tunel", "type": "server" }))
+            .await;
+        assert!(json_of(&avulso.text())["vpnPeer"].is_null());
+
+        // E a listagem traz o vínculo junto, sem uma consulta por linha.
+        let lista = json_of(&request.get("/api/devices").await.text());
+        let na_lista = lista
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"].as_i64() == Some(device_id))
+            .expect("o dispositivo do peer está na lista");
+        assert_eq!(na_lista["vpnPeer"]["id"], peer_id);
 
         let psk = vpn_peers::Entity::find_by_id(peer_id)
             .one(&ctx.db)

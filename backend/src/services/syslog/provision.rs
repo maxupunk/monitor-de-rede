@@ -113,8 +113,8 @@ pub struct ProvisionRequest {
     pub protocol: Protocol,
     pub username: String,
     pub password: String,
-    /// Chave do fabricante — a mesma do `snippets`.
-    pub vendor: String,
+    /// Id do sistema — o mesmo do catálogo e do `snippets`.
+    pub operating_system: String,
     /// Endereço deste servidor, como o roteador o enxerga.
     pub server_address: String,
     pub server_port: u16,
@@ -136,20 +136,23 @@ pub struct ProvisionOutcome {
 ///
 /// # Errors
 ///
-/// Falha de conexão, de autenticação, ou fabricante sem receita.
+/// Falha de conexão, de autenticação, ou sistema sem receita.
 pub async fn run(
     pedido: &ProvisionRequest,
     sources: Option<&Arc<SourceRegistry>>,
     device_id: i64,
 ) -> AppResult<ProvisionOutcome> {
-    let comandos =
-        snippets::commands_for(&pedido.vendor, &pedido.server_address, pedido.server_port)
-            .ok_or_else(|| {
-                AppError::validation(format!(
-                    "Não há receita de configuração para o fabricante {}.",
-                    pedido.vendor
-                ))
-            })?;
+    let comandos = snippets::commands_for(
+        &pedido.operating_system,
+        &pedido.server_address,
+        pedido.server_port,
+    )
+    .ok_or_else(|| {
+        AppError::validation(format!(
+            "Não há receita de configuração automática para o sistema {}.",
+            pedido.operating_system
+        ))
+    })?;
 
     let antes = sources.map(|registro| marcas(registro, device_id));
 
@@ -218,7 +221,7 @@ async fn executa(pedido: &ProvisionRequest, comandos: &[String]) -> AppResult<St
     // "configurei e o caminho está bloqueado". Sem ela, o silêncio depois da
     // ativação é ambíguo: as regras enviadas cobrem tópicos que só falam quando
     // algo acontece, e um roteador saudável pode passar horas sem dizer nada.
-    if let Some(teste) = snippets::test_command(&pedido.vendor) {
+    if let Some(teste) = snippets::test_command(&pedido.operating_system) {
         sessao.envia_linha(&teste).await?;
         let saida = sessao.le_ate_silenciar().await?;
         transcript.push_str(&format!("\n$ {teste}\n{saida}"));

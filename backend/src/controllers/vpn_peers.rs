@@ -11,7 +11,9 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::{
-    controllers::{auth_guard::AUTHENTICATED_USER_HEADER, devices::present as present_device},
+    controllers::{
+        auth_guard::AUTHENTICATED_USER_HEADER, devices::present_for_vpn as present_device,
+    },
     services::{
         shared::errors::{AppError, AppResult},
         vpn::{

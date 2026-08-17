@@ -80,6 +80,16 @@ async fn update(
     Json(input): Json<VpnServerInput>,
 ) -> AppResult<Response> {
     let (server, network) = server_service::create_or_update(&ctx.db, &input.into()).await?;
+
+    // O `public_endpoint` é a origem do endereço "Internet" da lista de
+    // endereços deste servidor. Se havia ali uma correção manual e ela acabou
+    // de virar cópia do que foi gravado aqui, some com ela — senão a próxima
+    // mudança deste campo valeria para os peers e não para o syslog, e as duas
+    // telas passariam a apontar endereços diferentes sem dizer nada.
+    if let Some(endpoint) = server.public_endpoint.as_deref() {
+        crate::services::server_addresses::forget_override_if(&ctx.db, "public", endpoint).await?;
+    }
+
     Ok(format::json(json!({
         "message": "Configuração aplicada sem derrubar os túneis ativos",
         "server": VpnServerResponse::from(server),

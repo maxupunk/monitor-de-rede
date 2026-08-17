@@ -802,6 +802,7 @@ import { useProbesStore } from '@/stores/probes'
 import { useDnsServersStore, type DnsServer } from '@/stores/dnsServers'
 import { useAlertsStore } from '@/stores/alerts'
 import { useSnmpTestStore } from '@/stores/snmpTest'
+import { usePreferencesStore } from '@/stores/preferences'
 import { apiService } from '@/services/apiService'
 import type { DeviceInterface } from '@/stores/deviceDetail'
 import DnsServersDialog from '@/components/DnsServersDialog.vue'
@@ -859,6 +860,7 @@ const probesStore = useProbesStore()
 const dnsServersStore = useDnsServersStore()
 const alertsStore = useAlertsStore()
 const snmpTestStore = useSnmpTestStore()
+const prefsStore = usePreferencesStore()
 
 const serversDialog = ref(false)
 const deviceDialog = ref(false)
@@ -1076,6 +1078,10 @@ async function resetForm() {
   if (devicesStore.devices.length === 0) devicesStore.fetchDevices()
   if (probesStore.probes.length === 0) probesStore.fetchProbes()
   dnsServersStore.fetchServers()
+  // O formulário **sempre** envia `intervalSeconds`, então sem esta leitura a
+  // preferência "Intervalo padrão de coleta por Ping" nunca chegaria a valer
+  // para um monitor criado pela tela — só para os criados pela API.
+  void prefsStore.fetchAll()
   await alertsStore.fetchAlertRules()
 
   if (props.monitor) {
@@ -1096,7 +1102,14 @@ async function resetForm() {
         (existingRule.severity as 'info' | 'warning' | 'critical') || 'warning'
     }
   } else {
-    Object.assign(form, createMonitorForm(props.defaultDeviceId ?? null), props.defaults ?? {})
+    Object.assign(
+      form,
+      createMonitorForm(props.defaultDeviceId ?? null),
+      { intervalSeconds: prefsStore.preferences.defaultPingIntervalSeconds },
+      // `defaults` vem de quem abriu o diálogo e é mais específico que a
+      // preferência global — por isso entra depois dela.
+      props.defaults ?? {}
+    )
     nameTouched.value = false
     // O alvo vindo em `defaults` é mais específico que o IP do equipamento —
     // sobrescrevê-lo aqui anularia o pré-preenchimento.

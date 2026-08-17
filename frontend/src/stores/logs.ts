@@ -166,29 +166,39 @@ export const useLogsStore = defineStore('logs', () => {
   }
 
   /**
-   * Se o Docker está reescrevendo o endereço de origem das mensagens.
+   * Se o mascaramento do Docker ainda está **atrapalhando**.
    *
-   * Quando é verdade, todos os roteadores chegam com o mesmo IP e só o hostname
-   * os separa — o aviso da tela existe para o operador não tentar resolver isso
-   * vinculando o endereço do gateway, que atribuiria o parque inteiro a um
-   * dispositivo só.
+   * Não é "existe mascaramento": é "existe origem mascarada sem vínculo". Os
+   * roteadores chegam todos com o mesmo IP e só o hostname os separa — o aviso
+   * existe para o operador não tentar resolver isso vinculando o endereço do
+   * gateway, que atribuiria o parque inteiro a um dispositivo só.
+   *
+   * Vinculados todos, o mascaramento continua lá e deixou de custar alguma
+   * coisa. Manter o aviso ali seria ensinar a ignorá-lo — e no dia em que um
+   * equipamento novo aparecer sem vínculo, ele volta e volta significando algo.
    */
-  const natMasking = computed(() => (nat.value?.maskedCount ?? 0) > 0)
+  const natMasking = computed(() => (nat.value?.unresolvedMaskedCount ?? 0) > 0)
 
   /**
    * `key` é o `bindKey` da origem, não o IP: atrás de NAT ele é `host:<nome>`.
    * Montar a chave na tela duplicaria a decisão de "isto está mascarado?", que
    * só o servidor sabe tomar.
    */
-  async function bindSource(key: string, deviceId: number | null): Promise<boolean> {
-    try {
-      await apiService.post(`/logs/sources/${encodeURIComponent(key)}/bind`, { deviceId })
-      await fetchSources()
-      list.reset()
-      return true
-    } catch {
-      return false
-    }
+  /**
+   * Vincula (ou desvincula) uma origem a um dispositivo.
+   *
+   * **Propaga o erro** em vez de devolver `false`: o servidor recusa o vínculo
+   * do gateway do NAT com uma explicação inteira de por quê e do que fazer no
+   * lugar, e engolir isso deixava o seletor voltando a vazio sem uma palavra —
+   * exatamente o desfecho que a mensagem existe para evitar.
+   *
+   * A lista de logs **não** é recarregada: o vínculo vale para o que chegar
+   * daqui em diante, e nenhuma linha já gravada muda. Recarregá-la só piscava a
+   * tela atrás do diálogo.
+   */
+  async function bindSource(key: string, deviceId: number | null): Promise<void> {
+    await apiService.post(`/logs/sources/${encodeURIComponent(key)}/bind`, { deviceId })
+    await fetchSources()
   }
 
   // --- ativação automática --------------------------------------------------
@@ -224,7 +234,8 @@ export const useLogsStore = defineStore('logs', () => {
       port: number | null
       username: string
       password: string
-      vendor: string | null
+      /** Id do catálogo de sistemas — ver `stores/operatingSystems`. */
+      operatingSystem: string | null
       /**
        * Endereço deste servidor que o **equipamento** deve usar. Vem do campo
        * da tela, não do navegador: quem abre a interface em `localhost` mandava
@@ -251,15 +262,18 @@ export const useLogsStore = defineStore('logs', () => {
 
   const setupGuide = ref<SetupGuide | null>(null)
 
-  async function fetchSetupGuide(): Promise<void> {
+  /**
+   * Gera os comandos com um endereço estampado.
+   *
+   * O endereço vem da lista "Endereços deste servidor", não do navegador. A
+   * versão anterior mandava `window.location.hostname`, e quem abre a interface
+   * em `http://localhost:3333` copiava um comando com `remote=localhost` — que
+   * o roteador aceita e que o faz mandar o log para si mesmo.
+   */
+  async function fetchSetupGuide(address: string | null = null): Promise<void> {
     try {
-      // O host da barra de endereços é o melhor palpite do endereço que o
-      // roteador alcança: de dentro do container o processo só enxerga o IP da
-      // bridge, que não serve para aparelho nenhum.
-      const address = window.location.hostname
-      setupGuide.value = await apiService.get<SetupGuide>(
-        `/logs/setup-snippet?address=${encodeURIComponent(address)}`
-      )
+      const query = address ? `?address=${encodeURIComponent(address)}` : ''
+      setupGuide.value = await apiService.get<SetupGuide>(`/logs/setup-snippet${query}`)
     } catch {
       setupGuide.value = null
     }

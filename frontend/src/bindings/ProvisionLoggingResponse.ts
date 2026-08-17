@@ -4,7 +4,7 @@
  * O que a tela mostra depois da ativação automática.
  */
 export type ProvisionLoggingResponse = {
-  vendor: string
+  operatingSystem: string
   /**
    * O endereço que foi gravado no equipamento.
    */

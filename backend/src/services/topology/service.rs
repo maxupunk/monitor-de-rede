@@ -340,6 +340,8 @@ mod tests {
             snmp_community: None,
             snmp_version: None,
             snmp_poll_interval_seconds: 60,
+            access_mode: None,
+            operating_system: None,
             status: "online".into(),
             last_seen_at: None,
             created_at: chrono::Utc::now().into(),

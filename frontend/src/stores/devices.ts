@@ -34,6 +34,19 @@ export interface Device {
   snmpCommunity?: string
   snmpVersion?: 'v1' | 'v2c' | 'v3'
   snmpPollIntervalSeconds?: number
+  /** O que o operador declarou. `null` = automático; ver `utils/accessMode`. */
+  accessMode?: 'local' | 'vpn' | 'remote' | null
+  /** O que o sistema vai usar de fato — declarado ou deduzido. */
+  effectiveAccessMode?: 'local' | 'vpn' | 'remote'
+  /** Por que essa conclusão. */
+  accessModeReason?: string
+  accessModeDeclared?: boolean
+  /** Sistema declarado no cadastro. `null` = automático. */
+  operatingSystem?: string | null
+  /** O que vale hoje — declarado ou deduzido. Id do catálogo do servidor. */
+  effectiveOperatingSystem?: string
+  /** `declarado` | `snmp` | `cadastro` | `padrão`. */
+  operatingSystemSource?: string
   site?: { id: number; name: string } | null
   parent?: { id: number; name: string } | null
   network?: { id: number; name: string; cidr: string }

@@ -21,6 +21,7 @@ use crate::{
             result_processor::process_result,
             runner::{run_monitor, RunOptions},
         },
+        preferences,
         shared::{
             errors::{AppError, AppResult},
             pagination::paginate_compat,
@@ -130,12 +131,19 @@ async fn store(
     let kind = kind.to_string();
     let name = name.to_string();
     let enabled = input.enabled.or(input.is_enabled).unwrap_or(true);
+    // O padrão vem das preferências, não de um literal: é este o ponto de
+    // consumo que faz "Intervalo padrão de coleta por Ping" significar alguma
+    // coisa. Monitor SNMP vinculado a dispositivo continua herdando o intervalo
+    // do próprio dispositivo — a preferência não o atropela.
+    let intervalo_padrao = preferences::load(&ctx.db)
+        .await?
+        .default_ping_interval_seconds;
     let interval_seconds = if kind.eq_ignore_ascii_case("snmp") {
         canonical_snmp_interval(&ctx, input.device_id, input.interval_seconds)
             .await?
-            .unwrap_or_else(|| input.interval_seconds.unwrap_or(60).max(1))
+            .unwrap_or_else(|| input.interval_seconds.unwrap_or(intervalo_padrao).max(1))
     } else {
-        input.interval_seconds.unwrap_or(60).max(1)
+        input.interval_seconds.unwrap_or(intervalo_padrao).max(1)
     };
     let timeout_seconds = calculate_smart_timeout_seconds(&kind, interval_seconds)
         .min((interval_seconds - 1).max(1))

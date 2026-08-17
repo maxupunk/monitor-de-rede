@@ -11,8 +11,9 @@
 //! - **o meio de acesso**, que o operador escolhia por tentativa. Sondar a
 //!   porta antes custa um `connect` e evita esperar o timeout de um SSH que
 //!   está desligado;
-//! - **o fabricante**, que decide quais comandos serão enviados. O cadastro tem
-//!   um campo de texto livre, e o SNMP costuma saber melhor.
+//! - **o sistema do equipamento**, que decide quais comandos serão enviados. O
+//!   catálogo é o de [`crate::services::devices::systems`], o mesmo do cadastro
+//!   e do assistente da VPN — a dedução aqui só escolhe uma entrada dele.
 //!
 //! Nada aqui é decisão final: tudo volta para a tela como sugestão editável. O
 //! módulo responde "o que dá para saber", não "o que vai ser feito".
@@ -29,6 +30,7 @@ use super::nat::NatDetector;
 use crate::{
     models::_entities::{device_interfaces, devices, discovery_results},
     services::{
+        devices::systems,
         shared::errors::AppResult,
         snmp::{
             client::{SnmpClient, SnmpConfig},
@@ -54,10 +56,10 @@ pub struct ProvisionHints {
     pub server_address_source: &'static str,
     pub ssh_open: bool,
     pub telnet_open: bool,
-    /// Chave de receita deduzida do cadastro e do SNMP.
-    pub vendor: String,
-    /// De onde veio a dedução do fabricante.
-    pub vendor_source: &'static str,
+    /// Sistema em vigor — declarado no cadastro ou deduzido.
+    pub operating_system: String,
+    /// De onde veio — ver [`systems::source`].
+    pub operating_system_source: &'static str,
     pub mac_address: Option<String>,
     /// Se este processo consegue falar em camada 2 com a rede do equipamento.
     /// Falso dentro de um container em rede bridge — e é o que inviabiliza o
@@ -89,7 +91,8 @@ pub async fn collect(
         Some(endereco) if dispositivo.snmp_enabled => sys_descr(endereco, dispositivo).await,
         _ => None,
     };
-    let (vendor, vendor_source) = deduz_vendor(
+    let (sistema, sistema_origem) = systems::deduce(
+        dispositivo.operating_system.as_deref(),
         dispositivo.vendor.as_deref(),
         descricao.as_deref().or(dispositivo.model.as_deref()),
     );
@@ -111,8 +114,8 @@ pub async fn collect(
         server_address_source,
         ssh_open,
         telnet_open,
-        vendor,
-        vendor_source,
+        operating_system: sistema.id.to_owned(),
+        operating_system_source: sistema_origem,
         mac_address: mac_conhecido(db, dispositivo).await?,
         // A difusão do MAC-Telnet não atravessa a ponte do Docker.
         layer2_reachable: !nat.bridged_container(),
@@ -254,54 +257,6 @@ pub async fn porta_aberta(host: IpAddr, porta: u16) -> bool {
     )
 }
 
-/// Traduz o fabricante de texto livre para uma chave de receita.
-///
-/// O `vendor` de `devices` vem do OUI do MAC, do SNMP ou da digitação do
-/// operador — e a descrição do sistema (`sysDescr`) costuma ser mais específica
-/// que os três. Por isso ela entra primeiro quando existe.
-#[must_use]
-pub fn deduz_vendor(vendor: Option<&str>, descricao: Option<&str>) -> (String, &'static str) {
-    if let Some(chave) = casa_vendor(descricao) {
-        return (chave.to_owned(), "snmp");
-    }
-    if let Some(chave) = casa_vendor(vendor) {
-        return (chave.to_owned(), "cadastro");
-    }
-    // O RouterOS é o parque para o qual este sistema foi feito, e a tela mostra
-    // a escolha antes de enviar qualquer coisa.
-    ("routeros".to_owned(), "padrão")
-}
-
-fn casa_vendor(texto: Option<&str>) -> Option<&'static str> {
-    let bruto = texto?.to_ascii_lowercase();
-    if bruto.is_empty() {
-        return None;
-    }
-    for (agulha, chave) in [
-        ("mikrotik", "routeros"),
-        ("routeros", "routeros"),
-        ("routerboard", "routeros"),
-        ("openwrt", "openwrt"),
-        ("lede", "openwrt"),
-        ("dd-wrt", "openwrt"),
-        ("ubiquiti", "ubiquiti"),
-        ("edgeos", "ubiquiti"),
-        ("edgerouter", "ubiquiti"),
-        ("edgeswitch", "ubiquiti"),
-        ("unifi", "ubiquiti"),
-        ("vyatta", "ubiquiti"),
-        ("debian", "linux"),
-        ("ubuntu", "linux"),
-        ("rsyslog", "linux"),
-        ("linux", "linux"),
-    ] {
-        if bruto.contains(agulha) {
-            return Some(chave);
-        }
-    }
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -367,43 +322,8 @@ mod tests {
         assert_eq!(local_address_toward(ip("127.0.0.1")), None);
     }
 
-    #[test]
-    fn o_snmp_tem_precedencia_sobre_o_cadastro() {
-        // O `vendor` do cadastro costuma vir do OUI do MAC, que identifica o
-        // fabricante da placa — não o sistema que roda nela.
-        let (chave, origem) = deduz_vendor(Some("Routerboard"), Some("OpenWrt 23.05 Linux"));
-        assert_eq!((chave.as_str(), origem), ("openwrt", "snmp"));
-    }
-
-    #[test]
-    fn sem_snmp_o_cadastro_decide() {
-        let (chave, origem) = deduz_vendor(Some("MikroTik"), None);
-        assert_eq!((chave.as_str(), origem), ("routeros", "cadastro"));
-    }
-
-    #[test]
-    fn sem_nada_o_padrao_e_declarado_como_padrao() {
-        // A origem importa: a tela avisa que foi chute, em vez de apresentar um
-        // palpite como se fosse informação.
-        let (chave, origem) = deduz_vendor(None, None);
-        assert_eq!((chave.as_str(), origem), ("routeros", "padrão"));
-        let (_, origem) = deduz_vendor(Some("   "), Some(""));
-        assert_eq!(origem, "padrão");
-    }
-
-    #[test]
-    fn as_familias_conhecidas_sao_reconhecidas_pela_descricao_do_snmp() {
-        for (descricao, esperado) in [
-            ("RouterOS CCR2004", "routeros"),
-            ("OpenWrt 22.03.5", "openwrt"),
-            ("EdgeOS v2.0.9", "ubiquiti"),
-            ("UniFi AP-AC-Pro", "ubiquiti"),
-            ("Linux servidor 6.1.0-18-amd64", "linux"),
-        ] {
-            let (chave, _) = deduz_vendor(None, Some(descricao));
-            assert_eq!(chave, esperado, "não reconheceu {descricao:?}");
-        }
-    }
+    // A dedução do sistema mudou de casa: os testes dela vivem em
+    // `services::devices::systems`, junto do catálogo que a decide.
 
     #[tokio::test]
     async fn porta_fechada_no_loopback_responde_falso_sem_travar() {

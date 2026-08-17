@@ -2,9 +2,9 @@
 
 export type SetupSnippet = {
   /**
-   * Chave estável, para a tela escolher ícone e ordenar.
+   * Chave do catálogo de sistemas, para a tela escolher ícone e ordenar.
    */
-  vendor: string
+  system: string
   label: string
   /**
    * O que o operador precisa saber antes de colar.

@@ -99,6 +99,18 @@ pub struct SnmpApplyOptions {
 /// Os monitores SNMP vinculados a ele não devem manter credenciais ou alvos
 /// divergentes, pois todos participam da mesma coleta.
 pub fn device_config(device: &devices::Model) -> AppResult<SnmpConfig> {
+    device_config_with(device, crate::services::preferences::DEFAULT_SNMP_COMMUNITY)
+}
+
+/// Idem, com a comunidade a usar quando o dispositivo não tem uma própria.
+///
+/// Existe para o chamador que tem banco à mão poder aplicar a preferência
+/// global (`Comunidade SNMP padrão`). Quem não tem cai no padrão de fábrica,
+/// que é o mesmo valor que estava fixo aqui antes.
+pub fn device_config_with(
+    device: &devices::Model,
+    comunidade_padrao: &str,
+) -> AppResult<SnmpConfig> {
     let host = device
         .ip_address
         .clone()
@@ -106,7 +118,12 @@ pub fn device_config(device: &devices::Model) -> AppResult<SnmpConfig> {
         .unwrap_or_else(|| device.name.clone());
     let mut config = SnmpConfig::v2c(
         host,
-        device.snmp_community.as_deref().unwrap_or("public"),
+        device
+            .snmp_community
+            .as_deref()
+            .map(str::trim)
+            .filter(|valor| !valor.is_empty())
+            .unwrap_or(comunidade_padrao),
         161,
     );
     config.version = SnmpVersion::parse(device.snmp_version.as_deref().unwrap_or("v2c"))
@@ -309,7 +326,13 @@ pub async fn poll_device_monitors(
     monitored_items: &[monitors::Model],
 ) -> Vec<(i64, CheckResult)> {
     let started_at = Utc::now();
-    let poll = match device_config(device) {
+    // A preferência entra aqui, e não no `device_config` sem banco: é a coleta
+    // que precisa dela, e é onde o dispositivo sem comunidade própria aparece.
+    let comunidade = crate::services::preferences::load(&ctx.db)
+        .await
+        .map(|preferencias| preferencias.default_snmp_community)
+        .unwrap_or_else(|_| crate::services::preferences::DEFAULT_SNMP_COMMUNITY.to_owned());
+    let poll = match device_config_with(device, &comunidade) {
         Ok(config) => poll_device(ctx, device, config).await,
         Err(error) => Err(error),
     };

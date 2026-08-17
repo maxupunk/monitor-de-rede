@@ -152,6 +152,7 @@
 
     <!-- Modal Gerenciamento de Servidores DNS -->
     <DnsServersDialog v-model="dnsServersDialog" />
+    <ServerAddressesDialog v-model="serverAddressesDialog" />
   </v-app>
 </template>
 
@@ -163,6 +164,7 @@ import { useEventsStore } from '@/stores/events'
 import { useAuthStore } from '@/stores/auth'
 import { useNotifications } from '@/composables/useNotifications'
 import DnsServersDialog from '@/components/DnsServersDialog.vue'
+import ServerAddressesDialog from '@/components/ServerAddressesDialog.vue'
 
 interface NavSubItem {
   title: string
@@ -181,6 +183,7 @@ interface NavItem {
 
 const drawer = ref(!useDisplay().mdAndDown)
 const dnsServersDialog = ref(false)
+const serverAddressesDialog = ref(false)
 const eventsStore = useEventsStore()
 const authStore = useAuthStore()
 const router = useRouter()
@@ -218,6 +221,13 @@ const navItems: NavItem[] = [
         icon: 'mdi-dns-outline',
         click: () => {
           dnsServersDialog.value = true
+        },
+      },
+      {
+        title: 'Endereços do servidor',
+        icon: 'mdi-server-network',
+        click: () => {
+          serverAddressesDialog.value = true
         },
       },
     ],

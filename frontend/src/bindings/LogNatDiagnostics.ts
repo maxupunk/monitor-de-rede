@@ -9,6 +9,15 @@ export type LogNatDiagnostics = {
    */
   maskedCount: number
   /**
+   * Dessas, quantas ainda **não** estão vinculadas a um dispositivo.
+   *
+   * É este número, e não o de cima, que decide se o aviso aparece. O
+   * mascaramento continua existindo depois de tudo vinculado — mas aí ele
+   * deixou de atrapalhar, e um aviso permanente sobre um problema resolvido
+   * treina o operador a ignorar avisos.
+   */
+  unresolvedMaskedCount: number
+  /**
    * Se o processo está dentro de um container — muda o texto da orientação,
    * não o comportamento.
    */

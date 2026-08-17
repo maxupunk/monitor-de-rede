@@ -72,6 +72,21 @@ pub struct SeenSource {
     pub last_message: String,
 }
 
+impl SeenSource {
+    /// Se esta origem ainda depende de alguém agir para deixar de ser
+    /// descartada.
+    ///
+    /// Atrás de NAT a resolução por IP é pulada de propósito — o endereço é o
+    /// gateway e vale para o parque inteiro —, então uma origem mascarada só
+    /// chega a `Device` por vínculo manual ou por casamento de hostname.
+    /// Qualquer outra classificação ali significa "ainda falta fazer algo", e é
+    /// isso que o aviso da tela pede.
+    #[must_use]
+    pub fn needs_binding(&self) -> bool {
+        self.masked && self.kind != SourceKind::Device
+    }
+}
+
 /// O registro, compartilhado entre os listeners e a API.
 #[derive(Default)]
 pub struct SourceRegistry {
@@ -150,6 +165,48 @@ impl SourceRegistry {
         // Truncar aqui, e não na tela: guardar linha de firewall inteira de mil
         // fontes é memória gasta para mostrar as primeiras palavras.
         entrada.last_message = mensagem.chars().take(200).collect();
+    }
+
+    /// O que se sabe de uma origem específica.
+    ///
+    /// Existe para o *bind* manual poder reclassificar sem adivinhar o endereço
+    /// e o nome: quando a chave é `host:<nome>`, o IP de origem só está aqui.
+    #[must_use]
+    pub fn snapshot(&self, bind_key: &str) -> Option<SeenSource> {
+        self.fontes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(bind_key)
+            .cloned()
+    }
+
+    /// Reaplica uma resolução a uma origem já vista, sem esperar a próxima
+    /// mensagem.
+    ///
+    /// É o que faz o *bind* manual valer **agora**. Sem isto, o registro
+    /// continuaria dizendo o que valia quando a última linha chegou: a tela
+    /// mostrava "Descartando" e o seletor voltava a vazio logo depois de o
+    /// operador escolher o dispositivo — porque a resposta do servidor, honesta,
+    /// ainda trazia `deviceId` nulo. Num roteador que fala de hora em hora, o
+    /// vínculo parecia simplesmente não ter pegado.
+    ///
+    /// As contagens **não** são tocadas: as mensagens que foram descartadas
+    /// foram descartadas de verdade, e zerar o número apagaria a única pista de
+    /// que houve perda antes do vínculo.
+    ///
+    /// Devolve se a origem existia.
+    pub fn reclassify(&self, bind_key: &str, resolucao: &Resolution) -> bool {
+        let mut fontes = self.fontes.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(entrada) = fontes.get_mut(bind_key) else {
+            return false;
+        };
+        entrada.kind = SourceKind::from(resolucao);
+        entrada.device_id = resolucao.device_id();
+        entrada.candidates = match resolucao {
+            Resolution::Ambiguous(ids) => ids.clone(),
+            _ => Vec::new(),
+        };
+        true
     }
 
     /// Todas as fontes, da mais recente para a mais antiga.
@@ -292,6 +349,135 @@ mod tests {
         assert_eq!(fontes[0].message_count, 2);
         assert_eq!(fontes[0].dropped_count, 1, "o que já se perdeu continua lá");
         assert_eq!(registro.unknown_count(), 0);
+    }
+
+    #[test]
+    fn o_vinculo_manual_vale_antes_da_proxima_mensagem() {
+        // O bug que isto fecha: o registro só aprendia com mensagem nova, então
+        // logo depois de vincular a tela relia "Descartando" e o seletor voltava
+        // a vazio. Num roteador que fala de hora em hora, o vínculo parecia não
+        // ter pegado.
+        let registro = SourceRegistry::create();
+        for _ in 0..9 {
+            registro.record(
+                "172.24.0.1",
+                true,
+                &Resolution::Unknown,
+                Some("Bpi-r3-borda"),
+                "linha",
+                agora(),
+            );
+        }
+
+        let chave = "host:Bpi-r3-borda";
+        let fonte = registro.snapshot(chave).expect("a origem foi vista");
+        assert_eq!(fonte.source_ip, "172.24.0.1", "o IP real sai daqui");
+        assert_eq!(fonte.device_id, None);
+
+        assert!(registro.reclassify(chave, &Resolution::Device(12)));
+        let fonte = registro.snapshot(chave).expect("continua lá");
+        assert_eq!(fonte.kind, SourceKind::Device);
+        assert_eq!(fonte.device_id, Some(12));
+        assert_eq!(registro.unknown_count(), 0);
+
+        // As contagens são história e não podem ser reescritas: aquelas nove
+        // mensagens foram descartadas de verdade, e zerar o número apagaria a
+        // única pista de que houve perda antes do vínculo.
+        assert_eq!(fonte.message_count, 9);
+        assert_eq!(fonte.dropped_count, 9);
+    }
+
+    #[test]
+    fn o_desvinculo_devolve_a_origem_ao_que_a_heuristica_disser() {
+        // E não a "desconhecida" por decreto: a origem pode cair numa rede
+        // cadastrada, e afirmar o contrário seria inventar um descarte.
+        let registro = SourceRegistry::create();
+        registro.record(
+            "192.168.1.50",
+            false,
+            &Resolution::Device(3),
+            None,
+            "linha",
+            agora(),
+        );
+        registro.reclassify("192.168.1.50", &Resolution::Network(8));
+
+        let fonte = registro.snapshot("192.168.1.50").expect("na lista");
+        assert_eq!(fonte.kind, SourceKind::Network);
+        assert_eq!(fonte.device_id, None);
+    }
+
+    #[test]
+    fn o_aviso_de_nat_cala_quando_todas_as_origens_estao_vinculadas() {
+        // O mascaramento não some com o vínculo — mas deixa de custar alguma
+        // coisa. Um aviso permanente sobre um problema já resolvido treina o
+        // operador a ignorar avisos, e aí ele ignora o que importa.
+        let registro = SourceRegistry::create();
+        for nome in ["Bpi-r3-borda", "RB922-terraco"] {
+            registro.record(
+                "172.24.0.1",
+                true,
+                &Resolution::Unknown,
+                Some(nome),
+                "linha",
+                agora(),
+            );
+        }
+        assert_eq!(
+            registro.list().iter().filter(|f| f.needs_binding()).count(),
+            2
+        );
+
+        registro.reclassify("host:Bpi-r3-borda", &Resolution::Device(1));
+        assert_eq!(
+            registro.list().iter().filter(|f| f.needs_binding()).count(),
+            1,
+            "com uma pendente o aviso ainda tem o que dizer"
+        );
+
+        registro.reclassify("host:RB922-terraco", &Resolution::Device(2));
+        assert_eq!(
+            registro.list().iter().filter(|f| f.needs_binding()).count(),
+            0
+        );
+        // E o mascaramento continua sendo verdade: a coluna "Endereço" segue
+        // mostrando o gateway, e é o aviso por linha que explica isso.
+        assert_eq!(registro.masked_count(), 2);
+    }
+
+    #[test]
+    fn origem_sem_nat_nunca_pede_vinculo_pelo_aviso() {
+        // Fonte desconhecida sem mascaramento é outro problema, com outro aviso
+        // — o de origens descartando. Misturar os dois faria o texto do NAT
+        // aparecer para quem não está atrás de NAT nenhum.
+        let registro = SourceRegistry::create();
+        registro.record(
+            "203.0.113.9",
+            false,
+            &Resolution::Unknown,
+            None,
+            "linha",
+            agora(),
+        );
+        assert!(!registro.list()[0].needs_binding());
+        assert_eq!(registro.unknown_count(), 1);
+    }
+
+    #[test]
+    fn mascarada_sem_nome_continua_pedindo_atencao() {
+        // É o caso que só `network_mode: host` resolve, e o aviso é o único
+        // lugar onde isso está escrito. Calá-lo aqui esconderia a saída.
+        let registro = SourceRegistry::create();
+        registro.record("172.24.0.1", true, &Resolution::Unknown, None, "x", agora());
+        assert!(registro.list()[0].needs_binding());
+    }
+
+    #[test]
+    fn reclassificar_origem_que_nunca_chegou_nao_inventa_linha() {
+        let registro = SourceRegistry::create();
+        assert!(!registro.reclassify("host:fantasma", &Resolution::Device(1)));
+        assert!(registro.list().is_empty());
+        assert!(registro.snapshot("host:fantasma").is_none());
     }
 
     #[test]

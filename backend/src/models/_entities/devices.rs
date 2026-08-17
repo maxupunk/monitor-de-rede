@@ -26,6 +26,12 @@ pub struct Model {
     pub snmp_community: Option<String>,
     pub snmp_version: Option<String>,
     pub snmp_poll_interval_seconds: i32,
+    /// Por onde o operador alcança o equipamento: `local`, `vpn` ou `remote`.
+    /// `None` significa "automático" — ver `services::devices::access`.
+    pub access_mode: Option<String>,
+    /// Sistema do equipamento, do catálogo de `services::devices::systems`.
+    /// `None` significa "automático" — deduzido do `sysDescr` do SNMP.
+    pub operating_system: Option<String>,
     pub status: String,
     pub last_seen_at: Option<DateTimeWithTimeZone>,
     pub created_at: DateTimeWithTimeZone,

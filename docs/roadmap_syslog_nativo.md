@@ -29,6 +29,7 @@ do desenho original mudaram; estão marcados com **⚠** onde aparecem.
 | ⚠ IP de origem verificado no spike | se o Docker mascarar a origem, nada é gravado e não há erro visível |
 | ⚠ **O Docker mascara mesmo** (Fase 7) | medido em produção. Resolvedor cai para o `HOSTNAME`, limitador e lista de fontes separam por nome, e o *bind* do gateway é recusado. `network_mode: host` é a correção de raiz |
 | ⚠ Credencial de ativação não é persistida | guardar a senha de admin de 30 roteadores para poupar um trabalho pontual inverte o custo/benefício |
+| ⚠ `devices.access_mode` guarda a **declaração**, nunca a dedução (Fase 8) | a dedução envelhece: gravá-la deixaria um equipamento que saiu da VPN marcado como VPN para sempre |
 
 ---
 
@@ -498,6 +499,43 @@ O recurso subiu e cinco coisas apareceram só com alguém usando:
       ficou em segundo plano
 - [x] **MAC-Telnet** para MikroTik e OpenWRT — ver abaixo
 
+#### Endereços deste servidor
+
+O `localhost` corrigido acima expôs um problema maior: **cada tela reinventava
+um palpite de "o endereço deste servidor"**, e nenhuma delas podia acertar
+sempre — porque a resposta certa depende de onde o equipamento está. Um
+servidor, várias portas de entrada: LAN, túnel e internet.
+
+- [x] `services/server_addresses.rs` + `GET`/`PUT /api/server-addresses`
+- [x] Três entradas **detectadas**, não digitadas: a rota de saída deste
+      servidor, o primeiro endereço útil da faixa do WireGuard (mesmo cálculo do
+      `server_service`) e o `public_endpoint` que o operador já preencheu para os
+      peers funcionarem
+- [x] Guarda-se só o que o operador **acrescentou ou corrigiu**. Gravar também
+      os detectados os congelaria: o IP da LAN muda e a tela seguiria mostrando
+      o antigo com toda a confiança. Correção em branco volta ao detectado
+- [x] Cada entrada carrega **quando usá-la** e **de onde veio o valor** — é o
+      par que dispensa explicação e impede palpite de ser lido como certeza
+- [x] Quando um endereço não é detectado, a entrada continua na lista com o
+      motivo concreto. O caso mais comum é o menos óbvio: em container de rede
+      bridge o servidor enxerga só a ponte, e dizer isso é melhor do que
+      oferecer `172.17.0.2` como "o endereço da rede local"
+- [x] `suggest_for`: qual das entradas serve a **este** equipamento, e por quê.
+      A evidência é a rota de saída — se o sistema sai por `10.8.0.1` para falar
+      com o aparelho, é por `10.8.0.1` que ele volta, e isso resolve LAN e túnel
+      sem classificar nada. Peer da VPN e padrão explícito são os desempates
+- [x] Seletor nas duas telas de configuração de syslog (automática e manual),
+      com "Outro endereço…" para o caso avulso e "Gerenciar endereços" abrindo o
+      editor **sem sair do diálogo** — quem percebe a falta no meio do
+      preenchimento resolve ali, sem perder o que digitou
+- [x] Card em Configurações e entrada no menu Infraestrutura
+- [x] Mora em `system_settings`, chave `server.addresses`: poucas linhas, escrita
+      manual, sem FK — e a tabela já entra no backup e no `truncate` de teste
+
+O saneamento de `localhost` continua nas duas pontas, agora também na gravação
+da lista: um endereço que aponta o equipamento para ele mesmo é recusado com
+422 antes de chegar a qualquer roteador.
+
 #### MAC-Telnet
 
 Acesso por MAC, sem IP, sobre UDP/20561: é o que alcança o equipamento cujo IP
@@ -530,6 +568,117 @@ sistema já monitora, e quem consegue se interpor ali tem caminhos mais curtos.
 `russh` entra com `default-features = false` e o backend `ring` — o padrão
 (`aws-lc-rs`) exigiria cmake e clang no `builder` do Dockerfile, e o `ring` já
 está na árvore pelo `rustls`.
+
+### Fase 8 — A forma de acesso do equipamento 🟢 Concluída
+
+A Fase 7 criou o catálogo de endereços deste servidor e ainda assim deixou uma
+pergunta na tela de ativação: *qual deles?* Perguntar era honesto enquanto não
+havia como saber — mas o sistema **tem** como saber, e o que faltava era ligar
+cada equipamento a uma das situações do catálogo.
+
+#### `devices.access_mode`
+
+Três valores — `local`, `vpn`, `remote` — que correspondem um a um às entradas
+"Rede local", "Túnel VPN" e "Internet" da lista de endereços.
+
+- [x] Coluna **anulável**, e `NULL` significa "automático". Sem backfill
+- [x] `services::devices::access`: a dedução, da evidência mais forte para a
+      mais fraca — peer registrado da VPN, rede do túnel, faixa do túnel, rede
+      cadastrada pelo nome, faixa privada (RFC 1918 **e** CGNAT), IP público
+- [x] A declaração vence a dedução. É o caso que justifica a coluna: a filial
+      atrás de outra VPN tem IP privado e é indistinguível de um vizinho de LAN
+- [x] `AccessContext` carrega em três consultas e julga a lista inteira —
+      `present_many` não podia voltar a ter um N+1
+- [x] Peer criado pelo assistente de VPN nasce com `access_mode = "vpn"`: ali
+      não é dedução, o dispositivo está nascendo **por causa** do túnel
+- [x] `suggest_for` passa a ter quatro degraus: declaração → rota de saída →
+      dedução → padrão explícito. A rota continua acima da dedução porque é
+      observação, não inferência
+- [x] Seletor opcional no cadastro, com a conclusão do sistema no subtítulo do
+      "Automático". Esconder a conclusão faria o operador declarar no escuro
+- [x] O `auto` é uma palavra do vocabulário da API, não a ausência do campo: a
+      tela manda o formulário inteiro, e sem ela voltar ao automático seria
+      indistinguível de "não mexi neste campo"
+- [x] Na ativação de log o seletor de endereço vira **resumo com motivo** —
+      "vai enviar para 10.8.0.1:514 · Túnel VPN — o cadastro diz que este
+      equipamento acessa por túnel vpn" — e o seletor fica a um clique em
+      "Alterar". Cair no primeiro endereço da lista por falta de sugestão
+      mantém o seletor aberto: escolha arbitrária não vira afirmação
+
+O teste que importa não é o de ida e volta, e sim o que verifica que declarar
+"acesso remoto" muda o endereço oferecido na tela de log
+(`tests/requests/device_access_mode.rs`).
+
+#### A configuração da VPN passa a ler o catálogo
+
+O `public_endpoint` do servidor WireGuard **é** a origem do endereço "Internet"
+da lista. Enquanto os dois pudessem discordar em silêncio, o syslog apontaria
+para um lado e os túneis para o outro.
+
+- [x] Combobox alimentado pelos endereços do servidor, com digitação livre — o
+      endpoint pode ser um nome que não está no catálogo
+- [x] Aviso de divergência quando existe uma correção manual em "Internet"
+      diferente do que está gravado aqui, com o botão que adota a da lista
+- [x] `forget_override_if`: gravar o endpoint apaga a correção que virou cópia
+      dele. Mantê-la seria guardar uma bomba-relógio — na mudança seguinte ela
+      venceria em silêncio
+- [x] Substituir um endpoint já em uso pede confirmação, e **só quando há
+      peers**: cada um deles guarda o endereço antigo no próprio arquivo. Sem
+      peers não há o que quebrar, e perguntar seria cerimônia
+- [x] Sub-rede da VPN com sugestões de faixas privadas que não colidem com
+      nenhuma rede cadastrada, mais aviso (não bloqueio) de sobreposição —
+      dois caminhos para o mesmo endereço não dão erro, dão pacote sumido
+
+**Ressalva.** A sub-rede não sai do catálogo de endereços, e não tinha como
+sair: aquilo guarda endereços, não faixas. O que ela ganhou foi a fonte que
+realmente serve para escolhê-la — as redes já cadastradas, que são exatamente
+com quem ela não pode colidir.
+
+### Fase 9 — Um catálogo de sistemas para todas as telas 🟢 Concluída
+
+A mesma pergunta era feita em três lugares com três vocabulários:
+
+| tela | o que oferecia | o que a chave significava |
+|---|---|---|
+| assistente da VPN | `mikrotik`, `openwrt`, `linux`, `windows`, `mobile` | nome do gerador de configuração |
+| ativação de log | `routeros`, `openwrt`, `ubiquiti`, `linux` | chave da receita de syslog |
+| cadastro do dispositivo | texto livre em "Fabricante" | o OUI do MAC, quase sempre |
+
+O operador que digitava "MikroTik" no cadastro, escolhia `mikrotik` na VPN e
+via `routeros` na tela de log não tinha como saber que eram a mesma escolha.
+
+- [x] `services::devices::systems`: sete entradas — `routeros`, `openwrt`,
+      `ubiquiti`, `linux`, `windows`, `mobile`, `other` — cada uma com o que
+      **suporta**: receita de syslog, MAC-Telnet, perfil de VPN e os apelidos
+      que a identificam num `sysDescr`
+- [x] O `id` nomeia o **sistema**, não o fabricante: `routeros`, porque a
+      MikroTik também vende aparelho com SwOS. O assistente da VPN continua
+      falando `mikrotik` — é o nome do gerador registrado lá — e a tradução mora
+      no `vpnProfile` do catálogo
+- [x] Um teste percorre os dois lados: toda receita de syslog e todo perfil de
+      VPN precisa ter dono no catálogo, e todo `supportsSyslog` precisa ter
+      receita. É o que impede o catálogo de virar um quarto vocabulário
+- [x] `devices.operating_system`, anulável, com a mesma semântica do
+      `access_mode`: guarda a **declaração**, e `NULL` é automático
+- [x] Backfill a partir de `vpn_peers.device_profile` — quem nasceu pelo
+      assistente já tinha respondido
+- [x] `hints::deduz_vendor` deixou de existir: a tabela de apelidos era uma
+      cópia, e a dedução agora é `systems::deduce`, com a declaração acima do
+      `sysDescr` e o `sysDescr` acima do texto livre
+- [x] `GET /api/devices/systems` serve o catálogo; a tela não tem cópia dele
+- [x] "Fabricante" na ativação de log virou "Sistema", com o mesmo catálogo.
+      Os sistemas sem receita aparecem **desabilitados**, com o motivo no
+      subtítulo — omiti-los faria a lista parecer incompleta
+- [x] O `MAC_TELNET_VENDORS` escrito na tela saiu: quem responde é o
+      `supportsMacTelnet` do catálogo
+- [x] Renomeado no contrato, e não só no rótulo: `vendor` → `operatingSystem`
+      nos três DTOs de log e `SetupSnippet.vendor` → `system`. Trocar só o texto
+      da tela deixaria a unificação por fazer, com dois nomes para uma coisa
+
+O campo "Fabricante / Vendor" do cadastro **continua existindo** e não foi
+substituído: ele diz quem fez a placa, e ainda alimenta a dedução quando não há
+SNMP nem declaração. O que mudou é que ele deixou de ser a resposta a uma
+pergunta que não era a dele.
 
 ---
 

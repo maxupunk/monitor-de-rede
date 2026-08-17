@@ -144,7 +144,25 @@ pub async fn enqueue_network_scan(
     Ok((run, false))
 }
 
+/// Enfileira as redes cuja varredura periódica venceu.
+///
+/// **Respeita a trava global** `autoDiscoveryEnabled` das preferências. Ela
+/// para o *enfileiramento*, não o processamento: uma varredura pedida à mão
+/// pelo botão "Escanear" continua sendo executada, porque desligar o automático
+/// não é o mesmo que desligar a descoberta. E as redes mantêm o `scan_enabled`
+/// individual intacto — religar a trava devolve o parque ao que era, sem que
+/// ninguém precise reconfigurar rede por rede.
+///
+/// # Errors
+///
+/// Propaga erro do banco.
 pub async fn schedule_due_networks(db: &sea_orm::DatabaseConnection) -> AppResult<u64> {
+    if !crate::services::preferences::load(db)
+        .await?
+        .auto_discovery_enabled
+    {
+        return Ok(0);
+    }
     let now = Utc::now();
     let networks = networks::Entity::find().all(db).await?;
     let mut count = 0;

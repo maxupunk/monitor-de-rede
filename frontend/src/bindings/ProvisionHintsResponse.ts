@@ -13,9 +13,38 @@ export type ProvisionHintsResponse = {
    * De onde veio o palpite, para a tela não apresentar chute como certeza.
    */
   serverAddressSource: string
+  /**
+   * Qual entrada da lista de endereços do servidor serve a **este**
+   * equipamento. Nulo quando não há nenhuma utilizável.
+   */
+  suggestedAddressId: string | null
+  /**
+   * Por que aquela foi sugerida — "este servidor alcança o equipamento por
+   * 10.8.0.1". O motivo é o que dispensa o operador de entender a lista.
+   */
+  suggestedAddressReason: string | null
+  /**
+   * Forma de acesso em vigor: `local`, `vpn` ou `remote`.
+   */
+  accessMode: string
+  /**
+   * Se ela veio do cadastro. A tela diz "definido no cadastro" em vez de
+   * "deduzido", e as duas frases pedem confiança diferente do operador.
+   */
+  accessModeDeclared: boolean
+  /**
+   * Por que esta forma de acesso.
+   */
+  accessModeReason: string
   serverPort: number
-  vendor: string
-  vendorSource: string
+  /**
+   * Sistema em vigor — id do catálogo de `services::devices::systems`.
+   */
+  operatingSystem: string
+  /**
+   * De onde ele veio: `declarado`, `snmp`, `cadastro` ou `padrão`.
+   */
+  operatingSystemSource: string
   /**
    * Porta 22 respondeu à sondagem.
    */

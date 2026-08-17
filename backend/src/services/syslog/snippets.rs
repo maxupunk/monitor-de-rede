@@ -45,8 +45,8 @@ pub fn published_port() -> u16 {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct SetupSnippet {
-    /// Chave estável, para a tela escolher ícone e ordenar.
-    pub vendor: String,
+    /// Chave do catálogo de sistemas, para a tela escolher ícone e ordenar.
+    pub system: String,
     pub label: String,
     /// O que o operador precisa saber antes de colar.
     pub note: String,
@@ -71,23 +71,27 @@ pub struct SetupGuide {
 /// que está e falharia no roteador sem explicar por quê.
 const ALVO_DESCONHECIDO: &str = "<IP-DO-SERVIDOR>";
 
-/// Os fabricantes atendidos, na ordem em que a tela os mostra.
+/// Os sistemas com receita, na ordem em que a tela os mostra.
+///
+/// As chaves são as do catálogo de [`crate::services::devices::systems`] — não
+/// um vocabulário próprio. Um teste lá garante que os dois lados não se
+/// separem: uma receita órfã seria oferecida numa tela e recusada na outra.
 #[must_use]
-pub fn vendors() -> Vec<&'static str> {
-    RECEITAS.iter().map(|receita| receita.vendor).collect()
+pub fn systems() -> Vec<&'static str> {
+    RECEITAS.iter().map(|receita| receita.sistema).collect()
 }
 
-/// Os comandos de um fabricante, um por linha, prontos para digitar.
+/// Os comandos de um sistema, um por linha, prontos para digitar.
 ///
 /// É o que o [`super::provision`] envia pela sessão SSH ou Telnet. `None`
-/// quando o fabricante não tem receita — o chamador transforma isso em erro de
+/// quando o sistema não tem receita — o chamador transforma isso em erro de
 /// validação com o nome recebido, que é mais útil do que uma lista vazia.
 #[must_use]
-pub fn commands_for(vendor: &str, server_address: &str, port: u16) -> Option<Vec<String>> {
+pub fn commands_for(sistema: &str, server_address: &str, port: u16) -> Option<Vec<String>> {
     let alvo = normaliza(server_address);
     RECEITAS
         .iter()
-        .find(|receita| receita.vendor.eq_ignore_ascii_case(vendor.trim()))
+        .find(|receita| receita.sistema.eq_ignore_ascii_case(sistema.trim()))
         .map(|receita| (receita.comandos)(&alvo, port))
 }
 
@@ -103,7 +107,7 @@ pub fn build(server_address: &str) -> SetupGuide {
         snippets: RECEITAS
             .iter()
             .map(|receita| SetupSnippet {
-                vendor: receita.vendor.to_owned(),
+                system: receita.sistema.to_owned(),
                 label: receita.label.to_owned(),
                 note: receita.note.to_owned(),
                 commands: (receita.comandos)(&alvo, porta).join("\n"),
@@ -134,17 +138,17 @@ fn normaliza(server_address: &str) -> String {
 /// `info` produziria uma linha que o próprio equipamento não encaminharia, e o
 /// teste acusaria falha onde não há.
 #[must_use]
-pub fn test_command(vendor: &str) -> Option<String> {
+pub fn test_command(sistema: &str) -> Option<String> {
     RECEITAS
         .iter()
-        .find(|receita| receita.vendor.eq_ignore_ascii_case(vendor.trim()))
+        .find(|receita| receita.sistema.eq_ignore_ascii_case(sistema.trim()))
         .and_then(|receita| receita.teste.map(str::to_owned))
 }
 
-/// Uma receita de fabricante. Os comandos são função do alvo e da porta porque
-/// os dois só se conhecem em tempo de execução.
+/// Uma receita de sistema. Os comandos são função do alvo e da porta porque os
+/// dois só se conhecem em tempo de execução.
 struct Receita {
-    vendor: &'static str,
+    sistema: &'static str,
     label: &'static str,
     note: &'static str,
     comandos: fn(&str, u16) -> Vec<String>,
@@ -154,7 +158,7 @@ struct Receita {
 
 const RECEITAS: &[Receita] = &[
     Receita {
-        vendor: "routeros",
+        sistema: "routeros",
         label: "MikroTik RouterOS",
         note: "`bsd-syslog=yes` é recomendado: sem ele o RouterOS envia um formato próprio, sem \
                data e sem nome do equipamento. A severidade e os tópicos continuam sendo lidos \
@@ -178,7 +182,7 @@ const RECEITAS: &[Receita] = &[
         teste: Some(":log error \"netmonitor: teste de envio de log\""),
     },
     Receita {
-        vendor: "openwrt",
+        sistema: "openwrt",
         label: "OpenWRT",
         note: "O `log_port` é a porta publicada, não a interna. Depois de reiniciar o serviço, \
                os registros aparecem em poucos segundos.",
@@ -194,7 +198,7 @@ const RECEITAS: &[Receita] = &[
         teste: Some("logger -p daemon.err \"netmonitor: teste de envio de log\""),
     },
     Receita {
-        vendor: "linux",
+        sistema: "linux",
         label: "Linux (rsyslog)",
         note: "Um único `@` usa UDP; `@@` usa TCP. As duas formas são aceitas — o servidor \
                escuta nos dois protocolos. Na ativação automática, o usuário informado precisa \
@@ -208,7 +212,7 @@ const RECEITAS: &[Receita] = &[
         teste: Some("logger -p daemon.err \"netmonitor: teste de envio de log\""),
     },
     Receita {
-        vendor: "ubiquiti",
+        sistema: "ubiquiti",
         label: "Ubiquiti EdgeOS",
         note: "No UniFi, o mesmo ajuste fica em Configurações → Sistema → Registro remoto, \
                apontando para o mesmo endereço e porta.",
@@ -243,7 +247,7 @@ mod tests {
             assert!(
                 snippet.commands.contains("192.168.1.10"),
                 "{} não recebeu o endereço",
-                snippet.vendor
+                snippet.system
             );
         }
     }
@@ -260,7 +264,7 @@ mod tests {
             assert!(
                 !snippet.commands.contains("5514"),
                 "{} vazou a porta interna",
-                snippet.vendor
+                snippet.system
             );
         }
     }
@@ -306,7 +310,7 @@ mod tests {
         let routeros = guia
             .snippets
             .iter()
-            .find(|s| s.vendor == "routeros")
+            .find(|s| s.system == "routeros")
             .expect("routeros");
         assert!(routeros.commands.contains("bsd-syslog=yes"));
         assert!(routeros.note.contains("src-address"));
@@ -318,13 +322,13 @@ mod tests {
         // apareceria no equipamento de alguém.
         let guia = build("10.0.0.5");
         for snippet in &guia.snippets {
-            let comandos = commands_for(&snippet.vendor, "10.0.0.5", guia.port)
+            let comandos = commands_for(&snippet.system, "10.0.0.5", guia.port)
                 .expect("receita do fabricante");
             assert_eq!(
                 comandos.join("\n"),
                 snippet.commands,
                 "{} divergiu entre a tela e a ativação automática",
-                snippet.vendor
+                snippet.system
             );
         }
     }
@@ -333,11 +337,11 @@ mod tests {
     fn cada_comando_da_receita_cabe_numa_linha() {
         // A sessão interativa manda uma linha por comando: uma receita com
         // quebra de linha embutida chegaria picotada ao equipamento.
-        for vendor in vendors() {
-            for comando in commands_for(vendor, "10.0.0.5", 514).expect("receita") {
+        for sistema in systems() {
+            for comando in commands_for(sistema, "10.0.0.5", 514).expect("receita") {
                 assert!(
                     !comando.contains('\n') && !comando.contains('\\'),
-                    "{vendor} tem comando multilinha: {comando:?}"
+                    "{sistema} tem comando multilinha: {comando:?}"
                 );
             }
         }
@@ -347,6 +351,9 @@ mod tests {
     fn fabricante_desconhecido_nao_devolve_receita_vazia() {
         // Lista vazia rodaria "com sucesso" sem configurar nada.
         assert!(commands_for("cisco", "10.0.0.5", 514).is_none());
+        // Sistemas do catálogo sem receita caem aqui pelo mesmo caminho.
+        assert!(commands_for("windows", "10.0.0.5", 514).is_none());
+        assert!(commands_for("other", "10.0.0.5", 514).is_none());
         assert!(commands_for("", "10.0.0.5", 514).is_none());
         // O nome chega da tela, e caixa não pode decidir se funciona.
         assert!(commands_for("RouterOS", "10.0.0.5", 514).is_some());

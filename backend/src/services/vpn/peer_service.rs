@@ -34,6 +34,17 @@ use crate::{
 /// Endpoint exibido quando o operador ainda não configurou o endereço público.
 const ENDPOINT_PLACEHOLDER: &str = "ENDERECO-PUBLICO-NAO-CONFIGURADO";
 
+/// O sistema do catálogo que corresponde a um perfil do assistente.
+///
+/// `None` para perfil sem sistema declarado — que hoje não existe, e no dia em
+/// que existir é melhor deixar o campo vazio do que gravar um palpite.
+fn sistema_do_perfil(perfil: &str) -> Option<String> {
+    crate::services::devices::systems::catalog()
+        .iter()
+        .find(|sistema| sistema.vpn_profile == Some(perfil))
+        .map(|sistema| sistema.id.to_owned())
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct CreatePeerPayload {
     pub name: String,
@@ -232,6 +243,16 @@ pub async fn create(
                 }))),
                 status: Set("unknown".into()),
                 is_monitored: Set(true),
+                // Aqui a forma de acesso não é dedução: o dispositivo está
+                // nascendo **por causa** do túnel. Declará-la agora poupa a
+                // pergunta em toda tela que depois precisar do endereço deste
+                // servidor — a ativação de log, principalmente.
+                access_mode: Set(Some("vpn".into())),
+                // O sistema também já está respondido: é o perfil que o
+                // operador escolheu para gerar a configuração. A tradução do
+                // nome do gerador (`mikrotik`) para o do sistema (`routeros`)
+                // mora no catálogo, e não numa segunda tabela aqui.
+                operating_system: Set(sistema_do_perfil(&payload.profile)),
                 snmp_enabled: Set(payload.snmp_enabled),
                 snmp_community: Set(payload.snmp_enabled.then(|| {
                     payload
@@ -512,6 +533,8 @@ mod tests {
             snmp_community: snmp.then(|| "netmon".to_string()),
             snmp_version: snmp.then(|| "v2c".to_string()),
             snmp_poll_interval_seconds: 60,
+            access_mode: Some("vpn".into()),
+            operating_system: Some("routeros".into()),
             status: "unknown".into(),
             last_seen_at: None,
             created_at: now.into(),

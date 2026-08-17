@@ -145,6 +145,7 @@ pub async fn serialize_sources(
     nat: &NatDetector,
 ) -> AppResult<LogSourcesResponse> {
     let masked_count = fontes.iter().filter(|fonte| fonte.masked).count();
+    let unresolved_masked_count = fontes.iter().filter(|fonte| fonte.needs_binding()).count();
     let ids: HashSet<i64> = fontes
         .iter()
         .flat_map(|fonte| fonte.device_id.into_iter().chain(fonte.candidates.clone()))
@@ -197,6 +198,7 @@ pub async fn serialize_sources(
         },
         nat: LogNatDiagnostics {
             masked_count,
+            unresolved_masked_count,
             containerized: nat.containerized,
             gateways: nat.gateways(),
         },

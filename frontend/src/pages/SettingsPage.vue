@@ -13,25 +13,119 @@
             Geral & Monitoramento
           </v-card-title>
           <v-card-text class="mt-2">
+            <!--
+              Cada campo diz **onde** ele muda o comportamento. Uma preferência
+              sem efeito declarado é indistinguível de uma que não funciona — e
+              esta tela passou tempo demais sendo exatamente isso.
+            -->
             <v-text-field
-              v-model="defaultPingInterval"
-              label="Intervalo padrão de coleta por Ping (segundos)"
+              v-model.number="form.defaultPingIntervalSeconds"
+              label="Intervalo padrão de coleta por Ping"
               type="number"
               variant="outlined"
+              suffix="segundos"
+              :min="MIN_PING_INTERVAL_SECONDS"
+              :max="MAX_PING_INTERVAL_SECONDS"
+              :disabled="prefsStore.loading"
+              hint="Aplicado a um monitor novo que não define o próprio intervalo. Monitores existentes não mudam."
+              persistent-hint
+              class="mb-4"
             />
             <v-text-field
-              v-model="defaultSnmpCommunity"
-              label="Comunidade SNMP Padrão"
+              v-model="form.defaultSnmpCommunity"
+              label="Comunidade SNMP padrão"
               variant="outlined"
+              :disabled="prefsStore.loading"
+              hint="Gravada no cadastro de um dispositivo novo com SNMP ligado que não informe a sua. Dispositivos já cadastrados mantêm a que têm."
+              persistent-hint
+              class="mb-2"
             />
             <v-switch
-              v-model="autoDiscovery"
-              label="Habilitar Descoberta Automática Periódica"
+              v-model="form.autoDiscoveryEnabled"
+              label="Varredura automática periódica das redes"
               color="primary"
+              :disabled="prefsStore.loading"
+              hint="Desligada, o agendador para de disparar varreduras sozinho. O botão “Escanear” de cada rede continua funcionando, e a configuração de cada uma fica intacta."
+              persistent-hint
             />
+
+            <v-alert
+              v-if="prefsStore.error"
+              type="error"
+              variant="tonal"
+              density="compact"
+              class="mt-4"
+              :text="prefsStore.error"
+            ></v-alert>
+          </v-card-text>
+          <v-card-actions class="justify-end align-center">
+            <!--
+              O botão fica sempre ativo: desabilitá-lo até haver alteração o
+              deixaria cinza, que nesta interface significa "quebrado". O aviso
+              de pendência carrega o estado, e salvar valores iguais é
+              inofensivo.
+            -->
+            <span v-if="prefsDirty" class="text-caption text-medium-emphasis mr-2">
+              Alterações não salvas
+            </span>
+            <v-btn
+              variant="text"
+              size="small"
+              :disabled="prefsStore.saving"
+              @click="restaurarPrefs"
+            >
+              Restaurar padrões
+            </v-btn>
+            <v-btn color="primary" :loading="prefsStore.saving" @click="salvarPrefs">
+              Salvar Preferências
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-col>
+
+      <v-col cols="12" md="6">
+        <v-card elevation="2" class="rounded-lg pa-4 d-flex flex-column">
+          <v-card-title class="font-weight-bold d-flex align-center">
+            <v-icon start color="primary">mdi-server-network</v-icon>
+            Endereços deste servidor
+          </v-card-title>
+          <v-card-text class="mt-2 flex-grow-1">
+            <p class="text-caption text-grey-darken-1 mb-4">
+              Um servidor, várias portas de entrada. Cada equipamento alcança o NetMonitor pelo
+              endereço da rede em que ele está — e é essa lista que aparece na hora de configurar o
+              envio de logs.
+            </p>
+
+            <v-list density="compact" class="pa-0 bg-transparent">
+              <v-list-item
+                v-for="entrada in addressesStore.entries"
+                :key="entrada.id"
+                class="px-0"
+                :title="entrada.label"
+              >
+                <template #prepend>
+                  <v-avatar
+                    :color="addressColor(entrada.kind)"
+                    size="30"
+                    rounded="lg"
+                    variant="tonal"
+                    class="mr-3"
+                  >
+                    <v-icon size="16">{{ addressIcon(entrada.kind) }}</v-icon>
+                  </v-avatar>
+                </template>
+                <template #subtitle>
+                  <span v-if="entrada.value" class="font-weight-medium">{{ entrada.value }}</span>
+                  <span v-else class="text-medium-emphasis">Não definido</span>
+                </template>
+              </v-list-item>
+            </v-list>
           </v-card-text>
           <v-card-actions class="justify-end">
-            <v-btn color="primary" @click="saveSettings">Salvar Preferências</v-btn>
+            <v-btn color="primary" variant="tonal" @click="addressesDialog = true">
+              <v-icon start>mdi-pencil-outline</v-icon>
+              Gerenciar endereços
+            </v-btn>
           </v-card-actions>
         </v-card>
       </v-col>
@@ -324,17 +418,40 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <ServerAddressesDialog v-model="addressesDialog" />
+
+    <v-snackbar v-model="feedback.visible" :color="feedback.color" timeout="4000">
+      {{ feedback.message }}
+    </v-snackbar>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useDashboardStore } from '@/stores/dashboard'
+import {
+  usePreferencesStore,
+  defaultPreferences,
+  MIN_PING_INTERVAL_SECONDS,
+  MAX_PING_INTERVAL_SECONDS,
+  type Preferences,
+} from '@/stores/preferences'
+import { useServerAddressesStore, addressIcon, addressColor } from '@/stores/serverAddresses'
+import ServerAddressesDialog from '@/components/ServerAddressesDialog.vue'
 import { useBackupStore, tableLabel } from '@/stores/backup'
 import { useNotifications } from '@/composables/useNotifications'
 import PageHeader from '@/components/PageHeader.vue'
 
 const dashboardStore = useDashboardStore()
+const addressesStore = useServerAddressesStore()
+const addressesDialog = ref(false)
+
+onMounted(async () => {
+  void addressesStore.fetchAll()
+  await prefsStore.fetchAll()
+  adotarPrefs(prefsStore.preferences)
+})
 const backupStore = useBackupStore()
 const {
   permissionState,
@@ -344,12 +461,47 @@ const {
   sendNotification,
 } = useNotifications()
 
-const defaultPingInterval = ref(60)
-const defaultSnmpCommunity = ref('public')
-const autoDiscovery = ref(true)
+// --- Preferências globais ---------------------------------------------------
 
-function saveSettings() {
-  alert('Configurações salvas com sucesso!')
+const prefsStore = usePreferencesStore()
+const form = reactive<Preferences>(defaultPreferences())
+
+/** Há edição pendente? Alimenta o aviso, não o estado do botão. */
+const prefsDirty = computed(
+  () =>
+    form.defaultPingIntervalSeconds !== prefsStore.preferences.defaultPingIntervalSeconds ||
+    form.defaultSnmpCommunity !== prefsStore.preferences.defaultSnmpCommunity ||
+    form.autoDiscoveryEnabled !== prefsStore.preferences.autoDiscoveryEnabled
+)
+
+function adotarPrefs(valores: Preferences): void {
+  form.defaultPingIntervalSeconds = valores.defaultPingIntervalSeconds
+  form.defaultSnmpCommunity = valores.defaultSnmpCommunity
+  form.autoDiscoveryEnabled = valores.autoDiscoveryEnabled
+}
+
+async function salvarPrefs(): Promise<void> {
+  const ok = await prefsStore.save({ ...form })
+  if (!ok) {
+    notify(prefsStore.error || 'Não foi possível salvar as preferências.', 'error')
+    return
+  }
+  // O servidor devolve o documento já validado e aparado; adotá-lo evita a tela
+  // mostrar uma coisa e o sistema usar outra.
+  adotarPrefs(prefsStore.preferences)
+  notify('Preferências salvas — já valem para os próximos monitores e dispositivos.')
+}
+
+function restaurarPrefs(): void {
+  adotarPrefs(defaultPreferences())
+}
+
+const feedback = reactive({ visible: false, message: '', color: 'success' })
+
+function notify(message: string, color = 'success'): void {
+  feedback.message = message
+  feedback.color = color
+  feedback.visible = true
 }
 
 const selectedFile = ref<File | File[] | null>(null)

@@ -45,6 +45,16 @@ pub struct DeviceInput {
     pub snmp_community: Option<String>,
     pub snmp_version: Option<String>,
     pub snmp_poll_interval_seconds: Option<i32>,
+    /// `auto`, `local`, `vpn` ou `remote`.
+    ///
+    /// O `auto` é explícito de propósito, e não representado por ausência: a
+    /// tela manda o formulário inteiro a cada gravação, e um campo ausente
+    /// significa "não mexi" no resto deste DTO. Sem a palavra, voltar de uma
+    /// declaração para o automático seria impossível pela interface.
+    pub access_mode: Option<String>,
+    /// `auto` ou um id do catálogo de `services::devices::systems`. O `auto` é
+    /// explícito pelo mesmo motivo do `access_mode` logo acima.
+    pub operating_system: Option<String>,
     pub status: Option<String>,
 }
 

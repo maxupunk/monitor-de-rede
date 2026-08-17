@@ -163,6 +163,14 @@ pub struct LogNatDiagnostics {
     /// Quantas origens chegam com o endereço reescrito.
     #[ts(type = "number")]
     pub masked_count: usize,
+    /// Dessas, quantas ainda **não** estão vinculadas a um dispositivo.
+    ///
+    /// É este número, e não o de cima, que decide se o aviso aparece. O
+    /// mascaramento continua existindo depois de tudo vinculado — mas aí ele
+    /// deixou de atrapalhar, e um aviso permanente sobre um problema resolvido
+    /// treina o operador a ignorar avisos.
+    #[ts(type = "number")]
+    pub unresolved_masked_count: usize,
     /// Se o processo está dentro de um container — muda o texto da orientação,
     /// não o comportamento.
     pub containerized: bool,
@@ -214,8 +222,8 @@ pub struct ProvisionLoggingInput {
     pub port: Option<u16>,
     pub username: String,
     pub password: String,
-    /// Chave do fabricante. Ausente, o servidor deduz do cadastro.
-    pub vendor: Option<String>,
+    /// Id do catálogo de sistemas. Ausente, o servidor deduz do cadastro.
+    pub operating_system: Option<String>,
     /// Endereço deste servidor como o **equipamento** o alcança. Vazio, ou
     /// `localhost`, faz o servidor descobrir sozinho: gravar `localhost` no
     /// roteador o faria mandar o log para si mesmo, sem erro e sem nada
@@ -236,10 +244,25 @@ pub struct ProvisionHintsResponse {
     pub server_address: Option<String>,
     /// De onde veio o palpite, para a tela não apresentar chute como certeza.
     pub server_address_source: String,
+    /// Qual entrada da lista de endereços do servidor serve a **este**
+    /// equipamento. Nulo quando não há nenhuma utilizável.
+    pub suggested_address_id: Option<String>,
+    /// Por que aquela foi sugerida — "este servidor alcança o equipamento por
+    /// 10.8.0.1". O motivo é o que dispensa o operador de entender a lista.
+    pub suggested_address_reason: Option<String>,
+    /// Forma de acesso em vigor: `local`, `vpn` ou `remote`.
+    pub access_mode: String,
+    /// Se ela veio do cadastro. A tela diz "definido no cadastro" em vez de
+    /// "deduzido", e as duas frases pedem confiança diferente do operador.
+    pub access_mode_declared: bool,
+    /// Por que esta forma de acesso.
+    pub access_mode_reason: String,
     #[ts(type = "number")]
     pub server_port: u16,
-    pub vendor: String,
-    pub vendor_source: String,
+    /// Sistema em vigor — id do catálogo de `services::devices::systems`.
+    pub operating_system: String,
+    /// De onde ele veio: `declarado`, `snmp`, `cadastro` ou `padrão`.
+    pub operating_system_source: String,
     /// Porta 22 respondeu à sondagem.
     pub ssh_open: bool,
     /// Porta 23 respondeu à sondagem.
@@ -255,7 +278,7 @@ pub struct ProvisionHintsResponse {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct ProvisionLoggingResponse {
-    pub vendor: String,
+    pub operating_system: String,
     /// O endereço que foi gravado no equipamento.
     pub server_address: String,
     #[ts(type = "number")]

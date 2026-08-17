@@ -621,7 +621,7 @@ async fn os_palpites_da_tela_nunca_sugerem_um_endereco_local() {
         let corpo: serde_json::Value = serde_json::from_str(&resposta.text()).unwrap();
 
         assert!(corpo["serverPort"].is_number());
-        assert!(corpo["vendor"].is_string());
+        assert!(corpo["operatingSystem"].is_string());
         assert!(corpo["sshOpen"].is_boolean());
         assert!(corpo["telnetOpen"].is_boolean());
         assert!(corpo["layer2Reachable"].is_boolean());
