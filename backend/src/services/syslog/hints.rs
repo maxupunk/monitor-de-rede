@@ -118,9 +118,21 @@ pub async fn collect(
         model: dispositivo.model.as_deref(),
     });
 
-    let (server_address, server_address_source) = match host.and_then(local_address_toward) {
-        Some(endereco) => (Some(endereco.to_string()), "rota até o equipamento"),
-        None => (None, "desconhecido"),
+    // Num container em rede bridge a rota responde com o IP da ponte — correto
+    // para o kernel, inútil para o roteador, que não alcança a ponte do Docker.
+    // Omitir é o que deixa a tela pedir o endereço em vez de gravar um palpite
+    // que falha em silêncio. O `server_addresses::da_rede_local` aplica o mesmo
+    // critério à entrada "rede local" da lista.
+    let (server_address, server_address_source) = if nat.bridged_container() {
+        (
+            None,
+            "container em rede bridge — o detectado seria o IP da ponte",
+        )
+    } else {
+        match host.and_then(local_address_toward) {
+            Some(endereco) => (Some(endereco.to_string()), "rota até o equipamento"),
+            None => (None, "desconhecido"),
+        }
     };
 
     Ok(ProvisionHints {
@@ -219,8 +231,9 @@ async fn sistema_por_snmp(host: IpAddr, dispositivo: &devices::Model) -> Option<
 ///
 /// **Isso responde pela rota, não pela alcançabilidade.** Dentro de um
 /// container em rede bridge o endereço devolvido é o da bridge — correto do
-/// ponto de vista do kernel e inútil para o roteador. Quem separa os dois casos
-/// é [`enderecos_utilizaveis`].
+/// ponto de vista do kernel e inútil para o roteador. Quem separa os dois
+/// casos é o chamador: [`collect`] e o `server_addresses` o descartam nesse
+/// ambiente.
 #[must_use]
 pub fn local_address_toward(destino: IpAddr) -> Option<IpAddr> {
     let vinculo: SocketAddr = if destino.is_ipv4() {

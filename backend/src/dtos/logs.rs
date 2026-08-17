@@ -245,7 +245,8 @@ pub struct ProvisionHintsResponse {
     /// De onde veio o palpite, para a tela não apresentar chute como certeza.
     pub server_address_source: String,
     /// Qual entrada da lista de endereços do servidor serve a **este**
-    /// equipamento. Nulo quando não há nenhuma utilizável.
+    /// equipamento. Nulo quando não há evidência para escolher — a tela então
+    /// pergunta ao operador em vez de chutar um endereço.
     pub suggested_address_id: Option<String>,
     /// Por que aquela foi sugerida — "este servidor alcança o equipamento por
     /// 10.8.0.1". O motivo é o que dispensa o operador de entender a lista.

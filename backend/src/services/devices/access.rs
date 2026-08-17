@@ -35,6 +35,7 @@ use std::{
     net::{IpAddr, Ipv4Addr},
 };
 
+use ipnet::IpNet;
 use sea_orm::{ConnectionTrait, EntityTrait};
 
 use crate::{
@@ -160,6 +161,19 @@ impl AccessContext {
         })
     }
 
+    /// A rede cadastrada (exceto a do túnel) que contém **os dois** endereços.
+    ///
+    /// É a prova de que equipamento e servidor se alcançam direto: mesmo CIDR
+    /// no inventário significa sem NAT e sem túnel no caminho. É o que salva a
+    /// sugestão de endereço num container em rede bridge, onde a rota do kernel
+    /// responde o IP da ponte em vez do IP da máquina.
+    #[must_use]
+    pub fn rede_em_comum(&self, a: IpAddr, b: IpAddr) -> Option<&(String, String)> {
+        self.redes
+            .iter()
+            .find(|(_, cidr)| contem(cidr, a) && contem(cidr, b))
+    }
+
     /// A conclusão para um dispositivo.
     #[must_use]
     pub fn resolve(&self, device: &devices::Model) -> ResolvedAccess {
@@ -259,6 +273,13 @@ fn dentro(ip: Ipv4Addr, cidr: &str) -> bool {
     bruto >= u32::from(faixa.network_address) && bruto <= u32::from(faixa.broadcast_address)
 }
 
+/// O mesmo teste para qualquer versão de IP — o [`dentro`] é IPv4 porque a
+/// dedução de acesso só tem faixa de túnel em v4; a rede em comum precisa
+/// valer também para v6.
+fn contem(cidr: &str, ip: IpAddr) -> bool {
+    cidr.parse::<IpNet>().is_ok_and(|rede| rede.contains(&ip))
+}
+
 /// Faixas que não trafegam pela internet.
 ///
 /// A CGNAT (100.64.0.0/10) entra junto com as três da RFC 1918 porque é o que
@@ -320,6 +341,40 @@ mod tests {
             vpn_cidr: Some("10.8.0.0/24".to_owned()),
             redes: vec![("Matriz".to_owned(), "192.168.1.0/24".to_owned())],
         }
+    }
+
+    #[test]
+    fn a_rede_em_comum_exige_os_dois_enderecos_na_mesma_faixa() {
+        let ctx = contexto();
+        let dentro = ctx.rede_em_comum(
+            "192.168.1.10".parse().unwrap(),
+            "192.168.1.20".parse().unwrap(),
+        );
+        assert_eq!(dentro.map(|(nome, _)| nome.as_str()), Some("Matriz"));
+
+        // Só um dos dois dentro não é rede em comum — é justamente o caso de
+        // um equipamento de LAN e um endereço que não o alcança.
+        assert!(ctx
+            .rede_em_comum("192.168.1.10".parse().unwrap(), "10.0.0.5".parse().unwrap())
+            .is_none());
+
+        // A faixa do túnel não entra: quem está nela é VPN, e a dedução já
+        // responde por esse caso.
+        assert!(ctx
+            .rede_em_comum("10.8.0.9".parse().unwrap(), "10.8.0.1".parse().unwrap())
+            .is_none());
+
+        // CIDR mal cadastrado não classifica nada, em vez de derrubar a tela.
+        let mut quebrado = contexto();
+        quebrado
+            .redes
+            .push(("Quebrada".to_owned(), "não é cidr".to_owned()));
+        assert!(quebrado
+            .rede_em_comum(
+                "192.168.1.10".parse().unwrap(),
+                "192.168.1.20".parse().unwrap()
+            )
+            .is_some());
     }
 
     #[test]

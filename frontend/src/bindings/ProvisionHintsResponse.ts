@@ -15,7 +15,8 @@ export type ProvisionHintsResponse = {
   serverAddressSource: string
   /**
    * Qual entrada da lista de endereços do servidor serve a **este**
-   * equipamento. Nulo quando não há nenhuma utilizável.
+   * equipamento. Nulo quando não há evidência para escolher — a tela então
+   * pergunta ao operador em vez de chutar um endereço.
    */
   suggestedAddressId: string | null
   /**

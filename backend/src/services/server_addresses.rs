@@ -403,10 +403,19 @@ async fn do_servidor_vpn(db: &DatabaseConnection) -> AppResult<(Option<String>, 
 ///    palpite — quem declarou sabe de algo que este servidor não observa;
 /// 2. **a rota de saída**: se o sistema operacional sai por `10.8.0.1` para
 ///    falar com o equipamento, é por `10.8.0.1` que ele volta. Resolve LAN e
-///    túnel de uma vez, sem classificar nada;
-/// 3. **a forma de acesso deduzida** — peer da VPN, faixa do túnel, endereço
+///    túnel de uma vez, sem classificar nada — com uma ressalva: rota que
+///    aponta para o endereço do túnel só vale para equipamento da VPN;
+/// 3. **a rede em comum**: se o inventário tem um CIDR que contém o IP do
+///    equipamento **e** um dos endereços deste servidor, eles se alcançam
+///    direto — sem NAT e sem túnel no caminho. É a resposta para o caso em
+///    que a rota não resolve (num container de rede bridge ela devolve o IP
+///    da ponte, não o da máquina);
+/// 4. **a forma de acesso deduzida** — peer da VPN, faixa do túnel, endereço
 ///    privado ou público — para quando a rota não resolve;
-/// 4. o marcado como padrão, e por fim o único que existir.
+/// 5. o marcado como padrão. Sem nenhum desses, a resposta é `None`, e não o
+///    primeiro endereço com valor: oferecê-lo apresentaria como conclusão o
+///    que é chute — e era assim que um equipamento de rede local herdava o
+///    endereço do túnel quando o da LAN não estava detectado.
 ///
 /// # Errors
 ///
@@ -417,7 +426,14 @@ pub async fn suggest_for(
     lista: &[ServerAddress],
 ) -> AppResult<Option<(String, String)>> {
     let contexto = access::AccessContext::load(db).await?;
-    suggest_with(db, dispositivo, lista, &contexto.resolve(dispositivo)).await
+    suggest_with(
+        db,
+        dispositivo,
+        lista,
+        &contexto,
+        &contexto.resolve(dispositivo),
+    )
+    .await
 }
 
 /// Igual a [`suggest_for`], com a forma de acesso já resolvida.
@@ -432,6 +448,7 @@ pub async fn suggest_with(
     db: &DatabaseConnection,
     dispositivo: &devices::Model,
     lista: &[ServerAddress],
+    contexto: &access::AccessContext,
     acesso: &access::ResolvedAccess,
 ) -> AppResult<Option<(String, String)>> {
     if acesso.declared {
@@ -459,10 +476,39 @@ pub async fn suggest_with(
             .iter()
             .find(|item| item.value.as_deref() == Some(&saida))
         {
-            return Ok(Some((
-                entrada.id.clone(),
-                format!("este servidor alcança o equipamento por {saida}"),
-            )));
+            // A rota pelo túnel só comprova algo para equipamento da VPN.
+            // Fora dela ela é artefato da configuração do WireGuard, não prova
+            // de que o aparelho atravessa o túnel — e sugerir `10.8.0.1` para
+            // quem não o alcança grava no roteador um destino que falha em
+            // silêncio, exatamente o erro que este módulo existe para evitar.
+            if entrada.kind != AddressKind::Vpn || acesso.mode == access::AccessMode::Vpn {
+                return Ok(Some((
+                    entrada.id.clone(),
+                    format!("este servidor alcança o equipamento por {saida}"),
+                )));
+            }
+        }
+    }
+
+    // Mesma rede cadastrada: o inventário dizendo que o equipamento e um dos
+    // endereços deste servidor dividem um CIDR é a prova de que o syslog vai
+    // direto, sem NAT nem túnel no caminho. Endereço que não é IP (o DDNS do
+    // endpoint público) não participa — não há faixa onde colocá-lo.
+    if let Some(ip) = host {
+        for item in lista {
+            let Some(endereco) = item
+                .value
+                .as_deref()
+                .and_then(|valor| valor.parse::<IpAddr>().ok())
+            else {
+                continue;
+            };
+            if let Some((nome, cidr)) = contexto.rede_em_comum(ip, endereco) {
+                return Ok(Some((
+                    item.id.clone(),
+                    format!("está na mesma rede do equipamento — \"{nome}\" ({cidr})"),
+                )));
+            }
         }
     }
 
@@ -482,10 +528,11 @@ pub async fn suggest_with(
         return Ok(Some((preferido, "marcado como padrão".to_owned())));
     }
 
-    Ok(lista
-        .iter()
-        .find(|item| item.value.is_some())
-        .map(|item| (item.id.clone(), "único endereço disponível".to_owned())))
+    // Sem evidência nenhuma, a resposta honesta é "não sei": a tela abre o
+    // seletor em vez de fechar uma conclusão errada. O primeiro endereço com
+    // valor costuma ser o do túnel, e sugeri-lo para um equipamento que não
+    // está na VPN era exatamente o erro que este `None` elimina.
+    Ok(None)
 }
 
 fn com_valor(lista: &[ServerAddress], id: &str) -> Option<String> {
@@ -730,6 +777,331 @@ mod tests {
             .expect("alguma");
         assert_eq!(id, "public");
         assert!(motivo.contains("cadastro"), "{motivo}");
+    }
+
+    #[tokio::test]
+    async fn equipamento_de_rede_local_nao_herda_o_endereco_do_tunel() {
+        // O bug: em container de rede bridge a entrada "rede local" não tem
+        // valor detectado, e o fallback cega no primeiro com valor — o túnel.
+        // Um roteador de LAN recebia `10.8.0.1` como conclusão, e o syslog
+        // ia para um endereço que ele não alcança. Sem evidência, a resposta
+        // certa é nenhuma: a tela abre o seletor em vez de chutar.
+        let db = banco().await;
+        let dispositivo = devices::ActiveModel {
+            name: Set("roteador".to_owned()),
+            r#type: Set("router".to_owned()),
+            status: Set("online".to_owned()),
+            ip_address: Set(Some("10.0.0.2".to_owned())),
+            ..Default::default()
+        }
+        .insert(&db)
+        .await
+        .expect("dispositivo");
+
+        let lista = vec![
+            monta(
+                AddressKind::Lan,
+                None,
+                &documento_vazio(),
+                &NatDetector::none(),
+            ),
+            monta(
+                AddressKind::Vpn,
+                Some("10.8.0.1".to_owned()),
+                &documento_vazio(),
+                &NatDetector::none(),
+            ),
+        ];
+        assert!(
+            suggest_for(&db, &dispositivo, &lista)
+                .await
+                .expect("sugestão")
+                .is_none(),
+            "equipamento fora da VPN não pode receber o endereço do túnel"
+        );
+    }
+
+    fn personalizado(id: &str, valor: &str) -> ServerAddress {
+        ServerAddress {
+            id: id.to_owned(),
+            kind: AddressKind::Custom,
+            label: id.to_owned(),
+            description: AddressKind::Custom.description().to_owned(),
+            value: Some(valor.to_owned()),
+            detected: None,
+            overridden: true,
+            source: "definido por você".to_owned(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_mesma_rede_cadastrada_recomenda_o_endereco_dela() {
+        // O caso real: roteador em 10.0.0.2, rede 10.0.0.0/24 no inventário e
+        // um endereço deste servidor dentro dela (10.0.0.170). Em container de
+        // rede bridge a rota devolve o IP da ponte e a "rede local" não é
+        // detectada — é a rede em comum que responde.
+        let db = banco().await;
+        networks::ActiveModel {
+            name: Set("Matriz".to_owned()),
+            cidr: Set("10.0.0.0/24".to_owned()),
+            ..Default::default()
+        }
+        .insert(&db)
+        .await
+        .expect("rede");
+        let dispositivo = devices::ActiveModel {
+            name: Set("roteador".to_owned()),
+            r#type: Set("router".to_owned()),
+            status: Set("online".to_owned()),
+            ip_address: Set(Some("10.0.0.2".to_owned())),
+            ..Default::default()
+        }
+        .insert(&db)
+        .await
+        .expect("dispositivo");
+
+        let lista = vec![
+            monta(
+                AddressKind::Lan,
+                None,
+                &documento_vazio(),
+                &NatDetector::none(),
+            ),
+            monta(
+                AddressKind::Vpn,
+                Some("10.8.0.1".to_owned()),
+                &documento_vazio(),
+                &NatDetector::none(),
+            ),
+            personalizado("custom:externo", "10.0.0.170"),
+        ];
+        let (id, motivo) = suggest_for(&db, &dispositivo, &lista)
+            .await
+            .expect("sugestão")
+            .expect("alguma");
+        assert_eq!(id, "custom:externo");
+        // Num servidor que está de fato na 10.0.0.0/24 a rota decide antes da
+        // rede em comum — o id sugerido é o mesmo, só o motivo muda, e os dois
+        // estão certos.
+        assert!(
+            motivo.contains("Matriz") || motivo.contains("alcança o equipamento por"),
+            "{motivo}"
+        );
+    }
+
+    #[tokio::test]
+    async fn endereco_em_outra_rede_nao_e_recomendado() {
+        // Um endereço do servidor numa rede que NÃO é a do equipamento não
+        // serve: o roteador mandaria o log para onde não alcança.
+        let db = banco().await;
+        for (nome, cidr) in [("Matriz", "10.0.0.0/24"), ("Filial", "198.51.100.0/24")] {
+            networks::ActiveModel {
+                name: Set(nome.to_owned()),
+                cidr: Set(cidr.to_owned()),
+                ..Default::default()
+            }
+            .insert(&db)
+            .await
+            .expect("rede");
+        }
+        let dispositivo = devices::ActiveModel {
+            name: Set("roteador".to_owned()),
+            r#type: Set("router".to_owned()),
+            status: Set("online".to_owned()),
+            ip_address: Set(Some("10.0.0.2".to_owned())),
+            ..Default::default()
+        }
+        .insert(&db)
+        .await
+        .expect("dispositivo");
+
+        // 198.51.100.10 é da "Filial", não da rede do equipamento.
+        let lista = vec![
+            monta(
+                AddressKind::Lan,
+                None,
+                &documento_vazio(),
+                &NatDetector::none(),
+            ),
+            personalizado("custom:filial", "198.51.100.10"),
+        ];
+        assert!(
+            suggest_for(&db, &dispositivo, &lista)
+                .await
+                .expect("sugestão")
+                .is_none(),
+            "endereço de outra rede não pode ser sugerido"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_rede_do_tunel_nao_conta_como_rede_em_comum() {
+        // O equipamento dentro da faixa do túnel é VPN pela dedução — não pela
+        // rede em comum, que exclui a rede do túnel. Se ela não excluísse, o
+        // motivo mostrado na tela diria "mesma rede" para um acesso que é VPN.
+        let db = banco().await;
+        let rede = networks::ActiveModel {
+            name: Set("VPN".to_owned()),
+            cidr: Set("10.8.0.0/24".to_owned()),
+            ..Default::default()
+        }
+        .insert(&db)
+        .await
+        .expect("rede");
+        vpn_servers::ActiveModel {
+            network_id: Set(rede.id),
+            interface_name: Set("wg0".to_owned()),
+            listen_port: Set(51820),
+            public_endpoint: Set(None),
+            public_key: Set("chave".to_owned()),
+            private_key_encrypted: Set("cifrada".to_owned()),
+            ..Default::default()
+        }
+        .insert(&db)
+        .await
+        .expect("servidor vpn");
+        let dispositivo = devices::ActiveModel {
+            name: Set("filial".to_owned()),
+            r#type: Set("router".to_owned()),
+            status: Set("online".to_owned()),
+            ip_address: Set(Some("10.8.0.9".to_owned())),
+            ..Default::default()
+        }
+        .insert(&db)
+        .await
+        .expect("dispositivo");
+
+        let lista = vec![monta(
+            AddressKind::Vpn,
+            Some("10.8.0.1".to_owned()),
+            &documento_vazio(),
+            &NatDetector::none(),
+        )];
+        let (id, motivo) = suggest_for(&db, &dispositivo, &lista)
+            .await
+            .expect("sugestão")
+            .expect("alguma");
+        assert_eq!(id, "vpn");
+        assert!(motivo.contains("faixa do túnel"), "{motivo}");
+    }
+
+    #[tokio::test]
+    async fn a_rota_pelo_tunel_nao_vale_para_equipamento_fora_da_vpn() {
+        // A rota mede o caminho de ida deste servidor; uma rota que sai pelo
+        // túnel para um aparelho que não é da VPN é artefato de configuração,
+        // não prova de que ele atravessa o túnel. A dedução decide.
+        let db = banco().await;
+        let dispositivo = devices::ActiveModel {
+            name: Set("remoto".to_owned()),
+            r#type: Set("router".to_owned()),
+            status: Set("online".to_owned()),
+            ip_address: Set(Some("192.0.2.9".to_owned())),
+            ..Default::default()
+        }
+        .insert(&db)
+        .await
+        .expect("dispositivo");
+
+        let Some(saida) = hints::local_address_toward("192.0.2.9".parse().unwrap()) else {
+            // Máquina sem rota padrão: não há o que exercitar.
+            return;
+        };
+
+        // O endereço do túnel carrega exatamente o valor que a rota devolve:
+        // sem o filtro, a sugestão seria "vpn" só porque os valores bateram.
+        let lista = vec![
+            monta(
+                AddressKind::Lan,
+                None,
+                &documento_vazio(),
+                &NatDetector::none(),
+            ),
+            monta(
+                AddressKind::Vpn,
+                Some(saida.to_string()),
+                &documento_vazio(),
+                &NatDetector::none(),
+            ),
+            monta(
+                AddressKind::Public,
+                Some("casa.ddns.net".to_owned()),
+                &documento_vazio(),
+                &NatDetector::none(),
+            ),
+        ];
+        let (id, _) = suggest_for(&db, &dispositivo, &lista)
+            .await
+            .expect("sugestão")
+            .expect("alguma");
+        assert_eq!(
+            id, "public",
+            "IP público é acesso remoto — a rota pelo túnel não pode vencer"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_rota_pelo_tunel_continua_valendo_para_equipamento_da_vpn() {
+        // O filtro não pode quebrar o caso que a rota resolve de verdade: o
+        // equipamento dentro da faixa do túnel.
+        let db = banco().await;
+        let rede = networks::ActiveModel {
+            name: Set("VPN".to_owned()),
+            cidr: Set("10.8.0.0/24".to_owned()),
+            ..Default::default()
+        }
+        .insert(&db)
+        .await
+        .expect("rede");
+        vpn_servers::ActiveModel {
+            network_id: Set(rede.id),
+            interface_name: Set("wg0".to_owned()),
+            listen_port: Set(51820),
+            public_endpoint: Set(None),
+            public_key: Set("chave".to_owned()),
+            private_key_encrypted: Set("cifrada".to_owned()),
+            ..Default::default()
+        }
+        .insert(&db)
+        .await
+        .expect("servidor vpn");
+        let dispositivo = devices::ActiveModel {
+            name: Set("filial".to_owned()),
+            r#type: Set("router".to_owned()),
+            status: Set("online".to_owned()),
+            ip_address: Set(Some("10.8.0.9".to_owned())),
+            ..Default::default()
+        }
+        .insert(&db)
+        .await
+        .expect("dispositivo");
+
+        let Some(saida) = hints::local_address_toward("10.8.0.9".parse().unwrap()) else {
+            return;
+        };
+
+        let lista = vec![
+            monta(
+                AddressKind::Lan,
+                None,
+                &documento_vazio(),
+                &NatDetector::none(),
+            ),
+            monta(
+                AddressKind::Vpn,
+                Some(saida.to_string()),
+                &documento_vazio(),
+                &NatDetector::none(),
+            ),
+        ];
+        let (id, motivo) = suggest_for(&db, &dispositivo, &lista)
+            .await
+            .expect("sugestão")
+            .expect("alguma");
+        assert_eq!(id, "vpn");
+        assert!(
+            motivo.contains("alcança o equipamento por"),
+            "a rota devia decidir, não a dedução: {motivo}"
+        );
     }
 
     #[tokio::test]

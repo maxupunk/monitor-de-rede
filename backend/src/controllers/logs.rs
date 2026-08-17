@@ -452,10 +452,10 @@ async fn provision_hints(
     // A forma de acesso é resolvida uma vez e usada duas: para escolher o
     // endereço e para explicar a escolha na tela. Resolver de novo lá dentro
     // custaria as mesmas três consultas para chegar à mesma conclusão.
-    let acesso = access::AccessContext::load(&ctx.db)
-        .await?
-        .resolve(&dispositivo);
-    let sugestao = server_addresses::suggest_with(&ctx.db, &dispositivo, &lista, &acesso).await?;
+    let contexto = access::AccessContext::load(&ctx.db).await?;
+    let acesso = contexto.resolve(&dispositivo);
+    let sugestao =
+        server_addresses::suggest_with(&ctx.db, &dispositivo, &lista, &contexto, &acesso).await?;
     let sugerido = sugestao.as_ref().and_then(|(id, _)| {
         lista
             .iter()
