@@ -24,6 +24,7 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
+use futures::{stream, StreamExt};
 use loco_rs::prelude::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 
@@ -31,7 +32,7 @@ use crate::{
     models::{devices, monitors, probes},
     services::{
         alerts::hysteresis,
-        discovery::queue::{process_pending_runs, schedule_due_networks},
+        discovery::queue::{process_pending_runs, schedule_due_networks, spawn_pending_run},
         maintenance::data_pruner,
         monitoring::{
             contracts::{CheckResult, MonitorStatus},
@@ -56,6 +57,7 @@ use crate::{
 /// Intervalo padrão entre ciclos, em segundos. Ajustável por
 /// `SCHEDULER_INTERVAL_SECONDS` ou pelo argumento `interval_seconds`.
 pub const DEFAULT_CYCLE_SECONDS: u64 = 5;
+const MONITOR_CONCURRENCY: usize = 16;
 
 /// Executa **um** ciclo e sai. Comando manual.
 pub struct SchedulerRun;
@@ -108,7 +110,7 @@ pub async fn run_forever(ctx: &AppContext, interval_seconds: u64) {
 
     loop {
         ticker.tick().await;
-        match run_cycle(ctx).await {
+        match run_cycle_inner(ctx, true).await {
             Ok(0) => {}
             Ok(count) => tracing::debug!(monitores = count, "ciclo concluído"),
             Err(error) => tracing::warn!(%error, "ciclo do scheduler falhou"),
@@ -142,6 +144,10 @@ impl Task for SchedulerLoop {
 /// caído *antes* do despacho, ou o operador só vê monitores parados sem
 /// explicação.
 pub async fn run_cycle(ctx: &AppContext) -> AppResult<usize> {
+    run_cycle_inner(ctx, false).await
+}
+
+async fn run_cycle_inner(ctx: &AppContext, detach_discovery: bool) -> AppResult<usize> {
     if let Err(error) = mark_stale_probes_offline(ctx).await {
         tracing::warn!(%error, "falha ao revisar a vida dos probes");
     }
@@ -158,19 +164,22 @@ pub async fn run_cycle(ctx: &AppContext) -> AppResult<usize> {
         ));
         active.update(&ctx.db).await?;
     }
-    for monitor in &due {
-        if local_snmp_device_id(monitor).is_some_and(|id| local_snmp_devices.contains(&id)) {
-            continue;
-        }
+    stream::iter(due.iter().filter(|monitor| {
+        !local_snmp_device_id(monitor).is_some_and(|id| local_snmp_devices.contains(&id))
+    }))
+    .for_each_concurrent(MONITOR_CONCURRENCY, |monitor| async move {
         if let Err(error) = execute_one(ctx, monitor).await {
             tracing::warn!(%error, monitor_id = monitor.id, "falha ao executar monitor");
         }
-    }
-    for device_id in local_snmp_devices {
-        if let Err(error) = execute_snmp_device_group(ctx, device_id, now).await {
-            tracing::warn!(%error, device_id, "falha ao executar coleta SNMP consolidada");
-        }
-    }
+    })
+    .await;
+    stream::iter(local_snmp_devices)
+        .for_each_concurrent(MONITOR_CONCURRENCY, |device_id| async move {
+            if let Err(error) = execute_snmp_device_group(ctx, device_id, now).await {
+                tracing::warn!(%error, device_id, "falha ao executar coleta SNMP consolidada");
+            }
+        })
+        .await;
     if let Err(error) = sync_vpn_traffic_if_due(ctx).await {
         tracing::warn!(%error, "falha ao sincronizar tráfego VPN");
     }
@@ -179,7 +188,12 @@ pub async fn run_cycle(ctx: &AppContext) -> AppResult<usize> {
     if let Err(error) = schedule_due_networks(&ctx.db).await {
         tracing::warn!(%error, "falha ao agendar discovery");
     }
-    if let Err(error) = process_pending_runs(ctx).await {
+    let discovery_result = if detach_discovery {
+        spawn_pending_run(ctx).await
+    } else {
+        process_pending_runs(ctx).await
+    };
+    if let Err(error) = discovery_result {
         tracing::warn!(%error, "falha ao processar discovery");
     }
     // As notificações da Fase 4 saem daqui, e não do ponto onde o alerta nasce:

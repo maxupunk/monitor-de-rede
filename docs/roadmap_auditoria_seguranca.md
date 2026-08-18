@@ -143,49 +143,57 @@ Os riscos reais se concentram em quatro pontos:
 
 ## Fase 2 — Robustez do scheduler e dos dados (médio prazo)
 
-### 🟠 13. Tirar o discovery do laço do scheduler
+### 🟢 13. Tirar o discovery do laço do scheduler — Concluído
 
-- **Onde:** `backend/src/tasks/scheduler_run.rs:182` →
-  `services/discovery/queue.rs:216-218`
+- **Onde:** `backend/src/tasks/scheduler_run.rs:188-198` →
+  `services/discovery/queue.rs:193-326`
 - **Problema:** uma varredura de até 1024 hosts roda **inline no ciclo** —
   minutos em que o scheduler não despacha monitores, notificações nem VPN.
   Um scan de /22 paralisa o monitoramento inteiro.
-- **Correção:** marcar a run como `running` e despachar com `tokio::spawn`
-  (o watchdog de 15 min já cobre crash).
+- **Implementado:** o loop longevo reivindica a run de forma condicional,
+  marca `running` antes de usar `tokio::spawn` e mantém no máximo um discovery
+  local em curso. O comando manual continua aguardando a conclusão, evitando
+  deixar uma tarefa órfã quando o processo termina; o watchdog recupera crash.
 
-### 🟠 14. Executar monitores do lote em paralelo
+### 🟢 14. Executar monitores do lote em paralelo — Concluído
 
-- **Onde:** `backend/src/tasks/scheduler_run.rs:161-173`
+- **Onde:** `backend/src/tasks/scheduler_run.rs:164-184`
 - **Problema:** execução estritamente serial; um monitor `down` com retry
   consome dezenas de segundos e atrasa todos os demais da grade.
-- **Correção:** `buffer_unordered` com semáforo (16–32 concorrentes). O
-  `try_acquire_monitor` já protege contra dupla execução.
+- **Implementado:** `for_each_concurrent` com limite fixo de 16 para monitores
+  comuns e grupos SNMP. Os guards existentes continuam impedindo execução
+  duplicada, e o lote mantém o teto de 50 itens para respeitar o pool do banco.
 
-### 🟡 15. Não deixar resultados atrasados de probe sobrescreverem o estado atual
+### 🟢 15. Não deixar resultados atrasados de probe sobrescreverem o estado atual — Concluído
 
 - **Onde:** `backend/src/services/probes/receiver.rs:47` →
-  `services/monitoring/result_processor.rs:37-71`
+  `services/monitoring/result_processor.rs:44-103`
 - **Problema:** o agente bufferiza offline e reenvia horas depois; o lote
   antigo flipa `status`/`last_run_at` para valores obsoletos e abre/fecha
   alertas fantasmas.
-- **Correção:** comparar `result.started_at` com `monitor.last_run_at`;
-  resultados antigos viram só histórico, sem tocar status nem alertas.
+- **Implementado:** histórico e atualização do monitor agora formam uma
+  transação curta; o `UPDATE` condicional compara `started_at` com
+  `last_run_at` no próprio banco. Resultado obsoleto permanece no histórico,
+  mas não altera monitor, dispositivo, alertas ou eventos em tempo real.
 
-### 🟡 16. Endurecer queries e transações de maior volume
+### 🟡 16. Endurecer queries e transações de maior volume — Parcialmente concluído
 
-- `backend/src/controllers/dns.rs:156-160` — endpoint de performance DNS lê
-  `monitor_results` **sem LIMIT** e filtra a janela em Rust: empurrar
-  `StartedAt.gte(cutoff)` para a query.
-- `backend/src/services/snmp/service.rs:262-299` — N+1 por interface a cada
+- 🟢 **Concluído:** `backend/src/controllers/dns.rs` filtra a janela com
+  `StartedAt.gte(cutoff)` no banco, sem carregar histórico fora do período.
+- ⚪ **Reavaliar após separar persistência dos efeitos de domínio:**
+  `backend/src/services/snmp/service.rs:262-299` — N+1 por interface a cada
   poll (switch de 48 portas ≈ 150 queries/15 s, sem transação): buscar métricas
-  anteriores em uma query `IN (...)` e embrulhar o poll em transação.
-- `backend/src/services/maintenance/data_pruner.rs:104-119` — purga em DELETE
-  único sem lotes segura o writer do SQLite: apagar em lotes de 10–50k.
-- `backend/src/services/monitoring/result_processor.rs:53-71` e
-  `services/probes/dispatcher.rs:82-98,113-135` — transações curtas em
-  insert+update de resultado e na fila de probes (delete+insert não atômico;
-  entrega read-then-delete permite duplicata — copiar o claim condicional de
-  `get_pending_discovery_tasks`).
+  anteriores em uma query por grupo. Uma transação envolvendo o poll atual
+  também prenderia o único writer SQLite enquanto alertas e topologia são
+  avaliados; antes disso, o serviço precisa separar coleta, persistência e
+  efeitos posteriores para manter transações realmente curtas.
+- 🟢 **Concluído:** `backend/src/services/maintenance/data_pruner.rs` apaga
+  `event_outbox`, `monitor_results` e `metrics` em lotes ordenados de 10 mil,
+  liberando o writer do SQLite entre os lotes.
+- 🟢 **Concluído:** `result_processor` usa transação curta e update temporal
+  condicional; a fila de probes usa upsert atômico e claim por delete
+  condicional, impedindo perda no replace e entrega duplicada em pollings
+  concorrentes.
 
 ---
 

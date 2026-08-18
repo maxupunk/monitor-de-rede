@@ -2,7 +2,9 @@
 
 use chrono::Utc;
 use loco_rs::app::AppContext;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
+use sea_orm::{
+    sea_query::Expr, ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set,
+};
 
 use crate::{
     models::{discovery_runs, networks},
@@ -188,7 +190,38 @@ pub async fn schedule_due_networks(db: &sea_orm::DatabaseConnection) -> AppResul
     Ok(count)
 }
 
-pub async fn process_pending_runs(ctx: &AppContext) -> AppResult<u64> {
+async fn claim_pending_run(
+    ctx: &AppContext,
+) -> AppResult<Option<(discovery_runs::Model, String, ScanSessionService)>> {
+    let session = ScanSessionService::from_context(ctx)?;
+
+    // O loop longevo despacha o trabalho em background. Enquanto houver uma
+    // varredura local válida em curso, não reivindica outra: isso preserva o
+    // limite global que antes era imposto naturalmente pelo `await` inline.
+    if let Some(running) = discovery_runs::Entity::find()
+        .filter(crate::models::_entities::discovery_runs::Column::Status.eq("running"))
+        .filter(crate::models::_entities::discovery_runs::Column::ProbeId.is_null())
+        .order_by_asc(crate::models::_entities::discovery_runs::Column::Id)
+        .one(&ctx.db)
+        .await?
+    {
+        if !is_abandoned(&running) {
+            return Ok(None);
+        }
+        let timeout_minutes = running_timeout_minutes(&running);
+        discovery_runs::ActiveModel {
+            id: Set(running.id),
+            status: Set("failed".into()),
+            finished_at: Set(Some(Utc::now().into())),
+            error: Set(Some(format!(
+                "Varredura abandonada (sem conclusão após {timeout_minutes} min)."
+            ))),
+            ..Default::default()
+        }
+        .update(&ctx.db)
+        .await?;
+    }
+
     let Some(run) = discovery_runs::Entity::find()
         .filter(crate::models::_entities::discovery_runs::Column::Status.eq("pending"))
         .filter(crate::models::_entities::discovery_runs::Column::ProbeId.is_null())
@@ -196,7 +229,7 @@ pub async fn process_pending_runs(ctx: &AppContext) -> AppResult<u64> {
         .one(&ctx.db)
         .await?
     else {
-        return Ok(0);
+        return Ok(None);
     };
     let cidr = run
         .configuration
@@ -205,17 +238,37 @@ pub async fn process_pending_runs(ctx: &AppContext) -> AppResult<u64> {
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default()
         .to_string();
-    let run = discovery_runs::ActiveModel {
-        id: Set(run.id),
-        status: Set("running".into()),
-        started_at: Set(Utc::now().into()),
-        ..Default::default()
+    let started_at = Utc::now();
+    let claimed = discovery_runs::Entity::update_many()
+        .col_expr(
+            crate::models::_entities::discovery_runs::Column::Status,
+            Expr::value("running"),
+        )
+        .col_expr(
+            crate::models::_entities::discovery_runs::Column::StartedAt,
+            Expr::value(started_at),
+        )
+        .filter(crate::models::_entities::discovery_runs::Column::Id.eq(run.id))
+        .filter(crate::models::_entities::discovery_runs::Column::Status.eq("pending"))
+        .exec(&ctx.db)
+        .await?;
+    if claimed.rows_affected == 0 {
+        return Ok(None);
     }
-    .update(&ctx.db)
-    .await?;
-    let session = ScanSessionService::from_context(ctx)?;
+    let mut run = run;
+    run.status = "running".into();
+    run.started_at = started_at.into();
+    Ok(Some((run, cidr, session)))
+}
+
+async fn execute_claimed_run(
+    ctx: &AppContext,
+    run: discovery_runs::Model,
+    cidr: &str,
+    session: &ScanSessionService,
+) -> AppResult<()> {
     let cancel = session.start(run.id, run.network_id).await;
-    match run_discovery(ctx, &cidr, run.id, cancel).await {
+    match run_discovery(ctx, cidr, run.id, cancel).await {
         Ok(_) => {
             discovery_runs::ActiveModel {
                 id: Set(run.id),
@@ -226,7 +279,6 @@ pub async fn process_pending_runs(ctx: &AppContext) -> AppResult<u64> {
             .update(&ctx.db)
             .await?;
             session.finish(None).await;
-            Ok(1)
         }
         Err(error) => {
             discovery_runs::ActiveModel {
@@ -239,9 +291,39 @@ pub async fn process_pending_runs(ctx: &AppContext) -> AppResult<u64> {
             .update(&ctx.db)
             .await?;
             session.finish(Some(error.to_string())).await;
-            Ok(1)
         }
     }
+    Ok(())
+}
+
+/// Processa uma varredura local e aguarda sua conclusão.
+///
+/// Este caminho continua sendo usado pelo comando manual, que deve sair apenas
+/// depois de concluir o trabalho que reivindicou.
+pub async fn process_pending_runs(ctx: &AppContext) -> AppResult<u64> {
+    let Some((run, cidr, session)) = claim_pending_run(ctx).await? else {
+        return Ok(0);
+    };
+    execute_claimed_run(ctx, run, &cidr, &session).await?;
+    Ok(1)
+}
+
+/// Reivindica uma varredura e a executa fora do caminho crítico do scheduler.
+///
+/// A linha vira `running` antes do spawn; assim o ciclo seguinte não duplica o
+/// trabalho. Se o processo cair, o watchdog de runs abandonadas a libera.
+pub async fn spawn_pending_run(ctx: &AppContext) -> AppResult<u64> {
+    let Some((run, cidr, session)) = claim_pending_run(ctx).await? else {
+        return Ok(0);
+    };
+    let ctx = ctx.clone();
+    tokio::spawn(async move {
+        let run_id = run.id;
+        if let Err(error) = execute_claimed_run(&ctx, run, &cidr, &session).await {
+            tracing::warn!(%error, run_id, "falha na tarefa de discovery");
+        }
+    });
+    Ok(1)
 }
 
 #[cfg(test)]

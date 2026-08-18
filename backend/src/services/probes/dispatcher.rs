@@ -5,8 +5,8 @@
 
 use chrono::{Duration, Utc};
 use sea_orm::{
-    sea_query::Expr, ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
-    QueryOrder, QuerySelect, Set,
+    sea_query::{Expr, OnConflict},
+    ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set,
 };
 use serde::{Deserialize, Serialize};
 
@@ -68,8 +68,8 @@ impl From<probe_tasks::Model> for ProbeTask {
 /// Enfileira a tarefa, substituindo a pendente do mesmo monitor.
 ///
 /// Sem a substituição, um probe offline acumularia uma tarefa por ciclo e
-/// dispararia todas de uma vez ao voltar (matriz de paridade #9). O `DELETE`
-/// prévio também é o que respeita o `UNIQUE(monitor_id)` da tabela.
+/// dispararia todas de uma vez ao voltar (matriz de paridade #9). O upsert usa
+/// o `UNIQUE(monitor_id)` para trocar a tarefa sem uma janela de fila vazia.
 ///
 /// # Errors
 ///
@@ -79,20 +79,29 @@ pub async fn dispatch_task<C: ConnectionTrait>(
     probe_id: i64,
     task: &ProbeTask,
 ) -> AppResult<()> {
-    probe_tasks::Entity::delete_many()
-        .filter(probe_tasks_entity::Column::MonitorId.eq(task.monitor_id))
-        .exec(db)
-        .await?;
-    probe_tasks::ActiveModel {
+    probe_tasks::Entity::insert(probe_tasks::ActiveModel {
         probe_id: Set(probe_id),
         monitor_id: Set(task.monitor_id),
         task_id: Set(task.id.clone()),
         r#type: Set(task.task_type.clone()),
         timeout_ms: Set(task.timeout_ms),
         payload: Set(task.payload.clone()),
+        created_at: Set(Utc::now().into()),
         ..Default::default()
-    }
-    .insert(db)
+    })
+    .on_conflict(
+        OnConflict::column(probe_tasks_entity::Column::MonitorId)
+            .update_columns([
+                probe_tasks_entity::Column::ProbeId,
+                probe_tasks_entity::Column::TaskId,
+                probe_tasks_entity::Column::Type,
+                probe_tasks_entity::Column::TimeoutMs,
+                probe_tasks_entity::Column::Payload,
+                probe_tasks_entity::Column::CreatedAt,
+            ])
+            .to_owned(),
+    )
+    .exec(db)
     .await?;
     Ok(())
 }
@@ -120,18 +129,18 @@ pub async fn get_pending_tasks<C: ConnectionTrait>(
         return Ok(Vec::new());
     }
 
-    let ids: Vec<i64> = rows.iter().map(|row| row.id).collect();
-    probe_tasks::Entity::delete_many()
-        .filter(probe_tasks_entity::Column::Id.is_in(ids))
-        .exec(db)
-        .await?;
-
     let cutoff = Utc::now() - Duration::seconds(TASK_TTL_SECONDS);
-    Ok(rows
-        .into_iter()
-        .filter(|row| row.created_at.with_timezone(&Utc) > cutoff)
-        .map(ProbeTask::from)
-        .collect())
+    let mut claimed = Vec::with_capacity(rows.len());
+    for row in rows {
+        // O DELETE por chave é o claim: entre pollings concorrentes, somente
+        // quem afetar a linha pode entregá-la. Tarefas vencidas também somem,
+        // mas não entram na resposta.
+        let deleted = probe_tasks::Entity::delete_by_id(row.id).exec(db).await?;
+        if deleted.rows_affected == 1 && row.created_at.with_timezone(&Utc) > cutoff {
+            claimed.push(ProbeTask::from(row));
+        }
+    }
+    Ok(claimed)
 }
 
 /// Entrega uma run remota pendente e a marca em execução. Uma única run por

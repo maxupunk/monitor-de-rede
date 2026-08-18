@@ -2,7 +2,7 @@
 
 use backend::{
     app::App,
-    models::{_entities::probe_tasks, monitors, probes},
+    models::{_entities::probe_tasks, monitor_results, monitors, probes},
     services::{
         probes::{dispatcher, DEFAULT_VPN_PROBE_TOKEN},
         shared::crypto::sha256_hex,
@@ -10,7 +10,7 @@ use backend::{
 };
 use chrono::{Duration, Utc};
 use loco_rs::testing::prelude::*;
-use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use serial_test::serial;
 
 use super::prepare_data;
@@ -561,6 +561,37 @@ async fn uma_tarefa_pendente_por_monitor() {
 
 #[tokio::test]
 #[serial]
+async fn pollings_concorrentes_nao_entregam_a_mesma_tarefa_duas_vezes() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
+        let probe_id = criar_probe(&ctx, "probe-claim", "token-claim", Some(Utc::now())).await;
+        let monitor_id = criar_monitor(&ctx, "Ping com claim", Some(probe_id)).await;
+        dispatcher::dispatch_task(
+            &ctx.db,
+            probe_id,
+            &dispatcher::ProbeTask {
+                id: "task-claim".into(),
+                monitor_id,
+                task_type: "ping".into(),
+                timeout_ms: 5_000,
+                payload: serde_json::json!({ "host": "127.0.0.1" }),
+            },
+        )
+        .await
+        .expect("tarefa enfileirada");
+
+        let (first, second) = tokio::join!(
+            dispatcher::get_pending_tasks(&ctx.db, probe_id),
+            dispatcher::get_pending_tasks(&ctx.db, probe_id)
+        );
+        let delivered =
+            first.expect("primeiro polling").len() + second.expect("segundo polling").len();
+        assert_eq!(delivered, 1, "cada linha só pode ter um consumidor");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
 async fn o_resultado_reportado_pelo_probe_vira_historico() {
     request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
         let session = prepare_data::init_user_login(&request, &ctx).await;
@@ -612,6 +643,72 @@ async fn o_resultado_reportado_pelo_probe_vira_historico() {
         assert_eq!(resultados["meta"]["total"], 1);
         assert_eq!(resultados["data"][0]["status"], "up");
         assert_eq!(resultados["data"][0]["latencyMs"], 12.5);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn resultado_atrasado_do_probe_nao_regride_o_estado_atual() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |request, ctx| async move {
+        let probe_id = criar_probe(&ctx, "probe-atraso", "token-atraso", Some(Utc::now())).await;
+        let monitor_id = criar_monitor(&ctx, "Ping com buffer", Some(probe_id)).await;
+
+        for (started_at, finished_at, status, success) in [
+            ("2026-08-11T11:00:00Z", "2026-08-11T11:00:01Z", "up", true),
+            (
+                "2026-08-11T10:00:00Z",
+                "2026-08-11T10:00:01Z",
+                "down",
+                false,
+            ),
+        ] {
+            let response = request
+                .post("/api/probes/results")
+                .add_header("x-probe-token", "token-atraso")
+                .json(&serde_json::json!({
+                    "results": [{
+                        "monitorId": monitor_id,
+                        "result": {
+                            "success": success,
+                            "status": status,
+                            "startedAt": started_at,
+                            "finishedAt": finished_at,
+                            "durationMs": 1000,
+                            "message": status,
+                            "metrics": [],
+                            "data": {}
+                        }
+                    }]
+                }))
+                .await;
+            assert_eq!(response.status_code(), 200);
+        }
+
+        let monitor = monitors::Entity::find_by_id(monitor_id)
+            .one(&ctx.db)
+            .await
+            .expect("consulta do monitor")
+            .expect("monitor existente");
+        assert_eq!(monitor.status, "up", "o lote antigo não pode vencer");
+        assert_eq!(
+            monitor
+                .last_run_at
+                .expect("última execução")
+                .with_timezone(&Utc)
+                .to_rfc3339(),
+            "2026-08-11T11:00:01+00:00"
+        );
+        assert_eq!(
+            monitor_results::Entity::find()
+                .filter(monitor_results::Column::MonitorId.eq(monitor_id))
+                .all(&ctx.db)
+                .await
+                .expect("histórico")
+                .len(),
+            2,
+            "o resultado obsoleto continua disponível como histórico"
+        );
     })
     .await;
 }

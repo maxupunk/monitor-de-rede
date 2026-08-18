@@ -157,10 +157,11 @@ a cada `SCHEDULER_INTERVAL_SECONDS` (padrão 5 s), em
 run_cycle (a cada 5 s, no mesmo processo)
    │
    ├─ monitores vencidos (next_run_at <= now)
+   │     ├─ lote de até 50, com no máximo 16 execuções concorrentes
    │     ├─ monitor tem probe? → enfileira em `probe_tasks`
    │     └─ não tem, ou o probe está offline? → executa local (`run_monitor`)
    │
-   ├─ discovery: processa runs locais pendentes e agenda redes vencidas
+   ├─ discovery: agenda redes vencidas e despacha uma run local em background
    ├─ VPN: sincroniza telemetria dos túneis
    ├─ watchdog: probe sem heartbeat vira `offline`
    └─ data_pruner (a cada 1h): aplica as janelas de retenção
@@ -442,11 +443,14 @@ Registrar o que **não** foi construído evita que alguém procure por uma peça
 ausente achando que ela está escondida:
 
 - **Não há worker nem fila externa.** Não existe Redis, BullMQ ou equivalente.
-  O scheduler executa os monitores inline e a fila dos probes é a tabela
-  `probe_tasks`. Não há nenhum worker registrado em `connect_workers`, e o
-  `start` roda **sem** `--server-and-worker`.
-- **A dívida disso é backpressure**: uma rajada de monitores vencidos não tem
-  onde ser represada. Ver a Fase 2 do [roadmap](roadmap.md).
+  O scheduler executa diretamente lotes limitados de monitores, com concorrência
+  máxima de 16, e a fila dos probes é a tabela `probe_tasks`. O discovery local
+  é uma task Tokio no mesmo processo, não um worker. Não há nenhum worker
+  registrado em `connect_workers`, e o `start` roda **sem**
+  `--server-and-worker`.
+- **O backpressure é local e limitado**: cada ciclo recolhe até 50 monitores e
+  executa até 16 ao mesmo tempo; atrasos além desse lote ficam representados por
+  `next_run_at` no banco para os ciclos seguintes.
 - **Não há agregação de métricas** (rollup por hora/dia). A retenção é por
   descarte, no `data_pruner`.
 - **Não há auditoria** nem permissões por papel — a autorização hoje é

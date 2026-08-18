@@ -13,7 +13,9 @@
 //! Central um alerta que o operador ainda precisa ver.
 
 use chrono::{Duration, Utc};
-use sea_orm::{ColumnTrait, Condition, ConnectionTrait, EntityTrait, QueryFilter};
+use sea_orm::{
+    ColumnTrait, Condition, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
+};
 
 use crate::{
     models::{
@@ -42,6 +44,7 @@ pub const DEFAULT_RETENTION_ALERT_EVENTS_DAYS: i64 = 90;
 /// O diário de notificações acompanha as métricas: passado esse prazo ele já não
 /// alimenta cooldown, agrupamento nem a pergunta "por que não fui avisado?".
 pub const DEFAULT_RETENTION_NOTIFICATIONS_DAYS: i64 = 30;
+const DELETE_BATCH_SIZE: u64 = 10_000;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PruneStats {
@@ -87,36 +90,22 @@ pub fn retention_days(variable: &str, default: i64) -> i64 {
 pub async fn prune_all<C: ConnectionTrait>(db: &C) -> AppResult<PruneStats> {
     let now = Utc::now();
 
-    let outbox_deleted = event_outbox::Entity::delete_many()
-        .filter(
-            event_outbox_entity::Column::CreatedAt
-                .lt(now - Duration::minutes(OUTBOX_RETENTION_MINUTES)),
-        )
-        .exec(db)
-        .await?
-        .rows_affected;
+    let outbox_deleted =
+        prune_event_outbox(db, now - Duration::minutes(OUTBOX_RETENTION_MINUTES)).await?;
 
     let results_cutoff = now
         - Duration::days(retention_days(
             "RETENTION_MONITOR_RESULTS_DAYS",
             DEFAULT_RETENTION_MONITOR_RESULTS_DAYS,
         ));
-    let results_deleted = monitor_results::Entity::delete_many()
-        .filter(monitor_results_entity::Column::CreatedAt.lt(results_cutoff))
-        .exec(db)
-        .await?
-        .rows_affected;
+    let results_deleted = prune_monitor_results(db, results_cutoff).await?;
 
     let metrics_cutoff = now
         - Duration::days(retention_days(
             "RETENTION_METRICS_DAYS",
             DEFAULT_RETENTION_METRICS_DAYS,
         ));
-    let metrics_deleted = metrics::Entity::delete_many()
-        .filter(metrics_entity::Column::CreatedAt.lt(metrics_cutoff))
-        .exec(db)
-        .await?
-        .rows_affected;
+    let metrics_deleted = prune_metrics(db, metrics_cutoff).await?;
 
     let discovery_cutoff = now
         - Duration::days(retention_days(
@@ -174,6 +163,84 @@ pub async fn prune_all<C: ConnectionTrait>(db: &C) -> AppResult<PruneStats> {
         alert_events_deleted,
         notifications_deleted,
     })
+}
+
+async fn prune_event_outbox<C: ConnectionTrait>(
+    db: &C,
+    cutoff: chrono::DateTime<Utc>,
+) -> AppResult<u64> {
+    let mut deleted = 0;
+    loop {
+        let ids = event_outbox::Entity::find()
+            .select_only()
+            .column(event_outbox_entity::Column::Id)
+            .filter(event_outbox_entity::Column::CreatedAt.lt(cutoff))
+            .order_by_asc(event_outbox_entity::Column::Id)
+            .limit(DELETE_BATCH_SIZE)
+            .into_tuple::<i64>()
+            .all(db)
+            .await?;
+        if ids.is_empty() {
+            return Ok(deleted);
+        }
+        deleted += event_outbox::Entity::delete_many()
+            .filter(event_outbox_entity::Column::Id.is_in(ids))
+            .exec(db)
+            .await?
+            .rows_affected;
+    }
+}
+
+async fn prune_monitor_results<C: ConnectionTrait>(
+    db: &C,
+    cutoff: chrono::DateTime<Utc>,
+) -> AppResult<u64> {
+    let mut deleted = 0;
+    loop {
+        let ids = monitor_results::Entity::find()
+            .select_only()
+            .column(monitor_results_entity::Column::Id)
+            .filter(monitor_results_entity::Column::CreatedAt.lt(cutoff))
+            .order_by_asc(monitor_results_entity::Column::Id)
+            .limit(DELETE_BATCH_SIZE)
+            .into_tuple::<i64>()
+            .all(db)
+            .await?;
+        if ids.is_empty() {
+            return Ok(deleted);
+        }
+        deleted += monitor_results::Entity::delete_many()
+            .filter(monitor_results_entity::Column::Id.is_in(ids))
+            .exec(db)
+            .await?
+            .rows_affected;
+    }
+}
+
+async fn prune_metrics<C: ConnectionTrait>(
+    db: &C,
+    cutoff: chrono::DateTime<Utc>,
+) -> AppResult<u64> {
+    let mut deleted = 0;
+    loop {
+        let ids = metrics::Entity::find()
+            .select_only()
+            .column(metrics_entity::Column::Id)
+            .filter(metrics_entity::Column::CreatedAt.lt(cutoff))
+            .order_by_asc(metrics_entity::Column::Id)
+            .limit(DELETE_BATCH_SIZE)
+            .into_tuple::<i64>()
+            .all(db)
+            .await?;
+        if ids.is_empty() {
+            return Ok(deleted);
+        }
+        deleted += metrics::Entity::delete_many()
+            .filter(metrics_entity::Column::Id.is_in(ids))
+            .exec(db)
+            .await?
+            .rows_affected;
+    }
 }
 
 #[cfg(test)]

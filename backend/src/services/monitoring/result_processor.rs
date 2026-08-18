@@ -1,7 +1,11 @@
 //! Persistência atômica da observação de um monitor e atualização do dispositivo.
 
+use chrono::Utc;
 use loco_rs::app::AppContext;
-use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+use sea_orm::{
+    sea_query::Expr, ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter, Set,
+    TransactionTrait,
+};
 
 use crate::{
     models::{devices, monitor_results, monitors},
@@ -40,10 +44,9 @@ pub async fn process_result(
     result: &CheckResult,
     probe_id: Option<i64>,
 ) -> AppResult<Option<monitor_results::Model>> {
-    let Some(monitor) = monitors::Entity::find_by_id(monitor_id)
-        .one(&ctx.db)
-        .await?
-    else {
+    let txn = ctx.db.begin().await?;
+    let Some(monitor) = monitors::Entity::find_by_id(monitor_id).one(&txn).await? else {
+        txn.commit().await?;
         return Ok(None);
     };
     let latency = pick_latency_metric(&result.metrics).map(|metric| metric.value);
@@ -62,13 +65,41 @@ pub async fn process_result(
         data: Set(Some(result.data.clone())),
         ..Default::default()
     }
-    .insert(&ctx.db)
+    .insert(&txn)
     .await?;
 
-    let mut active: monitors::ActiveModel = monitor.clone().into();
-    active.status = Set(result.status.as_str().to_string());
-    active.last_run_at = Set(Some(result.finished_at.into()));
-    active.update(&ctx.db).await?;
+    // O histórico aceita toda observação, mas apenas um resultado mais novo
+    // pode alterar o estado corrente. A condição fica no UPDATE (e não só num
+    // `if` em Rust) para fechar a corrida entre dois probes que respondem ao
+    // mesmo tempo.
+    let updated = monitors::Entity::update_many()
+        .col_expr(
+            monitors::Column::Status,
+            Expr::value(result.status.as_str()),
+        )
+        .col_expr(
+            monitors::Column::LastRunAt,
+            Expr::value(result.finished_at.fixed_offset()),
+        )
+        .col_expr(monitors::Column::UpdatedAt, Expr::value(Utc::now()))
+        .filter(monitors::Column::Id.eq(monitor.id))
+        .filter(
+            Condition::any()
+                .add(monitors::Column::LastRunAt.is_null())
+                .add(monitors::Column::LastRunAt.lt(result.started_at.fixed_offset())),
+        )
+        .exec(&txn)
+        .await?;
+    txn.commit().await?;
+
+    if updated.rows_affected == 0 {
+        tracing::debug!(
+            monitor_id = monitor.id,
+            result_started_at = %result.started_at,
+            "resultado histórico não alterou o estado atual"
+        );
+        return Ok(Some(stored));
+    }
 
     let mut device_name = None;
     if let Some(device_id) = monitor.device_id {

@@ -155,13 +155,11 @@ async fn performance(
         .collect();
     let results = monitor_results::Entity::find()
         .filter(monitor_results::Column::MonitorId.is_in(monitor_ids))
+        .filter(monitor_results::Column::StartedAt.gte(cutoff))
         .all(&ctx.db)
         .await?;
     let mut buckets: BTreeMap<String, PerformanceBucket> = BTreeMap::new();
-    for result in results
-        .into_iter()
-        .filter(|result| result.started_at.with_timezone(&Utc) >= cutoff)
-    {
+    for result in results {
         let Some(monitor) = monitor_by_id.get(&result.monitor_id) else {
             continue;
         };
