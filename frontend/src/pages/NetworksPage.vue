@@ -152,52 +152,67 @@
         </v-card-title>
         <v-card-text>
           <v-form @submit.prevent="save">
-            <div class="d-flex align-start ga-2">
-              <v-select
-                v-model="formModel.siteId"
-                :items="sitesStore.sites"
-                item-title="name"
-                item-value="id"
-                label="Site de Origem (opcional)"
-                placeholder="Sem site"
-                variant="outlined"
-                clearable
-                persistent-hint
-                hint="Deixe em branco para cadastrar a faixa sem vincular a um local."
-                class="flex-grow-1"
-              ></v-select>
-              <v-btn
-                icon="mdi-plus"
-                color="secondary"
-                variant="flat"
-                class="mt-1"
-                aria-label="Cadastrar novo site"
-                @click="siteDialog = true"
-              >
-                <v-icon>mdi-plus</v-icon>
-                <v-tooltip activator="parent" location="top">Cadastrar novo site</v-tooltip>
-              </v-btn>
-            </div>
-            <v-text-field
-              v-model="formModel.name"
-              label="Nome da Rede"
-              placeholder="Ex: LAN Matriz"
-              variant="outlined"
-              required
-            ></v-text-field>
-            <v-text-field
-              v-model="formModel.cidr"
-              label="Faixa CIDR"
-              placeholder="192.168.1.0/24"
-              variant="outlined"
-              required
-            ></v-text-field>
-            <v-text-field
-              v-model="formModel.gateway"
-              label="Gateway (IP)"
-              placeholder="192.168.1.1"
-              variant="outlined"
-            ></v-text-field>
+            <v-row>
+              <v-col cols="12">
+                <div class="d-flex align-start ga-2">
+                  <v-select
+                    v-model="formModel.siteId"
+                    :items="sitesStore.sites"
+                    item-title="name"
+                    item-value="id"
+                    label="Site de Origem (opcional)"
+                    placeholder="Sem site"
+                    variant="outlined"
+                    density="comfortable"
+                    clearable
+                    persistent-hint
+                    hint="Deixe em branco para cadastrar a faixa sem vincular a um local."
+                    class="flex-grow-1"
+                  ></v-select>
+                  <v-btn
+                    icon="mdi-plus"
+                    color="secondary"
+                    variant="flat"
+                    density="comfortable"
+                    class="mt-1"
+                    aria-label="Cadastrar novo site"
+                    @click="siteDialog = true"
+                  >
+                    <v-icon>mdi-plus</v-icon>
+                    <v-tooltip activator="parent" location="top">Cadastrar novo site</v-tooltip>
+                  </v-btn>
+                </div>
+              </v-col>
+              <v-col cols="12">
+                <v-text-field
+                  v-model="formModel.name"
+                  label="Nome da Rede"
+                  placeholder="Ex: LAN Matriz"
+                  variant="outlined"
+                  density="comfortable"
+                  required
+                ></v-text-field>
+              </v-col>
+              <v-col cols="12">
+                <v-text-field
+                  v-model="formModel.cidr"
+                  label="Faixa CIDR"
+                  placeholder="192.168.1.0/24"
+                  variant="outlined"
+                  density="comfortable"
+                  required
+                ></v-text-field>
+              </v-col>
+              <v-col cols="12">
+                <v-text-field
+                  v-model="formModel.gateway"
+                  label="Gateway (IP)"
+                  placeholder="192.168.1.1"
+                  variant="outlined"
+                  density="comfortable"
+                ></v-text-field>
+              </v-col>
+            </v-row>
           </v-form>
         </v-card-text>
         <v-card-actions class="justify-end">

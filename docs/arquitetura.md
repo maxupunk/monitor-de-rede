@@ -310,6 +310,8 @@ POST /api/auth/login | /forgot | /reset | /logout
 POST /api/auth/register             ← exige JWT
 GET  /api/auth/me | /current | /verify/{token} | /magic-link/{token}
 
+GET|POST         /api/users                 GET|PUT|DELETE /api/users/{id}
+
 GET|POST         /api/sites                 GET|PUT|DELETE /api/sites/{id}
 GET|POST         /api/networks              GET|PUT|DELETE /api/networks/{id}
 POST             /api/networks/{id}/scan
@@ -436,6 +438,10 @@ exatamente esse o bug corrigido pela [ADR 007](adr/007-scheduler-processo-unico.
 - Ping por socket ICMP `SOCK_DGRAM`, sem `CAP_NET_RAW` e sem `execFile('ping')`
   — ver [ADR 003](adr/003-icmp-dgram.md). O `sysctl net.ipv4.ping_group_range`
   no compose é o que habilita isso.
+- Autorização por perfil centralizada no guarda das rotas de negócio:
+  `admin` tem acesso total e gerencia usuários; `operator` lê e escreve os
+  recursos operacionais; `viewer` possui somente leitura. Contas inativas são
+  recusadas em toda requisição e o último administrador ativo é protegido.
 
 ## 12. O que não existe
 
@@ -453,8 +459,9 @@ ausente achando que ela está escondida:
   `next_run_at` no banco para os ciclos seguintes.
 - **Não há agregação de métricas** (rollup por hora/dia). A retenção é por
   descarte, no `data_pruner`.
-- **Não há auditoria** nem permissões por papel — a autorização hoje é
-  "autenticado ou não".
+- **Não há trilha de auditoria.** Há autorização por papel (`admin`, `operator`
+  e `viewer`), mas ainda não existe registro histórico de quem alterou cada
+  recurso.
 
 ## 13. Decisões registradas
 

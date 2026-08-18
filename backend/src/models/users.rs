@@ -252,6 +252,19 @@ impl Model {
         db: &DatabaseConnection,
         params: &RegisterParams,
     ) -> ModelResult<Self> {
+        Self::create_with_password_and_role(db, params, "admin").await
+    }
+
+    /// Cria um usuário já com o perfil informado na mesma transação.
+    ///
+    /// O chamador valida o vocabulário do perfil. Gravar o papel junto com a
+    /// conta impede que uma falha intermediária deixe um novo usuário com o
+    /// `admin` padrão da migration.
+    pub async fn create_with_password_and_role(
+        db: &DatabaseConnection,
+        params: &RegisterParams,
+        role: &str,
+    ) -> ModelResult<Self> {
         validator::Validate::validate(params).map_err(|e| ModelError::Validation(e.into()))?;
 
         // Único ponto de gravação de usuário no sistema, e por isso o lugar
@@ -283,6 +296,7 @@ impl Model {
             email: ActiveValue::set(email),
             password: ActiveValue::set(password_hash),
             name: ActiveValue::set(name),
+            role: ActiveValue::set(role.to_string()),
             ..Default::default()
         }
         .insert(&txn)

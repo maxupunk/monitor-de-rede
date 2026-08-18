@@ -13,6 +13,7 @@ use crate::{
 use loco_rs::prelude::*;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 use std::sync::OnceLock;
 
 pub static EMAIL_DOMAIN_RE: OnceLock<Regex> = OnceLock::new();
@@ -106,14 +107,28 @@ async fn setup(
 /// `POST /auth/setup`; daí em diante quem já está dentro cria os demais.
 #[debug_handler]
 async fn register(
-    _auth: auth::JWT,
+    auth: auth::JWT,
     State(ctx): State<AppContext>,
     Json(params): Json<RegisterParams>,
 ) -> AppResult<Response> {
-    validator::Validate::validate(&params)?;
-    let user = users::Model::create_with_password(&ctx.db, &params)
+    let actor = users::Model::find_by_pid(&ctx.db, &auth.claims.pid)
         .await
         .map_err(map_model_error)?;
+    let role = crate::services::users::Role::from_str(&actor.role)?;
+    if !actor.active || !role.can_manage_users() {
+        return Err(AppError::forbidden(
+            "Apenas administradores podem criar usuários.",
+        ));
+    }
+
+    validator::Validate::validate(&params)?;
+    let user = users::Model::create_with_password_and_role(
+        &ctx.db,
+        &params,
+        crate::services::users::Role::OPERATOR,
+    )
+    .await
+    .map_err(map_model_error)?;
 
     let user = user
         .into_active_model()

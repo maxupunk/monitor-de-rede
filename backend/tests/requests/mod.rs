@@ -18,3 +18,4 @@ mod server_addresses;
 mod settings;
 mod syslog_api;
 mod syslog_ingest;
+mod users_crud;

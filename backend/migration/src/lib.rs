@@ -35,6 +35,7 @@ mod m20260815_000002_alert_rules_flap_detection;
 mod m20260815_000003_notification_hygiene;
 mod m20260816_000002_device_access_mode;
 mod m20260817_000001_device_operating_system;
+mod m20260818_000001_users_role;
 
 pub struct Migrator;
 
@@ -139,6 +140,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260815_000003_notification_hygiene::Migration),
             Box::new(m20260816_000002_device_access_mode::Migration),
             Box::new(m20260817_000001_device_operating_system::Migration),
+            Box::new(m20260818_000001_users_role::Migration),
             // inject-above (do not remove this comment)
         ]
     }

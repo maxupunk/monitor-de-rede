@@ -1,12 +1,13 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { apiService } from '@/services/apiService'
+import { roleLabel, type UserRole } from '@/utils/access'
 
 export interface User {
   id: number
   email: string
   fullName?: string
-  role?: string
+  role?: UserRole
 }
 
 export interface LoginResponse {
@@ -64,6 +65,9 @@ export const useAuthStore = defineStore('auth', () => {
   const needsSetup = ref<boolean | null>(null)
 
   const isAuthenticated = computed(() => Boolean(token.value))
+  const isAdmin = computed(() => user.value?.role === 'admin')
+  const canWrite = computed(() => user.value?.role === 'admin' || user.value?.role === 'operator')
+  const currentRoleLabel = computed(() => roleLabel(user.value?.role))
 
   function persistSession(res: LoginResponse) {
     token.value = res.token
@@ -161,6 +165,9 @@ export const useAuthStore = defineStore('auth', () => {
     error,
     needsSetup,
     isAuthenticated,
+    isAdmin,
+    canWrite,
+    currentRoleLabel,
     clearError,
     refreshSetupStatus,
     ensureSetupStatus,

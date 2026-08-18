@@ -121,7 +121,9 @@
             <v-avatar color="primary" size="32" class="mr-2">
               <v-icon size="18" color="white">mdi-account</v-icon>
             </v-avatar>
-            <span class="text-caption font-weight-bold hidden-xs">Administrador</span>
+            <span class="text-caption font-weight-bold hidden-xs">{{
+              authStore.currentRoleLabel
+            }}</span>
             <v-icon end size="16">mdi-chevron-down</v-icon>
           </v-btn>
         </template>
@@ -129,7 +131,7 @@
           <v-list-item
             prepend-icon="mdi-account-circle-outline"
             title="Meu Perfil"
-            subtitle="admin@monitor.local"
+            :subtitle="authStore.user?.email || 'Conta autenticada'"
           />
           <v-divider class="my-1" />
           <v-list-item
@@ -146,6 +148,16 @@
     <!-- Conteúdo Principal da Página -->
     <v-main class="bg-grey-lighten-4">
       <v-container fluid class="px-2 px-md-6 py-3 py-md-6 max-w-1600">
+        <v-alert
+          v-if="!authStore.canWrite"
+          type="info"
+          variant="tonal"
+          density="compact"
+          icon="mdi-eye-outline"
+          class="mb-4"
+        >
+          Modo somente visualização: você pode consultar os dados, mas alterações estão desativadas.
+        </v-alert>
         <router-view />
       </v-container>
     </v-main>
@@ -157,7 +169,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useDisplay } from 'vuetify'
 import { useEventsStore } from '@/stores/events'
@@ -200,7 +212,7 @@ async function handleNotificationClick() {
   }
 }
 
-const navItems: NavItem[] = [
+const navItems = computed<NavItem[]>(() => [
   { title: 'Dashboard', icon: 'mdi-view-dashboard', to: '/' },
   { title: 'Dispositivos', icon: 'mdi-devices', to: '/devices' },
   { title: 'Monitores', icon: 'mdi-heart-pulse', to: '/monitors' },
@@ -240,10 +252,14 @@ const navItems: NavItem[] = [
       { title: 'Dispositivos VPN', icon: 'mdi-lan-connect', to: '/vpn/devices' },
     ],
   },
+  ...(authStore.isAdmin
+    ? [{ title: 'Usuários e acessos', icon: 'mdi-account-multiple-outline', to: '/users' }]
+    : []),
   { title: 'Configurações', icon: 'mdi-cog', to: '/settings' },
-]
+])
 
 onMounted(() => {
+  void authStore.fetchMe()
   eventsStore.connect()
 })
 

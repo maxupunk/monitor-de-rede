@@ -20,4 +20,5 @@ pub mod shared;
 pub mod snmp;
 pub mod syslog;
 pub mod topology;
+pub mod users;
 pub mod vpn;

@@ -10,6 +10,9 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use loco_rs::{app::AppContext, controller::extractor::auth};
+use std::str::FromStr;
+
+use crate::services::users::{request_is_allowed, Role};
 
 /// Cabeçalho interno com a identidade de quem passou pelo guarda.
 ///
@@ -57,6 +60,24 @@ pub async fn require_jwt(
         return (
             StatusCode::UNAUTHORIZED,
             axum::Json(serde_json::json!({ "message": "Este usuário está desativado. Procure um administrador." })),
+        )
+            .into_response();
+    }
+
+    let Ok(role) = Role::from_str(&user.role) else {
+        tracing::warn!(user_pid = %user.pid, role = %user.role, "requisição recusada: perfil inválido");
+        return (
+            StatusCode::FORBIDDEN,
+            axum::Json(serde_json::json!({ "message": "Seu perfil de acesso é inválido. Procure um administrador." })),
+        )
+            .into_response();
+    };
+
+    if !request_is_allowed(role, &parts.method, parts.uri.path()) {
+        tracing::info!(user_pid = %user.pid, role = %user.role, method = %parts.method, path = %parts.uri.path(), "requisição recusada pelo perfil de acesso");
+        return (
+            StatusCode::FORBIDDEN,
+            axum::Json(serde_json::json!({ "message": "Seu perfil não permite esta ação." })),
         )
             .into_response();
     }

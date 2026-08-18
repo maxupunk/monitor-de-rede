@@ -139,6 +139,16 @@ Os riscos reais se concentram em quatro pontos:
   `openwrt.rs`, `variants.rs`, `wg_conf.rs`
 - **Implementado:** `sanitized_community` restringindo caracteres a `[A-Za-z0-9._-]`, sanitização de DNS e escape de aspas e quebras de linha nos geradores de scripts.
 
+### 🟢 12A. CRUD de usuários e perfis mínimos de acesso — Concluído
+
+- **Onde:** `backend/src/services/users.rs`, `controllers/users.rs`,
+  `controllers/auth_guard.rs`, `frontend/src/pages/UsersPage.vue`
+- **Implementado:** perfis `admin`, `operator` e `viewer` com política
+  centralizada no backend; CRUD exclusivo do administrador; visualizador
+  limitado a métodos de leitura; proteção contra autoexclusão, autodesativação
+  e remoção do último administrador ativo; interface responsiva com descrição
+  clara de cada perfil e indicação permanente do modo somente leitura.
+
 ---
 
 ## Fase 2 — Robustez do scheduler e dos dados (médio prazo)

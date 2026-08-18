@@ -9,6 +9,7 @@
   api_key: lo-95ec80d7-cb60-4b70-9b4b-9ef74cb88758
   name: user1
   active: true
+  role: admin
   created_at: "2023-11-12T12:34:56.789Z"
   updated_at: "2023-11-12T12:34:56.789Z"
 - id: 2
@@ -18,6 +19,7 @@
   api_key: lo-153561ca-fa84-4e1b-813a-c62526d0a77e
   name: user2
   active: true
+  role: admin
   created_at: "2023-11-12T12:34:56.789Z"
   updated_at: "2023-11-12T12:34:56.789Z"
 - id: 3
@@ -27,5 +29,6 @@
   api_key: lo-6a8f6f91-6be5-4b9f-9a93-3cde89dac5df
   name: Admin
   active: true
+  role: admin
   created_at: "2026-08-11T00:00:00.000Z"
   updated_at: "2026-08-11T00:00:00.000Z"

@@ -2,6 +2,7 @@ pub mod common;
 pub mod logs;
 pub mod resources;
 pub mod server_addresses;
+pub mod users;
 
 /// Lê um corpo de requisição **opcional** sem deixá-lo mascarar o erro real.
 ///

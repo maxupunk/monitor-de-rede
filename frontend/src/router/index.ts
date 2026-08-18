@@ -54,6 +54,12 @@ const routes = [
         component: () => import('../pages/vpn/VpnDevicesPage.vue'),
       },
       { path: 'settings', name: 'settings', component: () => import('../pages/SettingsPage.vue') },
+      {
+        path: 'users',
+        name: 'users',
+        component: () => import('../pages/UsersPage.vue'),
+        meta: { requiresAdmin: true },
+      },
     ],
   },
 ]
@@ -79,6 +85,10 @@ router.beforeEach(async (to) => {
 
   if (auth.isAuthenticated) {
     if (to.name === 'login' || to.name === 'setup') return { name: 'dashboard' }
+    if (to.meta.requiresAdmin && !auth.isAdmin) {
+      await auth.fetchMe()
+      if (!auth.isAdmin) return { name: 'dashboard' }
+    }
     return true
   }
 

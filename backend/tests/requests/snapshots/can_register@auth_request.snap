@@ -24,5 +24,6 @@ Ok(
         magic_link_token: None,
         magic_link_expiration: None,
         active: true,
+        role: "operator",
     },
 )

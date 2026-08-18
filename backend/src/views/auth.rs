@@ -47,7 +47,7 @@ impl UserResponse {
             email: user.email.clone(),
             full_name: user.name.clone(),
             // O esquema atual possui um único perfil de operador.
-            role: "admin".into(),
+            role: user.role.clone(),
         }
     }
 }
