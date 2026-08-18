@@ -89,6 +89,9 @@ impl AppError {
     pub fn business_rule(msg: impl Into<String>) -> Self {
         Self::BusinessRule(msg.into())
     }
+    pub fn bad_request(msg: impl Into<String>) -> Self {
+        Self::BusinessRule(msg.into())
+    }
     pub fn rate_limited(msg: impl Into<String>, retry_after: u64) -> Self {
         Self::RateLimited {
             msg: msg.into(),

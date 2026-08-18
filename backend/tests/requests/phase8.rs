@@ -629,3 +629,57 @@ async fn perfil_desconhecido_e_ip_fora_da_faixa_sao_recusados() {
     .await;
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test]
+#[serial]
+async fn configuracao_do_servidor_vpn_valida_porta_mtu_dns_e_endpoint() {
+    let dir = isolar_volume_wireguard("valida-servidor");
+    let _ = std::fs::remove_dir_all(&dir);
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        // Porta inválida
+        let porta_invalida = request
+            .put("/api/vpn/server")
+            .json(&serde_json::json!({
+                "cidr": "10.8.0.0/24",
+                "listenPort": 70000,
+            }))
+            .await;
+        assert_eq!(porta_invalida.status_code(), 422);
+
+        // MTU inválido
+        let mtu_invalido = request
+            .put("/api/vpn/server")
+            .json(&serde_json::json!({
+                "cidr": "10.8.0.0/24",
+                "mtu": 100,
+            }))
+            .await;
+        assert_eq!(mtu_invalido.status_code(), 422);
+
+        // Endpoint com quebra de linha
+        let endpoint_invalido = request
+            .put("/api/vpn/server")
+            .json(&serde_json::json!({
+                "cidr": "10.8.0.0/24",
+                "publicEndpoint": "vpn.exemplo.com\nmalicioso",
+            }))
+            .await;
+        assert_eq!(endpoint_invalido.status_code(), 422);
+
+        // DNS com IP inválido
+        let dns_invalido = request
+            .put("/api/vpn/server")
+            .json(&serde_json::json!({
+                "cidr": "10.8.0.0/24",
+                "dnsServers": "1.1.1.1, ip_falso",
+            }))
+            .await;
+        assert_eq!(dns_invalido.status_code(), 422);
+    })
+    .await;
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -20,7 +20,7 @@ async fn semeie_usuarios(db: &sea_orm::DatabaseConnection, quantidade: usize) {
             db,
             &backend::models::users::RegisterParams {
                 email: format!("paginacao{i}@exemplo.com"),
-                password: "12341234".to_string(),
+                password: "Senha1234".to_string(),
                 name: format!("Usuário {i}"),
             },
         )

@@ -247,12 +247,34 @@ fn require_name_type(input: &DeviceInput) -> AppResult<(&str, &str)> {
         .map(str::trim)
         .filter(|name| !name.is_empty())
         .ok_or_else(|| AppError::validation("Nome do dispositivo é obrigatório"))?;
+    if name.contains('\n') || name.contains('\r') {
+        return Err(AppError::validation(
+            "Nome do dispositivo não pode conter quebra de linha",
+        ));
+    }
     let kind = input
         .device_type
         .as_deref()
         .map(str::trim)
         .filter(|kind| !kind.is_empty())
         .ok_or_else(|| AppError::validation("Tipo do dispositivo é obrigatório"))?;
+    if kind.contains('\n') || kind.contains('\r') {
+        return Err(AppError::validation(
+            "Tipo do dispositivo não pode conter quebra de linha",
+        ));
+    }
+    if let Some(ip) = input
+        .ip_address
+        .as_deref()
+        .map(str::trim)
+        .filter(|ip| !ip.is_empty())
+    {
+        if ip.parse::<std::net::IpAddr>().is_err() {
+            return Err(AppError::validation(format!(
+                "Endereço IP inválido: '{ip}'"
+            )));
+        }
+    }
     Ok((name, kind))
 }
 
@@ -392,6 +414,11 @@ async fn update(
         .filter(|name| !name.is_empty())
         .unwrap_or(&current.name)
         .to_string();
+    if name.contains('\n') || name.contains('\r') {
+        return Err(AppError::validation(
+            "Nome do dispositivo não pode conter quebra de linha",
+        ));
+    }
     let kind = input
         .device_type
         .as_deref()
@@ -399,6 +426,23 @@ async fn update(
         .filter(|kind| !kind.is_empty())
         .unwrap_or(&current.r#type)
         .to_string();
+    if kind.contains('\n') || kind.contains('\r') {
+        return Err(AppError::validation(
+            "Tipo do dispositivo não pode conter quebra de linha",
+        ));
+    }
+    if let Some(ip) = input
+        .ip_address
+        .as_deref()
+        .map(str::trim)
+        .filter(|ip| !ip.is_empty())
+    {
+        if ip.parse::<std::net::IpAddr>().is_err() {
+            return Err(AppError::validation(format!(
+                "Endereço IP inválido: '{ip}'"
+            )));
+        }
+    }
     let snmp_poll_interval_seconds = std::cmp::max(
         input
             .snmp_poll_interval_seconds

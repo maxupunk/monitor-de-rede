@@ -54,6 +54,13 @@ fn instructions() -> Vec<String> {
     ]
 }
 
+fn escape_uci(s: &str) -> String {
+    s.chars()
+        .filter(|c| !c.is_control() && *c != '\r' && *c != '\n')
+        .collect::<String>()
+        .replace('\'', "'\\''")
+}
+
 impl OpenWrtProfileGenerator {
     fn snmp_section(context: &PeerConfigContext, manager: PackageManager) -> Vec<String> {
         if !context.snmp_enabled {
@@ -65,8 +72,14 @@ impl OpenWrtProfileGenerator {
         ];
         lines.extend(manager.install_snmp());
         lines.extend([
-            format!("uci set snmpd.public.community='{}'", context.community()),
-            format!("uci set snmpd.public.source='{}'", context.vpn_cidr),
+            format!(
+                "uci set snmpd.public.community='{}'",
+                escape_uci(&context.sanitized_community())
+            ),
+            format!(
+                "uci set snmpd.public.source='{}'",
+                escape_uci(&context.vpn_cidr)
+            ),
             "uci commit snmpd && /etc/init.d/snmpd restart && /etc/init.d/snmpd enable".to_string(),
         ]);
         lines
@@ -83,30 +96,31 @@ impl OpenWrtProfileGenerator {
             format!("uci set network.{iface}.proto='wireguard'"),
             format!(
                 "uci set network.{iface}.private_key='{}'",
-                context.client_private_key
+                escape_uci(&context.client_private_key)
             ),
             format!("uci set network.{iface}.mtu='{}'", context.mtu),
             format!(
                 "uci add_list network.{iface}.addresses='{}/{}'",
-                context.peer_ip_address,
+                escape_uci(&context.peer_ip_address),
                 context.prefix_length()
             ),
             String::new(),
             format!("uci add network wireguard_{iface}"),
             format!(
                 "uci set network.@wireguard_{iface}[-1].public_key='{}'",
-                context.server_public_key
+                escape_uci(&context.server_public_key)
             ),
         ]);
         if let Some(preshared_key) = context.preshared_key.as_deref() {
             lines.push(format!(
-                "uci set network.@wireguard_{iface}[-1].preshared_key='{preshared_key}'"
+                "uci set network.@wireguard_{iface}[-1].preshared_key='{}'",
+                escape_uci(preshared_key)
             ));
         }
         lines.extend([
             format!(
                 "uci set network.@wireguard_{iface}[-1].endpoint_host='{}'",
-                context.endpoint_host
+                escape_uci(&context.endpoint_host)
             ),
             format!(
                 "uci set network.@wireguard_{iface}[-1].endpoint_port='{}'",
@@ -118,7 +132,7 @@ impl OpenWrtProfileGenerator {
             format!("uci set network.@wireguard_{iface}[-1].route_allowed_ips='1'"),
             format!(
                 "uci add_list network.@wireguard_{iface}[-1].allowed_ips='{}'",
-                context.vpn_cidr
+                escape_uci(&context.vpn_cidr)
             ),
             String::new(),
             self.firewall_hints(context),

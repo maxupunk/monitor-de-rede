@@ -23,14 +23,18 @@ fn get_allow_email_domain_re() -> &'static Regex {
     })
 }
 
+use axum::http::HeaderMap;
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ForgotParams {
     pub email: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Validate)]
 pub struct ResetParams {
+    #[validate(length(min = 1, message = "Informe o token de recuperação."))]
     pub token: String,
+    #[validate(custom(function = "crate::models::users::validate_password"))]
     pub password: String,
 }
 
@@ -42,6 +46,24 @@ pub struct MagicLinkParams {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ResendVerificationParams {
     pub email: String,
+}
+
+fn enforce_auth_rate_limit(ctx: &AppContext, scope: &str, key: &str) -> AppResult<()> {
+    if ctx.environment == loco_rs::environment::Environment::Test {
+        return Ok(());
+    }
+    let decision = crate::services::vpn::access_control::auth_endpoint_limiter()
+        .consume(&format!("auth:{scope}:{key}"));
+    if decision.allowed {
+        return Ok(());
+    }
+    Err(AppError::rate_limited(
+        format!(
+            "Muitas tentativas. Tente novamente em {}s.",
+            decision.retry_after_seconds
+        ),
+        decision.retry_after_seconds,
+    ))
 }
 
 /// Diz se a instalação ainda espera o primeiro usuário.
@@ -63,9 +85,15 @@ async fn setup_status(State(ctx): State<AppContext>) -> AppResult<Response> {
 /// instalação não tem o que reprovar num login logo em seguida.
 #[debug_handler]
 async fn setup(
+    headers: HeaderMap,
     State(ctx): State<AppContext>,
     Json(params): Json<SetupParams>,
 ) -> AppResult<Response> {
+    enforce_auth_rate_limit(
+        &ctx,
+        "setup",
+        &crate::services::vpn::access_control::extract_client_ip(&headers),
+    )?;
     let user = SetupService::new(&ctx.db).complete(&params).await?;
     Ok(format::json(issue_session(&ctx, &user)?)?)
 }
@@ -82,6 +110,7 @@ async fn register(
     State(ctx): State<AppContext>,
     Json(params): Json<RegisterParams>,
 ) -> AppResult<Response> {
+    validator::Validate::validate(&params)?;
     let user = users::Model::create_with_password(&ctx.db, &params)
         .await
         .map_err(map_model_error)?;
@@ -124,40 +153,59 @@ async fn verify(State(ctx): State<AppContext>, Path(token): Path<String>) -> Res
 /// list).
 #[debug_handler]
 async fn forgot(
+    headers: HeaderMap,
     State(ctx): State<AppContext>,
     Json(params): Json<ForgotParams>,
-) -> Result<Response> {
+) -> AppResult<Response> {
+    enforce_auth_rate_limit(
+        &ctx,
+        "forgot",
+        &crate::services::vpn::access_control::extract_client_ip(&headers),
+    )?;
     let Ok(user) = users::Model::find_by_email(&ctx.db, &params.email).await else {
         // we don't want to expose our users email. if the email is invalid we still
         // returning success to the caller
-        return format::json(());
+        return Ok(format::json(())?);
     };
 
     let user = user
         .into_active_model()
         .set_forgot_password_sent(&ctx.db)
-        .await?;
+        .await
+        .map_err(map_model_error)?;
 
     AuthMailer::forgot_password(&ctx, &user).await?;
 
-    format::json(())
+    Ok(format::json(())?)
 }
 
 /// reset user password by the given parameters
 #[debug_handler]
-async fn reset(State(ctx): State<AppContext>, Json(params): Json<ResetParams>) -> Result<Response> {
+async fn reset(
+    headers: HeaderMap,
+    State(ctx): State<AppContext>,
+    Json(params): Json<ResetParams>,
+) -> AppResult<Response> {
+    enforce_auth_rate_limit(
+        &ctx,
+        "reset",
+        &crate::services::vpn::access_control::extract_client_ip(&headers),
+    )?;
+    validator::Validate::validate(&params)?;
+
     let Ok(user) = users::Model::find_by_reset_token(&ctx.db, &params.token).await else {
         // we don't want to expose our users email. if the email is invalid we still
         // returning success to the caller
         tracing::info!("reset token not found");
 
-        return format::json(());
+        return Ok(format::json(())?);
     };
     user.into_active_model()
         .reset_password(&ctx.db, &params.password)
-        .await?;
+        .await
+        .map_err(map_model_error)?;
 
-    format::json(())
+    Ok(format::json(())?)
 }
 
 /// Emite o JWT do usuário e monta a resposta de sessão.
@@ -180,12 +228,17 @@ fn issue_session(ctx: &AppContext, user: &users::Model) -> AppResult<LoginRespon
 /// é metade do trabalho de invadir uma. O motivo real fica no log.
 #[debug_handler]
 async fn login(
+    headers: HeaderMap,
     State(ctx): State<AppContext>,
     Json(params): Json<LoginParams>,
 ) -> AppResult<Response> {
     const RECUSA: &str = "E-mail ou senha inválidos.";
 
     let email = params.email.trim().to_lowercase();
+    let ip = crate::services::vpn::access_control::extract_client_ip(&headers);
+    enforce_auth_rate_limit(&ctx, "login_ip", &ip)?;
+    enforce_auth_rate_limit(&ctx, "login_email", &email)?;
+
     let Ok(user) = users::Model::find_by_email(&ctx.db, &email).await else {
         tracing::debug!(email, "login recusado: e-mail sem cadastro");
         return Err(AppError::unauthorized(RECUSA));
@@ -236,29 +289,45 @@ async fn logout(_auth: auth::JWT, State(_ctx): State<AppContext>) -> Result<Resp
 ///
 /// This flow enhances security by avoiding traditional passwords and providing a seamless login experience.
 async fn magic_link(
+    headers: HeaderMap,
     State(ctx): State<AppContext>,
     Json(params): Json<MagicLinkParams>,
-) -> Result<Response> {
+) -> AppResult<Response> {
+    enforce_auth_rate_limit(
+        &ctx,
+        "magic_link",
+        &crate::services::vpn::access_control::extract_client_ip(&headers),
+    )?;
+
     let email_regex = get_allow_email_domain_re();
     if !email_regex.is_match(&params.email) {
         tracing::debug!(
             email = params.email,
             "The provided email is invalid or does not match the allowed domains"
         );
-        return bad_request("invalid request");
+        return Err(AppError::bad_request("invalid request"));
     }
 
     let Ok(user) = users::Model::find_by_email(&ctx.db, &params.email).await else {
         // we don't want to expose our users email. if the email is invalid we still
         // returning success to the caller
         tracing::debug!(email = params.email, "user not found by email");
-        return format::empty_json();
+        return Ok(format::empty_json()?);
     };
 
-    let user = user.into_active_model().create_magic_link(&ctx.db).await?;
+    if !user.active {
+        tracing::info!(user_pid = %user.pid, "magic link recusado: usuário desativado");
+        return Ok(format::empty_json()?);
+    }
+
+    let user = user
+        .into_active_model()
+        .create_magic_link(&ctx.db)
+        .await
+        .map_err(map_model_error)?;
     AuthMailer::send_magic_link(&ctx, &user).await?;
 
-    format::empty_json()
+    Ok(format::empty_json()?)
 }
 
 /// Verifies a magic link token and authenticates the user.
@@ -271,6 +340,13 @@ async fn magic_link_verify(
         // returning success to the caller
         return Err(AppError::unauthorized("Link inválido ou expirado."));
     };
+
+    if !user.active {
+        tracing::info!(user_pid = %user.pid, "magic link recusado na verificação: usuário desativado");
+        return Err(AppError::unauthorized(
+            "Este usuário está desativado. Procure um administrador.",
+        ));
+    }
 
     let user = user
         .into_active_model()

@@ -76,7 +76,7 @@ pub struct SetupParams {
     pub name: String,
     #[validate(email(message = "Informe um e-mail válido."))]
     pub email: String,
-    #[validate(length(min = 8, message = "A senha precisa ter ao menos 8 caracteres."))]
+    #[validate(custom(function = "crate::models::users::validate_password"))]
     pub password: String,
     #[validate(length(min = 1, message = "Informe o token de instalação."))]
     pub token: String,
@@ -404,7 +404,7 @@ mod tests {
 
     #[test]
     fn validacao_aceita_o_caso_bom() {
-        assert!(params("Maxuel", "admin@casa.com", "senha-forte-1", "tok")
+        assert!(params("Maxuel", "admin@casa.com", "Senha-forte-1", "tok")
             .validate()
             .is_ok());
     }

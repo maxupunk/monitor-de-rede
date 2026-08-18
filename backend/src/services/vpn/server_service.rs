@@ -176,11 +176,55 @@ async fn resolve_network(
 ///
 /// # Errors
 ///
-/// Propaga validação de CIDR e erro do banco.
+fn validate_vpn_server_payload(payload: &VpnServerPayload) -> AppResult<()> {
+    if let Some(port) = payload.listen_port {
+        if !(1..=65535).contains(&port) {
+            return Err(AppError::validation(
+                "A porta de escuta deve estar entre 1 e 65535.",
+            ));
+        }
+    }
+    if let Some(mtu) = payload.mtu {
+        if !(576..=9000).contains(&mtu) {
+            return Err(AppError::validation(
+                "O MTU deve estar entre 576 e 9000 bytes.",
+            ));
+        }
+    }
+    if let Some(endpoint) = payload
+        .public_endpoint
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+    {
+        let trimmed = endpoint.trim();
+        if trimmed.contains('\n') || trimmed.contains('\r') || trimmed.contains(' ') {
+            return Err(AppError::validation(
+                "O endpoint público contém caracteres inválidos.",
+            ));
+        }
+    }
+    if let Some(dns) = payload
+        .dns_servers
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+    {
+        for ip_str in dns.split(',') {
+            let ip_str = ip_str.trim();
+            if !ip_str.is_empty() && ip_str.parse::<std::net::IpAddr>().is_err() {
+                return Err(AppError::validation(format!(
+                    "Endereço DNS inválido: '{ip_str}'."
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 pub async fn create_or_update(
     db: &sea_orm::DatabaseConnection,
     payload: &VpnServerPayload,
 ) -> AppResult<(vpn_servers::Model, networks::Model)> {
+    validate_vpn_server_payload(payload)?;
     let server = match find(db).await? {
         None => {
             let network = resolve_network(db, payload).await?;

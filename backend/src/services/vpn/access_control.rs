@@ -16,6 +16,13 @@ use serde::Serialize;
 pub const RATE_LIMIT: usize = 10;
 pub const RATE_WINDOW: Duration = Duration::from_secs(60);
 
+/// Janela para rotas de autenticação: 10 requisições por 60 s em produção.
+pub const AUTH_RATE_LIMIT: usize = if cfg!(test) { 10_000 } else { 10 };
+pub const AUTH_RATE_WINDOW: Duration = Duration::from_secs(60);
+
+/// Teto de chaves rastreadas em memória para evitar consumo desenfreado de RAM.
+pub const MAX_TRACKED_ENTRIES: usize = 10_000;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RateLimitDecision {
     pub allowed: bool,
@@ -54,6 +61,7 @@ impl SlidingWindowRateLimiter {
     pub fn consume(&self, key: &str) -> RateLimitDecision {
         let now = Instant::now();
         let Ok(mut hits) = self.hits.lock() else {
+            tracing::error!("RateLimiter: Mutex envenenado ao registrar consumo");
             // Mutex envenenado não pode bloquear o operador: deixa passar.
             return RateLimitDecision {
                 allowed: true,
@@ -61,6 +69,20 @@ impl SlidingWindowRateLimiter {
                 retry_after_seconds: 0,
             };
         };
+
+        // Expurgo preventivo se atingir o teto de chaves rastreadas
+        if hits.len() >= MAX_TRACKED_ENTRIES && !hits.contains_key(key) {
+            hits.retain(|_, timestamps| {
+                timestamps.retain(|hit| now.duration_since(*hit) < self.window);
+                !timestamps.is_empty()
+            });
+            if hits.len() >= MAX_TRACKED_ENTRIES {
+                if let Some(first_key) = hits.keys().next().cloned() {
+                    hits.remove(&first_key);
+                }
+            }
+        }
+
         let entry = hits.entry(key.to_string()).or_default();
         entry.retain(|hit| now.duration_since(*hit) < self.window);
 
@@ -89,10 +111,65 @@ impl SlidingWindowRateLimiter {
     }
 }
 
-/// Instância compartilhada pelos controllers.
+/// Instância compartilhada pelos controllers sensíveis de VPN.
 pub fn sensitive_endpoint_limiter() -> &'static SlidingWindowRateLimiter {
     static LIMITER: OnceLock<SlidingWindowRateLimiter> = OnceLock::new();
     LIMITER.get_or_init(SlidingWindowRateLimiter::default)
+}
+
+/// Detecta se o processo está rodando em suíte de testes.
+pub fn is_test_environment() -> bool {
+    cfg!(test)
+        || std::env::var("LOCO_ENV")
+            .map(|v| v == "test")
+            .unwrap_or(false)
+        || std::env::var("ENVIRONMENT")
+            .map(|v| v == "test")
+            .unwrap_or(false)
+}
+
+/// Instância compartilhada para proteção de endpoints de autenticação.
+pub fn auth_endpoint_limiter() -> &'static SlidingWindowRateLimiter {
+    static AUTH_LIMITER: OnceLock<SlidingWindowRateLimiter> = OnceLock::new();
+    AUTH_LIMITER.get_or_init(|| {
+        let limit = if is_test_environment() {
+            100_000
+        } else {
+            AUTH_RATE_LIMIT
+        };
+        SlidingWindowRateLimiter::new(limit, AUTH_RATE_WINDOW)
+    })
+}
+
+/// Extrai e sanitiza com segurança o IP de origem dos cabeçalhos HTTP.
+pub fn extract_client_ip(headers: &axum::http::HeaderMap) -> String {
+    let sanitize = |raw: &str| -> Option<String> {
+        let cleaned: String = raw
+            .chars()
+            .filter(|c| !c.is_control() && !c.is_whitespace())
+            .collect();
+        if cleaned.is_empty() || cleaned.len() > 64 {
+            None
+        } else {
+            Some(cleaned)
+        }
+    };
+
+    if let Some(forwarded) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
+        if let Some(first) = forwarded.split(',').next() {
+            if let Some(ip) = sanitize(first) {
+                return ip;
+            }
+        }
+    }
+
+    if let Some(real_ip) = headers.get("x-real-ip").and_then(|v| v.to_str().ok()) {
+        if let Some(ip) = sanitize(real_ip) {
+            return ip;
+        }
+    }
+
+    "desconhecido".to_string()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

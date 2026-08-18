@@ -65,16 +65,17 @@ fn requester_id(headers: &HeaderMap) -> String {
     };
 
     if let Some(user) = header(AUTHENTICATED_USER_HEADER) {
-        return format!("user:{user}");
-    }
-    // `X-Forwarded-For` pode trazer a cadeia inteira: o cliente é o primeiro.
-    if let Some(forwarded) = header("x-forwarded-for") {
-        let client = forwarded.split(',').next().unwrap_or(forwarded).trim();
-        if !client.is_empty() {
-            return format!("ip:{client}");
+        let safe_user: String = user
+            .chars()
+            .filter(|c| !c.is_control() && !c.is_whitespace())
+            .collect();
+        if !safe_user.is_empty() {
+            return format!("user:{safe_user}");
         }
     }
-    header("x-real-ip").map_or_else(|| "ip:desconhecido".to_string(), |ip| format!("ip:{ip}"))
+
+    let ip = crate::services::vpn::access_control::extract_client_ip(headers);
+    format!("ip:{ip}")
 }
 
 /// Aplica a janela deslizante de 10 req/60 s, devolvendo 429 + `Retry-After`.

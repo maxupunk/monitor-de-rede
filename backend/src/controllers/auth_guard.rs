@@ -42,6 +42,25 @@ pub async fn require_jwt(
         }
     };
 
+    let Ok(user) = crate::models::users::Model::find_by_pid(&ctx.db, &claims.claims.pid).await
+    else {
+        tracing::warn!(pid = %claims.claims.pid, path = %parts.uri.path(), "usuário do JWT não existe no banco");
+        return (
+            StatusCode::UNAUTHORIZED,
+            axum::Json(serde_json::json!({ "message": "Não autenticado" })),
+        )
+            .into_response();
+    };
+
+    if !user.active {
+        tracing::info!(user_pid = %user.pid, path = %parts.uri.path(), "requisição de negócio recusada: usuário desativado");
+        return (
+            StatusCode::UNAUTHORIZED,
+            axum::Json(serde_json::json!({ "message": "Este usuário está desativado. Procure um administrador." })),
+        )
+            .into_response();
+    }
+
     parts.headers.remove(AUTHENTICATED_USER_HEADER);
     if let Ok(value) = HeaderValue::from_str(&claims.claims.pid) {
         parts.headers.insert(AUTHENTICATED_USER_HEADER, value);

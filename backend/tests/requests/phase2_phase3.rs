@@ -308,3 +308,80 @@ async fn historico_recente_tem_limite_individual_por_monitor() {
     })
     .await;
 }
+
+#[tokio::test]
+#[serial]
+async fn criacao_de_monitor_valida_tipo_suportado_quebras_de_linha_e_intervalo() {
+    request::<App, _, _>(|mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        // Tipo inválido
+        let tipo_invalido = request
+            .post("/api/monitors")
+            .json(&serde_json::json!({
+                "name": "Monitor Invalido",
+                "type": "custom_script_invalido",
+                "target": "127.0.0.1"
+            }))
+            .await;
+        assert_eq!(tipo_invalido.status_code(), 422);
+
+        // Quebra de linha no nome
+        let quebra_nome = request
+            .post("/api/monitors")
+            .json(&serde_json::json!({
+                "name": "Monitor\nInjetado",
+                "type": "ping",
+                "target": "127.0.0.1"
+            }))
+            .await;
+        assert_eq!(quebra_nome.status_code(), 422);
+
+        // Intervalo menor que 1
+        let intervalo_invalido = request
+            .post("/api/monitors")
+            .json(&serde_json::json!({
+                "name": "Monitor Ping",
+                "type": "ping",
+                "target": "127.0.0.1",
+                "intervalSeconds": 0
+            }))
+            .await;
+        assert_eq!(intervalo_invalido.status_code(), 422);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn criacao_de_dispositivo_valida_ip_e_quebras_de_linha() {
+    request::<App, _, _>(|mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        // IP inválido
+        let ip_invalido = request
+            .post("/api/devices")
+            .json(&serde_json::json!({
+                "name": "Switch Core",
+                "deviceType": "switch",
+                "ipAddress": "999.999.999.999"
+            }))
+            .await;
+        assert_eq!(ip_invalido.status_code(), 422);
+
+        // Quebra de linha no nome
+        let quebra_nome = request
+            .post("/api/devices")
+            .json(&serde_json::json!({
+                "name": "Switch\r\nCore",
+                "deviceType": "switch"
+            }))
+            .await;
+        assert_eq!(quebra_nome.status_code(), 422);
+    })
+    .await;
+}

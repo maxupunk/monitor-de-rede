@@ -75,6 +75,17 @@ fn build_configuration(
     config
 }
 
+const SUPPORTED_MONITOR_TYPES: &[&str] = &[
+    "ping",
+    "http",
+    "https",
+    "tcp",
+    "dns",
+    "snmp",
+    "ssl",
+    "port_scan",
+];
+
 fn require_kind_name(input: &MonitorInput) -> AppResult<(&str, &str)> {
     let kind = input
         .monitor_type
@@ -82,12 +93,29 @@ fn require_kind_name(input: &MonitorInput) -> AppResult<(&str, &str)> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| AppError::validation("Tipo do monitor é obrigatório"))?;
+    if !SUPPORTED_MONITOR_TYPES.contains(&kind.to_lowercase().as_str()) {
+        return Err(AppError::validation(format!(
+            "Tipo de monitor não suportado: '{kind}'."
+        )));
+    }
     let name = input
         .name
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| AppError::validation("Nome do monitor é obrigatório"))?;
+    if name.contains('\n') || name.contains('\r') {
+        return Err(AppError::validation(
+            "Nome do monitor não pode conter quebra de linha.",
+        ));
+    }
+    if let Some(interval) = input.interval_seconds {
+        if interval < 1 {
+            return Err(AppError::validation(
+                "O intervalo deve ser de pelo menos 1 segundo.",
+            ));
+        }
+    }
     Ok((kind, name))
 }
 
@@ -213,6 +241,18 @@ async fn update(
         .one(&ctx.db)
         .await?
         .ok_or_else(|| AppError::not_found("Monitor não encontrado"))?;
+    if let Some(kind_val) = input
+        .monitor_type
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        if !SUPPORTED_MONITOR_TYPES.contains(&kind_val.to_lowercase().as_str()) {
+            return Err(AppError::validation(format!(
+                "Tipo de monitor não suportado: '{kind_val}'."
+            )));
+        }
+    }
     let kind = input
         .monitor_type
         .as_deref()
@@ -220,6 +260,20 @@ async fn update(
         .filter(|value| !value.is_empty())
         .unwrap_or(&current.r#type)
         .to_string();
+    if let Some(name_val) = input.name.as_deref() {
+        if name_val.contains('\n') || name_val.contains('\r') {
+            return Err(AppError::validation(
+                "Nome do monitor não pode conter quebra de linha.",
+            ));
+        }
+    }
+    if let Some(interval) = input.interval_seconds {
+        if interval < 1 {
+            return Err(AppError::validation(
+                "O intervalo deve ser de pelo menos 1 segundo.",
+            ));
+        }
+    }
     let name = input
         .name
         .as_deref()

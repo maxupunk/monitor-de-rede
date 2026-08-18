@@ -51,7 +51,7 @@ impl MikrotikProfileGenerator {
             format!(
                 "/snmp/community/set [find default=yes] addresses={} name=\"{}\"",
                 context.vpn_cidr,
-                context.community()
+                context.sanitized_community()
             ),
             "/snmp/set enabled=yes contact=\"NetMonitor\"".to_string(),
         ]

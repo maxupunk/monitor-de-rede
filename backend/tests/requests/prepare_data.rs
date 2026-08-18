@@ -8,10 +8,10 @@ use loco_rs::{app::AppContext, TestServer};
 use sea_orm::IntoActiveModel;
 
 const USER_EMAIL: &str = "test@loco.com";
-const USER_PASSWORD: &str = "1234";
+const USER_PASSWORD: &str = "User1234";
 
 const OPERATOR_EMAIL: &str = "operator@loco.com";
-const OPERATOR_PASSWORD: &str = "operator-1234";
+const OPERATOR_PASSWORD: &str = "Operator-1234";
 
 pub struct LoggedInUser {
     pub user: users::Model,

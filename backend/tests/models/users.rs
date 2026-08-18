@@ -48,7 +48,7 @@ async fn can_create_with_password() {
 
     let params = RegisterParams {
         email: "test@framework.com".to_string(),
-        password: "1234".to_string(),
+        password: "SenhaForte123".to_string(),
         name: "framework".to_string(),
     };
 
@@ -76,7 +76,7 @@ async fn handle_create_with_password_with_duplicate() {
         &boot.app_context.db,
         &RegisterParams {
             email: "user1@example.com".to_string(),
-            password: "1234".to_string(),
+            password: "SenhaForte123".to_string(),
             name: "framework".to_string(),
         },
     )
@@ -277,7 +277,7 @@ async fn can_reset_password() {
     let result = user
         .clone()
         .into_active_model()
-        .reset_password(&boot.app_context.db, "new-password")
+        .reset_password(&boot.app_context.db, "New-password-123")
         .await;
 
     assert!(result.is_ok(), "Failed to reset password");
@@ -287,7 +287,7 @@ async fn can_reset_password() {
         .expect("Failed to find user by PID after password reset");
 
     assert!(
-        user.verify_password("new-password"),
+        user.verify_password("New-password-123"),
         "Password verification failed for new password"
     );
 }

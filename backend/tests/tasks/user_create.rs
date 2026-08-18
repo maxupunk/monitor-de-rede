@@ -16,7 +16,7 @@ async fn test_can_run_user_create() {
     let vars = task::Vars::from_cli_args(vec![
         ("email".to_string(), email.to_string()),
         ("name".to_string(), "Test User".to_string()),
-        ("password".to_string(), "securepassword".to_string()),
+        ("password".to_string(), "Securepassword1".to_string()),
     ]);
     assert!(
         run_task::<App>(&boot.app_context, Some(&"user:create".to_string()), &vars)
@@ -42,7 +42,7 @@ async fn test_user_email_already_exists() {
     let vars = task::Vars::from_cli_args(vec![
         ("email".to_string(), email.to_string()),
         ("name".to_string(), "Test User".to_string()),
-        ("password".to_string(), "securepassword".to_string()),
+        ("password".to_string(), "Securepassword1".to_string()),
     ]);
     let err = run_task::<App>(&boot.app_context, Some(&"user:create".to_string()), &vars)
         .await

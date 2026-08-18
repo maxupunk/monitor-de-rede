@@ -11,24 +11,42 @@ pub const MAGIC_LINK_LENGTH: i8 = 32;
 pub const MAGIC_LINK_EXPIRATION_MIN: i8 = 5;
 pub const RESET_TOKEN_EXPIRATION_MIN: i64 = 30;
 
+/// Valida a política de senha do sistema: no mínimo 8 caracteres e ao menos 1 letra maiúscula.
+pub fn validate_password(password: &str) -> std::result::Result<(), validator::ValidationError> {
+    if password.len() < 8 {
+        let mut err = validator::ValidationError::new("length");
+        err.message = Some("A senha precisa ter ao menos 8 caracteres.".into());
+        return Err(err);
+    }
+    if !password.chars().any(|c| c.is_ascii_uppercase()) {
+        let mut err = validator::ValidationError::new("uppercase");
+        err.message = Some("A senha precisa conter ao menos uma letra maiúscula.".into());
+        return Err(err);
+    }
+    Ok(())
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct LoginParams {
     pub email: String,
     pub password: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Validate)]
 pub struct RegisterParams {
+    #[validate(email(message = "Informe um e-mail válido."))]
     pub email: String,
+    #[validate(custom(function = "validate_password"))]
     pub password: String,
+    #[validate(length(min = 2, message = "O nome precisa ter ao menos 2 caracteres."))]
     pub name: String,
 }
 
 #[derive(Debug, Validate, Deserialize)]
 pub struct Validator {
-    #[validate(length(min = 2, message = "Name must be at least 2 characters long."))]
+    #[validate(length(min = 2, message = "O nome precisa ter ao menos 2 caracteres."))]
     pub name: String,
-    #[validate(email(message = "invalid email"))]
+    #[validate(email(message = "Informe um e-mail válido."))]
     pub email: String,
 }
 
@@ -234,6 +252,8 @@ impl Model {
         db: &DatabaseConnection,
         params: &RegisterParams,
     ) -> ModelResult<Self> {
+        validator::Validate::validate(params).map_err(|e| ModelError::Validation(e.into()))?;
+
         // Único ponto de gravação de usuário no sistema, e por isso o lugar
         // certo para normalizar o e-mail. `find_by_email` compara por igualdade
         // exata: sem isto, quem se cadastrasse como `Admin@Casa.com` nunca mais
@@ -352,6 +372,11 @@ impl ActiveModel {
         db: &DatabaseConnection,
         password: &str,
     ) -> ModelResult<Model> {
+        validate_password(password).map_err(|e| {
+            let mut errors = validator::ValidationErrors::new();
+            errors.add("password", e);
+            ModelError::Validation(errors.into())
+        })?;
         self.password =
             ActiveValue::set(hash::hash_password(password).map_err(|e| ModelError::Any(e.into()))?);
         self.reset_token = ActiveValue::Set(None);

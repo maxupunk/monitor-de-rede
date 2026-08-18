@@ -58,6 +58,20 @@ impl PeerConfigContext {
             .unwrap_or("public")
     }
 
+    #[must_use]
+    pub fn sanitized_community(&self) -> String {
+        let raw = self.community();
+        let cleaned: String = raw
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '.' || *c == '_' || *c == '-')
+            .collect();
+        if cleaned.is_empty() {
+            "public".to_string()
+        } else {
+            cleaned
+        }
+    }
+
     /// `true` quando a chave privada já foi consumida e o artefato é inútil.
     #[must_use]
     pub fn private_key_consumed(&self) -> bool {

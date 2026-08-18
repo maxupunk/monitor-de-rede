@@ -82,7 +82,7 @@ fn linux_snmp_section(
     if !context.snmp_enabled {
         return Vec::new();
     }
-    let community = context.community().to_string();
+    let community = context.sanitized_community();
     let mut lines = vec![
         String::new(),
         step(&format!(

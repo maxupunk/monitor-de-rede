@@ -41,9 +41,15 @@ export function emailRule(message = 'Informe um e-mail válido.'): ValidationRul
 }
 
 export function passwordRule(): ValidationRule {
-  return (value) =>
-    value.length >= MIN_PASSWORD_LENGTH ||
-    `A senha precisa ter ao menos ${MIN_PASSWORD_LENGTH} caracteres.`
+  return (value) => {
+    if (value.length < MIN_PASSWORD_LENGTH) {
+      return `A senha precisa ter ao menos ${MIN_PASSWORD_LENGTH} caracteres.`
+    }
+    if (!/[A-Z]/.test(value)) {
+      return 'A senha precisa conter ao menos uma letra maiúscula.'
+    }
+    return true
+  }
 }
 
 export function matchesRule(other: () => string, message: string): ValidationRule {

@@ -23,7 +23,7 @@ fn setup_payload(token: &str) -> serde_json::Value {
     serde_json::json!({
         "name": "Operador",
         "email": "admin@netmonitor.local",
-        "password": "senha-bem-forte",
+        "password": "Senha-bem-forte",
         "token": token,
     })
 }
@@ -114,10 +114,29 @@ async fn setup_recusa_senha_curta_por_campo() {
 
 #[tokio::test]
 #[serial]
+async fn setup_recusa_senha_sem_maiuscula_por_campo() {
+    request::<App, _, _>(|request, ctx| async move {
+        let token = SetupService::new(&ctx.db).token().await.unwrap();
+        let mut payload = setup_payload(&token);
+        payload["password"] = serde_json::json!("sem-maiuscula1");
+
+        let response = request.post("/api/auth/setup").json(&payload).await;
+
+        assert_eq!(response.status_code(), 422);
+        let body: serde_json::Value = serde_json::from_str(&response.text()).unwrap();
+        assert_eq!(body["errors"][0]["field"], "password");
+        assert!(SetupService::new(&ctx.db).is_pending().await.unwrap());
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
 async fn setup_fecha_depois_do_primeiro_usuario() {
     request::<App, _, _>(|request, ctx| async move {
         let token = SetupService::new(&ctx.db).token().await.unwrap();
-        prepare_data::create_user(&ctx, "quem chegou antes", "primeiro@loco.com", "12341234").await;
+        prepare_data::create_user(&ctx, "quem chegou antes", "primeiro@loco.com", "Senha1234")
+            .await;
 
         let response = request
             .post("/api/auth/setup")
@@ -144,7 +163,7 @@ async fn register_exige_sessao() {
             .json(&serde_json::json!({
                 "name": "intruso",
                 "email": "intruso@loco.com",
-                "password": "12341234"
+                "password": "Senha1234"
             }))
             .await;
 
@@ -161,7 +180,7 @@ async fn register_exige_sessao() {
 #[serial]
 async fn login_recusa_usuario_desativado() {
     request::<App, _, _>(|request, ctx| async move {
-        let user = prepare_data::create_user(&ctx, "desligado", "ex@loco.com", "12341234").await;
+        let user = prepare_data::create_user(&ctx, "desligado", "ex@loco.com", "Senha1234").await;
         let mut active = user.into_active_model();
         active.active = sea_orm::ActiveValue::Set(false);
         sea_orm::ActiveModelTrait::update(active, &ctx.db)
@@ -172,7 +191,7 @@ async fn login_recusa_usuario_desativado() {
             .post("/api/auth/login")
             .json(&serde_json::json!({
                 "email": "ex@loco.com",
-                "password": "12341234"
+                "password": "Senha1234"
             }))
             .await;
 
@@ -185,13 +204,13 @@ async fn login_recusa_usuario_desativado() {
 #[serial]
 async fn login_ignora_caixa_do_email() {
     request::<App, _, _>(|request, ctx| async move {
-        prepare_data::create_user(&ctx, "maiuscula", "Admin@Casa.com", "12341234").await;
+        prepare_data::create_user(&ctx, "maiuscula", "Admin@Casa.com", "Senha1234").await;
 
         let response = request
             .post("/api/auth/login")
             .json(&serde_json::json!({
                 "email": "  ADMIN@casa.com  ",
-                "password": "12341234"
+                "password": "Senha1234"
             }))
             .await;
 
@@ -214,7 +233,7 @@ async fn can_register() {
         let payload = serde_json::json!({
             "name": "loco",
             "email": email,
-            "password": "12341234"
+            "password": "Senha1234"
         });
 
         let response = request
@@ -237,18 +256,12 @@ async fn can_register() {
 
         let deliveries = ctx.mailer.unwrap().deliveries();
         assert_eq!(deliveries.count, 1, "Exactly one email should be sent");
-
-        // with_settings!({
-        //     filters => cleanup_email()
-        // }, {
-        //     assert_debug_snapshot!(ctx.mailer.unwrap().deliveries());
-        // });
     })
     .await;
 }
 
 #[rstest]
-#[case("login_with_valid_password", "12341234")]
+#[case("login_with_valid_password", "Senha1234")]
 #[case("login_with_invalid_password", "invalid-password")]
 #[tokio::test]
 #[serial]
@@ -258,7 +271,7 @@ async fn can_login_with_verify(#[case] test_name: &str, #[case] password: &str) 
     request::<App, _, _>(|request, ctx| async move {
         let email = "test@loco.com";
 
-        let user = prepare_data::create_user(&ctx, "loco", email, "12341234").await;
+        let user = prepare_data::create_user(&ctx, "loco", email, "Senha1234").await;
         let user = user
             .into_active_model()
             .set_email_verification_sent(&ctx.db)
@@ -335,7 +348,7 @@ async fn can_login_without_verify() {
 
     request::<App, _, _>(|request, ctx| async move {
         let email = "test@loco.com";
-        let password = "12341234";
+        let password = "Senha1234";
 
         // Usuário sem verificação de e-mail nenhuma: o login não a exige.
         prepare_data::create_user(&ctx, "loco", email, password).await;
@@ -428,7 +441,7 @@ async fn can_reset_password() {
             "Expected reset_sent_at to be set, but it was None. User: {user:?}"
         );
 
-        let new_password = "new-password";
+        let new_password = "New-password-123";
         let reset_payload = serde_json::json!({
             "token": user.reset_token,
             "password": new_password,
@@ -609,7 +622,7 @@ async fn can_resend_verification_email() {
         let payload = serde_json::json!({
             "name": "loco",
             "email": email,
-            "password": "12341234"
+            "password": "Senha1234"
         });
 
         let response = request
@@ -669,7 +682,7 @@ async fn cannot_resend_email_if_already_verified() {
         let payload = serde_json::json!({
             "name": "verified",
             "email": email,
-            "password": "12341234"
+            "password": "Senha1234"
         });
 
         request
@@ -703,6 +716,134 @@ async fn cannot_resend_email_if_already_verified() {
             deliveries.count, 1,
             "Only the original welcome email should be sent"
         );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn register_recusa_senha_curta_ou_sem_maiuscula() {
+    request::<App, _, _>(|request, ctx| async move {
+        let operator = prepare_data::init_operator(&ctx).await;
+        let (auth_key, auth_value) = prepare_data::auth_header(&operator.token);
+
+        // Senha curta (< 8 caracteres)
+        let curta_res = request
+            .post("/api/auth/register")
+            .add_header(auth_key.clone(), auth_value.clone())
+            .json(&serde_json::json!({
+                "name": "Operador 2",
+                "email": "op2@loco.com",
+                "password": "Short1"
+            }))
+            .await;
+        assert_eq!(curta_res.status_code(), 422);
+
+        // Senha sem maiúscula
+        let sem_mai_res = request
+            .post("/api/auth/register")
+            .add_header(auth_key, auth_value)
+            .json(&serde_json::json!({
+                "name": "Operador 3",
+                "email": "op3@loco.com",
+                "password": "senha-sem-maiuscula1"
+            }))
+            .await;
+        assert_eq!(sem_mai_res.status_code(), 422);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn reset_recusa_senha_sem_maiuscula() {
+    request::<App, _, _>(|request, ctx| async move {
+        let user =
+            prepare_data::create_user(&ctx, "reset_user", "reset_test@loco.com", "SenhaForte1")
+                .await;
+        let user = user
+            .into_active_model()
+            .set_forgot_password_sent(&ctx.db)
+            .await
+            .unwrap();
+
+        let token = user.reset_token.unwrap();
+
+        let response = request
+            .post("/api/auth/reset")
+            .json(&serde_json::json!({
+                "token": token,
+                "password": "sem-maiuscula123"
+            }))
+            .await;
+
+        assert_eq!(response.status_code(), 422);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn auth_guard_bloqueia_usuario_desativado_em_rotas_de_negocio() {
+    request::<App, _, _>(|request, ctx| async move {
+        let user =
+            prepare_data::create_user(&ctx, "bloqueado", "bloqueado@loco.com", "SenhaForte1").await;
+        let jwt_cfg = ctx.config.get_jwt_config().unwrap();
+        let token = user
+            .generate_jwt(&jwt_cfg.secret, jwt_cfg.expiration)
+            .unwrap();
+
+        let (auth_key, auth_value) = prepare_data::auth_header(&token);
+
+        // Ativo: acessa normalmente
+        let res_ativa = request
+            .get("/api/devices")
+            .add_header(auth_key.clone(), auth_value.clone())
+            .await;
+        assert_eq!(res_ativa.status_code(), 200);
+
+        // Desativa o usuário no banco
+        let mut active = user.into_active_model();
+        active.active = sea_orm::ActiveValue::Set(false);
+        sea_orm::ActiveModelTrait::update(active, &ctx.db)
+            .await
+            .unwrap();
+
+        // Imediatamente bloqueado mesmo com token JWT assinado e não expirado
+        let res_inativa = request
+            .get("/api/devices")
+            .add_header(auth_key, auth_value)
+            .await;
+        assert_eq!(res_inativa.status_code(), 401);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn magic_link_recusa_usuario_desativado() {
+    request::<App, _, _>(|request, ctx| async move {
+        let user =
+            prepare_data::create_user(&ctx, "magic_off", "magic_off@gmail.com", "SenhaForte1")
+                .await;
+        let user = user
+            .into_active_model()
+            .create_magic_link(&ctx.db)
+            .await
+            .unwrap();
+
+        let token = user.magic_link_token.clone().unwrap();
+
+        // Desativa o usuário
+        let mut active = user.into_active_model();
+        active.active = sea_orm::ActiveValue::Set(false);
+        sea_orm::ActiveModelTrait::update(active, &ctx.db)
+            .await
+            .unwrap();
+
+        // Tentativa de verificação com token de magic link deve ser recusada com 401
+        let response = request.get(&format!("/api/auth/magic-link/{token}")).await;
+        assert_eq!(response.status_code(), 401);
     })
     .await;
 }
