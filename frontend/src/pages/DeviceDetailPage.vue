@@ -431,7 +431,7 @@
               :monitors="detailStore.monitors"
               :loading="detailStore.loading"
               variant="device"
-              no-data-text="Nenhum monitor configurado para este equipamento. Use &quot;Novo monitor&quot; ou &quot;Configurar Monitoramento&quot; para descobrir automaticamente."
+              no-data-text='Nenhum monitor configurado para este equipamento. Use "Novo monitor" ou "Configurar Monitoramento" para descobrir automaticamente.'
               @edit="openMonitorDialog"
               @changed="reloadMonitors"
             ></MonitorsTable>
