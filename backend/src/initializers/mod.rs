@@ -11,3 +11,4 @@ pub mod monitoring;
 pub mod process_deps;
 pub mod setup;
 pub mod syslog;
+pub mod system_device;

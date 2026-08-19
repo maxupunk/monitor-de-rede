@@ -16,6 +16,7 @@
 //! `Initializer`, porque abrir porta é coisa de servidor — um comando de CLI
 //! não deve fazê-lo.
 
+pub mod app_layer;
 pub mod bus;
 pub mod config;
 pub mod db;
@@ -46,7 +47,7 @@ pub use db::LogsDb;
 pub use ingest::Ingestor;
 pub use matcher::PatternMatcher;
 pub use nat::NatDetector;
-pub use queue::{IngestMetrics, IngestSnapshot, LogQueue};
+pub use queue::{IngestMetrics, IngestSnapshot, LogQueue, LogSource};
 pub use sources::SourceRegistry;
 
 use crate::services::shared::errors::AppResult;
@@ -98,6 +99,12 @@ pub fn build(ctx: &AppContext, config: &SyslogConfig) -> AppResult<SyslogService
         Arc::clone(&sources),
         Arc::clone(&matcher),
     );
+
+    // A camada de `tracing` grava pela **mesma** fila. É o ponto em que a
+    // Fase 4 do roadmap do servidor como dispositivo se resolve sem construir
+    // nada: publicada a fila, todo `tracing::info!` do processo vira linha de
+    // `device_logs`, com live tail, busca, FTS e retenção de graça.
+    app_layer::install_queue(queue.clone());
 
     tokio::spawn(writer::run(
         logs.connection().clone(),

@@ -38,6 +38,9 @@ pub struct Model {
     pub topics: Option<String>,
     #[sea_orm(column_type = "Text")]
     pub message: String,
+    /// `syslog` (rede) ou `application` (este processo). Ver
+    /// `migration::logs::m20260819_000001_device_logs_source`.
+    pub source: String,
     pub created_at: DateTimeWithTimeZone,
 }
 

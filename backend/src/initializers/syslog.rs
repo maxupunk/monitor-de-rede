@@ -2,8 +2,13 @@
 //!
 //! Um `Initializer` do Loco roda apenas no `run_app`, que é o que se quer aqui:
 //! abrir porta é coisa de servidor, e um `backend-cli task …` não deve fazê-lo.
-//! A conexão com o banco de logs, essa sim, vive em `Hooks::after_context`,
-//! porque a purga de retenção roda no ciclo do `scheduler` (ADR 007).
+//!
+//! **Só isto mora aqui.** A conexão com o banco de logs *e* a montagem do
+//! pipeline (fila, escritor, barramento) vivem em `Hooks::after_context`: o
+//! `run_task` não executa initializers, e com a montagem aqui um processo
+//! `task scheduler_loop` ficaria sem log de aplicação nenhum. Além disso o
+//! `Hooks::init_logger`, que instala a camada de `tracing`, roda **antes** dos
+//! initializers — a fila precisa existir antes dele.
 //!
 //! **Ambiente de teste nunca escuta.** O `request_with_config` sobe o servidor
 //! completo, initializers inclusive: sem esta trava, *todo* teste de requisição
@@ -31,22 +36,14 @@ impl Initializer for SyslogInitializer {
 
     async fn before_run(&self, ctx: &AppContext) -> Result<()> {
         let config = SyslogConfig::from_env();
+        // O flag governa **só o listener** — quem abre porta. O banco de logs e
+        // o pipeline sobem em `after_context` de qualquer forma: com
+        // `SYSLOG_ENABLED=false` o que some é a escuta da rede, não o log
+        // interno do servidor.
         if !config.enabled {
             tracing::info!("servidor de syslog desligado (SYSLOG_ENABLED=false)");
             return Ok(());
         }
-
-        // O pipeline sobe em **todo** ambiente, inclusive no de teste: ele não
-        // abre porta, e é dele que a API de logs depende. Falha aqui não
-        // derruba o boot — o monitoramento e a interface web precisam subir de
-        // qualquer forma.
-        let servico = match syslog::build(ctx, &config) {
-            Ok(servico) => servico,
-            Err(error) => {
-                tracing::error!(%error, "não foi possível montar o pipeline de syslog");
-                return Ok(());
-            }
-        };
 
         // **Só o socket é barrado no teste.** O `request_with_config` sobe o
         // servidor completo, initializers inclusive: sem esta trava, *todo*
@@ -57,6 +54,11 @@ impl Initializer for SyslogInitializer {
         if ctx.environment == Environment::Test {
             return Ok(());
         }
+
+        let Some(servico) = syslog::SyslogService::from_context(ctx) else {
+            tracing::error!("pipeline de logs indisponível; listeners não abertos");
+            return Ok(());
+        };
 
         match syslog::spawn_listeners(&servico, &config).await {
             Ok((udp, tcp)) => {

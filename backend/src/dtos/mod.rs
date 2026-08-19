@@ -1,4 +1,6 @@
+pub mod alerts;
 pub mod common;
+pub mod devices;
 pub mod logs;
 pub mod resources;
 pub mod server_addresses;

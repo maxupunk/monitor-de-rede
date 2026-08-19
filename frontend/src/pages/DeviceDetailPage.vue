@@ -41,6 +41,7 @@
           class="d-flex flex-wrap align-center justify-start justify-md-end ga-2 w-100 w-md-auto"
         >
           <v-btn
+            v-if="can.createMonitor"
             color="primary"
             prepend-icon="mdi-plus"
             size="small"
@@ -51,6 +52,7 @@
           </v-btn>
 
           <v-btn-group
+            v-if="can.anyHeaderAction"
             color="primary"
             density="comfortable"
             variant="outlined"
@@ -58,6 +60,7 @@
             class="device-action-buttons"
           >
             <v-btn
+              v-if="can.snmpScan"
               prepend-icon="mdi-radar"
               :loading="detailStore.scanningSnmp"
               aria-label="Configurar monitoramento"
@@ -71,6 +74,7 @@
             </v-btn>
 
             <v-btn
+              v-if="can.snmpCollect"
               prepend-icon="mdi-refresh"
               :loading="detailStore.pollingSnmp"
               aria-label="Coletar agora"
@@ -84,6 +88,7 @@
             </v-btn>
 
             <v-btn
+              v-if="can.scanPorts"
               prepend-icon="mdi-lan-connect"
               aria-label="Escanear portas"
               @click="portScanOpen = true"
@@ -93,6 +98,7 @@
             </v-btn>
 
             <v-btn
+              v-if="can.editIdentity"
               prepend-icon="mdi-pencil"
               aria-label="Editar dispositivo"
               @click="editDeviceDialog = true"
@@ -118,13 +124,15 @@
         <v-tab value="monitors" prepend-icon="mdi-heart-pulse">
           Monitores ({{ detailStore.monitors.length }})
         </v-tab>
-        <v-tab value="interfaces" prepend-icon="mdi-expansion-card">
+        <v-tab value="rules" prepend-icon="mdi-bell-cog-outline">Regras</v-tab>
+        <v-tab v-if="can.interfaces" value="interfaces" prepend-icon="mdi-expansion-card">
           Interfaces SNMP ({{ detailStore.interfaces.length }})
         </v-tab>
-        <v-tab value="metrics" prepend-icon="mdi-chart-line">Métricas & Tráfego</v-tab>
-        <v-tab value="events" prepend-icon="mdi-history">Histórico de Eventos</v-tab>
-        <v-tab value="logs" prepend-icon="mdi-text-box-search-outline">Logs</v-tab>
-        <v-tab v-if="vpnPeer" value="vpn" prepend-icon="mdi-shield-lock-outline">VPN</v-tab>
+        <v-tab v-if="can.events" value="events" prepend-icon="mdi-history">
+          Histórico de Eventos
+        </v-tab>
+        <v-tab v-if="can.logs" value="logs" prepend-icon="mdi-text-box-search-outline">Logs</v-tab>
+        <v-tab v-if="can.vpn" value="vpn" prepend-icon="mdi-shield-lock-outline">VPN</v-tab>
       </v-tabs>
 
       <v-divider></v-divider>
@@ -168,201 +176,34 @@
                 </v-list>
               </v-col>
             </v-row>
-          </v-window-item>
 
-          <!-- Aba Monitores -->
-          <v-window-item value="monitors">
-            <MonitorsTable
-              :monitors="detailStore.monitors"
-              :loading="detailStore.loading"
-              variant="device"
-              no-data-text="Nenhum monitor configurado para este equipamento. Use &quot;Novo monitor&quot; ou &quot;Configurar Monitoramento&quot; para descobrir automaticamente."
-              @edit="openMonitorDialog"
-              @changed="reloadMonitors"
-            ></MonitorsTable>
-          </v-window-item>
+            <!--
+              Saúde do equipamento. A seção inteira só existe para quem publica
+              séries de saúde — o Servidor NetMonitor as preenche todas, um
+              roteador SNMP preenche as duas que o SNMP entrega, e um alvo que
+              só responde ping não mostra nada. "Em dispositivos comuns, a
+              Visão Geral mantém somente resumos aplicáveis."
+            -->
+            <template v-if="can.health">
+              <v-divider class="my-6" />
+              <DeviceHealthSummary :metrics="detailStore.metrics" />
+            </template>
 
-          <!-- Aba Interfaces SNMP -->
-          <v-window-item value="interfaces">
-            <div class="text-caption text-grey mb-3">
-              Clique em uma interface para ver o histórico de tráfego e incluí-la ou removê-la do
-              monitoramento.
-            </div>
-            <div class="table-responsive">
-              <v-table hover>
-                <thead>
-                  <tr>
-                    <th>Index</th>
-                    <th>Nome Interface</th>
-                    <th>Monitoramento</th>
-                    <th>Status Operacional</th>
-                    <th>MAC Address</th>
-                    <th>Velocidade de Negociação</th>
-                    <th style="width: 56px"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr
-                    v-for="intf in detailStore.interfaces"
-                    :key="intf.id"
-                    class="cursor-pointer"
-                    @click="openInterfaceChart(intf)"
-                  >
-                    <td>{{ intf.ifIndex ?? intf.snmpIndex ?? '-' }}</td>
-                    <td class="font-weight-bold">{{ interfaceLabel(intf) }}</td>
-                    <td>
-                      <v-chip
-                        :color="intf.isMonitored ? 'primary' : 'grey'"
-                        size="x-small"
-                        variant="tonal"
-                      >
-                        {{ intf.isMonitored ? 'MONITORADA' : 'NÃO MONITORADA' }}
-                      </v-chip>
-                    </td>
-                    <td>
-                      <v-chip
-                        :color="
-                          (intf.ifOperStatus || intf.operStatus) === 'up' ? 'success' : 'error'
-                        "
-                        size="x-small"
-                      >
-                        Oper: {{ intf.ifOperStatus || intf.operStatus || 'unknown' }}
-                      </v-chip>
-                    </td>
-                    <td>{{ intf.macAddress || 'N/A' }}</td>
-                    <td>
-                      <v-chip size="x-small" variant="tonal" color="info">
-                        {{ formatLinkSpeed(intf.ifSpeed || intf.speed) }}
-                      </v-chip>
-                    </td>
-                    <td>
-                      <v-btn icon size="x-small" variant="text" color="primary">
-                        <v-icon size="18">mdi-chart-line</v-icon>
-                        <v-tooltip activator="parent" location="top">
-                          Ver gráficos e gerenciar monitoramento
-                        </v-tooltip>
-                      </v-btn>
-                    </td>
-                  </tr>
-                  <tr v-if="detailStore.interfaces.length === 0">
-                    <td colspan="7" class="text-center text-grey py-4">
-                      Nenhuma interface SNMP registrada ainda. Use "Configurar Monitoramento" para
-                      descobri-las.
-                    </td>
-                  </tr>
-                </tbody>
-              </v-table>
-            </div>
-          </v-window-item>
-
-          <!-- Aba Métricas & Tráfego -->
-          <v-window-item value="metrics">
-            <!-- 1. KPIs de Recursos do Sistema -->
+            <!--
+              O resumo de tráfego é uma **métrica principal** do equipamento, e
+              é isso que a Visão Geral apresenta. O detalhe por interface —
+              inventário, estado, velocidade e o gráfico de cada porta — segue
+              na aba Interfaces SNMP, que é onde ele tem contexto.
+            -->
             <div
-              class="text-subtitle-1 font-weight-bold mb-3 d-flex align-center ga-2"
-              style="gap: 8px"
-            >
-              <v-icon color="primary">mdi-chip</v-icon>
-              Recursos de Hardware & Processamento
-            </div>
-
-            <v-row class="mb-6">
-              <!-- CPU Card -->
-              <v-col cols="12" md="6">
-                <v-card border flat class="pa-4 rounded-lg">
-                  <div class="d-flex align-center justify-space-between mb-2">
-                    <span class="text-subtitle-2 font-weight-bold">Uso de CPU</span>
-                    <v-chip
-                      size="x-small"
-                      :color="isCpuMonitored ? getCpuColor(cpuUsageValue) : 'grey'"
-                    >
-                      {{
-                        isCpuMonitored
-                          ? cpuUsageValue !== null
-                            ? `${cpuUsageValue}%`
-                            : 'Sem dados'
-                          : 'Não Monitorado'
-                      }}
-                    </v-chip>
-                  </div>
-                  <v-progress-linear
-                    :model-value="isCpuMonitored ? cpuUsageValue || 0 : 0"
-                    height="10"
-                    rounded
-                    :color="isCpuMonitored ? getCpuColor(cpuUsageValue) : 'grey-lighten-2'"
-                    class="mb-3"
-                  ></v-progress-linear>
-                  <MonitorSparkline
-                    v-if="isCpuMonitored && cpuUsageHistory.length > 1"
-                    :data="cpuUsageHistory"
-                    :color="getCpuHexColor(cpuUsageValue)"
-                    :width="220"
-                    :height="32"
-                    class="mb-3"
-                  />
-                  <div class="d-flex align-center justify-space-between text-caption text-grey">
-                    <span v-if="isCpuMonitored"
-                    >Load 1 min:
-                      {{ cpuLoadValue !== null ? `${cpuLoadValue} load` : 'N/A' }}</span
-                    >
-                    <span v-else>Recurso desativado na varredura</span>
-                    <span>Coleta: {{ cpuUsageMetric?.createdAt || 'N/A' }}</span>
-                  </div>
-                </v-card>
-              </v-col>
-
-              <!-- Memória RAM Card -->
-              <v-col cols="12" md="6">
-                <v-card border flat class="pa-4 rounded-lg">
-                  <div class="d-flex align-center justify-space-between mb-2">
-                    <span class="text-subtitle-2 font-weight-bold">Uso de Memória RAM</span>
-                    <v-chip
-                      size="x-small"
-                      :color="isMemoryMonitored ? getMemoryColor(memoryUsageValue) : 'grey'"
-                    >
-                      {{
-                        isMemoryMonitored
-                          ? memoryUsageValue !== null
-                            ? `${memoryUsageValue}%`
-                            : 'Sem dados'
-                          : 'Não Monitorado'
-                      }}
-                    </v-chip>
-                  </div>
-                  <v-progress-linear
-                    :model-value="isMemoryMonitored ? memoryUsageValue || 0 : 0"
-                    height="10"
-                    rounded
-                    :color="isMemoryMonitored ? getMemoryColor(memoryUsageValue) : 'grey-lighten-2'"
-                    class="mb-3"
-                  ></v-progress-linear>
-                  <MonitorSparkline
-                    v-if="isMemoryMonitored && memoryUsageHistory.length > 1"
-                    :data="memoryUsageHistory"
-                    :color="getMemoryHexColor(memoryUsageValue)"
-                    :width="220"
-                    :height="32"
-                    class="mb-3"
-                  />
-                  <div class="d-flex align-center justify-space-between text-caption text-grey">
-                    <span v-if="isMemoryMonitored">Percentual Utilizado</span>
-                    <span v-else>Recurso desativado na varredura</span>
-                    <span>Coleta: {{ memoryUsageMetric?.createdAt || 'N/A' }}</span>
-                  </div>
-                </v-card>
-              </v-col>
-            </v-row>
-
-            <!-- 2. Tabela de Tráfego por Interface Monitorada -->
-            <div
-              class="text-subtitle-1 font-weight-bold mb-3 d-flex align-center ga-2"
-              style="gap: 8px"
+              v-if="interfaceTrafficSummaries.length > 0"
+              class="text-subtitle-1 font-weight-bold mb-3 mt-6 d-flex align-center ga-2"
             >
               <v-icon color="primary">mdi-swap-horizontal</v-icon>
-              Tráfego de Rede por Interface (Apenas Itens Monitorados)
+              Tráfego por interface monitorada
             </div>
 
-            <div class="table-responsive">
+            <div v-if="interfaceTrafficSummaries.length > 0" class="table-responsive">
               <v-table border hover class="rounded-lg mb-6">
                 <thead>
                   <tr>
@@ -479,16 +320,36 @@
                       </div>
                     </td>
                   </tr>
-                  <tr v-if="interfaceTrafficSummaries.length === 0">
-                    <td colspan="6" class="text-center text-grey py-6">
-                      Nenhuma interface no monitoramento de tráfego. Selecione-as na aba "Interfaces
-                      SNMP" ou em "Configurar Monitoramento".
-                    </td>
-                  </tr>
                 </tbody>
               </v-table>
             </div>
 
+            <!-- Funcionalidade indisponível não gera aba vazia: a ação para
+                 habilitá-la fica aqui, com a explicação curta. -->
+            <v-alert
+              v-if="can.snmpConfigured && !can.snmpConnected"
+              type="info"
+              variant="tonal"
+              density="comfortable"
+              class="rounded-lg mt-4"
+            >
+              <div class="font-weight-medium">SNMP configurado, mas ainda sem resposta</div>
+              <div class="text-caption">
+                O inventário de interfaces e o tráfego aparecem depois da primeira comunicação
+                bem-sucedida. Verifique a comunidade e o alcance de rede e execute uma varredura.
+              </div>
+              <template #append>
+                <v-btn
+                  size="small"
+                  variant="tonal"
+                  color="primary"
+                  :loading="detailStore.scanningSnmp"
+                  @click="openScanModal"
+                >
+                  Varrer agora
+                </v-btn>
+              </template>
+            </v-alert>
             <!-- 3. Tabela do Histórico Bruto de Registros Recentes -->
             <v-card elevation="2" class="rounded-lg pa-4 border">
               <div class="d-flex align-center justify-space-between">
@@ -547,6 +408,116 @@
                 </div>
               </v-expand-transition>
             </v-card>
+          </v-window-item>
+
+          <!-- Aba Monitores -->
+          <v-window-item value="monitors">
+            <!--
+              Quando não há monitor de alcance, o motivo vem do backend
+              (`reachMonitorBlockedReason`) em vez de a tela deduzi-lo: são duas
+              causas diferentes — o dispositivo do sistema e o cadastro sem IP —
+              e cada uma pede uma ação diferente de quem está olhando.
+            -->
+            <v-alert
+              v-if="detailStore.capabilities?.reachMonitorBlockedReason"
+              type="info"
+              variant="tonal"
+              density="comfortable"
+              class="mb-4 rounded-lg"
+            >
+              {{ detailStore.capabilities.reachMonitorBlockedReason }}
+            </v-alert>
+            <MonitorsTable
+              :monitors="detailStore.monitors"
+              :loading="detailStore.loading"
+              variant="device"
+              no-data-text="Nenhum monitor configurado para este equipamento. Use &quot;Novo monitor&quot; ou &quot;Configurar Monitoramento&quot; para descobrir automaticamente."
+              @edit="openMonitorDialog"
+              @changed="reloadMonitors"
+            ></MonitorsTable>
+          </v-window-item>
+
+          <!-- Aba Regras -->
+          <v-window-item value="rules">
+            <DeviceRulesTab
+              :device-id="deviceId"
+              :device-name="detailStore.device?.name"
+              :monitor-names="monitorNames"
+              :available-fields="detailStore.capabilities?.alertFields"
+            />
+          </v-window-item>
+
+          <!-- Aba Interfaces SNMP -->
+          <v-window-item value="interfaces">
+            <div class="text-caption text-grey mb-3">
+              Clique em uma interface para ver o histórico de tráfego e incluí-la ou removê-la do
+              monitoramento.
+            </div>
+            <div class="table-responsive">
+              <v-table hover>
+                <thead>
+                  <tr>
+                    <th>Index</th>
+                    <th>Nome Interface</th>
+                    <th>Monitoramento</th>
+                    <th>Status Operacional</th>
+                    <th>MAC Address</th>
+                    <th>Velocidade de Negociação</th>
+                    <th style="width: 56px"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="intf in detailStore.interfaces"
+                    :key="intf.id"
+                    class="cursor-pointer"
+                    @click="openInterfaceChart(intf)"
+                  >
+                    <td>{{ intf.ifIndex ?? intf.snmpIndex ?? '-' }}</td>
+                    <td class="font-weight-bold">{{ interfaceLabel(intf) }}</td>
+                    <td>
+                      <v-chip
+                        :color="intf.isMonitored ? 'primary' : 'grey'"
+                        size="x-small"
+                        variant="tonal"
+                      >
+                        {{ intf.isMonitored ? 'MONITORADA' : 'NÃO MONITORADA' }}
+                      </v-chip>
+                    </td>
+                    <td>
+                      <v-chip
+                        :color="
+                          (intf.ifOperStatus || intf.operStatus) === 'up' ? 'success' : 'error'
+                        "
+                        size="x-small"
+                      >
+                        Oper: {{ intf.ifOperStatus || intf.operStatus || 'unknown' }}
+                      </v-chip>
+                    </td>
+                    <td>{{ intf.macAddress || 'N/A' }}</td>
+                    <td>
+                      <v-chip size="x-small" variant="tonal" color="info">
+                        {{ formatLinkSpeed(intf.ifSpeed || intf.speed) }}
+                      </v-chip>
+                    </td>
+                    <td>
+                      <v-btn icon size="x-small" variant="text" color="primary">
+                        <v-icon size="18">mdi-chart-line</v-icon>
+                        <v-tooltip activator="parent" location="top">
+                          Ver gráficos e gerenciar monitoramento
+                        </v-tooltip>
+                      </v-btn>
+                    </td>
+                  </tr>
+                  <tr v-if="detailStore.interfaces.length === 0">
+                    <td colspan="7" class="text-center text-grey py-4">
+                      Nenhuma interface SNMP registrada ainda. Use "Configurar Monitoramento" para
+                      descobri-las.
+                    </td>
+                  </tr>
+                </tbody>
+              </v-table>
+            </div>
           </v-window-item>
 
           <!-- Aba Eventos -->
@@ -1135,14 +1106,15 @@ import {
 } from '@/stores/deviceDetail'
 import TrafficChartDialog from '@/components/TrafficChartDialog.vue'
 import BaseMetricChart, { type ChartSeriesInput } from '@/components/BaseMetricChart.vue'
-import MonitorSparkline from '@/components/MonitorSparkline.vue'
 import VpnScriptViewer from '@/components/VpnScriptViewer.vue'
 import VpnFirewallHintsDialog from '@/components/VpnFirewallHintsDialog.vue'
 import PortScanDialog from '@/components/PortScanDialog.vue'
 import MonitorFormDialog from '@/components/MonitorFormDialog.vue'
 import DeviceDialog from '@/components/DeviceDialog.vue'
 import MonitorsTable from '@/components/MonitorsTable.vue'
-import { getStatusColor, gaugeHexColor } from '@/utils/monitorPresentation'
+import DeviceHealthSummary from '@/components/devices/DeviceHealthSummary.vue'
+import DeviceRulesTab from '@/components/devices/DeviceRulesTab.vue'
+import { getStatusColor } from '@/utils/monitorPresentation'
 import {
   formatBps,
   formatBytes,
@@ -1178,6 +1150,59 @@ const router = useRouter()
 const detailStore = useDeviceDetailStore()
 const vpnStore = useVpnStore()
 const activeTab = ref('overview')
+
+/**
+ * O que esta página pode mostrar e oferecer — respondido pelo backend.
+ *
+ * A mesma projeção governa **abas e botões**. Antes, o cabeçalho oferecia
+ * "Configurar", "Coletar", "Portas" e "Editar" para qualquer dispositivo: no
+ * Servidor NetMonitor isso significava escanear as próprias portas e editar o
+ * IP de um equipamento protegido — ações que só podiam devolver erro.
+ *
+ * Enquanto as capacidades não chegam, o padrão é conservador: nada de SNMP e
+ * nada de abas condicionais. Uma aba que aparece e some meio segundo depois é
+ * pior do que uma que demora meio segundo para aparecer.
+ */
+const can = computed(() => {
+  const caps = detailStore.capabilities
+  const snmpConnected = caps?.snmpConnected ?? false
+  const isSystem = caps?.isSystem ?? false
+  const snmpScan = caps?.canSnmpScan ?? !isSystem
+  const snmpCollect = caps?.canSnmpCollect ?? false
+  const scanPorts = caps?.canScanPorts ?? false
+  const editIdentity = caps?.canEditIdentity ?? !isSystem
+  return {
+    isSystem,
+    snmpConfigured: caps?.snmpConfigured ?? false,
+    snmpConnected,
+    interfaces: caps?.interfaces ?? false,
+    events: caps?.events ?? false,
+    logs: caps?.logs ?? false,
+    vpn: caps?.vpn ?? Boolean(detailStore.device?.vpnPeer),
+    health: caps?.health ?? false,
+    snmpScan,
+    snmpCollect,
+    scanPorts,
+    editIdentity,
+    createMonitor: caps?.canCreateMonitor ?? !isSystem,
+    anyHeaderAction: snmpScan || snmpCollect || scanPorts || editIdentity,
+  }
+})
+
+/** As abas que existem hoje para este dispositivo. */
+const abasAplicaveis = computed(() => {
+  const abas = ['overview', 'monitors', 'rules']
+  if (can.value.interfaces) abas.push('interfaces')
+  if (can.value.events) abas.push('events')
+  if (can.value.logs) abas.push('logs')
+  if (can.value.vpn) abas.push('vpn')
+  return abas
+})
+
+/** Nome de cada monitor, para a aba de regras descrever o escopo. */
+const monitorNames = computed<Record<number, string>>(() =>
+  Object.fromEntries(detailStore.monitors.map((monitor) => [monitor.id, monitor.name]))
+)
 const scanModalOpen = ref(false)
 const savingMonitors = ref(false)
 const portScanOpen = ref(false)
@@ -1315,6 +1340,23 @@ const logsNaoConfigurados = computed(() => {
   if (logsStore.sources.some((fonte) => fonte.deviceId === deviceId.value)) return false
   return logsStore.isEmpty
 })
+
+/**
+ * A aba pedida na URL, quando ainda for aplicável.
+ *
+ * Se deixar de ser — SNMP que nunca respondeu, VPN removida —, a página volta
+ * para `overview` **sem erro e sem conteúdo vazio**, que é a regra de layout do
+ * roadmap. Um link antigo continua funcionando; ele só não abre uma aba que não
+ * existe mais.
+ */
+watch(
+  [abasAplicaveis, () => route.query.tab],
+  ([abas, pedida]) => {
+    const alvo = typeof pedida === 'string' ? pedida : activeTab.value
+    activeTab.value = abas.includes(alvo) ? alvo : 'overview'
+  },
+  { immediate: true }
+)
 
 // A store é compartilhada com a tela `/logs`: entrar na aba sem fixar o
 // dispositivo mostraria o log do parque inteiro dentro da página de um
@@ -1454,73 +1496,6 @@ async function showVpnFirewallHints() {
   vpnFirewallOpen.value = true
 }
 
-const isCpuMonitored = computed(() =>
-  detailStore.monitors.some((m) => m.name.toLowerCase().includes('cpu') && m.status !== 'disabled')
-)
-
-const isMemoryMonitored = computed(() =>
-  detailStore.monitors.some((m) => {
-    const name = m.name
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-    return (
-      (name.includes('memoria') || name.includes('memory')) &&
-      m.enabled !== false &&
-      m.status !== 'disabled'
-    )
-  })
-)
-
-// Métricas de CPU
-const cpuUsageMetric = computed(() => detailStore.metrics.find((m) => m.metricName === 'cpu_usage'))
-const cpuUsageValue = computed(() =>
-  cpuUsageMetric.value !== undefined ? Number(cpuUsageMetric.value.metricValue) : null
-)
-
-const cpuLoadMetric = computed(() =>
-  detailStore.metrics.find((m) => m.metricName === 'cpu_load_1min')
-)
-const cpuLoadValue = computed(() =>
-  cpuLoadMetric.value !== undefined ? Number(cpuLoadMetric.value.metricValue) : null
-)
-
-// Métricas de Memória
-const memoryUsageMetric = computed(() =>
-  detailStore.metrics.find((m) => m.metricName === 'memory_usage' || m.metricName === 'memory_used')
-)
-const memoryUsageValue = computed(() =>
-  memoryUsageMetric.value !== undefined ? Number(memoryUsageMetric.value.metricValue) : null
-)
-
-/** Teto de amostras exibidas na mini tendência dos cards de CPU/Memória */
-const GAUGE_SPARKLINE_LIMIT = 30
-
-// `detailStore.metrics` vem do mais recente para o mais antigo (ver devices_controller.ts) —
-// a mini tendência precisa do sentido contrário para o tempo fluir da esquerda para a direita.
-function gaugeSparklineHistory(metricName: string) {
-  return detailStore.metrics
-    .filter(
-      (m) =>
-        m.metricName === metricName ||
-        (metricName === 'memory_usage' && m.metricName === 'memory_used')
-    )
-    .slice(0, GAUGE_SPARKLINE_LIMIT)
-    .reverse()
-    .map((m) => ({ value: Number(m.metricValue) || 0, recordedAt: m.createdAt }))
-}
-
-const cpuUsageHistory = computed(() => gaugeSparklineHistory('cpu_usage'))
-const memoryUsageHistory = computed(() => gaugeSparklineHistory('memory_usage'))
-
-function getCpuHexColor(usage?: number | null): string {
-  return gaugeHexColor(usage ?? null, 'cpu_usage')
-}
-
-function getMemoryHexColor(usage?: number | null): string {
-  return gaugeHexColor(usage ?? null, 'memory_usage')
-}
-
 // Resumo de tráfego por Interface — só as que de fato têm monitor coletando.
 // `adminStatus` não serve de filtro aqui: o próprio equipamento o preenche na
 // primeira coleta, e toda porta ligada apareceria como monitorada.
@@ -1568,20 +1543,6 @@ const interfaceTrafficSummaries = computed(() => {
 
 function formatMetricValue(metric: DeviceMetric): string {
   return formatMeasuredValue(metric.metricValue, metric.unit)
-}
-
-function getCpuColor(usage?: number | null) {
-  if (usage === null || usage === undefined) return 'grey'
-  if (usage > 85) return 'error'
-  if (usage > 65) return 'warning'
-  return 'success'
-}
-
-function getMemoryColor(usage?: number | null) {
-  if (usage === null || usage === undefined) return 'grey'
-  if (usage > 90) return 'error'
-  if (usage > 75) return 'warning'
-  return 'success'
 }
 
 async function openScanModal() {

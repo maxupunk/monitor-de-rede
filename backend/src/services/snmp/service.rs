@@ -7,6 +7,7 @@ use sea_orm::{
 };
 
 use crate::services::{
+    alerts::fields as alert_fields,
     monitoring::{
         contracts::{CheckResult, MonitorStatus},
         device_status::{self, DeviceStatus},
@@ -379,15 +380,24 @@ fn monitor_result_from_poll(
             "uptime"
         });
     let (status, message, data) = match metric {
+        // `usagePercent`/`usedPercent` soltos, que estas linhas publicavam
+        // antes, estavam **fora** do vocabulário do motor: não havia regra
+        // possível sobre eles. Trocá-los pelas chaves de saúde de dispositivo
+        // não quebra nada e faz o alerta de CPU passar a valer para o parque
+        // inteiro, não só para o servidor.
         "cpu_usage" if poll.scan.cpu_info.usage_percent.is_some() => (
             MonitorStatus::Up,
             "Uso de CPU coletado".to_string(),
-            serde_json::json!({ "usagePercent": poll.scan.cpu_info.usage_percent }),
+            serde_json::json!({
+                alert_fields::CPU_USAGE_PERCENT: poll.scan.cpu_info.usage_percent
+            }),
         ),
         "memory_usage" if poll.scan.memory_info.used_percent.is_some() => (
             MonitorStatus::Up,
             "Uso de memória coletado".to_string(),
-            serde_json::json!({ "usedPercent": poll.scan.memory_info.used_percent }),
+            serde_json::json!({
+                alert_fields::MEMORY_USED_PERCENT: poll.scan.memory_info.used_percent
+            }),
         ),
         "traffic" | "interface_traffic" => match if_index.and_then(|index| {
             poll.scan

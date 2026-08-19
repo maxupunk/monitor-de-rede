@@ -10,9 +10,11 @@ use crate::services::{
             http::{HttpChecker, HttpConfig},
             ping::{PingChecker, PingConfig},
             snmp::{SnmpChecker, SnmpCheckerConfig},
+            system_health::{SystemHealthChecker, SystemHealthConfig},
             tcp::{TcpChecker, TcpConfig},
         },
         contracts::{CheckResult, Checker},
+        managed::SYSTEM_HEALTH,
     },
     shared::errors::{AppError, AppResult},
 };
@@ -68,6 +70,17 @@ pub async fn run_monitor(
         "snmp" => {
             SnmpChecker
                 .execute(parse_config::<SnmpCheckerConfig>(&configuration, "snmp")?)
+                .await
+        }
+        // Sem este ramo o agendador devolveria "tipo de monitor desconhecido"
+        // a cada ciclo do monitor gerenciado do servidor — e o dispositivo
+        // ficaria eternamente em `unknown`.
+        SYSTEM_HEALTH => {
+            SystemHealthChecker
+                .execute(parse_config::<SystemHealthConfig>(
+                    &configuration,
+                    SYSTEM_HEALTH,
+                )?)
                 .await
         }
         _ => {

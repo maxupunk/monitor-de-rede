@@ -208,9 +208,13 @@ Resultados em [ADR 008](adr/008-syslog-parser.md).
       31/dez, nas duas direções)
 - [x] Medir inserção em lote — **85 228 linhas/s** em debug, **290 B/linha**
       com os 3 índices; 0,23% do tempo a 200 msg/s
-- [ ] Medir o IP de origem observado dentro do container, com pacote de outra
-      máquina — **em aberto**, exige a imagem de produção. Procedimento na
-      ADR 008; é o item de maior risco do projeto
+- [x] Medir o IP de origem observado dentro do container, com pacote de outra
+      máquina — **medido na primeira implantação, e a resposta é a ruim**: a
+      publicação `514:5514/udp` reescreve o remetente para o gateway da bridge.
+      Registrado na [ADR 008](adr/008-syslog-parser.md#pergunta-3), junto do
+      procedimento de verificação para um ambiente novo. Era o item de maior
+      risco do projeto, e é o que a Fase 7 resolve — o servidor detecta o
+      mascaramento e resolve a origem pelo `HOSTNAME`
 - [x] `docs/adr/008-syslog-parser.md`
 
 Duas descobertas que mudam a Fase 2:

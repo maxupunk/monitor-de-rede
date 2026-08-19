@@ -1,17 +1,24 @@
 /**
  * Tradução das métricas/condições técnicas das regras de alerta para rótulos
- * legíveis em português. O `field` de cada métrica corresponde exatamente à
- * chave produzida pelo AlertManager no backend (modules/alerts/alert_manager.ts).
+ * legíveis em português.
+ *
+ * O `field` de cada métrica **não é uma string livre**: é o tipo `AlertField`,
+ * gerado por `ts-rs` a partir de `services::alerts::fields` no backend. Antes
+ * disso, as chaves viviam no Rust e os rótulos aqui, sem nada ligando os dois —
+ * renomear um campo de um lado apagava o rótulo do outro sem erro de
+ * compilação em nenhum dos dois. Agora renomear no Rust quebra este arquivo no
+ * `typecheck`, que é onde o erro deve aparecer.
  */
 
+import type { AlertField } from '../bindings/AlertField'
 import { formatBps } from './formatters'
 import { getStatusColor } from './monitorPresentation'
 
 export type AlertOperator = 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'neq' | 'contains'
 
 export interface AlertMetricOption {
-  /** Chave avaliada pelo RuleEvaluator */
-  field: string
+  /** Chave avaliada pelo RuleEvaluator, vinda do vocabulário do backend */
+  field: AlertField
   /** Rótulo exibido no select */
   title: string
   /** Explicação curta mostrada abaixo do campo */
@@ -259,6 +266,46 @@ export const ALERT_METRICS: AlertMetricOption[] = [
     hint: 'Nível do syslog: 0 = emergência, 3 = erro, 4 = aviso, 6 = informação. Número menor é mais grave.',
     kind: 'number',
     defaultOperator: 'lte',
+    defaultValue: 4,
+  },
+  // --- Saúde do equipamento -------------------------------------------------
+  //
+  // São campos de **dispositivo**, não do servidor: o NetMonitor os publica
+  // pela coleta local e um roteador pelo SNMP. A tela oferece os mesmos em
+  // ambos os casos.
+  {
+    field: 'cpuUsagePercent',
+    title: 'Uso de CPU (%)',
+    hint: 'Percentual de processamento em uso. Combine com uma duração para ignorar picos curtos.',
+    kind: 'number',
+    unit: '%',
+    defaultOperator: 'gt',
+    defaultValue: 85,
+  },
+  {
+    field: 'memoryUsedPercent',
+    title: 'Memória usada (%)',
+    hint: 'Percentual de memória em uso. Dentro de um container, considera o limite do container.',
+    kind: 'number',
+    unit: '%',
+    defaultOperator: 'gt',
+    defaultValue: 90,
+  },
+  {
+    field: 'storageUsedPercent',
+    title: 'Armazenamento usado (%)',
+    hint: 'Percentual ocupado do volume de dados. Disco cheio derruba a gravação de métricas e de logs.',
+    kind: 'number',
+    unit: '%',
+    defaultOperator: 'gt',
+    defaultValue: 85,
+  },
+  {
+    field: 'loadAverage1m',
+    title: 'Carga média (1 min)',
+    hint: 'Processos aguardando execução. Compare com o número de núcleos: acima disso há fila.',
+    kind: 'number',
+    defaultOperator: 'gt',
     defaultValue: 4,
   },
 ]

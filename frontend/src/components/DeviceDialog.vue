@@ -242,6 +242,21 @@
                 color="primary"
                 hide-details
               ></v-checkbox>
+              <!--
+                Sem endereço não há alvo: o backend deixou de criar um ping
+                contra o **nome** do equipamento, que só podia falhar. Dizer
+                isso aqui é o que impede o operador de salvar e ir procurar em
+                /monitors um monitor que nunca vai existir.
+              -->
+              <v-alert
+                v-if="formModel.isMonitored && !formModel.ipAddress"
+                type="info"
+                variant="tonal"
+                density="compact"
+                class="mt-2 rounded-lg"
+              >
+                {{ SEM_ALVO_DE_ALCANCE }}
+              </v-alert>
             </v-col>
 
             <v-col cols="12">
@@ -364,6 +379,7 @@ import { useSnmpTestStore } from '@/stores/snmpTest'
 import { usePreferencesStore } from '@/stores/preferences'
 import SiteDialog from '@/components/SiteDialog.vue'
 import { INTERVAL_PRESETS, formatSeconds } from '@/utils/monitorTypes'
+import { SEM_ALVO_DE_ALCANCE } from '@/utils/reachability'
 import {
   AUTO_ACCESS_MODE,
   accessModeMeta,

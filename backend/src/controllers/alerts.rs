@@ -12,16 +12,24 @@ use crate::{
     dtos::{
         optional_body,
         resources::{
-            AlertRuleInput, CatalogApplyInput, InstabilityQuery, PaginationQuery, SilenceInput,
+            AlertRuleInput, AlertRuleScopeQuery, CatalogApplyInput, InstabilityQuery,
+            PaginationQuery, SilenceInput,
         },
     },
-    models::{_entities::alert_events as alert_events_entity, alert_events, alert_rules, monitors},
+    models::{
+        _entities::alert_events as alert_events_entity, alert_events, alert_rules, devices,
+        monitors,
+    },
     services::{
         alerts::{
-            catalog::{service as catalog, templates},
+            catalog::{
+                service::{self as catalog, TemplateScope},
+                templates,
+            },
             contracts::AlertStatus,
             instability, silence,
         },
+        devices::capabilities,
         events::EventBus,
         monitoring::{
             result_processor::process_result,
@@ -110,8 +118,52 @@ async fn publish(ctx: &AppContext, kind: &str, payload: Value) {
 
 // --- Regras -----------------------------------------------------------------
 
-async fn rules_index(State(ctx): State<AppContext>) -> AppResult<Response> {
-    let rules = alert_rules::Entity::find_ordered().all(&ctx.db).await?;
+/// Lista as regras, opcionalmente recortadas por escopo.
+///
+/// Sem parâmetro devolve tudo — a Central de Alertas continua sendo a fonte
+/// única da verdade. Com `deviceId`, devolve as regras **daquele** dispositivo
+/// e as dos monitores dele: é a mesma lista que a aba Regras da página do
+/// dispositivo mostra, e não uma segunda listagem. Com `includeGlobal`, junta
+/// as regras sem escopo — que valem para o parque inteiro e, portanto, também
+/// para este equipamento.
+async fn rules_index(
+    State(ctx): State<AppContext>,
+    Query(scope): Query<AlertRuleScopeQuery>,
+) -> AppResult<Response> {
+    let mut query = alert_rules::Entity::find_ordered();
+    if let Some(device_id) = scope.device_id {
+        let monitor_ids: Vec<i64> = monitors::Entity::find()
+            .filter(monitors::Column::DeviceId.eq(device_id))
+            .all(&ctx.db)
+            .await?
+            .into_iter()
+            .map(|monitor| monitor.id)
+            .collect();
+        let mut condicao = Condition::any().add(alert_rules::Column::DeviceId.eq(device_id));
+        if !monitor_ids.is_empty() {
+            condicao = condicao.add(alert_rules::Column::MonitorId.is_in(monitor_ids));
+        }
+        // Uma regra global **também** é avaliada nas checagens deste
+        // equipamento: escondê-la da aba dele mostraria "nenhuma regra" a quem
+        // acabou de criar uma. Quem pede o acréscimo é a tela, porque em outros
+        // recortes "só deste dispositivo" continua sendo a pergunta certa.
+        if scope.include_global.unwrap_or(false) {
+            condicao = condicao.add(
+                Condition::all()
+                    .add(alert_rules::Column::DeviceId.is_null())
+                    .add(alert_rules::Column::MonitorId.is_null())
+                    .add(alert_rules::Column::SiteId.is_null()),
+            );
+        }
+        query = query.filter(condicao);
+    }
+    if let Some(monitor_id) = scope.monitor_id {
+        query = query.filter(alert_rules::Column::MonitorId.eq(monitor_id));
+    }
+    if let Some(site_id) = scope.site_id {
+        query = query.filter(alert_rules::Column::SiteId.eq(site_id));
+    }
+    let rules = query.all(&ctx.db).await?;
     Ok(format::json(
         rules
             .into_iter()
@@ -147,9 +199,11 @@ async fn rules_store(
         non_negative(input.notification_cooldown_seconds, 0, invalid_cooldown)?;
 
     let rule = alert_rules::ActiveModel {
-        site_id: Set(input.site_id),
-        device_id: Set(input.device_id),
-        monitor_id: Set(input.monitor_id),
+        // No `POST`, campo ausente e `null` significam a mesma coisa — a regra
+        // nasce sem aquela dimensão de escopo.
+        site_id: Set(input.site_id.flatten()),
+        device_id: Set(input.device_id.flatten()),
+        monitor_id: Set(input.monitor_id.flatten()),
         name: Set(name.to_string()),
         r#type: Set(input.rule_type.unwrap_or_else(|| "custom".into())),
         condition: Set(condition),
@@ -208,9 +262,11 @@ async fn rules_update(
 
     let rule = alert_rules::ActiveModel {
         id: Set(id),
-        site_id: Set(input.site_id.or(current.site_id)),
-        device_id: Set(input.device_id.or(current.device_id)),
-        monitor_id: Set(input.monitor_id.or(current.monitor_id)),
+        // `unwrap_or` sobre a dupla opção: campo ausente mantém o atual,
+        // `null` explícito limpa. Ver a nota do `AlertRuleInput`.
+        site_id: Set(input.site_id.unwrap_or(current.site_id)),
+        device_id: Set(input.device_id.unwrap_or(current.device_id)),
+        monitor_id: Set(input.monitor_id.unwrap_or(current.monitor_id)),
         name: Set(input
             .name
             .as_deref()
@@ -253,14 +309,39 @@ async fn rules_destroy(State(ctx): State<AppContext>, Path(id): Path<i64>) -> Ap
 
 // --- Catálogo ---------------------------------------------------------------
 
-async fn catalog_index(State(ctx): State<AppContext>) -> AppResult<Response> {
+/// O catálogo, global ou já fixado num dispositivo.
+///
+/// É **um** catálogo, não dois: abrir pela página do dispositivo apenas
+/// preenche o escopo e filtra pela aplicabilidade; abrir por `/alerts` deixa o
+/// operador escolher. O mesmo componente do frontend serve às duas telas.
+async fn catalog_index(
+    State(ctx): State<AppContext>,
+    Query(scope): Query<AlertRuleScopeQuery>,
+) -> AppResult<Response> {
     let categories: serde_json::Map<String, Value> = templates::CATEGORY_LABELS
         .iter()
         .map(|(key, label)| ((*key).to_string(), json!(label)))
         .collect();
+
+    let escopo = TemplateScope {
+        site_id: scope.site_id,
+        device_id: scope.device_id,
+        monitor_id: scope.monitor_id,
+    };
+    let capacidades = match scope.device_id {
+        Some(device_id) => {
+            let device = devices::Entity::find_by_id(device_id)
+                .one(&ctx.db)
+                .await?
+                .ok_or_else(|| AppError::not_found("Dispositivo não encontrado"))?;
+            Some(capabilities::for_device(&ctx.db, &device).await?)
+        }
+        None => None,
+    };
+
     Ok(format::json(json!({
         "categories": categories,
-        "templates": catalog::describe(&ctx.db).await?,
+        "templates": catalog::describe_for(&ctx.db, escopo, capacidades.as_ref()).await?,
     }))?)
 }
 
@@ -275,7 +356,12 @@ async fn catalog_apply(
         ));
     }
 
-    let result = catalog::apply(&ctx.db, &keys).await?;
+    let escopo = TemplateScope {
+        site_id: input.site_id,
+        device_id: input.device_id,
+        monitor_id: input.monitor_id,
+    };
+    let result = catalog::apply_scoped(&ctx.db, &keys, escopo).await?;
     for rule in &result.created {
         publish(&ctx, "alert_rule:created", rule_event_payload(rule)).await;
     }

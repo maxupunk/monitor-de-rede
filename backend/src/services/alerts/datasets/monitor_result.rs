@@ -9,7 +9,11 @@ use crate::services::{
 
 /// Nomes das métricas produzidas pelos checkers → chaves usadas nas condições.
 /// Mantém o vocabulário da UI alinhado ao avaliador.
-const METRIC_FIELD_MAP: [(&str, &str); 12] = [
+/// A tradução acontece **num único ponto**, e é de propósito: `metrics.name`
+/// (a série persistida) e `condition.field` (o vocabulário da regra) são duas
+/// camadas com convenções diferentes, e espalhar a conversão faria as duas
+/// divergirem no primeiro nome novo.
+const METRIC_FIELD_MAP: [(&str, &str); 16] = [
     ("latency", fields::LATENCY_MS),
     ("response_time", fields::LATENCY_MS),
     ("packet_loss", fields::PACKET_LOSS),
@@ -22,6 +26,12 @@ const METRIC_FIELD_MAP: [(&str, &str); 12] = [
     ("snmp_uptime", fields::SNMP_UPTIME),
     ("inBps", fields::IN_BPS),
     ("outBps", fields::OUT_BPS),
+    // Saúde do equipamento. Mesmos nomes de série que o SNMP já grava, então
+    // uma regra de CPU vale igualmente para o servidor e para o roteador.
+    ("cpu_usage", fields::CPU_USAGE_PERCENT),
+    ("memory_usage", fields::MEMORY_USED_PERCENT),
+    ("storage_usage", fields::STORAGE_USED_PERCENT),
+    ("load_average_1m", fields::LOAD_AVERAGE_1M),
 ];
 
 fn field_for(metric_name: &str) -> Option<&'static str> {

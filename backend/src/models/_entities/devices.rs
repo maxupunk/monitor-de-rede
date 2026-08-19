@@ -32,6 +32,11 @@ pub struct Model {
     /// Sistema do equipamento, do catálogo de `services::devices::systems`.
     /// `None` significa "automático" — deduzido do `sysDescr` do SNMP.
     pub operating_system: Option<String>,
+    /// Chave técnica estável de um dispositivo **do próprio sistema**
+    /// (`netmonitor`). `None` em todo equipamento comum. Ver
+    /// `services::devices::system_device`.
+    #[sea_orm(unique)]
+    pub system_key: Option<String>,
     pub status: String,
     pub last_seen_at: Option<DateTimeWithTimeZone>,
     pub created_at: DateTimeWithTimeZone,

@@ -83,10 +83,20 @@ async fn o_ciclo_do_scheduler_nao_consome_o_outbox() {
         // Alguém escutando: se o ciclo relaysse, ele consumiria a linha aqui.
         let mut inscrito = bus.subscribe();
         run_cycle(&ctx).await.expect("ciclo do scheduler");
-        assert!(
-            inscrito.try_recv().is_err(),
-            "o ciclo do scheduler entregou evento SSE — o relay voltou para o ciclo"
-        );
+        // O ciclo publica os eventos dos monitores que ele mesmo executou —
+        // inclusive a coleta de saúde do sistema, provisionada no boot. O que
+        // ele não pode fazer é entregar o que estava no `event_outbox`, que é
+        // de outro processo. Por isso a asserção é sobre a **origem** do
+        // evento, e não sobre haver evento algum: um `try_recv` vazio deixou
+        // de distinguir as duas coisas no dia em que o servidor ganhou um
+        // monitor próprio.
+        while let Ok(evento) = inscrito.try_recv() {
+            let texto = serde_json::to_string(&evento).unwrap_or_default();
+            assert!(
+                !texto.contains("\"monitorId\":7"),
+                "o ciclo do scheduler entregou o evento do outbox — o relay voltou para o ciclo: {texto}"
+            );
+        }
 
         // E a prova de que o evento continua disponível para quem deve
         // entregá-lo: o servidor.

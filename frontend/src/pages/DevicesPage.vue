@@ -84,24 +84,45 @@
               <v-tooltip activator="parent" location="top">Detalhes</v-tooltip>
             </v-btn>
 
-            <v-btn icon size="small" variant="text" color="primary" @click.stop="openDialog(item)">
-              <v-icon>mdi-pencil</v-icon>
-              <v-tooltip activator="parent" location="top">Editar</v-tooltip>
-            </v-btn>
-            <v-btn icon size="small" variant="text" color="purple" @click.stop="openPortScan(item)">
-              <v-icon>mdi-lan-connect</v-icon>
-              <v-tooltip activator="parent" location="top">Escanear Portas</v-tooltip>
-            </v-btn>
-            <v-btn
-              icon
-              size="small"
-              variant="text"
-              color="error"
-              @click.stop="confirmDelete(item.id)"
-            >
-              <v-icon>mdi-delete</v-icon>
-              <v-tooltip activator="parent" location="top">Excluir</v-tooltip>
-            </v-btn>
+            <!--
+              O dispositivo que representa esta instalação não é editável nem
+              removível, e escanear as próprias portas não é uma ação válida.
+              Quem responde isso é o backend, por `isSystem` — a tela nunca
+              deduz pelo nome nem pela posição na lista. Um botão que só pode
+              devolver erro é pior que botão nenhum.
+            -->
+            <template v-if="!item.isSystem">
+              <v-btn
+                icon
+                size="small"
+                variant="text"
+                color="primary"
+                @click.stop="openDialog(item)"
+              >
+                <v-icon>mdi-pencil</v-icon>
+                <v-tooltip activator="parent" location="top">Editar</v-tooltip>
+              </v-btn>
+              <v-btn
+                icon
+                size="small"
+                variant="text"
+                color="purple"
+                @click.stop="openPortScan(item)"
+              >
+                <v-icon>mdi-lan-connect</v-icon>
+                <v-tooltip activator="parent" location="top">Escanear Portas</v-tooltip>
+              </v-btn>
+              <v-btn
+                icon
+                size="small"
+                variant="text"
+                color="error"
+                @click.stop="confirmDelete(item.id)"
+              >
+                <v-icon>mdi-delete</v-icon>
+                <v-tooltip activator="parent" location="top">Excluir</v-tooltip>
+              </v-btn>
+            </template>
           </div>
         </template>
 
@@ -130,33 +151,35 @@
               <v-btn icon size="small" variant="text" color="info" :to="'/devices/' + item.id">
                 <v-icon>mdi-eye</v-icon>
               </v-btn>
-              <v-btn
-                icon
-                size="small"
-                variant="text"
-                color="primary"
-                @click.stop="openDialog(item)"
-              >
-                <v-icon>mdi-pencil</v-icon>
-              </v-btn>
-              <v-btn
-                icon
-                size="small"
-                variant="text"
-                color="purple"
-                @click.stop="openPortScan(item)"
-              >
-                <v-icon>mdi-lan-connect</v-icon>
-              </v-btn>
-              <v-btn
-                icon
-                size="small"
-                variant="text"
-                color="error"
-                @click.stop="confirmDelete(item.id)"
-              >
-                <v-icon>mdi-delete</v-icon>
-              </v-btn>
+              <template v-if="!item.isSystem">
+                <v-btn
+                  icon
+                  size="small"
+                  variant="text"
+                  color="primary"
+                  @click.stop="openDialog(item)"
+                >
+                  <v-icon>mdi-pencil</v-icon>
+                </v-btn>
+                <v-btn
+                  icon
+                  size="small"
+                  variant="text"
+                  color="purple"
+                  @click.stop="openPortScan(item)"
+                >
+                  <v-icon>mdi-lan-connect</v-icon>
+                </v-btn>
+                <v-btn
+                  icon
+                  size="small"
+                  variant="text"
+                  color="error"
+                  @click.stop="confirmDelete(item.id)"
+                >
+                  <v-icon>mdi-delete</v-icon>
+                </v-btn>
+              </template>
             </div>
           </div>
         </template>

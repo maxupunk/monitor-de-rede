@@ -17,7 +17,9 @@ use crate::{
             execution_guard::{
                 calculate_smart_timeout_seconds, try_acquire_monitor, try_acquire_snmp_device,
             },
+            managed::{self, ProposedMonitor},
             presenter::{present_monitors, MonitorResultPresentation, RECENT_RESULTS_LIMIT},
+            reachability,
             result_processor::process_result,
             runner::{run_monitor, RunOptions},
         },
@@ -141,6 +143,30 @@ async fn canonical_snmp_interval(
     Ok(Some(device.snmp_poll_interval_seconds))
 }
 
+/// Recusa um monitor de alcance apontado para um dispositivo que a rede não
+/// alcança.
+///
+/// A pergunta é do domínio ([`reachability`]); o que este controller faz é só
+/// carregar a linha do dispositivo para poder fazê-la. Sem `device_id` não há
+/// o que checar: um monitor solto aponta para um alvo que o operador informou.
+async fn ensure_reach_allowed(
+    ctx: &AppContext,
+    device_id: Option<i64>,
+    kind: &str,
+) -> AppResult<()> {
+    if !reachability::is_reach_check(kind) {
+        return Ok(());
+    }
+    let Some(device_id) = device_id else {
+        return Ok(());
+    };
+    let device = devices::Entity::find_by_id(device_id)
+        .one(&ctx.db)
+        .await?
+        .ok_or_else(|| AppError::not_found("Dispositivo não encontrado"))?;
+    reachability::ensure_allowed_for_device(&device, kind)
+}
+
 async fn index(State(ctx): State<AppContext>) -> AppResult<Response> {
     let rows = monitors::Entity::find()
         .order_by_asc(monitors::Column::Name)
@@ -158,6 +184,7 @@ async fn store(
     let (kind, name) = require_kind_name(&input)?;
     let kind = kind.to_string();
     let name = name.to_string();
+    ensure_reach_allowed(&ctx, input.device_id, &kind).await?;
     let enabled = input.enabled.or(input.is_enabled).unwrap_or(true);
     // O padrão vem das preferências, não de um literal: é este o ponto de
     // consumo que faz "Intervalo padrão de coleta por Ping" significar alguma
@@ -241,6 +268,24 @@ async fn update(
         .one(&ctx.db)
         .await?
         .ok_or_else(|| AppError::not_found("Monitor não encontrado"))?;
+    // O monitor gerenciado aceita ajuste de intervalo e "Executar agora", mas
+    // não troca de tipo, alvo, probe nem desativação. A guarda vem antes de
+    // qualquer validação de payload: recusar por regra de negócio é mais
+    // informativo que recusar por tipo não suportado.
+    managed::ensure_editable(
+        &current,
+        &ProposedMonitor {
+            monitor_type: input
+                .monitor_type
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty()),
+            device_id: input.device_id,
+            probe_id: input.probe_id,
+            configuration: input.configuration.as_ref(),
+            enabled: input.enabled.or(input.is_enabled),
+        },
+    )?;
     if let Some(kind_val) = input
         .monitor_type
         .as_deref()
@@ -286,6 +331,11 @@ async fn update(
         .or(input.is_enabled)
         .unwrap_or(current.enabled);
     let device_id = input.device_id.or(current.device_id);
+    // O par (dispositivo, tipo) **resultante** é o que precisa ser válido:
+    // checar só o que o payload informou deixaria passar a troca de dispositivo
+    // de um monitor de ping que já existia, e é exatamente esse o caminho que
+    // devolveria o ping ao servidor depois de o boot tê-lo removido.
+    ensure_reach_allowed(&ctx, device_id, &kind).await?;
     let interval_seconds = if kind.eq_ignore_ascii_case("snmp") {
         canonical_snmp_interval(&ctx, device_id, input.interval_seconds)
             .await?
@@ -336,10 +386,11 @@ async fn update(
 }
 
 async fn destroy(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
-    monitors::Entity::find_by_id(id)
+    let current = monitors::Entity::find_by_id(id)
         .one(&ctx.db)
         .await?
         .ok_or_else(|| AppError::not_found("Monitor não encontrado"))?;
+    managed::ensure_deletable(&current)?;
     // Resolver **antes** de apagar: o cleanup remove os `alert_events` do
     // monitor, e sem esta passagem a notificação de normalização nunca sairia.
     recovery::resolve_alerts_for_monitor(&ctx, id, "Monitor removido").await?;

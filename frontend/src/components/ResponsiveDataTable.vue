@@ -10,7 +10,9 @@
       :items-per-page="props.itemsPerPage"
       :hide-default-footer="props.hideDefaultFooter"
       :no-data-text="props.noDataText"
+      :hover="props.clickable"
       class="elevation-0"
+      :class="{ 'linha-clicavel': props.clickable }"
       @click:row="onClickRow"
     >
       <template v-for="name in desktopSlotNames" :key="name" #[name]="slotProps">
@@ -90,6 +92,18 @@ function onCardClick(item: any) {
 }
 
 function onClickRow(event: MouseEvent, row: { item: any }) {
+  // O `VDataTable` emite `click:row` sempre; quem não declarou `clickable` não
+  // pode ganhar comportamento de clique só por montar a tabela.
+  if (!props.clickable) return
   emit('click:row', event, row)
 }
 </script>
+
+<style scoped>
+/* O cursor é o que diz que a linha inteira é o alvo. Sem ele, o operador
+   continua mirando o texto do nome, que é o que a linha clicável veio
+   resolver. */
+.linha-clicavel :deep(tbody tr) {
+  cursor: pointer;
+}
+</style>

@@ -8,13 +8,14 @@ use sea_orm::{
 };
 
 use crate::{
-    models::{devices, monitor_results, monitors},
+    models::{_entities::metrics, devices, monitor_results, monitors},
     services::{
         alerts,
         events::EventBus,
         monitoring::{
             contracts::{CheckMetric, CheckResult, MonitorStatus},
             device_status::{self, DeviceStatus},
+            health::series,
         },
         shared::errors::AppResult,
     },
@@ -34,6 +35,81 @@ pub fn pick_latency_metric(metrics: &[CheckMetric]) -> Option<&CheckMetric> {
     PRECEDENCE
         .iter()
         .find_map(|name| metrics.iter().find(|metric| metric.name == *name))
+}
+
+/// As séries que pertencem ao **dispositivo**, e não à checagem (§3.1).
+///
+/// A fronteira decide o volume do banco. `monitor_results` guarda o desfecho
+/// de uma checagem — status, duração, latência, mensagem — e vive 14 dias;
+/// `metrics` guarda a grandeza contínua do equipamento e vive 30. Latência e
+/// perda de pacote **ficam onde estão**: `monitor_results.latency_ms` tem
+/// índice próprio e alimenta o sparkline, e copiá-las a cada ciclo multiplica
+/// a tabela de maior volume do sistema sem acrescentar informação.
+///
+/// A lista é fechada de propósito. Um checker que invente um nome novo não
+/// passa a escrever em `metrics` por acidente: alguém precisa acrescentá-lo
+/// aqui, que é onde a decisão de retenção está escrita.
+const DEVICE_SERIES: [&str; 8] = [
+    series::CPU_USAGE,
+    series::MEMORY_USAGE,
+    series::STORAGE_USAGE,
+    series::LOAD_AVERAGE_1M,
+    series::PROCESS_MEMORY_BYTES,
+    series::UPTIME_SECONDS,
+    series::IN_BPS,
+    series::OUT_BPS,
+];
+
+/// Verdadeiro para as medidas que viram série do dispositivo.
+#[must_use]
+pub fn is_device_series(name: &str) -> bool {
+    DEVICE_SERIES.contains(&name)
+}
+
+/// Grava em `metrics` as medidas de série de dispositivo de um resultado.
+///
+/// Uma passagem genérica, válida para **qualquer** checker que tenha
+/// `device_id` — não um gravador do servidor. É o que faz `/devices/{id}/metrics`
+/// e os widgets de CPU e memória aceitarem o servidor sem uma linha de
+/// frontend nova.
+///
+/// Roda dentro da mesma transação da observação: uma coleta cujo resultado
+/// ficou gravado e cujas séries se perderam produziria um gráfico com buraco e
+/// nenhum sinal de erro.
+async fn record_device_series<C>(
+    txn: &C,
+    monitor: &monitors::Model,
+    result: &CheckResult,
+) -> AppResult<()>
+where
+    C: sea_orm::ConnectionTrait,
+{
+    let Some(device_id) = monitor.device_id else {
+        return Ok(());
+    };
+    let recorded_at = result.finished_at.fixed_offset();
+    let linhas: Vec<metrics::ActiveModel> = result
+        .metrics
+        .iter()
+        .filter(|metric| is_device_series(&metric.name) && metric.value.is_finite())
+        .map(|metric| metrics::ActiveModel {
+            device_id: Set(device_id),
+            interface_id: Set(None),
+            // A série é do dispositivo, mas saber qual checagem a produziu é o
+            // que permite ao histórico do monitor mostrá-la sem adivinhação.
+            monitor_id: Set(Some(monitor.id)),
+            name: Set(metric.name.clone()),
+            value: Set(metric.value),
+            unit: Set(metric.unit.clone()),
+            recorded_at: Set(recorded_at),
+            ..Default::default()
+        })
+        .collect();
+    if linhas.is_empty() {
+        return Ok(());
+    }
+    metrics::Entity::insert_many(linhas).exec(txn).await?;
+    Ok(())
 }
 
 /// Persiste uma observação e retorna `None` quando o monitor foi apagado entre
@@ -67,6 +143,9 @@ pub async fn process_result(
     }
     .insert(&txn)
     .await?;
+
+    // Séries do dispositivo, na mesma transação da observação.
+    record_device_series(&txn, &monitor, result).await?;
 
     // O histórico aceita toda observação, mas apenas um resultado mais novo
     // pode alterar o estado corrente. A condição fica no UPDATE (e não só num

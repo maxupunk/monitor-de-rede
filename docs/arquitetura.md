@@ -443,6 +443,79 @@ exatamente esse o bug corrigido pela [ADR 007](adr/007-scheduler-processo-unico.
   recursos operacionais; `viewer` possui somente leitura. Contas inativas são
   recusadas em toda requisição e o último administrador ativo é protegido.
 
+## 11-A. O próprio NetMonitor como dispositivo
+
+O servidor é um dispositivo de primeira classe: aparece na lista, tem monitores,
+regras, métricas, eventos e logs pelos **mesmos** fluxos de qualquer roteador.
+Nenhuma rota, tabela, store ou tela existe só para ele.
+
+```text
+coletor de saúde local (services/monitoring/health/)
+        │
+        ▼
+monitor gerenciado `system_health`  (services/monitoring/managed.rs)
+        │
+        ▼
+  process_result ──▶ monitor_results          (série da checagem)
+        │        └─▶ metrics                  (série do dispositivo)
+        │        └─▶ motor existente de alert_rules
+        │                    │
+        │                    ▼
+        │                alert_events
+        │
+tracing da aplicação ──▶ LogQueue existente ──▶ writer em lote existente
+                                                       │
+                                                  device_logs
+                                                       │
+                                       API/SSE de logs existente
+                                                       │
+                                       /logs e aba Logs do dispositivo
+```
+
+**A identidade é `devices.system_key`**, coluna anulável com índice único
+(`netmonitor`). Nunca por ID, nome, IP, site ou rede: o ID varia por instalação,
+o nome é editável e os demais podem ser nulos.
+`services::devices::system_device` garante a linha num `Initializer` — não em
+`after_context`, porque as migrations do banco principal só convergem depois do
+`create_context` — e publica o ID num cache de processo para os caminhos
+quentes. Uma restauração de backup **invalida o cache e reexecuta o serviço**:
+o `wipe` + recarga devolve as linhas com os IDs do arquivo, e um ID cacheado
+passaria a apontar para outro equipamento.
+
+**As duas séries, e por que não são a mesma.** `monitor_results` guarda o
+desfecho de *uma checagem* (status, duração, latência) por 14 dias;
+`metrics` guarda a grandeza contínua *do dispositivo* por 30. Latência e perda
+de pacote ficam apenas na primeira: copiá-las a cada ciclo multiplicaria a
+tabela de maior volume do sistema sem acrescentar informação. A lista fechada
+do que vira série de dispositivo está em
+`monitoring::result_processor::DEVICE_SERIES`.
+
+**Os dois vocabulários.** `metrics.name` usa `cpu_usage`, `memory_usage`,
+`storage_usage`, `load_average_1m`, `process_memory_bytes`, `uptime_seconds`,
+`inBps`, `outBps`. `condition.field` (a regra de alerta) usa camelCase:
+`cpuUsagePercent`, `memoryUsedPercent`, `storageUsedPercent`, `loadAverage1m`.
+O `METRIC_FIELD_MAP` de `alerts/datasets/monitor_result.rs` é o **único** ponto
+de tradução. As chaves atravessam para o frontend por `ts-rs`
+(`dtos/alerts.rs` → `bindings/AlertField.ts`), então renomear um campo no Rust
+quebra o `typecheck` do frontend em vez de apagar um rótulo em silêncio.
+
+**As capacidades governam a tela.** `GET /api/devices/{id}/capabilities`
+(`services/devices/capabilities.rs`) responde o que existe para aquele
+dispositivo, e a mesma projeção decide **abas e botões**. Toda capacidade nasce
+de evidência persistida — uma interface inventariada, uma métrica gravada, um
+evento registrado. `devices.snmp_enabled` é intenção de cadastro, não prova de
+conexão: o estado "configurado, mas ainda não conectado" vira uma ação na Visão
+Geral, não uma aba vazia.
+
+**Retenção: uma disputa aceita, de propósito.** `retention::prune` corta o banco
+de logs por idade *e* por tamanho (4 GB, mais antigo primeiro). Com o log da
+aplicação gravando em `device_logs`, ele **disputa esse orçamento** com o syslog
+do parque: um `DEBUG` ligado empurra log de roteador para fora, e vice-versa. A
+decisão é aceitar a disputa — cota por origem custaria mais complexidade do que
+resolve. Quem precisar de mais espaço para o syslog abaixa o nível do
+`config.logger`; a coluna `device_logs.source` permite medir a proporção antes
+de decidir.
+
 ## 12. O que não existe
 
 Registrar o que **não** foi construído evita que alguém procure por uma peça
@@ -459,6 +532,14 @@ ausente achando que ela está escondida:
   `next_run_at` no banco para os ciclos seguintes.
 - **Não há agregação de métricas** (rollup por hora/dia). A retenção é por
   descarte, no `data_pruner`.
+- **Não há segundo pipeline de log dentro do processo.** O log da aplicação usa
+  a mesma fila limitada, o mesmo escritor em lote e o mesmo barramento do
+  syslog; a camada de `tracing` (`syslog/app_layer.rs`) só monta o
+  `PendingLog`. Não existe `runtime_logs`, `runtime_metrics` nem
+  `/api/runtime/*`.
+- **Não há observador externo do processo.** Um processo parado não consegue
+  alertar sobre si: monitorar a queda total do NetMonitor exigiria um segundo
+  agente, e isso está fora de escopo.
 - **Não há trilha de auditoria.** Há autorização por papel (`admin`, `operator`
   e `viewer`), mas ainda não existe registro histórico de quem alterou cada
   recurso.

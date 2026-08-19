@@ -38,7 +38,7 @@
       <v-tabs v-model="tab" color="primary">
         <v-tab value="active">Alertas Pendentes ({{ alertsStore.activeAlerts.length }})</v-tab>
         <v-tab value="resolved">Alertas Resolvidos ({{ alertsStore.resolvedAlerts.length }})</v-tab>
-        <v-tab value="rules">Regras Configuradas ({{ alertsStore.alertRules.length }})</v-tab>
+        <v-tab value="rules">Regras Configuradas ({{ regrasVisiveis.length }})</v-tab>
         <v-tab value="history">Histórico Completo</v-tab>
       </v-tabs>
       <v-divider></v-divider>
@@ -271,6 +271,38 @@
 
           <!-- Regras Configuradas -->
           <v-window-item value="rules">
+            <!--
+              O recorte vindo da URL precisa estar **visível**: uma lista
+              filtrada que não se anuncia parece uma lista curta, e o operador
+              conclui que perdeu regras.
+            -->
+            <v-alert
+              v-if="filtroDeDispositivo"
+              type="info"
+              variant="tonal"
+              density="comfortable"
+              class="mb-4 rounded-lg"
+            >
+              <div class="d-flex flex-wrap align-center justify-space-between ga-2">
+                <span>
+                  Mostrando apenas as regras de
+                  <strong>{{ deviceName(filtroDeDispositivo) }}</strong
+                  >.
+                </span>
+                <div class="d-flex ga-2">
+                  <v-btn
+                    size="small"
+                    variant="text"
+                    :to="`/devices/${filtroDeDispositivo}?tab=rules`"
+                  >
+                    Abrir o dispositivo
+                  </v-btn>
+                  <v-btn size="small" variant="tonal" @click="limparFiltroDeDispositivo">
+                    Ver todas
+                  </v-btn>
+                </div>
+              </div>
+            </v-alert>
             <v-alert
               v-if="!alertsStore.loading && alertsStore.alertRules.length === 0"
               type="info"
@@ -290,7 +322,7 @@
 
             <ResponsiveDataTable
               :headers="rulesHeaders"
-              :items="alertsStore.alertRules"
+              :items="regrasVisiveis"
               :loading="alertsStore.loading"
               :items-per-page="-1"
               hide-default-footer
@@ -308,6 +340,28 @@
                     </template>
                   </v-tooltip>
                 </div>
+              </template>
+
+              <!--
+                O escopo diz **de quem** é a regra. Sem ele, duas regras do
+                mesmo template — uma do servidor, outra de um roteador —
+                apareciam com nome idêntico e nada as distinguia na lista.
+              -->
+              <template #item.scope="{ item }">
+                <div v-if="item.deviceId || item.monitorId" class="d-flex flex-column">
+                  <RouterLink
+                    v-if="item.deviceId"
+                    class="text-primary text-decoration-none font-weight-medium"
+                    :to="`/devices/${item.deviceId}?tab=rules`"
+                  >
+                    <v-icon size="14" class="mr-1">mdi-router-network</v-icon>
+                    {{ deviceName(item.deviceId) }}
+                  </RouterLink>
+                  <span v-if="item.monitorId" class="text-caption text-grey">
+                    Monitor #{{ item.monitorId }}
+                  </span>
+                </div>
+                <span v-else class="text-caption text-grey">Todos os dispositivos</span>
               </template>
 
               <template #item.metric="{ item }">
@@ -488,7 +542,16 @@
     </v-card>
 
     <!-- Modal Regras Pré-configuradas -->
-    <AlertRuleCatalogDialog v-model="catalogDialog" @applied="onCatalogApplied" />
+    <!--
+      Aqui o dispositivo é **escolhido**; aberto pela página do equipamento, ele
+      já vem fixado. É o mesmo componente nos dois casos — o que muda é só o
+      escopo que ele recebe.
+    -->
+    <AlertRuleCatalogDialog
+      v-model="catalogDialog"
+      allow-scope-choice
+      @applied="onCatalogApplied"
+    />
 
     <v-snackbar v-model="feedback.visible" :color="feedback.color" timeout="5000">
       {{ feedback.message }}
@@ -497,220 +560,33 @@
     <!-- Modal Silenciar Alerta -->
     <AlertSilenceDialog v-model="silenceDialog" :alert-id="silenceTargetId" />
 
-    <!-- Modal Form de Regra -->
-    <v-dialog
+    <!--
+      O **mesmo** formulário da aba Regras do dispositivo. Ele carrega o
+      seletor de escopo, com "Todos os dispositivos" entre as opções.
+    -->
+    <AlertRuleFormDialog
       v-model="ruleDialog"
-      :max-width="$vuetify.display.xs ? undefined : 620"
-      :fullscreen="$vuetify.display.xs"
-    >
-      <v-card class="rounded-lg pa-4">
-        <v-card-title class="font-weight-bold">
-          {{ editingRuleId ? 'Editar Regra de Alerta' : 'Cadastrar Regra de Alerta' }}
-        </v-card-title>
-        <v-card-subtitle class="pb-2">
-          Monte a regra em linguagem simples: escolha o que medir, como comparar e a partir de qual
-          valor o alerta deve disparar.
-        </v-card-subtitle>
-
-        <v-card-text>
-          <v-form ref="formRef" @submit.prevent="saveRule">
-            <v-text-field
-              v-model="form.name"
-              label="Nome da Regra"
-              placeholder="Ex.: Latência alta no link principal"
-              variant="outlined"
-              :rules="[(v: string) => !!v || 'Informe um nome para a regra']"
-            ></v-text-field>
-
-            <v-select
-              v-model="form.field"
-              :items="ALERT_METRICS"
-              item-title="title"
-              item-value="field"
-              label="O que monitorar (métrica alvo)"
-              :hint="selectedMetric?.hint"
-              persistent-hint
-              variant="outlined"
-              class="mb-4"
-              @update:model-value="onMetricChange"
-            ></v-select>
-
-            <v-row dense>
-              <v-col cols="12" sm="6">
-                <v-select
-                  v-model="form.operator"
-                  :items="availableOperators"
-                  item-title="title"
-                  item-value="value"
-                  label="Quando o valor..."
-                  variant="outlined"
-                ></v-select>
-              </v-col>
-
-              <v-col cols="12" sm="6">
-                <v-select
-                  v-if="selectedMetric?.kind === 'enum'"
-                  v-model="form.value"
-                  :items="selectedMetric.options"
-                  item-title="title"
-                  item-value="value"
-                  label="Valor de referência"
-                  variant="outlined"
-                ></v-select>
-                <v-text-field
-                  v-else-if="selectedMetric?.kind === 'text'"
-                  v-model="form.value"
-                  label="Valor de referência"
-                  placeholder="Ex.: uplink"
-                  variant="outlined"
-                ></v-text-field>
-                <DataRateInput
-                  v-else-if="selectedMetric?.unit === 'bps'"
-                  v-model="bpsValue"
-                  label="Valor de referência"
-                ></DataRateInput>
-                <v-text-field
-                  v-else
-                  v-model.number="form.value"
-                  label="Valor de referência"
-                  type="number"
-                  :suffix="selectedMetric?.unit"
-                  variant="outlined"
-                ></v-text-field>
-              </v-col>
-            </v-row>
-
-            <v-select
-              v-model="form.durationSeconds"
-              :items="ALERT_DURATIONS"
-              item-title="title"
-              item-value="value"
-              label="Tolerância antes de disparar"
-              hint="Evita alertas por oscilações momentâneas da rede."
-              persistent-hint
-              variant="outlined"
-              class="mb-4"
-            ></v-select>
-
-            <v-select
-              v-model="form.recoveryWindowSeconds"
-              :items="RECOVERY_WINDOWS"
-              item-title="title"
-              item-value="value"
-              label="Estabilização antes de resolver"
-              hint="Só resolve depois que o alvo se mantém estável por esse período; cada recaída reinicia a contagem."
-              persistent-hint
-              variant="outlined"
-              class="mb-4"
-            ></v-select>
-
-            <v-row dense class="mb-2">
-              <v-col cols="12" md="6">
-                <v-select
-                  v-model="form.flapThreshold"
-                  :items="FLAP_THRESHOLDS"
-                  item-title="title"
-                  item-value="value"
-                  label="Detecção de oscilação"
-                  hint="Alvo que recai demais é marcado como “oscilando” e para de notificar até estabilizar."
-                  persistent-hint
-                  variant="outlined"
-                ></v-select>
-              </v-col>
-              <v-col cols="12" md="6">
-                <v-select
-                  v-model="form.flapWindowSeconds"
-                  :items="FLAP_WINDOWS"
-                  item-title="title"
-                  item-value="value"
-                  label="Janela de contagem das recaídas"
-                  :disabled="!form.flapThreshold"
-                  variant="outlined"
-                ></v-select>
-              </v-col>
-            </v-row>
-
-            <v-alert
-              v-if="flapNeedsRecoveryWindow(form.flapThreshold, form.recoveryWindowSeconds)"
-              type="warning"
-              variant="tonal"
-              density="compact"
-              class="mb-4"
-            >
-              A detecção de oscilação é medida sobre o episódio do alerta, que só sobrevive à
-              oscilação quando há estabilização. Com “sem estabilização” o alerta resolve na
-              primeira checagem ok e nunca chega a recair — escolha uma janela acima.
-            </v-alert>
-
-            <v-select
-              v-model="form.notificationCooldownSeconds"
-              :items="NOTIFICATION_COOLDOWNS"
-              item-title="title"
-              item-value="value"
-              label="Intervalo entre notificações"
-              hint="Vale mesmo quando o alerta fecha e um novo abre. A resolução acompanha o disparo: se ele foi engolido, ela também é."
-              persistent-hint
-              variant="outlined"
-              class="mb-4"
-            ></v-select>
-
-            <v-switch
-              v-model="form.inhibitWhenParentDown"
-              color="primary"
-              label="Silenciar quando o equipamento-pai já está em alerta"
-              hint="Um roteador que cai leva junto tudo que está atrás dele. Com esta opção, só o alerta do pai chega ao canal."
-              persistent-hint
-              density="compact"
-              class="mb-4"
-            ></v-switch>
-
-            <v-select
-              v-model="form.severity"
-              :items="ALERT_SEVERITIES"
-              item-title="title"
-              item-value="value"
-              label="Nível de severidade"
-              variant="outlined"
-            ></v-select>
-
-            <v-alert type="info" variant="tonal" density="comfortable" class="mt-2">
-              <div class="text-caption font-weight-bold mb-1">Resumo da regra</div>
-              <div class="text-body-2">{{ rulePreview }}</div>
-            </v-alert>
-          </v-form>
-        </v-card-text>
-
-        <v-card-actions class="justify-end">
-          <v-btn variant="text" @click="ruleDialog = false">Cancelar</v-btn>
-          <v-btn color="primary" :loading="saving" @click="saveRule">
-            {{ editingRuleId ? 'Salvar Alterações' : 'Salvar Regra' }}
-          </v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
+      :rule="editingRule"
+      :default-device-id="filtroDeDispositivo"
+      @saved="onRuleSaved"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useAlertsStore, type AlertEvent, type AlertRule } from '@/stores/alerts'
+import { useDevicesStore } from '@/stores/devices'
 import { useEventsStore } from '@/stores/events'
 import { useInfiniteList } from '@/composables/useInfiniteList'
 import AlertRuleCatalogDialog from '@/components/AlertRuleCatalogDialog.vue'
+import AlertRuleFormDialog from '@/components/AlertRuleFormDialog.vue'
 import AlertSilenceDialog from '@/components/AlertSilenceDialog.vue'
-import DataRateInput from '@/components/DataRateInput.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import {
-  ALERT_METRICS,
   ALERT_DURATIONS,
-  RECOVERY_WINDOWS,
-  FLAP_THRESHOLDS,
-  FLAP_WINDOWS,
-  NOTIFICATION_COOLDOWNS,
-  ALERT_SEVERITIES,
-  findMetric,
-  operatorsForMetric,
   metricLabel,
   operatorLabel,
   severityLabel,
@@ -718,18 +594,82 @@ import {
   statusLabel,
   statusColor,
   problemKindLabel,
-  flapNeedsRecoveryWindow,
   formatConditionValue,
-  describeRule,
-  type AlertOperator,
 } from '@/utils/alertPresentation'
 import { formatDateTime, formatRelativeTime } from '@/utils/formatters'
 
 const alertsStore = useAlertsStore()
 const eventsStore = useEventsStore()
 
+const route = useRoute()
+const router = useRouter()
+
 const tab = ref('active')
 const catalogDialog = ref(false)
+
+const devicesStore = useDevicesStore()
+
+/** Nome do dispositivo pelo id, com o próprio id como último recurso. */
+function deviceName(id: number): string {
+  return devicesStore.devices.find((device) => device.id === id)?.name ?? `Dispositivo #${id}`
+}
+
+/**
+ * Recorte da lista de regras vindo da URL.
+ *
+ * `/alerts?tab=rules&deviceId=1` é o atalho que a página do dispositivo usa —
+ * e é a mesma Central de Alertas, só filtrada. Sem isto o link abria a aba
+ * errada e mostrava o parque inteiro.
+ */
+const filtroDeDispositivo = computed<number | null>(() => {
+  const bruto = route.query.deviceId
+  const valor = Number(Array.isArray(bruto) ? bruto[0] : bruto)
+  return Number.isFinite(valor) && valor > 0 ? valor : null
+})
+
+const abasValidas = ['active', 'resolved', 'rules', 'history']
+
+/** A aba pedida na URL manda; a URL acompanha a aba escolhida na tela. */
+watch(
+  () => route.query.tab,
+  (pedida) => {
+    const alvo = Array.isArray(pedida) ? pedida[0] : pedida
+    if (typeof alvo === 'string' && abasValidas.includes(alvo)) tab.value = alvo
+  },
+  { immediate: true }
+)
+
+watch(tab, (atual) => {
+  const naUrl = Array.isArray(route.query.tab) ? route.query.tab[0] : route.query.tab
+  if (naUrl === atual) return
+  void router.replace({ query: { ...route.query, tab: atual } })
+})
+
+/** Remove o recorte sem sair da aba. */
+function limparFiltroDeDispositivo(): void {
+  const query = { ...route.query }
+  delete query.deviceId
+  void router.replace({ query })
+}
+
+/** As regras mostradas na aba, já recortadas pelo filtro da URL. */
+const regrasVisiveis = computed(() => {
+  const alvo = filtroDeDispositivo.value
+  if (alvo == null) return alertsStore.alertRules
+  return alertsStore.alertRules.filter((regra) => regra.deviceId === alvo)
+})
+
+/** Abre a regra pedida em `?ruleId=` — o atalho de edição vindo do dispositivo. */
+watch(
+  [() => route.query.ruleId, () => alertsStore.alertRules],
+  ([bruto, regras]) => {
+    const id = Number(Array.isArray(bruto) ? bruto[0] : bruto)
+    if (!Number.isFinite(id) || id <= 0) return
+    const regra = regras.find((item) => item.id === id)
+    if (regra) openRuleDialog(regra)
+  },
+  { immediate: true }
+)
 
 const verifyingId = ref<number | null>(null)
 const verifyingAll = ref(false)
@@ -795,47 +735,7 @@ const silenceDialog = ref(false)
 const silenceTargetId = ref<number | null>(null)
 
 const ruleDialog = ref(false)
-const editingRuleId = ref<number | null>(null)
-const saving = ref(false)
-const formRef = ref()
-
-const form = reactive({
-  name: '',
-  field: 'latencyMs',
-  operator: 'gt' as AlertOperator,
-  value: 150 as number | string,
-  durationSeconds: 0,
-  recoveryWindowSeconds: 0,
-  flapThreshold: 0,
-  flapWindowSeconds: 900,
-  notificationCooldownSeconds: 0,
-  inhibitWhenParentDown: false,
-  severity: 'warning' as AlertRule['severity'],
-})
-
-const selectedMetric = computed(() => findMetric(form.field))
-const availableOperators = computed(() => operatorsForMetric(form.field))
-
-/** Ponte tipada para o DataRateInput, que trabalha só em bps (number | null) */
-const bpsValue = computed<number | null>({
-  get: () => (typeof form.value === 'number' ? form.value : Number(form.value) || null),
-  set: (value) => {
-    form.value = value ?? 0
-  },
-})
-const rulePreview = computed(() =>
-  describeRule(
-    { field: form.field, operator: form.operator, value: form.value },
-    form.durationSeconds,
-    form.recoveryWindowSeconds,
-    form.flapThreshold,
-    form.flapWindowSeconds,
-    {
-      notificationCooldownSeconds: form.notificationCooldownSeconds,
-      inhibitWhenParentDown: form.inhibitWhenParentDown,
-    }
-  )
-)
+const editingRule = ref<AlertRule | null>(null)
 
 const activeHeaders = [
   { title: 'Severidade', key: 'severity', width: '120px' },
@@ -856,6 +756,7 @@ const resolvedHeaders = [
 
 const rulesHeaders = [
   { title: 'Nome da Regra', key: 'name' },
+  { title: 'Escopo', key: 'scope', sortable: false, width: '200px' },
   { title: 'Métrica Monitorada', key: 'metric', sortable: false },
   { title: 'Critério de Disparo', key: 'criteria', sortable: false },
   { title: 'Tolerância', key: 'durationSeconds', width: '150px' },
@@ -867,6 +768,9 @@ const rulesHeaders = [
 onMounted(() => {
   alertsStore.fetchActiveAlerts()
   alertsStore.fetchAlertRules()
+  // A coluna de escopo e o seletor do catálogo mostram **nome**, não id: um
+  // "Dispositivo #7" na lista de regras não diz nada a quem opera.
+  void devicesStore.fetchDevices()
 })
 
 function notify(message: string, color = 'success') {
@@ -914,41 +818,16 @@ function episodeInfo(alert: AlertEvent): string {
   return parts.join(' · ')
 }
 
-function onMetricChange(field: string) {
-  const metric = findMetric(field)
-  if (!metric) return
-  form.operator = metric.defaultOperator
-  form.value = metric.defaultValue
-}
-
+/**
+ * Abre o formulário compartilhado.
+ *
+ * Sem regra, é cadastro novo — e o escopo começa no dispositivo filtrado pela
+ * URL, quando houver: quem chegou por `/alerts?tab=rules&deviceId=1` está
+ * olhando as regras daquele equipamento e quase certamente quer criar mais uma
+ * para ele.
+ */
 function openRuleDialog(rule?: AlertRule) {
-  if (rule) {
-    editingRuleId.value = rule.id
-    form.name = rule.name
-    form.field = rule.condition?.field ?? 'latencyMs'
-    form.operator = (rule.condition?.operator ?? 'gt') as AlertOperator
-    form.value = rule.condition?.value ?? 0
-    form.durationSeconds = rule.durationSeconds ?? 0
-    form.recoveryWindowSeconds = rule.recoveryWindowSeconds ?? 0
-    form.flapThreshold = rule.flapThreshold ?? 0
-    form.flapWindowSeconds = rule.flapWindowSeconds ?? 900
-    form.notificationCooldownSeconds = rule.notificationCooldownSeconds ?? 0
-    form.inhibitWhenParentDown = rule.inhibitWhenParentDown ?? false
-    form.severity = rule.severity ?? 'warning'
-  } else {
-    editingRuleId.value = null
-    form.name = ''
-    form.field = 'latencyMs'
-    form.operator = 'gt'
-    form.value = 150
-    form.durationSeconds = 0
-    form.recoveryWindowSeconds = 0
-    form.flapThreshold = 0
-    form.flapWindowSeconds = 900
-    form.notificationCooldownSeconds = 0
-    form.inhibitWhenParentDown = false
-    form.severity = 'warning'
-  }
+  editingRule.value = rule ?? null
   ruleDialog.value = true
 }
 
@@ -957,39 +836,10 @@ function openSilenceDialog(id: number) {
   silenceDialog.value = true
 }
 
-function buildPayload(): Partial<AlertRule> {
-  const metric = selectedMetric.value
-  // Métricas numéricas precisam chegar como número para o comparador do backend
-  const value =
-    metric?.kind === 'number' && form.value !== '' ? Number(form.value) : String(form.value)
-
-  return {
-    name: form.name,
-    type: 'custom',
-    condition: { field: form.field, operator: form.operator, value },
-    durationSeconds: form.durationSeconds,
-    recoveryWindowSeconds: form.recoveryWindowSeconds,
-    flapThreshold: form.flapThreshold,
-    flapWindowSeconds: form.flapWindowSeconds,
-    notificationCooldownSeconds: form.notificationCooldownSeconds,
-    inhibitWhenParentDown: form.inhibitWhenParentDown,
-    severity: form.severity,
-    enabled: true,
-  }
-}
-
-async function saveRule() {
-  const validation = await formRef.value?.validate()
-  if (validation && validation.valid === false) return
-  if (!form.name) return
-
-  saving.value = true
-  const ok = editingRuleId.value
-    ? await alertsStore.updateAlertRule(editingRuleId.value, buildPayload())
-    : await alertsStore.createAlertRule(buildPayload())
-  saving.value = false
-
-  if (ok) ruleDialog.value = false
+/** O componente já persistiu; aqui só se recarrega o que a tela mostra. */
+async function onRuleSaved() {
+  await alertsStore.fetchAlertRules()
+  notify('Regra salva.')
 }
 
 async function toggleRule(rule: AlertRule, enabled: boolean | null) {

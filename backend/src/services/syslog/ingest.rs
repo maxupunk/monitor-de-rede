@@ -15,7 +15,7 @@ use super::{
     config::SyslogConfig,
     matcher::PatternMatcher,
     parser,
-    queue::{IngestMetrics, LogQueue, PendingLog, RateLimiter},
+    queue::{IngestMetrics, LogQueue, LogSource, PendingLog, RateLimiter},
     resolver::Resolver,
     sources::SourceRegistry,
 };
@@ -152,6 +152,10 @@ impl Ingestor {
             source_ip,
             received_at: recebido_em,
             parsed,
+            // O `Ingestor` é o caminho da rede. O log da aplicação **não**
+            // passa por aqui: não há origem para resolver, rate limit por
+            // fonte a aplicar nem "origem vista" a registrar.
+            source: LogSource::Syslog,
         })
     }
 }

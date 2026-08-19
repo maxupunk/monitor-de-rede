@@ -156,6 +156,7 @@ fn para_active_model(log: PendingLog) -> device_logs::ActiveModel {
         pid: Set(log.parsed.pid),
         topics: Set(log.parsed.topics),
         message: Set(log.parsed.message),
+        source: Set(log.source.as_str().to_string()),
         ..Default::default()
     }
 }
@@ -163,7 +164,7 @@ fn para_active_model(log: PendingLog) -> device_logs::ActiveModel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::syslog::{db, parser::ParsedLog, queue::LogQueue};
+    use crate::services::syslog::{db, parser::ParsedLog, queue::LogQueue, queue::LogSource};
     use chrono::Utc;
     use sea_orm::PaginatorTrait;
     use serial_test::serial;
@@ -179,6 +180,7 @@ mod tests {
                 message: mensagem.into(),
                 ..ParsedLog::default()
             },
+            source: LogSource::Syslog,
         }
     }
 

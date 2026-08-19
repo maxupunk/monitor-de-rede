@@ -144,11 +144,12 @@ async fn aplica_pragmas(db: &DatabaseConnection) {
 /// Não devolve `Result` de propósito: um erro aqui abortaria **todo** comando,
 /// inclusive `db migrate` e `doctor`. Quem precisa do banco descobre no lugar
 /// certo, por [`LogsDb::from_context`], que devolve erro nomeado.
+/// **`SYSLOG_ENABLED` não é consultado aqui, de propósito.** O flag governa o
+/// *listener* — quem abre porta —, e desistir do banco por causa dele fazia
+/// "logs do servidor ativados por padrão" morrer em silêncio em toda
+/// instalação que não recebe syslog de roteador. Sem banco de logs não há log
+/// interno, não há aba de logs e não há retenção.
 pub async fn install(ctx: &AppContext, database_url: &str) {
-    if !super::config::SyslogConfig::from_env().enabled {
-        tracing::debug!("ingestão de syslog desligada; banco de logs não aberto");
-        return;
-    }
     // **Teste nunca toca em arquivo.** O `resolve_url` poria o banco de logs ao
     // lado do de teste, e ali ele seria um arquivo só, compartilhado por toda a
     // suíte: o `Hooks::truncate` não o alcança (é outro banco), então uma linha

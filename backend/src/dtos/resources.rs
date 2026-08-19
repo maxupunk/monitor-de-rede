@@ -87,6 +87,20 @@ pub struct ProbeInput {
     pub configuration: Option<serde_json::Value>,
 }
 
+/// Distingue "campo ausente" de "campo `null`" num payload parcial.
+///
+/// `#[serde(default)]` dá `None` quando a chave não veio; este desserializador
+/// embrulha o valor lido em `Some`, de modo que `null` explícito chega como
+/// `Some(None)`. É o único jeito de um `PUT` parcial poder **limpar** um
+/// campo opcional em vez de só preenchê-lo.
+fn presente<'de, T, D>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    T: Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    T::deserialize(deserializer).map(Some)
+}
+
 /// Regra de alerta vinda da tela "Regras Configuradas".
 ///
 /// Todo campo é opcional porque o `PUT` é parcial: o botão de ligar/desligar
@@ -95,9 +109,18 @@ pub struct ProbeInput {
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct AlertRuleInput {
-    pub site_id: Option<i64>,
-    pub device_id: Option<i64>,
-    pub monitor_id: Option<i64>,
+    // As três dimensões de escopo usam **dupla opção**, e a diferença importa:
+    // `None` é "o cliente não mandou o campo" (o toggle da lista manda só
+    // `enabled`) e `Some(None)` é "o cliente mandou `null`", que significa
+    // *todos os dispositivos*. Com um `Option<i64>` simples as duas colapsam
+    // em `None`, e o `input.device_id.or(current.device_id)` do `PUT` tornava
+    // impossível devolver uma regra ao escopo global depois de vinculá-la.
+    #[serde(default, deserialize_with = "presente")]
+    pub site_id: Option<Option<i64>>,
+    #[serde(default, deserialize_with = "presente")]
+    pub device_id: Option<Option<i64>>,
+    #[serde(default, deserialize_with = "presente")]
+    pub monitor_id: Option<Option<i64>>,
     pub name: Option<String>,
     #[serde(rename = "type")]
     pub rule_type: Option<String>,
@@ -125,6 +148,32 @@ pub struct AlertRuleInput {
 #[serde(rename_all = "camelCase")]
 pub struct CatalogApplyInput {
     pub keys: Option<Vec<String>>,
+    /// Escopo em que as regras nascem. Ausente = catálogo global, que é como
+    /// `/alerts` se comporta antes de o operador escolher um dispositivo.
+    pub site_id: Option<i64>,
+    pub device_id: Option<i64>,
+    pub monitor_id: Option<i64>,
+}
+
+/// `GET /api/alert-rules` e `GET /api/alert-rules/catalog` — recorte por escopo.
+///
+/// É o mesmo parâmetro nas duas rotas de propósito: abrir o catálogo pela
+/// página do dispositivo já fixa aquele dispositivo, e listar as regras dele é
+/// a mesma pergunta feita do outro lado.
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AlertRuleScopeQuery {
+    pub device_id: Option<i64>,
+    pub monitor_id: Option<i64>,
+    pub site_id: Option<i64>,
+    /// Junta ao recorte as regras **globais** (sem site, dispositivo nem
+    /// monitor).
+    ///
+    /// Só faz sentido junto de `device_id`, e existe porque uma regra global
+    /// criada de dentro de um equipamento sumia da tela em que nasceu — o que
+    /// é indistinguível de a criação ter falhado. Fica opcional para o recorte
+    /// continuar significando "só isto" onde é isso que se quer.
+    pub include_global: Option<bool>,
 }
 
 /// `GET /api/alerts/instability` — histórico de oscilação por alvo (Fase 3).

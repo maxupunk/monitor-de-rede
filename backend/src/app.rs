@@ -8,12 +8,14 @@ use loco_rs::{
     controller::AppRoutes,
     db,
     environment::Environment,
+    logger,
     task::Tasks,
     Result,
 };
 use migration::Migrator;
 use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 use std::path::Path;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[allow(unused_imports)]
 use crate::{
@@ -22,6 +24,7 @@ use crate::{
     initializers::process_deps,
     initializers::setup::SetupInitializer,
     initializers::syslog::SyslogInitializer,
+    initializers::system_device::SystemDeviceInitializer,
     models::_entities::users,
     models::tables,
     services::syslog,
@@ -82,13 +85,61 @@ impl Hooks for App {
         // exclusivos do servidor e vivem em `initializers::syslog`.
         let database_url = ctx.config.database.uri.clone();
         syslog::db::install(&ctx, &database_url).await;
+
+        // O **pipeline** de log (fila, escritor, barramento) monta aqui, e não
+        // no `initializers::syslog`, por dois motivos que se somam:
+        //
+        // 1. `Hooks::init_logger` recebe o `AppContext` **depois** do
+        //    `after_context` e **antes** dos initializers. É ali que a camada
+        //    de `tracing` é instalada, e ela precisa da fila já existindo.
+        // 2. `run_task` não executa initializers. Com a montagem lá, um
+        //    processo `task scheduler_loop` ficaria sem log de aplicação
+        //    nenhum — justamente o processo que mais tem o que contar.
+        //
+        // Os *listeners* continuam no initializer: abrir porta é coisa de
+        // servidor.
+        if let Err(error) = syslog::build(&ctx, &syslog::SyslogConfig::from_env()) {
+            tracing::warn!(%error, "não foi possível montar o pipeline de logs");
+        }
         Ok(ctx)
+    }
+
+    /// Instala a camada que grava o log da aplicação como log do dispositivo.
+    ///
+    /// Compõe com `logger::init_env_filter` e `logger::init_layer` do próprio
+    /// Loco: a política de filtro e o formato continuam sendo os do
+    /// `config.logger`, sem whitelist nem formato redeclarados aqui. O stdout
+    /// segue intacto — é por ele que se opera o container —, e o evento não é
+    /// duplicado dentro da aplicação: são dois destinos do **mesmo** evento.
+    ///
+    /// **O `file_appender` do Loco não é reproduzido**: nenhum `config/*.yaml`
+    /// deste projeto o habilita, e copiar aqui um caminho de código que
+    /// ninguém exercita seria dívida antes do primeiro uso. Ligá-lo pede
+    /// acrescentar a camada correspondente nesta função — não há como fazê-lo
+    /// pela configuração sozinha, porque o `init` do Loco deixou de rodar.
+    fn init_logger(ctx: &AppContext) -> Result<bool> {
+        let config = &ctx.config.logger;
+        if !config.enable {
+            // Logger desligado por configuração: nada a instalar, e o Loco
+            // também não instalaria nada.
+            return Ok(false);
+        }
+
+        let filtro =
+            logger::init_env_filter::<Self>(config.override_filter.as_ref(), &config.level);
+        tracing_subscriber::registry()
+            .with(logger::init_layer(std::io::stdout, &config.format, true))
+            .with(syslog::app_layer::AppLogLayer)
+            .with(filtro)
+            .init();
+        Ok(true)
     }
 
     async fn initializers(_ctx: &AppContext) -> Result<Vec<Box<dyn Initializer>>> {
         Ok(vec![
             Box::new(SetupInitializer),
             Box::new(MonitoringInitializer),
+            Box::new(SystemDeviceInitializer),
             Box::new(SyslogInitializer),
         ])
     }

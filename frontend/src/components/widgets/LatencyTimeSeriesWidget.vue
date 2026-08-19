@@ -281,7 +281,7 @@
                     color="primary"
                     variant="outlined"
                     prepend-icon="mdi-open-in-new"
-                    @click="goToMonitor(item.id)"
+                    @click="abrirMonitor(item.id)"
                   >
                     Ver Monitor
                   </v-btn>
@@ -293,18 +293,21 @@
       </v-card>
     </v-dialog>
   </v-card>
+
+  <MonitorDetailDialog v-model="detalheAberto" :monitor-id="monitorEmDetalhe" />
 </template>
 
 <script setup lang="ts">
 import { ref, computed, type CSSProperties } from 'vue'
-import { useRouter } from 'vue-router'
+import MonitorDetailDialog from '@/components/monitors/MonitorDetailDialog.vue'
+import { useMonitorDetail } from '@/composables/useMonitorDetail'
 import { useMonitorsStore } from '@/stores/monitors'
 import { formatLatency } from '@/utils/formatters'
 
 const timeframe = ref<'5m' | '15m' | '1h' | '24h'>('15m')
 const selectedMonitorId = ref<number | 'all'>('all')
 const monitorsStore = useMonitorsStore()
-const router = useRouter()
+const { detalheAberto, monitorEmDetalhe, abrirDetalhe } = useMonitorDetail()
 
 const chartContainerRef = ref<HTMLElement | null>(null)
 const mousePos = ref<{ x: number; y: number } | null>(null)
@@ -602,9 +605,13 @@ function onChartClick() {
   }
 }
 
-function goToMonitor(id: number) {
+/**
+ * O monitor abre no **mesmo** diálogo das demais listas, e não em outra tela.
+ * Ver `useMonitorDetail`: a regra de "como se abre um monitor" é uma só.
+ */
+function abrirMonitor(id: number) {
   detailDialog.value = false
-  router.push({ name: 'monitor-detail', params: { id } })
+  abrirDetalhe(id)
 }
 
 const tooltipStyle = computed<CSSProperties>(() => {

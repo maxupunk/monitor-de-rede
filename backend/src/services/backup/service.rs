@@ -46,7 +46,11 @@ use crate::{
         },
         tables,
     },
-    services::shared::errors::{AppError, AppResult},
+    services::{
+        devices::system_device::{self, SystemDeviceService},
+        monitoring::managed::ensure_system_health_monitor,
+        shared::errors::{AppError, AppResult},
+    },
 };
 
 /// Versão do formato do arquivo.
@@ -203,6 +207,27 @@ pub async fn restore(db: &DatabaseConnection, file: &BackupFile) -> AppResult<Ta
 
     realign_sequences(&txn).await?;
     txn.commit().await?;
+
+    // O `wipe` + recarga devolve as linhas **com os IDs do arquivo**. Sem
+    // esta reexecução o ID cacheado do dispositivo do sistema passaria a
+    // apontar para outro equipamento, e os logs internos seguintes iriam
+    // parar num roteador qualquer. Se o arquivo for anterior à feature, o
+    // `ensure` simplesmente recria a linha.
+    system_device::resolver::invalidate();
+    match SystemDeviceService::new(db).ensure().await {
+        Ok(device) => {
+            // O arquivo pode ser anterior à coleta de saúde, ou tê-la perdido
+            // junto com o dispositivo. Reprovisionar aqui evita um servidor
+            // restaurado que aparece na lista e nunca mais mede nada.
+            if let Err(error) = ensure_system_health_monitor(db, device.id).await {
+                tracing::warn!(%error, "não foi possível reprovisionar a coleta de saúde após restore");
+            }
+        }
+        Err(error) => {
+            tracing::warn!(%error, "não foi possível regarantir o dispositivo do sistema após restore");
+        }
+    }
+
     Ok(counts)
 }
 

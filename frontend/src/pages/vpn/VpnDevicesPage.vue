@@ -113,17 +113,18 @@
           <div class="d-flex" style="gap: 4px">
             <v-tooltip text="Ver histórico de conectividade (ping)">
               <template #activator="{ props }">
+                <!--
+                  O histórico do peer abre o **mesmo** diálogo de detalhe das
+                  demais listas de monitor, e não uma tela cheia: quem está
+                  conferindo um túnel quer voltar à lista de túneis.
+                -->
                 <v-btn
                   v-bind="props"
                   size="small"
                   icon="mdi-heart-pulse"
                   variant="text"
                   :disabled="!item.pingMonitorId"
-                  :to="
-                    item.pingMonitorId
-                      ? { name: 'monitor-detail', params: { id: item.pingMonitorId } }
-                      : undefined
-                  "
+                  @click.stop="abrirDetalhe(item.pingMonitorId!)"
                 ></v-btn>
               </template>
             </v-tooltip>
@@ -237,11 +238,7 @@
                 icon="mdi-heart-pulse"
                 variant="text"
                 :disabled="!item.pingMonitorId"
-                :to="
-                  item.pingMonitorId
-                    ? { name: 'monitor-detail', params: { id: item.pingMonitorId } }
-                    : undefined
-                "
+                @click.stop="abrirDetalhe(item.pingMonitorId!)"
               ></v-btn>
               <v-btn
                 size="small"
@@ -335,6 +332,8 @@
     <VpnScriptViewer v-model="viewerOpen" :artifact="vpnStore.lastArtifact" />
 
     <VpnFirewallHintsDialog v-model="firewallOpen" :content="firewallContent" />
+
+    <MonitorDetailDialog v-model="detalheAberto" :monitor-id="monitorEmDetalhe" />
   </div>
 </template>
 
@@ -345,6 +344,8 @@ import VpnScriptViewer from '@/components/VpnScriptViewer.vue'
 import VpnFirewallHintsDialog from '@/components/VpnFirewallHintsDialog.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
+import MonitorDetailDialog from '@/components/monitors/MonitorDetailDialog.vue'
+import { useMonitorDetail } from '@/composables/useMonitorDetail'
 import {
   useVpnStore,
   vpnProfileIcon,
@@ -358,6 +359,7 @@ import { formatBytes, formatRelativeTime } from '@/utils/formatters'
 
 const vpnStore = useVpnStore()
 const eventsStore = useEventsStore()
+const { detalheAberto, monitorEmDetalhe, abrirDetalhe } = useMonitorDetail()
 
 const wizardOpen = ref(false)
 const viewerOpen = ref(false)

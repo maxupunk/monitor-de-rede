@@ -71,8 +71,10 @@ async fn o_catalogo_e_idempotente_e_traz_os_templates_dos_dois_roadmaps() {
 
         let catalogo = json_of(&request.get("/api/alert-rules/catalog").await.text());
         let templates = catalogo["templates"].as_array().expect("templates");
-        // 18 do roadmap de alertas + 7 padrões de log (Fase 6 do de syslog).
-        assert_eq!(templates.len(), 25);
+        // 18 do roadmap de alertas + 7 padrões de log (Fase 6 do de syslog) +
+        // 3 de saúde de equipamento (Fase 3 do roadmap do servidor como
+        // dispositivo — são de dispositivo, não do servidor).
+        assert_eq!(templates.len(), 28);
         assert_eq!(catalogo["categories"]["disponibilidade"], "Disponibilidade");
         // Campos que a tela lê em cada template.
         assert!(templates[0]["applied"].is_boolean());

@@ -121,6 +121,12 @@ ssdp-client = { version = "2.1" }
 petgraph = { version = "0.7" }
 phf = { version = "0.11", features = ["macros"] }
 
+# `statvfs` para o armazenamento do coletor de saúde. Só em Unix: no Windows o
+# coletor declara a métrica indisponível, que é a resposta honesta — o alvo de
+# produção é o container Linux.
+[target.'cfg(unix)'.dependencies]
+libc = { version = "0.2" }
+
 [[bin]]
 name = "backend-cli"
 path = "src/bin/main.rs"

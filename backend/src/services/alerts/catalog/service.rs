@@ -11,6 +11,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::{
+    dtos::devices::DeviceCapabilities,
     models::alert_rules,
     services::{
         alerts::{
@@ -31,6 +32,10 @@ pub struct AlertRuleTemplateView {
     pub applied: bool,
     /// Regra existente correspondente, quando houver.
     pub rule_id: Option<i64>,
+    /// O dispositivo do escopo publica o campo que a condição compara.
+    ///
+    /// Sempre `true` no catálogo global: lá ainda não há dispositivo escolhido.
+    pub applicable: bool,
 }
 
 /// Por que um template pedido não virou regra.
@@ -52,6 +57,53 @@ pub struct SkippedTemplate {
 pub struct CatalogApplicationResult {
     pub created: Vec<alert_rules::Model>,
     pub skipped: Vec<SkippedTemplate>,
+}
+
+/// Onde um template será aplicado.
+///
+/// Sem isto o catálogo era **global por `template_key`**: aplicar o mesmo
+/// template a um segundo dispositivo devolvia `already_exists` e não criava
+/// nada, em silêncio. A chave de idempotência passa a ser
+/// `(template_key, site_id, device_id, monitor_id)` nas duas estruturas de
+/// índice, e é por isso que o escopo precisa existir como tipo em vez de ficar
+/// implícito em `None, None, None`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct TemplateScope {
+    pub site_id: Option<i64>,
+    pub device_id: Option<i64>,
+    pub monitor_id: Option<i64>,
+}
+
+impl TemplateScope {
+    /// O escopo global — nenhuma das três dimensões delimitada.
+    #[must_use]
+    pub const fn global() -> Self {
+        Self {
+            site_id: None,
+            device_id: None,
+            monitor_id: None,
+        }
+    }
+
+    /// Escopo de um dispositivo.
+    #[must_use]
+    pub const fn device(device_id: i64) -> Self {
+        Self {
+            site_id: None,
+            device_id: Some(device_id),
+            monitor_id: None,
+        }
+    }
+
+    fn key(self, template_key: &str) -> String {
+        let id = |value: Option<i64>| value.map_or_else(String::new, |value| value.to_string());
+        format!(
+            "{template_key}|{}|{}|{}",
+            id(self.site_id),
+            id(self.device_id),
+            id(self.monitor_id)
+        )
+    }
 }
 
 /// Assinatura que identifica uma regra por condição + escopo.
@@ -95,9 +147,13 @@ fn rule_signature(rule: &alert_rules::Model) -> String {
     )
 }
 
-fn template_signature(template: &AlertRuleTemplate) -> String {
-    // Templates nascem sempre globais: nenhuma das três dimensões é delimitada.
-    signature(&template.condition, None, None, None)
+fn template_signature(template: &AlertRuleTemplate, scope: TemplateScope) -> String {
+    signature(
+        &template.condition,
+        scope.site_id,
+        scope.device_id,
+        scope.monitor_id,
+    )
 }
 
 /// Índices de tudo que já existe, para decidir sem N consultas.
@@ -112,7 +168,12 @@ impl ExistingRules {
         let mut by_signature = HashMap::new();
         for rule in repository::find_all(db).await? {
             if let Some(key) = rule.template_key.clone() {
-                by_template_key.entry(key).or_insert(rule.id);
+                let scope = TemplateScope {
+                    site_id: rule.site_id,
+                    device_id: rule.device_id,
+                    monitor_id: rule.monitor_id,
+                };
+                by_template_key.entry(scope.key(&key)).or_insert(rule.id);
             }
             by_signature.entry(rule_signature(&rule)).or_insert(rule.id);
         }
@@ -122,39 +183,79 @@ impl ExistingRules {
         })
     }
 
-    fn matching(&self, template: &AlertRuleTemplate) -> Option<i64> {
+    fn matching(&self, template: &AlertRuleTemplate, scope: TemplateScope) -> Option<i64> {
         self.by_template_key
-            .get(template.key)
-            .or_else(|| self.by_signature.get(&template_signature(template)))
+            .get(&scope.key(template.key))
+            .or_else(|| self.by_signature.get(&template_signature(template, scope)))
             .copied()
     }
 
-    fn remember(&mut self, template: &AlertRuleTemplate, rule_id: i64) {
+    fn remember(&mut self, template: &AlertRuleTemplate, scope: TemplateScope, rule_id: i64) {
         self.by_template_key
-            .insert(template.key.to_string(), rule_id);
+            .insert(scope.key(template.key), rule_id);
         self.by_signature
-            .insert(template_signature(template), rule_id);
+            .insert(template_signature(template, scope), rule_id);
     }
 }
 
 /// Catálogo completo com a marcação do que já está configurado.
 ///
+/// Sem escopo, descreve o catálogo global — que é o que `/alerts` mostra antes
+/// de o operador escolher um dispositivo.
+///
 /// # Errors
 ///
 /// Propaga erro do banco.
 pub async fn describe<C: ConnectionTrait>(db: &C) -> AppResult<Vec<AlertRuleTemplateView>> {
+    describe_for(db, TemplateScope::global(), None).await
+}
+
+/// Catálogo visto **de dentro de um dispositivo**.
+///
+/// Duas coisas mudam em relação ao global: `applied` passa a perguntar "já
+/// existe para *este* dispositivo" — sem isso, aplicar o mesmo template a um
+/// segundo equipamento seria recusado em silêncio — e `applicable` filtra pelo
+/// vocabulário que o dispositivo publica de fato, para que a tela não ofereça
+/// uma regra de CPU a quem só responde ping.
+///
+/// # Errors
+///
+/// Propaga erro do banco.
+pub async fn describe_for<C: ConnectionTrait>(
+    db: &C,
+    scope: TemplateScope,
+    capabilities: Option<&DeviceCapabilities>,
+) -> AppResult<Vec<AlertRuleTemplateView>> {
     let existing = ExistingRules::load(db).await?;
     Ok(templates::all()
         .into_iter()
         .map(|template| {
-            let rule_id = existing.matching(&template);
+            let rule_id = existing.matching(&template, scope);
+            let applicable = is_applicable(&template, capabilities);
             AlertRuleTemplateView {
                 applied: rule_id.is_some(),
                 rule_id,
+                applicable,
                 template,
             }
         })
         .collect())
+}
+
+/// Se o template faz sentido para o dispositivo escolhido.
+///
+/// Sem capacidades — o catálogo global — tudo é aplicável: quem escolhe o
+/// escopo depois é o operador.
+fn is_applicable(template: &AlertRuleTemplate, capabilities: Option<&DeviceCapabilities>) -> bool {
+    let Some(capabilities) = capabilities else {
+        return true;
+    };
+    // O campo exigido pela condição é a pergunta certa, e não a categoria: uma
+    // regra só pode disparar se o dispositivo publicar o campo que ela compara.
+    let Some(campo) = template.condition.get("field").and_then(Value::as_str) else {
+        return true;
+    };
+    capabilities.publishes(&[campo])
 }
 
 /// Cria as regras das chaves informadas, pulando as que já existem.
@@ -165,6 +266,19 @@ pub async fn describe<C: ConnectionTrait>(db: &C) -> AppResult<Vec<AlertRuleTemp
 pub async fn apply<C: ConnectionTrait>(
     db: &C,
     keys: &[String],
+) -> AppResult<CatalogApplicationResult> {
+    apply_scoped(db, keys, TemplateScope::global()).await
+}
+
+/// Cria as regras das chaves informadas **já vinculadas ao escopo**.
+///
+/// # Errors
+///
+/// Propaga erro do banco.
+pub async fn apply_scoped<C: ConnectionTrait>(
+    db: &C,
+    keys: &[String],
+    scope: TemplateScope,
 ) -> AppResult<CatalogApplicationResult> {
     let mut result = CatalogApplicationResult::default();
     let mut existing = ExistingRules::load(db).await?;
@@ -181,7 +295,7 @@ pub async fn apply<C: ConnectionTrait>(
             });
             continue;
         };
-        if existing.matching(&template).is_some() {
+        if existing.matching(&template, scope).is_some() {
             result.skipped.push(SkippedTemplate {
                 key: key.clone(),
                 reason: SkipReason::AlreadyExists,
@@ -190,6 +304,9 @@ pub async fn apply<C: ConnectionTrait>(
         }
 
         let rule = alert_rules::ActiveModel {
+            site_id: Set(scope.site_id),
+            device_id: Set(scope.device_id),
+            monitor_id: Set(scope.monitor_id),
             name: Set(template.name.to_string()),
             r#type: Set(template.rule_type.to_string()),
             template_key: Set(Some(template.key.to_string())),
@@ -209,7 +326,7 @@ pub async fn apply<C: ConnectionTrait>(
 
         // Mantém os índices coerentes dentro do próprio lote (evita duplicar
         // quando duas chaves resolvem para a mesma condição).
-        existing.remember(&template, rule.id);
+        existing.remember(&template, scope, rule.id);
         result.created.push(rule);
     }
 
@@ -276,6 +393,7 @@ mod tests {
             template: templates::find("device_offline").expect("template existe"),
             applied: true,
             rule_id: Some(4),
+            applicable: true,
         };
         let json = serde_json::to_value(&view).unwrap();
         // O frontend lê tudo no mesmo nível do objeto (`AlertRuleTemplate`).

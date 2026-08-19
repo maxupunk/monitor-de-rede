@@ -62,11 +62,51 @@ export interface AlertRuleTemplate {
   /** Já existe regra equivalente: aplicar de novo não cria duplicata */
   applied: boolean
   ruleId: number | null
+  /**
+   * O dispositivo do escopo publica o campo que a condicao compara.
+   *
+   * Sempre `true` no catalogo global — la ainda nao ha dispositivo escolhido.
+   * Opcional para tolerar um backend anterior a esta versao.
+   */
+  applicable?: boolean
 }
 
 export interface AlertRuleCatalog {
   categories: Record<string, string>
   templates: AlertRuleTemplate[]
+}
+
+/**
+ * Onde uma regra do catalogo nasce.
+ *
+ * Sem escopo, o catalogo e global — e como `/alerts` se comporta antes de o
+ * operador escolher um dispositivo. Abrir o catalogo pela pagina do
+ * dispositivo ja preenche `deviceId`, e a partir dai "ja configurada" passa a
+ * significar "ja configurada **para este dispositivo**": sem isso, aplicar o
+ * mesmo template a um segundo equipamento era recusado em silencio.
+ */
+export interface AlertRuleScope {
+  siteId?: number | null
+  deviceId?: number | null
+  monitorId?: number | null
+  /**
+   * Junta ao recorte as regras globais — as que valem para todo o inventário
+   * e, por isso, também para este dispositivo. Sem isto, uma regra global
+   * criada de dentro do equipamento sumiria da aba em que nasceu.
+   */
+  includeGlobal?: boolean
+}
+
+/** Converte o escopo em query string, omitindo o que nao foi informado. */
+function scopeQuery(scope?: AlertRuleScope): string {
+  if (!scope) return ''
+  const params = new URLSearchParams()
+  if (scope.siteId != null) params.set('siteId', String(scope.siteId))
+  if (scope.deviceId != null) params.set('deviceId', String(scope.deviceId))
+  if (scope.monitorId != null) params.set('monitorId', String(scope.monitorId))
+  if (scope.includeGlobal) params.set('includeGlobal', 'true')
+  const texto = params.toString()
+  return texto ? `?${texto}` : ''
 }
 
 export interface CatalogApplicationResult {
@@ -168,11 +208,18 @@ export const useAlertsStore = defineStore('alerts', () => {
     }
   }
 
-  async function fetchAlertRules() {
+  /**
+   * As regras, opcionalmente recortadas por escopo.
+   *
+   * Sem escopo e a lista da Central de Alertas — a fonte unica da verdade. Com
+   * `deviceId`, e a mesma lista filtrada, e **nao** um segundo cadastro: a
+   * regra que aparece aqui e a mesma linha, com o mesmo `id`, que aparece la.
+   */
+  async function fetchAlertRules(scope?: AlertRuleScope) {
     loading.value = true
     error.value = null
     try {
-      alertRules.value = await apiService.get<AlertRule[]>('/alert-rules')
+      alertRules.value = await apiService.get<AlertRule[]>(`/alert-rules${scopeQuery(scope)}`)
     } catch (err: unknown) {
       error.value = err instanceof Error ? err.message : 'Erro ao carregar regras de alerta'
     } finally {
@@ -181,11 +228,13 @@ export const useAlertsStore = defineStore('alerts', () => {
   }
 
   /** Catálogo de regras pré-configuradas mantido pelo backend */
-  async function fetchRuleCatalog(): Promise<boolean> {
+  async function fetchRuleCatalog(scope?: AlertRuleScope): Promise<boolean> {
     catalogLoading.value = true
     error.value = null
     try {
-      const catalog = await apiService.get<AlertRuleCatalog>('/alert-rules/catalog')
+      const catalog = await apiService.get<AlertRuleCatalog>(
+        `/alert-rules/catalog${scopeQuery(scope)}`
+      )
       ruleTemplates.value = catalog.templates ?? []
       ruleCategories.value = catalog.categories ?? {}
       return true
@@ -201,15 +250,21 @@ export const useAlertsStore = defineStore('alerts', () => {
    * Aplica as regras escolhidas. O backend é idempotente: chaves já
    * configuradas voltam em `skipped` em vez de virar regra duplicada.
    */
-  async function applyCatalogRules(keys: string[]): Promise<CatalogApplicationResult | null> {
+  async function applyCatalogRules(
+    keys: string[],
+    scope?: AlertRuleScope
+  ): Promise<CatalogApplicationResult | null> {
     catalogLoading.value = true
     error.value = null
     try {
       const result = await apiService.post<CatalogApplicationResult>('/alert-rules/catalog', {
         keys,
+        siteId: scope?.siteId ?? null,
+        deviceId: scope?.deviceId ?? null,
+        monitorId: scope?.monitorId ?? null,
       })
       result.created.forEach((rule) => upsertAlertRule(rule))
-      await fetchRuleCatalog()
+      await fetchRuleCatalog(scope)
       return result
     } catch (err: unknown) {
       error.value = err instanceof Error ? err.message : 'Erro ao aplicar regras pré-configuradas'

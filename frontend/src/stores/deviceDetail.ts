@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { apiService } from '@/services/apiService'
+import type { DeviceCapabilities } from '@/bindings/DeviceCapabilities'
 import type { Device } from './devices'
 import type { Monitor } from './monitors'
 
@@ -124,6 +125,16 @@ export const useDeviceDetailStore = defineStore('deviceDetail', () => {
   const updatingInterfaceId = ref<number | null>(null)
   const scanResult = ref<ScanResult | null>(null)
   const error = ref<string | null>(null)
+  /**
+   * O que este dispositivo de fato oferece, respondido pelo backend.
+   *
+   * A tela **não deduz** suporte a partir do nome, do ID ou de
+   * `snmpEnabled`: quem sabe se houve comunicação SNMP bem-sucedida, se há
+   * interfaces inventariadas ou se o equipamento é o próprio servidor é quem
+   * tem os dados. `null` enquanto não carregou — e nesse estado nada é
+   * afirmado, porque uma aba que aparece e some é pior que uma que demora.
+   */
+  const capabilities = ref<DeviceCapabilities | null>(null)
 
   /**
    * O backend serializa `enabled`; a UI (e o `MonitorsTable`) lê `isEnabled`.
@@ -152,12 +163,13 @@ export const useDeviceDetailStore = defineStore('deviceDetail', () => {
     loading.value = true
     error.value = null
     try {
-      const [devData, intfData, monData, metData, evtData] = await Promise.allSettled([
+      const [devData, intfData, monData, metData, evtData, capData] = await Promise.allSettled([
         apiService.get<Device>(`/devices/${deviceId}`),
         apiService.get<DeviceInterface[]>(`/devices/${deviceId}/interfaces`),
         apiService.get<DeviceMonitor[]>(`/devices/${deviceId}/monitors`),
         apiService.get<DeviceMetric[]>(`/devices/${deviceId}/metrics`),
         apiService.get<DeviceEvent[]>(`/devices/${deviceId}/events`),
+        apiService.get<DeviceCapabilities>(`/devices/${deviceId}/capabilities`),
       ])
 
       if (devData.status === 'fulfilled') device.value = devData.value
@@ -173,6 +185,7 @@ export const useDeviceDetailStore = defineStore('deviceDetail', () => {
       if (evtData.status === 'fulfilled') {
         events.value = Array.isArray(evtData.value) ? evtData.value : []
       }
+      if (capData.status === 'fulfilled') capabilities.value = capData.value
     } catch (err: unknown) {
       error.value = err instanceof Error ? err.message : 'Erro ao carregar detalhes do dispositivo'
     } finally {
@@ -381,6 +394,7 @@ export const useDeviceDetailStore = defineStore('deviceDetail', () => {
     updatingInterfaceId,
     scanResult,
     error,
+    capabilities,
     loadDeviceDetails,
     reloadMonitors,
     triggerSnmpPoll,

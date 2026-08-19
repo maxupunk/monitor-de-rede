@@ -25,6 +25,23 @@ pub const SNMP_UPTIME: &str = "snmpUptime";
 pub const IN_BPS: &str = "inBps";
 pub const OUT_BPS: &str = "outBps";
 
+// --- Saúde do equipamento ---------------------------------------------------
+//
+// São campos **de dispositivo**, não do servidor. Quem os publica é qualquer
+// checagem que meça a saúde de um equipamento: a coleta local do NetMonitor e
+// o dataset do SNMP de um roteador, hoje; o que vier depois, amanhã. Foi por
+// isso que o produto não tinha alerta de CPU até aqui — a leitura existia, mas
+// fora do vocabulário avaliável, e regra alguma podia falar sobre ela.
+
+/// Uso de CPU em % (0–100).
+pub const CPU_USAGE_PERCENT: &str = "cpuUsagePercent";
+/// Memória usada em % (0–100).
+pub const MEMORY_USED_PERCENT: &str = "memoryUsedPercent";
+/// Armazenamento usado em % (0–100).
+pub const STORAGE_USED_PERCENT: &str = "storageUsedPercent";
+/// Carga média de 1 minuto, em processos executáveis.
+pub const LOAD_AVERAGE_1M: &str = "loadAverage1m";
+
 // --- Estado das interfaces coletadas via SNMP -------------------------------
 
 /// Nome da interface — permite restringir a regra a uplinks, por exemplo.
@@ -73,7 +90,7 @@ pub const VPN_PREVIOUS_STATUS: &str = "vpnPreviousStatus";
 
 /// Vocabulário completo oferecido na tela de regras. A **ordem importa**: é a
 /// ordem em que os campos aparecem no seletor da interface.
-pub const ALERT_FIELDS: [&str; 29] = [
+pub const ALERT_FIELDS: [&str; 33] = [
     STATUS,
     LATENCY_MS,
     PACKET_LOSS,
@@ -86,6 +103,10 @@ pub const ALERT_FIELDS: [&str; 29] = [
     SNMP_UPTIME,
     IN_BPS,
     OUT_BPS,
+    CPU_USAGE_PERCENT,
+    MEMORY_USED_PERCENT,
+    STORAGE_USED_PERCENT,
+    LOAD_AVERAGE_1M,
     INTERFACE_NAME,
     INTERFACE_OPER_STATUS,
     INTERFACE_STATUS_TRANSITION,

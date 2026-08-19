@@ -21,10 +21,15 @@ use crate::{
     services::{
         devices::{
             access::{AccessContext, AccessMode},
+            capabilities,
+            system_device::{self, ProposedIdentity},
             systems,
         },
         maintenance::resource_cleanup::ResourceCleanupService,
-        monitoring::presenter::{present_monitors, RECENT_RESULTS_LIMIT},
+        monitoring::{
+            presenter::{present_monitors, RECENT_RESULTS_LIMIT},
+            reachability,
+        },
         preferences,
         shared::{
             errors::{AppError, AppResult},
@@ -191,7 +196,11 @@ fn corpo(
         "operatingSystem": device.operating_system, "effectiveOperatingSystem": sistema.system.id,
         "operatingSystemSource": sistema.source, "operatingSystemReason": sistema.reason,
         "lastSeenAt": device.last_seen_at.map(|v| v.to_rfc3339()), "createdAt": device.created_at.to_rfc3339(),
-        "updatedAt": device.updated_at.to_rfc3339(), "site": site, "parent": parent
+        "updatedAt": device.updated_at.to_rfc3339(), "site": site, "parent": parent,
+        // A tela nunca deduz o dispositivo do sistema por nome ou por posição
+        // na lista: quem responde é o backend. `systemKey` é a identidade
+        // técnica; `isSystem` é o que a interface consulta.
+        "systemKey": device.system_key, "isSystem": system_device::is_protected(device)
     })
 }
 
@@ -287,8 +296,24 @@ async fn sync_device_monitor(
         .filter(monitors::Column::Type.eq("ping"))
         .one(db)
         .await?;
+    // Quem decide é o domínio, não este controller: o dispositivo do sistema
+    // não é alcançado pela rede, e um dispositivo sem endereço não tem alvo a
+    // checar. Nos dois casos, um ping provisionado aqui só poderia falhar —
+    // era daqui que nascia o monitor com o **nome exibido** como host.
+    let alvo = reachability::auto_target(device)
+        .filter(|_| reachability::ensure_allowed_for_device(device, "ping").is_ok());
     if device.is_monitored {
-        let configuration = serde_json::json!({"host": device.ip_address.clone().unwrap_or_else(|| device.name.clone())});
+        let Some(host) = alvo else {
+            // Sem alvo válido, um ping preexistente para de checar em vez de
+            // seguir marcando o equipamento como offline por um alvo inventado.
+            if let Some(row) = existing {
+                let mut active: monitors::ActiveModel = row.into();
+                active.enabled = Set(false);
+                active.update(db).await?;
+            }
+            return Ok(());
+        };
+        let configuration = serde_json::json!({ "host": host });
         if let Some(row) = existing {
             let mut active: monitors::ActiveModel = row.into();
             active.enabled = Set(true);
@@ -449,6 +474,25 @@ async fn update(
             .unwrap_or(current.snmp_poll_interval_seconds),
         1,
     );
+    // Regra de negócio, não perfil de acesso: o dispositivo que representa
+    // esta instalação não aceita mudança do que sustenta sua identidade.
+    system_device::ensure_identity_preserved(
+        &current,
+        &ProposedIdentity {
+            device_type: input
+                .device_type
+                .as_deref()
+                .map(str::trim)
+                .filter(|k| !k.is_empty()),
+            ip_address: input
+                .ip_address
+                .as_deref()
+                .map(str::trim)
+                .filter(|ip| !ip.is_empty()),
+            snmp_enabled: input.snmp_enabled,
+            network_id: input.network_id,
+        },
+    )?;
     let access_mode = access_mode_declarado(input.access_mode.as_deref(), current.access_mode)?;
     let operating_system =
         sistema_declarado(input.operating_system.as_deref(), current.operating_system)?;
@@ -484,12 +528,32 @@ async fn update(
 }
 
 async fn destroy(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
-    devices::Entity::find_by_id(id)
+    let row = devices::Entity::find_by_id(id)
         .one(&ctx.db)
         .await?
         .ok_or_else(|| AppError::not_found("Dispositivo não encontrado"))?;
+    system_device::ensure_deletable(&row)?;
     ResourceCleanupService::delete_device(&ctx.db, id).await?;
     Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+/// `GET /api/devices/{id}/capabilities` — o que esta página pode mostrar.
+///
+/// Uma rota, e não um campo dentro de `GET /devices/{id}`: as capacidades
+/// custam algumas contagens e a lista de dispositivos não precisa delas. A
+/// página de detalhe pede uma vez, e com a resposta decide **abas e botões** —
+/// as duas coisas, pela mesma projeção.
+async fn device_capabilities(
+    State(ctx): State<AppContext>,
+    Path(id): Path<i64>,
+) -> AppResult<Response> {
+    let device = devices::Entity::find_by_id(id)
+        .one(&ctx.db)
+        .await?
+        .ok_or_else(|| AppError::not_found("Dispositivo não encontrado"))?;
+    Ok(format::json(
+        capabilities::for_device(&ctx.db, &device).await?,
+    )?)
 }
 
 async fn device_monitors(
@@ -690,6 +754,7 @@ pub fn routes() -> Routes {
         .add("/systems", get(operating_systems))
         .add("/identify", post(identify))
         .add("/{id}", get(show).put(update).delete(destroy))
+        .add("/{id}/capabilities", get(device_capabilities))
         .add("/{id}/monitors", get(device_monitors))
         .add("/{id}/metrics", get(metrics))
         .add("/{id}/events", get(events))

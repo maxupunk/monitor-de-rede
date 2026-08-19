@@ -47,6 +47,19 @@ export interface Device {
   effectiveOperatingSystem?: string
   /** `declarado` | `snmp` | `cadastro` | `padrão`. */
   operatingSystemSource?: string
+  /**
+   * Chave técnica de um dispositivo **do próprio sistema** (`netmonitor`).
+   * `null` em todo equipamento comum.
+   */
+  systemKey?: string | null
+  /**
+   * Este é o dispositivo que representa esta instalação.
+   *
+   * Respondido pelo backend, e é a **única** forma legítima de a tela saber
+   * disso: deduzir por nome, por posição na lista ou por ID fixo é proibido —
+   * o nome é editável e o ID varia por instalação.
+   */
+  isSystem?: boolean
   site?: { id: number; name: string } | null
   parent?: { id: number; name: string } | null
   network?: { id: number; name: string; cidr: string }

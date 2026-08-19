@@ -25,6 +25,32 @@ use tokio::sync::mpsc;
 
 use super::parser::ParsedLog;
 
+/// De onde a linha veio.
+///
+/// A mesma fila serve às duas origens — é essa a decisão da Fase 4 do roadmap
+/// do servidor como dispositivo. Um segundo pipeline dentro do mesmo processo
+/// seria fila, escritor, barramento, retenção e busca duplicados para gravar na
+/// mesma tabela.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LogSource {
+    /// Recebida pela rede, pelo listener de syslog.
+    #[default]
+    Syslog,
+    /// Emitida por este processo, pela camada de `tracing`.
+    Application,
+}
+
+impl LogSource {
+    /// Forma persistida em `device_logs.source`.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Syslog => "syslog",
+            Self::Application => "application",
+        }
+    }
+}
+
 /// Uma linha resolvida, a caminho do escritor.
 #[derive(Debug, Clone)]
 pub struct PendingLog {
@@ -32,6 +58,7 @@ pub struct PendingLog {
     pub source_ip: String,
     pub received_at: DateTime<Utc>,
     pub parsed: ParsedLog,
+    pub source: LogSource,
 }
 
 /// Contadores de ingestão. Todos monotônicos desde o boot.
@@ -238,6 +265,7 @@ mod tests {
                 message: "teste".into(),
                 ..ParsedLog::default()
             },
+            source: LogSource::Syslog,
         }
     }
 

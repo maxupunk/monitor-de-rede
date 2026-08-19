@@ -83,12 +83,13 @@ fn log_pattern(spec: LogPatternSpec) -> AlertRuleTemplate {
 }
 
 /// As seis categorias exibidas na tela, com os rótulos em português.
-pub const CATEGORY_LABELS: [(&str, &str); 7] = [
+pub const CATEGORY_LABELS: [(&str, &str); 8] = [
     ("disponibilidade", "Disponibilidade"),
     ("desempenho", "Desempenho"),
     ("servicos", "Serviços e aplicações"),
     ("interfaces", "Interfaces de rede (SNMP)"),
     ("equipamento", "Equipamento (SNMP)"),
+    ("saude", "Saúde do equipamento"),
     ("vpn", "Túneis VPN (WireGuard)"),
     ("logs", "Padrões no log (syslog)"),
 ];
@@ -562,8 +563,74 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             severity: "info",
             recommended: false,
         }),
+        // --- Saúde do equipamento -------------------------------------------
+        //
+        // Não são "regras do servidor". São regras de **dispositivo**: valem
+        // para qualquer equipamento que publique os campos — o NetMonitor pela
+        // coleta local, um roteador pelo dataset do SNMP. `recommended: false`
+        // de propósito: o conjunto básico é global, e uma regra de CPU sem
+        // escopo dispararia para o parque inteiro. Quem as aplica é o catálogo
+        // por dispositivo, que sabe se o campo existe ali.
+        AlertRuleTemplate {
+            key: "cpu_usage_high",
+            name: "CPU acima de 85%",
+            description: "Uso de CPU sustentado por 5 minutos. Pico curto não alerta — só a carga que persiste.",
+            category: "saude",
+            rule_type: "custom",
+            condition: json!({ "field": fields::CPU_USAGE_PERCENT, "operator": "gt", "value": 85 }),
+            severity: "warning",
+            duration_seconds: 300,
+            recovery_window_seconds: 300,
+            flap_threshold: 5,
+            flap_window_seconds: 900,
+            notification_cooldown_seconds: 900,
+            // A saúde descreve o estado do próprio equipamento: o pai caído não
+            // explica a CPU do filho, e calar aqui seria esconder.
+            inhibit_when_parent_down: false,
+            recommended: false,
+        },
+        AlertRuleTemplate {
+            key: "memory_usage_high",
+            name: "Memória usada acima de 90%",
+            description: "Memória sustentada acima de 90% por 5 minutos — a faixa em que o sistema começa a recuperar página à força.",
+            category: "saude",
+            rule_type: "custom",
+            condition: json!({ "field": fields::MEMORY_USED_PERCENT, "operator": "gt", "value": 90 }),
+            severity: "warning",
+            duration_seconds: 300,
+            recovery_window_seconds: 300,
+            flap_threshold: 5,
+            flap_window_seconds: 900,
+            notification_cooldown_seconds: 900,
+            inhibit_when_parent_down: false,
+            recommended: false,
+        },
+        AlertRuleTemplate {
+            key: "storage_usage_high",
+            name: "Armazenamento usado acima de 85%",
+            description: "Disco enchendo de forma sustentada por 10 minutos. A janela é maior porque armazenamento não oscila: quando sobe, é para ficar.",
+            category: "saude",
+            rule_type: "custom",
+            condition: json!({ "field": fields::STORAGE_USED_PERCENT, "operator": "gt", "value": 85 }),
+            severity: "warning",
+            duration_seconds: 600,
+            recovery_window_seconds: 600,
+            flap_threshold: 5,
+            flap_window_seconds: 900,
+            notification_cooldown_seconds: 900,
+            inhibit_when_parent_down: false,
+            recommended: false,
+        },
     ]
 }
+
+/// As chaves de saúde, que o catálogo por dispositivo aplica ao Servidor
+/// NetMonitor no primeiro boot.
+///
+/// Ficam aqui, e não numa lista solta no serviço, porque é aqui que os
+/// templates existem: acrescentar um quarto template de saúde e esquecer de
+/// listá-lo seria um erro invisível.
+pub const HEALTH_KEYS: [&str; 3] = ["cpu_usage_high", "memory_usage_high", "storage_usage_high"];
 
 /// Um template pela chave.
 #[must_use]
@@ -583,8 +650,9 @@ mod tests {
     use std::collections::HashSet;
 
     /// 18 do roadmap de alertas + 7 padrões de log (Fase 6 do roadmap de
-    /// syslog).
-    const TOTAL_TEMPLATES: usize = 25;
+    /// syslog) + 3 de saúde de equipamento (Fase 3 do roadmap do servidor como
+    /// dispositivo).
+    const TOTAL_TEMPLATES: usize = 28;
 
     #[test]
     fn o_catalogo_tem_os_templates_dos_dois_roadmaps() {
@@ -615,7 +683,7 @@ mod tests {
                 template.category
             );
         }
-        assert_eq!(labels.len(), 7);
+        assert_eq!(labels.len(), 8);
     }
 
     #[test]

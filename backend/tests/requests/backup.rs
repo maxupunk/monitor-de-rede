@@ -8,6 +8,26 @@ use serial_test::serial;
 
 use super::prepare_data;
 
+/// Os dispositivos **de rede** de uma resposta de `/api/devices`.
+///
+/// O Servidor NetMonitor é criado no boot e viaja no backup como qualquer
+/// outro dispositivo — é exatamente o que a Fase 1 pede. Estes testes falam
+/// sobre a configuração que o operador cadastrou, então o descartam aqui em
+/// vez de fingir que ele não existe.
+fn sem_o_do_sistema(lista: &serde_json::Value) -> Vec<&serde_json::Value> {
+    lista
+        .as_array()
+        .expect("lista de dispositivos")
+        .iter()
+        // Duas formas para a mesma pergunta: a API devolve `isSystem`
+        // (camelCase, §5.1) e o arquivo de backup carrega o `Model` cru, em
+        // snake_case.
+        .filter(|device| {
+            device["isSystem"] != serde_json::Value::Bool(true) && device["system_key"].is_null()
+        })
+        .collect()
+}
+
 /// Cria um site, uma rede, um dispositivo e um monitor, e devolve o id do
 /// dispositivo — o suficiente para exercitar o grafo de FKs no arquivo.
 async fn semear(request: &TestServer) -> (i64, i64) {
@@ -69,7 +89,7 @@ async fn exportar_e_restaurar_devolve_a_configuracao_com_os_mesmos_ids() {
         let arquivo: serde_json::Value = serde_json::from_str(&exported.text()).unwrap();
         assert_eq!(arquivo["formatVersion"], 1);
         assert_eq!(arquivo["tables"]["sites"].as_array().unwrap().len(), 1);
-        assert_eq!(arquivo["tables"]["devices"].as_array().unwrap().len(), 1);
+        assert_eq!(sem_o_do_sistema(&arquivo["tables"]["devices"]).len(), 1);
         // Telemetria e contas de acesso não entram no arquivo.
         assert!(arquivo["tables"].get("metrics").is_none());
         assert!(arquivo["tables"].get("users").is_none());
@@ -90,7 +110,7 @@ async fn exportar_e_restaurar_devolve_a_configuracao_com_os_mesmos_ids() {
         );
         let vazio = request.get("/api/devices").await;
         let vazio: serde_json::Value = serde_json::from_str(&vazio.text()).unwrap();
-        assert!(vazio.as_array().unwrap().is_empty());
+        assert!(sem_o_do_sistema(&vazio).is_empty());
 
         let restored = request.post("/api/backup/restore").json(&arquivo).await;
         assert_eq!(restored.status_code(), 200, "{}", restored.text());
@@ -102,12 +122,19 @@ async fn exportar_e_restaurar_devolve_a_configuracao_com_os_mesmos_ids() {
         assert_eq!(device["name"], "rt-core");
         assert_eq!(device["siteId"].as_i64(), Some(site_id));
 
-        // O monitor voltou apontando para o dispositivo certo.
+        // O monitor voltou apontando para o dispositivo certo. A coleta de
+        // saúde do sistema também está na lista — ela é um monitor comum, e é
+        // esse o ponto da Fase 2 —, então a asserção fala do monitor semeado.
         let monitors = request.get("/api/monitors").await;
         let monitors: serde_json::Value = serde_json::from_str(&monitors.text()).unwrap();
-        let lista = monitors.as_array().unwrap();
-        assert_eq!(lista.len(), 1);
-        assert_eq!(lista[0]["deviceId"].as_i64(), Some(device_id));
+        let semeados: Vec<&serde_json::Value> = monitors
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|monitor| monitor["type"] != "system_health")
+            .collect();
+        assert_eq!(semeados.len(), 1);
+        assert_eq!(semeados[0]["deviceId"].as_i64(), Some(device_id));
 
         // Cadastrar depois da restauração não pode colidir com um id restaurado
         // — é o que a sequência realinhada garante no PostgreSQL.
@@ -228,7 +255,7 @@ async fn arquivo_de_versao_desconhecida_e_recusado_sem_tocar_no_banco() {
 
         let devices = request.get("/api/devices").await;
         let devices: serde_json::Value = serde_json::from_str(&devices.text()).unwrap();
-        assert_eq!(devices.as_array().unwrap().len(), 1);
+        assert_eq!(sem_o_do_sistema(&devices).len(), 1);
     })
     .await;
 }

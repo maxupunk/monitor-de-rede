@@ -535,6 +535,7 @@ mod tests {
             snmp_poll_interval_seconds: 60,
             access_mode: Some("vpn".into()),
             operating_system: Some("routeros".into()),
+            system_key: None,
             status: "unknown".into(),
             last_seen_at: None,
             created_at: now.into(),

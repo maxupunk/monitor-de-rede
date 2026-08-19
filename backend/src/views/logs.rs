@@ -246,6 +246,7 @@ mod tests {
             pid: None,
             topics: topics.map(str::to_owned),
             message: "mensagem".into(),
+            source: "syslog".into(),
             created_at: Utc::now().into(),
         }
     }

@@ -7,17 +7,23 @@
     :items-per-page="-1"
     hide-default-footer
     :no-data-text="noDataText"
-    :clickable="false"
+    clickable
+    :item-key="(item: Monitor) => item.id"
+    @click:row="(_event: MouseEvent, row: { item: Monitor }) => abrirDetalhe(row.item)"
   >
     <!-- Nome, dispositivo e histórico -->
     <template #item.name="{ item }">
       <div class="py-2">
-        <router-link
-          :to="`/monitors/${item.id}`"
-          class="text-subtitle-1 font-weight-bold text-decoration-none text-primary hover-underline d-block mb-1"
+        <a
+          class="text-subtitle-1 font-weight-bold text-decoration-none text-primary hover-underline d-block mb-1 cursor-pointer"
+          role="button"
+          tabindex="0"
+          :href="`/monitors/${item.id}`"
+          @click.prevent.stop="abrirDetalhe(item)"
+          @keydown.enter.prevent="abrirDetalhe(item)"
         >
           {{ item.name }}
-        </router-link>
+        </a>
         <div
           v-if="showDevice"
           class="text-caption text-grey-darken-1 mb-1 d-flex align-center ga-1"
@@ -49,9 +55,10 @@
             </v-icon>
             {{ interfaceStatusInfo(item).label }}
           </div>
-          <router-link
-            :to="`/monitors/${item.id}`"
-            class="text-decoration-none d-inline-flex align-center"
+          <a
+            class="text-decoration-none d-inline-flex align-center cursor-pointer"
+            :href="`/monitors/${item.id}`"
+            @click.prevent.stop="abrirDetalhe(item)"
           >
             <MonitorTimelineBar
               :results="item.recentResults"
@@ -59,7 +66,7 @@
               :height="20"
               :width="5"
             />
-          </router-link>
+          </a>
         </template>
       </div>
     </template>
@@ -110,6 +117,7 @@
         color="success"
         hide-details
         density="compact"
+        @click.stop
         @update:model-value="(val) => toggle(item, Boolean(val))"
       ></v-switch>
     </template>
@@ -124,21 +132,16 @@
           variant="outlined"
           prepend-icon="mdi-play"
           :loading="runningId === item.id"
-          @click="run(item)"
+          @click.stop="run(item)"
         >
           Testar
         </v-btn>
 
-        <v-btn icon size="small" variant="text" color="info" :to="`/monitors/${item.id}`">
-          <v-icon>mdi-chart-timeline-variant</v-icon>
-          <v-tooltip activator="parent" location="top">Ver Gráficos e Detalhes</v-tooltip>
-        </v-btn>
-
-        <v-btn icon size="small" variant="text" color="primary" @click="emit('edit', item)">
+        <v-btn icon size="small" variant="text" color="primary" @click.stop="emit('edit', item)">
           <v-icon>mdi-pencil</v-icon>
           <v-tooltip activator="parent" location="top">Editar monitor</v-tooltip>
         </v-btn>
-        <v-btn icon size="small" variant="text" color="error" @click="confirmDelete(item)">
+        <v-btn icon size="small" variant="text" color="error" @click.stop="confirmDelete(item)">
           <v-icon>mdi-delete</v-icon>
           <v-tooltip activator="parent" location="top">Excluir monitor</v-tooltip>
         </v-btn>
@@ -149,12 +152,16 @@
       <div class="d-flex flex-column ga-2">
         <div class="d-flex align-start justify-space-between ga-2">
           <div class="flex-grow-1 text-break">
-            <router-link
-              :to="`/monitors/${item.id}`"
-              class="text-subtitle-1 font-weight-bold text-decoration-none text-primary d-block"
+            <a
+              class="text-subtitle-1 font-weight-bold text-decoration-none text-primary d-block cursor-pointer"
+              role="button"
+              tabindex="0"
+              :href="`/monitors/${item.id}`"
+              @click.prevent.stop="abrirDetalhe(item)"
+              @keydown.enter.prevent="abrirDetalhe(item)"
             >
               {{ item.name }}
-            </router-link>
+            </a>
             <div v-if="showDevice" class="text-caption text-grey-darken-1">
               {{ item.device?.name || 'Dispositivo não vinculado' }}
             </div>
@@ -193,15 +200,17 @@
               density="compact"
               class="mt-1"
               style="transform: scale(0.85); transform-origin: right center"
+              @click.stop
               @update:model-value="(val) => toggle(item, Boolean(val))"
             ></v-switch>
           </div>
         </div>
 
         <div class="monitor-timeline-scroll">
-          <router-link
-            :to="`/monitors/${item.id}`"
-            class="text-decoration-none d-inline-flex align-center"
+          <a
+            class="text-decoration-none d-inline-flex align-center cursor-pointer"
+            :href="`/monitors/${item.id}`"
+            @click.prevent.stop="abrirDetalhe(item)"
           >
             <template v-if="isGaugeMonitor(item)">
               <div class="d-flex align-center ga-2">
@@ -224,7 +233,7 @@
               :height="20"
               :width="5"
             />
-          </router-link>
+          </a>
         </div>
 
         <div class="d-flex justify-end ga-1 mt-1">
@@ -234,23 +243,28 @@
             variant="outlined"
             prepend-icon="mdi-play"
             :loading="runningId === item.id"
-            @click="run(item)"
+            @click.stop="run(item)"
           >
             Testar
           </v-btn>
-          <v-btn icon size="small" variant="text" color="info" :to="`/monitors/${item.id}`">
-            <v-icon>mdi-chart-timeline-variant</v-icon>
-          </v-btn>
-          <v-btn icon size="small" variant="text" color="primary" @click="emit('edit', item)">
+          <v-btn icon size="small" variant="text" color="primary" @click.stop="emit('edit', item)">
             <v-icon>mdi-pencil</v-icon>
           </v-btn>
-          <v-btn icon size="small" variant="text" color="error" @click="confirmDelete(item)">
+          <v-btn icon size="small" variant="text" color="error" @click.stop="confirmDelete(item)">
             <v-icon>mdi-delete</v-icon>
           </v-btn>
         </div>
       </div>
     </template>
   </ResponsiveDataTable>
+
+  <!--
+    O detalhe do monitor abre **aqui**, sem sair da lista — e o alvo é a linha
+    inteira, não o texto do nome. Os `@click.stop` acima existem por causa
+    disso: sem eles, "Testar", "Editar", "Excluir" e o interruptor de ativação
+    abririam o diálogo por baixo da própria ação.
+  -->
+  <MonitorDetailDialog v-model="detalheAberto" :monitor-id="monitorEmDetalhe" />
 
   <!-- Confirmação de exclusão -->
   <v-dialog v-model="deleteDialog" max-width="440">
@@ -283,7 +297,9 @@ import { computed, ref } from 'vue'
 import { useMonitorsStore, type Monitor } from '@/stores/monitors'
 import MonitorTimelineBar from '@/components/MonitorTimelineBar.vue'
 import MonitorSparkline from '@/components/MonitorSparkline.vue'
+import MonitorDetailDialog from '@/components/monitors/MonitorDetailDialog.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
+import { useMonitorDetail } from '@/composables/useMonitorDetail'
 import {
   isGaugeMonitor,
   isTrafficMonitor,
@@ -341,6 +357,20 @@ const deleteDialog = ref(false)
 const deleting = ref(false)
 const monitorToDelete = ref<Monitor | null>(null)
 
+/**
+ * O detalhe do monitor é mostrado em diálogo, a partir da própria lista.
+ *
+ * Quem abre é a **linha inteira** (`@click:row`). Exigir o clique no nome era
+ * uma armadilha de precisão: o alvo tinha a largura do texto, e o resto da
+ * linha — a maior parte dela — não fazia nada.
+ *
+ * O `href` do nome continua apontando para `/monitors/{id}` de propósito:
+ * abrir em nova aba, copiar o link e a leitura por leitor de tela seguem
+ * funcionando, e a rota monta o mesmo diálogo. Ele deixou de ser o único alvo,
+ * não deixou de ser um alvo.
+ */
+const { detalheAberto, monitorEmDetalhe, abrirDetalhe } = useMonitorDetail()
+
 const showDevice = computed(() => props.variant === 'full')
 
 const headers = computed(() => [
@@ -356,7 +386,7 @@ const headers = computed(() => [
     : [{ title: 'Intervalo de coleta', key: 'intervalSeconds', width: '150px' }]),
   { title: 'Status', key: 'status', width: '100px' },
   { title: 'Ativo', key: 'isEnabled', width: '80px' },
-  { title: 'Ações', key: 'actions', sortable: false, width: '220px' },
+  { title: 'Ações', key: 'actions', sortable: false, width: '180px' },
 ])
 
 /**
@@ -472,5 +502,12 @@ function formatTarget(item: Monitor): string {
 <style scoped>
 .hover-underline:hover {
   text-decoration: underline !important;
+}
+
+/* Os alvos que abrem o diálogo são `<a>` com `@click.prevent`: mantêm o
+   `href` para abrir em nova aba e copiar o link, mas não navegam no clique
+   comum. O cursor precisa dizer que são clicáveis. */
+.cursor-pointer {
+  cursor: pointer;
 }
 </style>

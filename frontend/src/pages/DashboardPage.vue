@@ -465,10 +465,16 @@
             <v-card-text class="pa-0">
               <div v-if="monitorsStore.monitors.length > 0">
                 <v-list class="monitors-scroll-container pa-0">
+                  <!--
+                    A linha inteira abre o mesmo diálogo da lista de monitores.
+                    O `@click.stop` do botão "Testar" mais abaixo é o que
+                    impede a ação de abrir o detalhe por baixo dela.
+                  -->
                   <v-list-item
                     v-for="monitor in monitorsStore.monitors"
                     :key="monitor.id"
-                    class="px-4 py-3 border-b"
+                    class="px-4 py-3 border-b cursor-pointer"
+                    @click="abrirMonitor(monitor.id)"
                   >
                     <div
                       class="d-flex flex-column flex-md-row align-start align-md-center justify-space-between ga-3 w-100"
@@ -483,12 +489,16 @@
                           class="mr-1"
                         ></v-avatar>
                         <div>
-                          <router-link
-                            :to="'/monitors/' + monitor.id"
-                            class="text-subtitle-1 font-weight-bold text-decoration-none text-primary hover-underline d-block"
+                          <a
+                            class="text-subtitle-1 font-weight-bold text-decoration-none text-primary hover-underline d-block cursor-pointer"
+                            role="button"
+                            tabindex="0"
+                            :href="'/monitors/' + monitor.id"
+                            @click.prevent.stop="abrirMonitor(monitor.id)"
+                            @keydown.enter.prevent="abrirMonitor(monitor.id)"
                           >
                             {{ monitor.name }}
-                          </router-link>
+                          </a>
 
                           <div class="d-flex align-center ga-2 mt-1">
                             <v-chip size="x-small" color="info" variant="tonal">
@@ -505,9 +515,10 @@
                         class="monitor-timeline d-flex align-center justify-start justify-md-center monitor-timeline-scroll"
                         style="flex: 2; min-width: 280px"
                       >
-                        <router-link
-                          :to="'/monitors/' + monitor.id"
-                          class="text-decoration-none d-flex align-center ga-2"
+                        <a
+                          class="text-decoration-none d-flex align-center ga-2 cursor-pointer"
+                          :href="'/monitors/' + monitor.id"
+                          @click.prevent.stop="abrirMonitor(monitor.id)"
                         >
                           <template v-if="isGaugeMonitor(monitor)">
                             <MonitorSparkline
@@ -530,7 +541,7 @@
                             :height="20"
                             :width="5"
                           ></MonitorTimelineBar>
-                        </router-link>
+                        </a>
                       </div>
 
                       <div
@@ -551,7 +562,7 @@
                           variant="outlined"
                           prepend-icon="mdi-play"
                           :loading="monitorsStore.runningId === monitor.id"
-                          @click="monitorsStore.runMonitor(monitor.id)"
+                          @click.stop="monitorsStore.runMonitor(monitor.id)"
                         >
                           Testar
                         </v-btn>
@@ -637,6 +648,8 @@
     <!-- Modal Boas-vindas / Prompt de Escolha do Servidor (Exibido 1x por navegador) -->
     <DashboardServerPromptDialog />
 
+    <MonitorDetailDialog v-model="monitorDetailDialog" :monitor-id="monitorDetailId" />
+
     <v-snackbar v-model="snackbar" :color="snackbarColor" location="bottom right" timeout="4000">
       {{ snackbarText }}
     </v-snackbar>
@@ -652,6 +665,8 @@ import { useAlertsStore } from '@/stores/alerts'
 import { useEventsStore, type RealtimeEventPayload } from '@/stores/events'
 import { useMonitorsStore } from '@/stores/monitors'
 import DashboardWidgetWrapper from '@/components/DashboardWidgetWrapper.vue'
+import MonitorDetailDialog from '@/components/monitors/MonitorDetailDialog.vue'
+import { useMonitorDetail } from '@/composables/useMonitorDetail'
 import AddWidgetDialog from '@/components/AddWidgetDialog.vue'
 import DashboardServerPromptDialog from '@/components/DashboardServerPromptDialog.vue'
 import GaugeHealthWidget from '@/components/widgets/GaugeHealthWidget.vue'
@@ -765,8 +780,19 @@ function openSilenceDialog(id: number) {
   silenceDialog.value = true
 }
 
+/**
+ * Leva o operador ao alvo do alerta.
+ *
+ * Monitor abre em diálogo — é a única forma de abrir `/monitors/{id}` no
+ * produto; dispositivo continua sendo navegação de página, porque ali o
+ * contexto **é** a página.
+ */
 function goToAlert(alert: { monitorId?: number | null; deviceId?: number | null }) {
-  router.push(getAlertLink(alert))
+  if (alert.monitorId) {
+    abrirMonitor(alert.monitorId)
+    return
+  }
+  router.push(alert.deviceId ? `/devices/${alert.deviceId}` : '/alerts')
 }
 
 function openEventDetail(evt: RealtimeEventPayload) {
@@ -774,11 +800,15 @@ function openEventDetail(evt: RealtimeEventPayload) {
   eventDetailDialog.value = true
 }
 
-function getAlertLink(alert: { monitorId?: number | null; deviceId?: number | null }): string {
-  if (alert.monitorId) return '/monitors/' + alert.monitorId
-  if (alert.deviceId) return '/devices/' + alert.deviceId
-  return '/alerts'
-}
+/**
+ * O detalhe do monitor, sem tirar o operador do painel — pela **mesma** regra
+ * que a `MonitorsTable` usa. Ver `useMonitorDetail`.
+ */
+const {
+  detalheAberto: monitorDetailDialog,
+  monitorEmDetalhe: monitorDetailId,
+  abrirDetalhe: abrirMonitor,
+} = useMonitorDetail()
 
 function handleReorder(draggedId: string, targetId: string) {
   const currentVisible = dashboardStore.visibleWidgets.map((w) => w.id)
@@ -840,6 +870,11 @@ const globalUptime = computed(() => monitorUptimePercent(healthCounts.value))
 <style scoped>
 .hover-underline:hover {
   text-decoration: underline !important;
+}
+
+/* Ver a nota do mesmo seletor em `MonitorsTable.vue`. */
+.cursor-pointer {
+  cursor: pointer;
 }
 
 .edit-banner {

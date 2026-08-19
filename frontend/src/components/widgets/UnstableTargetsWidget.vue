@@ -32,7 +32,7 @@
           :key="target.scopeKey"
           :title="labelOf(target.scopeKey)"
           class="px-4 py-2 border-b"
-          :class="{ 'cursor-pointer': linkOf(target.scopeKey) }"
+          :class="{ 'cursor-pointer': monitorIdOf(target.scopeKey) != null }"
           @click="open(target.scopeKey)"
         >
           <template #prepend>
@@ -65,6 +65,14 @@
       </div>
     </v-card-text>
   </v-card>
+
+  <!--
+    O alvo instável abre o **mesmo** diálogo de detalhe das outras listas de
+    monitor, em vez de navegar para uma tela cheia. Quem está lendo o ranking
+    quer confirmar o alvo e voltar ao painel; a navegação custava esse caminho
+    de volta.
+  -->
+  <MonitorDetailDialog v-model="detalheAberto" :monitor-id="monitorEmDetalhe" />
 </template>
 
 <script setup lang="ts">
@@ -75,7 +83,8 @@
  * ativos, porque na hora do olhar ele pode estar no ar.
  */
 import { ref, computed, onMounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import MonitorDetailDialog from '@/components/monitors/MonitorDetailDialog.vue'
+import { useMonitorDetail } from '@/composables/useMonitorDetail'
 import { useAlertsStore, type ScopeInstability } from '@/stores/alerts'
 import { useMonitorsStore } from '@/stores/monitors'
 import { formatRelativeTime } from '@/utils/formatters'
@@ -90,9 +99,9 @@ const RANGES = [
 const MIN_OSCILLATIONS = 2
 const MAX_ITEMS = 6
 
-const router = useRouter()
 const alertsStore = useAlertsStore()
 const monitorsStore = useMonitorsStore()
+const { detalheAberto, monitorEmDetalhe, abrirDetalhe } = useMonitorDetail()
 
 const hours = ref(24)
 const loading = ref(false)
@@ -118,15 +127,17 @@ function labelOf(scopeKey: string): string {
   return scopeKey
 }
 
-function linkOf(scopeKey: string) {
+/** Só escopo de monitor tem detalhe a abrir; interface e túnel, não. */
+function monitorIdOf(scopeKey: string): number | null {
   const [kind, rawId] = scopeKey.split(':')
   if (kind !== 'monitor') return null
-  return { name: 'monitor-detail', params: { id: Number(rawId) } }
+  const id = Number(rawId)
+  return Number.isFinite(id) ? id : null
 }
 
 function open(scopeKey: string) {
-  const target = linkOf(scopeKey)
-  if (target) router.push(target)
+  const id = monitorIdOf(scopeKey)
+  if (id != null) abrirDetalhe(id)
 }
 
 async function load() {

@@ -7,7 +7,7 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, Query
 
 use crate::{
     models::{devices, monitors, probes},
-    services::shared::errors::AppResult,
+    services::{monitoring::reachability, shared::errors::AppResult},
 };
 
 /// Nome do probe dedicado que compartilha o namespace de rede do WireGuard.
@@ -45,6 +45,11 @@ pub async fn resolve_probe_id<C: ConnectionTrait>(db: &C) -> AppResult<Option<i6
 
 /// Cria o monitor de ping e, opcionalmente, o de SNMP.
 ///
+/// O ping só nasce quando o dispositivo tem alvo — a mesma regra de
+/// [`reachability`] que vale no cadastro. Um peer da VPN sem endereço
+/// atribuído ganharia um monitor contra o próprio nome, e o SNMP, que depende
+/// do mesmo alvo, o acompanha.
+///
 /// # Errors
 ///
 /// Propaga erro do banco.
@@ -53,12 +58,15 @@ pub async fn provision<C: ConnectionTrait>(
     device: &devices::Model,
     options: &MonitorProvisioningOptions,
 ) -> AppResult<Vec<monitors::Model>> {
+    reachability::ensure_allowed_for_device(device, "ping")?;
+    let Some(host) = reachability::auto_target(device) else {
+        tracing::info!(
+            device_id = device.id,
+            "dispositivo sem endereço: nenhum monitor provisionado"
+        );
+        return Ok(Vec::new());
+    };
     let probe_id = resolve_probe_id(db).await?;
-    let host = device
-        .ip_address
-        .clone()
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| device.name.clone());
     let interval = options.interval_seconds.unwrap_or(60);
     let mut created = Vec::new();
 
