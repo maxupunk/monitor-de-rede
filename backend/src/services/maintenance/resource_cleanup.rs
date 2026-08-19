@@ -93,6 +93,65 @@ impl ResourceCleanupService {
         Ok(())
     }
 
+    /// Apaga todo o histórico (métricas, resultados de monitor, eventos de alerta e logs)
+    /// pertencente a um dispositivo, preservando o cadastro do dispositivo e seus monitores/interfaces.
+    pub async fn clear_device_history(
+        db: &DatabaseConnection,
+        logs_db: Option<&DatabaseConnection>,
+        device_id: i64,
+    ) -> AppResult<()> {
+        let monitor_rows = monitors::Entity::find()
+            .filter(monitors::Column::DeviceId.eq(device_id))
+            .all(db)
+            .await?;
+        let monitor_ids: Vec<i64> = monitor_rows.into_iter().map(|m| m.id).collect();
+        if !monitor_ids.is_empty() {
+            monitor_results::Entity::delete_many()
+                .filter(monitor_results::Column::MonitorId.is_in(monitor_ids.clone()))
+                .exec(db)
+                .await?;
+            metrics::Entity::delete_many()
+                .filter(metrics::Column::MonitorId.is_in(monitor_ids.clone()))
+                .exec(db)
+                .await?;
+            alert_events::Entity::delete_many()
+                .filter(alert_events::Column::MonitorId.is_in(monitor_ids))
+                .exec(db)
+                .await?;
+        }
+
+        let interfaces = device_interfaces::Entity::find()
+            .filter(device_interfaces::Column::DeviceId.eq(device_id))
+            .all(db)
+            .await?;
+        let interface_ids: Vec<i64> = interfaces.into_iter().map(|item| item.id).collect();
+        if !interface_ids.is_empty() {
+            metrics::Entity::delete_many()
+                .filter(metrics::Column::InterfaceId.is_in(interface_ids))
+                .exec(db)
+                .await?;
+        }
+
+        metrics::Entity::delete_many()
+            .filter(metrics::Column::DeviceId.eq(device_id))
+            .exec(db)
+            .await?;
+
+        alert_events::Entity::delete_many()
+            .filter(alert_events::Column::DeviceId.eq(device_id))
+            .exec(db)
+            .await?;
+
+        if let Some(logs_conn) = logs_db {
+            let _ = crate::models::logs::device_logs::Entity::delete_many()
+                .filter(crate::models::logs::device_logs::Column::DeviceId.eq(device_id))
+                .exec(logs_conn)
+                .await;
+        }
+
+        Ok(())
+    }
+
     /// Remove um site e os dispositivos que fazem parte dele.
     pub async fn delete_site(db: &DatabaseConnection, site_id: i64) -> AppResult<()> {
         let device_rows = devices::Entity::find()

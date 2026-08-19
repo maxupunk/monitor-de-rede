@@ -1044,6 +1044,53 @@
       </v-card>
     </v-dialog>
 
+    <v-dialog v-model="snmpRemovalConfirmation" max-width="560" persistent>
+      <v-card class="rounded-lg">
+        <v-card-title class="font-weight-bold d-flex align-center ga-2">
+          <v-icon color="warning">mdi-alert-circle-outline</v-icon>
+          Remover do Monitoramento & Histórico?
+        </v-card-title>
+        <v-card-text>
+          <p class="mb-3">
+            Os seguintes itens foram desmarcados ou não constam mais na varredura SNMP do
+            equipamento:
+          </p>
+          <v-list density="compact" class="bg-grey-lighten-4 rounded-lg mb-3 pa-2">
+            <v-list-item
+              v-for="(item, idx) in removedItems"
+              :key="idx"
+              density="compact"
+              prepend-icon="mdi-minus-circle-outline"
+              :title="item"
+            ></v-list-item>
+          </v-list>
+          <p class="text-body-2 text-grey-darken-1 mb-0">
+            Deseja apagar o histórico de métricas, coletas e eventos dos itens removidos, ou deseja
+            manter o histórico existente?
+          </p>
+        </v-card-text>
+        <v-card-actions class="justify-end flex-wrap ga-2 pa-4">
+          <v-btn variant="text" @click="snmpRemovalConfirmation = false">Cancelar</v-btn>
+          <v-btn
+            color="primary"
+            variant="tonal"
+            :loading="savingMonitors"
+            @click="confirmSaveMonitors(false)"
+          >
+            Manter Histórico
+          </v-btn>
+          <v-btn
+            color="error"
+            variant="flat"
+            :loading="savingMonitors"
+            @click="confirmSaveMonitors(true)"
+          >
+            Apagar Histórico
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <!-- Modal de Gráfico de Tráfego de Interface -->
     <TrafficChartDialog
       v-model="chartDialogOpen"
@@ -1576,13 +1623,65 @@ function unselectAllInterfaces() {
   selectedIfIndexes.value = []
 }
 
+const snmpRemovalConfirmation = ref(false)
+
+const removedItems = computed(() => {
+  const items: string[] = []
+  if (!detailStore.scanResult) return items
+
+  // 1. Interfaces previamente monitoradas que foram desmarcadas
+  const unselectedInterfaces = detailStore.interfaces.filter((i) => {
+    const idx = i.snmpIndex ?? i.ifIndex
+    return i.isMonitored && idx != null && !selectedIfIndexes.value.includes(idx)
+  })
+  for (const intf of unselectedInterfaces) {
+    items.push(`Interface "${interfaceLabel(intf)}" (desmarcada do monitoramento)`)
+  }
+
+  // 2. Interfaces do banco que não existem mais na descoberta SNMP atual
+  const scanIndexes = new Set(detailStore.scanResult.interfaces.map((i) => i.ifIndex))
+  const missingInterfaces = detailStore.interfaces.filter((i) => {
+    const idx = i.snmpIndex ?? i.ifIndex
+    return idx != null && !scanIndexes.has(idx)
+  })
+  for (const intf of missingInterfaces) {
+    if (!unselectedInterfaces.includes(intf)) {
+      items.push(`Interface "${interfaceLabel(intf)}" (não encontrada no dispositivo via SNMP)`)
+    }
+  }
+
+  // 3. CPU / Memória desmarcados
+  if (detailStore.scanResult.hasCpuMonitor && !selectedCpuMonitor.value) {
+    items.push('Monitor de Uso de CPU (desmarcado)')
+  }
+  if (detailStore.scanResult.hasMemoryMonitor && !selectedMemoryMonitor.value) {
+    items.push('Monitor de Uso de Memória (desmarcado)')
+  }
+
+  return items
+})
+
 async function saveMonitors() {
+  if (removedItems.value.length > 0) {
+    snmpRemovalConfirmation.value = true
+    return
+  }
+  await doApplyMonitors(false)
+}
+
+async function confirmSaveMonitors(clearHistory: boolean) {
+  snmpRemovalConfirmation.value = false
+  await doApplyMonitors(clearHistory)
+}
+
+async function doApplyMonitors(clearRemovedHistory: boolean) {
   savingMonitors.value = true
   try {
     const success = await detailStore.applySnmpMonitors(deviceId.value, {
       enableCpuMonitor: selectedCpuMonitor.value,
       enableMemoryMonitor: selectedMemoryMonitor.value,
       monitoredIfIndexes: selectedIfIndexes.value,
+      clearRemovedHistory,
     })
     if (success) {
       scanModalOpen.value = false

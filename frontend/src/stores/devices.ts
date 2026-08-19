@@ -66,6 +66,7 @@ export interface Device {
   vpnPeer?: DeviceVpnPeer | null
   createdAt?: string
   updatedAt?: string
+  clearHistory?: boolean
 }
 
 export const useDevicesStore = defineStore('devices', () => {

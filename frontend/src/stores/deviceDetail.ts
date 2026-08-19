@@ -228,6 +228,7 @@ export const useDeviceDetailStore = defineStore('deviceDetail', () => {
       enableCpuMonitor?: boolean
       enableMemoryMonitor?: boolean
       monitoredIfIndexes?: number[]
+      clearRemovedHistory?: boolean
     }
   ): Promise<boolean> {
     loading.value = true

@@ -94,6 +94,7 @@ pub struct SnmpApplyOptions {
     pub enable_cpu_monitor: Option<bool>,
     pub enable_memory_monitor: Option<bool>,
     pub monitored_if_indexes: Vec<i32>,
+    pub clear_removed_history: Option<bool>,
 }
 
 /// Monta a configuração de coleta a partir do cadastro canônico do dispositivo.
@@ -504,6 +505,7 @@ pub async fn apply_monitors(
     options: SnmpApplyOptions,
 ) -> AppResult<()> {
     let scan = scan(config.clone()).await?;
+    let clear_history = options.clear_removed_history.unwrap_or(true);
     devices::ActiveModel {
         id: Set(device.id),
         snmp_enabled: Set(true),
@@ -512,6 +514,53 @@ pub async fn apply_monitors(
     }
     .update(&ctx.db)
     .await?;
+
+    let discovered_indexes: std::collections::HashSet<i32> =
+        scan.interfaces.iter().map(|i| i.if_index).collect();
+
+    // Trata interfaces que existiam no banco mas não foram descobertas no scan SNMP atual
+    let db_interfaces = device_interfaces::Entity::find()
+        .filter(device_interfaces_entity::Column::DeviceId.eq(device.id))
+        .all(&ctx.db)
+        .await?;
+
+    for db_iface in db_interfaces {
+        if let Some(snmp_idx) = db_iface.snmp_index {
+            if !discovered_indexes.contains(&snmp_idx) {
+                let monitor_name = interface_monitor_name(&db_iface.name);
+                let monitor = monitors::Entity::find()
+                    .filter(monitors_entity::Column::DeviceId.eq(Some(device.id)))
+                    .filter(monitors_entity::Column::Name.eq(&monitor_name))
+                    .one(&ctx.db)
+                    .await?;
+                if clear_history {
+                    metrics::Entity::delete_many()
+                        .filter(metrics_entity::Column::InterfaceId.eq(Some(db_iface.id)))
+                        .exec(&ctx.db)
+                        .await?;
+                    if let Some(mon) = monitor {
+                        crate::services::maintenance::resource_cleanup::ResourceCleanupService::delete_monitor(
+                            &ctx.db, mon.id,
+                        )
+                        .await?;
+                    }
+                    device_interfaces::Entity::delete_by_id(db_iface.id)
+                        .exec(&ctx.db)
+                        .await?;
+                } else {
+                    if let Some(mon) = monitor {
+                        let mut active: monitors::ActiveModel = mon.into();
+                        active.enabled = Set(false);
+                        active.update(&ctx.db).await?;
+                    }
+                    let mut active: device_interfaces::ActiveModel = db_iface.into();
+                    active.admin_status = Set(Some("down".into()));
+                    active.update(&ctx.db).await?;
+                }
+            }
+        }
+    }
+
     let selected = options
         .monitored_if_indexes
         .into_iter()
@@ -525,6 +574,7 @@ pub async fn apply_monitors(
             &interface,
             selected.contains(&source.if_index),
             device.snmp_poll_interval_seconds,
+            clear_history,
         )
         .await?;
     }
@@ -539,7 +589,7 @@ pub async fn apply_monitors(
             device.snmp_poll_interval_seconds,
         )
         .await?;
-        if !enabled {
+        if !enabled && clear_history {
             metrics::Entity::delete_many()
                 .filter(metrics_entity::Column::DeviceId.eq(device.id))
                 .filter(metrics_entity::Column::Name.eq("cpu_usage"))
@@ -558,7 +608,7 @@ pub async fn apply_monitors(
             device.snmp_poll_interval_seconds,
         )
         .await?;
-        if !enabled {
+        if !enabled && clear_history {
             metrics::Entity::delete_many()
                 .filter(metrics_entity::Column::DeviceId.eq(device.id))
                 .filter(metrics_entity::Column::Name.eq("memory_usage"))
@@ -585,6 +635,7 @@ async fn set_monitoring(
     interface: &device_interfaces::Model,
     enabled: bool,
     interval_seconds: i32,
+    clear_history: bool,
 ) -> AppResult<()> {
     device_interfaces::ActiveModel {
         id: Set(interface.id),
@@ -611,7 +662,7 @@ async fn set_monitoring(
         interval_seconds,
     )
     .await?;
-    if !enabled {
+    if !enabled && clear_history {
         metrics::Entity::delete_many()
             .filter(metrics_entity::Column::InterfaceId.eq(Some(interface.id)))
             .exec(db)
@@ -650,6 +701,7 @@ pub async fn set_interface_monitoring(
         &interface,
         enabled,
         device.snmp_poll_interval_seconds,
+        true,
     )
     .await?;
     // Sem uma coleta agora o gráfico abriria vazio até o próximo ciclo do

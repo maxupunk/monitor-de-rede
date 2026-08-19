@@ -355,6 +355,35 @@
 
     <SiteDialog v-model="siteDialog" @saved="onSiteCreated" />
 
+    <v-dialog v-model="ipChangeConfirmation" max-width="540" persistent>
+      <v-card class="rounded-lg">
+        <v-card-title class="font-weight-bold d-flex align-center ga-2">
+          <v-icon color="warning">mdi-alert-circle-outline</v-icon>
+          Alteração de Endereço IP
+        </v-card-title>
+        <v-card-text>
+          <p class="mb-3">
+            O endereço IP deste dispositivo foi alterado de
+            <strong>{{ originalIpAddress }}</strong> para <strong>{{ formModel.ipAddress }}</strong
+            >.
+          </p>
+          <p class="text-body-2 text-grey-darken-1 mb-0">
+            Deseja apagar o histórico de coletas, métricas de tráfego, eventos e logs acumulados com
+            o IP antigo, ou deseja manter o histórico existente?
+          </p>
+        </v-card-text>
+        <v-card-actions class="justify-end flex-wrap ga-2 pa-4">
+          <v-btn variant="text" @click="ipChangeConfirmation = false">Cancelar</v-btn>
+          <v-btn color="primary" variant="tonal" :loading="saving" @click="confirmIpChange(false)">
+            Manter Histórico
+          </v-btn>
+          <v-btn color="error" variant="flat" :loading="saving" @click="confirmIpChange(true)">
+            Apagar Histórico
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <v-dialog v-model="snmpIntervalConfirmation" max-width="520">
       <v-card class="rounded-lg">
         <v-card-title class="font-weight-bold">Aplicar intervalo SNMP?</v-card-title>
@@ -415,6 +444,9 @@ const saving = ref(false)
 const snmpTestResult = ref<{ ok: boolean; message: string } | null>(null)
 const snmpIntervalConfirmation = ref(false)
 const originalSnmpPollIntervalSeconds = ref(15)
+const ipChangeConfirmation = ref(false)
+const originalIpAddress = ref('')
+const pendingClearHistory = ref(false)
 const snmpIntervalItems = INTERVAL_PRESETS.map((value) => ({
   value,
   title: `A cada ${formatSeconds(value)}`,
@@ -583,6 +615,8 @@ watch(
       if (props.deviceToEdit) {
         formModel.name = props.deviceToEdit.name || ''
         formModel.ipAddress = props.deviceToEdit.ipAddress || ''
+        originalIpAddress.value = (props.deviceToEdit.ipAddress || '').trim()
+        pendingClearHistory.value = false
         formModel.type = props.deviceToEdit.type || 'router'
         formModel.siteId = props.deviceToEdit.siteId ?? null
         formModel.parentId = props.deviceToEdit.parentId ?? null
@@ -602,6 +636,8 @@ watch(
       } else if (props.prefillData) {
         formModel.name = props.prefillData.name || ''
         formModel.ipAddress = props.prefillData.ipAddress || ''
+        originalIpAddress.value = ''
+        pendingClearHistory.value = false
         formModel.type = (props.prefillData.type as string) || 'other'
         formModel.siteId = props.prefillData.siteId ?? null
         formModel.parentId = props.prefillData.parentId ?? null
@@ -619,6 +655,8 @@ watch(
       } else {
         formModel.name = ''
         formModel.ipAddress = ''
+        originalIpAddress.value = ''
+        pendingClearHistory.value = false
         formModel.type = 'router'
         formModel.siteId = null
         formModel.parentId = null
@@ -695,6 +733,18 @@ async function testSnmp(autoDetect = false) {
 }
 
 async function save() {
+  if (!formModel.name || !formModel.ipAddress) return
+
+  const ipChanged =
+    Boolean(props.deviceToEdit) &&
+    originalIpAddress.value !== '' &&
+    formModel.ipAddress.trim() !== originalIpAddress.value
+
+  if (ipChanged) {
+    ipChangeConfirmation.value = true
+    return
+  }
+
   const intervalChanged =
     props.deviceToEdit &&
     formModel.snmpEnabled &&
@@ -703,12 +753,27 @@ async function save() {
     snmpIntervalConfirmation.value = true
     return
   }
-  await persist()
+  await persist(false)
+}
+
+async function confirmIpChange(clearHistory: boolean) {
+  ipChangeConfirmation.value = false
+  const intervalChanged =
+    props.deviceToEdit &&
+    formModel.snmpEnabled &&
+    formModel.snmpPollIntervalSeconds !== originalSnmpPollIntervalSeconds.value
+  if (intervalChanged) {
+    pendingClearHistory.value = clearHistory
+    snmpIntervalConfirmation.value = true
+    return
+  }
+  await persist(clearHistory)
 }
 
 async function confirmSnmpIntervalChange() {
   snmpIntervalConfirmation.value = false
-  await persist()
+  await persist(pendingClearHistory.value)
+  pendingClearHistory.value = false
 }
 
 /**
@@ -719,20 +784,21 @@ async function confirmSnmpIntervalChange() {
  * automático é `null`. Por isso o `Device`, que descreve a resposta, não tem
  * como tipar este valor, e a conversão fica explícita aqui.
  */
-function payload(): Partial<Device> {
+function payload(clearHistory = false): Partial<Device> {
   return {
     ...formModel,
     accessMode: formModel.accessMode as Device['accessMode'],
     operatingSystem: formModel.operatingSystem as Device['operatingSystem'],
+    clearHistory,
   }
 }
 
-async function persist() {
+async function persist(clearHistory = false) {
   if (!formModel.name || !formModel.ipAddress) return
   saving.value = true
   try {
     if (props.deviceToEdit && props.deviceToEdit.id) {
-      const success = await devicesStore.updateDevice(props.deviceToEdit.id, payload())
+      const success = await devicesStore.updateDevice(props.deviceToEdit.id, payload(clearHistory))
       if (success) {
         await devicesStore.fetchDevices()
         const updated = devicesStore.devices.find((d) => d.id === props.deviceToEdit?.id)
@@ -741,7 +807,7 @@ async function persist() {
       }
     } else {
       const success = await devicesStore.createDevice({
-        ...payload(),
+        ...payload(false),
         status: 'unknown' as const,
       })
       if (success) {

@@ -8,6 +8,7 @@ mod app_logs;
 mod auth;
 mod backup;
 mod device_access_mode;
+mod device_history_cleanup;
 mod device_operating_system;
 mod health_rules;
 mod phase2_phase3;

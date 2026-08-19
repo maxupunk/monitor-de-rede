@@ -35,6 +35,7 @@ struct SnmpApplyInput {
     enable_cpu_monitor: Option<bool>,
     enable_memory_monitor: Option<bool>,
     monitored_if_indexes: Option<Vec<i32>>,
+    clear_removed_history: Option<bool>,
 }
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -127,6 +128,7 @@ async fn apply_monitors(
             enable_cpu_monitor: input.enable_cpu_monitor,
             enable_memory_monitor: input.enable_memory_monitor,
             monitored_if_indexes: input.monitored_if_indexes.unwrap_or_default(),
+            clear_removed_history: input.clear_removed_history,
         },
     )
     .await?;

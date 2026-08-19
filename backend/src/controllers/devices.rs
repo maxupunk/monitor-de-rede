@@ -521,6 +521,15 @@ async fn update(
     .update(&ctx.db)
     .await?;
     sync_device_monitor(&ctx.db, &row).await?;
+    if input.clear_history == Some(true) {
+        let logs_db = crate::services::syslog::LogsDb::from_context(&ctx).ok();
+        ResourceCleanupService::clear_device_history(
+            &ctx.db,
+            logs_db.as_ref().map(|l| l.connection()),
+            row.id,
+        )
+        .await?;
+    }
     if row.snmp_poll_interval_seconds != current.snmp_poll_interval_seconds {
         sync_monitor_intervals(&ctx.db, row.id, row.snmp_poll_interval_seconds).await?;
     }

@@ -56,6 +56,7 @@ pub struct DeviceInput {
     /// explícito pelo mesmo motivo do `access_mode` logo acima.
     pub operating_system: Option<String>,
     pub status: Option<String>,
+    pub clear_history: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Default)]
