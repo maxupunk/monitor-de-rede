@@ -48,4 +48,21 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    chunkSizeWarningLimit: 700,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('vuetify') || id.includes('@mdi')) {
+              return 'vendor-vuetify'
+            }
+            if (id.includes('vue') || id.includes('pinia') || id.includes('vue-router')) {
+              return 'vendor-vue'
+            }
+          }
+        },
+      },
+    },
+  },
 })

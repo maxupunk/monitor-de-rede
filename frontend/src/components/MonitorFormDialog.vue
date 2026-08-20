@@ -153,365 +153,60 @@
               </div>
             </v-col>
 
-            <v-col v-if="definition.usesPort" cols="12">
-              <v-text-field
-                v-model.number="form.port"
-                label="Porta TCP *"
-                type="number"
-                min="1"
-                max="65535"
-                prepend-inner-icon="mdi-numeric"
-                variant="outlined"
-                density="comfortable"
-                :rules="[(v: unknown) => isValidPort(v) || 'Informe uma porta entre 1 e 65535']"
-                hide-details="auto"
-              ></v-text-field>
-              <div class="d-flex flex-wrap ga-1 mt-2">
-                <v-chip
-                  v-for="preset in COMMON_TCP_PORTS"
-                  :key="preset.port"
-                  size="small"
-                  :variant="form.port === preset.port ? 'flat' : 'outlined'"
-                  :color="form.port === preset.port ? 'primary' : undefined"
-                  @click="form.port = preset.port"
-                >
-                  {{ preset.label }} · {{ preset.port }}
-                </v-chip>
-              </div>
-            </v-col>
+            <TcpFields
+              v-if="definition.usesPort"
+              :port="form.port"
+              @update:port="form.port = $event"
+            />
 
-            <v-col v-if="form.kind === 'snmp'" cols="12" md="6">
-              <v-select
-                v-model="form.snmpMode"
-                :items="SNMP_MODES"
-                item-title="label"
-                item-value="value"
-                label="O que coletar via SNMP"
-                prepend-inner-icon="mdi-format-list-bulleted-type"
-                variant="outlined"
-                density="comfortable"
-                :hint="snmpModeDescription"
-                persistent-hint
-              >
-                <template #item="{ props: itemProps, item }">
-                  <v-list-item
-                    v-bind="itemProps"
-                    :subtitle="itemField(item, 'description')"
-                    :prepend-icon="itemField(item, 'icon')"
-                  ></v-list-item>
-                </template>
-              </v-select>
-            </v-col>
+            <SnmpFields
+              v-if="form.kind === 'snmp'"
+              :snmp-mode="form.snmpMode"
+              :if-index="form.ifIndex"
+              :snmp-mode-description="snmpModeDescription"
+              :interface-items="interfaceItems"
+              :loading-interfaces="loadingInterfaces"
+              :scanning-snmp="scanningSnmp"
+              :has-target-or-device="!!form.target || !!form.deviceId"
+              :traffic-alert-enabled="form.trafficAlertEnabled"
+              :traffic-alert-direction="form.trafficAlertDirection"
+              :traffic-alert-operator="form.trafficAlertOperator"
+              :traffic-alert-value-bps="form.trafficAlertValueBps"
+              :traffic-alert-duration-seconds="form.trafficAlertDurationSeconds"
+              :traffic-alert-severity="form.trafficAlertSeverity"
+              @update:snmp-mode="form.snmpMode = $event"
+              @interface-selected="onInterfaceSelected"
+              @run-snmp-scan="runSnmpScan"
+              @update:traffic-alert-enabled="form.trafficAlertEnabled = $event"
+              @update:traffic-alert-direction="form.trafficAlertDirection = $event"
+              @update:traffic-alert-operator="form.trafficAlertOperator = $event"
+              @update:traffic-alert-value-bps="form.trafficAlertValueBps = $event"
+              @update:traffic-alert-duration-seconds="form.trafficAlertDurationSeconds = $event"
+              @update:traffic-alert-severity="form.trafficAlertSeverity = $event"
+            />
 
-            <v-col
-              v-if="
-                form.kind === 'snmp' &&
-                (form.snmpMode === 'interface' || form.snmpMode === 'interface_traffic')
-              "
-              cols="12"
-              md="6"
-            >
-              <v-select
-                v-if="interfaceItems.length > 0"
-                v-model="form.ifIndex"
-                :items="interfaceItems"
-                item-title="title"
-                item-value="value"
-                label="Interface monitorada *"
-                prepend-inner-icon="mdi-ethernet"
-                variant="outlined"
-                density="comfortable"
-                :loading="loadingInterfaces || scanningSnmp"
-                :rules="[(v: unknown) => v !== null || 'Selecione a interface']"
-                hint="Interfaces descobertas no último scan SNMP do dispositivo"
-                persistent-hint
-                @update:model-value="onInterfaceSelected"
-              >
-                <template #item="{ props: itemProps, item }">
-                  <v-list-item
-                    v-bind="itemProps"
-                    :subtitle="itemField(item, 'subtitle')"
-                  ></v-list-item>
-                </template>
-                <template #append-inner>
-                  <v-btn
-                    icon
-                    size="x-small"
-                    variant="text"
-                    density="comfortable"
-                    :loading="scanningSnmp"
-                    :disabled="!form.target && !form.deviceId"
-                    @click.stop="runSnmpScan"
-                  >
-                    <v-icon size="18">mdi-radar</v-icon>
-                    <v-tooltip activator="parent" location="top">
-                      Escanear interfaces via SNMP
-                    </v-tooltip>
-                  </v-btn>
-                </template>
-              </v-select>
+            <DnsFields
+              v-if="form.kind === 'dns'"
+              :dns-protocol-value="form.dnsProtocol"
+              :record-type="form.recordType"
+              :dns-server="form.dnsServer"
+              :doh-url="form.dohUrl"
+              :dns-server-rule="dnsServerRule"
+              :doh-url-rule="dohUrlRule"
+              :dns-server-hint="dnsServerHint"
+              :doh-endpoint-hint="dohEndpointHint"
+              @update:dns-protocol="form.dnsProtocol = $event"
+              @update:record-type="form.recordType = $event"
+              @server-changed="onDnsServerChange"
+              @doh-changed="onDohUrlChange"
+              @open-servers-dialog="openServersDialog"
+            />
 
-              <v-card
-                v-else
-                variant="outlined"
-                class="pa-3 rounded-lg border-dashed d-flex align-center justify-space-between ga-2 flex-wrap"
-                style="min-height: 48px"
-              >
-                <div class="d-flex align-center ga-2 text-caption text-medium-emphasis">
-                  <v-icon size="20" color="warning">mdi-information-outline</v-icon>
-                  <span>Nenhuma interface descoberta para este dispositivo.</span>
-                </div>
-                <v-btn
-                  color="primary"
-                  variant="tonal"
-                  height="36"
-                  size="small"
-                  :loading="scanningSnmp || loadingInterfaces"
-                  :disabled="!form.target && !form.deviceId"
-                  @click="runSnmpScan"
-                >
-                  <v-icon start size="16">mdi-radar</v-icon>
-                  Escanear SNMP
-                </v-btn>
-              </v-card>
-            </v-col>
-
-            <v-col
-              v-if="
-                form.kind === 'snmp' &&
-                form.snmpMode === 'interface_traffic' &&
-                form.ifIndex !== null
-              "
-              cols="12"
-            >
-              <v-card color="warning" variant="tonal" class="pa-4 rounded-lg">
-                <div class="d-flex align-center justify-space-between mb-2">
-                  <div class="d-flex align-center ga-2">
-                    <v-icon size="20">mdi-bell-ring-outline</v-icon>
-                    <span class="font-weight-bold text-subtitle-1">Regra de alerta de tráfego</span>
-                  </div>
-                  <v-switch
-                    v-model="form.trafficAlertEnabled"
-                    color="warning"
-                    density="compact"
-                    hide-details
-                  ></v-switch>
-                </div>
-
-                <v-row v-if="form.trafficAlertEnabled" dense class="mt-2">
-                  <v-col cols="12" md="4">
-                    <v-select
-                      v-model="form.trafficAlertDirection"
-                      :items="[
-                        { title: 'Entrada (Download / inBps)', value: 'inBps' },
-                        { title: 'Saída (Upload / outBps)', value: 'outBps' },
-                      ]"
-                      item-title="title"
-                      item-value="value"
-                      label="Direção *"
-                      variant="outlined"
-                      density="comfortable"
-                      hide-details="auto"
-                      bg-color="surface"
-                    ></v-select>
-                  </v-col>
-                  <v-col cols="12" md="4">
-                    <v-select
-                      v-model="form.trafficAlertOperator"
-                      :items="[
-                        { title: 'Avisar quando passar de (>)', value: 'gt' },
-                        { title: 'Avisar quando for menor que (<)', value: 'lt' },
-                      ]"
-                      item-title="title"
-                      item-value="value"
-                      label="Condição *"
-                      variant="outlined"
-                      density="comfortable"
-                      hide-details="auto"
-                      bg-color="surface"
-                    ></v-select>
-                  </v-col>
-                  <v-col cols="12" md="4">
-                    <DataRateInput
-                      v-model="form.trafficAlertValueBps"
-                      label="Limite de tráfego *"
-                      density="comfortable"
-                      :rules="[(v: unknown) => Number(v) > 0 || 'Informe um valor maior que 0']"
-                      hide-details="auto"
-                      bg-color="surface"
-                    ></DataRateInput>
-                  </v-col>
-                  <v-col cols="12" md="6" class="mt-2">
-                    <v-select
-                      v-model="form.trafficAlertDurationSeconds"
-                      :items="ALERT_DURATIONS"
-                      item-title="title"
-                      item-value="value"
-                      label="Tolerância antes de disparar"
-                      variant="outlined"
-                      density="comfortable"
-                      hide-details="auto"
-                      bg-color="surface"
-                    ></v-select>
-                  </v-col>
-                  <v-col cols="12" md="6" class="mt-2">
-                    <v-select
-                      v-model="form.trafficAlertSeverity"
-                      :items="ALERT_SEVERITIES"
-                      item-title="title"
-                      item-value="value"
-                      label="Nível de severidade"
-                      variant="outlined"
-                      density="comfortable"
-                      hide-details="auto"
-                      bg-color="surface"
-                    ></v-select>
-                  </v-col>
-                </v-row>
-                <div v-else class="text-body-2 mt-1">
-                  Ative a opção acima para ser notificado automaticamente quando o tráfego desta
-                  interface atingir o limite configurado em Mbps.
-                </div>
-              </v-card>
-            </v-col>
-
-            <v-col v-if="form.kind === 'dns'" cols="12" md="6">
-              <v-select
-                v-model="form.dnsProtocol"
-                :items="DNS_PROTOCOLS"
-                item-title="label"
-                item-value="value"
-                label="Transporte da consulta"
-                prepend-inner-icon="mdi-transit-connection"
-                variant="outlined"
-                density="comfortable"
-                :hint="dnsProtocolDefinition.description"
-                persistent-hint
-              >
-                <template #item="{ props: itemProps, item }">
-                  <v-list-item
-                    v-bind="itemProps"
-                    :subtitle="itemField(item, 'description')"
-                    :prepend-icon="itemField(item, 'icon')"
-                  ></v-list-item>
-                </template>
-              </v-select>
-            </v-col>
-
-            <v-col v-if="form.kind === 'dns'" cols="12" md="6">
-              <v-select
-                v-model="form.recordType"
-                :items="DNS_RECORD_TYPES"
-                item-title="title"
-                item-value="value"
-                label="Tipo de registro"
-                prepend-inner-icon="mdi-file-document-outline"
-                variant="outlined"
-                density="comfortable"
-                hide-details="auto"
-              >
-                <template #item="{ props: itemProps, item }">
-                  <v-list-item
-                    v-bind="itemProps"
-                    :subtitle="itemField(item, 'subtitle')"
-                  ></v-list-item>
-                </template>
-              </v-select>
-            </v-col>
-
-            <v-col v-if="form.kind === 'dns' && dnsProtocolDefinition.requiresServer" cols="12">
-              <div class="d-flex align-start ga-2">
-                <v-combobox
-                  :model-value="form.dnsServer"
-                  :items="dnsServerItems"
-                  item-title="title"
-                  item-value="value"
-                  :return-object="false"
-                  label="Servidor DNS medido *"
-                  placeholder="Escolha um cadastrado ou digite um novo"
-                  prepend-inner-icon="mdi-server"
-                  variant="outlined"
-                  density="comfortable"
-                  class="flex-grow-1"
-                  :loading="dnsServersStore.loading"
-                  :rules="[dnsServerRule]"
-                  :hint="dnsServerHint"
-                  persistent-hint
-                  @update:model-value="onDnsServerChange"
-                >
-                  <template #item="{ props: itemProps, item }">
-                    <v-list-item
-                      v-bind="itemProps"
-                      :subtitle="itemField(item, 'subtitle')"
-                      :prepend-icon="itemField(item, 'icon')"
-                    ></v-list-item>
-                  </template>
-                </v-combobox>
-                <v-btn
-                  icon
-                  variant="tonal"
-                  color="deep-purple"
-                  density="comfortable"
-                  class="mt-1"
-                  @click="openServersDialog"
-                >
-                  <v-icon>mdi-cog-outline</v-icon>
-                  <v-tooltip activator="parent" location="top">Gerenciar servidores DNS</v-tooltip>
-                </v-btn>
-              </div>
-            </v-col>
-
-            <v-col v-if="form.kind === 'dns' && dnsProtocolDefinition.requiresEndpoint" cols="12">
-              <div class="d-flex align-start ga-2">
-                <v-combobox
-                  :model-value="form.dohUrl"
-                  :items="dohEndpointItems"
-                  item-title="title"
-                  item-value="value"
-                  :return-object="false"
-                  label="Endpoint DoH *"
-                  placeholder="https://cloudflare-dns.com/dns-query"
-                  prepend-inner-icon="mdi-lock-outline"
-                  variant="outlined"
-                  density="comfortable"
-                  class="flex-grow-1"
-                  :rules="[dohUrlRule]"
-                  :hint="dohEndpointHint"
-                  persistent-hint
-                  @update:model-value="onDohUrlChange"
-                >
-                  <template #item="{ props: itemProps, item }">
-                    <v-list-item
-                      v-bind="itemProps"
-                      :subtitle="itemField(item, 'subtitle')"
-                    ></v-list-item>
-                  </template>
-                </v-combobox>
-                <v-btn
-                  icon
-                  variant="tonal"
-                  color="deep-purple"
-                  density="comfortable"
-                  class="mt-1"
-                  @click="openServersDialog"
-                >
-                  <v-icon>mdi-cog-outline</v-icon>
-                  <v-tooltip activator="parent" location="top">Gerenciar servidores DNS</v-tooltip>
-                </v-btn>
-              </div>
-            </v-col>
-
-            <v-col v-if="form.kind === 'http'" cols="12" md="6">
-              <v-select
-                v-model="form.httpMethod"
-                :items="['GET', 'HEAD', 'POST']"
-                label="Método HTTP"
-                prepend-inner-icon="mdi-swap-horizontal"
-                variant="outlined"
-                density="comfortable"
-                hide-details="auto"
-              ></v-select>
-            </v-col>
+            <HttpFields
+              v-if="form.kind === 'http'"
+              :http-method="form.httpMethod"
+              @update:http-method="form.httpMethod = $event"
+            />
 
             <v-col cols="12">
               <v-text-field
@@ -600,105 +295,25 @@
               </v-expansion-panel-title>
               <v-expansion-panel-text>
                 <v-row class="form-rows pt-2">
-                  <v-col v-if="form.kind === 'ping'" cols="12" md="6">
-                    <v-text-field
-                      v-model.number="form.packetCount"
-                      label="Pacotes por checagem"
-                      type="number"
-                      min="1"
-                      max="20"
-                      variant="outlined"
-                      density="comfortable"
-                      hint="Mais pacotes dão uma medida de perda mais confiável"
-                      persistent-hint
-                    ></v-text-field>
-                  </v-col>
-
-                  <v-col v-if="form.kind === 'http'" cols="12" md="8">
-                    <v-combobox
-                      :model-value="form.acceptedStatusCodes"
-                      :items="[200, 201, 202, 204, 301, 302, 401, 403]"
-                      label="Códigos HTTP aceitos"
-                      variant="outlined"
-                      density="comfortable"
-                      multiple
-                      chips
-                      closable-chips
-                      hint="Qualquer outro código marca o monitor como instável"
-                      persistent-hint
-                      @update:model-value="onStatusCodesChange"
-                    ></v-combobox>
-                  </v-col>
-                  <v-col v-if="form.kind === 'http'" cols="12" md="4">
-                    <v-switch
-                      v-model="form.validateCertificate"
-                      color="primary"
-                      density="comfortable"
-                      label="Validar certificado TLS"
-                      hide-details
-                    ></v-switch>
-                  </v-col>
-
-                  <v-col v-if="form.kind === 'dns'" cols="12" md="8">
-                    <v-combobox
-                      :model-value="form.extraHostnames"
-                      label="Outros nomes medidos na mesma checagem"
-                      placeholder="Digite e pressione Enter"
-                      variant="outlined"
-                      density="comfortable"
-                      multiple
-                      chips
-                      closable-chips
-                      hint="A latência publicada é a média de todos os nomes"
-                      persistent-hint
-                      @update:model-value="onExtraHostnamesChange"
-                    ></v-combobox>
-                  </v-col>
-                  <v-col v-if="form.kind === 'dns'" cols="12" md="4">
-                    <v-text-field
-                      v-model.number="form.dnsWarningThresholdMs"
-                      label="Alertar acima de (ms)"
-                      type="number"
-                      min="0"
-                      variant="outlined"
-                      density="comfortable"
-                      clearable
-                      hint="Em branco, só falhas geram alerta"
-                      persistent-hint
-                    ></v-text-field>
-                  </v-col>
-
-                  <v-col v-if="form.kind === 'snmp'" cols="12" md="4">
-                    <v-select
-                      v-model="form.snmpVersion"
-                      :items="['v1', 'v2c', 'v3']"
-                      label="Versão SNMP"
-                      variant="outlined"
-                      density="comfortable"
-                      hide-details="auto"
-                    ></v-select>
-                  </v-col>
-                  <v-col v-if="form.kind === 'snmp'" cols="12" md="4">
-                    <v-text-field
-                      v-model="form.snmpCommunity"
-                      label="Comunidade"
-                      variant="outlined"
-                      density="comfortable"
-                      hide-details="auto"
-                    ></v-text-field>
-                  </v-col>
-                  <v-col v-if="form.kind === 'snmp'" cols="12" md="4">
-                    <v-text-field
-                      v-model.number="form.snmpPort"
-                      label="Porta SNMP"
-                      type="number"
-                      min="1"
-                      max="65535"
-                      variant="outlined"
-                      density="comfortable"
-                      hide-details="auto"
-                    ></v-text-field>
-                  </v-col>
+                  <AdvancedProtocolOptions
+                    :kind="form.kind"
+                    :packet-count="form.packetCount"
+                    :accepted-status-codes="form.acceptedStatusCodes"
+                    :validate-certificate="form.validateCertificate"
+                    :extra-hostnames="form.extraHostnames"
+                    :dns-warning-threshold-ms="form.dnsWarningThresholdMs"
+                    :snmp-version="form.snmpVersion"
+                    :snmp-community="form.snmpCommunity"
+                    :snmp-port="form.snmpPort"
+                    @update:packet-count="form.packetCount = $event"
+                    @status-codes-change="onStatusCodesChange"
+                    @update:validate-certificate="form.validateCertificate = $event"
+                    @extra-hostnames-change="onExtraHostnamesChange"
+                    @update:dns-warning-threshold-ms="form.dnsWarningThresholdMs = $event"
+                    @update:snmp-version="form.snmpVersion = $event"
+                    @update:snmp-community="form.snmpCommunity = $event"
+                    @update:snmp-port="form.snmpPort = $event"
+                  />
 
                   <v-col cols="12" md="6">
                     <v-text-field
@@ -807,12 +422,12 @@ import { apiService } from '@/services/apiService'
 import type { DeviceInterface } from '@/stores/deviceDetail'
 import DnsServersDialog from '@/components/DnsServersDialog.vue'
 import DeviceDialog from '@/components/DeviceDialog.vue'
-import DataRateInput from '@/components/DataRateInput.vue'
-import { ALERT_DURATIONS, ALERT_SEVERITIES } from '@/utils/alertPresentation'
+import HttpFields from './monitors/form/HttpFields.vue'
+import TcpFields from './monitors/form/TcpFields.vue'
+import DnsFields from './monitors/form/DnsFields.vue'
+import SnmpFields from './monitors/form/SnmpFields.vue'
+import AdvancedProtocolOptions from './monitors/form/AdvancedProtocolOptions.vue'
 import {
-  COMMON_TCP_PORTS,
-  DNS_PROTOCOLS,
-  DNS_RECORD_TYPES,
   INTERVAL_PRESETS,
   MONITOR_KINDS,
   SNMP_MODES,
@@ -823,7 +438,6 @@ import {
   formatSeconds,
   isHostname,
   isIpAddress,
-  isValidPort,
   monitorKind,
   monitorToForm,
   suggestMonitorName,
@@ -882,28 +496,6 @@ const probeItems = computed(() => [
 ])
 
 const frequencyStepNumber = computed(() => (probeItems.value.length > 1 ? 4 : 3))
-
-/** Cadastrados no transporte atual + o valor digitado que ainda não existe */
-const dnsServerItems = computed(() =>
-  dnsServersStore.servers
-    .filter((server) => server.protocol === form.dnsProtocol)
-    .map((server) => ({
-      title: server.address,
-      value: server.address,
-      subtitle: server.description ? `${server.name} · ${server.description}` : server.name,
-      icon: 'mdi-server',
-    }))
-)
-
-const dohEndpointItems = computed(() =>
-  dnsServersStore.servers
-    .filter((server) => server.protocol === 'doh')
-    .map((server) => ({
-      title: server.address,
-      value: server.address,
-      subtitle: server.name,
-    }))
-)
 
 /** Avisa quando o endereço digitado será cadastrado junto com o monitor */
 function registryHint(address: string, fallback: string): string {

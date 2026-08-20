@@ -220,6 +220,7 @@ import { useDevicesStore } from '@/stores/devices'
 import { useDeviceDetailStore } from '@/stores/deviceDetail'
 import { useEventsStore } from '@/stores/events'
 import type { WidgetConfig } from '@/stores/dashboard'
+import { formatBps, formatBytes } from '@/utils/formatters'
 
 const props = defineProps<{
   widget: WidgetConfig
@@ -431,22 +432,6 @@ const totalVolumeFormatted = computed(() => {
   const totalBytes = totalBits / 8
   return formatBytes(totalBytes)
 })
-
-function formatBps(bps: number): string {
-  if (!bps || bps <= 0) return '0 bps'
-  if (bps >= 1e9) return (bps / 1e9).toFixed(2) + ' Gbps'
-  if (bps >= 1e6) return (bps / 1e6).toFixed(1) + ' Mbps'
-  if (bps >= 1e3) return (bps / 1e3).toFixed(0) + ' Kbps'
-  return Math.round(bps) + ' bps'
-}
-
-function formatBytes(bytes: number): string {
-  if (!bytes || bytes <= 0) return '0 B'
-  if (bytes >= 1e9) return (bytes / 1e9).toFixed(2) + ' GB'
-  if (bytes >= 1e6) return (bytes / 1e6).toFixed(1) + ' MB'
-  if (bytes >= 1e3) return (bytes / 1e3).toFixed(0) + ' KB'
-  return Math.round(bytes) + ' B'
-}
 
 const chartPoints = computed(() => {
   const left = 70

@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { apiService } from '@/services/apiService'
+import { useCrudResource } from './crudResource'
 import type { UserRole } from '@/utils/access'
 
 export interface ManagedUser {
@@ -25,39 +25,32 @@ export interface UpdateUserPayload extends CreateUserPayload {
   password: string
 }
 
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback
-}
-
 export const useUsersStore = defineStore('users', () => {
-  const users = ref<ManagedUser[]>([])
-  const loading = ref(false)
-  const saving = ref(false)
-  const error = ref<string | null>(null)
+  const resource = useCrudResource<ManagedUser>('/users', {
+    fetch: 'Não foi possível carregar os usuários.',
+    create: 'Não foi possível criar o usuário.',
+    update: 'Não foi possível atualizar o usuário.',
+    delete: 'Não foi possível excluir o usuário.',
+  })
 
-  async function fetchUsers() {
-    loading.value = true
-    error.value = null
-    try {
-      users.value = await apiService.get<ManagedUser[]>('/users')
-    } catch (err) {
-      error.value = errorMessage(err, 'Não foi possível carregar os usuários.')
-    } finally {
-      loading.value = false
+  const saving = ref(false)
+
+  async function fetchUsers(): Promise<boolean> {
+    const ok = await resource.fetchAll()
+    if (ok) {
+      resource.items.value.sort((a, b) => a.fullName.localeCompare(b.fullName, 'pt-BR'))
     }
+    return ok
   }
 
   async function createUser(payload: CreateUserPayload): Promise<boolean> {
     saving.value = true
-    error.value = null
     try {
-      const created = await apiService.post<ManagedUser>('/users', payload)
-      users.value = [...users.value, created].sort((a, b) =>
-        a.fullName.localeCompare(b.fullName, 'pt-BR')
-      )
-      return true
-    } catch (err) {
-      error.value = errorMessage(err, 'Não foi possível criar o usuário.')
+      const created = await resource.create(payload as unknown as Partial<ManagedUser>)
+      if (created) {
+        resource.items.value.sort((a, b) => a.fullName.localeCompare(b.fullName, 'pt-BR'))
+        return true
+      }
       return false
     } finally {
       saving.value = false
@@ -66,14 +59,9 @@ export const useUsersStore = defineStore('users', () => {
 
   async function updateUser(id: number, payload: UpdateUserPayload): Promise<boolean> {
     saving.value = true
-    error.value = null
     try {
-      const updated = await apiService.put<ManagedUser>(`/users/${id}`, payload)
-      users.value = users.value.map((user) => (user.id === id ? updated : user))
-      return true
-    } catch (err) {
-      error.value = errorMessage(err, 'Não foi possível atualizar o usuário.')
-      return false
+      const updated = await resource.update(id, payload as unknown as Partial<ManagedUser>)
+      return updated !== null
     } finally {
       saving.value = false
     }
@@ -81,28 +69,22 @@ export const useUsersStore = defineStore('users', () => {
 
   async function deleteUser(id: number): Promise<boolean> {
     saving.value = true
-    error.value = null
     try {
-      await apiService.delete(`/users/${id}`)
-      users.value = users.value.filter((user) => user.id !== id)
-      return true
-    } catch (err) {
-      error.value = errorMessage(err, 'Não foi possível excluir o usuário.')
-      return false
+      return await resource.remove(id)
     } finally {
       saving.value = false
     }
   }
 
   function clearError() {
-    error.value = null
+    resource.error.value = null
   }
 
   return {
-    users,
-    loading,
+    users: resource.items,
+    loading: resource.loading,
     saving,
-    error,
+    error: resource.error,
     fetchUsers,
     createUser,
     updateUser,

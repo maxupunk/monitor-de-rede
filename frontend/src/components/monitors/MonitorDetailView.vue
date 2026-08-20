@@ -29,848 +29,85 @@
 
     <div v-else-if="monitorsStore.currentMonitor">
       <!-- Header do Monitor -->
-      <v-card elevation="2" class="rounded-lg pa-4 pa-md-6 mb-6">
-        <div
-          class="d-flex flex-column flex-md-row align-start align-md-center justify-space-between ga-4"
-        >
-          <div class="d-flex align-center ga-3">
-            <v-avatar :color="headerChip.color" size="48" size-md="56" class="text-white mr-2">
-              <v-icon size="28" size-md="32">{{ typeIcon }}</v-icon>
-            </v-avatar>
-            <div>
-              <div class="d-flex align-center ga-2 flex-wrap">
-                <h1 class="text-h6 text-md-h4 font-weight-bold">{{ monitor.name }}</h1>
-                <v-chip
-                  :color="headerChip.color"
-                  size="small"
-                  variant="flat"
-                  class="font-weight-bold px-3"
-                >
-                  <v-icon start size="14">{{ headerChip.icon }}</v-icon>
-                  {{ headerChip.label }}
-                </v-chip>
-                <v-chip size="small" color="info" variant="tonal" class="px-3">
-                  {{ typeText }}
-                </v-chip>
-              </div>
-              <div class="text-caption text-md-subtitle-1 text-grey-darken-1 mt-1 text-break">
-                Alvo: <strong class="text-high-emphasis">{{ formattedTarget }}</strong> ·
-                {{
-                  monitor.type === 'snmp' && monitor.device
-                    ? 'Intervalo de coleta SNMP:'
-                    : 'Intervalo de coleta:'
-                }}
-                {{ monitor.intervalSeconds }}s
-                <span v-if="monitor.device">
-                  · Dispositivo: <strong>{{ monitor.device.name }}</strong></span
-                >
-              </div>
-            </div>
-          </div>
-
-          <div class="d-flex flex-wrap align-center ga-2 w-100 w-md-auto">
-            <!--
-              `color` explícito: sem ele o `tonal` cai na cor de superfície e o
-              botão fica cinza, do lado de quatro irmãos coloridos — cinza é a
-              linguagem de "desabilitado", e este botão funciona.
-            -->
-            <v-btn
-              v-if="monitor.device"
-              color="primary"
-              variant="tonal"
-              prepend-icon="mdi-router-network"
-              size="small"
-              class="flex-grow-1 flex-md-grow-0"
-              :to="{ name: 'device-detail', params: { id: monitor.device.id } }"
-            >
-              <span class="hidden-sm-and-down">Ver dispositivo</span>
-              <span class="hidden-md-and-up">Dispositivo</span>
-            </v-btn>
-            <v-btn
-              color="primary"
-              prepend-icon="mdi-play"
-              size="small"
-              class="flex-grow-1 flex-md-grow-0"
-              :loading="monitorsStore.runningId === monitor.id"
-              @click="monitorsStore.runMonitor(monitor.id)"
-            >
-              <span class="hidden-sm-and-down">Testar Agora</span>
-              <span class="hidden-md-and-up">Testar</span>
-            </v-btn>
-            <v-btn
-              variant="outlined"
-              color="primary"
-              prepend-icon="mdi-pencil"
-              size="small"
-              class="flex-grow-1 flex-md-grow-0"
-              @click="editDialog = true"
-            >
-              Editar
-            </v-btn>
-            <v-btn
-              :color="monitor.isEnabled ? 'warning' : 'success'"
-              variant="outlined"
-              size="small"
-              class="flex-grow-1 flex-md-grow-0"
-              :prepend-icon="monitor.isEnabled ? 'mdi-pause' : 'mdi-play-outline'"
-              @click="monitorsStore.toggleMonitorEnabled(monitor.id, !monitor.isEnabled)"
-            >
-              {{ monitor.isEnabled ? 'Pausar' : 'Ativar' }}
-            </v-btn>
-            <v-btn icon color="error" variant="text" size="small" @click="confirmDelete">
-              <v-icon>mdi-delete</v-icon>
-              <v-tooltip activator="parent" location="top">Excluir Monitor</v-tooltip>
-            </v-btn>
-          </div>
-        </div>
-      </v-card>
+      <MonitorDetailHeader
+        :monitor="monitor"
+        :header-chip="headerChip"
+        :type-icon="typeIcon"
+        :type-text="typeText"
+        :formatted-target="formattedTarget"
+        :running="monitorsStore.runningId === monitor.id"
+        @test="monitorsStore.runMonitor(monitor.id)"
+        @edit="editDialog = true"
+        @toggle-enabled="monitorsStore.toggleMonitorEnabled(monitor.id, !monitor.isEnabled)"
+        @delete="confirmDelete"
+      />
 
       <!-- Instabilidade histórica do alvo: "oscilou 12x nas últimas 24h" -->
       <InstabilityIndicator :scope-key="`monitor:${monitor.id}`" />
 
-      <!-- Cards de Métricas KPI: variam conforme o tipo de monitor (Tráfego, CPU/Memória, Interface RFC 2863 ou Ping/HTTP/TCP/DNS) -->
-      <v-row v-if="isTrafficMonitor" class="mb-6">
-        <v-col cols="12" sm="6" md="3">
-          <v-card elevation="2" class="rounded-lg pa-4 h-100">
-            <div class="d-flex align-center justify-space-between mb-2">
-              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-                >Download Atual (IN)</span
-              >
-              <v-avatar color="success" variant="tonal" size="36">
-                <v-icon size="20">mdi-arrow-down-bold</v-icon>
-              </v-avatar>
-            </div>
-            <div class="text-h4 font-weight-bold my-1 text-success">
-              {{ trafficInText }}
-            </div>
-            <div class="text-caption text-grey">Última taxa de recepção</div>
-          </v-card>
-        </v-col>
+      <!-- Cards de Métricas KPI -->
+      <MonitorKpiCards
+        :is-traffic-monitor="isTrafficMonitor"
+        :is-gauge-monitor="isGaugeMonitor"
+        :is-interface-monitor="isInterfaceMonitor"
+        :traffic-in-text="trafficInText"
+        :traffic-out-text="trafficOutText"
+        :interface-speed-text="interfaceSpeedText"
+        :interface-oper-text="interfaceOperText"
+        :header-chip="headerChip"
+        :gauge-color-value="gaugeColorValue"
+        :gauge-current-text="gaugeCurrentText"
+        :gauge-avg-text="gaugeAvgText"
+        :gauge-min-text="gaugeMinText"
+        :gauge-max-text="gaugeMaxText"
+        :stats="stats"
+        :interface-flap-count="interfaceFlapCount"
+        :latency-kpi-titles="latencyKpiTitles"
+        :last-latency-text="lastLatencyText"
+        :avg-latency-text="avgLatencyText"
+        :min-latency-text="minLatencyText"
+        :max-latency-text="maxLatencyText"
+      />
 
-        <v-col cols="12" sm="6" md="3">
-          <v-card elevation="2" class="rounded-lg pa-4 h-100">
-            <div class="d-flex align-center justify-space-between mb-2">
-              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-                >Upload Atual (OUT)</span
-              >
-              <v-avatar color="primary" variant="tonal" size="36">
-                <v-icon size="20">mdi-arrow-up-bold</v-icon>
-              </v-avatar>
-            </div>
-            <div class="text-h4 font-weight-bold my-1 text-primary">
-              {{ trafficOutText }}
-            </div>
-            <div class="text-caption text-grey">Última taxa de transmissão</div>
-          </v-card>
-        </v-col>
-
-        <v-col cols="12" sm="6" md="3">
-          <v-card elevation="2" class="rounded-lg pa-4 h-100">
-            <div class="d-flex align-center justify-space-between mb-2">
-              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-                >Velocidade da Interface</span
-              >
-              <v-avatar color="info" variant="tonal" size="36">
-                <v-icon size="20">mdi-speedometer</v-icon>
-              </v-avatar>
-            </div>
-            <div class="text-h4 font-weight-bold my-1 text-info">
-              {{ interfaceSpeedText }}
-            </div>
-            <div class="text-caption text-grey">Capacidade da porta negociada</div>
-          </v-card>
-        </v-col>
-
-        <v-col cols="12" sm="6" md="3">
-          <v-card elevation="2" class="rounded-lg pa-4 h-100">
-            <div class="d-flex align-center justify-space-between mb-2">
-              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-                >Status Operacional</span
-              >
-              <v-avatar :color="headerChip.color" variant="tonal" size="36">
-                <v-icon size="20">{{ headerChip.icon }}</v-icon>
-              </v-avatar>
-            </div>
-            <div class="text-h5 font-weight-bold my-1" :class="`text-${headerChip.color}`">
-              {{ interfaceOperText }}
-            </div>
-            <div class="text-caption text-grey">Estado da interface no agente</div>
-          </v-card>
-        </v-col>
-      </v-row>
-
-      <v-row v-else-if="isGaugeMonitor" class="mb-6">
-        <v-col cols="12" sm="6" md="3">
-          <v-card elevation="2" class="rounded-lg pa-4 h-100">
-            <div class="d-flex align-center justify-space-between mb-2">
-              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium">Uso Atual</span>
-              <v-avatar :color="gaugeColorValue" variant="tonal" size="36">
-                <v-icon size="20">mdi-gauge</v-icon>
-              </v-avatar>
-            </div>
-            <div class="text-h4 font-weight-bold my-1" :class="`text-${gaugeColorValue}`">
-              {{ gaugeCurrentText }}
-            </div>
-            <div class="text-caption text-grey">Última leitura SNMP</div>
-          </v-card>
-        </v-col>
-
-        <v-col cols="12" sm="6" md="3">
-          <v-card elevation="2" class="rounded-lg pa-4 h-100">
-            <div class="d-flex align-center justify-space-between mb-2">
-              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium">Uso Médio</span>
-              <v-avatar color="info" variant="tonal" size="36">
-                <v-icon size="20">mdi-chart-line</v-icon>
-              </v-avatar>
-            </div>
-            <div class="text-h4 font-weight-bold my-1 text-info">
-              {{ gaugeAvgText }}
-            </div>
-            <div class="text-caption text-grey">Média do histórico coletado</div>
-          </v-card>
-        </v-col>
-
-        <v-col cols="12" sm="6" md="3">
-          <v-card elevation="2" class="rounded-lg pa-4 h-100">
-            <div class="d-flex align-center justify-space-between mb-2">
-              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-                >Uso Mín / Máx</span
-              >
-              <v-avatar color="purple" variant="tonal" size="36">
-                <v-icon size="20">mdi-swap-vertical</v-icon>
-              </v-avatar>
-            </div>
-            <div class="text-h5 font-weight-bold my-1 text-purple">
-              <span>{{ gaugeMinText }}</span>
-              <span class="text-grey-darken-1 font-weight-regular text-subtitle-1 mx-1">/</span>
-              <span>{{ gaugeMaxText }}</span>
-            </div>
-            <div class="text-caption text-grey">Mínimo e máximo do período</div>
-          </v-card>
-        </v-col>
-
-        <v-col cols="12" sm="6" md="3">
-          <v-card elevation="2" class="rounded-lg pa-4 h-100">
-            <div class="d-flex align-center justify-space-between mb-2">
-              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-                >Agente SNMP Disponível</span
-              >
-              <v-avatar color="success" variant="tonal" size="36">
-                <v-icon size="20">mdi-check-decagram</v-icon>
-              </v-avatar>
-            </div>
-            <div class="text-h4 font-weight-bold my-1 text-success">
-              {{ stats.uptimePercentage }}%
-            </div>
-            <div class="text-caption text-grey">% de coletas SNMP com resposta</div>
-          </v-card>
-        </v-col>
-      </v-row>
-
-      <v-row v-else-if="isInterfaceMonitor" class="mb-6">
-        <v-col cols="12" sm="6" md="3">
-          <v-card elevation="2" class="rounded-lg pa-4 h-100">
-            <div class="d-flex align-center justify-space-between mb-2">
-              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-                >Velocidade Negociada</span
-              >
-              <v-avatar :color="headerChip.color" variant="tonal" size="36">
-                <v-icon size="20">{{ headerChip.icon }}</v-icon>
-              </v-avatar>
-            </div>
-            <div class="text-h4 font-weight-bold my-1" :class="`text-${headerChip.color}`">
-              {{ interfaceSpeedText }}
-            </div>
-            <div class="text-caption text-grey">Última verificação SNMP</div>
-          </v-card>
-        </v-col>
-
-        <v-col cols="12" sm="6" md="3">
-          <v-card elevation="2" class="rounded-lg pa-4 h-100">
-            <div class="d-flex align-center justify-space-between mb-2">
-              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-                >Status Operacional</span
-              >
-              <v-avatar color="info" variant="tonal" size="36">
-                <v-icon size="20">mdi-information-outline</v-icon>
-              </v-avatar>
-            </div>
-            <div class="text-h5 font-weight-bold my-1 text-info">
-              {{ interfaceOperText }}
-            </div>
-            <div class="text-caption text-grey">ifOperStatus / ifAdminStatus (SNMP)</div>
-          </v-card>
-        </v-col>
-
-        <v-col cols="12" sm="6" md="3">
-          <v-card elevation="2" class="rounded-lg pa-4 h-100">
-            <div class="d-flex align-center justify-space-between mb-2">
-              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-                >Estabilidade do Link</span
-              >
-              <v-avatar color="success" variant="tonal" size="36">
-                <v-icon size="20">mdi-check-decagram</v-icon>
-              </v-avatar>
-            </div>
-            <div class="text-h4 font-weight-bold my-1 text-success">
-              {{ stats.uptimePercentage }}%
-            </div>
-            <div class="text-caption text-grey">% de verificações com link Up</div>
-          </v-card>
-        </v-col>
-
-        <v-col cols="12" sm="6" md="3">
-          <v-card elevation="2" class="rounded-lg pa-4 h-100">
-            <div class="d-flex align-center justify-space-between mb-2">
-              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-                >Alterações de Estado</span
-              >
-              <v-avatar
-                :color="interfaceFlapCount > 0 ? 'warning' : 'grey'"
-                variant="tonal"
-                size="36"
-              >
-                <v-icon size="20">mdi-swap-horizontal</v-icon>
-              </v-avatar>
-            </div>
-            <div
-              class="text-h4 font-weight-bold my-1"
-              :class="interfaceFlapCount > 0 ? 'text-warning' : 'text-grey'"
-            >
-              {{ interfaceFlapCount }}
-            </div>
-            <div class="text-caption text-grey">Trocas de status no período exibido</div>
-          </v-card>
-        </v-col>
-      </v-row>
-
-      <v-row v-else class="mb-6">
-        <!-- Tempo de Resposta / Ping / Tempo de Consulta Atual -->
-        <v-col cols="12" sm="6" md="3">
-          <v-card elevation="2" class="rounded-lg pa-4 h-100">
-            <div class="d-flex align-center justify-space-between mb-2">
-              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium">{{
-                latencyKpiTitles.current
-              }}</span>
-              <v-avatar color="primary" variant="tonal" size="36">
-                <v-icon size="20">mdi-speedometer</v-icon>
-              </v-avatar>
-            </div>
-            <div
-              class="text-h4 font-weight-bold my-1"
-              :class="stats.lastLatency !== null ? 'text-primary' : 'text-grey'"
-            >
-              {{ lastLatencyText }}
-            </div>
-            <div class="text-caption text-grey">{{ latencyKpiTitles.currentCaption }}</div>
-          </v-card>
-        </v-col>
-
-        <!-- Tempo Médio -->
-        <v-col cols="12" sm="6" md="3">
-          <v-card elevation="2" class="rounded-lg pa-4 h-100">
-            <div class="d-flex align-center justify-space-between mb-2">
-              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium">{{
-                latencyKpiTitles.avg
-              }}</span>
-              <v-avatar color="info" variant="tonal" size="36">
-                <v-icon size="20">mdi-chart-line</v-icon>
-              </v-avatar>
-            </div>
-            <div class="text-h4 font-weight-bold my-1 text-info">
-              {{ avgLatencyText }}
-            </div>
-            <div class="text-caption text-grey">{{ latencyKpiTitles.avgCaption }}</div>
-          </v-card>
-        </v-col>
-
-        <!-- Tempo Mínimo / Máximo -->
-        <v-col cols="12" sm="6" md="3">
-          <v-card elevation="2" class="rounded-lg pa-4 h-100">
-            <div class="d-flex align-center justify-space-between mb-2">
-              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium">{{
-                latencyKpiTitles.minMax
-              }}</span>
-              <v-avatar color="purple" variant="tonal" size="36">
-                <v-icon size="20">mdi-swap-vertical</v-icon>
-              </v-avatar>
-            </div>
-            <div class="text-h5 font-weight-bold my-1 text-purple">
-              <span>{{ minLatencyText }}</span>
-              <span class="text-grey-darken-1 font-weight-regular text-subtitle-1 mx-1">/</span>
-              <span>{{ maxLatencyText }}</span>
-            </div>
-            <div class="text-caption text-grey">{{ latencyKpiTitles.minMaxCaption }}</div>
-          </v-card>
-        </v-col>
-
-        <!-- Uptime / Taxa de Sucesso -->
-        <v-col cols="12" sm="6" md="3">
-          <v-card elevation="2" class="rounded-lg pa-4 h-100">
-            <div class="d-flex align-center justify-space-between mb-2">
-              <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-                >Taxa de Uptime</span
-              >
-              <v-avatar color="success" variant="tonal" size="36">
-                <v-icon size="20">mdi-check-decagram</v-icon>
-              </v-avatar>
-            </div>
-            <div class="text-h4 font-weight-bold my-1 text-success">
-              {{ stats.uptimePercentage }}%
-            </div>
-            <v-progress-linear
-              :model-value="stats.uptimePercentage"
-              color="success"
-              height="6"
-              rounded
-              class="mt-2"
-            ></v-progress-linear>
-          </v-card>
-        </v-col>
-      </v-row>
-
-      <!-- Gráfico de Tráfego de Rede (IN/OUT bps) -->
-      <v-card v-if="isTrafficMonitor" elevation="2" class="rounded-lg pa-6 mb-6">
-        <div class="d-flex align-center justify-space-between mb-4 flex-wrap ga-3">
-          <div>
-            <h2 class="text-h6 font-weight-bold d-flex align-center ga-2">
-              <v-icon color="primary">mdi-chart-areaspline</v-icon>
-              Histórico de Tráfego de Rede
-            </h2>
-            <div class="text-subtitle-2 text-grey">
-              Throughput de transmissão e recepção coletado via SNMP
-            </div>
-          </div>
-          <v-btn-toggle
-            v-model="trafficTab"
-            color="primary"
-            variant="outlined"
-            mandatory
-            density="compact"
-          >
-            <v-btn value="inBps" size="small" prepend-icon="mdi-arrow-down-bold">
-              Download (IN)
-            </v-btn>
-            <v-btn value="outBps" size="small" prepend-icon="mdi-arrow-up-bold">
-              Upload (OUT)
-            </v-btn>
-            <v-btn value="combined" size="small" prepend-icon="mdi-swap-horizontal">
-              Combinado
-            </v-btn>
-          </v-btn-toggle>
-        </div>
-
-        <BaseMetricChart
-          v-if="trafficSeries.length > 0 && trafficSeries[0].data.length > 0"
-          :series="trafficSeries"
-          unit-type="bandwidth"
-        />
-
-        <div v-else class="text-center text-grey py-8 border rounded-lg bg-grey-lighten-5">
-          <v-icon size="40" color="grey-lighten-1">mdi-chart-line-variant</v-icon>
-          <div class="mt-2 text-subtitle-2">
-            Histórico de tráfego insuficiente para gerar o gráfico.
-          </div>
-          <div class="text-caption">
-            As taxas são calculadas pela varredura SNMP periódica do dispositivo.
-          </div>
-        </div>
-      </v-card>
-
-      <!-- Linha do Tempo de Status (Bar Timeline - Estilo Uptime Kuma) -->
-      <!-- Monitores de uso e tráfego não têm uma noção de up/down por execução, então a timeline não se aplica -->
-      <v-card
-        v-if="!isGaugeMonitor && !isTrafficMonitor"
-        elevation="2"
-        class="rounded-lg pa-6 mb-6"
-      >
-        <div class="d-flex align-center justify-space-between mb-4 flex-wrap ga-2">
-          <div>
-            <h2 class="text-h6 font-weight-bold d-flex align-center ga-2">
-              <v-icon color="primary">mdi-chart-timeline-variant</v-icon>
-              Linha do Tempo de Status
-            </h2>
-            <div class="text-subtitle-2 text-grey">Histórico recente de verificações de status</div>
-          </div>
-          <div class="d-flex align-center ga-4 text-caption flex-wrap">
-            <span v-if="statusBreakdown.up" class="d-flex align-center ga-1">
-              <span class="status-indicator-dot bg-success"></span> UP ({{ statusBreakdown.up }})
-            </span>
-            <span v-if="statusBreakdown.down" class="d-flex align-center ga-1">
-              <span class="status-indicator-dot bg-error"></span> DOWN ({{ statusBreakdown.down }})
-            </span>
-            <span v-if="statusBreakdown.warning" class="d-flex align-center ga-1">
-              <span class="status-indicator-dot bg-warning"></span> INSTÁVEL ({{
-                statusBreakdown.warning
-              }})
-            </span>
-            <span v-if="statusBreakdown.disabled" class="d-flex align-center ga-1">
-              <span class="status-indicator-dot" style="background-color: #9e9e9e"></span>
-              DESABILITADA ({{ statusBreakdown.disabled }})
-            </span>
-            <span v-if="statusBreakdown.unknown" class="d-flex align-center ga-1">
-              <span class="status-indicator-dot" style="background-color: #b0bec5"></span>
-              DESCONHECIDO ({{ statusBreakdown.unknown }})
-            </span>
-            <span class="text-grey font-weight-bold">Total: {{ stats.totalChecks }}</span>
-          </div>
-        </div>
-
-        <div
-          class="pa-3 bg-grey-lighten-4 rounded-lg monitor-timeline-scroll d-flex justify-center"
-        >
-          <MonitorTimelineBar
-            :results="monitor.recentResults"
-            :max-blocks="60"
-            :height="36"
-            :width="10"
-          />
-        </div>
-      </v-card>
-
-      <!-- Gráfico de Uso ao Longo do Tempo (CPU/Memória) -->
-      <v-card v-if="isGaugeMonitor && !isTrafficMonitor" elevation="2" class="rounded-lg pa-6 mb-6">
-        <div class="d-flex align-center justify-space-between mb-4">
-          <div>
-            <h2 class="text-h6 font-weight-bold d-flex align-center ga-2">
-              <v-icon color="info">mdi-sine-wave</v-icon>
-              Gráfico de Uso de {{ gaugeTypeLabel(monitor) === 'MEMÓRIA' ? 'Memória' : 'CPU' }}
-            </h2>
-            <div class="text-subtitle-2 text-grey">
-              Percentual de uso coletado via SNMP no dispositivo ao longo do tempo
-            </div>
-          </div>
-          <v-chip v-if="gaugeStats.avg !== null" color="info" size="small" variant="outlined">
-            Média: {{ gaugeStats.avg }}%
-          </v-chip>
-        </div>
-
-        <BaseMetricChart
-          v-if="gaugeSeries.length > 0 && gaugeSeries[0].data.length > 0"
-          :series="gaugeSeries"
-          unit-type="percentage"
-          :show-avg-line="true"
-          :avg-value="gaugeStats.avg ?? undefined"
-        />
-
-        <div v-else class="text-center text-grey py-8 border rounded-lg bg-grey-lighten-5">
-          <v-icon size="40" color="grey-lighten-1">mdi-chart-line-variant</v-icon>
-          <div class="mt-2 text-subtitle-2">
-            Histórico insuficiente para gerar o gráfico de uso.
-          </div>
-          <div class="text-caption">
-            As amostras vêm da varredura SNMP periódica do dispositivo.
-          </div>
-        </div>
-      </v-card>
-
-      <!-- Gráfico Unificado de Latência / Tempo de Resposta (não se aplica a monitores de uso, tráfego ou de interface) -->
-      <v-card
-        v-if="!isGaugeMonitor && !isInterfaceMonitor && !isTrafficMonitor"
-        elevation="2"
-        class="rounded-lg pa-6 mb-6"
-      >
-        <div class="d-flex align-center justify-space-between mb-4">
-          <div>
-            <h2 class="text-h6 font-weight-bold d-flex align-center ga-2">
-              <v-icon color="info">mdi-sine-wave</v-icon>
-              Gráfico de Tempo de Resposta (Ping Latency)
-            </h2>
-            <div class="text-subtitle-2 text-grey">
-              Variação da latência em milissegundos (ms) ao longo do tempo
-            </div>
-          </div>
-          <v-chip v-if="stats.avgLatency" color="info" size="small" variant="outlined">
-            Média: {{ formatLatency(stats.avgLatency) }}
-          </v-chip>
-        </div>
-
-        <!-- Renderização do Gráfico Unificado BaseMetricChart -->
-        <BaseMetricChart
-          v-if="latencySeries.length > 0 && latencySeries[0].data.length > 0"
-          :series="latencySeries"
-          unit-type="latency"
-          :show-avg-line="true"
-          :avg-value="stats.avgLatency || undefined"
-        />
-
-        <div v-else class="text-center text-grey py-8 border rounded-lg bg-grey-lighten-5">
-          <v-icon size="40" color="grey-lighten-1">mdi-chart-line-variant</v-icon>
-          <div class="mt-2 text-subtitle-2">
-            Histórico insuficiente para gerar o gráfico de latência.
-          </div>
-          <div class="text-caption">Execute mais verificações clicando em "Testar Agora".</div>
-        </div>
-      </v-card>
+      <!-- Seção de Gráficos e Timeline -->
+      <MonitorChartsSection
+        :is-traffic-monitor="isTrafficMonitor"
+        :is-gauge-monitor="isGaugeMonitor"
+        :is-interface-monitor="isInterfaceMonitor"
+        :traffic-tab="trafficTab"
+        :traffic-series="trafficSeries"
+        :recent-results="monitor.recentResults || []"
+        :status-breakdown="statusBreakdown"
+        :total-checks="stats.totalChecks"
+        :gauge-type="gaugeTypeLabel(monitor)"
+        :gauge-avg="gaugeStats.avg"
+        :gauge-series="gaugeSeries"
+        :avg-latency="stats.avgLatency"
+        :latency-series="latencySeries"
+        @update:traffic-tab="trafficTab = $event"
+      />
 
       <!-- Tabela com Histórico de Verificações Recentes -->
-      <v-card elevation="2" class="rounded-lg pa-6">
-        <div class="d-flex align-center justify-space-between mb-4">
-          <div>
-            <h2 class="text-h6 font-weight-bold d-flex align-center ga-2">
-              <v-icon color="primary">mdi-history</v-icon>
-              Histórico de Execuções Recentes
-            </h2>
-            <div class="text-subtitle-2 text-grey">Resultados das últimas verificações</div>
-          </div>
-          <div class="d-flex align-center ga-2">
-            <v-btn
-              size="small"
-              variant="text"
-              prepend-icon="mdi-refresh"
-              :loading="monitorsStore.loading"
-              @click="refreshData"
-            >
-              Atualizar
-            </v-btn>
-            <v-btn icon size="small" variant="text" @click="toggleShowHistory">
-              <v-icon>{{ showHistory ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
-              <v-tooltip activator="parent" location="top">
-                {{ showHistory ? 'Ocultar Histórico' : 'Mostrar Histórico' }}
-              </v-tooltip>
-            </v-btn>
-          </div>
-        </div>
-
-        <v-expand-transition>
-          <div v-if="showHistory">
-            <div
-              class="history-scroll-container rounded-lg border overflow-y-auto"
-              style="max-height: 450px"
-            >
-              <v-infinite-scroll :key="history.scrollKey.value" :height="420" @load="history.load">
-                <div class="table-responsive">
-                  <v-table density="comfortable" hover>
-                    <thead>
-                      <tr>
-                        <th style="width: 110px">Status</th>
-                        <th style="width: 140px">Latência (Ping)</th>
-                        <th style="width: 120px">Duração</th>
-                        <th style="width: 180px">Data e Hora</th>
-                        <th>Mensagem</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="item in history.items.value" :key="item.id">
-                        <td>
-                          <v-chip
-                            :color="getStatusColor(item.status)"
-                            size="x-small"
-                            variant="flat"
-                          >
-                            {{ item.status ? item.status.toUpperCase() : 'UNKNOWN' }}
-                          </v-chip>
-                        </td>
-                        <td>
-                          <span
-                            v-if="item.latencyMs !== undefined && item.latencyMs !== null"
-                            class="font-weight-medium"
-                          >
-                            {{ formatLatency(item.latencyMs) }}
-                          </span>
-                          <span v-else class="text-grey">-</span>
-                        </td>
-                        <td>
-                          <span class="text-grey">{{ item.durationMs }} ms</span>
-                        </td>
-                        <td>
-                          <span>{{ formatDateTime(item.finishedAt, '-') }}</span>
-                        </td>
-                        <td>
-                          <span
-                            :class="
-                              item.status === 'down'
-                                ? 'text-error font-weight-medium'
-                                : 'text-body-2'
-                            "
-                          >
-                            {{ item.message || '-' }}
-                          </span>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </v-table>
-                </div>
-                <template #empty>
-                  <div class="text-caption text-grey text-center py-3">
-                    Nenhum outro registro no histórico.
-                  </div>
-                </template>
-              </v-infinite-scroll>
-            </div>
-          </div>
-        </v-expand-transition>
-      </v-card>
+      <MonitorHistoryTable
+        :show="showHistory"
+        :history="history"
+        :loading="monitorsStore.loading"
+        @toggle="toggleShowHistory"
+        @refresh="refreshData"
+      />
 
       <!-- Tabela com Histórico de Alertas -->
-      <v-card elevation="2" class="rounded-lg pa-6 mt-6">
-        <div class="d-flex align-center justify-space-between mb-4">
-          <div>
-            <h2 class="text-h6 font-weight-bold d-flex align-center ga-2">
-              <v-icon color="warning">mdi-bell-alert</v-icon>
-              Histórico de Alertas
-            </h2>
-            <div class="text-subtitle-2 text-grey">
-              Alertas disparados e normalizações deste monitor
-            </div>
-          </div>
-          <div class="d-flex align-center ga-2">
-            <v-btn
-              size="small"
-              variant="text"
-              prepend-icon="mdi-refresh"
-              :loading="monitorsStore.loading"
-              @click="refreshData"
-            >
-              Atualizar
-            </v-btn>
-            <v-btn icon size="small" variant="text" @click="toggleShowAlerts">
-              <v-icon>{{ showAlerts ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
-              <v-tooltip activator="parent" location="top">
-                {{ showAlerts ? 'Ocultar Alertas' : 'Mostrar Alertas' }}
-              </v-tooltip>
-            </v-btn>
-          </div>
-        </div>
-
-        <v-expand-transition>
-          <div v-if="showAlerts">
-            <div
-              class="history-scroll-container rounded-lg border overflow-y-auto"
-              style="max-height: 450px"
-            >
-              <v-infinite-scroll
-                :key="alertHistory.scrollKey.value"
-                :height="420"
-                @load="alertHistory.load"
-              >
-                <div class="table-responsive">
-                  <v-table density="comfortable" hover>
-                    <thead>
-                      <tr>
-                        <th style="width: 120px">Severidade</th>
-                        <th style="width: 120px">Status</th>
-                        <th>Título / Regra</th>
-                        <th>Mensagem</th>
-                        <th style="width: 180px">Início</th>
-                        <th style="width: 180px">Normalizado em</th>
-                        <th style="width: 160px">Ações</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="item in alertHistory.items.value" :key="item.id">
-                        <td>
-                          <v-chip
-                            :color="severityColor(item.severity)"
-                            size="x-small"
-                            variant="flat"
-                          >
-                            {{ severityLabel(item.severity).toUpperCase() }}
-                          </v-chip>
-                        </td>
-                        <td>
-                          <v-chip
-                            :color="
-                              item.status === 'resolved' ? 'success' : severityColor(item.severity)
-                            "
-                            size="x-small"
-                            variant="tonal"
-                          >
-                            {{ statusLabel(item.status).toUpperCase() }}
-                          </v-chip>
-                        </td>
-                        <td class="font-weight-medium">
-                          {{ item.title || '—' }}
-                        </td>
-                        <td>
-                          <span
-                            :class="
-                              item.status === 'active'
-                                ? 'text-error font-weight-medium'
-                                : 'text-body-2'
-                            "
-                          >
-                            {{ item.message || '—' }}
-                          </span>
-                        </td>
-                        <td>
-                          {{ formatDateTime(item.startedAt, '—') }}
-                        </td>
-                        <td>
-                          <span v-if="item.resolvedAt" class="text-success font-weight-medium">
-                            {{ formatDateTime(item.resolvedAt, '—') }}
-                          </span>
-                          <span v-else class="text-grey">—</span>
-                        </td>
-                        <td>
-                          <div v-if="item.status === 'active'" class="d-flex ga-1">
-                            <v-btn
-                              size="x-small"
-                              variant="text"
-                              prepend-icon="mdi-check-circle"
-                              color="success"
-                              :loading="alertsStore.loading"
-                              @click="acknowledgeAlertItem(item)"
-                            >
-                              Reconhecer
-                            </v-btn>
-                            <v-menu location="bottom end">
-                              <template #activator="{ props: menuProps }">
-                                <v-btn
-                                  size="x-small"
-                                  variant="text"
-                                  prepend-icon="mdi-bell-off"
-                                  color="warning"
-                                  v-bind="menuProps"
-                                >
-                                  Silenciar
-                                </v-btn>
-                              </template>
-                              <v-list density="compact">
-                                <v-list-item
-                                  v-for="duration in silenceDurations"
-                                  :key="duration.minutes"
-                                  :title="duration.label"
-                                  :disabled="alertsStore.loading"
-                                  @click="silenceAlertItem(item, duration.minutes)"
-                                ></v-list-item>
-                              </v-list>
-                            </v-menu>
-                          </div>
-                          <v-chip
-                            v-else-if="item.status === 'acknowledged'"
-                            size="x-small"
-                            color="info"
-                            variant="tonal"
-                            prepend-icon="mdi-check-circle"
-                          >
-                            Reconhecido
-                          </v-chip>
-                          <v-chip
-                            v-else-if="item.status === 'silenced'"
-                            size="x-small"
-                            color="warning"
-                            variant="tonal"
-                            prepend-icon="mdi-bell-off"
-                          >
-                            Silenciado
-                          </v-chip>
-                          <span v-else class="text-grey">—</span>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </v-table>
-                </div>
-                <template #empty>
-                  <div class="text-caption text-grey text-center py-3">
-                    Nenhum outro registro no histórico de alertas.
-                  </div>
-                </template>
-              </v-infinite-scroll>
-            </div>
-          </div>
-        </v-expand-transition>
-      </v-card>
+      <MonitorAlertHistoryTable
+        :show="showAlerts"
+        :alert-history="alertHistory"
+        :loading="monitorsStore.loading"
+        :alerts-store-loading="alertsStore.loading"
+        :silence-durations="silenceDurations"
+        @toggle="toggleShowAlerts"
+        @refresh="refreshData"
+        @acknowledge="acknowledgeAlertItem"
+        @silence="silenceAlertItem"
+      />
     </div>
 
     <!-- State de Erro / Não Encontrado -->
@@ -901,10 +138,14 @@ import { useAlertsStore } from '@/stores/alerts'
 import { apiService } from '@/services/apiService'
 import { useInfiniteList } from '@/composables/useInfiniteList'
 import type { DeviceMetric } from '@/stores/deviceDetail'
-import MonitorTimelineBar from '@/components/MonitorTimelineBar.vue'
-import BaseMetricChart, { type ChartSeriesInput } from '@/components/BaseMetricChart.vue'
+import type { ChartSeriesInput } from '@/components/BaseMetricChart.vue'
 import MonitorFormDialog from '@/components/MonitorFormDialog.vue'
 import InstabilityIndicator from '@/components/InstabilityIndicator.vue'
+import MonitorDetailHeader from './detail/MonitorDetailHeader.vue'
+import MonitorKpiCards from './detail/MonitorKpiCards.vue'
+import MonitorChartsSection from './detail/MonitorChartsSection.vue'
+import MonitorHistoryTable from './detail/MonitorHistoryTable.vue'
+import MonitorAlertHistoryTable from './detail/MonitorAlertHistoryTable.vue'
 import {
   isGaugeMonitor as isGaugeMonitorFn,
   isTrafficMonitor as isTrafficMonitorFn,
@@ -916,7 +157,6 @@ import {
   latestResultData,
   getStatusColor,
 } from '@/utils/monitorPresentation'
-import { severityColor, severityLabel, statusLabel } from '@/utils/alertPresentation'
 import { formatDateTime, formatLatency, formatBps } from '@/utils/formatters'
 import type { AlertEvent } from '@/stores/alerts'
 
@@ -1443,12 +683,3 @@ const latencySeries = computed<ChartSeriesInput[]>(() => {
   ]
 })
 </script>
-
-<style scoped>
-.status-indicator-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  display: inline-block;
-}
-</style>

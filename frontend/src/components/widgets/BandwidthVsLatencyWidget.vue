@@ -237,7 +237,7 @@ import { ref, computed, onMounted, type CSSProperties } from 'vue'
 import { useMonitorsStore } from '@/stores/monitors'
 import { useDevicesStore } from '@/stores/devices'
 import type { WidgetConfig } from '@/stores/dashboard'
-import { formatLatency } from '@/utils/formatters'
+import { formatLatency, formatBps } from '@/utils/formatters'
 
 const props = defineProps<{
   widget: WidgetConfig
@@ -346,14 +346,6 @@ const correlationScore = computed(() => {
   if (samples.value.length === 0) return 0
   return hasSaturationCorrelation.value ? 82 : 15
 })
-
-function formatBps(bps: number): string {
-  if (!bps || bps <= 0) return '0 bps'
-  if (bps >= 1e9) return (bps / 1e9).toFixed(2) + ' Gbps'
-  if (bps >= 1e6) return (bps / 1e6).toFixed(1) + ' Mbps'
-  if (bps >= 1e3) return (bps / 1e3).toFixed(0) + ' Kbps'
-  return Math.round(bps) + ' bps'
-}
 
 const chartPoints = computed(() => {
   const left = 70
