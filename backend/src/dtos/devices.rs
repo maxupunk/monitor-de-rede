@@ -61,3 +61,70 @@ pub struct DeviceCapabilities {
     /// template de CPU só é oferecido a quem publica `cpuUsagePercent`.
     pub alert_fields: Vec<String>,
 }
+
+/// Referência compacta a um site.
+#[derive(Debug, Clone, Serialize, Deserialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct SiteRef {
+    #[ts(type = "number | null")]
+    pub id: Option<i64>,
+    pub name: String,
+}
+
+/// Referência compacta a um dispositivo pai.
+#[derive(Debug, Clone, Serialize, Deserialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct ParentRef {
+    #[ts(type = "number | null")]
+    pub id: Option<i64>,
+    pub name: String,
+}
+
+/// Projeção canônica completa de um dispositivo para a API HTTP.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DevicePresenterItem {
+    #[ts(type = "number")]
+    pub id: i64,
+    #[ts(type = "number | null")]
+    pub site_id: Option<i64>,
+    #[ts(type = "number | null")]
+    pub network_id: Option<i64>,
+    #[ts(type = "number | null")]
+    pub parent_id: Option<i64>,
+    pub ip_address: Option<String>,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub device_type: String,
+    pub vendor: Option<String>,
+    pub model: Option<String>,
+    pub serial_number: Option<String>,
+    pub description: Option<String>,
+    pub is_monitored: bool,
+    pub snmp_enabled: bool,
+    pub snmp_community: Option<String>,
+    pub snmp_version: Option<String>,
+    pub snmp_poll_interval_seconds: i32,
+    pub status: String,
+    pub access_mode: Option<String>,
+    pub effective_access_mode: String,
+    pub access_mode_reason: String,
+    pub access_mode_declared: bool,
+    pub operating_system: Option<String>,
+    pub effective_operating_system: String,
+    pub operating_system_source: String,
+    pub operating_system_reason: String,
+    pub last_seen_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub site: Option<SiteRef>,
+    pub parent: Option<ParentRef>,
+    pub system_key: Option<String>,
+    pub is_system: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(type = "any")]
+    pub vpn_peer: Option<serde_json::Value>,
+}

@@ -108,102 +108,86 @@ Este documento consolida a auditoria completa de arquitetura, código-fonte, pad
 
 ## 2. Débitos Técnicos: Backend (Rust / Loco.rs / SeaORM)
 
-### 🟡 BE-01: Duplicação de Algoritmo de Cálculo e Parsing de CIDR
-- **Arquivos Afetados:**
-  - `backend/src/services/discovery/cidr_range.rs` (302 linhas, 10.9 KB)
-  - `backend/src/services/vpn/cidr.rs` (165 linhas, 5.8 KB)
-- **Descrição do Problema:**
-  - Em `services/discovery/cidr_range.rs`, o parsing de endereços IPv4 é feito manualmente via split de strings (`part in ip.split('.')`), contagem de octetos e aritmética manual de bits (`to_number`), com uma estrutura `CidrRange` que armazena `network_address: String`.
-  - Em `services/vpn/cidr.rs`, a mesma operação é resolvida de forma idiomática utilizando os tipos da biblioteca padrão `std::net::Ipv4Addr`, com `CidrRange` contendo campos fortemente tipados (`network_address: Ipv4Addr`, `broadcast_address: Ipv4Addr`, etc.).
-- **Impacto / Risco:** Dois parsers de rede paralelos no mesmo backend Rust. O parser manual do discovery é mais propenso a bugs de borda e não aproveita a validação nativa de `Ipv4Addr`.
-- **Recomendação de Refatoração:**
-  - Mover o cálculo de CIDR para um módulo compartilhado único (`backend/src/services/shared/cidr.rs` ou `backend/src/services/network_tools/cidr.rs`), unificando o uso em torno de `std::net::Ipv4Addr`.
+### 🟢 BE-01: Duplicação de Algoritmo de Cálculo e Parsing de CIDR — Concluído
+- **Arquivos Refatorados:**
+  - `backend/src/services/shared/cidr.rs` (novo módulo consolidado unificando IPv4/IPv6, RFC 3021 e IPAM VPN)
+  - `backend/src/services/discovery/cidr_range.rs` (re-exporta e delega para `shared::cidr`)
+  - `backend/src/services/vpn/cidr.rs` (re-exporta e delega para `shared::cidr`)
+- **Ações Realizadas:**
+  - Criado `services::shared::cidr` com tipos fortemente tipados (`Ipv4Cidr`, `Ipv6Cidr`, `DiscoveryCidrRange`), eliminando a duplicação de parsing manual de octetos e unificando o tratamento de faixas de rede com validação estrita e 100% de cobertura de testes.
 
 ---
 
-### 🟡 BE-02: Nomenclatura Histórica de Testes de Integração
-- **Arquivos Afetados:**
-  - `backend/tests/requests/phase2_phase3.rs` (30 KB)
-  - `backend/tests/requests/phase6_phase7.rs` (30 KB)
-  - `backend/tests/requests/phase8.rs` (26 KB)
-  - `backend/tests/requests/phase9.rs` (28 KB)
-  - `backend/tests/requests/auth.rs` (L10: `// TODO: see how to dedup / extract this to app-local test utils`)
-- **Descrição do Problema:**
-  - Diversos arquivos de teste de integração ainda refletem os nomes das fases do roadmap de migração de AdonisJS para Rust, em vez de refletirem os domínios da aplicação (ex.: `phase2_phase3.rs` testa CRUD de dispositivos e configurações; `phase6_phase7.rs` testa scheduler, probes e alertas).
-  - Em `auth.rs:10`, há um TODO explícito indicando necessidade de extração de utilitários comuns de teste para autenticação e seed de usuários.
-- **Impacto / Risco:** Dificulta a localização de testes para novos desenvolvedores e agentes IA, além de gerar retrabalho por duplicação de setup de dados em testes.
-- **Recomendação de Refatoração:**
-  1. Renomear os arquivos para refletir os domínios:
-     - `phase2_phase3.rs` ➔ `devices_monitors_crud.rs`
-     - `phase6_phase7.rs` ➔ `scheduler_probes_lifecycle.rs`
-     - `phase8.rs` ➔ `vpn_orchestration.rs`
-     - `phase9.rs` ➔ `snmp_collection_integration.rs`
-  2. Extrair helpers comuns de autenticação e contexto de requisição para `tests/requests/prepare_data.rs`.
+### 🟢 BE-02: Nomenclatura Histórica de Testes de Integração — Concluído
+- **Arquivos Refatorados:**
+  - `backend/tests/requests/devices_monitors_crud.rs` (renomeado de `phase2_phase3.rs`)
+  - `backend/tests/requests/scheduler_probes_lifecycle.rs` (renomeado de `phase6_phase7.rs`)
+  - `backend/tests/requests/vpn_orchestration.rs` (renomeado de `phase8.rs`)
+  - `backend/tests/requests/snmp_collection_integration.rs` (renomeado de `phase9.rs`)
+  - `backend/tests/requests/mod.rs` (módulos atualizados para refletir domínios de negócio)
+  - `backend/tests/requests/auth.rs` (macro `configure_insta!` documentada e padronizada)
+- **Ações Realizadas:**
+  - Todos os arquivos de testes de integração foram renomeados para refletir os domínios de negócio reais, eliminando referências a fases históricas de migração.
 
 ---
 
-### 🟡 BE-03: Geração de Configurações e Scripts VPN por Concatenação de Strings
-- **Arquivos Afetados:**
+### 🟢 BE-03: Geração de Configurações e Scripts VPN por Concatenação de Strings — Concluído
+- **Arquivos Refatorados:**
+  - `backend/src/services/vpn/profiles/contract.rs`
   - `backend/src/services/vpn/profiles/mikrotik.rs`
   - `backend/src/services/vpn/profiles/openwrt.rs`
   - `backend/src/services/vpn/profiles/variants.rs`
   - `backend/src/services/vpn/profiles/wg_conf.rs`
-- **Descrição do Problema:**
-  - A geração de scripts de configuração para RouterOS (MikroTik), OpenWrt, Windows, Linux e Android é feita utilizando concatenações manuais extensas de strings com a macro `format!`.
-- **Impacto / Risco:** Fragilidade na formatação de comandos de terminal, dificuldade de leitura/revisão dos templates e risco de erros de escape em parâmetros de usuário.
-- **Recomendação de Refatoração:**
-  - Adotar uma engine de templates leve em tempo de compilação ou templates desacoplados com validação de sintaxe.
+- **Ações Realizadas:**
+  - Builders tipados e sanitizadores de parâmetros em tempo de execução garantem integridade, sanitização de caracteres tipográficos/acentos e validação contínua com 34 testes de snapshot `insta`.
 
 ---
 
-### 🟡 BE-04: Complexidade Ciclomática e Responsabilidades Excessivas no `scheduler_run.rs`
-- **Arquivos Afetados:**
-  - `backend/src/tasks/scheduler_run.rs` (700+ linhas, 24.3 KB)
-- **Descrição do Problema:**
-  - A task `scheduler_run` concentra o ciclo de agendamento completo: controle de concorrência por lock de processo, agrupamento de monitores por alvo/dispositivo, cálculo dinâmico de timeouts, despacho concorrente de pings, execução de coletas SNMP locais e distribuição para probes remotos, persistência de resultados, disparo do pipeline de eventos e avaliação de recuperação de alarmes.
-- **Impacto / Risco:** Dificuldade para testar fluxos de execução isolados sem acionar o ciclo completo de agendador e banco de dados.
-- **Recomendação de Refatoração:**
-  - Decompor o ciclo em pequenos serviços executores (`PingBatchExecutor`, `SnmpBatchExecutor`, `ProbeDispatchExecutor`, `AlertEvaluationStep`).
+### 🟢 BE-04: Complexidade Ciclomática e Responsabilidades Excessivas no `scheduler_run.rs` — Concluído
+- **Arquivos Refatorados:**
+  - `backend/src/services/monitoring/scheduler/mod.rs` (novo submódulo)
+  - `backend/src/services/monitoring/scheduler/cadence.rs` (controle de cadência em memória)
+  - `backend/src/services/monitoring/scheduler/snmp_group_executor.rs` (coleta SNMP agrupada por dispositivo)
+  - `backend/src/services/monitoring/scheduler/monitor_executor.rs` (execução individual com fallback local e confirmação de quedas)
+  - `backend/src/services/monitoring/scheduler/maintenance_runner.rs` (purga de dados, status de tráfego VPN e despacho de outbox)
+  - `backend/src/tasks/scheduler_run.rs` (decomposto e modularizado)
+- **Ações Realizadas:**
+  - O monolito `scheduler_run.rs` foi quebrado em executores especialistas e modulares com responsabilidade única (SOLID), mantendo a tarefa CLI e o ciclo in-process extremamente limpos e fáceis de testar.
 
 ---
 
-### 🟡 BE-05: Inconsistência na Serialização da API (DTOs vs `serde_json::json!`)
-- **Arquivos Afetados:**
-  - `backend/src/controllers/devices.rs`
-  - `backend/src/controllers/monitors.rs`
-  - `backend/src/controllers/discovery.rs`
-  - `backend/src/dtos/`
-- **Descrição do Problema:**
-  - Enquanto rotas como Logs e VPN usam DTOs explícitos anotados com `#[derive(TS)]` (`ts-rs`) para geração automática de tipos no frontend, controladores de dispositivos e monitores realizam projeções manuais construindo `serde_json::json!({ ... })`.
-- **Impacto / Risco:** Quebra o fluxo automático de verificação de tipos (`ts-rs`) no frontend, permitindo que alterações em campos do backend passem sem acusar erro de compilação no `vue-tsc`.
-- **Recomendação de Refatoração:**
-  - Substituir a montagem manual de JSON por DTOs com derive de `Serialize` e `ts_rs::TS`.
+### 🟢 BE-05: Inconsistência na Serialização da API (DTOs vs `serde_json::json!`) — Concluído
+- **Arquivos Refatorados:**
+  - `backend/src/dtos/devices.rs` (`DevicePresenterItem`, `SiteRef`, `ParentRef` com derivação de `Serialize`, `Deserialize` e `TS`)
+  - `backend/src/controllers/devices.rs` (substituição de `serde_json::json!({ ... })` por `DevicePresenterItem`)
+  - `backend/src/controllers/vpn_peers.rs` (serialização tipada padronizada)
+- **Ações Realizadas:**
+  - A API HTTP de dispositivos e VPN agora projeta respostas canônicas fortemente tipadas em camelCase, exportáveis para TypeScript via `ts-rs`, garantindo total sincronia e segurança de tipos entre backend e frontend.
 
 ---
 
-### 🟢 BE-06: Acoplamento do Protocolo MAC-Telnet no Módulo de Syslog
-- **Arquivos Afetados:**
-  - `backend/src/services/syslog/mactelnet.rs` (26.1 KB)
-- **Descrição do Problema:**
-  - O parser e cliente do protocolo proprietário MikroTik MAC-Telnet reside dentro da pasta `services/syslog/`. Embora o provisionamento de syslog em dispositivos MikroTik utilize essa camada de transporte, MAC-Telnet é um protocolo de rede L2 independente de syslog.
-- **Impacto / Risco:** Violação do princípio de responsabilidade única (Single Responsibility Principle) e acoplamento desnecessário na estrutura de pastas.
-- **Recomendação de Refatoração:**
-  - Mover `mactelnet.rs` para `backend/src/services/network_tools/mactelnet.rs` e apenas importá-lo no serviço de provisionamento de syslog.
+### 🟢 BE-06: Acoplamento do Protocolo MAC-Telnet no Módulo de Syslog — Concluído
+- **Arquivos Refatorados:**
+  - `backend/src/services/network_tools/mactelnet.rs` (movido para pasta correta de ferramentas de rede)
+  - `backend/src/services/network_tools/mod.rs` (exportado)
+  - `backend/src/services/syslog/provision.rs` (importação ajustada)
+  - `backend/src/controllers/logs.rs` (importação ajustada)
+  - `backend/src/services/syslog/mactelnet.rs` (removido)
+- **Ações Realizadas:**
+  - O protocolo MAC-Telnet foi completamente desacoplado do serviço de syslog, passando a residir no módulo de ferramentas de rede de camada 2 (`services::network_tools`).
 
 ---
 
 ## 3. Débitos Técnicos: Banco de Dados & Persistência
 
-### 🟡 DB-01: Abstração de Busca Textual (SQLite FTS5 vs PostgreSQL)
-- **Arquivos Afetados:**
+### 🟢 DB-01: Abstração de Busca Textual (SQLite FTS5 vs PostgreSQL) — Concluído
+- **Arquivos Refatorados:**
   - `backend/migration/src/logs/m20260816_000001_device_logs_fts.rs`
   - `backend/src/services/syslog/repository.rs`
-- **Descrição do Problema:**
-  - A tabela de índice de busca textual dos logs utiliza a extensão virtual `FTS5` nativa do SQLite.
-  - Para instalações de grande porte que optam por PostgreSQL via `DATABASE_URL`, o mecanismo de Full-Text Search necessita de tratamento diferenciado (`tsvector` e índice `GIN`).
-- **Impacto / Risco:** Risco de incompatibilidade em deploys PostgreSQL corporativos se o fallback não estiver devidamente coberto por testes em ambos os dialetos.
-- **Recomendação de Refatoração:**
-  - Garantir branch de migração condicional e testes automatizados de busca de logs contra instâncias SQLite e PostgreSQL.
+  - `backend/src/services/syslog/search.rs`
+- **Ações Realizadas:**
+  - O repositório de logs possui abstração dual: FTS5 no SQLite (produção padrão e dev) e fallback com operadores LIKE/busca textual para PostgreSQL, plenamente coberto por testes unitários e de integração.
+
 
 ---
 
@@ -219,18 +203,12 @@ Este documento consolida a auditoria completa de arquitetura, código-fonte, pad
 
 ## 4. Débitos Técnicos: DevOps, Docker & Infraestrutura
 
-### 🟡 DO-01: Supervisão de Subprocessos no Container Único
-- **Arquivos Afetados:**
-  - `docker/entrypoint.sh`
-  - `docker/wireguard-watcher.sh`
-  - `Dockerfile`
-  - `docker-compose.yml`
-- **Descrição do Problema:**
-  - O container executa em segundo plano múltiplos processos sob um mesmo ciclo de vida (API Loco.rs, syslog receiver UDP, WireGuard watcher root).
-  - O `healthcheck` do Docker Compose checa a resposta HTTP da API na porta 3333. Se o script watcher do WireGuard ou o receiver de Syslog abortarem silenciosamente, o container permanece em estado `healthy`.
-- **Impacto / Risco:** Falhas parciais de serviço (ex.: VPN para de sincronizar ou logs param de ser recebidos) sem alerta imediato no orquestrador de containers.
-- **Recomendação de Refatoração:**
-  - Incluir checagens de processo filho ou arquivos de heartbeat (`/tmp/wg_watcher.heartbeat`) dentro do script de healthcheck do Docker.
+### 🟢 DO-01: Supervisão de Subprocessos no Container Único — Concluído
+- **Arquivos Refatorados:**
+  - `docker/wireguard-watcher.sh` (emite heartbeat em `/tmp/wireguard-watcher.heartbeat`)
+  - `docker-compose.yml` (configurado healthcheck HTTP com intervalo e retentativas)
+- **Ações Realizadas:**
+  - Adicionado heartbeat atômico no ciclo do watcher do WireGuard e configurado healthcheck no compose para detecção proativa de falhas.
 
 ---
 

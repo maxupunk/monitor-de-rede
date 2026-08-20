@@ -23,7 +23,6 @@ pub mod db;
 pub mod hints;
 pub mod ingest;
 pub mod listener;
-pub mod mactelnet;
 pub mod matcher;
 pub mod nat;
 pub mod parser;

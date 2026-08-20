@@ -140,6 +140,12 @@ services:
       # mudança de peer, então o que precisa mesmo sobreviver é o banco.
       - netmonitor-data:/data
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3333/api/_health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 volumes:
   netmonitor-data:

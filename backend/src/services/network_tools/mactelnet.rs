@@ -1,4 +1,5 @@
 //! MAC-Telnet — o acesso da MikroTik por endereço MAC, sem IP.
+#![allow(dead_code)]
 //!
 //! É o que permite configurar um equipamento cujo IP está errado, ausente ou
 //! numa faixa que este servidor não alcança: o RouterOS responde a um protocolo
@@ -11,7 +12,7 @@
 //! **Só funciona na mesma rede de camada 2.** Difusão não atravessa roteador —
 //! e não atravessa a ponte do Docker. Num container em rede bridge (o arranjo
 //! padrão do `docker-compose.yml`) o pacote não chega ao equipamento e nada
-//! responde. `network_mode: host` resolve; ver [`super::nat`], que sabe dizer
+//! responde. `network_mode: host` resolve; ver [`crate::services::syslog::nat`], que sabe dizer
 //! em qual dos dois arranjos o processo está, e a tela avisa antes de deixar
 //! escolher este meio.
 //!

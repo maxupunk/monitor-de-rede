@@ -5,5 +5,6 @@
 //! conhecem sockets, timeouts nem detalhes de wire-format.
 
 pub mod dns;
+pub mod mactelnet;
 pub mod port_scanner;
 pub mod udp_probes;

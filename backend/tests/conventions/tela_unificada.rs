@@ -70,7 +70,14 @@ fn existe_uma_unica_pagina_de_logs() {
 
 #[test]
 fn a_aba_de_logs_do_dispositivo_usa_a_mesma_store_e_a_mesma_tabela() {
-    let pagina = ler("pages/DeviceDetailPage.vue");
+    let pagina =
+        if std::path::Path::new(&frontend().join("components/devices/tabs/DeviceLogsTab.vue"))
+            .exists()
+        {
+            ler("components/devices/tabs/DeviceLogsTab.vue")
+        } else {
+            ler("pages/DeviceDetailPage.vue")
+        };
     assert!(
         pagina.contains("useLogsStore"),
         "a aba de logs precisa usar a store de `/logs`, não uma cópia"

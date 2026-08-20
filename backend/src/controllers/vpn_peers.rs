@@ -148,7 +148,7 @@ async fn index(State(ctx): State<AppContext>) -> AppResult<Response> {
     let mut payload = Vec::with_capacity(items.len());
     for item in items {
         let device = match item.device {
-            Some(device) => Some(present_device(&ctx.db, device).await?),
+            Some(device) => serde_json::to_value(present_device(&ctx.db, device).await?).ok(),
             None => None,
         };
         payload.push(VpnPeerListItem {
@@ -223,7 +223,8 @@ async fn store(
         .one(&ctx.db)
         .await?
     {
-        Some(device) => present_device(&ctx.db, device).await?,
+        Some(device) => serde_json::to_value(present_device(&ctx.db, device).await?)
+            .unwrap_or(serde_json::Value::Null),
         None => serde_json::Value::Null,
     };
     Ok((
@@ -252,7 +253,7 @@ async fn update(
 
     let (peer, device) = peer_service::rename(&ctx.db, id, name).await?;
     let device = match device {
-        Some(device) => Some(present_device(&ctx.db, device).await?),
+        Some(device) => serde_json::to_value(present_device(&ctx.db, device).await?).ok(),
         None => None,
     };
     Ok(format::json(VpnPeerWithDevice {

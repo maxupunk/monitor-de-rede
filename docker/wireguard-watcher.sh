@@ -61,5 +61,6 @@ while true; do
     fi
   fi
 
+  touch "/tmp/wireguard-watcher.heartbeat" 2>/dev/null || true
   sleep "${INTERVAL}"
 done

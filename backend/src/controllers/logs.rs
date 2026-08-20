@@ -26,10 +26,11 @@ use crate::{
     },
     services::{
         devices::{access, systems},
+        network_tools::mactelnet,
         server_addresses,
         shared::errors::{AppError, AppResult},
         syslog::{
-            hints, mactelnet, provision,
+            hints, provision,
             repository::{self, Cursor, LogFilters, LogQuery},
             resolver, snippets, LogsDb, SyslogService,
         },

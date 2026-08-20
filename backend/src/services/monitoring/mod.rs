@@ -12,3 +12,4 @@ pub mod presenter;
 pub mod reachability;
 pub mod result_processor;
 pub mod runner;
+pub mod scheduler;

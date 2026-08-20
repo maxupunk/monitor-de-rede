@@ -10,7 +10,10 @@ use sea_orm::{
 };
 
 use crate::{
-    dtos::resources::{DeviceInput, PaginationQuery},
+    dtos::{
+        devices::{DevicePresenterItem, ParentRef, SiteRef},
+        resources::{DeviceInput, PaginationQuery},
+    },
     models::{
         _entities::{
             alert_events, device_interfaces, discovery_results, metrics as metrics_entity,
@@ -50,11 +53,11 @@ use crate::{
 pub(crate) async fn present(
     db: &sea_orm::DatabaseConnection,
     device: devices::Model,
-) -> AppResult<serde_json::Value> {
-    Ok(present_many(db, vec![device], VpnLink::Include)
+) -> AppResult<DevicePresenterItem> {
+    present_many(db, vec![device], VpnLink::Include)
         .await?
         .pop()
-        .unwrap_or_else(|| serde_json::json!({})))
+        .ok_or_else(|| AppError::not_found("Dispositivo não encontrado"))
 }
 
 /// Serializa um dispositivo **sem** o vínculo de VPN.
@@ -67,11 +70,11 @@ pub(crate) async fn present(
 pub(crate) async fn present_for_vpn(
     db: &sea_orm::DatabaseConnection,
     device: devices::Model,
-) -> AppResult<serde_json::Value> {
-    Ok(present_many(db, vec![device], VpnLink::Omit)
+) -> AppResult<DevicePresenterItem> {
+    present_many(db, vec![device], VpnLink::Omit)
         .await?
         .pop()
-        .unwrap_or_else(|| serde_json::json!({})))
+        .ok_or_else(|| AppError::not_found("Dispositivo não encontrado"))
 }
 
 /// Se o objeto devolvido carrega o peer de VPN do dispositivo.
@@ -91,7 +94,7 @@ pub(crate) async fn present_many(
     db: &sea_orm::DatabaseConnection,
     rows: Vec<devices::Model>,
     vpn: VpnLink,
-) -> AppResult<Vec<serde_json::Value>> {
+) -> AppResult<Vec<DevicePresenterItem>> {
     use std::collections::HashSet;
 
     let site_ids: HashSet<i64> = rows.iter().filter_map(|row| row.site_id).collect();
@@ -140,19 +143,22 @@ pub(crate) async fn present_many(
     Ok(rows
         .into_iter()
         .map(|device| {
-            let objeto = corpo(
+            let mut item = corpo(
                 &device,
                 device.site_id.and_then(|id| sites.get(&id)),
                 device.parent_id.and_then(|id| parents.get(&id)),
                 &acessos,
             );
-            // Em `Omit` a chave **não entra** — nem como `null`. É o que o
-            // `VpnPeerDeviceView` dos bindings sempre descreveu, e o que a tela
-            // de VPN sempre leu.
-            match vpn {
-                VpnLink::Include => objeto.com_peer(peers.get(&device.id).cloned()),
-                VpnLink::Omit => objeto,
+            if vpn == VpnLink::Include {
+                let peer_val = peers
+                    .get(&device.id)
+                    .map_or(serde_json::Value::Null, |row| {
+                        serde_json::to_value(VpnPeerResponse::from(row))
+                            .unwrap_or(serde_json::Value::Null)
+                    });
+                item.vpn_peer = Some(peer_val);
             }
+            item
         })
         .collect())
 }
@@ -162,9 +168,15 @@ fn corpo(
     site_name: Option<&String>,
     parent_name: Option<&String>,
     acessos: &AccessContext,
-) -> serde_json::Value {
-    let site = site_name.map(|name| serde_json::json!({"id": device.site_id, "name": name}));
-    let parent = parent_name.map(|name| serde_json::json!({"id": device.parent_id, "name": name}));
+) -> DevicePresenterItem {
+    let site = site_name.cloned().map(|name| SiteRef {
+        id: device.site_id,
+        name,
+    });
+    let parent = parent_name.cloned().map(|name| ParentRef {
+        id: device.parent_id,
+        name,
+    });
     // Três campos, e os três precisam existir separados: `accessMode` é o que o
     // operador declarou (nulo quando ele escolheu "automático"), o `effective` é
     // o que o sistema vai usar de fato, e o `reason` é por quê. Devolver só o
@@ -184,30 +196,44 @@ fn corpo(
         model: device.model.as_deref(),
         ..systems::Evidence::default()
     });
-    serde_json::json!({
-        "id": device.id, "siteId": device.site_id, "networkId": device.network_id, "parentId": device.parent_id,
-        "ipAddress": device.ip_address, "name": device.name,
-        "type": device.r#type, "vendor": device.vendor, "model": device.model, "serialNumber": device.serial_number,
-        "description": device.description, "isMonitored": device.is_monitored, "snmpEnabled": device.snmp_enabled,
-        "snmpCommunity": device.snmp_community, "snmpVersion": device.snmp_version,
-        "snmpPollIntervalSeconds": device.snmp_poll_interval_seconds, "status": device.status,
-        "accessMode": device.access_mode, "effectiveAccessMode": acesso.mode.id(),
-        "accessModeReason": acesso.reason, "accessModeDeclared": acesso.declared,
-        "operatingSystem": device.operating_system, "effectiveOperatingSystem": sistema.system.id,
-        "operatingSystemSource": sistema.source, "operatingSystemReason": sistema.reason,
-        "lastSeenAt": device.last_seen_at.map(|v| v.to_rfc3339()), "createdAt": device.created_at.to_rfc3339(),
-        "updatedAt": device.updated_at.to_rfc3339(), "site": site, "parent": parent,
-        // A tela nunca deduz o dispositivo do sistema por nome ou por posição
-        // na lista: quem responde é o backend. `systemKey` é a identidade
-        // técnica; `isSystem` é o que a interface consulta.
-        "systemKey": device.system_key, "isSystem": system_device::is_protected(device)
-    })
+    DevicePresenterItem {
+        id: device.id,
+        site_id: device.site_id,
+        network_id: device.network_id,
+        parent_id: device.parent_id,
+        ip_address: device.ip_address.clone(),
+        name: device.name.clone(),
+        device_type: device.r#type.clone(),
+        vendor: device.vendor.clone(),
+        model: device.model.clone(),
+        serial_number: device.serial_number.clone(),
+        description: device.description.clone(),
+        is_monitored: device.is_monitored,
+        snmp_enabled: device.snmp_enabled,
+        snmp_community: device.snmp_community.clone(),
+        snmp_version: device.snmp_version.clone(),
+        snmp_poll_interval_seconds: device.snmp_poll_interval_seconds,
+        status: device.status.clone(),
+        access_mode: device.access_mode.clone(),
+        effective_access_mode: acesso.mode.id().to_string(),
+        access_mode_reason: acesso.reason,
+        access_mode_declared: acesso.declared,
+        operating_system: device.operating_system.clone(),
+        effective_operating_system: sistema.system.id.to_string(),
+        operating_system_source: sistema.source.to_string(),
+        operating_system_reason: sistema.reason,
+        last_seen_at: device.last_seen_at.map(|v| v.to_rfc3339()),
+        created_at: device.created_at.to_rfc3339(),
+        updated_at: device.updated_at.to_rfc3339(),
+        site,
+        parent,
+        system_key: device.system_key.clone(),
+        is_system: system_device::is_protected(device),
+        vpn_peer: None,
+    }
 }
 
 /// Lê a forma de acesso vinda da tela.
-///
-/// `None` no DTO significa "campo ausente" e preserva o que estava gravado; a
-/// palavra `auto` é o que apaga a declaração. Ver a nota do `DeviceInput`.
 fn access_mode_declarado(bruto: Option<&str>, atual: Option<String>) -> AppResult<Option<String>> {
     let Some(texto) = bruto else {
         return Ok(atual);
@@ -225,28 +251,6 @@ fn sistema_declarado(bruto: Option<&str>, atual: Option<String>) -> AppResult<Op
     Ok(systems::parse(texto)
         .map_err(AppError::validation)?
         .map(|sistema| sistema.id.to_owned()))
-}
-
-/// Acrescenta (ou não) o peer ao objeto já montado.
-///
-/// O corpo do peer sai de [`VpnPeerResponse`], e não de uma lista de campos
-/// escrita à mão aqui: é ele que decide o que um peer expõe — e é ele que
-/// deriva `connectionStatus` do último handshake. Uma segunda lista divergiria
-/// na primeira mudança, e a chave privada não pode escapar por descuido.
-trait ComPeer {
-    fn com_peer(self, peer: Option<vpn_peers::Model>) -> serde_json::Value;
-}
-
-impl ComPeer for serde_json::Value {
-    fn com_peer(mut self, peer: Option<vpn_peers::Model>) -> serde_json::Value {
-        if let Some(objeto) = self.as_object_mut() {
-            let corpo = peer.map_or(serde_json::Value::Null, |row| {
-                serde_json::to_value(VpnPeerResponse::from(&row)).unwrap_or(serde_json::Value::Null)
-            });
-            objeto.insert("vpnPeer".to_owned(), corpo);
-        }
-        self
-    }
 }
 
 fn require_name_type(input: &DeviceInput) -> AppResult<(&str, &str)> {

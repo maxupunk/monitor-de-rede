@@ -37,7 +37,10 @@ use std::{net::IpAddr, sync::Arc, time::Duration};
 use tokio::time::timeout;
 
 use super::{snippets, sources::SourceRegistry};
-use crate::services::shared::errors::{AppError, AppResult};
+use crate::services::{
+    network_tools::mactelnet,
+    shared::errors::{AppError, AppResult},
+};
 
 /// Teto da sessão inteira. Um equipamento que não responde não pode segurar
 /// um worker do Axum indefinidamente.
@@ -72,17 +75,19 @@ pub enum Protocol {
 
 impl Protocol {
     /// Porta padrão de cada um, para a tela não obrigar a digitar o óbvio.
+    #[allow(dead_code)]
     #[must_use]
     pub const fn default_port(self) -> u16 {
         match self {
             Self::Ssh => 22,
             Self::Telnet => 23,
-            Self::MacTelnet => super::mactelnet::PORT,
+            Self::MacTelnet => mactelnet::PORT,
         }
     }
 
     /// Se o acesso é endereçado por MAC em vez de por IP. Muda o que a tela
     /// precisa pedir e o que o controller precisa validar.
+    #[allow(dead_code)]
     #[must_use]
     pub const fn by_mac(self) -> bool {
         matches!(self, Self::MacTelnet)
@@ -108,7 +113,7 @@ pub struct ProvisionRequest {
     /// Alvo por IP. Irrelevante no MAC-Telnet, que endereça por MAC.
     pub host: IpAddr,
     /// Alvo por MAC — obrigatório no MAC-Telnet, ignorado nos outros.
-    pub mac: Option<super::mactelnet::MacAddress>,
+    pub mac: Option<mactelnet::MacAddress>,
     pub port: u16,
     pub protocol: Protocol,
     pub username: String,
@@ -192,8 +197,7 @@ async fn executa(pedido: &ProvisionRequest, comandos: &[String]) -> AppResult<St
                 )
             })?;
             Sessao::MacTelnet(Box::new(
-                super::mactelnet::abre(mac, &pedido.username, &pedido.password, TETO_DE_CONEXAO)
-                    .await?,
+                mactelnet::abre(mac, &pedido.username, &pedido.password, TETO_DE_CONEXAO).await?,
             ))
         }
     };
@@ -284,7 +288,7 @@ async fn aguarda_primeira_mensagem(
 enum Sessao {
     Ssh(Box<ssh::Shell>),
     Telnet(Box<telnet::Shell>),
-    MacTelnet(Box<super::mactelnet::Shell>),
+    MacTelnet(Box<mactelnet::Shell>),
 }
 
 impl Sessao {
