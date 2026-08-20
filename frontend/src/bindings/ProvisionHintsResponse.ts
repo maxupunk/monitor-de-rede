@@ -3,66 +3,63 @@
 /**
  * O que a tela usa para se preencher antes de perguntar qualquer coisa.
  */
-export type ProvisionHintsResponse = {
-  /**
-   * Endereço deste servidor que o equipamento deve usar. `null` quando não
-   * há resposta confiável — aí a tela exige que o operador digite.
-   */
-  serverAddress: string | null
-  /**
-   * De onde veio o palpite, para a tela não apresentar chute como certeza.
-   */
-  serverAddressSource: string
-  /**
-   * Qual entrada da lista de endereços do servidor serve a **este**
-   * equipamento. Nulo quando não há evidência para escolher — a tela então
-   * pergunta ao operador em vez de chutar um endereço.
-   */
-  suggestedAddressId: string | null
-  /**
-   * Por que aquela foi sugerida — "este servidor alcança o equipamento por
-   * 10.8.0.1". O motivo é o que dispensa o operador de entender a lista.
-   */
-  suggestedAddressReason: string | null
-  /**
-   * Forma de acesso em vigor: `local`, `vpn` ou `remote`.
-   */
-  accessMode: string
-  /**
-   * Se ela veio do cadastro. A tela diz "definido no cadastro" em vez de
-   * "deduzido", e as duas frases pedem confiança diferente do operador.
-   */
-  accessModeDeclared: boolean
-  /**
-   * Por que esta forma de acesso.
-   */
-  accessModeReason: string
-  serverPort: number
-  /**
-   * Sistema em vigor — id do catálogo de `services::devices::systems`.
-   */
-  operatingSystem: string
-  /**
-   * De onde ele veio: `declarado`, `snmp`, `sonda`, `cadastro` ou `padrão`.
-   */
-  operatingSystemSource: string
-  /**
-   * A frase que explica a conclusão — "o servidor SSH se identifica como
-   * `dropbear`, que é o padrão do OpenWrt". Sem ela a tela só afirma.
-   */
-  operatingSystemReason: string
-  /**
-   * Porta 22 respondeu à sondagem.
-   */
-  sshOpen: boolean
-  /**
-   * Porta 23 respondeu à sondagem.
-   */
-  telnetOpen: boolean
-  macAddress: string | null
-  /**
-   * Se este processo alcança a camada 2 da rede do equipamento. Falso num
-   * container em rede bridge, onde o MAC-Telnet não tem como funcionar.
-   */
-  layer2Reachable: boolean
-}
+export type ProvisionHintsResponse = { 
+/**
+ * Endereço deste servidor que o equipamento deve usar. `null` quando não
+ * há resposta confiável — aí a tela exige que o operador digite.
+ */
+serverAddress: string | null, 
+/**
+ * De onde veio o palpite, para a tela não apresentar chute como certeza.
+ */
+serverAddressSource: string, 
+/**
+ * Qual entrada da lista de endereços do servidor serve a **este**
+ * equipamento. Nulo quando não há evidência para escolher — a tela então
+ * pergunta ao operador em vez de chutar um endereço.
+ */
+suggestedAddressId: string | null, 
+/**
+ * Por que aquela foi sugerida — "este servidor alcança o equipamento por
+ * 10.8.0.1". O motivo é o que dispensa o operador de entender a lista.
+ */
+suggestedAddressReason: string | null, 
+/**
+ * Forma de acesso em vigor: `local`, `vpn` ou `remote`.
+ */
+accessMode: string, 
+/**
+ * Se ela veio do cadastro. A tela diz "definido no cadastro" em vez de
+ * "deduzido", e as duas frases pedem confiança diferente do operador.
+ */
+accessModeDeclared: boolean, 
+/**
+ * Por que esta forma de acesso.
+ */
+accessModeReason: string, serverPort: number, 
+/**
+ * Sistema em vigor — id do catálogo de `services::devices::systems`.
+ */
+operatingSystem: string, 
+/**
+ * De onde ele veio: `declarado`, `snmp`, `sonda`, `cadastro` ou `padrão`.
+ */
+operatingSystemSource: string, 
+/**
+ * A frase que explica a conclusão — "o servidor SSH se identifica como
+ * `dropbear`, que é o padrão do OpenWrt". Sem ela a tela só afirma.
+ */
+operatingSystemReason: string, 
+/**
+ * Porta 22 respondeu à sondagem.
+ */
+sshOpen: boolean, 
+/**
+ * Porta 23 respondeu à sondagem.
+ */
+telnetOpen: boolean, macAddress: string | null, 
+/**
+ * Se este processo alcança a camada 2 da rede do equipamento. Falso num
+ * container em rede bridge, onde o MAC-Telnet não tem como funcionar.
+ */
+layer2Reachable: boolean, };

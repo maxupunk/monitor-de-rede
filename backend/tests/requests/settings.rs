@@ -228,6 +228,45 @@ async fn valores_invalidos_sao_recusados_com_mensagem_em_portugues() {
 async fn a_rota_exige_sessao() {
     request_with_config::<App, _, _>(RequestConfig::default(), |request, _ctx| async move {
         assert_eq!(request.get("/api/settings").await.status_code(), 401);
+        assert_eq!(
+            request.get("/api/settings/onboarding").await.status_code(),
+            401
+        );
+        assert_eq!(
+            request
+                .post("/api/settings/onboarding/complete")
+                .await
+                .status_code(),
+            401
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn onboarding_status_e_conclusao_funcionam_corretamente() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        autenticado(&mut request, &ctx).await;
+
+        let status_resp = request.get("/api/settings/onboarding").await;
+        assert_eq!(status_resp.status_code(), 200, "{}", status_resp.text());
+        let status_json: serde_json::Value = serde_json::from_str(&status_resp.text()).unwrap();
+
+        assert_eq!(status_json["completed"], false);
+        assert_eq!(status_json["needsOnboarding"], true);
+
+        // Marca como concluído
+        let complete_resp = request.post("/api/settings/onboarding/complete").await;
+        assert_eq!(complete_resp.status_code(), 200, "{}", complete_resp.text());
+
+        let status_depois = request.get("/api/settings/onboarding").await;
+        assert_eq!(status_depois.status_code(), 200, "{}", status_depois.text());
+        let depois_json: serde_json::Value = serde_json::from_str(&status_depois.text()).unwrap();
+
+        assert_eq!(depois_json["completed"], true);
+        assert_eq!(depois_json["needsOnboarding"], false);
+        assert!(depois_json["completedAt"].is_string());
     })
     .await;
 }

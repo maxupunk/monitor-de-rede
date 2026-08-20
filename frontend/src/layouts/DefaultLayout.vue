@@ -127,11 +127,18 @@
             <v-icon end size="16">mdi-chevron-down</v-icon>
           </v-btn>
         </template>
-        <v-list width="200" rounded="lg" elevation="4">
+        <v-list width="220" rounded="lg" elevation="4">
           <v-list-item
             prepend-icon="mdi-account-circle-outline"
             title="Meu Perfil"
             :subtitle="authStore.user?.email || 'Conta autenticada'"
+          />
+          <v-list-item
+            v-if="authStore.canWrite"
+            prepend-icon="mdi-rocket-launch-outline"
+            title="Assistente Inicial"
+            subtitle="Configurações básicas"
+            @click="onboardingStore.openWizard()"
           />
           <v-divider class="my-1" />
           <v-list-item
@@ -162,9 +169,10 @@
       </v-container>
     </v-main>
 
-    <!-- Modal Gerenciamento de Servidores DNS -->
+    <!-- Modal Gerenciamento de Servidores DNS e Assistente Inicial -->
     <DnsServersDialog v-model="dnsServersDialog" />
     <ServerAddressesDialog v-model="serverAddressesDialog" />
+    <InitialSetupDialog v-model="onboardingStore.showWizard" />
   </v-app>
 </template>
 
@@ -174,9 +182,11 @@ import { useRouter } from 'vue-router'
 import { useDisplay } from 'vuetify'
 import { useEventsStore } from '@/stores/events'
 import { useAuthStore } from '@/stores/auth'
+import { useOnboardingStore } from '@/stores/onboarding'
 import { useNotifications } from '@/composables/useNotifications'
 import DnsServersDialog from '@/components/DnsServersDialog.vue'
 import ServerAddressesDialog from '@/components/ServerAddressesDialog.vue'
+import InitialSetupDialog from '@/components/InitialSetupDialog.vue'
 
 interface NavSubItem {
   title: string
@@ -198,6 +208,7 @@ const dnsServersDialog = ref(false)
 const serverAddressesDialog = ref(false)
 const eventsStore = useEventsStore()
 const authStore = useAuthStore()
+const onboardingStore = useOnboardingStore()
 const router = useRouter()
 const { permissionState, notificationsEnabled, requestPermission, setNotificationsEnabled } =
   useNotifications()
@@ -261,6 +272,7 @@ const navItems = computed<NavItem[]>(() => [
 onMounted(() => {
   void authStore.fetchMe()
   eventsStore.connect()
+  void onboardingStore.checkAndOpenIfNeeded()
 })
 
 onUnmounted(() => {

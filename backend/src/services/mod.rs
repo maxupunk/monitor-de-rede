@@ -13,6 +13,7 @@ pub mod maintenance;
 pub mod monitoring;
 pub mod network_tools;
 pub mod notifications;
+pub mod onboarding;
 pub mod preferences;
 pub mod probes;
 pub mod server_addresses;
