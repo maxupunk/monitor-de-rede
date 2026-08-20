@@ -122,6 +122,7 @@ const SYNC_MODE_KEY = 'netmonitor_dashboard_sync_mode'
 const PROMPT_DISMISSED_KEY = 'netmonitor_dashboard_prompt_dismissed'
 
 export const DEFAULT_WIDGETS: WidgetConfig[] = [
+  // Linha 1: Visão geral numérica — sempre no topo
   {
     id: 'stat_cards',
     type: 'stat_cards',
@@ -136,6 +137,7 @@ export const DEFAULT_WIDGETS: WidgetConfig[] = [
     icon: 'mdi-view-dashboard-outline',
     description: 'Visão sintetizada de Dispositivos, Monitores, Disponibilidade e Alertas.',
   },
+  // Linha 2: Saúde global (donut) + Alertas críticos ativos (lado a lado)
   {
     id: 'health_gauge',
     type: 'health_gauge',
@@ -152,20 +154,6 @@ export const DEFAULT_WIDGETS: WidgetConfig[] = [
       'Gráfico Donut com taxa global de disponibilidade e distribuição dos status dos monitores.',
   },
   {
-    id: 'latency_time_series',
-    type: 'latency_time_series',
-    title: 'Latência & Perda de Pacotes',
-    category: 'charts',
-    cols: 12,
-    sm: 12,
-    md: 6,
-    lg: 6,
-    visible: true,
-    order: 2,
-    icon: 'mdi-chart-timeline-variant',
-    description: 'Série temporal estilo Grafana com filtro de tempo (5m, 15m, 1h, 24h).',
-  },
-  {
     id: 'active_alerts',
     type: 'active_alerts',
     title: 'Alertas Críticos Ativos',
@@ -175,9 +163,25 @@ export const DEFAULT_WIDGETS: WidgetConfig[] = [
     md: 6,
     lg: 6,
     visible: true,
-    order: 3,
+    order: 2,
     icon: 'mdi-bell-outline',
     description: 'Lista dos alertas ativos com severidade crítica e ações de gerenciamento.',
+  },
+  // Linha 3: Alvos instáveis (oscilação) + Feed de eventos em tempo real
+  {
+    id: 'unstable_targets',
+    type: 'unstable_targets',
+    title: 'Alvos Instáveis',
+    category: 'lists',
+    cols: 12,
+    sm: 12,
+    md: 6,
+    lg: 6,
+    visible: true,
+    order: 3,
+    icon: 'mdi-sine-wave',
+    description:
+      'Ranking dos alvos que mais caíram e voltaram na janela — quem oscila não aparece na lista de alertas ativos.',
   },
   {
     id: 'events_feed',
@@ -193,6 +197,22 @@ export const DEFAULT_WIDGETS: WidgetConfig[] = [
     icon: 'mdi-pulse',
     description: 'Fluxo em tempo real dos eventos e mudanças de status via SSE.',
   },
+  // Linha 4: DNS — diagnóstico de resolução (largura total para melhor leitura)
+  {
+    id: 'dns_latency',
+    type: 'dns_latency',
+    title: 'Tempo de Consulta e Benchmark DNS',
+    category: 'charts',
+    cols: 12,
+    sm: 12,
+    md: 12,
+    lg: 12,
+    visible: true,
+    order: 5,
+    icon: 'mdi-dns-outline',
+    description: 'Ranking comparativo e histórico de tempo de consulta de resolvedores DNS.',
+  },
+  // Linha 5: Lista completa de monitores (full-width para acomodar timeline)
   {
     id: 'network_monitors',
     type: 'network_monitors',
@@ -203,9 +223,24 @@ export const DEFAULT_WIDGETS: WidgetConfig[] = [
     md: 12,
     lg: 12,
     visible: true,
-    order: 5,
+    order: 6,
     icon: 'mdi-chart-timeline-variant',
     description: 'Lista interativa de monitores com barras de histórico e scroll suave (420px).',
+  },
+  // Linha 6: Gráficos de série temporal — latência e distribuição de eventos
+  {
+    id: 'latency_time_series',
+    type: 'latency_time_series',
+    title: 'Latência & Perda de Pacotes',
+    category: 'charts',
+    cols: 12,
+    sm: 12,
+    md: 6,
+    lg: 6,
+    visible: true,
+    order: 7,
+    icon: 'mdi-chart-timeline-variant',
+    description: 'Série temporal estilo Grafana com filtro de tempo (5m, 15m, 1h, 24h).',
   },
   {
     id: 'event_distribution',
@@ -217,38 +252,9 @@ export const DEFAULT_WIDGETS: WidgetConfig[] = [
     md: 6,
     lg: 6,
     visible: true,
-    order: 6,
+    order: 8,
     icon: 'mdi-chart-bar',
     description: 'Histograma por hora agrupando eventos por severidade (Crítico, Alerta, Info).',
-  },
-  {
-    id: 'dns_latency',
-    type: 'dns_latency',
-    title: 'Tempo de Consulta e Benchmark DNS',
-    category: 'charts',
-    cols: 12,
-    sm: 12,
-    md: 6,
-    lg: 6,
-    visible: true,
-    order: 7,
-    icon: 'mdi-dns-outline',
-    description: 'Ranking comparativo e histórico de tempo de consulta de resolvedores DNS.',
-  },
-  {
-    id: 'unstable_targets',
-    type: 'unstable_targets',
-    title: 'Alvos Instáveis',
-    category: 'lists',
-    cols: 12,
-    sm: 12,
-    md: 6,
-    lg: 6,
-    visible: true,
-    order: 8,
-    icon: 'mdi-sine-wave',
-    description:
-      'Ranking dos alvos que mais caíram e voltaram na janela — quem oscila não aparece na lista de alertas ativos.',
   },
 ]
 
