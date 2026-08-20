@@ -7,7 +7,7 @@ use sea_orm::{
 };
 
 use crate::{
-    dtos::resources::{MonitorInput, PaginationQuery},
+    dtos::resources::{MonitorInput, MonitorsIndexQuery, PaginationQuery},
     models::{devices, monitor_results, monitors},
     services::{
         alerts::recovery,
@@ -167,11 +167,25 @@ async fn ensure_reach_allowed(
     reachability::ensure_allowed_for_device(&device, kind)
 }
 
-async fn index(State(ctx): State<AppContext>) -> AppResult<Response> {
-    let rows = monitors::Entity::find()
-        .order_by_asc(monitors::Column::Name)
-        .all(&ctx.db)
-        .await?;
+async fn index(
+    State(ctx): State<AppContext>,
+    Query(query): Query<MonitorsIndexQuery>,
+) -> AppResult<Response> {
+    let mut stmt = monitors::Entity::find().order_by_asc(monitors::Column::Name);
+    let enabled_filter = query.enabled.or(query.is_enabled);
+    if let Some(enabled) = enabled_filter {
+        stmt = stmt.filter(monitors::Column::Enabled.eq(enabled));
+    }
+    if let Some(status) = query.status {
+        stmt = stmt.filter(monitors::Column::Status.eq(status));
+    }
+    if let Some(kind) = query.monitor_type {
+        stmt = stmt.filter(monitors::Column::Type.eq(kind));
+    }
+    if let Some(device_id) = query.device_id {
+        stmt = stmt.filter(monitors::Column::DeviceId.eq(Some(device_id)));
+    }
+    let rows = stmt.all(&ctx.db).await?;
     Ok(format::json(
         present_monitors(&ctx.db, rows, RECENT_RESULTS_LIMIT).await?,
     )?)

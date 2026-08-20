@@ -10,23 +10,36 @@
         </div>
         <div class="text-caption text-grey mt-1 d-flex align-center ga-1">
           <v-icon size="14" color="deep-purple">mdi-information-outline</v-icon>
-          <span>Eixo Duplo: Tráfego (Mbps) x Latência de Ping (ms)</span>
+          <span
+          >Eixo Duplo: Tráfego (Mbps) x Latência de Ping (ms) · Alvo:
+            {{ selectedPingTargetLabel }}</span
+          >
         </div>
       </div>
 
       <div class="d-flex align-center ga-2 flex-wrap">
-        <v-select
-          v-model="selectedMonitorId"
-          :items="monitorOptions"
-          item-title="name"
-          item-value="id"
+        <v-combobox
+          v-model="selectedPingTarget"
+          :items="pingTargetOptions"
+          item-title="title"
+          item-value="value"
+          :return-object="false"
           density="compact"
           variant="outlined"
           hide-details
-          style="min-width: 190px; max-width: 230px"
+          style="min-width: 200px; max-width: 260px"
           class="text-caption"
-          placeholder="Alvo de Ping"
-        ></v-select>
+          placeholder="Alvo de Ping / IP / DNS"
+        >
+          <template #item="{ props: itemProps, item }">
+            <v-list-item
+              v-bind="itemProps"
+              :title="itemField(item, 'title')"
+              :subtitle="itemField(item, 'subtitle')"
+              :prepend-icon="itemField(item, 'icon')"
+            ></v-list-item>
+          </template>
+        </v-combobox>
 
         <v-select
           v-model="selectedDeviceId"
@@ -220,7 +233,7 @@
         <div class="d-flex align-center ga-1">
           <span class="dot-indicator bg-amber"></span>
           <span
-            >Latência: {{ formatLatency(currentLatency) }} (Média:
+          >Latência: {{ formatLatency(currentLatency) }} (Média:
             {{ formatLatency(avgLatency) }})</span
           >
         </div>
@@ -236,6 +249,7 @@
 import { ref, computed, onMounted, type CSSProperties } from 'vue'
 import { useMonitorsStore } from '@/stores/monitors'
 import { useDevicesStore } from '@/stores/devices'
+import { useDnsServersStore } from '@/stores/dnsServers'
 import type { WidgetConfig } from '@/stores/dashboard'
 import { formatLatency, formatBps } from '@/utils/formatters'
 
@@ -245,9 +259,12 @@ const props = defineProps<{
 
 const monitorsStore = useMonitorsStore()
 const devicesStore = useDevicesStore()
+const dnsServersStore = useDnsServersStore()
 
 const timeframe = ref<'5m' | '15m' | '1h' | '24h'>('15m')
-const selectedMonitorId = ref<number | 'all'>((props.widget.config?.monitorId as any) || 'all')
+const initialPingTarget =
+  props.widget.config?.targetHost || (props.widget.config?.monitorId as any) || 'all'
+const selectedPingTarget = ref<number | 'all' | string>(initialPingTarget)
 const selectedDeviceId = ref<number | 'all'>((props.widget.config?.deviceId as any) || 'all')
 
 const chartContainerRef = ref<HTMLElement | null>(null)
@@ -263,16 +280,83 @@ interface DualSample {
 onMounted(async () => {
   if (monitorsStore.monitors.length === 0) await monitorsStore.fetchMonitors()
   if (devicesStore.devices.length === 0) await devicesStore.fetchDevices()
+  await dnsServersStore.fetchServers()
 })
 
-const monitorOptions = computed(() => {
-  const options: Array<{ id: number | 'all'; name: string }> = [
-    { id: 'all', name: 'Todos os Monitores Ping (Média Latência)' },
+export interface PingTargetOption {
+  value: number | 'all' | string
+  title: string
+  subtitle?: string
+  icon?: string
+}
+
+const pingTargetOptions = computed<PingTargetOption[]>(() => {
+  const options: PingTargetOption[] = [
+    {
+      value: 'all',
+      title: 'Todos os Monitores Ping (Média Latência)',
+      subtitle: 'Calcula a média de todos os alvos de ping',
+      icon: 'mdi-chart-timeline-variant',
+    },
   ]
+
+  // 1. Monitores de Ping cadastrados
   for (const m of monitorsStore.monitors.filter((m) => m.type === 'ping')) {
-    options.push({ id: m.id, name: `${m.name} (${m.target})` })
+    options.push({
+      value: m.id,
+      title: `${m.name} (${m.target})`,
+      subtitle: `Monitor #${m.id} · Alvo: ${m.target}`,
+      icon: 'mdi-pulse',
+    })
   }
+
+  // 2. Equipamentos (IPs)
+  for (const dev of devicesStore.devices) {
+    if (dev.ipAddress) {
+      options.push({
+        value: dev.ipAddress,
+        title: `${dev.name || 'Dispositivo #' + dev.id} (${dev.ipAddress})`,
+        subtitle: `IP do Equipamento · ${dev.model || dev.vendor || 'Equipamento'}`,
+        icon: 'mdi-devices',
+      })
+    }
+  }
+
+  // 3. Servidores DNS cadastrados
+  for (const dns of dnsServersStore.servers) {
+    if (dns.address) {
+      options.push({
+        value: dns.address,
+        title: `${dns.name} (${dns.address})`,
+        subtitle: `Servidor DNS · Protocolo: ${dns.protocol.toUpperCase()}`,
+        icon: 'mdi-dns',
+      })
+    }
+  }
+
+  // 4. Se houver alvo personalizado informado
+  if (
+    typeof selectedPingTarget.value === 'string' &&
+    selectedPingTarget.value !== 'all' &&
+    !options.some((o) => String(o.value) === String(selectedPingTarget.value))
+  ) {
+    options.push({
+      value: selectedPingTarget.value,
+      title: `Alvo Customizado: ${selectedPingTarget.value}`,
+      subtitle: 'IP fixo ou hostname DNS informado',
+      icon: 'mdi-target',
+    })
+  }
+
   return options
+})
+
+const selectedPingTargetLabel = computed(() => {
+  if (selectedPingTarget.value === 'all') return 'Todos os Monitores Ping'
+  const matched = pingTargetOptions.value.find(
+    (opt) => String(opt.value) === String(selectedPingTarget.value)
+  )
+  return matched ? matched.title : String(selectedPingTarget.value)
 })
 
 const deviceOptions = computed(() => {
@@ -452,6 +536,20 @@ const tooltipStyle = computed<CSSProperties>(() => {
     boxShadow: '0 8px 20px rgba(0,0,0,0.4)',
   }
 })
+
+function itemField(item: unknown, field: string): string | undefined {
+  if (!item || typeof item !== 'object') return undefined
+  const raw = (item as { raw?: Record<string, unknown> }).raw
+  if (raw && typeof raw === 'object' && field in raw) {
+    const val = raw[field]
+    return typeof val === 'string' ? val : undefined
+  }
+  if (field in item) {
+    const val = (item as Record<string, unknown>)[field]
+    return typeof val === 'string' ? val : undefined
+  }
+  return undefined
+}
 </script>
 
 <style scoped>

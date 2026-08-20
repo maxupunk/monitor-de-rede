@@ -177,7 +177,7 @@
               >
                 <div class="d-flex align-center justify-space-between mb-2">
                   <span class="text-subtitle-2 text-grey-darken-1 font-weight-bold"
-                    >Dispositivos</span
+                  >Dispositivos</span
                   >
                   <v-avatar color="primary" variant="tonal" size="36">
                     <v-icon color="primary">mdi-devices</v-icon>
@@ -198,7 +198,7 @@
               >
                 <div class="d-flex align-center justify-space-between mb-2">
                   <span class="text-subtitle-2 text-grey-darken-1 font-weight-bold"
-                    >Monitores de Rede</span
+                  >Monitores de Rede</span
                   >
                   <v-avatar color="info" variant="tonal" size="36">
                     <v-icon color="info">mdi-chart-timeline-variant</v-icon>
@@ -222,7 +222,7 @@
               >
                 <div class="d-flex align-center justify-space-between mb-2">
                   <span class="text-subtitle-2 text-grey-darken-1 font-weight-bold"
-                    >Disponibilidade</span
+                  >Disponibilidade</span
                   >
                   <v-avatar color="success" variant="tonal" size="36">
                     <v-icon color="success">mdi-check-circle-outline</v-icon>
@@ -239,7 +239,7 @@
               <v-card elevation="2" class="pa-4 rounded-lg stat-card" :to="statCardLink('/alerts')">
                 <div class="d-flex align-center justify-space-between mb-2">
                   <span class="text-subtitle-2 text-grey-darken-1 font-weight-bold"
-                    >Alertas Ativos</span
+                  >Alertas Ativos</span
                   >
                   <v-avatar color="warning" variant="tonal" size="36">
                     <v-icon color="warning">mdi-bell-ring-outline</v-icon>
@@ -447,7 +447,7 @@
                 <v-icon start color="primary">mdi-chart-timeline-variant</v-icon>
                 <span class="font-weight-bold text-h6">Monitores de Rede</span>
                 <v-chip size="x-small" color="primary" class="ml-2" variant="tonal">
-                  {{ monitorsStore.monitors.length }}
+                  {{ monitorsStore.activeMonitors.length }}
                 </v-chip>
               </div>
               <v-btn
@@ -463,7 +463,7 @@
             <v-divider></v-divider>
 
             <v-card-text class="pa-0">
-              <div v-if="monitorsStore.monitors.length > 0">
+              <div v-if="monitorsStore.activeMonitors.length > 0">
                 <v-list class="monitors-scroll-container pa-0">
                   <!--
                     A linha inteira abre o mesmo diálogo da lista de monitores.
@@ -471,7 +471,7 @@
                     impede a ação de abrir o detalhe por baixo dela.
                   -->
                   <v-list-item
-                    v-for="monitor in monitorsStore.monitors"
+                    v-for="monitor in monitorsStore.activeMonitors"
                     :key="monitor.id"
                     class="px-4 py-3 border-b cursor-pointer"
                     @click="abrirMonitor(monitor.id)"
@@ -575,12 +575,24 @@
                 <v-icon size="48" color="grey-lighten-1" class="mb-2">
                   mdi-chart-timeline-variant-off
                 </v-icon>
-                <div class="text-subtitle-1 font-weight-medium">Nenhum monitor cadastrado</div>
+                <div class="text-subtitle-1 font-weight-medium">
+                  {{
+                    monitorsStore.monitors.length > 0
+                      ? 'Nenhum monitor ativo no momento'
+                      : 'Nenhum monitor cadastrado'
+                  }}
+                </div>
                 <p class="text-caption text-grey-darken-1 mb-4">
-                  Cadastre monitores ICMP, HTTP ou TCP para visualizar os gráficos em barras.
+                  {{
+                    monitorsStore.monitors.length > 0
+                      ? 'Todos os monitores cadastrados estão desativados.'
+                      : 'Cadastre monitores ICMP, HTTP ou TCP para visualizar os gráficos em barras.'
+                  }}
                 </p>
                 <v-btn color="primary" prepend-icon="mdi-plus" to="/monitors">
-                  Cadastrar Monitor
+                  {{
+                    monitorsStore.monitors.length > 0 ? 'Gerenciar Monitores' : 'Cadastrar Monitor'
+                  }}
                 </v-btn>
               </div>
             </v-card-text>

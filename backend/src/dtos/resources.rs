@@ -280,3 +280,16 @@ pub struct PaginationQuery {
     pub page: Option<u64>,
     pub limit: Option<u64>,
 }
+
+/// Filtros suportados por `GET /api/monitors`
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct MonitorsIndexQuery {
+    pub enabled: Option<bool>,
+    #[serde(alias = "isEnabled", alias = "is_enabled")]
+    pub is_enabled: Option<bool>,
+    pub status: Option<String>,
+    #[serde(rename = "type")]
+    pub monitor_type: Option<String>,
+    pub device_id: Option<i64>,
+}

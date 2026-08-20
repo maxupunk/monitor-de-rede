@@ -385,3 +385,60 @@ async fn criacao_de_dispositivo_valida_ip_e_quebras_de_linha() {
     })
     .await;
 }
+
+#[tokio::test]
+#[serial]
+async fn listagem_de_monitores_permite_filtrar_por_enabled() {
+    request::<App, _, _>(|mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let mon1 = request
+            .post("/api/monitors")
+            .json(&serde_json::json!({
+                "name": "Monitor Ativo",
+                "type": "ping",
+                "target": "127.0.0.1",
+                "enabled": true
+            }))
+            .await;
+        assert_eq!(mon1.status_code(), 201);
+        let mon1_val: serde_json::Value = serde_json::from_str(&mon1.text()).unwrap();
+
+        let mon2 = request
+            .post("/api/monitors")
+            .json(&serde_json::json!({
+                "name": "Monitor Inativo",
+                "type": "ping",
+                "target": "127.0.0.2",
+                "enabled": false
+            }))
+            .await;
+        assert_eq!(mon2.status_code(), 201);
+        let mon2_val: serde_json::Value = serde_json::from_str(&mon2.text()).unwrap();
+
+        // Sem filtro: retorna ambos
+        let todos = request.get("/api/monitors").await;
+        assert_eq!(todos.status_code(), 200);
+        let lista_todos: Vec<serde_json::Value> = serde_json::from_str(&todos.text()).unwrap();
+        assert!(lista_todos.iter().any(|m| m["id"] == mon1_val["id"]));
+        assert!(lista_todos.iter().any(|m| m["id"] == mon2_val["id"]));
+
+        // Filtro enabled=true: retorna apenas o ativo
+        let ativos = request.get("/api/monitors?enabled=true").await;
+        assert_eq!(ativos.status_code(), 200);
+        let lista_ativos: Vec<serde_json::Value> = serde_json::from_str(&ativos.text()).unwrap();
+        assert!(lista_ativos.iter().any(|m| m["id"] == mon1_val["id"]));
+        assert!(!lista_ativos.iter().any(|m| m["id"] == mon2_val["id"]));
+
+        // Filtro enabled=false: retorna apenas o inativo
+        let inativos = request.get("/api/monitors?enabled=false").await;
+        assert_eq!(inativos.status_code(), 200);
+        let lista_inativos: Vec<serde_json::Value> =
+            serde_json::from_str(&inativos.text()).unwrap();
+        assert!(!lista_inativos.iter().any(|m| m["id"] == mon1_val["id"]));
+        assert!(lista_inativos.iter().any(|m| m["id"] == mon2_val["id"]));
+    })
+    .await;
+}

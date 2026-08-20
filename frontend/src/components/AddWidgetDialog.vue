@@ -228,17 +228,29 @@
             </v-col>
 
             <v-col v-if="isResourceRequired('dual-axis')" cols="12" sm="6">
-              <v-select
-                v-model="formMonitorId"
-                :items="monitorOptions"
-                item-title="name"
-                item-value="id"
-                label="Alvo de Ping / Latência"
+              <v-combobox
+                v-model="formPingTarget"
+                :items="pingTargetOptions"
+                item-title="title"
+                item-value="value"
+                :return-object="false"
+                label="Alvo de Ping / Latência (Monitor, IP, Interface ou DNS)"
+                placeholder="Selecione ou digite IP / DNS (ex: 8.8.8.8)"
                 variant="outlined"
                 density="compact"
                 hide-details="auto"
                 prepend-inner-icon="mdi-pulse"
-              ></v-select>
+                clearable
+              >
+                <template #item="{ props: itemProps, item }">
+                  <v-list-item
+                    v-bind="itemProps"
+                    :title="itemField(item, 'title')"
+                    :subtitle="itemField(item, 'subtitle')"
+                    :prepend-icon="itemField(item, 'icon')"
+                  ></v-list-item>
+                </template>
+              </v-combobox>
             </v-col>
 
             <v-col v-if="isResourceRequired('binary')" cols="12">
@@ -326,6 +338,7 @@ import {
 import { useDevicesStore } from '@/stores/devices'
 import { useDeviceDetailStore } from '@/stores/deviceDetail'
 import { useMonitorsStore } from '@/stores/monitors'
+import { useDnsServersStore } from '@/stores/dnsServers'
 
 const props = defineProps<{
   modelValue: boolean
@@ -339,6 +352,7 @@ const dashboardStore = useDashboardStore()
 const devicesStore = useDevicesStore()
 const deviceDetailStore = useDeviceDetailStore()
 const monitorsStore = useMonitorsStore()
+const dnsServersStore = useDnsServersStore()
 
 const step = ref<1 | 2>(1)
 const selectedTab = ref<'all' | 'custom' | 'standard'>('all')
@@ -350,6 +364,7 @@ const customTitle = ref('')
 const formDeviceId = ref<number | 'all'>('all')
 const formInterfaceId = ref<number | 'all'>('all')
 const formMonitorId = ref<number | 'all'>('all')
+const formPingTarget = ref<number | 'all' | string>('all')
 const formTimeframe = ref<'5m' | '15m' | '1h' | '24h'>('15m')
 
 const timeframeOptions = [
@@ -369,6 +384,7 @@ watch(isOpen, async (newVal) => {
     step.value = 1
     if (devicesStore.devices.length === 0) await devicesStore.fetchDevices()
     if (monitorsStore.monitors.length === 0) await monitorsStore.fetchMonitors()
+    await dnsServersStore.fetchServers()
   }
 })
 
@@ -419,6 +435,72 @@ const monitorOptions = computed(() => {
   return options
 })
 
+export interface PingTargetOption {
+  value: number | 'all' | string
+  title: string
+  subtitle?: string
+  icon?: string
+}
+
+const pingTargetOptions = computed<PingTargetOption[]>(() => {
+  const options: PingTargetOption[] = [
+    {
+      value: 'all',
+      title: 'Todos os Monitores Ping (Média Latência)',
+      subtitle: 'Calcula a média de todos os alvos de ping',
+      icon: 'mdi-chart-timeline-variant',
+    },
+  ]
+
+  // 1. Monitores de Ping cadastrados
+  for (const m of monitorsStore.monitors.filter((m) => m.type === 'ping')) {
+    options.push({
+      value: m.id,
+      title: `${m.name} (${m.target})`,
+      subtitle: `Monitor de Ping #${m.id} · Alvo: ${m.target}`,
+      icon: 'mdi-pulse',
+    })
+  }
+
+  // 2. Equipamentos (IPs)
+  for (const dev of devicesStore.devices) {
+    if (dev.ipAddress) {
+      options.push({
+        value: dev.ipAddress,
+        title: `${dev.name || 'Dispositivo #' + dev.id} (${dev.ipAddress})`,
+        subtitle: `IP do Equipamento · ${dev.model || dev.vendor || 'Equipamento'}`,
+        icon: 'mdi-devices',
+      })
+    }
+  }
+
+  // 3. Servidores DNS cadastrados
+  for (const dns of dnsServersStore.servers) {
+    if (dns.address) {
+      options.push({
+        value: dns.address,
+        title: `${dns.name} (${dns.address})`,
+        subtitle: `Servidor DNS · Protocolo: ${dns.protocol.toUpperCase()}`,
+        icon: 'mdi-dns',
+      })
+    }
+  }
+
+  // 4. Interfaces carregadas
+  for (const iface of deviceDetailStore.interfaces) {
+    if (iface.ipAddress) {
+      options.push({
+        value: iface.ipAddress,
+        title: `${iface.name || iface.ifName || 'Interface'} (${iface.ipAddress})`,
+        subtitle: `IP da Interface #${iface.snmpIndex || iface.id}`,
+        icon: 'mdi-swap-horizontal',
+      })
+    }
+  }
+
+  return options
+})
+
 function isResourceRequired(type: ResourceCompatibilityType): boolean {
   if (!selectedTemplate.value) return false
   return selectedTemplate.value.compatibleResourceTypes.includes(type)
@@ -430,6 +512,7 @@ async function startCardCreation(tmpl: CardTemplate) {
   formDeviceId.value = 'all'
   formInterfaceId.value = 'all'
   formMonitorId.value = 'all'
+  formPingTarget.value = 'all'
   formTimeframe.value = '15m'
   step.value = 2
 }
@@ -443,12 +526,47 @@ async function onFormDeviceChange(val: number | 'all') {
 function finishCardCreation() {
   if (!selectedTemplate.value) return
 
+  let monitorId: number | 'all' | null = null
+  let targetHost: string | null = null
+
+  if (isResourceRequired('dual-axis')) {
+    if (typeof formPingTarget.value === 'number') {
+      monitorId = formPingTarget.value
+    } else if (formPingTarget.value === 'all' || !formPingTarget.value) {
+      monitorId = 'all'
+    } else {
+      const rawVal =
+        typeof formPingTarget.value === 'object' && formPingTarget.value !== null
+          ? ((formPingTarget.value as any).value ?? (formPingTarget.value as any).title)
+          : String(formPingTarget.value).trim()
+
+      const matchingMonitor = monitorsStore.monitors.find(
+        (m) =>
+          String(m.id) === rawVal ||
+          m.target.toLowerCase() === rawVal.toLowerCase() ||
+          m.name.toLowerCase() === rawVal.toLowerCase()
+      )
+
+      if (matchingMonitor) {
+        monitorId = matchingMonitor.id
+      } else if (rawVal.toLowerCase() === 'all') {
+        monitorId = 'all'
+      } else {
+        targetHost = rawVal
+        monitorId = null
+      }
+    }
+  } else {
+    monitorId = formMonitorId.value
+  }
+
   dashboardStore.addCustomWidget(
     selectedTemplate.value.type,
     {
       deviceId: formDeviceId.value,
       interfaceId: formInterfaceId.value,
-      monitorId: formMonitorId.value,
+      monitorId,
+      targetHost,
       timeframe: formTimeframe.value,
     },
     customTitle.value
@@ -504,6 +622,20 @@ function categoryColor(cat: WidgetCategory): string {
     default:
       return 'grey'
   }
+}
+
+function itemField(item: unknown, field: string): string | undefined {
+  if (!item || typeof item !== 'object') return undefined
+  const raw = (item as { raw?: Record<string, unknown> }).raw
+  if (raw && typeof raw === 'object' && field in raw) {
+    const val = raw[field]
+    return typeof val === 'string' ? val : undefined
+  }
+  if (field in item) {
+    const val = (item as Record<string, unknown>)[field]
+    return typeof val === 'string' ? val : undefined
+  }
+  return undefined
 }
 </script>
 

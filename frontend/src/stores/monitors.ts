@@ -1,7 +1,14 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { apiService } from '@/services/apiService'
 import { gaugeMetricName, isGaugeMonitor } from '@/utils/monitorPresentation'
+
+export interface FetchMonitorsParams {
+  enabled?: boolean
+  status?: string
+  type?: string
+  deviceId?: number
+}
 
 export interface MonitorResult {
   id: number
@@ -75,14 +82,31 @@ export const useMonitorsStore = defineStore('monitors', () => {
     }
   }
 
-  async function fetchMonitors() {
+  const activeMonitors = computed(() =>
+    monitors.value.filter((m) => m.isEnabled !== false && m.enabled !== false)
+  )
+
+  async function fetchMonitors(params?: FetchMonitorsParams): Promise<Monitor[]> {
     loading.value = true
     error.value = null
     try {
-      const data = await apiService.get<any[]>('/monitors')
-      monitors.value = data.map(formatMonitor)
+      const queryParams = new URLSearchParams()
+      if (params?.enabled !== undefined) queryParams.set('enabled', String(params.enabled))
+      if (params?.status) queryParams.set('status', params.status)
+      if (params?.type) queryParams.set('type', params.type)
+      if (params?.deviceId !== undefined) queryParams.set('deviceId', String(params.deviceId))
+
+      const qs = queryParams.toString()
+      const endpoint = qs ? `/monitors?${qs}` : '/monitors'
+      const data = await apiService.get<any[]>(endpoint)
+      const formatted = data.map(formatMonitor)
+      if (!params || Object.keys(params).length === 0) {
+        monitors.value = formatted
+      }
+      return formatted
     } catch (err: unknown) {
       error.value = err instanceof Error ? err.message : 'Erro ao carregar monitores'
+      return []
     } finally {
       loading.value = false
     }
@@ -300,6 +324,7 @@ export const useMonitorsStore = defineStore('monitors', () => {
 
   return {
     monitors,
+    activeMonitors,
     currentMonitor,
     loading,
     runningId,
