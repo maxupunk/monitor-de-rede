@@ -100,7 +100,8 @@ auth:
       - from: Bearer
       - from: Query
         name: token
-    # Secret key for token generation and verification
+    # Segredo de teste — nunca use este valor em produção. A suíte de testes
+    # depende dele para funcionar sem configuração extra.
     secret: y7YMSmRyVT0tlcb4PX9s
     # Token expiration time in seconds
     expiration: 604800 # 7 days

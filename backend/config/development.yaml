@@ -109,10 +109,9 @@ auth:
       - from: Bearer
       - from: Query
         name: token
-    # Segredo de assinatura. Lê `JWT_SECRET` como o `production.yaml` faz: com
-    # o valor fixo do scaffold, um `JWT_SECRET` no `.env` era silenciosamente
-    # ignorado em dev — e o mesmo `.env` produzia sessões diferentes conforme o
-    # ambiente, sem nada no log dizendo por quê.
+    # Segredo de assinatura. Este default só existe para `cargo loco start` em
+    # dev funcionar numa cópia recém-clonada. Em produção a variável é
+    # obrigatória e o boot falha se não estiver definida.
     # ⚠️ Precisa ser base64 válido (`EncodingKey::from_base64_secret`, HS512).
     secret: {{ get_env(name="JWT_SECRET", default="v06Wz0VIum5J6JzeKtFl") }}
     # Token expiration time in seconds

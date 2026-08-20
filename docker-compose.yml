@@ -79,12 +79,14 @@ services:
       # Cifra em repouso dos segredos da VPN. Trocar o valor torna ilegível tudo
       # que já foi cifrado com o anterior. O fallback para `APP_KEY` (nome
       # antigo, do AdonisJS) existe para não quebrar quem já tem a variável.
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-${APP_KEY:-secret_app_key_32_characters_long_str}}
+      # Em produção a variável é obrigatória: o boot falha se não estiver definida.
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-${APP_KEY:-}}
       # Assinatura do JWT. Trocar em produção — e o valor **precisa ser base64
       # válido**: o Loco assina com `EncodingKey::from_base64_secret` (HS512).
       # Um segredo não-base64 não derruba o servidor; ele faz `generate_jwt`
       # falhar e todo login responder 401 com a mensagem de senha inválida.
-      JWT_SECRET: ${JWT_SECRET:-Y2hhbmdlLW1lLXRoaXMtaXMtYS1wbGFjZWhvbGRlci1zZWNyZXQtdmFsdWUtMDAwMQ==}
+      # Em produção a variável é obrigatória: o boot falha se não estiver definida.
+      JWT_SECRET: ${JWT_SECRET:-}
       # SQLite no volume. Sem interpolação de propósito: a `DATABASE_URL` do
       # `.env` descreve o caminho visto **da máquina**, e ela não vale aqui
       # dentro. Para apontar a um Postgres externo, edite esta linha.

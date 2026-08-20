@@ -73,6 +73,7 @@ impl Hooks for App {
     /// `sea-orm-migration` aborta o boot de qualquer banco que já as tenha
     /// aplicado.
     async fn after_context(ctx: AppContext) -> Result<AppContext> {
+        require_jwt_secret_in_production();
         process_deps::install(&ctx);
         enable_sqlite_wal(&ctx).await;
         migration::purge_removed_migrations(&ctx.db)
@@ -224,6 +225,28 @@ impl Hooks for App {
             .await?;
         Ok(())
     }
+}
+
+/// Falha o boot em produção se `JWT_SECRET` não estiver definida.
+///
+/// O Loco assina JWT com HS512 a partir de uma chave base64 vinda do ambiente.
+/// Deixar um default no `production.yaml` ou no `docker-compose.yml` é o mesmo
+/// que publicar a chave no repositório: qualquer um que leia o código consegue
+/// forjar tokens de admin. Por isso a produção exige a variável explicitamente.
+fn require_jwt_secret_in_production() {
+    let is_production = std::env::var("LOCO_ENV").map(|env| env == "production") == Ok(true);
+    if !is_production {
+        return;
+    }
+
+    let jwt_secret = std::env::var("JWT_SECRET")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    assert!(
+        jwt_secret.is_some(),
+        "JWT_SECRET é obrigatória em production: sem ela a assinatura de JWT usa um segredo que \
+         está no código-fonte"
+    );
 }
 
 /// Liga o WAL quando o banco é SQLite.

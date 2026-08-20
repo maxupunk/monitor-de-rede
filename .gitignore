@@ -4,6 +4,7 @@ node_modules
 # Diretório de trabalho local (ex.: ./tmp/wireguard quando se roda fora do Docker)
 tmp/*
 !tmp/.gitkeep
+backend/tmp/
 
 # Secrets
 .env
