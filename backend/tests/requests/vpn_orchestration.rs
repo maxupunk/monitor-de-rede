@@ -632,6 +632,59 @@ async fn perfil_desconhecido_e_ip_fora_da_faixa_sao_recusados() {
 
 #[tokio::test]
 #[serial]
+async fn nome_de_peer_com_controle_e_rejeitado_na_criacao_e_no_rename() {
+    let dir = isolar_volume_wireguard("nome-malicioso");
+    let _ = std::fs::remove_dir_all(&dir);
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+        request
+            .put("/api/vpn/server")
+            .json(&serde_json::json!({ "publicEndpoint": "vpn.exemplo.com.br" }))
+            .await;
+
+        for nome in ["filial\n01", "filial\r01", "filial\t01", "filial\x0001"] {
+            let recusado = request
+                .post("/api/vpn/peers")
+                .json(&serde_json::json!({ "name": nome, "profile": "linux" }))
+                .await;
+            assert_eq!(
+                recusado.status_code(),
+                422,
+                "nome com controle deve ser rejeitado: {nome:?}"
+            );
+            assert!(json_of(&recusado.text())["message"]
+                .as_str()
+                .unwrap()
+                .contains("caracteres de controle"));
+        }
+
+        let criado = json_of(
+            &request
+                .post("/api/vpn/peers")
+                .json(&serde_json::json!({ "name": "Filial 01", "profile": "linux" }))
+                .await
+                .text(),
+        );
+        let peer_id = criado["peer"]["id"].as_i64().unwrap();
+
+        let renomeado = request
+            .patch(&format!("/api/vpn/peers/{peer_id}"))
+            .json(&serde_json::json!({ "name": "Filial\nCentro" }))
+            .await;
+        assert_eq!(renomeado.status_code(), 422);
+        assert!(json_of(&renomeado.text())["message"]
+            .as_str()
+            .unwrap()
+            .contains("caracteres de controle"));
+    })
+    .await;
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+#[serial]
 async fn configuracao_do_servidor_vpn_valida_porta_mtu_dns_e_endpoint() {
     let dir = isolar_volume_wireguard("valida-servidor");
     let _ = std::fs::remove_dir_all(&dir);

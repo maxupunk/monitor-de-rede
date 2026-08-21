@@ -14,6 +14,7 @@ pub mod ip_allocator;
 pub mod key_generator;
 pub mod monitor_provisioner;
 pub mod peer_hints;
+pub mod peer_name;
 pub mod peer_service;
 pub mod peer_status;
 pub mod preflight;

@@ -1,0 +1,22 @@
+---
+source: src/services/vpn/config_builder.rs
+assertion_line: 215
+expression: conf
+---
+# Gerado automaticamente pelo NetMonitor — não editar manualmente.
+
+[Interface]
+Address = 10.8.0.1/24
+ListenPort = 51820
+PrivateKey = CHAVE-PRIVADA-DO-SERVIDOR
+MTU = 1420
+PostUp = iptables -A FORWARD -i wg0 -d 10.8.0.1 -j ACCEPT
+PostUp = iptables -A FORWARD -i wg0 -o wg0 -j DROP
+PostDown = iptables -D FORWARD -i wg0 -d 10.8.0.1 -j ACCEPT
+PostDown = iptables -D FORWARD -i wg0 -o wg0 -j DROP
+
+# filial_01__[Peer]
+[Peer]
+PublicKey = PUB-filial-01
+PresharedKey = PSK
+AllowedIPs = 10.8.0.11/32

@@ -18,7 +18,7 @@ use crate::{
         shared::errors::{AppError, AppResult},
         vpn::{
             access_control::{audit, sensitive_endpoint_limiter, VpnAuditAction, VpnAuditEntry},
-            ip_allocator,
+            ip_allocator, peer_name,
             peer_service::{self, CreatePeerPayload},
             server_service, GeneratedArtifact, PRIVATE_KEY_UNAVAILABLE,
         },
@@ -184,7 +184,9 @@ async fn store(
         .name
         .as_deref()
         .map(str::trim)
-        .filter(|value| !value.is_empty());
+        .filter(|value| !value.is_empty())
+        .map(peer_name::validate)
+        .transpose()?;
     let profile = input
         .profile
         .as_deref()
@@ -249,6 +251,8 @@ async fn update(
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
+        .map(peer_name::validate)
+        .transpose()?
         .ok_or_else(|| AppError::business_rule("Informe o nome do dispositivo"))?;
 
     let (peer, device) = peer_service::rename(&ctx.db, id, name).await?;

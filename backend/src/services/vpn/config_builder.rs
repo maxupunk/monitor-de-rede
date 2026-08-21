@@ -3,7 +3,10 @@
 //! Função pura: não toca no banco nem no disco, o que a torna trivialmente
 //! testável — e é o que permite ter um snapshot do arquivo inteiro no teste.
 
-use crate::services::{shared::errors::AppResult, vpn::cidr::parse_cidr};
+use crate::services::{
+    shared::errors::AppResult,
+    vpn::{cidr::parse_cidr, peer_name::sanitize_for_config},
+};
 
 #[derive(Debug, Clone)]
 pub struct ServerInterfaceInput {
@@ -65,8 +68,9 @@ pub fn build_interface_section(input: &ServerInterfaceInput) -> AppResult<String
 
 #[must_use]
 pub fn build_peer_section(peer: &PeerEntryInput) -> String {
+    let safe_name = sanitize_for_config(&peer.name);
     let mut lines = vec![
-        format!("# {}", peer.name),
+        format!("# {safe_name}"),
         "[Peer]".to_string(),
         format!("PublicKey = {}", peer.public_key),
     ];
@@ -171,6 +175,44 @@ mod tests {
     #[test]
     fn o_arquivo_inteiro_bate_com_o_esperado() {
         let conf = build(&servidor(false), &[peer("filial-01", true, Some("PSK"))]).unwrap();
+        insta::assert_snapshot!(conf);
+    }
+
+    #[test]
+    fn nome_malicioso_nao_quebra_a_secao_do_peer() {
+        let conf = build_peer_section(&PeerEntryInput {
+            name: "filial\n01\t[Peer]\nPublicKey = INJETADO".into(),
+            public_key: "PUB-MALICIOSO".into(),
+            preshared_key: None,
+            ip_address: "10.8.0.11".into(),
+            enabled: true,
+        });
+        // A sanitização transforma os controles em `_`, mantendo tudo numa
+        // única linha de comentário.
+        assert!(conf.contains("# filial_01_[Peer]_PublicKey = INJETADO"));
+        assert!(!conf.contains("\n# "));
+        // O `[Peer]` real continua logo em seguida, sem linhas extras.
+        let lines: Vec<&str> = conf.lines().collect();
+        assert_eq!(lines.len(), 4);
+        assert_eq!(lines[0], "# filial_01_[Peer]_PublicKey = INJETADO");
+        assert_eq!(lines[1], "[Peer]");
+        assert_eq!(lines[2], "PublicKey = PUB-MALICIOSO");
+        assert_eq!(lines[3], "AllowedIPs = 10.8.0.11/32");
+    }
+
+    #[test]
+    fn arquivo_inteiro_com_nome_malicioso_bate_com_o_snapshot() {
+        let conf = build(
+            &servidor(false),
+            &[PeerEntryInput {
+                name: "filial\n01\r\t[Peer]".into(),
+                public_key: "PUB-filial-01".into(),
+                preshared_key: Some("PSK".into()),
+                ip_address: "10.8.0.11".into(),
+                enabled: true,
+            }],
+        )
+        .unwrap();
         insta::assert_snapshot!(conf);
     }
 }

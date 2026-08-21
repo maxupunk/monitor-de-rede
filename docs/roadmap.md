@@ -77,15 +77,15 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
 
 ### 3.3 VPN e configuração
 
-- [ ] **SEC-05 — Sanitizar nomes que viram linhas do `wg0.conf`**
+- [x] **SEC-05 — Sanitizar nomes que viram linhas do `wg0.conf`**
   - **Severidade:** 🟠 Alta
   - **Esforço:** Pequeno
-  - **Arquivos:** `backend/src/services/vpn/config_builder.rs`, `backend/src/controllers/vpn_peers.rs`
-  - **Descrição:** `controllers/devices.rs` valida nome de dispositivo, mas nomes de peer não são validados e `config_builder.rs` interpola `peer.name` em comentário.
-  - **Aceite:**
-    - Rejeitar `\n`, `\r`, `\t` e caracteres de controle em nomes de peer.
-    - Defesa em profundidade no gerador: sanitizar/escapar antes de interpolar em `wg0.conf`.
-    - Testes de snapshot com strings maliciosas.
+  - **Arquivos:** `backend/src/services/vpn/peer_name.rs`, `backend/src/services/vpn/config_builder.rs`, `backend/src/controllers/vpn_peers.rs`, `backend/tests/requests/vpn_orchestration.rs`
+  - **Implementado:**
+    - Criado `services::vpn::peer_name` com `validate` (rejeita controles/\t e nome vazio) e `sanitize_for_config` (substitui controles por `_`).
+    - `POST /api/vpn/peers` e `PATCH /api/vpn/peers/:id` validam o nome antes de criar/renomear (422 para controles, 400 para nome vazio).
+    - `config_builder.rs` sanitiza o nome antes de interpolar no comentário do peer.
+    - Testes de snapshot e teste de integração `nome_de_peer_com_controle_e_rejeitado_na_criacao_e_no_rename` cobrem o fluxo.
 
 ### 3.4 CI/CD
 

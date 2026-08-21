@@ -37,7 +37,7 @@ Este documento consolida a auditoria de arquitetura, código-fonte, padrões de 
 | **SEC-02** | Segurança | Chave privada WireGuard em claro no repositório (`backend/tmp/wireguard/wg0.conf`) | Crítico | Pequeno | 🟢 Concluído |
 | **SEC-03** | Segurança | CI em diretório ignorado pelo GitHub Actions (`backend/.github/`) | Crítico | Pequeno | 🔴 Pendente |
 | **SEC-04** | Segurança | Receptor de resultados de probe não vincula monitor ao probe autenticado | Alto | Médio | 🟢 Concluído |
-| **SEC-05** | Segurança | Injeção de configuração `wg0.conf` via nome de peer não sanitizado | Alto | Pequeno | 🟡 Parcial |
+| **SEC-05** | Segurança | Injeção de configuração `wg0.conf` via nome de peer não sanitizado | Alto | Pequeno | 🟢 Concluído |
 | **SEC-06** | Segurança | `POST /api/probes` aceita `token_hash` arbitrário do cliente | Alto | Pequeno | 🟢 Concluído |
 | **SEC-07** | Segurança | JWT armazenado em `localStorage` no frontend | Alto | Médio | 🔴 Pendente |
 | **SEC-08** | Segurança | Headers de segurança ausentes no servidor estático | Baixo | Pequeno | 🔴 Pendente |
