@@ -82,7 +82,9 @@ pub struct MonitorInput {
 pub struct ProbeInput {
     pub site_id: Option<i64>,
     pub name: Option<String>,
-    pub token_hash: Option<String>,
+    /// Token cru do agente. O servidor calcula `sha256(token)` antes de gravar.
+    /// Nunca envie `token_hash` — esse campo não existe mais no contrato.
+    pub token: Option<String>,
     pub status: Option<String>,
     pub version: Option<String>,
     pub configuration: Option<serde_json::Value>,

@@ -1,11 +1,15 @@
 //! Recepção dos resultados reportados pelos probes (§8.11).
 
 use loco_rs::app::AppContext;
+use sea_orm::EntityTrait;
 use serde::Deserialize;
 
-use crate::services::{
-    monitoring::{contracts::CheckResult, result_processor::process_result},
-    shared::errors::AppResult,
+use crate::{
+    models::{discovery_runs, monitors},
+    services::{
+        monitoring::{contracts::CheckResult, result_processor::process_result},
+        shared::errors::{AppError, AppResult},
+    },
 };
 
 /// Um item de `POST /api/probes/results`.
@@ -27,6 +31,49 @@ pub struct ProbeDiscoveryResultPayload {
     pub error: Option<String>,
 }
 
+/// Verifica se o monitor informado pertence ao probe autenticado.
+///
+/// Um agente só pode reportar resultados dos monitores que lhe foram
+/// explicitamente atribuídos (`monitors.probe_id`). Qualquer outro `monitor_id`
+/// é descartado com log de segurança — isso fecha a janela de um probe com
+/// token padrão injetar resultados falsos em monitores alheios.
+async fn assert_monitor_belongs_to_probe(
+    ctx: &AppContext,
+    monitor_id: i64,
+    probe_id: i64,
+) -> AppResult<()> {
+    let Some(monitor) = monitors::Entity::find_by_id(monitor_id)
+        .one(&ctx.db)
+        .await?
+    else {
+        return Err(AppError::not_found("monitor não encontrado"));
+    };
+    if monitor.probe_id != Some(probe_id) {
+        return Err(AppError::unauthorized("monitor não pertence a este probe"));
+    }
+    Ok(())
+}
+
+/// Verifica se a run de discovery informada pertence ao probe autenticado.
+async fn assert_discovery_run_belongs_to_probe(
+    ctx: &AppContext,
+    run_id: i64,
+    probe_id: i64,
+) -> AppResult<()> {
+    let Some(run) = discovery_runs::Entity::find_by_id(run_id)
+        .one(&ctx.db)
+        .await?
+    else {
+        return Err(AppError::not_found("run de discovery não encontrada"));
+    };
+    if run.probe_id != Some(probe_id) {
+        return Err(AppError::unauthorized(
+            "run de discovery não pertence a este probe",
+        ));
+    }
+    Ok(())
+}
+
 /// Processa um lote inteiro.
 ///
 /// Uma falha por item é registrada e o laço segue: um resultado malformado — ou
@@ -44,6 +91,15 @@ pub async fn receive_batch_results(
 ) -> AppResult<usize> {
     let mut processed = 0;
     for item in payloads {
+        if let Err(error) = assert_monitor_belongs_to_probe(ctx, item.monitor_id, probe_id).await {
+            tracing::warn!(
+                %error,
+                monitor_id = item.monitor_id,
+                probe_id,
+                "resultado de probe rejeitado: monitor não pertence ao probe"
+            );
+            continue;
+        }
         match process_result(ctx, item.monitor_id, &item.result, Some(probe_id)).await {
             Ok(Some(_)) => processed += 1,
             Ok(None) => {
@@ -73,6 +129,16 @@ pub async fn receive_discovery_results(
 ) -> AppResult<usize> {
     let mut processed = 0;
     for item in payloads {
+        if let Err(error) = assert_discovery_run_belongs_to_probe(ctx, item.run_id, probe_id).await
+        {
+            tracing::warn!(
+                %error,
+                run_id = item.run_id,
+                probe_id,
+                "resultado de discovery rejeitado: run não pertence ao probe"
+            );
+            continue;
+        }
         match crate::services::discovery::service::complete_remote_discovery(
             ctx,
             probe_id,

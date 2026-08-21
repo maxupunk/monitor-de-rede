@@ -49,9 +49,11 @@ struct ProbeResponse {
     configuration: Option<serde_json::Value>,
     created_at: String,
     updated_at: String,
+    /// Token cru, só preenchido na criação. Em listagens e consultas vem `null`.
+    token: Option<String>,
 }
-impl From<probes::Model> for ProbeResponse {
-    fn from(row: probes::Model) -> Self {
+impl ProbeResponse {
+    fn from_model(row: probes::Model, token: Option<String>) -> Self {
         Self {
             id: row.id,
             site_id: row.site_id,
@@ -64,7 +66,13 @@ impl From<probes::Model> for ProbeResponse {
             configuration: row.configuration,
             created_at: row.created_at.to_rfc3339(),
             updated_at: row.updated_at.to_rfc3339(),
+            token,
         }
+    }
+}
+impl From<probes::Model> for ProbeResponse {
+    fn from(row: probes::Model) -> Self {
+        Self::from_model(row, None)
     }
 }
 
@@ -160,9 +168,14 @@ async fn store(
         .map(str::trim)
         .filter(|v| !v.is_empty())
         .ok_or_else(|| AppError::validation("Nome do probe é obrigatório"))?;
-    let token_hash = input
-        .token_hash
-        .unwrap_or_else(|| sha256_hex(&Uuid::new_v4().to_string()));
+    let token = input
+        .token
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToString::to_string)
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+    let token_hash = sha256_hex(&token);
     let row = probes::ActiveModel {
         site_id: Set(input.site_id),
         name: Set(name.into()),
@@ -174,7 +187,11 @@ async fn store(
     }
     .insert(&ctx.db)
     .await?;
-    Ok((StatusCode::CREATED, Json(ProbeResponse::from(row))).into_response())
+    Ok((
+        StatusCode::CREATED,
+        Json(ProbeResponse::from_model(row, Some(token))),
+    )
+        .into_response())
 }
 async fn show(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
     let row = probes::Entity::find_by_id(id)

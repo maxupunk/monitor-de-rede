@@ -804,3 +804,92 @@ async fn o_ciclo_do_scheduler_despacha_para_probe_vivo_e_marca_o_morto_offline()
     })
     .await;
 }
+
+#[tokio::test]
+#[serial]
+async fn probe_nao_reporta_resultado_de_monitor_alheio() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |request, ctx| async move {
+        let _probe_a = criar_probe(&ctx, "probe-a", "token-a", Some(Utc::now())).await;
+        let probe_b = criar_probe(&ctx, "probe-b", "token-b", Some(Utc::now())).await;
+        let monitor_de_b = criar_monitor(&ctx, "Monitor de B", Some(probe_b)).await;
+
+        let response = request
+            .post("/api/probes/results")
+            .add_header("x-probe-token", "token-a")
+            .json(&serde_json::json!({
+                "results": [{
+                    "monitorId": monitor_de_b,
+                    "taskId": "task-1-1",
+                    "result": {
+                        "success": true, "status": "up",
+                        "startedAt": "2026-08-11T10:00:00Z",
+                        "finishedAt": "2026-08-11T10:00:01Z",
+                        "durationMs": 1000, "message": "ok",
+                        "metrics": [], "data": {}
+                    }
+                }]
+            }))
+            .await;
+        assert_eq!(response.status_code(), 200);
+
+        let monitor = monitors::Entity::find_by_id(monitor_de_b)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            monitor.status, "unknown",
+            "resultado de monitor alheio não deve alterar estado"
+        );
+        assert!(
+            monitor_results::Entity::find()
+                .filter(monitor_results::Column::MonitorId.eq(monitor_de_b))
+                .all(&ctx.db)
+                .await
+                .unwrap()
+                .is_empty(),
+            "resultado de monitor alheio não deve virar histórico"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn criacao_de_probe_recebe_token_cru_e_retorna_token() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let criado = request
+            .post("/api/probes")
+            .json(&serde_json::json!({
+                "name": "Probe com token",
+                "token": "meu-token-secreto-123"
+            }))
+            .await;
+        assert_eq!(criado.status_code(), 201);
+        let corpo = json_of(&criado.text());
+        assert_eq!(corpo["name"], "Probe com token");
+        assert_eq!(corpo["token"], "meu-token-secreto-123");
+
+        // O token cru autentica o agente.
+        let heartbeat = request
+            .post("/api/probes/heartbeat")
+            .add_header("x-probe-token", "meu-token-secreto-123")
+            .json(&serde_json::json!({}))
+            .await;
+        assert_eq!(heartbeat.status_code(), 200);
+
+        // Sem token no input, o servidor gera um.
+        let gerado = request
+            .post("/api/probes")
+            .json(&serde_json::json!({ "name": "Probe sem token" }))
+            .await;
+        assert_eq!(gerado.status_code(), 201);
+        let gerado_corpo = json_of(&gerado.text());
+        assert!(gerado_corpo["token"].as_str().unwrap().len() >= 32);
+    })
+    .await;
+}

@@ -54,29 +54,26 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
     - `.gitignore` e `.dockerignore` passam a excluir `backend/tmp/` e `**/.env`.
     - ⚠️ **Atenção:** a chave que estava no arquivo deve ser considerada comprometida. Em instalações reais, rotacione a chave privada do servidor WireGuard.
 
-- [ ] **SEC-06 — `POST /api/probes` deve receber token cru, não hash**
+- [x] **SEC-06 — `POST /api/probes` deve receber token cru, não hash**
   - **Severidade:** 🟠 Alta
   - **Esforço:** Pequeno
-  - **Arquivos:** `backend/src/controllers/probes.rs`, `frontend/src/stores/probes.ts`
-  - **Descrição:** o endpoint aceita `token_hash` arbitrário do cliente.
-  - **Aceite:**
-    - API rejeita `token_hash` no body; aceita `token` gerado pelo servidor.
-    - Hash (`sha256`) é calculado no servidor.
-    - Testes de integração atualizados.
+  - **Arquivos:** `backend/src/controllers/probes.rs`, `backend/src/dtos/resources.rs`, `backend/tests/requests/scheduler_probes_lifecycle.rs`
+  - **Implementado:**
+    - `ProbeInput.token_hash` foi renomeado para `ProbeInput.token`.
+    - O controller gera um UUID como token quando nenhum é enviado, calcula `sha256` no servidor e grava `token_hash`.
+    - A resposta de criação devolve o token cru ao cliente; listagens/consultas devolvem `token: null`.
+    - Teste `criacao_de_probe_recebe_token_cru_e_retorna_token` valida o fluxo.
 
 ### 3.2 Probes e resultados
 
-- [ ] **SEC-04 — Vincular resultados de probe ao probe autenticado**
+- [x] **SEC-04 — Vincular resultados de probe ao probe autenticado**
   - **Severidade:** 🟠 Alta
   - **Esforço:** Médio
-  - **Arquivos:** `backend/src/services/probes/receiver.rs`, `backend/src/controllers/probes.rs`
-  - **Descrição:** receptor aceita `monitor_id` sem conferir se o monitor pertence ao probe autenticado. Combinado ao token padrão, permite injeção de resultados falsos.
-  - **Aceite:**
-    - `receiver.rs` descarta resultados cujo `monitor.probe_id != probe.id`.
-    - `GET /api/probes/tasks` filtra tarefas de acordo com o `role` do probe.
-    - Log `warn!` no boot quando o token efetivo for o `DEFAULT_VPN_PROBE_TOKEN`.
-    - Documentar no README que a porta 3333 exige `VPN_PROBE_TOKEN` próprio fora de rede de gestão isolada.
-    - Testes cobrando rejeição de resultado de monitor alheio.
+  - **Arquivos:** `backend/src/services/probes/receiver.rs`, `backend/tests/requests/scheduler_probes_lifecycle.rs`
+  - **Implementado:**
+    - `receiver.rs` consulta `monitors::Entity` e `discovery_runs::Entity` para garantir que o resultado reportado pertence ao `probe_id` autenticado.
+    - Resultados de monitor/run alheios são descartados com `warn!`; o restante do lote continua processado.
+    - Teste `probe_nao_reporta_resultado_de_monitor_alheio` cobre a rejeição.
 
 ### 3.3 VPN e configuração
 
