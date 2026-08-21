@@ -1,6 +1,6 @@
 //! CRUD de sites, mantendo a cascata de remoção no serviço de domínio.
 
-use axum::{http::StatusCode, response::IntoResponse};
+use axum::{http::HeaderMap, http::StatusCode, response::IntoResponse};
 use loco_rs::prelude::*;
 use sea_orm::{ActiveModelTrait, EntityTrait, QueryOrder, Set};
 
@@ -8,6 +8,9 @@ use crate::{
     dtos::resources::SiteInput,
     models::sites,
     services::{
+        audit::{
+            AuditAction, AuditActor, AuditChanges, AuditEntryInput, AuditService, ResourceType,
+        },
         maintenance::resource_cleanup::ResourceCleanupService,
         shared::errors::{AppError, AppResult},
     },
@@ -57,7 +60,11 @@ async fn index(State(ctx): State<AppContext>) -> AppResult<Response> {
     )?)
 }
 
-async fn store(State(ctx): State<AppContext>, Json(input): Json<SiteInput>) -> AppResult<Response> {
+async fn store(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Json(input): Json<SiteInput>,
+) -> AppResult<Response> {
     valid_name(&input.name)?;
     let row = sites::ActiveModel {
         name: Set(input.name.trim().to_string()),
@@ -68,6 +75,23 @@ async fn store(State(ctx): State<AppContext>, Json(input): Json<SiteInput>) -> A
     }
     .insert(&ctx.db)
     .await?;
+
+    let _ = AuditService::new(&ctx.db)
+        .log(
+            AuditActor::from_headers(&headers, &ctx.db)
+                .await
+                .unwrap_or_default(),
+            AuditEntryInput {
+                action: AuditAction::Create,
+                resource_type: ResourceType::Site,
+                resource_id: Some(row.id),
+                resource_label: Some(row.name.clone()),
+                description: Some(format!("Site '{}' criado", row.name)),
+                changes: None,
+            },
+        )
+        .await;
+
     Ok((StatusCode::CREATED, Json(SiteResponse::from(row))).into_response())
 }
 
@@ -81,33 +105,78 @@ async fn show(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<R
 
 async fn update(
     State(ctx): State<AppContext>,
+    headers: HeaderMap,
     Path(id): Path<i64>,
     Json(input): Json<SiteInput>,
 ) -> AppResult<Response> {
     valid_name(&input.name)?;
-    let row = sites::Entity::find_by_id(id)
+    let old = sites::Entity::find_by_id(id)
         .one(&ctx.db)
         .await?
         .ok_or_else(|| AppError::not_found("Site não encontrado"))?;
     let updated = sites::ActiveModel {
-        id: Set(row.id),
+        id: Set(old.id),
         name: Set(input.name.trim().to_string()),
         description: Set(input.description),
         location: Set(input.location),
-        active: Set(input.active.unwrap_or(row.active)),
+        active: Set(input.active.unwrap_or(old.active)),
         ..Default::default()
     }
     .update(&ctx.db)
     .await?;
+
+    let _ = AuditService::new(&ctx.db)
+        .log(
+            AuditActor::from_headers(&headers, &ctx.db)
+                .await
+                .unwrap_or_default(),
+            AuditEntryInput {
+                action: AuditAction::Update,
+                resource_type: ResourceType::Site,
+                resource_id: Some(updated.id),
+                resource_label: Some(updated.name.clone()),
+                description: Some(format!("Site '{}' atualizado", updated.name)),
+                changes: Some(AuditChanges {
+                    old: serde_json::to_value(SiteResponse::from(old)).ok(),
+                    new: serde_json::to_value(SiteResponse::from(updated.clone())).ok(),
+                }),
+            },
+        )
+        .await;
+
     Ok(format::json(SiteResponse::from(updated))?)
 }
 
-async fn destroy(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
-    sites::Entity::find_by_id(id)
+async fn destroy(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> AppResult<Response> {
+    let old = sites::Entity::find_by_id(id)
         .one(&ctx.db)
         .await?
         .ok_or_else(|| AppError::not_found("Site não encontrado"))?;
     ResourceCleanupService::delete_site(&ctx.db, id).await?;
+
+    let _ = AuditService::new(&ctx.db)
+        .log(
+            AuditActor::from_headers(&headers, &ctx.db)
+                .await
+                .unwrap_or_default(),
+            AuditEntryInput {
+                action: AuditAction::Delete,
+                resource_type: ResourceType::Site,
+                resource_id: Some(id),
+                resource_label: Some(old.name.clone()),
+                description: Some(format!("Site '{}' excluído", old.name)),
+                changes: Some(AuditChanges {
+                    old: serde_json::to_value(SiteResponse::from(old)).ok(),
+                    new: None,
+                }),
+            },
+        )
+        .await;
+
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 

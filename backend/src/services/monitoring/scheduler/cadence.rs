@@ -16,6 +16,9 @@ pub const VPN_TRAFFIC_INTERVAL_SECONDS: i64 = 30;
 /// Cadência da purga de dados antigos.
 pub const DATA_PRUNE_INTERVAL_SECONDS: i64 = 3_600;
 
+/// Cadência do rollup de resultados brutos em buckets horários.
+pub const ROLLUP_INTERVAL_SECONDS: i64 = 3_600;
+
 /// Próximo instante de cada tarefa periódica do ciclo.
 fn next_run_at() -> &'static Mutex<HashMap<&'static str, DateTime<Utc>>> {
     static NEXT: OnceLock<Mutex<HashMap<&'static str, DateTime<Utc>>>> = OnceLock::new();

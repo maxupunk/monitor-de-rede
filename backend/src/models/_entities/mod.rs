@@ -4,6 +4,7 @@ pub mod prelude;
 
 pub mod alert_events;
 pub mod alert_rules;
+pub mod audit_logs;
 pub mod device_interfaces;
 pub mod device_links;
 pub mod devices;
@@ -11,8 +12,10 @@ pub mod discovery_results;
 pub mod discovery_runs;
 pub mod dns_servers;
 pub mod event_outbox;
+pub mod maintenance_windows;
 pub mod metrics;
 pub mod monitor_results;
+pub mod monitor_results_hourly;
 pub mod monitors;
 pub mod networks;
 pub mod notification_outbox;

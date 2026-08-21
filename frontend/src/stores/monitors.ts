@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { apiService } from '@/services/apiService'
 import { gaugeMetricName, isGaugeMonitor } from '@/utils/monitorPresentation'
+import type { MonitorUptimeResponse } from '@/bindings/MonitorUptimeResponse'
 
 export interface FetchMonitorsParams {
   enabled?: boolean
@@ -43,6 +44,7 @@ export interface Monitor {
   port?: number
   configuration?: Record<string, unknown>
   intervalSeconds: number
+  timeoutSeconds: number
   retryCount?: number
   status: 'online' | 'offline' | 'warning' | 'disabled' | 'up' | 'down' | 'unknown'
   enabled?: boolean
@@ -212,6 +214,15 @@ export const useMonitorsStore = defineStore('monitors', () => {
     }
   }
 
+  async function fetchUptime(id: number, hours = 24): Promise<MonitorUptimeResponse | null> {
+    try {
+      return await apiService.get<MonitorUptimeResponse>(`/monitors/${id}/uptime?hours=${hours}`)
+    } catch (err: unknown) {
+      error.value = err instanceof Error ? err.message : 'Erro ao carregar uptime do monitor'
+      return null
+    }
+  }
+
   /** Mesmo cálculo do MonitorsController.show, para os KPIs não ficarem defasados */
   function computeStats(results: MonitorResult[]): MonitorStats {
     const latencies = results
@@ -338,5 +349,6 @@ export const useMonitorsStore = defineStore('monitors', () => {
     deleteMonitor,
     runMonitor,
     toggleMonitorEnabled,
+    fetchUptime,
   }
 })

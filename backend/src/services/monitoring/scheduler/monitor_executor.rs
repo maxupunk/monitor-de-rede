@@ -9,7 +9,7 @@ use crate::{
     services::{
         monitoring::{
             contracts::{CheckResult, MonitorStatus},
-            execution_guard::{calculate_smart_timeout_seconds, try_acquire_monitor},
+            execution_guard::{effective_timeout_seconds, try_acquire_monitor},
             result_processor::process_result,
             runner::{run_monitor, RunOptions},
         },
@@ -38,7 +38,7 @@ pub async fn execute_one(ctx: &AppContext, monitor: &monitors::Model) -> AppResu
     };
     let timeout_ms =
         u64::from(
-            calculate_smart_timeout_seconds(&monitor.r#type, monitor.interval_seconds) as u32,
+            effective_timeout_seconds(monitor.timeout_seconds, monitor.interval_seconds) as u32,
         ) * 1_000;
 
     if let Some(probe_id) = monitor.probe_id {

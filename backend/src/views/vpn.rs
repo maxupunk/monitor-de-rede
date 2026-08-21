@@ -190,6 +190,65 @@ pub struct VpnServerStateResponse {
     pub profiles: Vec<ProfileCard>,
 }
 
+/// Resposta de `GET /api/vpn/peers/next-ip`.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct VpnNextIpResponse {
+    pub ip_address: String,
+    pub cidr: String,
+}
+
+/// Resposta de `POST /api/vpn/peers`.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct VpnPeerCreatedResponse {
+    pub peer: VpnPeerResponse,
+    #[ts(as = "Option<VpnPeerDeviceView>")]
+    pub device: Option<serde_json::Value>,
+    pub artifact: SerializedVpnArtifact,
+}
+
+/// Resposta de `GET /api/vpn/peers/:id/qrcode`.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct VpnQrCodeResponse {
+    pub profile: String,
+    pub file_name: String,
+    pub svg: String,
+}
+
+/// Resposta de `POST /api/vpn/peers/:id/rotate`.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct VpnKeyRotationResponse {
+    pub message: String,
+    pub peer: VpnPeerResponse,
+    pub artifact: SerializedVpnArtifact,
+}
+
+/// Resposta de `POST /api/vpn/peers/:id/firewall-hints`.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct VpnFirewallHintsResponse {
+    pub profile: String,
+    pub label: String,
+    pub content: String,
+    pub message: String,
+}
+
+/// Resposta de `DELETE /api/vpn/peers/:id`.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct VpnPeerRevokedResponse {
+    pub message: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -256,5 +315,31 @@ mod tests {
         .unwrap();
         assert!(!json.contains("CRIPTOGRAMA-DO-SERVIDOR"));
         assert!(!json.contains("privateKey"));
+    }
+
+    #[test]
+    fn novos_dtos_vpn_serializam_em_camel_case() {
+        let next_ip = serde_json::to_value(VpnNextIpResponse {
+            ip_address: "10.8.0.11".into(),
+            cidr: "10.8.0.0/24".into(),
+        })
+        .unwrap();
+        assert_eq!(next_ip["ipAddress"], "10.8.0.11");
+
+        let hints = serde_json::to_value(VpnFirewallHintsResponse {
+            profile: "mikrotik".into(),
+            label: "MikroTik".into(),
+            content: "/ip/firewall...".into(),
+            message: "Copie as regras".into(),
+        })
+        .unwrap();
+        assert_eq!(hints["fileName"], serde_json::Value::Null);
+        assert_eq!(hints["message"], "Copie as regras");
+
+        let revoked = serde_json::to_value(VpnPeerRevokedResponse {
+            message: "revogado".into(),
+        })
+        .unwrap();
+        assert_eq!(revoked["message"], "revogado");
     }
 }

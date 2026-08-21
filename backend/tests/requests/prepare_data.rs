@@ -7,11 +7,11 @@ use backend::{
 use loco_rs::{app::AppContext, TestServer};
 use sea_orm::IntoActiveModel;
 
-const USER_EMAIL: &str = "test@loco.com";
-const USER_PASSWORD: &str = "User1234";
+pub const USER_EMAIL: &str = "test@loco.com";
+pub const USER_PASSWORD: &str = "User1234";
 
-const OPERATOR_EMAIL: &str = "operator@loco.com";
-const OPERATOR_PASSWORD: &str = "Operator-1234";
+pub const OPERATOR_EMAIL: &str = "operator@loco.com";
+pub const OPERATOR_PASSWORD: &str = "Operator-1234";
 
 pub struct LoggedInUser {
     pub user: users::Model,

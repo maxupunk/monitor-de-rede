@@ -22,6 +22,7 @@ pub mod probe_registrar;
 pub mod profiles;
 pub mod secret_store;
 pub mod server_service;
+pub mod shell_escape;
 pub mod state_watcher;
 pub mod traffic_recorder;
 

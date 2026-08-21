@@ -2,10 +2,12 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// Estado canônico de uma execução de monitor.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
+#[ts(export)]
 pub enum MonitorStatus {
     Up,
     Down,
@@ -29,8 +31,9 @@ impl MonitorStatus {
 }
 
 /// Uma medida numérica produzida por um checker.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct CheckMetric {
     pub name: String,
     pub value: f64,
@@ -38,16 +41,20 @@ pub struct CheckMetric {
 }
 
 /// Resultado degradável de uma medição. Erro de rede é dado de domínio, não panic.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct CheckResult {
     pub success: bool,
     pub status: MonitorStatus,
+    #[ts(type = "string")]
     pub started_at: DateTime<Utc>,
+    #[ts(type = "string")]
     pub finished_at: DateTime<Utc>,
     pub duration_ms: i64,
     pub message: Option<String>,
     pub metrics: Vec<CheckMetric>,
+    #[ts(type = "any")]
     pub data: serde_json::Value,
 }
 

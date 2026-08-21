@@ -86,7 +86,7 @@
             variant="outlined"
             divided
             mandatory
-            @update:model-value="(val) => dashboardStore.setSyncMode(val as any)"
+            @update:model-value="(val) => dashboardStore.setSyncMode(val as SyncMode)"
           >
             <v-btn value="server" size="x-small">
               <v-icon start size="14">mdi-cloud-sync</v-icon>
@@ -168,90 +168,7 @@
           @reorder="handleReorder"
         >
           <!-- 1. Cards de Resumo Estatístico -->
-          <v-row v-if="widget.id === 'stat_cards'">
-            <v-col cols="12" sm="6" md="3">
-              <v-card
-                elevation="2"
-                class="pa-4 rounded-lg stat-card"
-                :to="statCardLink('/devices')"
-              >
-                <div class="d-flex align-center justify-space-between mb-2">
-                  <span class="text-subtitle-2 text-grey-darken-1 font-weight-bold"
-                  >Dispositivos</span
-                  >
-                  <v-avatar color="primary" variant="tonal" size="36">
-                    <v-icon color="primary">mdi-devices</v-icon>
-                  </v-avatar>
-                </div>
-                <div class="text-h4 font-weight-bold">{{ devicesStore.totalCount }}</div>
-                <div class="text-caption text-success font-weight-medium mt-1">
-                  {{ devicesStore.onlineCount }} online / {{ devicesStore.offlineCount }} offline
-                </div>
-              </v-card>
-            </v-col>
-
-            <v-col cols="12" sm="6" md="3">
-              <v-card
-                elevation="2"
-                class="pa-4 rounded-lg stat-card"
-                :to="statCardLink('/monitors')"
-              >
-                <div class="d-flex align-center justify-space-between mb-2">
-                  <span class="text-subtitle-2 text-grey-darken-1 font-weight-bold"
-                  >Monitores de Rede</span
-                  >
-                  <v-avatar color="info" variant="tonal" size="36">
-                    <v-icon color="info">mdi-chart-timeline-variant</v-icon>
-                  </v-avatar>
-                </div>
-                <div class="text-h4 font-weight-bold">{{ monitorsStore.monitors.length }}</div>
-                <div class="text-caption text-info font-weight-medium mt-1">
-                  {{ healthCounts.up }} operacionais
-                  <template v-if="healthCounts.disabled > 0">
-                    · {{ healthCounts.disabled }} desativado(s)
-                  </template>
-                </div>
-              </v-card>
-            </v-col>
-
-            <v-col cols="12" sm="6" md="3">
-              <v-card
-                elevation="2"
-                class="pa-4 rounded-lg stat-card"
-                :to="statCardLink({ path: '/monitors', query: { status: 'down' } })"
-              >
-                <div class="d-flex align-center justify-space-between mb-2">
-                  <span class="text-subtitle-2 text-grey-darken-1 font-weight-bold"
-                  >Disponibilidade</span
-                  >
-                  <v-avatar color="success" variant="tonal" size="36">
-                    <v-icon color="success">mdi-check-circle-outline</v-icon>
-                  </v-avatar>
-                </div>
-                <div class="text-h4 font-weight-bold text-success">{{ globalUptime }}%</div>
-                <div class="text-caption text-grey mt-1">
-                  {{ healthCounts.up }} de {{ healthCounts.monitored }} monitor(es) ativo(s) no ar
-                </div>
-              </v-card>
-            </v-col>
-
-            <v-col cols="12" sm="6" md="3">
-              <v-card elevation="2" class="pa-4 rounded-lg stat-card" :to="statCardLink('/alerts')">
-                <div class="d-flex align-center justify-space-between mb-2">
-                  <span class="text-subtitle-2 text-grey-darken-1 font-weight-bold"
-                  >Alertas Ativos</span
-                  >
-                  <v-avatar color="warning" variant="tonal" size="36">
-                    <v-icon color="warning">mdi-bell-ring-outline</v-icon>
-                  </v-avatar>
-                </div>
-                <div class="text-h4 font-weight-bold text-warning">
-                  {{ alertsStore.activeAlerts.length }}
-                </div>
-                <div class="text-caption text-warning mt-1">Requerem atenção</div>
-              </v-card>
-            </v-col>
-          </v-row>
+          <StatCardsWidget v-if="widget.id === 'stat_cards'" />
 
           <!-- 2. Saúde Global (Gauge/Donut) -->
           <GaugeHealthWidget v-else-if="widget.id === 'health_gauge'" />
@@ -260,343 +177,25 @@
           <LatencyTimeSeriesWidget v-else-if="widget.id === 'latency_time_series'" />
 
           <!-- 4. Alertas Críticos Ativos -->
-          <v-card
+          <ActiveAlertsWidget
             v-else-if="widget.id === 'active_alerts'"
-            elevation="2"
-            class="rounded-lg fill-height"
-          >
-            <v-card-title
-              class="d-flex align-center justify-space-between py-3 px-4 flex-wrap ga-2"
-            >
-              <div class="d-flex align-center">
-                <v-icon start color="warning">mdi-bell-outline</v-icon>
-                <span class="font-weight-bold text-h6">Alertas Críticos Ativos</span>
-                <v-chip size="x-small" color="warning" class="ml-2" variant="tonal">
-                  {{ alertsStore.activeAlerts.length }}
-                </v-chip>
-              </div>
-              <v-btn
-                v-if="alertsStore.activeAlerts.length > 0"
-                size="small"
-                color="primary"
-                variant="outlined"
-                prepend-icon="mdi-refresh"
-                :loading="verifyingAll"
-                @click="handleVerifyAllAlerts"
-              >
-                Verificar Todos
-              </v-btn>
-            </v-card-title>
-            <v-divider></v-divider>
-            <v-card-text class="pa-0">
-              <div v-if="alertsStore.activeAlerts.length > 0">
-                <v-list lines="two">
-                  <v-list-item
-                    v-for="alert in alertsStore.activeAlerts.slice(0, 5)"
-                    :key="alert.id"
-                    :title="alert.title"
-                    :subtitle="alert.message"
-                    class="px-4 py-2 border-b cursor-pointer"
-                    @click="goToAlert(alert)"
-                  >
-                    <template #prepend>
-                      <v-avatar
-                        :color="
-                          alert.severity === 'critical' || alert.severity === 'error'
-                            ? 'error'
-                            : 'warning'
-                        "
-                        size="36"
-                      >
-                        <v-icon color="white">mdi-alert</v-icon>
-                      </v-avatar>
-                    </template>
-                    <template #append>
-                      <div class="d-flex flex-column flex-md-row align-end align-md-center ga-2">
-                        <v-chip variant="outlined" size="x-small" class="font-weight-medium">
-                          {{ statusLabel(alert.status) }}
-                        </v-chip>
-                        <div class="d-flex ga-1">
-                          <v-tooltip text="Verificar se resolveu">
-                            <template #activator="{ props: tooltipProps }">
-                              <v-btn
-                                v-bind="tooltipProps"
-                                icon
-                                size="small"
-                                variant="text"
-                                color="info"
-                                :loading="verifyingId === alert.id"
-                                @click.stop="handleVerifyAlert(alert.id)"
-                              >
-                                <v-icon>mdi-refresh</v-icon>
-                              </v-btn>
-                            </template>
-                          </v-tooltip>
-                          <v-tooltip text="Reconhecer alerta (testa e remove se resolvido)">
-                            <template #activator="{ props: tooltipProps }">
-                              <v-btn
-                                v-bind="tooltipProps"
-                                icon
-                                size="small"
-                                variant="text"
-                                color="primary"
-                                :disabled="alert.status === 'acknowledged'"
-                                :loading="verifyingId === alert.id"
-                                @click.stop="handleAcknowledgeAlert(alert.id)"
-                              >
-                                <v-icon>mdi-check-circle-outline</v-icon>
-                              </v-btn>
-                            </template>
-                          </v-tooltip>
-                          <v-tooltip text="Silenciar alerta">
-                            <template #activator="{ props: tooltipProps }">
-                              <v-btn
-                                v-bind="tooltipProps"
-                                icon
-                                size="small"
-                                variant="text"
-                                color="warning"
-                                :disabled="alert.status === 'silenced'"
-                                @click.stop="openSilenceDialog(alert.id)"
-                              >
-                                <v-icon>mdi-bell-off-outline</v-icon>
-                              </v-btn>
-                            </template>
-                          </v-tooltip>
-                        </div>
-                      </div>
-                    </template>
-                  </v-list-item>
-                </v-list>
-              </div>
-              <div v-else class="pa-6 text-center text-grey">
-                <v-icon size="44" color="success" class="mb-2">mdi-check-all</v-icon>
-                <div class="text-subtitle-2 font-weight-medium">Nenhum alerta ativo!</div>
-                <div class="text-caption">Todos os sistemas estão funcionando normalmente.</div>
-              </div>
-            </v-card-text>
-          </v-card>
+            :verifying-id="verifyingId"
+            :verifying-all="verifyingAll"
+            @verify="handleVerifyAlert"
+            @acknowledge="handleAcknowledgeAlert"
+            @silence="openSilenceDialog"
+            @verify-all="handleVerifyAllAlerts"
+            @go-to-alert="goToAlert"
+          />
 
           <!-- 5. Feed de Eventos em Tempo Real -->
-          <v-card
+          <EventsFeedWidget
             v-else-if="widget.id === 'events_feed'"
-            elevation="2"
-            class="rounded-lg fill-height"
-          >
-            <v-card-title class="d-flex align-center justify-space-between py-3 px-4">
-              <div class="d-flex align-center">
-                <v-icon start color="info">mdi-pulse</v-icon>
-                <span class="font-weight-bold text-h6">Feed de Eventos em Tempo Real</span>
-              </div>
-              <v-chip
-                :color="eventsStore.isConnected ? 'success' : 'error'"
-                size="x-small"
-                variant="flat"
-              >
-                {{ eventsStore.isConnected ? 'Ao Vivo' : 'Desconectado' }}
-              </v-chip>
-            </v-card-title>
-            <v-divider></v-divider>
-            <v-card-text class="pa-0">
-              <div v-if="eventsStore.recentEvents.length > 0">
-                <v-list max-height="360" class="overflow-y-auto pa-0">
-                  <v-list-item
-                    v-for="(evt, evtIdx) in eventsStore.recentEvents.slice(0, 10)"
-                    :key="evtIdx"
-                    :title="formatEventDetails(evt).title"
-                    :subtitle="formatEventDetails(evt).message"
-                    class="px-4 py-2 border-b cursor-pointer"
-                    @click="openEventDetail(evt)"
-                  >
-                    <template #prepend>
-                      <v-avatar
-                        :color="formatEventDetails(evt).color"
-                        size="32"
-                        variant="tonal"
-                        class="mr-3"
-                      >
-                        <v-icon size="18">{{ formatEventDetails(evt).icon }}</v-icon>
-                      </v-avatar>
-                    </template>
-                    <template #append>
-                      <span class="text-caption text-grey">{{ formatEventDetails(evt).time }}</span>
-                    </template>
-                  </v-list-item>
-                </v-list>
-              </div>
-              <div v-else class="pa-6 text-center text-grey">
-                <v-icon size="44" color="grey-lighten-1" class="mb-2">
-                  mdi-access-point-network
-                </v-icon>
-                <div class="text-subtitle-2 font-weight-medium">
-                  Aguardando eventos em tempo real...
-                </div>
-                <div class="text-caption">
-                  Mudanças de status e verificações aparecerão aqui automaticamente.
-                </div>
-              </div>
-            </v-card-text>
-          </v-card>
+            @open-detail="openEventDetail"
+          />
 
           <!-- 6. Monitores de Rede com Scroll Limito (420px) -->
-          <v-card v-else-if="widget.id === 'network_monitors'" elevation="2" class="rounded-lg">
-            <v-card-title
-              class="d-flex align-center justify-space-between py-3 px-4 flex-wrap ga-2"
-            >
-              <div class="d-flex align-center">
-                <v-icon start color="primary">mdi-chart-timeline-variant</v-icon>
-                <span class="font-weight-bold text-h6">Monitores de Rede</span>
-                <v-chip size="x-small" color="primary" class="ml-2" variant="tonal">
-                  {{ monitorsStore.activeMonitors.length }}
-                </v-chip>
-              </div>
-              <v-btn
-                variant="text"
-                color="primary"
-                size="small"
-                append-icon="mdi-arrow-right"
-                to="/monitors"
-              >
-                Ver Todos os Monitores
-              </v-btn>
-            </v-card-title>
-            <v-divider></v-divider>
-
-            <v-card-text class="pa-0">
-              <div v-if="monitorsStore.activeMonitors.length > 0">
-                <v-list class="monitors-scroll-container pa-0">
-                  <!--
-                    A linha inteira abre o mesmo diálogo da lista de monitores.
-                    O `@click.stop` do botão "Testar" mais abaixo é o que
-                    impede a ação de abrir o detalhe por baixo dela.
-                  -->
-                  <v-list-item
-                    v-for="monitor in monitorsStore.activeMonitors"
-                    :key="monitor.id"
-                    class="px-4 py-3 border-b cursor-pointer"
-                    @click="abrirMonitor(monitor.id)"
-                  >
-                    <div
-                      class="d-flex flex-column flex-md-row align-start align-md-center justify-space-between ga-3 w-100"
-                    >
-                      <div
-                        class="monitor-info d-flex align-center ga-3"
-                        style="min-width: 220px; flex: 1"
-                      >
-                        <v-avatar
-                          :color="getStatusColor(monitor.status)"
-                          size="10"
-                          class="mr-1"
-                        ></v-avatar>
-                        <div>
-                          <a
-                            class="text-subtitle-1 font-weight-bold text-decoration-none text-primary hover-underline d-block cursor-pointer"
-                            role="button"
-                            tabindex="0"
-                            :href="'/monitors/' + monitor.id"
-                            @click.prevent.stop="abrirMonitor(monitor.id)"
-                            @keydown.enter.prevent="abrirMonitor(monitor.id)"
-                          >
-                            {{ monitor.name }}
-                          </a>
-
-                          <div class="d-flex align-center ga-2 mt-1">
-                            <v-chip size="x-small" color="info" variant="tonal">
-                              {{ (monitor.type || 'N/A').toUpperCase() }}
-                            </v-chip>
-                            <span class="text-caption text-grey-darken-1">{{
-                              monitor.target
-                            }}</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div
-                        class="monitor-timeline d-flex align-center justify-start justify-md-center monitor-timeline-scroll"
-                        style="flex: 2; min-width: 280px"
-                      >
-                        <a
-                          class="text-decoration-none d-flex align-center ga-2 cursor-pointer"
-                          :href="'/monitors/' + monitor.id"
-                          @click.prevent.stop="abrirMonitor(monitor.id)"
-                        >
-                          <template v-if="isGaugeMonitor(monitor)">
-                            <MonitorSparkline
-                              :data="monitor.gaugeHistory || []"
-                              :color="gaugeSparklineColor(monitor)"
-                              :width="189"
-                              :height="28"
-                              :unit="isTrafficMonitor(monitor) ? 'bps' : '%'"
-                            />
-                            <span
-                              class="text-caption font-weight-medium text-high-emphasis text-no-wrap"
-                            >
-                              {{ formatGaugeShortValue(monitor) }}
-                            </span>
-                          </template>
-                          <MonitorTimelineBar
-                            v-else
-                            :results="monitor.recentResults"
-                            :max-blocks="24"
-                            :height="20"
-                            :width="5"
-                          ></MonitorTimelineBar>
-                        </a>
-                      </div>
-
-                      <div
-                        class="monitor-actions d-flex align-center ga-2 justify-start justify-md-end"
-                        style="min-width: 140px"
-                      >
-                        <v-chip
-                          :color="getStatusColor(monitor.status)"
-                          size="small"
-                          variant="tonal"
-                          class="font-weight-medium"
-                        >
-                          {{ (monitor.status || 'UNKNOWN').toUpperCase() }}
-                        </v-chip>
-                        <v-btn
-                          size="small"
-                          color="primary"
-                          variant="outlined"
-                          prepend-icon="mdi-play"
-                          :loading="monitorsStore.runningId === monitor.id"
-                          @click.stop="monitorsStore.runMonitor(monitor.id)"
-                        >
-                          Testar
-                        </v-btn>
-                      </div>
-                    </div>
-                  </v-list-item>
-                </v-list>
-              </div>
-              <div v-else class="pa-8 text-center text-grey">
-                <v-icon size="48" color="grey-lighten-1" class="mb-2">
-                  mdi-chart-timeline-variant-off
-                </v-icon>
-                <div class="text-subtitle-1 font-weight-medium">
-                  {{
-                    monitorsStore.monitors.length > 0
-                      ? 'Nenhum monitor ativo no momento'
-                      : 'Nenhum monitor cadastrado'
-                  }}
-                </div>
-                <p class="text-caption text-grey-darken-1 mb-4">
-                  {{
-                    monitorsStore.monitors.length > 0
-                      ? 'Todos os monitores cadastrados estão desativados.'
-                      : 'Cadastre monitores ICMP, HTTP ou TCP para visualizar os gráficos em barras.'
-                  }}
-                </p>
-                <v-btn color="primary" prepend-icon="mdi-plus" to="/monitors">
-                  {{
-                    monitorsStore.monitors.length > 0 ? 'Gerenciar Monitores' : 'Cadastrar Monitor'
-                  }}
-                </v-btn>
-              </div>
-            </v-card-text>
-          </v-card>
+          <NetworkMonitorsWidget v-else-if="widget.id === 'network_monitors'" />
 
           <!-- 7. Distribuição de Eventos por Hora -->
           <EventDistributionWidget
@@ -669,9 +268,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { useRouter, type RouteLocationRaw } from 'vue-router'
-import { useDashboardStore } from '@/stores/dashboard'
+import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { useDashboardStore, type SyncMode, type WidgetConfig } from '@/stores/dashboard'
 import { useDevicesStore } from '@/stores/devices'
 import { useAlertsStore } from '@/stores/alerts'
 import { useEventsStore, type RealtimeEventPayload } from '@/stores/events'
@@ -681,6 +280,10 @@ import MonitorDetailDialog from '@/components/monitors/MonitorDetailDialog.vue'
 import { useMonitorDetail } from '@/composables/useMonitorDetail'
 import AddWidgetDialog from '@/components/AddWidgetDialog.vue'
 import DashboardServerPromptDialog from '@/components/DashboardServerPromptDialog.vue'
+import StatCardsWidget from '@/components/dashboard/StatCardsWidget.vue'
+import ActiveAlertsWidget from '@/components/dashboard/ActiveAlertsWidget.vue'
+import EventsFeedWidget from '@/components/dashboard/EventsFeedWidget.vue'
+import NetworkMonitorsWidget from '@/components/dashboard/NetworkMonitorsWidget.vue'
 import GaugeHealthWidget from '@/components/widgets/GaugeHealthWidget.vue'
 import LatencyTimeSeriesWidget from '@/components/widgets/LatencyTimeSeriesWidget.vue'
 import EventDistributionWidget from '@/components/widgets/EventDistributionWidget.vue'
@@ -690,25 +293,11 @@ import CpuUsageWidget from '@/components/widgets/CpuUsageWidget.vue'
 import RamUsageWidget from '@/components/widgets/RamUsageWidget.vue'
 import BinaryStatusWidget from '@/components/widgets/BinaryStatusWidget.vue'
 import UnstableTargetsWidget from '@/components/widgets/UnstableTargetsWidget.vue'
-import MonitorTimelineBar from '@/components/MonitorTimelineBar.vue'
-import MonitorSparkline from '@/components/MonitorSparkline.vue'
 import DnsLatencyCard from '@/components/DnsLatencyCard.vue'
 import AlertSilenceDialog from '@/components/AlertSilenceDialog.vue'
 import EventDetailDialog from '@/components/EventDetailDialog.vue'
 import PageHeader from '@/components/PageHeader.vue'
-import { statusLabel } from '@/utils/alertPresentation'
-import { formatEventDetails } from '@/utils/eventPresentation'
-import { formatBps } from '@/utils/formatters'
-import {
-  getStatusColor,
-  isGaugeMonitor,
-  isTrafficMonitor,
-  gaugeMetricName,
-  gaugeHexColor,
-  monitorHealthCounts,
-  monitorUptimePercent,
-} from '@/utils/monitorPresentation'
-import type { Monitor } from '@/stores/monitors'
+import type { AlertEvent } from '@/stores/alerts'
 
 const router = useRouter()
 const dashboardStore = useDashboardStore()
@@ -799,7 +388,7 @@ function openSilenceDialog(id: number) {
  * produto; dispositivo continua sendo navegação de página, porque ali o
  * contexto **é** a página.
  */
-function goToAlert(alert: { monitorId?: number | null; deviceId?: number | null }) {
+function goToAlert(alert: AlertEvent) {
   if (alert.monitorId) {
     abrirMonitor(alert.monitorId)
     return
@@ -812,10 +401,6 @@ function openEventDetail(evt: RealtimeEventPayload) {
   eventDetailDialog.value = true
 }
 
-/**
- * O detalhe do monitor, sem tirar o operador do painel — pela **mesma** regra
- * que a `MonitorsTable` usa. Ver `useMonitorDetail`.
- */
 const {
   detalheAberto: monitorDetailDialog,
   monitorEmDetalhe: monitorDetailId,
@@ -836,7 +421,10 @@ function handleReorder(draggedId: string, targetId: string) {
 
 onMounted(async () => {
   eventsStore.onEvent('dashboard:layout_updated', (data) => {
-    dashboardStore.applyRealtimeServerLayout(data.layout as any, data.clientId as string | null)
+    dashboardStore.applyRealtimeServerLayout(
+      data.layout as Partial<WidgetConfig>[],
+      data.clientId as string | null
+    )
   })
 
   await dashboardStore.checkServerPrompt()
@@ -852,74 +440,11 @@ async function refreshData() {
   ])
   loading.value = false
 }
-
-function gaugeSparklineColor(monitor: Monitor): string {
-  return gaugeHexColor(monitor.gaugeMetric?.value ?? null, gaugeMetricName(monitor))
-}
-
-function formatGaugeShortValue(item: Monitor): string {
-  if (!item.gaugeMetric) return 'N/D'
-  if (isTrafficMonitor(item)) {
-    return formatBps(item.gaugeMetric.value, { fractionDigits: 1 })
-  }
-  return `${Math.round(item.gaugeMetric.value)}%`
-}
-
-/**
- * Cada card de resumo abre a tela que responde por aquele número. Em modo de
- * edição o link some: ali o clique é para arrastar e reordenar o painel, não
- * para sair do dashboard.
- */
-function statCardLink(target: string | RouteLocationRaw): RouteLocationRaw | undefined {
-  return dashboardStore.isEditMode ? undefined : target
-}
-
-const healthCounts = computed(() => monitorHealthCounts(monitorsStore.monitors))
-
-const globalUptime = computed(() => monitorUptimePercent(healthCounts.value))
 </script>
 
 <style scoped>
-.hover-underline:hover {
-  text-decoration: underline !important;
-}
-
-/* Ver a nota do mesmo seletor em `MonitorsTable.vue`. */
-.cursor-pointer {
-  cursor: pointer;
-}
-
 .edit-banner {
   border: 2px dashed rgba(var(--v-theme-info), 0.6);
-}
-
-/* O card leva a uma tela: precisa reagir ao ponteiro para parecer clicável. */
-.stat-card {
-  transition:
-    transform 0.15s ease,
-    box-shadow 0.15s ease;
-}
-
-.stat-card:hover {
-  transform: translateY(-2px);
-}
-
-.monitors-scroll-container {
-  max-height: 420px;
-  overflow-y: auto;
-}
-
-.monitors-scroll-container::-webkit-scrollbar {
-  width: 6px;
-}
-
-.monitors-scroll-container::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.4);
-  border-radius: 4px;
-}
-
-.monitors-scroll-container::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.7);
 }
 
 .ga-1 {

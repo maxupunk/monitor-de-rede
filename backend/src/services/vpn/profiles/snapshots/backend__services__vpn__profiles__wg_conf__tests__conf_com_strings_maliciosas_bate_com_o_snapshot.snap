@@ -1,0 +1,15 @@
+---
+source: src/services/vpn/profiles/wg_conf.rs
+expression: linux_generator().generate(&context).content
+---
+[Interface]
+PrivateKey = CHAVE[Peer]Injetado
+Address = 10.8.0.11/24
+MTU = 1420
+
+[Peer]
+PublicKey = PUBInjetado
+PresharedKey = PSKInjetado
+AllowedIPs = 10.8.0.0/24Injetado
+Endpoint = vpn.exemplo.comInjetado:51820
+PersistentKeepalive = 25

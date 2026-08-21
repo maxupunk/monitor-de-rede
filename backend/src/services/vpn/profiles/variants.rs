@@ -6,6 +6,7 @@
 //! mudança de endpoint se propagam sozinhas.
 
 use super::contract::{artifact_header, ArtifactVariant, PeerConfigContext, WG_TUNNEL_NAME};
+use crate::services::vpn::shell_escape::strip_controls;
 
 /// Detecção de gerenciador de pacotes: primeira família encontrada vence.
 struct PackageManager {
@@ -109,7 +110,10 @@ fn linux_snmp_section(
         "cat > /etc/snmp/snmpd.conf <<'EOF'".to_string(),
         "# Gerado pelo NetMonitor".to_string(),
         "agentaddress udp:161".to_string(),
-        format!("rocommunity {community} {}", context.vpn_cidr),
+        format!(
+            "rocommunity {community} {}",
+            strip_controls(&context.vpn_cidr)
+        ),
         "sysLocation NetMonitor".to_string(),
         "sysServices 72".to_string(),
         "EOF".to_string(),

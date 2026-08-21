@@ -6,7 +6,7 @@
 
 use backend::{
     app::App,
-    models::{devices, monitor_results, monitors, networks, sites},
+    models::{device_interfaces, devices, metrics, monitor_results, monitors, networks, sites},
     services::{
         discovery::queue,
         events::{relay::relay_pending, EventBus},
@@ -14,6 +14,7 @@ use backend::{
             device_status::{self, DeviceStatus},
             presenter::{present_monitors, RECENT_RESULTS_LIMIT},
         },
+        snmp::service::latest_metrics_for_interfaces,
     },
 };
 use chrono::Utc;
@@ -687,7 +688,7 @@ async fn admin_status_escolhido_pelo_operador_sobrevive_ao_poll() {
     };
 
     // Primeiro poll: cria a linha com o que o agente informou.
-    let criada = sync_interface(db, device.id, &lida(1))
+    let criada = sync_interface(db, device.id, &lida(1), None)
         .await
         .expect("primeiro poll");
     assert_eq!(criada.interface.admin_status.as_deref(), Some("up"));
@@ -702,8 +703,16 @@ async fn admin_status_escolhido_pelo_operador_sobrevive_ao_poll() {
     .await
     .expect("operador desliga a porta");
 
+    // Recarrega a interface atualizada para simular o que o poll faz ao carregar
+    // interfaces existentes em lote antes de chamar `sync_interface`.
+    let atualizada = backend::models::device_interfaces::Entity::find_by_id(criada.interface.id)
+        .one(db)
+        .await
+        .expect("buscar interface atualizada")
+        .expect("interface existe");
+
     // Poll seguinte: o agente continua dizendo "up", mas a escolha prevalece.
-    let repolada = sync_interface(db, device.id, &lida(2))
+    let repolada = sync_interface(db, device.id, &lida(2), Some(&atualizada))
         .await
         .expect("segundo poll");
     assert_eq!(
@@ -754,6 +763,7 @@ async fn a_interface_so_conta_como_monitorada_quando_tem_monitor_habilitado() {
             mac_address: None,
             is_monitored: false,
         },
+        None,
     )
     .await
     .expect("registrar a interface")
@@ -799,4 +809,82 @@ async fn a_interface_so_conta_como_monitorada_quando_tem_monitor_habilitado() {
     let depois = listada(ctx, device.id).await;
     assert!(!depois.is_monitored);
     assert_eq!(depois.admin_status.as_deref(), Some("down"));
+}
+
+/// QUA-04 — métricas anteriores de interfaces SNMP são buscadas em uma query
+/// só, em vez de uma por interface.
+#[tokio::test]
+#[serial]
+async fn busca_metricas_anteriores_de_interfaces_em_uma_query_sozinha() {
+    let boot = boot_test::<App>().await.expect("subir app de teste");
+    let db = &boot.app_context.db;
+    let device = dispositivo(db, "sw-n1", "online").await;
+
+    let interface_a = device_interfaces::ActiveModel {
+        device_id: Set(device.id),
+        snmp_index: Set(Some(1)),
+        name: Set("Gi0/1".into()),
+        ..Default::default()
+    }
+    .insert(db)
+    .await
+    .expect("criar interface A");
+
+    let interface_b = device_interfaces::ActiveModel {
+        device_id: Set(device.id),
+        snmp_index: Set(Some(2)),
+        name: Set("Gi0/2".into()),
+        ..Default::default()
+    }
+    .insert(db)
+    .await
+    .expect("criar interface B");
+
+    let agora = Utc::now();
+    for (interface, nome, valor) in [
+        (interface_a.id, "ifHCInOctets", 1_000.0),
+        (interface_a.id, "ifHCOutOctets", 2_000.0),
+        (interface_b.id, "ifHCInOctets", 3_000.0),
+        (interface_b.id, "ifHCOutOctets", 4_000.0),
+    ] {
+        metrics::ActiveModel {
+            device_id: Set(device.id),
+            interface_id: Set(Some(interface)),
+            name: Set(nome.into()),
+            value: Set(valor),
+            unit: Set("bytes".into()),
+            recorded_at: Set(agora.into()),
+            ..Default::default()
+        }
+        .insert(db)
+        .await
+        .expect("criar métrica anterior");
+    }
+
+    let encontradas = latest_metrics_for_interfaces(
+        db,
+        device.id,
+        &[interface_a.id, interface_b.id],
+        &["ifHCInOctets", "ifHCOutOctets"],
+    )
+    .await
+    .expect("buscar métricas em grupo");
+
+    assert_eq!(
+        encontradas.len(),
+        4,
+        "deveria trazer uma entrada por (interface, nome)"
+    );
+    assert_eq!(
+        encontradas
+            .get(&(interface_a.id, "ifHCInOctets".into()))
+            .map(|m| m.value),
+        Some(1_000.0)
+    );
+    assert_eq!(
+        encontradas
+            .get(&(interface_b.id, "ifHCOutOctets".into()))
+            .map(|m| m.value),
+        Some(4_000.0)
+    );
 }

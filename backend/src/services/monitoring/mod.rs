@@ -11,5 +11,7 @@ pub mod managed;
 pub mod presenter;
 pub mod reachability;
 pub mod result_processor;
+pub mod rollup;
 pub mod runner;
 pub mod scheduler;
+pub mod uptime;

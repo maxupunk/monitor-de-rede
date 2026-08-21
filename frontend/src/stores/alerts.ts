@@ -143,6 +143,28 @@ export interface ScopeInstability {
   lastProblemAt?: string | null
 }
 
+/** Evento correlacionado retornado pela análise de causa raiz. */
+export interface CorrelatedAlertEvent {
+  id: number
+  title: string
+  deviceId?: number | null
+  monitorId?: number | null
+  severity: AlertEvent['severity']
+  status: AlertEvent['status']
+  message?: string | null
+  startedAt?: string
+}
+
+/** Resultado da correlação temporal de alertas em cascata. */
+export interface AlertCorrelation {
+  windowSeconds: number
+  primaryCause: CorrelatedAlertEvent | null
+  relatedEvents: CorrelatedAlertEvent[]
+  commonSiteId?: number | null
+  commonNetworkId?: number | null
+  correlationCount: number
+}
+
 export interface AlertEvent {
   id: number
   alertRuleId?: number | null
@@ -294,6 +316,23 @@ export const useAlertsStore = defineStore('alerts', () => {
       )
     } catch {
       return []
+    }
+  }
+
+  /**
+   * Analisa a correlação temporal de um alerta.
+   *
+   * Devolve o evento mais provável de ser a causa raiz comum e os eventos
+   * relacionados numa janela curta. Falhas de rede devolvem estrutura vazia
+   * para não travar a tela.
+   */
+  async function fetchCorrelation(alertId: number): Promise<AlertCorrelation | null> {
+    try {
+      return await apiService.get<AlertCorrelation>(`/alerts/${alertId}/correlation`)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Erro ao analisar correlação'
+      error.value = msg
+      return null
     }
   }
 
@@ -461,6 +500,7 @@ export const useAlertsStore = defineStore('alerts', () => {
     fetchRuleCatalog,
     applyCatalogRules,
     fetchInstability,
+    fetchCorrelation,
     acknowledgeAlert,
     verifyAlert,
     verifyAllAlerts,

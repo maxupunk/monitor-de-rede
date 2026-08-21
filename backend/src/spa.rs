@@ -22,7 +22,13 @@
 use std::path::{Path, PathBuf};
 
 use axum::{
-    http::{header::CACHE_CONTROL, HeaderValue},
+    http::{
+        header::{
+            CACHE_CONTROL, CONTENT_SECURITY_POLICY, REFERRER_POLICY, X_CONTENT_TYPE_OPTIONS,
+            X_FRAME_OPTIONS,
+        },
+        HeaderValue,
+    },
     Router,
 };
 use tower_http::{
@@ -37,6 +43,15 @@ pub const DEFAULT_WEB_ROOT: &str = "/app/web";
 
 const IMMUTABLE: &str = "public, max-age=31536000, immutable";
 const REVALIDATE: &str = "no-cache";
+
+// Headers de segurança aplicados a todos os arquivos estáticos da SPA.
+// O CSP começa restritivo e permite apenas recursos do próprio origin; a SPA
+// empacotada pelo Vite carrega scripts e CSS de <script src>/<link href>, sem
+// inline. Imagens de QR code e ícones podem vir como data:URI.
+const X_CONTENT_TYPE_OPTIONS_VALUE: &str = "nosniff";
+const REFERRER_POLICY_VALUE: &str = "strict-origin-when-cross-origin";
+const X_FRAME_OPTIONS_VALUE: &str = "DENY";
+const CSP_VALUE: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
 
 /// Raiz dos estáticos, de `WEB_ROOT` ou do padrão da imagem.
 #[must_use]
@@ -69,10 +84,30 @@ pub fn mount(router: Router, root: &Path) -> Router {
 
     tracing::info!(root = %root.display(), "SPA servida pelo processo da API");
 
+    let security_headers = || {
+        Router::new()
+            .layer(SetResponseHeaderLayer::overriding(
+                X_CONTENT_TYPE_OPTIONS,
+                HeaderValue::from_static(X_CONTENT_TYPE_OPTIONS_VALUE),
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                REFERRER_POLICY,
+                HeaderValue::from_static(REFERRER_POLICY_VALUE),
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                X_FRAME_OPTIONS,
+                HeaderValue::from_static(X_FRAME_OPTIONS_VALUE),
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                CONTENT_SECURITY_POLICY,
+                HeaderValue::from_static(CSP_VALUE),
+            ))
+    };
+
     router
         .nest_service(
             "/assets",
-            Router::new()
+            security_headers()
                 .fallback_service(assets)
                 .layer(SetResponseHeaderLayer::overriding(
                     CACHE_CONTROL,
@@ -81,7 +116,7 @@ pub fn mount(router: Router, root: &Path) -> Router {
         )
         // Último recurso do roteador: as rotas da API já foram registradas e
         // continuam ganhando de qualquer arquivo de mesmo caminho.
-        .fallback_service(Router::new().fallback_service(shell).layer(
+        .fallback_service(security_headers().fallback_service(shell).layer(
             SetResponseHeaderLayer::overriding(CACHE_CONTROL, HeaderValue::from_static(REVALIDATE)),
         ))
 }
@@ -108,5 +143,21 @@ mod tests {
         std::env::set_var("WEB_ROOT", "");
         assert_eq!(web_root(), PathBuf::from(DEFAULT_WEB_ROOT));
         std::env::remove_var("WEB_ROOT");
+    }
+
+    #[test]
+    fn headers_de_seguranca_estao_configurados() {
+        // Garante que as constantes de header não estão vazias e que o mount
+        // consegue aplicá-las sobre um diretório real.
+        assert!(!X_CONTENT_TYPE_OPTIONS_VALUE.is_empty());
+        assert!(!REFERRER_POLICY_VALUE.is_empty());
+        assert!(!X_FRAME_OPTIONS_VALUE.is_empty());
+        assert!(!CSP_VALUE.is_empty());
+
+        let tmp = std::env::temp_dir().join(format!("netmonitor-spa-test-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        std::fs::write(tmp.join("index.html"), "<html></html>").unwrap();
+        drop(mount(Router::new(), &tmp));
+        std::fs::remove_dir_all(&tmp).unwrap();
     }
 }

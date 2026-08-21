@@ -228,6 +228,7 @@ const navItems = computed<NavItem[]>(() => [
   { title: 'Dispositivos', icon: 'mdi-devices', to: '/devices' },
   { title: 'Monitores', icon: 'mdi-heart-pulse', to: '/monitors' },
   { title: 'Alertas', icon: 'mdi-bell-outline', to: '/alerts' },
+  { title: 'Manutenção', icon: 'mdi-wrench-clock', to: '/maintenance-windows' },
   { title: 'Descoberta', icon: 'mdi-radar', to: '/discovery' },
   { title: 'Eventos', icon: 'mdi-history', to: '/events' },
   { title: 'Logs', icon: 'mdi-text-box-search-outline', to: '/logs' },
@@ -264,7 +265,10 @@ const navItems = computed<NavItem[]>(() => [
     ],
   },
   ...(authStore.isAdmin
-    ? [{ title: 'Usuários e acessos', icon: 'mdi-account-multiple-outline', to: '/users' }]
+    ? [
+        { title: 'Usuários e acessos', icon: 'mdi-account-multiple-outline', to: '/users' },
+        { title: 'Trilha de auditoria', icon: 'mdi-shield-account-outline', to: '/audit' },
+      ]
     : []),
   { title: 'Configurações', icon: 'mdi-cog', to: '/settings' },
 ])

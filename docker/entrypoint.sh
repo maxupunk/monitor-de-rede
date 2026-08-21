@@ -6,7 +6,8 @@
 # a aplicação:
 #
 #   1. acerta o dono de /data e /config — volume nomeado nasce do root;
-#   2. sobe o watcher do WireGuard, se o container tiver NET_ADMIN;
+#   2. sobe o watcher do WireGuard, se o container tiver NET_ADMIN, e o
+#      reinicia automaticamente se ele morrer;
 #   3. `exec` na aplicação como `app`, com todas as capabilities removidas.
 #
 # O passo 3 é o que mantém a fronteira do §7 do AGENTS.md: o processo da API
@@ -14,8 +15,8 @@
 # watcher, e o canal entre os dois é arquivo — `wg0.conf` de ida, `wg0.status`
 # de volta —, exatamente como era quando o WireGuard morava em outro container.
 #
-# `exec` também é o que faz a aplicação herdar o PID 1 e receber o SIGTERM do
-# `docker stop` diretamente, sem intermediário para repassá-lo.
+# `tini` é o PID 1 e repassa SIGTERM para este script. O trap garante que o
+# watcher seja encerrado junto com a aplicação, evitando processos órfãos.
 # ---------------------------------------------------------------------------
 set -eu
 
@@ -44,19 +45,45 @@ has_net_admin() {
   [ $(( 0x${caps} & 0x1000 )) -ne 0 ]
 }
 
+WATCHER_PID=""
+
+start_watcher() {
+  while true; do
+    log "iniciando watcher do WireGuard (${WG_CONFIG_DIR})"
+    WG_CONFIG_DIR="${WG_CONFIG_DIR}" /usr/local/bin/wireguard-watcher.sh &
+    WATCHER_PID=$!
+    wait "${WATCHER_PID}" 2>/dev/null || true
+    log "watcher do WireGuard saiu — reiniciando em 2s"
+    sleep 2
+  done
+}
+
+stop_watcher() {
+  if [ -n "${WATCHER_PID}" ] && kill -0 "${WATCHER_PID}" 2>/dev/null; then
+    kill -TERM "${WATCHER_PID}" 2>/dev/null || true
+    wait "${WATCHER_PID}" 2>/dev/null || true
+  fi
+}
+
 case "${WG_ENABLED:-auto}" in
   false | 0 | no | off)
     log "WireGuard desligado por WG_ENABLED"
     ;;
   *)
     if has_net_admin; then
-      log "iniciando watcher do WireGuard (${WG_CONFIG_DIR})"
-      WG_CONFIG_DIR="${WG_CONFIG_DIR}" /usr/local/bin/wireguard-watcher.sh &
+      start_watcher &
     else
       log "sem CAP_NET_ADMIN — watcher do WireGuard não iniciado"
     fi
     ;;
 esac
+
+# Garante limpeza ordenada ao receber SIGTERM/INT.
+cleanup() {
+  log "sinal de término recebido — encerrando watcher"
+  stop_watcher
+}
+trap cleanup TERM INT
 
 # --- 3. aplicação, sem privilégio -------------------------------------------
 # `--inh-caps=-all` esvazia o conjunto herdável: nem por engano a aplicação

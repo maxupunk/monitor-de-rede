@@ -1,4 +1,5 @@
 pub mod alerts;
+pub mod audit;
 pub mod auth;
 pub mod auth_guard;
 pub mod backup;
@@ -9,6 +10,7 @@ pub mod dns;
 pub mod dns_servers;
 pub mod events;
 pub mod logs;
+pub mod maintenance_windows;
 pub mod monitors;
 pub mod networks;
 pub mod port_scan;

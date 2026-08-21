@@ -327,11 +327,9 @@
                   <div class="flex-grow-1 min-width-0">
                     <div class="d-flex align-center ga-2">
                       <span class="font-weight-bold">Rede Local (LAN)</span>
-                      <v-chip size="x-small" color="primary" variant="flat"
-                      >
+                      <v-chip size="x-small" color="primary" variant="flat">
                         Recomendado Padrão
-                      </v-chip
-                      >
+                      </v-chip>
                     </div>
                     <div class="text-caption text-medium-emphasis mb-2">
                       Usado por switches, roteadores e servidores na mesma rede física.
@@ -885,11 +883,9 @@
                       <v-icon size="18">mdi-server-network</v-icon>
                     </v-avatar>
                   </template>
-                  <v-list-item-title class="font-weight-bold"
-                  >
+                  <v-list-item-title class="font-weight-bold">
                     Endereços do Servidor
-                  </v-list-item-title
-                  >
+                  </v-list-item-title>
                   <v-list-item-subtitle>
                     LAN: {{ form.addresses.lan || '—' }} | Internet:
                     {{ form.addresses.public || '—' }} | VPN: {{ form.addresses.vpn || '—' }}
@@ -955,11 +951,9 @@
                       <v-icon size="18">mdi-cog-outline</v-icon>
                     </v-avatar>
                   </template>
-                  <v-list-item-title class="font-weight-bold"
-                  >
+                  <v-list-item-title class="font-weight-bold">
                     Preferências Globais
-                  </v-list-item-title
-                  >
+                  </v-list-item-title>
                   <v-list-item-subtitle>
                     Ping: {{ form.preferences.defaultPingIntervalSeconds }}s | SNMP:
                     {{ form.preferences.defaultSnmpCommunity }} | Descoberta:

@@ -2,6 +2,7 @@ pub mod alerts;
 pub mod common;
 pub mod devices;
 pub mod logs;
+pub mod monitors;
 pub mod resources;
 pub mod server_addresses;
 pub mod users;

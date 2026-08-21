@@ -4,11 +4,12 @@ use chrono::Utc;
 use loco_rs::app::AppContext;
 
 use super::cadence::{
-    is_due, DATA_PRUNE_INTERVAL_SECONDS, VPN_STATUS_INTERVAL_SECONDS, VPN_TRAFFIC_INTERVAL_SECONDS,
+    is_due, DATA_PRUNE_INTERVAL_SECONDS, ROLLUP_INTERVAL_SECONDS, VPN_STATUS_INTERVAL_SECONDS,
+    VPN_TRAFFIC_INTERVAL_SECONDS,
 };
 use crate::services::{
-    alerts::hysteresis, maintenance::data_pruner, notifications::outbox, shared::errors::AppResult,
-    syslog, vpn::traffic_recorder,
+    alerts::hysteresis, maintenance::data_pruner, monitoring::rollup, notifications::outbox,
+    shared::errors::AppResult, syslog, vpn::traffic_recorder,
 };
 
 /// Sincroniza o status (10s) e histórico (30s) do tráfego dos túneis VPN.
@@ -74,6 +75,28 @@ pub async fn run_data_pruner_if_due(ctx: &AppContext) -> AppResult<()> {
     );
     if esquecidas > 0 {
         tracing::debug!(esquecidas, "contagens de histerese ociosas descartadas");
+    }
+    Ok(())
+}
+
+/// Executa o rollup horário dos resultados brutos quando vence a cadência.
+///
+/// A tarefa roda no mesmo ciclo do scheduler, mas só age a cada hora (ou quando
+/// `ROLLUP_INTERVAL_SECONDS` for menor em ambiente de teste). O fechamento do
+/// bucket exclui a hora em curso, garantindo que a agregação seja completa.
+pub async fn rollup_monitor_results_if_due(ctx: &AppContext) -> AppResult<()> {
+    let now = Utc::now();
+    if !is_due("monitor_rollup", ROLLUP_INTERVAL_SECONDS, now) {
+        return Ok(());
+    }
+    let stats = rollup::rollup_monitor_results(&ctx.db, now).await?;
+    if stats.total() > 0 {
+        tracing::info!(
+            buckets = stats.buckets_upserted,
+            agregadas = stats.rows_aggregated,
+            apagadas = stats.rows_deleted,
+            "rollup de resultados de monitoramento executado"
+        );
     }
     Ok(())
 }

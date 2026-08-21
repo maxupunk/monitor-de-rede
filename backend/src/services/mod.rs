@@ -4,12 +4,14 @@
 //! de negócio vive aqui e é testável sem HTTP.
 
 pub mod alerts;
+pub mod audit;
 pub mod auth;
 pub mod backup;
 pub mod devices;
 pub mod discovery;
 pub mod events;
 pub mod maintenance;
+pub mod maintenance_windows;
 pub mod monitoring;
 pub mod network_tools;
 pub mod notifications;

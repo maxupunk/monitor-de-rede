@@ -574,18 +574,19 @@ async fn can_auth_with_magic_link() {
 
 #[tokio::test]
 #[serial]
-async fn can_reject_invalid_email() {
+async fn magic_link_aceita_email_valido_sem_expor_existencia() {
     configure_insta!();
     request::<App, _, _>(|request, _ctx| async move {
-        let invalid_email = "user1@temp-mail.com";
+        // A allowlist de scaffold foi removida (SEC-09). O endpoint aceita
+        // qualquer e-mail válido e nunca revela se o usuário existe.
         let payload = serde_json::json!({
-            "email": invalid_email,
+            "email": "user1@temp-mail.com",
         });
         let response = request.post("/api/auth/magic-link").json(&payload).await;
         assert_eq!(
             response.status_code(),
-            400,
-            "Expected request with invalid email '{invalid_email}' to be blocked, but it was allowed."
+            200,
+            "magic link deve aceitar e-mail fora da antiga allowlist"
         );
     })
     .await;

@@ -1,9 +1,13 @@
 //! Requisições da base CRUD e do motor de monitoramento (Fases 2 e 3).
 
-use backend::{app::App, models::_entities::monitor_results};
+use backend::{
+    app::App,
+    models::_entities::{monitor_results, monitor_results_hourly},
+    services::monitoring::{rollup::rollup_monitor_results, uptime::uptime_for_monitor},
+};
 use chrono::{Duration, Utc};
 use loco_rs::testing::prelude::*;
-use sea_orm::{ActiveModelTrait, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use serial_test::serial;
 
 use super::prepare_data;
@@ -439,6 +443,188 @@ async fn listagem_de_monitores_permite_filtrar_por_enabled() {
             serde_json::from_str(&inativos.text()).unwrap();
         assert!(!lista_inativos.iter().any(|m| m["id"] == mon1_val["id"]));
         assert!(lista_inativos.iter().any(|m| m["id"] == mon2_val["id"]));
+    })
+    .await;
+}
+
+/// QUA-05 — `monitors.timeout_seconds` é preenchido e devolvido no contrato,
+/// permitindo que o scheduler o honre em vez de recalcular do intervalo.
+#[tokio::test]
+#[serial]
+async fn timeout_seconds_e_preenchido_e_exposto_no_monitor() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let monitor = request
+            .post("/api/monitors")
+            .json(&serde_json::json!({
+                "name": "Ping com timeout",
+                "type": "ping",
+                "target": "127.0.0.1",
+                "intervalSeconds": 60,
+            }))
+            .await;
+        assert_eq!(monitor.status_code(), 201);
+        let body: serde_json::Value = serde_json::from_str(&monitor.text()).unwrap();
+        assert!(
+            body["timeoutSeconds"].as_i64().is_some_and(|v| v >= 1),
+            "timeoutSeconds deveria ser >= 1, mas foi {:?}",
+            body["timeoutSeconds"]
+        );
+        assert!(
+            body["timeoutSeconds"].as_i64().unwrap() < body["intervalSeconds"].as_i64().unwrap(),
+            "timeout deve ser menor que o intervalo"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn endpoint_uptime_consolida_resultados_brutos_e_horarios() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let monitor = request
+            .post("/api/monitors")
+            .json(&serde_json::json!({
+                "name": "Uptime local",
+                "type": "ping",
+                "target": "127.0.0.1",
+            }))
+            .await;
+        assert_eq!(monitor.status_code(), 201);
+        let monitor: serde_json::Value = serde_json::from_str(&monitor.text()).unwrap();
+        let monitor_id = monitor["id"].as_i64().unwrap();
+
+        // Sem dados: uptime 100% e zero checagens.
+        let empty = request
+            .get(&format!("/api/monitors/{monitor_id}/uptime"))
+            .await;
+        assert_eq!(empty.status_code(), 200);
+        let empty: serde_json::Value = serde_json::from_str(&empty.text()).unwrap();
+        assert_eq!(empty["uptimePercentage"], 100.0);
+        assert_eq!(empty["totalChecks"], 0);
+
+        // Resultado bruto na hora atual.
+        monitor_results::ActiveModel {
+            monitor_id: Set(monitor_id),
+            status: Set("up".into()),
+            started_at: Set(Utc::now().into()),
+            finished_at: Set(Utc::now().into()),
+            duration_ms: Set(1),
+            latency_ms: Set(Some(10.0)),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .unwrap();
+
+        let partial = request
+            .get(&format!("/api/monitors/{monitor_id}/uptime?hours=24"))
+            .await;
+        assert_eq!(partial.status_code(), 200);
+        let partial: serde_json::Value = serde_json::from_str(&partial.text()).unwrap();
+        assert_eq!(partial["uptimePercentage"], 100.0);
+        assert_eq!(partial["totalChecks"], 1);
+        assert_eq!(partial["avgLatencyMs"], 10.0);
+
+        // Bucket horário fechado (hora anterior).
+        let bucket = Utc::now() - Duration::hours(2);
+        monitor_results_hourly::ActiveModel {
+            monitor_id: Set(monitor_id),
+            bucket: Set(bucket.into()),
+            total_checks: Set(4),
+            up_checks: Set(3),
+            down_checks: Set(1),
+            unknown_checks: Set(0),
+            avg_latency_ms: Set(Some(12.5)),
+            min_latency_ms: Set(Some(10.0)),
+            max_latency_ms: Set(Some(15.0)),
+            first_started_at: Set(bucket.into()),
+            last_finished_at: Set(bucket.into()),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .unwrap();
+
+        let mixed = request
+            .get(&format!("/api/monitors/{monitor_id}/uptime?hours=24"))
+            .await;
+        assert_eq!(mixed.status_code(), 200);
+        let mixed: serde_json::Value = serde_json::from_str(&mixed.text()).unwrap();
+        assert_eq!(mixed["totalChecks"], 5);
+        assert_eq!(mixed["upChecks"], 4);
+        assert_eq!(mixed["downChecks"], 1);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn rollup_agrega_resultados_brutos_em_buckets_horarios() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let monitor = request
+            .post("/api/monitors")
+            .json(&serde_json::json!({
+                "name": "Rollup local",
+                "type": "ping",
+                "target": "127.0.0.1",
+            }))
+            .await;
+        assert_eq!(monitor.status_code(), 201);
+        let monitor: serde_json::Value = serde_json::from_str(&monitor.text()).unwrap();
+        let monitor_id = monitor["id"].as_i64().unwrap();
+
+        let base = Utc::now() - Duration::hours(3);
+        for sequence in 0..5 {
+            let timestamp = base + Duration::minutes(sequence);
+            monitor_results::ActiveModel {
+                monitor_id: Set(monitor_id),
+                status: Set(if sequence % 2 == 0 {
+                    "up".into()
+                } else {
+                    "down".into()
+                }),
+                started_at: Set(timestamp.into()),
+                finished_at: Set(timestamp.into()),
+                duration_ms: Set(1),
+                latency_ms: Set(Some(sequence as f64)),
+                ..Default::default()
+            }
+            .insert(&ctx.db)
+            .await
+            .unwrap();
+        }
+
+        let stats = rollup_monitor_results(&ctx.db, Utc::now()).await.unwrap();
+        assert!(stats.buckets_upserted >= 1);
+        assert_eq!(stats.rows_aggregated, 5);
+
+        let buckets = monitor_results_hourly::Entity::find()
+            .filter(monitor_results_hourly::Column::MonitorId.eq(monitor_id))
+            .all(&ctx.db)
+            .await
+            .unwrap();
+        assert!(!buckets.is_empty());
+        let bucket = &buckets[0];
+        assert_eq!(bucket.total_checks, 5);
+        assert_eq!(bucket.up_checks, 3);
+        assert_eq!(bucket.down_checks, 2);
+
+        let uptime = uptime_for_monitor(&ctx.db, monitor_id, 24).await.unwrap();
+        assert_eq!(uptime.total_checks, 5);
+        assert_eq!(uptime.up_checks, 3);
+        assert_eq!(uptime.down_checks, 2);
     })
     .await;
 }

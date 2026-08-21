@@ -1,27 +1,38 @@
 //! CRUD e acionamento manual dos monitores.
 
-use axum::{extract::Query, http::StatusCode, response::IntoResponse};
+use axum::{extract::Query, http::HeaderMap, http::StatusCode, response::IntoResponse};
 use loco_rs::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set,
 };
 
 use crate::{
-    dtos::resources::{MonitorInput, MonitorsIndexQuery, PaginationQuery},
+    dtos::{
+        monitors::{
+            MonitorRunResponse, MonitorSnmpRunResponse, MonitorStats, MonitorUptimeResponse,
+            MonitorWithStats,
+        },
+        resources::{MonitorInput, MonitorsIndexQuery, PaginationQuery},
+    },
     models::{devices, monitor_results, monitors},
     services::{
         alerts::recovery,
+        audit::{
+            AuditAction, AuditActor, AuditChanges, AuditEntryInput, AuditService, ResourceType,
+        },
         maintenance::resource_cleanup::ResourceCleanupService,
         monitoring::{
             device_status,
             execution_guard::{
-                calculate_smart_timeout_seconds, try_acquire_monitor, try_acquire_snmp_device,
+                calculate_smart_timeout_seconds, effective_timeout_seconds, try_acquire_monitor,
+                try_acquire_snmp_device,
             },
             managed::{self, ProposedMonitor},
             presenter::{present_monitors, MonitorResultPresentation, RECENT_RESULTS_LIMIT},
             reachability,
             result_processor::process_result,
             runner::{run_monitor, RunOptions},
+            uptime::uptime_for_monitor,
         },
         preferences,
         shared::{
@@ -193,6 +204,7 @@ async fn index(
 
 async fn store(
     State(ctx): State<AppContext>,
+    headers: HeaderMap,
     Json(input): Json<MonitorInput>,
 ) -> AppResult<Response> {
     let (kind, name) = require_kind_name(&input)?;
@@ -239,8 +251,26 @@ async fn store(
     }
     .insert(&ctx.db)
     .await?;
-    let mut response = present_monitors(&ctx.db, vec![row], RECENT_RESULTS_LIMIT).await?;
-    Ok((StatusCode::CREATED, Json(response.remove(0))).into_response())
+    let mut response = present_monitors(&ctx.db, vec![row.clone()], RECENT_RESULTS_LIMIT).await?;
+    let created_response = response.remove(0);
+
+    let _ = AuditService::new(&ctx.db)
+        .log(
+            AuditActor::from_headers(&headers, &ctx.db)
+                .await
+                .unwrap_or_default(),
+            AuditEntryInput {
+                action: AuditAction::Create,
+                resource_type: ResourceType::Monitor,
+                resource_id: Some(row.id),
+                resource_label: Some(row.name.clone()),
+                description: Some(format!("Monitor '{}' ({}) criado", row.name, row.r#type)),
+                changes: None,
+            },
+        )
+        .await;
+
+    Ok((StatusCode::CREATED, Json(created_response)).into_response())
 }
 
 async fn show(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
@@ -263,18 +293,31 @@ async fn show(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<R
         .iter()
         .filter(|result| result.status == "up")
         .count();
-    let mut view = serde_json::to_value(present_monitors(&ctx.db, vec![row], 100).await?.remove(0))
+    let view = serde_json::to_value(present_monitors(&ctx.db, vec![row], 100).await?.remove(0))
         .map_err(|error| AppError::Internal(error.into()))?;
-    view["stats"] = serde_json::json!({
-        "avgLatency": (!latencies.is_empty()).then(|| (latencies.iter().sum::<f64>() / latencies.len() as f64).round()),
-        "minLatency": latencies.iter().copied().reduce(f64::min), "maxLatency": latencies.iter().copied().reduce(f64::max),
-        "lastLatency": latencies.first(), "uptimePercentage": if total_checks == 0 {100.0} else {(up_checks as f64 * 1000.0 / total_checks as f64).round() / 10.0},
-        "totalChecks": total_checks, "upChecks": up_checks });
-    Ok(format::json(view)?)
+    let stats = MonitorStats {
+        avg_latency: (!latencies.is_empty())
+            .then(|| (latencies.iter().sum::<f64>() / latencies.len() as f64).round() as i64),
+        min_latency: latencies.iter().copied().reduce(f64::min),
+        max_latency: latencies.iter().copied().reduce(f64::max),
+        last_latency: latencies.first().copied(),
+        uptime_percentage: if total_checks == 0 {
+            100.0
+        } else {
+            (up_checks as f64 * 1000.0 / total_checks as f64).round() / 10.0
+        },
+        total_checks,
+        up_checks,
+    };
+    Ok(format::json(MonitorWithStats {
+        monitor: view,
+        stats,
+    })?)
 }
 
 async fn update(
     State(ctx): State<AppContext>,
+    headers: HeaderMap,
     Path(id): Path<i64>,
     Json(input): Json<MonitorInput>,
 ) -> AppResult<Response> {
@@ -282,6 +325,9 @@ async fn update(
         .one(&ctx.db)
         .await?
         .ok_or_else(|| AppError::not_found("Monitor não encontrado"))?;
+    let old_response = present_monitors(&ctx.db, vec![current.clone()], RECENT_RESULTS_LIMIT)
+        .await?
+        .remove(0);
     // O monitor gerenciado aceita ajuste de intervalo e "Executar agora", mas
     // não troca de tipo, alvo, probe nem desativação. A guarda vem antes de
     // qualquer validação de payload: recusar por regra de negócio é mais
@@ -395,20 +441,73 @@ async fn update(
     if !enabled {
         recovery::resolve_alerts_for_monitor(&ctx, id, "Monitor desativado").await?;
     }
-    let mut output = present_monitors(&ctx.db, vec![row], RECENT_RESULTS_LIMIT).await?;
-    Ok(format::json(output.remove(0))?)
+    let mut output = present_monitors(&ctx.db, vec![row.clone()], RECENT_RESULTS_LIMIT).await?;
+    let new_response = output.remove(0);
+
+    let _ = AuditService::new(&ctx.db)
+        .log(
+            AuditActor::from_headers(&headers, &ctx.db)
+                .await
+                .unwrap_or_default(),
+            AuditEntryInput {
+                action: AuditAction::Update,
+                resource_type: ResourceType::Monitor,
+                resource_id: Some(row.id),
+                resource_label: Some(row.name.clone()),
+                description: Some(format!(
+                    "Monitor '{}' ({}) atualizado",
+                    row.name, row.r#type
+                )),
+                changes: Some(AuditChanges {
+                    old: serde_json::to_value(old_response).ok(),
+                    new: serde_json::to_value(new_response.clone()).ok(),
+                }),
+            },
+        )
+        .await;
+
+    Ok(format::json(new_response)?)
 }
 
-async fn destroy(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
+async fn destroy(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> AppResult<Response> {
     let current = monitors::Entity::find_by_id(id)
         .one(&ctx.db)
         .await?
         .ok_or_else(|| AppError::not_found("Monitor não encontrado"))?;
+    let old_response = present_monitors(&ctx.db, vec![current.clone()], RECENT_RESULTS_LIMIT)
+        .await?
+        .remove(0);
+    let old_name = current.name.clone();
+    let old_type = current.r#type.clone();
     managed::ensure_deletable(&current)?;
     // Resolver **antes** de apagar: o cleanup remove os `alert_events` do
     // monitor, e sem esta passagem a notificação de normalização nunca sairia.
     recovery::resolve_alerts_for_monitor(&ctx, id, "Monitor removido").await?;
     ResourceCleanupService::delete_monitor(&ctx.db, id).await?;
+
+    let _ = AuditService::new(&ctx.db)
+        .log(
+            AuditActor::from_headers(&headers, &ctx.db)
+                .await
+                .unwrap_or_default(),
+            AuditEntryInput {
+                action: AuditAction::Delete,
+                resource_type: ResourceType::Monitor,
+                resource_id: Some(id),
+                resource_label: Some(old_name.clone()),
+                description: Some(format!("Monitor '{}' ({}) excluído", old_name, old_type)),
+                changes: Some(AuditChanges {
+                    old: serde_json::to_value(old_response).ok(),
+                    new: None,
+                }),
+            },
+        )
+        .await;
+
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
@@ -440,10 +539,10 @@ async fn run(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Re
             for (monitor_id, result) in results {
                 process_result(&ctx, monitor_id, &result, None).await?;
             }
-            return Ok(format::json(serde_json::json!({
-                "message": "Coleta SNMP consolidada do dispositivo concluída com sucesso",
-                "result": selected,
-            }))?);
+            return Ok(format::json(MonitorSnmpRunResponse {
+                message: "Coleta SNMP consolidada do dispositivo concluída com sucesso".into(),
+                result: selected,
+            })?);
         }
     }
     let _guard = try_acquire_monitor(monitor.id).ok_or_else(|| {
@@ -455,16 +554,20 @@ async fn run(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Re
         &monitor.configuration,
         RunOptions {
             timeout_ms: Some(
-                calculate_smart_timeout_seconds(&monitor.r#type, monitor.interval_seconds) as u64
+                effective_timeout_seconds(monitor.timeout_seconds, monitor.interval_seconds) as u64
                     * 1000,
             ),
         },
     )
     .await?;
     process_result(&ctx, monitor.id, &result, monitor.probe_id).await?;
-    Ok(format::json(
-        serde_json::json!({"message": format!("Execução manual do monitor #{} concluída com sucesso", monitor.id), "result": result}),
-    )?)
+    Ok(format::json(MonitorRunResponse {
+        message: format!(
+            "Execução manual do monitor #{} concluída com sucesso",
+            monitor.id
+        ),
+        result,
+    })?)
 }
 
 async fn toggle(
@@ -542,6 +645,30 @@ async fn alerts(
     )?)
 }
 
+/// Uptime do monitor em uma janela de horas (padrão 24h).
+async fn uptime(
+    State(ctx): State<AppContext>,
+    Path(id): Path<i64>,
+    Query(query): Query<crate::dtos::resources::MonitorUptimeQuery>,
+) -> AppResult<Response> {
+    monitors::Entity::find_by_id(id)
+        .one(&ctx.db)
+        .await?
+        .ok_or_else(|| AppError::not_found("Monitor não encontrado"))?;
+    let hours = query.hours.map(|value| value.clamp(1, 720)).unwrap_or(24);
+    let stats = uptime_for_monitor(&ctx.db, id, hours).await?;
+    Ok(format::json(MonitorUptimeResponse {
+        monitor_id: id,
+        hours,
+        uptime_percentage: stats.uptime_percentage,
+        total_checks: stats.total_checks,
+        up_checks: stats.up_checks,
+        down_checks: stats.down_checks,
+        unknown_checks: stats.unknown_checks,
+        avg_latency_ms: stats.avg_latency_ms,
+    })?)
+}
+
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("/monitors")
@@ -552,6 +679,7 @@ pub fn routes() -> Routes {
         .add("/{id}/disable", post(disable))
         .add("/{id}/results", get(results))
         .add("/{id}/alerts", get(alerts))
+        .add("/{id}/uptime", get(uptime))
 }
 
 #[cfg(test)]

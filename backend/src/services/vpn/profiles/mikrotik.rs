@@ -6,6 +6,7 @@ use super::contract::{
     artifact_header, artifact_summary, ArtifactDelivery, GeneratedArtifact, PeerConfigContext,
     VpnProfileGenerator, PERSISTENT_KEEPALIVE_SECONDS,
 };
+use crate::services::vpn::shell_escape::{escape_routeros, sanitize_file_name};
 
 pub const INTERFACE_NAME: &str = "wg-netmonitor";
 /// Porta local padrão do WireGuard no RouterOS.
@@ -25,6 +26,7 @@ impl MikrotikProfileGenerator {
     /// Limpeza do que uma execução anterior tenha deixado para trás. Sem isso,
     /// uma segunda tentativa esbarra em "already have interface with such name".
     fn cleanup_section(context: &PeerConfigContext) -> Vec<String> {
+        let peer_ip_address = escape_routeros(&context.peer_ip_address);
         vec![
             "# Limpa uma instalacao anterior (nao falha se nao houver nada)".to_string(),
             format!("/interface/wireguard/peers/remove [find comment=\"{TAG}\"]"),
@@ -34,7 +36,7 @@ impl MikrotikProfileGenerator {
             // acima, deixando um IP duplicado na VPN.
             format!(
                 "/ip/address/remove [find address=\"{}/{}\"]",
-                context.peer_ip_address,
+                peer_ip_address,
                 context.prefix_length()
             ),
             format!("/interface/wireguard/remove [find name=\"{INTERFACE_NAME}\"]"),
@@ -50,7 +52,7 @@ impl MikrotikProfileGenerator {
             "# SNMP (community cadastrada no NetMonitor)".to_string(),
             format!(
                 "/snmp/community/set [find default=yes] addresses={} name=\"{}\"",
-                context.vpn_cidr,
+                escape_routeros(&context.vpn_cidr),
                 context.sanitized_community()
             ),
             "/snmp/set enabled=yes contact=\"NetMonitor\"".to_string(),
@@ -94,6 +96,11 @@ impl VpnProfileGenerator for MikrotikProfileGenerator {
     }
 
     fn generate(&self, context: &PeerConfigContext) -> GeneratedArtifact {
+        let client_private_key = escape_routeros(&context.client_private_key);
+        let peer_ip_address = escape_routeros(&context.peer_ip_address);
+        let server_public_key = escape_routeros(&context.server_public_key);
+        let endpoint_host = escape_routeros(&context.endpoint_host);
+        let vpn_cidr = escape_routeros(&context.vpn_cidr);
         let mut lines = artifact_header(context);
         lines.push(String::new());
         lines.extend(Self::cleanup_section(context));
@@ -103,28 +110,28 @@ impl VpnProfileGenerator for MikrotikProfileGenerator {
             format!(
                 "/interface/wireguard/add name={INTERFACE_NAME} listen-port={LOCAL_LISTEN_PORT} \\"
             ),
-            format!(
-                "    private-key=\"{}\" comment=\"{TAG}\"",
-                context.client_private_key
-            ),
+            format!("    private-key=\"{client_private_key}\" comment=\"{TAG}\""),
             format!(
                 "/ip/address/add address={}/{} interface={INTERFACE_NAME} comment=\"{TAG}\"",
-                context.peer_ip_address,
+                peer_ip_address,
                 context.prefix_length()
             ),
             String::new(),
             format!("/interface/wireguard/peers/add interface={INTERFACE_NAME} \\"),
-            format!("    public-key=\"{}\" \\", context.server_public_key),
+            format!("    public-key=\"{server_public_key}\" \\"),
         ]);
         if let Some(preshared_key) = context.preshared_key.as_deref() {
-            lines.push(format!("    preshared-key=\"{preshared_key}\" \\"));
+            lines.push(format!(
+                "    preshared-key=\"{}\" \\",
+                escape_routeros(preshared_key)
+            ));
         }
         lines.extend([
             format!(
-                "    endpoint-address={} endpoint-port={} \\",
-                context.endpoint_host, context.endpoint_port
+                "    endpoint-address={endpoint_host} endpoint-port={} \\",
+                context.endpoint_port
             ),
-            format!("    allowed-address={} \\", context.vpn_cidr),
+            format!("    allowed-address={vpn_cidr} \\"),
             format!("    persistent-keepalive={PERSISTENT_KEEPALIVE_SECONDS}s comment=\"{TAG}\""),
             String::new(),
             self.firewall_hints(context),
@@ -140,7 +147,7 @@ impl VpnProfileGenerator for MikrotikProfileGenerator {
             profile: self.profile().to_string(),
             label: self.label().to_string(),
             delivery: ArtifactDelivery::Copy,
-            file_name: format!("netmonitor-{}.rsc", context.peer_name),
+            file_name: format!("netmonitor-{}.rsc", sanitize_file_name(&context.peer_name)),
             language: "routeros".to_string(),
             content: format!("{}\n", lines.join("\n")),
             instructions: vec![
@@ -206,5 +213,18 @@ mod tests {
         let artifact = MikrotikProfileGenerator.generate(&context);
         assert_eq!(artifact.file_name, "netmonitor-Roteador São João.rsc");
         assert!(artifact.content.contains("Roteador Sao Joao"));
+    }
+
+    #[test]
+    fn script_com_strings_maliciosas_bate_com_o_snapshot() {
+        let mut context = contexto();
+        context.client_private_key = "CHAVE\n[Peer]\nInjetado".into();
+        context.server_public_key = "PUB\nInjetado".into();
+        context.preshared_key = Some("PSK\nInjetado".into());
+        context.peer_ip_address = "10.8.0.11\nInjetado".into();
+        context.endpoint_host = "vpn.exemplo.com\nInjetado".into();
+        context.vpn_cidr = "10.8.0.0/24\nInjetado".into();
+        context.peer_name = "filial\n../etc".into();
+        insta::assert_snapshot!(MikrotikProfileGenerator.generate(&context).content);
     }
 }

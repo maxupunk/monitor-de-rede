@@ -454,7 +454,7 @@ async fn a_leitura_de_cpu_do_snmp_passa_a_ser_avaliavel_por_regra() {
     // Antes desta fase o SNMP publicava `usagePercent`/`usedPercent` soltos, e
     // regra alguma podia falar sobre eles. Agora a mesma leitura vira o campo
     // de dispositivo, o que é o que torna o alerta de CPU válido para o parque.
-    use backend::services::alerts::datasets::monitor_result;
+    use backend::services::alerts::{baseline, datasets::monitor_result};
     use backend::services::monitoring::contracts::{CheckMetric, CheckResult, MonitorStatus};
 
     let agora = chrono::Utc::now();
@@ -474,6 +474,7 @@ async fn a_leitura_de_cpu_do_snmp_passa_a_ser_avaliavel_por_regra() {
             }],
             data: serde_json::json!({}),
         },
+        &baseline::MonitorBaseline::default(),
     );
     assert_eq!(
         facts[fields::CPU_USAGE_PERCENT],

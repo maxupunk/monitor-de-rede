@@ -93,6 +93,16 @@ pub fn try_acquire_port_scan(ip: IpAddr) -> Option<PortScanExecutionGuard> {
     }
 }
 
+/// Converte o `timeout_seconds` salvo no monitor para um valor efetivo,
+/// respeitando um mínimo de 1 s e um máximo de `interval - 1` (para não
+/// ultrapassar o próximo ciclo).
+#[must_use]
+pub fn effective_timeout_seconds(timeout_seconds: i32, interval_seconds: i32) -> i32 {
+    let interval = interval_seconds.max(1);
+    let max_allowed = (interval - 1).max(1);
+    timeout_seconds.max(1).min(max_allowed)
+}
+
 /// Calcula de forma inteligente o timeout ótimo em segundos com base no tipo
 /// de monitor e no intervalo de verificação configurado.
 #[must_use]
@@ -179,5 +189,23 @@ mod tests {
         assert_eq!(calculate_smart_timeout_seconds("http", 10), 5);
         assert_eq!(calculate_smart_timeout_seconds("http", 15), 7);
         assert_eq!(calculate_smart_timeout_seconds("http", 60), 10);
+    }
+
+    #[test]
+    fn timeout_efetivo_respeita_minimo_e_intervalo() {
+        // Menor que 1 s vira 1 s.
+        assert_eq!(effective_timeout_seconds(0, 60), 1);
+        assert_eq!(effective_timeout_seconds(-5, 60), 1);
+
+        // Dentro do intervalo é preservado.
+        assert_eq!(effective_timeout_seconds(5, 60), 5);
+        assert_eq!(effective_timeout_seconds(10, 60), 10);
+
+        // Nunca ultrapassa interval - 1.
+        assert_eq!(effective_timeout_seconds(60, 60), 59);
+        assert_eq!(effective_timeout_seconds(120, 60), 59);
+
+        // Intervalo curto: teto é 1 s.
+        assert_eq!(effective_timeout_seconds(5, 2), 1);
     }
 }

@@ -1,6 +1,7 @@
 pub mod _entities;
 pub mod alert_events;
 pub mod alert_rules;
+pub mod audit_logs;
 pub mod device_interfaces;
 pub mod device_links;
 pub mod devices;
@@ -10,8 +11,10 @@ pub mod dns_servers;
 pub mod event_outbox;
 /// Entidades do banco de logs, separado do principal.
 pub mod logs;
+pub mod maintenance_windows;
 pub mod metrics;
 pub mod monitor_results;
+pub mod monitor_results_hourly;
 pub mod monitors;
 pub mod networks;
 pub mod notification_outbox;

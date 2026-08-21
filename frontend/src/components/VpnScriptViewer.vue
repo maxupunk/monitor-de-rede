@@ -43,8 +43,10 @@
           <div class="text-caption text-medium-emphasis mb-3">
             No app, toque em "+" › "Ler a partir do código QR".
           </div>
-          <!-- eslint-disable-next-line vue/no-v-html -->
-          <div class="qr-wrapper d-inline-block pa-3 bg-white rounded-lg" v-html="qrCode"></div>
+          <div
+            class="qr-wrapper d-inline-block pa-3 bg-white rounded-lg"
+            v-html="sanitizedQrCode"
+          ></div>
         </v-sheet>
 
         <v-alert
@@ -128,7 +130,8 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import type { VpnArtifact } from '@/stores/vpn'
+import DOMPurify from 'dompurify'
+import { useVpnStore, type VpnArtifact } from '@/stores/vpn'
 
 /** Uma aba do visualizador: o artefato principal ou uma das variantes de instalação. */
 interface ArtifactDocument {
@@ -150,10 +153,22 @@ const emit = defineEmits<{
   (e: 'update:modelValue', value: boolean): void
 }>()
 
+const vpnStore = useVpnStore()
+
 const copied = ref(false)
 const activeTab = ref('base')
 const summaryOpen = ref<string | undefined>()
 const stepIcons = ['mdi-numeric-1-circle', 'mdi-numeric-2-circle', 'mdi-numeric-3-circle']
+
+/** Limpa o artefato sensível da store quando o visualizador fecha. */
+watch(
+  () => props.modelValue,
+  (isOpen) => {
+    if (!isOpen) {
+      vpnStore.lastArtifact = null
+    }
+  }
+)
 
 const hasPrivateKey = computed(
   () => !!props.artifact && !props.artifact.content.includes('CHAVE-PRIVADA-INDISPONIVEL')
@@ -161,6 +176,14 @@ const hasPrivateKey = computed(
 
 /** O QR Code chega junto do artefato — a chave privada só existe naquela resposta. */
 const qrCode = computed(() => props.artifact?.qrSvg || null)
+
+/** QR Code sanitizado antes de entrar no DOM — defesa em profundidade. */
+const sanitizedQrCode = computed(() => {
+  if (!qrCode.value) return null
+  return DOMPurify.sanitize(qrCode.value, {
+    USE_PROFILES: { svg: true, svgFilters: true },
+  })
+})
 
 /** Aba do artefato principal — arquivo de configuração ou script do próprio equipamento. */
 const baseDocument = computed<ArtifactDocument | null>(() => {

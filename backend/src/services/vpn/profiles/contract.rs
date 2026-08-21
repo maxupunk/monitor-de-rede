@@ -46,8 +46,14 @@ pub struct PeerConfigContext {
 impl PeerConfigContext {
     /// Prefixo do CIDR como texto (`24`), usado em `Address = <ip>/<prefixo>`.
     #[must_use]
-    pub fn prefix_length(&self) -> &str {
-        self.vpn_cidr.split('/').nth(1).unwrap_or("24")
+    pub fn prefix_length(&self) -> String {
+        self.vpn_cidr
+            .split('/')
+            .nth(1)
+            .unwrap_or("24")
+            .chars()
+            .filter(|c| c.is_ascii_digit())
+            .collect::<String>()
     }
 
     #[must_use]
@@ -223,17 +229,28 @@ pub fn artifact_summary(context: &PeerConfigContext) -> Vec<ArtifactSummaryItem>
         item("Dispositivo", context.peer_name.clone()),
         item(
             "IP fixo na VPN",
-            format!("{}/{}", context.peer_ip_address, context.prefix_length()),
+            format!(
+                "{}/{}",
+                crate::services::vpn::shell_escape::strip_controls(&context.peer_ip_address),
+                context.prefix_length()
+            ),
         ),
         item(
             "Endpoint do servidor",
-            format!("{}:{}", context.endpoint_host, context.endpoint_port),
+            format!(
+                "{}:{}",
+                crate::services::vpn::shell_escape::strip_controls(&context.endpoint_host),
+                context.endpoint_port
+            ),
         ),
         item(
             "Chave pública do servidor",
-            context.server_public_key.clone(),
+            crate::services::vpn::shell_escape::strip_controls(&context.server_public_key),
         ),
-        item("Rotas no túnel (AllowedIPs)", context.vpn_cidr.clone()),
+        item(
+            "Rotas no túnel (AllowedIPs)",
+            crate::services::vpn::shell_escape::strip_controls(&context.vpn_cidr),
+        ),
         item("NetMonitor na VPN", context.server_vpn_address.clone()),
         item("MTU", context.mtu.to_string()),
         item("Keepalive", format!("{PERSISTENT_KEEPALIVE_SECONDS}s")),

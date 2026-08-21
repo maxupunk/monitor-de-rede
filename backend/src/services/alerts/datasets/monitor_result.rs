@@ -3,7 +3,7 @@
 use serde_json::{json, Value};
 
 use crate::services::{
-    alerts::{contracts::AlertDataset, fields},
+    alerts::{baseline, contracts::AlertDataset, fields},
     monitoring::contracts::CheckResult,
 };
 
@@ -47,7 +47,11 @@ fn field_for(metric_name: &str) -> Option<&'static str> {
 /// distinguir "o monitor não mede latência" de "o campo nem existe": uma regra
 /// de latência aplicada a um monitor que não a produz nunca dispara.
 #[must_use]
-pub fn build(monitor_type: &str, result: &CheckResult) -> AlertDataset {
+pub fn build(
+    monitor_type: &str,
+    result: &CheckResult,
+    baseline: &baseline::MonitorBaseline,
+) -> AlertDataset {
     let mut dataset = AlertDataset::new();
     dataset.insert(fields::STATUS.into(), json!(result.status.as_str()));
     dataset.insert("success".into(), json!(result.success));
@@ -76,6 +80,35 @@ pub fn build(monitor_type: &str, result: &CheckResult) -> AlertDataset {
                 dataset.insert(key.clone(), value.clone());
             }
         }
+    }
+
+    let latency_ms = dataset
+        .get(fields::LATENCY_MS)
+        .and_then(|value| value.as_f64());
+    let packet_loss = dataset
+        .get(fields::PACKET_LOSS)
+        .and_then(|value| value.as_f64());
+    let status = dataset.get(fields::STATUS).and_then(|value| value.as_str());
+    let uptime_percent = status.map(|value| if value == "up" { 100.0 } else { 0.0 });
+
+    let enriched = baseline::with_current_value(baseline, latency_ms, packet_loss, uptime_percent);
+    if let Some(value) = enriched.latency_baseline_ms {
+        dataset.insert(fields::LATENCY_BASELINE_MS.into(), json!(value));
+    }
+    if let Some(value) = enriched.latency_deviation_percent {
+        dataset.insert(fields::LATENCY_DEVIATION_PERCENT.into(), json!(value));
+    }
+    if let Some(value) = enriched.packet_loss_baseline_percent {
+        dataset.insert(fields::PACKET_LOSS_BASELINE_PERCENT.into(), json!(value));
+    }
+    if let Some(value) = enriched.packet_loss_deviation_percent {
+        dataset.insert(fields::PACKET_LOSS_DEVIATION_PERCENT.into(), json!(value));
+    }
+    if let Some(value) = enriched.uptime_baseline_percent {
+        dataset.insert(fields::UPTIME_BASELINE_PERCENT.into(), json!(value));
+    }
+    if let Some(value) = enriched.uptime_deviation_percent {
+        dataset.insert(fields::UPTIME_DEVIATION_PERCENT.into(), json!(value));
     }
 
     dataset
@@ -109,6 +142,10 @@ mod tests {
         }
     }
 
+    fn sem_baseline() -> baseline::MonitorBaseline {
+        baseline::MonitorBaseline::default()
+    }
+
     #[test]
     fn latency_tem_precedencia_sobre_response_time() {
         let facts = build(
@@ -117,6 +154,7 @@ mod tests {
                 vec![metrica("latency", 12.0), metrica("response_time", 99.0)],
                 json!({}),
             ),
+            &sem_baseline(),
         );
         assert_eq!(facts[fields::LATENCY_MS], json!(12.0));
     }
@@ -126,13 +164,14 @@ mod tests {
         let facts = build(
             "http",
             &resultado(vec![metrica("response_time", 99.0)], json!({})),
+            &sem_baseline(),
         );
         assert_eq!(facts[fields::LATENCY_MS], json!(99.0));
     }
 
     #[test]
     fn latency_ausente_e_null_explicito_e_nao_chave_faltando() {
-        let facts = build("tcp", &resultado(vec![], json!({})));
+        let facts = build("tcp", &resultado(vec![], json!({})), &sem_baseline());
         assert_eq!(facts.get(fields::LATENCY_MS), Some(&Value::Null));
     }
 
@@ -144,6 +183,7 @@ mod tests {
                 vec![metrica("status_code", 503.0)],
                 json!({ "statusCode": 200, "redirects": 2 }),
             ),
+            &sem_baseline(),
         );
         // A métrica já ocupou `statusCode`: o `data` não a sobrepõe.
         assert_eq!(facts[fields::STATUS_CODE], json!(503.0));
@@ -152,16 +192,44 @@ mod tests {
 
     #[test]
     fn metrica_desconhecida_e_ignorada() {
-        let facts = build("ping", &resultado(vec![metrica("jitter", 3.0)], json!({})));
+        let facts = build(
+            "ping",
+            &resultado(vec![metrica("jitter", 3.0)], json!({})),
+            &sem_baseline(),
+        );
         assert!(!facts.contains_key("jitter"));
     }
 
     #[test]
     fn publica_status_duracao_e_tipo() {
-        let facts = build("ping", &resultado(vec![], json!({})));
+        let facts = build("ping", &resultado(vec![], json!({})), &sem_baseline());
         assert_eq!(facts[fields::STATUS], json!("up"));
         assert_eq!(facts[fields::DURATION_MS], json!(42));
         assert_eq!(facts["type"], json!("ping"));
         assert_eq!(facts["success"], json!(true));
+    }
+
+    #[test]
+    fn baseline_e_enriquecida_no_dataset() {
+        let baseline = baseline::MonitorBaseline {
+            latency_baseline_ms: Some(100.0),
+            packet_loss_baseline_percent: Some(2.0),
+            uptime_baseline_percent: Some(99.9),
+            ..Default::default()
+        };
+        let facts = build(
+            "ping",
+            &resultado(
+                vec![metrica("latency", 150.0), metrica("packet_loss", 5.0)],
+                json!({}),
+            ),
+            &baseline,
+        );
+        assert_eq!(facts[fields::LATENCY_BASELINE_MS], json!(100.0));
+        assert_eq!(facts[fields::LATENCY_DEVIATION_PERCENT], json!(50.0));
+        assert_eq!(facts[fields::PACKET_LOSS_BASELINE_PERCENT], json!(2.0));
+        assert_eq!(facts[fields::PACKET_LOSS_DEVIATION_PERCENT], json!(3.0));
+        assert_eq!(facts[fields::UPTIME_BASELINE_PERCENT], json!(99.9));
+        assert_eq!(facts[fields::UPTIME_DEVIATION_PERCENT], json!(0.0));
     }
 }

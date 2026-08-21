@@ -18,6 +18,9 @@ use crate::{
     dtos::{optional_body, resources::ProbeInput},
     models::probes,
     services::{
+        audit::{
+            AuditAction, AuditActor, AuditChanges, AuditEntryInput, AuditService, ResourceType,
+        },
         events::EventBus,
         maintenance::resource_cleanup::ResourceCleanupService,
         probes::{
@@ -160,6 +163,7 @@ async fn index(State(ctx): State<AppContext>) -> AppResult<Response> {
 }
 async fn store(
     State(ctx): State<AppContext>,
+    headers: HeaderMap,
     Json(input): Json<ProbeInput>,
 ) -> AppResult<Response> {
     let name = input
@@ -187,6 +191,23 @@ async fn store(
     }
     .insert(&ctx.db)
     .await?;
+
+    let _ = AuditService::new(&ctx.db)
+        .log(
+            AuditActor::from_headers(&headers, &ctx.db)
+                .await
+                .unwrap_or_default(),
+            AuditEntryInput {
+                action: AuditAction::Create,
+                resource_type: ResourceType::Probe,
+                resource_id: Some(row.id),
+                resource_label: Some(row.name.clone()),
+                description: Some(format!("Probe '{}' criado", row.name)),
+                changes: None,
+            },
+        )
+        .await;
+
     Ok((
         StatusCode::CREATED,
         Json(ProbeResponse::from_model(row, Some(token))),
@@ -202,49 +223,99 @@ async fn show(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<R
 }
 async fn update(
     State(ctx): State<AppContext>,
+    headers: HeaderMap,
     Path(id): Path<i64>,
     Json(input): Json<ProbeInput>,
 ) -> AppResult<Response> {
-    let current = probes::Entity::find_by_id(id)
+    let old = probes::Entity::find_by_id(id)
         .one(&ctx.db)
         .await?
         .ok_or_else(|| AppError::not_found("Probe não encontrado"))?;
-    let previous_status = current.status.clone();
+    let old_for_audit = old.clone();
+    let previous_status = old.status.clone();
     let row = probes::ActiveModel {
         id: Set(id),
-        site_id: Set(input.site_id.or(current.site_id)),
+        site_id: Set(input.site_id.or(old.site_id)),
         name: Set(input
             .name
             .as_deref()
             .map(str::trim)
             .filter(|v| !v.is_empty())
-            .unwrap_or(&current.name)
+            .unwrap_or(&old.name)
             .into()),
-        status: Set(input.status.unwrap_or(current.status)),
-        version: Set(input.version.or(current.version)),
-        configuration: Set(input.configuration.or(current.configuration)),
+        status: Set(input.status.unwrap_or(old.status)),
+        version: Set(input.version.or(old.version)),
+        configuration: Set(input.configuration.or(old.configuration)),
         ..Default::default()
     }
     .update(&ctx.db)
     .await?;
     emit_status_if_changed(&ctx, &row, &previous_status).await;
+
+    let _ = AuditService::new(&ctx.db)
+        .log(
+            AuditActor::from_headers(&headers, &ctx.db)
+                .await
+                .unwrap_or_default(),
+            AuditEntryInput {
+                action: AuditAction::Update,
+                resource_type: ResourceType::Probe,
+                resource_id: Some(row.id),
+                resource_label: Some(row.name.clone()),
+                description: Some(format!("Probe '{}' atualizado", row.name)),
+                changes: Some(AuditChanges {
+                    old: serde_json::to_value(ProbeResponse::from(old_for_audit)).ok(),
+                    new: serde_json::to_value(ProbeResponse::from(row.clone())).ok(),
+                }),
+            },
+        )
+        .await;
+
     Ok(format::json(ProbeResponse::from(row))?)
 }
-async fn destroy(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
-    probes::Entity::find_by_id(id)
+async fn destroy(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> AppResult<Response> {
+    let old = probes::Entity::find_by_id(id)
         .one(&ctx.db)
         .await?
         .ok_or_else(|| AppError::not_found("Probe não encontrado"))?;
     ResourceCleanupService::delete_probe(&ctx.db, id).await?;
+
+    let _ = AuditService::new(&ctx.db)
+        .log(
+            AuditActor::from_headers(&headers, &ctx.db)
+                .await
+                .unwrap_or_default(),
+            AuditEntryInput {
+                action: AuditAction::Delete,
+                resource_type: ResourceType::Probe,
+                resource_id: Some(id),
+                resource_label: Some(old.name.clone()),
+                description: Some(format!("Probe '{}' excluído", old.name)),
+                changes: Some(AuditChanges {
+                    old: serde_json::to_value(ProbeResponse::from(old)).ok(),
+                    new: None,
+                }),
+            },
+        )
+        .await;
+
     Ok(StatusCode::NO_CONTENT.into_response())
 }
-async fn revoke(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
-    let row = probes::Entity::find_by_id(id)
+async fn revoke(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> AppResult<Response> {
+    let old = probes::Entity::find_by_id(id)
         .one(&ctx.db)
         .await?
         .ok_or_else(|| AppError::not_found("Probe não encontrado"))?;
-    let previous_status = row.status.clone();
-    let mut active: probes::ActiveModel = row.into();
+    let previous_status = old.status.clone();
+    let mut active: probes::ActiveModel = old.clone().into();
     active.status = Set(probes::STATUS_REVOKED.into());
     active.revoked_at = Set(Some(Utc::now().into()));
     let saved = active.update(&ctx.db).await?;
@@ -252,6 +323,26 @@ async fn revoke(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult
     // acesso só produziria resultado que nunca chega de volta.
     dispatcher::clear_tasks_for_probe(&ctx.db, saved.id).await?;
     emit_status_if_changed(&ctx, &saved, &previous_status).await;
+
+    let _ = AuditService::new(&ctx.db)
+        .log(
+            AuditActor::from_headers(&headers, &ctx.db)
+                .await
+                .unwrap_or_default(),
+            AuditEntryInput {
+                action: AuditAction::Update,
+                resource_type: ResourceType::Probe,
+                resource_id: Some(saved.id),
+                resource_label: Some(saved.name.clone()),
+                description: Some(format!("Probe '{}' revogado", saved.name)),
+                changes: Some(AuditChanges {
+                    old: serde_json::to_value(ProbeResponse::from(old)).ok(),
+                    new: serde_json::to_value(ProbeResponse::from(saved.clone())).ok(),
+                }),
+            },
+        )
+        .await;
+
     Ok(format::json(ProbeResponse::from(saved))?)
 }
 async fn test(Path(id): Path<i64>) -> AppResult<Response> {

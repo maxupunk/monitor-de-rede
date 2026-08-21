@@ -296,10 +296,36 @@ pub struct ProvisionLoggingResponse {
     pub confirmed: Option<bool>,
 }
 
+/// Resposta do vínculo/desvínculo manual de uma origem de syslog.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct BindSourceResponse {
+    pub bind_key: String,
+    #[ts(type = "number | null")]
+    pub device_id: Option<i64>,
+}
+
 /// Filtros do live tail (`GET /api/logs/stream`).
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogStreamQuery {
     pub device_id: Option<i64>,
     pub severity: Option<i16>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bind_source_response_serializa_em_camel_case() {
+        let response = BindSourceResponse {
+            bind_key: "192.168.1.1".into(),
+            device_id: Some(7),
+        };
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["bindKey"], "192.168.1.1");
+        assert_eq!(json["deviceId"], 7);
+    }
 }

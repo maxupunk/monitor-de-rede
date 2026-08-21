@@ -5,7 +5,11 @@
 
 use crate::services::{
     shared::errors::AppResult,
-    vpn::{cidr::parse_cidr, peer_name::sanitize_for_config},
+    vpn::{
+        cidr::parse_cidr,
+        peer_name::sanitize_for_config,
+        shell_escape::{escape_wg_value, strip_controls},
+    },
 };
 
 #[derive(Debug, Clone)]
@@ -34,14 +38,14 @@ pub struct PeerEntryInput {
 /// Ficam em `PostUp`/`PostDown` porque `wg syncconf` (hot-reload) só aplica
 /// peers — o firewall é montado quando a interface sobe.
 fn build_isolation_rules(input: &ServerInterfaceInput) -> Vec<String> {
-    let iface = &input.interface_name;
+    let iface = strip_controls(&input.interface_name);
     if input.allow_peer_to_peer {
         return vec![
             format!("PostUp = iptables -A FORWARD -i {iface} -o {iface} -j ACCEPT"),
             format!("PostDown = iptables -D FORWARD -i {iface} -o {iface} -j ACCEPT"),
         ];
     }
-    let address = &input.address;
+    let address = strip_controls(&input.address);
     vec![
         format!("PostUp = iptables -A FORWARD -i {iface} -d {address} -j ACCEPT"),
         format!("PostUp = iptables -A FORWARD -i {iface} -o {iface} -j DROP"),
@@ -55,11 +59,13 @@ fn build_isolation_rules(input: &ServerInterfaceInput) -> Vec<String> {
 /// Falha quando o CIDR do servidor é inválido.
 pub fn build_interface_section(input: &ServerInterfaceInput) -> AppResult<String> {
     let prefix_length = parse_cidr(&input.cidr)?.prefix_length;
+    let address = strip_controls(&input.address);
+    let private_key = escape_wg_value(&input.private_key);
     let mut lines = vec![
         "[Interface]".to_string(),
-        format!("Address = {}/{prefix_length}", input.address),
+        format!("Address = {address}/{prefix_length}"),
         format!("ListenPort = {}", input.listen_port),
-        format!("PrivateKey = {}", input.private_key),
+        format!("PrivateKey = {private_key}"),
         format!("MTU = {}", input.mtu),
     ];
     lines.extend(build_isolation_rules(input));
@@ -69,16 +75,18 @@ pub fn build_interface_section(input: &ServerInterfaceInput) -> AppResult<String
 #[must_use]
 pub fn build_peer_section(peer: &PeerEntryInput) -> String {
     let safe_name = sanitize_for_config(&peer.name);
+    let public_key = escape_wg_value(&peer.public_key);
+    let ip_address = strip_controls(&peer.ip_address);
     let mut lines = vec![
         format!("# {safe_name}"),
         "[Peer]".to_string(),
-        format!("PublicKey = {}", peer.public_key),
+        format!("PublicKey = {public_key}"),
     ];
     if let Some(preshared_key) = peer.preshared_key.as_deref().filter(|key| !key.is_empty()) {
-        lines.push(format!("PresharedKey = {preshared_key}"));
+        lines.push(format!("PresharedKey = {}", escape_wg_value(preshared_key)));
     }
     // `/32`: cada peer só pode originar tráfego do próprio endereço da VPN.
-    lines.push(format!("AllowedIPs = {}/32", peer.ip_address));
+    lines.push(format!("AllowedIPs = {ip_address}/32"));
     lines.join("\n")
 }
 
@@ -214,5 +222,20 @@ mod tests {
         )
         .unwrap();
         insta::assert_snapshot!(conf);
+    }
+
+    #[test]
+    fn chaves_e_ip_sao_escapados_na_secao_do_peer() {
+        let conf = build_peer_section(&PeerEntryInput {
+            name: "filial-01".into(),
+            public_key: "PUB\n[Peer]\nInjetado".into(),
+            preshared_key: Some("PSK\nInjetado".into()),
+            ip_address: "10.8.0.11\nInjetado".into(),
+            enabled: true,
+        });
+        assert!(!conf.contains("\nInjetado"));
+        assert!(conf.contains("PublicKey = PUB[Peer]Injetado"));
+        assert!(conf.contains("PresharedKey = PSKInjetado"));
+        assert!(conf.contains("AllowedIPs = 10.8.0.11Injetado/32"));
     }
 }

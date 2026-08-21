@@ -120,6 +120,8 @@ pub enum SuppressReason {
     Cooldown,
     /// O pai do dispositivo está em alerta e explica a queda do filho.
     Inhibited,
+    /// Há uma janela de manutenção agendada para o site ou dispositivo.
+    Maintenance,
 }
 
 impl SuppressReason {
@@ -130,6 +132,7 @@ impl SuppressReason {
             Self::Unannounced => "unannounced",
             Self::Cooldown => "cooldown",
             Self::Inhibited => "inhibited",
+            Self::Maintenance => "maintenance",
         }
     }
 }
@@ -252,13 +255,21 @@ pub struct DeliveryInput {
     pub group_last_sent_at: Option<DateTime<Utc>>,
     /// Há silêncio vigente pedido pelo operador para este alerta.
     pub silenced: bool,
+    /// Há janela de manutenção vigente para o site ou dispositivo.
+    pub under_maintenance: bool,
     pub now: DateTime<Utc>,
 }
 
 /// Decide o destino de uma notificação. Pura: mesma entrada, mesma saída.
 #[must_use]
 pub fn decide(input: &DeliveryInput) -> Decision {
-    // 1. Silêncio pedido pelo operador vence tudo, inclusive a boa notícia:
+    // 1. Janela de manutenção vence tudo: o operador agendou o silêncio antes
+    //    do incidente acontecer.
+    if input.under_maintenance {
+        return Decision::Suppress(SuppressReason::Maintenance);
+    }
+
+    // 2. Silêncio pedido pelo operador vence o resto, inclusive a boa notícia:
     //    quem silenciou não quer saber nem que voltou.
     if input.silenced {
         return Decision::Suppress(SuppressReason::Silenced);
@@ -342,6 +353,7 @@ mod tests {
             log: DeliveryLog::default(),
             group_last_sent_at: None,
             silenced: false,
+            under_maintenance: false,
             now: t0(),
         }
     }
@@ -386,6 +398,24 @@ mod tests {
                 decide(&input),
                 Decision::Suppress(SuppressReason::Silenced),
                 "{kind} furou o silêncio"
+            );
+        }
+    }
+
+    #[test]
+    fn janela_de_manutencao_suprime_todos_os_tipos() {
+        for kind in [
+            NotificationKind::Problem,
+            NotificationKind::Flapping,
+            NotificationKind::Resolved,
+        ] {
+            let mut input = entrada(kind);
+            input.under_maintenance = true;
+            input.log.announced = true;
+            assert_eq!(
+                decide(&input),
+                Decision::Suppress(SuppressReason::Maintenance),
+                "{kind} furou a manutenção"
             );
         }
     }

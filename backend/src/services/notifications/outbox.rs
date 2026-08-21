@@ -32,6 +32,7 @@ use crate::{
     models::{devices, notification_outbox, sites},
     services::{
         alerts::inhibition,
+        maintenance_windows::is_under_maintenance,
         notifications::{
             contracts::{NotificationMessage, Severity},
             formatter,
@@ -133,6 +134,13 @@ pub async fn enqueue(ctx: &AppContext, request: NotificationRequest) -> AppResul
         request.device_id,
     );
     let digest = DigestPolicy::from_env();
+    let under_maintenance = is_under_maintenance(
+        &ctx.db,
+        device.as_ref().and_then(|device| device.site_id),
+        request.device_id,
+        now,
+    )
+    .await?;
 
     let decision = policy::decide(&DeliveryInput {
         kind: request.kind,
@@ -148,6 +156,7 @@ pub async fn enqueue(ctx: &AppContext, request: NotificationRequest) -> AppResul
         .await?,
         group_last_sent_at: group_last_sent_at(&ctx.db, &group).await?,
         silenced: request.silenced,
+        under_maintenance,
         now,
     });
 

@@ -1,0 +1,37 @@
+---
+source: src/services/vpn/profiles/mikrotik.rs
+expression: MikrotikProfileGenerator.generate(&context).content
+---
+# === NetMonitor - WireGuard - filial ../etc ===
+
+# Limpa uma instalacao anterior (nao falha se nao houver nada)
+/interface/wireguard/peers/remove [find comment="NetMonitor"]
+/ip/address/remove [find comment="NetMonitor"]
+/ip/address/remove [find address="10.8.0.11Injetado/24"]
+/interface/wireguard/remove [find name="wg-netmonitor"]
+
+# Interface WireGuard e IP fixo dentro da VPN
+/interface/wireguard/add name=wg-netmonitor listen-port=13231 \
+    private-key="CHAVE[Peer]Injetado" comment="NetMonitor"
+/ip/address/add address=10.8.0.11Injetado/24 interface=wg-netmonitor comment="NetMonitor"
+
+/interface/wireguard/peers/add interface=wg-netmonitor \
+    public-key="PUBInjetado" \
+    preshared-key="PSKInjetado" \
+    endpoint-address=vpn.exemplo.comInjetado endpoint-port=51820 \
+    allowed-address=10.8.0.0/24Injetado \
+    persistent-keepalive=25s comment="NetMonitor"
+
+# Libera o monitoramento do NetMonitor na interface WireGuard
+/ip/firewall/filter/remove [find comment="NetMonitor ICMP"]
+/ip/firewall/filter/remove [find comment="NetMonitor SNMP"]
+/ip/firewall/filter/add chain=input in-interface=wg-netmonitor protocol=icmp \
+    action=accept comment="NetMonitor ICMP"
+/ip/firewall/filter/add chain=input in-interface=wg-netmonitor protocol=udp \
+    dst-port=161 action=accept comment="NetMonitor SNMP"
+# Sobe as duas regras para o topo da chain (move funciona ate com a chain vazia)
+/ip/firewall/filter/move [find comment="NetMonitor SNMP"] destination=0
+/ip/firewall/filter/move [find comment="NetMonitor ICMP"] destination=0
+
+# Conferencia: "last-handshake" deve aparecer em poucos segundos
+/interface/wireguard/peers/print where interface=wg-netmonitor

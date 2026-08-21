@@ -1,6 +1,6 @@
 //! Regras de alerta, catálogo e Central de Alertas (§7.11).
 
-use axum::{extract::Query, http::StatusCode, response::IntoResponse};
+use axum::{extract::Query, http::HeaderMap, http::StatusCode, response::IntoResponse};
 use loco_rs::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
@@ -27,7 +27,10 @@ use crate::{
                 templates,
             },
             contracts::AlertStatus,
-            instability, silence,
+            correlation, instability, silence,
+        },
+        audit::{
+            AuditAction, AuditActor, AuditChanges, AuditEntryInput, AuditService, ResourceType,
         },
         devices::capabilities,
         events::EventBus,
@@ -174,6 +177,7 @@ async fn rules_index(
 
 async fn rules_store(
     State(ctx): State<AppContext>,
+    headers: HeaderMap,
     Json(input): Json<AlertRuleInput>,
 ) -> AppResult<Response> {
     let condition = input
@@ -221,11 +225,29 @@ async fn rules_store(
     .await?;
 
     publish(&ctx, "alert_rule:created", rule_event_payload(&rule)).await;
+
+    let _ = AuditService::new(&ctx.db)
+        .log(
+            AuditActor::from_headers(&headers, &ctx.db)
+                .await
+                .unwrap_or_default(),
+            AuditEntryInput {
+                action: AuditAction::Create,
+                resource_type: ResourceType::AlertRule,
+                resource_id: Some(rule.id),
+                resource_label: Some(rule.name.clone()),
+                description: Some(format!("Regra de alerta '{}' criada", rule.name)),
+                changes: None,
+            },
+        )
+        .await;
+
     Ok((StatusCode::CREATED, Json(AlertRuleResponse::from(rule))).into_response())
 }
 
 async fn rules_update(
     State(ctx): State<AppContext>,
+    headers: HeaderMap,
     Path(id): Path<i64>,
     Json(input): Json<AlertRuleInput>,
 ) -> AppResult<Response> {
@@ -233,6 +255,7 @@ async fn rules_update(
         .one(&ctx.db)
         .await?
         .ok_or_else(|| AppError::not_found("Regra de alerta não encontrada"))?;
+    let old_response = AlertRuleResponse::from(current.clone());
 
     // Campo ausente mantém o valor atual: o toggle da lista manda só `enabled`.
     let condition = match input.condition.as_ref() {
@@ -292,18 +315,64 @@ async fn rules_update(
     .await?;
 
     publish(&ctx, "alert_rule:updated", rule_event_payload(&rule)).await;
+
+    let _ = AuditService::new(&ctx.db)
+        .log(
+            AuditActor::from_headers(&headers, &ctx.db)
+                .await
+                .unwrap_or_default(),
+            AuditEntryInput {
+                action: AuditAction::Update,
+                resource_type: ResourceType::AlertRule,
+                resource_id: Some(rule.id),
+                resource_label: Some(rule.name.clone()),
+                description: Some(format!("Regra de alerta '{}' atualizada", rule.name)),
+                changes: Some(AuditChanges {
+                    old: serde_json::to_value(old_response).ok(),
+                    new: serde_json::to_value(AlertRuleResponse::from(rule.clone())).ok(),
+                }),
+            },
+        )
+        .await;
+
     Ok(format::json(AlertRuleResponse::from(rule))?)
 }
 
-async fn rules_destroy(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
+async fn rules_destroy(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> AppResult<Response> {
     let rule = alert_rules::Entity::find_by_id(id)
         .one(&ctx.db)
         .await?
         .ok_or_else(|| AppError::not_found("Regra de alerta não encontrada"))?;
     // O payload é montado antes do DELETE: depois dele a linha não existe mais.
     let payload = rule_event_payload(&rule);
+    let old_response = AlertRuleResponse::from(rule.clone());
+    let old_name = rule.name.clone();
     alert_rules::Entity::delete_by_id(id).exec(&ctx.db).await?;
     publish(&ctx, "alert_rule:deleted", payload).await;
+
+    let _ = AuditService::new(&ctx.db)
+        .log(
+            AuditActor::from_headers(&headers, &ctx.db)
+                .await
+                .unwrap_or_default(),
+            AuditEntryInput {
+                action: AuditAction::Delete,
+                resource_type: ResourceType::AlertRule,
+                resource_id: Some(id),
+                resource_label: Some(old_name.clone()),
+                description: Some(format!("Regra de alerta '{}' excluída", old_name)),
+                changes: Some(AuditChanges {
+                    old: serde_json::to_value(old_response).ok(),
+                    new: None,
+                }),
+            },
+        )
+        .await;
+
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
@@ -648,6 +717,19 @@ pub async fn alerts_for_monitor(
     })
 }
 
+/// `GET /api/alerts/{id}/correlation` — sugere causa raiz comum.
+///
+/// Analisa eventos abertos numa janela curta em torno do alerta e devolve o
+/// evento mais provável de ser a causa raiz (tipicamente um pai de infraestrutura
+/// que caiu primeiro), além dos eventos relacionados.
+async fn correlation_index(
+    State(ctx): State<AppContext>,
+    Path(id): Path<i64>,
+) -> AppResult<Response> {
+    let result = correlation::analyze(&ctx.db, id, None).await?;
+    Ok(format::json(result)?)
+}
+
 /// `/api/alert-rules` e o catálogo.
 ///
 /// `/catalog` é registrado antes de `/{id}` porque o roteador casa o caminho
@@ -671,6 +753,7 @@ pub fn routes() -> Routes {
         .add("/{id}/acknowledge", post(acknowledge))
         .add("/{id}/verify", post(verify))
         .add("/{id}/silence", post(silence_alert))
+        .add("/{id}/correlation", get(correlation_index))
 }
 
 #[cfg(test)]

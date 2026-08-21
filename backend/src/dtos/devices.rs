@@ -128,3 +128,76 @@ pub struct DevicePresenterItem {
     #[ts(type = "any")]
     pub vpn_peer: Option<serde_json::Value>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn device_metric_item_serializa_em_camel_case() {
+        let item = DeviceMetricItem {
+            id: 1,
+            device_id: 2,
+            interface_id: Some(3),
+            interface_name: Some("eth0".into()),
+            metric_name: "inBps".into(),
+            metric_value: 1_000.0,
+            unit: "bps".into(),
+            created_at: "01/01/2026 12:00:00".into(),
+        };
+        let json = serde_json::to_value(&item).unwrap();
+        assert_eq!(json["deviceId"], 2);
+        assert_eq!(json["interfaceId"], 3);
+        assert_eq!(json["metricName"], "inBps");
+        assert_eq!(json["metricValue"], 1_000.0);
+    }
+
+    #[test]
+    fn device_event_item_serializa_em_camel_case() {
+        let item = DeviceEventItem {
+            id: 1,
+            device_id: 2,
+            event_type: "down".into(),
+            severity: "critical".into(),
+            message: "caiu".into(),
+            created_at: "01/01/2026 12:00:00".into(),
+        };
+        let json = serde_json::to_value(&item).unwrap();
+        assert_eq!(json["eventType"], "down");
+        assert_eq!(json["deviceId"], 2);
+    }
+}
+
+/// Métrica de um dispositivo exibida na aba de métricas.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeviceMetricItem {
+    #[ts(type = "number")]
+    pub id: i64,
+    #[ts(type = "number")]
+    pub device_id: i64,
+    #[ts(type = "number | null")]
+    pub interface_id: Option<i64>,
+    pub interface_name: Option<String>,
+    pub metric_name: String,
+    #[ts(type = "number")]
+    pub metric_value: f64,
+    pub unit: String,
+    pub created_at: String,
+}
+
+/// Evento de alerta de um dispositivo exibido na aba de eventos.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeviceEventItem {
+    #[ts(type = "number")]
+    pub id: i64,
+    #[ts(type = "number")]
+    pub device_id: i64,
+    pub event_type: String,
+    pub severity: String,
+    pub message: String,
+    pub created_at: String,
+}

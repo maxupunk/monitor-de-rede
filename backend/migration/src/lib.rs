@@ -38,6 +38,9 @@ mod m20260817_000001_device_operating_system;
 mod m20260818_000001_users_role;
 mod m20260819_000001_devices_system_key;
 mod m20260819_000002_monitors_managed_unique;
+mod m20260821_000001_maintenance_windows;
+mod m20260821_000002_monitor_results_hourly;
+mod m20260821_000003_audit_logs;
 
 pub struct Migrator;
 
@@ -145,6 +148,9 @@ impl MigratorTrait for Migrator {
             Box::new(m20260818_000001_users_role::Migration),
             Box::new(m20260819_000001_devices_system_key::Migration),
             Box::new(m20260819_000002_monitors_managed_unique::Migration),
+            Box::new(m20260821_000001_maintenance_windows::Migration),
+            Box::new(m20260821_000002_monitor_results_hourly::Migration),
+            Box::new(m20260821_000003_audit_logs::Migration),
             // inject-above (do not remove this comment)
         ]
     }

@@ -20,6 +20,8 @@ static UDP_V6: OnceCell<UdpTransport> = OnceCell::const_new();
 static ENGINE_CACHE: OnceLock<Arc<EngineCache>> = OnceLock::new();
 static MASTER_KEYS: OnceLock<Mutex<HashMap<[u8; 32], MasterKeys>>> = OnceLock::new();
 
+const LOOKUP_TIMEOUT: Duration = Duration::from_secs(5);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SnmpVersion {
     V1,
@@ -356,11 +358,15 @@ async fn resolve_target(host: &str, port: u16) -> Result<std::net::SocketAddr, S
     if let Ok(ip) = host.parse::<IpAddr>() {
         return Ok(std::net::SocketAddr::new(ip, port));
     }
-    tokio::net::lookup_host((host, port))
-        .await
-        .map_err(|error| SnmpError::Network(error.to_string()))?
-        .next()
-        .ok_or_else(|| SnmpError::Network(format!("host SNMP não resolvido: {host}")))
+    match tokio::time::timeout(LOOKUP_TIMEOUT, tokio::net::lookup_host((host, port))).await {
+        Ok(Ok(mut addresses)) => addresses
+            .next()
+            .ok_or_else(|| SnmpError::Network(format!("host SNMP não resolvido: {host}"))),
+        Ok(Err(error)) => Err(SnmpError::Network(error.to_string())),
+        Err(_) => Err(SnmpError::Network(format!(
+            "tempo esgotado ao resolver host SNMP {host} (timeout de {LOOKUP_TIMEOUT:?})"
+        ))),
+    }
 }
 
 fn engine_cache() -> Arc<EngineCache> {
@@ -583,6 +589,18 @@ mod tests {
     fn formats_ipv6_target_with_brackets() {
         assert_eq!(target("2001:db8::1", 161), "[2001:db8::1]:161");
         assert_eq!(target("router.local", 161), "router.local:161");
+    }
+
+    #[tokio::test]
+    async fn resolve_target_ip_literal_nao_consulta_dns() {
+        assert_eq!(
+            resolve_target("192.0.2.10", 161).await.unwrap(),
+            std::net::SocketAddr::new("192.0.2.10".parse().unwrap(), 161)
+        );
+        assert_eq!(
+            resolve_target("2001:db8::1", 161).await.unwrap(),
+            std::net::SocketAddr::new("2001:db8::1".parse().unwrap(), 161)
+        );
     }
 
     #[tokio::test]

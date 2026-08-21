@@ -21,8 +21,8 @@ use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
 use crate::{
     dtos::logs::{
-        BindSourceInput, LogEntry, LogStreamQuery, LogsQuery, ProvisionHintsResponse,
-        ProvisionLoggingInput, ProvisionLoggingResponse,
+        BindSourceInput, BindSourceResponse, LogEntry, LogStreamQuery, LogsQuery,
+        ProvisionHintsResponse, ProvisionLoggingInput, ProvisionLoggingResponse,
     },
     services::{
         devices::{access, systems},
@@ -270,13 +270,13 @@ async fn bind_source(
         }
     }
 
-    Ok(format::json(serde_json::json!({
-        "bindKey": chave,
+    Ok(format::json(BindSourceResponse {
+        bind_key: chave,
         // O que o vínculo produziu de fato. No desvínculo pode não ser nulo: a
         // origem volta a ser resolvida pelo cadastro, e a tela precisa mostrar
         // isso em vez de um campo vazio que mente.
-        "deviceId": resolvido.or(entrada.device_id),
-    }))?)
+        device_id: resolvido.or(entrada.device_id),
+    })?)
 }
 
 /// Dedução do sistema a partir **só** do cadastro — sem tocar a rede.

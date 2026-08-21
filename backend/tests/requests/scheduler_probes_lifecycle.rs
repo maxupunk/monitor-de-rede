@@ -73,8 +73,9 @@ async fn o_catalogo_e_idempotente_e_traz_os_templates_dos_dois_roadmaps() {
         let templates = catalogo["templates"].as_array().expect("templates");
         // 18 do roadmap de alertas + 7 padrões de log (Fase 6 do de syslog) +
         // 3 de saúde de equipamento (Fase 3 do roadmap do servidor como
-        // dispositivo — são de dispositivo, não do servidor).
-        assert_eq!(templates.len(), 28);
+        // dispositivo — são de dispositivo, não do servidor) + 3 de baseline
+        // móvel (Fase 3 do roadmap mestre).
+        assert_eq!(templates.len(), 31);
         assert_eq!(catalogo["categories"]["disponibilidade"], "Disponibilidade");
         // Campos que a tela lê em cada template.
         assert!(templates[0]["applied"].is_boolean());
@@ -82,13 +83,14 @@ async fn o_catalogo_e_idempotente_e_traz_os_templates_dos_dois_roadmaps() {
 
         // O `ensure_defaults` do initializer já provisionou os recomendados no
         // boot desta instalação nova: eles chegam marcados como aplicados.
-        // São 13 — os 7 originais mais 6 padrões de log; `log_config_changed`
-        // fica de fora por ser rastro de auditoria, não problema.
+        // São 16 — os 7 originais mais 6 padrões de log mais 3 de baseline;
+        // `log_config_changed` fica de fora por ser rastro de auditoria, não
+        // problema.
         let recomendados: Vec<_> = templates
             .iter()
             .filter(|item| item["recommended"] == true)
             .collect();
-        assert_eq!(recomendados.len(), 13);
+        assert_eq!(recomendados.len(), 16);
         for template in &recomendados {
             assert_eq!(template["applied"], true, "{}", template["key"]);
             assert!(template["ruleId"].is_i64());

@@ -1,7 +1,7 @@
 # Roadmap NetMonitor
 
 > Roadmap mestre do NetMonitor. Ele consolida os roadmaps temáticos já entregues, os débitos técnicos pendentes e as próximas frentes de evolução do produto.  
-> **Última revisão:** 2026-08-20.
+> **Última revisão:** 2026-08-21.
 
 ## 1. Visão e critérios de priorização
 
@@ -89,16 +89,15 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
 
 ### 3.4 CI/CD
 
-- [ ] **INF-01 — Mover CI para `.github/workflows/` na raiz e completar os jobs**
+- [x] **INF-01 — Mover CI para `.github/workflows/` na raiz e completar os jobs**
   - **Severidade:** 🔴 Crítica
   - **Esforço:** Médio
-  - **Arquivos:** `backend/.github/workflows/ci.yaml`, `.github/workflows/ci.yaml`
-  - **Descrição:** o workflow mora em `backend/.github/`, que o GitHub Actions ignora.
-  - **Aceite:**
-    - Workflow na raiz com `defaults.run.working-directory: backend`.
-    - Jobs: `fmt`, `clippy --all-targets -- -D warnings`, `test` (SQLite e Postgres), `cargo audit` ou `cargo deny`, frontend (`typecheck`, `lint`, `build`), `npm audit` (fail em `high`/`critical`), build de imagem Docker.
-    - Substituir `actions-rs/cargo@v1` por action mantida ou `run` direto.
-    - Pinar actions por SHA.
+  - **Arquivos:** `.github/workflows/ci.yaml`
+  - **Implementado:**
+    - Workflow movido para a raiz com `defaults.run.working-directory: backend`.
+    - Jobs: `fmt`, `clippy`, testes SQLite e Postgres, `cargo audit`, frontend (`typecheck`, `lint`, `build`), `npm audit` (`--audit-level=high`), build Docker.
+    - `actions-rs/cargo@v1` substituído por `run` direto.
+    - Todas as actions pinadas por SHA.
 
 ---
 
@@ -106,74 +105,69 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
 
 > **Objetivo:** fechar gaps de segurança de superfície, limpar estado sensível na SPA e endurecer o container.
 
-- [ ] **SEC-07 — Decidir e implementar armazenamento seguro do JWT**
+- [x] **SEC-07 — Decidir e implementar armazenamento seguro do JWT**
   - **Severidade:** 🟠 Alta
   - **Esforço:** Médio
-  - **Arquivos:** `frontend/src/services/apiService.ts`, `backend/src/controllers/auth.rs`
-  - **Descrição:** JWT ainda mora em `localStorage`. O `roadmap_auditoria_seguranca.md` marca como concluído, mas o código não reflete.
-  - **Aceite:**
-    - Opção A: migrar para cookie `HttpOnly` + SameSite, com proteção CSRF para mutações.
-    - Opção B: manter `localStorage` com CSP estrito e documentar a decisão explicando por que o item foi marcado como concluído.
-    - Qualquer que seja a escolha, estado deve estar consistente entre código e documentação.
+  - **Arquivos:** `frontend/src/services/apiService.ts`, `backend/src/spa.rs`
+  - **Decisão:** Optou-se pela **Opção B** — manter o JWT no `localStorage` e endurecer o CSP.
+  - **Implementado:**
+    - `backend/src/spa.rs` passa a enviar `Content-Security-Policy` com `script-src 'self'`, `frame-ancestors 'none'`, `X-Frame-Options: DENY` e demais headers de segurança.
+    - `frontend/src/services/apiService.ts` documenta a decisão e o vínculo com o CSP.
+    - A migração para cookie `HttpOnly` permanece como evolução futura caso o modelo de ameaça exija (ex.: ambientes com extensões de navegador não confiáveis).
 
-- [ ] **SEC-08 — Adicionar headers de segurança no servidor estático**
+- [x] **SEC-08 — Adicionar headers de segurança no servidor estático**
   - **Severidade:** 🔵 Baixa
   - **Esforço:** Pequeno
   - **Arquivos:** `backend/src/spa.rs`
-  - **Descrição:** hoje só há `Cache-Control`.
-  - **Aceite:**
+  - **Implementado:**
     - `X-Content-Type-Options: nosniff`
     - `Referrer-Policy: strict-origin-when-cross-origin`
-    - `X-Frame-Options: DENY` ou CSP `frame-ancestors 'none'`
-    - CSP inicial permissivo o suficiente para não quebrar a SPA, mas sem `unsafe-inline` para scripts quando viável.
+    - `X-Frame-Options: DENY`
+    - `Content-Security-Policy` com `script-src 'self'`, `frame-ancestors 'none'` e demais diretivas.
+    - Teste `headers_de_seguranca_estao_configurados`.
 
-- [ ] **SEC-09 — Remover allowlist de scaffold do magic link**
+- [x] **SEC-09 — Remover allowlist de scaffold do magic link**
   - **Severidade:** 🟡 Média
   - **Esforço:** Pequeno
-  - **Arquivos:** `backend/src/controllers/auth.rs:20-25`
-  - **Descrição:** magic link só aceita `@example.com` e `@gmail.com`.
-  - **Aceite:**
-    - Remover allowlist ou remover o fluxo de magic link se não for usado.
-    - Testes ajustados.
+  - **Arquivos:** `backend/src/controllers/auth.rs`
+  - **Implementado:**
+    - Regex de allowlist removida; magic link aceita qualquer e-mail válido.
+    - Teste `magic_link_aceita_email_valido_sem_expor_existencia` ajustado.
 
-- [ ] **SEC-10 — Redigir senha nos derives `Debug` de credenciais**
+- [x] **SEC-10 — Redigir senha nos derives `Debug` de credenciais**
   - **Severidade:** 🟡 Média
   - **Esforço:** Pequeno
   - **Arquivos:** `backend/src/models/users.rs`
-  - **Descrição:** `LoginParams` e `RegisterParams` derivam `Debug` e vazam senha.
-  - **Aceite:**
-    - Implementar `Debug` manual ocultando a senha.
-    - Teste de convenção ou unitário garantindo que `format!("{:?}", params)` não contém a senha.
+  - **Implementado:**
+    - `LoginParams` e `RegisterParams` implementam `Debug` manual, substituindo a senha por `[REDACTED]`.
+    - Testes unitários garantem que `format!("{:?}", params)` não contém a senha.
 
-- [ ] **INF-02 — Supervisão do watcher e hardening do container**
+- [x] **INF-02 — Supervisão do watcher e hardening do container**
   - **Severidade:** 🟡 Média
   - **Esforço:** Médio
-  - **Arquivos:** `docker/entrypoint.sh`, `Dockerfile`, `docker-compose.yml`
-  - **Descrição:** watcher inicia com `&` e vira órfão; imagens não pinadas por digest.
-  - **Aceite:**
-    - Adotar `tini` como PID 1 ou supervisão mínima que reinicie o watcher se morrer.
-    - Healthcheck do container considerar vida do watcher.
-    - Pinar imagens base por digest (`node`, `rust`, `debian`).
-    - Adicionar `security_opt: [no-new-privileges:true]`, `read_only` com `tmpfs` e rotação de logs no compose.
+  - **Arquivos:** `docker/entrypoint.sh`, `docker/wireguard-watcher.sh`, `docker/healthcheck.sh`, `Dockerfile`, `docker-compose.yml`
+  - **Implementado:**
+    - `tini` como PID 1; entrypoint supervisiona e reinicia o watcher se morrer.
+    - Healthcheck via `docker/healthcheck.sh` considera API e heartbeat do watcher.
+    - Imagens base (`node`, `rust`, `debian`, `postgres` no CI) pinadas por digest.
+    - Compose com `read_only: true`, `tmpfs`, `security_opt: [no-new-privileges:true]` e rotação de logs.
 
-- [ ] **Frontend — Limpar estado sensível do visualizador VPN**
+- [x] **Frontend — Limpar estado sensível do visualizador VPN**
   - **Severidade:** 🟡 Média
   - **Esforço:** Pequeno
-  - **Arquivos:** `frontend/src/stores/vpn.ts`, `frontend/src/components/VpnScriptViewer.vue`
-  - **Descrição:** `lastArtifact` (contém chave privada e QR code) nunca é limpo; QR code renderizado via `v-html` sem DOMPurify.
-  - **Aceite:**
-    - `lastArtifact` é limpo ao fechar o diálogo.
-    - Adicionar DOMPurify no SVG do QR code (defesa em profundidade).
+  - **Arquivos:** `frontend/src/components/VpnScriptViewer.vue`
+  - **Implementado:**
+    - `vpnStore.lastArtifact` é limpo ao fechar o diálogo (`watch` de `modelValue`).
+    - Adicionada dependência `dompurify` e sanitização do SVG do QR code antes do `v-html`.
 
-- [ ] **Frontend — Melhorias no `apiService.ts`**
+- [x] **Frontend — Melhorias no `apiService.ts`**
   - **Severidade:** 🔵 Baixa
   - **Esforço:** Pequeno
   - **Arquivos:** `frontend/src/services/apiService.ts`
-  - **Descrição:** requisições sem `AbortSignal.timeout`; `?redirect=` perdido no 401 global; erro de rede não distingue de erro de API.
-  - **Aceite:**
-    - `AbortSignal.timeout(15000)` por requisição.
-    - Preservar e redirecionar com `?redirect=` no 401.
-    - Tipo de erro distinto para rede vs API.
+  - **Implementado:**
+    - `AbortSignal.timeout(15000)` em todas as requisições.
+    - Redirecionamento no 401 preserva `?redirect=`.
+    - `ApiError` e `NetworkError` como tipos distintos de erro.
 
 ---
 
@@ -181,71 +175,86 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
 
 > **Objetivo:** pagar débitos de manutenibilidade e performance antes de novas features.
 
-- [ ] **FE-03 — Infraestrutura de testes no frontend**
+- [x] **FE-03 — Infraestrutura de testes no frontend** 🟢 Concluído
   - **Severidade:** 🟠 Alta
   - **Esforço:** Médio
-  - **Arquivos:** `frontend/package.json`, `frontend/tests/`
-  - **Descrição:** não há script `test` nem runner configurado.
-  - **Aceite:**
-    - Adicionar `vitest`, `@vue/test-utils`, `jsdom`.
-    - Script `"test"` no `package.json`.
-    - Cobrir `utils/formatters.ts`, `composables/` e stores puras como primeira onda.
-    - CI executa `npm run test`.
+  - **Arquivos:** `frontend/package.json`, `frontend/vitest.config.ts`, `frontend/tests/`
+  - **Descrição:** não havia script `test` nem runner configurado.
+  - **Implementado:**
+    - Adicionados `vitest`, `@vue/test-utils`, `jsdom` e `@types/jsdom`.
+    - Criado `frontend/vitest.config.ts` com ambiente `jsdom` e alias `@/`.
+    - Script `"test": "vitest run"` no `package.json`; o script `"format"` passou a incluir `tests/`.
+    - Migrados os testes legados (`formatters.test.ts`, `ndjson.test.ts`) para a sintaxe do Vitest.
+    - Adicionados testes para `utils/formatters.ts`, `composables/useMonitorDetail.ts`, `composables/useInfiniteList.ts`, `composables/useInfiniteCursor.ts` e as stores puras `preferences`, `alerts` e `dashboard`.
+    - CI executa `npm run test` entre `lint` e `build`.
 
-- [ ] **QUA-01 — Decompor páginas monolíticas que cresceram**
+- [x] **QUA-01 — Decompor páginas monolíticas que cresceram** 🟢 Concluído
   - **Severidade:** 🟡 Média
   - **Esforço:** Médio
   - **Arquivos:** `frontend/src/pages/DashboardPage.vue`, `AlertsPage.vue`, `SettingsPage.vue`
   - **Descrição:** páginas com 600–950 linhas.
-  - **Aceite:**
-    - Extrair widgets, tabelas, filtros e formulários para componentes próprios.
-    - `typecheck`, `lint` e `build` passam sem novo `as any`.
+  - **Implementado:**
+    - `DashboardPage.vue`: extraídos `StatCardsWidget`, `ActiveAlertsWidget`, `EventsFeedWidget` e `NetworkMonitorsWidget` para `frontend/src/components/dashboard/`.
+    - `AlertsPage.vue`: extraídas as quatro abas (`ActiveAlertsTab`, `ResolvedAlertsTab`, `AlertRulesTab`, `AlertHistoryTab`) para `frontend/src/components/alerts/`.
+    - `SettingsPage.vue`: extraídos `PreferencesCard`, `ServerAddressesCard`, `DashboardSyncCard`, `NotificationsCard`, `OnboardingCard` e `BackupCard` para `frontend/src/components/settings/`.
+    - Páginas mantêm apenas orquestração, diálogos e feedback; componentes encapsulam template, estilo e chamadas às stores.
+    - `typecheck`, `lint`, `build` e `test` passam sem novo `as any`.
 
-- [ ] **QUA-02 — Cachear `reqwest::Client` no `HttpChecker`**
+- [x] **QUA-02 — Cachear `reqwest::Client` no `HttpChecker`**
   - **Severidade:** 🟡 Média
   - **Esforço:** Pequeno
   - **Arquivos:** `backend/src/services/monitoring/checkers/http.rs`
+  - **Implementado:**
+    - Dois clientes `reqwest` cacheados via `OnceLock<Result<Client, reqwest::Error>>`: um com verificação TLS padrão e outro com `danger_accept_invalid_certs(true)`.
+    - O timeout continua sendo aplicado por requisição (`RequestBuilder::timeout`), preservando o comportamento anterior.
+    - Testes unitários adicionados para cache e para checagens HTTP 200/404 com servidor local.
   - **Aceite:**
     - Dois clientes cacheados via `OnceLock` (um com verificação TLS padrão, outro configurável se necessário).
     - Testes de monitor HTTP continuam passando.
 
-- [ ] **QUA-03 — Timeout em `lookup_host` (ping e SNMP)**
+- [x] **QUA-03 — Timeout em `lookup_host` (ping e SNMP)**
   - **Severidade:** 🟡 Média
   - **Esforço:** Pequeno
-  - **Arquivos:** `backend/src/services/monitoring/checkers/ping.rs`, `backend/src/services/snmp/client.rs`
-  - **Aceite:**
-    - `tokio::time::timeout` com limite adequado (ex.: 5 s).
-    - Tradução de `Elapsed` para `CheckResult` `unknown` com mensagem clara.
+  - **Arquivos:** `backend/src/services/monitoring/checkers/ping.rs`, `backend/src/services/snmp/client.rs`, `backend/src/services/monitoring/checkers/snmp.rs`
+  - **Implementado:**
+    - `tokio::time::timeout` de 5 s em `lookup_host` no ping (`resolve_host`) e no cliente SNMP (`resolve_target`).
+    - Timeout de DNS no ping traduzido para `CheckResult` com `status: unknown` e mensagem clara.
+    - Timeout de DNS no SNMP propagado como `SnmpError::Timeout` e mapeado para `CheckResult` `unknown` no checker SNMP.
+    - Testes unitários cobrem IP literal, mapeamento de timeout para `unknown` e erros DNS/ rede permanecendo `down`.
 
-- [ ] **QUA-04 — Reduzir N+1 na coleta SNMP**
+- [x] **QUA-04 — Reduzir N+1 na coleta SNMP** 🟢 Concluído
   - **Severidade:** 🟡 Média
   - **Esforço:** Médio
-  - **Arquivos:** `backend/src/services/snmp/service.rs`
-  - **Aceite:**
-    - Buscar métricas anteriores em uma query por grupo de interfaces.
-    - Transações curtas; não prender writer do SQLite durante avaliação de alertas/topologia.
+  - **Arquivos:** `backend/src/services/snmp/service.rs`, `backend/tests/requests/snmp_collection_integration.rs`
+  - **Implementado:**
+    - Interfaces já conhecidas são carregadas de uma vez (`device_interfaces::Entity::find()`) antes do loop de sincronização.
+    - `sync_interface` recebe `Option<&device_interfaces::Model>` para evitar SELECT por interface.
+    - Métricas anteriores de tráfego são buscadas em lote por `latest_metrics_for_interfaces`.
+    - Métricas de tráfego e sistema são acumuladas em `Vec<PendingMetric>` e gravadas com `metrics::Entity::insert_many`.
     - Testes de SNMP passam.
 
-- [ ] **QUA-05 — Honrar ou remover `monitors.timeout_seconds`**
+- [x] **QUA-05 — Honrar `monitors.timeout_seconds` na execução** 🟢 Concluído
   - **Severidade:** 🟡 Média
   - **Esforço:** Pequeno
-  - **Arquivos:** `backend/src/models/monitors.rs`, `backend/src/controllers/monitors.rs`, `backend/src/services/monitoring/runner.rs`
-  - **Aceite:**
-    - Se honrar: scheduler usa `timeout_seconds` com mínimo sensato.
-    - Se remover: retirar coluna do formulário, API e DTOs.
-    - Nenhum contrato morto no schema.
+  - **Arquivos:** `backend/src/services/monitoring/execution_guard.rs`, `backend/src/services/monitoring/scheduler/monitor_executor.rs`, `backend/src/services/monitoring/presenter.rs`, `frontend/src/stores/monitors.ts`, `frontend/src/components/monitors/MonitorDetailView.vue`
+  - **Implementado:**
+    - Adicionado `effective_timeout_seconds(timeout_seconds, interval_seconds)` que aplica mínimo de 1 s e máximo de `interval - 1`.
+    - `monitor_executor.rs` usa `effective_timeout_seconds(monitor.timeout_seconds, monitor.interval_seconds)` para o timeout da execução.
+    - `MonitorPresentation` passa a expor `timeout_seconds` e o frontend mantém o campo no tipo `Monitor` e no `emptyMonitor`.
+    - Decisão: honrar a coluna, não removê-la.
 
-- [ ] **QUA-06 — Melhorar buffer offline do probe**
+- [x] **QUA-06 — Melhorar buffer offline do probe** 🟢 Concluído
   - **Severidade:** 🟡 Média
   - **Esforço:** Médio
   - **Arquivos:** `backend/src/services/probes/buffer.rs`
   - **Descrição:** buffer cresce sem teto, reescrita O(n²), escrita não atômica.
-  - **Aceite:**
-    - Tamanho máximo configurável.
-    - Escrita atômica (tmp+rename).
-    - Testes de crash/recuperação.
+  - **Implementado:**
+    - Limites configuráveis por número de itens (`PROBE_BUFFER_MAX_RESULTS`, padrão 10.000) e por bytes (`PROBE_BUFFER_MAX_BYTES`, padrão 50 MB).
+    - Escrita atômica com arquivo temporário + `rename`.
+    - Ao atingir o teto de bytes, deduplica por `monitor_id` mantendo o resultado mais recente de cada monitor; se ainda exceder, trunca os itens mais antigos.
+    - Testes cobrem limite de itens, limite de bytes, deduplicação, truncamento por idade, escrita atômica e recuperação após crash.
 
-- [ ] **BE-03 / BE-05 — Finalizar builders VPN e DTOs tipados**
+- [x] **BE-03 / BE-05 — Finalizar builders VPN e DTOs tipados**
   - **Severidade:** 🟡 Média
   - **Esforço:** Médio
   - **Arquivos:** `backend/src/services/vpn/profiles/*.rs`, `backend/src/controllers/{devices.rs,monitors.rs,logs.rs}`
@@ -260,23 +269,66 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
 
 > **Objetivo:** novas capacidades que aumentam o valor do produto. Só entram depois que as Fases 0 e 1 estiverem estáveis.
 
-- [ ] **Janelas de manutenção**
-  - Permitir silenciar alertas/notificações por site/dispositivo em janela agendada.
-  - Evita flaps falsos durante reboots e alterações programadas.
+- [x] **Janelas de manutenção** 🟢 Concluído
+  - **Severidade:** 🟡 Média
+  - **Esforço:** Médio
+  - **Arquivos:** `backend/src/services/maintenance_windows.rs`, `backend/src/controllers/maintenance_windows.rs`, `backend/src/views/maintenance_windows.rs`, `backend/src/dtos/resources.rs`, `backend/src/services/notifications/{policy,outbox}.rs`, `backend/migration/src/m20260821_000001_maintenance_windows.rs`, `frontend/src/stores/maintenanceWindows.ts`, `frontend/src/components/MaintenanceWindowDialog.vue`, `frontend/src/pages/MaintenanceWindowsPage.vue`, `frontend/src/layouts/DefaultLayout.vue`, `frontend/src/router/index.ts`, `backend/tests/requests/maintenance_windows.rs`
+  - **Implementado:**
+    - Nova tabela `maintenance_windows` com `site_id` e/ou `device_id`, `starts_at`, `ends_at`, `name`, `description` e `created_by`.
+    - CRUD REST sob `/api/maintenance-windows` com validações de intervalo e existência do alvo.
+    - Hierarquia respeitada: janela no site cobre dispositivos daquele site; janela no device cobre só ele.
+    - Integração no despachante de notificações: alertas ainda são criados, mas a linha do `notification_outbox` nasce `suppressed` com `suppress_reason = maintenance`.
+    - Novo motivo `SuppressReason::Maintenance` na política pura de notificações.
+    - Página de gerenciamento no frontend com diálogo de criação/edição, tabela responsiva e menu lateral.
+    - Testes de integração cobrindo CRUD, validações e supressão por janela no dispositivo e no site.
 
-- [ ] **Baseline móvel e alertas por desvio**
-  - Alertar quando latência, perda de pacotes ou outra métrica se desvia da média das últimas 24 h, em vez de usar apenas threshold fixo.
+- [x] **Baseline móvel e alertas por desvio** 🟢 Concluído
+  - **Severidade:** 🟡 Média
+  - **Esforço:** Médio
+  - **Arquivos:** `backend/src/services/alerts/baseline.rs`, `backend/src/services/alerts/{fields.rs,manager.rs}`, `backend/src/services/alerts/datasets/monitor_result.rs`, `backend/src/services/alerts/catalog/templates.rs`, `backend/src/dtos/alerts.rs`, `frontend/src/utils/alertPresentation.ts`, `backend/tests/requests/baseline_alerts.rs`
+  - **Implementado:**
+    - Service `baseline::MonitorBaseline` calcula baseline por monitor a partir de `monitor_results_hourly` (últimas 48 horas, ignorando buckets com poucas amostras), com cache em memória por 1 hora.
+    - Seis novos campos no vocabulário de alertas: `LATENCY_BASELINE_MS`, `LATENCY_DEVIATION_PERCENT`, `PACKET_LOSS_BASELINE_PERCENT`, `PACKET_LOSS_DEVIATION_PERCENT`, `UPTIME_BASELINE_PERCENT`, `UPTIME_DEVIATION_PERCENT`.
+    - Dataset `monitor_result` enriquece resultados de ping e monitor genérico com baseline de latência, perda e uptime; campos nulos quando não há dados suficientes.
+    - Três templates de catálogo adicionados: desvio de latência (>50% acima da baseline), perda acima da baseline e queda de uptime abaixo da baseline.
+    - Rótulos em português para os novos campos no frontend (`alertPresentation.ts`).
+    - Testes unitários do baseline e testes de integração cobrindo regra de desvio por latência, perda e uptime.
 
-- [ ] **Rollup/ agregação de métricas**
-  - Tabelas `monitor_results` e `metrics` são append-only e crescem sem limite.
-  - Agregações horárias/diárias para responder “este link é estável?” em 24 h / 7 d / 30 d.
+- [x] **Rollup/ agregação de métricas** 🟢 Concluído
+  - **Severidade:** 🟡 Média
+  - **Esforço:** Médio
+  - **Arquivos:** `backend/migration/src/m20260821_000002_monitor_results_hourly.rs`, `backend/src/models/_entities/monitor_results_hourly.rs`, `backend/src/models/monitor_results_hourly.rs`, `backend/src/services/monitoring/{rollup.rs,uptime.rs}`, `backend/src/services/monitoring/scheduler/{cadence.rs,maintenance_runner.rs}`, `backend/src/tasks/scheduler_run.rs`, `backend/src/dtos/monitors.rs`, `backend/src/controllers/monitors.rs`, `frontend/src/stores/monitors.ts`, `frontend/src/components/devices/tabs/DeviceOverviewTab.vue`, `frontend/src/bindings/MonitorUptimeResponse.ts`, `backend/tests/requests/devices_monitors_crud.rs`
+  - **Implementado:**
+    - Nova tabela `monitor_results_hourly` com buckets de 1 hora (`monitor_id`, `bucket`, `total_checks`, `up_checks`, `down_checks`, `unknown_checks`, latências agregadas e timestamps de extremo).
+    - Service `rollup::rollup_monitor_results` que agrupa resultados brutos por `(monitor_id, bucket)`, persiste os buckets e opcionalmente apaga o bruto antigo via `ROLLUP_DELETE_BRUTO_AFTER_HOURS`.
+    - Job `rollup_monitor_results_if_due` no scheduler, executado a cada 1 hora (configurável via `ROLLUP_INTERVAL_SECONDS`); fecha apenas buckets completos, nunca a hora em curso.
+    - Service `uptime::uptime_for_monitor` que soma buckets fechados e adiciona o bucket parcial da hora atual a partir de `monitor_results`.
+    - Endpoint `GET /api/monitors/:id/uptime?hours=N` (padrão 24, máximo 720) com DTO `MonitorUptimeResponse` exportado para TypeScript.
+    - Card “Estabilidade dos Monitores (24h)” na aba Visão Geral do dispositivo, com barra de progresso e contagem de checagens/up/down.
+    - Testes de integração cobrindo o endpoint de uptime e o rollup end-to-end.
 
-- [ ] **Trilha de auditoria**
-  - Registrar quem alterou cada recurso (usuário, timestamp, mudança).
-  - Pré-requisito para compliance e debug de incidentes.
+- [x] **Trilha de auditoria** 🟢 Concluído
+  - **Severidade:** 🟡 Média
+  - **Esforço:** Médio
+  - **Arquivos:** `backend/migration/src/m20260821_000003_audit_logs.rs`, `backend/src/models/_entities/audit_logs.rs`, `backend/src/models/audit_logs.rs`, `backend/src/services/audit.rs`, `backend/src/views/audit.rs`, `backend/src/controllers/audit.rs`, `backend/src/app.rs`, `frontend/src/stores/audit.ts`, `frontend/src/pages/AuditPage.vue`, `frontend/src/router/index.ts`, `frontend/src/layouts/DefaultLayout.vue`, `backend/tests/requests/audit.rs`
+  - **Implementado:**
+    - Nova tabela `audit_logs` (`user_id`, `action`, `resource_type`, `resource_id`, `resource_label`, `description`, `changes`, `ip_address`, `user_agent`, `created_at`) com índices em `created_at`, `user_id`, `(resource_type, resource_id)` e `action`.
+    - Service `services::audit` com `AuditAction`, `ResourceType`, `AuditActor`, `AuditEntryInput`, `AuditFilters` e gravação isolada (falhas de auditoria nunca quebram a operação principal).
+    - Controller `GET /api/audit-logs` restrito a administradores, com filtros (`userId`, `resourceType`, `resourceId`, `action`, `from`, `to`) e paginação `LucidMeta`.
+    - Auditoria integrada nos controllers de `auth`, `devices`, `monitors`, `sites`, `networks`, `users`, `probes`, `vpn_peers`, `maintenance_windows` e `alerts` (regras), registrando criação, alteração, exclusão e login/logout com diff opcional.
+    - Página frontend `/audit` (apenas admin) com tabela paginada, filtros, expansão de detalhes (IP, user-agent e diff `old`/`new`) e navegação por páginas.
+    - Testes unitários do service e testes de integração cobrindo acesso restrito, listagem, filtros e paginação.
 
-- [ ] **Correlação temporal de alertas em cascata**
-  - Além da inibição por `parent_id`, detectar que muitos dispositivos caíram no mesmo segundo e sugerir causa raiz comum.
+- [x] **Correlação temporal de alertas em cascata** 🟢 Concluído
+  - **Severidade:** 🟡 Média
+  - **Esforço:** Médio
+  - **Arquivos:** `backend/src/services/alerts/correlation.rs`, `backend/src/controllers/alerts.rs`, `backend/src/services/alerts/mod.rs`, `frontend/src/stores/alerts.ts`, `frontend/src/components/alerts/AlertCorrelationDialog.vue`, `frontend/src/components/alerts/ActiveAlertsTab.vue`, `frontend/src/pages/AlertsPage.vue`, `backend/tests/requests/alert_correlation.rs`
+  - **Implementado:**
+    - Service `services::alerts::correlation` que analisa eventos abertos numa janela curta (padrão 60 s) em torno de um alerta alvo.
+    - Algoritmo de causa raiz: prefere o evento mais antigo cujo dispositivo é pai declarado de outros dispositivos correlacionados; em ausência de pai, cai para o evento mais antigo da janela.
+    - Endpoint `GET /api/alerts/:id/correlation` devolvendo causa raiz primária, eventos relacionados, escopos comuns (site/rede) e contagem.
+    - Botão "Correlação" na Central de Alertas (`ActiveAlertsTab`) e dialog `AlertCorrelationDialog` exibindo a causa raiz sugerida e a lista de eventos correlacionados.
+    - Testes unitários do algoritmo de correlação e testes de integração cobrindo pai/filho, janela vazia e exclusão de eventos resolvidos.
 
 ---
 

@@ -2,7 +2,11 @@
 
 use std::collections::HashMap;
 
-use axum::{extract::Query, http::StatusCode, response::IntoResponse};
+use axum::{
+    extract::Query,
+    http::{HeaderMap, StatusCode},
+    response::IntoResponse,
+};
 use loco_rs::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, ExprTrait, QueryFilter, QueryOrder, QuerySelect,
@@ -11,7 +15,7 @@ use sea_orm::{
 
 use crate::{
     dtos::{
-        devices::{DevicePresenterItem, ParentRef, SiteRef},
+        devices::{DeviceEventItem, DeviceMetricItem, DevicePresenterItem, ParentRef, SiteRef},
         resources::{DeviceInput, PaginationQuery},
     },
     models::{
@@ -22,6 +26,9 @@ use crate::{
         devices, monitors, sites,
     },
     services::{
+        audit::{
+            AuditAction, AuditActor, AuditChanges, AuditEntryInput, AuditService, ResourceType,
+        },
         devices::{
             access::{AccessContext, AccessMode},
             capabilities,
@@ -360,6 +367,7 @@ async fn index(State(ctx): State<AppContext>) -> AppResult<Response> {
 
 async fn store(
     State(ctx): State<AppContext>,
+    headers: HeaderMap,
     Json(input): Json<DeviceInput>,
 ) -> AppResult<Response> {
     let (name, kind) = require_name_type(&input)?;
@@ -416,6 +424,26 @@ async fn store(
             .exec(&ctx.db)
             .await?;
     }
+
+    let _ = AuditService::new(&ctx.db)
+        .log(
+            AuditActor::from_headers(&headers, &ctx.db)
+                .await
+                .unwrap_or_default(),
+            AuditEntryInput {
+                action: AuditAction::Create,
+                resource_type: ResourceType::Device,
+                resource_id: Some(row.id),
+                resource_label: Some(row.name.clone()),
+                description: Some(format!(
+                    "Dispositivo '{}' ({}) criado",
+                    row.name, row.r#type
+                )),
+                changes: None,
+            },
+        )
+        .await;
+
     Ok((StatusCode::CREATED, Json(present(&ctx.db, row).await?)).into_response())
 }
 
@@ -429,6 +457,7 @@ async fn show(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<R
 
 async fn update(
     State(ctx): State<AppContext>,
+    headers: HeaderMap,
     Path(id): Path<i64>,
     Json(input): Json<DeviceInput>,
 ) -> AppResult<Response> {
@@ -436,6 +465,7 @@ async fn update(
         .one(&ctx.db)
         .await?
         .ok_or_else(|| AppError::not_found("Dispositivo não encontrado"))?;
+    let old_presented = present(&ctx.db, current.clone()).await?;
     let name = input
         .name
         .as_deref()
@@ -537,16 +567,70 @@ async fn update(
     if row.snmp_poll_interval_seconds != current.snmp_poll_interval_seconds {
         sync_monitor_intervals(&ctx.db, row.id, row.snmp_poll_interval_seconds).await?;
     }
-    Ok(format::json(present(&ctx.db, row).await?)?)
+
+    let new_presented = present(&ctx.db, row.clone()).await?;
+    let _ = AuditService::new(&ctx.db)
+        .log(
+            AuditActor::from_headers(&headers, &ctx.db)
+                .await
+                .unwrap_or_default(),
+            AuditEntryInput {
+                action: AuditAction::Update,
+                resource_type: ResourceType::Device,
+                resource_id: Some(row.id),
+                resource_label: Some(row.name.clone()),
+                description: Some(format!(
+                    "Dispositivo '{}' ({}) atualizado",
+                    row.name, row.r#type
+                )),
+                changes: Some(AuditChanges {
+                    old: serde_json::to_value(old_presented).ok(),
+                    new: serde_json::to_value(new_presented.clone()).ok(),
+                }),
+            },
+        )
+        .await;
+
+    Ok(format::json(new_presented)?)
 }
 
-async fn destroy(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
+async fn destroy(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> AppResult<Response> {
     let row = devices::Entity::find_by_id(id)
         .one(&ctx.db)
         .await?
         .ok_or_else(|| AppError::not_found("Dispositivo não encontrado"))?;
+    let old_presented = present(&ctx.db, row.clone()).await?;
+    let old_name = row.name.clone();
+    let old_type = row.r#type.clone();
     system_device::ensure_deletable(&row)?;
     ResourceCleanupService::delete_device(&ctx.db, id).await?;
+
+    let _ = AuditService::new(&ctx.db)
+        .log(
+            AuditActor::from_headers(&headers, &ctx.db)
+                .await
+                .unwrap_or_default(),
+            AuditEntryInput {
+                action: AuditAction::Delete,
+                resource_type: ResourceType::Device,
+                resource_id: Some(id),
+                resource_label: Some(old_name.clone()),
+                description: Some(format!(
+                    "Dispositivo '{}' ({}) excluído",
+                    old_name, old_type
+                )),
+                changes: Some(AuditChanges {
+                    old: serde_json::to_value(old_presented).ok(),
+                    new: None,
+                }),
+            },
+        )
+        .await;
+
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
@@ -590,11 +674,21 @@ async fn device_monitors(
 fn metric_json(
     row: metrics_entity::Model,
     interface_names: &HashMap<i64, String>,
-) -> serde_json::Value {
+) -> DeviceMetricItem {
     let interface_name = row
         .interface_id
-        .and_then(|interface_id| interface_names.get(&interface_id));
-    serde_json::json!({"id":row.id,"deviceId":row.device_id,"interfaceId":row.interface_id,"interfaceName":interface_name,"metricName":row.name,"metricValue":row.value,"unit":row.unit,"createdAt":row.recorded_at.format("%d/%m/%Y %H:%M:%S").to_string()})
+        .and_then(|interface_id| interface_names.get(&interface_id))
+        .cloned();
+    DeviceMetricItem {
+        id: row.id,
+        device_id: row.device_id,
+        interface_id: row.interface_id,
+        interface_name,
+        metric_name: row.name,
+        metric_value: row.value,
+        unit: row.unit,
+        created_at: row.recorded_at.format("%d/%m/%Y %H:%M:%S").to_string(),
+    }
 }
 
 async fn metrics(
@@ -642,8 +736,17 @@ async fn metrics(
     Ok(format::json(body)?)
 }
 
-fn event_json(row: alert_events::Model) -> serde_json::Value {
-    serde_json::json!({"id":row.id,"deviceId":row.device_id,"eventType":row.status,"severity":row.severity,"message":row.message.unwrap_or_else(|| "Sem mensagem de detalhes".into()),"createdAt":row.created_at.format("%d/%m/%Y %H:%M:%S").to_string()})
+fn event_json(row: alert_events::Model) -> DeviceEventItem {
+    DeviceEventItem {
+        id: row.id,
+        device_id: row.device_id.unwrap_or_default(),
+        event_type: row.status,
+        severity: row.severity,
+        message: row
+            .message
+            .unwrap_or_else(|| "Sem mensagem de detalhes".into()),
+        created_at: row.created_at.format("%d/%m/%Y %H:%M:%S").to_string(),
+    }
 }
 
 async fn events(

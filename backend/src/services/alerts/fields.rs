@@ -25,6 +25,21 @@ pub const SNMP_UPTIME: &str = "snmpUptime";
 pub const IN_BPS: &str = "inBps";
 pub const OUT_BPS: &str = "outBps";
 
+// --- Baseline móvel (Fase 3) ------------------------------------------------
+
+/// Média histórica de latência (ms) na janela de baseline.
+pub const LATENCY_BASELINE_MS: &str = "latencyBaselineMs";
+/// Desvio percentual da latência atual em relação à baseline.
+pub const LATENCY_DEVIATION_PERCENT: &str = "latencyDeviationPercent";
+/// Média histórica de perda de pacotes (%) na janela de baseline.
+pub const PACKET_LOSS_BASELINE_PERCENT: &str = "packetLossBaselinePercent";
+/// Diferença absoluta da perda atual em relação à baseline (p.p.).
+pub const PACKET_LOSS_DEVIATION_PERCENT: &str = "packetLossDeviationPercent";
+/// Média histórica de uptime (%) na janela de baseline.
+pub const UPTIME_BASELINE_PERCENT: &str = "uptimeBaselinePercent";
+/// Quanto o uptime atual caiu abaixo da baseline (p.p.).
+pub const UPTIME_DEVIATION_PERCENT: &str = "uptimeDeviationPercent";
+
 // --- Saúde do equipamento ---------------------------------------------------
 //
 // São campos **de dispositivo**, não do servidor. Quem os publica é qualquer
@@ -90,7 +105,7 @@ pub const VPN_PREVIOUS_STATUS: &str = "vpnPreviousStatus";
 
 /// Vocabulário completo oferecido na tela de regras. A **ordem importa**: é a
 /// ordem em que os campos aparecem no seletor da interface.
-pub const ALERT_FIELDS: [&str; 33] = [
+pub const ALERT_FIELDS: [&str; 39] = [
     STATUS,
     LATENCY_MS,
     PACKET_LOSS,
@@ -122,6 +137,12 @@ pub const ALERT_FIELDS: [&str; 33] = [
     LOG_WINDOW_SECONDS,
     LOG_SEVERITY,
     LOG_MESSAGE,
+    LATENCY_BASELINE_MS,
+    LATENCY_DEVIATION_PERCENT,
+    PACKET_LOSS_BASELINE_PERCENT,
+    PACKET_LOSS_DEVIATION_PERCENT,
+    UPTIME_BASELINE_PERCENT,
+    UPTIME_DEVIATION_PERCENT,
     // Fora da tela, mas avaliáveis: publicados pelos datasets.
     "success",
     "type",

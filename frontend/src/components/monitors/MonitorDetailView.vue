@@ -187,6 +187,7 @@ const emptyMonitor: Monitor = {
   port: undefined,
   configuration: {},
   intervalSeconds: 60,
+  timeoutSeconds: 5,
   status: 'unknown',
   isEnabled: true,
   device: undefined,

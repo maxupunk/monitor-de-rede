@@ -11,6 +11,7 @@ use super::contract::{
     artifact_header, artifact_summary, ArtifactDelivery, ArtifactVariant, GeneratedArtifact,
     PeerConfigContext, VpnProfileGenerator, PERSISTENT_KEEPALIVE_SECONDS,
 };
+use crate::services::vpn::shell_escape::{escape_uci, sanitize_file_name};
 
 pub const INTERFACE_NAME: &str = "wg_nm";
 pub const FIREWALL_ZONE: &str = "vpn_netmonitor";
@@ -52,13 +53,6 @@ fn instructions() -> Vec<String> {
         "Cole o bloco completo de comandos e pressione Enter.".to_string(),
         "A rede reinicia ao final e o túnel sobe automaticamente.".to_string(),
     ]
-}
-
-fn escape_uci(s: &str) -> String {
-    s.chars()
-        .filter(|c| !c.is_control() && *c != '\r' && *c != '\n')
-        .collect::<String>()
-        .replace('\'', "'\\''")
 }
 
 impl OpenWrtProfileGenerator {
@@ -147,13 +141,14 @@ impl OpenWrtProfileGenerator {
     }
 
     fn build_variants(&self, context: &PeerConfigContext) -> Vec<ArtifactVariant> {
+        let safe_name = sanitize_file_name(&context.peer_name);
         vec![
             ArtifactVariant {
                 id: "opkg".to_string(),
                 label: "opkg".to_string(),
                 hint: "OpenWrt 23.05, 22.03, 21.02 e anteriores".to_string(),
                 icon: "mdi-package-variant-closed".to_string(),
-                file_name: format!("netmonitor-{}-opkg.sh", context.peer_name),
+                file_name: format!("netmonitor-{safe_name}-opkg.sh"),
                 language: "shell".to_string(),
                 content: self.build_script(context, PackageManager::Opkg),
                 instructions: instructions(),
@@ -163,7 +158,7 @@ impl OpenWrtProfileGenerator {
                 label: "apk".to_string(),
                 hint: "OpenWrt 24.10+ e SNAPSHOT — o opkg foi substituído pelo apk".to_string(),
                 icon: "mdi-package-variant".to_string(),
-                file_name: format!("netmonitor-{}-apk.sh", context.peer_name),
+                file_name: format!("netmonitor-{safe_name}-apk.sh"),
                 language: "shell".to_string(),
                 content: self.build_script(context, PackageManager::Apk),
                 instructions: instructions(),
@@ -204,7 +199,7 @@ impl VpnProfileGenerator for OpenWrtProfileGenerator {
             profile: self.profile().to_string(),
             label: self.label().to_string(),
             delivery: ArtifactDelivery::Copy,
-            file_name: format!("netmonitor-{}.sh", context.peer_name),
+            file_name: format!("netmonitor-{}.sh", sanitize_file_name(&context.peer_name)),
             language: "shell".to_string(),
             content: self.build_script(context, PackageManager::Auto),
             instructions: instructions(),

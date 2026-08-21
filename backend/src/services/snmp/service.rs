@@ -5,6 +5,7 @@ use futures::future;
 use sea_orm::{
     sea_query::Expr, ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set,
 };
+use std::collections::{BTreeMap, HashMap};
 
 use crate::services::{
     alerts::fields as alert_fields,
@@ -261,9 +262,26 @@ pub async fn poll_device(
         });
     }
 
+    // Carrega interfaces já conhecidas de uma vez para evitar SELECT N+1 no
+    // loop de sincronização (QUA-04).
+    let existing_interfaces = device_interfaces::Entity::find()
+        .filter(device_interfaces_entity::Column::DeviceId.eq(device.id))
+        .all(&ctx.db)
+        .await?;
+    let existing_by_index: BTreeMap<i32, device_interfaces::Model> = existing_interfaces
+        .into_iter()
+        .filter_map(|row| row.snmp_index.map(|index| (index, row)))
+        .collect();
+
     let mut interfaces = std::collections::BTreeMap::new();
     for interface in &scan.interfaces {
-        let saved = sync_interface(&ctx.db, device.id, interface).await?;
+        let saved = sync_interface(
+            &ctx.db,
+            device.id,
+            interface,
+            existing_by_index.get(&interface.if_index),
+        )
+        .await?;
         // Só interface administrativamente habilitada é avaliada: uma porta
         // que o operador desligou não pode gerar alerta de queda de link.
         if saved.interface.admin_status.as_deref() == Some("up") {
@@ -281,25 +299,35 @@ pub async fn poll_device(
     let previous_uptime = latest_device_metric(&ctx.db, device.id, "snmp_uptime")
         .await?
         .map(|metric| metric.value.max(0.0) as u64);
-    let mut metrics_recorded = 0;
+    let interface_ids: Vec<i64> = interfaces.values().map(|row| row.id).collect();
+    let mut previous_metrics = latest_metrics_for_interfaces(
+        &ctx.db,
+        device.id,
+        &interface_ids,
+        &["ifHCInOctets", "ifHCOutOctets"],
+    )
+    .await?;
+
+    // Acumula métricas de tráfego e sistema para inserção em massa (QUA-04).
+    let mut pending_metrics: Vec<PendingMetric> = Vec::new();
     let mut reboot_detected = false;
     for traffic in &scan.traffic {
         let Some(interface) = interfaces.get(&traffic.if_index) else {
             continue;
         };
-        let (recorded, reboot) = persist_traffic(
-            &ctx.db,
+        let (metrics, reboot) = build_traffic_metrics(
             device.id,
             interface,
             traffic,
+            &mut previous_metrics,
             previous_uptime,
             scan.system_info.sys_up_time,
-        )
-        .await?;
-        metrics_recorded += recorded;
+        );
+        pending_metrics.extend(metrics);
         reboot_detected |= reboot;
     }
-    persist_system_metrics(&ctx.db, device.id, &scan).await?;
+    pending_metrics.extend(build_system_metrics(device.id, &scan));
+    let metrics_recorded = record_metrics_bulk(&ctx.db, pending_metrics).await?;
     // O status **não** é escrito aqui (matriz de paridade #4): quem decide é o
     // `device_status`, agregando todos os monitores habilitados. Gravar "online"
     // direto era o bug de alternância — a coleta subia o dispositivo em silêncio
@@ -523,6 +551,10 @@ pub async fn apply_monitors(
         .filter(device_interfaces_entity::Column::DeviceId.eq(device.id))
         .all(&ctx.db)
         .await?;
+    let db_interfaces_by_index: BTreeMap<i32, device_interfaces::Model> = db_interfaces
+        .iter()
+        .filter_map(|row| row.snmp_index.map(|index| (index, row.clone())))
+        .collect();
 
     for db_iface in db_interfaces {
         if let Some(snmp_idx) = db_iface.snmp_index {
@@ -566,7 +598,14 @@ pub async fn apply_monitors(
         .into_iter()
         .collect::<std::collections::BTreeSet<_>>();
     for source in &scan.interfaces {
-        let interface = sync_interface(&ctx.db, device.id, source).await?.interface;
+        let interface = sync_interface(
+            &ctx.db,
+            device.id,
+            source,
+            db_interfaces_by_index.get(&source.if_index),
+        )
+        .await?
+        .interface;
         set_monitoring(
             &ctx.db,
             device.id,
@@ -855,22 +894,21 @@ pub struct SyncedInterface {
 ///
 /// Público porque a matriz de paridade #20 — o `adminStatus` escolhido pelo
 /// operador sobrevive ao poll — só se prova contra o banco.
+///
+/// Recebe a interface existente (quando já carregada em lote pelo chamador)
+/// para evitar um `SELECT` por interface durante o poll.
 pub async fn sync_interface(
     db: &sea_orm::DatabaseConnection,
     device_id: i64,
     source: &SnmpInterface,
+    existing: Option<&device_interfaces::Model>,
 ) -> AppResult<SyncedInterface> {
-    let existing = device_interfaces::Entity::find()
-        .filter(device_interfaces_entity::Column::DeviceId.eq(device_id))
-        .filter(device_interfaces_entity::Column::SnmpIndex.eq(Some(source.if_index)))
-        .one(db)
-        .await?;
     let now = Utc::now();
-    let admin_status = existing.as_ref().and_then(|row| row.admin_status.clone());
-    let previous_oper_status = existing.as_ref().and_then(|row| row.oper_status.clone());
-    let previous_speed = existing.as_ref().and_then(|row| row.speed);
+    let admin_status = existing.and_then(|row| row.admin_status.clone());
+    let previous_oper_status = existing.and_then(|row| row.oper_status.clone());
+    let previous_speed = existing.and_then(|row| row.speed);
     let model = device_interfaces::ActiveModel {
-        id: existing.as_ref().map(|row| Set(row.id)).unwrap_or_default(),
+        id: existing.map(|row| Set(row.id)).unwrap_or_default(),
         device_id: Set(device_id),
         snmp_index: Set(Some(source.if_index)),
         name: Set(source.if_name.clone()),
@@ -903,37 +941,42 @@ pub async fn sync_interface(
     })
 }
 
-async fn persist_traffic(
-    db: &sea_orm::DatabaseConnection,
+/// Constrói as métricas de tráfego de uma interface para inserção em massa.
+///
+/// Não grava no banco: apenas devolve os `PendingMetric` e a flag de reboot,
+/// permitindo ao chamador um único `insert_many` por coleta SNMP.
+fn build_traffic_metrics(
     device_id: i64,
     interface: &device_interfaces::Model,
     current: &InterfaceTraffic,
+    previous_metrics: &mut HashMap<(i64, String), metrics::Model>,
     previous_uptime: Option<u64>,
     current_uptime: Option<u64>,
-) -> AppResult<(usize, bool)> {
-    let previous_in = latest_metric(db, interface.id, "ifHCInOctets").await?;
-    let previous_out = latest_metric(db, interface.id, "ifHCOutOctets").await?;
-    let mut recorded = 0;
+) -> (Vec<PendingMetric>, bool) {
+    let previous_in = previous_metrics
+        .get(&(interface.id, "ifHCInOctets".to_string()))
+        .cloned();
+    let previous_out = previous_metrics
+        .get(&(interface.id, "ifHCOutOctets".to_string()))
+        .cloned();
+    let mut pending = Vec::with_capacity(6);
     for (name, value) in [
         ("ifHCInOctets", current.in_octets as f64),
         ("ifHCOutOctets", current.out_octets as f64),
         ("ifInErrors", current.in_errors as f64),
         ("ifOutErrors", current.out_errors as f64),
     ] {
-        record_metric(
-            db,
+        pending.push(PendingMetric {
             device_id,
-            Some(interface.id),
-            name,
+            interface_id: Some(interface.id),
+            name: name.into(),
             value,
-            "bytes",
-            current.recorded_at,
-        )
-        .await?;
-        recorded += 1;
+            unit: "bytes".into(),
+            recorded_at: current.recorded_at,
+        });
     }
     let (Some(previous_in), Some(previous_out)) = (previous_in, previous_out) else {
-        return Ok((recorded, false));
+        return (pending, false);
     };
     let previous = InterfaceTraffic {
         if_index: current.if_index,
@@ -951,37 +994,30 @@ async fn persist_traffic(
         current_uptime,
     );
     if !rates.reboot_detected {
-        record_metric(
-            db,
+        pending.push(PendingMetric {
             device_id,
-            Some(interface.id),
-            "inBps",
-            rates.in_bps,
-            "bps",
-            current.recorded_at,
-        )
-        .await?;
-        record_metric(
-            db,
+            interface_id: Some(interface.id),
+            name: "inBps".into(),
+            value: rates.in_bps,
+            unit: "bps".into(),
+            recorded_at: current.recorded_at,
+        });
+        pending.push(PendingMetric {
             device_id,
-            Some(interface.id),
-            "outBps",
-            rates.out_bps,
-            "bps",
-            current.recorded_at,
-        )
-        .await?;
-        recorded += 2;
+            interface_id: Some(interface.id),
+            name: "outBps".into(),
+            value: rates.out_bps,
+            unit: "bps".into(),
+            recorded_at: current.recorded_at,
+        });
     }
-    Ok((recorded, rates.reboot_detected))
+    (pending, rates.reboot_detected)
 }
 
-async fn persist_system_metrics(
-    db: &sea_orm::DatabaseConnection,
-    device_id: i64,
-    scan: &SnmpScanResult,
-) -> AppResult<()> {
+/// Constrói as métricas de sistema (CPU, memória, uptime) para inserção em massa.
+fn build_system_metrics(device_id: i64, scan: &SnmpScanResult) -> Vec<PendingMetric> {
     let recorded_at = Utc::now();
+    let mut pending = Vec::with_capacity(3);
     for (name, value, unit) in [
         ("cpu_usage", scan.cpu_info.usage_percent, "percent"),
         ("memory_usage", scan.memory_info.used_percent, "percent"),
@@ -992,23 +1028,45 @@ async fn persist_system_metrics(
         ),
     ] {
         if let Some(value) = value {
-            record_metric(db, device_id, None, name, value, unit, recorded_at).await?;
+            pending.push(PendingMetric {
+                device_id,
+                interface_id: None,
+                name: name.into(),
+                value,
+                unit: unit.into(),
+                recorded_at,
+            });
         }
     }
-    Ok(())
+    pending
 }
 
-async fn latest_metric(
+/// Busca a métrica mais recente de cada `(interface_id, nome)` em uma única
+/// query, eliminando o N+1 do loop de contadores SNMP.
+pub async fn latest_metrics_for_interfaces(
     db: &sea_orm::DatabaseConnection,
-    interface_id: i64,
-    name: &str,
-) -> AppResult<Option<metrics::Model>> {
-    Ok(metrics::Entity::find()
-        .filter(metrics_entity::Column::InterfaceId.eq(Some(interface_id)))
-        .filter(metrics_entity::Column::Name.eq(name))
+    device_id: i64,
+    interface_ids: &[i64],
+    names: &[&str],
+) -> AppResult<HashMap<(i64, String), metrics::Model>> {
+    if interface_ids.is_empty() || names.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let rows = metrics::Entity::find()
+        .filter(metrics_entity::Column::DeviceId.eq(device_id))
+        .filter(metrics_entity::Column::InterfaceId.is_in(interface_ids.iter().copied()))
+        .filter(metrics_entity::Column::Name.is_in(names.iter().copied()))
         .order_by_desc(metrics_entity::Column::RecordedAt)
-        .one(db)
-        .await?)
+        .all(db)
+        .await?;
+    let mut map = HashMap::new();
+    for row in rows {
+        if let Some(interface_id) = row.interface_id {
+            let key = (interface_id, row.name.clone());
+            map.entry(key).or_insert(row);
+        }
+    }
+    Ok(map)
 }
 
 async fn latest_device_metric(
@@ -1025,28 +1083,53 @@ async fn latest_device_metric(
         .await?)
 }
 
-async fn record_metric(
-    db: &sea_orm::DatabaseConnection,
+/// Métrica pronta para inserção, usada para acumular várias leituras antes de
+/// um único `insert_many` — evita o N+1 de gravação no poll SNMP.
+#[derive(Debug, Clone)]
+struct PendingMetric {
     device_id: i64,
     interface_id: Option<i64>,
-    name: &str,
+    name: String,
     value: f64,
-    unit: &str,
+    unit: String,
     recorded_at: chrono::DateTime<Utc>,
-) -> AppResult<()> {
-    metrics::ActiveModel {
-        device_id: Set(device_id),
-        interface_id: Set(interface_id),
-        monitor_id: Set(None),
-        name: Set(name.into()),
-        value: Set(value),
-        unit: Set(unit.into()),
-        recorded_at: Set(recorded_at.into()),
-        ..Default::default()
+}
+
+impl PendingMetric {
+    fn into_active_model(self) -> metrics::ActiveModel {
+        metrics::ActiveModel {
+            device_id: Set(self.device_id),
+            interface_id: Set(self.interface_id),
+            monitor_id: Set(None),
+            name: Set(self.name),
+            value: Set(self.value),
+            unit: Set(self.unit),
+            recorded_at: Set(self.recorded_at.into()),
+            ..Default::default()
+        }
     }
-    .insert(db)
-    .await?;
-    Ok(())
+}
+
+/// Grava um lote de métricas em uma única operação de inserção em massa.
+///
+/// SQLite e PostgreSQL suportam `INSERT` multi-row; o `sea_orm` emite a forma
+/// correta para cada dialeto. O retorno é a quantidade de itens enviados.
+async fn record_metrics_bulk(
+    db: &sea_orm::DatabaseConnection,
+    metrics: Vec<PendingMetric>,
+) -> AppResult<usize> {
+    if metrics.is_empty() {
+        return Ok(0);
+    }
+    let count = metrics.len();
+    let active_models: Vec<metrics::ActiveModel> = metrics
+        .into_iter()
+        .map(PendingMetric::into_active_model)
+        .collect();
+    metrics::Entity::insert_many(active_models)
+        .exec_without_returning(db)
+        .await?;
+    Ok(count)
 }
 
 pub async fn detect_connection(

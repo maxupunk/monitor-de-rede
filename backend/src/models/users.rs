@@ -26,13 +26,22 @@ pub fn validate_password(password: &str) -> std::result::Result<(), validator::V
     Ok(())
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Deserialize, Serialize)]
 pub struct LoginParams {
     pub email: String,
     pub password: String,
 }
 
-#[derive(Debug, Deserialize, Serialize, Validate)]
+impl std::fmt::Debug for LoginParams {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LoginParams")
+            .field("email", &self.email)
+            .field("password", &"[REDACTED]")
+            .finish()
+    }
+}
+
+#[derive(Deserialize, Serialize, Validate)]
 pub struct RegisterParams {
     #[validate(email(message = "Informe um e-mail válido."))]
     pub email: String,
@@ -40,6 +49,16 @@ pub struct RegisterParams {
     pub password: String,
     #[validate(length(min = 2, message = "O nome precisa ter ao menos 2 caracteres."))]
     pub name: String,
+}
+
+impl std::fmt::Debug for RegisterParams {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RegisterParams")
+            .field("email", &self.email)
+            .field("name", &self.name)
+            .field("password", &"[REDACTED]")
+            .finish()
+    }
 }
 
 #[derive(Debug, Validate, Deserialize)]
@@ -425,5 +444,35 @@ impl ActiveModel {
         self.magic_link_token = ActiveValue::set(None);
         self.magic_link_expiration = ActiveValue::set(None);
         self.update(db).await.map_err(ModelError::from)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn debug_de_login_nao_exibe_a_senha() {
+        let params = LoginParams {
+            email: "user@example.com".to_string(),
+            password: "SenhaForte1".to_string(),
+        };
+        let debug = format!("{:?}", params);
+        assert!(debug.contains("user@example.com"));
+        assert!(!debug.contains("SenhaForte1"));
+        assert!(debug.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn debug_de_registro_nao_exibe_a_senha() {
+        let params = RegisterParams {
+            email: "user@example.com".to_string(),
+            password: "SenhaForte1".to_string(),
+            name: "User".to_string(),
+        };
+        let debug = format!("{:?}", params);
+        assert!(debug.contains("user@example.com"));
+        assert!(!debug.contains("SenhaForte1"));
+        assert!(debug.contains("[REDACTED]"));
     }
 }

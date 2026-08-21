@@ -6,7 +6,7 @@ use serde::Deserialize;
 use crate::services::{
     monitoring::contracts::{CheckMetric, CheckResult, Checker, MonitorStatus},
     snmp::{
-        client::{SnmpClient, SnmpConfig, SnmpVersion},
+        client::{SnmpClient, SnmpConfig, SnmpError, SnmpVersion},
         collectors::{collect_cpu, collect_memory, status_label, OID_SYS_UPTIME},
     },
 };
@@ -80,22 +80,36 @@ impl Checker for SnmpChecker {
                 metrics: observation.metrics,
                 data: observation.data,
             },
-            Err(error) => CheckResult {
-                success: false,
-                status: MonitorStatus::Down,
-                started_at,
-                finished_at,
-                duration_ms: (finished_at - started_at).num_milliseconds().max(0),
-                message: Some(format!("Falha na consulta SNMP: {error}")),
-                metrics: vec![],
-                data: serde_json::json!({}),
-            },
+            Err(error) => check_result_from_snmp_error(error, started_at, finished_at),
         }
     }
 }
 
-async fn execute_query(config: &SnmpCheckerConfig) -> Result<SnmpObservation, String> {
-    let version = SnmpVersion::parse(&config.version).ok_or("Versao SNMP invalida")?;
+fn check_result_from_snmp_error(
+    error: SnmpError,
+    started_at: chrono::DateTime<Utc>,
+    finished_at: chrono::DateTime<Utc>,
+) -> CheckResult {
+    let status = if matches!(error, SnmpError::Timeout) {
+        MonitorStatus::Unknown
+    } else {
+        MonitorStatus::Down
+    };
+    CheckResult {
+        success: false,
+        status,
+        started_at,
+        finished_at,
+        duration_ms: (finished_at - started_at).num_milliseconds().max(0),
+        message: Some(format!("Falha na consulta SNMP: {error}")),
+        metrics: vec![],
+        data: serde_json::json!({}),
+    }
+}
+
+async fn execute_query(config: &SnmpCheckerConfig) -> Result<SnmpObservation, SnmpError> {
+    let version = SnmpVersion::parse(&config.version)
+        .ok_or_else(|| SnmpError::InvalidConfig("Versão SNMP inválida".into()))?;
     let client = SnmpClient::new(SnmpConfig {
         host: config.host.clone(),
         version,
@@ -115,15 +129,12 @@ async fn execute_query(config: &SnmpCheckerConfig) -> Result<SnmpObservation, St
         "uptime" => uptime(&client).await,
         "cpu_usage" => cpu_usage(&client).await,
         "memory_usage" => memory_usage(&client).await,
-        _ => Err("Metrica SNMP invalida".into()),
+        _ => Err(SnmpError::InvalidConfig("Métrica SNMP inválida".into())),
     }
 }
 
-async fn uptime(client: &SnmpClient) -> Result<SnmpObservation, String> {
-    let values = client
-        .get(&[OID_SYS_UPTIME])
-        .await
-        .map_err(|error| error.to_string())?;
+async fn uptime(client: &SnmpClient) -> Result<SnmpObservation, SnmpError> {
+    let values = client.get(&[OID_SYS_UPTIME]).await?;
     let value = value(&values, OID_SYS_UPTIME)?;
     Ok(SnmpObservation {
         metric: "uptime".into(),
@@ -137,13 +148,11 @@ async fn uptime(client: &SnmpClient) -> Result<SnmpObservation, String> {
     })
 }
 
-async fn cpu_usage(client: &SnmpClient) -> Result<SnmpObservation, String> {
-    let cpu = collect_cpu(client)
-        .await
-        .map_err(|error| error.to_string())?;
+async fn cpu_usage(client: &SnmpClient) -> Result<SnmpObservation, SnmpError> {
+    let cpu = collect_cpu(client).await?;
     let usage = cpu
         .usage_percent
-        .ok_or("O agente SNMP nao informou uso de CPU")?;
+        .ok_or_else(|| SnmpError::InvalidConfig("O agente SNMP não informou uso de CPU".into()))?;
     Ok(SnmpObservation {
         metric: "cpu_usage".into(),
         status: MonitorStatus::Up,
@@ -156,13 +165,11 @@ async fn cpu_usage(client: &SnmpClient) -> Result<SnmpObservation, String> {
     })
 }
 
-async fn memory_usage(client: &SnmpClient) -> Result<SnmpObservation, String> {
-    let memory = collect_memory(client)
-        .await
-        .map_err(|error| error.to_string())?;
-    let usage = memory
-        .used_percent
-        .ok_or("O agente SNMP nao informou memoria total e disponivel")?;
+async fn memory_usage(client: &SnmpClient) -> Result<SnmpObservation, SnmpError> {
+    let memory = collect_memory(client).await?;
+    let usage = memory.used_percent.ok_or_else(|| {
+        SnmpError::InvalidConfig("O agente SNMP não informou memória total e disponível".into())
+    })?;
     Ok(SnmpObservation {
         metric: "memory_usage".into(),
         status: MonitorStatus::Up,
@@ -182,14 +189,11 @@ async fn interface_status(
     client: &SnmpClient,
     config: &SnmpCheckerConfig,
     metric: &str,
-) -> Result<SnmpObservation, String> {
+) -> Result<SnmpObservation, SnmpError> {
     let index = interface_index(config)?;
     let admin_oid = format!("{OID_IF_ADMIN_STATUS}.{index}");
     let oper_oid = format!("{OID_IF_OPER_STATUS}.{index}");
-    let values = client
-        .get(&[&admin_oid, &oper_oid])
-        .await
-        .map_err(|error| error.to_string())?;
+    let values = client.get(&[&admin_oid, &oper_oid]).await?;
     let admin = value(&values, &admin_oid)?;
     let oper = value(&values, &oper_oid)?;
     Ok(SnmpObservation {
@@ -219,16 +223,13 @@ async fn interface_status(
 async fn interface_traffic(
     client: &SnmpClient,
     config: &SnmpCheckerConfig,
-) -> Result<SnmpObservation, String> {
+) -> Result<SnmpObservation, SnmpError> {
     let index = interface_index(config)?;
     let hc_in = format!("{OID_IF_HC_IN_OCTETS}.{index}");
     let hc_out = format!("{OID_IF_HC_OUT_OCTETS}.{index}");
     let low_in = format!("{OID_IF_IN_OCTETS}.{index}");
     let low_out = format!("{OID_IF_OUT_OCTETS}.{index}");
-    let values = client
-        .get(&[&hc_in, &hc_out, &low_in, &low_out])
-        .await
-        .map_err(|error| error.to_string())?;
+    let values = client.get(&[&hc_in, &hc_out, &low_in, &low_out]).await?;
     let high_capacity = values
         .get(&hc_in)
         .and_then(Option::as_ref)
@@ -271,22 +272,22 @@ async fn interface_traffic(
     })
 }
 
-fn interface_index(config: &SnmpCheckerConfig) -> Result<i32, String> {
+fn interface_index(config: &SnmpCheckerConfig) -> Result<i32, SnmpError> {
     config
         .if_index
         .filter(|index| *index > 0)
-        .ok_or_else(|| "ifIndex e obrigatorio".into())
+        .ok_or_else(|| SnmpError::InvalidConfig("ifIndex é obrigatório".into()))
 }
 
 fn value(
     values: &std::collections::BTreeMap<String, Option<crate::services::snmp::client::SnmpValue>>,
     oid: &str,
-) -> Result<u64, String> {
+) -> Result<u64, SnmpError> {
     values
         .get(oid)
         .and_then(Option::as_ref)
         .and_then(|item| item.number())
-        .ok_or_else(|| format!("OID {oid} nao retornou valor numerico"))
+        .ok_or_else(|| SnmpError::Oid(format!("OID {oid} não retornou valor numérico")))
 }
 
 fn interface_monitor_status(admin: u64, oper: u64) -> MonitorStatus {
@@ -315,5 +316,30 @@ mod tests {
         assert_eq!(interface_monitor_status(1, 1), MonitorStatus::Up);
         assert_eq!(interface_monitor_status(1, 2), MonitorStatus::Down);
         assert_eq!(interface_monitor_status(1, 7), MonitorStatus::Warning);
+    }
+
+    #[test]
+    fn timeout_snmp_gera_resultado_unknown() {
+        let started_at = Utc::now();
+        let result = check_result_from_snmp_error(SnmpError::Timeout, started_at, started_at);
+        assert_eq!(result.status, MonitorStatus::Unknown);
+        assert!(!result.success);
+        assert!(result
+            .message
+            .as_deref()
+            .expect("mensagem presente")
+            .contains("Tempo esgotado na consulta SNMP"));
+    }
+
+    #[test]
+    fn outros_erros_snmp_geram_resultado_down() {
+        let started_at = Utc::now();
+        let result = check_result_from_snmp_error(
+            SnmpError::Network("host inalcançável".into()),
+            started_at,
+            started_at,
+        );
+        assert_eq!(result.status, MonitorStatus::Down);
+        assert!(!result.success);
     }
 }

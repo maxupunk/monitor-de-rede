@@ -1,5 +1,6 @@
 //! DTOs de entrada dos recursos entregues nas Fases 2 e 3.
 
+use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -283,6 +284,13 @@ pub struct PaginationQuery {
     pub limit: Option<u64>,
 }
 
+/// `GET /api/monitors/:id/uptime` — janela de horas para cálculo de uptime.
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct MonitorUptimeQuery {
+    pub hours: Option<i64>,
+}
+
 /// Filtros suportados por `GET /api/monitors`
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -294,4 +302,19 @@ pub struct MonitorsIndexQuery {
     #[serde(rename = "type")]
     pub monitor_type: Option<String>,
     pub device_id: Option<i64>,
+}
+
+/// Janela de manutenção (Fase 3).
+///
+/// Toda janela precisa estar vinculada a um site ou a um dispositivo. A
+/// validação semântica do intervalo fica no serviço de domínio.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MaintenanceWindowInput {
+    pub site_id: Option<i64>,
+    pub device_id: Option<i64>,
+    pub name: String,
+    pub description: Option<String>,
+    pub starts_at: DateTime<Utc>,
+    pub ends_at: DateTime<Utc>,
 }

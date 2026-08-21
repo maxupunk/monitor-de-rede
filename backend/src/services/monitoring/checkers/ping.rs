@@ -85,6 +85,73 @@ const fn default_timeout_ms() -> u64 {
     5_000
 }
 
+const LOOKUP_TIMEOUT: Duration = Duration::from_secs(5);
+
+#[derive(Debug, PartialEq)]
+enum PingLookupError {
+    Timeout,
+    NoAddress,
+    Dns(String),
+}
+
+async fn resolve_host(host: &str) -> Result<IpAddr, PingLookupError> {
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        return Ok(ip);
+    }
+
+    match tokio::time::timeout(LOOKUP_TIMEOUT, tokio::net::lookup_host((host, 0))).await {
+        Ok(Ok(mut addresses)) => addresses
+            .next()
+            .map(|address| address.ip())
+            .ok_or(PingLookupError::NoAddress),
+        Ok(Err(error)) => Err(PingLookupError::Dns(error.to_string())),
+        Err(_) => Err(PingLookupError::Timeout),
+    }
+}
+
+fn check_result_from_lookup_error(
+    started_at: chrono::DateTime<Utc>,
+    host: &str,
+    error: PingLookupError,
+) -> CheckResult {
+    let finished_at = Utc::now();
+    let (status, message) = match error {
+        PingLookupError::Timeout => (
+            MonitorStatus::Unknown,
+            format!("Tempo esgotado ao resolver {host} para ping (timeout de {LOOKUP_TIMEOUT:?})"),
+        ),
+        PingLookupError::NoAddress => (
+            MonitorStatus::Down,
+            format!("nenhum endereço IP foi encontrado no DNS para {host}"),
+        ),
+        PingLookupError::Dns(error) => (
+            MonitorStatus::Down,
+            format!("falha na resolução DNS de {host}: {error}"),
+        ),
+    };
+    CheckResult {
+        success: false,
+        status,
+        started_at,
+        finished_at,
+        duration_ms: (finished_at - started_at).num_milliseconds().max(0),
+        message: Some(message),
+        metrics: vec![
+            CheckMetric {
+                name: "latency".into(),
+                value: 0.0,
+                unit: "ms".into(),
+            },
+            CheckMetric {
+                name: "packet_loss".into(),
+                value: 100.0,
+                unit: "%".into(),
+            },
+        ],
+        data: serde_json::json!({}),
+    }
+}
+
 /// Checker ICMP associado ao cliente do processo atual.
 pub struct PingChecker {
     client: PingClient,
@@ -106,21 +173,9 @@ impl Checker for PingChecker {
     async fn execute(&self, config: Self::Config) -> CheckResult {
         let started_at = Utc::now();
         let host = config.host.clone();
-        let ip: IpAddr = match host.parse::<IpAddr>() {
+        let ip: IpAddr = match resolve_host(&host).await {
             Ok(ip) => ip,
-            Err(_) => match tokio::net::lookup_host((host.as_str(), 0)).await {
-                Ok(mut addresses) => match addresses.next() {
-                    Some(address) => address.ip(),
-                    None => {
-                        return failed_result(
-                            started_at,
-                            &host,
-                            "nenhum endereço IP foi encontrado no DNS".into(),
-                        )
-                    }
-                },
-                Err(error) => return failed_result(started_at, &host, error.to_string()),
-            },
+            Err(error) => return check_result_from_lookup_error(started_at, &host, error),
         };
         let count = config.packet_count.clamp(1, 20);
         let Some(client) = self.client.for_ip(ip) else {
@@ -293,5 +348,64 @@ mod tests {
             resumo(3, &[medida(12), medida(13)]).message.as_deref(),
             Some("Ping para 192.0.2.10 finalizado em 12.5ms (33% perda)")
         );
+    }
+
+    #[tokio::test]
+    async fn resolve_ip_literal_sem_consultar_dns() {
+        assert_eq!(
+            resolve_host("192.0.2.10").await,
+            Ok("192.0.2.10".parse::<IpAddr>().unwrap())
+        );
+        assert_eq!(
+            resolve_host("2001:db8::1").await,
+            Ok("2001:db8::1".parse::<IpAddr>().unwrap())
+        );
+    }
+
+    #[test]
+    fn timeout_de_lookup_gera_resultado_unknown() {
+        let started_at = Utc::now();
+        let result =
+            check_result_from_lookup_error(started_at, "router.local", PingLookupError::Timeout);
+        assert_eq!(result.status, MonitorStatus::Unknown);
+        assert!(!result.success);
+        assert!(result
+            .message
+            .as_deref()
+            .expect("mensagem presente")
+            .contains("Tempo esgotado ao resolver router.local"));
+        assert_eq!(metrica(&result, "packet_loss"), 100.0);
+        assert_eq!(metrica(&result, "latency"), 0.0);
+    }
+
+    #[test]
+    fn erro_de_dns_gera_resultado_down() {
+        let started_at = Utc::now();
+        let result = check_result_from_lookup_error(
+            started_at,
+            "router.local",
+            PingLookupError::Dns("NXDOMAIN".into()),
+        );
+        assert_eq!(result.status, MonitorStatus::Down);
+        assert!(!result.success);
+        assert!(result
+            .message
+            .as_deref()
+            .expect("mensagem presente")
+            .contains("falha na resolução DNS de router.local"));
+    }
+
+    #[test]
+    fn endereco_vazio_gera_resultado_down() {
+        let started_at = Utc::now();
+        let result =
+            check_result_from_lookup_error(started_at, "router.local", PingLookupError::NoAddress);
+        assert_eq!(result.status, MonitorStatus::Down);
+        assert!(!result.success);
+        assert!(result
+            .message
+            .as_deref()
+            .expect("mensagem presente")
+            .contains("nenhum endereço IP foi encontrado"));
     }
 }

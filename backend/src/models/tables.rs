@@ -16,8 +16,8 @@ use std::collections::HashSet;
 use loco_rs::Result;
 use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 
-/// As 22 tabelas do esquema, na ordem de criação da §6 (pais antes de filhos).
-pub const CREATION_ORDER: [&str; 22] = [
+/// As 25 tabelas do esquema, na ordem de criação da §6 (pais antes de filhos).
+pub const CREATION_ORDER: [&str; 25] = [
     "users",
     "sites",
     "probes",
@@ -27,6 +27,7 @@ pub const CREATION_ORDER: [&str; 22] = [
     "device_links",
     "monitors",
     "monitor_results",
+    "monitor_results_hourly",
     "metrics",
     "discovery_runs",
     "discovery_results",
@@ -41,11 +42,20 @@ pub const CREATION_ORDER: [&str; 22] = [
     "notification_outbox",
     "probe_tasks",
     "system_settings",
+    // Fase 3 do roadmap: janelas de manutenção. Depois de `sites`,
+    // `devices` e `users`, para as FKs já existirem.
+    "maintenance_windows",
+    // Fase 3 do roadmap: trilha de auditoria. Depois de `users` pela FK.
+    "audit_logs",
     // Opcional (§6 #23 / §10). **Não migrada:** a §10.2 optou por
     // `loco_rs::auth::JWT`, que não guarda token no banco. Fica listada porque
     // a limpeza pula tabelas inexistentes e a Fase 6 ainda pode voltar atrás.
     "auth_tokens",
 ];
+
+/// Tabela de controle do migrator. Precisa ser esvaziada entre testes para que
+/// o `auto_migrate` do Loco reaplique as migrations sem erro de UNIQUE.
+pub const MIGRATIONS_TABLE: &str = "seaql_migrations";
 
 /// Ordem segura de limpeza: filhos antes dos pais, para não violar FK em bancos
 /// que as checam (Postgres sempre; SQLite quando `foreign_keys=ON`).
@@ -113,6 +123,16 @@ pub async fn truncate_all<C: ConnectionTrait>(db: &C) -> Result<()> {
         ))
         .await?;
     }
+    // Limpa o controle do migrator por último, depois que todo o schema está
+    // vazio — assim o `auto_migrate` dos testes reaplica as migrations sem
+    // conflito de versão.
+    if existing.contains(MIGRATIONS_TABLE) {
+        db.execute_raw(Statement::from_string(
+            backend,
+            format!("DELETE FROM \"{MIGRATIONS_TABLE}\""),
+        ))
+        .await?;
+    }
     Ok(())
 }
 
@@ -121,10 +141,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cobre_as_22_tabelas_sem_repetir() {
-        assert_eq!(CREATION_ORDER.len(), 22);
+    fn cobre_as_25_tabelas_sem_repetir() {
+        assert_eq!(CREATION_ORDER.len(), 25);
         let unicas: HashSet<&&str> = CREATION_ORDER.iter().collect();
-        assert_eq!(unicas.len(), 22, "há nome de tabela repetido");
+        assert_eq!(unicas.len(), 25, "há nome de tabela repetido");
     }
 
     #[test]
@@ -134,8 +154,10 @@ mod tests {
         // `devices` referencia `sites` e `networks`; tem de sumir antes deles.
         assert!(posicao("devices") < posicao("sites"));
         assert!(posicao("devices") < posicao("networks"));
-        // `monitor_results` referencia `monitors`.
+        // `monitor_results` e seu rollup referenciam `monitors`.
         assert!(posicao("monitor_results") < posicao("monitors"));
+        assert!(posicao("monitor_results_hourly") < posicao("monitors"));
+        assert!(posicao("monitor_results_hourly") < posicao("monitor_results"));
         // `notification_outbox` referencia `alert_rules` e `devices`.
         assert!(posicao("notification_outbox") < posicao("alert_rules"));
         assert!(posicao("notification_outbox") < posicao("devices"));

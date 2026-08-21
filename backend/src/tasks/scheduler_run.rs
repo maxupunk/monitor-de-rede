@@ -31,7 +31,7 @@ use crate::{
         discovery::queue::{process_pending_runs, schedule_due_networks, spawn_pending_run},
         monitoring::scheduler::{
             dispatch_notifications, execute_one, execute_snmp_device_group, local_snmp_device_id,
-            run_data_pruner_if_due, sync_vpn_traffic_if_due,
+            rollup_monitor_results_if_due, run_data_pruner_if_due, sync_vpn_traffic_if_due,
         },
         probes::liveness::mark_stale_probes_offline,
         shared::errors::AppResult,
@@ -189,6 +189,9 @@ async fn run_cycle_inner(ctx: &AppContext, detach_discovery: bool) -> AppResult<
     }
     if let Err(error) = run_data_pruner_if_due(ctx).await {
         tracing::warn!(%error, "falha ao executar purga de dados antigos");
+    }
+    if let Err(error) = rollup_monitor_results_if_due(ctx).await {
+        tracing::warn!(%error, "falha ao executar rollup de resultados");
     }
     // Padrões de log casam na ingestão; a avaliação das janelas acontece aqui,
     // junto do resto do motor de alertas — é o que dá ao alerta de log a mesma

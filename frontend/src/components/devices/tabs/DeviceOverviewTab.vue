@@ -40,6 +40,44 @@
       <DeviceHealthSummary :metrics="detailStore.metrics" />
     </template>
 
+    <!-- Estabilidade dos monitores -->
+    <template v-if="detailStore.monitors.length > 0">
+      <v-divider class="my-6" />
+      <div class="text-subtitle-1 font-weight-bold mb-3 d-flex align-center ga-2">
+        <v-icon color="primary">mdi-chart-line</v-icon>
+        Estabilidade dos Monitores (24h)
+      </div>
+      <v-row>
+        <v-col v-for="monitor in monitorsWithUptime" :key="monitor.id" cols="12" sm="6" lg="4">
+          <v-card variant="outlined" class="rounded-lg pa-4">
+            <div class="d-flex align-center justify-space-between mb-2">
+              <div class="font-weight-medium text-truncate" :title="monitor.name">
+                {{ monitor.name }}
+              </div>
+              <v-chip
+                :color="getUptimeColor(monitor.uptime?.uptimePercentage)"
+                size="small"
+                variant="tonal"
+              >
+                {{ formatUptime(monitor.uptime?.uptimePercentage) }}%
+              </v-chip>
+            </div>
+            <div class="text-caption text-grey">
+              {{ monitor.uptime?.totalChecks ?? 0 }} checagens ·
+              {{ monitor.uptime?.upChecks ?? 0 }} up · {{ monitor.uptime?.downChecks ?? 0 }} down
+            </div>
+            <v-progress-linear
+              :model-value="monitor.uptime?.uptimePercentage ?? 100"
+              :color="getUptimeColor(monitor.uptime?.uptimePercentage)"
+              height="6"
+              rounded
+              class="mt-2"
+            ></v-progress-linear>
+          </v-card>
+        </v-col>
+      </v-row>
+    </template>
+
     <!-- Resumo de tráfego por interface monitorada -->
     <div
       v-if="interfaceTrafficSummaries.length > 0"
@@ -251,15 +289,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import {
   useDeviceDetailStore,
   type DeviceInterface,
   type DeviceMetric,
 } from '@/stores/deviceDetail'
+import { useMonitorsStore } from '@/stores/monitors'
 import DeviceHealthSummary from '@/components/devices/DeviceHealthSummary.vue'
 import { formatBps, formatBytes, formatMeasuredValue } from '@/utils/formatters'
 import { useInfiniteList } from '@/composables/useInfiniteList'
+import type { MonitorUptimeResponse } from '@/bindings/MonitorUptimeResponse'
 
 const props = defineProps<{
   deviceId: number
@@ -278,11 +318,58 @@ const emit = defineEmits<{
 }>()
 
 const detailStore = useDeviceDetailStore()
+const monitorsStore = useMonitorsStore()
+
+const uptimeByMonitor = ref<Record<number, MonitorUptimeResponse>>({})
+const uptimeLoading = ref(false)
 
 const showMetricsHistory = ref(false)
 const metricsHistory = useInfiniteList<DeviceMetric>(() => `/devices/${props.deviceId}/metrics`, {
   label: 'histórico de métricas',
 })
+
+const monitorsWithUptime = computed(() =>
+  detailStore.monitors.map((monitor) => ({
+    ...monitor,
+    uptime: uptimeByMonitor.value[monitor.id] ?? null,
+  }))
+)
+
+function getUptimeColor(value?: number | null): string {
+  if (value == null) return 'grey'
+  if (value >= 99.0) return 'success'
+  if (value >= 95.0) return 'warning'
+  return 'error'
+}
+
+function formatUptime(value?: number | null): string {
+  if (value == null) return '0.0'
+  return value.toFixed(1)
+}
+
+async function loadUptime() {
+  const monitors = detailStore.monitors.filter((m) => m.isEnabled !== false)
+  if (monitors.length === 0) return
+  uptimeLoading.value = true
+  try {
+    const results = await Promise.all(
+      monitors.map(async (monitor) => {
+        const uptime = await monitorsStore.fetchUptime(monitor.id, 24)
+        return { id: monitor.id, uptime }
+      })
+    )
+    for (const { id, uptime } of results) {
+      if (uptime) {
+        uptimeByMonitor.value[id] = uptime
+      }
+    }
+  } finally {
+    uptimeLoading.value = false
+  }
+}
+
+onMounted(loadUptime)
+watch(() => detailStore.monitors.map((m) => m.id).join(','), loadUptime, { immediate: true })
 
 function toggleShowMetricsHistory() {
   showMetricsHistory.value = !showMetricsHistory.value

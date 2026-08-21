@@ -22,7 +22,7 @@
 #   produzir sempre o mesmo resultado.
 
 # ------------------------------------------------------------------- web ----
-FROM node:24-alpine AS web
+FROM node:24-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43 AS web
 
 WORKDIR /web
 COPY frontend/package*.json ./
@@ -40,7 +40,7 @@ RUN find dist -type f \
       -size +1k -exec gzip -9 -k {} \;
 
 # --------------------------------------------------------------- builder ----
-FROM rust:slim-bookworm AS builder
+FROM rust:slim-bookworm@sha256:94e9efa4033213dbb70d4f665527e7ece3944ddb7ba1dd2e43f6fd6e2490af58 AS builder
 
 WORKDIR /usr/src/app
 
@@ -77,7 +77,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
           target/release/examples/spike_snmp_v2c \
           /usr/local/bin/
 
-FROM debian:bookworm-slim AS spike
+FROM debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241 AS spike
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates iputils-ping \
@@ -92,15 +92,17 @@ USER app
 CMD ["spike_icmp_dgram", "1.1.1.1"]
 
 # --------------------------------------------------------------- runtime ----
-FROM debian:bookworm-slim AS runtime
+FROM debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241 AS runtime
 
 # `wireguard-tools` traz `wg` e `wg-quick`; `iproute2` e `iptables` são o que o
 # `wg-quick` chama para criar a interface e aplicar as regras de `PostUp`. Não
 # há módulo de kernel aqui: o WireGuard vem do kernel do host (Linux ≥ 5.6,
 # incluindo o do WSL2).
+# `tini` mantém o init mínimo para repassar sinais e fazer o entrypoint
+# supervisionar tanto o watcher quanto a aplicação.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       ca-certificates wireguard-tools iproute2 iptables \
+       ca-certificates wireguard-tools iproute2 iptables tini \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --create-home --shell /usr/sbin/nologin app
@@ -109,8 +111,8 @@ WORKDIR /app
 COPY --from=builder /usr/local/bin/backend-cli /usr/local/bin/backend-cli
 COPY --from=builder /usr/src/app/config /app/config
 COPY --from=web /web/dist /app/web
-COPY docker/entrypoint.sh docker/wireguard-watcher.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/wireguard-watcher.sh
+COPY docker/entrypoint.sh docker/wireguard-watcher.sh docker/healthcheck.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/wireguard-watcher.sh /usr/local/bin/healthcheck.sh
 
 # Banco (SQLite) e configuração do túnel, no mesmo volume — um só. O entrypoint
 # acerta o dono antes de largar o privilégio: volume nomeado nasce do root.
@@ -129,7 +131,7 @@ EXPOSE 51820/udp
 # com a API respondendo. Com a flag, sobra o que interessa em produção: a
 # conexão com o banco.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD ["/usr/local/bin/backend-cli", "doctor", "--production"]
+    CMD ["/usr/local/bin/healthcheck.sh"]
 
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-CMD ["backend-cli", "start"]
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["/usr/local/bin/entrypoint.sh", "backend-cli", "start"]

@@ -142,8 +142,19 @@ services:
       # mudança de peer, então o que precisa mesmo sobreviver é o banco.
       - netmonitor-data:/data
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,size=100m
+      - /run:noexec,nosuid,size=10m
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:3333/api/_health || exit 1"]
+      test: ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
       interval: 30s
       timeout: 5s
       retries: 3

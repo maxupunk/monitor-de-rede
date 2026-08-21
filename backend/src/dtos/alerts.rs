@@ -64,6 +64,13 @@ pub enum AlertField {
     LogWindowSeconds,
     LogSeverity,
     LogMessage,
+    // Baseline móvel (Fase 3)
+    LatencyBaselineMs,
+    LatencyDeviationPercent,
+    PacketLossBaselinePercent,
+    PacketLossDeviationPercent,
+    UptimeBaselinePercent,
+    UptimeDeviationPercent,
     // Fora da tela, mas avaliáveis
     Success,
     Type,
@@ -79,7 +86,7 @@ mod tests {
     /// Escrita à mão de propósito: é ela que obriga quem acrescenta uma
     /// variante a olhar para a lista do Rust — e o teste abaixo obriga as duas
     /// a coincidirem com a do frontend.
-    const TODAS: [AlertField; 33] = [
+    const TODAS: [AlertField; 39] = [
         AlertField::Status,
         AlertField::LatencyMs,
         AlertField::PacketLoss,
@@ -111,6 +118,12 @@ mod tests {
         AlertField::LogWindowSeconds,
         AlertField::LogSeverity,
         AlertField::LogMessage,
+        AlertField::LatencyBaselineMs,
+        AlertField::LatencyDeviationPercent,
+        AlertField::PacketLossBaselinePercent,
+        AlertField::PacketLossDeviationPercent,
+        AlertField::UptimeBaselinePercent,
+        AlertField::UptimeDeviationPercent,
         AlertField::Success,
         AlertField::Type,
     ];

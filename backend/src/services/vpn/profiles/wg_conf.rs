@@ -10,6 +10,7 @@ use super::{
     },
     variants::{linux_bash_variant, windows_winget_variant},
 };
+use crate::services::vpn::shell_escape::{escape_wg_value, sanitize_file_name};
 
 /// Constrói os scripts de terminal a partir do `.conf` já renderizado.
 type VariantBuilder = fn(&PeerConfigContext, &str) -> ArtifactVariant;
@@ -48,20 +49,21 @@ impl VpnProfileGenerator for WgConfProfileGenerator {
     }
 
     fn generate(&self, context: &PeerConfigContext) -> GeneratedArtifact {
+        let client_private_key = escape_wg_value(&context.client_private_key);
+        let peer_ip_address = escape_wg_value(&context.peer_ip_address);
+        let server_public_key = escape_wg_value(&context.server_public_key);
+        let endpoint_host = escape_wg_value(&context.endpoint_host);
+        let vpn_cidr = escape_wg_value(&context.vpn_cidr);
         let mut lines = vec![
             "[Interface]".to_string(),
-            format!("PrivateKey = {}", context.client_private_key),
-            format!(
-                "Address = {}/{}",
-                context.peer_ip_address,
-                context.prefix_length()
-            ),
+            format!("PrivateKey = {client_private_key}"),
+            format!("Address = {peer_ip_address}/{}", context.prefix_length()),
             format!("MTU = {}", context.mtu),
         ];
         if let Some(dns) = context.dns_servers.as_deref().filter(|v| !v.is_empty()) {
             let safe_dns: String = dns
                 .chars()
-                .filter(|c| !c.is_control() && *c != '\r' && *c != '\n')
+                .filter(|c| !c.is_control() && *c != '\r' && *c != '\n' && *c != '\t')
                 .collect();
             if !safe_dns.is_empty() {
                 lines.push(format!("DNS = {safe_dns}"));
@@ -70,19 +72,16 @@ impl VpnProfileGenerator for WgConfProfileGenerator {
         lines.extend([
             String::new(),
             "[Peer]".to_string(),
-            format!("PublicKey = {}", context.server_public_key),
+            format!("PublicKey = {server_public_key}"),
         ]);
         if let Some(preshared_key) = context.preshared_key.as_deref() {
-            lines.push(format!("PresharedKey = {preshared_key}"));
+            lines.push(format!("PresharedKey = {}", escape_wg_value(preshared_key)));
         }
         lines.extend([
             // Somente a faixa da VPN: com `0.0.0.0/0` a internet do cliente
             // cairia dentro do túnel.
-            format!("AllowedIPs = {}", context.vpn_cidr),
-            format!(
-                "Endpoint = {}:{}",
-                context.endpoint_host, context.endpoint_port
-            ),
+            format!("AllowedIPs = {vpn_cidr}"),
+            format!("Endpoint = {endpoint_host}:{}", context.endpoint_port),
             format!("PersistentKeepalive = {PERSISTENT_KEEPALIVE_SECONDS}"),
         ]);
 
@@ -97,7 +96,7 @@ impl VpnProfileGenerator for WgConfProfileGenerator {
             profile: self.profile.to_string(),
             label: self.label.to_string(),
             delivery: self.delivery,
-            file_name: format!("netmonitor-{}.conf", context.peer_name),
+            file_name: format!("netmonitor-{}.conf", sanitize_file_name(&context.peer_name)),
             language: "ini".to_string(),
             content,
             instructions: self.instructions.clone(),
@@ -224,5 +223,17 @@ mod tests {
         let linux = linux_generator().generate(&context).content;
         assert_eq!(linux, windows_generator().generate(&context).content);
         assert_eq!(linux, mobile_generator().generate(&context).content);
+    }
+
+    #[test]
+    fn conf_com_strings_maliciosas_bate_com_o_snapshot() {
+        let mut context = contexto();
+        context.client_private_key = "CHAVE\n[Peer]\nInjetado".into();
+        context.server_public_key = "PUB\nInjetado".into();
+        context.preshared_key = Some("PSK\nInjetado".into());
+        context.endpoint_host = "vpn.exemplo.com\nInjetado".into();
+        context.vpn_cidr = "10.8.0.0/24\nInjetado".into();
+        context.peer_name = "filial\n../etc".into();
+        insta::assert_snapshot!(linux_generator().generate(&context).content);
     }
 }

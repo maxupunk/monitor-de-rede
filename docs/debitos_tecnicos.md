@@ -1,6 +1,6 @@
 # Diagnóstico e Catálogo de Débitos Técnicos
 
-Este documento consolida a auditoria de arquitetura, código-fonte, padrões de design, duplicações, segurança e gaps de teste do **NetMonitor**. A última revisão completa foi em **2026-08-20**; o estado real do código prevalece sobre qualquer descrição deste arquivo.
+Este documento consolida a auditoria de arquitetura, código-fonte, padrões de design, duplicações, segurança e gaps de teste do **NetMonitor**. A última revisão completa foi em **2026-08-21**; o estado real do código prevalece sobre qualquer descrição deste arquivo.
 
 ---
 
@@ -20,35 +20,35 @@ Este documento consolida a auditoria de arquitetura, código-fonte, padrões de 
 | :--- | :--- | :--- | :---: | :---: | :---: |
 | **FE-01** | Frontend | Componentes monolíticos (`DeviceDetailPage`, `MonitorDetailView`, `MonitorFormDialog`) | Alto | Médio | 🟢 Concluído |
 | **FE-02** | Frontend | Duplicação de widgets CPU/RAM e subutilização de `BaseMetricChart` | Alto | Pequeno | 🟢 Concluído |
-| **FE-03** | Frontend | Ausência de testes automatizados e script `test` no frontend | Alto | Médio | 🔴 Pendente |
+| **FE-03** | Frontend | Ausência de testes automatizados e script `test` no frontend | Alto | Médio | 🟢 Concluído |
 | **FE-04** | Frontend | Inconsistência no padrão de stores (`useCrudResource`) | Médio | Pequeno | 🟢 Concluído |
 | **FE-05** | Frontend | Bundle size e code-splitting no Vite | Médio | Pequeno | 🟢 Concluído |
 | **FE-06** | Frontend | Formatação duplicada de taxa/bytes | Médio | Pequeno | 🟢 Concluído |
 | **FE-07** | Frontend | Resíduos de scaffold inicial | Baixo | Mínimo | 🟢 Concluído |
 | **BE-01** | Backend | Duplicação de algoritmo CIDR | Médio | Pequeno | 🟢 Concluído |
 | **BE-02** | Backend | Nomenclatura histórica de testes (`phase*.rs`) | Médio | Pequeno | 🟢 Concluído |
-| **BE-03** | Backend | Geração de configurações/scripts VPN por concatenação de strings | Médio | Médio | 🟡 Parcial |
+| **BE-03** | Backend | Geração de configurações/scripts VPN por concatenação de strings | Médio | Médio | 🟢 Concluído |
 | **BE-04** | Backend | Complexidade do `scheduler_run.rs` | Médio | Médio | 🟢 Concluído |
-| **BE-05** | Backend | Inconsistência entre `serde_json::json!` e DTOs tipados | Médio | Médio | 🟡 Parcial |
+| **BE-05** | Backend | Inconsistência entre `serde_json::json!` e DTOs tipados | Médio | Médio | 🟢 Concluído |
 | **BE-06** | Backend | Acoplamento MAC-Telnet no módulo Syslog | Baixo | Pequeno | 🟢 Concluído |
 | **DB-01** | Banco | Abstração FTS5 vs `tsvector`/GIN | Médio | Médio | 🟢 Concluído |
 | **DO-01** | DevOps | Supervisão de subprocessos no container | Médio | Médio | 🟢 Concluído |
 | **SEC-01** | Segurança | Segredos de fallback públicos (`JWT_SECRET`, `ENCRYPTION_KEY`) | Crítico | Pequeno | 🟢 Concluído |
 | **SEC-02** | Segurança | Chave privada WireGuard em claro no repositório (`backend/tmp/wireguard/wg0.conf`) | Crítico | Pequeno | 🟢 Concluído |
-| **SEC-03** | Segurança | CI em diretório ignorado pelo GitHub Actions (`backend/.github/`) | Crítico | Pequeno | 🔴 Pendente |
+| **SEC-03** | Segurança | CI em diretório ignorado pelo GitHub Actions (`backend/.github/`) | Crítico | Pequeno | 🟢 Concluído |
 | **SEC-04** | Segurança | Receptor de resultados de probe não vincula monitor ao probe autenticado | Alto | Médio | 🟢 Concluído |
 | **SEC-05** | Segurança | Injeção de configuração `wg0.conf` via nome de peer não sanitizado | Alto | Pequeno | 🟢 Concluído |
 | **SEC-06** | Segurança | `POST /api/probes` aceita `token_hash` arbitrário do cliente | Alto | Pequeno | 🟢 Concluído |
-| **SEC-07** | Segurança | JWT armazenado em `localStorage` no frontend | Alto | Médio | 🔴 Pendente |
-| **SEC-08** | Segurança | Headers de segurança ausentes no servidor estático | Baixo | Pequeno | 🔴 Pendente |
-| **SEC-09** | Segurança | Magic link restrito a `@example.com`/`@gmail.com` (resíduo de scaffold) | Médio | Pequeno | 🔴 Pendente |
-| **SEC-10** | Segurança | DTOs de credencial derivam `Debug` expondo senha | Médio | Pequeno | 🔴 Pendente |
-| **QUA-01** | Qualidade | Novos componentes/páginas monolíticas cresceram (`DashboardPage`, `AlertsPage`, `SettingsPage`) | Médio | Médio | 🔴 Pendente |
-| **QUA-02** | Qualidade | `reqwest::Client` recriado a cada checagem HTTP | Médio | Pequeno | 🔴 Pendente |
-| **QUA-03** | Qualidade | `lookup_host` sem timeout em ping e SNMP | Médio | Pequeno | 🔴 Pendente |
-| **QUA-04** | Qualidade | N+1 por interface na coleta SNMP | Médio | Médio | 🔴 Pendente |
-| **QUA-05** | Qualidade | Coluna `monitors.timeout_seconds` escrita e nunca lida | Médio | Pequeno | 🔴 Pendente |
-| **QUA-06** | Qualidade | Buffer offline do probe sem teto e com reescrita O(n²) | Médio | Médio | 🔴 Pendente |
+| **SEC-07** | Segurança | JWT armazenado em `localStorage` no frontend | Alto | Médio | 🟢 Concluído (mitigado via CSP) |
+| **SEC-08** | Segurança | Headers de segurança ausentes no servidor estático | Baixo | Pequeno | 🟢 Concluído |
+| **SEC-09** | Segurança | Magic link restrito a `@example.com`/`@gmail.com` (resíduo de scaffold) | Médio | Pequeno | 🟢 Concluído |
+| **SEC-10** | Segurança | DTOs de credencial derivam `Debug` expondo senha | Médio | Pequeno | 🟢 Concluído |
+| **QUA-01** | Qualidade | Novos componentes/páginas monolíticas cresceram (`DashboardPage`, `AlertsPage`, `SettingsPage`) | Médio | Médio | 🟢 Concluído |
+| **QUA-02** | Qualidade | `reqwest::Client` recriado a cada checagem HTTP | Médio | Pequeno | 🟢 Concluído |
+| **QUA-03** | Qualidade | `lookup_host` sem timeout em ping e SNMP | Médio | Pequeno | 🟢 Concluído |
+| **QUA-04** | Qualidade | N+1 por interface na coleta SNMP | Médio | Médio | 🟢 Concluído |
+| **QUA-05** | Qualidade | Coluna `monitors.timeout_seconds` escrita e nunca lida | Médio | Pequeno | 🟢 Concluído |
+| **QUA-06** | Qualidade | Buffer offline do probe sem teto e com reescrita O(n²) | Médio | Médio | 🟢 Concluído |
 | **DOC-01** | Documentação | Inconsistência entre tabela resumo e corpo deste documento | Médio | Pequeno | 🟢 Corrigido |
 
 ---
@@ -64,11 +64,14 @@ Este documento consolida a auditoria de arquitetura, código-fonte, padrões de 
 ### 🟢 FE-02: Duplicação de Widgets — Concluído
 - Criado `ResourceUsageWidget.vue`; `CpuUsageWidget.vue` e `RamUsageWidget.vue` viraram wrappers.
 
-### 🔴 FE-03: Ausência de Infraestrutura e Suíte de Testes no Frontend
-- **Arquivos Afetados:** `frontend/package.json`, `frontend/tests/`
-- **Descrição:** o `package.json` não possui script `"test"`. Não há `vitest`, `@vue/test-utils`, `jsdom`, `cypress` ou `playwright`. Os dois arquivos em `frontend/tests/` (`formatters.test.ts`, `ndjson.test.ts`) não são executáveis.
-- **Impacto:** regressões no frontend só são pegas manualmente; o critério do `AGENTS.md` não cobre testes de frontend, mas a ausência deles é risco operacional.
-- **Recomendação:** adicionar `vitest` + `@vue/test-utils` + `jsdom`, script `"test"`, e cobrir pelo menos `utils/formatters.ts`, `composables/` e stores puras.
+### 🟢 FE-03: Ausência de Infraestrutura e Suíte de Testes no Frontend — Concluído
+- **Arquivos Afetados:** `frontend/package.json`, `frontend/vitest.config.ts`, `frontend/tests/`
+- **Implementado:**
+  - Adicionados `vitest`, `@vue/test-utils`, `jsdom` e `@types/jsdom`.
+  - Criado `frontend/vitest.config.ts` com ambiente `jsdom` e alias `@/`.
+  - Script `"test": "vitest run"` no `package.json`; o script `"format"` passou a incluir `tests/`.
+  - Testes legados migrados para a sintaxe do Vitest.
+  - Cobertura de primeira onda: `utils/formatters.ts`, `composables/useMonitorDetail.ts`, `composables/useInfiniteList.ts`, `composables/useInfiniteCursor.ts` e as stores `preferences`, `alerts` e `dashboard`.
 
 ### 🟢 FE-04: Inconsistência de Gerenciamento de Estado — Concluído
 - `users.ts`, `devices.ts`, `networks.ts`, `sites.ts`, `probes.ts`, `dnsServers.ts` usam `useCrudResource`.
@@ -92,18 +95,23 @@ Este documento consolida a auditoria de arquitetura, código-fonte, padrões de 
 ### 🟢 BE-02: Nomenclatura Histórica de Testes — Concluído
 - Arquivos `phase*.rs` renomeados para nomes de domínio (`devices_monitors_crud.rs`, `vpn_orchestration.rs`, etc.).
 
-### 🟡 BE-03: Geração de Configurações e Scripts VPN — Parcial
-- **Arquivos Afetados:** `backend/src/services/vpn/profiles/{mikrotik.rs,openwrt.rs,variants.rs,wg_conf.rs}`
-- **Descrição:** existem builders tipados e sanitização de `community`/`dns`, mas ainda há interpolação direta de `peer_name`, `client_private_key`, `server_public_key`, `endpoint_host` e `vpn_cidr`. A sanitização não cobre todos os campos nem garante defesa em profundidade no gerador final.
-- **Recomendação:** centralizar escape/sanitização de todos os valores interpolados; adicionar testes de snapshot para strings maliciosas.
+### 🟢 BE-03: Geração de Configurações e Scripts VPN — Concluído
+- **Arquivos Afetados:** `backend/src/services/vpn/profiles/{mikrotik.rs,openwrt.rs,variants.rs,wg_conf.rs}`, `backend/src/services/vpn/config_builder.rs`, `backend/src/services/vpn/contract.rs`
+- **Implementado:**
+  - Criado `backend/src/services/vpn/shell_escape.rs` com `strip_controls`, `escape_wg_value`, `escape_uci`, `escape_routeros` e `sanitize_file_name`.
+  - Todos os valores interpolados em `.conf`, scripts UCI/OpenWrt e RouterOS passam pelas funções de escape centralizadas.
+  - `PeerConfigContext::prefix_length()` filtra apenas dígitos, evitando que sujeira no CIDR vaze para endereços formatados.
+  - Adicionados testes de snapshot para strings maliciosas em `wg_conf` e `mikrotik`.
 
 ### 🟢 BE-04: Complexidade do `scheduler_run.rs` — Concluído
 - Quebrado em `services/monitoring/scheduler/{monitor_executor.rs,snmp_group_executor.rs,maintenance_runner.rs,cadence.rs}`.
 
-### 🟡 BE-05: Inconsistência na Serialização da API — Parcial
+### 🟢 BE-05: Inconsistência na Serialização da API — Concluído
 - **Arquivos Afetados:** `backend/src/controllers/{devices.rs,monitors.rs,logs.rs,vpn_peers.rs}`
-- **Descrição:** `DevicePresenterItem` e `VpnPeerResponse` introduziram DTOs tipados, mas ainda há dezenas de `serde_json::json!` nos mesmos controllers e em outros. Isso mantém risco de drift de contrato e dificulta a geração automática de bindings TypeScript.
-- **Recomendação:** mapear todos os endpoints para DTOs `ts-rs`; eliminar `serde_json::json!` de respostas de negócio.
+- **Implementado:**
+  - Criados DTOs `ts-rs` em `backend/src/views/vpn.rs` (`VpnNextIpResponse`, `VpnPeerCreatedResponse`, `VpnQrCodeResponse`, `VpnKeyRotationResponse`, `VpnFirewallHintsResponse`, `VpnPeerRevokedResponse`), `backend/src/dtos/devices.rs` (`DeviceMetricItem`, `DeviceEventItem`), `backend/src/dtos/monitors.rs` (`MonitorStats`, `MonitorRunResponse`, `MonitorSnmpRunResponse`, `MonitorWithStats`) e `backend/src/dtos/logs.rs` (`BindSourceResponse`).
+  - Controllers de VPN, dispositivos, monitores e logs migrados dos respectivos `serde_json::json!` para os novos DTOs.
+  - Bindings TypeScript regenerados e formatados no frontend.
 
 ### 🟢 BE-06: Acoplamento MAC-Telnet no Syslog — Concluído
 - `mactelnet.rs` movido para `services/network_tools/`.
@@ -125,15 +133,17 @@ Este documento consolida a auditoria de arquitetura, código-fonte, padrões de 
 ### 🟢 DO-01: Supervisão de Subprocessos — Concluído
 - Heartbeat atômico no `wireguard-watcher.sh` e healthcheck HTTP no `docker-compose.yml`.
 
-### 🔴 INF-01: CI em Diretório Ignorado pelo GitHub Actions
-- **Arquivos Afetados:** `backend/.github/workflows/ci.yaml`
-- **Descrição:** o GitHub Actions só lê `.github/workflows/` na raiz. O workflow atual nunca roda; nenhum gate de qualidade é executado na prática.
-- **Recomendação:** mover para `.github/workflows/ci.yaml` com `defaults.run.working-directory: backend`; adicionar jobs de frontend, auditoria (`cargo audit`, `npm audit`), build Docker e pin de actions por SHA.
+### 🟢 INF-01: CI em Diretório Ignorado pelo GitHub Actions — Concluído
+- **Arquivos Afetados:** `.github/workflows/ci.yaml` (workflow movido da raiz de `backend/`)
+- **Implementado:** workflow na raiz com `defaults.run.working-directory: backend`; jobs de `fmt`, `clippy`, testes SQLite/Postgres, `cargo audit`, frontend (`typecheck`, `lint`, `build`), `npm audit` e build Docker; todas as actions pinadas por SHA.
 
-### 🟡 INF-02: Supervisão do Watcher e Hardening do Container
-- **Arquivos Afetados:** `docker/entrypoint.sh:54`, `Dockerfile`, `docker-compose.yml`
-- **Descrição:** o watcher inicia com `&` e vira órfão; não há `tini`/supervisão. Imagens base não estão pinadas por digest. Faltam `security_opt: [no-new-privileges:true]`, `read_only` com `tmpfs` e rotação de logs no compose.
-- **Recomendação:** adotar `tini` como init ou supervisão mínima; pinar imagens por digest; endurecer compose.
+### 🟢 INF-02: Supervisão do Watcher e Hardening do Container — Concluído
+- **Arquivos Afetados:** `docker/entrypoint.sh`, `docker/wireguard-watcher.sh`, `docker/healthcheck.sh`, `Dockerfile`, `docker-compose.yml`
+- **Implementado:**
+  - `tini` como PID 1; entrypoint supervisiona e reinicia o watcher se ele morrer.
+  - Healthcheck considera vida do watcher via `/tmp/wireguard-watcher.heartbeat`.
+  - Imagens base (`node`, `rust`, `debian`, `postgres`) pinadas por digest.
+  - Compose com `read_only: true`, `tmpfs`, `security_opt: [no-new-privileges:true]` e rotação de logs.
 
 ---
 
@@ -164,59 +174,81 @@ Este documento consolida a auditoria de arquitetura, código-fonte, padrões de 
 - **Descrição:** o endpoint permite que o cliente envie o hash que quiser, em vez de receber o token cru e hashear no servidor.
 - **Recomendação:** receber token cru, gerar `sha256` no servidor e nunca aceitar `token_hash` na criação.
 
-### 🔴 SEC-07: JWT Armazenado em `localStorage`
-- **Arquivos Afetados:** `frontend/src/services/apiService.ts:28-30`
-- **Descrição:** o token JWT continua em `localStorage`, vulnerável a XSS e leitura por extensões. O `roadmap_auditoria_seguranca.md` marca este item como concluído, mas o código não reflete isso.
-- **Recomendação:** migrar para cookie `HttpOnly` com CSRF adequado, ou — se manter localStorage — implementar CSP estrito e validar a decisão documental.
+### 🟢 SEC-07: JWT Armazenado em `localStorage` — Concluído (mitigado)
+- **Arquivos Afetados:** `frontend/src/services/apiService.ts:28-30`, `backend/src/spa.rs`
+- **Decisão:** manter o token em `localStorage` e aplicar CSP restritivo (`script-src 'self'`, `frame-ancestors 'none'`, headers de segurança).
+- **Racional:** a migração para cookie `HttpOnly` exigiria reescrita do fluxo de autenticação e proteção CSRF para mutações. O CSP endurecido elimina o vetor XSS mais comum (scripts inline/injetados), mantendo a arquitetura atual. A decisão está documentada no `roadmap.md` e no próprio `apiService.ts`.
 
-### 🔴 SEC-08: Headers de Segurança Ausentes no Servidor Estático
-- **Arquivos Afetados:** `backend/src/spa.rs:72-86`
-- **Descrição:** só há `Cache-Control`. Faltam CSP, `X-Content-Type-Options`, `Referrer-Policy`, `frame-ancestors`.
-- **Recomendação:** adicionar headers mínimos de segurança; CSP pode começar restritivo e ser relaxado conforme necessário.
+### 🟢 SEC-08: Headers de Segurança no Servidor Estático — Concluído
+- **Arquivos Afetados:** `backend/src/spa.rs`
+- **Implementado:** `Content-Security-Policy`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: DENY` em todos os arquivos estáticos.
 
-### 🟡 SEC-09: Magic Link com Allowlist de Scaffold
-- **Arquivos Afetados:** `backend/src/controllers/auth.rs:20-25`
-- **Descrição:** magic link só permite `@example.com` e `@gmail.com`, resíduo de scaffold que impede uso real.
-- **Recomendação:** remover allowlist ou remover o fluxo de magic link.
+### 🟢 SEC-09: Magic Link com Allowlist de Scaffold — Concluído
+- **Arquivos Afetados:** `backend/src/controllers/auth.rs`
+- **Implementado:** allowlist `@example.com`/`@gmail.com` removida; magic link aceita qualquer e-mail válido sem revelar se o usuário existe.
 
-### 🟡 SEC-10: DTOs de Credencial Derivam `Debug`
-- **Arquivos Afetados:** `backend/src/models/users.rs:30-33,35-44`
-- **Descrição:** `LoginParams` e `RegisterParams` derivam `Debug`, expondo senha em logs e erros.
-- **Recomendação:** implementar `Debug` manual redigindo a senha.
+### 🟢 SEC-10: DTOs de Credencial Derivam `Debug` — Concluído
+- **Arquivos Afetados:** `backend/src/models/users.rs`
+- **Implementado:** `LoginParams` e `RegisterParams` implementam `Debug` manualmente, redigindo a senha com `[REDACTED]`.
 
 ---
 
 ## 6. Débitos de Qualidade e Manutenibilidade Identificados
 
-### 🟡 QUA-01: Novos Componentes/Páginas Monolíticas
-- **Arquivos Afetados:** `frontend/src/pages/DashboardPage.vue` (~937 linhas), `SettingsPage.vue` (~573 linhas), `AlertsPage.vue` (~859 linhas)
-- **Descrição:** após a refatoração FE-01, novas páginas cresceram sem decomposição equivalente.
-- **Recomendação:** extrair widgets/tabelas/filtros para componentes menores; seguir o mesmo padrão de `DeviceDetailPage`.
+### 🟢 QUA-01: Novos Componentes/Páginas Monolíticas — Concluído
+- **Arquivos Afetados:** `frontend/src/pages/DashboardPage.vue`, `SettingsPage.vue`, `AlertsPage.vue`
+- **Implementado:**
+  - `DashboardPage.vue`: extraídos `StatCardsWidget`, `ActiveAlertsWidget`, `EventsFeedWidget` e `NetworkMonitorsWidget` para `frontend/src/components/dashboard/`.
+  - `AlertsPage.vue`: extraídas as quatro abas (`ActiveAlertsTab`, `ResolvedAlertsTab`, `AlertRulesTab`, `AlertHistoryTab`) para `frontend/src/components/alerts/`.
+  - `SettingsPage.vue`: extraídos `PreferencesCard`, `ServerAddressesCard`, `DashboardSyncCard`, `NotificationsCard`, `OnboardingCard` e `BackupCard` para `frontend/src/components/settings/`.
+  - Páginas mantêm apenas orquestração, diálogos e feedback.
 
-### 🟡 QUA-02: `reqwest::Client` Recriado a Cada Checagem HTTP
-- **Arquivos Afetados:** `backend/src/services/monitoring/checkers/http.rs:51-55`
+### 🟢 QUA-02: `reqwest::Client` Recriado a Cada Checagem HTTP — Concluído
+- **Arquivos Afetados:** `backend/src/services/monitoring/checkers/http.rs:41-90`
 - **Descrição:** desperdiça conexões e repete TLS handshakes.
-- **Recomendação:** cachear um ou dois clientes via `OnceLock` ou estado do checker.
+- **Implementado:**
+  - Dois clientes cacheados via `OnceLock<Result<Client, reqwest::Error>>` (`DEFAULT_CLIENT` e `DANGEROUS_CLIENT`).
+  - O cliente padrão mantém a verificação TLS; o segundo aceita certificados inválidos quando `validateCertificate: false`.
+  - O timeout é aplicado por requisição, sem recriar o cliente.
+  - Testes unitários cobrem cache e checagens contra servidor TCP local.
 
-### 🟡 QUA-03: `lookup_host` sem Timeout
-- **Arquivos Afetados:** `backend/src/services/monitoring/checkers/ping.rs:111`, `backend/src/services/snmp/client.rs:359`
-- **Descrição:** resolução DNS pode travar o monitor por tempo indefinido.
-- **Recomendação:** envolver em `tokio::time::timeout`.
+### 🟢 QUA-03: `lookup_host` sem Timeout — Concluído
+- **Arquivos Afetados:** `backend/src/services/monitoring/checkers/ping.rs`, `backend/src/services/snmp/client.rs`, `backend/src/services/monitoring/checkers/snmp.rs`
+- **Descrição:** resolução DNS podia travar o monitor por tempo indefinido.
+- **Implementado:**
+  - `resolve_host` no ping e `resolve_target` no SNMP usam `tokio::time::timeout` de 5 s.
+  - Timeout de DNS no ping é traduzido para `CheckResult` com `status: unknown` e mensagem clara.
+  - Timeout de DNS no SNMP é propagado como `SnmpError::Timeout` e convertido para `CheckResult` `unknown` no checker SNMP.
+  - Testes unitários cobrem IP literal, mapeamento de timeout para `unknown` e erros DNS/rede como `down`.
 
-### 🟡 QUA-04: N+1 por Interface na Coleta SNMP
-- **Arquivos Afetados:** `backend/src/services/snmp/service.rs:265-301`
-- **Descrição:** loop sobre interfaces faz uma query/escrita por interface.
-- **Recomendação:** buscar métricas anteriores em uma query por grupo; separar coleta, persistência e efeitos para manter transações curtas.
+### 🟢 QUA-04: N+1 por Interface na Coleta SNMP — Concluído
+- **Arquivos Afetados:** `backend/src/services/snmp/service.rs`, `backend/tests/requests/snmp_collection_integration.rs`
+- **Descrição:** loop sobre interfaces fazia uma query/escrita por interface.
+- **Implementado:**
+  - `poll_device` carrega todas as interfaces conhecidas do dispositivo em uma única query antes do loop de sincronização.
+  - `sync_interface` recebe `Option<&device_interfaces::Model>` para evitar SELECT individual por interface.
+  - `latest_metrics_for_interfaces` busca as métricas anteriores de todas as interfaces em uma única query.
+  - `build_traffic_metrics` e `build_system_metrics` acumulam `PendingMetric`; `record_metrics_bulk` insere tudo com `metrics::Entity::insert_many`.
+  - Testes de SNMP (unitários e integração) continuam passando.
 
-### 🟡 QUA-05: Coluna `monitors.timeout_seconds` Não Lida
-- **Arquivos Afetados:** `backend/src/models/monitors.rs:111`, `backend/src/controllers/monitors.rs:217-234`
-- **Descrição:** o scheduler usa `calculate_smart_timeout_seconds` baseado apenas no intervalo.
-- **Recomendação:** honrar a coluna ou removê-la do contrato.
+### 🟢 QUA-05: Coluna `monitors.timeout_seconds` Honrada — Concluído
+- **Arquivos Afetados:** `backend/src/services/monitoring/execution_guard.rs`, `backend/src/services/monitoring/scheduler/monitor_executor.rs`, `backend/src/services/monitoring/presenter.rs`, `frontend/src/stores/monitors.ts`, `frontend/src/components/monitors/MonitorDetailView.vue`
+- **Descrição:** o scheduler usava `calculate_smart_timeout_seconds` baseado apenas no intervalo, ignorando a coluna.
+- **Implementado:**
+  - Adicionado `effective_timeout_seconds(timeout_seconds, interval_seconds)` em `execution_guard.rs`, aplicando mínimo de 1 s e máximo de `interval - 1`.
+  - `monitor_executor.rs` converte `effective_timeout_seconds(monitor.timeout_seconds, monitor.interval_seconds)` para milissegundos e aplica no `RunOptions`.
+  - `MonitorPresentation` expõe `timeout_seconds` para a UI; o frontend mantém o campo no tipo `Monitor` e no objeto `emptyMonitor`.
+  - Decisão: honrar a coluna, mantendo-a no contrato.
 
-### 🟡 QUA-06: Buffer Offline do Probe sem Teto e com Reescrita O(n²)
-- **Arquivos Afetados:** `backend/src/services/probes/buffer.rs:73-90`
-- **Descrição:** arquivo cresce sem limite; cada resultado lê e regrava o arquivo inteiro; escrita não é atômica.
-- **Recomendação:** adicionar tamanho máximo; usar tmp+rename; considerar SQLite ou segmentação.
+### 🟢 QUA-06: Buffer Offline do Probe com Limite e Escrita Atômica — Concluído
+- **Arquivos Afetados:** `backend/src/services/probes/buffer.rs`
+- **Descrição:** arquivo crescia sem limite; cada resultado lia e regrava o arquivo inteiro; escrita não era atômica.
+- **Implementado:**
+  - Limites configuráveis: `PROBE_BUFFER_MAX_RESULTS` (padrão 10.000 itens) e `PROBE_BUFFER_MAX_BYTES` (padrão 50 MB).
+  - Gravação atômica via arquivo temporário + `tokio::fs::rename`; tmp órfão de crash anterior é removido antes de nova escrita.
+  - Ao atingir o teto de bytes, deduplica por `monitor_id` mantendo o resultado mais recente de cada monitor; se ainda exceder, trunca os itens mais antigos.
+  - Leitura tolerante a arquivo ausente, vazio ou corrompido.
+  - Testes cobrem acúmulo/limpeza, arquivo corrompido, buffer separado de discovery, limite de itens, limite de bytes, deduplicação, truncamento por idade e escrita atômica com recuperação de tmp órfão.
 
 ---
 
@@ -237,5 +269,9 @@ Este documento consolida a auditoria de arquitetura, código-fonte, padrões de 
    - Cachear `reqwest::Client`; timeouts em `lookup_host`.
    - Reduzir N+1 SNMP; resolver `timeout_seconds`.
    - Melhorar buffer offline do probe.
+
+4. **Fase 3 — Evolução de produto (iniciada):**
+   - Janelas de manutenção: silenciar notificações por site/dispositivo em intervalo agendado.
+   - Rollup/agregação de métricas: tabela `monitor_results_hourly`, job no scheduler, endpoint `GET /api/monitors/:id/uptime` e card de estabilidade no detalhe do dispositivo.
 
 O detalhamento completo das entregas, cronograma e critérios de aceite está em [`docs/roadmap.md`](roadmap.md).

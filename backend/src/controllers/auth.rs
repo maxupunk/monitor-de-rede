@@ -5,26 +5,16 @@ use crate::{
         users::{LoginParams, RegisterParams},
     },
     services::{
+        audit::{AuditAction, AuditActor, AuditEntryInput, AuditService, ResourceType},
         auth::setup::{map_model_error, SetupParams, SetupService},
         shared::errors::{AppError, AppResult},
     },
     views::auth::{LoginResponse, SetupStatusResponse, UserResponse},
 };
+use axum::http::HeaderMap;
 use loco_rs::prelude::*;
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
-use std::sync::OnceLock;
-
-pub static EMAIL_DOMAIN_RE: OnceLock<Regex> = OnceLock::new();
-
-fn get_allow_email_domain_re() -> &'static Regex {
-    EMAIL_DOMAIN_RE.get_or_init(|| {
-        Regex::new(r"@example\.com$|@gmail\.com$").expect("Failed to compile regex")
-    })
-}
-
-use axum::http::HeaderMap;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ForgotParams {
@@ -274,6 +264,20 @@ async fn login(
         ));
     }
 
+    let _ = AuditService::new(&ctx.db)
+        .log(
+            AuditActor::from_user_id(user.id, &headers),
+            AuditEntryInput {
+                action: AuditAction::Login,
+                resource_type: ResourceType::User,
+                resource_id: Some(user.id),
+                resource_label: Some(user.email.clone()),
+                description: Some(format!("Login de {}", user.email)),
+                changes: None,
+            },
+        )
+        .await;
+
     Ok(format::json(issue_session(&ctx, &user)?)?)
 }
 
@@ -285,7 +289,27 @@ async fn current(auth: auth::JWT, State(ctx): State<AppContext>) -> Result<Respo
 
 /// JWT é stateless: o logout confirma a operação e o cliente descarta o token.
 #[debug_handler]
-async fn logout(_auth: auth::JWT, State(_ctx): State<AppContext>) -> Result<Response> {
+async fn logout(
+    auth: auth::JWT,
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+) -> Result<Response> {
+    if let Ok(user) = users::Model::find_by_pid(&ctx.db, &auth.claims.pid).await {
+        let _ = AuditService::new(&ctx.db)
+            .log(
+                AuditActor::from_user_id(user.id, &headers),
+                AuditEntryInput {
+                    action: AuditAction::Logout,
+                    resource_type: ResourceType::User,
+                    resource_id: Some(user.id),
+                    resource_label: Some(user.email.clone()),
+                    description: Some(format!("Logout de {}", user.email)),
+                    changes: None,
+                },
+            )
+            .await;
+    }
+
     format::json(serde_json::json!({ "message": "Sessão encerrada com sucesso" }))
 }
 
@@ -314,15 +338,6 @@ async fn magic_link(
         &crate::services::vpn::access_control::extract_client_ip(&headers),
     )?;
 
-    let email_regex = get_allow_email_domain_re();
-    if !email_regex.is_match(&params.email) {
-        tracing::debug!(
-            email = params.email,
-            "The provided email is invalid or does not match the allowed domains"
-        );
-        return Err(AppError::bad_request("invalid request"));
-    }
-
     let Ok(user) = users::Model::find_by_email(&ctx.db, &params.email).await else {
         // we don't want to expose our users email. if the email is invalid we still
         // returning success to the caller
@@ -349,6 +364,7 @@ async fn magic_link(
 async fn magic_link_verify(
     Path(token): Path<String>,
     State(ctx): State<AppContext>,
+    headers: HeaderMap,
 ) -> AppResult<Response> {
     let Ok(user) = users::Model::find_by_magic_token(&ctx.db, &token).await else {
         // we don't want to expose our users email. if the email is invalid we still
@@ -368,6 +384,20 @@ async fn magic_link_verify(
         .clear_magic_link(&ctx.db)
         .await
         .map_err(map_model_error)?;
+
+    let _ = AuditService::new(&ctx.db)
+        .log(
+            AuditActor::from_user_id(user.id, &headers),
+            AuditEntryInput {
+                action: AuditAction::Login,
+                resource_type: ResourceType::User,
+                resource_id: Some(user.id),
+                resource_label: Some(user.email.clone()),
+                description: Some(format!("Login via magic link de {}", user.email)),
+                changes: None,
+            },
+        )
+        .await;
 
     Ok(format::json(issue_session(&ctx, &user)?)?)
 }

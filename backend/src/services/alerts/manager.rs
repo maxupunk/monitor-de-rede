@@ -14,6 +14,7 @@ use crate::{
     models::{_entities::alert_events as alert_events_entity, alert_events, alert_rules, monitors},
     services::{
         alerts::{
+            baseline,
             contracts::{AlertEvaluationContext, AlertEvaluationScope, AlertScopeKey, AlertStatus},
             datasets::monitor_result,
             episode,
@@ -94,6 +95,8 @@ pub async fn evaluate_monitor_result(
         None => None,
     };
 
+    let baseline = baseline::for_monitor(&ctx.db, monitor.id).await?;
+
     let mut data = Map::new();
     data.insert("resultData".into(), result.data.clone());
     data.insert("monitorType".into(), json!(monitor.r#type));
@@ -110,7 +113,7 @@ pub async fn evaluate_monitor_result(
             target_label: device
                 .as_ref()
                 .map_or_else(|| monitor.name.clone(), |device| device.name.clone()),
-            dataset: monitor_result::build(&monitor.r#type, result),
+            dataset: monitor_result::build(&monitor.r#type, result, &baseline),
             message: result.message.clone().filter(|text| !text.is_empty()),
             data,
             recovered: result.status == MonitorStatus::Up,

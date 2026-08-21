@@ -1,6 +1,6 @@
 //! CRUD de redes e enfileiramento persistente de discovery.
 
-use axum::{http::StatusCode, response::IntoResponse};
+use axum::{http::HeaderMap, http::StatusCode, response::IntoResponse};
 use loco_rs::prelude::*;
 use sea_orm::{ActiveModelTrait, EntityTrait, QueryOrder, Set};
 
@@ -8,6 +8,9 @@ use crate::{
     dtos::resources::NetworkInput,
     models::{networks, sites},
     services::{
+        audit::{
+            AuditAction, AuditActor, AuditChanges, AuditEntryInput, AuditService, ResourceType,
+        },
         discovery::{cidr_range::parse_cidr_range, queue::enqueue_network_scan},
         shared::errors::{AppError, AppResult},
     },
@@ -110,6 +113,7 @@ async fn index(State(ctx): State<AppContext>) -> AppResult<Response> {
 
 async fn store(
     State(ctx): State<AppContext>,
+    headers: HeaderMap,
     Json(input): Json<NetworkInput>,
 ) -> AppResult<Response> {
     validate(&input)?;
@@ -128,6 +132,23 @@ async fn store(
     }
     .insert(&ctx.db)
     .await?;
+
+    let _ = AuditService::new(&ctx.db)
+        .log(
+            AuditActor::from_headers(&headers, &ctx.db)
+                .await
+                .unwrap_or_default(),
+            AuditEntryInput {
+                action: AuditAction::Create,
+                resource_type: ResourceType::Network,
+                resource_id: Some(row.id),
+                resource_label: Some(row.name.clone()),
+                description: Some(format!("Rede '{}' ({}) criada", row.name, row.cidr)),
+                changes: None,
+            },
+        )
+        .await;
+
     Ok((StatusCode::CREATED, Json(present(&ctx.db, row).await?)).into_response())
 }
 
@@ -141,16 +162,18 @@ async fn show(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<R
 
 async fn update(
     State(ctx): State<AppContext>,
+    headers: HeaderMap,
     Path(id): Path<i64>,
     Json(input): Json<NetworkInput>,
 ) -> AppResult<Response> {
     validate(&input)?;
-    let current = networks::Entity::find_by_id(id)
+    let old = networks::Entity::find_by_id(id)
         .one(&ctx.db)
         .await?
         .ok_or_else(|| AppError::not_found("Rede não encontrada"))?;
+    let old_response = present(&ctx.db, old.clone()).await?;
     let row = networks::ActiveModel {
-        id: Set(current.id),
+        id: Set(old.id),
         site_id: Set(input.site_id),
         probe_id: Set(input.probe_id),
         name: Set(input.name.trim().into()),
@@ -158,22 +181,68 @@ async fn update(
         gateway: Set(input.gateway),
         vlan: Set(input.vlan),
         dns_servers: Set(input.dns_servers),
-        scan_enabled: Set(input.scan_enabled.unwrap_or(current.scan_enabled)),
-        scan_interval: Set(input.scan_interval.unwrap_or(current.scan_interval)),
-        active: Set(input.active.unwrap_or(current.active)),
+        scan_enabled: Set(input.scan_enabled.unwrap_or(old.scan_enabled)),
+        scan_interval: Set(input.scan_interval.unwrap_or(old.scan_interval)),
+        active: Set(input.active.unwrap_or(old.active)),
         ..Default::default()
     }
     .update(&ctx.db)
     .await?;
-    Ok(format::json(present(&ctx.db, row).await?)?)
+
+    let new_response = present(&ctx.db, row.clone()).await?;
+    let _ = AuditService::new(&ctx.db)
+        .log(
+            AuditActor::from_headers(&headers, &ctx.db)
+                .await
+                .unwrap_or_default(),
+            AuditEntryInput {
+                action: AuditAction::Update,
+                resource_type: ResourceType::Network,
+                resource_id: Some(row.id),
+                resource_label: Some(row.name.clone()),
+                description: Some(format!("Rede '{}' ({}) atualizada", row.name, row.cidr)),
+                changes: Some(AuditChanges {
+                    old: serde_json::to_value(old_response).ok(),
+                    new: serde_json::to_value(&new_response).ok(),
+                }),
+            },
+        )
+        .await;
+
+    Ok(format::json(new_response)?)
 }
 
-async fn destroy(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
-    let row = networks::Entity::find_by_id(id)
+async fn destroy(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> AppResult<Response> {
+    let old = networks::Entity::find_by_id(id)
         .one(&ctx.db)
         .await?
         .ok_or_else(|| AppError::not_found("Rede não encontrada"))?;
-    row.delete(&ctx.db).await?;
+    let old_response = present(&ctx.db, old.clone()).await?;
+    old.clone().delete(&ctx.db).await?;
+
+    let _ = AuditService::new(&ctx.db)
+        .log(
+            AuditActor::from_headers(&headers, &ctx.db)
+                .await
+                .unwrap_or_default(),
+            AuditEntryInput {
+                action: AuditAction::Delete,
+                resource_type: ResourceType::Network,
+                resource_id: Some(id),
+                resource_label: Some(old.name.clone()),
+                description: Some(format!("Rede '{}' ({}) excluída", old.name, old.cidr)),
+                changes: Some(AuditChanges {
+                    old: serde_json::to_value(old_response).ok(),
+                    new: None,
+                }),
+            },
+        )
+        .await;
+
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 

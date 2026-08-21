@@ -4,8 +4,10 @@
 //! `evaluator` decide se um fato satisfaz uma regra, e o `manager` transforma
 //! isso em `alert_events`, notificação e evento SSE.
 
+pub mod baseline;
 pub mod catalog;
 pub mod contracts;
+pub mod correlation;
 pub mod datasets;
 pub mod episode;
 pub mod evaluator;
