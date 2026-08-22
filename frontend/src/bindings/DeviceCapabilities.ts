@@ -3,72 +3,74 @@
 /**
  * O que a página de detalhe pode mostrar e oferecer.
  */
-export type DeviceCapabilities = { deviceId: number, 
-/**
- * Este é o dispositivo que representa a instalação.
- */
-isSystem: boolean, 
-/**
- * SNMP declarado no cadastro. Intenção, não prova.
- */
-snmpConfigured: boolean, 
-/**
- * Houve comunicação SNMP bem-sucedida e persistida.
- */
-snmpConnected: boolean, 
-/**
- * Há inventário de interfaces para listar.
- */
-interfaces: boolean, 
-/**
- * Há histórico de eventos/alertas.
- */
-events: boolean, 
-/**
- * Log ativo, suportado ou já recebido.
- */
-logs: boolean, 
-/**
- * O dispositivo é a ponta de um túnel.
- */
-vpn: boolean, 
-/**
- * O dispositivo publica métricas de saúde (CPU, memória, …).
- */
-health: boolean, 
-/**
- * Varredura SNMP (descobrir interfaces e sistema).
- */
-canSnmpScan: boolean, 
-/**
- * Coleta SNMP pontual.
- */
-canSnmpCollect: boolean, 
-/**
- * Escanear portas do alvo.
- */
-canScanPorts: boolean, 
-/**
- * Editar identidade (IP, tipo, SNMP).
- */
-canEditIdentity: boolean, 
-/**
- * Criar monitores próprios.
- */
-canCreateMonitor: boolean, 
-/**
- * Por que este dispositivo não recebe um monitor de alcance automático
- * (ping/TCP/HTTP/DNS), em português. `None` quando recebe.
- *
- * A tela mostra este texto em vez de deduzir o motivo: são duas causas
- * diferentes — ser o dispositivo do sistema ou não ter endereço IP — e
- * cada uma pede uma ação diferente do operador.
- */
-reachMonitorBlockedReason: string | null, 
-/**
- * O vocabulário de alerta que este dispositivo publica hoje.
- *
- * É sobre esta lista que a aplicabilidade de um template é decidida: um
- * template de CPU só é oferecido a quem publica `cpuUsagePercent`.
- */
-alertFields: Array<string>, };
+export type DeviceCapabilities = {
+  deviceId: number
+  /**
+   * Este é o dispositivo que representa a instalação.
+   */
+  isSystem: boolean
+  /**
+   * SNMP declarado no cadastro. Intenção, não prova.
+   */
+  snmpConfigured: boolean
+  /**
+   * Houve comunicação SNMP bem-sucedida e persistida.
+   */
+  snmpConnected: boolean
+  /**
+   * Há inventário de interfaces para listar.
+   */
+  interfaces: boolean
+  /**
+   * Há histórico de eventos/alertas.
+   */
+  events: boolean
+  /**
+   * Log ativo, suportado ou já recebido.
+   */
+  logs: boolean
+  /**
+   * O dispositivo é a ponta de um túnel.
+   */
+  vpn: boolean
+  /**
+   * O dispositivo publica métricas de saúde (CPU, memória, …).
+   */
+  health: boolean
+  /**
+   * Varredura SNMP (descobrir interfaces e sistema).
+   */
+  canSnmpScan: boolean
+  /**
+   * Coleta SNMP pontual.
+   */
+  canSnmpCollect: boolean
+  /**
+   * Escanear portas do alvo.
+   */
+  canScanPorts: boolean
+  /**
+   * Editar identidade (IP, tipo, SNMP).
+   */
+  canEditIdentity: boolean
+  /**
+   * Criar monitores próprios.
+   */
+  canCreateMonitor: boolean
+  /**
+   * Por que este dispositivo não recebe um monitor de alcance automático
+   * (ping/TCP/HTTP/DNS), em português. `None` quando recebe.
+   *
+   * A tela mostra este texto em vez de deduzir o motivo: são duas causas
+   * diferentes — ser o dispositivo do sistema ou não ter endereço IP — e
+   * cada uma pede uma ação diferente do operador.
+   */
+  reachMonitorBlockedReason: string | null
+  /**
+   * O vocabulário de alerta que este dispositivo publica hoje.
+   *
+   * É sobre esta lista que a aplicabilidade de um template é decidida: um
+   * template de CPU só é oferecido a quem publica `cpuUsagePercent`.
+   */
+  alertFields: Array<string>
+}

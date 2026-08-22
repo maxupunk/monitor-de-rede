@@ -160,10 +160,11 @@ class ApiService {
     return this.handleResponse<T>(response, path)
   }
 
-  async delete<T>(path: string): Promise<T> {
+  async delete<T>(path: string, body?: unknown): Promise<T> {
     const response = await this.doFetch(path, {
       method: 'DELETE',
       headers: this.getHeaders(),
+      body: body ? JSON.stringify(body) : undefined,
     })
     return this.handleResponse<T>(response, path)
   }

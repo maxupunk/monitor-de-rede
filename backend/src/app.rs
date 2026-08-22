@@ -183,6 +183,7 @@ impl Hooks for App {
             .add_route(controllers::audit::routes().layer(business_auth.clone()))
             .add_route(controllers::alerts::rules_routes().layer(business_auth.clone()))
             .add_route(controllers::alerts::routes().layer(business_auth.clone()))
+            .add_route(controllers::push::routes().layer(business_auth.clone()))
             .add_route(controllers::vpn_servers::routes().layer(business_auth.clone()))
             .add_route(controllers::vpn_peers::routes().layer(business_auth))
     }

@@ -330,6 +330,19 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
     - Botão "Correlação" na Central de Alertas (`ActiveAlertsTab`) e dialog `AlertCorrelationDialog` exibindo a causa raiz sugerida e a lista de eventos correlacionados.
     - Testes unitários do algoritmo de correlação e testes de integração cobrindo pai/filho, janela vazia e exclusão de eventos resolvidos.
 
+- [x] **PWA & Notificações Web Push em Segundo Plano** 🟢 Concluído
+  - **Severidade:** 🟡 Média
+  - **Esforço:** Médio
+  - **Arquivos:** `backend/migration/src/m20260821_000004_push_subscriptions.rs`, `backend/src/models/_entities/push_subscriptions.rs`, `backend/src/models/push_subscriptions.rs`, `backend/src/services/webpush/{crypto.rs,keys.rs,client.rs,mod.rs}`, `backend/src/controllers/push.rs`, `backend/src/services/notifications/channels/webpush.rs`, `frontend/src/sw.ts`, `frontend/vite.config.ts`, `frontend/index.html`, `frontend/src/services/pushService.ts`, `frontend/src/composables/useNotifications.ts`, `frontend/src/components/settings/NotificationsCard.vue`, `backend/tests/requests/push.rs`
+  - **Implementado:**
+    - Suporte a Web Push conforme RFC 8030, RFC 8188 / RFC 8291 (AES-128-GCM) e RFC 8292 (VAPID / ES256) em Rust puro.
+    - Nova tabela `push_subscriptions` e gerenciamento inteligente com rotação e geração zero-config de chaves VAPID.
+    - Controlador REST sob `/api/push` (`/vapid-public-key`, `/status`, `/subscriptions`, `/test`).
+    - Integração de `WebPushChannel` ao despachante do outbox de notificações com expurgo automático de subscrições expiradas (404/410 Gone).
+    - Service Worker customizado (`src/sw.ts`) com Workbox precache (`injectManifest`), ouvintes nativos `push` e `notificationclick`.
+    - PWA com manifesto atualizado (atalhos rápidos para Dashboard, Alertas, Monitores), tags mobile Apple / Android e interface no card de configurações para diagnóstico, ativação e testes de entrega em segundo plano.
+    - Testes unitários e testes de requisição cobrindo geração de chave VAPID, codificação Base64URL, criptografia e ciclo de subscrições.
+
 ---
 
 ## 7. Matriz obrigatória de validação

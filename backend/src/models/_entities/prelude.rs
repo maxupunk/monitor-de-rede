@@ -16,6 +16,7 @@ pub use super::networks::Entity as Networks;
 pub use super::notification_outbox::Entity as NotificationOutbox;
 pub use super::probe_tasks::Entity as ProbeTasks;
 pub use super::probes::Entity as Probes;
+pub use super::push_subscriptions::Entity as PushSubscriptions;
 pub use super::sites::Entity as Sites;
 pub use super::system_settings::Entity as SystemSettings;
 pub use super::users::Entity as Users;

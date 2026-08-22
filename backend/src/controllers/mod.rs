@@ -15,6 +15,7 @@ pub mod monitors;
 pub mod networks;
 pub mod port_scan;
 pub mod probes;
+pub mod push;
 pub mod root;
 pub mod server_addresses;
 pub mod settings;

@@ -19,11 +19,9 @@
 
         <template v-else-if="correlation">
           <div v-if="correlation.correlationCount === 0" class="text-center py-6 text-grey">
-            <v-icon size="48" color="grey-lighten-1" class="mb-2"
-            >
+            <v-icon size="48" color="grey-lighten-1" class="mb-2">
               mdi-chart-timeline-variant
-            </v-icon
-            >
+            </v-icon>
             <div>
               Nenhum alerta correlacionado encontrado na janela de
               {{ correlation.windowSeconds }} segundos.

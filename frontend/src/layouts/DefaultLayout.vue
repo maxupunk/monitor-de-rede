@@ -91,8 +91,17 @@
         {{ eventsStore.isConnected ? 'Tempo Real Ativo' : 'Conectando SSE...' }}
       </v-chip>
 
-      <!-- Botão de Notificações PWA -->
-      <v-tooltip location="bottom" text="Notificações PWA do Navegador">
+      <!-- Botão de Notificações PWA / Web Push -->
+      <v-tooltip
+        location="bottom"
+        :text="
+          isSubscribed
+            ? 'Web Push Ativo (Alertas em segundo plano)'
+            : permissionState === 'granted'
+              ? 'Notificações Ativas (Clique para configurar)'
+              : 'Ativar Notificações Web Push'
+        "
+      >
         <template #activator="{ props: tooltipProps }">
           <v-btn
             v-bind="tooltipProps"
@@ -100,14 +109,16 @@
             size="small"
             variant="text"
             class="mr-2"
-            :color="permissionState === 'granted' && notificationsEnabled ? 'primary' : 'grey'"
+            :color="isSubscribed ? 'primary' : permissionState === 'granted' ? 'info' : 'grey'"
             @click="handleNotificationClick"
           >
             <v-icon>
               {{
-                permissionState === 'granted' && notificationsEnabled
-                  ? 'mdi-bell-ring-outline'
-                  : 'mdi-bell-off-outline'
+                isSubscribed
+                  ? 'mdi-bell-ring'
+                  : permissionState === 'granted'
+                    ? 'mdi-bell-ring-outline'
+                    : 'mdi-bell-off-outline'
               }}
             </v-icon>
           </v-btn>
@@ -173,6 +184,38 @@
     <DnsServersDialog v-model="dnsServersDialog" />
     <ServerAddressesDialog v-model="serverAddressesDialog" />
     <InitialSetupDialog v-model="onboardingStore.showWizard" />
+
+    <!-- Diálogo de Instruções de Instalação no iOS -->
+    <v-dialog v-model="showIosDialog" max-width="420">
+      <v-card class="rounded-xl pa-4">
+        <v-card-title class="d-flex align-center font-weight-bold">
+          <v-icon color="primary" class="mr-2">mdi-apple</v-icon>
+          Instalar no iOS (Safari)
+        </v-card-title>
+        <v-card-text class="text-body-2 pt-2">
+          <p class="mb-3 text-grey-darken-1">
+            Para instalar o <strong>NetMonitor</strong> no seu iPhone ou iPad:
+          </p>
+          <ol class="pl-4 d-flex flex-column ga-2 text-caption font-weight-medium">
+            <li>
+              Toque no botão de <strong>Compartilhar</strong>
+              <v-icon size="small" color="primary">mdi-export-variant</v-icon> na barra inferior do
+              Safari.
+            </li>
+            <li>
+              Role a lista para baixo e selecione <strong>"Adicionar à Tela de Início"</strong>
+              <v-icon size="small" color="primary">mdi-plus-box-outline</v-icon>.
+            </li>
+            <li>Toque em <strong>"Adicionar"</strong> no canto superior direito para confirmar.</li>
+          </ol>
+        </v-card-text>
+        <v-card-actions class="justify-end">
+          <v-btn color="primary" variant="flat" size="small" @click="showIosDialog = false">
+            Entendi
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </v-app>
 </template>
 
@@ -184,6 +227,7 @@ import { useEventsStore } from '@/stores/events'
 import { useAuthStore } from '@/stores/auth'
 import { useOnboardingStore } from '@/stores/onboarding'
 import { useNotifications } from '@/composables/useNotifications'
+import { usePwaInstall } from '@/composables/usePwaInstall'
 import DnsServersDialog from '@/components/DnsServersDialog.vue'
 import ServerAddressesDialog from '@/components/ServerAddressesDialog.vue'
 import InitialSetupDialog from '@/components/InitialSetupDialog.vue'
@@ -210,16 +254,14 @@ const eventsStore = useEventsStore()
 const authStore = useAuthStore()
 const onboardingStore = useOnboardingStore()
 const router = useRouter()
-const { permissionState, notificationsEnabled, requestPermission, setNotificationsEnabled } =
-  useNotifications()
+const { permissionState, isSubscribed, requestPermission } = useNotifications()
+const { canInstall, isInstalled, showIosDialog, promptInstall } = usePwaInstall()
 
 async function handleNotificationClick() {
   if (permissionState.value === 'default') {
     await requestPermission()
-  } else if (permissionState.value === 'granted') {
-    setNotificationsEnabled(!notificationsEnabled.value)
   } else {
-    router.push('/settings')
+    await router.push('/settings')
   }
 }
 
@@ -271,6 +313,17 @@ const navItems = computed<NavItem[]>(() => [
       ]
     : []),
   { title: 'Configurações', icon: 'mdi-cog', to: '/settings' },
+  ...(canInstall.value && !isInstalled.value
+    ? [
+        {
+          title: 'Instalar aplicativo',
+          icon: 'mdi-cellphone-arrow-down',
+          click: () => {
+            void promptInstall()
+          },
+        },
+      ]
+    : []),
 ])
 
 onMounted(() => {

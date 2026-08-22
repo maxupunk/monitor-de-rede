@@ -224,7 +224,7 @@ Isso cobre o básico bem. As próximas oportunidades de produto partem de três 
 
 ### 2.6 Experiência do usuário e mobilidade
 
-#### 2.6.1 Aplicativo mobile nativo ou PWA aprimorado
+#### 2.6.1 Aplicativo mobile nativo ou PWA aprimorado 🟢 Concluído
 
 **Referências:** UniFi Network app, Fing app, UptimeRobot app.
 
@@ -232,6 +232,7 @@ Isso cobre o básico bem. As próximas oportunidades de produto partem de três 
 | :--- | :--- |
 | O quê | Notificações push, visualização rápida de status, ações de silêncio de alerta. |
 | Como | PWA com push via service worker + Web Push, ou app Flutter/React Native para recursos nativos. |
+| Estado | 🟢 **Concluído:** PWA completo com Service Worker customizado (`injectManifest`), Web Push (RFC 8030/8291/8292/VAPID), atalhos rápidos e botão de instalação no menu lateral com suporte a iOS e Android. |
 
 #### 2.6.2 Mapa de calor de Wi-Fi
 

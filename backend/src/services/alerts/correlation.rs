@@ -187,7 +187,7 @@ fn primary_cause<'a>(
     let mut parent_candidates: Vec<&alert_events::Model> = candidates
         .iter()
         .filter(|event| {
-            event.device_id.map_or(false, |device_id| {
+            event.device_id.is_some_and(|device_id| {
                 candidate_device_ids.iter().any(|candidate_id| {
                     devices_map
                         .get(candidate_id)

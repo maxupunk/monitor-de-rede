@@ -95,7 +95,7 @@ const addressesDialog = ref(false)
 const confirmDialog = ref(false)
 const preferencesCard = ref<InstanceType<typeof PreferencesCard> | null>(null)
 
-const { sendNotification } = useNotifications()
+const { sendLocalNotification } = useNotifications()
 
 onMounted(async () => {
   void addressesStore.fetchAll()
@@ -137,7 +137,7 @@ async function onRestore() {
 }
 
 function testNotification() {
-  sendNotification('Notificação de Teste PWA', {
+  void sendLocalNotification('Notificação de Teste PWA', {
     body: 'Este é um teste de funcionamento das notificações em tempo real do NetMonitor.',
   })
 }

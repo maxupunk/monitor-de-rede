@@ -3,31 +3,34 @@
 /**
  * Uma entrada já resolvida, pronta para a tela.
  */
-export type ServerAddressEntry = { 
-/**
- * `lan`, `vpn`, `public` ou `custom:<uuid>`.
- */
-id: string, 
-/**
- * `lan` | `vpn` | `public` | `custom`.
- */
-kind: string, label: string, 
-/**
- * Quando usar este endereço. É esta frase que carrega o conceito na tela —
- * sem ela a lista vira três IPs sem critério.
- */
-description: string, 
-/**
- * O que vale hoje. Nulo quando não foi detectado nem definido.
- */
-value: string | null, 
-/**
- * O que o servidor descobriu sozinho, para a tela oferecer "voltar ao
- * detectado" depois de uma correção.
- */
-detected: string | null, overridden: boolean, 
-/**
- * De onde veio o valor, ou por que não há um. Palpite apresentado como
- * certeza é pior do que campo vazio.
- */
-source: string, };
+export type ServerAddressEntry = {
+  /**
+   * `lan`, `vpn`, `public` ou `custom:<uuid>`.
+   */
+  id: string
+  /**
+   * `lan` | `vpn` | `public` | `custom`.
+   */
+  kind: string
+  label: string
+  /**
+   * Quando usar este endereço. É esta frase que carrega o conceito na tela —
+   * sem ela a lista vira três IPs sem critério.
+   */
+  description: string
+  /**
+   * O que vale hoje. Nulo quando não foi detectado nem definido.
+   */
+  value: string | null
+  /**
+   * O que o servidor descobriu sozinho, para a tela oferecer "voltar ao
+   * detectado" depois de uma correção.
+   */
+  detected: string | null
+  overridden: boolean
+  /**
+   * De onde veio o valor, ou por que não há um. Palpite apresentado como
+   * certeza é pior do que campo vazio.
+   */
+  source: string
+}

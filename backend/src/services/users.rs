@@ -81,6 +81,10 @@ pub fn request_is_allowed(role: Role, method: &Method, path: &str) -> bool {
         return role.can_manage_users();
     }
 
+    if path == "/api/push" || path.starts_with("/api/push/") {
+        return true;
+    }
+
     matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS) || role.can_write()
 }
 

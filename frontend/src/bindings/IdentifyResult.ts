@@ -8,22 +8,27 @@
  * dizia "Linux" e não havia onde conferir que a razão era um `sysDescr` com o
  * `uname` genérico.
  */
-export type IdentifyResult = { operatingSystem: string, label: string, 
-/**
- * `declarado`, `snmp`, `sonda`, `cadastro` ou `padrão`.
- */
-source: string, reason: string, 
-/**
- * O que o SNMP respondeu, para a tela poder mostrar o texto cru.
- */
-sysDescr: string | null, sysObjectId: string | null, 
-/**
- * A identificação do servidor SSH, quando a porta 22 respondeu.
- */
-sshBanner: string | null, 
-/**
- * Se alguma evidência ao vivo chegou. Falso significa que a conclusão saiu
- * só do cadastro — e a tela precisa dizer isso em vez de anunciar uma
- * detecção que não aconteceu.
- */
-probed: boolean, };
+export type IdentifyResult = {
+  operatingSystem: string
+  label: string
+  /**
+   * `declarado`, `snmp`, `sonda`, `cadastro` ou `padrão`.
+   */
+  source: string
+  reason: string
+  /**
+   * O que o SNMP respondeu, para a tela poder mostrar o texto cru.
+   */
+  sysDescr: string | null
+  sysObjectId: string | null
+  /**
+   * A identificação do servidor SSH, quando a porta 22 respondeu.
+   */
+  sshBanner: string | null
+  /**
+   * Se alguma evidência ao vivo chegou. Falso significa que a conclusão saiu
+   * só do cadastro — e a tela precisa dizer isso em vez de anunciar uma
+   * detecção que não aconteceu.
+   */
+  probed: boolean
+}

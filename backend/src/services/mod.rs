@@ -25,3 +25,4 @@ pub mod syslog;
 pub mod topology;
 pub mod users;
 pub mod vpn;
+pub mod webpush;

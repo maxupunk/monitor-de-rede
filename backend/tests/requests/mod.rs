@@ -18,6 +18,7 @@ mod health_rules;
 mod maintenance_windows;
 mod prepare_data;
 mod process_deps;
+mod push;
 mod reach_monitors;
 mod root;
 mod scheduler_probes_lifecycle;

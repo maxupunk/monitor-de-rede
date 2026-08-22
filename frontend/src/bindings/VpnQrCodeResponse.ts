@@ -3,4 +3,4 @@
 /**
  * Resposta de `GET /api/vpn/peers/:id/qrcode`.
  */
-export type VpnQrCodeResponse = { profile: string, fileName: string, svg: string, };
+export type VpnQrCodeResponse = { profile: string; fileName: string; svg: string }

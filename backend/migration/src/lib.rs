@@ -41,6 +41,7 @@ mod m20260819_000002_monitors_managed_unique;
 mod m20260821_000001_maintenance_windows;
 mod m20260821_000002_monitor_results_hourly;
 mod m20260821_000003_audit_logs;
+mod m20260821_000004_push_subscriptions;
 
 pub struct Migrator;
 
@@ -151,6 +152,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260821_000001_maintenance_windows::Migration),
             Box::new(m20260821_000002_monitor_results_hourly::Migration),
             Box::new(m20260821_000003_audit_logs::Migration),
+            Box::new(m20260821_000004_push_subscriptions::Migration),
             // inject-above (do not remove this comment)
         ]
     }

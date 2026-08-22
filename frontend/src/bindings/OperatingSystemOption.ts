@@ -3,13 +3,18 @@
 /**
  * O que a tela recebe para montar o seletor.
  */
-export type OperatingSystemOption = { id: string, label: string, icon: string, 
-/**
- * Se a ativação automática de log tem comandos para este sistema. Sem
- * isto a tela ofereceria uma ação que não tem como funcionar.
- */
-supportsSyslog: boolean, supportsMacTelnet: boolean, 
-/**
- * Perfil equivalente no assistente da VPN, quando existe.
- */
-vpnProfile: string | null, };
+export type OperatingSystemOption = {
+  id: string
+  label: string
+  icon: string
+  /**
+   * Se a ativação automática de log tem comandos para este sistema. Sem
+   * isto a tela ofereceria uma ação que não tem como funcionar.
+   */
+  supportsSyslog: boolean
+  supportsMacTelnet: boolean
+  /**
+   * Perfil equivalente no assistente da VPN, quando existe.
+   */
+  vpnProfile: string | null
+}

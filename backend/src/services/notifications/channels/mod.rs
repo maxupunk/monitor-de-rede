@@ -4,3 +4,4 @@ pub mod discord;
 pub mod email;
 pub mod telegram;
 pub mod webhook;
+pub mod webpush;

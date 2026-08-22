@@ -5,7 +5,7 @@ use loco_rs::app::AppContext;
 use super::{
     channels::{
         discord::DiscordChannel, email::EmailChannel, telegram::TelegramChannel,
-        webhook::WebhookChannel,
+        webhook::WebhookChannel, webpush::WebPushChannel,
     },
     contracts::{NotificationChannel, NotificationMessage},
     http_channel::HttpNotificationChannel,
@@ -27,8 +27,7 @@ impl Default for NotificationService {
 }
 
 impl NotificationService {
-    /// Os quatro canais do §8.9, na ordem em que o backend anterior os
-    /// registrava.
+    /// Os canais de notificação do sistema (e-mail, telegram, discord, webhook e webpush).
     #[must_use]
     pub fn with_default_channels() -> Self {
         Self {
@@ -37,6 +36,7 @@ impl NotificationService {
                 Box::new(HttpNotificationChannel(TelegramChannel::from_env())),
                 Box::new(HttpNotificationChannel(DiscordChannel::from_env())),
                 Box::new(HttpNotificationChannel(WebhookChannel::from_env())),
+                Box::new(WebPushChannel::new()),
             ],
         }
     }
