@@ -343,8 +343,16 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
     - Controlador REST sob `/api/push` (`/vapid-public-key`, `/status`, `/subscriptions`, `/test`).
     - Integração de `WebPushChannel` ao despachante do outbox de notificações com expurgo automático de subscrições expiradas (404/410 Gone).
     - Service Worker customizado (`src/sw.ts`) com Workbox precache (`injectManifest`), ouvintes nativos `push` e `notificationclick`.
-    - PWA com manifesto atualizado (atalhos rápidos para Dashboard, Alertas, Monitores), tags mobile Apple / Android e interface no card de configurações para diagnóstico, ativação e testes de entrega em segundo plano.
-    - Testes unitários e testes de requisição cobrindo geração de chave VAPID, codificação Base64URL, criptografia e ciclo de subscrições.
+- [x] **Monitoramento de Latência SaaS e Mapa de Calor Horário (Item 2.2.2)** 🟢 Concluído
+  - **Severidade:** 🟡 Média
+  - **Esforço:** Médio
+  - **Arquivos:** `backend/src/dtos/saas.rs`, `backend/src/services/monitoring/{saas.rs,heatmap.rs}`, `backend/src/controllers/monitors.rs`, `backend/tests/requests/saas_monitoring.rs`, `frontend/src/bindings/{SaasPreset.ts,HourlyHeatmapResponse.ts,...}`, `frontend/src/stores/{monitors.ts,dashboard.ts}`, `frontend/src/components/monitors/SaasPresetsDialog.vue`, `frontend/src/components/widgets/SaasLatencyHeatmapWidget.vue`, `frontend/src/pages/{MonitorsPage.vue,DashboardPage.vue}`, `frontend/src/components/monitors/MonitorDetailView.vue`
+  - **Implementado:**
+    - Catálogo curado de presets SaaS (Google, Cloudflare, Microsoft 365, GitHub, Netflix, AWS, Zoom, WhatsApp) com alvos estáveis em ICMP (Ping) e HTTP HEAD (ultraleve) e thresholds automáticos de aviso/crítico.
+    - Endpoints REST sob `/api/monitors`: `GET /saas/presets`, `POST /saas/provision` (provisionamento idempotente com 1-clique ou lote) e `GET /hourly-heatmap` (agregação de matriz 24h x dias via `monitor_results_hourly` + hora parcial em andamento).
+    - Modal de catálogo no frontend (`SaasPresetsDialog.vue`) com filtros por categoria, busca, indicação de monitores já ativos e ações de provisionamento em massa.
+    - Widget de Heatmap Horário de Latência (`SaasLatencyHeatmapWidget.vue`) com grade cromática (24h x dias), identificação automática de horários de pico (`peakHour`) e melhor horário (`bestHour`), barra consolidada de 24h e integração no Dashboard customizável e na visualização detalhada do monitor.
+    - Testes unitários e testes de integração cobrindo catálogo, provisionamento, reuso de monitores e cálculo de heatmap.
 
 ---
 

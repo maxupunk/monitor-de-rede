@@ -94,6 +94,11 @@
         @update:traffic-tab="trafficTab = $event"
       />
 
+      <!-- Mapa de Calor de Latência por Hora do Dia (§2.2.2) -->
+      <div v-if="!isGaugeMonitor && !isTrafficMonitor && !isInterfaceMonitor" class="mb-6">
+        <SaasLatencyHeatmapWidget :monitor-id="monitor.id" />
+      </div>
+
       <!-- Tabela com Histórico de Verificações Recentes -->
       <MonitorHistoryTable
         :show="showHistory"
@@ -161,6 +166,7 @@ import MonitorDetailHeader from './detail/MonitorDetailHeader.vue'
 import MonitorKpiCards from './detail/MonitorKpiCards.vue'
 import MonitorBaselineCard, { type MonitorBaselinePayload } from './detail/MonitorBaselineCard.vue'
 import MonitorChartsSection from './detail/MonitorChartsSection.vue'
+import SaasLatencyHeatmapWidget from '@/components/widgets/SaasLatencyHeatmapWidget.vue'
 import MonitorHistoryTable from './detail/MonitorHistoryTable.vue'
 import MonitorAlertHistoryTable from './detail/MonitorAlertHistoryTable.vue'
 import {

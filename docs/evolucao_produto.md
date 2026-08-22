@@ -102,15 +102,16 @@ Isso cobre o básico bem. As próximas oportunidades de produto partem de três 
 | Alertas | "Download caiu abaixo de 50% do contrato", "Latência para o gateway do ISP está acima de 100 ms há 10 min". |
 | Valor | Provar para o ISP que a conexão está abaixo do contrato. |
 
-#### 2.2.2 Monitoramento de latência para serviços SaaS
+#### 2.2.2 Monitoramento de latência para serviços SaaS 🟢 Concluído
 
 **Referências:** ThousandEyes, Pingdom, UptimeRobot.
 
 | Aspecto | Proposta |
 | :--- | :--- |
-| O quê | Targets pré-cadastrados (Google, Cloudflare, Netflix, Microsoft 365, GitHub) com thresholds sugeridos. |
+| O quê | Targets pré-cadastrados (Google, Cloudflare, Netflix, Microsoft 365, GitHub, AWS, Zoom, WhatsApp) com thresholds sugeridos. |
 | Como | ICMP + HTTP HEAD para endpoints estáveis. |
 | Painel | Mapa de calor por hora do dia mostrando quando a rede fica lenta. |
+| Estado | 🟢 **Concluído:** Catálogo curado de presets SaaS com endpoints ICMP e HTTP HEAD e thresholds automáticos, provisionamento 1-clique ou em lote (`SaasPresetsDialog`), agregação horária no backend via `monitor_results_hourly` (`GET /api/monitors/hourly-heatmap`) e novo widget interativo de Heatmap de Latência no Dashboard (`SaasLatencyHeatmapWidget`) e no detalhe dos monitores. |
 
 #### 2.2.3 Detecção de shaping/tráfego priorizado
 

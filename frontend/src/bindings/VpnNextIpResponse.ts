@@ -3,4 +3,4 @@
 /**
  * Resposta de `GET /api/vpn/peers/next-ip`.
  */
-export type VpnNextIpResponse = { ipAddress: string, cidr: string, };
+export type VpnNextIpResponse = { ipAddress: string; cidr: string }

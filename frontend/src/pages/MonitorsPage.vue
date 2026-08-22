@@ -5,6 +5,16 @@
       subtitle="Verificações de Ping, HTTP, TCP, DNS e SNMP com histórico em linha do tempo"
     >
       <template #actions>
+        <v-btn
+          color="info"
+          variant="tonal"
+          prepend-icon="mdi-cloud-search-outline"
+          class="mr-2"
+          @click="saasDialog = true"
+        >
+          <span class="hidden-sm-and-down">Serviços SaaS</span>
+          <span class="hidden-md-and-up">SaaS</span>
+        </v-btn>
         <v-btn color="primary" prepend-icon="mdi-plus" @click="openDialog()">
           <span class="hidden-sm-and-down">Novo Monitor</span>
           <span class="hidden-md-and-up">Novo</span>
@@ -102,6 +112,9 @@
       :monitor="editingMonitor"
       @saved="refresh"
     ></MonitorFormDialog>
+
+    <!-- Modal Catálogo SaaS -->
+    <SaasPresetsDialog v-model="saasDialog" @provisioned="refresh"></SaasPresetsDialog>
   </div>
 </template>
 
@@ -112,6 +125,7 @@ import { useMonitorsStore, type Monitor } from '@/stores/monitors'
 import { useDevicesStore } from '@/stores/devices'
 import MonitorsTable from '@/components/MonitorsTable.vue'
 import MonitorFormDialog from '@/components/MonitorFormDialog.vue'
+import SaasPresetsDialog from '@/components/monitors/SaasPresetsDialog.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import { monitorHealthBucket, monitorHealthCounts } from '@/utils/monitorPresentation'
 
@@ -122,6 +136,7 @@ const devicesStore = useDevicesStore()
 
 const search = ref('')
 const dialog = ref(false)
+const saasDialog = ref(false)
 const editingMonitor = ref<Monitor | null>(null)
 
 const statusFilter = computed(() => {

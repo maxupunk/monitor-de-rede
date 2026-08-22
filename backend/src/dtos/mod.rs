@@ -4,6 +4,7 @@ pub mod devices;
 pub mod logs;
 pub mod monitors;
 pub mod resources;
+pub mod saas;
 pub mod server_addresses;
 pub mod users;
 

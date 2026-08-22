@@ -243,6 +243,19 @@
           <UnstableTargetsWidget
             v-else-if="widget.type === 'unstable_targets' || widget.id === 'unstable_targets'"
           />
+
+          <!-- 15. Mapa de Calor de Latência SaaS -->
+          <SaasLatencyHeatmapWidget
+            v-else-if="widget.type === 'saas_heatmap' || widget.id === 'saas_heatmap'"
+            :monitor-id="
+              typeof widget.config?.monitorId === 'number' ? widget.config.monitorId : undefined
+            "
+          />
+
+          <!-- 16. Serviços SaaS, Bancos & Nuvem -->
+          <SaasServicesWidget
+            v-else-if="widget.type === 'saas_services' || widget.id === 'saas_services'"
+          />
         </DashboardWidgetWrapper>
       </v-col>
     </v-row>
@@ -293,6 +306,8 @@ import CpuUsageWidget from '@/components/widgets/CpuUsageWidget.vue'
 import RamUsageWidget from '@/components/widgets/RamUsageWidget.vue'
 import BinaryStatusWidget from '@/components/widgets/BinaryStatusWidget.vue'
 import UnstableTargetsWidget from '@/components/widgets/UnstableTargetsWidget.vue'
+import SaasLatencyHeatmapWidget from '@/components/widgets/SaasLatencyHeatmapWidget.vue'
+import SaasServicesWidget from '@/components/widgets/SaasServicesWidget.vue'
 import DnsLatencyCard from '@/components/DnsLatencyCard.vue'
 import AlertSilenceDialog from '@/components/AlertSilenceDialog.vue'
 import EventDetailDialog from '@/components/EventDetailDialog.vue'

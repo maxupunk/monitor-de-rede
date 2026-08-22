@@ -195,7 +195,12 @@
 
             <!-- Seleção de Recursos conforme o tipo compatível -->
             <v-col
-              v-if="isResourceRequired('bandwidth') || isResourceRequired('numeric')"
+              v-if="
+                isResourceRequired('bandwidth') ||
+                (isResourceRequired('numeric') &&
+                  selectedTemplate?.type !== 'saas_heatmap' &&
+                  selectedTemplate?.type !== 'saas_services')
+              "
               cols="12"
               sm="6"
             >
@@ -253,17 +258,20 @@
               </v-combobox>
             </v-col>
 
-            <v-col v-if="isResourceRequired('binary')" cols="12">
+            <v-col
+              v-if="isResourceRequired('binary') || selectedTemplate?.type === 'saas_heatmap'"
+              cols="12"
+            >
               <v-select
                 v-model="formMonitorId"
                 :items="monitorOptions"
                 item-title="name"
                 item-value="id"
-                label="Monitor de Rede (Dados Binários Booleanos)"
+                label="Monitor de Rede (ou Todos)"
                 variant="outlined"
                 density="compact"
                 hide-details="auto"
-                prepend-inner-icon="mdi-checkbox-marked-circle-outline"
+                prepend-inner-icon="mdi-chart-scatter-plot-hexbin"
               ></v-select>
             </v-col>
 

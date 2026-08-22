@@ -115,6 +115,28 @@ export const CARD_TEMPLATES: CardTemplate[] = [
     allowMultiple: true,
     defaultCols: { cols: 12, sm: 12, md: 6, lg: 6 },
   },
+  {
+    type: 'saas_heatmap',
+    title: 'Mapa de Calor de Latência SaaS',
+    category: 'charts',
+    icon: 'mdi-chart-scatter-plot-hexbin',
+    description:
+      'Matriz horária (00h-23h) de latência por hora do dia e identificação de picos de lentidão.',
+    compatibleResourceTypes: ['numeric'],
+    allowMultiple: true,
+    defaultCols: { cols: 12, sm: 12, md: 12, lg: 12 },
+  },
+  {
+    type: 'saas_services',
+    title: 'Serviços SaaS, Bancos & Nuvem',
+    category: 'lists',
+    icon: 'mdi-bank-check',
+    description:
+      'Painel de monitoramento de latência e qualidade de experiência (QoE) para bancos, fintechs e provedores SaaS.',
+    compatibleResourceTypes: ['numeric'],
+    allowMultiple: false,
+    defaultCols: { cols: 12, sm: 12, md: 12, lg: 12 },
+  },
 ]
 
 const STORAGE_KEY = 'netmonitor_dashboard_layout_v1'
@@ -255,6 +277,36 @@ export const DEFAULT_WIDGETS: WidgetConfig[] = [
     order: 8,
     icon: 'mdi-chart-bar',
     description: 'Histograma por hora agrupando eventos por severidade (Crítico, Alerta, Info).',
+  },
+  {
+    id: 'saas_services',
+    type: 'saas_services',
+    title: 'Serviços SaaS, Bancos & Nuvem',
+    category: 'lists',
+    cols: 12,
+    sm: 12,
+    md: 12,
+    lg: 12,
+    visible: true,
+    order: 9,
+    icon: 'mdi-bank-check',
+    description:
+      'Painel de monitoramento de latência e qualidade de experiência (QoE) para bancos, fintechs e provedores SaaS.',
+  },
+  {
+    id: 'saas_heatmap',
+    type: 'saas_heatmap',
+    title: 'Mapa de Calor de Latência SaaS',
+    category: 'charts',
+    cols: 12,
+    sm: 12,
+    md: 12,
+    lg: 12,
+    visible: true,
+    order: 10,
+    icon: 'mdi-chart-scatter-plot-hexbin',
+    description:
+      'Matriz horária (00h-23h) de latência por hora do dia e identificação de picos de lentidão.',
   },
 ]
 

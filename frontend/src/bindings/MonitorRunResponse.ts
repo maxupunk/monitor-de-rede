@@ -3,4 +3,4 @@
 /**
  * Resposta de uma execução manual de monitor (ping, tcp, http, dns, etc.).
  */
-export type MonitorRunResponse = { message: string, result: any, };
+export type MonitorRunResponse = { message: string; result: any }

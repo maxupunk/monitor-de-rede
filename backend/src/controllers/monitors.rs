@@ -13,6 +13,7 @@ use crate::{
             MonitorWithStats,
         },
         resources::{MonitorInput, MonitorsIndexQuery, PaginationQuery},
+        saas::{HourlyHeatmapQuery, SaasProvisionRequest},
     },
     models::{devices, monitor_results, monitors},
     services::{
@@ -27,11 +28,13 @@ use crate::{
                 calculate_smart_timeout_seconds, effective_timeout_seconds, try_acquire_monitor,
                 try_acquire_snmp_device,
             },
+            heatmap::calculate_hourly_heatmap,
             managed::{self, ProposedMonitor},
             presenter::{present_monitors, MonitorResultPresentation, RECENT_RESULTS_LIMIT},
             reachability,
             result_processor::process_result,
             runner::{run_monitor, RunOptions},
+            saas::{get_saas_catalog, provision_saas_presets},
             uptime::uptime_for_monitor,
         },
         preferences,
@@ -724,10 +727,37 @@ async fn baseline_stats(State(ctx): State<AppContext>, Path(id): Path<i64>) -> A
     }))?)
 }
 
+/// Catálogo de presets de serviços SaaS e estado atual (§2.2.2).
+async fn saas_presets(State(ctx): State<AppContext>) -> AppResult<Response> {
+    let catalog = get_saas_catalog(&ctx.db).await?;
+    Ok(format::json(catalog)?)
+}
+
+/// Provisionamento em lote ou individual de serviços SaaS (§2.2.2).
+async fn saas_provision(
+    State(ctx): State<AppContext>,
+    Json(input): Json<SaasProvisionRequest>,
+) -> AppResult<Response> {
+    let res = provision_saas_presets(&ctx, input).await?;
+    Ok(format::json(res)?)
+}
+
+/// Matriz de calor horária de latência (§2.2.2).
+async fn hourly_heatmap(
+    State(ctx): State<AppContext>,
+    Query(query): Query<HourlyHeatmapQuery>,
+) -> AppResult<Response> {
+    let res = calculate_hourly_heatmap(&ctx.db, query).await?;
+    Ok(format::json(res)?)
+}
+
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("/monitors")
         .add("/", get(index).post(store))
+        .add("/saas/presets", get(saas_presets))
+        .add("/saas/provision", post(saas_provision))
+        .add("/hourly-heatmap", get(hourly_heatmap))
         .add("/{id}", get(show).put(update).delete(destroy))
         .add("/{id}/run", post(run))
         .add("/{id}/enable", post(enable))

@@ -21,6 +21,7 @@ mod process_deps;
 mod push;
 mod reach_monitors;
 mod root;
+mod saas_monitoring;
 mod scheduler_probes_lifecycle;
 mod server_addresses;
 mod settings;

@@ -3,21 +3,24 @@
 /**
  * O que a tela mostra depois da ativação automática.
  */
-export type ProvisionLoggingResponse = { operatingSystem: string, 
-/**
- * O endereço que foi gravado no equipamento.
- */
-serverAddress: string, serverPort: number, 
-/**
- * Os comandos enviados. Nunca a credencial.
- */
-commands: Array<string>, 
-/**
- * O que o equipamento respondeu, com a senha raspada.
- */
-transcript: string, 
-/**
- * Se chegou log do dispositivo antes do teto de espera. `null` quando não
- * havia como confirmar (ingestão desligada).
- */
-confirmed: boolean | null, };
+export type ProvisionLoggingResponse = {
+  operatingSystem: string
+  /**
+   * O endereço que foi gravado no equipamento.
+   */
+  serverAddress: string
+  serverPort: number
+  /**
+   * Os comandos enviados. Nunca a credencial.
+   */
+  commands: Array<string>
+  /**
+   * O que o equipamento respondeu, com a senha raspada.
+   */
+  transcript: string
+  /**
+   * Se chegou log do dispositivo antes do teto de espera. `null` quando não
+   * havia como confirmar (ingestão desligada).
+   */
+  confirmed: boolean | null
+}

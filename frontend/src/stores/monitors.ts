@@ -3,6 +3,9 @@ import { ref, computed } from 'vue'
 import { apiService } from '@/services/apiService'
 import { gaugeMetricName, isGaugeMonitor } from '@/utils/monitorPresentation'
 import type { MonitorUptimeResponse } from '@/bindings/MonitorUptimeResponse'
+import type { SaasPresetsResponse } from '@/bindings/SaasPresetsResponse'
+import type { SaasProvisionResponse } from '@/bindings/SaasProvisionResponse'
+import type { HourlyHeatmapResponse } from '@/bindings/HourlyHeatmapResponse'
 
 export interface FetchMonitorsParams {
   enabled?: boolean
@@ -333,6 +336,39 @@ export const useMonitorsStore = defineStore('monitors', () => {
     if (currentMonitor.value) apply(currentMonitor.value)
   }
 
+  async function fetchSaasPresets(): Promise<SaasPresetsResponse> {
+    return apiService.get<SaasPresetsResponse>('/monitors/saas/presets')
+  }
+
+  async function provisionSaasPresets(
+    presetIds: string[],
+    intervalSeconds?: number,
+    timeoutSeconds?: number
+  ): Promise<SaasProvisionResponse> {
+    const res = await apiService.post<SaasProvisionResponse>('/monitors/saas/provision', {
+      presetIds,
+      intervalSeconds,
+      timeoutSeconds,
+    })
+    await fetchMonitors()
+    return res
+  }
+
+  async function fetchHourlyHeatmap(params?: {
+    monitorId?: number
+    isSaas?: boolean
+    days?: number
+  }): Promise<HourlyHeatmapResponse> {
+    const q = new URLSearchParams()
+    if (params?.monitorId) q.set('monitorId', String(params.monitorId))
+    if (params?.isSaas !== undefined) q.set('isSaas', String(params.isSaas))
+    if (params?.days) q.set('days', String(params.days))
+    const qs = q.toString()
+    return apiService.get<HourlyHeatmapResponse>(
+      qs ? `/monitors/hourly-heatmap?${qs}` : '/monitors/hourly-heatmap'
+    )
+  }
+
   return {
     monitors,
     activeMonitors,
@@ -350,5 +386,8 @@ export const useMonitorsStore = defineStore('monitors', () => {
     runMonitor,
     toggleMonitorEnabled,
     fetchUptime,
+    fetchSaasPresets,
+    provisionSaasPresets,
+    fetchHourlyHeatmap,
   }
 })

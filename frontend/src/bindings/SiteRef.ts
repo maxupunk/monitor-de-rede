@@ -3,4 +3,4 @@
 /**
  * Referência compacta a um site.
  */
-export type SiteRef = { id: number | null, name: string, };
+export type SiteRef = { id: number | null; name: string }
