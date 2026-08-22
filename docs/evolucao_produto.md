@@ -145,14 +145,15 @@ Isso cobre o básico bem. As próximas oportunidades de produto partem de três 
 | Como | Grafo de dependências construído a partir da topologia + regras declaradas pelo usuário. |
 | Saída | "17 dispositivos ficaram inacessíveis após `192.168.1.1` parar de responder — causa provável: gateway". |
 
-#### 2.3.3 Anomalias com linha de base estatística
+#### 2.3.3 Anomalias com linha de base estatística `🟢 Concluído`
 
 **Referências:** Datadog anomaly detection, AWS CloudWatch Anomaly Detection.
 
 | Aspecto | Proposta |
 | :--- | :--- |
-| O quê | Detectar desvios em métricas sem thresholds fixos (ex.: latência, taxa de erros DHCP, volume de syslog). |
-| Como | Modelo simples de média móvel + desvio padrão; evolução para Holt-Winters ou isolation forest. |
+| O quê | Detectar desvios em métricas sem thresholds fixos (ex.: latência, perda de pacotes, volume de syslog, tráfego de interfaces). |
+| Como | Modelo de média móvel histórica de 7 dias ($\mu$) + desvio padrão amostral ($\sigma$) com pisos numéricos de variância ($\epsilon$), cálculo de Z-Score ($z = \frac{\text{current} - \mu}{\max(\sigma, \epsilon)}$) e bandas de confiança de 3 sigmas ($\mu \pm 3\sigma$). |
+| Entrega | ✅ Motor estatístico em `baseline.rs` com cálculo amostral de $\sigma$, Z-Scores e bandas normais ($3\sigma$).<br>✅ 13 novos campos tipados de alerta (`latencyZScore`, `latencyUpperBandMs`, `packetLossZScore`, `uptimeZScore`, `trafficInZScore`, etc.).<br>✅ Templates no catálogo (`latency_statistical_anomaly`, `packet_loss_statistical_anomaly`, `traffic_statistical_anomaly`).<br>✅ Endpoint `GET /api/monitors/:id/baseline` e componente visual `MonitorBaselineCard.vue` com badges de estado, faixas de confiança e criação de regras. |
 
 ---
 

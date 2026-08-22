@@ -33,6 +33,8 @@ pub enum ProblemKind {
     InterfaceFlap,
     /// Túnel VPN caindo ou instável.
     VpnInstability,
+    /// Anomalia estatística (Z-Score ou desvio relevante em relação à baseline).
+    StatisticalAnomaly,
 }
 
 impl ProblemKind {
@@ -46,6 +48,7 @@ impl ProblemKind {
             Self::DnsFailure => "dns_failure",
             Self::InterfaceFlap => "interface_flap",
             Self::VpnInstability => "vpn_instability",
+            Self::StatisticalAnomaly => "statistical_anomaly",
         }
     }
 
@@ -60,6 +63,7 @@ impl ProblemKind {
             "dns_failure" => Some(Self::DnsFailure),
             "interface_flap" => Some(Self::InterfaceFlap),
             "vpn_instability" => Some(Self::VpnInstability),
+            "statistical_anomaly" | "anomaly" => Some(Self::StatisticalAnomaly),
             _ => None,
         }
     }
@@ -74,6 +78,7 @@ impl ProblemKind {
             Self::DnsFailure => "falha de DNS",
             Self::InterfaceFlap => "interface oscilando",
             Self::VpnInstability => "instabilidade VPN",
+            Self::StatisticalAnomaly => "anomalia estatística",
         }
     }
 }
@@ -106,6 +111,25 @@ pub fn observed_value(kind: ProblemKind, dataset: &AlertDataset) -> Option<Strin
             number(fields::PACKET_LOSS).map(|value| format!("{value:.0}% de perda"))
         }
         ProblemKind::Latency => number(fields::LATENCY_MS).map(|value| format!("{value:.0} ms")),
+        ProblemKind::StatisticalAnomaly => number(fields::LATENCY_Z_SCORE)
+            .map(|z| format!("{z:+.1}σ latência"))
+            .or_else(|| number(fields::PACKET_LOSS_Z_SCORE).map(|z| format!("{z:+.1}σ perda")))
+            .or_else(|| number(fields::UPTIME_Z_SCORE).map(|z| format!("{z:+.1}σ queda uptime")))
+            .or_else(|| {
+                number(fields::SYSLOG_VOLUME_Z_SCORE).map(|z| format!("{z:+.1}σ volume logs"))
+            })
+            .or_else(|| number(fields::TRAFFIC_IN_Z_SCORE).map(|z| format!("{z:+.1}σ tráfego IN")))
+            .or_else(|| {
+                number(fields::TRAFFIC_OUT_Z_SCORE).map(|z| format!("{z:+.1}σ tráfego OUT"))
+            })
+            .or_else(|| {
+                number(fields::LATENCY_DEVIATION_PERCENT)
+                    .map(|dev| format!("{dev:+.0}% vs baseline"))
+            })
+            .or_else(|| {
+                number(fields::PACKET_LOSS_DEVIATION_PERCENT)
+                    .map(|dev| format!("{dev:+.0} p.p. vs baseline"))
+            }),
         _ => None,
     }
 }
@@ -134,6 +158,22 @@ fn kind_of_field(field: &str) -> Option<ProblemKind> {
         | fields::CONNECT_TIME_MS
         | fields::RESOLUTION_TIME_MS
         | fields::DURATION_MS => Some(ProblemKind::Latency),
+        fields::LATENCY_Z_SCORE
+        | fields::LATENCY_STDDEV_MS
+        | fields::LATENCY_UPPER_BAND_MS
+        | fields::LATENCY_DEVIATION_PERCENT
+        | fields::PACKET_LOSS_Z_SCORE
+        | fields::PACKET_LOSS_STDDEV_PERCENT
+        | fields::PACKET_LOSS_UPPER_BAND_PERCENT
+        | fields::PACKET_LOSS_DEVIATION_PERCENT
+        | fields::UPTIME_Z_SCORE
+        | fields::UPTIME_STDDEV_PERCENT
+        | fields::UPTIME_DEVIATION_PERCENT
+        | fields::SYSLOG_VOLUME_Z_SCORE
+        | fields::SYSLOG_VOLUME_BASELINE
+        | fields::SYSLOG_VOLUME_STDDEV
+        | fields::TRAFFIC_IN_Z_SCORE
+        | fields::TRAFFIC_OUT_Z_SCORE => Some(ProblemKind::StatisticalAnomaly),
         fields::INTERFACE_STATUS_TRANSITION
         | fields::INTERFACE_SPEED_TRANSITION
         | fields::INTERFACE_SPEED_BPS
@@ -163,6 +203,17 @@ fn classify_by_dataset(dataset: &AlertDataset) -> ProblemKind {
     }
     if dataset.get("type").and_then(Value::as_str) == Some("dns") {
         return ProblemKind::DnsFailure;
+    }
+    if dataset
+        .get(fields::LATENCY_Z_SCORE)
+        .and_then(Value::as_f64)
+        .is_some_and(|z| z >= 3.0)
+        || dataset
+            .get(fields::PACKET_LOSS_Z_SCORE)
+            .and_then(Value::as_f64)
+            .is_some_and(|z| z >= 3.0)
+    {
+        return ProblemKind::StatisticalAnomaly;
     }
     if dataset
         .get(fields::PACKET_LOSS)

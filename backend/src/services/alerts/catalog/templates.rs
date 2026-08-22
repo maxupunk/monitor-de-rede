@@ -251,6 +251,22 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             recommended: true,
         },
         AlertRuleTemplate {
+            key: "latency_statistical_anomaly",
+            name: "Anomalia estatística de latência (Z-Score > 3.0)",
+            description: "Dispara quando a latência ultrapassa 3 desvios padrão (3σ) acima da média histórica de 7 dias — detecta picos e degradações sem limiar fixo.",
+            category: "desempenho",
+            rule_type: "custom",
+            condition: json!({ "field": fields::LATENCY_Z_SCORE, "operator": "gte", "value": 3.0 }),
+            severity: "warning",
+            duration_seconds: 120,
+            recovery_window_seconds: 300,
+            flap_threshold: 5,
+            flap_window_seconds: 900,
+            notification_cooldown_seconds: 900,
+            inhibit_when_parent_down: true,
+            recommended: true,
+        },
+        AlertRuleTemplate {
             key: "packet_loss_baseline_deviation",
             name: "Perda de pacotes acima da baseline",
             description: "A perda de pacotes atual superou em 10 pontos percentuais a média histórica de 7 dias.",
@@ -259,6 +275,22 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             condition: json!({ "field": fields::PACKET_LOSS_DEVIATION_PERCENT, "operator": "gt", "value": 10 }),
             severity: "warning",
             duration_seconds: 300,
+            recovery_window_seconds: 300,
+            flap_threshold: 5,
+            flap_window_seconds: 900,
+            notification_cooldown_seconds: 900,
+            inhibit_when_parent_down: true,
+            recommended: true,
+        },
+        AlertRuleTemplate {
+            key: "packet_loss_statistical_anomaly",
+            name: "Anomalia estatística de perda de pacotes (Z-Score > 3.0)",
+            description: "Dispara quando a perda de pacotes sobe mais de 3 desvios padrão (3σ) acima do comportamento padrão do link.",
+            category: "disponibilidade",
+            rule_type: "custom",
+            condition: json!({ "field": fields::PACKET_LOSS_Z_SCORE, "operator": "gte", "value": 3.0 }),
+            severity: "warning",
+            duration_seconds: 120,
             recovery_window_seconds: 300,
             flap_threshold: 5,
             flap_window_seconds: 900,
@@ -443,6 +475,22 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             flap_threshold: 0,
             flap_window_seconds: 900,
             notification_cooldown_seconds: 0,
+            inhibit_when_parent_down: false,
+            recommended: false,
+        },
+        AlertRuleTemplate {
+            key: "traffic_statistical_anomaly",
+            name: "Pico anômalo de tráfego de rede (Z-Score > 3.0)",
+            description: "Detecta anomalia estatística de throughput quando o tráfego de entrada na interface excede 3 desvios padrão (3σ) do padrão histórico.",
+            category: "interfaces",
+            rule_type: "custom",
+            condition: json!({ "field": fields::TRAFFIC_IN_Z_SCORE, "operator": "gte", "value": 3.0 }),
+            severity: "warning",
+            duration_seconds: 300,
+            recovery_window_seconds: 300,
+            flap_threshold: 5,
+            flap_window_seconds: 900,
+            notification_cooldown_seconds: 900,
             inhibit_when_parent_down: false,
             recommended: false,
         },
@@ -699,20 +747,19 @@ mod tests {
 
     /// 18 do roadmap de alertas + 7 padrões de log (Fase 6 do roadmap de
     /// syslog) + 3 de saúde de equipamento (Fase 3 do roadmap do servidor como
-    /// dispositivo) + 3 de baseline móvel (Fase 3 do roadmap mestre).
-    const TOTAL_TEMPLATES: usize = 31;
+    /// dispositivo) + 3 de baseline móvel + 3 de anomalias estatísticas (§2.3.3).
+    const TOTAL_TEMPLATES: usize = 34;
 
     #[test]
     fn o_catalogo_tem_os_templates_dos_dois_roadmaps() {
         assert_eq!(all().len(), TOTAL_TEMPLATES);
     }
 
-    /// 7 do conjunto original + 6 dos padrões de log + 3 de baseline móvel.
-    /// Só `log_config_changed` fica de fora: é rastro de auditoria, não problema,
-    /// e ligá-lo por padrão encheria a Central de alerta informativo.
+    /// 7 do conjunto original + 6 dos padrões de log + 3 de baseline móvel + 2 de anomalias estatísticas.
+    /// Só `log_config_changed` e `traffic_statistical_anomaly` ficam de fora dos recomendados.
     #[test]
-    fn dezesseis_templates_compoem_o_conjunto_basico() {
-        assert_eq!(recommended().len(), 16);
+    fn dezoito_templates_compoem_o_conjunto_basico() {
+        assert_eq!(recommended().len(), 18);
     }
 
     #[test]

@@ -244,3 +244,95 @@ async fn regra_de_desvio_de_latencia_nao_dispara_abaixo_do_limiar() {
     })
     .await;
 }
+
+#[tokio::test]
+#[serial]
+async fn regra_de_anomalia_estatistica_por_z_score_dispara_acima_de_3_sigmas() {
+    limpar_cache();
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let monitor = request
+            .post("/api/monitors")
+            .json(&json!({
+                "name": "Z-Score Anomaly Ping",
+                "type": "ping",
+                "target": "127.0.0.1",
+            }))
+            .await;
+        let monitor: serde_json::Value = serde_json::from_str(&monitor.text()).unwrap();
+        let monitor_id = monitor["id"].as_i64().unwrap();
+
+        buckets_de_baseline(&ctx, monitor_id).await;
+
+        let rule = request
+            .post("/api/alert-rules")
+            .json(&json!({
+                "name": "Anomalia de latência (3σ)",
+                "condition": { "field": "latencyZScore", "operator": "gte", "value": 3.0 },
+                "severity": "warning",
+                "durationSeconds": 0,
+                "monitorId": monitor_id,
+            }))
+            .await;
+        assert_eq!(rule.status_code(), 201);
+        let rule: serde_json::Value = serde_json::from_str(&rule.text()).unwrap();
+        let rule_id = rule["id"].as_i64().unwrap();
+
+        // Latência de 30 ms com baseline de 20 ms -> Z-Score = (30 - 20) / 0.5 = 20.0 >= 3.0
+        backend::services::monitoring::result_processor::process_result(
+            &ctx,
+            monitor_id,
+            &resultado(30.0, 0.0),
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            eventos_por_regra(&ctx, rule_id).await,
+            1,
+            "regra de anomalia estatística deveria disparar com Z-Score elevado"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn endpoint_baseline_devolve_estatisticas_completas() {
+    limpar_cache();
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let monitor = request
+            .post("/api/monitors")
+            .json(&json!({
+                "name": "Baseline API Ping",
+                "type": "ping",
+                "target": "127.0.0.1",
+            }))
+            .await;
+        let monitor: serde_json::Value = serde_json::from_str(&monitor.text()).unwrap();
+        let monitor_id = monitor["id"].as_i64().unwrap();
+
+        buckets_de_baseline(&ctx, monitor_id).await;
+
+        let res = request
+            .get(&format!("/api/monitors/{monitor_id}/baseline"))
+            .await;
+        assert_eq!(res.status_code(), 200);
+        let payload: serde_json::Value = serde_json::from_str(&res.text()).unwrap();
+
+        assert_eq!(payload["monitorId"], monitor_id);
+        assert_eq!(payload["hasSufficientData"], true);
+        assert_eq!(payload["baseline"]["latencyBaselineMs"], 20.0);
+        assert!(payload["baseline"]["latencyUpperBandMs"].is_number());
+        assert_eq!(payload["baseline"]["sampleCount"], MIN_BUCKETS_FOR_BASELINE);
+    })
+    .await;
+}

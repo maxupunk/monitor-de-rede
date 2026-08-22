@@ -95,20 +95,44 @@ pub fn build(
     if let Some(value) = enriched.latency_baseline_ms {
         dataset.insert(fields::LATENCY_BASELINE_MS.into(), json!(value));
     }
+    if let Some(value) = enriched.latency_stddev_ms {
+        dataset.insert(fields::LATENCY_STDDEV_MS.into(), json!(value));
+    }
     if let Some(value) = enriched.latency_deviation_percent {
         dataset.insert(fields::LATENCY_DEVIATION_PERCENT.into(), json!(value));
+    }
+    if let Some(value) = enriched.latency_z_score {
+        dataset.insert(fields::LATENCY_Z_SCORE.into(), json!(value));
+    }
+    if let Some(value) = enriched.latency_upper_band_ms {
+        dataset.insert(fields::LATENCY_UPPER_BAND_MS.into(), json!(value));
     }
     if let Some(value) = enriched.packet_loss_baseline_percent {
         dataset.insert(fields::PACKET_LOSS_BASELINE_PERCENT.into(), json!(value));
     }
+    if let Some(value) = enriched.packet_loss_stddev_percent {
+        dataset.insert(fields::PACKET_LOSS_STDDEV_PERCENT.into(), json!(value));
+    }
     if let Some(value) = enriched.packet_loss_deviation_percent {
         dataset.insert(fields::PACKET_LOSS_DEVIATION_PERCENT.into(), json!(value));
+    }
+    if let Some(value) = enriched.packet_loss_z_score {
+        dataset.insert(fields::PACKET_LOSS_Z_SCORE.into(), json!(value));
+    }
+    if let Some(value) = enriched.packet_loss_upper_band_percent {
+        dataset.insert(fields::PACKET_LOSS_UPPER_BAND_PERCENT.into(), json!(value));
     }
     if let Some(value) = enriched.uptime_baseline_percent {
         dataset.insert(fields::UPTIME_BASELINE_PERCENT.into(), json!(value));
     }
+    if let Some(value) = enriched.uptime_stddev_percent {
+        dataset.insert(fields::UPTIME_STDDEV_PERCENT.into(), json!(value));
+    }
     if let Some(value) = enriched.uptime_deviation_percent {
         dataset.insert(fields::UPTIME_DEVIATION_PERCENT.into(), json!(value));
+    }
+    if let Some(value) = enriched.uptime_z_score {
+        dataset.insert(fields::UPTIME_Z_SCORE.into(), json!(value));
     }
 
     dataset
@@ -213,8 +237,14 @@ mod tests {
     fn baseline_e_enriquecida_no_dataset() {
         let baseline = baseline::MonitorBaseline {
             latency_baseline_ms: Some(100.0),
+            latency_stddev_ms: Some(10.0),
+            latency_upper_band_ms: Some(130.0),
+            latency_lower_band_ms: Some(70.0),
             packet_loss_baseline_percent: Some(2.0),
+            packet_loss_stddev_percent: Some(1.0),
+            packet_loss_upper_band_percent: Some(5.0),
             uptime_baseline_percent: Some(99.9),
+            uptime_stddev_percent: Some(0.5),
             ..Default::default()
         };
         let facts = build(
@@ -226,10 +256,18 @@ mod tests {
             &baseline,
         );
         assert_eq!(facts[fields::LATENCY_BASELINE_MS], json!(100.0));
+        assert_eq!(facts[fields::LATENCY_STDDEV_MS], json!(10.0));
         assert_eq!(facts[fields::LATENCY_DEVIATION_PERCENT], json!(50.0));
+        assert_eq!(facts[fields::LATENCY_Z_SCORE], json!(5.0));
+        assert_eq!(facts[fields::LATENCY_UPPER_BAND_MS], json!(130.0));
         assert_eq!(facts[fields::PACKET_LOSS_BASELINE_PERCENT], json!(2.0));
+        assert_eq!(facts[fields::PACKET_LOSS_STDDEV_PERCENT], json!(1.0));
         assert_eq!(facts[fields::PACKET_LOSS_DEVIATION_PERCENT], json!(3.0));
+        assert_eq!(facts[fields::PACKET_LOSS_Z_SCORE], json!(3.0));
+        assert_eq!(facts[fields::PACKET_LOSS_UPPER_BAND_PERCENT], json!(5.0));
         assert_eq!(facts[fields::UPTIME_BASELINE_PERCENT], json!(99.9));
+        assert_eq!(facts[fields::UPTIME_STDDEV_PERCENT], json!(0.5));
         assert_eq!(facts[fields::UPTIME_DEVIATION_PERCENT], json!(0.0));
+        assert_eq!(facts[fields::UPTIME_Z_SCORE], json!(0.0));
     }
 }

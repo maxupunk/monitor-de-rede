@@ -669,6 +669,61 @@ async fn uptime(
     })?)
 }
 
+/// Linha de base estatística e detecção de anomalias do monitor (§2.3.3).
+async fn baseline_stats(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
+    let monitor = monitors::Entity::find_by_id(id)
+        .one(&ctx.db)
+        .await?
+        .ok_or_else(|| AppError::not_found("Monitor não encontrado"))?;
+
+    let baseline = crate::services::alerts::baseline::for_monitor(&ctx.db, id).await?;
+
+    // Busca o resultado mais recente para enriquecer com o estado corrente
+    let latest_result = monitor_results::Entity::find()
+        .filter(monitor_results::Column::MonitorId.eq(id))
+        .order_by_desc(monitor_results::Column::StartedAt)
+        .one(&ctx.db)
+        .await?;
+
+    let (latency_ms, packet_loss, uptime_percent) = if let Some(ref res) = latest_result {
+        let loss = if res.status == "down" {
+            Some(100.0)
+        } else if res.status == "warning" {
+            Some(20.0)
+        } else {
+            Some(0.0)
+        };
+        let uptime = if res.status == "up" {
+            Some(100.0)
+        } else {
+            Some(0.0)
+        };
+        (res.latency_ms, loss, uptime)
+    } else {
+        (None, None, None)
+    };
+
+    let enriched = crate::services::alerts::baseline::with_current_value(
+        &baseline,
+        latency_ms,
+        packet_loss,
+        uptime_percent,
+    );
+
+    Ok(format::json(serde_json::json!({
+        "monitorId": id,
+        "monitorName": monitor.name,
+        "monitorType": monitor.r#type,
+        "hasSufficientData": !enriched.is_empty(),
+        "baseline": enriched,
+        "current": {
+            "latencyMs": latency_ms,
+            "packetLossPercent": packet_loss,
+            "uptimePercent": uptime_percent,
+        }
+    }))?)
+}
+
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("/monitors")
@@ -680,6 +735,7 @@ pub fn routes() -> Routes {
         .add("/{id}/results", get(results))
         .add("/{id}/alerts", get(alerts))
         .add("/{id}/uptime", get(uptime))
+        .add("/{id}/baseline", get(baseline_stats))
 }
 
 #[cfg(test)]

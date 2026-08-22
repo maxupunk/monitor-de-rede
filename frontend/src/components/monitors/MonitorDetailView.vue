@@ -69,6 +69,13 @@
         :max-latency-text="maxLatencyText"
       />
 
+      <!-- Linha de Base Estatística & Detecção de Anomalias (§2.3.3) -->
+      <MonitorBaselineCard
+        v-if="!isGaugeMonitor && !isInterfaceMonitor && !isTrafficMonitor"
+        :baseline-data="baselineData"
+        @create-anomaly-rule="showRuleCatalog = true"
+      />
+
       <!-- Seção de Gráficos e Timeline -->
       <MonitorChartsSection
         :is-traffic-monitor="isTrafficMonitor"
@@ -126,6 +133,14 @@
       :monitor="monitorsStore.currentMonitor"
       @saved="refreshData"
     ></MonitorFormDialog>
+
+    <!-- Dialog do Catálogo de Regras para Criação de Regra de Anomalia -->
+    <AlertRuleCatalogDialog
+      v-model="showRuleCatalog"
+      :fixed-device-id="monitor?.deviceId"
+      :fixed-device-name="monitor?.device?.name"
+      @applied="refreshData"
+    />
   </div>
 </template>
 
@@ -140,9 +155,11 @@ import { useInfiniteList } from '@/composables/useInfiniteList'
 import type { DeviceMetric } from '@/stores/deviceDetail'
 import type { ChartSeriesInput } from '@/components/BaseMetricChart.vue'
 import MonitorFormDialog from '@/components/MonitorFormDialog.vue'
+import AlertRuleCatalogDialog from '@/components/AlertRuleCatalogDialog.vue'
 import InstabilityIndicator from '@/components/InstabilityIndicator.vue'
 import MonitorDetailHeader from './detail/MonitorDetailHeader.vue'
 import MonitorKpiCards from './detail/MonitorKpiCards.vue'
+import MonitorBaselineCard, { type MonitorBaselinePayload } from './detail/MonitorBaselineCard.vue'
 import MonitorChartsSection from './detail/MonitorChartsSection.vue'
 import MonitorHistoryTable from './detail/MonitorHistoryTable.vue'
 import MonitorAlertHistoryTable from './detail/MonitorAlertHistoryTable.vue'
@@ -562,6 +579,20 @@ const gaugeSeries = computed<ChartSeriesInput[]>(() => {
   ]
 })
 
+const showRuleCatalog = ref(false)
+const baselineData = ref<MonitorBaselinePayload | null>(null)
+
+async function loadBaselineData() {
+  if (!monitorId.value) return
+  try {
+    baselineData.value = await apiService.get<MonitorBaselinePayload>(
+      `/monitors/${monitorId.value}/baseline`
+    )
+  } catch {
+    baselineData.value = null
+  }
+}
+
 async function loadGaugeHistory() {
   if (!monitor.value.deviceId) {
     gaugeHistory.value = []
@@ -588,6 +619,9 @@ onMounted(async () => {
 
   await monitorsStore.fetchMonitorById(monitorId.value)
   if (isGaugeMonitor.value || isTrafficMonitor.value) await loadGaugeHistory()
+  if (!isGaugeMonitor.value && !isInterfaceMonitor.value && !isTrafficMonitor.value) {
+    await loadBaselineData()
+  }
 
   stopMetricsListener = eventsStore.onEvent('metric:recorded', (data) => {
     if (!isGaugeMonitor.value && !isTrafficMonitor.value) return
@@ -609,6 +643,12 @@ onMounted(async () => {
     }
   })
 
+  eventsStore.onEvent('monitor:result', (data) => {
+    if (Number(data.monitorId) === monitorId.value) {
+      loadBaselineData()
+    }
+  })
+
   eventsStore.onEvent(
     ['alert:triggered', 'alert:resolved', 'alert:acknowledged', 'alert:silenced'],
     (data) => {
@@ -626,6 +666,9 @@ async function refreshData() {
   if (monitorId.value) {
     await monitorsStore.fetchMonitorById(monitorId.value)
     if (isGaugeMonitor.value || isTrafficMonitor.value) await loadGaugeHistory()
+    if (!isGaugeMonitor.value && !isInterfaceMonitor.value && !isTrafficMonitor.value) {
+      await loadBaselineData()
+    }
     if (showHistory.value) history.reset()
     if (showAlerts.value) alertHistory.reset()
   }

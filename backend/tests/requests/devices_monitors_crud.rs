@@ -585,7 +585,9 @@ async fn rollup_agrega_resultados_brutos_em_buckets_horarios() {
         let monitor: serde_json::Value = serde_json::from_str(&monitor.text()).unwrap();
         let monitor_id = monitor["id"].as_i64().unwrap();
 
-        let base = Utc::now() - Duration::hours(3);
+        let base = backend::services::monitoring::rollup::truncate_to_hour(
+            Utc::now() - Duration::hours(3),
+        ) + Duration::minutes(10);
         for sequence in 0..5 {
             let timestamp = base + Duration::minutes(sequence);
             monitor_results::ActiveModel {

@@ -308,7 +308,7 @@ export const ALERT_METRICS: AlertMetricOption[] = [
     defaultOperator: 'gt',
     defaultValue: 4,
   },
-  // --- Baseline móvel (Fase 3) ----------------------------------------------
+  // --- Baseline móvel e anomalias estatísticas (§2.3.3) --------------------
   {
     field: 'latencyBaselineMs',
     title: 'Baseline de latência (ms)',
@@ -317,6 +317,15 @@ export const ALERT_METRICS: AlertMetricOption[] = [
     unit: 'ms',
     defaultOperator: 'gt',
     defaultValue: 200,
+  },
+  {
+    field: 'latencyStddevMs',
+    title: 'Desvio padrão de latência (ms)',
+    hint: 'Variabilidade histórica da latência na janela de 7 dias (sigma).',
+    kind: 'number',
+    unit: 'ms',
+    defaultOperator: 'gt',
+    defaultValue: 10,
   },
   {
     field: 'latencyDeviationPercent',
@@ -328,6 +337,24 @@ export const ALERT_METRICS: AlertMetricOption[] = [
     defaultValue: 50,
   },
   {
+    field: 'latencyZScore',
+    title: 'Anomalia de latência — Z-Score (sigmas)',
+    hint: 'Número de desvios padrão acima da média histórica. Ex.: 3.0 indica 3σ (anomalia estatística acima de 99.7% do padrão).',
+    kind: 'number',
+    unit: 'σ',
+    defaultOperator: 'gte',
+    defaultValue: 3,
+  },
+  {
+    field: 'latencyUpperBandMs',
+    title: 'Banda superior de latência normal (ms)',
+    hint: 'Limiar superior esperado da latência (média + 3 sigmas).',
+    kind: 'number',
+    unit: 'ms',
+    defaultOperator: 'gt',
+    defaultValue: 150,
+  },
+  {
     field: 'packetLossBaselinePercent',
     title: 'Baseline de perda de pacotes (%)',
     hint: 'Média histórica de perda de pacotes dos últimos 7 dias.',
@@ -335,6 +362,15 @@ export const ALERT_METRICS: AlertMetricOption[] = [
     unit: '%',
     defaultOperator: 'gt',
     defaultValue: 1,
+  },
+  {
+    field: 'packetLossStddevPercent',
+    title: 'Desvio padrão de perda de pacotes (%)',
+    hint: 'Variabilidade histórica da taxa de perda de pacotes.',
+    kind: 'number',
+    unit: '%',
+    defaultOperator: 'gt',
+    defaultValue: 2,
   },
   {
     field: 'packetLossDeviationPercent',
@@ -346,6 +382,24 @@ export const ALERT_METRICS: AlertMetricOption[] = [
     defaultValue: 10,
   },
   {
+    field: 'packetLossZScore',
+    title: 'Anomalia de perda de pacotes — Z-Score (sigmas)',
+    hint: 'Número de desvios padrão acima da média histórica de perda. Ex.: 3.0 indica anomalia estatística.',
+    kind: 'number',
+    unit: 'σ',
+    defaultOperator: 'gte',
+    defaultValue: 3,
+  },
+  {
+    field: 'packetLossUpperBandPercent',
+    title: 'Banda superior de perda normal (%)',
+    hint: 'Limiar superior esperado de perda (média + 3 sigmas).',
+    kind: 'number',
+    unit: '%',
+    defaultOperator: 'gt',
+    defaultValue: 5,
+  },
+  {
     field: 'uptimeBaselinePercent',
     title: 'Baseline de uptime (%)',
     hint: 'Média histórica de uptime dos últimos 7 dias.',
@@ -355,6 +409,15 @@ export const ALERT_METRICS: AlertMetricOption[] = [
     defaultValue: 99,
   },
   {
+    field: 'uptimeStddevPercent',
+    title: 'Desvio padrão de uptime (%)',
+    hint: 'Variabilidade histórica da disponibilidade.',
+    kind: 'number',
+    unit: '%',
+    defaultOperator: 'gt',
+    defaultValue: 1,
+  },
+  {
     field: 'uptimeDeviationPercent',
     title: 'Queda de uptime abaixo da baseline (p.p.)',
     hint: 'Quanto o uptime atual está abaixo da média histórica, em pontos percentuais.',
@@ -362,6 +425,58 @@ export const ALERT_METRICS: AlertMetricOption[] = [
     unit: 'p.p.',
     defaultOperator: 'gt',
     defaultValue: 2,
+  },
+  {
+    field: 'uptimeZScore',
+    title: 'Anomalia de queda de uptime — Z-Score (sigmas)',
+    hint: 'Número de desvios padrão abaixo da média histórica de uptime.',
+    kind: 'number',
+    unit: 'σ',
+    defaultOperator: 'gte',
+    defaultValue: 3,
+  },
+  {
+    field: 'syslogVolumeBaseline',
+    title: 'Baseline de volume de logs Syslog',
+    hint: 'Média histórica de linhas de log recebidas na janela.',
+    kind: 'number',
+    defaultOperator: 'gt',
+    defaultValue: 100,
+  },
+  {
+    field: 'syslogVolumeStddev',
+    title: 'Desvio padrão de volume Syslog',
+    hint: 'Variabilidade do fluxo de mensagens syslog.',
+    kind: 'number',
+    defaultOperator: 'gt',
+    defaultValue: 20,
+  },
+  {
+    field: 'syslogVolumeZScore',
+    title: 'Surto de logs Syslog — Z-Score (sigmas)',
+    hint: 'Detecção de surto ou rajada atípica de logs em relação ao padrão histórico do dispositivo.',
+    kind: 'number',
+    unit: 'σ',
+    defaultOperator: 'gte',
+    defaultValue: 3.5,
+  },
+  {
+    field: 'trafficInZScore',
+    title: 'Anomalia de tráfego de entrada — Z-Score (sigmas)',
+    hint: 'Desvios padrão acima da média de tráfego de download/recepção na interface.',
+    kind: 'number',
+    unit: 'σ',
+    defaultOperator: 'gte',
+    defaultValue: 3,
+  },
+  {
+    field: 'trafficOutZScore',
+    title: 'Anomalia de tráfego de saída — Z-Score (sigmas)',
+    hint: 'Desvios padrão acima da média de tráfego de upload/transmissão na interface.',
+    kind: 'number',
+    unit: 'σ',
+    defaultOperator: 'gte',
+    defaultValue: 3,
   },
 ]
 
@@ -527,6 +642,7 @@ export type AlertProblemKind =
   | 'dns_failure'
   | 'interface_flap'
   | 'vpn_instability'
+  | 'statistical_anomaly'
   | (string & {})
 
 const PROBLEM_KIND_LABELS: Record<string, string> = {
@@ -536,6 +652,7 @@ const PROBLEM_KIND_LABELS: Record<string, string> = {
   dns_failure: 'Falha de DNS',
   interface_flap: 'Interface oscilando',
   vpn_instability: 'Instabilidade VPN',
+  statistical_anomaly: 'Anomalia estatística',
 }
 
 /**

@@ -64,13 +64,26 @@ pub enum AlertField {
     LogWindowSeconds,
     LogSeverity,
     LogMessage,
-    // Baseline móvel (Fase 3)
+    // Baseline móvel e anomalias estatísticas (§2.3.3)
     LatencyBaselineMs,
+    LatencyStddevMs,
     LatencyDeviationPercent,
+    LatencyZScore,
+    LatencyUpperBandMs,
     PacketLossBaselinePercent,
+    PacketLossStddevPercent,
     PacketLossDeviationPercent,
+    PacketLossZScore,
+    PacketLossUpperBandPercent,
     UptimeBaselinePercent,
+    UptimeStddevPercent,
     UptimeDeviationPercent,
+    UptimeZScore,
+    SyslogVolumeBaseline,
+    SyslogVolumeStddev,
+    SyslogVolumeZScore,
+    TrafficInZScore,
+    TrafficOutZScore,
     // Fora da tela, mas avaliáveis
     Success,
     Type,
@@ -86,7 +99,7 @@ mod tests {
     /// Escrita à mão de propósito: é ela que obriga quem acrescenta uma
     /// variante a olhar para a lista do Rust — e o teste abaixo obriga as duas
     /// a coincidirem com a do frontend.
-    const TODAS: [AlertField; 39] = [
+    const TODAS: [AlertField; 52] = [
         AlertField::Status,
         AlertField::LatencyMs,
         AlertField::PacketLoss,
@@ -119,11 +132,24 @@ mod tests {
         AlertField::LogSeverity,
         AlertField::LogMessage,
         AlertField::LatencyBaselineMs,
+        AlertField::LatencyStddevMs,
         AlertField::LatencyDeviationPercent,
+        AlertField::LatencyZScore,
+        AlertField::LatencyUpperBandMs,
         AlertField::PacketLossBaselinePercent,
+        AlertField::PacketLossStddevPercent,
         AlertField::PacketLossDeviationPercent,
+        AlertField::PacketLossZScore,
+        AlertField::PacketLossUpperBandPercent,
         AlertField::UptimeBaselinePercent,
+        AlertField::UptimeStddevPercent,
         AlertField::UptimeDeviationPercent,
+        AlertField::UptimeZScore,
+        AlertField::SyslogVolumeBaseline,
+        AlertField::SyslogVolumeStddev,
+        AlertField::SyslogVolumeZScore,
+        AlertField::TrafficInZScore,
+        AlertField::TrafficOutZScore,
         AlertField::Success,
         AlertField::Type,
     ];

@@ -25,20 +25,50 @@ pub const SNMP_UPTIME: &str = "snmpUptime";
 pub const IN_BPS: &str = "inBps";
 pub const OUT_BPS: &str = "outBps";
 
-// --- Baseline móvel (Fase 3) ------------------------------------------------
+// --- Baseline móvel e anomalias estatísticas (§2.3.3) -----------------------
 
 /// Média histórica de latência (ms) na janela de baseline.
 pub const LATENCY_BASELINE_MS: &str = "latencyBaselineMs";
+/// Desvio padrão da latência (ms) na janela de baseline.
+pub const LATENCY_STDDEV_MS: &str = "latencyStddevMs";
 /// Desvio percentual da latência atual em relação à baseline.
 pub const LATENCY_DEVIATION_PERCENT: &str = "latencyDeviationPercent";
+/// Z-Score da latência (desvios padrão acima da média histórica).
+pub const LATENCY_Z_SCORE: &str = "latencyZScore";
+/// Limiar da banda superior esperada de latência (média + 3 sigmas).
+pub const LATENCY_UPPER_BAND_MS: &str = "latencyUpperBandMs";
+
 /// Média histórica de perda de pacotes (%) na janela de baseline.
 pub const PACKET_LOSS_BASELINE_PERCENT: &str = "packetLossBaselinePercent";
+/// Desvio padrão da perda de pacotes (%) na janela de baseline.
+pub const PACKET_LOSS_STDDEV_PERCENT: &str = "packetLossStddevPercent";
 /// Diferença absoluta da perda atual em relação à baseline (p.p.).
 pub const PACKET_LOSS_DEVIATION_PERCENT: &str = "packetLossDeviationPercent";
+/// Z-Score da perda de pacotes (desvios padrão acima da média histórica).
+pub const PACKET_LOSS_Z_SCORE: &str = "packetLossZScore";
+/// Limiar da banda superior esperada de perda de pacotes (média + 3 sigmas).
+pub const PACKET_LOSS_UPPER_BAND_PERCENT: &str = "packetLossUpperBandPercent";
+
 /// Média histórica de uptime (%) na janela de baseline.
 pub const UPTIME_BASELINE_PERCENT: &str = "uptimeBaselinePercent";
+/// Desvio padrão do uptime (%) na janela de baseline.
+pub const UPTIME_STDDEV_PERCENT: &str = "uptimeStddevPercent";
 /// Quanto o uptime atual caiu abaixo da baseline (p.p.).
 pub const UPTIME_DEVIATION_PERCENT: &str = "uptimeDeviationPercent";
+/// Z-Score de queda de uptime (desvios padrão abaixo da média histórica).
+pub const UPTIME_Z_SCORE: &str = "uptimeZScore";
+
+/// Média histórica do volume de logs syslog na janela.
+pub const SYSLOG_VOLUME_BASELINE: &str = "syslogVolumeBaseline";
+/// Desvio padrão do volume de logs syslog na janela.
+pub const SYSLOG_VOLUME_STDDEV: &str = "syslogVolumeStddev";
+/// Z-Score do volume de logs syslog.
+pub const SYSLOG_VOLUME_Z_SCORE: &str = "syslogVolumeZScore";
+
+/// Z-Score do tráfego de entrada na interface.
+pub const TRAFFIC_IN_Z_SCORE: &str = "trafficInZScore";
+/// Z-Score do tráfego de saída na interface.
+pub const TRAFFIC_OUT_Z_SCORE: &str = "trafficOutZScore";
 
 // --- Saúde do equipamento ---------------------------------------------------
 //
@@ -105,7 +135,7 @@ pub const VPN_PREVIOUS_STATUS: &str = "vpnPreviousStatus";
 
 /// Vocabulário completo oferecido na tela de regras. A **ordem importa**: é a
 /// ordem em que os campos aparecem no seletor da interface.
-pub const ALERT_FIELDS: [&str; 39] = [
+pub const ALERT_FIELDS: [&str; 52] = [
     STATUS,
     LATENCY_MS,
     PACKET_LOSS,
@@ -138,11 +168,24 @@ pub const ALERT_FIELDS: [&str; 39] = [
     LOG_SEVERITY,
     LOG_MESSAGE,
     LATENCY_BASELINE_MS,
+    LATENCY_STDDEV_MS,
     LATENCY_DEVIATION_PERCENT,
+    LATENCY_Z_SCORE,
+    LATENCY_UPPER_BAND_MS,
     PACKET_LOSS_BASELINE_PERCENT,
+    PACKET_LOSS_STDDEV_PERCENT,
     PACKET_LOSS_DEVIATION_PERCENT,
+    PACKET_LOSS_Z_SCORE,
+    PACKET_LOSS_UPPER_BAND_PERCENT,
     UPTIME_BASELINE_PERCENT,
+    UPTIME_STDDEV_PERCENT,
     UPTIME_DEVIATION_PERCENT,
+    UPTIME_Z_SCORE,
+    SYSLOG_VOLUME_BASELINE,
+    SYSLOG_VOLUME_STDDEV,
+    SYSLOG_VOLUME_Z_SCORE,
+    TRAFFIC_IN_Z_SCORE,
+    TRAFFIC_OUT_Z_SCORE,
     // Fora da tela, mas avaliáveis: publicados pelos datasets.
     "success",
     "type",
