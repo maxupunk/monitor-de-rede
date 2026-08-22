@@ -11,7 +11,7 @@
         <div class="text-caption text-grey mt-1 d-flex align-center ga-1">
           <v-icon size="14" color="deep-purple">mdi-information-outline</v-icon>
           <span
-            >Eixo Duplo: Tráfego (Mbps) x Latência de Ping (ms) · Alvo:
+          >Eixo Duplo: Tráfego (Mbps) x Latência de Ping (ms) · Alvo:
             {{ selectedPingTargetLabel }}</span
           >
         </div>
@@ -233,7 +233,7 @@
         <div class="d-flex align-center ga-1">
           <span class="dot-indicator bg-amber"></span>
           <span
-            >Latência: {{ formatLatency(currentLatency) }} (Média:
+          >Latência: {{ formatLatency(currentLatency) }} (Média:
             {{ formatLatency(avgLatency) }})</span
           >
         </div>

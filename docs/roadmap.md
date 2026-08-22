@@ -319,16 +319,19 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
     - Página frontend `/audit` (apenas admin) com tabela paginada, filtros, expansão de detalhes (IP, user-agent e diff `old`/`new`) e navegação por páginas.
     - Testes unitários do service e testes de integração cobrindo acesso restrito, listagem, filtros e paginação.
 
-- [x] **Correlação temporal de alertas em cascata** 🟢 Concluído
+- [x] **Correlação temporal de eventos e causa raiz automática (RCA)** 🟢 Concluído
   - **Severidade:** 🟡 Média
   - **Esforço:** Médio
-  - **Arquivos:** `backend/src/services/alerts/correlation.rs`, `backend/src/controllers/alerts.rs`, `backend/src/services/alerts/mod.rs`, `frontend/src/stores/alerts.ts`, `frontend/src/components/alerts/AlertCorrelationDialog.vue`, `frontend/src/components/alerts/ActiveAlertsTab.vue`, `frontend/src/pages/AlertsPage.vue`, `backend/tests/requests/alert_correlation.rs`
+  - **Arquivos:** `backend/src/services/alerts/correlation.rs`, `backend/src/controllers/alerts.rs`, `backend/src/services/alerts/mod.rs`, `frontend/src/stores/alerts.ts`, `frontend/src/components/alerts/AlertCorrelationDialog.vue`, `frontend/src/components/alerts/ActiveAlertsTab.vue`, `frontend/src/pages/AlertsPage.vue`, `backend/tests/requests/alert_correlation.rs`, `frontend/tests/stores/alerts.spec.ts`
   - **Implementado:**
-    - Service `services::alerts::correlation` que analisa eventos abertos numa janela curta (padrão 60 s) em torno de um alerta alvo.
-    - Algoritmo de causa raiz: prefere o evento mais antigo cujo dispositivo é pai declarado de outros dispositivos correlacionados; em ausência de pai, cai para o evento mais antigo da janela.
-    - Endpoint `GET /api/alerts/:id/correlation` devolvendo causa raiz primária, eventos relacionados, escopos comuns (site/rede) e contagem.
-    - Botão "Correlação" na Central de Alertas (`ActiveAlertsTab`) e dialog `AlertCorrelationDialog` exibindo a causa raiz sugerida e a lista de eventos correlacionados.
-    - Testes unitários do algoritmo de correlação e testes de integração cobrindo pai/filho, janela vazia e exclusão de eventos resolvidos.
+    - Motor de Root Cause Analysis (RCA) e Grafo de Dependências Topológico (`DependencyGraph`) em `services::alerts::correlation` combinando hierarquia declarada (`parent_id`), enlaces descobertos/manuais (`device_links`) e agrupamento por sub-rede (`network_id`).
+    - Algoritmo de scoring multivariável: prioridade por papel de infraestrutura (`role_weight`), raio de alcance/impacto a jusante (BFS downstream), precedência temporal e penalidade por falha a montante.
+    - Categorização causal em 8 classes (`Gateway`, `Router`, `Switch`, `Firewall`, `VpnTunnel`, `IspLink`, `SiteOutage`, `IsolatedDevice`) com métrica de confiança estatística (0 a 100%).
+    - Síntese diagnóstica em linguagem natural (ex: *"17 dispositivos ficaram inacessíveis após `192.168.1.1` (Gateway Principal) parar de responder — causa provável: Gateway da Rede"*).
+    - Endpoint global `GET /api/alerts/root-cause-analysis` agrupando incidentes correlacionados ativos em clusters (`IncidentCluster`) para visão consolidada.
+    - Endpoint detalhado `GET /api/alerts/:id/correlation` com cadeia de dependência percorrida (`dependencyChain`), lista completa de equipamentos impactados (`impactedDevices`) e contagem.
+    - Banner de Diagnóstico RCA em tempo real no topo da Central de Alertas (`AlertsPage.vue`) e diálogo interativo `AlertCorrelationDialog.vue` com chips de categoria/confiança, citação diagnóstica, visualizador de cadeia topológica e lista de nós afetados.
+    - Testes unitários do algoritmo em Rust e TypeScript/Vitest, e testes de requisição cobrindo cascata de roteadores/switches, eventos isolados e agrupamento de incidentes ativos.
 
 - [x] **PWA & Notificações Web Push em Segundo Plano** 🟢 Concluído
   - **Severidade:** 🟡 Média

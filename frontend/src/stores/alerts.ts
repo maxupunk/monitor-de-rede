@@ -155,14 +155,67 @@ export interface CorrelatedAlertEvent {
   startedAt?: string
 }
 
-/** Resultado da correlação temporal de alertas em cascata. */
+/** Sumário de um nó na cadeia de dependência topológica até o alvo. */
+export interface DependencyNodeSummary {
+  id: number
+  name: string
+  ipAddress?: string | null
+  type: string
+  status: string
+  isRootCause: boolean
+  isTarget: boolean
+}
+
+/** Sumário de um equipamento impactado pela causa raiz. */
+export interface ImpactedDeviceSummary {
+  id: number
+  name: string
+  ipAddress?: string | null
+  type: string
+  status: string
+  alertId?: number | null
+  severity?: string | null
+}
+
+/** Resultado da correlação temporal e análise de causa raiz (RCA). */
 export interface AlertCorrelation {
   windowSeconds: number
   primaryCause: CorrelatedAlertEvent | null
+  causalCategory: string
+  causalCategoryLabel: string
+  confidence: number
+  explanation: string
+  impactedDevicesCount: number
+  impactedDevices: ImpactedDeviceSummary[]
+  dependencyChain: DependencyNodeSummary[]
   relatedEvents: CorrelatedAlertEvent[]
   commonSiteId?: number | null
   commonNetworkId?: number | null
   correlationCount: number
+}
+
+/** Cluster de incidentes correlacionados ativos no sistema. */
+export interface IncidentCluster {
+  id: string
+  rootCauseEvent: CorrelatedAlertEvent | null
+  rootCauseDeviceId?: number | null
+  rootCauseDeviceName?: string | null
+  causalCategory: string
+  causalCategoryLabel: string
+  confidence: number
+  explanation: string
+  impactedDevicesCount: number
+  totalAlertsCount: number
+  events: CorrelatedAlertEvent[]
+  startedAt?: string | null
+  maxSeverity: string
+}
+
+/** Sumário geral de incidentes e análise de causa raiz ativa. */
+export interface RootCauseAnalysisSummary {
+  activeClusters: IncidentCluster[]
+  totalActiveIncidents: number
+  totalCorrelatedAlerts: number
 }
 
 export interface AlertEvent {
@@ -193,6 +246,9 @@ export const useAlertsStore = defineStore('alerts', () => {
   const alertRules = ref<AlertRule[]>([])
   const ruleTemplates = ref<AlertRuleTemplate[]>([])
   const ruleCategories = ref<Record<string, string>>({})
+  const rcaSummary = ref<RootCauseAnalysisSummary | null>(null)
+  const activeClusters = computed(() => rcaSummary.value?.activeClusters ?? [])
+  const rcaLoading = ref(false)
   const catalogLoading = ref(false)
   const loading = ref(false)
   const error = ref<string | null>(null)
@@ -333,6 +389,22 @@ export const useAlertsStore = defineStore('alerts', () => {
       const msg = err instanceof Error ? err.message : 'Erro ao analisar correlação'
       error.value = msg
       return null
+    }
+  }
+
+  /**
+   * Obtém o diagnóstico global de incidentes ativos e análise de causa raiz (RCA).
+   */
+  async function fetchRootCauseAnalysis(): Promise<RootCauseAnalysisSummary | null> {
+    rcaLoading.value = true
+    try {
+      const summary = await apiService.get<RootCauseAnalysisSummary>('/alerts/root-cause-analysis')
+      rcaSummary.value = summary
+      return summary
+    } catch {
+      return null
+    } finally {
+      rcaLoading.value = false
     }
   }
 
@@ -495,12 +567,16 @@ export const useAlertsStore = defineStore('alerts', () => {
     loading,
     error,
     lastRealtimeUpdateAt,
+    rcaSummary,
+    activeClusters,
+    rcaLoading,
     fetchActiveAlerts,
     fetchAlertRules,
     fetchRuleCatalog,
     applyCatalogRules,
     fetchInstability,
     fetchCorrelation,
+    fetchRootCauseAnalysis,
     acknowledgeAlert,
     verifyAlert,
     verifyAllAlerts,

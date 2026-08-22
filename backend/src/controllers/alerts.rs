@@ -730,6 +730,12 @@ async fn correlation_index(
     Ok(format::json(result)?)
 }
 
+/// `GET /api/alerts/root-cause-analysis` — agrupamento e diagnóstico global de incidentes ativos.
+async fn root_cause_analysis_index(State(ctx): State<AppContext>) -> AppResult<Response> {
+    let result = correlation::analyze_active_clusters(&ctx.db, None).await?;
+    Ok(format::json(result)?)
+}
+
 /// `/api/alert-rules` e o catálogo.
 ///
 /// `/catalog` é registrado antes de `/{id}` porque o roteador casa o caminho
@@ -749,6 +755,7 @@ pub fn routes() -> Routes {
         .prefix("/alerts")
         .add("/", get(index))
         .add("/instability", get(instability_index))
+        .add("/root-cause-analysis", get(root_cause_analysis_index))
         .add("/verify-all", post(verify_all))
         .add("/{id}/acknowledge", post(acknowledge))
         .add("/{id}/verify", post(verify))

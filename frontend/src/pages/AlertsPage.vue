@@ -33,6 +33,49 @@
       </template>
     </PageHeader>
 
+    <!-- Banner de Causa Raiz Automática (RCA) -->
+    <v-card
+      v-for="cluster in correlatedClusters"
+      :key="cluster.id"
+      color="error"
+      variant="tonal"
+      class="mb-4 pa-4 rounded-lg border"
+    >
+      <div
+        class="d-flex flex-column flex-md-row align-start align-md-center justify-space-between ga-3"
+      >
+        <div>
+          <div class="d-flex align-center flex-wrap ga-2 mb-1">
+            <v-chip size="small" color="error" variant="flat" class="font-weight-bold">
+              <v-icon start size="small">mdi-alert-decagram</v-icon>
+              Incidente em Cascata ({{ cluster.totalAlertsCount }} alertas)
+            </v-chip>
+            <v-chip size="small" color="primary" variant="outlined" class="font-weight-bold">
+              <v-icon start size="small">mdi-source-branch</v-icon>
+              {{ cluster.causalCategoryLabel }}
+            </v-chip>
+            <v-chip size="small" color="success" variant="outlined" class="font-weight-bold">
+              {{ cluster.confidence }}% de Confiança
+            </v-chip>
+          </div>
+
+          <div class="text-body-1 font-weight-medium text-high-emphasis">
+            {{ cluster.explanation }}
+          </div>
+        </div>
+
+        <v-btn
+          color="error"
+          variant="flat"
+          size="small"
+          prepend-icon="mdi-chart-tree"
+          @click="openClusterCorrelation(cluster)"
+        >
+          Investigar Causa Raiz
+        </v-btn>
+      </div>
+    </v-card>
+
     <v-card elevation="2" rounded="lg">
       <v-tabs v-model="tab" color="primary">
         <v-tab value="active">Alertas Pendentes ({{ alertsStore.activeAlerts.length }})</v-tab>
@@ -105,7 +148,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useAlertsStore, type AlertRule } from '@/stores/alerts'
+import { useAlertsStore, type AlertRule, type IncidentCluster } from '@/stores/alerts'
 import { useEventsStore } from '@/stores/events'
 import AlertRuleCatalogDialog from '@/components/AlertRuleCatalogDialog.vue'
 import AlertRuleFormDialog from '@/components/AlertRuleFormDialog.vue'
@@ -127,6 +170,17 @@ const tab = ref('active')
 const catalogDialog = ref(false)
 
 const abasValidas = ['active', 'resolved', 'rules', 'history']
+
+const correlatedClusters = computed(() =>
+  alertsStore.activeClusters.filter((c) => c.totalAlertsCount >= 2)
+)
+
+function openClusterCorrelation(cluster: IncidentCluster): void {
+  const targetId = cluster.rootCauseEvent?.id ?? cluster.events[0]?.id
+  if (targetId) {
+    openCorrelationDialog(targetId)
+  }
+}
 
 watch(
   () => route.query.tab,
@@ -236,7 +290,15 @@ const editingRule = ref<AlertRule | null>(null)
 onMounted(() => {
   alertsStore.fetchActiveAlerts()
   alertsStore.fetchAlertRules()
+  alertsStore.fetchRootCauseAnalysis()
 })
+
+watch(
+  () => alertsStore.lastRealtimeUpdateAt,
+  () => {
+    void alertsStore.fetchRootCauseAnalysis()
+  }
+)
 
 function notify(message: string, color = 'success') {
   feedback.message = message

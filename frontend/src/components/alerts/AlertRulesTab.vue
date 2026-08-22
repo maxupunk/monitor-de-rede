@@ -30,7 +30,7 @@
   >
     Nenhuma regra configurada. Comece pelas
     <a class="font-weight-bold text-primary" href="#" @click.prevent="emit('open-catalog')"
-      >regras pré-configuradas</a
+    >regras pré-configuradas</a
     >
     para cobrir indisponibilidade, latência, perda de pacotes e quedas de interface.
   </v-alert>

@@ -114,4 +114,83 @@ describe('alerts store', () => {
 
     expect(store.alertRules).toHaveLength(0)
   })
+
+  it('obtem diagnostico global de causa raiz (RCA) e preenche rcaSummary e activeClusters', async () => {
+    const store = useAlertsStore()
+    const mockSummary = {
+      activeClusters: [
+        {
+          id: 'cluster-1',
+          rootCauseEvent: makeAlert({ id: 10, title: 'Gateway Inacessível' }),
+          rootCauseDeviceId: 1,
+          rootCauseDeviceName: 'Gateway Principal',
+          causalCategory: 'gateway',
+          causalCategoryLabel: 'Gateway da Rede',
+          confidence: 90,
+          explanation:
+            '17 dispositivos ficaram inacessíveis após 192.168.1.1 parar de responder — causa provável: Gateway da Rede',
+          impactedDevicesCount: 17,
+          totalAlertsCount: 18,
+          events: [makeAlert({ id: 10 }), makeAlert({ id: 11 })],
+          startedAt: new Date().toISOString(),
+          maxSeverity: 'critical',
+        },
+      ],
+      totalActiveIncidents: 1,
+      totalCorrelatedAlerts: 18,
+    }
+
+    getMock.mockResolvedValueOnce(mockSummary)
+
+    const result = await store.fetchRootCauseAnalysis()
+
+    expect(getMock).toHaveBeenCalledWith('/alerts/root-cause-analysis')
+    expect(result).toEqual(mockSummary)
+    expect(store.rcaSummary).toEqual(mockSummary)
+    expect(store.activeClusters).toHaveLength(1)
+    expect(store.activeClusters[0].causalCategory).toBe('gateway')
+  })
+
+  it('obtem correlacao pontual de um alerta com cadeia de dependencia', async () => {
+    const store = useAlertsStore()
+    const mockCorrelation = {
+      windowSeconds: 60,
+      primaryCause: makeAlert({ id: 10, title: 'Roteador Offline' }),
+      causalCategory: 'router',
+      causalCategoryLabel: 'Roteador Principal',
+      confidence: 85,
+      explanation: 'Dispositivo inacessível após queda do roteador',
+      impactedDevicesCount: 2,
+      impactedDevices: [{ id: 2, name: 'Servidor', type: 'server', status: 'offline' }],
+      dependencyChain: [
+        {
+          id: 1,
+          name: 'Router',
+          type: 'router',
+          status: 'offline',
+          isRootCause: true,
+          isTarget: false,
+        },
+        {
+          id: 2,
+          name: 'Servidor',
+          type: 'server',
+          status: 'offline',
+          isRootCause: false,
+          isTarget: true,
+        },
+      ],
+      relatedEvents: [],
+      correlationCount: 1,
+    }
+
+    getMock.mockResolvedValueOnce(mockCorrelation)
+
+    const result = await store.fetchCorrelation(20)
+
+    expect(getMock).toHaveBeenCalledWith('/alerts/20/correlation')
+    expect(result).toEqual(mockCorrelation)
+    expect(result?.confidence).toBe(85)
+    expect(result?.dependencyChain).toHaveLength(2)
+  })
 })

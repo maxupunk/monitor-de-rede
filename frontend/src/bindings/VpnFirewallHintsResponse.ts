@@ -3,9 +3,4 @@
 /**
  * Resposta de `POST /api/vpn/peers/:id/firewall-hints`.
  */
-export type VpnFirewallHintsResponse = {
-  profile: string
-  label: string
-  content: string
-  message: string
-}
+export type VpnFirewallHintsResponse = { profile: string, label: string, content: string, message: string, };

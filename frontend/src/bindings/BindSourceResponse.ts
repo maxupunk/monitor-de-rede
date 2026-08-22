@@ -3,4 +3,4 @@
 /**
  * Resposta do vínculo/desvínculo manual de uma origem de syslog.
  */
-export type BindSourceResponse = { bindKey: string; deviceId: number | null }
+export type BindSourceResponse = { bindKey: string, deviceId: number | null, };

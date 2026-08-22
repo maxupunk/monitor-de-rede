@@ -3,13 +3,4 @@
 /**
  * Resposta de uptime de um monitor em uma janela de horas.
  */
-export type MonitorUptimeResponse = {
-  monitorId: number
-  hours: number
-  uptimePercentage: number
-  totalChecks: number
-  upChecks: number
-  downChecks: number
-  unknownChecks: number
-  avgLatencyMs: number | null
-}
+export type MonitorUptimeResponse = { monitorId: number, hours: number, uptimePercentage: number, totalChecks: number, upChecks: number, downChecks: number, unknownChecks: number, avgLatencyMs: number | null, };

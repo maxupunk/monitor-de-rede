@@ -3,39 +3,29 @@
 /**
  * Uma linha de log como a tela a consome.
  */
-export type LogEntry = {
-  id: number
-  deviceId: number | null
-  /**
-   * Nome do dispositivo, hidratado do banco principal. `null` quando a
-   * origem caiu numa rede cadastrada sem dispositivo, quando o vínculo é
-   * ambíguo, ou quando o dispositivo foi apagado depois — não há FK entre
-   * os dois bancos, então a linha sobrevive ao aparelho.
-   */
-  deviceName: string | null
-  sourceIp: string
-  /**
-   * A verdade: quando **este** servidor recebeu. RFC 3339.
-   */
-  receivedAt: string
-  /**
-   * O que o dispositivo alegou. Pode faltar, e pode estar errado — relógio
-   * de roteador sem NTP manda 1970.
-   */
-  deviceTime: string | null
-  facility: number | null
-  severity: number | null
-  /**
-   * Rótulo pronto da severidade (`erro`, `aviso`, …), para a tela não
-   * reimplementar a tabela do RFC 5424.
-   */
-  severityLabel: string | null
-  hostname: string | null
-  appName: string | null
-  pid: number | null
-  /**
-   * Tópicos do RouterOS, já quebrados em lista (`system`, `info`, …).
-   */
-  topics: Array<string>
-  message: string
-}
+export type LogEntry = { id: number, deviceId: number | null, 
+/**
+ * Nome do dispositivo, hidratado do banco principal. `null` quando a
+ * origem caiu numa rede cadastrada sem dispositivo, quando o vínculo é
+ * ambíguo, ou quando o dispositivo foi apagado depois — não há FK entre
+ * os dois bancos, então a linha sobrevive ao aparelho.
+ */
+deviceName: string | null, sourceIp: string, 
+/**
+ * A verdade: quando **este** servidor recebeu. RFC 3339.
+ */
+receivedAt: string, 
+/**
+ * O que o dispositivo alegou. Pode faltar, e pode estar errado — relógio
+ * de roteador sem NTP manda 1970.
+ */
+deviceTime: string | null, facility: number | null, severity: number | null, 
+/**
+ * Rótulo pronto da severidade (`erro`, `aviso`, …), para a tela não
+ * reimplementar a tabela do RFC 5424.
+ */
+severityLabel: string | null, hostname: string | null, appName: string | null, pid: number | null, 
+/**
+ * Tópicos do RouterOS, já quebrados em lista (`system`, `info`, …).
+ */
+topics: Array<string>, message: string, };

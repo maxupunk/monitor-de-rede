@@ -135,15 +135,16 @@ Isso cobre o básico bem. As próximas oportunidades de produto partem de três 
 | Por quê | Dispositivos como routers MikroTik, OPNsense, Unifi e servidores já exportam métricas; o NetMonitor poderia consolidá-las sem agente próprio. |
 | Armazenamento | SQLite/Postgres com retenção configurável + agregações diárias. |
 
-#### 2.3.2 Correlação de eventos e causa raiz automática
+#### 2.3.2 Correlação de eventos e causa raiz automática `🟢 Concluído`
 
 **Referências:** BigPanda, Moogsoft, PagerDuty AIOps, Datadog Watchdog.
 
 | Aspecto | Proposta |
 | :--- | :--- |
-| O quê | Quando vários hosts caem simultaneamente, inferir se a causa é o roteador, o switch, o link ISP ou a VPN. |
-| Como | Grafo de dependências construído a partir da topologia + regras declaradas pelo usuário. |
-| Saída | "17 dispositivos ficaram inacessíveis após `192.168.1.1` parar de responder — causa provável: gateway". |
+| O quê | Quando vários hosts caem simultaneamente, inferir automaticamente se a causa é o roteador, o switch, o link ISP, o gateway, a VPN ou falha de site. |
+| Como | Grafo de dependências construído a partir da topologia (`devices.parent_id`, `device_links` de LLDP/CDP/manuais e inferência de sub-redes) + scoring topológico e temporal com BFS. |
+| Saída | "17 dispositivos ficaram inacessíveis após `192.168.1.1` (Gateway Principal) parar de responder — causa provável: Gateway da Rede". |
+| Entrega | ✅ Motor de Causa Raiz e Grafo de Dependências (`DependencyGraph`) em `backend/src/services/alerts/correlation.rs` com BFS downstream/upstream, cálculo de raio de impacto e caminho de dependência.<br>✅ Classificação em 8 categorias causais (`Gateway`, `Router`, `Switch`, `Firewall`, `VpnTunnel`, `IspLink`, `SiteOutage`, `IsolatedDevice`) com pontuação de confiança (0 a 100%).<br>✅ Síntese diagnóstica em linguagem natural e endpoint global `GET /api/alerts/root-cause-analysis` com agrupamento de clusters ativos (`IncidentCluster`).<br>✅ Endpoint pontual `GET /api/alerts/:id/correlation` com cadeia de nós (`dependencyChain`) e lista de equipamentos impactados (`impactedDevices`).<br>✅ Frontend com Banner Inteligente de RCA na Central de Alertas (`AlertsPage.vue`) e modal expandido `AlertCorrelationDialog.vue` com chips de confiança, citação diagnóstica formatada, visualização de cadeia de dependência e raio de impacto. |
 
 #### 2.3.3 Anomalias com linha de base estatística `🟢 Concluído`
 
