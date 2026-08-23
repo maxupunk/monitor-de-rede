@@ -157,6 +157,7 @@ import { useEventsStore } from '@/stores/events'
 import { useAlertsStore } from '@/stores/alerts'
 import { apiService } from '@/services/apiService'
 import { useInfiniteList } from '@/composables/useInfiniteList'
+import { confirm } from '@/composables/useConfirm'
 import type { DeviceMetric } from '@/stores/deviceDetail'
 import type { ChartSeriesInput } from '@/components/BaseMetricChart.vue'
 import MonitorFormDialog from '@/components/MonitorFormDialog.vue'
@@ -695,14 +696,21 @@ async function silenceAlertItem(item: AlertEvent, minutes: number) {
 }
 
 async function confirmDelete() {
-  if (confirm('Tem certeza de que deseja excluir este monitor?')) {
-    const success = await monitorsStore.deleteMonitor(monitorId.value)
-    if (!success) return
-    // Excluído: quem abriu decide o que fazer com a tela. Na rota, volta para
-    // a lista; no diálogo, fecha e deixa o chamador recarregar.
-    if (props.embedded) emit('closed')
-    else router.push('/monitors')
-  }
+  const ok = await confirm({
+    title: 'Excluir monitor',
+    message: 'Tem certeza de que deseja excluir este monitor e suas métricas históricas?',
+    confirmText: 'Excluir',
+    confirmColor: 'error',
+    icon: 'mdi-delete-alert-outline',
+  })
+  if (!ok) return
+
+  const success = await monitorsStore.deleteMonitor(monitorId.value)
+  if (!success) return
+  // Excluído: quem abriu decide o que fazer com a tela. Na rota, volta para
+  // a lista; no diálogo, fecha e deixa o chamador recarregar.
+  if (props.embedded) emit('closed')
+  else router.push('/monitors')
 }
 
 // Estrutura unificada de dados para o componente BaseMetricChart

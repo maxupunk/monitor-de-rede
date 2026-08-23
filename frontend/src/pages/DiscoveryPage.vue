@@ -333,6 +333,7 @@ import DiscoveryResultDialog from '@/components/DiscoveryResultDialog.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import type { Device } from '@/stores/devices'
+import { confirm } from '@/composables/useConfirm'
 
 const PHASE_LABELS: Record<DiscoveryPhase, string> = {
   idle: 'Aguardando',
@@ -665,9 +666,14 @@ async function onDeviceSaved() {
 }
 
 async function handleCleanup() {
-  if (
-    !confirm('Isso apagará varreduras com mais de 7 dias e todos os seus resultados. Continuar?')
-  ) {
+  const ok = await confirm({
+    title: 'Limpar histórico de varreduras',
+    message: 'Isso apagará varreduras com mais de 7 dias e todos os seus resultados. Continuar?',
+    confirmText: 'Limpar',
+    confirmColor: 'warning',
+    icon: 'mdi-broom',
+  })
+  if (!ok) {
     return
   }
 

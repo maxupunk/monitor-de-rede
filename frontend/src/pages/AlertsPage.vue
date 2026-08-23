@@ -159,6 +159,7 @@ import ResolvedAlertsTab from '@/components/alerts/ResolvedAlertsTab.vue'
 import AlertRulesTab from '@/components/alerts/AlertRulesTab.vue'
 import AlertHistoryTab from '@/components/alerts/AlertHistoryTab.vue'
 import PageHeader from '@/components/PageHeader.vue'
+import { confirm } from '@/composables/useConfirm'
 
 const alertsStore = useAlertsStore()
 const eventsStore = useEventsStore()
@@ -344,7 +345,15 @@ async function confirmDeleteRule(rule: AlertRule) {
     ? 'Atenção: Esta regra está vinculada a um monitor de tráfego. Ao excluí-la, o monitor deixará de gerar alertas de tráfego. Deseja continuar?'
     : 'Deseja excluir esta regra de alerta?'
 
-  if (confirm(promptMessage)) {
+  const ok = await confirm({
+    title: 'Excluir regra de alerta',
+    message: promptMessage,
+    confirmText: 'Excluir',
+    confirmColor: 'error',
+    icon: 'mdi-delete-alert-outline',
+  })
+
+  if (ok) {
     await alertsStore.deleteAlertRule(rule.id)
   }
 }

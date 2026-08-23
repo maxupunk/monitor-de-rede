@@ -356,6 +356,7 @@ import {
 } from '@/stores/vpn'
 import { useEventsStore } from '@/stores/events'
 import { formatBytes, formatRelativeTime } from '@/utils/formatters'
+import { confirm } from '@/composables/useConfirm'
 
 const vpnStore = useVpnStore()
 const eventsStore = useEventsStore()
@@ -445,7 +446,14 @@ async function openConfig(peer: VpnPeer) {
 
 async function rotate(peer: VpnPeer) {
   const name = peer.device?.name || `peer #${peer.id}`
-  if (!confirm(`Gerar novas chaves para "${name}"? A configuração atual deixará de funcionar.`)) {
+  const ok = await confirm({
+    title: 'Gerar novas chaves VPN',
+    message: `Gerar novas chaves para "${name}"? A configuração atual deixará de funcionar.`,
+    confirmText: 'Gerar novas chaves',
+    confirmColor: 'warning',
+    icon: 'mdi-key-change',
+  })
+  if (!ok) {
     return
   }
 
@@ -455,7 +463,14 @@ async function rotate(peer: VpnPeer) {
 
 async function revoke(peer: VpnPeer) {
   const name = peer.device?.name || `peer #${peer.id}`
-  if (!confirm(`Revogar o acesso de "${name}"? O túnel cai imediatamente e o IP é liberado.`)) {
+  const ok = await confirm({
+    title: 'Revogar acesso VPN',
+    message: `Revogar o acesso de "${name}"? O túnel cai imediatamente e o IP é liberado.`,
+    confirmText: 'Revogar acesso',
+    confirmColor: 'error',
+    icon: 'mdi-shield-remove-outline',
+  })
+  if (!ok) {
     return
   }
 

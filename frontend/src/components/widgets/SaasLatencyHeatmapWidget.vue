@@ -59,7 +59,7 @@
     <div
       v-else-if="
         !loading &&
-        (!heatmapData || heatmapData.monitors.length === 0 || heatmapData.totalChecks === 0)
+          (!heatmapData || heatmapData.monitors.length === 0 || heatmapData.totalChecks === 0)
       "
       class="d-flex flex-column align-center justify-center flex-grow-1 pa-8 text-center"
     >

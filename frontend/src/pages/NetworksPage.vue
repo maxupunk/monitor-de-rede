@@ -236,6 +236,7 @@ import { formatDateTime } from '@/utils/formatters'
 import PageHeader from '@/components/PageHeader.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import SiteDialog from '@/components/SiteDialog.vue'
+import { confirm } from '@/composables/useConfirm'
 
 const router = useRouter()
 const networksStore = useNetworksStore()
@@ -319,7 +320,15 @@ function triggerScan(network: Network) {
 }
 
 async function confirmDelete(id: number) {
-  if (confirm('Tem certeza de que deseja excluir esta rede?')) {
+  const ok = await confirm({
+    title: 'Excluir rede',
+    message:
+      'Tem certeza de que deseja excluir esta rede? Dispositivos vinculados perderão a associação.',
+    confirmText: 'Excluir',
+    confirmColor: 'error',
+    icon: 'mdi-delete-alert-outline',
+  })
+  if (ok) {
     await networksStore.deleteNetwork(id)
   }
 }

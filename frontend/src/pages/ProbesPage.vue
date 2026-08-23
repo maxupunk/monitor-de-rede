@@ -103,6 +103,7 @@ import { useProbesStore } from '@/stores/probes'
 import { getStatusColor } from '@/utils/monitorPresentation'
 import PageHeader from '@/components/PageHeader.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
+import { confirm } from '@/composables/useConfirm'
 
 const probesStore = useProbesStore()
 
@@ -121,7 +122,15 @@ onMounted(() => {
 })
 
 async function confirmRevoke(id: number) {
-  if (confirm('Tem certeza de que deseja revogar o token deste Probe?')) {
+  const ok = await confirm({
+    title: 'Revogar token do Probe',
+    message:
+      'Tem certeza de que deseja revogar o token deste Probe? Ele perderá a comunicação com o servidor.',
+    confirmText: 'Revogar token',
+    confirmColor: 'error',
+    icon: 'mdi-key-remove',
+  })
+  if (ok) {
     await probesStore.revokeProbe(id)
   }
 }

@@ -116,6 +116,7 @@ import { useMaintenanceWindowsStore, type MaintenanceWindow } from '@/stores/mai
 import MaintenanceWindowDialog from '@/components/MaintenanceWindowDialog.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
+import { confirm } from '@/composables/useConfirm'
 
 const windowsStore = useMaintenanceWindowsStore()
 const sitesStore = useSitesStore()
@@ -174,11 +175,18 @@ function onSaved() {
 }
 
 async function confirmDelete(id: number) {
-  if (!confirm('Tem certeza de que deseja excluir esta janela de manutenção?')) return
-  const ok = await windowsStore.deleteWindow(id)
+  const ok = await confirm({
+    title: 'Excluir janela de manutenção',
+    message: 'Tem certeza de que deseja excluir esta janela de manutenção?',
+    confirmText: 'Excluir',
+    confirmColor: 'error',
+    icon: 'mdi-delete-alert-outline',
+  })
+  if (!ok) return
+  const isDeleted = await windowsStore.deleteWindow(id)
   notify(
-    ok ? 'Janela excluída.' : windowsStore.error || 'Erro ao excluir janela.',
-    ok ? 'success' : 'error'
+    isDeleted ? 'Janela excluída.' : windowsStore.error || 'Erro ao excluir janela.',
+    isDeleted ? 'success' : 'error'
   )
 }
 

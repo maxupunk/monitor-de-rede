@@ -524,6 +524,7 @@ import { getStatusColor } from '@/utils/monitorPresentation'
 import { formatLinkSpeed } from '@/utils/formatters'
 import { useVpnStore } from '@/stores/vpn'
 import { useLogsStore } from '@/stores/logs'
+import { confirm } from '@/composables/useConfirm'
 
 const route = useRoute()
 const router = useRouter()
@@ -687,13 +688,15 @@ async function openVpnConfig() {
 async function rotateVpnKeys() {
   const vpnPeer = detailStore.device?.vpnPeer
   if (!vpnPeer) return
-  if (
-    !confirm(
-      `Gerar novas chaves para "${detailStore.device?.name}"? A configuração atual deixará de funcionar.`
-    )
-  ) {
-    return
-  }
+
+  const ok = await confirm({
+    title: 'Gerar novas chaves VPN',
+    message: `Gerar novas chaves para "${detailStore.device?.name}"? A configuração atual deixará de funcionar.`,
+    confirmText: 'Gerar novas chaves',
+    confirmColor: 'warning',
+    icon: 'mdi-key-change',
+  })
+  if (!ok) return
 
   const artifact = await vpnStore.rotateKeys(vpnPeer.id)
   if (artifact) {
@@ -705,13 +708,15 @@ async function rotateVpnKeys() {
 async function revokeVpnAccess() {
   const vpnPeer = detailStore.device?.vpnPeer
   if (!vpnPeer) return
-  if (
-    !confirm(
-      `Revogar o acesso VPN de "${detailStore.device?.name}"? O túnel cai imediatamente, o IP é liberado e este dispositivo será removido.`
-    )
-  ) {
-    return
-  }
+
+  const ok = await confirm({
+    title: 'Revogar acesso VPN',
+    message: `Revogar o acesso VPN de "${detailStore.device?.name}"? O túnel cai imediatamente, o IP é liberado e este dispositivo será removido.`,
+    confirmText: 'Revogar acesso',
+    confirmColor: 'error',
+    icon: 'mdi-shield-remove-outline',
+  })
+  if (!ok) return
 
   const success = await vpnStore.revokePeer(vpnPeer.id)
   if (success) {

@@ -80,6 +80,7 @@ import { useSitesStore, type Site } from '@/stores/sites'
 import SiteDialog from '@/components/SiteDialog.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
+import { confirm } from '@/composables/useConfirm'
 
 const sitesStore = useSitesStore()
 const search = ref('')
@@ -108,7 +109,15 @@ function onSiteSaved() {
 }
 
 async function confirmDelete(id: number) {
-  if (confirm('Tem certeza de que deseja excluir este site?')) {
+  const ok = await confirm({
+    title: 'Excluir site',
+    message:
+      'Tem certeza de que deseja excluir este site? Redes e dispositivos vinculados perderão a associação.',
+    confirmText: 'Excluir',
+    confirmColor: 'error',
+    icon: 'mdi-delete-alert-outline',
+  })
+  if (ok) {
     await sitesStore.deleteSite(id)
   }
 }

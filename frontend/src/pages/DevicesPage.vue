@@ -207,6 +207,7 @@ import PortScanDialog from '@/components/PortScanDialog.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import { getStatusColor } from '@/utils/monitorPresentation'
+import { confirm } from '@/composables/useConfirm'
 
 const router = useRouter()
 const devicesStore = useDevicesStore()
@@ -256,7 +257,15 @@ function openPortScan(device: Device) {
 }
 
 async function confirmDelete(id: number) {
-  if (confirm('Tem certeza de que deseja excluir este dispositivo?')) {
+  const ok = await confirm({
+    title: 'Excluir dispositivo',
+    message:
+      'Tem certeza de que deseja excluir este dispositivo? Todo o histórico de monitoramento associado será removido.',
+    confirmText: 'Excluir',
+    confirmColor: 'error',
+    icon: 'mdi-delete-alert-outline',
+  })
+  if (ok) {
     await devicesStore.deleteDevice(id)
   }
 }
