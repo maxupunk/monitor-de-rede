@@ -12,6 +12,8 @@
 
 /// Situação apurada na checagem: `up` | `down` | `warning` | `unknown`.
 pub const STATUS: &str = "status";
+/// Diagnóstico de alcance confirmado por protocolo alternativo.
+pub const REACHABILITY_CAUSE: &str = "reachabilityCause";
 pub const LATENCY_MS: &str = "latencyMs";
 pub const PACKET_LOSS: &str = "packetLoss";
 pub const STATUS_CODE: &str = "statusCode";
@@ -135,8 +137,9 @@ pub const VPN_PREVIOUS_STATUS: &str = "vpnPreviousStatus";
 
 /// Vocabulário completo oferecido na tela de regras. A **ordem importa**: é a
 /// ordem em que os campos aparecem no seletor da interface.
-pub const ALERT_FIELDS: [&str; 52] = [
+pub const ALERT_FIELDS: [&str; 53] = [
     STATUS,
+    REACHABILITY_CAUSE,
     LATENCY_MS,
     PACKET_LOSS,
     STATUS_CODE,

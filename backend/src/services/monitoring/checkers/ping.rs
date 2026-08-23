@@ -10,6 +10,7 @@ use surge_ping::{Client, Config, PingIdentifier, PingSequence, ICMP};
 
 use crate::services::{
     monitoring::contracts::{CheckMetric, CheckResult, Checker, MonitorStatus},
+    monitoring::ping_diagnostics::PingDiagnosticsConfig,
     shared::errors::{AppError, AppResult},
 };
 
@@ -73,6 +74,8 @@ pub struct PingConfig {
     pub packet_size: usize,
     #[serde(default = "default_timeout_ms")]
     pub timeout_ms: u64,
+    #[serde(default, rename = "_diagnostics")]
+    pub diagnostics: PingDiagnosticsConfig,
 }
 
 const fn default_packet_count() -> u16 {
@@ -115,6 +118,11 @@ fn check_result_from_lookup_error(
     error: PingLookupError,
 ) -> CheckResult {
     let finished_at = Utc::now();
+    let failure_kind = match &error {
+        PingLookupError::Timeout => "dns_timeout",
+        PingLookupError::NoAddress => "dns_no_address",
+        PingLookupError::Dns(_) => "dns_error",
+    };
     let (status, message) = match error {
         PingLookupError::Timeout => (
             MonitorStatus::Unknown,
@@ -148,7 +156,7 @@ fn check_result_from_lookup_error(
                 unit: "%".into(),
             },
         ],
-        data: serde_json::json!({}),
+        data: serde_json::json!({ "failureKind": failure_kind }),
     }
 }
 
@@ -194,7 +202,11 @@ impl Checker for PingChecker {
             }
         }
 
-        summarize(started_at, Utc::now(), &host, count, &latencies)
+        let mut result = summarize(started_at, Utc::now(), &host, count, &latencies);
+        if let Some(data) = result.data.as_object_mut() {
+            data.insert("resolvedIp".into(), serde_json::json!(ip.to_string()));
+        }
+        result
     }
 }
 
@@ -251,7 +263,11 @@ pub fn summarize(
                 unit: "%".into(),
             },
         ],
-        data: serde_json::json!({}),
+        data: if status == MonitorStatus::Down {
+            serde_json::json!({ "failureKind": "icmp_no_reply" })
+        } else {
+            serde_json::json!({})
+        },
     }
 }
 
@@ -276,7 +292,7 @@ fn failed_result(started_at: chrono::DateTime<Utc>, host: &str, error: String) -
                 unit: "%".into(),
             },
         ],
-        data: serde_json::json!({}),
+        data: serde_json::json!({ "failureKind": "icmp_socket_error" }),
     }
 }
 

@@ -2,11 +2,12 @@
 
 use std::time::Duration;
 
+use crate::services::{
+    monitoring::contracts::{CheckMetric, CheckResult, Checker, MonitorStatus},
+    network_tools::tcp_probe::{probe_tcp, TcpProbeState},
+};
 use chrono::Utc;
 use serde::Deserialize;
-use tokio::{net::TcpStream, time::timeout};
-
-use crate::services::monitoring::contracts::{CheckMetric, CheckResult, Checker, MonitorStatus};
 
 /// Configuração de conexão TCP.
 #[derive(Debug, Clone, Deserialize)]
@@ -32,20 +33,20 @@ impl Checker for TcpChecker {
     async fn execute(&self, config: Self::Config) -> CheckResult {
         let started_at = Utc::now();
         let target = format!("{}:{}", config.host, config.port);
-        let outcome = timeout(
+        let observation = probe_tcp(
+            (&*config.host, config.port),
             Duration::from_millis(config.timeout_ms.max(1)),
-            TcpStream::connect(&target),
         )
         .await;
         let finished_at = Utc::now();
         let duration_ms = (finished_at - started_at).num_milliseconds().max(0);
-        let (success, status, message) = match outcome {
-            Ok(Ok(_)) => (
+        let (success, status, message) = match observation.state {
+            TcpProbeState::Open => (
                 true,
                 MonitorStatus::Up,
                 format!("Conexão TCP para {target} estabelecida em {duration_ms}ms"),
             ),
-            Err(_) => (
+            TcpProbeState::Filtered => (
                 false,
                 MonitorStatus::Down,
                 format!(
@@ -53,10 +54,16 @@ impl Checker for TcpChecker {
                     config.timeout_ms
                 ),
             ),
-            Ok(Err(error)) => (
+            TcpProbeState::Closed | TcpProbeState::Unreachable | TcpProbeState::Error => (
                 false,
                 MonitorStatus::Down,
-                format!("Erro na conexão TCP para {target}: {error}"),
+                format!(
+                    "Erro na conexão TCP para {target}: {}",
+                    observation
+                        .error
+                        .as_deref()
+                        .unwrap_or(observation.state.as_str())
+                ),
             ),
         };
         CheckResult {

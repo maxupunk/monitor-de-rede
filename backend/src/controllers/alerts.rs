@@ -532,10 +532,12 @@ async fn check_and_resolve(
 
     // Falha de execução não invalida o alerta: mantém-se a avaliação pelo
     // estado atual, exatamente como no backend anterior.
+    let execution_configuration =
+        crate::services::monitoring::ping_diagnostics::prepare_configuration(ctx, &monitor).await?;
     match run_monitor(
         ctx,
         &monitor.r#type,
-        &monitor.configuration,
+        &execution_configuration,
         RunOptions {
             timeout_ms: Some(
                 crate::services::monitoring::execution_guard::calculate_smart_timeout_seconds(

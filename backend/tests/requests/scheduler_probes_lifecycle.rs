@@ -75,7 +75,7 @@ async fn o_catalogo_e_idempotente_e_traz_os_templates_dos_dois_roadmaps() {
         // 3 de saúde de equipamento (Fase 3 do roadmap do servidor como
         // dispositivo — são de dispositivo, não do servidor) + 3 de baseline
         // móvel + 3 de anomalias estatísticas (§2.3.3).
-        assert_eq!(templates.len(), 34);
+        assert_eq!(templates.len(), 35);
         assert_eq!(catalogo["categories"]["disponibilidade"], "Disponibilidade");
         // Campos que a tela lê em cada template.
         assert!(templates[0]["applied"].is_boolean());
@@ -83,13 +83,14 @@ async fn o_catalogo_e_idempotente_e_traz_os_templates_dos_dois_roadmaps() {
 
         // O `ensure_defaults` do initializer já provisionou os recomendados no
         // boot desta instalação nova: eles chegam marcados como aplicados.
-        // São 18 — os 7 originais mais 6 padrões de log mais 3 de baseline mais 2 de anomalias;
+        // São 19 — os 7 originais, ICMP filtrado, 6 padrões de log,
+        // 3 de baseline e 2 de anomalias;
         // `log_config_changed` e `traffic_statistical_anomaly` ficam de fora.
         let recomendados: Vec<_> = templates
             .iter()
             .filter(|item| item["recommended"] == true)
             .collect();
-        assert_eq!(recomendados.len(), 18);
+        assert_eq!(recomendados.len(), 19);
         for template in &recomendados {
             assert_eq!(template["applied"], true, "{}", template["key"]);
             assert!(template["ruleId"].is_i64());
@@ -802,6 +803,82 @@ async fn o_ciclo_do_scheduler_despacha_para_probe_vivo_e_marca_o_morto_offline()
         };
         assert_eq!(estado(morto).await, "offline");
         assert_eq!(estado(vivo).await, "online");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn scheduler_envia_diagnostico_transitorio_ao_probe_sem_persisti_lo() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let probe = criar_probe(&ctx, "probe-diagnostico", "token-diag", Some(Utc::now())).await;
+        let outro_probe =
+            criar_probe(&ctx, "probe-outra-origem", "token-outra", Some(Utc::now())).await;
+        for id in [probe, outro_probe] {
+            let mut ativo: probes::ActiveModel = probes::Entity::find_by_id(id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap()
+                .into();
+            ativo.status = Set("online".into());
+            ativo.update(&ctx.db).await.unwrap();
+        }
+
+        let ping_id = json_of(
+            &request
+                .post("/api/monitors")
+                .json(&serde_json::json!({
+                    "name": "Ping com diagnóstico", "type": "ping",
+                    "target": "127.0.0.1", "probeId": probe,
+                    "retryCount": 1
+                }))
+                .await
+                .text(),
+        )["id"]
+            .as_i64()
+            .unwrap();
+        request
+            .post("/api/monitors")
+            .json(&serde_json::json!({
+                "name": "TCP da mesma origem", "type": "tcp",
+                "target": "127.0.0.1", "port": 19001, "probeId": probe
+            }))
+            .await;
+        request
+            .post("/api/monitors")
+            .json(&serde_json::json!({
+                "name": "TCP de outra origem", "type": "tcp",
+                "target": "127.0.0.1", "port": 19002, "probeId": outro_probe
+            }))
+            .await;
+
+        backend::tasks::scheduler_run::run_cycle(&ctx)
+            .await
+            .expect("ciclo do scheduler");
+
+        let tarefa = probe_tasks::Entity::find()
+            .filter(probe_tasks::Column::MonitorId.eq(ping_id))
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .expect("tarefa do ping");
+        assert_eq!(
+            tarefa.payload["_diagnostics"]["tcpPorts"],
+            serde_json::json!([19001])
+        );
+        assert_eq!(tarefa.payload["_diagnostics"]["retryCount"], 1);
+
+        let salvo = monitors::Entity::find_by_id(ping_id)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .expect("monitor persistido");
+        assert!(salvo.configuration.get("_diagnostics").is_none());
     })
     .await;
 }

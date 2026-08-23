@@ -30,6 +30,7 @@ use ts_rs::TS;
 pub enum AlertField {
     // Resultado de monitor
     Status,
+    ReachabilityCause,
     LatencyMs,
     PacketLoss,
     StatusCode,
@@ -99,8 +100,9 @@ mod tests {
     /// Escrita à mão de propósito: é ela que obriga quem acrescenta uma
     /// variante a olhar para a lista do Rust — e o teste abaixo obriga as duas
     /// a coincidirem com a do frontend.
-    const TODAS: [AlertField; 52] = [
+    const TODAS: [AlertField; 53] = [
         AlertField::Status,
+        AlertField::ReachabilityCause,
         AlertField::LatencyMs,
         AlertField::PacketLoss,
         AlertField::StatusCode,

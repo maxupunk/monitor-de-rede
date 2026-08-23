@@ -254,6 +254,17 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
     - Ao atingir o teto de bytes, deduplica por `monitor_id` mantendo o resultado mais recente de cada monitor; se ainda exceder, trunca os itens mais antigos.
     - Testes cobrem limite de itens, limite de bytes, deduplicação, truncamento por idade, escrita atômica e recuperação após crash.
 
+- [x] **QUA-07 — Diagnosticar ICMP filtrado com confirmação TCP** 🟢 Concluído
+  - **Severidade:** 🟡 Média
+  - **Esforço:** Médio
+  - **Arquivos:** `backend/src/services/monitoring/ping_diagnostics.rs`, `backend/src/services/network_tools/tcp_probe.rs`, catálogo de alertas e ADR 003.
+  - **Implementado:**
+    - Ping permanece primário e a confirmação TCP só ocorre depois de todas as retentativas com perda total.
+    - Portas candidatas limitadas a três, priorizadas por monitores TCP da mesma origem e discovery recente, sem varredura ampla.
+    - Respostas TCP `open` ou `closed` mantêm o dispositivo em `warning` e geram o problema `icmp_filtered`; resultados silenciosos ou inalcançáveis continuam `down` e inconclusivos.
+    - Configuração `_diagnostics` é transitória e acompanha tarefas remotas sem alterar a configuração persistida.
+    - Regra global “ICMP filtrado ou desativado” provisionada de forma idempotente, sem duplicar alertas genéricos de perda de pacotes.
+
 - [x] **BE-03 / BE-05 — Finalizar builders VPN e DTOs tipados**
   - **Severidade:** 🟡 Média
   - **Esforço:** Médio

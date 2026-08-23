@@ -42,6 +42,7 @@ mod m20260821_000001_maintenance_windows;
 mod m20260821_000002_monitor_results_hourly;
 mod m20260821_000003_audit_logs;
 mod m20260821_000004_push_subscriptions;
+mod m20260822_000001_icmp_filtered_alert;
 
 pub struct Migrator;
 
@@ -153,6 +154,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260821_000002_monitor_results_hourly::Migration),
             Box::new(m20260821_000003_audit_logs::Migration),
             Box::new(m20260821_000004_push_subscriptions::Migration),
+            Box::new(m20260822_000001_icmp_filtered_alert::Migration),
             // inject-above (do not remove this comment)
         ]
     }

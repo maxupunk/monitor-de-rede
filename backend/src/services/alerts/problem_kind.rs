@@ -23,6 +23,8 @@ pub const PROBLEM_KIND: &str = "problemKind";
 pub enum ProblemKind {
     /// Indisponível — o fallback honesto quando nada mais específico se vê.
     Down,
+    /// O host responde via TCP, mas não aceita ou não devolve ICMP.
+    IcmpFiltered,
     /// Perda parcial de pacotes (ping intermitente).
     PacketLoss,
     /// Latência acima do tolerado.
@@ -43,6 +45,7 @@ impl ProblemKind {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Down => "down",
+            Self::IcmpFiltered => "icmp_filtered",
             Self::PacketLoss => "packet_loss",
             Self::Latency => "latency",
             Self::DnsFailure => "dns_failure",
@@ -58,6 +61,7 @@ impl ProblemKind {
     pub fn parse(raw: &str) -> Option<Self> {
         match raw {
             "down" => Some(Self::Down),
+            "icmp_filtered" => Some(Self::IcmpFiltered),
             "packet_loss" => Some(Self::PacketLoss),
             "latency" => Some(Self::Latency),
             "dns_failure" => Some(Self::DnsFailure),
@@ -73,6 +77,7 @@ impl ProblemKind {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Down => "indisponível",
+            Self::IcmpFiltered => "ICMP filtrado",
             Self::PacketLoss => "perda de pacotes",
             Self::Latency => "latência alta",
             Self::DnsFailure => "falha de DNS",
@@ -154,6 +159,7 @@ pub fn detail(kind: ProblemKind, dataset: &AlertDataset) -> ProblemDetail {
 fn kind_of_field(field: &str) -> Option<ProblemKind> {
     match field {
         fields::PACKET_LOSS => Some(ProblemKind::PacketLoss),
+        fields::REACHABILITY_CAUSE => Some(ProblemKind::IcmpFiltered),
         fields::LATENCY_MS
         | fields::CONNECT_TIME_MS
         | fields::RESOLUTION_TIME_MS
@@ -191,6 +197,13 @@ fn kind_of_field(field: &str) -> Option<ProblemKind> {
 }
 
 fn classify_by_dataset(dataset: &AlertDataset) -> ProblemKind {
+    if dataset
+        .get(fields::REACHABILITY_CAUSE)
+        .and_then(Value::as_str)
+        == Some("icmp_filtered")
+    {
+        return ProblemKind::IcmpFiltered;
+    }
     if dataset.contains_key(fields::INTERFACE_STATUS_TRANSITION)
         || dataset.contains_key(fields::INTERFACE_SPEED_TRANSITION)
     {
@@ -241,6 +254,7 @@ mod tests {
     fn a_classificacao_faz_aida_e_volta_pela_string_persistida() {
         for kind in [
             ProblemKind::Down,
+            ProblemKind::IcmpFiltered,
             ProblemKind::PacketLoss,
             ProblemKind::Latency,
             ProblemKind::DnsFailure,
@@ -313,6 +327,20 @@ mod tests {
     }
 
     #[test]
+    fn evidencia_tcp_classifica_icmp_filtrado_antes_da_perda() {
+        let aviso = dataset(&[
+            (fields::STATUS, json!("warning")),
+            (fields::REACHABILITY_CAUSE, json!("icmp_filtered")),
+            (fields::PACKET_LOSS, json!(100.0)),
+        ]);
+        assert_eq!(classify(None, &aviso), ProblemKind::IcmpFiltered);
+        assert_eq!(
+            classify(Some(fields::REACHABILITY_CAUSE), &aviso),
+            ProblemKind::IcmpFiltered
+        );
+    }
+
+    #[test]
     fn perda_zerada_nao_e_problema_de_perda() {
         let saudavel = dataset(&[("type", json!("ping")), (fields::PACKET_LOSS, json!(0.0))]);
         assert_eq!(classify(None, &saudavel), ProblemKind::Down);
@@ -339,6 +367,7 @@ mod tests {
     #[test]
     fn rotulos_em_portugues_cobrem_todos_os_tipos() {
         assert_eq!(ProblemKind::Down.label(), "indisponível");
+        assert_eq!(ProblemKind::IcmpFiltered.label(), "ICMP filtrado");
         assert_eq!(ProblemKind::PacketLoss.label(), "perda de pacotes");
         assert_eq!(ProblemKind::Latency.label(), "latência alta");
         assert_eq!(ProblemKind::DnsFailure.label(), "falha de DNS");

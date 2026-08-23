@@ -8,6 +8,7 @@
  */
 export type AlertField =
   | 'status'
+  | 'reachabilityCause'
   | 'latencyMs'
   | 'packetLoss'
   | 'statusCode'

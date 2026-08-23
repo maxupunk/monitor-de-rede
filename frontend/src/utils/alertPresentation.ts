@@ -36,6 +36,15 @@ export interface AlertMetricOption {
 
 export const ALERT_METRICS: AlertMetricOption[] = [
   {
+    field: 'reachabilityCause',
+    title: 'Diagnóstico de alcance',
+    hint: 'Causa específica confirmada por uma verificação de rede complementar.',
+    kind: 'enum',
+    options: [{ value: 'icmp_filtered', title: 'ICMP filtrado ou desativado' }],
+    defaultOperator: 'eq',
+    defaultValue: 'icmp_filtered',
+  },
+  {
     field: 'latencyMs',
     title: 'Latência de resposta (ms)',
     hint: 'Tempo que o equipamento levou para responder ao teste (ping, HTTP ou TCP).',
@@ -637,6 +646,7 @@ export const NOTIFICATION_COOLDOWNS = [
  */
 export type AlertProblemKind =
   | 'down'
+  | 'icmp_filtered'
   | 'packet_loss'
   | 'latency'
   | 'dns_failure'
@@ -647,6 +657,7 @@ export type AlertProblemKind =
 
 const PROBLEM_KIND_LABELS: Record<string, string> = {
   down: 'Indisponível',
+  icmp_filtered: 'ICMP filtrado',
   packet_loss: 'Perda de pacotes',
   latency: 'Latência alta',
   dns_failure: 'Falha de DNS',

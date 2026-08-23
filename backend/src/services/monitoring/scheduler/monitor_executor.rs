@@ -10,6 +10,7 @@ use crate::{
         monitoring::{
             contracts::{CheckResult, MonitorStatus},
             execution_guard::{effective_timeout_seconds, try_acquire_monitor},
+            ping_diagnostics,
             result_processor::process_result,
             runner::{run_monitor, RunOptions},
         },
@@ -40,6 +41,7 @@ pub async fn execute_one(ctx: &AppContext, monitor: &monitors::Model) -> AppResu
         u64::from(
             effective_timeout_seconds(monitor.timeout_seconds, monitor.interval_seconds) as u32,
         ) * 1_000;
+    let execution_configuration = ping_diagnostics::prepare_configuration(ctx, monitor).await?;
 
     if let Some(probe_id) = monitor.probe_id {
         let probe = probes::Entity::find_by_id(probe_id).one(&ctx.db).await?;
@@ -50,7 +52,7 @@ pub async fn execute_one(ctx: &AppContext, monitor: &monitors::Model) -> AppResu
                 task_type: monitor.r#type.clone(),
                 #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
                 timeout_ms: timeout_ms as i32,
-                payload: monitor.configuration.clone(),
+                payload: execution_configuration.clone(),
             };
             dispatcher::dispatch_task(&ctx.db, probe_id, &task).await?;
             return Ok(());
@@ -62,7 +64,7 @@ pub async fn execute_one(ctx: &AppContext, monitor: &monitors::Model) -> AppResu
         let local = run_monitor(
             ctx,
             &monitor.r#type,
-            &monitor.configuration,
+            &execution_configuration,
             RunOptions {
                 timeout_ms: Some(timeout_ms),
             },
@@ -81,7 +83,8 @@ pub async fn execute_one(ctx: &AppContext, monitor: &monitors::Model) -> AppResu
         return report_probe_unavailable(ctx, monitor, &label).await;
     }
 
-    let result = run_local_confirming_failure(ctx, monitor, timeout_ms).await;
+    let result =
+        run_local_confirming_failure(ctx, monitor, &execution_configuration, timeout_ms).await;
     process_result(ctx, monitor.id, &result, monitor.probe_id).await?;
     Ok(())
 }
@@ -92,17 +95,21 @@ pub async fn execute_one(ctx: &AppContext, monitor: &monitors::Model) -> AppResu
 pub async fn run_local_confirming_failure(
     ctx: &AppContext,
     monitor: &monitors::Model,
+    configuration: &serde_json::Value,
     timeout_ms: u64,
 ) -> CheckResult {
+    if monitor.r#type.eq_ignore_ascii_case("ping") {
+        return run_local_once(ctx, monitor, configuration, timeout_ms).await;
+    }
     let attempts = 1 + monitor.retry_count.clamp(0, MAX_RETRIES);
     let budget = chrono::Duration::seconds(i64::from(monitor.interval_seconds.max(1)));
     let started = Utc::now();
 
     let mut used = 1;
-    let mut result = run_local_once(ctx, monitor, timeout_ms).await;
+    let mut result = run_local_once(ctx, monitor, configuration, timeout_ms).await;
     while result.status == MonitorStatus::Down && used < attempts && Utc::now() - started < budget {
         used += 1;
-        result = run_local_once(ctx, monitor, timeout_ms).await;
+        result = run_local_once(ctx, monitor, configuration, timeout_ms).await;
     }
 
     if used > 1 {
@@ -122,12 +129,13 @@ pub async fn run_local_confirming_failure(
 async fn run_local_once(
     ctx: &AppContext,
     monitor: &monitors::Model,
+    configuration: &serde_json::Value,
     timeout_ms: u64,
 ) -> CheckResult {
     match run_monitor(
         ctx,
         &monitor.r#type,
-        &monitor.configuration,
+        configuration,
         RunOptions {
             timeout_ms: Some(timeout_ms),
         },

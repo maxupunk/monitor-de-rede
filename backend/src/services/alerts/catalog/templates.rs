@@ -157,7 +157,7 @@ pub struct AlertRuleTemplate {
     pub recommended: bool,
 }
 
-/// Os 18 templates portados literalmente do `alert_rule_templates.ts`.
+/// Templates de alerta disponíveis para aplicação global ou por escopo.
 ///
 /// É função e não `const` porque `condition` é um `serde_json::Value`, que não
 /// pode ser construído em contexto constante. A ordem é a do original — ela
@@ -179,6 +179,22 @@ pub fn all() -> Vec<AlertRuleTemplate> {
             // checagem ok — nunca chega a recair, nunca é detectado. 120 s
             // também entrega o critério de aceite da Fase 1 (link caindo a cada
             // 30 s gera um par de notificações, não vinte).
+            recovery_window_seconds: 120,
+            flap_threshold: 5,
+            flap_window_seconds: 900,
+            notification_cooldown_seconds: 900,
+            inhibit_when_parent_down: true,
+            recommended: true,
+        },
+        AlertRuleTemplate {
+            key: "icmp_filtered",
+            name: "ICMP filtrado ou desativado",
+            description: "O equipamento responde via TCP, mas não devolve ICMP. Indica filtragem por firewall ou ping desativado no alvo.",
+            category: "disponibilidade",
+            rule_type: "icmp_filtered",
+            condition: json!({ "field": fields::REACHABILITY_CAUSE, "operator": "eq", "value": "icmp_filtered" }),
+            severity: "warning",
+            duration_seconds: 0,
             recovery_window_seconds: 120,
             flap_threshold: 5,
             flap_window_seconds: 900,
@@ -745,21 +761,23 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
-    /// 18 do roadmap de alertas + 7 padrões de log (Fase 6 do roadmap de
-    /// syslog) + 3 de saúde de equipamento (Fase 3 do roadmap do servidor como
-    /// dispositivo) + 3 de baseline móvel + 3 de anomalias estatísticas (§2.3.3).
-    const TOTAL_TEMPLATES: usize = 34;
+    /// 18 do roadmap de alertas + ICMP filtrado + 7 padrões de log (Fase 6 do
+    /// roadmap de syslog) + 3 de saúde de equipamento (Fase 3 do roadmap do
+    /// servidor como dispositivo) + 3 de baseline móvel + 3 de anomalias
+    /// estatísticas (§2.3.3).
+    const TOTAL_TEMPLATES: usize = 35;
 
     #[test]
     fn o_catalogo_tem_os_templates_dos_dois_roadmaps() {
         assert_eq!(all().len(), TOTAL_TEMPLATES);
     }
 
-    /// 7 do conjunto original + 6 dos padrões de log + 3 de baseline móvel + 2 de anomalias estatísticas.
+    /// 7 do conjunto original + ICMP filtrado + 6 dos padrões de log + 3 de
+    /// baseline móvel + 2 de anomalias estatísticas.
     /// Só `log_config_changed` e `traffic_statistical_anomaly` ficam de fora dos recomendados.
     #[test]
-    fn dezoito_templates_compoem_o_conjunto_basico() {
-        assert_eq!(recommended().len(), 18);
+    fn dezenove_templates_compoem_o_conjunto_basico() {
+        assert_eq!(recommended().len(), 19);
     }
 
     #[test]
@@ -817,6 +835,7 @@ mod tests {
         assert_eq!(window("vpn_peer_unstable"), 120);
         // Indisponibilidade: revista na Fase 3 (ver o comentário do template).
         assert_eq!(window("device_offline"), 120);
+        assert_eq!(window("icmp_filtered"), 120);
         // Registros informativos e de estado: resolvem na hora.
         assert_eq!(window("http_error_response"), 0);
         assert_eq!(window("vpn_peer_reconnected"), 0);

@@ -20,3 +20,6 @@ features = [
   # e.g.
   "runtime-tokio-rustls", # `ASYNC_RUNTIME` feature
 ]
+
+[dev-dependencies]
+tokio = { version = "1.45", features = ["macros", "rt-multi-thread"] }

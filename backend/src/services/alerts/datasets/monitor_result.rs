@@ -82,6 +82,18 @@ pub fn build(
         }
     }
 
+    // Quando TCP provou que o host está vivo, 100% de perda descreve a política
+    // de ICMP, não degradação do enlace. O histórico bruto permanece no
+    // CheckResult; o vocabulário alertável omite a família de perda para não
+    // abrir um segundo episódio genérico ao lado do diagnóstico específico.
+    let icmp_filtered = dataset
+        .get(fields::REACHABILITY_CAUSE)
+        .and_then(Value::as_str)
+        == Some("icmp_filtered");
+    if icmp_filtered {
+        dataset.remove(fields::PACKET_LOSS);
+    }
+
     let latency_ms = dataset
         .get(fields::LATENCY_MS)
         .and_then(|value| value.as_f64());
@@ -89,7 +101,11 @@ pub fn build(
         .get(fields::PACKET_LOSS)
         .and_then(|value| value.as_f64());
     let status = dataset.get(fields::STATUS).and_then(|value| value.as_str());
-    let uptime_percent = status.map(|value| if value == "up" { 100.0 } else { 0.0 });
+    let uptime_percent = if icmp_filtered {
+        None
+    } else {
+        status.map(|value| if value == "up" { 100.0 } else { 0.0 })
+    };
 
     let enriched = baseline::with_current_value(baseline, latency_ms, packet_loss, uptime_percent);
     if let Some(value) = enriched.latency_baseline_ms {
@@ -107,19 +123,31 @@ pub fn build(
     if let Some(value) = enriched.latency_upper_band_ms {
         dataset.insert(fields::LATENCY_UPPER_BAND_MS.into(), json!(value));
     }
-    if let Some(value) = enriched.packet_loss_baseline_percent {
+    if let Some(value) = enriched
+        .packet_loss_baseline_percent
+        .filter(|_| !icmp_filtered)
+    {
         dataset.insert(fields::PACKET_LOSS_BASELINE_PERCENT.into(), json!(value));
     }
-    if let Some(value) = enriched.packet_loss_stddev_percent {
+    if let Some(value) = enriched
+        .packet_loss_stddev_percent
+        .filter(|_| !icmp_filtered)
+    {
         dataset.insert(fields::PACKET_LOSS_STDDEV_PERCENT.into(), json!(value));
     }
-    if let Some(value) = enriched.packet_loss_deviation_percent {
+    if let Some(value) = enriched
+        .packet_loss_deviation_percent
+        .filter(|_| !icmp_filtered)
+    {
         dataset.insert(fields::PACKET_LOSS_DEVIATION_PERCENT.into(), json!(value));
     }
-    if let Some(value) = enriched.packet_loss_z_score {
+    if let Some(value) = enriched.packet_loss_z_score.filter(|_| !icmp_filtered) {
         dataset.insert(fields::PACKET_LOSS_Z_SCORE.into(), json!(value));
     }
-    if let Some(value) = enriched.packet_loss_upper_band_percent {
+    if let Some(value) = enriched
+        .packet_loss_upper_band_percent
+        .filter(|_| !icmp_filtered)
+    {
         dataset.insert(fields::PACKET_LOSS_UPPER_BAND_PERCENT.into(), json!(value));
     }
     if let Some(value) = enriched.uptime_baseline_percent {
@@ -231,6 +259,19 @@ mod tests {
         assert_eq!(facts[fields::DURATION_MS], json!(42));
         assert_eq!(facts["type"], json!("ping"));
         assert_eq!(facts["success"], json!(true));
+    }
+
+    #[test]
+    fn icmp_filtrado_publica_a_causa_sem_duplicar_fatos_de_perda() {
+        let mut result = resultado(
+            vec![metrica("packet_loss", 100.0)],
+            json!({ fields::REACHABILITY_CAUSE: "icmp_filtered" }),
+        );
+        result.status = MonitorStatus::Warning;
+        let facts = build("ping", &result, &sem_baseline());
+        assert_eq!(facts[fields::REACHABILITY_CAUSE], json!("icmp_filtered"));
+        assert!(!facts.contains_key(fields::PACKET_LOSS));
+        assert!(!facts.contains_key(fields::PACKET_LOSS_Z_SCORE));
     }
 
     #[test]

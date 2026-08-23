@@ -15,6 +15,7 @@ use crate::services::{
         },
         contracts::{CheckResult, Checker},
         managed::SYSTEM_HEALTH,
+        ping_diagnostics,
     },
     shared::errors::{AppError, AppResult},
 };
@@ -48,9 +49,11 @@ pub async fn run_monitor(
     let configuration = merge_timeout(configuration, options.timeout_ms);
     let result = match kind.to_lowercase().as_str() {
         "ping" => {
-            PingChecker::from_context(ctx)?
-                .execute(parse_config::<PingConfig>(&configuration, "ping")?)
-                .await
+            ping_diagnostics::execute_ping(
+                &PingChecker::from_context(ctx)?,
+                parse_config::<PingConfig>(&configuration, "ping")?,
+            )
+            .await
         }
         "tcp" => {
             TcpChecker

@@ -11,12 +11,12 @@ use std::{
 use futures::{stream, StreamExt};
 use serde::Serialize;
 use tokio::{
-    net::{TcpStream, UdpSocket},
+    net::UdpSocket,
     sync::{mpsc, Mutex, Semaphore},
 };
 use tokio_util::sync::CancellationToken;
 
-use super::udp_probes::probe_for;
+use super::{tcp_probe::probe_tcp, udp_probes::probe_for};
 
 pub const MAX_PORTS_PER_SCAN: usize = u16::MAX as usize;
 pub const PORTS_PER_BATCH: usize = 1_024;
@@ -279,51 +279,21 @@ async fn scan_tcp(
     let mut attempts = 0;
     let (status, error) = loop {
         attempts += 1;
-        let outcome =
-            tokio::time::timeout(timeout, TcpStream::connect(SocketAddr::new(host, port))).await;
-        let (status, retryable, error) = classify_tcp_outcome(outcome);
-        if status == "open" || status == "closed" || !retryable || attempts > max_retries {
-            break (status, error);
+        let observation = probe_tcp(SocketAddr::new(host, port), timeout).await;
+        let status = observation.state;
+        if status.proves_reachability() || !status.retryable() || attempts > max_retries {
+            break (status, observation.error);
         }
         tokio::time::sleep(retry_backoff(retry_delay, attempts)).await;
     };
     PortScanItem {
         port,
         protocol: "tcp".into(),
-        status: status.into(),
+        status: status.as_str().into(),
         service: tcp_service(port),
         latency_ms: millis(started.elapsed()),
         attempts,
         error,
-    }
-}
-
-fn classify_tcp_outcome(
-    outcome: Result<io::Result<TcpStream>, tokio::time::error::Elapsed>,
-) -> (&'static str, bool, Option<String>) {
-    match outcome {
-        Ok(Ok(_)) => ("open", false, None),
-        Ok(Err(error)) if error.kind() == io::ErrorKind::ConnectionRefused => {
-            ("closed", false, None)
-        }
-        Ok(Err(error))
-            if matches!(
-                error.kind(),
-                io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
-            ) =>
-        {
-            ("filtered", true, Some(error.to_string()))
-        }
-        Ok(Err(error))
-            if matches!(
-                error.kind(),
-                io::ErrorKind::HostUnreachable | io::ErrorKind::NetworkUnreachable
-            ) =>
-        {
-            ("unreachable", true, Some(error.to_string()))
-        }
-        Ok(Err(error)) => ("error", false, Some(error.to_string())),
-        Err(error) => ("filtered", true, Some(error.to_string())),
     }
 }
 
@@ -547,14 +517,6 @@ mod tests {
         assert_eq!(reliable.min_timeout, Duration::from_millis(750));
         assert_eq!(complete.min_timeout, Duration::from_millis(1_200));
         assert!(complete.max_retries > reliable.max_retries);
-    }
-
-    #[test]
-    fn connection_refused_nao_e_retentavel() {
-        let outcome = Ok(Err(io::Error::from(io::ErrorKind::ConnectionRefused)));
-        let (status, retryable, _) = classify_tcp_outcome(outcome);
-        assert_eq!(status, "closed");
-        assert!(!retryable);
     }
 
     #[test]

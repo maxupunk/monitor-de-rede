@@ -30,6 +30,7 @@ use crate::{
             },
             heatmap::calculate_hourly_heatmap,
             managed::{self, ProposedMonitor},
+            ping_diagnostics,
             presenter::{present_monitors, MonitorResultPresentation, RECENT_RESULTS_LIMIT},
             reachability,
             result_processor::process_result,
@@ -551,10 +552,11 @@ async fn run(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Re
     let _guard = try_acquire_monitor(monitor.id).ok_or_else(|| {
         AppError::conflict("Uma verificação para este monitor já está em andamento")
     })?;
+    let execution_configuration = ping_diagnostics::prepare_configuration(&ctx, &monitor).await?;
     let result = run_monitor(
         &ctx,
         &monitor.r#type,
-        &monitor.configuration,
+        &execution_configuration,
         RunOptions {
             timeout_ms: Some(
                 effective_timeout_seconds(monitor.timeout_seconds, monitor.interval_seconds) as u64

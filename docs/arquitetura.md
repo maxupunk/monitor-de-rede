@@ -196,6 +196,25 @@ métricas e dados livres. O `result_processor` grava `monitor_results`, extrai
 Os cinco checkers são `ping`, `http`, `tcp`, `dns` e `snmp`
 (`services/monitoring/checkers/`).
 
+### Confirmação de alcance quando o ICMP não responde
+
+O checker de ping continua responsável por uma tentativa ICMP. A camada
+`monitoring/ping_diagnostics` coordena `1 + retry_count` tentativas e, somente
+quando todas terminam com perda de 100%, testa no máximo três portas TCP. As
+portas vêm primeiro de monitores TCP habilitados do mesmo dispositivo e
+`probe_id`, depois do discovery mais recente para o mesmo IP e origem. Essa
+lista segue numa configuração transitória `_diagnostics`: ela chega à execução
+local, manual e ao probe remoto, mas nunca é salva em `monitors.configuration`.
+
+Uma conexão aceita (`open`) ou recusada por RST (`closed`) prova que o host
+responde e converte o resultado em `warning`, com
+`reachabilityCause: icmp_filtered`. Timeout, filtragem, rota inalcançável e
+erros permanecem inconclusivos e mantêm o resultado `down`; ausência de
+resposta TCP nunca é apresentada como certeza de bloqueio. As sondagens usam
+TCP `connect`, em paralelo, com teto de 1,5 s e uma repetição apenas para
+silêncio. Como `_diagnostics` acompanha a tarefa do probe, ICMP e TCP são
+observados do mesmo ponto da rede.
+
 ## 6. Fila de tarefas dos probes
 
 A fila é **persistente**, na tabela `probe_tasks` — não em memória. Quem

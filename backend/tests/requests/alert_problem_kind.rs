@@ -9,7 +9,7 @@
 use backend::{
     app::App,
     models::_entities::alert_events as alert_events_entity,
-    models::alert_events,
+    models::{alert_events, devices, monitors},
     services::monitoring::{
         contracts::{CheckMetric, CheckResult, MonitorStatus},
         result_processor::process_result,
@@ -330,6 +330,102 @@ async fn warning_sem_regra_batendo_nao_dispara_alerta_novo() {
             eventos_da_regra(&ctx, rule_id).await.is_empty(),
             "warning respeita o evaluator: condição que não bateu não dispara"
         );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn icmp_filtrado_alerta_a_causa_sem_marcar_dispositivo_offline_ou_duplicar_perda() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let causa = json_of(
+            &request
+                .post("/api/alert-rules")
+                .json(&json!({
+                    "name": "ICMP filtrado",
+                    "condition": { "field": "reachabilityCause", "operator": "eq", "value": "icmp_filtered" },
+                    "severity": "warning",
+                    "recoveryWindowSeconds": 120
+                }))
+                .await
+                .text(),
+        );
+        let perda = json_of(
+            &request
+                .post("/api/alert-rules")
+                .json(&json!({
+                    "name": "Perda imediata",
+                    "condition": { "field": "packetLoss", "operator": "gt", "value": 10 },
+                    "severity": "warning"
+                }))
+                .await
+                .text(),
+        );
+        let device = json_of(
+            &request
+                .post("/api/devices")
+                .json(&json!({
+                    "name": "Roteador com firewall",
+                    "type": "router",
+                    "ipAddress": "127.0.0.1",
+                    "isMonitored": true
+                }))
+                .await
+                .text(),
+        );
+        let device_id = device["id"].as_i64().unwrap();
+        let monitor = monitors::Entity::find()
+            .filter(backend::models::_entities::monitors::Column::DeviceId.eq(device_id))
+            .filter(backend::models::_entities::monitors::Column::Type.eq("ping"))
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .expect("ping automático");
+
+        let mut warning = resultado_com_metricas(
+            MonitorStatus::Warning,
+            vec![CheckMetric {
+                name: "packet_loss".into(),
+                value: 100.0,
+                unit: "%".into(),
+            }],
+        );
+        warning.success = true;
+        warning.message = Some("ICMP filtrado ou desativado".into());
+        warning.data = json!({ "reachabilityCause": "icmp_filtered" });
+        process_result(&ctx, monitor.id, &warning, None)
+            .await
+            .expect("processar diagnóstico");
+
+        let eventos_causa = eventos_da_regra(&ctx, causa["id"].as_i64().unwrap()).await;
+        assert_eq!(eventos_causa.len(), 1);
+        assert_eq!(
+            eventos_causa[0].data.as_ref().unwrap()["problemKind"],
+            json!("icmp_filtered")
+        );
+        assert!(
+            eventos_da_regra(&ctx, perda["id"].as_i64().unwrap())
+                .await
+                .is_empty(),
+            "a perda bruta não pode abrir alerta duplicado"
+        );
+        let device = devices::Entity::find_by_id(device_id)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(device.status, "warning");
+
+        let normal = resultado(MonitorStatus::Up);
+        process_result(&ctx, monitor.id, &normal, None)
+            .await
+            .expect("iniciar recuperação");
+        let eventos_causa = eventos_da_regra(&ctx, causa["id"].as_i64().unwrap()).await;
+        assert_eq!(eventos_causa[0].status, "recovering");
     })
     .await;
 }

@@ -9,6 +9,7 @@ pub mod heatmap;
 pub mod interface_monitoring;
 pub mod link_speed;
 pub mod managed;
+pub mod ping_diagnostics;
 pub mod presenter;
 pub mod reachability;
 pub mod result_processor;

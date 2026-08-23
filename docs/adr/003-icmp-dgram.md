@@ -22,6 +22,20 @@ container base escolhido, sem capability adicional?
 **Sim. `SOCK_DGRAM`, sem `CAP_NET_RAW`, com o processo rodando como usuário
 não-root.**
 
+### Complemento: diagnóstico de ICMP filtrado
+
+Depois de `1 + retry_count` tentativas ICMP com perda total, o executor pode
+confirmar alcance com até três conexões TCP comuns (`connect`, equivalente à
+observação de um scan `-sT`). As portas são evidências já conhecidas pelo
+sistema — monitores TCP habilitados e o discovery mais recente da mesma origem
+de execução —, nunca uma varredura automática.
+
+Somente `open` e `closed`/RST provam que o host está vivo. Timeout, filtragem,
+host ou rede inalcançável e erros internos são inconclusivos. Havendo prova, o
+ping vira `warning` com `reachabilityCause: icmp_filtered`; sem prova, continua
+`down`. A mensagem usa “filtrado ou desativado” porque a medição não distingue
+firewall de configuração do host e ICMP não possui portas.
+
 ## Evidência
 
 Container `debian:bookworm-slim`, usuário `app` (não-root), **sem** `cap_add`:
@@ -103,3 +117,6 @@ no log; aí sim se reavalia com um caso concreto.
   depende de `socket2 ^0.6`, e `sock_type_hint` recebe o `socket2::Type`
   **daquela** versão. Com as duas majors na árvore, o tipo não unifica e o
   código não compila.
+- A confirmação TCP não exige Nmap, executáveis externos, raw sockets ou
+  capabilities. Em probe remoto, a configuração transitória acompanha a tarefa
+  para preservar o mesmo ponto de observação do ICMP.
