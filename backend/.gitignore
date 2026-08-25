@@ -1,7 +1,6 @@
-# Local and Production Configuration (Sensitive/Environment Specific)
+# Local Configuration (Sensitive/Environment Specific)
 **/config/local.yaml
 **/config/*.local.yaml
-**/config/production.yaml
 
 # Master Key (Loco sensitive key)
 master.key

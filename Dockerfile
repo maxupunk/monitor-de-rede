@@ -52,6 +52,10 @@ RUN apt-get update \
 
 COPY backend/ .
 
+# `LOCO_ENV=production` exige este arquivo no runtime. Falhar no build deixa o
+# problema explícito antes que uma imagem incompleta chegue ao servidor.
+RUN test -f config/production.yaml
+
 # Os dois `cache` mounts são o que separa "recompilar o projeto" de "recompilar
 # 400 crates de terceiros". Sem eles, qualquer alteração de fonte invalida o
 # `COPY` e o build recomeça do zero — cinco minutos por vez.

@@ -1,0 +1,73 @@
+# Configuração de produção: segredos e origens vêm do ambiente, nunca do repositório.
+logger:
+  enable: true
+  pretty_backtrace: false
+  level: {{ get_env(name="LOG_LEVEL", default="info") }}
+  format: json
+
+server:
+  # Porta e binding são fixos de propósito: o mapeamento do compose e o proxy do
+  # Vite apontam os dois para 3333. Deixá-los configuráveis só criaria a chance
+  # de mudar um lado e esquecer o outro.
+  binding: 0.0.0.0
+  port: 3333
+  host: {{ get_env(name="APP_URL", default="http://localhost") }}
+  middlewares:
+    # A SPA é servida por este mesmo processo (`src/spa.rs`), então em produção
+    # o navegador não faz requisição cross-origin nenhuma — este bloco existe
+    # para quem publica o frontend em outro endereço, e para o `npm run dev`
+    # apontado a um container de produção.
+    cors:
+      enable: true
+      allow_origins:
+        - "{{ get_env(name="FRONTEND_ORIGIN", default="http://localhost:3333") }}"
+      allow_headers: [content-type, authorization, accept, x-probe-token]
+      allow_methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
+      expose_headers: [retry-after]
+      max_age: 86400
+    # Vale para as respostas da API. Os estáticos não passam por aqui: eles são
+    # servidos com o `.gz` que o build da imagem já deixou pronto ao lado de
+    # cada arquivo, sem gastar CPU por request.
+    compression:
+      enable: true
+
+workers:
+  mode: BackgroundAsync
+
+database:
+  # SQLite no volume, por padrão — é o banco da instalação de um container só.
+  # O WAL é ligado no boot (`app::enable_sqlite_wal`), sem o qual uma escrita
+  # bloquearia toda leitura do processo.
+  #
+  # Instalação grande troca por Postgres definindo `DATABASE_URL`; o código
+  # atende aos dois dialetos e os testes rodam nos dois.
+  uri: {{ get_env(name="DATABASE_URL", default="sqlite:///data/netmonitor.sqlite?mode=rwc") }}
+  enable_logging: false
+  # ⚠️ Em **milissegundos** — o Loco os passa a `Duration::from_millis`, e o
+  # nome não denuncia isso. Os 500 do scaffold faziam a `idle_timeout` derrubar
+  # toda conexão meio segundo depois de ficar ociosa: o pool recriava o conjunto
+  # inteiro a cada poucos segundos, em todos os processos — inclusive no
+  # `probe`, que nunca consulta o banco mas ganha um pool assim mesmo. O
+  # Postgres registrava cada queda ("could not receive data from client:
+  # Connection reset by peer") e o log virava ruído contínuo.
+  connect_timeout: {{ get_env(name="DB_CONNECT_TIMEOUT", default="5000") }}
+  idle_timeout: {{ get_env(name="DB_IDLE_TIMEOUT", default="300000") }}
+  min_connections: {{ get_env(name="DB_MIN_CONNECTIONS", default="1") }}
+  max_connections: {{ get_env(name="DB_MAX_CONNECTIONS", default="10") }}
+  # O container `migration` não existe mais: o próprio `start` converge o
+  # esquema antes de abrir a porta. `create_app` migra; `run_task` não — então
+  # um probe remoto, que roda tarefa, continua sem tocar no banco de ninguém.
+  auto_migrate: true
+  dangerously_truncate: false
+  dangerously_recreate: false
+
+auth:
+  jwt:
+    location:
+      - from: Bearer
+      - from: Query
+        name: token
+    # Em produção `JWT_SECRET` é obrigatória. Sem ela o template falha na
+    # renderização e o boot é abortado — nunca use o default que existia aqui.
+    secret: {{ get_env(name="JWT_SECRET") }}
+    expiration: 604800
