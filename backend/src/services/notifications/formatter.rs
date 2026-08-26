@@ -179,7 +179,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn textos_batem_com_os_do_backend_anterior() {
+    fn textos_publicos_permanecem_estaveis() {
         let disparo = alert_triggered(
             "Dispositivo sem resposta",
             "Roteador Matriz",

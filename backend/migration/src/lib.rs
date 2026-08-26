@@ -114,10 +114,8 @@ impl MigratorTrait for Migrator {
     /// entre testes — e um teste garante que as duas listas não divirjam.
     ///
     /// **`auth_tokens` não é criada.** A autenticação é `loco_rs::auth::JWT`,
-    /// que é stateless e não guarda token no banco. A tabela
-    /// `auth_access_tokens` que existia no esquema anterior vinha do
-    /// `@adonisjs/auth`, e sumiu junto com ele. O nome segue listado em
-    /// `CREATION_ORDER` para o dia em que a escolha for por tokens opacos.
+    /// stateless, e não guarda tokens de sessão no banco. O nome permanece no
+    /// `CREATION_ORDER` para uma eventual adoção futura de tokens opacos.
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
         vec![
             Box::new(m20220101_000001_users::Migration),

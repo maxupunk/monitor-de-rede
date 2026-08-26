@@ -41,7 +41,7 @@ use crate::{
         preferences,
         shared::{
             errors::{AppError, AppResult},
-            pagination::paginate_compat,
+            pagination::paginate,
         },
         snmp::service as snmp_service,
     },
@@ -622,7 +622,7 @@ async fn results(
         .ok_or_else(|| AppError::not_found("Monitor não encontrado"))?;
     let page = query.page.unwrap_or(1);
     let limit = query.limit.unwrap_or(20);
-    let data = paginate_compat(
+    let data = paginate(
         &ctx.db,
         monitor_results::Entity::find()
             .filter(monitor_results::Column::MonitorId.eq(id))

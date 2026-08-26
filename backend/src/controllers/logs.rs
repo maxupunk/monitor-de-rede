@@ -205,6 +205,15 @@ async fn bind_source(
 ) -> AppResult<Response> {
     let entrada: BindSourceInput = crate::dtos::optional_body(&body);
     let por_hostname = chave.starts_with(resolver::HOSTNAME_BIND_PREFIX);
+    let chave = if por_hostname {
+        resolver::hostname_bind_key(
+            chave
+                .strip_prefix(resolver::HOSTNAME_BIND_PREFIX)
+                .unwrap_or_default(),
+        )
+    } else {
+        chave
+    };
 
     if !por_hostname {
         let endereco = chave
@@ -418,6 +427,25 @@ async fn provision_device(
     let resultado = provision::run(&pedido, servico.as_ref().map(|s| &s.sources), id).await?;
 
     let mut persistence_warnings = Vec::new();
+    if let Some(hostname) = resultado.identified_hostname.as_deref() {
+        let runtime = servico
+            .as_ref()
+            .map(|service| (service.ingestor.resolver(), service.sources.as_ref()));
+        if let Err(error) =
+            provision::associate_identified_hostname(&ctx.db, runtime, id, hostname).await
+        {
+            tracing::error!(
+                device_id = id,
+                hostname,
+                %error,
+                "configuração aplicada, mas a identidade não foi associada ao dispositivo"
+            );
+            persistence_warnings.push(
+                "A configuração foi aplicada, mas o NetMonitor não conseguiu lembrar a identidade anunciada pelo equipamento. Os logs ainda podem ser associados pelo IP ou pela linha de teste."
+                    .to_owned(),
+            );
+        }
+    }
     if let (Some(service), Some(source)) = (servico.as_ref(), resultado.observed_source.as_ref()) {
         if let Err(error) = provision::associate_confirmed_source(
             &ctx.db,
@@ -466,6 +494,7 @@ async fn provision_device(
 
     Ok(format::json(ProvisionLoggingResponse {
         operating_system,
+        identified_hostname: resultado.identified_hostname,
         server_address,
         server_port,
         commands: resultado.commands,

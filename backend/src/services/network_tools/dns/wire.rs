@@ -99,7 +99,7 @@ pub fn answers(message: &Message) -> Vec<DnsAnswer> {
                 record_type: record.record_type().to_string(),
                 ttl: record.ttl(),
                 // Hickory já formata MX como "prioridade exchange" e concatena
-                // fragments TXT, preservando o contrato legado sem parser manual.
+                // fragments TXT, preservando o contrato existente sem parser manual.
                 value: data.to_string(),
             })
         })

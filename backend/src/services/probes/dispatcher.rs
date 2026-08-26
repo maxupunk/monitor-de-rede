@@ -202,7 +202,7 @@ pub async fn clear_tasks_for_probe<C: ConnectionTrait>(db: &C, probe_id: i64) ->
     Ok(())
 }
 
-/// Identificador da tarefa: monitor + instante, como no backend anterior.
+/// Identificador da tarefa: monitor + instante.
 ///
 /// Recebe o `now` em vez de lê-lo do relógio para o chamador poder testá-lo e
 /// para o id combinar com o ciclo que o produziu.

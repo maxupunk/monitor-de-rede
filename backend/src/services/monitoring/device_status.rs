@@ -137,7 +137,7 @@ pub async fn apply(
     })
 }
 
-/// Publica a transição no mesmo contrato do backend anterior.
+/// Publica a transição no contrato de eventos em tempo real.
 ///
 /// Best-effort pelo mesmo motivo do `result_processor`: o status já está
 /// gravado, e uma falha de barramento não pode desfazer isso nem propagar erro

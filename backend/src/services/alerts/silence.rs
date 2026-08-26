@@ -12,7 +12,7 @@ use crate::{
     services::{alerts::contracts::AlertStatus, shared::errors::AppResult},
 };
 
-/// Duração padrão do silêncio, em minutos — igual à do backend anterior.
+/// Duração padrão do silêncio, em minutos.
 pub const DEFAULT_SILENCE_MINUTES: i64 = 60;
 
 /// `true` quando o alerta está silenciado **e** a janela ainda não venceu.

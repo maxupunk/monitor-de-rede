@@ -70,7 +70,7 @@ Este documento consolida a auditoria de arquitetura, código-fonte, padrões de 
   - Adicionados `vitest`, `@vue/test-utils`, `jsdom` e `@types/jsdom`.
   - Criado `frontend/vitest.config.ts` com ambiente `jsdom` e alias `@/`.
   - Script `"test": "vitest run"` no `package.json`; o script `"format"` passou a incluir `tests/`.
-  - Testes legados migrados para a sintaxe do Vitest.
+  - Testes existentes migrados para a sintaxe do Vitest.
   - Cobertura de primeira onda: `utils/formatters.ts`, `composables/useMonitorDetail.ts`, `composables/useInfiniteList.ts`, `composables/useInfiniteCursor.ts` e as stores `preferences`, `alerts` e `dashboard`.
 
 ### 🟢 FE-04: Inconsistência de Gerenciamento de Estado — Concluído

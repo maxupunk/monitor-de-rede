@@ -7,7 +7,7 @@
  * emitidos por compatibilidade defensiva: telas antigas e integrações externas
  * podem ler as URLs, e omiti-las produziria `undefined` silencioso.
  */
-export type LucidMeta = {
+export type PaginationMeta = {
   total: number
   perPage: number
   currentPage: number

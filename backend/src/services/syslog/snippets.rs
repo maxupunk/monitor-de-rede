@@ -142,6 +142,41 @@ pub fn test_command(sistema: &str) -> Option<String> {
     test_command_for_message(sistema, "netmonitor: teste de envio de log")
 }
 
+/// Prefixo inequívoco usado para extrair a identidade da saída do terminal.
+///
+/// O comando é ecoado por alguns equipamentos. Por isso o parser aceita apenas
+/// linhas cujo conteúdo, depois de aparado, **começa** pelo marcador; a linha do
+/// próprio comando contém texto antes dele e não vira nome por engano.
+const IDENTITY_MARKER: &str = "__NETMONITOR_IDENTITY__";
+
+/// Comando de leitura do hostname/identity para a sessão de provisionamento.
+///
+/// A identidade é consultada antes de alterar o Syslog e vira um vínculo
+/// `host:<nome>`. Isso mantém os logs separados mesmo quando a bridge do Docker
+/// reescreve o IP de todos os remetentes para o mesmo gateway.
+#[must_use]
+pub fn identity_command(sistema: &str) -> Option<String> {
+    match sistema.trim().to_ascii_lowercase().as_str() {
+        "routeros" => Some(format!(
+            r#":put ("{IDENTITY_MARKER}" . [/system identity get name])"#
+        )),
+        "openwrt" | "linux" | "ubiquiti" => Some(format!(
+            r#"printf '{IDENTITY_MARKER}%s\n' "$(hostname 2>/dev/null)""#
+        )),
+        _ => None,
+    }
+}
+
+/// Extrai e valida a identidade devolvida por [`identity_command`].
+#[must_use]
+pub fn parse_identity(output: &str) -> Option<String> {
+    output.lines().rev().find_map(|line| {
+        let identity = line.trim().strip_prefix(IDENTITY_MARKER)?.trim();
+        (!identity.is_empty() && identity.len() <= 253 && !identity.chars().any(char::is_control))
+            .then(|| identity.trim_end_matches('.').to_owned())
+    })
+}
+
 /// Variante correlacionável usada pela ativação automática.
 ///
 /// O marcador é gerado pelo backend e permite reconhecer a resposta mesmo
@@ -267,6 +302,29 @@ const RECEITAS: &[Receita] = &[
 mod tests {
     use super::*;
     use serial_test::serial;
+
+    #[test]
+    fn a_identidade_e_extraida_sem_confundir_o_comando_ecoado() {
+        let output = concat!(
+            ":put (\"__NETMONITOR_IDENTITY__\" . [/system identity get name])\n",
+            "__NETMONITOR_IDENTITY__Roteador-Borda.local.\n"
+        );
+        assert_eq!(
+            parse_identity(output).as_deref(),
+            Some("Roteador-Borda.local")
+        );
+        assert!(parse_identity("__NETMONITOR_IDENTITY__\n").is_none());
+    }
+
+    #[test]
+    fn todos_os_sistemas_automaticos_tem_comando_de_identidade() {
+        for system in systems() {
+            assert!(
+                identity_command(system).is_some(),
+                "sem identidade: {system}"
+            );
+        }
+    }
 
     #[test]
     #[serial]

@@ -1,6 +1,6 @@
 # ADR 004 — DNS: `hickory-proto` no formato wire, sem cliente pronto
 
-- **Spike:** SPIKE-04 (§3.4 do `roadmap_backend_rust.md`)
+- **Spike:** SPIKE-04
 - **Status:** aceito — Fase 0
 - **Data:** 2026-08-10
 - **Protótipo:** [`backend/examples/spikes/dns_wire.rs`](../../backend/examples/spikes/dns_wire.rs)

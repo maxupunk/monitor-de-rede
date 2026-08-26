@@ -7,10 +7,8 @@
 //! diferente faria toda lista infinita parar na primeira página — ou nunca
 //! parar.
 //!
-//! O formato veio do `paginate()` do Lucid, o ORM do backend anterior, e é daí
-//! que sai o nome dos tipos (`LucidPage`, `LucidMeta`). O nome é histórico; a
-//! obrigação de manter o formato não é — ela vale enquanto o frontend ler estes
-//! campos.
+//! O contrato expõe os dados e metadados necessários para paginação por número
+//! de página, sem acoplar controllers ao ORM ou à apresentação do frontend.
 //!
 //! Os tipos moram aqui, e não em `dtos/common.rs`, porque este módulo é o dono
 //! da paginação; `crate::dtos::common` os reexporta para quem só precisa do DTO.
@@ -34,7 +32,7 @@ pub const MAX_LIMIT: u64 = 100;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct LucidMeta {
+pub struct PaginationMeta {
     #[ts(type = "number")]
     pub total: u64,
     #[ts(type = "number")]
@@ -51,7 +49,7 @@ pub struct LucidMeta {
     pub previous_page_url: Option<String>,
 }
 
-impl LucidMeta {
+impl PaginationMeta {
     /// Monta o `meta` a partir dos três números que o banco devolve.
     ///
     /// `last_page` nunca é 0, é 1 mesmo para conjunto vazio: o
@@ -80,9 +78,9 @@ impl LucidMeta {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct LucidPage<T> {
+pub struct PaginatedResponse<T> {
     pub data: Vec<T>,
-    pub meta: LucidMeta,
+    pub meta: PaginationMeta,
 }
 
 /// Resposta dos endpoints de **modo dual**: array cru quando `?page` está
@@ -93,7 +91,7 @@ pub struct LucidPage<T> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum MaybePaged<T> {
-    Page(LucidPage<T>),
+    Page(PaginatedResponse<T>),
     List(Vec<T>),
 }
 
@@ -118,13 +116,13 @@ pub fn normalize_page(page: Option<u64>) -> u64 {
 /// # Errors
 ///
 /// Propaga erro do banco em `AppError::Internal`.
-pub async fn paginate_compat<E, T, F, C>(
+pub async fn paginate<E, T, F, C>(
     db: &C,
     query: Select<E>,
     page: u64,
     limit: u64,
     map: F,
-) -> AppResult<LucidPage<T>>
+) -> AppResult<PaginatedResponse<T>>
 where
     E: EntityTrait,
     E::Model: FromQueryResult + Send + Sync,
@@ -139,9 +137,9 @@ where
     // O paginator do SeaORM é 0-based; o contrato HTTP é 1-based.
     let rows = paginator.fetch_page(page - 1).await?;
 
-    Ok(LucidPage {
+    Ok(PaginatedResponse {
         data: rows.into_iter().map(map).collect(),
-        meta: LucidMeta::new(total, per_page, page),
+        meta: PaginationMeta::new(total, per_page, page),
     })
 }
 
@@ -151,7 +149,7 @@ mod tests {
 
     #[test]
     fn meta_reproduz_o_exemplo_do_roadmap() {
-        let meta = LucidMeta::new(137, 20, 3);
+        let meta = PaginationMeta::new(137, 20, 3);
         assert_eq!(meta.total, 137);
         assert_eq!(meta.per_page, 20);
         assert_eq!(meta.current_page, 3);
@@ -165,7 +163,7 @@ mod tests {
 
     #[test]
     fn meta_serializa_em_camel_case() {
-        let json = serde_json::to_value(LucidMeta::new(137, 20, 3)).unwrap();
+        let json = serde_json::to_value(PaginationMeta::new(137, 20, 3)).unwrap();
         for key in [
             "total",
             "perPage",
@@ -184,7 +182,7 @@ mod tests {
 
     #[test]
     fn conjunto_vazio_tem_last_page_1() {
-        let meta = LucidMeta::new(0, 20, 1);
+        let meta = PaginationMeta::new(0, 20, 1);
         assert_eq!(meta.last_page, 1);
         assert_eq!(meta.next_page_url, None);
         assert_eq!(meta.previous_page_url, None);
@@ -192,13 +190,13 @@ mod tests {
 
     #[test]
     fn total_multiplo_exato_nao_cria_pagina_a_mais() {
-        assert_eq!(LucidMeta::new(40, 20, 1).last_page, 2);
-        assert_eq!(LucidMeta::new(41, 20, 1).last_page, 3);
+        assert_eq!(PaginationMeta::new(40, 20, 1).last_page, 2);
+        assert_eq!(PaginationMeta::new(41, 20, 1).last_page, 3);
     }
 
     /// Réplica da regra de parada do `useInfiniteList`:
     /// `isLastPage = !meta || meta.currentPage >= meta.lastPage`.
-    fn is_last_page(meta: &LucidMeta) -> bool {
+    fn is_last_page(meta: &PaginationMeta) -> bool {
         meta.current_page >= meta.last_page
     }
 
@@ -209,7 +207,7 @@ mod tests {
         let mut page = 1;
         let mut visitadas = 0;
         loop {
-            let meta = LucidMeta::new(total, per_page, page);
+            let meta = PaginationMeta::new(total, per_page, page);
             visitadas += 1;
             if is_last_page(&meta) {
                 break;
@@ -222,7 +220,7 @@ mod tests {
 
     #[test]
     fn use_infinite_list_para_na_primeira_pagina_quando_nao_ha_dados() {
-        assert!(is_last_page(&LucidMeta::new(0, 20, 1)));
+        assert!(is_last_page(&PaginationMeta::new(0, 20, 1)));
     }
 
     #[test]
@@ -230,7 +228,7 @@ mod tests {
         // O comentário do `useInfiniteList` diz que o fim vem do `meta`, não do
         // tamanho do lote — endpoints que filtram linhas depois de paginar
         // devolvem página curta no meio do conjunto.
-        let meta = LucidMeta::new(137, 20, 4);
+        let meta = PaginationMeta::new(137, 20, 4);
         assert!(!is_last_page(&meta));
     }
 
@@ -253,9 +251,9 @@ mod tests {
             serde_json::json!([1, 2, 3])
         );
 
-        let paged = MaybePaged::Page(LucidPage {
+        let paged = MaybePaged::Page(PaginatedResponse {
             data: vec![1],
-            meta: LucidMeta::new(1, 20, 1),
+            meta: PaginationMeta::new(1, 20, 1),
         });
         let json = serde_json::to_value(&paged).unwrap();
         assert_eq!(json["data"], serde_json::json!([1]));

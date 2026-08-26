@@ -499,7 +499,7 @@ desfecho porque é ele que explica o código.
   > **✅ Respeitado** nas Fases 1, 3 e 4 — mas ver §3.2: o registro foi feito
   > no ponto certo e a *distinção visual* entre os dois estados não.
 - **Princípio de execução (decisão registrada)**: implementação **sem
-  legado** — pré-requisitos arquiteturais (§2.1, §2.2, tipagem de `data`)
+  caminhos residuais** — pré-requisitos arquiteturais (§2.1, §2.2, tipagem de `data`)
   são entregues junto com a Fase 1, código morto é removido na mesma
   entrega, e validação completa é critério de aceite, mesmo que leve mais
   tempo. Ver nota equivalente no cabeçalho do roadmap.

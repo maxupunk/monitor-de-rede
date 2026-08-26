@@ -71,7 +71,23 @@ pub const HOSTNAME_BIND_PREFIX: &str = "host:";
 /// Monta a chave de vínculo de um hostname.
 #[must_use]
 pub fn hostname_bind_key(hostname: &str) -> String {
-    format!("{HOSTNAME_BIND_PREFIX}{}", hostname.trim())
+    format!(
+        "{HOSTNAME_BIND_PREFIX}{}",
+        hostname.trim().trim_end_matches('.').to_lowercase()
+    )
+}
+
+/// Normaliza qualquer chave recebida na fronteira do resolvedor.
+///
+/// IPs permanecem intactos; hostnames ignoram caixa e o ponto final usado por
+/// alguns clientes DNS. Centralizar esta regra impede que API, provisionamento
+/// e registro em memória discordem sobre a mesma origem.
+#[must_use]
+pub fn normalize_bind_key(key: &str) -> String {
+    let trimmed = key.trim();
+    trimmed
+        .strip_prefix(HOSTNAME_BIND_PREFIX)
+        .map_or_else(|| trimmed.to_owned(), hostname_bind_key)
 }
 
 /// Por quanto tempo uma resolução vale sem reconsultar o banco.
@@ -339,10 +355,17 @@ pub async fn bindings(db: &DatabaseConnection) -> AppResult<HashMap<String, i64>
     else {
         return Ok(HashMap::new());
     };
-    Ok(linha
+    let stored: HashMap<String, i64> = linha
         .value
         .and_then(|texto| serde_json::from_str(&texto).ok())
-        .unwrap_or_default())
+        .unwrap_or_default();
+    // Chaves antigas e vínculos manuais podem ter caixa ou ponto final
+    // diferentes do HOSTNAME recebido. O hostname é semanticamente
+    // case-insensitive; normalizá-lo na leitura mantém esses vínculos úteis.
+    Ok(stored
+        .into_iter()
+        .map(|(key, device_id)| (normalize_bind_key(&key), device_id))
+        .collect())
 }
 
 /// Grava (ou remove, com `device_id` nulo) o vínculo manual de uma origem.
@@ -357,9 +380,10 @@ pub async fn bind(db: &DatabaseConnection, chave: &str, device_id: Option<i64>) 
     use sea_orm::{ActiveModelTrait, ActiveValue::Set};
 
     let mut mapa = bindings(db).await?;
+    let chave = normalize_bind_key(chave);
     match device_id {
-        Some(id) => mapa.insert(chave.to_owned(), id),
-        None => mapa.remove(chave),
+        Some(id) => mapa.insert(chave, id),
+        None => mapa.remove(&chave),
     };
     let valor = serde_json::to_string(&mapa)
         .map_err(|error| crate::services::shared::errors::AppError::Internal(error.into()))?;
@@ -544,7 +568,7 @@ mod tests {
 
     #[test]
     fn a_chave_de_hostname_nao_colide_com_ip() {
-        assert_eq!(hostname_bind_key(" MikroTik "), "host:MikroTik");
+        assert_eq!(hostname_bind_key(" MikroTik. "), "host:mikrotik");
         assert!(hostname_bind_key("x").starts_with(HOSTNAME_BIND_PREFIX));
         assert!("192.168.1.1".parse::<IpAddr>().is_ok());
         assert!(hostname_bind_key("192.168.1.1").parse::<IpAddr>().is_err());

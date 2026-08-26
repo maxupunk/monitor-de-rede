@@ -284,6 +284,9 @@ pub struct ProvisionHintsResponse {
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct ProvisionLoggingResponse {
     pub operating_system: String,
+    /// Identidade lida diretamente no equipamento e usada para associar os
+    /// logs quando o endereço de origem está mascarado ou compartilhado.
+    pub identified_hostname: Option<String>,
     /// O endereço que foi gravado no equipamento.
     pub server_address: String,
     #[ts(type = "number")]

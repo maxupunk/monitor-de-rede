@@ -249,6 +249,19 @@
           </v-alert>
 
           <v-alert
+            v-if="result.identifiedHostname"
+            type="info"
+            variant="tonal"
+            density="compact"
+            class="mt-3"
+            icon="mdi-tag-check-outline"
+          >
+            <strong>Identidade reconhecida: {{ result.identifiedHostname }}.</strong>
+            O NetMonitor lembrará este nome para associar os próximos logs ao dispositivo, mesmo
+            quando a rede do container mostrar o mesmo IP para vários equipamentos.
+          </v-alert>
+
+          <v-alert
             v-if="result.persistenceWarning"
             type="warning"
             variant="tonal"

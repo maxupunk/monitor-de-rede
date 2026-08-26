@@ -360,7 +360,7 @@ async fn o_vinculo_por_hostname_e_aceito_e_persiste_com_o_prefixo() {
         let mapa = backend::services::syslog::resolver::bindings(&ctx.db)
             .await
             .expect("bindings");
-        assert_eq!(mapa.get("host:MikroTik-Borda"), Some(&device_id));
+        assert_eq!(mapa.get("host:mikrotik-borda"), Some(&device_id));
     })
     .await;
 }

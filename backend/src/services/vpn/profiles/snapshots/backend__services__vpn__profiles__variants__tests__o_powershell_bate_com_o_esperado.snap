@@ -49,19 +49,6 @@ Address = 10.8.0.11/24
     & $WgExe /uninstalltunnelservice $Tunnel
     Start-Sleep -Seconds 3
   }
-  $Legacy = Join-Path $env:ProgramData 'NetMonitor'
-  if (Test-Path $Legacy) {
-    # Versoes antigas deixavam o perfil aqui com uma ACL de leitura que nao
-    # inclui DELETE - nem o administrador apagava sem tomar posse antes.
-    $stale = @(Get-ChildItem $Legacy -Force -Recurse -ErrorAction SilentlyContinue |
-      ForEach-Object { $_.FullName }) + @($Legacy)
-    foreach ($item in $stale) {
-      takeown /f $item /a | Out-Null
-      icacls $item /reset | Out-Null
-    }
-    Remove-Item -Path $Legacy -Recurse -Force -ErrorAction SilentlyContinue
-  }
-
   # 4/4 - Grava o perfil no cofre do proprio WireGuard
   # O gerenciador monitora essa pasta e lista o tunel na hora, sem reiniciar.
   # Ao ativar, ele cria o servico (que sobe no boot) e cifra o perfil como

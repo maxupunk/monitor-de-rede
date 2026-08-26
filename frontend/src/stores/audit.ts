@@ -4,7 +4,7 @@ import { useInfiniteList } from '@/composables/useInfiniteList'
 import { apiService } from '@/services/apiService'
 import type { AuditLogResponse } from '@/bindings/AuditLogResponse'
 import type { AuditLogListResponse } from '@/bindings/AuditLogListResponse'
-import type { LucidMeta } from '@/bindings/LucidMeta'
+import type { PaginationMeta } from '@/bindings/PaginationMeta'
 
 export type { AuditLogResponse }
 
@@ -82,14 +82,14 @@ export function actionColor(action: string | null): string {
 /**
  * Store da trilha de auditoria.
  *
- * A lista é paginada por número de página (`LucidMeta`) porque a tabela de
+ * A lista é paginada por número de página (`PaginationMeta`) porque a tabela de
  * auditoria não recebe inserções contínuas como a de syslog; portanto, o
  * deslocamento do `OFFSET` não é um problema e o total de registros é útil
  * para a navegação por páginas.
  */
 export const useAuditStore = defineStore('audit', () => {
   const filters = ref<AuditFilters>(defaultFilters())
-  const meta = ref<LucidMeta | null>(null)
+  const meta = ref<PaginationMeta | null>(null)
   const error = ref<string | null>(null)
 
   function endpoint(): string {

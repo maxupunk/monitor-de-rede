@@ -1,13 +1,13 @@
 # ADR 007 — Scheduler: laço em processo único, no lugar do scheduler nativo do Loco
 
-- **Status:** aceito — 2026-08-12. **Supersede a [ADR 005](005-scheduler-loco.md).**
+- **Status:** aceito — 2026-08-12.
 - **Data:** 2026-08-12
 
 ## Contexto
 
-A [ADR 005](005-scheduler-loco.md) decidiu que o ciclo de monitores seria uma
-task de **um ciclo** (`task scheduler_run`), disparada a cada 5 s pelo scheduler
-nativo do Loco, que executa cada job como **processo novo**.
+O desenho inicial executava cada ciclo de monitores em uma task isolada,
+disparada a cada 5 s pelo scheduler nativo do Loco. Cada job iniciava um
+processo novo e descartava as dependências mantidas em memória ao terminar.
 
 O desenho rodou por meses sem que ninguém notasse um problema, porque a stack
 não subia inteira: o serviço `migration` falhava e derrubava o `up`. Quando ela
@@ -147,6 +147,3 @@ causou o bug original é exatamente a desejada.
 - Dois testes de regressão cobrem os defeitos: um garante que o contexto criado
   fora do caminho do servidor tem cliente ICMP e barramento; outro garante que o
   ciclo não depende de assinante SSE para completar.
-- `docs/adr/005-scheduler-loco.md` fica como está, com uma nota de status. A
-  medição de boot que ela traz (~25 ms) continua correta e continua útil — o que
-  mudou não foi o custo, foi o que o processo descartável levava embora junto.

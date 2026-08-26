@@ -51,5 +51,5 @@ impl AuditLogResponse {
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct AuditLogListResponse {
     pub data: Vec<AuditLogResponse>,
-    pub meta: crate::services::shared::pagination::LucidMeta,
+    pub meta: crate::services::shared::pagination::PaginationMeta,
 }

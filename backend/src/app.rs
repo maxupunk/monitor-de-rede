@@ -212,7 +212,6 @@ impl Hooks for App {
         tasks.register(tasks::probe_run::ProbeRun);
         tasks.register(tasks::probe_register::ProbeRegister);
         tasks.register(tasks::vpn_probe_register::VpnProbeRegister);
-        tasks.register(tasks::vpn_secrets_import::VpnSecretsImport);
     }
     /// Limpa o esquema inteiro entre testes.
     ///

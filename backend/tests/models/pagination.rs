@@ -1,4 +1,4 @@
-//! `paginate_compat` contra um banco real (§5.4).
+//! `paginate` contra um banco real (§5.4).
 //!
 //! Os testes unitários em `services/shared/pagination.rs` cobrem a aritmética
 //! do `meta`. Aqui o que se prova é o acoplamento com o SeaORM: que a página
@@ -8,7 +8,7 @@
 use backend::{
     app::App,
     models::_entities::users,
-    services::shared::pagination::{normalize_limit, paginate_compat},
+    services::shared::pagination::{normalize_limit, paginate},
 };
 use loco_rs::testing::prelude::*;
 use sea_orm::EntityTrait;
@@ -35,7 +35,7 @@ async fn pagina_1_do_contrato_e_a_primeira_do_banco() {
     let boot = boot_test::<App>().await.expect("subir app de teste");
     semeie_usuarios(&boot.app_context.db, 7).await;
 
-    let primeira = paginate_compat(
+    let primeira = paginate(
         &boot.app_context.db,
         users::Entity::find(),
         1,
@@ -51,7 +51,7 @@ async fn pagina_1_do_contrato_e_a_primeira_do_banco() {
     assert_eq!(primeira.meta.last_page, 3);
     assert_eq!(primeira.meta.previous_page_url, None);
 
-    let segunda = paginate_compat(
+    let segunda = paginate(
         &boot.app_context.db,
         users::Entity::find(),
         2,
@@ -78,7 +78,7 @@ async fn percorrer_ate_o_fim_devolve_todas_as_linhas_uma_vez() {
     let mut acumulado: Vec<String> = Vec::new();
     let mut pagina = 1;
     loop {
-        let atual = paginate_compat(
+        let atual = paginate(
             &boot.app_context.db,
             users::Entity::find(),
             pagina,
@@ -106,7 +106,7 @@ async fn percorrer_ate_o_fim_devolve_todas_as_linhas_uma_vez() {
 async fn conjunto_vazio_nao_prende_a_lista_infinita() {
     let boot = boot_test::<App>().await.expect("subir app de teste");
 
-    let pagina = paginate_compat(
+    let pagina = paginate(
         &boot.app_context.db,
         users::Entity::find(),
         1,
@@ -129,7 +129,7 @@ async fn limite_e_limitado_a_100_antes_de_ir_ao_banco() {
 
     assert_eq!(normalize_limit(Some(100_000)), 100);
 
-    let pagina = paginate_compat(
+    let pagina = paginate(
         &boot.app_context.db,
         users::Entity::find(),
         1,

@@ -144,6 +144,9 @@ pub struct ProvisionOutcome {
     /// Origem exata da linha de teste desta sessão. Uso interno para associar
     /// fontes mascaradas pelo Docker sem depender do nome cadastrado.
     pub observed_source: Option<SeenSource>,
+    /// Hostname/identity lido diretamente na sessão autenticada. Ele é seguro
+    /// para criar o vínculo mesmo quando a linha de teste demora a chegar.
+    pub identified_hostname: Option<String>,
 }
 
 /// Entra no equipamento, roda os comandos e espera a primeira mensagem.
@@ -173,7 +176,7 @@ pub async fn run(
     let pending =
         PendingConfirmation::new(sources.map(Arc::as_ref), test_command.is_some(), marker);
 
-    let transcript = timeout(
+    let (transcript, identified_hostname) = timeout(
         TETO_DA_SESSAO,
         executa(pedido, &comandos, test_command.as_deref()),
     )
@@ -196,6 +199,7 @@ pub async fn run(
         transcript: raspa(&transcript, &pedido.password),
         confirmed,
         observed_source,
+        identified_hostname,
     })
 }
 
@@ -204,7 +208,7 @@ async fn executa(
     pedido: &ProvisionRequest,
     comandos: &[String],
     test_command: Option<&str>,
-) -> AppResult<String> {
+) -> AppResult<(String, Option<String>)> {
     let mut sessao = match pedido.protocol {
         Protocol::Ssh => Sessao::Ssh(Box::new(ssh::abre(pedido).await?)),
         Protocol::Telnet => Sessao::Telnet(Box::new(telnet::abre(pedido).await?)),
@@ -225,6 +229,20 @@ async fn executa(
     // transcript: é lá que aparece "senha expirada" e outros avisos que
     // explicariam um comando recusado logo em seguida.
     let mut transcript = sessao.le_ate_silenciar().await?;
+
+    // A identidade é lida dentro da mesma sessão já autenticada. Fazer uma
+    // segunda conexão duplicaria autenticação, timeout e tratamento de erro.
+    // Falhar em identificar não impede a configuração: a confirmação marcada
+    // ainda pode descobrir o hostname pelo pacote recebido.
+    let identified_hostname =
+        if let Some(command) = snippets::identity_command(&pedido.operating_system) {
+            sessao.envia_linha(&command).await?;
+            let output = sessao.le_ate_silenciar().await?;
+            transcript.push_str(&format!("\n$ {command}\n{output}"));
+            snippets::parse_identity(&output)
+        } else {
+            None
+        };
 
     for comando in comandos {
         sessao.envia_linha(comando).await?;
@@ -251,7 +269,37 @@ async fn executa(
     }
 
     sessao.encerra().await;
-    Ok(transcript)
+    Ok((transcript, identified_hostname))
+}
+
+/// Persiste o vínculo entre a identidade anunciada e o dispositivo.
+///
+/// O vínculo é independente do endereço de origem e, portanto, continua
+/// correto tanto em rede bridge/NAT quanto em `network_mode: host`.
+///
+/// # Errors
+///
+/// Propaga falhas de persistência.
+pub async fn associate_identified_hostname(
+    db: &DatabaseConnection,
+    runtime: Option<(&Resolver, &SourceRegistry)>,
+    device_id: i64,
+    hostname: &str,
+) -> AppResult<()> {
+    let bind_key = resolver::hostname_bind_key(hostname);
+    if let Some(existing_device_id) = resolver::bindings(db).await?.get(&bind_key) {
+        if *existing_device_id != device_id {
+            return Err(AppError::business_rule(format!(
+                "A identidade `{hostname}` já está associada a outro dispositivo. Renomeie um dos equipamentos para manter os logs separados."
+            )));
+        }
+    }
+    resolver::bind(db, &bind_key, Some(device_id)).await?;
+    if let Some((resolver, sources)) = runtime {
+        resolver.invalidate().await;
+        sources.reclassify(&bind_key, &Resolution::Device(device_id));
+    }
+    Ok(())
 }
 
 /// O `sudo` pedindo senha, nas formas em que ele aparece.
@@ -342,6 +390,16 @@ pub async fn associate_confirmed_source(
         return Err(AppError::business_rule(
             "A linha de teste chegou por um gateway compartilhado, mas sem hostname; não é seguro vincular esse endereço a um único dispositivo.",
         ));
+    }
+
+    if source.masked {
+        return associate_identified_hostname(
+            db,
+            Some((resolver, sources)),
+            device_id,
+            source.hostname.as_deref().expect("validado acima"),
+        )
+        .await;
     }
 
     resolver::bind(db, &source.bind_key, Some(device_id)).await?;
@@ -741,6 +799,8 @@ fn limpa(bruto: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use migration::{Migrator, MigratorTrait};
+    use sea_orm::Database;
 
     #[test]
     fn a_senha_e_raspada_do_transcript() {
@@ -784,5 +844,72 @@ mod tests {
         assert_eq!(limpa(b"linha 1\r\nlinha 2\r\n"), "linha 1\nlinha 2\n");
         // Latin-1 solto não pode derrubar o diagnóstico inteiro.
         assert!(limpa(&[b'a', 0xFF, b'b']).contains('a'));
+    }
+
+    #[tokio::test]
+    async fn a_identidade_autenticada_vira_vinculo_persistente() {
+        let db = Database::connect("sqlite::memory:")
+            .await
+            .expect("banco em memória");
+        Migrator::up(&db, None).await.expect("migrations");
+        let device = crate::models::devices::ActiveModel {
+            name: sea_orm::ActiveValue::Set("Nome amigável".to_owned()),
+            r#type: sea_orm::ActiveValue::Set("router".to_owned()),
+            status: sea_orm::ActiveValue::Set("online".to_owned()),
+            ..Default::default()
+        };
+        let device = sea_orm::ActiveModelTrait::insert(device, &db)
+            .await
+            .expect("dispositivo");
+
+        associate_identified_hostname(&db, None, device.id, "Roteador-Borda.local.")
+            .await
+            .expect("associação");
+
+        let bindings = resolver::bindings(&db).await.expect("vínculos");
+        assert_eq!(bindings.get("host:roteador-borda.local"), Some(&device.id));
+    }
+
+    #[tokio::test]
+    async fn a_identidade_repetida_nao_e_transferida_para_outro_dispositivo() {
+        let mut options = sea_orm::ConnectOptions::new("sqlite::memory:".to_owned());
+        options.max_connections(1).min_connections(1);
+        let db = Database::connect(options).await.expect("banco em memória");
+        Migrator::up(&db, None).await.expect("migrations");
+        let first = crate::models::devices::ActiveModel {
+            name: sea_orm::ActiveValue::Set("Primeiro".to_owned()),
+            r#type: sea_orm::ActiveValue::Set("router".to_owned()),
+            status: sea_orm::ActiveValue::Set("online".to_owned()),
+            ..Default::default()
+        };
+        let first = sea_orm::ActiveModelTrait::insert(first, &db)
+            .await
+            .expect("primeiro");
+        let second = crate::models::devices::ActiveModel {
+            name: sea_orm::ActiveValue::Set("Segundo".to_owned()),
+            r#type: sea_orm::ActiveValue::Set("router".to_owned()),
+            status: sea_orm::ActiveValue::Set("online".to_owned()),
+            ..Default::default()
+        };
+        let second = sea_orm::ActiveModelTrait::insert(second, &db)
+            .await
+            .expect("segundo");
+
+        associate_identified_hostname(&db, None, first.id, "openwrt")
+            .await
+            .expect("primeiro vínculo");
+        assert!(
+            associate_identified_hostname(&db, None, second.id, "openwrt")
+                .await
+                .is_err(),
+            "uma identidade compartilhada não pode trocar de dono silenciosamente"
+        );
+        assert_eq!(
+            resolver::bindings(&db)
+                .await
+                .expect("vínculos")
+                .get("host:openwrt"),
+            Some(&first.id)
+        );
     }
 }

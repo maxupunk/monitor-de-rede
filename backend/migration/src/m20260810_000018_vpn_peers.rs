@@ -19,7 +19,7 @@ impl MigrationTrait for Migration {
             // constraint (`vpn_peers_public_key_key`), e este esquema nomeia
             // seus índices à mão — ver `shared::index`.
             .col(string("public_key"))
-            // Cifrada em repouso com a APP_KEY — ver `services::shared::crypto`.
+            // Cifrada em repouso com ENCRYPTION_KEY — ver `services::shared::crypto`.
             .col(text_null("preshared_key_encrypted"))
             .col(string("device_profile").default("linux").take())
             .col(integer("persistent_keepalive").default(25).take())

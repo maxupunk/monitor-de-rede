@@ -48,8 +48,7 @@ cargo loco doctor           # check the environment
 
 ## Convenções deste projeto (além do padrão Loco)
 
-Fixadas na Fase 0 da migração. Ver `docs/adr/` (decisões vivas) e
-`docs/historico/roadmap_backend_rust.md` (o plano, encerrado).
+Ver `docs/adr/` para as decisões arquiteturais vigentes.
 
 - **Prefixo `/api`** vem do `AppRoutes::prefix` em `src/app.rs`, não do controller.
   Um `Routes::new().prefix("/auth")` vira `/api/auth`. `GET /`, `_ping` e `_health`
@@ -61,7 +60,7 @@ Fixadas na Fase 0 da migração. Ver `docs/adr/` (decisões vivas) e
   `{"message": "..."}` porque é isso que o frontend lê. Mensagens em português.
 - **`#[serde(rename_all = "camelCase")]` em todo DTO.** Não é estilo: o teste
   `tests/conventions/camel_case.rs` falha se você esquecer.
-- **Paginação:** use `paginate_compat` (`services/shared/pagination.rs`). O
+- **Paginação:** use `paginate` (`services/shared/pagination.rs`). O
   envelope é `{data, meta}`, não o `PaginationResponse` do Loco — é o formato
   que o `useInfiniteList` do frontend lê.
 - **Bindings TypeScript:** `#[ts(export, export_to = "../../frontend/src/bindings/")]`.
@@ -88,7 +87,8 @@ Fixadas na Fase 0 da migração. Ver `docs/adr/` (decisões vivas) e
   o Postgres tem `INT4` — o `sqlx` recusa a leitura em produção. Depois de
   gerar, confira o diff das entidades e rode `cargo test` (também contra o
   Postgres).
-- **Porta 3333** nos três ambientes — o proxy do Vite aponta para ela.
+- **Porta de produção configurável por `APP_PORT`**; em desenvolvimento e teste
+  permanece 3333, que é o destino do proxy do Vite.
 
 ## Learn more
 

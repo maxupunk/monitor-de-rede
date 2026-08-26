@@ -1,6 +1,6 @@
 # ADR 002 — Port scanner: algoritmo do RustScan, não a crate
 
-- **Spike:** SPIKE-02 (§3.4 do `roadmap_backend_rust.md`)
+- **Spike:** SPIKE-02
 - **Status:** aceito — Fase 0
 - **Data:** 2026-08-10
 

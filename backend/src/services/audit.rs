@@ -17,7 +17,7 @@ use crate::{
     models::{audit_logs, users},
     services::shared::{
         errors::{AppError, AppResult},
-        pagination::{normalize_limit, normalize_page, paginate_compat, LucidPage},
+        pagination::{normalize_limit, normalize_page, paginate, PaginatedResponse},
     },
 };
 
@@ -260,7 +260,7 @@ impl<'a, C: ConnectionTrait> AuditService<'a, C> {
         filters: AuditFilters,
         page: Option<u64>,
         limit: Option<u64>,
-    ) -> AppResult<LucidPage<audit_logs::Model>> {
+    ) -> AppResult<PaginatedResponse<audit_logs::Model>> {
         let mut query = audit_logs::Entity::find();
 
         if let Some(user_id) = filters.user_id {
@@ -286,7 +286,7 @@ impl<'a, C: ConnectionTrait> AuditService<'a, C> {
 
         let page = normalize_page(page);
         let limit = normalize_limit(limit);
-        paginate_compat(self.db, query, page, limit, |m| m).await
+        paginate(self.db, query, page, limit, |m| m).await
     }
 }
 

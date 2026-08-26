@@ -1,6 +1,6 @@
 # ADR 003 — ICMP por `SOCK_DGRAM`, sem `CAP_NET_RAW`
 
-- **Spike:** SPIKE-03 (§3.4 do `roadmap_backend_rust.md`)
+- **Spike:** SPIKE-03
 - **Status:** aceito — Fase 0
 - **Data:** 2026-08-10
 - **Protótipo:** [`backend/examples/spikes/icmp_dgram.rs`](../../backend/examples/spikes/icmp_dgram.rs)

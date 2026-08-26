@@ -40,7 +40,9 @@ use crate::{
         },
         shared::{
             errors::{AppError, AppResult},
-            pagination::{normalize_limit, normalize_page, paginate_compat, LucidMeta, LucidPage},
+            pagination::{
+                normalize_limit, normalize_page, paginate, PaginatedResponse, PaginationMeta,
+            },
         },
     },
     views::alerts::{
@@ -469,9 +471,9 @@ async fn index(
     let paginator = base.paginate(&ctx.db, limit);
     let total = paginator.num_items().await?;
     let events = paginator.fetch_page(page.saturating_sub(1)).await?;
-    Ok(format::json(LucidPage {
+    Ok(format::json(PaginatedResponse {
         data: serialize_events(&ctx.db, events).await?,
-        meta: LucidMeta::new(total, limit, page),
+        meta: PaginationMeta::new(total, limit, page),
     })?)
 }
 
@@ -531,7 +533,7 @@ async fn check_and_resolve(
     };
 
     // Falha de execução não invalida o alerta: mantém-se a avaliação pelo
-    // estado atual, exatamente como no backend anterior.
+    // estado atual, que continua sendo a fonte canônica.
     let execution_configuration =
         crate::services::monitoring::ping_diagnostics::prepare_configuration(ctx, &monitor).await?;
     match run_monitor(
@@ -699,11 +701,11 @@ pub async fn alerts_for_monitor(
     ctx: &AppContext,
     monitor_id: i64,
     query: &PaginationQuery,
-) -> AppResult<LucidPage<SerializedAlertEvent>> {
+) -> AppResult<PaginatedResponse<SerializedAlertEvent>> {
     let filter = Condition::any()
         .add(alert_events_entity::Column::MonitorId.eq(monitor_id))
         .add(alert_events_entity::Column::ScopeKey.eq(format!("monitor:{monitor_id}")));
-    let page = paginate_compat(
+    let page = paginate(
         &ctx.db,
         alert_events::Entity::find()
             .filter(filter)
@@ -713,7 +715,7 @@ pub async fn alerts_for_monitor(
         |row| row,
     )
     .await?;
-    Ok(LucidPage {
+    Ok(PaginatedResponse {
         data: serialize_events(&ctx.db, page.data).await?,
         meta: page.meta,
     })
@@ -797,7 +799,7 @@ mod tests {
     }
 
     #[test]
-    fn condicao_invalida_devolve_422_com_o_texto_do_backend_anterior() {
+    fn condicao_invalida_devolve_422_com_mensagem_estavel() {
         assert_eq!(
             invalid_condition().status(),
             StatusCode::UNPROCESSABLE_ENTITY

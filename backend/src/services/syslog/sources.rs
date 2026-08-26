@@ -218,10 +218,11 @@ impl SourceRegistry {
     /// e o nome: quando a chave é `host:<nome>`, o IP de origem só está aqui.
     #[must_use]
     pub fn snapshot(&self, bind_key: &str) -> Option<SeenSource> {
+        let bind_key = super::resolver::normalize_bind_key(bind_key);
         self.fontes
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .get(bind_key)
+            .get(&bind_key)
             .cloned()
     }
 
@@ -241,8 +242,9 @@ impl SourceRegistry {
     ///
     /// Devolve se a origem existia.
     pub fn reclassify(&self, bind_key: &str, resolucao: &Resolution) -> bool {
+        let bind_key = super::resolver::normalize_bind_key(bind_key);
         let mut fontes = self.fontes.lock().unwrap_or_else(PoisonError::into_inner);
-        let Some(entrada) = fontes.get_mut(bind_key) else {
+        let Some(entrada) = fontes.get_mut(&bind_key) else {
             return false;
         };
         entrada.kind = SourceKind::from(resolucao);
@@ -613,7 +615,7 @@ mod tests {
         // devolve no POST de bind.
         let mut chaves: Vec<&str> = fontes.iter().map(|f| f.bind_key.as_str()).collect();
         chaves.sort_unstable();
-        assert_eq!(chaves, vec!["host:MikroTik-Borda", "host:MikroTik-Filial"]);
+        assert_eq!(chaves, vec!["host:mikrotik-borda", "host:mikrotik-filial"]);
     }
 
     #[test]

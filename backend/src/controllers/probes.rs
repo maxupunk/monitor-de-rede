@@ -411,8 +411,8 @@ async fn results(
     if !input.discovery_results.is_empty() {
         receiver::receive_discovery_results(&ctx, probe.id, &input.discovery_results).await?;
     }
-    // `count` é o que o agente mandou, não o que foi aceito: é assim que o
-    // backend anterior responde, e o agente só usa isso para log.
+    // `count` é o que o agente mandou, não o que foi aceito; o agente usa o
+    // campo somente para diagnóstico.
     Ok(format::json(serde_json::json!({
         "status": "processed",
         "count": input.results.len() + input.discovery_results.len(),

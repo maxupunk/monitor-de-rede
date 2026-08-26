@@ -339,7 +339,7 @@ mod tests {
     }
 
     #[test]
-    fn perda_total_e_down_com_a_mensagem_do_backend_anterior() {
+    fn perda_total_e_down_com_mensagem_clara() {
         let result = resumo(3, &[]);
         assert_eq!(result.status, MonitorStatus::Down);
         assert!(!result.success);
@@ -353,7 +353,7 @@ mod tests {
     }
 
     #[test]
-    fn a_mensagem_de_sucesso_arredonda_como_o_backend_anterior() {
+    fn a_mensagem_de_sucesso_arredonda_para_duas_casas() {
         let result = resumo(2, &[medida(12), medida(13)]);
         assert_eq!(
             result.message.as_deref(),

@@ -33,8 +33,8 @@ use crate::{
     },
 };
 
-/// Lado **mínimo** do QR Code em pixels — o mesmo alvo do backend anterior,
-/// para o código continuar legível na mesma distância de câmera. A margem
+/// Lado **mínimo** do QR Code em pixels, suficiente para leitura na distância
+/// esperada de câmera. A margem
 /// (quiet zone) é a padrão do formato: sem ela, leitores recusam o código.
 const QR_SIZE: u32 = 320;
 

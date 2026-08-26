@@ -20,7 +20,7 @@ use crate::{
         events::{DomainEvent, EventBus},
         shared::{
             errors::AppResult,
-            pagination::{paginate_compat, LucidPage},
+            pagination::{paginate, PaginatedResponse},
         },
     },
     views::alerts::serialize_events,
@@ -32,7 +32,7 @@ async fn index(
     State(ctx): State<AppContext>,
     Query(query): Query<PaginationQuery>,
 ) -> AppResult<Response> {
-    let page = paginate_compat(
+    let page = paginate(
         &ctx.db,
         alert_events::Entity::find()
             .order_by_desc(crate::models::_entities::alert_events::Column::CreatedAt),
@@ -41,7 +41,7 @@ async fn index(
         |row| row,
     )
     .await?;
-    Ok(format::json(LucidPage {
+    Ok(format::json(PaginatedResponse {
         data: serialize_events(&ctx.db, page.data).await?,
         meta: page.meta,
     })?)

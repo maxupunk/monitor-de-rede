@@ -147,8 +147,8 @@ impl IntoResponse for AppError {
 
 /// Extrai a mensagem de um erro sem estourar quando ele não tem uma.
 ///
-/// Equivalente ao padrão de apresentação de erro do sistema anterior; a regra
-/// de negócio é a mesma, só mudou a implementação.
+/// Mantém a apresentação de erro previsível mesmo quando a causa não oferece
+/// uma mensagem própria.
 #[must_use]
 pub fn error_message(err: &dyn std::error::Error) -> String {
     let msg = err.to_string();

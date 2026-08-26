@@ -8,12 +8,6 @@
 //!   para montar o `wg0.conf`.
 //! * [`sha256_hex`] — irreversível. Usado no `probes.token_hash`, comparado por
 //!   igualdade na autenticação de probe (§7.10).
-//!
-//! > **Bancos anteriores ao corte para o backend Rust:** o formato de cifra do
-//! > backend AdonisJS não é este. Um `pg_dump` cru daquela época deixa
-//! > `private_key_encrypted` ilegível aqui; os valores precisam passar pelo
-//! > `task vpn_secrets_import`. Não se aplica a banco criado por estas
-//! > migrations. Ver `docs/historico/corte_backend_rust.md`.
 
 use base64::Engine as _;
 use chacha20poly1305::{
@@ -33,17 +27,7 @@ const NONCE_LEN: usize = 24;
 /// Variável que guarda a chave de cifra.
 pub const ENCRYPTION_KEY_ENV: &str = "ENCRYPTION_KEY";
 
-/// Nome anterior da mesma variável.
-///
-/// `APP_KEY` é convenção do AdonisJS, e ficou no repositório por inércia depois
-/// que o backend virou Rust. O nome mudou; o **valor** não pode mudar, porque é
-/// dele que sai a chave que decifra as chaves privadas do WireGuard já gravadas.
-/// Por isso o fallback continua sendo lido: uma instalação existente que só
-/// tenha `APP_KEY` no ambiente segue funcionando, com um aviso pedindo a
-/// renomeação. Remover este fallback torna ilegível todo peer VPN já cadastrado.
-const LEGACY_ENCRYPTION_KEY_ENV: &str = "APP_KEY";
-
-/// Chave usada quando nenhuma das duas está definida fora de produção. Existe só
+/// Chave usada quando a variável não está definida fora de produção. Existe só
 /// para `cargo test`/`cargo loco start` funcionarem numa cópia recém-clonada.
 const DEV_ENCRYPTION_KEY: &str = "netmonitor-development-app-key-do-not-use-in-production";
 
@@ -57,7 +41,7 @@ static ENCRYPTION_KEY: OnceLock<[u8; 32]> = OnceLock::new();
 ///
 /// # Panics
 ///
-/// Em `production` sem chave definida (nem no nome novo, nem no antigo). É
+/// Em `production` sem chave definida. É
 /// intencional: subir o serviço com uma chave que está no código-fonte exporia
 /// as chaves privadas do WireGuard.
 #[must_use]
@@ -70,15 +54,6 @@ pub fn encryption_key() -> &'static [u8; 32] {
 
 fn resolve_secret() -> String {
     if let Some(secret) = non_empty_env(ENCRYPTION_KEY_ENV) {
-        return secret;
-    }
-
-    if let Some(secret) = non_empty_env(LEGACY_ENCRYPTION_KEY_ENV) {
-        tracing::warn!(
-            "{LEGACY_ENCRYPTION_KEY_ENV} está obsoleta (era o nome do AdonisJS): renomeie para \
-             {ENCRYPTION_KEY_ENV} mantendo o MESMO valor — trocar o valor torna ilegível tudo \
-             que já foi cifrado"
-        );
         return secret;
     }
 

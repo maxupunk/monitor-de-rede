@@ -184,7 +184,7 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
     - Adicionados `vitest`, `@vue/test-utils`, `jsdom` e `@types/jsdom`.
     - Criado `frontend/vitest.config.ts` com ambiente `jsdom` e alias `@/`.
     - Script `"test": "vitest run"` no `package.json`; o script `"format"` passou a incluir `tests/`.
-    - Migrados os testes legados (`formatters.test.ts`, `ndjson.test.ts`) para a sintaxe do Vitest.
+    - Migrados os testes existentes (`formatters.test.ts`, `ndjson.test.ts`) para a sintaxe do Vitest.
     - Adicionados testes para `utils/formatters.ts`, `composables/useMonitorDetail.ts`, `composables/useInfiniteList.ts`, `composables/useInfiniteCursor.ts` e as stores puras `preferences`, `alerts` e `dashboard`.
     - CI executa `npm run test` entre `lint` e `build`.
 
@@ -325,7 +325,7 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
   - **Implementado:**
     - Nova tabela `audit_logs` (`user_id`, `action`, `resource_type`, `resource_id`, `resource_label`, `description`, `changes`, `ip_address`, `user_agent`, `created_at`) com índices em `created_at`, `user_id`, `(resource_type, resource_id)` e `action`.
     - Service `services::audit` com `AuditAction`, `ResourceType`, `AuditActor`, `AuditEntryInput`, `AuditFilters` e gravação isolada (falhas de auditoria nunca quebram a operação principal).
-    - Controller `GET /api/audit-logs` restrito a administradores, com filtros (`userId`, `resourceType`, `resourceId`, `action`, `from`, `to`) e paginação `LucidMeta`.
+    - Controller `GET /api/audit-logs` restrito a administradores, com filtros (`userId`, `resourceType`, `resourceId`, `action`, `from`, `to`) e `PaginationMeta`.
     - Auditoria integrada nos controllers de `auth`, `devices`, `monitors`, `sites`, `networks`, `users`, `probes`, `vpn_peers`, `maintenance_windows` e `alerts` (regras), registrando criação, alteração, exclusão e login/logout com diff opcional.
     - Página frontend `/audit` (apenas admin) com tabela paginada, filtros, expansão de detalhes (IP, user-agent e diff `old`/`new`) e navegação por páginas.
     - Testes unitários do service e testes de integração cobrindo acesso restrito, listagem, filtros e paginação.
@@ -370,7 +370,7 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
   - **Esforço:** Pequeno
   - **Arquivos:** `frontend/src/components/DeviceDialog.vue`, `frontend/src/pages/{LogsPage.vue,DeviceDetailPage.vue}`, `frontend/src/components/devices/tabs/{DeviceLogsTab.vue,DeviceOverviewTab.vue}`, `frontend/src/composables/useInfiniteCursor.ts`, `frontend/tests/composables/useInfiniteCursor.spec.ts`, `backend/tests/{requests/syslog_api.rs,conventions/tela_unificada.rs}`
   - **Implementado:**
-    - Ativação automática de syslog iniciada exclusivamente no cadastro do dispositivo, reaproveitando os dados salvos antes de abrir o assistente.
+    - Ativação automática de syslog oferecida no cadastro, na edição e na aba Logs do dispositivo, sempre com um snapshot imutável do alvo.
     - Aba de logs protegida por escopo visual e descarte de respostas assíncronas obsoletas, impedindo que registros de um dispositivo apareçam em outro.
     - Resumo de tráfego por interface reposicionado antes da estabilidade dos monitores na Visão Geral.
 
@@ -386,8 +386,20 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
   - O assistente aplica o snapshot já na primeira montagem; em container bridge, o backend combina a rota com o endereço externo observado na sessão e nunca sugere o IP interno/gateway do Docker.
   - A ativação usa um timeout HTTP próprio, maior que a sessão SSH e a confirmação do log; operações comuns continuam com o teto curto de 15 segundos.
   - A linha de teste leva um marcador efêmero por sessão; quando o Docker mascara o IP, sua origem é associada ao dispositivo autenticado sem vincular o gateway compartilhado.
+  - A sessão autenticada consulta o hostname/identity do equipamento antes de configurar; o vínculo persistido associa logs futuros pelo nome mesmo sem um IP de origem exclusivo e a tela mostra a identidade reconhecida.
   - A configuração de Syslog pode ser retomada pela edição e pela aba Logs de qualquer dispositivo; o IP vem primeiro e a identificação sugere o nome anunciado via SNMP/descoberta sem sobrescrever texto digitado.
   - O último destino aplicado é isolado por dispositivo; valores livres são normalizados e adicionados ao catálogo global sem duplicatas.
+
+- [x] **Rede Docker host e porta configurável** 🟢 Concluído
+  - `docker-compose.host.yml` remove publicação/NAT e compartilha diretamente a rede do host.
+  - `APP_PORT` define a porta real da API/SPA; `APP_EXTERNAL_PORT` continua sendo apenas a publicação no modo bridge.
+  - `SYSLOG_LISTEN_PORT` define os listeners e, no modo host, é anunciado automaticamente aos equipamentos.
+  - O modo é selecionado no `.env` por `COMPOSE_FILE`, com o mesmo separador em Windows e Linux.
+  - O README documenta ativação, portas, endereço usado pelos equipamentos, firewall, validação, retorno à bridge e o catálogo dos recursos disponíveis.
+
+- [x] **Remoção de referências e caminhos de migração sem uso** 🟢 Concluído
+  - Removidos o importador de segredos, o fallback de variável de cifra e os documentos dedicados à transição de backend.
+  - A documentação descreve apenas a arquitetura e os contratos atuais.
 
 ---
 

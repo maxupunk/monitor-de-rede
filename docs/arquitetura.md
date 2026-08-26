@@ -3,10 +3,8 @@
 Descreve o sistema **como ele é hoje**. Quando este documento e o código
 divergirem, o código está certo e este arquivo está desatualizado.
 
-O backend é **Rust sobre [Loco.rs](https://loco.rs/)**, em `backend/`. O
-backend anterior era AdonisJS; ele saiu do repositório e o registro daquela
-migração está em [`historico/`](historico/). As decisões técnicas que continuam
-valendo estão em [`adr/`](adr/).
+O backend é **Rust sobre [Loco.rs](https://loco.rs/)**, em `backend/`. As
+decisões técnicas vigentes estão em [`adr/`](adr/).
 
 ---
 
@@ -435,7 +433,7 @@ exatamente esse o bug corrigido pela [ADR 007](adr/007-scheduler-processo-unico.
   — nunca por `docker exec`.
 - A `wg0` sobe no namespace de rede do próprio container, então ICMP e SNMP na
   faixa do túnel saem direto do processo da API. `VPN_PROBE_EXTERNAL=true`
-  descreve o arranjo antigo — túnel em outro namespace, medido por um
+  habilita o arranjo externo — túnel em outro namespace, medido por um
   `vpn-probe` dedicado — e é o que reativa o registro do agente no boot e o
   aviso `pingOutsideTunnel`.
 - O token de fallback `DEFAULT_VPN_PROBE_TOKEN` **não pode ser removido**: é ele
@@ -447,9 +445,8 @@ exatamente esse o bug corrigido pela [ADR 007](adr/007-scheduler-processo-unico.
 - Autenticação JWT; `JWT_SECRET` **precisa ser base64 válido** (HS512). Um valor
   que não seja base64 faz todo login responder 401.
 - Tokens de probe guardados como `sha256`, revogáveis.
-- Credenciais e chaves privadas cifradas em repouso com `ENCRYPTION_KEY` (nome
-  anterior: `APP_KEY`, do AdonisJS, ainda aceito com aviso). Sem ela
-  em produção o serviço **não sobe** — é intencional.
+- Credenciais e chaves privadas cifradas em repouso com `ENCRYPTION_KEY`. Sem
+  ela em produção o serviço **não sobe** — é intencional.
 - Validação em toda entrada; rate limit; timeout por operação; limite de
   concorrência.
 - Isolamento por site: um probe só enxerga o site e as redes autorizadas.
@@ -571,8 +568,8 @@ ausente achando que ela está escondida:
 | [002](adr/002-rustscan-embedding.md) | Estratégia de port scan sobre `tokio` |
 | [003](adr/003-icmp-dgram.md) | Ping por socket ICMP `SOCK_DGRAM` |
 | [004](adr/004-dns-wire.md) | Consultas DNS no formato wire |
-| [005](adr/005-scheduler-loco.md) | Scheduler nativo do Loco, um ciclo por tique |
-| [006](adr/006-prioridade-do-padrao-rust.md) | Preferir o idioma Rust ao espelhamento do código anterior |
+| [007](adr/007-scheduler-processo-unico.md) | Scheduler em laço no processo principal |
+| [008](adr/008-syslog-parser.md) | Parser e ingestão de Syslog |
 
 ## 14. Configuração
 
@@ -581,7 +578,7 @@ O `.env` só preenche os `get_env(...)` desses arquivos e as substituições do
 compose — [`.env.example`](../.env.example) lista todas as variáveis lidas, e só
 elas. O banco é apontado por **`DATABASE_URL`**, uma URL única.
 
-A porta é **3333** nos três ambientes, e agora é a única publicada além da UDP
-do WireGuard: interface web e API dividem a mesma. Em desenvolvimento o Vite
-serve a SPA na 5173 e faz proxy de `/api` para a 3333 — a produção não tem
-proxy nenhum.
+Interface web e API dividem a porta configurada por `APP_PORT` em produção. Na
+bridge, `APP_EXTERNAL_PORT` escolhe a porta publicada; no modo host, `APP_PORT`
+é acessada diretamente. Em desenvolvimento o Vite serve a SPA na 5173 e faz
+proxy de `/api` para a 3333.

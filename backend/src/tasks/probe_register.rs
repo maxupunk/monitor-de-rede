@@ -10,7 +10,7 @@ use sea_orm::{ActiveModelTrait, Set};
 
 use crate::{models::probes, services::shared::crypto::sha256_hex};
 
-/// 32 bytes de entropia, como o `crypto.randomBytes(32)` do backend anterior.
+/// 32 bytes de entropia para o token de autenticação do probe.
 const TOKEN_BYTES: usize = 32;
 
 pub struct ProbeRegister;
@@ -77,7 +77,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn o_token_tem_a_entropia_do_backend_anterior() {
+    fn o_token_tem_entropia_suficiente() {
         let token = generate_token();
         assert_eq!(token.len(), TOKEN_BYTES * 2);
         assert!(token.chars().all(|c| c.is_ascii_hexdigit()));

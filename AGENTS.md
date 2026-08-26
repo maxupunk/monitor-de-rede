@@ -3,11 +3,6 @@
 > **O backend é Rust (Loco.rs), em `backend/`. Ponto.** Não existe outro
 > backend no repositório, nem "referência de comportamento" a consultar: se a
 > pergunta é como o sistema se comporta, a resposta está em `backend/`.
->
-> O backend anterior era AdonisJS. Ele saiu do repositório e continua
-> recuperável pela tag `adonisjs-final` (`git show adonisjs-final:backend/...`).
-> A migração está registrada em
-> [docs/historico/](docs/historico/) — leitura histórica, não guia de trabalho.
 
 ## 🧪 Padrões Obrigatórios de Teste & Estabilidade
 
@@ -63,8 +58,7 @@
 
 5. **Documentação & Roadmap**:
    - Atualize `docs/roadmap.md` marcando itens concluídos com `[x]` e badge
-     `🟢 Concluído`. O `roadmap_backend_rust.md` está encerrado e mora em
-     `docs/historico/`; não escreva nele.
+     `🟢 Concluído`.
    - Consulte [arquitetura.md](docs/arquitetura.md) e [diretrizes_testes.md](docs/diretrizes_testes.md).
 
 6. **Preservação e Regras de Negócio do Módulo `vpn-probe`**:
@@ -72,7 +66,7 @@
      dentro do namespace de rede do WireGuard. Na topologia padrão esse
      namespace é o do **próprio container** — a `wg0` é do processo da API, o
      agente não é registrado no boot e os monitores da VPN rodam locais.
-     `VPN_PROBE_EXTERNAL=true` reativa o arranjo com o agente à parte. O código
+     `VPN_PROBE_EXTERNAL=true` ativa o arranjo com o agente à parte. O código
      do agente, do registrador e do provisionador continua obrigatório: é ele
      que sustenta os dois arranjos.
    - **Token Fallback Padrão (`DEFAULT_VPN_PROBE_TOKEN`)**: o registrador

@@ -18,8 +18,8 @@ pub fn normalize_speed(bps: Option<i64>) -> Option<i64> {
     Some(value)
 }
 
-/// Rótulo legível da velocidade, com a mesma escala e arredondamento do
-/// backend anterior — os textos aparecem em alertas e no feed em tempo real.
+/// Rótulo legível da velocidade, com escala e arredondamento estáveis; os
+/// textos aparecem em alertas e no feed em tempo real.
 #[must_use]
 pub fn format_speed(bps: Option<i64>) -> String {
     let Some(value) = bps.filter(|value| *value > 0) else {
@@ -40,7 +40,7 @@ pub fn format_speed(bps: Option<i64>) -> String {
             }
             // `toFixed` arredonda meio para longe do zero; o `{:.1}` do Rust
             // arredonda meio para o par (1,25 viraria "1.2"). Arredondar antes
-            // mantém os rótulos idênticos aos do backend anterior.
+            // mantém o arredondamento decimal intuitivo para o operador.
             let rounded = (scaled * 10.0).round() / 10.0;
             return format!("{rounded:.1} {suffix}");
         }
@@ -67,7 +67,7 @@ mod tests {
     }
 
     #[test]
-    fn formata_na_escala_do_backend_anterior() {
+    fn formata_na_escala_de_rede() {
         assert_eq!(format_speed(Some(1_000_000_000)), "1 Gbps");
         assert_eq!(format_speed(Some(2_500_000_000)), "2.5 Gbps");
         assert_eq!(format_speed(Some(100_000_000)), "100 Mbps");
@@ -80,7 +80,7 @@ mod tests {
 
     #[test]
     fn arredonda_meio_para_longe_do_zero_como_o_tofixed() {
-        // `format!("{:.1}", 1.25)` daria "1.2"; o backend anterior exibia "1.3".
+        // `format!("{:.1}", 1.25)` daria "1.2"; a apresentação esperada é "1.3".
         assert_eq!(format_speed(Some(1_250_000_000)), "1.3 Gbps");
     }
 

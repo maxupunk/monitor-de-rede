@@ -6,11 +6,10 @@ logger:
   format: json
 
 server:
-  # Porta e binding são fixos de propósito: o mapeamento do compose e o proxy do
-  # Vite apontam os dois para 3333. Deixá-los configuráveis só criaria a chance
-  # de mudar um lado e esquecer o outro.
+  # `APP_PORT` é a porta real do processo. Na bridge o compose a publica em
+  # `APP_EXTERNAL_PORT`; em rede host ela é acessada diretamente.
   binding: 0.0.0.0
-  port: 3333
+  port: {{ get_env(name="APP_PORT", default="3333") }}
   host: {{ get_env(name="APP_URL", default="http://localhost") }}
   middlewares:
     # A SPA é servida por este mesmo processo (`src/spa.rs`), então em produção

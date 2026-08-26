@@ -14,7 +14,7 @@ use std::collections::HashMap;
 
 use chrono::Utc;
 use loco_rs::app::AppContext;
-use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use serde_json::{json, Value};
 
 use crate::{
@@ -208,15 +208,10 @@ async fn notify_flapping(
     }
 }
 
-/// Os eventos abertos do escopo, incluindo a busca legada por `monitor_id`.
+/// Os eventos abertos do escopo canônico.
 async fn open_events_of(ctx: &AppContext, scope_key: &str) -> AppResult<Vec<alert_events::Model>> {
-    let mut target = Condition::any().add(alert_events_entity::Column::ScopeKey.eq(scope_key));
-    if let Some(monitor_id) = AlertScopeKey::monitor_id_of(scope_key) {
-        target = target.add(alert_events_entity::Column::MonitorId.eq(monitor_id));
-    }
-
     Ok(alert_events::Entity::find()
-        .filter(target)
+        .filter(alert_events_entity::Column::ScopeKey.eq(scope_key))
         .filter(alert_events_entity::Column::Status.is_in(AlertStatus::OPEN))
         .all(&ctx.db)
         .await?)

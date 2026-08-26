@@ -1,22 +1,6 @@
-# Stack do NetMonitor — um serviço.
-#
-# Eram oito: `migration`, `server`, `scheduler`, `probe`, `wireguard`,
-# `vpn-probe`, `frontend` (nginx) e `postgres`. O que aconteceu com cada um:
-#
-# | saiu         | para onde foi                                                |
-# |--------------|--------------------------------------------------------------|
-# | `migration`  | `auto_migrate` no boot do próprio servidor                    |
-# | `scheduler`  | laço in-process (`initializers::monitoring`) — ADR 007 pedia  |
-# |              | processo longevo, não container próprio                        |
-# | `probe`      | redundante: enxergava a mesma rede que o servidor              |
-# | `vpn-probe`  | a `wg0` agora é do próprio processo                           |
-# | `wireguard`  | watcher como processo root deste container                    |
-# | `frontend`   | a SPA é servida pela API, mesma porta e mesma origem          |
-# | `postgres`   | SQLite em WAL no volume                                       |
-#
-# Probe remoto continua existindo, e é a única razão legítima para um segundo
-# container: um agente na ponta da rede, onde este servidor não alcança. Sobe
-# com esta mesma imagem — ver `docs/arquitetura.md`.
+# Stack do NetMonitor: aplicação, SPA, scheduler, Syslog e WireGuard no mesmo
+# serviço. Para compartilhar diretamente a rede do host, use o override
+# `docker-compose.host.yml`, selecionável pelo `.env`.
 
 services:
   netmonitor:
@@ -44,7 +28,7 @@ services:
         hard: 65536
     ports:
       # Interface web e API na mesma porta — não há mais duas.
-      - "${APP_EXTERNAL_PORT:-3333}:3333"
+      - "${APP_EXTERNAL_PORT:-3333}:${APP_PORT:-3333}"
       # Mapeada 1:1 de propósito: é a porta que os roteadores usam como
       # Endpoint, e precisa ser a mesma configurada em "Porta UDP" na tela /vpn.
       - "${WG_EXTERNAL_PORT:-51820}:${WG_EXTERNAL_PORT:-51820}/udp"
@@ -72,15 +56,17 @@ services:
       # tradução, e o processo continua sem capability nenhuma — só que aí a
       # porta que o roteador precisa usar é a 5514, e é por isso que a variável
       # existe: é ela que entra nos comandos que a tela gera.
-      - "${SYSLOG_EXTERNAL_PORT:-514}:5514/udp"
-      - "${SYSLOG_EXTERNAL_PORT:-514}:5514/tcp"
+      - "${SYSLOG_EXTERNAL_PORT:-514}:${SYSLOG_LISTEN_PORT:-5514}/udp"
+      - "${SYSLOG_EXTERNAL_PORT:-514}:${SYSLOG_LISTEN_PORT:-5514}/tcp"
     environment:
       LOCO_ENV: production
+      # Porta real da API dentro do container. No modo host é também a porta que
+      # o navegador acessa; na bridge, `APP_EXTERNAL_PORT` pode ser diferente.
+      APP_PORT: ${APP_PORT:-3333}
       # Cifra em repouso dos segredos da VPN. Trocar o valor torna ilegível tudo
-      # que já foi cifrado com o anterior. O fallback para `APP_KEY` (nome
-      # antigo, do AdonisJS) existe para não quebrar quem já tem a variável.
+      # que já foi cifrado com o anterior.
       # Em produção a variável é obrigatória: o boot falha se não estiver definida.
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-${APP_KEY:-}}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
       # Assinatura do JWT. Trocar em produção — e o valor **precisa ser base64
       # válido**: o Loco assina com `EncodingKey::from_base64_secret` (HS512).
       # Um segredo não-base64 não derruba o servidor; ele faz `generate_jwt`
@@ -118,6 +104,10 @@ services:
       # /data/logs.sqlite.
       SYSLOG_ENABLED: ${SYSLOG_ENABLED:-true}
       SYSLOG_DB_URL: ${SYSLOG_DB_URL:-}
+      # Porta real dos listeners sem privilégio dentro do container. O override
+      # de rede host anuncia esta mesma porta aos equipamentos.
+      SYSLOG_UDP_PORT: ${SYSLOG_LISTEN_PORT:-5514}
+      SYSLOG_TCP_PORT: ${SYSLOG_LISTEN_PORT:-5514}
       # A porta que o **roteador** deve usar — a publicada acima, não a de
       # escuta. Entra nos comandos que a tela gera e no acesso automático por
       # SSH. Em `network_mode: host` não há publicação e o valor certo é 5514.

@@ -12,7 +12,7 @@ pub struct TelegramChannel {
 }
 
 impl TelegramChannel {
-    /// Lê `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID`, como no backend anterior.
+    /// Lê `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID` do ambiente.
     #[must_use]
     pub fn from_env() -> Self {
         Self {
@@ -80,7 +80,7 @@ mod tests {
     }
 
     #[test]
-    fn monta_o_mesmo_payload_do_backend_anterior() {
+    fn monta_o_payload_esperado_pelo_telegram() {
         let request = TelegramChannel::new("t", "42").build_request(&mensagem());
         assert_eq!(request.url, "https://api.telegram.org/bott/sendMessage");
         assert_eq!(request.body["chat_id"], "42");

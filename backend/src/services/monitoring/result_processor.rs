@@ -21,8 +21,8 @@ use crate::{
     },
 };
 
-/// Extrai a medida que alimenta os gráficos de latência, na mesma precedência
-/// usada pelo backend anterior para não zerar monitores TCP ou DNS.
+/// Extrai a medida que alimenta os gráficos de latência na precedência que
+/// evita zerar monitores TCP ou DNS.
 #[must_use]
 pub fn pick_latency_metric(metrics: &[CheckMetric]) -> Option<&CheckMetric> {
     const PRECEDENCE: [&str; 5] = [

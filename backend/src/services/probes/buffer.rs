@@ -55,8 +55,8 @@ impl Default for ProbeBuffer {
     }
 }
 
-/// `tmp/probe_buffer.json` no diretório de trabalho — o mesmo caminho do
-/// backend anterior, para uma migração não perder o que estiver pendente.
+/// `tmp/probe_buffer.json` no diretório de trabalho, caminho estável para não
+/// perder itens pendentes durante atualizações.
 fn default_path() -> PathBuf {
     std::env::var("PROBE_BUFFER_PATH").map_or_else(
         |_| {

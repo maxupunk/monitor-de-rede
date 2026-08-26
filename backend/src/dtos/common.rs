@@ -9,7 +9,7 @@
 //! `../frontend/`, que resolve para `backend/frontend/` e não é consumido
 //! por ninguém.
 
-pub use crate::services::shared::pagination::{LucidMeta, LucidPage, MaybePaged};
+pub use crate::services::shared::pagination::{MaybePaged, PaginatedResponse, PaginationMeta};
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;

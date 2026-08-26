@@ -673,8 +673,8 @@ mod tests {
     fn interface_sem_nome_recebe_rotulo_derivado_do_indice() {
         let interfaces = parse_interfaces([linha(5, 7, SnmpValue::Number(1_000))], []);
         assert_eq!(interfaces[0].if_name, "eth7");
-        // Sem as colunas de status, o padrão é "1" (up) nos dois — é o que o
-        // backend anterior assumia para não inventar queda de link.
+        // Sem as colunas de status, o padrão é "1" (up) nos dois para não
+        // inventar queda de link.
         assert_eq!(interfaces[0].if_admin_status, Some(1));
         assert_eq!(interfaces[0].if_oper_status, Some(1));
     }

@@ -24,7 +24,7 @@ pub const MAX_ATTEMPTS: u32 = 10;
 /// (`SQLITE_CONSTRAINT_UNIQUE`), sem acoplar o serviço ao driver.
 ///
 /// O `sea-orm` não expõe o código do erro de forma portátil, então a checagem
-/// é pelo texto — o mesmo critério (e a mesma fragilidade) do backend anterior.
+/// é pelo texto, com a limitação documentada abaixo.
 #[must_use]
 pub fn is_unique_violation(error: &DbErr) -> bool {
     let message = error.to_string().to_lowercase();

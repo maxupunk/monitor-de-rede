@@ -43,7 +43,7 @@ use crate::{
         preferences,
         shared::{
             errors::{AppError, AppResult},
-            pagination::{paginate_compat, MaybePaged},
+            pagination::{paginate, MaybePaged},
         },
         snmp::service::{sync_monitor_intervals, DEFAULT_SNMP_POLL_INTERVAL_SECONDS},
         syslog::hints,
@@ -718,7 +718,7 @@ async fn metrics(
         .order_by_desc(metrics_entity::Column::RecordedAt);
     let body = if let Some(page) = query.page {
         MaybePaged::Page(
-            paginate_compat(&ctx.db, base, page, query.limit.unwrap_or(20), |metric| {
+            paginate(&ctx.db, base, page, query.limit.unwrap_or(20), |metric| {
                 metric_json(metric, &interface_names)
             })
             .await?,
@@ -759,7 +759,7 @@ async fn events(
         .order_by_desc(alert_events::Column::CreatedAt);
     let body = if let Some(page) = query.page {
         MaybePaged::Page(
-            paginate_compat(&ctx.db, base, page, query.limit.unwrap_or(20), event_json).await?,
+            paginate(&ctx.db, base, page, query.limit.unwrap_or(20), event_json).await?,
         )
     } else {
         MaybePaged::List(

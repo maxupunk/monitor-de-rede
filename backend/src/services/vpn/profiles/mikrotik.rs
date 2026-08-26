@@ -207,7 +207,7 @@ mod tests {
     #[test]
     fn so_o_conteudo_e_ascii_o_nome_do_arquivo_preserva_o_titulo() {
         // O console do RouterOS é ASCII, mas o nome do arquivo é só rótulo de
-        // download — mantê-lo igual ao do backend anterior evita divergência.
+        // download e pode preservar o nome original do equipamento.
         let mut context = contexto();
         context.peer_name = "Roteador São João".into();
         let artifact = MikrotikProfileGenerator.generate(&context);

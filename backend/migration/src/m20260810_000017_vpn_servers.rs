@@ -17,7 +17,7 @@ impl MigrationTrait for Migration {
             .col(integer("listen_port").default(51820).take())
             .col(string_null("public_endpoint"))
             .col(string("public_key"))
-            // Cifrada em repouso com a APP_KEY — ver `services::shared::crypto`.
+            // Cifrada em repouso com ENCRYPTION_KEY — ver `services::shared::crypto`.
             // `text` e não `string`: o base64 de nonce+criptograma passa dos 255
             // caracteres com folga.
             .col(text("private_key_encrypted"))

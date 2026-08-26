@@ -240,7 +240,7 @@ const OPEN_AS_ADMIN: &str = "menu Iniciar > digite \"powershell\" > botao direit
 /// silenciosa. Como scriptblock, é um único comando: o primeiro `throw` aborta
 /// tudo.
 ///
-/// O texto é ASCII puro — o console do PowerShell 5.1 roda em codepage legada e
+/// O texto é ASCII puro — o console do PowerShell 5.1 roda em codepage antiga e
 /// embaralha acentos colados, inclusive dentro das mensagens de erro.
 #[must_use]
 pub fn windows_winget_variant(context: &PeerConfigContext, conf_content: &str) -> ArtifactVariant {
@@ -295,20 +295,6 @@ pub fn windows_winget_variant(context: &PeerConfigContext, conf_content: &str) -
         "    & $WgExe /uninstalltunnelservice $Tunnel".to_string(),
         "    Start-Sleep -Seconds 3".to_string(),
         "  }".to_string(),
-        "  $Legacy = Join-Path $env:ProgramData 'NetMonitor'".to_string(),
-        "  if (Test-Path $Legacy) {".to_string(),
-        "    # Versoes antigas deixavam o perfil aqui com uma ACL de leitura que nao".to_string(),
-        "    # inclui DELETE - nem o administrador apagava sem tomar posse antes.".to_string(),
-        "    $stale = @(Get-ChildItem $Legacy -Force -Recurse -ErrorAction SilentlyContinue |"
-            .to_string(),
-        "      ForEach-Object { $_.FullName }) + @($Legacy)".to_string(),
-        "    foreach ($item in $stale) {".to_string(),
-        "      takeown /f $item /a | Out-Null".to_string(),
-        "      icacls $item /reset | Out-Null".to_string(),
-        "    }".to_string(),
-        "    Remove-Item -Path $Legacy -Recurse -Force -ErrorAction SilentlyContinue".to_string(),
-        "  }".to_string(),
-        String::new(),
         "  # 4/4 - Grava o perfil no cofre do proprio WireGuard".to_string(),
         "  # O gerenciador monitora essa pasta e lista o tunel na hora, sem reiniciar.".to_string(),
         "  # Ao ativar, ele cria o servico (que sobe no boot) e cifra o perfil como".to_string(),

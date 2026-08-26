@@ -7,8 +7,8 @@ use crate::services::notifications::contracts::{
     ChannelRequest, HttpChannelSpec, NotificationMessage, Severity,
 };
 
-/// Cores do embed, em decimal — os mesmos inteiros do backend anterior, para
-/// o histórico do canal continuar visualmente coerente.
+/// Cores do embed, em decimal, mantidas estáveis para o histórico do canal
+/// continuar visualmente coerente.
 const COLOR_CRITICAL: u32 = 15_158_332;
 const COLOR_WARNING: u32 = 16_776_960;
 const COLOR_INFO: u32 = 3_447_003;

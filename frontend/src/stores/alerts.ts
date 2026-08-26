@@ -66,7 +66,7 @@ export interface AlertRuleTemplate {
    * O dispositivo do escopo publica o campo que a condicao compara.
    *
    * Sempre `true` no catalogo global — la ainda nao ha dispositivo escolhido.
-   * Opcional para tolerar um backend anterior a esta versao.
+   * Opcional porque nem todo contexto possui um dispositivo selecionado.
    */
   applicable?: boolean
 }

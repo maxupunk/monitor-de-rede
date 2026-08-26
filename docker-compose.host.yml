@@ -1,0 +1,18 @@
+# Override opcional para receber a rede do host sem NAT da bridge.
+#
+# Ative pelo `.env`:
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.host.yml
+#   APP_PORT=3334
+#
+# `!reset` remove publicação de portas e sysctls do namespace do container,
+# opções incompatíveis com `network_mode: host`.
+services:
+  netmonitor:
+    network_mode: host
+    ports: !reset []
+    sysctls: !reset {}
+    environment:
+      # Sem mapeamento, a porta escutada é também a que entra nos comandos dos
+      # roteadores. Pode ser alterada por SYSLOG_LISTEN_PORT no `.env`.
+      SYSLOG_EXTERNAL_PORT: ${SYSLOG_LISTEN_PORT:-5514}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:${APP_PORT:-3333}}

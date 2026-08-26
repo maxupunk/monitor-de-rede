@@ -14,7 +14,7 @@
 > (arquitetura SOLID do motor e UX dos novos estados).
 >
 > **Princípio de execução (registrado na decisão de implementar a Fase 1)**:
-> cada fase é implementada **sem deixar legado** — os pré-requisitos
+> cada fase é implementada **sem manter caminhos residuais** — os pré-requisitos
 > arquiteturais são pagos junto com a feature (máquina de estados pura, enum
 > de status, contratos tipados), código morto ou duplicado é removido na
 > mesma entrega, e a validação completa (backend e frontend) é critério de
@@ -174,7 +174,7 @@ A menor mudança que já elimina o par 🚨+✅ a cada oscilação.
 > **Entrega (2026-08-15)**: migration
 > `m20260815_000001_alert_rules_recovery_window`; máquina de estados pura em
 > `services/alerts/state_machine.rs` (Clock injetável, 12 testes de tabela);
-> `enum AlertStatus` tipado substituindo as consts string (sem legado);
+> `enum AlertStatus` tipado substituindo as consts string (sem caminho duplicado);
 > `manager.rs` virou orquestrador; `feed.rs` centraliza os payloads SSE
 > (`alert:updated` novo); notificação de resolução com resumo do episódio;
 > `close_scope` para fechamento administrativo (monitor desativado não fica

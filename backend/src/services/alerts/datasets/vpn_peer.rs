@@ -191,7 +191,7 @@ mod tests {
     }
 
     #[test]
-    fn transicoes_do_backend_anterior() {
+    fn classifica_todas_as_transicoes_de_status() {
         assert_eq!(
             resolve_transition(Some(Connected), Disconnected),
             Some(vpn_status_transition::DISCONNECTED)

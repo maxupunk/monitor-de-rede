@@ -225,7 +225,7 @@ pub fn serialize_event(
     let device = AlertRelations::summary(&relations.devices, event.device_id);
     let monitor = AlertRelations::summary(&relations.monitors, event.monitor_id);
 
-    // Precedência do backend anterior: título gravado no disparo, senão
+    // Precedência de apresentação: título gravado no disparo, senão
     // "<regra> — <alvo>", senão o rótulo genérico. O nome da regra pode vir do
     // `data` quando a regra já foi apagada — é o que preserva o histórico.
     let title = data_string("title").unwrap_or_else(|| {

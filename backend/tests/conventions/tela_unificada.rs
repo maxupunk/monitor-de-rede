@@ -21,6 +21,19 @@ fn frontend() -> PathBuf {
         .join("frontend/src")
 }
 
+fn raiz() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("raiz do repositório")
+        .to_path_buf()
+}
+
+fn ler_raiz(relativo: &str) -> String {
+    let caminho = raiz().join(relativo);
+    std::fs::read_to_string(&caminho)
+        .unwrap_or_else(|erro| panic!("não foi possível ler {}: {erro}", caminho.display()))
+}
+
 fn ler(relativo: &str) -> String {
     let caminho = frontend().join(relativo);
     std::fs::read_to_string(&caminho)
@@ -141,7 +154,9 @@ fn o_formulario_identifica_ao_completar_o_ip_e_preserva_campos_sem_evidencia() {
             && ativacao.contains("serverAddress.value = dicas?.serverAddress?.trim()")
             && ativacao.contains("normalizeComboboxAddress(value)")
             && ativacao.contains("{ immediate: true }")
-            && ativacao.contains("resolveProvisionOperatingSystem"),
+            && ativacao.contains("resolveProvisionOperatingSystem")
+            && ativacao.contains("result.identifiedHostname")
+            && ativacao.contains("Identidade reconhecida"),
         "a ativação precisa inicializar o snapshot na montagem, preservar a sugestão e aceitar endereço livre no mesmo campo"
     );
 
@@ -152,6 +167,33 @@ fn o_formulario_identifica_ao_completar_o_ip_e_preserva_campos_sem_evidencia() {
             && store.contains("PROVISION_REQUEST_TIMEOUT_MS = 65_000")
             && store.contains("{ timeoutMs: PROVISION_REQUEST_TIMEOUT_MS }"),
         "o proxy não pode esconder o endereço externo e a ativação não pode herdar o timeout curto das APIs comuns"
+    );
+}
+
+#[test]
+fn o_compose_oferece_bridge_e_host_com_portas_coerentes() {
+    let compose = ler_raiz("docker-compose.yml");
+    let host = ler_raiz("docker-compose.host.yml");
+    let production = ler_raiz("backend/config/production.yaml");
+    let healthcheck = ler_raiz("docker/healthcheck.sh");
+
+    assert!(
+        compose.contains("${APP_EXTERNAL_PORT:-3333}:${APP_PORT:-3333}")
+            && compose.contains("SYSLOG_UDP_PORT: ${SYSLOG_LISTEN_PORT:-5514}")
+            && compose.contains("SYSLOG_TCP_PORT: ${SYSLOG_LISTEN_PORT:-5514}"),
+        "a bridge precisa separar porta publicada de porta real"
+    );
+    assert!(
+        host.contains("network_mode: host")
+            && host.contains("ports: !reset []")
+            && host.contains("sysctls: !reset {}")
+            && host.contains("SYSLOG_EXTERNAL_PORT: ${SYSLOG_LISTEN_PORT:-5514}"),
+        "o override host precisa remover opções incompatíveis e anunciar a porta escutada"
+    );
+    assert!(
+        production.contains("get_env(name=\"APP_PORT\", default=\"3333\")")
+            && healthcheck.contains("${APP_PORT:-3333}"),
+        "servidor e healthcheck precisam usar a mesma APP_PORT"
     );
 }
 

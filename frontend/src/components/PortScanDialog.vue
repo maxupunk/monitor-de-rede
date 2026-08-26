@@ -179,7 +179,7 @@
         <div v-if="results !== null">
           <div class="text-caption text-grey-darken-1 mb-2">
             {{ openCount }} porta(s) aberta(s)<span v-if="openFilteredCount > 0"
-              >, {{ openFilteredCount }} aberta(s)/filtrada(s)</span
+            >, {{ openFilteredCount }} aberta(s)/filtrada(s)</span
             >
             de {{ results.length }} escaneada(s)
           </div>

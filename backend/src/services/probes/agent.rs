@@ -38,7 +38,7 @@ pub struct ProbeAgentOptions {
     pub version: Option<String>,
 }
 
-/// Precedência do token, na ordem do backend anterior: opção da CLI,
+/// Precedência do token: opção da CLI,
 /// `PROBE_TOKEN`, `VPN_PROBE_TOKEN` e por fim o token compartilhado do
 /// vpn-probe. O último degrau é o que permite subir o container do túnel sem
 /// configuração nenhuma.
@@ -338,7 +338,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn a_precedencia_do_token_segue_o_backend_anterior() {
+    fn a_precedencia_do_token_respeita_cli_e_ambiente() {
         std::env::set_var("PROBE_TOKEN", "do-ambiente");
         std::env::set_var("VPN_PROBE_TOKEN", "do-vpn");
         assert_eq!(resolve_token(None), "do-ambiente");
