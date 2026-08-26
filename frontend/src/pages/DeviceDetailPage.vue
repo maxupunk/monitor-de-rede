@@ -181,12 +181,7 @@
 
           <!-- Aba Logs: syslog recebido deste dispositivo -->
           <v-window-item value="logs">
-            <DeviceLogsTab
-              ref="logsTabRef"
-              :device-id="deviceId"
-              @open-auto-setup="autoSetupDialog = true"
-              @open-setup="setupDialog = true"
-            />
+            <DeviceLogsTab :device-id="deviceId" />
           </v-window-item>
 
           <!-- Aba VPN -->
@@ -487,15 +482,6 @@
       :device-to-edit="detailStore.device"
       @saved="onDeviceSaved"
     />
-
-    <!-- Modais da aba Logs -->
-    <SyslogAutoSetupDialog
-      v-model="autoSetupDialog"
-      :device-id="deviceId"
-      :device-name="detailStore.device?.name ?? ''"
-      :host="detailStore.device?.ipAddress"
-    />
-    <SyslogSetupDialog v-model="setupDialog" />
   </div>
 </template>
 
@@ -532,7 +518,6 @@ const detailStore = useDeviceDetailStore()
 const vpnStore = useVpnStore()
 const logsStore = useLogsStore()
 const activeTab = ref('overview')
-const logsTabRef = ref<InstanceType<typeof DeviceLogsTab> | null>(null)
 
 const can = computed(() => {
   const caps = detailStore.capabilities
@@ -641,9 +626,6 @@ onMounted(() => {
   }
 })
 
-const autoSetupDialog = ref(false)
-const setupDialog = ref(false)
-
 watch(
   [abasAplicaveis, () => route.query.tab],
   ([abas, pedida]) => {
@@ -655,7 +637,6 @@ watch(
 
 watch(activeTab, (aba, anterior) => {
   if (aba === 'logs') {
-    logsTabRef.value?.applyLogFilters()
     void logsStore.fetchSources()
   } else if (anterior === 'logs') {
     logsStore.stopTail()

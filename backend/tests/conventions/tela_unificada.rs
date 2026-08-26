@@ -89,6 +89,41 @@ fn a_aba_de_logs_do_dispositivo_usa_a_mesma_store_e_a_mesma_tabela() {
 }
 
 #[test]
+fn a_aba_do_dispositivo_prioriza_monitores_ativos_sem_mutar_a_store() {
+    let pagina = ler("components/devices/tabs/DeviceMonitorsTab.vue");
+    assert!(
+        pagina.contains(":monitors=\"orderedMonitors\"")
+            && pagina.contains("[...detailStore.monitors].sort")
+            && pagina.contains("second.isEnabled !== false"),
+        "a aba do dispositivo precisa listar ativos primeiro sobre uma cópia da store"
+    );
+}
+
+#[test]
+fn a_ativacao_de_syslog_so_comeca_no_cadastro_do_dispositivo() {
+    let cadastro = ler("components/DeviceDialog.vue");
+    assert!(
+        cadastro.contains("Configurar envio de logs (Syslog)")
+            && cadastro.contains("SyslogAutoSetupDialog"),
+        "o cadastro precisa oferecer e encadear a configuração automática de syslog"
+    );
+
+    for tela in [
+        "pages/LogsPage.vue",
+        "pages/DeviceDetailPage.vue",
+        "components/devices/tabs/DeviceLogsTab.vue",
+    ] {
+        let conteudo = ler(tela);
+        assert!(
+            !conteudo.contains("SyslogAutoSetupDialog")
+                && !conteudo.contains("SyslogSetupDialog")
+                && !conteudo.contains("Configurar envio"),
+            "{tela} voltou a oferecer configuração fora do cadastro"
+        );
+    }
+}
+
+#[test]
 fn o_formulario_de_regra_e_um_componente_so_nas_duas_telas() {
     // A Fase 6 pede "criar ou editar uma regra usa um único componente
     // compartilhado nas duas páginas". Um formulário inline em `AlertsPage`

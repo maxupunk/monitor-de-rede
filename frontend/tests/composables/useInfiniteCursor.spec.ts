@@ -96,6 +96,48 @@ describe('useInfiniteCursor', () => {
     expect(list.scrollKey.value).toBe(1)
   })
 
+  it('ignora a resposta anterior quando o filtro muda durante o carregamento', async () => {
+    let resolveOld: (value: unknown) => void = () => {}
+    let resolveCurrent: (value: unknown) => void = () => {}
+    getMock
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveOld = resolve
+          })
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveCurrent = resolve
+          })
+      )
+
+    let endpoint = '/logs?deviceId=1'
+    const list = useInfiniteCursor<Log>(() => endpoint)
+    const oldLoad = list.load({ done: vi.fn() })
+
+    endpoint = '/logs?deviceId=2'
+    list.reset()
+    const currentLoad = list.load({ done: vi.fn() })
+
+    resolveCurrent({
+      data: [{ id: 'device-2', message: 'current' }],
+      meta: { nextCursor: null, hasMore: false, limit: 50, from: '', to: '' },
+    })
+    await currentLoad
+
+    resolveOld({
+      data: [{ id: 'device-1', message: 'stale' }],
+      meta: { nextCursor: null, hasMore: false, limit: 50, from: '', to: '' },
+    })
+    await oldLoad
+
+    expect(getMock).toHaveBeenNthCalledWith(1, '/logs?deviceId=1&limit=50')
+    expect(getMock).toHaveBeenNthCalledWith(2, '/logs?deviceId=2&limit=50')
+    expect(list.items.value).toEqual([{ id: 'device-2', message: 'current' }])
+  })
+
   it('empilha novas entradas no topo sem duplicar', () => {
     const list = useInfiniteCursor<Log>(() => '/logs')
     list.items.value = [

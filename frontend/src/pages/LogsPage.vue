@@ -16,10 +16,6 @@
           </v-icon>
           <span class="hidden-xs">{{ logsStore.tailing ? 'Ao vivo' : 'Acompanhar' }}</span>
         </v-btn>
-        <v-btn color="primary" variant="tonal" @click="openSetup">
-          <v-icon start>mdi-cog-outline</v-icon>
-          <span class="hidden-xs">Configurar envio</span>
-        </v-btn>
       </template>
     </PageHeader>
 
@@ -138,7 +134,6 @@
     />
 
     <LogSourcesDialog v-model="sourcesDialog" />
-    <SyslogSetupDialog v-model="setupDialog" />
   </div>
 </template>
 
@@ -147,7 +142,6 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import LogTable from '@/components/logs/LogTable.vue'
 import LogSourcesDialog from '@/components/logs/LogSourcesDialog.vue'
-import SyslogSetupDialog from '@/components/logs/SyslogSetupDialog.vue'
 import { useLogsStore, SEVERITY_OPTIONS, WINDOW_OPTIONS, type LogFilters } from '@/stores/logs'
 import { useDevicesStore } from '@/stores/devices'
 
@@ -159,7 +153,6 @@ const deviceId = ref<number | null>(null)
 const severity = ref<number | null>(null)
 const hours = ref<number | null>(24)
 const sourcesDialog = ref(false)
-const setupDialog = ref(false)
 
 const severityOptions = SEVERITY_OPTIONS
 const windowOptions = WINDOW_OPTIONS
@@ -199,10 +192,6 @@ function openSources(): void {
   sourcesDialog.value = true
 }
 
-function openSetup(): void {
-  setupDialog.value = true
-}
-
 onMounted(() => {
   void devicesStore.fetchDevices()
   void logsStore.fetchSources()
@@ -211,4 +200,8 @@ onMounted(() => {
 // O `EventSource` sobrevive à troca de rota se ninguém o fechar — e ficaria
 // empilhando linhas numa lista que não está mais na tela.
 onUnmounted(() => logsStore.stopTail())
+
+// A store também serve à aba de um dispositivo. A página global sempre
+// assume explicitamente o escopo global antes da primeira renderização.
+logsStore.clearFilters()
 </script>

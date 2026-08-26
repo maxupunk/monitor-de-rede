@@ -40,44 +40,6 @@
       <DeviceHealthSummary :metrics="detailStore.metrics" />
     </template>
 
-    <!-- Estabilidade dos monitores -->
-    <template v-if="detailStore.monitors.length > 0">
-      <v-divider class="my-6" />
-      <div class="text-subtitle-1 font-weight-bold mb-3 d-flex align-center ga-2">
-        <v-icon color="primary">mdi-chart-line</v-icon>
-        Estabilidade dos Monitores (24h)
-      </div>
-      <v-row>
-        <v-col v-for="monitor in monitorsWithUptime" :key="monitor.id" cols="12" sm="6" lg="4">
-          <v-card variant="outlined" class="rounded-lg pa-4">
-            <div class="d-flex align-center justify-space-between mb-2">
-              <div class="font-weight-medium text-truncate" :title="monitor.name">
-                {{ monitor.name }}
-              </div>
-              <v-chip
-                :color="getUptimeColor(monitor.uptime?.uptimePercentage)"
-                size="small"
-                variant="tonal"
-              >
-                {{ formatUptime(monitor.uptime?.uptimePercentage) }}%
-              </v-chip>
-            </div>
-            <div class="text-caption text-grey">
-              {{ monitor.uptime?.totalChecks ?? 0 }} checagens ·
-              {{ monitor.uptime?.upChecks ?? 0 }} up · {{ monitor.uptime?.downChecks ?? 0 }} down
-            </div>
-            <v-progress-linear
-              :model-value="monitor.uptime?.uptimePercentage ?? 100"
-              :color="getUptimeColor(monitor.uptime?.uptimePercentage)"
-              height="6"
-              rounded
-              class="mt-2"
-            ></v-progress-linear>
-          </v-card>
-        </v-col>
-      </v-row>
-    </template>
-
     <!-- Resumo de tráfego por interface monitorada -->
     <div
       v-if="interfaceTrafficSummaries.length > 0"
@@ -200,6 +162,44 @@
         </tbody>
       </v-table>
     </div>
+
+    <!-- Estabilidade dos monitores -->
+    <template v-if="detailStore.monitors.length > 0">
+      <v-divider class="my-6" />
+      <div class="text-subtitle-1 font-weight-bold mb-3 d-flex align-center ga-2">
+        <v-icon color="primary">mdi-chart-line</v-icon>
+        Estabilidade dos Monitores (24h)
+      </div>
+      <v-row>
+        <v-col v-for="monitor in monitorsWithUptime" :key="monitor.id" cols="12" sm="6" lg="4">
+          <v-card variant="outlined" class="rounded-lg pa-4">
+            <div class="d-flex align-center justify-space-between mb-2">
+              <div class="font-weight-medium text-truncate" :title="monitor.name">
+                {{ monitor.name }}
+              </div>
+              <v-chip
+                :color="getUptimeColor(monitor.uptime?.uptimePercentage)"
+                size="small"
+                variant="tonal"
+              >
+                {{ formatUptime(monitor.uptime?.uptimePercentage) }}%
+              </v-chip>
+            </div>
+            <div class="text-caption text-grey">
+              {{ monitor.uptime?.totalChecks ?? 0 }} checagens ·
+              {{ monitor.uptime?.upChecks ?? 0 }} up · {{ monitor.uptime?.downChecks ?? 0 }} down
+            </div>
+            <v-progress-linear
+              :model-value="monitor.uptime?.uptimePercentage ?? 100"
+              :color="getUptimeColor(monitor.uptime?.uptimePercentage)"
+              height="6"
+              rounded
+              class="mt-2"
+            ></v-progress-linear>
+          </v-card>
+        </v-col>
+      </v-row>
+    </template>
 
     <!-- Alerta de SNMP configurado sem resposta -->
     <v-alert

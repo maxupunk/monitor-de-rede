@@ -182,6 +182,34 @@ async fn os_filtros_recortam_o_resultado() {
 
 #[tokio::test]
 #[serial]
+async fn o_filtro_de_dispositivo_nunca_traz_logs_de_outro_equipamento() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let logs = logs_db(&ctx);
+        grava(&logs, Some(9_001), 6, 2, "log do dispositivo um").await;
+        grava(&logs, Some(9_002), 6, 1, "log do dispositivo dois").await;
+
+        let resposta = request.get("/api/logs?deviceId=9002").await;
+        assert_eq!(resposta.status_code(), 200, "{}", resposta.text());
+        let corpo: serde_json::Value = serde_json::from_str(&resposta.text()).unwrap();
+        let linhas = corpo["data"].as_array().unwrap();
+
+        assert_eq!(
+            linhas.len(),
+            1,
+            "um log de outro dispositivo vazou: {linhas:?}"
+        );
+        assert_eq!(linhas[0]["deviceId"], 9_002);
+        assert_eq!(linhas[0]["message"], "log do dispositivo dois");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
 async fn a_janela_devolvida_mostra_o_teto_aplicado() {
     // Quem pede um ano recebe sete dias. O `meta` diz qual janela valeu, para o
     // usuário não concluir que o log sumiu.

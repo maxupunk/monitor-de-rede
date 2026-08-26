@@ -1,25 +1,5 @@
 <template>
   <div>
-    <!-- Chamada para ação enquanto o equipamento nunca enviou nada -->
-    <v-alert v-if="logsNaoConfigurados" type="info" variant="tonal" border="start" class="mb-4">
-      <div class="d-flex align-center flex-wrap ga-3">
-        <div class="flex-grow-1">
-          <div class="font-weight-bold mb-1">
-            Este equipamento ainda não envia log para o servidor.
-          </div>
-          O envio de syslog é configurado no próprio roteador. O servidor pode fazer isso sozinho:
-          ele acessa o equipamento, aplica os comandos e confirma a chegada da primeira mensagem.
-        </div>
-        <div class="d-flex ga-2">
-          <v-btn color="primary" variant="flat" @click="emit('openAutoSetup')">
-            <v-icon start>mdi-flash</v-icon>
-            Ativar log
-          </v-btn>
-          <v-btn color="primary" variant="tonal" @click="emit('openSetup')"> Ver comandos </v-btn>
-        </div>
-      </div>
-    </v-alert>
-
     <!-- Mascaramento do Docker -->
     <v-alert
       v-if="logsStore.natMasking"
@@ -66,10 +46,6 @@
         @update:model-value="applyLogFilters"
       ></v-select>
       <v-spacer></v-spacer>
-      <v-btn color="primary" variant="tonal" size="small" @click="emit('openAutoSetup')">
-        <v-icon start>mdi-flash</v-icon>
-        <span class="hidden-xs">Ativar log</span>
-      </v-btn>
       <v-btn
         :color="logsStore.tailing ? 'success' : 'primary'"
         :variant="logsStore.tailing ? 'flat' : 'tonal'"
@@ -84,7 +60,7 @@
     </div>
 
     <LogTable
-      :entries="logsStore.entries"
+      :entries="deviceEntries"
       :scroll-key="logsStore.scrollKey"
       :load="logsStore.load"
       :error="logsStore.error"
@@ -95,17 +71,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import LogTable from '@/components/logs/LogTable.vue'
 import { useLogsStore, SEVERITY_OPTIONS, WINDOW_OPTIONS } from '@/stores/logs'
 
 const props = defineProps<{
   deviceId: number
-}>()
-
-const emit = defineEmits<{
-  (e: 'openAutoSetup'): void
-  (e: 'openSetup'): void
 }>()
 
 const logsStore = useLogsStore()
@@ -126,11 +97,15 @@ function applyLogFilters(): void {
   if (estavaAoVivo) logsStore.startTail()
 }
 
-const logsNaoConfigurados = computed(() => {
-  if (!logsStore.sourcesLoaded) return false
-  if (logsStore.sources.some((fonte) => fonte.deviceId === props.deviceId)) return false
-  return logsStore.isEmpty
-})
+// Defesa de apresentação: mesmo que uma resposta antiga chegue durante uma
+// troca de rota, uma linha de outro equipamento nunca é renderizada aqui.
+const deviceEntries = computed(() =>
+  logsStore.entries.filter((entry) => entry.deviceId === props.deviceId)
+)
+
+// Define o escopo antes da primeira renderização e também ao navegar de um
+// detalhe diretamente para outro reutilizando a mesma instância do componente.
+watch(() => props.deviceId, applyLogFilters, { immediate: true })
 
 defineExpose({
   applyLogFilters,

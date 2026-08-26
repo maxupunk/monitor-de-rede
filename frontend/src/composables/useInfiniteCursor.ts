@@ -72,20 +72,32 @@ export function useInfiniteCursor<T>(
    * trava, uma resposta lenta viraria duas requisições com o mesmo cursor e as
    * mesmas linhas apareceriam duas vezes.
    */
-  let loading = false
+  let generation = 0
+  let loadingGeneration: number | null = null
 
   async function load({ done }: { done: (status: LoadStatus) => void }): Promise<void> {
-    if (loading) {
+    const requestGeneration = generation
+    if (loadingGeneration === requestGeneration) {
       done('ok')
       return
     }
-    loading = true
+    loadingGeneration = requestGeneration
     try {
-      const separator = endpoint().includes('?') ? '&' : '?'
-      const query = cursor.value ? `&cursor=${encodeURIComponent(cursor.value)}` : ''
+      const currentEndpoint = endpoint()
+      const separator = currentEndpoint.includes('?') ? '&' : '?'
+      const currentCursor = cursor.value
+      const query = currentCursor ? `&cursor=${encodeURIComponent(currentCursor)}` : ''
       const response = await apiService.get<CursorResponse<T>>(
-        `${endpoint()}${separator}limit=${limit}${query}`
+        `${currentEndpoint}${separator}limit=${limit}${query}`
       )
+
+      // Um reset pode trocar o dispositivo enquanto a requisição anterior
+      // ainda está em voo. A resposta antiga nunca pode contaminar o novo
+      // escopo da lista.
+      if (requestGeneration !== generation) {
+        done('ok')
+        return
+      }
 
       const batch = Array.isArray(response.data) ? response.data : []
       if (batch.length > 0) items.value.push(...batch)
@@ -100,15 +112,21 @@ export function useInfiniteCursor<T>(
       cursor.value = next
       done(next ? 'ok' : 'empty')
     } catch (err: unknown) {
+      if (requestGeneration !== generation) {
+        done('ok')
+        return
+      }
       error.value = err instanceof Error ? err.message : 'Falha ao carregar os registros.'
       console.error(`Erro ao carregar ${options.label ?? endpoint()}:`, err)
       done('error')
     } finally {
-      loading = false
+      if (loadingGeneration === requestGeneration) loadingGeneration = null
     }
   }
 
   function reset(): void {
+    generation++
+    loadingGeneration = null
     items.value = []
     cursor.value = null
     window.value = null

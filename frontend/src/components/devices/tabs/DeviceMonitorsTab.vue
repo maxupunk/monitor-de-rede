@@ -10,7 +10,7 @@
       {{ detailStore.capabilities.reachMonitorBlockedReason }}
     </v-alert>
     <MonitorsTable
-      :monitors="detailStore.monitors"
+      :monitors="orderedMonitors"
       :loading="detailStore.loading"
       variant="device"
       no-data-text="Nenhum monitor configurado para este equipamento. Use &quot;Novo monitor&quot; ou &quot;Configurar Monitoramento&quot; para descobrir automaticamente."
@@ -21,6 +21,7 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useDeviceDetailStore, type DeviceMonitor } from '@/stores/deviceDetail'
 import MonitorsTable from '@/components/MonitorsTable.vue'
 
@@ -30,4 +31,16 @@ const emit = defineEmits<{
 }>()
 
 const detailStore = useDeviceDetailStore()
+
+/**
+ * A ordem pertence a esta aba, não à store compartilhada: a página global
+ * de monitores continua livre para aplicar os próprios filtros e ordenação.
+ * A cópia evita mutar a resposta do dispositivo e o sort estável preserva a
+ * ordem original dentro dos grupos ativo e inativo.
+ */
+const orderedMonitors = computed(() =>
+  [...detailStore.monitors].sort(
+    (first, second) => Number(second.isEnabled !== false) - Number(first.isEnabled !== false)
+  )
+)
 </script>

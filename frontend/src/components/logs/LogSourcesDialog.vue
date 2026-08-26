@@ -123,8 +123,8 @@
           <v-icon size="48" color="grey-lighten-1" class="mb-2">mdi-lan-disconnect</v-icon>
           <div class="text-subtitle-2 font-weight-medium">Nenhuma origem enviou syslog ainda</div>
           <div class="text-caption">
-            Configure os roteadores para enviarem para este servidor — o botão "Configurar envio"
-            traz os comandos prontos.
+            No cadastro de um novo dispositivo, marque “Configurar envio de logs (Syslog)” para o
+            NetMonitor detectar e aplicar a configuração automaticamente.
           </div>
         </div>
       </v-card-text>

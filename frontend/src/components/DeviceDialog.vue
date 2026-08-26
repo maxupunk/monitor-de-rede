@@ -259,6 +259,27 @@
               </v-alert>
             </v-col>
 
+            <v-col v-if="!deviceToEdit" cols="12">
+              <v-checkbox
+                v-model="configureLogsAfterCreate"
+                label="Configurar envio de logs (Syslog)"
+                color="primary"
+                hide-details
+              ></v-checkbox>
+              <v-alert
+                v-if="configureLogsAfterCreate"
+                type="info"
+                variant="tonal"
+                density="compact"
+                class="mt-2 rounded-lg"
+                icon="mdi-text-box-check-outline"
+              >
+                Depois do cadastro, o sistema reaproveita o IP, o sistema, o fabricante e o modelo
+                informados para detectar a melhor configuração. Você só precisará fornecer a
+                credencial de acesso, usada uma única vez e nunca armazenada.
+              </v-alert>
+            </v-col>
+
             <v-col cols="12">
               <v-checkbox
                 v-model="formModel.snmpEnabled"
@@ -349,7 +370,9 @@
       </v-card-text>
       <v-card-actions class="justify-end">
         <v-btn variant="text" @click="close">Cancelar</v-btn>
-        <v-btn color="primary" :loading="saving" @click="save">Salvar</v-btn>
+        <v-btn color="primary" :loading="saving" @click="save">
+          {{ configureLogsAfterCreate && !deviceToEdit ? 'Cadastrar e configurar logs' : 'Salvar' }}
+        </v-btn>
       </v-card-actions>
     </v-card>
 
@@ -398,6 +421,14 @@
       </v-card>
     </v-dialog>
   </v-dialog>
+
+  <SyslogAutoSetupDialog
+    v-if="createdForLogSetup"
+    v-model="autoSetupDialog"
+    :device-id="createdForLogSetup.id"
+    :device-name="createdForLogSetup.name"
+    :host="createdForLogSetup.ipAddress"
+  />
 </template>
 
 <script setup lang="ts">
@@ -407,6 +438,7 @@ import { useSitesStore, type Site } from '@/stores/sites'
 import { useSnmpTestStore } from '@/stores/snmpTest'
 import { usePreferencesStore } from '@/stores/preferences'
 import SiteDialog from '@/components/SiteDialog.vue'
+import SyslogAutoSetupDialog from '@/components/logs/SyslogAutoSetupDialog.vue'
 import { INTERVAL_PRESETS, formatSeconds } from '@/utils/monitorTypes'
 import { SEM_ALVO_DE_ALCANCE } from '@/utils/reachability'
 import {
@@ -441,6 +473,9 @@ const systemsStore = useOperatingSystemsStore()
 
 const siteDialog = ref(false)
 const saving = ref(false)
+const configureLogsAfterCreate = ref(false)
+const autoSetupDialog = ref(false)
+const createdForLogSetup = ref<Device | null>(null)
 const snmpTestResult = ref<{ ok: boolean; message: string } | null>(null)
 const snmpIntervalConfirmation = ref(false)
 const originalSnmpPollIntervalSeconds = ref(15)
@@ -604,6 +639,7 @@ watch(
       if (sitesStore.sites.length === 0) sitesStore.fetchSites()
 
       snmpTestResult.value = null
+      configureLogsAfterCreate.value = false
       identificacao.value = null
       identificacaoErro.value = ''
       // Sem isto a preferência só valeria depois de o operador visitar
@@ -806,15 +842,17 @@ async function persist(clearHistory = false) {
         close()
       }
     } else {
-      const success = await devicesStore.createDevice({
+      const created = await devicesStore.createDevice({
         ...payload(false),
         status: 'unknown' as const,
       })
-      if (success) {
-        await devicesStore.fetchDevices()
-        const created = devicesStore.devices[devicesStore.devices.length - 1]
-        if (created) emit('saved', created)
+      if (created) {
+        emit('saved', created)
         close()
+        if (configureLogsAfterCreate.value) {
+          createdForLogSetup.value = created
+          autoSetupDialog.value = true
+        }
       }
     }
   } finally {

@@ -1,7 +1,7 @@
 # Roadmap NetMonitor
 
 > Roadmap mestre do NetMonitor. Ele consolida os roadmaps temáticos já entregues, os débitos técnicos pendentes e as próximas frentes de evolução do produto.  
-> **Última revisão:** 2026-08-21.
+> **Última revisão:** 2026-08-25.
 
 ## 1. Visão e critérios de priorização
 
@@ -364,6 +364,18 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
     - Modal de catálogo no frontend (`SaasPresetsDialog.vue`) com filtros por categoria, busca, indicação de monitores já ativos e ações de provisionamento em massa.
     - Widget de Heatmap Horário de Latência (`SaasLatencyHeatmapWidget.vue`) com grade cromática (24h x dias), identificação automática de horários de pico (`peakHour`) e melhor horário (`bestHour`), barra consolidada de 24h e integração no Dashboard customizável e na visualização detalhada do monitor.
     - Testes unitários e testes de integração cobrindo catálogo, provisionamento, reuso de monitores e cálculo de heatmap.
+
+- [x] **Fluxo unificado de ativação e isolamento de logs por dispositivo** 🟢 Concluído
+  - **Severidade:** 🟠 Alta
+  - **Esforço:** Pequeno
+  - **Arquivos:** `frontend/src/components/DeviceDialog.vue`, `frontend/src/pages/{LogsPage.vue,DeviceDetailPage.vue}`, `frontend/src/components/devices/tabs/{DeviceLogsTab.vue,DeviceOverviewTab.vue}`, `frontend/src/composables/useInfiniteCursor.ts`, `frontend/tests/composables/useInfiniteCursor.spec.ts`, `backend/tests/{requests/syslog_api.rs,conventions/tela_unificada.rs}`
+  - **Implementado:**
+    - Ativação automática de syslog iniciada exclusivamente no cadastro do dispositivo, reaproveitando IP, sistema, fabricante, modelo e modo de acesso.
+    - Aba de logs protegida por escopo visual e descarte de respostas assíncronas obsoletas, impedindo que registros de um dispositivo apareçam em outro.
+    - Resumo de tráfego por interface reposicionado antes da estabilidade dos monitores na Visão Geral.
+
+- [x] **Prioridade visual para monitores ativos no dispositivo** 🟢 Concluído
+  - A aba Monitores de `/devices/{id}` lista os ativos primeiro sem alterar a store compartilhada nem a ordem da página global.
 
 ---
 
