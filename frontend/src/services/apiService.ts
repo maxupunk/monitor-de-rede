@@ -21,6 +21,11 @@ const CREDENTIAL_PATHS = ['/auth/login', '/auth/setup']
 /** Timeout padrão para requisições à API (ms). */
 const DEFAULT_TIMEOUT_MS = 15000
 
+export interface ApiRequestOptions {
+  /** Limite desta operação; ausente mantém o padrão curto das APIs comuns. */
+  timeoutMs?: number
+}
+
 /** Erro de resposta da API (status >= 400 com corpo parseável). */
 export class ApiError extends Error {
   readonly status: number
@@ -77,9 +82,16 @@ class ApiService {
     }
   }
 
-  private async doFetch(path: string, init: RequestInit): Promise<Response> {
+  private async doFetch(
+    path: string,
+    init: RequestInit,
+    options: ApiRequestOptions = {}
+  ): Promise<Response> {
     const controller = new AbortController()
-    const timeoutId = window.setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS)
+    const timeoutId = window.setTimeout(
+      () => controller.abort(),
+      options.timeoutMs ?? DEFAULT_TIMEOUT_MS
+    )
 
     try {
       return await fetch(this.buildUrl(path), {
@@ -133,12 +145,16 @@ class ApiService {
     return this.handleResponse<T>(response, path)
   }
 
-  async post<T>(path: string, body?: unknown): Promise<T> {
-    const response = await this.doFetch(path, {
-      method: 'POST',
-      headers: this.getHeaders(),
-      body: body ? JSON.stringify(body) : undefined,
-    })
+  async post<T>(path: string, body?: unknown, options: ApiRequestOptions = {}): Promise<T> {
+    const response = await this.doFetch(
+      path,
+      {
+        method: 'POST',
+        headers: this.getHeaders(),
+        body: body ? JSON.stringify(body) : undefined,
+      },
+      options
+    )
     return this.handleResponse<T>(response, path)
   }
 

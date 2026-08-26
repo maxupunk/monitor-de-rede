@@ -23,4 +23,12 @@ export type ProvisionLoggingResponse = {
    * havia como confirmar (ingestão desligada).
    */
   confirmed: boolean | null
+  /**
+   * Se o endereço aplicado também foi lembrado no dispositivo e no catálogo.
+   */
+  addressSaved: boolean
+  /**
+   * Falha parcial posterior à aplicação dos comandos. Nunca contém credenciais.
+   */
+  persistenceWarning: string | null
 }

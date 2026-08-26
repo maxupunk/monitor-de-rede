@@ -32,6 +32,9 @@ pub struct Model {
     /// Sistema do equipamento, do catálogo de `services::devices::systems`.
     /// `None` significa "automático" — deduzido do `sysDescr` do SNMP.
     pub operating_system: Option<String>,
+    /// Último endereço deste servidor gravado no equipamento para o Syslog.
+    /// Credenciais nunca são armazenadas com ele.
+    pub syslog_server_address: Option<String>,
     /// Chave técnica estável de um dispositivo **do próprio sistema**
     /// (`netmonitor`). `None` em todo equipamento comum. Ver
     /// `services::devices::system_device`.

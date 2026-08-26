@@ -192,6 +192,7 @@ mod tests {
             snmp_poll_interval_seconds: 60,
             access_mode: None,
             operating_system: None,
+            syslog_server_address: None,
             system_key: system.then(|| system_device::NETMONITOR_KEY.to_string()),
             status: "unknown".into(),
             last_seen_at: None,

@@ -9,6 +9,7 @@ import type { LogNatDiagnostics } from '@/bindings/LogNatDiagnostics'
 import type { ProvisionHintsResponse } from '@/bindings/ProvisionHintsResponse'
 import type { ProvisionLoggingResponse } from '@/bindings/ProvisionLoggingResponse'
 import type { SetupGuide } from '@/bindings/SetupGuide'
+import { observedApplicationAddress } from '@/utils/syslogProvision'
 
 export type {
   LogEntry,
@@ -52,6 +53,12 @@ export const WINDOW_OPTIONS = [
   { value: 24, label: 'Últimas 24 horas' },
   { value: 24 * 7, label: 'Últimos 7 dias' },
 ] as const
+
+/**
+ * O backend pode usar 45 s aplicando comandos e mais 12 s confirmando o log.
+ * A margem cobre persistência e serialização sem alongar as demais APIs.
+ */
+export const PROVISION_REQUEST_TIMEOUT_MS = 65_000
 
 export function defaultFilters(): LogFilters {
   return { deviceId: null, severity: null, hours: 24, search: '' }
@@ -211,8 +218,10 @@ export const useLogsStore = defineStore('logs', () => {
    */
   async function fetchProvisionHints(deviceId: number): Promise<ProvisionHintsResponse | null> {
     try {
+      const observedAddress = observedApplicationAddress()
+      const query = observedAddress ? `?observedAddress=${encodeURIComponent(observedAddress)}` : ''
       return await apiService.get<ProvisionHintsResponse>(
-        `/logs/devices/${deviceId}/provision-hints`
+        `/logs/devices/${deviceId}/provision-hints${query}`
       )
     } catch {
       // Palpite é conveniência: sem ele a tela ainda funciona, só exige que o
@@ -248,7 +257,8 @@ export const useLogsStore = defineStore('logs', () => {
   ): Promise<ProvisionLoggingResponse> {
     const resposta = await apiService.post<ProvisionLoggingResponse>(
       `/logs/devices/${deviceId}/provision`,
-      entrada
+      entrada,
+      { timeoutMs: PROVISION_REQUEST_TIMEOUT_MS }
     )
     // O que acabou de ser configurado muda a lista de origens e pode ter
     // vinculado o dispositivo — recarregar aqui evita a tela mostrar o estado

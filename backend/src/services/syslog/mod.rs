@@ -20,6 +20,7 @@ pub mod app_layer;
 pub mod bus;
 pub mod config;
 pub mod db;
+pub mod destination;
 pub mod hints;
 pub mod ingest;
 pub mod listener;

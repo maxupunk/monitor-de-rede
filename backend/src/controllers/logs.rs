@@ -8,7 +8,7 @@ use std::convert::Infallible;
 
 use axum::{
     extract::{Path, Query},
-    http::{header, HeaderValue},
+    http::{header, uri::Authority, HeaderMap, HeaderValue},
     response::{
         sse::{Event, KeepAlive, Sse},
         IntoResponse,
@@ -30,7 +30,7 @@ use crate::{
         server_addresses,
         shared::errors::{AppError, AppResult},
         syslog::{
-            hints, provision,
+            destination, hints, provision,
             repository::{self, Cursor, LogFilters, LogQuery},
             resolver, snippets, LogsDb, SyslogService,
         },
@@ -393,9 +393,12 @@ async fn provision_device(
                 "Não foi possível determinar o endereço deste servidor que o equipamento deve \
                  usar. Preencha o campo \"Endereço deste servidor\" com o IP pelo qual o roteador \
                  alcança o NetMonitor — `localhost` não serve, porque aponta o roteador para ele \
-                 mesmo.",
+                mesmo.",
             )
         })?;
+    let server_address = destination::normalize(&server_address).ok_or_else(|| {
+        AppError::validation("Informe um endereço válido deste servidor para o Syslog.")
+    })?;
 
     let server_port = snippets::published_port();
     let servico = service(&ctx).ok();
@@ -414,6 +417,53 @@ async fn provision_device(
 
     let resultado = provision::run(&pedido, servico.as_ref().map(|s| &s.sources), id).await?;
 
+    let mut persistence_warnings = Vec::new();
+    if let (Some(service), Some(source)) = (servico.as_ref(), resultado.observed_source.as_ref()) {
+        if let Err(error) = provision::associate_confirmed_source(
+            &ctx.db,
+            service.ingestor.resolver(),
+            service.sources.as_ref(),
+            id,
+            source,
+        )
+        .await
+        {
+            tracing::error!(
+                device_id = id,
+                bind_key = %source.bind_key,
+                %error,
+                "linha de teste recebida, mas a origem não foi associada ao dispositivo"
+            );
+            persistence_warnings.push(
+                "A linha de teste chegou, mas o NetMonitor não conseguiu associar sua origem a este dispositivo. Os comandos foram aplicados; verifique o vínculo da fonte na tela de logs."
+                    .to_owned(),
+            );
+        }
+    }
+
+    let detector = servico
+        .as_ref()
+        .map_or_else(crate::services::syslog::NatDetector::detect, |service| {
+            service.ingestor.resolver().nat().clone()
+        });
+    let address_saved = match destination::remember(&ctx.db, id, &server_address, &detector).await {
+        Ok(_) => true,
+        Err(error) => {
+            tracing::error!(
+                device_id = id,
+                %error,
+                "configuração de Syslog aplicada, mas o destino não foi persistido"
+            );
+            persistence_warnings.push(
+                "A configuração foi aplicada no equipamento, mas o NetMonitor não conseguiu lembrar o endereço. Tente aplicar novamente para salvar a preferência."
+                    .to_owned(),
+            );
+            false
+        }
+    };
+    let persistence_warning =
+        (!persistence_warnings.is_empty()).then(|| persistence_warnings.join(" "));
+
     Ok(format::json(ProvisionLoggingResponse {
         operating_system,
         server_address,
@@ -421,6 +471,8 @@ async fn provision_device(
         commands: resultado.commands,
         transcript: resultado.transcript,
         confirmed: resultado.confirmed,
+        address_saved,
+        persistence_warning,
     })?)
 }
 
@@ -434,6 +486,8 @@ async fn provision_device(
 async fn provision_hints(
     State(ctx): State<AppContext>,
     Path(id): Path<i64>,
+    Query(query): Query<ProvisionHintsQuery>,
+    headers: HeaderMap,
 ) -> AppResult<Response> {
     let dispositivo = crate::models::devices::Entity::find_by_id(id)
         .one(&ctx.db)
@@ -446,42 +500,74 @@ async fn provision_hints(
     );
     let dicas = hints::collect(&ctx.db, &dispositivo, &detector).await?;
 
-    // A lista de endereços do servidor é a fonte preferencial: ela carrega o
-    // que o operador corrigiu à mão, e é ela que a tela oferece no seletor. A
-    // detecção por rota só decide **qual** delas serve a este equipamento.
-    let lista = server_addresses::list(&ctx.db, &detector).await?;
     // A forma de acesso é resolvida uma vez e usada duas: para escolher o
     // endereço e para explicar a escolha na tela. Resolver de novo lá dentro
     // custaria as mesmas três consultas para chegar à mesma conclusão.
     let contexto = access::AccessContext::load(&ctx.db).await?;
     let acesso = contexto.resolve(&dispositivo);
+    // Dentro da bridge, a rota do processo termina no IP interno do container.
+    // O host observado na requisição é o lado externo dessa tradução: em
+    // produção vem da autoridade HTTP e, atrás do proxy de desenvolvimento, a
+    // tela envia explicitamente o mesmo `location.hostname`. O serviço decide
+    // se ele serve para este dispositivo e rejeita loopback, gateway da bridge
+    // e o próprio IP do equipamento.
+    let observed_address = query
+        .observed_address
+        .or_else(|| observed_address_from_headers(&headers));
+    // A lista de endereços do servidor é a fonte preferencial: ela carrega o
+    // que o operador corrigiu à mão, e é ela que a tela oferece no seletor. A
+    // detecção por rota só decide **qual** delas serve a este equipamento.
+    let lista = server_addresses::list_for_provision(
+        &ctx.db,
+        &detector,
+        &dispositivo,
+        &acesso,
+        observed_address.as_deref(),
+    )
+    .await?;
     let sugestao =
         server_addresses::suggest_with(&ctx.db, &dispositivo, &lista, &contexto, &acesso).await?;
-    let sugerido = sugestao.as_ref().and_then(|(id, _)| {
-        lista
-            .iter()
-            .find(|item| &item.id == id)
-            .and_then(|item| item.value.clone())
-    });
+    let suggested_entry = sugestao
+        .as_ref()
+        .and_then(|(id, _)| lista.iter().find(|item| &item.id == id));
+    let sugerido = suggested_entry.and_then(|item| item.value.clone());
+    let suggested_source = suggested_entry.map(|item| item.source.clone());
 
     // Ordem dos palpites, do mais confiável para o menos: a entrada sugerida da
     // lista, a rota até o equipamento, e por fim a `FRONTEND_ORIGIN` — esta
     // última com o mesmo crivo das outras, que é o que impede `localhost` de
     // voltar pela porta dos fundos.
-    let (server_address, server_address_source) = match (sugerido, dicas.server_address.clone()) {
-        (Some(endereco), _) => (Some(endereco), "endereços deste servidor"),
-        (None, Some(endereco)) => (Some(endereco), dicas.server_address_source),
-        (None, None) => (
-            hints::sanitiza_endereco(Some(&endereco_do_servidor())),
-            "origem configurada",
-        ),
-    };
+    let sugestao_id = sugestao.as_ref().map(|(id, _)| id.clone());
+    let sugestao_motivo = sugestao.as_ref().map(|(_, motivo)| motivo.clone());
+    let salvo = destination::saved_hint(&dispositivo, &lista);
+    let (server_address, server_address_source, suggested_address_id, suggested_address_reason) =
+        if let Some(salvo) = salvo {
+            (
+                Some(salvo.address),
+                "último endereço aplicado".to_owned(),
+                salvo.address_id,
+                Some(salvo.reason),
+            )
+        } else {
+            let (address, source) = match (sugerido, dicas.server_address.clone()) {
+                (Some(endereco), _) => (
+                    Some(endereco),
+                    suggested_source.unwrap_or_else(|| "endereços deste servidor".to_owned()),
+                ),
+                (None, Some(endereco)) => (Some(endereco), dicas.server_address_source.to_owned()),
+                (None, None) => (
+                    hints::sanitiza_endereco(Some(&endereco_do_servidor())),
+                    "origem configurada".to_owned(),
+                ),
+            };
+            (address, source, sugestao_id, sugestao_motivo)
+        };
 
     Ok(format::json(ProvisionHintsResponse {
         server_address,
-        server_address_source: server_address_source.to_owned(),
-        suggested_address_id: sugestao.as_ref().map(|(id, _)| id.clone()),
-        suggested_address_reason: sugestao.map(|(_, motivo)| motivo),
+        server_address_source,
+        suggested_address_id,
+        suggested_address_reason,
         access_mode: acesso.mode.id().to_owned(),
         access_mode_declared: acesso.declared,
         access_mode_reason: acesso.reason,
@@ -494,6 +580,55 @@ async fn provision_hints(
         mac_address: dicas.mac_address,
         layer2_reachable: dicas.layer2_reachable,
     })?)
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProvisionHintsQuery {
+    /// Host pelo qual o navegador abriu o NetMonitor. É só evidência: o serviço
+    /// valida e classifica antes de usá-lo como endereço da LAN.
+    observed_address: Option<String>,
+}
+
+/// Extrai a autoridade pública sem misturar HTTP com a regra de endereçamento.
+///
+/// A query explícita da SPA tem precedência no chamador porque o proxy do Vite
+/// troca `Host` por `localhost:3333`. Estes cabeçalhos mantêm clientes antigos e
+/// instalações atrás de proxy reverso funcionando sem contrato adicional.
+fn observed_address_from_headers(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get("forwarded")
+        .and_then(|value| value.to_str().ok())
+        .and_then(forwarded_host)
+        .or_else(|| header_host(headers, "x-forwarded-host", false))
+        .or_else(|| header_host(headers, "origin", true))
+        .or_else(|| header_host(headers, "referer", true))
+        .or_else(|| header_host(headers, header::HOST.as_str(), false))
+}
+
+fn forwarded_host(value: &str) -> Option<String> {
+    value.split(',').next()?.split(';').find_map(|part| {
+        let (name, value) = part.trim().split_once('=')?;
+        name.eq_ignore_ascii_case("host")
+            .then(|| authority_host(value.trim().trim_matches('"')))
+            .flatten()
+    })
+}
+
+fn header_host(headers: &HeaderMap, name: &str, url: bool) -> Option<String> {
+    let raw = headers.get(name)?.to_str().ok()?.split(',').next()?.trim();
+    if url {
+        let (_, remainder) = raw.split_once("://")?;
+        authority_host(remainder.split('/').next()?)
+    } else {
+        authority_host(raw)
+    }
+}
+
+fn authority_host(raw: &str) -> Option<String> {
+    let authority = raw.parse::<Authority>().ok()?;
+    let host = authority.host().trim_matches(['[', ']']).trim();
+    (!host.is_empty()).then(|| host.to_owned())
 }
 
 /// `GET /api/logs/setup-snippet` — comandos prontos por fabricante.
@@ -628,6 +763,29 @@ mod tests {
         assert!(!passa_no_filtro(&entrada(None, Some(6)), &query), "info");
         // Sem severidade não é escondido: sumiria sem explicação.
         assert!(passa_no_filtro(&entrada(None, None), &query));
+    }
+
+    #[test]
+    fn extrai_o_host_externo_dos_cabecalhos_http() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "forwarded",
+            "for=172.24.0.1;host=10.0.0.10:3333;proto=http"
+                .parse()
+                .unwrap(),
+        );
+        headers.insert(header::HOST, "172.24.0.2:3333".parse().unwrap());
+        assert_eq!(
+            observed_address_from_headers(&headers).as_deref(),
+            Some("10.0.0.10")
+        );
+
+        let mut direct = HeaderMap::new();
+        direct.insert(header::HOST, "[fd00::10]:3333".parse().unwrap());
+        assert_eq!(
+            observed_address_from_headers(&direct).as_deref(),
+            Some("fd00::10")
+        );
     }
 
     #[test]

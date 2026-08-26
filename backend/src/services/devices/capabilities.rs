@@ -106,11 +106,11 @@ pub async fn for_device(
         .await?
         > 0;
 
-    // Logs do dispositivo do sistema são ativos por padrão (Fase 4). Para os
-    // demais, a aba aparece quando o produto sabe falar syslog com aquele
-    // sistema ou quando já chegou linha — o que a aba de `/logs` resolve com o
-    // mesmo filtro.
-    let logs = is_system || device.operating_system.is_some();
+    // Logs é também o ponto de entrada para configurar ou retomar o Syslog.
+    // Esconder a aba até existir uma declaração manual de sistema criava um
+    // ciclo impossível: sistemas detectados automaticamente funcionavam, mas o
+    // operador não tinha como voltar ao assistente depois de fechar o cadastro.
+    let logs = true;
 
     let health = series_gravadas.contains(series::CPU_USAGE)
         || series_gravadas.contains(series::MEMORY_USAGE)

@@ -34,7 +34,7 @@ use crate::{
         shared::errors::AppResult,
         snmp::{
             client::{SnmpClient, SnmpConfig, SnmpVersion},
-            collectors::{collect_system, SnmpSystemInfo},
+            collectors::{collect_hardware, collect_system, SnmpSystemInfo},
         },
     },
 };
@@ -207,7 +207,13 @@ pub async fn identidade_snmp(
     }
     // Teto curto: isto roda na abertura de um diálogo, não num ciclo de coleta.
     config.timeout_ms = 1_500;
-    collect_system(&SnmpClient::new(config)).await.ok()
+    let client = SnmpClient::new(config);
+    let mut identidade = collect_system(&client).await.ok()?;
+    if let Ok((fabricante, modelo)) = collect_hardware(&client).await {
+        identidade.hardware_vendor = fabricante;
+        identidade.hardware_model = modelo;
+    }
+    Some(identidade)
 }
 
 async fn sistema_por_snmp(host: IpAddr, dispositivo: &devices::Model) -> Option<SnmpSystemInfo> {

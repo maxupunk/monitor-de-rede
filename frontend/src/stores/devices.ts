@@ -91,8 +91,8 @@ export const useDevicesStore = defineStore('devices', () => {
     return resource.create(payload)
   }
 
-  async function updateDevice(id: number, payload: Partial<Device>): Promise<boolean> {
-    return (await resource.update(id, payload)) !== null
+  async function updateDevice(id: number, payload: Partial<Device>): Promise<Device | null> {
+    return resource.update(id, payload)
   }
 
   async function deleteDevice(id: number): Promise<boolean> {

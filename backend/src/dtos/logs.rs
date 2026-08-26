@@ -208,11 +208,12 @@ pub struct BindSourceInput {
 
 /// Corpo de `POST /api/logs/devices/{id}/provision`.
 ///
-/// **Estes campos não são persistidos.** `username` e `password` existem
+/// **As credenciais não são persistidas.** `username` e `password` existem
 /// enquanto a requisição dura e morrem com ela — não há coluna, cache nem
-/// `system_settings` que os receba, nem cifrados. Ver a nota do módulo
-/// [`crate::services::syslog::provision`]. O DTO fica sem `Debug` derivado de
-/// propósito: um `tracing` distraído despejaria a senha no log.
+/// `system_settings` que os receba, nem cifrados. Depois de os comandos serem
+/// aplicados, somente o `server_address` é lembrado no dispositivo. Ver a nota
+/// do módulo [`crate::services::syslog::provision`]. O DTO fica sem `Debug`
+/// derivado de propósito: um `tracing` distraído despejaria a senha no log.
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProvisionLoggingInput {
@@ -294,6 +295,10 @@ pub struct ProvisionLoggingResponse {
     /// Se chegou log do dispositivo antes do teto de espera. `null` quando não
     /// havia como confirmar (ingestão desligada).
     pub confirmed: Option<bool>,
+    /// Se o endereço aplicado também foi lembrado no dispositivo e no catálogo.
+    pub address_saved: bool,
+    /// Falha parcial posterior à aplicação dos comandos. Nunca contém credenciais.
+    pub persistence_warning: Option<String>,
 }
 
 /// Resposta do vínculo/desvínculo manual de uma origem de syslog.

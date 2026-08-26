@@ -3,7 +3,7 @@
 set -eu
 
 # A API precisa responder independentemente do watcher.
-if ! curl -fsS http://localhost:3333/api/_health >/dev/null; then
+if ! curl -fsS http://localhost:3333/_health >/dev/null; then
   exit 1
 fi
 

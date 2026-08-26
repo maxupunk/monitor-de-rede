@@ -454,10 +454,44 @@ pub struct IdentifyResult {
     pub sys_object_id: Option<String>,
     /// A identificação do servidor SSH, quando a porta 22 respondeu.
     pub ssh_banner: Option<String>,
+    /// Dados de inventário que o formulário pode preencher sem adivinhar.
+    /// Nulos quando a sonda/descoberta não trouxe evidência suficiente.
+    pub suggested_vendor: Option<String>,
+    pub suggested_model: Option<String>,
+    /// Nome anunciado pelo próprio equipamento, preferencialmente via
+    /// `sysName`; a tela só o aplica enquanto o operador não tiver digitado.
+    pub suggested_name: Option<String>,
+    /// Forma de acesso deduzida pela mesma regra usada depois do cadastro.
+    pub access_mode: String,
+    pub access_mode_reason: String,
     /// Se alguma evidência ao vivo chegou. Falso significa que a conclusão saiu
     /// só do cadastro — e a tela precisa dizer isso em vez de anunciar uma
     /// detecção que não aconteceu.
     pub probed: bool,
+}
+
+/// Escolhe e normaliza um nome anunciado pelo equipamento.
+///
+/// A ordem expressa a confiança: `sysName` veio de uma consulta feita agora;
+/// hostname e mDNS podem ser cache de uma descoberta anterior. Endereços IP e
+/// textos com controles não são nomes úteis para o inventário.
+#[must_use]
+pub fn suggest_name(
+    sys_name: Option<&str>,
+    discovered_hostname: Option<&str>,
+    mdns_name: Option<&str>,
+) -> Option<String> {
+    [sys_name, discovered_hostname, mdns_name]
+        .into_iter()
+        .flatten()
+        .find_map(|candidate| {
+            let normalized = candidate.trim().trim_end_matches('.').trim();
+            (!normalized.is_empty()
+                && normalized.len() <= 120
+                && normalized.parse::<std::net::IpAddr>().is_err()
+                && !normalized.chars().any(char::is_control))
+            .then(|| normalized.to_owned())
+        })
 }
 
 #[must_use]
@@ -478,6 +512,19 @@ pub fn options() -> Vec<OperatingSystemOption> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn o_nome_prefere_sysname_e_descarta_ip_ou_controle() {
+        assert_eq!(
+            suggest_name(Some("  roteador-borda  "), Some("descoberta.local"), None).as_deref(),
+            Some("roteador-borda")
+        );
+        assert_eq!(
+            suggest_name(Some("10.0.0.1"), Some("openwrt.local."), None).as_deref(),
+            Some("openwrt.local")
+        );
+        assert!(suggest_name(Some("nome\nmalicioso"), None, None).is_none());
+    }
 
     #[test]
     fn o_catalogo_cobre_as_receitas_de_syslog_e_os_perfis_da_vpn() {

@@ -9,10 +9,14 @@
 //! contexto nasce com o seu, porque o `Hooks::truncate` do Loco não alcança um
 //! segundo banco e uma linha gravada aqui sobreviveria para o teste seguinte.
 
-use backend::{app::App, models::logs::device_logs, services::syslog::LogsDb};
+use backend::{
+    app::App,
+    models::{_entities::devices, logs::device_logs},
+    services::syslog::{destination, LogsDb, NatDetector},
+};
 use chrono::{Duration, Utc};
 use loco_rs::{app::AppContext, testing::prelude::*};
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection, EntityTrait};
 use serial_test::serial;
 
 use super::prepare_data;
@@ -667,6 +671,62 @@ async fn os_palpites_da_tela_nunca_sugerem_um_endereco_local() {
 
 #[tokio::test]
 #[serial]
+async fn o_ultimo_destino_fica_isolado_no_dispositivo_correto() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let first = request
+            .post("/api/devices")
+            .json(&serde_json::json!({
+                "name": "primeiro", "type": "router", "ipAddress": "127.0.0.1"
+            }))
+            .await;
+        let first: serde_json::Value = serde_json::from_str(&first.text()).unwrap();
+        let first_id = first["id"].as_i64().unwrap();
+        let second = request
+            .post("/api/devices")
+            .json(&serde_json::json!({
+                "name": "segundo", "type": "router", "ipAddress": "127.0.0.2"
+            }))
+            .await;
+        let second: serde_json::Value = serde_json::from_str(&second.text()).unwrap();
+        let second_id = second["id"].as_i64().unwrap();
+
+        destination::remember(
+            &ctx.db,
+            first_id,
+            "netmonitor.exemplo",
+            &NatDetector::none(),
+        )
+        .await
+        .expect("lembrar endereço");
+
+        let first_hints = request
+            .get(&format!("/api/logs/devices/{first_id}/provision-hints"))
+            .await;
+        let first_hints: serde_json::Value = serde_json::from_str(&first_hints.text()).unwrap();
+        assert_eq!(first_hints["serverAddress"], "netmonitor.exemplo");
+        assert_eq!(
+            first_hints["serverAddressSource"],
+            "último endereço aplicado"
+        );
+
+        let second_hints = request
+            .get(&format!("/api/logs/devices/{second_id}/provision-hints"))
+            .await;
+        let second_hints: serde_json::Value = serde_json::from_str(&second_hints.text()).unwrap();
+        assert_ne!(
+            second_hints["serverAddressSource"], "último endereço aplicado",
+            "a preferência do primeiro dispositivo vazou para o segundo"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
 async fn a_ativacao_recusa_dispositivo_inexistente() {
     request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
         let session = prepare_data::init_user_login(&request, &ctx).await;
@@ -728,6 +788,16 @@ async fn a_ativacao_falha_com_mensagem_de_operador_quando_a_porta_esta_fechada()
             resposta.text().contains("acessar o equipamento"),
             "{}",
             resposta.text()
+        );
+
+        let device = devices::Entity::find_by_id(device_id)
+            .one(&ctx.db)
+            .await
+            .expect("consultar dispositivo")
+            .expect("dispositivo existente");
+        assert!(
+            device.syslog_server_address.is_none(),
+            "uma falha de acesso não pode lembrar um destino que nunca foi aplicado"
         );
     })
     .await;

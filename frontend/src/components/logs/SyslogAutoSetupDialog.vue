@@ -7,9 +7,9 @@
       </v-card-title>
 
       <v-card-subtitle class="pb-3">
-        O servidor entra em <strong>{{ deviceName }}</strong
-        ><span v-if="host"> ({{ host }})</span> e aplica a configuração de envio de syslog. Nada é
-        instalado no equipamento — são os mesmos comandos da aba manual.
+        O servidor entra em <strong>{{ target.name }}</strong
+        ><span v-if="target.host"> ({{ target.host }})</span> e aplica a configuração de envio de
+        syslog. Nada é instalado no equipamento — são os mesmos comandos da aba manual.
       </v-card-subtitle>
 
       <v-divider></v-divider>
@@ -135,115 +135,47 @@
             ></v-text-field>
           </v-col>
 
-          <!--
-            Enquanto a sondagem roda, o campo diz que está carregando —
-            aparecer vazio e preencher de repente lia como campo quebrado. Se
-            a detecção falha, o seletor abre normalmente, com o aviso do que
-            aconteceu em vez de uma lista sem contexto.
-          -->
-          <v-col v-if="carregandoEndereco" cols="12">
-            <v-sheet class="pa-3 rounded-lg border d-flex align-center ga-3">
-              <v-progress-circular
-                indeterminate
-                size="20"
-                width="2"
-                color="primary"
-              ></v-progress-circular>
-              <div class="text-body-2 text-medium-emphasis">
-                Descobrindo por onde este equipamento alcança o NetMonitor…
-              </div>
-            </v-sheet>
+          <v-col v-if="enderecoFalhou" cols="12" class="pb-0">
+            <v-alert type="warning" variant="tonal" density="compact">
+              Não foi possível descobrir o endereço automaticamente. Selecione uma opção conhecida
+              ou digite o IP/hostname pelo qual o equipamento alcança o NetMonitor.
+            </v-alert>
           </v-col>
 
-          <template v-else>
-            <v-col v-if="enderecoFalhou" cols="12" class="pb-0">
-              <v-alert type="warning" variant="tonal" density="compact">
-                Não foi possível descobrir o endereço automaticamente. Escolha na lista por onde
-                este equipamento alcança o NetMonitor.
-              </v-alert>
-            </v-col>
-
-            <!--
-              O endereço já foi decidido: o cadastro diz como este equipamento é
-              acessado, e a lista de endereços do servidor diz qual deles serve
-              a essa situação. Mostrar a conclusão e o motivo — em vez de um
-              seletor — tira do operador uma pergunta que ele responderia por
-              eliminação. O seletor continua a um clique, para quando a
-              conclusão estiver errada.
-            -->
-            <v-col v-if="enderecoResolvido && !editandoEndereco" cols="12">
-              <v-sheet class="pa-3 rounded-lg border d-flex align-start ga-3">
-                <v-icon :color="accessModeMeta(hints?.accessMode).color" class="mt-1">
-                  {{ accessModeMeta(hints?.accessMode).icon }}
-                </v-icon>
-                <div class="flex-grow-1 min-width-0">
-                  <div class="text-body-2">
-                    O equipamento vai enviar o log para
-                    <strong>{{ serverAddress }}:{{ hints?.serverPort ?? 514 }}</strong>
-                  </div>
-                  <div class="text-caption text-medium-emphasis motivo">
-                    {{ motivoDoEndereco }}
-                  </div>
-                </div>
-                <v-btn
-                  size="small"
-                  variant="text"
-                  :disabled="running"
-                  @click="editandoEndereco = true"
-                >
-                  Alterar
-                </v-btn>
-              </v-sheet>
-            </v-col>
-
-            <v-col v-else cols="12">
-              <!--
-                Seletor e não campo livre: o endereço certo depende de onde o
-                equipamento está, e essa lista é exatamente o catálogo dessas
-                situações. Digitar continua possível pela última opção.
-              -->
-              <div class="d-flex align-start ga-2">
-                <v-select
-                  v-model="addressChoice"
-                  :items="addressOptions"
-                  item-title="title"
-                  item-value="value"
-                  label="Endereço que o equipamento vai usar"
-                  density="compact"
-                  variant="outlined"
-                  :error-messages="fieldErrors.serverAddress"
-                  :disabled="running"
-                  prepend-inner-icon="mdi-server-network"
-                  :item-props="addressItemProps"
-                  class="flex-grow-1 min-width-0"
-                  @update:model-value="onAddressChange"
-                ></v-select>
-                <!--
-                  Campo `compact` (40px) e botão `comfortable` (40px): a mesma
-                  altura, então nenhum deslocamento é necessário aqui.
-                -->
-                <ServerAddressesButton :disabled="running" @saved="onAddressesSaved" />
-              </div>
-
-              <div class="text-caption text-medium-emphasis px-1">
-                {{ addressHintText }}
-              </div>
-            </v-col>
-
-            <v-col v-if="editandoEndereco && addressChoice === CUSTOM_CHOICE" cols="12">
-              <v-text-field
-                v-model="serverAddress"
-                label="Endereço deste servidor"
-                placeholder="IP ou nome pelo qual o equipamento alcança o NetMonitor"
+          <!-- Um único valor serve para sugestão, seleção conhecida e texto livre. -->
+          <v-col cols="12">
+            <div class="d-flex align-start ga-2">
+              <v-combobox
+                :model-value="serverAddress"
+                :items="addressOptions"
+                item-title="title"
+                item-value="value"
+                :return-object="false"
+                label="Endereço que o equipamento vai usar"
+                placeholder="Selecione ou digite um IP/hostname"
                 density="compact"
                 variant="outlined"
+                clearable
+                persistent-hint
+                :hint="addressHintText"
+                :error-messages="fieldErrors.serverAddress"
+                :loading="carregandoEndereco"
                 :disabled="running"
-                prepend-inner-icon="mdi-pencil-outline"
-                autofocus
-                @update:model-value="fieldErrors.serverAddress = ''"
-              ></v-text-field>
-            </v-col>
-          </template>
+                prepend-inner-icon="mdi-server-network"
+                :item-props="addressItemProps"
+                class="flex-grow-1 min-width-0"
+                @update:model-value="onAddressChange"
+              >
+                <template #no-data>
+                  <v-list-item
+                    title="Usar o endereço digitado"
+                    subtitle="Pressione Enter ou saia do campo para confirmar"
+                  ></v-list-item>
+                </template>
+              </v-combobox>
+              <ServerAddressesButton :disabled="running" @saved="onAddressesSaved" />
+            </div>
+          </v-col>
         </v-row>
 
         <!--
@@ -295,7 +227,7 @@
           <v-divider class="my-4"></v-divider>
 
           <v-alert
-            :type="result.confirmed === true ? 'success' : 'warning'"
+            :type="result.confirmed === true && result.addressSaved ? 'success' : 'warning'"
             variant="tonal"
             density="comfortable"
             border="start"
@@ -314,6 +246,16 @@
               firewall bloqueando a porta {{ result.serverPort }}, ou o endereço
               <strong>{{ result.serverAddress }}</strong> não ser alcançável a partir do roteador.
             </template>
+          </v-alert>
+
+          <v-alert
+            v-if="result.persistenceWarning"
+            type="warning"
+            variant="tonal"
+            density="compact"
+            class="mt-3"
+          >
+            {{ result.persistenceWarning }}
           </v-alert>
 
           <div class="text-caption text-grey mt-4 mb-1">
@@ -358,17 +300,20 @@ import {
 } from '@/stores/logs'
 import { useServerAddressesStore } from '@/stores/serverAddresses'
 import ServerAddressesButton from '@/components/ServerAddressesButton.vue'
-import { accessModeMeta } from '@/utils/accessMode'
 import { operatingSystemSourceLabel, useOperatingSystemsStore } from '@/stores/operatingSystems'
+import {
+  buildProvisionAddressOptions,
+  isProvisionSessionCurrent,
+  normalizeComboboxAddress,
+  resolveProvisionOperatingSystem,
+  sameProvisionAddress,
+  type LogSetupTarget,
+} from '@/utils/syslogProvision'
 
 /** Igual ao `TETO_DA_CONFIRMACAO` do backend — só para o texto do aviso. */
 const CONFIRMATION_SECONDS = 12
 
-const props = defineProps<{
-  deviceId: number
-  deviceName: string
-  host: string | null | undefined
-}>()
+const props = defineProps<{ target: Readonly<LogSetupTarget> }>()
 
 const open = defineModel<boolean>({ required: true })
 
@@ -377,16 +322,13 @@ const addressesStore = useServerAddressesStore()
 
 const systemsStore = useOperatingSystemsStore()
 
-const operatingSystem = ref('routeros')
+const operatingSystem = ref('')
 const protocol = ref('ssh')
 const port = ref<number | null>(22)
 const username = ref('')
 const password = ref('')
 const macAddress = ref('')
 const serverAddress = ref('')
-const addressChoice = ref<string>('')
-/** O seletor só aparece quando a conclusão do servidor não serve. */
-const editandoEndereco = ref(false)
 /** A sondagem de palpites falhou — o seletor abre com o aviso, não em silêncio. */
 const hintsFalhou = ref(false)
 const showPassword = ref(false)
@@ -505,31 +447,28 @@ const protocolHintText = computed(() => {
   return ''
 })
 
-/** Valor sentinela da opção "digitar outro endereço". */
-const CUSTOM_CHOICE = '__custom__'
-
-interface AddressOption {
-  value: string
-  title: string
-  subtitle: string
-}
-
-const addressOptions = computed<AddressOption[]>(() => {
-  const opcoes: AddressOption[] = addressesStore.usable.map((entrada) => ({
-    value: entrada.id,
-    title: `${entrada.label} — ${entrada.value}`,
-    subtitle: entrada.description,
-  }))
-  opcoes.push({
-    value: CUSTOM_CHOICE,
-    title: 'Outro endereço…',
-    subtitle: 'Digitar um endereço só para este equipamento',
-  })
-  return opcoes
+const addressOptions = computed(() => {
+  const suggestedEntry = addressesStore.byId(hints.value?.suggestedAddressId)
+  return buildProvisionAddressOptions(
+    addressesStore.usable,
+    hints.value?.suggestedAddressId,
+    hints.value?.serverAddress
+      ? {
+          value: hints.value.serverAddress,
+          label: suggestedEntry?.label,
+          description:
+            hints.value.suggestedAddressReason ||
+            `Sugerido automaticamente — ${hints.value.serverAddressSource}`,
+        }
+      : null
+  )
 })
 
-function addressItemProps(item: AddressOption): Record<string, unknown> {
-  return { subtitle: item.subtitle }
+function addressItemProps(item: { subtitle: string; suggested: boolean }): Record<string, unknown> {
+  return {
+    subtitle: item.subtitle,
+    prependIcon: item.suggested ? 'mdi-auto-fix' : 'mdi-server-network',
+  }
 }
 
 /**
@@ -538,33 +477,30 @@ function addressItemProps(item: AddressOption): Record<string, unknown> {
  * antes de escolher.
  */
 const addressHintText = computed(() => {
-  if (addressChoice.value === CUSTOM_CHOICE) {
-    return 'Use o IP pelo qual o roteador alcança este servidor, não o da barra do navegador.'
+  if (carregandoEndereco.value) return 'Descobrindo a melhor rota para este equipamento…'
+  const current = addressesStore.usable.find((entry) =>
+    sameProvisionAddress(entry.value, serverAddress.value)
+  )
+  if (current?.id === hints.value?.suggestedAddressId) {
+    const reason = hints.value?.suggestedAddressReason
+    return reason ? `Sugerido automaticamente — ${reason}.` : 'Sugerido automaticamente.'
   }
-  const motivo = hints.value?.suggestedAddressReason
-  if (motivo && addressChoice.value === hints.value?.suggestedAddressId) {
-    return `Sugerido: ${motivo}.`
+  if (
+    hints.value?.serverAddressSource === 'último endereço aplicado' &&
+    sameProvisionAddress(hints.value.serverAddress, serverAddress.value)
+  ) {
+    return 'Último endereço aplicado neste dispositivo.'
   }
-  const entrada = addressesStore.byId(addressChoice.value)
-  if (entrada) return entrada.description
-  // Sem escolha e sem sugestão, o que ainda orienta o operador é o que o
-  // servidor sabe sobre como o equipamento é alcançado.
-  const acesso = hints.value?.accessModeReason
-  return acesso
-    ? `Sem sugestão automática — ${acesso}. Escolha por onde ele alcança o NetMonitor.`
-    : 'Escolha por onde este equipamento alcança o NetMonitor.'
+  if (sameProvisionAddress(hints.value?.serverAddress, serverAddress.value)) {
+    const reason = hints.value?.suggestedAddressReason || hints.value?.serverAddressSource
+    return reason ? `Sugerido automaticamente — ${reason}.` : 'Sugerido automaticamente.'
+  }
+  if (current) return current.description
+  if (serverAddress.value.trim()) {
+    return 'Endereço personalizado — será adicionado ao catálogo global depois da aplicação.'
+  }
+  return 'Selecione uma opção conhecida ou digite o IP/hostname alcançável pelo equipamento.'
 })
-
-/**
- * Se há endereço decidido — e portanto nada a perguntar.
- *
- * Cair na opção "digitar outro" significa que a lista não tinha resposta: ali o
- * campo precisa aparecer, porque a alternativa seria um resumo dizendo que o
- * equipamento vai enviar para lugar nenhum.
- */
-const enderecoResolvido = computed(
-  () => Boolean(serverAddress.value.trim()) && addressChoice.value !== CUSTOM_CHOICE
-)
 
 /**
  * A sondagem de palpites e a lista de endereços chegam juntas; enquanto
@@ -582,42 +518,18 @@ const enderecoFalhou = computed(
 )
 
 /**
- * A frase que substitui o seletor.
- *
- * Carrega o rótulo do endereço **e** o motivo — "Túnel VPN — o cadastro diz que
- * este equipamento acessa por túnel vpn". Só o endereço deixaria o operador sem
- * como julgar se está certo, que é exatamente o que o seletor pedia dele.
+ * Adapta tanto uma opção conhecida quanto o texto livre emitido pelo combobox.
  */
-const motivoDoEndereco = computed(() => {
-  const entrada = addressesStore.byId(addressChoice.value)
-  const rotulo = entrada?.label ?? 'Endereço deste servidor'
-  const motivo =
-    addressChoice.value === hints.value?.suggestedAddressId
-      ? hints.value?.suggestedAddressReason
-      : null
-  const complemento = motivo ?? entrada?.description
-  return complemento ? `${rotulo} — ${complemento}` : rotulo
-})
-
-function onAddressChange(escolha: unknown): void {
+function onAddressChange(value: unknown): void {
   fieldErrors.serverAddress = ''
-  const id = typeof escolha === 'string' ? escolha : null
-  if (!id || id === CUSTOM_CHOICE) {
-    serverAddress.value = ''
-    return
-  }
-  serverAddress.value = addressesStore.byId(id)?.value ?? ''
+  serverAddress.value = normalizeComboboxAddress(value)
 }
 
-/** Depois de gerenciar a lista, reaproveita a sugestão se ela passou a existir. */
+/** Gerenciar o catálogo não deve apagar o texto que o operador já digitou. */
 function onAddressesSaved(): void {
-  const sugerido = hints.value?.suggestedAddressId
-  if (sugerido && addressesStore.usable.some((entrada) => entrada.id === sugerido)) {
-    addressChoice.value = sugerido
-  } else if (addressChoice.value !== CUSTOM_CHOICE) {
-    addressChoice.value = addressesStore.usable[0]?.id ?? CUSTOM_CHOICE
+  if (!serverAddress.value.trim() && hints.value?.serverAddress) {
+    serverAddress.value = hints.value.serverAddress
   }
-  onAddressChange(addressChoice.value)
 }
 
 /**
@@ -662,9 +574,7 @@ function valida(): boolean {
     ? serverAddressLooksLocal.value
       ? 'Este endereço aponta o roteador para ele mesmo'
       : ''
-    : addressChoice.value === CUSTOM_CHOICE
-      ? 'Digite o endereço que o equipamento deve usar'
-      : 'Escolha por onde este equipamento alcança o NetMonitor'
+    : 'Digite ou selecione o endereço que o equipamento deve usar'
   fieldErrors.macAddress =
     protocol.value === 'mactelnet' && !macAddress.value.trim()
       ? 'O MAC-Telnet precisa do MAC do equipamento'
@@ -677,9 +587,6 @@ async function submit(): Promise<void> {
   if (!valida()) {
     error.value = 'Corrija os campos destacados antes de continuar.'
     errorHint.value = ''
-    // Um erro no endereço enquanto o resumo está fechado ficaria marcado num
-    // campo que ninguém vê — a mensagem apontaria para o nada.
-    if (fieldErrors.serverAddress) editandoEndereco.value = true
     return
   }
 
@@ -687,8 +594,10 @@ async function submit(): Promise<void> {
   error.value = ''
   errorHint.value = ''
   result.value = null
+  const sessionId = props.target.sessionId
+  const deviceId = props.target.id
   try {
-    result.value = await logsStore.provisionDevice(props.deviceId, {
+    const provisioned = await logsStore.provisionDevice(deviceId, {
       protocol: protocol.value,
       port: port.value || null,
       username: username.value,
@@ -697,7 +606,29 @@ async function submit(): Promise<void> {
       serverAddress: serverAddress.value.trim(),
       macAddress: macAddress.value.trim() || null,
     })
+    if (
+      !isProvisionSessionCurrent(
+        open.value,
+        sessionId,
+        props.target.sessionId,
+        deviceId,
+        props.target.id
+      )
+    )
+      return
+    result.value = provisioned
+    void addressesStore.fetchAll(true)
   } catch (erro) {
+    if (
+      !isProvisionSessionCurrent(
+        open.value,
+        sessionId,
+        props.target.sessionId,
+        deviceId,
+        props.target.id
+      )
+    )
+      return
     error.value = mensagemDeErro(erro)
     errorHint.value = pista(error.value)
   } finally {
@@ -733,24 +664,33 @@ function pista(mensagem: string): string {
   return ''
 }
 
+let hintsSequence = 0
+
 async function carregaPalpites(): Promise<void> {
+  const sequence = ++hintsSequence
+  const deviceId = props.target.id
   loadingHints.value = true
   try {
     // A lista de endereços e os palpites do equipamento são independentes; em
     // série somariam a sondagem de portas à leitura da lista sem motivo.
     const [dicas] = await Promise.all([
-      logsStore.fetchProvisionHints(props.deviceId),
+      logsStore.fetchProvisionHints(deviceId),
       addressesStore.fetchAll(true),
       systemsStore.fetchAll(),
     ])
+    if (!isProvisionSessionCurrent(open.value, sequence, hintsSequence, deviceId, props.target.id))
+      return
     hints.value = dicas
     // `null` é falha da sondagem, não "nada a sugerir" — a tela precisa saber
     // a diferença para avisar em vez de só mostrar o seletor.
     hintsFalhou.value = dicas === null
-    aplicaEndereco(dicas)
+    serverAddress.value = dicas?.serverAddress?.trim() ?? serverAddress.value
     if (!dicas) return
 
-    operatingSystem.value = dicas.operatingSystem
+    operatingSystem.value = resolveProvisionOperatingSystem(
+      dicas.operatingSystem,
+      props.target.operatingSystem
+    )
     macAddress.value = dicas.macAddress ?? ''
 
     // A sondagem decide o meio de acesso: oferecer SSH quando só a 23 responde
@@ -759,68 +699,45 @@ async function carregaPalpites(): Promise<void> {
     else if (dicas.telnetOpen) protocol.value = 'telnet'
     port.value = DEFAULT_PORTS[protocol.value] ?? 22
   } finally {
-    loadingHints.value = false
+    if (sequence === hintsSequence) loadingHints.value = false
   }
 }
 
-/**
- * Escolhe a entrada da lista que serve a este equipamento.
- *
- * Só a sugestão do servidor (que sabe por qual rota alcança o aparelho)
- * preenche o campo: sem ela, pré-selecionar o primeiro endereço da lista
- * apresentaria como padrão o que é chute — e o primeiro costuma ser o do
- * túnel VPN, errado para qualquer equipamento fora dele. Nesse caso o seletor
- * abre sem escolha, e a pergunta volta a ser do operador.
- */
-function aplicaEndereco(dicas: ProvisionHintsResponse | null): void {
-  const sugerido = dicas?.suggestedAddressId
-  if (sugerido && addressesStore.usable.some((entrada) => entrada.id === sugerido)) {
-    addressChoice.value = sugerido
-    onAddressChange(sugerido)
-    editandoEndereco.value = false
-    return
-  }
-  if (addressesStore.usable.length === 0) {
-    addressChoice.value = CUSTOM_CHOICE
-    // Sem lista, o palpite solto do servidor ainda vale como ponto de partida.
-    serverAddress.value = dicas?.serverAddress ?? ''
-    editandoEndereco.value = true
-    return
-  }
-  addressChoice.value = ''
-  serverAddress.value = ''
-  editandoEndereco.value = true
-}
-
-watch(open, (aberto) => {
-  if (aberto) {
-    operatingSystem.value = 'routeros'
-    protocol.value = 'ssh'
-    port.value = 22
-    username.value = ''
-    password.value = ''
-    macAddress.value = ''
-    serverAddress.value = ''
-    addressChoice.value = ''
-    editandoEndereco.value = false
-    showPassword.value = false
-    error.value = ''
-    errorHint.value = ''
-    result.value = null
-    hints.value = null
-    hintsFalhou.value = false
-    Object.keys(fieldErrors).forEach((campo) => {
-      fieldErrors[campo as keyof typeof fieldErrors] = ''
-    })
-    void carregaPalpites()
-  } else {
-    // A senha só é descartada **ao fechar**. Limpá-la logo depois de aplicar
-    // deixava o campo vazio marcado como obrigatório ao lado de uma mensagem de
-    // sucesso, o que lia como falha — e obrigava a redigitar para reaplicar.
-    password.value = ''
-    showPassword.value = false
-  }
-})
+watch(
+  [open, () => props.target.sessionId],
+  ([aberto]) => {
+    if (aberto) {
+      operatingSystem.value = resolveProvisionOperatingSystem(null, props.target.operatingSystem)
+      protocol.value = 'ssh'
+      port.value = 22
+      username.value = ''
+      password.value = ''
+      macAddress.value = ''
+      serverAddress.value = ''
+      showPassword.value = false
+      error.value = ''
+      errorHint.value = ''
+      result.value = null
+      hints.value = null
+      hintsFalhou.value = false
+      Object.keys(fieldErrors).forEach((campo) => {
+        fieldErrors[campo as keyof typeof fieldErrors] = ''
+      })
+      void carregaPalpites()
+    } else {
+      hintsSequence += 1
+      loadingHints.value = false
+      // A senha só é descartada **ao fechar**. Limpá-la logo depois de aplicar
+      // deixava o campo vazio marcado como obrigatório ao lado de uma mensagem de
+      // sucesso, o que lia como falha — e obrigava a redigitar para reaplicar.
+      password.value = ''
+      showPassword.value = false
+    }
+  },
+  // O componente nasce via `v-if` com `open=true`; sem execução imediata o
+  // snapshot e os palpites nunca eram aplicados na primeira abertura.
+  { immediate: true }
+)
 </script>
 
 <style scoped>

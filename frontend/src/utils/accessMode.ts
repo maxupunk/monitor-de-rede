@@ -73,13 +73,13 @@ export function accessModeOptions(deduced?: {
 }): { value: AccessModeChoice; title: string; subtitle: string; icon: string }[] {
   const conclusao =
     deduced?.mode && deduced.reason
-      ? `Detectado: ${accessModeLabel(deduced.mode)} — ${deduced.reason}`
+      ? `Detectado automaticamente — ${deduced.reason}`
       : AUTO_META.description
 
   return [
     {
       value: AUTO_ACCESS_MODE,
-      title: AUTO_META.label,
+      title: deduced?.mode ? accessModeLabel(deduced.mode) : AUTO_META.label,
       subtitle: conclusao,
       icon: deduced?.mode ? accessModeMeta(deduced.mode).icon : AUTO_META.icon,
     },

@@ -14,21 +14,27 @@
           <v-row>
             <v-col cols="12" sm="6">
               <v-text-field
-                v-model="formModel.name"
-                label="Nome do Equipamento *"
-                variant="outlined"
-                density="comfortable"
-                required
-              ></v-text-field>
-            </v-col>
-            <v-col cols="12" sm="6">
-              <v-text-field
                 v-model="formModel.ipAddress"
                 label="Endereço IP *"
                 placeholder="Ex: 192.168.1.1"
                 variant="outlined"
                 density="comfortable"
+                :loading="autoIdentifying"
                 required
+              ></v-text-field>
+            </v-col>
+            <v-col cols="12" sm="6">
+              <v-text-field
+                v-model="formModel.name"
+                label="Nome do Equipamento *"
+                variant="outlined"
+                density="comfortable"
+                :hint="deviceNameHint"
+                persistent-hint
+                :append-inner-icon="canApplySuggestedName ? 'mdi-auto-fix' : undefined"
+                required
+                @click:append-inner="applySuggestedName"
+                @update:model-value="nameManuallyEdited = true"
               ></v-text-field>
             </v-col>
             <v-col cols="12" sm="6">
@@ -259,24 +265,28 @@
               </v-alert>
             </v-col>
 
-            <v-col v-if="!deviceToEdit" cols="12">
+            <v-col cols="12">
               <v-checkbox
-                v-model="configureLogsAfterCreate"
-                label="Configurar envio de logs (Syslog)"
+                v-model="configureLogsAfterSave"
+                :label="
+                  deviceToEdit
+                    ? 'Configurar ou reconfigurar Syslog após salvar'
+                    : 'Ativar log automaticamente (Syslog) após salvar'
+                "
                 color="primary"
                 hide-details
               ></v-checkbox>
               <v-alert
-                v-if="configureLogsAfterCreate"
+                v-if="configureLogsAfterSave"
                 type="info"
                 variant="tonal"
                 density="compact"
                 class="mt-2 rounded-lg"
                 icon="mdi-text-box-check-outline"
               >
-                Depois do cadastro, o sistema reaproveita o IP, o sistema, o fabricante e o modelo
-                informados para detectar a melhor configuração. Você só precisará fornecer a
-                credencial de acesso, usada uma única vez e nunca armazenada.
+                Ao salvar, o sistema abre a configuração com o IP, o sistema, a forma de acesso e o
+                endereço do NetMonitor já identificados. Você só precisará fornecer a credencial,
+                usada uma única vez e nunca armazenada.
               </v-alert>
             </v-col>
 
@@ -371,7 +381,13 @@
       <v-card-actions class="justify-end">
         <v-btn variant="text" @click="close">Cancelar</v-btn>
         <v-btn color="primary" :loading="saving" @click="save">
-          {{ configureLogsAfterCreate && !deviceToEdit ? 'Cadastrar e configurar logs' : 'Salvar' }}
+          {{
+            configureLogsAfterSave
+              ? deviceToEdit
+                ? 'Salvar e configurar logs'
+                : 'Salvar e ativar logs'
+              : 'Salvar'
+          }}
         </v-btn>
       </v-card-actions>
     </v-card>
@@ -423,16 +439,15 @@
   </v-dialog>
 
   <SyslogAutoSetupDialog
-    v-if="createdForLogSetup"
+    v-if="deviceForLogSetup"
+    :key="deviceForLogSetup.sessionId"
     v-model="autoSetupDialog"
-    :device-id="createdForLogSetup.id"
-    :device-name="createdForLogSetup.name"
-    :host="createdForLogSetup.ipAddress"
+    :target="deviceForLogSetup"
   />
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, reactive, computed, onBeforeUnmount, watch } from 'vue'
 import { useDevicesStore, type Device } from '@/stores/devices'
 import { useSitesStore, type Site } from '@/stores/sites'
 import { useSnmpTestStore } from '@/stores/snmpTest'
@@ -453,6 +468,7 @@ import {
   useOperatingSystemsStore,
   type IdentifyResult,
 } from '@/stores/operatingSystems'
+import { createLogSetupTarget, type LogSetupTarget } from '@/utils/syslogProvision'
 
 const props = defineProps<{
   modelValue: boolean
@@ -473,9 +489,11 @@ const systemsStore = useOperatingSystemsStore()
 
 const siteDialog = ref(false)
 const saving = ref(false)
-const configureLogsAfterCreate = ref(false)
+const configureLogsAfterSave = ref(false)
 const autoSetupDialog = ref(false)
-const createdForLogSetup = ref<Device | null>(null)
+const deviceForLogSetup = ref<Readonly<LogSetupTarget> | null>(null)
+let logSetupSequence = 0
+const autoIdentifying = ref(false)
 const snmpTestResult = ref<{ ok: boolean; message: string } | null>(null)
 const snmpIntervalConfirmation = ref(false)
 const originalSnmpPollIntervalSeconds = ref(15)
@@ -519,6 +537,34 @@ const formModel = reactive<{
   operatingSystem: AUTO_OPERATING_SYSTEM,
 })
 
+const identificacao = ref<IdentifyResult | null>(null)
+const identificacaoErro = ref('')
+const nameManuallyEdited = ref(false)
+
+const suggestedDeviceName = computed(() => identificacao.value?.suggestedName?.trim() || '')
+const canApplySuggestedName = computed(
+  () =>
+    Boolean(suggestedDeviceName.value) &&
+    suggestedDeviceName.value.toLocaleLowerCase() !== formModel.name.trim().toLocaleLowerCase()
+)
+const deviceNameHint = computed(() => {
+  if (!suggestedDeviceName.value) {
+    return formModel.ipAddress
+      ? 'O nome será sugerido quando o equipamento anunciá-lo.'
+      : 'Preencha o IP primeiro para tentar identificar o nome.'
+  }
+  if (canApplySuggestedName.value) {
+    return `Nome identificado: ${suggestedDeviceName.value}. Clique no ícone para usar.`
+  }
+  return 'Nome identificado automaticamente pelo equipamento.'
+})
+
+function applySuggestedName(): void {
+  if (!suggestedDeviceName.value) return
+  formModel.name = suggestedDeviceName.value
+  nameManuallyEdited.value = true
+}
+
 const availableParentDevices = computed(() => {
   return devicesStore.devices.filter((d) => d.id !== props.deviceToEdit?.id)
 })
@@ -532,8 +578,8 @@ const availableParentDevices = computed(() => {
  */
 const accessModeItems = computed(() =>
   accessModeOptions({
-    mode: props.deviceToEdit?.effectiveAccessMode,
-    reason: props.deviceToEdit?.accessModeReason,
+    mode: identificacao.value?.accessMode ?? props.deviceToEdit?.effectiveAccessMode,
+    reason: identificacao.value?.accessModeReason ?? props.deviceToEdit?.accessModeReason,
   })
 )
 
@@ -548,14 +594,15 @@ function accessModeItemProps(item: { subtitle: string; icon: string }): Record<s
  * subtítulo explica o critério em vez de anunciar um resultado inventado.
  */
 const operatingSystemItems = computed(() => {
-  const detectado = props.deviceToEdit?.effectiveOperatingSystem
-  const origem = props.deviceToEdit?.operatingSystemSource
+  const detectado =
+    identificacao.value?.operatingSystem ?? props.deviceToEdit?.effectiveOperatingSystem
+  const origem = identificacao.value?.source ?? props.deviceToEdit?.operatingSystemSource
   return [
     {
       value: AUTO_OPERATING_SYSTEM,
-      title: 'Detectar automaticamente',
+      title: detectado ? systemsStore.label(detectado) : 'Detectar automaticamente',
       subtitle: detectado
-        ? `Detectado: ${systemsStore.label(detectado)} — ${operatingSystemSourceLabel(origem).toLowerCase()}`
+        ? `Detectado automaticamente — ${operatingSystemSourceLabel(origem).toLowerCase()}`
         : 'Pelo SNMP do equipamento, ou pelo fabricante informado',
       icon: detectado ? systemsStore.icon(detectado) : 'mdi-auto-fix',
     },
@@ -577,43 +624,104 @@ function operatingSystemItemProps(item: {
   return { subtitle: item.subtitle, prependIcon: item.icon }
 }
 
-const operatingSystemIcon = computed(() =>
-  formModel.operatingSystem === AUTO_OPERATING_SYSTEM
-    ? 'mdi-auto-fix'
-    : systemsStore.icon(formModel.operatingSystem)
-)
-
-const identificacao = ref<IdentifyResult | null>(null)
-const identificacaoErro = ref('')
+const operatingSystemIcon = computed(() => {
+  if (formModel.operatingSystem !== AUTO_OPERATING_SYSTEM) {
+    return systemsStore.icon(formModel.operatingSystem)
+  }
+  const detected =
+    identificacao.value?.operatingSystem ?? props.deviceToEdit?.effectiveOperatingSystem
+  return detected ? systemsStore.icon(detected) : 'mdi-auto-fix'
+})
 
 /**
- * Consulta o equipamento e **adota** o resultado no seletor.
+ * Consulta o equipamento e atualiza a conclusão automática.
  *
- * Adotar, e não só informar: o operador clicou para acertar o campo, e deixá-lo
- * escolher de novo na lista depois de já ter a resposta seria trabalho repetido.
- * A conclusão fica visível com a evidência ao lado, então a adoção é conferível
- * — que é o que faltava quando a dedução acontecia em silêncio.
+ * Detectar não transforma a conclusão em declaração. Só uma escolha explícita
+ * na lista fixa o sistema no cadastro.
  */
 async function identificarSistema() {
+  if (identificationTimer) clearTimeout(identificationTimer)
+  identificationTimer = null
+  await executarIdentificacao(true)
+}
+
+let identificationTimer: ReturnType<typeof setTimeout> | null = null
+let identificationSequence = 0
+
+/**
+ * Identifica sem transformar uma dedução automática em declaração.
+ *
+ * Tanto o clique quanto a sonda disparada pelo IP apenas mostram a conclusão e
+ * preenchem inventário vazio; assim "Automático" continua recalculável.
+ */
+async function executarIdentificacao(mostrarErro: boolean) {
+  const ipConsultado = formModel.ipAddress.trim()
+  const sequencia = ++identificationSequence
   identificacao.value = null
   identificacaoErro.value = ''
+  if (!mostrarErro) autoIdentifying.value = true
   try {
     const achado = await systemsStore.identify({
-      ipAddress: formModel.ipAddress || null,
-      snmpEnabled: formModel.snmpEnabled,
+      ipAddress: ipConsultado || null,
       snmpVersion: formModel.snmpVersion,
       snmpCommunity: formModel.snmpCommunity || null,
       vendor: formModel.vendor || null,
       model: formModel.model || null,
     })
+    if (sequencia !== identificationSequence || ipConsultado !== formModel.ipAddress.trim()) return
     identificacao.value = achado
-    formModel.operatingSystem = achado.operatingSystem
+    if (!formModel.vendor.trim() && achado.suggestedVendor) {
+      formModel.vendor = achado.suggestedVendor
+    }
+    if (!formModel.model.trim() && achado.suggestedModel) {
+      formModel.model = achado.suggestedModel
+    }
+    const suggestedName = achado.suggestedName?.trim()
+    const changedDeviceIp =
+      Boolean(props.deviceToEdit) &&
+      originalIpAddress.value !== '' &&
+      ipConsultado !== originalIpAddress.value
+    if (
+      suggestedName &&
+      !nameManuallyEdited.value &&
+      ((!props.deviceToEdit && !formModel.name.trim()) || changedDeviceIp)
+    ) {
+      formModel.name = suggestedName
+    }
   } catch (erro) {
-    identificacaoErro.value =
-      erro instanceof Error && erro.message.trim()
-        ? erro.message.trim()
-        : 'Não foi possível identificar o sistema.'
+    if (sequencia === identificationSequence && mostrarErro) {
+      identificacaoErro.value =
+        erro instanceof Error && erro.message.trim()
+          ? erro.message.trim()
+          : 'Não foi possível identificar o sistema.'
+    }
+  } finally {
+    if (sequencia === identificationSequence) autoIdentifying.value = false
   }
+}
+
+function ipCompleto(valor: string): boolean {
+  const texto = valor.trim()
+  const partes = texto.split('.')
+  if (partes.length === 4) {
+    return partes.every(
+      (parte) => /^\d{1,3}$/.test(parte) && Number(parte) >= 0 && Number(parte) <= 255
+    )
+  }
+  return texto.includes(':') && /^[0-9a-f:]+$/i.test(texto)
+}
+
+function agendarIdentificacao(ip: string): void {
+  if (identificationTimer) clearTimeout(identificationTimer)
+  identificationSequence += 1
+  autoIdentifying.value = false
+  identificacao.value = null
+  identificacaoErro.value = ''
+  if (!props.modelValue || !ipCompleto(ip)) return
+  identificationTimer = setTimeout(() => {
+    identificationTimer = null
+    void executarIdentificacao(false)
+  }, 650)
 }
 
 const operatingSystemHint = computed(() =>
@@ -626,9 +734,12 @@ const accessModeHint = computed(() => {
   if (formModel.accessMode !== AUTO_ACCESS_MODE) {
     return 'Decide qual endereço deste servidor é gravado no equipamento ao ativar o log.'
   }
-  return props.deviceToEdit
-    ? 'O sistema decide sozinho. Declare apenas se a conclusão acima estiver errada.'
-    : 'O sistema decide depois de salvar, pela rota até o equipamento.'
+  if (identificacao.value) {
+    return 'Detectado pela rota e pelas redes cadastradas. Declare apenas se a conclusão acima estiver errada.'
+  }
+  return formModel.ipAddress
+    ? 'Identificando pela rota e pelas redes cadastradas…'
+    : 'Preencha o IP para o sistema identificar a forma de acesso.'
 })
 
 watch(
@@ -639,12 +750,25 @@ watch(
       if (sitesStore.sites.length === 0) sitesStore.fetchSites()
 
       snmpTestResult.value = null
-      configureLogsAfterCreate.value = false
+      configureLogsAfterSave.value = false
+      nameManuallyEdited.value = false
       identificacao.value = null
       identificacaoErro.value = ''
       // Sem isto a preferência só valeria depois de o operador visitar
       // Configurações na mesma sessão.
-      void prefsStore.fetchAll()
+      const comunidadeAntesDeCarregar = prefsStore.preferences.defaultSnmpCommunity
+      void prefsStore.fetchAll().then(() => {
+        const comunidadeFoiInformada = Boolean(
+          props.deviceToEdit?.snmpCommunity || props.prefillData?.snmpCommunity
+        )
+        if (
+          props.modelValue &&
+          !comunidadeFoiInformada &&
+          formModel.snmpCommunity === comunidadeAntesDeCarregar
+        ) {
+          formModel.snmpCommunity = prefsStore.preferences.defaultSnmpCommunity
+        }
+      })
       // O catálogo de sistemas é do servidor: é a mesma lista que a ativação de
       // log e o assistente da VPN usam.
       void systemsStore.fetchAll()
@@ -709,9 +833,25 @@ watch(
         formModel.operatingSystem = AUTO_OPERATING_SYSTEM
         originalSnmpPollIntervalSeconds.value = 15
       }
+      agendarIdentificacao(formModel.ipAddress)
+    } else {
+      identificationSequence += 1
+      if (identificationTimer) clearTimeout(identificationTimer)
+      identificationTimer = null
+      autoIdentifying.value = false
     }
   }
 )
+
+watch(
+  () => [formModel.ipAddress, formModel.snmpVersion, formModel.snmpCommunity] as const,
+  ([ip]) => agendarIdentificacao(ip)
+)
+
+onBeforeUnmount(() => {
+  identificationSequence += 1
+  if (identificationTimer) clearTimeout(identificationTimer)
+})
 
 function onUpdateModelValue(val: boolean) {
   emit('update:modelValue', val)
@@ -829,16 +969,25 @@ function payload(clearHistory = false): Partial<Device> {
   }
 }
 
+function prepareLogSetup(device: Device): void {
+  deviceForLogSetup.value = createLogSetupTarget(
+    ++logSetupSequence,
+    device,
+    formModel.operatingSystem,
+    identificacao.value?.operatingSystem
+  )
+  autoSetupDialog.value = true
+}
+
 async function persist(clearHistory = false) {
   if (!formModel.name || !formModel.ipAddress) return
   saving.value = true
   try {
     if (props.deviceToEdit && props.deviceToEdit.id) {
-      const success = await devicesStore.updateDevice(props.deviceToEdit.id, payload(clearHistory))
-      if (success) {
-        await devicesStore.fetchDevices()
-        const updated = devicesStore.devices.find((d) => d.id === props.deviceToEdit?.id)
-        if (updated) emit('saved', updated)
+      const updated = await devicesStore.updateDevice(props.deviceToEdit.id, payload(clearHistory))
+      if (updated) {
+        if (configureLogsAfterSave.value) prepareLogSetup(updated)
+        emit('saved', updated)
         close()
       }
     } else {
@@ -847,18 +996,19 @@ async function persist(clearHistory = false) {
         status: 'unknown' as const,
       })
       if (created) {
+        if (configureLogsAfterSave.value) prepareLogSetup(created)
         emit('saved', created)
         close()
-        if (configureLogsAfterCreate.value) {
-          createdForLogSetup.value = created
-          autoSetupDialog.value = true
-        }
       }
     }
   } finally {
     saving.value = false
   }
 }
+
+watch(autoSetupDialog, (isOpen) => {
+  if (!isOpen) deviceForLogSetup.value = null
+})
 </script>
 
 <style scoped>

@@ -191,25 +191,46 @@ impl AccessContext {
         self.deduz(device)
     }
 
+    /// A conclusão para um dispositivo que ainda está no formulário.
+    ///
+    /// Não existe id nem peer associado antes do cadastro, mas IP e redes já
+    /// bastam para distinguir LAN, faixa do túnel e endereço público. Manter
+    /// esta decisão aqui evita uma segunda implementação no frontend.
+    #[must_use]
+    pub fn resolve_draft(&self, ip_address: Option<&str>) -> ResolvedAccess {
+        self.deduz_campos(false, ip_address, None)
+    }
+
     /// A dedução, da evidência mais forte para a mais fraca.
     fn deduz(&self, device: &devices::Model) -> ResolvedAccess {
         // Peer é fato registrado, não inferência: existe uma linha ligando este
         // dispositivo ao servidor WireGuard.
-        if self.peers.contains(&device.id) {
+        self.deduz_campos(
+            self.peers.contains(&device.id),
+            device.ip_address.as_deref(),
+            device.network_id,
+        )
+    }
+
+    fn deduz_campos(
+        &self,
+        peer_do_tunel: bool,
+        ip_address: Option<&str>,
+        network_id: Option<i64>,
+    ) -> ResolvedAccess {
+        if peer_do_tunel {
             return deduzido(
                 AccessMode::Vpn,
                 "é um peer do túnel WireGuard deste servidor",
             );
         }
 
-        let ip = device
-            .ip_address
-            .as_deref()
+        let ip = ip_address
             .map(str::trim)
             .filter(|valor| !valor.is_empty())
             .and_then(|texto| texto.parse::<IpAddr>().ok());
 
-        if device.network_id.is_some() && device.network_id == self.vpn_network_id {
+        if network_id.is_some() && network_id == self.vpn_network_id {
             return deduzido(AccessMode::Vpn, "está cadastrado na rede do túnel");
         }
         if let (Some(IpAddr::V4(v4)), Some(cidr)) = (ip, self.vpn_cidr.as_deref()) {
@@ -327,6 +348,7 @@ mod tests {
             snmp_poll_interval_seconds: 15,
             access_mode: None,
             operating_system: None,
+            syslog_server_address: None,
             system_key: None,
             status: "unknown".to_owned(),
             last_seen_at: None,
@@ -421,6 +443,19 @@ mod tests {
         let resolvido = contexto().resolve(&dispositivo(1, Some("10.8.0.9")));
         assert_eq!(resolvido.mode, AccessMode::Vpn);
         assert!(resolvido.reason.contains("10.8.0.0/24"));
+    }
+
+    #[test]
+    fn o_rascunho_do_formulario_usa_a_mesma_deducao_do_dispositivo_salvo() {
+        let ctx = contexto();
+        let local = ctx.resolve_draft(Some("192.168.1.25"));
+        let vpn = ctx.resolve_draft(Some("10.8.0.25"));
+        let remoto = ctx.resolve_draft(Some("200.150.10.25"));
+
+        assert_eq!(local.mode, AccessMode::Local);
+        assert_eq!(vpn.mode, AccessMode::Vpn);
+        assert_eq!(remoto.mode, AccessMode::Remote);
+        assert!(!local.declared && !vpn.declared && !remoto.declared);
     }
 
     #[test]

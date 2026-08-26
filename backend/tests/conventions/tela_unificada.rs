@@ -100,27 +100,59 @@ fn a_aba_do_dispositivo_prioriza_monitores_ativos_sem_mutar_a_store() {
 }
 
 #[test]
-fn a_ativacao_de_syslog_so_comeca_no_cadastro_do_dispositivo() {
-    let cadastro = ler("components/DeviceDialog.vue");
+fn o_syslog_pode_ser_retomado_na_edicao_e_na_aba_do_dispositivo() {
+    let formulario = ler("components/DeviceDialog.vue");
     assert!(
-        cadastro.contains("Configurar envio de logs (Syslog)")
-            && cadastro.contains("SyslogAutoSetupDialog"),
-        "o cadastro precisa oferecer e encadear a configuração automática de syslog"
+        formulario.contains("Configurar ou reconfigurar Syslog após salvar")
+            && formulario.contains("configureLogsAfterSave")
+            && formulario.contains("Salvar e ativar logs")
+            && formulario.contains("Salvar e configurar logs")
+            && formulario.contains("SyslogAutoSetupDialog"),
+        "cadastro e edição precisam oferecer salvar e abrir o assistente de syslog"
     );
 
-    for tela in [
-        "pages/LogsPage.vue",
-        "pages/DeviceDetailPage.vue",
-        "components/devices/tabs/DeviceLogsTab.vue",
-    ] {
-        let conteudo = ler(tela);
-        assert!(
-            !conteudo.contains("SyslogAutoSetupDialog")
-                && !conteudo.contains("SyslogSetupDialog")
-                && !conteudo.contains("Configurar envio"),
-            "{tela} voltou a oferecer configuração fora do cadastro"
-        );
-    }
+    let aba = ler("components/devices/tabs/DeviceLogsTab.vue");
+    assert!(
+        aba.contains("Configurar Syslog")
+            && aba.contains("SyslogAutoSetupDialog")
+            && aba.contains("createLogSetupTarget"),
+        "a aba do dispositivo precisa permitir retomar a configuração depois"
+    );
+}
+
+#[test]
+fn o_formulario_identifica_ao_completar_o_ip_e_preserva_campos_sem_evidencia() {
+    let formulario = ler("components/DeviceDialog.vue");
+    assert!(
+        formulario.contains("agendarIdentificacao(ip)")
+            && formulario.contains("executarIdentificacao(false)")
+            && formulario.contains("!formModel.model.trim() && achado.suggestedModel")
+            && formulario.contains("achado.suggestedName?.trim()")
+            && formulario.find("v-model=\"formModel.ipAddress\"")
+                < formulario.find("v-model=\"formModel.name\"")
+            && formulario.contains("identificacao.value?.accessMode")
+            && !formulario.contains("formModel.operatingSystem = achado.operatingSystem"),
+        "IP precisa vir primeiro e sugerir nome, sistema, acesso e modelo sem converter detecção em declaração"
+    );
+
+    let ativacao = ler("components/logs/SyslogAutoSetupDialog.vue");
+    assert!(
+        ativacao.contains("<v-combobox")
+            && ativacao.contains("serverAddress.value = dicas?.serverAddress?.trim()")
+            && ativacao.contains("normalizeComboboxAddress(value)")
+            && ativacao.contains("{ immediate: true }")
+            && ativacao.contains("resolveProvisionOperatingSystem"),
+        "a ativação precisa inicializar o snapshot na montagem, preservar a sugestão e aceitar endereço livre no mesmo campo"
+    );
+
+    let store = ler("stores/logs.ts");
+    assert!(
+        store.contains("observedAddress")
+            && store.contains("observedApplicationAddress")
+            && store.contains("PROVISION_REQUEST_TIMEOUT_MS = 65_000")
+            && store.contains("{ timeoutMs: PROVISION_REQUEST_TIMEOUT_MS }"),
+        "o proxy não pode esconder o endereço externo e a ativação não pode herdar o timeout curto das APIs comuns"
+    );
 }
 
 #[test]

@@ -342,6 +342,7 @@ mod tests {
             snmp_poll_interval_seconds: 60,
             access_mode: None,
             operating_system: None,
+            syslog_server_address: None,
             system_key: None,
             status: "online".into(),
             last_seen_at: None,

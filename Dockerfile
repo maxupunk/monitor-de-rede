@@ -106,7 +106,7 @@ FROM debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639
 # supervisionar tanto o watcher quanto a aplicação.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       ca-certificates wireguard-tools iproute2 iptables tini \
+       ca-certificates curl wireguard-tools iproute2 iptables tini \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --create-home --shell /usr/sbin/nologin app

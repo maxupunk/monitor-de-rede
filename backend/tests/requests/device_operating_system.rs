@@ -5,8 +5,13 @@
 //! isso as asserções são sobre o que muda de comportamento — o sistema
 //! declarado no cadastro decide os comandos que a ativação de log vai enviar.
 
-use backend::app::App;
+use backend::{
+    app::App,
+    models::{discovery_results, discovery_runs, networks},
+};
+use chrono::Utc;
 use loco_rs::testing::prelude::*;
+use sea_orm::{ActiveModelTrait, Set};
 use serde_json::Value;
 use serial_test::serial;
 
@@ -85,7 +90,14 @@ async fn identificar_sem_evidencia_ao_vivo_recai_no_cadastro() {
 
         assert_eq!(corpo["operatingSystem"], "routeros");
         assert_eq!(corpo["source"], "cadastro");
-        assert!(corpo["sysDescr"].is_null(), "SNMP desligado não consulta");
+        assert_eq!(corpo["accessMode"], "local");
+        assert!(
+            corpo["accessModeReason"]
+                .as_str()
+                .is_some_and(|texto| texto.contains("privada") || texto.contains("rede")),
+            "a dedução de acesso precisa vir explicada: {}",
+            corpo["accessModeReason"]
+        );
         assert!(
             corpo["reason"]
                 .as_str()
@@ -115,6 +127,99 @@ async fn identificar_sem_ip_cai_no_cadastro_em_vez_de_falhar() {
         assert_eq!(corpo["probed"], false);
         assert!(corpo["sysDescr"].is_null());
         assert!(corpo["sshBanner"].is_null());
+        assert!(corpo["suggestedModel"].is_null());
+        assert!(corpo["suggestedVendor"].is_null());
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn identificar_reaproveita_fabricante_e_modelo_da_descoberta() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        autenticado(&mut request, &ctx).await;
+
+        let rede = networks::ActiveModel {
+            name: Set("Loopback de teste".into()),
+            cidr: Set("127.0.0.0/8".into()),
+            scan_enabled: Set(false),
+            scan_interval: Set(3_600),
+            active: Set(true),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .expect("criar rede");
+        let agora = Utc::now();
+        let run = discovery_runs::ActiveModel {
+            network_id: Set(rede.id),
+            status: Set("completed".into()),
+            started_at: Set(agora.into()),
+            finished_at: Set(Some(agora.into())),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .expect("criar descoberta");
+        discovery_results::ActiveModel {
+            discovery_run_id: Set(run.id),
+            ip_address: Set("127.0.0.1".into()),
+            hostname: Set(Some("bpi-r3-assistencia".into())),
+            vendor: Set(Some("OpenWrt Foundation".into())),
+            confidence: Set(95),
+            data: Set(Some(serde_json::json!({
+                "details": { "snmp": { "model": "OpenWrt One" } }
+            }))),
+            first_seen_at: Set(agora.into()),
+            last_seen_at: Set(agora.into()),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .expect("criar resultado");
+
+        let resposta = request
+            .post("/api/devices/identify")
+            .json(&serde_json::json!({ "ipAddress": "127.0.0.1" }))
+            .await;
+        assert_eq!(resposta.status_code(), 200, "{}", resposta.text());
+        let corpo: Value = serde_json::from_str(&resposta.text()).expect("json");
+
+        assert_eq!(corpo["suggestedVendor"], "OpenWrt Foundation");
+        assert_eq!(corpo["suggestedModel"], "OpenWrt One");
+        assert_eq!(corpo["suggestedName"], "bpi-r3-assistencia");
+        assert_eq!(corpo["operatingSystem"], "openwrt");
+        assert_eq!(corpo["accessMode"], "local");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn a_aba_de_logs_existe_sem_declaracao_manual_de_sistema() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        autenticado(&mut request, &ctx).await;
+
+        let device = cria_dispositivo(
+            &request,
+            serde_json::json!({
+                "name": "openwrt-auto", "type": "router",
+                "ipAddress": "192.168.77.16", "vendor": "OpenWrt"
+            }),
+        )
+        .await;
+        assert!(
+            device["operatingSystem"].is_null(),
+            "a detecção deve continuar automática"
+        );
+
+        let id = device["id"].as_i64().expect("id");
+        let response = request
+            .get(&format!("/api/devices/{id}/capabilities"))
+            .await;
+        assert_eq!(response.status_code(), 200, "{}", response.text());
+        let capabilities: Value = serde_json::from_str(&response.text()).expect("json");
+        assert_eq!(capabilities["logs"], true);
     })
     .await;
 }

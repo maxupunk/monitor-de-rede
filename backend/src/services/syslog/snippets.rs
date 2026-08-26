@@ -139,10 +139,42 @@ fn normaliza(server_address: &str) -> String {
 /// teste acusaria falha onde não há.
 #[must_use]
 pub fn test_command(sistema: &str) -> Option<String> {
+    test_command_for_message(sistema, "netmonitor: teste de envio de log")
+}
+
+/// Variante correlacionável usada pela ativação automática.
+///
+/// O marcador é gerado pelo backend e permite reconhecer a resposta mesmo
+/// quando a bridge do Docker mascara o IP e o hostname do equipamento é
+/// diferente do nome cadastrado.
+#[must_use]
+pub fn test_command_with_marker(sistema: &str, marker: &str) -> Option<String> {
+    test_command_for_message(
+        sistema,
+        &format!("netmonitor: teste de envio de log [{marker}]"),
+    )
+}
+
+fn test_command_for_message(sistema: &str, message: &str) -> Option<String> {
     RECEITAS
         .iter()
         .find(|receita| receita.sistema.eq_ignore_ascii_case(sistema.trim()))
-        .and_then(|receita| receita.teste.map(str::to_owned))
+        .and_then(|receita| receita.teste.map(|dialect| dialect.command(message)))
+}
+
+#[derive(Clone, Copy)]
+enum TestDialect {
+    RouterOs,
+    Logger,
+}
+
+impl TestDialect {
+    fn command(self, message: &str) -> String {
+        match self {
+            Self::RouterOs => format!(r#":log error "{message}""#),
+            Self::Logger => format!(r#"logger -p daemon.err "{message}""#),
+        }
+    }
 }
 
 /// Uma receita de sistema. Os comandos são função do alvo e da porta porque os
@@ -153,7 +185,7 @@ struct Receita {
     note: &'static str,
     comandos: fn(&str, u16) -> Vec<String>,
     /// Ver [`test_command`].
-    teste: Option<&'static str>,
+    teste: Option<TestDialect>,
 }
 
 const RECEITAS: &[Receita] = &[
@@ -179,7 +211,7 @@ const RECEITAS: &[Receita] = &[
         // `:log error` emite no tópico `error`, que a receita acabou de mandar
         // encaminhar. Emitir em `info` produziria uma linha que o próprio
         // equipamento não encaminha, e o teste acusaria falha onde não há.
-        teste: Some(":log error \"netmonitor: teste de envio de log\""),
+        teste: Some(TestDialect::RouterOs),
     },
     Receita {
         sistema: "openwrt",
@@ -195,7 +227,7 @@ const RECEITAS: &[Receita] = &[
             ]
         },
         // Atravessa o `logd`, que é quem encaminha para o `log_ip`.
-        teste: Some("logger -p daemon.err \"netmonitor: teste de envio de log\""),
+        teste: Some(TestDialect::Logger),
     },
     Receita {
         sistema: "linux",
@@ -209,7 +241,7 @@ const RECEITAS: &[Receita] = &[
                 "sudo systemctl restart rsyslog".to_owned(),
             ]
         },
-        teste: Some("logger -p daemon.err \"netmonitor: teste de envio de log\""),
+        teste: Some(TestDialect::Logger),
     },
     Receita {
         sistema: "ubiquiti",
@@ -227,7 +259,7 @@ const RECEITAS: &[Receita] = &[
             ]
         },
         // Fora do modo `configure`, que os comandos acima já fecharam.
-        teste: Some("logger -p daemon.err \"netmonitor: teste de envio de log\""),
+        teste: Some(TestDialect::Logger),
     },
 ];
 
@@ -344,6 +376,15 @@ mod tests {
                     "{sistema} tem comando multilinha: {comando:?}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn comando_de_teste_carrega_o_marcador_da_sessao() {
+        for sistema in systems() {
+            let comando = test_command_with_marker(sistema, "sessao-123")
+                .expect("receita com comando de teste");
+            assert!(comando.contains("[sessao-123]"), "{sistema}: {comando}");
         }
     }
 

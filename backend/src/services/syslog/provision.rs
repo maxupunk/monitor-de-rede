@@ -34,9 +34,15 @@
 
 use std::{net::IpAddr, sync::Arc, time::Duration};
 
+use sea_orm::DatabaseConnection;
 use tokio::time::timeout;
+use uuid::Uuid;
 
-use super::{snippets, sources::SourceRegistry};
+use super::{
+    resolver::{self, Resolution, Resolver},
+    snippets,
+    sources::{SeenSource, SourceRegistry},
+};
 use crate::services::{
     network_tools::mactelnet,
     shared::errors::{AppError, AppResult},
@@ -135,6 +141,9 @@ pub struct ProvisionOutcome {
     /// Se chegou log deste dispositivo antes do teto. `None` quando não havia
     /// como confirmar (ingestão desligada).
     pub confirmed: Option<bool>,
+    /// Origem exata da linha de teste desta sessão. Uso interno para associar
+    /// fontes mascaradas pelo Docker sem depender do nome cadastrado.
+    pub observed_source: Option<SeenSource>,
 }
 
 /// Entra no equipamento, roda os comandos e espera a primeira mensagem.
@@ -159,33 +168,43 @@ pub async fn run(
         ))
     })?;
 
-    let antes = sources.map(|registro| marcas(registro, device_id));
+    let marker = format!("device-{device_id}-{}", Uuid::new_v4().simple());
+    let test_command = snippets::test_command_with_marker(&pedido.operating_system, &marker);
+    let pending =
+        PendingConfirmation::new(sources.map(Arc::as_ref), test_command.is_some(), marker);
 
-    let transcript = timeout(TETO_DA_SESSAO, executa(pedido, &comandos))
-        .await
-        .map_err(|_| {
-            AppError::business_rule(
-                "O equipamento não concluiu a configuração dentro do tempo limite. \
+    let transcript = timeout(
+        TETO_DA_SESSAO,
+        executa(pedido, &comandos, test_command.as_deref()),
+    )
+    .await
+    .map_err(|_| {
+        AppError::business_rule(
+            "O equipamento não concluiu a configuração dentro do tempo limite. \
                  Verifique se o usuário informado tem permissão para alterar o log.",
-            )
-        })??;
+        )
+    })??;
 
-    let confirmed = match (sources, antes) {
-        (Some(registro), Some(antes)) => {
-            Some(aguarda_primeira_mensagem(registro, device_id, antes).await)
-        }
-        _ => None,
+    let observed_source = match pending.registry() {
+        Some(registro) => aguarda_primeira_mensagem(registro, pending.marker()).await,
+        None => None,
     };
+    let confirmed = sources.map(|_| observed_source.is_some());
 
     Ok(ProvisionOutcome {
         commands: comandos,
         transcript: raspa(&transcript, &pedido.password),
         confirmed,
+        observed_source,
     })
 }
 
 /// Abre a sessão do protocolo escolhido e despeja os comandos nela.
-async fn executa(pedido: &ProvisionRequest, comandos: &[String]) -> AppResult<String> {
+async fn executa(
+    pedido: &ProvisionRequest,
+    comandos: &[String],
+    test_command: Option<&str>,
+) -> AppResult<String> {
     let mut sessao = match pedido.protocol {
         Protocol::Ssh => Sessao::Ssh(Box::new(ssh::abre(pedido).await?)),
         Protocol::Telnet => Sessao::Telnet(Box::new(telnet::abre(pedido).await?)),
@@ -225,8 +244,8 @@ async fn executa(pedido: &ProvisionRequest, comandos: &[String]) -> AppResult<St
     // "configurei e o caminho está bloqueado". Sem ela, o silêncio depois da
     // ativação é ambíguo: as regras enviadas cobrem tópicos que só falam quando
     // algo acontece, e um roteador saudável pode passar horas sem dizer nada.
-    if let Some(teste) = snippets::test_command(&pedido.operating_system) {
-        sessao.envia_linha(&teste).await?;
+    if let Some(teste) = test_command {
+        sessao.envia_linha(teste).await?;
         let saida = sessao.le_ate_silenciar().await?;
         transcript.push_str(&format!("\n$ {teste}\n{saida}"));
     }
@@ -255,30 +274,80 @@ fn raspa(transcript: &str, senha: &str) -> String {
     transcript.replace(senha, "********")
 }
 
-/// Quantas mensagens já haviam chegado deste dispositivo.
-fn marcas(sources: &Arc<SourceRegistry>, device_id: i64) -> u64 {
-    sources
-        .list()
-        .iter()
-        .filter(|fonte| fonte.device_id == Some(device_id))
-        .map(|fonte| fonte.message_count)
-        .sum()
+/// Mantém a observação registrada somente durante esta ativação, inclusive se
+/// a sessão falhar ou for cancelada pelo cliente.
+struct PendingConfirmation<'a> {
+    registry: Option<&'a SourceRegistry>,
+    marker: String,
 }
 
-/// Espera a contagem subir. É o "está funcionando" da tela.
-async fn aguarda_primeira_mensagem(
-    sources: &Arc<SourceRegistry>,
-    device_id: i64,
-    antes: u64,
-) -> bool {
+impl<'a> PendingConfirmation<'a> {
+    fn new(registry: Option<&'a SourceRegistry>, has_test: bool, marker: String) -> Self {
+        let registry = registry.filter(|_| has_test);
+        if let Some(registry) = registry {
+            registry.expect_confirmation(&marker);
+        }
+        Self { registry, marker }
+    }
+
+    const fn registry(&self) -> Option<&SourceRegistry> {
+        self.registry
+    }
+
+    fn marker(&self) -> &str {
+        &self.marker
+    }
+}
+
+impl Drop for PendingConfirmation<'_> {
+    fn drop(&mut self) {
+        if let Some(registry) = self.registry {
+            registry.forget_confirmation(&self.marker);
+        }
+    }
+}
+
+/// Espera a linha marcada desta sessão. É o "está funcionando" da tela e não
+/// pode ser confundida com mensagens antigas ou com outro dispositivo.
+async fn aguarda_primeira_mensagem(sources: &SourceRegistry, marker: &str) -> Option<SeenSource> {
     let ate = tokio::time::Instant::now() + TETO_DA_CONFIRMACAO;
     while tokio::time::Instant::now() < ate {
-        if marcas(sources, device_id) > antes {
-            return true;
+        if let Some(source) = sources.confirmation(marker) {
+            return Some(source);
         }
         tokio::time::sleep(Duration::from_millis(400)).await;
     }
-    false
+    None
+}
+
+/// Associa ao dispositivo a origem comprovada pela linha marcada emitida
+/// dentro da sessão autenticada. Assim um hostname diferente do nome de
+/// cadastro funciona mesmo quando o Docker mascara o IP real do roteador.
+///
+/// # Errors
+///
+/// Propaga falhas de persistência. Uma origem mascarada sem hostname não pode
+/// ser vinculada, pois a chave seria o gateway compartilhado por todo o parque.
+pub async fn associate_confirmed_source(
+    db: &DatabaseConnection,
+    resolver: &Resolver,
+    sources: &SourceRegistry,
+    device_id: i64,
+    source: &SeenSource,
+) -> AppResult<()> {
+    if source.device_id == Some(device_id) {
+        return Ok(());
+    }
+    if source.masked && source.hostname.is_none() {
+        return Err(AppError::business_rule(
+            "A linha de teste chegou por um gateway compartilhado, mas sem hostname; não é seguro vincular esse endereço a um único dispositivo.",
+        ));
+    }
+
+    resolver::bind(db, &source.bind_key, Some(device_id)).await?;
+    resolver.invalidate().await;
+    sources.reclassify(&source.bind_key, &Resolution::Device(device_id));
+    Ok(())
 }
 
 /// Uma sessão aberta, de qualquer um dos dois protocolos.

@@ -91,6 +91,9 @@ impl SeenSource {
 #[derive(Default)]
 pub struct SourceRegistry {
     fontes: Mutex<HashMap<String, SeenSource>>,
+    /// Confirmações efêmeras aguardadas por ativações em andamento. O valor só
+    /// é preenchido pela linha que contém o marcador aleatório daquela sessão.
+    confirmacoes: Mutex<HashMap<String, Option<SeenSource>>>,
 }
 
 impl SourceRegistry {
@@ -165,6 +168,48 @@ impl SourceRegistry {
         // Truncar aqui, e não na tela: guardar linha de firewall inteira de mil
         // fontes é memória gasta para mostrar as primeiras palavras.
         entrada.last_message = mensagem.chars().take(200).collect();
+        let fonte_atual = entrada.clone();
+        drop(fontes);
+
+        // O registro acontece no caminho de ingestão, antes que outra mensagem
+        // possa substituir `last_message`. Assim a confirmação não perde a
+        // linha de teste para um log emitido logo depois pelo próprio logd.
+        let mut confirmacoes = self
+            .confirmacoes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        for (marcador, confirmada) in confirmacoes.iter_mut() {
+            if confirmada.is_none() && mensagem.contains(marcador) {
+                *confirmada = Some(fonte_atual.clone());
+            }
+        }
+    }
+
+    /// Começa a observar uma mensagem correlacionada a uma ativação.
+    pub fn expect_confirmation(&self, marker: &str) {
+        self.confirmacoes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(marker.to_owned(), None);
+    }
+
+    /// Resultado atual, sem encerrar a observação.
+    #[must_use]
+    pub fn confirmation(&self, marker: &str) -> Option<SeenSource> {
+        self.confirmacoes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(marker)
+            .cloned()
+            .flatten()
+    }
+
+    /// Encerra a observação, com sucesso ou timeout.
+    pub fn forget_confirmation(&self, marker: &str) {
+        self.confirmacoes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(marker);
     }
 
     /// O que se sabe de uma origem específica.
@@ -286,6 +331,34 @@ mod tests {
         assert_eq!(fontes[0].message_count, 3);
         assert_eq!(fontes[0].dropped_count, 3);
         assert_eq!(registro.unknown_count(), 1);
+    }
+
+    #[test]
+    fn a_confirmacao_captura_a_linha_antes_que_o_log_seguinte_a_substitua() {
+        let registro = SourceRegistry::create();
+        registro.expect_confirmation("sessao-123");
+        registro.record(
+            "172.18.0.1",
+            true,
+            &Resolution::Unknown,
+            Some("roteador-real"),
+            "netmonitor: teste de envio de log [sessao-123]",
+            agora(),
+        );
+        registro.record(
+            "172.18.0.1",
+            true,
+            &Resolution::Unknown,
+            Some("roteador-real"),
+            "log emitido logo depois",
+            agora(),
+        );
+
+        let confirmada = registro.confirmation("sessao-123").expect("confirmação");
+        assert_eq!(confirmada.bind_key, "host:roteador-real");
+        assert!(confirmada.last_message.contains("sessao-123"));
+        registro.forget_confirmation("sessao-123");
+        assert!(registro.confirmation("sessao-123").is_none());
     }
 
     #[test]

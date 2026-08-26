@@ -26,6 +26,22 @@ export type IdentifyResult = {
    */
   sshBanner: string | null
   /**
+   * Dados de inventário que o formulário pode preencher sem adivinhar.
+   * Nulos quando a sonda/descoberta não trouxe evidência suficiente.
+   */
+  suggestedVendor: string | null
+  suggestedModel: string | null
+  /**
+   * Nome anunciado pelo próprio equipamento, preferencialmente via
+   * `sysName`; a tela só o aplica enquanto o operador não tiver digitado.
+   */
+  suggestedName: string | null
+  /**
+   * Forma de acesso deduzida pela mesma regra usada depois do cadastro.
+   */
+  accessMode: string
+  accessModeReason: string
+  /**
    * Se alguma evidência ao vivo chegou. Falso significa que a conclusão saiu
    * só do cadastro — e a tela precisa dizer isso em vez de anunciar uma
    * detecção que não aconteceu.

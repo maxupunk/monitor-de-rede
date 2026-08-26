@@ -13,6 +13,8 @@ pub const OID_SYS_UPTIME: &str = "1.3.6.1.2.1.1.3.0";
 pub const OID_SYS_CONTACT: &str = "1.3.6.1.2.1.1.4.0";
 pub const OID_SYS_NAME: &str = "1.3.6.1.2.1.1.5.0";
 pub const OID_SYS_LOCATION: &str = "1.3.6.1.2.1.1.6.0";
+pub const OID_ENT_PHYSICAL_MFG_NAME: &str = "1.3.6.1.2.1.47.1.1.1.1.12.1";
+pub const OID_ENT_PHYSICAL_MODEL_NAME: &str = "1.3.6.1.2.1.47.1.1.1.1.13.1";
 
 #[derive(Debug, Default, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -23,6 +25,9 @@ pub struct SnmpSystemInfo {
     pub sys_contact: Option<String>,
     pub sys_name: Option<String>,
     pub sys_location: Option<String>,
+    /// Fabricante e modelo do chassi, quando o agente implementa ENTITY-MIB.
+    pub hardware_vendor: Option<String>,
+    pub hardware_model: Option<String>,
 }
 
 impl SnmpSystemInfo {
@@ -56,7 +61,26 @@ pub async fn collect_system(client: &SnmpClient) -> Result<SnmpSystemInfo, SnmpE
         sys_contact: text(&values, OID_SYS_CONTACT),
         sys_name: text(&values, OID_SYS_NAME),
         sys_location: text(&values, OID_SYS_LOCATION),
+        hardware_vendor: None,
+        hardware_model: None,
     })
+}
+
+/// Tenta enriquecer a identidade com o chassi sem comprometer o `system`.
+///
+/// ENTITY-MIB é opcional. A consulta fica separada porque agentes SNMPv1 podem
+/// rejeitar o pacote inteiro quando recebem um OID que não conhecem; nesse caso
+/// ainda preservamos `sysDescr`, `sysObjectID` e o restante da identificação.
+pub async fn collect_hardware(
+    client: &SnmpClient,
+) -> Result<(Option<String>, Option<String>), SnmpError> {
+    let values = client
+        .get(&[OID_ENT_PHYSICAL_MFG_NAME, OID_ENT_PHYSICAL_MODEL_NAME])
+        .await?;
+    Ok((
+        text(&values, OID_ENT_PHYSICAL_MFG_NAME),
+        text(&values, OID_ENT_PHYSICAL_MODEL_NAME),
+    ))
 }
 
 /// `ifTable` — RFC 1213.

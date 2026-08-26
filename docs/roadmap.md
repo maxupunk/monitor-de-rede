@@ -370,12 +370,24 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
   - **Esforço:** Pequeno
   - **Arquivos:** `frontend/src/components/DeviceDialog.vue`, `frontend/src/pages/{LogsPage.vue,DeviceDetailPage.vue}`, `frontend/src/components/devices/tabs/{DeviceLogsTab.vue,DeviceOverviewTab.vue}`, `frontend/src/composables/useInfiniteCursor.ts`, `frontend/tests/composables/useInfiniteCursor.spec.ts`, `backend/tests/{requests/syslog_api.rs,conventions/tela_unificada.rs}`
   - **Implementado:**
-    - Ativação automática de syslog iniciada exclusivamente no cadastro do dispositivo, reaproveitando IP, sistema, fabricante, modelo e modo de acesso.
+    - Ativação automática de syslog iniciada exclusivamente no cadastro do dispositivo, reaproveitando os dados salvos antes de abrir o assistente.
     - Aba de logs protegida por escopo visual e descarte de respostas assíncronas obsoletas, impedindo que registros de um dispositivo apareçam em outro.
     - Resumo de tráfego por interface reposicionado antes da estabilidade dos monitores na Visão Geral.
 
 - [x] **Prioridade visual para monitores ativos no dispositivo** 🟢 Concluído
   - A aba Monitores de `/devices/{id}` lista os ativos primeiro sem alterar a store compartilhada nem a ordem da página global.
+
+- [x] **Identificação assistida e fluxo único de ativação de syslog** 🟢 Concluído
+  - O formulário sonda automaticamente um IP completo, mantendo Sistema e Forma de acesso em modo automático com a conclusão e o motivo visíveis.
+  - Fabricante e modelo só são preenchidos quando a descoberta ou a ENTITY-MIB fornecem evidência; valores informados pelo operador nunca são sobrescritos.
+  - O cadastro oferece “Salvar e ativar logs”, e o endereço detectado do NetMonitor não é mais descartado quando ainda não existe como entrada nomeada.
+  - Os campos automáticos exibem diretamente a conclusão efetiva sem congelá-la como declaração manual, e respostas atrasadas são descartadas por IP e sessão.
+  - A ativação usa um alvo imutável do dispositivo recém-salvo e um único autocomplete para sugestão, catálogo e endereço livre.
+  - O assistente aplica o snapshot já na primeira montagem; em container bridge, o backend combina a rota com o endereço externo observado na sessão e nunca sugere o IP interno/gateway do Docker.
+  - A ativação usa um timeout HTTP próprio, maior que a sessão SSH e a confirmação do log; operações comuns continuam com o teto curto de 15 segundos.
+  - A linha de teste leva um marcador efêmero por sessão; quando o Docker mascara o IP, sua origem é associada ao dispositivo autenticado sem vincular o gateway compartilhado.
+  - A configuração de Syslog pode ser retomada pela edição e pela aba Logs de qualquer dispositivo; o IP vem primeiro e a identificação sugere o nome anunciado via SNMP/descoberta sem sobrescrever texto digitado.
+  - O último destino aplicado é isolado por dispositivo; valores livres são normalizados e adicionados ao catálogo global sem duplicatas.
 
 ---
 

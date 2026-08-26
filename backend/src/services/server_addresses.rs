@@ -42,7 +42,7 @@
 
 use std::{collections::HashMap, net::IpAddr};
 
-use sea_orm::{DatabaseConnection, EntityTrait};
+use sea_orm::{ConnectionTrait, DatabaseConnection, EntityTrait};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -159,7 +159,7 @@ pub struct CustomAddress {
 /// # Errors
 ///
 /// Propaga erro do banco.
-pub async fn stored(db: &DatabaseConnection) -> AppResult<StoredAddresses> {
+pub async fn stored<C: ConnectionTrait>(db: &C) -> AppResult<StoredAddresses> {
     Ok(system_settings::Model::get(db, STORAGE_KEY)
         .await?
         .and_then(|linha| linha.value)
@@ -172,7 +172,7 @@ pub async fn stored(db: &DatabaseConnection) -> AppResult<StoredAddresses> {
 /// # Errors
 ///
 /// Endereço inutilizável, rótulo vazio, ou erro do banco.
-pub async fn save(db: &DatabaseConnection, mut documento: StoredAddresses) -> AppResult<()> {
+pub async fn save<C: ConnectionTrait>(db: &C, mut documento: StoredAddresses) -> AppResult<()> {
     // Descartar os brancos **antes** de validar: correção em branco significa
     // "voltar ao detectado", e validá-la primeiro tornaria isso impossível —
     // string vazia não passa em nenhum crivo de endereço.
@@ -273,14 +273,50 @@ fn valida_endereco(valor: &str, campo: &str) -> AppResult<()> {
 ///
 /// Propaga erro do banco.
 pub async fn list(db: &DatabaseConnection, nat: &NatDetector) -> AppResult<Vec<ServerAddress>> {
+    resolved_list(db, nat, da_rede_local(nat), false).await
+}
+
+/// Lista usada ao configurar um equipamento específico.
+///
+/// Em rede bridge a rota do processo termina no IP interno do container. Nesse
+/// caso, para equipamentos da LAN, o endereço pelo qual a interface web foi
+/// acessada é a observação do lado de fora da tradução do Docker. Ele só entra
+/// quando a rota nativa não trouxe uma resposta e nunca vence uma correção do
+/// operador.
+pub async fn list_for_provision(
+    db: &DatabaseConnection,
+    nat: &NatDetector,
+    device: &devices::Model,
+    access: &access::ResolvedAccess,
+    observed_address: Option<&str>,
+) -> AppResult<Vec<ServerAddress>> {
+    let routed = da_rede_local(nat);
+    let observed = routed
+        .is_none()
+        .then(|| observed_lan_address(device, access, nat, observed_address))
+        .flatten();
+    let observed_used = observed.is_some();
+    resolved_list(db, nat, routed.or(observed), observed_used).await
+}
+
+async fn resolved_list(
+    db: &DatabaseConnection,
+    nat: &NatDetector,
+    lan_address: Option<String>,
+    observed_lan: bool,
+) -> AppResult<Vec<ServerAddress>> {
     let documento = stored(db).await?;
     let (vpn_address, public_endpoint) = do_servidor_vpn(db).await?;
 
     let mut lista = vec![
-        monta(AddressKind::Lan, da_rede_local(nat), &documento, nat),
+        monta(AddressKind::Lan, lan_address, &documento, nat),
         monta(AddressKind::Vpn, vpn_address, &documento, nat),
         monta(AddressKind::Public, public_endpoint, &documento, nat),
     ];
+    if observed_lan && !lista[0].overridden {
+        lista[0].source =
+            "endereço externo observado antes da bridge do Docker nesta sessão".to_owned();
+    }
     lista.extend(documento.custom.iter().map(|entrada| ServerAddress {
         id: entrada.id.clone(),
         kind: AddressKind::Custom,
@@ -292,6 +328,37 @@ pub async fn list(db: &DatabaseConnection, nat: &NatDetector) -> AppResult<Vec<S
         source: "definido por você".to_owned(),
     }));
     Ok(lista)
+}
+
+fn observed_lan_address(
+    device: &devices::Model,
+    access: &access::ResolvedAccess,
+    nat: &NatDetector,
+    raw: Option<&str>,
+) -> Option<String> {
+    if access.mode != access::AccessMode::Local {
+        return None;
+    }
+    let clean = hints::sanitiza_endereco(raw)?;
+    let normalized = clean
+        .parse::<IpAddr>()
+        .map_or_else(|_| clean.to_ascii_lowercase(), |ip| ip.to_string());
+    if normalized
+        .parse::<IpAddr>()
+        .is_ok_and(|address| nat.is_masked(address))
+    {
+        return None;
+    }
+    let is_device_address = device.ip_address.as_deref().is_some_and(|device_address| {
+        let device_address = device_address.trim();
+        device_address.eq_ignore_ascii_case(&normalized)
+            || device_address
+                .parse::<IpAddr>()
+                .ok()
+                .zip(normalized.parse::<IpAddr>().ok())
+                .is_some_and(|(left, right)| left == right)
+    });
+    (!is_device_address).then_some(normalized)
 }
 
 fn monta(
@@ -691,6 +758,47 @@ mod tests {
             .expect("gravar lixo");
         let lista = list(&db, &NatDetector::none()).await.expect("lista");
         assert_eq!(lista.len(), 3, "os detectados continuam de pé");
+    }
+
+    #[tokio::test]
+    async fn o_endereco_observado_antes_do_docker_so_completa_a_rede_local() {
+        let db = banco().await;
+        let dispositivo = devices::ActiveModel {
+            name: Set("roteador".to_owned()),
+            r#type: Set("router".to_owned()),
+            status: Set("online".to_owned()),
+            ip_address: Set(Some("10.0.0.2".to_owned())),
+            ..Default::default()
+        }
+        .insert(&db)
+        .await
+        .expect("dispositivo");
+        let local = access::ResolvedAccess {
+            mode: access::AccessMode::Local,
+            declared: false,
+            reason: "IP privado".to_owned(),
+        };
+        let remoto = access::ResolvedAccess {
+            mode: access::AccessMode::Remote,
+            declared: false,
+            reason: "IP público".to_owned(),
+        };
+        let nat = NatDetector::none();
+
+        assert_eq!(
+            observed_lan_address(&dispositivo, &local, &nat, Some(" 10.0.0.10 ")).as_deref(),
+            Some("10.0.0.10")
+        );
+        assert!(observed_lan_address(&dispositivo, &local, &nat, Some("localhost")).is_none());
+        assert!(observed_lan_address(&dispositivo, &local, &nat, Some("10.0.0.2")).is_none());
+        assert!(
+            observed_lan_address(&dispositivo, &local, &nat, Some("172.24.0.1")).is_none(),
+            "gateway da bridge não pode ser gravado no roteador"
+        );
+        assert!(
+            observed_lan_address(&dispositivo, &remoto, &nat, Some("10.0.0.10")).is_none(),
+            "o host da interface web não substitui o endereço público"
+        );
     }
 
     #[tokio::test]

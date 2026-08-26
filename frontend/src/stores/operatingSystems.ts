@@ -9,7 +9,6 @@ export type { OperatingSystemOption, IdentifyResult }
 /** Corpo de `POST /api/devices/identify` — vem do formulário, não de um id. */
 export interface IdentifyPayload {
   ipAddress: string | null
-  snmpEnabled: boolean
   snmpVersion: string | null
   snmpCommunity: string | null
   vendor: string | null

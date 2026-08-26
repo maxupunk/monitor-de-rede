@@ -181,7 +181,11 @@
 
           <!-- Aba Logs: syslog recebido deste dispositivo -->
           <v-window-item value="logs">
-            <DeviceLogsTab :device-id="deviceId" />
+            <DeviceLogsTab
+              v-if="detailStore.device"
+              :device-id="deviceId"
+              :device="detailStore.device"
+            />
           </v-window-item>
 
           <!-- Aba VPN -->
