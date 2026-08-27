@@ -282,22 +282,52 @@ async fn fetch_gauge_metrics(
     }
 
     if is_traffic {
-        if let Some(if_index) = monitor
+        let configured_index = monitor
             .configuration
             .get("ifIndex")
             .and_then(serde_json::Value::as_i64)
-        {
-            if let Some(intf) = device_interfaces::Entity::find()
+            .map(|v| v as i32);
+        let configured_name = monitor
+            .configuration
+            .get("ifName")
+            .and_then(serde_json::Value::as_str)
+            .or_else(|| monitor.name.strip_prefix("Interface "));
+
+        let intf = if let Some(index) = configured_index {
+            device_interfaces::Entity::find()
                 .filter(crate::models::_entities::device_interfaces::Column::DeviceId.eq(device_id))
                 .filter(
-                    crate::models::_entities::device_interfaces::Column::SnmpIndex
-                        .eq(Some(if_index as i32)),
+                    crate::models::_entities::device_interfaces::Column::SnmpIndex.eq(Some(index)),
                 )
                 .one(db)
                 .await?
-            {
-                query = query.filter(metrics_entity::Column::InterfaceId.eq(Some(intf.id)));
+        } else {
+            None
+        };
+
+        let intf = match intf {
+            Some(i) => Some(i),
+            None => {
+                if let Some(name) = configured_name {
+                    device_interfaces::Entity::find()
+                        .filter(
+                            crate::models::_entities::device_interfaces::Column::DeviceId
+                                .eq(device_id),
+                        )
+                        .filter(
+                            crate::models::_entities::device_interfaces::Column::Name
+                                .eq(name.trim()),
+                        )
+                        .one(db)
+                        .await?
+                } else {
+                    None
+                }
             }
+        };
+
+        if let Some(intf) = intf {
+            query = query.filter(metrics_entity::Column::InterfaceId.eq(Some(intf.id)));
         }
     }
 

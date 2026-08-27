@@ -190,7 +190,7 @@ async fn interface_status(
     config: &SnmpCheckerConfig,
     metric: &str,
 ) -> Result<SnmpObservation, SnmpError> {
-    let index = interface_index(config)?;
+    let index = resolve_interface_index(client, config).await?;
     let admin_oid = format!("{OID_IF_ADMIN_STATUS}.{index}");
     let oper_oid = format!("{OID_IF_OPER_STATUS}.{index}");
     let values = client.get(&[&admin_oid, &oper_oid]).await?;
@@ -224,7 +224,7 @@ async fn interface_traffic(
     client: &SnmpClient,
     config: &SnmpCheckerConfig,
 ) -> Result<SnmpObservation, SnmpError> {
-    let index = interface_index(config)?;
+    let index = resolve_interface_index(client, config).await?;
     let hc_in = format!("{OID_IF_HC_IN_OCTETS}.{index}");
     let hc_out = format!("{OID_IF_HC_OUT_OCTETS}.{index}");
     let low_in = format!("{OID_IF_IN_OCTETS}.{index}");
@@ -240,9 +240,11 @@ async fn interface_traffic(
                 .and_then(Option::as_ref)
                 .and_then(|v| v.number()),
         );
-    let (in_octets, out_octets, bits) = high_capacity
-        .map(|(in_octets, out_octets)| (in_octets, out_octets, 64))
-        .unwrap_or((value(&values, &low_in)?, value(&values, &low_out)?, 32));
+    let (in_octets, out_octets, bits) = if let Some((in_octets, out_octets)) = high_capacity {
+        (in_octets, out_octets, 64)
+    } else {
+        (value(&values, &low_in)?, value(&values, &low_out)?, 32)
+    };
     Ok(SnmpObservation {
         metric: "traffic".into(),
         status: MonitorStatus::Up,
@@ -272,11 +274,45 @@ async fn interface_traffic(
     })
 }
 
-fn interface_index(config: &SnmpCheckerConfig) -> Result<i32, SnmpError> {
-    config
-        .if_index
-        .filter(|index| *index > 0)
-        .ok_or_else(|| SnmpError::InvalidConfig("ifIndex é obrigatório".into()))
+async fn resolve_interface_index(
+    client: &SnmpClient,
+    config: &SnmpCheckerConfig,
+) -> Result<i32, SnmpError> {
+    if let Some(index) = config.if_index.filter(|index| *index > 0) {
+        return Ok(index);
+    }
+    let Some(target_name) = config
+        .if_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    else {
+        return Err(SnmpError::InvalidConfig(
+            "ifIndex ou ifName é obrigatório".into(),
+        ));
+    };
+
+    let (base_descr, x_name) = tokio::join!(
+        client.walk("1.3.6.1.2.1.2.2.1.2"),
+        client.walk("1.3.6.1.2.1.31.1.1.1.1")
+    );
+    let entries = x_name
+        .unwrap_or_default()
+        .into_iter()
+        .chain(base_descr.unwrap_or_default());
+    for entry in entries {
+        if let Some((_, index)) =
+            crate::services::snmp::collectors::oid_column_and_index(&entry.oid)
+        {
+            let name = entry.value.text();
+            if name.trim().eq_ignore_ascii_case(target_name) {
+                return Ok(index);
+            }
+        }
+    }
+    Err(SnmpError::InvalidConfig(format!(
+        "Interface '{target_name}' não encontrada no agente SNMP"
+    )))
 }
 
 fn value(

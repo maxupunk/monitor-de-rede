@@ -277,24 +277,30 @@ pub fn parse_traffic(
         }
     }
     let recorded_at = Utc::now();
-    counters
+    let all_indexes = counters
+        .keys()
+        .chain(high.keys())
+        .copied()
+        .collect::<std::collections::BTreeSet<_>>();
+    all_indexes
         .into_iter()
-        .filter_map(|(if_index, fields)| {
+        .filter_map(|if_index| {
             let hc = high.get(&if_index);
+            let fields = counters.get(&if_index);
             let in_octets = hc
                 .and_then(|values| values.get(&6))
                 .copied()
-                .or_else(|| fields.get(&10).copied())?;
+                .or_else(|| fields.and_then(|f| f.get(&10)).copied())?;
             let out_octets = hc
                 .and_then(|values| values.get(&10))
                 .copied()
-                .or_else(|| fields.get(&16).copied())?;
+                .or_else(|| fields.and_then(|f| f.get(&16)).copied())?;
             Some(InterfaceTraffic {
                 if_index,
                 in_octets,
                 out_octets,
-                in_errors: fields.get(&14).copied().unwrap_or_default(),
-                out_errors: fields.get(&20).copied().unwrap_or_default(),
+                in_errors: fields.and_then(|f| f.get(&14)).copied().unwrap_or_default(),
+                out_errors: fields.and_then(|f| f.get(&20)).copied().unwrap_or_default(),
                 counter_bits: if hc
                     .map(|values| values.contains_key(&6) || values.contains_key(&10))
                     .unwrap_or(false)
@@ -351,7 +357,7 @@ fn counter_diff(previous: u64, current: u64, counter_bits: u8) -> u64 {
     }
 }
 
-fn oid_column_and_index(oid: &str) -> Option<(u32, i32)> {
+pub(crate) fn oid_column_and_index(oid: &str) -> Option<(u32, i32)> {
     let mut parts = oid.rsplit('.');
     let index = parts.next()?.parse().ok()?;
     let column = parts.next()?.parse().ok()?;
@@ -625,6 +631,21 @@ mod tests {
         assert_eq!(traffic[0].if_index, 4);
         assert_eq!(traffic[0].in_octets, 56);
         assert_eq!(traffic[0].out_octets, 78);
+        assert_eq!(traffic[0].counter_bits, 64);
+    }
+
+    #[test]
+    fn parse_traffic_suporta_interfaces_apenas_em_if_x_table() {
+        let extended = [
+            linha_x(1, 19, SnmpValue::Bytes(b"pppoe-wan".to_vec())),
+            linha_x(6, 19, SnmpValue::Number(1024)),
+            linha_x(10, 19, SnmpValue::Number(2048)),
+        ];
+        let traffic = parse_traffic([], extended);
+        assert_eq!(traffic.len(), 1);
+        assert_eq!(traffic[0].if_index, 19);
+        assert_eq!(traffic[0].in_octets, 1024);
+        assert_eq!(traffic[0].out_octets, 2048);
         assert_eq!(traffic[0].counter_bits, 64);
     }
 

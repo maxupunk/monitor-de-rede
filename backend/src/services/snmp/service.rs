@@ -268,20 +268,21 @@ pub async fn poll_device(
         .filter(device_interfaces_entity::Column::DeviceId.eq(device.id))
         .all(&ctx.db)
         .await?;
-    let existing_by_index: BTreeMap<i32, device_interfaces::Model> = existing_interfaces
-        .into_iter()
-        .filter_map(|row| row.snmp_index.map(|index| (index, row)))
-        .collect();
+    let mut existing_by_index: BTreeMap<i32, device_interfaces::Model> = BTreeMap::new();
+    let mut existing_by_name: HashMap<String, device_interfaces::Model> = HashMap::new();
+    for row in existing_interfaces {
+        if let Some(index) = row.snmp_index {
+            existing_by_index.insert(index, row.clone());
+        }
+        existing_by_name.insert(row.name.to_lowercase(), row);
+    }
 
     let mut interfaces = std::collections::BTreeMap::new();
     for interface in &scan.interfaces {
-        let saved = sync_interface(
-            &ctx.db,
-            device.id,
-            interface,
-            existing_by_index.get(&interface.if_index),
-        )
-        .await?;
+        let existing = existing_by_index
+            .get(&interface.if_index)
+            .or_else(|| existing_by_name.get(&interface.if_name.to_lowercase()));
+        let saved = sync_interface(&ctx.db, device.id, interface, existing).await?;
         // Só interface administrativamente habilitada é avaliada: uma porta
         // que o operador desligou não pode gerar alerta de queda de link.
         if saved.interface.admin_status.as_deref() == Some("up") {
@@ -368,15 +369,18 @@ pub async fn poll_device_monitors(
     };
     let finished_at = Utc::now();
     match poll {
-        Ok(poll) => monitored_items
-            .iter()
-            .map(|monitor| {
-                (
-                    monitor.id,
-                    monitor_result_from_poll(monitor, &poll, started_at, finished_at),
-                )
-            })
-            .collect(),
+        Ok(poll) => {
+            sync_migrated_monitor_indexes(ctx, monitored_items, &poll).await;
+            monitored_items
+                .iter()
+                .map(|monitor| {
+                    (
+                        monitor.id,
+                        monitor_result_from_poll(monitor, &poll, started_at, finished_at),
+                    )
+                })
+                .collect()
+        }
         Err(error) => monitored_items
             .iter()
             .map(|monitor| {
@@ -389,17 +393,106 @@ pub async fn poll_device_monitors(
     }
 }
 
+/// Sincroniza no banco o ifIndex de monitores cujas interfaces migraram dinamicamente no roteador.
+async fn sync_migrated_monitor_indexes(
+    ctx: &loco_rs::app::AppContext,
+    monitored_items: &[monitors::Model],
+    poll: &SnmpPollResult,
+) {
+    for monitor in monitored_items {
+        let configured_index = monitor
+            .configuration
+            .get("ifIndex")
+            .and_then(serde_json::Value::as_i64)
+            .and_then(|v| i32::try_from(v).ok());
+        let resolved_index = resolve_monitor_if_index(monitor, poll);
+        if let (Some(new_index), Some(old_index)) = (resolved_index, configured_index) {
+            if new_index != old_index {
+                let mut new_config = monitor.configuration.clone();
+                if let serde_json::Value::Object(ref mut map) = new_config {
+                    map.insert("ifIndex".to_string(), serde_json::json!(new_index));
+                }
+                if let Err(error) = monitors::Entity::update_many()
+                    .col_expr(
+                        monitors_entity::Column::Configuration,
+                        sea_orm::sea_query::Expr::value(new_config),
+                    )
+                    .filter(monitors_entity::Column::Id.eq(monitor.id))
+                    .exec(&ctx.db)
+                    .await
+                {
+                    tracing::warn!(
+                        %error,
+                        monitor_id = monitor.id,
+                        new_index,
+                        "falha ao sincronizar ifIndex atualizado no monitor"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Resolve o ifIndex da interface suportando migração dinâmica de índice (ex: reconexão PPPoE/túnel).
+fn resolve_monitor_if_index(monitor: &monitors::Model, poll: &SnmpPollResult) -> Option<i32> {
+    let config = &monitor.configuration;
+    let configured_index = config
+        .get("ifIndex")
+        .and_then(serde_json::Value::as_i64)
+        .and_then(|value| i32::try_from(value).ok());
+    let configured_name = config
+        .get("ifName")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| monitor.name.strip_prefix("Interface "));
+
+    if let (Some(index), Some(name)) = (configured_index, configured_name) {
+        if poll.scan.interfaces.iter().any(|i| {
+            i.if_index == index
+                && (i.if_name.eq_ignore_ascii_case(name)
+                    || i.if_descr
+                        .as_deref()
+                        .is_some_and(|d| d.eq_ignore_ascii_case(name)))
+        }) {
+            return Some(index);
+        }
+    }
+
+    if let Some(name) = configured_name {
+        let name_clean = name.trim();
+        if !name_clean.is_empty() {
+            if let Some(matched) = poll.scan.interfaces.iter().find(|i| {
+                i.if_name.eq_ignore_ascii_case(name_clean)
+                    || i.if_descr
+                        .as_deref()
+                        .is_some_and(|d| d.eq_ignore_ascii_case(name_clean))
+                    || i.if_alias
+                        .as_deref()
+                        .is_some_and(|a| a.eq_ignore_ascii_case(name_clean))
+            }) {
+                return Some(matched.if_index);
+            }
+        }
+    }
+
+    if let Some(index) = configured_index {
+        if poll.scan.traffic.iter().any(|t| t.if_index == index)
+            || poll.scan.interfaces.iter().any(|i| i.if_index == index)
+        {
+            return Some(index);
+        }
+    }
+
+    configured_index
+}
+
 fn monitor_result_from_poll(
     monitor: &monitors::Model,
     poll: &SnmpPollResult,
     started_at: DateTime<Utc>,
     finished_at: DateTime<Utc>,
 ) -> CheckResult {
+    let if_index = resolve_monitor_if_index(monitor, poll);
     let config = &monitor.configuration;
-    let if_index = config
-        .get("ifIndex")
-        .and_then(serde_json::Value::as_i64)
-        .and_then(|value| i32::try_from(value).ok());
     let metric = config
         .get("metric")
         .and_then(serde_json::Value::as_str)
@@ -545,6 +638,11 @@ pub async fn apply_monitors(
 
     let discovered_indexes: std::collections::HashSet<i32> =
         scan.interfaces.iter().map(|i| i.if_index).collect();
+    let discovered_names: std::collections::HashSet<String> = scan
+        .interfaces
+        .iter()
+        .map(|i| i.if_name.to_lowercase())
+        .collect();
 
     // Trata interfaces que existiam no banco mas não foram descobertas no scan SNMP atual
     let db_interfaces = device_interfaces::Entity::find()
@@ -555,10 +653,16 @@ pub async fn apply_monitors(
         .iter()
         .filter_map(|row| row.snmp_index.map(|index| (index, row.clone())))
         .collect();
+    let db_interfaces_by_name: HashMap<String, device_interfaces::Model> = db_interfaces
+        .iter()
+        .map(|row| (row.name.to_lowercase(), row.clone()))
+        .collect();
 
     for db_iface in db_interfaces {
         if let Some(snmp_idx) = db_iface.snmp_index {
-            if !discovered_indexes.contains(&snmp_idx) {
+            if !discovered_indexes.contains(&snmp_idx)
+                && !discovered_names.contains(&db_iface.name.to_lowercase())
+            {
                 let monitor_name = interface_monitor_name(&db_iface.name);
                 let monitor = monitors::Entity::find()
                     .filter(monitors_entity::Column::DeviceId.eq(Some(device.id)))
@@ -598,14 +702,12 @@ pub async fn apply_monitors(
         .into_iter()
         .collect::<std::collections::BTreeSet<_>>();
     for source in &scan.interfaces {
-        let interface = sync_interface(
-            &ctx.db,
-            device.id,
-            source,
-            db_interfaces_by_index.get(&source.if_index),
-        )
-        .await?
-        .interface;
+        let existing = db_interfaces_by_index
+            .get(&source.if_index)
+            .or_else(|| db_interfaces_by_name.get(&source.if_name.to_lowercase()));
+        let interface = sync_interface(&ctx.db, device.id, source, existing)
+            .await?
+            .interface;
         set_monitoring(
             &ctx.db,
             device.id,
@@ -1337,5 +1439,74 @@ mod tests {
         assert_eq!(interface_monitor_status(1, 1), MonitorStatus::Up);
         assert_eq!(interface_monitor_status(1, 2), MonitorStatus::Down);
         assert_eq!(interface_monitor_status(1, 7), MonitorStatus::Warning);
+    }
+
+    #[test]
+    fn resolve_if_index_por_nome_quando_indice_pppoe_migra() {
+        let monitor = monitors::Model {
+            id: 19,
+            name: "Interface pppoe-wan".into(),
+            r#type: "snmp".into(),
+            configuration: serde_json::json!({
+                "ifIndex": 19, // índice antigo no monitor
+                "ifName": "pppoe-wan",
+                "metric": "traffic",
+            }),
+            device_id: Some(1),
+            probe_id: None,
+            interval_seconds: 15,
+            timeout_seconds: 5,
+            retry_count: 3,
+            enabled: true,
+            status: "down".into(),
+            last_run_at: None,
+            next_run_at: None,
+            created_at: Utc::now().fixed_offset(),
+            updated_at: Utc::now().fixed_offset(),
+        };
+        let poll = SnmpPollResult {
+            scan: SnmpScanResult {
+                snmp_responded: true,
+                system_info: SnmpSystemInfo::default(),
+                interfaces: vec![SnmpInterface {
+                    if_index: 24, // novo índice no roteador
+                    if_name: "pppoe-wan".into(),
+                    if_descr: Some("pppoe-wan interface".into()),
+                    if_alias: None,
+                    if_type: None,
+                    if_speed: None,
+                    if_admin_status: Some(1),
+                    if_oper_status: Some(1),
+                    mac_address: None,
+                    is_monitored: true,
+                }],
+                traffic: vec![InterfaceTraffic {
+                    if_index: 24,
+                    in_octets: 1000,
+                    out_octets: 2000,
+                    in_errors: 0,
+                    out_errors: 0,
+                    counter_bits: 64,
+                    recorded_at: Utc::now(),
+                }],
+                cpu_info: SnmpCpuInfo::default(),
+                memory_info: SnmpMemoryInfo::default(),
+                neighbors: vec![],
+                collector_errors: Default::default(),
+                has_cpu_monitor: false,
+                has_memory_monitor: false,
+            },
+            interfaces_synced: 1,
+            metrics_recorded: 1,
+            links_resolved: 0,
+            reboot_detected: false,
+        };
+
+        let resolved = resolve_monitor_if_index(&monitor, &poll);
+        assert_eq!(resolved, Some(24));
+
+        let result = monitor_result_from_poll(&monitor, &poll, Utc::now(), Utc::now());
+        assert_eq!(result.status, MonitorStatus::Up);
+        assert!(result.success);
     }
 }
