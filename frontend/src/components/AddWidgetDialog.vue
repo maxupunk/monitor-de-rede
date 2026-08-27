@@ -197,9 +197,9 @@
             <v-col
               v-if="
                 isResourceRequired('bandwidth') ||
-                  (isResourceRequired('numeric') &&
-                    selectedTemplate?.type !== 'saas_heatmap' &&
-                    selectedTemplate?.type !== 'saas_services')
+                (isResourceRequired('numeric') &&
+                  selectedTemplate?.type !== 'saas_heatmap' &&
+                  selectedTemplate?.type !== 'saas_services')
               "
               cols="12"
               sm="6"

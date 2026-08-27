@@ -44,6 +44,29 @@ export interface DnsBenchmarkRequest {
   rounds?: number
 }
 
+export interface DnsBatchProvisionServer {
+  server: string
+  name?: string
+  protocol?: DnsProtocol
+  dohUrl?: string
+}
+
+export interface DnsBatchProvisionRequest {
+  servers: DnsBatchProvisionServer[]
+  domain?: string
+  domains?: string[]
+  recordType?: string
+  intervalSeconds?: number
+  executeNow?: boolean
+}
+
+export interface DnsBatchProvisionResponse {
+  createdCount: number
+  alreadyMonitoredCount: number
+  totalRequested: number
+  monitors: any[]
+}
+
 export const useDnsPerformanceStore = defineStore('dnsPerformance', () => {
   const ranking = ref<DnsRankingEntry[]>([])
   const source = ref<DnsRankingSource>('history')
@@ -53,6 +76,7 @@ export const useDnsPerformanceStore = defineStore('dnsPerformance', () => {
   const benchmarkHostnames = ref<string[]>([])
   const loading = ref(false)
   const benchmarking = ref(false)
+  const provisioning = ref(false)
   const error = ref<string | null>(null)
 
   /** Servidor mais rápido do ranking atual */
@@ -103,6 +127,22 @@ export const useDnsPerformanceStore = defineStore('dnsPerformance', () => {
     }
   }
 
+  async function provisionMonitors(
+    payload: DnsBatchProvisionRequest
+  ): Promise<DnsBatchProvisionResponse | null> {
+    provisioning.value = true
+    error.value = null
+    try {
+      const data = await apiService.post<DnsBatchProvisionResponse>('/dns/provision', payload)
+      return data
+    } catch (err: unknown) {
+      error.value = err instanceof Error ? err.message : 'Erro ao provisionar monitores DNS'
+      return null
+    } finally {
+      provisioning.value = false
+    }
+  }
+
   return {
     ranking,
     source,
@@ -112,10 +152,12 @@ export const useDnsPerformanceStore = defineStore('dnsPerformance', () => {
     benchmarkHostnames,
     loading,
     benchmarking,
+    provisioning,
     error,
     fastest,
     slowestLatency,
     fetchPerformance,
     runBenchmark,
+    provisionMonitors,
   }
 })

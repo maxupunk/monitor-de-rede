@@ -35,6 +35,19 @@
           </v-btn>
         </v-btn-toggle>
         <v-btn
+          size="small"
+          color="deep-purple"
+          variant="tonal"
+          prepend-icon="mdi-checkbox-multiple-marked-outline"
+          class="text-none ml-1"
+          @click="batchDialog = true"
+        >
+          <span class="hidden-xs">Monitorar DNS</span>
+          <v-tooltip activator="parent" location="top">
+            Adicionar múltiplos servidores DNS ao monitoramento contínuo
+          </v-tooltip>
+        </v-btn>
+        <v-btn
           icon
           size="small"
           variant="text"
@@ -183,6 +196,15 @@
         <div class="d-flex justify-center ga-2 flex-wrap">
           <v-btn
             color="deep-purple"
+            variant="flat"
+            size="small"
+            prepend-icon="mdi-checkbox-multiple-marked-outline"
+            @click="batchDialog = true"
+          >
+            Monitorar servidores DNS
+          </v-btn>
+          <v-btn
+            color="deep-purple"
             variant="tonal"
             size="small"
             prepend-icon="mdi-timer-play-outline"
@@ -208,6 +230,17 @@
       <span class="text-caption text-grey">{{ footerText }}</span>
       <v-spacer></v-spacer>
       <v-btn
+        v-if="mode === 'benchmark' && store.ranking.length > 0"
+        variant="tonal"
+        color="deep-purple"
+        size="small"
+        prepend-icon="mdi-checkbox-multiple-marked-outline"
+        class="mr-2"
+        @click="batchDialog = true"
+      >
+        Monitorar em lote
+      </v-btn>
+      <v-btn
         variant="text"
         color="primary"
         size="small"
@@ -219,6 +252,12 @@
     </v-card-actions>
 
     <DnsServersDialog v-model="serversDialog" @saved="onServersChanged"></DnsServersDialog>
+
+    <DnsBatchMonitorDialog
+      v-model="batchDialog"
+      :initial-hostnames="store.benchmarkHostnames"
+      @provisioned="onBatchProvisioned"
+    ></DnsBatchMonitorDialog>
 
     <!-- Criação do monitor DNS já apontando para o servidor escolhido no ranking -->
     <MonitorFormDialog
@@ -234,6 +273,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useDnsPerformanceStore, type DnsRankingEntry } from '@/stores/dnsPerformance'
 import { useMonitorsStore, type Monitor } from '@/stores/monitors'
 import DnsServersDialog from '@/components/DnsServersDialog.vue'
+import DnsBatchMonitorDialog from '@/components/DnsBatchMonitorDialog.vue'
 import MonitorFormDialog from '@/components/MonitorFormDialog.vue'
 import type { DnsProtocol, MonitorFormModel } from '@/utils/monitorTypes'
 import { formatLatency } from '@/utils/formatters'
@@ -242,6 +282,7 @@ const store = useDnsPerformanceStore()
 const monitorsStore = useMonitorsStore()
 const mode = ref<'history' | 'benchmark'>('history')
 const serversDialog = ref(false)
+const batchDialog = ref(false)
 const monitorDialog = ref(false)
 const monitorDefaults = ref<Partial<MonitorFormModel> | null>(null)
 
@@ -369,5 +410,12 @@ function refresh() {
 /** Mudou a lista de servidores: refaz a comparação para refletir o cadastro */
 function onServersChanged() {
   if (mode.value === 'benchmark') store.runBenchmark()
+}
+
+/** Servidores provisionados em lote: troca para o histórico e atualiza os dados */
+async function onBatchProvisioned() {
+  mode.value = 'history'
+  await monitorsStore.fetchMonitors()
+  await store.fetchPerformance()
 }
 </script>

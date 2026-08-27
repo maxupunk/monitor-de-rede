@@ -251,6 +251,26 @@ pub struct DnsBenchmarkInput {
     pub rounds: Option<u8>,
 }
 
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DnsBatchProvisionServerInput {
+    pub server: String,
+    pub name: Option<String>,
+    pub protocol: Option<String>,
+    pub doh_url: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DnsBatchProvisionInput {
+    pub servers: Vec<DnsBatchProvisionServerInput>,
+    pub domain: Option<String>,
+    pub domains: Option<Vec<String>>,
+    pub record_type: Option<String>,
+    pub interval_seconds: Option<i32>,
+    pub execute_now: Option<bool>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiscoveryScanInput {

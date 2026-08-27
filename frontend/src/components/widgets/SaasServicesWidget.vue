@@ -54,7 +54,7 @@
     >
       <v-progress-circular indeterminate color="primary" size="40"></v-progress-circular>
       <span class="text-caption text-medium-emphasis ml-3"
-      >Verificando latência dos serviços...</span
+        >Verificando latência dos serviços...</span
       >
     </div>
 
