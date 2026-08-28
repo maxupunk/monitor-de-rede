@@ -630,3 +630,56 @@ async fn rollup_agrega_resultados_brutos_em_buckets_horarios() {
     })
     .await;
 }
+
+#[tokio::test]
+#[serial]
+async fn cadastro_e_edicao_de_dispositivo_preserva_link_interface() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let dev_resp = request
+            .post("/api/devices")
+            .json(&serde_json::json!({
+                "name": "Roteador Borda",
+                "type": "router",
+                "ipAddress": "192.168.10.1",
+                "snmpEnabled": true,
+                "snmpCommunity": "public",
+                "linkInterfaceId": 10,
+                "linkInterfaceName": "ether1",
+            }))
+            .await;
+        assert_eq!(dev_resp.status_code(), 201);
+        let dev: serde_json::Value = serde_json::from_str(&dev_resp.text()).unwrap();
+        let dev_id = dev["id"].as_i64().unwrap();
+        assert_eq!(dev["linkInterfaceId"], 10);
+        assert_eq!(dev["linkInterfaceName"], "ether1");
+        assert_eq!(dev["snmpEnabled"], true);
+
+        let update_resp = request
+            .put(&format!("/api/devices/{dev_id}"))
+            .json(&serde_json::json!({
+                "linkInterfaceId": 20,
+                "linkInterfaceName": "ether2",
+            }))
+            .await;
+        assert_eq!(update_resp.status_code(), 200);
+        let updated: serde_json::Value = serde_json::from_str(&update_resp.text()).unwrap();
+        assert_eq!(updated["linkInterfaceId"], 20);
+        assert_eq!(updated["linkInterfaceName"], "ether2");
+
+        let clear_resp = request
+            .put(&format!("/api/devices/{dev_id}"))
+            .json(&serde_json::json!({
+                "snmpEnabled": false,
+            }))
+            .await;
+        assert_eq!(clear_resp.status_code(), 200);
+        let cleared: serde_json::Value = serde_json::from_str(&clear_resp.text()).unwrap();
+        assert!(cleared["linkInterfaceId"].is_null());
+        assert!(cleared["linkInterfaceName"].is_null());
+    })
+    .await;
+}

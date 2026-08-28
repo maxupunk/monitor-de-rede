@@ -91,7 +91,13 @@
         :gauge-series="gaugeSeries"
         :avg-latency="stats.avgLatency"
         :latency-series="latencySeries"
+        :link-interface-label="deviceLinkInterfaceName"
+        :link-traffic-tab="linkTrafficTab"
+        :link-traffic-series="linkTrafficSeries"
+        :latest-link-in-bps="latestLinkInBps"
+        :latest-link-out-bps="latestLinkOutBps"
         @update:traffic-tab="trafficTab = $event"
+        @update:link-traffic-tab="linkTrafficTab = $event"
       />
 
       <!-- Mapa de Calor de Latência por Hora do Dia (§2.2.2) -->
@@ -158,6 +164,7 @@ import { useAlertsStore } from '@/stores/alerts'
 import { apiService } from '@/services/apiService'
 import { useInfiniteList } from '@/composables/useInfiniteList'
 import { confirm } from '@/composables/useConfirm'
+import { useDevicesStore, type Device } from '@/stores/devices'
 import type { DeviceMetric } from '@/stores/deviceDetail'
 import type { ChartSeriesInput } from '@/components/BaseMetricChart.vue'
 import MonitorFormDialog from '@/components/MonitorFormDialog.vue'
@@ -198,6 +205,18 @@ const router = useRouter()
 const monitorsStore = useMonitorsStore()
 const eventsStore = useEventsStore()
 const alertsStore = useAlertsStore()
+const devicesStore = useDevicesStore()
+const associatedDevice = ref<Device | null>(null)
+
+const deviceLinkInterfaceId = computed(() => associatedDevice.value?.linkInterfaceId || null)
+const deviceLinkInterfaceName = computed(() => {
+  if (associatedDevice.value?.linkInterfaceName) return associatedDevice.value.linkInterfaceName
+  if (!deviceLinkInterfaceId.value) return null
+  const fromHistory = gaugeHistory.value.find(
+    (m) => m.interfaceId === deviceLinkInterfaceId.value
+  )?.interfaceName
+  return fromHistory || `Interface #${deviceLinkInterfaceId.value}`
+})
 
 const monitorId = computed(() => props.monitorId ?? Number(route.params.id))
 const editDialog = ref(false)
@@ -524,6 +543,99 @@ const trafficSeries = computed<ChartSeriesInput[]>(() => {
   ]
 })
 
+// --- Métricas da Interface de Link (quando configurada no dispositivo) ---
+const linkTrafficTab = ref<'inBps' | 'outBps' | 'combined'>('combined')
+
+const linkTrafficMetrics = computed(() => {
+  const linkId = deviceLinkInterfaceId.value
+  const linkName = deviceLinkInterfaceName.value?.toLowerCase()
+  if (!linkId && !linkName) return []
+  return gaugeHistory.value
+    .filter((m) => {
+      if (m.metricName !== 'inBps' && m.metricName !== 'outBps') return false
+      if (linkId && m.interfaceId === linkId) return true
+      if (linkName && m.interfaceName && m.interfaceName.toLowerCase() === linkName) return true
+      return false
+    })
+    .slice()
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+})
+
+const latestLinkInBps = computed(() => {
+  const list = linkTrafficMetrics.value.filter((m) => m.metricName === 'inBps')
+  if (list.length === 0) return null
+  return Number(list[list.length - 1].metricValue)
+})
+
+const latestLinkOutBps = computed(() => {
+  const list = linkTrafficMetrics.value.filter((m) => m.metricName === 'outBps')
+  if (list.length === 0) return null
+  return Number(list[list.length - 1].metricValue)
+})
+
+const linkTrafficSeries = computed<ChartSeriesInput[]>(() => {
+  const inList = linkTrafficMetrics.value.filter((m) => m.metricName === 'inBps')
+  const outList = linkTrafficMetrics.value.filter((m) => m.metricName === 'outBps')
+
+  if (linkTrafficTab.value === 'combined') {
+    const series: ChartSeriesInput[] = []
+    if (inList.length > 0) {
+      series.push({
+        id: 'linkInBps',
+        label: 'Download (IN)',
+        color: '#4CAF50',
+        fillArea: true,
+        data: inList.map((m) => {
+          const val = Number(m.metricValue) || 0
+          return {
+            time: formatDateTime(m.createdAt, '-'),
+            value: val,
+            formattedValue: formatBps(val),
+          }
+        }),
+      })
+    }
+    if (outList.length > 0) {
+      series.push({
+        id: 'linkOutBps',
+        label: 'Upload (OUT)',
+        color: '#2196F3',
+        fillArea: false,
+        data: outList.map((m) => {
+          const val = Number(m.metricValue) || 0
+          return {
+            time: formatDateTime(m.createdAt, '-'),
+            value: val,
+            formattedValue: formatBps(val),
+          }
+        }),
+      })
+    }
+    return series
+  }
+
+  const isDownload = linkTrafficTab.value === 'inBps'
+  const targetList = isDownload ? inList : outList
+  if (targetList.length === 0) return []
+
+  return [
+    {
+      id: linkTrafficTab.value,
+      label: isDownload ? 'Download (IN)' : 'Upload (OUT)',
+      color: isDownload ? '#4CAF50' : '#2196F3',
+      fillArea: true,
+      data: targetList.map((m) => {
+        const val = Number(m.metricValue) || 0
+        return {
+          time: formatDateTime(m.createdAt, '-'),
+          value: val,
+          formattedValue: formatBps(val),
+        }
+      }),
+    },
+  ]
+})
+
 const gaugeHistoryFiltered = computed(() => {
   const name = gaugeMetricName(monitor.value)
   return gaugeHistory.value
@@ -600,6 +712,25 @@ async function loadBaselineData() {
   }
 }
 
+async function loadAssociatedDevice() {
+  if (!monitor.value.deviceId) {
+    associatedDevice.value = null
+    return
+  }
+  const cached = devicesStore.devices.find((d) => d.id === monitor.value.deviceId)
+  if (cached) {
+    associatedDevice.value = cached
+  }
+  try {
+    const dev = await apiService.get<Device>(`/devices/${monitor.value.deviceId}`)
+    if (dev) {
+      associatedDevice.value = dev
+    }
+  } catch {
+    // Silently continue
+  }
+}
+
 async function loadGaugeHistory() {
   if (!monitor.value.deviceId) {
     gaugeHistory.value = []
@@ -625,13 +756,22 @@ onMounted(async () => {
   if (!monitorId.value) return
 
   await monitorsStore.fetchMonitorById(monitorId.value)
-  if (isGaugeMonitor.value || isTrafficMonitor.value) await loadGaugeHistory()
+  await loadAssociatedDevice()
+  if (
+    isGaugeMonitor.value ||
+    isTrafficMonitor.value ||
+    deviceLinkInterfaceId.value ||
+    deviceLinkInterfaceName.value
+  ) {
+    await loadGaugeHistory()
+  }
   if (!isGaugeMonitor.value && !isInterfaceMonitor.value && !isTrafficMonitor.value) {
     await loadBaselineData()
   }
 
   stopMetricsListener = eventsStore.onEvent('metric:recorded', (data) => {
-    if (!isGaugeMonitor.value && !isTrafficMonitor.value) return
+    const hasLink = Boolean(deviceLinkInterfaceId.value || deviceLinkInterfaceName.value)
+    if (!isGaugeMonitor.value && !isTrafficMonitor.value && !hasLink) return
     if (Number(data.deviceId) !== monitor.value.deviceId) return
 
     const samples = (data.metrics as Array<Record<string, unknown>>) || []
@@ -672,7 +812,10 @@ onUnmounted(() => {
 async function refreshData() {
   if (monitorId.value) {
     await monitorsStore.fetchMonitorById(monitorId.value)
-    if (isGaugeMonitor.value || isTrafficMonitor.value) await loadGaugeHistory()
+    await loadAssociatedDevice()
+    if (isGaugeMonitor.value || isTrafficMonitor.value || deviceLinkInterfaceName.value) {
+      await loadGaugeHistory()
+    }
     if (!isGaugeMonitor.value && !isInterfaceMonitor.value && !isTrafficMonitor.value) {
       await loadBaselineData()
     }

@@ -64,6 +64,8 @@ export interface Device {
   parent?: { id: number; name: string } | null
   network?: { id: number; name: string; cidr: string }
   vpnPeer?: DeviceVpnPeer | null
+  linkInterfaceId?: number | null
+  linkInterfaceName?: string | null
   createdAt?: string
   updatedAt?: string
   clearHistory?: boolean

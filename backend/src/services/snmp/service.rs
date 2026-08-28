@@ -177,6 +177,15 @@ pub async fn test_connection(config: SnmpConfig) -> AppResult<SnmpTestResult> {
     })
 }
 
+pub async fn query_interfaces(
+    config: SnmpConfig,
+) -> AppResult<Vec<super::collectors::SnmpInterface>> {
+    let client = super::client::SnmpClient::new(config);
+    super::collectors::collect_interfaces(&client)
+        .await
+        .map_err(map_error)
+}
+
 pub async fn scan(config: SnmpConfig) -> AppResult<SnmpScanResult> {
     let client = super::client::SnmpClient::new(config);
     let (system, interfaces_and_traffic, cpu, memory, neighbors) = tokio::join!(
@@ -296,6 +305,18 @@ pub async fn poll_device(
             .await?;
         }
         interfaces.insert(interface.if_index, saved.interface);
+    }
+    if let Some(ref link_name) = device.link_interface_name {
+        if let Some(matching) = interfaces
+            .values()
+            .find(|i| i.name.eq_ignore_ascii_case(link_name))
+        {
+            if device.link_interface_id != Some(matching.id) {
+                let mut dev_active: devices::ActiveModel = device.clone().into();
+                dev_active.link_interface_id = Set(Some(matching.id));
+                let _ = dev_active.update(&ctx.db).await;
+            }
+        }
     }
     let previous_uptime = latest_device_metric(&ctx.db, device.id, "snmp_uptime")
         .await?

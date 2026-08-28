@@ -350,6 +350,8 @@ mod tests {
             operating_system: None,
             syslog_server_address: None,
             system_key: None,
+            link_interface_id: None,
+            link_interface_name: None,
             status: "unknown".to_owned(),
             last_seen_at: None,
             created_at: chrono::Utc::now().into(),

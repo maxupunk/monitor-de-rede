@@ -156,9 +156,22 @@ async fn set_interface_monitoring(
         },
     }))?)
 }
+/// Consulta a lista de interfaces de um alvo SNMP sem precisar que o dispositivo
+/// já esteja salvo no banco. Útil para preenchimento de seletores na criação.
+async fn query_interfaces(Json(input): Json<SnmpTestInput>) -> AppResult<Response> {
+    if input.host.trim().is_empty() {
+        return Err(AppError::validation("Host SNMP é obrigatório"));
+    }
+    let port = input.port.unwrap_or(161);
+    let cfg = config_from_test_input(&input, port)?;
+    let ifaces = service::query_interfaces(cfg).await?;
+    Ok(format::json(ifaces)?)
+}
+
 pub fn routes() -> Routes {
     Routes::new()
         .add("/snmp/test", post(test))
+        .add("/snmp/interfaces-query", post(query_interfaces))
         .add("/devices/{id}/snmp/scan", post(scan))
         .add("/devices/{id}/snmp/poll", post(poll))
         .add("/devices/{id}/snmp/apply-monitors", post(apply_monitors))

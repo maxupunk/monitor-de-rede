@@ -124,6 +124,9 @@ pub struct DevicePresenterItem {
     pub parent: Option<ParentRef>,
     pub system_key: Option<String>,
     pub is_system: bool,
+    #[ts(type = "number | null")]
+    pub link_interface_id: Option<i64>,
+    pub link_interface_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(type = "any")]
     pub vpn_peer: Option<serde_json::Value>,

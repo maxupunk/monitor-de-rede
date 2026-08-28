@@ -38,5 +38,7 @@ export type DevicePresenterItem = {
   parent: ParentRef | null
   systemKey: string | null
   isSystem: boolean
+  linkInterfaceId: number | null
+  linkInterfaceName: string | null
   vpnPeer: any
 }

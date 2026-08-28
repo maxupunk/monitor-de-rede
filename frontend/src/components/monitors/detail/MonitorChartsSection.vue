@@ -155,6 +155,75 @@
         <div class="text-caption">Execute mais verificações clicando em "Testar Agora".</div>
       </div>
     </v-card>
+
+    <!-- Gráfico de Consumo de Banda da Interface de Link (WAN/Uplink) Alinhado ao Tempo de Resposta -->
+    <v-card
+      v-if="!isGaugeMonitor && !isInterfaceMonitor && !isTrafficMonitor && linkInterfaceLabel"
+      elevation="2"
+      class="rounded-lg pa-6 mb-6"
+    >
+      <div class="d-flex align-center justify-space-between mb-4 flex-wrap ga-3">
+        <div>
+          <div class="d-flex align-center ga-2 flex-wrap mb-1">
+            <h2 class="text-h6 font-weight-bold d-flex align-center ga-2 mb-0">
+              <v-icon color="primary">mdi-wan</v-icon>
+              Consumo de Banda — Interface de Link
+            </h2>
+            <v-chip color="primary" variant="flat" size="small" prepend-icon="mdi-ethernet">
+              {{ linkInterfaceLabel }}
+            </v-chip>
+          </div>
+          <div class="text-subtitle-2 text-grey">
+            Throughput de download e upload da interface de entrada principal coletado via SNMP
+          </div>
+        </div>
+
+        <div class="d-flex align-center ga-2 flex-wrap">
+          <v-chip v-if="latestLinkInBps !== null" color="success" size="small" variant="tonal">
+            Download: {{ formatBps(latestLinkInBps) }}
+          </v-chip>
+          <v-chip v-if="latestLinkOutBps !== null" color="info" size="small" variant="tonal">
+            Upload: {{ formatBps(latestLinkOutBps) }}
+          </v-chip>
+          <v-btn-toggle
+            :model-value="linkTrafficTab"
+            color="primary"
+            variant="outlined"
+            mandatory
+            density="compact"
+            @update:model-value="emit('update:linkTrafficTab', $event)"
+          >
+            <v-btn value="inBps" size="small" prepend-icon="mdi-arrow-down-bold">
+              Download (IN)
+            </v-btn>
+            <v-btn value="outBps" size="small" prepend-icon="mdi-arrow-up-bold">
+              Upload (OUT)
+            </v-btn>
+            <v-btn value="combined" size="small" prepend-icon="mdi-swap-horizontal">
+              Combinado
+            </v-btn>
+          </v-btn-toggle>
+        </div>
+      </div>
+
+      <BaseMetricChart
+        v-if="
+          linkTrafficSeries && linkTrafficSeries.length > 0 && linkTrafficSeries[0].data.length > 0
+        "
+        :series="linkTrafficSeries"
+        unit-type="bandwidth"
+      />
+
+      <div v-else class="text-center text-grey py-8 border rounded-lg bg-grey-lighten-5">
+        <v-icon size="40" color="grey-lighten-1">mdi-chart-line-variant</v-icon>
+        <div class="mt-2 text-subtitle-2">
+          Histórico de tráfego ainda não registrado para a interface {{ linkInterfaceLabel }}.
+        </div>
+        <div class="text-caption">
+          As taxas serão calculadas a cada coleta SNMP periódica do dispositivo.
+        </div>
+      </div>
+    </v-card>
   </div>
 </template>
 
@@ -162,26 +231,47 @@
 import BaseMetricChart, { type ChartSeriesInput } from '@/components/BaseMetricChart.vue'
 import MonitorTimelineBar from '@/components/MonitorTimelineBar.vue'
 import type { MonitorResult } from '@/stores/monitors'
-import { formatLatency } from '@/utils/formatters'
+import { formatLatency, formatBps } from '@/utils/formatters'
 
-defineProps<{
-  isTrafficMonitor: boolean
-  isGaugeMonitor: boolean
-  isInterfaceMonitor: boolean
-  trafficTab: 'inBps' | 'outBps' | 'combined'
-  trafficSeries: ChartSeriesInput[]
-  recentResults: MonitorResult[]
-  statusBreakdown: { up: number; down: number; warning: number; disabled: number; unknown: number }
-  totalChecks: number
-  gaugeType: string
-  gaugeAvg: number | null
-  gaugeSeries: ChartSeriesInput[]
-  avgLatency: number | null
-  latencySeries: ChartSeriesInput[]
-}>()
+withDefaults(
+  defineProps<{
+    isTrafficMonitor: boolean
+    isGaugeMonitor: boolean
+    isInterfaceMonitor: boolean
+    trafficTab: 'inBps' | 'outBps' | 'combined'
+    trafficSeries: ChartSeriesInput[]
+    recentResults: MonitorResult[]
+    statusBreakdown: {
+      up: number
+      down: number
+      warning: number
+      disabled: number
+      unknown: number
+    }
+    totalChecks: number
+    gaugeType: string
+    gaugeAvg: number | null
+    gaugeSeries: ChartSeriesInput[]
+    avgLatency: number | null
+    latencySeries: ChartSeriesInput[]
+    linkInterfaceLabel?: string | null
+    linkTrafficTab?: 'inBps' | 'outBps' | 'combined'
+    linkTrafficSeries?: ChartSeriesInput[]
+    latestLinkInBps?: number | null
+    latestLinkOutBps?: number | null
+  }>(),
+  {
+    linkInterfaceLabel: null,
+    linkTrafficTab: 'combined',
+    linkTrafficSeries: () => [],
+    latestLinkInBps: null,
+    latestLinkOutBps: null,
+  }
+)
 
 const emit = defineEmits<{
   (e: 'update:trafficTab', value: 'inBps' | 'outBps' | 'combined'): void
+  (e: 'update:linkTrafficTab', value: 'inBps' | 'outBps' | 'combined'): void
 }>()
 </script>
 

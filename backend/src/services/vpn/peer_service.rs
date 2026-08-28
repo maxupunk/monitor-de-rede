@@ -537,6 +537,8 @@ mod tests {
             operating_system: Some("routeros".into()),
             syslog_server_address: None,
             system_key: None,
+            link_interface_id: None,
+            link_interface_name: None,
             status: "unknown".into(),
             last_seen_at: None,
             created_at: now.into(),

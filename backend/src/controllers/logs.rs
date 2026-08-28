@@ -300,6 +300,7 @@ fn do_cadastro(
 ) -> systems::Detection {
     systems::detect(&systems::Evidence {
         declared: declarado,
+        name: Some(&dispositivo.name),
         vendor: dispositivo.vendor.as_deref(),
         model: dispositivo.model.as_deref(),
         ..systems::Evidence::default()

@@ -199,6 +199,7 @@ fn corpo(
     // ela pede um dispositivo de cada vez.
     let sistema = systems::detect(&systems::Evidence {
         declared: device.operating_system.as_deref(),
+        name: Some(&device.name),
         vendor: device.vendor.as_deref(),
         model: device.model.as_deref(),
         ..systems::Evidence::default()
@@ -236,6 +237,8 @@ fn corpo(
         parent,
         system_key: device.system_key.clone(),
         is_system: system_device::is_protected(device),
+        link_interface_id: device.link_interface_id,
+        link_interface_name: device.link_interface_name.clone(),
         vpn_peer: None,
     }
 }
@@ -412,6 +415,21 @@ async fn store(
         )),
         access_mode: Set(access_mode_declarado(input.access_mode.as_deref(), None)?),
         operating_system: Set(sistema_declarado(input.operating_system.as_deref(), None)?),
+        link_interface_id: Set(if snmp_enabled {
+            input.link_interface_id
+        } else {
+            None
+        }),
+        link_interface_name: Set(if snmp_enabled {
+            input
+                .link_interface_name
+                .as_deref()
+                .map(str::trim)
+                .filter(|valor| !valor.is_empty())
+                .map(str::to_owned)
+        } else {
+            None
+        }),
         status: Set(input.status.unwrap_or_else(|| "unknown".into())),
         ..Default::default()
     }
@@ -530,6 +548,26 @@ async fn update(
     let access_mode = access_mode_declarado(input.access_mode.as_deref(), current.access_mode)?;
     let operating_system =
         sistema_declarado(input.operating_system.as_deref(), current.operating_system)?;
+    let snmp_enabled = input.snmp_enabled.unwrap_or(current.snmp_enabled);
+    let link_interface_name = if !snmp_enabled {
+        None
+    } else if let Some(ref name) = input.link_interface_name {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    } else {
+        current.link_interface_name
+    };
+    let link_interface_id = if !snmp_enabled {
+        None
+    } else if input.link_interface_id.is_some() {
+        input.link_interface_id
+    } else {
+        current.link_interface_id
+    };
     let row = devices::ActiveModel {
         id: Set(current.id),
         site_id: Set(input.site_id.or(current.site_id)),
@@ -543,12 +581,14 @@ async fn update(
         serial_number: Set(input.serial_number.or(current.serial_number)),
         description: Set(input.description.or(current.description)),
         is_monitored: Set(input.is_monitored.unwrap_or(current.is_monitored)),
-        snmp_enabled: Set(input.snmp_enabled.unwrap_or(current.snmp_enabled)),
+        snmp_enabled: Set(snmp_enabled),
         snmp_community: Set(input.snmp_community.or(current.snmp_community)),
         snmp_version: Set(input.snmp_version.or(current.snmp_version)),
         snmp_poll_interval_seconds: Set(snmp_poll_interval_seconds),
         access_mode: Set(access_mode),
         operating_system: Set(operating_system),
+        link_interface_id: Set(link_interface_id),
+        link_interface_name: Set(link_interface_name),
         status: Set(input.status.unwrap_or(current.status)),
         ..Default::default()
     }
@@ -696,13 +736,24 @@ async fn metrics(
     Path(id): Path<i64>,
     Query(query): Query<PaginationQuery>,
 ) -> AppResult<Response> {
+    let device = devices::Entity::find_by_id(id).one(&ctx.db).await?;
+    let link_interface_id = device.as_ref().and_then(|d| d.link_interface_id);
+    let link_interface_name = device
+        .as_ref()
+        .and_then(|d| d.link_interface_name.as_deref());
+
     let interfaces = device_interfaces::Entity::find()
         .filter(device_interfaces::Column::DeviceId.eq(id))
         .all(&ctx.db)
         .await?;
     let interface_names: HashMap<i64, String> = interfaces
         .iter()
-        .filter(|interface| interface.admin_status.as_deref() == Some("up"))
+        .filter(|interface| {
+            interface.admin_status.as_deref() == Some("up")
+                || link_interface_id == Some(interface.id)
+                || link_interface_name
+                    .is_some_and(|name| name.eq_ignore_ascii_case(&interface.name))
+        })
         .map(|interface| (interface.id, interface.name.clone()))
         .collect();
     let visible_interface_ids: Vec<i64> = interface_names.keys().copied().collect();
@@ -781,6 +832,7 @@ async fn events(
 #[derive(Debug, Default, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct IdentifyInput {
+    name: Option<String>,
     ip_address: Option<String>,
     snmp_version: Option<String>,
     snmp_community: Option<String>,
@@ -811,21 +863,13 @@ async fn identify(
         .snmp_community
         .as_deref()
         .map(str::trim)
-        .filter(|valor| !valor.is_empty());
+        .filter(|valor| !valor.is_empty())
+        .unwrap_or(crate::services::preferences::DEFAULT_SNMP_COMMUNITY);
 
     let (snmp, ssh) = match host {
         Some(endereco) => {
             let consulta_snmp = async {
-                match comunidade {
-                    // Identificar não habilita coleta nem grava configuração:
-                    // é uma leitura pontual. Por isso ela também tenta SNMP
-                    // quando a coleta periódica ainda está desmarcada.
-                    Some(chave) => {
-                        hints::identidade_snmp(endereco, chave, entrada.snmp_version.as_deref())
-                            .await
-                    }
-                    _ => None,
-                }
+                hints::identidade_snmp(endereco, comunidade, entrada.snmp_version.as_deref()).await
             };
             tokio::join!(consulta_snmp, hints::sonda_ssh(endereco))
         }
@@ -872,6 +916,7 @@ async fn identify(
         sys_object_id: snmp.as_ref().and_then(|info| info.sys_object_id.as_deref()),
         sys_descr: snmp.as_ref().and_then(|info| info.sys_descr.as_deref()),
         ssh_banner: ssh_banner.as_deref(),
+        name: entrada.name.as_deref().or(suggested_name.as_deref()),
         vendor: entrada.vendor.as_deref().or(suggested_vendor.as_deref()),
         model: entrada.model.as_deref().or(suggested_model.as_deref()),
     });

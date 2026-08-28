@@ -44,6 +44,7 @@ mod m20260821_000003_audit_logs;
 mod m20260821_000004_push_subscriptions;
 mod m20260822_000001_icmp_filtered_alert;
 mod m20260826_000001_device_syslog_server_address;
+mod m20260828_000001_device_link_interface;
 
 pub struct Migrator;
 
@@ -155,6 +156,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260821_000004_push_subscriptions::Migration),
             Box::new(m20260822_000001_icmp_filtered_alert::Migration),
             Box::new(m20260826_000001_device_syslog_server_address::Migration),
+            Box::new(m20260828_000001_device_link_interface::Migration),
             // inject-above (do not remove this comment)
         ]
     }

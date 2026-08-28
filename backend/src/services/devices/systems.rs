@@ -113,7 +113,10 @@ const CATALOGO: &[OperatingSystem] = &[
         syslog: true,
         mac_telnet: true,
         vpn_profile: Some("openwrt"),
-        aliases: &["openwrt", "lede", "dd-wrt"],
+        aliases: &[
+            "openwrt", "lede", "dd-wrt", "gargoyle", "padavan", "gl.inet", "gl-inet", "glinet",
+            "turris", "luci",
+        ],
         generic: false,
         sys_object_ids: &[],
         ssh_banners: &["dropbear"],
@@ -252,6 +255,7 @@ pub struct Evidence<'a> {
     pub sys_descr: Option<&'a str>,
     /// A linha de identificação do servidor SSH (`SSH-2.0-dropbear_2022.82`).
     pub ssh_banner: Option<&'a str>,
+    pub name: Option<&'a str>,
     pub vendor: Option<&'a str>,
     pub model: Option<&'a str>,
 }
@@ -340,7 +344,7 @@ pub fn detect(evidencia: &Evidence) -> Detection {
     }
 
     for nivel in [Especificidade::Especifico, Especificidade::Generico] {
-        for texto in [evidencia.vendor, evidencia.model] {
+        for texto in [evidencia.vendor, evidencia.model, evidencia.name] {
             if let Some(sistema) = casa(texto, nivel) {
                 return achado(
                     sistema,

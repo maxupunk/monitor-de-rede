@@ -44,7 +44,7 @@ use crate::{
 /// Curto de propósito: são duas sondas em série na abertura de um diálogo, e o
 /// alvo está na rede local. Porta filtrada por firewall gasta o teto inteiro,
 /// e é por isso que ele não pode ser generoso.
-const TETO_DA_SONDA: Duration = Duration::from_millis(900);
+const TETO_DA_SONDA: Duration = Duration::from_millis(1500);
 
 /// O que a tela recebe para se preencher sozinha.
 #[derive(Debug, Clone, Default)]
@@ -114,6 +114,7 @@ pub async fn collect(
             .as_ref()
             .and_then(|info| info.sys_descr.as_deref()),
         ssh_banner: ssh_banner.as_deref(),
+        name: Some(&dispositivo.name),
         vendor: dispositivo.vendor.as_deref(),
         model: dispositivo.model.as_deref(),
     });
@@ -217,12 +218,13 @@ pub async fn identidade_snmp(
 }
 
 async fn sistema_por_snmp(host: IpAddr, dispositivo: &devices::Model) -> Option<SnmpSystemInfo> {
-    identidade_snmp(
-        host,
-        dispositivo.snmp_community.as_deref().unwrap_or_default(),
-        dispositivo.snmp_version.as_deref(),
-    )
-    .await
+    let community = dispositivo
+        .snmp_community
+        .as_deref()
+        .map(str::trim)
+        .filter(|valor| !valor.is_empty())
+        .unwrap_or(crate::services::preferences::DEFAULT_SNMP_COMMUNITY);
+    identidade_snmp(host, community, dispositivo.snmp_version.as_deref()).await
 }
 
 /// Descobre o endereço local que o sistema operacional usaria para falar com
@@ -312,7 +314,7 @@ pub async fn porta_aberta(host: IpAddr, porta: u16) -> bool {
 /// Separado do teto de conexão porque são esperas diferentes: conectar depende
 /// da rede, e a linha vem imediatamente depois — servidor que não a manda em
 /// meio segundo não vai mandar.
-const TETO_DO_BANNER: Duration = Duration::from_millis(600);
+const TETO_DO_BANNER: Duration = Duration::from_millis(1200);
 
 /// Máximo que se lê da identificação. O RFC 4253 limita a 255 bytes.
 const TETO_DE_BYTES: usize = 255;

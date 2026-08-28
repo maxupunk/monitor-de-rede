@@ -56,6 +56,8 @@ pub struct DeviceInput {
     /// `auto` ou um id do catálogo de `services::devices::systems`. O `auto` é
     /// explícito pelo mesmo motivo do `access_mode` logo acima.
     pub operating_system: Option<String>,
+    pub link_interface_id: Option<i64>,
+    pub link_interface_name: Option<String>,
     pub status: Option<String>,
     pub clear_history: Option<bool>,
 }

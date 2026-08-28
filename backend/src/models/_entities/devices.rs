@@ -40,6 +40,9 @@ pub struct Model {
     /// `services::devices::system_device`.
     #[sea_orm(unique)]
     pub system_key: Option<String>,
+    /// Interface de entrada de link (WAN/Uplink) principal do dispositivo.
+    pub link_interface_id: Option<i64>,
+    pub link_interface_name: Option<String>,
     pub status: String,
     pub last_seen_at: Option<DateTimeWithTimeZone>,
     pub created_at: DateTimeWithTimeZone,

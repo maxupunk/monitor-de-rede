@@ -329,6 +329,27 @@
                 persistent-hint
               ></v-select>
             </v-col>
+            <v-col v-if="formModel.snmpEnabled" cols="12" sm="6">
+              <v-select
+                :model-value="formModel.linkInterfaceName"
+                :items="interfaceItems"
+                item-title="title"
+                item-value="value"
+                label="Interface de entrada de link (Opcional)"
+                placeholder="Selecione a interface WAN/Uplink"
+                variant="outlined"
+                density="comfortable"
+                clearable
+                :loading="loadingInterfaces"
+                prepend-inner-icon="mdi-wan"
+                append-inner-icon="mdi-refresh"
+                hint="O consumo de banda será exibido junto ao Tempo de Resposta nos Detalhes do Monitor."
+                persistent-hint
+                no-data-text="Nenhuma interface encontrada. Verifique o IP/SNMP e clique em atualizar."
+                @update:model-value="onLinkInterfaceSelected"
+                @click:append-inner.stop="carregarInterfaces(true)"
+              ></v-select>
+            </v-col>
             <v-col v-if="formModel.snmpEnabled" cols="12">
               <v-alert
                 type="info"
@@ -469,6 +490,9 @@ import {
   type IdentifyResult,
 } from '@/stores/operatingSystems'
 import { createLogSetupTarget, type LogSetupTarget } from '@/utils/syslogProvision'
+import { apiService } from '@/services/apiService'
+import { formatBps } from '@/utils/formatters'
+import type { DeviceInterface } from '@/stores/deviceDetail'
 
 const props = defineProps<{
   modelValue: boolean
@@ -518,6 +542,8 @@ const formModel = reactive<{
   snmpCommunity: string
   snmpVersion: 'v1' | 'v2c' | 'v3'
   snmpPollIntervalSeconds: number
+  linkInterfaceId: number | null
+  linkInterfaceName: string | null
   accessMode: AccessModeChoice
   operatingSystem: string
 }>({
@@ -533,6 +559,8 @@ const formModel = reactive<{
   snmpCommunity: 'public',
   snmpVersion: 'v2c',
   snmpPollIntervalSeconds: 15,
+  linkInterfaceId: null,
+  linkInterfaceName: null,
   accessMode: AUTO_ACCESS_MODE,
   operatingSystem: AUTO_OPERATING_SYSTEM,
 })
@@ -540,6 +568,163 @@ const formModel = reactive<{
 const identificacao = ref<IdentifyResult | null>(null)
 const identificacaoErro = ref('')
 const nameManuallyEdited = ref(false)
+
+const availableInterfaces = ref<
+  Array<{
+    id?: number
+    ifIndex?: number
+    name: string
+    alias?: string | null
+    description?: string | null
+    speed?: number | null
+    operStatus?: string | null
+  }>
+>([])
+const loadingInterfaces = ref(false)
+
+const interfaceItems = computed(() => {
+  const list: Array<{
+    value: string
+    title: string
+    subtitle?: string
+  }> = []
+
+  const seen = new Set<string>()
+
+  if (formModel.linkInterfaceName) {
+    const nome = formModel.linkInterfaceName.trim()
+    seen.add(nome.toLowerCase())
+    list.push({
+      value: nome,
+      title: `${nome} (Selecionada)`,
+      subtitle: 'Interface de link atual',
+    })
+  }
+
+  for (const iface of availableInterfaces.value) {
+    const nome = iface.name.trim()
+    if (!nome) continue
+    if (seen.has(nome.toLowerCase())) continue
+    seen.add(nome.toLowerCase())
+
+    const desc = iface.alias || iface.description
+    const speed = iface.speed ? ` — ${formatBps(iface.speed)}` : ''
+    const title = `${nome}${desc ? ` (${desc})` : ''}${speed}`
+    const subtitle = iface.operStatus
+      ? iface.operStatus.toLowerCase() === 'up'
+        ? 'Status: Conectada (UP)'
+        : 'Status: Desconectada / DOWN'
+      : undefined
+
+    list.push({
+      value: nome,
+      title,
+      subtitle,
+    })
+  }
+
+  return list
+})
+
+function onLinkInterfaceSelected(nome: string | null) {
+  if (!nome) {
+    formModel.linkInterfaceName = null
+    formModel.linkInterfaceId = null
+    return
+  }
+  formModel.linkInterfaceName = nome
+  const found = availableInterfaces.value.find((i) => i.name.toLowerCase() === nome.toLowerCase())
+  formModel.linkInterfaceId = found?.id ?? null
+}
+
+async function carregarInterfaces(forceLive = false) {
+  const deviceId = props.deviceToEdit?.id
+  const ip = formModel.ipAddress.trim()
+
+  if (deviceId) {
+    if (forceLive) {
+      loadingInterfaces.value = true
+      try {
+        await apiService.post(`/devices/${deviceId}/snmp/poll`, {})
+      } catch {
+        // Silently continue to loading interfaces from db
+      } finally {
+        loadingInterfaces.value = false
+      }
+    }
+
+    loadingInterfaces.value = true
+    try {
+      const res = await apiService.get<DeviceInterface[]>(`/devices/${deviceId}/interfaces`)
+      if (Array.isArray(res) && res.length > 0) {
+        availableInterfaces.value = res.map((i) => ({
+          id: i.id,
+          ifIndex: i.ifIndex,
+          name: i.name || i.ifName || '',
+          alias: i.alias,
+          description: i.description,
+          speed: i.speed || i.ifSpeed,
+          operStatus: i.operStatus || i.ifOperStatus,
+        }))
+        if (formModel.linkInterfaceName && !formModel.linkInterfaceId) {
+          const found = availableInterfaces.value.find(
+            (i) => i.name.toLowerCase() === formModel.linkInterfaceName?.toLowerCase()
+          )
+          if (found?.id) formModel.linkInterfaceId = found.id
+        }
+        return
+      }
+    } catch {
+      // Se falhar o banco, tenta ao vivo se tiver IP
+    } finally {
+      loadingInterfaces.value = false
+    }
+  }
+
+  if (!ip) return
+
+  loadingInterfaces.value = true
+  try {
+    const res = await apiService.post<Array<Record<string, unknown>>>('/snmp/interfaces-query', {
+      host: ip,
+      port: 161,
+      version: formModel.snmpVersion,
+      community: formModel.snmpCommunity,
+    })
+    if (Array.isArray(res)) {
+      availableInterfaces.value = res.map((i) => {
+        const operStatusVal = i.ifOperStatus ?? i.if_oper_status
+        const operStr =
+          typeof operStatusVal === 'number'
+            ? operStatusVal === 1
+              ? 'up'
+              : 'down'
+            : typeof operStatusVal === 'string'
+              ? operStatusVal
+              : undefined
+        return {
+          id: typeof i.id === 'number' ? i.id : undefined,
+          ifIndex: Number(i.ifIndex ?? i.if_index) || undefined,
+          name: String(i.ifName ?? i.if_name ?? i.name ?? ''),
+          alias: (i.ifAlias ?? i.if_alias ?? i.alias) as string | null,
+          description: (i.ifDescr ?? i.if_descr ?? i.description) as string | null,
+          speed: Number(i.ifSpeed ?? i.if_speed ?? i.speed) || null,
+          operStatus: operStr,
+        }
+      })
+      if (formModel.linkInterfaceName && !formModel.linkInterfaceId) {
+        const found = availableInterfaces.value.find(
+          (i) => i.name.toLowerCase() === formModel.linkInterfaceName?.toLowerCase()
+        )
+        if (found?.id) formModel.linkInterfaceId = found.id
+      }
+    }
+  } catch {
+    // Falha silenciosa de probe ao vivo
+  } finally {
+    loadingInterfaces.value = false
+  }
+}
 
 const suggestedDeviceName = computed(() => identificacao.value?.suggestedName?.trim() || '')
 const canApplySuggestedName = computed(
@@ -662,6 +847,7 @@ async function executarIdentificacao(mostrarErro: boolean) {
   if (!mostrarErro) autoIdentifying.value = true
   try {
     const achado = await systemsStore.identify({
+      name: formModel.name || null,
       ipAddress: ipConsultado || null,
       snmpVersion: formModel.snmpVersion,
       snmpCommunity: formModel.snmpCommunity || null,
@@ -787,12 +973,17 @@ watch(
         formModel.snmpCommunity = props.deviceToEdit.snmpCommunity || 'public'
         formModel.snmpVersion = props.deviceToEdit.snmpVersion || 'v2c'
         formModel.snmpPollIntervalSeconds = props.deviceToEdit.snmpPollIntervalSeconds || 15
+        formModel.linkInterfaceId = props.deviceToEdit.linkInterfaceId ?? null
+        formModel.linkInterfaceName = props.deviceToEdit.linkInterfaceName ?? null
         // Só a **declaração** volta para o campo. Trazer o efetivo faria a
         // dedução parecer escolha do operador, e ele nunca conseguiria voltar
         // ao automático — não teria como saber que já não estava nele.
         formModel.accessMode = props.deviceToEdit.accessMode ?? AUTO_ACCESS_MODE
         formModel.operatingSystem = props.deviceToEdit.operatingSystem ?? AUTO_OPERATING_SYSTEM
         originalSnmpPollIntervalSeconds.value = formModel.snmpPollIntervalSeconds
+        if (formModel.snmpEnabled) {
+          void carregarInterfaces(false)
+        }
       } else if (props.prefillData) {
         formModel.name = props.prefillData.name || ''
         formModel.ipAddress = props.prefillData.ipAddress || ''
@@ -809,9 +1000,15 @@ watch(
           props.prefillData.snmpCommunity || prefsStore.preferences.defaultSnmpCommunity
         formModel.snmpVersion = props.prefillData.snmpVersion || 'v2c'
         formModel.snmpPollIntervalSeconds = props.prefillData.snmpPollIntervalSeconds || 15
+        formModel.linkInterfaceId = props.prefillData.linkInterfaceId ?? null
+        formModel.linkInterfaceName = props.prefillData.linkInterfaceName ?? null
         formModel.accessMode = props.prefillData.accessMode ?? AUTO_ACCESS_MODE
         formModel.operatingSystem = props.prefillData.operatingSystem ?? AUTO_OPERATING_SYSTEM
         originalSnmpPollIntervalSeconds.value = formModel.snmpPollIntervalSeconds
+        availableInterfaces.value = []
+        if (formModel.snmpEnabled && ipCompleto(formModel.ipAddress)) {
+          void carregarInterfaces(false)
+        }
       } else {
         formModel.name = ''
         formModel.ipAddress = ''
@@ -829,9 +1026,12 @@ watch(
         formModel.snmpCommunity = prefsStore.preferences.defaultSnmpCommunity
         formModel.snmpVersion = 'v2c'
         formModel.snmpPollIntervalSeconds = 15
+        formModel.linkInterfaceId = null
+        formModel.linkInterfaceName = null
         formModel.accessMode = AUTO_ACCESS_MODE
         formModel.operatingSystem = AUTO_OPERATING_SYSTEM
         originalSnmpPollIntervalSeconds.value = 15
+        availableInterfaces.value = []
       }
       agendarIdentificacao(formModel.ipAddress)
     } else {
@@ -839,6 +1039,15 @@ watch(
       if (identificationTimer) clearTimeout(identificationTimer)
       identificationTimer = null
       autoIdentifying.value = false
+    }
+  }
+)
+
+watch(
+  () => [formModel.snmpEnabled, formModel.ipAddress] as const,
+  ([enabled, ip]) => {
+    if (enabled && ipCompleto(ip) && availableInterfaces.value.length === 0) {
+      void carregarInterfaces(false)
     }
   }
 )
@@ -893,6 +1102,9 @@ async function testSnmp(autoDetect = false) {
     snmpTestResult.value = {
       ok: true,
       message: `SNMP respondeu (${res.version || formModel.snmpVersion}/${res.community || formModel.snmpCommunity}): ${res.sysDescr || res.sysName || 'dispositivo detectado'}`,
+    }
+    if (availableInterfaces.value.length === 0) {
+      void carregarInterfaces(true)
     }
   } else {
     // O backend sabe se o agente calou ou se recusou a credencial; só quando
