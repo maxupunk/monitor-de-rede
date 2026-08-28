@@ -24,10 +24,25 @@ export interface DnsRankingEntry {
   error?: string | null
 }
 
+export interface DnsHistoryPoint {
+  timestamp: string
+  latencyMs: number | null
+  status: string
+}
+
+export interface DnsSeriesItem {
+  server: string
+  label: string
+  protocol: DnsProtocol
+  monitorIds?: number[]
+  points: DnsHistoryPoint[]
+}
+
 interface PerformanceResponse {
   windowHours: number
   monitorCount: number
   ranking: DnsRankingEntry[]
+  series?: DnsSeriesItem[]
 }
 
 interface BenchmarkResponse {
@@ -69,6 +84,7 @@ export interface DnsBatchProvisionResponse {
 
 export const useDnsPerformanceStore = defineStore('dnsPerformance', () => {
   const ranking = ref<DnsRankingEntry[]>([])
+  const series = ref<DnsSeriesItem[]>([])
   const source = ref<DnsRankingSource>('history')
   const windowHours = ref(24)
   const monitorCount = ref(0)
@@ -96,6 +112,7 @@ export const useDnsPerformanceStore = defineStore('dnsPerformance', () => {
     try {
       const data = await apiService.get<PerformanceResponse>(`/dns/performance?hours=${hours}`)
       ranking.value = data.ranking || []
+      series.value = data.series || []
       windowHours.value = data.windowHours
       monitorCount.value = data.monitorCount
       source.value = 'history'
@@ -145,6 +162,7 @@ export const useDnsPerformanceStore = defineStore('dnsPerformance', () => {
 
   return {
     ranking,
+    series,
     source,
     windowHours,
     monitorCount,

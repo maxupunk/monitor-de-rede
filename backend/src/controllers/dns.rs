@@ -4,7 +4,8 @@ use std::collections::BTreeMap;
 
 use chrono::{Duration, Utc};
 use loco_rs::prelude::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
+use serde::Serialize;
 
 use crate::{
     dtos::resources::{DnsBatchProvisionInput, DnsBenchmarkInput, DnsLookupInput},
@@ -125,14 +126,34 @@ async fn lookup(Json(input): Json<DnsLookupInput>) -> AppResult<Response> {
     Ok(format::json(sample)?)
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DnsHistoryPoint {
+    pub timestamp: String,
+    pub latency_ms: Option<f64>,
+    pub status: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DnsSeriesItem {
+    pub server: String,
+    pub label: String,
+    pub protocol: String,
+    pub monitor_ids: Vec<i64>,
+    pub points: Vec<DnsHistoryPoint>,
+}
+
 #[derive(Default)]
 struct PerformanceBucket {
     server: String,
+    label: String,
     protocol: String,
     monitor_ids: Vec<i64>,
     latencies: Vec<f64>,
     total: usize,
     last_checked_at: Option<String>,
+    points: Vec<DnsHistoryPoint>,
 }
 
 async fn performance(
@@ -150,7 +171,7 @@ async fn performance(
         .await?;
     if dns_monitors.is_empty() {
         return Ok(format::json(
-            serde_json::json!({ "windowHours": hours, "monitorCount": 0, "ranking": [] }),
+            serde_json::json!({ "windowHours": hours, "monitorCount": 0, "ranking": [], "series": [] }),
         )?);
     }
     let cutoff = Utc::now() - Duration::hours(hours);
@@ -162,6 +183,7 @@ async fn performance(
     let results = monitor_results::Entity::find()
         .filter(monitor_results::Column::MonitorId.is_in(monitor_ids))
         .filter(monitor_results::Column::StartedAt.gte(cutoff))
+        .order_by_asc(monitor_results::Column::StartedAt)
         .all(&ctx.db)
         .await?;
     let mut buckets: BTreeMap<String, PerformanceBucket> = BTreeMap::new();
@@ -203,9 +225,15 @@ async fn performance(
                     .and_then(serde_json::Value::as_str)
             })
             .unwrap_or("Resolvedor do sistema");
+        let label = if !monitor.name.trim().is_empty() {
+            monitor.name.clone()
+        } else {
+            server.to_string()
+        };
         let key = format!("{server}|{protocol}");
         let bucket = buckets.entry(key).or_insert_with(|| PerformanceBucket {
             server: server.into(),
+            label: label.clone(),
             protocol: protocol.into(),
             ..Default::default()
         });
@@ -219,7 +247,7 @@ async fn performance(
             .as_ref()
             .is_none_or(|previous| previous < &checked_at)
         {
-            bucket.last_checked_at = Some(checked_at);
+            bucket.last_checked_at = Some(checked_at.clone());
         }
         let lookup = data
             .and_then(|value| value.get("avgLookupTimeMs"))
@@ -230,41 +258,62 @@ async fn performance(
                 bucket.latencies.push(value);
             }
         }
+        bucket.points.push(DnsHistoryPoint {
+            timestamp: checked_at,
+            latency_ms: if result.status == "up" { lookup } else { None },
+            status: result.status.clone(),
+        });
     }
-    let ranking: Vec<DnsServerRanking> = buckets
-        .into_values()
-        .map(|bucket| {
-            let mut values = bucket.latencies;
-            values.sort_by(f64::total_cmp);
-            let count = values.len();
-            DnsServerRanking {
-                server: bucket.server.clone(),
-                label: bucket.server,
-                protocol: bucket.protocol,
-                avg_lookup_time_ms: (count > 0).then(|| values.iter().sum::<f64>() / count as f64),
-                min_lookup_time_ms: values.first().copied(),
-                max_lookup_time_ms: values.last().copied(),
-                median_lookup_time_ms: (count > 0).then(|| {
-                    if count % 2 == 0 {
-                        (values[count / 2 - 1] + values[count / 2]) / 2.0
-                    } else {
-                        values[count / 2]
-                    }
-                }),
-                success_rate: if bucket.total == 0 {
-                    0.0
+    let mut ranking: Vec<DnsServerRanking> = Vec::new();
+    let mut series: Vec<DnsSeriesItem> = Vec::new();
+
+    for bucket in buckets.into_values() {
+        let mut values = bucket.latencies;
+        values.sort_by(f64::total_cmp);
+        let count = values.len();
+        ranking.push(DnsServerRanking {
+            server: bucket.server.clone(),
+            label: if bucket.label.is_empty() {
+                bucket.server.clone()
+            } else {
+                bucket.label.clone()
+            },
+            protocol: bucket.protocol.clone(),
+            avg_lookup_time_ms: (count > 0).then(|| values.iter().sum::<f64>() / count as f64),
+            min_lookup_time_ms: values.first().copied(),
+            max_lookup_time_ms: values.last().copied(),
+            median_lookup_time_ms: (count > 0).then(|| {
+                if count % 2 == 0 {
+                    (values[count / 2 - 1] + values[count / 2]) / 2.0
                 } else {
-                    (count as f64 / bucket.total as f64 * 1000.0).round() / 10.0
-                },
-                total_queries: bucket.total,
-                failed_queries: bucket.total - count,
-                error: None,
-            }
-        })
-        .collect();
-    Ok(format::json(
-        serde_json::json!({ "windowHours": hours, "monitorCount": dns_monitors.len(), "ranking": sort_by_latency(ranking) }),
-    )?)
+                    values[count / 2]
+                }
+            }),
+            success_rate: if bucket.total == 0 {
+                0.0
+            } else {
+                (count as f64 / bucket.total as f64 * 1000.0).round() / 10.0
+            },
+            total_queries: bucket.total,
+            failed_queries: bucket.total - count,
+            error: None,
+        });
+
+        series.push(DnsSeriesItem {
+            server: bucket.server,
+            label: bucket.label,
+            protocol: bucket.protocol,
+            monitor_ids: bucket.monitor_ids,
+            points: bucket.points,
+        });
+    }
+
+    Ok(format::json(serde_json::json!({
+        "windowHours": hours,
+        "monitorCount": dns_monitors.len(),
+        "ranking": sort_by_latency(ranking),
+        "series": series,
+    }))?)
 }
 
 async fn provision(

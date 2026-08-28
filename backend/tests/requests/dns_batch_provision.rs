@@ -68,6 +68,14 @@ async fn provisionamento_em_lote_de_monitores_dns() {
         assert_eq!(monitors.status_code(), 200);
         let monitors: Vec<serde_json::Value> = serde_json::from_str(&monitors.text()).unwrap();
         assert_eq!(monitors.len(), 4);
+
+        // 5. Testar GET /api/dns/performance com series e ranking
+        let perf_res = request.get("/api/dns/performance?hours=24").await;
+        assert_eq!(perf_res.status_code(), 200);
+        let perf_data: serde_json::Value = serde_json::from_str(&perf_res.text()).unwrap();
+        assert_eq!(perf_data["monitorCount"], 4);
+        assert!(perf_data["ranking"].is_array());
+        assert!(perf_data["series"].is_array());
     })
     .await;
 }
