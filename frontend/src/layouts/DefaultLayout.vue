@@ -164,10 +164,17 @@
     </v-app-bar>
 
     <!-- Conteúdo Principal da Página -->
-    <v-main class="bg-grey-lighten-4">
-      <v-container fluid class="px-2 px-md-6 py-3 py-md-6 max-w-1600">
+    <v-main class="bg-grey-lighten-4" :class="{ 'layout-full-bleed': route.meta.fullBleed }">
+      <v-container
+        fluid
+        :class="[
+          route.meta.fullBleed
+            ? 'pa-0 fill-height d-flex flex-column'
+            : 'px-2 px-md-6 py-3 py-md-6 max-w-1600',
+        ]"
+      >
         <v-alert
-          v-if="!authStore.canWrite"
+          v-if="!authStore.canWrite && !route.meta.fullBleed"
           type="info"
           variant="tonal"
           density="compact"
@@ -221,7 +228,7 @@
 
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useDisplay } from 'vuetify'
 import { useEventsStore } from '@/stores/events'
 import { useAuthStore } from '@/stores/auth'
@@ -254,6 +261,7 @@ const eventsStore = useEventsStore()
 const authStore = useAuthStore()
 const onboardingStore = useOnboardingStore()
 const router = useRouter()
+const route = useRoute()
 const { permissionState, isSubscribed, requestPermission } = useNotifications()
 const { canInstall, isInstalled, showIosDialog, promptInstall } = usePwaInstall()
 
@@ -352,5 +360,14 @@ async function handleLogout() {
 .max-w-1600 {
   max-width: 1600px;
   margin: 0 auto;
+}
+.layout-full-bleed {
+  height: calc(100vh - 64px);
+  overflow: hidden;
+}
+.layout-full-bleed > .v-container {
+  max-width: 100% !important;
+  height: 100% !important;
+  padding: 0 !important;
 }
 </style>

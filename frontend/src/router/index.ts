@@ -27,7 +27,12 @@ const routes = [
         name: 'device-detail',
         component: () => import('../pages/DeviceDetailPage.vue'),
       },
-      { path: 'topology', name: 'topology', component: () => import('../pages/TopologyPage.vue') },
+      {
+        path: 'topology',
+        name: 'topology',
+        component: () => import('../pages/TopologyPage.vue'),
+        meta: { fullBleed: true },
+      },
       {
         path: 'discovery',
         name: 'discovery',

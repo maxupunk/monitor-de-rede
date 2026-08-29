@@ -1,50 +1,15 @@
 <template>
-  <div class="topology-view-wrapper d-flex flex-column fill-height">
-    <!-- Header da Página -->
-    <PageHeader
-      title="Mapa de Topologia de Rede"
-      subtitle="Visualização interativa da arquitetura, enlaces físicos, SNMP e conexões de rede"
-    >
-      <template #actions>
-        <v-btn
-          color="secondary"
-          variant="tonal"
-          prepend-icon="mdi-calculator"
-          :loading="topologyStore.recalculating"
-          @click="recalculateTopology"
-        >
-          <span class="hidden-sm-and-down">Recalcular Topologia</span>
-          <span class="hidden-md-and-up">Recalcular</span>
-        </v-btn>
-
-        <v-btn
-          color="indigo"
-          variant="tonal"
-          prepend-icon="mdi-hub"
-          @click="unmanagedSwitchDialog = true"
-        >
-          <span class="hidden-sm-and-down">Adicionar Switch</span>
-          <span class="hidden-md-and-up">Switch</span>
-        </v-btn>
-
-        <v-btn color="primary" variant="elevated" prepend-icon="mdi-plus" @click="openLinkDialog()">
-          <span class="hidden-sm-and-down">Adicionar Conexão</span>
-          <span class="hidden-md-and-up">Conexão</span>
-        </v-btn>
-      </template>
-    </PageHeader>
-
-    <!-- Card Principal do Mapa Gráfico -->
-    <v-card
-      elevation="3"
-      class="rounded-xl overflow-hidden position-relative flex-grow-1 topology-map-container mt-2"
-    >
+  <div class="topology-view-wrapper d-flex flex-column fill-height w-100 position-relative">
+    <!-- Container Principal do Mapa Gráfico -->
+    <div class="overflow-hidden position-relative flex-grow-1 topology-map-container w-100 h-100">
       <!-- Barra Flutuante de Controles Superior -->
       <div class="floating-controls-wrapper">
         <TopologyControls
           :zoom-level="zoom"
           :is-connect-mode="isConnectMode"
           :active-type-filter="selectedTypeFilter"
+          :recalculating="topologyStore.recalculating"
+          :can-write="authStore.canWrite"
           @zoom-in="zoomIn"
           @zoom-out="zoomOut"
           @zoom-reset="zoomReset"
@@ -52,6 +17,9 @@
           @toggle-connect-mode="toggleConnectMode"
           @apply-layout="applyLayout"
           @filter-type="applyTypeFilter"
+          @add-link="openLinkDialog()"
+          @add-switch="unmanagedSwitchDialog = true"
+          @recalculate="recalculateTopology"
         />
       </div>
 
@@ -326,7 +294,7 @@
           <div class="text-subtitle-1 font-weight-bold">Carregando Mapa de Topologia...</div>
         </div>
       </v-overlay>
-    </v-card>
+    </div>
 
     <!-- Drawer de Detalhes do Nó Selecionado -->
     <v-dialog
@@ -595,7 +563,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useTopologyStore, type TopologyNode, type TopologyEdge } from '@/stores/topology'
-import PageHeader from '@/components/PageHeader.vue'
+import { useAuthStore } from '@/stores/auth'
 import TopologyControls from '@/components/topology/TopologyControls.vue'
 import TopologyLinkDialog from '@/components/topology/TopologyLinkDialog.vue'
 import UnmanagedSwitchDialog from '@/components/topology/UnmanagedSwitchDialog.vue'
@@ -616,6 +584,7 @@ interface RenderedEdge extends TopologyEdge {
 const STORAGE_POS_KEY = 'netmonitor_topology_positions_v1'
 
 const topologyStore = useTopologyStore()
+const authStore = useAuthStore()
 const canvasViewport = ref<HTMLElement | null>(null)
 
 // Estados de Visualização (Pan & Zoom)
@@ -1355,11 +1324,13 @@ function truncate(str: string, maxLen: number): string {
 
 <style scoped>
 .topology-view-wrapper {
-  height: calc(100vh - 84px);
-  min-height: 540px;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
 }
 .topology-map-container {
   height: 100%;
+  width: 100%;
   background: #0f172a;
 }
 .topology-viewport {

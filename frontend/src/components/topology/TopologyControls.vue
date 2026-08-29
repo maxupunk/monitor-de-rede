@@ -1,27 +1,90 @@
 <template>
   <div
-    class="topology-controls-bar d-flex align-center flex-wrap gap-2 pa-2 rounded-xl elevation-3"
+    class="topology-controls-bar d-flex align-center flex-wrap gap-2 pa-2 rounded-xl elevation-4"
   >
-    <!-- Ferramenta de Conexão com o Mouse (Cabo) -->
-    <v-btn
-      :color="isConnectMode ? 'primary' : 'surface'"
-      :variant="isConnectMode ? 'flat' : 'tonal'"
-      class="rounded-lg px-3 font-weight-bold font-sm shadow-sm"
-      prepend-icon="mdi-vector-polyline"
-      @click="$emit('toggle-connect-mode')"
-    >
-      <span class="d-none d-sm-inline">
-        {{ isConnectMode ? 'Conectando (Clique em 2 nós)' : 'Ligar com Mouse' }}
-      </span>
-      <span class="d-inline d-sm-none">Ligar</span>
-      <v-badge v-if="isConnectMode" color="error" dot floating class="ml-1"></v-badge>
-    </v-btn>
+    <!-- Ações Primárias de Gestão de Topologia -->
+    <template v-if="canWrite !== false">
+      <!-- Botão Adicionar Conexão -->
+      <v-tooltip text="Criar nova conexão entre dispositivos" location="bottom">
+        <template #activator="{ props: tooltipProps }">
+          <v-btn
+            v-bind="tooltipProps"
+            color="primary"
+            variant="elevated"
+            class="rounded-lg px-3 font-weight-bold font-sm shadow-sm"
+            prepend-icon="mdi-plus"
+            @click="$emit('add-link')"
+          >
+            <span class="d-none d-sm-inline">Conexão</span>
+          </v-btn>
+        </template>
+      </v-tooltip>
+
+      <!-- Botão Adicionar Switch -->
+      <v-tooltip text="Adicionar Switch ou Hub não gerenciável" location="bottom">
+        <template #activator="{ props: tooltipProps }">
+          <v-btn
+            v-bind="tooltipProps"
+            color="indigo"
+            variant="tonal"
+            class="rounded-lg px-3 font-weight-medium font-sm"
+            prepend-icon="mdi-hub"
+            @click="$emit('add-switch')"
+          >
+            <span class="d-none d-md-inline">Switch</span>
+          </v-btn>
+        </template>
+      </v-tooltip>
+    </template>
+
+    <!-- Botão Recalcular Topologia -->
+    <v-tooltip text="Reconstruir topologia a partir das rotas e SNMP" location="bottom">
+      <template #activator="{ props: tooltipProps }">
+        <v-btn
+          v-bind="tooltipProps"
+          color="secondary"
+          variant="tonal"
+          class="rounded-lg px-3 font-weight-medium font-sm"
+          prepend-icon="mdi-calculator"
+          :loading="recalculating"
+          @click="$emit('recalculate')"
+        >
+          <span class="d-none d-md-inline">Recalcular</span>
+        </v-btn>
+      </template>
+    </v-tooltip>
 
     <v-divider vertical class="mx-1 my-1"></v-divider>
 
+    <!-- Ferramenta de Conexão com o Mouse (Cabo) -->
+    <v-tooltip
+      v-if="canWrite !== false"
+      text="Ferramenta de cabo: ligue dois equipamentos clicando neles"
+      location="bottom"
+    >
+      <template #activator="{ props: tooltipProps }">
+        <v-btn
+          v-bind="tooltipProps"
+          :color="isConnectMode ? 'primary' : 'surface'"
+          :variant="isConnectMode ? 'flat' : 'tonal'"
+          class="rounded-lg px-3 font-weight-bold font-sm shadow-sm"
+          prepend-icon="mdi-vector-polyline"
+          @click="$emit('toggle-connect-mode')"
+        >
+          <span class="d-none d-sm-inline">
+            {{ isConnectMode ? 'Conectando...' : 'Ligar com Mouse' }}
+          </span>
+          <span class="d-inline d-sm-none">Ligar</span>
+          <v-badge v-if="isConnectMode" color="error" dot floating class="ml-1"></v-badge>
+        </v-btn>
+      </template>
+    </v-tooltip>
+
+    <v-divider v-if="canWrite !== false" vertical class="mx-1 my-1"></v-divider>
+
     <!-- Controles de Zoom e Enquadramento -->
     <div class="d-flex align-center bg-surface-variant-subtle rounded-lg pa-1">
-      <v-tooltip text="Aumentar Zoom (+)" location="top">
+      <v-tooltip text="Aumentar Zoom (+)" location="bottom">
         <template #activator="{ props: tooltipProps }">
           <v-btn
             v-bind="tooltipProps"
@@ -34,11 +97,11 @@
         </template>
       </v-tooltip>
 
-      <span class="text-caption font-weight-bold px-1 user-select-none">
+      <span class="text-caption font-weight-bold px-1 user-select-none font-mono">
         {{ Math.round(zoomLevel * 100) }}%
       </span>
 
-      <v-tooltip text="Diminuir Zoom (-)" location="top">
+      <v-tooltip text="Diminuir Zoom (-)" location="bottom">
         <template #activator="{ props: tooltipProps }">
           <v-btn
             v-bind="tooltipProps"
@@ -51,7 +114,7 @@
         </template>
       </v-tooltip>
 
-      <v-tooltip text="Resetar Zoom (100%)" location="top">
+      <v-tooltip text="Resetar Zoom (100%)" location="bottom">
         <template #activator="{ props: tooltipProps }">
           <v-btn
             v-bind="tooltipProps"
@@ -64,7 +127,7 @@
         </template>
       </v-tooltip>
 
-      <v-tooltip text="Centralizar e Enquadrar Nós (Fit)" location="top">
+      <v-tooltip text="Centralizar e Enquadrar Nós (Fit)" location="bottom">
         <template #activator="{ props: tooltipProps }">
           <v-btn
             v-bind="tooltipProps"
@@ -212,6 +275,18 @@
         </div>
       </v-card>
     </v-menu>
+
+    <!-- Indicador de Modo Somente Leitura se aplicável -->
+    <v-chip
+      v-if="canWrite === false"
+      size="small"
+      color="info"
+      variant="tonal"
+      class="font-weight-medium"
+    >
+      <v-icon start size="14">mdi-eye-outline</v-icon>
+      Modo Leitura
+    </v-chip>
   </div>
 </template>
 
@@ -220,6 +295,8 @@ defineProps<{
   zoomLevel: number
   isConnectMode: boolean
   activeTypeFilter?: string | null
+  recalculating?: boolean
+  canWrite?: boolean
 }>()
 
 defineEmits<{
@@ -230,21 +307,27 @@ defineEmits<{
   (e: 'toggle-connect-mode'): void
   (e: 'apply-layout', layout: 'hierarchical' | 'force' | 'radial' | 'grid'): void
   (e: 'filter-type', type: string | null): void
+  (e: 'add-link'): void
+  (e: 'add-switch'): void
+  (e: 'recalculate'): void
 }>()
 </script>
 
 <style scoped>
 .topology-controls-bar {
-  background: rgba(var(--v-theme-surface), 0.88);
-  backdrop-filter: blur(10px);
+  background: rgba(var(--v-theme-surface), 0.9);
+  backdrop-filter: blur(12px);
   border: 1px solid rgba(var(--v-theme-outline), 0.15);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.2);
 }
 .bg-surface-variant-subtle {
   background: rgba(var(--v-theme-surface-variant), 0.35);
 }
 .gap-2 {
   gap: 8px;
+}
+.font-mono {
+  font-family: monospace;
 }
 .legend-line {
   width: 24px;
