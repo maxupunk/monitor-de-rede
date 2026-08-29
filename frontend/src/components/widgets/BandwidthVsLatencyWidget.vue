@@ -246,10 +246,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, type CSSProperties } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, type CSSProperties } from 'vue'
 import { useMonitorsStore } from '@/stores/monitors'
-import { useDevicesStore } from '@/stores/devices'
+import {
+  useDevicesStore,
+  type BandwidthLatencyPoint,
+  type BandwidthLatencyResponse,
+} from '@/stores/devices'
 import { useDnsServersStore } from '@/stores/dnsServers'
+import { useEventsStore } from '@/stores/events'
 import type { WidgetConfig } from '@/stores/dashboard'
 import { formatLatency, formatBps } from '@/utils/formatters'
 
@@ -260,6 +265,7 @@ const props = defineProps<{
 const monitorsStore = useMonitorsStore()
 const devicesStore = useDevicesStore()
 const dnsServersStore = useDnsServersStore()
+const eventsStore = useEventsStore()
 
 const timeframe = ref<'5m' | '15m' | '1h' | '24h'>('15m')
 const initialPingTarget =
@@ -267,20 +273,95 @@ const initialPingTarget =
 const selectedPingTarget = ref<number | 'all' | string>(initialPingTarget)
 const selectedDeviceId = ref<number | 'all'>((props.widget.config?.deviceId as any) || 'all')
 
+const loading = ref(false)
+const serverResponse = ref<BandwidthLatencyResponse | null>(null)
+const localSamples = ref<BandwidthLatencyPoint[]>([])
+
 const chartContainerRef = ref<HTMLElement | null>(null)
 const mousePos = ref<{ x: number; y: number } | null>(null)
 const hoverIndex = ref<number | null>(null)
 
-interface DualSample {
-  time: string
-  bwBps: number
-  latency: number
+let unbindMetricEvent: (() => void) | null = null
+let unbindMonitorEvent: (() => void) | null = null
+
+async function loadData() {
+  loading.value = true
+  try {
+    const res = await devicesStore.fetchBandwidthLatencySeries({
+      deviceId: selectedDeviceId.value,
+      pingTarget: selectedPingTarget.value,
+      timeframe: timeframe.value,
+    })
+    serverResponse.value = res
+    if (res && Array.isArray(res.samples)) {
+      localSamples.value = res.samples
+    } else {
+      localSamples.value = []
+    }
+  } catch {
+    localSamples.value = []
+  } finally {
+    loading.value = false
+  }
 }
+
+watch([selectedDeviceId, selectedPingTarget, timeframe], () => {
+  loadData()
+})
 
 onMounted(async () => {
   if (monitorsStore.monitors.length === 0) await monitorsStore.fetchMonitors()
   if (devicesStore.devices.length === 0) await devicesStore.fetchDevices()
   await dnsServersStore.fetchServers()
+  await loadData()
+
+  // Escuta métricas SNMP de tráfego em tempo real
+  unbindMetricEvent = eventsStore.onEvent('metric:recorded', (data) => {
+    if (!data || !Array.isArray(data.metrics)) return
+    const devId = Number(data.deviceId)
+    if (selectedDeviceId.value !== 'all' && selectedDeviceId.value !== devId) return
+
+    let totalBps = 0
+    let matched = false
+    for (const m of data.metrics) {
+      if (m.name === 'inBps' || m.name === 'outBps' || m.name === 'traffic') {
+        totalBps += Number(m.value) || 0
+        matched = true
+      }
+    }
+
+    if (matched && localSamples.value.length > 0) {
+      const lastPoint = localSamples.value[localSamples.value.length - 1]
+      lastPoint.bwBps = totalBps
+    }
+  })
+
+  // Escuta resultados de ping em tempo real
+  unbindMonitorEvent = eventsStore.onEvent('monitor:result', (data) => {
+    const monId = Number(data.monitorId ?? data.id)
+    if (!monId) return
+
+    const mon = monitorsStore.monitors.find((m) => m.id === monId)
+    if (!mon || mon.type !== 'ping') return
+
+    const isMatch =
+      selectedPingTarget.value === 'all' ||
+      selectedPingTarget.value === monId ||
+      String(selectedPingTarget.value) === mon.target
+
+    if (!isMatch) return
+
+    const lat = typeof data.latencyMs === 'number' ? data.latencyMs : null
+    if (lat !== null && localSamples.value.length > 0) {
+      const lastPoint = localSamples.value[localSamples.value.length - 1]
+      lastPoint.latency = lat
+    }
+  })
+})
+
+onUnmounted(() => {
+  if (unbindMetricEvent) unbindMetricEvent()
+  if (unbindMonitorEvent) unbindMonitorEvent()
 })
 
 export interface PingTargetOption {
@@ -369,41 +450,38 @@ const deviceOptions = computed(() => {
   return options
 })
 
-const samples = computed<DualSample[]>(() => {
-  const list: DualSample[] = []
-  const count = timeframe.value === '5m' ? 10 : timeframe.value === '15m' ? 15 : 24
-  const now = new Date()
+const samples = computed(() => localSamples.value)
 
-  for (let i = count - 1; i >= 0; i--) {
-    const t = new Date(now.getTime() - i * 60 * 1000)
-    const isPeakTime = i >= 4 && i <= 8
-    const baseBw = isPeakTime ? 45000000 : 12000000
-    const baseLat = isPeakTime ? 65 : 14
-
-    list.push({
-      time: t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      bwBps: Math.floor(baseBw + Math.random() * 8000000),
-      latency: Math.max(5, Math.floor(baseLat + Math.random() * 6)),
-    })
+const currentBw = computed(() => {
+  if (serverResponse.value && serverResponse.value.currentBw > 0) {
+    return serverResponse.value.currentBw
   }
-
-  return list
+  return samples.value.length ? samples.value[samples.value.length - 1].bwBps : 0
 })
 
-const currentBw = computed(() =>
-  samples.value.length ? samples.value[samples.value.length - 1].bwBps : 0
-)
-const peakBw = computed(() =>
-  samples.value.length ? Math.max(...samples.value.map((s) => s.bwBps)) : 0
-)
+const peakBw = computed(() => {
+  if (serverResponse.value && serverResponse.value.peakBw > 0) {
+    return serverResponse.value.peakBw
+  }
+  return samples.value.length ? Math.max(...samples.value.map((s) => s.bwBps)) : 0
+})
 
-const currentLatency = computed(() =>
-  samples.value.length ? samples.value[samples.value.length - 1].latency : 0
-)
+const currentLatency = computed(() => {
+  if (serverResponse.value && serverResponse.value.currentLatency > 0) {
+    return serverResponse.value.currentLatency
+  }
+  return samples.value.length ? samples.value[samples.value.length - 1].latency : 0
+})
+
 const avgLatency = computed(() => {
-  if (samples.value.length === 0) return 0
-  return samples.value.reduce((a, b) => a + b.latency, 0) / samples.value.length
+  if (serverResponse.value && serverResponse.value.avgLatency > 0) {
+    return serverResponse.value.avgLatency
+  }
+  const valid = samples.value.filter((s) => s.latency > 0)
+  if (valid.length === 0) return 0
+  return valid.reduce((a, b) => a + b.latency, 0) / valid.length
 })
+
 const maxLatency = computed(() => {
   if (samples.value.length === 0) return 100
   const max = Math.max(...samples.value.map((s) => s.latency))
@@ -416,6 +494,9 @@ const maxBwRate = computed(() => {
 })
 
 const hasSaturationCorrelation = computed(() => {
+  if (serverResponse.value) {
+    return serverResponse.value.hasSaturationCorrelation
+  }
   if (samples.value.length < 5) return false
   const peakBwVal = peakBw.value
   const avgLatVal = avgLatency.value
@@ -427,6 +508,9 @@ const hasSaturationCorrelation = computed(() => {
 })
 
 const correlationScore = computed(() => {
+  if (serverResponse.value) {
+    return serverResponse.value.correlationScore
+  }
   if (samples.value.length === 0) return 0
   return hasSaturationCorrelation.value ? 82 : 15
 })

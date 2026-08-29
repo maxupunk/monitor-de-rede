@@ -387,20 +387,6 @@ function buildSamples() {
     })
   }
 
-  if (list.length === 0) {
-    const now = new Date()
-    const count = timeframe.value === '5m' ? 10 : timeframe.value === '15m' ? 15 : 24
-    for (let i = count - 1; i >= 0; i--) {
-      const t = new Date(now.getTime() - i * 60 * 1000)
-      list.push({
-        time: t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        inBps: Math.floor(15000000 + Math.random() * 25000000),
-        outBps: Math.floor(4000000 + Math.random() * 8000000),
-        timestamp: t.getTime(),
-      })
-    }
-  }
-
   localSamples.value = list.slice(-30)
 }
 

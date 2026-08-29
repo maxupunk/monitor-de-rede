@@ -1,5 +1,6 @@
 //! Núcleo do monitoramento: execução, persistência e apresentação.
 
+pub mod bandwidth_latency;
 pub mod checkers;
 pub mod contracts;
 pub mod device_status;
@@ -17,4 +18,5 @@ pub mod rollup;
 pub mod runner;
 pub mod saas;
 pub mod scheduler;
+pub mod timeseries;
 pub mod uptime;

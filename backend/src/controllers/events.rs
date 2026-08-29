@@ -14,7 +14,13 @@ use tokio::sync::mpsc;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
 use crate::{
-    dtos::resources::PaginationQuery,
+    dtos::{
+        alerts::{
+            HourlyDistributionBin, HourlyDistributionQuery, HourlyDistributionResponse,
+            HourlyDistributionTotals,
+        },
+        resources::PaginationQuery,
+    },
     models::alert_events,
     services::{
         events::{DomainEvent, EventBus},
@@ -110,9 +116,85 @@ async fn stream(State(ctx): State<AppContext>) -> AppResult<Response> {
     Ok(response)
 }
 
+/// `GET /api/events/hourly-distribution` — agregação de eventos por hora (padrão últimas 6h).
+async fn hourly_distribution(
+    State(ctx): State<AppContext>,
+    Query(query): Query<HourlyDistributionQuery>,
+) -> AppResult<Response> {
+    use chrono::{Duration, Timelike};
+    use sea_orm::{ColumnTrait, QueryFilter};
+
+    let hours_count = query.hours.unwrap_or(6).clamp(1, 48);
+    let now = Utc::now();
+
+    // 1. Inicializa os baldes de horas ordenados cronologicamente
+    let mut bins: Vec<HourlyDistributionBin> = Vec::with_capacity(hours_count as usize);
+    for i in 0..hours_count {
+        let bin_time = now - Duration::hours(hours_count - 1 - i);
+        let hour = bin_time.hour();
+        let label = format!("{:02}:00", hour);
+        bins.push(HourlyDistributionBin {
+            label,
+            hour,
+            timestamp: bin_time.to_rfc3339(),
+            critical: 0,
+            warning: 0,
+            info: 0,
+        });
+    }
+
+    // 2. Consulta eventos criados desde o início do período
+    let cutoff = now - Duration::hours(hours_count);
+    let rows = alert_events::Entity::find()
+        .filter(crate::models::_entities::alert_events::Column::CreatedAt.gte(cutoff))
+        .all(&ctx.db)
+        .await?;
+
+    let mut totals = HourlyDistributionTotals {
+        critical: 0,
+        warning: 0,
+        info: 0,
+        total: 0,
+    };
+
+    // 3. Distribui os eventos nos baldes
+    for row in rows {
+        let row_time = row.created_at.with_timezone(&Utc);
+        let hours_ago = (now - row_time).num_hours();
+
+        if hours_ago >= 0 && hours_ago < hours_count {
+            let bin_idx = (hours_count - 1 - hours_ago) as usize;
+            if let Some(bin) = bins.get_mut(bin_idx) {
+                match row.severity.to_lowercase().as_str() {
+                    "critical" | "error" => {
+                        bin.critical += 1;
+                        totals.critical += 1;
+                    }
+                    "warning" => {
+                        bin.warning += 1;
+                        totals.warning += 1;
+                    }
+                    _ => {
+                        bin.info += 1;
+                        totals.info += 1;
+                    }
+                }
+                totals.total += 1;
+            }
+        }
+    }
+
+    Ok(format::json(HourlyDistributionResponse {
+        hours: hours_count,
+        bins,
+        totals,
+    })?)
+}
+
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("/events")
         .add("/", get(index))
         .add("/stream", get(stream))
+        .add("/hourly-distribution", get(hourly_distribution))
 }

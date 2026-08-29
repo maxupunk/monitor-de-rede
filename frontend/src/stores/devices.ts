@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed } from 'vue'
+import { apiService } from '@/services/apiService'
 import { useCrudResource } from './crudResource'
 import type { VpnDeviceProfile, VpnConnectionStatus } from './vpn'
 
@@ -71,6 +72,24 @@ export interface Device {
   clearHistory?: boolean
 }
 
+export interface BandwidthLatencyPoint {
+  time: string
+  timestamp: number
+  bwBps: number
+  latency: number
+}
+
+export interface BandwidthLatencyResponse {
+  timeframe: string
+  samples: BandwidthLatencyPoint[]
+  currentBw: number
+  peakBw: number
+  currentLatency: number
+  avgLatency: number
+  correlationScore: number
+  hasSaturationCorrelation: boolean
+}
+
 export const useDevicesStore = defineStore('devices', () => {
   const resource = useCrudResource<Device>('/devices', {
     fetch: 'Erro ao carregar dispositivos',
@@ -120,6 +139,31 @@ export const useDevicesStore = defineStore('devices', () => {
     if (data.ipAddress) dev.ipAddress = String(data.ipAddress)
   }
 
+  async function fetchBandwidthLatencySeries(params?: {
+    deviceId?: number | 'all' | string
+    pingTarget?: number | 'all' | string
+    timeframe?: '5m' | '15m' | '1h' | '24h'
+  }): Promise<BandwidthLatencyResponse | null> {
+    try {
+      const q = new URLSearchParams()
+      if (params?.deviceId && params.deviceId !== 'all') {
+        q.set('deviceId', String(params.deviceId))
+      }
+      if (params?.pingTarget && params.pingTarget !== 'all') {
+        q.set('pingTarget', String(params.pingTarget))
+      }
+      if (params?.timeframe) {
+        q.set('timeframe', params.timeframe)
+      }
+      const qs = q.toString()
+      return await apiService.get<BandwidthLatencyResponse>(
+        qs ? `/devices/bandwidth-latency-series?${qs}` : '/devices/bandwidth-latency-series'
+      )
+    } catch {
+      return null
+    }
+  }
+
   return {
     devices,
     loading: resource.loading,
@@ -134,5 +178,6 @@ export const useDevicesStore = defineStore('devices', () => {
     deleteDevice,
     updateDeviceStatus,
     applyRealtimeStatus,
+    fetchBandwidthLatencySeries,
   }
 })

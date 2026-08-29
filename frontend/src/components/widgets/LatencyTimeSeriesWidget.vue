@@ -298,40 +298,35 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, type CSSProperties } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, type CSSProperties } from 'vue'
 import MonitorDetailDialog from '@/components/monitors/MonitorDetailDialog.vue'
 import { useMonitorDetail } from '@/composables/useMonitorDetail'
-import { useMonitorsStore } from '@/stores/monitors'
+import {
+  useMonitorsStore,
+  type MonitorTimeSeriesPoint,
+  type MonitorTimeSeriesDetailItem,
+  type MonitorTimeSeriesResponse,
+} from '@/stores/monitors'
+import { useEventsStore } from '@/stores/events'
 import { formatLatency } from '@/utils/formatters'
 
 const timeframe = ref<'5m' | '15m' | '1h' | '24h'>('15m')
 const selectedMonitorId = ref<number | 'all'>('all')
 const monitorsStore = useMonitorsStore()
+const eventsStore = useEventsStore()
 const { detalheAberto, monitorEmDetalhe, abrirDetalhe } = useMonitorDetail()
+
+const loading = ref(false)
+const timeSeriesResponse = ref<MonitorTimeSeriesResponse | null>(null)
+const localSamples = ref<MonitorTimeSeriesPoint[]>([])
 
 const chartContainerRef = ref<HTMLElement | null>(null)
 const mousePos = ref<{ x: number; y: number } | null>(null)
 const hoverIndex = ref<number | null>(null)
 const detailDialog = ref(false)
-const selectedSample = ref<SamplePoint | null>(null)
+const selectedSample = ref<MonitorTimeSeriesPoint | null>(null)
 
-interface MonitorDetailItem {
-  id: number
-  name: string
-  target: string
-  type: string
-  deviceName?: string
-  status: string
-  latencyMs: number | null
-  lossPct: number
-}
-
-interface SamplePoint {
-  time: string
-  latency: number
-  loss: number
-  monitorsDetail: MonitorDetailItem[]
-}
+let unbindEvent: (() => void) | null = null
 
 const monitorOptions = computed(() => {
   const options: Array<{ id: number | 'all'; name: string }> = [
@@ -370,145 +365,120 @@ const targetLabel = computed(() => {
   return 'Origem: Média Global dos Monitores Ping'
 })
 
-// Compila amostras com base no filtro selecionado (específico ou apenas monitores de ping)
-const samples = computed<SamplePoint[]>(() => {
-  const targetMonitors =
-    selectedMonitorId.value === 'all'
-      ? pingMonitors.value
-      : monitorsStore.monitors.filter((m) => m.id === selectedMonitorId.value)
-
-  const allResults: Array<{
-    monitor: (typeof monitorsStore.monitors)[0]
-    latency: number | null
-    status: string
-    finishedAt: string
-  }> = []
-
-  for (const m of targetMonitors) {
-    if (m.recentResults && m.recentResults.length > 0) {
-      for (const r of m.recentResults) {
-        allResults.push({
-          monitor: m,
-          latency: r.latencyMs,
-          status: r.status,
-          finishedAt: r.finishedAt,
-        })
-      }
-    } else if (typeof m.lastLatencyMs === 'number') {
-      allResults.push({
-        monitor: m,
-        latency: m.lastLatencyMs,
-        status: m.status === 'offline' || m.status === 'down' ? 'down' : 'up',
-        finishedAt: m.lastCheckedAt || new Date().toISOString(),
-      })
-    }
-  }
-
-  if (allResults.length === 0) {
-    // Retorna amostras sintéticas demonstrativas para inicialização visual
-    const now = new Date()
-    const list: SamplePoint[] = []
-    const pointsCount = timeframe.value === '5m' ? 10 : timeframe.value === '15m' ? 15 : 20
-
-    const mockMonitors: MonitorDetailItem[] =
-      targetMonitors.length > 0
-        ? targetMonitors.map((m) => ({
-            id: m.id,
-            name: m.name,
-            target: m.target,
-            type: m.type,
-            deviceName: m.device?.name,
-            status: m.status || 'up',
-            latencyMs: m.lastLatencyMs ?? 15,
-            lossPct: m.status === 'down' || m.status === 'offline' ? 100 : 0,
-          }))
-        : [
-            {
-              id: 1,
-              name: 'Gateway Principal',
-              target: '192.168.1.1',
-              type: 'ping',
-              status: 'up',
-              latencyMs: 12,
-              lossPct: 0,
-            },
-          ]
-
-    for (let i = pointsCount - 1; i >= 0; i--) {
-      const t = new Date(now.getTime() - i * 60 * 1000)
-      const lossVal = i === 3 ? 5 : 0
-      list.push({
-        time: t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        latency: Math.max(5, Math.floor(12 + Math.random() * 8)),
-        loss: lossVal,
-        monitorsDetail: mockMonitors.map((item) => ({
-          ...item,
-          lossPct: lossVal > 0 ? lossVal : item.lossPct,
-        })),
-      })
-    }
-    return list
-  }
-
-  // Agrupa em baldes de tempo
-  const sorted = [...allResults].sort(
-    (a, b) => new Date(a.finishedAt).getTime() - new Date(b.finishedAt).getTime()
-  )
-  const sampleMap = new Map<
-    string,
-    {
-      latencies: number[]
-      downCount: number
-      total: number
-      items: MonitorDetailItem[]
-    }
-  >()
-
-  for (const item of sorted) {
-    const d = new Date(item.finishedAt)
-    const key = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    if (!sampleMap.has(key)) {
-      sampleMap.set(key, { latencies: [], downCount: 0, total: 0, items: [] })
-    }
-    const entry = sampleMap.get(key)!
-    entry.total++
-    const isDown = item.status === 'down' || item.status === 'offline'
-    if (isDown) {
-      entry.downCount++
-    }
-    if (item.latency !== null && item.latency !== undefined) {
-      entry.latencies.push(item.latency)
-    }
-
-    if (!entry.items.some((i) => i.id === item.monitor.id)) {
-      entry.items.push({
-        id: item.monitor.id,
-        name: item.monitor.name,
-        target: item.monitor.target,
-        type: item.monitor.type,
-        deviceName: item.monitor.device?.name,
-        status: item.status,
-        latencyMs: item.latency,
-        lossPct: isDown ? 100 : 0,
-      })
-    }
-  }
-
-  const result: SamplePoint[] = []
-  sampleMap.forEach((val, key) => {
-    const avgLat =
-      val.latencies.length > 0 ? val.latencies.reduce((a, b) => a + b, 0) / val.latencies.length : 0
-    const lossPct = val.total > 0 ? Math.round((val.downCount / val.total) * 100) : 0
-    result.push({
-      time: key,
-      latency: Number(avgLat.toFixed(1)),
-      loss: lossPct,
-      monitorsDetail: val.items,
+async function loadTimeSeries() {
+  loading.value = true
+  try {
+    const res = await monitorsStore.fetchTimeSeries({
+      monitorId: selectedMonitorId.value,
+      monitorType: 'ping',
+      timeframe: timeframe.value,
     })
-  })
+    timeSeriesResponse.value = res
+    if (res && Array.isArray(res.samples)) {
+      localSamples.value = res.samples
+    } else {
+      localSamples.value = []
+    }
+  } catch {
+    localSamples.value = []
+  } finally {
+    loading.value = false
+  }
+}
 
-  return result.slice(-25)
+watch([timeframe, selectedMonitorId], () => {
+  loadTimeSeries()
 })
+
+onMounted(async () => {
+  if (monitorsStore.monitors.length === 0) {
+    await monitorsStore.fetchMonitors()
+  }
+  await loadTimeSeries()
+
+  // Escuta resultados em tempo real para atualizar o último ponto / balde
+  unbindEvent = eventsStore.onEvent('monitor:result', (data) => {
+    const monId = Number(data.monitorId ?? data.id)
+    if (!monId) return
+
+    const isMatch = selectedMonitorId.value === 'all' || selectedMonitorId.value === monId
+
+    if (!isMatch) return
+
+    const mon = monitorsStore.monitors.find((m) => m.id === monId)
+    if (!mon || mon.type !== 'ping') return
+
+    const latency = typeof data.latencyMs === 'number' ? data.latencyMs : null
+    const isDown = data.status === 'down' || data.status === 'offline'
+    const now = new Date()
+
+    if (localSamples.value.length > 0) {
+      const lastPoint = localSamples.value[localSamples.value.length - 1]
+      const diffMs = now.getTime() - lastPoint.timestamp
+
+      // Se a última amostra for recente (< 45s), atualiza o ponto; senão anexa novo
+      if (diffMs < 45000 && latency !== null) {
+        lastPoint.latency = Number(((lastPoint.latency + latency) / 2).toFixed(1))
+        lastPoint.loss = isDown ? 100 : 0
+
+        const detailIdx = lastPoint.monitorsDetail.findIndex((d) => d.id === monId)
+        const detailItem: MonitorTimeSeriesDetailItem = {
+          id: monId,
+          name: mon.name,
+          target: mon.target,
+          type: mon.type,
+          deviceName: mon.device?.name,
+          status: String(data.status ?? 'up'),
+          latencyMs: latency,
+          lossPct: isDown ? 100 : 0,
+        }
+
+        if (detailIdx !== -1) {
+          lastPoint.monitorsDetail[detailIdx] = detailItem
+        } else {
+          lastPoint.monitorsDetail.push(detailItem)
+        }
+      } else if (latency !== null) {
+        const timeStr = now.toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        })
+        localSamples.value.push({
+          time: timeStr,
+          timestamp: now.getTime(),
+          latency,
+          loss: isDown ? 100 : 0,
+          monitorsDetail: [
+            {
+              id: monId,
+              name: mon.name,
+              target: mon.target,
+              type: mon.type,
+              deviceName: mon.device?.name,
+              status: String(data.status ?? 'up'),
+              latencyMs: latency,
+              lossPct: isDown ? 100 : 0,
+            },
+          ],
+        })
+
+        if (localSamples.value.length > 50) {
+          localSamples.value.shift()
+        }
+      }
+    }
+  })
+})
+
+onUnmounted(() => {
+  if (unbindEvent) {
+    unbindEvent()
+    unbindEvent = null
+  }
+})
+
+const samples = computed(() => localSamples.value)
 
 const maxLatency = computed(() => {
   if (samples.value.length === 0) return 100
@@ -517,9 +487,13 @@ const maxLatency = computed(() => {
 })
 
 const avgLatency = computed(() => {
-  if (samples.value.length === 0) return 0
-  const sum = samples.value.reduce((acc, s) => acc + s.latency, 0)
-  return Math.round(sum / samples.value.length)
+  if (timeSeriesResponse.value && timeSeriesResponse.value.avgLatency > 0) {
+    return timeSeriesResponse.value.avgLatency
+  }
+  const valid = samples.value.filter((s) => s.latency > 0)
+  if (valid.length === 0) return 0
+  const sum = valid.reduce((acc, s) => acc + s.latency, 0)
+  return Math.round(sum / valid.length)
 })
 
 const maxLatencyFormatted = computed(() => formatLatency(maxLatency.value))

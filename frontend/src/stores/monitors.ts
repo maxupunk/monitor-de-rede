@@ -369,6 +369,29 @@ export const useMonitorsStore = defineStore('monitors', () => {
     )
   }
 
+  async function fetchTimeSeries(params?: {
+    monitorId?: number | 'all'
+    monitorType?: string
+    timeframe?: '5m' | '15m' | '1h' | '24h'
+  }): Promise<MonitorTimeSeriesResponse | null> {
+    try {
+      const q = new URLSearchParams()
+      if (params?.monitorId && params.monitorId !== 'all') {
+        q.set('monitorId', String(params.monitorId))
+      }
+      if (params?.monitorType) q.set('monitorType', params.monitorType)
+      if (params?.timeframe) q.set('timeframe', params.timeframe)
+      const qs = q.toString()
+      return await apiService.get<MonitorTimeSeriesResponse>(
+        qs ? `/monitors/timeseries?${qs}` : '/monitors/timeseries'
+      )
+    } catch (err: unknown) {
+      error.value =
+        err instanceof Error ? err.message : 'Erro ao carregar série temporal do monitor'
+      return null
+    }
+  }
+
   return {
     monitors,
     activeMonitors,
@@ -389,5 +412,35 @@ export const useMonitorsStore = defineStore('monitors', () => {
     fetchSaasPresets,
     provisionSaasPresets,
     fetchHourlyHeatmap,
+    fetchTimeSeries,
   }
 })
+
+export interface MonitorTimeSeriesDetailItem {
+  id: number
+  name: string
+  target: string
+  type: string
+  deviceName?: string
+  status: string
+  latencyMs: number | null
+  lossPct: number
+}
+
+export interface MonitorTimeSeriesPoint {
+  time: string
+  timestamp: number
+  latency: number
+  loss: number
+  monitorsDetail: MonitorTimeSeriesDetailItem[]
+}
+
+export interface MonitorTimeSeriesResponse {
+  timeframe: string
+  samples: MonitorTimeSeriesPoint[]
+  avgLatency: number
+  maxLatency: number
+  minLatency: number
+  packetLossPct: number
+  totalChecks: number
+}

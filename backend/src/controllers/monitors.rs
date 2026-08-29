@@ -753,6 +753,16 @@ async fn hourly_heatmap(
     Ok(format::json(res)?)
 }
 
+/// Série temporal de latência e perda de pacotes agrupada.
+async fn timeseries(
+    State(ctx): State<AppContext>,
+    Query(query): Query<crate::dtos::monitors::MonitorTimeSeriesQuery>,
+) -> AppResult<Response> {
+    let res = crate::services::monitoring::timeseries::calculate_monitor_timeseries(&ctx.db, query)
+        .await?;
+    Ok(format::json(res)?)
+}
+
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("/monitors")
@@ -760,6 +770,7 @@ pub fn routes() -> Routes {
         .add("/saas/presets", get(saas_presets))
         .add("/saas/provision", post(saas_provision))
         .add("/hourly-heatmap", get(hourly_heatmap))
+        .add("/timeseries", get(timeseries))
         .add("/{id}", get(show).put(update).delete(destroy))
         .add("/{id}/run", post(run))
         .add("/{id}/enable", post(enable))

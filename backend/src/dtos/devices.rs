@@ -204,3 +204,46 @@ pub struct DeviceEventItem {
     pub message: String,
     pub created_at: String,
 }
+
+/// Query de correlação de banda x latência.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BandwidthLatencyQuery {
+    pub device_id: Option<String>,
+    pub ping_target: Option<String>,
+    pub timeframe: Option<String>,
+}
+
+/// Ponto da série de correlação banda x latência.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct BandwidthLatencyPoint {
+    pub time: String,
+    #[ts(type = "number")]
+    pub timestamp: i64,
+    #[ts(type = "number")]
+    pub bw_bps: f64,
+    #[ts(type = "number")]
+    pub latency: f64,
+}
+
+/// Resposta do endpoint de correlação banda x latência.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct BandwidthLatencyResponse {
+    pub timeframe: String,
+    pub samples: Vec<BandwidthLatencyPoint>,
+    #[ts(type = "number")]
+    pub current_bw: f64,
+    #[ts(type = "number")]
+    pub peak_bw: f64,
+    #[ts(type = "number")]
+    pub current_latency: f64,
+    #[ts(type = "number")]
+    pub avg_latency: f64,
+    #[ts(type = "number")]
+    pub correlation_score: i32,
+    pub has_saturation_correlation: bool,
+}

@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { apiService } from '@/services/apiService'
 import { useDevicesStore } from './devices'
 import { useAlertsStore, type AlertEvent } from './alerts'
 import { useMonitorsStore } from './monitors'
@@ -14,6 +15,28 @@ export interface RealtimeEventPayload {
   type: string
   data: Record<string, unknown>
   timestamp: string
+}
+
+export interface HourlyDistributionBin {
+  label: string
+  hour: number
+  timestamp: string
+  critical: number
+  warning: number
+  info: number
+}
+
+export interface HourlyDistributionTotals {
+  critical: number
+  warning: number
+  info: number
+  total: number
+}
+
+export interface HourlyDistributionResponse {
+  hours: number
+  bins: HourlyDistributionBin[]
+  totals: HourlyDistributionTotals
 }
 
 /** Máximo de eventos mantidos no feed em memória */
@@ -285,6 +308,16 @@ export const useEventsStore = defineStore('events', () => {
     isConnected.value = false
   }
 
+  async function fetchHourlyDistribution(hours = 6): Promise<HourlyDistributionResponse | null> {
+    try {
+      return await apiService.get<HourlyDistributionResponse>(
+        `/events/hourly-distribution?hours=${hours}`
+      )
+    } catch {
+      return null
+    }
+  }
+
   return {
     isConnected,
     recentEvents,
@@ -292,5 +325,6 @@ export const useEventsStore = defineStore('events', () => {
     connect,
     disconnect,
     onEvent,
+    fetchHourlyDistribution,
   }
 })

@@ -979,6 +979,18 @@ async fn operating_systems() -> AppResult<Response> {
     Ok(format::json(systems::options())?)
 }
 
+/// `GET /api/devices/bandwidth-latency-series` — correlação temporal de banda e latência de ping.
+async fn bandwidth_latency_series(
+    State(ctx): State<AppContext>,
+    Query(query): Query<crate::dtos::devices::BandwidthLatencyQuery>,
+) -> AppResult<Response> {
+    let res = crate::services::monitoring::bandwidth_latency::calculate_bandwidth_latency_series(
+        &ctx.db, query,
+    )
+    .await?;
+    Ok(format::json(res)?)
+}
+
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("/devices")
@@ -987,6 +999,7 @@ pub fn routes() -> Routes {
         // parâmetro, e um teste garante que a rota não seja engolida.
         .add("/systems", get(operating_systems))
         .add("/identify", post(identify))
+        .add("/bandwidth-latency-series", get(bandwidth_latency_series))
         .add("/{id}", get(show).put(update).delete(destroy))
         .add("/{id}/capabilities", get(device_capabilities))
         .add("/{id}/monitors", get(device_monitors))

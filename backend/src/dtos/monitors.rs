@@ -1,9 +1,71 @@
 //! DTOs de resposta dos endpoints de monitores.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::services::monitoring::contracts::CheckResult;
+
+/// Query para série temporal de latência e perda de pacotes.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MonitorTimeSeriesQuery {
+    pub monitor_id: Option<i64>,
+    pub monitor_type: Option<String>,
+    pub timeframe: Option<String>,
+}
+
+/// Item de detalhe de monitor em uma amostra temporal.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct MonitorTimeSeriesDetailItem {
+    #[ts(type = "number")]
+    pub id: i64,
+    pub name: String,
+    pub target: String,
+    #[serde(rename = "type")]
+    pub monitor_type: String,
+    pub device_name: Option<String>,
+    pub status: String,
+    #[ts(type = "number | null")]
+    pub latency_ms: Option<f64>,
+    #[ts(type = "number")]
+    pub loss_pct: i32,
+}
+
+/// Ponto da série temporal de latência.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct MonitorTimeSeriesPoint {
+    pub time: String,
+    #[ts(type = "number")]
+    pub timestamp: i64,
+    #[ts(type = "number")]
+    pub latency: f64,
+    #[ts(type = "number")]
+    pub loss: i32,
+    pub monitors_detail: Vec<MonitorTimeSeriesDetailItem>,
+}
+
+/// Resposta completa do endpoint de série temporal.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct MonitorTimeSeriesResponse {
+    pub timeframe: String,
+    pub samples: Vec<MonitorTimeSeriesPoint>,
+    #[ts(type = "number")]
+    pub avg_latency: f64,
+    #[ts(type = "number")]
+    pub max_latency: f64,
+    #[ts(type = "number")]
+    pub min_latency: f64,
+    #[ts(type = "number")]
+    pub packet_loss_pct: i32,
+    #[ts(type = "number")]
+    pub total_checks: i64,
+}
 
 /// Estatísticas agregadas exibidas no detalhe de um monitor.
 #[derive(Debug, Clone, Serialize, TS)]

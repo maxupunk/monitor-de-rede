@@ -90,6 +90,56 @@ pub enum AlertField {
     Type,
 }
 
+/// Query para distribuição horária de eventos.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HourlyDistributionQuery {
+    pub hours: Option<i64>,
+}
+
+/// Bin horário da distribuição de eventos.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct HourlyDistributionBin {
+    pub label: String,
+    #[ts(type = "number")]
+    pub hour: u32,
+    pub timestamp: String,
+    #[ts(type = "number")]
+    pub critical: i64,
+    #[ts(type = "number")]
+    pub warning: i64,
+    #[ts(type = "number")]
+    pub info: i64,
+}
+
+/// Totais agregados da distribuição de eventos.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct HourlyDistributionTotals {
+    #[ts(type = "number")]
+    pub critical: i64,
+    #[ts(type = "number")]
+    pub warning: i64,
+    #[ts(type = "number")]
+    pub info: i64,
+    #[ts(type = "number")]
+    pub total: i64,
+}
+
+/// Resposta de distribuição horária de eventos.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct HourlyDistributionResponse {
+    #[ts(type = "number")]
+    pub hours: i64,
+    pub bins: Vec<HourlyDistributionBin>,
+    pub totals: HourlyDistributionTotals,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

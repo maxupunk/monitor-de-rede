@@ -119,60 +119,89 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-import { useEventsStore } from '@/stores/events'
-import { formatEventDetails } from '@/utils/eventPresentation'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useEventsStore, type HourlyDistributionBin } from '@/stores/events'
 
 const eventsStore = useEventsStore()
+const loading = ref(false)
+const bins = ref<HourlyDistributionBin[]>([])
+let unbindEvent: (() => void) | null = null
 
-interface HourlyBin {
-  label: string
-  critical: number
-  warning: number
-  info: number
+async function loadData() {
+  loading.value = true
+  try {
+    const res = await eventsStore.fetchHourlyDistribution(6)
+    if (res && Array.isArray(res.bins)) {
+      bins.value = res.bins
+    } else {
+      buildEmptyBins()
+    }
+  } catch {
+    buildEmptyBins()
+  } finally {
+    loading.value = false
+  }
 }
 
-const hourlyBins = computed<HourlyBin[]>(() => {
-  const bins: HourlyBin[] = []
+function buildEmptyBins() {
+  const list: HourlyDistributionBin[] = []
   const now = new Date()
-
-  // Prepara 6 caixas para as últimas 6 horas
   for (let i = 5; i >= 0; i--) {
     const d = new Date(now.getTime() - i * 3600 * 1000)
-    const label = `${d.getHours().toString().padStart(2, '0')}:00`
-    bins.push({ label, critical: 0, warning: 0, info: 0 })
+    const hour = d.getHours()
+    const label = `${hour.toString().padStart(2, '0')}:00`
+    list.push({
+      label,
+      hour,
+      timestamp: d.toISOString(),
+      critical: 0,
+      warning: 0,
+      info: 0,
+    })
   }
+  bins.value = list
+}
 
-  // Preenche com os eventos reais do `eventsStore`
-  for (const evt of eventsStore.recentEvents) {
-    const evtTime = new Date(evt.timestamp)
-    const hoursAgo = Math.floor((now.getTime() - evtTime.getTime()) / (3600 * 1000))
-    if (hoursAgo >= 0 && hoursAgo < 6) {
-      const binIdx = 5 - hoursAgo
-      const bin = bins[binIdx]
-      if (bin) {
-        const details = formatEventDetails(evt)
-        const color = details.color
-        if (color === 'error' || color === 'red') bin.critical++
-        else if (color === 'warning' || color === 'amber' || color === 'orange') bin.warning++
-        else bin.info++
+onMounted(async () => {
+  await loadData()
+
+  unbindEvent = eventsStore.onEvent(
+    ['alert:triggered', 'alert:updated', 'alert:resolved'],
+    (data) => {
+      const severity = String(data.severity || 'info').toLowerCase()
+      const now = new Date()
+      const currentHour = now.getHours()
+
+      if (bins.value.length === 0) {
+        buildEmptyBins()
+      }
+
+      // Encontra ou atualiza o último balde correspondente à hora corrente
+      const lastBin = bins.value[bins.value.length - 1]
+      if (lastBin && lastBin.hour === currentHour) {
+        if (severity === 'critical' || severity === 'error') {
+          lastBin.critical++
+        } else if (severity === 'warning') {
+          lastBin.warning++
+        } else {
+          lastBin.info++
+        }
+      } else {
+        // Se mudou de hora, recarrega a distribuição do servidor
+        loadData()
       }
     }
-  }
-
-  // Se houver pouquíssimos eventos no feed, adiciona amostragem demonstrativa inicial
-  const hasData = bins.some((b) => b.critical + b.warning + b.info > 0)
-  if (!hasData) {
-    bins[1].info = 2
-    bins[2].warning = 1
-    bins[3].critical = 1
-    bins[3].warning = 2
-    bins[4].info = 3
-    bins[5].info = 1
-  }
-
-  return bins
+  )
 })
+
+onUnmounted(() => {
+  if (unbindEvent) {
+    unbindEvent()
+    unbindEvent = null
+  }
+})
+
+const hourlyBins = computed(() => bins.value)
 
 const maxCount = computed(() => {
   let max = 1
