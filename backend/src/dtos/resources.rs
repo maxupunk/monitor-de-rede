@@ -282,14 +282,43 @@ pub struct DiscoveryScanInput {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TopologyLinkInput {
-    #[serde(alias = "source_device_id")]
+    #[serde(alias = "source_device_id", alias = "source")]
     pub source_device_id: i64,
-    #[serde(alias = "target_device_id")]
+    #[serde(alias = "target_device_id", alias = "target")]
     pub target_device_id: i64,
     #[serde(alias = "source_interface_id")]
     pub source_interface_id: Option<i64>,
     #[serde(alias = "target_interface_id")]
     pub target_interface_id: Option<i64>,
+    #[serde(alias = "link_type")]
+    pub link_type: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopologyLinkUpdateInput {
+    #[serde(alias = "source_interface_id")]
+    pub source_interface_id: Option<i64>,
+    #[serde(alias = "target_interface_id")]
+    pub target_interface_id: Option<i64>,
+    #[serde(alias = "link_type")]
+    pub link_type: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnmanagedSwitchInput {
+    pub name: String,
+    pub vendor: Option<String>,
+    pub model: Option<String>,
+    #[serde(default = "default_unmanaged_port_count")]
+    pub port_count: u32,
+    pub site_id: Option<i64>,
+    pub network_id: Option<i64>,
+}
+
+fn default_unmanaged_port_count() -> u32 {
+    8
 }
 
 #[derive(Debug, Deserialize)]

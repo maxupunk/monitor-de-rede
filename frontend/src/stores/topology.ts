@@ -2,25 +2,61 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { apiService } from '@/services/apiService'
 
+export interface DeviceInterfaceItem {
+  id: number
+  deviceId: number
+  snmpIndex?: number
+  name: string
+  description?: string
+  alias?: string
+  macAddress?: string
+  type?: string
+  speed?: number
+  adminStatus?: 'up' | 'down' | string
+  operStatus?: 'up' | 'down' | string
+  isMonitored?: boolean
+}
+
 export interface TopologyNode {
   id: number
   name: string
   type: string
   vendor?: string
-  status: 'online' | 'offline' | 'warning' | 'unknown'
+  model?: string
+  status: 'online' | 'offline' | 'warning' | 'unknown' | string
+  siteId?: number | null
+  interfaceCount: number
   ipAddress?: string
+  snmpEnabled?: boolean
+  parentId?: number | null
   x?: number
   y?: number
 }
 
 export interface TopologyEdge {
   id: number
-  sourceDeviceId: number
-  targetDeviceId: number
-  sourceInterfaceId?: number
-  targetInterfaceId?: number
-  linkType: 'manual' | 'lldp' | 'cdp' | 'subnet'
-  confidenceScore?: number
+  source: number
+  target: number
+  sourceDeviceId?: number
+  targetDeviceId?: number
+  sourceDeviceName?: string
+  targetDeviceName?: string
+  sourceInterfaceId?: number | null
+  targetInterfaceId?: number | null
+  sourceInterfaceName?: string | null
+  targetInterfaceName?: string | null
+  sourceInterfaceSpeed?: number | null
+  targetInterfaceSpeed?: number | null
+  sourceInterfaceStatus?: string | null
+  targetInterfaceStatus?: string | null
+  inBps?: number | null
+  outBps?: number | null
+  trafficBps?: number | null
+  trafficLabel?: string | null
+  linkType: string
+  discoveryMethod: string
+  confidence?: number
+  confirmed?: boolean
   status?: string
 }
 
@@ -29,39 +65,121 @@ export interface TopologyData {
   edges: TopologyEdge[]
 }
 
+export interface UnmanagedSwitchPayload {
+  name: string
+  vendor?: string
+  model?: string
+  portCount: number
+  siteId?: number | null
+  networkId?: number | null
+}
+
 export const useTopologyStore = defineStore('topology', () => {
   const nodes = ref<TopologyNode[]>([])
   const edges = ref<TopologyEdge[]>([])
   const loading = ref(false)
   const recalculating = ref(false)
   const error = ref<string | null>(null)
+  const interfaceCache = ref<Map<number, DeviceInterfaceItem[]>>(new Map())
 
-  async function fetchTopology() {
-    loading.value = true
+  async function fetchTopology(siteId?: number | null, setGlobalLoading = true) {
+    if (setGlobalLoading) {
+      loading.value = true
+    }
     error.value = null
     try {
-      const data = await apiService.get<TopologyData>('/topology')
-      nodes.value = data.nodes || []
-      edges.value = data.edges || []
+      const query = siteId ? `?siteId=${siteId}` : ''
+      const data = await apiService.get<TopologyData>(`/topology${query}`)
+      nodes.value = (data.nodes || []).map((node) => ({
+        ...node,
+        status: node.status || 'unknown',
+      }))
+      edges.value = (data.edges || []).map((edge) => ({
+        ...edge,
+        sourceDeviceId: edge.sourceDeviceId ?? edge.source,
+        targetDeviceId: edge.targetDeviceId ?? edge.target,
+      }))
     } catch (err: unknown) {
       error.value = err instanceof Error ? err.message : 'Erro ao carregar mapa de topologia'
     } finally {
-      loading.value = false
+      if (setGlobalLoading) {
+        loading.value = false
+      }
+    }
+  }
+
+  async function fetchDeviceInterfaces(
+    deviceId: number,
+    forceRefresh = false
+  ): Promise<DeviceInterfaceItem[]> {
+    if (!forceRefresh && interfaceCache.value.has(deviceId)) {
+      return interfaceCache.value.get(deviceId) || []
+    }
+    try {
+      const ifaces = await apiService.get<DeviceInterfaceItem[]>(`/devices/${deviceId}/interfaces`)
+      interfaceCache.value.set(deviceId, ifaces || [])
+      return ifaces || []
+    } catch {
+      return []
     }
   }
 
   async function addLink(payload: {
     sourceDeviceId: number
     targetDeviceId: number
-    sourceInterfaceId?: number
-    targetInterfaceId?: number
+    sourceInterfaceId?: number | null
+    targetInterfaceId?: number | null
+    linkType?: string
   }): Promise<boolean> {
     try {
       await apiService.post('/topology/links', payload)
-      await fetchTopology()
+      await fetchTopology(null, false)
       return true
     } catch (err: unknown) {
       error.value = err instanceof Error ? err.message : 'Erro ao adicionar conexão na topologia'
+      return false
+    }
+  }
+
+  async function createUnmanagedSwitch(payload: UnmanagedSwitchPayload): Promise<boolean> {
+    try {
+      await apiService.post('/topology/unmanaged-switch', payload)
+      await fetchTopology(null, false)
+      return true
+    } catch (err: unknown) {
+      error.value = err instanceof Error ? err.message : 'Erro ao cadastrar switch'
+      return false
+    }
+  }
+
+  async function updateLink(
+    linkId: number,
+    payload: {
+      sourceInterfaceId?: number | null
+      targetInterfaceId?: number | null
+      linkType?: string
+    }
+  ): Promise<boolean> {
+    try {
+      await apiService.put(`/topology/links/${linkId}`, payload)
+      await fetchTopology(null, false)
+      return true
+    } catch (err: unknown) {
+      error.value = err instanceof Error ? err.message : 'Erro ao atualizar conexão na topologia'
+      return false
+    }
+  }
+
+  async function deleteDevice(deviceId: number): Promise<boolean> {
+    try {
+      await apiService.delete(`/devices/${deviceId}`)
+      nodes.value = nodes.value.filter((n) => n.id !== deviceId)
+      edges.value = edges.value.filter(
+        (e) => e.sourceDeviceId !== deviceId && e.targetDeviceId !== deviceId
+      )
+      return true
+    } catch (err: unknown) {
+      error.value = err instanceof Error ? err.message : 'Erro ao remover dispositivo'
       return false
     }
   }
@@ -81,7 +199,7 @@ export const useTopologyStore = defineStore('topology', () => {
     recalculating.value = true
     try {
       await apiService.post('/topology/recalculate')
-      await fetchTopology()
+      await fetchTopology(null, false)
       return true
     } catch (err: unknown) {
       error.value = err instanceof Error ? err.message : 'Erro ao recalcular ligações de topologia'
@@ -107,9 +225,14 @@ export const useTopologyStore = defineStore('topology', () => {
     loading,
     recalculating,
     error,
+    interfaceCache,
     applyRealtimeStatus,
     fetchTopology,
+    fetchDeviceInterfaces,
     addLink,
+    updateLink,
+    createUnmanagedSwitch,
+    deleteDevice,
     deleteLink,
     recalculateTopology,
   }

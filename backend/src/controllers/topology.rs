@@ -5,7 +5,7 @@ use loco_rs::prelude::*;
 use std::collections::BTreeMap;
 
 use crate::{
-    dtos::resources::TopologyLinkInput,
+    dtos::resources::{TopologyLinkInput, TopologyLinkUpdateInput, UnmanagedSwitchInput},
     services::{
         shared::errors::{AppError, AppResult},
         topology::service,
@@ -29,6 +29,7 @@ async fn index(
         service::get_topology(&ctx.db, site_id).await?,
     )?)
 }
+
 async fn store_link(
     State(ctx): State<AppContext>,
     Json(input): Json<TopologyLinkInput>,
@@ -39,10 +40,36 @@ async fn store_link(
         input.target_device_id,
         input.source_interface_id,
         input.target_interface_id,
+        input.link_type,
     )
     .await?;
     Ok((StatusCode::CREATED, axum::Json(link)).into_response())
 }
+
+async fn update_link(
+    State(ctx): State<AppContext>,
+    Path(id): Path<i64>,
+    Json(input): Json<TopologyLinkUpdateInput>,
+) -> AppResult<Response> {
+    let link = service::update_manual_link(
+        &ctx.db,
+        id,
+        input.source_interface_id,
+        input.target_interface_id,
+        input.link_type,
+    )
+    .await?;
+    Ok(format::json(link)?)
+}
+
+async fn store_unmanaged_switch(
+    State(ctx): State<AppContext>,
+    Json(input): Json<UnmanagedSwitchInput>,
+) -> AppResult<Response> {
+    let device = service::create_unmanaged_switch(&ctx.db, input).await?;
+    Ok((StatusCode::CREATED, axum::Json(device)).into_response())
+}
+
 async fn destroy_link(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
     if !service::delete_link(&ctx.db, id).await? {
         return Err(AppError::not_found("Ligação não encontrada"));
@@ -51,17 +78,20 @@ async fn destroy_link(State(ctx): State<AppContext>, Path(id): Path<i64>) -> App
         serde_json::json!({ "message": "Ligação removida com sucesso" }),
     )?)
 }
+
 async fn recalculate(State(ctx): State<AppContext>) -> AppResult<Response> {
     let count = service::infer_subnet_links(&ctx.db).await?;
     Ok(format::json(
         serde_json::json!({ "message":"Recálculo de topologia concluído", "inferredCount":count }),
     )?)
 }
+
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("/topology")
         .add("/", get(index))
         .add("/links", post(store_link))
-        .add("/links/{id}", delete(destroy_link))
+        .add("/links/{id}", put(update_link).delete(destroy_link))
+        .add("/unmanaged-switch", post(store_unmanaged_switch))
         .add("/recalculate", post(recalculate))
 }
