@@ -115,7 +115,7 @@
       </div>
 
       <!-- Grade dos Cards de Serviços -->
-      <div class="saas-widgets-grid overflow-y-auto pr-1" style="max-height: 480px">
+      <div class="saas-widgets-grid overflow-y-auto pr-1" style="max-height: 520px">
         <v-row dense>
           <v-col
             v-for="mon in filteredMonitors"
@@ -134,10 +134,10 @@
             >
               <div>
                 <!-- Topo: Avatar do Serviço + Status Chip -->
-                <div class="d-flex align-center justify-space-between mb-2">
+                <div class="d-flex align-center justify-space-between mb-1">
                   <div class="d-flex align-center ga-2 overflow-hidden">
-                    <v-avatar :color="getServiceColor(mon)" size="30" variant="tonal" rounded>
-                      <v-icon size="18" :color="getServiceColor(mon)">
+                    <v-avatar :color="getServiceColor(mon)" size="28" variant="tonal" rounded>
+                      <v-icon size="16" :color="getServiceColor(mon)">
                         {{ getServiceIcon(mon) }}
                       </v-icon>
                     </v-avatar>
@@ -146,13 +146,16 @@
                     </div>
                   </div>
 
-                  <v-badge
-                    dot
+                  <v-chip
+                    size="x-small"
                     :color="
                       mon.status === 'up' ? 'success' : mon.status === 'down' ? 'error' : 'warning'
                     "
-                    inline
-                  ></v-badge>
+                    variant="tonal"
+                    class="font-weight-bold px-1"
+                  >
+                    {{ (mon.status || 'unknown').toUpperCase() }}
+                  </v-chip>
                 </div>
 
                 <!-- Alvo do Monitor -->
@@ -162,27 +165,68 @@
                 >
                   {{ mon.target }}
                 </div>
+
+                <!-- Gráfico Sparkline de Histórico do Serviço -->
+                <div class="saas-sparkline-box my-1 pa-1 rounded bg-surface-light border">
+                  <div
+                    class="d-flex align-center justify-space-between text-caption px-1 mb-1 text-medium-emphasis"
+                    style="font-size: 10px"
+                  >
+                    <span>Histórico de Latência</span>
+                    <span
+                      class="font-weight-bold font-family-monospace"
+                      :class="`text-${getLatencyColor(mon.lastLatencyMs)}`"
+                    >
+                      {{
+                        mon.lastLatencyMs !== null && mon.lastLatencyMs !== undefined
+                          ? `${mon.lastLatencyMs.toFixed(1)} ms`
+                          : '--'
+                      }}
+                    </span>
+                  </div>
+                  <div class="w-100 d-flex align-center justify-center" style="height: 32px">
+                    <MonitorSparkline
+                      v-if="getMonitorHistoryPoints(mon).length > 0"
+                      :data="getMonitorHistoryPoints(mon)"
+                      :color="getServiceColor(mon)"
+                      width="100%"
+                      :height="32"
+                      unit="ms"
+                      :format-value="formatLatency"
+                    />
+                    <div
+                      v-else
+                      class="text-caption text-disabled d-flex align-center ga-1"
+                      style="font-size: 11px"
+                    >
+                      <v-icon size="12">mdi-chart-timeline-variant-shimmer</v-icon>
+                      <span>Aguardando amostras...</span>
+                    </div>
+                  </div>
+                </div>
               </div>
 
-              <!-- Rodapé do Card do Serviço: Latência e Categoria -->
-              <div class="d-flex align-center justify-space-between pt-2 border-t mt-1">
-                <span class="text-caption text-medium-emphasis">
+              <!-- Rodapé do Card do Serviço: Categoria e Total de Amostras -->
+              <div class="d-flex align-center justify-space-between pt-2 border-t mt-2">
+                <span
+                  class="text-caption text-medium-emphasis text-truncate"
+                  style="max-width: 110px"
+                >
                   {{ getCategoryLabel(mon) }}
                 </span>
 
-                <div class="d-flex align-center ga-1">
-                  <v-chip
-                    size="x-small"
-                    :color="getLatencyColor(mon.lastLatencyMs)"
-                    variant="flat"
-                    class="font-weight-bold"
-                  >
-                    {{
-                      mon.lastLatencyMs !== null && mon.lastLatencyMs !== undefined
-                        ? `${mon.lastLatencyMs.toFixed(1)} ms`
-                        : '--'
+                <div
+                  class="d-flex align-center ga-1 text-caption text-medium-emphasis"
+                  style="font-size: 11px"
+                >
+                  <span v-if="mon.stats?.uptimePercentage !== undefined" class="font-weight-medium">
+                    {{ mon.stats.uptimePercentage }}% uptime
+                  </span>
+                  <span v-else>
+                    {{ getMonitorHistoryPoints(mon).length }} leitura{{
+                      getMonitorHistoryPoints(mon).length !== 1 ? 's' : ''
                     }}
-                  </v-chip>
+                  </span>
                 </div>
               </div>
             </v-card>
@@ -205,8 +249,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useMonitorsStore, type Monitor } from '@/stores/monitors'
+import MonitorSparkline, { type SparklinePoint } from '@/components/MonitorSparkline.vue'
 import SaasPresetsDialog from '@/components/monitors/SaasPresetsDialog.vue'
 import MonitorDetailDialog from '@/components/monitors/MonitorDetailDialog.vue'
+import { formatLatency } from '@/utils/formatters'
 
 const monitorsStore = useMonitorsStore()
 
@@ -273,6 +319,27 @@ const avgLatency = computed(() => {
   const sum = withLat.reduce((acc, m) => acc + (m.lastLatencyMs || 0), 0)
   return sum / withLat.length
 })
+
+function getMonitorHistoryPoints(m: Monitor): SparklinePoint[] {
+  if (m.recentResults && m.recentResults.length > 0) {
+    const valid = m.recentResults
+      .filter((r) => r.latencyMs !== null && r.latencyMs !== undefined)
+      .map((r) => ({
+        value: r.latencyMs as number,
+        recordedAt: r.finishedAt || r.startedAt,
+      }))
+    if (valid.length > 0) return valid
+  }
+  if (typeof m.lastLatencyMs === 'number') {
+    return [
+      {
+        value: m.lastLatencyMs,
+        recordedAt: m.lastCheckedAt || new Date().toISOString(),
+      },
+    ]
+  }
+  return []
+}
 
 function getLatencyColor(latency: number | null | undefined): string {
   if (latency === null || latency === undefined) return 'grey'

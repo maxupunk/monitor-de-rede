@@ -1,13 +1,11 @@
 <template>
   <div
     class="monitor-sparkline-wrapper d-inline-flex align-center"
-    :style="{ position: 'relative', width: `${width}px`, height: `${height}px` }"
+    :style="{ position: 'relative', width: cssWidth, height: `${height}px` }"
   >
     <svg
       class="monitor-sparkline-svg"
-      :width="width"
-      :height="height"
-      :viewBox="`0 0 ${width} ${height}`"
+      :viewBox="`0 0 ${viewBoxWidth} ${height}`"
       preserveAspectRatio="none"
       style="display: block; width: 100%; height: 100%"
     >
@@ -32,7 +30,7 @@
         <line
           x1="0"
           :y1="points[0].y"
-          :x2="width"
+          :x2="viewBoxWidth"
           :y2="points[0].y"
           :stroke="color"
           stroke-width="1.5"
@@ -123,7 +121,7 @@ const props = withDefaults(
   defineProps<{
     data?: SparklinePoint[]
     color?: string
-    width?: number
+    width?: number | string
     height?: number
     unit?: string
     formatValue?: (val: number) => string
@@ -142,6 +140,17 @@ const activeHoverIndex = ref<number | null>(null)
 
 const gradientId = `sparkline-grad-${Math.random().toString(36).slice(2)}`
 
+const viewBoxWidth = computed(() => {
+  if (typeof props.width === 'number') return props.width
+  const parsed = parseFloat(String(props.width))
+  return isNaN(parsed) || parsed <= 0 ? 100 : parsed
+})
+
+const cssWidth = computed(() => {
+  if (typeof props.width === 'number') return `${props.width}px`
+  return props.width || '100%'
+})
+
 const values = computed(() => props.data.map((d) => d.value).filter((v) => !isNaN(v)))
 
 const maxVal = computed(() => (values.value.length > 0 ? Math.max(...values.value) : 0))
@@ -155,9 +164,10 @@ const points = computed(() => {
   const top = padding
   const bottom = props.height - padding
   const range = maxVal.value - minVal.value
+  const vw = viewBoxWidth.value
 
   return props.data.map((d, idx) => {
-    const x = count === 1 ? props.width / 2 : (idx / (count - 1)) * props.width
+    const x = count === 1 ? vw / 2 : (idx / (count - 1)) * vw
     const ratio = range > 0 ? (d.value - minVal.value) / range : 0.5
     const y = bottom - ratio * (bottom - top)
     return { x, y, value: d.value, recordedAt: d.recordedAt }
@@ -178,10 +188,11 @@ const areaPoints = computed(() => {
 const columns = computed(() => {
   const count = points.value.length
   if (count === 0) return []
+  const vw = viewBoxWidth.value
 
   return points.value.map((pt, idx) => {
     let leftX = 0
-    let rightX = props.width
+    let rightX = vw
 
     if (count > 1) {
       if (idx === 0) {
@@ -189,7 +200,7 @@ const columns = computed(() => {
         rightX = (pt.x + points.value[1].x) / 2
       } else if (idx === count - 1) {
         leftX = (pt.x + points.value[idx - 1].x) / 2
-        rightX = props.width
+        rightX = vw
       } else {
         leftX = (pt.x + points.value[idx - 1].x) / 2
         rightX = (pt.x + points.value[idx + 1].x) / 2
@@ -201,7 +212,7 @@ const columns = computed(() => {
     return {
       pt,
       idx,
-      flexRatio: colWidth / props.width,
+      flexRatio: colWidth / vw,
     }
   })
 })

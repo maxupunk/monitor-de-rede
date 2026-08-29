@@ -9,10 +9,10 @@
 1. **Validação Obrigatória Pré-Finalização**:
    - **Frontend**:
      ```bash
-     npm --prefix frontend run typecheck
-     npm --prefix frontend run format
-     npm --prefix frontend run lint
-     npm --prefix frontend run build
+     pnpm --prefix frontend run typecheck
+     pnpm --prefix frontend run format
+     pnpm --prefix frontend run lint
+     pnpm --prefix frontend run build
      ```
    - **Backend (Rust)**:
      ```bash
@@ -41,8 +41,8 @@
      recusa a leitura em produção.
    - **Alinhamento de Peer Dependencies (frontend)**: ao atualizar/adicionar
      dependências em `package.json`, garanta versões compatíveis para evitar
-     `ERESOLVE`, e rode `npm --prefix frontend install` para sincronizar o
-     `package-lock.json`.
+     `ERESOLVE`, e rode `pnpm --prefix frontend install` para sincronizar o
+     `pnpm-lock.yaml`.
 
 4. **Práticas de Teste (Rust)**:
    - **Isolamento de Banco**: testes de requisição usam
@@ -102,5 +102,5 @@
 
 8. **Edições Cirúrgicas e Preservação de Formatação / Indentação (Economia de Tokens)**:
    - **Edições cirúrgicas**: Faça apenas modificações pontuais no escopo estrito da tarefa. **NUNCA** reformate arquivos inteiros nem altere a indentação, espaçamento ou quebras de linha de blocos de código não relacionados à mudança funcional.
-   - **Evitar retrabalho com formatadores**: O repositório já possui formatadores padronizados (`cargo fmt` no backend e `npm run format` / Prettier no frontend). Alterar indentação arbitrariamente faz com que a etapa de validação (`format`) precise desfazer ou reformatar tudo, inflando diffs e desperdiçando tokens desnecessariamente.
+   - **Evitar retrabalho com formatadores**: O repositório já possui formatadores padronizados (`cargo fmt` no backend e `pnpm run format` / Prettier no frontend). Alterar indentação arbitrariamente faz com que a etapa de validação (`format`) precise desfazer ou reformatar tudo, inflando diffs e desperdiçando tokens desnecessariamente.
    - **Respeite o estilo local**: Ao escrever código novo, siga rigorosamente o padrão de indentação e espaçamento já presente no arquivo para que o formatador não precise reformatar o bloco na validação final.

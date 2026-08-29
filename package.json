@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev:frontend": "npm --prefix frontend run dev",
-    "build:frontend": "npm --prefix frontend run build",
-    "typecheck:frontend": "npm --prefix frontend run typecheck",
-    "lint:frontend": "npm --prefix frontend run lint",
-    "format:frontend": "npm --prefix frontend run format"
+    "dev:frontend": "pnpm --prefix frontend run dev",
+    "build:frontend": "pnpm --prefix frontend run build",
+    "typecheck:frontend": "pnpm --prefix frontend run typecheck",
+    "lint:frontend": "pnpm --prefix frontend run lint",
+    "format:frontend": "pnpm --prefix frontend run format"
   }
 }

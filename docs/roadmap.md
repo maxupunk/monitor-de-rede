@@ -383,13 +383,6 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
   - O cadastro oferece “Salvar e ativar logs”, e o endereço detectado do NetMonitor não é mais descartado quando ainda não existe como entrada nomeada.
   - Os campos automáticos exibem diretamente a conclusão efetiva sem congelá-la como declaração manual, e respostas atrasadas são descartadas por IP e sessão.
   - A ativação usa um alvo imutável do dispositivo recém-salvo e um único autocomplete para sugestão, catálogo e endereço livre.
-  - O assistente aplica o snapshot já na primeira montagem; em container bridge, o backend combina a rota com o endereço externo observado na sessão e nunca sugere o IP interno/gateway do Docker.
-  - A ativação usa um timeout HTTP próprio, maior que a sessão SSH e a confirmação do log; operações comuns continuam com o teto curto de 15 segundos.
-  - A linha de teste leva um marcador efêmero por sessão; quando o Docker mascara o IP, sua origem é associada ao dispositivo autenticado sem vincular o gateway compartilhado.
-  - A sessão autenticada consulta o hostname/identity do equipamento antes de configurar; o vínculo persistido associa logs futuros pelo nome mesmo sem um IP de origem exclusivo e a tela mostra a identidade reconhecida.
-  - A configuração de Syslog pode ser retomada pela edição e pela aba Logs de qualquer dispositivo; o IP vem primeiro e a identificação sugere o nome anunciado via SNMP/descoberta sem sobrescrever texto digitado.
-  - O último destino aplicado é isolado por dispositivo; valores livres são normalizados e adicionados ao catálogo global sem duplicatas.
-
 - [x] **Rede Docker host e porta configurável** 🟢 Concluído
   - `docker-compose.host.yml` remove publicação/NAT e compartilha diretamente a rede do host.
   - `APP_PORT` define a porta real da API/SPA; `APP_EXTERNAL_PORT` continua sendo apenas a publicação no modo bridge.
@@ -420,12 +413,12 @@ cargo build --release
 ### Frontend
 
 ```bash
-npm --prefix frontend run typecheck
-npm --prefix frontend run format
-npm --prefix frontend run lint
-npm --prefix frontend run build
+pnpm --prefix frontend run typecheck
+pnpm --prefix frontend run format
+pnpm --prefix frontend run lint
+pnpm --prefix frontend run build
 # após adicionar testes:
-npm --prefix frontend run test
+pnpm --prefix frontend run test
 ```
 
 ### Segurança / DevOps (quando aplicável)
@@ -437,13 +430,13 @@ cargo audit
 cargo deny check
 
 # Frontend
-npm --prefix frontend audit
+pnpm --prefix frontend audit
 
 # Docker
 docker build -t netmonitor:check .
 ```
 
-> Regra de ouro: `cargo test` regenera os bindings `ts-rs`. Sempre rode `npm --prefix frontend run format` **depois** de `cargo test`, nunca antes.
+> Regra de ouro: `cargo test` regenera os bindings `ts-rs`. Sempre rode `pnpm --prefix frontend run format` **depois** de `cargo test`, nunca antes.
 
 ---
 
