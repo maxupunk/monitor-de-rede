@@ -82,13 +82,16 @@ export const useTopologyStore = defineStore('topology', () => {
   const error = ref<string | null>(null)
   const interfaceCache = ref<Map<number, DeviceInterfaceItem[]>>(new Map())
 
-  async function fetchTopology(siteId?: number | null, setGlobalLoading = true) {
+  async function fetchTopology(siteId?: number | null, setGlobalLoading = true, live = true) {
     if (setGlobalLoading) {
       loading.value = true
     }
     error.value = null
     try {
-      const query = siteId ? `?siteId=${siteId}` : ''
+      const params = new URLSearchParams()
+      if (siteId) params.set('siteId', siteId.toString())
+      if (live) params.set('live', 'true')
+      const query = params.toString() ? `?${params.toString()}` : ''
       const data = await apiService.get<TopologyData>(`/topology${query}`)
       nodes.value = (data.nodes || []).map((node) => ({
         ...node,

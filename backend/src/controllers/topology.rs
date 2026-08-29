@@ -25,8 +25,12 @@ async fn index(
                 .map_err(|_| AppError::validation("siteId inválido"))
         })
         .transpose()?;
+    let live = query
+        .get("live")
+        .map(|v| v == "true" || v == "1")
+        .unwrap_or(false);
     Ok(format::json(
-        service::get_topology(&ctx.db, site_id).await?,
+        service::get_topology_with_live(&ctx, site_id, live).await?,
     )?)
 }
 
