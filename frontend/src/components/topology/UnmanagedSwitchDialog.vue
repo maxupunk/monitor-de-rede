@@ -3,12 +3,13 @@
     :model-value="modelValue"
     :max-width="$vuetify.display.xs ? undefined : 560"
     :fullscreen="$vuetify.display.xs"
+    scrollable
     persistent
     @update:model-value="$emit('update:modelValue', $event)"
   >
-    <v-card class="rounded-xl overflow-hidden elevation-12">
+    <v-card class="rounded-xl overflow-hidden elevation-12 dialog-card-container">
       <!-- Header do Modal -->
-      <v-card-item class="bg-indigo-darken-2 text-white py-4 px-6">
+      <v-card-item class="bg-indigo-darken-2 text-white py-4 px-6 flex-shrink-0">
         <div class="d-flex align-center justify-space-between w-100">
           <div class="d-flex align-center">
             <v-avatar color="white" variant="flat" size="38" class="mr-3 text-indigo-darken-2">
@@ -33,7 +34,7 @@
         </div>
       </v-card-item>
 
-      <v-card-text class="pa-6">
+      <v-card-text class="pa-4 pa-sm-6 flex-grow-1 overflow-y-auto">
         <!-- Explicação do papel do Switch -->
         <v-alert
           type="info"
@@ -139,7 +140,7 @@
 
       <v-divider></v-divider>
 
-      <v-card-actions class="pa-4 px-6 justify-end bg-surface">
+      <v-card-actions class="pa-4 px-6 justify-end bg-surface border-t flex-shrink-0">
         <v-btn variant="text" :disabled="saving" @click="close">Cancelar</v-btn>
         <v-btn
           color="indigo-darken-2"
@@ -226,6 +227,11 @@ async function save() {
 </script>
 
 <style scoped>
+.dialog-card-container {
+  display: flex;
+  flex-direction: column;
+  max-height: 90vh;
+}
 .ports-preview-container {
   background: rgba(var(--v-theme-surface-variant), 0.35);
   border: 1px solid rgba(var(--v-theme-outline), 0.2);
@@ -242,5 +248,16 @@ async function save() {
 }
 .gap-1 {
   gap: 4px;
+}
+@media (max-width: 600px) {
+  .dialog-card-container {
+    max-height: 100vh;
+    height: 100%;
+    border-radius: 0 !important;
+  }
+  .port-badge {
+    min-width: 32px;
+    font-size: 10px;
+  }
 }
 </style>

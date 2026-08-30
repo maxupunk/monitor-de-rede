@@ -3,12 +3,13 @@
     :model-value="modelValue"
     :max-width="$vuetify.display.xs ? undefined : 640"
     :fullscreen="$vuetify.display.xs"
+    scrollable
     persistent
     @update:model-value="$emit('update:modelValue', $event)"
   >
-    <v-card class="rounded-xl overflow-hidden elevation-12">
+    <v-card class="rounded-xl overflow-hidden elevation-12 dialog-card-container">
       <!-- Header com gradiente moderno -->
-      <v-card-item class="bg-primary text-white py-4 px-6">
+      <v-card-item class="bg-primary text-white py-4 px-6 flex-shrink-0">
         <div class="d-flex align-center justify-space-between w-100">
           <div class="d-flex align-center">
             <v-avatar color="white" variant="flat" size="38" class="mr-3 text-primary">
@@ -39,7 +40,7 @@
         </div>
       </v-card-item>
 
-      <v-card-text class="pa-6">
+      <v-card-text class="pa-4 pa-sm-6 flex-grow-1 overflow-y-auto">
         <!-- Visual Connection Preview Banner -->
         <div class="connection-preview-card pa-4 rounded-lg mb-6 elevation-1">
           <div class="text-caption font-weight-bold text-medium-emphasis mb-2 text-uppercase">
@@ -293,7 +294,7 @@
 
       <v-divider></v-divider>
 
-      <v-card-actions class="pa-4 px-6 justify-end bg-surface">
+      <v-card-actions class="pa-4 px-6 justify-end bg-surface border-t flex-shrink-0">
         <v-btn variant="text" :disabled="saving" @click="close">Cancelar</v-btn>
         <v-btn
           color="primary"
@@ -587,5 +588,23 @@ async function save() {
 }
 .border-success-subtle {
   border-color: rgba(var(--v-theme-success), 0.3) !important;
+}
+.dialog-card-container {
+  display: flex;
+  flex-direction: column;
+  max-height: 90vh;
+}
+@media (max-width: 600px) {
+  .dialog-card-container {
+    max-height: 100vh;
+    height: 100%;
+    border-radius: 0 !important;
+  }
+  .preview-box {
+    min-width: 100%;
+  }
+  .connection-preview-card {
+    padding: 12px !important;
+  }
 }
 </style>

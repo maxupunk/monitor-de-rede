@@ -2,65 +2,68 @@
   <div class="topology-view-wrapper d-flex flex-column fill-height w-100 position-relative">
     <!-- Container Principal do Mapa Gráfico -->
     <div class="overflow-hidden position-relative flex-grow-1 topology-map-container w-100 h-100">
-      <!-- Barra Flutuante de Controles Superior -->
-      <div class="floating-controls-wrapper">
-        <TopologyControls
-          :zoom-level="zoom"
-          :is-connect-mode="isConnectMode"
-          :active-type-filter="selectedTypeFilter"
-          :recalculating="topologyStore.recalculating"
-          :can-write="authStore.canWrite"
-          @zoom-in="zoomIn"
-          @zoom-out="zoomOut"
-          @zoom-reset="zoomReset"
-          @fit-screen="fitToScreen"
-          @toggle-connect-mode="toggleConnectMode"
-          @apply-layout="applyLayout"
-          @filter-type="applyTypeFilter"
-          @add-link="openLinkDialog()"
-          @add-switch="unmanagedSwitchDialog = true"
-          @recalculate="recalculateTopology"
-        />
+      <!-- Header Superior Flutuante (Controles à Esquerda e Busca à Direita) -->
+      <div class="top-floating-header-wrapper d-flex align-center justify-space-between w-100 px-3 px-sm-4 pt-3">
+        <div class="header-controls-area">
+          <TopologyControls
+            :zoom-level="zoom"
+            :is-connect-mode="isConnectMode"
+            :active-type-filter="selectedTypeFilter"
+            :recalculating="topologyStore.recalculating"
+            :can-write="authStore.canWrite"
+            @zoom-in="zoomIn"
+            @zoom-out="zoomOut"
+            @zoom-reset="zoomReset"
+            @fit-screen="fitToScreen"
+            @toggle-connect-mode="toggleConnectMode"
+            @apply-layout="applyLayout"
+            @filter-type="applyTypeFilter"
+            @add-link="openLinkDialog()"
+            @add-switch="unmanagedSwitchDialog = true"
+            @recalculate="recalculateTopology"
+            @open-search="mobileSearchOpen = true"
+          />
+        </div>
+
+        <!-- Barra de Busca Rápida Desktop (Integrada no header, sem sobreposição) -->
+        <div class="header-search-area d-none d-lg-block ml-3">
+          <v-autocomplete
+            v-model="highlightedDeviceId"
+            :items="topologyStore.nodes"
+            item-title="name"
+            item-value="id"
+            label="Localizar equipamento no mapa..."
+            prepend-inner-icon="mdi-magnify"
+            variant="solo-filled"
+            density="compact"
+            hide-details
+            clearable
+            class="search-autocomplete elevation-4"
+            @update:model-value="onDeviceSearchSelected"
+          >
+            <template #item="{ props: itemProps, item }">
+              <v-list-item v-bind="itemProps" :subtitle="item.ipAddress || item.type">
+                <template #prepend>
+                  <v-icon :color="getNodeColor(item.status)" size="20">
+                    {{ getNodeIcon(item.type) }}
+                  </v-icon>
+                </template>
+              </v-list-item>
+            </template>
+          </v-autocomplete>
+        </div>
       </div>
 
-      <!-- Barra Flutuante de Busca Rápida de Dispositivo -->
-      <div class="floating-search-wrapper hidden-xs">
-        <v-autocomplete
-          v-model="highlightedDeviceId"
-          :items="topologyStore.nodes"
-          item-title="name"
-          item-value="id"
-          label="Localizar equipamento no mapa..."
-          prepend-inner-icon="mdi-magnify"
-          variant="solo-filled"
-          density="compact"
-          hide-details
-          clearable
-          class="search-autocomplete elevation-3"
-          @update:model-value="onDeviceSearchSelected"
-        >
-          <template #item="{ props: itemProps, item }">
-            <v-list-item v-bind="itemProps" :subtitle="item.ipAddress || item.type">
-              <template #prepend>
-                <v-icon :color="getNodeColor(item.status)" size="20">
-                  {{ getNodeIcon(item.type) }}
-                </v-icon>
-              </template>
-            </v-list-item>
-          </template>
-        </v-autocomplete>
-      </div>
-
-      <!-- Alerta Informativo do Modo de Conexão com Mouse Ativo -->
+      <!-- Alerta Informativo do Modo de Conexão com Mouse/Touch Ativo -->
       <transition name="slide-y-transition">
-        <div v-if="isConnectMode" class="connect-mode-banner elevation-6 px-4 py-2 rounded-pill">
+        <div v-if="isConnectMode" class="connect-mode-banner elevation-8 px-4 py-2 rounded-pill">
           <v-icon color="white" class="mr-2 cable-pulse">mdi-vector-polyline</v-icon>
           <span class="text-caption font-weight-bold text-white">
             <span v-if="!connectSourceId">
-              Clique no <strong>equipamento de ORIGEM</strong> para iniciar o enlace
+              Toque ou clique no <strong>equipamento de ORIGEM</strong>
             </span>
             <span v-else>
-              Clique no <strong>equipamento de DESTINO</strong> para finalizar (ESC para cancelar)
+              Toque ou clique no <strong>equipamento de DESTINO</strong> (ESC para cancelar)
             </span>
           </span>
           <v-btn
@@ -69,12 +72,13 @@
             color="white"
             icon="mdi-close"
             class="ml-2"
+            aria-label="Cancelar modo de conexão"
             @click="cancelConnectMode"
           ></v-btn>
         </div>
       </transition>
 
-      <!-- Viewport / Canvas Interativo (Pan & Zoom) -->
+      <!-- Viewport / Canvas Interativo (Pan, Zoom & Touch) -->
       <div
         ref="canvasViewport"
         class="topology-viewport"
@@ -108,7 +112,7 @@
 
           <!-- SVG Canvas para Arestas / Cabos -->
           <svg width="4000" height="4000" class="topology-edges-layer">
-            <!-- Linha Elástica Provisória de Conexão do Mouse -->
+            <!-- Linha Elástica Provisória de Conexão do Mouse / Touch -->
             <g v-if="isConnectMode && connectSourceId && mousePosWorld">
               <line
                 :x1="getNodeCenter(connectSourceId).x"
@@ -128,15 +132,17 @@
               :key="edge.id"
               class="edge-group cursor-pointer"
               @click.stop="onEdgeClick(edge)"
+              @touchend.stop="onEdgeTouchEnd(edge)"
             >
-              <!-- Linha Invisível mais Grossa para Facilitar Clique / Hover -->
+              <!-- Linha Invisível mais Grossa para Facilitar Toque Touch e Hover -->
               <line
                 :x1="edge.x1"
                 :y1="edge.y1"
                 :x2="edge.x2"
                 :y2="edge.y2"
                 stroke="transparent"
-                stroke-width="18"
+                stroke-width="32"
+                class="edge-touch-target"
               />
 
               <!-- Linha Principal da Conexão -->
@@ -189,7 +195,7 @@
             </g>
           </svg>
 
-          <!-- Nós / Equipamentos Renderizados em HTML com Rich Styling -->
+          <!-- Nós / Equipamentos Renderizados em HTML com Rich Styling e Suporte a Touch -->
           <div
             v-for="node in visibleNodes"
             :key="node.id"
@@ -202,6 +208,8 @@
             :style="{ left: `${node.x}px`, top: `${node.y}px` }"
             @mousedown.stop="onNodeMouseDown($event, node)"
             @click.stop="onNodeClick(node)"
+            @touchstart.stop="onNodeTouchStart($event, node)"
+            @touchend.stop="onNodeTouchEnd(node)"
           >
             <!-- Halo de Conexão no Modo Cable Tool -->
             <div v-if="isConnectMode" class="connect-port-handles">
@@ -266,7 +274,7 @@
           <p class="text-body-2 text-medium-emphasis mb-4">
             Cadastre dispositivos ou clique em "Recalcular Topologia" para construir o mapa.
           </p>
-          <div class="d-flex justify-center gap-2">
+          <div class="d-flex justify-center gap-2 flex-wrap">
             <v-btn color="primary" prepend-icon="mdi-calculator" @click="recalculateTopology">
               Recalcular Topologia
             </v-btn>
@@ -296,21 +304,97 @@
       </v-overlay>
     </div>
 
-    <!-- Drawer de Detalhes do Nó Selecionado -->
+    <!-- Diálogo de Busca Rápida Mobile -->
+    <v-dialog
+      v-model="mobileSearchOpen"
+      :max-width="500"
+      scrollable
+      transition="dialog-bottom-transition"
+    >
+      <v-card class="bg-surface rounded-xl overflow-hidden elevation-12 dialog-card-container">
+        <v-toolbar color="surface" density="comfortable" class="px-3 border-b flex-shrink-0">
+          <v-icon color="#38bdf8" class="mr-2">mdi-magnify</v-icon>
+          <v-text-field
+            v-model="mobileSearchQuery"
+            placeholder="Localizar equipamento no mapa..."
+            variant="solo-filled"
+            density="compact"
+            hide-details
+            clearable
+            autofocus
+            class="rounded-lg flex-grow-1"
+          ></v-text-field>
+          <v-btn
+            icon="mdi-close"
+            variant="text"
+            size="small"
+            class="ml-2"
+            aria-label="Fechar busca"
+            @click="mobileSearchOpen = false"
+          ></v-btn>
+        </v-toolbar>
+        <v-card-text class="pa-2 flex-grow-1 overflow-y-auto">
+          <v-list lines="two" class="bg-transparent pa-0">
+            <v-list-item
+              v-for="node in filteredSearchNodes"
+              :key="node.id"
+              class="rounded-lg mb-1 search-result-item"
+              @click="selectMobileSearchNode(node)"
+            >
+              <template #prepend>
+                <v-avatar :color="getNodeColor(node.status)" size="38" class="mr-3 elevation-2">
+                  <v-icon color="white" size="22">{{ getNodeIcon(node.type) }}</v-icon>
+                </v-avatar>
+              </template>
+              <v-list-item-title class="font-weight-bold text-subtitle-2 text-white">
+                {{ node.name }}
+              </v-list-item-title>
+              <v-list-item-subtitle class="text-caption text-medium-emphasis">
+                <span v-if="node.ipAddress" class="font-mono text-cyan-accent-2 mr-2">
+                  {{ node.ipAddress }}
+                </span>
+                <span>• {{ getNodeTypeLabel(node.type) }}</span>
+              </v-list-item-subtitle>
+              <template #append>
+                <v-chip
+                  size="x-small"
+                  :color="getNodeColor(node.status)"
+                  variant="tonal"
+                  class="text-uppercase font-weight-bold"
+                >
+                  {{ node.status }}
+                </v-chip>
+              </template>
+            </v-list-item>
+            <div
+              v-if="filteredSearchNodes.length === 0"
+              class="text-center pa-8 text-medium-emphasis"
+            >
+              <v-icon size="36" color="grey" class="mb-2">mdi-magnify-close</v-icon>
+              <div class="text-subtitle-2 font-weight-bold">Nenhum equipamento encontrado</div>
+              <div class="text-caption">Tente buscar por nome, endereço IP ou tipo de nó.</div>
+            </div>
+          </v-list>
+        </v-card-text>
+      </v-card>
+    </v-dialog>
+
+    <!-- Drawer / Diálogo de Detalhes do Nó Selecionado -->
     <v-dialog
       v-model="nodeDrawer"
       :max-width="$vuetify.display.xs ? undefined : 460"
       :fullscreen="$vuetify.display.xs"
+      scrollable
     >
-      <v-card v-if="selectedNode" class="rounded-xl pa-2 overflow-hidden elevation-12">
-        <v-card-item class="pa-4 bg-surface-variant-subtle rounded-lg">
+      <v-card v-if="selectedNode" class="rounded-xl overflow-hidden elevation-12 dialog-card-container">
+        <v-card-item class="pa-4 bg-surface-variant-subtle border-b flex-shrink-0">
           <div class="d-flex align-center">
             <v-avatar :color="getNodeColor(selectedNode.status)" size="48" class="mr-3 elevation-2">
               <v-icon color="white" size="26">{{ getNodeIcon(selectedNode.type) }}</v-icon>
             </v-avatar>
             <div class="flex-grow-1 overflow-hidden">
               <div class="text-h6 font-weight-bold text-truncate">{{ selectedNode.name }}</div>
-              <div class="text-caption text-medium-emphasis d-flex align-center">
+              <div class="text-caption text-medium-emphasis d-flex align-center flex-wrap">
                 <span class="mr-2">IP: {{ selectedNode.ipAddress || 'Não configurado' }}</span>
                 <v-chip
                   size="x-small"
@@ -327,12 +411,13 @@
               variant="text"
               density="comfortable"
               size="small"
+              aria-label="Fechar detalhes"
               @click="nodeDrawer = false"
             ></v-btn>
           </div>
         </v-card-item>
 
-        <v-card-text class="pa-4">
+        <v-card-text class="pa-4 flex-grow-1 overflow-y-auto">
           <v-list density="compact" class="pa-0">
             <v-list-item
               title="Tipo de Dispositivo"
@@ -375,6 +460,7 @@
               variant="tonal"
               prepend-icon="mdi-vector-polyline-plus"
               block
+              class="rounded-lg"
               @click="openLinkDialogFromNode(selectedNode.id)"
             >
               Conectar a Outro Dispositivo
@@ -385,6 +471,7 @@
               variant="outlined"
               prepend-icon="mdi-open-in-new"
               block
+              class="rounded-lg"
               :to="`/devices/${selectedNode.id}`"
             >
               Abrir Ficha do Dispositivo
@@ -394,6 +481,7 @@
               variant="tonal"
               prepend-icon="mdi-trash-can-outline"
               block
+              class="rounded-lg"
               @click="confirmDeleteDevice(selectedNode)"
             >
               {{
@@ -444,25 +532,29 @@
     <!-- Diálogo de Detalhes / Edição / Exclusão de Conexão -->
     <v-dialog
       v-model="edgeDialog"
-      :max-width="$vuetify.display.xs ? undefined : 460"
+      :max-width="$vuetify.display.xs ? undefined : 480"
       :fullscreen="$vuetify.display.xs"
+      scrollable
     >
-      <v-card v-if="selectedEdge" class="rounded-xl pa-4 elevation-12">
-        <v-card-title class="font-weight-bold d-flex align-center justify-space-between pa-0 mb-3">
-          <div class="d-flex align-center">
-            <v-icon color="primary" class="mr-2">mdi-transit-connection-variant</v-icon>
-            <span>Detalhes do Enlace</span>
+      <v-card v-if="selectedEdge" class="rounded-xl overflow-hidden elevation-12 dialog-card-container">
+        <v-card-item class="pa-4 border-b flex-shrink-0 bg-surface-variant-subtle">
+          <div class="d-flex align-center justify-space-between w-100">
+            <div class="d-flex align-center font-weight-bold text-subtitle-1">
+              <v-icon color="primary" class="mr-2">mdi-transit-connection-variant</v-icon>
+              <span>Detalhes do Enlace</span>
+            </div>
+            <v-btn
+              icon="mdi-close"
+              variant="text"
+              density="compact"
+              size="small"
+              aria-label="Fechar detalhes do enlace"
+              @click="edgeDialog = false"
+            ></v-btn>
           </div>
-          <v-btn
-            icon="mdi-close"
-            variant="text"
-            density="compact"
-            size="small"
-            @click="edgeDialog = false"
-          ></v-btn>
-        </v-card-title>
-        <v-divider class="mb-3"></v-divider>
-        <v-card-text class="pa-0">
+        </v-card-item>
+
+        <v-card-text class="pa-4 flex-grow-1 overflow-y-auto">
           <div class="pa-3 rounded-lg bg-surface-variant-subtle mb-3">
             <div class="d-flex align-center justify-space-between mb-1">
               <span class="text-caption text-medium-emphasis">Dispositivo A (Origem):</span>
@@ -515,7 +607,7 @@
             </v-list-item>
           </v-list>
         </v-card-text>
-        <v-card-actions class="pa-0 mt-4 d-flex align-center justify-space-between flex-wrap gap-2">
+        <v-card-actions class="pa-3 px-4 border-t flex-shrink-0 bg-surface d-flex align-center justify-space-between flex-wrap gap-2">
           <v-btn
             v-if="selectedEdge.id > 0"
             color="error"
@@ -594,19 +686,39 @@ const panY = ref(60)
 const isPanning = ref(false)
 const panStart = reactive({ x: 0, y: 0, panX: 0, panY: 0, hasMoved: false })
 
+// Estados de Toque (Touch / Pinch-to-Zoom)
+const isPinching = ref(false)
+let pinchStartDist = 0
+let pinchStartZoom = 1
+let pinchStartCenter = { x: 0, y: 0 }
+let pinchStartPan = { x: 0, y: 0 }
+
 // Estados de Arraste de Nó
 const nodePositions = reactive<Map<number, { x: number; y: number }>>(new Map())
 const draggingNodeId = ref<number | null>(null)
 const dragStart = reactive({ mouseX: 0, mouseY: 0, nodeX: 0, nodeY: 0, hasMoved: false })
 
-// Estados de Conexão Gráfica com o Mouse (Cable Tool)
+// Estados de Conexão Gráfica com Mouse / Touch (Cable Tool)
 const isConnectMode = ref(false)
 const connectSourceId = ref<number | null>(null)
 const mousePosWorld = ref<{ x: number; y: number } | null>(null)
 
-// Estados de Filtro e Destaque
+// Estados de Filtro e Busca Mobile
 const selectedTypeFilter = ref<string | null>(null)
 const highlightedDeviceId = ref<number | null>(null)
+const mobileSearchOpen = ref(false)
+const mobileSearchQuery = ref('')
+
+const filteredSearchNodes = computed(() => {
+  const q = mobileSearchQuery.value.trim().toLowerCase()
+  if (!q) return topologyStore.nodes
+  return topologyStore.nodes.filter(
+    (n) =>
+      n.name.toLowerCase().includes(q) ||
+      (n.ipAddress && n.ipAddress.toLowerCase().includes(q)) ||
+      (n.type && n.type.toLowerCase().includes(q))
+  )
+})
 
 // Diálogos e Seleções
 const selectedNode = ref<TopologyNode | null>(null)
@@ -637,6 +749,13 @@ onMounted(async () => {
   ensureInitialNodeLayout()
   window.addEventListener('keydown', onKeyDown)
 
+  if (canvasViewport.value) {
+    canvasViewport.value.addEventListener('touchstart', onTouchStart, { passive: false })
+    canvasViewport.value.addEventListener('touchmove', onTouchMove, { passive: false })
+    canvasViewport.value.addEventListener('touchend', onTouchEnd, { passive: true })
+    canvasViewport.value.addEventListener('touchcancel', onTouchEnd, { passive: true })
+  }
+
   // Atualização contínua de tráfego e métricas em tempo real (a cada 5 segundos)
   pollTimer = setInterval(() => {
     topologyStore.fetchTopology(null, false)
@@ -645,6 +764,12 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeyDown)
+  if (canvasViewport.value) {
+    canvasViewport.value.removeEventListener('touchstart', onTouchStart)
+    canvasViewport.value.removeEventListener('touchmove', onTouchMove)
+    canvasViewport.value.removeEventListener('touchend', onTouchEnd)
+    canvasViewport.value.removeEventListener('touchcancel', onTouchEnd)
+  }
   if (pollTimer) {
     clearInterval(pollTimer)
     pollTimer = null
@@ -784,7 +909,6 @@ function applyLayout(type: 'hierarchical' | 'force' | 'radial' | 'grid') {
 }
 
 function layoutHierarchical(nodes: TopologyNode[]) {
-  // Separa por camadas: Roteadores / Gateways (0), Switches (1), Hosts / Demais (2)
   const tier0: TopologyNode[] = []
   const tier1: TopologyNode[] = []
   const tier2: TopologyNode[] = []
@@ -914,7 +1038,7 @@ function layoutForce(nodes: TopologyNode[]) {
 }
 
 // ----------------------------------------------------
-// INTERAÇÃO DE PAN & ZOOM
+// INTERAÇÃO DE PAN & ZOOM (MOUSE & TOUCH)
 // ----------------------------------------------------
 
 function onViewportMouseDown(e: MouseEvent) {
@@ -930,7 +1054,7 @@ function onViewportMouseDown(e: MouseEvent) {
 }
 
 function onViewportMouseMove(e: MouseEvent) {
-  // Movimento de Pan
+  // Movimento de Pan com Mouse
   if (isPanning.value) {
     const dist = Math.hypot(e.clientX - panStart.x, e.clientY - panStart.y)
     if (dist > 4) {
@@ -941,7 +1065,7 @@ function onViewportMouseMove(e: MouseEvent) {
     return
   }
 
-  // Movimento de Arraste de Nó
+  // Movimento de Arraste de Nó com Mouse
   if (draggingNodeId.value !== null) {
     const totalDist = Math.hypot(e.clientX - dragStart.mouseX, e.clientY - dragStart.mouseY)
     if (totalDist > 4) {
@@ -989,6 +1113,167 @@ function onViewportWheel(e: WheelEvent) {
   }
 
   zoom.value = newZoom
+}
+
+// Manipuladores de Toque Touchscreen
+function onTouchStart(e: TouchEvent) {
+  if (isConnectMode.value && e.touches.length === 1) {
+    const touch = e.touches[0]
+    updateConnectMousePos(touch.clientX, touch.clientY)
+    return
+  }
+
+  if (e.touches.length === 1) {
+    // 1 Dedo: Pan do canvas
+    isPanning.value = true
+    const touch = e.touches[0]
+    panStart.x = touch.clientX
+    panStart.y = touch.clientY
+    panStart.panX = panX.value
+    panStart.panY = panY.value
+    panStart.hasMoved = false
+    isPinching.value = false
+  } else if (e.touches.length === 2) {
+    // 2 Dedos: Pinch to Zoom & Pan
+    isPanning.value = false
+    draggingNodeId.value = null
+    isPinching.value = true
+
+    const t1 = e.touches[0]
+    const t2 = e.touches[1]
+    pinchStartDist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY)
+    pinchStartZoom = zoom.value
+    pinchStartCenter = {
+      x: (t1.clientX + t2.clientX) / 2,
+      y: (t1.clientY + t2.clientY) / 2,
+    }
+    pinchStartPan = {
+      x: panX.value,
+      y: panY.value,
+    }
+    panStart.hasMoved = true
+  }
+}
+
+function onTouchMove(e: TouchEvent) {
+  if (e.cancelable) {
+    e.preventDefault()
+  }
+
+  if (e.touches.length === 1) {
+    const touch = e.touches[0]
+
+    if (isConnectMode.value) {
+      updateConnectMousePos(touch.clientX, touch.clientY)
+    }
+
+    // Arraste de nó via touch
+    if (draggingNodeId.value !== null) {
+      const totalDist = Math.hypot(touch.clientX - dragStart.mouseX, touch.clientY - dragStart.mouseY)
+      if (totalDist > 4) {
+        dragStart.hasMoved = true
+      }
+      const dx = (touch.clientX - dragStart.mouseX) / zoom.value
+      const dy = (touch.clientY - dragStart.mouseY) / zoom.value
+      const newX = Math.max(20, Math.min(3800, dragStart.nodeX + dx))
+      const newY = Math.max(20, Math.min(3800, dragStart.nodeY + dy))
+      nodePositions.set(draggingNodeId.value, { x: newX, y: newY })
+      return
+    }
+
+    // Pan do viewport via touch
+    if (isPanning.value && !isPinching.value) {
+      const dist = Math.hypot(touch.clientX - panStart.x, touch.clientY - panStart.y)
+      if (dist > 4) {
+        panStart.hasMoved = true
+      }
+      panX.value = panStart.panX + (touch.clientX - panStart.x)
+      panY.value = panStart.panY + (touch.clientY - panStart.y)
+      return
+    }
+  } else if (e.touches.length === 2 && isPinching.value && canvasViewport.value) {
+    const t1 = e.touches[0]
+    const t2 = e.touches[1]
+    const currentDist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY)
+    const currentCenter = {
+      x: (t1.clientX + t2.clientX) / 2,
+      y: (t1.clientY + t2.clientY) / 2,
+    }
+
+    if (pinchStartDist > 0) {
+      const scale = currentDist / pinchStartDist
+      const targetZoom = Math.min(2.5, Math.max(0.3, pinchStartZoom * scale))
+      const rect = canvasViewport.value.getBoundingClientRect()
+
+      const worldCenterX = (pinchStartCenter.x - rect.left - pinchStartPan.x) / pinchStartZoom
+      const worldCenterY = (pinchStartCenter.y - rect.top - pinchStartPan.y) / pinchStartZoom
+
+      panX.value = currentCenter.x - rect.left - worldCenterX * targetZoom
+      panY.value = currentCenter.y - rect.top - worldCenterY * targetZoom
+      zoom.value = targetZoom
+    }
+  }
+}
+
+function onTouchEnd(e: TouchEvent) {
+  if (e.touches.length === 0) {
+    if (isPanning.value) {
+      isPanning.value = false
+    }
+    if (isPinching.value) {
+      isPinching.value = false
+    }
+    if (draggingNodeId.value !== null) {
+      draggingNodeId.value = null
+      savePositionsToStorage()
+    }
+  } else if (e.touches.length === 1) {
+    isPinching.value = false
+    const touch = e.touches[0]
+    panStart.x = touch.clientX
+    panStart.y = touch.clientY
+    panStart.panX = panX.value
+    panStart.panY = panY.value
+    panStart.hasMoved = true
+  }
+}
+
+function onNodeTouchStart(e: TouchEvent, node: RenderedNode) {
+  if (e.touches.length === 1) {
+    const touch = e.touches[0]
+    draggingNodeId.value = node.id
+    dragStart.mouseX = touch.clientX
+    dragStart.mouseY = touch.clientY
+    dragStart.nodeX = node.x
+    dragStart.nodeY = node.y
+    dragStart.hasMoved = false
+  }
+}
+
+function onNodeTouchEnd(node: RenderedNode) {
+  if (!dragStart.hasMoved) {
+    onNodeClick(node)
+  }
+  if (draggingNodeId.value !== null) {
+    draggingNodeId.value = null
+    savePositionsToStorage()
+  }
+}
+
+function onEdgeTouchEnd(edge: TopologyEdge) {
+  if (!panStart.hasMoved && !dragStart.hasMoved) {
+    onEdgeClick(edge)
+  }
+}
+
+function updateConnectMousePos(clientX: number, clientY: number) {
+  if (isConnectMode.value && connectSourceId.value && canvasViewport.value) {
+    const rect = canvasViewport.value.getBoundingClientRect()
+    mousePosWorld.value = {
+      x: (clientX - rect.left - panX.value) / zoom.value,
+      y: (clientY - rect.top - panY.value) / zoom.value,
+    }
+  }
 }
 
 function zoomIn() {
@@ -1051,7 +1336,6 @@ function onNodeMouseDown(e: MouseEvent, node: RenderedNode) {
 }
 
 function onNodeClick(node: RenderedNode) {
-  // Se o usuário realizou arraste do nó, não abre o diálogo/drawer
   if (dragStart.hasMoved) {
     dragStart.hasMoved = false
     return
@@ -1113,9 +1397,16 @@ function onDeviceSearchSelected(deviceId: number | null) {
   const pos = nodePositions.get(deviceId)
   if (pos && canvasViewport.value) {
     const rect = canvasViewport.value.getBoundingClientRect()
-    panX.value = rect.width / 2 - pos.x * zoom.value - 30 * zoom.value
-    panY.value = rect.height / 2 - pos.y * zoom.value - 30 * zoom.value
+    panX.value = rect.width / 2 - (pos.x + 30) * zoom.value
+    panY.value = rect.height / 2 - (pos.y + 30) * zoom.value
   }
+}
+
+function selectMobileSearchNode(node: TopologyNode) {
+  mobileSearchOpen.value = false
+  mobileSearchQuery.value = ''
+  highlightedDeviceId.value = node.id
+  onDeviceSearchSelected(node.id)
 }
 
 function applyTypeFilter(type: string | null) {
@@ -1127,7 +1418,6 @@ function applyTypeFilter(type: string | null) {
 // ----------------------------------------------------
 
 function onEdgeClick(edge: TopologyEdge) {
-  // Se o usuário realizou arraste/pan do mapa, ignora o clique
   if (panStart.hasMoved || dragStart.hasMoved) {
     panStart.hasMoved = false
     dragStart.hasMoved = false
@@ -1184,7 +1474,7 @@ function openLinkDialogFromNode(nodeId: number) {
 }
 
 function onLinkSaved() {
-  // Atualiza posições ou mantém
+  // Mantém posições
 }
 
 function onSwitchCreated() {
@@ -1327,11 +1617,13 @@ function truncate(str: string, maxLen: number): string {
   height: 100%;
   width: 100%;
   overflow: hidden;
+  touch-action: none;
 }
 .topology-map-container {
   height: 100%;
   width: 100%;
   background: #0f172a;
+  touch-action: none;
 }
 .topology-viewport {
   width: 100%;
@@ -1339,6 +1631,8 @@ function truncate(str: string, maxLen: number): string {
   overflow: hidden;
   position: relative;
   user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
 }
 .topology-world {
   position: absolute;
@@ -1347,6 +1641,7 @@ function truncate(str: string, maxLen: number): string {
   width: 4000px;
   height: 4000px;
   will-change: transform;
+  touch-action: none;
 }
 .topology-grid-layer {
   position: absolute;
@@ -1371,6 +1666,9 @@ function truncate(str: string, maxLen: number): string {
   align-items: center;
   z-index: 10;
   cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
   transition: transform 0.15s ease-out;
 }
 .node-dragging {
@@ -1459,6 +1757,9 @@ function truncate(str: string, maxLen: number): string {
 .edge-line-active {
   stroke-linecap: round;
 }
+.edge-touch-target {
+  cursor: pointer;
+}
 .port-pill-bg {
   fill: #1e293b;
   stroke: #475569;
@@ -1486,24 +1787,53 @@ function truncate(str: string, maxLen: number): string {
   font-weight: bold;
 }
 
-/* Controles Flutuantes */
-.floating-controls-wrapper {
+/* Header Superior Flutuante */
+.top-floating-header-wrapper {
   position: absolute;
-  top: 16px;
-  left: 16px;
+  top: 0;
+  left: 0;
   z-index: 30;
+  pointer-events: none;
 }
-.floating-search-wrapper {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  z-index: 30;
+.header-controls-area {
+  pointer-events: auto;
+  flex-shrink: 1;
+  min-width: 0;
+}
+.header-search-area {
+  pointer-events: auto;
   width: 280px;
+  min-width: 220px;
+  flex-shrink: 0;
 }
 .search-autocomplete {
-  background: rgba(var(--v-theme-surface), 0.9) !important;
-  backdrop-filter: blur(10px);
+  background: rgba(15, 23, 42, 0.9) !important;
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 12px;
+}
+
+.search-result-item {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: all 0.2s ease;
+}
+.search-result-item:hover {
+  background: rgba(56, 189, 248, 0.12);
+  border-color: rgba(56, 189, 248, 0.35);
+}
+
+.dialog-card-container {
+  display: flex;
+  flex-direction: column;
+  max-height: 90vh;
+}
+@media (max-width: 600px) {
+  .dialog-card-container {
+    max-height: 100vh;
+    height: 100%;
+    border-radius: 0 !important;
+  }
 }
 
 /* Banner do Modo Conexão */
@@ -1517,6 +1847,7 @@ function truncate(str: string, maxLen: number): string {
   backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
+  max-width: 90vw;
 }
 
 /* Alças / Conectores Magnéticos nos Nós no Modo de Conexão */
