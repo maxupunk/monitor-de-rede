@@ -43,7 +43,7 @@
 
     <!-- Tabela de Dispositivos -->
     <v-card elevation="2" rounded="lg">
-      <v-card-title class="pa-4 d-flex align-center">
+      <v-card-title class="pa-2.5 pa-sm-4 d-flex align-center">
         <v-text-field
           v-model="search"
           prepend-inner-icon="mdi-magnify"

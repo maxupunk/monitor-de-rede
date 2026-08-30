@@ -1,9 +1,9 @@
 <template>
   <div>
     <!-- Cards de Métricas KPI: Tráfego SNMP -->
-    <v-row v-if="isTrafficMonitor" class="mb-6">
+    <v-row v-if="isTrafficMonitor" dense class="mb-3 mb-md-6">
       <v-col cols="12" sm="6" md="3">
-        <v-card elevation="2" class="rounded-lg pa-4 h-100">
+        <v-card elevation="2" class="rounded-lg pa-3 pa-sm-4 h-100">
           <div class="d-flex align-center justify-space-between mb-2">
             <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
               >Download Atual (IN)</span
@@ -20,7 +20,7 @@
       </v-col>
 
       <v-col cols="12" sm="6" md="3">
-        <v-card elevation="2" class="rounded-lg pa-4 h-100">
+        <v-card elevation="2" class="rounded-lg pa-3 pa-sm-4 h-100">
           <div class="d-flex align-center justify-space-between mb-2">
             <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
               >Upload Atual (OUT)</span
@@ -37,7 +37,7 @@
       </v-col>
 
       <v-col cols="12" sm="6" md="3">
-        <v-card elevation="2" class="rounded-lg pa-4 h-100">
+        <v-card elevation="2" class="rounded-lg pa-3 pa-sm-4 h-100">
           <div class="d-flex align-center justify-space-between mb-2">
             <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
               >Velocidade da Interface</span
@@ -54,7 +54,7 @@
       </v-col>
 
       <v-col cols="12" sm="6" md="3">
-        <v-card elevation="2" class="rounded-lg pa-4 h-100">
+        <v-card elevation="2" class="rounded-lg pa-3 pa-sm-4 h-100">
           <div class="d-flex align-center justify-space-between mb-2">
             <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
               >Status Operacional</span
@@ -72,9 +72,9 @@
     </v-row>
 
     <!-- Cards de Métricas KPI: CPU / Memória (Gauge) -->
-    <v-row v-else-if="isGaugeMonitor" class="mb-6">
+    <v-row v-else-if="isGaugeMonitor" dense class="mb-3 mb-md-6">
       <v-col cols="12" sm="6" md="3">
-        <v-card elevation="2" class="rounded-lg pa-4 h-100">
+        <v-card elevation="2" class="rounded-lg pa-3 pa-sm-4 h-100">
           <div class="d-flex align-center justify-space-between mb-2">
             <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium">Uso Atual</span>
             <v-avatar :color="gaugeColorValue" variant="tonal" size="36">
@@ -89,7 +89,7 @@
       </v-col>
 
       <v-col cols="12" sm="6" md="3">
-        <v-card elevation="2" class="rounded-lg pa-4 h-100">
+        <v-card elevation="2" class="rounded-lg pa-3 pa-sm-4 h-100">
           <div class="d-flex align-center justify-space-between mb-2">
             <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium">Uso Médio</span>
             <v-avatar color="info" variant="tonal" size="36">
@@ -104,7 +104,7 @@
       </v-col>
 
       <v-col cols="12" sm="6" md="3">
-        <v-card elevation="2" class="rounded-lg pa-4 h-100">
+        <v-card elevation="2" class="rounded-lg pa-3 pa-sm-4 h-100">
           <div class="d-flex align-center justify-space-between mb-2">
             <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium">Uso Mín / Máx</span>
             <v-avatar color="purple" variant="tonal" size="36">
@@ -121,7 +121,7 @@
       </v-col>
 
       <v-col cols="12" sm="6" md="3">
-        <v-card elevation="2" class="rounded-lg pa-4 h-100">
+        <v-card elevation="2" class="rounded-lg pa-3 pa-sm-4 h-100">
           <div class="d-flex align-center justify-space-between mb-2">
             <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
               >Agente SNMP Disponível</span
@@ -139,9 +139,9 @@
     </v-row>
 
     <!-- Cards de Métricas KPI: Interface RFC 2863 -->
-    <v-row v-else-if="isInterfaceMonitor" class="mb-6">
+    <v-row v-else-if="isInterfaceMonitor" dense class="mb-3 mb-md-6">
       <v-col cols="12" sm="6" md="3">
-        <v-card elevation="2" class="rounded-lg pa-4 h-100">
+        <v-card elevation="2" class="rounded-lg pa-3 pa-sm-4 h-100">
           <div class="d-flex align-center justify-space-between mb-2">
             <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
               >Velocidade Negociada</span
@@ -158,7 +158,7 @@
       </v-col>
 
       <v-col cols="12" sm="6" md="3">
-        <v-card elevation="2" class="rounded-lg pa-4 h-100">
+        <v-card elevation="2" class="rounded-lg pa-3 pa-sm-4 h-100">
           <div class="d-flex align-center justify-space-between mb-2">
             <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
               >Status Operacional</span
@@ -175,7 +175,7 @@
       </v-col>
 
       <v-col cols="12" sm="6" md="3">
-        <v-card elevation="2" class="rounded-lg pa-4 h-100">
+        <v-card elevation="2" class="rounded-lg pa-3 pa-sm-4 h-100">
           <div class="d-flex align-center justify-space-between mb-2">
             <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
               >Estabilidade do Link</span
@@ -192,7 +192,7 @@
       </v-col>
 
       <v-col cols="12" sm="6" md="3">
-        <v-card elevation="2" class="rounded-lg pa-4 h-100">
+        <v-card elevation="2" class="rounded-lg pa-3 pa-sm-4 h-100">
           <div class="d-flex align-center justify-space-between mb-2">
             <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
               >Alterações de Estado</span
@@ -217,9 +217,9 @@
     </v-row>
 
     <!-- Cards de Métricas KPI: Ping / HTTP / TCP / DNS -->
-    <v-row v-else class="mb-6">
+    <v-row v-else dense class="mb-3 mb-md-6">
       <v-col cols="12" sm="6" md="3">
-        <v-card elevation="2" class="rounded-lg pa-4 h-100">
+        <v-card elevation="2" class="rounded-lg pa-3 pa-sm-4 h-100">
           <div class="d-flex align-center justify-space-between mb-2">
             <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium">{{
               latencyKpiTitles.current
@@ -239,7 +239,7 @@
       </v-col>
 
       <v-col cols="12" sm="6" md="3">
-        <v-card elevation="2" class="rounded-lg pa-4 h-100">
+        <v-card elevation="2" class="rounded-lg pa-3 pa-sm-4 h-100">
           <div class="d-flex align-center justify-space-between mb-2">
             <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium">{{
               latencyKpiTitles.avg
@@ -256,7 +256,7 @@
       </v-col>
 
       <v-col cols="12" sm="6" md="3">
-        <v-card elevation="2" class="rounded-lg pa-4 h-100">
+        <v-card elevation="2" class="rounded-lg pa-3 pa-sm-4 h-100">
           <div class="d-flex align-center justify-space-between mb-2">
             <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium">{{
               latencyKpiTitles.minMax
@@ -275,7 +275,7 @@
       </v-col>
 
       <v-col cols="12" sm="6" md="3">
-        <v-card elevation="2" class="rounded-lg pa-4 h-100">
+        <v-card elevation="2" class="rounded-lg pa-3 pa-sm-4 h-100">
           <div class="d-flex align-center justify-space-between mb-2">
             <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
               >Taxa de Uptime</span

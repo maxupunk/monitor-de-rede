@@ -14,7 +14,7 @@
 
     <!-- Tabela de Sub-redes -->
     <v-card elevation="2" rounded="lg">
-      <v-card-title class="pa-4">
+      <v-card-title class="pa-2.5 pa-sm-4">
         <v-text-field
           v-model="search"
           prepend-inner-icon="mdi-magnify"

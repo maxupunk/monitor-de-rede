@@ -77,16 +77,16 @@
     </v-card>
 
     <v-card elevation="2" rounded="lg">
-      <v-tabs v-model="tab" color="primary">
-        <v-tab value="active">Alertas Pendentes ({{ alertsStore.activeAlerts.length }})</v-tab>
-        <v-tab value="resolved">Alertas Resolvidos ({{ alertsStore.resolvedAlerts.length }})</v-tab>
-        <v-tab value="rules">Regras Configuradas ({{ regrasVisiveis.length }})</v-tab>
-        <v-tab value="history">Histórico Completo</v-tab>
+      <v-tabs v-model="tab" color="primary" show-arrows density="comfortable">
+        <v-tab value="active">Pendentes ({{ alertsStore.activeAlerts.length }})</v-tab>
+        <v-tab value="resolved">Resolvidos ({{ alertsStore.resolvedAlerts.length }})</v-tab>
+        <v-tab value="rules">Regras ({{ regrasVisiveis.length }})</v-tab>
+        <v-tab value="history">Histórico</v-tab>
       </v-tabs>
       <v-divider></v-divider>
 
-      <v-card-text class="pa-4">
-        <v-window v-model="tab">
+      <v-card-text class="pa-2 pa-sm-4">
+        <v-window v-model="tab" :touch="false">
           <v-window-item value="active">
             <ActiveAlertsTab
               v-model:sub-filter="activeSubFilter"

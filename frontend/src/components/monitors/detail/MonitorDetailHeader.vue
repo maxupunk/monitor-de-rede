@@ -1,7 +1,7 @@
 <template>
-  <v-card elevation="2" class="rounded-lg pa-4 pa-md-6 mb-6">
+  <v-card elevation="2" class="rounded-lg pa-3 pa-md-6 mb-3 mb-md-6">
     <div
-      class="d-flex flex-column flex-md-row align-start align-md-center justify-space-between ga-4"
+      class="d-flex flex-column flex-md-row align-start align-md-center justify-space-between ga-3 ga-md-4"
     >
       <div class="d-flex align-center ga-3">
         <v-avatar :color="headerChip.color" size="48" size-md="56" class="text-white mr-2">

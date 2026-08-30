@@ -1,17 +1,17 @@
 <template>
   <div>
     <!-- Botão de Voltar -->
-    <v-btn variant="text" prepend-icon="mdi-arrow-left" class="mb-4" to="/devices">
+    <v-btn variant="text" prepend-icon="mdi-arrow-left" class="mb-2 mb-md-4" to="/devices">
       Voltar para Dispositivos
     </v-btn>
 
     <!-- Header do Dispositivo -->
-    <v-card elevation="2" class="rounded-lg pa-4 mb-6">
+    <v-card elevation="2" class="rounded-lg pa-3 pa-md-4 mb-3 mb-md-6">
       <div
-        class="d-flex flex-column flex-md-row align-start align-md-center justify-space-between ga-4"
+        class="d-flex flex-column flex-md-row align-start align-md-center justify-space-between ga-3 ga-md-4"
       >
         <div class="d-flex align-center ga-3">
-          <v-avatar color="primary" size="48" class="mr-2">
+          <v-avatar color="primary" size="44" size-md="48" class="mr-2">
             <v-icon color="white">mdi-router-network</v-icon>
           </v-avatar>
           <div>
@@ -137,8 +137,8 @@
 
       <v-divider></v-divider>
 
-      <v-card-text class="pa-6">
-        <v-window v-model="activeTab">
+      <v-card-text class="pa-2 pa-sm-4 pa-md-6">
+        <v-window v-model="activeTab" :touch="false">
           <!-- Aba Visão Geral -->
           <v-window-item value="overview">
             <DeviceOverviewTab

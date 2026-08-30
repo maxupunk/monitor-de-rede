@@ -118,41 +118,71 @@
 
     <template #mobile-item="{ item }">
       <div class="d-flex flex-column ga-2">
-        <div class="d-flex align-start justify-space-between ga-2">
-          <div class="flex-grow-1 text-break">
-            <div class="d-flex flex-wrap align-center ga-2">
-              <v-chip :color="severityColor(item.severity)" size="x-small">
-                {{ severityLabel(item.severity) }}
-              </v-chip>
-              <v-chip :color="statusColor(item.status)" variant="outlined" size="x-small">
-                {{ statusLabel(item.status) }}
-              </v-chip>
-              <v-chip
-                v-if="problemKindLabel(item.data?.problemKind)"
-                size="x-small"
-                variant="tonal"
-                color="grey"
-              >
-                {{ problemKindLabel(item.data?.problemKind) }}
-              </v-chip>
-            </div>
-            <div class="text-subtitle-1 font-weight-bold mt-1">{{ item.title }}</div>
-            <div class="text-body-2 text-grey-darken-1">{{ item.message }}</div>
-            <div v-if="episodeInfo(item)" class="text-caption text-warning">
-              {{ episodeInfo(item) }}
-            </div>
-            <div class="text-caption text-grey mt-1">
-              {{ formatDateTime(item.startedAt || item.createdAt) }}
-            </div>
+        <!-- Top Row: Badges de Severidade, Status e Hora -->
+        <div class="d-flex align-center justify-space-between ga-2 flex-wrap mb-0.5">
+          <div class="d-flex align-center ga-1.5 flex-wrap">
+            <v-chip
+              :color="severityColor(item.severity)"
+              size="x-small"
+              variant="flat"
+              class="font-weight-bold text-uppercase px-2"
+            >
+              {{ severityLabel(item.severity) }}
+            </v-chip>
+            <v-chip
+              :color="statusColor(item.status)"
+              variant="tonal"
+              size="x-small"
+              class="font-weight-medium"
+            >
+              {{ statusLabel(item.status) }}
+            </v-chip>
+            <v-chip
+              v-if="problemKindLabel(item.data?.problemKind)"
+              size="x-small"
+              variant="tonal"
+              color="grey"
+              class="font-weight-medium"
+            >
+              {{ problemKindLabel(item.data?.problemKind) }}
+            </v-chip>
           </div>
+
+          <span class="text-caption text-grey d-flex align-center ga-1 flex-shrink-0">
+            <v-icon size="12">mdi-clock-outline</v-icon>
+            {{ formatDateTime(item.startedAt || item.createdAt) }}
+          </span>
         </div>
-        <div class="d-flex align-center ga-1 flex-wrap mt-1">
+
+        <!-- Middle: Título e Mensagem do Alerta -->
+        <div class="d-flex flex-column ga-1">
+          <div class="text-subtitle-1 font-weight-bold text-break text-high-emphasis leading-tight">
+            {{ item.title }}
+          </div>
+          <div class="text-body-2 text-grey-darken-1 text-break">
+            {{ item.message }}
+          </div>
+          <v-alert
+            v-if="episodeInfo(item)"
+            type="warning"
+            variant="tonal"
+            density="compact"
+            class="py-1 px-2 my-1 text-caption rounded"
+          >
+            {{ episodeInfo(item) }}
+          </v-alert>
+        </div>
+
+        <!-- Footer: Barra de Ações com Padrão Visual Harmonioso -->
+        <div class="d-flex align-center flex-wrap ga-1.5 pt-2 mt-1 border-t">
           <v-btn
             size="small"
             color="primary"
-            variant="tonal"
+            variant="flat"
+            prepend-icon="mdi-check"
             :disabled="item.status === 'acknowledged'"
             :loading="verifyingId === item.id"
+            class="text-caption px-2"
             @click="emit('acknowledge', item.id)"
           >
             Reconhecer
@@ -160,8 +190,10 @@
           <v-btn
             size="small"
             color="info"
-            variant="outlined"
+            variant="tonal"
+            prepend-icon="mdi-refresh"
             :loading="verifyingId === item.id"
+            class="text-caption px-2"
             @click="emit('verify', item.id)"
           >
             Verificar
@@ -169,8 +201,10 @@
           <v-btn
             size="small"
             color="warning"
-            variant="outlined"
+            variant="tonal"
+            prepend-icon="mdi-volume-off"
             :disabled="item.status === 'silenced'"
+            class="text-caption px-2"
             @click="emit('silence', item.id)"
           >
             Silenciar
@@ -178,10 +212,12 @@
           <v-btn
             size="small"
             color="secondary"
-            variant="outlined"
+            variant="tonal"
+            prepend-icon="mdi-source-branch"
+            class="text-caption px-2"
             @click="emit('correlate', item.id)"
           >
-            <v-icon>mdi-source-branch</v-icon>
+            Correlação
           </v-btn>
         </div>
       </div>

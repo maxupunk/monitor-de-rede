@@ -5,7 +5,7 @@
       subtitle="Preferências globais, parâmetros de monitoramento e notificações"
     />
 
-    <v-row>
+    <v-row dense>
       <v-col cols="12" md="6">
         <PreferencesCard
           ref="preferencesCard"

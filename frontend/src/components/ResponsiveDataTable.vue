@@ -25,7 +25,7 @@
     </VDataTable>
 
     <!-- Mobile: lista de cards -->
-    <div v-else class="d-flex flex-column ga-2 pa-2">
+    <div v-else class="d-flex flex-column ga-2 pa-1">
       <template v-if="items.length > 0">
         <!-- `border` porque o card do item fica dentro do card da página, com a
              mesma cor de surface: sem contorno os dois viram um bloco só, e com
@@ -35,20 +35,21 @@
           :key="itemKey ? itemKey(item) : index"
           border
           rounded="lg"
-          class="pa-3 transition-swing"
+          class="pa-3 transition-swing mobile-card-wrapper"
           :class="{
             'cursor-pointer': clickable,
             'selected-card border-primary': showSelect && isMobileSelected(item),
           }"
           @click="clickable ? onCardClick(item) : undefined"
         >
-          <div class="d-flex align-start ga-2">
-            <div v-if="showSelect" class="pt-0.5" @click.stop>
+          <div class="d-flex align-start ga-3">
+            <div v-if="showSelect" class="pt-0.5 flex-shrink-0" @click.stop>
               <v-checkbox-btn
                 :model-value="isMobileSelected(item)"
                 color="primary"
                 density="compact"
                 hide-details
+                class="mobile-select-checkbox"
                 @update:model-value="toggleMobileSelect(item, $event)"
               ></v-checkbox-btn>
             </div>
@@ -153,5 +154,15 @@ function onClickRow(event: MouseEvent, row: { item: any }) {
 
 .selected-card {
   background-color: rgba(var(--v-theme-primary), 0.08) !important;
+}
+
+.mobile-select-checkbox {
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.mobile-select-checkbox :deep(.v-selection-control) {
+  min-height: 24px;
+  height: 24px;
 }
 </style>

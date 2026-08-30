@@ -26,18 +26,43 @@
     </template>
 
     <template #mobile-item="{ item }">
-      <div class="d-flex flex-column ga-2 pa-1">
-        <div class="d-flex align-center ga-2">
-          <v-chip :color="severityColor(item.severity)" size="x-small">
-            {{ severityLabel(item.severity) }}
-          </v-chip>
-          <v-chip color="success" variant="tonal" size="x-small"> Resolvido </v-chip>
+      <div class="d-flex flex-column ga-2">
+        <div class="d-flex align-center justify-space-between ga-2 flex-wrap mb-0.5">
+          <div class="d-flex align-center ga-1.5 flex-wrap">
+            <v-chip
+              :color="severityColor(item.severity)"
+              size="x-small"
+              variant="flat"
+              class="font-weight-bold text-uppercase px-2"
+            >
+              {{ severityLabel(item.severity) }}
+            </v-chip>
+            <v-chip color="success" variant="tonal" size="x-small" class="font-weight-medium">
+              <v-icon start size="12">mdi-check-circle</v-icon>
+              Resolvido
+            </v-chip>
+          </div>
+
+          <span class="text-caption text-grey d-flex align-center ga-1 flex-shrink-0">
+            <v-icon size="12">mdi-clock-check-outline</v-icon>
+            {{ formatDateTime(item.resolvedAt || item.createdAt) }}
+          </span>
         </div>
-        <div class="text-subtitle-1 font-weight-bold">{{ item.title }}</div>
-        <div class="text-body-2 text-grey-darken-1">{{ item.message }}</div>
-        <div class="text-caption text-grey">
-          Início: {{ formatDateTime(item.startedAt || item.createdAt) }} | Resolvido:
-          {{ item.resolvedAt ? formatDateTime(item.resolvedAt) : 'Sim' }}
+
+        <div class="text-subtitle-1 font-weight-bold text-break text-high-emphasis leading-tight">
+          {{ item.title }}
+        </div>
+        <div class="text-body-2 text-grey-darken-1 text-break">
+          {{ item.message }}
+        </div>
+
+        <div
+          class="text-caption text-grey pt-2 mt-1 border-t d-flex align-center justify-space-between flex-wrap ga-1"
+        >
+          <span>Início: {{ formatDateTime(item.startedAt || item.createdAt) }}</span>
+          <span v-if="item.resolvedAt" class="text-success font-weight-medium">
+            Resolvido em {{ formatDateTime(item.resolvedAt) }}
+          </span>
         </div>
       </div>
     </template>

@@ -150,35 +150,26 @@
 
     <template #mobile-item="{ item }">
       <div class="d-flex flex-column ga-2">
-        <div class="d-flex align-start justify-space-between ga-2">
-          <div class="flex-grow-1 text-break">
-            <a
-              class="text-subtitle-1 font-weight-bold text-decoration-none text-primary d-block cursor-pointer"
-              role="button"
-              tabindex="0"
-              :href="`/monitors/${item.id}`"
-              @click.prevent.stop="abrirDetalhe(item)"
-              @keydown.enter.prevent="abrirDetalhe(item)"
-            >
-              {{ item.name }}
-            </a>
-            <div v-if="showDevice" class="text-caption text-grey-darken-1">
-              {{ item.device?.name || 'Dispositivo não vinculado' }}
-            </div>
-            <div class="d-flex flex-wrap align-center ga-2 mt-1">
-              <v-chip size="x-small" :color="typeChip(item).color" variant="tonal">
-                <v-icon start size="12">{{ typeChip(item).icon }}</v-icon>
-                {{ typeChip(item).label }}
-              </v-chip>
-              <span class="text-caption text-grey-darken-1">{{ formatTarget(item) }}</span>
-            </div>
-          </div>
-          <div class="d-flex flex-column align-end ga-1">
+        <!-- Top Row: Nome do Monitor e Badge de Status -->
+        <div class="d-flex align-center justify-space-between ga-2">
+          <a
+            class="text-subtitle-1 font-weight-bold text-decoration-none text-primary text-truncate cursor-pointer"
+            role="button"
+            tabindex="0"
+            :href="`/monitors/${item.id}`"
+            @click.prevent.stop="abrirDetalhe(item)"
+            @keydown.enter.prevent="abrirDetalhe(item)"
+          >
+            {{ item.name }}
+          </a>
+
+          <div class="flex-shrink-0">
             <v-chip
               v-if="isGaugeMonitor(item)"
               :color="gaugeColor(item)"
               size="small"
               variant="tonal"
+              class="font-weight-bold px-2.5"
             >
               {{ formatGaugeValue(item) }}
             </v-chip>
@@ -187,33 +178,58 @@
               :color="interfaceStatusInfo(item).color"
               size="small"
               variant="tonal"
+              class="font-weight-bold px-2.5"
             >
               {{ interfaceStatusInfo(item).label }}
             </v-chip>
-            <v-chip v-else :color="getStatusColor(item.status)" size="small" variant="tonal">
+            <v-chip
+              v-else
+              :color="getStatusColor(item.status)"
+              size="small"
+              variant="tonal"
+              class="font-weight-bold px-2.5"
+            >
               {{ (item.status || 'UNKNOWN').toUpperCase() }}
             </v-chip>
-            <v-switch
-              :model-value="item.isEnabled"
-              color="success"
-              hide-details
-              density="compact"
-              class="mt-1"
-              style="transform: scale(0.85); transform-origin: right center"
-              @click.stop
-              @update:model-value="(val) => toggle(item, Boolean(val))"
-            ></v-switch>
           </div>
         </div>
 
-        <div class="monitor-timeline-scroll">
+        <!-- Middle Row: Device Info & Target Details -->
+        <div class="d-flex flex-column ga-1 text-caption">
+          <div
+            v-if="showDevice && item.device?.name"
+            class="d-flex align-center ga-1 text-grey-darken-1"
+          >
+            <v-icon size="14">mdi-router-network</v-icon>
+            <span class="text-truncate">{{ item.device.name }}</span>
+          </div>
+          <div v-else-if="showDevice" class="text-grey-darken-1">Dispositivo não vinculado</div>
+
+          <div class="d-flex flex-wrap align-center ga-2 mt-0.5">
+            <v-chip
+              size="x-small"
+              :color="typeChip(item).color"
+              variant="tonal"
+              class="font-weight-medium"
+            >
+              <v-icon start size="12">{{ typeChip(item).icon }}</v-icon>
+              {{ typeChip(item).label }}
+            </v-chip>
+            <span class="text-caption text-truncate font-mono text-grey-darken-1">{{
+              formatTarget(item)
+            }}</span>
+          </div>
+        </div>
+
+        <!-- Timeline / Sparkline Section -->
+        <div class="w-100 py-1">
           <a
-            class="text-decoration-none d-inline-flex align-center cursor-pointer"
+            class="text-decoration-none d-flex align-center cursor-pointer w-100"
             :href="`/monitors/${item.id}`"
             @click.prevent.stop="abrirDetalhe(item)"
           >
             <template v-if="isGaugeMonitor(item)">
-              <div class="d-flex align-center ga-2">
+              <div class="d-flex align-center ga-2 w-100">
                 <MonitorSparkline
                   :data="item.gaugeHistory || []"
                   :color="gaugeSparklineColor(item)"
@@ -229,30 +245,57 @@
             <MonitorTimelineBar
               v-else
               :results="item.recentResults"
-              :max-blocks="24"
-              :height="20"
-              :width="5"
+              :max-blocks="30"
+              :height="22"
+              :responsive="true"
             />
           </a>
         </div>
 
-        <div class="d-flex justify-end ga-1 mt-1">
-          <v-btn
-            size="small"
-            color="primary"
-            variant="outlined"
-            prepend-icon="mdi-play"
-            :loading="runningId === item.id"
-            @click.stop="run(item)"
-          >
-            Testar
-          </v-btn>
-          <v-btn icon size="small" variant="text" color="primary" @click.stop="emit('edit', item)">
-            <v-icon>mdi-pencil</v-icon>
-          </v-btn>
-          <v-btn icon size="small" variant="text" color="error" @click.stop="confirmDelete(item)">
-            <v-icon>mdi-delete</v-icon>
-          </v-btn>
+        <!-- Footer Row: Switch on the Left, Actions on the Right -->
+        <div class="d-flex align-center justify-space-between pt-2 mt-1 border-t">
+          <div class="d-flex align-center ga-1" @click.stop>
+            <v-switch
+              :model-value="item.isEnabled"
+              color="success"
+              hide-details
+              density="compact"
+              class="ma-0 monitor-card-switch"
+              @update:model-value="(val) => toggle(item, Boolean(val))"
+            >
+              <template #label>
+                <span class="text-caption text-grey" style="font-size: 11px">
+                  {{ item.isEnabled ? 'Ativo' : 'Pausado' }}
+                </span>
+              </template>
+            </v-switch>
+          </div>
+
+          <div class="d-flex align-center ga-1">
+            <v-btn
+              size="small"
+              color="primary"
+              variant="tonal"
+              prepend-icon="mdi-play"
+              :loading="runningId === item.id"
+              class="text-caption px-2"
+              @click.stop="run(item)"
+            >
+              Testar
+            </v-btn>
+            <v-btn
+              icon
+              size="small"
+              variant="text"
+              color="primary"
+              @click.stop="emit('edit', item)"
+            >
+              <v-icon size="18">mdi-pencil</v-icon>
+            </v-btn>
+            <v-btn icon size="small" variant="text" color="error" @click.stop="confirmDelete(item)">
+              <v-icon size="18">mdi-delete</v-icon>
+            </v-btn>
+          </div>
         </div>
       </div>
     </template>
@@ -509,5 +552,9 @@ function formatTarget(item: Monitor): string {
    comum. O cursor precisa dizer que são clicáveis. */
 .cursor-pointer {
   cursor: pointer;
+}
+
+.monitor-card-switch :deep(.v-selection-control) {
+  min-height: 24px;
 }
 </style>

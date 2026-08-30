@@ -1,6 +1,6 @@
 <template>
   <div
-    class="d-flex flex-column flex-md-row align-start align-md-center justify-space-between mb-4 mb-md-6 ga-4 px-3 px-md-0"
+    class="d-flex flex-column flex-md-row align-start align-md-center justify-space-between mb-3 mb-md-6 ga-2 ga-md-4 px-1 px-md-0"
   >
     <div class="flex-grow-1">
       <h1 class="text-h5 text-md-h4 font-weight-bold text-break">{{ title }}</h1>

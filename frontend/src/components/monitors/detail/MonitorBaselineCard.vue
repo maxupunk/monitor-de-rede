@@ -1,7 +1,7 @@
 <template>
-  <v-card elevation="2" class="rounded-lg pa-6 mb-6">
+  <v-card elevation="2" class="rounded-lg pa-3 pa-md-5 mb-3 mb-md-6">
     <!-- Cabeçalho do Card -->
-    <div class="d-flex align-center justify-space-between mb-4 flex-wrap ga-3">
+    <div class="d-flex align-center justify-space-between mb-3 mb-md-4 flex-wrap ga-3">
       <div>
         <h2 class="text-h6 font-weight-bold d-flex align-center ga-2">
           <v-icon color="primary">mdi-chart-bell-curve-cumulative</v-icon>

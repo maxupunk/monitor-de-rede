@@ -1,8 +1,8 @@
 <template>
   <div>
     <!-- Gráfico de Tráfego de Rede (IN/OUT bps) -->
-    <v-card v-if="isTrafficMonitor" elevation="2" class="rounded-lg pa-6 mb-6">
-      <div class="d-flex align-center justify-space-between mb-4 flex-wrap ga-3">
+    <v-card v-if="isTrafficMonitor" elevation="2" class="rounded-lg pa-3 pa-md-5 mb-3 mb-md-6">
+      <div class="d-flex align-center justify-space-between mb-3 mb-md-4 flex-wrap ga-3">
         <div>
           <h2 class="text-h6 font-weight-bold d-flex align-center ga-2">
             <v-icon color="primary">mdi-chart-areaspline</v-icon>
@@ -48,8 +48,12 @@
     </v-card>
 
     <!-- Linha do Tempo de Status (Bar Timeline - Estilo Uptime Kuma) -->
-    <v-card v-if="!isGaugeMonitor && !isTrafficMonitor" elevation="2" class="rounded-lg pa-6 mb-6">
-      <div class="d-flex align-center justify-space-between mb-4 flex-wrap ga-2">
+    <v-card
+      v-if="!isGaugeMonitor && !isTrafficMonitor"
+      elevation="2"
+      class="rounded-lg pa-3 pa-md-5 mb-3 mb-md-6"
+    >
+      <div class="d-flex align-center justify-space-between mb-3 mb-md-4 flex-wrap ga-2">
         <div>
           <h2 class="text-h6 font-weight-bold d-flex align-center ga-2">
             <v-icon color="primary">mdi-chart-timeline-variant</v-icon>
@@ -57,7 +61,7 @@
           </h2>
           <div class="text-subtitle-2 text-grey">Histórico recente de verificações de status</div>
         </div>
-        <div class="d-flex align-center ga-4 text-caption flex-wrap">
+        <div class="d-flex align-center ga-3 text-caption flex-wrap">
           <span v-if="statusBreakdown.up" class="d-flex align-center ga-1">
             <span class="status-indicator-dot bg-success"></span> UP ({{ statusBreakdown.up }})
           </span>
@@ -81,14 +85,23 @@
         </div>
       </div>
 
-      <div class="pa-3 bg-grey-lighten-4 rounded-lg monitor-timeline-scroll d-flex justify-center">
-        <MonitorTimelineBar :results="recentResults" :max-blocks="60" :height="36" :width="10" />
+      <div class="pa-2 pa-sm-3 bg-grey-lighten-4 rounded-lg d-flex w-100">
+        <MonitorTimelineBar
+          :results="recentResults"
+          :max-blocks="60"
+          :height="36"
+          :responsive="true"
+        />
       </div>
     </v-card>
 
     <!-- Gráfico de Uso ao Longo do Tempo (CPU/Memória) -->
-    <v-card v-if="isGaugeMonitor && !isTrafficMonitor" elevation="2" class="rounded-lg pa-6 mb-6">
-      <div class="d-flex align-center justify-space-between mb-4">
+    <v-card
+      v-if="isGaugeMonitor && !isTrafficMonitor"
+      elevation="2"
+      class="rounded-lg pa-3 pa-md-5 mb-3 mb-md-6"
+    >
+      <div class="d-flex align-center justify-space-between mb-3 mb-md-4">
         <div>
           <h2 class="text-h6 font-weight-bold d-flex align-center ga-2">
             <v-icon color="info">mdi-sine-wave</v-icon>
@@ -122,9 +135,9 @@
     <v-card
       v-if="!isGaugeMonitor && !isInterfaceMonitor && !isTrafficMonitor"
       elevation="2"
-      class="rounded-lg pa-6 mb-6"
+      class="rounded-lg pa-3 pa-md-5 mb-3 mb-md-6"
     >
-      <div class="d-flex align-center justify-space-between mb-4">
+      <div class="d-flex align-center justify-space-between mb-3 mb-md-4">
         <div>
           <h2 class="text-h6 font-weight-bold d-flex align-center ga-2">
             <v-icon color="info">mdi-sine-wave</v-icon>
@@ -160,9 +173,9 @@
     <v-card
       v-if="!isGaugeMonitor && !isInterfaceMonitor && !isTrafficMonitor && linkInterfaceLabel"
       elevation="2"
-      class="rounded-lg pa-6 mb-6"
+      class="rounded-lg pa-3 pa-md-5 mb-3 mb-md-6"
     >
-      <div class="d-flex align-center justify-space-between mb-4 flex-wrap ga-3">
+      <div class="d-flex align-center justify-space-between mb-3 mb-md-4 flex-wrap ga-3">
         <div>
           <div class="d-flex align-center ga-2 flex-wrap mb-1">
             <h2 class="text-h6 font-weight-bold d-flex align-center ga-2 mb-0">

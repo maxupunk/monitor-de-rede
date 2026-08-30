@@ -1,6 +1,11 @@
 <template>
-  <div class="timeline-bar-wrapper d-inline-flex align-center ga-1">
-    <div v-for="block in formattedBlocks" :key="block.id" class="timeline-block-container">
+  <div class="timeline-bar-wrapper" :class="{ 'timeline-bar-responsive': responsive }">
+    <div
+      v-for="block in formattedBlocks"
+      :key="block.id"
+      class="timeline-block-container"
+      :style="responsive ? { flex: '1 1 0px', minWidth: '2px', height: `${height}px` } : undefined"
+    >
       <v-tooltip
         location="top"
         :disabled="!block.hasData"
@@ -17,7 +22,7 @@
             :style="{
               backgroundColor: block.color,
               height: `${height}px`,
-              width: `${width}px`,
+              width: responsive ? '100%' : `${width}px`,
             }"
           ></div>
         </template>
@@ -63,12 +68,14 @@ const props = withDefaults(
     maxBlocks?: number
     height?: number
     width?: number
+    responsive?: boolean
   }>(),
   {
     results: () => [],
     maxBlocks: 30,
     height: 24,
     width: 6,
+    responsive: false,
   }
 )
 
@@ -130,6 +137,13 @@ const formattedBlocks = computed<BlockItem[]>(() => {
   user-select: none;
   padding: 4px 2px;
   box-sizing: border-box;
+}
+
+.timeline-bar-responsive {
+  display: flex !important;
+  width: 100% !important;
+  gap: 2px !important;
+  padding: 2px 0 !important;
 }
 
 .timeline-block-container {

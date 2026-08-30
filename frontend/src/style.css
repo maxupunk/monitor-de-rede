@@ -101,3 +101,21 @@ body,
   opacity: 1;
   color: rgba(var(--v-theme-primary), 1);
 }
+
+/* Otimização Global de Margens e Conteúdo em Dispositivos Móveis (Padrão Unificado) */
+@media (max-width: 599.98px) {
+  /* Cartões com margem interna uniforme para máximo aproveitamento de tela */
+  .v-card:not(.v-card--flat) {
+    margin-bottom: 8px;
+  }
+
+  /* Reduz padding excessivo de diálogos e formulários em mobile */
+  .v-dialog > .v-card > .v-card-text {
+    padding: 12px !important;
+  }
+
+  /* Garante que tabelas de detalhes e abas tenham rolagem suave com toque */
+  .table-responsive {
+    -webkit-overflow-scrolling: touch;
+  }
+}

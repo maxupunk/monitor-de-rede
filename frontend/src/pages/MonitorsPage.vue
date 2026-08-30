@@ -24,7 +24,7 @@
 
     <!-- Tabela de Monitores -->
     <v-card elevation="2" rounded="lg">
-      <v-card-title class="pa-4 d-flex align-center justify-space-between flex-wrap ga-3">
+      <v-card-title class="pa-2.5 pa-sm-4 d-flex align-center justify-space-between flex-wrap ga-3">
         <v-text-field
           v-model="search"
           prepend-inner-icon="mdi-magnify"
@@ -38,10 +38,10 @@
         ></v-text-field>
 
         <!-- Chips de Filtro por Status da Saúde Global -->
-        <div class="d-flex align-center ga-1 flex-wrap">
+        <div class="d-flex align-center ga-1.5 flex-wrap">
           <v-chip
             :color="statusFilter === 'all' ? 'primary' : 'default'"
-            :variant="statusFilter === 'all' ? 'flat' : 'outlined'"
+            :variant="statusFilter === 'all' ? 'flat' : 'tonal'"
             size="small"
             class="font-weight-medium cursor-pointer"
             @click="setStatusFilter('all')"
@@ -50,7 +50,7 @@
           </v-chip>
           <v-chip
             :color="statusFilter === 'up' ? 'success' : 'default'"
-            :variant="statusFilter === 'up' ? 'flat' : 'outlined'"
+            :variant="statusFilter === 'up' ? 'flat' : 'tonal'"
             size="small"
             class="font-weight-medium cursor-pointer"
             @click="setStatusFilter('up')"
@@ -59,7 +59,7 @@
           </v-chip>
           <v-chip
             :color="statusFilter === 'warning' ? 'warning' : 'default'"
-            :variant="statusFilter === 'warning' ? 'flat' : 'outlined'"
+            :variant="statusFilter === 'warning' ? 'flat' : 'tonal'"
             size="small"
             class="font-weight-medium cursor-pointer"
             @click="setStatusFilter('warning')"
@@ -68,7 +68,7 @@
           </v-chip>
           <v-chip
             :color="statusFilter === 'down' ? 'error' : 'default'"
-            :variant="statusFilter === 'down' ? 'flat' : 'outlined'"
+            :variant="statusFilter === 'down' ? 'flat' : 'tonal'"
             size="small"
             class="font-weight-medium cursor-pointer"
             @click="setStatusFilter('down')"
@@ -77,7 +77,7 @@
           </v-chip>
           <v-chip
             :color="statusFilter === 'unknown' ? 'grey-darken-1' : 'default'"
-            :variant="statusFilter === 'unknown' ? 'flat' : 'outlined'"
+            :variant="statusFilter === 'unknown' ? 'flat' : 'tonal'"
             size="small"
             class="font-weight-medium cursor-pointer"
             @click="setStatusFilter('unknown')"
@@ -86,7 +86,7 @@
           </v-chip>
           <v-chip
             :color="statusFilter === 'disabled' ? 'grey-darken-1' : 'default'"
-            :variant="statusFilter === 'disabled' ? 'flat' : 'outlined'"
+            :variant="statusFilter === 'disabled' ? 'flat' : 'tonal'"
             size="small"
             class="font-weight-medium cursor-pointer"
             @click="setStatusFilter('disabled')"

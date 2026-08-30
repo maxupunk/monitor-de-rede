@@ -77,8 +77,8 @@
       </v-tabs>
       <v-divider></v-divider>
 
-      <v-card-text class="pa-3 pa-md-4">
-        <v-window v-model="tab">
+      <v-card-text class="pa-2 pa-sm-4">
+        <v-window v-model="tab" :touch="false">
           <!-- Resultados Encontrados -->
           <v-window-item value="results">
             <!-- Card de progresso durante a varredura -->

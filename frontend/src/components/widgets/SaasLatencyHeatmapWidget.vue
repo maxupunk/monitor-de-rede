@@ -2,11 +2,11 @@
   <v-card elevation="2" class="rounded-lg fill-height d-flex flex-column">
     <!-- Cabeçalho do Card -->
     <v-card-title
-      class="d-flex align-center justify-space-between py-3 px-4 flex-wrap ga-2 border-b"
+      class="d-flex align-center justify-space-between py-2.5 px-3 px-sm-4 flex-wrap ga-2 border-b"
     >
       <div class="d-flex align-center ga-3">
-        <v-avatar color="primary" variant="tonal" size="38" rounded="lg">
-          <v-icon color="primary" size="22">mdi-chart-scatter-plot-hexbin</v-icon>
+        <v-avatar color="primary" variant="tonal" size="36" rounded="lg">
+          <v-icon color="primary" size="20">mdi-chart-scatter-plot-hexbin</v-icon>
         </v-avatar>
         <div>
           <div class="text-subtitle-1 font-weight-bold">Mapa de Calor de Latência</div>
@@ -17,7 +17,7 @@
       </div>
 
       <!-- Filtros e Seletores -->
-      <div class="d-flex align-center ga-2 flex-wrap">
+      <div class="d-flex align-center ga-2 flex-wrap w-100 w-sm-auto justify-start justify-sm-end">
         <v-select
           v-model="selectedScope"
           :items="scopeOptions"
@@ -26,8 +26,8 @@
           density="compact"
           variant="outlined"
           hide-details
-          style="min-width: 190px; max-width: 260px"
-          class="text-caption"
+          style="min-width: 170px; max-width: 260px"
+          class="text-caption flex-grow-1 flex-sm-grow-0"
         ></v-select>
 
         <v-btn-toggle
@@ -82,11 +82,11 @@
     </div>
 
     <!-- Conteúdo Principal do Heatmap -->
-    <v-card-text v-else class="pa-4 flex-grow-1 d-flex flex-column ga-4">
+    <v-card-text v-else class="pa-3 pa-sm-4 flex-grow-1 d-flex flex-column ga-3">
       <!-- Destaques e KPIs de Análise -->
       <v-row dense>
         <v-col cols="12" sm="4">
-          <v-card variant="tonal" color="warning" class="pa-3 rounded-lg h-100">
+          <v-card variant="tonal" color="warning" class="pa-2.5 pa-sm-3 rounded-lg h-100">
             <div class="d-flex align-center justify-space-between">
               <div class="text-caption font-weight-medium">Horário de Maior Latência</div>
               <v-icon size="18">mdi-clock-alert-outline</v-icon>
@@ -105,7 +105,7 @@
         </v-col>
 
         <v-col cols="12" sm="4">
-          <v-card variant="tonal" color="success" class="pa-3 rounded-lg h-100">
+          <v-card variant="tonal" color="success" class="pa-2.5 pa-sm-3 rounded-lg h-100">
             <div class="d-flex align-center justify-space-between">
               <div class="text-caption font-weight-medium">Melhor Horário (Mais Rápido)</div>
               <v-icon size="18">mdi-lightning-bolt-outline</v-icon>
@@ -122,7 +122,7 @@
         </v-col>
 
         <v-col cols="12" sm="4">
-          <v-card variant="tonal" color="primary" class="pa-3 rounded-lg h-100">
+          <v-card variant="tonal" color="primary" class="pa-2.5 pa-sm-3 rounded-lg h-100">
             <div class="d-flex align-center justify-space-between">
               <div class="text-caption font-weight-medium">Latência Global / Uptime</div>
               <v-icon size="18">mdi-pulse</v-icon>
@@ -144,108 +144,136 @@
         </v-col>
       </v-row>
 
+      <!-- Dica visual mobile -->
+      <div class="d-flex d-md-none align-center ga-1 text-caption text-grey">
+        <v-icon size="14">mdi-gesture-swipe-horizontal</v-icon>
+        Arraste a tabela para ver todas as 24 horas (00h às 23h)
+      </div>
+
       <!-- Grade do Mapa de Calor (Heatmap Grid) -->
-      <div class="heatmap-wrapper border rounded-lg pa-3 bg-surface overflow-x-auto">
-        <!-- Cabeçalho das Horas (00h às 23h) -->
-        <div class="heatmap-grid-header mb-1">
-          <div class="row-label-header">Data</div>
-          <div
-            v-for="h in 24"
-            :key="h - 1"
-            class="hour-col-header text-caption text-medium-emphasis"
-            :title="`Hora ${h - 1}:00`"
-          >
-            {{ (h - 1) % 3 === 0 ? `${h - 1}h` : '' }}
-          </div>
-        </div>
-
-        <!-- Linhas por Dia -->
-        <div v-for="dayRow in groupedByDay" :key="dayRow.date" class="heatmap-grid-row">
-          <!-- Rótulo do Dia -->
-          <div class="row-label text-caption font-weight-medium text-truncate" :title="dayRow.date">
-            {{ formatDayLabel(dayRow.date, dayRow.dayOfWeek) }}
+      <div class="heatmap-scroll-area border rounded-lg pa-2 pa-sm-3 bg-surface overflow-x-auto">
+        <div class="heatmap-inner-content" style="min-width: 590px">
+          <!-- Cabeçalho das Horas (00h às 23h) -->
+          <div class="heatmap-grid-header mb-1">
+            <div class="row-label-header">Data</div>
+            <div
+              v-for="h in 24"
+              :key="h - 1"
+              class="hour-col-header text-caption text-medium-emphasis"
+              :title="`Hora ${h - 1}:00`"
+            >
+              {{ (h - 1) % 3 === 0 ? `${h - 1}h` : '' }}
+            </div>
           </div>
 
-          <!-- Células das 24 Horas -->
-          <div
-            v-for="cell in dayRow.cells"
-            :key="cell.hour"
-            class="heatmap-cell rounded-sm"
-            :style="{ backgroundColor: getCellColor(cell) }"
-          >
-            <v-tooltip activator="parent" location="top" density="compact">
-              <div class="pa-1 text-caption">
-                <div class="font-weight-bold mb-1">
-                  {{ formatDateFull(cell.date) }} · {{ String(cell.hour).padStart(2, '0') }}:00 -
-                  {{ String(cell.hour).padStart(2, '0') }}:59
+          <!-- Linhas por Dia -->
+          <div v-for="dayRow in groupedByDay" :key="dayRow.date" class="heatmap-grid-row">
+            <!-- Rótulo do Dia (Sticky) -->
+            <div
+              class="row-label text-caption font-weight-medium text-truncate"
+              :title="dayRow.date"
+            >
+              {{ formatDayLabel(dayRow.date, dayRow.dayOfWeek) }}
+            </div>
+
+            <!-- Células das 24 Horas -->
+            <div
+              v-for="cell in dayRow.cells"
+              :key="cell.hour"
+              class="heatmap-cell rounded-sm"
+              :style="{ backgroundColor: getCellColor(cell) }"
+            >
+              <v-tooltip activator="parent" location="top" density="compact">
+                <div class="pa-1 text-caption">
+                  <div class="font-weight-bold mb-1">
+                    {{ formatDateFull(cell.date) }} · {{ String(cell.hour).padStart(2, '0') }}:00 -
+                    {{ String(cell.hour).padStart(2, '0') }}:59
+                  </div>
+                  <div v-if="cell.totalChecks > 0">
+                    <div>
+                      <strong>Latência Média:</strong>
+                      {{ cell.avgLatencyMs ? `${cell.avgLatencyMs.toFixed(1)} ms` : '--' }}
+                    </div>
+                    <div v-if="cell.minLatencyMs !== null && cell.maxLatencyMs !== null">
+                      <strong>Variação:</strong> {{ cell.minLatencyMs.toFixed(1) }}ms ~
+                      {{ cell.maxLatencyMs.toFixed(1) }}ms
+                    </div>
+                    <div>
+                      <strong>Disponibilidade:</strong> {{ cell.uptimePercentage.toFixed(1) }}%
+                    </div>
+                    <div>
+                      <strong>Checagens:</strong> {{ cell.totalChecks }} ({{ cell.upChecks }} up,
+                      {{ cell.downChecks }} down)
+                    </div>
+                  </div>
+                  <div v-else class="text-grey-lighten-1">
+                    Nenhuma medição registrada neste intervalo
+                  </div>
                 </div>
-                <div v-if="cell.totalChecks > 0">
-                  <div>
-                    <strong>Latência Média:</strong>
-                    {{ cell.avgLatencyMs ? `${cell.avgLatencyMs.toFixed(1)} ms` : '--' }}
-                  </div>
-                  <div v-if="cell.minLatencyMs !== null && cell.maxLatencyMs !== null">
-                    <strong>Variação:</strong> {{ cell.minLatencyMs.toFixed(1) }}ms ~
-                    {{ cell.maxLatencyMs.toFixed(1) }}ms
-                  </div>
-                  <div>
-                    <strong>Disponibilidade:</strong> {{ cell.uptimePercentage.toFixed(1) }}%
-                  </div>
-                  <div>
-                    <strong>Checagens:</strong> {{ cell.totalChecks }} ({{ cell.upChecks }} up,
-                    {{ cell.downChecks }} down)
-                  </div>
-                </div>
-                <div v-else class="text-grey-lighten-1">
-                  Nenhuma medição registrada neste intervalo
-                </div>
-              </div>
-            </v-tooltip>
+              </v-tooltip>
+            </div>
           </div>
         </div>
       </div>
 
       <!-- Resumo Consolidado do Perfil Diário (24 Horas) -->
       <div class="mt-2">
-        <div class="d-flex align-center justify-space-between mb-2">
+        <div class="d-flex align-center justify-space-between mb-2 flex-wrap ga-2">
           <div class="text-caption font-weight-bold text-medium-emphasis d-flex align-center ga-1">
             <v-icon size="14">mdi-chart-line</v-icon>
             Perfil Médio Consolidado por Hora do Dia (00h - 23h)
           </div>
           <!-- Legenda de Cores -->
-          <div class="d-flex align-center ga-2 text-caption">
-            <span class="legend-dot" style="background-color: #10b981"></span> &lt;30ms
-            <span class="legend-dot" style="background-color: #84cc16"></span> &lt;60ms
-            <span class="legend-dot" style="background-color: #f59e0b"></span> &lt;100ms
-            <span class="legend-dot" style="background-color: #f97316"></span> &lt;200ms
-            <span class="legend-dot" style="background-color: #ef4444"></span> &gt;200ms
+          <div class="d-flex align-center ga-2 text-caption flex-wrap">
+            <span class="d-flex align-center"
+              ><span class="legend-dot" style="background-color: #10b981"></span> &lt;30ms</span
+            >
+            <span class="d-flex align-center"
+              ><span class="legend-dot" style="background-color: #84cc16"></span> &lt;60ms</span
+            >
+            <span class="d-flex align-center"
+              ><span class="legend-dot" style="background-color: #f59e0b"></span> &lt;100ms</span
+            >
+            <span class="d-flex align-center"
+              ><span class="legend-dot" style="background-color: #f97316"></span> &lt;200ms</span
+            >
+            <span class="d-flex align-center"
+              ><span class="legend-dot" style="background-color: #ef4444"></span> &gt;200ms</span
+            >
           </div>
         </div>
 
-        <div class="hourly-summary-bar d-flex ga-1">
-          <div
-            v-for="h in heatmapData?.byHourOfDay || []"
-            :key="h.hour"
-            class="hourly-summary-pill flex-grow-1 text-center rounded-sm pa-1"
-            :style="{ backgroundColor: getHourSummaryColor(h) }"
-          >
-            <div class="text-overline" style="font-size: 8px; line-height: 10px">{{ h.hour }}h</div>
-            <div
-              class="text-caption font-weight-bold text-truncate"
-              style="font-size: 10px; line-height: 12px"
-            >
-              {{ h.avgLatencyMs ? `${Math.round(h.avgLatencyMs)}` : '-' }}
+        <div class="heatmap-scroll-area border rounded-lg pa-2 bg-surface overflow-x-auto">
+          <div class="hourly-summary-grid" style="min-width: 590px">
+            <div class="row-label text-caption font-weight-bold text-truncate d-flex align-center">
+              Média 24h
             </div>
-            <v-tooltip activator="parent" location="bottom" density="compact">
-              <div class="pa-1 text-caption">
-                <div class="font-weight-bold">{{ String(h.hour).padStart(2, '0') }}:00h</div>
-                <div>
-                  Latência Média: {{ h.avgLatencyMs ? `${h.avgLatencyMs.toFixed(1)} ms` : '--' }}
-                </div>
-                <div>Disponibilidade: {{ h.uptimePercentage.toFixed(1) }}%</div>
-                <div>Total de Amostras: {{ h.totalChecks }}</div>
+            <div
+              v-for="h in heatmapData?.byHourOfDay || []"
+              :key="h.hour"
+              class="hourly-summary-pill text-center rounded-sm pa-1"
+              :style="{ backgroundColor: getHourSummaryColor(h) }"
+            >
+              <div class="text-overline" style="font-size: 8px; line-height: 10px">
+                {{ h.hour }}h
               </div>
-            </v-tooltip>
+              <div
+                class="text-caption font-weight-bold text-truncate"
+                style="font-size: 10px; line-height: 12px"
+              >
+                {{ h.avgLatencyMs ? `${Math.round(h.avgLatencyMs)}` : '-' }}
+              </div>
+              <v-tooltip activator="parent" location="bottom" density="compact">
+                <div class="pa-1 text-caption">
+                  <div class="font-weight-bold">{{ String(h.hour).padStart(2, '0') }}:00h</div>
+                  <div>
+                    Latência Média: {{ h.avgLatencyMs ? `${h.avgLatencyMs.toFixed(1)} ms` : '--' }}
+                  </div>
+                  <div>Disponibilidade: {{ h.uptimePercentage.toFixed(1) }}%</div>
+                  <div>Total de Amostras: {{ h.totalChecks }}</div>
+                </div>
+              </v-tooltip>
+            </div>
           </div>
         </div>
       </div>
@@ -403,19 +431,32 @@ function formatDateFull(dateStr: string): string {
 </script>
 
 <style scoped>
-.heatmap-wrapper {
-  min-width: 600px;
+.heatmap-scroll-area {
+  width: 100%;
+  -webkit-overflow-scrolling: touch;
 }
 
-.heatmap-grid-header {
+.heatmap-grid-header,
+.heatmap-grid-row,
+.hourly-summary-grid {
   display: grid;
   grid-template-columns: 85px repeat(24, minmax(18px, 1fr));
   gap: 3px;
   align-items: center;
 }
 
-.row-label-header {
+.row-label-header,
+.row-label {
   font-size: 11px;
+  color: rgba(var(--v-theme-on-surface), 0.85);
+  position: sticky;
+  left: 0;
+  z-index: 4;
+  background: rgb(var(--v-theme-surface));
+  padding-right: 4px;
+}
+
+.row-label-header {
   font-weight: 600;
   color: rgba(var(--v-theme-on-surface), 0.6);
 }
@@ -428,16 +469,7 @@ function formatDateFull(dateStr: string): string {
 }
 
 .heatmap-grid-row {
-  display: grid;
-  grid-template-columns: 85px repeat(24, minmax(18px, 1fr));
-  gap: 3px;
-  align-items: center;
   margin-bottom: 3px;
-}
-
-.row-label {
-  font-size: 11px;
-  color: rgba(var(--v-theme-on-surface), 0.8);
 }
 
 .heatmap-cell {

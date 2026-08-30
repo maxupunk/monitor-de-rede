@@ -118,40 +118,72 @@
 
     <template #mobile-item="{ item }">
       <div class="d-flex flex-column ga-2">
-        <div class="d-flex align-start justify-space-between ga-2">
-          <div class="flex-grow-1 text-break">
-            <div class="d-flex flex-wrap align-center ga-2">
-              <span class="text-subtitle-2 font-weight-bold">{{ item.name }}</span>
-              <v-chip :color="severityColor(item.severity)" size="x-small">
-                {{ severityLabel(item.severity) }}
-              </v-chip>
-            </div>
-            <div class="text-body-2 text-grey-darken-1 mt-1">
-              {{ metricLabel(item.condition?.field) }}
-              {{ operatorLabel(item.condition?.operator).toLowerCase() }}
-              <strong>
-                {{ formatConditionValue(item.condition?.field, item.condition?.value) }}
-              </strong>
-            </div>
-            <div class="text-caption text-grey mt-1">
-              Tolerância: {{ durationLabel(item.durationSeconds) }}
-            </div>
+        <!-- Top Row: Nome da Regra, Severidade e Switch -->
+        <div class="d-flex align-center justify-space-between ga-2">
+          <div class="d-flex align-center ga-1.5 flex-wrap flex-grow-1 min-w-0">
+            <span class="text-subtitle-1 font-weight-bold text-truncate">{{ item.name }}</span>
+            <v-chip
+              :color="severityColor(item.severity)"
+              size="x-small"
+              variant="flat"
+              class="font-weight-bold text-uppercase px-2"
+            >
+              {{ severityLabel(item.severity) }}
+            </v-chip>
+            <v-tooltip v-if="item.templateKey" text="Criada a partir do catálogo">
+              <template #activator="{ props: tooltipProps }">
+                <v-icon v-bind="tooltipProps" size="14" color="primary">mdi-playlist-check</v-icon>
+              </template>
+            </v-tooltip>
           </div>
-          <v-switch
-            :model-value="item.isEnabled ?? item.enabled"
-            color="success"
-            density="compact"
-            hide-details
-            style="transform: scale(0.85); transform-origin: right top"
-            @update:model-value="emit('toggle-rule', item, $event)"
-          ></v-switch>
+
+          <div class="flex-shrink-0" @click.stop>
+            <v-switch
+              :model-value="item.isEnabled ?? item.enabled"
+              color="success"
+              density="compact"
+              hide-details
+              class="ma-0"
+              @update:model-value="emit('toggle-rule', item, $event)"
+            ></v-switch>
+          </div>
         </div>
-        <div class="d-flex ga-1 mt-1">
-          <v-btn icon size="small" variant="text" @click="emit('edit-rule', item)">
-            <v-icon>mdi-pencil</v-icon>
+
+        <!-- Middle: Métrica e Condição -->
+        <div class="text-body-2 text-grey-darken-1">
+          <span>{{ metricLabel(item.condition?.field) }}</span>
+          <span class="mx-1">{{ operatorLabel(item.condition?.operator).toLowerCase() }}</span>
+          <strong class="text-high-emphasis">
+            {{ formatConditionValue(item.condition?.field, item.condition?.value) }}
+          </strong>
+        </div>
+
+        <!-- Meta: Tolerância e Escopo -->
+        <div class="text-caption text-grey d-flex align-center flex-wrap ga-2">
+          <span class="d-flex align-center ga-1">
+            <v-icon size="12">mdi-timer-outline</v-icon>
+            Tolerância: {{ durationLabel(item.durationSeconds) }}
+          </span>
+          <span v-if="item.deviceId" class="d-flex align-center ga-1">
+            <v-icon size="12">mdi-router-network</v-icon>
+            {{ deviceName(item.deviceId) }}
+          </span>
+        </div>
+
+        <!-- Footer Actions -->
+        <div class="d-flex align-center justify-end ga-1 pt-2 mt-1 border-t">
+          <v-btn
+            size="small"
+            variant="tonal"
+            color="primary"
+            prepend-icon="mdi-pencil"
+            class="text-caption px-2"
+            @click="emit('edit-rule', item)"
+          >
+            Editar
           </v-btn>
           <v-btn icon size="small" variant="text" color="error" @click="emit('delete-rule', item)">
-            <v-icon>mdi-delete</v-icon>
+            <v-icon size="18">mdi-delete</v-icon>
           </v-btn>
         </div>
       </div>

@@ -170,7 +170,7 @@
         :class="[
           route.meta.fullBleed
             ? 'pa-0 fill-height d-flex flex-column'
-            : 'px-2 px-md-6 py-3 py-md-6 max-w-1600',
+            : 'px-1 px-sm-3 px-md-6 py-2 py-md-4 max-w-1600',
         ]"
       >
         <v-alert

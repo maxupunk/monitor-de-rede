@@ -1,5 +1,5 @@
 <template>
-  <v-card elevation="2" class="rounded-lg pa-4">
+  <v-card elevation="2" class="rounded-lg pa-3 pa-sm-4">
     <v-card-title class="font-weight-bold d-flex align-center">
       <v-icon start color="info">mdi-view-dashboard-variant-outline</v-icon>
       Sincronização do Dashboard

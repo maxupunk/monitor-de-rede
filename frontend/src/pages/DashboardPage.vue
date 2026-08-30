@@ -147,7 +147,7 @@
     </v-alert>
 
     <!-- Malha Reativa de Widgets Customizáveis -->
-    <v-row class="mb-2">
+    <v-row dense class="mb-2">
       <v-col
         v-for="(widget, idx) in dashboardStore.visibleWidgets"
         :key="widget.id"
@@ -155,7 +155,7 @@
         :sm="widget.sm || 12"
         :md="widget.md || 12"
         :lg="widget.lg || 12"
-        class="pb-6"
+        class="pb-3 pb-md-6"
       >
         <DashboardWidgetWrapper
           :widget="widget"

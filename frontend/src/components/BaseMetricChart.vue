@@ -4,6 +4,9 @@
     class="base-metric-chart-container relative pa-2 border rounded-lg bg-surface"
     @mousemove="handleMouseMove"
     @mouseleave="handleMouseLeave"
+    @touchmove.passive="handleTouchMove"
+    @touchend="handleMouseLeave"
+    @touchcancel="handleMouseLeave"
   >
     <svg
       v-if="seriesList.length > 0 && maxPointCount > 0"
@@ -187,9 +190,22 @@ function handleMouseMove(e: MouseEvent) {
   const mouseX = e.clientX - rect.left
   const mouseY = e.clientY - rect.top
 
+  updateHoverPosition(mouseX, mouseY, rect.width)
+}
+
+function handleTouchMove(e: TouchEvent) {
+  if (!chartContainerRef.value || e.touches.length === 0) return
+  const touch = e.touches[0]
+  const rect = chartContainerRef.value.getBoundingClientRect()
+  const mouseX = touch.clientX - rect.left
+  const mouseY = touch.clientY - rect.top
+
+  updateHoverPosition(mouseX, mouseY, rect.width)
+}
+
+function updateHoverPosition(mouseX: number, mouseY: number, svgWidth: number) {
   mousePos.value = { x: mouseX, y: mouseY }
 
-  const svgWidth = rect.width
   if (svgWidth <= 0) return
 
   const marginX = (75 / 800) * svgWidth
