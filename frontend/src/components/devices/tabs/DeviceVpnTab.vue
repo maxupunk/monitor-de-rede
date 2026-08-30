@@ -164,10 +164,10 @@ const vpnStore = useVpnStore()
 
 const vpnPeer = computed(() => detailStore.device?.vpnPeer ?? null)
 const vpnProfileLabelValue = computed(() =>
-  vpnPeer.value ? vpnProfileLabel(vpnPeer.value.deviceProfile) : ''
+  vpnPeer.value ? vpnProfileLabel(vpnPeer.value.deviceProfile, vpnStore.profiles) : ''
 )
 const vpnProfileIconValue = computed(() =>
-  vpnPeer.value ? vpnProfileIcon(vpnPeer.value.deviceProfile) : ''
+  vpnPeer.value ? vpnProfileIcon(vpnPeer.value.deviceProfile, vpnStore.profiles) : ''
 )
 const vpnStatusLabelValue = computed(() =>
   vpnPeer.value ? vpnStatusLabel(vpnPeer.value.connectionStatus) : ''

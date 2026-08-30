@@ -34,17 +34,6 @@ use crate::{
 /// Endpoint exibido quando o operador ainda não configurou o endereço público.
 const ENDPOINT_PLACEHOLDER: &str = "ENDERECO-PUBLICO-NAO-CONFIGURADO";
 
-/// O sistema do catálogo que corresponde a um perfil do assistente.
-///
-/// `None` para perfil sem sistema declarado — que hoje não existe, e no dia em
-/// que existir é melhor deixar o campo vazio do que gravar um palpite.
-fn sistema_do_perfil(perfil: &str) -> Option<String> {
-    crate::services::devices::systems::catalog()
-        .iter()
-        .find(|sistema| sistema.vpn_profile == Some(perfil))
-        .map(|sistema| sistema.id.to_owned())
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct CreatePeerPayload {
     pub name: String,
@@ -201,6 +190,15 @@ pub async fn create(
             payload.profile
         )));
     }
+    let device_adapter = crate::services::devices::adapters::registry::by_vpn_profile(
+        &payload.profile,
+    )
+    .ok_or_else(|| {
+        AppError::business_rule(format!(
+            "Perfil {} não está associado a um adapter de dispositivo",
+            payload.profile
+        ))
+    })?;
     let server = server_service::find_or_fail(db).await?;
     let network = server_service::network_of(db, &server).await?;
 
@@ -231,13 +229,7 @@ pub async fn create(
                 network_id: Set(Some(server.network_id)),
                 ip_address: Set(Some(ip_address.to_string())),
                 name: Set(payload.name.clone()),
-                r#type: Set(
-                    if payload.profile == "mikrotik" || payload.profile == "openwrt" {
-                        "router".into()
-                    } else {
-                        "host".into()
-                    },
-                ),
+                r#type: Set(device_adapter.default_device_type().to_owned()),
                 description: Set(Some(payload.description.clone().unwrap_or_else(|| {
                     "Dispositivo conectado via VPN WireGuard".to_string()
                 }))),
@@ -252,7 +244,7 @@ pub async fn create(
                 // operador escolheu para gerar a configuração. A tradução do
                 // nome do gerador (`mikrotik`) para o do sistema (`routeros`)
                 // mora no catálogo, e não numa segunda tabela aqui.
-                operating_system: Set(sistema_do_perfil(&payload.profile)),
+                operating_system: Set(Some(device_adapter.platform().id.to_owned())),
                 snmp_enabled: Set(payload.snmp_enabled),
                 snmp_community: Set(payload.snmp_enabled.then(|| {
                     payload

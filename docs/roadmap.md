@@ -274,6 +274,18 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
     - Reduzir `serde_json::json!` nas respostas; migrar para DTOs `ts-rs`.
     - Testes de snapshot e convenção cobrem os novos DTOs.
 
+- [x] **ARQ-01 — Unificar plataformas com Adapter Pattern** 🟢 Concluído
+  - **Severidade:** 🟠 Alta
+  - **Esforço:** Grande
+  - **Arquivos:** `backend/src/services/devices/adapters/`, `backend/src/services/devices/systems.rs`, `backend/src/services/{syslog,discovery,vpn}/`, `frontend/src/stores/{operatingSystems,vpn}.ts`, `frontend/src/components/`, `backend/tests/conventions/device_adapters.rs`, `docs/adr/009-device-adapters.md`
+  - **Implementado:**
+    - Registro único de `DeviceAdapter` para RouterOS, OpenWrt, Ubiquiti, Linux, Windows, mobile e fallback genérico.
+    - Identificação por SNMP/SSH/cadastro, meios de acesso e classificação de discovery dependem do contrato, sem listas paralelas.
+    - Configuração e dialeto Syslog encapsulados em `SyslogConfigurationAdapter`.
+    - Geradores WireGuard existentes preservados como adapters especializados e ligados ao registro principal.
+    - Frontend deriva perfis, rótulos, ícones, QR Code e seleção inicial da API.
+    - Validação de MAC-Telnet no backend e testes unitários/de convenção impedem regressão arquitetural.
+
 ---
 
 ## 6. Fase 3 — Evolução de produto (planejado)

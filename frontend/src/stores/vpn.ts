@@ -35,17 +35,6 @@ export type VpnArtifact = SerializedVpnArtifact
 export type VpnPreflightResult = PreflightResult
 
 /**
- * Perfis com rótulo e ícone próprios nesta interface.
- *
- * **Não** é o contrato: quem decide os perfis aceitos é o registro do backend
- * (`services/vpn/profiles/registry.rs`), e por isso `deviceProfile` chega como
- * `string`. Esta união existe só para tipar as tabelas de apresentação abaixo —
- * um perfil novo no backend aparece no wizard sozinho e cai no rótulo padrão
- * até ganhar um ícone aqui.
- */
-export type VpnDeviceProfile = 'mikrotik' | 'openwrt' | 'linux' | 'windows' | 'mobile'
-
-/**
  * Corpo de `POST /api/vpn/peers`, escrito à mão de propósito: no Rust todo
  * campo do `CreatePeerInput` é opcional (a validação e a mensagem em português
  * ficam no controller), e gerar o binding daria um tipo em que `name` e
@@ -59,23 +48,6 @@ export interface CreateVpnPeerPayload {
   snmpEnabled?: boolean
   snmpCommunity?: string | null
   description?: string | null
-}
-
-/** Fonte única de rótulo/ícone por perfil — reutilizada em qualquer tela que liste peers da VPN. */
-export const VPN_PROFILE_LABELS: Record<VpnDeviceProfile, string> = {
-  mikrotik: 'MikroTik',
-  openwrt: 'OpenWrt',
-  linux: 'Linux',
-  windows: 'Windows',
-  mobile: 'Celular',
-}
-
-export const VPN_PROFILE_ICONS: Record<VpnDeviceProfile, string> = {
-  mikrotik: 'mdi-router-network',
-  openwrt: 'mdi-router-wireless',
-  linux: 'mdi-linux',
-  windows: 'mdi-microsoft-windows',
-  mobile: 'mdi-cellphone',
 }
 
 export const VPN_STATUS_LABELS: Record<VpnConnectionStatus, string> = {
@@ -92,17 +64,20 @@ export const VPN_STATUS_COLORS: Record<VpnConnectionStatus, string> = {
   awaiting: 'grey',
 }
 
-/**
- * Recebem `string`, e não a união: o perfil vem do registro do backend, então
- * um perfil ainda sem rótulo aqui precisa cair no padrão — que é o que estas
- * funções sempre fizeram em runtime.
- */
-export function vpnProfileLabel(profile: string): string {
-  return VPN_PROFILE_LABELS[profile as VpnDeviceProfile] || profile
+/** Apresentação derivada do registro do backend, sem catálogo paralelo no frontend. */
+export function vpnProfileLabel(profile: string, profiles: readonly ProfileCard[]): string {
+  return profiles.find((option) => option.profile === profile)?.label ?? profile
 }
 
-export function vpnProfileIcon(profile: string): string {
-  return VPN_PROFILE_ICONS[profile as VpnDeviceProfile] || 'mdi-devices'
+export function vpnProfileIcon(profile: string, profiles: readonly ProfileCard[]): string {
+  return profiles.find((option) => option.profile === profile)?.icon ?? 'mdi-devices'
+}
+
+export function vpnProfileSupportsQrCode(
+  profile: string,
+  profiles: readonly ProfileCard[]
+): boolean {
+  return profiles.find((option) => option.profile === profile)?.supportsQrCode === true
 }
 
 export function vpnStatusLabel(status: VpnConnectionStatus): string {

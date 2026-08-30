@@ -12,15 +12,15 @@
 //! 1. **Resgate do `<pri>`** ([`resgata_pri`]): sem `bsd-syslog=yes` o RouterOS
 //!    manda formato próprio, sem timestamp — o parser joga tudo em `msg` e a
 //!    severidade se perde dentro do texto.
-//! 2. **Severidade pelos tópicos** ([`severidade_do_topico`]): o `<pri>` do
-//!    RouterOS carrega o `syslog-severity` fixo da *action*, que vale `info`
-//!    para tudo nas versões sem `auto`. Sem esta correção, filtrar por
-//!    severidade não separaria nada num parque MikroTik.
+//! 2. **Severidade pelos tópicos**: o adapter RouterOS corrige o `<pri>` fixo
+//!    da *action*. O parser apenas aplica os enriquecimentos registrados.
 
 use chrono::{DateTime, Datelike, FixedOffset, TimeZone, Utc};
 use syslog_loose::{
     decompose_pri, IncompleteDate, Message, ProcId, SyslogFacility, SyslogSeverity, Variant,
 };
+
+use crate::services::devices::adapters::registry;
 
 /// Uma linha já no vocabulário da tabela `device_logs`.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -58,8 +58,8 @@ pub fn parse(bruto: &str, recebido_em: DateTime<Utc>) -> ParsedLog {
             // o pri como mensagem: os tópicos ficam no começo dela.
             if linha.topics.is_none() {
                 if let Some((tag, resto)) = linha.message.split_once(' ') {
-                    if let Some(topicos) = topicos_do_routeros(Some(tag)) {
-                        linha.severity = severidade_do_topico(&topicos).or(linha.severity);
+                    if let Some(topicos) = registry::syslog_topics(Some(tag)) {
+                        linha.severity = registry::syslog_severity(&topicos).or(linha.severity);
                         linha.topics = Some(topicos);
                         linha.message = resto.to_owned();
                     }
@@ -73,10 +73,10 @@ pub fn parse(bruto: &str, recebido_em: DateTime<Utc>) -> ParsedLog {
 }
 
 fn converte(mensagem: Message<&str>) -> ParsedLog {
-    let topics = topicos_do_routeros(mensagem.appname);
+    let topics = registry::syslog_topics(mensagem.appname);
     let severity = topics
         .as_deref()
-        .and_then(severidade_do_topico)
+        .and_then(registry::syslog_severity)
         .or_else(|| mensagem.severity.map(|valor| valor as i16));
     ParsedLog {
         facility: mensagem.facility.map(|valor| valor as i16),
@@ -105,50 +105,6 @@ fn resgata_pri(bruto: &str) -> Option<(Option<SyslogFacility>, Option<SyslogSeve
     let pri: u8 = numero.parse().ok()?;
     let (facility, severity) = decompose_pri(pri);
     Some((facility, severity, resto))
-}
-
-/// Os tópicos do RouterOS chegam no lugar do `tag` do BSD.
-///
-/// O RouterOS manda `<pri>timestamp hostname topics mensagem`, e o parser
-/// RFC 3164 pega `system,info,account` como `appname` — é o primeiro token
-/// depois do hostname. Não é preciso parser próprio para RouterOS: basta
-/// reconhecer o formato `palavra,palavra[,palavra]`, sem espaço e sem `[pid]`.
-/// Um `appname` de Linux (`sshd`, `dnsmasq-dhcp`) não tem vírgula, então a
-/// regra separa os dois casos sem heurística frouxa.
-#[must_use]
-pub fn topicos_do_routeros(appname: Option<&str>) -> Option<String> {
-    let tag = appname?;
-    if !tag.contains(',') {
-        return None;
-    }
-    let valido = tag.split(',').all(|parte| {
-        !parte.is_empty()
-            && parte
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-    });
-    valido.then(|| tag.to_owned())
-}
-
-/// A severidade verdadeira do RouterOS está nos tópicos, não no `<pri>`.
-///
-/// Vence a mais grave (menor número) entre as palavras conhecidas. Quando o
-/// dispositivo já mandou o `<pri>` certo, os dois concordam e nada muda.
-#[must_use]
-pub fn severidade_do_topico(topics: &str) -> Option<i16> {
-    topics
-        .split(',')
-        .filter_map(|topico| match topico {
-            "emergency" => Some(SyslogSeverity::SEV_EMERG as i16),
-            "alert" => Some(SyslogSeverity::SEV_ALERT as i16),
-            "critical" => Some(SyslogSeverity::SEV_CRIT as i16),
-            "error" => Some(SyslogSeverity::SEV_ERR as i16),
-            "warning" => Some(SyslogSeverity::SEV_WARNING as i16),
-            "info" => Some(SyslogSeverity::SEV_INFO as i16),
-            "debug" => Some(SyslogSeverity::SEV_DEBUG as i16),
-            _ => None,
-        })
-        .min()
 }
 
 /// Escolhe o ano que deixa a data **mais perto** de `referencia`.
@@ -287,13 +243,13 @@ mod tests {
     #[test]
     fn topico_so_e_topico_quando_parece_com_um() {
         assert_eq!(
-            topicos_do_routeros(Some("system,info")).as_deref(),
+            registry::syslog_topics(Some("system,info")).as_deref(),
             Some("system,info")
         );
-        assert_eq!(topicos_do_routeros(Some("sshd")), None);
+        assert_eq!(registry::syslog_topics(Some("sshd")), None);
         // Segmento vazio e caractere fora do alfabeto derrubam o palpite.
-        assert_eq!(topicos_do_routeros(Some("system,,info")), None);
-        assert_eq!(topicos_do_routeros(Some("a b,c")), None);
-        assert_eq!(topicos_do_routeros(None), None);
+        assert_eq!(registry::syslog_topics(Some("system,,info")), None);
+        assert_eq!(registry::syslog_topics(Some("a b,c")), None);
+        assert_eq!(registry::syslog_topics(None), None);
     }
 }

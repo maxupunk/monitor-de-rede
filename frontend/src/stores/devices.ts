@@ -2,14 +2,14 @@ import { defineStore } from 'pinia'
 import { computed } from 'vue'
 import { apiService } from '@/services/apiService'
 import { useCrudResource } from './crudResource'
-import type { VpnDeviceProfile, VpnConnectionStatus } from './vpn'
+import type { VpnConnectionStatus } from './vpn'
 
 export interface DeviceVpnPeer {
   id: number
   vpnServerId: number
   deviceId: number
   publicKey: string
-  deviceProfile: VpnDeviceProfile
+  deviceProfile: string
   persistentKeepalive: number
   lastHandshakeAt: string | null
   bytesRx: number

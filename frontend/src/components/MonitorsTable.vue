@@ -254,13 +254,14 @@
 
         <!-- Footer Row: Switch on the Left, Actions on the Right -->
         <div class="d-flex align-center justify-space-between pt-2 mt-1 border-t">
-          <div class="d-flex align-center ga-1" @click.stop>
+          <div class="d-flex align-center ga-1">
             <v-switch
               :model-value="item.isEnabled"
               color="success"
               hide-details
               density="compact"
               class="ma-0 monitor-card-switch"
+              @click.stop
               @update:model-value="(val) => toggle(item, Boolean(val))"
             >
               <template #label>

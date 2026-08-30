@@ -130,6 +130,7 @@ backend/
 
 ```text
 services/
+├── devices/        adapters de plataforma, acesso, capacidades e dispositivo do sistema
 ├── monitoring/     checkers/, runner, result_processor, device_status, presenter
 ├── discovery/      service, queue, merger, device_identifier, oui_lookup, cidr_range
 ├── snmp/           sessões, coletores, perfis
@@ -144,6 +145,24 @@ services/
 ├── backup/         export/restore das configurações
 └── shared/         crypto, pagination, errors
 ```
+
+### Adapters de dispositivo
+
+Toda variação por sistema operacional ou família de equipamento parte de
+`services/devices/adapters/`. O contrato `DeviceAdapter` concentra identidade,
+evidências de detecção, meios de acesso, classificação e vínculos com adapters
+especializados. O registro define a ordem pública e é consumido por cadastro,
+discovery, Syslog e VPN.
+
+O Syslog usa `SyslogConfigurationAdapter` para gerar comandos, identificar o
+equipamento, emitir a linha de teste e interpretar extensões de dialeto. A VPN
+usa `VpnProfileGenerator` para gerar artefatos e regras de firewall. O frontend
+não possui enum/mapa próprio dessas plataformas: usa os cards e capacidades da
+API. Ver [ADR 009](adr/009-device-adapters.md).
+
+`devices/capabilities.rs` tem outra responsabilidade: deriva capacidades já
+comprovadas por interfaces, métricas, eventos e logs persistidos. Ela não
+confunde “a plataforma suporta” com “este equipamento respondeu”.
 
 ## 5. O ciclo de monitoramento
 
@@ -570,6 +589,7 @@ ausente achando que ela está escondida:
 | [004](adr/004-dns-wire.md) | Consultas DNS no formato wire |
 | [007](adr/007-scheduler-processo-unico.md) | Scheduler em laço no processo principal |
 | [008](adr/008-syslog-parser.md) | Parser e ingestão de Syslog |
+| [009](adr/009-device-adapters.md) | Adapters extensíveis por plataforma de dispositivo |
 
 ## 14. Configuração
 

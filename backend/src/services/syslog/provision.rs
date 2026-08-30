@@ -44,6 +44,7 @@ use super::{
     sources::{SeenSource, SourceRegistry},
 };
 use crate::services::{
+    devices::adapters::{registry as device_adapters, DeviceAccessMethod},
     network_tools::mactelnet,
     shared::errors::{AppError, AppResult},
 };
@@ -159,6 +160,21 @@ pub async fn run(
     sources: Option<&Arc<SourceRegistry>>,
     device_id: i64,
 ) -> AppResult<ProvisionOutcome> {
+    let adapter = device_adapters::find(&pedido.operating_system).ok_or_else(|| {
+        AppError::validation(format!(
+            "Sistema desconhecido: {}.",
+            pedido.operating_system
+        ))
+    })?;
+    if pedido.protocol == Protocol::MacTelnet
+        && !adapter.supports_access(DeviceAccessMethod::MacTelnet)
+    {
+        return Err(AppError::validation(format!(
+            "{} não oferece acesso por MAC-Telnet.",
+            adapter.platform().label
+        )));
+    }
+
     let comandos = snippets::commands_for(
         &pedido.operating_system,
         &pedido.server_address,
@@ -830,6 +846,26 @@ mod tests {
         assert_eq!(Protocol::parse("SSH").unwrap(), Protocol::Ssh);
         assert_eq!(Protocol::parse(" telnet ").unwrap(), Protocol::Telnet);
         assert!(Protocol::parse("rlogin").is_err());
+    }
+
+    #[tokio::test]
+    async fn o_adapter_recusa_mactelnet_em_plataforma_incompativel() {
+        let request = ProvisionRequest {
+            host: "127.0.0.1".parse().unwrap(),
+            mac: Some(mactelnet::MacAddress::parse("02:00:00:00:00:01").unwrap()),
+            port: mactelnet::PORT,
+            protocol: Protocol::MacTelnet,
+            username: "admin".to_owned(),
+            password: "segredo".to_owned(),
+            operating_system: "windows".to_owned(),
+            server_address: "192.0.2.10".to_owned(),
+            server_port: 514,
+        };
+
+        let error = run(&request, None, 1).await.expect_err("deveria recusar");
+        assert!(error
+            .to_string()
+            .contains("não oferece acesso por MAC-Telnet"));
     }
 
     #[test]

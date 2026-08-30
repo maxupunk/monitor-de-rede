@@ -349,7 +349,7 @@ async fn provision_device(
         None => {
             return Err(AppError::business_rule(
                 "Este dispositivo não tem endereço IP cadastrado — não há para onde conectar. \
-                 Use MAC-Telnet se o equipamento for MikroTik e estiver na mesma rede local.",
+                 Use MAC-Telnet se o adapter do equipamento oferecer esse acesso e ele estiver na mesma rede local.",
             ))
         }
     };

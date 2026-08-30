@@ -663,7 +663,7 @@ function mensagemDeErro(erro: unknown): string {
 function pista(mensagem: string): string {
   const texto = mensagem.toLowerCase()
   if (texto.includes('recusad') || texto.includes('senha')) {
-    return 'Confirme se o usuário tem permissão de administrador no equipamento. No RouterOS, o grupo precisa incluir as políticas "write" e "policy".'
+    return 'Confirme se o usuário tem permissão de administrador para alterar a configuração de logs do equipamento.'
   }
   if (texto.includes('tempo esgotado') || texto.includes('acessar o equipamento')) {
     return `Verifique se o serviço está ligado no equipamento e se a porta ${port.value ?? defaultPort.value} aceita conexão a partir deste servidor.`

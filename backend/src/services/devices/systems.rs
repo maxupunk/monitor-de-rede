@@ -22,61 +22,26 @@
 //!
 //! | campo | quem lê |
 //! |---|---|
-//! | [`OperatingSystem::syslog`] | a ativação de log — o `id` é a chave da receita em [`crate::services::syslog::snippets`] |
-//! | [`OperatingSystem::mac_telnet`] | o seletor de meio de acesso |
-//! | [`OperatingSystem::vpn_profile`] | o assistente da VPN |
-//! | [`OperatingSystem::aliases`] | a dedução por `sysDescr` do SNMP |
+//! | [`super::adapters::DeviceAdapter::syslog`] | a ativação de log |
+//! | [`super::adapters::DeviceAdapter::supports_access`] | o seletor de meio de acesso |
+//! | [`super::adapters::DeviceAdapter::vpn_profile`] | o assistente da VPN |
+//! | [`super::adapters::DeviceAdapter::aliases`] | a dedução por `sysDescr` do SNMP |
 //!
 //! # O `id` é o sistema, não o fabricante
 //!
 //! Por isso `routeros` e não `mikrotik`: RouterOS é o sistema, MikroTik é quem
 //! fabrica o equipamento — e o mesmo fabricante vende aparelho com SwOS. O
 //! assistente da VPN continua falando `mikrotik` porque é o nome do gerador de
-//! configuração registrado lá; a tradução vive no [`OperatingSystem::vpn_profile`]
-//! desta tabela, e um teste garante que os dois lados não se percam.
+//! configuração registrado lá; a tradução vive no adapter da plataforma, e um
+//! teste garante que os dois lados não se percam.
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use super::adapters::{registry, DeviceAccessMethod, DevicePlatform};
+
 /// Um sistema do catálogo.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct OperatingSystem {
-    pub id: &'static str,
-    pub label: &'static str,
-    pub icon: &'static str,
-    /// Tem receita de syslog — e nesse caso o `id` **é** a chave dela.
-    pub syslog: bool,
-    /// Atende MAC-Telnet (RouterOS de fábrica; OpenWrt com `mactelnetd`).
-    pub mac_telnet: bool,
-    /// Perfil equivalente no assistente da VPN, quando existe.
-    pub vpn_profile: Option<&'static str>,
-    /// Palavras que identificam este sistema num texto livre — `sysDescr` do
-    /// SNMP, campo de fabricante ou modelo do cadastro.
-    pub aliases: &'static [&'static str],
-    /// Se os apelidos são **genéricos** — descrevem uma família inteira em vez
-    /// de um sistema.
-    ///
-    /// Só `linux` é. E é por isso que ele existe: quase todo firmware embarcado
-    /// roda Linux e diz isso no `sysDescr`. Um OpenWrt cujo agente responde
-    /// `Linux bpi-r3 6.12.87 aarch64` casava com `linux` e parava ali — a
-    /// palavra estava lá, e nenhuma evidência mais específica chegava a ser
-    /// consultada. O genérico só decide depois que todo o resto se calou.
-    pub generic: bool,
-    /// Prefixos de `sysObjectId` que pertencem a este sistema.
-    ///
-    /// É o número de empresa da IANA, e vale mais que qualquer texto: não é
-    /// prosa de firmware, é registro. `1.3.6.1.4.1.8072` (net-snmp) **não**
-    /// entra em lugar nenhum de propósito — é o agente, não o sistema, e ele
-    /// roda tanto no OpenWrt quanto num Debian.
-    pub sys_object_ids: &'static [&'static str],
-    /// Trechos da identificação que o servidor SSH anuncia ao conectar.
-    ///
-    /// O `dropbear` é o desempate que resolve o caso do OpenWrt: é o servidor
-    /// SSH padrão dele, e a linha de identificação chega **antes** de qualquer
-    /// autenticação — o mesmo `connect` que já sonda a porta 22 a traz de
-    /// graça. `openssh` não entra: roda em tudo e não separa nada.
-    pub ssh_banners: &'static [&'static str],
-}
+pub type OperatingSystem = DevicePlatform;
 
 /// Valor que a API aceita para "não declarei — deduza".
 pub const AUTO: &str = "auto";
@@ -89,121 +54,14 @@ pub const AUTO: &str = "auto";
 /// `padrão` justamente para a escolha ser conferida antes de aplicar.
 pub const FALLBACK: &str = "routeros";
 
-/// A ordem importa duas vezes: é a ordem em que as telas listam, e é a ordem em
-/// que os apelidos são procurados. `OpenWrt 23.05 Linux` precisa casar com
-/// `openwrt` antes de chegar em `linux` — que é o que aconteceria se a ordem
-/// fosse alfabética.
-const CATALOGO: &[OperatingSystem] = &[
-    OperatingSystem {
-        id: "routeros",
-        label: "MikroTik RouterOS",
-        icon: "mdi-router-network",
-        syslog: true,
-        mac_telnet: true,
-        vpn_profile: Some("mikrotik"),
-        aliases: &["mikrotik", "routeros", "routerboard"],
-        generic: false,
-        sys_object_ids: &["1.3.6.1.4.1.14988"],
-        ssh_banners: &["rosssh", "mikrotik"],
-    },
-    OperatingSystem {
-        id: "openwrt",
-        label: "OpenWrt",
-        icon: "mdi-router-wireless",
-        syslog: true,
-        mac_telnet: true,
-        vpn_profile: Some("openwrt"),
-        aliases: &[
-            "openwrt", "lede", "dd-wrt", "gargoyle", "padavan", "gl.inet", "gl-inet", "glinet",
-            "turris", "luci",
-        ],
-        generic: false,
-        sys_object_ids: &[],
-        ssh_banners: &["dropbear"],
-    },
-    OperatingSystem {
-        id: "ubiquiti",
-        label: "Ubiquiti EdgeOS / UniFi",
-        icon: "mdi-router",
-        syslog: true,
-        mac_telnet: false,
-        vpn_profile: None,
-        aliases: &[
-            "ubiquiti",
-            "edgeos",
-            "edgerouter",
-            "edgeswitch",
-            "unifi",
-            "vyatta",
-        ],
-        generic: false,
-        sys_object_ids: &["1.3.6.1.4.1.41112", "1.3.6.1.4.1.10002"],
-        ssh_banners: &[],
-    },
-    OperatingSystem {
-        id: "linux",
-        label: "Linux",
-        icon: "mdi-linux",
-        syslog: true,
-        mac_telnet: false,
-        vpn_profile: Some("linux"),
-        aliases: &["debian", "ubuntu", "rsyslog", "linux"],
-        // Ver a nota do campo: é a palavra que todo firmware embarcado diz.
-        generic: true,
-        sys_object_ids: &[],
-        ssh_banners: &[],
-    },
-    OperatingSystem {
-        id: "windows",
-        label: "Windows",
-        icon: "mdi-microsoft-windows",
-        syslog: false,
-        mac_telnet: false,
-        vpn_profile: Some("windows"),
-        aliases: &["windows", "microsoft"],
-        generic: false,
-        sys_object_ids: &["1.3.6.1.4.1.311"],
-        ssh_banners: &[],
-    },
-    OperatingSystem {
-        id: "mobile",
-        label: "Celular (Android / iOS)",
-        icon: "mdi-cellphone",
-        syslog: false,
-        mac_telnet: false,
-        vpn_profile: Some("mobile"),
-        aliases: &["android", "iphone", "ipados", "ios"],
-        generic: false,
-        sys_object_ids: &[],
-        ssh_banners: &[],
-    },
-    OperatingSystem {
-        id: "other",
-        label: "Outro sistema",
-        icon: "mdi-help-circle-outline",
-        syslog: false,
-        mac_telnet: false,
-        vpn_profile: None,
-        // Nenhum: `other` é escolha declarada, nunca dedução. Deduzir "outro"
-        // seria o mesmo que não deduzir, com a aparência de conclusão.
-        aliases: &[],
-        generic: false,
-        sys_object_ids: &[],
-        ssh_banners: &[],
-    },
-];
-
 #[must_use]
-pub fn catalog() -> &'static [OperatingSystem] {
-    CATALOGO
+pub fn catalog() -> &'static [&'static OperatingSystem] {
+    registry::platforms()
 }
 
 #[must_use]
 pub fn find(id: &str) -> Option<&'static OperatingSystem> {
-    let procurado = id.trim();
-    CATALOGO
-        .iter()
-        .find(|sistema| sistema.id.eq_ignore_ascii_case(procurado))
+    registry::find(id).map(|adapter| adapter.platform())
 }
 
 /// Lê o valor vindo da API. `auto` e vazio significam "sem declaração".
@@ -218,7 +76,7 @@ pub fn parse(bruto: &str) -> Result<Option<&'static OperatingSystem>, String> {
         return Ok(None);
     }
     find(limpo).map(Some).ok_or_else(|| {
-        let aceitos = CATALOGO
+        let aceitos = catalog()
             .iter()
             .map(|sistema| sistema.id)
             .collect::<Vec<_>>()
@@ -374,7 +232,7 @@ fn achado(system: &'static OperatingSystem, source: &'static str, reason: String
 }
 
 /// Se o apelido descreve um sistema ou uma família inteira. Ver
-/// [`OperatingSystem::generic`].
+/// [`DevicePlatform::generic`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Especificidade {
     Especifico,
@@ -386,10 +244,17 @@ fn casa(texto: Option<&str>, nivel: Especificidade) -> Option<&'static Operating
     if bruto.trim().is_empty() {
         return None;
     }
-    CATALOGO
+    registry::all()
         .iter()
-        .filter(|sistema| sistema.generic == (nivel == Especificidade::Generico))
-        .find(|sistema| sistema.aliases.iter().any(|agulha| bruto.contains(agulha)))
+        .copied()
+        .filter(|adapter| adapter.platform().generic == (nivel == Especificidade::Generico))
+        .find(|adapter| {
+            adapter
+                .aliases()
+                .iter()
+                .any(|agulha| bruto.contains(agulha))
+        })
+        .map(|adapter| adapter.platform())
 }
 
 /// Casa pelo prefixo, e não por igualdade: o `sysObjectId` completo carrega a
@@ -399,12 +264,12 @@ fn casa_oid(oid: Option<&str>) -> Option<(&'static OperatingSystem, &'static str
     if bruto.is_empty() {
         return None;
     }
-    CATALOGO.iter().find_map(|sistema| {
-        sistema
-            .sys_object_ids
+    registry::all().iter().find_map(|adapter| {
+        adapter
+            .sys_object_ids()
             .iter()
             .find(|prefixo| bruto.starts_with(*prefixo))
-            .map(|prefixo| (sistema, *prefixo))
+            .map(|prefixo| (adapter.platform(), *prefixo))
     })
 }
 
@@ -413,12 +278,12 @@ fn casa_banner(banner: Option<&str>) -> Option<(&'static OperatingSystem, &'stat
     if bruto.trim().is_empty() {
         return None;
     }
-    CATALOGO.iter().find_map(|sistema| {
-        sistema
-            .ssh_banners
+    registry::all().iter().find_map(|adapter| {
+        adapter
+            .ssh_banners()
             .iter()
             .find(|marca| bruto.contains(*marca))
-            .map(|marca| (sistema, *marca))
+            .map(|marca| (adapter.platform(), *marca))
     })
 }
 
@@ -500,15 +365,15 @@ pub fn suggest_name(
 
 #[must_use]
 pub fn options() -> Vec<OperatingSystemOption> {
-    CATALOGO
+    registry::all()
         .iter()
-        .map(|sistema| OperatingSystemOption {
-            id: sistema.id.to_owned(),
-            label: sistema.label.to_owned(),
-            icon: sistema.icon.to_owned(),
-            supports_syslog: sistema.syslog,
-            supports_mac_telnet: sistema.mac_telnet,
-            vpn_profile: sistema.vpn_profile.map(str::to_owned),
+        .map(|adapter| OperatingSystemOption {
+            id: adapter.platform().id.to_owned(),
+            label: adapter.platform().label.to_owned(),
+            icon: adapter.platform().icon.to_owned(),
+            supports_syslog: adapter.syslog().is_some(),
+            supports_mac_telnet: adapter.supports_access(DeviceAccessMethod::MacTelnet),
+            vpn_profile: adapter.vpn_profile().map(str::to_owned),
         })
         .collect()
 }
@@ -532,40 +397,37 @@ mod tests {
 
     #[test]
     fn o_catalogo_cobre_as_receitas_de_syslog_e_os_perfis_da_vpn() {
-        // A prova de que a unificação é real e não um terceiro vocabulário
-        // paralelo: toda receita e todo perfil precisa ter dono aqui.
         use crate::services::{syslog::snippets, vpn::profiles::registry};
 
         for receita in snippets::systems() {
-            let sistema = find(receita).unwrap_or_else(|| panic!("receita {receita} sem sistema"));
+            let adapter = super::registry::find(receita)
+                .unwrap_or_else(|| panic!("receita {receita} sem adapter"));
             assert!(
-                sistema.syslog,
-                "{receita} tem receita mas o catálogo diz que não"
+                adapter.syslog().is_some(),
+                "{receita} tem receita mas o adapter diz que não"
             );
         }
-        for sistema in catalog().iter().filter(|sistema| sistema.syslog) {
+        for adapter in super::registry::with_syslog() {
             assert!(
-                snippets::systems().contains(&sistema.id),
+                snippets::systems().contains(&adapter.platform().id),
                 "{} promete receita de syslog que não existe",
-                sistema.id
+                adapter.platform().id
             );
         }
 
         for card in registry::list() {
             assert!(
-                catalog()
-                    .iter()
-                    .any(|sistema| sistema.vpn_profile == Some(card.profile.as_str())),
+                super::registry::by_vpn_profile(&card.profile).is_some(),
                 "o perfil de VPN {} não tem sistema no catálogo",
                 card.profile
             );
         }
-        for sistema in catalog() {
-            if let Some(perfil) = sistema.vpn_profile {
+        for adapter in super::registry::all() {
+            if let Some(perfil) = adapter.vpn_profile() {
                 assert!(
                     registry::has(perfil),
                     "{} aponta para o perfil {perfil}, que não existe",
-                    sistema.id
+                    adapter.platform().id
                 );
             }
         }
@@ -765,8 +627,9 @@ mod tests {
         // Deduzir "outro" seria o mesmo que não deduzir, com a aparência de
         // conclusão — e ainda deixaria a ativação de log sem receita.
         let outro = find("other").expect("no catálogo");
-        assert!(outro.aliases.is_empty());
-        assert!(!outro.syslog);
+        let adapter = super::registry::find("other").expect("adapter");
+        assert!(adapter.aliases().is_empty());
+        assert!(adapter.syslog().is_none());
         assert_eq!(parse("other"), Ok(Some(outro)));
     }
 
@@ -793,7 +656,10 @@ mod tests {
         // dupla seria oferecer uma tentativa que não tem como dar certo.
         let com: Vec<&str> = catalog()
             .iter()
-            .filter(|sistema| sistema.mac_telnet)
+            .filter(|sistema| {
+                super::registry::find(sistema.id)
+                    .is_some_and(|adapter| adapter.supports_access(DeviceAccessMethod::MacTelnet))
+            })
             .map(|sistema| sistema.id)
             .collect();
         assert_eq!(com, vec!["routeros", "openwrt"]);

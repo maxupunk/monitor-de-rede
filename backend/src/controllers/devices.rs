@@ -1028,10 +1028,7 @@ fn fabricante_da_descoberta(item: &discovery_results::Model) -> Option<String> {
         .as_deref()
         .map(str::trim)
         .filter(|valor| !valor.is_empty() && valor.len() <= 80)
-        .filter(|valor| {
-            let minusculo = valor.to_ascii_lowercase();
-            !minusculo.starts_with("linux ") && !minusculo.contains(" kernel ")
-        })
+        .filter(|valor| !crate::services::devices::adapters::registry::is_system_description(valor))
         .map(str::to_owned)
 }
 

@@ -112,7 +112,7 @@ const open = defineModel<boolean>({ required: true })
 
 const logsStore = useLogsStore()
 const addressesStore = useServerAddressesStore()
-const sistema = ref('routeros')
+const sistema = ref('')
 const copied = ref<string | null>(null)
 const addressChoice = ref('')
 
@@ -153,6 +153,13 @@ async function recarrega(): Promise<void> {
 
 watch(addressChoice, (endereco) => {
   if (endereco) void logsStore.fetchSetupGuide(endereco)
+})
+
+watch(guide, (current) => {
+  const snippets = current?.snippets ?? []
+  if (!snippets.some((snippet) => snippet.system === sistema.value)) {
+    sistema.value = snippets[0]?.system ?? ''
+  }
 })
 
 async function copy(chave: string, texto: string): Promise<void> {

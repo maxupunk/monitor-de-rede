@@ -20,6 +20,8 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::services::devices::adapters::registry;
+
 /// Porta que o roteador deve usar, quando nada é declarado. Ver a nota do
 /// módulo.
 pub const DEFAULT_PUBLISHED_PORT: u16 = 514;
@@ -78,7 +80,9 @@ const ALVO_DESCONHECIDO: &str = "<IP-DO-SERVIDOR>";
 /// separem: uma receita órfã seria oferecida numa tela e recusada na outra.
 #[must_use]
 pub fn systems() -> Vec<&'static str> {
-    RECEITAS.iter().map(|receita| receita.sistema).collect()
+    registry::with_syslog()
+        .map(|adapter| adapter.platform().id)
+        .collect()
 }
 
 /// Os comandos de um sistema, um por linha, prontos para digitar.
@@ -89,10 +93,7 @@ pub fn systems() -> Vec<&'static str> {
 #[must_use]
 pub fn commands_for(sistema: &str, server_address: &str, port: u16) -> Option<Vec<String>> {
     let alvo = normaliza(server_address);
-    RECEITAS
-        .iter()
-        .find(|receita| receita.sistema.eq_ignore_ascii_case(sistema.trim()))
-        .map(|receita| (receita.comandos)(&alvo, port))
+    registry::syslog_for(sistema).map(|adapter| adapter.commands(&alvo, port))
 }
 
 /// Monta o guia com o endereço do servidor preenchido.
@@ -104,13 +105,15 @@ pub fn build(server_address: &str) -> SetupGuide {
     SetupGuide {
         server_address: alvo.clone(),
         port: porta,
-        snippets: RECEITAS
-            .iter()
-            .map(|receita| SetupSnippet {
-                system: receita.sistema.to_owned(),
-                label: receita.label.to_owned(),
-                note: receita.note.to_owned(),
-                commands: (receita.comandos)(&alvo, porta).join("\n"),
+        snippets: registry::with_syslog()
+            .filter_map(|adapter| {
+                let syslog = adapter.syslog()?;
+                Some(SetupSnippet {
+                    system: adapter.platform().id.to_owned(),
+                    label: syslog.label().to_owned(),
+                    note: syslog.note().to_owned(),
+                    commands: syslog.commands(&alvo, porta).join("\n"),
+                })
             })
             .collect(),
     }
@@ -156,15 +159,7 @@ const IDENTITY_MARKER: &str = "__NETMONITOR_IDENTITY__";
 /// reescreve o IP de todos os remetentes para o mesmo gateway.
 #[must_use]
 pub fn identity_command(sistema: &str) -> Option<String> {
-    match sistema.trim().to_ascii_lowercase().as_str() {
-        "routeros" => Some(format!(
-            r#":put ("{IDENTITY_MARKER}" . [/system identity get name])"#
-        )),
-        "openwrt" | "linux" | "ubiquiti" => Some(format!(
-            r#"printf '{IDENTITY_MARKER}%s\n' "$(hostname 2>/dev/null)""#
-        )),
-        _ => None,
-    }
+    registry::syslog_for(sistema).map(|adapter| adapter.identity_command(IDENTITY_MARKER))
 }
 
 /// Extrai e valida a identidade devolvida por [`identity_command`].
@@ -191,112 +186,8 @@ pub fn test_command_with_marker(sistema: &str, marker: &str) -> Option<String> {
 }
 
 fn test_command_for_message(sistema: &str, message: &str) -> Option<String> {
-    RECEITAS
-        .iter()
-        .find(|receita| receita.sistema.eq_ignore_ascii_case(sistema.trim()))
-        .and_then(|receita| receita.teste.map(|dialect| dialect.command(message)))
+    registry::syslog_for(sistema).map(|adapter| adapter.test_command(message))
 }
-
-#[derive(Clone, Copy)]
-enum TestDialect {
-    RouterOs,
-    Logger,
-}
-
-impl TestDialect {
-    fn command(self, message: &str) -> String {
-        match self {
-            Self::RouterOs => format!(r#":log error "{message}""#),
-            Self::Logger => format!(r#"logger -p daemon.err "{message}""#),
-        }
-    }
-}
-
-/// Uma receita de sistema. Os comandos são função do alvo e da porta porque os
-/// dois só se conhecem em tempo de execução.
-struct Receita {
-    sistema: &'static str,
-    label: &'static str,
-    note: &'static str,
-    comandos: fn(&str, u16) -> Vec<String>,
-    /// Ver [`test_command`].
-    teste: Option<TestDialect>,
-}
-
-const RECEITAS: &[Receita] = &[
-    Receita {
-        sistema: "routeros",
-        label: "MikroTik RouterOS",
-        note: "`bsd-syslog=yes` é recomendado: sem ele o RouterOS envia um formato próprio, sem \
-               data e sem nome do equipamento. A severidade e os tópicos continuam sendo lidos \
-               de qualquer forma. Se o roteador tiver mais de um IP, acrescente `src-address=` \
-               com o endereço cadastrado aqui.",
-        comandos: |alvo, porta| {
-            vec![
-                format!(
-                    "/system logging action add name=netmonitor target=remote remote={alvo} \
-                     remote-port={porta} bsd-syslog=yes"
-                ),
-                "/system logging add topics=system action=netmonitor".to_owned(),
-                "/system logging add topics=error action=netmonitor".to_owned(),
-                "/system logging add topics=critical action=netmonitor".to_owned(),
-                "/system logging add topics=interface action=netmonitor".to_owned(),
-            ]
-        },
-        // `:log error` emite no tópico `error`, que a receita acabou de mandar
-        // encaminhar. Emitir em `info` produziria uma linha que o próprio
-        // equipamento não encaminha, e o teste acusaria falha onde não há.
-        teste: Some(TestDialect::RouterOs),
-    },
-    Receita {
-        sistema: "openwrt",
-        label: "OpenWRT",
-        note: "O `log_port` é a porta publicada, não a interna. Depois de reiniciar o serviço, \
-               os registros aparecem em poucos segundos.",
-        comandos: |alvo, porta| {
-            vec![
-                format!("uci set system.@system[0].log_ip='{alvo}'"),
-                format!("uci set system.@system[0].log_port='{porta}'"),
-                "uci set system.@system[0].log_proto='udp'".to_owned(),
-                "uci commit system && /etc/init.d/log restart".to_owned(),
-            ]
-        },
-        // Atravessa o `logd`, que é quem encaminha para o `log_ip`.
-        teste: Some(TestDialect::Logger),
-    },
-    Receita {
-        sistema: "linux",
-        label: "Linux (rsyslog)",
-        note: "Um único `@` usa UDP; `@@` usa TCP. As duas formas são aceitas — o servidor \
-               escuta nos dois protocolos. Na ativação automática, o usuário informado precisa \
-               poder usar `sudo`.",
-        comandos: |alvo, porta| {
-            vec![
-                format!("echo '*.* @{alvo}:{porta}' | sudo tee /etc/rsyslog.d/60-netmonitor.conf"),
-                "sudo systemctl restart rsyslog".to_owned(),
-            ]
-        },
-        teste: Some(TestDialect::Logger),
-    },
-    Receita {
-        sistema: "ubiquiti",
-        label: "Ubiquiti EdgeOS",
-        note: "No UniFi, o mesmo ajuste fica em Configurações → Sistema → Registro remoto, \
-               apontando para o mesmo endereço e porta.",
-        comandos: |alvo, porta| {
-            vec![
-                "configure".to_owned(),
-                format!("set system syslog host {alvo} facility all level info"),
-                format!("set system syslog host {alvo} port {porta}"),
-                "commit".to_owned(),
-                "save".to_owned(),
-                "exit".to_owned(),
-            ]
-        },
-        // Fora do modo `configure`, que os comandos acima já fecharam.
-        teste: Some(TestDialect::Logger),
-    },
-];
 
 #[cfg(test)]
 mod tests {

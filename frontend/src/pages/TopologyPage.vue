@@ -3,7 +3,9 @@
     <!-- Container Principal do Mapa Gráfico -->
     <div class="overflow-hidden position-relative flex-grow-1 topology-map-container w-100 h-100">
       <!-- Header Superior Flutuante (Controles à Esquerda e Busca à Direita) -->
-      <div class="top-floating-header-wrapper d-flex align-center justify-space-between w-100 px-3 px-sm-4 pt-3">
+      <div
+        class="top-floating-header-wrapper d-flex align-center justify-space-between w-100 px-3 px-sm-4 pt-3"
+      >
         <div class="header-controls-area">
           <TopologyControls
             :zoom-level="zoom"
@@ -386,7 +388,10 @@
       :fullscreen="$vuetify.display.xs"
       scrollable
     >
-      <v-card v-if="selectedNode" class="rounded-xl overflow-hidden elevation-12 dialog-card-container">
+      <v-card
+        v-if="selectedNode"
+        class="rounded-xl overflow-hidden elevation-12 dialog-card-container"
+      >
         <v-card-item class="pa-4 bg-surface-variant-subtle border-b flex-shrink-0">
           <div class="d-flex align-center">
             <v-avatar :color="getNodeColor(selectedNode.status)" size="48" class="mr-3 elevation-2">
@@ -536,7 +541,10 @@
       :fullscreen="$vuetify.display.xs"
       scrollable
     >
-      <v-card v-if="selectedEdge" class="rounded-xl overflow-hidden elevation-12 dialog-card-container">
+      <v-card
+        v-if="selectedEdge"
+        class="rounded-xl overflow-hidden elevation-12 dialog-card-container"
+      >
         <v-card-item class="pa-4 border-b flex-shrink-0 bg-surface-variant-subtle">
           <div class="d-flex align-center justify-space-between w-100">
             <div class="d-flex align-center font-weight-bold text-subtitle-1">
@@ -607,7 +615,9 @@
             </v-list-item>
           </v-list>
         </v-card-text>
-        <v-card-actions class="pa-3 px-4 border-t flex-shrink-0 bg-surface d-flex align-center justify-space-between flex-wrap gap-2">
+        <v-card-actions
+          class="pa-3 px-4 border-t flex-shrink-0 bg-surface d-flex align-center justify-space-between flex-wrap gap-2"
+        >
           <v-btn
             v-if="selectedEdge.id > 0"
             color="error"
@@ -1169,7 +1179,10 @@ function onTouchMove(e: TouchEvent) {
 
     // Arraste de nó via touch
     if (draggingNodeId.value !== null) {
-      const totalDist = Math.hypot(touch.clientX - dragStart.mouseX, touch.clientY - dragStart.mouseY)
+      const totalDist = Math.hypot(
+        touch.clientX - dragStart.mouseX,
+        touch.clientY - dragStart.mouseY
+      )
       if (totalDist > 4) {
         dragStart.hasMoved = true
       }

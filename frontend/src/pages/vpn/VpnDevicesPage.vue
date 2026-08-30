@@ -153,7 +153,7 @@
               </template>
             </v-tooltip>
 
-            <v-tooltip v-if="isMobile(item)" text="QR Code">
+            <v-tooltip v-if="supportsQrCode(item)" text="QR Code">
               <template #activator="{ props }">
                 <v-btn
                   v-bind="props"
@@ -274,7 +274,7 @@
                 @click="openConfig(item)"
               ></v-btn>
               <v-btn
-                v-if="isMobile(item)"
+                v-if="supportsQrCode(item)"
                 size="small"
                 icon="mdi-qrcode"
                 variant="text"
@@ -374,6 +374,7 @@ import {
   useVpnStore,
   vpnProfileIcon,
   vpnProfileLabel,
+  vpnProfileSupportsQrCode,
   vpnStatusColor,
   vpnStatusLabel,
   type VpnPeer,
@@ -426,14 +427,14 @@ onUnmounted(() => {
   if (fallbackTimer) clearInterval(fallbackTimer)
 })
 
-const profileLabel = vpnProfileLabel
-const profileIcon = vpnProfileIcon
+const profileLabel = (profile: string) => vpnProfileLabel(profile, vpnStore.profiles)
+const profileIcon = (profile: string) => vpnProfileIcon(profile, vpnStore.profiles)
 const statusLabel = vpnStatusLabel
 const statusColor = vpnStatusColor
 const relativeTime = formatRelativeTime
 
-function isMobile(peer: VpnPeer): boolean {
-  return peer.deviceProfile === 'mobile'
+function supportsQrCode(peer: VpnPeer): boolean {
+  return vpnProfileSupportsQrCode(peer.deviceProfile, vpnStore.profiles)
 }
 
 function onPeerCreated() {
