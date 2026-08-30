@@ -14,7 +14,7 @@
 
     <!-- Tabela de Sites -->
     <v-card elevation="2" rounded="lg">
-      <v-card-title class="pa-2.5 pa-sm-4">
+      <div class="pa-3 pa-sm-4">
         <v-text-field
           v-model="search"
           prepend-inner-icon="mdi-magnify"
@@ -26,7 +26,7 @@
           class="w-100"
           style="max-width: 420px"
         ></v-text-field>
-      </v-card-title>
+      </div>
 
       <ResponsiveDataTable
         :headers="headers"
@@ -50,18 +50,38 @@
         </template>
 
         <template #mobile-item="{ item }">
-          <div class="d-flex align-start justify-space-between ga-2">
-            <div class="flex-grow-1 text-break">
-              <div class="text-subtitle-2 font-weight-bold">{{ item.name }}</div>
-              <div class="text-body-2 text-grey-darken-1">{{ item.location || '—' }}</div>
-              <div class="text-caption text-grey mt-1">{{ item.description || '—' }}</div>
+          <div class="d-flex flex-column ga-2">
+            <!-- Top Row: Nome do Site -->
+            <div class="d-flex align-center justify-space-between ga-2">
+              <span class="text-subtitle-1 font-weight-bold text-truncate">{{ item.name }}</span>
+              <span
+                v-if="item.location"
+                class="text-caption text-grey d-flex align-center ga-1 flex-shrink-0"
+              >
+                <v-icon size="13">mdi-map-marker-outline</v-icon>
+                {{ item.location }}
+              </span>
             </div>
-            <div class="d-flex ga-1">
-              <v-btn icon size="small" variant="text" color="primary" @click="openDialog(item)">
-                <v-icon>mdi-pencil</v-icon>
+
+            <!-- Middle: Descrição -->
+            <div v-if="item.description" class="text-body-2 text-grey-darken-1 text-break">
+              {{ item.description }}
+            </div>
+
+            <!-- Footer Actions -->
+            <div class="d-flex align-center justify-end ga-1 pt-2 mt-1 border-t">
+              <v-btn
+                size="small"
+                variant="tonal"
+                color="primary"
+                prepend-icon="mdi-pencil"
+                class="text-caption px-2"
+                @click="openDialog(item)"
+              >
+                Editar
               </v-btn>
               <v-btn icon size="small" variant="text" color="error" @click="confirmDelete(item.id)">
-                <v-icon>mdi-delete</v-icon>
+                <v-icon size="18">mdi-delete</v-icon>
               </v-btn>
             </div>
           </div>

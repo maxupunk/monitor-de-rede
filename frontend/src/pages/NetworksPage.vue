@@ -14,7 +14,7 @@
 
     <!-- Tabela de Sub-redes -->
     <v-card elevation="2" rounded="lg">
-      <v-card-title class="pa-2.5 pa-sm-4">
+      <div class="pa-3 pa-sm-4">
         <v-text-field
           v-model="search"
           prepend-inner-icon="mdi-magnify"
@@ -26,7 +26,7 @@
           class="w-100"
           style="max-width: 420px"
         ></v-text-field>
-      </v-card-title>
+      </div>
 
       <ResponsiveDataTable
         :headers="headers"
@@ -117,61 +117,74 @@
 
         <template #mobile-item="{ item }">
           <div class="d-flex flex-column ga-2">
-            <div class="d-flex align-start justify-space-between ga-2">
-              <div class="flex-grow-1 text-break">
-                <div
-                  class="text-subtitle-2 font-weight-bold d-flex align-center justify-space-between"
-                >
-                  <span>{{ item.name }}</span>
-                  <v-chip size="x-small" variant="tonal" color="primary">
-                    {{ getDeviceCountForNetwork(item.id) }} dispositivo(s)
-                  </v-chip>
-                </div>
-                <div class="d-flex flex-wrap align-center ga-2 mt-1">
-                  <span class="text-body-2 font-weight-medium font-mono">{{ item.cidr }}</span>
-                  <v-chip
-                    v-if="item.scannable"
-                    size="x-small"
-                    variant="tonal"
-                    color="grey-darken-1"
-                  >
-                    {{ item.usableHosts }} host(s)
-                  </v-chip>
-                  <v-chip v-else size="x-small" variant="tonal" color="error">
-                    faixa inválida
-                  </v-chip>
-                </div>
-                <div v-if="item.gateway" class="text-caption text-grey mt-1">
-                  Gateway: <span class="font-mono">{{ item.gateway }}</span>
-                  <span v-if="getGatewayDevice(item.gateway)">
-                    ({{ getGatewayDevice(item.gateway)?.name }})
-                  </span>
-                </div>
-                <div class="text-caption text-grey mt-1">
-                  Site: {{ item.site?.name || (item.siteId ? `Site #${item.siteId}` : 'sem site') }}
-                </div>
-                <div class="text-caption text-grey">
-                  <span v-if="item.lastScanAt">{{ formatDateTime(item.lastScanAt) }}</span>
-                  <span v-else>Nunca varrida</span>
-                </div>
+            <!-- Top Row: Nome e Contagem de Dispositivos -->
+            <div class="d-flex align-center justify-space-between ga-2">
+              <span class="text-subtitle-1 font-weight-bold text-truncate">{{ item.name }}</span>
+              <v-chip
+                size="small"
+                variant="tonal"
+                color="primary"
+                class="font-weight-medium px-2.5 flex-shrink-0"
+              >
+                <v-icon start size="14">mdi-devices</v-icon>
+                {{ getDeviceCountForNetwork(item.id) }} disp.
+              </v-chip>
+            </div>
+
+            <!-- Middle: CIDR, Hosts, Gateway e Site -->
+            <div class="d-flex flex-column ga-1 text-caption text-grey">
+              <div class="d-flex flex-wrap align-center ga-2">
+                <span class="font-weight-medium font-mono text-body-2 text-high-emphasis">{{
+                  item.cidr
+                }}</span>
+                <v-chip v-if="item.scannable" size="x-small" variant="tonal" color="grey-darken-1">
+                  {{ item.usableHosts }} hosts
+                </v-chip>
+                <v-chip v-else size="x-small" variant="tonal" color="error">
+                  faixa inválida
+                </v-chip>
+              </div>
+
+              <div v-if="item.gateway" class="d-flex align-center ga-1 text-truncate">
+                <span>Gateway:</span>
+                <span class="font-mono text-medium-emphasis">{{ item.gateway }}</span>
+                <span v-if="getGatewayDevice(item.gateway)">
+                  ({{ getGatewayDevice(item.gateway)?.name }})
+                </span>
+              </div>
+
+              <div class="d-flex flex-wrap align-center justify-space-between ga-2 mt-0.5">
+                <span class="d-inline-flex align-center ga-1">
+                  <v-icon size="13">mdi-map-marker-outline</v-icon>
+                  {{
+                    item.site?.name || (item.siteId ? `Site #${item.siteId}` : 'Sem local definido')
+                  }}
+                </span>
+                <span class="d-inline-flex align-center ga-1 text-grey">
+                  <v-icon size="12">mdi-history</v-icon>
+                  {{ item.lastScanAt ? formatDateTime(item.lastScanAt) : 'Nunca varrida' }}
+                </span>
               </div>
             </div>
-            <div class="d-flex align-center ga-1 mt-1">
+
+            <!-- Footer Actions -->
+            <div class="d-flex align-center justify-end ga-1 pt-2 mt-1 border-t">
               <v-btn
                 size="small"
                 color="secondary"
-                variant="flat"
+                variant="tonal"
                 prepend-icon="mdi-radar"
                 :disabled="item.scannable === false"
+                class="text-caption px-2"
                 @click="triggerScan(item)"
               >
                 Escanear
               </v-btn>
               <v-btn icon size="small" variant="text" color="primary" @click="openDialog(item)">
-                <v-icon>mdi-pencil</v-icon>
+                <v-icon size="18">mdi-pencil</v-icon>
               </v-btn>
               <v-btn icon size="small" variant="text" color="error" @click="confirmDelete(item.id)">
-                <v-icon>mdi-delete</v-icon>
+                <v-icon size="18">mdi-delete</v-icon>
               </v-btn>
             </div>
           </div>

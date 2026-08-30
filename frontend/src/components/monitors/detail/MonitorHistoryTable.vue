@@ -1,5 +1,5 @@
 <template>
-  <v-card elevation="2" class="rounded-lg pa-6">
+  <v-card elevation="2" class="rounded-lg pa-3 pa-md-6">
     <div class="d-flex align-center justify-space-between mb-4">
       <div>
         <h2 class="text-h6 font-weight-bold d-flex align-center ga-2">
@@ -34,7 +34,8 @@
           style="max-height: 450px"
         >
           <v-infinite-scroll :key="history.scrollKey.value" :height="420" @load="history.load">
-            <div class="table-responsive">
+            <!-- Desktop: Tabela -->
+            <div v-if="$vuetify.display.mdAndUp" class="table-responsive">
               <v-table density="comfortable" hover>
                 <thead>
                   <tr>
@@ -80,6 +81,61 @@
                 </tbody>
               </v-table>
             </div>
+
+            <!-- Mobile: Cards Responsivos -->
+            <div v-else class="d-flex flex-column ga-2 pa-2">
+              <v-card
+                v-for="item in history.items.value"
+                :key="item.id"
+                border
+                rounded="lg"
+                class="pa-3"
+              >
+                <div class="d-flex align-center justify-space-between ga-2 mb-1">
+                  <v-chip
+                    :color="getStatusColor(item.status)"
+                    size="x-small"
+                    variant="flat"
+                    class="font-weight-bold text-uppercase px-2"
+                  >
+                    {{ item.status ? item.status.toUpperCase() : 'UNKNOWN' }}
+                  </v-chip>
+                  <span class="text-caption text-grey d-flex align-center ga-1">
+                    <v-icon size="12">mdi-clock-outline</v-icon>
+                    {{ formatDateTime(item.finishedAt, '-') }}
+                  </span>
+                </div>
+
+                <div
+                  class="d-flex flex-wrap align-center justify-space-between ga-2 text-caption text-grey my-1"
+                >
+                  <span>
+                    Latência:
+                    <strong
+                      v-if="item.latencyMs !== undefined && item.latencyMs !== null"
+                      class="text-high-emphasis font-weight-bold"
+                    >
+                      {{ formatLatency(item.latencyMs) }}
+                    </strong>
+                    <span v-else>—</span>
+                  </span>
+                  <span>Duração: {{ item.durationMs }} ms</span>
+                </div>
+
+                <div
+                  v-if="item.message"
+                  :class="
+                    item.status === 'down'
+                      ? 'text-error font-weight-medium'
+                      : 'text-body-2 text-grey-darken-1'
+                  "
+                  class="pt-1 mt-1 border-t text-break"
+                >
+                  {{ item.message }}
+                </div>
+              </v-card>
+            </div>
+
             <template #empty>
               <div class="text-caption text-grey text-center py-3">
                 Nenhum outro registro no histórico.

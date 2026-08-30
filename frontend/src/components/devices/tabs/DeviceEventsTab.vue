@@ -1,13 +1,14 @@
 <template>
   <div>
     <v-infinite-scroll :key="eventsHistory.scrollKey.value" @load="eventsHistory.load">
-      <div class="table-responsive">
+      <!-- Desktop: Tabela -->
+      <div v-if="$vuetify.display.mdAndUp" class="table-responsive">
         <v-table hover density="comfortable" class="rounded-lg border">
           <thead>
             <tr>
-              <th>Severidade</th>
+              <th style="width: 120px">Severidade</th>
               <th>Mensagem</th>
-              <th>Data/Hora</th>
+              <th style="width: 180px">Data/Hora</th>
             </tr>
           </thead>
           <tbody>
@@ -18,16 +19,48 @@
                     evt.severity === 'critical' || evt.severity === 'error' ? 'error' : 'warning'
                   "
                   size="x-small"
+                  variant="flat"
+                  class="font-weight-bold text-uppercase px-2"
                 >
                   {{ (evt.severity || 'INFO').toUpperCase() }}
                 </v-chip>
               </td>
-              <td>{{ evt.message }}</td>
-              <td>{{ evt.createdAt }}</td>
+              <td class="text-body-2">{{ evt.message }}</td>
+              <td class="text-caption text-grey">{{ evt.createdAt }}</td>
             </tr>
           </tbody>
         </v-table>
       </div>
+
+      <!-- Mobile: Cards Responsivos -->
+      <div v-else class="d-flex flex-column ga-2">
+        <v-card
+          v-for="evt in eventsHistory.items.value"
+          :key="evt.id"
+          border
+          rounded="lg"
+          class="pa-3"
+        >
+          <div class="d-flex align-center justify-space-between ga-2 mb-1">
+            <v-chip
+              :color="evt.severity === 'critical' || evt.severity === 'error' ? 'error' : 'warning'"
+              size="x-small"
+              variant="flat"
+              class="font-weight-bold text-uppercase px-2"
+            >
+              {{ (evt.severity || 'INFO').toUpperCase() }}
+            </v-chip>
+            <span class="text-caption text-grey d-flex align-center ga-1">
+              <v-icon size="12">mdi-clock-outline</v-icon>
+              {{ evt.createdAt }}
+            </span>
+          </div>
+          <div class="text-body-2 text-high-emphasis text-break">
+            {{ evt.message }}
+          </div>
+        </v-card>
+      </div>
+
       <template #empty>
         <div class="text-caption text-grey text-center py-4">
           Nenhum outro evento registrado no histórico.

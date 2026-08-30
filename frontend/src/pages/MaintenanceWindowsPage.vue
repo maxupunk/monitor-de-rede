@@ -12,8 +12,9 @@
       </template>
     </PageHeader>
 
+    <!-- Tabela de Janelas de Manutenção -->
     <v-card elevation="2" rounded="lg">
-      <v-card-title class="pa-4">
+      <div class="pa-3 pa-sm-4">
         <v-text-field
           v-model="search"
           prepend-inner-icon="mdi-magnify"
@@ -25,7 +26,7 @@
           class="w-100"
           style="max-width: 420px"
         />
-      </v-card-title>
+      </div>
 
       <ResponsiveDataTable
         :headers="headers"
@@ -71,28 +72,60 @@
         </template>
 
         <template #mobile-item="{ item }">
-          <div class="d-flex align-start justify-space-between ga-2">
-            <div class="flex-grow-1 text-break">
-              <div class="text-subtitle-2 font-weight-bold">{{ item.name }}</div>
-              <div class="text-body-2 text-grey-darken-1">
+          <div class="d-flex flex-column ga-2">
+            <!-- Top Row: Nome e Status Chip -->
+            <div class="d-flex align-center justify-space-between ga-2">
+              <span class="text-subtitle-1 font-weight-bold text-truncate">{{ item.name }}</span>
+              <v-chip
+                :color="isActive(item) ? 'warning' : 'success'"
+                size="small"
+                variant="tonal"
+                class="font-weight-medium px-2.5 flex-shrink-0"
+              >
                 {{
-                  item.siteId
-                    ? siteName(item.siteId)
-                    : item.deviceId
-                      ? deviceName(item.deviceId)
-                      : '—'
+                  isActive(item)
+                    ? 'Em vigor'
+                    : item.endsAt && new Date(item.endsAt) < now
+                      ? 'Encerrada'
+                      : 'Agendada'
                 }}
+              </v-chip>
+            </div>
+
+            <!-- Middle: Escopo e Período -->
+            <div class="d-flex flex-column ga-1 text-caption text-grey">
+              <div class="d-flex align-center ga-1 text-medium-emphasis">
+                <v-icon size="14">mdi-map-marker-outline</v-icon>
+                <span>
+                  {{
+                    item.siteId
+                      ? siteName(item.siteId)
+                      : item.deviceId
+                        ? deviceName(item.deviceId)
+                        : 'Todos os equipamentos'
+                  }}
+                </span>
               </div>
-              <div class="text-caption text-grey mt-1">
-                {{ formatDateTime(item.startsAt) }} — {{ formatDateTime(item.endsAt) }}
+              <div class="d-flex align-center ga-1 text-grey-darken-1 mt-0.5">
+                <v-icon size="12">mdi-clock-outline</v-icon>
+                <span>{{ formatDateTime(item.startsAt) }} — {{ formatDateTime(item.endsAt) }}</span>
               </div>
             </div>
-            <div class="d-flex ga-1">
-              <v-btn icon size="small" variant="text" color="primary" @click="openDialog(item)">
-                <v-icon>mdi-pencil</v-icon>
+
+            <!-- Footer Actions -->
+            <div class="d-flex align-center justify-end ga-1 pt-2 mt-1 border-t">
+              <v-btn
+                size="small"
+                variant="tonal"
+                color="primary"
+                prepend-icon="mdi-pencil"
+                class="text-caption px-2"
+                @click="openDialog(item)"
+              >
+                Editar
               </v-btn>
               <v-btn icon size="small" variant="text" color="error" @click="confirmDelete(item.id)">
-                <v-icon>mdi-delete</v-icon>
+                <v-icon size="18">mdi-delete</v-icon>
               </v-btn>
             </div>
           </div>

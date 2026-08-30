@@ -55,27 +55,45 @@
 
         <template #mobile-item="{ item }">
           <div class="d-flex flex-column ga-2">
-            <div class="d-flex align-start justify-space-between ga-2">
-              <div class="flex-grow-1 text-break">
-                <div class="text-subtitle-2 font-weight-bold">{{ item.name }}</div>
-                <div class="text-caption text-grey-darken-1">
-                  {{ item.location || 'Sem localização' }} · {{ item.ipAddress || '—' }}
-                </div>
-                <div class="text-caption text-grey mt-1">
-                  Último heartbeat: {{ item.lastHeartbeatAt || '—' }}
-                </div>
-              </div>
-              <v-chip :color="getStatusColor(item.status)" size="small">
+            <!-- Top Row: Nome e Status Chip -->
+            <div class="d-flex align-center justify-space-between ga-2">
+              <span class="text-subtitle-1 font-weight-bold text-truncate">{{ item.name }}</span>
+              <v-chip
+                :color="getStatusColor(item.status)"
+                size="small"
+                variant="tonal"
+                class="font-weight-bold px-2.5 flex-shrink-0"
+              >
                 {{ (item.status || 'UNKNOWN').toUpperCase() }}
               </v-chip>
             </div>
-            <div class="d-flex align-center ga-2 mt-1">
+
+            <!-- Middle: Localização, IP e Heartbeat -->
+            <div class="d-flex flex-column ga-1 text-caption text-grey">
+              <div class="d-flex flex-wrap align-center ga-2">
+                <span v-if="item.location" class="d-inline-flex align-center ga-1">
+                  <v-icon size="13">mdi-map-marker-outline</v-icon>
+                  {{ item.location }}
+                </span>
+                <span v-if="item.ipAddress" class="font-mono text-medium-emphasis">
+                  {{ item.ipAddress }}
+                </span>
+              </div>
+              <div class="d-flex align-center ga-1 text-grey-darken-1 mt-0.5">
+                <v-icon size="12">mdi-heart-pulse</v-icon>
+                <span>Último heartbeat: {{ item.lastHeartbeatAt || '—' }}</span>
+              </div>
+            </div>
+
+            <!-- Footer Actions -->
+            <div class="d-flex align-center justify-end ga-1.5 pt-2 mt-1 border-t">
               <v-btn
                 size="small"
                 color="primary"
-                variant="outlined"
+                variant="tonal"
                 prepend-icon="mdi-lightning-bolt"
                 :loading="probesStore.testingId === item.id"
+                class="text-caption px-2"
                 @click="probesStore.testProbe(item.id)"
               >
                 Testar
@@ -84,7 +102,9 @@
                 v-if="item.status !== 'revoked'"
                 size="small"
                 color="error"
-                variant="outlined"
+                variant="tonal"
+                prepend-icon="mdi-cancel"
+                class="text-caption px-2"
                 @click="confirmRevoke(item.id)"
               >
                 Revogar

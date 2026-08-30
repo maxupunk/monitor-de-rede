@@ -57,7 +57,8 @@
       aparecem as compatíveis com o que este equipamento mede.
     </v-alert>
 
-    <div v-else class="table-responsive">
+    <!-- Desktop: Tabela -->
+    <div v-else-if="$vuetify.display.mdAndUp" class="table-responsive">
       <v-table hover density="comfortable" class="rounded-lg border">
         <thead>
           <tr>
@@ -77,11 +78,6 @@
                 {{ escopoDaRegra(regra) }}
               </div>
             </td>
-            <!--
-              O rótulo de alcance é obrigatório: sem ele, uma regra global
-              listada aqui pareceria pertencer a este equipamento, e excluí-la
-              seria uma surpresa cara.
-            -->
             <td>
               <v-chip
                 :color="ehGlobal(regra) ? 'warning' : 'primary'"
@@ -152,6 +148,84 @@
           </tr>
         </tbody>
       </v-table>
+    </div>
+
+    <!-- Mobile: Cards Responsivos -->
+    <div v-else class="d-flex flex-column ga-2">
+      <v-card v-for="regra in regras" :key="regra.id" border rounded="lg" class="pa-3">
+        <div class="d-flex align-center justify-space-between ga-2 mb-1">
+          <span class="font-weight-bold text-subtitle-1 text-truncate">{{ regra.name }}</span>
+          <v-chip
+            :color="severityColor(regra.severity)"
+            size="x-small"
+            variant="flat"
+            class="font-weight-bold text-uppercase px-2 flex-shrink-0"
+          >
+            {{ severityLabel(regra.severity) }}
+          </v-chip>
+        </div>
+
+        <div class="d-flex flex-wrap align-center ga-1.5 mb-1">
+          <v-chip :color="ehGlobal(regra) ? 'warning' : 'primary'" size="x-small" variant="tonal">
+            <v-icon start size="12">
+              {{ ehGlobal(regra) ? 'mdi-earth' : 'mdi-router-network' }}
+            </v-icon>
+            {{ ehGlobal(regra) ? 'Global' : 'Dispositivo' }}
+          </v-chip>
+          <span v-if="escopoDaRegra(regra)" class="text-caption text-grey">
+            {{ escopoDaRegra(regra) }}
+          </span>
+        </div>
+
+        <div class="text-caption text-grey-darken-1 mt-1">
+          {{
+            describeRule(
+              regra.condition,
+              regra.durationSeconds ?? 0,
+              regra.recoveryWindowSeconds ?? 0,
+              regra.flapThreshold ?? 0,
+              regra.flapWindowSeconds ?? 900,
+              {
+                notificationCooldownSeconds: regra.notificationCooldownSeconds ?? 0,
+                inhibitWhenParentDown: regra.inhibitWhenParentDown ?? false,
+              }
+            )
+          }}
+        </div>
+
+        <div class="d-flex align-center justify-space-between pt-2 mt-1 border-t">
+          <div class="d-flex align-center ga-1">
+            <v-switch
+              :model-value="regra.enabled !== false"
+              color="primary"
+              density="compact"
+              hide-details
+              inset
+              :aria-label="`Ativar ou desativar a regra ${regra.name}`"
+              @update:model-value="alternar(regra, $event)"
+            />
+            <span class="text-caption text-grey">{{
+              regra.enabled !== false ? 'Ativa' : 'Desativada'
+            }}</span>
+          </div>
+
+          <div class="d-flex align-center ga-1">
+            <v-btn
+              size="small"
+              variant="tonal"
+              color="primary"
+              prepend-icon="mdi-pencil"
+              class="text-caption px-2"
+              @click="abrirFormulario(regra)"
+            >
+              Editar
+            </v-btn>
+            <v-btn icon size="small" variant="text" color="error" @click="confirmarExclusao(regra)">
+              <v-icon size="18">mdi-delete-outline</v-icon>
+            </v-btn>
+          </div>
+        </div>
+      </v-card>
     </div>
 
     <AlertRuleCatalogDialog

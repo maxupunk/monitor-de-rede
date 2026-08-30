@@ -4,7 +4,8 @@
       Clique em uma interface para ver o histórico de tráfego e incluí-la ou removê-la do
       monitoramento.
     </div>
-    <div class="table-responsive">
+    <!-- Desktop: Tabela -->
+    <div v-if="$vuetify.display.mdAndUp" class="table-responsive">
       <v-table hover>
         <thead>
           <tr>
@@ -62,6 +63,61 @@
           </tr>
         </tbody>
       </v-table>
+    </div>
+
+    <!-- Mobile: Cards Responsivos -->
+    <div v-else class="d-flex flex-column ga-2">
+      <template v-if="detailStore.interfaces.length > 0">
+        <v-card
+          v-for="intf in detailStore.interfaces"
+          :key="intf.id"
+          border
+          rounded="lg"
+          class="pa-3 cursor-pointer"
+          @click="emit('openInterfaceChart', intf)"
+        >
+          <div class="d-flex align-center justify-space-between ga-2">
+            <div class="d-flex align-center ga-2 min-w-0">
+              <span class="text-caption font-mono text-medium-emphasis"
+                >#{{ intf.ifIndex ?? intf.snmpIndex ?? '-' }}</span
+              >
+              <span class="font-weight-bold text-subtitle-1 text-truncate">{{
+                interfaceLabel(intf)
+              }}</span>
+            </div>
+            <div class="d-flex align-center ga-1.5 flex-shrink-0">
+              <v-chip
+                :color="(intf.ifOperStatus || intf.operStatus) === 'up' ? 'success' : 'error'"
+                size="x-small"
+                variant="flat"
+                class="font-weight-bold text-uppercase px-2"
+              >
+                {{ (intf.ifOperStatus || intf.operStatus || 'UNKNOWN').toUpperCase() }}
+              </v-chip>
+              <v-icon size="18" color="grey">mdi-chevron-right</v-icon>
+            </div>
+          </div>
+
+          <div class="d-flex flex-wrap align-center ga-2 mt-1">
+            <v-chip :color="intf.isMonitored ? 'primary' : 'grey'" size="x-small" variant="tonal">
+              {{ intf.isMonitored ? 'MONITORADA' : 'NÃO MONITORADA' }}
+            </v-chip>
+            <v-chip size="x-small" variant="tonal" color="info">
+              {{ formatLinkSpeed(intf.ifSpeed || intf.speed) }}
+            </v-chip>
+            <span v-if="intf.macAddress" class="text-caption font-mono text-medium-emphasis">
+              {{ intf.macAddress }}
+            </span>
+          </div>
+        </v-card>
+      </template>
+
+      <v-card v-else variant="outlined" rounded="lg" class="pa-6 text-center text-grey">
+        <v-icon size="40" color="grey-lighten-1" class="mb-2">mdi-expansion-card</v-icon>
+        <div class="text-subtitle-2 font-weight-medium">
+          Nenhuma interface SNMP registrada ainda. Use "Configurar Monitoramento" para descobri-las.
+        </div>
+      </v-card>
     </div>
   </div>
 </template>

@@ -24,7 +24,7 @@
 
     <!-- Tabela de Monitores -->
     <v-card elevation="2" rounded="lg">
-      <v-card-title class="pa-2.5 pa-sm-4 d-flex align-center justify-space-between flex-wrap ga-3">
+      <div class="pa-3 pa-sm-4 d-flex align-center justify-space-between flex-wrap ga-3">
         <v-text-field
           v-model="search"
           prepend-inner-icon="mdi-magnify"
@@ -38,9 +38,9 @@
         ></v-text-field>
 
         <!-- Chips de Filtro por Status da Saúde Global -->
-        <div class="d-flex align-center ga-1.5 flex-wrap">
+        <div class="d-flex align-center ga-2 flex-wrap">
           <v-chip
-            :color="statusFilter === 'all' ? 'primary' : 'default'"
+            :color="statusFilter === 'all' ? 'primary' : undefined"
             :variant="statusFilter === 'all' ? 'flat' : 'tonal'"
             size="small"
             class="font-weight-medium cursor-pointer"
@@ -49,7 +49,7 @@
             Todos ({{ counts.all }})
           </v-chip>
           <v-chip
-            :color="statusFilter === 'up' ? 'success' : 'default'"
+            :color="statusFilter === 'up' ? 'success' : undefined"
             :variant="statusFilter === 'up' ? 'flat' : 'tonal'"
             size="small"
             class="font-weight-medium cursor-pointer"
@@ -58,7 +58,7 @@
             Up ({{ counts.up }})
           </v-chip>
           <v-chip
-            :color="statusFilter === 'warning' ? 'warning' : 'default'"
+            :color="statusFilter === 'warning' ? 'warning' : undefined"
             :variant="statusFilter === 'warning' ? 'flat' : 'tonal'"
             size="small"
             class="font-weight-medium cursor-pointer"
@@ -67,7 +67,7 @@
             Warning ({{ counts.warning }})
           </v-chip>
           <v-chip
-            :color="statusFilter === 'down' ? 'error' : 'default'"
+            :color="statusFilter === 'down' ? 'error' : undefined"
             :variant="statusFilter === 'down' ? 'flat' : 'tonal'"
             size="small"
             class="font-weight-medium cursor-pointer"
@@ -76,7 +76,7 @@
             Down ({{ counts.down }})
           </v-chip>
           <v-chip
-            :color="statusFilter === 'unknown' ? 'grey-darken-1' : 'default'"
+            :color="statusFilter === 'unknown' ? 'grey-darken-1' : undefined"
             :variant="statusFilter === 'unknown' ? 'flat' : 'tonal'"
             size="small"
             class="font-weight-medium cursor-pointer"
@@ -85,7 +85,7 @@
             Desconhecido ({{ counts.unknown }})
           </v-chip>
           <v-chip
-            :color="statusFilter === 'disabled' ? 'grey-darken-1' : 'default'"
+            :color="statusFilter === 'disabled' ? 'grey-darken-1' : undefined"
             :variant="statusFilter === 'disabled' ? 'flat' : 'tonal'"
             size="small"
             class="font-weight-medium cursor-pointer"
@@ -94,7 +94,7 @@
             Desativados ({{ counts.disabled }})
           </v-chip>
         </div>
-      </v-card-title>
+      </div>
 
       <MonitorsTable
         :monitors="filteredMonitors"

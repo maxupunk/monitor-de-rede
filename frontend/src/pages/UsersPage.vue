@@ -39,7 +39,7 @@
     </v-alert>
 
     <v-card elevation="2" rounded="lg">
-      <v-card-title class="pa-4 d-flex flex-column flex-md-row ga-3 align-md-center">
+      <div class="pa-3 pa-sm-4 d-flex flex-column flex-md-row ga-3 align-md-center">
         <v-text-field
           v-model="search"
           prepend-inner-icon="mdi-magnify"
@@ -55,7 +55,7 @@
         <v-chip variant="tonal" color="primary" prepend-icon="mdi-account-multiple-outline">
           {{ usersStore.users.length }} usuário{{ usersStore.users.length === 1 ? '' : 's' }}
         </v-chip>
-      </v-card-title>
+      </div>
 
       <ResponsiveDataTable
         :headers="headers"
@@ -141,35 +141,70 @@
         </template>
 
         <template #mobile-item="{ item }">
-          <div class="d-flex align-start justify-space-between ga-3">
-            <div class="min-width-0">
-              <div class="font-weight-bold text-break">{{ item.fullName }}</div>
-              <div class="text-body-2 text-medium-emphasis text-break">{{ item.email }}</div>
-              <div class="d-flex flex-wrap ga-2 mt-2">
-                <v-chip size="x-small" variant="tonal" :color="roleColor(item.role)">
-                  {{ roleLabel(item.role) }}
-                </v-chip>
-                <v-chip size="x-small" variant="tonal" :color="item.active ? 'success' : 'grey'">
-                  {{ item.active ? 'Ativo' : 'Desativado' }}
+          <div class="d-flex flex-column ga-2">
+            <!-- Top Row: Nome e Chips de Perfil/Status -->
+            <div class="d-flex align-center justify-space-between ga-2">
+              <div class="font-weight-bold text-subtitle-1 text-truncate d-flex align-center ga-2">
+                <span>{{ item.fullName }}</span>
+                <v-chip
+                  v-if="item.id === authStore.user?.id"
+                  size="x-small"
+                  color="primary"
+                  class="font-weight-bold"
+                >
+                  Você
                 </v-chip>
               </div>
-            </div>
-            <div class="d-flex ga-1">
-              <v-btn
-                icon="mdi-pencil-outline"
+
+              <v-chip
                 size="small"
-                variant="text"
-                color="primary"
-                @click="openEdit(item)"
-              ></v-btn>
+                variant="tonal"
+                :color="item.active ? 'success' : 'grey-darken-1'"
+                class="font-weight-medium px-2.5 flex-shrink-0"
+              >
+                {{ item.active ? 'Ativo' : 'Desativado' }}
+              </v-chip>
+            </div>
+
+            <!-- Middle: Email e Perfil de Acesso -->
+            <div
+              class="d-flex flex-wrap align-center justify-space-between ga-2 text-caption text-grey"
+            >
+              <span class="text-body-2 text-medium-emphasis text-truncate font-mono">{{
+                item.email
+              }}</span>
+              <v-chip
+                size="x-small"
+                variant="tonal"
+                :color="roleColor(item.role)"
+                class="font-weight-medium"
+              >
+                {{ roleLabel(item.role) }}
+              </v-chip>
+            </div>
+
+            <!-- Footer Actions -->
+            <div class="d-flex align-center justify-end ga-1 pt-2 mt-1 border-t">
               <v-btn
-                icon="mdi-delete-outline"
+                size="small"
+                variant="tonal"
+                color="primary"
+                prepend-icon="mdi-pencil"
+                class="text-caption px-2"
+                @click="openEdit(item)"
+              >
+                Editar
+              </v-btn>
+              <v-btn
+                icon
                 size="small"
                 variant="text"
                 color="error"
                 :disabled="item.id === authStore.user?.id"
                 @click="askDelete(item)"
-              ></v-btn>
+              >
+                <v-icon size="18">mdi-delete</v-icon>
+              </v-btn>
             </div>
           </div>
         </template>

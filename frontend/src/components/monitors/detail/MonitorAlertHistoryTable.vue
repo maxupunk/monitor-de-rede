@@ -1,5 +1,5 @@
 <template>
-  <v-card elevation="2" class="rounded-lg pa-6 mt-6">
+  <v-card elevation="2" class="rounded-lg pa-3 pa-md-6 mt-4 mt-md-6">
     <div class="d-flex align-center justify-space-between mb-4">
       <div>
         <h2 class="text-h6 font-weight-bold d-flex align-center ga-2">
@@ -40,7 +40,8 @@
             :height="420"
             @load="alertHistory.load"
           >
-            <div class="table-responsive">
+            <!-- Desktop: Tabela -->
+            <div v-if="$vuetify.display.mdAndUp" class="table-responsive">
               <v-table density="comfortable" hover>
                 <thead>
                   <tr>
@@ -151,6 +152,98 @@
                 </tbody>
               </v-table>
             </div>
+
+            <!-- Mobile: Cards Responsivos -->
+            <div v-else class="d-flex flex-column ga-2 pa-2">
+              <v-card
+                v-for="item in alertHistory.items.value"
+                :key="item.id"
+                border
+                rounded="lg"
+                class="pa-3"
+              >
+                <div class="d-flex align-center justify-space-between ga-2 mb-1">
+                  <div class="d-flex align-center ga-1.5 flex-wrap">
+                    <v-chip
+                      :color="severityColor(item.severity)"
+                      size="x-small"
+                      variant="flat"
+                      class="font-weight-bold text-uppercase px-2"
+                    >
+                      {{ severityLabel(item.severity) }}
+                    </v-chip>
+                    <v-chip
+                      :color="item.status === 'resolved' ? 'success' : severityColor(item.severity)"
+                      size="x-small"
+                      variant="tonal"
+                    >
+                      {{ statusLabel(item.status) }}
+                    </v-chip>
+                  </div>
+                  <span class="text-caption text-grey d-flex align-center ga-1">
+                    <v-icon size="12">mdi-clock-outline</v-icon>
+                    {{ formatDateTime(item.startedAt, '—') }}
+                  </span>
+                </div>
+
+                <div class="text-subtitle-1 font-weight-bold text-break text-high-emphasis">
+                  {{ item.title || '—' }}
+                </div>
+                <div v-if="item.message" class="text-body-2 text-grey-darken-1 text-break mt-1">
+                  {{ item.message }}
+                </div>
+
+                <div
+                  class="d-flex align-center justify-space-between pt-2 mt-1 border-t flex-wrap ga-1"
+                >
+                  <span class="text-caption text-grey">
+                    Normalizado:
+                    <strong v-if="item.resolvedAt" class="text-success font-weight-medium">
+                      {{ formatDateTime(item.resolvedAt, '—') }}
+                    </strong>
+                    <span v-else class="text-warning">Em aberto</span>
+                  </span>
+
+                  <div v-if="item.status === 'active'" class="d-flex ga-1">
+                    <v-btn
+                      size="small"
+                      variant="tonal"
+                      color="success"
+                      prepend-icon="mdi-check-circle"
+                      :loading="alertsStoreLoading"
+                      class="text-caption px-2"
+                      @click="emit('acknowledge', item)"
+                    >
+                      Reconhecer
+                    </v-btn>
+                    <v-menu location="bottom end">
+                      <template #activator="{ props: menuProps }">
+                        <v-btn
+                          size="small"
+                          variant="tonal"
+                          color="warning"
+                          prepend-icon="mdi-bell-off"
+                          v-bind="menuProps"
+                          class="text-caption px-2"
+                        >
+                          Silenciar
+                        </v-btn>
+                      </template>
+                      <v-list density="compact">
+                        <v-list-item
+                          v-for="duration in silenceDurations"
+                          :key="duration.minutes"
+                          :title="duration.label"
+                          :disabled="alertsStoreLoading"
+                          @click="emit('silence', item, duration.minutes)"
+                        ></v-list-item>
+                      </v-list>
+                    </v-menu>
+                  </div>
+                </div>
+              </v-card>
+            </div>
+
             <template #empty>
               <div class="text-caption text-grey text-center py-3">
                 Nenhum outro registro no histórico de alertas.

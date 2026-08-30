@@ -195,61 +195,82 @@
 
         <template #mobile-item="{ item }">
           <div class="d-flex flex-column ga-2">
-            <div class="d-flex align-start justify-space-between ga-2">
-              <div class="flex-grow-1 text-break">
-                <div class="text-subtitle-2 font-weight-bold">
-                  {{ item.device?.name || `Peer #${item.id}` }}
-                </div>
-                <div
-                  v-if="item.needsFirewallHint"
-                  class="text-caption text-warning d-flex align-center ga-1"
-                >
-                  <v-icon size="12">mdi-alert</v-icon>
-                  Túnel conectado, mas não responde a ping
-                </div>
-                <div
-                  v-else-if="item.pingOutsideTunnel"
-                  class="text-caption text-info d-flex align-center ga-1"
-                >
-                  <v-icon size="12">mdi-lan-disconnect</v-icon>
-                  Ping fora do túnel
-                </div>
-                <div class="d-flex flex-wrap align-center ga-2 mt-1">
-                  <v-chip size="x-small" variant="tonal">
-                    <v-icon start size="12">{{ profileIcon(item.deviceProfile) }}</v-icon>
-                    {{ profileLabel(item.deviceProfile) }}
-                  </v-chip>
-                  <span class="text-caption text-grey-darken-1">{{
-                    item.device?.ipAddress || '—'
-                  }}</span>
-                  <v-chip :color="statusColor(item.connectionStatus)" size="x-small" variant="flat">
-                    {{ statusLabel(item.connectionStatus) }}
-                  </v-chip>
-                </div>
-                <div class="text-caption text-grey mt-1">
-                  {{ formatBytes(item.bytesRx) }} ↓ / {{ formatBytes(item.bytesTx) }} ↑ ·
+            <!-- Top Row: Nome e Status Chip -->
+            <div class="d-flex align-center justify-space-between ga-2">
+              <span class="text-subtitle-1 font-weight-bold text-truncate">
+                {{ item.device?.name || `Peer #${item.id}` }}
+              </span>
+              <v-chip
+                :color="statusColor(item.connectionStatus)"
+                size="small"
+                variant="flat"
+                class="font-weight-bold px-2.5 flex-shrink-0"
+              >
+                {{ statusLabel(item.connectionStatus) }}
+              </v-chip>
+            </div>
+
+            <!-- Hints & Warnings -->
+            <div
+              v-if="item.needsFirewallHint"
+              class="text-caption text-warning d-flex align-center ga-1"
+            >
+              <v-icon size="13">mdi-alert</v-icon>
+              Túnel conectado, mas não responde a ping
+            </div>
+            <div
+              v-else-if="item.pingOutsideTunnel"
+              class="text-caption text-info d-flex align-center ga-1"
+            >
+              <v-icon size="13">mdi-lan-disconnect</v-icon>
+              Ping fora do túnel
+            </div>
+
+            <!-- Middle: Perfil, IP e Tráfego -->
+            <div class="d-flex flex-column ga-1 text-caption text-grey">
+              <div class="d-flex flex-wrap align-center ga-2">
+                <v-chip size="x-small" variant="tonal">
+                  <v-icon start size="12">{{ profileIcon(item.deviceProfile) }}</v-icon>
+                  {{ profileLabel(item.deviceProfile) }}
+                </v-chip>
+                <span class="font-mono text-medium-emphasis">{{
+                  item.device?.ipAddress || '—'
+                }}</span>
+              </div>
+              <div class="d-flex flex-wrap align-center justify-space-between ga-2 mt-0.5">
+                <span>{{ formatBytes(item.bytesRx) }} ↓ / {{ formatBytes(item.bytesTx) }} ↑</span>
+                <span class="d-inline-flex align-center ga-1">
+                  <v-icon size="12">mdi-history</v-icon>
                   {{ relativeTime(item.lastSeenAt || item.lastHandshakeAt) }}
-                </div>
+                </span>
               </div>
             </div>
-            <div class="d-flex flex-wrap justify-end ga-1 mt-1">
+
+            <!-- Footer Actions -->
+            <div class="d-flex flex-wrap align-center justify-end ga-1 pt-2 mt-1 border-t">
               <v-btn
                 size="small"
-                icon="mdi-heart-pulse"
-                variant="text"
+                variant="tonal"
+                color="info"
+                prepend-icon="mdi-heart-pulse"
+                class="text-caption px-2"
                 :disabled="!item.pingMonitorId"
                 @click.stop="abrirDetalhe(item.pingMonitorId!)"
-              ></v-btn>
+              >
+                Conectividade
+              </v-btn>
               <v-btn
                 size="small"
                 icon="mdi-pencil"
                 variant="text"
+                title="Renomear"
                 @click="openRename(item)"
               ></v-btn>
               <v-btn
                 size="small"
                 icon="mdi-content-copy"
                 variant="text"
+                title="Copiar Configuração"
                 @click="openConfig(item)"
               ></v-btn>
               <v-btn
@@ -257,6 +278,7 @@
                 size="small"
                 icon="mdi-qrcode"
                 variant="text"
+                title="QR Code"
                 @click="openConfig(item)"
               ></v-btn>
               <v-btn
@@ -264,6 +286,7 @@
                 icon="mdi-key-change"
                 variant="text"
                 color="warning"
+                title="Rotacionar Chave"
                 @click="rotate(item)"
               ></v-btn>
               <v-btn
@@ -271,6 +294,7 @@
                 icon="mdi-cancel"
                 variant="text"
                 color="error"
+                title="Revogar"
                 @click="revoke(item)"
               ></v-btn>
             </div>

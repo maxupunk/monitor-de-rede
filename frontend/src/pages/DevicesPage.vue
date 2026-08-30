@@ -43,7 +43,7 @@
 
     <!-- Tabela de Dispositivos -->
     <v-card elevation="2" rounded="lg">
-      <v-card-title class="pa-2.5 pa-sm-4 d-flex align-center">
+      <div class="pa-3 pa-sm-4 d-flex align-center">
         <v-text-field
           v-model="search"
           prepend-inner-icon="mdi-magnify"
@@ -55,7 +55,7 @@
           class="w-100"
           style="max-width: 420px"
         ></v-text-field>
-      </v-card-title>
+      </div>
 
       <ResponsiveDataTable
         v-model="selectedDeviceIds"
@@ -104,18 +104,6 @@
 
         <template #item.actions="{ item }">
           <div class="d-flex ga-1">
-            <v-btn
-              icon
-              size="small"
-              variant="text"
-              color="info"
-              :to="'/devices/' + item.id"
-              @click.stop
-            >
-              <v-icon>mdi-eye</v-icon>
-              <v-tooltip activator="parent" location="top">Detalhes</v-tooltip>
-            </v-btn>
-
             <!--
               O dispositivo que representa esta instalação não é editável nem
               removível, e escanear as próprias portas não é uma ação válida.
@@ -160,92 +148,102 @@
 
         <template #mobile-item="{ item }">
           <div class="d-flex flex-column ga-2">
-            <div class="d-flex align-start justify-space-between ga-2">
-              <div class="flex-grow-1 min-w-0">
-                <router-link
-                  :to="'/devices/' + item.id"
-                  class="text-subtitle-1 font-weight-bold text-decoration-none text-primary d-block text-truncate"
-                  @click.stop
+            <!-- Top Row: Nome do Dispositivo + Status Chip -->
+            <div class="d-flex align-center justify-space-between ga-2">
+              <router-link
+                :to="'/devices/' + item.id"
+                class="text-subtitle-1 font-weight-bold text-decoration-none text-primary d-block text-truncate"
+                @click.stop
+              >
+                {{ item.name }}
+              </router-link>
+
+              <v-chip
+                :color="getStatusColor(item.status)"
+                size="small"
+                variant="tonal"
+                class="font-weight-bold px-2.5 flex-shrink-0"
+              >
+                <v-icon start size="12">mdi-circle</v-icon>
+                {{ (item.status || 'UNKNOWN').toUpperCase() }}
+              </v-chip>
+            </div>
+
+            <!-- Middle: IP, Tipo, Monitorado, Site e Pai -->
+            <div class="d-flex flex-column ga-1 text-caption text-grey">
+              <div class="d-flex flex-wrap align-center ga-2">
+                <span v-if="item.ipAddress" class="font-mono text-medium-emphasis">
+                  {{ item.ipAddress }}
+                </span>
+                <v-chip
+                  size="x-small"
+                  color="info"
+                  variant="tonal"
+                  class="text-uppercase font-weight-medium"
                 >
-                  {{ item.name }}
-                </router-link>
-                <div class="d-flex flex-wrap align-center ga-1 mt-1">
-                  <span v-if="item.ipAddress" class="text-caption font-mono text-medium-emphasis">
-                    {{ item.ipAddress }}
-                  </span>
-                  <v-chip
-                    size="x-small"
-                    color="info"
-                    variant="tonal"
-                    class="text-uppercase font-weight-medium"
-                  >
-                    {{ item.type }}
-                  </v-chip>
-                  <v-chip :color="getStatusColor(item.status)" size="x-small" variant="tonal">
-                    <v-icon start size="10">mdi-circle</v-icon>
-                    {{ (item.status || 'UNKNOWN').toUpperCase() }}
-                  </v-chip>
-                </div>
-                <div
-                  v-if="item.site || item.parent"
-                  class="d-flex flex-wrap align-center ga-2 text-caption text-medium-emphasis mt-1"
+                  {{ item.type }}
+                </v-chip>
+                <v-chip
+                  v-if="item.isMonitored"
+                  size="x-small"
+                  color="success"
+                  variant="tonal"
+                  class="font-weight-medium"
                 >
-                  <span v-if="item.site" class="d-inline-flex align-center ga-1">
-                    <v-icon size="13">mdi-map-marker-outline</v-icon>
-                    {{ item.site.name }}
-                  </span>
-                  <span v-if="item.parent" class="d-inline-flex align-center ga-1">
-                    <v-icon size="13">mdi-sitemap</v-icon>
-                    {{ item.parent.name }}
-                  </span>
-                </div>
+                  Monitorado
+                </v-chip>
+              </div>
+
+              <div
+                v-if="item.site || item.parent"
+                class="d-flex flex-wrap align-center ga-2 text-caption text-medium-emphasis mt-0.5"
+              >
+                <span v-if="item.site" class="d-inline-flex align-center ga-1">
+                  <v-icon size="13">mdi-map-marker-outline</v-icon>
+                  {{ item.site.name }}
+                </span>
+                <span v-if="item.parent" class="d-inline-flex align-center ga-1">
+                  <v-icon size="13">mdi-sitemap</v-icon>
+                  {{ item.parent.name }}
+                </span>
               </div>
             </div>
 
-            <div class="d-flex align-center justify-end ga-1 pt-1 border-t mt-1">
+            <!-- Footer Actions -->
+            <div
+              v-if="!item.isSystem"
+              class="d-flex align-center justify-end ga-1 pt-2 mt-1 border-t"
+            >
               <v-btn
                 icon
                 size="small"
                 variant="text"
-                color="info"
-                :to="'/devices/' + item.id"
-                title="Ver detalhes"
-                @click.stop
+                color="primary"
+                title="Editar"
+                @click.stop="openDialog(item)"
               >
-                <v-icon size="18">mdi-eye</v-icon>
+                <v-icon size="18">mdi-pencil</v-icon>
               </v-btn>
-              <template v-if="!item.isSystem">
-                <v-btn
-                  icon
-                  size="small"
-                  variant="text"
-                  color="primary"
-                  title="Editar"
-                  @click.stop="openDialog(item)"
-                >
-                  <v-icon size="18">mdi-pencil</v-icon>
-                </v-btn>
-                <v-btn
-                  icon
-                  size="small"
-                  variant="text"
-                  color="purple"
-                  title="Escanear Portas"
-                  @click.stop="openPortScan(item)"
-                >
-                  <v-icon size="18">mdi-lan-connect</v-icon>
-                </v-btn>
-                <v-btn
-                  icon
-                  size="small"
-                  variant="text"
-                  color="error"
-                  title="Excluir"
-                  @click.stop="confirmDelete(item.id)"
-                >
-                  <v-icon size="18">mdi-delete</v-icon>
-                </v-btn>
-              </template>
+              <v-btn
+                icon
+                size="small"
+                variant="text"
+                color="purple"
+                title="Escanear Portas"
+                @click.stop="openPortScan(item)"
+              >
+                <v-icon size="18">mdi-lan-connect</v-icon>
+              </v-btn>
+              <v-btn
+                icon
+                size="small"
+                variant="text"
+                color="error"
+                title="Excluir"
+                @click.stop="confirmDelete(item.id)"
+              >
+                <v-icon size="18">mdi-delete</v-icon>
+              </v-btn>
             </div>
           </div>
         </template>
