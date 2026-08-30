@@ -76,6 +76,39 @@
               </div>
             </v-col>
 
+            <!-- Alerta/Informativo Contextual de Sub-rede e Gateway -->
+            <v-col v-if="matchedNetwork" cols="12" class="py-1">
+              <v-alert
+                v-if="isMatchedNetworkGateway"
+                type="success"
+                variant="tonal"
+                density="compact"
+                class="rounded-lg text-caption mb-0"
+              >
+                <div class="d-flex align-center ga-2">
+                  <v-icon size="18">mdi-router-network</v-icon>
+                  <span>
+                    Este endereço IP corresponde ao
+                    <strong>Gateway da rede {{ matchedNetwork.name }}</strong> ({{
+                      matchedNetwork.cidr
+                    }}).
+                  </span>
+                </div>
+              </v-alert>
+              <div v-else class="text-caption text-medium-emphasis d-flex align-center ga-1 px-1">
+                <v-icon size="16" color="primary">mdi-lan</v-icon>
+                <span>
+                  Sub-rede detectada: <strong>{{ matchedNetwork.name }}</strong> ({{
+                    matchedNetwork.cidr
+                  }})
+                  <template v-if="matchedNetwork.gateway">
+                    • Gateway (Uplink): <strong>{{ matchedNetwork.gateway }}</strong>
+                    <span v-if="networkGatewayDevice"> ({{ networkGatewayDevice.name }})</span>
+                  </template>
+                </span>
+              </div>
+            </v-col>
+
             <!-- Campo "Está atrás de" para Topologia -->
             <v-col cols="12" sm="6">
               <v-select
@@ -520,6 +553,7 @@
 import { ref, reactive, computed, onBeforeUnmount, watch } from 'vue'
 import { useDevicesStore, type Device } from '@/stores/devices'
 import { useSitesStore, type Site } from '@/stores/sites'
+import { useNetworksStore } from '@/stores/networks'
 import { useSnmpTestStore } from '@/stores/snmpTest'
 import { usePreferencesStore } from '@/stores/preferences'
 import SiteDialog from '@/components/SiteDialog.vue'
@@ -556,6 +590,7 @@ const emit = defineEmits<{
 
 const devicesStore = useDevicesStore()
 const sitesStore = useSitesStore()
+const networksStore = useNetworksStore()
 const snmpTestStore = useSnmpTestStore()
 const prefsStore = usePreferencesStore()
 const systemsStore = useOperatingSystemsStore()
@@ -583,6 +618,7 @@ const formModel = reactive<{
   ipAddress: string
   type: string
   siteId: number | null
+  networkId: number | null
   parentId: number | null
   vendor: string
   model: string
@@ -600,6 +636,7 @@ const formModel = reactive<{
   ipAddress: '',
   type: 'router',
   siteId: null,
+  networkId: null,
   parentId: null,
   vendor: '',
   model: '',
@@ -831,6 +868,50 @@ const INFRASTRUCTURE_TYPES = new Set([
   'access_point',
 ])
 
+function ipInCidr(ip: string, cidr: string): boolean {
+  if (!ip || !cidr || !cidr.includes('/')) return false
+  const [rangeIp, prefixStr] = cidr.split('/')
+  const prefix = parseInt(prefixStr, 10)
+  if (isNaN(prefix) || prefix < 0 || prefix > 32) return false
+
+  const ipToLong = (addr: string): number | null => {
+    const parts = addr.trim().split('.')
+    if (parts.length !== 4) return null
+    let num = 0
+    for (let i = 0; i < 4; i++) {
+      const part = parseInt(parts[i], 10)
+      if (isNaN(part) || part < 0 || part > 255) return null
+      num = (num << 8) + part
+    }
+    return num >>> 0
+  }
+
+  const ipNum = ipToLong(ip)
+  const rangeNum = ipToLong(rangeIp)
+  if (ipNum === null || rangeNum === null) return false
+
+  const mask = prefix === 0 ? 0 : (~0 << (32 - prefix)) >>> 0
+  return (ipNum & mask) === (rangeNum & mask)
+}
+
+const matchedNetwork = computed(() => {
+  const ip = formModel.ipAddress.trim()
+  if (!ip) return null
+  return networksStore.networks.find((net) => ipInCidr(ip, net.cidr)) || null
+})
+
+const isMatchedNetworkGateway = computed(() => {
+  if (!matchedNetwork.value) return false
+  const ip = formModel.ipAddress.trim()
+  return Boolean(matchedNetwork.value.gateway && matchedNetwork.value.gateway.trim() === ip)
+})
+
+const networkGatewayDevice = computed(() => {
+  if (!matchedNetwork.value?.gateway) return null
+  const gwIp = matchedNetwork.value.gateway.trim()
+  return availableParentDevices.value.find((d) => d.ipAddress === gwIp) || null
+})
+
 const availableParentDevices = computed(() => {
   const currentId = props.deviceToEdit?.id
   const currentSiteId = formModel.siteId
@@ -872,7 +953,17 @@ const suggestedParent = computed(() => {
   const candidates = availableParentDevices.value.filter((d) => d.id !== currentId)
   if (candidates.length === 0) return null
 
-  // 1. Tentar encontrar por sub-rede comum (ex: 192.168.1.x)
+  // Se este dispositivo for o próprio gateway da sub-rede, ele é o nó raiz da rede (sem pai local)
+  if (isMatchedNetworkGateway.value) {
+    return null
+  }
+
+  // 1. Prioridade máxima: Gateway da sub-rede identificada (se houver um dispositivo com esse IP cadastrado)
+  if (networkGatewayDevice.value && networkGatewayDevice.value.id !== currentId) {
+    return networkGatewayDevice.value
+  }
+
+  // 2. Tentar encontrar por sub-rede comum (ex: 192.168.1.x)
   if (ip && ip.includes('.')) {
     const parts = ip.split('.')
     if (parts.length === 4) {
@@ -897,13 +988,13 @@ const suggestedParent = computed(() => {
     }
   }
 
-  // 2. Tentar encontrar por Site comum (primeiro switch/roteador do mesmo site)
+  // 3. Tentar encontrar por Site comum (primeiro switch/roteador do mesmo site)
   if (siteId) {
     const siteInfra = candidates.find((c) => c.siteId === siteId && c.isInfrastructure)
     if (siteInfra) return siteInfra
   }
 
-  // 3. Fallback: Primeiro roteador/switch global
+  // 4. Fallback: Primeiro roteador/switch global
   const globalRouter = candidates.find((c) => c.type === 'router' || c.type === 'switch')
   return globalRouter || null
 })
@@ -1098,6 +1189,7 @@ watch(
     if (isOpen) {
       if (devicesStore.devices.length === 0) devicesStore.fetchDevices()
       if (sitesStore.sites.length === 0) sitesStore.fetchSites()
+      if (networksStore.networks.length === 0) void networksStore.fetchNetworks()
 
       snmpTestResult.value = null
       configureLogsAfterSave.value = false
@@ -1129,6 +1221,7 @@ watch(
         pendingClearHistory.value = false
         formModel.type = props.deviceToEdit.type || 'router'
         formModel.siteId = props.deviceToEdit.siteId ?? null
+        formModel.networkId = props.deviceToEdit.networkId ?? null
         formModel.parentId = props.deviceToEdit.parentId ?? null
         formModel.vendor = props.deviceToEdit.vendor || ''
         formModel.model = props.deviceToEdit.model || ''
@@ -1155,6 +1248,7 @@ watch(
         pendingClearHistory.value = false
         formModel.type = (props.prefillData.type as string) || 'other'
         formModel.siteId = props.prefillData.siteId ?? null
+        formModel.networkId = props.prefillData.networkId ?? null
         formModel.parentId = props.prefillData.parentId ?? null
         formModel.vendor = props.prefillData.vendor || ''
         formModel.model = props.prefillData.model || ''
@@ -1180,6 +1274,7 @@ watch(
         pendingClearHistory.value = false
         formModel.type = 'router'
         formModel.siteId = null
+        formModel.networkId = null
         formModel.parentId = null
         formModel.vendor = ''
         formModel.model = ''
@@ -1339,6 +1434,8 @@ async function confirmSnmpIntervalChange() {
 function payload(clearHistory = false): Partial<Device> {
   return {
     ...formModel,
+    networkId: formModel.networkId ?? matchedNetwork.value?.id ?? null,
+    siteId: formModel.siteId ?? matchedNetwork.value?.siteId ?? null,
     accessMode: formModel.accessMode as Device['accessMode'],
     operatingSystem: formModel.operatingSystem as Device['operatingSystem'],
     clearHistory,

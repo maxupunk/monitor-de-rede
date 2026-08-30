@@ -35,9 +35,21 @@
               </div>
             </div>
           </div>
-          <v-chip :color="isAdded ? 'success' : 'warning'" size="small" variant="flat">
-            {{ isAdded ? 'JÁ ADICIONADO' : 'PENDENTE' }}
-          </v-chip>
+          <div class="d-flex align-center ga-2">
+            <v-chip
+              v-if="isNetworkGateway"
+              color="primary"
+              size="small"
+              variant="flat"
+              class="font-weight-bold"
+            >
+              <v-icon start size="14">mdi-router-network</v-icon>
+              GATEWAY DA REDE
+            </v-chip>
+            <v-chip :color="isAdded ? 'success' : 'warning'" size="small" variant="flat">
+              {{ isAdded ? 'JÁ ADICIONADO' : 'PENDENTE' }}
+            </v-chip>
+          </div>
         </div>
 
         <!-- Grid de informações -->
@@ -177,6 +189,14 @@ const copied = ref(false)
 const isAdded = computed(() => {
   if (!props.result) return false
   return devicesStore.devices.some((d) => d.ipAddress === props.result?.ipAddress)
+})
+
+const isNetworkGateway = computed(() => {
+  if (!props.result) return false
+  if ('discoveryRun' in props.result && props.result.discoveryRun?.network?.gateway) {
+    return props.result.ipAddress === props.result.discoveryRun.network.gateway
+  }
+  return false
 })
 
 const deviceTypeLabel = computed(() => {

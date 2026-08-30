@@ -21,6 +21,7 @@ export interface DiscoveryRun {
     id: number
     name: string
     cidr: string
+    gateway?: string | null
     siteId?: number
     site?: { id: number; name: string }
   } | null

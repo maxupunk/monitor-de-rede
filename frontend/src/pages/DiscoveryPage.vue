@@ -172,6 +172,18 @@
                       {{ item.mdnsName || item.hostname || 'Dispositivo sem nome' }}
                     </div>
                     <div class="d-flex flex-wrap align-center ga-2 mt-1">
+                      <v-chip
+                        v-if="
+                          selectedNetwork?.gateway && item.ipAddress === selectedNetwork.gateway
+                        "
+                        size="x-small"
+                        color="primary"
+                        variant="flat"
+                        class="font-weight-bold"
+                      >
+                        <v-icon start size="12">mdi-router-network</v-icon>
+                        GATEWAY DA REDE
+                      </v-chip>
                       <v-chip size="x-small" color="info" variant="tonal">
                         {{ item.vendor || 'Fabricante desconhecido' }}
                       </v-chip>
@@ -407,14 +419,29 @@ const selectedNetwork = computed(() =>
 const dialogPrefill = computed<Partial<Device> | null>(() => {
   if (!selectedResult.value) return null
   const result = selectedResult.value
+  const isGateway = Boolean(
+    selectedNetwork.value?.gateway && result.ipAddress === selectedNetwork.value.gateway
+  )
+
+  let parentId: number | null = null
+  if (!isGateway && selectedNetwork.value?.gateway) {
+    const gwDevice = devicesStore.devices.find(
+      (d) => d.ipAddress === selectedNetwork.value?.gateway
+    )
+    if (gwDevice) {
+      parentId = gwDevice.id
+    }
+  }
+
   return {
     name: result.mdnsName || result.hostname || result.ipAddress,
     ipAddress: result.ipAddress,
-    type: result.deviceType || 'other',
+    type: isGateway ? 'router' : result.deviceType || 'other',
     vendor: result.vendor || undefined,
     macAddress: result.macAddress || undefined,
     siteId: selectedNetwork.value?.siteId ?? null,
     networkId: selectedNetwork.value?.id ?? null,
+    parentId,
     isMonitored: true,
     snmpEnabled: false,
   }

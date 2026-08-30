@@ -30,6 +30,24 @@
             title="Data de Cadastro"
             :subtitle="detailStore.device?.createdAt || 'Desconhecida'"
           ></v-list-item>
+          <v-list-item title="Sub-rede / Segmento">
+            <template #subtitle>
+              <div v-if="deviceNetwork" class="d-flex align-center ga-1">
+                <span class="font-weight-medium text-primary">{{ deviceNetwork.name }}</span>
+                <span class="font-mono text-caption text-grey">({{ deviceNetwork.cidr }})</span>
+                <v-chip
+                  v-if="isDeviceNetworkGateway"
+                  size="x-small"
+                  color="success"
+                  variant="tonal"
+                  class="ml-1"
+                >
+                  GATEWAY
+                </v-chip>
+              </div>
+              <span v-else class="text-grey">Não associado a uma sub-rede</span>
+            </template>
+          </v-list-item>
           <v-list-item title="Está atrás de (Dispositivo Pai)">
             <template #subtitle>
               <router-link
@@ -54,7 +72,12 @@
           <v-icon color="primary">mdi-transit-connection-variant</v-icon>
           Caminho de Rede & Diagnóstico Hierárquico
         </div>
-        <v-chip size="x-small" color="primary" variant="tonal">Topologia & RCA</v-chip>
+        <div class="d-flex align-center ga-2">
+          <v-chip v-if="deviceNetwork" size="x-small" color="info" variant="tonal">
+            {{ deviceNetwork.name }} ({{ deviceNetwork.cidr }})
+          </v-chip>
+          <v-chip size="x-small" color="primary" variant="tonal">Topologia & RCA</v-chip>
+        </div>
       </div>
 
       <div class="d-flex align-center flex-wrap ga-3 pa-3 bg-surface-variant-subtle rounded-lg">
@@ -98,11 +121,26 @@
         <!-- Hop 3: Current Device -->
         <div class="d-flex align-center ga-2 pa-2 rounded bg-surface border">
           <v-avatar :color="getStatusColor(detailStore.device?.status)" size="32">
-            <v-icon color="white" size="18">mdi-lan</v-icon>
+            <v-icon color="white" size="18">
+              {{ isDeviceNetworkGateway ? 'mdi-router-network' : 'mdi-lan' }}
+            </v-icon>
           </v-avatar>
           <div>
-            <div class="text-caption font-weight-bold">{{ detailStore.device?.name }}</div>
-            <div class="text-caption text-grey">{{ detailStore.device?.ipAddress || 'Host' }}</div>
+            <div class="d-flex align-center ga-1">
+              <span class="text-caption font-weight-bold">{{ detailStore.device?.name }}</span>
+              <v-chip
+                v-if="isDeviceNetworkGateway"
+                size="x-small"
+                color="primary"
+                variant="flat"
+                class="text-xxs"
+              >
+                GATEWAY
+              </v-chip>
+            </div>
+            <div class="text-caption text-grey font-mono">
+              {{ detailStore.device?.ipAddress || 'Host' }}
+            </div>
           </div>
           <v-chip
             :color="getStatusColor(detailStore.device?.status)"
@@ -386,6 +424,7 @@ import {
   type DeviceMetric,
 } from '@/stores/deviceDetail'
 import { useMonitorsStore } from '@/stores/monitors'
+import { useNetworksStore } from '@/stores/networks'
 import DeviceHealthSummary from '@/components/devices/DeviceHealthSummary.vue'
 import { formatBps, formatBytes, formatMeasuredValue } from '@/utils/formatters'
 import { getStatusColor } from '@/utils/monitorPresentation'
@@ -410,6 +449,32 @@ const emit = defineEmits<{
 
 const detailStore = useDeviceDetailStore()
 const monitorsStore = useMonitorsStore()
+const networksStore = useNetworksStore()
+
+const deviceNetwork = computed(() => {
+  const dev = detailStore.device
+  if (!dev) return null
+  if (dev.networkId) {
+    return networksStore.networks.find((n) => n.id === dev.networkId) || null
+  }
+  const ip = dev.ipAddress?.trim()
+  if (!ip || !ip.includes('.')) return null
+  const parts = ip.split('.')
+  if (parts.length !== 4) return null
+  const prefix = `${parts[0]}.${parts[1]}.${parts[2]}.`
+  return networksStore.networks.find((n) => n.cidr?.startsWith(prefix)) || null
+})
+
+const isDeviceNetworkGateway = computed(() => {
+  if (!deviceNetwork.value?.gateway || !detailStore.device?.ipAddress) return false
+  return deviceNetwork.value.gateway.trim() === detailStore.device.ipAddress.trim()
+})
+
+onMounted(() => {
+  if (networksStore.networks.length === 0) {
+    void networksStore.fetchNetworks()
+  }
+})
 
 const uptimeByMonitor = ref<Record<number, MonitorUptimeResponse>>({})
 const uptimeLoading = ref(false)

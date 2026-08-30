@@ -23,7 +23,7 @@ use crate::{
             alert_events, device_interfaces, discovery_results, metrics as metrics_entity,
             vpn_peers,
         },
-        devices, monitors, sites,
+        devices, monitors, networks, sites,
     },
     services::{
         audit::{
@@ -42,6 +42,7 @@ use crate::{
         },
         preferences,
         shared::{
+            cidr::Ipv4Cidr,
             errors::{AppError, AppResult},
             pagination::{paginate, MaybePaged},
         },
@@ -368,6 +369,41 @@ async fn index(State(ctx): State<AppContext>) -> AppResult<Response> {
     )?)
 }
 
+async fn infer_network_and_site(
+    db: &sea_orm::DatabaseConnection,
+    ip_str: Option<&str>,
+    declared_network: Option<i64>,
+    declared_site: Option<i64>,
+) -> (Option<i64>, Option<i64>) {
+    if declared_network.is_some() {
+        return (declared_network, declared_site);
+    }
+    let Some(ip_text) = ip_str.map(str::trim).filter(|s| !s.is_empty()) else {
+        return (declared_network, declared_site);
+    };
+    let Ok(ip) = ip_text.parse::<std::net::Ipv4Addr>() else {
+        return (declared_network, declared_site);
+    };
+
+    let all_networks = match networks::Entity::find().all(db).await {
+        Ok(nets) => nets,
+        Err(_) => return (declared_network, declared_site),
+    };
+
+    for net in all_networks {
+        if let Ok(range) = crate::services::shared::cidr::parse_discovery_cidr(&net.cidr) {
+            if let Ok(net_addr) = range.network_address.parse::<std::net::Ipv4Addr>() {
+                let cidr = Ipv4Cidr::new(net_addr, range.prefix);
+                if cidr.contains(ip) {
+                    let site = declared_site.or(net.site_id);
+                    return (Some(net.id), site);
+                }
+            }
+        }
+    }
+    (declared_network, declared_site)
+}
+
 async fn store(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -392,9 +428,16 @@ async fn store(
         None if snmp_enabled => Some(preferences::load(&ctx.db).await?.default_snmp_community),
         None => None,
     };
+    let (network_id, site_id) = infer_network_and_site(
+        &ctx.db,
+        input.ip_address.as_deref(),
+        input.network_id.flatten(),
+        input.site_id.flatten(),
+    )
+    .await;
     let row = devices::ActiveModel {
-        site_id: Set(input.site_id.flatten()),
-        network_id: Set(input.network_id.flatten()),
+        site_id: Set(site_id),
+        network_id: Set(network_id),
         parent_id: Set(input.parent_id.flatten()),
         ip_address: Set(input.ip_address),
         name: Set(name),
@@ -534,6 +577,16 @@ async fn update(
         Some(opt) => opt,
         None => current.network_id,
     };
+    let (network_id, site_id) = infer_network_and_site(
+        &ctx.db,
+        input
+            .ip_address
+            .as_deref()
+            .or(current.ip_address.as_deref()),
+        network_id,
+        site_id,
+    )
+    .await;
     let parent_id = match input.parent_id {
         Some(opt) => opt,
         None => current.parent_id,
