@@ -16,7 +16,7 @@ use sea_orm::{
 use crate::{
     dtos::{
         devices::{DeviceEventItem, DeviceMetricItem, DevicePresenterItem, ParentRef, SiteRef},
-        resources::{DeviceInput, PaginationQuery},
+        resources::{BatchParentInput, DeviceInput, PaginationQuery},
     },
     models::{
         _entities::{
@@ -393,9 +393,9 @@ async fn store(
         None => None,
     };
     let row = devices::ActiveModel {
-        site_id: Set(input.site_id),
-        network_id: Set(input.network_id),
-        parent_id: Set(input.parent_id),
+        site_id: Set(input.site_id.flatten()),
+        network_id: Set(input.network_id.flatten()),
+        parent_id: Set(input.parent_id.flatten()),
         ip_address: Set(input.ip_address),
         name: Set(name),
         r#type: Set(kind),
@@ -526,6 +526,18 @@ async fn update(
             .unwrap_or(current.snmp_poll_interval_seconds),
         1,
     );
+    let site_id = match input.site_id {
+        Some(opt) => opt,
+        None => current.site_id,
+    };
+    let network_id = match input.network_id {
+        Some(opt) => opt,
+        None => current.network_id,
+    };
+    let parent_id = match input.parent_id {
+        Some(opt) => opt,
+        None => current.parent_id,
+    };
     // Regra de negócio, não perfil de acesso: o dispositivo que representa
     // esta instalação não aceita mudança do que sustenta sua identidade.
     system_device::ensure_identity_preserved(
@@ -542,7 +554,7 @@ async fn update(
                 .map(str::trim)
                 .filter(|ip| !ip.is_empty()),
             snmp_enabled: input.snmp_enabled,
-            network_id: input.network_id,
+            network_id,
         },
     )?;
     let access_mode = access_mode_declarado(input.access_mode.as_deref(), current.access_mode)?;
@@ -570,9 +582,9 @@ async fn update(
     };
     let row = devices::ActiveModel {
         id: Set(current.id),
-        site_id: Set(input.site_id.or(current.site_id)),
-        network_id: Set(input.network_id.or(current.network_id)),
-        parent_id: Set(input.parent_id.or(current.parent_id)),
+        site_id: Set(site_id),
+        network_id: Set(network_id),
+        parent_id: Set(parent_id),
         ip_address: Set(input.ip_address.or(current.ip_address)),
         name: Set(name),
         r#type: Set(kind),
@@ -991,6 +1003,60 @@ async fn bandwidth_latency_series(
     Ok(format::json(res)?)
 }
 
+/// `POST /api/devices/batch-parent` — define o dispositivo pai de múltiplos equipamentos em lote.
+async fn batch_parent(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Json(input): Json<BatchParentInput>,
+) -> AppResult<Response> {
+    if input.device_ids.is_empty() {
+        return Ok(format::json(serde_json::json!({ "updatedCount": 0 }))?);
+    }
+
+    if let Some(pid) = input.parent_id {
+        let exists = devices::Entity::find_by_id(pid).one(&ctx.db).await?;
+        if exists.is_none() {
+            return Err(AppError::not_found("Dispositivo pai não encontrado"));
+        }
+    }
+
+    let mut updated_count = 0;
+    for id in &input.device_ids {
+        if input.parent_id == Some(*id) {
+            continue;
+        }
+        let Some(dev) = devices::Entity::find_by_id(*id).one(&ctx.db).await? else {
+            continue;
+        };
+        let mut active: devices::ActiveModel = dev.into();
+        active.parent_id = Set(input.parent_id);
+        active.update(&ctx.db).await?;
+        updated_count += 1;
+    }
+
+    let _ = AuditService::new(&ctx.db)
+        .log(
+            AuditActor::from_headers(&headers, &ctx.db)
+                .await
+                .unwrap_or_default(),
+            AuditEntryInput {
+                action: AuditAction::Update,
+                resource_type: ResourceType::Device,
+                resource_id: None,
+                resource_label: Some("Lote de Dispositivos".into()),
+                description: Some(format!(
+                    "Atualizado dispositivo pai de {updated_count} dispositivo(s)"
+                )),
+                changes: None,
+            },
+        )
+        .await;
+
+    Ok(format::json(
+        serde_json::json!({ "updatedCount": updated_count }),
+    )?)
+}
+
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("/devices")
@@ -999,6 +1065,7 @@ pub fn routes() -> Routes {
         // parâmetro, e um teste garante que a rota não seja engolida.
         .add("/systems", get(operating_systems))
         .add("/identify", post(identify))
+        .add("/batch-parent", post(batch_parent))
         .add("/bandwidth-latency-series", get(bandwidth_latency_series))
         .add("/{id}", get(show).put(update).delete(destroy))
         .add("/{id}/capabilities", get(device_capabilities))

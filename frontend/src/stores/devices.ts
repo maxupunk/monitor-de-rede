@@ -164,6 +164,19 @@ export const useDevicesStore = defineStore('devices', () => {
     }
   }
 
+  async function batchSetParent(deviceIds: number[], parentId: number | null): Promise<boolean> {
+    try {
+      await apiService.post('/devices/batch-parent', {
+        deviceIds,
+        parentId,
+      })
+      await fetchDevices()
+      return true
+    } catch {
+      return false
+    }
+  }
+
   return {
     devices,
     loading: resource.loading,
@@ -179,5 +192,6 @@ export const useDevicesStore = defineStore('devices', () => {
     updateDeviceStatus,
     applyRealtimeStatus,
     fetchBandwidthLatencySeries,
+    batchSetParent,
   }
 })

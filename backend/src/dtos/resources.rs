@@ -27,12 +27,23 @@ pub struct NetworkInput {
     pub active: Option<bool>,
 }
 
+fn deserialize_some<'de, T, D>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    T: Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    Deserialize::deserialize(deserializer).map(Some)
+}
+
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceInput {
-    pub site_id: Option<i64>,
-    pub network_id: Option<i64>,
-    pub parent_id: Option<i64>,
+    #[serde(default, deserialize_with = "deserialize_some")]
+    pub site_id: Option<Option<i64>>,
+    #[serde(default, deserialize_with = "deserialize_some")]
+    pub network_id: Option<Option<i64>>,
+    #[serde(default, deserialize_with = "deserialize_some")]
+    pub parent_id: Option<Option<i64>>,
     pub ip_address: Option<String>,
     pub name: Option<String>,
     #[serde(rename = "type")]
@@ -60,6 +71,13 @@ pub struct DeviceInput {
     pub link_interface_name: Option<String>,
     pub status: Option<String>,
     pub clear_history: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchParentInput {
+    pub device_ids: Vec<i64>,
+    pub parent_id: Option<i64>,
 }
 
 #[derive(Debug, Deserialize, Default)]

@@ -11,8 +11,12 @@
       :hide-default-footer="props.hideDefaultFooter"
       :no-data-text="props.noDataText"
       :hover="props.clickable"
+      :show-select="props.showSelect"
+      :item-value="props.itemValue || 'id'"
+      :model-value="props.modelValue"
       class="elevation-0"
       :class="{ 'linha-clicavel': props.clickable }"
+      @update:model-value="emit('update:modelValue', $event)"
       @click:row="onClickRow"
     >
       <template v-for="name in desktopSlotNames" :key="name" #[name]="slotProps">
@@ -31,11 +35,27 @@
           :key="itemKey ? itemKey(item) : index"
           border
           rounded="lg"
-          class="pa-3"
-          :class="{ 'cursor-pointer': clickable }"
+          class="pa-3 transition-swing"
+          :class="{
+            'cursor-pointer': clickable,
+            'selected-card border-primary': showSelect && isMobileSelected(item),
+          }"
           @click="clickable ? onCardClick(item) : undefined"
         >
-          <slot name="mobile-item" :item="item" />
+          <div class="d-flex align-start ga-2">
+            <div v-if="showSelect" class="pt-0.5" @click.stop>
+              <v-checkbox-btn
+                :model-value="isMobileSelected(item)"
+                color="primary"
+                density="compact"
+                hide-details
+                @update:model-value="toggleMobileSelect(item, $event)"
+              ></v-checkbox-btn>
+            </div>
+            <div class="flex-grow-1 min-w-0">
+              <slot name="mobile-item" :item="item" />
+            </div>
+          </div>
         </v-card>
       </template>
 
@@ -70,12 +90,36 @@ const props = defineProps<{
   itemsPerPage?: number
   hideDefaultFooter?: boolean
   clickable?: boolean
+  showSelect?: boolean
+  modelValue?: any[]
+  itemValue?: string
   itemKey?: (item: any) => string | number
 }>()
 
 const emit = defineEmits<{
   (e: 'click:row', event: MouseEvent, row: { item: any }): void
+  (e: 'update:modelValue', value: any[]): void
 }>()
+
+function isMobileSelected(item: any): boolean {
+  if (!props.modelValue) return false
+  const valKey = props.itemValue || 'id'
+  const val = item[valKey] !== undefined ? item[valKey] : item
+  return props.modelValue.includes(val)
+}
+
+function toggleMobileSelect(item: any, isSelected: boolean | null) {
+  const current = Array.isArray(props.modelValue) ? [...props.modelValue] : []
+  const valKey = props.itemValue || 'id'
+  const val = item[valKey] !== undefined ? item[valKey] : item
+  if (isSelected) {
+    if (!current.includes(val)) current.push(val)
+  } else {
+    const idx = current.indexOf(val)
+    if (idx !== -1) current.splice(idx, 1)
+  }
+  emit('update:modelValue', current)
+}
 
 defineSlots<{
   default?: (props: Record<string, never>) => VNode[]
@@ -105,5 +149,9 @@ function onClickRow(event: MouseEvent, row: { item: any }) {
    resolver. */
 .linha-clicavel :deep(tbody tr) {
   cursor: pointer;
+}
+
+.selected-card {
+  background-color: rgba(var(--v-theme-primary), 0.08) !important;
 }
 </style>

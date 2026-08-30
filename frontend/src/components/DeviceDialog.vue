@@ -87,17 +87,66 @@
                 variant="outlined"
                 density="comfortable"
                 clearable
+                prepend-inner-icon="mdi-sitemap"
+                :append-inner-icon="canApplySuggestedParent ? 'mdi-auto-fix' : undefined"
                 hint="Indica a qual equipamento (ex: Switch/Roteador) este dispositivo está conectado."
                 persistent-hint
+                @click:append-inner="applySuggestedParent"
               >
-                <template #append-inner>
-                  <v-icon size="small" color="grey-darken-1">mdi-help-circle-outline</v-icon>
-                  <v-tooltip activator="parent" location="top">
-                    Esta associação mapeia o caminho físico da rede para montar a estrutura de
-                    topologia.
-                  </v-tooltip>
+                <template #item="{ props: itemProps, item }">
+                  <v-list-item v-bind="itemProps" :title="item.name">
+                    <template #prepend>
+                      <v-icon :color="item.isInfrastructure ? 'primary' : 'grey'" size="20">
+                        {{ item.icon }}
+                      </v-icon>
+                    </template>
+                    <template #subtitle>
+                      <div class="d-flex align-center ga-1 text-caption">
+                        <span v-if="item.ipAddress" class="font-mono text-grey-darken-1">
+                          {{ item.ipAddress }}
+                        </span>
+                        <span v-if="item.siteName" class="text-grey"> • {{ item.siteName }} </span>
+                      </div>
+                    </template>
+                    <template #append>
+                      <v-chip
+                        size="x-small"
+                        :color="item.isInfrastructure ? 'primary' : 'default'"
+                        variant="tonal"
+                        class="text-uppercase"
+                      >
+                        {{ item.type }}
+                      </v-chip>
+                    </template>
+                  </v-list-item>
+                </template>
+                <template #append-item>
+                  <div class="pa-2 text-caption text-grey text-center border-t">
+                    Priorizando switches e roteadores para topologia e inibição de alertas
+                  </div>
                 </template>
               </v-select>
+
+              <!-- Chip de Sugestão Inteligente (1 Clique) -->
+              <div v-if="canApplySuggestedParent && suggestedParent" class="mt-1">
+                <v-chip
+                  size="small"
+                  color="primary"
+                  variant="tonal"
+                  class="cursor-pointer"
+                  prepend-icon="mdi-lightbulb-on-outline"
+                  append-icon="mdi-arrow-right-circle"
+                  @click="applySuggestedParent"
+                >
+                  <span class="text-caption">
+                    Sugerido: <strong>{{ suggestedParent.name }}</strong>
+                    <span v-if="suggestedParent.ipAddress"> ({{ suggestedParent.ipAddress }})</span>
+                  </span>
+                  <v-tooltip activator="parent" location="bottom">
+                    Clique para definir {{ suggestedParent.name }} como dispositivo pai
+                  </v-tooltip>
+                </v-chip>
+              </div>
             </v-col>
 
             <!--
@@ -750,9 +799,124 @@ function applySuggestedName(): void {
   nameManuallyEdited.value = true
 }
 
+function getDeviceIcon(type?: string): string {
+  switch (type?.toLowerCase()) {
+    case 'router':
+    case 'gateway':
+      return 'mdi-router-network'
+    case 'switch':
+    case 'unmanaged_switch':
+      return 'mdi-hub'
+    case 'firewall':
+      return 'mdi-shield-network'
+    case 'ap':
+    case 'access_point':
+      return 'mdi-access-point'
+    case 'server':
+      return 'mdi-server'
+    case 'printer':
+      return 'mdi-printer'
+    default:
+      return 'mdi-lan'
+  }
+}
+
+const INFRASTRUCTURE_TYPES = new Set([
+  'router',
+  'switch',
+  'firewall',
+  'gateway',
+  'unmanaged_switch',
+  'ap',
+  'access_point',
+])
+
 const availableParentDevices = computed(() => {
-  return devicesStore.devices.filter((d) => d.id !== props.deviceToEdit?.id)
+  const currentId = props.deviceToEdit?.id
+  const currentSiteId = formModel.siteId
+
+  const list = devicesStore.devices
+    .filter((d) => d.id !== currentId)
+    .map((d) => {
+      const isInfra = INFRASTRUCTURE_TYPES.has(d.type?.toLowerCase() || '')
+      const sameSite = currentSiteId ? d.siteId === currentSiteId : false
+      return {
+        id: d.id,
+        name: d.name,
+        ipAddress: d.ipAddress || '',
+        type: d.type,
+        siteId: d.siteId,
+        siteName: d.site?.name || '',
+        isInfrastructure: isInfra,
+        sameSite,
+        icon: getDeviceIcon(d.type),
+      }
+    })
+
+  // Ordenação: Infraestrutura do mesmo site -> Outra infraestrutura -> Mesmo site outros -> Restante
+  return list.sort((a, b) => {
+    if (a.sameSite !== b.sameSite && a.isInfrastructure === b.isInfrastructure) {
+      return a.sameSite ? -1 : 1
+    }
+    if (a.isInfrastructure !== b.isInfrastructure) {
+      return a.isInfrastructure ? -1 : 1
+    }
+    return a.name.localeCompare(b.name)
+  })
 })
+
+const suggestedParent = computed(() => {
+  const currentId = props.deviceToEdit?.id
+  const ip = formModel.ipAddress.trim()
+  const siteId = formModel.siteId
+  const candidates = availableParentDevices.value.filter((d) => d.id !== currentId)
+  if (candidates.length === 0) return null
+
+  // 1. Tentar encontrar por sub-rede comum (ex: 192.168.1.x)
+  if (ip && ip.includes('.')) {
+    const parts = ip.split('.')
+    if (parts.length === 4) {
+      const subnetPrefix = `${parts[0]}.${parts[1]}.${parts[2]}.`
+      // Procurar gateway / infraestrutura na mesma sub-rede
+      const sameSubnetInfra = candidates.find(
+        (c) =>
+          c.isInfrastructure &&
+          c.ipAddress &&
+          c.ipAddress.startsWith(subnetPrefix) &&
+          (c.ipAddress.endsWith('.1') ||
+            c.ipAddress.endsWith('.254') ||
+            c.type === 'router' ||
+            c.type === 'switch')
+      )
+      if (sameSubnetInfra) return sameSubnetInfra
+
+      const anySubnetInfra = candidates.find(
+        (c) => c.isInfrastructure && c.ipAddress && c.ipAddress.startsWith(subnetPrefix)
+      )
+      if (anySubnetInfra) return anySubnetInfra
+    }
+  }
+
+  // 2. Tentar encontrar por Site comum (primeiro switch/roteador do mesmo site)
+  if (siteId) {
+    const siteInfra = candidates.find((c) => c.siteId === siteId && c.isInfrastructure)
+    if (siteInfra) return siteInfra
+  }
+
+  // 3. Fallback: Primeiro roteador/switch global
+  const globalRouter = candidates.find((c) => c.type === 'router' || c.type === 'switch')
+  return globalRouter || null
+})
+
+const canApplySuggestedParent = computed(
+  () => Boolean(suggestedParent.value) && formModel.parentId !== suggestedParent.value?.id
+)
+
+function applySuggestedParent(): void {
+  if (suggestedParent.value) {
+    formModel.parentId = suggestedParent.value.id
+  }
+}
 
 /**
  * As opções, com a conclusão do sistema no subtítulo do "Automático".

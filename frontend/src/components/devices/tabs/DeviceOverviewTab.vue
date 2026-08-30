@@ -30,9 +30,99 @@
             title="Data de Cadastro"
             :subtitle="detailStore.device?.createdAt || 'Desconhecida'"
           ></v-list-item>
+          <v-list-item title="Está atrás de (Dispositivo Pai)">
+            <template #subtitle>
+              <router-link
+                v-if="detailStore.device?.parent"
+                :to="'/devices/' + detailStore.device.parent.id"
+                class="text-decoration-none text-primary font-weight-medium d-inline-flex align-center ga-1"
+              >
+                <v-icon size="16">mdi-sitemap</v-icon>
+                {{ detailStore.device.parent.name }}
+              </router-link>
+              <span v-else class="text-grey">Nenhum (Nó de Topo / Raiz)</span>
+            </template>
+          </v-list-item>
         </v-list>
       </v-col>
     </v-row>
+
+    <!-- Caminho de Rede & Topologia (Diagnóstico de Rota) -->
+    <v-card variant="outlined" class="rounded-lg pa-4 mt-6">
+      <div class="d-flex align-center justify-space-between mb-3">
+        <div class="text-subtitle-1 font-weight-bold d-flex align-center ga-2">
+          <v-icon color="primary">mdi-transit-connection-variant</v-icon>
+          Caminho de Rede & Diagnóstico Hierárquico
+        </div>
+        <v-chip size="x-small" color="primary" variant="tonal">Topologia & RCA</v-chip>
+      </div>
+
+      <div class="d-flex align-center flex-wrap ga-3 pa-3 bg-surface-variant-subtle rounded-lg">
+        <!-- Hop 1: NetMonitor Server -->
+        <div class="d-flex align-center ga-2 pa-2 rounded bg-surface border">
+          <v-avatar color="indigo" size="32">
+            <v-icon color="white" size="18">mdi-server-security</v-icon>
+          </v-avatar>
+          <div>
+            <div class="text-caption font-weight-bold">NetMonitor</div>
+            <div class="text-caption text-grey">Servidor Central</div>
+          </div>
+          <v-icon color="success" size="16" class="ml-1">mdi-check-circle</v-icon>
+        </div>
+
+        <v-icon color="grey-darken-1" size="20">mdi-arrow-right-bold</v-icon>
+
+        <!-- Hop 2: Parent Device (if configured) -->
+        <template v-if="detailStore.device?.parent">
+          <router-link
+            :to="'/devices/' + detailStore.device.parent.id"
+            class="text-decoration-none"
+          >
+            <div class="d-flex align-center ga-2 pa-2 rounded bg-surface border">
+              <v-avatar color="primary" size="32">
+                <v-icon color="white" size="18">mdi-router-network</v-icon>
+              </v-avatar>
+              <div>
+                <div class="text-caption font-weight-bold text-primary">
+                  {{ detailStore.device.parent.name }}
+                </div>
+                <div class="text-caption text-grey">Dispositivo Pai (Uplink)</div>
+              </div>
+              <v-icon color="primary" size="16" class="ml-1">mdi-open-in-new</v-icon>
+            </div>
+          </router-link>
+
+          <v-icon color="grey-darken-1" size="20">mdi-arrow-right-bold</v-icon>
+        </template>
+
+        <!-- Hop 3: Current Device -->
+        <div class="d-flex align-center ga-2 pa-2 rounded bg-surface border">
+          <v-avatar :color="getStatusColor(detailStore.device?.status)" size="32">
+            <v-icon color="white" size="18">mdi-lan</v-icon>
+          </v-avatar>
+          <div>
+            <div class="text-caption font-weight-bold">{{ detailStore.device?.name }}</div>
+            <div class="text-caption text-grey">{{ detailStore.device?.ipAddress || 'Host' }}</div>
+          </div>
+          <v-chip
+            :color="getStatusColor(detailStore.device?.status)"
+            size="x-small"
+            variant="tonal"
+            class="ml-1"
+          >
+            {{ (detailStore.device?.status || 'UNKNOWN').toUpperCase() }}
+          </v-chip>
+        </div>
+      </div>
+
+      <div class="text-caption text-medium-emphasis mt-3 d-flex align-center ga-1">
+        <v-icon size="14" color="info">mdi-information-outline</v-icon>
+        <span>
+          A hierarquia de topologia inibe tempestades de alarmes: se o dispositivo pai cair, as
+          notificações deste equipamento serão suprimidas para alertar apenas a causa raiz.
+        </span>
+      </div>
+    </v-card>
 
     <!-- Saúde do equipamento -->
     <template v-if="canHealth">
@@ -298,6 +388,7 @@ import {
 import { useMonitorsStore } from '@/stores/monitors'
 import DeviceHealthSummary from '@/components/devices/DeviceHealthSummary.vue'
 import { formatBps, formatBytes, formatMeasuredValue } from '@/utils/formatters'
+import { getStatusColor } from '@/utils/monitorPresentation'
 import { useInfiniteList } from '@/composables/useInfiniteList'
 import type { MonitorUptimeResponse } from '@/bindings/MonitorUptimeResponse'
 
