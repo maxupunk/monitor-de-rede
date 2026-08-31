@@ -79,6 +79,10 @@ pub enum ResourceType {
     VpnPeer,
     AlertRule,
     MaintenanceWindow,
+    DockerContainer,
+    DockerVolume,
+    DockerNetwork,
+    DockerImage,
 }
 
 impl ResourceType {
@@ -94,6 +98,10 @@ impl ResourceType {
             ResourceType::VpnPeer => "vpn_peer",
             ResourceType::AlertRule => "alert_rule",
             ResourceType::MaintenanceWindow => "maintenance_window",
+            ResourceType::DockerContainer => "docker_container",
+            ResourceType::DockerVolume => "docker_volume",
+            ResourceType::DockerNetwork => "docker_network",
+            ResourceType::DockerImage => "docker_image",
         }
     }
 }
@@ -118,6 +126,10 @@ impl std::str::FromStr for ResourceType {
             "vpn_peer" | "vpnpeer" => Ok(ResourceType::VpnPeer),
             "alert_rule" | "alertrule" => Ok(ResourceType::AlertRule),
             "maintenance_window" | "maintenancewindow" => Ok(ResourceType::MaintenanceWindow),
+            "docker_container" | "dockercontainer" => Ok(ResourceType::DockerContainer),
+            "docker_volume" | "dockervolume" => Ok(ResourceType::DockerVolume),
+            "docker_network" | "dockernetwork" => Ok(ResourceType::DockerNetwork),
+            "docker_image" | "dockerimage" => Ok(ResourceType::DockerImage),
             _ => Err(AppError::validation(format!(
                 "Tipo de recurso inválido: {s}"
             ))),

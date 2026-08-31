@@ -36,6 +36,25 @@ mkdir -p "${DATA_DIR}" "${WG_CONFIG_DIR}"
 chown -R "${APP_USER}:${APP_USER}" "${DATA_DIR}" "${WG_CONFIG_DIR}" 2>/dev/null \
   || log "aviso: não foi possível ajustar o dono de ${DATA_DIR}/${WG_CONFIG_DIR}"
 
+# O socket da Docker Engine costuma pertencer a um GID diferente em cada host.
+# O filesystem do container é somente leitura, portanto /etc/group não pode ser
+# alterado com usermod. Guardamos o GID para passá-lo diretamente ao setpriv:
+# isso mantém a aplicação não-root, evita chmod 666 e funciona com qualquer
+# GID do host. O acesso continua equivalendo a administração do host, por isso
+# a API aplica autorização e auditoria nas operações mutáveis.
+DOCKER_SOCKET="${DOCKER_SOCKET:-/var/run/docker.sock}"
+APP_GROUPS=$(id -G "${APP_USER}" | tr ' ' ',')
+if [ -S "${DOCKER_SOCKET}" ]; then
+  docker_gid=$(stat -c '%g' "${DOCKER_SOCKET}" 2>/dev/null || true)
+  if [ -n "${docker_gid}" ]; then
+    case ",${APP_GROUPS}," in
+      *,"${docker_gid}",*) ;;
+      *) APP_GROUPS="${APP_GROUPS},${docker_gid}" ;;
+    esac
+    log "socket Docker liberado para ${APP_USER} pelo GID ${docker_gid}"
+  fi
+fi
+
 # --- 2. watcher do WireGuard ------------------------------------------------
 # CAP_NET_ADMIN é o bit 12 do CapEff. Sem ele o `wg-quick` não cria interface
 # nenhuma, e subir o watcher só encheria o log de falha a cada 5 s — é o caso
@@ -89,5 +108,5 @@ trap cleanup TERM INT
 # `--inh-caps=-all` esvazia o conjunto herdável: nem por engano a aplicação
 # recebe o NET_ADMIN que o watcher usa.
 log "iniciando ${1:-backend-cli} como ${APP_USER}"
-exec setpriv --reuid="${APP_USER}" --regid="${APP_USER}" --init-groups \
+exec setpriv --reuid="${APP_USER}" --regid="${APP_USER}" --groups="${APP_GROUPS}" \
              --inh-caps=-all -- "$@"

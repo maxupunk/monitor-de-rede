@@ -402,6 +402,17 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
   - O modo é selecionado no `.env` por `COMPOSE_FILE`, com o mesmo separador em Windows e Linux.
   - O README documenta ativação, portas, endereço usado pelos equipamentos, firewall, validação, retorno à bridge e o catálogo dos recursos disponíveis.
 
+- [x] **Gerenciador e monitoramento Docker ponta a ponta** 🟢 Concluído
+  - **Arquivos:** `backend/src/services/docker/`, `backend/src/controllers/docker.rs`, `backend/src/{dtos,views}/docker.rs`, `frontend/src/pages/docker/`, `frontend/src/{services,stores}/docker.ts`, `docker-compose.yml`, `docker/entrypoint.sh`, ADR 010.
+  - **Implementado:**
+    - Cliente nativo da Docker Engine com timeouts, erros sanitizados e nenhum uso do CLI `docker`.
+    - Visão geral da Engine e métricas de CPU, memória, rede, I/O e PIDs coletadas concorrentemente com cache curto.
+    - Inventário, inspeção, logs e ciclo de vida de containers; volumes com exportação `.tar.gz` em streaming; conexão e remoção de redes; inspeção, remoção e prune de imagens.
+    - Valores sensíveis de ambiente são ocultados no backend antes de atravessar a API.
+    - Leitura para perfis autenticados; controle da Engine e exportação de dados apenas para administradores, com trilha de auditoria.
+    - Interface responsiva com visão geral, containers, volumes, redes e imagens, estados de indisponibilidade e confirmação de ações destrutivas.
+    - Testes unitários Rust, contratos HTTP e testes Vitest do service/store.
+
 - [x] **Remoção de referências e caminhos de migração sem uso** 🟢 Concluído
   - Removidos o importador de segredos, o fallback de variável de cifra e os documentos dedicados à transição de backend.
   - A documentação descreve apenas a arquitetura e os contratos atuais.

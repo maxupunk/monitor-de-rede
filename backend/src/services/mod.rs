@@ -9,6 +9,7 @@ pub mod auth;
 pub mod backup;
 pub mod devices;
 pub mod discovery;
+pub mod docker;
 pub mod events;
 pub mod maintenance;
 pub mod maintenance_windows;

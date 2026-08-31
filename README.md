@@ -20,6 +20,7 @@ monitores, banco (SQLite) e servidor WireGuard.
 | **VPN WireGuard** | Servidor e peers, geração de configurações e QR Code, rotação de chaves, dicas de firewall, telemetria do túnel e acesso a redes remotas. |
 | **Probes remotos** | Agentes autenticados para monitorar outros sites, fila persistente, heartbeat, buffer quando o servidor está indisponível e retomada automática. |
 | **Ferramentas de rede** | Scanner de portas, consultas e benchmark DNS e diagnóstico complementar quando ICMP é filtrado. |
+| **Docker** | Visão geral da Engine, containers e métricas, logs, volumes e exportação, redes, imagens e operações administrativas auditadas. |
 | **Operação e segurança** | Usuários com perfis `admin`, `operator` e `viewer`, auditoria, backup e restauração das configurações, primeiro acesso protegido e segredos cifrados em repouso. |
 | **Plataforma** | SPA instalável como PWA, eventos via SSE, SQLite por padrão, PostgreSQL opcional e automonitoramento do próprio servidor. |
 
@@ -48,6 +49,42 @@ docker compose up -d --build
 
 Interface e API na mesma porta: <http://localhost:3333>. A UDP 51820 é do
 WireGuard e só importa a quem usa a VPN.
+
+### Gerenciamento Docker
+
+O compose monta `/var/run/docker.sock` no NetMonitor e a página **Docker** usa
+a API nativa da Engine; o container não instala nem executa o CLI `docker`.
+Consultas de inventário e métricas ficam disponíveis a todos os perfis
+autenticados. Iniciar, parar, reiniciar ou remover containers, alterar redes,
+remover volumes/imagens, exportar dados de volumes e executar limpeza exigem
+administrador e entram na trilha de auditoria.
+
+> O socket Docker concede controle equivalente a administrador do host. Em uma
+> instalação que precise apenas de monitoramento de rede, defina
+> `DOCKER_ENABLED=false` e remova a montagem do socket em
+> [`docker-compose.yml`](docker-compose.yml).
+
+O entrypoint descobre o GID real do socket e o aplica como grupo suplementar do
+processo `app`; não altera o filesystem somente leitura, não usa `chmod 666` e
+a API continua sem capabilities Linux. A Engine
+pode ficar indisponível sem derrubar o restante do sistema: as telas distinguem
+explicitamente indisponibilidade de inventário vazio.
+
+Se a tela informar que a Engine está indisponível, configure a variável no
+arquivo `.env` que fica **na mesma pasta do `docker-compose.yml`**:
+
+```env
+DOCKER_ENABLED=true
+```
+
+Confirme também a montagem `/var/run/docker.sock:/var/run/docker.sock` no
+serviço `netmonitor` e aplique a configuração com:
+
+```bash
+docker compose up -d --force-recreate netmonitor
+docker compose exec netmonitor ls -l /var/run/docker.sock
+docker compose logs --tail=100 netmonitor
+```
 
 ### Usar a rede do host
 

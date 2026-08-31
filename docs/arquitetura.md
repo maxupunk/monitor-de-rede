@@ -77,6 +77,13 @@ dois — de container para processo vizinho —, não o contrato. O entrypoint c
 a aplicação com `setpriv --inh-caps=-all`: o `NET_ADMIN` concedido ao container
 não chega a ela.
 
+Quando o módulo Docker está habilitado, a API acessa a **Docker Engine API**
+diretamente pelo socket montado, via `bollard`; não chama `docker`, `docker exec`
+nem shell. Essa montagem é uma autoridade separada das capabilities Linux e
+equivale a administração do host. Por isso mutações e exportação de volume são
+exclusivas de `admin` e auditadas. A decisão e as consequências estão na
+[ADR 010](adr/010-docker-engine-api.md).
+
 ### Estáticos
 
 O `dist` da SPA é copiado para `/app/web` e servido pelo `ServeDir`:
@@ -382,6 +389,17 @@ POST /api/port-scan
 POST /api/dns/lookup | /benchmark          GET /api/dns/performance
 GET|POST /api/dns-servers                  PUT|DELETE /api/dns-servers/{id}
 
+GET  /api/docker/status | /metrics
+GET  /api/docker/containers | /containers/{id} | /containers/{id}/logs
+POST /api/docker/containers/{id}/start | /stop | /restart
+DELETE /api/docker/containers/{id}
+GET  /api/docker/volumes | /volumes/{name} | /volumes/{name}/export
+DELETE /api/docker/volumes/{name}
+GET|POST /api/docker/networks              GET|DELETE /api/docker/networks/{id}
+POST /api/docker/networks/{id}/connect | /disconnect
+GET  /api/docker/images | /images/{id}     DELETE /api/docker/images/{id}
+POST /api/docker/images/prune
+
 GET|PUT  /api/vpn/server                   POST /api/vpn/server/preflight | /detect-endpoint
 GET|POST /api/vpn/peers                    PATCH|DELETE /api/vpn/peers/{id}
 GET      /api/vpn/peers/next-ip            GET /api/vpn/peers/{id}/config | /qrcode
@@ -477,6 +495,10 @@ exatamente esse o bug corrigido pela [ADR 007](adr/007-scheduler-processo-unico.
   `admin` tem acesso total e gerencia usuários; `operator` lê e escreve os
   recursos operacionais; `viewer` possui somente leitura. Contas inativas são
   recusadas em toda requisição e o último administrador ativo é protegido.
+- O socket Docker é opt-out (`DOCKER_ENABLED=false` mais remoção da
+  montagem). Leitura de inventário não expõe valores de variáveis cujo nome
+  indica senha, token, segredo, chave privada ou credencial. Controle da Engine
+  e exportação de volumes exigem `admin` e geram auditoria.
 
 ## 11-A. O próprio NetMonitor como dispositivo
 

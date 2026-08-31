@@ -283,6 +283,17 @@ const navItems = computed<NavItem[]>(() => [
   { title: 'Eventos', icon: 'mdi-history', to: '/events' },
   { title: 'Logs', icon: 'mdi-text-box-search-outline', to: '/logs' },
   {
+    title: 'Docker',
+    icon: 'mdi-docker',
+    children: [
+      { title: 'Visão geral', icon: 'mdi-view-dashboard-outline', to: '/docker' },
+      { title: 'Containers', icon: 'mdi-cube-outline', to: '/docker/containers' },
+      { title: 'Volumes', icon: 'mdi-database-outline', to: '/docker/volumes' },
+      { title: 'Redes', icon: 'mdi-lan', to: '/docker/networks' },
+      { title: 'Imagens', icon: 'mdi-layers-outline', to: '/docker/images' },
+    ],
+  },
+  {
     title: 'Infraestrutura',
     icon: 'mdi-server-network',
     children: [

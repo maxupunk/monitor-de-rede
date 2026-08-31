@@ -37,6 +37,8 @@ tower-http = { version = "0.6", features = ["fs", "set-header"] }
 futures = { version = "0.3" }
 async-trait = { version = "0.1" }
 axum = { version = "0.8" }
+bollard = { version = "0.18.1", default-features = false, features = ["http", "pipe"] }
+async-compression = { version = "0.4", default-features = false, features = ["tokio", "gzip"] }
 tracing = { version = "0.1" }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 regex = { version = "1.11" }

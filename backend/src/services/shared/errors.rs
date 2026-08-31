@@ -50,6 +50,9 @@ pub enum AppError {
     #[error("{0}")]
     Forbidden(String),
 
+    #[error("{0}")]
+    ServiceUnavailable(String),
+
     #[error("{msg}")]
     RateLimited { msg: String, retry_after: u64 },
 
@@ -71,6 +74,7 @@ impl AppError {
             Self::Conflict(_) => StatusCode::CONFLICT,
             Self::Unauthorized(_) => StatusCode::UNAUTHORIZED,
             Self::Forbidden(_) => StatusCode::FORBIDDEN,
+            Self::ServiceUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             Self::RateLimited { .. } => StatusCode::TOO_MANY_REQUESTS,
             Self::BusinessRule(_) => StatusCode::BAD_REQUEST,
             Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -92,6 +96,9 @@ impl AppError {
     }
     pub fn forbidden(msg: impl Into<String>) -> Self {
         Self::Forbidden(msg.into())
+    }
+    pub fn service_unavailable(msg: impl Into<String>) -> Self {
+        Self::ServiceUnavailable(msg.into())
     }
     pub fn business_rule(msg: impl Into<String>) -> Self {
         Self::BusinessRule(msg.into())
@@ -250,6 +257,7 @@ mod tests {
             (AppError::conflict("x"), 409),
             (AppError::unauthorized("x"), 401),
             (AppError::forbidden("x"), 403),
+            (AppError::service_unavailable("x"), 503),
             (AppError::business_rule("x"), 400),
             (AppError::rate_limited("x", 30), 429),
             (AppError::Internal(anyhow::anyhow!("x")), 500),

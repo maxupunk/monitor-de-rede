@@ -8,6 +8,7 @@ pub mod devices;
 pub mod discovery;
 pub mod dns;
 pub mod dns_servers;
+pub mod docker;
 pub mod events;
 pub mod logs;
 pub mod maintenance_windows;

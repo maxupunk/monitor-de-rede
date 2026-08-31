@@ -185,6 +185,21 @@ class ApiService {
     return this.handleResponse<T>(response, path)
   }
 
+  async download(path: string, options: ApiRequestOptions = {}): Promise<Blob> {
+    const response = await this.doFetch(
+      path,
+      {
+        method: 'GET',
+        headers: this.getHeaders(),
+      },
+      options
+    )
+    if (!response.ok) {
+      await this.handleResponse(response, path)
+    }
+    return response.blob()
+  }
+
   /**
    * POST que retorna a Response crua (sem consumir/parsear o corpo), para endpoints que
    * transmitem a resposta em streaming (ex: NDJSON) em vez de um único JSON final.

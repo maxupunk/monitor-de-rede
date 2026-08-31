@@ -13,3 +13,4 @@ decisão cria.
 | [007](007-scheduler-processo-unico.md) | Scheduler: laço em processo único; deps de processo em `after_context` | — | aceito |
 | [008](008-syslog-parser.md) | Syslog: `syslog_loose` com resgate do `<pri>` e severidade por tópico | SPIKE-06 | aceito |
 | [009](009-device-adapters.md) | Plataformas: registro único com `DeviceAdapter` e adapters especializados | — | aceito |
+| [010](010-docker-engine-api.md) | Docker: API nativa pelo socket, com mutações administrativas e auditadas | — | aceito |

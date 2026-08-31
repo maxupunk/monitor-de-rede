@@ -15,6 +15,7 @@ mod device_history_cleanup;
 mod device_operating_system;
 mod devices_monitors_crud;
 mod dns_batch_provision;
+mod docker;
 mod health_rules;
 mod maintenance_windows;
 mod prepare_data;

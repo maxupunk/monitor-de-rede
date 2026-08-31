@@ -126,11 +126,20 @@ services:
       # linha com os três índices (ADR 008).
       RETENTION_LOGS_DAYS: ${RETENTION_LOGS_DAYS:-7}
       RETENTION_LOGS_MAX_MB: ${RETENTION_LOGS_MAX_MB:-4096}
+      # Gerenciador Docker. O socket abaixo concede controle administrativo da
+      # Engine ao processo da API; por isso as mutações exigem perfil admin e
+      # entram na trilha de auditoria. Defina false para desativar a
+      # integração sem precisar reconstruir a imagem.
+      DOCKER_ENABLED: ${DOCKER_ENABLED:-true}
     volumes:
       # Um volume só: o banco em /data/netmonitor.sqlite e a configuração do
       # túnel em /data/wg. O `wg0.conf` é reescrito a partir do banco a cada
       # mudança de peer, então o que precisa mesmo sobreviver é o banco.
       - netmonitor-data:/data
+      # API nativa da Engine: não instala nem executa o CLI `docker`.
+      # Remova esta montagem junto com DOCKER_ENABLED=false se a instalação
+      # não for administrar o host Docker.
+      - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
     read_only: true
     tmpfs:

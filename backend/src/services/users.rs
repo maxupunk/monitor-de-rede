@@ -57,6 +57,11 @@ impl Role {
     pub const fn can_manage_users(self) -> bool {
         matches!(self, Self::Admin)
     }
+
+    #[must_use]
+    pub const fn can_manage_docker(self) -> bool {
+        matches!(self, Self::Admin)
+    }
 }
 
 impl FromStr for Role {
@@ -83,6 +88,14 @@ pub fn request_is_allowed(role: Role, method: &Method, path: &str) -> bool {
 
     if path == "/api/push" || path.starts_with("/api/push/") {
         return true;
+    }
+
+    if path == "/api/docker" || path.starts_with("/api/docker/") {
+        if path.ends_with("/export") {
+            return role.can_manage_docker();
+        }
+        return matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS)
+            || role.can_manage_docker();
     }
 
     matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS) || role.can_write()

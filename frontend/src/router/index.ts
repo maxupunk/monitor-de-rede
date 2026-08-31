@@ -52,6 +52,37 @@ const routes = [
       },
       { path: 'events', name: 'events', component: () => import('../pages/EventsPage.vue') },
       { path: 'logs', name: 'logs', component: () => import('../pages/LogsPage.vue') },
+      {
+        path: 'docker',
+        component: () => import('../pages/docker/DockerLayout.vue'),
+        children: [
+          {
+            path: '',
+            name: 'docker-overview',
+            component: () => import('../pages/docker/DockerOverviewPage.vue'),
+          },
+          {
+            path: 'containers',
+            name: 'docker-containers',
+            component: () => import('../pages/docker/DockerContainersPage.vue'),
+          },
+          {
+            path: 'volumes',
+            name: 'docker-volumes',
+            component: () => import('../pages/docker/DockerVolumesPage.vue'),
+          },
+          {
+            path: 'networks',
+            name: 'docker-networks',
+            component: () => import('../pages/docker/DockerNetworksPage.vue'),
+          },
+          {
+            path: 'images',
+            name: 'docker-images',
+            component: () => import('../pages/docker/DockerImagesPage.vue'),
+          },
+        ],
+      },
       { path: 'probes', name: 'probes', component: () => import('../pages/ProbesPage.vue') },
       {
         path: 'vpn',
