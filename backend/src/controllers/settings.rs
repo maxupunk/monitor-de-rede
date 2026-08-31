@@ -9,6 +9,7 @@ use loco_rs::prelude::*;
 use crate::services::{
     onboarding,
     preferences::{self, Preferences},
+    settings::database,
     shared::errors::AppResult,
     syslog::{nat::NatDetector, SyslogService},
 };
@@ -42,6 +43,13 @@ async fn complete_onboarding(State(ctx): State<AppContext>) -> AppResult<Respons
     Ok(format::json(onboarding::mark_completed(&ctx.db).await?)?)
 }
 
+/// `GET /api/settings/database-size` — tipo e tamanho do banco de dados.
+async fn database_size(State(ctx): State<AppContext>) -> AppResult<Response> {
+    Ok(format::json(
+        database::database_info(&ctx.db, &ctx.config.database.uri).await?,
+    )?)
+}
+
 fn detector(ctx: &AppContext) -> NatDetector {
     SyslogService::from_context(ctx).map_or_else(NatDetector::detect, |servico| {
         servico.ingestor.resolver().nat().clone()
@@ -54,4 +62,5 @@ pub fn routes() -> Routes {
         .add("/", get(show).put(update))
         .add("/onboarding", get(onboarding_status))
         .add("/onboarding/complete", post(complete_onboarding))
+        .add("/database-size", get(database_size))
 }

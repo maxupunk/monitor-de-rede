@@ -20,6 +20,7 @@ pub mod onboarding;
 pub mod preferences;
 pub mod probes;
 pub mod server_addresses;
+pub mod settings;
 pub mod shared;
 pub mod snmp;
 pub mod syslog;

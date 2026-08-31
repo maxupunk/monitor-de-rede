@@ -9,6 +9,8 @@ import { useDiscoveryStore } from './discovery'
 import { useDeviceDetailStore } from './deviceDetail'
 import { useTopologyStore } from './topology'
 import { useVpnStore } from './vpn'
+import { useMaintenanceWindowsStore } from './maintenanceWindows'
+import { useDockerStore } from './docker'
 
 export interface RealtimeEventPayload {
   /** Nome do evento publicado pelo backend (ex.: `monitor:result`) */
@@ -282,6 +284,18 @@ export const useEventsStore = defineStore('events', () => {
         // Novos enlaces exigem recarregar o grafo: não dá para deduzir
         // a geometria do mapa a partir do evento.
         scheduleRefresh('topology', () => topologyStore.fetchTopology())
+        break
+      }
+
+      case 'maintenance_windows:updated': {
+        const maintenanceStore = useMaintenanceWindowsStore()
+        scheduleRefresh('maintenance_windows', () => maintenanceStore.fetchWindows())
+        break
+      }
+
+      case 'docker:updated': {
+        const dockerStore = useDockerStore()
+        scheduleRefresh('docker', () => dockerStore.refreshAll())
         break
       }
     }

@@ -341,6 +341,20 @@ fn default_unmanaged_port_count() -> u32 {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct TopologyLayoutNodeInput {
+    pub device_id: i64,
+    pub x: f64,
+    pub y: f64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopologyLayoutInput {
+    pub nodes: Vec<TopologyLayoutNodeInput>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DashboardLayoutInput {
     pub layout: Vec<serde_json::Value>,
     pub client_id: Option<String>,

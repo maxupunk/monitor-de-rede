@@ -18,6 +18,7 @@ use crate::{
         audit::{
             AuditAction, AuditActor, AuditChanges, AuditEntryInput, AuditService, ResourceType,
         },
+        events::EventBus,
         shared::errors::{AppError, AppResult},
         vpn::{
             access_control::{audit, sensitive_endpoint_limiter, VpnAuditAction, VpnAuditEntry},
@@ -219,6 +220,7 @@ async fn store(
         },
     )
     .await?;
+    emit_vpn_peers_updated(&ctx).await;
 
     let requester = requester_id(&headers);
     audit_entry(
@@ -285,6 +287,7 @@ async fn update(
     let old_response = VpnPeerResponse::from(&old);
 
     let (peer, device) = peer_service::rename(&ctx.db, id, name).await?;
+    emit_vpn_peers_updated(&ctx).await;
     let device = match device {
         Some(device) => serde_json::to_value(present_device(&ctx.db, device).await?).ok(),
         None => None,
@@ -391,6 +394,7 @@ async fn rotate(
     let old_response = VpnPeerResponse::from(&old);
 
     let (peer, artifact) = peer_service::rotate_keys(&ctx.db, id).await?;
+    emit_vpn_peers_updated(&ctx).await;
     audit_entry(
         VpnAuditAction::KeyRotation,
         Some(peer.id),
@@ -447,6 +451,7 @@ async fn destroy(
     let old_label = format!("Peer VPN #{}", old.id);
 
     peer_service::revoke(&ctx.db, id).await?;
+    emit_vpn_peers_updated(&ctx).await;
     audit_entry(
         VpnAuditAction::PeerRevoked,
         Some(id),
@@ -474,6 +479,17 @@ async fn destroy(
     Ok(format::json(VpnPeerRevokedResponse {
         message: "Peer revogado. O acesso foi cortado imediatamente.".into(),
     })?)
+}
+
+async fn emit_vpn_peers_updated(ctx: &AppContext) {
+    if let Ok(bus) = EventBus::from_context(ctx) {
+        if let Err(error) = bus
+            .publish(&ctx.db, "vpn:peers_updated", serde_json::json!({}))
+            .await
+        {
+            tracing::warn!(%error, "falha ao publicar vpn:peers_updated");
+        }
+    }
 }
 
 pub fn routes() -> Routes {

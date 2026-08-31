@@ -362,7 +362,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import VpnPeerWizard from '@/components/VpnPeerWizard.vue'
 import VpnScriptViewer from '@/components/VpnScriptViewer.vue'
 import VpnFirewallHintsDialog from '@/components/VpnFirewallHintsDialog.vue'
@@ -379,12 +379,10 @@ import {
   vpnStatusLabel,
   type VpnPeer,
 } from '@/stores/vpn'
-import { useEventsStore } from '@/stores/events'
 import { formatBytes, formatRelativeTime } from '@/utils/formatters'
 import { confirm } from '@/composables/useConfirm'
 
 const vpnStore = useVpnStore()
-const eventsStore = useEventsStore()
 const { detalheAberto, monitorEmDetalhe, abrirDetalhe } = useMonitorDetail()
 
 const wizardOpen = ref(false)
@@ -406,25 +404,8 @@ const headers = [
   { title: 'Ações', key: 'actions', sortable: false, width: '200px' },
 ]
 
-/**
- * Rede de segurança: o status vem do SSE (`vpn:peers_updated`), então uma queda
- * silenciosa da conexão congela a tela sem nenhum sinal para o operador. Só
- * busca de novo enquanto o stream estiver fora do ar — com ele de pé, este
- * intervalo não gera request nenhum.
- */
-const FALLBACK_REFRESH_MS = 30_000
-let fallbackTimer: ReturnType<typeof setInterval> | null = null
-
 onMounted(async () => {
   await Promise.all([vpnStore.fetchServer(), vpnStore.fetchPeers()])
-
-  fallbackTimer = setInterval(() => {
-    if (!eventsStore.isConnected) vpnStore.fetchPeers()
-  }, FALLBACK_REFRESH_MS)
-})
-
-onUnmounted(() => {
-  if (fallbackTimer) clearInterval(fallbackTimer)
 })
 
 const profileLabel = (profile: string) => vpnProfileLabel(profile, vpnStore.profiles)

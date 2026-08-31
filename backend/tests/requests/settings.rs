@@ -245,6 +245,22 @@ async fn a_rota_exige_sessao() {
 
 #[tokio::test]
 #[serial]
+async fn database_size_retorna_tamanho_e_tipo_do_banco() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        autenticado(&mut request, &ctx).await;
+
+        let resposta = request.get("/api/settings/database-size").await;
+        assert_eq!(resposta.status_code(), 200, "{}", resposta.text());
+        let corpo: serde_json::Value = serde_json::from_str(&resposta.text()).unwrap();
+
+        assert!(corpo["sizeBytes"].as_i64().is_some_and(|v| v > 0));
+        assert_eq!(corpo["dbType"], "sqlite");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
 async fn onboarding_status_e_conclusao_funcionam_corretamente() {
     request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
         autenticado(&mut request, &ctx).await;

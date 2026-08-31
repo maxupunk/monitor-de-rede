@@ -74,6 +74,16 @@ export interface UnmanagedSwitchPayload {
   networkId?: number | null
 }
 
+export interface TopologyLayoutNode {
+  deviceId: number
+  x: number
+  y: number
+}
+
+export interface TopologyLayout {
+  nodes: TopologyLayoutNode[]
+}
+
 export const useTopologyStore = defineStore('topology', () => {
   const nodes = ref<TopologyNode[]>([])
   const edges = ref<TopologyEdge[]>([])
@@ -222,6 +232,36 @@ export const useTopologyStore = defineStore('topology', () => {
     }
   }
 
+  async function fetchTopologyLayout(siteId?: number | null): Promise<TopologyLayout | null> {
+    try {
+      const params = new URLSearchParams()
+      if (siteId) params.set('siteId', siteId.toString())
+      const query = params.toString() ? `?${params.toString()}` : ''
+      return await apiService.get<TopologyLayout>(`/topology/layout${query}`)
+    } catch {
+      return null
+    }
+  }
+
+  async function saveTopologyLayout(
+    positions: Map<number, { x: number; y: number }>,
+    siteId?: number | null
+  ): Promise<boolean> {
+    try {
+      const nodes: TopologyLayoutNode[] = []
+      positions.forEach((pos, id) => {
+        nodes.push({ deviceId: id, x: pos.x, y: pos.y })
+      })
+      const params = new URLSearchParams()
+      if (siteId) params.set('siteId', siteId.toString())
+      const query = params.toString() ? `?${params.toString()}` : ''
+      await apiService.put(`/topology/layout${query}`, { nodes })
+      return true
+    } catch {
+      return false
+    }
+  }
+
   return {
     nodes,
     edges,
@@ -231,6 +271,7 @@ export const useTopologyStore = defineStore('topology', () => {
     interfaceCache,
     applyRealtimeStatus,
     fetchTopology,
+    fetchTopologyLayout,
     fetchDeviceInterfaces,
     addLink,
     updateLink,
@@ -238,5 +279,6 @@ export const useTopologyStore = defineStore('topology', () => {
     deleteDevice,
     deleteLink,
     recalculateTopology,
+    saveTopologyLayout,
   }
 })

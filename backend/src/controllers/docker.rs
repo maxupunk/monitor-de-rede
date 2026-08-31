@@ -21,6 +21,7 @@ use crate::{
             engine::{self, ContainerAction, LogFilters},
             metrics, volume_export,
         },
+        events::EventBus,
         shared::errors::{AppError, AppResult},
     },
 };
@@ -138,6 +139,7 @@ async fn container_action(
 ) -> AppResult<Response> {
     let id = docker::validate_identifier(&id, "Container")?;
     let response = engine::container_action(&id, action).await?;
+    emit_docker_updated(ctx).await;
     audit(
         ctx,
         headers,
@@ -171,6 +173,7 @@ async fn remove_volume(
 ) -> AppResult<Response> {
     let name = docker::validate_identifier(&name, "Volume")?;
     let response = engine::remove_volume(&name, query.force.unwrap_or(false)).await?;
+    emit_docker_updated(&ctx).await;
     audit(
         &ctx,
         &headers,
@@ -236,6 +239,7 @@ async fn create_network(
         return Err(AppError::validation("Driver de rede não suportado"));
     }
     let response = engine::create_network(name.clone(), driver).await?;
+    emit_docker_updated(&ctx).await;
     audit(
         &ctx,
         &headers,
@@ -255,6 +259,7 @@ async fn remove_network(
 ) -> AppResult<Response> {
     let id = docker::validate_identifier(&id, "Rede")?;
     let response = engine::remove_network(&id).await?;
+    emit_docker_updated(&ctx).await;
     audit(
         &ctx,
         &headers,
@@ -299,6 +304,7 @@ async fn network_connection(
     } else {
         engine::connect_network(&id, container).await?
     };
+    emit_docker_updated(ctx).await;
     audit(
         ctx,
         headers,
@@ -328,6 +334,7 @@ async fn remove_image(
 ) -> AppResult<Response> {
     let id = docker::validate_identifier(&id, "Imagem")?;
     let response = engine::remove_image(&id, query.force.unwrap_or(false)).await?;
+    emit_docker_updated(&ctx).await;
     audit(
         &ctx,
         &headers,
@@ -342,6 +349,7 @@ async fn remove_image(
 
 async fn prune_images(State(ctx): State<AppContext>, headers: HeaderMap) -> AppResult<Response> {
     let response = engine::prune_images().await?;
+    emit_docker_updated(&ctx).await;
     audit(
         &ctx,
         &headers,
@@ -369,6 +377,17 @@ async fn listing<T: Serialize>(
             })?)
         }
         Err(error) => Err(error.into()),
+    }
+}
+
+async fn emit_docker_updated(ctx: &AppContext) {
+    if let Ok(bus) = EventBus::from_context(ctx) {
+        if let Err(error) = bus
+            .publish(&ctx.db, "docker:updated", serde_json::json!({}))
+            .await
+        {
+            tracing::warn!(%error, "falha ao publicar docker:updated");
+        }
     }
 }
 

@@ -120,10 +120,12 @@
 import { computed, onMounted, onUnmounted } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import { useDockerStore } from '@/stores/docker'
+import { useEventsStore } from '@/stores/events'
 import { formatBytes, formatRelativeTime } from '@/utils/formatters'
 
 const docker = useDockerStore()
-let refreshTimer: number | undefined
+const eventsStore = useEventsStore()
+let unsubscribe: (() => void) | undefined
 
 const summaryCards = computed(() => [
   {
@@ -165,10 +167,10 @@ const topMetrics = computed(() =>
 
 onMounted(() => {
   void docker.refreshAll()
-  refreshTimer = window.setInterval(() => void docker.refreshAll(), 30_000)
+  unsubscribe = eventsStore.onEvent('docker:updated', () => void docker.refreshAll())
 })
 
 onUnmounted(() => {
-  if (refreshTimer !== undefined) window.clearInterval(refreshTimer)
+  unsubscribe?.()
 })
 </script>

@@ -10,6 +10,7 @@ use serde_json::json;
 use crate::{
     dtos::optional_body,
     services::{
+        events::EventBus,
         shared::errors::AppResult,
         vpn::{
             preflight,
@@ -80,6 +81,7 @@ async fn update(
     Json(input): Json<VpnServerInput>,
 ) -> AppResult<Response> {
     let (server, network) = server_service::create_or_update(&ctx.db, &input.into()).await?;
+    emit_vpn_peers_updated(&ctx).await;
 
     // O `public_endpoint` é a origem do endereço "Internet" da lista de
     // endereços deste servidor. Se havia ali uma correção manual e ela acabou
@@ -132,6 +134,17 @@ async fn detect_endpoint() -> AppResult<Response> {
         "publicEndpoint": public_ip.to_string(),
         "message": format!("Endereço público detectado: {public_ip}"),
     }))?)
+}
+
+async fn emit_vpn_peers_updated(ctx: &AppContext) {
+    if let Ok(bus) = EventBus::from_context(ctx) {
+        if let Err(error) = bus
+            .publish(&ctx.db, "vpn:peers_updated", serde_json::json!({}))
+            .await
+        {
+            tracing::warn!(%error, "falha ao publicar vpn:peers_updated");
+        }
+    }
 }
 
 pub fn routes() -> Routes {

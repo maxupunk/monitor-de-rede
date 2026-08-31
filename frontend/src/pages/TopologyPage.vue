@@ -134,7 +134,8 @@
               :key="edge.id"
               class="edge-group cursor-pointer"
               @click.stop="onEdgeClick(edge)"
-              @touchend.stop="onEdgeTouchEnd(edge)"
+              @touchstart.stop="onEdgeTouchStart($event)"
+              @touchend.stop="onEdgeTouchEnd($event, edge)"
             >
               <!-- Linha Invisível mais Grossa para Facilitar Toque Touch e Hover -->
               <line
@@ -211,7 +212,7 @@
             @mousedown.stop="onNodeMouseDown($event, node)"
             @click.stop="onNodeClick(node)"
             @touchstart.stop="onNodeTouchStart($event, node)"
-            @touchend.stop="onNodeTouchEnd(node)"
+            @touchend.stop="onNodeTouchEnd($event, node)"
           >
             <!-- Halo de Conexão no Modo Cable Tool -->
             <div v-if="isConnectMode" class="connect-port-handles">
@@ -708,6 +709,13 @@ const nodePositions = reactive<Map<number, { x: number; y: number }>>(new Map())
 const draggingNodeId = ref<number | null>(null)
 const dragStart = reactive({ mouseX: 0, mouseY: 0, nodeX: 0, nodeY: 0, hasMoved: false })
 
+// Estados de detecção de tap vs pan/drag em touch
+const TOUCH_TAP_THRESHOLD = 10 // px
+const TOUCH_TAP_MAX_DURATION = 500 // ms
+let touchStartPos = { x: 0, y: 0 }
+let touchStartTime = 0
+let touchHandled = false
+
 // Estados de Conexão Gráfica com Mouse / Touch (Cable Tool)
 const isConnectMode = ref(false)
 const connectSourceId = ref<number | null>(null)
@@ -718,6 +726,7 @@ const selectedTypeFilter = ref<string | null>(null)
 const highlightedDeviceId = ref<number | null>(null)
 const mobileSearchOpen = ref(false)
 const mobileSearchQuery = ref('')
+const siteId = ref<number | null>(null)
 
 const filteredSearchNodes = computed(() => {
   const q = mobileSearchQuery.value.trim().toLowerCase()
@@ -751,11 +760,12 @@ const linkDialogLinkType = ref<string | null>(null)
 
 const unmanagedSwitchDialog = ref(false)
 
-let pollTimer: ReturnType<typeof setInterval> | null = null
-
 onMounted(async () => {
-  loadPositionsFromStorage()
-  await topologyStore.fetchTopology()
+  await topologyStore.fetchTopology(siteId.value)
+  await loadPositionsFromServer()
+  if (nodePositions.size === 0) {
+    loadPositionsFromStorage()
+  }
   ensureInitialNodeLayout()
   window.addEventListener('keydown', onKeyDown)
 
@@ -765,11 +775,6 @@ onMounted(async () => {
     canvasViewport.value.addEventListener('touchend', onTouchEnd, { passive: true })
     canvasViewport.value.addEventListener('touchcancel', onTouchEnd, { passive: true })
   }
-
-  // Atualização contínua de tráfego e métricas em tempo real (a cada 5 segundos)
-  pollTimer = setInterval(() => {
-    topologyStore.fetchTopology(null, false)
-  }, 5000)
 })
 
 onUnmounted(() => {
@@ -779,10 +784,6 @@ onUnmounted(() => {
     canvasViewport.value.removeEventListener('touchmove', onTouchMove)
     canvasViewport.value.removeEventListener('touchend', onTouchEnd)
     canvasViewport.value.removeEventListener('touchcancel', onTouchEnd)
-  }
-  if (pollTimer) {
-    clearInterval(pollTimer)
-    pollTimer = null
   }
 })
 
@@ -810,6 +811,15 @@ function loadPositionsFromStorage() {
   }
 }
 
+async function loadPositionsFromServer() {
+  const layout = await topologyStore.fetchTopologyLayout(siteId.value)
+  if (!layout || !layout.nodes || layout.nodes.length === 0) return
+
+  for (const node of layout.nodes) {
+    nodePositions.set(node.deviceId, { x: node.x, y: node.y })
+  }
+}
+
 function savePositionsToStorage() {
   try {
     const obj: Record<string, { x: number; y: number }> = {}
@@ -820,6 +830,9 @@ function savePositionsToStorage() {
   } catch {
     // Ignora
   }
+
+  // Persiste também no servidor para sincronizar entre navegadores/dispositivos
+  topologyStore.saveTopologyLayout(nodePositions, siteId.value)
 }
 
 function ensureInitialNodeLayout() {
@@ -1137,6 +1150,9 @@ function onTouchStart(e: TouchEvent) {
     // 1 Dedo: Pan do canvas
     isPanning.value = true
     const touch = e.touches[0]
+    touchStartPos = { x: touch.clientX, y: touch.clientY }
+    touchStartTime = Date.now()
+    touchHandled = false
     panStart.x = touch.clientX
     panStart.y = touch.clientY
     panStart.panX = panX.value
@@ -1254,6 +1270,9 @@ function onTouchEnd(e: TouchEvent) {
 function onNodeTouchStart(e: TouchEvent, node: RenderedNode) {
   if (e.touches.length === 1) {
     const touch = e.touches[0]
+    touchStartPos = { x: touch.clientX, y: touch.clientY }
+    touchStartTime = Date.now()
+    touchHandled = false
     draggingNodeId.value = node.id
     dragStart.mouseX = touch.clientX
     dragStart.mouseY = touch.clientY
@@ -1263,20 +1282,49 @@ function onNodeTouchStart(e: TouchEvent, node: RenderedNode) {
   }
 }
 
-function onNodeTouchEnd(node: RenderedNode) {
-  if (!dragStart.hasMoved) {
-    onNodeClick(node)
-  }
+function onNodeTouchEnd(e: TouchEvent, node: RenderedNode) {
+  const wasDragging = draggingNodeId.value !== null
   if (draggingNodeId.value !== null) {
     draggingNodeId.value = null
-    savePositionsToStorage()
+    if (dragStart.hasMoved) {
+      savePositionsToStorage()
+    }
+  }
+
+  if (!wasDragging) return
+
+  const touch = e.changedTouches[0]
+  const dist = Math.hypot(touch.clientX - touchStartPos.x, touch.clientY - touchStartPos.y)
+  const duration = Date.now() - touchStartTime
+  if (dragStart.hasMoved || dist > TOUCH_TAP_THRESHOLD || duration > TOUCH_TAP_MAX_DURATION) return
+
+  touchHandled = true
+  onNodeClick(node)
+}
+
+function onEdgeTouchStart(e: TouchEvent) {
+  if (e.touches.length === 1) {
+    const touch = e.touches[0]
+    touchStartPos = { x: touch.clientX, y: touch.clientY }
+    touchStartTime = Date.now()
+    touchHandled = false
   }
 }
 
-function onEdgeTouchEnd(edge: TopologyEdge) {
-  if (!panStart.hasMoved && !dragStart.hasMoved) {
-    onEdgeClick(edge)
-  }
+function onEdgeTouchEnd(e: TouchEvent, edge: TopologyEdge) {
+  const touch = e.changedTouches[0]
+  const dist = Math.hypot(touch.clientX - touchStartPos.x, touch.clientY - touchStartPos.y)
+  const duration = Date.now() - touchStartTime
+  if (
+    panStart.hasMoved ||
+    dragStart.hasMoved ||
+    dist > TOUCH_TAP_THRESHOLD ||
+    duration > TOUCH_TAP_MAX_DURATION
+  )
+    return
+
+  touchHandled = true
+  onEdgeClick(edge)
 }
 
 function updateConnectMousePos(clientX: number, clientY: number) {
@@ -1349,6 +1397,11 @@ function onNodeMouseDown(e: MouseEvent, node: RenderedNode) {
 }
 
 function onNodeClick(node: RenderedNode) {
+  if (touchHandled) {
+    touchHandled = false
+    return
+  }
+
   if (dragStart.hasMoved) {
     dragStart.hasMoved = false
     return
@@ -1431,6 +1484,11 @@ function applyTypeFilter(type: string | null) {
 // ----------------------------------------------------
 
 function onEdgeClick(edge: TopologyEdge) {
+  if (touchHandled) {
+    touchHandled = false
+    return
+  }
+
   if (panStart.hasMoved || dragStart.hasMoved) {
     panStart.hasMoved = false
     dragStart.hasMoved = false

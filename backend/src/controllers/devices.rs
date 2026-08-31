@@ -35,6 +35,7 @@ use crate::{
             system_device::{self, ProposedIdentity},
             systems,
         },
+        events::EventBus,
         maintenance::resource_cleanup::ResourceCleanupService,
         monitoring::{
             presenter::{present_monitors, RECENT_RESULTS_LIMIT},
@@ -660,6 +661,9 @@ async fn update(
     .update(&ctx.db)
     .await?;
     sync_device_monitor(&ctx.db, &row).await?;
+    if row.parent_id != current.parent_id {
+        emit_topology_updated(&ctx).await;
+    }
     if input.clear_history == Some(true) {
         let logs_db = crate::services::syslog::LogsDb::from_context(&ctx).ok();
         ResourceCleanupService::clear_device_history(
@@ -713,6 +717,7 @@ async fn destroy(
     let old_type = row.r#type.clone();
     system_device::ensure_deletable(&row)?;
     ResourceCleanupService::delete_device(&ctx.db, id).await?;
+    emit_topology_updated(&ctx).await;
 
     let _ = AuditService::new(&ctx.db)
         .log(
@@ -1105,6 +1110,17 @@ async fn batch_parent(
     Ok(format::json(
         serde_json::json!({ "updatedCount": updated_count }),
     )?)
+}
+
+async fn emit_topology_updated(ctx: &AppContext) {
+    if let Ok(bus) = EventBus::from_context(ctx) {
+        if let Err(error) = bus
+            .publish(&ctx.db, "topology:updated", serde_json::json!({}))
+            .await
+        {
+            tracing::warn!(%error, "falha ao publicar topology:updated");
+        }
+    }
 }
 
 pub fn routes() -> Routes {

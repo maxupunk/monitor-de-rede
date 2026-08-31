@@ -27,21 +27,28 @@ export interface SetupPayload {
   token: string
 }
 
+function storageFor(remember: boolean): Storage {
+  return remember ? localStorage : sessionStorage
+}
+
 function loadStoredUser(): User | null {
-  const rawUser = localStorage.getItem('auth_user')
+  const rawUser = sessionStorage.getItem('auth_user') ?? localStorage.getItem('auth_user')
   if (!rawUser) return null
   try {
     return JSON.parse(rawUser) as User
   } catch {
+    sessionStorage.removeItem('auth_user')
     localStorage.removeItem('auth_user')
     return null
   }
 }
 
-function persistUser(value: User | null) {
+function persistUser(value: User | null, remember: boolean) {
+  const storage = storageFor(remember)
   if (value) {
-    localStorage.setItem('auth_user', JSON.stringify(value))
+    storage.setItem('auth_user', JSON.stringify(value))
   } else {
+    sessionStorage.removeItem('auth_user')
     localStorage.removeItem('auth_user')
   }
 }
@@ -51,7 +58,10 @@ function describeError(err: unknown, fallback: string): string {
 }
 
 export const useAuthStore = defineStore('auth', () => {
-  const token = ref<string | null>(localStorage.getItem('auth_token'))
+  const sessionToken = sessionStorage.getItem('auth_token')
+  const localToken = localStorage.getItem('auth_token')
+  const token = ref<string | null>(sessionToken ?? localToken)
+  const rememberMe = ref<boolean>(sessionToken === null && localToken !== null)
   const user = ref<User | null>(loadStoredUser())
   const loading = ref(false)
   const error = ref<string | null>(null)
@@ -69,11 +79,16 @@ export const useAuthStore = defineStore('auth', () => {
   const canWrite = computed(() => user.value?.role === 'admin' || user.value?.role === 'operator')
   const currentRoleLabel = computed(() => roleLabel(user.value?.role))
 
-  function persistSession(res: LoginResponse) {
+  function persistSession(res: LoginResponse, remember = false) {
     token.value = res.token
     user.value = res.user
-    localStorage.setItem('auth_token', res.token)
-    persistUser(res.user)
+    rememberMe.value = remember
+    const storage = storageFor(remember)
+    storage.setItem('auth_token', res.token)
+    storage.setItem('auth_user', JSON.stringify(res.user))
+    const other = storageFor(!remember)
+    other.removeItem('auth_token')
+    other.removeItem('auth_user')
   }
 
   function clearError() {
@@ -103,11 +118,14 @@ export const useAuthStore = defineStore('auth', () => {
     return needsSetup.value
   }
 
-  async function login(email: string, password: string): Promise<boolean> {
+  async function login(email: string, password: string, remember = false): Promise<boolean> {
     loading.value = true
     error.value = null
     try {
-      persistSession(await apiService.post<LoginResponse>('/auth/login', { email, password }))
+      persistSession(
+        await apiService.post<LoginResponse>('/auth/login', { email, password }),
+        remember
+      )
       needsSetup.value = false
       return true
     } catch (err: unknown) {
@@ -123,7 +141,7 @@ export const useAuthStore = defineStore('auth', () => {
     loading.value = true
     error.value = null
     try {
-      persistSession(await apiService.post<LoginResponse>('/auth/setup', payload))
+      persistSession(await apiService.post<LoginResponse>('/auth/setup', payload), true)
       needsSetup.value = false
       return true
     } catch (err: unknown) {
@@ -139,7 +157,7 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const userData = await apiService.get<User | { user: User }>('/auth/me')
       user.value = 'user' in userData ? userData.user : userData
-      persistUser(user.value)
+      persistUser(user.value, rememberMe.value)
     } catch {
       void logout()
     }
@@ -153,8 +171,10 @@ export const useAuthStore = defineStore('auth', () => {
     } finally {
       token.value = null
       user.value = null
+      sessionStorage.removeItem('auth_token')
+      sessionStorage.removeItem('auth_user')
       localStorage.removeItem('auth_token')
-      persistUser(null)
+      localStorage.removeItem('auth_user')
     }
   }
 

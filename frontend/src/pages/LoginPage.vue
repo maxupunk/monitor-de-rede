@@ -44,12 +44,21 @@
         density="comfortable"
         flat
         rounded="lg"
-        class="mb-6"
+        class="mb-3"
         hide-details="auto"
         :rules="passwordRules"
         @click:append-inner="showPassword = !showPassword"
         @update:model-value="authStore.clearError()"
       ></v-text-field>
+
+      <v-checkbox
+        v-model="rememberMe"
+        label="Permanecer logado"
+        color="primary"
+        density="comfortable"
+        hide-details
+        class="mb-4"
+      ></v-checkbox>
 
       <v-btn
         type="submit"
@@ -83,6 +92,7 @@ const formRef = ref<VuetifyForm | null>(null)
 const email = ref('')
 const password = ref('')
 const showPassword = ref(false)
+const rememberMe = ref(false)
 
 const emailRules: ValidationRule[] = [emailRule()]
 const passwordRules: ValidationRule[] = [requiredRule('Informe a senha.')]
@@ -106,7 +116,7 @@ async function handleLogin() {
   const { valid } = (await formRef.value?.validate()) ?? { valid: false }
   if (!valid) return
 
-  const success = await authStore.login(email.value.trim(), password.value)
+  const success = await authStore.login(email.value.trim(), password.value, rememberMe.value)
   if (success) await router.push(redirectTarget())
 }
 </script>

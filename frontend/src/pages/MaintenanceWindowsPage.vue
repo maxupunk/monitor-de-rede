@@ -142,10 +142,11 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useSitesStore } from '@/stores/sites'
 import { useDevicesStore } from '@/stores/devices'
 import { useMaintenanceWindowsStore, type MaintenanceWindow } from '@/stores/maintenanceWindows'
+import { useEventsStore } from '@/stores/events'
 import MaintenanceWindowDialog from '@/components/MaintenanceWindowDialog.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
@@ -154,6 +155,9 @@ import { confirm } from '@/composables/useConfirm'
 const windowsStore = useMaintenanceWindowsStore()
 const sitesStore = useSitesStore()
 const devicesStore = useDevicesStore()
+const eventsStore = useEventsStore()
+
+let unsubscribe: (() => void) | undefined
 
 const search = ref('')
 const dialog = ref(false)
@@ -174,9 +178,17 @@ onMounted(() => {
   void windowsStore.fetchWindows()
   void sitesStore.fetchSites()
   void devicesStore.fetchDevices()
+  unsubscribe = eventsStore.onEvent(
+    'maintenance_windows:updated',
+    () => void windowsStore.fetchWindows()
+  )
   setInterval(() => {
     now.value = new Date()
   }, 30_000)
+})
+
+onUnmounted(() => {
+  unsubscribe?.()
 })
 
 function siteName(siteId: number): string {

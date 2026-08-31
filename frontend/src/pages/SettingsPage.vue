@@ -38,6 +38,10 @@
           @confirm-restore="confirmDialog = true"
         />
       </v-col>
+
+      <v-col cols="12">
+        <DatabaseInfoCard />
+      </v-col>
     </v-row>
 
     <v-dialog v-model="confirmDialog" max-width="520">
@@ -86,6 +90,7 @@ import DashboardSyncCard from '@/components/settings/DashboardSyncCard.vue'
 import NotificationsCard from '@/components/settings/NotificationsCard.vue'
 import OnboardingCard from '@/components/settings/OnboardingCard.vue'
 import BackupCard from '@/components/settings/BackupCard.vue'
+import DatabaseInfoCard from '@/components/settings/DatabaseInfoCard.vue'
 import PageHeader from '@/components/PageHeader.vue'
 
 const addressesStore = useServerAddressesStore()
