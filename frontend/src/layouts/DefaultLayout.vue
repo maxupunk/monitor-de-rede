@@ -68,10 +68,10 @@
     </v-navigation-drawer>
 
     <!-- App Bar Superior -->
-    <v-app-bar flat border="b" density="comfortable" class="px-2">
+    <v-app-bar flat border="b" density="comfortable" class="px-2 pwa-app-bar">
       <v-app-bar-nav-icon @click="drawer = !drawer" />
 
-      <v-toolbar-title class="text-subtitle-1 font-weight-bold text-grey-darken-3 text-truncate">
+      <v-toolbar-title class="text-subtitle-1 font-weight-bold text-high-emphasis text-truncate">
         <span class="hidden-sm-and-down">Plataforma de Monitoramento de Redes</span>
         <span class="hidden-md-and-up">NetMonitor</span>
       </v-toolbar-title>
@@ -164,7 +164,7 @@
     </v-app-bar>
 
     <!-- Conteúdo Principal da Página -->
-    <v-main class="bg-grey-lighten-4" :class="{ 'layout-full-bleed': route.meta.fullBleed }">
+    <v-main :class="{ 'layout-full-bleed': route.meta.fullBleed }">
       <v-container
         fluid
         :class="[

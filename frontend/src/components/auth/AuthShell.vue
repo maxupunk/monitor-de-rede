@@ -41,8 +41,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 import NetworkBackdrop from './NetworkBackdrop.vue'
+import { usePwaThemeColor, AUTH_SCREEN_COLOR } from '@/composables/usePwaThemeColor'
 
 /**
  * Moldura comum ao login e ao primeiro acesso.
@@ -63,6 +64,16 @@ const props = withDefaults(
   }>(),
   { wide: false }
 )
+
+const { setThemeColor, resetThemeColor } = usePwaThemeColor()
+
+onMounted(() => {
+  setThemeColor(AUTH_SCREEN_COLOR)
+})
+
+onUnmounted(() => {
+  resetThemeColor()
+})
 
 const columns = computed(() => (props.wide ? { md: 7, lg: 5 } : { md: 6, lg: 4 }))
 </script>

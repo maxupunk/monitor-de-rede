@@ -119,3 +119,24 @@ body,
     -webkit-overflow-scrolling: touch;
   }
 }
+
+/* Suporte a Safe Areas e PWA Native Status Bar */
+:root {
+  --pwa-safe-top: env(safe-area-inset-top, 0px);
+  --pwa-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --pwa-safe-left: env(safe-area-inset-left, 0px);
+  --pwa-safe-right: env(safe-area-inset-right, 0px);
+  --pwa-app-bar-color: #212121;
+}
+
+/* Garante integração visual perfeita do App Bar com a barra de status do SO */
+.pwa-app-bar {
+  background-color: var(--pwa-app-bar-color) !important;
+}
+
+@supports (padding-top: env(safe-area-inset-top)) {
+  /* Em PWA standalone, preserva a margem inferior para a barra de navegação/gestos */
+  body {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}
