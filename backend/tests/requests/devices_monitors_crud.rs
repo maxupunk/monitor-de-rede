@@ -2,7 +2,7 @@
 
 use backend::{
     app::App,
-    models::_entities::{monitor_results, monitor_results_hourly},
+    models::_entities::{monitor_results, monitor_results_hourly, probes},
     services::monitoring::{rollup::rollup_monitor_results, uptime::uptime_for_monitor},
 };
 use chrono::{Duration, Utc};
@@ -584,6 +584,15 @@ async fn rollup_agrega_resultados_brutos_em_buckets_horarios() {
         assert_eq!(monitor.status_code(), 201);
         let monitor: serde_json::Value = serde_json::from_str(&monitor.text()).unwrap();
         let monitor_id = monitor["id"].as_i64().unwrap();
+        let probe = probes::ActiveModel {
+            name: Set("Probe temporário".into()),
+            token_hash: Set("hash-rollup".into()),
+            status: Set("online".into()),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .unwrap();
 
         let base = backend::services::monitoring::rollup::truncate_to_hour(
             Utc::now() - Duration::hours(3),
@@ -592,6 +601,7 @@ async fn rollup_agrega_resultados_brutos_em_buckets_horarios() {
             let timestamp = base + Duration::minutes(sequence);
             monitor_results::ActiveModel {
                 monitor_id: Set(monitor_id),
+                probe_id: Set((sequence == 0).then_some(probe.id)),
                 status: Set(if sequence % 2 == 0 {
                     "up".into()
                 } else {
@@ -622,11 +632,74 @@ async fn rollup_agrega_resultados_brutos_em_buckets_horarios() {
         assert_eq!(bucket.total_checks, 5);
         assert_eq!(bucket.up_checks, 3);
         assert_eq!(bucket.down_checks, 2);
+        assert_eq!(
+            bucket.probe_id, None,
+            "origens mistas não podem gerar dois buckets com a mesma chave"
+        );
 
         let uptime = uptime_for_monitor(&ctx.db, monitor_id, 24).await.unwrap();
         assert_eq!(uptime.total_checks, 5);
         assert_eq!(uptime.up_checks, 3);
         assert_eq!(uptime.down_checks, 2);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn rollup_limitado_nao_apaga_o_backlog_ainda_nao_agregado() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let monitor = request
+            .post("/api/monitors")
+            .json(&serde_json::json!({
+                "name": "Backlog limitado",
+                "type": "ping",
+                "target": "127.0.0.1",
+            }))
+            .await;
+        let monitor: serde_json::Value = serde_json::from_str(&monitor.text()).unwrap();
+        let monitor_id = monitor["id"].as_i64().unwrap();
+        let base = backend::services::monitoring::rollup::truncate_to_hour(
+            Utc::now() - Duration::hours(200),
+        ) + Duration::minutes(5);
+        let backlog = (0..170)
+            .map(|hour| {
+                let timestamp = base + Duration::hours(hour);
+                monitor_results::ActiveModel {
+                    monitor_id: Set(monitor_id),
+                    status: Set("up".into()),
+                    started_at: Set(timestamp.into()),
+                    finished_at: Set(timestamp.into()),
+                    duration_ms: Set(1),
+                    latency_ms: Set(Some(1.0)),
+                    ..Default::default()
+                }
+            })
+            .collect::<Vec<_>>();
+        monitor_results::Entity::insert_many(backlog)
+            .exec(&ctx.db)
+            .await
+            .unwrap();
+
+        std::env::set_var("ROLLUP_DELETE_BRUTO_AFTER_HOURS", "1");
+        let result = rollup_monitor_results(&ctx.db, Utc::now()).await;
+        std::env::remove_var("ROLLUP_DELETE_BRUTO_AFTER_HOURS");
+        let stats = result.unwrap();
+        assert_eq!(stats.rows_aggregated, 168);
+
+        let remaining = monitor_results::Entity::find()
+            .filter(monitor_results::Column::MonitorId.eq(monitor_id))
+            .all(&ctx.db)
+            .await
+            .unwrap();
+        assert_eq!(remaining.len(), 2);
+        assert!(remaining
+            .iter()
+            .all(|row| { row.started_at.with_timezone(&Utc) >= base + Duration::hours(168) }));
     })
     .await;
 }

@@ -208,6 +208,13 @@ pub async fn restore(db: &DatabaseConnection, file: &BackupFile) -> AppResult<Ta
     realign_sequences(&txn).await?;
     txn.commit().await?;
 
+    // `DELETE` devolve páginas ao freelist, não ao filesystem. Em SQLite uma
+    // restauração pode apagar milhões de métricas e deixar um arquivo de vários
+    // GiB mapeável pelas conexões seguintes. A compactação ocorre fora da
+    // transação e é best effort: o restore já foi confirmado e não pode ser
+    // reportado como falho só porque outro leitor segurou o checkpoint.
+    compact_sqlite_after_restore(db).await;
+
     // O `wipe` + recarga devolve as linhas **com os IDs do arquivo**. Sem
     // esta reexecução o ID cacheado do dispositivo do sistema passaria a
     // apontar para outro equipamento, e os logs internos seguintes iriam
@@ -229,6 +236,21 @@ pub async fn restore(db: &DatabaseConnection, file: &BackupFile) -> AppResult<Ta
     }
 
     Ok(counts)
+}
+
+async fn compact_sqlite_after_restore(db: &DatabaseConnection) {
+    if db.get_database_backend() != DatabaseBackend::Sqlite {
+        return;
+    }
+    for statement in [
+        "PRAGMA wal_checkpoint(TRUNCATE);",
+        "VACUUM;",
+        "PRAGMA optimize;",
+    ] {
+        if let Err(error) = db.execute_unprepared(statement).await {
+            tracing::warn!(%error, statement, "não foi possível compactar o SQLite após restore");
+        }
+    }
 }
 
 fn validate_version(file: &BackupFile) -> AppResult<()> {

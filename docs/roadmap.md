@@ -265,6 +265,19 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
     - Configuração `_diagnostics` é transitória e acompanha tarefas remotas sem alterar a configuração persistida.
     - Regra global “ICMP filtrado ou desativado” provisionada de forma idempotente, sem duplicar alertas genéricos de perda de pacotes.
 
+- [x] **QUA-08 — Limitar memória nos históricos e no SQLite de produção** 🟢 Concluído
+  - **Severidade:** 🔴 Crítica
+  - **Esforço:** Médio
+  - **Arquivos:** `docker-compose.yml`, `backend/config/production.yaml`, `backend/src/services/monitoring/{metrics_repository.rs,rollup.rs,timeseries.rs,bandwidth_latency.rs,heatmap.rs,uptime.rs}`, `backend/src/services/{snmp,topology}/service.rs`, `backend/src/services/events/relay.rs`, `backend/src/services/backup/service.rs`, `backend/src/controllers/{dns.rs,events.rs}` e testes de integração.
+  - **Implementado:**
+    - Busca do último contador SNMP por par `(interface, série)` com lookup indexado e `LIMIT 1`, sem carregar ou ordenar todo o histórico.
+    - Pool SQLite de produção alinhado ao desenvolvimento em uma conexão por padrão; PostgreSQL pode elevar `DB_MAX_CONNECTIONS` explicitamente.
+    - Séries temporais, uptime, heatmap, distribuição de eventos e correlação banda/latência processados por stream e acumuladores de cardinalidade fixa.
+    - Rollup feito por agregação SQL, em janelas de no máximo sete dias por ciclo e lotes de 500 inserts; origens local/probe mistas não violam mais a chave do bucket.
+    - Relay do outbox limitado a 500 eventos por passagem, histórico DNS limitado a 720 pontos por série e amostra de mediana limitada a 2.048 valores.
+    - Restore SQLite executa checkpoint, `VACUUM` e `PRAGMA optimize` após confirmar a transação, liberando páginas deixadas por históricos apagados.
+    - Testes cobrem cardinalidade do último valor, desempate por `id`, backlog do relay, rollup com origem mista e limites do histórico DNS.
+
 - [x] **BE-03 / BE-05 — Finalizar builders VPN e DTOs tipados**
   - **Severidade:** 🟡 Média
   - **Esforço:** Médio

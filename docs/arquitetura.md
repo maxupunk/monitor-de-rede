@@ -597,6 +597,15 @@ resolve. Quem precisar de mais espaço para o syslog abaixa o nível do
 `config.logger`; a coluna `device_logs.source` permite medir a proporção antes
 de decidir.
 
+**Memória dos históricos é limitada pela cardinalidade da resposta.** A coleta
+SNMP consulta o último contador de cada `(interface, série)` por lookup indexado,
+sem materializar o passado. Séries para gráficos percorrem cursores e mantêm
+somente acumuladores fixos; o histórico DNS entrega no máximo 720 pontos por
+série. O rollup de `monitor_results` agrega no banco em janelas de até sete dias
+por ciclo e o relay SSE lê no máximo 500 linhas do outbox por passagem. Como o
+banco padrão de produção é SQLite, seu pool também usa uma conexão por padrão;
+instalações PostgreSQL dimensionam `DB_MAX_CONNECTIONS` explicitamente.
+
 ## 12. O que não existe
 
 Registrar o que **não** foi construído evita que alguém procure por uma peça
@@ -611,8 +620,9 @@ ausente achando que ela está escondida:
 - **O backpressure é local e limitado**: cada ciclo recolhe até 50 monitores e
   executa até 16 ao mesmo tempo; atrasos além desse lote ficam representados por
   `next_run_at` no banco para os ciclos seguintes.
-- **Não há agregação de métricas** (rollup por hora/dia). A retenção é por
-  descarte, no `data_pruner`.
+- **Não há rollup da tabela `metrics`.** Seus contadores SNMP/VPN continuam com
+  retenção por descarte no `data_pruner`; os resultados de monitoramento da
+  tabela `monitor_results` têm rollup horário em `monitor_results_hourly`.
 - **Não há segundo pipeline de log dentro do processo.** O log da aplicação usa
   a mesma fila limitada, o mesmo escritor em lote e o mesmo barramento do
   syslog; a camada de `tracing` (`syslog/app_layer.rs`) só monta o

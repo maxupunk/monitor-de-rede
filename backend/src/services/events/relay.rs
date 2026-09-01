@@ -1,5 +1,5 @@
 use loco_rs::app::AppContext;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 
 use crate::{
     models::{_entities::event_outbox as event_outbox_entity, event_outbox},
@@ -11,6 +11,10 @@ use crate::{
 
 /// Replica eventos de outros processos somente quando ha cliente SSE conectado.
 /// O `origin` evita que a instancia que persistiu o evento o publique duas vezes.
+/// Uma passada é deliberadamente limitada: backlog não pode virar um vetor
+/// proporcional ao tamanho do outbox nem inundar o canal SSE de uma só vez.
+pub const RELAY_BATCH_SIZE: u64 = 500;
+
 pub async fn relay_pending(ctx: &AppContext) -> AppResult<u64> {
     let bus = EventBus::from_context(ctx)?;
     if !bus.has_subscribers() {
@@ -20,6 +24,7 @@ pub async fn relay_pending(ctx: &AppContext) -> AppResult<u64> {
     let rows = event_outbox::Entity::find()
         .filter(event_outbox_entity::Column::Id.gt(last_id))
         .order_by_asc(event_outbox_entity::Column::Id)
+        .limit(RELAY_BATCH_SIZE)
         .all(&ctx.db)
         .await?;
     let mut relayed = 0;

@@ -1,28 +1,35 @@
-//! Rollup horário de `monitor_results` (Fase 3 do roadmap).
+//! Rollup horário de `monitor_results`.
 //!
-//! Agrega o histórico bruto de checagens em buckets de uma hora. A pergunta que
-//! esta tabela responde é "este link é estável?" em 24h / 7d / 30d, sem varrer
-//! milhões de linhas a cada consulta.
-
-use std::collections::BTreeMap;
+//! A agregação acontece no banco e devolve somente um registro por
+//! `(monitor, hora)`. O processo nunca materializa as checagens brutas, mesmo
+//! durante a recuperação de um backlog grande.
 
 use chrono::{DateTime, Duration, Utc};
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Set};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection, EntityTrait,
+    FromQueryResult, QueryFilter, QueryOrder, Set, Statement, TransactionTrait, Value,
+};
 
 use crate::{
     models::{monitor_results, monitor_results_hourly},
-    services::shared::errors::AppResult,
+    services::shared::errors::{AppError, AppResult},
 };
 
 /// Quantas horas de bruto são mantidas após o rollup.
 ///
 /// Desligado por padrão (`0`): a purga existente continua responsável por
-/// apagar `monitor_results`, e o rollup não quebra o sparkline recente. Quando
-/// configurado, apaga apenas buckets completos já copiados para a tabela hourly.
+/// apagar `monitor_results`, e o rollup não quebra o sparkline recente.
 pub const DEFAULT_DELETE_BRUTO_AFTER_HOURS: i64 = 0;
 
 /// Intervalo entre execuções do rollup no scheduler, em segundos.
-pub const DEFAULT_ROLLUP_INTERVAL_SECONDS: i64 = 3600;
+pub const DEFAULT_ROLLUP_INTERVAL_SECONDS: i64 = 3_600;
+
+/// Máximo de histórico agregado em uma execução. Uma instalação com backlog
+/// avança uma semana por ciclo sem alocar todo o passado no processo.
+pub const MAX_ROLLUP_HOURS_PER_RUN: i64 = 24 * 7;
+
+/// Horas fechadas recalculadas para absorver resultados atrasados.
+const ROLLUP_LOOKBACK_HOURS: i64 = 2;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RollupStats {
@@ -42,219 +49,200 @@ impl RollupStats {
 #[must_use]
 pub fn truncate_to_hour(dt: DateTime<Utc>) -> DateTime<Utc> {
     let ts = dt.timestamp();
-    let hour_start = ts - (ts % 3600);
+    let hour_start = ts - (ts % 3_600);
     DateTime::from_timestamp(hour_start, 0).expect("timestamp de hora válido")
 }
 
-/// Executa o rollup de todos os buckets completos anteriores a `until`.
+/// Agrega buckets completos anteriores a `until`.
 ///
-/// Um bucket só é considerado fechado quando a hora seguinte já começou, ou
-/// seja, quando `until` é superior ao fim do bucket. Na prática `until` vem
-/// truncado para a hora atual, então a hora em curso nunca é rollupada.
-///
-/// # Errors
-///
-/// Propaga erro do banco.
-pub async fn rollup_monitor_results<C>(db: &C, until: DateTime<Utc>) -> AppResult<RollupStats>
-where
-    C: ConnectionTrait,
-{
+/// O intervalo é limitado, a agregação é feita por SQL e a substituição dos
+/// buckets ocorre na mesma transação. O bucket mais recente é recalculado para
+/// incorporar resultados que chegaram com atraso.
+pub async fn rollup_monitor_results(
+    db: &DatabaseConnection,
+    until: DateTime<Utc>,
+) -> AppResult<RollupStats> {
     let cutoff = truncate_to_hour(until);
-    let rows = monitor_results::Entity::find()
+    let Some(earliest) = monitor_results::Entity::find()
         .filter(monitor_results::Column::StartedAt.lt(cutoff))
         .order_by_asc(monitor_results::Column::StartedAt)
-        .all(db)
-        .await?;
+        .one(db)
+        .await?
+    else {
+        return Ok(RollupStats::default());
+    };
 
-    if rows.is_empty() {
+    let earliest_bucket = truncate_to_hour(earliest.started_at.with_timezone(&Utc));
+    let latest_bucket = monitor_results_hourly::Entity::find()
+        .filter(monitor_results_hourly::Column::Bucket.lt(cutoff))
+        .order_by_desc(monitor_results_hourly::Column::Bucket)
+        .one(db)
+        .await?
+        .map(|row| truncate_to_hour(row.bucket.with_timezone(&Utc)));
+    let start = latest_bucket.map_or(earliest_bucket, |latest| {
+        earliest_bucket.max(latest - Duration::hours(ROLLUP_LOOKBACK_HOURS))
+    });
+    let end = cutoff.min(start + Duration::hours(MAX_ROLLUP_HOURS_PER_RUN));
+    if start >= end {
         return Ok(RollupStats::default());
     }
 
-    // Agrupa por (monitor_id, probe_id, bucket).
-    let mut buckets: BTreeMap<(i64, Option<i64>, DateTime<Utc>), Accumulator> = BTreeMap::new();
-    for row in &rows {
-        let bucket = truncate_to_hour(row.started_at.with_timezone(&Utc));
-        let key = (row.monitor_id, row.probe_id, bucket);
-        let acc = buckets.entry(key).or_default();
-        acc.add(row);
-    }
+    let txn = db.begin().await?;
+    let aggregates = aggregate_range(&txn, start, end).await?;
+    let rows_aggregated = aggregates.iter().try_fold(0_u64, |total, row| {
+        u64::try_from(row.total_checks)
+            .ok()
+            .and_then(|count| total.checked_add(count))
+    });
+    let rows_aggregated = rows_aggregated
+        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("contagem do rollup excede u64")))?;
 
-    let buckets_to_write: Vec<_> = buckets.into_iter().collect();
-    let bucket_keys: Vec<(i64, DateTime<Utc>)> = buckets_to_write
-        .iter()
-        .map(|((monitor_id, _probe_id, bucket), _)| (*monitor_id, *bucket))
-        .collect();
-
-    // Remove entradas hourly que serão reescritas. Idempotência simples e
-    // portável entre SQLite e Postgres.
-    for (monitor_id, bucket) in &bucket_keys {
-        monitor_results_hourly::Entity::delete_many()
-            .filter(monitor_results_hourly::Column::MonitorId.eq(*monitor_id))
-            .filter(monitor_results_hourly::Column::Bucket.eq(*bucket))
-            .exec(db)
-            .await?;
-    }
+    monitor_results_hourly::Entity::delete_many()
+        .filter(monitor_results_hourly::Column::Bucket.gte(start))
+        .filter(monitor_results_hourly::Column::Bucket.lt(end))
+        .exec(&txn)
+        .await?;
 
     let mut stats = RollupStats {
-        buckets_upserted: buckets_to_write.len() as u64,
-        rows_aggregated: rows.len() as u64,
+        buckets_upserted: aggregates.len() as u64,
+        rows_aggregated,
         ..Default::default()
     };
-
-    let active_models: Vec<monitor_results_hourly::ActiveModel> = buckets_to_write
-        .into_iter()
-        .map(|((monitor_id, probe_id, bucket), acc)| {
-            acc.into_active_model(monitor_id, probe_id, bucket)
-        })
-        .collect();
-
-    for chunk in active_models.chunks(500) {
-        monitor_results_hourly::Entity::insert_many(chunk.to_vec())
-            .exec(db)
+    let mut insert_batch = Vec::with_capacity(500);
+    for aggregate in aggregates {
+        insert_batch.push(aggregate.into_active_model()?);
+        if insert_batch.len() == 500 {
+            monitor_results_hourly::Entity::insert_many(std::mem::take(&mut insert_batch))
+                .exec(&txn)
+                .await?;
+        }
+    }
+    if !insert_batch.is_empty() {
+        monitor_results_hourly::Entity::insert_many(insert_batch)
+            .exec(&txn)
             .await?;
     }
 
     let delete_after = std::env::var("ROLLUP_DELETE_BRUTO_AFTER_HOURS")
         .ok()
-        .and_then(|v| v.trim().parse::<i64>().ok())
+        .and_then(|value| value.trim().parse::<i64>().ok())
         .unwrap_or(DEFAULT_DELETE_BRUTO_AFTER_HOURS);
-
     if delete_after > 0 {
         let delete_cutoff = cutoff - Duration::hours(delete_after);
-        let deleted = monitor_results::Entity::delete_many()
+        stats.rows_deleted = monitor_results::Entity::delete_many()
             .filter(monitor_results::Column::StartedAt.lt(delete_cutoff))
-            .exec(db)
+            // Durante a recuperação de backlog, horas posteriores a `end`
+            // ainda não foram agregadas e não podem ser descartadas.
+            .filter(monitor_results::Column::StartedAt.lt(end))
+            .exec(&txn)
             .await?
             .rows_affected;
-        stats.rows_deleted = deleted;
     }
 
+    txn.commit().await?;
     Ok(stats)
 }
 
-#[derive(Debug, Default)]
-struct Accumulator {
-    total: i32,
-    up: i32,
-    down: i32,
-    unknown: i32,
-    latencies: Vec<f64>,
-    first_started_at: Option<DateTime<Utc>>,
-    last_finished_at: Option<DateTime<Utc>>,
+#[derive(Debug, FromQueryResult)]
+struct HourlyAggregate {
+    monitor_id: i64,
+    probe_id: Option<i64>,
+    bucket: sea_orm::prelude::DateTimeWithTimeZone,
+    total_checks: i64,
+    up_checks: i64,
+    down_checks: i64,
+    unknown_checks: i64,
+    avg_latency_ms: Option<f64>,
+    min_latency_ms: Option<f64>,
+    max_latency_ms: Option<f64>,
+    first_started_at: sea_orm::prelude::DateTimeWithTimeZone,
+    last_finished_at: sea_orm::prelude::DateTimeWithTimeZone,
 }
 
-impl Accumulator {
-    fn add(&mut self, row: &monitor_results::Model) {
-        self.total += 1;
-        match row.status.as_str() {
-            "up" => self.up += 1,
-            "down" => self.down += 1,
-            _ => self.unknown += 1,
-        }
-        if let Some(latency) = row.latency_ms {
-            if latency.is_finite() {
-                self.latencies.push(latency);
-            }
-        }
-        let started = row.started_at.with_timezone(&Utc);
-        let finished = row.finished_at.with_timezone(&Utc);
-        self.first_started_at = Some(
-            self.first_started_at
-                .map_or(started, |current| current.min(started)),
-        );
-        self.last_finished_at = Some(
-            self.last_finished_at
-                .map_or(finished, |current| current.max(finished)),
-        );
-    }
-
-    fn into_active_model(
-        self,
-        monitor_id: i64,
-        probe_id: Option<i64>,
-        bucket: DateTime<Utc>,
-    ) -> monitor_results_hourly::ActiveModel {
-        let (avg, min, max) = if self.latencies.is_empty() {
-            (None, None, None)
-        } else {
-            let sum: f64 = self.latencies.iter().sum();
-            let avg = sum / self.latencies.len() as f64;
-            let min = self.latencies.iter().copied().fold(f64::INFINITY, f64::min);
-            let max = self
-                .latencies
-                .iter()
-                .copied()
-                .fold(f64::NEG_INFINITY, f64::max);
-            (Some(avg), Some(min), Some(max))
+impl HourlyAggregate {
+    fn into_active_model(self) -> AppResult<monitor_results_hourly::ActiveModel> {
+        let count = |name: &str, value: i64| {
+            i32::try_from(value)
+                .map_err(|_| AppError::Internal(anyhow::anyhow!("{name} do rollup excede i32")))
         };
-
-        monitor_results_hourly::ActiveModel {
-            monitor_id: Set(monitor_id),
-            probe_id: Set(probe_id),
-            bucket: Set(bucket.into()),
-            total_checks: Set(self.total),
-            up_checks: Set(self.up),
-            down_checks: Set(self.down),
-            unknown_checks: Set(self.unknown),
-            avg_latency_ms: Set(avg),
-            min_latency_ms: Set(min),
-            max_latency_ms: Set(max),
-            first_started_at: Set(self.first_started_at.unwrap_or(bucket).into()),
-            last_finished_at: Set(self.last_finished_at.unwrap_or(bucket).into()),
+        Ok(monitor_results_hourly::ActiveModel {
+            monitor_id: Set(self.monitor_id),
+            probe_id: Set(self.probe_id),
+            bucket: Set(self.bucket),
+            total_checks: Set(count("total_checks", self.total_checks)?),
+            up_checks: Set(count("up_checks", self.up_checks)?),
+            down_checks: Set(count("down_checks", self.down_checks)?),
+            unknown_checks: Set(count("unknown_checks", self.unknown_checks)?),
+            avg_latency_ms: Set(self.avg_latency_ms),
+            min_latency_ms: Set(self.min_latency_ms),
+            max_latency_ms: Set(self.max_latency_ms),
+            first_started_at: Set(self.first_started_at),
+            last_finished_at: Set(self.last_finished_at),
             ..Default::default()
-        }
+        })
     }
+}
+
+async fn aggregate_range<C>(
+    db: &C,
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
+) -> AppResult<Vec<HourlyAggregate>>
+where
+    C: ConnectionTrait,
+{
+    let backend = db.get_database_backend();
+    let (start_marker, end_marker, bucket_expression) = match backend {
+        DatabaseBackend::Postgres => ("$1", "$2", "date_trunc('hour', started_at)"),
+        _ => ("?", "?", "strftime('%Y-%m-%dT%H:00:00+00:00', started_at)"),
+    };
+    let sql = format!(
+        "SELECT monitor_id, \
+                CASE WHEN COUNT(probe_id) = COUNT(*) AND MIN(probe_id) = MAX(probe_id) \
+                     THEN MIN(probe_id) ELSE NULL END AS probe_id, \
+                {bucket_expression} AS bucket, \
+                COUNT(*) AS total_checks, \
+                SUM(CASE WHEN status = 'up' THEN 1 ELSE 0 END) AS up_checks, \
+                SUM(CASE WHEN status = 'down' THEN 1 ELSE 0 END) AS down_checks, \
+                SUM(CASE WHEN status NOT IN ('up', 'down') THEN 1 ELSE 0 END) AS unknown_checks, \
+                AVG(latency_ms) AS avg_latency_ms, \
+                MIN(latency_ms) AS min_latency_ms, \
+                MAX(latency_ms) AS max_latency_ms, \
+                MIN(started_at) AS first_started_at, \
+                MAX(finished_at) AS last_finished_at \
+           FROM monitor_results \
+          WHERE started_at >= {start_marker} AND started_at < {end_marker} \
+          GROUP BY monitor_id, {bucket_expression} \
+          ORDER BY bucket ASC, monitor_id ASC"
+    );
+
+    Ok(
+        HourlyAggregate::find_by_statement(Statement::from_sql_and_values(
+            backend,
+            sql,
+            Vec::<Value>::from([start.into(), end.into()]),
+        ))
+        .all(db)
+        .await?,
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{Duration, Timelike};
+    use chrono::Timelike;
 
     #[test]
     fn trunca_para_inicio_da_hora() {
-        let dt = Utc::now();
-        let truncated = truncate_to_hour(dt);
+        let truncated = truncate_to_hour(Utc::now());
         assert_eq!(truncated.minute(), 0);
         assert_eq!(truncated.second(), 0);
         assert_eq!(truncated.nanosecond(), 0);
     }
 
     #[test]
-    fn acumulador_conta_status_e_latencias() {
-        let t0 = Utc::now();
-        let mut acc = Accumulator::default();
-        acc.add(&monitor_results::Model {
-            id: 1,
-            monitor_id: 1,
-            probe_id: None,
-            status: "up".into(),
-            started_at: t0.into(),
-            finished_at: (t0 + Duration::seconds(1)).into(),
-            duration_ms: 10,
-            latency_ms: Some(12.5),
-            message: None,
-            data: None,
-            created_at: t0.into(),
-        });
-        acc.add(&monitor_results::Model {
-            id: 2,
-            monitor_id: 1,
-            probe_id: None,
-            status: "down".into(),
-            started_at: (t0 + Duration::seconds(5)).into(),
-            finished_at: (t0 + Duration::seconds(6)).into(),
-            duration_ms: 10,
-            latency_ms: None,
-            message: None,
-            data: None,
-            created_at: t0.into(),
-        });
-
-        assert_eq!(acc.total, 2);
-        assert_eq!(acc.up, 1);
-        assert_eq!(acc.down, 1);
-        assert_eq!(acc.unknown, 0);
-        assert_eq!(acc.latencies, vec![12.5]);
+    fn janela_de_backlog_tem_teto_explicito() {
+        assert_eq!(MAX_ROLLUP_HOURS_PER_RUN, 168);
+        assert_eq!(ROLLUP_LOOKBACK_HOURS, 2);
     }
 }

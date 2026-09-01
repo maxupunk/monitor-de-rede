@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 
 use chrono::{Duration, Utc};
+use futures::TryStreamExt;
 use loco_rs::prelude::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 use serde::Serialize;
@@ -144,16 +145,88 @@ pub struct DnsSeriesItem {
     pub points: Vec<DnsHistoryPoint>,
 }
 
+const DNS_HISTORY_POINT_LIMIT: usize = 720;
+const DNS_MEDIAN_SAMPLE_LIMIT: usize = 2_048;
+
 #[derive(Default)]
 struct PerformanceBucket {
     server: String,
     label: String,
     protocol: String,
     monitor_ids: Vec<i64>,
-    latencies: Vec<f64>,
+    latency_sample: Vec<f64>,
+    latency_sample_stride: usize,
+    latency_seen: usize,
+    latency_sum: f64,
+    min_latency: Option<f64>,
+    max_latency: Option<f64>,
     total: usize,
     last_checked_at: Option<String>,
     points: Vec<DnsHistoryPoint>,
+    point_stride: usize,
+    points_seen: usize,
+    last_point: Option<DnsHistoryPoint>,
+}
+
+impl PerformanceBucket {
+    fn add_latency(&mut self, value: f64) {
+        if !value.is_finite() {
+            return;
+        }
+        self.latency_seen += 1;
+        self.latency_sum += value;
+        self.min_latency = Some(self.min_latency.map_or(value, |current| current.min(value)));
+        self.max_latency = Some(self.max_latency.map_or(value, |current| current.max(value)));
+
+        let stride = self.latency_sample_stride.max(1);
+        self.latency_sample_stride = stride;
+        if (self.latency_seen - 1).is_multiple_of(stride) {
+            self.latency_sample.push(value);
+        }
+        if self.latency_sample.len() > DNS_MEDIAN_SAMPLE_LIMIT {
+            retain_alternating(&mut self.latency_sample);
+            self.latency_sample_stride = stride.saturating_mul(2);
+        }
+    }
+
+    fn add_point(&mut self, point: DnsHistoryPoint) {
+        self.points_seen += 1;
+        self.last_point = Some(point.clone());
+        let stride = self.point_stride.max(1);
+        self.point_stride = stride;
+        if (self.points_seen - 1).is_multiple_of(stride) {
+            self.points.push(point);
+        }
+        if self.points.len() > DNS_HISTORY_POINT_LIMIT {
+            retain_alternating(&mut self.points);
+            self.point_stride = stride.saturating_mul(2);
+        }
+    }
+
+    fn finish_points(&mut self) -> Vec<DnsHistoryPoint> {
+        if let Some(last) = self.last_point.take() {
+            let already_present = self
+                .points
+                .last()
+                .is_some_and(|point| point.timestamp == last.timestamp);
+            if !already_present {
+                if self.points.len() >= DNS_HISTORY_POINT_LIMIT {
+                    self.points.pop();
+                }
+                self.points.push(last);
+            }
+        }
+        std::mem::take(&mut self.points)
+    }
+}
+
+fn retain_alternating<T>(items: &mut Vec<T>) {
+    let mut index = 0;
+    items.retain(|_| {
+        let retain = index % 2 == 0;
+        index += 1;
+        retain
+    });
 }
 
 async fn performance(
@@ -180,14 +253,15 @@ async fn performance(
         .iter()
         .map(|monitor| (monitor.id, monitor))
         .collect();
-    let results = monitor_results::Entity::find()
+    let mut results = monitor_results::Entity::find()
         .filter(monitor_results::Column::MonitorId.is_in(monitor_ids))
         .filter(monitor_results::Column::StartedAt.gte(cutoff))
+        .filter(monitor_results::Column::StartedAt.lte(Utc::now()))
         .order_by_asc(monitor_results::Column::StartedAt)
-        .all(&ctx.db)
+        .stream(&ctx.db)
         .await?;
     let mut buckets: BTreeMap<String, PerformanceBucket> = BTreeMap::new();
-    for result in results {
+    while let Some(result) = results.try_next().await? {
         let Some(monitor) = monitor_by_id.get(&result.monitor_id) else {
             continue;
         };
@@ -255,10 +329,10 @@ async fn performance(
             .or(result.latency_ms);
         if result.status == "up" {
             if let Some(value) = lookup {
-                bucket.latencies.push(value);
+                bucket.add_latency(value);
             }
         }
-        bucket.points.push(DnsHistoryPoint {
+        bucket.add_point(DnsHistoryPoint {
             timestamp: checked_at,
             latency_ms: if result.status == "up" { lookup } else { None },
             status: result.status.clone(),
@@ -267,10 +341,11 @@ async fn performance(
     let mut ranking: Vec<DnsServerRanking> = Vec::new();
     let mut series: Vec<DnsSeriesItem> = Vec::new();
 
-    for bucket in buckets.into_values() {
-        let mut values = bucket.latencies;
+    for mut bucket in buckets.into_values() {
+        let mut values = std::mem::take(&mut bucket.latency_sample);
         values.sort_by(f64::total_cmp);
-        let count = values.len();
+        let count = bucket.latency_seen;
+        let sampled_count = values.len();
         ranking.push(DnsServerRanking {
             server: bucket.server.clone(),
             label: if bucket.label.is_empty() {
@@ -279,14 +354,14 @@ async fn performance(
                 bucket.label.clone()
             },
             protocol: bucket.protocol.clone(),
-            avg_lookup_time_ms: (count > 0).then(|| values.iter().sum::<f64>() / count as f64),
-            min_lookup_time_ms: values.first().copied(),
-            max_lookup_time_ms: values.last().copied(),
-            median_lookup_time_ms: (count > 0).then(|| {
-                if count % 2 == 0 {
-                    (values[count / 2 - 1] + values[count / 2]) / 2.0
+            avg_lookup_time_ms: (count > 0).then(|| bucket.latency_sum / count as f64),
+            min_lookup_time_ms: bucket.min_latency,
+            max_lookup_time_ms: bucket.max_latency,
+            median_lookup_time_ms: (sampled_count > 0).then(|| {
+                if sampled_count % 2 == 0 {
+                    (values[sampled_count / 2 - 1] + values[sampled_count / 2]) / 2.0
                 } else {
-                    values[count / 2]
+                    values[sampled_count / 2]
                 }
             }),
             success_rate: if bucket.total == 0 {
@@ -299,12 +374,13 @@ async fn performance(
             error: None,
         });
 
+        let points = bucket.finish_points();
         series.push(DnsSeriesItem {
             server: bucket.server,
             label: bucket.label,
             protocol: bucket.protocol,
             monitor_ids: bucket.monitor_ids,
-            points: bucket.points,
+            points,
         });
     }
 
@@ -486,4 +562,33 @@ pub fn routes() -> Routes {
         .add("/lookup", post(lookup))
         .add("/performance", get(performance))
         .add("/provision", post(provision))
+}
+
+#[cfg(test)]
+mod memory_tests {
+    use super::*;
+
+    #[test]
+    fn historico_dns_e_amostra_da_mediana_permanecem_limitados() {
+        let mut bucket = PerformanceBucket::default();
+        for index in 0..10_000 {
+            bucket.add_latency(index as f64);
+            bucket.add_point(DnsHistoryPoint {
+                timestamp: index.to_string(),
+                latency_ms: Some(index as f64),
+                status: "up".into(),
+            });
+        }
+
+        assert_eq!(bucket.latency_seen, 10_000);
+        assert_eq!(bucket.latency_sum, 49_995_000.0);
+        assert_eq!(bucket.min_latency, Some(0.0));
+        assert_eq!(bucket.max_latency, Some(9_999.0));
+        assert!(bucket.latency_sample.len() <= DNS_MEDIAN_SAMPLE_LIMIT);
+
+        let points = bucket.finish_points();
+        assert!(points.len() <= DNS_HISTORY_POINT_LIMIT);
+        assert_eq!(points.first().unwrap().timestamp, "0");
+        assert_eq!(points.last().unwrap().timestamp, "9999");
+    }
 }

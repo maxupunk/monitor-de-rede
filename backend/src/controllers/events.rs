@@ -145,9 +145,10 @@ async fn hourly_distribution(
 
     // 2. Consulta eventos criados desde o início do período
     let cutoff = now - Duration::hours(hours_count);
-    let rows = alert_events::Entity::find()
+    let mut rows = alert_events::Entity::find()
         .filter(crate::models::_entities::alert_events::Column::CreatedAt.gte(cutoff))
-        .all(&ctx.db)
+        .filter(crate::models::_entities::alert_events::Column::CreatedAt.lte(now))
+        .stream(&ctx.db)
         .await?;
 
     let mut totals = HourlyDistributionTotals {
@@ -158,7 +159,7 @@ async fn hourly_distribution(
     };
 
     // 3. Distribui os eventos nos baldes
-    for row in rows {
+    while let Some(row) = futures::TryStreamExt::try_next(&mut rows).await? {
         let row_time = row.created_at.with_timezone(&Utc);
         let hours_ago = (now - row_time).num_hours();
 

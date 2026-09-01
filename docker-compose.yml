@@ -83,7 +83,9 @@ services:
       DB_CONNECT_TIMEOUT: ${DB_CONNECT_TIMEOUT:-5000}
       DB_IDLE_TIMEOUT: ${DB_IDLE_TIMEOUT:-300000}
       DB_MIN_CONNECTIONS: ${DB_MIN_CONNECTIONS:-1}
-      DB_MAX_CONNECTIONS: ${DB_MAX_CONNECTIONS:-10}
+      # SQLite é o padrão e usa um único writer; pools maiores multiplicam o
+      # cache e os buffers temporários. PostgreSQL pode sobrescrever para 10.
+      DB_MAX_CONNECTIONS: ${DB_MAX_CONNECTIONS:-1}
       # Token exigido no cadastro do primeiro usuário. Deixe vazio e o servidor
       # sorteia um no primeiro boot, imprimindo-o no log (`docker compose logs
       # netmonitor | grep setup_token`). Definir aqui só interessa a

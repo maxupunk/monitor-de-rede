@@ -52,7 +52,10 @@ database:
   connect_timeout: {{ get_env(name="DB_CONNECT_TIMEOUT", default="5000") }}
   idle_timeout: {{ get_env(name="DB_IDLE_TIMEOUT", default="300000") }}
   min_connections: {{ get_env(name="DB_MIN_CONNECTIONS", default="1") }}
-  max_connections: {{ get_env(name="DB_MAX_CONNECTIONS", default="10") }}
+  # O padrão é SQLite: uma conexão impede que caches e buffers temporários
+  # sejam multiplicados pelo pool e é coerente com seu escritor único. Quem
+  # usa PostgreSQL pode elevar explicitamente `DB_MAX_CONNECTIONS` (ex.: 10).
+  max_connections: {{ get_env(name="DB_MAX_CONNECTIONS", default="1") }}
   # O container `migration` não existe mais: o próprio `start` converge o
   # esquema antes de abrir a porta. `create_app` migra; `run_task` não — então
   # um probe remoto, que roda tarefa, continua sem tocar no banco de ninguém.

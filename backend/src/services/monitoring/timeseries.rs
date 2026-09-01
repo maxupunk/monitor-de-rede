@@ -7,7 +7,8 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Duration, Utc};
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder};
+use futures::TryStreamExt;
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, StreamTrait};
 
 use crate::{
     dtos::monitors::{
@@ -20,7 +21,8 @@ use crate::{
 
 #[derive(Debug, Default)]
 struct BucketAccumulator {
-    latencies: Vec<f64>,
+    latency_sum: f64,
+    latency_count: i64,
     down_count: i64,
     total_checks: i64,
     monitor_items: HashMap<i64, MonitorTimeSeriesDetailItem>,
@@ -32,7 +34,7 @@ pub async fn calculate_monitor_timeseries<C>(
     query: MonitorTimeSeriesQuery,
 ) -> AppResult<MonitorTimeSeriesResponse>
 where
-    C: ConnectionTrait,
+    C: ConnectionTrait + StreamTrait + Send,
 {
     let timeframe_str = query.timeframe.unwrap_or_else(|| "15m".into());
     let (total_seconds, bucket_count, bucket_duration) = match timeframe_str.to_lowercase().as_str()
@@ -89,25 +91,27 @@ where
     let monitor_info_map: HashMap<i64, &monitors::Model> =
         target_monitors.iter().map(|m| (m.id, m)).collect();
 
-    // 3. Consulta os resultados brutos no período
-    let results = monitor_results::Entity::find()
-        .filter(monitor_results::Column::MonitorId.is_in(monitor_ids))
-        .filter(monitor_results::Column::StartedAt.gte(start_time))
-        .order_by_asc(monitor_results::Column::StartedAt)
-        .all(db)
-        .await?;
-
-    // 4. Inicializa baldes
+    // 3. Inicializa acumuladores de cardinalidade fixa antes de percorrer a
+    // série. O cursor mantém uma única linha decodificada por vez.
     let mut buckets: Vec<BucketAccumulator> = (0..bucket_count)
         .map(|_| BucketAccumulator::default())
         .collect();
+    let mut global_latency_sum = 0.0;
+    let mut global_latency_count = 0_i64;
+    let mut global_min_latency: Option<f64> = None;
+    let mut global_max_latency: Option<f64> = None;
+    let mut global_down_count = 0_i64;
+    let mut total_checks_count = 0_i64;
 
-    let mut global_latencies: Vec<f64> = Vec::with_capacity(results.len());
-    let mut global_down_count: i64 = 0;
-    let total_checks_count = results.len() as i64;
-
-    // 5. Distribui leituras nos baldes
-    for res in &results {
+    let mut results = monitor_results::Entity::find()
+        .filter(monitor_results::Column::MonitorId.is_in(monitor_ids))
+        .filter(monitor_results::Column::StartedAt.gte(start_time))
+        .filter(monitor_results::Column::StartedAt.lte(now))
+        .order_by_asc(monitor_results::Column::StartedAt)
+        .stream(db)
+        .await?;
+    while let Some(res) = results.try_next().await? {
+        total_checks_count += 1;
         let res_time: DateTime<Utc> = res.started_at.with_timezone(&Utc);
         let offset = (res_time - start_time).num_seconds();
 
@@ -118,7 +122,10 @@ where
 
         if let Some(lat) = res.latency_ms {
             if lat.is_finite() {
-                global_latencies.push(lat);
+                global_latency_sum += lat;
+                global_latency_count += 1;
+                global_min_latency = Some(global_min_latency.map_or(lat, |value| value.min(lat)));
+                global_max_latency = Some(global_max_latency.map_or(lat, |value| value.max(lat)));
             }
         }
 
@@ -133,7 +140,8 @@ where
 
             if let Some(lat) = res.latency_ms {
                 if lat.is_finite() {
-                    bucket.latencies.push(lat);
+                    bucket.latency_sum += lat;
+                    bucket.latency_count += 1;
                 }
             }
 
@@ -177,9 +185,8 @@ where
             bucket_mid.format("%H:%M").to_string()
         };
 
-        let avg_lat = if !bucket.latencies.is_empty() {
-            let sum: f64 = bucket.latencies.iter().sum();
-            (sum / bucket.latencies.len() as f64 * 10.0).round() / 10.0
+        let avg_lat = if bucket.latency_count > 0 {
+            (bucket.latency_sum / bucket.latency_count as f64 * 10.0).round() / 10.0
         } else {
             0.0
         };
@@ -200,23 +207,14 @@ where
     }
 
     // 7. Estatísticas consolidadas
-    let avg_latency = if !global_latencies.is_empty() {
-        let sum: f64 = global_latencies.iter().sum();
-        (sum / global_latencies.len() as f64 * 10.0).round() / 10.0
+    let avg_latency = if global_latency_count > 0 {
+        (global_latency_sum / global_latency_count as f64 * 10.0).round() / 10.0
     } else {
         0.0
     };
 
-    let max_latency = global_latencies
-        .iter()
-        .copied()
-        .reduce(f64::max)
-        .unwrap_or(0.0);
-    let min_latency = global_latencies
-        .iter()
-        .copied()
-        .reduce(f64::min)
-        .unwrap_or(0.0);
+    let max_latency = global_max_latency.unwrap_or(0.0);
+    let min_latency = global_min_latency.unwrap_or(0.0);
 
     let packet_loss_pct = if total_checks_count > 0 {
         ((global_down_count as f64 / total_checks_count as f64) * 100.0).round() as i32

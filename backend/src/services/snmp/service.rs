@@ -13,7 +13,7 @@ use crate::services::{
         contracts::{CheckResult, MonitorStatus},
         device_status::{self, DeviceStatus},
         execution_guard::calculate_smart_timeout_seconds,
-        interface_monitoring,
+        interface_monitoring, metrics_repository,
     },
     shared::errors::{AppError, AppResult},
     snmp::{
@@ -1175,12 +1175,7 @@ pub async fn latest_metrics_for_interfaces(
     if interface_ids.is_empty() || names.is_empty() {
         return Ok(HashMap::new());
     }
-    let rows = metrics::Entity::find()
-        .filter(metrics_entity::Column::DeviceId.eq(device_id))
-        .filter(metrics_entity::Column::InterfaceId.is_in(interface_ids.iter().copied()))
-        .filter(metrics_entity::Column::Name.is_in(names.iter().copied()))
-        .order_by_desc(metrics_entity::Column::RecordedAt)
-        .all(db)
+    let rows = metrics_repository::latest_for_interfaces(db, Some(device_id), interface_ids, names)
         .await?;
     let mut map = HashMap::new();
     for row in rows {

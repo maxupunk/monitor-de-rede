@@ -5,7 +5,8 @@
 //! permitindo detectar saturações de link em tempo real e em janelas históricas.
 
 use chrono::{DateTime, Duration, Utc};
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder};
+use futures::TryStreamExt;
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, StreamTrait};
 
 use crate::{
     dtos::devices::{BandwidthLatencyPoint, BandwidthLatencyQuery, BandwidthLatencyResponse},
@@ -15,8 +16,10 @@ use crate::{
 
 #[derive(Debug, Default)]
 struct DualBucketAccumulator {
-    bw_readings: Vec<f64>,
-    lat_readings: Vec<f64>,
+    bw_sum: f64,
+    bw_count: i64,
+    latency_sum: f64,
+    latency_count: i64,
 }
 
 /// Calcula a série temporal correlacionada de banda e latência.
@@ -25,7 +28,7 @@ pub async fn calculate_bandwidth_latency_series<C>(
     query: BandwidthLatencyQuery,
 ) -> AppResult<BandwidthLatencyResponse>
 where
-    C: ConnectionTrait,
+    C: ConnectionTrait + StreamTrait + Send,
 {
     let timeframe_str = query.timeframe.unwrap_or_else(|| "15m".into());
     let (total_seconds, bucket_count, bucket_duration) = match timeframe_str.to_lowercase().as_str()
@@ -72,17 +75,33 @@ where
         ping_monitors.into_iter().map(|m| m.id).collect()
     };
 
-    // 2. Consulta latências de ping
-    let latency_rows = if !monitor_ids.is_empty() {
-        monitor_results::Entity::find()
+    let mut buckets: Vec<DualBucketAccumulator> = (0..bucket_count)
+        .map(|_| DualBucketAccumulator::default())
+        .collect();
+
+    // 2. Percorre latências de ping sem materializar a janela.
+    if !monitor_ids.is_empty() {
+        let mut latency_rows = monitor_results::Entity::find()
             .filter(monitor_results::Column::MonitorId.is_in(monitor_ids))
             .filter(monitor_results::Column::StartedAt.gte(start_time))
-            .order_by_asc(monitor_results::Column::StartedAt)
-            .all(db)
-            .await?
-    } else {
-        Vec::new()
-    };
+            .filter(monitor_results::Column::StartedAt.lte(now))
+            .stream(db)
+            .await?;
+        while let Some(row) = latency_rows.try_next().await? {
+            let row_time: DateTime<Utc> = row.started_at.with_timezone(&Utc);
+            let offset = (row_time - start_time).num_seconds();
+            if offset >= 0 && offset < total_seconds {
+                let bucket_idx = ((offset / bucket_duration) as usize).min(bucket_count - 1);
+                if let Some(latency) = row
+                    .latency_ms
+                    .filter(|value| value.is_finite() && *value >= 0.0)
+                {
+                    buckets[bucket_idx].latency_sum += latency;
+                    buckets[bucket_idx].latency_count += 1;
+                }
+            }
+        }
+    }
 
     // 3. Consulta métricas de banda
     let mut metrics_query = metrics_entity::Entity::find()
@@ -92,7 +111,8 @@ where
             "traffic",
             "interface_traffic",
         ]))
-        .filter(metrics_entity::Column::RecordedAt.gte(start_time));
+        .filter(metrics_entity::Column::RecordedAt.gte(start_time))
+        .filter(metrics_entity::Column::RecordedAt.lte(now));
 
     if let Some(dev_str) = &query.device_id {
         if dev_str != "all" && !dev_str.trim().is_empty() {
@@ -102,46 +122,23 @@ where
         }
     }
 
-    let metric_rows = metrics_query
-        .order_by_asc(metrics_entity::Column::RecordedAt)
-        .all(db)
-        .await?;
-
-    // 4. Inicializa baldes
-    let mut buckets: Vec<DualBucketAccumulator> = (0..bucket_count)
-        .map(|_| DualBucketAccumulator::default())
-        .collect();
-
-    // 5. Preenche baldes de banda
-    for m in &metric_rows {
+    let mut metric_rows = metrics_query.stream(db).await?;
+    while let Some(m) = metric_rows.try_next().await? {
         let m_time: DateTime<Utc> = m.recorded_at.with_timezone(&Utc);
         let offset = (m_time - start_time).num_seconds();
         if offset >= 0 && offset < total_seconds {
             let bucket_idx = ((offset / bucket_duration) as usize).min(bucket_count - 1);
             if m.value.is_finite() && m.value >= 0.0 {
-                buckets[bucket_idx].bw_readings.push(m.value);
-            }
-        }
-    }
-
-    // 6. Preenche baldes de latência
-    for r in &latency_rows {
-        let r_time: DateTime<Utc> = r.started_at.with_timezone(&Utc);
-        let offset = (r_time - start_time).num_seconds();
-        if offset >= 0 && offset < total_seconds {
-            let bucket_idx = ((offset / bucket_duration) as usize).min(bucket_count - 1);
-            if let Some(lat) = r.latency_ms {
-                if lat.is_finite() && lat >= 0.0 {
-                    buckets[bucket_idx].lat_readings.push(lat);
-                }
+                buckets[bucket_idx].bw_sum += m.value;
+                buckets[bucket_idx].bw_count += 1;
             }
         }
     }
 
     // 7. Constrói a lista alinhada de amostras
     let mut samples: Vec<BandwidthLatencyPoint> = Vec::with_capacity(bucket_count);
-    let mut all_bw: Vec<f64> = Vec::new();
-    let mut all_lat: Vec<f64> = Vec::new();
+    let mut bucket_latency_sum = 0.0;
+    let mut buckets_with_latency = 0_i64;
 
     for (i, bucket) in buckets.into_iter().enumerate() {
         let bucket_start = start_time + Duration::seconds((i as i64) * bucket_duration);
@@ -154,25 +151,21 @@ where
             bucket_mid.format("%H:%M").to_string()
         };
 
-        let bw_val = if !bucket.bw_readings.is_empty() {
-            let sum: f64 = bucket.bw_readings.iter().sum();
-            sum / bucket.bw_readings.len() as f64
+        let bw_val = if bucket.bw_count > 0 {
+            bucket.bw_sum / bucket.bw_count as f64
         } else {
             0.0
         };
 
-        let lat_val = if !bucket.lat_readings.is_empty() {
-            let sum: f64 = bucket.lat_readings.iter().sum();
-            (sum / bucket.lat_readings.len() as f64 * 10.0).round() / 10.0
+        let lat_val = if bucket.latency_count > 0 {
+            (bucket.latency_sum / bucket.latency_count as f64 * 10.0).round() / 10.0
         } else {
             0.0
         };
 
-        if bw_val > 0.0 {
-            all_bw.push(bw_val);
-        }
         if lat_val > 0.0 {
-            all_lat.push(lat_val);
+            bucket_latency_sum += lat_val;
+            buckets_with_latency += 1;
         }
 
         samples.push(BandwidthLatencyPoint {
@@ -192,9 +185,8 @@ where
         .unwrap_or(0.0);
 
     let current_latency = samples.last().map(|s| s.latency).unwrap_or(0.0);
-    let avg_latency = if !all_lat.is_empty() {
-        let sum: f64 = all_lat.iter().sum();
-        (sum / all_lat.len() as f64 * 10.0).round() / 10.0
+    let avg_latency = if buckets_with_latency > 0 {
+        (bucket_latency_sum / buckets_with_latency as f64 * 10.0).round() / 10.0
     } else {
         0.0
     };

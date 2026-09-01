@@ -9,9 +9,13 @@ use backend::{
     models::{device_interfaces, devices, metrics, monitor_results, monitors, networks, sites},
     services::{
         discovery::queue,
-        events::{relay::relay_pending, EventBus},
+        events::{
+            relay::{relay_pending, RELAY_BATCH_SIZE},
+            EventBus,
+        },
         monitoring::{
             device_status::{self, DeviceStatus},
+            metrics_repository,
             presenter::{present_monitors, RECENT_RESULTS_LIMIT},
         },
         snmp::service::latest_metrics_for_interfaces,
@@ -164,20 +168,23 @@ async fn o_relay_so_trabalha_com_assinante_e_entrega_evento_de_outro_processo() 
     let ctx = &boot.app_context;
     let bus = EventBus::from_context(ctx).expect("barramento inicializado");
 
-    // Um processo diferente gravou no outbox (origin alheio).
-    backend::models::event_outbox::ActiveModel {
-        r#type: Set("monitor:result".into()),
-        origin: Set("outro-processo".into()),
-        payload: Set(serde_json::json!({
-            "type": "monitor:result",
-            "data": { "monitorId": 42 },
-            "timestamp": Utc::now().to_rfc3339(),
-        })),
-        ..Default::default()
-    }
-    .insert(&ctx.db)
-    .await
-    .expect("gravar no outbox");
+    // Um processo diferente gravou backlog maior que uma passada.
+    let backlog = (0..=RELAY_BATCH_SIZE)
+        .map(|monitor_id| backend::models::event_outbox::ActiveModel {
+            r#type: Set("monitor:result".into()),
+            origin: Set("outro-processo".into()),
+            payload: Set(serde_json::json!({
+                "type": "monitor:result",
+                "data": { "monitorId": monitor_id },
+                "timestamp": Utc::now().to_rfc3339(),
+            })),
+            ..Default::default()
+        })
+        .collect::<Vec<_>>();
+    backend::models::event_outbox::Entity::insert_many(backlog)
+        .exec(&ctx.db)
+        .await
+        .expect("gravar no outbox");
 
     // Sem ninguém escutando, o relay não consulta o banco (matriz #32).
     assert_eq!(
@@ -188,13 +195,20 @@ async fn o_relay_so_trabalha_com_assinante_e_entrega_evento_de_outro_processo() 
 
     // Com assinante, o evento atravessa (matriz #30).
     let mut inscrito = bus.subscribe();
-    assert_eq!(relay_pending(ctx).await.expect("relay com assinante"), 1);
+    assert_eq!(
+        relay_pending(ctx).await.expect("relay com assinante"),
+        RELAY_BATCH_SIZE
+    );
     let evento = inscrito.try_recv().expect("evento replicado");
     assert_eq!(evento.event_type, "monitor:result");
-    assert_eq!(evento.payload["monitorId"], 42);
+    assert_eq!(evento.payload["monitorId"], 0);
 
-    // Segunda passada não reentrega: o `last_relayed_id` avançou.
-    assert_eq!(relay_pending(ctx).await.expect("segunda passada"), 0);
+    // A linha excedente fica para a próxima passagem, mantendo memória e
+    // pressão sobre o canal limitadas.
+    assert_eq!(relay_pending(ctx).await.expect("segunda passada"), 1);
+
+    // Terceira passada não reentrega: o `last_relayed_id` avançou.
+    assert_eq!(relay_pending(ctx).await.expect("terceira passada"), 0);
 }
 
 /// Matriz #31 — o relay ignora o que a própria instância publicou, senão o
@@ -811,8 +825,7 @@ async fn a_interface_so_conta_como_monitorada_quando_tem_monitor_habilitado() {
     assert_eq!(depois.admin_status.as_deref(), Some("down"));
 }
 
-/// QUA-04 — métricas anteriores de interfaces SNMP são buscadas em uma query
-/// só, em vez de uma por interface.
+/// QUA-04 — a query devolve cardinalidade por série, não por histórico.
 #[tokio::test]
 #[serial]
 async fn busca_metricas_anteriores_de_interfaces_em_uma_query_sozinha() {
@@ -841,6 +854,30 @@ async fn busca_metricas_anteriores_de_interfaces_em_uma_query_sozinha() {
     .expect("criar interface B");
 
     let agora = Utc::now();
+    let mut historico = Vec::new();
+    for sequence in 0..100 {
+        for (interface, nome) in [
+            (interface_a.id, "ifHCInOctets"),
+            (interface_a.id, "ifHCOutOctets"),
+            (interface_b.id, "ifHCInOctets"),
+            (interface_b.id, "ifHCOutOctets"),
+        ] {
+            historico.push(metrics::ActiveModel {
+                device_id: Set(device.id),
+                interface_id: Set(Some(interface)),
+                name: Set(nome.into()),
+                value: Set(sequence as f64),
+                unit: Set("bytes".into()),
+                recorded_at: Set((agora - chrono::Duration::minutes(101 - sequence)).into()),
+                ..Default::default()
+            });
+        }
+    }
+    metrics::Entity::insert_many(historico)
+        .exec(db)
+        .await
+        .expect("criar histórico de métricas");
+
     for (interface, nome, valor) in [
         (interface_a.id, "ifHCInOctets", 1_000.0),
         (interface_a.id, "ifHCOutOctets", 2_000.0),
@@ -861,6 +898,30 @@ async fn busca_metricas_anteriores_de_interfaces_em_uma_query_sozinha() {
         .expect("criar métrica anterior");
     }
 
+    // Mesmo timestamp: o maior id é o desempate determinístico.
+    metrics::ActiveModel {
+        device_id: Set(device.id),
+        interface_id: Set(Some(interface_a.id)),
+        name: Set("ifHCInOctets".into()),
+        value: Set(9_999.0),
+        unit: Set("bytes".into()),
+        recorded_at: Set(agora.into()),
+        ..Default::default()
+    }
+    .insert(db)
+    .await
+    .expect("criar métrica empatada");
+
+    let linhas = metrics_repository::latest_for_interfaces(
+        db,
+        Some(device.id),
+        &[interface_a.id, interface_b.id, interface_a.id],
+        &["ifHCInOctets", "ifHCOutOctets", "ifHCInOctets"],
+    )
+    .await
+    .expect("buscar linhas mais recentes");
+    assert_eq!(linhas.len(), 4, "o histórico não pode atravessar a query");
+
     let encontradas = latest_metrics_for_interfaces(
         db,
         device.id,
@@ -879,7 +940,7 @@ async fn busca_metricas_anteriores_de_interfaces_em_uma_query_sozinha() {
         encontradas
             .get(&(interface_a.id, "ifHCInOctets".into()))
             .map(|m| m.value),
-        Some(1_000.0)
+        Some(9_999.0)
     );
     assert_eq!(
         encontradas

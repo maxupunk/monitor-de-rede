@@ -7,7 +7,8 @@
 //! `monitor_results` e agregada no mesmo formato.
 
 use chrono::{Duration, Utc};
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder};
+use futures::TryStreamExt;
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, StreamTrait};
 
 use crate::{
     models::{monitor_results, monitor_results_hourly},
@@ -96,7 +97,7 @@ impl UptimeStats {
 /// Propaga erro do banco.
 pub async fn uptime_for_monitor<C>(db: &C, monitor_id: i64, hours: i64) -> AppResult<UptimeStats>
 where
-    C: ConnectionTrait,
+    C: ConnectionTrait + StreamTrait + Send,
 {
     if hours <= 0 {
         return Ok(UptimeStats::default());
@@ -104,16 +105,18 @@ where
 
     let now = Utc::now();
     let window_start = truncate_to_hour(now - Duration::hours(hours - 1));
+    let current_hour_start = truncate_to_hour(now);
 
-    let hourly = monitor_results_hourly::Entity::find()
+    let mut hourly = monitor_results_hourly::Entity::find()
         .filter(monitor_results_hourly::Column::MonitorId.eq(monitor_id))
         .filter(monitor_results_hourly::Column::Bucket.gte(window_start))
+        .filter(monitor_results_hourly::Column::Bucket.lt(current_hour_start))
         .order_by_asc(monitor_results_hourly::Column::Bucket)
-        .all(db)
+        .stream(db)
         .await?;
 
     let mut stats = UptimeStats::default();
-    for bucket in &hourly {
+    while let Some(bucket) = hourly.try_next().await? {
         stats.merge(&UptimeStats {
             total_checks: i64::from(bucket.total_checks),
             up_checks: i64::from(bucket.up_checks),
@@ -123,31 +126,32 @@ where
             avg_latency_ms: bucket.avg_latency_ms,
         });
     }
+    drop(hourly);
 
     // Agrega a hora atual (bucket ainda aberto) a partir dos resultados brutos.
-    let current_hour_start = truncate_to_hour(now);
-    let partial = monitor_results::Entity::find()
+    let mut partial = monitor_results::Entity::find()
         .filter(monitor_results::Column::MonitorId.eq(monitor_id))
         .filter(monitor_results::Column::StartedAt.gte(current_hour_start))
-        .all(db)
+        .filter(monitor_results::Column::StartedAt.lte(now))
+        .stream(db)
         .await?;
 
-    if !partial.is_empty() {
-        let mut partial_stats = UptimeStats::default();
-        let mut latency_sum = 0.0;
-        let mut latency_count = 0;
-        for row in &partial {
-            partial_stats.total_checks += 1;
-            match row.status.as_str() {
-                "up" => partial_stats.up_checks += 1,
-                "down" => partial_stats.down_checks += 1,
-                _ => partial_stats.unknown_checks += 1,
-            }
-            if let Some(latency) = row.latency_ms.filter(|value| value.is_finite()) {
-                latency_sum += latency;
-                latency_count += 1;
-            }
+    let mut partial_stats = UptimeStats::default();
+    let mut latency_sum = 0.0;
+    let mut latency_count = 0;
+    while let Some(row) = partial.try_next().await? {
+        partial_stats.total_checks += 1;
+        match row.status.as_str() {
+            "up" => partial_stats.up_checks += 1,
+            "down" => partial_stats.down_checks += 1,
+            _ => partial_stats.unknown_checks += 1,
         }
+        if let Some(latency) = row.latency_ms.filter(|value| value.is_finite()) {
+            latency_sum += latency;
+            latency_count += 1;
+        }
+    }
+    if !partial_stats.is_empty() {
         partial_stats.avg_latency_ms =
             (latency_count > 0).then(|| latency_sum / latency_count as f64);
         partial_stats.recalculate_uptime();

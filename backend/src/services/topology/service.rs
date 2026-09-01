@@ -3,15 +3,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use petgraph::{algo::is_cyclic_directed, graph::Graph};
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter};
 
 use crate::{
     dtos::resources::UnmanagedSwitchInput,
     models::{
-        _entities::device_interfaces as device_interfaces_entity,
-        _entities::metrics as metrics_entity, device_interfaces, device_links, devices, metrics,
+        _entities::device_interfaces as device_interfaces_entity, device_interfaces, device_links,
+        devices,
     },
     services::{
+        monitoring::metrics_repository,
         shared::errors::{AppError, AppResult},
         snmp::collectors::LldpNeighbor,
         topology::link_resolver::{persist_resolved_links_detailed, NetworkLink},
@@ -233,17 +234,13 @@ pub async fn get_topology(
 
     let mut latest_traffic: BTreeMap<i64, (Option<f64>, Option<f64>)> = BTreeMap::new();
     if !iface_ids.is_empty() {
-        let recent_metrics = metrics::Entity::find()
-            .filter(metrics_entity::Column::InterfaceId.is_in(iface_ids))
-            .filter(metrics_entity::Column::Name.is_in([
-                "inBps",
-                "outBps",
-                "traffic_rx_bytes",
-                "traffic_tx_bytes",
-            ]))
-            .order_by_desc(metrics_entity::Column::RecordedAt)
-            .all(db)
-            .await?;
+        let recent_metrics = metrics_repository::latest_for_interfaces(
+            db,
+            None,
+            &iface_ids,
+            &["inBps", "outBps", "traffic_rx_bytes", "traffic_tx_bytes"],
+        )
+        .await?;
 
         for m in recent_metrics {
             if let Some(iface_id) = m.interface_id {

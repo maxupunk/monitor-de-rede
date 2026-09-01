@@ -7,7 +7,8 @@
 use std::collections::HashMap;
 
 use chrono::{Datelike, Duration, Timelike, Utc};
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder};
+use futures::TryStreamExt;
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, StreamTrait};
 
 use crate::{
     dtos::saas::{
@@ -103,11 +104,12 @@ pub async fn calculate_hourly_heatmap<C>(
     query: HourlyHeatmapQuery,
 ) -> AppResult<HourlyHeatmapResponse>
 where
-    C: ConnectionTrait,
+    C: ConnectionTrait + StreamTrait + Send,
 {
     let days_count = query.days.unwrap_or(7).clamp(1, 30);
     let now = Utc::now();
     let window_start = truncate_to_hour(now - Duration::days(days_count - 1));
+    let current_hour_start = truncate_to_hour(now);
 
     // Seleciona os monitores elegíveis
     let mut monitors_query = monitors::Entity::find();
@@ -184,38 +186,40 @@ where
     }
 
     // Consulta buckets horários fechados
-    let hourly_records = monitor_results_hourly::Entity::find()
+    let mut hourly_records = monitor_results_hourly::Entity::find()
         .filter(monitor_results_hourly::Column::MonitorId.is_in(monitor_ids.clone()))
         .filter(monitor_results_hourly::Column::Bucket.gte(window_start))
+        .filter(monitor_results_hourly::Column::Bucket.lt(current_hour_start))
         .order_by_asc(monitor_results_hourly::Column::Bucket)
-        .all(db)
+        .stream(db)
         .await?;
 
     // Mapa: (date_string, hour_u32) -> HourlyAccumulator
     let mut map: HashMap<(String, u32), HourlyAccumulator> = HashMap::new();
 
-    for record in &hourly_records {
+    while let Some(record) = hourly_records.try_next().await? {
         let dt = record.bucket.with_timezone(&Utc);
         let date_key = dt.format("%Y-%m-%d").to_string();
         let hour = dt.hour();
         let acc = map.entry((date_key, hour)).or_default();
-        acc.add_hourly_bucket(record);
+        acc.add_hourly_bucket(&record);
     }
+    drop(hourly_records);
 
     // Adiciona hora em andamento a partir de `monitor_results`
-    let current_hour_start = truncate_to_hour(now);
-    let raw_recent = monitor_results::Entity::find()
+    let mut raw_recent = monitor_results::Entity::find()
         .filter(monitor_results::Column::MonitorId.is_in(monitor_ids))
         .filter(monitor_results::Column::StartedAt.gte(current_hour_start))
-        .all(db)
+        .filter(monitor_results::Column::StartedAt.lte(now))
+        .stream(db)
         .await?;
 
-    for raw in &raw_recent {
+    while let Some(raw) = raw_recent.try_next().await? {
         let dt = raw.started_at.with_timezone(&Utc);
         let date_key = dt.format("%Y-%m-%d").to_string();
         let hour = dt.hour();
         let acc = map.entry((date_key, hour)).or_default();
-        acc.add_raw_result(raw);
+        acc.add_raw_result(&raw);
     }
 
     // Constrói a grade completa ordenada por data e hora
