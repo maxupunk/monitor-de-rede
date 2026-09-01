@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { formatLatency, formatMeasuredValue } from '../src/utils/formatters.ts'
+import {
+  formatBinaryBytes,
+  formatDecimalBytes,
+  formatLatency,
+  formatMeasuredValue,
+} from '../src/utils/formatters.ts'
 
 describe('formatters', () => {
   it('corta o lixo de ponto flutuante do RTT em uma casa decimal', () => {
@@ -30,7 +35,12 @@ describe('formatters', () => {
 
   it('métrica que chega com unidade `ms` passa pelo mesmo arredondamento', () => {
     expect(formatMeasuredValue(6.903808999999999, 'ms')).toBe('6.9 ms')
-    expect(formatMeasuredValue(1536, 'bytes')).toBe('1.5 KB')
+    expect(formatMeasuredValue(1536, 'bytes')).toBe('1.5 KiB')
     expect(formatMeasuredValue(1_500_000, 'bps')).toBe('1.5 Mbps')
+  })
+
+  it('distingue bytes binários de contadores decimais', () => {
+    expect(formatBinaryBytes(1_048_576)).toBe('1 MiB')
+    expect(formatDecimalBytes(1_000_000)).toBe('1 MB')
   })
 })

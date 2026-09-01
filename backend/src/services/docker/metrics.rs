@@ -3,7 +3,7 @@
 use std::{sync::Arc, time::Duration};
 
 use bollard::{
-    container::{ListContainersOptions, StatsOptions},
+    container::{ListContainersOptions, MemoryStatsStats, StatsOptions},
     models::ContainerSummary,
     Docker,
 };
@@ -49,6 +49,16 @@ pub async fn overview(ctx: &AppContext) -> DockerMetricsResponse {
     result
 }
 
+/// Descarta uma amostra anterior depois de qualquer mutação na Engine.
+///
+/// Sem isso, a publicação imediata disparada por start/stop/restart poderia
+/// reenviar por até dois segundos o snapshot anterior à ação.
+pub async fn invalidate(ctx: &AppContext) {
+    if let Some(state) = ctx.shared_store.get::<MetricsState>() {
+        *state.value.lock().await = None;
+    }
+}
+
 async fn cached(state: Option<&MetricsState>) -> Option<DockerMetricsResponse> {
     let guard = state?.value.lock().await;
     let (measured_at, value) = guard.as_ref()?;
@@ -82,12 +92,14 @@ async fn collect() -> DockerMetricsResponse {
     .buffer_unordered(MAX_CONCURRENT_STATS)
     .collect::<Vec<Option<DockerContainerMetrics>>>()
     .await;
+    let failed_container_count = measured.iter().filter(|metric| metric.is_none()).count();
     let mut metrics = measured.into_iter().flatten().collect::<Vec<_>>();
     metrics.sort_by(|a, b| a.container_name.cmp(&b.container_name));
 
     DockerMetricsResponse {
         docker_available: true,
         unavailable_reason: None,
+        failed_container_count,
         collected_at: chrono::Utc::now().to_rfc3339(),
         containers: metrics,
     }
@@ -97,6 +109,7 @@ fn unavailable(reason: &str) -> DockerMetricsResponse {
     DockerMetricsResponse {
         docker_available: false,
         unavailable_reason: Some(reason.to_string()),
+        failed_container_count: 0,
         collected_at: chrono::Utc::now().to_rfc3339(),
         containers: Vec::new(),
     }
@@ -107,13 +120,7 @@ async fn container_metrics(
     id: &str,
     summary: &ContainerSummary,
 ) -> Option<DockerContainerMetrics> {
-    let mut stream = client.stats(
-        id,
-        Some(StatsOptions {
-            stream: false,
-            one_shot: true,
-        }),
-    );
+    let mut stream = client.stats(id, Some(stats_options()));
     let stats = tokio::time::timeout(STATS_TIMEOUT, stream.next())
         .await
         .ok()??
@@ -132,7 +139,7 @@ async fn container_metrics(
             .find_map(|key| labels.get(*key))
             .cloned()
     });
-    let usage = stats.memory_stats.usage.unwrap_or_default();
+    let usage = memory_usage_without_inactive_cache(&stats.memory_stats);
     let limit = stats.memory_stats.limit.unwrap_or_default();
     let mut received = 0;
     let mut transmitted = 0;
@@ -181,6 +188,36 @@ async fn container_metrics(
         },
         pids: stats.pids_stats.current,
     })
+}
+
+fn stats_options() -> StatsOptions {
+    StatsOptions {
+        stream: false,
+        // CPU é um delta entre duas leituras. Com `one_shot`, a Engine deixa
+        // `precpu_stats` vazio e o percentual vira uma média desde o boot.
+        one_shot: false,
+    }
+}
+
+fn memory_usage_without_inactive_cache(memory: &bollard::container::MemoryStats) -> u64 {
+    let usage = memory.usage.unwrap_or_default();
+    let inactive_file = match memory.stats {
+        Some(MemoryStatsStats::V1(stats)) => stats.total_inactive_file,
+        Some(MemoryStatsStats::V2(stats)) => stats.inactive_file,
+        None => 0,
+    };
+
+    usage_without_cache(usage, inactive_file)
+}
+
+fn usage_without_cache(usage: u64, inactive_file: u64) -> u64 {
+    // O Docker CLI preserva o valor bruto quando a Engine devolve uma
+    // estatística impossível (cache maior ou igual ao uso).
+    if inactive_file < usage {
+        usage - inactive_file
+    } else {
+        usage
+    }
 }
 
 fn cpu_usage(stats: &bollard::container::Stats) -> f64 {
@@ -232,5 +269,19 @@ mod tests {
     fn percentual_trata_total_zero() {
         assert_eq!(percentage(10, 0), 0.0);
         assert_eq!(percentage(25, 100), 25.0);
+    }
+
+    #[test]
+    fn uso_de_memoria_desconta_cache_valido_e_preserva_amostra_invalida() {
+        assert_eq!(usage_without_cache(800, 300), 500);
+        assert_eq!(usage_without_cache(800, 800), 800);
+        assert_eq!(usage_without_cache(800, 900), 800);
+    }
+
+    #[test]
+    fn coleta_de_cpu_solicita_a_amostra_anterior() {
+        let options = stats_options();
+        assert!(!options.stream);
+        assert!(!options.one_shot);
     }
 }

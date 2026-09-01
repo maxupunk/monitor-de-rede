@@ -29,6 +29,8 @@ use contracts::{HealthSource, MeasureSource, Reading};
 pub mod series {
     pub const CPU_USAGE: &str = "cpu_usage";
     pub const MEMORY_USAGE: &str = "memory_usage";
+    pub const MEMORY_USED_BYTES: &str = "memory_used_bytes";
+    pub const MEMORY_TOTAL_BYTES: &str = "memory_total_bytes";
     pub const STORAGE_USAGE: &str = "storage_usage";
     pub const LOAD_AVERAGE_1M: &str = "load_average_1m";
     pub const PROCESS_MEMORY_BYTES: &str = "process_memory_bytes";

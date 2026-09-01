@@ -321,6 +321,8 @@ async fn as_series_de_dispositivo_sao_uma_lista_fechada() {
     for nome in [
         series::CPU_USAGE,
         series::MEMORY_USAGE,
+        series::MEMORY_USED_BYTES,
+        series::MEMORY_TOTAL_BYTES,
         series::STORAGE_USAGE,
         series::LOAD_AVERAGE_1M,
         series::PROCESS_MEMORY_BYTES,

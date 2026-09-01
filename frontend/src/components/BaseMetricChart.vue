@@ -253,7 +253,7 @@ const maxPointCount = computed(() => {
 const maxVal = computed(() => {
   if (allValues.value.length === 0) return 100
   const max = Math.max(...allValues.value)
-  if (props.unitType === 'percentage') return Math.min(100, max > 0 ? max * 1.15 : 100)
+  if (props.unitType === 'percentage') return Math.max(100, max > 0 ? max * 1.15 : 100)
   return max > 0 ? max * 1.15 : 100
 })
 

@@ -305,7 +305,8 @@
                   ></v-switch>
                   <div class="text-caption text-grey ml-8">
                     <span v-if="detailStore.scanResult.memoryInfo.totalKb">
-                      Total: {{ Math.round(detailStore.scanResult.memoryInfo.totalKb / 1024) }} MB
+                      Total:
+                      {{ formatBinaryBytes(detailStore.scanResult.memoryInfo.totalKb * 1024) }}
                     </span>
                     <span v-if="detailStore.scanResult.memoryInfo.usedPercent != null">
                       - Uso: {{ detailStore.scanResult.memoryInfo.usedPercent.toFixed(1) }}%
@@ -511,7 +512,7 @@ import DeviceEventsTab from '@/components/devices/tabs/DeviceEventsTab.vue'
 import DeviceLogsTab from '@/components/devices/tabs/DeviceLogsTab.vue'
 import DeviceVpnTab from '@/components/devices/tabs/DeviceVpnTab.vue'
 import { getStatusColor } from '@/utils/monitorPresentation'
-import { formatLinkSpeed } from '@/utils/formatters'
+import { formatBinaryBytes, formatLinkSpeed } from '@/utils/formatters'
 import { useVpnStore } from '@/stores/vpn'
 import { useLogsStore } from '@/stores/logs'
 import { confirm } from '@/composables/useConfirm'

@@ -230,6 +230,16 @@ pub fn parse_cgroup_v2_inactive_file(conteudo: &str) -> Option<u64> {
         .and_then(|valor| valor.parse::<u64>().ok())
 }
 
+/// Cache de arquivos inativo contabilizado por um cgroup v1.
+#[must_use]
+pub fn parse_cgroup_v1_total_inactive_file(conteudo: &str) -> Option<u64> {
+    conteudo
+        .lines()
+        .find(|linha| linha.starts_with("total_inactive_file "))
+        .and_then(|linha| linha.split_whitespace().nth(1))
+        .and_then(|valor| valor.parse::<u64>().ok())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -374,6 +384,10 @@ mod tests {
         let stat = "anon 100\nfile 900\ninactive_file 700\nslab 10\n";
         assert_eq!(parse_cgroup_v2_inactive_file(stat), Some(700));
         assert_eq!(parse_cgroup_v2_inactive_file("anon 100\n"), None);
+        assert_eq!(
+            parse_cgroup_v1_total_inactive_file("cache 200\ntotal_inactive_file 700\n"),
+            Some(700)
+        );
         assert_eq!(parse_cgroup_usage(" 1024 \n"), Some(1024));
     }
 }

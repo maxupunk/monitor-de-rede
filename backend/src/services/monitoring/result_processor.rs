@@ -49,9 +49,11 @@ pub fn pick_latency_metric(metrics: &[CheckMetric]) -> Option<&CheckMetric> {
 /// A lista é fechada de propósito. Um checker que invente um nome novo não
 /// passa a escrever em `metrics` por acidente: alguém precisa acrescentá-lo
 /// aqui, que é onde a decisão de retenção está escrita.
-const DEVICE_SERIES: [&str; 8] = [
+const DEVICE_SERIES: [&str; 10] = [
     series::CPU_USAGE,
     series::MEMORY_USAGE,
+    series::MEMORY_USED_BYTES,
+    series::MEMORY_TOTAL_BYTES,
     series::STORAGE_USAGE,
     series::LOAD_AVERAGE_1M,
     series::PROCESS_MEMORY_BYTES,
@@ -205,8 +207,23 @@ pub async fn process_result(
     // Publicação e persistência de SSE são best-effort: uma falha de relay não
     // pode abortar nem apagar a observação técnica já gravada.
     if let Ok(events) = EventBus::from_context(ctx) {
+        let recorded_at = result.finished_at.to_rfc3339();
+        let realtime_metrics: Vec<serde_json::Value> = result
+            .metrics
+            .iter()
+            .filter(|metric| is_device_series(&metric.name))
+            .map(|metric| {
+                serde_json::json!({
+                    "name": metric.name,
+                    "value": metric.value,
+                    "unit": metric.unit,
+                    "recordedAt": recorded_at.as_str(),
+                })
+            })
+            .collect();
         // `monitor:result` é o nome que `stores/events.ts` despacha; o payload
-        // alimenta a timeline e o sparkline sem esperar um refetch da lista.
+        // alimenta timeline, sparklines e séries numéricas sem um segundo
+        // evento durável para a mesma observação.
         if let Err(error) = events
             .publish(
                 &ctx.db,
@@ -225,6 +242,8 @@ pub async fn process_result(
                     "latencyMs": latency,
                     "durationMs": result.duration_ms,
                     "message": result.message,
+                    "metrics": realtime_metrics,
+                    "recordedAt": recorded_at,
                     "startedAt": result.started_at.to_rfc3339(),
                     "finishedAt": result.finished_at.to_rfc3339(),
                 }),

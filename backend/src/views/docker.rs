@@ -345,6 +345,7 @@ pub struct DockerContainerMetrics {
 pub struct DockerMetricsResponse {
     pub docker_available: bool,
     pub unavailable_reason: Option<String>,
+    pub failed_container_count: usize,
     pub collected_at: String,
     pub containers: Vec<DockerContainerMetrics>,
 }

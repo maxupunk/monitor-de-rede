@@ -4,6 +4,7 @@ import type { DockerContainerMetrics } from './DockerContainerMetrics'
 export type DockerMetricsResponse = {
   dockerAvailable: boolean
   unavailableReason: string | null
+  failedContainerCount: number
   collectedAt: string
   containers: Array<DockerContainerMetrics>
 }

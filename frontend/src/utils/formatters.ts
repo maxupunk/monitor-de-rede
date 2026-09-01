@@ -5,7 +5,8 @@
  * métrica aparecer com casas decimais diferentes conforme a tela.
  */
 
-const BYTE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'] as const
+const BINARY_BYTE_UNITS = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'] as const
+const DECIMAL_BYTE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'] as const
 const BIT_RATE_UNITS = ['bps', 'Kbps', 'Mbps', 'Gbps', 'Tbps'] as const
 
 export interface ScaleFormatOptions {
@@ -39,9 +40,19 @@ function formatScaled(
   return `${Number.parseFloat(scaled.toFixed(fractionDigits))} ${units[index]}`
 }
 
-/** Volume de dados em base 1024: 1536 ➔ "1.5 KB" */
+/** Memória e armazenamento em base 1024: 1536 ➔ "1.5 KiB". */
+export function formatBinaryBytes(value?: number | null, options?: ScaleFormatOptions): string {
+  return formatScaled(value, 1024, BINARY_BYTE_UNITS, options)
+}
+
+/** Contadores apresentados pelo Docker em base decimal: 1500 ➔ "1.5 KB". */
+export function formatDecimalBytes(value?: number | null, options?: ScaleFormatOptions): string {
+  return formatScaled(value, 1000, DECIMAL_BYTE_UNITS, options)
+}
+
+/** Compatibilidade para grandezas historicamente tratadas como armazenamento. */
 export function formatBytes(value?: number | null, options?: ScaleFormatOptions): string {
-  return formatScaled(value, 1024, BYTE_UNITS, options)
+  return formatBinaryBytes(value, options)
 }
 
 /** Taxa de transmissão em base 1000: 1_500_000 ➔ "1.5 Mbps" */

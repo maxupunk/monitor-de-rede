@@ -4,7 +4,10 @@ use chrono::Utc;
 use serde::Deserialize;
 
 use crate::services::{
-    monitoring::contracts::{CheckMetric, CheckResult, Checker, MonitorStatus},
+    monitoring::{
+        contracts::{CheckMetric, CheckResult, Checker, MonitorStatus},
+        health::series,
+    },
     snmp::{
         client::{SnmpClient, SnmpConfig, SnmpError, SnmpVersion},
         collectors::{collect_cpu, collect_memory, status_label, OID_SYS_UPTIME},
@@ -170,14 +173,31 @@ async fn memory_usage(client: &SnmpClient) -> Result<SnmpObservation, SnmpError>
     let usage = memory.used_percent.ok_or_else(|| {
         SnmpError::InvalidConfig("O agente SNMP não informou memória total e disponível".into())
     })?;
+    let mut metrics = vec![CheckMetric {
+        name: series::MEMORY_USAGE.into(),
+        value: usage,
+        unit: "percent".into(),
+    }];
+    #[allow(clippy::cast_precision_loss)]
+    if let Some(used_kb) = memory.used_kb {
+        metrics.push(CheckMetric {
+            name: series::MEMORY_USED_BYTES.into(),
+            value: used_kb.saturating_mul(1024) as f64,
+            unit: "bytes".into(),
+        });
+    }
+    #[allow(clippy::cast_precision_loss)]
+    if let Some(total_kb) = memory.total_kb {
+        metrics.push(CheckMetric {
+            name: series::MEMORY_TOTAL_BYTES.into(),
+            value: total_kb.saturating_mul(1024) as f64,
+            unit: "bytes".into(),
+        });
+    }
     Ok(SnmpObservation {
         metric: "memory_usage".into(),
         status: MonitorStatus::Up,
-        metrics: vec![CheckMetric {
-            name: "memory_usage".into(),
-            value: usage,
-            unit: "percent".into(),
-        }],
+        metrics,
         data: serde_json::json!({
             "totalKb": memory.total_kb,
             "usedKb": memory.used_kb,

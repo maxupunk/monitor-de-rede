@@ -16,6 +16,14 @@
     <v-alert v-if="docker.error" type="error" variant="tonal" closable class="mb-4">
       {{ docker.error }}
     </v-alert>
+    <v-alert
+      v-if="docker.metrics?.failedContainerCount"
+      type="warning"
+      variant="tonal"
+      class="mb-4"
+    >
+      Métricas parciais: {{ docker.metrics.failedContainerCount }} container(s) sem amostra.
+    </v-alert>
     <v-card rounded="xl" variant="outlined" class="mb-4">
       <div class="d-flex flex-column flex-md-row ga-3 pa-4">
         <v-text-field
@@ -61,7 +69,8 @@
             </v-chip>
             <v-spacer></v-spacer>
             <div class="docker-group-totals text-caption text-medium-emphasis">
-              CPU {{ group.cpuPercent.toFixed(1) }}% · RAM {{ formatBytes(group.memoryBytes) }}
+              CPU {{ group.cpuPercent.toFixed(2) }}% · RAM
+              {{ formatBinaryBytes(group.memoryBytes) }}
             </div>
           </div>
         </v-expansion-panel-title>
@@ -90,8 +99,8 @@
             </template>
             <template #item.resources="{ item }">
               <div v-if="metricFor(item.id)" class="text-caption py-1">
-                <div>CPU {{ metricFor(item.id)?.cpu.usagePercent.toFixed(1) }}%</div>
-                <div>RAM {{ metricFor(item.id)?.memory.usagePercent.toFixed(1) }}%</div>
+                <div>CPU {{ metricFor(item.id)?.cpu.usagePercent.toFixed(2) }}%</div>
+                <div>RAM {{ metricFor(item.id)?.memory.usagePercent.toFixed(2) }}%</div>
               </div>
               <span v-else class="text-medium-emphasis">—</span>
             </template>
@@ -380,7 +389,7 @@ import { useDockerStore } from '@/stores/docker'
 import type { DockerContainerDetail } from '@/bindings/DockerContainerDetail'
 import type { DockerContainerSummary } from '@/bindings/DockerContainerSummary'
 import type { DockerLogEntry } from '@/bindings/DockerLogEntry'
-import { formatBytes } from '@/utils/formatters'
+import { formatBinaryBytes } from '@/utils/formatters'
 
 type ContainerActionName = 'start' | 'stop' | 'restart' | 'remove'
 interface ContainerGroup {

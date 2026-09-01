@@ -422,6 +422,14 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
     - Histórico agregado de CPU/RAM na visão Docker e resumo compacto no dashboard, renderizado somente quando a Engine está disponível.
     - Diálogo com download e limpeza real de logs `json-file`, conexão/desconexão de redes com proteção da última rede e contraste revisado.
 
+- [x] **Coerência das métricas de recursos** 🟢 Concluído
+  - **Arquivos:** `backend/src/services/{docker,monitoring,snmp}/`, `frontend/src/components/widgets/ResourceUsageWidget.vue`, `frontend/src/utils/{formatters,resourceMetrics}.ts`.
+  - **Implementado:**
+    - CPU e working set de memória Docker alinhados às fórmulas do CLI, com sinalização de snapshots parciais e invalidação de cache após ações.
+    - Cache recuperável descontado em cgroup v1/v2 e em agentes UCD-SNMP, preferindo `memSysAvail` quando disponível.
+    - Widgets de CPU/RAM alimentados apenas por histórico e SSE reais, com load average e capacidade medidos; removidas amostras sintéticas e capacidades fixas.
+    - Unidades binárias e decimais explicitadas e tamanhos de imagem separados entre uso em disco e tamanho de conteúdo.
+
 - [x] **Remoção de referências e caminhos de migração sem uso** 🟢 Concluído
   - Removidos o importador de segredos, o fallback de variável de cifra e os documentos dedicados à transição de backend.
   - A documentação descreve apenas a arquitetura e os contratos atuais.

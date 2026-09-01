@@ -59,6 +59,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { apiService } from '@/services/apiService'
 import type { DatabaseInfo } from '@/bindings/DatabaseInfo'
+import { formatBinaryBytes } from '@/utils/formatters'
 
 const loading = ref(false)
 const error = ref('')
@@ -66,22 +67,13 @@ const info = ref<DatabaseInfo | null>(null)
 
 const formattedSize = computed(() => {
   if (!info.value) return '—'
-  return formatBytes(Number(info.value.sizeBytes))
+  return formatBinaryBytes(Number(info.value.sizeBytes))
 })
 
 const dbTypeLabel = computed(() => {
   if (!info.value) return '—'
   return info.value.dbType === 'sqlite' ? 'SQLite' : 'PostgreSQL'
 })
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  const k = 1024
-  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), units.length - 1)
-  const value = bytes / k ** i
-  return `${value.toFixed(i === 0 ? 0 : 2)} ${units[i]}`
-}
 
 async function fetchDatabaseInfo(): Promise<void> {
   loading.value = true

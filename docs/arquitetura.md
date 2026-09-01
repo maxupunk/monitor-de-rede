@@ -454,6 +454,17 @@ quantas abas estiverem abertas recebem a mesma amostra. Mutações administrativ
 forçam os dois snapshots imediatamente. O dashboard não renderiza seu resumo
 quando o snapshot informa que a Engine está indisponível.
 
+As métricas Docker seguem a mesma semântica do CLI: CPU nasce do delta entre
+duas amostras e memória representa o working set (`usage - inactive_file` no
+cgroup v2; `usage - total_inactive_file` no v1). Falhas isoladas de coleta são
+marcadas como snapshot parcial, sem fazer a Engine inteira parecer offline.
+
+As séries numéricas de um equipamento viajam no próprio `monitor:result`.
+O frontend aplica `metrics` diretamente nas stores e oferece localmente o alias
+`metric:recorded` aos gráficos; não existe segundo evento durável nem refetch.
+Memória publica o trio `memory_usage`, `memory_used_bytes` e
+`memory_total_bytes`, sempre medido pela fonte, nunca inferido pela interface.
+
 Telemetria Docker é efêmera e vai direto ao barramento em memória: persistir
 amostras de três em três segundos no `event_outbox` faria o banco crescer sem
 valor histórico. Os eventos de domínio duráveis descritos abaixo continuam

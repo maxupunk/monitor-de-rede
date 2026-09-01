@@ -83,6 +83,7 @@ async fn publish_live(ctx: &AppContext, bus: &EventBus) -> Result<bool, DockerEr
             DockerMetricsResponse {
                 docker_available: false,
                 unavailable_reason: status.reason.clone(),
+                failed_container_count: 0,
                 collected_at: chrono::Utc::now().to_rfc3339(),
                 containers: Vec::new(),
             },

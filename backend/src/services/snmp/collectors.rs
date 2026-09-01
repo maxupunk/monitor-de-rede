@@ -390,29 +390,68 @@ pub struct SnmpMemoryInfo {
     pub used_kb: Option<u64>,
     pub used_percent: Option<f64>,
 }
+
+const OID_MEM_TOTAL_REAL: &str = "1.3.6.1.4.1.2021.4.5.0";
+const OID_MEM_AVAIL_REAL: &str = "1.3.6.1.4.1.2021.4.6.0";
+const OID_MEM_BUFFER: &str = "1.3.6.1.4.1.2021.4.14.0";
+const OID_MEM_CACHED: &str = "1.3.6.1.4.1.2021.4.15.0";
+const OID_MEM_SYS_AVAILABLE: &str = "1.3.6.1.4.1.2021.4.27.0";
+
 pub async fn collect_memory(client: &SnmpClient) -> Result<SnmpMemoryInfo, SnmpError> {
     let values = client
         .get(&[
-            "1.3.6.1.4.1.2021.4.5.0",
-            "1.3.6.1.4.1.2021.4.6.0",
-            "1.3.6.1.4.1.2021.4.11.0",
+            OID_MEM_TOTAL_REAL,
+            OID_MEM_AVAIL_REAL,
+            OID_MEM_BUFFER,
+            OID_MEM_CACHED,
+            OID_MEM_SYS_AVAILABLE,
         ])
         .await?;
-    let total = number(&values, "1.3.6.1.4.1.2021.4.5.0");
-    let avail = number(&values, "1.3.6.1.4.1.2021.4.6.0");
-    let free = number(&values, "1.3.6.1.4.1.2021.4.11.0");
+    Ok(memory_info(
+        number(&values, OID_MEM_TOTAL_REAL),
+        number(&values, OID_MEM_SYS_AVAILABLE),
+        number(&values, OID_MEM_AVAIL_REAL),
+        number(&values, OID_MEM_BUFFER),
+        number(&values, OID_MEM_CACHED),
+    ))
+}
+
+fn memory_info(
+    total: Option<u64>,
+    system_available: Option<u64>,
+    free: Option<u64>,
+    buffers: Option<u64>,
+    cached: Option<u64>,
+) -> SnmpMemoryInfo {
+    // Net-SNMP moderno expõe diretamente o equivalente a `MemAvailable`.
+    // Em agentes antigos, aproxima com RAM livre + buffers + page cache, sem
+    // misturar swap (`memTotalFree`) à capacidade física.
+    let available = system_available.or_else(|| {
+        free.map(|free| {
+            free.saturating_add(buffers.unwrap_or_default())
+                .saturating_add(cached.unwrap_or_default())
+        })
+    });
+    let available = total
+        .zip(available)
+        .map(|(total, available)| available.min(total));
     let used = total
-        .zip(avail)
-        .map(|(total, avail)| total.saturating_sub(avail));
-    Ok(SnmpMemoryInfo {
+        .zip(available)
+        .map(|(total, available)| total.saturating_sub(available));
+    SnmpMemoryInfo {
         total_kb: total,
-        avail_kb: avail,
+        avail_kb: available,
         free_kb: free,
         used_kb: used,
         used_percent: used
-            .zip(total)
-            .map(|(used, total)| used as f64 * 100.0 / total.max(1) as f64),
-    })
+            .zip(total.filter(|total| *total > 0))
+            .map(|(used, total)| {
+                #[allow(clippy::cast_precision_loss)]
+                {
+                    used as f64 * 100.0 / total as f64
+                }
+            }),
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -518,6 +557,33 @@ fn text(values: &BTreeMap<String, Option<SnmpValue>>, oid: &str) -> Option<Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn memoria_prefere_disponivel_do_sistema() {
+        let memory = memory_info(Some(1_000), Some(600), Some(100), Some(100), Some(200));
+        assert_eq!(memory.avail_kb, Some(600));
+        assert_eq!(memory.free_kb, Some(100));
+        assert_eq!(memory.used_kb, Some(400));
+        assert_eq!(memory.used_percent, Some(40.0));
+    }
+
+    #[test]
+    fn memoria_antiga_soma_livre_buffers_e_cache_sem_ultrapassar_total() {
+        let memory = memory_info(Some(1_000), None, Some(100), Some(200), Some(300));
+        assert_eq!(memory.avail_kb, Some(600));
+        assert_eq!(memory.used_kb, Some(400));
+
+        let clamped = memory_info(Some(1_000), None, Some(800), Some(300), Some(200));
+        assert_eq!(clamped.avail_kb, Some(1_000));
+        assert_eq!(clamped.used_percent, Some(0.0));
+    }
+
+    #[test]
+    fn memoria_sem_total_utilizavel_nao_inventa_percentual() {
+        let memory = memory_info(Some(0), Some(0), Some(0), None, None);
+        assert_eq!(memory.used_percent, None);
+    }
+
     #[test]
     fn calcula_rollover_de_32_bits() {
         let previous = InterfaceTraffic {

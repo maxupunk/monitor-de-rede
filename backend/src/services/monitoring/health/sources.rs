@@ -88,6 +88,7 @@ impl HealthSource for HostSourceLinux {
         "host"
     }
 
+    #[allow(clippy::cast_precision_loss)]
     fn read(&self) -> Reading {
         let mut reading = Reading::default();
         // Um `Mutex` envenenado por um panic em outra thread não pode calar a
@@ -140,12 +141,25 @@ impl HealthSource for HostSourceLinux {
         {
             Some(info) => match info.used_percent() {
                 Some(percentual) => {
-                    reading = reading.measure(Measure::new(
-                        series::MEMORY_USAGE,
-                        percentual,
-                        "percent",
-                        MeasureSource::Host,
-                    ));
+                    reading = reading
+                        .measure(Measure::new(
+                            series::MEMORY_USAGE,
+                            percentual,
+                            "percent",
+                            MeasureSource::Host,
+                        ))
+                        .measure(Measure::new(
+                            series::MEMORY_USED_BYTES,
+                            info.used_bytes() as f64,
+                            "bytes",
+                            MeasureSource::Host,
+                        ))
+                        .measure(Measure::new(
+                            series::MEMORY_TOTAL_BYTES,
+                            info.total_bytes as f64,
+                            "bytes",
+                            MeasureSource::Host,
+                        ));
                 }
                 None => {
                     reading = reading.missing(
@@ -338,8 +352,8 @@ impl CgroupSourceLinux {
         std::fs::read_to_string(base.join(arquivo)).ok()
     }
 
-    /// Percentual usado sob o limite do cgroup, se houver limite.
-    fn used_percent(&self) -> Option<f64> {
+    /// Bytes usados e limite do cgroup, se houver limite.
+    fn memory_usage(&self) -> Option<(u64, u64)> {
         // v2 primeiro: é o padrão nas distribuições atuais.
         let v2 = Self::ler(&self.v2, "memory.max")
             .as_deref()
@@ -366,14 +380,16 @@ impl CgroupSourceLinux {
                         .as_deref()
                         .and_then(parsers::parse_cgroup_usage),
                 )
+                .map(|(limite, usado)| {
+                    let cache = Self::ler(&self.v1, "memory.stat")
+                        .as_deref()
+                        .and_then(parsers::parse_cgroup_v1_total_inactive_file)
+                        .unwrap_or(0);
+                    (limite, usado.saturating_sub(cache))
+                })
         };
 
-        let (limite, usado) = v2.or_else(v1)?;
-        if limite == 0 {
-            return None;
-        }
-        #[allow(clippy::cast_precision_loss)]
-        Some((usado as f64 / limite as f64) * 100.0)
+        v2.or_else(v1).filter(|(limite, _)| *limite > 0)
     }
 }
 
@@ -382,14 +398,32 @@ impl HealthSource for CgroupSourceLinux {
         "cgroup"
     }
 
+    #[allow(clippy::cast_precision_loss)]
     fn read(&self) -> Reading {
-        match self.used_percent() {
-            Some(percentual) => Reading::default().measure(Measure::new(
-                series::MEMORY_USAGE,
-                percentual,
-                "percent",
-                MeasureSource::Cgroup,
-            )),
+        match self.memory_usage() {
+            Some((limite, usado)) => {
+                #[allow(clippy::cast_precision_loss)]
+                let percentual = (usado as f64 / limite as f64) * 100.0;
+                Reading::default()
+                    .measure(Measure::new(
+                        series::MEMORY_USAGE,
+                        percentual,
+                        "percent",
+                        MeasureSource::Cgroup,
+                    ))
+                    .measure(Measure::new(
+                        series::MEMORY_USED_BYTES,
+                        usado as f64,
+                        "bytes",
+                        MeasureSource::Cgroup,
+                    ))
+                    .measure(Measure::new(
+                        series::MEMORY_TOTAL_BYTES,
+                        limite as f64,
+                        "bytes",
+                        MeasureSource::Cgroup,
+                    ))
+            }
             // Não é indisponibilidade: é ausência de limite, e nesse caso a
             // resposta certa é a do host. Registrar "indisponível" aqui faria
             // a tela mostrar um aviso para uma instalação perfeitamente sadia.
@@ -590,7 +624,7 @@ mod tests {
     }
 
     #[test]
-    fn o_cgroup_v2_desconta_o_cache_e_o_v1_serve_de_alternativa() {
+    fn os_cgroups_v2_e_v1_descontam_o_cache_de_arquivos() {
         let v2 = fixtures(&[
             ("memory.max", "1000\n"),
             ("memory.current", "800\n"),
@@ -604,6 +638,14 @@ mod tests {
             achou(&reading, series::MEMORY_USAGE).unwrap().source,
             MeasureSource::Cgroup
         );
+
+        let v1 = fixtures(&[
+            ("memory.limit_in_bytes", "1000\n"),
+            ("memory.usage_in_bytes", "800\n"),
+            ("memory.stat", "cache 400\ntotal_inactive_file 300\n"),
+        ]);
+        let reading = CgroupSourceLinux::new(v1.path().join("inexistente"), v1.path()).read();
+        assert!((achou(&reading, series::MEMORY_USAGE).unwrap().value - 50.0).abs() < 1e-9);
     }
 
     #[test]

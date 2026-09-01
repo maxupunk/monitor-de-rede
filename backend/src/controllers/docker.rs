@@ -400,6 +400,7 @@ async fn listing<T: Serialize>(
 }
 
 async fn emit_docker_updated(ctx: &AppContext) {
+    metrics::invalidate(ctx).await;
     let ctx = ctx.clone();
     tokio::spawn(async move { realtime::publish_all(&ctx).await });
 }

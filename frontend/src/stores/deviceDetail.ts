@@ -162,6 +162,9 @@ export const useDeviceDetailStore = defineStore('deviceDetail', () => {
   async function loadDeviceDetails(deviceId: number) {
     loading.value = true
     error.value = null
+    // Nunca preserve telemetria do equipamento anterior enquanto a nova
+    // seleção carrega ou quando apenas o endpoint de métricas falha.
+    metrics.value = []
     try {
       const [devData, intfData, monData, metData, evtData, capData] = await Promise.allSettled([
         apiService.get<Device>(`/devices/${deviceId}`),

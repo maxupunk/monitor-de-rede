@@ -19,6 +19,15 @@
     <v-alert v-if="docker.error" type="error" variant="tonal" closable class="mb-4">
       {{ docker.error }}
     </v-alert>
+    <v-alert
+      v-if="docker.metrics?.failedContainerCount"
+      type="warning"
+      variant="tonal"
+      class="mb-4"
+    >
+      Não foi possível coletar a amostra de
+      {{ docker.metrics.failedContainerCount }} container(s). Os totais abaixo são parciais.
+    </v-alert>
     <template v-if="docker.available">
       <v-row dense class="mb-2">
         <v-col v-for="card in summaryCards" :key="card.label" cols="6" md="3">
@@ -75,7 +84,7 @@
               ></v-list-item>
               <v-list-item
                 title="Capacidade"
-                :subtitle="`${docker.status?.cpus ?? 0} CPUs · ${formatBytes(docker.status?.memoryTotalBytes)}`"
+                :subtitle="`${docker.status?.cpus ?? 0} CPUs · ${formatBinaryBytes(docker.status?.memoryTotalBytes)}`"
               ></v-list-item>
             </v-list>
           </v-card>
@@ -110,15 +119,17 @@
                       {{ metric.projectName || 'Avulso' }}
                     </div>
                   </td>
-                  <td class="text-right">{{ metric.cpu.usagePercent.toFixed(1) }}%</td>
+                  <td class="text-right">{{ metric.cpu.usagePercent.toFixed(2) }}%</td>
                   <td class="text-right">
-                    {{ metric.memory.usagePercent.toFixed(1) }}%
-                    <div class="text-caption">{{ formatBytes(metric.memory.usageBytes) }}</div>
+                    {{ metric.memory.usagePercent.toFixed(2) }}%
+                    <div class="text-caption">
+                      {{ formatBinaryBytes(metric.memory.usageBytes) }}
+                    </div>
                   </td>
                   <td class="text-right">
-                    ↓ {{ formatBytes(metric.network.receivedBytes) }}
+                    ↓ {{ formatDecimalBytes(metric.network.receivedBytes) }}
                     <div class="text-caption">
-                      ↑ {{ formatBytes(metric.network.transmittedBytes) }}
+                      ↑ {{ formatDecimalBytes(metric.network.transmittedBytes) }}
                     </div>
                   </td>
                 </tr>
@@ -143,7 +154,7 @@ import { computed } from 'vue'
 import BaseMetricChart, { type ChartSeriesInput } from '@/components/BaseMetricChart.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import { useDockerStore } from '@/stores/docker'
-import { formatBytes, formatRelativeTime } from '@/utils/formatters'
+import { formatBinaryBytes, formatDecimalBytes, formatRelativeTime } from '@/utils/formatters'
 
 const docker = useDockerStore()
 
@@ -200,7 +211,7 @@ const aggregateSeries = computed<ChartSeriesInput[]>(() => [
   },
   {
     id: 'docker-memory-total',
-    label: 'Memória do host',
+    label: 'RAM dos containers / capacidade da Engine',
     color: '#7E57C2',
     fillArea: false,
     data: docker.aggregateHistory.map((sample) => ({

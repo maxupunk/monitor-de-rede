@@ -84,6 +84,19 @@ export const useEventsStore = defineStore('events', () => {
         // Um assinante com defeito não pode interromper os demais
       }
     }
+    // `monitor:result` já é o evento durável da observação. As métricas
+    // viajam no mesmo payload e este alias local mantém a assinatura focada
+    // dos gráficos sem duplicar linhas no event_outbox.
+    if (payload.type === 'monitor:result' && Array.isArray(payload.data.metrics)) {
+      const metricPayload = { ...payload, type: 'metric:recorded' }
+      for (const handler of handlers.get('metric:recorded') ?? []) {
+        try {
+          handler(metricPayload.data, metricPayload)
+        } catch {
+          // Mantém o isolamento entre assinantes também no alias local.
+        }
+      }
+    }
   }
 
   /**
@@ -169,7 +182,9 @@ export const useEventsStore = defineStore('events', () => {
         const monitorsStore = useMonitorsStore()
         const deviceDetailStore = useDeviceDetailStore()
         monitorsStore.applyRealtimeResult(data)
+        monitorsStore.applyRealtimeMetrics(data)
         deviceDetailStore.applyMonitorResult(data)
+        deviceDetailStore.applyRecordedMetrics(data)
         break
       }
 

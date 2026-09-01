@@ -47,7 +47,7 @@
         <v-col cols="12" md="4">
           <div class="docker-metric pa-3 rounded-lg">
             <div class="d-flex align-center justify-space-between ga-3 mb-2">
-              <span class="text-caption text-medium-emphasis">Memória do host</span>
+              <span class="text-caption text-medium-emphasis">RAM dos containers / Engine</span>
               <strong>{{ current?.memoryPercent.toFixed(1) ?? '0.0' }}%</strong>
             </div>
             <MonitorSparkline
@@ -63,11 +63,11 @@
             <div class="text-caption text-medium-emphasis mb-2">Tráfego acumulado</div>
             <div class="d-flex align-center justify-space-between ga-2">
               <span><v-icon size="16" color="success">mdi-arrow-down</v-icon> Recebido</span>
-              <strong>{{ formatBytes(current?.networkReceivedBytes) }}</strong>
+              <strong>{{ formatDecimalBytes(current?.networkReceivedBytes) }}</strong>
             </div>
             <div class="d-flex align-center justify-space-between ga-2 mt-2">
               <span><v-icon size="16" color="info">mdi-arrow-up</v-icon> Enviado</span>
-              <strong>{{ formatBytes(current?.networkTransmittedBytes) }}</strong>
+              <strong>{{ formatDecimalBytes(current?.networkTransmittedBytes) }}</strong>
             </div>
           </div>
         </v-col>
@@ -80,7 +80,7 @@
 import { computed } from 'vue'
 import MonitorSparkline, { type SparklinePoint } from '@/components/MonitorSparkline.vue'
 import { useDockerStore } from '@/stores/docker'
-import { formatBytes } from '@/utils/formatters'
+import { formatDecimalBytes } from '@/utils/formatters'
 
 const docker = useDockerStore()
 const current = computed(() => docker.aggregateHistory.at(-1) ?? null)

@@ -86,6 +86,7 @@ describe('docker store', () => {
     mocked.metrics.mockResolvedValue({
       dockerAvailable: true,
       unavailableReason: null,
+      failedContainerCount: 0,
       collectedAt: '2026-08-31T12:00:00Z',
       containers: [
         {
@@ -158,6 +159,7 @@ describe('docker store', () => {
       metrics: {
         dockerAvailable: true,
         unavailableReason: null,
+        failedContainerCount: 0,
         collectedAt: '2026-08-31T12:00:03Z',
         containers: [],
       },

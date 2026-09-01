@@ -44,30 +44,30 @@
           <div class="pa-2 bg-surface-variant rounded-lg text-center">
             <div class="text-caption text-grey">Atual</div>
             <div class="text-h6 font-weight-bold" :class="`text-${statusColor}`">
-              {{ currentUsage }}%
+              {{ currentUsage.toFixed(1) }}%
             </div>
           </div>
         </v-col>
         <v-col cols="6" sm="3">
           <div class="pa-2 bg-surface-variant rounded-lg text-center">
             <div class="text-caption text-grey">Pico</div>
-            <div class="text-h6 font-weight-bold text-error">{{ peakUsage }}%</div>
+            <div class="text-h6 font-weight-bold text-error">{{ peakUsage.toFixed(1) }}%</div>
           </div>
         </v-col>
         <v-col cols="6" sm="3">
           <div class="pa-2 bg-surface-variant rounded-lg text-center">
             <div class="text-caption text-grey">Média</div>
-            <div class="text-h6 font-weight-bold text-info">{{ avgUsage }}%</div>
+            <div class="text-h6 font-weight-bold text-info">{{ avgUsage.toFixed(1) }}%</div>
           </div>
         </v-col>
         <v-col cols="6" sm="3">
           <div class="pa-2 bg-surface-variant rounded-lg text-center">
             <div class="text-caption text-grey">{{ config.fourthCardLabel }}</div>
             <div v-if="resourceType === 'cpu'" class="text-h6 font-weight-bold text-secondary">
-              {{ cpuLoad.toFixed(2) }}
+              {{ cpuLoad === null ? '—' : cpuLoad.toFixed(2) }}
             </div>
             <div v-else class="text-subtitle-1 font-weight-bold text-primary">
-              {{ usedGbFormatted }} / {{ totalGbFormatted }}
+              {{ memoryAllocation }}
             </div>
           </div>
         </v-col>
@@ -201,17 +201,24 @@
           <span>{{ config.legendLabels.danger }}</span>
         </div>
       </div>
-      <span class="text-grey">Intervalo de Amostragem: 30s</span>
+      <span class="text-grey">Janela exibida: {{ timeframe }}</span>
     </v-card-actions>
   </v-card>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, type CSSProperties } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, type CSSProperties } from 'vue'
 import { useDevicesStore } from '@/stores/devices'
 import { useDeviceDetailStore } from '@/stores/deviceDetail'
 import { useEventsStore } from '@/stores/events'
 import type { WidgetConfig } from '@/stores/dashboard'
+import { formatBinaryBytes } from '@/utils/formatters'
+import {
+  latestMetricValue,
+  resourceMetricWindow,
+  RESOURCE_SERIES,
+  type ResourceTimeframe,
+} from '@/utils/resourceMetrics'
 
 export type ResourceType = 'cpu' | 'ram'
 
@@ -239,7 +246,7 @@ const CONFIGS = {
     label: 'Uso de CPU',
     emptyText: 'Sem dados de uso de CPU no período',
     fourthCardLabel: 'Load 1min',
-    metricNames: ['cpuUsage', 'cpu_usage', 'cpu'],
+    metricNames: RESOURCE_SERIES.cpu,
     legendLabels: {
       normal: 'Normal (< 70%)',
       warning: 'Alerta (70-85%)',
@@ -253,7 +260,7 @@ const CONFIGS = {
     label: 'Uso de RAM',
     emptyText: 'Sem dados de uso de RAM no período',
     fourthCardLabel: 'Alocação',
-    metricNames: ['ramUsage', 'ram_usage', 'memory'],
+    metricNames: RESOURCE_SERIES.ram,
     legendLabels: {
       normal: 'Suficiente (< 70%)',
       warning: 'Atenção (70-85%)',
@@ -268,8 +275,11 @@ const devicesStore = useDevicesStore()
 const deviceDetailStore = useDeviceDetailStore()
 const eventsStore = useEventsStore()
 
-const timeframe = ref<'5m' | '15m' | '1h' | '24h'>('15m')
-const selectedDeviceId = ref<number | 'all'>((props.widget.config?.deviceId as any) || 'all')
+const timeframe = ref<ResourceTimeframe>('15m')
+const configuredDeviceId = Number(props.widget.config?.deviceId)
+const selectedDeviceId = ref<number | null>(
+  Number.isInteger(configuredDeviceId) && configuredDeviceId > 0 ? configuredDeviceId : null
+)
 
 const chartContainerRef = ref<HTMLElement | null>(null)
 const mousePos = ref<{ x: number; y: number } | null>(null)
@@ -284,9 +294,7 @@ interface SamplePoint {
 const localSamples = ref<SamplePoint[]>([])
 
 const deviceOptions = computed(() => {
-  const options: Array<{ id: number | 'all'; name: string }> = [
-    { id: 'all', name: 'Todos os Equipamentos' },
-  ]
+  const options: Array<{ id: number; name: string }> = []
   for (const dev of devicesStore.devices) {
     options.push({ id: dev.id, name: dev.name || dev.ipAddress || `Device #${dev.id}` })
   }
@@ -294,38 +302,46 @@ const deviceOptions = computed(() => {
 })
 
 const targetDescription = computed(() => {
-  if (selectedDeviceId.value === 'all') return 'Média Global de Equipamentos'
   const dev = devicesStore.devices.find((d) => d.id === selectedDeviceId.value)
-  return dev ? `${dev.name} (${dev.ipAddress || 'SNMP'})` : `Dispositivo #${selectedDeviceId.value}`
+  if (dev) return `${dev.name} (${dev.ipAddress || 'SNMP'})`
+  return selectedDeviceId.value
+    ? `Dispositivo #${selectedDeviceId.value}`
+    : 'Selecione um equipamento'
 })
+
+let stopMetricListener: (() => void) | null = null
 
 onMounted(async () => {
   if (devicesStore.devices.length === 0) {
     await devicesStore.fetchDevices()
   }
-  if (selectedDeviceId.value !== 'all' && typeof selectedDeviceId.value === 'number') {
+  if (selectedDeviceId.value === null) {
+    selectedDeviceId.value = devicesStore.devices.find((device) => device.isSystem)?.id ?? null
+  }
+  if (selectedDeviceId.value !== null) {
     await deviceDetailStore.loadDeviceDetails(selectedDeviceId.value)
   }
   buildSamples()
 
-  eventsStore.onEvent('metric:recorded', (data: any) => {
+  stopMetricListener = eventsStore.onEvent('metric:recorded', (data: any) => {
     if (data && data.metrics && Array.isArray(data.metrics)) {
       const devId = Number(data.deviceId)
-      if (selectedDeviceId.value === 'all' || selectedDeviceId.value === devId) {
+      if (selectedDeviceId.value === devId) {
         for (const m of data.metrics) {
           if ((config.value.metricNames as readonly string[]).includes(String(m.name))) {
             const val = Number(m.value) || 0
-            const now = new Date()
+            const recordedAt = String(m.recordedAt ?? data.recordedAt ?? new Date().toISOString())
+            const recordedDate = new Date(recordedAt)
             localSamples.value.push({
-              time: now.toLocaleTimeString([], {
+              time: recordedDate.toLocaleTimeString([], {
                 hour: '2-digit',
                 minute: '2-digit',
                 second: '2-digit',
               }),
               value: Math.min(100, Math.max(0, val)),
-              timestamp: now.getTime(),
+              timestamp: recordedDate.getTime(),
             })
-            if (localSamples.value.length > 40) {
+            if (localSamples.value.length > 120) {
               localSamples.value.shift()
             }
             break
@@ -336,10 +352,10 @@ onMounted(async () => {
   })
 })
 
-function onDeviceChange(val: number | 'all') {
-  if (val !== 'all' && typeof val === 'number') {
-    deviceDetailStore.loadDeviceDetails(val)
-  }
+onUnmounted(() => stopMetricListener?.())
+
+async function onDeviceChange(val: number | null) {
+  if (val !== null) await deviceDetailStore.loadDeviceDetails(val)
   buildSamples()
 }
 
@@ -348,67 +364,23 @@ watch(timeframe, () => {
 })
 
 function buildSamples() {
-  const count =
-    timeframe.value === '5m'
-      ? 10
-      : timeframe.value === '15m'
-        ? 20
-        : timeframe.value === '1h'
-          ? 30
-          : 40
-  const stepMs =
-    (timeframe.value === '5m'
-      ? 30
-      : timeframe.value === '15m'
-        ? 45
-        : timeframe.value === '1h'
-          ? 120
-          : 2160) * 1000
-
-  const list: SamplePoint[] = []
-  const now = Date.now()
-
-  // Procura histórico gravado na store de detalhes se houver
-  const metricName = resourceType.value === 'cpu' ? 'cpuUsage' : 'ramUsage'
-  const hist = Array.isArray(deviceDetailStore.metrics)
-    ? deviceDetailStore.metrics.filter((m) => m.metricName === metricName)
-    : []
-  if (hist.length > 0) {
-    for (const h of hist) {
-      list.push({
-        time: new Date(h.createdAt).toLocaleTimeString([], {
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-        }),
-        value: Number(h.metricValue) || 0,
-        timestamp: new Date(h.createdAt).getTime(),
-      })
+  const history = resourceMetricWindow(
+    deviceDetailStore.metrics,
+    config.value.metricNames,
+    timeframe.value
+  )
+  localSamples.value = history.map((metric) => {
+    const date = new Date(metric.createdAt)
+    return {
+      time: date.toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      }),
+      value: Math.min(100, Math.max(0, Number(metric.metricValue))),
+      timestamp: date.getTime(),
     }
-  } else {
-    // Fallback com base nos devices cadastrados
-    let baseVal = resourceType.value === 'cpu' ? 35 : 48
-    if (selectedDeviceId.value !== 'all') {
-      baseVal = ((Number(selectedDeviceId.value) * 13) % 45) + 20
-    }
-    for (let i = count; i >= 0; i--) {
-      const ts = now - i * stepMs
-      const date = new Date(ts)
-      const noise = Math.sin(i * 0.7) * 12 + (i % 3) * 4
-      const val = Math.min(98, Math.max(8, baseVal + noise))
-      list.push({
-        time: date.toLocaleTimeString([], {
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-        }),
-        value: Math.round(val),
-        timestamp: ts,
-      })
-    }
-  }
-
-  localSamples.value = list.slice(-40)
+  })
 }
 
 const samples = computed(() => localSamples.value)
@@ -422,19 +394,23 @@ const peakUsage = computed(() =>
 const avgUsage = computed(() => {
   if (samples.value.length === 0) return 0
   const sum = samples.value.reduce((acc, s) => acc + s.value, 0)
-  return Math.round(sum / samples.value.length)
+  return sum / samples.value.length
 })
 
-const cpuLoad = computed(() => Number((currentUsage.value / 30).toFixed(2)))
-
-const totalRamBytes = computed(() => 16 * 1024 * 1024 * 1024)
-const usedRamBytes = computed(() => (totalRamBytes.value * currentUsage.value) / 100)
-const usedGbFormatted = computed(
-  () => `${(usedRamBytes.value / (1024 * 1024 * 1024)).toFixed(1)} GB`
+const cpuLoad = computed(() =>
+  latestMetricValue(deviceDetailStore.metrics, RESOURCE_SERIES.loadAverage)
 )
-const totalGbFormatted = computed(
-  () => `${(totalRamBytes.value / (1024 * 1024 * 1024)).toFixed(0)} GB`
+const totalRamBytes = computed(() =>
+  latestMetricValue(deviceDetailStore.metrics, RESOURCE_SERIES.memoryTotalBytes)
 )
+const usedRamBytes = computed(() =>
+  latestMetricValue(deviceDetailStore.metrics, RESOURCE_SERIES.memoryUsedBytes)
+)
+const memoryAllocation = computed(() => {
+  if (totalRamBytes.value === null) return 'N/D'
+  const used = usedRamBytes.value ?? (totalRamBytes.value * currentUsage.value) / 100
+  return `${formatBinaryBytes(used)} / ${formatBinaryBytes(totalRamBytes.value)}`
+})
 
 const statusColor = computed(() => {
   if (currentUsage.value >= 85) return 'error'

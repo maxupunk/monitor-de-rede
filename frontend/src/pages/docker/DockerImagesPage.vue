@@ -53,7 +53,7 @@
           </div>
         </template>
         <template #item.created="{ item }">{{ formatEpoch(item.created) }}</template>
-        <template #item.size="{ item }">{{ formatBytes(item.size) }}</template>
+        <template #item.size="{ item }">{{ formatDecimalBytes(item.size) }}</template>
         <template #item.actions="{ item }">
           <div class="d-flex justify-end ga-1" @click.stop>
             <v-btn
@@ -79,7 +79,9 @@
           <div class="d-flex align-start justify-space-between ga-2">
             <div class="min-w-0">
               <div class="font-weight-bold text-truncate">{{ imageName(item) }}</div>
-              <div class="text-caption text-medium-emphasis">{{ formatBytes(item.size) }}</div>
+              <div class="text-caption text-medium-emphasis">
+                {{ formatDecimalBytes(item.size) }}
+              </div>
               <div class="text-caption">{{ formatEpoch(item.created) }}</div>
             </div>
             <v-icon color="primary">mdi-layers-outline</v-icon>
@@ -108,7 +110,10 @@
                 title="Criada em"
                 :subtitle="formatDateTime(detail.created)"
               ></v-list-item>
-              <v-list-item title="Tamanho" :subtitle="formatBytes(detail.size)"></v-list-item>
+              <v-list-item
+                title="Tamanho do conteúdo"
+                :subtitle="formatDecimalBytes(detail.size)"
+              ></v-list-item>
               <v-list-item
                 title="Usuário"
                 :subtitle="detail.user || 'padrão da imagem'"
@@ -142,7 +147,7 @@ import { confirm } from '@/composables/useConfirm'
 import { dockerService } from '@/services/dockerService'
 import { useAuthStore } from '@/stores/auth'
 import { useDockerStore } from '@/stores/docker'
-import { formatBytes, formatDateTime } from '@/utils/formatters'
+import { formatDateTime, formatDecimalBytes } from '@/utils/formatters'
 import type { DockerImageDetail } from '@/bindings/DockerImageDetail'
 import type { DockerImageSummary } from '@/bindings/DockerImageSummary'
 
@@ -157,7 +162,7 @@ const feedback = ref({ visible: false, color: 'success', message: '' })
 const headers = [
   { title: 'Imagem', key: 'name' },
   { title: 'Criada em', key: 'created', width: '190px' },
-  { title: 'Tamanho', key: 'size', width: '130px' },
+  { title: 'Uso em disco', key: 'size', width: '130px' },
   { title: 'Containers', key: 'containers', width: '110px' },
   { title: 'Ações', key: 'actions', width: '110px', sortable: false },
 ]
@@ -236,7 +241,7 @@ async function pruneImages(): Promise<void> {
   })
   notify(
     success
-      ? `${removed} registro(s) removido(s); ${formatBytes(reclaimed)} recuperados.`
+      ? `${removed} registro(s) removido(s); ${formatDecimalBytes(reclaimed)} recuperados.`
       : docker.error || 'Erro ao limpar imagens',
     success ? 'success' : 'error'
   )
