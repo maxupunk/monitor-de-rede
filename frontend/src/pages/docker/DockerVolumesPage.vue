@@ -140,7 +140,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import { confirm } from '@/composables/useConfirm'
@@ -179,8 +179,6 @@ const filteredVolumes = computed(() => {
       )
     : docker.volumes
 })
-
-onMounted(() => void docker.refreshAll())
 
 function projectName(labels: Record<string, string>): string {
   return labels['com.docker.compose.project'] || 'Sem projeto Compose'

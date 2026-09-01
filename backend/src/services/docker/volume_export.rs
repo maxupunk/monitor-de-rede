@@ -12,7 +12,7 @@ use tokio::io::{AsyncRead, ReadBuf};
 
 use super::{call, client, engine, DockerError};
 
-const EXPORT_IMAGE: &str = "alpine:latest";
+pub(crate) const EXPORT_IMAGE: &str = "alpine:latest";
 const MOUNT_POINT: &str = "/volume";
 
 pub struct VolumeExport {
@@ -95,7 +95,7 @@ pub async fn export(name: &str) -> Result<VolumeExport, DockerError> {
     })
 }
 
-async fn ensure_image(client: &bollard::Docker) -> Result<(), DockerError> {
+pub(crate) async fn ensure_image(client: &bollard::Docker) -> Result<(), DockerError> {
     match call(client.inspect_image(EXPORT_IMAGE)).await {
         Ok(_) => return Ok(()),
         Err(DockerError::NotFound) => {}

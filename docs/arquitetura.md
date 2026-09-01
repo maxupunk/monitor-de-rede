@@ -446,7 +446,20 @@ mudança de estado de dispositivo, resultado de monitor, abertura e resolução 
 alerta, conexão e desconexão de probe, dispositivo descoberto, progresso de scan
 e atualização de topologia.
 
-**Os eventos passam por `event_outbox` antes do barramento.** Quem gera o evento
+O módulo Docker não usa polling no navegador. Um único produtor no processo
+`server` coleta estado e métricas em ciclo curto e inventário em ciclo mais
+espaçado, publicando `docker:snapshot` e `docker:inventory` no mesmo stream SSE.
+O ciclo só consulta a Engine quando `EventBus::has_subscribers()` é verdadeiro;
+quantas abas estiverem abertas recebem a mesma amostra. Mutações administrativas
+forçam os dois snapshots imediatamente. O dashboard não renderiza seu resumo
+quando o snapshot informa que a Engine está indisponível.
+
+Telemetria Docker é efêmera e vai direto ao barramento em memória: persistir
+amostras de três em três segundos no `event_outbox` faria o banco crescer sem
+valor histórico. Os eventos de domínio duráveis descritos abaixo continuam
+passando pelo outbox para atravessar processos.
+
+**Os eventos de domínio duráveis passam por `event_outbox` antes do barramento.** Quem gera o evento
 é o scheduler, num processo; quem tem a conexão SSE aberta é o `server`, em
 outro. Publicar direto na memória do processo que gerou faria o evento morrer ali
 — o relay (`services/events/relay.rs`) é a ponte, e a tabela é o que garante que

@@ -104,3 +104,12 @@
    - **Edições cirúrgicas**: Faça apenas modificações pontuais no escopo estrito da tarefa. **NUNCA** reformate arquivos inteiros nem altere a indentação, espaçamento ou quebras de linha de blocos de código não relacionados à mudança funcional.
    - **Evitar retrabalho com formatadores**: O repositório já possui formatadores padronizados (`cargo fmt` no backend e `pnpm run format` / Prettier no frontend). Alterar indentação arbitrariamente faz com que a etapa de validação (`format`) precise desfazer ou reformatar tudo, inflando diffs e desperdiçando tokens desnecessariamente.
    - **Respeite o estilo local**: Ao escrever código novo, siga rigorosamente o padrão de indentação e espaçamento já presente no arquivo para que o formatador não precise reformatar o bloco na validação final.
+
+9. **Tempo Real Exclusivamente por SSE — Polling Proibido**:
+   - **É proibido implementar polling no frontend sob qualquer forma**: não usar `setInterval`, `setTimeout` recursivo, `refetchInterval`, loops temporizados, watchers que consultam repetidamente a API ou qualquer mecanismo equivalente para atualizar dados automaticamente.
+   - Toda atualização automática ou em tempo real deve chegar pelo stream SSE compartilhado (`GET /api/events/stream`) e ser aplicada diretamente nas stores em memória. **Não criar endpoints SSE paralelos por tela** quando o barramento global puder transportar o evento.
+   - Uma queda do SSE deve usar apenas a reconexão com backoff do `EventSource`; **nunca adicionar polling como fallback**.
+   - Para o estado inicial de recursos em tempo real, o backend deve publicar um snapshot pelo SSE ao detectar assinantes. Não fazer hidratação automática por chamadas HTTP repetidas ou por temporizadores.
+   - Requisições HTTP pontuais continuam permitidas somente para ações explícitas do usuário, comandos, formulários, paginação/histórico não-live, downloads e abertura de detalhes sob demanda. Elas não podem formar um ciclo automático de atualização.
+   - Quando a fonte não oferecer push (por exemplo, métricas da Docker Engine), admite-se apenas **um coletor compartilhado no backend**, condicionado à existência de assinantes e distribuído por SSE para todas as abas. Nunca criar um ciclo de coleta por cliente.
+   - Ao alterar uma área em tempo real, remover pollers preexistentes no mesmo escopo e adicionar teste que prove que o snapshot SSE atualiza o estado sem chamar novamente os endpoints de consulta.

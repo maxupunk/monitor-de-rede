@@ -135,7 +135,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import { confirm } from '@/composables/useConfirm'
@@ -173,8 +173,6 @@ const filteredImages = computed(() => {
       )
     : docker.images
 })
-
-onMounted(() => void docker.refreshAll())
 
 function imageName(image: DockerImageSummary): string {
   return image.repoTags[0] || '<sem tag>'

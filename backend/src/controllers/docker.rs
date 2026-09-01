@@ -19,9 +19,8 @@ use crate::{
         docker::{
             self,
             engine::{self, ContainerAction, LogFilters},
-            metrics, volume_export,
+            log_clear, metrics, realtime, volume_export,
         },
-        events::EventBus,
         shared::errors::{AppError, AppResult},
     },
 };
@@ -88,6 +87,26 @@ async fn container_logs(
         )
         .await?,
     )?)
+}
+
+async fn clear_container_logs(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> AppResult<Response> {
+    let id = docker::validate_identifier(&id, "Container")?;
+    let response = log_clear::clear(&id).await?;
+    emit_docker_updated(&ctx).await;
+    audit(
+        &ctx,
+        &headers,
+        AuditAction::Update,
+        ResourceType::DockerContainer,
+        &id,
+        &response.message,
+    )
+    .await;
+    Ok(format::json(response)?)
 }
 
 async fn start_container(
@@ -381,14 +400,8 @@ async fn listing<T: Serialize>(
 }
 
 async fn emit_docker_updated(ctx: &AppContext) {
-    if let Ok(bus) = EventBus::from_context(ctx) {
-        if let Err(error) = bus
-            .publish(&ctx.db, "docker:updated", serde_json::json!({}))
-            .await
-        {
-            tracing::warn!(%error, "falha ao publicar docker:updated");
-        }
-    }
+    let ctx = ctx.clone();
+    tokio::spawn(async move { realtime::publish_all(&ctx).await });
 }
 
 async fn audit(
@@ -424,6 +437,7 @@ pub fn routes() -> Routes {
         .add("/metrics", get(container_metrics))
         .add("/containers", get(containers))
         .add("/containers/{id}/logs", get(container_logs))
+        .add("/containers/{id}/logs", delete(clear_container_logs))
         .add("/containers/{id}/start", post(start_container))
         .add("/containers/{id}/stop", post(stop_container))
         .add("/containers/{id}/restart", post(restart_container))

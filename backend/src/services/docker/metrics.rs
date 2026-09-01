@@ -18,7 +18,10 @@ use crate::views::docker::{
 
 use super::{client, DockerError, DISABLED_REASON, UNAVAILABLE_REASON};
 
-const CACHE_TTL: Duration = Duration::from_secs(10);
+// O produtor SSE coleta estado a cada 3 s enquanto há clientes conectados. O
+// cache ligeiramente menor evita devolver a mesma amostra em dois ciclos
+// seguidos e também agrega leituras manuais concorrentes.
+const CACHE_TTL: Duration = Duration::from_secs(2);
 const STATS_TIMEOUT: Duration = Duration::from_secs(4);
 const MAX_CONCURRENT_STATS: usize = 8;
 

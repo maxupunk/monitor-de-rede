@@ -4,7 +4,9 @@
 //! trabalham apenas com DTOs da aplicação e nunca executam o binário `docker`.
 
 pub mod engine;
+pub mod log_clear;
 pub mod metrics;
+pub mod realtime;
 pub mod volume_export;
 
 use std::{future::Future, time::Duration};

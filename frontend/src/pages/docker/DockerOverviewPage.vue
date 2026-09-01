@@ -34,6 +34,28 @@
         </v-col>
       </v-row>
 
+      <v-card rounded="xl" variant="outlined" class="mb-4">
+        <v-card-title class="d-flex flex-wrap align-center ga-2">
+          <span class="d-flex align-center ga-2">
+            <v-icon color="primary">mdi-chart-timeline-variant</v-icon>
+            Consumo geral dos containers
+          </span>
+          <v-spacer></v-spacer>
+          <v-chip color="primary" size="small" variant="tonal">
+            CPU {{ latestAggregate?.cpuPercent.toFixed(1) ?? '0.0' }}%
+          </v-chip>
+          <v-chip color="secondary" size="small" variant="tonal">
+            RAM {{ latestAggregate?.memoryPercent.toFixed(1) ?? '0.0' }}%
+          </v-chip>
+        </v-card-title>
+        <v-card-subtitle>
+          Histórico desta sessão, atualizado automaticamente enquanto o SSE estiver conectado.
+        </v-card-subtitle>
+        <v-card-text>
+          <BaseMetricChart :series="aggregateSeries" unit-type="percentage"></BaseMetricChart>
+        </v-card-text>
+      </v-card>
+
       <v-row>
         <v-col cols="12" lg="5">
           <v-card rounded="xl" variant="outlined" height="100%">
@@ -117,15 +139,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted } from 'vue'
+import { computed } from 'vue'
+import BaseMetricChart, { type ChartSeriesInput } from '@/components/BaseMetricChart.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import { useDockerStore } from '@/stores/docker'
-import { useEventsStore } from '@/stores/events'
 import { formatBytes, formatRelativeTime } from '@/utils/formatters'
 
 const docker = useDockerStore()
-const eventsStore = useEventsStore()
-let unsubscribe: (() => void) | undefined
 
 const summaryCards = computed(() => [
   {
@@ -165,12 +185,28 @@ const topMetrics = computed(() =>
     .slice(0, 8)
 )
 
-onMounted(() => {
-  void docker.refreshAll()
-  unsubscribe = eventsStore.onEvent('docker:updated', () => void docker.refreshAll())
-})
+const latestAggregate = computed(() => docker.aggregateHistory.at(-1) ?? null)
 
-onUnmounted(() => {
-  unsubscribe?.()
-})
+const aggregateSeries = computed<ChartSeriesInput[]>(() => [
+  {
+    id: 'docker-cpu-total',
+    label: 'CPU total',
+    color: '#2196F3',
+    fillArea: true,
+    data: docker.aggregateHistory.map((sample) => ({
+      time: sample.recordedAt,
+      value: sample.cpuPercent,
+    })),
+  },
+  {
+    id: 'docker-memory-total',
+    label: 'Memória do host',
+    color: '#7E57C2',
+    fillArea: false,
+    data: docker.aggregateHistory.map((sample) => ({
+      time: sample.recordedAt,
+      value: sample.memoryPercent,
+    })),
+  },
+])
 </script>

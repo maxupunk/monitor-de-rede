@@ -25,6 +25,10 @@ capabilities Linux não reduz essa autoridade.
 - permitir inventário, detalhes, logs e métricas a qualquer perfil autenticado;
 - restringir mutações e exportação de volumes ao perfil `admin`;
 - registrar mutações na trilha de auditoria;
+- limpar logs reais somente para containers com driver `json-file`: a operação
+  valida o `LogPath`, interrompe brevemente o alvo, trunca o arquivo por um
+  helper efêmero sem rede/capabilities e restaura o estado anterior; containers
+  `auto-remove`, pausados ou o próprio NetMonitor são recusados;
 - ocultar no backend valores de ambiente com nomes associados a senhas,
   tokens, segredos, chaves privadas e credenciais;
 - usar timeouts em chamadas da Engine, limite de linhas de log, coleta de
@@ -46,3 +50,8 @@ transmite o arquivo compactado sem carregá-lo inteiro em memória. Se a imagem
 não existir, a Engine faz pull; portanto a primeira exportação pode depender de
 acesso ao registry. O container auxiliar é removido ao encerrar ou interromper o
 stream.
+
+A Engine não oferece endpoint para apagar logs. A limpeza de `json-file` é,
+portanto, uma operação Linux específica e deliberadamente restrita. Drivers
+como `journald`, `local`, `syslog` e backends remotos devem ser limpos pela
+ferramenta responsável por seu armazenamento.

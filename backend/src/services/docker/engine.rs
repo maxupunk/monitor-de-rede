@@ -341,8 +341,14 @@ pub async fn disconnect_network(
     container: String,
     force: bool,
 ) -> Result<DockerActionResponse, DockerError> {
-    call(client()?.disconnect_network(network, DisconnectNetworkOptions { container, force }))
-        .await?;
+    let client = client()?;
+    let inspected = to_value(call(client.inspect_container(&container, None)).await?)?;
+    if attached_network_count(&inspected) <= 1 {
+        return Err(DockerError::Validation(
+            "O container precisa permanecer conectado a pelo menos uma rede".to_string(),
+        ));
+    }
+    call(client.disconnect_network(network, DisconnectNetworkOptions { container, force })).await?;
     Ok(DockerActionResponse {
         success: true,
         message: "Container desconectado da rede com sucesso.".to_string(),
@@ -516,6 +522,13 @@ fn container_detail(raw: &Value) -> DockerContainerDetail {
         mounts,
         networks,
     }
+}
+
+fn attached_network_count(raw: &Value) -> usize {
+    field(raw, &["NetworkSettings", "networkSettings"])
+        .and_then(|settings| field(settings, &["Networks", "networks"]))
+        .and_then(Value::as_object)
+        .map_or(0, serde_json::Map::len)
 }
 
 fn volume_summary(raw: &Value) -> DockerVolumeSummary {
@@ -801,5 +814,23 @@ mod tests {
             "********"
         );
         assert_eq!(values["database_password"], "********");
+    }
+
+    #[test]
+    fn conta_redes_anexadas_antes_de_permitir_desconexao() {
+        assert_eq!(
+            attached_network_count(&json!({
+                "NetworkSettings": {
+                    "Networks": { "frontend": {}, "backend": {} }
+                }
+            })),
+            2
+        );
+        assert_eq!(
+            attached_network_count(&json!({
+                "NetworkSettings": { "Networks": { "default": {} } }
+            })),
+            1
+        );
     }
 }

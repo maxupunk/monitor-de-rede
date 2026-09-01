@@ -86,6 +86,9 @@ async fn somente_administrador_controla_a_engine() {
 
         let export = request.get("/api/docker/volumes/dados/export").await;
         assert_eq!(export.status_code(), 403, "{}", export.text());
+
+        let clear_logs = request.delete("/api/docker/containers/exemplo/logs").await;
+        assert_eq!(clear_logs.status_code(), 403, "{}", clear_logs.text());
     })
     .await;
 }

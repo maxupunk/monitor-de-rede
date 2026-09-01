@@ -78,6 +78,10 @@ export const dockerService = {
     )
   },
 
+  clearLogs(id: string): Promise<DockerActionResponse> {
+    return apiService.delete(resource(`/containers/${encodeURIComponent(id)}/logs`))
+  },
+
   startContainer(id: string): Promise<DockerActionResponse> {
     return apiService.post(resource(`/containers/${encodeURIComponent(id)}/start`))
   },

@@ -153,7 +153,9 @@ export const useEventsStore = defineStore('events', () => {
   function handleIncomingEvent(payload: RealtimeEventPayload) {
     lastEventAt.value = payload.timestamp
 
-    if (payload.type !== 'stream:connected') {
+    const isEphemeralTelemetry =
+      payload.type === 'docker:snapshot' || payload.type === 'docker:inventory'
+    if (payload.type !== 'stream:connected' && !isEphemeralTelemetry) {
       recentEvents.value.unshift(payload)
       if (recentEvents.value.length > FEED_LIMIT) {
         recentEvents.value.length = FEED_LIMIT
@@ -293,9 +295,15 @@ export const useEventsStore = defineStore('events', () => {
         break
       }
 
-      case 'docker:updated': {
+      case 'docker:snapshot': {
         const dockerStore = useDockerStore()
-        scheduleRefresh('docker', () => dockerStore.refreshAll())
+        dockerStore.applyLiveSnapshot(data as never)
+        break
+      }
+
+      case 'docker:inventory': {
+        const dockerStore = useDockerStore()
+        dockerStore.applyInventorySnapshot(data as never)
         break
       }
     }

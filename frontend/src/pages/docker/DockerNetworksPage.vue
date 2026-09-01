@@ -222,7 +222,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import { confirm } from '@/composables/useConfirm'
@@ -265,8 +265,6 @@ const connectableContainers = computed(() => {
     }))
 })
 
-onMounted(() => void docker.refreshAll())
-
 function shortId(id: string): string {
   return id.slice(0, 12)
 }
@@ -304,7 +302,6 @@ async function openDetail(network: DockerNetworkSummary): Promise<void> {
 
 async function reloadDetail(): Promise<void> {
   detail.value = await dockerService.network(selectedNetworkId.value)
-  await docker.refreshAll()
 }
 
 async function createNetwork(): Promise<void> {

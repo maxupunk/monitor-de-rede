@@ -146,6 +146,12 @@
       </div>
     </v-alert>
 
+    <v-row v-if="dockerStore.available" dense class="mb-2">
+      <v-col cols="12" class="pb-3 pb-md-6">
+        <DockerSummaryCard></DockerSummaryCard>
+      </v-col>
+    </v-row>
+
     <!-- Malha Reativa de Widgets Customizáveis -->
     <v-row dense class="mb-2">
       <v-col
@@ -297,6 +303,7 @@ import StatCardsWidget from '@/components/dashboard/StatCardsWidget.vue'
 import ActiveAlertsWidget from '@/components/dashboard/ActiveAlertsWidget.vue'
 import EventsFeedWidget from '@/components/dashboard/EventsFeedWidget.vue'
 import NetworkMonitorsWidget from '@/components/dashboard/NetworkMonitorsWidget.vue'
+import DockerSummaryCard from '@/components/dashboard/DockerSummaryCard.vue'
 import GaugeHealthWidget from '@/components/widgets/GaugeHealthWidget.vue'
 import LatencyTimeSeriesWidget from '@/components/widgets/LatencyTimeSeriesWidget.vue'
 import EventDistributionWidget from '@/components/widgets/EventDistributionWidget.vue'
@@ -313,6 +320,7 @@ import AlertSilenceDialog from '@/components/AlertSilenceDialog.vue'
 import EventDetailDialog from '@/components/EventDetailDialog.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import type { AlertEvent } from '@/stores/alerts'
+import { useDockerStore } from '@/stores/docker'
 
 const router = useRouter()
 const dashboardStore = useDashboardStore()
@@ -320,6 +328,7 @@ const devicesStore = useDevicesStore()
 const alertsStore = useAlertsStore()
 const eventsStore = useEventsStore()
 const monitorsStore = useMonitorsStore()
+const dockerStore = useDockerStore()
 const loading = ref(false)
 
 const addWidgetDialog = ref(false)

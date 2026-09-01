@@ -91,6 +91,25 @@ impl EventBus {
         Ok(event)
     }
 
+    /// Publica telemetria efêmera diretamente no processo HTTP.
+    ///
+    /// Amostras frequentes não pertencem ao `event_outbox`: persistir cada
+    /// leitura faria o banco crescer apenas para alimentar clientes que podem
+    /// nem estar conectados. Eventos de domínio continuam usando `publish`.
+    pub fn publish_ephemeral(
+        &self,
+        event_type: impl Into<String>,
+        payload: serde_json::Value,
+    ) -> DomainEvent {
+        let event = DomainEvent {
+            event_type: event_type.into(),
+            payload,
+            occurred_at: Utc::now().to_rfc3339(),
+        };
+        self.publish_local(event.clone());
+        event
+    }
+
     pub fn publish_local(&self, event: DomainEvent) {
         let _ = self.sender.send(event);
     }
@@ -122,5 +141,17 @@ mod tests {
         assert_eq!(json["timestamp"], "2026-08-11T00:00:00Z");
         assert!(json.get("payload").is_none());
         assert!(json.get("occurredAt").is_none());
+    }
+
+    #[tokio::test]
+    async fn telemetria_efemera_chega_ao_assinante_sem_outbox() {
+        let bus = EventBus::create();
+        let mut receiver = bus.subscribe();
+
+        bus.publish_ephemeral("docker:snapshot", serde_json::json!({ "available": true }));
+
+        let event = receiver.recv().await.unwrap();
+        assert_eq!(event.event_type, "docker:snapshot");
+        assert_eq!(event.payload["available"], true);
     }
 }

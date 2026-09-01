@@ -348,3 +348,22 @@ pub struct DockerMetricsResponse {
     pub collected_at: String,
     pub containers: Vec<DockerContainerMetrics>,
 }
+
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DockerLiveSnapshot {
+    pub status: DockerStatusResponse,
+    pub containers: Vec<DockerContainerSummary>,
+    pub metrics: DockerMetricsResponse,
+}
+
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DockerInventorySnapshot {
+    pub collected_at: String,
+    pub volumes: Vec<DockerVolumeSummary>,
+    pub networks: Vec<DockerNetworkSummary>,
+    pub images: Vec<DockerImageSummary>,
+}

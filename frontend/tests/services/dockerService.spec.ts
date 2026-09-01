@@ -25,6 +25,14 @@ describe('dockerService', () => {
     )
   })
 
+  it('limpa o log real pela rota administrativa do container', async () => {
+    const remove = vi.spyOn(apiService, 'delete').mockResolvedValue({ success: true, message: '' })
+
+    await dockerService.clearLogs('sha256:abc/def')
+
+    expect(remove).toHaveBeenCalledWith('/docker/containers/sha256%3Aabc%2Fdef/logs')
+  })
+
   it('envia force explicitamente nas remoções', async () => {
     const remove = vi.spyOn(apiService, 'delete').mockResolvedValue({ success: true, message: '' })
 

@@ -413,6 +413,15 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
     - Interface responsiva com visão geral, containers, volumes, redes e imagens, estados de indisponibilidade e confirmação de ações destrutivas.
     - Testes unitários Rust, contratos HTTP e testes Vitest do service/store.
 
+- [x] **Docker em tempo real, agrupamento e resumo no dashboard** 🟢 Concluído
+  - **Arquivos:** `backend/src/services/docker/{metrics,realtime}.rs`, `frontend/src/pages/docker/`, `frontend/src/components/dashboard/DockerSummaryCard.vue`, `frontend/src/stores/{docker,events}.ts`.
+  - **Implementado:**
+    - Um único coletor no backend distribui inventário, métricas e estado por SSE para todas as abas; não há polling periódico no navegador.
+    - A coleta só roda com assinantes SSE, usa eventos efêmeros sem inflar o `event_outbox` e publica snapshot imediato após ações administrativas.
+    - Containers separados por projeto Compose, com totais de CPU, memória e estado em cada grupo.
+    - Histórico agregado de CPU/RAM na visão Docker e resumo compacto no dashboard, renderizado somente quando a Engine está disponível.
+    - Diálogo com download e limpeza real de logs `json-file`, conexão/desconexão de redes com proteção da última rede e contraste revisado.
+
 - [x] **Remoção de referências e caminhos de migração sem uso** 🟢 Concluído
   - Removidos o importador de segredos, o fallback de variável de cifra e os documentos dedicados à transição de backend.
   - A documentação descreve apenas a arquitetura e os contratos atuais.

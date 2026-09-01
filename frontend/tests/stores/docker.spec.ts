@@ -86,8 +86,21 @@ describe('docker store', () => {
     mocked.metrics.mockResolvedValue({
       dockerAvailable: true,
       unavailableReason: null,
-      collectedAt: new Date().toISOString(),
-      containers: [],
+      collectedAt: '2026-08-31T12:00:00Z',
+      containers: [
+        {
+          containerId: 'abc',
+          containerName: 'web',
+          projectName: null,
+          imageName: 'nginx',
+          status: 'running',
+          cpu: { usagePercent: 12.5 },
+          memory: { usageBytes: 256, limitBytes: 1024, usagePercent: 25 },
+          network: { receivedBytes: 100, transmittedBytes: 50 },
+          blockIo: { readBytes: 10, writeBytes: 5 },
+          pids: 2,
+        },
+      ],
     })
     const store = useDockerStore()
 
@@ -96,6 +109,70 @@ describe('docker store', () => {
     expect(store.available).toBe(true)
     expect(store.runningContainers).toBe(1)
     expect(mocked.metrics).toHaveBeenCalledOnce()
+    expect(store.aggregateHistory).toEqual([
+      {
+        recordedAt: '2026-08-31T12:00:00Z',
+        cpuPercent: 12.5,
+        memoryPercent: 25,
+        memoryUsageBytes: 256,
+        networkReceivedBytes: 100,
+        networkTransmittedBytes: 50,
+      },
+    ])
     expect(store.loading).toBe(false)
+  })
+
+  it('aplica snapshots SSE sem consultar os endpoints Docker', () => {
+    const store = useDockerStore()
+
+    store.applyLiveSnapshot({
+      status: {
+        available: true,
+        reason: null,
+        engineVersion: '28.0',
+        apiVersion: '1.47',
+        name: 'docker-host',
+        operatingSystem: 'Linux',
+        architecture: 'x86_64',
+        cpus: 8,
+        memoryTotalBytes: 1024,
+        containers: 1,
+        containersRunning: 1,
+        containersStopped: 0,
+        images: 1,
+      },
+      containers: [
+        {
+          id: 'abc',
+          names: ['/web'],
+          image: 'nginx',
+          imageId: 'def',
+          state: 'running',
+          status: 'Up',
+          labels: {},
+          ports: [],
+          created: 1,
+          projectName: 'app',
+        },
+      ],
+      metrics: {
+        dockerAvailable: true,
+        unavailableReason: null,
+        collectedAt: '2026-08-31T12:00:03Z',
+        containers: [],
+      },
+    })
+    store.applyInventorySnapshot({
+      collectedAt: '2026-08-31T12:00:03Z',
+      volumes: [],
+      networks: [],
+      images: [],
+    })
+
+    expect(store.available).toBe(true)
+    expect(store.runningContainers).toBe(1)
+    expect(mocked.status).not.toHaveBeenCalled()
+    expect(mocked.containers).not.toHaveBeenCalled()
+    expect(mocked.metrics).not.toHaveBeenCalled()
   })
 })

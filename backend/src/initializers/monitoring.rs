@@ -15,9 +15,9 @@ use loco_rs::{
 
 use crate::{
     services::{
-        alerts::catalog::service as alert_catalog, events::relay::relay_pending,
-        network_tools::dns::registry::DnsServerRegistry, vpn::probe_is_external,
-        vpn::probe_registrar as vpn_probe_registrar,
+        alerts::catalog::service as alert_catalog, docker::realtime as docker_realtime,
+        events::relay::relay_pending, network_tools::dns::registry::DnsServerRegistry,
+        vpn::probe_is_external, vpn::probe_registrar as vpn_probe_registrar,
     },
     tasks::scheduler_run,
 };
@@ -39,6 +39,7 @@ impl Initializer for MonitoringInitializer {
 
     async fn before_run(&self, ctx: &AppContext) -> Result<()> {
         spawn_event_relay(ctx.clone());
+        docker_realtime::spawn(ctx.clone());
         spawn_scheduler(ctx.clone());
 
         // Cadastro é uma conveniência de boot: banco indisponível não impede o

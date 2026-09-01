@@ -1,12 +1,24 @@
 <template>
   <div>
     <v-card variant="outlined" rounded="xl" class="mb-4 overflow-hidden">
-      <v-tabs color="primary" show-arrows>
-        <v-tab v-for="item in tabs" :key="item.to" :to="item.to" exact>
-          <v-icon start>{{ item.icon }}</v-icon>
-          {{ item.title }}
-        </v-tab>
-      </v-tabs>
+      <div class="d-flex align-center pr-3">
+        <v-tabs color="primary" show-arrows class="flex-grow-1">
+          <v-tab v-for="item in tabs" :key="item.to" :to="item.to" exact>
+            <v-icon start>{{ item.icon }}</v-icon>
+            {{ item.title }}
+          </v-tab>
+        </v-tabs>
+        <v-chip
+          v-if="docker.available"
+          color="success"
+          size="small"
+          variant="tonal"
+          prepend-icon="mdi-access-point"
+          class="docker-live-chip"
+        >
+          Tempo real
+        </v-chip>
+      </div>
     </v-card>
     <DockerUnavailableAlert
       v-if="docker.status && !docker.available"
@@ -30,3 +42,15 @@ const tabs = [
   { title: 'Imagens', icon: 'mdi-layers-outline', to: '/docker/images' },
 ]
 </script>
+
+<style scoped>
+.docker-live-chip {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 700px) {
+  .docker-live-chip {
+    display: none;
+  }
+}
+</style>
