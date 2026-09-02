@@ -100,7 +100,10 @@
             <template #item.resources="{ item }">
               <div v-if="metricFor(item.id)" class="text-caption py-1">
                 <div>CPU {{ metricFor(item.id)?.cpu.usagePercent.toFixed(2) }}%</div>
-                <div>RAM {{ metricFor(item.id)?.memory.usagePercent.toFixed(2) }}%</div>
+                <div>RAM {{ formatContainerMemory(item.id) }}</div>
+                <div class="text-medium-emphasis">
+                  {{ metricFor(item.id)?.memory.usagePercent.toFixed(1) }}%
+                </div>
               </div>
               <span v-else class="text-medium-emphasis">—</span>
             </template>
@@ -425,7 +428,7 @@ const headers = [
   { title: 'Container', key: 'name' },
   { title: 'Imagem', key: 'image' },
   { title: 'Estado', key: 'state', width: '120px' },
-  { title: 'Recursos', key: 'resources', width: '130px', sortable: false },
+  { title: 'Recursos', key: 'resources', width: '190px', sortable: false },
   { title: 'Ações', key: 'actions', width: '220px', sortable: false },
 ]
 const stateOptions = [
@@ -549,6 +552,12 @@ function stateLabel(state: string): string {
 
 function metricFor(id: string) {
   return docker.metrics?.containers.find((metric) => metric.containerId === id)
+}
+
+function formatContainerMemory(id: string): string {
+  const memory = metricFor(id)?.memory
+  if (!memory) return 'N/D'
+  return `${formatBinaryBytes(memory.usageBytes)} / ${formatBinaryBytes(memory.limitBytes)}`
 }
 
 function onRowClick(_event: MouseEvent, row: { item: DockerContainerSummary }): void {

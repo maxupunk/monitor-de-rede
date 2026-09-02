@@ -1,7 +1,8 @@
 import type { Monitor, MonitorResult } from '@/stores/monitors'
+import { formatBinaryBytes, formatBps } from '@/utils/formatters'
 
 /**
- * Monitores SNMP de uso de CPU/Memória são leituras de percentual (gauge), não
+ * Monitores SNMP de uso de CPU/Memória são leituras de recurso (gauge), não
  * checagens up/down — este helper identifica esses monitores para que a UI
  * mostre a leitura atual em vez de um status de disponibilidade.
  */
@@ -43,6 +44,50 @@ export function gaugeTypeLabel(monitor: Pick<Monitor, 'configuration' | 'gaugeMe
   if (name === 'memory_usage') return 'MEMÓRIA'
   if (name === 'interface_traffic' || name === 'traffic') return 'TRÁFEGO'
   return 'CPU'
+}
+
+export function isMemoryMonitor(monitor: Pick<Monitor, 'configuration' | 'gaugeMetric'>): boolean {
+  return gaugeMetricName(monitor) === 'memory_usage'
+}
+
+/** Valor principal de um gauge: memória em bytes, tráfego em bps e CPU em %. */
+export function formatGaugeValue(
+  monitor: Pick<Monitor, 'type' | 'configuration' | 'gaugeMetric'>,
+  compact = false
+): string {
+  const reading = monitor.gaugeMetric
+  if (!reading || !Number.isFinite(reading.value)) return compact ? 'N/D' : 'SEM DADOS'
+  if (isMemoryMonitor(monitor)) {
+    const used = formatBinaryBytes(reading.value, { fractionDigits: compact ? 1 : 2 })
+    if (compact || !Number.isFinite(reading.totalBytes)) return used
+    return `${used} / ${formatBinaryBytes(reading.totalBytes)}`
+  }
+  if (isTrafficMonitor(monitor)) {
+    return formatBps(reading.value, { fractionDigits: compact ? 1 : 2 })
+  }
+  return `${Math.round(reading.value)}%`
+}
+
+/** Percentual é auxiliar para memória e segue sendo o valor principal para CPU. */
+export function gaugeUsagePercent(
+  monitor: Pick<Monitor, 'configuration' | 'gaugeMetric'>
+): number | null {
+  const reading = monitor.gaugeMetric
+  if (!reading) return null
+  if (!isMemoryMonitor(monitor)) return reading.value
+  if (Number.isFinite(reading.usagePercent)) return Number(reading.usagePercent)
+  if (Number.isFinite(reading.totalBytes) && Number(reading.totalBytes) > 0) {
+    return (reading.value / Number(reading.totalBytes)) * 100
+  }
+  return null
+}
+
+export function gaugeDisplayUnit(
+  monitor: Pick<Monitor, 'type' | 'configuration' | 'gaugeMetric'>
+): string {
+  if (isMemoryMonitor(monitor)) return 'bytes'
+  if (isTrafficMonitor(monitor)) return 'bps'
+  return '%'
 }
 
 /** Limiares de alerta de uso replicados do card de CPU/Memória do DeviceDetailPage. */

@@ -88,7 +88,7 @@ export const CARD_TEMPLATES: CardTemplate[] = [
     title: 'Uso de RAM',
     category: 'charts',
     icon: 'mdi-memory',
-    description: 'Monitoramento de utilização de memória RAM (%) e quantidade alocada.',
+    description: 'Monitoramento da quantidade de memória RAM usada e da capacidade disponível.',
     compatibleResourceTypes: ['numeric'],
     allowMultiple: true,
     defaultCols: { cols: 12, sm: 12, md: 6, lg: 6 },

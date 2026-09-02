@@ -60,7 +60,14 @@ export interface Monitor {
   probe?: { id: number; name: string }
   recentResults?: MonitorResult[]
   stats?: MonitorStats
-  gaugeMetric?: { name: string; value: number; unit: string; recordedAt: string } | null
+  gaugeMetric?: {
+    name: string
+    value: number
+    unit: string
+    recordedAt: string
+    usagePercent?: number | null
+    totalBytes?: number | null
+  } | null
   gaugeHistory?: Array<{ value: number; recordedAt: string }>
   createdAt?: string
   updatedAt?: string
@@ -306,7 +313,8 @@ export const useMonitorsStore = defineStore('monitors', () => {
       if (target.deviceId !== deviceId || !isGaugeMonitor(target)) return
       const name = gaugeMetricName(target)
       const isTraffic = name === 'interface_traffic' || name === 'traffic'
-      const queryName = isTraffic ? 'inBps' : name
+      const isMemory = name === 'memory_usage'
+      const queryName = isTraffic ? 'inBps' : isMemory ? 'memory_used_bytes' : name
       const ifName = target.configuration?.ifName as string | undefined
 
       const sample = [...metrics].reverse().find((m) => {
@@ -320,12 +328,20 @@ export const useMonitorsStore = defineStore('monitors', () => {
 
       const value = Number(sample.value)
       const recordedAt = String(sample.recordedAt)
+      const memoryPercentage = Number(
+        metrics.find((metric) => metric.name === 'memory_usage')?.value
+      )
+      const memoryTotalBytes = Number(
+        metrics.find((metric) => metric.name === 'memory_total_bytes')?.value
+      )
 
       target.gaugeMetric = {
         name,
         value,
         unit: String(sample.unit ?? (isTraffic ? 'bps' : '%')),
         recordedAt,
+        usagePercent: isMemory && Number.isFinite(memoryPercentage) ? memoryPercentage : undefined,
+        totalBytes: isMemory && Number.isFinite(memoryTotalBytes) ? memoryTotalBytes : undefined,
       }
       target.gaugeHistory = [...(target.gaugeHistory || []), { value, recordedAt }].slice(
         -GAUGE_HISTORY_LIMIT

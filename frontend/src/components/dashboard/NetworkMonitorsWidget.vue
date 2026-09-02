@@ -70,7 +70,7 @@
                       :color="gaugeSparklineColor(monitor)"
                       :width="189"
                       :height="28"
-                      :unit="isTrafficMonitor(monitor) ? 'bps' : '%'"
+                      :unit="gaugeDisplayUnit(monitor)"
                     />
                     <span class="text-caption font-weight-medium text-high-emphasis text-no-wrap">
                       {{ formatGaugeShortValue(monitor) }}
@@ -144,12 +144,13 @@ import { useMonitorsStore, type Monitor } from '@/stores/monitors'
 import { useMonitorDetail } from '@/composables/useMonitorDetail'
 import MonitorTimelineBar from '@/components/MonitorTimelineBar.vue'
 import MonitorSparkline from '@/components/MonitorSparkline.vue'
-import { formatBps } from '@/utils/formatters'
 import {
   getStatusColor,
   isGaugeMonitor,
-  isTrafficMonitor,
   gaugeMetricName,
+  gaugeDisplayUnit,
+  gaugeUsagePercent,
+  formatGaugeValue,
   gaugeHexColor,
 } from '@/utils/monitorPresentation'
 
@@ -157,15 +158,11 @@ const monitorsStore = useMonitorsStore()
 const { abrirDetalhe: abrirMonitor } = useMonitorDetail()
 
 function gaugeSparklineColor(monitor: Monitor): string {
-  return gaugeHexColor(monitor.gaugeMetric?.value ?? null, gaugeMetricName(monitor))
+  return gaugeHexColor(gaugeUsagePercent(monitor), gaugeMetricName(monitor))
 }
 
 function formatGaugeShortValue(item: Monitor): string {
-  if (!item.gaugeMetric) return 'N/D'
-  if (isTrafficMonitor(item)) {
-    return formatBps(item.gaugeMetric.value, { fractionDigits: 1 })
-  }
-  return `${Math.round(item.gaugeMetric.value)}%`
+  return formatGaugeValue(item, true)
 }
 </script>
 

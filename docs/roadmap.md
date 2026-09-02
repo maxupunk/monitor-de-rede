@@ -443,6 +443,13 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
     - Widgets de CPU/RAM alimentados apenas por histórico e SSE reais, com load average e capacidade medidos; removidas amostras sintéticas e capacidades fixas.
     - Unidades binárias e decimais explicitadas e tamanhos de imagem separados entre uso em disco e tamanho de conteúdo.
 
+- [x] **RAM apresentada prioritariamente como quantidade** 🟢 Concluído
+  - **Arquivos:** `backend/src/services/monitoring/presenter.rs`, `frontend/src/components/`, `frontend/src/pages/docker/`, `frontend/src/utils/`.
+  - **Implementado:**
+    - Cards, tabelas, gráficos, sparklines e eventos exibem memória usada e capacidade em bytes com unidade legível.
+    - O percentual permanece apenas como contexto secundário e como base interna para cores e limiares de alerta.
+    - Monitores SNMP publicam quantidade no `gaugeMetric` e preservam `usagePercent`/`totalBytes` como metadados auxiliares.
+
 - [x] **Remoção de referências e caminhos de migração sem uso** 🟢 Concluído
   - Removidos o importador de segredos, o fallback de variável de cifra e os documentos dedicados à transição de backend.
   - A documentação descreve apenas a arquitetura e os contratos atuais.

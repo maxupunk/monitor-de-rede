@@ -108,18 +108,22 @@
             Gráfico de Uso de {{ gaugeType === 'MEMÓRIA' ? 'Memória' : 'CPU' }}
           </h2>
           <div class="text-subtitle-2 text-grey">
-            Percentual de uso coletado via SNMP no dispositivo ao longo do tempo
+            {{
+              gaugeType === 'MEMÓRIA'
+                ? 'Quantidade usada coletada via SNMP no dispositivo ao longo do tempo'
+                : 'Percentual de uso coletado via SNMP no dispositivo ao longo do tempo'
+            }}
           </div>
         </div>
         <v-chip v-if="gaugeAvg !== null" color="info" size="small" variant="outlined">
-          Média: {{ gaugeAvg }}%
+          Média: {{ gaugeAvgText }}
         </v-chip>
       </div>
 
       <BaseMetricChart
         v-if="gaugeSeries.length > 0 && gaugeSeries[0].data.length > 0"
         :series="gaugeSeries"
-        unit-type="percentage"
+        :unit-type="gaugeUnitType"
         :show-avg-line="true"
         :avg-value="gaugeAvg ?? undefined"
       />
@@ -264,6 +268,8 @@ withDefaults(
     totalChecks: number
     gaugeType: string
     gaugeAvg: number | null
+    gaugeAvgText: string
+    gaugeUnitType: 'bytes' | 'percentage'
     gaugeSeries: ChartSeriesInput[]
     avgLatency: number | null
     latencySeries: ChartSeriesInput[]

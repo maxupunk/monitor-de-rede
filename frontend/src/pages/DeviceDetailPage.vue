@@ -300,16 +300,18 @@
                   <v-switch
                     v-model="selectedMemoryMonitor"
                     color="primary"
-                    label="Monitorar Memória RAM (%)"
+                    label="Monitorar memória RAM"
                     hide-details
                   ></v-switch>
                   <div class="text-caption text-grey ml-8">
-                    <span v-if="detailStore.scanResult.memoryInfo.totalKb">
-                      Total:
-                      {{ formatBinaryBytes(detailStore.scanResult.memoryInfo.totalKb * 1024) }}
+                    <span v-if="detailStore.scanResult.memoryInfo.usedKb != null">
+                      Uso: {{ formatBinaryBytes(detailStore.scanResult.memoryInfo.usedKb * 1024) }}
+                      <template v-if="detailStore.scanResult.memoryInfo.totalKb">
+                        / {{ formatBinaryBytes(detailStore.scanResult.memoryInfo.totalKb * 1024) }}
+                      </template>
                     </span>
-                    <span v-if="detailStore.scanResult.memoryInfo.usedPercent != null">
-                      - Uso: {{ detailStore.scanResult.memoryInfo.usedPercent.toFixed(1) }}%
+                    <span v-if="detailStore.scanResult.memoryInfo.usedPercent != null" class="ml-1">
+                      ({{ detailStore.scanResult.memoryInfo.usedPercent.toFixed(1) }}%)
                     </span>
                   </div>
                 </v-col>

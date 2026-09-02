@@ -54,14 +54,29 @@
             CPU {{ latestAggregate?.cpuPercent.toFixed(1) ?? '0.0' }}%
           </v-chip>
           <v-chip color="secondary" size="small" variant="tonal">
-            RAM {{ latestAggregate?.memoryPercent.toFixed(1) ?? '0.0' }}%
+            RAM {{ aggregateMemoryText }}
+            <span v-if="latestAggregate" class="ml-1 hidden-sm-and-down">
+              ({{ latestAggregate.memoryPercent.toFixed(1) }}%)
+            </span>
           </v-chip>
         </v-card-title>
         <v-card-subtitle>
           Histórico desta sessão, atualizado automaticamente enquanto o SSE estiver conectado.
         </v-card-subtitle>
         <v-card-text>
-          <BaseMetricChart :series="aggregateSeries" unit-type="percentage"></BaseMetricChart>
+          <v-row>
+            <v-col cols="12" lg="6">
+              <div class="text-subtitle-2 mb-2">CPU total</div>
+              <BaseMetricChart
+                :series="cpuAggregateSeries"
+                unit-type="percentage"
+              ></BaseMetricChart>
+            </v-col>
+            <v-col cols="12" lg="6">
+              <div class="text-subtitle-2 mb-2">RAM usada pelos containers</div>
+              <BaseMetricChart :series="memoryAggregateSeries" unit-type="bytes"></BaseMetricChart>
+            </v-col>
+          </v-row>
         </v-card-text>
       </v-card>
 
@@ -121,10 +136,9 @@
                   </td>
                   <td class="text-right">{{ metric.cpu.usagePercent.toFixed(2) }}%</td>
                   <td class="text-right">
-                    {{ metric.memory.usagePercent.toFixed(2) }}%
-                    <div class="text-caption">
-                      {{ formatBinaryBytes(metric.memory.usageBytes) }}
-                    </div>
+                    {{ formatBinaryBytes(metric.memory.usageBytes) }} /
+                    {{ formatBinaryBytes(metric.memory.limitBytes) }}
+                    <div class="text-caption">{{ metric.memory.usagePercent.toFixed(1) }}%</div>
                   </td>
                   <td class="text-right">
                     ↓ {{ formatDecimalBytes(metric.network.receivedBytes) }}
@@ -198,7 +212,14 @@ const topMetrics = computed(() =>
 
 const latestAggregate = computed(() => docker.aggregateHistory.at(-1) ?? null)
 
-const aggregateSeries = computed<ChartSeriesInput[]>(() => [
+const aggregateMemoryText = computed(() => {
+  if (!latestAggregate.value) return '0 B'
+  const used = formatBinaryBytes(latestAggregate.value.memoryUsageBytes)
+  const total = formatBinaryBytes(docker.status?.memoryTotalBytes, { fallback: 'N/D' })
+  return `${used} / ${total}`
+})
+
+const cpuAggregateSeries = computed<ChartSeriesInput[]>(() => [
   {
     id: 'docker-cpu-total',
     label: 'CPU total',
@@ -209,6 +230,9 @@ const aggregateSeries = computed<ChartSeriesInput[]>(() => [
       value: sample.cpuPercent,
     })),
   },
+])
+
+const memoryAggregateSeries = computed<ChartSeriesInput[]>(() => [
   {
     id: 'docker-memory-total',
     label: 'RAM dos containers / capacidade da Engine',
@@ -216,7 +240,8 @@ const aggregateSeries = computed<ChartSeriesInput[]>(() => [
     fillArea: false,
     data: docker.aggregateHistory.map((sample) => ({
       time: sample.recordedAt,
-      value: sample.memoryPercent,
+      value: sample.memoryUsageBytes,
+      formattedValue: formatBinaryBytes(sample.memoryUsageBytes),
     })),
   },
 ])

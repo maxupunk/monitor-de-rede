@@ -44,20 +44,26 @@
           <div class="pa-2 bg-surface-variant rounded-lg text-center">
             <div class="text-caption text-grey">Atual</div>
             <div class="text-h6 font-weight-bold" :class="`text-${statusColor}`">
-              {{ currentUsage.toFixed(1) }}%
+              {{ formatUsageValue(currentUsage) }}
+            </div>
+            <div
+              v-if="resourceType === 'ram' && currentUsagePercent !== null"
+              class="text-caption text-grey"
+            >
+              {{ currentUsagePercent.toFixed(1) }}% do total
             </div>
           </div>
         </v-col>
         <v-col cols="6" sm="3">
           <div class="pa-2 bg-surface-variant rounded-lg text-center">
             <div class="text-caption text-grey">Pico</div>
-            <div class="text-h6 font-weight-bold text-error">{{ peakUsage.toFixed(1) }}%</div>
+            <div class="text-h6 font-weight-bold text-error">{{ formatUsageValue(peakUsage) }}</div>
           </div>
         </v-col>
         <v-col cols="6" sm="3">
           <div class="pa-2 bg-surface-variant rounded-lg text-center">
             <div class="text-caption text-grey">Média</div>
-            <div class="text-h6 font-weight-bold text-info">{{ avgUsage.toFixed(1) }}%</div>
+            <div class="text-h6 font-weight-bold text-info">{{ formatUsageValue(avgUsage) }}</div>
           </div>
         </v-col>
         <v-col cols="6" sm="3">
@@ -102,7 +108,9 @@
             stroke="rgba(148, 163, 184, 0.2)"
             stroke-dasharray="3,3"
           />
-          <text x="42" y="24" font-size="10" fill="#94a3b8" text-anchor="end">100%</text>
+          <text x="42" y="24" font-size="10" fill="#94a3b8" text-anchor="end">
+            {{ chartMaxLabel }}
+          </text>
 
           <line
             x1="50"
@@ -112,7 +120,9 @@
             stroke="rgba(148, 163, 184, 0.2)"
             stroke-dasharray="3,3"
           />
-          <text x="42" y="94" font-size="10" fill="#94a3b8" text-anchor="end">50%</text>
+          <text x="42" y="94" font-size="10" fill="#94a3b8" text-anchor="end">
+            {{ chartMidLabel }}
+          </text>
 
           <line
             x1="50"
@@ -122,7 +132,9 @@
             stroke="rgba(148, 163, 184, 0.3)"
             stroke-width="1.5"
           />
-          <text x="42" y="164" font-size="10" fill="#94a3b8" text-anchor="end">0%</text>
+          <text x="42" y="164" font-size="10" fill="#94a3b8" text-anchor="end">
+            {{ chartMinLabel }}
+          </text>
 
           <!-- Crosshair -->
           <line
@@ -156,7 +168,9 @@
             :cx="pt.x"
             :cy="pt.y"
             :r="hoverIndex === idx ? 6 : 3"
-            :fill="pt.value >= 85 ? '#ef4444' : pt.value >= 70 ? '#f59e0b' : '#10b981'"
+            :fill="
+              pt.usagePercent >= 85 ? '#ef4444' : pt.usagePercent >= 70 ? '#f59e0b' : '#10b981'
+            "
             stroke="#ffffff"
             stroke-width="1.5"
           />
@@ -175,7 +189,7 @@
           :style="tooltipStyle"
         >
           <div class="text-caption font-weight-bold" :class="`text-${statusColor}`">
-            {{ config.label }}: {{ currentHoverItem.value }}%
+            {{ config.label }}: {{ formatUsageValue(currentHoverItem.value) }}
           </div>
           <div class="text-caption text-grey-lighten-1 mt-1">Hora: {{ currentHoverItem.time }}</div>
         </v-card>
@@ -338,7 +352,7 @@ onMounted(async () => {
                 minute: '2-digit',
                 second: '2-digit',
               }),
-              value: Math.min(100, Math.max(0, val)),
+              value: Math.max(0, val),
               timestamp: recordedDate.getTime(),
             })
             if (localSamples.value.length > 120) {
@@ -377,7 +391,7 @@ function buildSamples() {
         minute: '2-digit',
         second: '2-digit',
       }),
-      value: Math.min(100, Math.max(0, Number(metric.metricValue))),
+      value: Math.max(0, Number(metric.metricValue)),
       timestamp: date.getTime(),
     }
   })
@@ -408,21 +422,45 @@ const usedRamBytes = computed(() =>
 )
 const memoryAllocation = computed(() => {
   if (totalRamBytes.value === null) return 'N/D'
-  const used = usedRamBytes.value ?? (totalRamBytes.value * currentUsage.value) / 100
+  const used = usedRamBytes.value ?? currentUsage.value
   return `${formatBinaryBytes(used)} / ${formatBinaryBytes(totalRamBytes.value)}`
 })
 
+const currentUsagePercent = computed(() => {
+  if (resourceType.value === 'cpu') return currentUsage.value
+  if (totalRamBytes.value === null || totalRamBytes.value <= 0) return null
+  return (currentUsage.value / totalRamBytes.value) * 100
+})
+
+function formatUsageValue(value: number): string {
+  return resourceType.value === 'ram'
+    ? formatBinaryBytes(value, { fractionDigits: 1 })
+    : `${value.toFixed(1)}%`
+}
+
 const statusColor = computed(() => {
-  if (currentUsage.value >= 85) return 'error'
-  if (currentUsage.value >= 70) return 'warning'
+  const usage = currentUsagePercent.value ?? 0
+  if (usage >= 85) return 'error'
+  if (usage >= 70) return 'warning'
   return 'success'
 })
 
 const statusHexColor = computed(() => {
-  if (currentUsage.value >= 85) return '#ef4444'
-  if (currentUsage.value >= 70) return '#f59e0b'
+  const usage = currentUsagePercent.value ?? 0
+  if (usage >= 85) return '#ef4444'
+  if (usage >= 70) return '#f59e0b'
   return '#10b981'
 })
+
+const chartMaxValue = computed(() => {
+  if (resourceType.value === 'cpu') return 100
+  if (totalRamBytes.value !== null && totalRamBytes.value > 0) return totalRamBytes.value
+  const peak = peakUsage.value
+  return peak > 0 ? peak * 1.15 : 1
+})
+const chartMaxLabel = computed(() => formatUsageValue(chartMaxValue.value))
+const chartMidLabel = computed(() => formatUsageValue(chartMaxValue.value / 2))
+const chartMinLabel = computed(() => formatUsageValue(0))
 
 const chartPoints = computed(() => {
   const left = 50
@@ -437,9 +475,13 @@ const chartPoints = computed(() => {
 
   return samples.value.map((s, idx) => {
     const x = count === 1 ? (left + right) / 2 : left + idx * step
-    const ratio = Math.min(1, Math.max(0, s.value / 100))
+    const ratio = Math.min(1, Math.max(0, s.value / chartMaxValue.value))
     const y = bottom - ratio * height
-    return { x, y, value: s.value, time: s.time }
+    const usagePercent =
+      resourceType.value === 'ram' && totalRamBytes.value
+        ? (s.value / totalRamBytes.value) * 100
+        : s.value
+    return { x, y, value: s.value, usagePercent, time: s.time }
   })
 })
 

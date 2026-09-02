@@ -48,13 +48,17 @@
           <div class="docker-metric pa-3 rounded-lg">
             <div class="d-flex align-center justify-space-between ga-3 mb-2">
               <span class="text-caption text-medium-emphasis">RAM dos containers / Engine</span>
-              <strong>{{ current?.memoryPercent.toFixed(1) ?? '0.0' }}%</strong>
+              <strong>{{ memorySummary }}</strong>
+            </div>
+            <div v-if="current" class="text-caption text-medium-emphasis mb-1">
+              {{ current.memoryPercent.toFixed(1) }}% da capacidade
             </div>
             <MonitorSparkline
               :data="memoryHistory"
               color="#7E57C2"
               width="100%"
               :height="42"
+              unit="bytes"
             ></MonitorSparkline>
           </div>
         </v-col>
@@ -80,10 +84,19 @@
 import { computed } from 'vue'
 import MonitorSparkline, { type SparklinePoint } from '@/components/MonitorSparkline.vue'
 import { useDockerStore } from '@/stores/docker'
-import { formatDecimalBytes } from '@/utils/formatters'
+import { formatBinaryBytes, formatDecimalBytes } from '@/utils/formatters'
 
 const docker = useDockerStore()
 const current = computed(() => docker.aggregateHistory.at(-1) ?? null)
+const memorySummary = computed(() => {
+  if (!current.value) return '0 B'
+  const used = formatBinaryBytes(current.value.memoryUsageBytes, { fractionDigits: 1 })
+  const total = formatBinaryBytes(docker.status?.memoryTotalBytes, {
+    fractionDigits: 1,
+    fallback: 'N/D',
+  })
+  return `${used} / ${total}`
+})
 const cpuHistory = computed<SparklinePoint[]>(() =>
   docker.aggregateHistory.map((sample) => ({
     value: sample.cpuPercent,
@@ -92,7 +105,7 @@ const cpuHistory = computed<SparklinePoint[]>(() =>
 )
 const memoryHistory = computed<SparklinePoint[]>(() =>
   docker.aggregateHistory.map((sample) => ({
-    value: sample.memoryPercent,
+    value: sample.memoryUsageBytes,
     recordedAt: sample.recordedAt,
   }))
 )

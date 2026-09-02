@@ -79,7 +79,7 @@
           <div class="d-flex align-center justify-space-between ga-2">
             <div class="d-flex align-center ga-2 min-w-0">
               <span class="text-caption font-mono text-medium-emphasis"
-                >#{{ intf.ifIndex ?? intf.snmpIndex ?? '-' }}</span
+              >#{{ intf.ifIndex ?? intf.snmpIndex ?? '-' }}</span
               >
               <span class="font-weight-bold text-subtitle-1 text-truncate">{{
                 interfaceLabel(intf)

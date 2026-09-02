@@ -45,7 +45,7 @@
 
           <v-progress-linear
             v-if="card.percentual"
-            :model-value="card.disponivel ? (card.valor ?? 0) : 0"
+            :model-value="card.disponivel ? (card.progresso ?? 0) : 0"
             height="10"
             rounded
             :color="card.disponivel ? card.cor : 'grey-lighten-2'"
@@ -152,15 +152,15 @@ const DEFINICOES: DefinicaoSerie[] = [
     critico: 85,
   },
   {
-    serie: 'memory_usage',
-    tipoDeUnidade: 'percentage',
-    alternativos: ['memory_used'],
+    serie: 'memory_used_bytes',
+    tipoDeUnidade: 'bytes',
     titulo: 'Memória usada',
     icone: 'mdi-memory',
-    legenda: 'Percentual utilizado',
+    legenda: 'Quantidade em uso',
     percentual: true,
     atencao: 75,
     critico: 90,
+    formata: formatBytes,
   },
   {
     serie: 'storage_usage',
@@ -225,7 +225,7 @@ function nomesDa(def: DefinicaoSerie): string[] {
  *
  * Métrica que este sistema não consegue medir simplesmente não gera card — o
  * backend a declara indisponível com o motivo em vez de publicar zero, e um
- * card com `0%` seria indistinguível de um servidor ocioso.
+ * card com `0 B` seria indistinguível de um servidor ocioso.
  */
 const cards = computed(() =>
   DEFINICOES.flatMap((def) => {
@@ -237,7 +237,32 @@ const cards = computed(() =>
     const atual = amostras[0]
     const valor = Number(atual.metricValue)
     const disponivel = Number.isFinite(valor)
-    const cor = corDaFaixa(disponivel ? valor : null, def)
+    const percentualMemoria =
+      def.serie === 'memory_used_bytes'
+        ? Number(props.metrics.find((m) => m.metricName === 'memory_usage')?.metricValue)
+        : null
+    const progresso =
+      def.serie === 'memory_used_bytes' && Number.isFinite(percentualMemoria)
+        ? percentualMemoria
+        : disponivel && def.percentual
+          ? valor
+          : null
+    const totalMemoria =
+      def.serie === 'memory_used_bytes'
+        ? Number(props.metrics.find((m) => m.metricName === 'memory_total_bytes')?.metricValue)
+        : null
+    const cor = corDaFaixa(progresso, def)
+    const legenda =
+      def.serie === 'memory_used_bytes'
+        ? [
+            Number.isFinite(totalMemoria) ? `de ${formatBytes(totalMemoria)}` : null,
+            Number.isFinite(percentualMemoria)
+              ? `${Number(percentualMemoria).toFixed(1)}% utilizado`
+              : null,
+          ]
+            .filter(Boolean)
+            .join(' · ') || def.legenda
+        : def.legenda
 
     return [
       {
@@ -247,12 +272,16 @@ const cards = computed(() =>
         tipoDeUnidade: def.tipoDeUnidade ?? 'generic',
         titulo: def.titulo,
         icone: def.icone,
-        legenda: def.legenda,
+        legenda,
         percentual: def.percentual,
+        progresso,
         valor: disponivel ? valor : null,
         disponivel,
         cor,
-        corHex: gaugeHexColor(disponivel ? valor : null, def.serie),
+        corHex: gaugeHexColor(
+          progresso,
+          def.serie === 'memory_used_bytes' ? 'memory_usage' : def.serie
+        ),
         textoValor: !disponivel
           ? 'Sem dados'
           : def.formata

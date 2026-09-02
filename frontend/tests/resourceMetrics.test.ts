@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { latestMetricValue, resourceMetricWindow } from '../src/utils/resourceMetrics.ts'
+import {
+  latestMetricValue,
+  resourceMetricWindow,
+  RESOURCE_SERIES,
+} from '../src/utils/resourceMetrics.ts'
 
 const NOW = Date.parse('2026-09-01T12:00:00Z')
 
@@ -15,7 +19,11 @@ describe('resource metrics', () => {
   })
 
   it('não fabrica amostras quando não existe telemetria', () => {
-    expect(resourceMetricWindow([], ['memory_usage'], '24h', NOW)).toEqual([])
+    expect(resourceMetricWindow([], RESOURCE_SERIES.ram, '24h', NOW)).toEqual([])
+  })
+
+  it('usa quantidade em bytes como série principal de RAM', () => {
+    expect(RESOURCE_SERIES.ram).toEqual(['memory_used_bytes'])
   })
 
   it('seleciona o valor real mais recente de uma série auxiliar', () => {

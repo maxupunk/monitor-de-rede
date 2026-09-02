@@ -6,7 +6,8 @@ export interface ResourceMetricPoint {
 
 export const RESOURCE_SERIES = {
   cpu: ['cpu_usage'],
-  ram: ['memory_usage'],
+  ram: ['memory_used_bytes'],
+  memoryUsagePercent: 'memory_usage',
   loadAverage: 'load_average_1m',
   memoryUsedBytes: 'memory_used_bytes',
   memoryTotalBytes: 'memory_total_bytes',

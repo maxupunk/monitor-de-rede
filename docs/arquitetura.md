@@ -464,6 +464,9 @@ O frontend aplica `metrics` diretamente nas stores e oferece localmente o alias
 `metric:recorded` aos gráficos; não existe segundo evento durável nem refetch.
 Memória publica o trio `memory_usage`, `memory_used_bytes` e
 `memory_total_bytes`, sempre medido pela fonte, nunca inferido pela interface.
+Na apresentação, `memory_used_bytes` e `memory_total_bytes` são os valores
+principais; `memory_usage` fica restrito ao contexto secundário, às cores e aos
+limiares percentuais de alerta.
 
 Telemetria Docker é efêmera e vai direto ao barramento em memória: persistir
 amostras de três em três segundos no `event_outbox` faria o banco crescer sem

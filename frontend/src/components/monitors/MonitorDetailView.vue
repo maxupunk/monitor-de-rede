@@ -88,6 +88,8 @@
         :total-checks="stats.totalChecks"
         :gauge-type="gaugeTypeLabel(monitor)"
         :gauge-avg="gaugeStats.avg"
+        :gauge-avg-text="gaugeAvgText"
+        :gauge-unit-type="gaugeUnitType"
         :gauge-series="gaugeSeries"
         :avg-latency="stats.avgLatency"
         :latency-series="latencySeries"
@@ -182,13 +184,15 @@ import {
   isTrafficMonitor as isTrafficMonitorFn,
   gaugeMetricName,
   gaugeTypeLabel,
+  gaugeUsagePercent,
+  formatGaugeValue,
   gaugeColor as gaugeColorFn,
   isInterfaceMonitor as isInterfaceMonitorFn,
   interfaceStatusInfo,
   latestResultData,
   getStatusColor,
 } from '@/utils/monitorPresentation'
-import { formatDateTime, formatLatency, formatBps } from '@/utils/formatters'
+import { formatBinaryBytes, formatDateTime, formatLatency, formatBps } from '@/utils/formatters'
 import type { AlertEvent } from '@/stores/alerts'
 
 const props = defineProps<{
@@ -295,6 +299,7 @@ const statusText = computed(() => (monitor.value.status || 'UNKNOWN').toUpperCas
 const isTrafficMonitor = computed(() => isTrafficMonitorFn(monitor.value))
 const isGaugeMonitor = computed(() => isGaugeMonitorFn(monitor.value) && !isTrafficMonitor.value)
 const isInterfaceMonitor = computed(() => isInterfaceMonitorFn(monitor.value))
+const isMemoryGauge = computed(() => gaugeMetricName(monitor.value) === 'memory_usage')
 
 const typeText = computed(() => {
   if (isTrafficMonitor.value) return 'TRÁFEGO'
@@ -304,10 +309,11 @@ const typeText = computed(() => {
 })
 
 const gaugeColorValue = computed(() =>
-  gaugeColorFn(monitor.value.gaugeMetric?.value ?? null, gaugeMetricName(monitor.value))
+  gaugeColorFn(gaugeUsagePercent(monitor.value), gaugeMetricName(monitor.value))
 )
 
-// Unifica a apresentação do status no header: tráfego mostra taxa, gauge mostra %,
+// Unifica a apresentação do status no header: tráfego mostra taxa, memória mostra
+// quantidade, CPU mostra percentual,
 // interface mostra o estado real e monitor tradicional mostra status textual.
 const headerChip = computed(() => {
   if (isTrafficMonitor.value) {
@@ -322,9 +328,8 @@ const headerChip = computed(() => {
     }
   }
   if (isGaugeMonitor.value) {
-    const val = monitor.value.gaugeMetric?.value
     return {
-      label: val !== null && val !== undefined ? `${Math.round(val)}%` : 'SEM DADOS',
+      label: formatGaugeValue(monitor.value, true).toUpperCase(),
       color: gaugeColorValue.value,
       icon: 'mdi-gauge',
     }
@@ -637,7 +642,7 @@ const linkTrafficSeries = computed<ChartSeriesInput[]>(() => {
 })
 
 const gaugeHistoryFiltered = computed(() => {
-  const name = gaugeMetricName(monitor.value)
+  const name = isMemoryGauge.value ? 'memory_used_bytes' : gaugeMetricName(monitor.value)
   return gaugeHistory.value
     .filter((m) => m.metricName === name)
     .slice()
@@ -662,18 +667,17 @@ const gaugeStats = computed(() => {
   return { current, avg, min: Math.min(...values), max: Math.max(...values) }
 })
 
-const gaugeCurrentText = computed(() => {
-  const v = gaugeStats.value.current
-  return v !== null && v !== undefined ? `${Number(v).toFixed(1)}%` : 'N/A'
-})
-const gaugeAvgText = computed(() =>
-  gaugeStats.value.avg !== null ? `${gaugeStats.value.avg}%` : 'N/A'
-)
-const gaugeMinText = computed(() =>
-  gaugeStats.value.min !== null ? `${gaugeStats.value.min!.toFixed(1)}%` : 'N/A'
-)
-const gaugeMaxText = computed(() =>
-  gaugeStats.value.max !== null ? `${gaugeStats.value.max!.toFixed(1)}%` : 'N/A'
+function formatGaugeStat(value: number | null | undefined): string {
+  if (value === null || value === undefined) return 'N/A'
+  return isMemoryGauge.value ? formatBinaryBytes(value) : `${Number(value).toFixed(1)}%`
+}
+
+const gaugeCurrentText = computed(() => formatGaugeStat(gaugeStats.value.current))
+const gaugeAvgText = computed(() => formatGaugeStat(gaugeStats.value.avg))
+const gaugeMinText = computed(() => formatGaugeStat(gaugeStats.value.min))
+const gaugeMaxText = computed(() => formatGaugeStat(gaugeStats.value.max))
+const gaugeUnitType = computed<'bytes' | 'percentage'>(() =>
+  isMemoryGauge.value ? 'bytes' : 'percentage'
 )
 
 const gaugeSeries = computed<ChartSeriesInput[]>(() => {
@@ -691,7 +695,7 @@ const gaugeSeries = computed<ChartSeriesInput[]>(() => {
         return {
           time: formatDateTime(m.createdAt, '-'),
           value: val,
-          formattedValue: `${val.toFixed(1)}%`,
+          formattedValue: formatGaugeStat(val),
         }
       }),
     },

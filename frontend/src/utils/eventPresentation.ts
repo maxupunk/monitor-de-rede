@@ -1,5 +1,5 @@
 import type { RealtimeEventPayload } from '@/stores/events'
-import { formatClockTime, formatMeasuredValue } from '@/utils/formatters'
+import { formatBinaryBytes, formatClockTime, formatMeasuredValue } from '@/utils/formatters'
 
 export interface FormattedEventDetails {
   title: string
@@ -40,11 +40,18 @@ export function formatEventDetails(evt: RealtimeEventPayload): FormattedEventDet
           ...new Set(metrics.map((m: any) => m.interfaceId).filter((id: any) => id != null)),
         ]
         const cpu = metrics.find((m: any) => m.name === 'cpu_usage')
-        const mem = metrics.find((m: any) => m.name === 'memory_usage')
+        const memUsed = metrics.find((m: any) => m.name === 'memory_used_bytes')
+        const memTotal = metrics.find((m: any) => m.name === 'memory_total_bytes')
+        const memPercent = metrics.find((m: any) => m.name === 'memory_usage')
 
         const highlights: string[] = []
         if (cpu) highlights.push(`CPU: ${cpu.value}%`)
-        if (mem) highlights.push(`Memória: ${mem.value}%`)
+        if (memUsed) {
+          const used = formatBinaryBytes(Number(memUsed.value))
+          const total = memTotal ? ` / ${formatBinaryBytes(Number(memTotal.value))}` : ''
+          const percent = memPercent ? ` (${Number(memPercent.value).toFixed(1)}%)` : ''
+          highlights.push(`Memória: ${used}${total}${percent}`)
+        }
 
         if (highlights.length > 0) {
           const ifText = interfaceIds.length > 0 ? ` • ${interfaceIds.length} interface(s)` : ''

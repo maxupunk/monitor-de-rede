@@ -41,7 +41,7 @@
             :color="gaugeSparklineColor(item)"
             :width="189"
             :height="28"
-            :unit="isTrafficMonitor(item) ? 'bps' : '%'"
+            :unit="gaugeDisplayUnit(item)"
           />
           <span class="text-caption font-weight-medium text-no-wrap" style="min-width: 44px">
             {{ formatGaugeShortValue(item) }}
@@ -235,7 +235,7 @@
                   :color="gaugeSparklineColor(item)"
                   :width="220"
                   :height="28"
-                  :unit="isTrafficMonitor(item) ? 'bps' : '%'"
+                  :unit="gaugeDisplayUnit(item)"
                 />
                 <span class="text-caption font-weight-medium text-no-wrap">
                   {{ formatGaugeShortValue(item) }}
@@ -346,8 +346,10 @@ import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import { useMonitorDetail } from '@/composables/useMonitorDetail'
 import {
   isGaugeMonitor,
-  isTrafficMonitor,
   gaugeMetricName,
+  gaugeDisplayUnit,
+  gaugeUsagePercent,
+  formatGaugeValue as formatGaugeReading,
   gaugeColor as gaugeColorFor,
   gaugeHexColor,
   isInterfaceMonitor,
@@ -355,7 +357,6 @@ import {
   latestResultData,
   getStatusColor,
 } from '@/utils/monitorPresentation'
-import { formatBps } from '@/utils/formatters'
 import { monitorKind, resolveKind, resolveSnmpMode, SNMP_MODES } from '@/utils/monitorTypes'
 
 /**
@@ -472,27 +473,19 @@ async function executeDelete() {
 }
 
 function gaugeColor(item: Monitor): string {
-  return gaugeColorFor(item.gaugeMetric?.value ?? null, gaugeMetricName(item))
+  return gaugeColorFor(gaugeUsagePercent(item), gaugeMetricName(item))
 }
 
 function gaugeSparklineColor(item: Monitor): string {
-  return gaugeHexColor(item.gaugeMetric?.value ?? null, gaugeMetricName(item))
+  return gaugeHexColor(gaugeUsagePercent(item), gaugeMetricName(item))
 }
 
 function formatGaugeValue(item: Monitor): string {
-  if (!item.gaugeMetric) return 'SEM DADOS'
-  if (isTrafficMonitor(item)) {
-    return formatBps(item.gaugeMetric.value)
-  }
-  return `${Math.round(item.gaugeMetric.value)}%`
+  return formatGaugeReading(item)
 }
 
 function formatGaugeShortValue(item: Monitor): string {
-  if (!item.gaugeMetric) return 'N/D'
-  if (isTrafficMonitor(item)) {
-    return formatBps(item.gaugeMetric.value, { fractionDigits: 1 })
-  }
-  return `${Math.round(item.gaugeMetric.value)}%`
+  return formatGaugeReading(item, true)
 }
 
 function interfaceStatusInfo(item: Monitor) {

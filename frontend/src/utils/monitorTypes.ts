@@ -351,7 +351,7 @@ export const SNMP_MODES: SnmpModeDefinition[] = [
     value: 'memory_usage',
     label: 'Uso de memória',
     icon: 'mdi-memory',
-    description: 'Coleta o percentual de uso de memória. Exibido como medidor, não como up/down.',
+    description: 'Coleta a quantidade de memória usada e a capacidade, com percentual auxiliar.',
     isGauge: true,
   },
   {

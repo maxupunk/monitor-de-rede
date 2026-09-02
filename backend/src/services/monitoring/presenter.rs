@@ -70,6 +70,11 @@ pub struct GaugeReading {
     pub value: f64,
     pub unit: String,
     pub recorded_at: String,
+    /// Percentual auxiliar para cores e limites. A memória continua sendo
+    /// apresentada pela quantidade em `value`.
+    pub usage_percent: Option<f64>,
+    /// Capacidade correspondente à leitura de memória, em bytes.
+    pub total_bytes: Option<f64>,
 }
 
 /// Amostra compacta de um gauge.
@@ -276,7 +281,7 @@ async fn fetch_gauge_metrics(
     if is_traffic {
         query = query.filter(metrics_entity::Column::Name.eq("inBps"));
     } else if is_memory {
-        query = query.filter(metrics_entity::Column::Name.is_in(["memory_usage", "memory_used"]));
+        query = query.filter(metrics_entity::Column::Name.eq("memory_used_bytes"));
     } else {
         query = query.filter(metrics_entity::Column::Name.eq(metric_name));
     }
@@ -336,15 +341,36 @@ async fn fetch_gauge_metrics(
         .limit(GAUGE_HISTORY_LIMIT)
         .all(db)
         .await?;
+    let (usage_percent, total_bytes) = if is_memory {
+        let percentage = metrics_entity::Entity::find()
+            .filter(metrics_entity::Column::DeviceId.eq(device_id))
+            .filter(metrics_entity::Column::Name.eq("memory_usage"))
+            .order_by_desc(metrics_entity::Column::RecordedAt)
+            .one(db)
+            .await?
+            .map(|row| row.value);
+        let total = metrics_entity::Entity::find()
+            .filter(metrics_entity::Column::DeviceId.eq(device_id))
+            .filter(metrics_entity::Column::Name.eq("memory_total_bytes"))
+            .order_by_desc(metrics_entity::Column::RecordedAt)
+            .one(db)
+            .await?
+            .map(|row| row.value);
+        (percentage, total)
+    } else {
+        (None, None)
+    };
     let latest = rows.first().map(|row| GaugeReading {
         name: if is_traffic {
             "interface_traffic".to_string()
         } else {
-            row.name.clone()
+            metric_name.to_string()
         },
         value: row.value,
         unit: row.unit.clone(),
         recorded_at: row.recorded_at.to_rfc3339(),
+        usage_percent,
+        total_bytes,
     });
     let mut history: Vec<_> = rows
         .into_iter()
