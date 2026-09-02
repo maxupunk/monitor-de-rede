@@ -815,6 +815,17 @@ pub async fn provision_saas_presets(
         config_map.insert("saasService".into(), json!(preset.provider.to_lowercase()));
         config_map.insert("saasCategory".into(), json!(preset.category));
         config_map.insert(
+            "latencyAlertPolicy".into(),
+            json!({
+                "mode": "adaptive",
+                "deviationPercent": 50,
+                "consecutiveChecks": 3,
+                "minIncreaseMs": 20,
+                "suppressOnSaturation": true,
+                "saturationThresholdPercent": 80
+            }),
+        );
+        config_map.insert(
             "warningThresholdMs".into(),
             json!(preset.suggested_thresholds.warning_latency_ms),
         );

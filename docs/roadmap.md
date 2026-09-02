@@ -330,6 +330,17 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
     - Rótulos em português para os novos campos no frontend (`alertPresentation.ts`).
     - Testes unitários do baseline e testes de integração cobrindo regra de desvio por latência, perda e uptime.
 
+- [x] **Guarda adaptativa para latência externa e saturação da WAN** 🟢 Concluído
+  - **Arquivos:** `backend/src/services/alerts/adaptive_latency.rs`, `backend/src/services/alerts/manager.rs`, `backend/src/services/monitoring/{result_processor.rs,saas.rs}`, `backend/src/controllers/monitors.rs`, `frontend/src/{utils/monitorTypes.ts,stores/monitors.ts}`, `frontend/src/components/MonitorFormDialog.vue`, `frontend/src/components/monitors/{MonitorDetailView.vue,detail/MonitorBaselineCard.vue}`, `backend/tests/requests/baseline_alerts.rs`, `frontend/tests/{monitorTypes.test.ts,stores/events.spec.ts}`
+  - **Implementado:**
+    - HTTP/HTTPS, DNS, TCP e ping externos usam baseline própria e somente liberam fatos de latência após um desvio percentual por X leituras consecutivas; alvos internos mantêm as regras existentes no modo automático.
+    - O limiar efetivo combina percentual, aumento absoluto mínimo e banda de 3σ, e as confirmações persistem em `monitor_results`, sem estado volátil dependente de restart.
+    - Cada leitura é correlacionada com `inBps`/`outBps` da WAN. Saturação baseada na capacidade contratada (ou velocidade negociada) quebra a sequência; telemetria ausente falha de forma aberta e explicável.
+    - Somente fatos de latência são suprimidos: indisponibilidade, perda, código HTTP e falha DNS permanecem alertáveis.
+    - Formulário permite configurar modo, percentual, confirmações, WAN e capacidades assimétricas; o detalhe mostra limiar, progresso, interface, utilização e motivo da decisão.
+    - Presets SaaS novos recebem a política adaptativa por padrão; monitores SaaS existentes entram automaticamente pela marca `isSaas`, sem migração manual.
+    - O diagnóstico acompanha `monitor:result` pelo SSE compartilhado e atualiza a store em memória; teste garante que o snapshot não chama novamente o endpoint de baseline.
+
 - [x] **Rollup/ agregação de métricas** 🟢 Concluído
   - **Severidade:** 🟡 Média
   - **Esforço:** Médio

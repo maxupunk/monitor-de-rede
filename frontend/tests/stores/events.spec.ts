@@ -3,6 +3,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { apiService } from '@/services/apiService'
 import { useDeviceDetailStore } from '@/stores/deviceDetail'
 import { useEventsStore } from '@/stores/events'
+import { useMonitorsStore } from '@/stores/monitors'
 
 class FakeEventSource {
   static latest: FakeEventSource | null = null
@@ -39,6 +40,18 @@ describe('events store', () => {
     const apiGet = vi.spyOn(apiService, 'get')
     const detail = useDeviceDetailStore()
     detail.device = { id: 7 } as never
+    const monitors = useMonitorsStore()
+    monitors.currentMonitor = {
+      id: 11,
+      deviceId: 7,
+      name: 'OpenAI',
+      type: 'https',
+      target: 'https://chatgpt.com',
+      intervalSeconds: 60,
+      timeoutSeconds: 5,
+      status: 'up',
+      isEnabled: true,
+    }
     const events = useEventsStore()
     const metricHandler = vi.fn()
     events.onEvent('metric:recorded', metricHandler)
@@ -61,6 +74,23 @@ describe('events store', () => {
               recordedAt: '2026-09-01T12:00:00Z',
             },
           ],
+          adaptiveLatency: {
+            applies: true,
+            alertEligible: false,
+            reason: 'collecting_confirmations',
+            deviationPercent: 50,
+            requiredConsecutiveChecks: 3,
+            observedConsecutiveChecks: 2,
+            expectedLatencyMs: 220,
+            alertThresholdMs: 330,
+            currentLatencyMs: 350,
+            linkUtilizationPercent: 35,
+            linkSaturated: false,
+            sourceDeviceId: 7,
+            linkInterfaceId: 3,
+            linkInterfaceName: 'wan1',
+            capacitySource: 'configured',
+          },
         },
       }),
     } as MessageEvent<string>)
@@ -74,6 +104,13 @@ describe('events store', () => {
       }),
     ])
     expect(metricHandler).toHaveBeenCalledOnce()
+    expect(monitors.currentMonitor?.adaptiveLatency).toEqual(
+      expect.objectContaining({
+        reason: 'collecting_confirmations',
+        observedConsecutiveChecks: 2,
+        currentLatencyMs: 350,
+      })
+    )
     expect(apiGet).not.toHaveBeenCalled()
     events.disconnect()
   })

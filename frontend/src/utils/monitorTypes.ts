@@ -486,6 +486,16 @@ export interface MonitorFormModel {
   intervalSeconds: number
   retryCount: number
   enabled: boolean
+  // Política de latência para destinos externos
+  latencyAlertMode: 'auto' | 'adaptive' | 'fixed'
+  latencyDeviationPercent: number
+  latencyConsecutiveChecks: number
+  latencyMinIncreaseMs: number
+  latencySuppressOnSaturation: boolean
+  latencySaturationThresholdPercent: number
+  latencySourceDeviceId: number | null
+  latencyDownloadCapacityBps: number | null
+  latencyUploadCapacityBps: number | null
   // Ping
   packetCount: number
   // HTTP
@@ -531,6 +541,15 @@ export function createMonitorForm(deviceId?: number | null): MonitorFormModel {
     intervalSeconds: 60,
     retryCount: 3,
     enabled: true,
+    latencyAlertMode: 'auto',
+    latencyDeviationPercent: 50,
+    latencyConsecutiveChecks: 3,
+    latencyMinIncreaseMs: 20,
+    latencySuppressOnSaturation: true,
+    latencySaturationThresholdPercent: 80,
+    latencySourceDeviceId: null,
+    latencyDownloadCapacityBps: null,
+    latencyUploadCapacityBps: null,
     packetCount: 3,
     httpMethod: 'GET',
     acceptedStatusCodes: [...DEFAULT_ACCEPTED_STATUS_CODES],
@@ -596,6 +615,27 @@ export function monitorToForm(monitor: Monitor): MonitorFormModel {
   form.retryCount = Number.isFinite(Number(monitor.retryCount)) ? Number(monitor.retryCount) : 3
   form.enabled = monitor.isEnabled ?? monitor.enabled ?? true
 
+  const latencyPolicy =
+    config.latencyAlertPolicy && typeof config.latencyAlertPolicy === 'object'
+      ? (config.latencyAlertPolicy as Record<string, unknown>)
+      : {}
+  if (['auto', 'adaptive', 'fixed'].includes(String(latencyPolicy.mode))) {
+    form.latencyAlertMode = latencyPolicy.mode as MonitorFormModel['latencyAlertMode']
+  }
+  form.latencyDeviationPercent = asNumber(latencyPolicy.deviationPercent, 50)
+  form.latencyConsecutiveChecks = asNumber(latencyPolicy.consecutiveChecks, 3)
+  form.latencyMinIncreaseMs = asNumber(latencyPolicy.minIncreaseMs, 20)
+  form.latencySuppressOnSaturation = latencyPolicy.suppressOnSaturation !== false
+  form.latencySaturationThresholdPercent = asNumber(latencyPolicy.saturationThresholdPercent, 80)
+  form.latencySourceDeviceId =
+    latencyPolicy.sourceDeviceId === undefined || latencyPolicy.sourceDeviceId === null
+      ? null
+      : Number(latencyPolicy.sourceDeviceId)
+  form.latencyDownloadCapacityBps =
+    typeof latencyPolicy.downloadCapacityBps === 'number' ? latencyPolicy.downloadCapacityBps : null
+  form.latencyUploadCapacityBps =
+    typeof latencyPolicy.uploadCapacityBps === 'number' ? latencyPolicy.uploadCapacityBps : null
+
   form.target =
     monitor.target || ((config.host || config.url || config.domain || '') as string) || ''
 
@@ -652,27 +692,41 @@ export function apiTypeFor(form: MonitorFormModel): MonitorApiType {
 /** Monta o `configuration` no formato esperado pelo checker correspondente */
 export function buildConfiguration(form: MonitorFormModel): Record<string, unknown> {
   const target = form.target.trim()
+  const withLatencyPolicy = (config: Record<string, unknown>) => ({
+    ...config,
+    latencyAlertPolicy: {
+      mode: form.latencyAlertMode,
+      deviationPercent: form.latencyDeviationPercent,
+      consecutiveChecks: form.latencyConsecutiveChecks,
+      minIncreaseMs: form.latencyMinIncreaseMs,
+      suppressOnSaturation: form.latencySuppressOnSaturation,
+      saturationThresholdPercent: form.latencySaturationThresholdPercent,
+      sourceDeviceId: form.latencySourceDeviceId,
+      downloadCapacityBps: form.latencyDownloadCapacityBps,
+      uploadCapacityBps: form.latencyUploadCapacityBps,
+    },
+  })
 
   switch (form.kind) {
     case 'ping':
-      return {
+      return withLatencyPolicy({
         host: target,
         packetCount: form.packetCount,
-      }
+      })
     case 'http':
-      return {
+      return withLatencyPolicy({
         url: normalizeUrl(target),
         method: form.httpMethod,
         acceptedStatusCodes: form.acceptedStatusCodes.length
           ? form.acceptedStatusCodes
           : [...DEFAULT_ACCEPTED_STATUS_CODES],
         validateCertificate: form.validateCertificate,
-      }
+      })
     case 'tcp':
-      return {
+      return withLatencyPolicy({
         host: target,
         port: Number(form.port) || 443,
-      }
+      })
     case 'dns': {
       const config: Record<string, unknown> = {
         // `domain` é mantido sempre: é dele que sai o alvo exibido nas listas
@@ -694,7 +748,7 @@ export function buildConfiguration(form: MonitorFormModel): Record<string, unkno
         config.warningThresholdMs = form.dnsWarningThresholdMs
       }
 
-      return config
+      return withLatencyPolicy(config)
     }
     case 'snmp': {
       const config: Record<string, unknown> = {
@@ -794,14 +848,18 @@ export function describeMonitor(form: MonitorFormModel): string {
       ? 'no intervalo de coleta definido no dispositivo'
       : `a cada ${formatSeconds(form.intervalSeconds)}`
   const target = form.target.trim() || '—'
+  const adaptiveSummary =
+    form.latencyAlertMode === 'fixed'
+      ? ''
+      : ` Latência adaptativa: +${form.latencyDeviationPercent}% por ${form.latencyConsecutiveChecks} leituras; saturação da WAN ${form.latencySuppressOnSaturation ? 'suprime' : 'não suprime'} o alerta.`
 
   switch (form.kind) {
     case 'ping':
-      return `${form.packetCount} pacotes ICMP para ${target}, ${every}.`
+      return `${form.packetCount} pacotes ICMP para ${target}, ${every}.${adaptiveSummary}`
     case 'http':
-      return `${form.httpMethod} em ${normalizeUrl(target)}, ${every}, aceitando ${form.acceptedStatusCodes.join(', ')}.`
+      return `${form.httpMethod} em ${normalizeUrl(target)}, ${every}, aceitando ${form.acceptedStatusCodes.join(', ')}.${adaptiveSummary}`
     case 'tcp':
-      return `Conexão TCP em ${target}:${form.port || '—'}, ${every}.`
+      return `Conexão TCP em ${target}:${form.port || '—'}, ${every}.${adaptiveSummary}`
     case 'dns': {
       const protocol = dnsProtocol(form.dnsProtocol)
       const via =
@@ -815,7 +873,7 @@ export function describeMonitor(form: MonitorFormModel): string {
       const threshold = form.dnsWarningThresholdMs
         ? ` Alerta acima de ${form.dnsWarningThresholdMs}ms.`
         : ''
-      return `Tempo de resolução ${form.recordType} de ${target}${scope}${via}, ${every}.${threshold}`
+      return `Tempo de resolução ${form.recordType} de ${target}${scope}${via}, ${every}.${threshold}${adaptiveSummary}`
     }
     case 'snmp': {
       const mode = SNMP_MODES.find((m) => m.value === form.snmpMode)
@@ -843,6 +901,24 @@ export function validateMonitorForm(form: MonitorFormModel): string[] {
 
   if (definition.usesPort && !isValidPort(form.port)) {
     errors.push('Informe uma porta entre 1 e 65535')
+  }
+
+  if (form.kind !== 'snmp' && form.latencyAlertMode !== 'fixed') {
+    if (form.latencyDeviationPercent < 5 || form.latencyDeviationPercent > 500) {
+      errors.push('O desvio de latência deve ficar entre 5% e 500%')
+    }
+    if (form.latencyConsecutiveChecks < 2 || form.latencyConsecutiveChecks > 20) {
+      errors.push('As confirmações de latência devem ficar entre 2 e 20 leituras')
+    }
+    if (form.latencyMinIncreaseMs < 1) {
+      errors.push('O aumento mínimo de latência deve ser maior que zero')
+    }
+    if (
+      form.latencySuppressOnSaturation &&
+      (form.latencySaturationThresholdPercent < 50 || form.latencySaturationThresholdPercent > 100)
+    ) {
+      errors.push('A saturação da WAN deve ficar entre 50% e 100%')
+    }
   }
 
   if (form.kind === 'snmp') {

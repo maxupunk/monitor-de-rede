@@ -220,6 +220,38 @@ métricas e dados livres. O `result_processor` grava `monitor_results`, extrai
 Os cinco checkers são `ping`, `http`, `tcp`, `dns` e `snmp`
 (`services/monitoring/checkers/`).
 
+### Guarda adaptativa de latência externa
+
+Antes de avaliar qualquer regra baseada em latência, o
+`alerts/adaptive_latency` classifica monitores HTTP/HTTPS, DNS, TCP e ping como
+internos ou externos. Em modo automático, destinos SaaS, FQDNs públicos e IPs
+públicos usam a guarda; redes privadas, nomes locais e demais tipos preservam
+as regras fixas. O operador pode forçar `adaptive` ou `fixed` em
+`configuration.latencyAlertPolicy`.
+
+Para um destino externo, o limiar efetivo é o maior entre a média histórica
+mais o percentual configurado, a média mais um aumento absoluto mínimo e a
+banda estatística de 3σ. O alerta só é liberado após X resultados consecutivos
+acima desse limiar; a sequência é reconstruída de `monitor_results`, portanto
+reiniciar o processo não apaga confirmações. Essa confirmação substitui a
+janela temporal da regra para os fatos de latência, evitando somar duas esperas.
+
+Cada resultado da sequência é cruzado com `inBps` e `outBps` da interface
+declarada como WAN/Uplink. A capacidade contratada de download/upload tem
+precedência; sem ela, usa-se a velocidade negociada da interface. Uma amostra
+acima do percentual de saturação interrompe a sequência, porque a elevação de
+latência é explicada pelo uso normal do link. O sistema só infere a origem
+quando encontra uma única WAN compatível no site; ambiguidade ou falta de
+telemetria nunca é inventada como saturação e não silencia o alerta.
+
+A guarda remove apenas fatos de tempo (`latencyMs`, desvio, Z-Score, conexão e
+resolução) durante aprendizado, confirmação ou saturação. Indisponibilidade,
+perda de pacotes, erro HTTP e falha DNS continuam independentes. O diagnóstico
+completo segue em `alert_events.data.adaptiveLatency`, em
+`GET /api/monitors/:id/baseline` e no payload SSE `monitor:result`. A tela faz
+uma leitura HTTP inicial e depois atualiza a decisão diretamente em memória pelo
+stream compartilhado, sem polling nem refetch por resultado.
+
 ### Confirmação de alcance quando o ICMP não responde
 
 O checker de ping continua responsável por uma tentativa ICMP. A camada

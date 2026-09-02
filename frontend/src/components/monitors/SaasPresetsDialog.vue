@@ -232,7 +232,7 @@
                     </span>
                     <span class="d-flex align-center ga-1 text-warning font-weight-medium">
                       <v-icon size="13" color="warning">mdi-speedometer</v-icon>
-                      Alerta &gt; {{ preset.suggestedThresholds.warningLatencyMs }}ms
+                      Baseline +50% · 3 leituras
                     </span>
                   </div>
                 </div>

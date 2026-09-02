@@ -53,6 +53,35 @@
 
     <!-- Conteúdo com Dados Suficientes -->
     <div v-if="hasData">
+      <v-alert
+        v-if="adaptive?.applies"
+        :type="adaptiveAlertType"
+        variant="tonal"
+        density="compact"
+        class="mb-4"
+        :icon="adaptiveAlertIcon"
+      >
+        <div class="font-weight-medium">{{ adaptiveTitle }}</div>
+        <div class="text-caption mt-1">
+          Atual {{ formatLatency(adaptive.currentLatencyMs) }} · esperado
+          {{ formatLatency(adaptive.expectedLatencyMs) }} · alerta a partir de
+          {{ formatLatency(adaptive.alertThresholdMs) }} por
+          {{ adaptive.requiredConsecutiveChecks }} leituras consecutivas. Confirmações atuais:
+          {{ adaptive.observedConsecutiveChecks }}.
+          <template v-if="adaptive.linkUtilizationPercent !== null">
+            WAN em {{ formatPercent(adaptive.linkUtilizationPercent)
+            }}<template v-if="adaptive.linkInterfaceName">
+              ({{ adaptive.linkInterfaceName }})
+            </template
+            >.
+          </template>
+          <template v-else>
+            Sem telemetria WAN suficiente; a latência continua sendo avaliada, sem presumir
+            saturação.
+          </template>
+        </div>
+      </v-alert>
+
       <v-row class="mb-2">
         <!-- KPI: Latência Estatística -->
         <v-col cols="12" sm="6" md="4">
@@ -173,6 +202,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import type { AdaptiveLatencyAssessment } from '@/stores/monitors'
 
 export interface MonitorBaselinePayload {
   monitorId: number
@@ -205,6 +235,7 @@ export interface MonitorBaselinePayload {
     packetLossPercent?: number | null
     uptimePercent?: number | null
   }
+  adaptiveLatency?: AdaptiveLatencyAssessment
 }
 
 const props = defineProps<{
@@ -224,18 +255,57 @@ const hasData = computed(() => {
 })
 
 const baseline = computed(() => props.baselineData?.baseline)
+const adaptive = computed(() => props.baselineData?.adaptiveLatency)
 
 const isAnomaly = computed(() => {
+  const adaptiveLatencyAnomaly = adaptive.value?.applies
+    ? adaptive.value.alertEligible
+    : Boolean(
+        baseline.value?.isLatencyAnomaly ||
+        (baseline.value?.latencyZScore !== null &&
+          baseline.value?.latencyZScore !== undefined &&
+          baseline.value.latencyZScore >= 3.0)
+      )
   return Boolean(
-    baseline.value?.isLatencyAnomaly ||
+    adaptiveLatencyAnomaly ||
     baseline.value?.isPacketLossAnomaly ||
-    (baseline.value?.latencyZScore !== null &&
-      baseline.value?.latencyZScore !== undefined &&
-      baseline.value.latencyZScore >= 3.0) ||
     (baseline.value?.packetLossZScore !== null &&
       baseline.value?.packetLossZScore !== undefined &&
       baseline.value.packetLossZScore >= 3.0)
   )
+})
+
+const adaptiveAlertType = computed<'success' | 'info' | 'warning' | 'error'>(() => {
+  if (adaptive.value?.alertEligible) return 'error'
+  if (adaptive.value?.reason === 'link_saturated') return 'warning'
+  if (adaptive.value?.reason === 'within_expected_range') return 'success'
+  return 'info'
+})
+
+const adaptiveAlertIcon = computed(() => {
+  if (adaptive.value?.alertEligible) return 'mdi-bell-alert'
+  if (adaptive.value?.reason === 'link_saturated') return 'mdi-speedometer-slow'
+  if (adaptive.value?.reason === 'within_expected_range') return 'mdi-check-circle-outline'
+  return 'mdi-chart-timeline-variant-shimmer'
+})
+
+const adaptiveTitle = computed(() => {
+  switch (adaptive.value?.reason) {
+    case 'alert_ready':
+      return 'Degradação confirmada: alerta de latência liberado'
+    case 'link_saturated':
+      return 'Alerta de latência suprimido: WAN saturada nesta leitura'
+    case 'collecting_confirmations':
+      return 'Desvio detectado: aguardando confirmações consecutivas'
+    case 'within_expected_range':
+      return 'Latência dentro do comportamento esperado para este destino'
+    case 'latency_unavailable':
+      return 'Esta leitura não possui uma medida de latência'
+    case 'evaluation_unavailable':
+      return 'Contexto adaptativo indisponível; regras existentes foram mantidas por segurança'
+    default:
+      return 'Aprendendo a latência normal deste destino'
+  }
 })
 
 const latencyZColor = computed(() => {

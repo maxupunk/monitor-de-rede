@@ -200,9 +200,15 @@ pub async fn process_result(
     // Avaliar alertas é best-effort pelo mesmo motivo da publicação: a
     // observação técnica já está gravada e não pode ser desfeita porque o
     // motor de alertas topou com uma regra corrompida.
-    if let Err(error) = alerts::manager::evaluate_monitor_result(ctx, &monitor, result).await {
-        tracing::warn!(%error, monitor_id = monitor.id, "falha ao avaliar alertas do monitor");
-    }
+    let adaptive_latency = match alerts::manager::evaluate_monitor_result(ctx, &monitor, result)
+        .await
+    {
+        Ok(assessment) => Some(assessment),
+        Err(error) => {
+            tracing::warn!(%error, monitor_id = monitor.id, "falha ao avaliar alertas do monitor");
+            None
+        }
+    };
 
     // Publicação e persistência de SSE são best-effort: uma falha de relay não
     // pode abortar nem apagar a observação técnica já gravada.
@@ -243,6 +249,7 @@ pub async fn process_result(
                     "durationMs": result.duration_ms,
                     "message": result.message,
                     "metrics": realtime_metrics,
+                    "adaptiveLatency": adaptive_latency,
                     "recordedAt": recorded_at,
                     "startedAt": result.started_at.to_rfc3339(),
                     "finishedAt": result.finished_at.to_rfc3339(),

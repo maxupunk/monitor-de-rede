@@ -14,7 +14,7 @@ use crate::{
     models::{_entities::alert_events as alert_events_entity, alert_events, alert_rules, monitors},
     services::{
         alerts::{
-            baseline,
+            adaptive_latency, baseline,
             contracts::{AlertEvaluationContext, AlertEvaluationScope, AlertScopeKey, AlertStatus},
             datasets::monitor_result,
             episode,
@@ -84,7 +84,7 @@ pub async fn evaluate_monitor_result(
     ctx: &AppContext,
     monitor: &monitors::Model,
     result: &CheckResult,
-) -> AppResult<()> {
+) -> AppResult<adaptive_latency::Assessment> {
     // Monitores de checagem externa não têm dispositivo vinculado.
     let device = match monitor.device_id {
         Some(device_id) => {
@@ -96,10 +96,39 @@ pub async fn evaluate_monitor_result(
     };
 
     let baseline = baseline::for_monitor(&ctx.db, monitor.id).await?;
+    let mut dataset = monitor_result::build(&monitor.r#type, result, &baseline);
+    let current_latency_ms = dataset
+        .get(crate::services::alerts::fields::LATENCY_MS)
+        .and_then(Value::as_f64);
+    let latency_assessment = match adaptive_latency::assess(
+        &ctx.db,
+        monitor,
+        &baseline,
+        current_latency_ms,
+        result.finished_at,
+    )
+    .await
+    {
+        Ok(assessment) => assessment,
+        Err(error) => {
+            // Falha de contexto nunca pode silenciar uma regra existente. O
+            // caminho seguro é liberar a avaliação normal e registrar o erro.
+            tracing::warn!(
+                %error,
+                monitor_id = monitor.id,
+                "falha ao avaliar a guarda adaptativa de latência"
+            );
+            adaptive_latency::Assessment::fail_open(current_latency_ms)
+        }
+    };
+    if latency_assessment.applies && !latency_assessment.alert_eligible {
+        adaptive_latency::suppress_latency_facts(&mut dataset);
+    }
 
     let mut data = Map::new();
     data.insert("resultData".into(), result.data.clone());
     data.insert("monitorType".into(), json!(monitor.r#type));
+    data.insert("adaptiveLatency".into(), json!(latency_assessment));
 
     evaluate(
         ctx,
@@ -113,14 +142,15 @@ pub async fn evaluate_monitor_result(
             target_label: device
                 .as_ref()
                 .map_or_else(|| monitor.name.clone(), |device| device.name.clone()),
-            dataset: monitor_result::build(&monitor.r#type, result, &baseline),
+            dataset,
             message: result.message.clone().filter(|text| !text.is_empty()),
             data,
             recovered: result.status == MonitorStatus::Up,
             degraded: result.status == MonitorStatus::Warning,
         },
     )
-    .await
+    .await?;
+    Ok(latency_assessment)
 }
 
 /// Só libera o disparo quando a condição se mantém pelo tempo configurado em
@@ -135,6 +165,21 @@ async fn has_sustained_condition(
     condition: &AlertRuleCondition,
     context: &AlertEvaluationContext,
 ) -> AppResult<bool> {
+    // A guarda adaptativa já reconstrói de forma persistente as X leituras
+    // consecutivas. Aplicar também `duration_seconds` aqui criaria uma segunda
+    // espera, fazendo "3 leituras" significar 3 leituras + 5 minutos.
+    let adaptive_confirmed = adaptive_latency::is_latency_field(&condition.field)
+        && context
+            .data
+            .get("adaptiveLatency")
+            .and_then(Value::as_object)
+            .is_some_and(|assessment| {
+                assessment.get("applies").and_then(Value::as_bool) == Some(true)
+                    && assessment.get("alertEligible").and_then(Value::as_bool) == Some(true)
+            });
+    if adaptive_confirmed {
+        return Ok(true);
+    }
     hysteresis::observe(
         &ctx.db,
         rule.id,

@@ -37,6 +37,24 @@ export interface MonitorStats {
   upChecks: number
 }
 
+export interface AdaptiveLatencyAssessment {
+  applies: boolean
+  alertEligible: boolean
+  reason: string
+  deviationPercent: number
+  requiredConsecutiveChecks: number
+  observedConsecutiveChecks: number
+  expectedLatencyMs: number | null
+  alertThresholdMs: number | null
+  currentLatencyMs: number | null
+  linkUtilizationPercent: number | null
+  linkSaturated: boolean
+  sourceDeviceId: number | null
+  linkInterfaceId: number | null
+  linkInterfaceName: string | null
+  capacitySource: string | null
+}
+
 export interface Monitor {
   id: number
   deviceId: number
@@ -60,6 +78,7 @@ export interface Monitor {
   probe?: { id: number; name: string }
   recentResults?: MonitorResult[]
   stats?: MonitorStats
+  adaptiveLatency?: AdaptiveLatencyAssessment | null
   gaugeMetric?: {
     name: string
     value: number
@@ -286,6 +305,9 @@ export const useMonitorsStore = defineStore('monitors', () => {
       if (status) target.status = status
       target.lastLatencyMs = latencyMs
       target.lastCheckedAt = finishedAt
+      if (data.adaptiveLatency && typeof data.adaptiveLatency === 'object') {
+        target.adaptiveLatency = data.adaptiveLatency as unknown as AdaptiveLatencyAssessment
+      }
 
       // A timeline exibe do mais antigo para o mais recente
       const history = [...(target.recentResults || []), result].slice(-HISTORY_LIMIT)

@@ -72,7 +72,7 @@
       <!-- Linha de Base Estatística & Detecção de Anomalias (§2.3.3) -->
       <MonitorBaselineCard
         v-if="!isGaugeMonitor && !isInterfaceMonitor && !isTrafficMonitor"
-        :baseline-data="baselineData"
+        :baseline-data="displayedBaselineData"
         @create-anomaly-rule="showRuleCatalog = true"
       />
 
@@ -704,6 +704,17 @@ const gaugeSeries = computed<ChartSeriesInput[]>(() => {
 
 const showRuleCatalog = ref(false)
 const baselineData = ref<MonitorBaselinePayload | null>(null)
+const displayedBaselineData = computed<MonitorBaselinePayload | null>(() => {
+  if (!baselineData.value || !monitor.value.adaptiveLatency) return baselineData.value
+  return {
+    ...baselineData.value,
+    adaptiveLatency: monitor.value.adaptiveLatency,
+    current: {
+      ...baselineData.value.current,
+      latencyMs: monitor.value.adaptiveLatency.currentLatencyMs,
+    },
+  }
+})
 
 async function loadBaselineData() {
   if (!monitorId.value) return
@@ -791,12 +802,6 @@ onMounted(async () => {
         unit: String(sample.unit ?? ''),
         createdAt: String(sample.recordedAt ?? new Date().toISOString()),
       })
-    }
-  })
-
-  eventsStore.onEvent('monitor:result', (data) => {
-    if (Number(data.monitorId) === monitorId.value) {
-      loadBaselineData()
     }
   })
 

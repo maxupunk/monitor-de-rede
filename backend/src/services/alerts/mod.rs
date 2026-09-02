@@ -4,6 +4,7 @@
 //! `evaluator` decide se um fato satisfaz uma regra, e o `manager` transforma
 //! isso em `alert_events`, notificação e evento SSE.
 
+pub mod adaptive_latency;
 pub mod baseline;
 pub mod catalog;
 pub mod contracts;

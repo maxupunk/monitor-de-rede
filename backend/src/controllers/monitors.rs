@@ -1,6 +1,7 @@
 //! CRUD e acionamento manual dos monitores.
 
 use axum::{extract::Query, http::HeaderMap, http::StatusCode, response::IntoResponse};
+use chrono::Utc;
 use loco_rs::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set,
@@ -714,6 +715,23 @@ async fn baseline_stats(State(ctx): State<AppContext>, Path(id): Path<i64>) -> A
         packet_loss,
         uptime_percent,
     );
+    let adaptive_latency = match crate::services::alerts::adaptive_latency::assess(
+        &ctx.db,
+        &monitor,
+        &baseline,
+        latency_ms,
+        latest_result
+            .as_ref()
+            .map_or_else(Utc::now, |result| result.finished_at.with_timezone(&Utc)),
+    )
+    .await
+    {
+        Ok(assessment) => assessment,
+        Err(error) => {
+            tracing::warn!(%error, monitor_id = id, "falha ao calcular diagnóstico adaptativo");
+            crate::services::alerts::adaptive_latency::Assessment::fail_open(latency_ms)
+        }
+    };
 
     Ok(format::json(serde_json::json!({
         "monitorId": id,
@@ -725,7 +743,8 @@ async fn baseline_stats(State(ctx): State<AppContext>, Path(id): Path<i64>) -> A
             "latencyMs": latency_ms,
             "packetLossPercent": packet_loss,
             "uptimePercent": uptime_percent,
-        }
+        },
+        "adaptiveLatency": adaptive_latency,
     }))?)
 }
 

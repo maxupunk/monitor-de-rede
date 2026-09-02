@@ -315,6 +315,144 @@
                     @update:snmp-port="form.snmpPort = $event"
                   />
 
+                  <template v-if="isLatencyMonitor">
+                    <v-col cols="12">
+                      <v-divider class="mb-4"></v-divider>
+                      <div class="text-subtitle-2 font-weight-bold mb-1">
+                        Alerta inteligente de latência externa
+                      </div>
+                      <div class="text-caption text-medium-emphasis mb-3">
+                        Compara com a média deste destino, exige leituras consecutivas e considera o
+                        consumo da interface WAN antes de notificar. Falhas, perda e erros de
+                        protocolo continuam alertando normalmente.
+                      </div>
+                    </v-col>
+
+                    <v-col cols="12" md="4">
+                      <v-select
+                        v-model="form.latencyAlertMode"
+                        :items="latencyModeItems"
+                        item-title="title"
+                        item-value="value"
+                        label="Modo"
+                        variant="outlined"
+                        density="comfortable"
+                        hide-details="auto"
+                      ></v-select>
+                    </v-col>
+
+                    <template v-if="form.latencyAlertMode !== 'fixed'">
+                      <v-col cols="12" sm="4" md="3">
+                        <v-text-field
+                          v-model.number="form.latencyDeviationPercent"
+                          label="Aumento esperado (%)"
+                          type="number"
+                          min="5"
+                          max="500"
+                          suffix="%"
+                          variant="outlined"
+                          density="comfortable"
+                          hide-details="auto"
+                        ></v-text-field>
+                      </v-col>
+                      <v-col cols="12" sm="4" md="2">
+                        <v-text-field
+                          v-model.number="form.latencyConsecutiveChecks"
+                          label="Confirmações"
+                          type="number"
+                          min="2"
+                          max="20"
+                          variant="outlined"
+                          density="comfortable"
+                          hide-details="auto"
+                        ></v-text-field>
+                      </v-col>
+                      <v-col cols="12" sm="4" md="3">
+                        <v-text-field
+                          v-model.number="form.latencyMinIncreaseMs"
+                          label="Aumento mínimo"
+                          type="number"
+                          min="1"
+                          suffix="ms"
+                          variant="outlined"
+                          density="comfortable"
+                          hide-details="auto"
+                        ></v-text-field>
+                      </v-col>
+
+                      <v-col cols="12" md="6">
+                        <v-select
+                          v-model="form.latencySourceDeviceId"
+                          :items="uplinkDeviceItems"
+                          item-title="title"
+                          item-value="value"
+                          label="Gateway / WAN de origem"
+                          clearable
+                          variant="outlined"
+                          density="comfortable"
+                          hint="Automático somente quando existe uma única WAN compatível no site"
+                          persistent-hint
+                        >
+                          <template #item="{ props: itemProps, item }">
+                            <v-list-item
+                              v-bind="itemProps"
+                              :subtitle="itemField(item, 'subtitle')"
+                            ></v-list-item>
+                          </template>
+                        </v-select>
+                      </v-col>
+                      <v-col cols="12" md="6" class="d-flex align-center">
+                        <v-switch
+                          v-model="form.latencySuppressOnSaturation"
+                          color="primary"
+                          label="Considerar saturação da WAN"
+                          hint="Uma leitura saturada interrompe a sequência de confirmações"
+                          persistent-hint
+                        ></v-switch>
+                      </v-col>
+
+                      <template v-if="form.latencySuppressOnSaturation">
+                        <v-col cols="12" md="4">
+                          <v-text-field
+                            v-model.number="form.latencySaturationThresholdPercent"
+                            label="WAN saturada a partir de"
+                            type="number"
+                            min="50"
+                            max="100"
+                            suffix="%"
+                            variant="outlined"
+                            density="comfortable"
+                            hide-details="auto"
+                          ></v-text-field>
+                        </v-col>
+                        <v-col cols="12" md="4">
+                          <DataRateInput
+                            v-model="form.latencyDownloadCapacityBps"
+                            label="Capacidade download"
+                            variant="outlined"
+                            density="comfortable"
+                            hide-details="auto"
+                          ></DataRateInput>
+                        </v-col>
+                        <v-col cols="12" md="4">
+                          <DataRateInput
+                            v-model="form.latencyUploadCapacityBps"
+                            label="Capacidade upload"
+                            variant="outlined"
+                            density="comfortable"
+                            hide-details="auto"
+                          ></DataRateInput>
+                        </v-col>
+                        <v-col cols="12" class="pt-0">
+                          <div class="text-caption text-medium-emphasis">
+                            Capacidades vazias usam a velocidade negociada da interface. Para links
+                            assimétricos, informe os valores contratados para medir a ocupação real.
+                          </div>
+                        </v-col>
+                      </template>
+                    </template>
+                  </template>
+
                   <v-col cols="12" md="6">
                     <v-text-field
                       v-model.number="form.retryCount"
@@ -422,6 +560,7 @@ import { apiService } from '@/services/apiService'
 import type { DeviceInterface } from '@/stores/deviceDetail'
 import DnsServersDialog from '@/components/DnsServersDialog.vue'
 import DeviceDialog from '@/components/DeviceDialog.vue'
+import DataRateInput from '@/components/DataRateInput.vue'
 import HttpFields from './monitors/form/HttpFields.vue'
 import TcpFields from './monitors/form/TcpFields.vue'
 import DnsFields from './monitors/form/DnsFields.vue'
@@ -532,6 +671,32 @@ const usesDeviceSnmpInterval = computed(() => form.kind === 'snmp' && form.devic
 const summary = computed(() => describeMonitor(form))
 const validationErrors = computed(() => validateMonitorForm(form))
 const canSave = computed(() => validationErrors.value.length === 0 && saving.value === null)
+const isLatencyMonitor = computed(() => ['ping', 'http', 'tcp', 'dns'].includes(form.kind))
+
+const latencyModeItems = [
+  {
+    title: 'Automático (recomendado)',
+    value: 'auto',
+  },
+  {
+    title: 'Adaptativo para este monitor',
+    value: 'adaptive',
+  },
+  {
+    title: 'Regras fixas existentes',
+    value: 'fixed',
+  },
+]
+
+const uplinkDeviceItems = computed(() =>
+  devicesStore.devices
+    .filter((device) => device.linkInterfaceId !== null && device.linkInterfaceId !== undefined)
+    .map((device) => ({
+      title: device.name,
+      value: device.id,
+      subtitle: `${device.site?.name || 'Sem site'} · ${device.linkInterfaceName || 'WAN/Uplink'}`,
+    }))
+)
 
 const suggestedName = computed(() => suggestMonitorName(form, selectedDevice.value?.name))
 
