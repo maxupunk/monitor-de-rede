@@ -144,8 +144,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, type CSSProperties } from 'vue'
+import { ref, computed } from 'vue'
 import { formatBps, formatBytes, formatLatency } from '@/utils/formatters'
+import { chartTooltipStyle } from '@/utils/chartTooltip'
 
 export interface ChartDataPoint {
   time: string
@@ -363,40 +364,25 @@ const activeItems = computed(() => {
 })
 
 // Tooltip com Rastreamento Inteligente ao Lado do Cursor (Flips laterais e verticais)
-const tooltipStyle = computed<CSSProperties>(() => {
+const tooltipStyle = computed(() => {
   if (!mousePos.value || !chartContainerRef.value) return {}
   const { x, y } = mousePos.value
   const rect = chartContainerRef.value.getBoundingClientRect()
 
-  const cardWidth = 230
-  const cardHeight = 90
-
-  // Se o mouse estiver próximo da borda direita, inverte o tooltip para a esquerda
-  let left = x + 16
-  if (x > rect.width - cardWidth - 20) {
-    left = x - cardWidth - 16
-  }
-
-  // Se o mouse estiver na metade superior, coloca o tooltip abaixo do cursor para não cobrir
-  let top = y - cardHeight - 16
-  if (y < cardHeight + 20) {
-    top = y + 16
-  }
-
-  left = Math.max(8, Math.min(rect.width - cardWidth - 8, left))
-  top = Math.max(8, Math.min(rect.height - cardHeight - 8, top))
-
   return {
-    position: 'absolute',
-    left: `${left}px`,
-    top: `${top}px`,
-    pointerEvents: 'none',
+    ...chartTooltipStyle({
+      x,
+      y,
+      containerWidth: rect.width,
+      containerHeight: rect.height,
+      estimatedHeight: 62 + activeItems.value.length * 28,
+    }),
     zIndex: 30,
     background: '#0F172A',
     borderColor: '#0284C7',
     boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5)',
-    whiteSpace: 'nowrap',
-    transition: 'left 0.08s ease-out, top 0.08s ease-out',
+    transition:
+      'left 0.08s ease-out, right 0.08s ease-out, top 0.08s ease-out, bottom 0.08s ease-out',
   }
 })
 </script>

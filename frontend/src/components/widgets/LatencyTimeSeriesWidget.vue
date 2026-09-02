@@ -298,7 +298,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, type CSSProperties } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import MonitorDetailDialog from '@/components/monitors/MonitorDetailDialog.vue'
 import { useMonitorDetail } from '@/composables/useMonitorDetail'
 import {
@@ -309,6 +309,7 @@ import {
 } from '@/stores/monitors'
 import { useEventsStore } from '@/stores/events'
 import { formatLatency } from '@/utils/formatters'
+import { chartTooltipStyle } from '@/utils/chartTooltip'
 
 const timeframe = ref<'5m' | '15m' | '1h' | '24h'>('15m')
 const selectedMonitorId = ref<number | 'all'>('all')
@@ -588,23 +589,22 @@ function abrirMonitor(id: number) {
   abrirDetalhe(id)
 }
 
-const tooltipStyle = computed<CSSProperties>(() => {
+const tooltipStyle = computed(() => {
   if (!mousePos.value || !chartContainerRef.value) return {}
   const { x, y } = mousePos.value
   const rect = chartContainerRef.value.getBoundingClientRect()
 
-  const cardW = 190
-  const cardH = 80
-
-  let left = x + 12
-  if (x > rect.width - cardW - 10) left = x - cardW - 12
-  let top = y - cardH - 12
-  if (y < cardH + 10) top = y + 12
-
   return {
-    position: 'absolute',
-    left: `${Math.max(4, Math.min(rect.width - cardW - 4, left))}px`,
-    top: `${Math.max(4, Math.min(rect.height - cardH - 4, top))}px`,
+    ...chartTooltipStyle({
+      x,
+      y,
+      containerWidth: rect.width,
+      containerHeight: rect.height,
+      maxWidth: 240,
+      estimatedHeight: 80,
+      offset: 12,
+      padding: 4,
+    }),
     zIndex: 20,
     background: '#0F172A',
     borderColor: '#0284C7',

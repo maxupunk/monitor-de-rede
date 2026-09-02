@@ -215,12 +215,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, type CSSProperties } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useDevicesStore } from '@/stores/devices'
 import { useDeviceDetailStore } from '@/stores/deviceDetail'
 import { useEventsStore } from '@/stores/events'
 import type { WidgetConfig } from '@/stores/dashboard'
 import { formatBps, formatBytes } from '@/utils/formatters'
+import { chartTooltipStyle } from '@/utils/chartTooltip'
 
 const props = defineProps<{
   widget: WidgetConfig
@@ -502,22 +503,22 @@ function onMouseLeave() {
   hoverIndex.value = null
 }
 
-const tooltipStyle = computed<CSSProperties>(() => {
+const tooltipStyle = computed(() => {
   if (!mousePos.value || !chartContainerRef.value) return {}
   const { x, y } = mousePos.value
   const rect = chartContainerRef.value.getBoundingClientRect()
-  const cardW = 190
-  const cardH = 70
-
-  let left = x + 12
-  if (x > rect.width - cardW - 10) left = x - cardW - 12
-  let top = y - cardH - 12
-  if (y < cardH + 10) top = y + 12
 
   return {
-    position: 'absolute',
-    left: `${Math.max(4, Math.min(rect.width - cardW - 4, left))}px`,
-    top: `${Math.max(4, Math.min(rect.height - cardH - 4, top))}px`,
+    ...chartTooltipStyle({
+      x,
+      y,
+      containerWidth: rect.width,
+      containerHeight: rect.height,
+      maxWidth: 240,
+      estimatedHeight: 70,
+      offset: 12,
+      padding: 4,
+    }),
     zIndex: 20,
     background: '#0F172A',
     borderColor: '#0284C7',

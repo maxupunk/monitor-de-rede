@@ -541,7 +541,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, type CSSProperties } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useDnsPerformanceStore, type DnsRankingEntry } from '@/stores/dnsPerformance'
 import { useMonitorsStore, type Monitor } from '@/stores/monitors'
 import DnsServersDialog from '@/components/DnsServersDialog.vue'
@@ -549,6 +549,7 @@ import DnsBatchMonitorDialog from '@/components/DnsBatchMonitorDialog.vue'
 import MonitorFormDialog from '@/components/MonitorFormDialog.vue'
 import type { DnsProtocol, MonitorFormModel } from '@/utils/monitorTypes'
 import { formatLatency, formatShortDateTime } from '@/utils/formatters'
+import { chartTooltipStyle } from '@/utils/chartTooltip'
 
 const store = useDnsPerformanceStore()
 const monitorsStore = useMonitorsStore()
@@ -980,41 +981,31 @@ function isPointActive(seriesId: string, pt: ChartPoint): boolean {
   return Math.abs(match.pointX - pt.x) < 2 && Math.abs(match.pointY - pt.y) < 2
 }
 
-const tooltipStyle = computed<CSSProperties>(() => {
+const tooltipStyle = computed(() => {
   if (!mousePos.value || !chartContainerRef.value) return {}
   const { x, y } = mousePos.value
   const rect = chartContainerRef.value.getBoundingClientRect()
 
-  const cardWidth = 280
   const cardHeight = Math.min(300, 60 + (hoverSnapshot.value?.items.length || 1) * 28)
 
-  let left = x + 16
-  if (x > rect.width - cardWidth - 20) {
-    left = x - cardWidth - 16
-  }
-
-  let top = y - cardHeight / 2
-  if (top < 10) top = 10
-  if (top + cardHeight > rect.height - 10) {
-    top = Math.max(10, rect.height - cardHeight - 10)
-  }
-
-  left = Math.max(8, Math.min(rect.width - cardWidth - 8, left))
-
   return {
-    position: 'absolute',
-    left: `${left}px`,
-    top: `${top}px`,
-    pointerEvents: 'none',
+    ...chartTooltipStyle({
+      x,
+      y,
+      containerWidth: rect.width,
+      containerHeight: rect.height,
+      maxWidth: 280,
+      estimatedHeight: cardHeight,
+    }),
     zIndex: 40,
     background: 'rgba(15, 23, 42, 0.95)',
     backdropFilter: 'blur(8px)',
     border: '1px solid rgba(147, 51, 234, 0.5)',
     boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5)',
     borderRadius: '8px',
-    maxWidth: `${cardWidth}px`,
-    width: `${cardWidth}px`,
-    transition: 'left 0.06s ease-out, top 0.06s ease-out',
+    width: '280px',
+    transition:
+      'left 0.06s ease-out, right 0.06s ease-out, top 0.06s ease-out, bottom 0.06s ease-out',
   }
 })
 

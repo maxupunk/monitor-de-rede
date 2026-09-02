@@ -449,6 +449,7 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
     - Cards, tabelas, gráficos, sparklines e eventos exibem memória usada e capacidade em bytes com unidade legível.
     - O percentual permanece apenas como contexto secundário e como base interna para cores e limiares de alerta.
     - Monitores SNMP publicam quantidade no `gaugeMetric` e preservam `usagePercent`/`totalBytes` como metadados auxiliares.
+    - Tooltips dos gráficos escolhem automaticamente o espaço disponível e quebram textos longos sem serem recortados pelas bordas dos cards.
 
 - [x] **Remoção de referências e caminhos de migração sem uso** 🟢 Concluído
   - Removidos o importador de segredos, o fallback de variável de cifra e os documentos dedicados à transição de backend.
