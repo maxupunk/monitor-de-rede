@@ -9,8 +9,10 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrde
 use serde::Serialize;
 
 use crate::{
-    dtos::resources::{DnsBatchProvisionInput, DnsBenchmarkInput, DnsLookupInput},
-    models::{monitor_results, monitors},
+    dtos::resources::{
+        DnsBatchProvisionInput, DnsBenchmarkInput, DnsLookupInput, DnsPingProvisionInput,
+    },
+    models::{dns_servers, monitor_results, monitors},
     services::{
         monitoring::{
             execution_guard::{calculate_smart_timeout_seconds, effective_timeout_seconds},
@@ -20,9 +22,9 @@ use crate::{
         },
         network_tools::dns::{
             latency::{
-                benchmark_dns_servers, measure_dns_lookup, sort_by_latency, DnsBenchmarkOptions,
-                DnsLookupOptions, DnsProtocol, DnsServerRanking, DnsServerTarget,
-                DEFAULT_BENCHMARK_HOSTNAMES, DEFAULT_DNS_SERVERS,
+                benchmark_dns_servers, measure_dns_lookup, parse_server_address, sort_by_latency,
+                DnsBenchmarkOptions, DnsLookupOptions, DnsProtocol, DnsServerRanking,
+                DnsServerTarget, DEFAULT_BENCHMARK_HOSTNAMES, DEFAULT_DNS_SERVERS,
             },
             registry::DnsServerRegistry,
             wire,
@@ -509,10 +511,213 @@ async fn provision(
             device_id: Set(None),
             probe_id: Set(None),
             r#type: Set("dns".into()),
-            name: Set(name),
+            name: Set(name.clone()),
             configuration: Set(config),
             interval_seconds: Set(interval_seconds),
             timeout_seconds: Set(timeout_seconds),
+            retry_count: Set(3),
+            enabled: Set(true),
+            status: Set("unknown".into()),
+            ..Default::default()
+        };
+
+        let inserted = active_model.insert(&ctx.db).await?;
+
+        if execute_now {
+            let timeout_ms =
+                (effective_timeout_seconds(inserted.timeout_seconds, inserted.interval_seconds)
+                    as u64)
+                    * 1000;
+            if let Ok(result) = run_monitor(
+                &ctx,
+                &inserted.r#type,
+                &inserted.configuration,
+                RunOptions {
+                    timeout_ms: Some(timeout_ms),
+                },
+            )
+            .await
+            {
+                let _ = process_result(&ctx, inserted.id, &result, inserted.probe_id).await;
+            }
+        }
+
+        created_rows.push(inserted);
+
+        if input.include_ping.unwrap_or(false) && protocol_str != "doh" {
+            let ping_host = if let Ok((host, _)) = parse_server_address(server_addr) {
+                host
+            } else {
+                server_addr.to_string()
+            };
+
+            let existing_ping = monitors::Entity::find()
+                .filter(monitors::Column::Type.eq("ping"))
+                .all(&ctx.db)
+                .await?;
+
+            let already_has_ping = existing_ping.iter().any(|m| {
+                m.target().eq_ignore_ascii_case(&ping_host)
+                    || m.configuration
+                        .get("host")
+                        .and_then(serde_json::Value::as_str)
+                        .map(|h| h.eq_ignore_ascii_case(&ping_host))
+                        .unwrap_or(false)
+            });
+
+            if !already_has_ping {
+                let ping_name = format!("Ping {name}");
+                let ping_model = monitors::ActiveModel {
+                    device_id: Set(None),
+                    probe_id: Set(None),
+                    r#type: Set("ping".into()),
+                    name: Set(ping_name),
+                    configuration: Set(serde_json::json!({ "host": ping_host })),
+                    interval_seconds: Set(interval_seconds),
+                    timeout_seconds: Set(5),
+                    retry_count: Set(3),
+                    enabled: Set(true),
+                    status: Set("unknown".into()),
+                    ..Default::default()
+                };
+                if let Ok(inserted_ping) = ping_model.insert(&ctx.db).await {
+                    if execute_now {
+                        let timeout_ms = (effective_timeout_seconds(
+                            inserted_ping.timeout_seconds,
+                            inserted_ping.interval_seconds,
+                        ) as u64)
+                            * 1000;
+                        if let Ok(result) = run_monitor(
+                            &ctx,
+                            &inserted_ping.r#type,
+                            &inserted_ping.configuration,
+                            RunOptions {
+                                timeout_ms: Some(timeout_ms),
+                            },
+                        )
+                        .await
+                        {
+                            let _ = process_result(
+                                &ctx,
+                                inserted_ping.id,
+                                &result,
+                                inserted_ping.probe_id,
+                            )
+                            .await;
+                        }
+                    }
+                    created_rows.push(inserted_ping);
+                }
+            }
+        }
+    }
+
+    let count = created_rows.len();
+    let monitors_presentation =
+        present_monitors(&ctx.db, created_rows, RECENT_RESULTS_LIMIT).await?;
+
+    Ok(format::json(serde_json::json!({
+        "createdCount": count,
+        "alreadyMonitoredCount": already_monitored_count,
+        "totalRequested": count + already_monitored_count,
+        "monitors": monitors_presentation,
+    }))?)
+}
+
+async fn provision_ping(
+    State(ctx): State<AppContext>,
+    Json(input): Json<DnsPingProvisionInput>,
+) -> AppResult<Response> {
+    let interval_seconds = input.interval_seconds.unwrap_or(60).clamp(10, 3600);
+    let execute_now = input.execute_now.unwrap_or(true);
+
+    let servers: Vec<(String, String)> = if let Some(srv_list) = input.servers {
+        if srv_list.is_empty() {
+            let db_servers = dns_servers::Entity::find().all(&ctx.db).await?;
+            if db_servers.is_empty() {
+                DEFAULT_DNS_SERVERS
+                    .iter()
+                    .map(|(label, addr)| (label.to_string(), addr.to_string()))
+                    .collect()
+            } else {
+                db_servers
+                    .into_iter()
+                    .map(|s| (s.name, s.address))
+                    .collect()
+            }
+        } else {
+            srv_list
+                .into_iter()
+                .map(|s| {
+                    let name = s.name.unwrap_or_else(|| s.server.clone());
+                    (name, s.server)
+                })
+                .collect()
+        }
+    } else {
+        let db_servers = dns_servers::Entity::find().all(&ctx.db).await?;
+        if db_servers.is_empty() {
+            DEFAULT_DNS_SERVERS
+                .iter()
+                .map(|(label, addr)| (label.to_string(), addr.to_string()))
+                .collect()
+        } else {
+            db_servers
+                .into_iter()
+                .map(|s| (s.name, s.address))
+                .collect()
+        }
+    };
+
+    let existing_ping = monitors::Entity::find()
+        .filter(monitors::Column::Type.eq("ping"))
+        .all(&ctx.db)
+        .await?;
+
+    let mut created_rows = Vec::new();
+    let mut already_monitored_count = 0;
+
+    for (name, addr) in servers {
+        let raw_addr = addr.trim();
+        if raw_addr.is_empty() || raw_addr.starts_with("https://") {
+            continue;
+        }
+        let ping_host = if let Ok((host, _)) = parse_server_address(raw_addr) {
+            host
+        } else {
+            raw_addr.to_string()
+        };
+
+        let already_exists = existing_ping.iter().any(|m| {
+            m.target().eq_ignore_ascii_case(&ping_host)
+                || m.configuration
+                    .get("host")
+                    .and_then(serde_json::Value::as_str)
+                    .map(|h| h.eq_ignore_ascii_case(&ping_host))
+                    .unwrap_or(false)
+        }) || created_rows
+            .iter()
+            .any(|m: &monitors::Model| m.target().eq_ignore_ascii_case(&ping_host));
+
+        if already_exists {
+            already_monitored_count += 1;
+            continue;
+        }
+
+        let monitor_name = if name.to_lowercase().starts_with("ping") {
+            name
+        } else {
+            format!("Ping DNS {name} ({ping_host})")
+        };
+
+        let active_model = monitors::ActiveModel {
+            device_id: Set(None),
+            probe_id: Set(None),
+            r#type: Set("ping".into()),
+            name: Set(monitor_name),
+            configuration: Set(serde_json::json!({ "host": ping_host })),
+            interval_seconds: Set(interval_seconds),
+            timeout_seconds: Set(5),
             retry_count: Set(3),
             enabled: Set(true),
             status: Set("unknown".into()),
@@ -562,6 +767,7 @@ pub fn routes() -> Routes {
         .add("/lookup", post(lookup))
         .add("/performance", get(performance))
         .add("/provision", post(provision))
+        .add("/provision-ping", post(provision_ping))
 }
 
 #[cfg(test)]

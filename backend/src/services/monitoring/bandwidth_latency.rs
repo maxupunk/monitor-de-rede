@@ -42,7 +42,7 @@ where
     let now = Utc::now();
     let start_time = now - Duration::seconds(total_seconds);
 
-    // 1. Identifica monitores de ping relevantes
+    // 1. Identifica monitores relevantes (ping ou dns)
     let mut monitors_query = monitors::Entity::find();
     if let Some(target) = &query.ping_target {
         if target != "all" && !target.trim().is_empty() {
@@ -50,7 +50,8 @@ where
                 monitors_query = monitors_query.filter(monitors::Column::Id.eq(mon_id));
             } else {
                 // Alvo informado como IP ou hostname
-                monitors_query = monitors_query.filter(monitors::Column::Type.eq("ping"));
+                monitors_query =
+                    monitors_query.filter(monitors::Column::Type.is_in(vec!["ping", "dns"]));
             }
         } else {
             monitors_query = monitors_query.filter(monitors::Column::Type.eq("ping"));
@@ -59,20 +60,43 @@ where
         monitors_query = monitors_query.filter(monitors::Column::Type.eq("ping"));
     }
 
-    let ping_monitors = monitors_query.all(db).await?;
+    let candidate_monitors = monitors_query.all(db).await?;
     let monitor_ids: Vec<i64> = if let Some(target) = &query.ping_target {
         if target != "all" && target.parse::<i64>().is_err() {
             // Filtra em memória por target matching caso tenha sido informado IP/Host
-            ping_monitors
+            candidate_monitors
                 .into_iter()
-                .filter(|m| m.target().eq_ignore_ascii_case(target))
+                .filter(|m| {
+                    if m.target().eq_ignore_ascii_case(target) {
+                        return true;
+                    }
+                    if let Some(dns_server) = m
+                        .configuration
+                        .get("dnsServer")
+                        .and_then(serde_json::Value::as_str)
+                    {
+                        if dns_server.eq_ignore_ascii_case(target) {
+                            return true;
+                        }
+                    }
+                    if let Some(host) = m
+                        .configuration
+                        .get("host")
+                        .and_then(serde_json::Value::as_str)
+                    {
+                        if host.eq_ignore_ascii_case(target) {
+                            return true;
+                        }
+                    }
+                    false
+                })
                 .map(|m| m.id)
                 .collect()
         } else {
-            ping_monitors.into_iter().map(|m| m.id).collect()
+            candidate_monitors.into_iter().map(|m| m.id).collect()
         }
     } else {
-        ping_monitors.into_iter().map(|m| m.id).collect()
+        candidate_monitors.into_iter().map(|m| m.id).collect()
     };
 
     let mut buckets: Vec<DualBucketAccumulator> = (0..bucket_count)

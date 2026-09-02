@@ -71,8 +71,7 @@
           <template v-if="adaptive.linkUtilizationPercent !== null">
             WAN em {{ formatPercent(adaptive.linkUtilizationPercent)
             }}<template v-if="adaptive.linkInterfaceName">
-              ({{ adaptive.linkInterfaceName }})
-            </template
+              ({{ adaptive.linkInterfaceName }}) </template
             >.
           </template>
           <template v-else>

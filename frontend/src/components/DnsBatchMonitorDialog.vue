@@ -218,7 +218,19 @@
               ></v-select>
             </v-col>
 
-            <v-col cols="12" md="4" class="d-flex align-center">
+            <v-col cols="12" sm="6" md="3" class="d-flex align-center">
+              <v-switch
+                v-model="includePing"
+                color="deep-purple"
+                density="compact"
+                label="Monitorar Ping (ICMP)"
+                inset
+                hide-details
+                class="ms-2"
+              ></v-switch>
+            </v-col>
+
+            <v-col cols="12" sm="6" md="3" class="d-flex align-center">
               <v-switch
                 v-model="executeNow"
                 color="deep-purple"
@@ -310,6 +322,7 @@ const extraHostnames = ref<string[]>(['cloudflare.com', 'globo.com'])
 const recordType = ref('A')
 const intervalSeconds = ref(60)
 const executeNow = ref(true)
+const includePing = ref(true)
 
 const snackbar = ref({
   show: false,
@@ -496,6 +509,7 @@ async function submit() {
     recordType: recordType.value,
     intervalSeconds: intervalSeconds.value,
     executeNow: executeNow.value,
+    includePing: includePing.value,
   }
 
   const result = await dnsStore.provisionMonitors(payload)

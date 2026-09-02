@@ -289,6 +289,15 @@ pub struct DnsBatchProvisionInput {
     pub record_type: Option<String>,
     pub interval_seconds: Option<i32>,
     pub execute_now: Option<bool>,
+    pub include_ping: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DnsPingProvisionInput {
+    pub servers: Option<Vec<DnsBatchProvisionServerInput>>,
+    pub interval_seconds: Option<i32>,
+    pub execute_now: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]

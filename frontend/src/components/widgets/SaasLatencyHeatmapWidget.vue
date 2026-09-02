@@ -59,7 +59,7 @@
     <div
       v-else-if="
         !loading &&
-          (!heatmapData || heatmapData.monitors.length === 0 || heatmapData.totalChecks === 0)
+        (!heatmapData || heatmapData.monitors.length === 0 || heatmapData.totalChecks === 0)
       "
       class="d-flex flex-column align-center justify-center flex-grow-1 pa-8 text-center"
     >
@@ -226,19 +226,19 @@
           <!-- Legenda de Cores -->
           <div class="d-flex align-center ga-2 text-caption flex-wrap">
             <span class="d-flex align-center"
-            ><span class="legend-dot" style="background-color: #10b981"></span> &lt;30ms</span
+              ><span class="legend-dot" style="background-color: #10b981"></span> &lt;30ms</span
             >
             <span class="d-flex align-center"
-            ><span class="legend-dot" style="background-color: #84cc16"></span> &lt;60ms</span
+              ><span class="legend-dot" style="background-color: #84cc16"></span> &lt;60ms</span
             >
             <span class="d-flex align-center"
-            ><span class="legend-dot" style="background-color: #f59e0b"></span> &lt;100ms</span
+              ><span class="legend-dot" style="background-color: #f59e0b"></span> &lt;100ms</span
             >
             <span class="d-flex align-center"
-            ><span class="legend-dot" style="background-color: #f97316"></span> &lt;200ms</span
+              ><span class="legend-dot" style="background-color: #f97316"></span> &lt;200ms</span
             >
             <span class="d-flex align-center"
-            ><span class="legend-dot" style="background-color: #ef4444"></span> &gt;200ms</span
+              ><span class="legend-dot" style="background-color: #ef4444"></span> &gt;200ms</span
             >
           </div>
         </div>

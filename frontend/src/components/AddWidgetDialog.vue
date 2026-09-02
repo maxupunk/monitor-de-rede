@@ -197,9 +197,9 @@
             <v-col
               v-if="
                 isResourceRequired('bandwidth') ||
-                  (isResourceRequired('numeric') &&
-                    selectedTemplate?.type !== 'saas_heatmap' &&
-                    selectedTemplate?.type !== 'saas_services')
+                (isResourceRequired('numeric') &&
+                  selectedTemplate?.type !== 'saas_heatmap' &&
+                  selectedTemplate?.type !== 'saas_services')
               "
               cols="12"
               sm="6"
@@ -460,50 +460,42 @@ const pingTargetOptions = computed<PingTargetOption[]>(() => {
     },
   ]
 
-  // 1. Monitores de Ping cadastrados
+  // 1. Monitores de Ping cadastrados (ativos)
   for (const m of monitorsStore.monitors.filter((m) => m.type === 'ping')) {
+    const isDns =
+      m.name.toLowerCase().includes('dns') ||
+      dnsServersStore.servers.some((s) => s.address === m.target)
+    const device = m.deviceId ? devicesStore.devices.find((d) => d.id === m.deviceId) : null
+
+    let icon = 'mdi-pulse'
+    let subtitle = `Monitor de Ping #${m.id} · Alvo: ${m.target}`
+
+    if (isDns) {
+      icon = 'mdi-dns'
+      subtitle = `Ping para Servidor DNS · Alvo: ${m.target}`
+    } else if (device) {
+      icon = 'mdi-devices'
+      subtitle = `Ping de ${device.name || 'Dispositivo #' + device.id} · Alvo: ${m.target}`
+    }
+
     options.push({
       value: m.id,
       title: `${m.name} (${m.target})`,
-      subtitle: `Monitor de Ping #${m.id} · Alvo: ${m.target}`,
-      icon: 'mdi-pulse',
+      subtitle,
+      icon,
     })
   }
 
-  // 2. Equipamentos (IPs)
-  for (const dev of devicesStore.devices) {
-    if (dev.ipAddress) {
-      options.push({
-        value: dev.ipAddress,
-        title: `${dev.name || 'Dispositivo #' + dev.id} (${dev.ipAddress})`,
-        subtitle: `IP do Equipamento · ${dev.model || dev.vendor || 'Equipamento'}`,
-        icon: 'mdi-devices',
-      })
-    }
-  }
-
-  // 3. Servidores DNS cadastrados
-  for (const dns of dnsServersStore.servers) {
-    if (dns.address) {
-      options.push({
-        value: dns.address,
-        title: `${dns.name} (${dns.address})`,
-        subtitle: `Servidor DNS · Protocolo: ${dns.protocol.toUpperCase()}`,
-        icon: 'mdi-dns',
-      })
-    }
-  }
-
-  // 4. Interfaces carregadas
-  for (const iface of deviceDetailStore.interfaces) {
-    if (iface.ipAddress) {
-      options.push({
-        value: iface.ipAddress,
-        title: `${iface.name || iface.ifName || 'Interface'} (${iface.ipAddress})`,
-        subtitle: `IP da Interface #${iface.snmpIndex || iface.id}`,
-        icon: 'mdi-swap-horizontal',
-      })
-    }
+  // 2. Monitores DNS cadastrados (Resolução)
+  for (const m of monitorsStore.monitors.filter((m) => m.type === 'dns')) {
+    const cfg = (m.configuration || {}) as Record<string, unknown>
+    const dnsServer = (cfg.dnsServer || cfg.dohUrl || m.target) as string
+    options.push({
+      value: m.id,
+      title: `${m.name} (${dnsServer})`,
+      subtitle: `Resolução DNS · Alvo: ${m.target} · Monitor #${m.id}`,
+      icon: 'mdi-dns-outline',
+    })
   }
 
   return options

@@ -73,6 +73,7 @@ export interface DnsBatchProvisionRequest {
   recordType?: string
   intervalSeconds?: number
   executeNow?: boolean
+  includePing?: boolean
 }
 
 export interface DnsBatchProvisionResponse {
@@ -160,6 +161,27 @@ export const useDnsPerformanceStore = defineStore('dnsPerformance', () => {
     }
   }
 
+  async function provisionPingMonitors(
+    servers?: DnsBatchProvisionServer[],
+    intervalSeconds?: number
+  ): Promise<DnsBatchProvisionResponse | null> {
+    provisioning.value = true
+    error.value = null
+    try {
+      const data = await apiService.post<DnsBatchProvisionResponse>('/dns/provision-ping', {
+        servers,
+        intervalSeconds,
+      })
+      return data
+    } catch (err: unknown) {
+      error.value =
+        err instanceof Error ? err.message : 'Erro ao provisionar ping para servidores DNS'
+      return null
+    } finally {
+      provisioning.value = false
+    }
+  }
+
   return {
     ranking,
     series,
@@ -177,5 +199,6 @@ export const useDnsPerformanceStore = defineStore('dnsPerformance', () => {
     fetchPerformance,
     runBenchmark,
     provisionMonitors,
+    provisionPingMonitors,
   }
 })

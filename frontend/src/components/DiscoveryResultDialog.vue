@@ -101,7 +101,7 @@
             >
               {{ port }}
               <span v-if="serviceName(port)" class="text-caption ml-1"
-              >({{ serviceName(port) }})</span
+                >({{ serviceName(port) }})</span
               >
             </v-chip>
           </div>
@@ -150,7 +150,7 @@
             <pre
               class="text-caption font-mono text-grey-darken-3 mb-0"
               style="white-space: pre-wrap; word-break: break-word"
-            >{{ rawJson }}</pre>
+              >{{ rawJson }}</pre>
           </v-card>
         </div>
       </v-card-text>

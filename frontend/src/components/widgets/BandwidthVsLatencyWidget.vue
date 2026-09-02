@@ -11,13 +11,29 @@
         <div class="text-caption text-grey mt-1 d-flex align-center ga-1">
           <v-icon size="14" color="deep-purple">mdi-information-outline</v-icon>
           <span
-          >Eixo Duplo: Tráfego (Mbps) x Latência de Ping (ms) · Alvo:
+            >Eixo Duplo: Tráfego (Mbps) x Latência de Ping (ms) · Alvo:
             {{ selectedPingTargetLabel }}</span
           >
         </div>
       </div>
 
       <div class="d-flex align-center ga-2 flex-wrap">
+        <v-btn
+          v-if="!hasDnsPingMonitors && dnsServersStore.servers.length > 0"
+          size="small"
+          variant="tonal"
+          color="deep-purple"
+          prepend-icon="mdi-dns"
+          :loading="provisioningDnsPing"
+          class="text-caption"
+          @click="provisionDnsPing"
+        >
+          Adicionar Ping para DNS
+          <v-tooltip activator="parent" location="top">
+            Provisiona monitores de Ping ICMP para os servidores DNS compararem com a banda
+          </v-tooltip>
+        </v-btn>
+
         <v-combobox
           v-model="selectedPingTarget"
           :items="pingTargetOptions"
@@ -233,7 +249,7 @@
         <div class="d-flex align-center ga-1">
           <span class="dot-indicator bg-amber"></span>
           <span
-          >Latência: {{ formatLatency(currentLatency) }} (Média:
+            >Latência: {{ formatLatency(currentLatency) }} (Média:
             {{ formatLatency(avgLatency) }})</span
           >
         </div>
@@ -254,6 +270,7 @@ import {
   type BandwidthLatencyResponse,
 } from '@/stores/devices'
 import { useDnsServersStore } from '@/stores/dnsServers'
+import { useDnsPerformanceStore } from '@/stores/dnsPerformance'
 import { useEventsStore } from '@/stores/events'
 import type { WidgetConfig } from '@/stores/dashboard'
 import { formatLatency, formatBps } from '@/utils/formatters'
@@ -266,6 +283,7 @@ const props = defineProps<{
 const monitorsStore = useMonitorsStore()
 const devicesStore = useDevicesStore()
 const dnsServersStore = useDnsServersStore()
+const dnsPerformanceStore = useDnsPerformanceStore()
 const eventsStore = useEventsStore()
 
 const timeframe = ref<'5m' | '15m' | '1h' | '24h'>('15m')
@@ -275,8 +293,31 @@ const selectedPingTarget = ref<number | 'all' | string>(initialPingTarget)
 const selectedDeviceId = ref<number | 'all'>((props.widget.config?.deviceId as any) || 'all')
 
 const loading = ref(false)
+const provisioningDnsPing = ref(false)
 const serverResponse = ref<BandwidthLatencyResponse | null>(null)
 const localSamples = ref<BandwidthLatencyPoint[]>([])
+
+const hasDnsPingMonitors = computed(() =>
+  monitorsStore.monitors.some(
+    (m) =>
+      m.type === 'ping' &&
+      (m.name.toLowerCase().includes('dns') ||
+        dnsServersStore.servers.some((s) => s.address === m.target))
+  )
+)
+
+async function provisionDnsPing() {
+  provisioningDnsPing.value = true
+  try {
+    const res = await dnsPerformanceStore.provisionPingMonitors()
+    if (res) {
+      await monitorsStore.fetchMonitors()
+      await loadData()
+    }
+  } finally {
+    provisioningDnsPing.value = false
+  }
+}
 
 const chartContainerRef = ref<HTMLElement | null>(null)
 const mousePos = ref<{ x: number; y: number } | null>(null)
@@ -337,18 +378,20 @@ onMounted(async () => {
     }
   })
 
-  // Escuta resultados de ping em tempo real
+  // Escuta resultados de ping/dns em tempo real
   unbindMonitorEvent = eventsStore.onEvent('monitor:result', (data) => {
     const monId = Number(data.monitorId ?? data.id)
     if (!monId) return
 
     const mon = monitorsStore.monitors.find((m) => m.id === monId)
-    if (!mon || mon.type !== 'ping') return
+    if (!mon || (mon.type !== 'ping' && mon.type !== 'dns')) return
 
+    const dnsServer = (mon.configuration as any)?.dnsServer || (mon.configuration as any)?.dohUrl
     const isMatch =
       selectedPingTarget.value === 'all' ||
       selectedPingTarget.value === monId ||
-      String(selectedPingTarget.value) === mon.target
+      String(selectedPingTarget.value) === mon.target ||
+      (dnsServer && String(selectedPingTarget.value) === String(dnsServer))
 
     if (!isMatch) return
 
@@ -382,41 +425,45 @@ const pingTargetOptions = computed<PingTargetOption[]>(() => {
     },
   ]
 
-  // 1. Monitores de Ping cadastrados
+  // 1. Monitores de Ping cadastrados (ativos)
   for (const m of monitorsStore.monitors.filter((m) => m.type === 'ping')) {
+    const isDns =
+      m.name.toLowerCase().includes('dns') ||
+      dnsServersStore.servers.some((s) => s.address === m.target)
+    const device = m.deviceId ? devicesStore.devices.find((d) => d.id === m.deviceId) : null
+
+    let icon = 'mdi-pulse'
+    let subtitle = `Monitor de Ping #${m.id} · Alvo: ${m.target}`
+
+    if (isDns) {
+      icon = 'mdi-dns'
+      subtitle = `Ping para Servidor DNS · Alvo: ${m.target}`
+    } else if (device) {
+      icon = 'mdi-devices'
+      subtitle = `Ping de ${device.name || 'Dispositivo #' + device.id} · Alvo: ${m.target}`
+    }
+
     options.push({
       value: m.id,
       title: `${m.name} (${m.target})`,
-      subtitle: `Monitor #${m.id} · Alvo: ${m.target}`,
-      icon: 'mdi-pulse',
+      subtitle,
+      icon,
     })
   }
 
-  // 2. Equipamentos (IPs)
-  for (const dev of devicesStore.devices) {
-    if (dev.ipAddress) {
-      options.push({
-        value: dev.ipAddress,
-        title: `${dev.name || 'Dispositivo #' + dev.id} (${dev.ipAddress})`,
-        subtitle: `IP do Equipamento · ${dev.model || dev.vendor || 'Equipamento'}`,
-        icon: 'mdi-devices',
-      })
-    }
+  // 2. Monitores DNS cadastrados (Resolução)
+  for (const m of monitorsStore.monitors.filter((m) => m.type === 'dns')) {
+    const cfg = (m.configuration || {}) as Record<string, unknown>
+    const dnsServer = (cfg.dnsServer || cfg.dohUrl || m.target) as string
+    options.push({
+      value: m.id,
+      title: `${m.name} (${dnsServer})`,
+      subtitle: `Resolução DNS · Alvo: ${m.target} · Monitor #${m.id}`,
+      icon: 'mdi-dns-outline',
+    })
   }
 
-  // 3. Servidores DNS cadastrados
-  for (const dns of dnsServersStore.servers) {
-    if (dns.address) {
-      options.push({
-        value: dns.address,
-        title: `${dns.name} (${dns.address})`,
-        subtitle: `Servidor DNS · Protocolo: ${dns.protocol.toUpperCase()}`,
-        icon: 'mdi-dns',
-      })
-    }
-  }
-
-  // 4. Se houver alvo personalizado informado
+  // 3. Se houver alvo personalizado informado
   if (
     typeof selectedPingTarget.value === 'string' &&
     selectedPingTarget.value !== 'all' &&

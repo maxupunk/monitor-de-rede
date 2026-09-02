@@ -6,7 +6,7 @@
         <v-card elevation="2" class="rounded-lg pa-3 pa-sm-4 h-100">
           <div class="d-flex align-center justify-space-between mb-2">
             <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-            >Download Atual (IN)</span
+              >Download Atual (IN)</span
             >
             <v-avatar color="success" variant="tonal" size="36">
               <v-icon size="20">mdi-arrow-down-bold</v-icon>
@@ -23,7 +23,7 @@
         <v-card elevation="2" class="rounded-lg pa-3 pa-sm-4 h-100">
           <div class="d-flex align-center justify-space-between mb-2">
             <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-            >Upload Atual (OUT)</span
+              >Upload Atual (OUT)</span
             >
             <v-avatar color="primary" variant="tonal" size="36">
               <v-icon size="20">mdi-arrow-up-bold</v-icon>
@@ -40,7 +40,7 @@
         <v-card elevation="2" class="rounded-lg pa-3 pa-sm-4 h-100">
           <div class="d-flex align-center justify-space-between mb-2">
             <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-            >Velocidade da Interface</span
+              >Velocidade da Interface</span
             >
             <v-avatar color="info" variant="tonal" size="36">
               <v-icon size="20">mdi-speedometer</v-icon>
@@ -57,7 +57,7 @@
         <v-card elevation="2" class="rounded-lg pa-3 pa-sm-4 h-100">
           <div class="d-flex align-center justify-space-between mb-2">
             <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-            >Status Operacional</span
+              >Status Operacional</span
             >
             <v-avatar :color="headerChip.color" variant="tonal" size="36">
               <v-icon size="20">{{ headerChip.icon }}</v-icon>
@@ -124,7 +124,7 @@
         <v-card elevation="2" class="rounded-lg pa-3 pa-sm-4 h-100">
           <div class="d-flex align-center justify-space-between mb-2">
             <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-            >Agente SNMP Disponível</span
+              >Agente SNMP Disponível</span
             >
             <v-avatar color="success" variant="tonal" size="36">
               <v-icon size="20">mdi-check-decagram</v-icon>
@@ -144,7 +144,7 @@
         <v-card elevation="2" class="rounded-lg pa-3 pa-sm-4 h-100">
           <div class="d-flex align-center justify-space-between mb-2">
             <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-            >Velocidade Negociada</span
+              >Velocidade Negociada</span
             >
             <v-avatar :color="headerChip.color" variant="tonal" size="36">
               <v-icon size="20">{{ headerChip.icon }}</v-icon>
@@ -161,7 +161,7 @@
         <v-card elevation="2" class="rounded-lg pa-3 pa-sm-4 h-100">
           <div class="d-flex align-center justify-space-between mb-2">
             <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-            >Status Operacional</span
+              >Status Operacional</span
             >
             <v-avatar color="info" variant="tonal" size="36">
               <v-icon size="20">mdi-information-outline</v-icon>
@@ -178,7 +178,7 @@
         <v-card elevation="2" class="rounded-lg pa-3 pa-sm-4 h-100">
           <div class="d-flex align-center justify-space-between mb-2">
             <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-            >Estabilidade do Link</span
+              >Estabilidade do Link</span
             >
             <v-avatar color="success" variant="tonal" size="36">
               <v-icon size="20">mdi-check-decagram</v-icon>
@@ -195,7 +195,7 @@
         <v-card elevation="2" class="rounded-lg pa-3 pa-sm-4 h-100">
           <div class="d-flex align-center justify-space-between mb-2">
             <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-            >Alterações de Estado</span
+              >Alterações de Estado</span
             >
             <v-avatar
               :color="interfaceFlapCount > 0 ? 'warning' : 'grey'"
@@ -278,7 +278,7 @@
         <v-card elevation="2" class="rounded-lg pa-3 pa-sm-4 h-100">
           <div class="d-flex align-center justify-space-between mb-2">
             <span class="text-subtitle-2 text-grey-darken-1 font-weight-medium"
-            >Taxa de Uptime</span
+              >Taxa de Uptime</span
             >
             <v-avatar color="success" variant="tonal" size="36">
               <v-icon size="20">mdi-check-decagram</v-icon>
