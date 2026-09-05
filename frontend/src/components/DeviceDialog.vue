@@ -264,7 +264,7 @@
               -->
               <v-alert
                 v-if="identificacao"
-                :type="identificacao.probed ? 'success' : 'warning'"
+                :type="identificationAlertType"
                 variant="tonal"
                 density="compact"
                 class="mt-3"
@@ -272,7 +272,11 @@
                 <div class="font-weight-bold mb-1">
                   {{ identificacao.label }} — {{ identificacao.reason }}
                 </div>
-                <div v-if="!identificacao.probed" class="text-body-2 mb-1">
+                <div v-if="identificacao.fromDiscovery" class="text-body-2 mb-1">
+                  O equipamento não respondeu agora. A conclusão reutiliza a evidência SNMP da
+                  última descoberta da rede.
+                </div>
+                <div v-else-if="!identificacao.probed" class="text-body-2 mb-1">
                   O equipamento não respondeu nem por SNMP nem na porta 22. A conclusão saiu só do
                   cadastro — confira antes de salvar.
                 </div>
@@ -1071,6 +1075,14 @@ const operatingSystemIcon = computed(() => {
   const detected =
     identificacao.value?.operatingSystem ?? props.deviceToEdit?.effectiveOperatingSystem
   return detected ? systemsStore.icon(detected) : 'mdi-auto-fix'
+})
+
+const identificationAlertType = computed(() => {
+  if (!identificacao.value) return 'warning'
+  if (identificacao.value.fromDiscovery) return 'info'
+  return identificacao.value.probed && ['snmp', 'sonda'].includes(identificacao.value.source)
+    ? 'success'
+    : 'warning'
 })
 
 /**

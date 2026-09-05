@@ -74,9 +74,13 @@
             <v-list border class="rounded-lg">
               <v-list-item
                 title="Fabricante"
-                :subtitle="result.vendor || 'Não identificado'"
+                :subtitle="result.vendor || identity?.hardwareVendor || 'Não identificado'"
               ></v-list-item>
               <v-list-item title="Tipo de Dispositivo" :subtitle="deviceTypeLabel"></v-list-item>
+              <v-list-item
+                title="Sistema"
+                :subtitle="identity?.label || 'Não identificado'"
+              ></v-list-item>
               <v-list-item
                 title="Confiança"
                 :subtitle="`${Math.ceil(result.confidence)}%`"
@@ -84,6 +88,20 @@
             </v-list>
           </v-col>
         </v-row>
+
+        <v-alert
+          v-if="identity"
+          :type="identity.source === 'snmp' ? 'success' : 'warning'"
+          variant="tonal"
+          density="compact"
+          class="mb-4"
+        >
+          <div class="font-weight-bold">{{ identity.reason }}</div>
+          <div v-if="identity.sysDescr" class="text-caption">sysDescr: {{ identity.sysDescr }}</div>
+          <div v-if="identity.sysObjectId" class="text-caption">
+            sysObjectId: {{ identity.sysObjectId }}
+          </div>
+        </v-alert>
 
         <!-- Portas abertas -->
         <v-card v-if="openPorts.length > 0" variant="outlined" class="rounded-lg pa-4 mb-4">
@@ -170,7 +188,11 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useDevicesStore } from '@/stores/devices'
-import type { DiscoveryResult, StreamedDiscoveryHost } from '@/stores/discovery'
+import {
+  discoveryIdentity,
+  type DiscoveryResult,
+  type StreamedDiscoveryHost,
+} from '@/stores/discovery'
 import { formatDateTime } from '@/utils/formatters'
 
 const props = defineProps<{
@@ -185,6 +207,7 @@ const emit = defineEmits<{
 
 const devicesStore = useDevicesStore()
 const copied = ref(false)
+const identity = computed(() => discoveryIdentity(props.result))
 
 const isAdded = computed(() => {
   if (!props.result) return false

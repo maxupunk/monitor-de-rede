@@ -17,6 +17,8 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
 
 ## 2. Roadmaps temáticos já concluídos
 
+- [x] 🟢 Concluído — Identificação de sistema sem assumir RouterOS na ausência de evidência; categoria explícita para firmware embarcado, comparação de OID por componentes, fabricante/modelo pela ENTITY-MIB e reaproveitamento da identidade SNMP da descoberta. O syslog bloqueia aplicação enquanto o sistema não tiver uma receita compatível. Regressão do controlador MPPT coberta por teste.
+
 | Roadmap | Tema | Estado | Link |
 | :--- | :--- | :--- | :--- |
 | Servidor NetMonitor como dispositivo | Representar o próprio servidor como dispositivo de primeira classe | 🟢 Concluído | [`roadmap_servidor_netmonitor_como_dispositivo.md`](roadmap_servidor_netmonitor_como_dispositivo.md) |

@@ -765,6 +765,7 @@ async fn a_ativacao_falha_com_mensagem_de_operador_quando_a_porta_esta_fechada()
             .post("/api/devices")
             .json(&serde_json::json!({
                 "name": "local", "type": "router", "ipAddress": "127.0.0.1",
+                "operatingSystem": "routeros",
                 "siteId": site["id"].as_i64().unwrap()
             }))
             .await;

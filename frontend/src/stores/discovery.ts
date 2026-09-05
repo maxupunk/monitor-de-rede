@@ -63,6 +63,30 @@ export interface StreamedDiscoveryHost {
   lastSeenAt?: string
 }
 
+export interface DiscoveryIdentity {
+  operatingSystem?: string
+  label?: string
+  source?: string
+  reason?: string
+  sysDescr?: string
+  sysObjectId?: string
+  sysName?: string
+  hardwareVendor?: string
+  hardwareModel?: string
+}
+
+/** Lê a identidade tanto do snapshot SSE quanto do resultado persistido. */
+export function discoveryIdentity(
+  result: Pick<DiscoveryResult | StreamedDiscoveryHost, 'data'> | null | undefined
+): DiscoveryIdentity | null {
+  const data = result?.data
+  if (!data || typeof data !== 'object') return null
+  const details = data.details
+  const container = details && typeof details === 'object' ? details : data
+  const identity = (container as Record<string, unknown>).identity
+  return identity && typeof identity === 'object' ? (identity as DiscoveryIdentity) : null
+}
+
 export interface ScanSessionState {
   runId: number | null
   networkId: number | null

@@ -1,6 +1,7 @@
 //! Identifica agentes SNMP autorizados durante discovery. Falhas são esperadas.
 
 use crate::services::{
+    devices::systems,
     discovery::{merger::DiscoveredHost, progress::ScanReporter},
     snmp::service::detect_connection,
 };
@@ -24,9 +25,25 @@ pub async fn enrich(
                     if result.detected {
                         host.confidence = host.confidence.max(95);
                         if let Some(details) = result.result {
+                            let identity = systems::detect(&systems::Evidence {
+                                sys_object_id: details.system.sys_object_id.as_deref(),
+                                sys_descr: details.system.sys_descr.as_deref(),
+                                ..systems::Evidence::default()
+                            });
                             if host.vendor.is_none() {
-                                host.vendor = details.system.sys_descr;
+                                host.vendor = details.system.hardware_vendor.clone();
                             }
+                            host.data["identity"] = serde_json::json!({
+                                "operatingSystem": identity.system.id,
+                                "label": identity.system.label,
+                                "source": identity.source,
+                                "reason": identity.reason,
+                                "sysDescr": details.system.sys_descr,
+                                "sysObjectId": details.system.sys_object_id,
+                                "sysName": details.system.sys_name,
+                                "hardwareVendor": details.system.hardware_vendor,
+                                "hardwareModel": details.system.hardware_model,
+                            });
                         }
                         host.data["snmp"] = serde_json::json!({
                             "detected": true,

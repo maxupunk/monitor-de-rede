@@ -19,9 +19,9 @@ use crate::services::{
     snmp::{
         client::{SnmpConfig, SnmpError, SnmpVersion},
         collectors::{
-            collect_cpu, collect_interfaces_and_traffic, collect_lldp, collect_memory,
-            collect_system, status_label, InterfaceTraffic, LldpNeighbor, SnmpCpuInfo,
-            SnmpInterface, SnmpMemoryInfo, SnmpSystemInfo,
+            collect_cpu, collect_hardware, collect_interfaces_and_traffic, collect_lldp,
+            collect_memory, collect_system, status_label, InterfaceTraffic, LldpNeighbor,
+            SnmpCpuInfo, SnmpInterface, SnmpMemoryInfo, SnmpSystemInfo,
         },
     },
 };
@@ -162,9 +162,14 @@ pub async fn sync_monitor_intervals(
 }
 
 pub async fn test_connection(config: SnmpConfig) -> AppResult<SnmpTestResult> {
-    let system = collect_system(&super::client::SnmpClient::new(config))
-        .await
-        .map_err(map_error)?;
+    let client = super::client::SnmpClient::new(config);
+    let mut system = collect_system(&client).await.map_err(map_error)?;
+    if system.responded() {
+        if let Ok((vendor, model)) = collect_hardware(&client).await {
+            system.hardware_vendor = vendor;
+            system.hardware_model = model;
+        }
+    }
     let success = system.responded();
     Ok(SnmpTestResult {
         success,

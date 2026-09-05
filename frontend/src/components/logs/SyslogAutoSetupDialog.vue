@@ -54,6 +54,16 @@
               :hint="systemHintText"
               persistent-hint
             ></v-select>
+            <v-alert
+              v-if="operatingSystem && !operatingSystemSupported"
+              type="warning"
+              variant="tonal"
+              density="compact"
+              class="mt-2"
+            >
+              O sistema não foi identificado ou não possui comandos automáticos. Selecione o sistema
+              correto para continuar.
+            </v-alert>
           </v-col>
           <v-col cols="12" sm="5">
             <v-select
@@ -289,12 +299,25 @@
           fazia o desfecho parecer uma falha que precisa ser refeita.
         -->
         <template v-if="result">
-          <v-btn variant="text" :loading="running" @click="submit">Aplicar de novo</v-btn>
+          <v-btn
+            variant="text"
+            :loading="running"
+            :disabled="!operatingSystemSupported"
+            @click="submit"
+          >
+            Aplicar de novo
+          </v-btn>
           <v-btn color="primary" variant="flat" @click="open = false">Concluir</v-btn>
         </template>
         <template v-else>
           <v-btn variant="text" :disabled="running" @click="open = false">Cancelar</v-btn>
-          <v-btn color="primary" variant="flat" :loading="running" @click="submit">
+          <v-btn
+            color="primary"
+            variant="flat"
+            :loading="running"
+            :disabled="!operatingSystemSupported"
+            @click="submit"
+          >
             <v-icon start>mdi-flash</v-icon>
             Ativar agora
           </v-btn>
@@ -417,6 +440,10 @@ const systemHintText = computed(
  */
 const aceitaMacTelnet = computed(
   () => systemsStore.byId(operatingSystem.value)?.supportsMacTelnet ?? false
+)
+
+const operatingSystemSupported = computed(
+  () => systemsStore.byId(operatingSystem.value)?.supportsSyslog ?? false
 )
 
 interface ProtocolOption {
@@ -597,6 +624,11 @@ function valida(): boolean {
 
 async function submit(): Promise<void> {
   if (running.value) return
+  if (!operatingSystemSupported.value) {
+    error.value = 'Selecione um sistema com ativação automática de log.'
+    errorHint.value = ''
+    return
+  }
   if (!valida()) {
     error.value = 'Corrija os campos destacados antes de continuar.'
     errorHint.value = ''

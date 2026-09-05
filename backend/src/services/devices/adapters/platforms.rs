@@ -12,6 +12,7 @@ pub struct UbiquitiAdapter;
 pub struct LinuxAdapter;
 pub struct WindowsAdapter;
 pub struct MobileAdapter;
+pub struct EmbeddedAdapter;
 pub struct OtherAdapter;
 
 struct RouterOsSyslogAdapter;
@@ -30,6 +31,7 @@ pub static UBIQUITI: UbiquitiAdapter = UbiquitiAdapter;
 pub static LINUX: LinuxAdapter = LinuxAdapter;
 pub static WINDOWS: WindowsAdapter = WindowsAdapter;
 pub static MOBILE: MobileAdapter = MobileAdapter;
+pub static EMBEDDED: EmbeddedAdapter = EmbeddedAdapter;
 pub static OTHER: OtherAdapter = OtherAdapter;
 
 static ROUTEROS_PLATFORM: DevicePlatform = DevicePlatform {
@@ -66,6 +68,12 @@ static MOBILE_PLATFORM: DevicePlatform = DevicePlatform {
     id: "mobile",
     label: "Celular (Android / iOS)",
     icon: "mdi-cellphone",
+    generic: false,
+};
+static EMBEDDED_PLATFORM: DevicePlatform = DevicePlatform {
+    id: "embedded",
+    label: "Sistema embarcado (firmware não identificado)",
+    icon: "mdi-chip",
     generic: false,
 };
 static OTHER_PLATFORM: DevicePlatform = DevicePlatform {
@@ -244,6 +252,21 @@ impl DeviceAdapter for MobileAdapter {
 
     fn vpn_profile(&self) -> Option<&'static str> {
         Some("mobile")
+    }
+}
+
+impl DeviceAdapter for EmbeddedAdapter {
+    fn platform(&self) -> &'static DevicePlatform {
+        &EMBEDDED_PLATFORM
+    }
+
+    fn aliases(&self) -> &'static [&'static str] {
+        &[
+            "sistema embarcado",
+            "firmware embarcado",
+            "controlador de carga",
+            "mppt",
+        ]
     }
 }
 

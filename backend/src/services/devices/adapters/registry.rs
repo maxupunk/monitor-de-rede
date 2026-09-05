@@ -4,7 +4,7 @@ use std::sync::OnceLock;
 
 use super::{
     contract::{DeviceAdapter, DevicePlatform, SyslogConfigurationAdapter},
-    platforms::{LINUX, MOBILE, OPENWRT, OTHER, ROUTEROS, UBIQUITI, WINDOWS},
+    platforms::{EMBEDDED, LINUX, MOBILE, OPENWRT, OTHER, ROUTEROS, UBIQUITI, WINDOWS},
 };
 
 /// A ordem é pública: apresentação e precedência da detecção usam a mesma lista.
@@ -14,7 +14,7 @@ pub fn all() -> &'static [&'static dyn DeviceAdapter] {
     ADAPTERS
         .get_or_init(|| {
             vec![
-                &ROUTEROS, &OPENWRT, &UBIQUITI, &LINUX, &WINDOWS, &MOBILE, &OTHER,
+                &ROUTEROS, &OPENWRT, &UBIQUITI, &LINUX, &WINDOWS, &MOBILE, &EMBEDDED, &OTHER,
             ]
         })
         .as_slice()

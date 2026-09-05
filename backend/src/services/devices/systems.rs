@@ -46,13 +46,9 @@ pub type OperatingSystem = DevicePlatform;
 /// Valor que a API aceita para "não declarei — deduza".
 pub const AUTO: &str = "auto";
 
-/// O sistema assumido quando nada identifica o equipamento.
-///
-/// Não é `other`: `other` significa "declarei que é outro", e aí não há receita
-/// nenhuma a oferecer. Aqui o que houve foi ausência de evidência, e o parque
-/// para o qual este sistema foi feito é RouterOS. A tela mostra a origem
-/// `padrão` justamente para a escolha ser conferida antes de aplicar.
-pub const FALLBACK: &str = "routeros";
+/// Sem evidência, usa o adapter neutro, sem comandos específicos de plataforma.
+/// A origem `padrão` distingue ausência de identificação de declaração manual.
+pub const FALLBACK: &str = "other";
 
 #[must_use]
 pub fn catalog() -> &'static [&'static OperatingSystem] {
@@ -219,7 +215,7 @@ pub fn detect(evidencia: &Evidence) -> Detection {
     achado(
         find(FALLBACK).expect("o padrão precisa estar no catálogo"),
         source::DEFAULT,
-        "nada identificou o equipamento — confirme antes de aplicar".to_owned(),
+        "sistema não identificado — as evidências não permitem determinar o firmware; selecione manualmente se souber".to_owned(),
     )
 }
 
@@ -260,7 +256,7 @@ fn casa(texto: Option<&str>, nivel: Especificidade) -> Option<&'static Operating
 /// Casa pelo prefixo, e não por igualdade: o `sysObjectId` completo carrega a
 /// linha de produto depois do número da empresa (`…14988.1.1.3.11`).
 fn casa_oid(oid: Option<&str>) -> Option<(&'static OperatingSystem, &'static str)> {
-    let bruto = oid?.trim();
+    let bruto = oid?.trim().trim_start_matches('.');
     if bruto.is_empty() {
         return None;
     }
@@ -268,7 +264,12 @@ fn casa_oid(oid: Option<&str>) -> Option<(&'static OperatingSystem, &'static str
         adapter
             .sys_object_ids()
             .iter()
-            .find(|prefixo| bruto.starts_with(*prefixo))
+            .find(|prefixo| {
+                bruto == **prefixo
+                    || bruto
+                        .strip_prefix(**prefixo)
+                        .is_some_and(|resto| resto.starts_with('.'))
+            })
             .map(|prefixo| (adapter.platform(), *prefixo))
     })
 }
@@ -334,9 +335,10 @@ pub struct IdentifyResult {
     pub access_mode: String,
     pub access_mode_reason: String,
     /// Se alguma evidência ao vivo chegou. Falso significa que a conclusão saiu
-    /// só do cadastro — e a tela precisa dizer isso em vez de anunciar uma
-    /// detecção que não aconteceu.
+    /// de cache ou só do cadastro.
     pub probed: bool,
+    /// A sonda atual não respondeu e a evidência SNMP veio da última descoberta.
+    pub from_discovery: bool,
 }
 
 /// Escolhe e normaliza um nome anunciado pelo equipamento.
@@ -623,14 +625,36 @@ mod tests {
     }
 
     #[test]
-    fn outro_e_escolha_declarada_e_nunca_deducao() {
-        // Deduzir "outro" seria o mesmo que não deduzir, com a aparência de
-        // conclusão — e ainda deixaria a ativação de log sem receita.
+    fn outro_nao_oferece_comandos_especificos() {
         let outro = find("other").expect("no catálogo");
         let adapter = super::registry::find("other").expect("adapter");
         assert!(adapter.aliases().is_empty());
         assert!(adapter.syslog().is_none());
         assert_eq!(parse("other"), Ok(Some(outro)));
+    }
+
+    #[test]
+    fn controlador_mppt_e_embarcado_e_nao_routeros() {
+        let achado = detect(&Evidence {
+            name: Some("Volt"),
+            sys_descr: Some("Controlador de Carga MPPT 12V/24V/48V-30A"),
+            sys_object_id: Some("1.3.6.1.4.1.17095.1"),
+            ..Evidence::default()
+        });
+        assert_eq!(
+            (achado.system.id, achado.source),
+            ("embedded", source::SNMP)
+        );
+        assert!(registry::find(achado.system.id).unwrap().syslog().is_none());
+    }
+
+    #[test]
+    fn prefixo_oid_respeita_limites_dos_componentes() {
+        assert!(casa_oid(Some("1.3.6.1.4.1.149880.1")).is_none());
+        assert_eq!(
+            casa_oid(Some(".1.3.6.1.4.1.14988.1")).unwrap().0.id,
+            "routeros"
+        );
     }
 
     #[test]

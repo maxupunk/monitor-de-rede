@@ -336,6 +336,7 @@ import {
   type DiscoveryPhase,
   type StreamedDiscoveryHost,
   type ScanSessionState,
+  discoveryIdentity,
 } from '@/stores/discovery'
 import { useNetworksStore } from '@/stores/networks'
 import { useDevicesStore } from '@/stores/devices'
@@ -419,6 +420,7 @@ const selectedNetwork = computed(() =>
 const dialogPrefill = computed<Partial<Device> | null>(() => {
   if (!selectedResult.value) return null
   const result = selectedResult.value
+  const identity = discoveryIdentity(result)
   const isGateway = Boolean(
     selectedNetwork.value?.gateway && result.ipAddress === selectedNetwork.value.gateway
   )
@@ -434,10 +436,11 @@ const dialogPrefill = computed<Partial<Device> | null>(() => {
   }
 
   return {
-    name: result.mdnsName || result.hostname || result.ipAddress,
+    name: identity?.sysName || result.mdnsName || result.hostname || result.ipAddress,
     ipAddress: result.ipAddress,
     type: isGateway ? 'router' : result.deviceType || 'other',
-    vendor: result.vendor || undefined,
+    vendor: result.vendor || identity?.hardwareVendor || undefined,
+    model: identity?.hardwareModel || undefined,
     macAddress: result.macAddress || undefined,
     siteId: selectedNetwork.value?.siteId ?? null,
     networkId: selectedNetwork.value?.id ?? null,

@@ -43,8 +43,11 @@ export type IdentifyResult = {
   accessModeReason: string
   /**
    * Se alguma evidência ao vivo chegou. Falso significa que a conclusão saiu
-   * só do cadastro — e a tela precisa dizer isso em vez de anunciar uma
-   * detecção que não aconteceu.
+   * de cache ou só do cadastro.
    */
   probed: boolean
+  /**
+   * A sonda atual não respondeu e a evidência SNMP veio da última descoberta.
+   */
+  fromDiscovery: boolean
 }

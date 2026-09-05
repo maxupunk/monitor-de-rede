@@ -958,18 +958,53 @@ async fn identify(
         None => None,
     };
 
+    let cached_sys_descr = descoberta
+        .as_ref()
+        .and_then(|item| campo_identidade_da_descoberta(item, "sysDescr"));
+    let cached_sys_object_id = descoberta
+        .as_ref()
+        .and_then(|item| campo_identidade_da_descoberta(item, "sysObjectId"));
+    let cached_sys_name = descoberta
+        .as_ref()
+        .and_then(|item| campo_identidade_da_descoberta(item, "sysName"));
+    let sys_descr = snmp
+        .as_ref()
+        .and_then(|info| info.sys_descr.clone())
+        .or(cached_sys_descr);
+    let sys_object_id = snmp
+        .as_ref()
+        .and_then(|info| info.sys_object_id.clone())
+        .or(cached_sys_object_id);
+
     let suggested_vendor = snmp
         .as_ref()
         .and_then(|info| info.hardware_vendor.clone())
+        .or_else(|| {
+            descoberta
+                .as_ref()
+                .and_then(|item| campo_identidade_da_descoberta(item, "hardwareVendor"))
+        })
         .or_else(|| descoberta.as_ref().and_then(fabricante_da_descoberta))
+        .filter(|valor| {
+            snmp.as_ref()
+                .and_then(|info| info.sys_descr.as_deref())
+                .is_none_or(|descricao| valor.trim() != descricao.trim())
+        })
         .filter(|valor| !valor.trim().is_empty());
     let suggested_model = snmp
         .as_ref()
         .and_then(|info| info.hardware_model.clone())
+        .or_else(|| {
+            descoberta
+                .as_ref()
+                .and_then(|item| campo_identidade_da_descoberta(item, "hardwareModel"))
+        })
         .or_else(|| descoberta.as_ref().and_then(modelo_da_descoberta))
         .filter(|valor| !valor.trim().is_empty());
     let suggested_name = systems::suggest_name(
-        snmp.as_ref().and_then(|info| info.sys_name.as_deref()),
+        snmp.as_ref()
+            .and_then(|info| info.sys_name.as_deref())
+            .or(cached_sys_name.as_deref()),
         descoberta
             .as_ref()
             .and_then(|item| item.hostname.as_deref()),
@@ -983,8 +1018,8 @@ async fn identify(
         // **equipamento** é, e devolver de volta o que o operador acabou de
         // escolher no seletor faria a detecção concordar consigo mesma.
         declared: None,
-        sys_object_id: snmp.as_ref().and_then(|info| info.sys_object_id.as_deref()),
-        sys_descr: snmp.as_ref().and_then(|info| info.sys_descr.as_deref()),
+        sys_object_id: sys_object_id.as_deref(),
+        sys_descr: sys_descr.as_deref(),
         ssh_banner: ssh_banner.as_deref(),
         name: entrada.name.as_deref().or(suggested_name.as_deref()),
         vendor: entrada.vendor.as_deref().or(suggested_vendor.as_deref()),
@@ -994,13 +1029,14 @@ async fn identify(
     let acesso = AccessContext::load(&ctx.db)
         .await?
         .resolve_draft(entrada.ip_address.as_deref());
+    let from_discovery = snmp.is_none() && achado.source == systems::source::SNMP;
     Ok(format::json(systems::IdentifyResult {
         operating_system: achado.system.id.to_owned(),
         label: achado.system.label.to_owned(),
         source: achado.source.to_owned(),
         reason: achado.reason,
-        sys_descr: snmp.as_ref().and_then(|info| info.sys_descr.clone()),
-        sys_object_id: snmp.as_ref().and_then(|info| info.sys_object_id.clone()),
+        sys_descr,
+        sys_object_id,
         probed: snmp.is_some() || ssh_banner.is_some(),
         ssh_banner,
         suggested_vendor,
@@ -1008,7 +1044,20 @@ async fn identify(
         suggested_name,
         access_mode: acesso.mode.id().to_owned(),
         access_mode_reason: acesso.reason,
+        from_discovery,
     })?)
+}
+
+fn campo_identidade_da_descoberta(item: &discovery_results::Model, campo: &str) -> Option<String> {
+    let detalhes = item.data.as_ref()?.get("details")?;
+    detalhes
+        .get("identity")
+        .or_else(|| detalhes.get("snmpSystem"))
+        .and_then(|identidade| identidade.get(campo))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|valor| !valor.is_empty())
+        .map(str::to_owned)
 }
 
 /// Probes mais novos podem anexar o modelo ao documento livre da descoberta.

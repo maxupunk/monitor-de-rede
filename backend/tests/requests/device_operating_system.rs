@@ -48,7 +48,10 @@ async fn o_catalogo_e_servido_e_nao_colide_com_a_rota_de_id() {
             .collect();
         assert_eq!(
             ids,
-            vec!["routeros", "openwrt", "ubiquiti", "linux", "windows", "mobile", "other"],
+            vec![
+                "routeros", "openwrt", "ubiquiti", "linux", "windows", "mobile", "embedded",
+                "other"
+            ],
             "a ordem do catálogo é a ordem em que as telas listam"
         );
 
@@ -105,6 +108,25 @@ async fn identificar_sem_evidencia_ao_vivo_recai_no_cadastro() {
             "o motivo precisa citar a evidência: {}",
             corpo["reason"]
         );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn identificar_controlador_sem_assinatura_nao_sugere_mikrotik() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        autenticado(&mut request, &ctx).await;
+        let resposta = request
+            .post("/api/devices/identify")
+            .json(&serde_json::json!({
+                "name": "Volt", "vendor": "Controlador de Carga MPPT 12V/24V/48V-30A"
+            }))
+            .await;
+        assert_eq!(resposta.status_code(), 200, "{}", resposta.text());
+        let corpo: Value = serde_json::from_str(&resposta.text()).expect("json");
+        assert_eq!(corpo["operatingSystem"], "embedded");
+        assert_eq!(corpo["source"], "cadastro");
     })
     .await;
 }
@@ -190,6 +212,70 @@ async fn identificar_reaproveita_fabricante_e_modelo_da_descoberta() {
         assert_eq!(corpo["suggestedName"], "bpi-r3-assistencia");
         assert_eq!(corpo["operatingSystem"], "openwrt");
         assert_eq!(corpo["accessMode"], "local");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn identificar_reaproveita_identidade_snmp_da_descoberta() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        autenticado(&mut request, &ctx).await;
+        let rede = networks::ActiveModel {
+            name: Set("Loopback com identidade".into()),
+            cidr: Set("127.0.0.0/8".into()),
+            scan_enabled: Set(false),
+            scan_interval: Set(3_600),
+            active: Set(true),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .expect("criar rede");
+        let agora = Utc::now();
+        let run = discovery_runs::ActiveModel {
+            network_id: Set(rede.id),
+            status: Set("completed".into()),
+            started_at: Set(agora.into()),
+            finished_at: Set(Some(agora.into())),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .expect("criar descoberta");
+        discovery_results::ActiveModel {
+            discovery_run_id: Set(run.id),
+            ip_address: Set("127.0.0.254".into()),
+            confidence: Set(95),
+            data: Set(Some(serde_json::json!({
+                "details": { "identity": {
+                    "sysDescr": "OpenWrt 24.10 Linux 6.6",
+                    "sysObjectId": "1.3.6.1.4.1.8072.3.2.10",
+                    "sysName": "bpi-r3-cache",
+                    "hardwareVendor": "Banana Pi",
+                    "hardwareModel": "BPI-R3"
+                } }
+            }))),
+            first_seen_at: Set(agora.into()),
+            last_seen_at: Set(agora.into()),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .expect("criar resultado");
+
+        let resposta = request
+            .post("/api/devices/identify")
+            .json(&serde_json::json!({ "ipAddress": "127.0.0.254" }))
+            .await;
+        assert_eq!(resposta.status_code(), 200, "{}", resposta.text());
+        let corpo: Value = serde_json::from_str(&resposta.text()).expect("json");
+        assert_eq!(corpo["operatingSystem"], "openwrt");
+        assert_eq!(corpo["source"], "snmp");
+        assert_eq!(corpo["fromDiscovery"], true);
+        assert_eq!(corpo["suggestedName"], "bpi-r3-cache");
+        assert_eq!(corpo["suggestedVendor"], "Banana Pi");
+        assert_eq!(corpo["suggestedModel"], "BPI-R3");
     })
     .await;
 }
