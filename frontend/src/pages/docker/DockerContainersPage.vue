@@ -179,7 +179,7 @@
       Nenhum container encontrado para os filtros selecionados.
     </v-alert>
 
-    <v-dialog v-model="detailDialog" max-width="980" scrollable>
+    <v-dialog v-model="detailDialog" :fullscreen="$vuetify.display.xs" max-width="980" scrollable>
       <v-card rounded="xl" class="docker-detail-card">
         <v-card-title class="d-flex align-center ga-2">
           <v-icon color="primary">mdi-cube-outline</v-icon>
@@ -760,8 +760,21 @@ function notify(message: string, color: string): void {
   background: rgb(var(--v-theme-surface));
   color: rgb(var(--v-theme-on-surface));
 }
+/*
+ * O card do diálogo é um flex column: título, abas e corpo dividem a altura
+ * disponível. O corpo é o único item rolável, mas o `min-height` fixo o
+ * impedia de encolher — num viewport curto o excedente espremia o título e as
+ * abas, que ficavam por baixo do conteúdo. Travar o cabeçalho elimina a
+ * sobreposição e o `min()` mantém a altura estável entre as abas sem pedir
+ * mais espaço do que o diálogo tem para dar.
+ */
+.docker-detail-card > .v-card-title,
+.docker-detail-card > .v-tabs,
+.docker-detail-card > .v-divider {
+  flex: 0 0 auto;
+}
 .docker-detail-body {
-  min-height: 420px;
+  min-height: min(420px, 45vh);
 }
 .docker-code,
 .docker-logs {

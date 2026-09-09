@@ -1,6 +1,7 @@
 <template>
   <v-dialog
     v-model="state.isOpen"
+    :fullscreen="$vuetify.display.xs"
     :max-width="state.options.width || 480"
     :persistent="state.options.persistent"
     @update:model-value="onModelUpdate"

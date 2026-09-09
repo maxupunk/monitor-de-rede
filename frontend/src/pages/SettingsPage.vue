@@ -44,7 +44,7 @@
       </v-col>
     </v-row>
 
-    <v-dialog v-model="confirmDialog" max-width="520">
+    <v-dialog v-model="confirmDialog" :fullscreen="$vuetify.display.xs" max-width="520">
       <v-card class="rounded-lg">
         <v-card-title class="font-weight-bold d-flex align-center">
           <v-icon start color="warning">mdi-alert-outline</v-icon>

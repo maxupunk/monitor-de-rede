@@ -501,7 +501,12 @@
 
     <SiteDialog v-model="siteDialog" @saved="onSiteCreated" />
 
-    <v-dialog v-model="ipChangeConfirmation" max-width="540" persistent>
+    <v-dialog
+      v-model="ipChangeConfirmation"
+      :fullscreen="$vuetify.display.xs"
+      max-width="540"
+      persistent
+    >
       <v-card class="rounded-lg">
         <v-card-title class="font-weight-bold d-flex align-center ga-2">
           <v-icon color="warning">mdi-alert-circle-outline</v-icon>
@@ -530,7 +535,7 @@
       </v-card>
     </v-dialog>
 
-    <v-dialog v-model="snmpIntervalConfirmation" max-width="520">
+    <v-dialog v-model="snmpIntervalConfirmation" :fullscreen="$vuetify.display.xs" max-width="520">
       <v-card class="rounded-lg">
         <v-card-title class="font-weight-bold">Aplicar intervalo SNMP?</v-card-title>
         <v-card-text>

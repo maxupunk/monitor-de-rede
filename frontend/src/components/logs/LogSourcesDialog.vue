@@ -1,5 +1,5 @@
 <template>
-  <v-dialog v-model="open" max-width="900">
+  <v-dialog v-model="open" :fullscreen="$vuetify.display.xs" max-width="900">
     <v-card class="rounded-lg">
       <v-card-title class="d-flex align-center">
         <v-icon start>mdi-lan-connect</v-icon>

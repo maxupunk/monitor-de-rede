@@ -1,5 +1,5 @@
 <template>
-  <v-dialog v-model="dialog" max-width="780">
+  <v-dialog v-model="dialog" :fullscreen="$vuetify.display.xs" max-width="780">
     <v-card rounded="lg">
       <v-card-title class="pa-4 d-flex align-center">
         <v-icon color="primary" class="mr-2">mdi-chart-tree</v-icon>

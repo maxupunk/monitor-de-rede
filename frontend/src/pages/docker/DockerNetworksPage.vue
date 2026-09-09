@@ -83,7 +83,7 @@
       </ResponsiveDataTable>
     </v-card>
 
-    <v-dialog v-model="createDialog" max-width="520">
+    <v-dialog v-model="createDialog" :fullscreen="$vuetify.display.xs" max-width="520">
       <v-card rounded="xl">
         <v-card-title>Nova rede Docker</v-card-title>
         <v-card-text>
@@ -115,7 +115,7 @@
       </v-card>
     </v-dialog>
 
-    <v-dialog v-model="detailDialog" max-width="900" scrollable>
+    <v-dialog v-model="detailDialog" :fullscreen="$vuetify.display.xs" max-width="900" scrollable>
       <v-card rounded="xl">
         <v-card-title class="d-flex align-center ga-2">
           <v-icon color="primary">mdi-lan</v-icon>

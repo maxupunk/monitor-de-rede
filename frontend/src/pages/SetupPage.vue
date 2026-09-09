@@ -19,7 +19,7 @@
       </v-alert>
     </v-expand-transition>
 
-    <v-form ref="formRef" validate-on="submit" @submit.prevent="handleSetup">
+    <v-form ref="formRef" validate-on="lazy invalid-input" @submit.prevent="handleSetup">
       <div class="text-overline text-medium-emphasis mb-2">Administrador</div>
 
       <v-text-field

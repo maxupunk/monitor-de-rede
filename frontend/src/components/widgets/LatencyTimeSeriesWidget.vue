@@ -181,7 +181,7 @@
     </v-card-actions>
 
     <!-- Diálogo de Detalhes da Amostragem Selecionada -->
-    <v-dialog v-model="detailDialog" max-width="700px" scrollable>
+    <v-dialog v-model="detailDialog" :fullscreen="$vuetify.display.xs" max-width="700px" scrollable>
       <v-card v-if="selectedSample" class="rounded-lg">
         <v-card-title
           class="d-flex align-center justify-space-between py-3 px-4 bg-surface-variant"

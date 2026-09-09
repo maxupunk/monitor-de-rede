@@ -255,7 +255,7 @@
       atinge todo o inventário, e o diálogo precisa dizer isso com todas as
       letras antes de o operador confirmar.
     -->
-    <v-dialog v-model="exclusaoDialog" max-width="460">
+    <v-dialog v-model="exclusaoDialog" :fullscreen="$vuetify.display.xs" max-width="460">
       <v-card class="rounded-lg pa-2">
         <v-card-item>
           <template #prepend>

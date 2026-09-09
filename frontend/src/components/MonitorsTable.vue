@@ -311,7 +311,7 @@
   <MonitorDetailDialog v-model="detalheAberto" :monitor-id="monitorEmDetalhe" />
 
   <!-- Confirmação de exclusão -->
-  <v-dialog v-model="deleteDialog" max-width="440">
+  <v-dialog v-model="deleteDialog" :fullscreen="$vuetify.display.xs" max-width="440">
     <v-card class="rounded-lg pa-2">
       <v-card-item>
         <template #prepend>

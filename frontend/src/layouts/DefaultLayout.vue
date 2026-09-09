@@ -71,11 +71,6 @@
     <v-app-bar flat border="b" density="comfortable" class="px-2 pwa-app-bar">
       <v-app-bar-nav-icon @click="drawer = !drawer" />
 
-      <v-toolbar-title class="text-subtitle-1 font-weight-bold text-high-emphasis text-truncate">
-        <span class="hidden-sm-and-down">Plataforma de Monitoramento de Redes</span>
-        <span class="hidden-md-and-up">NetMonitor</span>
-      </v-toolbar-title>
-
       <v-spacer />
 
       <!-- Status SSE Tempo Real -->
@@ -193,7 +188,7 @@
     <InitialSetupDialog v-model="onboardingStore.showWizard" />
 
     <!-- Diálogo de Instruções de Instalação no iOS -->
-    <v-dialog v-model="showIosDialog" max-width="420">
+    <v-dialog v-model="showIosDialog" :fullscreen="$vuetify.display.xs" max-width="420">
       <v-card class="rounded-xl pa-4">
         <v-card-title class="d-flex align-center font-weight-bold">
           <v-icon color="primary" class="mr-2">mdi-apple</v-icon>

@@ -174,7 +174,7 @@
     </v-card>
 
     <!-- Confirmação de exclusão -->
-    <v-dialog v-model="deleteDialog" max-width="420">
+    <v-dialog v-model="deleteDialog" :fullscreen="$vuetify.display.xs" max-width="420">
       <v-card class="rounded-lg pa-2">
         <v-card-item>
           <template #prepend>

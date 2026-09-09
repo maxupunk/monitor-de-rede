@@ -1,5 +1,5 @@
 <template>
-  <v-dialog v-model="open" max-width="760" :persistent="running">
+  <v-dialog v-model="open" :fullscreen="$vuetify.display.xs" max-width="760" :persistent="running">
     <v-card class="rounded-lg">
       <v-card-title class="d-flex align-center">
         <v-icon start>mdi-console-network-outline</v-icon>

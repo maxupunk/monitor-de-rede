@@ -1,5 +1,5 @@
 <template>
-  <v-dialog v-model="isOpen" max-width="850" scrollable>
+  <v-dialog v-model="isOpen" :fullscreen="$vuetify.display.xs" max-width="850" scrollable>
     <v-card class="rounded-lg">
       <v-card-title class="d-flex align-center justify-space-between py-3 px-4">
         <div class="d-flex align-center ga-2">

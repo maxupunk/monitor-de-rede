@@ -15,7 +15,7 @@
       </v-alert>
     </v-expand-transition>
 
-    <v-form ref="formRef" validate-on="submit" @submit.prevent="handleLogin">
+    <v-form ref="formRef" validate-on="lazy invalid-input" @submit.prevent="handleLogin">
       <v-text-field
         v-model="email"
         label="E-mail"

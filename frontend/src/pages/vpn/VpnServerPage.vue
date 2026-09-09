@@ -307,7 +307,7 @@
       arquivo e para de fechar o túnel até receber a configuração nova. Sem peers
       não há o que quebrar, e perguntar ali seria cerimônia.
     -->
-    <v-dialog v-model="confirmacaoDeTroca" max-width="560">
+    <v-dialog v-model="confirmacaoDeTroca" :fullscreen="$vuetify.display.xs" max-width="560">
       <v-card class="rounded-lg">
         <v-card-title class="font-weight-bold">Substituir o endereço público?</v-card-title>
         <v-card-text>

@@ -218,7 +218,7 @@
       @saved="onSaved"
     ></UserDialog>
 
-    <v-dialog v-model="deleteDialog" max-width="460">
+    <v-dialog v-model="deleteDialog" :fullscreen="$vuetify.display.xs" max-width="460">
       <v-card rounded="xl">
         <v-card-title class="pa-5 pb-2">Excluir usuário?</v-card-title>
         <v-card-text>

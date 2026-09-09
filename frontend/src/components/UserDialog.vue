@@ -1,5 +1,11 @@
 <template>
-  <v-dialog :model-value="modelValue" max-width="640" persistent @update:model-value="close">
+  <v-dialog
+    :fullscreen="$vuetify.display.xs"
+    :model-value="modelValue"
+    max-width="640"
+    persistent
+    @update:model-value="close"
+  >
     <v-card rounded="xl">
       <v-card-title class="d-flex align-center pa-5 pb-3">
         <v-avatar color="primary" variant="tonal" size="40" class="mr-3">

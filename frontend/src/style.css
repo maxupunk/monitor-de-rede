@@ -114,10 +114,33 @@ body,
     padding: 12px !important;
   }
 
+  /*
+   * Todo diálogo abre em tela cheia no mobile (`:fullscreen` no `<v-dialog>`).
+   * A margem inferior que os cards ganham acima é para o empilhamento das
+   * páginas — dentro de um diálogo em tela cheia ela só abriria uma fresta do
+   * fundo embaixo e um scroll de 8px.
+   */
+  .v-dialog > .v-overlay__content > .v-card,
+  .v-dialog > .v-overlay__content > form > .v-card {
+    margin-bottom: 0;
+  }
+
   /* Garante que tabelas de detalhes e abas tenham rolagem suave com toque */
   .table-responsive {
     -webkit-overflow-scrolling: touch;
   }
+}
+
+/*
+ * Um diálogo em tela cheia não tem cantos para arredondar. O Vuetify já zera o
+ * raio, mas as utilitárias `rounded-*` (e o prop `rounded` do card) carregam
+ * `!important` e venciam a regra — sobravam cantos com o fundo aparecendo.
+ */
+.v-dialog--fullscreen > .v-overlay__content > .v-card,
+.v-dialog--fullscreen > .v-overlay__content > .v-sheet,
+.v-dialog--fullscreen > .v-overlay__content > form > .v-card,
+.v-dialog--fullscreen > .v-overlay__content > form > .v-sheet {
+  border-radius: 0 !important;
 }
 
 /* Suporte a Safe Areas e PWA Native Status Bar */

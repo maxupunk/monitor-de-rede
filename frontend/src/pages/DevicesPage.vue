@@ -251,7 +251,7 @@
     </v-card>
 
     <!-- Diálogo de Associação em Lote do Dispositivo Pai -->
-    <v-dialog v-model="batchParentDialog" max-width="500">
+    <v-dialog v-model="batchParentDialog" :fullscreen="$vuetify.display.xs" max-width="500">
       <v-card class="rounded-xl pa-4 elevation-12">
         <v-card-title class="font-weight-bold d-flex align-center ga-2 pa-0 mb-3">
           <v-icon color="primary">mdi-sitemap</v-icon>

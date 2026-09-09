@@ -90,7 +90,7 @@
       </ResponsiveDataTable>
     </v-card>
 
-    <v-dialog v-model="detailDialog" max-width="860" scrollable>
+    <v-dialog v-model="detailDialog" :fullscreen="$vuetify.display.xs" max-width="860" scrollable>
       <v-card rounded="xl">
         <v-card-title class="d-flex align-center ga-2">
           <v-icon color="primary">mdi-layers-outline</v-icon>

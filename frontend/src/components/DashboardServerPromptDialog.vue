@@ -1,5 +1,5 @@
 <template>
-  <v-dialog v-model="isOpen" max-width="640" persistent>
+  <v-dialog v-model="isOpen" :fullscreen="$vuetify.display.xs" max-width="640" persistent>
     <v-card class="rounded-lg pa-2">
       <v-card-item class="pb-2">
         <template #prepend>

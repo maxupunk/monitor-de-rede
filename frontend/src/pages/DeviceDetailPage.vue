@@ -202,7 +202,7 @@
     </v-card>
 
     <!-- Modal de Descoberta SNMP -->
-    <v-dialog v-model="scanModalOpen" max-width="900" scrollable>
+    <v-dialog v-model="scanModalOpen" :fullscreen="$vuetify.display.xs" max-width="900" scrollable>
       <v-card class="rounded-lg">
         <v-card-title
           class="font-weight-bold d-flex align-center justify-space-between bg-primary text-white pa-4"
@@ -403,7 +403,12 @@
       </v-card>
     </v-dialog>
 
-    <v-dialog v-model="snmpRemovalConfirmation" max-width="560" persistent>
+    <v-dialog
+      v-model="snmpRemovalConfirmation"
+      :fullscreen="$vuetify.display.xs"
+      max-width="560"
+      persistent
+    >
       <v-card class="rounded-lg">
         <v-card-title class="font-weight-bold d-flex align-center ga-2">
           <v-icon color="warning">mdi-alert-circle-outline</v-icon>

@@ -310,6 +310,7 @@
     <!-- Diálogo de Busca Rápida Mobile -->
     <v-dialog
       v-model="mobileSearchOpen"
+      :fullscreen="$vuetify.display.xs"
       :max-width="500"
       scrollable
       transition="dialog-bottom-transition"
@@ -502,7 +503,7 @@
     </v-dialog>
 
     <!-- Diálogo de Confirmação de Exclusão de Dispositivo/Switch -->
-    <v-dialog v-model="deleteDeviceDialog" max-width="420">
+    <v-dialog v-model="deleteDeviceDialog" :fullscreen="$vuetify.display.xs" max-width="420">
       <v-card v-if="deviceToDelete" class="rounded-xl pa-4 elevation-12">
         <v-card-title class="font-weight-bold d-flex align-center pa-0 mb-2">
           <v-icon color="error" class="mr-2">mdi-alert-circle</v-icon>
