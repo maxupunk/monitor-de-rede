@@ -50,6 +50,7 @@ describe('DatabaseInfoCard.vue', () => {
     expect(apiService.get).toHaveBeenCalledWith('/settings/database-size')
     expect(wrapper.text()).toContain('10 MiB')
     expect(wrapper.text()).toContain('SQLite')
+    expect(wrapper.text()).toContain('Total de Histórico')
     expect(wrapper.text()).toContain('Primeiro Registro')
     expect(wrapper.text()).toContain('Último Registro')
   })

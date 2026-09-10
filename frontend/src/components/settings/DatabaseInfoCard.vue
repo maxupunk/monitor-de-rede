@@ -11,7 +11,7 @@
       </p>
 
       <v-row dense>
-        <v-col cols="12" sm="6" md="3">
+        <v-col cols="12" sm="6" md="4">
           <div class="d-flex align-center justify-space-between pa-3 rounded border h-100">
             <div>
               <div class="font-weight-bold text-subtitle-2">Tamanho Total</div>
@@ -21,7 +21,7 @@
           </div>
         </v-col>
 
-        <v-col cols="12" sm="6" md="3">
+        <v-col cols="12" sm="6" md="4">
           <div class="d-flex align-center justify-space-between pa-3 rounded border h-100">
             <div>
               <div class="font-weight-bold text-subtitle-2">Tipo</div>
@@ -31,7 +31,17 @@
           </div>
         </v-col>
 
-        <v-col cols="12" sm="6" md="3">
+        <v-col cols="12" sm="6" md="4">
+          <div class="d-flex align-center justify-space-between pa-3 rounded border h-100">
+            <div>
+              <div class="font-weight-bold text-subtitle-2">Total de Histórico</div>
+              <div class="text-caption text-grey">{{ formattedHistorySpan }}</div>
+            </div>
+            <v-icon color="info" size="28">mdi-history</v-icon>
+          </div>
+        </v-col>
+
+        <v-col cols="12" sm="6" md="6">
           <div class="d-flex align-center justify-space-between pa-3 rounded border h-100">
             <div>
               <div class="font-weight-bold text-subtitle-2">Primeiro Registro</div>
@@ -41,7 +51,7 @@
           </div>
         </v-col>
 
-        <v-col cols="12" sm="6" md="3">
+        <v-col cols="12" sm="6" md="6">
           <div class="d-flex align-center justify-space-between pa-3 rounded border h-100">
             <div>
               <div class="font-weight-bold text-subtitle-2">Último Registro</div>
@@ -149,7 +159,7 @@ import { computed, onMounted, ref } from 'vue'
 import { apiService } from '@/services/apiService'
 import type { DatabaseInfo } from '@/bindings/DatabaseInfo'
 import type { ClearHistoryStats } from '@/bindings/ClearHistoryStats'
-import { formatBinaryBytes, formatDateTime } from '@/utils/formatters'
+import { formatBinaryBytes, formatDateTime, formatTimeSpan } from '@/utils/formatters'
 
 const loading = ref(false)
 const clearing = ref(false)
@@ -176,6 +186,11 @@ const formattedEarliestRecord = computed(() => {
 const formattedLatestRecord = computed(() => {
   if (!info.value?.latestRecord) return '—'
   return formatDateTime(info.value.latestRecord)
+})
+
+const formattedHistorySpan = computed(() => {
+  if (!info.value?.earliestRecord || !info.value?.latestRecord) return '—'
+  return formatTimeSpan(info.value.earliestRecord, info.value.latestRecord)
 })
 
 async function fetchDatabaseInfo(): Promise<void> {

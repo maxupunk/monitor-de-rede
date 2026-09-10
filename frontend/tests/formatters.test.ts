@@ -4,6 +4,7 @@ import {
   formatDecimalBytes,
   formatLatency,
   formatMeasuredValue,
+  formatTimeSpan,
 } from '../src/utils/formatters.ts'
 
 describe('formatters', () => {
@@ -42,5 +43,32 @@ describe('formatters', () => {
   it('distingue bytes binários de contadores decimais', () => {
     expect(formatBinaryBytes(1_048_576)).toBe('1 MiB')
     expect(formatDecimalBytes(1_000_000)).toBe('1 MB')
+  })
+
+  it('formata o total de dias/horas de histórico entre duas datas', () => {
+    const start = new Date('2026-08-01T10:00:00Z')
+    const end31d6h = new Date('2026-09-01T16:00:00Z')
+    expect(formatTimeSpan(start, end31d6h)).toBe('31 dias e 6 horas')
+
+    const end1d1h = new Date('2026-08-02T11:00:00Z')
+    expect(formatTimeSpan(start, end1d1h)).toBe('1 dia e 1 hora')
+
+    const end1d = new Date('2026-08-02T10:00:00Z')
+    expect(formatTimeSpan(start, end1d)).toBe('1 dia')
+
+    const end5h = new Date('2026-08-01T15:00:00Z')
+    expect(formatTimeSpan(start, end5h)).toBe('5 horas')
+
+    const end5h30m = new Date('2026-08-01T15:30:00Z')
+    expect(formatTimeSpan(start, end5h30m)).toBe('5 horas e 30 min')
+
+    const end15m = new Date('2026-08-01T10:15:00Z')
+    expect(formatTimeSpan(start, end15m)).toBe('15 minutos')
+
+    const end0 = new Date('2026-08-01T10:00:00Z')
+    expect(formatTimeSpan(start, end0)).toBe('menos de 1 minuto')
+
+    expect(formatTimeSpan(null, null)).toBe('—')
+    expect(formatTimeSpan(start, null)).toBe('—')
   })
 })

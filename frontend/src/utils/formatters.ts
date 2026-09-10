@@ -147,6 +147,41 @@ export function formatRelativeTime(value?: string | Date | null, emptyLabel = 'n
   return `há ${Math.floor(elapsedSeconds / 86400)} dias`
 }
 
+/**
+ * Intervalo de tempo formatado em dias e horas: "15 dias e 4 horas", "1 dia", "6 horas", etc.
+ */
+export function formatTimeSpan(
+  startDate?: string | Date | null,
+  endDate?: string | Date | null,
+  fallback = '—'
+): string {
+  const start = toDate(startDate)
+  const end = toDate(endDate)
+  if (!start || !end) return fallback
+
+  const diffMs = Math.max(0, end.getTime() - start.getTime())
+  const totalMinutes = Math.floor(diffMs / (1000 * 60))
+  const totalHours = Math.floor(totalMinutes / 60)
+  const days = Math.floor(totalHours / 24)
+  const hours = totalHours % 24
+  const minutes = totalMinutes % 60
+
+  if (days === 0 && totalHours === 0) {
+    if (minutes === 0) return 'menos de 1 minuto'
+    return `${minutes} ${minutes === 1 ? 'minuto' : 'minutos'}`
+  }
+
+  if (days === 0) {
+    if (minutes === 0) return `${totalHours} ${totalHours === 1 ? 'hora' : 'horas'}`
+    return `${totalHours} ${totalHours === 1 ? 'hora' : 'horas'} e ${minutes} min`
+  }
+
+  const daysLabel = `${days} ${days === 1 ? 'dia' : 'dias'}`
+  if (hours === 0) return daysLabel
+  const hoursLabel = `${hours} ${hours === 1 ? 'hora' : 'horas'}`
+  return `${daysLabel} e ${hoursLabel}`
+}
+
 function toDate(value?: string | Date | null): Date | null {
   if (!value) return null
   const date = value instanceof Date ? value : new Date(value)
