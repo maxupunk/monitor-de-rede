@@ -103,6 +103,7 @@ mod tests {
         Model {
             id: 1,
             device_id: None,
+            interface_id: None,
             probe_id: None,
             r#type: "tcp".to_string(),
             name: "Teste".to_string(),

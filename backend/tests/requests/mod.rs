@@ -20,6 +20,7 @@ mod docker;
 mod health_rules;
 mod interface_duplicate_merge;
 mod maintenance_windows;
+mod monitor_interface_binding;
 mod prepare_data;
 mod process_deps;
 mod push;

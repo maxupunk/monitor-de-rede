@@ -235,6 +235,7 @@ mod tests {
         monitors::Model {
             id: 1,
             device_id: Some(1),
+            interface_id: None,
             probe_id: None,
             r#type: kind.into(),
             name: kind.into(),

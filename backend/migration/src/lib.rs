@@ -46,6 +46,7 @@ mod m20260822_000001_icmp_filtered_alert;
 mod m20260826_000001_device_syslog_server_address;
 mod m20260828_000001_device_link_interface;
 mod m20260909_000001_merge_duplicate_device_interfaces;
+mod m20260909_000002_monitors_interface_id;
 
 pub struct Migrator;
 
@@ -159,6 +160,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260826_000001_device_syslog_server_address::Migration),
             Box::new(m20260828_000001_device_link_interface::Migration),
             Box::new(m20260909_000001_merge_duplicate_device_interfaces::Migration),
+            Box::new(m20260909_000002_monitors_interface_id::Migration),
             // inject-above (do not remove this comment)
         ]
     }

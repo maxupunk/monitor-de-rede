@@ -196,6 +196,7 @@ mod tests {
         monitors::Model {
             id: 1,
             device_id: Some(7),
+            interface_id: None,
             probe_id: None,
             r#type: kind.to_string(),
             name: "Saúde do sistema".into(),

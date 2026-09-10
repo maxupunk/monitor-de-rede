@@ -9,6 +9,13 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i64,
     pub device_id: Option<i64>,
+    /// Interface de `device_interfaces` que este monitor observa.
+    ///
+    /// `None` em monitor do dispositivo inteiro (ping, TCP, `cpu_usage`,
+    /// `memory_usage`). O vínculo era feito pelo nome — `Interface {ifName}` —,
+    /// o que fazia duas portas homônimas dividirem um monitor só e perdia o
+    /// vínculo quando o operador renomeava a porta no equipamento.
+    pub interface_id: Option<i64>,
     pub probe_id: Option<i64>,
     pub r#type: String,
     pub name: String,

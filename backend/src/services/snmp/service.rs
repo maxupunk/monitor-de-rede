@@ -262,81 +262,185 @@ pub async fn scan_device(
     let enabled = |name: &str| existing.iter().any(|monitor| monitor.name == name);
     scan.has_cpu_monitor = enabled(CPU_MONITOR_NAME);
     scan.has_memory_monitor = enabled(MEMORY_MONITOR_NAME);
-    for interface in &mut scan.interfaces {
-        interface.is_monitored = enabled(&interface_monitor_name(&interface.if_name));
+
+    // A varredura não conhece o `id` da linha: é a cadeia de identidade que liga
+    // a porta recém-lida ao registro local, e só então a pergunta "esta é
+    // monitorada?" tem um alvo. Pelo nome, a órfã de uma PPPoE renumerada
+    // aparecia marcada e o diálogo de descoberta acusava remoção a cada
+    // gravação, para uma interface que o operador não tinha como selecionar.
+    let monitoradas: std::collections::BTreeSet<i64> = existing
+        .iter()
+        .filter_map(|monitor| monitor.interface_id)
+        .collect();
+    let linhas = device_interfaces::Entity::find()
+        .filter(device_interfaces_entity::Column::DeviceId.eq(device.id))
+        .all(&ctx.db)
+        .await?;
+    let mut casadas = InterfaceMatcher::resolve(linhas, &scan.interfaces);
+    for (posicao, interface) in scan.interfaces.iter_mut().enumerate() {
+        interface.is_monitored = casadas
+            .take(posicao)
+            .is_some_and(|linha| monitoradas.contains(&linha.id));
     }
     Ok(scan)
 }
 
 /// Casa cada interface da varredura com a linha já persistida.
 ///
-/// # Por que o nome vem antes do índice
+/// # O problema
 ///
-/// A identidade estável de uma porta é o **nome**; o `ifIndex` é volátil. Uma
-/// interface PPPoE renumera a cada reconexão, e o índice que ela liberou é
-/// reaproveitado por outra porta no boot seguinte. Casar por índice primeiro
-/// errava exatamente aí: com `pppoe-wan` gravada no índice 34 e o roteador
-/// reportando `br-lan` nesse índice, a linha da `pppoe-wan` era **renomeada**
-/// para `br-lan` — o histórico da porta continuava colado num registro que
-/// agora descreve outra coisa.
+/// O `ifIndex` não é identidade. A RFC 2863 só garante que ele seja constante
+/// **entre re-inicializações** do agente, não através de reboots — e uma
+/// interface PPPoE renumera a cada reconexão, liberando um índice que a próxima
+/// porta reaproveita. Casar por índice erra dos dois jeitos: perde a interface
+/// que se moveu e sequestra a linha de outra que herdou o número.
 ///
-/// # Por que nem todo nome entra
+/// # A cadeia
 ///
-/// Um agente SNMP pode reportar duas portas com o mesmo `ifName`. Nesse caso o
-/// nome não identifica ninguém, e casar por ele faria as duas interfaces
-/// disputarem a mesma linha. Nomes repetidos ficam de fora do índice por nome e
-/// caem no `ifIndex`, que ao menos as distingue.
+/// Em vez de eleger um único campo, cada interface casa pelo sinal mais forte
+/// que ela tiver, na ordem `ifAlias` → `ifName` → `ifDescr` → `ifPhysAddress` →
+/// `ifIndex`:
 ///
-/// # Por que cada linha só pode ser reivindicada uma vez
+/// - **`ifAlias`** primeiro porque é o que a RFC 2863 desenha para isto: o
+///   agente é obrigado a preservá-lo através de reboots, e é o operador quem o
+///   escreve. É a âncora que o PRTG usa para reconciliar índice após reset.
+/// - **`ifName`** e **`ifDescr`** em seguida — os dois modos que o LibreNMS
+///   oferece como alternativa ao índice.
+/// - **`ifPhysAddress`** só como desempate tardio: num roteador Linux as
+///   bridges e VLANs herdam o MAC da porta física, então ele identifica muito
+///   menos do que parece. Nos dados de produção deste projeto, 42 interfaces
+///   têm MAC e só 18 desses valores são únicos no dispositivo.
+/// - **`ifIndex`** por último, como recurso de quem não tem mais nada.
 ///
-/// Os mapas antigos eram montados uma única vez, antes do laço, e não
-/// enxergavam o que o próprio laço criava ou alterava. Duas interfaces da mesma
-/// varredura podiam resolver para a mesma linha e sobrescrever uma à outra, o
-/// que transformava duas portas em uma. `claim` consome a linha: a segunda
-/// pretendente não a encontra e vira registro novo, que é o que ela é.
+/// A diferença para o modo configurável do LibreNMS é que aqui a degradação é
+/// **por interface**, não por equipamento: num parque misto, o Mikrotik com
+/// `ifAlias` preenchido e o OpenWrt sem ele são atendidos pela mesma regra, sem
+/// ninguém precisar escolher o modo certo para cada um.
+///
+/// # Por que a unicidade é exigida dos dois lados
+///
+/// Um sinal só identifica quando aponta para **uma** linha e vem de **uma**
+/// interface. Exigir unicidade apenas no banco deixava o desempate na mão da
+/// ordem de iteração: com duas portas `lan` na varredura e uma no banco, quem
+/// ficava com a linha era quem chegasse primeiro. Ambíguo de qualquer um dos
+/// lados, o sinal é descartado e a decisão desce para o próximo da cadeia.
+///
+/// # Por que em duas passadas
+///
+/// Resolver interface a interface faria um casamento fraco consumir a linha que
+/// um casamento forte reivindicaria depois. A resolução acontece de uma vez,
+/// sinal por sinal sobre o conjunto inteiro: todos os `ifAlias` casam antes de
+/// qualquer `ifName` ser considerado.
 struct InterfaceMatcher {
-    rows: BTreeMap<i64, device_interfaces::Model>,
-    by_name: HashMap<String, i64>,
-    by_index: BTreeMap<i32, i64>,
+    /// Posição da interface na varredura → linha do banco que lhe corresponde.
+    casados: HashMap<usize, device_interfaces::Model>,
+}
+
+/// Normaliza um sinal textual: `None` quando não serve para identificar.
+fn sinal(valor: Option<&str>) -> Option<String> {
+    let limpo = valor?.trim().to_lowercase();
+    if limpo.is_empty() {
+        return None;
+    }
+    Some(limpo)
+}
+
+/// O MAC zerado é o que um agente devolve para interface sem endereço (loopback,
+/// túnel, PPP). Tratá-lo como sinal juntaria todas elas numa só.
+fn sinal_mac(valor: Option<&str>) -> Option<String> {
+    let limpo = sinal(valor)?;
+    if limpo.bytes().all(|b| b == b'0' || b == b':' || b == b'-') {
+        return None;
+    }
+    Some(limpo)
+}
+
+/// Os extratores da cadeia, do sinal mais forte para o mais fraco.
+type Extrator = (
+    fn(&device_interfaces::Model) -> Option<String>,
+    fn(&SnmpInterface) -> Option<String>,
+);
+
+const CADEIA: &[Extrator] = &[
+    (
+        |row| sinal(row.alias.as_deref()),
+        |src| sinal(src.if_alias.as_deref()),
+    ),
+    (
+        |row| sinal(Some(&row.name)),
+        |src| sinal(Some(&src.if_name)),
+    ),
+    (
+        |row| sinal(row.description.as_deref()),
+        |src| sinal(src.if_descr.as_deref()),
+    ),
+    (
+        |row| sinal_mac(row.mac_address.as_deref()),
+        |src| sinal_mac(src.mac_address.as_deref()),
+    ),
+    (
+        |row| row.snmp_index.map(|indice| indice.to_string()),
+        |src| Some(src.if_index.to_string()),
+    ),
+];
+
+/// Índice `valor → chave` contendo só os valores que aparecem uma única vez.
+fn apenas_unicos<T: Copy, I: IntoIterator<Item = (String, T)>>(pares: I) -> HashMap<String, T> {
+    let mut unicos: HashMap<String, T> = HashMap::new();
+    let mut repetidos: Vec<String> = Vec::new();
+    for (valor, chave) in pares {
+        if unicos.insert(valor.clone(), chave).is_some() {
+            repetidos.push(valor);
+        }
+    }
+    for valor in repetidos {
+        unicos.remove(&valor);
+    }
+    unicos
 }
 
 impl InterfaceMatcher {
-    fn new(rows: Vec<device_interfaces::Model>) -> Self {
-        let mut by_name: HashMap<String, i64> = HashMap::new();
-        let mut ambiguos: std::collections::HashSet<String> = std::collections::HashSet::new();
-        let mut by_index = BTreeMap::new();
-        let mut indexed = BTreeMap::new();
+    fn resolve(linhas: Vec<device_interfaces::Model>, varredura: &[SnmpInterface]) -> Self {
+        let mut disponiveis: BTreeMap<i64, device_interfaces::Model> =
+            linhas.into_iter().map(|row| (row.id, row)).collect();
+        let mut pendentes: Vec<usize> = (0..varredura.len()).collect();
+        let mut casados = HashMap::new();
 
-        for row in rows {
-            let chave = row.name.to_lowercase();
-            if by_name.insert(chave.clone(), row.id).is_some() {
-                ambiguos.insert(chave);
+        for (do_banco, da_varredura) in CADEIA {
+            if pendentes.is_empty() || disponiveis.is_empty() {
+                break;
             }
-            if let Some(index) = row.snmp_index {
-                by_index.insert(index, row.id);
+            let no_banco = apenas_unicos(
+                disponiveis
+                    .values()
+                    .filter_map(|row| do_banco(row).map(|valor| (valor, row.id))),
+            );
+            let na_varredura = apenas_unicos(
+                pendentes
+                    .iter()
+                    .filter_map(|&pos| da_varredura(&varredura[pos]).map(|valor| (valor, pos))),
+            );
+
+            for (valor, pos) in na_varredura {
+                let Some(&id) = no_banco.get(&valor) else {
+                    continue;
+                };
+                let Some(row) = disponiveis.remove(&id) else {
+                    continue;
+                };
+                casados.insert(pos, row);
             }
-            indexed.insert(row.id, row);
-        }
-        for chave in ambiguos {
-            by_name.remove(&chave);
+            pendentes.retain(|pos| !casados.contains_key(pos));
         }
 
-        Self {
-            rows: indexed,
-            by_name,
-            by_index,
-        }
+        Self { casados }
     }
 
-    /// Devolve — e consome — a linha correspondente, ou `None` quando a
-    /// interface é nova para este dispositivo.
-    fn claim(&mut self, source: &SnmpInterface) -> Option<device_interfaces::Model> {
-        let id = self
-            .by_name
-            .get(&source.if_name.to_lowercase())
-            .or_else(|| self.by_index.get(&source.if_index))
-            .copied()?;
-        self.rows.remove(&id)
+    /// A linha correspondente à interface nesta posição da varredura, ou `None`
+    /// quando ela é nova para o dispositivo. Consome: cada linha vale por uma
+    /// varredura.
+    fn take(&mut self, posicao: usize) -> Option<device_interfaces::Model> {
+        self.casados.remove(&posicao)
     }
 }
 
@@ -362,11 +466,11 @@ pub async fn poll_device(
         .filter(device_interfaces_entity::Column::DeviceId.eq(device.id))
         .all(&ctx.db)
         .await?;
-    let mut conhecidas = InterfaceMatcher::new(existing_interfaces);
+    let mut conhecidas = InterfaceMatcher::resolve(existing_interfaces, &scan.interfaces);
 
     let mut interfaces = std::collections::BTreeMap::new();
-    for interface in &scan.interfaces {
-        let existing = conhecidas.claim(interface);
+    for (posicao, interface) in scan.interfaces.iter().enumerate() {
+        let existing = conhecidas.take(posicao);
         let saved = sync_interface(&ctx.db, device.id, interface, existing.as_ref()).await?;
         // Só interface administrativamente habilitada é avaliada: uma porta
         // que o operador desligou não pode gerar alerta de queda de link.
@@ -793,7 +897,7 @@ pub async fn apply_monitors(
         .map(|i| i.if_name.to_lowercase())
         .collect();
 
-    let mut conhecidas = InterfaceMatcher::new(db_interfaces.clone());
+    let mut conhecidas = InterfaceMatcher::resolve(db_interfaces.clone(), &scan.interfaces);
 
     // Numa transação porque a remoção de uma interface são três escritas que
     // só valem juntas — métricas, monitor e a própria linha. Sem ela, o pool de
@@ -809,10 +913,11 @@ pub async fn apply_monitors(
         {
             continue;
         }
-        let monitor_name = interface_monitor_name(&db_iface.name);
+        // Pelo vínculo, não pelo nome: apagar o monitor da porta homônima
+        // que continua viva seria pior do que não apagar nada.
         let monitor = monitors::Entity::find()
             .filter(monitors_entity::Column::DeviceId.eq(Some(device.id)))
-            .filter(monitors_entity::Column::Name.eq(&monitor_name))
+            .filter(monitors_entity::Column::InterfaceId.eq(Some(db_iface.id)))
             .one(&removal)
             .await?;
         if clear_history {
@@ -846,8 +951,8 @@ pub async fn apply_monitors(
         .monitored_if_indexes
         .into_iter()
         .collect::<std::collections::BTreeSet<_>>();
-    for source in &scan.interfaces {
-        let existing = conhecidas.claim(source);
+    for (posicao, source) in scan.interfaces.iter().enumerate() {
+        let existing = conhecidas.take(posicao);
         let interface = sync_interface(&ctx.db, device.id, source, existing.as_ref())
             .await?
             .interface;
@@ -865,12 +970,15 @@ pub async fn apply_monitors(
     if let Some(enabled) = options.enable_cpu_monitor {
         sync_monitor(
             &ctx.db,
-            device.id,
-            CPU_MONITOR_NAME,
-            enabled,
-            monitor_configuration(&config, "cpu_usage"),
-            true,
-            device.snmp_poll_interval_seconds,
+            MonitorSpec {
+                device_id: device.id,
+                interface: None,
+                name: CPU_MONITOR_NAME,
+                enabled,
+                configuration: monitor_configuration(&config, "cpu_usage"),
+                up: true,
+                interval_seconds: device.snmp_poll_interval_seconds,
+            },
         )
         .await?;
         if !enabled && clear_history {
@@ -884,12 +992,15 @@ pub async fn apply_monitors(
     if let Some(enabled) = options.enable_memory_monitor {
         sync_monitor(
             &ctx.db,
-            device.id,
-            MEMORY_MONITOR_NAME,
-            enabled,
-            monitor_configuration(&config, "memory_usage"),
-            true,
-            device.snmp_poll_interval_seconds,
+            MonitorSpec {
+                device_id: device.id,
+                interface: None,
+                name: MEMORY_MONITOR_NAME,
+                enabled,
+                configuration: monitor_configuration(&config, "memory_usage"),
+                up: true,
+                interval_seconds: device.snmp_poll_interval_seconds,
+            },
         )
         .await?;
         if !enabled && clear_history {
@@ -930,20 +1041,23 @@ async fn set_monitoring(
     .await?;
     sync_monitor(
         db,
-        device_id,
-        &interface_monitor_name(&interface.name),
-        enabled,
-        serde_json::json!({
-            "host": config.host.clone(),
-            "version": version_name(config.version),
-            "community": config.community.clone(),
-            "port": config.port,
-            "ifIndex": interface.snmp_index,
-            "ifName": interface.name,
-            "metric": "traffic",
-        }),
-        interface.oper_status.as_deref() == Some("up"),
-        interval_seconds,
+        MonitorSpec {
+            device_id,
+            interface: Some(interface.id),
+            name: &interface_monitor_name(&interface.name),
+            enabled,
+            configuration: serde_json::json!({
+                "host": config.host.clone(),
+                "version": version_name(config.version),
+                "community": config.community.clone(),
+                "port": config.port,
+                "ifIndex": interface.snmp_index,
+                "ifName": interface.name,
+                "metric": "traffic",
+            }),
+            up: interface.oper_status.as_deref() == Some("up"),
+            interval_seconds,
+        },
     )
     .await?;
     if !enabled && clear_history {
@@ -1030,18 +1144,21 @@ pub async fn list_interfaces(
         .order_by_asc(device_interfaces_entity::Column::SnmpIndex)
         .all(&ctx.db)
         .await?;
+    // Por `interface_id`: com o nome, duas linhas homônimas — o que sobra de
+    // uma PPPoE que trocou de índice — se declaravam monitoradas pelo mesmo
+    // monitor, e o painel mostrava a porta duas vezes, uma delas zerada.
     let monitored = monitors::Entity::find()
         .filter(monitors_entity::Column::DeviceId.eq(Some(device_id)))
         .filter(monitors_entity::Column::Enabled.eq(true))
         .all(&ctx.db)
         .await?
         .into_iter()
-        .map(|monitor| monitor.name)
+        .filter_map(|monitor| monitor.interface_id)
         .collect::<std::collections::BTreeSet<_>>();
     Ok(interfaces
         .into_iter()
         .map(|row| DeviceInterfaceView {
-            is_monitored: monitored.contains(&interface_monitor_name(&row.name)),
+            is_monitored: monitored.contains(&row.id),
             id: row.id,
             device_id: row.device_id,
             snmp_index: row.snmp_index,
@@ -1066,23 +1183,61 @@ fn monitor_configuration(config: &SnmpConfig, metric: &str) -> serde_json::Value
     })
 }
 
-async fn sync_monitor(
-    db: &sea_orm::DatabaseConnection,
+/// Cria ou atualiza o monitor gerenciado de um dispositivo.
+///
+/// `interface` distingue os dois tipos que passam por aqui: o monitor de uma
+/// porta, que pertence a uma linha de `device_interfaces`, e o monitor do
+/// dispositivo inteiro (`cpu_usage`, `memory_usage`), que não pertence a
+/// nenhuma.
+///
+/// Quando há interface, é o `interface_id` que localiza o monitor — não o nome.
+/// A diferença aparece quando o operador renomeia a porta no equipamento: a
+/// cadeia de identidade reencontra a linha, o monitor é achado pelo vínculo e
+/// **renomeado junto**. Pela busca por nome, ele virava órfão e um segundo
+/// monitor nascia para a mesma porta.
+struct MonitorSpec<'a> {
     device_id: i64,
-    name: &str,
+    /// `None` em monitor do dispositivo inteiro (`cpu_usage`, `memory_usage`).
+    interface: Option<i64>,
+    name: &'a str,
     enabled: bool,
     configuration: serde_json::Value,
     up: bool,
     interval_seconds: i32,
-) -> AppResult<()> {
-    let existing = monitors::Entity::find()
-        .filter(monitors_entity::Column::DeviceId.eq(Some(device_id)))
-        .filter(monitors_entity::Column::Name.eq(name))
-        .one(db)
-        .await?;
+}
+
+async fn sync_monitor(db: &sea_orm::DatabaseConnection, spec: MonitorSpec<'_>) -> AppResult<()> {
+    let MonitorSpec {
+        device_id,
+        interface,
+        name,
+        enabled,
+        configuration,
+        up,
+        interval_seconds,
+    } = spec;
+    let busca =
+        monitors::Entity::find().filter(monitors_entity::Column::DeviceId.eq(Some(device_id)));
+    let existing = match interface {
+        Some(interface_id) => {
+            busca
+                .filter(monitors_entity::Column::InterfaceId.eq(Some(interface_id)))
+                .one(db)
+                .await?
+        }
+        None => {
+            busca
+                .filter(monitors_entity::Column::Name.eq(name))
+                .one(db)
+                .await?
+        }
+    };
     if let Some(existing) = existing {
         monitors::ActiveModel {
             id: Set(existing.id),
+            // Acompanha o nome da porta no equipamento.
+            name: Set(name.into()),
+            interface_id: Set(interface),
             configuration: Set(configuration),
             interval_seconds: Set(interval_seconds),
             timeout_seconds: Set(calculate_smart_timeout_seconds("snmp", interval_seconds)
@@ -1097,6 +1252,7 @@ async fn sync_monitor(
     } else {
         monitors::ActiveModel {
             device_id: Set(Some(device_id)),
+            interface_id: Set(interface),
             probe_id: Set(None),
             r#type: Set("snmp".into()),
             name: Set(name.into()),
@@ -1546,69 +1702,201 @@ mod tests {
         }
     }
 
-    /// O caso PPPoE: o nome é o mesmo, o índice mudou na reconexão. Sem
-    /// encontrar a linha, a sincronização inseriria uma segunda `pppoe-wan` e
-    /// deixaria a primeira órfã para sempre — foi assim que a duplicata de
-    /// produção nasceu.
-    #[test]
-    fn interface_renumerada_casa_pelo_nome() {
-        let mut matcher = InterfaceMatcher::new(vec![linha_de_teste(17, Some(34), "pppoe-wan")]);
-        let casada = matcher
-            .claim(&interface_de_teste(55, "pppoe-wan"))
-            .expect("deveria reencontrar a linha pelo nome");
-        assert_eq!(casada.id, 17);
+    fn linha_completa(
+        id: i64,
+        snmp_index: Option<i32>,
+        name: &str,
+        alias: Option<&str>,
+        mac: Option<&str>,
+    ) -> device_interfaces::Model {
+        let mut row = linha_de_teste(id, snmp_index, name);
+        row.alias = alias.map(Into::into);
+        row.mac_address = mac.map(Into::into);
+        row
     }
 
-    /// Índice liberado e reaproveitado por outra porta no boot seguinte. Com o
-    /// casamento por índice na frente, a linha da `pppoe-wan` era renomeada
-    /// para `br-lan` e o histórico continuava colado num registro que passou a
+    fn origem(
+        if_index: i32,
+        if_name: &str,
+        if_alias: Option<&str>,
+        mac_address: Option<&str>,
+    ) -> SnmpInterface {
+        let mut src = interface_de_teste(if_index, if_name);
+        src.if_alias = if_alias.map(Into::into);
+        src.mac_address = mac_address.map(Into::into);
+        src
+    }
+
+    fn casa(
+        linhas: Vec<device_interfaces::Model>,
+        varredura: Vec<SnmpInterface>,
+    ) -> Vec<Option<i64>> {
+        let mut matcher = InterfaceMatcher::resolve(linhas, &varredura);
+        (0..varredura.len())
+            .map(|pos| matcher.take(pos).map(|row| row.id))
+            .collect()
+    }
+
+    /// O caso PPPoE: o nome e o mesmo, o indice mudou na reconexao. Sem
+    /// reencontrar a linha, a sincronizacao inseriria uma segunda `pppoe-wan` e
+    /// deixaria a primeira orfa para sempre.
+    #[test]
+    fn interface_renumerada_casa_pelo_nome() {
+        let casamento = casa(
+            vec![linha_de_teste(17, Some(34), "pppoe-wan")],
+            vec![interface_de_teste(55, "pppoe-wan")],
+        );
+        assert_eq!(casamento, vec![Some(17)]);
+    }
+
+    /// Indice liberado e reaproveitado por outra porta no boot seguinte. Com o
+    /// casamento por indice na frente, a linha da `pppoe-wan` era renomeada
+    /// para `br-lan` e o historico continuava colado num registro que passou a
     /// descrever outra coisa.
     #[test]
     fn indice_reaproveitado_nao_sequestra_a_linha_de_outra_interface() {
-        let mut matcher = InterfaceMatcher::new(vec![
-            linha_de_teste(17, Some(34), "pppoe-wan"),
-            linha_de_teste(10, Some(11), "br-lan"),
-        ]);
-        let casada = matcher
-            .claim(&interface_de_teste(34, "br-lan"))
-            .expect("deveria casar pelo nome");
-        assert_eq!(casada.id, 10, "a linha da br-lan, não a da pppoe-wan");
+        let casamento = casa(
+            vec![
+                linha_de_teste(17, Some(34), "pppoe-wan"),
+                linha_de_teste(10, Some(11), "br-lan"),
+            ],
+            vec![interface_de_teste(34, "br-lan")],
+        );
+        assert_eq!(casamento, vec![Some(10)], "a br-lan, nao a pppoe-wan");
     }
 
-    /// Agente que reporta duas portas com o mesmo `ifName`: o nome não
-    /// identifica ninguém e casar por ele faria as duas disputarem uma linha só.
+    /// `ifAlias` e o que a RFC 2863 obriga o agente a preservar atraves de
+    /// reboots, e e o operador quem o escreve. Quando existe, vence o nome —
+    /// que o proprio operador pode ter mudado no equipamento.
     #[test]
-    fn nome_repetido_no_aparelho_cai_para_o_indice() {
-        let mut matcher = InterfaceMatcher::new(vec![
-            linha_de_teste(1, Some(5), "lan"),
-            linha_de_teste(2, Some(6), "lan"),
-        ]);
-        assert_eq!(matcher.claim(&interface_de_teste(6, "lan")).unwrap().id, 2);
-        assert_eq!(matcher.claim(&interface_de_teste(5, "lan")).unwrap().id, 1);
-    }
-
-    /// Cada linha vale por uma varredura. Os mapas antigos não enxergavam o que
-    /// o próprio laço consumia, e duas interfaces podiam sobrescrever a mesma
-    /// linha — duas portas viravam uma.
-    #[test]
-    fn uma_linha_so_e_reivindicada_uma_vez() {
-        let mut matcher = InterfaceMatcher::new(vec![linha_de_teste(17, Some(34), "pppoe-wan")]);
-        assert!(matcher
-            .claim(&interface_de_teste(55, "pppoe-wan"))
-            .is_some());
-        assert!(
-            matcher
-                .claim(&interface_de_teste(34, "pppoe-wan"))
-                .is_none(),
-            "a segunda pretendente vira registro novo, que é o que ela é"
+    fn alias_vence_o_nome_quando_a_porta_foi_renomeada() {
+        let casamento = casa(
+            vec![
+                linha_completa(1, Some(5), "lan1", Some("Uplink Matriz"), None),
+                linha_completa(2, Some(6), "uplink", None, None),
+            ],
+            vec![origem(5, "uplink", Some("Uplink Matriz"), None)],
+        );
+        assert_eq!(
+            casamento,
+            vec![Some(1)],
+            "o alias identifica a porta renomeada, nao a homonima do novo nome"
         );
     }
 
-    /// Porta que o dispositivo nunca reportou não casa com nada.
+    /// A resolucao e sinal a sinal sobre o conjunto inteiro. Se fosse interface
+    /// a interface, a `eth0` casaria por nome com a linha 1 antes de a `wan`
+    /// poder reivindica-la pelo alias, que e o sinal mais forte.
+    #[test]
+    fn a_ancora_forte_e_resolvida_antes_da_fraca() {
+        let casamento = casa(
+            vec![
+                linha_completa(1, Some(1), "eth0", Some("WAN Fibra"), None),
+                linha_completa(2, Some(9), "eth1", None, None),
+            ],
+            vec![
+                origem(9, "eth0", None, None),
+                origem(1, "wan", Some("WAN Fibra"), None),
+            ],
+        );
+        // Interface a interface, a `eth0` casaria pelo nome com a linha 1 e
+        // roubaria a que o alias da `wan` reivindica depois — resultado
+        // `[Some(1), None]`, com a WAN perdendo o historico.
+        assert_eq!(
+            casamento,
+            vec![Some(2), Some(1)],
+            "o alias resolve antes; a eth0 fica com a linha que sobrou, pelo indice"
+        );
+    }
+
+    /// Agente que reporta duas portas com o mesmo `ifName`: o nome nao
+    /// identifica ninguem e casar por ele faria as duas disputarem uma linha.
+    #[test]
+    fn nome_repetido_no_aparelho_cai_para_o_indice() {
+        let casamento = casa(
+            vec![
+                linha_de_teste(1, Some(5), "lan"),
+                linha_de_teste(2, Some(6), "lan"),
+            ],
+            vec![interface_de_teste(6, "lan"), interface_de_teste(5, "lan")],
+        );
+        assert_eq!(
+            casamento,
+            vec![Some(2), Some(1)],
+            "cada uma pelo seu indice"
+        );
+    }
+
+    /// Ambiguidade do lado da varredura conta igual. Exigir unicidade so no
+    /// banco deixava o desempate na ordem de iteracao: com duas `lan` chegando
+    /// e uma no banco, ficava com a linha quem chegasse primeiro.
+    #[test]
+    fn nome_repetido_na_varredura_tambem_descarta_o_sinal() {
+        let casamento = casa(
+            vec![linha_de_teste(1, Some(5), "lan")],
+            vec![interface_de_teste(9, "lan"), interface_de_teste(5, "lan")],
+        );
+        assert_eq!(
+            casamento,
+            vec![None, Some(1)],
+            "o nome e descartado; quem casa e a que bate o indice"
+        );
+    }
+
+    /// Num roteador Linux as bridges e VLANs herdam o MAC da porta fisica. Nos
+    /// dados de producao deste projeto, 42 interfaces tem MAC e so 18 desses
+    /// valores sao unicos — por isso ele e desempate tardio, e so quando unico.
+    #[test]
+    fn mac_compartilhado_entre_bridges_nao_identifica() {
+        let compartilhado = Some("d6:8c:72:59:65:fc");
+        let casamento = casa(
+            vec![
+                linha_completa(1, Some(9), "sfp2", None, compartilhado),
+                linha_completa(2, Some(11), "br-lan", None, compartilhado),
+            ],
+            vec![origem(11, "br-lan", None, compartilhado)],
+        );
+        assert_eq!(casamento, vec![Some(2)], "quem decide e o nome, nao o MAC");
+    }
+
+    /// MAC zerado e o que o agente devolve para interface sem endereco
+    /// (loopback, tunel, PPP). Trata-lo como sinal juntaria todas numa so.
+    #[test]
+    fn mac_zerado_nao_e_sinal() {
+        let zerado = Some("00:00:00:00:00:00");
+        let casamento = casa(
+            vec![linha_completa(1, Some(1), "lo", None, zerado)],
+            vec![origem(99, "tun0", None, zerado)],
+        );
+        assert_eq!(casamento, vec![None], "portas diferentes seguem diferentes");
+    }
+
+    /// Cada linha vale por uma varredura: duas interfaces nao podem colapsar
+    /// numa so.
+    #[test]
+    fn uma_linha_so_e_reivindicada_uma_vez() {
+        let casamento = casa(
+            vec![linha_de_teste(17, Some(34), "pppoe-wan")],
+            vec![
+                interface_de_teste(55, "pppoe-wan"),
+                interface_de_teste(34, "pppoe-wan"),
+            ],
+        );
+        assert_eq!(
+            casamento.iter().filter(|item| item.is_some()).count(),
+            1,
+            "so uma das duas leva a linha; a outra vira registro novo"
+        );
+    }
+
+    /// Porta que o dispositivo nunca reportou nao casa com nada.
     #[test]
     fn interface_desconhecida_nao_casa() {
-        let mut matcher = InterfaceMatcher::new(vec![linha_de_teste(1, Some(5), "lan")]);
-        assert!(matcher.claim(&interface_de_teste(99, "wan-nova")).is_none());
+        let casamento = casa(
+            vec![linha_de_teste(1, Some(5), "lan")],
+            vec![interface_de_teste(99, "wan-nova")],
+        );
+        assert_eq!(casamento, vec![None]);
     }
 
     fn interface_de_teste(if_index: i32, if_name: &str) -> SnmpInterface {
@@ -1744,6 +2032,7 @@ mod tests {
     fn resolve_if_index_por_nome_quando_indice_pppoe_migra() {
         let monitor = monitors::Model {
             id: 19,
+            interface_id: None,
             name: "Interface pppoe-wan".into(),
             r#type: "snmp".into(),
             configuration: serde_json::json!({

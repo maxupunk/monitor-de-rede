@@ -67,9 +67,15 @@ async fn dispositivo(db: &sea_orm::DatabaseConnection, nome: &str, status: &str)
     .expect("criar dispositivo")
 }
 
-async fn monitor(db: &sea_orm::DatabaseConnection, device_id: i64, nome: &str) -> monitors::Model {
+async fn monitor(
+    db: &sea_orm::DatabaseConnection,
+    device_id: i64,
+    nome: &str,
+    interface: Option<i64>,
+) -> monitors::Model {
     monitors::ActiveModel {
         device_id: Set(Some(device_id)),
+        interface_id: Set(interface),
         r#type: Set("ping".into()),
         name: Set(nome.into()),
         configuration: Set(serde_json::json!({ "host": "10.0.0.1" })),
@@ -248,7 +254,7 @@ async fn o_historico_recente_tem_trinta_itens_por_monitor() {
 
     let mut criados = Vec::new();
     for indice in 1..=3 {
-        let monitor = monitor(db, device.id, &format!("Ping {indice}")).await;
+        let monitor = monitor(db, device.id, &format!("Ping {indice}"), None).await;
         for passo in 0..50 {
             let instante = Utc::now() - chrono::Duration::seconds(50 - passo);
             monitor_results::ActiveModel {
@@ -431,7 +437,7 @@ async fn o_scheduler_reserva_o_monitor_antes_de_executar() {
     let boot = boot_test::<App>().await.expect("subir app de teste");
     let db = &boot.app_context.db;
     let device = dispositivo(db, "sw-agenda", "online").await;
-    let monitor = monitor(db, device.id, "Ping agendado").await;
+    let monitor = monitor(db, device.id, "Ping agendado", None).await;
 
     // Vencido há muito: entra no lote deste ciclo.
     monitors::ActiveModel {
@@ -802,7 +808,15 @@ async fn a_interface_so_conta_como_monitorada_quando_tem_monitor_habilitado() {
     assert_eq!(antes.id, criada.id);
     assert_eq!(antes.snmp_index, Some(3));
 
-    monitor(&ctx.db, device.id, &interface_monitor_name("Gi0/3")).await;
+    // O vínculo é explícito: é `interface_id` que diz de quem o monitor é. Pelo
+    // nome, duas portas homônimas se declaravam monitoradas pelo mesmo monitor.
+    monitor(
+        &ctx.db,
+        device.id,
+        &interface_monitor_name("Gi0/3"),
+        Some(criada.id),
+    )
+    .await;
     assert!(
         listada(ctx, device.id).await.is_monitored,
         "monitor habilitado não refletiu na listagem"

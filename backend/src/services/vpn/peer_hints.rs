@@ -89,6 +89,7 @@ mod tests {
         monitors::Model {
             id: 7,
             device_id: Some(1),
+            interface_id: None,
             probe_id,
             r#type: "ping".into(),
             name: "Ping".into(),
