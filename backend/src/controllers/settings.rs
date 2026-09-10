@@ -4,14 +4,22 @@
 //! e os padrões vivem em [`crate::services::preferences`], que é também quem os
 //! pontos de consumo consultam.
 
+use std::str::FromStr;
+
+use axum::http::HeaderMap;
 use loco_rs::prelude::*;
 
-use crate::services::{
-    onboarding,
-    preferences::{self, Preferences},
-    settings::database,
-    shared::errors::AppResult,
-    syslog::{nat::NatDetector, SyslogService},
+use crate::{
+    controllers::auth_guard::AUTHENTICATED_USER_HEADER,
+    services::{
+        audit::{AuditAction, AuditActor, AuditEntryInput, AuditService, ResourceType},
+        onboarding,
+        preferences::{self, Preferences},
+        settings::database,
+        shared::errors::{AppError, AppResult},
+        syslog::{db::LogsDb, nat::NatDetector, SyslogService},
+        users::Role,
+    },
 };
 
 /// `GET /api/settings` — as preferências em vigor.
@@ -43,11 +51,66 @@ async fn complete_onboarding(State(ctx): State<AppContext>) -> AppResult<Respons
     Ok(format::json(onboarding::mark_completed(&ctx.db).await?)?)
 }
 
-/// `GET /api/settings/database-size` — tipo e tamanho do banco de dados.
+/// `GET /api/settings/database-size` — tipo, tamanho e amplitude temporal do histórico do banco de dados.
 async fn database_size(State(ctx): State<AppContext>) -> AppResult<Response> {
+    let logs_db = LogsDb::from_context(&ctx).ok();
     Ok(format::json(
-        database::database_info(&ctx.db, &ctx.config.database.uri).await?,
+        database::database_info(
+            &ctx.db,
+            &ctx.config.database.uri,
+            logs_db.as_ref().map(LogsDb::connection),
+        )
+        .await?,
     )?)
+}
+
+/// `POST /api/settings/clear-history` — limpa métricas, resultados e logs históricos, liberando disco.
+async fn clear_history(headers: HeaderMap, State(ctx): State<AppContext>) -> AppResult<Response> {
+    require_admin(&ctx, &headers).await?;
+
+    let logs_db = LogsDb::from_context(&ctx).ok();
+    let stats = database::clear_history(&ctx.db, logs_db.as_ref().map(LogsDb::connection)).await?;
+
+    let _ = AuditService::new(&ctx.db)
+        .log(
+            AuditActor::from_headers(&headers, &ctx.db)
+                .await
+                .unwrap_or_default(),
+            AuditEntryInput {
+                action: AuditAction::Delete,
+                resource_type: ResourceType::SystemSetting,
+                resource_id: None,
+                resource_label: Some("database_history".to_string()),
+                description: Some(format!(
+                    "Histórico do sistema apagado ({} registros removidos)",
+                    stats.total_deleted
+                )),
+                changes: None,
+            },
+        )
+        .await;
+
+    Ok(format::json(stats)?)
+}
+
+async fn require_admin(ctx: &AppContext, headers: &HeaderMap) -> AppResult<()> {
+    let pid = headers
+        .get(AUTHENTICATED_USER_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| AppError::unauthorized("Não autenticado"))?;
+
+    let user = crate::models::users::Model::find_by_pid(&ctx.db, pid)
+        .await
+        .map_err(|_| AppError::unauthorized("Não autenticado"))?;
+
+    let role = Role::from_str(&user.role)?;
+    if !role.can_manage_users() {
+        return Err(AppError::forbidden(
+            "Apenas administradores podem apagar o histórico do sistema.",
+        ));
+    }
+
+    Ok(())
 }
 
 fn detector(ctx: &AppContext) -> NatDetector {
@@ -63,4 +126,5 @@ pub fn routes() -> Routes {
         .add("/onboarding", get(onboarding_status))
         .add("/onboarding/complete", post(complete_onboarding))
         .add("/database-size", get(database_size))
+        .add("/clear-history", post(clear_history))
 }

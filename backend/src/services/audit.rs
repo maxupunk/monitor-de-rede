@@ -83,6 +83,7 @@ pub enum ResourceType {
     DockerVolume,
     DockerNetwork,
     DockerImage,
+    SystemSetting,
 }
 
 impl ResourceType {
@@ -102,6 +103,7 @@ impl ResourceType {
             ResourceType::DockerVolume => "docker_volume",
             ResourceType::DockerNetwork => "docker_network",
             ResourceType::DockerImage => "docker_image",
+            ResourceType::SystemSetting => "system_setting",
         }
     }
 }
@@ -130,6 +132,7 @@ impl std::str::FromStr for ResourceType {
             "docker_volume" | "dockervolume" => Ok(ResourceType::DockerVolume),
             "docker_network" | "dockernetwork" => Ok(ResourceType::DockerNetwork),
             "docker_image" | "dockerimage" => Ok(ResourceType::DockerImage),
+            "system_setting" | "systemsetting" | "settings" => Ok(ResourceType::SystemSetting),
             _ => Err(AppError::validation(format!(
                 "Tipo de recurso inválido: {s}"
             ))),

@@ -223,6 +223,96 @@ async fn nomes_por_id(
     Ok(encontrados.into_iter().collect())
 }
 
+/// Formata uma linha individual de log para visualização ou arquivo de texto puro.
+#[must_use]
+pub fn format_log_line(row: &device_logs::Model) -> String {
+    let timestamp = row.received_at.to_rfc3339();
+    let severity = row
+        .severity
+        .and_then(severity_label)
+        .unwrap_or("desconhecido")
+        .to_uppercase();
+
+    let tag = if let Some(app) = &row.app_name {
+        if let Some(pid) = row.pid {
+            format!("{app}[{pid}]")
+        } else {
+            app.clone()
+        }
+    } else if let Some(topics) = &row.topics {
+        topics.clone()
+    } else {
+        String::new()
+    };
+
+    let source = row.hostname.as_deref().unwrap_or(&row.source_ip);
+
+    if tag.is_empty() {
+        format!("{timestamp} [{severity}] {source}: {}", row.message)
+    } else {
+        format!("{timestamp} [{severity}] {source} {tag}: {}", row.message)
+    }
+}
+
+/// Sanitiza o identificador de dispositivo para uso seguro em nomes de arquivo.
+#[must_use]
+pub fn sanitize_label(name: &str) -> String {
+    name.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
+
+/// Gera o nome de arquivo para o download dos logs exportados.
+#[must_use]
+pub fn export_filename(
+    device_label: &str,
+    is_csv: bool,
+    timestamp: chrono::DateTime<chrono::Utc>,
+) -> String {
+    let ext = if is_csv { "csv" } else { "log" };
+    format!(
+        "logs-{device_label}-{}.{ext}",
+        timestamp.format("%Y%m%d-%H%M%S")
+    )
+}
+
+/// Serializa as linhas de log para exportação no formato de texto puro ou CSV.
+#[must_use]
+pub fn format_log_export(rows: &[device_logs::Model], is_csv: bool) -> (&'static str, String) {
+    if is_csv {
+        let mut csv = String::from("timestamp,severity,source_ip,hostname,app_or_topics,message\n");
+        for row in rows {
+            let timestamp = row.received_at.to_rfc3339();
+            let severity = row.severity.and_then(severity_label).unwrap_or("");
+            let source_ip = &row.source_ip;
+            let hostname = row.hostname.as_deref().unwrap_or("");
+            let app_or_topics = row
+                .app_name
+                .as_deref()
+                .or(row.topics.as_deref())
+                .unwrap_or("");
+            let message = row.message.replace('"', "\"\"");
+            csv.push_str(&format!(
+                "\"{timestamp}\",\"{severity}\",\"{source_ip}\",\"{hostname}\",\"{app_or_topics}\",\"{message}\"\n"
+            ));
+        }
+        ("text/csv; charset=utf-8", csv)
+    } else {
+        let mut txt = String::new();
+        for row in rows {
+            txt.push_str(&format_log_line(row));
+            txt.push('\n');
+        }
+        ("text/plain; charset=utf-8", txt)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -295,5 +385,30 @@ mod tests {
         // Valor fora da tabela do RFC não inventa rótulo.
         let invalida = serialize_entry(linha(None, None, Some(42)), &HashMap::new());
         assert_eq!(invalida.severity_label, None);
+    }
+
+    #[test]
+    fn format_log_export_gera_texto_e_csv_corretamente() {
+        let rows = vec![linha(Some(1), Some("system,info"), Some(3))];
+        let (ct_txt, txt) = format_log_export(&rows, false);
+        assert_eq!(ct_txt, "text/plain; charset=utf-8");
+        assert!(txt.contains("[ERRO] MikroTik system,info: mensagem"));
+
+        let (ct_csv, csv) = format_log_export(&rows, true);
+        assert_eq!(ct_csv, "text/csv; charset=utf-8");
+        assert!(csv.starts_with("timestamp,severity,source_ip,hostname,app_or_topics,message\n"));
+        assert!(csv.contains("\"erro\",\"192.168.88.1\",\"MikroTik\",\"system,info\",\"mensagem\""));
+    }
+
+    #[test]
+    fn export_filename_gera_nome_esperado() {
+        let ts = Utc::now();
+        let name_log = export_filename("roteador-01", false, ts);
+        assert!(name_log.starts_with("logs-roteador-01-"));
+        assert!(name_log.ends_with(".log"));
+
+        let name_csv = export_filename("geral", true, ts);
+        assert!(name_csv.starts_with("logs-geral-"));
+        assert!(name_csv.ends_with(".csv"));
     }
 }

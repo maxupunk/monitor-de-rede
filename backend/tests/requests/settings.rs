@@ -245,7 +245,7 @@ async fn a_rota_exige_sessao() {
 
 #[tokio::test]
 #[serial]
-async fn database_size_retorna_tamanho_e_tipo_do_banco() {
+async fn database_size_retorna_tamanho_tipo_e_datas_do_banco() {
     request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
         autenticado(&mut request, &ctx).await;
 
@@ -255,6 +255,87 @@ async fn database_size_retorna_tamanho_e_tipo_do_banco() {
 
         assert!(corpo["sizeBytes"].as_i64().is_some_and(|v| v > 0));
         assert_eq!(corpo["dbType"], "sqlite");
+        assert!(corpo["earliestRecord"].is_null());
+        assert!(corpo["latestRecord"].is_null());
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn clear_history_limpa_dados_historicos_e_retorna_estatisticas() {
+    use backend::models::_entities::{devices, metrics};
+    use chrono::Utc;
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        autenticado(&mut request, &ctx).await;
+
+        let now = Utc::now();
+        let dev = devices::ActiveModel {
+            name: Set("Router Teste".into()),
+            r#type: Set("router".into()),
+            ip_address: Set(Some("192.168.1.1".into())),
+            is_monitored: Set(true),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .unwrap();
+
+        metrics::ActiveModel {
+            device_id: Set(dev.id),
+            interface_id: Set(None),
+            monitor_id: Set(None),
+            name: Set("cpu.utilization".into()),
+            value: Set(50.0),
+            unit: Set("%".into()),
+            recorded_at: Set(now.into()),
+            created_at: Set(now.into()),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .unwrap();
+
+        let size_resp = request.get("/api/settings/database-size").await;
+        assert_eq!(size_resp.status_code(), 200);
+        let size_json: serde_json::Value = serde_json::from_str(&size_resp.text()).unwrap();
+        assert!(size_json["earliestRecord"].is_string());
+        assert!(size_json["latestRecord"].is_string());
+
+        let clear_resp = request.post("/api/settings/clear-history").await;
+        assert_eq!(clear_resp.status_code(), 200, "{}", clear_resp.text());
+        let stats: serde_json::Value = serde_json::from_str(&clear_resp.text()).unwrap();
+        assert_eq!(stats["metricsDeleted"], 1);
+        assert_eq!(stats["totalDeleted"], 1);
+
+        let size_depois = request.get("/api/settings/database-size").await;
+        let depois_json: serde_json::Value = serde_json::from_str(&size_depois.text()).unwrap();
+        assert!(depois_json["earliestRecord"].is_null());
+        assert!(depois_json["latestRecord"].is_null());
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn clear_history_exige_perfil_administrador() {
+    use sea_orm::{ActiveModelTrait, IntoActiveModel, Set};
+
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let op_session = prepare_data::init_operator(&ctx).await;
+        let mut active = op_session.user.into_active_model();
+        active.role = Set(backend::services::users::Role::Operator
+            .as_str()
+            .to_string());
+        active.update(&ctx.db).await.unwrap();
+
+        let (header, value) = prepare_data::auth_header(&op_session.token);
+        request.add_header(header, value);
+
+        let resp = request.post("/api/settings/clear-history").await;
+        assert_eq!(resp.status_code(), 403, "{}", resp.text());
     })
     .await;
 }

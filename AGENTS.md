@@ -10,10 +10,11 @@
    - **Frontend**:
      ```bash
      pnpm --prefix frontend run typecheck
-     pnpm --prefix frontend run format
      pnpm --prefix frontend run lint
+     pnpm --prefix frontend run format
      pnpm --prefix frontend run build
      ```
+     (Ou da raiz: `pnpm typecheck`, `pnpm lint`, `pnpm format`, `pnpm build`).
    - **Backend (Rust)**:
      ```bash
      cargo fmt --all --check
@@ -113,3 +114,25 @@
    - Requisições HTTP pontuais continuam permitidas somente para ações explícitas do usuário, comandos, formulários, paginação/histórico não-live, downloads e abertura de detalhes sob demanda. Elas não podem formar um ciclo automático de atualização.
    - Quando a fonte não oferecer push (por exemplo, métricas da Docker Engine), admite-se apenas **um coletor compartilhado no backend**, condicionado à existência de assinantes e distribuído por SSE para todas as abas. Nunca criar um ciclo de coleta por cliente.
    - Ao alterar uma área em tempo real, remover pollers preexistentes no mesmo escopo e adicionar teste que prove que o snapshot SSE atualiza o estado sem chamar novamente os endpoints de consulta.
+
+10. **Princípios de Design de Software (SOLID) & Clean Architecture**:
+    - **S — Responsabilidade Única (Single Responsibility)**:
+      - **Controllers** (`src/controllers/`): Extraem parâmetros de rota/query/corpo, validam DTOs de entrada, delegam imediatamente para serviços (`src/services/`) e retornam a resposta formatada delegando a serialização para `src/views/` ou DTOs. Jamais escreva SQL, lógica de negócio, transformações complexas de dados ou formatação de exportação dentro de controllers.
+      - **Services** (`src/services/`): Contêm regras de negócio puras, orquestração e fluxos de domínio. Devem ser testáveis sem camada HTTP (sem axum/loco requests).
+      - **Views** (`src/views/`): Responsáveis por formatação, hidratação de apresentação, serialização de envelopes e renderização de relatórios/exportações (ex: CSV, plain text).
+      - **Entidades e Repositórios** (`src/models/`, `services/**/repository.rs`): Responsáveis pelo acesso a dados, mapeamento relacional e consultas otimizadas.
+      - **Frontend (Vue 3 / Vuetify / Pinia)**: Componentes tratam da interação do usuário e da árvore visual; Pinia stores (`src/stores/`) tratam do estado reativo e chamadas a endpoints; utilitários centralizados (`src/utils/formatters.ts`) tratam de formatação de valores, datas, latências e bytes (DRY absoluto).
+    - **O — Aberto/Fechado (Open/Closed)**:
+      - Módulos e serviços devem ser abertos para extensão e fechados para modificação.
+      - Use traits e enums polimórficos para novos comportamentos (ex: runners de monitoramento, drivers de notificação, regras de alerta) em vez de blocos gigantes de `match`/`if` espalhados pelo código.
+    - **L — Substituição de Liskov (Liskov Substitution)**:
+      - Abstrações e implementações de traits devem ser substituíveis sem violar invariantes do sistema.
+      - **Regra de Ouro dos Bancos**: Toda consulta, migração ou comando SeaORM DEVE produzir o mesmo comportamento tanto em SQLite quanto em PostgreSQL.
+    - **I — Segregação de Interfaces (Interface Segregation)**:
+      - DTOs, traits e contratos de funções devem ser enxutos e focados no caso de uso específico. Nunca crie DTOs ou interfaces infladas ("god objects") que forçam o consumidor a carregar dados irrelevantes.
+    - **D — Inversão de Dependência (Dependency Inversion)**:
+      - Dependa de abstrações, não de implementações concretas: serviços de banco operam sobre generic `C: ConnectionTrait`, permitindo testes unitários com SQLite em memória (`sqlite::memory:`).
+      - Serviços e clientes externos (SNMP, ICMP, Docker) são providos via contexto injetado (`AppContext.shared_store`).
+    - **Clean Code & Programação Defensiva**:
+      - Erros devem ser tipados e propagados com `AppResult<T>` / `AppError`, nunca suprimidos nem transformados em `unwrap()` soltos em caminhos de produção.
+      - No TypeScript: utilize tipagem forte, programação defensiva e evite `any` ou type-assertions forçadas (`as unknown as ...`).

@@ -82,7 +82,10 @@ impl FromStr for Role {
 /// Política única das rotas protegidas.
 #[must_use]
 pub fn request_is_allowed(role: Role, method: &Method, path: &str) -> bool {
-    if path == "/api/users" || path.starts_with("/api/users/") {
+    if path == "/api/users"
+        || path.starts_with("/api/users/")
+        || path == "/api/settings/clear-history"
+    {
         return role.can_manage_users();
     }
 

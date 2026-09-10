@@ -4,4 +4,9 @@ import type { DbType } from './DbType'
 /**
  * Dados retornados por `GET /api/settings/database-size`.
  */
-export type DatabaseInfo = { dbType: DbType; sizeBytes: bigint }
+export type DatabaseInfo = {
+  dbType: DbType
+  sizeBytes: bigint
+  earliestRecord: string | null
+  latestRecord: string | null
+}

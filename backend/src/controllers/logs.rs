@@ -24,7 +24,6 @@ use crate::{
         BindSourceInput, BindSourceResponse, LogEntry, LogExportQuery, LogStreamQuery, LogsQuery,
         ProvisionHintsResponse, ProvisionLoggingInput, ProvisionLoggingResponse,
     },
-    models::logs::device_logs,
     services::{
         devices::{access, systems},
         network_tools::mactelnet,
@@ -36,7 +35,9 @@ use crate::{
             resolver, snippets, LogsDb, SyslogService,
         },
     },
-    views::logs::{serialize_page, serialize_sources},
+    views::logs::{
+        export_filename, format_log_export, sanitize_label, serialize_page, serialize_sources,
+    },
 };
 
 /// O serviço de ingestão, ou um erro nomeado quando ele está desligado.
@@ -108,17 +109,7 @@ async fn export_logs(
             .one(&ctx.db)
             .await
         {
-            device
-                .name
-                .chars()
-                .map(|c| {
-                    if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                        c
-                    } else {
-                        '-'
-                    }
-                })
-                .collect::<String>()
+            sanitize_label(&device.name)
         } else {
             format!("dispositivo-{device_id}")
         }
@@ -126,41 +117,8 @@ async fn export_logs(
         "logs".to_string()
     };
 
-    let ext = if is_csv { "csv" } else { "log" };
-    let filename = format!(
-        "logs-{device_label}-{}.{ext}",
-        Utc::now().format("%Y%m%d-%H%M%S")
-    );
-
-    let (content_type, body) = if is_csv {
-        let mut csv = String::from("timestamp,severity,source_ip,hostname,app_or_topics,message\n");
-        for row in &rows {
-            let timestamp = row.received_at.to_rfc3339();
-            let severity = row
-                .severity
-                .and_then(crate::views::logs::severity_label)
-                .unwrap_or("");
-            let source_ip = &row.source_ip;
-            let hostname = row.hostname.as_deref().unwrap_or("");
-            let app_or_topics = row
-                .app_name
-                .as_deref()
-                .or(row.topics.as_deref())
-                .unwrap_or("");
-            let message = row.message.replace('"', "\"\"");
-            csv.push_str(&format!(
-                "\"{timestamp}\",\"{severity}\",\"{source_ip}\",\"{hostname}\",\"{app_or_topics}\",\"{message}\"\n"
-            ));
-        }
-        ("text/csv; charset=utf-8", csv)
-    } else {
-        let mut txt = String::new();
-        for row in &rows {
-            txt.push_str(&format_log_line(row));
-            txt.push('\n');
-        }
-        ("text/plain; charset=utf-8", txt)
-    };
+    let filename = export_filename(&device_label, is_csv, Utc::now());
+    let (content_type, body) = format_log_export(&rows, is_csv);
 
     let mut response = body.into_response();
     let headers = response.headers_mut();
@@ -174,35 +132,6 @@ async fn export_logs(
             .map_err(|_| AppError::validation("Nome de arquivo inválido."))?,
     );
     Ok(response)
-}
-
-fn format_log_line(row: &device_logs::Model) -> String {
-    let timestamp = row.received_at.to_rfc3339();
-    let severity = row
-        .severity
-        .and_then(crate::views::logs::severity_label)
-        .unwrap_or("desconhecido")
-        .to_uppercase();
-
-    let tag = if let Some(app) = &row.app_name {
-        if let Some(pid) = row.pid {
-            format!("{app}[{pid}]")
-        } else {
-            app.clone()
-        }
-    } else if let Some(topics) = &row.topics {
-        topics.clone()
-    } else {
-        String::new()
-    };
-
-    let source = row.hostname.as_deref().unwrap_or(&row.source_ip);
-
-    if tag.is_empty() {
-        format!("{timestamp} [{severity}] {source}: {}", row.message)
-    } else {
-        format!("{timestamp} [{severity}] {source} {tag}: {}", row.message)
-    }
 }
 
 /// Lê um instante em RFC 3339.

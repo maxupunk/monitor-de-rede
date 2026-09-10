@@ -8,6 +8,10 @@
     "build:frontend": "pnpm --prefix frontend run build",
     "typecheck:frontend": "pnpm --prefix frontend run typecheck",
     "lint:frontend": "pnpm --prefix frontend run lint",
-    "format:frontend": "pnpm --prefix frontend run format"
+    "format:frontend": "pnpm --prefix frontend run format",
+    "format": "pnpm --prefix frontend run format",
+    "lint": "pnpm --prefix frontend run lint",
+    "typecheck": "pnpm --prefix frontend run typecheck",
+    "build": "pnpm --prefix frontend run build"
   }
 }
