@@ -137,11 +137,15 @@ class ApiService {
     return response.json() as Promise<T>
   }
 
-  async get<T>(path: string): Promise<T> {
-    const response = await this.doFetch(path, {
-      method: 'GET',
-      headers: this.getHeaders(),
-    })
+  async get<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
+    const response = await this.doFetch(
+      path,
+      {
+        method: 'GET',
+        headers: this.getHeaders(),
+      },
+      options
+    )
     return this.handleResponse<T>(response, path)
   }
 
@@ -158,30 +162,42 @@ class ApiService {
     return this.handleResponse<T>(response, path)
   }
 
-  async put<T>(path: string, body?: unknown): Promise<T> {
-    const response = await this.doFetch(path, {
-      method: 'PUT',
-      headers: this.getHeaders(),
-      body: body ? JSON.stringify(body) : undefined,
-    })
+  async put<T>(path: string, body?: unknown, options: ApiRequestOptions = {}): Promise<T> {
+    const response = await this.doFetch(
+      path,
+      {
+        method: 'PUT',
+        headers: this.getHeaders(),
+        body: body ? JSON.stringify(body) : undefined,
+      },
+      options
+    )
     return this.handleResponse<T>(response, path)
   }
 
-  async patch<T>(path: string, body?: unknown): Promise<T> {
-    const response = await this.doFetch(path, {
-      method: 'PATCH',
-      headers: this.getHeaders(),
-      body: body ? JSON.stringify(body) : undefined,
-    })
+  async patch<T>(path: string, body?: unknown, options: ApiRequestOptions = {}): Promise<T> {
+    const response = await this.doFetch(
+      path,
+      {
+        method: 'PATCH',
+        headers: this.getHeaders(),
+        body: body ? JSON.stringify(body) : undefined,
+      },
+      options
+    )
     return this.handleResponse<T>(response, path)
   }
 
-  async delete<T>(path: string, body?: unknown): Promise<T> {
-    const response = await this.doFetch(path, {
-      method: 'DELETE',
-      headers: this.getHeaders(),
-      body: body ? JSON.stringify(body) : undefined,
-    })
+  async delete<T>(path: string, body?: unknown, options: ApiRequestOptions = {}): Promise<T> {
+    const response = await this.doFetch(
+      path,
+      {
+        method: 'DELETE',
+        headers: this.getHeaders(),
+        body: body ? JSON.stringify(body) : undefined,
+      },
+      options
+    )
     return this.handleResponse<T>(response, path)
   }
 

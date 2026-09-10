@@ -90,8 +90,17 @@ database:
   idle_timeout: {{ get_env(name="DB_IDLE_TIMEOUT", default="300000") }}
   # Minimum number of connections for a pool.
   min_connections: {{ get_env(name="DB_MIN_CONNECTIONS", default="1") }}
-  # Maximum number of connections for a pool.
-  max_connections: {{ get_env(name="DB_MAX_CONNECTIONS", default="1") }}
+  # Com o WAL ligado no boot, o SQLite atende vários leitores em paralelo com o
+  # escritor — e dois escritores se serializam sozinhos pelo `busy_timeout` de
+  # 5 s do sqlx. Um pool de **uma** conexão jogava isso fora: toda requisição
+  # disputava a mesma conexão com o scheduler, os polls SNMP e a ingestão de
+  # syslog, e quem esperasse mais que o `connect_timeout` recebia
+  # "Connection pool timed out" — que vira **500** no cliente. Era a origem dos
+  # 500 intermitentes em `GET /api/auth/setup` em produção.
+  #
+  # Cinco é o teto de leitores simultâneos, não um alvo: o pool só cresce sob
+  # disputa e `min_connections` mantém uma.
+  max_connections: {{ get_env(name="DB_MAX_CONNECTIONS", default="5") }}
   # Run migration up when application loaded
   auto_migrate: true
   # Truncate database when application loaded. This is a dangerous operation, make sure that you using this flag only on dev environments or test mode

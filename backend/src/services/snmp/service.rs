@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use futures::future;
 use sea_orm::{
     sea_query::Expr, ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set,
+    TransactionTrait,
 };
 use std::collections::{BTreeMap, HashMap};
 
@@ -43,7 +44,7 @@ pub struct SnmpTestResult {
     pub system: SnmpSystemInfo,
     pub message: String,
 }
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Default, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SnmpScanResult {
     pub snmp_responded: bool,
@@ -89,6 +90,13 @@ pub const DEFAULT_SNMP_POLL_INTERVAL_SECONDS: i32 = 15;
 pub fn interface_monitor_name(if_name: &str) -> String {
     format!("Interface {if_name}")
 }
+
+/// Chave do coletor de interfaces em `SnmpScanResult::collector_errors`.
+///
+/// Existe como constante porque `scan` a escreve e `ensure_scan_can_remove` a
+/// lê: um literal solto nos dois lados deixaria a guarda silenciosamente cega
+/// se a grafia mudasse de um lado só.
+const INTERFACES_COLLECTOR: &str = "interfaces";
 
 #[derive(Debug, Default)]
 pub struct SnmpApplyOptions {
@@ -205,7 +213,7 @@ pub async fn scan(config: SnmpConfig) -> AppResult<SnmpScanResult> {
     let (interfaces, traffic) = match interfaces_and_traffic {
         Ok(value) => value,
         Err(error) => {
-            collector_errors.insert("interfaces".into(), error.to_string());
+            collector_errors.insert(INTERFACES_COLLECTOR.into(), error.to_string());
             Default::default()
         }
     };
@@ -260,6 +268,78 @@ pub async fn scan_device(
     Ok(scan)
 }
 
+/// Casa cada interface da varredura com a linha já persistida.
+///
+/// # Por que o nome vem antes do índice
+///
+/// A identidade estável de uma porta é o **nome**; o `ifIndex` é volátil. Uma
+/// interface PPPoE renumera a cada reconexão, e o índice que ela liberou é
+/// reaproveitado por outra porta no boot seguinte. Casar por índice primeiro
+/// errava exatamente aí: com `pppoe-wan` gravada no índice 34 e o roteador
+/// reportando `br-lan` nesse índice, a linha da `pppoe-wan` era **renomeada**
+/// para `br-lan` — o histórico da porta continuava colado num registro que
+/// agora descreve outra coisa.
+///
+/// # Por que nem todo nome entra
+///
+/// Um agente SNMP pode reportar duas portas com o mesmo `ifName`. Nesse caso o
+/// nome não identifica ninguém, e casar por ele faria as duas interfaces
+/// disputarem a mesma linha. Nomes repetidos ficam de fora do índice por nome e
+/// caem no `ifIndex`, que ao menos as distingue.
+///
+/// # Por que cada linha só pode ser reivindicada uma vez
+///
+/// Os mapas antigos eram montados uma única vez, antes do laço, e não
+/// enxergavam o que o próprio laço criava ou alterava. Duas interfaces da mesma
+/// varredura podiam resolver para a mesma linha e sobrescrever uma à outra, o
+/// que transformava duas portas em uma. `claim` consome a linha: a segunda
+/// pretendente não a encontra e vira registro novo, que é o que ela é.
+struct InterfaceMatcher {
+    rows: BTreeMap<i64, device_interfaces::Model>,
+    by_name: HashMap<String, i64>,
+    by_index: BTreeMap<i32, i64>,
+}
+
+impl InterfaceMatcher {
+    fn new(rows: Vec<device_interfaces::Model>) -> Self {
+        let mut by_name: HashMap<String, i64> = HashMap::new();
+        let mut ambiguos: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut by_index = BTreeMap::new();
+        let mut indexed = BTreeMap::new();
+
+        for row in rows {
+            let chave = row.name.to_lowercase();
+            if by_name.insert(chave.clone(), row.id).is_some() {
+                ambiguos.insert(chave);
+            }
+            if let Some(index) = row.snmp_index {
+                by_index.insert(index, row.id);
+            }
+            indexed.insert(row.id, row);
+        }
+        for chave in ambiguos {
+            by_name.remove(&chave);
+        }
+
+        Self {
+            rows: indexed,
+            by_name,
+            by_index,
+        }
+    }
+
+    /// Devolve — e consome — a linha correspondente, ou `None` quando a
+    /// interface é nova para este dispositivo.
+    fn claim(&mut self, source: &SnmpInterface) -> Option<device_interfaces::Model> {
+        let id = self
+            .by_name
+            .get(&source.if_name.to_lowercase())
+            .or_else(|| self.by_index.get(&source.if_index))
+            .copied()?;
+        self.rows.remove(&id)
+    }
+}
+
 pub async fn poll_device(
     ctx: &loco_rs::app::AppContext,
     device: &devices::Model,
@@ -282,21 +362,12 @@ pub async fn poll_device(
         .filter(device_interfaces_entity::Column::DeviceId.eq(device.id))
         .all(&ctx.db)
         .await?;
-    let mut existing_by_index: BTreeMap<i32, device_interfaces::Model> = BTreeMap::new();
-    let mut existing_by_name: HashMap<String, device_interfaces::Model> = HashMap::new();
-    for row in existing_interfaces {
-        if let Some(index) = row.snmp_index {
-            existing_by_index.insert(index, row.clone());
-        }
-        existing_by_name.insert(row.name.to_lowercase(), row);
-    }
+    let mut conhecidas = InterfaceMatcher::new(existing_interfaces);
 
     let mut interfaces = std::collections::BTreeMap::new();
     for interface in &scan.interfaces {
-        let existing = existing_by_index
-            .get(&interface.if_index)
-            .or_else(|| existing_by_name.get(&interface.if_name.to_lowercase()));
-        let saved = sync_interface(&ctx.db, device.id, interface, existing).await?;
+        let existing = conhecidas.claim(interface);
+        let saved = sync_interface(&ctx.db, device.id, interface, existing.as_ref()).await?;
         // Só interface administrativamente habilitada é avaliada: uma porta
         // que o operador desligou não pode gerar alerta de queda de link.
         if saved.interface.admin_status.as_deref() == Some("up") {
@@ -645,6 +716,49 @@ fn interface_monitor_status(admin: u64, oper: u64) -> MonitorStatus {
     }
 }
 
+/// Recusa aplicar a configuração quando a varredura não é confiável.
+///
+/// `apply_monitors` lê "interface ausente da varredura" como "interface
+/// removida do equipamento" e, com `clear_removed_history`, apaga o monitor, as
+/// métricas e a própria linha. Só que uma coleta que **falhou** também devolve
+/// lista vazia: `scan` registra o erro em `collector_errors` e segue com `Ok`
+/// de propósito, para a tela de descoberta conseguir explicar a seção vazia em
+/// vez de morrer inteira.
+///
+/// Sem esta guarda os dois casos eram indistinguíveis, e um único PDU perdido
+/// no walk do `ifTable` — UDP, 4 s de timeout por requisição — bastava para
+/// varrer monitores e histórico de um equipamento saudável. O terceiro teste é
+/// a rede de segurança para uma falha que não vire erro de coletor: nenhum
+/// equipamento perde todas as interfaces de uma vez.
+fn ensure_scan_can_remove(scan: &SnmpScanResult, known_interfaces: usize) -> AppResult<()> {
+    const NADA_ALTERADO: &str = "Nenhuma configuração foi alterada.";
+
+    if !scan.snmp_responded {
+        return Err(AppError::service_unavailable(format!(
+            "O equipamento não respondeu ao SNMP agora. {NADA_ALTERADO} Tente novamente."
+        )));
+    }
+    if let Some(detail) = scan.collector_errors.get(INTERFACES_COLLECTOR) {
+        tracing::warn!(
+            %detail,
+            "coleta de interfaces falhou: aplicação de monitores recusada"
+        );
+        return Err(AppError::service_unavailable(format!(
+            "A leitura das interfaces via SNMP falhou agora. {NADA_ALTERADO} Tente novamente."
+        )));
+    }
+    if scan.interfaces.is_empty() && known_interfaces > 0 {
+        tracing::warn!(
+            known_interfaces,
+            "varredura sem interfaces em equipamento que já tem interfaces registradas:              aplicação de monitores recusada"
+        );
+        return Err(AppError::service_unavailable(format!(
+            "A varredura SNMP não devolveu nenhuma interface, mas este equipamento tem              {known_interfaces} registradas. {NADA_ALTERADO} Tente novamente."
+        )));
+    }
+    Ok(())
+}
+
 pub async fn apply_monitors(
     ctx: &loco_rs::app::AppContext,
     device: &devices::Model,
@@ -653,6 +767,15 @@ pub async fn apply_monitors(
 ) -> AppResult<()> {
     let scan = scan(config.clone()).await?;
     let clear_history = options.clear_removed_history.unwrap_or(true);
+
+    // Lido antes de qualquer escrita: a guarda precisa do total conhecido, e
+    // recusar depois de já ter mexido no dispositivo não seria recusar.
+    let db_interfaces = device_interfaces::Entity::find()
+        .filter(device_interfaces_entity::Column::DeviceId.eq(device.id))
+        .all(&ctx.db)
+        .await?;
+    ensure_scan_can_remove(&scan, db_interfaces.len())?;
+
     devices::ActiveModel {
         id: Set(device.id),
         snmp_enabled: Set(true),
@@ -670,68 +793,62 @@ pub async fn apply_monitors(
         .map(|i| i.if_name.to_lowercase())
         .collect();
 
-    // Trata interfaces que existiam no banco mas não foram descobertas no scan SNMP atual
-    let db_interfaces = device_interfaces::Entity::find()
-        .filter(device_interfaces_entity::Column::DeviceId.eq(device.id))
-        .all(&ctx.db)
-        .await?;
-    let db_interfaces_by_index: BTreeMap<i32, device_interfaces::Model> = db_interfaces
-        .iter()
-        .filter_map(|row| row.snmp_index.map(|index| (index, row.clone())))
-        .collect();
-    let db_interfaces_by_name: HashMap<String, device_interfaces::Model> = db_interfaces
-        .iter()
-        .map(|row| (row.name.to_lowercase(), row.clone()))
-        .collect();
+    let mut conhecidas = InterfaceMatcher::new(db_interfaces.clone());
 
+    // Numa transação porque a remoção de uma interface são três escritas que
+    // só valem juntas — métricas, monitor e a própria linha. Sem ela, o pool de
+    // uma conexão do SQLite estourando o `connect_timeout` no meio do laço
+    // deixava o equipamento pela metade: interface apagada, monitor de pé.
+    let removal = ctx.db.begin().await?;
     for db_iface in db_interfaces {
-        if let Some(snmp_idx) = db_iface.snmp_index {
-            if !discovered_indexes.contains(&snmp_idx)
-                && !discovered_names.contains(&db_iface.name.to_lowercase())
-            {
-                let monitor_name = interface_monitor_name(&db_iface.name);
-                let monitor = monitors::Entity::find()
-                    .filter(monitors_entity::Column::DeviceId.eq(Some(device.id)))
-                    .filter(monitors_entity::Column::Name.eq(&monitor_name))
-                    .one(&ctx.db)
-                    .await?;
-                if clear_history {
-                    metrics::Entity::delete_many()
-                        .filter(metrics_entity::Column::InterfaceId.eq(Some(db_iface.id)))
-                        .exec(&ctx.db)
-                        .await?;
-                    if let Some(mon) = monitor {
-                        crate::services::maintenance::resource_cleanup::ResourceCleanupService::delete_monitor(
-                            &ctx.db, mon.id,
-                        )
-                        .await?;
-                    }
-                    device_interfaces::Entity::delete_by_id(db_iface.id)
-                        .exec(&ctx.db)
-                        .await?;
-                } else {
-                    if let Some(mon) = monitor {
-                        let mut active: monitors::ActiveModel = mon.into();
-                        active.enabled = Set(false);
-                        active.update(&ctx.db).await?;
-                    }
-                    let mut active: device_interfaces::ActiveModel = db_iface.into();
-                    active.admin_status = Set(Some("down".into()));
-                    active.update(&ctx.db).await?;
-                }
+        let Some(snmp_idx) = db_iface.snmp_index else {
+            continue;
+        };
+        if discovered_indexes.contains(&snmp_idx)
+            || discovered_names.contains(&db_iface.name.to_lowercase())
+        {
+            continue;
+        }
+        let monitor_name = interface_monitor_name(&db_iface.name);
+        let monitor = monitors::Entity::find()
+            .filter(monitors_entity::Column::DeviceId.eq(Some(device.id)))
+            .filter(monitors_entity::Column::Name.eq(&monitor_name))
+            .one(&removal)
+            .await?;
+        if clear_history {
+            metrics::Entity::delete_many()
+                .filter(metrics_entity::Column::InterfaceId.eq(Some(db_iface.id)))
+                .exec(&removal)
+                .await?;
+            if let Some(mon) = monitor {
+                crate::services::maintenance::resource_cleanup::ResourceCleanupService::delete_monitor(
+                    &removal, mon.id,
+                )
+                .await?;
             }
+            device_interfaces::Entity::delete_by_id(db_iface.id)
+                .exec(&removal)
+                .await?;
+        } else {
+            if let Some(mon) = monitor {
+                let mut active: monitors::ActiveModel = mon.into();
+                active.enabled = Set(false);
+                active.update(&removal).await?;
+            }
+            let mut active: device_interfaces::ActiveModel = db_iface.into();
+            active.admin_status = Set(Some("down".into()));
+            active.update(&removal).await?;
         }
     }
+    removal.commit().await?;
 
     let selected = options
         .monitored_if_indexes
         .into_iter()
         .collect::<std::collections::BTreeSet<_>>();
     for source in &scan.interfaces {
-        let existing = db_interfaces_by_index
-            .get(&source.if_index)
-            .or_else(|| db_interfaces_by_name.get(&source.if_name.to_lowercase()));
-        let interface = sync_interface(&ctx.db, device.id, source, existing)
+        let existing = conhecidas.claim(source);
+        let interface = sync_interface(&ctx.db, device.id, source, existing.as_ref())
             .await?
             .interface;
         set_monitoring(
@@ -1408,6 +1525,167 @@ fn map_error(error: SnmpError) -> AppError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn linha_de_teste(id: i64, snmp_index: Option<i32>, name: &str) -> device_interfaces::Model {
+        let agora = Utc::now().into();
+        device_interfaces::Model {
+            id,
+            device_id: 1,
+            snmp_index,
+            name: name.into(),
+            description: None,
+            alias: None,
+            mac_address: None,
+            r#type: None,
+            speed: None,
+            admin_status: None,
+            oper_status: None,
+            last_seen_at: Some(agora),
+            created_at: agora,
+            updated_at: agora,
+        }
+    }
+
+    /// O caso PPPoE: o nome é o mesmo, o índice mudou na reconexão. Sem
+    /// encontrar a linha, a sincronização inseriria uma segunda `pppoe-wan` e
+    /// deixaria a primeira órfã para sempre — foi assim que a duplicata de
+    /// produção nasceu.
+    #[test]
+    fn interface_renumerada_casa_pelo_nome() {
+        let mut matcher = InterfaceMatcher::new(vec![linha_de_teste(17, Some(34), "pppoe-wan")]);
+        let casada = matcher
+            .claim(&interface_de_teste(55, "pppoe-wan"))
+            .expect("deveria reencontrar a linha pelo nome");
+        assert_eq!(casada.id, 17);
+    }
+
+    /// Índice liberado e reaproveitado por outra porta no boot seguinte. Com o
+    /// casamento por índice na frente, a linha da `pppoe-wan` era renomeada
+    /// para `br-lan` e o histórico continuava colado num registro que passou a
+    /// descrever outra coisa.
+    #[test]
+    fn indice_reaproveitado_nao_sequestra_a_linha_de_outra_interface() {
+        let mut matcher = InterfaceMatcher::new(vec![
+            linha_de_teste(17, Some(34), "pppoe-wan"),
+            linha_de_teste(10, Some(11), "br-lan"),
+        ]);
+        let casada = matcher
+            .claim(&interface_de_teste(34, "br-lan"))
+            .expect("deveria casar pelo nome");
+        assert_eq!(casada.id, 10, "a linha da br-lan, não a da pppoe-wan");
+    }
+
+    /// Agente que reporta duas portas com o mesmo `ifName`: o nome não
+    /// identifica ninguém e casar por ele faria as duas disputarem uma linha só.
+    #[test]
+    fn nome_repetido_no_aparelho_cai_para_o_indice() {
+        let mut matcher = InterfaceMatcher::new(vec![
+            linha_de_teste(1, Some(5), "lan"),
+            linha_de_teste(2, Some(6), "lan"),
+        ]);
+        assert_eq!(matcher.claim(&interface_de_teste(6, "lan")).unwrap().id, 2);
+        assert_eq!(matcher.claim(&interface_de_teste(5, "lan")).unwrap().id, 1);
+    }
+
+    /// Cada linha vale por uma varredura. Os mapas antigos não enxergavam o que
+    /// o próprio laço consumia, e duas interfaces podiam sobrescrever a mesma
+    /// linha — duas portas viravam uma.
+    #[test]
+    fn uma_linha_so_e_reivindicada_uma_vez() {
+        let mut matcher = InterfaceMatcher::new(vec![linha_de_teste(17, Some(34), "pppoe-wan")]);
+        assert!(matcher
+            .claim(&interface_de_teste(55, "pppoe-wan"))
+            .is_some());
+        assert!(
+            matcher
+                .claim(&interface_de_teste(34, "pppoe-wan"))
+                .is_none(),
+            "a segunda pretendente vira registro novo, que é o que ela é"
+        );
+    }
+
+    /// Porta que o dispositivo nunca reportou não casa com nada.
+    #[test]
+    fn interface_desconhecida_nao_casa() {
+        let mut matcher = InterfaceMatcher::new(vec![linha_de_teste(1, Some(5), "lan")]);
+        assert!(matcher.claim(&interface_de_teste(99, "wan-nova")).is_none());
+    }
+
+    fn interface_de_teste(if_index: i32, if_name: &str) -> SnmpInterface {
+        SnmpInterface {
+            if_index,
+            if_name: if_name.into(),
+            if_descr: None,
+            if_alias: None,
+            if_type: None,
+            if_speed: None,
+            if_admin_status: Some(1),
+            if_oper_status: Some(1),
+            mac_address: None,
+            is_monitored: false,
+        }
+    }
+
+    /// Agente mudo não é equipamento sem interfaces. Antes da guarda este
+    /// cenário chegava ao laço de limpeza com a lista vazia e apagava monitor,
+    /// métricas e interfaces de tudo que estava registrado.
+    #[test]
+    fn varredura_sem_resposta_nao_autoriza_remocao() {
+        let scan = SnmpScanResult::default();
+        let erro = ensure_scan_can_remove(&scan, 21).expect_err("deveria recusar");
+        assert_eq!(erro.status(), axum::http::StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    /// O caso real: `sysDescr` responde, o walk do `ifTable` perde um PDU e
+    /// `scan` devolve `Ok` com a lista vazia e o erro em `collector_errors`.
+    #[test]
+    fn falha_do_coletor_de_interfaces_nao_autoriza_remocao() {
+        let mut scan = SnmpScanResult {
+            snmp_responded: true,
+            ..Default::default()
+        };
+        scan.collector_errors
+            .insert(INTERFACES_COLLECTOR.into(), "tempo esgotado".into());
+        let erro = ensure_scan_can_remove(&scan, 21).expect_err("deveria recusar");
+        assert_eq!(erro.status(), axum::http::StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    /// Rede de segurança para a falha que não vira erro de coletor: nenhum
+    /// equipamento perde todas as interfaces de uma vez.
+    #[test]
+    fn varredura_vazia_com_interfaces_conhecidas_nao_autoriza_remocao() {
+        let scan = SnmpScanResult {
+            snmp_responded: true,
+            ..Default::default()
+        };
+        let erro = ensure_scan_can_remove(&scan, 21).expect_err("deveria recusar");
+        assert_eq!(erro.status(), axum::http::StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    /// Primeira configuração de um equipamento sem interface nenhuma no banco:
+    /// não há o que proteger, e recusar aqui travaria o cadastro inicial.
+    #[test]
+    fn varredura_vazia_sem_interfaces_conhecidas_e_permitida() {
+        let scan = SnmpScanResult {
+            snmp_responded: true,
+            ..Default::default()
+        };
+        assert!(ensure_scan_can_remove(&scan, 0).is_ok());
+    }
+
+    /// Coleta boa continua passando — inclusive com erro de um coletor que não
+    /// é o de interfaces, que não tem nada a ver com remover porta.
+    #[test]
+    fn varredura_com_interfaces_autoriza_remocao() {
+        let mut scan = SnmpScanResult {
+            snmp_responded: true,
+            interfaces: vec![interface_de_teste(1, "eth0")],
+            ..Default::default()
+        };
+        scan.collector_errors
+            .insert("cpu".into(), "sem OID de CPU".into());
+        assert!(ensure_scan_can_remove(&scan, 21).is_ok());
+    }
 
     /// O diálogo "Escaneamento & Descoberta SNMP" lê estes campos direto do
     /// JSON. Quando eles saíam como `system`/`cpu`/`memory`, a tela quebrava em

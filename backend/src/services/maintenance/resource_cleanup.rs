@@ -5,7 +5,8 @@
 //! controller apague um subconjunto diferente do agregado.
 
 use sea_orm::{
-    sea_query::Expr, ColumnTrait, DatabaseConnection, EntityTrait, ExprTrait, QueryFilter,
+    sea_query::Expr, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, ExprTrait,
+    QueryFilter,
 };
 
 use crate::{
@@ -23,7 +24,12 @@ pub struct ResourceCleanupService;
 
 impl ResourceCleanupService {
     /// Remove um monitor e todo histórico que não é coberto pela FK.
-    pub async fn delete_monitor(db: &DatabaseConnection, monitor_id: i64) -> AppResult<()> {
+    ///
+    /// Genérico sobre a conexão para poder rodar dentro de uma transação: são
+    /// cinco `DELETE` que só fazem sentido juntos, e quem chama em lote (a
+    /// aplicação de monitores SNMP) precisa que a falha do terceiro desfaça os
+    /// dois primeiros.
+    pub async fn delete_monitor<C: ConnectionTrait>(db: &C, monitor_id: i64) -> AppResult<()> {
         monitor_results::Entity::delete_many()
             .filter(monitor_results::Column::MonitorId.eq(monitor_id))
             .exec(db)

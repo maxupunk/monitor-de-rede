@@ -52,10 +52,17 @@ database:
   connect_timeout: {{ get_env(name="DB_CONNECT_TIMEOUT", default="5000") }}
   idle_timeout: {{ get_env(name="DB_IDLE_TIMEOUT", default="300000") }}
   min_connections: {{ get_env(name="DB_MIN_CONNECTIONS", default="1") }}
-  # O padrão é SQLite: uma conexão impede que caches e buffers temporários
-  # sejam multiplicados pelo pool e é coerente com seu escritor único. Quem
-  # usa PostgreSQL pode elevar explicitamente `DB_MAX_CONNECTIONS` (ex.: 10).
-  max_connections: {{ get_env(name="DB_MAX_CONNECTIONS", default="1") }}
+  # Com o WAL ligado no boot, o SQLite atende vários leitores em paralelo com o
+  # escritor — e dois escritores se serializam sozinhos pelo `busy_timeout` de
+  # 5 s do sqlx. Um pool de **uma** conexão jogava isso fora: toda requisição
+  # disputava a mesma conexão com o scheduler, os polls SNMP e a ingestão de
+  # syslog, e quem esperasse mais que o `connect_timeout` recebia
+  # "Connection pool timed out" — que vira **500** no cliente. Era a origem dos
+  # 500 intermitentes em `GET /api/auth/setup` em produção.
+  #
+  # Cinco é o teto de leitores simultâneos, não um alvo: o pool só cresce sob
+  # disputa e `min_connections` mantém uma.
+  max_connections: {{ get_env(name="DB_MAX_CONNECTIONS", default="5") }}
   # O container `migration` não existe mais: o próprio `start` converge o
   # esquema antes de abrir a porta. `create_app` migra; `run_task` não — então
   # um probe remoto, que roda tarefa, continua sem tocar no banco de ninguém.

@@ -5,6 +5,19 @@ import type { DeviceCapabilities } from '@/bindings/DeviceCapabilities'
 import type { Device } from './devices'
 import type { Monitor } from './monitors'
 
+/**
+ * Toda rota `/snmp/*` responde só depois de conversar com o equipamento: são
+ * walks de `ifTable`/`ifXTable` sobre UDP, com 4 s de timeout por requisição e
+ * retry. `apply-monitors` faz **dois** — um para decidir e outro no poll final
+ * — mais uma escrita por interface.
+ *
+ * O padrão de 15 s do `apiService` é dimensionado para API que só lê banco.
+ * Aplicado aqui, o `AbortController` cancelava a requisição no navegador com o
+ * backend ainda escrevendo: a tela ficava carregando "sem acontecer nada" e o
+ * operador não tinha como saber que a gravação seguiu do outro lado.
+ */
+export const SNMP_REQUEST_TIMEOUT_MS = 120_000
+
 export interface DeviceInterface {
   id: number
   deviceId: number
@@ -199,7 +212,9 @@ export const useDeviceDetailStore = defineStore('deviceDetail', () => {
   async function triggerSnmpPoll(deviceId: number): Promise<boolean> {
     pollingSnmp.value = true
     try {
-      await apiService.post(`/devices/${deviceId}/snmp/poll`)
+      await apiService.post(`/devices/${deviceId}/snmp/poll`, undefined, {
+        timeoutMs: SNMP_REQUEST_TIMEOUT_MS,
+      })
       await loadDeviceDetails(deviceId)
       return true
     } catch (err: unknown) {
@@ -214,7 +229,9 @@ export const useDeviceDetailStore = defineStore('deviceDetail', () => {
     scanningSnmp.value = true
     error.value = null
     try {
-      const res = await apiService.post<ScanResult>(`/devices/${deviceId}/snmp/scan`)
+      const res = await apiService.post<ScanResult>(`/devices/${deviceId}/snmp/scan`, undefined, {
+        timeoutMs: SNMP_REQUEST_TIMEOUT_MS,
+      })
       scanResult.value = res
       return res
     } catch (err: unknown) {
@@ -235,8 +252,11 @@ export const useDeviceDetailStore = defineStore('deviceDetail', () => {
     }
   ): Promise<boolean> {
     loading.value = true
+    error.value = null
     try {
-      await apiService.post(`/devices/${deviceId}/snmp/apply-monitors`, options)
+      await apiService.post(`/devices/${deviceId}/snmp/apply-monitors`, options, {
+        timeoutMs: SNMP_REQUEST_TIMEOUT_MS,
+      })
       await loadDeviceDetails(deviceId)
       return true
     } catch (err: unknown) {
@@ -261,9 +281,11 @@ export const useDeviceDetailStore = defineStore('deviceDetail', () => {
     updatingInterfaceId.value = interfaceId
     error.value = null
     try {
-      await apiService.patch(`/devices/${deviceId}/interfaces/${interfaceId}/monitoring`, {
-        enabled,
-      })
+      await apiService.patch(
+        `/devices/${deviceId}/interfaces/${interfaceId}/monitoring`,
+        { enabled },
+        { timeoutMs: SNMP_REQUEST_TIMEOUT_MS }
+      )
       await loadDeviceDetails(deviceId)
       return true
     } catch (err: unknown) {

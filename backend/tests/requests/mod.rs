@@ -18,6 +18,7 @@ mod dns_batch_provision;
 mod dns_ping_provision;
 mod docker;
 mod health_rules;
+mod interface_duplicate_merge;
 mod maintenance_windows;
 mod prepare_data;
 mod process_deps;

@@ -35,4 +35,38 @@ describe('timeout individual da API', () => {
     await vi.advanceTimersByTimeAsync(50_000)
     await rejection
   })
+
+  /**
+   * Só `post` aceitava `timeoutMs`. A assimetria era acidental, mas empurrava
+   * de volta para o teto de 15 s qualquer operação longa que não fosse POST —
+   * como ligar o monitoramento de uma interface, que dispara uma coleta SNMP.
+   */
+  it('vale para os demais verbos, não só para o POST', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn(() => null),
+      removeItem: vi.fn(),
+      setItem: vi.fn(),
+    })
+    let signal: AbortSignal | null = null
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+        signal = init?.signal ?? null
+        return new Promise<Response>((_resolve, reject) => {
+          signal?.addEventListener('abort', () => {
+            reject(Object.assign(new Error('Abortado'), { name: 'AbortError' }))
+          })
+        })
+      })
+    )
+
+    const request = apiService.patch('/coleta-longa', { enabled: true }, { timeoutMs: 65_000 })
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(signal?.aborted).toBe(false)
+
+    const rejection = expect(request).rejects.toBeInstanceOf(NetworkError)
+    await vi.advanceTimersByTimeAsync(50_000)
+    await rejection
+  })
 })

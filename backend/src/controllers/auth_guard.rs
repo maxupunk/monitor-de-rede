@@ -45,14 +45,32 @@ pub async fn require_jwt(
         }
     };
 
-    let Ok(user) = crate::models::users::Model::find_by_pid(&ctx.db, &claims.claims.pid).await
-    else {
-        tracing::warn!(pid = %claims.claims.pid, path = %parts.uri.path(), "usuário do JWT não existe no banco");
-        return (
-            StatusCode::UNAUTHORIZED,
-            axum::Json(serde_json::json!({ "message": "Não autenticado" })),
-        )
-            .into_response();
+    // Banco fora do ar **não** é sessão inválida. Enquanto os dois casos
+    // compartilhavam o 401, um "Connection pool timed out" — rotineiro quando o
+    // pool tinha uma conexão só — derrubava a sessão de quem estava logado: o
+    // `apiService` limpa o token e redireciona no 401, então o operador era
+    // deslogado por uma indisponibilidade de segundos. O 503 mantém a sessão e
+    // deixa o cliente tentar de novo.
+    let user = match crate::models::users::Model::find_by_pid(&ctx.db, &claims.claims.pid).await {
+        Ok(user) => user,
+        Err(loco_rs::model::ModelError::EntityNotFound) => {
+            tracing::warn!(pid = %claims.claims.pid, path = %parts.uri.path(), "usuário do JWT não existe no banco");
+            return (
+                StatusCode::UNAUTHORIZED,
+                axum::Json(serde_json::json!({ "message": "Não autenticado" })),
+            )
+                .into_response();
+        }
+        Err(error) => {
+            tracing::error!(%error, pid = %claims.claims.pid, path = %parts.uri.path(), "falha ao consultar o usuário do JWT");
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                axum::Json(
+                    serde_json::json!({ "message": "Serviço temporariamente indisponível. Tente novamente." }),
+                ),
+            )
+                .into_response();
+        }
     };
 
     if !user.active {
