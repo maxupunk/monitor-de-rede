@@ -33,6 +33,20 @@ pub struct LogsQuery {
     pub limit: Option<u64>,
 }
 
+/// Filtros de `GET /api/logs/export`.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogExportQuery {
+    pub device_id: Option<i64>,
+    pub severity: Option<i16>,
+    pub facility: Option<i16>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub q: Option<String>,
+    pub limit: Option<u64>,
+    pub format: Option<String>,
+}
+
 /// Uma linha de log como a tela a consome.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]

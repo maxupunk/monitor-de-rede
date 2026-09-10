@@ -21,9 +21,10 @@ use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
 use crate::{
     dtos::logs::{
-        BindSourceInput, BindSourceResponse, LogEntry, LogStreamQuery, LogsQuery,
+        BindSourceInput, BindSourceResponse, LogEntry, LogExportQuery, LogStreamQuery, LogsQuery,
         ProvisionHintsResponse, ProvisionLoggingInput, ProvisionLoggingResponse,
     },
+    models::logs::device_logs,
     services::{
         devices::{access, systems},
         network_tools::mactelnet,
@@ -31,7 +32,7 @@ use crate::{
         shared::errors::{AppError, AppResult},
         syslog::{
             destination, hints, provision,
-            repository::{self, Cursor, LogFilters, LogQuery},
+            repository::{self, Cursor, LogFilters, LogQuery, MAX_EXPORT_LIMIT},
             resolver, snippets, LogsDb, SyslogService,
         },
     },
@@ -71,6 +72,137 @@ async fn index(
     let pagina = repository::search(logs.connection(), &filtros).await?;
     let resposta = serialize_page(&ctx.db, pagina, &filtros).await?;
     Ok(format::json(resposta)?)
+}
+
+/// `GET /api/logs/export` — exporta logs respeitando filtros em arquivo `.log`/`.txt` ou `.csv`.
+async fn export_logs(
+    State(ctx): State<AppContext>,
+    Query(query): Query<LogExportQuery>,
+) -> AppResult<Response> {
+    let logs = LogsDb::from_context(&ctx)?;
+
+    let max_rows = query.limit.unwrap_or(MAX_EXPORT_LIMIT);
+    let filtros = LogQuery::normalize(
+        LogFilters {
+            device_id: query.device_id,
+            severity: query.severity,
+            facility: query.facility,
+            from: instante(query.from.as_deref(), "from")?,
+            to: instante(query.to.as_deref(), "to")?,
+            q: query.q,
+            cursor: None,
+            limit: Some(max_rows),
+        },
+        Utc::now(),
+    );
+
+    let rows = repository::export(logs.connection(), &filtros, max_rows).await?;
+
+    let is_csv = query
+        .format
+        .as_deref()
+        .is_some_and(|f| f.eq_ignore_ascii_case("csv"));
+
+    let device_label = if let Some(device_id) = query.device_id {
+        if let Ok(Some(device)) = crate::models::_entities::devices::Entity::find_by_id(device_id)
+            .one(&ctx.db)
+            .await
+        {
+            device
+                .name
+                .chars()
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                        c
+                    } else {
+                        '-'
+                    }
+                })
+                .collect::<String>()
+        } else {
+            format!("dispositivo-{device_id}")
+        }
+    } else {
+        "logs".to_string()
+    };
+
+    let ext = if is_csv { "csv" } else { "log" };
+    let filename = format!(
+        "logs-{device_label}-{}.{ext}",
+        Utc::now().format("%Y%m%d-%H%M%S")
+    );
+
+    let (content_type, body) = if is_csv {
+        let mut csv = String::from("timestamp,severity,source_ip,hostname,app_or_topics,message\n");
+        for row in &rows {
+            let timestamp = row.received_at.to_rfc3339();
+            let severity = row
+                .severity
+                .and_then(crate::views::logs::severity_label)
+                .unwrap_or("");
+            let source_ip = &row.source_ip;
+            let hostname = row.hostname.as_deref().unwrap_or("");
+            let app_or_topics = row
+                .app_name
+                .as_deref()
+                .or(row.topics.as_deref())
+                .unwrap_or("");
+            let message = row.message.replace('"', "\"\"");
+            csv.push_str(&format!(
+                "\"{timestamp}\",\"{severity}\",\"{source_ip}\",\"{hostname}\",\"{app_or_topics}\",\"{message}\"\n"
+            ));
+        }
+        ("text/csv; charset=utf-8", csv)
+    } else {
+        let mut txt = String::new();
+        for row in &rows {
+            txt.push_str(&format_log_line(row));
+            txt.push('\n');
+        }
+        ("text/plain; charset=utf-8", txt)
+    };
+
+    let mut response = body.into_response();
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_str(content_type).unwrap(),
+    );
+    headers.insert(
+        header::CONTENT_DISPOSITION,
+        HeaderValue::try_from(format!("attachment; filename=\"{filename}\""))
+            .map_err(|_| AppError::validation("Nome de arquivo inválido."))?,
+    );
+    Ok(response)
+}
+
+fn format_log_line(row: &device_logs::Model) -> String {
+    let timestamp = row.received_at.to_rfc3339();
+    let severity = row
+        .severity
+        .and_then(crate::views::logs::severity_label)
+        .unwrap_or("desconhecido")
+        .to_uppercase();
+
+    let tag = if let Some(app) = &row.app_name {
+        if let Some(pid) = row.pid {
+            format!("{app}[{pid}]")
+        } else {
+            app.clone()
+        }
+    } else if let Some(topics) = &row.topics {
+        topics.clone()
+    } else {
+        String::new()
+    };
+
+    let source = row.hostname.as_deref().unwrap_or(&row.source_ip);
+
+    if tag.is_empty() {
+        format!("{timestamp} [{severity}] {source}: {}", row.message)
+    } else {
+        format!("{timestamp} [{severity}] {source} {tag}: {}", row.message)
+    }
 }
 
 /// Lê um instante em RFC 3339.
@@ -708,6 +840,7 @@ pub fn routes() -> Routes {
     Routes::new()
         .prefix("/logs")
         .add("/", get(index))
+        .add("/export", get(export_logs))
         .add("/stream", get(stream))
         .add("/sources", get(sources))
         .add("/sources/{ip}/bind", post(bind_source))

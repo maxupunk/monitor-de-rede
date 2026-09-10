@@ -289,6 +289,48 @@ export const useLogsStore = defineStore('logs', () => {
     }
   }
 
+  /**
+   * Baixa os logs em arquivo de texto respeitando os filtros informados (ou os atuais da store).
+   */
+  async function downloadExport(
+    overrideFilters?: Partial<LogFilters>,
+    deviceLabel?: string,
+    format: 'txt' | 'csv' = 'txt'
+  ): Promise<boolean> {
+    const f = { ...filters.value, ...overrideFilters }
+    const params = new URLSearchParams()
+    if (f.deviceId !== null && f.deviceId !== undefined) params.set('deviceId', String(f.deviceId))
+    if (f.severity !== null && f.severity !== undefined) params.set('severity', String(f.severity))
+    if (f.hours !== null && f.hours !== undefined) {
+      const from = new Date(Date.now() - f.hours * 3_600_000)
+      params.set('from', from.toISOString())
+    }
+    const termo = (f.search ?? '').trim()
+    if (termo) params.set('q', termo)
+    if (format !== 'txt') params.set('format', format)
+
+    const query = params.toString()
+    const path = query ? `/logs/export?${query}` : '/logs/export'
+    const blob = await apiService.download(path)
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-')
+    const safeName = (deviceLabel || (f.deviceId ? `device-${f.deviceId}` : 'all')).replace(
+      /[^a-zA-Z0-9_-]/g,
+      '-'
+    )
+    const ext = format === 'csv' ? 'csv' : 'log'
+    const filename = `logs-${safeName}-${stamp}.${ext}`
+
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = filename
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    URL.revokeObjectURL(url)
+    return true
+  }
+
   return {
     filters,
     entries: list.items,
@@ -316,6 +358,7 @@ export const useLogsStore = defineStore('logs', () => {
     provisionDevice,
     setupGuide,
     fetchSetupGuide,
+    downloadExport,
   }
 })
 

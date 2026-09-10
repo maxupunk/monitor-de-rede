@@ -39,7 +39,30 @@
       <code>network_mode: host</code> para o endereço real chegar.
     </v-alert>
 
+    <v-alert
+      v-if="downloadError"
+      type="error"
+      variant="tonal"
+      class="mb-4"
+      closable
+      @click:close="downloadError = null"
+    >
+      {{ downloadError }}
+    </v-alert>
+
     <div class="d-flex align-center flex-wrap ga-3 mb-4">
+      <v-text-field
+        v-model="search"
+        placeholder="Buscar nos logs..."
+        prepend-inner-icon="mdi-magnify"
+        hide-details
+        clearable
+        density="compact"
+        variant="outlined"
+        style="max-width: 240px"
+        @keyup.enter="applyLogFilters"
+        @click:clear="applyLogFilters"
+      ></v-text-field>
       <v-select
         v-model="logSeverity"
         :items="logSeverityOptions"
@@ -50,7 +73,7 @@
         clearable
         density="compact"
         variant="outlined"
-        style="max-width: 240px"
+        style="max-width: 220px"
         @update:model-value="applyLogFilters"
       ></v-select>
       <v-select
@@ -62,10 +85,20 @@
         hide-details
         density="compact"
         variant="outlined"
-        style="max-width: 200px"
+        style="max-width: 180px"
         @update:model-value="applyLogFilters"
       ></v-select>
       <v-spacer></v-spacer>
+      <v-btn
+        color="primary"
+        variant="tonal"
+        size="small"
+        prepend-icon="mdi-download"
+        :loading="downloading"
+        @click="downloadLogs"
+      >
+        Baixar logs
+      </v-btn>
       <v-btn
         :color="logsStore.tailing ? 'success' : 'primary'"
         :variant="logsStore.tailing ? 'flat' : 'tonal'"
@@ -111,8 +144,11 @@ const props = defineProps<{
 }>()
 
 const logsStore = useLogsStore()
+const search = ref('')
 const logSeverity = ref<number | null>(null)
 const logHours = ref<number | null>(24)
+const downloading = ref(false)
+const downloadError = ref<string | null>(null)
 const logSeverityOptions = SEVERITY_OPTIONS
 const logWindowOptions = WINDOW_OPTIONS
 const logSetupOpen = ref(false)
@@ -136,9 +172,29 @@ function applyLogFilters(): void {
     deviceId: props.deviceId,
     severity: logSeverity.value,
     hours: logHours.value,
-    search: '',
+    search: search.value ?? '',
   })
   if (estavaAoVivo) logsStore.startTail()
+}
+
+async function downloadLogs(): Promise<void> {
+  downloading.value = true
+  downloadError.value = null
+  try {
+    await logsStore.downloadExport(
+      {
+        deviceId: props.deviceId,
+        severity: logSeverity.value,
+        hours: logHours.value,
+        search: search.value ?? '',
+      },
+      props.device.name
+    )
+  } catch (err: unknown) {
+    downloadError.value = err instanceof Error ? err.message : 'Erro ao baixar logs do dispositivo'
+  } finally {
+    downloading.value = false
+  }
 }
 
 // Defesa de apresentação: mesmo que uma resposta antiga chegue durante uma
@@ -156,5 +212,6 @@ watch(logSetupOpen, (isOpen) => {
 
 defineExpose({
   applyLogFilters,
+  downloadLogs,
 })
 </script>

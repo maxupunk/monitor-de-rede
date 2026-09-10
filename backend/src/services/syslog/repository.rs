@@ -44,6 +44,9 @@ pub const DEFAULT_LIMIT: u64 = 50;
 /// Teto por página. Protege o banco de um `?limit=100000`.
 pub const MAX_LIMIT: u64 = 200;
 
+/// Teto de registros retornados na exportação direta de logs.
+pub const MAX_EXPORT_LIMIT: u64 = 10_000;
+
 /// Posição na ordenação `(received_at DESC, id DESC)`.
 ///
 /// `id` desempata: duas mensagens do mesmo milissegundo — comuns numa rajada —
@@ -225,6 +228,44 @@ pub async fn search(db: &DatabaseConnection, query: &LogQuery) -> AppResult<LogP
     };
 
     Ok(LogPage { rows, next_cursor })
+}
+
+/// Consulta até `max_rows` linhas para exportação de logs, ordenadas cronologicamente (mais antigas primeiro).
+///
+/// Seleciona as mais recentes dentro do limite `max_rows`, e devolve em ordem cronológica para leitura sequencial do arquivo.
+pub async fn export(
+    db: &DatabaseConnection,
+    query: &LogQuery,
+    max_rows: u64,
+) -> AppResult<Vec<device_logs::Model>> {
+    let mut condicao = Condition::all()
+        .add(device_logs::Column::ReceivedAt.gte(query.from))
+        .add(device_logs::Column::ReceivedAt.lte(query.to));
+
+    if let Some(device_id) = query.device_id {
+        condicao = condicao.add(device_logs::Column::DeviceId.eq(device_id));
+    }
+    if let Some(severity) = query.severity {
+        condicao = condicao.add(device_logs::Column::Severity.lte(severity));
+    }
+    if let Some(facility) = query.facility {
+        condicao = condicao.add(device_logs::Column::Facility.eq(facility));
+    }
+    if let Some(termo) = &query.q {
+        condicao = condicao.add(search::select(db).await.condition(db, termo).await);
+    }
+
+    let limit = max_rows.clamp(1, MAX_EXPORT_LIMIT);
+    let mut rows = device_logs::Entity::find()
+        .filter(condicao)
+        .order_by_desc(device_logs::Column::ReceivedAt)
+        .order_by_desc(device_logs::Column::Id)
+        .limit(limit)
+        .all(db)
+        .await?;
+
+    rows.reverse();
+    Ok(rows)
 }
 
 #[cfg(test)]
@@ -490,5 +531,33 @@ mod tests {
             "o `_` do SQL casou com qualquer coisa"
         );
         assert_eq!(pagina.rows[0].message, "pppoe_client caiu");
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn export_respeita_filtros_e_ordena_cronologicamente() {
+        let db = banco().await;
+        for i in 1..=3 {
+            device_logs::ActiveModel {
+                device_id: Set(Some(42)),
+                source_ip: Set("10.0.0.42".into()),
+                received_at: Set((agora() - Duration::minutes(10 * i)).into()),
+                severity: Set(Some(3)),
+                message: Set(format!("msg {i}")),
+                ..Default::default()
+            }
+            .insert(&db)
+            .await
+            .expect("insere");
+        }
+
+        let mut query = consulta(None, Some(50));
+        query.device_id = Some(42);
+        let rows = export(&db, &query, 100).await.expect("exporta");
+
+        assert_eq!(rows.len(), 3);
+        // Ordenação cronológica (mais antiga primeiro: msg 3, msg 2, msg 1)
+        assert_eq!(rows[0].message, "msg 3");
+        assert_eq!(rows[2].message, "msg 1");
     }
 }

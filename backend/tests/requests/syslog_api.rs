@@ -803,3 +803,61 @@ async fn a_ativacao_falha_com_mensagem_de_operador_quando_a_porta_esta_fechada()
     })
     .await;
 }
+
+#[tokio::test]
+#[serial]
+async fn export_de_logs_respeita_filtros_e_retorna_anexo_formatado() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let device_id = dispositivo(&request).await;
+        let logs = logs_db(&ctx);
+
+        // Grava logs com severidades diferentes e outro dispositivo
+        grava(&logs, Some(device_id), 3, 20, "falha de autenticacao").await;
+        grava(&logs, Some(device_id), 4, 10, "aviso de temperatura").await;
+        grava(&logs, Some(9999), 3, 5, "outro equipamento").await;
+
+        // Exportação filtrando por device_id e severidade 3 ("erro e acima")
+        let resposta = request
+            .get(&format!("/api/logs/export?deviceId={device_id}&severity=3"))
+            .await;
+        assert_eq!(resposta.status_code(), 200, "{}", resposta.text());
+
+        let headers = resposta.headers();
+        let content_type = headers.get("content-type").unwrap().to_str().unwrap();
+        assert!(content_type.contains("text/plain"));
+
+        let disposition = headers
+            .get("content-disposition")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(disposition.contains("attachment"));
+        assert!(disposition.contains("logs-rt-core-"));
+        assert!(disposition.ends_with(".log\""));
+
+        let corpo = resposta.text();
+        assert!(corpo.contains("falha de autenticacao"));
+        assert!(!corpo.contains("aviso de temperatura"));
+        assert!(!corpo.contains("outro equipamento"));
+
+        // Exportação em formato CSV
+        let resposta_csv = request
+            .get(&format!("/api/logs/export?deviceId={device_id}&format=csv"))
+            .await;
+        assert_eq!(resposta_csv.status_code(), 200, "{}", resposta_csv.text());
+        let headers_csv = resposta_csv.headers();
+        let content_type_csv = headers_csv.get("content-type").unwrap().to_str().unwrap();
+        assert!(content_type_csv.contains("text/csv"));
+        let corpo_csv = resposta_csv.text();
+        assert!(
+            corpo_csv.starts_with("timestamp,severity,source_ip,hostname,app_or_topics,message")
+        );
+        assert!(corpo_csv.contains("falha de autenticacao"));
+        assert!(corpo_csv.contains("aviso de temperatura"));
+    })
+    .await;
+}
