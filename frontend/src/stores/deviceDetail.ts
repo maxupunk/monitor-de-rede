@@ -89,6 +89,38 @@ export interface ScanInterfaceItem {
   isMonitored: boolean
 }
 
+export interface SensorStateSpec {
+  label: string
+  color?: string
+  icon?: string
+}
+
+export interface DiscoveredSensorItem {
+  key: string
+  label: string
+  name?: string
+  oid: string
+  unit: string
+  scale: number
+  category: string
+  dataType?: 'float' | 'integer' | 'boolean' | 'state'
+  rawValue?: number | null
+  value?: number | null
+  formattedValue: string
+  isMonitored: boolean
+  icon?: string
+  color?: string
+  states?: Record<string, string | SensorStateSpec>
+}
+
+export interface MatchedProfileSummary {
+  id: string
+  name: string
+  vendor: string
+  category: string
+  isBuiltin: boolean
+}
+
 /**
  * `POST /api/devices/:id/snmp/scan` (`services::snmp::service::SnmpScanResult`).
  *
@@ -101,6 +133,7 @@ export interface ScanResult {
   systemInfo: {
     sysName?: string | null
     sysDescr?: string | null
+    sysObjectId?: string | null
     sysUpTime?: number | null
   }
   cpuInfo: {
@@ -118,6 +151,8 @@ export interface ScanResult {
   hasCpuMonitor: boolean
   hasMemoryMonitor: boolean
   snmpResponded: boolean
+  matchedProfile?: MatchedProfileSummary | null
+  sensors?: DiscoveredSensorItem[]
 }
 
 /** Teto de amostras mantidas em memória na tela de detalhe */
@@ -248,6 +283,7 @@ export const useDeviceDetailStore = defineStore('deviceDetail', () => {
       enableCpuMonitor?: boolean
       enableMemoryMonitor?: boolean
       monitoredIfIndexes?: number[]
+      monitoredSensors?: string[]
       clearRemovedHistory?: boolean
     }
   ): Promise<boolean> {

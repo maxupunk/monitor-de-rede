@@ -468,6 +468,16 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
   - Removidos o importador de segredos, o fallback de variável de cifra e os documentos dedicados à transição de backend.
   - A documentação descreve apenas a arquitetura e os contratos atuais.
 
+- [x] **Perfis SNMP de Dispositivos e Telemetria de Sensores (Solar MPPT / IoT / Nobreak)** 🟢 Concluído
+  - **Arquivos:** `backend/src/services/snmp/profiles/`, `backend/src/services/snmp/service.rs`, `backend/src/controllers/snmp.rs`, `backend/src/services/monitoring/checkers/snmp.rs`, `frontend/src/stores/snmpProfiles.ts`, `frontend/src/stores/deviceDetail.ts`, `frontend/src/components/devices/SnmpProfilesDialog.vue`, `frontend/src/pages/DeviceDetailPage.vue`.
+  - **Implementado:**
+    - Sistema genérico e extensível de perfis SNMP para identificação automática por `sysObjectID` / `sysDescr`.
+    - Perfil nativo integrado para controladores solares MPPT da Volt Tecnologia (medindo tensões, correntes, potência dos painéis PV, bateria, carga e temperaturas).
+    - Suporte a perfis customizados em JSON persistidos em `system_settings` com validação de formato e modelos de exemplo.
+    - Descoberta e exibição clara separando interfaces de rede de dados de sensores e telemetria.
+    - Tratamento de erro aprimorado no modal de escaneamento SNMP com diagnóstico detalhado (ACL, community, timeout UDP 161) e botão de retry.
+    - Monitoramento periódico de sensores via agendador com registro de métricas históricas no banco.
+
 ---
 
 ## 7. Matriz obrigatória de validação

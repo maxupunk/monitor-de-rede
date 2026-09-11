@@ -35,6 +35,7 @@ struct SnmpApplyInput {
     enable_cpu_monitor: Option<bool>,
     enable_memory_monitor: Option<bool>,
     monitored_if_indexes: Option<Vec<i32>>,
+    monitored_sensors: Option<Vec<String>>,
     clear_removed_history: Option<bool>,
 }
 #[derive(Debug, serde::Deserialize)]
@@ -128,6 +129,7 @@ async fn apply_monitors(
             enable_cpu_monitor: input.enable_cpu_monitor,
             enable_memory_monitor: input.enable_memory_monitor,
             monitored_if_indexes: input.monitored_if_indexes.unwrap_or_default(),
+            monitored_sensors: input.monitored_sensors.unwrap_or_default(),
             clear_removed_history: input.clear_removed_history,
         },
     )
@@ -168,10 +170,36 @@ async fn query_interfaces(Json(input): Json<SnmpTestInput>) -> AppResult<Respons
     Ok(format::json(ifaces)?)
 }
 
+async fn list_profiles(State(ctx): State<AppContext>) -> AppResult<Response> {
+    let profiles = crate::services::snmp::profiles::load_all_profiles(&ctx.db).await?;
+    Ok(format::json(profiles)?)
+}
+
+async fn save_profile(
+    State(ctx): State<AppContext>,
+    Json(profile): Json<crate::services::snmp::profiles::SnmpDeviceProfile>,
+) -> AppResult<Response> {
+    let saved = crate::services::snmp::profiles::save_custom_profile(&ctx.db, profile).await?;
+    Ok(format::json(saved)?)
+}
+
+async fn delete_profile(
+    State(ctx): State<AppContext>,
+    Path(profile_id): Path<String>,
+) -> AppResult<Response> {
+    crate::services::snmp::profiles::delete_custom_profile(&ctx.db, &profile_id).await?;
+    Ok(format::json(serde_json::json!({
+        "message": "Perfil removido com sucesso",
+    }))?)
+}
+
 pub fn routes() -> Routes {
     Routes::new()
         .add("/snmp/test", post(test))
         .add("/snmp/interfaces-query", post(query_interfaces))
+        .add("/snmp/profiles", get(list_profiles))
+        .add("/snmp/profiles", post(save_profile))
+        .add("/snmp/profiles/{id}", delete(delete_profile))
         .add("/devices/{id}/snmp/scan", post(scan))
         .add("/devices/{id}/snmp/poll", post(poll))
         .add("/devices/{id}/snmp/apply-monitors", post(apply_monitors))

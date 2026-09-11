@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, HashMap};
 use crate::services::{
     alerts::fields as alert_fields,
     monitoring::{
-        contracts::{CheckResult, MonitorStatus},
+        contracts::{CheckMetric, CheckResult, MonitorStatus},
         device_status::{self, DeviceStatus},
         execution_guard::calculate_smart_timeout_seconds,
         interface_monitoring, metrics_repository,
@@ -54,6 +54,10 @@ pub struct SnmpScanResult {
     pub cpu_info: SnmpCpuInfo,
     pub memory_info: SnmpMemoryInfo,
     pub neighbors: Vec<LldpNeighbor>,
+    /// Perfil de equipamento reconhecido (ex: MPPT, nobreak, sensor IoT)
+    pub matched_profile: Option<super::profiles::SnmpProfileSummary>,
+    /// Sensores e grandezas elétricas/ambientais descobertos
+    pub sensors: Vec<super::profiles::DiscoveredSensor>,
     /// Falhas isoladas por coletor. Dados válidos dos demais coletores são
     /// preservados e a UI consegue explicar por que uma seção ficou vazia.
     pub collector_errors: std::collections::BTreeMap<String, String>,
@@ -91,7 +95,12 @@ pub fn interface_monitor_name(if_name: &str) -> String {
     format!("Interface {if_name}")
 }
 
-/// Chave do coletor de interfaces em `SnmpScanResult::collector_errors`.
+#[must_use]
+pub fn sensor_monitor_name(sensor_name: &str) -> String {
+    format!("Sensor {sensor_name}")
+}
+
+/// Identificador do coletor de interfaces nos erros parciais da varredura.
 ///
 /// Existe como constante porque `scan` a escreve e `ensure_scan_can_remove` a
 /// lê: um literal solto nos dois lados deixaria a guarda silenciosamente cega
@@ -103,6 +112,7 @@ pub struct SnmpApplyOptions {
     pub enable_cpu_monitor: Option<bool>,
     pub enable_memory_monitor: Option<bool>,
     pub monitored_if_indexes: Vec<i32>,
+    pub monitored_sensors: Vec<String>,
     pub clear_removed_history: Option<bool>,
 }
 
@@ -200,6 +210,13 @@ pub async fn query_interfaces(
 }
 
 pub async fn scan(config: SnmpConfig) -> AppResult<SnmpScanResult> {
+    scan_with_profiles(config, &super::profiles::builtin_profiles()).await
+}
+
+pub async fn scan_with_profiles(
+    config: SnmpConfig,
+    profiles: &[super::profiles::SnmpDeviceProfile],
+) -> AppResult<SnmpScanResult> {
     let client = super::client::SnmpClient::new(config);
     let (system, interfaces_and_traffic, cpu, memory, neighbors) = tokio::join!(
         collect_system(&client),
@@ -229,6 +246,24 @@ pub async fn scan(config: SnmpConfig) -> AppResult<SnmpScanResult> {
         collector_errors.insert("neighbors".into(), error.to_string());
         Default::default()
     });
+
+    let (matched_profile, sensors) = if let Some(profile) = super::profiles::match_profile(
+        profiles,
+        system.sys_object_id.as_deref(),
+        system.sys_descr.as_deref(),
+    ) {
+        let summary = super::profiles::SnmpProfileSummary::from(profile);
+        let collected = super::profiles::collect_profile_sensors(&client, profile)
+            .await
+            .unwrap_or_else(|error| {
+                collector_errors.insert("sensors".into(), error.to_string());
+                Default::default()
+            });
+        (Some(summary), collected)
+    } else {
+        (None, Vec::new())
+    };
+
     Ok(SnmpScanResult {
         snmp_responded: system.responded(),
         system_info: system,
@@ -237,6 +272,8 @@ pub async fn scan(config: SnmpConfig) -> AppResult<SnmpScanResult> {
         cpu_info,
         memory_info,
         neighbors,
+        matched_profile,
+        sensors,
         collector_errors,
         has_cpu_monitor: false,
         has_memory_monitor: false,
@@ -253,15 +290,72 @@ pub async fn scan_device(
     device: &devices::Model,
     config: SnmpConfig,
 ) -> AppResult<SnmpScanResult> {
-    let mut scan = scan(config).await?;
-    let existing = monitors::Entity::find()
+    let profiles = super::profiles::load_all_profiles(&ctx.db).await?;
+    let mut scan = scan_with_profiles(config, &profiles).await?;
+    let all_device_monitors = monitors::Entity::find()
         .filter(monitors_entity::Column::DeviceId.eq(Some(device.id)))
-        .filter(monitors_entity::Column::Enabled.eq(true))
         .all(&ctx.db)
         .await?;
-    let enabled = |name: &str| existing.iter().any(|monitor| monitor.name == name);
-    scan.has_cpu_monitor = enabled(CPU_MONITOR_NAME);
-    scan.has_memory_monitor = enabled(MEMORY_MONITOR_NAME);
+
+    let has_cpu_support = scan.cpu_info.usage_percent.is_some();
+    let has_memory_support =
+        scan.memory_info.used_percent.is_some() || scan.memory_info.total_kb.is_some();
+
+    if has_cpu_support {
+        scan.has_cpu_monitor = all_device_monitors
+            .iter()
+            .any(|m| m.name == CPU_MONITOR_NAME && m.enabled);
+    } else {
+        scan.has_cpu_monitor = false;
+        if let Some(mon) = all_device_monitors
+            .iter()
+            .find(|m| m.name == CPU_MONITOR_NAME)
+        {
+            let _ = crate::services::maintenance::resource_cleanup::ResourceCleanupService::delete_monitor(
+                &ctx.db, mon.id,
+            ).await;
+            let _ = metrics::Entity::delete_many()
+                .filter(metrics_entity::Column::DeviceId.eq(device.id))
+                .filter(metrics_entity::Column::Name.eq("cpu_usage"))
+                .exec(&ctx.db)
+                .await;
+        }
+    }
+
+    if has_memory_support {
+        scan.has_memory_monitor = all_device_monitors
+            .iter()
+            .any(|m| m.name == MEMORY_MONITOR_NAME && m.enabled);
+    } else {
+        scan.has_memory_monitor = false;
+        if let Some(mon) = all_device_monitors
+            .iter()
+            .find(|m| m.name == MEMORY_MONITOR_NAME)
+        {
+            let _ = crate::services::maintenance::resource_cleanup::ResourceCleanupService::delete_monitor(
+                &ctx.db, mon.id,
+            ).await;
+            let _ = metrics::Entity::delete_many()
+                .filter(metrics_entity::Column::DeviceId.eq(device.id))
+                .filter(metrics_entity::Column::Name.eq("memory_usage"))
+                .exec(&ctx.db)
+                .await;
+        }
+    }
+
+    let existing: Vec<_> = all_device_monitors
+        .into_iter()
+        .filter(|m| m.enabled)
+        .collect();
+
+    // Sensores do perfil: marca se já há monitor habilitado para cada sensor
+    for sensor in &mut scan.sensors {
+        sensor.is_monitored = existing.iter().any(|m| {
+            m.r#type == "snmp"
+                && m.configuration.get("sensorKey").and_then(|v| v.as_str())
+                    == Some(sensor.key.as_str())
+        });
+    }
 
     // A varredura não conhece o `id` da linha: é a cadeia de identidade que liga
     // a porta recém-lida ao registro local, e só então a pergunta "esta é
@@ -449,7 +543,8 @@ pub async fn poll_device(
     device: &devices::Model,
     config: SnmpConfig,
 ) -> AppResult<SnmpPollResult> {
-    let scan = scan(config).await?;
+    let profiles = super::profiles::load_all_profiles(&ctx.db).await?;
+    let scan = scan_with_profiles(config, &profiles).await?;
     if !scan.snmp_responded {
         return Ok(SnmpPollResult {
             scan,
@@ -764,6 +859,40 @@ fn monitor_result_from_poll(
         },
         "cpu_usage" => missing_measurement_result("uso de CPU"),
         "memory_usage" => missing_measurement_result("uso de memória"),
+        "sensor" => {
+            let sensor_key = config.get("sensorKey").and_then(serde_json::Value::as_str);
+            match sensor_key.and_then(|key| poll.scan.sensors.iter().find(|s| s.key == key)) {
+                Some(sensor) => match sensor.value {
+                    Some(val) => (
+                        MonitorStatus::Up,
+                        format!("Sensor {} coletado: {val} {}", sensor.name, sensor.unit),
+                        serde_json::json!({
+                            "sensorKey": sensor.key,
+                            "name": sensor.name,
+                            "value": val,
+                            "unit": sensor.unit,
+                            "raw": sensor.raw_value,
+                            "dataType": sensor.data_type,
+                            "reading": sensor.formatted_value,
+                            "states": sensor.states,
+                            "icon": sensor.icon,
+                            "color": sensor.color,
+                        }),
+                    ),
+                    None => (
+                        MonitorStatus::Down,
+                        format!("Sensor {} não retornou leitura válida", sensor.name),
+                        serde_json::json!({
+                            "sensorKey": sensor.key,
+                            "name": sensor.name,
+                            "reason": "sensor_value_missing",
+                            "dataType": sensor.data_type,
+                        }),
+                    ),
+                },
+                None => missing_measurement_result("leitura do sensor"),
+            }
+        }
         _ if poll.scan.snmp_responded => (
             MonitorStatus::Up,
             "Agente SNMP respondeu à coleta consolidada".to_string(),
@@ -771,6 +900,44 @@ fn monitor_result_from_poll(
         ),
         _ => missing_measurement_result("resposta do agente SNMP"),
     };
+
+    let mut metrics = Vec::new();
+    match metric {
+        "cpu_usage" => {
+            if let Some(usage) = poll.scan.cpu_info.usage_percent {
+                metrics.push(CheckMetric {
+                    name: "cpu_usage".to_string(),
+                    value: usage,
+                    unit: "percent".to_string(),
+                });
+            }
+        }
+        "memory_usage" => {
+            if let Some(usage) = poll.scan.memory_info.used_percent {
+                metrics.push(CheckMetric {
+                    name: "memory_usage".to_string(),
+                    value: usage,
+                    unit: "percent".to_string(),
+                });
+            }
+        }
+        "sensor" => {
+            let sensor_key = config.get("sensorKey").and_then(serde_json::Value::as_str);
+            if let Some(sensor) =
+                sensor_key.and_then(|key| poll.scan.sensors.iter().find(|s| s.key == key))
+            {
+                if let Some(val) = sensor.value {
+                    metrics.push(CheckMetric {
+                        name: sensor.key.clone(),
+                        value: val,
+                        unit: sensor.unit.clone(),
+                    });
+                }
+            }
+        }
+        _ => {}
+    }
+
     CheckResult {
         success: matches!(status, MonitorStatus::Up | MonitorStatus::Disabled),
         status,
@@ -778,7 +945,7 @@ fn monitor_result_from_poll(
         finished_at,
         duration_ms: (finished_at - started_at).num_milliseconds().max(0),
         message: Some(message),
-        metrics: vec![],
+        metrics,
         data,
     }
 }
@@ -843,13 +1010,15 @@ fn ensure_scan_can_remove(scan: &SnmpScanResult, known_interfaces: usize) -> App
         )));
     }
     if let Some(detail) = scan.collector_errors.get(INTERFACES_COLLECTOR) {
-        tracing::warn!(
-            %detail,
-            "coleta de interfaces falhou: aplicação de monitores recusada"
-        );
-        return Err(AppError::service_unavailable(format!(
-            "A leitura das interfaces via SNMP falhou agora. {NADA_ALTERADO} Tente novamente."
-        )));
+        if known_interfaces > 0 {
+            tracing::warn!(
+                %detail,
+                "coleta de interfaces falhou: aplicação de monitores recusada"
+            );
+            return Err(AppError::service_unavailable(format!(
+                "A leitura das interfaces via SNMP falhou agora. {NADA_ALTERADO} Tente novamente."
+            )));
+        }
     }
     if scan.interfaces.is_empty() && known_interfaces > 0 {
         tracing::warn!(
@@ -869,7 +1038,8 @@ pub async fn apply_monitors(
     config: SnmpConfig,
     options: SnmpApplyOptions,
 ) -> AppResult<()> {
-    let scan = scan(config.clone()).await?;
+    let profiles = super::profiles::load_all_profiles(&ctx.db).await?;
+    let scan = scan_with_profiles(config.clone(), &profiles).await?;
     let clear_history = options.clear_removed_history.unwrap_or(true);
 
     // Lido antes de qualquer escrita: a guarda precisa do total conhecido, e
@@ -967,50 +1137,147 @@ pub async fn apply_monitors(
         )
         .await?;
     }
-    if let Some(enabled) = options.enable_cpu_monitor {
-        sync_monitor(
-            &ctx.db,
-            MonitorSpec {
-                device_id: device.id,
-                interface: None,
-                name: CPU_MONITOR_NAME,
-                enabled,
-                configuration: monitor_configuration(&config, "cpu_usage"),
-                up: true,
-                interval_seconds: device.snmp_poll_interval_seconds,
-            },
-        )
-        .await?;
-        if !enabled && clear_history {
-            metrics::Entity::delete_many()
+    let has_cpu_support = scan.cpu_info.usage_percent.is_some();
+    let has_memory_support =
+        scan.memory_info.used_percent.is_some() || scan.memory_info.total_kb.is_some();
+
+    if has_cpu_support {
+        if let Some(enabled) = options.enable_cpu_monitor {
+            sync_monitor(
+                &ctx.db,
+                MonitorSpec {
+                    device_id: device.id,
+                    interface: None,
+                    name: CPU_MONITOR_NAME,
+                    enabled,
+                    configuration: monitor_configuration(&config, "cpu_usage"),
+                    up: true,
+                    interval_seconds: device.snmp_poll_interval_seconds,
+                },
+            )
+            .await?;
+            if !enabled && clear_history {
+                metrics::Entity::delete_many()
+                    .filter(metrics_entity::Column::DeviceId.eq(device.id))
+                    .filter(metrics_entity::Column::Name.eq("cpu_usage"))
+                    .exec(&ctx.db)
+                    .await?;
+            }
+        }
+    } else {
+        // Equipamento não possui CPU (ex: MPPT, IoT): remove monitor órfão de CPU se existir
+        if let Some(mon) = monitors::Entity::find()
+            .filter(monitors_entity::Column::DeviceId.eq(Some(device.id)))
+            .filter(monitors_entity::Column::Name.eq(CPU_MONITOR_NAME))
+            .one(&ctx.db)
+            .await?
+        {
+            let _ = crate::services::maintenance::resource_cleanup::ResourceCleanupService::delete_monitor(
+                &ctx.db, mon.id,
+            )
+            .await;
+            let _ = metrics::Entity::delete_many()
                 .filter(metrics_entity::Column::DeviceId.eq(device.id))
                 .filter(metrics_entity::Column::Name.eq("cpu_usage"))
                 .exec(&ctx.db)
-                .await?;
+                .await;
         }
     }
-    if let Some(enabled) = options.enable_memory_monitor {
-        sync_monitor(
-            &ctx.db,
-            MonitorSpec {
-                device_id: device.id,
-                interface: None,
-                name: MEMORY_MONITOR_NAME,
-                enabled,
-                configuration: monitor_configuration(&config, "memory_usage"),
-                up: true,
-                interval_seconds: device.snmp_poll_interval_seconds,
-            },
-        )
-        .await?;
-        if !enabled && clear_history {
-            metrics::Entity::delete_many()
+
+    if has_memory_support {
+        if let Some(enabled) = options.enable_memory_monitor {
+            sync_monitor(
+                &ctx.db,
+                MonitorSpec {
+                    device_id: device.id,
+                    interface: None,
+                    name: MEMORY_MONITOR_NAME,
+                    enabled,
+                    configuration: monitor_configuration(&config, "memory_usage"),
+                    up: true,
+                    interval_seconds: device.snmp_poll_interval_seconds,
+                },
+            )
+            .await?;
+            if !enabled && clear_history {
+                metrics::Entity::delete_many()
+                    .filter(metrics_entity::Column::DeviceId.eq(device.id))
+                    .filter(metrics_entity::Column::Name.eq("memory_usage"))
+                    .exec(&ctx.db)
+                    .await?;
+            }
+        }
+    } else {
+        // Equipamento não possui Memória: remove monitor órfão de memória se existir
+        if let Some(mon) = monitors::Entity::find()
+            .filter(monitors_entity::Column::DeviceId.eq(Some(device.id)))
+            .filter(monitors_entity::Column::Name.eq(MEMORY_MONITOR_NAME))
+            .one(&ctx.db)
+            .await?
+        {
+            let _ = crate::services::maintenance::resource_cleanup::ResourceCleanupService::delete_monitor(
+                &ctx.db, mon.id,
+            )
+            .await;
+            let _ = metrics::Entity::delete_many()
                 .filter(metrics_entity::Column::DeviceId.eq(device.id))
                 .filter(metrics_entity::Column::Name.eq("memory_usage"))
                 .exec(&ctx.db)
-                .await?;
+                .await;
         }
     }
+
+    let selected_sensors: std::collections::BTreeSet<String> =
+        options.monitored_sensors.into_iter().collect();
+
+    for sensor in &scan.sensors {
+        let is_monitored = selected_sensors.contains(&sensor.key);
+        let mon_name = sensor_monitor_name(&sensor.name);
+        let existing = monitors::Entity::find()
+            .filter(monitors_entity::Column::DeviceId.eq(Some(device.id)))
+            .filter(monitors_entity::Column::Name.eq(&mon_name))
+            .one(&ctx.db)
+            .await?;
+
+        if is_monitored || existing.is_some() {
+            sync_monitor(
+                &ctx.db,
+                MonitorSpec {
+                    device_id: device.id,
+                    interface: None,
+                    name: &mon_name,
+                    enabled: is_monitored,
+                    configuration: serde_json::json!({
+                        "host": config.host.clone(),
+                        "version": version_name(config.version),
+                        "community": config.community.clone(),
+                        "port": config.port,
+                        "metric": "sensor",
+                        "sensorKey": sensor.key.clone(),
+                        "oid": sensor.oid.clone(),
+                        "scale": sensor.scale,
+                        "unit": sensor.unit.clone(),
+                        "dataType": sensor.data_type.clone(),
+                        "icon": sensor.icon.clone(),
+                        "color": sensor.color.clone(),
+                        "states": sensor.states.clone(),
+                    }),
+                    up: sensor.value.is_some(),
+                    interval_seconds: device.snmp_poll_interval_seconds,
+                },
+            )
+            .await?;
+
+            if !is_monitored && clear_history {
+                metrics::Entity::delete_many()
+                    .filter(metrics_entity::Column::DeviceId.eq(device.id))
+                    .filter(metrics_entity::Column::Name.eq(&sensor.key))
+                    .exec(&ctx.db)
+                    .await?;
+            }
+        }
+    }
+
     // Um poll inicial deixa a configuracao e a primeira visualizacao coerentes.
     let _ = poll_device(ctx, device, config).await;
     Ok(())
@@ -1418,7 +1685,7 @@ fn build_traffic_metrics(
 /// Constrói as métricas de sistema (CPU, memória, uptime) para inserção em massa.
 fn build_system_metrics(device_id: i64, scan: &SnmpScanResult) -> Vec<PendingMetric> {
     let recorded_at = Utc::now();
-    let mut pending = Vec::with_capacity(3);
+    let mut pending = Vec::with_capacity(3 + scan.sensors.len());
     for (name, value, unit) in [
         ("cpu_usage", scan.cpu_info.usage_percent, "percent"),
         ("memory_usage", scan.memory_info.used_percent, "percent"),
@@ -1435,6 +1702,18 @@ fn build_system_metrics(device_id: i64, scan: &SnmpScanResult) -> Vec<PendingMet
                 name: name.into(),
                 value,
                 unit: unit.into(),
+                recorded_at,
+            });
+        }
+    }
+    for sensor in &scan.sensors {
+        if let Some(value) = sensor.value {
+            pending.push(PendingMetric {
+                device_id,
+                interface_id: None,
+                name: sensor.key.clone(),
+                value,
+                unit: sensor.unit.clone(),
                 recorded_at,
             });
         }
@@ -2002,6 +2281,8 @@ mod tests {
             collector_errors: Default::default(),
             has_cpu_monitor: true,
             has_memory_monitor: false,
+            matched_profile: None,
+            sensors: vec![],
         };
         let json = serde_json::to_value(&scan).unwrap();
 
@@ -2083,6 +2364,8 @@ mod tests {
                 collector_errors: Default::default(),
                 has_cpu_monitor: false,
                 has_memory_monitor: false,
+                matched_profile: None,
+                sensors: vec![],
             },
             interfaces_synced: 1,
             metrics_recorded: 1,

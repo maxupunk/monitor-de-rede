@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div v-if="cards.length > 0">
     <div class="text-subtitle-1 font-weight-bold mb-3 d-flex align-center ga-2">
       <v-icon color="primary">mdi-chip</v-icon>
       Saúde do equipamento

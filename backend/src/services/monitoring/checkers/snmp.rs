@@ -11,6 +11,7 @@ use crate::services::{
     snmp::{
         client::{SnmpClient, SnmpConfig, SnmpError, SnmpVersion},
         collectors::{collect_cpu, collect_memory, status_label, OID_SYS_UPTIME},
+        profiles::format_sensor_value,
     },
 };
 
@@ -39,6 +40,19 @@ pub struct SnmpCheckerConfig {
     pub if_index: Option<i32>,
     #[serde(default)]
     pub if_name: Option<String>,
+    #[serde(default)]
+    pub oid: Option<String>,
+    #[serde(default)]
+    pub sensor_key: Option<String>,
+    #[serde(default)]
+    pub scale: Option<f64>,
+    #[serde(default)]
+    pub unit: Option<String>,
+    #[serde(default)]
+    pub data_type: Option<String>,
+    #[serde(default)]
+    pub states:
+        Option<std::collections::HashMap<String, crate::services::snmp::profiles::SensorStateSpec>>,
 }
 fn default_version() -> String {
     "v2c".into()
@@ -132,6 +146,7 @@ async fn execute_query(config: &SnmpCheckerConfig) -> Result<SnmpObservation, Sn
         "uptime" => uptime(&client).await,
         "cpu_usage" => cpu_usage(&client).await,
         "memory_usage" => memory_usage(&client).await,
+        "sensor" => sensor_metric(&client, config).await,
         _ => Err(SnmpError::InvalidConfig("Métrica SNMP inválida".into())),
     }
 }
@@ -201,6 +216,62 @@ async fn memory_usage(client: &SnmpClient) -> Result<SnmpObservation, SnmpError>
         data: serde_json::json!({
             "totalKb": memory.total_kb,
             "usedKb": memory.used_kb,
+        }),
+    })
+}
+
+async fn sensor_metric(
+    client: &SnmpClient,
+    config: &SnmpCheckerConfig,
+) -> Result<SnmpObservation, SnmpError> {
+    let oid = config.oid.as_deref().ok_or_else(|| {
+        SnmpError::InvalidConfig("OID SNMP obrigatório para monitor de sensor".into())
+    })?;
+    let values = client.get(&[oid]).await?;
+    let raw_opt = values
+        .get(oid)
+        .and_then(|v| v.as_ref())
+        .and_then(|v| v.number());
+    let scale = config.scale.unwrap_or(1.0);
+    let unit = config.unit.clone().unwrap_or_default();
+    let sensor_name = config
+        .sensor_key
+        .clone()
+        .unwrap_or_else(|| "sensor_value".into());
+
+    let (val, formatted) = match raw_opt {
+        Some(num) => {
+            #[allow(clippy::cast_precision_loss)]
+            let raw = num as f64;
+            let scaled = raw * scale;
+            let fmt = format_sensor_value(raw, scaled, &unit, config.states.as_ref());
+            (scaled, fmt)
+        }
+        None => {
+            let text = values
+                .get(oid)
+                .and_then(|v| v.as_ref())
+                .map(|v| v.text())
+                .filter(|t| !t.is_empty())
+                .unwrap_or_else(|| "Sem leitura".into());
+            (0.0, text)
+        }
+    };
+
+    Ok(SnmpObservation {
+        metric: sensor_name.clone(),
+        status: MonitorStatus::Up,
+        metrics: vec![CheckMetric {
+            name: sensor_name,
+            value: val,
+            unit: unit.clone(),
+        }],
+        data: serde_json::json!({
+            "reading": formatted,
+            "unit": unit,
+            "dataType": config.data_type.as_deref().unwrap_or("float"),
+            "value": val,
+            "raw": raw_opt,
         }),
     })
 }

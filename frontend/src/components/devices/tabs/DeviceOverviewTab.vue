@@ -168,6 +168,9 @@
       <DeviceHealthSummary :metrics="detailStore.metrics" />
     </template>
 
+    <!-- Telemetria de Sensores & Energia -->
+    <DeviceTelemetrySummary :metrics="detailStore.metrics" />
+
     <!-- Resumo de tráfego por interface monitorada -->
     <div
       v-if="interfaceTrafficSummaries.length > 0"
@@ -426,6 +429,7 @@ import {
 import { useMonitorsStore } from '@/stores/monitors'
 import { useNetworksStore } from '@/stores/networks'
 import DeviceHealthSummary from '@/components/devices/DeviceHealthSummary.vue'
+import DeviceTelemetrySummary from '@/components/devices/DeviceTelemetrySummary.vue'
 import { formatBps, formatBytes, formatMeasuredValue } from '@/utils/formatters'
 import { getStatusColor } from '@/utils/monitorPresentation'
 import { useInfiniteList } from '@/composables/useInfiniteList'

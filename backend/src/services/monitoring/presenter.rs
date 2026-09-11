@@ -127,11 +127,20 @@ pub fn gauge_metric_name(monitor: &monitors::Model) -> Option<&str> {
                 .and_then(serde_json::Value::as_str)
         })
         .flatten()
-        .filter(|name| {
-            matches!(
-                *name,
+        .and_then(|name| {
+            if matches!(
+                name,
                 "cpu_usage" | "memory_usage" | "traffic" | "interface_traffic"
-            )
+            ) {
+                Some(name)
+            } else if name == "sensor" {
+                monitor
+                    .configuration
+                    .get("sensorKey")
+                    .and_then(serde_json::Value::as_str)
+            } else {
+                None
+            }
         })
 }
 
@@ -179,7 +188,8 @@ pub async fn present_monitors(
             .remove(&monitor.id)
             .unwrap_or_default();
         let latency_ms = recent_results.last().and_then(|result| result.latency_ms);
-        let (gauge_metric, gauge_history) = fetch_gauge_metrics(db, &monitor).await?;
+        let (gauge_metric, gauge_history) =
+            fetch_gauge_metrics(db, &monitor, &recent_results).await?;
         let is_enabled = monitor.is_enabled();
         let target = monitor.target();
         let port = monitor.port();
@@ -266,6 +276,7 @@ async fn fetch_recent_results(
 async fn fetch_gauge_metrics(
     db: &DatabaseConnection,
     monitor: &monitors::Model,
+    recent_results: &[MonitorResultPresentation],
 ) -> AppResult<(Option<GaugeReading>, Vec<GaugeSample>)> {
     let (Some(device_id), Some(metric_name)) = (monitor.device_id, gauge_metric_name(monitor))
     else {
@@ -274,6 +285,11 @@ async fn fetch_gauge_metrics(
 
     let is_traffic = matches!(metric_name, "traffic" | "interface_traffic");
     let is_memory = metric_name == "memory_usage";
+    let is_sensor = monitor
+        .configuration
+        .get("metric")
+        .and_then(serde_json::Value::as_str)
+        == Some("sensor");
 
     let mut query =
         metrics_entity::Entity::find().filter(metrics_entity::Column::DeviceId.eq(device_id));
@@ -282,6 +298,12 @@ async fn fetch_gauge_metrics(
         query = query.filter(metrics_entity::Column::Name.eq("inBps"));
     } else if is_memory {
         query = query.filter(metrics_entity::Column::Name.eq("memory_used_bytes"));
+    } else if is_sensor {
+        query = query.filter(
+            sea_orm::Condition::any()
+                .add(metrics_entity::Column::MonitorId.eq(Some(monitor.id)))
+                .add(metrics_entity::Column::Name.eq(metric_name)),
+        );
     } else {
         query = query.filter(metrics_entity::Column::Name.eq(metric_name));
     }
@@ -341,6 +363,37 @@ async fn fetch_gauge_metrics(
         .limit(GAUGE_HISTORY_LIMIT)
         .all(db)
         .await?;
+
+    if rows.is_empty() && is_sensor && !recent_results.is_empty() {
+        let mut samples = Vec::new();
+        let mut latest_reading = None;
+        for res in recent_results {
+            if let Some(data) = &res.data {
+                if let Some(val) = data.get("value").and_then(serde_json::Value::as_f64) {
+                    let unit = data
+                        .get("unit")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default()
+                        .to_string();
+                    samples.push(GaugeSample {
+                        value: val,
+                        recorded_at: res.started_at.clone(),
+                    });
+                    latest_reading = Some(GaugeReading {
+                        name: metric_name.to_string(),
+                        value: val,
+                        unit,
+                        recorded_at: res.started_at.clone(),
+                        usage_percent: None,
+                        total_bytes: None,
+                    });
+                }
+            }
+        }
+        if !samples.is_empty() {
+            return Ok((latest_reading, samples));
+        }
+    }
     let (usage_percent, total_bytes) = if is_memory {
         let percentage = metrics_entity::Entity::find()
             .filter(metrics_entity::Column::DeviceId.eq(device_id))

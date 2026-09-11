@@ -90,10 +90,15 @@ where
         return Ok(());
     };
     let recorded_at = result.finished_at.fixed_offset();
+    let is_sensor = monitor
+        .configuration
+        .get("metric")
+        .and_then(serde_json::Value::as_str)
+        == Some("sensor");
     let linhas: Vec<metrics::ActiveModel> = result
         .metrics
         .iter()
-        .filter(|metric| is_device_series(&metric.name) && metric.value.is_finite())
+        .filter(|metric| (is_device_series(&metric.name) || is_sensor) && metric.value.is_finite())
         .map(|metric| metrics::ActiveModel {
             device_id: Set(device_id),
             interface_id: Set(None),
@@ -214,10 +219,15 @@ pub async fn process_result(
     // pode abortar nem apagar a observação técnica já gravada.
     if let Ok(events) = EventBus::from_context(ctx) {
         let recorded_at = result.finished_at.to_rfc3339();
+        let is_sensor = monitor
+            .configuration
+            .get("metric")
+            .and_then(serde_json::Value::as_str)
+            == Some("sensor");
         let realtime_metrics: Vec<serde_json::Value> = result
             .metrics
             .iter()
-            .filter(|metric| is_device_series(&metric.name))
+            .filter(|metric| is_device_series(&metric.name) || is_sensor)
             .map(|metric| {
                 serde_json::json!({
                     "name": metric.name,

@@ -2,4 +2,5 @@
 
 pub mod client;
 pub mod collectors;
+pub mod profiles;
 pub mod service;

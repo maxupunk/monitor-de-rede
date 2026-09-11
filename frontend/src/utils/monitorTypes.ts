@@ -24,7 +24,7 @@ export type MonitorKind = 'ping' | 'http' | 'tcp' | 'dns' | 'snmp'
  * que "preencher ifIndex" muda o comportamento do monitor.
  */
 export type SnmpMode =
-  'availability' | 'cpu_usage' | 'memory_usage' | 'interface' | 'interface_traffic'
+  'availability' | 'cpu_usage' | 'memory_usage' | 'interface' | 'interface_traffic' | 'sensor'
 
 export type DnsRecordType = 'A' | 'AAAA' | 'MX' | 'TXT' | 'CNAME' | 'NS'
 export type HttpMethod = 'GET' | 'HEAD' | 'POST'
@@ -368,6 +368,14 @@ export const SNMP_MODES: SnmpModeDefinition[] = [
     description: 'Coleta throughput (in/out bps) de uma interface. Exibido como medidor de banda.',
     isGauge: true,
   },
+  {
+    value: 'sensor',
+    label: 'Sensor / Telemetria',
+    icon: 'mdi-gauge',
+    description:
+      'Leitura contínua ou discreta de grandezas de sensores (tensão, corrente, potência, etc.).',
+    isGauge: true,
+  },
 ]
 
 export interface DnsProtocolDefinition {
@@ -585,6 +593,7 @@ export function resolveKind(type: string | undefined): MonitorKind {
 
 export function resolveSnmpMode(configuration: Record<string, unknown> | undefined): SnmpMode {
   const metric = configuration?.metric
+  if (metric === 'sensor') return 'sensor'
   if (metric === 'interface_traffic' || metric === 'traffic') return 'interface_traffic'
   if (metric === 'cpu_usage') return 'cpu_usage'
   if (metric === 'memory_usage') return 'memory_usage'

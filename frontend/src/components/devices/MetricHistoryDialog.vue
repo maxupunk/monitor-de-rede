@@ -29,13 +29,28 @@
             <div class="text-caption text-grey">Leitura atual</div>
             <div class="text-h5 font-weight-bold">{{ atual }}</div>
           </div>
-          <v-divider vertical class="d-none d-sm-block" />
-          <div>
-            <div class="text-caption text-grey">Mínimo · Médio · Máximo</div>
-            <div class="text-body-1 font-weight-medium">
-              {{ minimo }} · {{ medio }} · {{ maximo }}
+          <template v-if="!isDiscrete">
+            <v-divider vertical class="d-none d-sm-block" />
+            <div>
+              <div class="text-caption text-grey">Mínimo · Médio · Máximo</div>
+              <div class="text-body-1 font-weight-medium">
+                {{ minimo }} · {{ medio }} · {{ maximo }}
+              </div>
             </div>
-          </div>
+          </template>
+          <template v-else>
+            <v-divider vertical class="d-none d-sm-block" />
+            <div>
+              <div class="text-caption text-grey">Tipo de Medição</div>
+              <div class="text-body-1 font-weight-medium">
+                {{
+                  props.dataType === 'boolean' || props.unitType === 'boolean'
+                    ? 'Digital / Booleano'
+                    : 'Estado / Modo'
+                }}
+              </div>
+            </div>
+          </template>
           <v-divider vertical class="d-none d-sm-block" />
           <div>
             <div class="text-caption text-grey">Amostras</div>
@@ -46,10 +61,13 @@
         <BaseMetricChart
           v-if="pontos.length > 1"
           :series="[serie]"
-          :unit-type="unitType ?? 'generic'"
+          :unit-type="
+            unitType ?? (isDiscrete ? (dataType === 'boolean' ? 'boolean' : 'state') : 'generic')
+          "
           :custom-unit="customUnit ?? ''"
-          show-avg-line
-          :avg-value="mediaBruta"
+          :show-avg-line="!isDiscrete"
+          :avg-value="isDiscrete ? undefined : mediaBruta"
+          :format-value="props.format"
         />
 
         <v-alert v-else type="info" variant="tonal" density="comfortable" class="rounded-lg">
@@ -88,12 +106,21 @@ const props = defineProps<{
   title: string
   icon?: string
   color?: string
-  unitType?: 'bandwidth' | 'bytes' | 'latency' | 'percentage' | 'generic'
+  dataType?: 'float' | 'integer' | 'boolean' | 'state'
+  unitType?: 'bandwidth' | 'bytes' | 'latency' | 'percentage' | 'generic' | 'boolean' | 'state'
   customUnit?: string
   metrics: DeviceMetric[]
   /** Formatador do resumo numérico, o mesmo usado no card. */
   format?: (valor: number) => string
 }>()
+
+const isDiscrete = computed(
+  () =>
+    props.dataType === 'boolean' ||
+    props.dataType === 'state' ||
+    props.unitType === 'boolean' ||
+    props.unitType === 'state'
+)
 
 const emit = defineEmits<{ (e: 'update:modelValue', value: boolean): void }>()
 
@@ -127,7 +154,16 @@ const valores = computed(() => pontos.value.map((ponto) => ponto.value))
 
 function formata(valor: number | null): string {
   if (valor === null) return '—'
-  return props.format ? props.format(valor) : `${Math.round(valor * 10) / 10}%`
+  if (props.format) return props.format(valor)
+  if (props.unitType === 'percentage') return `${Math.round(valor * 10) / 10}%`
+  if (props.dataType === 'boolean' || props.unitType === 'boolean') {
+    return Math.round(valor) === 1 ? 'Ligado' : 'Desligado'
+  }
+  if (props.customUnit) {
+    const valStr = valor % 1 === 0 ? valor.toFixed(0) : (Math.round(valor * 10) / 10).toFixed(1)
+    return `${valStr} ${props.customUnit}`.trim()
+  }
+  return valor % 1 === 0 ? valor.toFixed(0) : (Math.round(valor * 10) / 10).toFixed(1)
 }
 
 const atual = computed(() =>

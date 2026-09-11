@@ -37,11 +37,12 @@
           <!-- Largura igual à da MonitorTimelineBar abaixo (24 blocos de 5px + 23 gaps de 3px = 189px),
                para os dois estilos de linha ficarem visualmente alinhados na mesma coluna. -->
           <MonitorSparkline
-            :data="item.gaugeHistory || []"
+            :data="getMonitorSparklineData(item)"
             :color="gaugeSparklineColor(item)"
             :width="189"
             :height="28"
             :unit="gaugeDisplayUnit(item)"
+            :format-value="(v) => formatSparklinePoint(item, v)"
           />
           <span class="text-caption font-weight-medium text-no-wrap" style="min-width: 44px">
             {{ formatGaugeShortValue(item) }}
@@ -231,11 +232,12 @@
             <template v-if="isGaugeMonitor(item)">
               <div class="d-flex align-center ga-2 w-100">
                 <MonitorSparkline
-                  :data="item.gaugeHistory || []"
+                  :data="getMonitorSparklineData(item)"
                   :color="gaugeSparklineColor(item)"
                   :width="220"
                   :height="28"
                   :unit="gaugeDisplayUnit(item)"
+                  :format-value="(v) => formatSparklinePoint(item, v)"
                 />
                 <span class="text-caption font-weight-medium text-no-wrap">
                   {{ formatGaugeShortValue(item) }}
@@ -346,6 +348,8 @@ import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import { useMonitorDetail } from '@/composables/useMonitorDetail'
 import {
   isGaugeMonitor,
+  isSensorMonitor,
+  sensorDataType,
   gaugeMetricName,
   gaugeDisplayUnit,
   gaugeUsagePercent,
@@ -472,11 +476,78 @@ async function executeDelete() {
   }
 }
 
+function getMonitorSparklineData(item: Monitor) {
+  if (item.gaugeHistory && item.gaugeHistory.length > 0) {
+    return item.gaugeHistory
+  }
+  if (item.recentResults && item.recentResults.length > 0) {
+    const points = []
+    for (const res of item.recentResults) {
+      const val = res.data?.value as number | undefined
+      if (typeof val === 'number' && Number.isFinite(val)) {
+        points.push({ value: val, recordedAt: res.startedAt })
+      }
+    }
+    if (points.length > 0) return points
+  }
+  return []
+}
+
+function formatSparklinePoint(item: Monitor, val: number): string {
+  if (isSensorMonitor(item)) {
+    const dt = sensorDataType(item)
+    if (dt === 'boolean') {
+      return val === 1 ? 'Ligado' : 'Desligado'
+    }
+    const unit = gaugeDisplayUnit(item)
+    const num = Number.isInteger(val) ? String(val) : Number(val.toFixed(1)).toString()
+    return unit ? `${num} ${unit}` : num
+  }
+  return ''
+}
+
 function gaugeColor(item: Monitor): string {
-  return gaugeColorFor(gaugeUsagePercent(item), gaugeMetricName(item))
+  if (item.status === 'down' || item.status === 'offline') return 'error'
+  if (item.status === 'warning') return 'warning'
+  const states = item.configuration?.states as Record<string, { color?: string }> | undefined
+  const val =
+    item.gaugeMetric?.value ?? (latestResultData(item.recentResults)?.value as number | undefined)
+  if (states && val !== undefined && val !== null) {
+    const k = String(Math.round(val))
+    if (states[k]?.color) return states[k].color!
+  }
+  if (isSensorMonitor(item)) {
+    const dt = sensorDataType(item)
+    if (dt === 'boolean') {
+      return val === 1 ? 'success' : 'grey'
+    }
+    if (val === null || val === undefined || !Number.isFinite(val)) return 'grey'
+    const name = ((item.configuration?.sensorKey as string) || item.name).toLowerCase()
+    if (name.includes('temp') || name.includes('temperatura')) {
+      if (val > 70) return 'error'
+      if (val > 50) return 'warning'
+    }
+    return 'success'
+  }
+  return gaugeColorFor(gaugeUsagePercent(item), gaugeMetricName(item), item.status)
 }
 
 function gaugeSparklineColor(item: Monitor): string {
+  if (item.status === 'down' || item.status === 'offline') return '#F44336'
+  const states = item.configuration?.states as Record<string, { color?: string }> | undefined
+  const val =
+    item.gaugeMetric?.value ?? (latestResultData(item.recentResults)?.value as number | undefined)
+  if (states && val !== undefined && val !== null) {
+    return gaugeHexColor(val, gaugeMetricName(item), states)
+  }
+  if (isSensorMonitor(item)) {
+    const key = ((item.configuration?.sensorKey as string) || item.name).toLowerCase()
+    if (key.includes('temp')) return '#FF9800'
+    if (key.includes('pv') || key.includes('solar') || key.includes('fonte')) return '#4CAF50'
+    if (key.includes('bat')) return '#2196F3'
+    if (key.includes('saida') || key.includes('carga') || key.includes('rele')) return '#00BCD4'
+    return '#4CAF50'
+  }
   return gaugeHexColor(gaugeUsagePercent(item), gaugeMetricName(item))
 }
 
@@ -494,13 +565,20 @@ function interfaceStatusInfo(item: Monitor) {
 
 /**
  * O chip de tipo usa o mesmo catálogo do formulário, com o detalhe de que
- * monitores SNMP se desdobram em leituras diferentes (CPU, memória, interface).
+ * monitores SNMP se desdobram em leituras diferentes (CPU, memória, interface, sensor).
  */
 function typeChip(item: Monitor): { label: string; icon: string; color: string } {
   const definition = monitorKind(resolveKind(item.type))
 
   if (item.type === 'snmp') {
     const mode = resolveSnmpMode(item.configuration)
+    if (mode === 'sensor' || isSensorMonitor(item)) {
+      return {
+        label: 'SENSOR',
+        icon: 'mdi-gauge',
+        color: 'info',
+      }
+    }
     const modeDefinition = SNMP_MODES.find((m) => m.value === mode)
     if (mode !== 'availability' && modeDefinition) {
       return {
@@ -516,6 +594,7 @@ function typeChip(item: Monitor): { label: string; icon: string; color: string }
 }
 
 function gaugeLabel(item: Monitor): string {
+  if (isSensorMonitor(item)) return 'SENSOR'
   const name = gaugeMetricName(item)
   if (name === 'memory_usage') return 'MEMÓRIA'
   if (name === 'interface_traffic' || name === 'traffic') return 'TRÁFEGO'

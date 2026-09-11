@@ -167,16 +167,18 @@ export interface ChartSeriesInput {
 const props = withDefaults(
   defineProps<{
     series: ChartSeriesInput[]
-    unitType?: 'bandwidth' | 'bytes' | 'latency' | 'percentage' | 'generic'
+    unitType?: 'bandwidth' | 'bytes' | 'latency' | 'percentage' | 'generic' | 'boolean' | 'state'
     customUnit?: string
     showAvgLine?: boolean
     avgValue?: number
+    formatValue?: (val: number) => string
   }>(),
   {
     unitType: 'generic',
     customUnit: '',
     showAvgLine: false,
     avgValue: undefined,
+    formatValue: undefined,
   }
 )
 
@@ -252,13 +254,16 @@ const maxPointCount = computed(() => {
 })
 
 const maxVal = computed(() => {
+  if (props.unitType === 'boolean') return 1
   if (allValues.value.length === 0) return 100
   const max = Math.max(...allValues.value)
   if (props.unitType === 'percentage') return Math.max(100, max > 0 ? max * 1.15 : 100)
+  if (props.unitType === 'state') return Math.max(1, max)
   return max > 0 ? max * 1.15 : 100
 })
 
 const minVal = computed(() => {
+  if (props.unitType === 'boolean' || props.unitType === 'state') return 0
   if (allValues.value.length === 0) return 0
   const min = Math.min(...allValues.value)
   return min < 0 ? min : 0
@@ -279,16 +284,25 @@ const avgY = computed(() => {
 })
 
 function formatUnitValue(val: number): string {
+  if (props.formatValue) return props.formatValue(val)
   if (props.unitType === 'bandwidth') return formatBps(val)
   if (props.unitType === 'bytes') return formatBytes(val)
   if (props.unitType === 'latency') return formatLatency(val)
   if (props.unitType === 'percentage') return `${val.toFixed(1)}%`
-  return `${val} ${props.customUnit}`.trim()
+  if (props.unitType === 'boolean') return val >= 0.5 ? '1' : '0'
+  const rounded = val % 1 === 0 ? val.toFixed(0) : (Math.round(val * 10) / 10).toFixed(1)
+  return props.customUnit ? `${rounded} ${props.customUnit}`.trim() : rounded
 }
 
-const formattedMaxVal = computed(() => formatUnitValue(maxVal.value))
-const formattedMidVal = computed(() => formatUnitValue((maxVal.value + minVal.value) / 2))
-const formattedMinVal = computed(() => formatUnitValue(minVal.value))
+const formattedMaxVal = computed(() =>
+  props.unitType === 'boolean' ? '1 (Ligado)' : formatUnitValue(maxVal.value)
+)
+const formattedMidVal = computed(() =>
+  props.unitType === 'boolean' ? '' : formatUnitValue((maxVal.value + minVal.value) / 2)
+)
+const formattedMinVal = computed(() =>
+  props.unitType === 'boolean' ? '0 (Desligado)' : formatUnitValue(minVal.value)
+)
 
 const seriesList = computed(() => {
   const svgLeft = 75

@@ -211,9 +211,20 @@
             <v-icon>mdi-radar</v-icon>
             <span>Escaneamento & Descoberta SNMP</span>
           </div>
-          <v-btn icon variant="text" color="white" @click="scanModalOpen = false">
-            <v-icon>mdi-close</v-icon>
-          </v-btn>
+          <div class="d-flex align-center ga-1">
+            <v-btn
+              variant="text"
+              color="white"
+              size="small"
+              prepend-icon="mdi-tune-vertical"
+              @click="profilesDialogOpen = true"
+            >
+              Perfis SNMP
+            </v-btn>
+            <v-btn icon variant="text" color="white" @click="scanModalOpen = false">
+              <v-icon>mdi-close</v-icon>
+            </v-btn>
+          </div>
         </v-card-title>
 
         <v-card-text class="pa-6">
@@ -264,6 +275,130 @@
               title="Dispositivo Conectado"
               :subtitle="detailStore.scanResult.systemInfo.sysDescr || 'Dispositivo SNMP'"
             ></v-alert>
+
+            <!-- Perfil Detectado -->
+            <v-alert
+              v-if="detailStore.scanResult.matchedProfile"
+              type="success"
+              variant="tonal"
+              class="mb-4"
+              prepend-icon="mdi-solar-power-variant-outline"
+              :title="`Perfil Detectado: ${detailStore.scanResult.matchedProfile.name}`"
+            >
+              <div class="d-flex align-center justify-space-between flex-wrap ga-2 mt-1">
+                <div>
+                  <strong>Fabricante:</strong> {{ detailStore.scanResult.matchedProfile.vendor }} ·
+                  <strong>Categoria:</strong> {{ detailStore.scanResult.matchedProfile.category }}
+                </div>
+                <v-btn
+                  size="small"
+                  variant="outlined"
+                  color="success"
+                  prepend-icon="mdi-format-list-bulleted"
+                  @click="profilesDialogOpen = true"
+                >
+                  Gerenciar Perfis
+                </v-btn>
+              </div>
+            </v-alert>
+
+            <v-alert
+              v-else-if="detailStore.scanResult.snmpResponded"
+              type="info"
+              variant="tonal"
+              density="compact"
+              class="mb-4"
+              prepend-icon="mdi-information-outline"
+            >
+              <div class="d-flex align-center justify-space-between flex-wrap ga-2">
+                <span>
+                  Dispositivo sem perfil específico mapeado.
+                  <template v-if="detailStore.scanResult.interfaces.length === 0">
+                    Se for um controlador solar (MPPT), nobreak ou sensor IoT, você pode cadastrar
+                    um perfil com os OIDs.
+                  </template>
+                </span>
+                <v-btn
+                  size="x-small"
+                  variant="outlined"
+                  color="primary"
+                  prepend-icon="mdi-plus"
+                  @click="profilesDialogOpen = true"
+                >
+                  Cadastrar Perfil
+                </v-btn>
+              </div>
+            </v-alert>
+
+            <!-- Telemetria & Sensores Mapeados -->
+            <v-card
+              v-if="detailStore.scanResult.sensors && detailStore.scanResult.sensors.length > 0"
+              variant="outlined"
+              class="mb-6 rounded-lg pa-4"
+            >
+              <div class="d-flex align-center justify-space-between mb-3">
+                <div
+                  class="text-subtitle-1 font-weight-bold d-flex align-center ga-2"
+                  style="gap: 8px"
+                >
+                  <v-icon color="primary">mdi-lightning-bolt</v-icon>
+                  Sensores & Telemetria do Equipamento ({{ detailStore.scanResult.sensors.length }})
+                </div>
+                <div class="d-flex align-center ga-2" style="gap: 8px">
+                  <v-btn size="small" variant="text" color="primary" @click="selectAllSensors">
+                    Selecionar Todos
+                  </v-btn>
+                  <v-btn size="small" variant="text" color="grey" @click="unselectAllSensors">
+                    Desmarcar Todos
+                  </v-btn>
+                </div>
+              </div>
+
+              <v-row>
+                <v-col
+                  v-for="sensor in detailStore.scanResult.sensors"
+                  :key="sensor.key"
+                  cols="12"
+                  sm="6"
+                  md="4"
+                >
+                  <v-card
+                    variant="tonal"
+                    color="surface-variant"
+                    class="pa-3 rounded-lg fill-height d-flex flex-column justify-space-between border"
+                  >
+                    <div class="d-flex align-center justify-space-between">
+                      <div
+                        class="text-caption font-weight-bold text-truncate"
+                        :title="sensor.label"
+                      >
+                        {{ sensor.label }}
+                      </div>
+                      <v-switch
+                        :model-value="selectedSensors.includes(sensor.key)"
+                        color="primary"
+                        density="compact"
+                        hide-details
+                        @update:model-value="toggleSensor(sensor.key)"
+                      ></v-switch>
+                    </div>
+                    <div class="mt-2 d-flex align-center justify-space-between">
+                      <div class="text-h6 font-weight-bold text-primary text-no-wrap">
+                        {{ formatSensorDisplay(sensor) }}
+                      </div>
+                      <v-tooltip v-if="sensor.oid" location="top">
+                        <template #activator="{ props: tooltipProps }">
+                          <v-icon v-bind="tooltipProps" size="16" color="grey-darken-1">
+                            mdi-information-outline
+                          </v-icon>
+                        </template>
+                        <span>OID: {{ sensor.oid }}</span>
+                      </v-tooltip>
+                    </div>
+                  </v-card>
+                </v-col>
+              </v-row>
+            </v-card>
 
             <v-card
               v-if="hasCpuData || hasMemoryData"
@@ -376,13 +511,68 @@
                     </td>
                   </tr>
                   <tr v-if="detailStore.scanResult.interfaces.length === 0">
-                    <td colspan="6" class="text-center text-grey py-4">
-                      Nenhuma interface respondeu na varredura SNMP.
+                    <td colspan="6" class="text-center text-grey py-6">
+                      <div class="d-flex flex-column align-center ga-1">
+                        <v-icon size="32" color="grey">mdi-ethernet-off</v-icon>
+                        <div class="font-weight-medium">
+                          Nenhuma interface de rede convencional detectada via SNMP.
+                        </div>
+                        <div class="text-caption">
+                          Equipamentos como controladores solares MPPT, nobreaks e sensores IoT não
+                          utilizam portas de rede para medição. O monitoramento é realizado através
+                          da telemetria de sensores acima.
+                        </div>
+                      </div>
                     </td>
                   </tr>
                 </tbody>
               </v-table>
             </div>
+          </div>
+
+          <div v-else-if="detailStore.error" class="py-4">
+            <v-alert
+              type="error"
+              variant="tonal"
+              class="mb-4 rounded-lg"
+              prepend-icon="mdi-alert-circle"
+              title="Falha na Comunicação SNMP"
+            >
+              <div class="mb-3 text-body-2 font-weight-medium">{{ detailStore.error }}</div>
+              <v-divider class="my-2"></v-divider>
+              <div class="text-caption">
+                <strong>Diagnóstico e possíveis causas:</strong>
+                <ul class="pl-4 mt-2">
+                  <li>
+                    O serviço SNMP pode estar desabilitado no equipamento ou restrito por regras de
+                    Firewall/ACL.
+                  </li>
+                  <li>
+                    A community SNMP configurada no cadastro deste dispositivo pode não coincidir
+                    com a permitida no equipamento (padrão comum: <code>public</code>).
+                  </li>
+                  <li>
+                    A porta 161 UDP pode estar inacessível ou filtrada na rota até o endereço
+                    <code>{{ detailStore.device?.ipAddress }}</code
+                    >.
+                  </li>
+                  <li>A versão SNMP (v1, v2c ou v3) difere da configurada no dispositivo.</li>
+                </ul>
+              </div>
+            </v-alert>
+            <div class="text-center">
+              <v-btn
+                color="primary"
+                variant="outlined"
+                prepend-icon="mdi-refresh"
+                @click="openScanModal"
+              >
+                Tentar Novamente
+              </v-btn>
+            </div>
+          </div>
+          <div v-else class="text-center py-8 text-grey">
+            Nenhuma informação disponível para exibição.
           </div>
         </v-card-text>
 
@@ -494,6 +684,9 @@
       :device-to-edit="detailStore.device"
       @saved="onDeviceSaved"
     />
+
+    <!-- Modal de Perfis SNMP -->
+    <SnmpProfilesDialog v-model="profilesDialogOpen" />
   </div>
 </template>
 
@@ -504,6 +697,7 @@ import {
   useDeviceDetailStore,
   type DeviceInterface,
   type DeviceMonitor,
+  type DiscoveredSensorItem,
 } from '@/stores/deviceDetail'
 import TrafficChartDialog from '@/components/TrafficChartDialog.vue'
 import VpnScriptViewer from '@/components/VpnScriptViewer.vue'
@@ -511,6 +705,7 @@ import VpnFirewallHintsDialog from '@/components/VpnFirewallHintsDialog.vue'
 import PortScanDialog from '@/components/PortScanDialog.vue'
 import MonitorFormDialog from '@/components/MonitorFormDialog.vue'
 import DeviceDialog from '@/components/DeviceDialog.vue'
+import SnmpProfilesDialog from '@/components/devices/SnmpProfilesDialog.vue'
 import DeviceRulesTab from '@/components/devices/DeviceRulesTab.vue'
 import DeviceOverviewTab from '@/components/devices/tabs/DeviceOverviewTab.vue'
 import DeviceMonitorsTab from '@/components/devices/tabs/DeviceMonitorsTab.vue'
@@ -530,6 +725,8 @@ const detailStore = useDeviceDetailStore()
 const vpnStore = useVpnStore()
 const logsStore = useLogsStore()
 const activeTab = ref('overview')
+const profilesDialogOpen = ref(false)
+const selectedSensors = ref<string[]>([])
 
 const can = computed(() => {
   const caps = detailStore.capabilities
@@ -614,14 +811,12 @@ async function toggleInterfaceMonitoring(enabled: boolean) {
   }
 }
 
-const selectedCpuMonitor = ref(true)
-const selectedMemoryMonitor = ref(true)
+const selectedCpuMonitor = ref(false)
+const selectedMemoryMonitor = ref(false)
 
 const hasCpuData = computed(() => {
   const cpu = detailStore.scanResult?.cpuInfo
-  return Boolean(
-    cpu && (cpu.usagePercent != null || cpu.coresCount != null || cpu.load1min != null)
-  )
+  return Boolean(cpu && cpu.usagePercent != null)
 })
 const hasMemoryData = computed(() => {
   const mem = detailStore.scanResult?.memoryInfo
@@ -731,9 +926,16 @@ async function openScanModal() {
   scanModalOpen.value = true
   const res = await detailStore.scanDeviceSnmp(deviceId.value)
   if (res) {
-    selectedCpuMonitor.value = res.hasCpuMonitor || res.cpuInfo.usagePercent != null
-    selectedMemoryMonitor.value = res.hasMemoryMonitor || res.memoryInfo.usedPercent != null
+    const cpuSupported = Boolean(res.cpuInfo && res.cpuInfo.usagePercent != null)
+    const memSupported = Boolean(
+      res.memoryInfo && (res.memoryInfo.usedPercent != null || res.memoryInfo.totalKb != null)
+    )
+    selectedCpuMonitor.value = cpuSupported && res.hasCpuMonitor
+    selectedMemoryMonitor.value = memSupported && res.hasMemoryMonitor
     selectedIfIndexes.value = res.interfaces.filter((i) => i.isMonitored).map((i) => i.ifIndex)
+    const monitoredSensors = (res.sensors || []).filter((s) => s.isMonitored).map((s) => s.key)
+    selectedSensors.value =
+      monitoredSensors.length > 0 ? monitoredSensors : (res.sensors || []).map((s) => s.key)
   }
 }
 
@@ -754,6 +956,53 @@ function selectAllInterfaces() {
 
 function unselectAllInterfaces() {
   selectedIfIndexes.value = []
+}
+
+function toggleSensor(sensorKey: string) {
+  const idx = selectedSensors.value.indexOf(sensorKey)
+  if (idx > -1) {
+    selectedSensors.value.splice(idx, 1)
+  } else {
+    selectedSensors.value.push(sensorKey)
+  }
+}
+
+function selectAllSensors() {
+  if (detailStore.scanResult?.sensors) {
+    selectedSensors.value = detailStore.scanResult.sensors.map((s) => s.key)
+  }
+}
+
+function unselectAllSensors() {
+  selectedSensors.value = []
+}
+
+function formatSensorDisplay(sensor: DiscoveredSensorItem): string {
+  // 1. Se o sensor possui estados declarados no perfil SNMP:
+  const rawNum = sensor.rawValue ?? sensor.value
+  if (sensor.states && rawNum != null && Number.isFinite(rawNum)) {
+    const key = String(Math.round(rawNum))
+    const s = sensor.states[key]
+    if (s) {
+      return typeof s === 'string' ? s : s.label
+    }
+  }
+
+  // 2. Se já veio formatado pelo backend com texto descritivo:
+  if (sensor.formattedValue && isNaN(Number(sensor.formattedValue))) {
+    return sensor.formattedValue
+  }
+
+  // 3. Se for numérico, exibe o valor formatado com a unidade física do perfil:
+  if (sensor.value != null && Number.isFinite(sensor.value)) {
+    if (sensor.unit === 'kWh') {
+      return `${sensor.value.toFixed(2)} kWh`
+    }
+    const valStr = sensor.value % 1 === 0 ? sensor.value.toFixed(0) : sensor.value.toFixed(1)
+    return sensor.unit ? `${valStr} ${sensor.unit}` : valStr
+  }
+
+  return sensor.formattedValue || 'Sem leitura'
 }
 
 const snmpRemovalConfirmation = ref(false)
@@ -788,6 +1037,14 @@ const removedItems = computed(() => {
     items.push('Monitor de Uso de Memória (desmarcado)')
   }
 
+  if (detailStore.scanResult.sensors) {
+    for (const sensor of detailStore.scanResult.sensors) {
+      if (sensor.isMonitored && !selectedSensors.value.includes(sensor.key)) {
+        items.push(`Sensor "${sensor.label}" (desmarcado do monitoramento)`)
+      }
+    }
+  }
+
   return items
 })
 
@@ -808,9 +1065,10 @@ async function doApplyMonitors(clearRemovedHistory: boolean) {
   savingMonitors.value = true
   try {
     const success = await detailStore.applySnmpMonitors(deviceId.value, {
-      enableCpuMonitor: selectedCpuMonitor.value,
-      enableMemoryMonitor: selectedMemoryMonitor.value,
+      enableCpuMonitor: hasCpuData.value ? selectedCpuMonitor.value : false,
+      enableMemoryMonitor: hasMemoryData.value ? selectedMemoryMonitor.value : false,
       monitoredIfIndexes: selectedIfIndexes.value,
+      monitoredSensors: selectedSensors.value,
       clearRemovedHistory,
     })
     if (success) {

@@ -13,9 +13,41 @@ export function isTrafficMonitor(
   return monitor.type === 'snmp' && (metric === 'traffic' || metric === 'interface_traffic')
 }
 
+export function isSensorMonitor(
+  monitor: Pick<Monitor, 'configuration' | 'gaugeMetric'> & { type?: string }
+): boolean {
+  const metric = (monitor.configuration?.metric as string | undefined) || monitor.gaugeMetric?.name
+  return (!monitor.type || monitor.type === 'snmp') && metric === 'sensor'
+}
+
+export function sensorDataType(
+  monitor: Pick<Monitor, 'configuration'> & { recentResults?: MonitorResult[] }
+): 'float' | 'integer' | 'boolean' | 'state' {
+  const fromConfig = monitor.configuration?.dataType as string | undefined
+  if (
+    fromConfig === 'boolean' ||
+    fromConfig === 'state' ||
+    fromConfig === 'integer' ||
+    fromConfig === 'float'
+  ) {
+    return fromConfig
+  }
+  const latestData = latestResultData(monitor.recentResults)
+  const fromData = latestData?.dataType as string | undefined
+  if (
+    fromData === 'boolean' ||
+    fromData === 'state' ||
+    fromData === 'integer' ||
+    fromData === 'float'
+  ) {
+    return fromData
+  }
+  return 'float'
+}
+
 /**
- * Monitores SNMP de uso de CPU/Memória/Tráfego são leituras de gauge/taxa, não
- * checagens puras up/down — este helper identifica esses monitores para que a UI
+ * Monitores SNMP de uso de CPU/Memória/Tráfego e Sensores são leituras de gauge/taxa/medidor,
+ * não checagens puras up/down — este helper identifica esses monitores para que a UI
  * mostre a leitura atual em vez de um status simples de disponibilidade.
  */
 export function isGaugeMonitor(
@@ -27,11 +59,16 @@ export function isGaugeMonitor(
     (metric === 'cpu_usage' ||
       metric === 'memory_usage' ||
       metric === 'interface_traffic' ||
-      metric === 'traffic')
+      metric === 'traffic' ||
+      metric === 'sensor')
   )
 }
 
 export function gaugeMetricName(monitor: Pick<Monitor, 'configuration' | 'gaugeMetric'>): string {
+  const sensorKey = monitor.configuration?.sensorKey
+  if (monitor.configuration?.metric === 'sensor' && sensorKey) {
+    return String(sensorKey)
+  }
   return (
     (monitor.configuration?.metric as string | undefined) ||
     monitor.gaugeMetric?.name ||
@@ -40,6 +77,7 @@ export function gaugeMetricName(monitor: Pick<Monitor, 'configuration' | 'gaugeM
 }
 
 export function gaugeTypeLabel(monitor: Pick<Monitor, 'configuration' | 'gaugeMetric'>): string {
+  if (isSensorMonitor(monitor)) return 'SENSOR'
   const name = gaugeMetricName(monitor)
   if (name === 'memory_usage') return 'MEMÓRIA'
   if (name === 'interface_traffic' || name === 'traffic') return 'TRÁFEGO'
@@ -50,11 +88,49 @@ export function isMemoryMonitor(monitor: Pick<Monitor, 'configuration' | 'gaugeM
   return gaugeMetricName(monitor) === 'memory_usage'
 }
 
-/** Valor principal de um gauge: memória em bytes, tráfego em bps e CPU em %. */
+/** Valor principal de um gauge: memória em bytes, tráfego em bps, sensores em unidade física e CPU em %. */
 export function formatGaugeValue(
-  monitor: Pick<Monitor, 'type' | 'configuration' | 'gaugeMetric'>,
+  monitor: Pick<Monitor, 'type' | 'configuration' | 'gaugeMetric'> & {
+    recentResults?: MonitorResult[]
+    status?: Monitor['status']
+  },
   compact = false
 ): string {
+  if (monitor.status === 'down' || monitor.status === 'offline') {
+    return compact ? 'Offline' : 'OFFLINE'
+  }
+
+  if (isSensorMonitor(monitor)) {
+    const latestData = latestResultData(monitor.recentResults)
+    const reading = latestData?.reading as string | undefined
+    if (reading && reading.trim() && reading !== 'Sem leitura') {
+      return reading
+    }
+
+    const dt = sensorDataType(monitor)
+    const val = monitor.gaugeMetric?.value ?? (latestData?.value as number | undefined)
+    if (val !== undefined && val !== null && Number.isFinite(val)) {
+      const states = monitor.configuration?.states as
+        Record<string, { label?: string } | string> | undefined
+      if (states) {
+        const k = String(Math.round(val))
+        const s = states[k]
+        if (s) {
+          return typeof s === 'string' ? s : (s.label ?? String(val))
+        }
+      }
+
+      if (dt === 'boolean') {
+        return val === 1 ? 'Ligado' : 'Desligado'
+      }
+      const unit = gaugeDisplayUnit(monitor)
+      const num = Number.isInteger(val) ? String(val) : Number(val.toFixed(1)).toString()
+      return unit ? `${num} ${unit}` : num
+    }
+
+    return compact ? 'N/D' : 'SEM DADOS'
+  }
+
   const reading = monitor.gaugeMetric
   if (!reading || !Number.isFinite(reading.value)) return compact ? 'N/D' : 'SEM DADOS'
   if (isMemoryMonitor(monitor)) {
@@ -87,28 +163,71 @@ export function gaugeDisplayUnit(
 ): string {
   if (isMemoryMonitor(monitor)) return 'bytes'
   if (isTrafficMonitor(monitor)) return 'bps'
+  if (isSensorMonitor(monitor)) {
+    const configUnit = monitor.configuration?.unit as string | undefined
+    const metricUnit = monitor.gaugeMetric?.unit
+    return (configUnit || metricUnit || '').trim()
+  }
   return '%'
 }
 
-/** Limiares de alerta de uso replicados do card de CPU/Memória do DeviceDetailPage. */
-export function gaugeColor(value: number | null | undefined, metricName: string): string {
+/** Limiares de alerta de uso e apresentação por métrica. */
+export function gaugeColor(
+  value: number | null | undefined,
+  metricName: string,
+  monitorStatus?: string | null,
+  states?: Record<string, { color?: string } | string>
+): string {
+  if (monitorStatus === 'down' || monitorStatus === 'offline') return 'error'
+  if (monitorStatus === 'warning') return 'warning'
   if (value === null || value === undefined) return 'grey'
+
+  if (states) {
+    const k = String(Math.round(value))
+    const s = states[k]
+    if (s && typeof s === 'object' && s.color) {
+      return s.color
+    }
+  }
+
   if (metricName === 'interface_traffic' || metricName === 'traffic') return 'info'
   if (metricName === 'memory_usage') {
     if (value > 90) return 'error'
     if (value > 75) return 'warning'
     return 'success'
   }
-  if (value > 85) return 'error'
-  if (value > 65) return 'warning'
+  if (metricName === 'cpu_usage') {
+    if (value > 85) return 'error'
+    if (value > 65) return 'warning'
+    return 'success'
+  }
+  if (metricName.includes('temp') || metricName.includes('temperatura')) {
+    if (value > 70) return 'error'
+    if (value > 50) return 'warning'
+    return 'success'
+  }
   return 'success'
 }
 
 /** Mesmos limiares de `gaugeColor`, em hexadecimal para uso em SVG (ex: MonitorSparkline). */
-export function gaugeHexColor(value: number | null | undefined, metricName: string): string {
-  const tone = gaugeColor(value, metricName) as StatusTone | 'grey'
+export function gaugeHexColor(
+  value: number | null | undefined,
+  metricName: string,
+  states?: Record<string, { color?: string } | string>
+): string {
+  const tone = gaugeColor(value, metricName, undefined, states)
   if (tone === 'grey') return TONE_HEX_COLORS.neutral
-  return TONE_HEX_COLORS[tone]
+  if (tone in TONE_HEX_COLORS) return TONE_HEX_COLORS[tone as StatusTone]
+  const customMap: Record<string, string> = {
+    amber: '#f59e0b',
+    orange: '#ea580c',
+    blue: '#2563eb',
+    teal: '#0d9488',
+    cyan: '#0891b2',
+    indigo: '#4f46e5',
+    purple: '#9333ea',
+  }
+  return customMap[tone] || TONE_HEX_COLORS.info
 }
 
 export function isInterfaceMonitor(

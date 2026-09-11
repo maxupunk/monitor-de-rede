@@ -85,14 +85,18 @@ pub async fn for_device(
         .await?
         > 0;
 
-    // Conexão SNMP provada: ou temos inventário de interfaces, ou temos uma
-    // série que só o SNMP grava. `snmp_enabled` sozinho nunca basta.
     let snmp_connected = device.snmp_enabled
         && (interfaces
             || series_gravadas.contains("snmp_uptime")
             || (monitores.iter().any(|m| m.r#type == "snmp")
                 && (series_gravadas.contains(series::CPU_USAGE)
-                    || series_gravadas.contains(series::MEMORY_USAGE))));
+                    || series_gravadas.contains(series::MEMORY_USAGE)
+                    || monitores.iter().any(|m| {
+                        m.configuration
+                            .get("metric")
+                            .and_then(serde_json::Value::as_str)
+                            == Some("sensor")
+                    }))));
 
     let events = alert_events::Entity::find()
         .filter(alert_events::Column::DeviceId.eq(device.id))
