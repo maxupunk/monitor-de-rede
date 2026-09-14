@@ -479,6 +479,32 @@ async fn store(
     }
     .insert(&ctx.db)
     .await?;
+
+    if let Some(mac) = input
+        .mac_address
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+    {
+        let _ = crate::services::monitoring::ip_reconciliation::associate_device_mac(
+            &ctx.db, row.id, mac,
+        )
+        .await;
+    } else if let Some(ip) = &row.ip_address {
+        if let Ok(Some(disc)) = discovery_results::Entity::find()
+            .filter(discovery_results::Column::IpAddress.eq(ip))
+            .filter(discovery_results::Column::MacAddress.is_not_null())
+            .one(&ctx.db)
+            .await
+        {
+            if let Some(mac) = disc.mac_address.as_deref() {
+                let _ = crate::services::monitoring::ip_reconciliation::associate_device_mac(
+                    &ctx.db, row.id, mac,
+                )
+                .await;
+            }
+        }
+    }
+
     sync_device_monitor(&ctx.db, &row).await?;
     if let Some(ip) = &row.ip_address {
         discovery_results::Entity::delete_many()
@@ -660,6 +686,18 @@ async fn update(
     }
     .update(&ctx.db)
     .await?;
+
+    if let Some(mac) = input
+        .mac_address
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+    {
+        let _ = crate::services::monitoring::ip_reconciliation::associate_device_mac(
+            &ctx.db, row.id, mac,
+        )
+        .await;
+    }
+
     sync_device_monitor(&ctx.db, &row).await?;
     if row.parent_id != current.parent_id {
         emit_topology_updated(&ctx).await;

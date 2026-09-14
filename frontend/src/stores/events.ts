@@ -264,13 +264,36 @@ export const useEventsStore = defineStore('events', () => {
         break
       }
 
+      case 'device:updated': {
+        const devicesStore = useDevicesStore()
+        const devId = Number(data.deviceId)
+        if (devId && data.ipAddress) {
+          const dev = devicesStore.devices.find((d) => d.id === devId)
+          if (dev) {
+            dev.ipAddress = String(data.ipAddress)
+          }
+        }
+        break
+      }
+
       case 'discovery:started':
       case 'discovery:completed':
       case 'discovery:failed': {
         const discoveryStore = useDiscoveryStore()
         scheduleRefresh('discovery', () => {
           discoveryStore.fetchDiscoveryRuns()
+          discoveryStore.fetchConflicts()
         })
+        break
+      }
+
+      case 'discovery:conflicts_detected': {
+        const discoveryStore = useDiscoveryStore()
+        if (Array.isArray(data.conflicts)) {
+          discoveryStore.conflicts = data.conflicts as never
+        } else {
+          discoveryStore.fetchConflicts()
+        }
         break
       }
 

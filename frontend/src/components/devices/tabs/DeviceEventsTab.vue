@@ -16,7 +16,11 @@
               <td>
                 <v-chip
                   :color="
-                    evt.severity === 'critical' || evt.severity === 'error' ? 'error' : 'warning'
+                    evt.severity === 'critical' || evt.severity === 'error'
+                      ? 'error'
+                      : evt.severity === 'info'
+                        ? 'info'
+                        : 'warning'
                   "
                   size="x-small"
                   variant="flat"
@@ -43,7 +47,13 @@
         >
           <div class="d-flex align-center justify-space-between ga-2 mb-1">
             <v-chip
-              :color="evt.severity === 'critical' || evt.severity === 'error' ? 'error' : 'warning'"
+              :color="
+                evt.severity === 'critical' || evt.severity === 'error'
+                  ? 'error'
+                  : evt.severity === 'info'
+                    ? 'info'
+                    : 'warning'
+              "
               size="x-small"
               variant="flat"
               class="font-weight-bold text-uppercase px-2"

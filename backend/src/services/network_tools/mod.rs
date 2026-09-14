@@ -6,6 +6,7 @@
 
 pub mod dns;
 pub mod mactelnet;
+pub mod neighbor_cache;
 pub mod port_scanner;
 pub mod tcp_probe;
 pub mod udp_probes;

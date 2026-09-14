@@ -190,6 +190,14 @@ pub async fn run_discovery(
     let merged = outcome?;
     session.hosts(&merged).await;
     persist_results(&ctx.db, run_id, &merged).await?;
+
+    // Auditoria de conflitos/clones de IP e MAC após a varredura
+    if let Ok(conflicts) = super::conflicts::analyze_network_conflicts(&ctx.db).await {
+        if !conflicts.is_empty() {
+            let _ = super::conflicts::alert_on_conflicts(ctx, &conflicts).await;
+        }
+    }
+
     Ok(merged)
 }
 

@@ -8,6 +8,7 @@ pub mod execution_guard;
 pub mod health;
 pub mod heatmap;
 pub mod interface_monitoring;
+pub mod ip_reconciliation;
 pub mod link_speed;
 pub mod managed;
 pub mod metrics_repository;

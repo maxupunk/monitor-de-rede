@@ -226,6 +226,31 @@ async fn cleanup(
     )?)
 }
 
+async fn environment() -> AppResult<Response> {
+    let is_host_mode = crate::services::monitoring::ip_reconciliation::can_inspect_l2();
+    let detector = crate::services::syslog::nat::NatDetector::detect();
+    Ok(format::json(serde_json::json!({
+        "isHostMode": is_host_mode,
+        "containerized": detector.containerized,
+    }))?)
+}
+
+async fn conflicts(State(ctx): State<AppContext>) -> AppResult<Response> {
+    let list = crate::services::discovery::conflicts::analyze_network_conflicts(&ctx.db).await?;
+    Ok(format::json(list)?)
+}
+
+async fn check_conflicts(State(ctx): State<AppContext>) -> AppResult<Response> {
+    let list = crate::services::discovery::conflicts::analyze_network_conflicts(&ctx.db).await?;
+    if !list.is_empty() {
+        crate::services::discovery::conflicts::alert_on_conflicts(&ctx, &list).await?;
+    }
+    Ok(format::json(serde_json::json!({
+        "count": list.len(),
+        "conflicts": list,
+    }))?)
+}
+
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("/discovery")
@@ -236,4 +261,7 @@ pub fn routes() -> Routes {
         .add("/runs", get(runs))
         .add("/runs/{id}", get(run_details))
         .add("/cleanup", delete(cleanup))
+        .add("/environment", get(environment))
+        .add("/conflicts", get(conflicts))
+        .add("/check-conflicts", post(check_conflicts))
 }

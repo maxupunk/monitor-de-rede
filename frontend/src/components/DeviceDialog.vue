@@ -25,6 +25,17 @@
             </v-col>
             <v-col cols="12" sm="6">
               <v-text-field
+                v-model="formModel.macAddress"
+                label="Endereço MAC (Opcional)"
+                placeholder="Ex: 48:8f:5a:12:34:56"
+                variant="outlined"
+                density="comfortable"
+                hint="Permite rastrear o equipamento automaticamente se o IP mudar"
+                persistent-hint
+              ></v-text-field>
+            </v-col>
+            <v-col cols="12" sm="6">
+              <v-text-field
                 v-model="formModel.name"
                 label="Nome do Equipamento *"
                 variant="outlined"
@@ -625,6 +636,7 @@ const snmpIntervalItems = INTERVAL_PRESETS.map((value) => ({
 const formModel = reactive<{
   name: string
   ipAddress: string
+  macAddress: string
   type: string
   siteId: number | null
   networkId: number | null
@@ -643,6 +655,7 @@ const formModel = reactive<{
 }>({
   name: '',
   ipAddress: '',
+  macAddress: '',
   type: 'router',
   siteId: null,
   networkId: null,
@@ -1234,6 +1247,7 @@ watch(
       if (props.deviceToEdit) {
         formModel.name = props.deviceToEdit.name || ''
         formModel.ipAddress = props.deviceToEdit.ipAddress || ''
+        formModel.macAddress = props.deviceToEdit.macAddress || ''
         originalIpAddress.value = (props.deviceToEdit.ipAddress || '').trim()
         pendingClearHistory.value = false
         formModel.type = props.deviceToEdit.type || 'router'
@@ -1261,6 +1275,7 @@ watch(
       } else if (props.prefillData) {
         formModel.name = props.prefillData.name || ''
         formModel.ipAddress = props.prefillData.ipAddress || ''
+        formModel.macAddress = props.prefillData.macAddress || ''
         originalIpAddress.value = ''
         pendingClearHistory.value = false
         formModel.type = (props.prefillData.type as string) || 'other'
@@ -1287,6 +1302,7 @@ watch(
       } else {
         formModel.name = ''
         formModel.ipAddress = ''
+        formModel.macAddress = ''
         originalIpAddress.value = ''
         pendingClearHistory.value = false
         formModel.type = 'router'

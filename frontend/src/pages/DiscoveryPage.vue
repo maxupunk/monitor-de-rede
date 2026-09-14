@@ -74,6 +74,17 @@
       <v-tabs v-model="tab" color="primary">
         <v-tab value="results">Resultados Encontrados</v-tab>
         <v-tab value="runs">Histórico de Escaneamento</v-tab>
+        <v-tab value="conflicts">
+          <v-badge
+            v-if="discoveryStore.conflicts.length > 0"
+            color="error"
+            :content="discoveryStore.conflicts.length"
+            inline
+          >
+            Conflitos e Clones
+          </v-badge>
+          <span v-else>Conflitos e Clones</span>
+        </v-tab>
       </v-tabs>
       <v-divider></v-divider>
 
@@ -308,6 +319,140 @@
               </template>
             </ResponsiveDataTable>
           </v-window-item>
+
+          <!-- Conflitos e Clones (MAC / IP) -->
+          <v-window-item value="conflicts">
+            <!-- Banner de Modo de Rede -->
+            <v-alert
+              v-if="discoveryStore.environment?.isHostMode"
+              type="success"
+              variant="tonal"
+              density="comfortable"
+              rounded="lg"
+              class="mb-4"
+              prepend-icon="mdi-check-decagram"
+            >
+              <div class="text-subtitle-2 font-weight-bold">Modo de Rede Host Ativo</div>
+              <div class="text-caption">
+                O container possui acesso nativo à Camada 2 (L2/ARP). A detecção de clones,
+                conflitos de IP e MACs duplicados opera diretamente na rede física.
+              </div>
+            </v-alert>
+            <v-alert
+              v-else
+              type="warning"
+              variant="tonal"
+              density="comfortable"
+              rounded="lg"
+              class="mb-4"
+              prepend-icon="mdi-alert-circle-outline"
+            >
+              <div class="text-subtitle-2 font-weight-bold">Ambiente em Rede Bridge (Isolada)</div>
+              <div class="text-caption">
+                Em modo bridge o Docker mascara a camada 2 via NAT. Para que a detecção de conflitos
+                ARP e MACs duplicados na LAN física funcione, utilize o arquivo
+                <code>docker-compose.host.yml</code> com <code>network_mode: host</code>.
+              </div>
+            </v-alert>
+
+            <!-- Ações e cabeçalho da auditoria de conflitos -->
+            <div class="d-flex flex-wrap align-center justify-space-between ga-2 mb-4">
+              <div>
+                <div class="text-subtitle-1 font-weight-bold d-flex align-center ga-2">
+                  <v-icon color="primary">mdi-shield-alert-outline</v-icon>
+                  Auditoria de Conflitos e Clones de Rede
+                </div>
+                <div class="text-caption text-grey">
+                  Identifica múltiplos MACs respondendo pelo mesmo IP ou o mesmo MAC ativo em
+                  múltiplos IPs.
+                </div>
+              </div>
+              <v-btn
+                color="primary"
+                prepend-icon="mdi-shield-search"
+                :loading="discoveryStore.loadingConflicts"
+                @click="onScanConflicts"
+              >
+                Escanear Conflitos Agora
+              </v-btn>
+            </div>
+
+            <!-- Estado Vazio -->
+            <v-card
+              v-if="discoveryStore.conflicts.length === 0"
+              variant="outlined"
+              rounded="lg"
+              class="pa-6 text-center text-grey"
+            >
+              <v-icon size="44" color="success" class="mb-2">mdi-shield-check</v-icon>
+              <div class="text-subtitle-2 font-weight-medium text-high-emphasis">
+                Nenhum conflito ou clonagem de rede detectado
+              </div>
+              <div class="text-caption text-grey">
+                Todos os endereços IP e MACs monitorados estão consistentes e sem duplicidades na
+                tabela de vizinhos.
+              </div>
+            </v-card>
+
+            <!-- Lista de Conflitos Encontrados -->
+            <div v-else class="d-flex flex-column ga-3">
+              <v-card
+                v-for="conflict in discoveryStore.conflicts"
+                :key="conflict.id"
+                border
+                rounded="lg"
+                class="pa-4"
+              >
+                <div class="d-flex flex-wrap align-center justify-space-between ga-2 mb-2">
+                  <div class="d-flex align-center ga-2">
+                    <v-chip
+                      :color="conflict.severity === 'critical' ? 'error' : 'warning'"
+                      size="small"
+                      variant="flat"
+                      class="font-weight-bold"
+                    >
+                      {{ conflictTypeLabel(conflict.conflictType) }}
+                    </v-chip>
+                    <span class="text-subtitle-2 font-mono font-weight-bold">
+                      {{ conflict.ipAddress }}
+                    </span>
+                  </div>
+                  <span class="text-caption text-grey">
+                    {{ formatDateTime(conflict.detectedAt) }}
+                  </span>
+                </div>
+
+                <div class="text-body-2 mb-2">
+                  {{ conflict.description }}
+                </div>
+
+                <div class="d-flex flex-wrap align-center ga-3 text-caption text-medium-emphasis">
+                  <div class="d-flex align-center ga-1">
+                    <v-icon size="14">mdi-ethernet</v-icon>
+                    <span>MAC(s):</span>
+                    <span class="font-mono font-weight-medium">
+                      {{ conflict.macAddresses.join(', ') }}
+                    </span>
+                  </div>
+                  <div v-if="conflict.vendors.length > 0" class="d-flex align-center ga-1">
+                    <v-icon size="14">mdi-domain</v-icon>
+                    <span>Fabricante(s):</span>
+                    <span class="font-weight-medium">{{ conflict.vendors.join(', ') }}</span>
+                  </div>
+                  <div v-if="conflict.affectedDeviceName" class="d-flex align-center ga-1">
+                    <v-icon size="14">mdi-server-network</v-icon>
+                    <span>Dispositivo:</span>
+                    <router-link
+                      :to="'/devices/' + conflict.affectedDeviceId"
+                      class="text-decoration-none font-weight-medium text-primary"
+                    >
+                      {{ conflict.affectedDeviceName }}
+                    </router-link>
+                  </div>
+                </div>
+              </v-card>
+            </div>
+          </v-window-item>
         </v-window>
       </v-card-text>
     </v-card>
@@ -479,6 +624,8 @@ const scannableNetworks = computed(() =>
 
 onMounted(async () => {
   devicesStore.fetchDevices()
+  discoveryStore.fetchEnvironment()
+  discoveryStore.fetchConflicts()
   // A rede precisa estar carregada antes de honrar o `?networkId=` da URL:
   // sem a lista, não há como saber se o bloco pedido existe e é varredurável.
   await networksStore.fetchNetworks()
@@ -530,7 +677,38 @@ onUnmounted(() => {
 })
 
 async function refreshData() {
-  await Promise.all([devicesStore.fetchDevices(), loadRuns()])
+  await Promise.all([
+    devicesStore.fetchDevices(),
+    loadRuns(),
+    discoveryStore.fetchEnvironment(),
+    discoveryStore.fetchConflicts(),
+  ])
+}
+
+function conflictTypeLabel(type: string): string {
+  switch (type) {
+    case 'ipCollision':
+      return 'IP Clonado / Colisão'
+    case 'macDuplicated':
+      return 'MAC Duplicado / Clonado'
+    case 'deviceMacMismatch':
+      return 'Divergência de Cadastro'
+    default:
+      return 'Conflito de Rede'
+  }
+}
+
+async function onScanConflicts() {
+  await discoveryStore.checkConflicts()
+  if (discoveryStore.conflicts.length > 0) {
+    feedback.color = 'warning'
+    feedback.message = `${discoveryStore.conflicts.length} anomalia(s) ou conflito(s) de rede detectado(s)!`
+    feedback.visible = true
+  } else {
+    feedback.color = 'success'
+    feedback.message = 'Auditoria concluída: nenhum conflito de rede detectado.'
+    feedback.visible = true
+  }
 }
 
 async function loadRuns() {

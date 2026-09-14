@@ -83,8 +83,33 @@ pub async fn execute_one(ctx: &AppContext, monitor: &monitors::Model) -> AppResu
         return report_probe_unavailable(ctx, monitor, &label).await;
     }
 
-    let result =
+    let mut result =
         run_local_confirming_failure(ctx, monitor, &execution_configuration, timeout_ms).await;
+
+    if result.status == MonitorStatus::Down && monitor.device_id.is_some() {
+        if let Ok(Some(reconciled)) =
+            crate::services::monitoring::ip_reconciliation::try_reconcile_device_ip_on_failure(
+                ctx, monitor, &result,
+            )
+            .await
+        {
+            result = reconciled;
+        }
+    } else if result.status == MonitorStatus::Up
+        && monitor.r#type.eq_ignore_ascii_case("ping")
+        && monitor.device_id.is_some()
+    {
+        if let Some(device_id) = monitor.device_id {
+            if let Some(host) = execution_configuration.get("host").and_then(|h| h.as_str()) {
+                let _ =
+                    crate::services::monitoring::ip_reconciliation::auto_learn_device_mac_if_missing(
+                        &ctx.db, device_id, host,
+                    )
+                    .await;
+            }
+        }
+    }
+
     process_result(ctx, monitor.id, &result, monitor.probe_id).await?;
     Ok(())
 }

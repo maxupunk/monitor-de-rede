@@ -87,6 +87,24 @@ export function discoveryIdentity(
   return identity && typeof identity === 'object' ? (identity as DiscoveryIdentity) : null
 }
 
+export interface NetworkConflict {
+  id: string
+  conflictType: 'ipCollision' | 'macDuplicated' | 'deviceMacMismatch'
+  ipAddress: string
+  macAddresses: string[]
+  affectedDeviceId?: number | null
+  affectedDeviceName?: string | null
+  vendors: string[]
+  severity: string
+  description: string
+  detectedAt: string
+}
+
+export interface DiscoveryEnvironment {
+  isHostMode: boolean
+  containerized: boolean
+}
+
 export interface ScanSessionState {
   runId: number | null
   networkId: number | null
@@ -229,15 +247,64 @@ export const useDiscoveryStore = defineStore('discovery', () => {
     }
   }
 
+  const conflicts = ref<NetworkConflict[]>([])
+  const environment = ref<DiscoveryEnvironment | null>(null)
+  const loadingConflicts = ref(false)
+
+  async function fetchEnvironment(): Promise<DiscoveryEnvironment | null> {
+    try {
+      environment.value = await apiService.get<DiscoveryEnvironment>('/discovery/environment')
+      return environment.value
+    } catch (err: unknown) {
+      console.error('Erro ao consultar ambiente de rede:', err)
+      return null
+    }
+  }
+
+  async function fetchConflicts(): Promise<NetworkConflict[]> {
+    loadingConflicts.value = true
+    try {
+      conflicts.value = await apiService.get<NetworkConflict[]>('/discovery/conflicts')
+      return conflicts.value
+    } catch (err: unknown) {
+      console.error('Erro ao carregar conflitos de rede:', err)
+      return []
+    } finally {
+      loadingConflicts.value = false
+    }
+  }
+
+  async function checkConflicts(): Promise<NetworkConflict[]> {
+    loadingConflicts.value = true
+    try {
+      const res = await apiService.post<{ count: number; conflicts: NetworkConflict[] }>(
+        '/discovery/check-conflicts'
+      )
+      conflicts.value = res.conflicts
+      return conflicts.value
+    } catch (err: unknown) {
+      error.value = err instanceof Error ? err.message : 'Erro ao escanear conflitos de rede'
+      return []
+    } finally {
+      loadingConflicts.value = false
+    }
+  }
+
   return {
     runs,
     loading,
     error,
+    conflicts,
+    environment,
+    loadingConflicts,
     fetchDiscoveryRuns,
     cleanup,
     fetchScanState,
     startScan,
     subscribeScanStream,
     cancelScan,
+    fetchEnvironment,
+    fetchConflicts,
+    checkConflicts,
   }
 })

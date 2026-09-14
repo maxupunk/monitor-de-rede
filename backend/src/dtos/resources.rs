@@ -45,6 +45,7 @@ pub struct DeviceInput {
     #[serde(default, deserialize_with = "deserialize_some")]
     pub parent_id: Option<Option<i64>>,
     pub ip_address: Option<String>,
+    pub mac_address: Option<String>,
     pub name: Option<String>,
     #[serde(rename = "type")]
     pub device_type: Option<String>,
