@@ -29,9 +29,9 @@ services:
     ports:
       # Interface web e API na mesma porta — não há mais duas.
       - "${APP_EXTERNAL_PORT:-3333}:${APP_PORT:-3333}"
-      # Mapeada 1:1 de propósito: é a porta que os roteadores usam como
-      # Endpoint, e precisa ser a mesma configurada em "Porta UDP" na tela /vpn.
-      - "${WG_EXTERNAL_PORT:-51820}:${WG_EXTERNAL_PORT:-51820}/udp"
+      # Porta UDP do WireGuard. No modo bridge, mapeia a porta pública para a
+      # porta de escuta do túnel (padrão 51820).
+      - "${WG_EXTERNAL_PORT:-51820}:${WG_LISTEN_PORT:-51820}/udp"
       # Syslog. O roteador manda para a 514, que é o padrão do protocolo e o
       # que todo firmware assume; o processo escuta na 5514 porque roda com
       # `CapEff` zerado (`setpriv --inh-caps=-all`) e não abre porta
@@ -99,6 +99,9 @@ services:
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:3333}
       # Token do probe remoto — o mesmo valor precisa ir no container de lá.
       VPN_PROBE_TOKEN: ${VPN_PROBE_TOKEN:-default_vpn_probe_token}
+      # Porta UDP de escuta e externa da VPN WireGuard
+      WG_LISTEN_PORT: ${WG_LISTEN_PORT:-51820}
+      WG_EXTERNAL_PORT: ${WG_EXTERNAL_PORT:-51820}
       # --- servidor de syslog ---
       # Sem interpolação no caminho do banco, pelo mesmo motivo da
       # `DATABASE_URL`: o `.env` descreve a máquina, não o container. Vazio

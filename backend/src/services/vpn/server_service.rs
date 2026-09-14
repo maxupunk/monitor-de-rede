@@ -28,6 +28,20 @@ pub const DEFAULT_LISTEN_PORT: i32 = 51_820;
 pub const DEFAULT_MTU: i32 = 1_420;
 pub const DEFAULT_INTERFACE: &str = "wg0";
 
+/// Porta padrão de escuta para o servidor WireGuard.
+///
+/// Lê `WG_LISTEN_PORT` ou `WG_PORT` do ambiente (permitindo resolver conflitos
+/// no modo host do Docker); se não definida ou inválida, cai no padrão 51820.
+#[must_use]
+pub fn default_listen_port() -> i32 {
+    std::env::var("WG_LISTEN_PORT")
+        .or_else(|_| std::env::var("WG_PORT"))
+        .ok()
+        .and_then(|val| val.trim().parse::<i32>().ok())
+        .filter(|&p| (1..=65535).contains(&p))
+        .unwrap_or(DEFAULT_LISTEN_PORT)
+}
+
 /// Payload de `PUT /api/vpn/server`.
 #[derive(Debug, Clone, Default)]
 pub struct VpnServerPayload {
@@ -232,7 +246,7 @@ pub async fn create_or_update(
             let mut active = vpn_servers::ActiveModel {
                 network_id: Set(network.id),
                 interface_name: Set(DEFAULT_INTERFACE.into()),
-                listen_port: Set(payload.listen_port.unwrap_or(DEFAULT_LISTEN_PORT)),
+                listen_port: Set(payload.listen_port.unwrap_or_else(default_listen_port)),
                 public_endpoint: Set(payload.public_endpoint.clone()),
                 public_key: Set(key_pair.public_key),
                 allow_peer_to_peer: Set(payload.allow_peer_to_peer.unwrap_or(false)),
@@ -369,4 +383,37 @@ pub async fn get_state(db: &sea_orm::DatabaseConnection) -> AppResult<VpnServerS
         bytes_tx: peers.iter().map(|peer| peer.bytes_tx).sum(),
         server: Some(server),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serial_test::serial;
+
+    #[test]
+    #[serial]
+    fn default_listen_port_usa_padrao_quando_variaveis_ausentes() {
+        std::env::remove_var("WG_LISTEN_PORT");
+        std::env::remove_var("WG_PORT");
+        assert_eq!(default_listen_port(), DEFAULT_LISTEN_PORT);
+    }
+
+    #[test]
+    #[serial]
+    fn default_listen_port_respeita_wg_listen_port() {
+        std::env::set_var("WG_LISTEN_PORT", "51825");
+        std::env::remove_var("WG_PORT");
+        assert_eq!(default_listen_port(), 51825);
+        std::env::remove_var("WG_LISTEN_PORT");
+    }
+
+    #[test]
+    #[serial]
+    fn default_listen_port_ignora_valores_invalidos() {
+        for invalido in ["0", "-1", "70000", "texto", ""] {
+            std::env::set_var("WG_LISTEN_PORT", invalido);
+            assert_eq!(default_listen_port(), DEFAULT_LISTEN_PORT);
+        }
+        std::env::remove_var("WG_LISTEN_PORT");
+    }
 }

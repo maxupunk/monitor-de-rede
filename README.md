@@ -119,8 +119,8 @@ rede e remove as publicações incompatíveis.
   (`>= 1024`), pois a aplicação roda sem capabilities. `SYSLOG_EXTERNAL_PORT`
   não é usada no modo host.
 - Se a VPN estiver habilitada, a porta configurada em **VPN → Servidor → Porta
-  UDP** também precisa estar livre no host. No modo host não existe mapeamento
-  para corrigir uma diferença entre porta interna e externa.
+  UDP** (ou `WG_LISTEN_PORT` no `.env`, padrão 51820) também precisa estar livre no host.
+  No modo host não existe mapeamento para corrigir uma diferença entre porta interna e externa.
 
 Exemplo: com `APP_PORT=3334` e `SYSLOG_LISTEN_PORT=5514`, a interface fica em
 `http://IP-DO-HOST:3334` e o roteador deve enviar Syslog para

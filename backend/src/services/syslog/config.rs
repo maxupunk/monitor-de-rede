@@ -64,10 +64,11 @@ impl SyslogConfig {
     #[must_use]
     pub fn from_env() -> Self {
         let padrao = Self::default();
+        let listen_port = numero("SYSLOG_LISTEN_PORT", padrao.udp_port);
         Self {
             enabled: flag("SYSLOG_ENABLED", padrao.enabled),
-            udp_port: numero("SYSLOG_UDP_PORT", padrao.udp_port),
-            tcp_port: numero("SYSLOG_TCP_PORT", padrao.tcp_port),
+            udp_port: numero("SYSLOG_UDP_PORT", listen_port),
+            tcp_port: numero("SYSLOG_TCP_PORT", listen_port),
             max_msg_bytes: numero("SYSLOG_MAX_MSG_BYTES", padrao.max_msg_bytes),
             queue_capacity: numero("SYSLOG_QUEUE_CAPACITY", padrao.queue_capacity),
             rate_limit_per_source: numero(
@@ -118,6 +119,7 @@ mod tests {
     fn o_padrao_escuta_na_5514_e_recusa_fonte_desconhecida() {
         for variavel in [
             "SYSLOG_ENABLED",
+            "SYSLOG_LISTEN_PORT",
             "SYSLOG_UDP_PORT",
             "SYSLOG_TCP_PORT",
             "SYSLOG_MAX_MSG_BYTES",
@@ -134,6 +136,19 @@ mod tests {
         assert_eq!(config.tcp_port, 5514);
         assert!(!config.accept_unknown_sources);
         assert!(!config.store_raw, "payload cru dobra o disco");
+    }
+
+    #[test]
+    #[serial]
+    fn syslog_listen_port_define_udp_e_tcp() {
+        for variavel in ["SYSLOG_UDP_PORT", "SYSLOG_TCP_PORT"] {
+            std::env::remove_var(variavel);
+        }
+        std::env::set_var("SYSLOG_LISTEN_PORT", "5518");
+        let config = SyslogConfig::from_env();
+        assert_eq!(config.udp_port, 5518);
+        assert_eq!(config.tcp_port, 5518);
+        std::env::remove_var("SYSLOG_LISTEN_PORT");
     }
 
     #[test]

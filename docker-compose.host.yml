@@ -16,3 +16,5 @@ services:
       # roteadores. Pode ser alterada por SYSLOG_LISTEN_PORT no `.env`.
       SYSLOG_EXTERNAL_PORT: ${SYSLOG_LISTEN_PORT:-5514}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:${APP_PORT:-3333}}
+      # No modo host, a porta anunciada para a VPN é a própria porta de escuta do WireGuard.
+      WG_EXTERNAL_PORT: ${WG_LISTEN_PORT:-51820}

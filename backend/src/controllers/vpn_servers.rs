@@ -15,7 +15,7 @@ use crate::{
         vpn::{
             preflight,
             profiles::{registry, PERSISTENT_KEEPALIVE_SECONDS},
-            server_service::{self, VpnServerPayload, DEFAULT_LISTEN_PORT},
+            server_service::{self, default_listen_port, VpnServerPayload},
         },
     },
     views::vpn::{VpnServerResponse, VpnServerStateResponse},
@@ -113,7 +113,7 @@ async fn run_preflight(State(ctx): State<AppContext>, body: String) -> AppResult
     let port = input
         .listen_port
         .or_else(|| server.as_ref().map(|s| s.listen_port))
-        .unwrap_or(DEFAULT_LISTEN_PORT);
+        .unwrap_or_else(default_listen_port);
 
     Ok(format::json(
         preflight::run(endpoint.as_deref(), port).await,
