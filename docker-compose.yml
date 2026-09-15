@@ -60,6 +60,7 @@ services:
       - "${SYSLOG_EXTERNAL_PORT:-514}:${SYSLOG_LISTEN_PORT:-5514}/tcp"
     environment:
       LOCO_ENV: production
+      TZ: ${TZ:-America/Fortaleza}
       # Porta real da API dentro do container. No modo host é também a porta que
       # o navegador acessa; na bridge, `APP_EXTERNAL_PORT` pode ser diferente.
       APP_PORT: ${APP_PORT:-3333}

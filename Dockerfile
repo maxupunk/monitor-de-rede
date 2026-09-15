@@ -106,7 +106,7 @@ FROM debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639
 # supervisionar tanto o watcher quanto a aplicação.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       ca-certificates curl wireguard-tools iproute2 iptables tini \
+       ca-certificates curl wireguard-tools iproute2 iptables tini tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --create-home --shell /usr/sbin/nologin app
@@ -123,7 +123,8 @@ RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/wireguard-watcher.sh /u
 RUN mkdir -p /data/wg && chown -R app:app /data
 ENV LOCO_ENV=production \
     WEB_ROOT=/app/web \
-    WG_CONFIG_DIR=/data/wg
+    WG_CONFIG_DIR=/data/wg \
+    TZ=America/Fortaleza
 
 EXPOSE 3333
 EXPOSE 51820/udp
