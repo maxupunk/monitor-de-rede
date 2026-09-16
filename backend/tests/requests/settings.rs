@@ -367,3 +367,101 @@ async fn onboarding_status_e_conclusao_funcionam_corretamente() {
     })
     .await;
 }
+
+#[tokio::test]
+#[serial]
+async fn clear_all_items_limpa_cadastros_e_restaura_sistema_como_admin() {
+    use backend::models::_entities::{devices, monitors, networks, sites};
+    use sea_orm::EntityTrait;
+
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        autenticado(&mut request, &ctx).await;
+
+        let site_resp = request
+            .post("/api/sites")
+            .json(&serde_json::json!({ "name": "Filial Sul" }))
+            .await;
+        assert_eq!(site_resp.status_code(), 201);
+        let site: serde_json::Value = serde_json::from_str(&site_resp.text()).unwrap();
+        let site_id = site["id"].as_i64().unwrap();
+
+        let net_resp = request
+            .post("/api/networks")
+            .json(&serde_json::json!({
+                "name": "Rede Teste",
+                "cidr": "10.10.10.0/24",
+                "siteId": site_id,
+                "scanEnabled": false
+            }))
+            .await;
+        assert_eq!(net_resp.status_code(), 201);
+
+        let dev_resp = request
+            .post("/api/devices")
+            .json(&serde_json::json!({
+                "name": "Roteador Teste",
+                "ip": "10.10.10.1",
+                "type": "router",
+                "siteId": site_id
+            }))
+            .await;
+        assert_eq!(dev_resp.status_code(), 201);
+        let dev: serde_json::Value = serde_json::from_str(&dev_resp.text()).unwrap();
+        let dev_id = dev["id"].as_i64().unwrap();
+
+        let mon_resp = request
+            .post("/api/monitors")
+            .json(&serde_json::json!({
+                "name": "Ping Roteador",
+                "type": "ping",
+                "deviceId": dev_id,
+                "intervalSeconds": 60,
+                "configuration": { "host": "10.10.10.1" }
+            }))
+            .await;
+        assert_eq!(mon_resp.status_code(), 201);
+
+        let clear_resp = request.post("/api/settings/clear-all-items").await;
+        assert_eq!(clear_resp.status_code(), 200, "{}", clear_resp.text());
+        let stats: serde_json::Value = serde_json::from_str(&clear_resp.text()).unwrap();
+        assert!(stats["devicesDeleted"].as_u64().unwrap() >= 1);
+        assert!(stats["monitorsDeleted"].as_u64().unwrap() >= 1);
+        assert_eq!(stats["networksDeleted"].as_u64().unwrap(), 1);
+
+        let sites_restantes = sites::Entity::find().all(&ctx.db).await.unwrap();
+        assert!(sites_restantes.is_empty());
+        let redes_restantes = networks::Entity::find().all(&ctx.db).await.unwrap();
+        assert!(redes_restantes.is_empty());
+
+        let devs_restantes = devices::Entity::find().all(&ctx.db).await.unwrap();
+        assert_eq!(devs_restantes.len(), 1);
+        assert_eq!(devs_restantes[0].system_key.as_deref(), Some("netmonitor"));
+
+        let mons_restantes = monitors::Entity::find().all(&ctx.db).await.unwrap();
+        assert_eq!(mons_restantes.len(), 1);
+        assert_eq!(mons_restantes[0].r#type, "system_health");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn clear_all_items_exige_perfil_administrador() {
+    use sea_orm::{ActiveModelTrait, IntoActiveModel, Set};
+
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let op_session = prepare_data::init_operator(&ctx).await;
+        let mut active = op_session.user.into_active_model();
+        active.role = Set(backend::services::users::Role::Operator
+            .as_str()
+            .to_string());
+        active.update(&ctx.db).await.unwrap();
+
+        let (header, value) = prepare_data::auth_header(&op_session.token);
+        request.add_header(header, value);
+
+        let resp = request.post("/api/settings/clear-all-items").await;
+        assert_eq!(resp.status_code(), 403, "{}", resp.text());
+    })
+    .await;
+}

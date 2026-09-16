@@ -85,16 +85,29 @@
     </v-card-text>
 
     <v-card-actions class="d-flex justify-space-between align-center flex-wrap ga-2">
-      <v-btn
-        color="error"
-        variant="tonal"
-        size="small"
-        prepend-icon="mdi-delete-sweep-outline"
-        :disabled="loading || clearing"
-        @click="confirmClearDialog = true"
-      >
-        Apagar Histórico
-      </v-btn>
+      <div class="d-flex align-center flex-wrap ga-2">
+        <v-btn
+          color="error"
+          variant="tonal"
+          size="small"
+          prepend-icon="mdi-delete-sweep-outline"
+          :disabled="loading || clearing || clearingAll"
+          @click="confirmClearDialog = true"
+        >
+          Apagar Histórico
+        </v-btn>
+
+        <v-btn
+          color="error"
+          variant="tonal"
+          size="small"
+          prepend-icon="mdi-database-remove-outline"
+          :disabled="loading || clearing || clearingAll"
+          @click="confirmClearAllDialog = true"
+        >
+          Apagar Todos os Itens
+        </v-btn>
+      </div>
 
       <v-btn
         color="info"
@@ -102,7 +115,7 @@
         size="small"
         prepend-icon="mdi-refresh"
         :loading="loading"
-        :disabled="clearing"
+        :disabled="clearing || clearingAll"
         @click="fetchDatabaseInfo"
       >
         Atualizar
@@ -151,6 +164,56 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <v-dialog
+      v-model="confirmClearAllDialog"
+      max-width="560"
+      :fullscreen="Boolean($vuetify?.display?.xs)"
+    >
+      <v-card class="rounded-lg">
+        <v-card-title class="font-weight-bold d-flex align-center text-error">
+          <v-icon start color="error">mdi-alert-octagon-outline</v-icon>
+          Apagar Todos os Itens e Cadastros
+        </v-card-title>
+        <v-card-text>
+          <p class="mb-3">
+            Esta ação apagará <strong>permanentemente todos os cadastros e dados</strong> do
+            sistema:
+          </p>
+          <ul class="text-body-2 pl-4 mb-3 text-grey-darken-2">
+            <li>Todos os dispositivos, interfaces e enlaces de topologia</li>
+            <li>Todos os monitores, métricas e histórico de coletas</li>
+            <li>Todas as redes e histórico de descoberta (Discovery)</li>
+            <li>Regras de alerta customizadas, eventos e notificações</li>
+            <li>Sites, servidores e peers de VPN</li>
+            <li>Histórico de logs de dispositivos (Syslog)</li>
+          </ul>
+          <v-alert type="warning" variant="tonal" density="compact" class="mb-3">
+            <strong>Atenção:</strong> O inventário voltará ao estado inicial limpo. O dispositivo do
+            servidor local (<em>Servidor NetMonitor</em>) e o monitor de saúde serão recriados
+            automaticamente.
+          </v-alert>
+          <v-alert type="info" variant="tonal" density="compact" class="mb-0">
+            <strong>Usuários preservados:</strong> Sua conta de administrador e credenciais
+            <strong>não</strong> serão afetadas (você continua logado).
+          </v-alert>
+        </v-card-text>
+        <v-card-actions class="justify-end">
+          <v-btn variant="text" :disabled="clearingAll" @click="confirmClearAllDialog = false">
+            Cancelar
+          </v-btn>
+          <v-btn
+            color="error"
+            variant="flat"
+            :loading="clearingAll"
+            prepend-icon="mdi-database-remove-outline"
+            @click="clearAllItems"
+          >
+            Confirmar e Apagar Tudo
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </v-card>
 </template>
 
@@ -159,13 +222,16 @@ import { computed, onMounted, ref } from 'vue'
 import { apiService } from '@/services/apiService'
 import type { DatabaseInfo } from '@/bindings/DatabaseInfo'
 import type { ClearHistoryStats } from '@/bindings/ClearHistoryStats'
+import type { ClearAllItemsStats } from '@/bindings/ClearAllItemsStats'
 import { formatBinaryBytes, formatDateTime, formatTimeSpan } from '@/utils/formatters'
 
 const loading = ref(false)
 const clearing = ref(false)
+const clearingAll = ref(false)
 const error = ref('')
 const successMessage = ref('')
 const confirmClearDialog = ref(false)
+const confirmClearAllDialog = ref(false)
 const info = ref<DatabaseInfo | null>(null)
 
 const formattedSize = computed(() => {
@@ -221,6 +287,26 @@ async function clearHistory(): Promise<void> {
       erro instanceof Error ? erro.message : 'Não foi possível apagar o histórico do banco.'
   } finally {
     clearing.value = false
+  }
+}
+
+async function clearAllItems(): Promise<void> {
+  clearingAll.value = true
+  error.value = ''
+  successMessage.value = ''
+  try {
+    const stats = await apiService.post<ClearAllItemsStats>('/settings/clear-all-items', {})
+    confirmClearAllDialog.value = false
+    const devCount = Number(stats.devicesDeleted)
+    const monCount = Number(stats.monitorsDeleted)
+    const netCount = Number(stats.networksDeleted)
+    successMessage.value = `Todos os itens foram apagados com sucesso! Removidos: ${devCount.toLocaleString('pt-BR')} dispositivo(s), ${monCount.toLocaleString('pt-BR')} monitor(es) e ${netCount.toLocaleString('pt-BR')} rede(s). Dispositivo local padrão restaurado.`
+    await fetchDatabaseInfo()
+  } catch (erro) {
+    error.value =
+      erro instanceof Error ? erro.message : 'Não foi possível apagar todos os itens do banco.'
+  } finally {
+    clearingAll.value = false
   }
 }
 

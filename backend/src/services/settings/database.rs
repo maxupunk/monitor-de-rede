@@ -6,7 +6,7 @@
 
 use sea_orm::{
     prelude::DateTimeWithTimeZone, ConnectionTrait, DatabaseBackend, DatabaseConnection,
-    EntityTrait, QueryOrder, QuerySelect, Statement,
+    EntityTrait, QueryOrder, QuerySelect, Statement, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -14,12 +14,21 @@ use ts_rs::TS;
 use crate::{
     models::{
         _entities::{
-            alert_events, discovery_results, discovery_runs, event_outbox, metrics,
-            monitor_results, monitor_results_hourly, notification_outbox,
+            alert_events, alert_rules, device_interfaces, device_links, devices, discovery_results,
+            discovery_runs, dns_servers, event_outbox, maintenance_windows, metrics,
+            monitor_results, monitor_results_hourly, monitors, networks, notification_outbox,
+            probe_tasks, probes, sites, vpn_peers, vpn_servers,
         },
         logs::device_logs,
     },
-    services::shared::errors::{AppError, AppResult},
+    services::{
+        alerts::catalog::service as alert_catalog,
+        devices::system_device::{self, SystemDeviceService},
+        monitoring::managed::ensure_system_health_monitor,
+        network_tools::dns::registry::DnsServerRegistry,
+        shared::errors::{AppError, AppResult},
+        vpn::{probe_is_external, probe_registrar as vpn_probe_registrar},
+    },
 };
 
 /// Tipo do banco de dados detectado.
@@ -51,6 +60,17 @@ pub struct ClearHistoryStats {
     pub results_deleted: u64,
     pub logs_deleted: u64,
     pub alerts_deleted: u64,
+    pub total_deleted: u64,
+}
+
+/// Estatísticas retornadas por `POST /api/settings/clear-all-items`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct ClearAllItemsStats {
+    pub devices_deleted: u64,
+    pub monitors_deleted: u64,
+    pub networks_deleted: u64,
     pub total_deleted: u64,
 }
 
@@ -146,6 +166,187 @@ pub async fn clear_history<C: ConnectionTrait>(
         alerts_deleted,
         total_deleted,
     })
+}
+
+/// Apaga todos os cadastros (dispositivos, monitores, redes, sites, VPN, alertas) e histórico,
+/// preservando contas de usuários, configurações do sistema, inscrições push e auditoria.
+///
+/// Re-semeia o dispositivo do sistema local, coleta de saúde, regras básicas de alerta e DNS padrão.
+pub async fn clear_all_items(
+    db: &DatabaseConnection,
+    logs_db: Option<&DatabaseConnection>,
+) -> AppResult<ClearAllItemsStats> {
+    let txn = db.begin().await?;
+
+    let mut total_deleted = 0u64;
+
+    // 1. Histórico e telemetria dependente (filhos antes de pais)
+    total_deleted += probe_tasks::Entity::delete_many()
+        .exec(&txn)
+        .await?
+        .rows_affected;
+    total_deleted += event_outbox::Entity::delete_many()
+        .exec(&txn)
+        .await?
+        .rows_affected;
+    total_deleted += notification_outbox::Entity::delete_many()
+        .exec(&txn)
+        .await?
+        .rows_affected;
+    total_deleted += alert_events::Entity::delete_many()
+        .exec(&txn)
+        .await?
+        .rows_affected;
+    total_deleted += discovery_results::Entity::delete_many()
+        .exec(&txn)
+        .await?
+        .rows_affected;
+    total_deleted += discovery_runs::Entity::delete_many()
+        .exec(&txn)
+        .await?
+        .rows_affected;
+    total_deleted += metrics::Entity::delete_many()
+        .exec(&txn)
+        .await?
+        .rows_affected;
+    total_deleted += monitor_results_hourly::Entity::delete_many()
+        .exec(&txn)
+        .await?
+        .rows_affected;
+    total_deleted += monitor_results::Entity::delete_many()
+        .exec(&txn)
+        .await?
+        .rows_affected;
+
+    // 2. Cadastros dependentes em ordem inversa de criação
+    total_deleted += maintenance_windows::Entity::delete_many()
+        .exec(&txn)
+        .await?
+        .rows_affected;
+    total_deleted += device_links::Entity::delete_many()
+        .exec(&txn)
+        .await?
+        .rows_affected;
+    total_deleted += device_interfaces::Entity::delete_many()
+        .exec(&txn)
+        .await?
+        .rows_affected;
+    let monitors_deleted = monitors::Entity::delete_many()
+        .exec(&txn)
+        .await?
+        .rows_affected;
+    total_deleted += monitors_deleted;
+    let devices_deleted = devices::Entity::delete_many()
+        .exec(&txn)
+        .await?
+        .rows_affected;
+    total_deleted += devices_deleted;
+    total_deleted += alert_rules::Entity::delete_many()
+        .exec(&txn)
+        .await?
+        .rows_affected;
+    total_deleted += vpn_peers::Entity::delete_many()
+        .exec(&txn)
+        .await?
+        .rows_affected;
+    total_deleted += vpn_servers::Entity::delete_many()
+        .exec(&txn)
+        .await?
+        .rows_affected;
+    let networks_deleted = networks::Entity::delete_many()
+        .exec(&txn)
+        .await?
+        .rows_affected;
+    total_deleted += networks_deleted;
+    total_deleted += probes::Entity::delete_many()
+        .exec(&txn)
+        .await?
+        .rows_affected;
+    total_deleted += sites::Entity::delete_many().exec(&txn).await?.rows_affected;
+    total_deleted += dns_servers::Entity::delete_many()
+        .exec(&txn)
+        .await?
+        .rows_affected;
+
+    let logs_deleted = if let Some(logs) = logs_db {
+        device_logs::Entity::delete_many()
+            .exec(logs)
+            .await?
+            .rows_affected
+    } else {
+        0
+    };
+    total_deleted += logs_deleted;
+
+    realign_sequences_after_clear(&txn).await?;
+    txn.commit().await?;
+
+    devolver_disco_sqlite(db).await;
+    if let Some(logs) = logs_db {
+        devolver_disco_sqlite(logs).await;
+    }
+
+    // Re-semeia as entidades essenciais do sistema
+    system_device::resolver::invalidate();
+    match SystemDeviceService::new(db).ensure().await {
+        Ok(device) => {
+            if let Err(error) = ensure_system_health_monitor(db, device.id).await {
+                tracing::warn!(%error, "não foi possível reprovisionar monitor de saúde após limpeza de todos os itens");
+            }
+        }
+        Err(error) => {
+            tracing::warn!(%error, "não foi possível reprovisionar dispositivo do sistema após limpeza de todos os itens");
+        }
+    }
+
+    if let Err(error) = alert_catalog::ensure_defaults(db).await {
+        tracing::warn!(%error, "não foi possível reprovisionar regras básicas de alerta após limpeza de todos os itens");
+    }
+
+    if let Err(error) = DnsServerRegistry::ensure_defaults(db).await {
+        tracing::warn!(%error, "não foi possível reprovisionar resolvedores DNS após limpeza de todos os itens");
+    }
+
+    if probe_is_external() {
+        if let Err(error) = vpn_probe_registrar::register(db, None).await {
+            tracing::warn!(%error, "não foi possível registrar probe de VPN após limpeza de todos os itens");
+        }
+    }
+
+    Ok(ClearAllItemsStats {
+        devices_deleted,
+        monitors_deleted,
+        networks_deleted,
+        total_deleted,
+    })
+}
+
+async fn realign_sequences_after_clear(txn: &sea_orm::DatabaseTransaction) -> AppResult<()> {
+    if txn.get_database_backend() != DatabaseBackend::Postgres {
+        return Ok(());
+    }
+    const RESET_TABLES: [&str; 11] = [
+        "sites",
+        "probes",
+        "networks",
+        "devices",
+        "device_interfaces",
+        "device_links",
+        "monitors",
+        "alert_rules",
+        "vpn_servers",
+        "vpn_peers",
+        "dns_servers",
+    ];
+    for table in RESET_TABLES {
+        let sql = format!(
+            "SELECT setval(pg_get_serial_sequence('{table}', 'id'), \
+             COALESCE((SELECT MAX(id) FROM \"{table}\"), 0) + 1, false)"
+        );
+        txn.execute_raw(Statement::from_string(DatabaseBackend::Postgres, sql))
+            .await?;
+    }
+    Ok(())
 }
 
 async fn devolver_disco_sqlite<C: ConnectionTrait>(db: &C) {

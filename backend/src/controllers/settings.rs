@@ -93,6 +93,36 @@ async fn clear_history(headers: HeaderMap, State(ctx): State<AppContext>) -> App
     Ok(format::json(stats)?)
 }
 
+/// `POST /api/settings/clear-all-items` — limpa todos os cadastros e dados, mantendo apenas usuários e preferências.
+async fn clear_all_items(headers: HeaderMap, State(ctx): State<AppContext>) -> AppResult<Response> {
+    require_admin(&ctx, &headers).await?;
+
+    let logs_db = LogsDb::from_context(&ctx).ok();
+    let stats =
+        database::clear_all_items(&ctx.db, logs_db.as_ref().map(LogsDb::connection)).await?;
+
+    let _ = AuditService::new(&ctx.db)
+        .log(
+            AuditActor::from_headers(&headers, &ctx.db)
+                .await
+                .unwrap_or_default(),
+            AuditEntryInput {
+                action: AuditAction::Delete,
+                resource_type: ResourceType::SystemSetting,
+                resource_id: None,
+                resource_label: Some("database_all_items".to_string()),
+                description: Some(format!(
+                    "Todos os itens e cadastros apagados ({} dispositivos, {} monitores, {} redes removidos)",
+                    stats.devices_deleted, stats.monitors_deleted, stats.networks_deleted
+                )),
+                changes: None,
+            },
+        )
+        .await;
+
+    Ok(format::json(stats)?)
+}
+
 async fn require_admin(ctx: &AppContext, headers: &HeaderMap) -> AppResult<()> {
     let pid = headers
         .get(AUTHENTICATED_USER_HEADER)
@@ -127,4 +157,5 @@ pub fn routes() -> Routes {
         .add("/onboarding/complete", post(complete_onboarding))
         .add("/database-size", get(database_size))
         .add("/clear-history", post(clear_history))
+        .add("/clear-all-items", post(clear_all_items))
 }
