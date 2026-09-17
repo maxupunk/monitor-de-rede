@@ -104,6 +104,15 @@ cleanup() {
 }
 trap cleanup TERM INT
 
+# --- 2.1. socket ICMP sem privilégio (ADR 003) ------------------------------
+# Se o sysctl net.ipv4.ping_group_range não foi injetado pelo compose/orquestrador,
+# tenta ativá-lo como root no namespace de rede do container antes de largar os privilégios.
+if [ -w /proc/sys/net/ipv4/ping_group_range ]; then
+  echo "0 2147483647" > /proc/sys/net/ipv4/ping_group_range 2>/dev/null \
+    && log "net.ipv4.ping_group_range configurado para '0 2147483647'" \
+    || true
+fi
+
 # --- 3. aplicação, sem privilégio -------------------------------------------
 # `--inh-caps=-all` esvazia o conjunto herdável: nem por engano a aplicação
 # recebe o NET_ADMIN que o watcher usa.
