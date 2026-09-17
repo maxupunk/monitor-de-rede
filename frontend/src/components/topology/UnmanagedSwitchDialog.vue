@@ -17,10 +17,14 @@
             </v-avatar>
             <div>
               <v-card-title class="text-h6 font-weight-bold pa-0 text-white">
-                Adicionar Switch
+                {{ isEditMode ? 'Editar Switch' : 'Adicionar Switch' }}
               </v-card-title>
               <div class="text-caption text-white opacity-80">
-                Cadastre switches e multiplicadores de portas na topologia
+                {{
+                  isEditMode
+                    ? 'Altere as informações do switch não gerenciável'
+                    : 'Cadastre switches e multiplicadores de portas na topologia'
+                }}
               </div>
             </div>
           </div>
@@ -63,7 +67,7 @@
               ></v-text-field>
             </v-col>
 
-            <v-col cols="12">
+            <v-col v-if="!isEditMode" cols="12">
               <div class="text-caption font-weight-bold mb-2 text-medium-emphasis">
                 Quantidade de Portas Físicas *
               </div>
@@ -84,7 +88,7 @@
             </v-col>
 
             <!-- Prévia visual das portas físicas geradas -->
-            <v-col cols="12" class="mb-3">
+            <v-col v-if="!isEditMode" cols="12" class="mb-3">
               <div class="ports-preview-container pa-3 rounded-lg">
                 <div class="d-flex align-center justify-space-between mb-2">
                   <span class="text-caption font-weight-bold text-medium-emphasis">
@@ -134,6 +138,23 @@
                 prepend-inner-icon="mdi-tag-outline"
               ></v-text-field>
             </v-col>
+
+            <v-col cols="12">
+              <v-select
+                v-model="form.siteId"
+                :items="sitesStore.sites"
+                item-title="name"
+                item-value="id"
+                label="Site / Localidade (Opcional)"
+                placeholder="Selecione o local do switch"
+                variant="outlined"
+                density="comfortable"
+                clearable
+                prepend-inner-icon="mdi-map-marker-outline"
+                hint="Associa este switch ao local físico, facilitando filtros e identificação do pai."
+                persistent-hint
+              ></v-select>
+            </v-col>
           </v-row>
         </v-form>
       </v-card-text>
@@ -145,11 +166,11 @@
         <v-btn
           color="indigo-darken-2"
           variant="elevated"
-          prepend-icon="mdi-plus-box"
+          :prepend-icon="isEditMode ? 'mdi-check' : 'mdi-plus-box'"
           :loading="saving"
           @click="save"
         >
-          Criar Switch
+          {{ isEditMode ? 'Salvar Alterações' : 'Criar Switch' }}
         </v-btn>
       </v-card-actions>
     </v-card>
@@ -157,12 +178,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, watch } from 'vue'
-import { useTopologyStore } from '@/stores/topology'
+import { ref, reactive, computed, watch } from 'vue'
+import { useTopologyStore, type TopologyNode } from '@/stores/topology'
+import { useSitesStore } from '@/stores/sites'
+import { useDevicesStore } from '@/stores/devices'
 
 const props = defineProps<{
   modelValue: boolean
   defaultSiteId?: number | null
+  switchToEdit?: TopologyNode | null
 }>()
 
 const emit = defineEmits<{
@@ -171,8 +195,12 @@ const emit = defineEmits<{
 }>()
 
 const topologyStore = useTopologyStore()
+const sitesStore = useSitesStore()
+const devicesStore = useDevicesStore()
 const formRef = ref()
 const saving = ref(false)
+
+const isEditMode = computed(() => Boolean(props.switchToEdit?.id))
 
 const form = reactive({
   name: '',
@@ -190,11 +218,20 @@ watch(
   () => props.modelValue,
   (isOpen) => {
     if (isOpen) {
-      form.name = ''
-      form.vendor = ''
-      form.model = ''
-      form.portCount = 8
-      form.siteId = props.defaultSiteId ?? null
+      if (sitesStore.sites.length === 0) void sitesStore.fetchSites()
+      if (props.switchToEdit) {
+        form.name = props.switchToEdit.name || ''
+        form.vendor = props.switchToEdit.vendor || ''
+        form.model = props.switchToEdit.model || ''
+        form.portCount = props.switchToEdit.interfaceCount || 8
+        form.siteId = props.switchToEdit.siteId ?? props.defaultSiteId ?? null
+      } else {
+        form.name = ''
+        form.vendor = ''
+        form.model = ''
+        form.portCount = 8
+        form.siteId = props.defaultSiteId ?? null
+      }
     }
   }
 )
@@ -209,16 +246,30 @@ async function save() {
 
   saving.value = true
   try {
-    const success = await topologyStore.createUnmanagedSwitch({
-      name: form.name.trim(),
-      vendor: form.vendor?.trim() || undefined,
-      model: form.model?.trim() || undefined,
-      portCount: form.portCount,
-      siteId: form.siteId,
-    })
-    if (success) {
-      emit('created')
-      close()
+    if (isEditMode.value && props.switchToEdit?.id) {
+      const updated = await devicesStore.updateDevice(props.switchToEdit.id, {
+        name: form.name.trim(),
+        vendor: form.vendor?.trim() || undefined,
+        model: form.model?.trim() || undefined,
+        siteId: form.siteId,
+      })
+      if (updated) {
+        await topologyStore.fetchTopology(null, false)
+        emit('created')
+        close()
+      }
+    } else {
+      const success = await topologyStore.createUnmanagedSwitch({
+        name: form.name.trim(),
+        vendor: form.vendor?.trim() || undefined,
+        model: form.model?.trim() || undefined,
+        portCount: form.portCount,
+        siteId: form.siteId,
+      })
+      if (success) {
+        emit('created')
+        close()
+      }
     }
   } finally {
     saving.value = false

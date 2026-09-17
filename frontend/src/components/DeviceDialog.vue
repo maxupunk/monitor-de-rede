@@ -149,6 +149,11 @@
                         <span v-if="item.ipAddress" class="font-mono text-grey-darken-1">
                           {{ item.ipAddress }}
                         </span>
+                        <span v-else class="text-grey-darken-1 font-italic">
+                          {{
+                            item.type === 'unmanaged_switch' ? 'Switch não gerenciável' : 'Sem IP'
+                          }}
+                        </span>
                         <span v-if="item.siteName" class="text-grey"> • {{ item.siteName }} </span>
                       </div>
                     </template>
@@ -1217,7 +1222,7 @@ watch(
   () => props.modelValue,
   (isOpen) => {
     if (isOpen) {
-      if (devicesStore.devices.length === 0) devicesStore.fetchDevices()
+      void devicesStore.fetchDevices()
       if (sitesStore.sites.length === 0) sitesStore.fetchSites()
       if (networksStore.networks.length === 0) void networksStore.fetchNetworks()
 

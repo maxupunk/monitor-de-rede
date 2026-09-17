@@ -21,7 +21,7 @@
             @apply-layout="applyLayout"
             @filter-type="applyTypeFilter"
             @add-link="openLinkDialog()"
-            @add-switch="unmanagedSwitchDialog = true"
+            @add-switch="openCreateSwitchDialog"
             @recalculate="recalculateTopology"
             @open-search="mobileSearchOpen = true"
           />
@@ -285,7 +285,7 @@
               color="indigo"
               variant="outlined"
               prepend-icon="mdi-hub"
-              @click="unmanagedSwitchDialog = true"
+              @click="openCreateSwitchDialog"
             >
               Criar Switch
             </v-btn>
@@ -473,6 +473,28 @@
               Conectar a Outro Dispositivo
             </v-btn>
             <v-btn
+              v-if="selectedNode.type === 'unmanaged_switch' || selectedNode.type === 'hub'"
+              color="indigo"
+              variant="tonal"
+              prepend-icon="mdi-pencil-outline"
+              block
+              class="rounded-lg"
+              @click="openEditSwitchDialog(selectedNode)"
+            >
+              Editar Switch
+            </v-btn>
+            <v-btn
+              v-if="selectedNode.type !== 'unmanaged_switch' && selectedNode.type !== 'hub'"
+              color="primary"
+              variant="tonal"
+              prepend-icon="mdi-pencil-outline"
+              block
+              class="rounded-lg"
+              @click="openEditDeviceDialog(selectedNode)"
+            >
+              Editar Dispositivo
+            </v-btn>
+            <v-btn
               v-if="selectedNode.type !== 'unmanaged_switch' && selectedNode.type !== 'hub'"
               color="secondary"
               variant="outlined"
@@ -565,6 +587,19 @@
         </v-card-item>
 
         <v-card-text class="pa-4 flex-grow-1 overflow-y-auto">
+          <!-- Alerta explicativo se for enlace de hierarquia -->
+          <v-alert
+            v-if="selectedEdge.linkType === 'parent'"
+            type="info"
+            variant="tonal"
+            density="compact"
+            class="mb-3 text-caption"
+            icon="mdi-sitemap"
+          >
+            Este enlace representa a relação hierárquica ("Está atrás de") definida no cadastro do
+            equipamento. Ao desvincular, a hierarquia é limpa e o enlace deixa de ser exibido.
+          </v-alert>
+
           <div class="pa-3 rounded-lg bg-surface-variant-subtle mb-3">
             <div class="d-flex align-center justify-space-between mb-1">
               <span class="text-caption text-medium-emphasis">Dispositivo A (Origem):</span>
@@ -621,14 +656,16 @@
           class="pa-3 px-4 border-t flex-shrink-0 bg-surface d-flex align-center justify-space-between flex-wrap gap-2"
         >
           <v-btn
-            v-if="selectedEdge.id > 0"
+            v-if="selectedEdge.id > 0 || selectedEdge.linkType === 'parent'"
             color="error"
             variant="tonal"
-            prepend-icon="mdi-trash-can-outline"
+            :prepend-icon="
+              selectedEdge.linkType === 'parent' ? 'mdi-link-variant-off' : 'mdi-trash-can-outline'
+            "
             :loading="deletingEdge"
             @click="confirmDeleteEdge(selectedEdge.id)"
           >
-            Remover Link
+            {{ selectedEdge.linkType === 'parent' ? 'Desvincular Hierarquia' : 'Remover Link' }}
           </v-btn>
           <span v-else class="text-caption text-grey">Enlace automático</span>
 
@@ -659,8 +696,20 @@
       @saved="onLinkSaved"
     />
 
-    <!-- Diálogo de Criação de Switch -->
-    <UnmanagedSwitchDialog v-model="unmanagedSwitchDialog" @created="onSwitchCreated" />
+    <!-- Diálogo de Criação e Edição de Switch -->
+    <UnmanagedSwitchDialog
+      v-model="unmanagedSwitchDialog"
+      :default-site-id="siteId"
+      :switch-to-edit="switchToEdit"
+      @created="onSwitchCreated"
+    />
+
+    <!-- Diálogo de Edição de Dispositivo -->
+    <DeviceDialog
+      v-model="deviceDialogOpen"
+      :device-to-edit="deviceToEdit"
+      @saved="onDeviceSaved"
+    />
   </div>
 </template>
 
@@ -671,6 +720,9 @@ import { useAuthStore } from '@/stores/auth'
 import TopologyControls from '@/components/topology/TopologyControls.vue'
 import TopologyLinkDialog from '@/components/topology/TopologyLinkDialog.vue'
 import UnmanagedSwitchDialog from '@/components/topology/UnmanagedSwitchDialog.vue'
+import DeviceDialog from '@/components/DeviceDialog.vue'
+import { useDevicesStore, type Device } from '@/stores/devices'
+import { apiService } from '@/services/apiService'
 
 interface RenderedNode extends TopologyNode {
   x: number
@@ -760,6 +812,42 @@ const linkDialogTargetInterfaceId = ref<number | null>(null)
 const linkDialogLinkType = ref<string | null>(null)
 
 const unmanagedSwitchDialog = ref(false)
+const switchToEdit = ref<TopologyNode | null>(null)
+const deviceDialogOpen = ref(false)
+const deviceToEdit = ref<Device | null>(null)
+const devicesStore = useDevicesStore()
+
+function openCreateSwitchDialog() {
+  switchToEdit.value = null
+  unmanagedSwitchDialog.value = true
+}
+
+function openEditSwitchDialog(node: TopologyNode) {
+  nodeDrawer.value = false
+  switchToEdit.value = node
+  unmanagedSwitchDialog.value = true
+}
+
+async function openEditDeviceDialog(node: TopologyNode) {
+  nodeDrawer.value = false
+  const found = devicesStore.devices.find((d) => d.id === node.id)
+  if (found) {
+    deviceToEdit.value = found
+  } else {
+    try {
+      const dev = await apiService.get<Device>(`/devices/${node.id}`)
+      deviceToEdit.value = dev
+    } catch {
+      deviceToEdit.value = null
+    }
+  }
+  deviceDialogOpen.value = true
+}
+
+async function onDeviceSaved() {
+  await topologyStore.fetchTopology(siteId.value, false)
+  ensureInitialNodeLayout()
+}
 
 onMounted(async () => {
   await topologyStore.fetchTopology(siteId.value)
@@ -1505,6 +1593,7 @@ async function confirmDeleteEdge(edgeId: number) {
     const success = await topologyStore.deleteLink(edgeId)
     if (success) {
       edgeDialog.value = false
+      void devicesStore.fetchDevices()
     }
   } finally {
     deletingEdge.value = false

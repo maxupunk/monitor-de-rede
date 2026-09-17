@@ -477,6 +477,26 @@ pub async fn create_unmanaged_switch(
 }
 
 pub async fn delete_link(db: &sea_orm::DatabaseConnection, id: i64) -> AppResult<bool> {
+    if id < 0 {
+        // Enlace virtual de hierarquia pai/filho gerado por append_parent_edges:
+        // id = -(device.id * 1000 + parent)
+        let devices = devices::Entity::find()
+            .filter(devices::Column::ParentId.is_not_null())
+            .all(db)
+            .await?;
+        for dev in devices {
+            if let Some(parent) = dev.parent_id {
+                if -(dev.id * 1000 + parent) == id {
+                    let mut active: devices::ActiveModel = dev.into();
+                    active.parent_id = sea_orm::Set(None);
+                    active.updated_at = sea_orm::Set(chrono::Utc::now().into());
+                    active.update(db).await?;
+                    return Ok(true);
+                }
+            }
+        }
+        return Ok(false);
+    }
     Ok(device_links::Entity::delete_by_id(id)
         .exec(db)
         .await?
@@ -710,5 +730,14 @@ mod tests {
         let mut edges = Vec::new();
         append_parent_edges(&mut edges, &devices, &BTreeSet::from([1]));
         assert!(edges.is_empty());
+    }
+
+    #[test]
+    fn aresta_virtual_tem_id_negativo_reversivel() {
+        let child_id = 3;
+        let parent_id = 1;
+        let virtual_id = -(child_id * 1000 + parent_id);
+        assert_eq!(virtual_id, -3001);
+        assert_eq!(-(child_id * 1000 + parent_id), virtual_id);
     }
 }

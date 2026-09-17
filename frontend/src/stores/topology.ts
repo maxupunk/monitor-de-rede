@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { apiService } from '@/services/apiService'
+import { useDevicesStore } from './devices'
 
 export interface DeviceInterfaceItem {
   id: number
@@ -158,6 +159,8 @@ export const useTopologyStore = defineStore('topology', () => {
     try {
       await apiService.post('/topology/unmanaged-switch', payload)
       await fetchTopology(null, false)
+      const devicesStore = useDevicesStore()
+      void devicesStore.fetchDevices()
       return true
     } catch (err: unknown) {
       error.value = err instanceof Error ? err.message : 'Erro ao cadastrar switch'
@@ -201,6 +204,9 @@ export const useTopologyStore = defineStore('topology', () => {
     try {
       await apiService.delete(`/topology/links/${linkId}`)
       edges.value = edges.value.filter((e) => e.id !== linkId)
+      await fetchTopology(null, false)
+      const devicesStore = useDevicesStore()
+      void devicesStore.fetchDevices()
       return true
     } catch (err: unknown) {
       error.value = err instanceof Error ? err.message : 'Erro ao remover link da topologia'
