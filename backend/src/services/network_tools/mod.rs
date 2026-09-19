@@ -7,6 +7,9 @@
 pub mod dns;
 pub mod mactelnet;
 pub mod neighbor_cache;
+pub mod playbook;
 pub mod port_scanner;
+pub mod speedtest;
 pub mod tcp_probe;
+pub mod traceroute;
 pub mod udp_probes;

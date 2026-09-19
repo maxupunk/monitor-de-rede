@@ -10,6 +10,7 @@ import type { ProvisionHintsResponse } from '@/bindings/ProvisionHintsResponse'
 import type { ProvisionLoggingResponse } from '@/bindings/ProvisionLoggingResponse'
 import type { SetupGuide } from '@/bindings/SetupGuide'
 import { observedApplicationAddress } from '@/utils/syslogProvision'
+import { getStoredToken } from '@/utils/authStorage'
 
 export type {
   LogEntry,
@@ -118,7 +119,7 @@ export const useLogsStore = defineStore('logs', () => {
     const params = new URLSearchParams()
     if (filters.value.deviceId !== null) params.set('deviceId', String(filters.value.deviceId))
     if (filters.value.severity !== null) params.set('severity', String(filters.value.severity))
-    const token = localStorage.getItem('auth_token')
+    const token = getStoredToken()
     if (token) params.set('token', token)
 
     tailSource = new EventSource(`/api/logs/stream?${params.toString()}`)

@@ -51,20 +51,22 @@ function isNetworkError(err: unknown): boolean {
   return err instanceof TypeError || (err instanceof Error && err.name === 'AbortError')
 }
 
+import { clearStoredAuth, getStoredToken } from '@/utils/authStorage'
+
 class ApiService {
   private baseUrl = '/api'
+  private isRedirecting = false
 
   private getHeaders(): HeadersInit {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       Accept: 'application/json',
     }
-    // SEC-07: o token continua no localStorage. A mitigação principal contra
+    // SEC-07: o token continua no localStorage/sessionStorage. A mitigação principal contra
     // XSS é o CSP restritivo (`script-src 'self'`) aplicado pelo servidor
     // estático em `backend/src/spa.rs`, que impede execução de scripts
-    // injetados. A migração para cookie HttpOnly foi avaliada, mas exigiria
-    // reescrita do fluxo de autenticação e proteção CSRF para mutações.
-    const token = localStorage.getItem('auth_token')
+    // injetados.
+    const token = getStoredToken()
     if (token) {
       headers['Authorization'] = `Bearer ${token}`
     }
@@ -76,9 +78,13 @@ class ApiService {
   }
 
   private redirectToLogin() {
+    if (this.isRedirecting) return
+    this.isRedirecting = true
     const current = encodeURIComponent(window.location.pathname + window.location.search)
     if (window.location.pathname !== '/login') {
       window.location.assign(`/login?redirect=${current}`)
+    } else {
+      this.isRedirecting = false
     }
   }
 
@@ -123,8 +129,7 @@ class ApiService {
         // Fallback for non-JSON error responses
       }
       if (response.status === 401 && !CREDENTIAL_PATHS.includes(path)) {
-        localStorage.removeItem('auth_token')
-        localStorage.removeItem('auth_user')
+        clearStoredAuth()
         this.redirectToLogin()
       }
       throw new ApiError(errorMessage, response.status, errorData)

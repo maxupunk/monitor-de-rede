@@ -97,6 +97,7 @@
               @silence="openSilenceDialog"
               @verify-all="handleVerifyAllAlerts"
               @correlate="openCorrelationDialog"
+              @diagnose="handleDiagnoseAlert"
             />
           </v-window-item>
 
@@ -142,18 +143,32 @@
     />
 
     <AlertCorrelationDialog v-model="correlationDialog" :alert-id="correlationTargetId" />
+
+    <DiagnosticPlaybookDialog
+      v-model="playbookDialog"
+      :device-id="playbookDeviceId"
+      :device-name="playbookDeviceName"
+      :device-ip="playbookDeviceIp"
+      :initial-playbook-type="playbookDeviceId ? 'device_reachability' : 'internet_health'"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useAlertsStore, type AlertRule, type IncidentCluster } from '@/stores/alerts'
+import {
+  useAlertsStore,
+  type AlertRule,
+  type AlertEvent,
+  type IncidentCluster,
+} from '@/stores/alerts'
 import { useEventsStore } from '@/stores/events'
 import AlertRuleCatalogDialog from '@/components/AlertRuleCatalogDialog.vue'
 import AlertRuleFormDialog from '@/components/AlertRuleFormDialog.vue'
 import AlertSilenceDialog from '@/components/AlertSilenceDialog.vue'
 import AlertCorrelationDialog from '@/components/alerts/AlertCorrelationDialog.vue'
+import DiagnosticPlaybookDialog from '@/components/DiagnosticPlaybookDialog.vue'
 import ActiveAlertsTab from '@/components/alerts/ActiveAlertsTab.vue'
 import ResolvedAlertsTab from '@/components/alerts/ResolvedAlertsTab.vue'
 import AlertRulesTab from '@/components/alerts/AlertRulesTab.vue'
@@ -287,6 +302,18 @@ const silenceTargetId = ref<number | null>(null)
 
 const ruleDialog = ref(false)
 const editingRule = ref<AlertRule | null>(null)
+
+const playbookDialog = ref(false)
+const playbookDeviceId = ref<number | undefined>(undefined)
+const playbookDeviceName = ref('')
+const playbookDeviceIp = ref('')
+
+function handleDiagnoseAlert(alert: AlertEvent) {
+  playbookDeviceId.value = alert.deviceId ?? alert.device?.id ?? undefined
+  playbookDeviceName.value = alert.device?.name ?? ''
+  playbookDeviceIp.value = ''
+  playbookDialog.value = true
+}
 
 onMounted(() => {
   alertsStore.fetchActiveAlerts()

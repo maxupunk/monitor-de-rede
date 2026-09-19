@@ -187,6 +187,11 @@
     <ServerAddressesDialog v-model="serverAddressesDialog" />
     <InitialSetupDialog v-model="onboardingStore.showWizard" />
 
+    <!-- Modais de Diagnóstico de Rede -->
+    <TracerouteDialog v-model="tracerouteDialog" />
+    <SpeedTestDialog v-model="speedTestDialog" />
+    <DiagnosticPlaybookDialog v-model="playbookDialog" />
+
     <!-- Diálogo de Instruções de Instalação no iOS -->
     <v-dialog v-model="showIosDialog" :fullscreen="$vuetify.display.xs" max-width="420">
       <v-card class="rounded-xl pa-4">
@@ -233,6 +238,9 @@ import { usePwaInstall } from '@/composables/usePwaInstall'
 import DnsServersDialog from '@/components/DnsServersDialog.vue'
 import ServerAddressesDialog from '@/components/ServerAddressesDialog.vue'
 import InitialSetupDialog from '@/components/InitialSetupDialog.vue'
+import TracerouteDialog from '@/components/TracerouteDialog.vue'
+import SpeedTestDialog from '@/components/SpeedTestDialog.vue'
+import DiagnosticPlaybookDialog from '@/components/DiagnosticPlaybookDialog.vue'
 
 interface NavSubItem {
   title: string
@@ -252,6 +260,9 @@ interface NavItem {
 const drawer = ref(!useDisplay().mdAndDown)
 const dnsServersDialog = ref(false)
 const serverAddressesDialog = ref(false)
+const tracerouteDialog = ref(false)
+const speedTestDialog = ref(false)
+const playbookDialog = ref(false)
 const eventsStore = useEventsStore()
 const authStore = useAuthStore()
 const onboardingStore = useOnboardingStore()
@@ -308,6 +319,33 @@ const navItems = computed<NavItem[]>(() => [
         icon: 'mdi-server-network',
         click: () => {
           serverAddressesDialog.value = true
+        },
+      },
+    ],
+  },
+  {
+    title: 'Diagnóstico',
+    icon: 'mdi-stethoscope',
+    children: [
+      {
+        title: 'Playbooks',
+        icon: 'mdi-clipboard-play-outline',
+        click: () => {
+          playbookDialog.value = true
+        },
+      },
+      {
+        title: 'Traceroute ICMP',
+        icon: 'mdi-routes',
+        click: () => {
+          tracerouteDialog.value = true
+        },
+      },
+      {
+        title: 'Teste de Velocidade',
+        icon: 'mdi-speedometer',
+        click: () => {
+          speedTestDialog.value = true
         },
       },
     ],

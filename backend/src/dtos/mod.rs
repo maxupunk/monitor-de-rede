@@ -1,6 +1,7 @@
 pub mod alerts;
 pub mod common;
 pub mod devices;
+pub mod diagnostics;
 pub mod docker;
 pub mod logs;
 pub mod monitors;

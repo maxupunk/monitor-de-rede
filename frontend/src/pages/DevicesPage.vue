@@ -113,6 +113,28 @@
             -->
             <template v-if="!item.isSystem">
               <v-btn
+                v-if="item.ipAddress"
+                icon
+                size="small"
+                variant="text"
+                color="teal"
+                @click.stop="openTraceroute(item)"
+              >
+                <v-icon>mdi-routes</v-icon>
+                <v-tooltip activator="parent" location="top">Traceroute ICMP</v-tooltip>
+              </v-btn>
+              <v-btn
+                v-if="item.ipAddress"
+                icon
+                size="small"
+                variant="text"
+                color="indigo"
+                @click.stop="openDiagnosticPlaybook(item)"
+              >
+                <v-icon>mdi-stethoscope</v-icon>
+                <v-tooltip activator="parent" location="top">Diagnosticar Dispositivo</v-tooltip>
+              </v-btn>
+              <v-btn
                 icon
                 size="small"
                 variant="text"
@@ -214,6 +236,28 @@
               v-if="!item.isSystem"
               class="d-flex align-center justify-end ga-1 pt-2 mt-1 border-t"
             >
+              <v-btn
+                v-if="item.ipAddress"
+                icon
+                size="small"
+                variant="text"
+                color="teal"
+                title="Traceroute ICMP"
+                @click.stop="openTraceroute(item)"
+              >
+                <v-icon size="18">mdi-routes</v-icon>
+              </v-btn>
+              <v-btn
+                v-if="item.ipAddress"
+                icon
+                size="small"
+                variant="text"
+                color="indigo"
+                title="Diagnosticar Dispositivo"
+                @click.stop="openDiagnosticPlaybook(item)"
+              >
+                <v-icon size="18">mdi-stethoscope</v-icon>
+              </v-btn>
               <v-btn
                 icon
                 size="small"
@@ -329,6 +373,22 @@
       :host="portScanHost"
       :device-name="portScanDeviceName"
     />
+
+    <!-- Diálogo de Traceroute ICMP -->
+    <TracerouteDialog
+      v-model="tracerouteDialog"
+      :host="tracerouteHost"
+      :device-name="tracerouteDeviceName"
+    />
+
+    <!-- Diálogo de Playbook de Diagnóstico -->
+    <DiagnosticPlaybookDialog
+      v-model="playbookDialog"
+      :device-id="playbookDeviceId"
+      :device-name="playbookDeviceName"
+      :device-ip="playbookDeviceIp"
+      initial-playbook-type="device_reachability"
+    />
   </div>
 </template>
 
@@ -338,6 +398,8 @@ import { useRouter } from 'vue-router'
 import { useDevicesStore, type Device } from '@/stores/devices'
 import DeviceDialog from '@/components/DeviceDialog.vue'
 import PortScanDialog from '@/components/PortScanDialog.vue'
+import TracerouteDialog from '@/components/TracerouteDialog.vue'
+import DiagnosticPlaybookDialog from '@/components/DiagnosticPlaybookDialog.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import { getStatusColor } from '@/utils/monitorPresentation'
@@ -357,6 +419,28 @@ const savingBatchParent = ref(false)
 const portScanDialog = ref(false)
 const portScanHost = ref('')
 const portScanDeviceName = ref('')
+
+const tracerouteDialog = ref(false)
+const tracerouteHost = ref('')
+const tracerouteDeviceName = ref('')
+
+const playbookDialog = ref(false)
+const playbookDeviceId = ref<number | undefined>(undefined)
+const playbookDeviceName = ref('')
+const playbookDeviceIp = ref('')
+
+function openTraceroute(device: Device) {
+  tracerouteHost.value = device.ipAddress || ''
+  tracerouteDeviceName.value = device.name
+  tracerouteDialog.value = true
+}
+
+function openDiagnosticPlaybook(device: Device) {
+  playbookDeviceId.value = device.id
+  playbookDeviceName.value = device.name
+  playbookDeviceIp.value = device.ipAddress || ''
+  playbookDialog.value = true
+}
 
 const INFRA_TYPES = new Set([
   'router',

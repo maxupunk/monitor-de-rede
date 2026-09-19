@@ -25,6 +25,16 @@ fn in_flight_port_scans() -> &'static Mutex<HashSet<IpAddr>> {
     SET.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
+fn in_flight_traceroutes() -> &'static Mutex<HashSet<IpAddr>> {
+    static SET: OnceLock<Mutex<HashSet<IpAddr>>> = OnceLock::new();
+    SET.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+fn in_flight_speedtest() -> &'static Mutex<bool> {
+    static FLAG: OnceLock<Mutex<bool>> = OnceLock::new();
+    FLAG.get_or_init(|| Mutex::new(false))
+}
+
 /// Guarda RAII que sinaliza a execução em curso de um monitor.
 /// Libera o identificador automaticamente ao ser descartado.
 #[derive(Debug)]
@@ -88,6 +98,51 @@ pub fn try_acquire_port_scan(ip: IpAddr) -> Option<PortScanExecutionGuard> {
     let mut set = in_flight_port_scans().lock().ok()?;
     if set.insert(ip) {
         Some(PortScanExecutionGuard(ip))
+    } else {
+        None
+    }
+}
+
+/// Guarda RAII que sinaliza o traceroute em curso para um IP.
+#[derive(Debug)]
+pub struct TracerouteExecutionGuard(IpAddr);
+
+impl Drop for TracerouteExecutionGuard {
+    fn drop(&mut self) {
+        if let Ok(mut set) = in_flight_traceroutes().lock() {
+            set.remove(&self.0);
+        }
+    }
+}
+
+/// Tenta adquirir a trava de traceroute para o IP informado.
+pub fn try_acquire_traceroute(ip: IpAddr) -> Option<TracerouteExecutionGuard> {
+    let mut set = in_flight_traceroutes().lock().ok()?;
+    if set.insert(ip) {
+        Some(TracerouteExecutionGuard(ip))
+    } else {
+        None
+    }
+}
+
+/// Guarda RAII que sinaliza o teste de velocidade em curso no servidor.
+#[derive(Debug)]
+pub struct SpeedTestExecutionGuard;
+
+impl Drop for SpeedTestExecutionGuard {
+    fn drop(&mut self) {
+        if let Ok(mut flag) = in_flight_speedtest().lock() {
+            *flag = false;
+        }
+    }
+}
+
+/// Tenta adquirir a trava do teste de velocidade.
+pub fn try_acquire_speedtest() -> Option<SpeedTestExecutionGuard> {
+    let mut flag = in_flight_speedtest().lock().ok()?;
+    if !*flag {
+        *flag = true;
+        Some(SpeedTestExecutionGuard)
     } else {
         None
     }

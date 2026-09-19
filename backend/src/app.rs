@@ -173,6 +173,7 @@ impl Hooks for App {
             .add_route(controllers::snmp::routes().layer(business_auth.clone()))
             .add_route(controllers::probes::routes().layer(business_auth.clone()))
             .add_route(controllers::port_scan::routes().layer(business_auth.clone()))
+            .add_route(controllers::diagnostics::routes().layer(business_auth.clone()))
             .add_route(controllers::dns::routes().layer(business_auth.clone()))
             .add_route(controllers::dns_servers::routes().layer(business_auth.clone()))
             .add_route(controllers::docker::routes().layer(business_auth.clone()))

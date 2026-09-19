@@ -185,6 +185,20 @@ Isso cobre o básico bem. As próximas oportunidades de produto partem de três 
 
 **Referências:** Datadog Notebooks, Grafana Incident, PagerDuty Runbooks.
 
+- [x] 🟢 Concluído — Playbooks de diagnóstico integrados e operacionais.
+  - **Traceroute ICMP Nativo em Rust**: Execução assíncrona usando `surge-ping` com `SOCK_DGRAM` (sem necessidade de `CAP_NET_RAW` ou binários externos). Suporta TTL incremental, medição de RTT por salto, resolução reversa de DNS PTR assíncrona via Hickory-DNS e streaming em tempo real via NDJSON.
+  - **Teste de Velocidade (Speed Test WAN & LAN)**:
+    - WAN: Teste de latência/jitter, download em chunks assíncronos contra CDN global Cloudflare (`__down`) e upload com streaming (`__up`), com detecção do PoP/cidade de borda.
+    - LAN: Teste de velocidade local cliente-servidor contra a própria API NetMonitor (`GET /api/diagnostics/speedtest/lan/download` e `POST /api/diagnostics/speedtest/lan/upload`).
+  - **Playbooks Automatizados**:
+    - `internet_health`: Resolução DNS → Latência Externa (Ping) → Traçado de Rota (Traceroute) → Teste de Velocidade → Síntese e recomendações automáticas.
+    - `device_reachability`: Sonda ICMP (Ping) → Varredura de Portas de Serviço TCP comuns → Traceroute Local até o dispositivo → Síntese diagnóstica com recomendações contextualizadas.
+  - **Integração na Interface (UI/UX)**:
+    - Menu "Diagnóstico" na navegação principal (`DefaultLayout.vue`) com acesso a Playbooks, Traceroute e Teste de Velocidade.
+    - Ações de Traceroute e Diagnóstico rápido na tabela e cards de Dispositivos (`DevicesPage.vue`).
+    - Ações dedicadas no cabeçalho do detalhe do dispositivo (`DeviceDetailPage.vue`).
+    - Botão "Diagnóstico" em alertas ativos (`ActiveAlertsTab.vue` e `AlertsPage.vue`) para disparar playbook contextualizado para o equipamento com falha.
+
 | Aspecto | Proposta |
 | :--- | :--- |
 | O quê | Para cada tipo de alerta, apresentar um checklist automatizado de verificação. |

@@ -11,6 +11,7 @@ import { useTopologyStore } from './topology'
 import { useVpnStore } from './vpn'
 import { useMaintenanceWindowsStore } from './maintenanceWindows'
 import { useDockerStore } from './docker'
+import { getStoredToken } from '@/utils/authStorage'
 
 export interface RealtimeEventPayload {
   /** Nome do evento publicado pelo backend (ex.: `monitor:result`) */
@@ -118,7 +119,7 @@ export const useEventsStore = defineStore('events', () => {
   function connect() {
     if (eventSource) return
 
-    const token = localStorage.getItem('auth_token')
+    const token = getStoredToken()
     const url = token
       ? `/api/events/stream?token=${encodeURIComponent(token)}`
       : '/api/events/stream'

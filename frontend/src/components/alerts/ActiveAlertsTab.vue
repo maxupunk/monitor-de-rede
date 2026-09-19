@@ -113,6 +113,15 @@
         >
           Correlação
         </v-btn>
+        <v-btn
+          size="small"
+          color="teal"
+          variant="outlined"
+          prepend-icon="mdi-stethoscope"
+          @click="emit('diagnose', item)"
+        >
+          Diagnóstico
+        </v-btn>
       </div>
     </template>
 
@@ -219,6 +228,16 @@
           >
             Correlação
           </v-btn>
+          <v-btn
+            size="small"
+            color="teal"
+            variant="tonal"
+            prepend-icon="mdi-stethoscope"
+            class="text-caption px-2"
+            @click="emit('diagnose', item)"
+          >
+            Diagnóstico
+          </v-btn>
         </div>
       </div>
     </template>
@@ -249,6 +268,7 @@ const emit = defineEmits<{
   silence: [id: number]
   'verify-all': []
   correlate: [id: number]
+  diagnose: [alert: AlertEvent]
 }>()
 
 const alertsStore = useAlertsStore()

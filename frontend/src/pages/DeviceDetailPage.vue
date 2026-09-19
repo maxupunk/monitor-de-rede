@@ -98,6 +98,30 @@
             </v-btn>
 
             <v-btn
+              v-if="detailStore.device?.ipAddress"
+              prepend-icon="mdi-routes"
+              aria-label="Traceroute ICMP"
+              @click="tracerouteOpen = true"
+            >
+              <span class="hidden-md-and-down">Traceroute</span>
+              <v-tooltip activator="parent" location="bottom"
+                >Traceroute ICMP até este dispositivo</v-tooltip
+              >
+            </v-btn>
+
+            <v-btn
+              v-if="detailStore.device?.ipAddress"
+              prepend-icon="mdi-stethoscope"
+              aria-label="Diagnóstico"
+              @click="playbookOpen = true"
+            >
+              <span class="hidden-md-and-down">Diagnóstico</span>
+              <v-tooltip activator="parent" location="bottom"
+                >Executar playbook de conectividade</v-tooltip
+              >
+            </v-btn>
+
+            <v-btn
               v-if="can.editIdentity"
               prepend-icon="mdi-pencil"
               aria-label="Editar dispositivo"
@@ -669,6 +693,22 @@
       :device-name="detailStore.device?.name"
     />
 
+    <!-- Modal de Traceroute ICMP -->
+    <TracerouteDialog
+      v-model="tracerouteOpen"
+      :host="detailStore.device?.ipAddress"
+      :device-name="detailStore.device?.name"
+    />
+
+    <!-- Modal de Playbook de Diagnóstico -->
+    <DiagnosticPlaybookDialog
+      v-model="playbookOpen"
+      :device-id="Number(deviceId)"
+      :device-name="detailStore.device?.name"
+      :device-ip="detailStore.device?.ipAddress"
+      initial-playbook-type="device_reachability"
+    />
+
     <!-- Monitor deste equipamento: o vínculo já vem definido e travado -->
     <MonitorFormDialog
       v-model="monitorDialog"
@@ -703,6 +743,8 @@ import TrafficChartDialog from '@/components/TrafficChartDialog.vue'
 import VpnScriptViewer from '@/components/VpnScriptViewer.vue'
 import VpnFirewallHintsDialog from '@/components/VpnFirewallHintsDialog.vue'
 import PortScanDialog from '@/components/PortScanDialog.vue'
+import TracerouteDialog from '@/components/TracerouteDialog.vue'
+import DiagnosticPlaybookDialog from '@/components/DiagnosticPlaybookDialog.vue'
 import MonitorFormDialog from '@/components/MonitorFormDialog.vue'
 import DeviceDialog from '@/components/DeviceDialog.vue'
 import SnmpProfilesDialog from '@/components/devices/SnmpProfilesDialog.vue'
@@ -769,6 +811,8 @@ const monitorNames = computed<Record<number, string>>(() =>
 const scanModalOpen = ref(false)
 const savingMonitors = ref(false)
 const portScanOpen = ref(false)
+const tracerouteOpen = ref(false)
+const playbookOpen = ref(false)
 const editDeviceDialog = ref(false)
 
 async function onDeviceSaved() {

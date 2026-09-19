@@ -92,7 +92,7 @@ const formRef = ref<VuetifyForm | null>(null)
 const email = ref('')
 const password = ref('')
 const showPassword = ref(false)
-const rememberMe = ref(false)
+const rememberMe = ref(true)
 
 const emailRules: ValidationRule[] = [emailRule()]
 const passwordRules: ValidationRule[] = [requiredRule('Informe a senha.')]

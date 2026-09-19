@@ -27,42 +27,22 @@ export interface SetupPayload {
   token: string
 }
 
-function storageFor(remember: boolean): Storage {
-  return remember ? localStorage : sessionStorage
-}
-
-function loadStoredUser(): User | null {
-  const rawUser = sessionStorage.getItem('auth_user') ?? localStorage.getItem('auth_user')
-  if (!rawUser) return null
-  try {
-    return JSON.parse(rawUser) as User
-  } catch {
-    sessionStorage.removeItem('auth_user')
-    localStorage.removeItem('auth_user')
-    return null
-  }
-}
-
-function persistUser(value: User | null, remember: boolean) {
-  const storage = storageFor(remember)
-  if (value) {
-    storage.setItem('auth_user', JSON.stringify(value))
-  } else {
-    sessionStorage.removeItem('auth_user')
-    localStorage.removeItem('auth_user')
-  }
-}
+import {
+  clearStoredAuth,
+  getStoredToken,
+  getStoredUser,
+  isRememberMeActive,
+  persistAuthSession,
+} from '@/utils/authStorage'
 
 function describeError(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? err.message : fallback
 }
 
 export const useAuthStore = defineStore('auth', () => {
-  const sessionToken = sessionStorage.getItem('auth_token')
-  const localToken = localStorage.getItem('auth_token')
-  const token = ref<string | null>(sessionToken ?? localToken)
-  const rememberMe = ref<boolean>(sessionToken === null && localToken !== null)
-  const user = ref<User | null>(loadStoredUser())
+  const token = ref<string | null>(getStoredToken())
+  const rememberMe = ref<boolean>(isRememberMeActive())
+  const user = ref<User | null>(getStoredUser<User>())
   const loading = ref(false)
   const error = ref<string | null>(null)
 
@@ -83,12 +63,7 @@ export const useAuthStore = defineStore('auth', () => {
     token.value = res.token
     user.value = res.user
     rememberMe.value = remember
-    const storage = storageFor(remember)
-    storage.setItem('auth_token', res.token)
-    storage.setItem('auth_user', JSON.stringify(res.user))
-    const other = storageFor(!remember)
-    other.removeItem('auth_token')
-    other.removeItem('auth_user')
+    persistAuthSession(res.token, res.user, remember)
   }
 
   function clearError() {
@@ -157,7 +132,9 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const userData = await apiService.get<User | { user: User }>('/auth/me')
       user.value = 'user' in userData ? userData.user : userData
-      persistUser(user.value, rememberMe.value)
+      if (token.value && user.value) {
+        persistAuthSession(token.value, user.value, rememberMe.value)
+      }
     } catch {
       void logout()
     }
@@ -171,10 +148,7 @@ export const useAuthStore = defineStore('auth', () => {
     } finally {
       token.value = null
       user.value = null
-      sessionStorage.removeItem('auth_token')
-      sessionStorage.removeItem('auth_user')
-      localStorage.removeItem('auth_token')
-      localStorage.removeItem('auth_user')
+      clearStoredAuth()
     }
   }
 

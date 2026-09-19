@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { apiService } from '@/services/apiService'
+import { getStoredToken } from '@/utils/authStorage'
 
 export type DiscoveryPhase = 'icmp' | 'discovery' | 'ports' | 'snmp' | 'idle'
 
@@ -195,7 +196,7 @@ export const useDiscoveryStore = defineStore('discovery', () => {
   ): () => void {
     // `EventSource` não manda o header Authorization; o backend aceita o JWT
     // em `?token=` justamente para os streams (ver config `auth.jwt.location`).
-    const token = localStorage.getItem('auth_token')
+    const token = getStoredToken()
     const url = token
       ? `/api/discovery/scan-stream?token=${encodeURIComponent(token)}`
       : '/api/discovery/scan-stream'
