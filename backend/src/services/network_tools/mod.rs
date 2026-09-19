@@ -5,6 +5,7 @@
 //! conhecem sockets, timeouts nem detalhes de wire-format.
 
 pub mod dns;
+pub mod icmp_probe;
 pub mod mactelnet;
 pub mod neighbor_cache;
 pub mod playbook;

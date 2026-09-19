@@ -4,16 +4,15 @@
 //! emitindo eventos de progresso passo a passo e gerando uma síntese diagnóstica
 //! conclusiva com recomendações acionáveis.
 
-use std::net::IpAddr;
+use std::{net::IpAddr, time::Duration};
 
 use serde_json::json;
-use socket2::Type;
-use surge_ping::{Client, Config, PingIdentifier, PingSequence, ICMP};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use super::{
     dns::latency::{measure_dns_lookup, DnsLookupOptions, DnsProtocol},
+    icmp_probe::{probe_icmp, IcmpProbeOptions},
     speedtest::{self, SpeedTestEvent},
     tcp_probe::{probe_tcp, TcpProbeState},
     traceroute::{self, TracerouteOptions},
@@ -258,67 +257,16 @@ async fn run_dns_check(cancel: &CancellationToken) -> PlaybookStepResult {
     }
 }
 
-async fn ping_probe(
-    target: IpAddr,
-    count: usize,
-    timeout: std::time::Duration,
-    cancel: &CancellationToken,
-) -> (Option<f64>, Vec<Option<f64>>) {
-    let is_ipv4 = target.is_ipv4();
-    let config = Config::builder()
-        .kind(if is_ipv4 { ICMP::V4 } else { ICMP::V6 })
-        .sock_type_hint(Type::DGRAM)
-        .build();
-
-    let client = match Client::new(&config) {
-        Ok(c) => c,
-        Err(err) => {
-            tracing::warn!(%err, "falha ao criar socket ICMP para ping do playbook");
-            return (None, Vec::new());
-        }
-    };
-
-    let mut pinger = client.pinger(target, PingIdentifier(rand::random())).await;
-    pinger.timeout(timeout);
-    let payload = vec![0u8; 56];
-    let mut rtts = Vec::new();
-
-    for seq in 0..count {
-        if cancel.is_cancelled() {
-            break;
-        }
-        match pinger.ping(PingSequence(seq as u16), &payload).await {
-            Ok((_packet, rtt)) => {
-                let ms = (rtt.as_secs_f64() * 1_000.0 * 100.0).round() / 100.0;
-                rtts.push(Some(ms));
-            }
-            Err(_) => {
-                rtts.push(None);
-            }
-        }
-    }
-
-    let successful: Vec<f64> = rtts.iter().flatten().copied().collect();
-    let avg = if successful.is_empty() {
-        None
-    } else {
-        let sum: f64 = successful.iter().sum();
-        Some(((sum / successful.len() as f64) * 100.0).round() / 100.0)
-    };
-
-    (avg, rtts)
-}
-
 async fn run_external_ping_check(cancel: &CancellationToken) -> PlaybookStepResult {
     let target: IpAddr = "1.1.1.1".parse().unwrap();
-    let timeout = std::time::Duration::from_millis(2_000);
-    let (avg_rtt_opt, rtts) = ping_probe(target, 3, timeout, cancel).await;
+    let options = IcmpProbeOptions::new(3, Duration::from_millis(2_000));
+    let res = probe_icmp(target, &options, cancel).await;
 
     if cancel.is_cancelled() {
         return cancelled_step(2, "Latência e Perda Externa");
     }
 
-    if let Some(avg_rtt) = avg_rtt_opt {
+    if let Some(avg_rtt) = res.avg_rtt_ms {
         let status = if avg_rtt > 120.0 {
             "warning"
         } else {
@@ -332,7 +280,11 @@ async fn run_external_ping_check(cancel: &CancellationToken) -> PlaybookStepResu
             message: Some(format!(
                 "Conexão externa respondendo com latência média de {avg_rtt:.1}ms"
             )),
-            data: Some(json!({ "latencyMs": avg_rtt, "rtts": rtts })),
+            data: Some(json!({
+                "latencyMs": avg_rtt,
+                "rtts": res.rtts,
+                "packetLossPct": res.packet_loss_pct,
+            })),
         }
     } else {
         PlaybookStepResult {
@@ -435,14 +387,14 @@ async fn run_speed_check(cancel: &CancellationToken) -> PlaybookStepResult {
 }
 
 async fn run_device_icmp_check(target: IpAddr, cancel: &CancellationToken) -> PlaybookStepResult {
-    let timeout = std::time::Duration::from_millis(1_500);
-    let (avg_rtt_opt, rtts) = ping_probe(target, 3, timeout, cancel).await;
+    let options = IcmpProbeOptions::new(3, Duration::from_millis(1_500));
+    let res = probe_icmp(target, &options, cancel).await;
 
     if cancel.is_cancelled() {
         return cancelled_step(1, "Sonda ICMP (Ping)");
     }
 
-    if let Some(avg_rtt) = avg_rtt_opt {
+    if let Some(avg_rtt) = res.avg_rtt_ms {
         PlaybookStepResult {
             step_index: 1,
             step_name: "Sonda ICMP (Ping)".into(),
@@ -451,7 +403,11 @@ async fn run_device_icmp_check(target: IpAddr, cancel: &CancellationToken) -> Pl
             message: Some(format!(
                 "Host respondendo normalmente (latência média: {avg_rtt:.1}ms)"
             )),
-            data: Some(json!({ "latencyMs": avg_rtt, "rtts": rtts })),
+            data: Some(json!({
+                "latencyMs": avg_rtt,
+                "rtts": res.rtts,
+                "packetLossPct": res.packet_loss_pct,
+            })),
         }
     } else {
         PlaybookStepResult {

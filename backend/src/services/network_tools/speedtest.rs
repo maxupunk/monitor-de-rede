@@ -11,7 +11,10 @@ use reqwest::Client;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::dtos::diagnostics::{SpeedTestProgress, SpeedTestResult};
+use crate::{
+    dtos::diagnostics::{SpeedTestProgress, SpeedTestResult},
+    services::network_tools::icmp_probe::round_two,
+};
 
 const CLOUDFLARE_BASE: &str = "https://speed.cloudflare.com";
 const PING_COUNT: usize = 5;
@@ -386,10 +389,6 @@ pub fn calculate_jitter(latencies: &[f64]) -> f64 {
         sum_diff += (latencies[i] - latencies[i - 1]).abs();
     }
     sum_diff / (latencies.len() - 1) as f64
-}
-
-fn round_two(val: f64) -> f64 {
-    (val * 100.0).round() / 100.0
 }
 
 #[cfg(test)]

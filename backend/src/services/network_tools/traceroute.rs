@@ -16,7 +16,10 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     dtos::diagnostics::TracerouteHop,
-    services::network_tools::dns::wire::{answers, decode_message, encode_query},
+    services::network_tools::{
+        dns::wire::{answers, decode_message, encode_query},
+        icmp_probe::round_two,
+    },
 };
 
 pub const DEFAULT_MAX_HOPS: u8 = 30;
@@ -110,7 +113,7 @@ pub async fn execute_traceroute(
             match pinger.ping(PingSequence(seq.into()), &payload).await {
                 Ok((packet, rtt)) => {
                     let rtt_val = rtt.as_secs_f64() * 1_000.0;
-                    rtts.push(Some(round_two_decimals(rtt_val)));
+                    rtts.push(Some(round_two(rtt_val)));
 
                     let (src_ip, is_dest) = match &packet {
                         surge_ping::IcmpPacket::V4(v4) => {
@@ -144,7 +147,7 @@ pub async fn execute_traceroute(
             None
         } else {
             let sum: f64 = successful_rtts.iter().sum();
-            Some(round_two_decimals(sum / successful_rtts.len() as f64))
+            Some(round_two(sum / successful_rtts.len() as f64))
         };
 
         let status = if reached_target {
@@ -214,10 +217,6 @@ async fn resolve_reverse_dns(ip: IpAddr) -> Option<String> {
     .flatten()
 }
 
-fn round_two_decimals(val: f64) -> f64 {
-    (val * 100.0).round() / 100.0
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -233,12 +232,5 @@ mod tests {
         assert_eq!(opt_clamped.max_hops, MAX_ALLOWED_HOPS);
         assert_eq!(opt_clamped.timeout_ms, 200);
         assert_eq!(opt_clamped.probes_per_hop, 3);
-    }
-
-    #[test]
-    fn arredondamento_de_duas_casas() {
-        assert_eq!(round_two_decimals(12.3456), 12.35);
-        assert_eq!(round_two_decimals(12.341), 12.34);
-        assert_eq!(round_two_decimals(0.0), 0.0);
     }
 }
