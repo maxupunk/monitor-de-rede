@@ -16,7 +16,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    dtos::diagnostics::{PlaybookRunInput, TracerouteInput},
+    dtos::diagnostics::{PlaybookRunInput, SpeedTestInput, TracerouteInput},
     models::devices,
     services::{
         monitoring::execution_guard::{try_acquire_speedtest, try_acquire_traceroute},
@@ -105,18 +105,21 @@ async fn traceroute(Json(input): Json<TracerouteInput>) -> AppResult<Response> {
         .map_err(|err| AppError::Internal(err.into()))
 }
 
-async fn speedtest() -> AppResult<Response> {
+async fn speedtest(body: Bytes) -> AppResult<Response> {
     let guard = try_acquire_speedtest().ok_or_else(|| {
         AppError::conflict("Já existe um teste de velocidade em andamento no servidor")
     })?;
 
+    let input: Option<SpeedTestInput> = serde_json::from_slice(&body).ok();
+    let profile = input.and_then(|i| i.mode);
     let (sender, receiver) = mpsc::channel(32);
     let cancel = CancellationToken::new();
     let task_cancel = cancel.clone();
 
     tokio::spawn(async move {
         let _guard = guard;
-        let _res = execute_wan_speedtest(sender.clone(), task_cancel.clone()).await;
+        let _res =
+            execute_wan_speedtest(sender.clone(), task_cancel.clone(), profile.as_deref()).await;
         if !task_cancel.is_cancelled() {
             let _ = sender
                 .send(SpeedTestEvent::Progress(

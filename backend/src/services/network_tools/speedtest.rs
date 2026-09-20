@@ -17,10 +17,57 @@ use crate::{
 };
 
 const CLOUDFLARE_BASE: &str = "https://speed.cloudflare.com";
-const PING_COUNT: usize = 5;
-const DOWNLOAD_BYTES: usize = 15_000_000; // 15 MB
-const UPLOAD_BYTES: usize = 5_000_000; // 5 MB
-const CLIENT_TIMEOUT: Duration = Duration::from_secs(20);
+const CLIENT_TIMEOUT: Duration = Duration::from_secs(25);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SpeedTestProfile {
+    Simple,
+    #[default]
+    Medium,
+    Complete,
+}
+
+impl SpeedTestProfile {
+    pub fn from_opt_str(s: Option<&str>) -> Self {
+        match s.map(|v| v.to_ascii_lowercase()).as_deref() {
+            Some("simple") | Some("simples") | Some("quick") => Self::Simple,
+            Some("complete") | Some("completo") | Some("full") => Self::Complete,
+            _ => Self::Medium,
+        }
+    }
+
+    pub fn ping_count(&self) -> usize {
+        match self {
+            Self::Simple => 3,
+            Self::Medium => 5,
+            Self::Complete => 10,
+        }
+    }
+
+    pub fn download_bytes(&self) -> usize {
+        match self {
+            Self::Simple => 10_000_000,   // 10 MB
+            Self::Medium => 25_000_000,   // 25 MB
+            Self::Complete => 60_000_000, // 60 MB
+        }
+    }
+
+    pub fn upload_bytes(&self) -> usize {
+        match self {
+            Self::Simple => 8_000_000,    // 8 MB
+            Self::Medium => 20_000_000,   // 20 MB
+            Self::Complete => 50_000_000, // 50 MB
+        }
+    }
+
+    pub fn upload_chunks(&self) -> usize {
+        match self {
+            Self::Simple => 16,
+            Self::Medium => 32,
+            Self::Complete => 50,
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum SpeedTestEvent {
@@ -33,7 +80,9 @@ pub enum SpeedTestEvent {
 pub async fn execute_wan_speedtest(
     sender: mpsc::Sender<SpeedTestEvent>,
     cancel: CancellationToken,
+    profile_str: Option<&str>,
 ) -> Option<SpeedTestResult> {
+    let profile = SpeedTestProfile::from_opt_str(profile_str);
     let mut default_headers = reqwest::header::HeaderMap::new();
     default_headers.insert(
         reqwest::header::USER_AGENT,
@@ -68,7 +117,7 @@ pub async fn execute_wan_speedtest(
 
     // 1. Fase de Ping & Jitter
     let (ping_ms, jitter_ms, server_location) =
-        match measure_ping_jitter(&client, &sender, &cancel).await {
+        match measure_ping_jitter(&client, &sender, &cancel, profile.ping_count()).await {
             Some(res) => res,
             None => {
                 if !cancel.is_cancelled() {
@@ -94,6 +143,7 @@ pub async fn execute_wan_speedtest(
         ping_ms,
         jitter_ms,
         &server_location,
+        profile.download_bytes(),
     )
     .await
     {
@@ -119,10 +169,14 @@ pub async fn execute_wan_speedtest(
         &client,
         &sender,
         &cancel,
-        ping_ms,
-        jitter_ms,
-        download_mbps,
-        &server_location,
+        UploadOptions {
+            ping_ms,
+            jitter_ms,
+            download_mbps,
+            location: &server_location,
+            bytes: profile.upload_bytes(),
+            chunks: profile.upload_chunks(),
+        },
     )
     .await
     {
@@ -171,8 +225,9 @@ async fn measure_ping_jitter(
     client: &Client,
     sender: &mpsc::Sender<SpeedTestEvent>,
     cancel: &CancellationToken,
+    ping_count: usize,
 ) -> Option<(f64, f64, String)> {
-    let mut latencies: Vec<f64> = Vec::with_capacity(PING_COUNT);
+    let mut latencies: Vec<f64> = Vec::with_capacity(ping_count);
     let ping_url = format!("{CLOUDFLARE_BASE}/__down?bytes=0");
 
     let _ = sender
@@ -189,7 +244,7 @@ async fn measure_ping_jitter(
         }))
         .await;
 
-    for i in 0..PING_COUNT {
+    for i in 0..ping_count {
         if cancel.is_cancelled() {
             return None;
         }
@@ -202,7 +257,7 @@ async fn measure_ping_jitter(
             latencies.push(elapsed);
         }
 
-        let pct = 5.0 + ((i + 1) as f64 / PING_COUNT as f64) * 15.0;
+        let pct = 5.0 + ((i + 1) as f64 / ping_count as f64) * 15.0;
         let current_ping = if latencies.is_empty() {
             None
         } else {
@@ -276,8 +331,9 @@ async fn measure_download(
     ping_ms: f64,
     jitter_ms: f64,
     location: &str,
+    download_bytes: usize,
 ) -> Option<f64> {
-    let url = format!("{CLOUDFLARE_BASE}/__down?bytes={DOWNLOAD_BYTES}");
+    let url = format!("{CLOUDFLARE_BASE}/__down?bytes={download_bytes}");
     let resp = client.get(&url).send().await.ok()?;
 
     if !resp.status().is_success() {
@@ -300,7 +356,7 @@ async fn measure_download(
         if last_emit.elapsed() >= Duration::from_millis(150) {
             let elapsed_sec = start.elapsed().as_secs_f64().max(0.001);
             let mbps = (received_bytes as f64 * 8.0) / (elapsed_sec * 1_000_000.0);
-            let pct = 20.0 + (received_bytes as f64 / DOWNLOAD_BYTES as f64).min(1.0) * 40.0;
+            let pct = 20.0 + (received_bytes as f64 / download_bytes as f64).min(1.0) * 45.0;
 
             let _ = sender
                 .send(SpeedTestEvent::Progress(SpeedTestProgress {
@@ -325,57 +381,75 @@ async fn measure_download(
     Some(final_mbps)
 }
 
+struct UploadOptions<'a> {
+    ping_ms: f64,
+    jitter_ms: f64,
+    download_mbps: f64,
+    location: &'a str,
+    bytes: usize,
+    chunks: usize,
+}
+
 async fn measure_upload(
     client: &Client,
     sender: &mpsc::Sender<SpeedTestEvent>,
     cancel: &CancellationToken,
-    ping_ms: f64,
-    jitter_ms: f64,
-    download_mbps: f64,
-    location: &str,
+    opts: UploadOptions<'_>,
 ) -> Option<f64> {
     let url = format!("{CLOUDFLARE_BASE}/__up");
-    let payload = vec![0u8; UPLOAD_BYTES];
+    let chunk_size = (opts.bytes / opts.chunks).max(1);
+    let payload = vec![0u8; chunk_size];
     let start = Instant::now();
+    let mut sent_bytes: usize = 0;
 
     let _ = sender
         .send(SpeedTestEvent::Progress(SpeedTestProgress {
             phase: "upload".into(),
-            progress_pct: 65.0,
+            progress_pct: 68.0,
             current_mbps: None,
-            ping_ms: Some(round_two(ping_ms)),
-            jitter_ms: Some(round_two(jitter_ms)),
-            download_mbps: Some(round_two(download_mbps)),
+            ping_ms: Some(round_two(opts.ping_ms)),
+            jitter_ms: Some(round_two(opts.jitter_ms)),
+            download_mbps: Some(round_two(opts.download_mbps)),
             upload_mbps: None,
             server_name: Some("Cloudflare Edge Network".into()),
-            server_location: Some(location.to_string()),
+            server_location: Some(opts.location.to_string()),
         }))
         .await;
 
-    let req = client.post(&url).body(payload);
-    let resp = req.send().await.ok()?;
+    for i in 0..opts.chunks {
+        if cancel.is_cancelled() {
+            return None;
+        }
 
-    if !resp.status().is_success() || cancel.is_cancelled() {
-        return None;
+        let req = client.post(&url).body(payload.clone());
+        let resp = req.send().await.ok()?;
+
+        if !resp.status().is_success() || cancel.is_cancelled() {
+            return None;
+        }
+
+        sent_bytes += chunk_size;
+        let elapsed_sec = start.elapsed().as_secs_f64().max(0.001);
+        let current_mbps = (sent_bytes as f64 * 8.0) / (elapsed_sec * 1_000_000.0);
+        let pct = 68.0 + ((i + 1) as f64 / opts.chunks as f64) * 28.0;
+
+        let _ = sender
+            .send(SpeedTestEvent::Progress(SpeedTestProgress {
+                phase: "upload".into(),
+                progress_pct: round_two(pct),
+                current_mbps: Some(round_two(current_mbps)),
+                ping_ms: Some(round_two(opts.ping_ms)),
+                jitter_ms: Some(round_two(opts.jitter_ms)),
+                download_mbps: Some(round_two(opts.download_mbps)),
+                upload_mbps: Some(round_two(current_mbps)),
+                server_name: Some("Cloudflare Edge Network".into()),
+                server_location: Some(opts.location.to_string()),
+            }))
+            .await;
     }
 
     let elapsed_sec = start.elapsed().as_secs_f64().max(0.001);
-    let final_mbps = (UPLOAD_BYTES as f64 * 8.0) / (elapsed_sec * 1_000_000.0);
-
-    let _ = sender
-        .send(SpeedTestEvent::Progress(SpeedTestProgress {
-            phase: "upload".into(),
-            progress_pct: 95.0,
-            current_mbps: Some(round_two(final_mbps)),
-            ping_ms: Some(round_two(ping_ms)),
-            jitter_ms: Some(round_two(jitter_ms)),
-            download_mbps: Some(round_two(download_mbps)),
-            upload_mbps: Some(round_two(final_mbps)),
-            server_name: Some("Cloudflare Edge Network".into()),
-            server_location: Some(location.to_string()),
-        }))
-        .await;
-
+    let final_mbps = (sent_bytes as f64 * 8.0) / (elapsed_sec * 1_000_000.0);
     Some(final_mbps)
 }
 

@@ -342,7 +342,7 @@ async fn run_speed_check(cancel: &CancellationToken) -> PlaybookStepResult {
     let task_cancel = cancel.clone();
 
     let speed_handle =
-        tokio::spawn(async move { speedtest::execute_wan_speedtest(tx, task_cancel).await });
+        tokio::spawn(async move { speedtest::execute_wan_speedtest(tx, task_cancel, None).await });
 
     let mut last_progress = None;
     while let Some(event) = rx.recv().await {

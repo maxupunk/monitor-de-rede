@@ -5,6 +5,11 @@ import {
   formatLatency,
   formatMeasuredValue,
   formatTimeSpan,
+  resolveAutoUnit,
+  resolveSpeedUnit,
+  convertSpeedFromMbps,
+  formatSpeedByUnit,
+  getSpeedUnitLabel,
 } from '../src/utils/formatters.ts'
 
 describe('formatters', () => {
@@ -70,5 +75,48 @@ describe('formatters', () => {
 
     expect(formatTimeSpan(null, null)).toBe('—')
     expect(formatTimeSpan(start, null)).toBe('—')
+  })
+
+  describe('resolução automática e formatação de unidades de velocidade', () => {
+    it('determina unidade automaticamente conforme magnitude em Mbps', () => {
+      expect(resolveAutoUnit(1500)).toBe('gbps')
+      expect(resolveAutoUnit(1000)).toBe('gbps')
+      expect(resolveAutoUnit(999.9)).toBe('mbps')
+      expect(resolveAutoUnit(50)).toBe('mbps')
+      expect(resolveAutoUnit(1)).toBe('mbps')
+      expect(resolveAutoUnit(0.85)).toBe('kbps')
+      expect(resolveAutoUnit(0.01)).toBe('kbps')
+      expect(resolveAutoUnit(0)).toBe('mbps')
+      expect(resolveAutoUnit(null)).toBe('mbps')
+      expect(resolveAutoUnit(undefined)).toBe('mbps')
+    })
+
+    it('resolve a unidade respeitando modo auto vs modo manual', () => {
+      expect(resolveSpeedUnit(0.85, 'auto')).toBe('kbps')
+      expect(resolveSpeedUnit(0.85, 'mbps')).toBe('mbps')
+      expect(resolveSpeedUnit(1200, 'auto')).toBe('gbps')
+      expect(resolveSpeedUnit(1200, 'mbps')).toBe('mbps')
+      expect(resolveSpeedUnit(50, 'kbps')).toBe('kbps')
+    })
+
+    it('converte valores a partir de Mbps para a unidade alvo', () => {
+      expect(convertSpeedFromMbps(1.5, 'kbps')).toBe(1500)
+      expect(convertSpeedFromMbps(1500, 'gbps')).toBe(1.5)
+      expect(convertSpeedFromMbps(50, 'mbps')).toBe(50)
+      expect(convertSpeedFromMbps(0.5, 'auto')).toBe(500)
+    })
+
+    it('formata valores e labels de velocidade corretamente com auto-identificação', () => {
+      expect(formatSpeedByUnit(0.45, 'auto')).toBe('450')
+      expect(getSpeedUnitLabel('auto', 0.45)).toBe('Kbps')
+
+      expect(formatSpeedByUnit(85.4, 'auto')).toBe('85.4')
+      expect(getSpeedUnitLabel('auto', 85.4)).toBe('Mbps')
+
+      expect(formatSpeedByUnit(1250, 'auto')).toBe('1.25')
+      expect(getSpeedUnitLabel('auto', 1250)).toBe('Gbps')
+
+      expect(formatSpeedByUnit(null, 'auto')).toBe('--')
+    })
   })
 })

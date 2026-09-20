@@ -69,6 +69,90 @@ export function formatLinkSpeed(bps?: number | null): string {
   return formatBps(bps, { fractionDigits: 1 })
 }
 
+export type SpeedUnit = 'auto' | 'kbps' | 'mbps' | 'gbps'
+
+/** Determina automaticamente a unidade apropriada com base no valor em Mbps (>= 1000 Mbps -> Gbps, >= 1 Mbps -> Mbps, < 1 Mbps -> Kbps) */
+export function resolveAutoUnit(speedMbps?: number | null): 'kbps' | 'mbps' | 'gbps' {
+  if (
+    speedMbps === null ||
+    speedMbps === undefined ||
+    !Number.isFinite(speedMbps) ||
+    speedMbps <= 0
+  ) {
+    return 'mbps'
+  }
+  const abs = Math.abs(speedMbps)
+  if (abs >= 1000) return 'gbps'
+  if (abs < 1) return 'kbps'
+  return 'mbps'
+}
+
+/** Resolve a unidade final a ser utilizada considerando o modo automático */
+export function resolveSpeedUnit(
+  valueMbps?: number | null,
+  unit: SpeedUnit = 'auto'
+): 'kbps' | 'mbps' | 'gbps' {
+  if (unit !== 'auto') return unit
+  return resolveAutoUnit(valueMbps)
+}
+
+/** Converte valor de Mbps para a unidade de velocidade especificada */
+export function convertSpeedFromMbps(mbps: number, unit: SpeedUnit): number {
+  const resolved = resolveSpeedUnit(mbps, unit)
+  switch (resolved) {
+    case 'kbps':
+      return mbps * 1000
+    case 'gbps':
+      return mbps / 1000
+    case 'mbps':
+    default:
+      return mbps
+  }
+}
+
+/** Formata valor numérico de velocidade já convertido para a unidade */
+export function formatSpeedValue(
+  value?: number | null,
+  unit: SpeedUnit = 'mbps',
+  fallback = '--'
+): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return fallback
+  const resolved = unit === 'auto' ? 'mbps' : unit
+  const fractionDigits = resolved === 'gbps' ? 2 : resolved === 'kbps' ? 0 : 1
+  return Number.parseFloat(value.toFixed(fractionDigits)).toString()
+}
+
+/** Formata velocidade a partir de Mbps para a unidade selecionada */
+export function formatSpeedByUnit(
+  valueMbps?: number | null,
+  unit: SpeedUnit = 'auto',
+  fallback = '--'
+): string {
+  if (valueMbps === null || valueMbps === undefined || !Number.isFinite(valueMbps)) return fallback
+  const resolved = resolveSpeedUnit(valueMbps, unit)
+  const converted = convertSpeedFromMbps(valueMbps, resolved)
+  return formatSpeedValue(converted, resolved, fallback)
+}
+
+/** Retorna o label formatado da unidade (Kbps, Mbps, Gbps) */
+export function getSpeedUnitLabel(unit: SpeedUnit, valueMbps?: number | null): string {
+  const resolved = resolveSpeedUnit(valueMbps, unit)
+  switch (resolved) {
+    case 'kbps':
+      return 'Kbps'
+    case 'gbps':
+      return 'Gbps'
+    case 'mbps':
+    default:
+      return 'Mbps'
+  }
+}
+
+/** Formata velocidade em Mbps com uma casa decimal: 12.34 ➔ "12.3", null ➔ "--" */
+export function formatSpeedMbps(value?: number | null, fallback = '--'): string {
+  return formatSpeedByUnit(value, 'mbps', fallback)
+}
+
 /**
  * Latência em milissegundos: 6.903808999999999 ➔ "6.9 ms", 250.4 ➔ "250 ms".
  *

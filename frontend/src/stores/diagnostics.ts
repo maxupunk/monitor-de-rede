@@ -154,7 +154,8 @@ export const useDiagnosticsStore = defineStore('diagnostics', () => {
    */
   async function runSpeedTest(
     onProgress: (progress: SpeedTestProgress) => void,
-    onComplete: (result: SpeedTestResult) => void
+    onComplete: (result: SpeedTestResult) => void,
+    mode: 'simple' | 'medium' | 'complete' = 'medium'
   ): Promise<boolean> {
     speedTestRunning.value = true
     speedTestError.value = null
@@ -162,7 +163,11 @@ export const useDiagnosticsStore = defineStore('diagnostics', () => {
     activeSpeedTestController = controller
 
     try {
-      const response = await apiService.postStream('/diagnostics/speedtest', {}, controller.signal)
+      const response = await apiService.postStream(
+        '/diagnostics/speedtest',
+        { mode },
+        controller.signal
+      )
       const reader = response.body?.getReader()
       if (!reader) return false
 
@@ -237,7 +242,8 @@ export const useDiagnosticsStore = defineStore('diagnostics', () => {
    * Executa teste de velocidade LAN (Navegador <-> NetMonitor Backend).
    */
   async function runLanTest(
-    onProgress: (progress: SpeedTestProgress) => void
+    onProgress: (progress: SpeedTestProgress) => void,
+    mode: 'simple' | 'medium' | 'complete' = 'medium'
   ): Promise<SpeedTestResult | null> {
     speedTestRunning.value = true
     speedTestError.value = null
@@ -248,16 +254,30 @@ export const useDiagnosticsStore = defineStore('diagnostics', () => {
       const token = getStoredToken()
       const authHeaders: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {}
 
+      let pingCount = 5
+      let downloadBytes = 35_000_000
+      let uploadBytes = 25_000_000
+
+      if (mode === 'simple') {
+        pingCount = 3
+        downloadBytes = 15_000_000
+        uploadBytes = 10_000_000
+      } else if (mode === 'complete') {
+        pingCount = 10
+        downloadBytes = 80_000_000
+        uploadBytes = 60_000_000
+      }
+
       // 1. Ping LAN
       onProgress({
         phase: 'ping',
-        progressPct: 10.0,
+        progressPct: 5.0,
         serverName: 'Servidor Local (LAN)',
         serverLocation: 'Rede Local',
       })
 
       const pingSamples: number[] = []
-      for (let i = 0; i < 5; i++) {
+      for (let i = 0; i < pingCount; i++) {
         if (controller.signal.aborted) return null
         const t0 = performance.now()
         const pingResp = await fetch('/api/diagnostics/speedtest/lan/download?bytes=0', {
@@ -271,7 +291,7 @@ export const useDiagnosticsStore = defineStore('diagnostics', () => {
         pingSamples.push(rtt)
         onProgress({
           phase: 'ping',
-          progressPct: 10.0 + (i + 1) * 3.0,
+          progressPct: 5.0 + ((i + 1) / pingCount) * 15.0,
           pingMs:
             Math.round((pingSamples.reduce((a, b) => a + b, 0) / pingSamples.length) * 100) / 100,
           serverName: 'Servidor Local (LAN)',
@@ -290,17 +310,16 @@ export const useDiagnosticsStore = defineStore('diagnostics', () => {
         jitter = Math.round((diffSum / (pingSamples.length - 1)) * 100) / 100
       }
 
-      // 2. Download LAN (25 MB)
+      // 2. Download LAN
       onProgress({
         phase: 'download',
-        progressPct: 30.0,
+        progressPct: 22.0,
         pingMs: avgPing,
         jitterMs: jitter,
         serverName: 'Servidor Local (LAN)',
         serverLocation: 'Rede Local',
       })
 
-      const downloadBytes = 25_000_000
       const downStart = performance.now()
       const downResp = await fetch(
         `/api/diagnostics/speedtest/lan/download?bytes=${downloadBytes}`,
@@ -322,11 +341,11 @@ export const useDiagnosticsStore = defineStore('diagnostics', () => {
         received += value?.length || 0
         const elapsed = (performance.now() - downStart) / 1000
         const currentMbps = Math.round(((received * 8) / (elapsed * 1_000_000)) * 100) / 100
-        const pct = 30.0 + (received / downloadBytes) * 35.0
+        const pct = 22.0 + (received / downloadBytes) * 45.0
 
         onProgress({
           phase: 'download',
-          progressPct: Math.min(65.0, Math.round(pct)),
+          progressPct: Math.min(67.0, Math.round(pct)),
           currentMbps,
           downloadMbps: currentMbps,
           pingMs: avgPing,
@@ -340,10 +359,10 @@ export const useDiagnosticsStore = defineStore('diagnostics', () => {
       const finalDownloadMbps =
         Math.round(((received * 8) / (downTotalSec * 1_000_000)) * 100) / 100
 
-      // 3. Upload LAN (10 MB)
+      // 3. Upload LAN
       onProgress({
         phase: 'upload',
-        progressPct: 70.0,
+        progressPct: 68.0,
         downloadMbps: finalDownloadMbps,
         pingMs: avgPing,
         jitterMs: jitter,
@@ -351,22 +370,63 @@ export const useDiagnosticsStore = defineStore('diagnostics', () => {
         serverLocation: 'Rede Local',
       })
 
-      const uploadBytes = 10_000_000
       const dummyData = new Uint8Array(uploadBytes)
       const upStart = performance.now()
 
-      const upResp = await fetch('/api/diagnostics/speedtest/lan/upload', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/octet-stream',
-          ...authHeaders,
-        },
-        body: dummyData,
-        signal: controller.signal,
+      const upTotalSec = await new Promise<number>((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        xhr.open('POST', '/api/diagnostics/speedtest/lan/upload')
+        if (token) {
+          xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+        }
+        xhr.setRequestHeader('Content-Type', 'application/octet-stream')
+
+        const onAbort = () => {
+          xhr.abort()
+          reject(new DOMException('Aborted', 'AbortError'))
+        }
+        controller.signal.addEventListener('abort', onAbort)
+
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable && event.loaded > 0) {
+            const elapsed = (performance.now() - upStart) / 1000
+            if (elapsed > 0.05) {
+              const currentMbps =
+                Math.round(((event.loaded * 8) / (elapsed * 1_000_000)) * 100) / 100
+              const pct = 68.0 + (event.loaded / uploadBytes) * 28.0
+              onProgress({
+                phase: 'upload',
+                progressPct: Math.min(96.0, Math.round(pct)),
+                currentMbps,
+                uploadMbps: currentMbps,
+                downloadMbps: finalDownloadMbps,
+                pingMs: avgPing,
+                jitterMs: jitter,
+                serverName: 'Servidor Local (LAN)',
+                serverLocation: 'Rede Local',
+              })
+            }
+          }
+        }
+
+        xhr.onload = () => {
+          controller.signal.removeEventListener('abort', onAbort)
+          if (xhr.status >= 200 && xhr.status < 300) {
+            const totalSec = (performance.now() - upStart) / 1000
+            resolve(totalSec)
+          } else {
+            reject(new Error(`Falha no upload LAN (${xhr.status})`))
+          }
+        }
+
+        xhr.onerror = () => {
+          controller.signal.removeEventListener('abort', onAbort)
+          reject(new Error('Erro de rede durante o upload LAN'))
+        }
+
+        xhr.send(dummyData)
       })
 
-      if (!upResp.ok) throw new Error(`Falha no upload LAN (${upResp.status})`)
-      const upTotalSec = (performance.now() - upStart) / 1000
       const finalUploadMbps = Math.round(((uploadBytes * 8) / (upTotalSec * 1_000_000)) * 100) / 100
 
       const result: SpeedTestResult = {
