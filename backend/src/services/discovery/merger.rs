@@ -1,6 +1,6 @@
 //! Reconcilia as observações heterogêneas por endereço IP.
 
-use super::{device_identifier::identify_device_type, oui_lookup::lookup_vendor};
+use super::{device_identifier::identify_device_type_with_context, oui_lookup::lookup_vendor};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -57,11 +57,30 @@ pub fn merge_hosts(lists: impl IntoIterator<Item = Vec<DiscoveredHost>>) -> Vec<
                 .and_then(lookup_vendor)
                 .map(str::to_string);
         }
+        let extra_evidence = host.data.get("identity").map(|id| {
+            let sys_descr = id.get("sysDescr").and_then(|v| v.as_str()).unwrap_or("");
+            let sys_name = id.get("sysName").and_then(|v| v.as_str()).unwrap_or("");
+            let label = id.get("label").and_then(|v| v.as_str()).unwrap_or("");
+            let op_system = id
+                .get("operatingSystem")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let hw_vendor = id
+                .get("hardwareVendor")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let hw_model = id
+                .get("hardwareModel")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            format!("{sys_descr} {sys_name} {label} {op_system} {hw_vendor} {hw_model}")
+        });
         host.device_type = Some(
-            identify_device_type(
+            identify_device_type_with_context(
                 host.hostname.as_deref().or(host.mdns_name.as_deref()),
                 host.vendor.as_deref(),
                 &host.open_ports,
+                extra_evidence.as_deref(),
             )
             .into(),
         );

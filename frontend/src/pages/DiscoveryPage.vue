@@ -174,15 +174,37 @@
                 class="pa-3 cursor-pointer"
                 @click="openDetailDialog(item)"
               >
-                <div class="d-flex align-start justify-space-between ga-2">
-                  <div class="flex-grow-1 text-break">
-                    <div class="text-subtitle-1 font-weight-bold text-primary">
-                      {{ item.ipAddress }}
+                <div class="d-flex align-start ga-3">
+                  <v-avatar
+                    :color="discoveryDeviceTypeInfo(item.deviceType).color"
+                    size="44"
+                    variant="tonal"
+                    class="rounded-lg flex-shrink-0"
+                  >
+                    <v-icon
+                      :icon="discoveryDeviceTypeInfo(item.deviceType).icon"
+                      size="24"
+                    ></v-icon>
+                  </v-avatar>
+
+                  <div class="flex-grow-1 text-break min-width-0">
+                    <div class="d-flex align-center justify-space-between ga-2">
+                      <div class="text-subtitle-1 font-weight-bold text-primary">
+                        {{ item.ipAddress }}
+                      </div>
+                      <div class="text-caption font-weight-medium text-success">
+                        {{ Math.ceil(item.confidence) }}%
+                      </div>
                     </div>
-                    <div class="text-caption text-grey-darken-1">
-                      {{ item.mdnsName || item.hostname || 'Dispositivo sem nome' }}
+
+                    <div class="text-body-2 font-weight-medium text-grey-darken-3">
+                      {{ hostName(item) }}
                     </div>
-                    <div class="d-flex flex-wrap align-center ga-2 mt-1">
+                    <div v-if="hostDescription(item)" class="text-caption text-grey">
+                      {{ hostDescription(item) }}
+                    </div>
+
+                    <div class="d-flex flex-wrap align-center ga-2 mt-2">
                       <v-chip
                         v-if="
                           selectedNetwork?.gateway && item.ipAddress === selectedNetwork.gateway
@@ -195,8 +217,27 @@
                         <v-icon start size="12">mdi-router-network</v-icon>
                         GATEWAY DA REDE
                       </v-chip>
+                      <v-chip
+                        v-if="discoveryDeviceTypeInfo(item.deviceType).isKnown"
+                        size="x-small"
+                        :color="discoveryDeviceTypeInfo(item.deviceType).color"
+                        variant="tonal"
+                      >
+                        <v-icon start size="12">{{
+                          discoveryDeviceTypeInfo(item.deviceType).icon
+                        }}</v-icon>
+                        {{ discoveryDeviceTypeInfo(item.deviceType).label }}
+                      </v-chip>
+                      <v-chip v-if="hasSnmp(item)" size="x-small" color="teal" variant="tonal">
+                        <v-icon start size="12">mdi-lan-check</v-icon>
+                        SNMP {{ snmpVersion(item) }}
+                      </v-chip>
                       <v-chip size="x-small" color="info" variant="tonal">
-                        {{ item.vendor || 'Fabricante desconhecido' }}
+                        {{
+                          item.vendor ||
+                          discoveryIdentity(item)?.hardwareVendor ||
+                          'Fabricante desconhecido'
+                        }}
                       </v-chip>
                       <v-chip
                         v-if="isIpAdded(item.ipAddress)"
@@ -215,12 +256,10 @@
                         {{ item.openPorts.length }} porta(s)
                       </v-chip>
                     </div>
+
                     <div v-if="selectedNetwork" class="text-caption text-grey mt-1">
                       {{ selectedNetwork.name }} — {{ selectedNetwork.cidr }}
                     </div>
-                  </div>
-                  <div class="text-caption font-weight-medium text-success">
-                    {{ Math.ceil(item.confidence) }}%
                   </div>
                 </div>
 
@@ -482,6 +521,8 @@ import {
   type StreamedDiscoveryHost,
   type ScanSessionState,
   discoveryIdentity,
+  discoveryDeviceName,
+  discoveryDeviceTypeInfo,
 } from '@/stores/discovery'
 import { useNetworksStore } from '@/stores/networks'
 import { useDevicesStore } from '@/stores/devices'
@@ -558,6 +599,35 @@ function isIpAdded(ip: string): boolean {
   return addedIpSet.value.has(ip)
 }
 
+function hostName(item: DiscoveryResult | StreamedDiscoveryHost): string {
+  const name = discoveryDeviceName(item)
+  if (name) return name
+  const typeInfo = discoveryDeviceTypeInfo(item.deviceType)
+  if (typeInfo.isKnown) return typeInfo.label
+  return 'Dispositivo sem nome'
+}
+
+function hostDescription(item: DiscoveryResult | StreamedDiscoveryHost): string | null {
+  const identity = discoveryIdentity(item)
+  if (identity?.sysDescr) return identity.sysDescr
+  return null
+}
+
+function hasSnmp(item: DiscoveryResult | StreamedDiscoveryHost): boolean {
+  if (!item.data) return false
+  const snmp = (item.data as Record<string, unknown>).snmp as Record<string, unknown> | undefined
+  if (snmp?.detected) return true
+  const identity = discoveryIdentity(item)
+  return identity?.source === 'snmp'
+}
+
+function snmpVersion(item: DiscoveryResult | StreamedDiscoveryHost): string {
+  if (!item.data) return ''
+  const snmp = (item.data as Record<string, unknown>).snmp as Record<string, unknown> | undefined
+  if (typeof snmp?.version === 'string') return snmp.version
+  return ''
+}
+
 const selectedNetwork = computed(() =>
   networksStore.networks.find((n) => n.id === selectedNetworkId.value)
 )
@@ -566,6 +636,7 @@ const dialogPrefill = computed<Partial<Device> | null>(() => {
   if (!selectedResult.value) return null
   const result = selectedResult.value
   const identity = discoveryIdentity(result)
+  const typeInfo = discoveryDeviceTypeInfo(result.deviceType)
   const isGateway = Boolean(
     selectedNetwork.value?.gateway && result.ipAddress === selectedNetwork.value.gateway
   )
@@ -580,10 +651,19 @@ const dialogPrefill = computed<Partial<Device> | null>(() => {
     }
   }
 
+  const discoveredName = discoveryDeviceName(result)
+  const fallbackName = typeInfo.isKnown
+    ? `${typeInfo.label} (${result.ipAddress})`
+    : result.ipAddress
+
   return {
-    name: identity?.sysName || result.mdnsName || result.hostname || result.ipAddress,
+    name: discoveredName || fallbackName,
     ipAddress: result.ipAddress,
-    type: isGateway ? 'router' : result.deviceType || 'other',
+    type: isGateway
+      ? 'router'
+      : typeInfo.isKnown && result.deviceType
+        ? result.deviceType
+        : 'other',
     vendor: result.vendor || identity?.hardwareVendor || undefined,
     model: identity?.hardwareModel || undefined,
     macAddress: result.macAddress || undefined,
@@ -591,7 +671,7 @@ const dialogPrefill = computed<Partial<Device> | null>(() => {
     networkId: selectedNetwork.value?.id ?? null,
     parentId,
     isMonitored: true,
-    snmpEnabled: false,
+    snmpEnabled: hasSnmp(result),
   }
 })
 

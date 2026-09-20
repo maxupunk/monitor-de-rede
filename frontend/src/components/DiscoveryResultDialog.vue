@@ -20,12 +20,12 @@
         <!-- Header com IP e status -->
         <div class="d-flex align-center justify-space-between flex-wrap ga-3 mb-4">
           <div class="d-flex align-center ga-3">
-            <v-avatar color="primary" size="48">
-              <v-icon color="white" size="28">mdi-router-network</v-icon>
+            <v-avatar :color="typeInfo.color" size="48" variant="tonal">
+              <v-icon :icon="typeInfo.icon" size="28"></v-icon>
             </v-avatar>
             <div>
               <div class="text-h6 font-weight-bold">
-                {{ result.mdnsName || result.hostname || result.ipAddress }}
+                {{ displayName }}
               </div>
               <div class="text-caption text-grey">
                 IP: {{ result.ipAddress }}
@@ -68,6 +68,11 @@
                 title="Nome mDNS/Bonjour"
                 :subtitle="result.mdnsName || 'Não identificado'"
               ></v-list-item>
+              <v-list-item
+                v-if="identity?.sysName"
+                title="Nome SNMP (sysName)"
+                :subtitle="identity.sysName"
+              ></v-list-item>
             </v-list>
           </v-col>
           <v-col cols="12" sm="6">
@@ -76,7 +81,7 @@
                 title="Fabricante"
                 :subtitle="result.vendor || identity?.hardwareVendor || 'Não identificado'"
               ></v-list-item>
-              <v-list-item title="Tipo de Dispositivo" :subtitle="deviceTypeLabel"></v-list-item>
+              <v-list-item title="Tipo de Dispositivo" :subtitle="typeInfo.label"></v-list-item>
               <v-list-item
                 title="Sistema"
                 :subtitle="identity?.label || 'Não identificado'"
@@ -97,6 +102,7 @@
           class="mb-4"
         >
           <div class="font-weight-bold">{{ identity.reason }}</div>
+          <div v-if="identity.sysName" class="text-caption">sysName: {{ identity.sysName }}</div>
           <div v-if="identity.sysDescr" class="text-caption">sysDescr: {{ identity.sysDescr }}</div>
           <div v-if="identity.sysObjectId" class="text-caption">
             sysObjectId: {{ identity.sysObjectId }}
@@ -189,6 +195,8 @@
 import { computed, ref } from 'vue'
 import { useDevicesStore } from '@/stores/devices'
 import {
+  discoveryDeviceName,
+  discoveryDeviceTypeInfo,
   discoveryIdentity,
   type DiscoveryResult,
   type StreamedDiscoveryHost,
@@ -222,20 +230,13 @@ const isNetworkGateway = computed(() => {
   return false
 })
 
-const deviceTypeLabel = computed(() => {
-  const type = props.result?.deviceType
-  if (!type || type === 'unknown') return 'Desconhecido'
-  const labels: Record<string, string> = {
-    router: 'Roteador',
-    switch: 'Switch',
-    access_point: 'Access Point',
-    printer: 'Impressora',
-    camera: 'Câmera',
-    server: 'Servidor',
-    web_device: 'Dispositivo Web',
-    other: 'Outro',
-  }
-  return labels[type] || type
+const typeInfo = computed(() => discoveryDeviceTypeInfo(props.result?.deviceType))
+
+const displayName = computed(() => {
+  const name = discoveryDeviceName(props.result)
+  if (name) return name
+  if (typeInfo.value.isKnown) return typeInfo.value.label
+  return props.result?.ipAddress || ''
 })
 
 const openPorts = computed(() => {

@@ -88,6 +88,70 @@ export function discoveryIdentity(
   return identity && typeof identity === 'object' ? (identity as DiscoveryIdentity) : null
 }
 
+export interface DeviceTypePresentation {
+  label: string
+  icon: string
+  color: string
+  isKnown: boolean
+}
+
+/**
+ * Retorna o nome mais específico do dispositivo descoberto:
+ * 1. Nome SNMP (sysName)
+ * 2. Hostname registrado (DNS)
+ * 3. Nome mDNS/Bonjour
+ * 4. null caso nenhum esteja disponível.
+ */
+export function discoveryDeviceName(
+  result:
+    | Pick<DiscoveryResult | StreamedDiscoveryHost, 'data'>
+    | { data?: Record<string, unknown> | null; hostname?: string | null; mdnsName?: string | null }
+    | null
+    | undefined
+): string | null {
+  if (!result) return null
+  const identity = discoveryIdentity(result)
+  const sysName = identity?.sysName?.trim()
+  if (sysName) return sysName
+  const host = result as { hostname?: string | null; mdnsName?: string | null }
+  const hostname = host.hostname?.trim()
+  if (hostname) return hostname
+  const mdns = host.mdnsName?.trim()
+  if (mdns) return mdns
+  return null
+}
+
+/**
+ * Mapeamento canônico de ícone, cor e rótulo para apresentação de deviceType.
+ */
+export function discoveryDeviceTypeInfo(deviceType?: string | null): DeviceTypePresentation {
+  const type = deviceType?.toLowerCase()?.trim()
+  switch (type) {
+    case 'router':
+      return { label: 'Roteador', icon: 'mdi-router-network', color: 'primary', isKnown: true }
+    case 'switch':
+    case 'unmanaged_switch':
+      return { label: 'Switch', icon: 'mdi-hub', color: 'teal', isKnown: true }
+    case 'access_point':
+    case 'ap':
+      return { label: 'Access Point', icon: 'mdi-access-point', color: 'cyan', isKnown: true }
+    case 'camera':
+      return { label: 'Câmera', icon: 'mdi-cctv', color: 'purple', isKnown: true }
+    case 'server':
+      return { label: 'Servidor', icon: 'mdi-server', color: 'deep-purple', isKnown: true }
+    case 'printer':
+      return { label: 'Impressora', icon: 'mdi-printer', color: 'orange', isKnown: true }
+    case 'web_device':
+      return { label: 'Dispositivo Web', icon: 'mdi-web', color: 'blue', isKnown: true }
+    case 'firewall':
+      return { label: 'Firewall', icon: 'mdi-shield-network', color: 'red', isKnown: true }
+    case 'other':
+      return { label: 'Outro', icon: 'mdi-devices', color: 'blue-grey', isKnown: true }
+    default:
+      return { label: 'Desconhecido', icon: 'mdi-lan', color: 'grey', isKnown: false }
+  }
+}
+
 export interface NetworkConflict {
   id: string
   conflictType: 'ipCollision' | 'macDuplicated' | 'deviceMacMismatch'
