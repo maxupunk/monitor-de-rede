@@ -16,7 +16,7 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-use super::{tcp_probe::probe_tcp, udp_probes::probe_for};
+use super::{icmp_probe::duration_to_ms, tcp_probe::probe_tcp, udp_probes::probe_for};
 
 pub const MAX_PORTS_PER_SCAN: usize = u16::MAX as usize;
 pub const PORTS_PER_BATCH: usize = 1_024;
@@ -291,7 +291,7 @@ async fn scan_tcp(
         protocol: "tcp".into(),
         status: status.as_str().into(),
         service: tcp_service(port),
-        latency_ms: millis(started.elapsed()),
+        latency_ms: duration_to_ms(started.elapsed()),
         attempts,
         error,
     }
@@ -363,14 +363,10 @@ async fn scan_udp(
         protocol: "udp".into(),
         status: status.into(),
         service: udp_service(port),
-        latency_ms: millis(started.elapsed()),
+        latency_ms: duration_to_ms(started.elapsed()),
         attempts,
         error,
     }
-}
-
-fn millis(duration: Duration) -> f64 {
-    (duration.as_secs_f64() * 1_000.0 * 1_000.0).round() / 1_000.0
 }
 
 fn tcp_service(port: u16) -> Option<&'static str> {

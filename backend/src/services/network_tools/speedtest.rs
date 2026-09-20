@@ -13,7 +13,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     dtos::diagnostics::{SpeedTestProgress, SpeedTestResult},
-    services::network_tools::icmp_probe::round_two,
+    services::network_tools::icmp_probe::{duration_to_ms, round_two},
 };
 
 const CLOUDFLARE_BASE: &str = "https://speed.cloudflare.com";
@@ -196,7 +196,7 @@ async fn measure_ping_jitter(
 
         let start = Instant::now();
         let resp = client.get(&ping_url).send().await.ok()?;
-        let elapsed = start.elapsed().as_secs_f64() * 1_000.0;
+        let elapsed = duration_to_ms(start.elapsed());
 
         if resp.status().is_success() {
             latencies.push(elapsed);
@@ -379,16 +379,9 @@ async fn measure_upload(
     Some(final_mbps)
 }
 
-/// Calcula o jitter como a média das diferenças absolutas entre amostras consecutivas.
+/// Calcula o jitter delegando para a implementação canônica em `icmp_probe`.
 pub fn calculate_jitter(latencies: &[f64]) -> f64 {
-    if latencies.len() < 2 {
-        return 0.0;
-    }
-    let mut sum_diff = 0.0;
-    for i in 1..latencies.len() {
-        sum_diff += (latencies[i] - latencies[i - 1]).abs();
-    }
-    sum_diff / (latencies.len() - 1) as f64
+    crate::services::network_tools::icmp_probe::calculate_jitter(latencies).unwrap_or(0.0)
 }
 
 #[cfg(test)]
@@ -401,7 +394,7 @@ mod tests {
         // diffs: |12-10| = 2, |11-12| = 1, |15-11| = 4 -> soma = 7 / 3 = 2.333...
         let latencies = vec![10.0, 12.0, 11.0, 15.0];
         let jitter = calculate_jitter(&latencies);
-        assert!((jitter - 7.0 / 3.0).abs() < 0.001);
+        assert_eq!(jitter, 2.33);
 
         // Amostra única ou vazia dá 0.0
         assert_eq!(calculate_jitter(&[10.0]), 0.0);

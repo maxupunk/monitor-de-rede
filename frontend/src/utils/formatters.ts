@@ -109,6 +109,13 @@ export function formatDateTime(value?: string | Date | null, fallback = '—'): 
   return date.toLocaleString('pt-BR')
 }
 
+/** Somente a data no formato brasileiro: "05/08/2026" */
+export function formatDate(value?: string | Date | null, fallback = '—'): string {
+  const date = toDate(value)
+  if (!date) return value ? String(value) : fallback
+  return date.toLocaleDateString('pt-BR')
+}
+
 /**
  * Versão compacta usada em tooltips e séries temporais, onde o ano é ruído:
  * "05/08 14:32:07"

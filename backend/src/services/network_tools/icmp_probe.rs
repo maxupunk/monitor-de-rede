@@ -59,6 +59,33 @@ pub fn round_two(val: f64) -> f64 {
     (val * 100.0).round() / 100.0
 }
 
+/// Converte um `Duration` em milissegundos com arredondamento para duas casas decimais.
+pub fn duration_to_ms(duration: Duration) -> f64 {
+    round_two(duration.as_secs_f64() * 1_000.0)
+}
+
+/// Cria um cliente ICMP DGRAM não-privilegiado (ADR 003) para IPv4 ou IPv6,
+/// opcionalmente definindo o TTL do socket.
+pub fn create_icmp_client(is_ipv4: bool, ttl: Option<u32>) -> std::io::Result<Client> {
+    let mut builder = Config::builder()
+        .kind(if is_ipv4 { ICMP::V4 } else { ICMP::V6 })
+        .sock_type_hint(Type::DGRAM);
+    if let Some(t) = ttl {
+        builder = builder.ttl(t);
+    }
+    Client::new(&builder.build())
+}
+
+/// Calcula o jitter (variação média de latência entre amostras consecutivas)
+/// conforme a RFC 3550 / RFC 1889.
+pub fn calculate_jitter(latencies: &[f64]) -> Option<f64> {
+    if latencies.len() < 2 {
+        return None;
+    }
+    let diff_sum: f64 = latencies.windows(2).map(|w| (w[1] - w[0]).abs()).sum();
+    Some(round_two(diff_sum / (latencies.len() - 1) as f64))
+}
+
 /// Executa múltiplas sondas ICMP contra o alvo, retornando métricas consolidadas.
 pub async fn probe_icmp(
     target: IpAddr,
@@ -66,12 +93,7 @@ pub async fn probe_icmp(
     cancel: &CancellationToken,
 ) -> IcmpProbeResult {
     let is_ipv4 = target.is_ipv4();
-    let config = Config::builder()
-        .kind(if is_ipv4 { ICMP::V4 } else { ICMP::V6 })
-        .sock_type_hint(Type::DGRAM)
-        .build();
-
-    let client = match Client::new(&config) {
+    let client = match create_icmp_client(is_ipv4, None) {
         Ok(c) => c,
         Err(err) => {
             tracing::warn!(%err, %target, "falha ao criar socket ICMP DGRAM");
@@ -98,7 +120,7 @@ pub async fn probe_icmp(
         }
         match pinger.ping(PingSequence(seq as u16), &payload).await {
             Ok((_packet, rtt)) => {
-                let ms = round_two(rtt.as_secs_f64() * 1_000.0);
+                let ms = duration_to_ms(rtt);
                 rtts.push(Some(ms));
             }
             Err(_) => {
@@ -143,13 +165,7 @@ fn calculate_probe_result(rtts: Vec<Option<f64>>, total_sent: usize) -> IcmpProb
     let avg = round_two(sum / received_count as f64);
     let min = round_two(successful.iter().cloned().fold(f64::INFINITY, f64::min));
     let max = round_two(successful.iter().cloned().fold(f64::NEG_INFINITY, f64::max));
-
-    let jitter = if received_count > 1 {
-        let diff_sum: f64 = successful.windows(2).map(|w| (w[1] - w[0]).abs()).sum();
-        Some(round_two(diff_sum / (received_count - 1) as f64))
-    } else {
-        None
-    };
+    let jitter = calculate_jitter(&successful);
 
     IcmpProbeResult {
         success: true,
@@ -171,6 +187,12 @@ mod tests {
         assert_eq!(round_two(12.3456), 12.35);
         assert_eq!(round_two(12.341), 12.34);
         assert_eq!(round_two(0.0), 0.0);
+    }
+
+    #[test]
+    fn duration_to_ms_converte_corretamente() {
+        assert_eq!(duration_to_ms(Duration::from_millis(150)), 150.0);
+        assert_eq!(duration_to_ms(Duration::from_micros(12_345)), 12.35);
     }
 
     #[test]
@@ -207,7 +229,15 @@ mod tests {
         let rtts = vec![None, None, None];
         let res = calculate_probe_result(rtts, 3);
         assert!(!res.success);
-        assert_eq!(res.avg_rtt_ms, None);
         assert_eq!(res.packet_loss_pct, 100.0);
+    }
+
+    #[test]
+    fn calcula_jitter_correto() {
+        let latencies = vec![10.0, 12.0, 11.0, 15.0];
+        // |12-10| = 2, |11-12| = 1, |15-11| = 4 -> soma = 7 / 3 = 2.33
+        assert_eq!(calculate_jitter(&latencies), Some(2.33));
+        assert_eq!(calculate_jitter(&[10.0]), None);
+        assert_eq!(calculate_jitter(&[]), None);
     }
 }

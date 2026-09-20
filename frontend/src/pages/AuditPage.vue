@@ -139,7 +139,7 @@
         no-data-text="Nenhum registro de auditoria encontrado"
       >
         <template #item.createdAt="{ item }">
-          {{ formatDate(item.createdAt) }}
+          {{ formatDateTime(item.createdAt) }}
         </template>
         <template #item.user="{ item }">
           <div class="d-flex align-center ga-2">
@@ -249,6 +249,7 @@ import {
   type AuditFilters,
 } from '@/stores/audit'
 import { useUsersStore } from '@/stores/users'
+import { formatDateTime } from '@/utils/formatters'
 
 const auditStore = useAuditStore()
 const usersStore = useUsersStore()
@@ -324,17 +325,6 @@ function toIso(local: string): string | null {
     return new Date(local).toISOString()
   } catch {
     return null
-  }
-}
-
-function formatDate(value: string): string {
-  try {
-    return new Date(value).toLocaleString('pt-BR', {
-      dateStyle: 'short',
-      timeStyle: 'short',
-    })
-  } catch {
-    return value
   }
 }
 

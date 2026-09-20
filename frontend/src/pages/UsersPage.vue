@@ -251,6 +251,7 @@ import UserDialog from '@/components/UserDialog.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useUsersStore, type ManagedUser } from '@/stores/users'
 import { ROLE_OPTIONS, roleLabel, type UserRole } from '@/utils/access'
+import { formatDate } from '@/utils/formatters'
 
 const usersStore = useUsersStore()
 const authStore = useAuthStore()
@@ -278,10 +279,6 @@ function roleColor(role: UserRole): string {
   if (role === 'admin') return 'deep-purple'
   if (role === 'operator') return 'primary'
   return 'blue-grey'
-}
-
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short' }).format(new Date(value))
 }
 
 function openCreate() {

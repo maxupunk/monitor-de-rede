@@ -136,3 +136,24 @@
     - **Clean Code & Programação Defensiva**:
       - Erros devem ser tipados e propagados com `AppResult<T>` / `AppError`, nunca suprimidos nem transformados em `unwrap()` soltos em caminhos de produção.
       - No TypeScript: utilize tipagem forte, programação defensiva e evite `any` ou type-assertions forçadas (`as unknown as ...`).
+
+11. **Princípio DRY (Don't Repeat Yourself) & Reutilização Canônica**:
+    - **Proibição Estrita de Duplicação de Código (DRY Absoluto)**:
+      - Nunca reimplemente funções utilitárias de formatação, cálculo numérico, conversão de unidades ou parsing se já existirem no repositório.
+      - Antes de criar qualquer nova função utilitária ou rotina de suporte, o agente **DEVE** inspecionar os módulos canônicos existentes (`grep_search` ou leitura dos módulos centrais).
+    - **Backend (Rust)**:
+      - **Métricas e Sondas de Rede (`backend/src/services/network_tools/`)**:
+        - Sockets ICMP DGRAM, envio de pacotes, cálculo de RTT, estatísticas de perdas e jitter pertencem exclusivamente a `network_tools::icmp_probe` (`probe_icmp`, `create_icmp_client`, `calculate_jitter`, `duration_to_ms`, `round_two`).
+        - Nunca instancie sockets de rede brutos/DGRAM ou HTTP clients repetidamente dentro de loops iterativos (ex: loops de sequência em traceroute, scans de porta). Reutilize o cliente/socket ao longo de toda a varredura ou hop.
+        - Conversões de `Duration` para milissegundos com precisão decimal devem obrigatoriamente usar `duration_to_ms(duration)`.
+        - Sondas TCP pontuais devem usar exclusivamente `network_tools::tcp_probe::probe_tcp`.
+        - Sondas UDP com payloads conhecidos devem usar `network_tools::udp_probes::probe_for`.
+      - **Tratamento e Propagação de Erros**:
+        - Utilize os tipos centrais `AppError` e `AppResult<T>` (`src/services/shared/errors.rs`). Jamais crie tipos ad-hoc de erro redundantes onde os existentes cobrem a semântica.
+    - **Frontend (Vue 3 / TypeScript)**:
+      - **Formatadores Centralizados (`frontend/src/utils/formatters.ts`)**:
+        - Toda exibição de dados — bytes (`formatBytes`, `formatBinaryBytes`, `formatDecimalBytes`), taxas de rede (`formatBps`, `formatLinkSpeed`), latências (`formatLatency`), datas e horários (`formatDate`, `formatDateTime`, `formatShortDateTime`, `formatClockTime`, `formatRelativeTime`, `formatTimeSpan`) — **DEVE** ser importada de `@/utils/formatters`.
+        - É expressamente proibido declarar funções locais `formatDate`, `formatBytes`, `formatLatency`, chamadas diretas ad-hoc a `toLocaleString()` ou `.toFixed()` em componentes `.vue`.
+      - **Stores Pinia & Serviços de API**:
+        - Requisições HTTP a um mesmo domínio ou recurso devem residir exclusivamente na sua respectiva store (`src/stores/`). Não faça chamadas diretas via `fetch` ou `axios` duplicadas em componentes.
+

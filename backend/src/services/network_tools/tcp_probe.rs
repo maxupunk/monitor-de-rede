@@ -12,6 +12,8 @@ use tokio::{
     time::timeout,
 };
 
+use super::icmp_probe::duration_to_ms;
+
 /// Estado observável de uma tentativa TCP, sem inferir além da evidência.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -67,7 +69,7 @@ pub async fn probe_tcp<A: ToSocketAddrs>(
     let (state, error) = classify_tcp_outcome(outcome);
     TcpProbeObservation {
         state,
-        latency_ms: millis(started.elapsed()),
+        latency_ms: duration_to_ms(started.elapsed()),
         error,
     }
 }
@@ -99,10 +101,6 @@ fn classify_tcp_outcome(
         Ok(Err(error)) => (TcpProbeState::Error, Some(error.to_string())),
         Err(error) => (TcpProbeState::Filtered, Some(error.to_string())),
     }
-}
-
-fn millis(duration: Duration) -> f64 {
-    (duration.as_secs_f64() * 1_000.0 * 1_000.0).round() / 1_000.0
 }
 
 #[cfg(test)]

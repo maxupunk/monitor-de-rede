@@ -151,6 +151,7 @@ import MaintenanceWindowDialog from '@/components/MaintenanceWindowDialog.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import { confirm } from '@/composables/useConfirm'
+import { formatDateTime } from '@/utils/formatters'
 
 const windowsStore = useMaintenanceWindowsStore()
 const sitesStore = useSitesStore()
@@ -197,10 +198,6 @@ function siteName(siteId: number): string {
 
 function deviceName(deviceId: number): string {
   return devicesStore.devices.find((d) => d.id === deviceId)?.name ?? `Dispositivo ${deviceId}`
-}
-
-function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString('pt-BR')
 }
 
 function isActive(item: MaintenanceWindow): boolean {

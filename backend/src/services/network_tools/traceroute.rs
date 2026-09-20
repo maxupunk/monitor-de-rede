@@ -9,8 +9,7 @@ use std::{
     time::Duration,
 };
 
-use socket2::Type;
-use surge_ping::{Client, Config, PingIdentifier, PingSequence, ICMP};
+use surge_ping::{PingIdentifier, PingSequence};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -18,7 +17,7 @@ use crate::{
     dtos::diagnostics::TracerouteHop,
     services::network_tools::{
         dns::wire::{answers, decode_message, encode_query},
-        icmp_probe::round_two,
+        icmp_probe::{create_icmp_client, duration_to_ms, round_two},
     },
 };
 
@@ -84,6 +83,14 @@ pub async fn execute_traceroute(
             break;
         }
 
+        let client = match create_icmp_client(is_ipv4, Some(u32::from(hop_num))) {
+            Ok(c) => c,
+            Err(err) => {
+                tracing::warn!(%err, hop = hop_num, "falha ao criar socket ICMP com TTL");
+                break;
+            }
+        };
+
         let mut rtts: Vec<Option<f64>> = Vec::with_capacity(usize::from(options.probes_per_hop));
         let mut resolved_ip: Option<IpAddr> = None;
         let mut reached_target = false;
@@ -93,27 +100,12 @@ pub async fn execute_traceroute(
                 break;
             }
 
-            let config = Config::builder()
-                .kind(if is_ipv4 { ICMP::V4 } else { ICMP::V6 })
-                .sock_type_hint(Type::DGRAM)
-                .ttl(u32::from(hop_num))
-                .build();
-
-            let client = match Client::new(&config) {
-                Ok(c) => c,
-                Err(err) => {
-                    tracing::warn!(%err, hop = hop_num, "falha ao criar socket ICMP com TTL");
-                    break;
-                }
-            };
-
             let mut pinger = client.pinger(target, PingIdentifier(rand::random())).await;
             pinger.timeout(probe_timeout);
 
             match pinger.ping(PingSequence(seq.into()), &payload).await {
                 Ok((packet, rtt)) => {
-                    let rtt_val = rtt.as_secs_f64() * 1_000.0;
-                    rtts.push(Some(round_two(rtt_val)));
+                    rtts.push(Some(duration_to_ms(rtt)));
 
                     let (src_ip, is_dest) = match &packet {
                         surge_ping::IcmpPacket::V4(v4) => {
