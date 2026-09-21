@@ -11,7 +11,7 @@
         <div>
           <div class="text-caption font-weight-bold">{{ meta.label }}</div>
           <div class="text-caption text-grey text-truncate max-w-300">
-            {{ formatArgsSummary(tool.arguments) }}
+            {{ formatToolArgs(tool.arguments) }}
           </div>
         </div>
       </div>
@@ -50,6 +50,10 @@
       </div>
     </div>
 
+    <div v-if="tool.chart" class="px-2 pb-2">
+      <AiToolChart :chart="tool.chart" />
+    </div>
+
     <v-expand-transition>
       <div v-if="expanded" class="pa-3 pt-0 border-t mt-1">
         <div class="text-caption font-weight-bold text-grey-darken-1 mb-1">Parâmetros:</div>
@@ -72,6 +76,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { AiToolCallState } from '@/stores/ai'
+import AiToolChart from './AiToolChart.vue'
+import { aiToolMeta, formatToolArgs } from './aiToolMeta'
 
 const props = defineProps<{
   tool: AiToolCallState
@@ -79,63 +85,13 @@ const props = defineProps<{
 
 const expanded = ref(false)
 
-interface ToolMeta {
-  label: string
-  icon: string
-  color: string
-}
-
-const meta = computed<ToolMeta>(() => {
-  switch (props.tool.name) {
-    case 'ping_host':
-      return { label: 'ICMP Ping', icon: 'mdi-pulse', color: 'primary' }
-    case 'traceroute':
-      return { label: 'Traceroute', icon: 'mdi-routes', color: 'info' }
-    case 'scan_ports':
-      return { label: 'Scan de Portas TCP', icon: 'mdi-lan-connect', color: 'warning' }
-    case 'dns_lookup':
-      return { label: 'Resolução DNS', icon: 'mdi-dns', color: 'teal' }
-    case 'run_playbook':
-      return {
-        label: 'Playbook de Diagnóstico',
-        icon: 'mdi-clipboard-play-outline',
-        color: 'purple',
-      }
-    case 'list_devices':
-      return { label: 'Consulta de Dispositivos', icon: 'mdi-devices', color: 'blue' }
-    case 'get_device_detail':
-      return { label: 'Detalhes do Dispositivo', icon: 'mdi-information-outline', color: 'indigo' }
-    case 'get_active_alerts':
-      return { label: 'Alertas Recentes', icon: 'mdi-bell-alert-outline', color: 'orange' }
-    case 'get_system_summary':
-      return { label: 'Resumo da Infraestrutura', icon: 'mdi-chart-box-outline', color: 'cyan' }
-    case 'search_system_docs':
-      return {
-        label: 'Base de Conhecimento',
-        icon: 'mdi-book-open-page-variant-outline',
-        color: 'green',
-      }
-    default:
-      return { label: props.tool.name, icon: 'mdi-cog-outline', color: 'grey' }
-  }
-})
+const meta = computed(() => aiToolMeta(props.tool.name))
 
 const cardColor = computed(() => {
   if (props.tool.status === 'running') return 'primary'
   if (props.tool.status === 'error') return 'error'
   return 'grey-lighten-1'
 })
-
-function formatArgsSummary(args: Record<string, unknown>): string {
-  if (args.target) return `Alvo: ${args.target}`
-  if (args.hostname) return `Host: ${args.hostname}`
-  if (args.identifier) return `Dispositivo: ${args.identifier}`
-  if (args.playbook_type) return `Playbook: ${args.playbook_type}`
-  if (args.query) return `Busca: "${args.query}"`
-  const keys = Object.keys(args)
-  if (keys.length > 0) return `${keys.join(', ')}`
-  return 'Sem parâmetros adicionais'
-}
 </script>
 
 <style scoped>

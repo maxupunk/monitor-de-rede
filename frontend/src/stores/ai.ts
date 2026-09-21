@@ -5,8 +5,12 @@ import type { OpenCodeModelItem } from '@/bindings/OpenCodeModelItem'
 import type { OpenCodeModelsResponse } from '@/bindings/OpenCodeModelsResponse'
 import type { OpenRouterModelItem } from '@/bindings/OpenRouterModelItem'
 import type { OpenRouterModelsResponse } from '@/bindings/OpenRouterModelsResponse'
+import type { AiChart } from '@/bindings/AiChart'
+import type { AiResponseStyle } from '@/bindings/AiResponseStyle'
 
 export type {
+  AiChart,
+  AiResponseStyle,
   OpenCodeModelItem,
   OpenCodeModelsResponse,
   OpenRouterModelItem,
@@ -25,6 +29,7 @@ export interface AiSettings {
   ollamaModel?: string | null
   allowActiveTools: boolean
   requireToolConfirmation: boolean
+  responseStyle: AiResponseStyle
   customSystemPrompt?: string | null
 }
 
@@ -72,6 +77,8 @@ export interface AiToolCallState {
   name: string
   arguments: Record<string, unknown>
   result?: Record<string, unknown> | null
+  /** Gráfico desenhado no chat; a IA recebe só o resumo em `result`. */
+  chart?: AiChart | null
   status: 'running' | 'done' | 'error'
 }
 
@@ -268,6 +275,7 @@ export const useAiStore = defineStore('ai', () => {
                 const targetTool = assistantMsg.toolCalls?.find((t) => t.id === event.id)
                 if (targetTool) {
                   targetTool.result = event.result
+                  targetTool.chart = event.chart ?? null
                   targetTool.status = event.result?.error ? 'error' : 'done'
                 }
               } else if (event.type === 'error') {

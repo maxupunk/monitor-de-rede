@@ -6,6 +6,7 @@ use sea_orm::{ConnectionTrait, DatabaseConnection};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use super::response_style::AiResponseStyle;
 use crate::{
     models::system_settings,
     services::shared::errors::{AppError, AppResult},
@@ -95,6 +96,8 @@ struct AiSettingsHelper {
     #[serde(default)]
     require_tool_confirmation: bool,
     #[serde(default)]
+    response_style: AiResponseStyle,
+    #[serde(default)]
     custom_system_prompt: Option<String>,
 }
 
@@ -127,6 +130,9 @@ pub struct AiSettings {
     /// Exige confirmação do usuário antes de rodar ferramentas ativas
     pub require_tool_confirmation: bool,
 
+    /// Quanto texto a IA devolve: direto (mínimo de tokens) ou normal.
+    pub response_style: AiResponseStyle,
+
     pub custom_system_prompt: Option<String>,
 }
 
@@ -148,6 +154,7 @@ impl<'de> Deserialize<'de> for AiSettings {
             ollama_model: h.ollama_model,
             allow_active_tools: h.allow_active_tools,
             require_tool_confirmation: h.require_tool_confirmation,
+            response_style: h.response_style,
             custom_system_prompt: h.custom_system_prompt,
         })
     }
@@ -195,6 +202,7 @@ impl Default for AiSettings {
             ollama_model: default_ollama_model(),
             allow_active_tools: true,
             require_tool_confirmation: false,
+            response_style: AiResponseStyle::default(),
             custom_system_prompt: None,
         }
     }
@@ -421,5 +429,14 @@ mod tests {
         assert_eq!(settings.openrouter_model, None);
         assert_eq!(settings.opencode_model, None);
         assert_eq!(settings.ollama_model, None);
+    }
+
+    #[test]
+    fn configuracao_antiga_sem_estilo_assume_o_modo_direto() {
+        let settings: AiSettings = serde_json::from_str(r#"{ "enabled": true }"#).unwrap();
+        assert_eq!(settings.response_style, AiResponseStyle::Concise);
+
+        let normal: AiSettings = serde_json::from_str(r#"{ "responseStyle": "normal" }"#).unwrap();
+        assert_eq!(normal.response_style, AiResponseStyle::Normal);
     }
 }

@@ -155,6 +155,15 @@
         >
           <div class="d-flex align-center ga-1">
             <v-chip
+              size="x-small"
+              color="primary"
+              variant="tonal"
+              :prepend-icon="responseStyle.icon"
+              :title="responseStyle.hint"
+            >
+              {{ responseStyle.title }}
+            </v-chip>
+            <v-chip
               v-if="aiStore.settings?.allowActiveTools"
               size="x-small"
               color="success"
@@ -205,6 +214,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useAiStore } from '@/stores/ai'
 import AiChatMessage from './AiChatMessage.vue'
+import { responseStyleOption } from './aiResponseStyle'
 
 const aiStore = useAiStore()
 const inputContent = ref('')
@@ -225,11 +235,13 @@ const activeModelLabel = computed(() => {
   return 'Padrão'
 })
 
+const responseStyle = computed(() => responseStyleOption(aiStore.settings?.responseStyle))
+
 const suggestions = [
   'Testar conectividade com a Internet',
   'Resumir os alertas críticos recentes',
-  'Como configuro um monitor SNMP no NetMonitor?',
-  'Listar dispositivos offline na rede',
+  'Mostrar o gráfico de latência da última hora',
+  'Quais interfaces estão caídas ou saturadas?',
 ]
 
 onMounted(async () => {

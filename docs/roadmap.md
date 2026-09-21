@@ -18,6 +18,7 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
 ## 2. Roadmaps temáticos já concluídos
 
 - [x] 🟢 Concluído — Identificação de sistema sem assumir RouterOS na ausência de evidência; categoria explícita para firmware embarcado, comparação de OID por componentes, fabricante/modelo pela ENTITY-MIB e reaproveitamento da identidade SNMP da descoberta. O syslog bloqueia aplicação enquanto o sistema não tiver uma receita compatível. Regressão do controlador MPPT coberta por teste.
+- [x] 🟢 Concluído — Chat da IA: estilo de resposta configurável (`direto`, padrão, com diretiva no prompt e teto de `max_tokens`; ou `normal`); ferramentas de leitura do banco (interfaces com status/tráfego/utilização, monitores, histórico de uptime e falhas, métricas de sistema, alertas abertos e históricos); gráficos de latência, tráfego de interface e métricas desenhados no chat com o `BaseMetricChart` — a IA recebe só o resumo estatístico, os pontos vão para a tela. Ferramentas viraram um registro de `AiToolHandler` (`services/ai/harness/tools/`) e ferramenta ativa desligada não executa nem se o modelo inventar a chamada.
 
 | Roadmap | Tema | Estado | Link |
 | :--- | :--- | :--- | :--- |

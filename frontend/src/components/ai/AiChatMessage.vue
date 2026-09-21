@@ -14,6 +14,7 @@
       :class="[
         'message-bubble-wrapper',
         message.role === 'user' ? 'user-wrapper' : 'assistant-wrapper',
+        { 'has-chart': hasChart },
       ]"
     >
       <!-- Tool Cards Executados -->
@@ -85,6 +86,9 @@ const props = defineProps<{
 
 const copied = ref(false)
 
+/** Gráfico precisa da largura toda, mesmo quando o texto da resposta é curto. */
+const hasChart = computed(() => props.message.toolCalls?.some((tool) => tool.chart) ?? false)
+
 function escapeHtml(text: string): string {
   return text
     .replace(/&/g, '&amp;')
@@ -150,6 +154,9 @@ async function copyContent() {
 <style scoped>
 .message-bubble-wrapper {
   max-width: 85%;
+}
+.message-bubble-wrapper.has-chart {
+  width: 85%;
 }
 .user-wrapper {
   align-items: flex-end;

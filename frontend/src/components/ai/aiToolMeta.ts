@@ -1,0 +1,92 @@
+/** Rótulo, ícone e cor de cada ferramenta da IA exibida no chat. */
+export interface AiToolMeta {
+  label: string
+  icon: string
+  color: string
+}
+
+const TOOL_META: Record<string, AiToolMeta> = {
+  get_system_summary: {
+    label: 'Resumo da Infraestrutura',
+    icon: 'mdi-chart-box-outline',
+    color: 'cyan',
+  },
+  list_devices: { label: 'Consulta de Dispositivos', icon: 'mdi-devices', color: 'blue' },
+  get_device_detail: {
+    label: 'Detalhes do Dispositivo',
+    icon: 'mdi-information-outline',
+    color: 'indigo',
+  },
+  get_device_interfaces: {
+    label: 'Status das Interfaces',
+    icon: 'mdi-ethernet',
+    color: 'blue',
+  },
+  list_monitors: { label: 'Consulta de Monitores', icon: 'mdi-monitor-eye', color: 'indigo' },
+  get_alerts: { label: 'Alertas', icon: 'mdi-bell-alert-outline', color: 'orange' },
+  get_monitor_history: {
+    label: 'Histórico do Monitor',
+    icon: 'mdi-history',
+    color: 'teal',
+  },
+  get_device_metrics: {
+    label: 'Métricas do Dispositivo',
+    icon: 'mdi-gauge',
+    color: 'teal',
+  },
+  chart_monitor_latency: {
+    label: 'Gráfico de Latência',
+    icon: 'mdi-chart-line',
+    color: 'primary',
+  },
+  chart_interface_traffic: {
+    label: 'Gráfico de Tráfego',
+    icon: 'mdi-chart-areaspline',
+    color: 'success',
+  },
+  chart_device_metric: {
+    label: 'Gráfico de Métrica',
+    icon: 'mdi-chart-bell-curve-cumulative',
+    color: 'deep-purple',
+  },
+  search_system_docs: {
+    label: 'Base de Conhecimento',
+    icon: 'mdi-book-open-page-variant-outline',
+    color: 'green',
+  },
+  ping_host: { label: 'ICMP Ping', icon: 'mdi-pulse', color: 'primary' },
+  traceroute: { label: 'Traceroute', icon: 'mdi-routes', color: 'info' },
+  scan_ports: { label: 'Scan de Portas TCP', icon: 'mdi-lan-connect', color: 'warning' },
+  dns_lookup: { label: 'Resolução DNS', icon: 'mdi-dns', color: 'teal' },
+  run_playbook: {
+    label: 'Playbook de Diagnóstico',
+    icon: 'mdi-clipboard-play-outline',
+    color: 'purple',
+  },
+}
+
+export function aiToolMeta(name: string): AiToolMeta {
+  return TOOL_META[name] ?? { label: name, icon: 'mdi-cog-outline', color: 'grey' }
+}
+
+/** Resumo de uma linha dos argumentos, na ordem do que mais identifica a chamada. */
+export function formatToolArgs(args: Record<string, unknown>): string {
+  const labeled: Array<[string, string]> = [
+    ['target', 'Alvo'],
+    ['hostname', 'Host'],
+    ['identifier', 'Dispositivo'],
+    ['device', 'Dispositivo'],
+    ['interface', 'Interface'],
+    ['monitor_id', 'Monitor'],
+    ['metric', 'Métrica'],
+    ['playbook_type', 'Playbook'],
+    ['query', 'Busca'],
+    ['status', 'Status'],
+  ]
+  const parts = labeled
+    .filter(([key]) => args[key] !== undefined && args[key] !== null && args[key] !== '')
+    .map(([key, label]) => `${label}: ${String(args[key])}`)
+  if (parts.length > 0) return parts.slice(0, 2).join(' · ')
+  const keys = Object.keys(args)
+  return keys.length > 0 ? keys.join(', ') : 'Sem parâmetros adicionais'
+}

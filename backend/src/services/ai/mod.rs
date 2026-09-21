@@ -4,4 +4,5 @@ pub mod knowledge;
 pub mod ollama;
 pub mod opencode;
 pub mod openrouter;
+pub mod response_style;
 pub mod settings;

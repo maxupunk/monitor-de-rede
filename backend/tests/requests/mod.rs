@@ -1,3 +1,4 @@
+mod ai_tools;
 mod alert_correlation;
 mod alert_engine_robustness;
 mod alert_flapping;

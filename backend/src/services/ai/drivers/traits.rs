@@ -121,6 +121,13 @@ pub struct AiChatChunk {
 
 pub type AiChunkStream = Pin<Box<dyn Stream<Item = AppResult<AiChatChunk>> + Send>>;
 
+/// Parâmetros de geração independentes do provedor.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AiChatOptions {
+    /// Teto de tokens de saída; `None` deixa o padrão do provedor.
+    pub max_tokens: Option<u32>,
+}
+
 #[async_trait]
 pub trait AiDriver: Send + Sync {
     fn id(&self) -> &'static str;
@@ -131,6 +138,7 @@ pub trait AiDriver: Send + Sync {
         &self,
         messages: &[AiMessage],
         tools: &[AiTool],
+        options: AiChatOptions,
     ) -> AppResult<AiChunkStream>;
 
     /// Testa a conectividade com o provedor, medindo latência e validando a autenticação.

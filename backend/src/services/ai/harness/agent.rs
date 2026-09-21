@@ -13,12 +13,12 @@ use serde_json::json;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
-use super::tools::{execute_tool, get_available_tools};
+use super::tools::ToolRegistry;
 use crate::{
-    dtos::ai::ChatStreamRequest,
+    dtos::ai::{AiChart, ChatStreamRequest},
     models::devices,
     services::ai::{
-        drivers::traits::{AiDriver, AiMessage},
+        drivers::traits::{AiChatOptions, AiDriver, AiMessage},
         settings::AiSettings,
     },
 };
@@ -38,6 +38,9 @@ pub enum HarnessEvent {
         id: String,
         name: String,
         result: serde_json::Value,
+        /// Gráfico para a tela; a IA recebe só `result`.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        chart: Option<AiChart>,
     },
     Done,
     Error {
@@ -56,14 +59,18 @@ async fn build_system_prompt(
     let now = Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
 
     let mut prompt = format!(
-        "Você é o NetMonitor AI, um Engenheiro de Redes Sênior e Especialista em Infraestrutura integrado ao NetMonitor.
-Data/Hora atual do sistema: {now}.
+        "Você é o NetMonitor AI, engenheiro de redes sênior integrado ao NetMonitor. Agora: {now}.
 
-Suas atribuições fundamentais:
-1. DIAGNÓSTICO DE REDE: Quando o usuário relatar falhas, lentidão, pacotes perdidos ou instabilidade, utilize ativamente as ferramentas de diagnóstico (ping_host, traceroute, scan_ports, run_playbook, get_device_detail, get_active_alerts) para investigar e fundamentar seu diagnóstico em evidências concretas antes de emitir conclusões.
-2. DÚVIDAS DO SISTEMA: Quando o usuário tiver dúvidas operacionais sobre como configurar ou utilizar o NetMonitor (monitores, alertas, regras de flapping, WireGuard VPN, probes, descoberta de redes, janelas de manutenção, etc.), forneça instruções claras e objetivas. Utilize a ferramenta 'search_system_docs' sempre que necessário para consultar a documentação interna.
-3. CONCISÃO E PRECISÃO: Seja direto, técnico e profissional. Apresente métricas numéricas formatadas (latência em ms, taxas de perda em %, portas abertas) e conclua com recomendações acionáveis de correção.
-"
+COMO TRABALHAR:
+1. Fundamente o diagnóstico em dados, nunca em suposição. Comece pelo que o sistema já registrou: get_system_summary, get_alerts, get_device_detail, get_device_interfaces, get_monitor_history e get_device_metrics.
+2. Testes ativos (ping_host, traceroute, scan_ports, dns_lookup, run_playbook), quando disponíveis, servem para confirmar o estado de agora.
+3. Gráficos: quando o usuário pedir um gráfico ou a evolução no tempo ajudar, use chart_monitor_latency, chart_interface_traffic ou chart_device_metric. O gráfico aparece para o usuário automaticamente — não o reproduza em texto nem em tabela.
+4. Dúvidas sobre configurar ou usar o NetMonitor: search_system_docs.
+5. Se um nome for ambíguo ou não existir, liste as opções (list_devices, list_monitors) em vez de adivinhar.
+
+{style}
+",
+        style = settings.response_style.directive()
     );
 
     if let Some(custom) = &settings.custom_system_prompt {
@@ -81,13 +88,15 @@ Suas atribuições fundamentais:
                 .map(|t| t.to_rfc3339())
                 .unwrap_or_else(|| "N/A".into());
             prompt.push_str(&format!(
-                "\nCONTEXTO DO DISPOSITIVO ATUALMENTE EM VISUALIZAÇÃO:
+                "\nCONTEXTO DO DISPOSITIVO EM VISUALIZAÇÃO (use-o quando o usuário não citar outro):
+- Id: {}
 - Nome: {}
 - IP: {}
 - Fabricante: {}
 - Status atual: {}
 - Última atividade: {}
 ",
+                dev.id,
                 dev.name,
                 dev.ip_address.unwrap_or_else(|| "N/A".into()),
                 dev.vendor.unwrap_or_else(|| "Desconhecido".into()),
@@ -110,7 +119,11 @@ pub async fn run_agent_loop(
     let (sender, receiver) = mpsc::channel(64);
 
     tokio::spawn(async move {
-        let tools = get_available_tools(settings.allow_active_tools);
+        let registry = ToolRegistry::new(settings.allow_active_tools);
+        let tools = registry.definitions();
+        let options = AiChatOptions {
+            max_tokens: settings.response_style.max_output_tokens(),
+        };
         let system_prompt = build_system_prompt(&ctx, &settings, req.device_id).await;
 
         let mut conversation: Vec<AiMessage> = Vec::new();
@@ -130,10 +143,10 @@ pub async fn run_agent_loop(
             });
         }
 
-        const MAX_ITERATIONS: usize = 5;
+        const MAX_ITERATIONS: usize = 6;
 
         for iteration in 0..MAX_ITERATIONS {
-            let mut stream = match driver.chat_stream(&conversation, &tools).await {
+            let mut stream = match driver.chat_stream(&conversation, &tools, options).await {
                 Ok(s) => s,
                 Err(err) => {
                     let _ = sender
@@ -213,16 +226,18 @@ pub async fn run_agent_loop(
                     return;
                 }
 
-                let tool_result = match execute_tool(&ctx, &tool.name, &tool.arguments).await {
-                    Ok(res) => res,
-                    Err(err) => json!({ "error": err.to_string() }),
-                };
+                let (tool_result, chart) =
+                    match registry.execute(&ctx, &tool.name, &tool.arguments).await {
+                        Ok(output) => (output.data, output.chart),
+                        Err(err) => (json!({ "error": err.to_string() }), None),
+                    };
 
                 if sender
                     .send(HarnessEvent::ToolResult {
                         id: tool.id.clone(),
                         name: tool.name.clone(),
                         result: tool_result.clone(),
+                        chart,
                     })
                     .await
                     .is_err()
@@ -249,4 +264,43 @@ pub async fn run_agent_loop(
     });
 
     Box::pin(ReceiverStream::new(receiver))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dtos::ai::{AiChartSeries, AiChartUnit};
+
+    #[test]
+    fn resultado_de_ferramenta_so_leva_grafico_quando_existe() {
+        let sem = serde_json::to_value(HarnessEvent::ToolResult {
+            id: "c1".into(),
+            name: "get_alerts".into(),
+            result: json!({ "total": 0 }),
+            chart: None,
+        })
+        .unwrap();
+        assert_eq!(sem["type"], "toolResult");
+        assert!(sem.get("chart").is_none());
+
+        let com = serde_json::to_value(HarnessEvent::ToolResult {
+            id: "c2".into(),
+            name: "chart_device_metric".into(),
+            result: json!({ "chart_shown": true }),
+            chart: Some(AiChart {
+                title: "CPU — Borda".into(),
+                subtitle: None,
+                unit: AiChartUnit::Percentage,
+                series: vec![AiChartSeries {
+                    id: "cpu_usage".into(),
+                    label: "CPU".into(),
+                    points: Vec::new(),
+                }],
+                avg_value: Some(12.5),
+            }),
+        })
+        .unwrap();
+        assert_eq!(com["chart"]["unit"], "percentage");
+        assert_eq!(com["chart"]["avgValue"], 12.5);
+    }
 }

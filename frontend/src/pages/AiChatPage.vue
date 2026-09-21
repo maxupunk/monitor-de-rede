@@ -125,6 +125,15 @@
             </div>
             <div class="d-flex align-center ga-2">
               <v-chip
+                size="x-small"
+                color="primary"
+                variant="tonal"
+                :prepend-icon="responseStyle.icon"
+                :title="responseStyle.hint"
+              >
+                {{ responseStyle.title }}
+              </v-chip>
+              <v-chip
                 v-if="aiStore.settings?.allowActiveTools"
                 size="x-small"
                 color="success"
@@ -313,6 +322,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useAiStore } from '@/stores/ai'
 import PageHeader from '@/components/PageHeader.vue'
 import AiChatMessage from '@/components/ai/AiChatMessage.vue'
+import { responseStyleOption } from '@/components/ai/aiResponseStyle'
 
 const aiStore = useAiStore()
 const inputContent = ref('')
@@ -341,11 +351,14 @@ const activeModelLabel = computed(() => {
   return 'Padrão'
 })
 
+const responseStyle = computed(() => responseStyleOption(aiStore.settings?.responseStyle))
+
 const quickPrompts = [
   'Testar conectividade e latência com a Internet',
   'Quais dispositivos estão offline ou com instabilidade?',
   'Resumir os alertas críticos das últimas horas',
-  'Como configuro o monitoramento de tráfego via SNMP?',
+  'Mostrar o gráfico de latência das últimas 24h do gateway',
+  'Quais interfaces estão caídas ou saturadas?',
   'Como funciona o probe WireGuard e quando utilizá-lo?',
 ]
 
@@ -369,15 +382,15 @@ const suggestionCategories = [
     color: 'warning',
   },
   {
-    title: 'Varredura de Portas',
-    prompt: 'Verificar portas essenciais (DNS, HTTP, SSH) no gateway',
-    icon: 'mdi-target',
+    title: 'Gráfico de Latência',
+    prompt: 'Mostrar o gráfico de latência das últimas 24h do gateway',
+    icon: 'mdi-chart-line',
     color: 'info',
   },
   {
-    title: 'Configuração SNMP',
-    prompt: 'Como configuro o perfil SNMP v2c/v3 nos dispositivos?',
-    icon: 'mdi-chart-line',
+    title: 'Interfaces com Problema',
+    prompt: 'Quais interfaces estão caídas ou saturadas? Mostre o tráfego da mais carregada',
+    icon: 'mdi-ethernet',
     color: 'success',
   },
   {

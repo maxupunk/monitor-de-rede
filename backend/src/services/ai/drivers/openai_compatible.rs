@@ -8,7 +8,9 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::codec::{BytesCodec, FramedRead};
 
-use super::traits::{AiChatChunk, AiChunkStream, AiDriver, AiMessage, AiTool, AiToolCall};
+use super::traits::{
+    AiChatChunk, AiChatOptions, AiChunkStream, AiDriver, AiMessage, AiTool, AiToolCall,
+};
 use crate::{
     dtos::ai::TestConnectionResponse,
     services::shared::errors::{AppError, AppResult},
@@ -148,6 +150,7 @@ impl AiDriver for OpenAiCompatibleDriver {
         &self,
         messages: &[AiMessage],
         tools: &[AiTool],
+        options: AiChatOptions,
     ) -> AppResult<AiChunkStream> {
         let url = self.endpoint_url();
         let headers = self.build_headers()?;
@@ -160,6 +163,9 @@ impl AiDriver for OpenAiCompatibleDriver {
 
         if !tools.is_empty() {
             body["tools"] = json!(tools);
+        }
+        if let Some(max_tokens) = options.max_tokens {
+            body["max_tokens"] = json!(max_tokens);
         }
 
         let mut res = self

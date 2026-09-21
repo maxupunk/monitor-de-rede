@@ -700,6 +700,27 @@
           </v-col>
         </template>
 
+        <!-- Estilo de Resposta -->
+        <v-col cols="12">
+          <div class="text-subtitle-2 font-weight-bold mb-2">Estilo de resposta</div>
+          <v-btn-toggle
+            v-model="form.responseStyle"
+            mandatory
+            divided
+            color="primary"
+            variant="outlined"
+            density="comfortable"
+          >
+            <v-btn v-for="option in responseStyleOptions" :key="option.value" :value="option.value">
+              <v-icon start size="18">{{ option.icon }}</v-icon>
+              {{ option.title }}
+            </v-btn>
+          </v-btn-toggle>
+          <div class="text-caption text-medium-emphasis mt-2">
+            {{ selectedResponseStyle.hint }}
+          </div>
+        </v-col>
+
         <!-- Permissões de Ferramentas -->
         <v-col cols="12">
           <v-checkbox
@@ -769,6 +790,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useAiStore, type AiSettings } from '@/stores/ai'
+import { RESPONSE_STYLE_OPTIONS, responseStyleOption } from '@/components/ai/aiResponseStyle'
 import { formatDecimalBytes } from '@/utils/formatters'
 import AiModelSearchDialog from './AiModelSearchDialog.vue'
 
@@ -786,6 +808,9 @@ const driverOptions = [
   { title: 'OpenRouter (Multi-Model Gateway)', value: 'openrouter' },
   { title: 'OpenCode Go / Zen', value: 'opencode' },
 ]
+
+const responseStyleOptions = RESPONSE_STYLE_OPTIONS
+const selectedResponseStyle = computed(() => responseStyleOption(form.responseStyle))
 
 const localSaveError = ref<string | null>(null)
 const localSaveSuccess = ref<string | null>(null)
@@ -807,6 +832,7 @@ const form = reactive<AiSettings>({
   ollamaModel: 'llama3.2',
   allowActiveTools: true,
   requireToolConfirmation: false,
+  responseStyle: 'concise',
   customSystemPrompt: '',
 })
 
