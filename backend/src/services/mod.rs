@@ -3,6 +3,7 @@
 //! A regra da casa: o controller extrai, valida, delega e serializa. Toda regra
 //! de negócio vive aqui e é testável sem HTTP.
 
+pub mod ai;
 pub mod alerts;
 pub mod audit;
 pub mod auth;

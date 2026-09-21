@@ -5,7 +5,9 @@
  */
 
 export interface ApiErrorResponse {
-  message: string
+  message?: string
+  error?: string
+  description?: string
   errors?: Array<{ field?: string; message: string }>
 }
 
@@ -122,6 +124,12 @@ class ApiService {
         errorData = (await response.json()) as ApiErrorResponse
         if (errorData.message) {
           errorMessage = errorData.message
+        } else if (errorData.description) {
+          errorMessage = errorData.error
+            ? `${errorData.error}: ${errorData.description}`
+            : errorData.description
+        } else if (errorData.error) {
+          errorMessage = errorData.error
         } else if (Array.isArray(errorData.errors) && errorData.errors.length > 0) {
           errorMessage = errorData.errors.map((e) => e.message).join(', ')
         }
@@ -227,9 +235,15 @@ class ApiService {
    * Aceita um AbortSignal externo para permitir cancelamento pelo chamador; se nenhum
    * for passado, o timeout padrão ainda é aplicado.
    */
-  async postStream(path: string, body: unknown, signal?: AbortSignal): Promise<Response> {
+  async postStream(
+    path: string,
+    body: unknown,
+    signal?: AbortSignal,
+    options: ApiRequestOptions = {}
+  ): Promise<Response> {
     const controller = new AbortController()
-    const timeoutId = window.setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS)
+    const timeoutMs = options.timeoutMs ?? (signal ? undefined : DEFAULT_TIMEOUT_MS)
+    const timeoutId = timeoutMs ? window.setTimeout(() => controller.abort(), timeoutMs) : null
 
     if (signal) {
       signal.addEventListener('abort', () => controller.abort(), { once: true })
@@ -252,7 +266,9 @@ class ApiService {
       }
       throw err
     } finally {
-      window.clearTimeout(timeoutId)
+      if (timeoutId) {
+        window.clearTimeout(timeoutId)
+      }
     }
   }
 }

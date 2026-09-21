@@ -86,6 +86,23 @@
         {{ eventsStore.isConnected ? 'Tempo Real Ativo' : 'Conectando SSE...' }}
       </v-chip>
 
+      <!-- Botão Assistente IA -->
+      <v-tooltip location="bottom" text="Assistente IA (Diagnóstico & Suporte)">
+        <template #activator="{ props: tooltipProps }">
+          <v-btn
+            v-bind="tooltipProps"
+            icon
+            size="small"
+            variant="text"
+            class="mr-2"
+            color="primary"
+            @click="aiStore.toggleDrawer()"
+          >
+            <v-icon>mdi-robot-outline</v-icon>
+          </v-btn>
+        </template>
+      </v-tooltip>
+
       <!-- Botão de Notificações PWA / Web Push -->
       <v-tooltip
         location="bottom"
@@ -191,6 +208,7 @@
     <TracerouteDialog v-model="tracerouteDialog" />
     <SpeedTestDialog v-model="speedTestDialog" />
     <DiagnosticPlaybookDialog v-model="playbookDialog" />
+    <AiChatDrawer />
 
     <!-- Diálogo de Instruções de Instalação no iOS -->
     <v-dialog v-model="showIosDialog" :fullscreen="$vuetify.display.xs" max-width="420">
@@ -241,6 +259,8 @@ import InitialSetupDialog from '@/components/InitialSetupDialog.vue'
 import TracerouteDialog from '@/components/TracerouteDialog.vue'
 import SpeedTestDialog from '@/components/SpeedTestDialog.vue'
 import DiagnosticPlaybookDialog from '@/components/DiagnosticPlaybookDialog.vue'
+import AiChatDrawer from '@/components/ai/AiChatDrawer.vue'
+import { useAiStore } from '@/stores/ai'
 
 interface NavSubItem {
   title: string
@@ -263,6 +283,7 @@ const serverAddressesDialog = ref(false)
 const tracerouteDialog = ref(false)
 const speedTestDialog = ref(false)
 const playbookDialog = ref(false)
+const aiStore = useAiStore()
 const eventsStore = useEventsStore()
 const authStore = useAuthStore()
 const onboardingStore = useOnboardingStore()
@@ -327,6 +348,11 @@ const navItems = computed<NavItem[]>(() => [
     title: 'Diagnóstico',
     icon: 'mdi-stethoscope',
     children: [
+      {
+        title: 'Assistente IA',
+        icon: 'mdi-robot-outline',
+        to: '/ai-chat',
+      },
       {
         title: 'Playbooks',
         icon: 'mdi-clipboard-play-outline',

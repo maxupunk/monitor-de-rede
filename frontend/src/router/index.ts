@@ -94,6 +94,7 @@ const routes = [
         name: 'vpn-devices',
         component: () => import('../pages/vpn/VpnDevicesPage.vue'),
       },
+      { path: 'ai-chat', name: 'ai-chat', component: () => import('../pages/AiChatPage.vue') },
       { path: 'settings', name: 'settings', component: () => import('../pages/SettingsPage.vue') },
       {
         path: 'users',

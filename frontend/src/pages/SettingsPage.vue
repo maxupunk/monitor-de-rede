@@ -28,6 +28,10 @@
       </v-col>
 
       <v-col cols="12">
+        <AiSettingsCard @saved="notify" />
+      </v-col>
+
+      <v-col cols="12">
         <OnboardingCard />
       </v-col>
 
@@ -91,6 +95,7 @@ import NotificationsCard from '@/components/settings/NotificationsCard.vue'
 import OnboardingCard from '@/components/settings/OnboardingCard.vue'
 import BackupCard from '@/components/settings/BackupCard.vue'
 import DatabaseInfoCard from '@/components/settings/DatabaseInfoCard.vue'
+import AiSettingsCard from '@/components/settings/AiSettingsCard.vue'
 import PageHeader from '@/components/PageHeader.vue'
 
 const addressesStore = useServerAddressesStore()
