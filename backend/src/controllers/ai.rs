@@ -16,8 +16,8 @@ use serde::Deserialize;
 
 use crate::{
     dtos::ai::{
-        ChatStreamRequest, ExecuteToolRequest, ExecuteToolResponse, OllamaPullRequest,
-        TestConnectionInput, TestConnectionResponse,
+        AiMentionQuery, ChatStreamRequest, ExecuteToolRequest, ExecuteToolResponse,
+        OllamaPullRequest, TestConnectionInput, TestConnectionResponse,
     },
     services::{
         ai::{
@@ -26,7 +26,7 @@ use crate::{
                 agent::{run_agent_loop, AgentRequest},
                 confirmation,
             },
-            ollama, opencode, openrouter,
+            mentions, ollama, opencode, openrouter,
             proactive::{digest, runner::ProviderDrivers, schedule::period_hours},
             settings::{self, AiSettings},
         },
@@ -208,6 +208,15 @@ async fn latest_digest(State(ctx): State<AppContext>) -> AppResult<Response> {
     Ok(format::json(digest::latest(&ctx.db).await?)?)
 }
 
+/// `GET /api/ai/mentions?q=` — sugestões para o `@` do chat.
+async fn search_mentions(
+    State(ctx): State<AppContext>,
+    Query(query): Query<AiMentionQuery>,
+) -> AppResult<Response> {
+    let term = query.q.unwrap_or_default();
+    Ok(format::json(mentions::search(&ctx.db, &term).await?)?)
+}
+
 /// `POST /api/ai/digest/run` — gera o resumo agora, cobrindo o período da
 /// frequência configurada (24 h quando o envio automático está desligado).
 /// Não envia notificação: quem pediu está olhando a tela.
@@ -333,6 +342,7 @@ pub fn routes() -> Routes {
         .add("/chat/stream", post(chat_stream))
         .add("/tools/execute", post(execute_tool))
         .add("/digest/latest", get(latest_digest))
+        .add("/mentions", get(search_mentions))
         .add("/digest/run", post(run_digest))
         .add("/opencode/models", get(list_opencode_models))
         .add("/openrouter/models", get(list_openrouter_models))

@@ -34,12 +34,14 @@ const LEITURA: ToolPolicy = ToolPolicy {
     allow_active: false,
     allow_actions: false,
     confirm_active: false,
+    interactive: false,
 };
 
 const COM_ACOES: ToolPolicy = ToolPolicy {
     allow_active: false,
     allow_actions: true,
     confirm_active: false,
+    interactive: false,
 };
 
 async fn aparelho(ctx: &AppContext) -> devices::Model {

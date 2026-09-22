@@ -8,7 +8,7 @@
 //!
 //! - [`matcher`]: o que casa (e o trecho da mensagem que importa).
 //! - [`engine`]: as formas de saída, puras.
-//! - [`sources`]: de onde ler (logs, alertas, falhas de checagem).
+//! - [`sources`]: de onde ler (logs, alertas, falhas de checagem, Docker).
 
 mod engine;
 mod matcher;
@@ -75,7 +75,7 @@ impl AiToolHandler for Grep {
     }
 
     fn description(&self) -> &'static str {
-        "Procura texto nos dados sem trazê-los inteiros, como o grep. Fontes: 'logs' (syslog dos equipamentos e da aplicação), 'alerts' (mensagens de alertas) e 'checks' (mensagens de checagens que falharam). \
+        "Procura texto nos dados sem trazê-los inteiros, como o grep. Fontes: 'logs' (syslog dos equipamentos e da aplicação), 'alerts' (mensagens de alertas), 'checks' (mensagens de checagens que falharam) e 'docker' (saída de um container; exige container). \
 Escolha quanto receber: 'count' (total, por origem e por hora), 'sources' (quais dispositivos/monitores), 'patterns' (mensagens distintas com contagem), 'lines' (as ocorrências mais recentes) ou 'auto' (linhas se couberem, senão resumo). \
 Prefira count/sources para medir antes de pedir linhas."
     }
@@ -90,6 +90,7 @@ Prefira count/sources para medir antes de pedir linhas."
                 "source": { "type": "string", "enum": SOURCE_NAMES, "description": "Padrão: logs" },
                 "output": { "type": "string", "enum": ["auto", "count", "sources", "patterns", "lines"] },
                 "device": { "type": "string", "description": "Nome, IP ou id do dispositivo" },
+                "container": { "type": "string", "description": "Só docker: nome ou id do container" },
                 "severity": { "type": "string", "description": "Só logs: severidade máxima (error, warning, notice, info ou 0-7)" },
                 "hours": { "type": "integer", "description": "Janela em horas (1 a 168, padrão 24)" },
                 "max_lines": { "type": "integer", "description": "Linhas em 'lines'/'auto' (1 a 50, padrão 15)" },
@@ -144,6 +145,7 @@ Prefira count/sources para medir antes de pedir linhas."
             severity,
             // Só texto literal ajuda o banco: regex é casada em memória.
             needle: pattern.filter(|_| !regex),
+            container: args.text("container"),
         };
 
         let scan = match source.scan(ctx, &filter).await? {

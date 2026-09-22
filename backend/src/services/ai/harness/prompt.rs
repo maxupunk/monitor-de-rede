@@ -1,21 +1,24 @@
-//! System prompt da sessão: papel, método de trabalho, formato da resposta e
-//! o contexto da tela de onde o chat foi aberto.
+//! System prompt da sessão: papel, método de trabalho, formato da resposta,
+//! o que o usuário marcou com `@` e o contexto da tela de onde o chat foi aberto.
 
 use chrono::Utc;
 use sea_orm::{ConnectionTrait, EntityTrait};
 
 use super::tools::ToolPolicy;
 use crate::{
+    dtos::ai::{AiMention, AiMentionKind},
     models::{alert_events, devices, monitors},
-    services::ai::settings::AiSettings,
+    services::ai::{mentions, settings::AiSettings},
 };
 
-/// Onde o usuário estava quando abriu o chat.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// Onde o usuário estava quando abriu o chat e o que marcou na pergunta.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ChatContext {
     pub device_id: Option<i64>,
     pub monitor_id: Option<i64>,
     pub alert_id: Option<i64>,
+    /// Marcados com `@` na última pergunta — o alvo explícito dela.
+    pub mentions: Vec<AiMention>,
 }
 
 const METHOD: &str = "COMO TRABALHAR:
@@ -31,11 +34,15 @@ Use regex para alternativas ('link (down|flap)') e exclude para tirar ruído.
 5. Gráficos: quando o usuário pedir ou a evolução no tempo ajudar, use chart_monitor_latency, chart_interface_traffic, \
 chart_device_metric ou get_hourly_pattern. O gráfico aparece para o usuário automaticamente — não o reproduza em texto nem em tabela.
 6. Dúvidas sobre configurar ou usar o NetMonitor: search_system_docs.
-7. Se um nome for ambíguo ou não existir, liste as opções (list_devices, list_monitors) em vez de adivinhar.";
+7. Recursos marcados com @ são o alvo da pergunta: use-os direto. Se não estiver claro de qual dispositivo ou recurso vem a \
+informação — a conversa era sobre um equipamento e agora a pergunta é de outro assunto (ex: era a borda, agora é a bateria ou o MPPT), \
+ou o nome é ambíguo —, não assuma o assunto anterior nem o contexto da tela: chame ask_user com os candidatos \
+(list_devices, list_monitors) como opções, antes de consultar qualquer outra coisa.
+8. Containers Docker do servidor: get_docker_containers; logs de um container: grep source='docker'.";
 
-const ACTIVE_TOOLS: &str = "8. Testes ativos (ping_host, traceroute, scan_ports, dns_lookup, run_playbook) confirmam o estado de agora.";
+const ACTIVE_TOOLS: &str = "9. Testes ativos (ping_host, traceroute, scan_ports, dns_lookup, run_playbook) confirmam o estado de agora.";
 
-const ACTIONS: &str = "9. Ações (acknowledge_alert, silence_alert, create_maintenance_window, create_monitor) só são \
+const ACTIONS: &str = "10. Ações (acknowledge_alert, silence_alert, create_maintenance_window, create_monitor) só são \
 executadas depois que o usuário confirma no chat. Proponha a ação quando ela resolver o pedido; ao receber \
 'awaiting_user_confirmation', diga em uma frase o que foi proposto e não repita a chamada.";
 
@@ -91,8 +98,33 @@ async fn alert_section<C: ConnectionTrait>(db: &C, id: i64) -> Option<String> {
     ))
 }
 
+/// Uma linha por marcação. O que sumiu do banco é dito como tal, para a IA
+/// não procurar um aparelho que não existe mais.
+async fn mention_section<C: ConnectionTrait>(db: &C, mention: &AiMention) -> String {
+    let missing = || format!("- '{}' (marcado, mas não existe mais)", mention.label);
+    let id = mention.id.parse::<i64>().ok();
+    match mention.kind {
+        AiMentionKind::Device => match id {
+            Some(id) => device_section(db, id).await.unwrap_or_else(missing),
+            None => missing(),
+        },
+        AiMentionKind::Monitor => match id {
+            Some(id) => monitor_section(db, id).await.unwrap_or_else(missing),
+            None => missing(),
+        },
+        AiMentionKind::Container => format!(
+            "- Container Docker '{label}' (id {id}): get_docker_containers container='{label}'; logs com grep source='docker' container='{label}'",
+            label = mention.label,
+            id = mention.id,
+        ),
+        AiMentionKind::Source => mentions::source(&mention.id).map_or_else(missing, |source| {
+            format!("- Fonte {}: {}", source.label, source.hint)
+        }),
+    }
+}
+
 /// Linhas de contexto da tela; vazio quando o chat foi aberto sem contexto.
-async fn context_sections<C: ConnectionTrait>(db: &C, context: ChatContext) -> Vec<String> {
+async fn context_sections<C: ConnectionTrait>(db: &C, context: &ChatContext) -> Vec<String> {
     let mut sections = Vec::new();
     if let Some(id) = context.alert_id {
         sections.extend(alert_section(db, id).await);
@@ -111,7 +143,7 @@ pub async fn build_system_prompt<C: ConnectionTrait>(
     db: &C,
     settings: &AiSettings,
     policy: ToolPolicy,
-    context: ChatContext,
+    context: &ChatContext,
 ) -> String {
     let now = Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
     let mut prompt = format!(
@@ -140,10 +172,20 @@ pub async fn build_system_prompt<C: ConnectionTrait>(
         prompt.push('\n');
     }
 
+    if !context.mentions.is_empty() {
+        prompt.push_str(
+            "\nMARCADOS COM @ NA PERGUNTA (o alvo dela; têm prioridade sobre o contexto da tela):\n",
+        );
+        for mention in &context.mentions {
+            prompt.push_str(&mention_section(db, mention).await);
+            prompt.push('\n');
+        }
+    }
+
     let sections = context_sections(db, context).await;
     if !sections.is_empty() {
         prompt.push_str(
-            "\nCONTEXTO DA TELA DE ONDE O CHAT FOI ABERTO (use-o quando o usuário não citar outro alvo):\n",
+            "\nCONTEXTO DA TELA DE ONDE O CHAT FOI ABERTO (vale enquanto a pergunta for sobre ele):\n",
         );
         prompt.push_str(&sections.join("\n"));
         prompt.push('\n');

@@ -2,6 +2,7 @@ pub mod conversations;
 pub mod drivers;
 pub mod harness;
 pub mod knowledge;
+pub mod mentions;
 pub mod ollama;
 pub mod opencode;
 pub mod openrouter;

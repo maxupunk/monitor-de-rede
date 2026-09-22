@@ -75,6 +75,12 @@ const TOOL_META: Record<string, AiToolMeta> = {
     color: 'blue-grey',
   },
   grep: { label: 'Busca nos Dados (grep)', icon: 'mdi-text-search', color: 'blue-grey' },
+  get_docker_containers: { label: 'Containers Docker', icon: 'mdi-docker', color: 'info' },
+  ask_user: {
+    label: 'Pergunta ao Usuário',
+    icon: 'mdi-account-question-outline',
+    color: 'primary',
+  },
   acknowledge_alert: {
     label: 'Reconhecer Alerta',
     icon: 'mdi-check-circle-outline',
@@ -121,6 +127,7 @@ export function formatToolArgs(args: Record<string, unknown>): string {
     ['playbook_type', 'Playbook'],
     ['pattern', 'Padrão'],
     ['source', 'Fonte'],
+    ['container', 'Container'],
     ['query', 'Busca'],
     ['status', 'Status'],
   ]

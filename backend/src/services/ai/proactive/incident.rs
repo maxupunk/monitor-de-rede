@@ -102,6 +102,7 @@ pub async fn summarize_alert(
             device_id: event.device_id,
             monitor_id: event.monitor_id,
             alert_id: Some(alert_id),
+            ..ChatContext::default()
         },
     )
     .await?;

@@ -18,17 +18,26 @@
       ]"
     >
       <!-- Tool Cards Executados -->
-      <div v-if="message.toolCalls && message.toolCalls.length > 0" class="mb-2">
+      <div v-if="toolCards.length > 0" class="mb-2">
         <AiToolCard
-          v-for="tool in message.toolCalls"
+          v-for="tool in toolCards"
           :key="tool.id"
           :tool="tool"
           :message-id="message.id"
         />
       </div>
 
+      <!-- Pergunta da IA antes de prosseguir -->
+      <AiQuestionCard
+        v-for="item in questions"
+        :key="item.id"
+        :question="item.question"
+        :answerable="answerable"
+      />
+
       <!-- Balão de Mensagem -->
       <v-card
+        v-if="message.content || message.isStreaming || message.error"
         :color="message.role === 'user' ? 'primary' : 'surface'"
         :class="[
           'pa-3 rounded-xl elevation-1 message-bubble',
@@ -49,6 +58,20 @@
         <!-- Conteúdo Renderizado -->
         <div v-if="message.content" class="markdown-body" v-html="renderedContent" />
 
+        <!-- Marcados com @ -->
+        <div v-if="message.mentions?.length" class="d-flex flex-wrap ga-1 mt-2">
+          <v-chip
+            v-for="mention in message.mentions"
+            :key="mention.kind + mention.id"
+            size="x-small"
+            variant="outlined"
+            color="white"
+            :prepend-icon="mentionKindMeta(mention.kind).icon"
+          >
+            {{ mention.label }}
+          </v-chip>
+        </div>
+
         <!-- Cursor de Streaming -->
         <span v-if="message.isStreaming" class="streaming-cursor" />
 
@@ -65,10 +88,22 @@
             {{ usageLabel }}
           </span>
           <v-btn
+            v-if="message.role === 'user'"
             icon
             size="x-small"
             variant="text"
-            :color="message.role === 'user' ? 'white' : 'grey'"
+            color="white"
+            title="Desfazer: volta a conversa para antes desta pergunta e devolve o texto ao campo. Ações já executadas não são revertidas."
+            @click="emit('rewind', message.id)"
+          >
+            <v-icon size="14">mdi-undo-variant</v-icon>
+          </v-btn>
+          <v-btn
+            icon
+            size="x-small"
+            variant="text"
+            :color="message.role === 'user' ? 'white' : 'primary'"
+            title="Copiar"
             @click="copyContent"
           >
             <v-icon size="14">{{ copied ? 'mdi-check' : 'mdi-content-copy' }}</v-icon>
@@ -92,13 +127,41 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import DOMPurify from 'dompurify'
-import type { AiDisplayMessage } from '@/stores/ai'
+import { useAiStore, type AiDisplayMessage } from '@/stores/ai'
 import AiToolCard from './AiToolCard.vue'
+import AiQuestionCard from './AiQuestionCard.vue'
 import { formatCompactCount } from '@/utils/formatters'
+import { toolQuestion } from '@/utils/aiChatStream'
+import { mentionKindMeta } from '@/utils/aiMentions'
 
 const props = defineProps<{
   message: AiDisplayMessage
 }>()
+
+const emit = defineEmits<{
+  /** "Desfazer" da pergunta: quem mostra o campo recebe o texto de volta. */
+  rewind: [messageId: string]
+}>()
+
+const aiStore = useAiStore()
+
+/** Perguntas da IA (`ask_user`) viram cartão com opções; o resto, cartão de ferramenta. */
+const questions = computed(() =>
+  (props.message.toolCalls ?? []).flatMap((tool) => {
+    const question = toolQuestion(tool)
+    return question ? [{ id: tool.id, question }] : []
+  })
+)
+
+const toolCards = computed(() =>
+  (props.message.toolCalls ?? []).filter((tool) => !toolQuestion(tool))
+)
+
+/** Só a última mensagem, com a IA parada, aceita resposta pelos botões. */
+const answerable = computed(
+  () =>
+    !aiStore.isStreaming && aiStore.messages[aiStore.messages.length - 1]?.id === props.message.id
+)
 
 const copied = ref(false)
 

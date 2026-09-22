@@ -13,12 +13,16 @@
 //! - [`charts`]: séries do banco desenhadas no chat com os gráficos das telas.
 //! - [`diagnostics`]: testes ativos de rede (ping, traceroute, portas, DNS).
 //! - [`actions`]: ações que mudam o sistema — sempre com confirmação do usuário.
+//! - [`docker`]: containers da Docker Engine (estado, sem variáveis de ambiente).
+//! - [`ask`]: a IA pergunta ao usuário antes de prosseguir.
 
 mod actions;
 mod analysis;
 mod args;
+mod ask;
 mod charts;
 mod diagnostics;
+mod docker;
 mod grep;
 mod history;
 mod inventory;
@@ -33,6 +37,7 @@ use loco_rs::prelude::AppContext;
 use serde_json::{json, Value};
 
 pub use args::ToolArgs;
+pub use lookup::device_matches;
 
 use crate::{
     dtos::ai::AiChart,
@@ -55,6 +60,9 @@ pub enum ToolKind {
     /// Muda o estado do sistema (silenciar alerta, criar monitor). Depende de
     /// `allow_actions` e **sempre** passa pela confirmação do usuário.
     Action,
+    /// Conversa com o usuário (perguntar antes de prosseguir). Só no chat —
+    /// nas rotinas automáticas não há ninguém para responder.
+    Interactive,
 }
 
 /// Quais ferramentas a sessão pode usar e quais pedem confirmação.
@@ -64,6 +72,8 @@ pub struct ToolPolicy {
     pub allow_actions: bool,
     /// Pede confirmação também antes dos testes ativos.
     pub confirm_active: bool,
+    /// Há alguém do outro lado para responder (chat, não rotina automática).
+    pub interactive: bool,
 }
 
 impl ToolPolicy {
@@ -74,6 +84,7 @@ impl ToolPolicy {
             allow_active: false,
             allow_actions: false,
             confirm_active: false,
+            interactive: false,
         }
     }
 
@@ -83,6 +94,7 @@ impl ToolPolicy {
             allow_active: settings.allow_active_tools,
             allow_actions: settings.allow_actions,
             confirm_active: settings.require_tool_confirmation,
+            interactive: true,
         }
     }
 
@@ -92,13 +104,14 @@ impl ToolPolicy {
             ToolKind::Passive => true,
             ToolKind::Active => self.allow_active,
             ToolKind::Action => self.allow_actions,
+            ToolKind::Interactive => self.interactive,
         }
     }
 
     #[must_use]
     pub const fn needs_confirmation(self, kind: ToolKind) -> bool {
         match kind {
-            ToolKind::Passive => false,
+            ToolKind::Passive | ToolKind::Interactive => false,
             ToolKind::Active => self.confirm_active,
             ToolKind::Action => true,
         }
@@ -113,12 +126,19 @@ pub struct ToolOutput {
     /// O que a tela desenha. Não volta para a IA — os pontos custariam tokens
     /// sem acrescentar ao resumo que já está em `data`.
     pub chart: Option<AiChart>,
+    /// A resposta agora é do usuário: o agente encerra a rodada sem chamar o
+    /// provedor de novo.
+    pub ends_turn: bool,
 }
 
 impl ToolOutput {
     #[must_use]
     pub const fn data(data: Value) -> Self {
-        Self { data, chart: None }
+        Self {
+            data,
+            chart: None,
+            ends_turn: false,
+        }
     }
 
     #[must_use]
@@ -126,6 +146,17 @@ impl ToolOutput {
         Self {
             data,
             chart: Some(chart),
+            ends_turn: false,
+        }
+    }
+
+    /// Algo foi perguntado ao usuário; a conversa espera a resposta dele.
+    #[must_use]
+    pub const fn awaiting_user(data: Value) -> Self {
+        Self {
+            data,
+            chart: None,
+            ends_turn: true,
         }
     }
 
@@ -191,6 +222,7 @@ fn all_handlers() -> Vec<Box<dyn AiToolHandler>> {
         Box::new(charts::DeviceMetricChart),
         Box::new(logs::LogsOverview),
         Box::new(grep::Grep),
+        Box::new(docker::DockerContainers),
         Box::new(inventory::SearchDocs),
         Box::new(diagnostics::Ping),
         Box::new(diagnostics::Traceroute),
@@ -201,6 +233,7 @@ fn all_handlers() -> Vec<Box<dyn AiToolHandler>> {
         Box::new(actions::SilenceAlert),
         Box::new(actions::CreateMaintenanceWindow),
         Box::new(actions::CreateMonitor),
+        Box::new(ask::AskUser),
     ]
 }
 
@@ -300,7 +333,7 @@ impl ToolRegistry {
         arguments: ToolArgs,
     ) -> AppResult<ToolOutput> {
         let handler = self.handler(name)?;
-        if handler.kind() == ToolKind::Passive {
+        if matches!(handler.kind(), ToolKind::Passive | ToolKind::Interactive) {
             return Err(AppError::validation(format!(
                 "A ferramenta {name} não precisa de confirmação"
             )));
@@ -345,11 +378,16 @@ mod tests {
         assert!(!nomes.contains(&"ping_host".to_string()));
 
         assert!(!nomes.contains(&"silence_alert".to_string()));
+        assert!(
+            !nomes.contains(&"ask_user".to_string()),
+            "rotina automática não tem a quem perguntar"
+        );
 
         let todas = ToolRegistry::new(ToolPolicy {
             allow_active: true,
             allow_actions: true,
             confirm_active: false,
+            interactive: true,
         });
         assert_eq!(todas.definitions().len(), all_handlers().len());
     }
@@ -360,9 +398,11 @@ mod tests {
             allow_active: true,
             allow_actions: true,
             confirm_active: false,
+            interactive: true,
         };
         assert!(!sem.needs_confirmation(ToolKind::Passive));
         assert!(!sem.needs_confirmation(ToolKind::Active));
+        assert!(!sem.needs_confirmation(ToolKind::Interactive));
         assert!(sem.needs_confirmation(ToolKind::Action));
 
         let com = ToolPolicy {

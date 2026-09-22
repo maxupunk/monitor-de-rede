@@ -125,6 +125,72 @@ describe('ações propostas pela IA', () => {
   })
 })
 
+describe('desfazer e marcar com @', () => {
+  const mppt = { kind: 'device' as const, id: '12', label: 'MPPT Bateria' }
+
+  it('a marcação vai no corpo e fica anotada no histórico seguinte', async () => {
+    vi.mocked(apiService.postStream)
+      .mockResolvedValueOnce(
+        sseResponse([{ type: 'textDelta', content: '48 V' }, { type: 'done' }])
+      )
+      .mockResolvedValueOnce(sseResponse([{ type: 'done' }]))
+    const store = useAiStore()
+    await store.sendMessage('tensão da @MPPT Bateria?', {}, [mppt])
+    await store.sendMessage('e ontem?')
+
+    const [primeiro, segundo] = vi
+      .mocked(apiService.postStream)
+      .mock.calls.map((call) => call[1] as { mentions: unknown[]; messages: { content: string }[] })
+    expect(primeiro.mentions).toEqual([mppt])
+    expect(segundo.mentions).toEqual([])
+    expect(segundo.messages[0].content).toContain('[Marcados com @: dispositivo "MPPT Bateria"')
+  })
+
+  it('desfazer volta a conversa para antes da pergunta e a salva assim', async () => {
+    vi.mocked(apiService.postStream)
+      .mockResolvedValueOnce(
+        sseResponse([{ type: 'textDelta', content: 'borda ok' }, { type: 'done' }])
+      )
+      .mockResolvedValueOnce(
+        sseResponse([{ type: 'textDelta', content: 'errado' }, { type: 'done' }])
+      )
+    const store = useAiStore()
+    await store.sendMessage('dados da borda')
+    await store.sendMessage('e a @MPPT Bateria?', {}, [mppt])
+    const conversas = useAiConversationsStore()
+    await vi.waitFor(() => expect(conversas.activeId).not.toBeNull())
+
+    const rascunho = store.rewind(store.messages[2].id)
+
+    expect(rascunho).toEqual({ content: 'e a @MPPT Bateria?', mentions: [mppt] })
+    expect(store.messages.map((message) => message.content)).toEqual(['dados da borda', 'borda ok'])
+    await vi.waitFor(() =>
+      expect(api.conversations.get(conversas.activeId!)?.messages).toHaveLength(2)
+    )
+    expect(store.rewind(store.messages[1].id)).toBeNull()
+  })
+
+  it('desfazer durante a resposta interrompe a geração', async () => {
+    vi.mocked(apiService.postStream).mockImplementationOnce(
+      (_path, _body, signal) =>
+        new Promise((_resolve, reject) => {
+          signal?.addEventListener('abort', () =>
+            reject(Object.assign(new Error('abort'), { name: 'AbortError' }))
+          )
+        })
+    )
+    const store = useAiStore()
+    const envio = store.sendMessage('pergunta longa')
+    expect(store.isStreaming).toBe(true)
+
+    store.rewind(store.messages[0].id)
+    await envio
+
+    expect(store.isStreaming).toBe(false)
+    expect(store.messages).toHaveLength(0)
+  })
+})
+
 describe('conversas salvas na conta', () => {
   it('a conversa vai para o servidor e reabre depois de começar outra', async () => {
     const store = await conversaComProposta()

@@ -126,52 +126,25 @@
 
       <!-- Histórico de Mensagens -->
       <template v-else>
-        <AiChatMessage v-for="msg in aiStore.messages" :key="msg.id" :message="msg" />
+        <AiChatMessage
+          v-for="msg in aiStore.messages"
+          :key="msg.id"
+          :message="msg"
+          @rewind="handleRewind"
+        />
       </template>
     </div>
 
-    <!-- Barra de Entrada Inferior (Instruções no TOPO + Textarea Alto + Ações) -->
+    <!-- Campo da pergunta, com @ para marcar recursos -->
     <template #append>
       <div class="pa-3 border-t bg-surface">
-        <!-- 1. TEXTO DE EXPLICAÇÃO NO TOPO DO CAMPO -->
-        <div
-          class="d-flex align-center justify-space-between px-3 py-1 bg-surface-variant rounded-t-lg border-t border-s border-e"
-        >
-          <div class="d-flex align-center ga-1 text-caption text-medium-emphasis">
-            <v-icon size="14" color="primary">mdi-keyboard-outline</v-icon>
-            <span>
-              <kbd class="kbd-key">Enter</kbd> envia &bull;
-              <kbd class="kbd-key">Shift+Enter</kbd> quebra linha
-            </span>
-          </div>
-          <span
-            v-if="aiStore.isStreaming"
-            class="text-caption text-primary font-weight-medium d-flex align-center ga-1"
-          >
-            <v-progress-circular indeterminate size="10" width="2" color="primary" />
-            Respondendo
-          </span>
-        </div>
-
-        <!-- 2. CAMPO DE TEXTO MAIS ALTO -->
-        <v-textarea
-          v-model="inputContent"
-          placeholder="Digite sua dúvida ou comando (ex: 'ping no 1.1.1.1')..."
-          variant="outlined"
-          density="comfortable"
-          :rows="3"
+        <AiChatComposer
+          ref="composer"
+          compact
           :max-rows="6"
-          auto-grow
-          hide-details
-          class="drawer-chat-textarea"
-          @keydown.enter.prevent="handleEnter"
-        />
-
-        <!-- 3. BARRA DE AÇÕES INFERIOR -->
-        <div
-          class="d-flex align-center justify-space-between px-3 py-2 bg-surface-variant rounded-b-lg border-b border-s border-e"
+          placeholder="Sua dúvida ou comando (ex: 'ping no 1.1.1.1'). @ marca um recurso..."
         >
-          <div class="d-flex align-center ga-1">
+          <template #status>
             <v-chip
               size="x-small"
               color="primary"
@@ -189,40 +162,8 @@
             >
               Ferramentas
             </v-chip>
-            <v-btn
-              v-if="inputContent.length > 0"
-              variant="text"
-              size="x-small"
-              color="grey"
-              icon="mdi-close"
-              @click="inputContent = ''"
-            />
-          </div>
-
-          <div class="d-flex align-center ga-2">
-            <v-btn
-              v-if="aiStore.isStreaming"
-              color="error"
-              variant="flat"
-              size="small"
-              prepend-icon="mdi-stop-circle-outline"
-              @click="aiStore.cancelGeneration()"
-            >
-              Parar
-            </v-btn>
-            <v-btn
-              v-else
-              color="primary"
-              variant="flat"
-              size="small"
-              prepend-icon="mdi-send"
-              :disabled="!inputContent.trim() || !aiStore.settings?.enabled"
-              @click="handleSend"
-            >
-              Enviar
-            </v-btn>
-          </div>
-        </div>
+          </template>
+        </AiChatComposer>
       </div>
     </template>
   </v-navigation-drawer>
@@ -232,12 +173,13 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useAiStore } from '@/stores/ai'
 import AiChatMessage from './AiChatMessage.vue'
+import AiChatComposer from './AiChatComposer.vue'
 import AiConversationList from './AiConversationList.vue'
 import { responseStyleOption } from './aiResponseStyle'
 
 const aiStore = useAiStore()
-const inputContent = ref('')
 const chatContainer = ref<HTMLElement | null>(null)
+const composer = ref<InstanceType<typeof AiChatComposer> | null>(null)
 const historyOpen = ref(false)
 
 const activeModelLabel = computed(() => {
@@ -288,26 +230,14 @@ watch(
   () => scrollToBottom()
 )
 
-function handleEnter(e: KeyboardEvent) {
-  if (e.shiftKey) {
-    inputContent.value += '\n'
-  } else {
-    handleSend()
-  }
-}
-
-function handleSend() {
-  const text = inputContent.value.trim()
-  if (!text || aiStore.isStreaming) return
-
-  inputContent.value = ''
-  aiStore.sendMessage(text)
-  scrollToBottom()
-}
-
 function sendSuggestion(suggestion: string) {
-  inputContent.value = suggestion
-  handleSend()
+  if (aiStore.isStreaming || !aiStore.settings?.enabled) return
+  void aiStore.sendMessage(suggestion)
+}
+
+function handleRewind(messageId: string) {
+  const draft = aiStore.rewind(messageId)
+  if (draft) composer.value?.setDraft(draft)
 }
 </script>
 
@@ -316,19 +246,8 @@ function sendSuggestion(suggestion: string) {
   height: calc(100vh - 210px);
 }
 
-.kbd-key {
-  display: inline-block;
-  padding: 0.1rem 0.3rem;
-  font-size: 0.7rem;
-  font-family: monospace;
-  background-color: rgba(var(--v-theme-on-surface), 0.08);
-  border-radius: 4px;
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.15);
-}
-
-:deep(.drawer-chat-textarea .v-field) {
-  border-radius: 0 !important;
-  border-top: none !important;
-  border-bottom: none !important;
+/* A lista do @ abre para cima, por cima das mensagens: o rodapé não pode cortá-la. */
+.ai-drawer :deep(.v-navigation-drawer__append) {
+  overflow: visible;
 }
 </style>

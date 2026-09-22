@@ -3,6 +3,7 @@
  * construção e como as mensagens viram o histórico enviado ao backend.
  */
 import type { AiChart } from '@/bindings/AiChart'
+import { describeMention, type AiMention } from './aiMentions'
 
 export type AiToolStatus = 'running' | 'done' | 'error' | 'awaiting' | 'cancelled'
 
@@ -28,6 +29,8 @@ export interface AiDisplayMessage {
   role: 'user' | 'assistant'
   content: string
   toolCalls?: AiToolCallState[]
+  /** O que o usuário marcou com `@` nesta pergunta. */
+  mentions?: AiMention[]
   usage?: AiUsageInfo | null
   isStreaming?: boolean
   error?: string | null
@@ -97,8 +100,33 @@ export function applyChatEvent(message: AiDisplayMessage, event: unknown): void 
   }
 }
 
-/** Nota que conta à IA o que o usuário decidiu sobre uma ação proposta. */
+/** Nome da ferramenta com que a IA pergunta ao usuário antes de prosseguir. */
+export const ASK_USER_TOOL = 'ask_user'
+
+export interface AiQuestion {
+  question: string
+  options: string[]
+}
+
+/** A pergunta que a IA fez com `ask_user`, quando o resultado a trouxe. */
+export function toolQuestion(tool: AiToolCallState): AiQuestion | null {
+  if (tool.name !== ASK_USER_TOOL || typeof tool.result?.question !== 'string') return null
+  const options = Array.isArray(tool.result.options)
+    ? tool.result.options.filter((option): option is string => typeof option === 'string')
+    : []
+  return { question: tool.result.question, options }
+}
+
+/**
+ * Nota que conta à IA o que ficou fora do texto: o que o usuário decidiu
+ * sobre uma ação proposta, ou a pergunta que ela mesma fez.
+ */
 function decisionNote(tool: AiToolCallState): string | null {
+  const question = toolQuestion(tool)
+  if (question) {
+    const options = question.options.length ? ` Opções: ${question.options.join(', ')}.` : ''
+    return `[Perguntei ao usuário: ${question.question}${options}]`
+  }
   const label = tool.summary || tool.name
   if (tool.status === 'cancelled') return `[Ação cancelada pelo usuário: ${label}]`
   if (tool.status === 'awaiting') return `[Ação ainda aguardando confirmação: ${label}]`
@@ -119,8 +147,35 @@ export function toApiMessages(messages: AiDisplayMessage[]): ApiChatMessage[] {
       const notes = (message.toolCalls ?? [])
         .map(decisionNote)
         .filter((note): note is string => note !== null)
+      if (message.mentions?.length) {
+        notes.push(`[Marcados com @: ${message.mentions.map(describeMention).join('; ')}]`)
+      }
       const content = [message.content, ...notes].filter((part) => part.trim()).join('\n')
       return { role: message.role, content }
     })
     .filter((message) => message.content.trim().length > 0)
+}
+
+/** O que o "desfazer" devolve ao campo: a pergunta e o que estava marcado. */
+export interface AiDraft {
+  content: string
+  mentions: AiMention[]
+}
+
+/**
+ * Volta a conversa para antes da pergunta `messageId`: ela e tudo o que veio
+ * depois saem, e o texto dela volta para o campo. `null` quando o id não é
+ * de uma pergunta do usuário.
+ */
+export function rewindTo(
+  messages: AiDisplayMessage[],
+  messageId: string
+): { kept: AiDisplayMessage[]; draft: AiDraft } | null {
+  const index = messages.findIndex((message) => message.id === messageId)
+  if (index < 0 || messages[index].role !== 'user') return null
+  const question = messages[index]
+  return {
+    kept: messages.slice(0, index),
+    draft: { content: question.content, mentions: question.mentions ?? [] },
+  }
 }

@@ -20,6 +20,7 @@ use crate::{
     services::{
         ai::{
             drivers::traits::{AiChatOptions, AiDriver, AiMessage, AiToolCall, AiUsage},
+            mentions,
             settings::AiSettings,
         },
         shared::errors::{AppError, AppResult},
@@ -103,6 +104,7 @@ impl AgentRequest {
                 device_id: request.device_id,
                 monitor_id: request.monitor_id,
                 alert_id: request.alert_id,
+                mentions: mentions::sanitize(request.mentions),
             },
             policy: ToolPolicy::from_settings(settings),
         }
@@ -136,18 +138,29 @@ impl EventSink {
     }
 }
 
+/// O que vem depois de uma chamada de ferramenta.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ToolFlow {
+    Continue,
+    /// A ferramenta perguntou ao usuário: a rodada termina sem nova chamada.
+    EndTurn,
+    /// A tela fechou a conexão.
+    Disconnected,
+}
+
 /// Resolve uma chamada de ferramenta: executa, ou devolve o pedido de
-/// confirmação. Retorna `false` quando a tela desconectou.
+/// confirmação.
 async fn handle_tool_call(
     ctx: &AppContext,
     registry: &ToolRegistry,
     sink: &EventSink,
     conversation: &mut Vec<AiMessage>,
     tool: AiToolCall,
-) -> bool {
+) -> ToolFlow {
     let arguments: serde_json::Value =
         serde_json::from_str(&tool.arguments).unwrap_or_else(|_| json!({}));
 
+    let mut flow = ToolFlow::Continue;
     let result = if registry.needs_confirmation(&tool.name) {
         let summary = registry
             .preview(ctx, &tool.name, &tool.arguments)
@@ -162,7 +175,7 @@ async fn handle_tool_call(
             })
             .await
         {
-            return false;
+            return ToolFlow::Disconnected;
         }
         json!({
             "status": "awaiting_user_confirmation",
@@ -178,10 +191,15 @@ async fn handle_tool_call(
             })
             .await
         {
-            return false;
+            return ToolFlow::Disconnected;
         }
         let (result, chart) = match registry.execute(ctx, &tool.name, &tool.arguments).await {
-            Ok(output) => (output.data, output.chart),
+            Ok(output) => {
+                if output.ends_turn {
+                    flow = ToolFlow::EndTurn;
+                }
+                (output.data, output.chart)
+            }
             Err(err) => (json!({ "error": err.to_string() }), None),
         };
         if !sink
@@ -193,7 +211,7 @@ async fn handle_tool_call(
             })
             .await
         {
-            return false;
+            return ToolFlow::Disconnected;
         }
         result
     };
@@ -204,7 +222,7 @@ async fn handle_tool_call(
         tool_calls: None,
         tool_call_id: Some(tool.id),
     });
-    true
+    flow
 }
 
 /// Executa o loop do Agent Harness transmitindo eventos em tempo real.
@@ -224,7 +242,7 @@ pub async fn run_agent_loop(
             max_tokens: settings.response_style.max_output_tokens(),
         };
         let system_prompt =
-            build_system_prompt(&ctx.db, &settings, request.policy, request.context).await;
+            build_system_prompt(&ctx.db, &settings, request.policy, &request.context).await;
 
         let mut conversation = vec![AiMessage {
             role: "system".to_string(),
@@ -279,10 +297,16 @@ pub async fn run_agent_loop(
                 tool_calls: Some(pending_tools.clone()),
                 tool_call_id: None,
             });
+            let mut ends_turn = false;
             for tool in pending_tools {
-                if !handle_tool_call(&ctx, &registry, &sink, &mut conversation, tool).await {
-                    return;
+                match handle_tool_call(&ctx, &registry, &sink, &mut conversation, tool).await {
+                    ToolFlow::Disconnected => return,
+                    ToolFlow::EndTurn => ends_turn = true,
+                    ToolFlow::Continue => {}
                 }
+            }
+            if ends_turn {
+                return sink.finish(usage).await;
             }
         }
         sink.finish(usage).await;

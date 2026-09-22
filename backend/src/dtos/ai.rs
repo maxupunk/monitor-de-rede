@@ -25,6 +25,9 @@ pub struct ChatStreamRequest {
     #[serde(default)]
     #[ts(type = "number | null")]
     pub alert_id: Option<i64>,
+    /// O que o usuário marcou com `@` na última pergunta.
+    #[serde(default)]
+    pub mentions: Vec<AiMention>,
 }
 
 #[derive(Deserialize)]
@@ -39,6 +42,8 @@ enum ChatStreamRequestHelper {
         monitor_id: Option<i64>,
         #[serde(default)]
         alert_id: Option<i64>,
+        #[serde(default)]
+        mentions: Vec<AiMention>,
     },
     Array(Vec<ChatMessageInput>),
 }
@@ -55,20 +60,57 @@ impl<'de> Deserialize<'de> for ChatStreamRequest {
                 device_id,
                 monitor_id,
                 alert_id,
+                mentions,
             } => Ok(Self {
                 messages,
                 device_id,
                 monitor_id,
                 alert_id,
+                mentions,
             }),
             ChatStreamRequestHelper::Array(messages) => Ok(Self {
                 messages,
                 device_id: None,
                 monitor_id: None,
                 alert_id: None,
+                mentions: Vec::new(),
             }),
         }
     }
+}
+
+/// Tipo do que se marca com `@` no chat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub enum AiMentionKind {
+    Device,
+    Monitor,
+    Container,
+    /// Uma fonte de dados inteira: logs, alertas, checagens, Docker.
+    Source,
+}
+
+/// Algo marcado com `@` na pergunta: diz à IA de qual recurso se trata, sem
+/// ela precisar adivinhar pelo nome.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct AiMention {
+    pub kind: AiMentionKind,
+    /// Id do dispositivo/monitor, id do container ou nome da fonte.
+    pub id: String,
+    pub label: String,
+    /// Linha curta para a lista de sugestões (IP, tipo, estado).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiMentionQuery {
+    pub q: Option<String>,
 }
 
 /// Deserializa identificadores de modelo aceitando string simples ou objeto com id/name.

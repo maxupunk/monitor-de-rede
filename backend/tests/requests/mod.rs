@@ -1,6 +1,7 @@
 mod ai_analysis;
 mod ai_conversations;
 mod ai_grep;
+mod ai_mentions;
 mod ai_proactive;
 mod ai_tools;
 mod alert_correlation;

@@ -231,59 +231,22 @@
 
             <!-- Lista de Mensagens -->
             <template v-else>
-              <AiChatMessage v-for="msg in aiStore.messages" :key="msg.id" :message="msg" />
+              <AiChatMessage
+                v-for="msg in aiStore.messages"
+                :key="msg.id"
+                :message="msg"
+                @rewind="handleRewind"
+              />
             </template>
           </div>
 
-          <!-- Área Inferior do Chat (Barra de Instruções no TOPO + Textarea Alto + Ações) -->
+          <!-- Campo da pergunta, com @ para marcar recursos -->
           <div class="pa-3 border-t bg-surface">
-            <!-- 1. TEXTO DE EXPLICAÇÃO E ATALHOS NA PARTE DE CIMA DO CAMPO -->
-            <div
-              class="d-flex align-center justify-space-between px-3 py-1 bg-surface-variant rounded-t-lg border-t border-s border-e"
+            <AiChatComposer
+              ref="composer"
+              placeholder="Digite sua dúvida ou instrução (ex: 'analisar latência para 1.1.1.1'). Use @ para marcar um dispositivo ou recurso..."
             >
-              <div class="d-flex align-center ga-1 text-caption text-medium-emphasis">
-                <v-icon size="14" color="primary">mdi-keyboard-outline</v-icon>
-                <span>
-                  Pressione <kbd class="kbd-key">Enter</kbd> para enviar &bull;
-                  <kbd class="kbd-key">Shift + Enter</kbd> para pular linha
-                </span>
-              </div>
-              <div class="d-flex align-center ga-2">
-                <span
-                  v-if="aiStore.isStreaming"
-                  class="text-caption text-primary font-weight-medium d-flex align-center ga-1"
-                >
-                  <v-progress-circular indeterminate size="12" width="2" color="primary" />
-                  IA respondendo...
-                </span>
-                <span
-                  v-else-if="inputContent.trim().length > 0"
-                  class="text-caption text-medium-emphasis font-mono"
-                >
-                  {{ inputContent.trim().length }} caracteres
-                </span>
-              </div>
-            </div>
-
-            <!-- 2. CAMPO DE TEXTO MAIS ALTO PARA MELHOR USABILIDADE -->
-            <v-textarea
-              v-model="inputContent"
-              placeholder="Digite sua dúvida ou instrução para a IA (ex: 'analisar latência para 1.1.1.1 e checar rota do gateway')..."
-              variant="outlined"
-              density="comfortable"
-              :rows="3"
-              :max-rows="8"
-              auto-grow
-              hide-details
-              class="chat-input-textarea"
-              @keydown.enter.prevent="handleEnter"
-            />
-
-            <!-- 3. BARRA DE AÇÕES INFERIOR DO CAMPO DE ENTRADA -->
-            <div
-              class="d-flex align-center justify-space-between px-3 py-2 bg-surface-variant rounded-b-lg border-b border-s border-e"
-            >
-              <div class="d-flex align-center ga-2">
+              <template #status>
                 <v-tooltip location="top" text="Execução de ping, traceroute e scan de portas">
                   <template #activator="{ props: tipProps }">
                     <v-chip
@@ -297,45 +260,8 @@
                     </v-chip>
                   </template>
                 </v-tooltip>
-                <v-btn
-                  v-if="inputContent.length > 0"
-                  variant="text"
-                  size="x-small"
-                  color="grey"
-                  prepend-icon="mdi-close"
-                  @click="inputContent = ''"
-                >
-                  Limpar
-                </v-btn>
-              </div>
-
-              <div class="d-flex align-center ga-2">
-                <!-- Botão de Interromper Geração -->
-                <v-btn
-                  v-if="aiStore.isStreaming"
-                  color="error"
-                  variant="flat"
-                  size="small"
-                  prepend-icon="mdi-stop-circle-outline"
-                  @click="aiStore.cancelGeneration()"
-                >
-                  Interromper
-                </v-btn>
-
-                <!-- Botão de Enviar Mensagem -->
-                <v-btn
-                  v-else
-                  color="primary"
-                  variant="flat"
-                  size="small"
-                  prepend-icon="mdi-send"
-                  :disabled="!inputContent.trim() || !aiStore.settings?.enabled"
-                  @click="handleSend"
-                >
-                  Enviar
-                </v-btn>
-              </div>
-            </div>
+              </template>
+            </AiChatComposer>
           </div>
         </v-card>
       </v-col>
@@ -348,12 +274,13 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useAiStore } from '@/stores/ai'
 import PageHeader from '@/components/PageHeader.vue'
 import AiChatMessage from '@/components/ai/AiChatMessage.vue'
+import AiChatComposer from '@/components/ai/AiChatComposer.vue'
 import AiConversationList from '@/components/ai/AiConversationList.vue'
 import { responseStyleOption } from '@/components/ai/aiResponseStyle'
 
 const aiStore = useAiStore()
-const inputContent = ref('')
 const chatContainer = ref<HTMLElement | null>(null)
+const composer = ref<InstanceType<typeof AiChatComposer> | null>(null)
 
 const activeDriverLabel = computed(() => {
   const driver = aiStore.settings?.activeDriver
@@ -387,6 +314,10 @@ const capabilities = [
     text: 'panorama por padrão e busca (regex, contagem, contexto) em logs, alertas e checagens.',
   },
   { title: 'Causa raiz', text: 'correlação pela topologia e comparação com o normal.' },
+  {
+    title: '@ e desfazer',
+    text: 'marque dispositivo, monitor, container ou fonte; desfaça a pergunta que saiu errada.',
+  },
   { title: 'Gráficos', text: 'latência, tráfego, CPU/memória e padrão por hora.' },
   { title: 'Testes ativos', text: 'ping, traceroute, portas, DNS e playbooks.' },
   {
@@ -467,26 +398,14 @@ watch(
   () => scrollToBottom()
 )
 
-function handleEnter(e: KeyboardEvent) {
-  if (e.shiftKey) {
-    inputContent.value += '\n'
-  } else {
-    handleSend()
-  }
-}
-
-function handleSend() {
-  const text = inputContent.value.trim()
-  if (!text || aiStore.isStreaming) return
-
-  inputContent.value = ''
-  aiStore.sendMessage(text)
-  scrollToBottom()
-}
-
 function handleQuickPrompt(prompt: string) {
-  inputContent.value = prompt
-  handleSend()
+  if (aiStore.isStreaming || !aiStore.settings?.enabled) return
+  void aiStore.sendMessage(prompt)
+}
+
+function handleRewind(messageId: string) {
+  const draft = aiStore.rewind(messageId)
+  if (draft) composer.value?.setDraft(draft)
 }
 </script>
 
@@ -507,16 +426,6 @@ function handleQuickPrompt(prompt: string) {
   max-width: 750px;
 }
 
-.kbd-key {
-  display: inline-block;
-  padding: 0.1rem 0.35rem;
-  font-size: 0.72rem;
-  font-family: monospace;
-  background-color: rgba(var(--v-theme-on-surface), 0.08);
-  border-radius: 4px;
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.15);
-}
-
 .hover-card {
   transition:
     transform 0.2s ease,
@@ -526,11 +435,5 @@ function handleQuickPrompt(prompt: string) {
 .hover-card:hover {
   transform: translateY(-2px);
   border-color: rgb(var(--v-theme-primary));
-}
-
-:deep(.chat-input-textarea .v-field) {
-  border-radius: 0 !important;
-  border-top: none !important;
-  border-bottom: none !important;
 }
 </style>

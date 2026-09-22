@@ -12,10 +12,13 @@ import type { AiResponseStyle } from '@/bindings/AiResponseStyle'
 import type { ExecuteToolResponse } from '@/bindings/ExecuteToolResponse'
 import {
   applyChatEvent,
+  rewindTo,
   toApiMessages,
   type AiDisplayMessage,
+  type AiDraft,
   type AiToolCallState,
 } from '@/utils/aiChatStream'
+import type { AiMention } from '@/utils/aiMentions'
 import { useAiConversationsStore } from './aiConversations'
 import { readSseJson } from '@/utils/sseReader'
 
@@ -23,6 +26,8 @@ export type {
   AiChart,
   AiDigest,
   AiDisplayMessage,
+  AiDraft,
+  AiMention,
   AiProactiveSettings,
   AiResponseStyle,
   AiToolCallState,
@@ -131,6 +136,7 @@ export const useAiStore = defineStore('ai', () => {
   const streamError = ref<string | null>(null)
 
   let activeAbortController: AbortController | null = null
+  let messageSeq = 0
 
   const conversations = useAiConversationsStore()
 
@@ -205,12 +211,22 @@ export const useAiStore = defineStore('ai', () => {
     return fallback
   }
 
-  async function sendMessage(content: string, context: AiChatContext = {}) {
+  async function sendMessage(
+    content: string,
+    context: AiChatContext = {},
+    mentions: AiMention[] = []
+  ) {
     if (!content.trim() || isStreaming.value) return
 
     streamError.value = null
-    const stamp = Date.now()
-    messages.value.push({ id: `user-${stamp}`, role: 'user', content: content.trim() })
+    // O contador desempata perguntas no mesmo milissegundo: o "desfazer" acha a mensagem pelo id.
+    const stamp = `${Date.now()}-${++messageSeq}`
+    messages.value.push({
+      id: `user-${stamp}`,
+      role: 'user',
+      content: content.trim(),
+      ...(mentions.length > 0 ? { mentions } : {}),
+    })
     const history = toApiMessages(messages.value)
 
     const assistantMsg = reactive<AiDisplayMessage>({
@@ -234,6 +250,7 @@ export const useAiStore = defineStore('ai', () => {
           deviceId: context.deviceId ?? undefined,
           monitorId: context.monitorId ?? undefined,
           alertId: context.alertId ?? undefined,
+          mentions,
         },
         controller.signal
       )
@@ -265,6 +282,27 @@ export const useAiStore = defineStore('ai', () => {
       activeAbortController = null
     }
     isStreaming.value = false
+  }
+
+  /**
+   * "Desfazer" de uma pergunta: a conversa volta para antes dela (a resposta
+   * em andamento é interrompida) e o texto volta para o campo. Ações já
+   * confirmadas não são revertidas — só saem da conversa.
+   */
+  function rewind(messageId: string): AiDraft | null {
+    const rewound = rewindTo(messages.value, messageId)
+    if (!rewound) return null
+    cancelGeneration()
+    messages.value = rewound.kept
+    streamError.value = null
+    void conversations.persist(messages.value)
+    return rewound.draft
+  }
+
+  /** Sugestões para o `@` do campo, conforme o usuário digita. */
+  async function searchMentions(query: string): Promise<AiMention[]> {
+    const params = new URLSearchParams({ q: query })
+    return apiService.get<AiMention[]>(`/ai/mentions?${params.toString()}`)
   }
 
   /** Começa uma conversa nova; a atual continua salva no histórico. */
@@ -602,6 +640,8 @@ export const useAiStore = defineStore('ai', () => {
     pullOllamaModel,
     cancelOllamaPull,
     sendMessage,
+    rewind,
+    searchMentions,
     cancelGeneration,
     clearMessages,
     newConversation,

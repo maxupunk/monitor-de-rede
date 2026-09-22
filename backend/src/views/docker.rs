@@ -57,6 +57,18 @@ pub struct DockerContainerSummary {
     pub project_name: Option<String>,
 }
 
+impl DockerContainerSummary {
+    /// Nome como aparece no `docker ps`, sem a barra inicial; o id curto
+    /// quando o container não tem nome.
+    #[must_use]
+    pub fn display_name(&self) -> String {
+        self.names
+            .first()
+            .map(|name| name.trim_start_matches('/').to_string())
+            .unwrap_or_else(|| self.id.chars().take(12).collect())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]

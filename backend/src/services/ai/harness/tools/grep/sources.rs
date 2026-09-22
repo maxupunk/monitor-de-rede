@@ -13,6 +13,7 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 
 use super::{
     super::{
+        docker::{resolve_container, unavailable_message},
         log_digest::label_of,
         logs::{logs_disabled_message, origin_labeler},
         lookup::device_names,
@@ -26,6 +27,7 @@ use crate::{
         logs::device_logs,
     },
     services::{
+        docker::engine,
         shared::errors::AppResult,
         syslog::{
             db::LogsDb,
@@ -47,6 +49,8 @@ pub struct GrepFilter {
     pub severity: Option<i16>,
     /// Trecho literal que o banco pode usar para pré-filtrar.
     pub needle: Option<String>,
+    /// Nome ou id do container (só a fonte `docker`).
+    pub container: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -79,12 +83,13 @@ pub fn source_for(name: &str) -> Option<Box<dyn GrepSource>> {
         "logs" => Some(Box::new(Logs)),
         "alerts" => Some(Box::new(Alerts)),
         "checks" => Some(Box::new(Checks)),
+        "docker" => Some(Box::new(DockerLogs)),
         _ => None,
     }
 }
 
 /// Nomes aceitos, para a mensagem de erro e o schema.
-pub const SOURCE_NAMES: [&str; 3] = ["logs", "alerts", "checks"];
+pub const SOURCE_NAMES: [&str; 4] = ["logs", "alerts", "checks", "docker"];
 
 /// Syslog dos equipamentos e eventos da aplicação (tela `/logs`).
 pub struct Logs;
@@ -271,6 +276,70 @@ impl GrepSource for Checks {
     }
 }
 
+/// Saída de um container Docker (stdout e stderr) na janela.
+pub struct DockerLogs;
+
+impl DockerLogs {
+    /// O `stderr` pesa como erro na ordenação por gravidade.
+    fn rank(stream: &str) -> i16 {
+        if stream == "stderr" {
+            3
+        } else {
+            6
+        }
+    }
+}
+
+#[async_trait]
+impl GrepSource for DockerLogs {
+    async fn scan(
+        &self,
+        _ctx: &AppContext,
+        filter: &GrepFilter,
+    ) -> AppResult<Result<Scan, String>> {
+        let Some(identifier) = filter.container.as_deref() else {
+            return Ok(Err(
+                "Informe 'container' (nome ou id; get_docker_containers lista)".into(),
+            ));
+        };
+        let container = match resolve_container(identifier).await {
+            Ok(container) => container,
+            Err(message) => return Ok(Err(message)),
+        };
+        let entries = match engine::container_logs(
+            &container.id,
+            engine::LogFilters {
+                tail: SCAN_CAP.to_string(),
+                since: filter.since.timestamp(),
+                until: filter.until.timestamp(),
+                timestamps: true,
+            },
+        )
+        .await
+        {
+            Ok(entries) => entries,
+            Err(error) => return Ok(Err(unavailable_message(&error))),
+        };
+        let origin = container.display_name();
+        let records: Vec<GrepRecord> = entries
+            .into_iter()
+            .map(|entry| GrepRecord {
+                at: DateTime::parse_from_rfc3339(&entry.timestamp)
+                    .map_or(filter.until, |at| at.with_timezone(&Utc)),
+                origin: origin.clone(),
+                rank: Self::rank(&entry.stream),
+                severity: entry.stream,
+                text: entry.message,
+                log_id: None,
+            })
+            .collect();
+        Ok(Ok(Scan {
+            capped: records.len() as u64 >= SCAN_CAP,
+            records,
+        }))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -287,5 +356,6 @@ mod tests {
     fn gravidade_ordena_do_pior_para_o_melhor() {
         assert!(alert_rank("critical") < alert_rank("warning"));
         assert!(check_rank("down") < check_rank("warning"));
+        assert!(DockerLogs::rank("stderr") < DockerLogs::rank("stdout"));
     }
 }

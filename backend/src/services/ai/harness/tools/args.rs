@@ -100,6 +100,25 @@ impl ToolArgs {
         }
     }
 
+    /// Lista de textos não vazios. Um texto solto vale como lista de um.
+    #[must_use]
+    pub fn texts(&self, key: &str) -> Vec<String> {
+        let items = match self.values.get(key) {
+            Some(Value::Array(items)) => items.as_slice(),
+            Some(single) => std::slice::from_ref(single),
+            None => &[],
+        };
+        items
+            .iter()
+            .filter_map(|item| match item {
+                Value::String(text) => Some(text.trim().to_string()),
+                Value::Number(number) => Some(number.to_string()),
+                _ => None,
+            })
+            .filter(|text| !text.is_empty())
+            .collect()
+    }
+
     /// Lista de portas; entradas fora de `1..=65535` são descartadas.
     #[must_use]
     pub fn ports(&self, key: &str) -> Option<Vec<u16>> {
@@ -127,6 +146,14 @@ mod tests {
         let args = ToolArgs::parse("não é json");
         assert_eq!(args.text("target"), None);
         assert!(!args.flag("x"));
+    }
+
+    #[test]
+    fn lista_de_textos_aceita_texto_solto_e_descarta_vazios() {
+        let args = ToolArgs::parse(r#"{"a": [" Borda ", "", 7, null], "b": "MPPT"}"#);
+        assert_eq!(args.texts("a"), vec!["Borda", "7"]);
+        assert_eq!(args.texts("b"), vec!["MPPT"]);
+        assert!(args.texts("c").is_empty());
     }
 
     #[test]
