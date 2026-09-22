@@ -82,6 +82,33 @@ pub fn downsample(samples: &[Sample], max_points: usize) -> Vec<Sample> {
         .collect()
 }
 
+/// Serializa um instante em RFC 3339 (para `#[serde(serialize_with)]`).
+///
+/// # Errors
+///
+/// Os do serializador.
+pub fn serialize_rfc3339<S: serde::Serializer>(
+    at: &DateTime<Utc>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(&at.to_rfc3339())
+}
+
+/// Versão opcional de [`serialize_rfc3339`].
+///
+/// # Errors
+///
+/// Os do serializador.
+pub fn serialize_rfc3339_opt<S: serde::Serializer>(
+    at: &Option<DateTime<Utc>>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    match at {
+        Some(at) => serializer.serialize_str(&at.to_rfc3339()),
+        None => serializer.serialize_none(),
+    }
+}
+
 /// Converte para os pontos do gráfico, já reduzidos.
 #[must_use]
 pub fn chart_points(samples: &[Sample]) -> Vec<AiChartPoint> {

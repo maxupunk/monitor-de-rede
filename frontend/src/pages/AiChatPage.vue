@@ -9,11 +9,11 @@
           variant="outlined"
           color="primary"
           size="small"
-          prepend-icon="mdi-delete-outline"
-          :disabled="aiStore.messages.length === 0"
-          @click="aiStore.clearMessages()"
+          prepend-icon="mdi-plus"
+          :disabled="aiStore.messages.length === 0 || aiStore.isStreaming"
+          @click="aiStore.newConversation()"
         >
-          Limpar Conversa
+          Nova conversa
         </v-btn>
         <v-btn
           variant="text"
@@ -60,6 +60,15 @@
           </div>
         </v-card>
 
+        <!-- Card: Conversas Salvas -->
+        <v-card class="rounded-lg pa-3" variant="outlined">
+          <div class="d-flex align-center ga-2 mb-2">
+            <v-icon color="primary" size="18">mdi-history</v-icon>
+            <span class="text-subtitle-2 font-weight-bold">Conversas</span>
+          </div>
+          <AiConversationList />
+        </v-card>
+
         <!-- Card: Ações Rápidas -->
         <v-card class="rounded-lg pa-3" variant="outlined">
           <div class="d-flex align-center ga-2 mb-2">
@@ -89,18 +98,8 @@
             <span class="text-subtitle-2 font-weight-bold">Ferramentas Autônomas</span>
           </div>
           <ul class="text-caption text-medium-emphasis pl-4 d-flex flex-column ga-2">
-            <li><strong>ICMP Ping:</strong> Medição de RTT médio, jitter e perda de pacotes.</li>
-            <li>
-              <strong>Traceroute:</strong> Rastreamento de saltos e identificação de rotas
-              degradadas.
-            </li>
-            <li>
-              <strong>Port Scan:</strong> Verificação de conectividade TCP em portas essenciais.
-            </li>
-            <li><strong>Playbooks:</strong> Checklists completos de internet e equipamentos.</li>
-            <li>
-              <strong>Base de Conhecimento:</strong> Orientações sobre SNMP, WireGuard VPN e
-              alertas.
+            <li v-for="capability in capabilities" :key="capability.title">
+              <strong>{{ capability.title }}:</strong> {{ capability.text }}
             </li>
           </ul>
         </v-card>
@@ -117,6 +116,22 @@
             class="px-4 py-2 border-b bg-surface d-flex align-center justify-space-between flex-wrap ga-2"
           >
             <div class="d-flex align-center ga-2">
+              <v-menu location="bottom start" :close-on-content-click="false">
+                <template #activator="{ props: menuProps }">
+                  <v-btn
+                    v-bind="menuProps"
+                    icon="mdi-history"
+                    size="small"
+                    variant="text"
+                    color="primary"
+                    class="d-md-none"
+                    title="Conversas salvas"
+                  />
+                </template>
+                <v-card class="pa-3" min-width="280" max-width="340">
+                  <AiConversationList />
+                </v-card>
+              </v-menu>
               <v-icon color="primary" size="20">mdi-chat-processing-outline</v-icon>
               <span class="text-subtitle-2 font-weight-bold">Canal de Diagnóstico Interativo</span>
               <v-chip size="x-small" color="primary" variant="outlined" class="font-mono">
@@ -142,15 +157,26 @@
               >
                 Ferramentas Ativas
               </v-chip>
+              <v-chip
+                v-if="aiStore.settings?.allowActions"
+                size="x-small"
+                color="warning"
+                variant="tonal"
+                prepend-icon="mdi-hand-back-right-outline"
+                title="A IA pode propor ações; cada uma espera a sua confirmação"
+              >
+                Ações com confirmação
+              </v-chip>
               <v-btn
                 v-if="aiStore.messages.length > 0"
                 variant="text"
-                color="grey"
+                color="primary"
                 size="x-small"
-                prepend-icon="mdi-delete-outline"
-                @click="aiStore.clearMessages()"
+                prepend-icon="mdi-plus"
+                :disabled="aiStore.isStreaming"
+                @click="aiStore.newConversation()"
               >
-                Limpar
+                Nova
               </v-btn>
             </div>
           </div>
@@ -322,6 +348,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useAiStore } from '@/stores/ai'
 import PageHeader from '@/components/PageHeader.vue'
 import AiChatMessage from '@/components/ai/AiChatMessage.vue'
+import AiConversationList from '@/components/ai/AiConversationList.vue'
 import { responseStyleOption } from '@/components/ai/aiResponseStyle'
 
 const aiStore = useAiStore()
@@ -353,13 +380,25 @@ const activeModelLabel = computed(() => {
 
 const responseStyle = computed(() => responseStyleOption(aiStore.settings?.responseStyle))
 
+const capabilities = [
+  { title: 'Dados do sistema', text: 'interfaces, monitores, histórico de uptime e métricas.' },
+  { title: 'Logs', text: 'syslog agrupado por padrão, com os erros recorrentes em destaque.' },
+  { title: 'Causa raiz', text: 'correlação pela topologia e comparação com o normal.' },
+  { title: 'Gráficos', text: 'latência, tráfego, CPU/memória e padrão por hora.' },
+  { title: 'Testes ativos', text: 'ping, traceroute, portas, DNS e playbooks.' },
+  {
+    title: 'Ações',
+    text: 'silenciar alerta, janela de manutenção e monitor — só com confirmação.',
+  },
+]
+
 const quickPrompts = [
   'Testar conectividade e latência com a Internet',
   'Quais dispositivos estão offline ou com instabilidade?',
   'Resumir os alertas críticos das últimas horas',
   'Mostrar o gráfico de latência das últimas 24h do gateway',
   'Quais interfaces estão caídas ou saturadas?',
-  'Como funciona o probe WireGuard e quando utilizá-lo?',
+  'Quais erros se repetem nos logs das últimas 24h?',
 ]
 
 const suggestionCategories = [

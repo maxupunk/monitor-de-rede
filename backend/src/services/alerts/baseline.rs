@@ -21,7 +21,7 @@ use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    models::monitor_results_hourly,
+    models::{monitor_results, monitor_results_hourly},
     services::shared::errors::{AppError, AppResult},
 };
 
@@ -398,9 +398,113 @@ fn uptime_deviation_percent(current: Option<f64>, baseline: Option<f64>) -> Opti
     }
 }
 
+/// O que a última checagem representa em latência, perda e disponibilidade.
+///
+/// A checagem isolada não mede perda: `down` conta como 100%, `warning` como
+/// degradação parcial (20%) e o resto como 0%.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct CurrentReading {
+    pub latency_ms: Option<f64>,
+    pub packet_loss_percent: Option<f64>,
+    pub uptime_percent: Option<f64>,
+}
+
+impl CurrentReading {
+    #[must_use]
+    pub fn from_result(result: Option<&monitor_results::Model>) -> Self {
+        let Some(result) = result else {
+            return Self::default();
+        };
+        let loss = match result.status.as_str() {
+            "down" => 100.0,
+            "warning" => 20.0,
+            _ => 0.0,
+        };
+        let uptime = if result.status == "up" { 100.0 } else { 0.0 };
+        Self {
+            latency_ms: result.latency_ms,
+            packet_loss_percent: Some(loss),
+            uptime_percent: Some(uptime),
+        }
+    }
+}
+
+/// Baseline do monitor comparada com a checagem mais recente.
+#[derive(Debug, Clone)]
+pub struct BaselineSnapshot {
+    /// Baseline pura, como sai do histórico.
+    pub baseline: MonitorBaseline,
+    /// Baseline com desvios e Z-Scores do valor atual.
+    pub enriched: MonitorBaseline,
+    pub current: CurrentReading,
+    pub latest: Option<monitor_results::Model>,
+}
+
+/// # Errors
+///
+/// Propaga erro do banco.
+pub async fn snapshot<C>(db: &C, monitor_id: i64) -> AppResult<BaselineSnapshot>
+where
+    C: ConnectionTrait,
+{
+    let baseline = for_monitor(db, monitor_id).await?;
+    let latest = monitor_results::Entity::find()
+        .filter(monitor_results::Column::MonitorId.eq(monitor_id))
+        .order_by_desc(monitor_results::Column::StartedAt)
+        .one(db)
+        .await?;
+    let current = CurrentReading::from_result(latest.as_ref());
+    let enriched = with_current_value(
+        &baseline,
+        current.latency_ms,
+        current.packet_loss_percent,
+        current.uptime_percent,
+    );
+    Ok(BaselineSnapshot {
+        baseline,
+        enriched,
+        current,
+        latest,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn checagem(status: &str, latency: Option<f64>) -> monitor_results::Model {
+        let now = Utc::now().into();
+        monitor_results::Model {
+            id: 1,
+            monitor_id: 1,
+            probe_id: None,
+            status: status.into(),
+            started_at: now,
+            finished_at: now,
+            duration_ms: 10,
+            latency_ms: latency,
+            message: None,
+            data: None,
+            created_at: now,
+        }
+    }
+
+    #[test]
+    fn leitura_atual_traduz_o_status_da_ultima_checagem() {
+        assert_eq!(CurrentReading::from_result(None), CurrentReading::default());
+
+        let up = CurrentReading::from_result(Some(&checagem("up", Some(12.0))));
+        assert_eq!(up.latency_ms, Some(12.0));
+        assert_eq!(up.packet_loss_percent, Some(0.0));
+        assert_eq!(up.uptime_percent, Some(100.0));
+
+        let warning = CurrentReading::from_result(Some(&checagem("warning", Some(90.0))));
+        assert_eq!(warning.packet_loss_percent, Some(20.0));
+        assert_eq!(warning.uptime_percent, Some(0.0));
+
+        let down = CurrentReading::from_result(Some(&checagem("down", None)));
+        assert_eq!(down.packet_loss_percent, Some(100.0));
+    }
 
     #[test]
     fn desvio_percentual_acima_da_baseline() {

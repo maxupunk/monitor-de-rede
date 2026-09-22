@@ -37,18 +37,36 @@
           </template>
         </v-tooltip>
 
-        <v-tooltip location="bottom" text="Limpar conversa">
+        <v-menu v-model="historyOpen" location="bottom end" :close-on-content-click="false">
+          <template #activator="{ props: menuProps }">
+            <v-btn
+              v-bind="menuProps"
+              icon
+              size="small"
+              variant="text"
+              color="primary"
+              title="Conversas salvas"
+            >
+              <v-icon size="18">mdi-history</v-icon>
+            </v-btn>
+          </template>
+          <v-card class="pa-3" min-width="280" max-width="340">
+            <AiConversationList @selected="historyOpen = false" />
+          </v-card>
+        </v-menu>
+
+        <v-tooltip location="bottom" text="Nova conversa">
           <template #activator="{ props: tipProps }">
             <v-btn
               v-bind="tipProps"
               icon
               size="small"
               variant="text"
-              color="grey"
-              :disabled="aiStore.messages.length === 0"
-              @click="aiStore.clearMessages()"
+              color="primary"
+              :disabled="aiStore.messages.length === 0 || aiStore.isStreaming"
+              @click="aiStore.newConversation()"
             >
-              <v-icon size="18">mdi-delete-outline</v-icon>
+              <v-icon size="18">mdi-plus</v-icon>
             </v-btn>
           </template>
         </v-tooltip>
@@ -214,11 +232,13 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useAiStore } from '@/stores/ai'
 import AiChatMessage from './AiChatMessage.vue'
+import AiConversationList from './AiConversationList.vue'
 import { responseStyleOption } from './aiResponseStyle'
 
 const aiStore = useAiStore()
 const inputContent = ref('')
 const chatContainer = ref<HTMLElement | null>(null)
+const historyOpen = ref(false)
 
 const activeModelLabel = computed(() => {
   const settings = aiStore.settings

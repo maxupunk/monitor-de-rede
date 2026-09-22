@@ -14,7 +14,6 @@ use crate::{
         audit::{
             AuditAction, AuditActor, AuditChanges, AuditEntryInput, AuditService, ResourceType,
         },
-        events::EventBus,
         maintenance_windows::{self, MaintenanceWindowInput as ServiceInput},
         shared::errors::{AppError, AppResult},
     },
@@ -62,7 +61,7 @@ async fn store(
 ) -> AppResult<Response> {
     let created_by = actor_id(&ctx, &headers).await?;
     let row = maintenance_windows::create(&ctx.db, into_service_input(input), created_by).await?;
-    emit_maintenance_windows_updated(&ctx).await;
+    maintenance_windows::publish_updated(&ctx).await;
 
     let _ = AuditService::new(&ctx.db)
         .log(
@@ -98,7 +97,7 @@ async fn update(
         .await?
         .ok_or_else(|| AppError::not_found("Janela de manutenção não encontrada"))?;
     let row = maintenance_windows::update(&ctx.db, id, into_service_input(input)).await?;
-    emit_maintenance_windows_updated(&ctx).await;
+    maintenance_windows::publish_updated(&ctx).await;
 
     let _ = AuditService::new(&ctx.db)
         .log(
@@ -132,7 +131,7 @@ async fn destroy(
         .await?
         .ok_or_else(|| AppError::not_found("Janela de manutenção não encontrada"))?;
     maintenance_windows::delete(&ctx.db, id).await?;
-    emit_maintenance_windows_updated(&ctx).await;
+    maintenance_windows::publish_updated(&ctx).await;
 
     let _ = AuditService::new(&ctx.db)
         .log(
@@ -154,21 +153,6 @@ async fn destroy(
         .await;
 
     Ok(StatusCode::NO_CONTENT.into_response())
-}
-
-async fn emit_maintenance_windows_updated(ctx: &AppContext) {
-    if let Ok(bus) = EventBus::from_context(ctx) {
-        if let Err(error) = bus
-            .publish(
-                &ctx.db,
-                "maintenance_windows:updated",
-                serde_json::json!({}),
-            )
-            .await
-        {
-            tracing::warn!(%error, "falha ao publicar maintenance_windows:updated");
-        }
-    }
 }
 
 pub fn routes() -> Routes {

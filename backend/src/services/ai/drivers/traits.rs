@@ -112,11 +112,38 @@ pub struct AiTool {
     pub function: AiToolFunction,
 }
 
+/// Tokens consumidos numa chamada ao provedor.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AiUsage {
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+}
+
+impl AiUsage {
+    /// Lê o objeto `usage` do protocolo OpenAI; ausente ou vazio vira `None`.
+    #[must_use]
+    pub fn from_openai(value: &serde_json::Value) -> Option<Self> {
+        let field = |name: &str| value.get(name).and_then(serde_json::Value::as_u64);
+        let usage = Self {
+            prompt_tokens: field("prompt_tokens").unwrap_or(0),
+            completion_tokens: field("completion_tokens").unwrap_or(0),
+        };
+        (usage != Self::default()).then_some(usage)
+    }
+
+    pub fn add(&mut self, other: Self) {
+        self.prompt_tokens += other.prompt_tokens;
+        self.completion_tokens += other.completion_tokens;
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct AiChatChunk {
     pub text_delta: Option<String>,
     pub tool_calls: Vec<AiToolCall>,
     pub finish_reason: Option<String>,
+    /// Chega no último pedaço do stream, quando o provedor informa.
+    pub usage: Option<AiUsage>,
 }
 
 pub type AiChunkStream = Pin<Box<dyn Stream<Item = AppResult<AiChatChunk>> + Send>>;
@@ -204,6 +231,26 @@ mod tests {
         assert_eq!(tc.id, "call_123");
         assert_eq!(tc.name, "ping");
         assert_eq!(tc.arguments, "{\"target\":\"1.1.1.1\"}");
+    }
+
+    #[test]
+    fn uso_de_tokens_do_protocolo_openai() {
+        let usage = AiUsage::from_openai(&serde_json::json!({
+            "prompt_tokens": 1200, "completion_tokens": 85, "total_tokens": 1285
+        }));
+        assert_eq!(
+            usage,
+            Some(AiUsage {
+                prompt_tokens: 1200,
+                completion_tokens: 85
+            })
+        );
+        assert_eq!(AiUsage::from_openai(&serde_json::json!(null)), None);
+
+        let mut total = AiUsage::default();
+        total.add(usage.unwrap());
+        total.add(usage.unwrap());
+        assert_eq!(total.completion_tokens, 170);
     }
 
     #[test]

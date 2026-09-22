@@ -51,6 +51,12 @@
             Novo monitor
           </v-btn>
 
+          <AiAskButton
+            class="flex-grow-1 flex-sm-grow-0"
+            :prompt="aiDevicePrompt"
+            :context="aiDeviceContext"
+          />
+
           <v-btn-group
             v-if="can.anyHeaderAction"
             color="primary"
@@ -745,6 +751,7 @@ import VpnFirewallHintsDialog from '@/components/VpnFirewallHintsDialog.vue'
 import PortScanDialog from '@/components/PortScanDialog.vue'
 import TracerouteDialog from '@/components/TracerouteDialog.vue'
 import DiagnosticPlaybookDialog from '@/components/DiagnosticPlaybookDialog.vue'
+import AiAskButton from '@/components/ai/AiAskButton.vue'
 import MonitorFormDialog from '@/components/MonitorFormDialog.vue'
 import DeviceDialog from '@/components/DeviceDialog.vue'
 import SnmpProfilesDialog from '@/components/devices/SnmpProfilesDialog.vue'
@@ -869,6 +876,11 @@ const hasMemoryData = computed(() => {
 const selectedIfIndexes = ref<number[]>([])
 
 const deviceId = computed(() => Number(route.params.id))
+const aiDevicePrompt = computed(
+  () =>
+    `Faça um diagnóstico do dispositivo ${detailStore.device?.name || `#${deviceId.value}`}: estado atual, alertas, interfaces com problema e erros recentes nos logs.`
+)
+const aiDeviceContext = computed(() => ({ deviceId: deviceId.value }))
 
 onMounted(() => {
   if (deviceId.value) {

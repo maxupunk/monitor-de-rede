@@ -237,6 +237,23 @@ where
     Ok(())
 }
 
+/// Avisa as telas que a lista de janelas mudou. Best-effort: a gravação já
+/// concluiu quando chegamos aqui.
+pub async fn publish_updated(ctx: &loco_rs::prelude::AppContext) {
+    if let Ok(bus) = crate::services::events::EventBus::from_context(ctx) {
+        if let Err(error) = bus
+            .publish(
+                &ctx.db,
+                "maintenance_windows:updated",
+                serde_json::json!({}),
+            )
+            .await
+        {
+            tracing::warn!(%error, "falha ao publicar maintenance_windows:updated");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

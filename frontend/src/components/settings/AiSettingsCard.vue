@@ -721,14 +721,13 @@
           </div>
         </v-col>
 
-        <!-- Permissões de Ferramentas -->
+        <!-- Ferramentas, ações e IA proativa -->
         <v-col cols="12">
-          <v-checkbox
-            v-model="form.allowActiveTools"
-            color="primary"
-            density="compact"
-            hide-details
-            label="Permitir execução de ferramentas ativas de rede (Ping, Traceroute, Scan de Portas e Playbooks)"
+          <AiAutomationSettings
+            v-model:allow-active-tools="form.allowActiveTools"
+            v-model:require-tool-confirmation="form.requireToolConfirmation"
+            v-model:allow-actions="form.allowActions"
+            v-model:proactive="form.proactive"
           />
         </v-col>
       </v-row>
@@ -793,6 +792,8 @@ import { useAiStore, type AiSettings } from '@/stores/ai'
 import { RESPONSE_STYLE_OPTIONS, responseStyleOption } from '@/components/ai/aiResponseStyle'
 import { formatDecimalBytes } from '@/utils/formatters'
 import AiModelSearchDialog from './AiModelSearchDialog.vue'
+import AiAutomationSettings from './AiAutomationSettings.vue'
+import type { AiProactiveSettings } from '@/bindings/AiProactiveSettings'
 
 const emit = defineEmits<{
   (e: 'saved', message: string, color?: string): void
@@ -832,9 +833,21 @@ const form = reactive<AiSettings>({
   ollamaModel: 'llama3.2',
   allowActiveTools: true,
   requireToolConfirmation: false,
+  allowActions: false,
   responseStyle: 'concise',
+  proactive: defaultProactive(),
   customSystemPrompt: '',
 })
+
+function defaultProactive(): AiProactiveSettings {
+  return {
+    incidentSummaries: false,
+    incidentMinSeverity: 'critical',
+    maxSummariesPerHour: 6,
+    digest: 'off',
+    digestHour: 8,
+  }
+}
 
 interface ModelOption {
   id: string
@@ -1216,6 +1229,8 @@ onMounted(async () => {
   await aiStore.loadSettings()
   if (aiStore.settings) {
     Object.assign(form, aiStore.settings)
+    // Cópia própria: editar o formulário não pode mexer na store antes de salvar.
+    form.proactive = { ...defaultProactive(), ...aiStore.settings.proactive }
   }
   if (!form.opencodeBaseUrl) {
     form.opencodeBaseUrl = 'https://opencode.ai/zen/v1'
@@ -1282,6 +1297,9 @@ async function handleSave() {
   ) {
     form.openrouterModel = 'openrouter/free'
   }
+
+  // Campo numérico apagado chega como '' — o backend exige um inteiro.
+  form.proactive.maxSummariesPerHour = Number(form.proactive.maxSummariesPerHour) || 6
 
   const res = await aiStore.saveSettings({ ...form })
   if (res.success) {

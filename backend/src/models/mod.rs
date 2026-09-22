@@ -1,4 +1,5 @@
 pub mod _entities;
+pub mod ai_conversations;
 pub mod alert_events;
 pub mod alert_rules;
 pub mod audit_logs;

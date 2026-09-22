@@ -24,6 +24,10 @@ use crate::{
         },
         maintenance::resource_cleanup::ResourceCleanupService,
         monitoring::{
+            creation::{
+                self as monitor_creation, build_configuration, canonical_snmp_interval,
+                ensure_reach_allowed, SUPPORTED_MONITOR_TYPES,
+            },
             device_status,
             execution_guard::{
                 calculate_smart_timeout_seconds, effective_timeout_seconds, try_acquire_monitor,
@@ -33,13 +37,11 @@ use crate::{
             managed::{self, ProposedMonitor},
             ping_diagnostics,
             presenter::{present_monitors, MonitorResultPresentation, RECENT_RESULTS_LIMIT},
-            reachability,
             result_processor::process_result,
             runner::{run_monitor, RunOptions},
             saas::{get_saas_catalog, provision_saas_presets},
             uptime::uptime_for_monitor,
         },
-        preferences,
         shared::{
             errors::{AppError, AppResult},
             pagination::paginate,
@@ -47,141 +49,6 @@ use crate::{
         snmp::service as snmp_service,
     },
 };
-
-fn build_configuration(
-    kind: &str,
-    supplied: Option<serde_json::Value>,
-    target: Option<&str>,
-    port: Option<i64>,
-    fallback: Option<&serde_json::Value>,
-) -> serde_json::Value {
-    let mut config = supplied
-        .or_else(|| fallback.cloned())
-        .unwrap_or_else(|| serde_json::json!({}));
-    let serde_json::Value::Object(ref mut object) = config else {
-        return serde_json::json!({});
-    };
-    // O limite de resposta é definido automaticamente a partir do tipo e do
-    // intervalo do monitor. Remove também valores salvos por versões antigas.
-    object.remove("timeoutMs");
-    if let Some(target) = target.filter(|target| !target.trim().is_empty()) {
-        match kind.to_lowercase().as_str() {
-            "ping" | "snmp" => {
-                object.entry("host").or_insert_with(|| target.into());
-            }
-            "http" | "https" => {
-                object.entry("url").or_insert_with(|| {
-                    if target.starts_with("http") {
-                        target.into()
-                    } else {
-                        format!("http://{target}").into()
-                    }
-                });
-            }
-            "tcp" => {
-                object.entry("host").or_insert_with(|| target.into());
-            }
-            "dns" => {
-                object.entry("domain").or_insert_with(|| target.into());
-            }
-            _ => {}
-        }
-    }
-    if let Some(port) = port.filter(|port| (1..=65535).contains(port)) {
-        object.entry("port").or_insert_with(|| port.into());
-    }
-    config
-}
-
-const SUPPORTED_MONITOR_TYPES: &[&str] = &[
-    "ping",
-    "http",
-    "https",
-    "tcp",
-    "dns",
-    "snmp",
-    "ssl",
-    "port_scan",
-];
-
-fn require_kind_name(input: &MonitorInput) -> AppResult<(&str, &str)> {
-    let kind = input
-        .monitor_type
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| AppError::validation("Tipo do monitor é obrigatório"))?;
-    if !SUPPORTED_MONITOR_TYPES.contains(&kind.to_lowercase().as_str()) {
-        return Err(AppError::validation(format!(
-            "Tipo de monitor não suportado: '{kind}'."
-        )));
-    }
-    let name = input
-        .name
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| AppError::validation("Nome do monitor é obrigatório"))?;
-    if name.contains('\n') || name.contains('\r') {
-        return Err(AppError::validation(
-            "Nome do monitor não pode conter quebra de linha.",
-        ));
-    }
-    if let Some(interval) = input.interval_seconds {
-        if interval < 1 {
-            return Err(AppError::validation(
-                "O intervalo deve ser de pelo menos 1 segundo.",
-            ));
-        }
-    }
-    Ok((kind, name))
-}
-
-async fn canonical_snmp_interval(
-    ctx: &AppContext,
-    device_id: Option<i64>,
-    supplied_interval: Option<i32>,
-) -> AppResult<Option<i32>> {
-    let Some(device_id) = device_id else {
-        return Ok(None);
-    };
-    let device = devices::Entity::find_by_id(device_id)
-        .one(&ctx.db)
-        .await?
-        .ok_or_else(|| AppError::not_found("Dispositivo não encontrado"))?;
-    if let Some(supplied_interval) = supplied_interval.map(|value| value.max(1)) {
-        if supplied_interval != device.snmp_poll_interval_seconds {
-            return Err(AppError::validation(
-                "O intervalo de coleta SNMP é definido no dispositivo e se aplica a todos os itens SNMP vinculados a ele",
-            ));
-        }
-    }
-    Ok(Some(device.snmp_poll_interval_seconds))
-}
-
-/// Recusa um monitor de alcance apontado para um dispositivo que a rede não
-/// alcança.
-///
-/// A pergunta é do domínio ([`reachability`]); o que este controller faz é só
-/// carregar a linha do dispositivo para poder fazê-la. Sem `device_id` não há
-/// o que checar: um monitor solto aponta para um alvo que o operador informou.
-async fn ensure_reach_allowed(
-    ctx: &AppContext,
-    device_id: Option<i64>,
-    kind: &str,
-) -> AppResult<()> {
-    if !reachability::is_reach_check(kind) {
-        return Ok(());
-    }
-    let Some(device_id) = device_id else {
-        return Ok(());
-    };
-    let device = devices::Entity::find_by_id(device_id)
-        .one(&ctx.db)
-        .await?
-        .ok_or_else(|| AppError::not_found("Dispositivo não encontrado"))?;
-    reachability::ensure_allowed_for_device(&device, kind)
-}
 
 async fn index(
     State(ctx): State<AppContext>,
@@ -212,50 +79,7 @@ async fn store(
     headers: HeaderMap,
     Json(input): Json<MonitorInput>,
 ) -> AppResult<Response> {
-    let (kind, name) = require_kind_name(&input)?;
-    let kind = kind.to_string();
-    let name = name.to_string();
-    ensure_reach_allowed(&ctx, input.device_id, &kind).await?;
-    let enabled = input.enabled.or(input.is_enabled).unwrap_or(true);
-    // O padrão vem das preferências, não de um literal: é este o ponto de
-    // consumo que faz "Intervalo padrão de coleta por Ping" significar alguma
-    // coisa. Monitor SNMP vinculado a dispositivo continua herdando o intervalo
-    // do próprio dispositivo — a preferência não o atropela.
-    let intervalo_padrao = preferences::load(&ctx.db)
-        .await?
-        .default_ping_interval_seconds;
-    let interval_seconds = if kind.eq_ignore_ascii_case("snmp") {
-        canonical_snmp_interval(&ctx, input.device_id, input.interval_seconds)
-            .await?
-            .unwrap_or_else(|| input.interval_seconds.unwrap_or(intervalo_padrao).max(1))
-    } else {
-        input.interval_seconds.unwrap_or(intervalo_padrao).max(1)
-    };
-    let timeout_seconds = calculate_smart_timeout_seconds(&kind, interval_seconds)
-        .min((interval_seconds - 1).max(1))
-        .max(1);
-    let config = build_configuration(
-        &kind,
-        input.configuration,
-        input.target.as_deref(),
-        input.port,
-        None,
-    );
-    let row = monitors::ActiveModel {
-        device_id: Set(input.device_id),
-        probe_id: Set(input.probe_id),
-        r#type: Set(kind),
-        name: Set(name),
-        configuration: Set(config),
-        interval_seconds: Set(interval_seconds),
-        timeout_seconds: Set(timeout_seconds),
-        retry_count: Set(input.retry_count.unwrap_or(3).max(0)),
-        enabled: Set(enabled),
-        status: Set(input.status.unwrap_or_else(|| "unknown".into())),
-        ..Default::default()
-    }
-    .insert(&ctx.db)
-    .await?;
+    let row = monitor_creation::create(&ctx.db, input).await?;
     let mut response = present_monitors(&ctx.db, vec![row.clone()], RECENT_RESULTS_LIMIT).await?;
     let created_response = response.remove(0);
 
@@ -400,9 +224,9 @@ async fn update(
     // checar só o que o payload informou deixaria passar a troca de dispositivo
     // de um monitor de ping que já existia, e é exatamente esse o caminho que
     // devolveria o ping ao servidor depois de o boot tê-lo removido.
-    ensure_reach_allowed(&ctx, device_id, &kind).await?;
+    ensure_reach_allowed(&ctx.db, device_id, &kind).await?;
     let interval_seconds = if kind.eq_ignore_ascii_case("snmp") {
-        canonical_snmp_interval(&ctx, device_id, input.interval_seconds)
+        canonical_snmp_interval(&ctx.db, device_id, input.interval_seconds)
             .await?
             .unwrap_or_else(|| {
                 input
@@ -682,39 +506,16 @@ async fn baseline_stats(State(ctx): State<AppContext>, Path(id): Path<i64>) -> A
         .await?
         .ok_or_else(|| AppError::not_found("Monitor não encontrado"))?;
 
-    let baseline = crate::services::alerts::baseline::for_monitor(&ctx.db, id).await?;
+    let crate::services::alerts::baseline::BaselineSnapshot {
+        baseline,
+        enriched,
+        current,
+        latest: latest_result,
+    } = crate::services::alerts::baseline::snapshot(&ctx.db, id).await?;
+    let latency_ms = current.latency_ms;
+    let packet_loss = current.packet_loss_percent;
+    let uptime_percent = current.uptime_percent;
 
-    // Busca o resultado mais recente para enriquecer com o estado corrente
-    let latest_result = monitor_results::Entity::find()
-        .filter(monitor_results::Column::MonitorId.eq(id))
-        .order_by_desc(monitor_results::Column::StartedAt)
-        .one(&ctx.db)
-        .await?;
-
-    let (latency_ms, packet_loss, uptime_percent) = if let Some(ref res) = latest_result {
-        let loss = if res.status == "down" {
-            Some(100.0)
-        } else if res.status == "warning" {
-            Some(20.0)
-        } else {
-            Some(0.0)
-        };
-        let uptime = if res.status == "up" {
-            Some(100.0)
-        } else {
-            Some(0.0)
-        };
-        (res.latency_ms, loss, uptime)
-    } else {
-        (None, None, None)
-    };
-
-    let enriched = crate::services::alerts::baseline::with_current_value(
-        &baseline,
-        latency_ms,
-        packet_loss,
-        uptime_percent,
-    );
     let adaptive_latency = match crate::services::alerts::adaptive_latency::assess(
         &ctx.db,
         &monitor,
@@ -798,22 +599,4 @@ pub fn routes() -> Routes {
         .add("/{id}/alerts", get(alerts))
         .add("/{id}/uptime", get(uptime))
         .add("/{id}/baseline", get(baseline_stats))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::build_configuration;
-
-    #[test]
-    fn configuracao_do_monitor_descarta_timeout_informado() {
-        let config = build_configuration(
-            "ping",
-            Some(serde_json::json!({ "host": "127.0.0.1", "timeoutMs": 60_000 })),
-            None,
-            None,
-            None,
-        );
-
-        assert!(config.get("timeoutMs").is_none());
-    }
 }

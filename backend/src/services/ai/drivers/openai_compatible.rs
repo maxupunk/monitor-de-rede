@@ -9,7 +9,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::codec::{BytesCodec, FramedRead};
 
 use super::traits::{
-    AiChatChunk, AiChatOptions, AiChunkStream, AiDriver, AiMessage, AiTool, AiToolCall,
+    AiChatChunk, AiChatOptions, AiChunkStream, AiDriver, AiMessage, AiTool, AiToolCall, AiUsage,
 };
 use crate::{
     dtos::ai::TestConnectionResponse,
@@ -136,6 +136,193 @@ fn clean_provider_error_message(
     format!("Provedor {display_name} retornou HTTP {status}: {body}")
 }
 
+/// Lê o stream SSE do provedor numa task e devolve os pedaços já interpretados.
+fn spawn_sse_reader(res: reqwest::Response) -> AiChunkStream {
+    let (sender, receiver) = mpsc::channel(64);
+
+    tokio::spawn(async move {
+        let byte_stream = res
+            .bytes_stream()
+            .map(|item| item.map_err(std::io::Error::other));
+        let reader = tokio_util::io::StreamReader::new(byte_stream);
+        let mut framed = FramedRead::new(reader, BytesCodec::new());
+
+        let mut pending_buffer = String::new();
+        let mut accumulated_tools: HashMap<usize, (String, String, String)> = HashMap::new();
+
+        while let Some(chunk_res) = framed.next().await {
+            let bytes = match chunk_res {
+                Ok(b) => b,
+                Err(e) => {
+                    let _ = sender
+                        .send(Err(AppError::service_unavailable(format!(
+                            "Erro no stream de dados: {e}"
+                        ))))
+                        .await;
+                    return;
+                }
+            };
+
+            let text = match String::from_utf8(bytes.to_vec()) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+
+            pending_buffer.push_str(&text);
+
+            while let Some(pos) = pending_buffer.find('\n') {
+                let line = pending_buffer[..pos].trim().to_string();
+                pending_buffer = pending_buffer[pos + 1..].to_string();
+
+                if line.is_empty() || line.starts_with(':') {
+                    continue;
+                }
+
+                if let Some(data_str) = line.strip_prefix("data: ") {
+                    let data_str = data_str.trim();
+                    if data_str == "[DONE]" {
+                        if !accumulated_tools.is_empty() {
+                            let mut calls = Vec::new();
+                            for (_, (mut id, name, args)) in accumulated_tools.drain() {
+                                if id.is_empty() {
+                                    id = format!(
+                                        "call_{}",
+                                        &uuid::Uuid::new_v4().simple().to_string()[..12]
+                                    );
+                                }
+                                calls.push(AiToolCall {
+                                    id,
+                                    name,
+                                    arguments: args,
+                                });
+                            }
+                            let _ = sender
+                                .send(Ok(AiChatChunk {
+                                    text_delta: None,
+                                    tool_calls: calls,
+                                    finish_reason: Some("tool_calls".into()),
+                                    usage: None,
+                                }))
+                                .await;
+                        }
+                        let _ = sender
+                            .send(Ok(AiChatChunk {
+                                text_delta: None,
+                                tool_calls: Vec::new(),
+                                finish_reason: Some("stop".into()),
+                                usage: None,
+                            }))
+                            .await;
+                        return;
+                    }
+
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data_str) {
+                        if let Some(usage) = parsed.get("usage").and_then(AiUsage::from_openai) {
+                            if sender
+                                .send(Ok(AiChatChunk {
+                                    usage: Some(usage),
+                                    ..AiChatChunk::default()
+                                }))
+                                .await
+                                .is_err()
+                            {
+                                return;
+                            }
+                        }
+                        if let Some(choices) = parsed.get("choices").and_then(|c| c.as_array()) {
+                            if let Some(choice) = choices.first() {
+                                let delta = choice.get("delta");
+                                let finish_reason = choice
+                                    .get("finish_reason")
+                                    .and_then(|f| f.as_str())
+                                    .map(ToString::to_string);
+
+                                let text_delta = delta
+                                    .and_then(|d| d.get("content"))
+                                    .and_then(|c| c.as_str())
+                                    .map(ToString::to_string);
+
+                                if let Some(tool_calls_json) = delta
+                                    .and_then(|d| d.get("tool_calls"))
+                                    .and_then(|t| t.as_array())
+                                {
+                                    for tc in tool_calls_json {
+                                        let index =
+                                            tc.get("index").and_then(|i| i.as_u64()).unwrap_or(0)
+                                                as usize;
+                                        let id =
+                                            tc.get("id").and_then(|s| s.as_str()).unwrap_or("");
+                                        let func = tc.get("function");
+                                        let name = func
+                                            .and_then(|f| f.get("name"))
+                                            .and_then(|n| n.as_str())
+                                            .unwrap_or("");
+                                        let args = func
+                                            .and_then(|f| f.get("arguments"))
+                                            .and_then(|a| a.as_str())
+                                            .unwrap_or("");
+
+                                        let entry =
+                                            accumulated_tools.entry(index).or_insert_with(|| {
+                                                (String::new(), String::new(), String::new())
+                                            });
+                                        if !id.is_empty() {
+                                            entry.0 = id.to_string();
+                                        }
+                                        if !name.is_empty() {
+                                            entry.1.push_str(name);
+                                        }
+                                        if !args.is_empty() {
+                                            entry.2.push_str(args);
+                                        }
+                                    }
+                                }
+
+                                let mut calls = Vec::new();
+                                if finish_reason.as_deref() == Some("tool_calls")
+                                    && !accumulated_tools.is_empty()
+                                {
+                                    for (_, (mut id, name, args)) in accumulated_tools.drain() {
+                                        if id.is_empty() {
+                                            id = format!(
+                                                "call_{}",
+                                                &uuid::Uuid::new_v4().simple().to_string()[..12]
+                                            );
+                                        }
+                                        calls.push(AiToolCall {
+                                            id,
+                                            name,
+                                            arguments: args,
+                                        });
+                                    }
+                                }
+
+                                if (text_delta.is_some()
+                                    || !calls.is_empty()
+                                    || finish_reason.is_some())
+                                    && sender
+                                        .send(Ok(AiChatChunk {
+                                            text_delta,
+                                            tool_calls: calls,
+                                            finish_reason,
+                                            usage: None,
+                                        }))
+                                        .await
+                                        .is_err()
+                                {
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    Box::pin(ReceiverStream::new(receiver))
+}
+
 #[async_trait]
 impl AiDriver for OpenAiCompatibleDriver {
     fn id(&self) -> &'static str {
@@ -159,6 +346,7 @@ impl AiDriver for OpenAiCompatibleDriver {
             "model": self.model,
             "messages": messages,
             "stream": true,
+            "stream_options": { "include_usage": true },
         });
 
         if !tools.is_empty() {
@@ -213,188 +401,46 @@ impl AiDriver for OpenAiCompatibleDriver {
         }
 
         if !status.is_success() {
-            let err_text = res
+            let mut err_text = res
                 .text()
                 .await
                 .unwrap_or_else(|_| "Erro desconhecido".into());
+
+            // Servidor compatível mais antigo que não conhece `stream_options`:
+            // perde-se só a contagem de tokens, não a resposta.
+            if status == reqwest::StatusCode::BAD_REQUEST && err_text.contains("stream_options") {
+                if let Some(fields) = body.as_object_mut() {
+                    fields.remove("stream_options");
+                }
+                let retry = self
+                    .client
+                    .post(&url)
+                    .headers(self.build_headers()?)
+                    .json(&body)
+                    .send()
+                    .await
+                    .map_err(|err| {
+                        AppError::service_unavailable(format!(
+                            "Falha ao conectar ao provedor {}: {}",
+                            self.display_name, err
+                        ))
+                    })?;
+                status = retry.status();
+                if status.is_success() {
+                    return Ok(spawn_sse_reader(retry));
+                }
+                err_text = retry
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| "Erro desconhecido".into());
+            }
+
             let friendly =
                 clean_provider_error_message(status, &err_text, &self.model, self.display_name);
             return Err(AppError::service_unavailable(friendly));
         }
 
-        let (sender, receiver) = mpsc::channel(64);
-
-        tokio::spawn(async move {
-            let byte_stream = res
-                .bytes_stream()
-                .map(|item| item.map_err(std::io::Error::other));
-            let reader = tokio_util::io::StreamReader::new(byte_stream);
-            let mut framed = FramedRead::new(reader, BytesCodec::new());
-
-            let mut pending_buffer = String::new();
-            let mut accumulated_tools: HashMap<usize, (String, String, String)> = HashMap::new();
-
-            while let Some(chunk_res) = framed.next().await {
-                let bytes = match chunk_res {
-                    Ok(b) => b,
-                    Err(e) => {
-                        let _ = sender
-                            .send(Err(AppError::service_unavailable(format!(
-                                "Erro no stream de dados: {e}"
-                            ))))
-                            .await;
-                        return;
-                    }
-                };
-
-                let text = match String::from_utf8(bytes.to_vec()) {
-                    Ok(s) => s,
-                    Err(_) => continue,
-                };
-
-                pending_buffer.push_str(&text);
-
-                while let Some(pos) = pending_buffer.find('\n') {
-                    let line = pending_buffer[..pos].trim().to_string();
-                    pending_buffer = pending_buffer[pos + 1..].to_string();
-
-                    if line.is_empty() || line.starts_with(':') {
-                        continue;
-                    }
-
-                    if let Some(data_str) = line.strip_prefix("data: ") {
-                        let data_str = data_str.trim();
-                        if data_str == "[DONE]" {
-                            if !accumulated_tools.is_empty() {
-                                let mut calls = Vec::new();
-                                for (_, (mut id, name, args)) in accumulated_tools.drain() {
-                                    if id.is_empty() {
-                                        id = format!(
-                                            "call_{}",
-                                            &uuid::Uuid::new_v4().simple().to_string()[..12]
-                                        );
-                                    }
-                                    calls.push(AiToolCall {
-                                        id,
-                                        name,
-                                        arguments: args,
-                                    });
-                                }
-                                let _ = sender
-                                    .send(Ok(AiChatChunk {
-                                        text_delta: None,
-                                        tool_calls: calls,
-                                        finish_reason: Some("tool_calls".into()),
-                                    }))
-                                    .await;
-                            }
-                            let _ = sender
-                                .send(Ok(AiChatChunk {
-                                    text_delta: None,
-                                    tool_calls: Vec::new(),
-                                    finish_reason: Some("stop".into()),
-                                }))
-                                .await;
-                            return;
-                        }
-
-                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data_str) {
-                            if let Some(choices) = parsed.get("choices").and_then(|c| c.as_array())
-                            {
-                                if let Some(choice) = choices.first() {
-                                    let delta = choice.get("delta");
-                                    let finish_reason = choice
-                                        .get("finish_reason")
-                                        .and_then(|f| f.as_str())
-                                        .map(ToString::to_string);
-
-                                    let text_delta = delta
-                                        .and_then(|d| d.get("content"))
-                                        .and_then(|c| c.as_str())
-                                        .map(ToString::to_string);
-
-                                    if let Some(tool_calls_json) = delta
-                                        .and_then(|d| d.get("tool_calls"))
-                                        .and_then(|t| t.as_array())
-                                    {
-                                        for tc in tool_calls_json {
-                                            let index = tc
-                                                .get("index")
-                                                .and_then(|i| i.as_u64())
-                                                .unwrap_or(0)
-                                                as usize;
-                                            let id =
-                                                tc.get("id").and_then(|s| s.as_str()).unwrap_or("");
-                                            let func = tc.get("function");
-                                            let name = func
-                                                .and_then(|f| f.get("name"))
-                                                .and_then(|n| n.as_str())
-                                                .unwrap_or("");
-                                            let args = func
-                                                .and_then(|f| f.get("arguments"))
-                                                .and_then(|a| a.as_str())
-                                                .unwrap_or("");
-
-                                            let entry = accumulated_tools
-                                                .entry(index)
-                                                .or_insert_with(|| {
-                                                    (String::new(), String::new(), String::new())
-                                                });
-                                            if !id.is_empty() {
-                                                entry.0 = id.to_string();
-                                            }
-                                            if !name.is_empty() {
-                                                entry.1.push_str(name);
-                                            }
-                                            if !args.is_empty() {
-                                                entry.2.push_str(args);
-                                            }
-                                        }
-                                    }
-
-                                    let mut calls = Vec::new();
-                                    if finish_reason.as_deref() == Some("tool_calls")
-                                        && !accumulated_tools.is_empty()
-                                    {
-                                        for (_, (mut id, name, args)) in accumulated_tools.drain() {
-                                            if id.is_empty() {
-                                                id = format!(
-                                                    "call_{}",
-                                                    &uuid::Uuid::new_v4().simple().to_string()
-                                                        [..12]
-                                                );
-                                            }
-                                            calls.push(AiToolCall {
-                                                id,
-                                                name,
-                                                arguments: args,
-                                            });
-                                        }
-                                    }
-
-                                    if (text_delta.is_some()
-                                        || !calls.is_empty()
-                                        || finish_reason.is_some())
-                                        && sender
-                                            .send(Ok(AiChatChunk {
-                                                text_delta,
-                                                tool_calls: calls,
-                                                finish_reason,
-                                            }))
-                                            .await
-                                            .is_err()
-                                    {
-                                        return;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        });
-
-        Ok(Box::pin(ReceiverStream::new(receiver)))
+        Ok(spawn_sse_reader(res))
     }
 
     async fn test_connection(&self) -> AppResult<TestConnectionResponse> {

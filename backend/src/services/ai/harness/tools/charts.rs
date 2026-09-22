@@ -19,7 +19,7 @@ use super::{
 };
 use crate::{
     dtos::{
-        ai::{AiChart, AiChartSeries, AiChartUnit},
+        ai::{AiChart, AiChartAxis, AiChartSeries, AiChartUnit},
         monitors::MonitorTimeSeriesQuery,
     },
     models::_entities::{monitor_results_hourly, monitors},
@@ -175,6 +175,7 @@ impl AiToolHandler for MonitorLatencyChart {
             title: format!("Latência — {}", monitor.name),
             subtitle: Some(window.description().to_string()),
             unit: AiChartUnit::Latency,
+            x_axis: AiChartAxis::Time,
             series: vec![AiChartSeries {
                 id: format!("monitor-{}", monitor.id),
                 label: "Latência".into(),
@@ -272,6 +273,7 @@ impl AiToolHandler for InterfaceTrafficChart {
             title: format!("Tráfego — {} / {}", device.name, iface.name),
             subtitle: Some(format!("últimas {hours}h")),
             unit: AiChartUnit::Bandwidth,
+            x_axis: AiChartAxis::Time,
             series,
             avg_value: None,
         };
@@ -349,6 +351,7 @@ impl AiToolHandler for DeviceMetricChart {
             title: format!("{label} — {}", device.name),
             subtitle: Some(format!("últimas {hours}h")),
             unit,
+            x_axis: AiChartAxis::Time,
             series: vec![AiChartSeries {
                 id: metric.clone(),
                 label: label.to_string(),

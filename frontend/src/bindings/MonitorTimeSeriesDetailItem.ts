@@ -3,4 +3,13 @@
 /**
  * Item de detalhe de monitor em uma amostra temporal.
  */
-export type MonitorTimeSeriesDetailItem = { id: number, name: string, target: string, type: string, deviceName: string | null, status: string, latencyMs: number | null, lossPct: number, };
+export type MonitorTimeSeriesDetailItem = {
+  id: number
+  name: string
+  target: string
+  type: string
+  deviceName: string | null
+  status: string
+  latencyMs: number | null
+  lossPct: number
+}

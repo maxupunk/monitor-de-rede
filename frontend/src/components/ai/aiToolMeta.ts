@@ -49,6 +49,44 @@ const TOOL_META: Record<string, AiToolMeta> = {
     icon: 'mdi-chart-bell-curve-cumulative',
     color: 'deep-purple',
   },
+  analyze_root_cause: {
+    label: 'Causa Raiz (Topologia)',
+    icon: 'mdi-source-branch',
+    color: 'deep-orange',
+  },
+  compare_with_baseline: {
+    label: 'Comparação com o Normal',
+    icon: 'mdi-chart-bell-curve',
+    color: 'indigo',
+  },
+  get_hourly_pattern: {
+    label: 'Padrão por Hora do Dia',
+    icon: 'mdi-clock-time-four-outline',
+    color: 'primary',
+  },
+  get_incident_timeline: {
+    label: 'Linha do Tempo do Incidente',
+    icon: 'mdi-timeline-clock-outline',
+    color: 'orange',
+  },
+  get_logs_overview: {
+    label: 'Visão Geral dos Logs',
+    icon: 'mdi-text-box-search-outline',
+    color: 'blue-grey',
+  },
+  search_logs: { label: 'Busca nos Logs', icon: 'mdi-magnify-scan', color: 'blue-grey' },
+  acknowledge_alert: {
+    label: 'Reconhecer Alerta',
+    icon: 'mdi-check-circle-outline',
+    color: 'primary',
+  },
+  silence_alert: { label: 'Silenciar Alerta', icon: 'mdi-bell-off-outline', color: 'warning' },
+  create_maintenance_window: {
+    label: 'Janela de Manutenção',
+    icon: 'mdi-calendar-clock',
+    color: 'purple',
+  },
+  create_monitor: { label: 'Criar Monitor', icon: 'mdi-monitor-eye', color: 'success' },
   search_system_docs: {
     label: 'Base de Conhecimento',
     icon: 'mdi-book-open-page-variant-outline',
@@ -78,6 +116,7 @@ export function formatToolArgs(args: Record<string, unknown>): string {
     ['device', 'Dispositivo'],
     ['interface', 'Interface'],
     ['monitor_id', 'Monitor'],
+    ['alert_id', 'Alerta'],
     ['metric', 'Métrica'],
     ['playbook_type', 'Playbook'],
     ['query', 'Busca'],

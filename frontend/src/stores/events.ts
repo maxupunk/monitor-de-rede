@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { apiService } from '@/services/apiService'
 import { useDevicesStore } from './devices'
 import { useAlertsStore, type AlertEvent } from './alerts'
+import type { AiIncidentSummary } from '@/bindings/AiIncidentSummary'
 import { useMonitorsStore } from './monitors'
 import { useProbesStore } from './probes'
 import { useDiscoveryStore } from './discovery'
@@ -217,6 +218,12 @@ export const useEventsStore = defineStore('events', () => {
           startedAt: data.startedAt as string,
           createdAt: String(data.createdAt ?? data.startedAt ?? payload.timestamp),
         })
+        break
+      }
+
+      case 'alert:ai_summary': {
+        const summary = data.aiSummary as AiIncidentSummary | undefined
+        if (summary) useAlertsStore().applyAiSummary(Number(data.id ?? data.alertEventId), summary)
         break
       }
 

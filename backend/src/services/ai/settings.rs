@@ -6,7 +6,7 @@ use sea_orm::{ConnectionTrait, DatabaseConnection};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use super::response_style::AiResponseStyle;
+use super::{proactive::config::AiProactiveSettings, response_style::AiResponseStyle};
 use crate::{
     models::system_settings,
     services::shared::errors::{AppError, AppResult},
@@ -96,7 +96,11 @@ struct AiSettingsHelper {
     #[serde(default)]
     require_tool_confirmation: bool,
     #[serde(default)]
+    allow_actions: bool,
+    #[serde(default)]
     response_style: AiResponseStyle,
+    #[serde(default)]
+    proactive: AiProactiveSettings,
     #[serde(default)]
     custom_system_prompt: Option<String>,
 }
@@ -130,8 +134,15 @@ pub struct AiSettings {
     /// Exige confirmação do usuário antes de rodar ferramentas ativas
     pub require_tool_confirmation: bool,
 
+    /// Permite que a IA proponha ações (reconhecer/silenciar alerta, janela de
+    /// manutenção, criar monitor). Toda ação passa pela confirmação do usuário.
+    pub allow_actions: bool,
+
     /// Quanto texto a IA devolve: direto (mínimo de tokens) ou normal.
     pub response_style: AiResponseStyle,
+
+    /// O que a IA faz sozinha: resumo de incidente e resumo periódico.
+    pub proactive: AiProactiveSettings,
 
     pub custom_system_prompt: Option<String>,
 }
@@ -154,7 +165,9 @@ impl<'de> Deserialize<'de> for AiSettings {
             ollama_model: h.ollama_model,
             allow_active_tools: h.allow_active_tools,
             require_tool_confirmation: h.require_tool_confirmation,
+            allow_actions: h.allow_actions,
             response_style: h.response_style,
+            proactive: h.proactive,
             custom_system_prompt: h.custom_system_prompt,
         })
     }
@@ -202,7 +215,9 @@ impl Default for AiSettings {
             ollama_model: default_ollama_model(),
             allow_active_tools: true,
             require_tool_confirmation: false,
+            allow_actions: false,
             response_style: AiResponseStyle::default(),
+            proactive: AiProactiveSettings::default(),
             custom_system_prompt: None,
         }
     }
@@ -256,6 +271,7 @@ pub async fn load<C: ConnectionTrait>(db: &C) -> AppResult<AiSettings> {
 pub async fn save(db: &DatabaseConnection, mut new_settings: AiSettings) -> AppResult<AiSettings> {
     let existing = load(db).await?;
     new_settings.merge_unmasked(&existing);
+    new_settings.proactive = new_settings.proactive.normalized();
 
     // Validações básicas
     match new_settings.active_driver.as_str() {
@@ -438,5 +454,12 @@ mod tests {
 
         let normal: AiSettings = serde_json::from_str(r#"{ "responseStyle": "normal" }"#).unwrap();
         assert_eq!(normal.response_style, AiResponseStyle::Normal);
+    }
+
+    #[test]
+    fn configuracao_antiga_nao_libera_acoes_nem_rotinas_automaticas() {
+        let settings: AiSettings = serde_json::from_str(r#"{ "enabled": true }"#).unwrap();
+        assert!(!settings.allow_actions);
+        assert!(!settings.proactive.incident_summaries);
     }
 }

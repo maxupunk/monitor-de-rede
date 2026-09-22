@@ -20,6 +20,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 #[allow(unused_imports)]
 use crate::{
     controllers,
+    initializers::ai::AiInitializer,
     initializers::monitoring::MonitoringInitializer,
     initializers::process_deps,
     initializers::setup::SetupInitializer,
@@ -143,6 +144,7 @@ impl Hooks for App {
             Box::new(MonitoringInitializer),
             Box::new(SystemDeviceInitializer),
             Box::new(SyslogInitializer),
+            Box::new(AiInitializer),
         ])
     }
 
@@ -189,6 +191,7 @@ impl Hooks for App {
             .add_route(controllers::push::routes().layer(business_auth.clone()))
             .add_route(controllers::vpn_servers::routes().layer(business_auth.clone()))
             .add_route(controllers::ai::routes().layer(business_auth.clone()))
+            .add_route(controllers::ai_conversations::routes().layer(business_auth.clone()))
             .add_route(controllers::vpn_peers::routes().layer(business_auth))
     }
 

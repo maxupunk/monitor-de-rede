@@ -1,8 +1,10 @@
+pub mod conversations;
 pub mod drivers;
 pub mod harness;
 pub mod knowledge;
 pub mod ollama;
 pub mod opencode;
 pub mod openrouter;
+pub mod proactive;
 pub mod response_style;
 pub mod settings;

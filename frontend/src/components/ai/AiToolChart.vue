@@ -66,7 +66,7 @@ const series = computed<ChartSeriesInput[]>(() => {
     color: SERIES_COLORS[item.id] ?? PALETTE[index % PALETTE.length],
     fillArea: !multiple,
     data: item.points.map((point) => ({
-      time: formatShortDateTime(point.time),
+      time: props.chart.xAxis === 'label' ? point.time : formatShortDateTime(point.time),
       value: point.value,
     })),
   }))

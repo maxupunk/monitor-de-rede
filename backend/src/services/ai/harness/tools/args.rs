@@ -6,23 +6,56 @@
 
 use serde_json::{json, Value};
 
-use crate::services::shared::errors::{AppError, AppResult};
+use crate::services::{
+    audit::AuditActor,
+    shared::errors::{AppError, AppResult},
+};
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct ToolArgs(Value);
+/// Argumentos de uma chamada e quem a fez.
+#[derive(Debug, Clone)]
+pub struct ToolArgs {
+    values: Value,
+    actor: AuditActor,
+}
 
 impl ToolArgs {
     /// JSON inválido vira objeto vazio: a ferramenta decide o que é obrigatório.
     #[must_use]
     pub fn parse(raw: &str) -> Self {
-        Self(serde_json::from_str(raw).unwrap_or_else(|_| json!({})))
+        Self::from_value(serde_json::from_str(raw).unwrap_or_else(|_| json!({})))
+    }
+
+    /// Argumentos já em JSON; qualquer coisa que não seja objeto vira vazio.
+    #[must_use]
+    pub fn from_value(values: Value) -> Self {
+        let values = if values.is_object() {
+            values
+        } else {
+            json!({})
+        };
+        Self {
+            values,
+            actor: AuditActor::default(),
+        }
+    }
+
+    /// Registra o usuário que confirmou a chamada (auditoria, autoria).
+    #[must_use]
+    pub fn with_actor(mut self, actor: AuditActor) -> Self {
+        self.actor = actor;
+        self
+    }
+
+    #[must_use]
+    pub const fn actor(&self) -> &AuditActor {
+        &self.actor
     }
 
     /// Texto não vazio, já sem espaços nas pontas. Números também valem,
     /// porque um id de dispositivo costuma chegar como `12`.
     #[must_use]
     pub fn text(&self, key: &str) -> Option<String> {
-        match self.0.get(key)? {
+        match self.values.get(key)? {
             Value::String(text) => {
                 let trimmed = text.trim();
                 (!trimmed.is_empty()).then(|| trimmed.to_string())
@@ -42,7 +75,7 @@ impl ToolArgs {
     /// Inteiro não negativo, aceitando número ou texto numérico.
     #[must_use]
     pub fn integer(&self, key: &str) -> Option<i64> {
-        match self.0.get(key)? {
+        match self.values.get(key)? {
             Value::Number(number) => number
                 .as_i64()
                 .or_else(|| number.as_f64().map(|value| value as i64)),
@@ -60,7 +93,7 @@ impl ToolArgs {
 
     #[must_use]
     pub fn flag(&self, key: &str) -> bool {
-        match self.0.get(key) {
+        match self.values.get(key) {
             Some(Value::Bool(value)) => *value,
             Some(Value::String(text)) => text.trim().eq_ignore_ascii_case("true"),
             _ => false,
@@ -70,7 +103,7 @@ impl ToolArgs {
     /// Lista de portas; entradas fora de `1..=65535` são descartadas.
     #[must_use]
     pub fn ports(&self, key: &str) -> Option<Vec<u16>> {
-        let list = self.0.get(key)?.as_array()?;
+        let list = self.values.get(key)?.as_array()?;
         let ports: Vec<u16> = list
             .iter()
             .filter_map(|item| match item {
@@ -119,6 +152,13 @@ mod tests {
         let args = ToolArgs::parse(r#"{"p": [22, "443", 0, 70000, "x"], "vazio": []}"#);
         assert_eq!(args.ports("p"), Some(vec![22, 443]));
         assert_eq!(args.ports("vazio"), None);
+    }
+
+    #[test]
+    fn argumento_que_nao_e_objeto_vira_vazio() {
+        let args = ToolArgs::from_value(json!([1, 2]));
+        assert_eq!(args.text("0"), None);
+        assert_eq!(args.actor().user_id, None);
     }
 
     #[test]

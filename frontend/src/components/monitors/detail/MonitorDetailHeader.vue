@@ -72,6 +72,12 @@
         >
           Editar
         </v-btn>
+        <AiAskButton
+          class="flex-grow-1 flex-md-grow-0"
+          label="Analisar com IA"
+          :prompt="aiPrompt"
+          :context="aiContext"
+        />
         <v-btn
           :color="monitor.isEnabled ? 'warning' : 'success'"
           variant="outlined"
@@ -92,9 +98,12 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { Monitor } from '@/stores/monitors'
+import type { AiChatContext } from '@/stores/ai'
+import AiAskButton from '@/components/ai/AiAskButton.vue'
 
-defineProps<{
+const props = defineProps<{
   monitor: Monitor
   headerChip: { label: string; color: string; icon: string }
   typeIcon: string
@@ -102,6 +111,15 @@ defineProps<{
   formattedTarget: string
   running: boolean
 }>()
+
+const aiPrompt = computed(
+  () =>
+    `Analise o monitor ${props.monitor.name}: disponibilidade recente, se está pior que o normal e o que explica as falhas.`
+)
+const aiContext = computed<AiChatContext>(() => ({
+  monitorId: props.monitor.id,
+  deviceId: props.monitor.device?.id ?? null,
+}))
 
 const emit = defineEmits<{
   (e: 'test'): void

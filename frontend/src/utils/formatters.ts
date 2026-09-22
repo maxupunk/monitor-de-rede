@@ -176,6 +176,14 @@ export function formatLatency(value?: number | null, fallback = 'N/A'): string {
  * Formata um valor conforme a unidade que veio junto dele na métrica/evento.
  * Unidades desconhecidas são apenas concatenadas.
  */
+/** Contagem compacta: `850`, `1,2 mil`, `3,4 mi` (tokens, amostras, eventos). */
+export function formatCompactCount(value?: number | null, fallback = '—'): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return fallback
+  if (Math.abs(value) < 1000) return String(Math.round(value))
+  const [divisor, suffix] = Math.abs(value) < 1_000_000 ? [1000, 'mil'] : [1_000_000, 'mi']
+  return `${(value / divisor).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} ${suffix}`
+}
+
 export function formatMeasuredValue(value: unknown, unit?: string | null): string {
   const numeric = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(numeric)) return String(value ?? '')

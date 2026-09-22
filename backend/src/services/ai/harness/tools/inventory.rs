@@ -1,7 +1,7 @@
 //! Estado atual do que o NetMonitor conhece: dispositivos, interfaces,
 //! monitores, alertas e a documentação interna.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use async_trait::async_trait;
 use chrono::{Duration, Utc};
@@ -10,7 +10,7 @@ use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
 use serde_json::{json, Value};
 
 use super::{
-    lookup::{device_interfaces_of, device_matches, find_device},
+    lookup::{device_interfaces_of, device_matches, device_names, find_device},
     series::round2,
     AiToolHandler, ToolArgs, ToolOutput,
 };
@@ -26,24 +26,6 @@ use crate::{
 const MAX_LIST_ROWS: usize = 50;
 
 const DEVICE_ARG: &str = "Nome, IP ou id do dispositivo";
-
-/// Nomes de dispositivo por id, para trocar ids por nomes legíveis.
-async fn device_names(
-    ctx: &AppContext,
-    ids: impl IntoIterator<Item = i64>,
-) -> AppResult<HashMap<i64, String>> {
-    let ids: HashSet<i64> = ids.into_iter().collect();
-    if ids.is_empty() {
-        return Ok(HashMap::new());
-    }
-    Ok(devices::Entity::find()
-        .filter(devices::Column::Id.is_in(ids))
-        .all(&ctx.db)
-        .await?
-        .into_iter()
-        .map(|device| (device.id, device.name))
-        .collect())
-}
 
 fn device_not_found(identifier: &str) -> ToolOutput {
     ToolOutput::not_found(format!(
@@ -385,7 +367,7 @@ impl AiToolHandler for ListMonitors {
         }
 
         let found = query.all(&ctx.db).await?;
-        let names = device_names(ctx, found.iter().filter_map(|m| m.device_id)).await?;
+        let names = device_names(&ctx.db, found.iter().filter_map(|m| m.device_id)).await?;
         let rows: Vec<Value> = found
             .iter()
             .take(MAX_LIST_ROWS)
@@ -461,7 +443,7 @@ impl AiToolHandler for Alerts {
 
         let total = query.clone().count(&ctx.db).await?;
         let rows = query.limit(limit as u64).all(&ctx.db).await?;
-        let names = device_names(ctx, rows.iter().filter_map(|row| row.device_id)).await?;
+        let names = device_names(&ctx.db, rows.iter().filter_map(|row| row.device_id)).await?;
         let alerts: Vec<Value> = rows
             .into_iter()
             .map(|row| {

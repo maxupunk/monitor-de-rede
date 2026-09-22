@@ -6,11 +6,26 @@ import type { OpenCodeModelsResponse } from '@/bindings/OpenCodeModelsResponse'
 import type { OpenRouterModelItem } from '@/bindings/OpenRouterModelItem'
 import type { OpenRouterModelsResponse } from '@/bindings/OpenRouterModelsResponse'
 import type { AiChart } from '@/bindings/AiChart'
+import type { AiDigest } from '@/bindings/AiDigest'
+import type { AiProactiveSettings } from '@/bindings/AiProactiveSettings'
 import type { AiResponseStyle } from '@/bindings/AiResponseStyle'
+import type { ExecuteToolResponse } from '@/bindings/ExecuteToolResponse'
+import {
+  applyChatEvent,
+  toApiMessages,
+  type AiDisplayMessage,
+  type AiToolCallState,
+} from '@/utils/aiChatStream'
+import { useAiConversationsStore } from './aiConversations'
+import { readSseJson } from '@/utils/sseReader'
 
 export type {
   AiChart,
+  AiDigest,
+  AiDisplayMessage,
+  AiProactiveSettings,
   AiResponseStyle,
+  AiToolCallState,
   OpenCodeModelItem,
   OpenCodeModelsResponse,
   OpenRouterModelItem,
@@ -29,8 +44,17 @@ export interface AiSettings {
   ollamaModel?: string | null
   allowActiveTools: boolean
   requireToolConfirmation: boolean
+  allowActions: boolean
   responseStyle: AiResponseStyle
+  proactive: AiProactiveSettings
   customSystemPrompt?: string | null
+}
+
+/** Tela de onde o chat foi aberto: vira contexto no prompt da IA. */
+export interface AiChatContext {
+  deviceId?: number | null
+  monitorId?: number | null
+  alertId?: number | null
 }
 
 export interface TestConnectionResponse {
@@ -72,25 +96,6 @@ export interface OllamaPullProgress {
   error?: string | null
 }
 
-export interface AiToolCallState {
-  id: string
-  name: string
-  arguments: Record<string, unknown>
-  result?: Record<string, unknown> | null
-  /** Gráfico desenhado no chat; a IA recebe só o resumo em `result`. */
-  chart?: AiChart | null
-  status: 'running' | 'done' | 'error'
-}
-
-export interface AiDisplayMessage {
-  id: string
-  role: 'user' | 'assistant'
-  content: string
-  toolCalls?: AiToolCallState[]
-  isStreaming?: boolean
-  error?: string | null
-}
-
 export const useAiStore = defineStore('ai', () => {
   const settings = ref<AiSettings | null>(null)
   const loadingSettings = ref(false)
@@ -126,6 +131,13 @@ export const useAiStore = defineStore('ai', () => {
   const streamError = ref<string | null>(null)
 
   let activeAbortController: AbortController | null = null
+
+  const conversations = useAiConversationsStore()
+
+  const latestDigest = ref<AiDigest | null>(null)
+  const loadingDigest = ref(false)
+  const runningDigest = ref(false)
+  const digestError = ref<string | null>(null)
 
   async function loadSettings() {
     loadingSettings.value = true
@@ -187,21 +199,22 @@ export const useAiStore = defineStore('ai', () => {
     }
   }
 
-  async function sendMessage(content: string, deviceId?: number | null) {
+  function errorMessage(err: unknown, fallback: string): string {
+    if (err instanceof ApiError) return err.message
+    if (err instanceof Error) return err.message
+    return fallback
+  }
+
+  async function sendMessage(content: string, context: AiChatContext = {}) {
     if (!content.trim() || isStreaming.value) return
 
     streamError.value = null
-    const userMsgId = `user-${Date.now()}`
-    const assistantMsgId = `asst-${Date.now()}`
-
-    messages.value.push({
-      id: userMsgId,
-      role: 'user',
-      content: content.trim(),
-    })
+    const stamp = Date.now()
+    messages.value.push({ id: `user-${stamp}`, role: 'user', content: content.trim() })
+    const history = toApiMessages(messages.value)
 
     const assistantMsg = reactive<AiDisplayMessage>({
-      id: assistantMsgId,
+      id: `asst-${stamp}`,
       role: 'assistant',
       content: '',
       toolCalls: [],
@@ -214,87 +227,27 @@ export const useAiStore = defineStore('ai', () => {
     activeAbortController = controller
 
     try {
-      // Monta histórico de mensagens para a API
-      const apiMessages = messages.value
-        .filter((m) => m.id !== assistantMsgId && !m.error)
-        .map((m) => ({
-          role: m.role,
-          content: m.content,
-        }))
-
       const response = await apiService.postStream(
         '/ai/chat/stream',
         {
-          messages: apiMessages,
-          deviceId: deviceId || undefined,
+          messages: history,
+          deviceId: context.deviceId ?? undefined,
+          monitorId: context.monitorId ?? undefined,
+          alertId: context.alertId ?? undefined,
         },
         controller.signal
       )
-
       const reader = response.body?.getReader()
       if (!reader) {
         throw new Error('Não foi possível inicializar o leitor de stream')
       }
-
-      const decoder = new TextDecoder()
-      let buffer = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
-
-        for (const line of lines) {
-          const trimmed = line.trim()
-          if (!trimmed || trimmed.startsWith(':')) continue
-
-          const prefix = trimmed.startsWith('data: ')
-            ? 'data: '
-            : trimmed.startsWith('data:')
-              ? 'data:'
-              : null
-          if (prefix) {
-            const jsonStr = trimmed.slice(prefix.length).trim()
-            try {
-              const event = JSON.parse(jsonStr)
-
-              if (event.type === 'textDelta' && typeof event.content === 'string') {
-                assistantMsg.content += event.content
-              } else if (event.type === 'toolCall') {
-                if (!assistantMsg.toolCalls) assistantMsg.toolCalls = []
-                assistantMsg.toolCalls.push({
-                  id: event.id,
-                  name: event.name,
-                  arguments: event.arguments || {},
-                  status: 'running',
-                })
-              } else if (event.type === 'toolResult') {
-                const targetTool = assistantMsg.toolCalls?.find((t) => t.id === event.id)
-                if (targetTool) {
-                  targetTool.result = event.result
-                  targetTool.chart = event.chart ?? null
-                  targetTool.status = event.result?.error ? 'error' : 'done'
-                }
-              } else if (event.type === 'error') {
-                assistantMsg.error = event.message
-                streamError.value = event.message
-              } else if (event.type === 'done') {
-                assistantMsg.isStreaming = false
-              }
-            } catch {
-              // Ignora linhas parciais
-            }
-          }
-        }
-      }
+      await readSseJson(reader, (event) => applyChatEvent(assistantMsg, event))
+      if (assistantMsg.error) streamError.value = assistantMsg.error
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'AbortError') {
         assistantMsg.content += ' [Geração interrompida]'
       } else {
-        const msg = err instanceof Error ? err.message : 'Erro no processamento da resposta'
+        const msg = errorMessage(err, 'Erro no processamento da resposta')
         assistantMsg.error = msg
         streamError.value = msg
       }
@@ -302,6 +255,7 @@ export const useAiStore = defineStore('ai', () => {
       assistantMsg.isStreaming = false
       isStreaming.value = false
       activeAbortController = null
+      void conversations.persist(messages.value)
     }
   }
 
@@ -313,10 +267,109 @@ export const useAiStore = defineStore('ai', () => {
     isStreaming.value = false
   }
 
-  function clearMessages() {
+  /** Começa uma conversa nova; a atual continua salva no histórico. */
+  function newConversation() {
     cancelGeneration()
     messages.value = []
     streamError.value = null
+    conversations.startNew()
+  }
+
+  /** Mantido para as telas que já chamavam "limpar": abre uma conversa nova. */
+  function clearMessages() {
+    newConversation()
+  }
+
+  /** Reabre uma conversa salva. Ferramenta que ficou rodando vira falha. */
+  async function openConversation(id: number) {
+    cancelGeneration()
+    const loaded = await conversations.open<AiDisplayMessage>(id)
+    if (!loaded) return
+    streamError.value = null
+    messages.value = loaded.map((message) => ({
+      ...message,
+      isStreaming: false,
+      toolCalls: message.toolCalls?.map((tool) =>
+        tool.status === 'running'
+          ? { ...tool, status: 'error', result: { error: 'Interrompido' } }
+          : tool
+      ),
+    }))
+  }
+
+  async function deleteConversation(id: number) {
+    if (conversations.activeId === id) newConversation()
+    await conversations.remove(id)
+  }
+
+  /**
+   * "Diagnosticar com IA" das telas de alerta, dispositivo e monitor: abre o
+   * painel numa conversa nova já com a pergunta e o contexto da tela.
+   */
+  function askAbout(prompt: string, context: AiChatContext): boolean {
+    if (isStreaming.value) return false
+    newConversation()
+    isDrawerOpen.value = true
+    void sendMessage(prompt, context)
+    return true
+  }
+
+  function findTool(messageId: string, toolId: string): AiToolCallState | null {
+    const message = messages.value.find((item) => item.id === messageId)
+    return message?.toolCalls?.find((tool) => tool.id === toolId) ?? null
+  }
+
+  /** Executa a ação que a IA propôs e o usuário confirmou. */
+  async function confirmTool(messageId: string, toolId: string) {
+    const tool = findTool(messageId, toolId)
+    if (!tool || tool.status !== 'awaiting') return
+    tool.status = 'running'
+    try {
+      const response = await apiService.post<ExecuteToolResponse>('/ai/tools/execute', {
+        name: tool.name,
+        arguments: tool.arguments,
+      })
+      tool.result = response.result
+      tool.chart = response.chart ?? null
+      tool.status = response.result?.error ? 'error' : 'done'
+    } catch (err: unknown) {
+      tool.result = { error: errorMessage(err, 'Falha ao executar a ação') }
+      tool.status = 'error'
+    } finally {
+      void conversations.persist(messages.value)
+    }
+  }
+
+  function cancelTool(messageId: string, toolId: string) {
+    const tool = findTool(messageId, toolId)
+    if (!tool || tool.status !== 'awaiting') return
+    tool.status = 'cancelled'
+    void conversations.persist(messages.value)
+  }
+
+  async function loadLatestDigest() {
+    loadingDigest.value = true
+    digestError.value = null
+    try {
+      latestDigest.value = await apiService.get<AiDigest | null>('/ai/digest/latest')
+    } catch (err: unknown) {
+      digestError.value = errorMessage(err, 'Falha ao carregar o resumo da rede')
+    } finally {
+      loadingDigest.value = false
+    }
+  }
+
+  /** Gera o resumo da rede agora (ação explícita do usuário). */
+  async function runDigest() {
+    runningDigest.value = true
+    digestError.value = null
+    try {
+      latestDigest.value = await apiService.post<AiDigest>('/ai/digest/run', {})
+    } catch (err: unknown) {
+      digestError.value = errorMessage(err, 'Falha ao gerar o resumo da rede')
+    } finally {
+      runningDigest.value = false
+    }
   }
 
   function toggleDrawer() {
@@ -551,6 +604,18 @@ export const useAiStore = defineStore('ai', () => {
     sendMessage,
     cancelGeneration,
     clearMessages,
+    newConversation,
+    openConversation,
+    deleteConversation,
+    askAbout,
+    confirmTool,
+    cancelTool,
+    latestDigest,
+    loadingDigest,
+    runningDigest,
+    digestError,
+    loadLatestDigest,
+    runDigest,
     toggleDrawer,
   }
 })

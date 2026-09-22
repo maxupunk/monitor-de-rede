@@ -47,6 +47,7 @@ mod m20260826_000001_device_syslog_server_address;
 mod m20260828_000001_device_link_interface;
 mod m20260909_000001_merge_duplicate_device_interfaces;
 mod m20260909_000002_monitors_interface_id;
+mod m20260922_000001_ai_conversations;
 
 pub struct Migrator;
 
@@ -161,6 +162,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260828_000001_device_link_interface::Migration),
             Box::new(m20260909_000001_merge_duplicate_device_interfaces::Migration),
             Box::new(m20260909_000002_monitors_interface_id::Migration),
+            Box::new(m20260922_000001_ai_conversations::Migration),
             // inject-above (do not remove this comment)
         ]
     }

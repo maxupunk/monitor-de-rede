@@ -1,3 +1,6 @@
+mod ai_analysis;
+mod ai_conversations;
+mod ai_proactive;
 mod ai_tools;
 mod alert_correlation;
 mod alert_engine_robustness;

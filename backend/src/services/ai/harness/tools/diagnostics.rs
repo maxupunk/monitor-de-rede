@@ -70,6 +70,14 @@ impl AiToolHandler for Ping {
         ToolKind::Active
     }
 
+    async fn preview(&self, _ctx: &AppContext, args: &ToolArgs) -> AppResult<String> {
+        let count = args.integer_in("count", 3, 1, 5);
+        Ok(format!(
+            "Enviar {count} pings para {}",
+            args.text("target").unwrap_or_else(|| "?".into())
+        ))
+    }
+
     async fn execute(&self, _ctx: &AppContext, args: &ToolArgs) -> AppResult<ToolOutput> {
         let target = args.required_text("target", "Alvo (target) não informado para o ping")?;
         let ip = match resolve_target(&target).await {
@@ -113,6 +121,13 @@ impl AiToolHandler for Traceroute {
 
     fn kind(&self) -> ToolKind {
         ToolKind::Active
+    }
+
+    async fn preview(&self, _ctx: &AppContext, args: &ToolArgs) -> AppResult<String> {
+        Ok(format!(
+            "Traçar a rota até {}",
+            args.text("target").unwrap_or_else(|| "?".into())
+        ))
     }
 
     async fn execute(&self, _ctx: &AppContext, args: &ToolArgs) -> AppResult<ToolOutput> {
@@ -178,6 +193,18 @@ impl AiToolHandler for ScanPorts {
         ToolKind::Active
     }
 
+    async fn preview(&self, _ctx: &AppContext, args: &ToolArgs) -> AppResult<String> {
+        let ports = args
+            .ports("ports")
+            .unwrap_or_else(|| DEFAULT_PORTS.to_vec());
+        let list: Vec<String> = ports.iter().map(ToString::to_string).collect();
+        Ok(format!(
+            "Testar as portas TCP {} em {}",
+            list.join(", "),
+            args.text("target").unwrap_or_else(|| "?".into())
+        ))
+    }
+
     async fn execute(&self, _ctx: &AppContext, args: &ToolArgs) -> AppResult<ToolOutput> {
         let target = args.required_text(
             "target",
@@ -238,6 +265,14 @@ impl AiToolHandler for DnsLookup {
         ToolKind::Active
     }
 
+    async fn preview(&self, _ctx: &AppContext, args: &ToolArgs) -> AppResult<String> {
+        Ok(format!(
+            "Resolver {} no DNS {}",
+            args.text("hostname").unwrap_or_else(|| "?".into()),
+            args.text("server").unwrap_or_else(|| "padrão".into())
+        ))
+    }
+
     async fn execute(&self, _ctx: &AppContext, args: &ToolArgs) -> AppResult<ToolOutput> {
         let hostname =
             args.required_text("hostname", "Hostname não informado para a consulta DNS")?;
@@ -285,6 +320,16 @@ impl AiToolHandler for Playbook {
 
     fn kind(&self) -> ToolKind {
         ToolKind::Active
+    }
+
+    async fn preview(&self, _ctx: &AppContext, args: &ToolArgs) -> AppResult<String> {
+        Ok(match args.text("playbook_type").as_deref() {
+            Some("device_reachability") => format!(
+                "Rodar o diagnóstico de alcance de {}",
+                args.text("target").unwrap_or_else(|| "?".into())
+            ),
+            _ => "Rodar o diagnóstico de saúde da internet".to_string(),
+        })
     }
 
     async fn execute(&self, _ctx: &AppContext, args: &ToolArgs) -> AppResult<ToolOutput> {

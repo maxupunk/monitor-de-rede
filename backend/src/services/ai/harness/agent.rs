@@ -4,24 +4,34 @@
 
 use std::pin::Pin;
 
-use chrono::Utc;
 use futures::{Stream, StreamExt};
 use loco_rs::prelude::AppContext;
-use sea_orm::EntityTrait;
 use serde::Serialize;
 use serde_json::json;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
-use super::tools::ToolRegistry;
+use super::{
+    prompt::{build_system_prompt, ChatContext},
+    tools::{ToolPolicy, ToolRegistry},
+};
 use crate::{
-    dtos::ai::{AiChart, ChatStreamRequest},
-    models::devices,
-    services::ai::{
-        drivers::traits::{AiChatOptions, AiDriver, AiMessage},
-        settings::AiSettings,
+    dtos::ai::{AiChart, ChatMessageInput, ChatStreamRequest},
+    services::{
+        ai::{
+            drivers::traits::{AiChatOptions, AiDriver, AiMessage, AiToolCall, AiUsage},
+            settings::AiSettings,
+        },
+        shared::errors::{AppError, AppResult},
     },
 };
+
+/// Rodadas de raciocínio (chamada ao provedor + ferramentas) por pergunta.
+const MAX_ITERATIONS: usize = 6;
+
+/// Mensagens anteriores enviadas ao provedor. O histórico inteiro seria
+/// reenviado a cada pergunta; as últimas trocas bastam para manter o assunto.
+pub const MAX_HISTORY_MESSAGES: usize = 16;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -42,6 +52,20 @@ pub enum HarnessEvent {
         #[serde(skip_serializing_if = "Option::is_none")]
         chart: Option<AiChart>,
     },
+    /// A ferramenta pede confirmação: a tela mostra `summary` com os botões
+    /// e, confirmando, chama `POST /api/ai/tools/execute`.
+    ConfirmationRequired {
+        id: String,
+        name: String,
+        arguments: serde_json::Value,
+        summary: String,
+    },
+    /// Tokens somados de todas as rodadas da resposta.
+    #[serde(rename_all = "camelCase")]
+    Usage {
+        prompt_tokens: u64,
+        completion_tokens: u64,
+    },
     Done,
     Error {
         message: String,
@@ -50,63 +74,137 @@ pub enum HarnessEvent {
 
 pub type HarnessEventStream = Pin<Box<dyn Stream<Item = HarnessEvent> + Send>>;
 
-/// Constrói o System Prompt contextualizado para a sessão.
-async fn build_system_prompt(
+/// As últimas `limit` mensagens, começando sempre por uma do usuário — uma
+/// resposta da IA sem a pergunta que a originou só confunde o modelo.
+#[must_use]
+pub fn recent_history(messages: Vec<ChatMessageInput>, limit: usize) -> Vec<ChatMessageInput> {
+    let skip = messages.len().saturating_sub(limit);
+    messages
+        .into_iter()
+        .skip(skip)
+        .skip_while(|message| message.role != "user")
+        .collect()
+}
+
+/// Uma sessão do agente: a pergunta, as ferramentas liberadas e o contexto.
+pub struct AgentRequest {
+    pub messages: Vec<ChatMessageInput>,
+    pub context: ChatContext,
+    pub policy: ToolPolicy,
+}
+
+impl AgentRequest {
+    /// Pedido vindo do chat: ferramentas conforme as configurações.
+    #[must_use]
+    pub fn from_chat(request: ChatStreamRequest, settings: &AiSettings) -> Self {
+        Self {
+            messages: request.messages,
+            context: ChatContext {
+                device_id: request.device_id,
+                monitor_id: request.monitor_id,
+                alert_id: request.alert_id,
+            },
+            policy: ToolPolicy::from_settings(settings),
+        }
+    }
+}
+
+/// Canal de eventos que para de trabalhar quando a tela fecha a conexão.
+struct EventSink(mpsc::Sender<HarnessEvent>);
+
+impl EventSink {
+    /// `false` quando ninguém escuta mais.
+    async fn send(&self, event: HarnessEvent) -> bool {
+        self.0.send(event).await.is_ok()
+    }
+
+    async fn finish(&self, usage: AiUsage) {
+        if usage != AiUsage::default() {
+            let _ = self
+                .send(HarnessEvent::Usage {
+                    prompt_tokens: usage.prompt_tokens,
+                    completion_tokens: usage.completion_tokens,
+                })
+                .await;
+        }
+        let _ = self.send(HarnessEvent::Done).await;
+    }
+
+    async fn fail(&self, message: String, usage: AiUsage) {
+        let _ = self.send(HarnessEvent::Error { message }).await;
+        self.finish(usage).await;
+    }
+}
+
+/// Resolve uma chamada de ferramenta: executa, ou devolve o pedido de
+/// confirmação. Retorna `false` quando a tela desconectou.
+async fn handle_tool_call(
     ctx: &AppContext,
-    settings: &AiSettings,
-    device_id: Option<i64>,
-) -> String {
-    let now = Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
+    registry: &ToolRegistry,
+    sink: &EventSink,
+    conversation: &mut Vec<AiMessage>,
+    tool: AiToolCall,
+) -> bool {
+    let arguments: serde_json::Value =
+        serde_json::from_str(&tool.arguments).unwrap_or_else(|_| json!({}));
 
-    let mut prompt = format!(
-        "Você é o NetMonitor AI, engenheiro de redes sênior integrado ao NetMonitor. Agora: {now}.
-
-COMO TRABALHAR:
-1. Fundamente o diagnóstico em dados, nunca em suposição. Comece pelo que o sistema já registrou: get_system_summary, get_alerts, get_device_detail, get_device_interfaces, get_monitor_history e get_device_metrics.
-2. Testes ativos (ping_host, traceroute, scan_ports, dns_lookup, run_playbook), quando disponíveis, servem para confirmar o estado de agora.
-3. Gráficos: quando o usuário pedir um gráfico ou a evolução no tempo ajudar, use chart_monitor_latency, chart_interface_traffic ou chart_device_metric. O gráfico aparece para o usuário automaticamente — não o reproduza em texto nem em tabela.
-4. Dúvidas sobre configurar ou usar o NetMonitor: search_system_docs.
-5. Se um nome for ambíguo ou não existir, liste as opções (list_devices, list_monitors) em vez de adivinhar.
-
-{style}
-",
-        style = settings.response_style.directive()
-    );
-
-    if let Some(custom) = &settings.custom_system_prompt {
-        if !custom.trim().is_empty() {
-            prompt.push_str("\nInstruções adicionais do administrador:\n");
-            prompt.push_str(custom.trim());
-            prompt.push('\n');
+    let result = if registry.needs_confirmation(&tool.name) {
+        let summary = registry
+            .preview(ctx, &tool.name, &tool.arguments)
+            .await
+            .unwrap_or_else(|error| error.to_string());
+        if !sink
+            .send(HarnessEvent::ConfirmationRequired {
+                id: tool.id.clone(),
+                name: tool.name.clone(),
+                arguments,
+                summary: summary.clone(),
+            })
+            .await
+        {
+            return false;
         }
-    }
-
-    if let Some(dev_id) = device_id {
-        if let Ok(Some(dev)) = devices::Entity::find_by_id(dev_id).one(&ctx.db).await {
-            let last_seen_str = dev
-                .last_seen_at
-                .map(|t| t.to_rfc3339())
-                .unwrap_or_else(|| "N/A".into());
-            prompt.push_str(&format!(
-                "\nCONTEXTO DO DISPOSITIVO EM VISUALIZAÇÃO (use-o quando o usuário não citar outro):
-- Id: {}
-- Nome: {}
-- IP: {}
-- Fabricante: {}
-- Status atual: {}
-- Última atividade: {}
-",
-                dev.id,
-                dev.name,
-                dev.ip_address.unwrap_or_else(|| "N/A".into()),
-                dev.vendor.unwrap_or_else(|| "Desconhecido".into()),
-                dev.status,
-                last_seen_str
-            ));
+        json!({
+            "status": "awaiting_user_confirmation",
+            "summary": summary,
+            "note": "A ação foi apresentada ao usuário com botões de confirmar/cancelar. Não repita a chamada.",
+        })
+    } else {
+        if !sink
+            .send(HarnessEvent::ToolCall {
+                id: tool.id.clone(),
+                name: tool.name.clone(),
+                arguments,
+            })
+            .await
+        {
+            return false;
         }
-    }
+        let (result, chart) = match registry.execute(ctx, &tool.name, &tool.arguments).await {
+            Ok(output) => (output.data, output.chart),
+            Err(err) => (json!({ "error": err.to_string() }), None),
+        };
+        if !sink
+            .send(HarnessEvent::ToolResult {
+                id: tool.id.clone(),
+                name: tool.name.clone(),
+                result: result.clone(),
+                chart,
+            })
+            .await
+        {
+            return false;
+        }
+        result
+    };
 
-    prompt
+    conversation.push(AiMessage {
+        role: "tool".to_string(),
+        content: Some(result.to_string()),
+        tool_calls: None,
+        tool_call_id: Some(tool.id),
+    });
+    true
 }
 
 /// Executa o loop do Agent Harness transmitindo eventos em tempo real.
@@ -114,162 +212,180 @@ pub async fn run_agent_loop(
     ctx: AppContext,
     settings: AiSettings,
     driver: Box<dyn AiDriver>,
-    req: ChatStreamRequest,
+    request: AgentRequest,
 ) -> HarnessEventStream {
     let (sender, receiver) = mpsc::channel(64);
 
     tokio::spawn(async move {
-        let registry = ToolRegistry::new(settings.allow_active_tools);
+        let sink = EventSink(sender);
+        let registry = ToolRegistry::new(request.policy);
         let tools = registry.definitions();
         let options = AiChatOptions {
             max_tokens: settings.response_style.max_output_tokens(),
         };
-        let system_prompt = build_system_prompt(&ctx, &settings, req.device_id).await;
+        let system_prompt =
+            build_system_prompt(&ctx.db, &settings, request.policy, request.context).await;
 
-        let mut conversation: Vec<AiMessage> = Vec::new();
-        conversation.push(AiMessage {
+        let mut conversation = vec![AiMessage {
             role: "system".to_string(),
             content: Some(system_prompt),
             tool_calls: None,
             tool_call_id: None,
-        });
+        }];
+        conversation.extend(
+            recent_history(request.messages, MAX_HISTORY_MESSAGES)
+                .into_iter()
+                .map(|message| AiMessage {
+                    role: message.role,
+                    content: Some(message.content),
+                    tool_calls: None,
+                    tool_call_id: None,
+                }),
+        );
 
-        for msg in req.messages {
-            conversation.push(AiMessage {
-                role: msg.role,
-                content: Some(msg.content),
-                tool_calls: None,
-                tool_call_id: None,
-            });
-        }
-
-        const MAX_ITERATIONS: usize = 6;
-
-        for iteration in 0..MAX_ITERATIONS {
+        let mut usage = AiUsage::default();
+        for _ in 0..MAX_ITERATIONS {
             let mut stream = match driver.chat_stream(&conversation, &tools, options).await {
-                Ok(s) => s,
-                Err(err) => {
-                    let _ = sender
-                        .send(HarnessEvent::Error {
-                            message: err.to_string(),
-                        })
-                        .await;
-                    let _ = sender.send(HarnessEvent::Done).await;
-                    return;
-                }
+                Ok(stream) => stream,
+                Err(err) => return sink.fail(err.to_string(), usage).await,
             };
 
             let mut assistant_text = String::new();
             let mut pending_tools = Vec::new();
-
-            while let Some(chunk_res) = stream.next().await {
-                match chunk_res {
-                    Ok(chunk) => {
-                        if let Some(delta) = chunk.text_delta {
-                            assistant_text.push_str(&delta);
-                            if sender
-                                .send(HarnessEvent::TextDelta { content: delta })
-                                .await
-                                .is_err()
-                            {
-                                return;
-                            }
-                        }
-                        if !chunk.tool_calls.is_empty() {
-                            pending_tools.extend(chunk.tool_calls);
-                        }
-                    }
-                    Err(err) => {
-                        let _ = sender
-                            .send(HarnessEvent::Error {
-                                message: err.to_string(),
-                            })
-                            .await;
-                        let _ = sender.send(HarnessEvent::Done).await;
+            while let Some(chunk) = stream.next().await {
+                let chunk = match chunk {
+                    Ok(chunk) => chunk,
+                    Err(err) => return sink.fail(err.to_string(), usage).await,
+                };
+                if let Some(chunk_usage) = chunk.usage {
+                    usage.add(chunk_usage);
+                }
+                if let Some(delta) = chunk.text_delta {
+                    assistant_text.push_str(&delta);
+                    if !sink.send(HarnessEvent::TextDelta { content: delta }).await {
                         return;
                     }
                 }
+                pending_tools.extend(chunk.tool_calls);
             }
 
-            // Se não houver chamadas de ferramentas, a resposta foi concluída
             if pending_tools.is_empty() {
-                let _ = sender.send(HarnessEvent::Done).await;
-                return;
+                return sink.finish(usage).await;
             }
 
-            // Registra a mensagem do assistente com as tool calls solicitadas
             conversation.push(AiMessage {
                 role: "assistant".to_string(),
-                content: if assistant_text.is_empty() {
-                    None
-                } else {
-                    Some(assistant_text)
-                },
+                content: (!assistant_text.is_empty()).then_some(assistant_text),
                 tool_calls: Some(pending_tools.clone()),
                 tool_call_id: None,
             });
-
-            // Executa cada ferramenta e adiciona o resultado
             for tool in pending_tools {
-                let args_json: serde_json::Value =
-                    serde_json::from_str(&tool.arguments).unwrap_or_else(|_| json!({}));
-
-                if sender
-                    .send(HarnessEvent::ToolCall {
-                        id: tool.id.clone(),
-                        name: tool.name.clone(),
-                        arguments: args_json,
-                    })
-                    .await
-                    .is_err()
-                {
+                if !handle_tool_call(&ctx, &registry, &sink, &mut conversation, tool).await {
                     return;
                 }
-
-                let (tool_result, chart) =
-                    match registry.execute(&ctx, &tool.name, &tool.arguments).await {
-                        Ok(output) => (output.data, output.chart),
-                        Err(err) => (json!({ "error": err.to_string() }), None),
-                    };
-
-                if sender
-                    .send(HarnessEvent::ToolResult {
-                        id: tool.id.clone(),
-                        name: tool.name.clone(),
-                        result: tool_result.clone(),
-                        chart,
-                    })
-                    .await
-                    .is_err()
-                {
-                    return;
-                }
-
-                conversation.push(AiMessage {
-                    role: "tool".to_string(),
-                    content: Some(tool_result.to_string()),
-                    tool_calls: None,
-                    tool_call_id: Some(tool.id),
-                });
-            }
-
-            // Próxima iteração continuará o raciocínio com os resultados das ferramentas
-            if iteration == MAX_ITERATIONS - 1 {
-                let _ = sender.send(HarnessEvent::Done).await;
-                return;
             }
         }
-
-        let _ = sender.send(HarnessEvent::Done).await;
+        sink.finish(usage).await;
     });
 
     Box::pin(ReceiverStream::new(receiver))
 }
 
+/// Resposta completa de uma sessão sem tela (rotinas automáticas).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AgentAnswer {
+    pub text: String,
+    pub usage: AiUsage,
+}
+
+/// Consome o stream e junta o texto.
+///
+/// # Errors
+///
+/// O erro do provedor, quando a sessão falha, ou resposta vazia.
+pub async fn collect_answer(mut stream: HarnessEventStream) -> AppResult<AgentAnswer> {
+    let mut answer = AgentAnswer::default();
+    while let Some(event) = stream.next().await {
+        match event {
+            HarnessEvent::TextDelta { content } => answer.text.push_str(&content),
+            HarnessEvent::Usage {
+                prompt_tokens,
+                completion_tokens,
+            } => {
+                answer.usage = AiUsage {
+                    prompt_tokens,
+                    completion_tokens,
+                };
+            }
+            HarnessEvent::Error { message } => {
+                return Err(AppError::service_unavailable(message));
+            }
+            HarnessEvent::Done => break,
+            _ => {}
+        }
+    }
+    answer.text = answer.text.trim().to_string();
+    if answer.text.is_empty() {
+        return Err(AppError::service_unavailable(
+            "O provedor de IA não devolveu texto",
+        ));
+    }
+    Ok(answer)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dtos::ai::{AiChartSeries, AiChartUnit};
+    use crate::dtos::ai::{AiChartAxis, AiChartSeries, AiChartUnit};
+
+    fn msg(role: &str, content: &str) -> ChatMessageInput {
+        ChatMessageInput {
+            role: role.into(),
+            content: content.into(),
+        }
+    }
+
+    #[test]
+    fn historico_mantem_as_ultimas_e_comeca_pelo_usuario() {
+        let historico = vec![
+            msg("user", "1"),
+            msg("assistant", "2"),
+            msg("user", "3"),
+            msg("assistant", "4"),
+            msg("user", "5"),
+        ];
+        let recentes = recent_history(historico.clone(), 4);
+        let conteudos: Vec<&str> = recentes.iter().map(|m| m.content.as_str()).collect();
+        assert_eq!(
+            conteudos,
+            vec!["3", "4", "5"],
+            "a resposta órfã '2' cai fora"
+        );
+
+        assert_eq!(recent_history(historico, 50).len(), 5);
+    }
+
+    #[test]
+    fn eventos_novos_serializam_em_camel_case() {
+        let uso = serde_json::to_value(HarnessEvent::Usage {
+            prompt_tokens: 1200,
+            completion_tokens: 80,
+        })
+        .unwrap();
+        assert_eq!(uso["type"], "usage");
+        assert_eq!(uso["promptTokens"], 1200);
+        assert_eq!(uso["completionTokens"], 80);
+
+        let pedido = serde_json::to_value(HarnessEvent::ConfirmationRequired {
+            id: "c1".into(),
+            name: "silence_alert".into(),
+            arguments: json!({ "alert_id": 3 }),
+            summary: "Silenciar o alerta #3 por 60 min".into(),
+        })
+        .unwrap();
+        assert_eq!(pedido["type"], "confirmationRequired");
+        assert_eq!(pedido["summary"], "Silenciar o alerta #3 por 60 min");
+    }
 
     #[test]
     fn resultado_de_ferramenta_so_leva_grafico_quando_existe() {
@@ -291,6 +407,7 @@ mod tests {
                 title: "CPU — Borda".into(),
                 subtitle: None,
                 unit: AiChartUnit::Percentage,
+                x_axis: AiChartAxis::Time,
                 series: vec![AiChartSeries {
                     id: "cpu_usage".into(),
                     label: "CPU".into(),
@@ -301,6 +418,7 @@ mod tests {
         })
         .unwrap();
         assert_eq!(com["chart"]["unit"], "percentage");
+        assert_eq!(com["chart"]["xAxis"], "time");
         assert_eq!(com["chart"]["avgValue"], 12.5);
     }
 }

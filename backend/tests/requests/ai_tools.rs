@@ -10,7 +10,7 @@ use backend::{
     models::_entities::{
         alert_events, device_interfaces, devices, metrics, monitor_results, monitors,
     },
-    services::ai::harness::tools::ToolRegistry,
+    services::ai::harness::tools::{ToolPolicy, ToolRegistry},
 };
 use chrono::{Duration, Utc};
 use loco_rs::{prelude::AppContext, testing::prelude::*};
@@ -146,7 +146,7 @@ async fn interfaces_com_problema_mostram_porta_caida_e_saturada() {
         porta(&ctx, dev.id, 3, "ether3", "up").await;
         trafego(&ctx, dev.id, wan.id, "inBps", &[10_000_000.0, 95_000_000.0]).await;
 
-        let saida = ToolRegistry::new(false)
+        let saida = ToolRegistry::new(ToolPolicy::passive())
             .execute(
                 &ctx,
                 "get_device_interfaces",
@@ -178,7 +178,7 @@ async fn grafico_de_trafego_manda_pontos_para_a_tela_e_resumo_para_a_ia() {
         trafego(&ctx, dev.id, wan.id, "inBps", &[10.0, 20.0, 30.0]).await;
         trafego(&ctx, dev.id, wan.id, "outBps", &[1.0, 2.0, 3.0]).await;
 
-        let saida = ToolRegistry::new(false)
+        let saida = ToolRegistry::new(ToolPolicy::passive())
             .execute(
                 &ctx,
                 "chart_interface_traffic",
@@ -210,7 +210,7 @@ async fn historico_do_monitor_traz_uptime_e_falhas_recentes() {
         checagem(&ctx, mon.id, 2, "down", 0.0).await;
         checagem(&ctx, mon.id, 1, "up", 18.0).await;
 
-        let registro = ToolRegistry::new(false);
+        let registro = ToolRegistry::new(ToolPolicy::passive());
         let saida = registro
             .execute(
                 &ctx,
@@ -245,7 +245,7 @@ async fn alertas_separam_abertos_do_historico() {
         alerta(&ctx, dev.id, "active", "Link caído").await;
         alerta(&ctx, dev.id, "resolved", "Perda alta").await;
 
-        let registro = ToolRegistry::new(false);
+        let registro = ToolRegistry::new(ToolPolicy::passive());
         let abertos = registro.execute(&ctx, "get_alerts", "{}").await.unwrap();
         assert_eq!(abertos.data["total"], 1);
         assert_eq!(abertos.data["alerts"][0]["message"], "Link caído");
@@ -272,7 +272,7 @@ async fn alertas_separam_abertos_do_historico() {
 #[serial]
 async fn alvo_inexistente_volta_como_dado_e_ferramenta_ativa_desligada_nao_roda() {
     request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
-        let registro = ToolRegistry::new(false);
+        let registro = ToolRegistry::new(ToolPolicy::passive());
         let saida = registro
             .execute(
                 &ctx,

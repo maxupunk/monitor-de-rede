@@ -4,7 +4,7 @@ use std::convert::Infallible;
 
 use axum::{
     extract::Query,
-    http::{header, HeaderValue},
+    http::{header, HeaderMap, HeaderValue},
     response::{
         sse::{Event, KeepAlive, Sse},
         IntoResponse, Response,
@@ -15,14 +15,22 @@ use loco_rs::prelude::*;
 use serde::Deserialize;
 
 use crate::{
-    dtos::ai::{ChatStreamRequest, OllamaPullRequest, TestConnectionInput, TestConnectionResponse},
+    dtos::ai::{
+        ChatStreamRequest, ExecuteToolRequest, ExecuteToolResponse, OllamaPullRequest,
+        TestConnectionInput, TestConnectionResponse,
+    },
     services::{
         ai::{
             drivers::{create_driver, openai_compatible::OpenAiCompatibleDriver, traits::AiDriver},
-            harness::agent::run_agent_loop,
+            harness::{
+                agent::{run_agent_loop, AgentRequest},
+                confirmation,
+            },
             ollama, opencode, openrouter,
+            proactive::{digest, runner::ProviderDrivers, schedule::period_hours},
             settings::{self, AiSettings},
         },
+        audit::AuditActor,
         shared::errors::{AppError, AppResult},
     },
 };
@@ -148,7 +156,8 @@ async fn chat_stream(
     }
 
     let driver = create_driver(&settings)?;
-    let event_stream = run_agent_loop(ctx, settings, driver, input).await;
+    let request = AgentRequest::from_chat(input, &settings);
+    let event_stream = run_agent_loop(ctx, settings, driver, request).await;
 
     let sse_stream = event_stream.map(|event| {
         let json_str = serde_json::to_string(&event).unwrap_or_else(|_| "{}".into());
@@ -172,6 +181,42 @@ async fn chat_stream(
     headers.insert("x-accel-buffering", HeaderValue::from_static("no"));
 
     Ok(response)
+}
+
+/// `POST /api/ai/tools/execute` — executa a ação (ou teste ativo) que o
+/// usuário confirmou no chat, em nome dele.
+async fn execute_tool(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Json(input): Json<ExecuteToolRequest>,
+) -> AppResult<Response> {
+    let settings = settings::load(&ctx.db).await?;
+    let actor = AuditActor::from_headers(&headers, &ctx.db)
+        .await
+        .unwrap_or_default();
+    let output =
+        confirmation::execute_confirmed(&ctx, &settings, &input.name, input.arguments, actor)
+            .await?;
+    Ok(format::json(ExecuteToolResponse {
+        result: output.data,
+        chart: output.chart,
+    })?)
+}
+
+/// `GET /api/ai/digest/latest` — último resumo da rede gerado pela IA (ou `null`).
+async fn latest_digest(State(ctx): State<AppContext>) -> AppResult<Response> {
+    Ok(format::json(digest::latest(&ctx.db).await?)?)
+}
+
+/// `POST /api/ai/digest/run` — gera o resumo agora, cobrindo o período da
+/// frequência configurada (24 h quando o envio automático está desligado).
+/// Não envia notificação: quem pediu está olhando a tela.
+async fn run_digest(State(ctx): State<AppContext>) -> AppResult<Response> {
+    let settings = settings::load(&ctx.db).await?;
+    let hours = period_hours(settings.proactive.digest);
+    Ok(format::json(
+        digest::generate(&ctx, &settings, &ProviderDrivers, hours).await?,
+    )?)
 }
 
 #[derive(Debug, Deserialize)]
@@ -286,6 +331,9 @@ pub fn routes() -> Routes {
         .add("/settings", get(show_settings).put(update_settings))
         .add("/test-connection", post(test_connection))
         .add("/chat/stream", post(chat_stream))
+        .add("/tools/execute", post(execute_tool))
+        .add("/digest/latest", get(latest_digest))
+        .add("/digest/run", post(run_digest))
         .add("/opencode/models", get(list_opencode_models))
         .add("/openrouter/models", get(list_openrouter_models))
         .add("/ollama/models", get(list_ollama_models))

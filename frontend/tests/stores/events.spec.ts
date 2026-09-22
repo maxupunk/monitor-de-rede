@@ -4,6 +4,7 @@ import { apiService } from '@/services/apiService'
 import { useDeviceDetailStore } from '@/stores/deviceDetail'
 import { useEventsStore } from '@/stores/events'
 import { useMonitorsStore } from '@/stores/monitors'
+import { useAlertsStore } from '@/stores/alerts'
 
 class FakeEventSource {
   static latest: FakeEventSource | null = null
@@ -111,6 +112,44 @@ describe('events store', () => {
         currentLatencyMs: 350,
       })
     )
+    expect(apiGet).not.toHaveBeenCalled()
+    events.disconnect()
+  })
+  it('aplica o resumo da IA de alert:ai_summary sem consultar endpoints', () => {
+    const apiGet = vi.spyOn(apiService, 'get')
+    const alerts = useAlertsStore()
+    alerts.upsertAlertEvent({
+      id: 42,
+      severity: 'critical',
+      status: 'active',
+      title: 'Borda fora do ar',
+      message: 'Timeout',
+      data: { problemKind: 'unreachable' },
+      createdAt: '2026-09-21T10:00:00Z',
+    })
+    const events = useEventsStore()
+    events.connect()
+
+    FakeEventSource.latest?.onmessage?.({
+      data: JSON.stringify({
+        type: 'alert:ai_summary',
+        timestamp: '2026-09-21T10:01:00Z',
+        data: {
+          id: 42,
+          alertEventId: 42,
+          aiSummary: {
+            text: 'Uplink caiu; trocar o SFP.',
+            generatedAt: '2026-09-21T10:01:00Z',
+            promptTokens: 900,
+            completionTokens: 30,
+          },
+        },
+      }),
+    } as MessageEvent<string>)
+
+    const alerta = alerts.alertEvents.find((event) => event.id === 42)
+    expect(alerta?.data?.aiSummary?.text).toBe('Uplink caiu; trocar o SFP.')
+    expect(alerta?.data?.problemKind).toBe('unreachable')
     expect(apiGet).not.toHaveBeenCalled()
     events.disconnect()
   })

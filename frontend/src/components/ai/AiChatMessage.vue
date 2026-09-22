@@ -19,7 +19,12 @@
     >
       <!-- Tool Cards Executados -->
       <div v-if="message.toolCalls && message.toolCalls.length > 0" class="mb-2">
-        <AiToolCard v-for="tool in message.toolCalls" :key="tool.id" :tool="tool" />
+        <AiToolCard
+          v-for="tool in message.toolCalls"
+          :key="tool.id"
+          :tool="tool"
+          :message-id="message.id"
+        />
       </div>
 
       <!-- Balão de Mensagem -->
@@ -48,7 +53,17 @@
         <span v-if="message.isStreaming" class="streaming-cursor" />
 
         <!-- Rodapé do Balão -->
-        <div v-if="message.content && !message.isStreaming" class="d-flex justify-end mt-1">
+        <div
+          v-if="message.content && !message.isStreaming"
+          class="d-flex align-center justify-end ga-2 mt-1"
+        >
+          <span
+            v-if="usageLabel"
+            class="text-caption text-medium-emphasis me-auto"
+            title="Tokens enviados ao provedor (↑) e gerados na resposta (↓)"
+          >
+            {{ usageLabel }}
+          </span>
           <v-btn
             icon
             size="x-small"
@@ -79,12 +94,20 @@ import { computed, ref } from 'vue'
 import DOMPurify from 'dompurify'
 import type { AiDisplayMessage } from '@/stores/ai'
 import AiToolCard from './AiToolCard.vue'
+import { formatCompactCount } from '@/utils/formatters'
 
 const props = defineProps<{
   message: AiDisplayMessage
 }>()
 
 const copied = ref(false)
+
+/** Consumo da resposta, quando o provedor informou. */
+const usageLabel = computed(() => {
+  const usage = props.message.usage
+  if (!usage) return null
+  return `↑ ${formatCompactCount(usage.promptTokens)} · ↓ ${formatCompactCount(usage.completionTokens)} tokens`
+})
 
 /** Gráfico precisa da largura toda, mesmo quando o texto da resposta é curto. */
 const hasChart = computed(() => props.message.toolCalls?.some((tool) => tool.chart) ?? false)

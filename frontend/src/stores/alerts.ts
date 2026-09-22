@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { apiService } from '@/services/apiService'
 import type { AlertOperator, AlertProblemKind } from '@/utils/alertPresentation'
+import type { AiIncidentSummary } from '@/bindings/AiIncidentSummary'
 
 export interface AlertRuleCondition {
   field: string
@@ -128,6 +129,8 @@ export interface AlertEventData {
   flappingSince?: string
   /** Carimbos ISO das recaídas dentro da janela de detecção de oscilação */
   problemTimeline?: string[]
+  /** Resumo gerado pela IA quando o alerta abriu (se habilitado) */
+  aiSummary?: AiIncidentSummary
   [key: string]: unknown
 }
 
@@ -530,6 +533,14 @@ export const useAlertsStore = defineStore('alerts', () => {
     lastRealtimeUpdateAt.value = new Date().toISOString()
   }
 
+  /** Resumo da IA chegou pelo SSE: entra no `data` sem refetch. */
+  function applyAiSummary(id: number, summary: AiIncidentSummary) {
+    const current = alertEvents.value.find((a) => a.id === id)
+    if (!current) return
+    current.data = { ...(current.data ?? {}), aiSummary: summary }
+    lastRealtimeUpdateAt.value = new Date().toISOString()
+  }
+
   function patchAlertEvent(id: number, patch: Partial<AlertEvent>) {
     const current = alertEvents.value.find((a) => a.id === id)
     if (!current) return
@@ -586,6 +597,7 @@ export const useAlertsStore = defineStore('alerts', () => {
     deleteAlertRule,
     upsertAlertEvent,
     patchAlertEvent,
+    applyAiSummary,
     upsertAlertRule,
     removeAlertRule,
   }

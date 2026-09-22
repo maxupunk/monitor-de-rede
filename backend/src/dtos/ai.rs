@@ -14,8 +14,17 @@ pub struct ChatMessageInput {
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct ChatStreamRequest {
     pub messages: Vec<ChatMessageInput>,
+    /// Dispositivo, monitor ou alerta de onde o chat foi aberto: vira contexto
+    /// no system prompt para a IA não precisar perguntar "qual?".
     #[serde(default)]
+    #[ts(type = "number | null")]
     pub device_id: Option<i64>,
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub monitor_id: Option<i64>,
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub alert_id: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -26,6 +35,10 @@ enum ChatStreamRequestHelper {
         messages: Vec<ChatMessageInput>,
         #[serde(default)]
         device_id: Option<i64>,
+        #[serde(default)]
+        monitor_id: Option<i64>,
+        #[serde(default)]
+        alert_id: Option<i64>,
     },
     Array(Vec<ChatMessageInput>),
 }
@@ -40,13 +53,19 @@ impl<'de> Deserialize<'de> for ChatStreamRequest {
             ChatStreamRequestHelper::Object {
                 messages,
                 device_id,
+                monitor_id,
+                alert_id,
             } => Ok(Self {
                 messages,
                 device_id,
+                monitor_id,
+                alert_id,
             }),
             ChatStreamRequestHelper::Array(messages) => Ok(Self {
                 messages,
                 device_id: None,
+                monitor_id: None,
+                alert_id: None,
             }),
         }
     }
@@ -337,7 +356,19 @@ pub enum AiChartUnit {
     Generic,
 }
 
-/// Amostra de uma série: instante em RFC 3339 e valor na unidade do gráfico.
+/// O que o eixo X representa.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub enum AiChartAxis {
+    /// `time` de cada ponto é um instante RFC 3339 — a tela formata a data.
+    Time,
+    /// `time` é um rótulo pronto ("14h") — a tela mostra como veio.
+    Label,
+}
+
+/// Amostra de uma série: instante RFC 3339 (ou rótulo, conforme o eixo) e
+/// valor na unidade do gráfico.
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
@@ -367,7 +398,64 @@ pub struct AiChart {
     pub title: String,
     pub subtitle: Option<String>,
     pub unit: AiChartUnit,
+    pub x_axis: AiChartAxis,
     pub series: Vec<AiChartSeries>,
     #[ts(type = "number | null")]
     pub avg_value: Option<f64>,
+}
+
+/// Corpo de `POST /api/ai/tools/execute`: a chamada que o usuário confirmou.
+#[derive(Debug, Clone, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct ExecuteToolRequest {
+    pub name: String,
+    #[serde(default)]
+    #[ts(type = "Record<string, unknown>")]
+    pub arguments: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct ExecuteToolResponse {
+    #[ts(type = "Record<string, unknown>")]
+    pub result: serde_json::Value,
+    pub chart: Option<AiChart>,
+}
+
+/// Corpo de criação/atualização de uma conversa salva do assistente.
+#[derive(Debug, Clone, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct AiConversationInput {
+    pub title: String,
+    /// Mensagens como a tela as exibe (texto, ferramentas, gráficos).
+    #[ts(type = "unknown[]")]
+    pub messages: serde_json::Value,
+}
+
+/// Item da lista de conversas: sem as mensagens, que só vêm ao abrir.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct AiConversationSummary {
+    #[ts(type = "number")]
+    pub id: i64,
+    pub title: String,
+    pub updated_at: String,
+    #[ts(type = "number")]
+    pub message_count: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct AiConversationDetail {
+    #[ts(type = "number")]
+    pub id: i64,
+    pub title: String,
+    pub updated_at: String,
+    #[ts(type = "unknown[]")]
+    pub messages: serde_json::Value,
 }

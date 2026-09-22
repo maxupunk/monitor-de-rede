@@ -5,6 +5,8 @@
 //! `LOWER(...) LIKE` teria semântica diferente entre SQLite e PostgreSQL, e as
 //! listas envolvidas (dispositivos, interfaces de um aparelho) são pequenas.
 
+use std::collections::{HashMap, HashSet};
+
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 
 use crate::{
@@ -63,6 +65,28 @@ pub fn pick_device<'a>(list: &'a [devices::Model], identifier: &str) -> Option<&
         (Some(only), None) => Some(only),
         _ => None,
     }
+}
+
+/// Nomes de dispositivo por id, para trocar ids por nomes legíveis.
+///
+/// # Errors
+///
+/// Propaga erro do banco.
+pub async fn device_names<C: ConnectionTrait>(
+    db: &C,
+    ids: impl IntoIterator<Item = i64>,
+) -> AppResult<HashMap<i64, String>> {
+    let ids: HashSet<i64> = ids.into_iter().collect();
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    Ok(devices::Entity::find()
+        .filter(devices::Column::Id.is_in(ids))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|device| (device.id, device.name))
+        .collect())
 }
 
 /// # Errors

@@ -1,4 +1,5 @@
 pub mod ai;
+pub mod ai_conversations;
 pub mod alerts;
 pub mod audit;
 pub mod auth;

@@ -22,6 +22,7 @@ use crate::{
     },
     services::{
         alerts::{
+            actions as alert_actions,
             catalog::{
                 service::{self as catalog, TemplateScope},
                 templates,
@@ -593,21 +594,7 @@ async fn acknowledge(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppR
         }))?);
     }
 
-    let event = silence::acknowledge_alert(&ctx.db, event).await?;
-    publish(
-        &ctx,
-        "alert:acknowledged",
-        json!({
-            "id": event.id,
-            "alertEventId": event.id,
-            "monitorId": event.monitor_id,
-            "deviceId": event.device_id,
-            "status": event.status,
-            "severity": event.severity,
-            "message": event.message,
-        }),
-    )
-    .await;
+    let event = alert_actions::acknowledge(&ctx, event).await?;
 
     Ok(format::json(json!({
         "message": format!("Alerta #{id} reconhecido"),
@@ -662,25 +649,8 @@ async fn silence_alert(
         .or(input.duration_minutes)
         .filter(|value| *value > 0)
         .unwrap_or(silence::DEFAULT_SILENCE_MINUTES);
-    let event = silence::silence_alert(&ctx.db, load_event(&ctx, id).await?, duration).await?;
+    let event = alert_actions::silence(&ctx, load_event(&ctx, id).await?, duration).await?;
     let serialized = serialize_one(&ctx, &event).await?;
-
-    publish(
-        &ctx,
-        "alert:silenced",
-        json!({
-            "id": event.id,
-            "alertEventId": event.id,
-            "monitorId": event.monitor_id,
-            "deviceId": event.device_id,
-            "status": event.status,
-            "severity": event.severity,
-            "message": event.message,
-            "silencedUntil": serialized.silenced_until,
-            "durationMinutes": duration,
-        }),
-    )
-    .await;
 
     Ok(format::json(json!({
         "message": format!("Alerta #{id} silenciado por {duration} minutos"),

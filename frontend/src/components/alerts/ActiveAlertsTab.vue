@@ -68,6 +68,7 @@
       <div v-if="episodeInfo(item)" class="text-caption text-warning">
         {{ episodeInfo(item) }}
       </div>
+      <AiAlertSummary :summary="item.data?.aiSummary" />
     </template>
 
     <template #item.createdAt="{ item }">
@@ -122,6 +123,12 @@
         >
           Diagnóstico
         </v-btn>
+        <AiAskButton
+          icon-only
+          variant="outlined"
+          :prompt="aiPrompt(item)"
+          :context="aiContext(item)"
+        />
       </div>
     </template>
 
@@ -180,6 +187,7 @@
           >
             {{ episodeInfo(item) }}
           </v-alert>
+          <AiAlertSummary :summary="item.data?.aiSummary" />
         </div>
 
         <!-- Footer: Barra de Ações com Padrão Visual Harmonioso -->
@@ -238,6 +246,12 @@
           >
             Diagnóstico
           </v-btn>
+          <AiAskButton
+            label="IA"
+            class="text-caption px-2"
+            :prompt="aiPrompt(item)"
+            :context="aiContext(item)"
+          />
         </div>
       </div>
     </template>
@@ -256,6 +270,17 @@ import {
   problemKindLabel,
 } from '@/utils/alertPresentation'
 import { formatDateTime, formatRelativeTime } from '@/utils/formatters'
+import AiAskButton from '@/components/ai/AiAskButton.vue'
+import AiAlertSummary from '@/components/ai/AiAlertSummary.vue'
+import type { AiChatContext } from '@/stores/ai'
+
+function aiPrompt(alert: AlertEvent): string {
+  return `Investigue o alerta #${alert.id} (${alert.title}): qual a causa provável e o que devo fazer?`
+}
+
+function aiContext(alert: AlertEvent): AiChatContext {
+  return { alertId: alert.id, deviceId: alert.deviceId, monitorId: alert.monitorId }
+}
 
 defineProps<{
   verifyingId: number | null
