@@ -3,6 +3,7 @@ mod ai_conversations;
 mod ai_grep;
 mod ai_mentions;
 mod ai_proactive;
+mod ai_token_budget;
 mod ai_tools;
 mod alert_correlation;
 mod alert_engine_robustness;

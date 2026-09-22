@@ -32,6 +32,8 @@ mod lookup;
 mod series;
 mod timeline;
 
+use std::collections::BTreeSet;
+
 use async_trait::async_trait;
 use loco_rs::prelude::AppContext;
 use serde_json::{json, Value};
@@ -64,6 +66,81 @@ pub enum ToolKind {
     /// nas rotinas automáticas não há ninguém para responder.
     Interactive,
 }
+
+/// Grupo do catálogo. Só o [`ToolGroup::Core`] vai em toda chamada ao
+/// provedor; os demais entram quando a pergunta pede ou quando a IA os
+/// carrega com [`LOAD_TOOLS`] — cada schema enviado custa tokens em toda
+/// rodada, use a IA a ferramenta ou não.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ToolGroup {
+    /// Inventário, alertas, grep, documentação e a pergunta ao usuário.
+    Core,
+    History,
+    Analysis,
+    Charts,
+    Logs,
+    Docker,
+    Diagnostics,
+    Actions,
+}
+
+impl ToolGroup {
+    /// Os grupos que podem ser carregados sob demanda, na ordem do catálogo.
+    pub const DEFERRED: [Self; 7] = [
+        Self::History,
+        Self::Analysis,
+        Self::Charts,
+        Self::Logs,
+        Self::Docker,
+        Self::Diagnostics,
+        Self::Actions,
+    ];
+
+    #[must_use]
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Core => "core",
+            Self::History => "history",
+            Self::Analysis => "analysis",
+            Self::Charts => "charts",
+            Self::Logs => "logs",
+            Self::Docker => "docker",
+            Self::Diagnostics => "diagnostics",
+            Self::Actions => "actions",
+        }
+    }
+
+    /// Para que serve, na linha do catálogo.
+    #[must_use]
+    pub const fn purpose(self) -> &'static str {
+        match self {
+            Self::Core => "consultas básicas",
+            Self::History => "uptime, falhas e métricas gravadas no tempo",
+            Self::Analysis => {
+                "causa raiz, comparação com o normal, padrão por hora, linha do tempo"
+            }
+            Self::Charts => "gráficos de latência, tráfego e CPU/memória",
+            Self::Logs => "panorama dos logs agrupado por padrão",
+            Self::Docker => "containers da Docker Engine",
+            Self::Diagnostics => "ping, traceroute, portas, DNS e playbooks",
+            Self::Actions => "reconhecer/silenciar alerta, janela de manutenção, criar monitor",
+        }
+    }
+
+    #[must_use]
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::DEFERRED
+            .into_iter()
+            .find(|group| group.id().eq_ignore_ascii_case(id.trim()))
+    }
+}
+
+/// Grupos carregados numa sessão.
+pub type ToolGroups = BTreeSet<ToolGroup>;
+
+/// Ferramenta do próprio agente que carrega grupos do catálogo. Não é um
+/// [`AiToolHandler`]: ela muda o que a sessão enxerga, não consulta nada.
+pub const LOAD_TOOLS: &str = "load_tools";
 
 /// Quais ferramentas a sessão pode usar e quais pedem confirmação.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -181,6 +258,16 @@ pub trait AiToolHandler: Send + Sync {
         ToolKind::Passive
     }
 
+    /// Grupo do catálogo. Testes ativos e ações têm grupo próprio; o resto é
+    /// básico até dizer o contrário.
+    fn group(&self) -> ToolGroup {
+        match self.kind() {
+            ToolKind::Active => ToolGroup::Diagnostics,
+            ToolKind::Action => ToolGroup::Actions,
+            ToolKind::Passive | ToolKind::Interactive => ToolGroup::Core,
+        }
+    }
+
     async fn execute(&self, ctx: &AppContext, args: &ToolArgs) -> AppResult<ToolOutput>;
 
     /// Frase que o usuário lê antes de confirmar ("Silenciar o alerta #12 por
@@ -259,6 +346,66 @@ impl ToolRegistry {
         self.handlers
             .iter()
             .map(|handler| handler.definition())
+            .collect()
+    }
+
+    /// Contratos do núcleo mais os grupos carregados, e o `load_tools`
+    /// enquanto sobrar grupo por carregar.
+    #[must_use]
+    pub fn definitions_for(&self, loaded: &ToolGroups) -> Vec<AiTool> {
+        let mut tools: Vec<AiTool> = self
+            .handlers
+            .iter()
+            .filter(|handler| {
+                handler.group() == ToolGroup::Core || loaded.contains(&handler.group())
+            })
+            .map(|handler| handler.definition())
+            .collect();
+        let pending: Vec<&str> = self
+            .available_groups()
+            .into_iter()
+            .filter(|group| !loaded.contains(group))
+            .map(ToolGroup::id)
+            .collect();
+        if !pending.is_empty() {
+            tools.push(AiTool {
+                r#type: "function".to_string(),
+                function: AiToolFunction {
+                    name: LOAD_TOOLS.to_string(),
+                    description: "Carrega grupos de ferramentas do catálogo (listados no prompt) para a próxima rodada. Peça todos os grupos de que precisar numa chamada só.".to_string(),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {
+                            "groups": { "type": "array", "items": { "type": "string", "enum": pending } }
+                        },
+                        "required": ["groups"]
+                    }),
+                },
+            });
+        }
+        tools
+    }
+
+    /// Grupos sob demanda que a política desta sessão libera.
+    #[must_use]
+    pub fn available_groups(&self) -> Vec<ToolGroup> {
+        ToolGroup::DEFERRED
+            .into_iter()
+            .filter(|group| {
+                self.handlers
+                    .iter()
+                    .any(|handler| handler.group() == *group)
+            })
+            .collect()
+    }
+
+    /// Nomes das ferramentas de um grupo, para o catálogo do prompt.
+    #[must_use]
+    pub fn tool_names(&self, group: ToolGroup) -> Vec<&'static str> {
+        self.handlers
+            .iter()
+            .filter(|handler| handler.group() == group)
+            .map(|handler| handler.name())
             .collect()
     }
 
@@ -390,6 +537,56 @@ mod tests {
             interactive: true,
         });
         assert_eq!(todas.definitions().len(), all_handlers().len());
+    }
+
+    #[test]
+    fn catalogo_sob_demanda_manda_o_nucleo_e_so_o_que_foi_carregado() {
+        let registro = ToolRegistry::new(ToolPolicy {
+            allow_active: true,
+            allow_actions: false,
+            confirm_active: false,
+            interactive: true,
+        });
+        let nomes = |carregados: &ToolGroups| -> Vec<String> {
+            registro
+                .definitions_for(carregados)
+                .into_iter()
+                .map(|tool| tool.function.name)
+                .collect()
+        };
+
+        let nucleo = nomes(&ToolGroups::new());
+        assert!(nucleo.contains(&"grep".to_string()));
+        assert!(nucleo.contains(&"ask_user".to_string()));
+        assert!(!nucleo.contains(&"chart_monitor_latency".to_string()));
+        assert!(nucleo.contains(&LOAD_TOOLS.to_string()));
+        assert!(
+            !registro.available_groups().contains(&ToolGroup::Actions),
+            "ação desligada não entra nem no catálogo"
+        );
+
+        let com_graficos = nomes(&ToolGroups::from([ToolGroup::Charts]));
+        assert!(com_graficos.contains(&"chart_monitor_latency".to_string()));
+
+        let tudo: ToolGroups = registro.available_groups().into_iter().collect();
+        assert!(
+            !nomes(&tudo).contains(&LOAD_TOOLS.to_string()),
+            "nada a carregar, sem load_tools"
+        );
+    }
+
+    #[test]
+    fn nucleo_cabe_num_orcamento_pequeno() {
+        let registro = ToolRegistry::new(ToolPolicy::from_settings(&AiSettings::default()));
+        let tamanho: usize = registro
+            .definitions_for(&ToolGroups::new())
+            .iter()
+            .map(|tool| serde_json::to_string(tool).unwrap().len())
+            .sum();
+        assert!(
+            tamanho < 7_500,
+            "o núcleo vai em toda rodada: {tamanho} caracteres"
+        );
     }
 
     #[test]

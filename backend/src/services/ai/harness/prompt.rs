@@ -4,7 +4,7 @@
 use chrono::Utc;
 use sea_orm::{ConnectionTrait, EntityTrait};
 
-use super::tools::ToolPolicy;
+use super::tools::{ToolGroups, ToolPolicy, ToolRegistry};
 use crate::{
     dtos::ai::{AiMention, AiMentionKind},
     models::{alert_events, devices, monitors},
@@ -22,29 +22,59 @@ pub struct ChatContext {
 }
 
 const METHOD: &str = "COMO TRABALHAR:
-1. Fundamente o diagnóstico em dados, nunca em suposição. Comece pelo que o sistema já registrou: \
-get_system_summary, get_alerts, get_device_detail, get_device_interfaces, get_monitor_history e get_device_metrics.
-2. Vários alertas ao mesmo tempo: use analyze_root_cause antes de tratar cada um — um switch ou gateway caído derruba o que está abaixo dele.
-3. 'Está pior que o normal?': compare_with_baseline. 'Em que horário piora?': get_hourly_pattern. \
-'O que aconteceu às 14h?': get_incident_timeline.
-4. Logs, mensagens de alertas e falhas de checagem: para um panorama dos logs, get_logs_overview (agrupa por padrão). \
-Para procurar algo específico, grep — meça antes de ler: output 'count' ou 'sources' diz quanto e onde; \
-só então peça 'lines' (com device/hours estreitos) e context apenas se precisar ver o que veio antes/depois. \
-Use regex para alternativas ('link (down|flap)') e exclude para tirar ruído.
-5. Gráficos: quando o usuário pedir ou a evolução no tempo ajudar, use chart_monitor_latency, chart_interface_traffic, \
-chart_device_metric ou get_hourly_pattern. O gráfico aparece para o usuário automaticamente — não o reproduza em texto nem em tabela.
-6. Dúvidas sobre configurar ou usar o NetMonitor: search_system_docs.
-7. Recursos marcados com @ são o alvo da pergunta: use-os direto. Se não estiver claro de qual dispositivo ou recurso vem a \
-informação — a conversa era sobre um equipamento e agora a pergunta é de outro assunto (ex: era a borda, agora é a bateria ou o MPPT), \
-ou o nome é ambíguo —, não assuma o assunto anterior nem o contexto da tela: chame ask_user com os candidatos \
-(list_devices, list_monitors) como opções, antes de consultar qualquer outra coisa.
-8. Containers Docker do servidor: get_docker_containers; logs de um container: grep source='docker'.";
+1. Use ferramentas só quando a pergunta precisar de dados do sistema. Saudação, agradecimento ou conversa: responda direto, sem consultar nada.
+2. Consulte o mínimo que responde, e peça na mesma rodada tudo o que já sabe que vai precisar — cada rodada reenvia a conversa inteira. \
+Um aparelho: get_device_detail. Alertas: get_alerts. Visão geral da rede: get_system_summary.
+3. Fundamente o diagnóstico nos dados, nunca em suposição. Vários alertas juntos: a causa raiz pela topologia vem antes de tratar um a um.
+4. Logs, mensagens de alertas e falhas de checagem: grep — meça antes de ler ('count' ou 'sources'), depois 'lines' com device/hours \
+estreitos; regex para alternativas ('link (down|flap)'), exclude para tirar ruído.
+5. Gráficos aparecem para o usuário automaticamente — não os reproduza em texto nem em tabela.
+6. Marcados com @ são o alvo da pergunta: use-os direto. Se não estiver claro de qual dispositivo ou recurso vem a informação \
+(a conversa era sobre um equipamento e a pergunta mudou de assunto — ex: era a borda, agora é a bateria ou o MPPT —, ou o nome é ambíguo), \
+não assuma o assunto anterior nem o contexto da tela: chame ask_user com os candidatos como opções, antes de consultar outra coisa.
+7. Dúvidas sobre configurar ou usar o NetMonitor: search_system_docs.";
 
-const ACTIVE_TOOLS: &str = "9. Testes ativos (ping_host, traceroute, scan_ports, dns_lookup, run_playbook) confirmam o estado de agora.";
+const ACTIVE_TOOLS: &str =
+    "8. Testes ativos (ping, traceroute, portas, DNS, playbooks) confirmam o estado de agora.";
 
-const ACTIONS: &str = "10. Ações (acknowledge_alert, silence_alert, create_maintenance_window, create_monitor) só são \
+const ACTIONS: &str = "9. Ações (reconhecer/silenciar alerta, janela de manutenção, criar monitor) só são \
 executadas depois que o usuário confirma no chat. Proponha a ação quando ela resolver o pedido; ao receber \
 'awaiting_user_confirmation', diga em uma frase o que foi proposto e não repita a chamada.";
+
+/// Uma linha por grupo ainda não carregado: nome, para que serve e
+/// ferramentas. Nada quando a sessão já recebeu o catálogo inteiro.
+fn catalog_section(policy: ToolPolicy, loaded: &ToolGroups) -> Option<String> {
+    let registry = ToolRegistry::new(policy);
+    let lines: Vec<String> = registry
+        .available_groups()
+        .into_iter()
+        .filter(|group| !loaded.contains(group))
+        .map(|group| {
+            format!(
+                "- {}: {} ({})",
+                group.id(),
+                group.purpose(),
+                registry.tool_names(group).join(", ")
+            )
+        })
+        .collect();
+    (!lines.is_empty()).then(|| {
+        format!(
+            "\nFERRAMENTAS SOB DEMANDA — carregue com load_tools (todos os grupos necessários numa chamada) antes de usar:\n{}\n",
+            lines.join("\n")
+        )
+    })
+}
+
+/// Prompt de uma troca de cortesia: papel e estilo, sem método nem contexto
+/// — não há o que consultar.
+#[must_use]
+pub fn build_small_talk_prompt(settings: &AiSettings) -> String {
+    format!(
+        "Você é o NetMonitor AI, assistente de redes do NetMonitor. Responda à cortesia em uma frase e ofereça ajuda com a rede.\n{}\n",
+        settings.response_style.directive()
+    )
+}
 
 async fn device_section<C: ConnectionTrait>(db: &C, id: i64) -> Option<String> {
     let device = devices::Entity::find_by_id(id).one(db).await.ok()??;
@@ -144,6 +174,7 @@ pub async fn build_system_prompt<C: ConnectionTrait>(
     settings: &AiSettings,
     policy: ToolPolicy,
     context: &ChatContext,
+    loaded: &ToolGroups,
 ) -> String {
     let now = Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
     let mut prompt = format!(
@@ -157,6 +188,7 @@ pub async fn build_system_prompt<C: ConnectionTrait>(
         prompt.push_str(ACTIONS);
         prompt.push('\n');
     }
+    prompt.extend(catalog_section(policy, loaded));
     prompt.push('\n');
     prompt.push_str(settings.response_style.directive());
     prompt.push('\n');

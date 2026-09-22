@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use loco_rs::prelude::AppContext;
 use serde_json::{json, Value};
 
-use super::{AiToolHandler, ToolArgs, ToolOutput};
+use super::{AiToolHandler, ToolArgs, ToolGroup, ToolOutput};
 use crate::{
     services::{
         docker::{self, engine, DockerError},
@@ -83,6 +83,10 @@ pub struct DockerContainers;
 impl AiToolHandler for DockerContainers {
     fn name(&self) -> &'static str {
         "get_docker_containers"
+    }
+
+    fn group(&self) -> ToolGroup {
+        ToolGroup::Docker
     }
 
     fn description(&self) -> &'static str {

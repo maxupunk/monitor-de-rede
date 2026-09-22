@@ -15,7 +15,7 @@ use super::{
     history::{metric_samples, monitor_selector_schema},
     lookup::{device_interfaces_of, find_device, find_monitor, pick_interface},
     series::{chart_points, round2, stats, Sample},
-    AiToolHandler, ToolArgs, ToolOutput,
+    AiToolHandler, ToolArgs, ToolGroup, ToolOutput,
 };
 use crate::{
     dtos::{
@@ -133,6 +133,10 @@ impl AiToolHandler for MonitorLatencyChart {
         "chart_monitor_latency"
     }
 
+    fn group(&self) -> ToolGroup {
+        ToolGroup::Charts
+    }
+
     fn description(&self) -> &'static str {
         "Exibe ao usuário o gráfico de latência de um monitor (ping, DNS, HTTP...) e devolve min/máx/média e perda. Use quando pedirem gráfico ou para mostrar a evolução de uma lentidão."
     }
@@ -202,6 +206,10 @@ pub struct InterfaceTrafficChart;
 impl AiToolHandler for InterfaceTrafficChart {
     fn name(&self) -> &'static str {
         "chart_interface_traffic"
+    }
+
+    fn group(&self) -> ToolGroup {
+        ToolGroup::Charts
     }
 
     fn description(&self) -> &'static str {
@@ -302,6 +310,10 @@ pub struct DeviceMetricChart;
 impl AiToolHandler for DeviceMetricChart {
     fn name(&self) -> &'static str {
         "chart_device_metric"
+    }
+
+    fn group(&self) -> ToolGroup {
+        ToolGroup::Charts
     }
 
     fn description(&self) -> &'static str {

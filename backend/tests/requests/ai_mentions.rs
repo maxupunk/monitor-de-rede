@@ -21,9 +21,9 @@ use backend::{
                 AiChatChunk, AiChatOptions, AiChunkStream, AiDriver, AiMessage, AiTool, AiToolCall,
             },
             harness::{
-                agent::{run_agent_loop, AgentRequest, HarnessEvent},
+                agent::{run_agent_loop, AgentRequest, HarnessEvent, ToolLoading},
                 prompt::{build_system_prompt, ChatContext},
-                tools::ToolPolicy,
+                tools::{ToolGroups, ToolPolicy},
             },
             mentions,
             settings::AiSettings,
@@ -118,6 +118,7 @@ async fn marcado_vai_para_o_prompt_como_alvo_da_pergunta() {
             &AiSettings::default(),
             ToolPolicy::passive(),
             &contexto,
+            &ToolGroups::new(),
         )
         .await;
 
@@ -204,6 +205,7 @@ async fn pergunta_ao_usuario_encerra_a_rodada_sem_nova_chamada() {
                 }],
                 context: ChatContext::default(),
                 policy: ToolPolicy::from_settings(&AiSettings::default()),
+                tool_loading: ToolLoading::OnDemand,
             },
         )
         .await;

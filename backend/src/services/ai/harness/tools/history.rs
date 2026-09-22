@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use super::{
     lookup::{find_device, find_monitor},
     series::{round2, stats, Sample},
-    AiToolHandler, ToolArgs, ToolOutput,
+    AiToolHandler, ToolArgs, ToolGroup, ToolOutput,
 };
 use crate::{
     models::_entities::{metrics, monitor_results},
@@ -73,6 +73,10 @@ pub struct MonitorHistory;
 impl AiToolHandler for MonitorHistory {
     fn name(&self) -> &'static str {
         "get_monitor_history"
+    }
+
+    fn group(&self) -> ToolGroup {
+        ToolGroup::History
     }
 
     fn description(&self) -> &'static str {
@@ -154,6 +158,10 @@ pub struct DeviceMetrics;
 impl AiToolHandler for DeviceMetrics {
     fn name(&self) -> &'static str {
         "get_device_metrics"
+    }
+
+    fn group(&self) -> ToolGroup {
+        ToolGroup::History
     }
 
     fn description(&self) -> &'static str {

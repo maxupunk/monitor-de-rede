@@ -14,7 +14,7 @@ use super::{
     lookup::{device_names, find_device, find_monitor},
     series::round2,
     timeline::{merge, status_transitions, EntryKind, TimelineEntry},
-    AiToolHandler, ToolArgs, ToolOutput,
+    AiToolHandler, ToolArgs, ToolGroup, ToolOutput,
 };
 use crate::{
     dtos::{
@@ -71,6 +71,10 @@ pub struct RootCause;
 impl AiToolHandler for RootCause {
     fn name(&self) -> &'static str {
         "analyze_root_cause"
+    }
+
+    fn group(&self) -> ToolGroup {
+        ToolGroup::Analysis
     }
 
     fn description(&self) -> &'static str {
@@ -150,6 +154,10 @@ impl AiToolHandler for BaselineComparison {
         "compare_with_baseline"
     }
 
+    fn group(&self) -> ToolGroup {
+        ToolGroup::Analysis
+    }
+
     fn description(&self) -> &'static str {
         "Compara a última checagem de um monitor com o comportamento normal dele (média e desvio dos últimos dias): diz se a latência ou a perda atual é anormal e quanto."
     }
@@ -213,6 +221,10 @@ pub struct HourlyPattern;
 impl AiToolHandler for HourlyPattern {
     fn name(&self) -> &'static str {
         "get_hourly_pattern"
+    }
+
+    fn group(&self) -> ToolGroup {
+        ToolGroup::Analysis
     }
 
     fn description(&self) -> &'static str {
@@ -454,6 +466,10 @@ pub struct IncidentTimeline;
 impl AiToolHandler for IncidentTimeline {
     fn name(&self) -> &'static str {
         "get_incident_timeline"
+    }
+
+    fn group(&self) -> ToolGroup {
+        ToolGroup::Analysis
     }
 
     fn description(&self) -> &'static str {

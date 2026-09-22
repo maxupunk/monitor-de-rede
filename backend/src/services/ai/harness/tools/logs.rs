@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 use super::{
     log_digest::{parse_severity, summarize},
     lookup::{device_names, find_device},
-    AiToolHandler, ToolArgs, ToolOutput,
+    AiToolHandler, ToolArgs, ToolGroup, ToolOutput,
 };
 use crate::{
     models::logs::device_logs,
@@ -119,6 +119,10 @@ pub struct LogsOverview;
 impl AiToolHandler for LogsOverview {
     fn name(&self) -> &'static str {
         "get_logs_overview"
+    }
+
+    fn group(&self) -> ToolGroup {
+        ToolGroup::Logs
     }
 
     fn description(&self) -> &'static str {

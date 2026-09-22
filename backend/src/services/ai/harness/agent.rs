@@ -12,8 +12,9 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use super::{
-    prompt::{build_system_prompt, ChatContext},
-    tools::{ToolPolicy, ToolRegistry},
+    prompt::{build_small_talk_prompt, build_system_prompt, ChatContext},
+    tools::{ToolGroups, ToolPolicy, ToolRegistry, LOAD_TOOLS},
+    turn::{compact_for_model, is_small_talk, preselect_groups, requested_groups},
 };
 use crate::{
     dtos::ai::{AiChart, ChatMessageInput, ChatStreamRequest},
@@ -87,11 +88,25 @@ pub fn recent_history(messages: Vec<ChatMessageInput>, limit: usize) -> Vec<Chat
         .collect()
 }
 
+/// Mensagens enviadas numa troca de cortesia: não há o que lembrar.
+const SMALL_TALK_HISTORY: usize = 4;
+
+/// Como a sessão recebe os contratos das ferramentas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolLoading {
+    /// Todos de saída — rotinas automáticas, onde ninguém espera uma rodada a mais.
+    Everything,
+    /// O núcleo e o que a pergunta pede; o resto a IA carrega com `load_tools`.
+    /// Cortesia não recebe ferramenta nenhuma.
+    OnDemand,
+}
+
 /// Uma sessão do agente: a pergunta, as ferramentas liberadas e o contexto.
 pub struct AgentRequest {
     pub messages: Vec<ChatMessageInput>,
     pub context: ChatContext,
     pub policy: ToolPolicy,
+    pub tool_loading: ToolLoading,
 }
 
 impl AgentRequest {
@@ -107,6 +122,7 @@ impl AgentRequest {
                 mentions: mentions::sanitize(request.mentions),
             },
             policy: ToolPolicy::from_settings(settings),
+            tool_loading: ToolLoading::OnDemand,
         }
     }
 }
@@ -155,10 +171,32 @@ async fn handle_tool_call(
     registry: &ToolRegistry,
     sink: &EventSink,
     conversation: &mut Vec<AiMessage>,
+    loaded: &mut ToolGroups,
     tool: AiToolCall,
 ) -> ToolFlow {
     let arguments: serde_json::Value =
         serde_json::from_str(&tool.arguments).unwrap_or_else(|_| json!({}));
+
+    // Carregar grupos é coisa do agente, não consulta: a tela não vê.
+    if tool.name == LOAD_TOOLS {
+        let available = registry.available_groups();
+        let groups: Vec<_> = requested_groups(&arguments)
+            .into_iter()
+            .filter(|group| available.contains(group))
+            .collect();
+        loaded.extend(groups.iter().copied());
+        let tools: Vec<&str> = groups
+            .iter()
+            .flat_map(|group| registry.tool_names(*group))
+            .collect();
+        conversation.push(AiMessage {
+            role: "tool".to_string(),
+            content: Some(json!({ "loaded": tools }).to_string()),
+            tool_calls: None,
+            tool_call_id: Some(tool.id),
+        });
+        return ToolFlow::Continue;
+    }
 
     let mut flow = ToolFlow::Continue;
     let result = if registry.needs_confirmation(&tool.name) {
@@ -218,7 +256,7 @@ async fn handle_tool_call(
 
     conversation.push(AiMessage {
         role: "tool".to_string(),
-        content: Some(result.to_string()),
+        content: Some(compact_for_model(&result)),
         tool_calls: None,
         tool_call_id: Some(tool.id),
     });
@@ -237,12 +275,33 @@ pub async fn run_agent_loop(
     tokio::spawn(async move {
         let sink = EventSink(sender);
         let registry = ToolRegistry::new(request.policy);
-        let tools = registry.definitions();
         let options = AiChatOptions {
             max_tokens: settings.response_style.max_output_tokens(),
         };
-        let system_prompt =
-            build_system_prompt(&ctx.db, &settings, request.policy, &request.context).await;
+        let mut history = recent_history(request.messages, MAX_HISTORY_MESSAGES);
+        let small_talk = request.tool_loading == ToolLoading::OnDemand && is_small_talk(&history);
+        let mut loaded: ToolGroups = match request.tool_loading {
+            ToolLoading::Everything => registry.available_groups().into_iter().collect(),
+            ToolLoading::OnDemand => {
+                let question = history
+                    .last()
+                    .map_or("", |message| message.content.as_str());
+                preselect_groups(question, &request.context.mentions)
+            }
+        };
+        let system_prompt = if small_talk {
+            history = recent_history(history, SMALL_TALK_HISTORY);
+            build_small_talk_prompt(&settings)
+        } else {
+            build_system_prompt(
+                &ctx.db,
+                &settings,
+                request.policy,
+                &request.context,
+                &loaded,
+            )
+            .await
+        };
 
         let mut conversation = vec![AiMessage {
             role: "system".to_string(),
@@ -250,19 +309,21 @@ pub async fn run_agent_loop(
             tool_calls: None,
             tool_call_id: None,
         }];
-        conversation.extend(
-            recent_history(request.messages, MAX_HISTORY_MESSAGES)
-                .into_iter()
-                .map(|message| AiMessage {
-                    role: message.role,
-                    content: Some(message.content),
-                    tool_calls: None,
-                    tool_call_id: None,
-                }),
-        );
+        conversation.extend(history.into_iter().map(|message| AiMessage {
+            role: message.role,
+            content: Some(message.content),
+            tool_calls: None,
+            tool_call_id: None,
+        }));
 
         let mut usage = AiUsage::default();
         for _ in 0..MAX_ITERATIONS {
+            // Recalculado a cada rodada: um `load_tools` vale já na seguinte.
+            let tools = if small_talk {
+                Vec::new()
+            } else {
+                registry.definitions_for(&loaded)
+            };
             let mut stream = match driver.chat_stream(&conversation, &tools, options).await {
                 Ok(stream) => stream,
                 Err(err) => return sink.fail(err.to_string(), usage).await,
@@ -299,7 +360,9 @@ pub async fn run_agent_loop(
             });
             let mut ends_turn = false;
             for tool in pending_tools {
-                match handle_tool_call(&ctx, &registry, &sink, &mut conversation, tool).await {
+                match handle_tool_call(&ctx, &registry, &sink, &mut conversation, &mut loaded, tool)
+                    .await
+                {
                     ToolFlow::Disconnected => return,
                     ToolFlow::EndTurn => ends_turn = true,
                     ToolFlow::Continue => {}
