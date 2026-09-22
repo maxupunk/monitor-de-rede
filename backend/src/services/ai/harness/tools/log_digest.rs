@@ -75,7 +75,9 @@ pub fn normalize_message(message: &str) -> String {
     truncate_chars(&normalized.join(" "), PATTERN_CHARS)
 }
 
-fn label_of(severity: Option<i16>) -> String {
+/// Rótulo em português da severidade syslog (0–7).
+#[must_use]
+pub fn label_of(severity: Option<i16>) -> String {
     severity
         .and_then(severity_label)
         .map_or_else(|| "sem severidade".to_string(), str::to_string)
@@ -294,7 +296,8 @@ pub struct CollapsedLine {
     pub message: String,
     /// Quantas linhas seguidas tinham o mesmo padrão e origem (1 = única).
     pub repeated: usize,
-    /// Instante da mais antiga do grupo, quando `repeated > 1`.
+    /// Instante da outra ponta do grupo (a mais antiga, na ordem "recentes
+    /// primeiro" da busca), quando `repeated > 1`.
     #[serde(
         skip_serializing_if = "Option::is_none",
         serialize_with = "serialize_rfc3339_opt"
@@ -308,32 +311,45 @@ pub fn collapse_repeats(
     rows: &[device_logs::Model],
     device_label: impl Fn(&device_logs::Model) -> String,
 ) -> Vec<CollapsedLine> {
-    let mut out: Vec<CollapsedLine> = Vec::new();
-    let mut last_key: Option<(String, String)> = None;
-    for row in rows {
-        let device = device_label(row);
-        let key = (device.clone(), normalize_message(&row.message));
-        let at = row.received_at.with_timezone(&Utc);
-        if last_key.as_ref() == Some(&key) {
-            if let Some(line) = out.last_mut() {
-                line.repeated += 1;
-                line.since = Some(at);
-                continue;
-            }
+    let labels: Vec<String> = rows.iter().map(&device_label).collect();
+    group_consecutive(rows, |index, row| {
+        (labels[index].clone(), normalize_message(&row.message))
+    })
+    .into_iter()
+    .map(|group| {
+        let first = &rows[group.start];
+        let last = &rows[group.end - 1];
+        CollapsedLine {
+            at: first.received_at.with_timezone(&Utc),
+            device: labels[group.start].clone(),
+            severity: label_of(first.severity),
+            severity_value: first.severity,
+            app: first.app_name.clone(),
+            message: truncate_chars(&first.message, MESSAGE_CHARS),
+            repeated: group.len(),
+            since: (group.len() > 1).then(|| last.received_at.with_timezone(&Utc)),
         }
-        out.push(CollapsedLine {
-            at,
-            device,
-            severity: label_of(row.severity),
-            severity_value: row.severity,
-            app: row.app_name.clone(),
-            message: truncate_chars(&row.message, MESSAGE_CHARS),
-            repeated: 1,
-            since: None,
-        });
-        last_key = Some(key);
+    })
+    .collect()
+}
+
+/// Faixas de itens consecutivos com a mesma chave — base do "×N" que
+/// colapsa repetições. A ordem dos itens é preservada.
+pub fn group_consecutive<T, K: PartialEq>(
+    items: &[T],
+    key: impl Fn(usize, &T) -> K,
+) -> Vec<std::ops::Range<usize>> {
+    let mut groups: Vec<std::ops::Range<usize>> = Vec::new();
+    let mut last_key: Option<K> = None;
+    for (index, item) in items.iter().enumerate() {
+        let current = key(index, item);
+        match groups.last_mut() {
+            Some(group) if last_key.as_ref() == Some(&current) => group.end = index + 1,
+            _ => groups.push(index..index + 1),
+        }
+        last_key = Some(current);
     }
-    out
+    groups
 }
 
 /// Severidade máxima pedida pela IA: número 0–7 ou nome (inglês ou português).
@@ -456,6 +472,13 @@ mod tests {
         assert_eq!(linhas[0].repeated, 2);
         assert!(linhas[0].since.is_some());
         assert_eq!(linhas[1].repeated, 1);
+    }
+
+    #[test]
+    fn agrupa_so_vizinhos_iguais() {
+        let grupos = group_consecutive(&["a", "a", "b", "a"], |_, item| *item);
+        assert_eq!(grupos, vec![0..2, 2..3, 3..4]);
+        assert!(group_consecutive(&[] as &[&str], |_, item| *item).is_empty());
     }
 
     #[test]

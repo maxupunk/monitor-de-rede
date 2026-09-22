@@ -8,6 +8,7 @@
 //! - [`inventory`]: estado atual (dispositivos, interfaces, monitores, alertas).
 //! - [`history`]: histórico gravado no banco (uptime, falhas, métricas).
 //! - [`logs`]: syslog e logs da aplicação, agrupados por padrão.
+//! - [`grep`]: busca em logs, alertas e checagens devolvendo só o necessário.
 //! - [`analysis`]: causa raiz, baseline, padrão por hora e linha do tempo.
 //! - [`charts`]: séries do banco desenhadas no chat com os gráficos das telas.
 //! - [`diagnostics`]: testes ativos de rede (ping, traceroute, portas, DNS).
@@ -18,6 +19,7 @@ mod analysis;
 mod args;
 mod charts;
 mod diagnostics;
+mod grep;
 mod history;
 mod inventory;
 mod log_digest;
@@ -188,7 +190,7 @@ fn all_handlers() -> Vec<Box<dyn AiToolHandler>> {
         Box::new(charts::InterfaceTrafficChart),
         Box::new(charts::DeviceMetricChart),
         Box::new(logs::LogsOverview),
-        Box::new(logs::SearchLogs),
+        Box::new(grep::Grep),
         Box::new(inventory::SearchDocs),
         Box::new(diagnostics::Ping),
         Box::new(diagnostics::Traceroute),

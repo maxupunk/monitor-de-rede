@@ -164,12 +164,9 @@ pub struct LogPage {
     pub next_cursor: Option<Cursor>,
 }
 
-/// Busca uma página.
-///
-/// # Errors
-///
-/// Propaga erro do banco.
-pub async fn search(db: &DatabaseConnection, query: &LogQuery) -> AppResult<LogPage> {
+/// Janela, dispositivo, severidade máxima e facility — o que toda consulta
+/// da tabela filtra antes de qualquer busca por texto.
+fn window_condition(query: &LogQuery) -> Condition {
     let mut condicao = Condition::all()
         .add(device_logs::Column::ReceivedAt.gte(query.from))
         .add(device_logs::Column::ReceivedAt.lte(query.to));
@@ -183,6 +180,16 @@ pub async fn search(db: &DatabaseConnection, query: &LogQuery) -> AppResult<LogP
     if let Some(facility) = query.facility {
         condicao = condicao.add(device_logs::Column::Facility.eq(facility));
     }
+    condicao
+}
+
+/// Busca uma página.
+///
+/// # Errors
+///
+/// Propaga erro do banco.
+pub async fn search(db: &DatabaseConnection, query: &LogQuery) -> AppResult<LogPage> {
+    let mut condicao = window_condition(query);
     if let Some(termo) = &query.q {
         // A implementação da busca é escolhida em tempo de execução — FTS5,
         // `tsvector` ou `LIKE`, conforme o que o banco tem. Ver `search`.
@@ -238,19 +245,7 @@ pub async fn export(
     query: &LogQuery,
     max_rows: u64,
 ) -> AppResult<Vec<device_logs::Model>> {
-    let mut condicao = Condition::all()
-        .add(device_logs::Column::ReceivedAt.gte(query.from))
-        .add(device_logs::Column::ReceivedAt.lte(query.to));
-
-    if let Some(device_id) = query.device_id {
-        condicao = condicao.add(device_logs::Column::DeviceId.eq(device_id));
-    }
-    if let Some(severity) = query.severity {
-        condicao = condicao.add(device_logs::Column::Severity.lte(severity));
-    }
-    if let Some(facility) = query.facility {
-        condicao = condicao.add(device_logs::Column::Facility.eq(facility));
-    }
+    let mut condicao = window_condition(query);
     if let Some(termo) = &query.q {
         condicao = condicao.add(search::select(db).await.condition(db, termo).await);
     }
@@ -266,6 +261,100 @@ pub async fn export(
 
     rows.reverse();
     Ok(rows)
+}
+
+/// As `max_rows` linhas mais recentes da janela que contêm `needle` (sem
+/// caixa), em ordem cronológica — o pré-filtro do grep da IA.
+///
+/// Diferente de `q` (FTS por palavra/prefixo), aqui é substring: "link down"
+/// casa dentro de "uplink down", como no grep. O `needle` só é aplicado
+/// quando é ASCII, caso em que o filtro do banco é exato; fora disso a janela
+/// vem sem ele e quem chama filtra em memória.
+///
+/// # Errors
+///
+/// Propaga erro do banco.
+pub async fn scan_containing(
+    db: &DatabaseConnection,
+    query: &LogQuery,
+    needle: Option<&str>,
+    max_rows: u64,
+) -> AppResult<Vec<device_logs::Model>> {
+    let mut condicao = window_condition(query);
+    if let Some(needle) = needle.filter(|needle| !needle.is_empty() && needle.is_ascii()) {
+        condicao = condicao.add(search::LikeSearch::contains_ignore_case(needle));
+    }
+    let mut rows = device_logs::Entity::find()
+        .filter(condicao)
+        .order_by_desc(device_logs::Column::ReceivedAt)
+        .order_by_desc(device_logs::Column::Id)
+        .limit(max_rows.clamp(1, MAX_EXPORT_LIMIT))
+        .all(db)
+        .await?;
+    rows.reverse();
+    Ok(rows)
+}
+
+/// Linhas vizinhas de `anchor` na mesma origem (dispositivo cadastrado ou,
+/// sem vínculo, o mesmo IP de origem): até `before` anteriores e `after`
+/// posteriores, em ordem cronológica. É o `-C` do grep.
+///
+/// # Errors
+///
+/// Propaga erro do banco.
+pub async fn neighbors(
+    db: &DatabaseConnection,
+    anchor: &device_logs::Model,
+    before: u64,
+    after: u64,
+) -> AppResult<(Vec<device_logs::Model>, Vec<device_logs::Model>)> {
+    let same_origin = match anchor.device_id {
+        Some(device_id) => Condition::all().add(device_logs::Column::DeviceId.eq(device_id)),
+        None => Condition::all()
+            .add(device_logs::Column::DeviceId.is_null())
+            .add(device_logs::Column::SourceIp.eq(anchor.source_ip.clone())),
+    };
+    let earlier = Condition::any()
+        .add(device_logs::Column::ReceivedAt.lt(anchor.received_at))
+        .add(
+            Condition::all()
+                .add(device_logs::Column::ReceivedAt.eq(anchor.received_at))
+                .add(device_logs::Column::Id.lt(anchor.id)),
+        );
+    let later = Condition::any()
+        .add(device_logs::Column::ReceivedAt.gt(anchor.received_at))
+        .add(
+            Condition::all()
+                .add(device_logs::Column::ReceivedAt.eq(anchor.received_at))
+                .add(device_logs::Column::Id.gt(anchor.id)),
+        );
+
+    let mut previous = if before == 0 {
+        Vec::new()
+    } else {
+        device_logs::Entity::find()
+            .filter(same_origin.clone())
+            .filter(earlier)
+            .order_by_desc(device_logs::Column::ReceivedAt)
+            .order_by_desc(device_logs::Column::Id)
+            .limit(before)
+            .all(db)
+            .await?
+    };
+    previous.reverse();
+    let next = if after == 0 {
+        Vec::new()
+    } else {
+        device_logs::Entity::find()
+            .filter(same_origin)
+            .filter(later)
+            .order_by_asc(device_logs::Column::ReceivedAt)
+            .order_by_asc(device_logs::Column::Id)
+            .limit(after)
+            .all(db)
+            .await?
+    };
+    Ok((previous, next))
 }
 
 #[cfg(test)]

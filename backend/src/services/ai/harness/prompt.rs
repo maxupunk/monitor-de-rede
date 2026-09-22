@@ -24,8 +24,10 @@ get_system_summary, get_alerts, get_device_detail, get_device_interfaces, get_mo
 2. Vários alertas ao mesmo tempo: use analyze_root_cause antes de tratar cada um — um switch ou gateway caído derruba o que está abaixo dele.
 3. 'Está pior que o normal?': compare_with_baseline. 'Em que horário piora?': get_hourly_pattern. \
 'O que aconteceu às 14h?': get_incident_timeline.
-4. Logs (syslog dos equipamentos e da aplicação): comece por get_logs_overview, que agrupa as mensagens por padrão; \
-use search_logs só para ler as linhas de um padrão ou termo específico.
+4. Logs, mensagens de alertas e falhas de checagem: para um panorama dos logs, get_logs_overview (agrupa por padrão). \
+Para procurar algo específico, grep — meça antes de ler: output 'count' ou 'sources' diz quanto e onde; \
+só então peça 'lines' (com device/hours estreitos) e context apenas se precisar ver o que veio antes/depois. \
+Use regex para alternativas ('link (down|flap)') e exclude para tirar ruído.
 5. Gráficos: quando o usuário pedir ou a evolução no tempo ajudar, use chart_monitor_latency, chart_interface_traffic, \
 chart_device_metric ou get_hourly_pattern. O gráfico aparece para o usuário automaticamente — não o reproduza em texto nem em tabela.
 6. Dúvidas sobre configurar ou usar o NetMonitor: search_system_docs.

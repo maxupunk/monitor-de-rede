@@ -26,7 +26,7 @@
 
 use async_trait::async_trait;
 use sea_orm::{
-    sea_query::{Expr, ExprTrait, LikeExpr, SimpleExpr},
+    sea_query::{Expr, ExprTrait, Func, LikeExpr, SimpleExpr},
     ConnectionTrait, DatabaseBackend, DatabaseConnection, Statement,
 };
 
@@ -66,6 +66,22 @@ impl LikeSearch {
             .replace('%', "\\%")
             .replace('_', "\\_");
         Expr::col(device_logs::Column::Message)
+            .like(LikeExpr::new(format!("%{escapado}%")).escape('\\'))
+    }
+
+    /// Substring sem caixa, com o mesmo resultado em SQLite e PostgreSQL:
+    /// `LOWER(message) LIKE '%termo%'`. O `LIKE` puro difere entre eles (o do
+    /// SQLite ignora caixa ASCII, o do Postgres não). Só é exato para termo
+    /// ASCII — o `LOWER` do SQLite não dobra acentos —, então quem chama deve
+    /// usá-lo como pré-filtro apenas nesse caso.
+    #[must_use]
+    pub fn contains_ignore_case(termo: &str) -> SimpleExpr {
+        let escapado = termo
+            .to_lowercase()
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+        Expr::expr(Func::lower(Expr::col(device_logs::Column::Message)))
             .like(LikeExpr::new(format!("%{escapado}%")).escape('\\'))
     }
 }

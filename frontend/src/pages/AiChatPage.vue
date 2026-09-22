@@ -382,7 +382,10 @@ const responseStyle = computed(() => responseStyleOption(aiStore.settings?.respo
 
 const capabilities = [
   { title: 'Dados do sistema', text: 'interfaces, monitores, histórico de uptime e métricas.' },
-  { title: 'Logs', text: 'syslog agrupado por padrão, com os erros recorrentes em destaque.' },
+  {
+    title: 'Logs e grep',
+    text: 'panorama por padrão e busca (regex, contagem, contexto) em logs, alertas e checagens.',
+  },
   { title: 'Causa raiz', text: 'correlação pela topologia e comparação com o normal.' },
   { title: 'Gráficos', text: 'latência, tráfego, CPU/memória e padrão por hora.' },
   { title: 'Testes ativos', text: 'ping, traceroute, portas, DNS e playbooks.' },

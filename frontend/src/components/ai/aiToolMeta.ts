@@ -74,7 +74,7 @@ const TOOL_META: Record<string, AiToolMeta> = {
     icon: 'mdi-text-box-search-outline',
     color: 'blue-grey',
   },
-  search_logs: { label: 'Busca nos Logs', icon: 'mdi-magnify-scan', color: 'blue-grey' },
+  grep: { label: 'Busca nos Dados (grep)', icon: 'mdi-text-search', color: 'blue-grey' },
   acknowledge_alert: {
     label: 'Reconhecer Alerta',
     icon: 'mdi-check-circle-outline',
@@ -119,6 +119,8 @@ export function formatToolArgs(args: Record<string, unknown>): string {
     ['alert_id', 'Alerta'],
     ['metric', 'Métrica'],
     ['playbook_type', 'Playbook'],
+    ['pattern', 'Padrão'],
+    ['source', 'Fonte'],
     ['query', 'Busca'],
     ['status', 'Status'],
   ]

@@ -169,19 +169,19 @@ async fn logs_chegam_agrupados_por_padrao_e_com_repeticoes_colapsadas() {
         let busca = registro
             .execute(
                 &ctx,
-                "search_logs",
-                r#"{"query": "link down", "severity": "error"}"#,
+                "grep",
+                r#"{"pattern": "link down", "severity": "error", "output": "lines"}"#,
             )
             .await
             .unwrap();
-        assert_eq!(busca.data["read"], 5);
+        assert_eq!(busca.data["matched"], 5);
         let linhas = busca.data["lines"].as_array().unwrap();
         assert_eq!(linhas.len(), 1, "cinco linhas iguais viram uma");
         assert_eq!(linhas[0]["repeated"], 5);
         assert_eq!(linhas[0]["severity"], "erro");
 
         let invalida = registro
-            .execute(&ctx, "search_logs", r#"{"severity": "gravíssimo"}"#)
+            .execute(&ctx, "grep", r#"{"severity": "gravíssimo"}"#)
             .await
             .unwrap();
         assert!(invalida.data["error"]

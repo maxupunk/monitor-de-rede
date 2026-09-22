@@ -106,6 +106,10 @@ describe('apresentação das ferramentas e do estilo', () => {
     expect(formatToolArgs({ device: 'Borda', interface: 'ether1', hours: 6 })).toBe(
       'Dispositivo: Borda · Interface: ether1'
     )
+    expect(formatToolArgs({ pattern: 'link down', source: 'logs', output: 'count' })).toBe(
+      'Padrão: link down · Fonte: logs'
+    )
+    expect(aiToolMeta('grep').label).toBe('Busca nos Dados (grep)')
     expect(formatToolArgs({ hours: 6 })).toBe('hours')
     expect(formatToolArgs({})).toBe('Sem parâmetros adicionais')
   })
