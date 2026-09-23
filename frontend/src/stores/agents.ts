@@ -8,6 +8,18 @@ import type { AgentUpdateInput } from '@/bindings/AgentUpdateInput'
 import type { AgentView } from '@/bindings/AgentView'
 import type { AgentWithEnrollment } from '@/bindings/AgentWithEnrollment'
 
+/** O `probe:status` de um servidor remoto traz o host anunciado na conexão. */
+function isHostInfo(value: unknown): value is AgentView['host'] {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'policy' in value &&
+    Array.isArray(value.policy) &&
+    'docker' in value &&
+    typeof value.docker === 'object'
+  )
+}
+
 /**
  * Agentes remotos (ADR 011): cadastro, códigos de instalação e estado vivo.
  * A lista é carregada ao abrir a tela; online/offline chega pelo SSE
@@ -145,6 +157,7 @@ export const useAgentsStore = defineStore('agents', () => {
     }
     if (typeof data.version === 'string') agent.version = data.version
     if (typeof data.lastSeenAt === 'string') agent.lastSeenAt = data.lastSeenAt
+    if (isHostInfo(data.host)) agent.host = data.host
   }
 
   return {

@@ -7,11 +7,16 @@
   >
     <v-card v-if="enrollment && commands" rounded="xl">
       <v-card-title class="d-flex align-center ga-2">
-        <v-icon color="primary">mdi-server</v-icon>
-        Conectar {{ agentName }} à central
+        <v-icon :color="connected ? 'success' : 'primary'">
+          {{ connected ? 'mdi-check-circle' : 'mdi-server' }}
+        </v-icon>
+        {{ connected ? `${agentName} conectado à central` : `Conectar ${agentName} à central` }}
       </v-card-title>
       <v-card-text>
-        <v-alert type="warning" variant="tonal" density="compact" class="mb-4">
+        <v-alert v-if="connected" type="success" variant="tonal" density="compact" class="mb-4">
+          O servidor se conectou{{ connectedDetails }}. Já dá para ver o Docker e as métricas dele.
+        </v-alert>
+        <v-alert v-else type="warning" variant="tonal" density="compact" class="mb-4">
           O código <strong>{{ enrollment.code.slice(0, 12) }}…</strong> vale uma única vez e expira
           em {{ expiresInMinutes }} minutos. Ele não será exibido de novo — gere outro se precisar.
         </v-alert>
@@ -61,6 +66,16 @@
         </p>
       </v-card-text>
       <v-card-actions>
+        <v-btn
+          v-if="connected && agent"
+          color="primary"
+          variant="tonal"
+          prepend-icon="mdi-docker"
+          :to="{ path: '/docker', query: { host: agent.hostKey } }"
+          @click="emit('update:modelValue', false)"
+        >
+          Abrir Docker
+        </v-btn>
         <v-spacer></v-spacer>
         <v-btn color="primary" variant="flat" @click="emit('update:modelValue', false)">
           Concluir
@@ -89,6 +104,8 @@ const props = defineProps<{
   modelValue: boolean
   enrollment: AgentEnrollmentView | null
   agentName: string
+  /** Para acompanhar pelo SSE (`probe:status`) o momento em que ele conecta. */
+  agentId?: number | null
 }>()
 
 const emit = defineEmits<{
@@ -99,6 +116,26 @@ const agentsStore = useAgentsStore()
 const addressesStore = useServerAddressesStore()
 const commands = ref<AgentInstallCommands | null>(null)
 const switching = ref(false)
+/** Só a conexão que acontece com o diálogo aberto conta: numa reinstalação o
+ * servidor podia já estar conectado com a instalação antiga. */
+const connected = ref(false)
+
+const agent = computed(() =>
+  props.agentId ? (agentsStore.agents.find((item) => item.id === props.agentId) ?? null) : null
+)
+
+const connectedDetails = computed(() => {
+  const host = agent.value?.host
+  const parts = [host?.hostname, host?.os].filter(Boolean)
+  return parts.length ? ` (${parts.join(' · ')})` : ''
+})
+
+watch(
+  () => agent.value?.connected,
+  (now, before) => {
+    if (props.modelValue && now && before === false) connected.value = true
+  }
+)
 
 const expiresInMinutes = computed(() => Math.round((props.enrollment?.expiresInSeconds ?? 0) / 60))
 
@@ -148,6 +185,7 @@ watch(
   () => props.enrollment,
   (enrollment) => {
     commands.value = enrollment?.commands ?? null
+    connected.value = false
     if (enrollment) void addressesStore.fetchAll()
   },
   { immediate: true }

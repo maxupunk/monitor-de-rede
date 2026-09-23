@@ -522,11 +522,14 @@ pub fn tunnel_server_url(server_vpn_address: &str) -> String {
 
 /// Publica `probe:status` para a tela de agentes e probes.
 pub async fn publish_status(ctx: &AppContext, probe: &probes::Model) {
+    // O mesmo evento dos probes, mais o que o servidor anunciou ao conectar
+    // (hostname, sistema, Docker, política): a tela se atualiza sem consultar.
+    let mut payload = status_payload(probe);
+    if let Ok(host) = serde_json::to_value(to_view(probe, None, false).host) {
+        payload["host"] = host;
+    }
     if let Ok(bus) = EventBus::from_context(ctx) {
-        if let Err(error) = bus
-            .publish(&ctx.db, "probe:status", status_payload(probe))
-            .await
-        {
+        if let Err(error) = bus.publish(&ctx.db, "probe:status", payload).await {
             tracing::warn!(%error, probe_id = probe.id, "falha ao publicar probe:status");
         }
     }

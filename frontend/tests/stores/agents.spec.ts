@@ -112,4 +112,24 @@ describe('agents store', () => {
     })
     expect(commands?.serverUrl).toBe('http://192.168.0.10:3333')
   })
+
+  it('probe:status de conexão traz o host anunciado sem nova consulta', async () => {
+    const get = vi
+      .spyOn(apiService, 'get')
+      .mockResolvedValue([
+        agent({ status: 'pending', host: { ...agent().host, hostname: null, os: null } }),
+      ])
+    const store = useAgentsStore()
+    await store.fetchAgents()
+
+    store.applyRealtimeStatus({
+      id: 7,
+      status: 'online',
+      host: { ...agent().host, hostname: 'srv-novo', os: 'Ubuntu 24.04' },
+    })
+
+    expect(get).toHaveBeenCalledOnce()
+    expect(store.agents[0].connected).toBe(true)
+    expect(store.agents[0].host.hostname).toBe('srv-novo')
+  })
 })

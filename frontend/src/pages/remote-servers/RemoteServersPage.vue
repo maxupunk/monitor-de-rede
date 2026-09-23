@@ -239,6 +239,7 @@
       v-model="enrollmentOpen"
       :enrollment="enrollment"
       :agent-name="enrollmentAgent"
+      :agent-id="enrollmentAgentId"
     ></AgentEnrollmentDialog>
   </div>
 </template>
@@ -262,6 +263,7 @@ const form = reactive({ name: '', enforceTunnelIp: true })
 const enrollmentOpen = ref(false)
 const enrollment = ref<AgentEnrollmentView | null>(null)
 const enrollmentAgent = ref('')
+const enrollmentAgentId = ref<number | null>(null)
 const pendingId = ref<number | null>(null)
 const confirm = reactive({
   open: false,
@@ -316,6 +318,7 @@ async function create() {
   createOpen.value = false
   enrollment.value = created.enrollment
   enrollmentAgent.value = created.agent.name
+  enrollmentAgentId.value = created.agent.id
   enrollmentOpen.value = true
 }
 
@@ -326,6 +329,7 @@ async function reissue(agent: AgentView) {
   if (!issued) return
   enrollment.value = issued
   enrollmentAgent.value = agent.name
+  enrollmentAgentId.value = agent.id
   enrollmentOpen.value = true
 }
 
