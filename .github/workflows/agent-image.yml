@@ -63,7 +63,7 @@ jobs:
           PLATFORM: ${{ matrix.platform }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5b23221 # v3.10.0
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
 
       - name: Log in to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
@@ -74,7 +74,7 @@ jobs:
 
       # Carrega localmente para o teste de fumaça antes de publicar qualquer byte.
       - name: Build image
-        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d2a3e69 # v5.4.0
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
         with:
           context: .
           target: agent
@@ -99,7 +99,7 @@ jobs:
 
       - name: Push by digest
         id: push
-        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d2a3e69 # v5.4.0
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
         with:
           context: .
           target: agent
@@ -146,7 +146,7 @@ jobs:
           path: ${{ runner.temp }}/digests
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5b23221 # v3.10.0
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
 
       - name: Image tags
         id: meta
