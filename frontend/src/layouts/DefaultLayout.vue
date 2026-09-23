@@ -87,7 +87,12 @@
       </v-chip>
 
       <!-- Botão Assistente IA -->
-      <v-tooltip location="bottom" text="Assistente IA (Diagnóstico & Suporte)">
+      <!-- Sem dica no toque: ela abria no tap e ficava presa sobre o chat. -->
+      <v-tooltip
+        location="bottom"
+        text="Assistente IA (Diagnóstico & Suporte)"
+        :disabled="display.mdAndDown.value"
+      >
         <template #activator="{ props: tooltipProps }">
           <v-btn
             v-bind="tooltipProps"
@@ -106,6 +111,7 @@
       <!-- Botão de Notificações PWA / Web Push -->
       <v-tooltip
         location="bottom"
+        :disabled="display.mdAndDown.value"
         :text="
           isSubscribed
             ? 'Web Push Ativo (Alertas em segundo plano)'
@@ -245,7 +251,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useDisplay } from 'vuetify'
 import { useEventsStore } from '@/stores/events'
@@ -277,7 +283,8 @@ interface NavItem {
   children?: NavSubItem[]
 }
 
-const drawer = ref(!useDisplay().mdAndDown)
+const display = useDisplay()
+const drawer = ref(!display.mdAndDown.value)
 const dnsServersDialog = ref(false)
 const serverAddressesDialog = ref(false)
 const tracerouteDialog = ref(false)
@@ -291,6 +298,27 @@ const router = useRouter()
 const route = useRoute()
 const { permissionState, isSubscribed, requestPermission } = useNotifications()
 const { canInstall, isInstalled, showIosDialog, promptInstall } = usePwaInstall()
+
+/*
+ * No celular e no tablet o menu e o Assistente IA são sobreposições da tela
+ * inteira: abrir um fecha o outro, e trocar de página fecha os dois. Sem isso
+ * o chat ficava por cima do menu e da página nova, sem saída aparente.
+ */
+watch(drawer, (open) => {
+  if (open && display.mdAndDown.value) aiStore.isDrawerOpen = false
+})
+watch(
+  () => aiStore.isDrawerOpen,
+  (open) => {
+    if (open && display.mdAndDown.value) drawer.value = false
+  }
+)
+watch(
+  () => route.fullPath,
+  () => {
+    if (display.mdAndDown.value) aiStore.isDrawerOpen = false
+  }
+)
 
 async function handleNotificationClick() {
   if (permissionState.value === 'default') {

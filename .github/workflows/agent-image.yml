@@ -1,0 +1,176 @@
+name: Agent Image
+
+# Publica a imagem do agente remoto (`Dockerfile`, alvo `agent`, ADR 011) no
+# GitHub Container Registry: ghcr.io/<dono>/netmonitor-agent.
+#
+# Roda numa tag de versão (`v1.2.3` → `1.2.3`, `1.2` e `latest`) ou à mão pela
+# aba Actions (tag `sha-<commit>`, mais `latest` se marcado). Cada arquitetura
+# compila no runner nativo dela — Rust sob emulação QEMU levaria horas — e o
+# último job junta as duas num único manifesto multi-arquitetura.
+#
+# Depois da primeira publicação, marque o pacote como público em
+# github.com/<dono>?tab=packages para os servidores baixarem sem `docker login`.
+# Na central, aponte `AGENT_IMAGE=ghcr.io/<dono>/netmonitor-agent:<versão>`.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      latest:
+        description: "Também marcar como latest"
+        type: boolean
+        default: false
+
+concurrency:
+  group: agent-image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build (${{ matrix.platform }})
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.name.outputs.image }}
+    steps:
+      - name: Checkout the code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # O nome do registry precisa ser minúsculo; o do dono do repositório
+      # pode não ser.
+      - name: Resolve image name
+        id: name
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          echo "image=ghcr.io/${owner}/netmonitor-agent" >> "$GITHUB_OUTPUT"
+          echo "arch=${PLATFORM#linux/}" >> "$GITHUB_OUTPUT"
+        env:
+          PLATFORM: ${{ matrix.platform }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5b23221 # v3.10.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Carrega localmente para o teste de fumaça antes de publicar qualquer byte.
+      - name: Build image
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d2a3e69 # v5.4.0
+        with:
+          context: .
+          target: agent
+          platforms: ${{ matrix.platform }}
+          load: true
+          tags: netmonitor-agent:smoke
+          cache-from: type=gha,scope=agent-${{ steps.name.outputs.arch }}
+          cache-to: type=gha,mode=max,scope=agent-${{ steps.name.outputs.arch }}
+
+      # Sem AGENT_SERVER_URL o agente precisa sair com código 2 e a mensagem de
+      # configuração: prova que o binário estático roda na imagem final.
+      - name: Smoke test
+        run: |
+          set +e
+          output=$(docker run --rm netmonitor-agent:smoke 2>&1)
+          code=$?
+          set -e
+          echo "$output"
+          test "$code" -eq 2
+          echo "$output" | grep -q "AGENT_SERVER_URL"
+          docker run --rm --entrypoint docker netmonitor-agent:smoke compose version
+
+      - name: Push by digest
+        id: push
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d2a3e69 # v5.4.0
+        with:
+          context: .
+          target: agent
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ steps.name.outputs.image }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=agent-${{ steps.name.outputs.arch }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.description=Agente remoto do NetMonitor (Docker, host e monitores)
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Export digest
+        run: |
+          mkdir -p "${RUNNER_TEMP}/digests"
+          touch "${RUNNER_TEMP}/digests/${DIGEST#sha256:}"
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+
+      - name: Upload digest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: agent-digest-${{ steps.name.outputs.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish manifest
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: agent-digest-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/digests
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5b23221 # v3.10.0
+
+      - name: Image tags
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        with:
+          images: ${{ needs.build.outputs.image }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
+          flavor: |
+            latest=${{ startsWith(github.ref, 'refs/tags/v') || inputs.latest == true }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create multi-arch manifest
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf "${IMAGE}@sha256:%s " *)
+        env:
+          IMAGE: ${{ needs.build.outputs.image }}
+
+      - name: Inspect
+        run: docker buildx imagetools inspect "${IMAGE}:${VERSION}"
+        env:
+          IMAGE: ${{ needs.build.outputs.image }}
+          VERSION: ${{ steps.meta.outputs.version }}

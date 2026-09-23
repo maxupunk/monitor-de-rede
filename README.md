@@ -257,6 +257,15 @@ agente da própria central (`/api/agents/download/<arch>`) a cada início — n�
 depende de registry, e reiniciar o container atualiza o agente. Quem publicar a
 imagem própria (`docker build --target agent`) pode apontá-la em `AGENT_IMAGE`.
 
+**Imagem publicada no GHCR (opcional).** O workflow
+`.github/workflows/agent-image.yml` compila o alvo `agent` para amd64 e arm64
+(cada um no runner nativo), testa se o binário sobe e publica
+`ghcr.io/<dono>/netmonitor-agent` com as tags da versão (`1.2.3`, `1.2`,
+`latest`). Ele roda ao criar uma tag `v*.*.*` ou manualmente pela aba Actions.
+Na primeira vez, marque o pacote como público no GitHub. Depois defina na
+central `AGENT_IMAGE=ghcr.io/<dono>/netmonitor-agent:1.2.3`: o `docker run`
+passa a usar a imagem fixa, sem baixar o binário a cada início.
+
 ## Frontend — comandos
 
 ```powershell

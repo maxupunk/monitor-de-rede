@@ -3,6 +3,7 @@
     v-model="aiStore.isDrawerOpen"
     location="right"
     temporary
+    touchless
     elevation="4"
     :width="$vuetify.display.xs ? '100%' : 480"
     class="ai-drawer"
@@ -242,8 +243,20 @@ function handleRewind(messageId: string) {
 </script>
 
 <style scoped>
+/*
+ * Cabeçalho, mensagens e campo dividem a altura do drawer: só as mensagens
+ * rolam. A altura fixa em `100vh` empurrava o campo para fora da tela no
+ * celular, onde o `vh` inclui a barra de endereço do navegador.
+ */
+.ai-drawer :deep(.v-navigation-drawer__content) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .chat-messages-container {
-  height: calc(100vh - 210px);
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 /* A lista do @ abre para cima, por cima das mensagens: o rodapé não pode cortá-la. */

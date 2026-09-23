@@ -39,8 +39,10 @@ RUN find dist -type f \
          -o -name '*.svg' -o -name '*.json' -o -name '*.webmanifest' \) \
       -size +1k -exec gzip -9 -k {} \;
 
-# --------------------------------------------------------------- builder ----
-FROM rust:slim-bookworm@sha256:94e9efa4033213dbb70d4f665527e7ece3944ddb7ba1dd2e43f6fd6e2490af58 AS builder
+# ------------------------------------------------------------- rust-base ----
+# Fonte e toolchain, sem compilar nada: `builder` (a central) e
+# `agent-builder` (o agente) partem daqui, e cada `--target` compila só o seu.
+FROM rust:slim-bookworm@sha256:94e9efa4033213dbb70d4f665527e7ece3944ddb7ba1dd2e43f6fd6e2490af58 AS rust-base
 
 WORKDIR /usr/src/app
 
@@ -55,6 +57,9 @@ COPY backend/ .
 # `LOCO_ENV=production` exige este arquivo no runtime. Falhar no build deixa o
 # problema explícito antes que uma imagem incompleta chegue ao servidor.
 RUN test -f config/production.yaml
+
+# --------------------------------------------------------------- builder ----
+FROM rust-base AS builder
 
 # Os dois `cache` mounts são o que separa "recompilar o projeto" de "recompilar
 # 400 crates de terceiros". Sem eles, qualquer alteração de fonte invalida o
@@ -74,7 +79,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
 # é o que a central serve em `/api/agents/download/<arch>`. Não há OpenSSL na
 # árvore — TLS é rustls sobre ring e o SQLite é compilado junto —, então basta
 # o `musl-gcc`.
-FROM builder AS agent-builder
+FROM rust-base AS agent-builder
 RUN apt-get update \
     && apt-get install -y --no-install-recommends musl-tools \
     && rm -rf /var/lib/apt/lists/* \
@@ -91,7 +96,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
 # (a central nunca executa — AGENTS §7). Roda como root dentro do container:
 # o socket da Engine já é equivalente a root no host, e o GID do grupo docker
 # muda de servidor para servidor.
-FROM docker:27-cli AS agent
+FROM docker:27-cli@sha256:851f91d241214e7c6db86513b270d58776379aacc5eb9c4a87e5b47115e3065c AS agent
 RUN apk add --no-cache tini ca-certificates
 COPY --from=agent-builder /usr/local/bin/netmonitor-agent /usr/local/bin/netmonitor-agent
 ENV AGENT_STATE_DIR=/var/lib/netmonitor-agent \
