@@ -3,10 +3,17 @@
 //! Esta é a única fronteira do sistema que conhece `bollard`. Controllers
 //! trabalham apenas com DTOs da aplicação e nunca executam o binário `docker`.
 
+pub mod compose;
 pub mod engine;
+pub mod hosts;
 pub mod log_clear;
+pub mod log_stream;
+pub mod maintenance;
 pub mod metrics;
+pub mod operations;
 pub mod realtime;
+pub mod source;
+pub mod update;
 pub mod volume_export;
 
 use std::{future::Future, time::Duration};
@@ -36,6 +43,12 @@ pub enum DockerError {
     Validation(String),
     #[error("Falha ao comunicar com a Docker Engine")]
     Engine,
+    /// A política local do agente não permite a operação (ADR 011).
+    #[error("{0}")]
+    Forbidden(String),
+    /// A operação não existe para este host (ex.: compose na própria central).
+    #[error("{0}")]
+    Unsupported(String),
 }
 
 impl From<DockerError> for AppError {
@@ -47,6 +60,8 @@ impl From<DockerError> for AppError {
             DockerError::NotFound => Self::not_found(error.to_string()),
             DockerError::Conflict => Self::conflict(error.to_string()),
             DockerError::Validation(message) => Self::validation(message),
+            DockerError::Forbidden(message) => Self::forbidden(message),
+            DockerError::Unsupported(message) => Self::business_rule(message),
             DockerError::Engine => Self::Internal(anyhow::anyhow!(error)),
         }
     }

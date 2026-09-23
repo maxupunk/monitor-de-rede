@@ -20,10 +20,19 @@ pub struct Model {
     pub configuration: Option<Json>,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
+    pub device_id: Option<i64>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
+    #[sea_orm(
+        belongs_to = "super::devices::Entity",
+        from = "Column::DeviceId",
+        to = "super::devices::Column::Id",
+        on_update = "Cascade",
+        on_delete = "SetNull"
+    )]
+    Devices,
     #[sea_orm(has_many = "super::discovery_runs::Entity")]
     DiscoveryRuns,
     #[sea_orm(has_many = "super::monitor_results::Entity")]
@@ -42,6 +51,12 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     Sites,
+}
+
+impl Related<super::devices::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Devices.def()
+    }
 }
 
 impl Related<super::discovery_runs::Entity> for Entity {

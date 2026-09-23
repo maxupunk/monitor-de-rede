@@ -226,7 +226,6 @@ import { computed, reactive, ref } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import { confirm } from '@/composables/useConfirm'
-import { dockerService } from '@/services/dockerService'
 import { useAuthStore } from '@/stores/auth'
 import { useDockerStore } from '@/stores/docker'
 import type { DockerNetworkDetail } from '@/bindings/DockerNetworkDetail'
@@ -292,7 +291,7 @@ async function openDetail(network: DockerNetworkSummary): Promise<void> {
   selectedNetworkId.value = network.id
   containerToConnect.value = null
   try {
-    detail.value = await dockerService.network(network.id)
+    detail.value = await docker.api.network(network.id)
   } catch (reason: unknown) {
     notify(reason instanceof Error ? reason.message : 'Erro ao inspecionar rede', 'error')
   } finally {
@@ -301,12 +300,12 @@ async function openDetail(network: DockerNetworkSummary): Promise<void> {
 }
 
 async function reloadDetail(): Promise<void> {
-  detail.value = await dockerService.network(selectedNetworkId.value)
+  detail.value = await docker.api.network(selectedNetworkId.value)
 }
 
 async function createNetwork(): Promise<void> {
   const success = await docker.runAction(() =>
-    dockerService.createNetwork(newNetwork.name.trim(), newNetwork.driver)
+    docker.api.createNetwork(newNetwork.name.trim(), newNetwork.driver)
   )
   if (success) {
     createDialog.value = false
@@ -327,7 +326,7 @@ async function removeNetwork(network: DockerNetworkSummary): Promise<void> {
     icon: 'mdi-lan-disconnect',
   })
   if (!accepted) return
-  const success = await docker.runAction(() => dockerService.removeNetwork(network.id))
+  const success = await docker.runAction(() => docker.api.removeNetwork(network.id))
   notify(
     success ? 'Rede removida.' : docker.error || 'Erro ao remover rede',
     success ? 'success' : 'error'
@@ -337,7 +336,7 @@ async function removeNetwork(network: DockerNetworkSummary): Promise<void> {
 async function connectContainer(): Promise<void> {
   if (!containerToConnect.value) return
   const success = await docker.runAction(
-    () => dockerService.connectNetwork(selectedNetworkId.value, containerToConnect.value as string),
+    () => docker.api.connectNetwork(selectedNetworkId.value, containerToConnect.value as string),
     reloadDetail
   )
   if (success) containerToConnect.value = null
@@ -357,7 +356,7 @@ async function disconnectContainer(containerId: string): Promise<void> {
   })
   if (!accepted) return
   const success = await docker.runAction(
-    () => dockerService.disconnectNetwork(selectedNetworkId.value, containerId),
+    () => docker.api.disconnectNetwork(selectedNetworkId.value, containerId),
     reloadDetail
   )
   notify(

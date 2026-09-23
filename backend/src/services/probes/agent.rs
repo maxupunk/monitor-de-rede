@@ -308,7 +308,7 @@ struct ProbeTaskBatch {
 }
 
 /// Observação de falha na execução pelo probe.
-fn failed_result(message: &str) -> CheckResult {
+pub(crate) fn failed_result(message: &str) -> CheckResult {
     let now = Utc::now();
     CheckResult {
         success: false,

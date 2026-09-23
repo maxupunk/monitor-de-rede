@@ -101,6 +101,20 @@
                   density="comfortable"
                 ></v-text-field>
               </v-col>
+
+              <v-col v-if="supportsAgent" cols="12">
+                <v-switch
+                  v-model="form.installAgent"
+                  color="primary"
+                  label="Conectar este servidor à central (Docker, métricas e monitores)"
+                  density="comfortable"
+                  hide-details
+                ></v-switch>
+                <div class="text-caption text-medium-emphasis ml-2">
+                  O script do túnel termina instalando o agente NetMonitor, que se conecta pela VPN
+                  com um código de uso único. Acompanhe em Infraestrutura → Servidores remotos.
+                </div>
+              </v-col>
             </v-row>
 
             <v-alert type="info" variant="tonal" density="comfortable" class="mt-2">
@@ -178,6 +192,7 @@ const form = reactive<{
   siteId: number | null
   snmpEnabled: boolean
   snmpCommunity: string
+  installAgent: boolean
 }>({
   profile: null,
   name: '',
@@ -185,7 +200,11 @@ const form = reactive<{
   siteId: null,
   snmpEnabled: false,
   snmpCommunity: 'public',
+  installAgent: false,
 })
+
+/** Só o script Linux instala o agente (ADR 011). */
+const supportsAgent = computed(() => form.profile === 'linux')
 
 const profiles = computed(() => vpnStore.profiles)
 const cidr = computed(() => vpnStore.state?.cidr ?? null)
@@ -203,6 +222,7 @@ watch(
     form.siteId = null
     form.snmpEnabled = false
     form.snmpCommunity = 'public'
+    form.installAgent = false
 
     if (sitesStore.sites.length === 0) {
       await sitesStore.fetchSites()
@@ -236,6 +256,7 @@ async function submit() {
     siteId: form.siteId,
     snmpEnabled: form.snmpEnabled,
     snmpCommunity: form.snmpEnabled ? form.snmpCommunity : null,
+    installAgent: supportsAgent.value && form.installAgent,
   })
 
   if (artifact) {

@@ -1,12 +1,12 @@
 <template>
   <div>
     <PageHeader
-      title="Agentes Remotos (Probes)"
-      subtitle="Status de probes distribuídos e gerenciamento de autenticação"
+      title="Sondas de rede"
+      subtitle="Pontos de medição em outros sites: executam monitores e descobertas a partir de lá"
     >
       <template #actions>
         <v-btn color="primary" prepend-icon="mdi-refresh" @click="probesStore.fetchProbes()">
-          <span class="hidden-sm-and-down">Atualizar Probes</span>
+          <span class="hidden-sm-and-down">Atualizar sondas</span>
           <span class="hidden-md-and-up">Atualizar</span>
         </v-btn>
       </template>

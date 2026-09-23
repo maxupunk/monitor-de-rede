@@ -4,11 +4,14 @@ use loco_rs::app::AppContext;
 use serde_json::Value;
 
 use crate::services::{
+    docker::source::LocalEngine,
     monitoring::{
         checkers::{
+            container::{ContainerChecker, ContainerConfig},
             dns::{DnsChecker, DnsConfig},
+            host_resources::{HostResourcesChecker, HostResourcesConfig},
             http::{HttpChecker, HttpConfig},
-            ping::{PingChecker, PingConfig},
+            ping::{PingChecker, PingClient, PingConfig},
             snmp::{SnmpChecker, SnmpCheckerConfig},
             system_health::{SystemHealthChecker, SystemHealthConfig},
             tcp::{TcpChecker, TcpConfig},
@@ -39,9 +42,44 @@ pub fn merge_timeout(config: &Value, timeout_ms: Option<u64>) -> Value {
     merged
 }
 
+/// Dependências de processo que os checkers usam. O servidor as tira do
+/// `AppContext`; o agente remoto as monta direto, sem subir o Loco nem banco.
+#[derive(Clone, Default)]
+pub struct CheckDeps {
+    /// Opcional porque só o ping precisa dele: sem o socket ICMP, os demais
+    /// tipos continuam rodando e só o ping falha — como antes do refactor.
+    pub ping: Option<PingClient>,
+}
+
+impl CheckDeps {
+    #[must_use]
+    pub fn from_context(ctx: &AppContext) -> Self {
+        Self {
+            ping: PingClient::from_context(ctx).ok(),
+        }
+    }
+
+    /// Cliente ICMP ou o mesmo erro que `PingClient::from_context` devolveria.
+    pub fn ping_client(&self) -> AppResult<PingClient> {
+        self.ping
+            .clone()
+            .ok_or_else(|| AppError::Internal(anyhow::anyhow!("Cliente ICMP não inicializado")))
+    }
+}
+
 /// Executa o checker do tipo informado sem deixar regra de negócio no controller.
 pub async fn run_monitor(
     ctx: &AppContext,
+    kind: &str,
+    configuration: &Value,
+    options: RunOptions,
+) -> AppResult<CheckResult> {
+    run_monitor_with(&CheckDeps::from_context(ctx), kind, configuration, options).await
+}
+
+/// Mesma execução de [`run_monitor`], para quem não tem `AppContext` (agente).
+pub async fn run_monitor_with(
+    deps: &CheckDeps,
     kind: &str,
     configuration: &Value,
     options: RunOptions,
@@ -50,7 +88,7 @@ pub async fn run_monitor(
     let result = match kind.to_lowercase().as_str() {
         "ping" => {
             ping_diagnostics::execute_ping(
-                &PingChecker::from_context(ctx)?,
+                &PingChecker::new(deps.ping_client()?),
                 parse_config::<PingConfig>(&configuration, "ping")?,
             )
             .await
@@ -68,6 +106,24 @@ pub async fn run_monitor(
         "dns" => {
             DnsChecker
                 .execute(parse_config::<DnsConfig>(&configuration, "dns")?)
+                .await
+        }
+        // Docker e recursos do host onde o monitor roda: a central, ou o
+        // agente do servidor remoto quando o monitor pertence a ele (ADR 011).
+        "container" => {
+            ContainerChecker::new(std::sync::Arc::new(LocalEngine))
+                .execute(parse_config::<ContainerConfig>(
+                    &configuration,
+                    "container",
+                )?)
+                .await
+        }
+        "host_resources" => {
+            HostResourcesChecker
+                .execute(parse_config::<HostResourcesConfig>(
+                    &configuration,
+                    "host_resources",
+                )?)
                 .await
         }
         "snmp" => {
@@ -117,5 +173,29 @@ mod tests {
             merge_timeout(&serde_json::json!({}), Some(1_000))["timeoutMs"],
             1_000
         );
+    }
+
+    #[tokio::test]
+    async fn sem_cliente_icmp_so_o_ping_falha() {
+        let deps = CheckDeps::default();
+        let ping = run_monitor_with(
+            &deps,
+            "ping",
+            &serde_json::json!({ "host": "127.0.0.1" }),
+            RunOptions::default(),
+        )
+        .await;
+        assert!(ping.is_err());
+
+        let tcp = run_monitor_with(
+            &deps,
+            "tcp",
+            &serde_json::json!({ "host": "127.0.0.1", "port": 1 }),
+            RunOptions {
+                timeout_ms: Some(1_000),
+            },
+        )
+        .await;
+        assert!(tcp.is_ok());
     }
 }

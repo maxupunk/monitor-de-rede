@@ -6,7 +6,7 @@
 //! mudança de endpoint se propagam sozinhas.
 
 use super::contract::{artifact_header, ArtifactVariant, PeerConfigContext, WG_TUNNEL_NAME};
-use crate::services::vpn::shell_escape::strip_controls;
+use crate::services::vpn::shell_escape::{escape_uci, strip_controls};
 
 /// Detecção de gerenciador de pacotes: primeira família encontrada vence.
 struct PackageManager {
@@ -125,14 +125,40 @@ fn linux_snmp_section(
     lines
 }
 
+/// Instala o agente NetMonitor pelo túnel que acabou de subir (ADR 011). O
+/// script de instalação vem da própria central; o código de enrollment é de
+/// uso único e expira junto com a chave privada deste artefato.
+fn linux_agent_section(
+    context: &PeerConfigContext,
+    step: &mut impl FnMut(&str) -> String,
+) -> Vec<String> {
+    let Some(agent) = &context.agent else {
+        return Vec::new();
+    };
+    let url = escape_uci(&agent.server_url);
+    let code = escape_uci(&agent.enroll_code);
+    vec![
+        String::new(),
+        step("Instala o agente NetMonitor (Docker, métricas e monitores deste servidor)"),
+        "# O túnel acabou de subir: dá alguns segundos para o handshake.".to_string(),
+        "for _ in 1 2 3 4 5 6 7 8 9 10; do".to_string(),
+        format!("  curl -fsS --max-time 3 '{url}/api/agents/install.sh' >/dev/null 2>&1 && break"),
+        "  sleep 3".to_string(),
+        "done".to_string(),
+        format!(
+            "curl -fsSL '{url}/api/agents/install.sh' | AGENT_SERVER_URL='{url}' AGENT_ENROLL_CODE='{code}' sh"
+        ),
+    ]
+}
+
 /// Bash único para todas as distribuições: descobre o gerenciador de pacotes,
 /// instala o `wireguard-tools`, grava o perfil com permissão 600 e habilita o
 /// túnel no boot.
 #[must_use]
 pub fn linux_bash_variant(context: &PeerConfigContext, conf_content: &str) -> ArtifactVariant {
     let iface = WG_TUNNEL_NAME;
-    // O bloco de SNMP é opcional, então a numeração dos passos acompanha o total.
-    let total_steps = if context.snmp_enabled { 5 } else { 4 };
+    // SNMP e agente são opcionais, então a numeração dos passos acompanha o total.
+    let total_steps = 4 + usize::from(context.snmp_enabled) + usize::from(context.agent.is_some());
     let mut current_step = 0;
     let mut step = move |title: &str| {
         current_step += 1;
@@ -202,6 +228,7 @@ pub fn linux_bash_variant(context: &PeerConfigContext, conf_content: &str) -> Ar
         "wg show \"$IFACE\"".to_string(),
     ]);
     lines.extend(linux_snmp_section(context, &mut step));
+    lines.extend(linux_agent_section(context, &mut step));
     lines.extend([
         String::new(),
         format!("echo 'Túnel {iface} ativo. O dispositivo aparece como conectado no NetMonitor.'"),
@@ -389,6 +416,18 @@ mod tests {
         assert!(com.content.contains("# 1/5 ·"));
         assert!(com.content.contains("# 5/5 ·"));
         assert!(com.content.contains("rocommunity public 10.8.0.0/24"));
+    }
+
+    #[test]
+    fn o_bash_instala_o_agente_quando_ha_um_cadastrado() {
+        let mut context = contexto();
+        context.agent = Some(super::super::contract::AgentInstall {
+            server_url: "http://10.8.0.1:3333".into(),
+            enroll_code: "nma_codigo".into(),
+        });
+        let content = linux_bash_variant(&context, CONF).content;
+        assert!(content.contains("# 5/5 · Instala o agente NetMonitor"));
+        insta::assert_snapshot!(content);
     }
 
     #[test]

@@ -12,13 +12,12 @@ use crate::{
     services::{
         server_addresses::{self, CustomAddress, ServerAddress, StoredAddresses},
         shared::errors::AppResult,
-        syslog::{nat::NatDetector, SyslogService},
     },
 };
 
 /// `GET /api/server-addresses` — a lista resolvida.
 async fn index(State(ctx): State<AppContext>) -> AppResult<Response> {
-    let lista = server_addresses::list(&ctx.db, &detector(&ctx)).await?;
+    let lista = server_addresses::list(&ctx.db, &server_addresses::nat_detector(&ctx)).await?;
     let documento = server_addresses::stored(&ctx.db).await?;
     Ok(format::json(ServerAddressesResponse {
         data: lista.into_iter().map(serializa).collect(),
@@ -55,15 +54,6 @@ async fn save(
     // Devolve a lista já resolvida: a tela precisa dos ids que o servidor
     // sorteou para os itens novos, e de um segundo `GET` a menos.
     index(State(ctx)).await
-}
-
-/// O detector do serviço de syslog quando ele existe; um recém-criado quando
-/// não. A detecção é barata e o resultado é o mesmo — o que não pode acontecer
-/// é a lista de endereços depender da ingestão estar ligada.
-fn detector(ctx: &AppContext) -> NatDetector {
-    SyslogService::from_context(ctx).map_or_else(NatDetector::detect, |servico| {
-        servico.ingestor.resolver().nat().clone()
-    })
 }
 
 fn serializa(endereco: ServerAddress) -> ServerAddressEntry {

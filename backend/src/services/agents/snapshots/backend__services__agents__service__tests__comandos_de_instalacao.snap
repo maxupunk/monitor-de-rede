@@ -1,0 +1,19 @@
+---
+source: src/services/agents/service.rs
+expression: "format!(\"{docker}\\n\\n{systemd}\")"
+---
+docker run -d --name netmonitor-agent --restart unless-stopped --init \
+  --network host --pid host \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v /proc:/host/proc:ro -v /:/host:ro \
+  -v netmonitor-agent:/var/lib/netmonitor-agent \
+  -e AGENT_SERVER_URL=http://10.8.0.1:3333 \
+  -e AGENT_ENROLL_CODE=nma_abc \
+  -e AGENT_ALLOW=read,lifecycle,monitor,discovery \
+  -e HOST_PROC=/host/proc -e HOST_ROOT=/host \
+  -e AGENT_STATE_DIR=/var/lib/netmonitor-agent \
+  --entrypoint sh docker:27-cli -c \
+  'wget -qO /usr/local/bin/netmonitor-agent "$AGENT_SERVER_URL/api/agents/download/$(uname -m)" && chmod +x /usr/local/bin/netmonitor-agent && exec netmonitor-agent'
+
+curl -fsSL http://10.8.0.1:3333/api/agents/install.sh | \
+  sudo AGENT_SERVER_URL=http://10.8.0.1:3333 AGENT_ENROLL_CODE=nma_abc sh

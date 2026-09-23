@@ -28,11 +28,15 @@ pub struct DomainEvent {
     pub occurred_at: String,
 }
 
+/// Último estado de cada recurso em tempo real, por `(tipo, chave)`.
+type SnapshotMap = std::collections::BTreeMap<(String, String), DomainEvent>;
+
 #[derive(Clone)]
 pub struct EventBus {
     sender: broadcast::Sender<DomainEvent>,
     origin: String,
     last_relayed_id: Arc<Mutex<i64>>,
+    snapshots: Arc<std::sync::Mutex<SnapshotMap>>,
 }
 
 impl EventBus {
@@ -43,6 +47,7 @@ impl EventBus {
             sender,
             origin: Uuid::new_v4().to_string(),
             last_relayed_id: Arc::new(Mutex::new(0)),
+            snapshots: Arc::default(),
         }
     }
 
@@ -108,6 +113,39 @@ impl EventBus {
         };
         self.publish_local(event.clone());
         event
+    }
+
+    /// Publica o estado completo de um recurso e o guarda como o mais
+    /// recente. Quem assinar depois recebe esse estado logo após
+    /// `stream:connected` (ver [`Self::current_snapshots`]) — sem esperar o
+    /// próximo ciclo e sem hidratação por HTTP (AGENTS §9).
+    pub fn publish_snapshot(
+        &self,
+        event_type: impl Into<String>,
+        key: impl Into<String>,
+        payload: serde_json::Value,
+    ) -> DomainEvent {
+        let event = self.publish_ephemeral(event_type, payload);
+        self.lock_snapshots()
+            .insert((event.event_type.clone(), key.into()), event.clone());
+        event
+    }
+
+    /// Esquece os snapshots de uma chave (host desconectado, por exemplo).
+    pub fn forget_snapshots(&self, key: &str) {
+        self.lock_snapshots()
+            .retain(|(_, stored_key), _| stored_key != key);
+    }
+
+    #[must_use]
+    pub fn current_snapshots(&self) -> Vec<DomainEvent> {
+        self.lock_snapshots().values().cloned().collect()
+    }
+
+    fn lock_snapshots(&self) -> std::sync::MutexGuard<'_, SnapshotMap> {
+        self.snapshots
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     pub fn publish_local(&self, event: DomainEvent) {

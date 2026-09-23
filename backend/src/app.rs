@@ -164,6 +164,9 @@ impl Hooks for App {
             // O agente do probe não tem sessão de usuário: autentica-se pelo
             // `X-Probe-Token` dentro do handler (§7.10). Fora do guarda JWT.
             .add_route(controllers::probes::agent_routes())
+            // Idem para o agente remoto (ADR 011): código de enrollment ou
+            // token, validados no handler; o canal é um WebSocket de saída.
+            .add_route(controllers::agents::agent_routes())
             .add_route(controllers::dashboard::routes().layer(business_auth.clone()))
             .add_route(controllers::backup::routes().layer(business_auth.clone()))
             .add_route(controllers::sites::routes().layer(business_auth.clone()))
@@ -174,6 +177,7 @@ impl Hooks for App {
             .add_route(controllers::topology::routes().layer(business_auth.clone()))
             .add_route(controllers::snmp::routes().layer(business_auth.clone()))
             .add_route(controllers::probes::routes().layer(business_auth.clone()))
+            .add_route(controllers::agents::routes().layer(business_auth.clone()))
             .add_route(controllers::port_scan::routes().layer(business_auth.clone()))
             .add_route(controllers::diagnostics::routes().layer(business_auth.clone()))
             .add_route(controllers::dns::routes().layer(business_auth.clone()))

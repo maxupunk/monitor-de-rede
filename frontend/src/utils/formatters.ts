@@ -176,6 +176,15 @@ export function formatLatency(value?: number | null, fallback = 'N/A'): string {
  * Formata um valor conforme a unidade que veio junto dele na métrica/evento.
  * Unidades desconhecidas são apenas concatenadas.
  */
+/** Percentual com casas fixas: `42,5%` (CPU, memória, disco). */
+export function formatPercent(value?: number | null, digits = 1, fallback = '—'): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return fallback
+  return `${value.toLocaleString('pt-BR', {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  })}%`
+}
+
 /** Contagem compacta: `850`, `1,2 mil`, `3,4 mi` (tokens, amostras, eventos). */
 export function formatCompactCount(value?: number | null, fallback = '—'): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return fallback

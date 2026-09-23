@@ -27,7 +27,7 @@ use crate::{
         logs::device_logs,
     },
     services::{
-        docker::engine,
+        docker::{engine, source::LocalEngine},
         shared::errors::AppResult,
         syslog::{
             db::LogsDb,
@@ -307,6 +307,7 @@ impl GrepSource for DockerLogs {
             Err(message) => return Ok(Err(message)),
         };
         let entries = match engine::container_logs(
+            &LocalEngine,
             &container.id,
             engine::LogFilters {
                 tail: SCAN_CAP.to_string(),

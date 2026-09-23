@@ -77,6 +77,8 @@ pub enum Relation {
         on_delete = "SetNull"
     )]
     Networks,
+    #[sea_orm(has_many = "super::probes::Entity")]
+    Probes,
     #[sea_orm(
         belongs_to = "super::sites::Entity",
         from = "Column::SiteId",
@@ -116,6 +118,12 @@ impl Related<super::metrics::Entity> for Entity {
 impl Related<super::monitors::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Monitors.def()
+    }
+}
+
+impl Related<super::probes::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Probes.def()
     }
 }
 

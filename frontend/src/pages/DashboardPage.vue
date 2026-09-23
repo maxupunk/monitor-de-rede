@@ -146,7 +146,7 @@
       </div>
     </v-alert>
 
-    <v-row v-if="dockerStore.available" dense class="mb-2">
+    <v-row v-if="dockerStore.hostView(LOCAL_HOST_KEY).status?.available" dense class="mb-2">
       <v-col cols="12" class="pb-3 pb-md-6">
         <DockerSummaryCard></DockerSummaryCard>
       </v-col>
@@ -320,6 +320,7 @@ import AlertSilenceDialog from '@/components/AlertSilenceDialog.vue'
 import EventDetailDialog from '@/components/EventDetailDialog.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import type { AlertEvent } from '@/stores/alerts'
+import { LOCAL_HOST_KEY } from '@/services/dockerService'
 import { useDockerStore } from '@/stores/docker'
 
 const router = useRouter()

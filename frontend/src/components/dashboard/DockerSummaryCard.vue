@@ -83,28 +83,41 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import MonitorSparkline, { type SparklinePoint } from '@/components/MonitorSparkline.vue'
+import { LOCAL_HOST_KEY } from '@/services/dockerService'
 import { useDockerStore } from '@/stores/docker'
 import { formatBinaryBytes, formatDecimalBytes } from '@/utils/formatters'
 
-const docker = useDockerStore()
-const current = computed(() => docker.aggregateHistory.at(-1) ?? null)
+const dockerStore = useDockerStore()
+/** O dashboard é da central: sempre o Docker local, qualquer que seja o host aberto na tela Docker. */
+const docker = computed(() => {
+  const local = dockerStore.hostView(LOCAL_HOST_KEY)
+  const running = local.containers.filter((container) => container.state === 'running').length
+  return {
+    available: local.status?.available === true,
+    status: local.status,
+    runningContainers: running,
+    stoppedContainers: local.containers.length - running,
+    aggregateHistory: local.aggregateHistory,
+  }
+})
+const current = computed(() => docker.value.aggregateHistory.at(-1) ?? null)
 const memorySummary = computed(() => {
   if (!current.value) return '0 B'
   const used = formatBinaryBytes(current.value.memoryUsageBytes, { fractionDigits: 1 })
-  const total = formatBinaryBytes(docker.status?.memoryTotalBytes, {
+  const total = formatBinaryBytes(docker.value.status?.memoryTotalBytes, {
     fractionDigits: 1,
     fallback: 'N/D',
   })
   return `${used} / ${total}`
 })
 const cpuHistory = computed<SparklinePoint[]>(() =>
-  docker.aggregateHistory.map((sample) => ({
+  docker.value.aggregateHistory.map((sample) => ({
     value: sample.cpuPercent,
     recordedAt: sample.recordedAt,
   }))
 )
 const memoryHistory = computed<SparklinePoint[]>(() =>
-  docker.aggregateHistory.map((sample) => ({
+  docker.value.aggregateHistory.map((sample) => ({
     value: sample.memoryUsageBytes,
     recordedAt: sample.recordedAt,
   }))

@@ -5,6 +5,7 @@ import { useDeviceDetailStore } from '@/stores/deviceDetail'
 import { useEventsStore } from '@/stores/events'
 import { useMonitorsStore } from '@/stores/monitors'
 import { useAlertsStore } from '@/stores/alerts'
+import { useDockerStore } from '@/stores/docker'
 
 class FakeEventSource {
   static latest: FakeEventSource | null = null
@@ -152,5 +153,44 @@ describe('events store', () => {
     expect(alerta?.data?.problemKind).toBe('unreachable')
     expect(apiGet).not.toHaveBeenCalled()
     events.disconnect()
+  })
+
+  it('roteia snapshot e operação Docker de host remoto sem consultar endpoints', () => {
+    const apiGet = vi.spyOn(apiService, 'get')
+    const events = useEventsStore()
+    events.connect()
+    const send = (type: string, data: unknown) =>
+      FakeEventSource.latest?.onmessage?.({
+        data: JSON.stringify({ type, timestamp: '2026-09-22T10:00:00Z', data }),
+      } as MessageEvent<string>)
+
+    send('docker:snapshot', {
+      hostKey: 'agent-4',
+      status: { available: true, reason: null, name: 'srv-4' },
+      containers: [],
+      metrics: {
+        dockerAvailable: true,
+        unavailableReason: null,
+        failedContainerCount: 0,
+        collectedAt: '2026-09-22T10:00:00Z',
+        containers: [],
+      },
+    })
+    send('docker:operation', {
+      operationId: 'op-9',
+      hostKey: 'agent-4',
+      kind: 'pull',
+      target: 'nginx:alpine',
+      state: 'running',
+      line: 'Pulling fs layer',
+      message: null,
+    })
+
+    const docker = useDockerStore()
+    expect(docker.hostView('agent-4').status?.name).toBe('srv-4')
+    expect(docker.hostView('local').status).toBeNull()
+    expect(docker.operations[0].lines).toEqual(['Pulling fs layer'])
+    expect(events.recentEvents).toHaveLength(0)
+    expect(apiGet).not.toHaveBeenCalled()
   })
 })

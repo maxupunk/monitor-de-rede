@@ -15,9 +15,14 @@ use loco_rs::{
 
 use crate::{
     services::{
-        alerts::catalog::service as alert_catalog, docker::realtime as docker_realtime,
-        events::relay::relay_pending, network_tools::dns::registry::DnsServerRegistry,
-        vpn::probe_is_external, vpn::probe_registrar as vpn_probe_registrar,
+        agents::background as agents_background,
+        alerts::catalog::service as alert_catalog,
+        docker::{hosts::LOCAL_HOST_KEY, realtime as docker_realtime, source::LocalEngine},
+        events::relay::relay_pending,
+        network_tools::dns::registry::DnsServerRegistry,
+        telemetry::{host_metrics::HostMetricsReader, sampler},
+        vpn::probe_is_external,
+        vpn::probe_registrar as vpn_probe_registrar,
     },
     tasks::scheduler_run,
 };
@@ -40,6 +45,9 @@ impl Initializer for MonitoringInitializer {
     async fn before_run(&self, ctx: &AppContext) -> Result<()> {
         spawn_event_relay(ctx.clone());
         docker_realtime::spawn(ctx.clone());
+        // Canal dos agentes remotos: modo ao vivo e entrega de tarefas (ADR 011).
+        agents_background::spawn(ctx.clone());
+        spawn_local_telemetry(ctx);
         spawn_scheduler(ctx.clone());
 
         // Cadastro é uma conveniência de boot: banco indisponível não impede o
@@ -82,6 +90,23 @@ impl Initializer for MonitoringInitializer {
         }
         Ok(())
     }
+}
+
+/// Histórico de 1 minuto do host desta central (`TELEMETRY_ENABLED=false`
+/// desliga). Amostra `/proc` e o Docker local e grava direto no banco — o
+/// mesmo amostrador que o agente usa nos servidores remotos.
+fn spawn_local_telemetry(ctx: &AppContext) {
+    if !sampler::enabled() {
+        tracing::info!("histórico de métricas do host desligado (TELEMETRY_ENABLED=false)");
+        return;
+    }
+    sampler::spawn(
+        sampler::Sampler::new(
+            HostMetricsReader::from_env(),
+            std::sync::Arc::new(LocalEngine),
+        ),
+        std::sync::Arc::new(sampler::DatabaseSink::new(ctx.db.clone(), LOCAL_HOST_KEY)),
+    );
 }
 
 /// Sobe o ciclo do scheduler dentro do processo do servidor.

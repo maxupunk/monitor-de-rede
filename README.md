@@ -18,7 +18,7 @@ monitores, banco (SQLite) e servidor WireGuard.
 | **Notificações** | Web Push, e-mail, Telegram, Discord e webhooks, respeitando silêncios, correlação e política de recuperação. |
 | **Topologia** | Mapa de dispositivos e enlaces, vínculos automáticos ou manuais e nível de confiança da relação encontrada. |
 | **VPN WireGuard** | Servidor e peers, geração de configurações e QR Code, rotação de chaves, dicas de firewall, telemetria do túnel e acesso a redes remotas. |
-| **Probes remotos** | Agentes autenticados para monitorar outros sites, fila persistente, heartbeat, buffer quando o servidor está indisponível e retomada automática. |
+| **Sondas de rede** | Agentes autenticados para monitorar outros sites, fila persistente, heartbeat, buffer quando o servidor está indisponível e retomada automática. |
 | **Ferramentas de rede** | Scanner de portas, consultas e benchmark DNS e diagnóstico complementar quando ICMP é filtrado. |
 | **Docker** | Visão geral da Engine, containers e métricas, logs, volumes e exportação, redes, imagens e operações administrativas auditadas. |
 | **Operação e segurança** | Usuários com perfis `admin`, `operator` e `viewer`, auditoria, backup e restauração das configurações, primeiro acesso protegido e segredos cifrados em repouso. |
@@ -203,6 +203,9 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
+Binários: `backend-cli` (a central) e `netmonitor-agent` (o agente remoto, sem
+Loco nem banco — `cargo build --release --bin netmonitor-agent`).
+
 Tarefas de CLI: `task auth_setup_token`, `task user:create`, `task probe_register`,
 `task vpn_probe_register`, `task probe_run` (agente de um probe remoto),
 `task scheduler_loop` (o ciclo em processo próprio, quando não se quer o
@@ -225,6 +228,34 @@ services:
       net.ipv4.ping_group_range: "0 2147483647"
     restart: unless-stopped
 ```
+
+### Agente remoto (Docker, host e monitores de outros servidores)
+
+O agente leva a central para dentro de outros servidores: inventário e ações
+Docker (ciclo de vida, pull/recriação com rollback, compose), métricas do host
+e dos containers com histórico de 1 minuto por 30 dias e os monitores/descoberta
+executados a partir daquele site. Ele **só disca para fora** — por WebSocket,
+de preferência pelo túnel da VPN — e não abre porta nenhuma no servidor
+([ADR 011](docs/adr/011-agente-remoto.md)).
+
+1. **Pela VPN (recomendado):** em VPN → Novo peer, perfil Linux, marque
+   "Conectar este servidor à central". O script do túnel termina instalando o
+   agente com um código de uso único, e ele já nasce vinculado ao dispositivo.
+2. **Manual:** Infraestrutura → Servidores remotos → Conectar servidor. Escolha
+   por qual dos "Endereços deste servidor" (túnel, rede local, internet ou um
+   personalizado) ele alcança a central; a tela mostra o comando systemd
+   (`curl …/api/agents/install.sh | sudo … sh`) e o `docker run` com esse
+   endereço e o código embutidos. Há também `docker/agent/docker-compose.yml`.
+   Pelo túnel vale a `APP_PORT`; pela rede local e pela internet, a
+   `APP_EXTERNAL_PORT` publicada.
+
+A política é **local**: `AGENT_ALLOW` no servidor remoto define o que ele aceita
+(`read,lifecycle,monitor,discovery` por padrão; `update` e `compose` só quando
+explicitamente liberados). A central não consegue ampliá-la. O `docker run`
+exibido usa a imagem oficial `docker:27-cli` e baixa o binário estático do
+agente da própria central (`/api/agents/download/<arch>`) a cada início — não
+depende de registry, e reiniciar o container atualiza o agente. Quem publicar a
+imagem própria (`docker build --target agent`) pode apontá-la em `AGENT_IMAGE`.
 
 ## Frontend — comandos
 

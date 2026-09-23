@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use super::{AiToolHandler, ToolArgs, ToolGroup, ToolOutput};
 use crate::{
     services::{
-        docker::{self, engine, DockerError},
+        docker::{self, engine, source::LocalEngine, DockerError},
         shared::errors::AppResult,
     },
     views::docker::DockerContainerSummary,
@@ -57,7 +57,7 @@ pub(super) fn pick_container<'a>(
 
 /// O container pelo nome ou id; `Err(mensagem)` para a IA quando não dá.
 pub(super) async fn resolve_container(identifier: &str) -> Result<DockerContainerSummary, String> {
-    let containers = engine::list_containers()
+    let containers = engine::list_containers(&LocalEngine)
         .await
         .map_err(|error| unavailable_message(&error))?;
     pick_container(&containers, identifier)
@@ -110,7 +110,7 @@ Para os logs de um container, use grep com source='docker'."
                 Ok(container) => container,
                 Err(message) => return Ok(ToolOutput::not_found(message)),
             };
-            let detail = match engine::inspect_container(&container.id).await {
+            let detail = match engine::inspect_container(&LocalEngine, &container.id).await {
                 Ok(detail) => detail,
                 Err(error) => return Ok(ToolOutput::not_found(unavailable_message(&error))),
             };
@@ -135,7 +135,7 @@ Para os logs de um container, use grep com source='docker'."
             })));
         }
 
-        let containers = match engine::list_containers().await {
+        let containers = match engine::list_containers(&LocalEngine).await {
             Ok(containers) => containers,
             Err(error) => return Ok(ToolOutput::not_found(unavailable_message(&error))),
         };

@@ -84,6 +84,13 @@ equivale a administração do host. Por isso mutações e exportação de volume
 exclusivas de `admin` e auditadas. A decisão e as consequências estão na
 [ADR 010](adr/010-docker-engine-api.md).
 
+A camada Docker separa a **fonte** dos dados crus (`services/docker/source.rs`,
+trait `DockerEngine`) do **mapeamento** para DTO, da redação de segredos e das
+regras (`services/docker/engine.rs`). Hoje a única fonte é `LocalEngine`, o
+`bollard` pelo socket. É por esse ponto que o agente remoto vai servir o Docker
+de outros servidores sem duplicar o mapeamento
+([ADR 011](adr/011-agente-remoto.md)).
+
 ### Estáticos
 
 O `dist` da SPA é copiado para `/app/web` e servido pelo `ServeDir`:
@@ -641,6 +648,55 @@ por ciclo e o relay SSE lê no máximo 500 linhas do outbox por passagem. Como o
 banco padrão de produção é SQLite, seu pool também usa uma conexão por padrão;
 instalações PostgreSQL dimensionam `DB_MAX_CONNECTIONS` explicitamente.
 
+## 11-B. Agentes remotos
+
+Um agente (`netmonitor-agent`, [ADR 011](adr/011-agente-remoto.md)) é uma
+linha de `probes` com `configuration.role = "agent"`, opcionalmente vinculada ao
+dispositivo que o hospeda (`probes.device_id`, normalmente o peer da VPN). É um
+segundo binário do mesmo crate: não sobe o Loco nem abre banco e reaproveita o
+protocolo, a `LocalEngine`, os checkers (`run_monitor_with`) e a telemetria.
+
+**Canal.** O agente abre `GET /api/agents/connect` (WebSocket, `X-Probe-Token`)
+e nunca escuta porta. Tudo que atravessa é um `Envelope` JSON
+(`services/agents/protocol.rs`): `Request` → `Chunk`* → `Response`, `Cancel`,
+e `Event` espontâneo. Os comandos Docker formam um enum fechado, cada um com a
+sua permissão. `services/agents/connection.rs` e
+`services/agent_runtime/session.rs` falam texto por canais — o controller só
+faz a ponte com o socket, e os testes ligam as duas pontas em memória.
+
+**Enrollment e autenticação.** O cadastro emite um código `nma_…` de uso único
+(cofre em memória, 15 min, o mesmo `EphemeralSecretStore` da VPN), trocado em
+`POST /api/agents/enroll` pelo token de longa duração; o banco guarda só o
+hash. O canal recusa o `DEFAULT_VPN_PROBE_TOKEN` para qualquer probe que não
+seja o `vpn-probe` e, com o dispositivo vinculado em modo `vpn`, exige que a
+conexão venha do IP do túnel.
+
+**Política local.** `AGENT_ALLOW` no servidor remoto (`read`, `lifecycle`,
+`update`, `compose`, `monitor`, `discovery`) é aplicada pelo agente a cada
+pedido; a central só a usa para não oferecer o que seria recusado.
+
+**Docker por host.** `services/docker/source.rs` (`DockerEngine`) e
+`maintenance.rs` (`DockerMaintenance`) são as fontes; `hosts.rs` resolve
+`local` para `LocalEngine` e `agent-<id>` para `AgentEngine` (RPC pelo hub). As
+rotas existem em `/api/docker/...` (a central) e
+`/api/docker/hosts/{host}/...`. Pull, atualização (recreate com rollback) e
+compose respondem `202` e relatam progresso em `docker:operation`; logs em
+follow chegam como `docker:log`. O CLI `docker compose` só roda no agente.
+
+**Tempo real e histórico.** Com assinante SSE, a central pede snapshots ao
+vivo (`SetLive`) e os republica como `docker:snapshot`/`docker:inventory` com
+`hostKey`; o último de cada host é reenviado a quem assina depois
+(`EventBus::publish_snapshot`). Sem assinante, o agente só manda o rollup de
+1 minuto (`services/telemetry`), que também é coletado para o host `local`.
+As tabelas `host_metrics_1m` e `container_metrics_1m` seguem
+`RETENTION_METRICS_DAYS`.
+
+**Tarefas do probe.** O pump (`services/agents/background.rs`) entrega pelo
+canal o que o agendador enfileirou em `probe_tasks`/`discovery_runs`. A fila
+continua no banco; o polling HTTP, o registrador do `vpn-probe` e o fallback
+local do agendador permanecem (AGENTS §6). Resultado pronto com o canal caído
+vai para o buffer do agente e volta como evento na reconexão.
+
 ## 12. O que não existe
 
 Registrar o que **não** foi construído evita que alguém procure por uma peça
@@ -681,6 +737,8 @@ ausente achando que ela está escondida:
 | [007](adr/007-scheduler-processo-unico.md) | Scheduler em laço no processo principal |
 | [008](adr/008-syslog-parser.md) | Parser e ingestão de Syslog |
 | [009](adr/009-device-adapters.md) | Adapters extensíveis por plataforma de dispositivo |
+| [010](adr/010-docker-engine-api.md) | Gerenciamento pela Docker Engine API |
+| [011](adr/011-agente-remoto.md) | Agente remoto por canal de saída sobre a VPN |
 
 ## 14. Configuração
 

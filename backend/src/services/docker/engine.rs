@@ -1,18 +1,11 @@
 //! Operações e normalização do contrato da Docker Engine.
+//!
+//! Cada operação recebe a fonte dos dados crus ([`DockerEngine`]) e aplica o
+//! mesmo mapeamento e a mesma redação de segredos, seja o host local ou um
+//! servidor remoto atendido por agente.
 
 use std::collections::HashMap;
-use std::time::Duration;
 
-use bollard::{
-    container::{ListContainersOptions, LogsOptions, RemoveContainerOptions},
-    image::{ListImagesOptions, RemoveImageOptions},
-    network::{
-        ConnectNetworkOptions, CreateNetworkOptions, DisconnectNetworkOptions, ListNetworksOptions,
-    },
-    volume::{ListVolumesOptions, RemoveVolumeOptions},
-};
-use futures::StreamExt;
-use serde::Serialize;
 use serde_json::Value;
 
 use crate::views::docker::{
@@ -23,12 +16,15 @@ use crate::views::docker::{
     DockerRestartPolicy, DockerStatusResponse, DockerVolumeDetail, DockerVolumeSummary,
 };
 
-use super::{call, client, DockerError, DISABLED_REASON, UNAVAILABLE_REASON};
+use super::{
+    source::{DockerEngine, LogChunk},
+    DockerError, DISABLED_REASON, UNAVAILABLE_REASON,
+};
 
-const STATUS_TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_LOG_LINES: usize = 10_000;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
 pub enum ContainerAction {
     Start,
     Stop,
@@ -47,7 +43,8 @@ impl ContainerAction {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LogFilters {
     pub tail: String,
     pub since: i64,
@@ -55,46 +52,28 @@ pub struct LogFilters {
     pub timestamps: bool,
 }
 
-pub async fn status() -> DockerStatusResponse {
-    let client = match client() {
-        Ok(client) => client,
+pub async fn status(engine: &dyn DockerEngine) -> DockerStatusResponse {
+    let raw = match engine.status_raw().await {
+        Ok(raw) => raw,
         Err(DockerError::Disabled) => return unavailable_status(DISABLED_REASON),
         Err(_) => return unavailable_status(UNAVAILABLE_REASON),
     };
-    if !matches!(
-        tokio::time::timeout(STATUS_TIMEOUT, client.ping()).await,
-        Ok(Ok(_))
-    ) {
-        return unavailable_status(UNAVAILABLE_REASON);
-    }
-
-    let version = tokio::time::timeout(STATUS_TIMEOUT, client.version())
-        .await
-        .ok()
-        .and_then(Result::ok)
-        .and_then(|value| serde_json::to_value(value).ok())
-        .unwrap_or(Value::Null);
-    let info = tokio::time::timeout(STATUS_TIMEOUT, client.info())
-        .await
-        .ok()
-        .and_then(Result::ok)
-        .and_then(|value| serde_json::to_value(value).ok())
-        .unwrap_or(Value::Null);
+    let (version, info) = (&raw.version, &raw.info);
 
     DockerStatusResponse {
         available: true,
         reason: None,
-        engine_version: optional_string(&version, &["Version", "version"]),
-        api_version: optional_string(&version, &["ApiVersion", "apiVersion"]),
-        name: optional_string(&info, &["Name", "name"]),
-        operating_system: optional_string(&info, &["OperatingSystem", "operatingSystem"]),
-        architecture: optional_string(&info, &["Architecture", "architecture"]),
-        cpus: optional_i64(&info, &["NCPU", "nCpu"]),
-        memory_total_bytes: optional_i64(&info, &["MemTotal", "memTotal"]),
-        containers: optional_i64(&info, &["Containers", "containers"]),
-        containers_running: optional_i64(&info, &["ContainersRunning", "containersRunning"]),
-        containers_stopped: optional_i64(&info, &["ContainersStopped", "containersStopped"]),
-        images: optional_i64(&info, &["Images", "images"]),
+        engine_version: optional_string(version, &["Version", "version"]),
+        api_version: optional_string(version, &["ApiVersion", "apiVersion"]),
+        name: optional_string(info, &["Name", "name"]),
+        operating_system: optional_string(info, &["OperatingSystem", "operatingSystem"]),
+        architecture: optional_string(info, &["Architecture", "architecture"]),
+        cpus: optional_i64(info, &["NCPU", "nCpu"]),
+        memory_total_bytes: optional_i64(info, &["MemTotal", "memTotal"]),
+        containers: optional_i64(info, &["Containers", "containers"]),
+        containers_running: optional_i64(info, &["ContainersRunning", "containersRunning"]),
+        containers_stopped: optional_i64(info, &["ContainersStopped", "containersStopped"]),
+        images: optional_i64(info, &["Images", "images"]),
     }
 }
 
@@ -116,18 +95,12 @@ fn unavailable_status(reason: &str) -> DockerStatusResponse {
     }
 }
 
-pub async fn list_containers() -> Result<Vec<DockerContainerSummary>, DockerError> {
-    let items = call(
-        client()?.list_containers(Some(ListContainersOptions::<String> {
-            all: true,
-            ..Default::default()
-        })),
-    )
-    .await?;
-    let mut output = items
-        .into_iter()
-        .map(to_value)
-        .collect::<Result<Vec<_>, _>>()?
+pub async fn list_containers(
+    engine: &dyn DockerEngine,
+) -> Result<Vec<DockerContainerSummary>, DockerError> {
+    let mut output = engine
+        .list_containers_raw()
+        .await?
         .iter()
         .map(container_summary)
         .collect::<Vec<_>>();
@@ -135,31 +108,19 @@ pub async fn list_containers() -> Result<Vec<DockerContainerSummary>, DockerErro
     Ok(output)
 }
 
-pub async fn inspect_container(id: &str) -> Result<DockerContainerDetail, DockerError> {
-    let raw = to_value(call(client()?.inspect_container(id, None)).await?)?;
-    Ok(container_detail(&raw))
+pub async fn inspect_container(
+    engine: &dyn DockerEngine,
+    id: &str,
+) -> Result<DockerContainerDetail, DockerError> {
+    Ok(container_detail(&engine.inspect_container_raw(id).await?))
 }
 
 pub async fn container_action(
+    engine: &dyn DockerEngine,
     id: &str,
     action: ContainerAction,
 ) -> Result<DockerActionResponse, DockerError> {
-    let client = client()?;
-    match action {
-        ContainerAction::Start => call(client.start_container::<String>(id, None)).await?,
-        ContainerAction::Stop => call(client.stop_container(id, None)).await?,
-        ContainerAction::Restart => call(client.restart_container(id, None)).await?,
-        ContainerAction::Remove { force } => {
-            call(client.remove_container(
-                id,
-                Some(RemoveContainerOptions {
-                    force,
-                    ..Default::default()
-                }),
-            ))
-            .await?;
-        }
-    }
+    engine.container_action(id, action).await?;
     Ok(DockerActionResponse {
         success: true,
         message: action.success_message().to_string(),
@@ -167,54 +128,40 @@ pub async fn container_action(
 }
 
 pub async fn container_logs(
+    engine: &dyn DockerEngine,
     id: &str,
     filters: LogFilters,
 ) -> Result<Vec<DockerLogEntry>, DockerError> {
-    let mut stream = client()?.logs(
-        id,
-        Some(LogsOptions {
-            follow: false,
-            stdout: true,
-            stderr: true,
-            since: filters.since,
-            until: filters.until,
-            timestamps: filters.timestamps,
-            tail: filters.tail,
-        }),
-    );
+    let chunks = engine
+        .container_logs_raw(id, &filters, MAX_LOG_LINES)
+        .await?;
+    Ok(log_entries(&chunks, filters.timestamps))
+}
+
+pub(crate) fn log_entries(chunks: &[LogChunk], timestamps: bool) -> Vec<DockerLogEntry> {
     let mut entries = Vec::new();
-    while entries.len() < MAX_LOG_LINES {
-        let next = tokio::time::timeout(STATUS_TIMEOUT, stream.next())
-            .await
-            .map_err(|_| DockerError::Unavailable)?;
-        let Some(output) = next else { break };
-        let output = output.map_err(|_| DockerError::Engine)?;
-        let (stream_name, bytes) = match output {
-            bollard::container::LogOutput::StdOut { message } => ("stdout", message),
-            bollard::container::LogOutput::StdErr { message } => ("stderr", message),
-            _ => continue,
-        };
-        for raw_line in String::from_utf8_lossy(&bytes).lines() {
-            let (timestamp, message) = split_timestamp(raw_line, filters.timestamps);
+    for chunk in chunks {
+        for raw_line in chunk.text.lines() {
+            let (timestamp, message) = split_timestamp(raw_line, timestamps);
             if !message.is_empty() {
                 entries.push(DockerLogEntry {
                     timestamp,
-                    stream: stream_name.to_string(),
+                    stream: chunk.stream.clone(),
                     message,
                 });
             }
             if entries.len() >= MAX_LOG_LINES {
-                break;
+                return entries;
             }
         }
     }
-    Ok(entries)
+    entries
 }
 
-pub async fn list_volumes() -> Result<Vec<DockerVolumeSummary>, DockerError> {
-    let raw = to_value(
-        call(client()?.list_volumes(Some(ListVolumesOptions::<String>::default()))).await?,
-    )?;
+pub async fn list_volumes(
+    engine: &dyn DockerEngine,
+) -> Result<Vec<DockerVolumeSummary>, DockerError> {
+    let raw = engine.list_volumes_raw().await?;
     let mut volumes: Vec<DockerVolumeSummary> = field(&raw, &["Volumes", "volumes"])
         .and_then(Value::as_array)
         .map(|items| items.iter().map(volume_summary).collect())
@@ -223,8 +170,11 @@ pub async fn list_volumes() -> Result<Vec<DockerVolumeSummary>, DockerError> {
     Ok(volumes)
 }
 
-pub async fn inspect_volume(name: &str) -> Result<DockerVolumeDetail, DockerError> {
-    let raw = to_value(call(client()?.inspect_volume(name)).await?)?;
+pub async fn inspect_volume(
+    engine: &dyn DockerEngine,
+    name: &str,
+) -> Result<DockerVolumeDetail, DockerError> {
+    let raw = engine.inspect_volume_raw(name).await?;
     let summary = volume_summary(&raw);
     Ok(DockerVolumeDetail {
         name: summary.name,
@@ -237,21 +187,24 @@ pub async fn inspect_volume(name: &str) -> Result<DockerVolumeDetail, DockerErro
     })
 }
 
-pub async fn remove_volume(name: &str, force: bool) -> Result<DockerActionResponse, DockerError> {
-    call(client()?.remove_volume(name, Some(RemoveVolumeOptions { force }))).await?;
+pub async fn remove_volume(
+    engine: &dyn DockerEngine,
+    name: &str,
+    force: bool,
+) -> Result<DockerActionResponse, DockerError> {
+    engine.remove_volume(name, force).await?;
     Ok(DockerActionResponse {
         success: true,
         message: "Volume removido com sucesso.".to_string(),
     })
 }
 
-pub async fn list_networks() -> Result<Vec<DockerNetworkSummary>, DockerError> {
-    let items =
-        call(client()?.list_networks(Some(ListNetworksOptions::<String>::default()))).await?;
-    let mut output = items
-        .into_iter()
-        .map(to_value)
-        .collect::<Result<Vec<_>, _>>()?
+pub async fn list_networks(
+    engine: &dyn DockerEngine,
+) -> Result<Vec<DockerNetworkSummary>, DockerError> {
+    let mut output = engine
+        .list_networks_raw()
+        .await?
         .iter()
         .map(network_summary)
         .collect::<Vec<_>>();
@@ -259,8 +212,11 @@ pub async fn list_networks() -> Result<Vec<DockerNetworkSummary>, DockerError> {
     Ok(output)
 }
 
-pub async fn inspect_network(id: &str) -> Result<DockerNetworkDetail, DockerError> {
-    let raw = to_value(call(client()?.inspect_network::<String>(id, None)).await?)?;
+pub async fn inspect_network(
+    engine: &dyn DockerEngine,
+    id: &str,
+) -> Result<DockerNetworkDetail, DockerError> {
+    let raw = engine.inspect_network_raw(id).await?;
     let summary = network_summary(&raw);
     let containers = field(&raw, &["Containers", "containers"])
         .and_then(Value::as_object)
@@ -294,24 +250,22 @@ pub async fn inspect_network(id: &str) -> Result<DockerNetworkDetail, DockerErro
 }
 
 pub async fn create_network(
+    engine: &dyn DockerEngine,
     name: String,
     driver: String,
 ) -> Result<DockerActionResponse, DockerError> {
-    call(client()?.create_network(CreateNetworkOptions {
-        name: name.clone(),
-        driver,
-        check_duplicate: true,
-        ..Default::default()
-    }))
-    .await?;
+    engine.create_network(&name, &driver).await?;
     Ok(DockerActionResponse {
         success: true,
         message: format!("Rede \"{name}\" criada com sucesso."),
     })
 }
 
-pub async fn remove_network(id: &str) -> Result<DockerActionResponse, DockerError> {
-    call(client()?.remove_network(id)).await?;
+pub async fn remove_network(
+    engine: &dyn DockerEngine,
+    id: &str,
+) -> Result<DockerActionResponse, DockerError> {
+    engine.remove_network(id).await?;
     Ok(DockerActionResponse {
         success: true,
         message: "Rede removida com sucesso.".to_string(),
@@ -319,17 +273,11 @@ pub async fn remove_network(id: &str) -> Result<DockerActionResponse, DockerErro
 }
 
 pub async fn connect_network(
+    engine: &dyn DockerEngine,
     network: &str,
     container: String,
 ) -> Result<DockerActionResponse, DockerError> {
-    call(client()?.connect_network(
-        network,
-        ConnectNetworkOptions {
-            container,
-            ..Default::default()
-        },
-    ))
-    .await?;
+    engine.connect_network(network, &container).await?;
     Ok(DockerActionResponse {
         success: true,
         message: "Container conectado à rede com sucesso.".to_string(),
@@ -337,30 +285,32 @@ pub async fn connect_network(
 }
 
 pub async fn disconnect_network(
+    engine: &dyn DockerEngine,
     network: &str,
     container: String,
     force: bool,
 ) -> Result<DockerActionResponse, DockerError> {
-    let client = client()?;
-    let inspected = to_value(call(client.inspect_container(&container, None)).await?)?;
+    let inspected = engine.inspect_container_raw(&container).await?;
     if attached_network_count(&inspected) <= 1 {
         return Err(DockerError::Validation(
             "O container precisa permanecer conectado a pelo menos uma rede".to_string(),
         ));
     }
-    call(client.disconnect_network(network, DisconnectNetworkOptions { container, force })).await?;
+    engine
+        .disconnect_network(network, &container, force)
+        .await?;
     Ok(DockerActionResponse {
         success: true,
         message: "Container desconectado da rede com sucesso.".to_string(),
     })
 }
 
-pub async fn list_images() -> Result<Vec<DockerImageSummary>, DockerError> {
-    let items = call(client()?.list_images(Some(ListImagesOptions::<String>::default()))).await?;
-    let mut output = items
-        .into_iter()
-        .map(to_value)
-        .collect::<Result<Vec<_>, _>>()?
+pub async fn list_images(
+    engine: &dyn DockerEngine,
+) -> Result<Vec<DockerImageSummary>, DockerError> {
+    let mut output = engine
+        .list_images_raw()
+        .await?
         .iter()
         .map(image_summary)
         .collect::<Vec<_>>();
@@ -368,8 +318,11 @@ pub async fn list_images() -> Result<Vec<DockerImageSummary>, DockerError> {
     Ok(output)
 }
 
-pub async fn inspect_image(id: &str) -> Result<DockerImageDetail, DockerError> {
-    let raw = to_value(call(client()?.inspect_image(id)).await?)?;
+pub async fn inspect_image(
+    engine: &dyn DockerEngine,
+    id: &str,
+) -> Result<DockerImageDetail, DockerError> {
+    let raw = engine.inspect_image_raw(id).await?;
     let config = field(&raw, &["Config", "config"]).unwrap_or(&Value::Null);
     let root_fs = field(&raw, &["RootFS", "rootFs"]).unwrap_or(&Value::Null);
     Ok(DockerImageDetail {
@@ -388,24 +341,20 @@ pub async fn inspect_image(id: &str) -> Result<DockerImageDetail, DockerError> {
     })
 }
 
-pub async fn remove_image(id: &str, force: bool) -> Result<DockerActionResponse, DockerError> {
-    call(client()?.remove_image(
-        id,
-        Some(RemoveImageOptions {
-            force,
-            ..Default::default()
-        }),
-        None,
-    ))
-    .await?;
+pub async fn remove_image(
+    engine: &dyn DockerEngine,
+    id: &str,
+    force: bool,
+) -> Result<DockerActionResponse, DockerError> {
+    engine.remove_image(id, force).await?;
     Ok(DockerActionResponse {
         success: true,
         message: "Imagem removida com sucesso.".to_string(),
     })
 }
 
-pub async fn prune_images() -> Result<DockerPruneResponse, DockerError> {
-    let raw = to_value(call(client()?.prune_images::<String>(None)).await?)?;
+pub async fn prune_images(engine: &dyn DockerEngine) -> Result<DockerPruneResponse, DockerError> {
+    let raw = engine.prune_images_raw().await?;
     Ok(DockerPruneResponse {
         images_deleted: field(&raw, &["ImagesDeleted", "imagesDeleted"])
             .and_then(Value::as_array)
@@ -586,10 +535,6 @@ fn image_summary(raw: &Value) -> DockerImageSummary {
     }
 }
 
-fn to_value<T: Serialize>(value: T) -> Result<Value, DockerError> {
-    serde_json::to_value(value).map_err(|_| DockerError::Engine)
-}
-
 fn field<'a>(value: &'a Value, names: &[&str]) -> Option<&'a Value> {
     names.iter().find_map(|name| value.get(*name))
 }
@@ -758,7 +703,7 @@ mod tests {
     async fn status_explica_quando_a_integracao_foi_desativada() {
         let previous = std::env::var_os("DOCKER_ENABLED");
         std::env::set_var("DOCKER_ENABLED", "false");
-        let response = status().await;
+        let response = status(&crate::services::docker::source::LocalEngine).await;
         match previous {
             Some(value) => std::env::set_var("DOCKER_ENABLED", value),
             None => std::env::remove_var("DOCKER_ENABLED"),
@@ -832,5 +777,176 @@ mod tests {
             })),
             1
         );
+    }
+
+    /// Fonte falsa: prova que mapeamento e regras não dependem do `bollard`,
+    /// que é o que permite a mesma camada servir o host de um agente remoto.
+    #[derive(Default)]
+    struct FakeEngine {
+        status: Option<DockerError>,
+        containers: Vec<Value>,
+        inspected: Value,
+        disconnected: std::sync::Mutex<bool>,
+    }
+
+    #[async_trait::async_trait]
+    impl DockerEngine for FakeEngine {
+        async fn status_raw(&self) -> Result<super::super::source::EngineStatusRaw, DockerError> {
+            match &self.status {
+                Some(DockerError::Disabled) => Err(DockerError::Disabled),
+                Some(_) => Err(DockerError::Unavailable),
+                None => Ok(super::super::source::EngineStatusRaw {
+                    version: json!({ "Version": "27.0.1" }),
+                    info: json!({ "NCPU": 4, "Name": "srv-remoto" }),
+                }),
+            }
+        }
+        async fn list_containers_raw(&self) -> Result<Vec<Value>, DockerError> {
+            Ok(self.containers.clone())
+        }
+        async fn inspect_container_raw(&self, _: &str) -> Result<Value, DockerError> {
+            Ok(self.inspected.clone())
+        }
+        async fn container_action(&self, _: &str, _: ContainerAction) -> Result<(), DockerError> {
+            Ok(())
+        }
+        async fn container_logs_raw(
+            &self,
+            _: &str,
+            _: &LogFilters,
+            _: usize,
+        ) -> Result<Vec<LogChunk>, DockerError> {
+            Ok(Vec::new())
+        }
+        async fn list_volumes_raw(&self) -> Result<Value, DockerError> {
+            Ok(json!({ "Volumes": [] }))
+        }
+        async fn inspect_volume_raw(&self, _: &str) -> Result<Value, DockerError> {
+            Err(DockerError::NotFound)
+        }
+        async fn remove_volume(&self, _: &str, _: bool) -> Result<(), DockerError> {
+            Ok(())
+        }
+        async fn list_networks_raw(&self) -> Result<Vec<Value>, DockerError> {
+            Ok(Vec::new())
+        }
+        async fn inspect_network_raw(&self, _: &str) -> Result<Value, DockerError> {
+            Err(DockerError::NotFound)
+        }
+        async fn create_network(&self, _: &str, _: &str) -> Result<(), DockerError> {
+            Ok(())
+        }
+        async fn remove_network(&self, _: &str) -> Result<(), DockerError> {
+            Ok(())
+        }
+        async fn connect_network(&self, _: &str, _: &str) -> Result<(), DockerError> {
+            Ok(())
+        }
+        async fn disconnect_network(&self, _: &str, _: &str, _: bool) -> Result<(), DockerError> {
+            *self.disconnected.lock().expect("mutex") = true;
+            Ok(())
+        }
+        async fn list_images_raw(&self) -> Result<Vec<Value>, DockerError> {
+            Ok(Vec::new())
+        }
+        async fn inspect_image_raw(&self, _: &str) -> Result<Value, DockerError> {
+            Err(DockerError::NotFound)
+        }
+        async fn remove_image(&self, _: &str, _: bool) -> Result<(), DockerError> {
+            Ok(())
+        }
+        async fn prune_images_raw(&self) -> Result<Value, DockerError> {
+            Ok(json!({ "ImagesDeleted": [{}, {}], "SpaceReclaimed": 42 }))
+        }
+        async fn metrics(&self) -> crate::views::docker::DockerMetricsResponse {
+            crate::services::docker::metrics::unavailable("fonte falsa")
+        }
+        async fn follow_logs(
+            &self,
+            _: &str,
+            _: &str,
+            _: tokio::sync::mpsc::UnboundedSender<LogChunk>,
+            _: tokio_util::sync::CancellationToken,
+        ) -> Result<(), DockerError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn status_de_fonte_qualquer_segue_o_mesmo_mapeamento() {
+        let ok = status(&FakeEngine::default()).await;
+        assert!(ok.available);
+        assert_eq!(ok.engine_version.as_deref(), Some("27.0.1"));
+        assert_eq!(ok.cpus, Some(4));
+
+        let disabled = status(&FakeEngine {
+            status: Some(DockerError::Disabled),
+            ..Default::default()
+        })
+        .await;
+        assert_eq!(disabled.reason.as_deref(), Some(DISABLED_REASON));
+
+        let down = status(&FakeEngine {
+            status: Some(DockerError::Unavailable),
+            ..Default::default()
+        })
+        .await;
+        assert_eq!(down.reason.as_deref(), Some(UNAVAILABLE_REASON));
+    }
+
+    #[tokio::test]
+    async fn lista_de_fonte_qualquer_e_ordenada_e_normalizada() {
+        let engine = FakeEngine {
+            containers: vec![
+                json!({ "Id": "2", "Names": ["/zeta"], "Labels": {} }),
+                json!({ "Id": "1", "Names": ["/Alfa"], "Labels": { "com.docker.compose.project": "app" } }),
+            ],
+            ..Default::default()
+        };
+        let items = list_containers(&engine).await.expect("lista");
+        assert_eq!(items[0].names, vec!["/Alfa"]);
+        assert_eq!(items[0].project_name.as_deref(), Some("app"));
+        assert_eq!(items[1].id, "2");
+
+        let pruned = prune_images(&engine).await.expect("prune");
+        assert_eq!(pruned.images_deleted, 2);
+        assert_eq!(pruned.space_reclaimed, 42);
+    }
+
+    #[tokio::test]
+    async fn desconexao_da_ultima_rede_e_barrada_antes_de_chegar_a_fonte() {
+        let engine = FakeEngine {
+            inspected: json!({ "NetworkSettings": { "Networks": { "default": {} } } }),
+            ..Default::default()
+        };
+        let error = disconnect_network(&engine, "default", "web".into(), false)
+            .await
+            .expect_err("última rede");
+        assert!(matches!(error, DockerError::Validation(_)));
+        assert!(!*engine.disconnected.lock().expect("mutex"));
+    }
+
+    #[test]
+    fn blocos_de_log_viram_linhas_com_fluxo_e_timestamp() {
+        let chunks = [
+            LogChunk {
+                stream: "stdout".into(),
+                text: "2024-01-01T00:00:00Z iniciado
+
+"
+                .into(),
+            },
+            LogChunk {
+                stream: "stderr".into(),
+                text: "2024-01-01T00:00:01Z falhou
+"
+                .into(),
+            },
+        ];
+        let entries = log_entries(&chunks, true);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].timestamp, "2024-01-01T00:00:00Z");
+        assert_eq!(entries[0].message, "iniciado");
+        assert_eq!(entries[1].stream, "stderr");
     }
 }

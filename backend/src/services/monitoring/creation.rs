@@ -55,6 +55,9 @@ pub fn build_configuration(
             "dns" => {
                 object.entry("domain").or_insert_with(|| target.into());
             }
+            "container" => {
+                object.entry("container").or_insert_with(|| target.into());
+            }
             _ => {}
         }
     }
@@ -73,6 +76,9 @@ pub const SUPPORTED_MONITOR_TYPES: &[&str] = &[
     "snmp",
     "ssl",
     "port_scan",
+    // Executados onde o monitor roda: na central ou no agente (ADR 011).
+    "container",
+    "host_resources",
 ];
 
 /// Tipo e nome obrigatórios e válidos.

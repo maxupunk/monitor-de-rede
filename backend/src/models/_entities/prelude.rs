@@ -3,6 +3,7 @@
 pub use super::ai_conversations::Entity as AiConversations;
 pub use super::alert_events::Entity as AlertEvents;
 pub use super::alert_rules::Entity as AlertRules;
+pub use super::container_metrics_1m::Entity as ContainerMetrics1m;
 pub use super::device_interfaces::Entity as DeviceInterfaces;
 pub use super::device_links::Entity as DeviceLinks;
 pub use super::devices::Entity as Devices;
@@ -10,6 +11,7 @@ pub use super::discovery_results::Entity as DiscoveryResults;
 pub use super::discovery_runs::Entity as DiscoveryRuns;
 pub use super::dns_servers::Entity as DnsServers;
 pub use super::event_outbox::Entity as EventOutbox;
+pub use super::host_metrics_1m::Entity as HostMetrics1m;
 pub use super::metrics::Entity as Metrics;
 pub use super::monitor_results::Entity as MonitorResults;
 pub use super::monitors::Entity as Monitors;

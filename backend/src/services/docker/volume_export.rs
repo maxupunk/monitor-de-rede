@@ -10,7 +10,7 @@ use bollard::{
 use futures::StreamExt;
 use tokio::io::{AsyncRead, ReadBuf};
 
-use super::{call, client, engine, DockerError};
+use super::{call, client, engine, source::LocalEngine, DockerError};
 
 pub(crate) const EXPORT_IMAGE: &str = "alpine:latest";
 const MOUNT_POINT: &str = "/volume";
@@ -35,14 +35,18 @@ impl Drop for VolumeExport {
     fn drop(&mut self) {
         let id = self.container_id.clone();
         tokio::spawn(async move {
-            let _ = engine::container_action(&id, engine::ContainerAction::Remove { force: true })
-                .await;
+            let _ = engine::container_action(
+                &LocalEngine,
+                &id,
+                engine::ContainerAction::Remove { force: true },
+            )
+            .await;
         });
     }
 }
 
 pub async fn export(name: &str) -> Result<VolumeExport, DockerError> {
-    engine::inspect_volume(name).await?;
+    engine::inspect_volume(&LocalEngine, name).await?;
     let client = client()?;
     ensure_image(&client).await?;
 
@@ -72,9 +76,12 @@ pub async fn export(name: &str) -> Result<VolumeExport, DockerError> {
         return Err(DockerError::Engine);
     }
     if let Err(error) = call(client.start_container::<String>(&created.id, None)).await {
-        let _ =
-            engine::container_action(&created.id, engine::ContainerAction::Remove { force: true })
-                .await;
+        let _ = engine::container_action(
+            &LocalEngine,
+            &created.id,
+            engine::ContainerAction::Remove { force: true },
+        )
+        .await;
         return Err(error);
     }
 

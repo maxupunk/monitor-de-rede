@@ -16,8 +16,8 @@ use std::collections::HashSet;
 use loco_rs::Result;
 use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 
-/// As 27 tabelas do esquema, na ordem de criação da §6 (pais antes de filhos).
-pub const CREATION_ORDER: [&str; 27] = [
+/// As 29 tabelas do esquema, na ordem de criação da §6 (pais antes de filhos).
+pub const CREATION_ORDER: [&str; 29] = [
     "users",
     "sites",
     "probes",
@@ -51,6 +51,9 @@ pub const CREATION_ORDER: [&str; 27] = [
     "push_subscriptions",
     // Conversas do Assistente IA. Depois de `users` pela FK.
     "ai_conversations",
+    // Histórico de métricas de host e containers (ADR 011). Sem FK.
+    "host_metrics_1m",
+    "container_metrics_1m",
     // Opcional (§6 #23 / §10). **Não migrada:** a §10.2 optou por
     // `loco_rs::auth::JWT`, que não guarda token no banco. Fica listada porque
     // a limpeza pula tabelas inexistentes e a Fase 6 ainda pode voltar atrás.
@@ -146,9 +149,9 @@ mod tests {
 
     #[test]
     fn cobre_as_27_tabelas_sem_repetir() {
-        assert_eq!(CREATION_ORDER.len(), 27);
+        assert_eq!(CREATION_ORDER.len(), 29);
         let unicas: HashSet<&&str> = CREATION_ORDER.iter().collect();
-        assert_eq!(unicas.len(), 27, "há nome de tabela repetido");
+        assert_eq!(unicas.len(), 29, "há nome de tabela repetido");
     }
 
     #[test]

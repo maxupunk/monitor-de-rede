@@ -56,6 +56,7 @@ async fn index(
 async fn stream(State(ctx): State<AppContext>) -> AppResult<Response> {
     let bus = EventBus::from_context(&ctx)?;
     let mut updates = bus.subscribe();
+    let snapshots = bus.current_snapshots();
     let (sender, receiver) = mpsc::channel(32);
     tokio::spawn(async move {
         let connected = DomainEvent {
@@ -68,6 +69,13 @@ async fn stream(State(ctx): State<AppContext>) -> AppResult<Response> {
         // pode deixar o painel mudo por muito mais do que os 3 s combinados.
         if sender.send((connected, true)).await.is_err() {
             return;
+        }
+        // Estado inicial dos recursos em tempo real (Docker de cada host):
+        // chega logo após o `connected`, sem esperar o próximo ciclo.
+        for snapshot in snapshots {
+            if sender.send((snapshot, false)).await.is_err() {
+                return;
+            }
         }
         loop {
             match updates.recv().await {

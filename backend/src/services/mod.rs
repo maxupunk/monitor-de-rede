@@ -3,6 +3,8 @@
 //! A regra da casa: o controller extrai, valida, delega e serializa. Toda regra
 //! de negócio vive aqui e é testável sem HTTP.
 
+pub mod agent_runtime;
+pub mod agents;
 pub mod ai;
 pub mod alerts;
 pub mod audit;
@@ -25,6 +27,7 @@ pub mod settings;
 pub mod shared;
 pub mod snmp;
 pub mod syslog;
+pub mod telemetry;
 pub mod topology;
 pub mod users;
 pub mod vpn;

@@ -166,11 +166,14 @@ pub struct PingChecker {
 }
 
 impl PingChecker {
+    #[must_use]
+    pub const fn new(client: PingClient) -> Self {
+        Self { client }
+    }
+
     /// Cria o checker usando a dependência injetada pelo `AppContext` do Loco.
     pub fn from_context(ctx: &AppContext) -> AppResult<Self> {
-        Ok(Self {
-            client: PingClient::from_context(ctx)?,
-        })
+        Ok(Self::new(PingClient::from_context(ctx)?))
     }
 }
 

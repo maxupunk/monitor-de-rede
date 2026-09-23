@@ -118,7 +118,7 @@ async fn container_mentions(term: &str) -> Vec<AiMention> {
     if !docker::enabled() {
         return Vec::new();
     }
-    let Ok(containers) = docker::engine::list_containers().await else {
+    let Ok(containers) = docker::engine::list_containers(&docker::source::LocalEngine).await else {
         return Vec::new();
     };
     containers

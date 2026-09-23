@@ -3,6 +3,7 @@ pub mod ai_conversations;
 pub mod alert_events;
 pub mod alert_rules;
 pub mod audit_logs;
+pub mod container_metrics_1m;
 pub mod device_interfaces;
 pub mod device_links;
 pub mod devices;
@@ -10,6 +11,7 @@ pub mod discovery_results;
 pub mod discovery_runs;
 pub mod dns_servers;
 pub mod event_outbox;
+pub mod host_metrics_1m;
 /// Entidades do banco de logs, separado do principal.
 pub mod logs;
 pub mod maintenance_windows;

@@ -12,8 +12,12 @@ use sea_orm::{
 };
 
 use crate::{
-    models::{devices, monitors, networks, vpn_peers, vpn_servers},
+    models::{devices, monitors, networks, probes, vpn_peers, vpn_servers},
     services::{
+        agents::{
+            enrollment,
+            service::{tunnel_server_url, AgentService},
+        },
         maintenance::resource_cleanup::ResourceCleanupService,
         shared::errors::{AppError, AppResult},
         vpn::{
@@ -22,8 +26,8 @@ use crate::{
             monitor_provisioner::{self, MonitorProvisioningOptions},
             peer_hints::{compute_peer_hints, PeerHints},
             profiles::{
-                contract::PeerConfigContext, registry, GeneratedArtifact,
-                PERSISTENT_KEEPALIVE_SECONDS, PRIVATE_KEY_UNAVAILABLE,
+                contract::{AgentInstall, PeerConfigContext},
+                registry, GeneratedArtifact, PERSISTENT_KEEPALIVE_SECONDS, PRIVATE_KEY_UNAVAILABLE,
             },
             secret_store::{client_key_store, secret_key},
             server_service,
@@ -44,6 +48,9 @@ pub struct CreatePeerPayload {
     pub snmp_community: Option<String>,
     pub snmp_version: Option<String>,
     pub description: Option<String>,
+    /// Cadastra um agente NetMonitor para este servidor e inclui a instalação
+    /// dele no script (perfis com script Linux, ADR 011).
+    pub install_agent: bool,
 }
 
 pub struct PeerListItem {
@@ -58,6 +65,8 @@ struct PeerBundle {
     device: Option<devices::Model>,
     server: vpn_servers::Model,
     network: networks::Model,
+    /// Agente remoto vinculado ao dispositivo deste peer, se houver.
+    agent: Option<probes::Model>,
 }
 
 async fn load_peer(db: &DatabaseConnection, peer_id: i64) -> AppResult<PeerBundle> {
@@ -71,11 +80,13 @@ async fn load_peer(db: &DatabaseConnection, peer_id: i64) -> AppResult<PeerBundl
         .ok_or_else(|| AppError::business_rule("Servidor VPN ainda não foi configurado"))?;
     let network = server_service::network_of(db, &server).await?;
     let device = devices::Entity::find_by_id(peer.device_id).one(db).await?;
+    let agent = AgentService::new(db).for_device(peer.device_id).await?;
     Ok(PeerBundle {
         peer,
         device,
         server,
         network,
+        agent,
     })
 }
 
@@ -85,6 +96,17 @@ fn build_context(
     client_private_key: Option<&str>,
 ) -> AppResult<PeerConfigContext> {
     let device = bundle.device.as_ref();
+    let server_vpn_address = server_service::server_address(&bundle.network)?.to_string();
+    // O código só vale junto com a chave privada: artefato sem chave não sobe
+    // o túnel, e um código emitido ali seria um segredo desperdiçado.
+    let agent = bundle
+        .agent
+        .as_ref()
+        .filter(|_| client_private_key.is_some())
+        .map(|agent| AgentInstall {
+            server_url: tunnel_server_url(&server_vpn_address),
+            enroll_code: enrollment::issue(agent.id),
+        });
     Ok(PeerConfigContext {
         peer_name: device.map_or_else(
             || format!("peer-{}", bundle.peer.id),
@@ -94,7 +116,7 @@ fn build_context(
             .and_then(|device| device.ip_address.clone())
             .unwrap_or_default(),
         vpn_cidr: bundle.network.cidr.clone(),
-        server_vpn_address: server_service::server_address(&bundle.network)?.to_string(),
+        server_vpn_address,
         client_private_key: client_private_key
             .unwrap_or(PRIVATE_KEY_UNAVAILABLE)
             .to_string(),
@@ -111,6 +133,7 @@ fn build_context(
         dns_servers: bundle.server.dns_servers.clone(),
         snmp_enabled: device.is_some_and(|device| device.snmp_enabled),
         snmp_community: device.and_then(|device| device.snmp_community.clone()),
+        agent,
     })
 }
 
@@ -300,6 +323,12 @@ pub async fn create(
 
     server_service::apply_configuration(db, &server, &network).await?;
 
+    if payload.install_agent {
+        AgentService::new(db)
+            .create_for_device(&payload.name, payload.site_id, peer.device_id)
+            .await?;
+    }
+
     client_key_store().put(secret_key(peer.id), key_pair.private_key.clone());
     let bundle = load_peer(db, peer.id).await?;
     let artifact = generate_artifact(&bundle, Some(&key_pair.private_key))?;
@@ -470,6 +499,7 @@ mod tests {
                 updated_at: now.into(),
             },
             device,
+            agent: None,
             server: vpn_servers::Model {
                 id: 1,
                 network_id: 1,

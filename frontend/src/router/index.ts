@@ -81,8 +81,24 @@ const routes = [
             name: 'docker-images',
             component: () => import('../pages/docker/DockerImagesPage.vue'),
           },
+          {
+            path: 'compose',
+            name: 'docker-compose',
+            component: () => import('../pages/docker/DockerComposePage.vue'),
+          },
+          {
+            path: 'history',
+            name: 'docker-history',
+            component: () => import('../pages/docker/DockerHistoryPage.vue'),
+          },
         ],
       },
+      {
+        path: 'remote-servers',
+        name: 'remote-servers',
+        component: () => import('../pages/remote-servers/RemoteServersPage.vue'),
+      },
+      { path: 'agents', redirect: '/remote-servers' },
       { path: 'probes', name: 'probes', component: () => import('../pages/ProbesPage.vue') },
       {
         path: 'vpn',

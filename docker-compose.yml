@@ -64,6 +64,10 @@ services:
       # Porta real da API dentro do container. No modo host é também a porta que
       # o navegador acessa; na bridge, `APP_EXTERNAL_PORT` pode ser diferente.
       APP_PORT: ${APP_PORT:-3333}
+      # Porta publicada no host. Entra nos comandos de instalação do agente
+      # remoto que chega pela rede local ou pela internet (pelo túnel VPN ele
+      # fala direto com a `APP_PORT`).
+      APP_EXTERNAL_PORT: ${APP_EXTERNAL_PORT:-3333}
       # Cifra em repouso dos segredos da VPN. Trocar o valor torna ilegível tudo
       # que já foi cifrado com o anterior.
       # Em produção a variável é obrigatória: o boot falha se não estiver definida.

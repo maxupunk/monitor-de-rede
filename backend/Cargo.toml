@@ -36,7 +36,11 @@ tokio-util = { version = "0.7" }
 tower-http = { version = "0.6", features = ["fs", "set-header"] }
 futures = { version = "0.3" }
 async-trait = { version = "0.1" }
-axum = { version = "0.8" }
+# `ws` atende o canal do agente remoto (`/api/agents/connect`, ADR 011).
+axum = { version = "0.8", features = ["ws"] }
+# Cliente do canal no binário `netmonitor-agent`. Mesma versão que o `axum`
+# puxa para o lado servidor; o TLS usa o `ring` já presente na árvore.
+tokio-tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
 bollard = { version = "0.18.1", default-features = false, features = ["http", "pipe"] }
 async-compression = { version = "0.4", default-features = false, features = ["tokio", "gzip"] }
 tracing = { version = "0.1" }
@@ -135,6 +139,12 @@ libc = { version = "0.2" }
 [[bin]]
 name = "backend-cli"
 path = "src/bin/main.rs"
+required-features = []
+
+# Agente dos servidores remotos (ADR 011): mesmo crate, sem Loco nem banco.
+[[bin]]
+name = "netmonitor-agent"
+path = "src/bin/agent.rs"
 required-features = []
 
 # Protótipos dos spikes da Fase 0 (§3.4). Ficam em `examples/spikes/` para não

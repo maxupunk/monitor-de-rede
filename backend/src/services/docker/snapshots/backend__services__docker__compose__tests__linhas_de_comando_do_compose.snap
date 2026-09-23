@@ -1,0 +1,10 @@
+---
+source: src/services/docker/compose.rs
+expression: "rendered.join(\"\\n\")"
+---
+compose --project-name portal --project-directory /srv/portal --file /srv/portal/compose.yml --file /srv/portal/compose.prod.yml pull
+compose --project-name portal --project-directory /srv/portal --file /srv/portal/compose.yml --file /srv/portal/compose.prod.yml up --detach
+compose --project-name portal --project-directory /srv/portal --file /srv/portal/compose.yml --file /srv/portal/compose.prod.yml up --detach -- web
+compose --project-name portal --project-directory /srv/portal --file /srv/portal/compose.yml --file /srv/portal/compose.prod.yml restart -- db
+compose --project-name erp --project-directory /srv/erp --file /srv/erp/compose.yml --file /srv/erp/compose.prod.yml stop
+compose --project-name erp --project-directory /srv/erp --file /srv/erp/compose.yml --file /srv/erp/compose.prod.yml down

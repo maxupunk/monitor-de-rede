@@ -41,6 +41,17 @@ pub struct PeerConfigContext {
     pub dns_servers: Option<String>,
     pub snmp_enabled: bool,
     pub snmp_community: Option<String>,
+    /// Instalação do agente NetMonitor ao fim do script (ADR 011). Só existe
+    /// quando o dispositivo tem um agente cadastrado e o artefato é útil
+    /// (a chave privada ainda não foi entregue).
+    pub agent: Option<AgentInstall>,
+}
+
+/// Onde o agente vai se conectar e o código de uso único para o enrollment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentInstall {
+    pub server_url: String,
+    pub enroll_code: String,
 }
 
 impl PeerConfigContext {
@@ -294,6 +305,7 @@ pub(super) mod tests {
             dns_servers: None,
             snmp_enabled: false,
             snmp_community: None,
+            agent: None,
         }
     }
 

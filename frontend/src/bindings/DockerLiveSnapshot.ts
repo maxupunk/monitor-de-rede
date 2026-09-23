@@ -4,6 +4,11 @@ import type { DockerMetricsResponse } from './DockerMetricsResponse'
 import type { DockerStatusResponse } from './DockerStatusResponse'
 
 export type DockerLiveSnapshot = {
+  /**
+   * Host de origem: `local` ou `agent-<id>`. A central carimba o valor ao
+   * publicar, então o agente não precisa (nem consegue) escolher a chave.
+   */
+  hostKey: string
   status: DockerStatusResponse
   containers: Array<DockerContainerSummary>
   metrics: DockerMetricsResponse

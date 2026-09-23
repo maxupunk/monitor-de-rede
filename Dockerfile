@@ -68,6 +68,38 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     cargo build --release --bin backend-cli \
     && cp target/release/backend-cli /usr/local/bin/backend-cli
 
+# ---------------------------------------------------------- agent-builder ----
+# Agente dos servidores remotos (ADR 011) como binário **estático** (musl): o
+# mesmo arquivo roda em qualquer distribuição, inclusive as de glibc antiga, e
+# é o que a central serve em `/api/agents/download/<arch>`. Não há OpenSSL na
+# árvore — TLS é rustls sobre ring e o SQLite é compilado junto —, então basta
+# o `musl-gcc`.
+FROM builder AS agent-builder
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends musl-tools \
+    && rm -rf /var/lib/apt/lists/* \
+    && rustup target add "$(uname -m)-unknown-linux-musl"
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/usr/src/app/target,sharing=locked \
+    TARGET="$(uname -m)-unknown-linux-musl" \
+    && cargo build --release --bin netmonitor-agent --target "$TARGET" \
+    && cp "target/$TARGET/release/netmonitor-agent" /usr/local/bin/netmonitor-agent
+
+# ------------------------------------------------------------------ agent ----
+# Imagem do agente para quem prefere container ao systemd. Parte da imagem
+# oficial do CLI do Docker porque o agente executa `docker compose` no host
+# (a central nunca executa — AGENTS §7). Roda como root dentro do container:
+# o socket da Engine já é equivalente a root no host, e o GID do grupo docker
+# muda de servidor para servidor.
+FROM docker:27-cli AS agent
+RUN apk add --no-cache tini ca-certificates
+COPY --from=agent-builder /usr/local/bin/netmonitor-agent /usr/local/bin/netmonitor-agent
+ENV AGENT_STATE_DIR=/var/lib/netmonitor-agent \
+    HOST_PROC=/host/proc \
+    HOST_ROOT=/host
+VOLUME ["/var/lib/netmonitor-agent"]
+ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/netmonitor-agent"]
+
 # ----------------------------------------------------------------- spike ----
 # Estágio usado só por `backend/docker-compose.icmp-spike.yml`. Compila os
 # protótipos da Fase 0 para poderem ser executados dentro do mesmo ambiente da
@@ -113,6 +145,11 @@ RUN useradd --create-home --shell /usr/sbin/nologin app
 WORKDIR /app
 
 COPY --from=builder /usr/local/bin/backend-cli /usr/local/bin/backend-cli
+# A central serve o binário do agente da própria arquitetura para o
+# `install.sh` (ADR 011). Outras arquiteturas: publique o binário em
+# `AGENT_DIST_DIR` com o nome `netmonitor-agent-<arch>`.
+COPY --from=agent-builder /usr/local/bin/netmonitor-agent /app/agent-dist/netmonitor-agent
+RUN mv /app/agent-dist/netmonitor-agent "/app/agent-dist/netmonitor-agent-$(uname -m)"
 COPY --from=builder /usr/src/app/config /app/config
 COPY --from=web /web/dist /app/web
 COPY docker/entrypoint.sh docker/wireguard-watcher.sh docker/healthcheck.sh /usr/local/bin/
@@ -123,6 +160,7 @@ RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/wireguard-watcher.sh /u
 RUN mkdir -p /data/wg && chown -R app:app /data
 ENV LOCO_ENV=production \
     WEB_ROOT=/app/web \
+    AGENT_DIST_DIR=/app/agent-dist \
     WG_CONFIG_DIR=/data/wg \
     TZ=America/Fortaleza
 

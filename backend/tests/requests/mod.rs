@@ -1,3 +1,4 @@
+mod agents;
 mod ai_analysis;
 mod ai_conversations;
 mod ai_grep;

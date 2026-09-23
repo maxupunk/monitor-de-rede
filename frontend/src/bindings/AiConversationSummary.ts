@@ -3,4 +3,9 @@
 /**
  * Item da lista de conversas: sem as mensagens, que só vêm ao abrir.
  */
-export type AiConversationSummary = { id: number, title: string, updatedAt: string, messageCount: number, };
+export type AiConversationSummary = {
+  id: number
+  title: string
+  updatedAt: string
+  messageCount: number
+}

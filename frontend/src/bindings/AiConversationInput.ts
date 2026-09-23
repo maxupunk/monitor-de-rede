@@ -3,8 +3,10 @@
 /**
  * Corpo de criação/atualização de uma conversa salva do assistente.
  */
-export type AiConversationInput = { title: string, 
-/**
- * Mensagens como a tela as exibe (texto, ferramentas, gráficos).
- */
-messages: unknown[], };
+export type AiConversationInput = {
+  title: string
+  /**
+   * Mensagens como a tela as exibe (texto, ferramentas, gráficos).
+   */
+  messages: unknown[]
+}

@@ -318,6 +318,8 @@ const navItems = computed<NavItem[]>(() => [
       { title: 'Volumes', icon: 'mdi-database-outline', to: '/docker/volumes' },
       { title: 'Redes', icon: 'mdi-lan', to: '/docker/networks' },
       { title: 'Imagens', icon: 'mdi-layers-outline', to: '/docker/images' },
+      { title: 'Projetos', icon: 'mdi-file-cabinet', to: '/docker/compose' },
+      { title: 'Histórico', icon: 'mdi-chart-timeline-variant', to: '/docker/history' },
     ],
   },
   {
@@ -327,7 +329,8 @@ const navItems = computed<NavItem[]>(() => [
       { title: 'Sites', icon: 'mdi-domain', to: '/sites' },
       { title: 'Redes', icon: 'mdi-lan', to: '/networks' },
       { title: 'Topologia', icon: 'mdi-sitemap', to: '/topology' },
-      { title: 'Probes', icon: 'mdi-router-wireless', to: '/probes' },
+      { title: 'Servidores remotos', icon: 'mdi-server', to: '/remote-servers' },
+      { title: 'Sondas de rede', icon: 'mdi-access-point-network', to: '/probes' },
       {
         title: 'Servidores DNS',
         icon: 'mdi-dns-outline',

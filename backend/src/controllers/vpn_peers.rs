@@ -50,6 +50,7 @@ struct CreatePeerInput {
     snmp_community: Option<String>,
     snmp_version: Option<String>,
     description: Option<String>,
+    install_agent: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -217,6 +218,7 @@ async fn store(
             snmp_community: input.snmp_community,
             snmp_version: input.snmp_version,
             description: input.description,
+            install_agent: input.install_agent.unwrap_or(false),
         },
     )
     .await?;

@@ -93,6 +93,13 @@ pub fn request_is_allowed(role: Role, method: &Method, path: &str) -> bool {
         return true;
     }
 
+    // Um agente tem o Docker de outro servidor nas mãos: cadastrar, emitir
+    // código ou revogar é tão sensível quanto operar a Engine.
+    if path == "/api/agents" || path.starts_with("/api/agents/") {
+        return matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS)
+            || role.can_manage_docker();
+    }
+
     if path == "/api/docker" || path.starts_with("/api/docker/") {
         if path.ends_with("/export") {
             return role.can_manage_docker();

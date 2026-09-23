@@ -2,10 +2,10 @@
 
 use std::collections::HashMap;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct DockerStatusResponse {
@@ -30,7 +30,7 @@ pub struct DockerStatusResponse {
     pub images: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct DockerContainerPort {
@@ -40,7 +40,7 @@ pub struct DockerContainerPort {
     pub protocol: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct DockerContainerSummary {
@@ -69,7 +69,7 @@ impl DockerContainerSummary {
     }
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct DockerContainerState {
@@ -85,7 +85,7 @@ pub struct DockerContainerState {
     pub exit_code: i64,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct DockerContainerConfig {
@@ -98,7 +98,7 @@ pub struct DockerContainerConfig {
     pub user: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct DockerRestartPolicy {
@@ -107,7 +107,7 @@ pub struct DockerRestartPolicy {
     pub maximum_retry_count: i64,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct DockerContainerHostConfig {
@@ -115,7 +115,7 @@ pub struct DockerContainerHostConfig {
     pub network_mode: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct DockerMount {
@@ -127,7 +127,7 @@ pub struct DockerMount {
     pub read_write: bool,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct DockerNetworkEndpoint {
@@ -138,7 +138,7 @@ pub struct DockerNetworkEndpoint {
     pub aliases: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct DockerContainerDetail {
@@ -154,7 +154,7 @@ pub struct DockerContainerDetail {
     pub networks: Vec<DockerNetworkEndpoint>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct DockerVolumeSummary {
@@ -166,7 +166,7 @@ pub struct DockerVolumeSummary {
     pub created_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct DockerVolumeDetail {
@@ -179,7 +179,7 @@ pub struct DockerVolumeDetail {
     pub options: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct DockerIpamConfig {
@@ -187,7 +187,7 @@ pub struct DockerIpamConfig {
     pub gateway: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct DockerNetworkContainer {
@@ -198,7 +198,7 @@ pub struct DockerNetworkContainer {
     pub ipv6_address: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct DockerNetworkSummary {
@@ -214,7 +214,7 @@ pub struct DockerNetworkSummary {
     pub created: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct DockerNetworkDetail {
@@ -232,7 +232,7 @@ pub struct DockerNetworkDetail {
     pub options: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct DockerImageSummary {
@@ -251,7 +251,7 @@ pub struct DockerImageSummary {
     pub containers: i64,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct DockerImageDetail {
@@ -270,7 +270,7 @@ pub struct DockerImageDetail {
     pub layers: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct DockerLogEntry {
@@ -279,7 +279,7 @@ pub struct DockerLogEntry {
     pub message: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct DockerActionResponse {
@@ -287,7 +287,7 @@ pub struct DockerActionResponse {
     pub message: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct DockerPruneResponse {
@@ -296,14 +296,14 @@ pub struct DockerPruneResponse {
     pub space_reclaimed: u64,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct DockerCpuMetrics {
     pub usage_percent: f64,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct DockerMemoryMetrics {
@@ -314,7 +314,7 @@ pub struct DockerMemoryMetrics {
     pub usage_percent: f64,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct DockerIoMetrics {
@@ -324,7 +324,7 @@ pub struct DockerIoMetrics {
     pub write_bytes: u64,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct DockerNetworkMetrics {
@@ -334,7 +334,7 @@ pub struct DockerNetworkMetrics {
     pub transmitted_bytes: u64,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct DockerContainerMetrics {
@@ -351,7 +351,7 @@ pub struct DockerContainerMetrics {
     pub pids: Option<u64>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct DockerMetricsResponse {
@@ -362,21 +362,31 @@ pub struct DockerMetricsResponse {
     pub containers: Vec<DockerContainerMetrics>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct DockerLiveSnapshot {
+    /// Host de origem: `local` ou `agent-<id>`. A central carimba o valor ao
+    /// publicar, então o agente não precisa (nem consegue) escolher a chave.
+    #[serde(default = "local_host_key")]
+    pub host_key: String,
     pub status: DockerStatusResponse,
     pub containers: Vec<DockerContainerSummary>,
     pub metrics: DockerMetricsResponse,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct DockerInventorySnapshot {
+    #[serde(default = "local_host_key")]
+    pub host_key: String,
     pub collected_at: String,
     pub volumes: Vec<DockerVolumeSummary>,
     pub networks: Vec<DockerNetworkSummary>,
     pub images: Vec<DockerImageSummary>,
+}
+
+fn local_host_key() -> String {
+    crate::services::docker::hosts::LOCAL_HOST_KEY.to_string()
 }

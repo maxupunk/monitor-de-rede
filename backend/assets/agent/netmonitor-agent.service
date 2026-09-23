@@ -1,0 +1,25 @@
+[Unit]
+Description=Agente NetMonitor (Docker, host e monitores deste servidor)
+After=network-online.target docker.service wg-quick@netmonitor.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/netmonitor-agent/agent.env
+ExecStart=/usr/local/bin/netmonitor-agent
+Restart=always
+RestartSec=5
+# Usuário efêmero, sem login, só com o grupo docker (o socket da Engine) e
+# o ICMP DGRAM liberado pelo sysctl. O resto do sistema fica somente leitura;
+# o token e o buffer offline vivem no StateDirectory.
+DynamicUser=yes
+SupplementaryGroups=docker
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+StateDirectory=netmonitor-agent
+StateDirectoryMode=0700
+
+[Install]
+WantedBy=multi-user.target

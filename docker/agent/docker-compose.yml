@@ -1,0 +1,40 @@
+# Agente NetMonitor num servidor remoto (ADR 011).
+#
+# Suba o túnel da VPN antes (script gerado em VPN → Novo peer) e cadastre o
+# agente na central (Agentes → Novo agente): a tela mostra o código de uso
+# único. Depois:
+#
+#   AGENT_SERVER_URL=http://10.8.0.1:3333 AGENT_ENROLL_CODE=nma_... \
+#     docker compose -f docker/agent/docker-compose.yml up -d
+#
+# O código só é usado na primeira vez: o token fica no volume `agent-state`.
+services:
+  netmonitor-agent:
+    image: ${AGENT_IMAGE:-netmonitor-agent:latest}
+    build:
+      context: ../..
+      target: agent
+    container_name: netmonitor-agent
+    restart: unless-stopped
+    # Rede do host: é por ela que o túnel WireGuard do servidor é alcançado e
+    # que as métricas de interface refletem o host, não o container.
+    network_mode: host
+    pid: host
+    environment:
+      AGENT_SERVER_URL: ${AGENT_SERVER_URL:?defina AGENT_SERVER_URL}
+      AGENT_ENROLL_CODE: ${AGENT_ENROLL_CODE:-}
+      # Política local: a central não consegue ampliá-la. Acrescente `update`
+      # e `compose` só se este host deve aceitar pull/recriação/compose.
+      AGENT_ALLOW: ${AGENT_ALLOW:-read,lifecycle,monitor,discovery}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /proc:/host/proc:ro
+      - /:/host:ro
+      - agent-state:/var/lib/netmonitor-agent
+      # Compose: os projetos precisam aparecer no mesmo caminho do host.
+      # Descomente e ajuste para as pastas dos seus projetos.
+      # - /srv:/srv:ro
+      # - /opt:/opt:ro
+
+volumes:
+  agent-state:

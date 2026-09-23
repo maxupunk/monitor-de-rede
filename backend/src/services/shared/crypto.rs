@@ -144,6 +144,16 @@ pub fn sha256_hex(input: &str) -> String {
     hex::encode(Sha256::digest(input.as_bytes()))
 }
 
+/// Segredo aleatório de 32 bytes em hex: token de probe/agente e código de
+/// enrollment. Um ponto só, para que todo token emitido tenha a mesma entropia.
+#[must_use]
+pub fn random_token() -> String {
+    use rand::RngCore;
+    let mut bytes = [0_u8; 32];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    hex::encode(bytes)
+}
+
 /// Compara dois segredos sem vazar, pelo tempo gasto, o quanto eles se parecem.
 ///
 /// O `==` de `&str` para no primeiro byte diferente. Quem consegue medir o

@@ -117,7 +117,7 @@
                   @click="openDetail(item)"
                 ></v-btn>
                 <v-btn
-                  v-if="auth.isAdmin && item.state !== 'running'"
+                  v-if="canOperate && item.state !== 'running'"
                   icon="mdi-play"
                   size="small"
                   color="success"
@@ -127,7 +127,7 @@
                   @click="runContainerAction(item, 'start')"
                 ></v-btn>
                 <v-btn
-                  v-if="auth.isAdmin && item.state === 'running'"
+                  v-if="canOperate && item.state === 'running'"
                   icon="mdi-stop"
                   size="small"
                   color="warning"
@@ -137,7 +137,7 @@
                   @click="runContainerAction(item, 'stop')"
                 ></v-btn>
                 <v-btn
-                  v-if="auth.isAdmin"
+                  v-if="canOperate"
                   icon="mdi-restart"
                   size="small"
                   color="info"
@@ -147,7 +147,17 @@
                   @click="runContainerAction(item, 'restart')"
                 ></v-btn>
                 <v-btn
-                  v-if="auth.isAdmin"
+                  v-if="canUpdate"
+                  icon="mdi-update"
+                  size="small"
+                  color="primary"
+                  variant="text"
+                  title="Atualizar imagem e recriar"
+                  :loading="docker.actionLoading"
+                  @click="updateContainer(item)"
+                ></v-btn>
+                <v-btn
+                  v-if="canOperate"
                   icon="mdi-delete-outline"
                   size="small"
                   color="error"
@@ -344,8 +354,22 @@
                   hide-details
                   max-width="180"
                 ></v-select>
-                <v-btn prepend-icon="mdi-refresh" :loading="logsLoading" @click="loadLogs()">
+                <v-btn
+                  prepend-icon="mdi-refresh"
+                  :loading="logsLoading"
+                  :disabled="Boolean(followStreamId)"
+                  @click="loadLogs()"
+                >
                   Atualizar
+                </v-btn>
+                <v-btn
+                  :color="followStreamId ? 'success' : 'primary'"
+                  :variant="followStreamId ? 'flat' : 'tonal'"
+                  :prepend-icon="followStreamId ? 'mdi-pause' : 'mdi-play-circle-outline'"
+                  :loading="followStarting"
+                  @click="toggleFollow"
+                >
+                  {{ followStreamId ? 'Pausar ao vivo' : 'Ao vivo' }}
                 </v-btn>
                 <v-spacer></v-spacer>
                 <v-btn
@@ -368,6 +392,15 @@
                   Limpar logs
                 </v-btn>
               </div>
+              <v-alert
+                v-if="followEnded"
+                type="info"
+                variant="tonal"
+                density="compact"
+                class="mb-2"
+              >
+                {{ followEnded }}
+              </v-alert>
               <pre class="docker-logs">{{ formattedLogs }}</pre>
             </v-window-item>
           </v-window>
@@ -382,11 +415,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import { confirm } from '@/composables/useConfirm'
-import { dockerService } from '@/services/dockerService'
 import { useAuthStore } from '@/stores/auth'
 import { useDockerStore } from '@/stores/docker'
 import type { DockerContainerDetail } from '@/bindings/DockerContainerDetail'
@@ -419,6 +451,11 @@ const logsLoading = ref(false)
 const logsDownloading = ref(false)
 const logsClearing = ref(false)
 const logTail = ref<number | 'all'>(500)
+const followStreamId = ref<string | null>(null)
+const followStarting = ref(false)
+/** Ações da política do host selecionado (ADR 011), sempre só para admin. */
+const canOperate = computed(() => auth.isAdmin && docker.allows('lifecycle'))
+const canUpdate = computed(() => auth.isAdmin && docker.allows('update'))
 const networkToConnect = ref<string | null>(null)
 const feedback = ref({ visible: false, color: 'success', message: '' })
 let detailRefreshing = false
@@ -499,9 +536,18 @@ const availableNetworks = computed(() => {
     .sort((left, right) => left.name.localeCompare(right.name))
 })
 
+/** No modo ao vivo o log vem do stream SSE (`docker:log`), não de nova consulta. */
+const shownLogs = computed<DockerLogEntry[]>(() =>
+  followStreamId.value ? (docker.logStreams[followStreamId.value]?.entries ?? []) : logs.value
+)
+
+const followEnded = computed(() =>
+  followStreamId.value ? (docker.logStreams[followStreamId.value]?.ended ?? null) : null
+)
+
 const formattedLogs = computed(() =>
-  logs.value.length
-    ? logs.value
+  shownLogs.value.length
+    ? shownLogs.value
         .map(
           (entry) =>
             `${entry.timestamp ? `[${entry.timestamp}] ` : ''}${entry.stream}: ${entry.message}`
@@ -572,7 +618,7 @@ async function openDetail(container: DockerContainerSummary): Promise<void> {
   logs.value = []
   networkToConnect.value = null
   try {
-    detail.value = await dockerService.container(container.id)
+    detail.value = await docker.api.container(container.id)
   } catch (reason: unknown) {
     notify(reason instanceof Error ? reason.message : 'Erro ao inspecionar container', 'error')
   } finally {
@@ -585,7 +631,7 @@ async function refreshDetail(silent = false): Promise<void> {
   detailRefreshing = true
   if (!silent) detailLoading.value = true
   try {
-    detail.value = await dockerService.container(detail.value.id)
+    detail.value = await docker.api.container(detail.value.id)
   } catch (reason: unknown) {
     if (!silent) {
       notify(reason instanceof Error ? reason.message : 'Erro ao atualizar container', 'error')
@@ -601,7 +647,7 @@ async function loadLogs(): Promise<void> {
   logsRefreshing = true
   logsLoading.value = true
   try {
-    logs.value = await dockerService.logs(detail.value.id, {
+    logs.value = await docker.api.logs(detail.value.id, {
       tail: logTail.value,
       timestamps: true,
     })
@@ -617,7 +663,7 @@ async function downloadLogs(): Promise<void> {
   if (!detail.value) return
   logsDownloading.value = true
   try {
-    const entries = await dockerService.logs(detail.value.id, {
+    const entries = await docker.api.logs(detail.value.id, {
       tail: 'all',
       timestamps: true,
     })
@@ -656,7 +702,7 @@ async function clearLogs(): Promise<void> {
   if (!accepted) return
   logsClearing.value = true
   try {
-    const response = await dockerService.clearLogs(detail.value.id)
+    const response = await docker.api.clearLogs(detail.value.id)
     logs.value = []
     await refreshDetail(true)
     notify(response.message, 'success')
@@ -672,7 +718,7 @@ async function connectSelectedNetwork(): Promise<void> {
   const containerId = detail.value.id
   const networkId = networkToConnect.value
   const success = await docker.runAction(
-    () => dockerService.connectNetwork(networkId, containerId),
+    () => docker.api.connectNetwork(networkId, containerId),
     async () => {
       await refreshDetail(true)
     }
@@ -696,7 +742,7 @@ async function disconnectNetwork(networkId: string, networkName: string): Promis
   if (!accepted) return
   const containerId = detail.value.id
   const success = await docker.runAction(
-    () => dockerService.disconnectNetwork(networkId, containerId),
+    () => docker.api.disconnectNetwork(networkId, containerId),
     async () => {
       await refreshDetail(true)
     }
@@ -710,6 +756,55 @@ async function disconnectNetwork(networkId: string, networkName: string): Promis
 function sanitizeFileName(value: string): string {
   return value.replace(/^\//, '').replace(/[^a-zA-Z0-9._-]+/g, '-') || 'container'
 }
+
+async function toggleFollow(): Promise<void> {
+  if (followStreamId.value) {
+    await stopFollow()
+    return
+  }
+  if (!detail.value) return
+  followStarting.value = true
+  try {
+    followStreamId.value = await docker.startLogStream(detail.value.id, logTail.value)
+  } catch (reason: unknown) {
+    notify(reason instanceof Error ? reason.message : 'Erro ao acompanhar os logs', 'error')
+  } finally {
+    followStarting.value = false
+  }
+}
+
+async function stopFollow(): Promise<void> {
+  const streamId = followStreamId.value
+  followStreamId.value = null
+  if (streamId) await docker.stopLogStream(streamId)
+}
+
+async function updateContainer(container: DockerContainerSummary): Promise<void> {
+  const name = containerName(container)
+  const accepted = await confirm({
+    title: 'Atualizar container',
+    message: `Baixar a versão atual de "${container.image}" e recriar "${name}" com a mesma configuração? Se algo falhar, o container original é restaurado.`,
+    confirmText: 'Atualizar',
+    confirmColor: 'primary',
+    icon: 'mdi-update',
+  })
+  if (!accepted) return
+  const success = await docker.runAction(() => docker.api.updateContainer(container.id))
+  notify(
+    success
+      ? 'Atualização iniciada. O progresso aparece no topo da tela.'
+      : docker.error || 'Operação não concluída',
+    success ? 'success' : 'error'
+  )
+}
+
+watch(detailDialog, (open) => {
+  if (!open) void stopFollow()
+})
+
+onBeforeUnmount(() => {
+  void stopFollow()
+})
 
 async function runContainerAction(
   container: DockerContainerSummary,
@@ -731,10 +826,10 @@ async function runContainerAction(
   let responseMessage = ''
   const success = await docker.runAction(async () => {
     const response = await {
-      start: () => dockerService.startContainer(container.id),
-      stop: () => dockerService.stopContainer(container.id),
-      restart: () => dockerService.restartContainer(container.id),
-      remove: () => dockerService.removeContainer(container.id),
+      start: () => docker.api.startContainer(container.id),
+      stop: () => docker.api.stopContainer(container.id),
+      restart: () => docker.api.restartContainer(container.id),
+      remove: () => docker.api.removeContainer(container.id),
     }[action]()
     responseMessage = response.message
   })

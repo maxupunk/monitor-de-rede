@@ -15,9 +15,10 @@ use crate::{
         audit::{AuditAction, AuditActor, AuditEntryInput, AuditService, ResourceType},
         onboarding,
         preferences::{self, Preferences},
+        server_addresses,
         settings::database,
         shared::errors::{AppError, AppResult},
-        syslog::{db::LogsDb, nat::NatDetector, SyslogService},
+        syslog::db::LogsDb,
         users::Role,
     },
 };
@@ -42,7 +43,7 @@ async fn update(
 /// `GET /api/settings/onboarding` — status do assistente inicial e dados detectados.
 async fn onboarding_status(State(ctx): State<AppContext>) -> AppResult<Response> {
     Ok(format::json(
-        onboarding::get_status(&ctx.db, &detector(&ctx)).await?,
+        onboarding::get_status(&ctx.db, &server_addresses::nat_detector(&ctx)).await?,
     )?)
 }
 
@@ -141,12 +142,6 @@ async fn require_admin(ctx: &AppContext, headers: &HeaderMap) -> AppResult<()> {
     }
 
     Ok(())
-}
-
-fn detector(ctx: &AppContext) -> NatDetector {
-    SyslogService::from_context(ctx).map_or_else(NatDetector::detect, |servico| {
-        servico.ingestor.resolver().nat().clone()
-    })
 }
 
 pub fn routes() -> Routes {

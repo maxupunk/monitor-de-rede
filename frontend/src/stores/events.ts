@@ -12,6 +12,7 @@ import { useTopologyStore } from './topology'
 import { useVpnStore } from './vpn'
 import { useMaintenanceWindowsStore } from './maintenanceWindows'
 import { useDockerStore } from './docker'
+import { useAgentsStore } from './agents'
 import { getStoredToken } from '@/utils/authStorage'
 
 export interface RealtimeEventPayload {
@@ -169,7 +170,10 @@ export const useEventsStore = defineStore('events', () => {
     lastEventAt.value = payload.timestamp
 
     const isEphemeralTelemetry =
-      payload.type === 'docker:snapshot' || payload.type === 'docker:inventory'
+      payload.type === 'docker:snapshot' ||
+      payload.type === 'docker:inventory' ||
+      payload.type === 'docker:operation' ||
+      payload.type === 'docker:log'
     if (payload.type !== 'stream:connected' && !isEphemeralTelemetry) {
       recentEvents.value.unshift(payload)
       if (recentEvents.value.length > FEED_LIMIT) {
@@ -269,6 +273,10 @@ export const useEventsStore = defineStore('events', () => {
       case 'probe:status': {
         const probesStore = useProbesStore()
         probesStore.applyRealtimeStatus(data)
+        // Agentes remotos também são probes: a tela de agentes e o seletor
+        // de host Docker acompanham o mesmo evento (ADR 011).
+        useAgentsStore().applyRealtimeStatus(data)
+        useDockerStore().applyAgentStatus(data)
         break
       }
 
@@ -350,6 +358,16 @@ export const useEventsStore = defineStore('events', () => {
       case 'docker:inventory': {
         const dockerStore = useDockerStore()
         dockerStore.applyInventorySnapshot(data as never)
+        break
+      }
+
+      case 'docker:operation': {
+        useDockerStore().applyOperationEvent(data as never)
+        break
+      }
+
+      case 'docker:log': {
+        useDockerStore().applyLogStreamEvent(data as never)
         break
       }
     }

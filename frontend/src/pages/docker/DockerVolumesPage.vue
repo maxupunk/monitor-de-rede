@@ -55,7 +55,7 @@
               @click="openDetail(item)"
             ></v-btn>
             <v-btn
-              v-if="auth.isAdmin"
+              v-if="canExport"
               icon="mdi-download-outline"
               size="small"
               color="primary"
@@ -120,7 +120,7 @@
             ></v-list-item>
           </v-list>
         </v-card-text>
-        <v-card-actions v-if="auth.isAdmin" class="justify-end pa-4">
+        <v-card-actions v-if="canExport" class="justify-end pa-4">
           <v-btn
             prepend-icon="mdi-download-outline"
             color="primary"
@@ -144,14 +144,17 @@ import { computed, ref } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import { confirm } from '@/composables/useConfirm'
-import { dockerService } from '@/services/dockerService'
 import { useAuthStore } from '@/stores/auth'
+import { LOCAL_HOST_KEY } from '@/services/dockerService'
 import { useDockerStore } from '@/stores/docker'
 import { formatDateTime } from '@/utils/formatters'
 import type { DockerVolumeDetail } from '@/bindings/DockerVolumeDetail'
 import type { DockerVolumeSummary } from '@/bindings/DockerVolumeSummary'
 
 const docker = useDockerStore()
+
+/** A exportação transmite o tar pelo socket local: não atravessa o agente. */
+const canExport = computed(() => auth.isAdmin && docker.selectedHostKey === LOCAL_HOST_KEY)
 const auth = useAuthStore()
 const search = ref('')
 const detailDialog = ref(false)
@@ -192,7 +195,7 @@ async function openDetail(volume: DockerVolumeSummary): Promise<void> {
   detailDialog.value = true
   detailLoading.value = true
   try {
-    detail.value = await dockerService.volume(volume.name)
+    detail.value = await docker.api.volume(volume.name)
   } catch (reason: unknown) {
     notify(reason instanceof Error ? reason.message : 'Erro ao inspecionar volume', 'error')
   } finally {
@@ -203,7 +206,7 @@ async function openDetail(volume: DockerVolumeSummary): Promise<void> {
 async function exportVolume(name: string): Promise<void> {
   exportingName.value = name
   try {
-    await dockerService.exportVolume(name)
+    await docker.api.exportVolume(name)
     notify('Exportação do volume concluída.', 'success')
   } catch (reason: unknown) {
     notify(reason instanceof Error ? reason.message : 'Erro ao exportar volume', 'error')
@@ -221,7 +224,7 @@ async function removeVolume(name: string): Promise<void> {
     icon: 'mdi-database-remove-outline',
   })
   if (!accepted) return
-  const success = await docker.runAction(() => dockerService.removeVolume(name))
+  const success = await docker.runAction(() => docker.api.removeVolume(name))
   notify(
     success ? 'Volume removido.' : docker.error || 'Erro ao remover volume',
     success ? 'success' : 'error'

@@ -48,6 +48,8 @@ export interface CreateVpnPeerPayload {
   snmpEnabled?: boolean
   snmpCommunity?: string | null
   description?: string | null
+  /** Instala o agente NetMonitor ao fim do script Linux (ADR 011). */
+  installAgent?: boolean
 }
 
 export const VPN_STATUS_LABELS: Record<VpnConnectionStatus, string> = {

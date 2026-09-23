@@ -1,27 +1,47 @@
 //! Endpoints de monitoramento e administração da Docker Engine.
+//!
+//! Cada rota existe duas vezes: `/api/docker/...` (a central, como sempre
+//! foi) e `/api/docker/hosts/{host}/...` (a central com `host=local`, ou um
+//! servidor remoto com `host=agent-<id>`, ADR 011). O handler não sabe qual:
+//! recebe o [`DockerHost`] já resolvido e usa os mesmos serviços.
 
 use async_compression::tokio::bufread::GzipEncoder;
 use axum::{
     body::Body,
-    http::{header, HeaderMap, StatusCode},
+    extract::{FromRequestParts, RawPathParams},
+    http::{header, request::Parts, HeaderMap, StatusCode},
     response::IntoResponse,
+    routing::MethodRouter,
 };
 use loco_rs::prelude::*;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::io::BufReader;
 
 use crate::{
-    dtos::docker::{
-        DockerForceQuery, DockerLogsQuery, DockerNetworkConnectionInput, DockerNetworkCreateInput,
+    dtos::{
+        agents::{DockerComposeInput, DockerFollowLogsInput, DockerHistoryQuery, DockerPullInput},
+        docker::{
+            DockerForceQuery, DockerLogsQuery, DockerNetworkConnectionInput,
+            DockerNetworkCreateInput,
+        },
     },
     services::{
         audit::{AuditAction, AuditActor, AuditEntryInput, AuditService, ResourceType},
         docker::{
-            self,
+            self, compose,
             engine::{self, ContainerAction, LogFilters},
-            log_clear, metrics, realtime, volume_export,
+            hosts::{self, DockerHost, HostKey},
+            log_stream::LogStreams,
+            maintenance::ComposeRequest,
+            operations::{self, Operation},
+            realtime, volume_export,
         },
         shared::errors::{AppError, AppResult},
+        telemetry::store,
+    },
+    views::{
+        agents::DockerLogStreamStarted,
+        telemetry::{ContainerHistoryResponse, HostHistoryResponse},
     },
 };
 
@@ -32,28 +52,90 @@ struct DockerListing<T: Serialize> {
     data: T,
 }
 
-async fn status() -> AppResult<Response> {
-    Ok(format::json(engine::status().await)?)
+/// Parâmetros de caminho por nome: a mesma rota recebe ou não o `{host}`.
+#[derive(Deserialize)]
+struct IdPath {
+    id: String,
 }
 
-async fn container_metrics(State(ctx): State<AppContext>) -> AppResult<Response> {
-    Ok(format::json(metrics::overview(&ctx).await)?)
+#[derive(Deserialize)]
+struct NamePath {
+    name: String,
 }
 
-async fn containers() -> AppResult<Response> {
-    listing(engine::list_containers()).await
+#[derive(Deserialize)]
+struct ProjectPath {
+    project: String,
 }
 
-async fn container(Path(id): Path<String>) -> AppResult<Response> {
-    let id = docker::validate_identifier(&id, "Container")?;
-    Ok(format::json(engine::inspect_container(&id).await?)?)
+#[derive(Deserialize)]
+struct StreamPath {
+    stream_id: String,
+}
+
+/// O host da rota (`local` quando não há `{host}`), já resolvido para as
+/// fontes. Agente desconectado vira 503.
+struct Target(DockerHost);
+
+impl FromRequestParts<AppContext> for Target {
+    type Rejection = AppError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        ctx: &AppContext,
+    ) -> Result<Self, Self::Rejection> {
+        let params = RawPathParams::from_request_parts(parts, ctx)
+            .await
+            .map_err(|_| AppError::validation("Host Docker inválido"))?;
+        let key = params
+            .iter()
+            .find(|(name, _)| *name == "host")
+            .map_or(Ok(HostKey::Local), |(_, value)| value.parse::<HostKey>())?;
+        Ok(Self(hosts::resolve(ctx, key)?))
+    }
+}
+
+/// Rótulo de auditoria: recursos remotos levam o host na frente.
+fn label(host: &DockerHost, resource: &str) -> String {
+    if host.key.is_local() {
+        resource.to_string()
+    } else {
+        format!("{}/{resource}", host.key)
+    }
+}
+
+async fn host_list(State(ctx): State<AppContext>) -> AppResult<Response> {
+    Ok(format::json(hosts::list(&ctx).await?)?)
+}
+
+async fn status(Target(host): Target) -> AppResult<Response> {
+    Ok(format::json(engine::status(host.engine.as_ref()).await)?)
+}
+
+async fn container_metrics(
+    State(ctx): State<AppContext>,
+    Target(host): Target,
+) -> AppResult<Response> {
+    Ok(format::json(host.metrics(&ctx).await)?)
+}
+
+async fn containers(Target(host): Target) -> AppResult<Response> {
+    listing(engine::list_containers(host.engine.as_ref())).await
+}
+
+async fn container(Target(host): Target, Path(path): Path<IdPath>) -> AppResult<Response> {
+    let id = docker::validate_identifier(&path.id, "Container")?;
+    Ok(format::json(
+        engine::inspect_container(host.engine.as_ref(), &id).await?,
+    )?)
 }
 
 async fn container_logs(
-    Path(id): Path<String>,
+    Target(host): Target,
+    Path(path): Path<IdPath>,
     Query(query): Query<DockerLogsQuery>,
 ) -> AppResult<Response> {
-    let id = docker::validate_identifier(&id, "Container")?;
+    let id = docker::validate_identifier(&path.id, "Container")?;
     if query.since.is_some_and(|value| value < 0)
         || query.until.is_some_and(|value| value < 0)
         || query
@@ -65,18 +147,10 @@ async fn container_logs(
             "O intervalo informado para os logs é inválido",
         ));
     }
-    let tail = query.tail.unwrap_or_else(|| "200".to_string());
-    if tail != "all"
-        && !tail
-            .parse::<usize>()
-            .is_ok_and(|value| (1..=10_000).contains(&value))
-    {
-        return Err(AppError::validation(
-            "tail deve ser 'all' ou um número entre 1 e 10000",
-        ));
-    }
+    let tail = validate_tail(query.tail.unwrap_or_else(|| "200".to_string()))?;
     Ok(format::json(
         engine::container_logs(
+            host.engine.as_ref(),
             &id,
             LogFilters {
                 tail,
@@ -89,20 +163,58 @@ async fn container_logs(
     )?)
 }
 
+fn validate_tail(tail: String) -> AppResult<String> {
+    if tail != "all"
+        && !tail
+            .parse::<usize>()
+            .is_ok_and(|value| (1..=10_000).contains(&value))
+    {
+        return Err(AppError::validation(
+            "tail deve ser 'all' ou um número entre 1 e 10000",
+        ));
+    }
+    Ok(tail)
+}
+
+/// `POST .../containers/{id}/logs/follow` — começa a acompanhar o log. As
+/// linhas chegam pelo SSE global como `docker:log`.
+async fn follow_logs(
+    State(ctx): State<AppContext>,
+    Target(host): Target,
+    Path(path): Path<IdPath>,
+    body: String,
+) -> AppResult<Response> {
+    let id = docker::validate_identifier(&path.id, "Container")?;
+    let input: DockerFollowLogsInput = crate::dtos::optional_body(&body);
+    let tail = validate_tail(input.tail.unwrap_or_else(|| "100".to_string()))?;
+    let stream_id = LogStreams::from_context(&ctx)?.start(&ctx, host, id, tail)?;
+    Ok(format::json(DockerLogStreamStarted { stream_id })?)
+}
+
+/// `DELETE /api/docker/log-streams/{stream_id}`.
+async fn stop_log_stream(
+    State(ctx): State<AppContext>,
+    Path(path): Path<StreamPath>,
+) -> AppResult<Response> {
+    let stopped = LogStreams::from_context(&ctx)?.stop(&path.stream_id);
+    Ok(format::json(serde_json::json!({ "stopped": stopped }))?)
+}
+
 async fn clear_container_logs(
     State(ctx): State<AppContext>,
+    Target(host): Target,
     headers: HeaderMap,
-    Path(id): Path<String>,
+    Path(path): Path<IdPath>,
 ) -> AppResult<Response> {
-    let id = docker::validate_identifier(&id, "Container")?;
-    let response = log_clear::clear(&id).await?;
-    emit_docker_updated(&ctx).await;
+    let id = docker::validate_identifier(&path.id, "Container")?;
+    let response = host.maintenance.clear_logs(&id).await?;
+    realtime::refresh(&ctx, host.key).await;
     audit(
         &ctx,
         &headers,
         AuditAction::Update,
         ResourceType::DockerContainer,
-        &id,
+        &label(&host, &id),
         &response.message,
     )
     .await;
@@ -111,38 +223,43 @@ async fn clear_container_logs(
 
 async fn start_container(
     State(ctx): State<AppContext>,
+    Target(host): Target,
     headers: HeaderMap,
-    Path(id): Path<String>,
+    Path(path): Path<IdPath>,
 ) -> AppResult<Response> {
-    container_action(&ctx, &headers, id, ContainerAction::Start).await
+    container_action(&ctx, &host, &headers, &path.id, ContainerAction::Start).await
 }
 
 async fn stop_container(
     State(ctx): State<AppContext>,
+    Target(host): Target,
     headers: HeaderMap,
-    Path(id): Path<String>,
+    Path(path): Path<IdPath>,
 ) -> AppResult<Response> {
-    container_action(&ctx, &headers, id, ContainerAction::Stop).await
+    container_action(&ctx, &host, &headers, &path.id, ContainerAction::Stop).await
 }
 
 async fn restart_container(
     State(ctx): State<AppContext>,
+    Target(host): Target,
     headers: HeaderMap,
-    Path(id): Path<String>,
+    Path(path): Path<IdPath>,
 ) -> AppResult<Response> {
-    container_action(&ctx, &headers, id, ContainerAction::Restart).await
+    container_action(&ctx, &host, &headers, &path.id, ContainerAction::Restart).await
 }
 
 async fn remove_container(
     State(ctx): State<AppContext>,
+    Target(host): Target,
     headers: HeaderMap,
-    Path(id): Path<String>,
+    Path(path): Path<IdPath>,
     Query(query): Query<DockerForceQuery>,
 ) -> AppResult<Response> {
     container_action(
         &ctx,
+        &host,
         &headers,
-        id,
+        &path.id,
         ContainerAction::Remove {
             force: query.force.unwrap_or(false),
         },
@@ -152,13 +269,14 @@ async fn remove_container(
 
 async fn container_action(
     ctx: &AppContext,
+    host: &DockerHost,
     headers: &HeaderMap,
-    id: String,
+    id: &str,
     action: ContainerAction,
 ) -> AppResult<Response> {
-    let id = docker::validate_identifier(&id, "Container")?;
-    let response = engine::container_action(&id, action).await?;
-    emit_docker_updated(ctx).await;
+    let id = docker::validate_identifier(id, "Container")?;
+    let response = engine::container_action(host.engine.as_ref(), &id, action).await?;
+    realtime::refresh(ctx, host.key).await;
     audit(
         ctx,
         headers,
@@ -168,49 +286,175 @@ async fn container_action(
             AuditAction::Update
         },
         ResourceType::DockerContainer,
-        &id,
+        &label(host, &id),
         &response.message,
     )
     .await;
     Ok(format::json(response)?)
 }
 
-async fn volumes() -> AppResult<Response> {
-    listing(engine::list_volumes()).await
+/// `POST .../containers/{id}/update` — pull da tag e recriação com rollback.
+async fn update_container(
+    State(ctx): State<AppContext>,
+    Target(host): Target,
+    headers: HeaderMap,
+    Path(path): Path<IdPath>,
+) -> AppResult<Response> {
+    let id = docker::validate_identifier(&path.id, "Container")?;
+    audit(
+        &ctx,
+        &headers,
+        AuditAction::Update,
+        ResourceType::DockerContainer,
+        &label(&host, &id),
+        "Atualização de imagem e recriação solicitadas",
+    )
+    .await;
+    let maintenance = host.maintenance.clone();
+    let target = id.clone();
+    let accepted = operations::start(
+        &ctx,
+        Operation {
+            host: host.key,
+            kind: "update",
+            target: id,
+        },
+        move |progress| async move { maintenance.update_container(&target, progress).await },
+    );
+    Ok((StatusCode::ACCEPTED, Json(accepted)).into_response())
 }
 
-async fn volume(Path(name): Path<String>) -> AppResult<Response> {
-    let name = docker::validate_identifier(&name, "Volume")?;
-    Ok(format::json(engine::inspect_volume(&name).await?)?)
+/// `POST .../images/pull`.
+async fn pull_image(
+    State(ctx): State<AppContext>,
+    Target(host): Target,
+    headers: HeaderMap,
+    Json(input): Json<DockerPullInput>,
+) -> AppResult<Response> {
+    let image = docker::validate_identifier(&input.image, "Imagem")?;
+    audit(
+        &ctx,
+        &headers,
+        AuditAction::Create,
+        ResourceType::DockerImage,
+        &label(&host, &image),
+        "Pull de imagem solicitado",
+    )
+    .await;
+    let maintenance = host.maintenance.clone();
+    let target = image.clone();
+    let accepted = operations::start(
+        &ctx,
+        Operation {
+            host: host.key,
+            kind: "pull",
+            target: image,
+        },
+        move |progress| async move { maintenance.pull_image(&target, progress).await },
+    );
+    Ok((StatusCode::ACCEPTED, Json(accepted)).into_response())
+}
+
+/// `GET .../compose` — projetos compose do host.
+async fn compose_projects(Target(host): Target) -> AppResult<Response> {
+    listing(async {
+        engine::list_containers(host.engine.as_ref())
+            .await
+            .map(|containers| compose::projects(&containers))
+    })
+    .await
+}
+
+/// `POST .../compose/{project}` — ação de projeto, executada pelo agente.
+async fn compose_action(
+    State(ctx): State<AppContext>,
+    Target(host): Target,
+    headers: HeaderMap,
+    Path(path): Path<ProjectPath>,
+    Json(input): Json<DockerComposeInput>,
+) -> AppResult<Response> {
+    let project = docker::validate_identifier(&path.project, "Projeto")?;
+    let service = input
+        .service
+        .as_deref()
+        .map(|service| docker::validate_identifier(service, "Serviço"))
+        .transpose()?;
+    let request = ComposeRequest {
+        project: project.clone(),
+        action: input.action,
+        service: service.clone(),
+    };
+    let target = service.map_or_else(|| project.clone(), |service| format!("{project}/{service}"));
+    audit(
+        &ctx,
+        &headers,
+        AuditAction::Update,
+        ResourceType::DockerContainer,
+        &label(&host, &target),
+        &format!("compose {} solicitado", request.action.label()),
+    )
+    .await;
+    let maintenance = host.maintenance.clone();
+    let accepted = operations::start(
+        &ctx,
+        Operation {
+            host: host.key,
+            kind: "compose",
+            target,
+        },
+        move |progress| async move { maintenance.compose(&request, progress).await },
+    );
+    Ok((StatusCode::ACCEPTED, Json(accepted)).into_response())
+}
+
+async fn volumes(Target(host): Target) -> AppResult<Response> {
+    listing(engine::list_volumes(host.engine.as_ref())).await
+}
+
+async fn volume(Target(host): Target, Path(path): Path<NamePath>) -> AppResult<Response> {
+    let name = docker::validate_identifier(&path.name, "Volume")?;
+    Ok(format::json(
+        engine::inspect_volume(host.engine.as_ref(), &name).await?,
+    )?)
 }
 
 async fn remove_volume(
     State(ctx): State<AppContext>,
+    Target(host): Target,
     headers: HeaderMap,
-    Path(name): Path<String>,
+    Path(path): Path<NamePath>,
     Query(query): Query<DockerForceQuery>,
 ) -> AppResult<Response> {
-    let name = docker::validate_identifier(&name, "Volume")?;
-    let response = engine::remove_volume(&name, query.force.unwrap_or(false)).await?;
-    emit_docker_updated(&ctx).await;
+    let name = docker::validate_identifier(&path.name, "Volume")?;
+    let response =
+        engine::remove_volume(host.engine.as_ref(), &name, query.force.unwrap_or(false)).await?;
+    realtime::refresh(&ctx, host.key).await;
     audit(
         &ctx,
         &headers,
         AuditAction::Delete,
         ResourceType::DockerVolume,
-        &name,
+        &label(&host, &name),
         &response.message,
     )
     .await;
     Ok(format::json(response)?)
 }
 
+/// Exportação transmite o tar pelo socket local; não atravessa o canal do
+/// agente.
 async fn export_volume(
     State(ctx): State<AppContext>,
+    Target(host): Target,
     headers: HeaderMap,
-    Path(name): Path<String>,
+    Path(path): Path<NamePath>,
 ) -> AppResult<Response> {
-    let name = docker::validate_identifier(&name, "Volume")?;
+    if !host.key.is_local() {
+        return Err(AppError::business_rule(
+            "A exportação de volume só está disponível para o Docker desta central",
+        ));
+    }
+    let name = docker::validate_identifier(&path.name, "Volume")?;
     let export = volume_export::export(&name).await?;
     audit(
         &ctx,
@@ -238,17 +482,20 @@ async fn export_volume(
         .into_response())
 }
 
-async fn networks() -> AppResult<Response> {
-    listing(engine::list_networks()).await
+async fn networks(Target(host): Target) -> AppResult<Response> {
+    listing(engine::list_networks(host.engine.as_ref())).await
 }
 
-async fn network(Path(id): Path<String>) -> AppResult<Response> {
-    let id = docker::validate_identifier(&id, "Rede")?;
-    Ok(format::json(engine::inspect_network(&id).await?)?)
+async fn network(Target(host): Target, Path(path): Path<IdPath>) -> AppResult<Response> {
+    let id = docker::validate_identifier(&path.id, "Rede")?;
+    Ok(format::json(
+        engine::inspect_network(host.engine.as_ref(), &id).await?,
+    )?)
 }
 
 async fn create_network(
     State(ctx): State<AppContext>,
+    Target(host): Target,
     headers: HeaderMap,
     Json(input): Json<DockerNetworkCreateInput>,
 ) -> AppResult<Response> {
@@ -257,14 +504,14 @@ async fn create_network(
     if !matches!(driver.as_str(), "bridge" | "overlay" | "macvlan" | "ipvlan") {
         return Err(AppError::validation("Driver de rede não suportado"));
     }
-    let response = engine::create_network(name.clone(), driver).await?;
-    emit_docker_updated(&ctx).await;
+    let response = engine::create_network(host.engine.as_ref(), name.clone(), driver).await?;
+    realtime::refresh(&ctx, host.key).await;
     audit(
         &ctx,
         &headers,
         AuditAction::Create,
         ResourceType::DockerNetwork,
-        &name,
+        &label(&host, &name),
         &response.message,
     )
     .await;
@@ -273,18 +520,19 @@ async fn create_network(
 
 async fn remove_network(
     State(ctx): State<AppContext>,
+    Target(host): Target,
     headers: HeaderMap,
-    Path(id): Path<String>,
+    Path(path): Path<IdPath>,
 ) -> AppResult<Response> {
-    let id = docker::validate_identifier(&id, "Rede")?;
-    let response = engine::remove_network(&id).await?;
-    emit_docker_updated(&ctx).await;
+    let id = docker::validate_identifier(&path.id, "Rede")?;
+    let response = engine::remove_network(host.engine.as_ref(), &id).await?;
+    realtime::refresh(&ctx, host.key).await;
     audit(
         &ctx,
         &headers,
         AuditAction::Delete,
         ResourceType::DockerNetwork,
-        &id,
+        &label(&host, &id),
         &response.message,
     )
     .await;
@@ -293,92 +541,183 @@ async fn remove_network(
 
 async fn connect_network(
     State(ctx): State<AppContext>,
+    Target(host): Target,
     headers: HeaderMap,
-    Path(id): Path<String>,
+    Path(path): Path<IdPath>,
     Json(input): Json<DockerNetworkConnectionInput>,
 ) -> AppResult<Response> {
-    network_connection(&ctx, &headers, id, input, false).await
+    network_connection(&ctx, &host, &headers, &path.id, input, false).await
 }
 
 async fn disconnect_network(
     State(ctx): State<AppContext>,
+    Target(host): Target,
     headers: HeaderMap,
-    Path(id): Path<String>,
+    Path(path): Path<IdPath>,
     Json(input): Json<DockerNetworkConnectionInput>,
 ) -> AppResult<Response> {
-    network_connection(&ctx, &headers, id, input, true).await
+    network_connection(&ctx, &host, &headers, &path.id, input, true).await
 }
 
 async fn network_connection(
     ctx: &AppContext,
+    host: &DockerHost,
     headers: &HeaderMap,
-    id: String,
+    id: &str,
     input: DockerNetworkConnectionInput,
     disconnect: bool,
 ) -> AppResult<Response> {
-    let id = docker::validate_identifier(&id, "Rede")?;
+    let id = docker::validate_identifier(id, "Rede")?;
     let container = docker::validate_identifier(&input.container_id, "Container")?;
     let response = if disconnect {
-        engine::disconnect_network(&id, container, input.force.unwrap_or(false)).await?
+        engine::disconnect_network(
+            host.engine.as_ref(),
+            &id,
+            container,
+            input.force.unwrap_or(false),
+        )
+        .await?
     } else {
-        engine::connect_network(&id, container).await?
+        engine::connect_network(host.engine.as_ref(), &id, container).await?
     };
-    emit_docker_updated(ctx).await;
+    realtime::refresh(ctx, host.key).await;
     audit(
         ctx,
         headers,
         AuditAction::Update,
         ResourceType::DockerNetwork,
-        &id,
+        &label(host, &id),
         &response.message,
     )
     .await;
     Ok(format::json(response)?)
 }
 
-async fn images() -> AppResult<Response> {
-    listing(engine::list_images()).await
+async fn images(Target(host): Target) -> AppResult<Response> {
+    listing(engine::list_images(host.engine.as_ref())).await
 }
 
-async fn image(Path(id): Path<String>) -> AppResult<Response> {
-    let id = docker::validate_identifier(&id, "Imagem")?;
-    Ok(format::json(engine::inspect_image(&id).await?)?)
+async fn image(Target(host): Target, Path(path): Path<IdPath>) -> AppResult<Response> {
+    let id = docker::validate_identifier(&path.id, "Imagem")?;
+    Ok(format::json(
+        engine::inspect_image(host.engine.as_ref(), &id).await?,
+    )?)
 }
 
 async fn remove_image(
     State(ctx): State<AppContext>,
+    Target(host): Target,
     headers: HeaderMap,
-    Path(id): Path<String>,
+    Path(path): Path<IdPath>,
     Query(query): Query<DockerForceQuery>,
 ) -> AppResult<Response> {
-    let id = docker::validate_identifier(&id, "Imagem")?;
-    let response = engine::remove_image(&id, query.force.unwrap_or(false)).await?;
-    emit_docker_updated(&ctx).await;
+    let id = docker::validate_identifier(&path.id, "Imagem")?;
+    let response =
+        engine::remove_image(host.engine.as_ref(), &id, query.force.unwrap_or(false)).await?;
+    realtime::refresh(&ctx, host.key).await;
     audit(
         &ctx,
         &headers,
         AuditAction::Delete,
         ResourceType::DockerImage,
-        &id,
+        &label(&host, &id),
         &response.message,
     )
     .await;
     Ok(format::json(response)?)
 }
 
-async fn prune_images(State(ctx): State<AppContext>, headers: HeaderMap) -> AppResult<Response> {
-    let response = engine::prune_images().await?;
-    emit_docker_updated(&ctx).await;
+async fn prune_images(
+    State(ctx): State<AppContext>,
+    Target(host): Target,
+    headers: HeaderMap,
+) -> AppResult<Response> {
+    let response = engine::prune_images(host.engine.as_ref()).await?;
+    realtime::refresh(&ctx, host.key).await;
     audit(
         &ctx,
         &headers,
         AuditAction::Delete,
         ResourceType::DockerImage,
-        "dangling",
+        &label(&host, "dangling"),
         "Imagens sem uso removidas",
     )
     .await;
     Ok(format::json(response)?)
+}
+
+/// `GET .../history` — série do host e uso por container na janela. Leitura
+/// de histórico sob demanda, não um ciclo de atualização.
+async fn history(
+    State(ctx): State<AppContext>,
+    Path(host): Path<HostPath>,
+    Query(query): Query<DockerHistoryQuery>,
+) -> AppResult<Response> {
+    let key = host.key()?;
+    let range = query.range.unwrap_or_default();
+    let now = chrono::Utc::now();
+    let host_key = key.to_string();
+    let (host_points, containers) = tokio::try_join!(
+        store::host_history(&ctx.db, &host_key, range, now),
+        store::container_usage(&ctx.db, &host_key, range, now)
+    )?;
+    Ok(format::json(HostHistoryResponse {
+        host_key,
+        range,
+        step_minutes: range.step_minutes(),
+        host: host_points,
+        containers,
+    })?)
+}
+
+/// `GET .../history/containers/{name}`.
+async fn container_history(
+    State(ctx): State<AppContext>,
+    Path(path): Path<HostNamePath>,
+    Query(query): Query<DockerHistoryQuery>,
+) -> AppResult<Response> {
+    let key = path.key()?;
+    let name = docker::validate_identifier(&path.name, "Container")?;
+    let range = query.range.unwrap_or_default();
+    let host_key = key.to_string();
+    let points =
+        store::container_history(&ctx.db, &host_key, &name, range, chrono::Utc::now()).await?;
+    Ok(format::json(ContainerHistoryResponse {
+        host_key,
+        container_name: name,
+        range,
+        step_minutes: range.step_minutes(),
+        points,
+    })?)
+}
+
+/// O histórico é do banco: não exige o agente conectado.
+#[derive(Deserialize)]
+struct HostPath {
+    host: Option<String>,
+}
+
+impl HostPath {
+    fn key(&self) -> AppResult<HostKey> {
+        self.host
+            .as_deref()
+            .map_or(Ok(HostKey::Local), str::parse::<HostKey>)
+    }
+}
+
+#[derive(Deserialize)]
+struct HostNamePath {
+    host: Option<String>,
+    name: String,
+}
+
+impl HostNamePath {
+    fn key(&self) -> AppResult<HostKey> {
+        HostPath {
+            host: self.host.clone(),
+        }
+        .key()
+    }
 }
 
 async fn listing<T: Serialize>(
@@ -397,12 +736,6 @@ async fn listing<T: Serialize>(
         }
         Err(error) => Err(error.into()),
     }
-}
-
-async fn emit_docker_updated(ctx: &AppContext) {
-    metrics::invalidate(ctx).await;
-    let ctx = ctx.clone();
-    tokio::spawn(async move { realtime::publish_all(&ctx).await });
 }
 
 async fn audit(
@@ -431,31 +764,49 @@ async fn audit(
         .await;
 }
 
+/// Rotas que existem por host. Registradas com e sem o `{host}`.
+fn per_host() -> Vec<(&'static str, MethodRouter<AppContext>)> {
+    vec![
+        ("/status", get(status)),
+        ("/metrics", get(container_metrics)),
+        ("/history", get(history)),
+        ("/history/containers/{name}", get(container_history)),
+        ("/compose", get(compose_projects)),
+        ("/compose/{project}", post(compose_action)),
+        ("/containers", get(containers)),
+        ("/containers/{id}/logs/follow", post(follow_logs)),
+        (
+            "/containers/{id}/logs",
+            get(container_logs).delete(clear_container_logs),
+        ),
+        ("/containers/{id}/start", post(start_container)),
+        ("/containers/{id}/stop", post(stop_container)),
+        ("/containers/{id}/restart", post(restart_container)),
+        ("/containers/{id}/update", post(update_container)),
+        ("/containers/{id}", get(container).delete(remove_container)),
+        ("/volumes", get(volumes)),
+        ("/volumes/{name}/export", get(export_volume)),
+        ("/volumes/{name}", get(volume).delete(remove_volume)),
+        ("/networks", get(networks).post(create_network)),
+        ("/networks/{id}/connect", post(connect_network)),
+        ("/networks/{id}/disconnect", post(disconnect_network)),
+        ("/networks/{id}", get(network).delete(remove_network)),
+        ("/images/prune", post(prune_images)),
+        ("/images/pull", post(pull_image)),
+        ("/images", get(images)),
+        ("/images/{id}", get(image).delete(remove_image)),
+    ]
+}
+
 pub fn routes() -> Routes {
-    Routes::new()
+    let mut routes = Routes::new()
         .prefix("/docker")
-        .add("/status", get(status))
-        .add("/metrics", get(container_metrics))
-        .add("/containers", get(containers))
-        .add("/containers/{id}/logs", get(container_logs))
-        .add("/containers/{id}/logs", delete(clear_container_logs))
-        .add("/containers/{id}/start", post(start_container))
-        .add("/containers/{id}/stop", post(stop_container))
-        .add("/containers/{id}/restart", post(restart_container))
-        .add("/containers/{id}", get(container))
-        .add("/containers/{id}", delete(remove_container))
-        .add("/volumes", get(volumes))
-        .add("/volumes/{name}/export", get(export_volume))
-        .add("/volumes/{name}", get(volume))
-        .add("/volumes/{name}", delete(remove_volume))
-        .add("/networks", get(networks))
-        .add("/networks", post(create_network))
-        .add("/networks/{id}/connect", post(connect_network))
-        .add("/networks/{id}/disconnect", post(disconnect_network))
-        .add("/networks/{id}", get(network))
-        .add("/networks/{id}", delete(remove_network))
-        .add("/images/prune", post(prune_images))
-        .add("/images", get(images))
-        .add("/images/{id}", get(image))
-        .add("/images/{id}", delete(remove_image))
+        .add("/hosts", get(host_list))
+        .add("/log-streams/{stream_id}", delete(stop_log_stream));
+    for (path, handler) in per_host() {
+        routes = routes
+            .add(path, handler.clone())
+            .add(&format!("/hosts/{{host}}{path}"), handler);
+    }
+    routes
 }

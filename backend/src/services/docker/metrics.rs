@@ -65,7 +65,7 @@ async fn cached(state: Option<&MetricsState>) -> Option<DockerMetricsResponse> {
     (measured_at.elapsed() < CACHE_TTL).then(|| value.clone())
 }
 
-async fn collect() -> DockerMetricsResponse {
+pub(crate) async fn collect() -> DockerMetricsResponse {
     let client = match client() {
         Ok(client) => client,
         Err(DockerError::Disabled) => return unavailable(DISABLED_REASON),
@@ -105,7 +105,7 @@ async fn collect() -> DockerMetricsResponse {
     }
 }
 
-fn unavailable(reason: &str) -> DockerMetricsResponse {
+pub(crate) fn unavailable(reason: &str) -> DockerMetricsResponse {
     DockerMetricsResponse {
         docker_available: false,
         unavailable_reason: Some(reason.to_string()),

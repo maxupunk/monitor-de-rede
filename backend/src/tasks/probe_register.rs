@@ -5,22 +5,19 @@
 
 use chrono::Utc;
 use loco_rs::prelude::*;
-use rand::RngCore;
 use sea_orm::{ActiveModelTrait, Set};
 
-use crate::{models::probes, services::shared::crypto::sha256_hex};
-
-/// 32 bytes de entropia para o token de autenticação do probe.
-const TOKEN_BYTES: usize = 32;
+use crate::{
+    models::probes,
+    services::shared::crypto::{random_token, sha256_hex},
+};
 
 pub struct ProbeRegister;
 
-/// Gera o token cru do probe.
+/// Gera o token cru do probe (32 bytes de entropia, em hex).
 #[must_use]
 pub fn generate_token() -> String {
-    let mut bytes = [0_u8; TOKEN_BYTES];
-    rand::thread_rng().fill_bytes(&mut bytes);
-    hex::encode(bytes)
+    random_token()
 }
 
 #[async_trait]
@@ -79,7 +76,7 @@ mod tests {
     #[test]
     fn o_token_tem_entropia_suficiente() {
         let token = generate_token();
-        assert_eq!(token.len(), TOKEN_BYTES * 2);
+        assert_eq!(token.len(), 64);
         assert!(token.chars().all(|c| c.is_ascii_hexdigit()));
         assert_ne!(token, generate_token());
     }

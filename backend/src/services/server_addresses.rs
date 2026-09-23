@@ -272,6 +272,17 @@ fn valida_endereco(valor: &str, campo: &str) -> AppResult<()> {
 /// # Errors
 ///
 /// Propaga erro do banco.
+/// O detector do serviço de syslog quando ele existe; um recém-criado quando
+/// não. A detecção é barata e o resultado é o mesmo — o que não pode acontecer
+/// é a lista de endereços depender da ingestão estar ligada.
+#[must_use]
+pub fn nat_detector(ctx: &loco_rs::app::AppContext) -> NatDetector {
+    crate::services::syslog::SyslogService::from_context(ctx)
+        .map_or_else(NatDetector::detect, |servico| {
+            servico.ingestor.resolver().nat().clone()
+        })
+}
+
 pub async fn list(db: &DatabaseConnection, nat: &NatDetector) -> AppResult<Vec<ServerAddress>> {
     resolved_list(db, nat, da_rede_local(nat), false).await
 }

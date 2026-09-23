@@ -4,6 +4,7 @@ import {
   formatDecimalBytes,
   formatLatency,
   formatMeasuredValue,
+  formatPercent,
   formatTimeSpan,
   resolveAutoUnit,
   resolveSpeedUnit,
@@ -13,6 +14,13 @@ import {
 } from '../src/utils/formatters.ts'
 
 describe('formatters', () => {
+  it('formata percentual com casas fixas no padrão brasileiro', () => {
+    expect(formatPercent(42.456)).toBe('42,5%')
+    expect(formatPercent(7, 0)).toBe('7%')
+    expect(formatPercent(null)).toBe('—')
+    expect(formatPercent(Number.NaN, 1, 'N/D')).toBe('N/D')
+  })
+
   it('corta o lixo de ponto flutuante do RTT em uma casa decimal', () => {
     expect(formatLatency(6.903808999999999)).toBe('6.9 ms')
     expect(formatLatency(0.4321)).toBe('0.4 ms')

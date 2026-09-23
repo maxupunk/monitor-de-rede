@@ -26,7 +26,7 @@ use crate::{
         },
         alert_events, discovery_runs, event_outbox, metrics, monitor_results, notification_outbox,
     },
-    services::{alerts::contracts::AlertStatus, shared::errors::AppResult},
+    services::{alerts::contracts::AlertStatus, shared::errors::AppResult, telemetry},
 };
 
 /// O outbox é buffer de retransmissão, não histórico: o relay lê os últimos
@@ -54,6 +54,8 @@ pub struct PruneStats {
     pub discovery_deleted: u64,
     pub alert_events_deleted: u64,
     pub notifications_deleted: u64,
+    /// Histórico de 1 minuto de host e containers (ADR 011).
+    pub telemetry_deleted: u64,
 }
 
 impl PruneStats {
@@ -65,6 +67,7 @@ impl PruneStats {
             + self.discovery_deleted
             + self.alert_events_deleted
             + self.notifications_deleted
+            + self.telemetry_deleted
     }
 }
 
@@ -106,6 +109,8 @@ pub async fn prune_all<C: ConnectionTrait>(db: &C) -> AppResult<PruneStats> {
             DEFAULT_RETENTION_METRICS_DAYS,
         ));
     let metrics_deleted = prune_metrics(db, metrics_cutoff).await?;
+    // Mesma janela das métricas SNMP: é a mesma natureza de dado.
+    let telemetry_deleted = telemetry::store::prune(db, metrics_cutoff).await?;
 
     let discovery_cutoff = now
         - Duration::days(retention_days(
@@ -162,6 +167,7 @@ pub async fn prune_all<C: ConnectionTrait>(db: &C) -> AppResult<PruneStats> {
         discovery_deleted,
         alert_events_deleted,
         notifications_deleted,
+        telemetry_deleted,
     })
 }
 
@@ -276,7 +282,7 @@ mod tests {
     }
 
     #[test]
-    fn o_total_soma_as_seis_tabelas() {
+    fn o_total_soma_as_sete_origens() {
         let stats = PruneStats {
             outbox_deleted: 1,
             results_deleted: 2,
@@ -284,8 +290,9 @@ mod tests {
             discovery_deleted: 4,
             alert_events_deleted: 5,
             notifications_deleted: 6,
+            telemetry_deleted: 7,
         };
-        assert_eq!(stats.total(), 21);
+        assert_eq!(stats.total(), 28);
         assert_eq!(PruneStats::default().total(), 0);
     }
 

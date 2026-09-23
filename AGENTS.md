@@ -47,7 +47,7 @@
 
 4. **Práticas de Teste (Rust)**:
    - **Isolamento de Banco**: testes de requisição usam
-     `request_with_config::<App, _, _>`; o `Hooks::truncate` limpa as 23 tabelas
+     `request_with_config::<App, _, _>`; o `Hooks::truncate` limpa as 29 tabelas
      entre eles.
    - **`#[serial]`** em tudo que toca estado global de processo: `ScanSessionService`,
      o cofre de chaves da VPN, o rate limiter e qualquer teste que mexa em
@@ -98,6 +98,12 @@
      `execFile('ping')`. O `sysctl net.ipv4.ping_group_range` está no compose.
    - A chave privada de um peer **nunca** vai ao banco: vive no cofre em memória
      até a primeira leitura. Depois disso, só rotacionando.
+   - O agente remoto (`netmonitor-agent`, ADR 011) **só disca para fora**: nunca
+     abra porta nele nem faça a central chamá-lo. `docker compose` roda **só no
+     agente**, no host remoto; a central continua sem CLI `docker`. A política
+     local (`AGENT_ALLOW`) é soberana — a central não a amplia — e comandos
+     Docker novos entram no enum fechado de `services/agents/protocol.rs`, cada
+     um com a sua permissão. Proxy genérico para a Engine é proibido.
    - Controller extrai, valida, delega e serializa. Regra de negócio vive em
      `src/services/`, testável sem HTTP.
 

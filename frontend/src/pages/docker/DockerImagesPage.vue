@@ -144,7 +144,6 @@ import { computed, ref } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import { confirm } from '@/composables/useConfirm'
-import { dockerService } from '@/services/dockerService'
 import { useAuthStore } from '@/stores/auth'
 import { useDockerStore } from '@/stores/docker'
 import { formatDateTime, formatDecimalBytes } from '@/utils/formatters'
@@ -199,7 +198,7 @@ async function openDetail(image: DockerImageSummary): Promise<void> {
   detailDialog.value = true
   detailLoading.value = true
   try {
-    detail.value = await dockerService.image(image.id)
+    detail.value = await docker.api.image(image.id)
   } catch (reason: unknown) {
     notify(reason instanceof Error ? reason.message : 'Erro ao inspecionar imagem', 'error')
   } finally {
@@ -216,7 +215,7 @@ async function removeImage(image: DockerImageSummary): Promise<void> {
     icon: 'mdi-layers-remove',
   })
   if (!accepted) return
-  const success = await docker.runAction(() => dockerService.removeImage(image.id))
+  const success = await docker.runAction(() => docker.api.removeImage(image.id))
   notify(
     success ? 'Imagem removida.' : docker.error || 'Erro ao remover imagem',
     success ? 'success' : 'error'
@@ -235,7 +234,7 @@ async function pruneImages(): Promise<void> {
   let removed = 0
   let reclaimed = 0
   const success = await docker.runAction(async () => {
-    const result = await dockerService.pruneImages()
+    const result = await docker.api.pruneImages()
     removed = result.imagesDeleted
     reclaimed = result.spaceReclaimed
   })

@@ -18,7 +18,7 @@ use crate::{
             progress::{ScanEvent, ScanReporter},
             scanners::{arp, icmp, mdns, ports, snmp, ssdp},
         },
-        monitoring::checkers::ping::PingClient,
+        monitoring::{checkers::ping::PingClient, runner::CheckDeps},
         shared::errors::{AppError, AppResult},
     },
 };
@@ -181,7 +181,10 @@ pub async fn run_discovery(
     let session = ScanSessionService::from_context(ctx)?;
     let (reporter, events) = ScanReporter::channel();
     let pump = tokio::spawn(pump_events(session.clone(), events));
-    let outcome = scan_phases(ctx, cidr, cancel, &reporter).await;
+    let outcome = match PingClient::from_context(ctx) {
+        Ok(ping) => scan_phases(&ping, cidr, cancel, &reporter).await,
+        Err(error) => Err(error),
+    };
     // Derrubar o repórter fecha o canal e encerra o pump: só depois disso o
     // estado publicado é o final, e não uma atualização atrasada de fase.
     drop(reporter);
@@ -208,7 +211,16 @@ pub async fn scan_network(
     cidr: &str,
     cancel: CancellationToken,
 ) -> AppResult<Vec<DiscoveredHost>> {
-    scan_phases(ctx, cidr, cancel, &ScanReporter::silent()).await
+    scan_network_with(&CheckDeps::from_context(ctx), cidr, cancel).await
+}
+
+/// Mesma varredura de [`scan_network`], para quem não tem `AppContext` (agente).
+pub async fn scan_network_with(
+    deps: &CheckDeps,
+    cidr: &str,
+    cancel: CancellationToken,
+) -> AppResult<Vec<DiscoveredHost>> {
+    scan_phases(&deps.ping_client()?, cidr, cancel, &ScanReporter::silent()).await
 }
 
 /// Valida e finaliza o resultado devolvido por um probe. O vínculo da run com
@@ -279,7 +291,7 @@ async fn pump_events(
 }
 
 async fn scan_phases(
-    ctx: &AppContext,
+    ping: &PingClient,
     cidr: &str,
     cancel: CancellationToken,
     reporter: &ScanReporter,
@@ -287,7 +299,6 @@ async fn scan_phases(
     let range = parse_cidr_range(cidr)?;
     let total = range.usable_hosts as usize;
     reporter.phase("discovery", 0, total);
-    let ping = PingClient::from_context(ctx)?;
     // Multicast pertence à interface, não a um lote do CIDR: executá-lo uma vez
     // evita respostas duplicadas em faixas grandes.
     let (mdns_hosts, ssdp_hosts) = tokio::join!(mdns::scan(), ssdp::scan());
@@ -308,7 +319,7 @@ async fn scan_phases(
         reporter.phase("icmp", offset as usize, total);
         let phase_started = Instant::now();
         let icmp_hosts =
-            icmp::scan(&ping, &addresses, cancel.clone(), &ScanReporter::silent()).await?;
+            icmp::scan(ping, &addresses, cancel.clone(), &ScanReporter::silent()).await?;
         tracing::info!(
             phase = "icmp",
             cidr,

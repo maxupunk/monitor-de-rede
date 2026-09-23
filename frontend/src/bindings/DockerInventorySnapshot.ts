@@ -4,6 +4,7 @@ import type { DockerNetworkSummary } from './DockerNetworkSummary'
 import type { DockerVolumeSummary } from './DockerVolumeSummary'
 
 export type DockerInventorySnapshot = {
+  hostKey: string
   collectedAt: string
   volumes: Array<DockerVolumeSummary>
   networks: Array<DockerNetworkSummary>

@@ -14,3 +14,4 @@ decisão cria.
 | [008](008-syslog-parser.md) | Syslog: `syslog_loose` com resgate do `<pri>` e severidade por tópico | SPIKE-06 | aceito |
 | [009](009-device-adapters.md) | Plataformas: registro único com `DeviceAdapter` e adapters especializados | — | aceito |
 | [010](010-docker-engine-api.md) | Docker: API nativa pelo socket, com mutações administrativas e auditadas | — | aceito |
+| [011](011-agente-remoto.md) | Agente remoto: WebSocket de saída sobre a VPN, política local soberana, Docker por fonte injetável | — | aceito |

@@ -10,7 +10,7 @@ use futures::StreamExt;
 
 use crate::views::docker::DockerActionResponse;
 
-use super::{call, client, engine, volume_export, DockerError};
+use super::{call, client, engine, source::LocalEngine, volume_export, DockerError};
 
 const LOG_MOUNT_POINT: &str = "/docker-log/container.log";
 const HELPER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
@@ -129,7 +129,8 @@ fn validate_log_path(id: &str, value: &str) -> Result<(), DockerError> {
     Ok(())
 }
 
-fn is_current_container(id: &str) -> bool {
+/// Container que executa este processo — o Docker usa o id curto como hostname.
+pub(crate) fn is_current_container(id: &str) -> bool {
     std::env::var("HOSTNAME")
         .ok()
         .map(|hostname| hostname.trim().to_ascii_lowercase())
@@ -172,9 +173,12 @@ async fn truncate_with_helper(client: &bollard::Docker, source: &str) -> Result<
         return Err(DockerError::Engine);
     }
     if let Err(error) = call(client.start_container::<String>(&created.id, None)).await {
-        let _ =
-            engine::container_action(&created.id, engine::ContainerAction::Remove { force: true })
-                .await;
+        let _ = engine::container_action(
+            &LocalEngine,
+            &created.id,
+            engine::ContainerAction::Remove { force: true },
+        )
+        .await;
         return Err(error);
     }
 
@@ -185,8 +189,12 @@ async fn truncate_with_helper(client: &bollard::Docker, source: &str) -> Result<
         .flatten()
         .and_then(Result::ok);
     let succeeded = result.is_some_and(|result| result.status_code == 0);
-    let _ = engine::container_action(&created.id, engine::ContainerAction::Remove { force: true })
-        .await;
+    let _ = engine::container_action(
+        &LocalEngine,
+        &created.id,
+        engine::ContainerAction::Remove { force: true },
+    )
+    .await;
     if !succeeded {
         return Err(DockerError::Engine);
     }

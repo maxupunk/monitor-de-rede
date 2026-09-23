@@ -484,6 +484,44 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
     - Tratamento de erro aprimorado no modal de escaneamento SNMP com diagnóstico detalhado (ACL, community, timeout UDP 161) e botão de retry.
     - Monitoramento periódico de sensores via agendador com registro de métricas históricas no banco.
 
+
+- [x] **Agente remoto: Docker, host e monitores de outros servidores via VPN** 🟢 Concluído ([ADR 011](adr/011-agente-remoto.md))
+  - **Objetivo:** um agente em cada servidor remoto, ligado à central pelo túnel WireGuard, para ver e gerenciar o Docker (ciclo de vida, pull/update e compose), coletar métricas de host e containers (rollup de 1 min, 30 dias) e absorver o papel do probe.
+  - **Arquivos:** `backend/src/services/{agents,agent_runtime,telemetry}/`, `backend/src/services/docker/{source,maintenance,hosts,update,compose,operations,log_stream}.rs`, `backend/src/controllers/{agents,docker}.rs`, `backend/src/bin/agent.rs`, `backend/migration/src/m20260922_00000{2,3}_*.rs`, `backend/assets/agent/`, `Dockerfile` (estágios `agent-builder` e `agent`), `docker/agent/docker-compose.yml`, `frontend/src/pages/{agents,docker}/`, `frontend/src/stores/{agents,docker,events}.ts`, `frontend/src/services/dockerService.ts`.
+  - [x] **F0 — Fundação** 🟢 Concluído
+    - `CheckDeps` + `run_monitor_with` / `scan_network_with`: os checks rodam sem `AppContext`.
+    - Trait `DockerEngine` (`services/docker/source.rs`) com `LocalEngine`. Mapeamento, redação e regras ficam em `engine.rs`, testados com fonte falsa.
+  - [x] **F1 — Canal e agente mínimo** 🟢 Concluído
+    - Protocolo tipado (`Envelope`, pedidos correlacionados, chunks, cancelamento, eventos) e hub de sessões na central.
+    - Enrollment com código `nma_…` de uso único (15 min) trocado por token; `probes.device_id` com FK `SET NULL`.
+    - Canal WebSocket de saída; token padrão recusado fora do `vpn-probe`; origem exigida pelo túnel do dispositivo.
+    - Binário estático `netmonitor-agent` (musl), imagem `--target agent`, unit systemd com `DynamicUser` e `install.sh` servido pela central.
+    - Tela Servidores remotos: status vivo por `probe:status`, host anunciado, política, código de instalação, revogação e remoção.
+  - [x] **F2 — Docker remoto** 🟢 Concluído
+    - `AgentEngine` e rotas `/api/docker/hosts/{host}/…` espelhando as locais; `/api/docker/*` segue sendo a central.
+    - Seletor de host na tela Docker (`?host=`), store por `hostKey`, snapshot ao assinar (`EventBus::publish_snapshot`).
+    - Logs em tail e em follow (`docker:log` no SSE global) e auditoria `agent-<id>/<recurso>`.
+  - [x] **F3 — Telemetria e histórico** 🟢 Concluído
+    - Leitor de `/proc` + `statvfs` com parsers puros; acumulador de minuto (média/pico e delta de contadores).
+    - `host_metrics_1m` / `container_metrics_1m` com upsert, retenção por `RETENTION_METRICS_DAYS` e histórico do host local.
+    - Tela Histórico (1h–30d) com CPU, memória, rede, discos e série por container.
+    - Monitores nativos `container` e `host_resources`, executados onde o monitor roda.
+  - [x] **F4 — Agente absorve o probe** 🟢 Concluído
+    - Pump de `probe_tasks` e `discovery_runs` pelo canal; resultados pelo mesmo `receiver` com checagem de posse.
+    - Buffer offline de eventos no agente (rollups e resultados), reenviado na reconexão.
+    - Fallback local do agendador, polling HTTP e registrador do `vpn-probe` preservados.
+  - [x] **F5 — Pull / update / compose** 🟢 Concluído
+    - Pull com progresso e recreate com preservação de configuração, redes e volumes anônimos, espera de healthcheck e rollback.
+    - Compose (pull/up/restart/stop/down) executado só no agente, sem shell; tela Projetos.
+    - Operações `202` com progresso em `docker:operation`; política local (`AGENT_ALLOW`) aplicada no agente e refletida na tela.
+  - [x] **F6 — Provisionamento integrado** 🟢 Concluído
+    - Peer Linux da VPN com "Conectar este servidor à central": o script do túnel instala o agente pelo IP da central na VPN com código embutido.
+    - O agente nasce vinculado ao dispositivo do peer e exige o túnel.
+  - [x] **Ajustes de usabilidade** 🟢 Concluído
+    - Menu: "Servidores remotos" (antes "Agentes", confundido com o agente de IA) e "Sondas de rede" (antes "Probes").
+    - Comandos de instalação escolhem entre os "Endereços deste servidor", com a porta certa por caminho (`APP_PORT` no túnel, `APP_EXTERNAL_PORT` fora dele), em vez da origem do navegador.
+    - Projetos compose: ações do projeto inteiro com explicação e lista de serviços com estado e ações próprias, no lugar do seletor "Aplicar em".
+
 ---
 
 ## 7. Matriz obrigatória de validação

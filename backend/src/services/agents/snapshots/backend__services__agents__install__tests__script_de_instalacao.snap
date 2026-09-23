@@ -1,0 +1,78 @@
+---
+source: src/services/agents/install.rs
+expression: script()
+---
+#!/bin/sh
+# Instala o agente NetMonitor como serviço systemd.
+# Uso: curl -fsSL <central>/api/agents/install.sh | sudo AGENT_SERVER_URL=<central> AGENT_ENROLL_CODE=<código> sh
+set -eu
+
+: "${AGENT_SERVER_URL:?defina AGENT_SERVER_URL com o endereço da central}"
+AGENT_ALLOW="${AGENT_ALLOW:-read,lifecycle,monitor,discovery}"
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "Execute como root (sudo)." >&2
+  exit 1
+fi
+if ! command -v systemctl >/dev/null 2>&1; then
+  echo "systemd não encontrado; use a instalação em container." >&2
+  exit 1
+fi
+
+case "$(uname -m)" in
+  x86_64|amd64) ARCH=x86_64 ;;
+  aarch64|arm64) ARCH=aarch64 ;;
+  *) echo "Arquitetura não suportada: $(uname -m)" >&2; exit 1 ;;
+esac
+
+echo "Baixando o agente ($ARCH) da central..."
+curl -fsSL "$AGENT_SERVER_URL/api/agents/download/$ARCH" -o /usr/local/bin/netmonitor-agent.new
+chmod 0755 /usr/local/bin/netmonitor-agent.new
+mv /usr/local/bin/netmonitor-agent.new /usr/local/bin/netmonitor-agent
+
+install -d -m 0755 /etc/netmonitor-agent
+umask 077
+{
+  echo "AGENT_SERVER_URL=$AGENT_SERVER_URL"
+  echo "AGENT_ALLOW=$AGENT_ALLOW"
+  if [ -n "${AGENT_ENROLL_CODE:-}" ]; then echo "AGENT_ENROLL_CODE=$AGENT_ENROLL_CODE"; fi
+} > /etc/netmonitor-agent/agent.env
+
+cat > /etc/systemd/system/netmonitor-agent.service <<'UNIT'
+[Unit]
+Description=Agente NetMonitor (Docker, host e monitores deste servidor)
+After=network-online.target docker.service wg-quick@netmonitor.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/netmonitor-agent/agent.env
+ExecStart=/usr/local/bin/netmonitor-agent
+Restart=always
+RestartSec=5
+# Usuário efêmero, sem login, só com o grupo docker (o socket da Engine) e
+# o ICMP DGRAM liberado pelo sysctl. O resto do sistema fica somente leitura;
+# o token e o buffer offline vivem no StateDirectory.
+DynamicUser=yes
+SupplementaryGroups=docker
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+StateDirectory=netmonitor-agent
+StateDirectoryMode=0700
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+# ICMP sem privilégio (ADR 003) para os monitores de ping deste site.
+if [ -w /proc/sys/net/ipv4/ping_group_range ]; then
+  echo "net.ipv4.ping_group_range = 0 2147483647" > /etc/sysctl.d/60-netmonitor-agent.conf
+  sysctl -q -p /etc/sysctl.d/60-netmonitor-agent.conf || true
+fi
+
+systemctl daemon-reload
+systemctl enable --now netmonitor-agent
+systemctl restart netmonitor-agent
+echo "Agente NetMonitor instalado. Acompanhe com: journalctl -u netmonitor-agent -f"

@@ -110,6 +110,7 @@ mod tests {
             configuration: None,
             created_at: now,
             updated_at: now,
+            device_id: None,
         }
     }
 
