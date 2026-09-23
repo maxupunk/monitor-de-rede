@@ -251,20 +251,15 @@ de preferência pelo túnel da VPN — e não abre porta nenhuma no servidor
 
 A política é **local**: `AGENT_ALLOW` no servidor remoto define o que ele aceita
 (`read,lifecycle,monitor,discovery` por padrão; `update` e `compose` só quando
-explicitamente liberados). A central não consegue ampliá-la. O `docker run`
-exibido usa a imagem oficial `docker:27-cli` e baixa o binário estático do
-agente da própria central (`/api/agents/download/<arch>`) a cada início — não
-depende de registry, e reiniciar o container atualiza o agente. Quem publicar a
-imagem própria (`docker build --target agent`) pode apontá-la em `AGENT_IMAGE`.
+explicitamente liberados). A central não consegue ampliá-la.
 
-**Imagem publicada no GHCR (opcional).** O workflow
-`.github/workflows/agent-image.yml` compila o alvo `agent` para amd64 e arm64
-(cada um no runner nativo), testa se o binário sobe e publica
-`ghcr.io/<dono>/netmonitor-agent` com as tags da versão (`1.2.3`, `1.2`,
-`latest`). Ele roda ao criar uma tag `v*.*.*` ou manualmente pela aba Actions.
-Na primeira vez, marque o pacote como público no GitHub. Depois defina na
-central `AGENT_IMAGE=ghcr.io/<dono>/netmonitor-agent:1.2.3`: o `docker run`
-passa a usar a imagem fixa, sem baixar o binário a cada início.
+**Imagem do agente.** O `docker run` exibido usa
+`ghcr.io/maxupunk/netmonitor-agent:latest`, publicada pelo workflow
+`.github/workflows/agent-image.yml` (alvo `agent`, amd64 e arm64, com teste de
+fumaça antes de publicar). Ele roda ao criar uma tag `v*.*.*` ou pela aba
+Actions. Para fixar uma versão ou usar outro registry, defina `AGENT_IMAGE` na
+central (ex.: `ghcr.io/maxupunk/netmonitor-agent:1.0.0`). A instalação systemd
+não depende da imagem: baixa o binário da própria central.
 
 ## Frontend — comandos
 

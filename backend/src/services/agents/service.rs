@@ -110,20 +110,17 @@ fn canonical(ip: IpAddr) -> IpAddr {
     }
 }
 
-/// Imagem base do comando `docker run`: o CLI oficial do Docker (Alpine, com
-/// `docker compose`). O binário do agente não vem numa imagem publicada — a
-/// central o serve em `/api/agents/download/<arch>` e o container o baixa ao
-/// subir. Assim a instalação não depende de registry, e reiniciar o container
-/// atualiza o agente para a versão da central.
-const AGENT_BASE_IMAGE: &str = "docker:27-cli";
+/// Imagem do agente publicada pelo workflow `agent-image.yml` (alvo `agent`
+/// do `Dockerfile`, amd64 e arm64). `AGENT_IMAGE` na central troca por outra —
+/// uma versão fixa ou um registry próprio.
+pub const DEFAULT_AGENT_IMAGE: &str = "ghcr.io/maxupunk/netmonitor-agent:latest";
 
-/// Imagem própria do agente (`docker build --target agent`), quando o
-/// operador a publicou num registry e prefere usá-la.
-fn custom_agent_image() -> Option<String> {
+fn agent_image() -> String {
     std::env::var("AGENT_IMAGE")
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| DEFAULT_AGENT_IMAGE.to_string())
 }
 
 /// Comandos de instalação exibidos uma vez, com o código embutido.
@@ -134,7 +131,7 @@ fn custom_agent_image() -> Option<String> {
 #[must_use]
 pub fn install_commands(server_url: &str, code: &str) -> (String, String) {
     let common = format!(
-        "docker run -d --name netmonitor-agent --restart unless-stopped --init \\\n  \
+        "docker run -d --name netmonitor-agent --restart unless-stopped \\\n  \
          --network host --pid host \\\n  \
          -v /var/run/docker.sock:/var/run/docker.sock \\\n  \
          -v /proc:/host/proc:ro -v /:/host:ro \\\n  \
@@ -143,18 +140,7 @@ pub fn install_commands(server_url: &str, code: &str) -> (String, String) {
          -e AGENT_ENROLL_CODE={code} \\\n  \
          -e AGENT_ALLOW=read,lifecycle,monitor,discovery \\\n  "
     );
-    let docker = match custom_agent_image() {
-        Some(image) => format!("{common}{image}"),
-        // `$AGENT_SERVER_URL` entre aspas simples: quem expande é o `sh` do
-        // container, a partir do `-e` acima — a URL não se repete no comando.
-        None => format!(
-            "{common}-e HOST_PROC=/host/proc -e HOST_ROOT=/host \\\n  \
-             -e AGENT_STATE_DIR=/var/lib/netmonitor-agent \\\n  \
-             --entrypoint sh {AGENT_BASE_IMAGE} -c \\\n  \
-             'wget -qO /usr/local/bin/netmonitor-agent \"$AGENT_SERVER_URL/api/agents/download/$(uname -m)\" \
-             && chmod +x /usr/local/bin/netmonitor-agent && exec netmonitor-agent'"
-        ),
-    };
+    let docker = format!("{common}{image}", image = agent_image());
     let systemd = format!(
         "curl -fsSL {server_url}/api/agents/install.sh | \\\n  \
          sudo AGENT_SERVER_URL={server_url} AGENT_ENROLL_CODE={code} sh"
@@ -589,12 +575,13 @@ mod tests {
 
     #[test]
     #[serial_test::serial]
-    fn imagem_propria_substitui_o_download() {
+    fn imagem_propria_substitui_a_padrao() {
         std::env::set_var("AGENT_IMAGE", "registry.exemplo/netmonitor-agent:1.0");
         let (docker, _) = install_commands("http://10.8.0.1:3333", "nma_abc");
         std::env::remove_var("AGENT_IMAGE");
         assert!(docker.ends_with("registry.exemplo/netmonitor-agent:1.0"));
-        assert!(!docker.contains("wget"));
+        let (padrao, _) = install_commands("http://10.8.0.1:3333", "nma_abc");
+        assert!(padrao.ends_with(DEFAULT_AGENT_IMAGE));
     }
 
     #[test]

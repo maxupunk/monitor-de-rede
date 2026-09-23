@@ -10,10 +10,7 @@
 # O código só é usado na primeira vez: o token fica no volume `agent-state`.
 services:
   netmonitor-agent:
-    image: ${AGENT_IMAGE:-netmonitor-agent:latest}
-    build:
-      context: ../..
-      target: agent
+    image: ${AGENT_IMAGE:-ghcr.io/maxupunk/netmonitor-agent:latest}
     container_name: netmonitor-agent
     restart: unless-stopped
     # Rede do host: é por ela que o túnel WireGuard do servidor é alcançado e
