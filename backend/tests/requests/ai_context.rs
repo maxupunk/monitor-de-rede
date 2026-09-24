@@ -226,6 +226,7 @@ impl AiDriver for Provedor {
                 usage: Some(AiUsage {
                     prompt_tokens: 1000,
                     completion_tokens: 10,
+                    cached_tokens: 0,
                 }),
                 ..AiChatChunk::default()
             }),
@@ -286,6 +287,7 @@ async fn conversar(
             policy: ToolPolicy::from_settings(&settings),
             tool_loading: ToolLoading::OnDemand,
             memory: memoria,
+            actor: backend::services::audit::AuditActor::default(),
         },
     )
     .await

@@ -98,11 +98,27 @@ struct AiSettingsHelper {
     #[serde(default)]
     allow_actions: bool,
     #[serde(default)]
+    container_actions: AiContainerActionMode,
+    #[serde(default)]
     response_style: AiResponseStyle,
     #[serde(default)]
     proactive: AiProactiveSettings,
     #[serde(default)]
     custom_system_prompt: Option<String>,
+}
+
+/// O que a IA pode fazer com containers Docker (iniciar, parar, reiniciar).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub enum AiContainerActionMode {
+    /// A IA não mexe em container.
+    Off,
+    /// A IA propõe e o usuário confirma no chat.
+    #[default]
+    Confirm,
+    /// A IA executa sozinha; a ação aparece no chat e na auditoria.
+    Auto,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -138,6 +154,10 @@ pub struct AiSettings {
     /// manutenção, criar monitor). Toda ação passa pela confirmação do usuário.
     pub allow_actions: bool,
 
+    /// Iniciar, parar e reiniciar containers: desligado, com confirmação
+    /// (padrão) ou automático.
+    pub container_actions: AiContainerActionMode,
+
     /// Quanto texto a IA devolve: direto (mínimo de tokens) ou normal.
     pub response_style: AiResponseStyle,
 
@@ -166,6 +186,7 @@ impl<'de> Deserialize<'de> for AiSettings {
             allow_active_tools: h.allow_active_tools,
             require_tool_confirmation: h.require_tool_confirmation,
             allow_actions: h.allow_actions,
+            container_actions: h.container_actions,
             response_style: h.response_style,
             proactive: h.proactive,
             custom_system_prompt: h.custom_system_prompt,
@@ -216,6 +237,7 @@ impl Default for AiSettings {
             allow_active_tools: true,
             require_tool_confirmation: false,
             allow_actions: false,
+            container_actions: AiContainerActionMode::default(),
             response_style: AiResponseStyle::default(),
             proactive: AiProactiveSettings::default(),
             custom_system_prompt: None,
@@ -445,6 +467,19 @@ mod tests {
         assert_eq!(settings.openrouter_model, None);
         assert_eq!(settings.opencode_model, None);
         assert_eq!(settings.ollama_model, None);
+    }
+
+    #[test]
+    fn acoes_em_container_pedem_confirmacao_por_padrao() {
+        let antiga: AiSettings = serde_json::from_str(r#"{ "enabled": true }"#).unwrap();
+        assert_eq!(antiga.container_actions, AiContainerActionMode::Confirm);
+        assert_eq!(
+            AiSettings::default().container_actions,
+            AiContainerActionMode::Confirm
+        );
+
+        let auto: AiSettings = serde_json::from_str(r#"{ "containerActions": "auto" }"#).unwrap();
+        assert_eq!(auto.container_actions, AiContainerActionMode::Auto);
     }
 
     #[test]

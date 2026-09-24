@@ -15,7 +15,10 @@
 //! - [`actions`]: ações que mudam o sistema — sempre com confirmação do usuário.
 //! - [`alert_rules`]: origem de um alerta, regras cadastradas, guia e — com
 //!   confirmação — criar ou excluir regra.
-//! - [`docker`]: containers da Docker Engine (estado, sem variáveis de ambiente).
+//! - [`docker`]: containers da central e dos agentes remotos (estado e
+//!   consumo, sem variáveis de ambiente).
+//! - [`platform`]: o próprio NetMonitor — agentes, VPN, topologia, descoberta,
+//!   redes, manutenção, auditoria e notificações.
 //! - [`ask`]: a IA pergunta ao usuário antes de prosseguir.
 
 mod actions;
@@ -32,10 +35,9 @@ mod inventory;
 mod log_digest;
 mod logs;
 mod lookup;
+mod platform;
 mod series;
 mod timeline;
-
-use std::collections::BTreeSet;
 
 use async_trait::async_trait;
 use loco_rs::prelude::AppContext;
@@ -49,8 +51,9 @@ use crate::{
     services::{
         ai::{
             drivers::traits::{AiTool, AiToolFunction},
-            settings::AiSettings,
+            settings::{AiContainerActionMode, AiSettings},
         },
+        audit::AuditActor,
         shared::errors::{AppError, AppResult},
     },
 };
@@ -68,6 +71,10 @@ pub enum ToolKind {
     /// Conversa com o usuário (perguntar antes de prosseguir). Só no chat —
     /// nas rotinas automáticas não há ninguém para responder.
     Interactive,
+    /// Inicia, para ou reinicia container. Tem configuração própria
+    /// ([`AiContainerActionMode`]): desligado, com confirmação (padrão) ou
+    /// automático.
+    ContainerAction,
 }
 
 /// Grupo do catálogo. Só o [`ToolGroup::Core`] vai em toda chamada ao
@@ -86,16 +93,18 @@ pub enum ToolGroup {
     Diagnostics,
     Actions,
     AlertRules,
+    Platform,
 }
 
 impl ToolGroup {
     /// Os grupos que podem ser carregados sob demanda, na ordem do catálogo.
-    pub const DEFERRED: [Self; 8] = [
+    pub const DEFERRED: [Self; 9] = [
         Self::History,
         Self::Analysis,
         Self::Charts,
         Self::Logs,
         Self::Docker,
+        Self::Platform,
         Self::Diagnostics,
         Self::Actions,
         Self::AlertRules,
@@ -113,6 +122,7 @@ impl ToolGroup {
             Self::Diagnostics => "diagnostics",
             Self::Actions => "actions",
             Self::AlertRules => "alert_rules",
+            Self::Platform => "platform",
         }
     }
 
@@ -127,11 +137,16 @@ impl ToolGroup {
             }
             Self::Charts => "gráficos de latência, tráfego e CPU/memória",
             Self::Logs => "panorama dos logs agrupado por padrão",
-            Self::Docker => "containers da Docker Engine",
+            Self::Docker => {
+                "containers da central e dos agentes remotos: estado, consumo de CPU/memória e servidores"
+            }
             Self::Diagnostics => "ping, traceroute, portas, DNS e playbooks",
             Self::Actions => "reconhecer/silenciar alerta, janela de manutenção, criar monitor",
             Self::AlertRules => {
                 "origem de um alerta, regras cadastradas, guia de regras, criar/excluir regra"
+            }
+            Self::Platform => {
+                "agentes remotos, VPN, topologia/vizinhos, descoberta, redes/sites/DNS, manutenção, auditoria, notificações"
             }
         }
     }
@@ -144,8 +159,79 @@ impl ToolGroup {
     }
 }
 
-/// Grupos carregados numa sessão.
-pub type ToolGroups = BTreeSet<ToolGroup>;
+/// Grupos carregados numa sessão, na ordem em que entraram.
+///
+/// A ordem importa: os contratos vão ao provedor nessa sequência, e um grupo
+/// novo entra no fim da lista — o começo dela continua idêntico e o cache de
+/// prefixo do provedor segue valendo.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ToolGroups(Vec<ToolGroup>);
+
+impl ToolGroups {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    /// `false` quando o grupo já estava carregado.
+    pub fn insert(&mut self, group: ToolGroup) -> bool {
+        if self.contains(&group) {
+            return false;
+        }
+        self.0.push(group);
+        true
+    }
+
+    #[must_use]
+    pub fn contains(&self, group: &ToolGroup) -> bool {
+        self.0.contains(group)
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = ToolGroup> + '_ {
+        self.0.iter().copied()
+    }
+
+    /// Ids na ordem de carga, para a tela devolver na próxima pergunta.
+    #[must_use]
+    pub fn ids(&self) -> Vec<String> {
+        self.0.iter().map(|group| group.id().to_string()).collect()
+    }
+
+    /// Grupos pelos ids; o que não existe é ignorado.
+    #[must_use]
+    pub fn from_ids<S: AsRef<str>>(ids: &[S]) -> Self {
+        ids.iter()
+            .filter_map(|id| ToolGroup::from_id(id.as_ref()))
+            .collect()
+    }
+}
+
+impl Extend<ToolGroup> for ToolGroups {
+    fn extend<I: IntoIterator<Item = ToolGroup>>(&mut self, groups: I) {
+        for group in groups {
+            self.insert(group);
+        }
+    }
+}
+
+impl FromIterator<ToolGroup> for ToolGroups {
+    fn from_iter<I: IntoIterator<Item = ToolGroup>>(groups: I) -> Self {
+        let mut set = Self::new();
+        set.extend(groups);
+        set
+    }
+}
+
+impl<const N: usize> From<[ToolGroup; N]> for ToolGroups {
+    fn from(groups: [ToolGroup; N]) -> Self {
+        groups.into_iter().collect()
+    }
+}
 
 /// Ferramenta do próprio agente que carrega grupos do catálogo. Não é um
 /// [`AiToolHandler`]: ela muda o que a sessão enxerga, não consulta nada.
@@ -160,6 +246,8 @@ pub struct ToolPolicy {
     pub confirm_active: bool,
     /// Há alguém do outro lado para responder (chat, não rotina automática).
     pub interactive: bool,
+    /// Ações em container: desligadas, com confirmação ou automáticas.
+    pub container_actions: AiContainerActionMode,
 }
 
 impl ToolPolicy {
@@ -171,6 +259,7 @@ impl ToolPolicy {
             allow_actions: false,
             confirm_active: false,
             interactive: false,
+            container_actions: AiContainerActionMode::Off,
         }
     }
 
@@ -181,6 +270,7 @@ impl ToolPolicy {
             allow_actions: settings.allow_actions,
             confirm_active: settings.require_tool_confirmation,
             interactive: true,
+            container_actions: settings.container_actions,
         }
     }
 
@@ -191,6 +281,9 @@ impl ToolPolicy {
             ToolKind::Active => self.allow_active,
             ToolKind::Action => self.allow_actions,
             ToolKind::Interactive => self.interactive,
+            ToolKind::ContainerAction => {
+                !matches!(self.container_actions, AiContainerActionMode::Off)
+            }
         }
     }
 
@@ -200,6 +293,9 @@ impl ToolPolicy {
             ToolKind::Passive | ToolKind::Interactive => false,
             ToolKind::Active => self.confirm_active,
             ToolKind::Action => true,
+            ToolKind::ContainerAction => {
+                !matches!(self.container_actions, AiContainerActionMode::Auto)
+            }
         }
     }
 }
@@ -273,6 +369,7 @@ pub trait AiToolHandler: Send + Sync {
         match self.kind() {
             ToolKind::Active => ToolGroup::Diagnostics,
             ToolKind::Action => ToolGroup::Actions,
+            ToolKind::ContainerAction => ToolGroup::Docker,
             ToolKind::Passive | ToolKind::Interactive => ToolGroup::Core,
         }
     }
@@ -318,7 +415,12 @@ fn all_handlers() -> Vec<Box<dyn AiToolHandler>> {
         Box::new(charts::DeviceMetricChart),
         Box::new(logs::LogsOverview),
         Box::new(grep::Grep),
+        Box::new(docker::DockerHosts),
         Box::new(docker::DockerContainers),
+        Box::new(docker::DockerUsage),
+        Box::new(docker::DockerContainerAction),
+        Box::new(platform::PlatformStatus),
+        Box::new(platform::Topology),
         Box::new(inventory::SearchDocs),
         Box::new(diagnostics::Ping),
         Box::new(diagnostics::Traceroute),
@@ -363,25 +465,19 @@ impl ToolRegistry {
             .collect()
     }
 
-    /// Contratos do núcleo mais os grupos carregados, e o `load_tools`
-    /// enquanto sobrar grupo por carregar.
+    /// Contratos do núcleo, o `load_tools` e depois os grupos carregados, na
+    /// ordem em que entraram.
+    ///
+    /// A lista só cresce pelo fim: o núcleo e o `load_tools` (com o catálogo
+    /// inteiro no `enum`, carregado ou não) não mudam, então o prefixo que o
+    /// provedor guardou em cache continua batendo depois de um `load_tools`.
+    /// Só quando não sobra nada a carregar o `load_tools` sai.
     #[must_use]
     pub fn definitions_for(&self, loaded: &ToolGroups) -> Vec<AiTool> {
-        let mut tools: Vec<AiTool> = self
-            .handlers
-            .iter()
-            .filter(|handler| {
-                handler.group() == ToolGroup::Core || loaded.contains(&handler.group())
-            })
-            .map(|handler| handler.definition())
-            .collect();
-        let pending: Vec<&str> = self
-            .available_groups()
-            .into_iter()
-            .filter(|group| !loaded.contains(group))
-            .map(ToolGroup::id)
-            .collect();
-        if !pending.is_empty() {
+        let mut tools = self.group_definitions(ToolGroup::Core);
+        let groups = self.available_groups();
+        let available: Vec<&str> = groups.iter().map(|group| group.id()).collect();
+        if groups.iter().any(|group| !loaded.contains(group)) {
             tools.push(AiTool {
                 r#type: "function".to_string(),
                 function: AiToolFunction {
@@ -390,14 +486,25 @@ impl ToolRegistry {
                     parameters: json!({
                         "type": "object",
                         "properties": {
-                            "groups": { "type": "array", "items": { "type": "string", "enum": pending } }
+                            "groups": { "type": "array", "items": { "type": "string", "enum": available } }
                         },
                         "required": ["groups"]
                     }),
                 },
             });
         }
+        for group in loaded.iter().filter(|group| *group != ToolGroup::Core) {
+            tools.extend(self.group_definitions(group));
+        }
         tools
+    }
+
+    fn group_definitions(&self, group: ToolGroup) -> Vec<AiTool> {
+        self.handlers
+            .iter()
+            .filter(|handler| handler.group() == group)
+            .map(|handler| handler.definition())
+            .collect()
     }
 
     /// Grupos sob demanda que a política desta sessão libera.
@@ -456,18 +563,35 @@ impl ToolRegistry {
             .await
     }
 
-    /// Executa uma chamada da IA dentro do chat. O que pede confirmação não
+    /// Executa uma chamada da IA sem usuário identificado.
+    ///
+    /// # Errors
+    ///
+    /// Os mesmos de [`Self::execute_as`].
+    pub async fn execute(
+        &self,
+        ctx: &AppContext,
+        name: &str,
+        arguments_json: &str,
+    ) -> AppResult<ToolOutput> {
+        self.execute_as(ctx, name, arguments_json, &AuditActor::default())
+            .await
+    }
+
+    /// Executa uma chamada da IA dentro do chat, em nome de quem conversa
+    /// (a ação automática fica na auditoria dele). O que pede confirmação não
     /// roda aqui — só por [`Self::execute_confirmed`].
     ///
     /// # Errors
     ///
     /// Ferramenta fora do registro, que exige confirmação, argumento inválido
     /// ou falha do banco.
-    pub async fn execute(
+    pub async fn execute_as(
         &self,
         ctx: &AppContext,
         name: &str,
         arguments_json: &str,
+        actor: &AuditActor,
     ) -> AppResult<ToolOutput> {
         let handler = self.handler(name)?;
         if self.policy.needs_confirmation(handler.kind()) {
@@ -475,7 +599,8 @@ impl ToolRegistry {
                 "A ferramenta {name} exige confirmação do usuário"
             )));
         }
-        handler.execute(ctx, &ToolArgs::parse(arguments_json)).await
+        let args = ToolArgs::parse(arguments_json).with_actor(actor.clone());
+        handler.execute(ctx, &args).await
     }
 
     /// Executa o que o usuário confirmou no chat, em nome dele.
@@ -549,6 +674,7 @@ mod tests {
             allow_actions: true,
             confirm_active: false,
             interactive: true,
+            container_actions: AiContainerActionMode::Confirm,
         });
         assert_eq!(todas.definitions().len(), all_handlers().len());
     }
@@ -560,6 +686,7 @@ mod tests {
             allow_actions: false,
             confirm_active: false,
             interactive: true,
+            container_actions: AiContainerActionMode::Confirm,
         });
         let nomes = |carregados: &ToolGroups| -> Vec<String> {
             registro
@@ -581,12 +708,28 @@ mod tests {
 
         let com_graficos = nomes(&ToolGroups::from([ToolGroup::Charts]));
         assert!(com_graficos.contains(&"chart_monitor_latency".to_string()));
+        assert_eq!(
+            com_graficos[..nucleo.len()],
+            nucleo[..],
+            "grupo carregado entra no fim: o prefixo em cache não muda"
+        );
+
+        let depois = nomes(&ToolGroups::from([ToolGroup::Charts, ToolGroup::History]));
+        assert_eq!(depois[..com_graficos.len()], com_graficos[..]);
 
         let tudo: ToolGroups = registro.available_groups().into_iter().collect();
         assert!(
             !nomes(&tudo).contains(&LOAD_TOOLS.to_string()),
             "nada a carregar, sem load_tools"
         );
+    }
+
+    #[test]
+    fn grupos_guardam_a_ordem_de_carga_sem_repetir() {
+        let mut grupos = ToolGroups::from_ids(&["docker", "history", "inventado", "DOCKER"]);
+        assert!(!grupos.insert(ToolGroup::History));
+        grupos.insert(ToolGroup::Charts);
+        assert_eq!(grupos.ids(), vec!["docker", "history", "charts"]);
     }
 
     #[test]
@@ -604,12 +747,47 @@ mod tests {
     }
 
     #[test]
+    fn acao_em_container_segue_o_modo_configurado() {
+        let modo = |container_actions| {
+            ToolRegistry::new(ToolPolicy {
+                container_actions,
+                ..ToolPolicy::from_settings(&AiSettings::default())
+            })
+        };
+        let padrao = ToolRegistry::new(ToolPolicy::from_settings(&AiSettings::default()));
+        assert!(
+            padrao.needs_confirmation("docker_container_action"),
+            "o padrão é pedir permissão"
+        );
+
+        let auto = modo(AiContainerActionMode::Auto);
+        assert!(!auto.needs_confirmation("docker_container_action"));
+        assert!(auto
+            .tool_names(ToolGroup::Docker)
+            .contains(&"docker_container_action"));
+
+        let desligado = modo(AiContainerActionMode::Off);
+        assert!(!desligado
+            .tool_names(ToolGroup::Docker)
+            .contains(&"docker_container_action"));
+
+        let rotina = ToolRegistry::new(ToolPolicy::passive());
+        assert!(
+            !rotina
+                .tool_names(ToolGroup::Docker)
+                .contains(&"docker_container_action"),
+            "rotina automática nunca mexe em container"
+        );
+    }
+
+    #[test]
     fn acoes_sempre_pedem_confirmacao_e_testes_ativos_so_quando_configurado() {
         let sem = ToolPolicy {
             allow_active: true,
             allow_actions: true,
             confirm_active: false,
             interactive: true,
+            container_actions: AiContainerActionMode::Confirm,
         };
         assert!(!sem.needs_confirmation(ToolKind::Passive));
         assert!(!sem.needs_confirmation(ToolKind::Active));

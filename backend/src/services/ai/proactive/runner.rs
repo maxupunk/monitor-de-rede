@@ -72,6 +72,7 @@ pub async fn ask(
             policy: ToolPolicy::passive(),
             tool_loading: ToolLoading::Everything,
             memory: ConversationMemory::default(),
+            actor: crate::services::audit::AuditActor::default(),
         },
     )
     .await;

@@ -35,6 +35,7 @@ const LEITURA: ToolPolicy = ToolPolicy {
     allow_actions: false,
     confirm_active: false,
     interactive: false,
+    container_actions: backend::services::ai::settings::AiContainerActionMode::Off,
 };
 
 const COM_ACOES: ToolPolicy = ToolPolicy {
@@ -42,6 +43,7 @@ const COM_ACOES: ToolPolicy = ToolPolicy {
     allow_actions: true,
     confirm_active: false,
     interactive: false,
+    container_actions: backend::services::ai::settings::AiContainerActionMode::Off,
 };
 
 async fn aparelho(ctx: &AppContext) -> devices::Model {

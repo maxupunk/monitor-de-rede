@@ -19,7 +19,7 @@ use super::{
         estimate_history, estimate_messages, estimate_tokens, fallback_summary, fold_count,
         prune_tool_results, summarize, ContextBudget,
     },
-    prompt::{build_small_talk_prompt, build_system_prompt, ChatContext},
+    prompt::{build_small_talk_prompt, build_system_prompt, build_turn_context, ChatContext},
     tools::{ToolGroups, ToolPolicy, ToolRegistry, LOAD_TOOLS},
     turn::{compact_for_model, is_small_talk, preselect_groups, requested_groups},
 };
@@ -32,6 +32,7 @@ use crate::{
             mentions,
             settings::AiSettings,
         },
+        audit::AuditActor,
         shared::errors::{AppError, AppResult},
     },
 };
@@ -76,8 +77,14 @@ pub enum HarnessEvent {
     Usage {
         prompt_tokens: u64,
         completion_tokens: u64,
+        /// Parte de `prompt_tokens` servida do cache do provedor (cobrada
+        /// com desconto). Zero quando o provedor não informa.
+        cached_tokens: u64,
         #[serde(skip_serializing_if = "Option::is_none")]
         model: Option<String>,
+        /// Grupos de ferramentas carregados, na ordem: a tela devolve na
+        /// próxima pergunta para a lista de ferramentas não mudar (cache).
+        tool_groups: Vec<String>,
         /// Tokens da última rodada (entrada + saída): o tamanho da conversa
         /// que a próxima pergunta vai carregar.
         context_tokens: u64,
@@ -144,6 +151,8 @@ pub struct AgentRequest {
     pub policy: ToolPolicy,
     pub tool_loading: ToolLoading,
     pub memory: ConversationMemory,
+    /// Quem conversa: a ação que roda sem confirmação fica na auditoria dele.
+    pub actor: AuditActor,
 }
 
 /// O que a tela sabe da conversa além das mensagens.
@@ -159,6 +168,8 @@ pub struct ConversationMemory {
     pub last_model: Option<String>,
     /// Compactar agora, mesmo cabendo (pedido explícito da tela).
     pub force_compaction: bool,
+    /// Grupos de ferramentas que a conversa já carregou, na ordem.
+    pub tool_groups: ToolGroups,
 }
 
 /// Modelos que escolhem outro modelo por pergunta.
@@ -179,7 +190,7 @@ fn with_summary(system_prompt: String, summary: Option<&str>) -> String {
 impl AgentRequest {
     /// Pedido vindo do chat: ferramentas conforme as configurações.
     #[must_use]
-    pub fn from_chat(request: ChatStreamRequest, settings: &AiSettings) -> Self {
+    pub fn from_chat(request: ChatStreamRequest, settings: &AiSettings, actor: AuditActor) -> Self {
         Self {
             messages: request.messages,
             context: ChatContext {
@@ -197,9 +208,15 @@ impl AgentRequest {
                     .filter(|summary| !summary.is_empty()),
                 last_context_tokens: request.context_hint.as_ref().map(|hint| hint.tokens),
                 last_context_window: request.context_hint.as_ref().and_then(|hint| hint.window),
+                tool_groups: request
+                    .context_hint
+                    .as_ref()
+                    .map(|hint| ToolGroups::from_ids(&hint.tool_groups))
+                    .unwrap_or_default(),
                 last_model: request.context_hint.and_then(|hint| hint.model),
                 force_compaction: request.compact,
             },
+            actor,
         }
     }
 }
@@ -241,6 +258,8 @@ struct TurnMetrics {
     window: Option<(String, ContextWindow)>,
     /// Tamanho estimado da conversa, para quando o provedor não mede.
     estimated_context: u64,
+    /// Grupos carregados ao fim da resposta.
+    tool_groups: Vec<String>,
 }
 
 impl TurnMetrics {
@@ -255,6 +274,7 @@ impl TurnMetrics {
             generation: Duration::ZERO,
             window: None,
             estimated_context: 0,
+            tool_groups: Vec::new(),
         }
     }
 
@@ -305,6 +325,8 @@ impl TurnMetrics {
         Some(HarnessEvent::Usage {
             prompt_tokens: self.usage.prompt_tokens,
             completion_tokens: self.usage.completion_tokens,
+            cached_tokens: self.usage.cached_tokens,
+            tool_groups: self.tool_groups.clone(),
             context_tokens: if measured > 0 {
                 measured
             } else {
@@ -341,6 +363,7 @@ async fn handle_tool_call(
     sink: &EventSink,
     conversation: &mut Vec<AiMessage>,
     loaded: &mut ToolGroups,
+    actor: &AuditActor,
     tool: AiToolCall,
 ) -> ToolFlow {
     let arguments: serde_json::Value =
@@ -349,18 +372,22 @@ async fn handle_tool_call(
     // Carregar grupos é coisa do agente, não consulta: a tela não vê.
     if tool.name == LOAD_TOOLS {
         let available = registry.available_groups();
-        let groups: Vec<_> = requested_groups(&arguments)
+        let (fresh, already): (Vec<_>, Vec<_>) = requested_groups(&arguments)
             .into_iter()
             .filter(|group| available.contains(group))
-            .collect();
-        loaded.extend(groups.iter().copied());
-        let tools: Vec<&str> = groups
+            .partition(|group| loaded.insert(*group));
+        let tools: Vec<&str> = fresh
             .iter()
             .flat_map(|group| registry.tool_names(*group))
             .collect();
+        let mut reply = json!({ "loaded": tools });
+        if !already.is_empty() {
+            reply["already_loaded"] =
+                json!(already.iter().map(|group| group.id()).collect::<Vec<_>>());
+        }
         conversation.push(AiMessage {
             role: "tool".to_string(),
-            content: Some(json!({ "loaded": tools }).to_string()),
+            content: Some(reply.to_string()),
             tool_calls: None,
             tool_call_id: Some(tool.id),
         });
@@ -400,7 +427,10 @@ async fn handle_tool_call(
         {
             return ToolFlow::Disconnected;
         }
-        let (result, chart) = match registry.execute(ctx, &tool.name, &tool.arguments).await {
+        let (result, chart) = match registry
+            .execute_as(ctx, &tool.name, &tool.arguments, actor)
+            .await
+        {
             Ok(output) => {
                 if output.ends_turn {
                     flow = ToolFlow::EndTurn;
@@ -450,27 +480,37 @@ pub async fn run_agent_loop(
         let requested = request.messages.clone();
         let mut history = recent_history(request.messages, MAX_HISTORY_MESSAGES);
         let small_talk = request.tool_loading == ToolLoading::OnDemand && is_small_talk(&history);
-        let mut loaded: ToolGroups = match request.tool_loading {
-            ToolLoading::Everything => registry.available_groups().into_iter().collect(),
+        let available = registry.available_groups();
+        let preselected: ToolGroups = match request.tool_loading {
+            ToolLoading::Everything => available.iter().copied().collect(),
             ToolLoading::OnDemand => {
                 let question = history
                     .last()
                     .map_or("", |message| message.content.as_str());
                 preselect_groups(question, &request.context.mentions)
+                    .iter()
+                    .filter(|group| available.contains(group))
+                    .collect()
             }
         };
+        // O que a conversa já carregou vem primeiro, na mesma ordem: a lista
+        // de ferramentas repete a da pergunta anterior e o cache vale.
+        let mut loaded: ToolGroups = request
+            .memory
+            .tool_groups
+            .iter()
+            .filter(|group| available.contains(group))
+            .chain(preselected.iter())
+            .collect();
         let system_prompt = if small_talk {
             history = recent_history(history, SMALL_TALK_HISTORY);
             build_small_talk_prompt(&settings)
         } else {
             build_system_prompt(
-                &ctx.db,
                 &settings,
                 request.policy,
-                &request.context,
-                &loaded,
+                request.tool_loading == ToolLoading::OnDemand,
             )
-            .await
         };
 
         let mut metrics = TurnMetrics::new(driver.model());
@@ -542,6 +582,9 @@ pub async fn run_agent_loop(
                         return;
                     }
                     summary = Some(text);
+                    // O prefixo mudou de qualquer jeito: a conversa recomeça
+                    // só com o que esta pergunta pede.
+                    loaded = preselected.clone();
                 }
             }
         }
@@ -550,6 +593,17 @@ pub async fn run_agent_loop(
         } else {
             with_summary(system_prompt, summary.as_deref())
         };
+
+        if !small_talk {
+            let turn_context = build_turn_context(&ctx.db, &request.context).await;
+            if let Some(last) = history
+                .iter_mut()
+                .rev()
+                .find(|message| message.role == "user")
+            {
+                last.content = format!("{turn_context}{}", last.content);
+            }
+        }
 
         let mut conversation = vec![AiMessage {
             role: "system".to_string(),
@@ -578,6 +632,7 @@ pub async fn run_agent_loop(
                 tracing::info!("resultados de ferramenta antigos podados para caber na janela");
             }
             metrics.estimated_context = estimate_messages(&conversation) + tools_tokens;
+            metrics.tool_groups = loaded.ids();
             metrics.start_round();
             let mut stream = match driver.chat_stream(&conversation, &tools, options).await {
                 Ok(stream) => stream,
@@ -634,14 +689,23 @@ pub async fn run_agent_loop(
             });
             let mut ends_turn = false;
             for tool in pending_tools {
-                match handle_tool_call(&ctx, &registry, &sink, &mut conversation, &mut loaded, tool)
-                    .await
+                match handle_tool_call(
+                    &ctx,
+                    &registry,
+                    &sink,
+                    &mut conversation,
+                    &mut loaded,
+                    &request.actor,
+                    tool,
+                )
+                .await
                 {
                     ToolFlow::Disconnected => return,
                     ToolFlow::EndTurn => ends_turn = true,
                     ToolFlow::Continue => {}
                 }
             }
+            metrics.tool_groups = loaded.ids();
             if ends_turn {
                 return sink.finish(&mut metrics, driver.as_ref()).await;
             }
@@ -672,11 +736,13 @@ pub async fn collect_answer(mut stream: HarnessEventStream) -> AppResult<AgentAn
             HarnessEvent::Usage {
                 prompt_tokens,
                 completion_tokens,
+                cached_tokens,
                 ..
             } => {
                 answer.usage = AiUsage {
                     prompt_tokens,
                     completion_tokens,
+                    cached_tokens,
                 };
             }
             HarnessEvent::Error { message } => {
@@ -732,7 +798,9 @@ mod tests {
         let uso = serde_json::to_value(HarnessEvent::Usage {
             prompt_tokens: 1200,
             completion_tokens: 80,
+            cached_tokens: 1024,
             model: Some("openai/gpt-4o-mini".into()),
+            tool_groups: vec!["docker".into()],
             context_tokens: 900,
             context_window: Some(128_000),
             context_window_reported: true,
@@ -749,6 +817,8 @@ mod tests {
         assert_eq!(uso["contextWindowReported"], true);
         assert_eq!(uso["generationMs"], 1500);
         assert_eq!(uso["durationMs"], 4200);
+        assert_eq!(uso["cachedTokens"], 1024);
+        assert_eq!(uso["toolGroups"], serde_json::json!(["docker"]));
 
         let pedido = serde_json::to_value(HarnessEvent::ConfirmationRequired {
             id: "c1".into(),
@@ -773,11 +843,13 @@ mod tests {
         metricas.add_usage(AiUsage {
             prompt_tokens: 1000,
             completion_tokens: 50,
+            cached_tokens: 0,
         });
         metricas.start_round();
         metricas.add_usage(AiUsage {
             prompt_tokens: 1400,
             completion_tokens: 120,
+            cached_tokens: 0,
         });
         metricas.model = Some("meta-llama/llama-3.3-70b-instruct".into());
 

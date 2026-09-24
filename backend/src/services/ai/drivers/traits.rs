@@ -120,6 +120,8 @@ pub struct AiTool {
 pub struct AiUsage {
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
+    /// Parte de `prompt_tokens` lida do cache de prefixo do provedor.
+    pub cached_tokens: u64,
 }
 
 impl AiUsage {
@@ -127,9 +129,17 @@ impl AiUsage {
     #[must_use]
     pub fn from_openai(value: &serde_json::Value) -> Option<Self> {
         let field = |name: &str| value.get(name).and_then(serde_json::Value::as_u64);
+        // OpenAI e OpenRouter: `prompt_tokens_details.cached_tokens`;
+        // DeepSeek: `prompt_cache_hit_tokens`.
+        let cached = value
+            .pointer("/prompt_tokens_details/cached_tokens")
+            .and_then(serde_json::Value::as_u64)
+            .or_else(|| field("prompt_cache_hit_tokens"))
+            .unwrap_or(0);
         let usage = Self {
             prompt_tokens: field("prompt_tokens").unwrap_or(0),
             completion_tokens: field("completion_tokens").unwrap_or(0),
+            cached_tokens: cached,
         };
         (usage != Self::default()).then_some(usage)
     }
@@ -137,6 +147,7 @@ impl AiUsage {
     pub fn add(&mut self, other: Self) {
         self.prompt_tokens += other.prompt_tokens;
         self.completion_tokens += other.completion_tokens;
+        self.cached_tokens += other.cached_tokens;
     }
 }
 
@@ -259,9 +270,15 @@ mod tests {
             usage,
             Some(AiUsage {
                 prompt_tokens: 1200,
-                completion_tokens: 85
+                completion_tokens: 85,
+                cached_tokens: 0,
             })
         );
+        let cacheado = AiUsage::from_openai(&serde_json::json!({
+            "prompt_tokens": 1200, "completion_tokens": 85,
+            "prompt_tokens_details": { "cached_tokens": 1024 }
+        }));
+        assert_eq!(cacheado.map(|usage| usage.cached_tokens), Some(1024));
         assert_eq!(AiUsage::from_openai(&serde_json::json!(null)), None);
 
         let mut total = AiUsage::default();

@@ -13,7 +13,7 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 
 use super::{
     super::{
-        docker::{resolve_container, unavailable_message},
+        docker::{resolve_container, resolve_host, unavailable_message},
         log_digest::label_of,
         logs::{logs_disabled_message, origin_labeler},
         lookup::device_names,
@@ -27,7 +27,7 @@ use crate::{
         logs::device_logs,
     },
     services::{
-        docker::{engine, source::LocalEngine},
+        docker::engine,
         shared::errors::AppResult,
         syslog::{
             db::LogsDb,
@@ -51,6 +51,8 @@ pub struct GrepFilter {
     pub needle: Option<String>,
     /// Nome ou id do container (só a fonte `docker`).
     pub container: Option<String>,
+    /// Servidor Docker do container (só a fonte `docker`); `None` é a central.
+    pub host: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -292,22 +294,22 @@ impl DockerLogs {
 
 #[async_trait]
 impl GrepSource for DockerLogs {
-    async fn scan(
-        &self,
-        _ctx: &AppContext,
-        filter: &GrepFilter,
-    ) -> AppResult<Result<Scan, String>> {
+    async fn scan(&self, ctx: &AppContext, filter: &GrepFilter) -> AppResult<Result<Scan, String>> {
         let Some(identifier) = filter.container.as_deref() else {
             return Ok(Err(
                 "Informe 'container' (nome ou id; get_docker_containers lista)".into(),
             ));
         };
-        let container = match resolve_container(identifier).await {
+        let host = match resolve_host(ctx, filter.host.as_deref()).await? {
+            Ok(host) => host,
+            Err(message) => return Ok(Err(message)),
+        };
+        let container = match resolve_container(host.engine.as_ref(), identifier).await {
             Ok(container) => container,
             Err(message) => return Ok(Err(message)),
         };
         let entries = match engine::container_logs(
-            &LocalEngine,
+            host.engine.as_ref(),
             &container.id,
             engine::LogFilters {
                 tail: SCAN_CAP.to_string(),

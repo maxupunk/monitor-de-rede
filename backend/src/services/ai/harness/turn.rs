@@ -117,7 +117,35 @@ const HINTS: &[(ToolGroup, &[&str])] = &[
         ],
     ),
     (ToolGroup::Logs, &["log", "logs", "syslog"]),
-    (ToolGroup::Docker, &["docker", "container", "containers"]),
+    (
+        ToolGroup::Docker,
+        &["docker", "container", "containers", "reinici", "restart"],
+    ),
+    (
+        ToolGroup::Platform,
+        &[
+            "agente",
+            "vpn",
+            "wireguard",
+            "peer",
+            "tunel",
+            "topolog",
+            "vizinh",
+            "uplink",
+            "descobert",
+            "varredura",
+            "subrede",
+            "cidr",
+            "vlan",
+            "site",
+            "auditor",
+            "notifica",
+            "telegram",
+            "email",
+            "webhook",
+            "discord",
+        ],
+    ),
     (
         ToolGroup::Diagnostics,
         &[
@@ -214,18 +242,109 @@ pub fn requested_groups(arguments: &Value) -> Vec<ToolGroup> {
         .collect()
 }
 
-/// O resultado como a IA o recebe: inteiro quando cabe, cortado com aviso
-/// quando não — o aviso diz como pedir menos.
+/// Marcador que substitui os itens cortados de uma lista.
+const OMITTED_KEY: &str = "_omitidos";
+
+/// Tamanho serializado de um valor, em caracteres.
+fn size(value: &Value) -> usize {
+    value.to_string().chars().count()
+}
+
+/// Passo do caminho até um valor dentro do JSON.
+#[derive(Clone)]
+enum Step {
+    Key(String),
+    Index(usize),
+}
+
+/// Caminho da lista mais pesada que ainda dá para encurtar (mais de um item
+/// que não seja o marcador).
+fn heaviest_array_path(value: &Value) -> Option<Vec<Step>> {
+    let mut best: Option<(usize, Vec<Step>)> = None;
+    let mut stack: Vec<(&Value, Vec<Step>)> = vec![(value, Vec::new())];
+    while let Some((node, path)) = stack.pop() {
+        match node {
+            Value::Array(items) => {
+                let real = items
+                    .iter()
+                    .filter(|item| item.get(OMITTED_KEY).is_none())
+                    .count();
+                let weight = items.iter().map(size).sum::<usize>();
+                if real > 1 && best.as_ref().is_none_or(|(heaviest, _)| weight > *heaviest) {
+                    best = Some((weight, path.clone()));
+                }
+                for (index, item) in items.iter().enumerate() {
+                    let mut child = path.clone();
+                    child.push(Step::Index(index));
+                    stack.push((item, child));
+                }
+            }
+            Value::Object(map) => {
+                for (key, item) in map {
+                    let mut child = path.clone();
+                    child.push(Step::Key(key.clone()));
+                    stack.push((item, child));
+                }
+            }
+            _ => {}
+        }
+    }
+    best.map(|(_, path)| path)
+}
+
+fn array_at<'a>(value: &'a mut Value, path: &[Step]) -> Option<&'a mut Vec<Value>> {
+    let mut node = value;
+    for step in path {
+        node = match step {
+            Step::Key(key) => node.get_mut(key.as_str())?,
+            Step::Index(index) => node.get_mut(*index)?,
+        };
+    }
+    node.as_array_mut()
+}
+
+/// Corta a lista pela metade e soma o que saiu no marcador do fim.
+fn halve(items: &mut Vec<Value>) {
+    let already = match items.last().and_then(|item| item.get(OMITTED_KEY)) {
+        Some(count) => {
+            let count = count.as_u64().unwrap_or(0);
+            items.pop();
+            count
+        }
+        None => 0,
+    };
+    let keep = items.len().div_ceil(2);
+    let removed = (items.len() - keep) as u64;
+    items.truncate(keep);
+    items.push(serde_json::json!({ OMITTED_KEY: already + removed }));
+}
+
+/// O resultado como a IA o recebe: inteiro quando cabe; senão as listas mais
+/// pesadas são encurtadas (com a contagem do que saiu) até caber, e o JSON
+/// continua válido. Só em último caso o texto é cortado.
 #[must_use]
 pub fn compact_for_model(result: &Value) -> String {
     let text = result.to_string();
     if text.chars().count() <= MAX_TOOL_RESULT_CHARS {
         return text;
     }
+    let total = text.chars().count();
+    let mut shrunk = result.clone();
+    while size(&shrunk) > MAX_TOOL_RESULT_CHARS {
+        let Some(items) =
+            heaviest_array_path(&shrunk).and_then(|path| array_at(&mut shrunk, &path))
+        else {
+            break;
+        };
+        halve(items);
+    }
+    let text = shrunk.to_string();
+    if text.chars().count() <= MAX_TOOL_RESULT_CHARS {
+        return text;
+    }
     let cut: String = text.chars().take(MAX_TOOL_RESULT_CHARS).collect();
     format!(
-        "{cut}… [resultado cortado em {MAX_TOOL_RESULT_CHARS} de {} caracteres; refine os filtros para ver o resto]",
-        text.chars().count()
+        "{cut}… [resultado cortado em {MAX_TOOL_RESULT_CHARS} de {total} caracteres; refine os filtros para ver o resto]"
     )
 }
 
@@ -290,6 +409,8 @@ mod tests {
         );
 
         assert!(preselect_groups("Por que a borda caiu?", &[]).contains(&ToolGroup::Analysis));
+        assert!(preselect_groups("o agente da filial está conectado?", &[])
+            .contains(&ToolGroup::Platform));
         assert!(preselect_groups("quais dispositivos estão offline?", &[]).is_empty());
 
         let container = AiMention {
@@ -320,6 +441,21 @@ mod tests {
     fn resultado_grande_e_cortado_com_aviso() {
         let pequeno = json!({ "total": 1 });
         assert_eq!(compact_for_model(&pequeno), pequeno.to_string());
+
+        let lista = json!({
+            "total": 400,
+            "itens": (0..400).map(|i| json!({ "id": i, "nome": format!("dispositivo-{i}") })).collect::<Vec<_>>(),
+        });
+        let encurtado = compact_for_model(&lista);
+        assert!(encurtado.chars().count() <= MAX_TOOL_RESULT_CHARS);
+        let lido: Value = serde_json::from_str(&encurtado).expect("continua JSON válido");
+        let itens = lido["itens"].as_array().unwrap();
+        let omitidos = itens.last().unwrap()[OMITTED_KEY].as_u64().unwrap();
+        assert_eq!(
+            itens.len() as u64 - 1 + omitidos,
+            400,
+            "nada some sem ser contado"
+        );
 
         let grande = json!({ "texto": "x".repeat(MAX_TOOL_RESULT_CHARS * 2) });
         let cortado = compact_for_model(&grande);

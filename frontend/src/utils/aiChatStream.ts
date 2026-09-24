@@ -35,6 +35,10 @@ export interface AiUsageInfo {
   generationMs?: number
   /** Tempo total da resposta, ferramentas incluídas. */
   durationMs?: number
+  /** Parte da entrada servida do cache do provedor. */
+  cachedTokens?: number
+  /** Grupos de ferramentas carregados — voltam na próxima pergunta. */
+  toolGroups?: string[]
 }
 
 /** Registro de uma compactação: as mensagens até esta viraram `summary`. */
@@ -96,6 +100,13 @@ function usageFrom(event: Record<string, unknown>): AiUsageInfo {
   if (durationMs !== undefined) usage.durationMs = durationMs
   if (typeof event.contextWindowReported === 'boolean') {
     usage.contextWindowReported = event.contextWindowReported
+  }
+  const cachedTokens = positive(event.cachedTokens)
+  if (cachedTokens !== undefined) usage.cachedTokens = cachedTokens
+  if (Array.isArray(event.toolGroups)) {
+    usage.toolGroups = event.toolGroups.filter(
+      (group): group is string => typeof group === 'string'
+    )
   }
   return usage
 }
@@ -237,6 +248,7 @@ export function buildChatHistory(messages: AiDisplayMessage[]): AiChatHistory {
         tokens: usage.contextTokens,
         window: usage.contextWindow ?? null,
         model: usage.model ?? null,
+        toolGroups: usage.toolGroups ?? [],
       }
       break
     }

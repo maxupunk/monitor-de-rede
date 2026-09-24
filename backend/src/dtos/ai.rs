@@ -54,6 +54,11 @@ pub struct ContextHint {
     /// Modelo que respondeu.
     #[serde(default)]
     pub model: Option<String>,
+    /// Grupos de ferramentas que a conversa carregou, na ordem (evento
+    /// `usage`). Voltam iguais para a lista de ferramentas não mudar e o
+    /// cache de prefixo do provedor continuar valendo.
+    #[serde(default)]
+    pub tool_groups: Vec<String>,
 }
 
 #[derive(Deserialize)]

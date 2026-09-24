@@ -58,6 +58,7 @@ impl AiDriver for Resposta {
                 usage: Some(AiUsage {
                     prompt_tokens: 900,
                     completion_tokens: 40,
+                    cached_tokens: 0,
                 }),
                 ..AiChatChunk::default()
             }),

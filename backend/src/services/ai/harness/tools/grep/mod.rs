@@ -91,6 +91,7 @@ Prefira count/sources para medir antes de pedir linhas."
                 "output": { "type": "string", "enum": ["auto", "count", "sources", "patterns", "lines"] },
                 "device": { "type": "string", "description": "Nome, IP ou id do dispositivo" },
                 "container": { "type": "string", "description": "Só docker: nome ou id do container" },
+                "host": { "type": "string", "description": "Só docker: servidor do container (agente remoto; padrão: a central)" },
                 "severity": { "type": "string", "description": "Só logs: severidade máxima (error, warning, notice, info ou 0-7)" },
                 "hours": { "type": "integer", "description": "Janela em horas (1 a 168, padrão 24)" },
                 "max_lines": { "type": "integer", "description": "Linhas em 'lines'/'auto' (1 a 50, padrão 15)" },
@@ -146,6 +147,7 @@ Prefira count/sources para medir antes de pedir linhas."
             // Só texto literal ajuda o banco: regex é casada em memória.
             needle: pattern.filter(|_| !regex),
             container: args.text("container"),
+            host: args.text("host"),
         };
 
         let scan = match source.scan(ctx, &filter).await? {

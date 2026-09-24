@@ -76,6 +76,23 @@ const TOOL_META: Record<string, AiToolMeta> = {
   },
   grep: { label: 'Busca nos Dados (grep)', icon: 'mdi-text-search', color: 'blue-grey' },
   get_docker_containers: { label: 'Containers Docker', icon: 'mdi-docker', color: 'info' },
+  get_docker_hosts: { label: 'Servidores Docker', icon: 'mdi-server-network', color: 'info' },
+  get_docker_usage: {
+    label: 'Consumo dos Containers',
+    icon: 'mdi-chart-box-outline',
+    color: 'info',
+  },
+  docker_container_action: {
+    label: 'Ação em Container',
+    icon: 'mdi-restart',
+    color: 'warning',
+  },
+  get_platform_status: {
+    label: 'Estado da Plataforma',
+    icon: 'mdi-view-dashboard-outline',
+    color: 'blue-grey',
+  },
+  get_topology: { label: 'Topologia', icon: 'mdi-sitemap-outline', color: 'blue-grey' },
   ask_user: {
     label: 'Pergunta ao Usuário',
     icon: 'mdi-account-question-outline',

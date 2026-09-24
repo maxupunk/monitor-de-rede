@@ -4,11 +4,14 @@
 use chrono::Utc;
 use sea_orm::{ConnectionTrait, EntityTrait};
 
-use super::tools::{ToolGroups, ToolPolicy, ToolRegistry};
+use super::tools::{ToolPolicy, ToolRegistry};
 use crate::{
     dtos::ai::{AiMention, AiMentionKind},
     models::{alert_events, devices, monitors},
-    services::ai::{mentions, settings::AiSettings},
+    services::ai::{
+        mentions,
+        settings::{AiContainerActionMode, AiSettings},
+    },
 };
 
 /// Onde o usuário estava quando abriu o chat e o que marcou na pergunta.
@@ -42,14 +45,28 @@ const ACTIONS: &str = "9. Ações (reconhecer/silenciar alerta, janela de manute
 executadas depois que o usuário confirma no chat. Proponha a ação quando ela resolver o pedido; ao receber \
 'awaiting_user_confirmation', diga em uma frase o que foi proposto e não repita a chamada.";
 
-/// Uma linha por grupo ainda não carregado: nome, para que serve e
-/// ferramentas. Nada quando a sessão já recebeu o catálogo inteiro.
-fn catalog_section(policy: ToolPolicy, loaded: &ToolGroups) -> Option<String> {
+/// Regra das ações em container, conforme o modo configurado.
+const fn container_rule(mode: AiContainerActionMode) -> Option<&'static str> {
+    match mode {
+        AiContainerActionMode::Off => None,
+        AiContainerActionMode::Confirm => Some(
+            "10. Containers (docker_container_action: iniciar, parar, reiniciar) só rodam depois que o usuário confirma. Proponha quando o diagnóstico mostrar o container parado ou travado; ao receber 'awaiting_user_confirmation', não repita a chamada.",
+        ),
+        AiContainerActionMode::Auto => Some(
+            "10. Containers (docker_container_action: iniciar, parar, reiniciar) rodam na hora, sem confirmação. Só aja quando o usuário pediu ou o diagnóstico mostrou o container parado ou travado — nunca por tentativa. Diga em uma frase o que fez.",
+        ),
+    }
+}
+
+/// Uma linha por grupo do catálogo: nome, para que serve e ferramentas.
+///
+/// Lista todos, carregados ou não: o system prompt não muda quando um grupo
+/// entra, e o cache de prefixo do provedor continua valendo.
+fn catalog_section(policy: ToolPolicy) -> Option<String> {
     let registry = ToolRegistry::new(policy);
     let lines: Vec<String> = registry
         .available_groups()
         .into_iter()
-        .filter(|group| !loaded.contains(group))
         .map(|group| {
             format!(
                 "- {}: {} ({})",
@@ -61,8 +78,12 @@ fn catalog_section(policy: ToolPolicy, loaded: &ToolGroups) -> Option<String> {
         .collect();
     (!lines.is_empty()).then(|| {
         format!(
-            "\nFERRAMENTAS SOB DEMANDA — carregue com load_tools (todos os grupos necessários numa chamada) antes de usar:\n{}\n",
-            lines.join("\n")
+            "
+FERRAMENTAS SOB DEMANDA — carregue com load_tools (todos os grupos necessários numa chamada) antes de usar; um grupo carregado continua disponível na conversa:
+{}
+",
+            lines.join("
+")
         )
     })
 }
@@ -170,16 +191,23 @@ async fn context_sections<C: ConnectionTrait>(db: &C, context: &ChatContext) -> 
 }
 
 /// Monta o system prompt.
-pub async fn build_system_prompt<C: ConnectionTrait>(
-    db: &C,
+///
+/// Só entra o que vale para a conversa inteira: ele abre toda chamada ao
+/// provedor, e qualquer byte diferente invalida o cache de prefixo de tudo o
+/// que vem depois (ferramentas e histórico). A data vai sem hora pelo mesmo
+/// motivo; a hora exata, as marcações e a tela vão em [`build_turn_context`].
+///
+/// `with_catalog` é falso quando a sessão já recebe todas as ferramentas
+/// (rotinas automáticas): não há o que carregar.
+#[must_use]
+pub fn build_system_prompt(
     settings: &AiSettings,
     policy: ToolPolicy,
-    context: &ChatContext,
-    loaded: &ToolGroups,
+    with_catalog: bool,
 ) -> String {
-    let now = Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
+    let today = Utc::now().format("%Y-%m-%d");
     let mut prompt = format!(
-        "Você é o NetMonitor AI, engenheiro de redes sênior integrado ao NetMonitor. Agora: {now}.\n\n{METHOD}\n"
+        "Você é o NetMonitor AI, engenheiro de redes sênior integrado ao NetMonitor. Hoje: {today} (a hora exata vem no bloco <contexto> da pergunta).\n\n{METHOD}\n"
     );
     if policy.allow_active {
         prompt.push_str(ACTIVE_TOOLS);
@@ -189,7 +217,13 @@ pub async fn build_system_prompt<C: ConnectionTrait>(
         prompt.push_str(ACTIONS);
         prompt.push('\n');
     }
-    prompt.extend(catalog_section(policy, loaded));
+    if let Some(rule) = container_rule(policy.container_actions) {
+        prompt.push_str(rule);
+        prompt.push('\n');
+    }
+    if with_catalog {
+        prompt.extend(catalog_section(policy));
+    }
     prompt.push('\n');
     prompt.push_str(settings.response_style.directive());
     prompt.push('\n');
@@ -204,24 +238,33 @@ pub async fn build_system_prompt<C: ConnectionTrait>(
         prompt.push_str(custom);
         prompt.push('\n');
     }
+    prompt
+}
+
+/// O que muda a cada pergunta: a hora, o que foi marcado com `@` e a tela de
+/// onde o chat foi aberto. Vai junto da última pergunta, não no system
+/// prompt — assim a conversa anterior continua em cache.
+pub async fn build_turn_context<C: ConnectionTrait>(db: &C, context: &ChatContext) -> String {
+    let now = Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
+    let mut block = format!("<contexto>\nAgora: {now}\n");
 
     if !context.mentions.is_empty() {
-        prompt.push_str(
-            "\nMARCADOS COM @ NA PERGUNTA (o alvo dela; têm prioridade sobre o contexto da tela):\n",
+        block.push_str(
+            "MARCADOS COM @ NA PERGUNTA (o alvo dela; têm prioridade sobre o contexto da tela):\n",
         );
         for mention in &context.mentions {
-            prompt.push_str(&mention_section(db, mention).await);
-            prompt.push('\n');
+            block.push_str(&mention_section(db, mention).await);
+            block.push('\n');
         }
     }
 
     let sections = context_sections(db, context).await;
     if !sections.is_empty() {
-        prompt.push_str(
-            "\nCONTEXTO DA TELA DE ONDE O CHAT FOI ABERTO (vale enquanto a pergunta for sobre ele):\n",
-        );
-        prompt.push_str(&sections.join("\n"));
-        prompt.push('\n');
+        block
+            .push_str("TELA DE ONDE O CHAT FOI ABERTO (vale enquanto a pergunta for sobre ela):\n");
+        block.push_str(&sections.join("\n"));
+        block.push('\n');
     }
-    prompt
+    block.push_str("</contexto>\n\n");
+    block
 }

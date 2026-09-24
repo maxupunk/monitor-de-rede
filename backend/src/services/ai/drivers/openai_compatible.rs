@@ -153,6 +153,39 @@ fn clean_provider_error_message(
 }
 
 /// Lê o stream SSE do provedor numa task e devolve os pedaços já interpretados.
+/// Modelos que só guardam o prefixo em cache com marcação explícita
+/// (`cache_control`). OpenAI, DeepSeek e afins fazem sozinhos.
+fn needs_cache_breakpoints(driver_id: &str, model: &str) -> bool {
+    let model = model.to_ascii_lowercase();
+    driver_id == "openrouter"
+        && (model.starts_with("anthropic/") || model.contains("claude") || model.contains("gemini"))
+}
+
+/// Marca o system prompt e a última pergunta como pontos de cache.
+///
+/// O system prompt (com os contratos das ferramentas, que vêm antes dele)
+/// é o mesmo a conversa inteira; a última pergunta fecha o prefixo que a
+/// próxima rodada — e a próxima pergunta — reaproveita.
+fn with_cache_breakpoints(messages: &mut serde_json::Value) {
+    let Some(list) = messages.as_array_mut() else {
+        return;
+    };
+    let last_user = list.iter().rposition(|message| message["role"] == "user");
+    for index in [Some(0), last_user].into_iter().flatten() {
+        let message = &mut list[index];
+        if index == 0 && message["role"] != "system" {
+            continue;
+        }
+        if let Some(text) = message["content"].as_str().map(ToString::to_string) {
+            message["content"] = json!([{
+                "type": "text",
+                "text": text,
+                "cache_control": { "type": "ephemeral" }
+            }]);
+        }
+    }
+}
+
 fn spawn_sse_reader(res: reqwest::Response) -> AiChunkStream {
     let (sender, receiver) = mpsc::channel(64);
 
@@ -397,6 +430,9 @@ impl AiDriver for OpenAiCompatibleDriver {
         if !tools.is_empty() {
             body["tools"] = json!(tools);
         }
+        if needs_cache_breakpoints(self.driver_id, &self.model) {
+            with_cache_breakpoints(&mut body["messages"]);
+        }
         if let Some(max_tokens) = options.max_tokens {
             body["max_tokens"] = json!(max_tokens);
         }
@@ -546,5 +582,47 @@ impl AiDriver for OpenAiCompatibleDriver {
                 model: Some(self.model.clone()),
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cache_explicito_so_para_quem_precisa_de_marcacao() {
+        assert!(needs_cache_breakpoints(
+            "openrouter",
+            "anthropic/claude-sonnet-5"
+        ));
+        assert!(needs_cache_breakpoints(
+            "openrouter",
+            "google/gemini-2.5-pro"
+        ));
+        assert!(!needs_cache_breakpoints("openrouter", "openai/gpt-5"));
+        assert!(!needs_cache_breakpoints("ollama", "claude-imitacao"));
+    }
+
+    #[test]
+    fn marca_o_system_prompt_e_a_ultima_pergunta() {
+        let mut mensagens = json!([
+            { "role": "system", "content": "papel" },
+            { "role": "user", "content": "primeira" },
+            { "role": "assistant", "content": "resposta" },
+            { "role": "user", "content": "segunda" },
+            { "role": "tool", "content": "{}", "tool_call_id": "1" }
+        ]);
+        with_cache_breakpoints(&mut mensagens);
+        assert_eq!(mensagens[0]["content"][0]["text"], "papel");
+        assert_eq!(
+            mensagens[0]["content"][0]["cache_control"]["type"],
+            "ephemeral"
+        );
+        assert_eq!(mensagens[1]["content"], "primeira");
+        assert_eq!(mensagens[3]["content"][0]["text"], "segunda");
+        assert_eq!(
+            mensagens[4]["content"], "{}",
+            "resultado de ferramenta fica como texto"
+        );
     }
 }

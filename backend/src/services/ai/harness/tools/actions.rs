@@ -29,13 +29,13 @@ const WINDOW_MAX: i64 = 7 * 24 * 60;
 const CREATABLE_MONITORS: &[&str] = &["ping", "http", "https", "tcp", "dns"];
 
 /// Marca no registro de auditoria que a ação veio do chat.
-const VIA_AI: &str = "via Assistente IA";
+pub(super) const VIA_AI: &str = "via Assistente IA";
 
 fn local_time(at: DateTime<Utc>) -> String {
     at.with_timezone(&Local).format("%d/%m %H:%M").to_string()
 }
 
-async fn audit(ctx: &AppContext, args: &ToolArgs, entry: AuditEntryInput) {
+pub(super) async fn audit(ctx: &AppContext, args: &ToolArgs, entry: AuditEntryInput) {
     let _ = AuditService::new(&ctx.db)
         .log(args.actor().clone(), entry)
         .await;

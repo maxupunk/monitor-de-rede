@@ -69,6 +69,7 @@ describe('histórico enviado ao backend', () => {
         contextWindow: 8000,
         contextWindowReported: true,
         model: 'meta/llama',
+        toolGroups: ['docker', 'history'],
       },
     },
     { id: 'u2', role: 'user', content: 'e a filial?' },
@@ -80,7 +81,12 @@ describe('histórico enviado ao backend', () => {
     const historico = buildChatHistory(conversa())
     expect(historico.ids).toEqual(['u1', 'a1', 'u2', 'u3'])
     expect(historico.summary).toBeNull()
-    expect(historico.contextHint).toEqual({ tokens: 950, window: 8000, model: 'meta/llama' })
+    expect(historico.contextHint).toEqual({
+      tokens: 950,
+      window: 8000,
+      model: 'meta/llama',
+      toolGroups: ['docker', 'history'],
+    })
     expect(contextUsage(conversa())?.reported).toBe(true)
   })
 

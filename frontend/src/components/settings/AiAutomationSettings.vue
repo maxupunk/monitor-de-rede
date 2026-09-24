@@ -29,6 +29,28 @@
       clique, e a execução fica registrada na auditoria em seu nome.
     </div>
 
+    <!-- Ações em containers Docker -->
+    <div class="text-subtitle-2 font-weight-bold mb-2">
+      Iniciar, parar e reiniciar containers Docker
+    </div>
+    <v-btn-toggle
+      v-model="containerActions"
+      mandatory
+      divided
+      color="primary"
+      variant="outlined"
+      density="comfortable"
+    >
+      <v-btn v-for="option in containerActionOptions" :key="option.value" :value="option.value">
+        <v-icon start size="18">{{ option.icon }}</v-icon>
+        {{ option.title }}
+      </v-btn>
+    </v-btn-toggle>
+    <div class="text-caption text-medium-emphasis mt-2 mb-4">
+      {{ selectedContainerAction.hint }} Vale para a central e para os agentes remotos que permitem
+      (política local do agente). Remover ou atualizar container nunca fica com a IA.
+    </div>
+
     <!-- IA proativa -->
     <div class="d-flex align-center ga-2 mb-1">
       <span class="text-subtitle-2 font-weight-bold">IA proativa</span>
@@ -100,6 +122,8 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
+import type { AiContainerActionMode } from '@/bindings/AiContainerActionMode'
 import type { AiDigestSchedule } from '@/bindings/AiDigestSchedule'
 import type { AiIncidentSeverity } from '@/bindings/AiIncidentSeverity'
 import type { AiProactiveSettings } from '@/bindings/AiProactiveSettings'
@@ -110,7 +134,41 @@ const requireToolConfirmation = defineModel<boolean>('requireToolConfirmation', 
   required: true,
 })
 const allowActions = defineModel<boolean>('allowActions', { required: true })
+const containerActions = defineModel<AiContainerActionMode>('containerActions', {
+  required: true,
+})
 const proactive = defineModel<AiProactiveSettings>('proactive', { required: true })
+
+const containerActionOptions: {
+  title: string
+  value: AiContainerActionMode
+  icon: string
+  hint: string
+}[] = [
+  {
+    title: 'Desligado',
+    value: 'off',
+    icon: 'mdi-cancel',
+    hint: 'A IA só consulta os containers; nunca muda o estado deles.',
+  },
+  {
+    title: 'Pedir permissão',
+    value: 'confirm',
+    icon: 'mdi-hand-back-right-outline',
+    hint: 'A IA propõe a ação no chat e só executa depois do seu clique em Confirmar.',
+  },
+  {
+    title: 'Automático',
+    value: 'auto',
+    icon: 'mdi-robot-outline',
+    hint: 'A IA executa sozinha quando o diagnóstico pede; a ação aparece no chat e fica na auditoria em seu nome.',
+  },
+]
+const selectedContainerAction = computed(
+  () =>
+    containerActionOptions.find((option) => option.value === containerActions.value) ??
+    containerActionOptions[1]
+)
 
 const severityOptions: { title: string; value: AiIncidentSeverity }[] = [
   { title: 'Só críticos', value: 'critical' },

@@ -146,6 +146,7 @@ async fn test_connection(
 /// `POST /api/ai/chat/stream` — endpoint SSE transmitindo deltas de texto e execuções de ferramentas.
 async fn chat_stream(
     State(ctx): State<AppContext>,
+    headers: HeaderMap,
     Json(input): Json<ChatStreamRequest>,
 ) -> AppResult<Response> {
     let settings = settings::load(&ctx.db).await?;
@@ -156,7 +157,10 @@ async fn chat_stream(
     }
 
     let driver = create_driver(&settings)?;
-    let request = AgentRequest::from_chat(input, &settings);
+    let actor = AuditActor::from_headers(&headers, &ctx.db)
+        .await
+        .unwrap_or_default();
+    let request = AgentRequest::from_chat(input, &settings, actor);
     let event_stream = run_agent_loop(ctx, settings, driver, request).await;
 
     let sse_stream = event_stream.map(|event| {

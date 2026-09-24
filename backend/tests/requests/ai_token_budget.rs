@@ -141,6 +141,7 @@ async fn conversar(
             policy: ToolPolicy::from_settings(&settings),
             tool_loading: carga,
             memory: ConversationMemory::default(),
+            actor: backend::services::audit::AuditActor::default(),
         },
     )
     .await
@@ -234,7 +235,10 @@ async fn pergunta_que_pede_grafico_ja_chega_com_os_graficos() {
         assert!(rodadas[0]
             .ferramentas
             .contains(&"chart_monitor_latency".to_string()));
-        assert!(!rodadas[0].prompt.contains("- charts:"), "já carregado");
+        assert!(
+            rodadas[0].prompt.contains("- charts:"),
+            "o catálogo não encolhe ao carregar: o system prompt fica igual e o cache vale"
+        );
     })
     .await;
 }

@@ -9,6 +9,7 @@ import type { AiChart } from '@/bindings/AiChart'
 import type { AiDigest } from '@/bindings/AiDigest'
 import type { AiProactiveSettings } from '@/bindings/AiProactiveSettings'
 import type { AiResponseStyle } from '@/bindings/AiResponseStyle'
+import type { AiContainerActionMode } from '@/bindings/AiContainerActionMode'
 import type { ExecuteToolResponse } from '@/bindings/ExecuteToolResponse'
 import {
   applyChatEvent,
@@ -66,6 +67,8 @@ export interface AiSettings {
   allowActiveTools: boolean
   requireToolConfirmation: boolean
   allowActions: boolean
+  /** Iniciar, parar e reiniciar containers: desligado, com confirmação ou automático. */
+  containerActions: AiContainerActionMode
   responseStyle: AiResponseStyle
   proactive: AiProactiveSettings
   customSystemPrompt?: string | null

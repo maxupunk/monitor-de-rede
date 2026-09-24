@@ -16,4 +16,10 @@ export type ContextHint = {
    * Modelo que respondeu.
    */
   model: string | null
+  /**
+   * Grupos de ferramentas que a conversa carregou, na ordem (evento
+   * `usage`). Voltam iguais para a lista de ferramentas não mudar e o
+   * cache de prefixo do provedor continuar valendo.
+   */
+  toolGroups: Array<string>
 }

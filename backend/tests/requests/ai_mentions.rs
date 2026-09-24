@@ -24,8 +24,8 @@ use backend::{
                 agent::{
                     run_agent_loop, AgentRequest, ConversationMemory, HarnessEvent, ToolLoading,
                 },
-                prompt::{build_system_prompt, ChatContext},
-                tools::{ToolGroups, ToolPolicy},
+                prompt::{build_system_prompt, build_turn_context, ChatContext},
+                tools::ToolPolicy,
             },
             mentions,
             settings::AiSettings,
@@ -115,27 +115,25 @@ async fn marcado_vai_para_o_prompt_como_alvo_da_pergunta() {
             ],
             ..ChatContext::default()
         };
-        let prompt = build_system_prompt(
-            &ctx.db,
-            &AiSettings::default(),
-            ToolPolicy::passive(),
-            &contexto,
-            &ToolGroups::new(),
-        )
-        .await;
+        let prompt = build_system_prompt(&AiSettings::default(), ToolPolicy::passive(), true);
+        let pergunta = build_turn_context(&ctx.db, &contexto).await;
 
-        let marcados = prompt
+        let marcados = pergunta
             .split("MARCADOS COM @")
             .nth(1)
             .expect("seção dos marcados");
-        let marcados = marcados.split("CONTEXTO DA TELA").next().unwrap();
-        assert!(marcados.contains("MPPT Bateria"), "{prompt}");
+        let marcados = marcados.split("TELA DE ONDE").next().unwrap();
+        assert!(marcados.contains("MPPT Bateria"), "{pergunta}");
         assert!(marcados.contains("10.0.0.9"));
         assert!(marcados.contains("grep source='logs'"));
         assert!(marcados.contains("'Apagado' (marcado, mas não existe mais)"));
         assert!(
-            prompt.contains("CONTEXTO DA TELA"),
+            pergunta.contains("TELA DE ONDE O CHAT FOI ABERTO"),
             "a tela continua como contexto secundário"
+        );
+        assert!(
+            !prompt.contains("MPPT Bateria") && !prompt.contains("Agora:"),
+            "o system prompt não muda por pergunta: o cache de prefixo depende disso"
         );
         assert!(
             prompt.contains("ask_user"),
@@ -209,6 +207,7 @@ async fn pergunta_ao_usuario_encerra_a_rodada_sem_nova_chamada() {
                 policy: ToolPolicy::from_settings(&AiSettings::default()),
                 tool_loading: ToolLoading::OnDemand,
                 memory: ConversationMemory::default(),
+                actor: backend::services::audit::AuditActor::default(),
             },
         )
         .await;
