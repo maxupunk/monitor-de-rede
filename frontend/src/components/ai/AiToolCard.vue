@@ -9,8 +9,8 @@
           <v-icon size="16">{{ meta.icon }}</v-icon>
         </v-avatar>
         <div class="min-w-0">
-          <div class="text-caption font-weight-bold">{{ meta.label }}</div>
-          <div class="text-caption text-grey text-truncate max-w-300">
+          <div class="text-body-small font-weight-bold">{{ meta.label }}</div>
+          <div class="text-body-small text-grey text-truncate max-w-300">
             {{ formatToolArgs(tool.arguments) }}
           </div>
         </div>
@@ -37,7 +37,7 @@
 
     <!-- Pedido de confirmação: a IA propôs, o usuário decide -->
     <div v-if="tool.summary" class="px-3 pb-3">
-      <div class="text-body-2 mb-2 d-flex align-start ga-2">
+      <div class="text-body-medium mb-2 d-flex align-start ga-2">
         <v-icon size="18" :color="tool.status === 'awaiting' ? 'warning' : status.color">
           mdi-hand-back-right-outline
         </v-icon>
@@ -63,7 +63,7 @@
           Cancelar
         </v-btn>
       </div>
-      <div v-else-if="tool.status === 'error' && errorText" class="text-caption text-error">
+      <div v-else-if="tool.status === 'error' && errorText" class="text-body-small text-error">
         {{ errorText }}
       </div>
     </div>
@@ -74,17 +74,17 @@
 
     <v-expand-transition>
       <div v-if="expanded" class="pa-3 pt-0 border-t mt-1">
-        <div class="text-caption font-weight-bold text-grey-darken-1 mb-1">Parâmetros:</div>
-        <pre class="bg-grey-lighten-4 pa-2 rounded text-caption font-mono mb-2 overflow-x-auto">{{
-          JSON.stringify(tool.arguments, null, 2)
-        }}</pre>
+        <div class="text-body-small font-weight-bold text-grey-darken-1 mb-1">Parâmetros:</div>
+        <pre
+          class="bg-grey-lighten-4 pa-2 rounded text-body-small font-mono mb-2 overflow-x-auto"
+          >{{ JSON.stringify(tool.arguments, null, 2) }}</pre>
 
-        <div v-if="tool.result" class="text-caption font-weight-bold text-grey-darken-1 mb-1">
+        <div v-if="tool.result" class="text-body-small font-weight-bold text-grey-darken-1 mb-1">
           Resultado:
         </div>
         <pre
           v-if="tool.result"
-          class="bg-grey-lighten-4 pa-2 rounded text-caption font-mono overflow-x-auto max-h-200"
+          class="bg-grey-lighten-4 pa-2 rounded text-body-small font-mono overflow-x-auto max-h-200"
           >{{ JSON.stringify(tool.result, null, 2) }}</pre>
       </div>
     </v-expand-transition>

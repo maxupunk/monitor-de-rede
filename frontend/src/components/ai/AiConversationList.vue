@@ -18,7 +18,7 @@
       type="error"
       variant="tonal"
       density="compact"
-      class="mb-2 text-caption"
+      class="mb-2 text-body-small"
       closable
       @click:close="conversations.error = null"
     >
@@ -29,7 +29,7 @@
 
     <div
       v-if="conversations.summaries.length === 0 && !conversations.loading"
-      class="text-caption text-medium-emphasis text-center py-3"
+      class="text-body-small text-medium-emphasis text-center py-3"
     >
       As conversas ficam salvas na sua conta e aparecem em qualquer computador.
     </div>

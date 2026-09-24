@@ -2,7 +2,7 @@
   <v-card variant="tonal" color="primary" class="my-2 pa-3 rounded-lg">
     <div class="d-flex align-start ga-2 mb-2">
       <v-icon size="18" color="primary">mdi-account-question-outline</v-icon>
-      <span class="text-body-2 font-weight-medium">{{ question.question }}</span>
+      <span class="text-body-medium font-weight-medium">{{ question.question }}</span>
     </div>
     <div v-if="question.options.length > 0" class="d-flex flex-wrap ga-2">
       <v-btn
@@ -18,7 +18,7 @@
         {{ option }}
       </v-btn>
     </div>
-    <div v-if="answerable" class="text-caption text-medium-emphasis mt-2">
+    <div v-if="answerable" class="text-body-small text-medium-emphasis mt-2">
       Escolha uma opção ou responda no campo — use <strong>@</strong> para marcar o recurso.
     </div>
   </v-card>

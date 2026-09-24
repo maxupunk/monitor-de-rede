@@ -42,7 +42,7 @@
           :color="message.role === 'user' ? 'primary' : 'surface'"
           :class="[
             'pa-3 rounded-xl elevation-1 message-bubble',
-            message.role === 'user' ? 'text-white' : 'text-body-2',
+            message.role === 'user' ? 'text-white' : 'text-body-medium',
           ]"
         >
           <!-- Erro -->
@@ -51,7 +51,7 @@
             type="error"
             variant="tonal"
             density="compact"
-            class="mb-2 text-caption"
+            class="mb-2 text-body-small"
           >
             {{ message.error }}
           </v-alert>
@@ -83,7 +83,7 @@
           >
             <div
               v-if="metrics"
-              class="usage-metrics d-flex align-center flex-wrap ga-2 me-auto text-caption"
+              class="usage-metrics d-flex align-center flex-wrap ga-2 me-auto text-body-small"
               :title="metrics.detail"
             >
               <span v-if="metrics.model" class="usage-model d-inline-flex align-center ga-1">
@@ -134,7 +134,7 @@
 
     <!-- Compactação: o que está acima virou resumo na memória da IA -->
     <div v-if="message.compaction" class="compaction mb-3">
-      <div class="compaction__line d-flex align-center ga-2 text-caption">
+      <div class="compaction__line d-flex align-center ga-2 text-body-small">
         <v-icon size="16" color="primary">mdi-archive-arrow-down-outline</v-icon>
         <span>
           {{
@@ -157,7 +157,7 @@
           Resumo
         </v-btn>
       </div>
-      <div v-if="showSummary" class="compaction__summary text-body-2">
+      <div v-if="showSummary" class="compaction__summary text-body-medium">
         {{ message.compaction.summary }}
       </div>
     </div>
@@ -252,12 +252,12 @@ const renderedContent = computed(() => {
 
   // Bloco de código: ```linguagem\n...\n```
   text = text.replace(/```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g, (_match, _lang, code) => {
-    return `<pre class="code-block pa-2 rounded my-2 font-mono text-caption overflow-x-auto"><code>${escapeHtml(code.trim())}</code></pre>`
+    return `<pre class="code-block pa-2 rounded my-2 font-mono text-body-small overflow-x-auto"><code>${escapeHtml(code.trim())}</code></pre>`
   })
 
   // Código inline: `...`
   text = text.replace(/`([^`]+)`/g, (_match, code) => {
-    return `<code class="inline-code px-1 rounded font-mono text-caption">${escapeHtml(code)}</code>`
+    return `<code class="inline-code px-1 rounded font-mono text-body-small">${escapeHtml(code)}</code>`
   })
 
   // Negrito: **...**

@@ -2,10 +2,10 @@
   <div v-if="summary" class="ai-alert-summary d-flex align-start ga-2 pa-2 mt-1 rounded">
     <v-icon size="16" color="deep-purple" class="mt-1">mdi-robot-outline</v-icon>
     <div class="min-w-0">
-      <div class="text-caption font-weight-bold text-deep-purple">
+      <div class="text-body-small font-weight-bold text-deep-purple">
         Resumo da IA · {{ formatRelativeTime(summary.generatedAt) }}
       </div>
-      <div class="text-caption summary-text">{{ summary.text }}</div>
+      <div class="text-body-small summary-text">{{ summary.text }}</div>
     </div>
   </div>
 </template>

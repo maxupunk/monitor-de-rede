@@ -2,8 +2,8 @@
   <div class="ai-tool-chart">
     <div class="d-flex align-center justify-space-between flex-wrap ga-2 mb-2">
       <div class="min-w-0">
-        <div class="text-body-2 font-weight-bold text-truncate">{{ chart.title }}</div>
-        <div v-if="chart.subtitle" class="text-caption text-medium-emphasis">
+        <div class="text-body-medium font-weight-bold text-truncate">{{ chart.title }}</div>
+        <div v-if="chart.subtitle" class="text-body-small text-medium-emphasis">
           {{ chart.subtitle }}
         </div>
       </div>
@@ -11,7 +11,7 @@
         <div
           v-for="item in series"
           :key="item.id"
-          class="d-flex align-center ga-1 text-caption text-medium-emphasis"
+          class="d-flex align-center ga-1 text-body-small text-medium-emphasis"
         >
           <span class="legend-dot" :style="{ backgroundColor: item.color }"></span>
           {{ item.label }}

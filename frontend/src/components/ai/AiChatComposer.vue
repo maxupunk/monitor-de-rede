@@ -4,7 +4,10 @@
     <div
       class="composer-bar d-flex align-center justify-space-between ga-2 px-3 py-1 rounded-t-lg border-t border-s border-e"
     >
-      <div class="d-flex align-center ga-1 text-caption text-medium-emphasis">
+      <div v-if="touch" class="text-body-small text-medium-emphasis">
+        <kbd class="kbd-key">@</kbd> marca um recurso
+      </div>
+      <div v-else class="d-flex align-center ga-1 text-body-small text-medium-emphasis">
         <v-icon size="14" color="primary">mdi-keyboard-outline</v-icon>
         <span v-if="compact">
           <kbd class="kbd-key">Enter</kbd> envia &bull; <kbd class="kbd-key">@</kbd> marca
@@ -18,7 +21,7 @@
       <div class="d-flex align-center ga-3 flex-shrink-0">
         <span
           v-if="aiStore.isStreaming"
-          class="text-caption text-primary font-weight-medium d-flex align-center ga-1"
+          class="text-body-small text-primary font-weight-medium d-flex align-center ga-1"
         >
           <v-progress-circular indeterminate size="12" width="2" color="primary" />
           {{ compact ? 'Respondendo' : 'IA respondendo...' }}
@@ -39,7 +42,7 @@
             <button
               v-bind="menuProps"
               type="button"
-              class="context-meter d-flex align-center ga-1 text-caption"
+              class="context-meter d-flex align-center ga-1 text-body-small"
               :aria-label="context.detail"
             >
               <v-progress-circular
@@ -53,7 +56,7 @@
             </button>
           </template>
           <v-card class="pa-3" rounded="lg">
-            <div class="text-subtitle-2 font-weight-bold mb-1">Janela de contexto</div>
+            <div class="text-title-small font-weight-bold mb-1">Janela de contexto</div>
             <v-progress-linear
               :model-value="context.percent"
               :color="context.color"
@@ -61,15 +64,17 @@
               rounded
               class="mb-2"
             />
-            <div class="text-body-2">{{ context.amount }} tokens ({{ context.percentLabel }})</div>
-            <div class="text-caption text-medium-emphasis mb-2">
+            <div class="text-body-medium">
+              {{ context.amount }} tokens ({{ context.percentLabel }})
+            </div>
+            <div class="text-body-small text-medium-emphasis mb-2">
               {{
                 context.reported
                   ? 'Janela informada pelo provedor do modelo.'
                   : 'Janela estimada pelo nome do modelo — o provedor não informou.'
               }}
             </div>
-            <div class="text-caption mb-3">
+            <div class="text-body-small mb-3">
               A partir de {{ autoCompactLabel }} a conversa é compactada sozinha: as mensagens
               antigas viram um resumo e a janela volta para cerca de metade.
             </div>
@@ -92,10 +97,10 @@
     <div class="composer-field">
       <!-- Lista do @ -->
       <v-card v-if="picker.isOpen.value" class="mention-menu" elevation="8" rounded="lg">
-        <div class="px-3 pt-2 pb-1 text-caption font-weight-bold text-medium-emphasis">
+        <div class="px-3 pt-2 pb-1 text-body-small font-weight-bold text-medium-emphasis">
           Marcar com @
         </div>
-        <div v-if="picker.options.value.length === 0" class="px-3 pb-3 text-caption">
+        <div v-if="picker.options.value.length === 0" class="px-3 pb-3 text-body-small">
           <v-progress-circular indeterminate size="12" width="2" color="primary" class="me-1" />
           Buscando...
         </div>
@@ -135,7 +140,7 @@
         :placeholder="placeholder"
         variant="outlined"
         density="comfortable"
-        :rows="3"
+        :rows="touch ? 2 : 3"
         :max-rows="maxRows"
         auto-grow
         hide-details
@@ -226,6 +231,10 @@ const props = withDefaults(
 )
 
 const aiStore = useAiStore()
+
+/** Tela de toque: teclado virtual, sem atalhos de teclado físico. */
+const touch =
+  typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches === true
 
 /** Quanto da janela do modelo a conversa já ocupa (medida da última resposta). */
 const context = computed(() => {
@@ -350,7 +359,9 @@ function onKeydown(event: KeyboardEvent) {
       return
     }
   }
-  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+  // No teclado de toque, Enter pula linha (como nos apps de mensagem): enviar
+  // é pelo botão. Sem isso, a pergunta ia pela metade ao tentar quebrar linha.
+  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && !touch) {
     event.preventDefault()
     send()
   }
@@ -371,7 +382,12 @@ function setDraft(draft: AiDraft) {
   placeCaret(draft.content.length)
 }
 
-defineExpose({ setDraft })
+/** Foco no campo (o painel chama ao abrir, fora do celular). */
+function focus() {
+  placeCaret(content.value.length)
+}
+
+defineExpose({ setDraft, focus })
 </script>
 
 <style scoped>
