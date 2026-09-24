@@ -193,6 +193,25 @@ export function formatCompactCount(value?: number | null, fallback = '—'): str
   return `${(value / divisor).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} ${suffix}`
 }
 
+/** Velocidade de geração da IA: `42,3 tok/s` (uma casa abaixo de 100). */
+export function formatTokenRate(value?: number | null, fallback = '—'): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return fallback
+  const digits = Math.abs(value) >= 100 ? 0 : 1
+  return `${value.toLocaleString('pt-BR', { maximumFractionDigits: digits })} tok/s`
+}
+
+/** Duração curta em milissegundos: `850 ms`, `4,2 s`, `1 min 12 s`. */
+export function formatElapsedMs(value?: number | null, fallback = '—'): string {
+  if (value === null || value === undefined || !Number.isFinite(value) || value < 0) {
+    return fallback
+  }
+  if (value < 1000) return `${Math.round(value)} ms`
+  const seconds = value / 1000
+  if (seconds < 60) return `${seconds.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} s`
+  const total = Math.round(seconds)
+  return `${Math.floor(total / 60)} min ${total % 60} s`
+}
+
 export function formatMeasuredValue(value: unknown, unit?: string | null): string {
   const numeric = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(numeric)) return String(value ?? '')

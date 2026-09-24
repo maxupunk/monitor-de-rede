@@ -199,17 +199,52 @@ pub async fn remove_volume(
     })
 }
 
+/// Redes com a contagem de containers conectados.
+///
+/// A listagem `GET /networks` da Engine devolve `Containers` vazio — só a
+/// inspeção de cada rede o preenche. Em vez de uma inspeção por rede, a conta
+/// sai da lista de containers, que já traz as redes de cada um.
 pub async fn list_networks(
     engine: &dyn DockerEngine,
 ) -> Result<Vec<DockerNetworkSummary>, DockerError> {
-    let mut output = engine
-        .list_networks_raw()
-        .await?
+    let (networks, containers) =
+        tokio::try_join!(engine.list_networks_raw(), engine.list_containers_raw())?;
+    let attached = containers_per_network(&containers);
+    let mut output = networks
         .iter()
         .map(network_summary)
+        .map(|mut network| {
+            let counted = attached
+                .get(&network.id)
+                .or_else(|| attached.get(&network.name))
+                .copied()
+                .unwrap_or(0);
+            network.connected_containers = network.connected_containers.max(counted);
+            network
+        })
         .collect::<Vec<_>>();
     output.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(output)
+}
+
+/// Containers por rede, contados pelo `NetworkSettings.Networks` de cada
+/// container. A chave é o id da rede e, quando a Engine não o informa, o nome.
+fn containers_per_network(containers: &[Value]) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    for container in containers {
+        let Some(networks) = field(container, &["NetworkSettings", "networkSettings"])
+            .and_then(|settings| field(settings, &["Networks", "networks"]))
+            .and_then(Value::as_object)
+        else {
+            continue;
+        };
+        for (name, network) in networks {
+            let id = string(network, &["NetworkID", "networkId", "networkID"]);
+            let key = if id.is_empty() { name.clone() } else { id };
+            *counts.entry(key).or_insert(0) += 1;
+        }
+    }
+    counts
 }
 
 pub async fn inspect_network(
@@ -777,6 +812,24 @@ mod tests {
             })),
             1
         );
+    }
+
+    #[test]
+    fn conta_containers_por_rede_pela_lista_de_containers() {
+        let containers = vec![
+            json!({ "NetworkSettings": { "Networks": {
+                "app_net": { "NetworkID": "n1" },
+                "bridge": { "NetworkID": "n0" }
+            } } }),
+            json!({ "NetworkSettings": { "Networks": { "app_net": { "NetworkID": "n1" } } } }),
+            json!({ "NetworkSettings": { "Networks": { "legado": {} } } }),
+            json!({ "Names": ["/sem-rede"] }),
+        ];
+        let contagem = containers_per_network(&containers);
+        assert_eq!(contagem.get("n1"), Some(&2));
+        assert_eq!(contagem.get("n0"), Some(&1));
+        assert_eq!(contagem.get("legado"), Some(&1), "sem id, conta pelo nome");
+        assert_eq!(contagem.len(), 3);
     }
 
     /// Fonte falsa: prova que mapeamento e regras não dependem do `bollard`,

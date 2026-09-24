@@ -7,4 +7,8 @@ export type ServerAddressesResponse = {
    * Qual usar quando nada indicar outro.
    */
   preferredId: string | null
+  /**
+   * O domínio está atrás de um proxy HTTPS.
+   */
+  domainHttps: boolean
 }

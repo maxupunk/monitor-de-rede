@@ -2,6 +2,7 @@
   <div>
     <PageHeader title="Containers" subtitle="Inventário, consumo, logs e controle do ciclo de vida">
       <template #actions>
+        <LiveIndicator :updated-at="docker.lastUpdatedAt" />
         <v-btn
           color="primary"
           prepend-icon="mdi-refresh"
@@ -69,7 +70,7 @@
             </v-chip>
             <v-spacer></v-spacer>
             <div class="docker-group-totals text-caption text-medium-emphasis">
-              CPU {{ group.cpuPercent.toFixed(2) }}% · RAM
+              CPU {{ formatPercent(group.cpuPercent, 1) }} · RAM
               {{ formatBinaryBytes(group.memoryBytes) }}
             </div>
           </div>
@@ -98,12 +99,17 @@
               </v-chip>
             </template>
             <template #item.resources="{ item }">
-              <div v-if="metricFor(item.id)" class="text-caption py-1">
-                <div>CPU {{ metricFor(item.id)?.cpu.usagePercent.toFixed(2) }}%</div>
-                <div>RAM {{ formatContainerMemory(item.id) }}</div>
-                <div class="text-medium-emphasis">
-                  {{ metricFor(item.id)?.memory.usagePercent.toFixed(1) }}%
-                </div>
+              <div v-if="metricFor(item.id)" class="resource-cell py-1">
+                <v-icon size="14" class="text-medium-emphasis">mdi-cpu-64-bit</v-icon>
+                <span class="resource-cell__label">CPU</span>
+                <span class="resource-cell__value">
+                  {{ formatPercent(metricFor(item.id)?.cpu.usagePercent, 1) }}
+                </span>
+                <v-icon size="14" class="text-medium-emphasis">mdi-memory</v-icon>
+                <span class="resource-cell__label">RAM</span>
+                <span class="resource-cell__value">
+                  {{ formatBinaryBytes(metricFor(item.id)?.memory.usageBytes) }}
+                </span>
               </div>
               <span v-else class="text-medium-emphasis">—</span>
             </template>
@@ -424,7 +430,8 @@ import { useDockerStore } from '@/stores/docker'
 import type { DockerContainerDetail } from '@/bindings/DockerContainerDetail'
 import type { DockerContainerSummary } from '@/bindings/DockerContainerSummary'
 import type { DockerLogEntry } from '@/bindings/DockerLogEntry'
-import { formatBinaryBytes } from '@/utils/formatters'
+import { formatBinaryBytes, formatPercent } from '@/utils/formatters'
+import LiveIndicator from '@/components/LiveIndicator.vue'
 
 type ContainerActionName = 'start' | 'stop' | 'restart' | 'remove'
 interface ContainerGroup {
@@ -465,7 +472,7 @@ const headers = [
   { title: 'Container', key: 'name' },
   { title: 'Imagem', key: 'image' },
   { title: 'Estado', key: 'state', width: '120px' },
-  { title: 'Recursos', key: 'resources', width: '190px', sortable: false },
+  { title: 'Recursos', key: 'resources', width: '160px', sortable: false },
   { title: 'Ações', key: 'actions', width: '220px', sortable: false },
 ]
 const stateOptions = [
@@ -598,12 +605,6 @@ function stateLabel(state: string): string {
 
 function metricFor(id: string) {
   return docker.metrics?.containers.find((metric) => metric.containerId === id)
-}
-
-function formatContainerMemory(id: string): string {
-  const memory = metricFor(id)?.memory
-  if (!memory) return 'N/D'
-  return `${formatBinaryBytes(memory.usageBytes)} / ${formatBinaryBytes(memory.limitBytes)}`
 }
 
 function onRowClick(_event: MouseEvent, row: { item: DockerContainerSummary }): void {
@@ -845,6 +846,25 @@ function notify(message: string, color: string): void {
 </script>
 
 <style scoped>
+.resource-cell {
+  display: grid;
+  grid-template-columns: 14px auto 1fr;
+  align-items: center;
+  column-gap: 6px;
+  row-gap: 2px;
+  font-size: 0.8125rem;
+}
+
+.resource-cell__label {
+  color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity));
+}
+
+.resource-cell__value {
+  text-align: right;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
 .docker-filter {
   max-width: 220px;
 }

@@ -27,6 +27,8 @@ pub struct ServerAddressEntry {
     /// De onde veio o valor, ou por que não há um. Palpite apresentado como
     /// certeza é pior do que campo vazio.
     pub source: String,
+    /// Chega-se por HTTPS (o domínio atrás de um proxy).
+    pub https: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -36,6 +38,8 @@ pub struct ServerAddressesResponse {
     pub data: Vec<ServerAddressEntry>,
     /// Qual usar quando nada indicar outro.
     pub preferred_id: Option<String>,
+    /// O domínio está atrás de um proxy HTTPS.
+    pub domain_https: bool,
 }
 
 /// Corpo de `PUT /api/server-addresses`.
@@ -54,6 +58,9 @@ pub struct SaveServerAddressesInput {
     pub custom: Vec<CustomServerAddressInput>,
     #[serde(default)]
     pub preferred_id: Option<String>,
+    /// O domínio está atrás de um proxy HTTPS (agentes usam `https://`).
+    #[serde(default)]
+    pub domain_https: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

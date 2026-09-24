@@ -18,7 +18,9 @@ use backend::{
                 AiChatChunk, AiChatOptions, AiChunkStream, AiDriver, AiMessage, AiTool, AiToolCall,
             },
             harness::{
-                agent::{run_agent_loop, AgentRequest, HarnessEvent, ToolLoading},
+                agent::{
+                    run_agent_loop, AgentRequest, ConversationMemory, HarnessEvent, ToolLoading,
+                },
                 prompt::ChatContext,
                 tools::{ToolPolicy, LOAD_TOOLS},
             },
@@ -138,6 +140,7 @@ async fn conversar(
             context: ChatContext::default(),
             policy: ToolPolicy::from_settings(&settings),
             tool_loading: carga,
+            memory: ConversationMemory::default(),
         },
     )
     .await

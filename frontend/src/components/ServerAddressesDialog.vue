@@ -21,7 +21,8 @@
         <v-card-subtitle class="text-wrap">
           Um servidor, várias portas de entrada. Cada equipamento alcança o NetMonitor pelo endereço
           da rede em que ele está — quem fica na mesma rede usa um, quem chega pelo túnel usa outro,
-          quem vem pela internet usa um terceiro.
+          quem vem pela internet usa um terceiro. Com um domínio cadastrado, ele vira o padrão dos
+          comandos de instalação.
         </v-card-subtitle>
       </v-card-item>
 
@@ -48,7 +49,7 @@
             border
             rounded
             class="pa-4 mb-3"
-            :class="{ 'border-primary': entrada.id === preferred }"
+            :class="{ 'border-primary': entrada.id === effectiveDefault }"
           >
             <div class="d-flex align-start ga-3">
               <v-avatar :color="addressColor(entrada.kind)" size="36" rounded="lg" variant="tonal">
@@ -59,19 +60,24 @@
                 <div class="d-flex align-center ga-2 flex-wrap">
                   <span class="font-weight-bold">{{ entrada.label }}</span>
                   <v-chip
-                    v-if="entrada.id === preferred"
+                    v-if="entrada.id === effectiveDefault"
                     size="x-small"
                     color="primary"
                     variant="flat"
+                    :title="
+                      entrada.id === preferred
+                        ? 'Marcado por você como padrão'
+                        : 'Com domínio cadastrado e nenhum outro marcado, o domínio é o padrão'
+                    "
                   >
-                    Padrão
+                    {{ entrada.id === preferred ? 'Padrão' : 'Padrão (automático)' }}
                   </v-chip>
                 </div>
                 <div class="text-caption text-medium-emphasis">{{ entrada.description }}</div>
 
                 <v-text-field
                   v-model="drafts[entrada.id]"
-                  :placeholder="entrada.detected ?? 'Nenhum endereço definido'"
+                  :placeholder="placeholderFor(entrada)"
                   density="compact"
                   variant="outlined"
                   hide-details="auto"
@@ -79,6 +85,26 @@
                   :error-messages="rowErrors[entrada.id]"
                   @update:model-value="rowErrors[entrada.id] = ''"
                 ></v-text-field>
+
+                <v-switch
+                  v-if="entrada.kind === 'domain'"
+                  v-model="domainHttps"
+                  :disabled="!(drafts[entrada.id] ?? '').trim()"
+                  color="primary"
+                  density="compact"
+                  inset
+                  hide-details
+                  class="mt-1"
+                >
+                  <template #label>
+                    <span class="text-body-2">Atrás de um proxy HTTPS</span>
+                    <span class="text-caption text-medium-emphasis ms-2 hidden-xs">
+                      agentes conectam em https://{{
+                        (drafts[entrada.id] ?? '').trim() || 'domínio'
+                      }}
+                    </span>
+                  </template>
+                </v-switch>
 
                 <!--
                   A procedência fica **abaixo** do campo, não dentro dele. No
@@ -115,10 +141,7 @@
                   removido. São ações diferentes com o mesmo gesto, e o ícone
                   precisa dizer qual é.
                 -->
-                <v-tooltip
-                  location="top"
-                  :text="entrada.kind === 'custom' ? 'Remover' : 'Voltar ao detectado'"
-                >
+                <v-tooltip location="top" :text="resetLabel(entrada)">
                   <template #activator="{ props: tip }">
                     <v-btn
                       v-bind="tip"
@@ -215,7 +238,27 @@ const store = useServerAddressesStore()
 const drafts = reactive<Record<string, string>>({})
 const rowErrors = reactive<Record<string, string>>({})
 const preferred = ref<string | null>(null)
+const domainHttps = ref(false)
 const novo = reactive({ label: '', value: '' })
+
+/**
+ * O padrão que vale de fato: o marcado com a estrela e, sem marcação, o
+ * domínio preenchido — a mesma regra que o backend aplica aos comandos.
+ */
+const effectiveDefault = computed<string | null>(() => {
+  if (preferred.value) return preferred.value
+  return (drafts.domain ?? '').trim() ? 'domain' : null
+})
+
+function placeholderFor(entrada: ServerAddressEntry): string {
+  if (entrada.detected) return entrada.detected
+  return entrada.kind === 'domain' ? 'Ex: monitor.empresa.com.br' : 'Nenhum endereço definido'
+}
+
+function resetLabel(entrada: ServerAddressEntry): string {
+  if (entrada.kind === 'custom') return 'Remover'
+  return entrada.kind === 'domain' ? 'Limpar' : 'Voltar ao detectado'
+}
 
 /** Personalizados adicionados nesta sessão, ainda sem id do servidor. */
 const adicionados = ref<{ id: string; label: string; value: string; kind: string }[]>([])
@@ -231,6 +274,7 @@ const rows = computed<ServerAddressEntry[]>(() => [
     detected: null,
     overridden: true,
     source: 'ainda não salvo',
+    https: false,
   })),
 ])
 
@@ -241,7 +285,9 @@ const rows = computed<ServerAddressEntry[]>(() => [
  */
 function sourceLabel(entrada: ServerAddressEntry): string {
   const rascunho = (drafts[entrada.id] ?? '').trim()
-  if (rascunho && rascunho !== (entrada.detected ?? '')) return 'corrigido por você'
+  if (rascunho && rascunho !== (entrada.detected ?? '')) {
+    return entrada.kind === 'domain' ? 'definido por você' : 'corrigido por você'
+  }
   return entrada.source
 }
 
@@ -333,7 +379,12 @@ async function salvar(): Promise<void> {
   // sobreviveria à gravação; deixar em branco é melhor que apontar para nada.
   const preferredId = preferred.value?.startsWith('novo:') ? null : preferred.value
 
-  const ok = await store.save({ overrides, custom, preferredId })
+  const ok = await store.save({
+    overrides,
+    custom,
+    preferredId,
+    domainHttps: Boolean(overrides.domain) && domainHttps.value,
+  })
   if (!ok) return
   adicionados.value = []
   sincronizaRascunhos()
@@ -350,6 +401,7 @@ function sincronizaRascunhos(): void {
     drafts[entrada.id] = entrada.overridden ? (entrada.value ?? '') : ''
   }
   preferred.value = store.preferredId
+  domainHttps.value = store.domainHttps
 }
 
 watch(open, async (aberto) => {

@@ -25,7 +25,8 @@ const METHOD: &str = "COMO TRABALHAR:
 1. Use ferramentas só quando a pergunta precisar de dados do sistema. Saudação, agradecimento ou conversa: responda direto, sem consultar nada.
 2. Consulte o mínimo que responde, e peça na mesma rodada tudo o que já sabe que vai precisar — cada rodada reenvia a conversa inteira. \
 Um aparelho: get_device_detail. Alertas: get_alerts. Visão geral da rede: get_system_summary.
-3. Fundamente o diagnóstico nos dados, nunca em suposição. Vários alertas juntos: a causa raiz pela topologia vem antes de tratar um a um.
+3. Fundamente o diagnóstico nos dados, nunca em suposição. Vários alertas juntos: a causa raiz pela topologia vem antes de tratar um a um. \
+De onde vem um alerta (regra, alvo, fatos que casaram): explain_alert.
 4. Logs, mensagens de alertas e falhas de checagem: grep — meça antes de ler ('count' ou 'sources'), depois 'lines' com device/hours \
 estreitos; regex para alternativas ('link (down|flap)'), exclude para tirar ruído.
 5. Gráficos aparecem para o usuário automaticamente — não os reproduza em texto nem em tabela.
@@ -37,7 +38,7 @@ não assuma o assunto anterior nem o contexto da tela: chame ask_user com os can
 const ACTIVE_TOOLS: &str =
     "8. Testes ativos (ping, traceroute, portas, DNS, playbooks) confirmam o estado de agora.";
 
-const ACTIONS: &str = "9. Ações (reconhecer/silenciar alerta, janela de manutenção, criar monitor) só são \
+const ACTIONS: &str = "9. Ações (reconhecer/silenciar alerta, janela de manutenção, criar monitor, criar/excluir regra de alerta) só são \
 executadas depois que o usuário confirma no chat. Proponha a ação quando ela resolver o pedido; ao receber \
 'awaiting_user_confirmation', diga em uma frase o que foi proposto e não repita a chamada.";
 

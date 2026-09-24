@@ -416,6 +416,42 @@
                 </div>
               </v-sheet>
             </v-col>
+
+            <!-- Domínio -->
+            <v-col cols="12">
+              <v-sheet border rounded="lg" class="pa-4 bg-surface">
+                <div class="d-flex align-start ga-3">
+                  <v-avatar color="indigo" size="38" rounded="lg" variant="tonal">
+                    <v-icon size="20">mdi-earth</v-icon>
+                  </v-avatar>
+                  <div class="flex-grow-1 min-width-0">
+                    <span class="font-weight-bold">Domínio (opcional)</span>
+                    <div class="text-caption text-medium-emphasis mb-2">
+                      Nome pelo qual o servidor é acessado. Quando preenchido, vira o endereço
+                      padrão dos comandos de instalação dos servidores remotos.
+                    </div>
+                    <v-text-field
+                      v-model="form.addresses.domain"
+                      placeholder="Ex: monitor.empresa.com.br"
+                      variant="outlined"
+                      density="compact"
+                      prepend-inner-icon="mdi-web"
+                      hide-details="auto"
+                    ></v-text-field>
+                    <v-switch
+                      v-model="form.addresses.domainHttps"
+                      :disabled="!form.addresses.domain.trim()"
+                      color="primary"
+                      density="compact"
+                      inset
+                      hide-details
+                      label="Atrás de um proxy HTTPS"
+                      class="mt-1"
+                    ></v-switch>
+                  </div>
+                </div>
+              </v-sheet>
+            </v-col>
           </v-row>
         </div>
 
@@ -889,6 +925,9 @@
                   <v-list-item-subtitle>
                     LAN: {{ form.addresses.lan || '—' }} | Internet:
                     {{ form.addresses.public || '—' }} | VPN: {{ form.addresses.vpn || '—' }}
+                    <template v-if="form.addresses.domain.trim()">
+                      | Domínio: {{ form.addresses.domain.trim() }}
+                    </template>
                   </v-list-item-subtitle>
                 </v-list-item>
                 <v-divider class="my-2"></v-divider>
@@ -1141,6 +1180,8 @@ const form = reactive({
     lan: '',
     public: '',
     vpn: '10.8.0.1',
+    domain: '',
+    domainHttps: false,
   },
   network: {
     enabled: true,
@@ -1364,11 +1405,15 @@ async function handleApplyAll() {
     if (form.addresses.lan.trim()) overrides.lan = form.addresses.lan.trim()
     if (form.addresses.public.trim()) overrides.public = form.addresses.public.trim()
     if (form.addresses.vpn.trim()) overrides.vpn = form.addresses.vpn.trim()
+    const domain = form.addresses.domain.trim()
+    if (domain) overrides.domain = domain
 
+    // Com domínio, ele é o padrão (sem marcação explícita); sem, a rede local.
     await serverAddressesStore.save({
       overrides,
       custom: [],
-      preferredId: 'lan',
+      preferredId: domain ? null : 'lan',
+      domainHttps: Boolean(domain) && form.addresses.domainHttps,
     })
 
     // 3. Criar Sub-rede se habilitada

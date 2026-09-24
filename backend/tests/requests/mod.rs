@@ -1,5 +1,7 @@
 mod agents;
+mod ai_alert_rules;
 mod ai_analysis;
+mod ai_context;
 mod ai_conversations;
 mod ai_grep;
 mod ai_mentions;

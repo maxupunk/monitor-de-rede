@@ -22,6 +22,7 @@ async fn index(State(ctx): State<AppContext>) -> AppResult<Response> {
     Ok(format::json(ServerAddressesResponse {
         data: lista.into_iter().map(serializa).collect(),
         preferred_id: documento.preferred_id,
+        domain_https: documento.domain_https,
     })?)
 }
 
@@ -47,6 +48,7 @@ async fn save(
                 .preferred_id
                 .map(|id| id.trim().to_owned())
                 .filter(|id| !id.is_empty()),
+            domain_https: entrada.domain_https,
         },
     )
     .await?;
@@ -66,6 +68,7 @@ fn serializa(endereco: ServerAddress) -> ServerAddressEntry {
         detected: endereco.detected,
         overridden: endereco.overridden,
         source: endereco.source,
+        https: endereco.https,
     }
 }
 

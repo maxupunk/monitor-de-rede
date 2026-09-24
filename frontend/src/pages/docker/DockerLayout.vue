@@ -36,16 +36,6 @@
             </v-list-item>
           </template>
         </v-select>
-        <v-chip
-          v-if="docker.available"
-          color="success"
-          size="small"
-          variant="tonal"
-          prepend-icon="mdi-access-point"
-          class="docker-live-chip"
-        >
-          Tempo real
-        </v-chip>
       </div>
     </v-card>
     <v-alert
@@ -142,20 +132,12 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.docker-live-chip {
-  flex: 0 0 auto;
-}
-
 .docker-host-select {
   flex: 0 0 240px;
   max-width: 280px;
 }
 
 @media (max-width: 700px) {
-  .docker-live-chip {
-    display: none;
-  }
-
   .docker-host-select {
     flex: 1 1 100%;
     max-width: none;

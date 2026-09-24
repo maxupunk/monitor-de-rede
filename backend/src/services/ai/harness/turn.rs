@@ -144,6 +144,20 @@ const HINTS: &[(ToolGroup, &[&str])] = &[
             "silenci", "reconhec", "manutenc", "criar", "crie", "cadastr", "adicion",
         ],
     ),
+    (
+        ToolGroup::AlertRules,
+        &[
+            "regra",
+            "limiar",
+            "threshold",
+            "dispar",
+            "origem",
+            "gatilho",
+            "apagar",
+            "exclu",
+            "remov",
+        ],
+    ),
 ];
 
 /// Grupos que a pergunta (e o que foi marcado nela) obviamente pede.

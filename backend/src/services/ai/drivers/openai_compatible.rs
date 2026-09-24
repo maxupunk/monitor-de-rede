@@ -1,4 +1,4 @@
-use std::{collections::HashMap, time::Instant};
+use std::{collections::HashMap, sync::Arc, time::Instant};
 
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -13,7 +13,13 @@ use super::traits::{
 };
 use crate::{
     dtos::ai::TestConnectionResponse,
-    services::shared::errors::{AppError, AppResult},
+    services::{
+        ai::context_window::{
+            self,
+            sources::{LearnedWindow, WindowLookup},
+        },
+        shared::errors::{AppError, AppResult},
+    },
 };
 
 pub struct OpenAiCompatibleDriver {
@@ -24,6 +30,8 @@ pub struct OpenAiCompatibleDriver {
     pub model: String,
     pub extra_headers: Vec<(String, String)>,
     client: reqwest::Client,
+    /// Onde o provedor informa a janela de contexto dos modelos.
+    window_lookup: Option<Arc<dyn WindowLookup>>,
 }
 
 impl OpenAiCompatibleDriver {
@@ -50,7 +58,15 @@ impl OpenAiCompatibleDriver {
             model,
             extra_headers,
             client,
+            window_lookup: None,
         }
+    }
+
+    /// Liga a consulta da janela de contexto ao provedor.
+    #[must_use]
+    pub fn with_window_lookup(mut self, lookup: Arc<dyn WindowLookup>) -> Self {
+        self.window_lookup = Some(lookup);
+        self
     }
 
     fn endpoint_url(&self) -> String {
@@ -149,6 +165,8 @@ fn spawn_sse_reader(res: reqwest::Response) -> AiChunkStream {
 
         let mut pending_buffer = String::new();
         let mut accumulated_tools: HashMap<usize, (String, String, String)> = HashMap::new();
+        // O id do modelo se repete em todo pedaço; basta repassar uma vez.
+        let mut model_reported = false;
 
         while let Some(chunk_res) = framed.next().await {
             let bytes = match chunk_res {
@@ -201,7 +219,7 @@ fn spawn_sse_reader(res: reqwest::Response) -> AiChunkStream {
                                     text_delta: None,
                                     tool_calls: calls,
                                     finish_reason: Some("tool_calls".into()),
-                                    usage: None,
+                                    ..AiChatChunk::default()
                                 }))
                                 .await;
                         }
@@ -210,13 +228,32 @@ fn spawn_sse_reader(res: reqwest::Response) -> AiChunkStream {
                                 text_delta: None,
                                 tool_calls: Vec::new(),
                                 finish_reason: Some("stop".into()),
-                                usage: None,
+                                ..AiChatChunk::default()
                             }))
                             .await;
                         return;
                     }
 
                     if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data_str) {
+                        if !model_reported {
+                            if let Some(model) = parsed
+                                .get("model")
+                                .and_then(|m| m.as_str())
+                                .filter(|m| !m.is_empty())
+                            {
+                                model_reported = true;
+                                if sender
+                                    .send(Ok(AiChatChunk {
+                                        model: Some(model.to_string()),
+                                        ..AiChatChunk::default()
+                                    }))
+                                    .await
+                                    .is_err()
+                                {
+                                    return;
+                                }
+                            }
+                        }
                         if let Some(usage) = parsed.get("usage").and_then(AiUsage::from_openai) {
                             if sender
                                 .send(Ok(AiChatChunk {
@@ -305,7 +342,7 @@ fn spawn_sse_reader(res: reqwest::Response) -> AiChunkStream {
                                             text_delta,
                                             tool_calls: calls,
                                             finish_reason,
-                                            usage: None,
+                                            ..AiChatChunk::default()
                                         }))
                                         .await
                                         .is_err()
@@ -331,6 +368,14 @@ impl AiDriver for OpenAiCompatibleDriver {
 
     fn display_name(&self) -> &'static str {
         self.display_name
+    }
+
+    fn model(&self) -> Option<&str> {
+        Some(&self.model)
+    }
+
+    async fn context_window(&self, model: &str) -> Option<LearnedWindow> {
+        context_window::lookup(self.window_lookup.as_deref()?, model).await
     }
 
     async fn chat_stream(

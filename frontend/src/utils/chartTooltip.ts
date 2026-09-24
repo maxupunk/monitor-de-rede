@@ -9,6 +9,11 @@ export interface ChartTooltipPosition {
   estimatedHeight?: number
   offset?: number
   padding?: number
+  /**
+   * Largura mínima legível. Quando nenhum lado do cursor comporta, o cartão
+   * deixa de seguir o cursor pelo lado e fica inteiro dentro do gráfico.
+   */
+  minWidth?: number
 }
 
 /**
@@ -25,6 +30,7 @@ export function chartTooltipStyle({
   estimatedHeight = 90,
   offset = 16,
   padding = 8,
+  minWidth = 0,
 }: ChartTooltipPosition): CSSProperties {
   const spaceLeft = Math.max(0, x - offset - padding)
   const spaceRight = Math.max(0, containerWidth - x - offset - padding)
@@ -36,9 +42,20 @@ export function chartTooltipStyle({
   const placeAbove = spaceAbove >= estimatedHeight || spaceAbove > spaceBelow
   const availableHeight = placeAbove ? spaceAbove : spaceBelow
 
-  const horizontal: CSSProperties = placeLeft
-    ? { right: `${Math.max(padding, containerWidth - x + offset)}px` }
-    : { left: `${Math.max(padding, x + offset)}px` }
+  const cramped = minWidth > 0 && availableWidth < minWidth
+  const width = Math.min(maxWidth, Math.max(minWidth, containerWidth - 2 * padding))
+  const horizontal: CSSProperties = cramped
+    ? {
+        left: `${Math.round(
+          Math.min(
+            Math.max(padding, x - width / 2),
+            Math.max(padding, containerWidth - width - padding)
+          )
+        )}px`,
+      }
+    : placeLeft
+      ? { right: `${Math.max(padding, containerWidth - x + offset)}px` }
+      : { left: `${Math.max(padding, x + offset)}px` }
   const vertical: CSSProperties = placeAbove
     ? { bottom: `${Math.max(padding, containerHeight - y + offset)}px` }
     : { top: `${Math.max(padding, y + offset)}px` }
@@ -48,7 +65,8 @@ export function chartTooltipStyle({
     ...horizontal,
     ...vertical,
     width: 'max-content',
-    maxWidth: `${Math.max(0, Math.min(maxWidth, availableWidth))}px`,
+    maxWidth: `${Math.max(0, cramped ? width : Math.min(maxWidth, availableWidth))}px`,
+    ...(minWidth > 0 ? { minWidth: `${Math.min(minWidth, width)}px` } : {}),
     maxHeight: `${Math.max(0, availableHeight)}px`,
     whiteSpace: 'normal',
     overflowWrap: 'anywhere',

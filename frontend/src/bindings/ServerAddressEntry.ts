@@ -33,4 +33,8 @@ export type ServerAddressEntry = {
    * certeza é pior do que campo vazio.
    */
   source: string
+  /**
+   * Chega-se por HTTPS (o domínio atrás de um proxy).
+   */
+  https: boolean
 }

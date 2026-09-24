@@ -55,4 +55,29 @@ describe('chart tooltip positioning', () => {
     expect(style.top).toBeUndefined()
     expect(style.maxHeight).toBe('196px')
   })
+
+  it('sem espaço mínimo de nenhum lado, fica inteiro dentro do gráfico', () => {
+    const style = chartTooltipStyle({
+      x: 225,
+      y: 100,
+      containerWidth: 450,
+      containerHeight: 220,
+      maxWidth: 300,
+      minWidth: 250,
+    })
+    expect(style.right).toBeUndefined()
+    expect(style.left).toBe('75px')
+    expect(style.maxWidth).toBe('300px')
+    expect(style.minWidth).toBe('250px')
+
+    const naBorda = chartTooltipStyle({
+      x: 440,
+      y: 100,
+      containerWidth: 450,
+      containerHeight: 220,
+      maxWidth: 300,
+      minWidth: 250,
+    })
+    expect(naBorda.right).toBe('26px')
+  })
 })

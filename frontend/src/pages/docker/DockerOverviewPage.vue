@@ -50,31 +50,51 @@
             Consumo geral dos containers
           </span>
           <v-spacer></v-spacer>
-          <v-chip color="primary" size="small" variant="tonal">
-            CPU {{ latestAggregate?.cpuPercent.toFixed(1) ?? '0.0' }}%
-          </v-chip>
-          <v-chip color="secondary" size="small" variant="tonal">
-            RAM {{ aggregateMemoryText }}
-            <span v-if="latestAggregate" class="ml-1 hidden-sm-and-down">
-              ({{ latestAggregate.memoryPercent.toFixed(1) }}%)
-            </span>
-          </v-chip>
+          <LiveIndicator :updated-at="docker.lastUpdatedAt" />
         </v-card-title>
         <v-card-subtitle>
-          Histórico desta sessão, atualizado automaticamente enquanto o SSE estiver conectado.
+          Cada faixa é um container; a linha é o total. Passe o mouse para ver a divisão em cada
+          horário.
         </v-card-subtitle>
         <v-card-text>
           <v-row>
             <v-col cols="12" lg="6">
-              <div class="text-subtitle-2 mb-2">CPU total</div>
-              <BaseMetricChart
-                :series="cpuAggregateSeries"
-                unit-type="percentage"
-              ></BaseMetricChart>
+              <div class="d-flex align-baseline justify-space-between mb-2">
+                <span class="text-subtitle-2">CPU total</span>
+                <span class="text-h6 font-weight-bold">
+                  {{ formatPercent(latestAggregate?.cpuPercent ?? 0) }}
+                </span>
+              </div>
+              <StackedUsageChart
+                :samples="cpuSamples"
+                :labels="containerLabels"
+                :format-value="formatCpu"
+                :min-ceiling="10"
+                total-label="CPU total"
+                aria-label="Uso de CPU por container, empilhado, com a linha do total"
+              />
             </v-col>
             <v-col cols="12" lg="6">
-              <div class="text-subtitle-2 mb-2">RAM usada pelos containers</div>
-              <BaseMetricChart :series="memoryAggregateSeries" unit-type="bytes"></BaseMetricChart>
+              <div class="d-flex align-baseline justify-space-between mb-2">
+                <span class="text-subtitle-2">RAM usada pelos containers</span>
+                <span class="text-h6 font-weight-bold">
+                  {{ formatBinaryBytes(latestAggregate?.memoryUsageBytes ?? 0) }}
+                  <span
+                    v-if="latestAggregate && docker.status?.memoryTotalBytes"
+                    class="text-caption text-medium-emphasis"
+                  >
+                    {{ formatPercent(latestAggregate.memoryPercent) }} da Engine
+                  </span>
+                </span>
+              </div>
+              <StackedUsageChart
+                :samples="memorySamples"
+                :labels="containerLabels"
+                :format-value="formatMemory"
+                :scale-base="1024"
+                total-label="RAM total"
+                aria-label="Memória usada por container, empilhada, com a linha do total"
+              />
             </v-col>
           </v-row>
         </v-card-text>
@@ -134,11 +154,9 @@
                       {{ metric.projectName || 'Avulso' }}
                     </div>
                   </td>
-                  <td class="text-right">{{ metric.cpu.usagePercent.toFixed(2) }}%</td>
+                  <td class="text-right">{{ formatPercent(metric.cpu.usagePercent, 2) }}</td>
                   <td class="text-right">
-                    {{ formatBinaryBytes(metric.memory.usageBytes) }} /
-                    {{ formatBinaryBytes(metric.memory.limitBytes) }}
-                    <div class="text-caption">{{ metric.memory.usagePercent.toFixed(1) }}%</div>
+                    {{ formatBinaryBytes(metric.memory.usageBytes) }}
                   </td>
                   <td class="text-right">
                     ↓ {{ formatDecimalBytes(metric.network.receivedBytes) }}
@@ -165,10 +183,17 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import BaseMetricChart, { type ChartSeriesInput } from '@/components/BaseMetricChart.vue'
 import PageHeader from '@/components/PageHeader.vue'
+import LiveIndicator from '@/components/LiveIndicator.vue'
+import StackedUsageChart from '@/components/StackedUsageChart.vue'
 import { useDockerStore } from '@/stores/docker'
-import { formatBinaryBytes, formatDecimalBytes, formatRelativeTime } from '@/utils/formatters'
+import {
+  formatBinaryBytes,
+  formatDecimalBytes,
+  formatPercent,
+  formatRelativeTime,
+} from '@/utils/formatters'
+import type { UsageSample } from '@/utils/stackedUsage'
 
 const docker = useDockerStore()
 
@@ -212,37 +237,30 @@ const topMetrics = computed(() =>
 
 const latestAggregate = computed(() => docker.aggregateHistory.at(-1) ?? null)
 
-const aggregateMemoryText = computed(() => {
-  if (!latestAggregate.value) return '0 B'
-  const used = formatBinaryBytes(latestAggregate.value.memoryUsageBytes)
-  const total = formatBinaryBytes(docker.status?.memoryTotalBytes, { fallback: 'N/D' })
-  return `${used} / ${total}`
-})
+/** Nome de cada container visto na janela — o mais recente vence. */
+const containerLabels = computed<Record<string, string>>(() =>
+  Object.assign({}, ...docker.aggregateHistory.map((sample) => sample.containerNames))
+)
 
-const cpuAggregateSeries = computed<ChartSeriesInput[]>(() => [
-  {
-    id: 'docker-cpu-total',
-    label: 'CPU total',
-    color: '#2196F3',
-    fillArea: true,
-    data: docker.aggregateHistory.map((sample) => ({
-      time: sample.recordedAt,
-      value: sample.cpuPercent,
-    })),
-  },
-])
+const cpuSamples = computed<UsageSample[]>(() =>
+  docker.aggregateHistory.map((sample) => ({
+    time: sample.recordedAt,
+    values: sample.cpuByContainer,
+  }))
+)
 
-const memoryAggregateSeries = computed<ChartSeriesInput[]>(() => [
-  {
-    id: 'docker-memory-total',
-    label: 'RAM dos containers / capacidade da Engine',
-    color: '#7E57C2',
-    fillArea: false,
-    data: docker.aggregateHistory.map((sample) => ({
-      time: sample.recordedAt,
-      value: sample.memoryUsageBytes,
-      formattedValue: formatBinaryBytes(sample.memoryUsageBytes),
-    })),
-  },
-])
+const memorySamples = computed<UsageSample[]>(() =>
+  docker.aggregateHistory.map((sample) => ({
+    time: sample.recordedAt,
+    values: sample.memoryByContainer,
+  }))
+)
+
+function formatCpu(value: number): string {
+  return formatPercent(value)
+}
+
+function formatMemory(value: number): string {
+  return formatBinaryBytes(value)
+}
 </script>

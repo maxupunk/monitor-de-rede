@@ -9,7 +9,10 @@ use crate::{
         ai::{
             drivers::{create_driver, traits::AiDriver},
             harness::{
-                agent::{collect_answer, run_agent_loop, AgentAnswer, AgentRequest, ToolLoading},
+                agent::{
+                    collect_answer, run_agent_loop, AgentAnswer, AgentRequest, ConversationMemory,
+                    ToolLoading,
+                },
                 prompt::ChatContext,
                 tools::ToolPolicy,
             },
@@ -68,6 +71,7 @@ pub async fn ask(
             context,
             policy: ToolPolicy::passive(),
             tool_loading: ToolLoading::Everything,
+            memory: ConversationMemory::default(),
         },
     )
     .await;

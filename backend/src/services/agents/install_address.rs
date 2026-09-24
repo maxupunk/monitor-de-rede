@@ -105,14 +105,30 @@ pub fn validate_code(code: &str) -> AppResult<&str> {
     }
 }
 
-/// Endereço padrão: o que o dispositivo vinculado usaria para chegar aqui
-/// (mesma sugestão do provisionamento de syslog), senão o preferido do
-/// operador, senão o primeiro com valor.
+/// URL da central para uma entrada da lista. O domínio atrás de proxy HTTPS
+/// vira `https://domínio` — quem escuta é o proxy, não a porta da API.
+#[must_use]
+pub fn server_url_for(address: &ServerAddress, ports: (u16, u16)) -> Option<String> {
+    let value = address.value.as_deref()?.trim().trim_end_matches('/');
+    if address.https && is_safe(value) && !value.contains("://") {
+        return Some(format!("https://{value}"));
+    }
+    server_url(address.kind, value, ports)
+}
+
+/// Endereço padrão: o marcado pelo operador e, sem marcação, o domínio — o
+/// caminho que sobrevive a troca de IP. Sem nenhum dos dois, o que o
+/// dispositivo vinculado usaria para chegar aqui (mesma sugestão do
+/// provisionamento de syslog), senão o primeiro com valor.
 async fn default_address<'a>(
     ctx: &AppContext,
     addresses: &'a [ServerAddress],
     device: Option<&devices::Model>,
 ) -> AppResult<Option<&'a ServerAddress>> {
+    let preferred = server_addresses::stored(&ctx.db).await?.preferred_id;
+    if let Some(chosen) = server_addresses::default_address_id(addresses, preferred.as_deref()) {
+        return Ok(Some(chosen));
+    }
     let usable = || addresses.iter().filter(|address| address.value.is_some());
     if let Some(device) = device {
         if let Some((value, _)) = server_addresses::suggest_for(&ctx.db, device, addresses).await? {
@@ -121,10 +137,7 @@ async fn default_address<'a>(
             }
         }
     }
-    let preferred = server_addresses::stored(&ctx.db).await?.preferred_id;
-    Ok(usable()
-        .find(|address| Some(&address.id) == preferred.as_ref())
-        .or_else(|| usable().next()))
+    Ok(usable().next())
 }
 
 /// Comandos de instalação para o endereço escolhido (ou o padrão).
@@ -168,12 +181,7 @@ pub async fn commands(
             code,
         ));
     };
-    let url = server_url(
-        chosen.kind,
-        chosen.value.as_deref().unwrap_or_default(),
-        ports(ctx),
-    )
-    .ok_or_else(|| {
+    let url = server_url_for(chosen, ports(ctx)).ok_or_else(|| {
         AppError::validation("O endereço escolhido não é um host ou URL válido para o agente")
     })?;
     Ok(render(Some(chosen.id.clone()), url, code))
@@ -240,6 +248,41 @@ mod tests {
                 "{value}"
             );
         }
+    }
+
+    #[test]
+    fn dominio_com_https_dispensa_a_porta_da_api() {
+        let dominio = ServerAddress {
+            id: "domain".into(),
+            kind: AddressKind::Domain,
+            label: "Domínio".into(),
+            description: String::new(),
+            value: Some("monitor.exemplo.com".into()),
+            detected: None,
+            overridden: true,
+            source: "definido por você".into(),
+            https: true,
+        };
+        assert_eq!(
+            server_url_for(&dominio, PORTS).as_deref(),
+            Some("https://monitor.exemplo.com")
+        );
+        let sem_proxy = ServerAddress {
+            https: false,
+            ..dominio.clone()
+        };
+        assert_eq!(
+            server_url_for(&sem_proxy, PORTS).as_deref(),
+            Some("http://monitor.exemplo.com:8080")
+        );
+        let com_porta = ServerAddress {
+            value: Some("monitor.exemplo.com:8443".into()),
+            ..dominio
+        };
+        assert_eq!(
+            server_url_for(&com_porta, PORTS).as_deref(),
+            Some("https://monitor.exemplo.com:8443")
+        );
     }
 
     #[test]

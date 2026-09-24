@@ -17,6 +17,8 @@ export type { ServerAddressEntry }
 export const useServerAddressesStore = defineStore('serverAddresses', () => {
   const entries = ref<ServerAddressEntry[]>([])
   const preferredId = ref<string | null>(null)
+  /** O domínio está atrás de um proxy HTTPS (agentes usam `https://`). */
+  const domainHttps = ref(false)
   const loading = ref(false)
   const saving = ref(false)
   const loaded = ref(false)
@@ -24,6 +26,16 @@ export const useServerAddressesStore = defineStore('serverAddresses', () => {
 
   /** Só as entradas que têm endereço — as outras não podem ser oferecidas. */
   const usable = computed(() => entries.value.filter((entrada) => Boolean(entrada.value)))
+
+  /**
+   * O padrão efetivo dos comandos de instalação: o marcado pelo operador e,
+   * sem marcação, o domínio — a mesma regra do backend.
+   */
+  const defaultId = computed<string | null>(() => {
+    const marked = usable.value.find((entrada) => entrada.id === preferredId.value)
+    if (marked) return marked.id
+    return usable.value.find((entrada) => entrada.kind === 'domain')?.id ?? null
+  })
 
   /** Se ainda não há nenhum endereço utilizável, a tela precisa pedir um. */
   const isEmpty = computed(() => loaded.value && usable.value.length === 0)
@@ -37,6 +49,7 @@ export const useServerAddressesStore = defineStore('serverAddresses', () => {
       const resposta = await apiService.get<ServerAddressesResponse>('/server-addresses')
       entries.value = resposta.data ?? []
       preferredId.value = resposta.preferredId ?? null
+      domainHttps.value = resposta.domainHttps ?? false
       loaded.value = true
     } catch (erro) {
       error.value = erro instanceof Error ? erro.message : 'Não foi possível carregar os endereços.'
@@ -55,6 +68,7 @@ export const useServerAddressesStore = defineStore('serverAddresses', () => {
     overrides: Record<string, string>
     custom: { id: string; label: string; value: string }[]
     preferredId: string | null
+    domainHttps: boolean
   }): Promise<boolean> {
     saving.value = true
     error.value = ''
@@ -62,6 +76,7 @@ export const useServerAddressesStore = defineStore('serverAddresses', () => {
       const resposta = await apiService.put<ServerAddressesResponse>('/server-addresses', payload)
       entries.value = resposta.data ?? []
       preferredId.value = resposta.preferredId ?? null
+      domainHttps.value = resposta.domainHttps ?? false
       loaded.value = true
       return true
     } catch (erro) {
@@ -81,6 +96,8 @@ export const useServerAddressesStore = defineStore('serverAddresses', () => {
   return {
     entries,
     preferredId,
+    domainHttps,
+    defaultId,
     loading,
     saving,
     loaded,
@@ -102,6 +119,8 @@ export function addressIcon(kind: string): string {
       return 'mdi-shield-lock-outline'
     case 'public':
       return 'mdi-web'
+    case 'domain':
+      return 'mdi-earth'
     default:
       return 'mdi-map-marker-outline'
   }
@@ -115,6 +134,8 @@ export function addressColor(kind: string): string {
       return 'deep-purple'
     case 'public':
       return 'teal'
+    case 'domain':
+      return 'indigo'
     default:
       return 'blue-grey'
   }

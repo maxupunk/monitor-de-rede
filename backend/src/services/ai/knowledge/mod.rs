@@ -3,6 +3,10 @@
 //! Fornece documentação técnica, manuais de operação e guias de troubleshooting
 //! que são indexados e injetados nas consultas da IA para respostas precisas sobre o sistema.
 
+/// Guia de regras de alerta: funcionamento, vocabulário e receitas. Um só
+/// texto para a busca na documentação e para `get_alert_rules_guide`.
+pub const ALERT_RULES_GUIDE: &str = include_str!("regras_de_alerta.md");
+
 #[derive(Debug, Clone)]
 pub struct DocTopic {
     pub id: &'static str,
@@ -44,17 +48,8 @@ pub static SYSTEM_DOCS: &[DocTopic] = &[
     DocTopic {
         id: "alerts_rules",
         title: "Regras de Alerta e Notificações",
-        keywords: &["alerta", "alertas", "notificacao", "notificacoes", "webpush", "telegram", "discord", "webhook", "flap", "flapping"],
-        content: "Central de Alertas e Notificações:
-- Regras de Alerta definem condições para disparo de incidentes:
-  * Severidades: 'critical', 'warning', 'info'.
-  * Critérios: host inacessível ('down'), latência acima do limite por N amostras consecutivas, perda de pacotes acima da porcentagem estipulada.
-  * Flap Detection: evita tempestade de notificações quando um link instável oscila rapidamente entre UP e DOWN.
-- Canais de notificação:
-  * Web Push (notificações push no navegador/PWA mesmo com app fechado).
-  * Telegram Bot (envio para chats ou grupos).
-  * Discord Webhook.
-  * Webhook genérico HTTP POST com payload JSON assinado.",
+        keywords: &["alerta", "alertas", "regra", "regras", "condicao", "limiar", "notificacao", "notificacoes", "webpush", "telegram", "discord", "webhook", "flap", "flapping", "severidade"],
+        content: ALERT_RULES_GUIDE,
     },
     DocTopic {
         id: "diagnostics",

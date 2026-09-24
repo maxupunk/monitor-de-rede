@@ -42,7 +42,7 @@
         </div>
         <p class="text-caption text-medium-emphasis mb-4">
           O servidor vai conectar em <code>{{ commands.serverUrl }}</code
-          >. Escolha o caminho pelo qual ele alcança esta central: túnel VPN, rede local ou
+          >. Escolha o caminho pelo qual ele alcança esta central: domínio, túnel VPN, rede local ou
           internet.
         </p>
         <v-alert v-if="addressHint" type="info" variant="tonal" density="compact" class="mb-4">
@@ -139,13 +139,22 @@ watch(
 
 const expiresInMinutes = computed(() => Math.round((props.enrollment?.expiresInSeconds ?? 0) / 60))
 
-const addressOptions = computed<AddressOption[]>(() =>
-  addressesStore.usable.map((entry) => ({
-    value: entry.id,
-    title: `${entry.label} — ${entry.value}`,
-    subtitle: entry.description,
-  }))
-)
+/**
+ * O padrão (o marcado pelo operador ou, sem marcação, o domínio) vem primeiro
+ * e identificado; os outros caminhos seguem na ordem da lista.
+ */
+const addressOptions = computed<AddressOption[]>(() => {
+  const defaultId = addressesStore.defaultId
+  return [...addressesStore.usable]
+    .sort((a, b) => Number(b.id === defaultId) - Number(a.id === defaultId))
+    .map((entry) => ({
+      value: entry.id,
+      title: `${entry.label} — ${entry.https ? `https://${entry.value}` : entry.value}${
+        entry.id === defaultId ? ' (padrão)' : ''
+      }`,
+      subtitle: entry.description,
+    }))
+})
 
 function addressItemProps(item: AddressOption): Record<string, unknown> {
   return { subtitle: item.subtitle }

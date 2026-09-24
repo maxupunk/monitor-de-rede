@@ -22,6 +22,7 @@ pub mod manager;
 pub mod problem_kind;
 pub mod recovery;
 pub mod repository;
+pub mod rules;
 pub mod silence;
 pub mod state_machine;
 

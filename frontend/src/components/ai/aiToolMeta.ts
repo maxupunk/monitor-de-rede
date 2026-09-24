@@ -93,6 +93,27 @@ const TOOL_META: Record<string, AiToolMeta> = {
     color: 'purple',
   },
   create_monitor: { label: 'Criar Monitor', icon: 'mdi-monitor-eye', color: 'success' },
+  get_alert_rules_guide: {
+    label: 'Guia de Regras de Alerta',
+    icon: 'mdi-book-alert-outline',
+    color: 'green',
+  },
+  list_alert_rules: { label: 'Regras de Alerta', icon: 'mdi-bell-cog-outline', color: 'orange' },
+  explain_alert: {
+    label: 'Origem do Alerta',
+    icon: 'mdi-bell-ring-outline',
+    color: 'deep-orange',
+  },
+  create_alert_rule: {
+    label: 'Criar Regra de Alerta',
+    icon: 'mdi-bell-plus-outline',
+    color: 'success',
+  },
+  delete_alert_rule: {
+    label: 'Excluir Regra de Alerta',
+    icon: 'mdi-bell-remove-outline',
+    color: 'error',
+  },
   search_system_docs: {
     label: 'Base de Conhecimento',
     icon: 'mdi-book-open-page-variant-outline',
@@ -123,6 +144,9 @@ export function formatToolArgs(args: Record<string, unknown>): string {
     ['interface', 'Interface'],
     ['monitor_id', 'Monitor'],
     ['alert_id', 'Alerta'],
+    ['rule_id', 'Regra'],
+    ['name', 'Nome'],
+    ['field', 'Campo'],
     ['metric', 'Métrica'],
     ['playbook_type', 'Playbook'],
     ['pattern', 'Padrão'],

@@ -33,6 +33,11 @@
       {{ aiStore.digestError }}
     </v-alert>
 
+    <div v-if="aiStore.runningDigest" class="text-caption text-medium-emphasis mt-2">
+      A IA está consultando alertas, logs e interfaces para montar o resumo — isso pode levar alguns
+      minutos.
+    </div>
+
     <div v-if="digest" class="digest-text text-body-2 mt-2">{{ digest.text }}</div>
     <div v-else-if="!aiStore.loadingDigest" class="text-caption text-medium-emphasis mt-2">
       Nenhum resumo gerado ainda. Gere agora ou ative o envio periódico acima.

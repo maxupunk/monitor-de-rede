@@ -69,12 +69,18 @@ pub const STORAGE_KEY: &str = "server.addresses";
 /// resultado e insinuaria um tráfego que não acontece.
 const DESTINO_DE_SONDAGEM: &str = "192.0.2.1";
 
-/// Os três tipos que o sistema conhece, mais o que o operador inventar.
+/// Os tipos que o sistema conhece, mais o que o operador inventar.
+///
+/// O domínio não é detectado — nenhum lado do servidor sabe por qual nome o
+/// mundo o chama —, mas é um tipo próprio e não um "outro endereço": quando
+/// existe, é o caminho que sobrevive a troca de IP e a proxy HTTPS, e por isso
+/// vira o padrão dos comandos de instalação.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AddressKind {
     Lan,
     Vpn,
     Public,
+    Domain,
     Custom,
 }
 
@@ -85,6 +91,7 @@ impl AddressKind {
             Self::Lan => "lan",
             Self::Vpn => "vpn",
             Self::Public => "public",
+            Self::Domain => "domain",
             Self::Custom => "custom",
         }
     }
@@ -95,6 +102,7 @@ impl AddressKind {
             Self::Lan => "Rede local",
             Self::Vpn => "Túnel VPN",
             Self::Public => "Internet",
+            Self::Domain => "Domínio",
             Self::Custom => "Outro endereço",
         }
     }
@@ -107,6 +115,9 @@ impl AddressKind {
             Self::Lan => "Para equipamentos na mesma rede que este servidor",
             Self::Vpn => "Para equipamentos que chegam pelo túnel WireGuard",
             Self::Public => "Para equipamentos em outro local, que chegam pela internet",
+            Self::Domain => {
+                "Para quem chega pelo nome (DNS ou proxy HTTPS): agentes remotos, interface web e equipamentos que resolvem o domínio"
+            }
             Self::Custom => "Endereço definido por você",
         }
     }
@@ -128,6 +139,8 @@ pub struct ServerAddress {
     /// De onde veio o valor. A tela mostra: palpite apresentado como certeza é
     /// pior do que campo vazio.
     pub source: String,
+    /// Chega-se por HTTPS (hoje, só o domínio atrás de proxy).
+    pub https: bool,
 }
 
 /// O documento guardado — só o que o operador acrescentou ou corrigiu.
@@ -143,6 +156,10 @@ pub struct StoredAddresses {
     /// explícita, a sugestão vem da rota até o equipamento, que acerta mais.
     #[serde(default)]
     pub preferred_id: Option<String>,
+    /// O domínio está atrás de um proxy HTTPS: os agentes conectam em
+    /// `https://domínio`, sem a porta publicada da API.
+    #[serde(default)]
+    pub domain_https: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -180,7 +197,17 @@ pub async fn save<C: ConnectionTrait>(db: &C, mut documento: StoredAddresses) ->
         .overrides
         .retain(|_, valor| !valor.trim().is_empty());
 
+    if let Some(valor) = documento.overrides.get_mut(AddressKind::Domain.id()) {
+        let dominio = valida_dominio(valor)?;
+        *valor = dominio.host;
+        if let Some(https) = dominio.https {
+            documento.domain_https = https;
+        }
+    }
     for (tipo, valor) in &documento.overrides {
+        if tipo == AddressKind::Domain.id() {
+            continue;
+        }
         valida_endereco(
             valor,
             &format!("o endereço de \"{}\"", rotulo_do_tipo(tipo)),
@@ -248,6 +275,7 @@ fn rotulo_do_tipo(tipo: &str) -> &'static str {
         "lan" => AddressKind::Lan.label(),
         "vpn" => AddressKind::Vpn.label(),
         "public" => AddressKind::Public.label(),
+        "domain" => AddressKind::Domain.label(),
         _ => AddressKind::Custom.label(),
     }
 }
@@ -265,6 +293,81 @@ fn valida_endereco(valor: &str, campo: &str) -> AppResult<()> {
         )));
     }
     Ok(())
+}
+
+/// Domínio já conferido: o host (com porta, se veio) e se a URL digitada
+/// dizia `https://`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckedDomain {
+    pub host: String,
+    pub https: Option<bool>,
+}
+
+/// Normaliza e confere o domínio: um nome DNS (`monitor.empresa.com.br`),
+/// opcionalmente com porta, ou a URL (`https://monitor.empresa.com.br`) de
+/// quem tem um proxy HTTPS na frente. Guarda-se só o host — o mesmo valor
+/// serve de destino de syslog, onde uma URL não faria sentido; o esquema vira
+/// o indicador [`StoredAddresses::domain_https`]. IP não é domínio: ele tem o
+/// lugar dele em "Rede local" ou "Internet".
+///
+/// # Errors
+///
+/// Valor que não é um nome de domínio.
+pub fn valida_dominio(valor: &str) -> AppResult<CheckedDomain> {
+    let limpo = valor.trim().trim_end_matches('/');
+    let (resto, https) = if let Some(resto) = limpo.strip_prefix("https://") {
+        (resto, Some(true))
+    } else if let Some(resto) = limpo.strip_prefix("http://") {
+        (resto, Some(false))
+    } else {
+        (limpo, None)
+    };
+    let host = match resto.rsplit_once(':') {
+        Some((host, porta)) if porta.parse::<u16>().is_ok_and(|porta| porta > 0) => host,
+        _ => resto,
+    };
+    let rotulos: Vec<&str> = host.split('.').collect();
+    let nome_valido = rotulos.len() >= 2
+        && host.len() <= 253
+        && rotulos.iter().all(|rotulo| {
+            !rotulo.is_empty()
+                && rotulo.len() <= 63
+                && !rotulo.starts_with('-')
+                && !rotulo.ends_with('-')
+                && rotulo
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-')
+        })
+        && rotulos
+            .last()
+            .is_some_and(|tld| tld.chars().any(|c| c.is_ascii_alphabetic()));
+    if !nome_valido || host.parse::<IpAddr>().is_ok() {
+        return Err(AppError::validation(format!(
+            "`{limpo}` não é um domínio. Informe o nome, como monitor.empresa.com.br, ou a URL              com proxy HTTPS, como https://monitor.empresa.com.br. Para IP use \"Rede local\" ou \"Internet\"."
+        )));
+    }
+    valida_endereco(resto, "o domínio")?;
+    Ok(CheckedDomain {
+        host: resto.to_ascii_lowercase(),
+        https,
+    })
+}
+
+/// O endereço que os comandos de instalação usam quando ninguém escolheu
+/// outro: o marcado como padrão pelo operador e, sem marcação, o domínio.
+#[must_use]
+pub fn default_address_id<'a>(
+    lista: &'a [ServerAddress],
+    preferido: Option<&str>,
+) -> Option<&'a ServerAddress> {
+    let com_valor = |id: &str| {
+        lista
+            .iter()
+            .find(|item| item.id == id && item.value.is_some())
+    };
+    preferido
+        .and_then(com_valor)
+        .or_else(|| com_valor(AddressKind::Domain.id()))
 }
 
 /// Monta a lista completa: detectados, corrigidos e personalizados.
@@ -323,6 +426,7 @@ async fn resolved_list(
         monta(AddressKind::Lan, lan_address, &documento, nat),
         monta(AddressKind::Vpn, vpn_address, &documento, nat),
         monta(AddressKind::Public, public_endpoint, &documento, nat),
+        monta(AddressKind::Domain, None, &documento, nat),
     ];
     if observed_lan && !lista[0].overridden {
         lista[0].source =
@@ -337,6 +441,7 @@ async fn resolved_list(
         detected: None,
         overridden: true,
         source: "definido por você".to_owned(),
+        https: false,
     }));
     Ok(lista)
 }
@@ -384,13 +489,15 @@ fn monta(
         .map(|valor| valor.trim().to_owned())
         .filter(|valor| !valor.is_empty());
     let overridden = correcao.is_some();
-    let source = if overridden {
+    let source = if overridden && kind == AddressKind::Domain {
+        "definido por você".to_owned()
+    } else if overridden {
         "corrigido por você".to_owned()
     } else if detectado.is_some() {
         match kind {
             AddressKind::Lan => "detectado neste servidor".to_owned(),
             AddressKind::Vpn | AddressKind::Public => "do servidor WireGuard".to_owned(),
-            AddressKind::Custom => "definido por você".to_owned(),
+            AddressKind::Domain | AddressKind::Custom => "definido por você".to_owned(),
         }
     } else {
         motivo_de_nao_detectar(kind, nat)
@@ -405,6 +512,7 @@ fn monta(
         detected: detectado,
         overridden,
         source,
+        https: kind == AddressKind::Domain && documento.domain_https,
     }
 }
 
@@ -423,6 +531,10 @@ fn motivo_de_nao_detectar(kind: AddressKind, nat: &NatDetector) -> String {
         AddressKind::Vpn => "não detectado — nenhum servidor WireGuard configurado".to_owned(),
         AddressKind::Public => {
             "não detectado — o servidor WireGuard está sem endereço público".to_owned()
+        }
+        AddressKind::Domain => {
+            "não definido — informe o domínio se este servidor tiver um (ex.: monitor.empresa.com.br)"
+                .to_owned()
         }
         AddressKind::Custom => "definido por você".to_owned(),
     }
@@ -650,7 +762,9 @@ mod tests {
         let db = banco().await;
         let lista = list(&db, &NatDetector::none()).await.expect("lista");
 
-        assert_eq!(lista.len(), 3);
+        assert_eq!(lista.len(), 4);
+        assert_eq!(lista[3].kind, AddressKind::Domain);
+        assert!(lista[3].value.is_none(), "domínio não é detectado");
         assert_eq!(lista[0].kind, AddressKind::Lan);
         assert_eq!(lista[1].kind, AddressKind::Vpn);
         assert_eq!(lista[2].kind, AddressKind::Public);
@@ -756,9 +870,9 @@ mod tests {
         assert!(guardado.custom[0].id.starts_with("custom:"));
 
         let lista = list(&db, &NatDetector::none()).await.expect("lista");
-        assert_eq!(lista.len(), 4);
-        assert_eq!(lista[3].label, "Filial Norte");
-        assert_eq!(lista[3].kind, AddressKind::Custom);
+        assert_eq!(lista.len(), 5);
+        assert_eq!(lista[4].label, "Filial Norte");
+        assert_eq!(lista[4].kind, AddressKind::Custom);
     }
 
     #[tokio::test]
@@ -768,7 +882,7 @@ mod tests {
             .await
             .expect("gravar lixo");
         let lista = list(&db, &NatDetector::none()).await.expect("lista");
-        assert_eq!(lista.len(), 3, "os detectados continuam de pé");
+        assert_eq!(lista.len(), 4, "os tipos conhecidos continuam de pé");
     }
 
     #[tokio::test]
@@ -950,7 +1064,82 @@ mod tests {
             detected: None,
             overridden: true,
             source: "definido por você".to_owned(),
+            https: false,
         }
+    }
+
+    #[test]
+    fn dominio_aceita_nome_porta_e_url_e_guarda_so_o_host() {
+        assert_eq!(
+            valida_dominio(" Monitor.Empresa.com.br/ ").unwrap(),
+            CheckedDomain {
+                host: "monitor.empresa.com.br".into(),
+                https: None
+            }
+        );
+        assert_eq!(
+            valida_dominio("https://monitor.empresa.com.br").unwrap(),
+            CheckedDomain {
+                host: "monitor.empresa.com.br".into(),
+                https: Some(true)
+            }
+        );
+        assert_eq!(
+            valida_dominio("http://casa.ddns.net:8080").unwrap(),
+            CheckedDomain {
+                host: "casa.ddns.net:8080".into(),
+                https: Some(false)
+            }
+        );
+    }
+
+    #[test]
+    fn dominio_recusa_ip_nome_sem_ponto_e_caminho() {
+        for valor in [
+            "192.168.0.10",
+            "localhost",
+            "servidor",
+            "https://monitor.empresa.com/painel",
+            "monitor..com",
+            "-ruim.com",
+            "monitor.empresa.123",
+        ] {
+            assert!(valida_dominio(valor).is_err(), "{valor}");
+        }
+    }
+
+    #[tokio::test]
+    async fn dominio_gravado_vira_o_padrao_e_o_esquema_liga_o_https() {
+        let db = banco().await;
+        let mut documento = documento_vazio();
+        documento
+            .overrides
+            .insert("domain".into(), "https://Monitor.Empresa.com.br".into());
+        save(&db, documento).await.expect("grava");
+
+        let guardado = stored(&db).await.expect("lê");
+        assert_eq!(
+            guardado.overrides.get("domain").map(String::as_str),
+            Some("monitor.empresa.com.br")
+        );
+        assert!(guardado.domain_https);
+
+        let lista = list(&db, &NatDetector::none()).await.expect("lista");
+        let dominio = &lista[3];
+        assert_eq!(dominio.value.as_deref(), Some("monitor.empresa.com.br"));
+        assert_eq!(dominio.source, "definido por você");
+        assert!(dominio.https);
+
+        assert_eq!(
+            default_address_id(&lista, None).map(|item| item.id.as_str()),
+            Some("domain"),
+            "sem padrão marcado, o domínio é o padrão"
+        );
+        assert_eq!(
+            default_address_id(&lista, Some("vpn")).map(|item| item.id.as_str()),
+            Some("domain"),
+            "padrão marcado sem valor não vence o domínio"
+        );
     }
 
     #[tokio::test]

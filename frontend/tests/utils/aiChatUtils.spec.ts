@@ -6,8 +6,15 @@ import {
   loadLocalConversations,
 } from '@/utils/aiConversationStorage'
 import { readSseJson } from '@/utils/sseReader'
-import { applyChatEvent, toApiMessages, type AiDisplayMessage } from '@/utils/aiChatStream'
-import { formatCompactCount } from '@/utils/formatters'
+import {
+  applyChatEvent,
+  contextUsage,
+  shortModelName,
+  toApiMessages,
+  tokensPerSecond,
+  type AiDisplayMessage,
+} from '@/utils/aiChatStream'
+import { formatCompactCount, formatElapsedMs, formatTokenRate } from '@/utils/formatters'
 
 function readerOf(...chunks: string[]): ReadableStreamDefaultReader<Uint8Array> {
   const encoder = new TextEncoder()
@@ -93,6 +100,71 @@ describe('contagem compacta', () => {
     expect(formatCompactCount(1234)).toBe('1,2 mil')
     expect(formatCompactCount(3_400_000)).toBe('3,4 mi')
     expect(formatCompactCount(null)).toBe('—')
+  })
+})
+
+describe('métricas da resposta', () => {
+  it('evento de uso traz modelo, contexto e tempos', () => {
+    const msg: AiDisplayMessage = { id: 'a', role: 'assistant', content: '' }
+    applyChatEvent(msg, {
+      type: 'usage',
+      promptTokens: 1200,
+      completionTokens: 80,
+      model: 'meta-llama/llama-3.3-70b-instruct',
+      contextTokens: 950,
+      contextWindow: 131072,
+      generationMs: 2000,
+      durationMs: 5000,
+    })
+    expect(msg.usage).toEqual({
+      promptTokens: 1200,
+      completionTokens: 80,
+      model: 'meta-llama/llama-3.3-70b-instruct',
+      contextTokens: 950,
+      contextWindow: 131072,
+      generationMs: 2000,
+      durationMs: 5000,
+    })
+    expect(tokensPerSecond(msg.usage)).toBe(40)
+    expect(shortModelName(msg.usage?.model)).toBe('llama-3.3-70b-instruct')
+  })
+
+  it('tokens/s cai no tempo total quando a escrita foi curta demais para medir', () => {
+    expect(
+      tokensPerSecond({ promptTokens: 1, completionTokens: 50, generationMs: 10, durationMs: 1000 })
+    ).toBe(50)
+    expect(tokensPerSecond({ promptTokens: 1, completionTokens: 0, generationMs: 900 })).toBeNull()
+    expect(tokensPerSecond({ promptTokens: 1, completionTokens: 9 })).toBeNull()
+    expect(tokensPerSecond(null)).toBeNull()
+  })
+
+  it('contexto vem da resposta mais recente que o mediu', () => {
+    const mensagens: AiDisplayMessage[] = [
+      {
+        id: '1',
+        role: 'assistant',
+        content: 'a',
+        usage: { promptTokens: 1, completionTokens: 1, contextTokens: 1000, contextWindow: 8000 },
+      },
+      { id: '2', role: 'user', content: 'b' },
+      { id: '3', role: 'assistant', content: 'c', usage: { promptTokens: 1, completionTokens: 1 } },
+    ]
+    expect(contextUsage(mensagens)).toEqual({
+      used: 1000,
+      window: 8000,
+      ratio: 0.125,
+      reported: false,
+    })
+    expect(contextUsage([])).toBeNull()
+  })
+
+  it('formata velocidade e duração', () => {
+    expect(formatTokenRate(42.34)).toBe('42,3 tok/s')
+    expect(formatTokenRate(120.6)).toBe('121 tok/s')
+    expect(formatTokenRate(null)).toBe('—')
+    expect(formatElapsedMs(850)).toBe('850 ms')
+    expect(formatElapsedMs(4230)).toBe('4,2 s')
+    expect(formatElapsedMs(119_600)).toBe('2 min 0 s')
   })
 })
 

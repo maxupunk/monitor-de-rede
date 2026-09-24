@@ -125,6 +125,9 @@ describe('docker store', () => {
         memoryUsageBytes: 256,
         networkReceivedBytes: 100,
         networkTransmittedBytes: 50,
+        cpuByContainer: { abc: 12.5 },
+        memoryByContainer: { abc: 256 },
+        containerNames: { abc: 'web' },
       },
     ])
     expect(store.loading).toBe(false)

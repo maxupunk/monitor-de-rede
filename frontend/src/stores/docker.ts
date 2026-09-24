@@ -28,6 +28,11 @@ export interface DockerAggregateSample {
   memoryUsageBytes: number
   networkReceivedBytes: number
   networkTransmittedBytes: number
+  /** Parcela de cada container (id → valor): o que o gráfico empilha. */
+  cpuByContainer: Record<string, number>
+  memoryByContainer: Record<string, number>
+  /** Nome de cada container na amostra (id → nome). */
+  containerNames: Record<string, string>
 }
 
 /** Estado de um host Docker (a central ou um agente), alimentado pelo SSE. */
@@ -174,6 +179,15 @@ export const useDockerStore = defineStore('docker', () => {
       networkTransmittedBytes: response.containers.reduce(
         (total, container) => total + container.network.transmittedBytes,
         0
+      ),
+      cpuByContainer: Object.fromEntries(
+        response.containers.map((container) => [container.containerId, container.cpu.usagePercent])
+      ),
+      memoryByContainer: Object.fromEntries(
+        response.containers.map((container) => [container.containerId, container.memory.usageBytes])
+      ),
+      containerNames: Object.fromEntries(
+        response.containers.map((container) => [container.containerId, container.containerName])
       ),
     }
     state.aggregateHistory = [...state.aggregateHistory, sample].slice(-HISTORY_LIMIT)

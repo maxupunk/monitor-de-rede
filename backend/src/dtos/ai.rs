@@ -28,6 +28,32 @@ pub struct ChatStreamRequest {
     /// O que o usuário marcou com `@` na última pergunta.
     #[serde(default)]
     pub mentions: Vec<AiMention>,
+    /// Resumo das mensagens já compactadas — elas não vêm mais em `messages`.
+    #[serde(default)]
+    pub summary: Option<String>,
+    /// O que a resposta anterior mediu: base da decisão de compactar.
+    #[serde(default)]
+    pub context_hint: Option<ContextHint>,
+    /// Compactar agora, mesmo cabendo na janela.
+    #[serde(default)]
+    pub compact: bool,
+}
+
+/// Medida da resposta anterior da conversa.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct ContextHint {
+    /// Tokens da conversa na última rodada (entrada + saída).
+    #[ts(type = "number")]
+    pub tokens: u64,
+    /// Janela do modelo que respondeu.
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub window: Option<u64>,
+    /// Modelo que respondeu.
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -44,6 +70,12 @@ enum ChatStreamRequestHelper {
         alert_id: Option<i64>,
         #[serde(default)]
         mentions: Vec<AiMention>,
+        #[serde(default)]
+        summary: Option<String>,
+        #[serde(default)]
+        context_hint: Option<ContextHint>,
+        #[serde(default)]
+        compact: bool,
     },
     Array(Vec<ChatMessageInput>),
 }
@@ -61,12 +93,18 @@ impl<'de> Deserialize<'de> for ChatStreamRequest {
                 monitor_id,
                 alert_id,
                 mentions,
+                summary,
+                context_hint,
+                compact,
             } => Ok(Self {
                 messages,
                 device_id,
                 monitor_id,
                 alert_id,
                 mentions,
+                summary,
+                context_hint,
+                compact,
             }),
             ChatStreamRequestHelper::Array(messages) => Ok(Self {
                 messages,
@@ -74,6 +112,9 @@ impl<'de> Deserialize<'de> for ChatStreamRequest {
                 monitor_id: None,
                 alert_id: None,
                 mentions: Vec::new(),
+                summary: None,
+                context_hint: None,
+                compact: false,
             }),
         }
     }

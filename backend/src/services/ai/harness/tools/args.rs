@@ -65,6 +65,12 @@ impl ToolArgs {
         }
     }
 
+    /// O valor como veio, para argumentos que aceitam número ou texto.
+    #[must_use]
+    pub fn raw(&self, key: &str) -> Option<&Value> {
+        self.values.get(key).filter(|value| !value.is_null())
+    }
+
     /// # Errors
     ///
     /// Validação quando o argumento falta ou está vazio.

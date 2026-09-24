@@ -299,6 +299,58 @@ async fn comandos_de_instalacao_usam_os_enderecos_deste_servidor() {
 
 #[tokio::test]
 #[serial]
+async fn com_dominio_cadastrado_os_comandos_usam_o_dominio_por_padrao() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        session_with_role(&mut request, &ctx, Role::Admin).await;
+        let saved = request
+            .put("/api/server-addresses")
+            .json(&json!({
+                "overrides": {
+                    "public": "200.1.2.3",
+                    "domain": "https://Monitor.Exemplo.com"
+                },
+                "custom": [],
+                "preferredId": null
+            }))
+            .await;
+        assert_eq!(saved.status_code(), 200, "{}", saved.text());
+        let saved = json_of(&saved.text());
+        assert_eq!(
+            saved["domainHttps"], true,
+            "o esquema digitado liga o HTTPS"
+        );
+        let domain = saved["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["kind"] == "domain")
+            .expect("domínio na lista")
+            .clone();
+        assert_eq!(domain["value"], "monitor.exemplo.com", "guarda só o host");
+        assert_eq!(domain["https"], true);
+
+        let created = json_of(
+            &request
+                .post("/api/agents")
+                .json(&json!({ "name": "srv-web" }))
+                .await
+                .text(),
+        );
+        let commands = &created["enrollment"]["commands"];
+        assert_eq!(commands["addressId"], "domain");
+        assert_eq!(commands["serverUrl"], "https://monitor.exemplo.com");
+
+        let ip = request
+            .put("/api/server-addresses")
+            .json(&json!({ "overrides": { "domain": "10.0.0.5" }, "custom": [] }))
+            .await;
+        assert_eq!(ip.status_code(), 422, "IP não é domínio");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
 async fn so_admin_cadastra_ou_revoga_agentes() {
     request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
         session_with_role(&mut request, &ctx, Role::Operator).await;

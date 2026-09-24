@@ -13,10 +13,13 @@
 //! - [`charts`]: séries do banco desenhadas no chat com os gráficos das telas.
 //! - [`diagnostics`]: testes ativos de rede (ping, traceroute, portas, DNS).
 //! - [`actions`]: ações que mudam o sistema — sempre com confirmação do usuário.
+//! - [`alert_rules`]: origem de um alerta, regras cadastradas, guia e — com
+//!   confirmação — criar ou excluir regra.
 //! - [`docker`]: containers da Docker Engine (estado, sem variáveis de ambiente).
 //! - [`ask`]: a IA pergunta ao usuário antes de prosseguir.
 
 mod actions;
+mod alert_rules;
 mod analysis;
 mod args;
 mod ask;
@@ -82,11 +85,12 @@ pub enum ToolGroup {
     Docker,
     Diagnostics,
     Actions,
+    AlertRules,
 }
 
 impl ToolGroup {
     /// Os grupos que podem ser carregados sob demanda, na ordem do catálogo.
-    pub const DEFERRED: [Self; 7] = [
+    pub const DEFERRED: [Self; 8] = [
         Self::History,
         Self::Analysis,
         Self::Charts,
@@ -94,6 +98,7 @@ impl ToolGroup {
         Self::Docker,
         Self::Diagnostics,
         Self::Actions,
+        Self::AlertRules,
     ];
 
     #[must_use]
@@ -107,6 +112,7 @@ impl ToolGroup {
             Self::Docker => "docker",
             Self::Diagnostics => "diagnostics",
             Self::Actions => "actions",
+            Self::AlertRules => "alert_rules",
         }
     }
 
@@ -124,6 +130,9 @@ impl ToolGroup {
             Self::Docker => "containers da Docker Engine",
             Self::Diagnostics => "ping, traceroute, portas, DNS e playbooks",
             Self::Actions => "reconhecer/silenciar alerta, janela de manutenção, criar monitor",
+            Self::AlertRules => {
+                "origem de um alerta, regras cadastradas, guia de regras, criar/excluir regra"
+            }
         }
     }
 
@@ -320,6 +329,11 @@ fn all_handlers() -> Vec<Box<dyn AiToolHandler>> {
         Box::new(actions::SilenceAlert),
         Box::new(actions::CreateMaintenanceWindow),
         Box::new(actions::CreateMonitor),
+        Box::new(alert_rules::AlertRulesGuide),
+        Box::new(alert_rules::ListAlertRules),
+        Box::new(alert_rules::ExplainAlert),
+        Box::new(alert_rules::CreateAlertRule),
+        Box::new(alert_rules::DeleteAlertRule),
         Box::new(ask::AskUser),
     ]
 }

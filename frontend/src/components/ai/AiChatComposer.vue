@@ -2,7 +2,7 @@
   <div class="ai-composer">
     <!-- Dicas de teclado no topo do campo -->
     <div
-      class="d-flex align-center justify-space-between px-3 py-1 bg-surface-variant rounded-t-lg border-t border-s border-e"
+      class="composer-bar d-flex align-center justify-space-between ga-2 px-3 py-1 rounded-t-lg border-t border-s border-e"
     >
       <div class="d-flex align-center ga-1 text-caption text-medium-emphasis">
         <v-icon size="14" color="primary">mdi-keyboard-outline</v-icon>
@@ -15,13 +15,78 @@
           <kbd class="kbd-key">@</kbd> marca dispositivo, monitor, container ou fonte
         </span>
       </div>
-      <span
-        v-if="aiStore.isStreaming"
-        class="text-caption text-primary font-weight-medium d-flex align-center ga-1"
-      >
-        <v-progress-circular indeterminate size="12" width="2" color="primary" />
-        {{ compact ? 'Respondendo' : 'IA respondendo...' }}
-      </span>
+      <div class="d-flex align-center ga-3 flex-shrink-0">
+        <span
+          v-if="aiStore.isStreaming"
+          class="text-caption text-primary font-weight-medium d-flex align-center ga-1"
+        >
+          <v-progress-circular indeterminate size="12" width="2" color="primary" />
+          {{ compact ? 'Respondendo' : 'IA respondendo...' }}
+        </span>
+        <v-chip
+          v-if="aiStore.compactNext"
+          size="x-small"
+          color="primary"
+          variant="tonal"
+          prepend-icon="mdi-archive-arrow-down-outline"
+          closable
+          @click:close="aiStore.requestCompaction(false)"
+        >
+          {{ compact ? 'Compactar' : 'Compactar ao enviar' }}
+        </v-chip>
+        <v-menu v-if="context" location="top end" :close-on-content-click="false" max-width="320">
+          <template #activator="{ props: menuProps }">
+            <button
+              v-bind="menuProps"
+              type="button"
+              class="context-meter d-flex align-center ga-1 text-caption"
+              :aria-label="context.detail"
+            >
+              <v-progress-circular
+                :model-value="context.percent"
+                :color="context.color"
+                bg-color="on-surface"
+                size="14"
+                width="3"
+              />
+              <span>{{ context.label }}</span>
+            </button>
+          </template>
+          <v-card class="pa-3" rounded="lg">
+            <div class="text-subtitle-2 font-weight-bold mb-1">Janela de contexto</div>
+            <v-progress-linear
+              :model-value="context.percent"
+              :color="context.color"
+              height="6"
+              rounded
+              class="mb-2"
+            />
+            <div class="text-body-2">{{ context.amount }} tokens ({{ context.percentLabel }})</div>
+            <div class="text-caption text-medium-emphasis mb-2">
+              {{
+                context.reported
+                  ? 'Janela informada pelo provedor do modelo.'
+                  : 'Janela estimada pelo nome do modelo — o provedor não informou.'
+              }}
+            </div>
+            <div class="text-caption mb-3">
+              A partir de {{ autoCompactLabel }} a conversa é compactada sozinha: as mensagens
+              antigas viram um resumo e a janela volta para cerca de metade.
+            </div>
+            <v-btn
+              block
+              size="small"
+              color="primary"
+              :variant="aiStore.compactNext ? 'tonal' : 'flat'"
+              prepend-icon="mdi-archive-arrow-down-outline"
+              :disabled="aiStore.messages.length < 3"
+              @click="aiStore.requestCompaction(!aiStore.compactNext)"
+            >
+              {{ aiStore.compactNext ? 'Cancelar compactação' : 'Compactar na próxima pergunta' }}
+            </v-btn>
+          </v-card>
+        </v-menu>
+      </div>
     </div>
 
     <div class="composer-field">
@@ -85,7 +150,7 @@
 
     <!-- Barra de ações -->
     <div
-      class="d-flex align-center justify-space-between px-3 py-2 bg-surface-variant rounded-b-lg border-b border-s border-e"
+      class="composer-bar d-flex align-center justify-space-between px-3 py-2 rounded-b-lg border-b border-s border-e"
     >
       <div class="d-flex align-center ga-1 flex-wrap">
         <slot name="status" />
@@ -139,12 +204,18 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useAiStore, type AiDraft, type AiMention } from '@/stores/ai'
 import { useMentionPicker } from '@/composables/useMentionPicker'
 import { addMention, insertMention, mentionKindMeta, mentionsInText } from '@/utils/aiMentions'
+import { AUTO_COMPACT_RATIO, contextUsage } from '@/utils/aiChatStream'
+import { formatCompactCount, formatPercent } from '@/utils/formatters'
 
-withDefaults(
+/** Perto da compactação automática: vale avisar. */
+const CONTEXT_WARNING_RATIO = 0.7
+const autoCompactLabel = formatPercent(AUTO_COMPACT_RATIO * 100, 0)
+
+const props = withDefaults(
   defineProps<{
     placeholder: string
     maxRows?: number
@@ -155,6 +226,32 @@ withDefaults(
 )
 
 const aiStore = useAiStore()
+
+/** Quanto da janela do modelo a conversa já ocupa (medida da última resposta). */
+const context = computed(() => {
+  const usage = contextUsage(aiStore.messages)
+  if (!usage) return null
+  const percent = usage.ratio * 100
+  const color =
+    usage.ratio >= AUTO_COMPACT_RATIO
+      ? 'error'
+      : usage.ratio >= CONTEXT_WARNING_RATIO
+        ? 'warning'
+        : 'primary'
+  const amount = `${formatCompactCount(usage.used)} / ${formatCompactCount(usage.window)}`
+  const percentLabel = formatPercent(percent, 0)
+  const estimated = usage.reported ? '' : ' (janela estimada)'
+  return {
+    percent,
+    percentLabel,
+    color,
+    amount,
+    reported: usage.reported,
+    label: props.compact ? percentLabel : `${amount} tokens${usage.reported ? '' : ' ~'}`,
+    detail: `Janela de contexto: ${amount} tokens, ${percentLabel}${estimated}. Clique para detalhes e para compactar.`,
+  }
+})
+
 const picker = useMentionPicker((query) => aiStore.searchMentions(query))
 
 const content = ref('')
@@ -278,6 +375,30 @@ defineExpose({ setDraft })
 </script>
 
 <style scoped>
+/* `bg-surface-variant` é cinza-claro no tema escuro e o texto de ênfase média
+   é branco: o contraste ficava ilegível. A barra usa um véu do próprio tema. */
+.composer-bar {
+  background: rgba(var(--v-theme-on-surface), 0.05);
+  color: rgb(var(--v-theme-on-surface));
+}
+
+.context-meter {
+  color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity));
+  white-space: nowrap;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: none;
+  border: none;
+  font: inherit;
+}
+
+.context-meter:hover,
+.context-meter:focus-visible {
+  background: rgba(var(--v-theme-on-surface), 0.08);
+  outline: none;
+}
+
 .composer-field {
   position: relative;
 }

@@ -2,7 +2,10 @@
 //!
 //! Coordena a troca de mensagens com o provedor de IA e a execução iterativa de ferramentas.
 
-use std::pin::Pin;
+use std::{
+    pin::Pin,
+    time::{Duration, Instant},
+};
 
 use futures::{Stream, StreamExt};
 use loco_rs::prelude::AppContext;
@@ -12,6 +15,10 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use super::{
+    compaction::{
+        estimate_history, estimate_messages, estimate_tokens, fallback_summary, fold_count,
+        prune_tool_results, summarize, ContextBudget,
+    },
     prompt::{build_small_talk_prompt, build_system_prompt, ChatContext},
     tools::{ToolGroups, ToolPolicy, ToolRegistry, LOAD_TOOLS},
     turn::{compact_for_model, is_small_talk, preselect_groups, requested_groups},
@@ -20,6 +27,7 @@ use crate::{
     dtos::ai::{AiChart, ChatMessageInput, ChatStreamRequest},
     services::{
         ai::{
+            context_window::{self, ContextWindow},
             drivers::traits::{AiChatOptions, AiDriver, AiMessage, AiToolCall, AiUsage},
             mentions,
             settings::AiSettings,
@@ -62,11 +70,39 @@ pub enum HarnessEvent {
         arguments: serde_json::Value,
         summary: String,
     },
-    /// Tokens somados de todas as rodadas da resposta.
+    /// Métricas da resposta: tokens somados de todas as rodadas, o modelo
+    /// que respondeu, o tempo gasto e quanto da janela a conversa ocupa.
     #[serde(rename_all = "camelCase")]
     Usage {
         prompt_tokens: u64,
         completion_tokens: u64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
+        /// Tokens da última rodada (entrada + saída): o tamanho da conversa
+        /// que a próxima pergunta vai carregar.
+        context_tokens: u64,
+        /// Janela do modelo; `None` sem modelo conhecido.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        context_window: Option<u64>,
+        /// A janela veio do provedor (`true`) ou é estimada pelo nome.
+        context_window_reported: bool,
+        /// Tempo do provedor escrevendo (do primeiro pedaço ao último, somado
+        /// das rodadas) — a base do tokens/s, sem a espera nem as ferramentas.
+        generation_ms: u64,
+        /// Tempo total da resposta, ferramentas incluídas.
+        duration_ms: u64,
+    },
+    /// As mensagens antigas viraram resumo para caber na janela. A tela
+    /// guarda o resumo e passa a mandar só o que veio depois.
+    #[serde(rename_all = "camelCase")]
+    ContextCompacted {
+        summary: String,
+        /// Quantas mensagens do início do pedido o resumo cobre.
+        folded_messages: usize,
+        tokens_before: u64,
+        tokens_after: u64,
+        /// `false` quando o provedor não resumiu e as mensagens só saíram.
+        summarized: bool,
     },
     Done,
     Error {
@@ -107,6 +143,37 @@ pub struct AgentRequest {
     pub context: ChatContext,
     pub policy: ToolPolicy,
     pub tool_loading: ToolLoading,
+    pub memory: ConversationMemory,
+}
+
+/// O que a tela sabe da conversa além das mensagens.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ConversationMemory {
+    /// Resumo das mensagens compactadas antes (não vêm mais em `messages`).
+    pub summary: Option<String>,
+    /// Tamanho da conversa medido pelo provedor na resposta anterior.
+    pub last_context_tokens: Option<u64>,
+    /// Janela e modelo da resposta anterior — conta quando o configurado é um
+    /// roteador, que pode ter respondido com um modelo de janela menor.
+    pub last_context_window: Option<u64>,
+    pub last_model: Option<String>,
+    /// Compactar agora, mesmo cabendo (pedido explícito da tela).
+    pub force_compaction: bool,
+}
+
+/// Modelos que escolhem outro modelo por pergunta.
+fn is_router(model: &str) -> bool {
+    model.starts_with("openrouter/")
+}
+
+/// Seção do prompt com o resumo das mensagens compactadas.
+fn with_summary(system_prompt: String, summary: Option<&str>) -> String {
+    match summary {
+        Some(summary) => format!(
+            "{system_prompt}\n\nRESUMO DA CONVERSA ATÉ AQUI (as mensagens anteriores foram compactadas para caber na janela de contexto):\n{summary}\n"
+        ),
+        None => system_prompt,
+    }
 }
 
 impl AgentRequest {
@@ -123,6 +190,16 @@ impl AgentRequest {
             },
             policy: ToolPolicy::from_settings(settings),
             tool_loading: ToolLoading::OnDemand,
+            memory: ConversationMemory {
+                summary: request
+                    .summary
+                    .map(|summary| summary.trim().to_string())
+                    .filter(|summary| !summary.is_empty()),
+                last_context_tokens: request.context_hint.as_ref().map(|hint| hint.tokens),
+                last_context_window: request.context_hint.as_ref().and_then(|hint| hint.window),
+                last_model: request.context_hint.and_then(|hint| hint.model),
+                force_compaction: request.compact,
+            },
         }
     }
 }
@@ -136,22 +213,114 @@ impl EventSink {
         self.0.send(event).await.is_ok()
     }
 
-    async fn finish(&self, usage: AiUsage) {
-        if usage != AiUsage::default() {
-            let _ = self
-                .send(HarnessEvent::Usage {
-                    prompt_tokens: usage.prompt_tokens,
-                    completion_tokens: usage.completion_tokens,
-                })
-                .await;
+    /// Fecha a resposta: resolve a janela do modelo que de fato respondeu e
+    /// manda as métricas.
+    async fn finish(&self, metrics: &mut TurnMetrics, driver: &dyn AiDriver) {
+        metrics.settle_window(driver).await;
+        if let Some(event) = metrics.event() {
+            let _ = self.send(event).await;
         }
         let _ = self.send(HarnessEvent::Done).await;
     }
 
-    async fn fail(&self, message: String, usage: AiUsage) {
+    async fn fail(&self, message: String, metrics: &mut TurnMetrics, driver: &dyn AiDriver) {
         let _ = self.send(HarnessEvent::Error { message }).await;
-        self.finish(usage).await;
+        self.finish(metrics, driver).await;
     }
+}
+
+/// O que se mede ao longo das rodadas de uma resposta.
+struct TurnMetrics {
+    started: Instant,
+    usage: AiUsage,
+    /// Uso só da rodada mais recente.
+    last_round: AiUsage,
+    model: Option<String>,
+    generation: Duration,
+    /// Janela conhecida e o modelo a que ela se refere.
+    window: Option<(String, ContextWindow)>,
+    /// Tamanho estimado da conversa, para quando o provedor não mede.
+    estimated_context: u64,
+}
+
+impl TurnMetrics {
+    fn new(configured_model: Option<&str>) -> Self {
+        Self {
+            started: Instant::now(),
+            usage: AiUsage::default(),
+            last_round: AiUsage::default(),
+            model: configured_model
+                .filter(|model| !model.trim().is_empty())
+                .map(ToString::to_string),
+            generation: Duration::ZERO,
+            window: None,
+            estimated_context: 0,
+        }
+    }
+
+    /// Garante que a janela é a do modelo que respondeu (um roteador troca).
+    async fn settle_window(&mut self, driver: &dyn AiDriver) {
+        let Some(model) = self.model.clone() else {
+            return;
+        };
+        if self
+            .window
+            .as_ref()
+            .is_some_and(|(known, _)| *known == model)
+        {
+            return;
+        }
+        let window = context_window::resolve(driver, &model).await;
+        self.window = Some((model, window));
+    }
+
+    /// A janela do modelo atual: a resolvida quando é dele, senão a estimada.
+    fn current_window(&self) -> Option<ContextWindow> {
+        let model = self.model.as_deref()?;
+        Some(match &self.window {
+            Some((known, window)) if known == model => *window,
+            _ => ContextWindow {
+                tokens: context_window::estimate(model),
+                reported: false,
+            },
+        })
+    }
+
+    fn start_round(&mut self) {
+        self.last_round = AiUsage::default();
+    }
+
+    fn add_usage(&mut self, usage: AiUsage) {
+        self.usage.add(usage);
+        self.last_round.add(usage);
+    }
+
+    /// O evento para a tela; `None` quando nada foi medido.
+    fn event(&self) -> Option<HarnessEvent> {
+        if self.usage == AiUsage::default() && self.model.is_none() {
+            return None;
+        }
+        let measured = self.last_round.prompt_tokens + self.last_round.completion_tokens;
+        let window = self.current_window();
+        Some(HarnessEvent::Usage {
+            prompt_tokens: self.usage.prompt_tokens,
+            completion_tokens: self.usage.completion_tokens,
+            context_tokens: if measured > 0 {
+                measured
+            } else {
+                self.estimated_context
+            },
+            context_window: window.map(|window| window.tokens),
+            context_window_reported: window.is_some_and(|window| window.reported),
+            model: self.model.clone(),
+            generation_ms: duration_ms(self.generation),
+            duration_ms: duration_ms(self.started.elapsed()),
+        })
+    }
+}
+
+fn duration_ms(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
 
 /// O que vem depois de uma chamada de ferramenta.
@@ -278,6 +447,7 @@ pub async fn run_agent_loop(
         let options = AiChatOptions {
             max_tokens: settings.response_style.max_output_tokens(),
         };
+        let requested = request.messages.clone();
         let mut history = recent_history(request.messages, MAX_HISTORY_MESSAGES);
         let small_talk = request.tool_loading == ToolLoading::OnDemand && is_small_talk(&history);
         let mut loaded: ToolGroups = match request.tool_loading {
@@ -303,6 +473,84 @@ pub async fn run_agent_loop(
             .await
         };
 
+        let mut metrics = TurnMetrics::new(driver.model());
+        let configured_model = driver.model().unwrap_or_default().to_string();
+        let mut window = context_window::resolve(driver.as_ref(), &configured_model).await;
+        // Um roteador pode ter respondido com um modelo de janela menor: vale a
+        // menor das duas.
+        if let (Some(hint), Some(last_model)) = (
+            request.memory.last_context_window,
+            request.memory.last_model.as_deref(),
+        ) {
+            if is_router(&configured_model) && last_model != configured_model && hint > 0 {
+                window.tokens = window.tokens.min(hint);
+            }
+        }
+        metrics.window = Some((configured_model, window));
+        let budget = ContextBudget::new(window.tokens, options.max_tokens);
+
+        let mut summary = request.memory.summary.clone();
+        if !small_talk {
+            let tools_tokens = estimate_tokens(
+                &serde_json::to_string(&registry.definitions_for(&loaded)).unwrap_or_default(),
+            );
+            let fixed = estimate_tokens(&system_prompt) + tools_tokens;
+            let summary_tokens = summary.as_deref().map_or(0, estimate_tokens);
+            let measured = fixed + summary_tokens + estimate_history(&history);
+            let reported = request.memory.last_context_tokens.map_or(0, |tokens| {
+                tokens
+                    + history
+                        .last()
+                        .map_or(0, |last| estimate_tokens(&last.content))
+            });
+            let used = measured.max(reported);
+            let force = request.memory.force_compaction;
+            if force || budget.needs_compaction(used) {
+                let fold = fold_count(&history, fixed, &budget, force);
+                if fold > 0 {
+                    // O que `recent_history` já tinha deixado de fora entra no
+                    // resumo também: nada some sem ser resumido.
+                    let folded = requested.len() - history.len() + fold;
+                    let text = match summarize(
+                        driver.as_ref(),
+                        &budget,
+                        summary.as_deref(),
+                        &requested[..folded],
+                    )
+                    .await
+                    {
+                        Ok(text) => Some(text),
+                        Err(error) => {
+                            tracing::warn!(%error, "falha ao resumir a conversa; mensagens antigas saem sem resumo");
+                            None
+                        }
+                    };
+                    let summarized = text.is_some();
+                    let text = text.unwrap_or_else(|| fallback_summary(summary.as_deref(), folded));
+                    history.drain(..fold);
+                    let after = fixed + estimate_tokens(&text) + estimate_history(&history);
+                    if !sink
+                        .send(HarnessEvent::ContextCompacted {
+                            summary: text.clone(),
+                            folded_messages: folded,
+                            tokens_before: used,
+                            tokens_after: after,
+                            summarized,
+                        })
+                        .await
+                    {
+                        return;
+                    }
+                    summary = Some(text);
+                }
+            }
+        }
+        let system_prompt = if small_talk {
+            system_prompt
+        } else {
+            with_summary(system_prompt, summary.as_deref())
+        };
+
         let mut conversation = vec![AiMessage {
             role: "system".to_string(),
             content: Some(system_prompt),
@@ -316,7 +564,8 @@ pub async fn run_agent_loop(
             tool_call_id: None,
         }));
 
-        let mut usage = AiUsage::default();
+        // Início da rodada mais recente: os resultados dela a IA ainda não leu.
+        let mut round_start = conversation.len();
         for _ in 0..MAX_ITERATIONS {
             // Recalculado a cada rodada: um `load_tools` vale já na seguinte.
             let tools = if small_talk {
@@ -324,20 +573,41 @@ pub async fn run_agent_loop(
             } else {
                 registry.definitions_for(&loaded)
             };
+            let tools_tokens = estimate_tokens(&serde_json::to_string(&tools).unwrap_or_default());
+            if prune_tool_results(&mut conversation, tools_tokens, &budget, round_start) {
+                tracing::info!("resultados de ferramenta antigos podados para caber na janela");
+            }
+            metrics.estimated_context = estimate_messages(&conversation) + tools_tokens;
+            metrics.start_round();
             let mut stream = match driver.chat_stream(&conversation, &tools, options).await {
                 Ok(stream) => stream,
-                Err(err) => return sink.fail(err.to_string(), usage).await,
+                Err(err) => {
+                    return sink
+                        .fail(err.to_string(), &mut metrics, driver.as_ref())
+                        .await
+                }
             };
 
             let mut assistant_text = String::new();
             let mut pending_tools = Vec::new();
+            let mut first_output: Option<Instant> = None;
             while let Some(chunk) = stream.next().await {
                 let chunk = match chunk {
                     Ok(chunk) => chunk,
-                    Err(err) => return sink.fail(err.to_string(), usage).await,
+                    Err(err) => {
+                        return sink
+                            .fail(err.to_string(), &mut metrics, driver.as_ref())
+                            .await
+                    }
                 };
+                if chunk.text_delta.is_some() || !chunk.tool_calls.is_empty() {
+                    first_output.get_or_insert_with(Instant::now);
+                }
+                if let Some(model) = chunk.model {
+                    metrics.model = Some(model);
+                }
                 if let Some(chunk_usage) = chunk.usage {
-                    usage.add(chunk_usage);
+                    metrics.add_usage(chunk_usage);
                 }
                 if let Some(delta) = chunk.text_delta {
                     assistant_text.push_str(&delta);
@@ -347,11 +617,15 @@ pub async fn run_agent_loop(
                 }
                 pending_tools.extend(chunk.tool_calls);
             }
-
-            if pending_tools.is_empty() {
-                return sink.finish(usage).await;
+            if let Some(first) = first_output {
+                metrics.generation += first.elapsed();
             }
 
+            if pending_tools.is_empty() {
+                return sink.finish(&mut metrics, driver.as_ref()).await;
+            }
+
+            round_start = conversation.len();
             conversation.push(AiMessage {
                 role: "assistant".to_string(),
                 content: (!assistant_text.is_empty()).then_some(assistant_text),
@@ -369,10 +643,10 @@ pub async fn run_agent_loop(
                 }
             }
             if ends_turn {
-                return sink.finish(usage).await;
+                return sink.finish(&mut metrics, driver.as_ref()).await;
             }
         }
-        sink.finish(usage).await;
+        sink.finish(&mut metrics, driver.as_ref()).await;
     });
 
     Box::pin(ReceiverStream::new(receiver))
@@ -398,6 +672,7 @@ pub async fn collect_answer(mut stream: HarnessEventStream) -> AppResult<AgentAn
             HarnessEvent::Usage {
                 prompt_tokens,
                 completion_tokens,
+                ..
             } => {
                 answer.usage = AiUsage {
                     prompt_tokens,
@@ -457,11 +732,23 @@ mod tests {
         let uso = serde_json::to_value(HarnessEvent::Usage {
             prompt_tokens: 1200,
             completion_tokens: 80,
+            model: Some("openai/gpt-4o-mini".into()),
+            context_tokens: 900,
+            context_window: Some(128_000),
+            context_window_reported: true,
+            generation_ms: 1500,
+            duration_ms: 4200,
         })
         .unwrap();
         assert_eq!(uso["type"], "usage");
         assert_eq!(uso["promptTokens"], 1200);
         assert_eq!(uso["completionTokens"], 80);
+        assert_eq!(uso["model"], "openai/gpt-4o-mini");
+        assert_eq!(uso["contextTokens"], 900);
+        assert_eq!(uso["contextWindow"], 128_000);
+        assert_eq!(uso["contextWindowReported"], true);
+        assert_eq!(uso["generationMs"], 1500);
+        assert_eq!(uso["durationMs"], 4200);
 
         let pedido = serde_json::to_value(HarnessEvent::ConfirmationRequired {
             id: "c1".into(),
@@ -472,6 +759,49 @@ mod tests {
         .unwrap();
         assert_eq!(pedido["type"], "confirmationRequired");
         assert_eq!(pedido["summary"], "Silenciar o alerta #3 por 60 min");
+    }
+
+    #[test]
+    fn metricas_somam_rodadas_mas_contexto_e_so_da_ultima() {
+        let mut metricas = TurnMetrics::new(Some("llama3.2"));
+        assert!(
+            metricas.event().is_some(),
+            "o modelo sozinho já vale mostrar"
+        );
+
+        metricas.start_round();
+        metricas.add_usage(AiUsage {
+            prompt_tokens: 1000,
+            completion_tokens: 50,
+        });
+        metricas.start_round();
+        metricas.add_usage(AiUsage {
+            prompt_tokens: 1400,
+            completion_tokens: 120,
+        });
+        metricas.model = Some("meta-llama/llama-3.3-70b-instruct".into());
+
+        let Some(HarnessEvent::Usage {
+            prompt_tokens,
+            completion_tokens,
+            context_tokens,
+            context_window,
+            model,
+            ..
+        }) = metricas.event()
+        else {
+            panic!("esperava o evento de uso");
+        };
+        assert_eq!((prompt_tokens, completion_tokens), (2400, 170));
+        assert_eq!(context_tokens, 1520);
+        assert_eq!(context_window, Some(131_072));
+        assert_eq!(model.as_deref(), Some("meta-llama/llama-3.3-70b-instruct"));
+    }
+
+    #[test]
+    fn sem_modelo_nem_tokens_nao_ha_evento() {
+        assert!(TurnMetrics::new(None).event().is_none());
+        assert!(TurnMetrics::new(Some("  ")).event().is_none());
     }
 
     #[test]

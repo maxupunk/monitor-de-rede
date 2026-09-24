@@ -12,8 +12,9 @@ import type { AiResponseStyle } from '@/bindings/AiResponseStyle'
 import type { ExecuteToolResponse } from '@/bindings/ExecuteToolResponse'
 import {
   applyChatEvent,
+  applyCompaction,
+  buildChatHistory,
   rewindTo,
-  toApiMessages,
   type AiDisplayMessage,
   type AiDraft,
   type AiToolCallState,
@@ -21,6 +22,21 @@ import {
 import type { AiMention } from '@/utils/aiMentions'
 import { useAiConversationsStore } from './aiConversations'
 import { readSseJson } from '@/utils/sseReader'
+
+/**
+ * O resumo roda o laço do agente inteiro (várias ferramentas, até 6 rodadas de
+ * até 120 s cada no driver) numa única requisição: o timeout padrão de 15 s
+ * abortava o fetch no meio e a tela mostrava "falha de conexão".
+ */
+export const DIGEST_REQUEST_TIMEOUT_MS = 12 * 60 * 1000
+
+function isCompactionEvent(event: unknown): event is Record<string, unknown> {
+  return (
+    typeof event === 'object' &&
+    event !== null &&
+    (event as { type?: unknown }).type === 'contextCompacted'
+  )
+}
 
 export type {
   AiChart,
@@ -131,6 +147,8 @@ export const useAiStore = defineStore('ai', () => {
   const saveError = ref<string | null>(null)
 
   const messages = ref<AiDisplayMessage[]>([])
+  /** O usuário pediu para compactar o contexto na próxima pergunta. */
+  const compactNext = ref(false)
   const isStreaming = ref(false)
   const isDrawerOpen = ref(false)
   const streamError = ref<string | null>(null)
@@ -227,7 +245,9 @@ export const useAiStore = defineStore('ai', () => {
       content: content.trim(),
       ...(mentions.length > 0 ? { mentions } : {}),
     })
-    const history = toApiMessages(messages.value)
+    const history = buildChatHistory(messages.value)
+    const compact = compactNext.value
+    compactNext.value = false
 
     const assistantMsg = reactive<AiDisplayMessage>({
       id: `asst-${stamp}`,
@@ -246,11 +266,14 @@ export const useAiStore = defineStore('ai', () => {
       const response = await apiService.postStream(
         '/ai/chat/stream',
         {
-          messages: history,
+          messages: history.messages,
           deviceId: context.deviceId ?? undefined,
           monitorId: context.monitorId ?? undefined,
           alertId: context.alertId ?? undefined,
           mentions,
+          summary: history.summary,
+          contextHint: history.contextHint,
+          compact,
         },
         controller.signal
       )
@@ -258,7 +281,10 @@ export const useAiStore = defineStore('ai', () => {
       if (!reader) {
         throw new Error('Não foi possível inicializar o leitor de stream')
       }
-      await readSseJson(reader, (event) => applyChatEvent(assistantMsg, event))
+      await readSseJson(reader, (event) => {
+        if (isCompactionEvent(event)) applyCompaction(messages.value, history.ids, event)
+        else applyChatEvent(assistantMsg, event)
+      })
       if (assistantMsg.error) streamError.value = assistantMsg.error
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'AbortError') {
@@ -274,6 +300,11 @@ export const useAiStore = defineStore('ai', () => {
       activeAbortController = null
       void conversations.persist(messages.value)
     }
+  }
+
+  /** Compactar o contexto junto da próxima pergunta (pedido do usuário). */
+  function requestCompaction(value = true) {
+    compactNext.value = value
   }
 
   function cancelGeneration() {
@@ -309,6 +340,7 @@ export const useAiStore = defineStore('ai', () => {
   function newConversation() {
     cancelGeneration()
     messages.value = []
+    compactNext.value = false
     streamError.value = null
     conversations.startNew()
   }
@@ -324,6 +356,7 @@ export const useAiStore = defineStore('ai', () => {
     const loaded = await conversations.open<AiDisplayMessage>(id)
     if (!loaded) return
     streamError.value = null
+    compactNext.value = false
     messages.value = loaded.map((message) => ({
       ...message,
       isStreaming: false,
@@ -402,7 +435,11 @@ export const useAiStore = defineStore('ai', () => {
     runningDigest.value = true
     digestError.value = null
     try {
-      latestDigest.value = await apiService.post<AiDigest>('/ai/digest/run', {})
+      latestDigest.value = await apiService.post<AiDigest>(
+        '/ai/digest/run',
+        {},
+        { timeoutMs: DIGEST_REQUEST_TIMEOUT_MS }
+      )
     } catch (err: unknown) {
       digestError.value = errorMessage(err, 'Falha ao gerar o resumo da rede')
     } finally {
@@ -619,6 +656,8 @@ export const useAiStore = defineStore('ai', () => {
     pullProgress,
     pullError,
     messages,
+    compactNext,
+    requestCompaction,
     isStreaming,
     isDrawerOpen,
     streamError,

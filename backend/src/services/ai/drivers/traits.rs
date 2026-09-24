@@ -3,7 +3,10 @@ use futures::Stream;
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 
-use crate::{dtos::ai::TestConnectionResponse, services::shared::errors::AppResult};
+use crate::{
+    dtos::ai::TestConnectionResponse,
+    services::{ai::context_window::sources::LearnedWindow, shared::errors::AppResult},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AiToolCall {
@@ -144,6 +147,9 @@ pub struct AiChatChunk {
     pub finish_reason: Option<String>,
     /// Chega no último pedaço do stream, quando o provedor informa.
     pub usage: Option<AiUsage>,
+    /// Modelo que de fato respondeu, quando o provedor informa — um roteador
+    /// (`openrouter/free`) escolhe um diferente do configurado.
+    pub model: Option<String>,
 }
 
 pub type AiChunkStream = Pin<Box<dyn Stream<Item = AppResult<AiChatChunk>> + Send>>;
@@ -159,6 +165,17 @@ pub struct AiChatOptions {
 pub trait AiDriver: Send + Sync {
     fn id(&self) -> &'static str;
     fn display_name(&self) -> &'static str;
+
+    /// Modelo configurado; vale quando o stream não diz qual respondeu.
+    fn model(&self) -> Option<&str> {
+        None
+    }
+
+    /// Janela de contexto de `model` segundo o provedor. `None` quando ele não
+    /// informa — quem chama cai na estimativa pelo nome.
+    async fn context_window(&self, _model: &str) -> Option<LearnedWindow> {
+        None
+    }
 
     /// Envia mensagens e ferramentas disponíveis, retornando um stream de deltas de texto e tool calls.
     async fn chat_stream(

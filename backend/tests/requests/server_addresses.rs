@@ -30,12 +30,12 @@ async fn a_lista_nasce_com_os_tres_tipos_e_o_motivo_de_cada_um() {
         let corpo: serde_json::Value = serde_json::from_str(&resposta.text()).unwrap();
 
         let dados = corpo["data"].as_array().expect("lista");
-        assert_eq!(dados.len(), 3);
+        assert_eq!(dados.len(), 4);
         let tipos: Vec<&str> = dados
             .iter()
             .map(|item| item["kind"].as_str().unwrap())
             .collect();
-        assert_eq!(tipos, vec!["lan", "vpn", "public"]);
+        assert_eq!(tipos, vec!["lan", "vpn", "public", "domain"]);
 
         for item in dados {
             assert!(
@@ -140,14 +140,14 @@ async fn o_personalizado_ganha_id_do_servidor_e_exige_nome() {
         assert_eq!(ok.status_code(), 200, "{}", ok.text());
         let corpo: serde_json::Value = serde_json::from_str(&ok.text()).unwrap();
         let dados = corpo["data"].as_array().unwrap();
-        assert_eq!(dados.len(), 4);
-        assert_eq!(dados[3]["label"], "Filial Norte");
-        assert_eq!(dados[3]["kind"], "custom");
+        assert_eq!(dados.len(), 5);
+        assert_eq!(dados[4]["label"], "Filial Norte");
+        assert_eq!(dados[4]["kind"], "custom");
         // A tela precisa do id sorteado para editar depois sem duplicar.
         assert!(
-            dados[3]["id"].as_str().unwrap().starts_with("custom:"),
+            dados[4]["id"].as_str().unwrap().starts_with("custom:"),
             "{}",
-            dados[3]
+            dados[4]
         );
     })
     .await;
