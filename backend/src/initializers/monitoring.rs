@@ -21,6 +21,7 @@ use crate::{
         events::relay::relay_pending,
         network_tools::dns::registry::DnsServerRegistry,
         telemetry::{host_metrics::HostMetricsReader, sampler},
+        topology::realtime as topology_realtime,
         vpn::probe_is_external,
         vpn::probe_registrar as vpn_probe_registrar,
     },
@@ -45,6 +46,7 @@ impl Initializer for MonitoringInitializer {
     async fn before_run(&self, ctx: &AppContext) -> Result<()> {
         spawn_event_relay(ctx.clone());
         docker_realtime::spawn(ctx.clone());
+        topology_realtime::spawn(ctx.clone());
         // Canal dos agentes remotos: modo ao vivo e entrega de tarefas (ADR 011).
         agents_background::spawn(ctx.clone());
         spawn_local_telemetry(ctx);

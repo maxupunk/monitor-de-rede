@@ -173,16 +173,54 @@
                 </text>
               </g>
 
-              <!-- Badge de Consumo / Tráfego no Meio do Link (Atualizado em Tempo Real) -->
+              <!-- Badge de Consumo / Tráfego no Meio do Link (Download e Upload com Setas) -->
               <g
-                v-if="edge.trafficLabel || edge.sourceInterfaceName || edge.targetInterfaceName"
+                v-if="
+                  edge.trafficLabel ||
+                  edge.inBps != null ||
+                  edge.outBps != null ||
+                  edge.sourceInterfaceName ||
+                  edge.targetInterfaceName
+                "
                 :transform="`translate(${calculatePortBadgePos(edge.x1, edge.y1, edge.x2, edge.y2, 0.5).x}, ${calculatePortBadgePos(edge.x1, edge.y1, edge.x2, edge.y2, 0.5).y})`"
                 class="traffic-pill-group"
               >
-                <rect x="-36" y="-10" width="72" height="20" rx="10" class="traffic-pill-bg" />
-                <text x="0" y="4" text-anchor="middle" class="traffic-pill-text">
-                  {{ edge.trafficLabel || '0 bps' }}
-                </text>
+                <title>
+                  Download: {{ getEdgeInBpsLabel(edge) }}&#10;Upload:
+                  {{ getEdgeOutBpsLabel(edge) }}&#10;Total: {{ edge.trafficLabel || '0 bps' }}
+                </title>
+                <!-- Fundo do card de tráfego com contraste e acabamento moderno -->
+                <rect
+                  x="-44"
+                  y="-17"
+                  width="88"
+                  height="34"
+                  rx="7"
+                  class="traffic-pill-bg"
+                  :class="{ 'traffic-pill-down': edge.status === 'down' }"
+                />
+
+                <!-- Linha 1: Download (Seta para baixo à esquerda + texto de download) -->
+                <g class="traffic-row-down">
+                  <path
+                    d="M -34 -10.5 L -34 -3.5 M -37 -6 L -34 -3.5 L -31 -6"
+                    class="traffic-arrow-down"
+                  />
+                  <text x="-26" y="-7" class="traffic-text-down">
+                    {{ getEdgeInBpsLabel(edge) }}
+                  </text>
+                </g>
+
+                <!-- Linha 2: Upload (Seta para cima à esquerda + texto de upload) -->
+                <g class="traffic-row-up">
+                  <path
+                    d="M -34 10.5 L -34 3.5 M -37 6 L -34 3.5 L -31 6"
+                    class="traffic-arrow-up"
+                  />
+                  <text x="-26" y="7" class="traffic-text-up">
+                    {{ getEdgeOutBpsLabel(edge) }}
+                  </text>
+                </g>
               </g>
 
               <!-- Porta de Chegada (Destino) -->
@@ -566,7 +604,7 @@
       scrollable
     >
       <v-card
-        v-if="selectedEdge"
+        v-if="liveSelectedEdge"
         class="rounded-xl overflow-hidden elevation-12 dialog-card-container"
       >
         <v-card-item class="pa-4 border-b flex-shrink-0 bg-surface-variant-subtle">
@@ -589,7 +627,7 @@
         <v-card-text class="pa-4 flex-grow-1 overflow-y-auto">
           <!-- Alerta explicativo se for enlace de hierarquia -->
           <v-alert
-            v-if="selectedEdge.linkType === 'parent'"
+            v-if="liveSelectedEdge.linkType === 'parent'"
             type="info"
             variant="tonal"
             density="compact"
@@ -605,10 +643,11 @@
               <span class="text-caption text-medium-emphasis">Dispositivo A (Origem):</span>
               <v-chip size="x-small" color="primary" variant="tonal">Origem</v-chip>
             </div>
-            <div class="font-weight-bold">{{ selectedEdge.sourceDeviceName || 'Origem' }}</div>
+            <div class="font-weight-bold">{{ liveSelectedEdge.sourceDeviceName || 'Origem' }}</div>
             <div class="text-caption text-primary font-weight-medium mt-1">
               <v-icon size="14" class="mr-1">mdi-ethernet</v-icon>
-              Porta de Saída: {{ selectedEdge.sourceInterfaceName || 'Automática / Não definida' }}
+              Porta de Saída:
+              {{ liveSelectedEdge.sourceInterfaceName || 'Automática / Não definida' }}
             </div>
 
             <v-divider class="my-2"></v-divider>
@@ -617,35 +656,61 @@
               <span class="text-caption text-medium-emphasis">Dispositivo B (Destino):</span>
               <v-chip size="x-small" color="success" variant="tonal">Destino</v-chip>
             </div>
-            <div class="font-weight-bold">{{ selectedEdge.targetDeviceName || 'Destino' }}</div>
+            <div class="font-weight-bold">{{ liveSelectedEdge.targetDeviceName || 'Destino' }}</div>
             <div class="text-caption text-success font-weight-medium mt-1">
               <v-icon size="14" class="mr-1">mdi-ethernet</v-icon>
               Porta de Chegada:
-              {{ selectedEdge.targetInterfaceName || 'Automática / Não definida' }}
+              {{ liveSelectedEdge.targetInterfaceName || 'Automática / Não definida' }}
             </div>
           </div>
 
           <v-list density="compact" class="pa-0">
             <v-list-item
               title="Tecnologia do Link"
-              :subtitle="getLinkTypeLabel(selectedEdge.linkType)"
+              :subtitle="getLinkTypeLabel(liveSelectedEdge.linkType)"
             >
               <template #prepend>
-                <v-icon :color="getLinkColor(selectedEdge.linkType)">
-                  {{ getLinkTypeIcon(selectedEdge.linkType) }}
+                <v-icon :color="getLinkColor(liveSelectedEdge.linkType)">
+                  {{ getLinkTypeIcon(liveSelectedEdge.linkType) }}
                 </v-icon>
               </template>
             </v-list-item>
             <v-list-item
-              v-if="selectedEdge.trafficLabel"
-              title="Consumo de Tráfego em Tempo Real"
-              :subtitle="selectedEdge.trafficLabel"
+              v-if="
+                liveSelectedEdge.trafficLabel ||
+                liveSelectedEdge.inBps != null ||
+                liveSelectedEdge.outBps != null
+              "
+              title="Taxa de Download (RX)"
+              :subtitle="getEdgeInBpsLabel(liveSelectedEdge)"
             >
               <template #prepend>
-                <v-icon color="cyan">mdi-speedometer</v-icon>
+                <v-icon color="success">mdi-arrow-down-bold</v-icon>
               </template>
             </v-list-item>
-            <v-list-item title="Método de Descoberta" :subtitle="selectedEdge.discoveryMethod">
+            <v-list-item
+              v-if="
+                liveSelectedEdge.trafficLabel ||
+                liveSelectedEdge.inBps != null ||
+                liveSelectedEdge.outBps != null
+              "
+              title="Taxa de Upload (TX)"
+              :subtitle="getEdgeOutBpsLabel(liveSelectedEdge)"
+            >
+              <template #prepend>
+                <v-icon color="info">mdi-arrow-up-bold</v-icon>
+              </template>
+            </v-list-item>
+            <v-list-item
+              v-if="liveSelectedEdge.trafficLabel"
+              title="Consumo Total Combinado"
+              :subtitle="liveSelectedEdge.trafficLabel"
+            >
+              <template #prepend>
+                <v-icon color="cyan">mdi-swap-vertical-bold</v-icon>
+              </template>
+            </v-list-item>
+            <v-list-item title="Método de Descoberta" :subtitle="liveSelectedEdge.discoveryMethod">
               <template #prepend>
                 <v-icon color="grey">mdi-information-outline</v-icon>
               </template>
@@ -656,16 +721,18 @@
           class="pa-3 px-4 border-t flex-shrink-0 bg-surface d-flex align-center justify-space-between flex-wrap gap-2"
         >
           <v-btn
-            v-if="selectedEdge.id > 0 || selectedEdge.linkType === 'parent'"
+            v-if="liveSelectedEdge.id > 0 || liveSelectedEdge.linkType === 'parent'"
             color="error"
             variant="tonal"
             :prepend-icon="
-              selectedEdge.linkType === 'parent' ? 'mdi-link-variant-off' : 'mdi-trash-can-outline'
+              liveSelectedEdge.linkType === 'parent'
+                ? 'mdi-link-variant-off'
+                : 'mdi-trash-can-outline'
             "
             :loading="deletingEdge"
-            @click="confirmDeleteEdge(selectedEdge.id)"
+            @click="confirmDeleteEdge(liveSelectedEdge.id)"
           >
-            {{ selectedEdge.linkType === 'parent' ? 'Desvincular Hierarquia' : 'Remover Link' }}
+            {{ liveSelectedEdge.linkType === 'parent' ? 'Desvincular Hierarquia' : 'Remover Link' }}
           </v-btn>
           <span v-else class="text-caption text-grey">Enlace automático</span>
 
@@ -674,9 +741,9 @@
               color="primary"
               variant="tonal"
               prepend-icon="mdi-pencil-outline"
-              @click="editLinkFromEdge(selectedEdge)"
+              @click="editLinkFromEdge(liveSelectedEdge)"
             >
-              {{ selectedEdge.id > 0 ? 'Editar Conexão' : 'Personalizar Enlace' }}
+              {{ liveSelectedEdge.id > 0 ? 'Editar Conexão' : 'Personalizar Enlace' }}
             </v-btn>
             <v-btn variant="text" @click="edgeDialog = false">Fechar</v-btn>
           </div>
@@ -723,6 +790,7 @@ import UnmanagedSwitchDialog from '@/components/topology/UnmanagedSwitchDialog.v
 import DeviceDialog from '@/components/DeviceDialog.vue'
 import { useDevicesStore, type Device } from '@/stores/devices'
 import { apiService } from '@/services/apiService'
+import { formatBps } from '@/utils/formatters'
 
 interface RenderedNode extends TopologyNode {
   x: number
@@ -735,6 +803,18 @@ interface RenderedEdge extends TopologyEdge {
   x2: number
   y2: number
   isHighlighted: boolean
+}
+
+function getEdgeInBpsLabel(edge: TopologyEdge): string {
+  if (edge.inBpsLabel) return edge.inBpsLabel
+  if (edge.inBps !== null && edge.inBps !== undefined) return formatBps(edge.inBps)
+  return '0 bps'
+}
+
+function getEdgeOutBpsLabel(edge: TopologyEdge): string {
+  if (edge.outBpsLabel) return edge.outBpsLabel
+  if (edge.outBps !== null && edge.outBps !== undefined) return formatBps(edge.outBps)
+  return '0 bps'
 }
 
 const STORAGE_POS_KEY = 'netmonitor_topology_positions_v1'
@@ -796,6 +876,10 @@ const filteredSearchNodes = computed(() => {
 const selectedNode = ref<TopologyNode | null>(null)
 const nodeDrawer = ref(false)
 const selectedEdge = ref<TopologyEdge | null>(null)
+const liveSelectedEdge = computed(() => {
+  if (!selectedEdge.value) return null
+  return topologyStore.edges.find((e) => e.id === selectedEdge.value?.id) || selectedEdge.value
+})
 const edgeDialog = ref(false)
 const deletingEdge = ref(false)
 
@@ -1934,18 +2018,64 @@ function truncate(str: string, maxLen: number): string {
   font-weight: bold;
 }
 
-/* Badge de Tráfego / Consumo no Centro do Link */
-.traffic-pill-bg {
-  fill: #0f172a;
-  stroke: #38bdf8;
-  stroke-width: 1.5;
-  filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.6));
+/* Badge de Tráfego / Consumo no Centro do Link (Download e Upload) */
+.traffic-pill-group {
+  transition:
+    transform 0.15s ease,
+    filter 0.15s ease;
+  cursor: pointer;
+  user-select: none;
 }
-.traffic-pill-text {
+.traffic-pill-group:hover {
+  filter: brightness(1.2) drop-shadow(0 0 10px rgba(56, 189, 248, 0.45));
+}
+.traffic-pill-bg {
+  fill: #090d16;
+  stroke: rgba(56, 189, 248, 0.45);
+  stroke-width: 1.2;
+  filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.7));
+  transition:
+    stroke 0.2s ease,
+    fill 0.2s ease;
+}
+.traffic-pill-bg.traffic-pill-down {
+  stroke: rgba(239, 68, 68, 0.65);
+}
+.traffic-row-down {
+  pointer-events: none;
+}
+.traffic-arrow-down {
+  stroke: #4ade80;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+}
+.traffic-text-down {
+  fill: #4ade80;
+  font-size: 9.5px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  dominant-baseline: central;
+}
+.traffic-row-up {
+  pointer-events: none;
+}
+.traffic-arrow-up {
+  stroke: #38bdf8;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+}
+.traffic-text-up {
   fill: #38bdf8;
-  font-size: 10px;
-  font-family: monospace;
-  font-weight: bold;
+  font-size: 9.5px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  dominant-baseline: central;
 }
 
 /* Header Superior Flutuante */

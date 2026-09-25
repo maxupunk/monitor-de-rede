@@ -440,6 +440,58 @@ export const useDeviceDetailStore = defineStore('deviceDetail', () => {
     }
   }
 
+  function applyInterfaceTraffic(data: Record<string, unknown>) {
+    if (!isCurrentDevice(data)) return
+
+    const items = (data.interfaces as Array<Record<string, unknown>>) || []
+    const deviceId = Number(data.deviceId)
+    const now = new Date().toISOString()
+
+    for (const item of items) {
+      const ifId = Number(item.id)
+      const iface = interfaces.value.find((i) => i.id === ifId)
+      if (iface) {
+        if (item.operStatus !== undefined) {
+          const st = String(item.operStatus) as 'up' | 'down' | 'testing'
+          iface.operStatus = st
+          iface.ifOperStatus = st
+        }
+        if (item.speed !== undefined && item.speed !== null) {
+          iface.speed = Number(item.speed)
+          iface.ifSpeed = Number(item.speed)
+        }
+      }
+      if (item.inBps !== undefined && item.inBps !== null) {
+        metrics.value.push({
+          id: Date.now() + metrics.value.length,
+          deviceId,
+          interfaceId: ifId,
+          interfaceName: item.name ? String(item.name) : null,
+          metricName: 'inBps',
+          metricValue: Number(item.inBps),
+          unit: 'bps',
+          createdAt: now,
+        })
+      }
+      if (item.outBps !== undefined && item.outBps !== null) {
+        metrics.value.push({
+          id: Date.now() + metrics.value.length,
+          deviceId,
+          interfaceId: ifId,
+          interfaceName: item.name ? String(item.name) : null,
+          metricName: 'outBps',
+          metricValue: Number(item.outBps),
+          unit: 'bps',
+          createdAt: now,
+        })
+      }
+    }
+
+    if (metrics.value.length > METRICS_LIMIT) {
+      metrics.value = metrics.value.slice(-METRICS_LIMIT)
+    }
+  }
+
   return {
     device,
     interfaces,
@@ -451,6 +503,7 @@ export const useDeviceDetailStore = defineStore('deviceDetail', () => {
     applyMonitorResult,
     applyRecordedMetrics,
     applyInterfaceChange,
+    applyInterfaceTraffic,
     pollingSnmp,
     scanningSnmp,
     updatingInterfaceId,

@@ -6,6 +6,7 @@ import { useEventsStore } from '@/stores/events'
 import { useMonitorsStore } from '@/stores/monitors'
 import { useAlertsStore } from '@/stores/alerts'
 import { useDockerStore } from '@/stores/docker'
+import { useTopologyStore } from '@/stores/topology'
 
 class FakeEventSource {
   static latest: FakeEventSource | null = null
@@ -192,5 +193,62 @@ describe('events store', () => {
     expect(docker.operations[0].lines).toEqual(['Pulling fs layer'])
     expect(events.recentEvents).toHaveLength(0)
     expect(apiGet).not.toHaveBeenCalled()
+  })
+
+  it('atualiza métricas de tráfego de topologia em memória via interface:traffic sem consultar endpoints', () => {
+    const apiGet = vi.spyOn(apiService, 'get')
+    const topology = useTopologyStore()
+    topology.edges = [
+      {
+        id: '1-2-10-20',
+        source: 1,
+        target: 2,
+        sourceInterfaceId: 10,
+        targetInterfaceId: 20,
+        sourceInterface: 'ge-0/0/1',
+        targetInterface: 'eth1',
+        status: 'unknown',
+        trafficBps: 0,
+        trafficLabel: undefined,
+        inBps: 0,
+        outBps: 0,
+      } as never,
+    ]
+
+    const events = useEventsStore()
+    events.connect()
+
+    FakeEventSource.latest?.onmessage?.({
+      data: JSON.stringify({
+        type: 'interface:traffic',
+        timestamp: '2026-09-24T22:00:00Z',
+        data: {
+          deviceId: 1,
+          deviceName: 'Core-Router',
+          interfaces: [
+            {
+              id: 10,
+              name: 'ge-0/0/1',
+              inBps: 15_000_000,
+              outBps: 45_000_000,
+              operStatus: 'up',
+              adminStatus: 'up',
+              speed: 1_000_000_000,
+            },
+          ],
+        },
+      }),
+    } as MessageEvent<string>)
+
+    expect(topology.edges[0].trafficBps).toBe(60_000_000)
+    expect(topology.edges[0].inBps).toBe(15_000_000)
+    expect(topology.edges[0].outBps).toBe(45_000_000)
+    expect(topology.edges[0].trafficLabel).toBe('60 Mbps')
+    expect(topology.edges[0].inBpsLabel).toBe('15 Mbps')
+    expect(topology.edges[0].outBpsLabel).toBe('45 Mbps')
+    expect(topology.edges[0].status).toBe('up')
+    expect(events.recentEvents).toHaveLength(0) // Efêmero, não polui feed
+    expect(apiGet).not.toHaveBeenCalled()
+    events.disconnect()
   })
 })

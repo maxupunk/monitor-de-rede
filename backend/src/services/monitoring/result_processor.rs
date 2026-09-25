@@ -233,6 +233,7 @@ pub async fn process_result(
                     "name": metric.name,
                     "value": metric.value,
                     "unit": metric.unit,
+                    "interfaceId": monitor.interface_id,
                     "recordedAt": recorded_at.as_str(),
                 })
             })

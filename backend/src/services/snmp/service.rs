@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use crate::services::{
     alerts::fields as alert_fields,
+    events::EventBus,
     monitoring::{
         contracts::{CheckMetric, CheckResult, MonitorStatus},
         device_status::{self, DeviceStatus},
@@ -82,6 +83,8 @@ pub struct SnmpPollResult {
     pub metrics_recorded: usize,
     pub links_resolved: usize,
     pub reboot_detected: bool,
+    #[serde(default)]
+    pub interface_rates: HashMap<i32, (Option<f64>, Option<f64>)>,
 }
 /// Nomes dos monitores criados pela tela de descoberta. São a chave que liga o
 /// que o usuário marcou no diálogo ao que já existe no banco, então mudá-los
@@ -552,6 +555,7 @@ pub async fn poll_device(
             metrics_recorded: 0,
             links_resolved: 0,
             reboot_detected: false,
+            interface_rates: HashMap::new(),
         });
     }
 
@@ -608,6 +612,7 @@ pub async fn poll_device(
     // Acumula métricas de tráfego e sistema para inserção em massa (QUA-04).
     let mut pending_metrics: Vec<PendingMetric> = Vec::new();
     let mut reboot_detected = false;
+    let mut interface_rates = HashMap::new();
     for traffic in &scan.traffic {
         let Some(interface) = interfaces.get(&traffic.if_index) else {
             continue;
@@ -620,11 +625,50 @@ pub async fn poll_device(
             previous_uptime,
             scan.system_info.sys_up_time,
         );
+        let in_bps = metrics.iter().find(|m| m.name == "inBps").map(|m| m.value);
+        let out_bps = metrics.iter().find(|m| m.name == "outBps").map(|m| m.value);
+        interface_rates.insert(traffic.if_index, (in_bps, out_bps));
         pending_metrics.extend(metrics);
         reboot_detected |= reboot;
     }
     pending_metrics.extend(build_system_metrics(device.id, &scan));
+
+    let mut iface_payloads = Vec::with_capacity(interfaces.len());
+    for interface in interfaces.values() {
+        let rates = interface
+            .snmp_index
+            .and_then(|idx| interface_rates.get(&idx).copied())
+            .unwrap_or((None, None));
+
+        iface_payloads.push(serde_json::json!({
+            "id": interface.id,
+            "ifIndex": interface.snmp_index,
+            "name": interface.name,
+            "inBps": rates.0,
+            "outBps": rates.1,
+            "operStatus": interface.oper_status,
+            "adminStatus": interface.admin_status,
+            "speed": interface.speed,
+        }));
+    }
+
     let metrics_recorded = record_metrics_bulk(&ctx.db, pending_metrics).await?;
+
+    if let Ok(bus) = EventBus::from_context(ctx) {
+        if !iface_payloads.is_empty() {
+            let payload = serde_json::json!({
+                "deviceId": device.id,
+                "deviceName": device.name,
+                "interfaces": iface_payloads,
+            });
+            bus.publish_snapshot(
+                "interface:traffic",
+                format!("device:{}", device.id),
+                payload,
+            );
+        }
+    }
+
     // O status **não** é escrito aqui (matriz de paridade #4): quem decide é o
     // `device_status`, agregando todos os monitores habilitados. Gravar "online"
     // direto era o bug de alternância — a coleta subia o dispositivo em silêncio
@@ -635,12 +679,20 @@ pub async fn poll_device(
     let links_resolved = topology::resolve_discovered_neighbors(ctx, device, &scan.neighbors)
         .await?
         .len();
+    if links_resolved > 0 {
+        if let Ok(bus) = EventBus::from_context(ctx) {
+            let _ = bus
+                .publish(&ctx.db, "topology:updated", serde_json::json!({}))
+                .await;
+        }
+    }
     Ok(SnmpPollResult {
         scan,
         interfaces_synced: interfaces.len(),
         metrics_recorded,
         links_resolved,
         reboot_detected,
+        interface_rates,
     })
 }
 
@@ -817,22 +869,29 @@ fn monitor_result_from_poll(
                 alert_fields::MEMORY_USED_PERCENT: poll.scan.memory_info.used_percent
             }),
         ),
-        "traffic" | "interface_traffic" => match if_index.and_then(|index| {
-            poll.scan
-                .traffic
-                .iter()
-                .find(|traffic| traffic.if_index == index)
-        }) {
-            Some(traffic) => (
-                MonitorStatus::Up,
-                "Tráfego de interface coletado".to_string(),
-                serde_json::json!({
-                    "ifIndex": traffic.if_index,
-                    "counterBits": traffic.counter_bits,
-                }),
-            ),
-            None => missing_measurement_result("contadores de tráfego da interface"),
-        },
+        "traffic" | "interface_traffic" => {
+            let rates = if_index.and_then(|idx| poll.interface_rates.get(&idx));
+            let in_bps = rates.and_then(|r| r.0);
+            let out_bps = rates.and_then(|r| r.1);
+            match if_index.and_then(|index| {
+                poll.scan
+                    .traffic
+                    .iter()
+                    .find(|traffic| traffic.if_index == index)
+            }) {
+                Some(traffic) => (
+                    MonitorStatus::Up,
+                    "Tráfego de interface coletado".to_string(),
+                    serde_json::json!({
+                        "ifIndex": traffic.if_index,
+                        "counterBits": traffic.counter_bits,
+                        "inBps": in_bps,
+                        "outBps": out_bps,
+                    }),
+                ),
+                None => missing_measurement_result("contadores de tráfego da interface"),
+            }
+        }
         "interface_status" | "status" => match if_index.and_then(|index| {
             poll.scan
                 .interfaces
@@ -931,6 +990,25 @@ fn monitor_result_from_poll(
                         name: sensor.key.clone(),
                         value: val,
                         unit: sensor.unit.clone(),
+                    });
+                }
+            }
+        }
+        "traffic" | "interface_traffic" => {
+            if let Some((in_bps, out_bps)) = if_index.and_then(|idx| poll.interface_rates.get(&idx))
+            {
+                if let Some(val) = in_bps {
+                    metrics.push(CheckMetric {
+                        name: "inBps".to_string(),
+                        value: *val,
+                        unit: "bps".to_string(),
+                    });
+                }
+                if let Some(val) = out_bps {
+                    metrics.push(CheckMetric {
+                        name: "outBps".to_string(),
+                        value: *val,
+                        unit: "bps".to_string(),
                     });
                 }
             }
@@ -2371,6 +2449,7 @@ mod tests {
             metrics_recorded: 1,
             links_resolved: 0,
             reboot_detected: false,
+            interface_rates: HashMap::new(),
         };
 
         let resolved = resolve_monitor_if_index(&monitor, &poll);

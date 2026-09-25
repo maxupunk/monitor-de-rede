@@ -173,7 +173,8 @@ export const useEventsStore = defineStore('events', () => {
       payload.type === 'docker:snapshot' ||
       payload.type === 'docker:inventory' ||
       payload.type === 'docker:operation' ||
-      payload.type === 'docker:log'
+      payload.type === 'docker:log' ||
+      payload.type === 'interface:traffic'
     if (payload.type !== 'stream:connected' && !isEphemeralTelemetry) {
       recentEvents.value.unshift(payload)
       if (recentEvents.value.length > FEED_LIMIT) {
@@ -313,19 +314,31 @@ export const useEventsStore = defineStore('events', () => {
         break
       }
 
+      case 'interface:traffic': {
+        const topologyStore = useTopologyStore()
+        const deviceDetailStore = useDeviceDetailStore()
+        topologyStore.applyRealtimeTraffic(data)
+        deviceDetailStore.applyInterfaceTraffic(data)
+        break
+      }
+
       case 'interface:status_change':
       case 'interface:speed_change':
       case 'interface:speed_downgrade': {
         const deviceDetailStore = useDeviceDetailStore()
+        const topologyStore = useTopologyStore()
         deviceDetailStore.applyInterfaceChange(payload.type, data)
+        topologyStore.applyInterfaceChange(payload.type, data)
         break
       }
 
       case 'metric:recorded': {
         const deviceDetailStore = useDeviceDetailStore()
         const monitorsStore = useMonitorsStore()
+        const topologyStore = useTopologyStore()
         deviceDetailStore.applyRecordedMetrics(data)
         monitorsStore.applyRealtimeMetrics(data)
+        topologyStore.applyRealtimeMetric(data)
         break
       }
 
@@ -338,8 +351,8 @@ export const useEventsStore = defineStore('events', () => {
       case 'topology:updated': {
         const topologyStore = useTopologyStore()
         // Novos enlaces exigem recarregar o grafo: não dá para deduzir
-        // a geometria do mapa a partir do evento.
-        scheduleRefresh('topology', () => topologyStore.fetchTopology())
+        // a geometria do mapa a partir do evento. Recarrega em background sem spinner global.
+        scheduleRefresh('topology', () => topologyStore.fetchTopology(null, false, false))
         break
       }
 
