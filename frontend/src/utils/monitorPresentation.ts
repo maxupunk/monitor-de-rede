@@ -13,6 +13,32 @@ export function isTrafficMonitor(
   return monitor.type === 'snmp' && (metric === 'traffic' || metric === 'interface_traffic')
 }
 
+export function getMonitorTrafficInData(
+  monitor: Pick<Monitor, 'inHistory' | 'gaugeHistory'>
+): Array<{ value: number; recordedAt: string }> {
+  return monitor.inHistory || monitor.gaugeHistory || []
+}
+
+export function getMonitorTrafficOutData(
+  monitor: Pick<Monitor, 'outHistory'>
+): Array<{ value: number; recordedAt: string }> {
+  return monitor.outHistory || []
+}
+
+export function getMonitorInBps(monitor: Pick<Monitor, 'inBps' | 'gaugeMetric'>): number | null {
+  if (monitor.inBps !== undefined && monitor.inBps !== null) {
+    return monitor.inBps
+  }
+  return monitor.gaugeMetric?.value ?? null
+}
+
+export function getMonitorOutBps(monitor: Pick<Monitor, 'outBps'>): number | null {
+  if (monitor.outBps !== undefined && monitor.outBps !== null) {
+    return monitor.outBps
+  }
+  return null
+}
+
 export function isSensorMonitor(
   monitor: Pick<Monitor, 'configuration' | 'gaugeMetric'> & { type?: string }
 ): boolean {

@@ -277,7 +277,11 @@ impl ProbeBuffer {
         }
 
         if let Err(error) = tokio::fs::rename(&tmp_path, path).await {
-            tracing::warn!(%error, "não foi possível promover o {context}");
+            // No Windows, rename falha se o destino já existir.
+            let _ = tokio::fs::remove_file(path).await;
+            if let Err(retry_err) = tokio::fs::rename(&tmp_path, path).await {
+                tracing::warn!(error = %retry_err, initial_error = %error, "não foi possível promover o {context}");
+            }
         }
     }
 

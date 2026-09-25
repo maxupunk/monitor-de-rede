@@ -67,12 +67,65 @@
                   <template v-if="isGaugeMonitor(monitor)">
                     <MonitorSparkline
                       :data="monitor.gaugeHistory || []"
+                      :in-data="
+                        isTrafficMonitor(monitor) ? getMonitorTrafficInData(monitor) : undefined
+                      "
+                      :out-data="
+                        isTrafficMonitor(monitor) ? getMonitorTrafficOutData(monitor) : undefined
+                      "
                       :color="gaugeSparklineColor(monitor)"
                       :width="189"
                       :height="28"
                       :unit="gaugeDisplayUnit(monitor)"
                     />
-                    <span class="text-caption font-weight-medium text-high-emphasis text-no-wrap">
+                    <div
+                      v-if="isTrafficMonitor(monitor)"
+                      class="d-flex flex-column text-no-wrap"
+                      style="min-width: 68px; line-height: 1.15"
+                    >
+                      <span
+                        class="d-flex align-center ga-1"
+                        style="font-size: 11px; color: #4ade80; font-weight: 600"
+                      >
+                        <svg
+                          width="10"
+                          height="10"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2.5"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        >
+                          <line x1="12" y1="5" x2="12" y2="19"></line>
+                          <polyline points="19 12 12 19 5 12"></polyline>
+                        </svg>
+                        {{ formatBps(getMonitorInBps(monitor) ?? 0, { fractionDigits: 1 }) }}
+                      </span>
+                      <span
+                        class="d-flex align-center ga-1"
+                        style="font-size: 11px; color: #38bdf8; font-weight: 600"
+                      >
+                        <svg
+                          width="10"
+                          height="10"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2.5"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        >
+                          <line x1="12" y1="19" x2="12" y2="5"></line>
+                          <polyline points="5 12 12 5 19 12"></polyline>
+                        </svg>
+                        {{ formatBps(getMonitorOutBps(monitor) ?? 0, { fractionDigits: 1 }) }}
+                      </span>
+                    </div>
+                    <span
+                      v-else
+                      class="text-caption font-weight-medium text-high-emphasis text-no-wrap"
+                    >
                       {{ formatGaugeShortValue(monitor) }}
                     </span>
                   </template>
@@ -144,9 +197,15 @@ import { useMonitorsStore, type Monitor } from '@/stores/monitors'
 import { useMonitorDetail } from '@/composables/useMonitorDetail'
 import MonitorTimelineBar from '@/components/MonitorTimelineBar.vue'
 import MonitorSparkline from '@/components/MonitorSparkline.vue'
+import { formatBps } from '@/utils/formatters'
 import {
   getStatusColor,
   isGaugeMonitor,
+  isTrafficMonitor,
+  getMonitorTrafficInData,
+  getMonitorTrafficOutData,
+  getMonitorInBps,
+  getMonitorOutBps,
   gaugeMetricName,
   gaugeDisplayUnit,
   gaugeUsagePercent,

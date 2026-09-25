@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { apiService } from '@/services/apiService'
-import { gaugeMetricName, isGaugeMonitor } from '@/utils/monitorPresentation'
+import { gaugeMetricName, isGaugeMonitor, isTrafficMonitor } from '@/utils/monitorPresentation'
 import type { MonitorUptimeResponse } from '@/bindings/MonitorUptimeResponse'
 import type { SaasPresetsResponse } from '@/bindings/SaasPresetsResponse'
 import type { SaasProvisionResponse } from '@/bindings/SaasProvisionResponse'
@@ -88,6 +88,10 @@ export interface Monitor {
     totalBytes?: number | null
   } | null
   gaugeHistory?: Array<{ value: number; recordedAt: string }>
+  inHistory?: Array<{ value: number; recordedAt: string }>
+  outHistory?: Array<{ value: number; recordedAt: string }>
+  inBps?: number | null
+  outBps?: number | null
   createdAt?: string
   updatedAt?: string
 }
@@ -335,17 +339,58 @@ export const useMonitorsStore = defineStore('monitors', () => {
       if (target.deviceId !== deviceId || !isGaugeMonitor(target)) return
       const name = gaugeMetricName(target)
       const isTraffic = name === 'interface_traffic' || name === 'traffic'
-      const isMemory = name === 'memory_usage'
-      const queryName = isTraffic ? 'inBps' : isMemory ? 'memory_used_bytes' : name
       const ifName = target.configuration?.ifName as string | undefined
 
-      const sample = [...metrics].reverse().find((m) => {
-        if (m.name !== queryName) return false
-        if (isTraffic && ifName && m.interfaceName) {
-          return String(m.interfaceName).toLowerCase() === ifName.toLowerCase()
+      if (isTraffic) {
+        const inSample = [...metrics].reverse().find((m) => {
+          if (m.name !== 'inBps') return false
+          if (ifName && m.interfaceName) {
+            return String(m.interfaceName).toLowerCase() === ifName.toLowerCase()
+          }
+          return true
+        })
+        const outSample = [...metrics].reverse().find((m) => {
+          if (m.name !== 'outBps') return false
+          if (ifName && m.interfaceName) {
+            return String(m.interfaceName).toLowerCase() === ifName.toLowerCase()
+          }
+          return true
+        })
+
+        if (!inSample && !outSample) return
+
+        const inVal = inSample ? Number(inSample.value) : undefined
+        const outVal = outSample ? Number(outSample.value) : undefined
+        const recordedAt = String((inSample ?? outSample)?.recordedAt ?? new Date().toISOString())
+
+        if (inVal !== undefined && Number.isFinite(inVal)) {
+          target.inBps = inVal
+          target.inHistory = [...(target.inHistory || []), { value: inVal, recordedAt }].slice(
+            -GAUGE_HISTORY_LIMIT
+          )
         }
-        return true
-      })
+        if (outVal !== undefined && Number.isFinite(outVal)) {
+          target.outBps = outVal
+          target.outHistory = [...(target.outHistory || []), { value: outVal, recordedAt }].slice(
+            -GAUGE_HISTORY_LIMIT
+          )
+        }
+
+        const primaryVal = inVal ?? outVal ?? 0
+        target.gaugeMetric = {
+          name,
+          value: primaryVal,
+          unit: 'bps',
+          recordedAt,
+        }
+        target.gaugeHistory = target.inHistory ?? target.outHistory ?? []
+        return
+      }
+
+      const isMemory = name === 'memory_usage'
+      const queryName = isMemory ? 'memory_used_bytes' : name
+
+      const sample = [...metrics].reverse().find((m) => m.name === queryName)
       if (!sample) return
 
       const value = Number(sample.value)
@@ -360,7 +405,7 @@ export const useMonitorsStore = defineStore('monitors', () => {
       target.gaugeMetric = {
         name,
         value,
-        unit: String(sample.unit ?? (isTraffic ? 'bps' : '%')),
+        unit: String(sample.unit ?? '%'),
         recordedAt,
         usagePercent: isMemory && Number.isFinite(memoryPercentage) ? memoryPercentage : undefined,
         totalBytes: isMemory && Number.isFinite(memoryTotalBytes) ? memoryTotalBytes : undefined,
@@ -368,6 +413,69 @@ export const useMonitorsStore = defineStore('monitors', () => {
       target.gaugeHistory = [...(target.gaugeHistory || []), { value, recordedAt }].slice(
         -GAUGE_HISTORY_LIMIT
       )
+    }
+
+    for (const mon of monitors.value) apply(mon)
+    if (currentMonitor.value) apply(currentMonitor.value)
+  }
+
+  /**
+   * Atualiza as taxas bidirecionais (inBps / outBps) e históricos dos monitores de tráfego
+   * de interface diretamente a partir do evento SSE `interface:traffic` em tempo real.
+   */
+  function applyInterfaceTraffic(data: Record<string, unknown>) {
+    const deviceId = Number(data.deviceId)
+    const interfaces = (data.interfaces as Array<Record<string, unknown>>) || []
+    if (!deviceId || interfaces.length === 0) return
+
+    const apply = (target: Monitor) => {
+      if (target.deviceId !== deviceId || !isTrafficMonitor(target)) return
+      const ifIndex = target.configuration?.ifIndex
+      const ifName = target.configuration?.ifName as string | undefined
+
+      const match = interfaces.find((intf) => {
+        if (
+          ifIndex !== undefined &&
+          ifIndex !== null &&
+          intf.ifIndex !== undefined &&
+          intf.ifIndex !== null
+        ) {
+          return Number(intf.ifIndex) === Number(ifIndex)
+        }
+        if (ifName && intf.name) {
+          return String(intf.name).toLowerCase() === ifName.toLowerCase()
+        }
+        return false
+      })
+      if (!match) return
+
+      const recordedAt = new Date().toISOString()
+      const inVal =
+        match.inBps !== null && match.inBps !== undefined ? Number(match.inBps) : undefined
+      const outVal =
+        match.outBps !== null && match.outBps !== undefined ? Number(match.outBps) : undefined
+
+      if (inVal !== undefined && Number.isFinite(inVal)) {
+        target.inBps = inVal
+        target.inHistory = [...(target.inHistory || []), { value: inVal, recordedAt }].slice(
+          -GAUGE_HISTORY_LIMIT
+        )
+      }
+      if (outVal !== undefined && Number.isFinite(outVal)) {
+        target.outBps = outVal
+        target.outHistory = [...(target.outHistory || []), { value: outVal, recordedAt }].slice(
+          -GAUGE_HISTORY_LIMIT
+        )
+      }
+
+      const primaryVal = inVal ?? outVal ?? 0
+      target.gaugeMetric = {
+        name: 'interface_traffic',
+        value: primaryVal,
+        unit: 'bps',
+        recordedAt,
+      }
+      target.gaugeHistory = target.inHistory ?? target.outHistory ?? []
     }
 
     for (const mon of monitors.value) apply(mon)
@@ -439,6 +547,7 @@ export const useMonitorsStore = defineStore('monitors', () => {
     error,
     applyRealtimeResult,
     applyRealtimeMetrics,
+    applyInterfaceTraffic,
     fetchMonitors,
     fetchMonitorById,
     createMonitor,

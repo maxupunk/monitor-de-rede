@@ -85,6 +85,17 @@ pub struct GaugeSample {
     pub recorded_at: String,
 }
 
+/// Agrupamento de leituras e históricos de um gauge (incluindo taxas bidirecionais de tráfego).
+#[derive(Debug, Default)]
+pub struct GaugeData {
+    pub latest: Option<GaugeReading>,
+    pub history: Vec<GaugeSample>,
+    pub in_history: Option<Vec<GaugeSample>>,
+    pub out_history: Option<Vec<GaugeSample>>,
+    pub in_bps: Option<f64>,
+    pub out_bps: Option<f64>,
+}
+
 /// Formato que ambas as telas de monitores consomem.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -114,6 +125,14 @@ pub struct MonitorPresentation {
     pub recent_results: Vec<MonitorResultPresentation>,
     pub gauge_metric: Option<GaugeReading>,
     pub gauge_history: Vec<GaugeSample>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub in_history: Option<Vec<GaugeSample>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub out_history: Option<Vec<GaugeSample>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub in_bps: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub out_bps: Option<f64>,
 }
 
 /// Nome da métrica de uso configurada por um monitor SNMP.
@@ -188,8 +207,7 @@ pub async fn present_monitors(
             .remove(&monitor.id)
             .unwrap_or_default();
         let latency_ms = recent_results.last().and_then(|result| result.latency_ms);
-        let (gauge_metric, gauge_history) =
-            fetch_gauge_metrics(db, &monitor, &recent_results).await?;
+        let gauge_data = fetch_gauge_metrics(db, &monitor, &recent_results).await?;
         let is_enabled = monitor.is_enabled();
         let target = monitor.target();
         let port = monitor.port();
@@ -216,8 +234,12 @@ pub async fn present_monitors(
             device,
             probe,
             recent_results,
-            gauge_metric,
-            gauge_history,
+            gauge_metric: gauge_data.latest,
+            gauge_history: gauge_data.history,
+            in_history: gauge_data.in_history,
+            out_history: gauge_data.out_history,
+            in_bps: gauge_data.in_bps,
+            out_bps: gauge_data.out_bps,
         });
     }
     Ok(output)
@@ -277,10 +299,10 @@ async fn fetch_gauge_metrics(
     db: &DatabaseConnection,
     monitor: &monitors::Model,
     recent_results: &[MonitorResultPresentation],
-) -> AppResult<(Option<GaugeReading>, Vec<GaugeSample>)> {
+) -> AppResult<GaugeData> {
     let (Some(device_id), Some(metric_name)) = (monitor.device_id, gauge_metric_name(monitor))
     else {
-        return Ok((None, Vec::new()));
+        return Ok(GaugeData::default());
     };
 
     let is_traffic = matches!(metric_name, "traffic" | "interface_traffic");
@@ -295,7 +317,7 @@ async fn fetch_gauge_metrics(
         metrics_entity::Entity::find().filter(metrics_entity::Column::DeviceId.eq(device_id));
 
     if is_traffic {
-        query = query.filter(metrics_entity::Column::Name.eq("inBps"));
+        query = query.filter(metrics_entity::Column::Name.is_in(["inBps", "outBps"]));
     } else if is_memory {
         query = query.filter(metrics_entity::Column::Name.eq("memory_used_bytes"));
     } else if is_sensor {
@@ -358,9 +380,15 @@ async fn fetch_gauge_metrics(
         }
     }
 
+    let limit = if is_traffic {
+        GAUGE_HISTORY_LIMIT * 2
+    } else {
+        GAUGE_HISTORY_LIMIT
+    };
+
     let rows = query
         .order_by_desc(metrics_entity::Column::RecordedAt)
-        .limit(GAUGE_HISTORY_LIMIT)
+        .limit(limit)
         .all(db)
         .await?;
 
@@ -391,9 +419,76 @@ async fn fetch_gauge_metrics(
             }
         }
         if !samples.is_empty() {
-            return Ok((latest_reading, samples));
+            return Ok(GaugeData {
+                latest: latest_reading,
+                history: samples,
+                in_history: None,
+                out_history: None,
+                in_bps: None,
+                out_bps: None,
+            });
         }
     }
+
+    if is_traffic {
+        let mut in_rows = Vec::new();
+        let mut out_rows = Vec::new();
+        for row in rows {
+            if row.name == "inBps" && in_rows.len() < GAUGE_HISTORY_LIMIT as usize {
+                in_rows.push(row);
+            } else if row.name == "outBps" && out_rows.len() < GAUGE_HISTORY_LIMIT as usize {
+                out_rows.push(row);
+            }
+        }
+
+        let in_bps = in_rows.first().map(|r| r.value);
+        let out_bps = out_rows.first().map(|r| r.value);
+
+        let latest_recorded_at = in_rows
+            .first()
+            .or_else(|| out_rows.first())
+            .map(|r| r.recorded_at.to_rfc3339())
+            .unwrap_or_default();
+
+        let latest = in_bps.or(out_bps).map(|val| GaugeReading {
+            name: "interface_traffic".to_string(),
+            value: val,
+            unit: "bps".to_string(),
+            recorded_at: latest_recorded_at,
+            usage_percent: None,
+            total_bytes: None,
+        });
+
+        let mut in_history: Vec<_> = in_rows
+            .into_iter()
+            .map(|row| GaugeSample {
+                value: row.value,
+                recorded_at: row.recorded_at.to_rfc3339(),
+            })
+            .collect();
+        in_history.reverse();
+
+        let mut out_history: Vec<_> = out_rows
+            .into_iter()
+            .map(|row| GaugeSample {
+                value: row.value,
+                recorded_at: row.recorded_at.to_rfc3339(),
+            })
+            .collect();
+        out_history.reverse();
+
+        let history = in_history.clone();
+
+        return Ok(GaugeData {
+            latest,
+            history,
+            in_history: Some(in_history),
+            out_history: Some(out_history),
+            in_bps,
+            out_bps,
+        });
+    }
+
     let (usage_percent, total_bytes) = if is_memory {
         let percentage = metrics_entity::Entity::find()
             .filter(metrics_entity::Column::DeviceId.eq(device_id))
@@ -414,11 +509,7 @@ async fn fetch_gauge_metrics(
         (None, None)
     };
     let latest = rows.first().map(|row| GaugeReading {
-        name: if is_traffic {
-            "interface_traffic".to_string()
-        } else {
-            metric_name.to_string()
-        },
+        name: metric_name.to_string(),
         value: row.value,
         unit: row.unit.clone(),
         recorded_at: row.recorded_at.to_rfc3339(),
@@ -433,5 +524,12 @@ async fn fetch_gauge_metrics(
         })
         .collect();
     history.reverse();
-    Ok((latest, history))
+    Ok(GaugeData {
+        latest,
+        history,
+        in_history: None,
+        out_history: None,
+        in_bps: None,
+        out_bps: None,
+    })
 }

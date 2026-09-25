@@ -317,8 +317,10 @@ export const useEventsStore = defineStore('events', () => {
       case 'interface:traffic': {
         const topologyStore = useTopologyStore()
         const deviceDetailStore = useDeviceDetailStore()
+        const monitorsStore = useMonitorsStore()
         topologyStore.applyRealtimeTraffic(data)
         deviceDetailStore.applyInterfaceTraffic(data)
+        monitorsStore.applyInterfaceTraffic(data)
         break
       }
 

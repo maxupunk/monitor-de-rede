@@ -33,18 +33,64 @@
         </div>
 
         <!-- Monitores de uso (CPU/Memória/Tráfego via SNMP) não são checagens puras up/down: mostramos a leitura atual -->
-        <div v-if="isGaugeMonitor(item)" class="d-flex align-center ga-2" style="max-width: 260px">
+        <div v-if="isGaugeMonitor(item)" class="d-flex align-center ga-2" style="max-width: 275px">
           <!-- Largura igual à da MonitorTimelineBar abaixo (24 blocos de 5px + 23 gaps de 3px = 189px),
                para os dois estilos de linha ficarem visualmente alinhados na mesma coluna. -->
           <MonitorSparkline
             :data="getMonitorSparklineData(item)"
+            :in-data="isTrafficMonitor(item) ? getMonitorTrafficInData(item) : undefined"
+            :out-data="isTrafficMonitor(item) ? getMonitorTrafficOutData(item) : undefined"
             :color="gaugeSparklineColor(item)"
             :width="189"
             :height="28"
             :unit="gaugeDisplayUnit(item)"
             :format-value="(v) => formatSparklinePoint(item, v)"
           />
-          <span class="text-caption font-weight-medium text-no-wrap" style="min-width: 44px">
+          <div
+            v-if="isTrafficMonitor(item)"
+            class="d-flex flex-column text-no-wrap"
+            style="min-width: 68px; line-height: 1.15"
+          >
+            <span
+              class="d-flex align-center ga-1"
+              style="font-size: 11px; color: #4ade80; font-weight: 600"
+            >
+              <svg
+                width="10"
+                height="10"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <polyline points="19 12 12 19 5 12"></polyline>
+              </svg>
+              {{ formatBps(getMonitorInBps(item) ?? 0, { fractionDigits: 1 }) }}
+            </span>
+            <span
+              class="d-flex align-center ga-1"
+              style="font-size: 11px; color: #38bdf8; font-weight: 600"
+            >
+              <svg
+                width="10"
+                height="10"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <line x1="12" y1="19" x2="12" y2="5"></line>
+                <polyline points="5 12 12 5 19 12"></polyline>
+              </svg>
+              {{ formatBps(getMonitorOutBps(item) ?? 0, { fractionDigits: 1 }) }}
+            </span>
+          </div>
+          <span v-else class="text-caption font-weight-medium text-no-wrap" style="min-width: 44px">
             {{ formatGaugeShortValue(item) }}
           </span>
         </div>
@@ -233,13 +279,59 @@
               <div class="d-flex align-center ga-2 w-100">
                 <MonitorSparkline
                   :data="getMonitorSparklineData(item)"
+                  :in-data="isTrafficMonitor(item) ? getMonitorTrafficInData(item) : undefined"
+                  :out-data="isTrafficMonitor(item) ? getMonitorTrafficOutData(item) : undefined"
                   :color="gaugeSparklineColor(item)"
-                  :width="220"
+                  :width="180"
                   :height="28"
                   :unit="gaugeDisplayUnit(item)"
                   :format-value="(v) => formatSparklinePoint(item, v)"
                 />
-                <span class="text-caption font-weight-medium text-no-wrap">
+                <div
+                  v-if="isTrafficMonitor(item)"
+                  class="d-flex flex-column text-no-wrap"
+                  style="min-width: 68px; line-height: 1.15"
+                >
+                  <span
+                    class="d-flex align-center ga-1"
+                    style="font-size: 11px; color: #4ade80; font-weight: 600"
+                  >
+                    <svg
+                      width="10"
+                      height="10"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.5"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <line x1="12" y1="5" x2="12" y2="19"></line>
+                      <polyline points="19 12 12 19 5 12"></polyline>
+                    </svg>
+                    {{ formatBps(getMonitorInBps(item) ?? 0, { fractionDigits: 1 }) }}
+                  </span>
+                  <span
+                    class="d-flex align-center ga-1"
+                    style="font-size: 11px; color: #38bdf8; font-weight: 600"
+                  >
+                    <svg
+                      width="10"
+                      height="10"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.5"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <line x1="12" y1="19" x2="12" y2="5"></line>
+                      <polyline points="5 12 12 5 19 12"></polyline>
+                    </svg>
+                    {{ formatBps(getMonitorOutBps(item) ?? 0, { fractionDigits: 1 }) }}
+                  </span>
+                </div>
+                <span v-else class="text-caption font-weight-medium text-no-wrap">
                   {{ formatGaugeShortValue(item) }}
                 </span>
               </div>
@@ -346,8 +438,14 @@ import MonitorSparkline from '@/components/MonitorSparkline.vue'
 import MonitorDetailDialog from '@/components/monitors/MonitorDetailDialog.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import { useMonitorDetail } from '@/composables/useMonitorDetail'
+import { formatBps } from '@/utils/formatters'
 import {
   isGaugeMonitor,
+  isTrafficMonitor,
+  getMonitorTrafficInData,
+  getMonitorTrafficOutData,
+  getMonitorInBps,
+  getMonitorOutBps,
   isSensorMonitor,
   sensorDataType,
   gaugeMetricName,
