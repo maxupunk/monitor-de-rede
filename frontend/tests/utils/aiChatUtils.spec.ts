@@ -84,6 +84,13 @@ describe('eventos do chat', () => {
     expect(msg.isStreaming).toBe(false)
   })
 
+  it('aviso do backend fica na mensagem sem virar erro', () => {
+    const msg = resposta()
+    applyChatEvent(msg, { type: 'notice', message: 'Janela de 4096 tokens' })
+    expect(msg.notice).toBe('Janela de 4096 tokens')
+    expect(msg.error).toBeUndefined()
+  })
+
   it('histórico deixa de fora mensagens com erro e vazias', () => {
     const mensagens: AiDisplayMessage[] = [
       { id: '1', role: 'user', content: 'oi' },

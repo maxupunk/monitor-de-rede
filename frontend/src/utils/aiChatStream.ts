@@ -62,6 +62,8 @@ export interface AiDisplayMessage {
   usage?: AiUsageInfo | null
   isStreaming?: boolean
   error?: string | null
+  /** Aviso sobre a resposta (ex: janela do modelo pequena demais). */
+  notice?: string | null
 }
 
 export interface ApiChatMessage {
@@ -152,6 +154,9 @@ export function applyChatEvent(message: AiDisplayMessage, event: unknown): void 
       break
     case 'error':
       message.error = typeof event.message === 'string' ? event.message : 'Erro no provedor'
+      break
+    case 'notice':
+      if (typeof event.message === 'string') message.notice = event.message
       break
     case 'done':
       message.isStreaming = false

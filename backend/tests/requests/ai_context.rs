@@ -464,3 +464,46 @@ async fn resumo_anterior_vai_no_prompt() {
     })
     .await;
 }
+
+#[tokio::test]
+#[serial]
+async fn oi_numa_janela_pequena_nao_compacta_e_avisa() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
+        let fala = |role: &str, content: &str| ChatMessageInput {
+            role: role.into(),
+            content: content.into(),
+        };
+        let mensagens = vec![
+            fala("user", "oi"),
+            fala(
+                "assistant",
+                "Olá! Estou à disposição para monitorar a sua rede.",
+            ),
+            fala("user", "você conseguiu acessar os containers?"),
+        ];
+        let (chamadas, eventos) = conversar(
+            &ctx,
+            4_096,
+            Some("resumo que não devia existir"),
+            mensagens,
+            ConversationMemory::default(),
+        )
+        .await;
+
+        assert!(
+            compactacao(&eventos).is_none(),
+            "resumir 'oi' não libera espaço: a parte fixa é que não cabe"
+        );
+        assert_eq!(chamadas.len(), 1, "nenhuma chamada extra de resumo");
+        assert_eq!(chamadas[0].mensagens, 4, "sistema + as três mensagens");
+        let aviso = eventos.iter().find_map(|evento| match evento {
+            HarnessEvent::Notice { message } => Some(message.clone()),
+            _ => None,
+        });
+        assert!(
+            aviso.is_some_and(|aviso| aviso.contains("4096")),
+            "a tela explica que a janela é pequena"
+        );
+    })
+    .await;
+}

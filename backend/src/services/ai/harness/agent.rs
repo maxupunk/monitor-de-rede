@@ -17,7 +17,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use super::{
     compaction::{
         estimate_history, estimate_messages, estimate_tokens, fallback_summary, fold_count,
-        prune_tool_results, summarize, ContextBudget,
+        prune_tool_results, small_window_notice, summarize, worth_folding, ContextBudget,
     },
     prompt::{build_small_talk_prompt, build_system_prompt, build_turn_context, ChatContext},
     tools::{ToolGroups, ToolPolicy, ToolRegistry, LOAD_TOOLS},
@@ -98,6 +98,11 @@ pub enum HarnessEvent {
         generation_ms: u64,
         /// Tempo total da resposta, ferramentas incluídas.
         duration_ms: u64,
+    },
+    /// Algo que o usuário precisa saber sobre a resposta (janela pequena
+    /// demais para as ferramentas, por exemplo). Não interrompe nada.
+    Notice {
+        message: String,
     },
     /// As mensagens antigas viraram resumo para caber na janela. A tela
     /// guarda o resumo e passa a mandar só o que veio depois.
@@ -531,10 +536,26 @@ pub async fn run_agent_loop(
 
         let mut summary = request.memory.summary.clone();
         if !small_talk {
-            let tools_tokens = estimate_tokens(
-                &serde_json::to_string(&registry.definitions_for(&loaded)).unwrap_or_default(),
-            );
-            let fixed = estimate_tokens(&system_prompt) + tools_tokens;
+            let fixed_for = |loaded: &ToolGroups| {
+                estimate_tokens(&system_prompt)
+                    + estimate_tokens(
+                        &serde_json::to_string(&registry.definitions_for(loaded))
+                            .unwrap_or_default(),
+                    )
+            };
+            let mut fixed = fixed_for(&loaded);
+            // A parte fixa sozinha não cabe: resumir mensagens não resolve.
+            // Primeiro saem os grupos herdados de perguntas anteriores (o
+            // cache de prefixo vale menos que caber); se nem assim, avisa.
+            if fixed > budget.target() && loaded != preselected {
+                loaded = preselected.clone();
+                fixed = fixed_for(&loaded);
+            }
+            if let Some(message) = small_window_notice(&budget, fixed, driver.id()) {
+                if !sink.send(HarnessEvent::Notice { message }).await {
+                    return;
+                }
+            }
             let summary_tokens = summary.as_deref().map_or(0, estimate_tokens);
             let measured = fixed + summary_tokens + estimate_history(&history);
             let reported = request.memory.last_context_tokens.map_or(0, |tokens| {
@@ -547,7 +568,9 @@ pub async fn run_agent_loop(
             let force = request.memory.force_compaction;
             if force || budget.needs_compaction(used) {
                 let fold = fold_count(&history, fixed, &budget, force);
-                if fold > 0 {
+                // Resumir pouco não libera nada: a conversa sai do mesmo
+                // tamanho (ou maior) e ainda custa uma chamada ao provedor.
+                if fold > 0 && worth_folding(&history[..fold], force) {
                     // O que `recent_history` já tinha deixado de fora entra no
                     // resumo também: nada some sem ser resumido.
                     let folded = requested.len() - history.len() + fold;

@@ -136,6 +136,44 @@ impl ContextBudget {
     }
 }
 
+/// Menor trecho que vale resumir. Abaixo disso o resumo sai do tamanho do
+/// que substitui — e ainda custa uma chamada ao provedor.
+pub const MIN_FOLD_TOKENS: u64 = 2 * SUMMARY_MAX_TOKENS as u64;
+
+/// Se resumir `folded` compensa. Pedido explícito da tela vale com qualquer
+/// tamanho; o automático só quando o trecho pesa mais que dois resumos.
+#[must_use]
+pub fn worth_folding(folded: &[ChatMessageInput], force: bool) -> bool {
+    let tokens = estimate_history(folded);
+    if force {
+        tokens > 0
+    } else {
+        tokens >= MIN_FOLD_TOKENS
+    }
+}
+
+/// Aviso quando a parte fixa (instruções e ferramentas) sozinha já passa da
+/// meta da janela: nenhuma compactação resolve, só uma janela maior.
+#[must_use]
+pub fn small_window_notice(
+    budget: &ContextBudget,
+    fixed_tokens: u64,
+    driver_id: &str,
+) -> Option<String> {
+    if fixed_tokens <= budget.target() {
+        return None;
+    }
+    let hint = if driver_id == "ollama" {
+        " No Ollama, aumente o contexto do servidor (variável OLLAMA_CONTEXT_LENGTH=16384 ou mais) ou o num_ctx do modelo."
+    } else {
+        " Escolha um modelo com janela maior."
+    };
+    Some(format!(
+        "A janela de contexto do modelo ({} tokens) mal comporta as instruções e ferramentas (~{fixed_tokens} tokens): as respostas podem sair incompletas e a conversa não tem espaço para crescer.{hint}",
+        budget.window
+    ))
+}
+
 /// Quantas mensagens do começo do histórico viram resumo.
 ///
 /// Ficam as mais recentes que cabem na meta, descontado o que é fixo (prompt
@@ -312,6 +350,43 @@ pub fn fallback_summary(previous: Option<&str>, folded: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn fala(role: &str, content: &str) -> ChatMessageInput {
+        ChatMessageInput {
+            role: role.into(),
+            content: content.into(),
+        }
+    }
+
+    #[test]
+    fn cortesia_nao_vale_um_resumo() {
+        let cortesia = [
+            fala("user", "oi"),
+            fala("assistant", "Olá! Como posso ajudar?"),
+        ];
+        assert!(
+            !worth_folding(&cortesia, false),
+            "resumir 'oi' só aumenta a conversa"
+        );
+        assert!(worth_folding(&cortesia, true), "pedido explícito vale");
+        assert!(!worth_folding(&[], true));
+
+        let longa = [fala("user", &"x".repeat(6_000))];
+        assert!(worth_folding(&longa, false));
+    }
+
+    #[test]
+    fn janela_pequena_avisa_com_a_dica_do_provedor() {
+        let pequena = ContextBudget::new(4_096, Some(1_024));
+        let aviso = small_window_notice(&pequena, 3_800, "ollama").expect("aviso");
+        assert!(aviso.contains("4096") && aviso.contains("OLLAMA_CONTEXT_LENGTH"));
+        assert!(small_window_notice(&pequena, 3_800, "openrouter")
+            .is_some_and(|aviso| !aviso.contains("OLLAMA")));
+        assert_eq!(
+            small_window_notice(&ContextBudget::new(32_768, Some(1_024)), 3_800, "ollama"),
+            None
+        );
+    }
 
     fn msg(role: &str, content: &str) -> ChatMessageInput {
         ChatMessageInput {

@@ -38,7 +38,7 @@
 
         <!-- Balão de Mensagem -->
         <v-card
-          v-if="message.content || message.isStreaming || message.error"
+          v-if="message.content || message.isStreaming || message.error || message.notice"
           :color="message.role === 'user' ? 'primary' : 'surface'"
           :class="[
             'pa-3 rounded-xl elevation-1 message-bubble',
@@ -54,6 +54,17 @@
             class="mb-2 text-body-small"
           >
             {{ message.error }}
+          </v-alert>
+
+          <!-- Aviso (ex: janela de contexto pequena) -->
+          <v-alert
+            v-if="message.notice"
+            type="warning"
+            variant="tonal"
+            density="compact"
+            class="mb-2 text-body-small"
+          >
+            {{ message.notice }}
           </v-alert>
 
           <!-- Conteúdo Renderizado -->
