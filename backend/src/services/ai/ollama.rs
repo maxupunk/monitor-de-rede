@@ -19,6 +19,13 @@ use crate::{
 /// Modelos recomendados para execução no Ollama com o NetMonitor.
 pub static RECOMMENDED_MODELS: &[(&str, &str, &str, &str, bool)] = &[
     (
+        "ornith-1.5:9b",
+        "Ornith 1.5 9B — Modelo mais recomendado para o NetMonitor: autoaperfeiçoamento, raciocínio avançado, ferramentas de rede e janela nativa de 256k",
+        "9B",
+        "256k",
+        true,
+    ),
+    (
         "llama3-groq-tool-use:8b",
         "Llama 3 Groq Tool Use 8B — Especialista em execução de ferramentas de rede e diagnósticos (Function Calling)",
         "8B",

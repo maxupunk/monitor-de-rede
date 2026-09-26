@@ -498,7 +498,7 @@
                     :return-object="false"
                     :custom-filter="customModelFilter"
                     label="Modelo para baixar e instalar no Ollama"
-                    placeholder="Selecione um recomendado ou digite qualquer tag (ex: qwen3.8:27b, mistral)..."
+                    placeholder="Selecione um recomendado ou digite qualquer tag (ex: ornith-1.5:9b, qwen3.8:27b, mistral)..."
                     variant="outlined"
                     density="compact"
                     hide-details="auto"
@@ -516,6 +516,15 @@
                       >
                         <template #append>
                           <div class="d-flex align-center ga-1">
+                            <v-chip
+                              v-if="item.name === 'ornith-1.5:9b'"
+                              size="x-small"
+                              color="amber-darken-2"
+                              variant="flat"
+                            >
+                              <v-icon start size="10">mdi-star</v-icon>
+                              Mais Recomendado
+                            </v-chip>
                             <v-chip
                               v-if="item.parameterSize"
                               size="x-small"
@@ -916,7 +925,7 @@ const form = reactive<AiSettings>({
   openrouterApiKey: '',
   openrouterModel: 'openrouter/free',
   ollamaBaseUrl: 'http://localhost:11434/v1',
-  ollamaModel: 'llama3.2',
+  ollamaModel: 'ornith-1.5:9b',
   ollamaNumCtx: 16384,
   allowActiveTools: true,
   requireToolConfirmation: false,
@@ -1400,7 +1409,7 @@ async function handleTestConnection() {
     }
   } else if (form.activeDriver === 'ollama') {
     baseUrl = form.ollamaBaseUrl || 'http://localhost:11434/v1'
-    model = form.ollamaModel || 'llama3.2'
+    model = form.ollamaModel || 'ornith-1.5:9b'
   }
 
   await aiStore.testConnection({

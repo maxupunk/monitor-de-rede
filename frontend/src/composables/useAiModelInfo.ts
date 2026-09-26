@@ -5,7 +5,7 @@ import { useAiStore } from '@/stores/ai'
 const DEFAULT_MODELS: Record<string, string> = {
   opencode: 'muse-spark-1.3-contributor-free',
   openrouter: 'openrouter/free',
-  ollama: 'llama3.2',
+  ollama: 'ornith-1.5:9b',
 }
 
 const DRIVER_LABELS: Record<string, string> = {

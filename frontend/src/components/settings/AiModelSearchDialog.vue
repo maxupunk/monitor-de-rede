@@ -232,10 +232,11 @@
                       <v-chip
                         v-else-if="driver === 'ollama' && item.isRecommended"
                         size="x-small"
-                        color="primary"
-                        variant="tonal"
+                        :color="item.id === 'ornith-1.5:9b' ? 'amber-darken-2' : 'primary'"
+                        :variant="item.id === 'ornith-1.5:9b' ? 'flat' : 'tonal'"
                       >
-                        Recomendado
+                        <v-icon v-if="item.id === 'ornith-1.5:9b'" start size="12">mdi-star</v-icon>
+                        {{ item.id === 'ornith-1.5:9b' ? 'Mais Recomendado' : 'Recomendado' }}
                       </v-chip>
                     </div>
 

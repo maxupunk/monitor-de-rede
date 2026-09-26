@@ -21,6 +21,7 @@ const FAMILIES: &[(&str, u64)] = &[
     ("glm", 131_072),
     ("deepseek", 131_072),
     ("qwen3.8", 262_144),
+    ("ornith", 262_144),
     ("qwen3", 131_072),
     ("qwen2.5", 32_768),
     ("qwen", 32_768),
@@ -65,6 +66,7 @@ mod tests {
         assert_eq!(estimate("llama3.2"), 131_072);
         assert_eq!(estimate("gemma4:e4b"), 131_072);
         assert_eq!(estimate("qwen3.8:27b"), 262_144);
+        assert_eq!(estimate("ornith-1.5:9b"), 262_144);
         assert_eq!(estimate("granite4.2:latest"), 131_072);
     }
 

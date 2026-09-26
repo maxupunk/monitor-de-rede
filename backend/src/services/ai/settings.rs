@@ -21,7 +21,7 @@ pub const MASKED_KEY: &str = "********";
 pub const OPENCODE_DEFAULT_BASE_URL: &str = "https://opencode.ai/zen/v1";
 pub const DEFAULT_OPENCODE_MODEL: &str = "muse-spark-1.3-contributor-free";
 pub const DEFAULT_OLLAMA_BASE_URL: &str = "http://localhost:11434/v1";
-pub const DEFAULT_OLLAMA_MODEL: &str = "llama3.2";
+pub const DEFAULT_OLLAMA_MODEL: &str = "ornith-1.5:9b";
 pub const DEFAULT_OLLAMA_NUM_CTX: u64 = 16_384;
 pub const DEFAULT_OPENROUTER_MODEL: &str = "openrouter/free";
 
