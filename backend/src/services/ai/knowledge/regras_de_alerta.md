@@ -45,12 +45,14 @@
 - Site HTTP com erro: `statusCode gte 500`, `critical`.
 
 ## Diagnosticar de onde vem um alerta
-1. `explain_alert` com o id: traz a regra que disparou, a condição, o alvo (monitor, interface, túnel), os fatos que casaram e quantas vezes a regra disparou nas últimas 24 h.
-2. Regra ruidosa (muitos disparos, duração curta)? Sugira aumentar `duration_seconds`, `recovery_window_seconds` ou ligar o flapping — não apagar.
-3. Problema real? Siga com causa raiz, linha do tempo e testes ativos no alvo.
-4. Alvo em manutenção programada? Proponha janela de manutenção.
+1. `explain_alert` com o `alert_id`: traz a regra que disparou (condição, janelas, escopo), o alvo exato (equipamento, monitor, interface ou túnel VPN), os fatos/métricas reais que casaram a condição, disparos nas últimas 24 h e outros alertas em aberto no mesmo equipamento.
+2. Regra ruidosa (muitos disparos nas 24h, duração curta)? Sugira aumentar `duration_seconds`, `recovery_window_seconds` ou ligar o flapping (`flap_threshold`) — evite sugerir apagar regras legítimas apenas por ruído passageiro.
+3. Problema real? Siga com diagnóstico de causa raiz (`analyze_root_cause`), linha do tempo (`get_incident_timeline`) e testes ativos no alvo (ping, traceroute, portas).
+4. Alvo em manutenção programada? Proponha janela de manutenção (`create_maintenance_window`).
 
-## Criar e excluir pela IA
-- `create_alert_rule` e `delete_alert_rule` sempre pedem confirmação do usuário no chat.
-- **Excluir apaga também o histórico de alertas da regra** (cascata no banco). Quando o objetivo é só parar de ser avisado, desativar a regra na tela /alerts preserva o histórico — mencione essa alternativa.
-- Antes de criar, confira com `list_alert_rules` se já existe regra igual para o mesmo escopo.
+## Criar, ativar/desativar e excluir pela IA
+- `create_alert_rule`, `toggle_alert_rule` e `delete_alert_rule` **sempre pedem confirmação do usuário no chat**.
+- **Criar regra**: antes de criar, use `list_alert_rules` para verificar se já existe regra similar para o escopo e garanta que `field` pertença ao vocabulário oficial.
+- **Desativar regra**: use `toggle_alert_rule` com `enabled: false`. Quando o objetivo do usuário é apenas parar de receber notificações ou silenciar a regra indefinidamente, **desativar preserva o histórico de alertas e auditoria**.
+- **Excluir regra**: use `delete_alert_rule` (aceita `rule_id` ou `alert_id`). **Excluir apaga também todo o histórico de alertas da regra** (deleção em cascata no banco). Sempre alerte o usuário sobre a perda do histórico e ofereça desativar antes de proceder.
+

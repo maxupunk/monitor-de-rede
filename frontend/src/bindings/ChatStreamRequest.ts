@@ -12,6 +12,7 @@ export type ChatStreamRequest = {
   deviceId: number | null
   monitorId: number | null
   alertId: number | null
+  ruleId: number | null
   /**
    * O que o usuário marcou com `@` na última pergunta.
    */

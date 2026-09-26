@@ -262,3 +262,91 @@ async fn excluir_regra_avisa_que_o_historico_vai_junto() {
     })
     .await;
 }
+
+#[tokio::test]
+#[serial]
+async fn excluir_regra_pelo_alert_id_resolve_e_apaga() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
+        let dev = aparelho(&ctx).await;
+        let rule = regra(&ctx, dev.id).await;
+        let evento = disparo(&ctx, &rule, "active").await;
+        let registro = ToolRegistry::new(COM_ACOES);
+
+        let argumentos = json!({ "alert_id": evento.id }).to_string();
+        assert!(registro.needs_confirmation("delete_alert_rule"));
+        let resumo = registro
+            .preview(&ctx, "delete_alert_rule", &argumentos)
+            .await
+            .unwrap();
+        assert!(resumo.contains("Excluir a regra de alerta"));
+        assert!(resumo.contains(&rule.name));
+
+        let feito = registro
+            .execute_confirmed(&ctx, "delete_alert_rule", ToolArgs::parse(&argumentos))
+            .await
+            .unwrap();
+        assert_eq!(feito.data["done"], true);
+        assert_eq!(feito.data["deleted_rule"], rule.name);
+        assert!(alert_rules::Entity::find_by_id(rule.id)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .is_none());
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn toggle_regra_ativa_e_desativa_mantendo_historico() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
+        let dev = aparelho(&ctx).await;
+        let rule = regra(&ctx, dev.id).await;
+        let evento = disparo(&ctx, &rule, "active").await;
+        let registro = ToolRegistry::new(COM_ACOES);
+
+        assert!(registro.needs_confirmation("toggle_alert_rule"));
+
+        let arg_desativar = json!({ "alert_id": evento.id, "enabled": false }).to_string();
+        let preview_desativar = registro
+            .preview(&ctx, "toggle_alert_rule", &arg_desativar)
+            .await
+            .unwrap();
+        assert!(preview_desativar.contains("Desativar"));
+        assert!(preview_desativar.contains("mantendo o histórico"));
+
+        let feito = registro
+            .execute_confirmed(&ctx, "toggle_alert_rule", ToolArgs::parse(&arg_desativar))
+            .await
+            .unwrap();
+        assert_eq!(feito.data["done"], true);
+        assert_eq!(feito.data["enabled"], false);
+
+        let persistida = alert_rules::Entity::find_by_id(rule.id)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .expect("regra ainda existe");
+        assert!(!persistida.enabled);
+
+        assert!(alert_events::Entity::find_by_id(evento.id)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .is_some());
+
+        let arg_ativar = json!({ "rule_id": rule.id, "enabled": true }).to_string();
+        let preview_ativar = registro
+            .preview(&ctx, "toggle_alert_rule", &arg_ativar)
+            .await
+            .unwrap();
+        assert!(preview_ativar.contains("Ativar"));
+
+        let reativado = registro
+            .execute_confirmed(&ctx, "toggle_alert_rule", ToolArgs::parse(&arg_ativar))
+            .await
+            .unwrap();
+        assert_eq!(reativado.data["enabled"], true);
+    })
+    .await;
+}

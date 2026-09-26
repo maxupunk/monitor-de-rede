@@ -143,7 +143,7 @@ impl ToolGroup {
             Self::Diagnostics => "ping, traceroute, portas, DNS e playbooks",
             Self::Actions => "reconhecer/silenciar alerta, janela de manutenção, criar monitor",
             Self::AlertRules => {
-                "origem de um alerta, regras cadastradas, guia de regras, criar/excluir regra"
+                "origem de um alerta, regras cadastradas, guia de regras, criar/ativar/desativar/excluir regra"
             }
             Self::Platform => {
                 "agentes remotos, VPN, topologia/vizinhos, descoberta, redes/sites/DNS, manutenção, auditoria, notificações"
@@ -436,6 +436,7 @@ fn all_handlers() -> Vec<Box<dyn AiToolHandler>> {
         Box::new(alert_rules::ExplainAlert),
         Box::new(alert_rules::CreateAlertRule),
         Box::new(alert_rules::DeleteAlertRule),
+        Box::new(alert_rules::ToggleAlertRule),
         Box::new(ask::AskUser),
     ]
 }

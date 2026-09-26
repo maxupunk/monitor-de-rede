@@ -26,13 +26,24 @@
     type="info"
     variant="tonal"
     density="comfortable"
-    class="mb-4"
+    class="mb-4 rounded-lg"
   >
-    Nenhuma regra configurada. Comece pelas
-    <a class="font-weight-bold text-primary" href="#" @click.prevent="emit('open-catalog')"
-      >regras pré-configuradas</a
-    >
-    para cobrir indisponibilidade, latência, perda de pacotes e quedas de interface.
+    <div class="d-flex flex-wrap align-center justify-space-between ga-3">
+      <div>
+        Nenhuma regra configurada. Comece pelas
+        <a class="font-weight-bold text-primary" href="#" @click.prevent="emit('open-catalog')"
+          >regras pré-configuradas</a
+        >
+        para cobrir indisponibilidade, latência, perda de pacotes e quedas de interface, ou crie
+        regras com o Assistente IA.
+      </div>
+      <AiAskButton
+        size="small"
+        label="Criar Regras com IA"
+        prompt="Gostaria de criar regras de alerta recomendadas para proteger minha infraestrutura. Quais regras você sugere e como podemos criá-las?"
+        :context="{}"
+      />
+    </div>
   </v-alert>
 
   <ResponsiveDataTable
@@ -107,6 +118,14 @@
 
     <template #item.actions="{ item }">
       <div class="d-flex ga-1">
+        <AiAskButton
+          icon-only
+          size="small"
+          variant="text"
+          tooltip="Consultar IA sobre esta regra (avaliar disparos ou ruído)"
+          :prompt="`Avalie a regra de alerta #${item.id} ('${item.name}'): verifique a frequência de disparos, se ela é ruidosa e me diga de onde vêm os alertas.`"
+          :context="{ ruleId: item.id, deviceId: item.deviceId, monitorId: item.monitorId }"
+        />
         <v-btn icon size="small" variant="text" @click="emit('edit-rule', item)">
           <v-icon>mdi-pencil</v-icon>
         </v-btn>
@@ -172,6 +191,14 @@
 
         <!-- Footer Actions -->
         <div class="d-flex align-center justify-end ga-1 pt-2 mt-1 border-t">
+          <AiAskButton
+            size="small"
+            variant="text"
+            label="IA"
+            tooltip="Consultar IA sobre esta regra"
+            :prompt="`Avalie a regra de alerta #${item.id} ('${item.name}'): verifique a frequência de disparos, se ela é ruidosa e me diga de onde vêm os alertas.`"
+            :context="{ ruleId: item.id, deviceId: item.deviceId, monitorId: item.monitorId }"
+          />
           <v-btn
             size="small"
             variant="tonal"
@@ -196,6 +223,7 @@ import { computed } from 'vue'
 import { useAlertsStore, type AlertRule } from '@/stores/alerts'
 import { useDevicesStore } from '@/stores/devices'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
+import AiAskButton from '@/components/ai/AiAskButton.vue'
 import {
   ALERT_DURATIONS,
   metricLabel,

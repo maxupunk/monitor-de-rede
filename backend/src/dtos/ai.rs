@@ -25,6 +25,9 @@ pub struct ChatStreamRequest {
     #[serde(default)]
     #[ts(type = "number | null")]
     pub alert_id: Option<i64>,
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub rule_id: Option<i64>,
     /// O que o usuário marcou com `@` na última pergunta.
     #[serde(default)]
     pub mentions: Vec<AiMention>,
@@ -74,6 +77,8 @@ enum ChatStreamRequestHelper {
         #[serde(default)]
         alert_id: Option<i64>,
         #[serde(default)]
+        rule_id: Option<i64>,
+        #[serde(default)]
         mentions: Vec<AiMention>,
         #[serde(default)]
         summary: Option<String>,
@@ -97,6 +102,7 @@ impl<'de> Deserialize<'de> for ChatStreamRequest {
                 device_id,
                 monitor_id,
                 alert_id,
+                rule_id,
                 mentions,
                 summary,
                 context_hint,
@@ -106,6 +112,7 @@ impl<'de> Deserialize<'de> for ChatStreamRequest {
                 device_id,
                 monitor_id,
                 alert_id,
+                rule_id,
                 mentions,
                 summary,
                 context_hint,
@@ -116,6 +123,7 @@ impl<'de> Deserialize<'de> for ChatStreamRequest {
                 device_id: None,
                 monitor_id: None,
                 alert_id: None,
+                rule_id: None,
                 mentions: Vec::new(),
                 summary: None,
                 context_hint: None,
@@ -276,6 +284,7 @@ pub struct OllamaRecommendedModel {
     pub name: String,
     pub description: String,
     pub parameter_size: String,
+    pub context_window: String,
     pub is_installed: bool,
     pub tool_calling_optimized: bool,
 }

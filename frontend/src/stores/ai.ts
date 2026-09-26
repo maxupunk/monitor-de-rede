@@ -6,7 +6,6 @@ import type { OpenCodeModelsResponse } from '@/bindings/OpenCodeModelsResponse'
 import type { OpenRouterModelItem } from '@/bindings/OpenRouterModelItem'
 import type { OpenRouterModelsResponse } from '@/bindings/OpenRouterModelsResponse'
 import type { AiChart } from '@/bindings/AiChart'
-import type { AiDigest } from '@/bindings/AiDigest'
 import type { AiProactiveSettings } from '@/bindings/AiProactiveSettings'
 import type { AiResponseStyle } from '@/bindings/AiResponseStyle'
 import type { AiContainerActionMode } from '@/bindings/AiContainerActionMode'
@@ -24,13 +23,6 @@ import type { AiMention } from '@/utils/aiMentions'
 import { useAiConversationsStore } from './aiConversations'
 import { readSseJson } from '@/utils/sseReader'
 
-/**
- * O resumo roda o laço do agente inteiro (várias ferramentas, até 6 rodadas de
- * até 120 s cada no driver) numa única requisição: o timeout padrão de 15 s
- * abortava o fetch no meio e a tela mostrava "falha de conexão".
- */
-export const DIGEST_REQUEST_TIMEOUT_MS = 12 * 60 * 1000
-
 function isCompactionEvent(event: unknown): event is Record<string, unknown> {
   return (
     typeof event === 'object' &&
@@ -41,7 +33,6 @@ function isCompactionEvent(event: unknown): event is Record<string, unknown> {
 
 export type {
   AiChart,
-  AiDigest,
   AiDisplayMessage,
   AiDraft,
   AiMention,
@@ -79,6 +70,7 @@ export interface AiChatContext {
   deviceId?: number | null
   monitorId?: number | null
   alertId?: number | null
+  ruleId?: number | null
 }
 
 export interface TestConnectionResponse {
@@ -99,6 +91,7 @@ export interface OllamaRecommendedModel {
   name: string
   description: string
   parameterSize: string
+  contextWindow: string
   isInstalled: boolean
   toolCallingOptimized: boolean
 }
@@ -160,11 +153,6 @@ export const useAiStore = defineStore('ai', () => {
   let messageSeq = 0
 
   const conversations = useAiConversationsStore()
-
-  const latestDigest = ref<AiDigest | null>(null)
-  const loadingDigest = ref(false)
-  const runningDigest = ref(false)
-  const digestError = ref<string | null>(null)
 
   async function loadSettings() {
     loadingSettings.value = true
@@ -273,6 +261,7 @@ export const useAiStore = defineStore('ai', () => {
           deviceId: context.deviceId ?? undefined,
           monitorId: context.monitorId ?? undefined,
           alertId: context.alertId ?? undefined,
+          ruleId: context.ruleId ?? undefined,
           mentions,
           summary: history.summary,
           contextHint: history.contextHint,
@@ -419,35 +408,6 @@ export const useAiStore = defineStore('ai', () => {
     if (!tool || tool.status !== 'awaiting') return
     tool.status = 'cancelled'
     void conversations.persist(messages.value)
-  }
-
-  async function loadLatestDigest() {
-    loadingDigest.value = true
-    digestError.value = null
-    try {
-      latestDigest.value = await apiService.get<AiDigest | null>('/ai/digest/latest')
-    } catch (err: unknown) {
-      digestError.value = errorMessage(err, 'Falha ao carregar o resumo da rede')
-    } finally {
-      loadingDigest.value = false
-    }
-  }
-
-  /** Gera o resumo da rede agora (ação explícita do usuário). */
-  async function runDigest() {
-    runningDigest.value = true
-    digestError.value = null
-    try {
-      latestDigest.value = await apiService.post<AiDigest>(
-        '/ai/digest/run',
-        {},
-        { timeoutMs: DIGEST_REQUEST_TIMEOUT_MS }
-      )
-    } catch (err: unknown) {
-      digestError.value = errorMessage(err, 'Falha ao gerar o resumo da rede')
-    } finally {
-      runningDigest.value = false
-    }
   }
 
   function toggleDrawer() {
@@ -692,12 +652,6 @@ export const useAiStore = defineStore('ai', () => {
     askAbout,
     confirmTool,
     cancelTool,
-    latestDigest,
-    loadingDigest,
-    runningDigest,
-    digestError,
-    loadLatestDigest,
-    runDigest,
     toggleDrawer,
   }
 })

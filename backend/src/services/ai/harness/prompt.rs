@@ -7,7 +7,7 @@ use sea_orm::{ConnectionTrait, EntityTrait};
 use super::tools::{ToolPolicy, ToolRegistry};
 use crate::{
     dtos::ai::{AiMention, AiMentionKind},
-    models::{alert_events, devices, monitors},
+    models::{alert_events, alert_rules, devices, monitors},
     services::ai::{
         mentions,
         settings::{AiContainerActionMode, AiSettings},
@@ -20,6 +20,7 @@ pub struct ChatContext {
     pub device_id: Option<i64>,
     pub monitor_id: Option<i64>,
     pub alert_id: Option<i64>,
+    pub rule_id: Option<i64>,
     /// Marcados com `@` na última pergunta — o alvo explícito dela.
     pub mentions: Vec<AiMention>,
 }
@@ -29,19 +30,19 @@ const METHOD: &str = "COMO TRABALHAR:
 2. Consulte o mínimo que responde, e peça na mesma rodada tudo o que já sabe que vai precisar — cada rodada reenvia a conversa inteira. \
 Um aparelho: get_device_detail. Alertas: get_alerts. Visão geral da rede: get_system_summary.
 3. Fundamente o diagnóstico nos dados, nunca em suposição. Vários alertas juntos: a causa raiz pela topologia vem antes de tratar um a um. \
-De onde vem um alerta (regra, alvo, fatos que casaram): explain_alert.
+De onde vem um alerta (regra, alvo, fatos que casaram): explain_alert. Se uma regra for ruidosa, oriente ajustes (duração/janela/flapping) ou desativação antes de excluir.
 4. Logs, mensagens de alertas e falhas de checagem: grep — meça antes de ler ('count' ou 'sources'), depois 'lines' com device/hours \
 estreitos; regex para alternativas ('link (down|flap)'), exclude para tirar ruído.
 5. Gráficos aparecem para o usuário automaticamente — não os reproduza em texto nem em tabela.
 6. Marcados com @ são o alvo da pergunta: use-os direto. Se não estiver claro de qual dispositivo ou recurso vem a informação \
 (a conversa era sobre um equipamento e a pergunta mudou de assunto — ex: era a borda, agora é a bateria ou o MPPT —, ou o nome é ambíguo), \
 não assuma o assunto anterior nem o contexto da tela: chame ask_user com os candidatos como opções, antes de consultar outra coisa.
-7. Dúvidas sobre configurar ou usar o NetMonitor: search_system_docs.";
+7. Dúvidas sobre configurar ou usar o NetMonitor ou regras de alerta: search_system_docs ou get_alert_rules_guide.";
 
 const ACTIVE_TOOLS: &str =
     "8. Testes ativos (ping, traceroute, portas, DNS, playbooks) confirmam o estado de agora.";
 
-const ACTIONS: &str = "9. Ações (reconhecer/silenciar alerta, janela de manutenção, criar monitor, criar/excluir regra de alerta) só são \
+const ACTIONS: &str = "9. Ações (reconhecer/silenciar alerta, janela de manutenção, criar monitor, criar/ativar/desativar/excluir regra de alerta) só são \
 executadas depois que o usuário confirma no chat. Proponha a ação quando ela resolver o pedido; ao receber \
 'awaiting_user_confirmation', diga em uma frase o que foi proposto e não repita a chamada.";
 
@@ -132,12 +133,17 @@ async fn monitor_section<C: ConnectionTrait>(db: &C, id: i64) -> Option<String> 
 
 async fn alert_section<C: ConnectionTrait>(db: &C, id: i64) -> Option<String> {
     let alert = alert_events::Entity::find_by_id(id).one(db).await.ok()??;
+    let rule_hint = alert.alert_rule_id.map_or_else(
+        || "sem regra vinculada (alerta de sistema/baseline)".to_string(),
+        |rule_id| format!("regra #{rule_id}"),
+    );
     Some(format!(
-        "- Alerta #{}: [{}] {} — status {}, desde {}{}{}",
+        "- Alerta #{}: [{}] {} — status {}, {}, desde {}{}{}. Dica: use explain_alert alert_id={} para diagnosticar a regra, alvos e fatos que dispararam este alerta.",
         alert.id,
         alert.severity,
         alert.message.as_deref().unwrap_or("sem mensagem"),
         alert.status,
+        rule_hint,
         alert.started_at.to_rfc3339(),
         alert
             .device_id
@@ -146,7 +152,25 @@ async fn alert_section<C: ConnectionTrait>(db: &C, id: i64) -> Option<String> {
         alert
             .monitor_id
             .map(|monitor| format!(", monitor #{monitor}"))
-            .unwrap_or_default()
+            .unwrap_or_default(),
+        alert.id
+    ))
+}
+
+async fn rule_section<C: ConnectionTrait>(db: &C, id: i64) -> Option<String> {
+    let rule = alert_rules::Entity::find_by_id(id).one(db).await.ok()??;
+    let value_str = match &rule.condition["value"] {
+        serde_json::Value::String(text) => format!("\"{text}\""),
+        other => other.to_string(),
+    };
+    Some(format!(
+        "- Regra de alerta #{}: '{}' [{}] — condição: {} {} {value_str}, ativa: {}. Dica: use list_alert_rules para listar regras ou toggle_alert_rule / delete_alert_rule se o usuário desejar alterá-la.",
+        rule.id,
+        rule.name,
+        rule.severity,
+        rule.condition["field"].as_str().unwrap_or("?"),
+        rule.condition["operator"].as_str().unwrap_or("?"),
+        rule.enabled
     ))
 }
 
@@ -180,6 +204,9 @@ async fn context_sections<C: ConnectionTrait>(db: &C, context: &ChatContext) -> 
     let mut sections = Vec::new();
     if let Some(id) = context.alert_id {
         sections.extend(alert_section(db, id).await);
+    }
+    if let Some(id) = context.rule_id {
+        sections.extend(rule_section(db, id).await);
     }
     if let Some(id) = context.monitor_id {
         sections.extend(monitor_section(db, id).await);

@@ -4,6 +4,7 @@ export type OllamaRecommendedModel = {
   name: string
   description: string
   parameterSize: string
+  contextWindow: string
   isInstalled: boolean
   toolCallingOptimized: boolean
 }

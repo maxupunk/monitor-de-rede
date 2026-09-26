@@ -175,6 +175,8 @@ const HINTS: &[(ToolGroup, &[&str])] = &[
     (
         ToolGroup::AlertRules,
         &[
+            "alerta",
+            "alert",
             "regra",
             "limiar",
             "threshold",
@@ -184,6 +186,10 @@ const HINTS: &[(ToolGroup, &[&str])] = &[
             "apagar",
             "exclu",
             "remov",
+            "desativ",
+            "ativar",
+            "notifica",
+            "onde",
         ],
     ),
 ];
@@ -207,6 +213,10 @@ pub fn preselect_groups(question: &str, mentions: &[AiMention]) -> ToolGroups {
     let joined = words.join(" ");
     if joined.contains("por que") || joined.contains("linha do tempo") {
         groups.insert(ToolGroup::Analysis);
+    }
+    if joined.contains("de onde") || joined.contains("qual a causa") {
+        groups.insert(ToolGroup::Analysis);
+        groups.insert(ToolGroup::AlertRules);
     }
     for mention in mentions {
         match (mention.kind, mention.id.as_str()) {
@@ -409,6 +419,14 @@ mod tests {
         );
 
         assert!(preselect_groups("Por que a borda caiu?", &[]).contains(&ToolGroup::Analysis));
+        assert!(
+            preselect_groups("Investigue o alerta #12: qual a causa provável?", &[])
+                .contains(&ToolGroup::AlertRules)
+        );
+        assert!(
+            preselect_groups("Crie uma regra de alerta para a latência", &[])
+                .contains(&ToolGroup::AlertRules)
+        );
         assert!(preselect_groups("o agente da filial está conectado?", &[])
             .contains(&ToolGroup::Platform));
         assert!(preselect_groups("quais dispositivos estão offline?", &[]).is_empty());

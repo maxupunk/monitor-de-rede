@@ -20,6 +20,7 @@ const FAMILIES: &[(&str, u64)] = &[
     ("kimi", 131_072),
     ("glm", 131_072),
     ("deepseek", 131_072),
+    ("qwen3.8", 262_144),
     ("qwen3", 131_072),
     ("qwen2.5", 32_768),
     ("qwen", 32_768),
@@ -30,10 +31,13 @@ const FAMILIES: &[(&str, u64)] = &[
     ("mistral-small", 131_072),
     ("mistral-large", 131_072),
     ("mistral", 32_768),
+    ("gemma4", 131_072),
+    ("gemma-4", 131_072),
     ("gemma3", 131_072),
     ("gemma-3", 131_072),
     ("gemma", 8_192),
     ("phi", 16_384),
+    ("granite", 131_072),
     ("grok", 131_072),
     ("minimax", 1_000_000),
 ];
@@ -59,10 +63,14 @@ mod tests {
         assert_eq!(estimate("openai/gpt-4o-mini"), 128_000);
         assert_eq!(estimate("meta-llama/llama-3.3-70b-instruct:free"), 131_072);
         assert_eq!(estimate("llama3.2"), 131_072);
+        assert_eq!(estimate("gemma4:e4b"), 131_072);
+        assert_eq!(estimate("qwen3.8:27b"), 262_144);
+        assert_eq!(estimate("granite4.2:latest"), 131_072);
     }
 
     #[test]
     fn familia_especifica_vence_a_generica() {
+        assert_eq!(estimate("qwen3.8:27b"), 262_144);
         assert_eq!(estimate("qwen3:8b"), 131_072);
         assert_eq!(estimate("qwen2.5-coder"), 32_768);
         assert_eq!(estimate("mistralai/mistral-small-3.2"), 131_072);

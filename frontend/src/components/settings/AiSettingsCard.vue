@@ -74,12 +74,10 @@
         <!-- Campos: OpenCode Go / Zen -->
         <template v-if="form.activeDriver === 'opencode'">
           <v-col cols="12">
-            <div
-              class="d-flex align-center justify-space-between pa-2 px-3 rounded-lg bg-surface-variant border mb-2"
-            >
+            <div class="d-flex align-center justify-space-between pa-2 px-3 rounded-lg border mb-2">
               <div class="d-flex align-center ga-2">
                 <v-icon color="primary" size="18">mdi-link-variant</v-icon>
-                <span class="text-caption text-medium-emphasis">Endpoint Oficial Fixo:</span>
+                <span class="text-caption font-weight-medium">Endpoint Oficial Fixo:</span>
                 <code class="text-caption font-mono font-weight-bold text-primary"
                   >https://opencode.ai/zen/v1</code
                 >
@@ -341,7 +339,7 @@
           <v-col cols="12" md="5">
             <v-combobox
               v-model="form.ollamaModel"
-              label="Modelo Ollama"
+              label="Modelo Ollama Ativo (em uso)"
               :items="ollamaModelOptions"
               item-title="id"
               item-value="id"
@@ -403,6 +401,16 @@
                       Recomendado
                     </v-chip>
                     <v-chip
+                      v-if="item.contextWindow"
+                      color="info"
+                      size="x-small"
+                      variant="tonal"
+                      class="ms-1"
+                      title="Janela de contexto arquitetural"
+                    >
+                      {{ item.contextWindow }}
+                    </v-chip>
+                    <v-chip
                       v-if="item.supportsTools"
                       color="warning"
                       size="x-small"
@@ -428,6 +436,168 @@
                 Buscar na biblioteca de modelos Ollama
               </v-btn>
             </div>
+          </v-col>
+
+          <!-- Campo Exclusivo para Baixar e Instalar Modelos no Ollama -->
+          <v-col cols="12">
+            <v-card variant="outlined" class="pa-4 rounded-lg">
+              <div class="d-flex align-center justify-space-between flex-wrap ga-2 mb-3">
+                <div class="d-flex align-center ga-2">
+                  <v-icon color="primary" size="20">mdi-download-box-outline</v-icon>
+                  <span class="text-subtitle-2 font-weight-bold">
+                    Instalar Modelo no Ollama (Download Local)
+                  </span>
+                </div>
+                <span class="text-caption">
+                  Campo exclusivo para baixar e instalar modelos no servidor Ollama
+                </span>
+              </div>
+
+              <v-row dense align="center">
+                <v-col cols="12" sm="8" md="9">
+                  <v-combobox
+                    v-model="modelToInstall"
+                    :items="aiStore.recommendedOllamaModels"
+                    item-title="name"
+                    item-value="name"
+                    :return-object="false"
+                    :custom-filter="customModelFilter"
+                    label="Modelo para baixar e instalar no Ollama"
+                    placeholder="Selecione um recomendado ou digite qualquer tag (ex: qwen3.8:27b, mistral)..."
+                    variant="outlined"
+                    density="compact"
+                    hide-details="auto"
+                    prepend-inner-icon="mdi-cloud-download-outline"
+                    clearable
+                    :disabled="!!aiStore.pullingModelName"
+                    @update:model-value="(val) => (modelToInstall = extractModelId(val))"
+                    @keydown.enter.prevent="handleInstallFromField"
+                  >
+                    <template #item="{ item, props: itemProps }">
+                      <v-list-item
+                        v-bind="itemProps"
+                        :title="item.name"
+                        :subtitle="item.description"
+                      >
+                        <template #append>
+                          <div class="d-flex align-center ga-1">
+                            <v-chip
+                              v-if="item.parameterSize"
+                              size="x-small"
+                              variant="tonal"
+                              color="secondary"
+                            >
+                              {{ item.parameterSize }}
+                            </v-chip>
+                            <v-chip
+                              v-if="item.contextWindow"
+                              size="x-small"
+                              variant="tonal"
+                              color="info"
+                              title="Janela de contexto suportada pelo modelo"
+                            >
+                              {{ item.contextWindow }}
+                            </v-chip>
+                            <v-chip
+                              v-if="item.toolCallingOptimized"
+                              size="x-small"
+                              color="warning"
+                              variant="tonal"
+                              title="Otimizado para execução de ferramentas e diagnósticos"
+                            >
+                              <v-icon start size="10">mdi-tools</v-icon>
+                              Tools
+                            </v-chip>
+                            <v-chip
+                              v-if="item.isInstalled"
+                              size="x-small"
+                              color="success"
+                              variant="tonal"
+                            >
+                              Instalado
+                            </v-chip>
+                            <v-chip v-else size="x-small" color="primary" variant="outlined">
+                              Disponível
+                            </v-chip>
+                          </div>
+                        </template>
+                      </v-list-item>
+                    </template>
+                  </v-combobox>
+                </v-col>
+
+                <v-col cols="12" sm="4" md="3">
+                  <v-btn
+                    color="primary"
+                    variant="flat"
+                    block
+                    class="text-none font-weight-medium"
+                    height="40"
+                    :loading="aiStore.pullingModelName === cleanModelToInstall"
+                    :disabled="!cleanModelToInstall || !!aiStore.pullingModelName"
+                    @click="handleInstallFromField"
+                  >
+                    <v-icon start size="16">mdi-download</v-icon>
+                    {{ isModelToInstallInstalled ? 'Reinstalar' : 'Baixar Modelo' }}
+                  </v-btn>
+                </v-col>
+              </v-row>
+
+              <div class="d-flex align-center justify-space-between mt-3 flex-wrap ga-2">
+                <span class="text-caption">
+                  💡 Selecione na lista com especificações e contexto já testados ou digite qualquer
+                  tag do repositório (ex: <code>qwen3.8:27b</code>, <code>mistral:7b</code>).
+                </span>
+                <div v-if="cleanModelToInstall" class="d-flex align-center ga-1">
+                  <v-chip
+                    v-if="selectedRecommendedMeta?.parameterSize"
+                    size="x-small"
+                    variant="tonal"
+                    color="secondary"
+                  >
+                    {{ selectedRecommendedMeta.parameterSize }}
+                  </v-chip>
+                  <v-chip
+                    v-if="selectedRecommendedMeta?.contextWindow"
+                    size="x-small"
+                    variant="tonal"
+                    color="info"
+                    title="Janela de contexto arquitetural"
+                  >
+                    {{ selectedRecommendedMeta.contextWindow }}
+                  </v-chip>
+                  <v-chip
+                    v-if="selectedRecommendedMeta?.toolCallingOptimized"
+                    size="x-small"
+                    color="warning"
+                    variant="tonal"
+                    title="Otimizado para Function Calling"
+                  >
+                    <v-icon start size="10">mdi-tools</v-icon>
+                    Tools
+                  </v-chip>
+                  <v-chip
+                    v-if="isModelToInstallInstalled"
+                    size="x-small"
+                    color="success"
+                    variant="tonal"
+                    class="font-weight-medium"
+                  >
+                    <v-icon start size="12">mdi-check</v-icon>
+                    Já instalado
+                  </v-chip>
+                  <v-chip
+                    v-else
+                    size="x-small"
+                    color="primary"
+                    variant="outlined"
+                    class="font-weight-medium"
+                  >
+                    Pronto para baixar
+                  </v-chip>
+                </div>
+              </div>
+            </v-card>
           </v-col>
 
           <!-- Alerta se Ollama estiver offline / inacessível -->
@@ -491,7 +661,7 @@
 
           <!-- Card de Progresso de Instalação de Modelo -->
           <v-col v-if="aiStore.pullingModelName" cols="12">
-            <v-card variant="outlined" color="primary" class="pa-3 mb-3 bg-surface-variant">
+            <v-card variant="outlined" color="primary" class="pa-3 mb-3">
               <div class="d-flex align-center justify-space-between mb-2">
                 <div class="d-flex align-center ga-2">
                   <v-progress-circular indeterminate color="primary" size="20" width="2" />
@@ -518,9 +688,7 @@
                 class="mb-2"
               />
 
-              <div
-                class="d-flex align-center justify-space-between text-caption text-medium-emphasis"
-              >
+              <div class="d-flex align-center justify-space-between text-caption">
                 <span>{{
                   aiStore.pullProgress?.status || 'Processando download no Ollama...'
                 }}</span>
@@ -579,124 +747,6 @@
                 </v-btn>
               </div>
             </v-alert>
-          </v-col>
-
-          <!-- Seção de Modelos Recomendados com Ações de Instalação e Seleção -->
-          <v-col cols="12">
-            <div class="d-flex align-center justify-space-between mb-2">
-              <span class="text-subtitle-2 font-weight-bold text-medium-emphasis">
-                <v-icon size="16" start color="primary">mdi-star-outline</v-icon>
-                Modelos Recomendados para o NetMonitor
-              </span>
-              <div class="d-flex align-center ga-1">
-                <v-btn
-                  variant="tonal"
-                  size="x-small"
-                  color="primary"
-                  prepend-icon="mdi-magnify"
-                  @click="openModelSearchDialog"
-                >
-                  Buscar no Catálogo
-                </v-btn>
-                <v-btn
-                  variant="text"
-                  size="x-small"
-                  color="primary"
-                  @click="showRecommendedDetails = !showRecommendedDetails"
-                >
-                  {{ showRecommendedDetails ? 'Ocultar detalhes' : 'Ver detalhes e recursos' }}
-                  <v-icon end size="14">
-                    {{ showRecommendedDetails ? 'mdi-chevron-up' : 'mdi-chevron-down' }}
-                  </v-icon>
-                </v-btn>
-              </div>
-            </div>
-
-            <v-row dense>
-              <v-col
-                v-for="rec in aiStore.recommendedOllamaModels"
-                :key="rec.name"
-                cols="12"
-                :md="showRecommendedDetails ? 6 : 4"
-              >
-                <v-card
-                  variant="outlined"
-                  class="pa-2 fill-height d-flex flex-column"
-                  :color="isModelActive(rec.name) ? 'primary' : undefined"
-                >
-                  <div class="d-flex align-center justify-space-between mb-1">
-                    <span class="font-weight-bold text-body-2 text-truncate" :title="rec.name">
-                      {{ rec.name }}
-                    </span>
-                    <div class="d-flex align-center ga-1">
-                      <v-chip size="x-small" variant="tonal" color="default">
-                        {{ rec.parameterSize }}
-                      </v-chip>
-                      <v-chip
-                        v-if="rec.toolCallingOptimized"
-                        size="x-small"
-                        color="warning"
-                        variant="tonal"
-                        title="Otimizado para execução de ferramentas e diagnósticos"
-                      >
-                        <v-icon start size="12">mdi-tools</v-icon>
-                        Tool Use
-                      </v-chip>
-                    </div>
-                  </div>
-
-                  <p
-                    v-if="showRecommendedDetails"
-                    class="text-caption text-medium-emphasis mb-2 flex-grow-1"
-                  >
-                    {{ rec.description }}
-                  </p>
-
-                  <div class="d-flex align-center justify-space-between mt-auto pt-1">
-                    <v-chip v-if="rec.isInstalled" size="x-small" color="success" variant="tonal">
-                      <v-icon start size="12">mdi-check</v-icon>
-                      Instalado
-                    </v-chip>
-                    <span v-else class="text-caption text-disabled">Não instalado</span>
-
-                    <div class="d-flex ga-1">
-                      <template v-if="rec.isInstalled">
-                        <v-chip
-                          v-if="isModelActive(rec.name)"
-                          size="x-small"
-                          color="primary"
-                          variant="flat"
-                        >
-                          Em uso
-                        </v-chip>
-                        <v-btn
-                          v-else
-                          size="x-small"
-                          variant="outlined"
-                          color="primary"
-                          @click="selectModel(rec.name)"
-                        >
-                          Selecionar
-                        </v-btn>
-                      </template>
-                      <template v-else>
-                        <v-btn
-                          size="x-small"
-                          variant="flat"
-                          color="primary"
-                          prepend-icon="mdi-download"
-                          :loading="aiStore.pullingModelName === rec.name"
-                          :disabled="!!aiStore.pullingModelName"
-                          @click="handleInstallModel(rec.name)"
-                        >
-                          Instalar
-                        </v-btn>
-                      </template>
-                    </div>
-                  </div>
-                </v-card>
-              </v-col>
-            </v-row>
           </v-col>
         </template>
 
@@ -795,6 +845,7 @@ import { formatDecimalBytes } from '@/utils/formatters'
 import AiModelSearchDialog from './AiModelSearchDialog.vue'
 import AiAutomationSettings from './AiAutomationSettings.vue'
 import type { AiProactiveSettings } from '@/bindings/AiProactiveSettings'
+import type { OllamaRecommendedModel } from '@/bindings/OllamaRecommendedModel'
 
 const emit = defineEmits<{
   (e: 'saved', message: string, color?: string): void
@@ -802,7 +853,6 @@ const emit = defineEmits<{
 
 const aiStore = useAiStore()
 const showApiKey = ref(false)
-const showRecommendedDetails = ref(false)
 const showModelSearchDialog = ref(false)
 
 const driverOptions = [
@@ -867,6 +917,7 @@ interface OllamaOption {
   size?: string | null
   description?: string | null
   supportsTools?: boolean
+  contextWindow?: string | null
 }
 
 // Extrai string pura (slug ou nome) de qualquer modelo recebido (seja string ou objeto com id/name/value)
@@ -892,12 +943,16 @@ function extractModelId(val: unknown): string {
 function customModelFilter(value: string, query: string, item?: any): boolean {
   if (!query) return true
   const q = query.trim().toLowerCase()
-  const raw = item?.raw
+  const raw = item?.raw || item
   if (!raw) return (value || '').toLowerCase().includes(q)
   const id = (raw.id || raw.name || '').toLowerCase()
   const name = (raw.name || '').toLowerCase()
   const desc = (raw.description || '').toLowerCase()
-  return id.includes(q) || name.includes(q) || desc.includes(q)
+  const ctx = (raw.contextWindow || '').toLowerCase()
+  const param = (raw.parameterSize || '').toLowerCase()
+  return (
+    id.includes(q) || name.includes(q) || desc.includes(q) || ctx.includes(q) || param.includes(q)
+  )
 }
 
 const openRouterModelOptions = computed<ModelOption[]>(() => {
@@ -1061,6 +1116,7 @@ const ollamaModelOptions = computed<OllamaOption[]>(() => {
     if (existing) {
       existing.isRecommended = true
       existing.supportsTools = rec.toolCallingOptimized
+      existing.contextWindow = rec.contextWindow
       if (rec.description) existing.description = rec.description
     } else {
       map.set(rec.name, {
@@ -1069,6 +1125,7 @@ const ollamaModelOptions = computed<OllamaOption[]>(() => {
         isInstalled: rec.isInstalled,
         isRecommended: true,
         supportsTools: rec.toolCallingOptimized,
+        contextWindow: rec.contextWindow,
         description: rec.description,
       })
     }
@@ -1158,12 +1215,37 @@ const shouldShowInstallAlert = computed(() => {
   return !isCurrentModelInstalled.value
 })
 
-function isModelActive(modelName: string): boolean {
-  return form.ollamaModel?.trim().toLowerCase() === modelName.trim().toLowerCase()
-}
+const modelToInstall = ref<string>('')
 
-function selectModel(modelName: string) {
-  form.ollamaModel = modelName
+const cleanModelToInstall = computed<string>(() => {
+  return extractModelId(modelToInstall.value)
+})
+
+const isModelToInstallInstalled = computed<boolean>(() => {
+  if (!cleanModelToInstall.value) return false
+  return isModelInstalled(cleanModelToInstall.value)
+})
+
+const selectedRecommendedMeta = computed<OllamaRecommendedModel | null>(() => {
+  if (!cleanModelToInstall.value) return null
+  const target = cleanModelToInstall.value.toLowerCase()
+  return (
+    aiStore.recommendedOllamaModels.find((m) => {
+      const n = m.name.toLowerCase()
+      return (
+        n === target ||
+        n === `${target}:latest` ||
+        (target.endsWith(':latest') && n === target.slice(0, -7)) ||
+        n.startsWith(`${target}:`)
+      )
+    }) ?? null
+  )
+})
+
+async function handleInstallFromField() {
+  const target = cleanModelToInstall.value
+  if (!target) return
+  await handleInstallModel(target)
 }
 
 async function refreshOllamaModels() {

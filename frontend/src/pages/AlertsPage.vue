@@ -30,6 +30,13 @@
           <span class="hidden-sm-and-down">Nova Regra de Alerta</span>
           <span class="hidden-md-and-up">Nova</span>
         </v-btn>
+        <AiAskButton
+          variant="tonal"
+          label="Ajuda da IA"
+          tooltip="Pedir ajuda ao Assistente IA para criar regras ou analisar alertas"
+          prompt="Como funcionam as regras de alerta no NetMonitor e como você pode me ajudar a criá-las ou diagnosticar alertas?"
+          :context="{}"
+        />
       </template>
     </PageHeader>
 
@@ -174,6 +181,7 @@ import ResolvedAlertsTab from '@/components/alerts/ResolvedAlertsTab.vue'
 import AlertRulesTab from '@/components/alerts/AlertRulesTab.vue'
 import AlertHistoryTab from '@/components/alerts/AlertHistoryTab.vue'
 import PageHeader from '@/components/PageHeader.vue'
+import AiAskButton from '@/components/ai/AiAskButton.vue'
 import { confirm } from '@/composables/useConfirm'
 
 const alertsStore = useAlertsStore()

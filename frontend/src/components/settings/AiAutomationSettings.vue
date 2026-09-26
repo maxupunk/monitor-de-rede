@@ -116,8 +116,6 @@
         />
       </v-col>
     </v-row>
-
-    <AiDigestPanel class="mt-3" />
   </div>
 </template>
 
@@ -127,7 +125,6 @@ import type { AiContainerActionMode } from '@/bindings/AiContainerActionMode'
 import type { AiDigestSchedule } from '@/bindings/AiDigestSchedule'
 import type { AiIncidentSeverity } from '@/bindings/AiIncidentSeverity'
 import type { AiProactiveSettings } from '@/bindings/AiProactiveSettings'
-import AiDigestPanel from './AiDigestPanel.vue'
 
 const allowActiveTools = defineModel<boolean>('allowActiveTools', { required: true })
 const requireToolConfirmation = defineModel<boolean>('requireToolConfirmation', {

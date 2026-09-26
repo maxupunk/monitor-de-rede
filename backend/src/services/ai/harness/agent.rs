@@ -20,7 +20,7 @@ use super::{
         prune_tool_results, small_window_notice, summarize, worth_folding, ContextBudget,
     },
     prompt::{build_small_talk_prompt, build_system_prompt, build_turn_context, ChatContext},
-    tools::{ToolGroups, ToolPolicy, ToolRegistry, LOAD_TOOLS},
+    tools::{ToolGroup, ToolGroups, ToolPolicy, ToolRegistry, LOAD_TOOLS},
     turn::{compact_for_model, is_small_talk, preselect_groups, requested_groups},
 };
 use crate::{
@@ -202,6 +202,7 @@ impl AgentRequest {
                 device_id: request.device_id,
                 monitor_id: request.monitor_id,
                 alert_id: request.alert_id,
+                rule_id: request.rule_id,
                 mentions: mentions::sanitize(request.mentions),
             },
             policy: ToolPolicy::from_settings(settings),
@@ -492,7 +493,12 @@ pub async fn run_agent_loop(
                 let question = history
                     .last()
                     .map_or("", |message| message.content.as_str());
-                preselect_groups(question, &request.context.mentions)
+                let mut groups = preselect_groups(question, &request.context.mentions);
+                if request.context.alert_id.is_some() || request.context.rule_id.is_some() {
+                    groups.insert(ToolGroup::AlertRules);
+                    groups.insert(ToolGroup::Analysis);
+                }
+                groups
                     .iter()
                     .filter(|group| available.contains(group))
                     .collect()

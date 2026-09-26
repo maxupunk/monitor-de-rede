@@ -173,7 +173,7 @@
                 variant="outlined"
                 class="pa-3 transition-swing"
                 :color="isItemActive(item.id) ? 'primary' : undefined"
-                :class="{ 'bg-surface-variant': isItemActive(item.id) }"
+                :class="{ 'border-primary': isItemActive(item.id) }"
               >
                 <div class="d-flex align-start justify-space-between ga-2">
                   <div class="flex-grow-1" style="min-width: 0">
@@ -211,12 +211,12 @@
 
                       <!-- Badge: Context Length -->
                       <v-chip
-                        v-if="item.contextLength"
+                        v-if="item.contextWindow || item.contextLength"
                         size="x-small"
-                        color="default"
+                        color="info"
                         variant="tonal"
                       >
-                        {{ formatContextLength(item.contextLength) }}
+                        {{ item.contextWindow || formatContextLength(item.contextLength) }}
                       </v-chip>
 
                       <!-- Badge para Ollama: Instalado ou Recomendado -->
@@ -339,6 +339,7 @@ interface UniversalModelItem {
   isFree: boolean
   description?: string | null
   contextLength?: number | bigint | null
+  contextWindow?: string | null
   supportsTools?: boolean | null
   isInstalled?: boolean
   isRecommended?: boolean
@@ -473,6 +474,7 @@ const rawModels = computed<UniversalModelItem[]>(() => {
       if (existing) {
         existing.isRecommended = true
         existing.supportsTools = rec.toolCallingOptimized
+        existing.contextWindow = rec.contextWindow
         if (rec.description) existing.description = rec.description
       } else {
         map.set(rec.name, {
@@ -482,6 +484,7 @@ const rawModels = computed<UniversalModelItem[]>(() => {
           isInstalled: rec.isInstalled,
           isRecommended: true,
           supportsTools: rec.toolCallingOptimized,
+          contextWindow: rec.contextWindow,
           description: rec.description,
         })
       }

@@ -279,6 +279,17 @@ async fn describe_target(ctx: &AppContext, scope_key: Option<&str>) -> AppResult
             }
             None => json!({ "kind": "vpn_peer", "id": id, "missing": true }),
         },
+        "device" => match devices::Entity::find_by_id(id).one(&ctx.db).await? {
+            Some(device) => json!({
+                "kind": "device",
+                "id": device.id,
+                "name": device.name,
+                "ip": device.ip_address,
+                "type": device.r#type,
+                "status": device.status,
+            }),
+            None => json!({ "kind": "device", "id": id, "missing": true }),
+        },
         other => json!({ "kind": other, "id": id }),
     })
 }
@@ -358,6 +369,37 @@ impl AiToolHandler for ExplainAlert {
             Some(device_id) => devices::Entity::find_by_id(device_id).one(&ctx.db).await?,
             None => None,
         };
+        let monitor = match event.monitor_id {
+            Some(monitor_id) => {
+                monitors::Entity::find_by_id(monitor_id)
+                    .one(&ctx.db)
+                    .await?
+            }
+            None => None,
+        };
+        let target = match describe_target(ctx, event.scope_key.as_deref()).await? {
+            Value::Null => match &monitor {
+                Some(m) => json!({
+                    "kind": "monitor",
+                    "id": m.id,
+                    "name": m.name,
+                    "type": m.r#type,
+                    "status": m.status,
+                    "interval_s": m.interval_seconds,
+                    "enabled": m.enabled,
+                }),
+                None => match &device {
+                    Some(d) => json!({
+                        "kind": "device",
+                        "id": d.id,
+                        "name": d.name,
+                        "ip": d.ip_address,
+                    }),
+                    None => Value::Null,
+                },
+            },
+            other => other,
+        };
         let other_open = match event.device_id {
             Some(device_id) => {
                 alert_events::Entity::find()
@@ -389,7 +431,14 @@ impl AiToolHandler for ExplainAlert {
                 "name": device.name,
                 "ip": device.ip_address,
             })),
-            "target": describe_target(ctx, event.scope_key.as_deref()).await?,
+            "monitor": monitor.map(|m| json!({
+                "id": m.id,
+                "name": m.name,
+                "type": m.r#type,
+                "status": m.status,
+                "interval_s": m.interval_seconds,
+            })),
+            "target": target,
             "facts": event.data,
             "other_open_alerts_on_device": other_open,
         })))
@@ -566,9 +615,35 @@ impl DeleteAlertRule {
         ctx: &AppContext,
         args: &ToolArgs,
     ) -> AppResult<Result<(alert_rules::Model, u64), ToolOutput>> {
-        let Some(id) = args.integer("rule_id") else {
+        let id_opt = match args.integer("rule_id") {
+            Some(id) => Some(id),
+            None => match args.integer("alert_id") {
+                Some(alert_id) => {
+                    let event = alert_events::Entity::find_by_id(alert_id)
+                        .one(&ctx.db)
+                        .await?;
+                    match event {
+                        Some(e) => match e.alert_rule_id {
+                            Some(r_id) => Some(r_id),
+                            None => {
+                                return Ok(Err(ToolOutput::not_found(format!(
+                                    "O alerta #{alert_id} não possui regra vinculada (alerta de sistema ou baseline)"
+                                ))))
+                            }
+                        },
+                        None => {
+                            return Ok(Err(ToolOutput::not_found(format!(
+                                "Alerta #{alert_id} não encontrado"
+                            ))))
+                        }
+                    }
+                }
+                None => None,
+            },
+        };
+        let Some(id) = id_opt else {
             return Ok(Err(ToolOutput::not_found(
-                "Informe rule_id (de list_alert_rules ou explain_alert)",
+                "Informe rule_id ou alert_id (de list_alert_rules ou explain_alert)",
             )));
         };
         match rules::find(ctx, id).await {
@@ -591,16 +666,16 @@ impl AiToolHandler for DeleteAlertRule {
     }
 
     fn description(&self) -> &'static str {
-        "Propõe excluir uma regra de alerta — o histórico de alertas dela é apagado junto. Para só parar os avisos, sugira desativar a regra em /alerts. O usuário confirma no chat antes de executar."
+        "Propõe excluir uma regra de alerta — o histórico de alertas dela é apagado junto. Para só parar os avisos, sugira desativar a regra com toggle_alert_rule ou em /alerts. O usuário confirma no chat antes de executar."
     }
 
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "rule_id": { "type": "integer", "description": "Id da regra (de list_alert_rules ou explain_alert)" }
-            },
-            "required": ["rule_id"]
+                "rule_id": { "type": "integer", "description": "Id da regra (de list_alert_rules ou explain_alert)" },
+                "alert_id": { "type": "integer", "description": "Opcional: id de um alerta cuja regra deve ser excluída" }
+            }
         })
     }
 
@@ -639,6 +714,126 @@ impl AiToolHandler for DeleteAlertRule {
             "done": true,
             "deleted_rule": rule.name,
             "deleted_alerts": events,
+        })))
+    }
+}
+
+pub struct ToggleAlertRule;
+
+impl ToggleAlertRule {
+    async fn load(
+        ctx: &AppContext,
+        args: &ToolArgs,
+    ) -> AppResult<Result<(alert_rules::Model, bool), ToolOutput>> {
+        let id_opt = match args.integer("rule_id") {
+            Some(id) => Some(id),
+            None => match args.integer("alert_id") {
+                Some(alert_id) => {
+                    let event = alert_events::Entity::find_by_id(alert_id)
+                        .one(&ctx.db)
+                        .await?;
+                    match event {
+                        Some(e) => match e.alert_rule_id {
+                            Some(r_id) => Some(r_id),
+                            None => {
+                                return Ok(Err(ToolOutput::not_found(format!(
+                                    "O alerta #{alert_id} não possui regra vinculada (alerta de sistema ou baseline)"
+                                ))))
+                            }
+                        },
+                        None => {
+                            return Ok(Err(ToolOutput::not_found(format!(
+                                "Alerta #{alert_id} não encontrado"
+                            ))))
+                        }
+                    }
+                }
+                None => None,
+            },
+        };
+        let Some(id) = id_opt else {
+            return Ok(Err(ToolOutput::not_found(
+                "Informe rule_id ou alert_id (de list_alert_rules ou explain_alert)",
+            )));
+        };
+        let Some(enabled) = args.raw("enabled").and_then(Value::as_bool) else {
+            return Ok(Err(ToolOutput::not_found(
+                "Informe enabled (true para ativar, false para desativar)",
+            )));
+        };
+        match rules::find(ctx, id).await {
+            Ok(rule) => Ok(Ok((rule, enabled))),
+            Err(AppError::NotFound(_)) => Ok(Err(ToolOutput::not_found(format!(
+                "Regra {id} não encontrada; use list_alert_rules"
+            )))),
+            Err(error) => Err(error),
+        }
+    }
+}
+
+#[async_trait]
+impl AiToolHandler for ToggleAlertRule {
+    fn name(&self) -> &'static str {
+        "toggle_alert_rule"
+    }
+
+    fn description(&self) -> &'static str {
+        "Propõe ativar ou desativar uma regra de alerta existente, preservando o histórico de alertas. O usuário confirma no chat antes de executar."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "rule_id": { "type": "integer", "description": "Id da regra (de list_alert_rules ou explain_alert)" },
+                "alert_id": { "type": "integer", "description": "Opcional: id de um alerta cuja regra deve ser ativada/desativada" },
+                "enabled": { "type": "boolean", "description": "true para ativar a regra, false para desativar" }
+            },
+            "required": ["enabled"]
+        })
+    }
+
+    fn kind(&self) -> ToolKind {
+        ToolKind::Action
+    }
+
+    fn group(&self) -> ToolGroup {
+        ToolGroup::AlertRules
+    }
+
+    async fn preview(&self, ctx: &AppContext, args: &ToolArgs) -> AppResult<String> {
+        let loaded = Self::load(ctx, args).await?;
+        Ok(preview_or_error(loaded.map(|(rule, enabled)| {
+            let action = if enabled { "Ativar" } else { "Desativar" };
+            format!(
+                "{action} a regra de alerta #{} '{}' ({}) mantendo o histórico de alertas.",
+                rule.id,
+                rule.name,
+                condition_text(&rule.condition)
+            )
+        })))
+    }
+
+    async fn execute(&self, ctx: &AppContext, args: &ToolArgs) -> AppResult<ToolOutput> {
+        let (rule, enabled) = match Self::load(ctx, args).await? {
+            Ok(loaded) => loaded,
+            Err(output) => return Ok(output),
+        };
+        let updated = rules::update(
+            ctx,
+            rule.id,
+            AlertRuleInput {
+                enabled: Some(enabled),
+                ..AlertRuleInput::default()
+            },
+            args.actor().clone(),
+        )
+        .await?;
+        Ok(ToolOutput::data(json!({
+            "done": true,
+            "rule_id": updated.id,
+            "name": updated.name,
+            "enabled": updated.enabled,
         })))
     }
 }

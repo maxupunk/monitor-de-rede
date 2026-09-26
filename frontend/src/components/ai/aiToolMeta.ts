@@ -126,6 +126,11 @@ const TOOL_META: Record<string, AiToolMeta> = {
     icon: 'mdi-bell-plus-outline',
     color: 'success',
   },
+  toggle_alert_rule: {
+    label: 'Ativar/Desativar Regra',
+    icon: 'mdi-toggle-switch',
+    color: 'warning',
+  },
   delete_alert_rule: {
     label: 'Excluir Regra de Alerta',
     icon: 'mdi-bell-remove-outline',
