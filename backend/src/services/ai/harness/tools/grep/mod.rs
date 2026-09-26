@@ -84,18 +84,18 @@ Prefira count/sources para medir antes de pedir linhas."
         json!({
             "type": "object",
             "properties": {
-                "pattern": { "type": "string", "description": "Texto a procurar, sem diferenciar maiúsculas. Vazio: tudo (útil com severity para contar erros)." },
-                "regex": { "type": "boolean", "description": "Trata pattern e exclude como regex (ex: 'link (down|flap)'). Padrão: texto literal." },
-                "exclude": { "type": "string", "description": "Descarta ocorrências que contêm isto (o -v do grep)" },
-                "source": { "type": "string", "enum": SOURCE_NAMES, "description": "Padrão: logs" },
+                "pattern": { "type": "string", "description": "Texto a procurar (vazio: tudo)" },
+                "regex": { "type": "boolean", "description": "Trata pattern/exclude como regex" },
+                "exclude": { "type": "string", "description": "Descarta linhas com este texto" },
+                "source": { "type": "string", "enum": SOURCE_NAMES, "description": "Fonte (padrão: logs)" },
                 "output": { "type": "string", "enum": ["auto", "count", "sources", "patterns", "lines"] },
                 "device": { "type": "string", "description": "Nome, IP ou id do dispositivo" },
                 "container": { "type": "string", "description": "Só docker: nome ou id do container" },
-                "host": { "type": "string", "description": "Só docker: servidor do container (agente remoto; padrão: a central)" },
-                "severity": { "type": "string", "description": "Só logs: severidade máxima (error, warning, notice, info ou 0-7)" },
+                "host": { "type": "string", "description": "Só docker: servidor (padrão: central)" },
+                "severity": { "type": "string", "description": "Só logs: severidade máxima (error, warning, info)" },
                 "hours": { "type": "integer", "description": "Janela em horas (1 a 168, padrão 24)" },
                 "max_lines": { "type": "integer", "description": "Linhas em 'lines'/'auto' (1 a 50, padrão 15)" },
-                "context": { "type": "integer", "description": "Só logs: linhas antes e depois de cada ocorrência (0 a 3, padrão 0)" }
+                "context": { "type": "integer", "description": "Só logs: linhas de contexto (0 a 3, padrão 0)" }
             }
         })
     }

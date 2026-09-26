@@ -36,7 +36,7 @@
 
     <v-list v-else density="compact" nav class="pa-0 conversation-scroll">
       <v-list-item
-        v-for="item in conversations.summaries"
+        v-for="item in sortedSummaries"
         :key="item.id"
         :title="item.title"
         :subtitle="formatRelativeTime(item.updatedAt)"
@@ -62,7 +62,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useAiStore } from '@/stores/ai'
 import { useAiConversationsStore } from '@/stores/aiConversations'
 import { formatRelativeTime } from '@/utils/formatters'
@@ -73,6 +73,14 @@ const emit = defineEmits<{
 
 const aiStore = useAiStore()
 const conversations = useAiConversationsStore()
+
+const sortedSummaries = computed(() => {
+  return [...conversations.summaries].sort((a, b) => {
+    const timeA = new Date(a.updatedAt).getTime()
+    const timeB = new Date(b.updatedAt).getTime()
+    return timeB - timeA
+  })
+})
 
 // Sempre do servidor ao abrir: pode ter conversa nova vinda de outro computador.
 onMounted(() => void conversations.load())

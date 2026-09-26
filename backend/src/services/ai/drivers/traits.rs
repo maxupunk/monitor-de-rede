@@ -161,6 +161,8 @@ pub struct AiChatChunk {
     /// Modelo que de fato respondeu, quando o provedor informa — um roteador
     /// (`openrouter/free`) escolhe um diferente do configurado.
     pub model: Option<String>,
+    /// Aviso emitido pelo driver (ex: fallback automático de modelo após 429).
+    pub notice: Option<String>,
 }
 
 pub type AiChunkStream = Pin<Box<dyn Stream<Item = AppResult<AiChatChunk>> + Send>>;

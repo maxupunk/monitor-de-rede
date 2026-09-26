@@ -220,6 +220,7 @@ pub async fn update<C: ConnectionTrait>(
     active.title = Set(valid.title);
     active.messages = Set(valid.messages);
     active.message_count = Set(valid.message_count);
+    active.updated_at = Set(chrono::Utc::now().into());
     let row = active.update(db).await?;
     Ok(summary(&row))
 }

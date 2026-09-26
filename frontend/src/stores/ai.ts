@@ -55,6 +55,7 @@ export interface AiSettings {
   openrouterModel?: string | null
   ollamaBaseUrl?: string | null
   ollamaModel?: string | null
+  ollamaNumCtx?: number | null
   allowActiveTools: boolean
   requireToolConfirmation: boolean
   allowActions: boolean

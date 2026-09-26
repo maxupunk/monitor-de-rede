@@ -17,6 +17,10 @@ export type AiSettings = {
   ollamaBaseUrl: string | null
   ollamaModel: string | null
   /**
+   * Janela de contexto solicitada ao Ollama (num_ctx), padrão 16.384 tokens.
+   */
+  ollamaNumCtx: number | null
+  /**
    * Permite executar ferramentas ativas (ping, traceroute, scan de portas)
    */
   allowActiveTools: boolean

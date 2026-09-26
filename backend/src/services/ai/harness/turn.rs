@@ -30,7 +30,7 @@ const SMALL_TALK_WORDS: &[&str] = &[
 const MAX_SMALL_TALK_WORDS: usize = 6;
 
 /// Resultado de ferramenta devolvido à IA, em caracteres.
-pub const MAX_TOOL_RESULT_CHARS: usize = 8_000;
+pub const MAX_TOOL_RESULT_CHARS: usize = 4_000;
 
 /// Minúsculas sem acento, para comparar palavras.
 fn fold(text: &str) -> String {

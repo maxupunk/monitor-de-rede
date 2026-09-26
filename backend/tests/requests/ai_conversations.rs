@@ -42,6 +42,15 @@ async fn ciclo_completo_da_conversa_salva() {
         assert_eq!(criada["title"], "Ping no gateway");
         assert_eq!(criada["messageCount"], 1);
 
+        let criada2 = request
+            .post("/api/ai/conversations")
+            .add_header(h.clone(), v.clone())
+            .json(&corpo("Segunda conversa", &["segunda"]))
+            .await;
+        let id2 = criada2.json::<Value>()["id"].as_i64().unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_millis(15)).await;
+
         let atualizada = request
             .put(&format!("/api/ai/conversations/{id}"))
             .add_header(h.clone(), v.clone())
@@ -57,7 +66,12 @@ async fn ciclo_completo_da_conversa_salva() {
             .add_header(h.clone(), v.clone())
             .await
             .json();
-        assert_eq!(lista.as_array().unwrap().len(), 1);
+        assert_eq!(lista.as_array().unwrap().len(), 2);
+        assert_eq!(
+            lista[0]["id"], id,
+            "a conversa atualizada mais recentemente deve vir no topo"
+        );
+        assert_eq!(lista[1]["id"], id2);
         assert_eq!(lista[0]["messageCount"], 2);
         assert!(
             lista[0].get("messages").is_none(),

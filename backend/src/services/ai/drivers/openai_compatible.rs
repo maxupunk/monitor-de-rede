@@ -32,6 +32,7 @@ pub struct OpenAiCompatibleDriver {
     client: reqwest::Client,
     /// Onde o provedor informa a janela de contexto dos modelos.
     window_lookup: Option<Arc<dyn WindowLookup>>,
+    num_ctx: Option<u64>,
 }
 
 impl OpenAiCompatibleDriver {
@@ -59,6 +60,7 @@ impl OpenAiCompatibleDriver {
             extra_headers,
             client,
             window_lookup: None,
+            num_ctx: None,
         }
     }
 
@@ -66,6 +68,13 @@ impl OpenAiCompatibleDriver {
     #[must_use]
     pub fn with_window_lookup(mut self, lookup: Arc<dyn WindowLookup>) -> Self {
         self.window_lookup = Some(lookup);
+        self
+    }
+
+    /// Configura a janela de contexto / num_ctx enviada ao servidor (ex: Ollama options.num_ctx).
+    #[must_use]
+    pub fn with_num_ctx(mut self, num_ctx: u64) -> Self {
+        self.num_ctx = Some(num_ctx);
         self
     }
 
@@ -186,10 +195,19 @@ fn with_cache_breakpoints(messages: &mut serde_json::Value) {
     }
 }
 
-fn spawn_sse_reader(res: reqwest::Response) -> AiChunkStream {
+fn spawn_sse_reader(res: reqwest::Response, notice: Option<String>) -> AiChunkStream {
     let (sender, receiver) = mpsc::channel(64);
 
     tokio::spawn(async move {
+        if let Some(notice_text) = notice {
+            let _ = sender
+                .send(Ok(AiChatChunk {
+                    notice: Some(notice_text),
+                    ..AiChatChunk::default()
+                }))
+                .await;
+        }
+
         let byte_stream = res
             .bytes_stream()
             .map(|item| item.map_err(std::io::Error::other));
@@ -205,10 +223,17 @@ fn spawn_sse_reader(res: reqwest::Response) -> AiChunkStream {
             let bytes = match chunk_res {
                 Ok(b) => b,
                 Err(e) => {
+                    let err_str = e.to_string();
+                    let friendly = if err_str.contains("error decoding response body")
+                        || err_str.contains("connection closed")
+                        || err_str.contains("broken pipe")
+                    {
+                        "A conexão com o provedor de IA foi encerrada inesperadamente (o modelo local pode ter excedido a capacidade de memória ou limite de contexto). Recomendação: aumente o num_ctx nas Configurações de IA ou compacte a conversa.".to_string()
+                    } else {
+                        format!("Erro no stream de dados: {e}")
+                    };
                     let _ = sender
-                        .send(Err(AppError::service_unavailable(format!(
-                            "Erro no stream de dados: {e}"
-                        ))))
+                        .send(Err(AppError::service_unavailable(friendly)))
                         .await;
                     return;
                 }
@@ -430,6 +455,10 @@ impl AiDriver for OpenAiCompatibleDriver {
         if !tools.is_empty() {
             body["tools"] = json!(tools);
         }
+        if let Some(num_ctx) = self.num_ctx {
+            body["num_ctx"] = json!(num_ctx);
+            body["options"] = json!({ "num_ctx": num_ctx });
+        }
         if needs_cache_breakpoints(self.driver_id, &self.model) {
             with_cache_breakpoints(&mut body["messages"]);
         }
@@ -452,6 +481,7 @@ impl AiDriver for OpenAiCompatibleDriver {
             })?;
 
         let mut status = res.status();
+        let mut fallback_notice = None;
 
         // Se o OpenRouter retornar 429 (rate-limited upstream) ou 404 para um modelo gratuito específico,
         // tenta o fallback automático para "openrouter/free" para não deixar o usuário sem resposta.
@@ -477,6 +507,10 @@ impl AiDriver for OpenAiCompatibleDriver {
                 if fallback_res.status().is_success() {
                     res = fallback_res;
                     status = res.status();
+                    fallback_notice = Some(format!(
+                        "O modelo '{}' atingiu o limite de taxa (429) no OpenRouter. A resposta foi gerada usando o balanceador dinâmico 'openrouter/free'.",
+                        self.model
+                    ));
                 }
             }
         }
@@ -508,7 +542,7 @@ impl AiDriver for OpenAiCompatibleDriver {
                     })?;
                 status = retry.status();
                 if status.is_success() {
-                    return Ok(spawn_sse_reader(retry));
+                    return Ok(spawn_sse_reader(retry, None));
                 }
                 err_text = retry
                     .text()
@@ -521,7 +555,7 @@ impl AiDriver for OpenAiCompatibleDriver {
             return Err(AppError::service_unavailable(friendly));
         }
 
-        Ok(spawn_sse_reader(res))
+        Ok(spawn_sse_reader(res, fallback_notice))
     }
 
     async fn test_connection(&self) -> AppResult<TestConnectionResponse> {

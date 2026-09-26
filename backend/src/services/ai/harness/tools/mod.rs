@@ -131,23 +131,15 @@ impl ToolGroup {
     pub const fn purpose(self) -> &'static str {
         match self {
             Self::Core => "consultas básicas",
-            Self::History => "uptime, falhas e métricas gravadas no tempo",
-            Self::Analysis => {
-                "causa raiz, comparação com o normal, padrão por hora, linha do tempo"
-            }
-            Self::Charts => "gráficos de latência, tráfego e CPU/memória",
-            Self::Logs => "panorama dos logs agrupado por padrão",
-            Self::Docker => {
-                "containers da central e dos agentes remotos: estado, consumo de CPU/memória e servidores"
-            }
+            Self::History => "uptime e métricas no tempo",
+            Self::Analysis => "causa raiz, baseline e linha do tempo",
+            Self::Charts => "gráficos de latência, tráfego e recursos",
+            Self::Logs => "panorama de logs por padrão",
+            Self::Docker => "containers e servidores Docker (estado, consumo, logs)",
             Self::Diagnostics => "ping, traceroute, portas, DNS e playbooks",
-            Self::Actions => "reconhecer/silenciar alerta, janela de manutenção, criar monitor",
-            Self::AlertRules => {
-                "origem de um alerta, regras cadastradas, guia de regras, criar/ativar/desativar/excluir regra"
-            }
-            Self::Platform => {
-                "agentes remotos, VPN, topologia/vizinhos, descoberta, redes/sites/DNS, manutenção, auditoria, notificações"
-            }
+            Self::Actions => "ações com confirmação: alertas, manutenção, monitores",
+            Self::AlertRules => "origem, guia e gestão de regras de alerta",
+            Self::Platform => "agentes, VPN, topologia, descoberta e redes",
         }
     }
 

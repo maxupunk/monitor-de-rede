@@ -164,7 +164,7 @@ pub fn small_window_notice(
         return None;
     }
     let hint = if driver_id == "ollama" {
-        " No Ollama, aumente o contexto do servidor (variável OLLAMA_CONTEXT_LENGTH=16384 ou mais) ou o num_ctx do modelo."
+        " No Ollama, configure a 'Janela de Contexto (num_ctx)' nas Configurações de IA (ex: 16384 ou mais) ou a variável OLLAMA_CONTEXT_LENGTH no servidor."
     } else {
         " Escolha um modelo com janela maior."
     };

@@ -103,7 +103,12 @@ pub fn create_driver(settings: &AiSettings) -> AppResult<Box<dyn AiDriver>> {
                 .filter(|m| !m.trim().is_empty())
                 .unwrap_or_else(|| "llama3.2".to_string());
 
-            let lookup = Arc::new(OllamaLookup::from_openai_base(&base_url));
+            let num_ctx = settings
+                .ollama_num_ctx
+                .unwrap_or(crate::services::ai::settings::DEFAULT_OLLAMA_NUM_CTX);
+
+            let lookup =
+                Arc::new(OllamaLookup::from_openai_base(&base_url).with_num_ctx(Some(num_ctx)));
             Ok(Box::new(
                 OpenAiCompatibleDriver::new(
                     "ollama",
@@ -113,6 +118,7 @@ pub fn create_driver(settings: &AiSettings) -> AppResult<Box<dyn AiDriver>> {
                     model,
                     vec![],
                 )
+                .with_num_ctx(num_ctx)
                 .with_window_lookup(lookup),
             ))
         }

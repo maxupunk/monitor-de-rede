@@ -17,9 +17,11 @@ use std::{collections::HashMap, time::Duration};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
+// --- Ollama ------------------------------------------------------------------
+
 /// Janela padrão do Ollama quando nem o modelo carregado nem o `num_ctx`
 /// dizem outra coisa (`OLLAMA_CONTEXT_LENGTH` não definido no servidor).
-pub const OLLAMA_DEFAULT_NUM_CTX: u64 = 4_096;
+pub const OLLAMA_DEFAULT_NUM_CTX: u64 = 16_384;
 
 /// Catálogo público de modelos por provedor.
 pub const MODELS_DEV_URL: &str = "https://models.dev/api.json";
@@ -217,15 +219,19 @@ pub fn parse_ollama_show(show: &Value) -> (Option<u64>, Option<u64>) {
     (max, num_ctx)
 }
 
-/// A janela que o Ollama vai usar: a do modelo carregado quando há; senão o
-/// `num_ctx` do modelo, senão o padrão do servidor — nunca acima do máximo
-/// do modelo. Só a do modelo carregado é certa.
+/// A janela que o Ollama vai usar: se `num_ctx` foi configurado na tela ou driver,
+/// ele tem precedência (a requisição força esse valor no Ollama com RoPE scaling se necessário).
+/// Senão, vale o do modelo carregado (`running`); senão o `max` do modelo;
+/// senão o padrão do servidor (`OLLAMA_DEFAULT_NUM_CTX`).
 #[must_use]
 pub fn ollama_effective_window(
     running: Option<u64>,
     max: Option<u64>,
     num_ctx: Option<u64>,
 ) -> Option<LearnedWindow> {
+    if let Some(configured) = num_ctx {
+        return Some(LearnedWindow::confident(configured));
+    }
     if let Some(tokens) = running {
         return Some(LearnedWindow::confident(tokens));
     }
@@ -242,6 +248,7 @@ pub fn ollama_effective_window(
 pub struct OllamaLookup {
     /// Endereço da API nativa (`http://host:11434`), sem o `/v1`.
     pub base_url: String,
+    pub num_ctx: Option<u64>,
 }
 
 impl OllamaLookup {
@@ -252,7 +259,14 @@ impl OllamaLookup {
         let native = trimmed.strip_suffix("/v1").unwrap_or(trimmed);
         Self {
             base_url: native.to_string(),
+            num_ctx: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_num_ctx(mut self, num_ctx: Option<u64>) -> Self {
+        self.num_ctx = num_ctx;
+        self
     }
 }
 
@@ -286,7 +300,8 @@ impl WindowLookup for OllamaLookup {
             },
             None => (None, None),
         };
-        ollama_effective_window(running, max, num_ctx)
+        let effective_num_ctx = self.num_ctx.or(num_ctx);
+        ollama_effective_window(running, max, effective_num_ctx)
             .map(|window| HashMap::from([(model.to_string(), window)]))
             .unwrap_or_default()
     }
@@ -357,10 +372,7 @@ mod tests {
         );
         assert_eq!(
             ollama_effective_window(None, Some(131_072), Some(16_384)),
-            Some(LearnedWindow {
-                tokens: 16_384,
-                confident: false
-            })
+            Some(LearnedWindow::confident(16_384))
         );
         assert_eq!(
             ollama_effective_window(None, Some(131_072), None),
@@ -371,7 +383,7 @@ mod tests {
             "sem num_ctx vale o padrão do servidor"
         );
         assert_eq!(
-            ollama_effective_window(None, Some(2048), Some(8192)).map(|janela| janela.tokens),
+            ollama_effective_window(None, Some(2048), None).map(|janela| janela.tokens),
             Some(2048),
             "nunca acima do máximo do modelo"
         );

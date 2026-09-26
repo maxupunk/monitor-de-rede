@@ -64,7 +64,18 @@
             density="compact"
             class="mb-2 text-body-small"
           >
-            {{ message.notice }}
+            <div>{{ message.notice }}</div>
+            <div class="mt-2 d-flex justify-end">
+              <v-btn
+                size="x-small"
+                variant="outlined"
+                color="warning"
+                prepend-icon="mdi-cog-outline"
+                to="/settings"
+              >
+                Ajustar Configurações de IA
+              </v-btn>
+            </div>
           </v-alert>
 
           <!-- Conteúdo Renderizado -->

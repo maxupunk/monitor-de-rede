@@ -1,17 +1,29 @@
 <template>
   <v-card class="rounded-lg fill-height d-flex flex-column">
-    <v-card-title class="font-weight-bold d-flex align-center justify-space-between">
+    <v-card-title class="font-weight-bold d-flex align-center justify-space-between flex-wrap ga-2">
       <div class="d-flex align-center">
         <v-icon start color="primary">mdi-robot-outline</v-icon>
         Assistente Inteligente (IA)
       </div>
-      <v-switch
-        v-model="form.enabled"
-        color="primary"
-        density="compact"
-        hide-details
-        label="Ativo"
-      />
+      <div class="d-flex align-center ga-3">
+        <v-btn
+          color="primary"
+          variant="flat"
+          size="small"
+          :loading="aiStore.savingSettings"
+          @click="handleSave"
+        >
+          <v-icon start size="16">mdi-content-save-outline</v-icon>
+          Salvar
+        </v-btn>
+        <v-switch
+          v-model="form.enabled"
+          color="primary"
+          density="compact"
+          hide-details
+          label="Ativo"
+        />
+      </div>
     </v-card-title>
 
     <v-card-subtitle>
@@ -323,7 +335,7 @@
 
         <!-- Campos: Ollama Local -->
         <template v-if="form.activeDriver === 'ollama'">
-          <v-col cols="12" md="7">
+          <v-col cols="12" md="6">
             <v-text-field
               v-model="form.ollamaBaseUrl"
               label="URL Base do Ollama"
@@ -336,7 +348,7 @@
               @blur="handleOllamaBaseUrlBlur"
             />
           </v-col>
-          <v-col cols="12" md="5">
+          <v-col cols="12" md="6">
             <v-combobox
               v-model="form.ollamaModel"
               label="Modelo Ollama Ativo (em uso)"
@@ -435,6 +447,29 @@
               >
                 Buscar na biblioteca de modelos Ollama
               </v-btn>
+            </div>
+          </v-col>
+
+          <v-col cols="12" md="6">
+            <v-select
+              v-model="form.ollamaNumCtx"
+              label="Janela de Contexto no Ollama (num_ctx)"
+              :items="ollamaNumCtxOptions"
+              item-title="title"
+              item-value="value"
+              variant="outlined"
+              density="compact"
+              prepend-inner-icon="mdi-memory"
+              hide-details="auto"
+              class="mb-3"
+            />
+          </v-col>
+          <v-col cols="12" md="6" class="d-flex align-center">
+            <div class="text-caption text-secondary mb-3">
+              <v-icon size="14" color="primary" class="me-1">mdi-information-outline</v-icon>
+              Garante tamanho de contexto suficiente (16k a 32k recomendado para modelos locais).
+              <strong>Nota:</strong> Salve as configurações no botão <strong>Salvar</strong> acima
+              para aplicar o novo limite ao servidor Ollama.
             </div>
           </v-col>
 
@@ -882,6 +917,7 @@ const form = reactive<AiSettings>({
   openrouterModel: 'openrouter/free',
   ollamaBaseUrl: 'http://localhost:11434/v1',
   ollamaModel: 'llama3.2',
+  ollamaNumCtx: 16384,
   allowActiveTools: true,
   requireToolConfirmation: false,
   allowActions: false,
@@ -919,6 +955,14 @@ interface OllamaOption {
   supportsTools?: boolean
   contextWindow?: string | null
 }
+
+const ollamaNumCtxOptions = [
+  { title: '8.192 tokens (8k - Econômico)', value: 8192 },
+  { title: '16.384 tokens (16k - Padrão Recomendado)', value: 16384 },
+  { title: '32.768 tokens (32k - Médio)', value: 32768 },
+  { title: '65.536 tokens (64k - Amplo)', value: 65536 },
+  { title: '131.072 tokens (128k - Máximo)', value: 131072 },
+]
 
 // Extrai string pura (slug ou nome) de qualquer modelo recebido (seja string ou objeto com id/name/value)
 function extractModelId(val: unknown): string {
@@ -1315,6 +1359,9 @@ onMounted(async () => {
     Object.assign(form, aiStore.settings)
     // Cópia própria: editar o formulário não pode mexer na store antes de salvar.
     form.proactive = { ...defaultProactive(), ...aiStore.settings.proactive }
+    if (!form.ollamaNumCtx) {
+      form.ollamaNumCtx = 16384
+    }
   }
   if (!form.opencodeBaseUrl) {
     form.opencodeBaseUrl = 'https://opencode.ai/zen/v1'

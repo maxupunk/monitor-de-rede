@@ -22,6 +22,7 @@ pub const OPENCODE_DEFAULT_BASE_URL: &str = "https://opencode.ai/zen/v1";
 pub const DEFAULT_OPENCODE_MODEL: &str = "muse-spark-1.3-contributor-free";
 pub const DEFAULT_OLLAMA_BASE_URL: &str = "http://localhost:11434/v1";
 pub const DEFAULT_OLLAMA_MODEL: &str = "llama3.2";
+pub const DEFAULT_OLLAMA_NUM_CTX: u64 = 16_384;
 pub const DEFAULT_OPENROUTER_MODEL: &str = "openrouter/free";
 
 /// Deserializa campos de modelo de forma resiliente, aceitando tanto uma `String`
@@ -91,6 +92,8 @@ struct AiSettingsHelper {
         deserialize_with = "deserialize_optional_model_id"
     )]
     ollama_model: Option<String>,
+    #[serde(default = "default_ollama_num_ctx")]
+    ollama_num_ctx: Option<u64>,
     #[serde(default = "default_true")]
     allow_active_tools: bool,
     #[serde(default)]
@@ -144,6 +147,10 @@ pub struct AiSettings {
 
     pub ollama_model: Option<String>,
 
+    /// Janela de contexto solicitada ao Ollama (num_ctx), padrão 16.384 tokens.
+    #[ts(type = "number | null")]
+    pub ollama_num_ctx: Option<u64>,
+
     /// Permite executar ferramentas ativas (ping, traceroute, scan de portas)
     pub allow_active_tools: bool,
 
@@ -183,6 +190,7 @@ impl<'de> Deserialize<'de> for AiSettings {
             openrouter_model: h.openrouter_model,
             ollama_base_url: h.ollama_base_url,
             ollama_model: h.ollama_model,
+            ollama_num_ctx: h.ollama_num_ctx,
             allow_active_tools: h.allow_active_tools,
             require_tool_confirmation: h.require_tool_confirmation,
             allow_actions: h.allow_actions,
@@ -218,6 +226,10 @@ fn default_ollama_model() -> Option<String> {
     Some(DEFAULT_OLLAMA_MODEL.to_string())
 }
 
+fn default_ollama_num_ctx() -> Option<u64> {
+    Some(DEFAULT_OLLAMA_NUM_CTX)
+}
+
 const fn default_true() -> bool {
     true
 }
@@ -234,6 +246,7 @@ impl Default for AiSettings {
             openrouter_model: default_openrouter_model(),
             ollama_base_url: default_ollama_base_url(),
             ollama_model: default_ollama_model(),
+            ollama_num_ctx: Some(DEFAULT_OLLAMA_NUM_CTX),
             allow_active_tools: true,
             require_tool_confirmation: false,
             allow_actions: false,
@@ -373,6 +386,9 @@ pub async fn save(db: &DatabaseConnection, mut new_settings: AiSettings) -> AppR
                     .is_empty()
             {
                 return Err(AppError::validation("Informe a URL Base para o Ollama"));
+            }
+            if new_settings.ollama_num_ctx.is_none() || new_settings.ollama_num_ctx == Some(0) {
+                new_settings.ollama_num_ctx = Some(DEFAULT_OLLAMA_NUM_CTX);
             }
         }
         outro => {

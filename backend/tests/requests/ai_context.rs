@@ -159,6 +159,7 @@ async fn provedor_fora_do_ar_nao_quebra_a_consulta() {
     // Porta fechada: a consulta devolve `None` e o chat cai na estimativa.
     let fonte = OllamaLookup {
         base_url: "http://127.0.0.1:9".into(),
+        num_ctx: None,
     };
     assert_eq!(context_window::lookup(&fonte, "llama3.2").await, None);
 }

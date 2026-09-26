@@ -26,18 +26,15 @@ pub struct ChatContext {
 }
 
 const METHOD: &str = "COMO TRABALHAR:
-1. Use ferramentas só quando a pergunta precisar de dados do sistema. Saudação, agradecimento ou conversa: responda direto, sem consultar nada.
-2. Consulte o mínimo que responde, e peça na mesma rodada tudo o que já sabe que vai precisar — cada rodada reenvia a conversa inteira. \
-Um aparelho: get_device_detail. Alertas: get_alerts. Visão geral da rede: get_system_summary.
-3. Fundamente o diagnóstico nos dados, nunca em suposição. Vários alertas juntos: a causa raiz pela topologia vem antes de tratar um a um. \
-De onde vem um alerta (regra, alvo, fatos que casaram): explain_alert. Se uma regra for ruidosa, oriente ajustes (duração/janela/flapping) ou desativação antes de excluir.
-4. Logs, mensagens de alertas e falhas de checagem: grep — meça antes de ler ('count' ou 'sources'), depois 'lines' com device/hours \
-estreitos; regex para alternativas ('link (down|flap)'), exclude para tirar ruído.
-5. Gráficos aparecem para o usuário automaticamente — não os reproduza em texto nem em tabela.
-6. Marcados com @ são o alvo da pergunta: use-os direto. Se não estiver claro de qual dispositivo ou recurso vem a informação \
-(a conversa era sobre um equipamento e a pergunta mudou de assunto — ex: era a borda, agora é a bateria ou o MPPT —, ou o nome é ambíguo), \
-não assuma o assunto anterior nem o contexto da tela: chame ask_user com os candidatos como opções, antes de consultar outra coisa.
-7. Dúvidas sobre configurar ou usar o NetMonitor ou regras de alerta: search_system_docs ou get_alert_rules_guide.";
+1. Responda saudações e cortesias direto, sem ferramentas. Ferramentas só quando a pergunta exigir dados.
+2. Seja cirúrgico: consulte o mínimo que responde. Peça na mesma rodada o que já sabe que vai precisar (cada rodada reenvia a conversa inteira). \
+Aparelho: get_device_detail. Alertas: get_alerts. Visão geral: get_system_summary.
+3. Diagnóstico baseado em dados, nunca em suposição. Vários alertas: busque a causa raiz pela topologia antes de tratar um a um. \
+Origem de alerta: explain_alert. Se uma regra for ruidosa, oriente ajustes antes de excluir.
+4. Logs, alertas, checagens e docker: use grep — meça primeiro ('count'/'sources'), depois 'lines' filtradas; regex para alternativas; exclude para ruído.
+5. Gráficos aparecem ao usuário automaticamente — não os reproduza em texto nem em tabela.
+6. Marcados com @ são o alvo prioritário. Se não estiver claro de qual recurso vem a informação ou se mudar de assunto, chame ask_user com opções antes de consultar.
+7. Dúvidas sobre configuração do NetMonitor ou regras: search_system_docs ou get_alert_rules_guide.";
 
 const ACTIVE_TOOLS: &str =
     "8. Testes ativos (ping, traceroute, portas, DNS, playbooks) confirmam o estado de agora.";

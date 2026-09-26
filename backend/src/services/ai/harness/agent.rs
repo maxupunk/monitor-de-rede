@@ -687,6 +687,11 @@ pub async fn run_agent_loop(
                 if chunk.text_delta.is_some() || !chunk.tool_calls.is_empty() {
                     first_output.get_or_insert_with(Instant::now);
                 }
+                if let Some(notice) = chunk.notice {
+                    if !sink.send(HarnessEvent::Notice { message: notice }).await {
+                        return;
+                    }
+                }
                 if let Some(model) = chunk.model {
                     metrics.model = Some(model);
                 }

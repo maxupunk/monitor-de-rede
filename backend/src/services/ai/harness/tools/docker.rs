@@ -130,13 +130,22 @@ pub(super) async fn resolve_container(
 }
 
 fn summary_row(container: &DockerContainerSummary) -> Value {
-    json!({
+    let mut row = json!({
         "name": container.display_name(),
-        "image": container.image,
         "state": container.state,
         "status": container.status,
-        "project": container.project_name,
-    })
+    });
+    if let Some(project) = &container.project_name {
+        row["project"] = json!(project);
+    }
+    if !container.image.is_empty() {
+        let short_image = container
+            .image
+            .strip_prefix("sha256:")
+            .map_or(&container.image[..], |h| &h[..12.min(h.len())]);
+        row["image"] = json!(short_image);
+    }
+    row
 }
 
 pub struct DockerContainers;
