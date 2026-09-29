@@ -32,6 +32,10 @@
       </v-col>
 
       <v-col cols="12">
+        <LayaSettingsCard @saved="notify" />
+      </v-col>
+
+      <v-col cols="12">
         <OnboardingCard />
       </v-col>
 
@@ -96,6 +100,7 @@ import OnboardingCard from '@/components/settings/OnboardingCard.vue'
 import BackupCard from '@/components/settings/BackupCard.vue'
 import DatabaseInfoCard from '@/components/settings/DatabaseInfoCard.vue'
 import AiSettingsCard from '@/components/settings/AiSettingsCard.vue'
+import LayaSettingsCard from '@/components/settings/LayaSettingsCard.vue'
 import PageHeader from '@/components/PageHeader.vue'
 
 const addressesStore = useServerAddressesStore()

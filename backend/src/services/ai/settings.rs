@@ -6,7 +6,10 @@ use sea_orm::{ConnectionTrait, DatabaseConnection};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use super::{proactive::config::AiProactiveSettings, response_style::AiResponseStyle};
+use super::{
+    laya::config::AiLayaSettings, proactive::config::AiProactiveSettings,
+    response_style::AiResponseStyle,
+};
 use crate::{
     models::system_settings,
     services::shared::errors::{AppError, AppResult},
@@ -107,6 +110,8 @@ struct AiSettingsHelper {
     #[serde(default)]
     proactive: AiProactiveSettings,
     #[serde(default)]
+    laya: AiLayaSettings,
+    #[serde(default)]
     custom_system_prompt: Option<String>,
 }
 
@@ -171,6 +176,9 @@ pub struct AiSettings {
     /// O que a IA faz sozinha: resumo de incidente e resumo periódico.
     pub proactive: AiProactiveSettings,
 
+    /// Laya (via Ollaya): decide antes do chat quais ferramentas mandar.
+    pub laya: AiLayaSettings,
+
     pub custom_system_prompt: Option<String>,
 }
 
@@ -197,6 +205,7 @@ impl<'de> Deserialize<'de> for AiSettings {
             container_actions: h.container_actions,
             response_style: h.response_style,
             proactive: h.proactive,
+            laya: h.laya,
             custom_system_prompt: h.custom_system_prompt,
         })
     }
@@ -253,6 +262,7 @@ impl Default for AiSettings {
             container_actions: AiContainerActionMode::default(),
             response_style: AiResponseStyle::default(),
             proactive: AiProactiveSettings::default(),
+            laya: AiLayaSettings::default(),
             custom_system_prompt: None,
         }
     }
@@ -262,27 +272,29 @@ impl AiSettings {
     /// Devolve uma cópia segura para ser enviada ao frontend, com chaves secretas mascaradas.
     pub fn masked_view(&self) -> Self {
         let mut view = self.clone();
-        if let Some(key) = &view.opencode_api_key {
-            if !key.trim().is_empty() {
-                view.opencode_api_key = Some(MASKED_KEY.to_string());
-            }
-        }
-        if let Some(key) = &view.openrouter_api_key {
-            if !key.trim().is_empty() {
-                view.openrouter_api_key = Some(MASKED_KEY.to_string());
-            }
-        }
+        mask_secret(&mut view.opencode_api_key);
+        mask_secret(&mut view.openrouter_api_key);
         view
     }
 
     /// Mescla os valores mascarados enviados pelo frontend com os valores reais persistidos.
     pub fn merge_unmasked(&mut self, existing: &AiSettings) {
-        if self.opencode_api_key.as_deref() == Some(MASKED_KEY) {
-            self.opencode_api_key = existing.opencode_api_key.clone();
-        }
-        if self.openrouter_api_key.as_deref() == Some(MASKED_KEY) {
-            self.openrouter_api_key = existing.openrouter_api_key.clone();
-        }
+        restore_secret(&mut self.opencode_api_key, &existing.opencode_api_key);
+        restore_secret(&mut self.openrouter_api_key, &existing.openrouter_api_key);
+    }
+}
+
+/// Troca uma chave preenchida pela máscara, para ir ao frontend.
+pub fn mask_secret(key: &mut Option<String>) {
+    if key.as_deref().is_some_and(|key| !key.trim().is_empty()) {
+        *key = Some(MASKED_KEY.to_string());
+    }
+}
+
+/// A máscara voltou do frontend: vale a chave que já estava gravada.
+pub fn restore_secret(key: &mut Option<String>, stored: &Option<String>) {
+    if key.as_deref() == Some(MASKED_KEY) {
+        key.clone_from(stored);
     }
 }
 
@@ -307,6 +319,9 @@ pub async fn save(db: &DatabaseConnection, mut new_settings: AiSettings) -> AppR
     let existing = load(db).await?;
     new_settings.merge_unmasked(&existing);
     new_settings.proactive = new_settings.proactive.normalized();
+    // O Laya tem card e endpoint próprios (`save_laya`): o formulário do
+    // provedor não o altera, nem com uma cópia desatualizada.
+    new_settings.laya = existing.laya;
 
     // Validações básicas
     match new_settings.active_driver.as_str() {
@@ -398,10 +413,24 @@ pub async fn save(db: &DatabaseConnection, mut new_settings: AiSettings) -> AppR
         }
     }
 
-    let texto = serde_json::to_string(&new_settings)
+    persist(db, &new_settings).await?;
+    Ok(new_settings)
+}
+
+/// Grava só a parte do Laya, sem passar pelas validações do provedor: um
+/// provedor mal configurado não pode impedir de ligar ou desligar o Laya.
+pub async fn save_laya(db: &DatabaseConnection, laya: AiLayaSettings) -> AppResult<AiLayaSettings> {
+    let mut settings = load(db).await?;
+    settings.laya = laya.normalized();
+    persist(db, &settings).await?;
+    Ok(settings.laya)
+}
+
+async fn persist(db: &DatabaseConnection, settings: &AiSettings) -> AppResult<()> {
+    let texto = serde_json::to_string(settings)
         .map_err(|error| AppError::Internal(anyhow::Error::new(error)))?;
     system_settings::Model::set(db, STORAGE_KEY, Some(texto)).await?;
-    Ok(new_settings)
+    Ok(())
 }
 
 #[cfg(test)]

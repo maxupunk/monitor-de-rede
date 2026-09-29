@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::services::ai::laya::config::AiLayaSettings;
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
@@ -244,6 +246,81 @@ pub struct TestConnectionResponse {
     pub model: Option<String>,
 }
 
+/// Testa o Laya com o que está no formulário, ainda não salvo.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct TestLayaInput {
+    pub laya: AiLayaSettings,
+    /// Pergunta de exemplo; sem ela, vale a padrão do servidor.
+    #[serde(default)]
+    pub question: Option<String>,
+}
+
+/// Baixa o modelo do Laya no Ollaya do formulário.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct LayaPullInput {
+    pub laya: AiLayaSettings,
+}
+
+/// Um modelo que a tela oferece no autocomplete.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct LayaModelOption {
+    pub name: String,
+    /// Só os do catálogo têm; um instalado por fora vem sem.
+    #[serde(default)]
+    pub description: Option<String>,
+    pub installed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct LayaModelsResponse {
+    /// O Ollaya respondeu.
+    pub online: bool,
+    #[serde(default)]
+    pub error_message: Option<String>,
+    /// Nomes como o Ollaya os lista (`laya:multilingual`…).
+    pub installed: Vec<String>,
+    /// Catálogo conhecido mais o que está instalado fora dele.
+    pub options: Vec<LayaModelOption>,
+}
+
+/// Quão provável o Laya acha que um grupo de ferramentas é necessário.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct LayaGroupScore {
+    pub id: String,
+    pub purpose: String,
+    /// 0–1.
+    pub probability: f64,
+    /// Passou do limiar configurado: iria para a IA.
+    pub selected: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct TestLayaResponse {
+    pub success: bool,
+    /// O Ollaya respondeu.
+    pub online: bool,
+    /// O modelo configurado está instalado nele.
+    pub model_installed: bool,
+    pub latency_ms: f64,
+    pub message: String,
+    /// Quem respondeu de fato (`laya:en`, `laya:multilingual`…).
+    #[serde(default)]
+    pub model: Option<String>,
+    pub groups: Vec<LayaGroupScore>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
@@ -317,19 +394,38 @@ pub struct OllamaPullRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct OllamaPullProgress {
+/// Progresso do download de um modelo num servidor local (Ollama ou Ollaya).
+pub struct ModelPullProgress {
     pub status: String,
     #[serde(default)]
     pub digest: Option<String>,
     #[serde(default)]
+    #[ts(type = "number | null")]
     pub total: Option<u64>,
     #[serde(default)]
+    #[ts(type = "number | null")]
     pub completed: Option<u64>,
     #[serde(default)]
     pub percentage: Option<f64>,
     pub done: bool,
     #[serde(default)]
     pub error: Option<String>,
+}
+
+impl ModelPullProgress {
+    /// Evento final de um download que falhou.
+    #[must_use]
+    pub fn failed(status: &str, error: impl Into<String>) -> Self {
+        Self {
+            status: status.to_string(),
+            digest: None,
+            total: None,
+            completed: None,
+            percentage: None,
+            done: true,
+            error: Some(error.into()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

@@ -143,6 +143,25 @@ impl ToolGroup {
         }
     }
 
+    /// Afirmação sim/não que o Laya avalia sobre a pergunta do usuário. Em
+    /// inglês: é a língua em que os modelos de decisão foram treinados, e o
+    /// roteador do Laya lê a língua da pergunta, não a da afirmação.
+    #[must_use]
+    pub const fn intent(self) -> &'static str {
+        match self {
+            Self::Core => "The message asks about devices, monitors, current alerts or documentation.",
+            Self::History => "Answering requires uptime, availability or metrics over a past period of time.",
+            Self::Analysis => "The message asks why something happened, its root cause, a baseline or an incident timeline.",
+            Self::Charts => "The user wants a chart or graph of latency, traffic or resource usage.",
+            Self::Logs => "Answering requires reading or searching system, device or syslog logs.",
+            Self::Docker => "The message is about Docker containers, Docker hosts or their resource usage or logs.",
+            Self::Diagnostics => "The user wants a live network test such as ping, traceroute, port scan or DNS lookup.",
+            Self::Actions => "The user wants to change something: acknowledge or silence an alert, schedule maintenance or create a monitor.",
+            Self::AlertRules => "The message is about alert rules: where an alert comes from, thresholds, or creating, deleting or toggling a rule.",
+            Self::Platform => "The message is about monitoring agents, the VPN, network topology, discovery or networks.",
+        }
+    }
+
     #[must_use]
     pub fn from_id(id: &str) -> Option<Self> {
         Self::DEFERRED

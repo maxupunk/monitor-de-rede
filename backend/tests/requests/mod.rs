@@ -4,6 +4,7 @@ mod ai_analysis;
 mod ai_context;
 mod ai_conversations;
 mod ai_grep;
+mod ai_laya;
 mod ai_mentions;
 mod ai_proactive;
 mod ai_token_budget;

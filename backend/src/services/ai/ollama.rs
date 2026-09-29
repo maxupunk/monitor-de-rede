@@ -6,13 +6,12 @@
 
 use std::time::Duration;
 
-use futures::StreamExt;
 use serde::Deserialize;
-use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
+use super::local_models::{self, PullTarget};
 use crate::{
-    dtos::ai::{OllamaModelItem, OllamaModelsResponse, OllamaPullProgress, OllamaRecommendedModel},
+    dtos::ai::{ModelPullProgress, OllamaModelItem, OllamaModelsResponse, OllamaRecommendedModel},
     services::shared::errors::{AppError, AppResult},
 };
 
@@ -208,23 +207,13 @@ pub async fn list_models(base_url: &str) -> AppResult<OllamaModelsResponse> {
         ),
     };
 
-    let installed_names_lower: Vec<String> = installed_items
-        .iter()
-        .map(|m| m.name.to_lowercase())
-        .collect();
+    let installed_names: Vec<&str> = installed_items.iter().map(|m| m.name.as_str()).collect();
 
     let recommended: Vec<OllamaRecommendedModel> = RECOMMENDED_MODELS
         .iter()
         .map(
             |&(name, desc, param_size, context_window, tool_optimized)| {
-                let name_lower = name.to_lowercase();
-                let is_installed = installed_names_lower.iter().any(|inst| {
-                    inst == &name_lower
-                        || inst == &format!("{name_lower}:latest")
-                        || (name_lower.ends_with(":latest")
-                            && inst == &name_lower[..name_lower.len() - 7])
-                        || inst.starts_with(&format!("{name_lower}:"))
-                });
+                let is_installed = local_models::is_installed(&installed_names, name);
 
                 OllamaRecommendedModel {
                     name: name.to_string(),
@@ -246,156 +235,22 @@ pub async fn list_models(base_url: &str) -> AppResult<OllamaModelsResponse> {
     })
 }
 
-#[derive(Debug, Deserialize)]
-struct OllamaPullRaw {
-    status: Option<String>,
-    digest: Option<String>,
-    total: Option<u64>,
-    completed: Option<u64>,
-    error: Option<String>,
-}
-
 /// Inicia o download (pull) de um modelo no Ollama e transmite o progresso via stream assíncrono.
 pub async fn pull_model_stream(
     base_url: &str,
     model: &str,
-) -> AppResult<ReceiverStream<OllamaPullProgress>> {
-    let root_url = normalize_ollama_base_url(base_url);
-    let pull_url = format!("{root_url}/api/pull");
-    let model_name = model.trim().to_string();
-
+) -> AppResult<ReceiverStream<ModelPullProgress>> {
+    let model_name = model.trim();
     if model_name.is_empty() {
         return Err(AppError::validation("Nome do modelo não pode ser vazio"));
     }
-
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(3600)) // Downloads de modelos grandes podem levar vários minutos
-        .build()
-        .map_err(|e| AppError::service_unavailable(format!("Erro ao criar cliente HTTP: {e}")))?;
-
-    let res = client
-        .post(&pull_url)
-        .json(&serde_json::json!({
-            "name": model_name,
-            "stream": true
-        }))
-        .send()
-        .await
-        .map_err(|e| {
-            AppError::service_unavailable(format!(
-                "Não foi possível conectar ao Ollama em '{root_url}': {e}"
-            ))
-        })?;
-
-    if !res.status().is_success() {
-        let status = res.status();
-        let body = res.text().await.unwrap_or_default();
-        return Err(AppError::service_unavailable(format!(
-            "Ollama retornou status {status} ao tentar baixar o modelo: {body}"
-        )));
-    }
-
-    let (tx, rx) = mpsc::channel::<OllamaPullProgress>(100);
-
-    tokio::spawn(async move {
-        let mut byte_stream = res.bytes_stream();
-        let mut line_buffer = String::new();
-
-        while let Some(item) = byte_stream.next().await {
-            match item {
-                Ok(bytes) => {
-                    let chunk_str = String::from_utf8_lossy(&bytes);
-                    line_buffer.push_str(&chunk_str);
-
-                    while let Some(pos) = line_buffer.find('\n') {
-                        let line = line_buffer[..pos].trim().to_string();
-                        line_buffer.drain(..=pos);
-
-                        if line.is_empty() {
-                            continue;
-                        }
-
-                        if let Ok(raw) = serde_json::from_str::<OllamaPullRaw>(&line) {
-                            if let Some(err) = raw.error {
-                                let _ = tx
-                                    .send(OllamaPullProgress {
-                                        status: "Erro".to_string(),
-                                        digest: None,
-                                        total: None,
-                                        completed: None,
-                                        percentage: None,
-                                        done: true,
-                                        error: Some(err),
-                                    })
-                                    .await;
-                                return;
-                            }
-
-                            let status_text =
-                                raw.status.unwrap_or_else(|| "Processando...".to_string());
-                            let is_success = status_text.to_lowercase() == "success";
-
-                            let percentage = match (raw.completed, raw.total) {
-                                (Some(comp), Some(tot)) if tot > 0 => {
-                                    let pct = ((comp as f64) / (tot as f64)) * 100.0;
-                                    Some((pct * 10.0).round() / 10.0)
-                                }
-                                _ => None,
-                            };
-
-                            let progress = OllamaPullProgress {
-                                status: status_text,
-                                digest: raw.digest,
-                                total: raw.total,
-                                completed: raw.completed,
-                                percentage,
-                                done: is_success,
-                                error: None,
-                            };
-
-                            let is_done = progress.done;
-                            if tx.send(progress).await.is_err() {
-                                return;
-                            }
-
-                            if is_done {
-                                return;
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    let _ = tx
-                        .send(OllamaPullProgress {
-                            status: "Falha de rede".to_string(),
-                            digest: None,
-                            total: None,
-                            completed: None,
-                            percentage: None,
-                            done: true,
-                            error: Some(format!("Erro na transmissão de dados: {e}")),
-                        })
-                        .await;
-                    return;
-                }
-            }
-        }
-
-        // Se terminou o stream sem enviar success
-        let _ = tx
-            .send(OllamaPullProgress {
-                status: "Finalizado".to_string(),
-                digest: None,
-                total: None,
-                completed: None,
-                percentage: Some(100.0),
-                done: true,
-                error: None,
-            })
-            .await;
-    });
-
-    Ok(ReceiverStream::new(rx))
+    local_models::stream_pull(PullTarget {
+        url: format!("{}/api/pull", normalize_ollama_base_url(base_url)),
+        body: serde_json::json!({ "name": model_name, "stream": true }),
+        bearer: None,
+        service: "Ollama",
+    })
+    .await
 }
 
 #[cfg(test)]

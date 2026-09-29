@@ -16,8 +16,9 @@ use serde::Deserialize;
 
 use crate::{
     dtos::ai::{
-        AiMentionQuery, ChatStreamRequest, ExecuteToolRequest, ExecuteToolResponse,
-        OllamaPullRequest, TestConnectionInput, TestConnectionResponse,
+        AiMentionQuery, ChatStreamRequest, ExecuteToolRequest, ExecuteToolResponse, LayaPullInput,
+        ModelPullProgress, OllamaPullRequest, TestConnectionInput, TestConnectionResponse,
+        TestLayaInput,
     },
     services::{
         ai::{
@@ -26,6 +27,7 @@ use crate::{
                 agent::{run_agent_loop, AgentRequest},
                 confirmation,
             },
+            laya::{catalog, client::LayaClient, config::AiLayaSettings, diagnostics},
             mentions, ollama, opencode, openrouter,
             proactive::{digest, runner::ProviderDrivers, schedule::period_hours},
             settings::{self, AiSettings},
@@ -266,8 +268,14 @@ async fn pull_ollama_model(
         .unwrap_or_else(|| "http://localhost:11434".to_string());
 
     let progress_stream = ollama::pull_model_stream(&base_url, &input.model).await?;
+    Ok(pull_progress_sse(progress_stream))
+}
 
-    let sse_stream = progress_stream.map(|progress| {
+/// Progresso de um download de modelo como SSE, sem buffer no proxy.
+fn pull_progress_sse(
+    progress: impl futures::Stream<Item = ModelPullProgress> + Send + 'static,
+) -> Response {
+    let sse_stream = progress.map(|progress| {
         let json_str = serde_json::to_string(&progress).unwrap_or_else(|_| "{}".into());
         Ok::<Event, Infallible>(Event::default().data(json_str))
     });
@@ -287,8 +295,53 @@ async fn pull_ollama_model(
     );
     headers.insert(header::CONNECTION, HeaderValue::from_static("keep-alive"));
     headers.insert("x-accel-buffering", HeaderValue::from_static("no"));
+    response
+}
 
-    Ok(response)
+/// `GET /api/ai/laya` — configuração do Laya.
+async fn show_laya(State(ctx): State<AppContext>) -> AppResult<Response> {
+    Ok(format::json(settings::load(&ctx.db).await?.laya)?)
+}
+
+/// `PUT /api/ai/laya` — grava só o Laya; o resto da IA fica como está.
+async fn update_laya(
+    State(ctx): State<AppContext>,
+    Json(laya): Json<AiLayaSettings>,
+) -> AppResult<Response> {
+    Ok(format::json(settings::save_laya(&ctx.db, laya).await?)?)
+}
+
+#[derive(Debug, Deserialize)]
+struct LayaModelsQuery {
+    base_url: Option<String>,
+}
+
+/// `GET /api/ai/laya/models` — catálogo do Laya e o que o Ollaya já tem
+/// instalado, para o autocomplete da tela.
+async fn list_laya_models(
+    State(ctx): State<AppContext>,
+    Query(query): Query<LayaModelsQuery>,
+) -> AppResult<Response> {
+    let mut laya = settings::load(&ctx.db).await?.laya;
+    if let Some(base_url) = query.base_url.filter(|url| !url.trim().is_empty()) {
+        laya.base_url = base_url;
+    }
+    Ok(format::json(catalog::list(&laya.normalized()).await)?)
+}
+
+/// `POST /api/ai/laya/test` — o Ollaya responde, o modelo está lá, e o que ele
+/// decide para a pergunta de exemplo.
+async fn test_laya(Json(input): Json<TestLayaInput>) -> AppResult<Response> {
+    let laya = input.laya.normalized();
+    let result = diagnostics::test(&laya, input.question.as_deref()).await;
+    Ok(format::json(result)?)
+}
+
+/// `POST /api/ai/laya/pull` — streaming SSE do download do modelo do Laya.
+async fn pull_laya_model(Json(input): Json<LayaPullInput>) -> AppResult<Response> {
+    let laya = input.laya.normalized();
+    let progress = LayaClient::new(&laya).pull().await?;
+    Ok(pull_progress_sse(progress))
 }
 
 #[derive(Debug, Deserialize)]
@@ -352,4 +405,8 @@ pub fn routes() -> Routes {
         .add("/openrouter/models", get(list_openrouter_models))
         .add("/ollama/models", get(list_ollama_models))
         .add("/ollama/pull", post(pull_ollama_model))
+        .add("/laya", get(show_laya).put(update_laya))
+        .add("/laya/models", get(list_laya_models))
+        .add("/laya/test", post(test_laya))
+        .add("/laya/pull", post(pull_laya_model))
 }

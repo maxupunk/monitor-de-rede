@@ -3,6 +3,8 @@ pub mod conversations;
 pub mod drivers;
 pub mod harness;
 pub mod knowledge;
+pub mod laya;
+pub mod local_models;
 pub mod mentions;
 pub mod ollama;
 pub mod opencode;

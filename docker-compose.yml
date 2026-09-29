@@ -60,6 +60,9 @@ services:
       - "${SYSLOG_EXTERNAL_PORT:-514}:${SYSLOG_LISTEN_PORT:-5514}/tcp"
     environment:
       LOCO_ENV: production
+      # Chave do Laya/Ollaya, lida pela API no ponto de uso — o mesmo valor
+      # vai ao serviço `ollaya` abaixo, então não se digita em tela nenhuma.
+      OLLAYA_API_KEY: ${OLLAYA_API_KEY:-}
       TZ: ${TZ:-America/Fortaleza}
       # Porta real da API dentro do container. No modo host é também a porta que
       # o navegador acessa; na bridge, `APP_EXTERNAL_PORT` pode ser diferente.
@@ -169,5 +172,36 @@ services:
       retries: 3
       start_period: 10s
 
+  # Laya (opcional): modelos de decisão servidos pelo Ollaya. Decide, antes de
+  # cada pergunta do chat da IA, quais grupos de ferramentas vão para o LLM.
+  # Só sobe com `docker compose --profile laya up -d`; depois, em
+  # Configurações → IA, use a URL `http://ollaya:11435` e "Baixar modelo".
+  # Sem porta publicada: a API fala com ele pela rede interna do compose.
+  # GPU NVIDIA? Troque a imagem por `ghcr.io/ollaya-dev/ollaya:cuda` e
+  # acrescente `gpus: all`.
+  ollaya:
+    image: ghcr.io/ollaya-dev/ollaya:latest
+    profiles: [laya]
+    environment:
+      OLLAYA_HOST: 0.0.0.0:11435
+      OLLAYA_MODELS: /models
+      # Mantém o modelo carregado entre perguntas: descarregar e recarregar
+      # custaria segundos na primeira pergunta depois de uma pausa.
+      OLLAYA_KEEP_ALIVE: ${OLLAYA_KEEP_ALIVE:-30m}
+      # Vazio = sem autenticação (só a rede interna o alcança). Definida no
+      # `.env`, o compose entrega o mesmo valor à API (serviço `netmonitor`).
+      OLLAYA_API_KEY: ${OLLAYA_API_KEY:-}
+    volumes:
+      - ollaya-models:/models
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+
 volumes:
   netmonitor-data:
+  ollaya-models:

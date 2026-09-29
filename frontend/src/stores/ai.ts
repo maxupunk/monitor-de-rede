@@ -22,6 +22,8 @@ import {
 import type { AiMention } from '@/utils/aiMentions'
 import { useAiConversationsStore } from './aiConversations'
 import { readSseJson } from '@/utils/sseReader'
+import { streamModelPull } from '@/utils/modelPull'
+import type { ModelPullProgress } from '@/bindings/ModelPullProgress'
 
 function isCompactionEvent(event: unknown): event is Record<string, unknown> {
   return (
@@ -104,15 +106,9 @@ export interface OllamaModelsResponse {
   errorMessage?: string | null
 }
 
-export interface OllamaPullProgress {
-  status: string
-  digest?: string | null
-  total?: number | null
-  completed?: number | null
-  percentage?: number | null
-  done: boolean
-  error?: string | null
-}
+/** Progresso de download de modelo — o mesmo contrato para Ollama e Ollaya. */
+export type OllamaPullProgress = Partial<ModelPullProgress> &
+  Pick<ModelPullProgress, 'status' | 'done'>
 
 export const useAiStore = defineStore('ai', () => {
   const settings = ref<AiSettings | null>(null)
@@ -513,58 +509,14 @@ export const useAiStore = defineStore('ai', () => {
     activePullAbortController = controller
 
     try {
-      const response = await apiService.postStream(
+      await streamModelPull(
         '/ai/ollama/pull',
-        {
-          model: trimmed,
-          baseUrl: baseUrl || undefined,
-        },
-        controller.signal
-      )
-
-      const reader = response.body?.getReader()
-      if (!reader) {
-        throw new Error('Não foi possível inicializar leitura do download')
-      }
-
-      const decoder = new TextDecoder()
-      let buffer = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
-
-        for (const line of lines) {
-          const trimmedLine = line.trim()
-          if (!trimmedLine || trimmedLine.startsWith(':')) continue
-
-          if (trimmedLine.startsWith('data: ')) {
-            const jsonStr = trimmedLine.slice(6).trim()
-            try {
-              const event = JSON.parse(jsonStr) as OllamaPullProgress
-              pullProgress.value = event
-
-              if (event.error) {
-                throw new Error(event.error)
-              }
-
-              if (event.done) {
-                await loadOllamaModels(baseUrl)
-                if (onSuccess) onSuccess()
-                return true
-              }
-            } catch (jsonErr) {
-              if (jsonErr instanceof Error && jsonErr.message !== 'Unexpected end of JSON input') {
-                throw jsonErr
-              }
-            }
-          }
+        { model: trimmed, baseUrl: baseUrl || undefined },
+        controller.signal,
+        (progress) => {
+          pullProgress.value = progress
         }
-      }
+      )
 
       await loadOllamaModels(baseUrl)
       if (onSuccess) onSuccess()

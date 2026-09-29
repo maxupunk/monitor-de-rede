@@ -29,6 +29,7 @@ use crate::{
         ai::{
             context_window::{self, ContextWindow},
             drivers::traits::{AiChatOptions, AiDriver, AiMessage, AiToolCall, AiUsage},
+            laya::tool_routing,
             mentions,
             settings::AiSettings,
         },
@@ -487,13 +488,29 @@ pub async fn run_agent_loop(
         let mut history = recent_history(request.messages, MAX_HISTORY_MESSAGES);
         let small_talk = request.tool_loading == ToolLoading::OnDemand && is_small_talk(&history);
         let available = registry.available_groups();
+        let question = history
+            .last()
+            .map_or("", |message| message.content.as_str());
+        let configured_model = driver.model().unwrap_or_default().to_string();
+        // O Laya decide enquanto a janela de contexto é consultada: as duas
+        // são chamadas de rede e nenhuma depende da outra.
+        let consult_laya = request.tool_loading == ToolLoading::OnDemand && !small_talk;
+        let (routed, mut window) = tokio::join!(
+            async {
+                if consult_laya {
+                    tool_routing::route(&settings.laya, question, &available).await
+                } else {
+                    ToolGroups::new()
+                }
+            },
+            context_window::resolve(driver.as_ref(), &configured_model)
+        );
         let preselected: ToolGroups = match request.tool_loading {
             ToolLoading::Everything => available.iter().copied().collect(),
             ToolLoading::OnDemand => {
-                let question = history
-                    .last()
-                    .map_or("", |message| message.content.as_str());
                 let mut groups = preselect_groups(question, &request.context.mentions);
+                // O Laya só acrescenta: o que as palavras-chave acharam fica.
+                groups.extend(routed.iter());
                 if request.context.alert_id.is_some() || request.context.rule_id.is_some() {
                     groups.insert(ToolGroup::AlertRules);
                     groups.insert(ToolGroup::Analysis);
@@ -525,8 +542,6 @@ pub async fn run_agent_loop(
         };
 
         let mut metrics = TurnMetrics::new(driver.model());
-        let configured_model = driver.model().unwrap_or_default().to_string();
-        let mut window = context_window::resolve(driver.as_ref(), &configured_model).await;
         // Um roteador pode ter respondido com um modelo de janela menor: vale a
         // menor das duas.
         if let (Some(hint), Some(last_model)) = (
