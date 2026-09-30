@@ -2,8 +2,10 @@
 //!
 //! ```text
 //! udp/tcp:5514 → parser → resolvedor → fila(10k) → escritor em lote
-//!                            │                          ↓
-//!                       fontes vistas              logs.sqlite
+//!                            │                          ↓            ╲ padrão inédito
+//!                       fontes vistas              logs.sqlite        ↘ (try_send)
+//!                                                       ↑         categorizador → Laya
+//!                                                  log_templates ←──────┘
 //! ```
 //!
 //! Roteiro completo em `docs/roadmap_syslog_nativo.md`; as decisões medidas, na
@@ -18,6 +20,7 @@
 
 pub mod app_layer;
 pub mod bus;
+pub mod categorizer;
 pub mod config;
 pub mod db;
 pub mod destination;
@@ -35,6 +38,8 @@ pub mod retention;
 pub mod search;
 pub mod snippets;
 pub mod sources;
+pub mod template;
+pub mod templates;
 pub mod writer;
 
 use std::sync::Arc;
@@ -106,11 +111,23 @@ pub fn build(ctx: &AppContext, config: &SyslogConfig) -> AppResult<SyslogService
     // `device_logs`, com live tail, busca, FTS e retenção de graça.
     app_layer::install_queue(queue.clone());
 
+    // Categoria dos padrões novos: o escritor só enfileira, o worker grava e
+    // pergunta ao Laya (que decide sozinho se a frente está ligada).
+    let (catalog, jobs) = categorizer::TemplateCatalog::create();
+    tokio::spawn(categorizer::run_worker(
+        logs.connection().clone(),
+        Arc::clone(&catalog),
+        jobs,
+        Arc::new(categorizer::LayaTemplateClassifier::new(ctx.clone())),
+        crate::services::events::EventBus::from_context(ctx).ok(),
+    ));
+
     tokio::spawn(writer::run(
         logs.connection().clone(),
         receiver,
         Arc::clone(queue.metrics()),
         bus.clone(),
+        catalog,
     ));
 
     let servico = SyslogService {

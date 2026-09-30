@@ -18,4 +18,10 @@ export type AiProactiveSettings = {
    * Hora (0–23, horário do servidor) em que o resumo periódico sai.
    */
   digestHour: number
+  /**
+   * Não gastar tokens com resumo periódico de um período em que nenhum
+   * alerta abriu e nenhum ficou aberto — "nada aconteceu" se conta, não se
+   * pergunta ao LLM.
+   */
+  skipQuietDigest: boolean
 }

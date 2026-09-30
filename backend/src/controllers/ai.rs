@@ -27,9 +27,12 @@ use crate::{
                 agent::{run_agent_loop, AgentRequest},
                 confirmation,
             },
-            laya::{catalog, client::LayaClient, config::AiLayaSettings, diagnostics},
+            laya::{
+                catalog, client::LayaClient, config::AiLayaSettings, diagnostics,
+                runtime::LayaRuntime,
+            },
             mentions, ollama, opencode, openrouter,
-            proactive::{digest, runner::ProviderDrivers, schedule::period_hours},
+            proactive::{digest, incident, runner::ProviderDrivers, schedule::period_hours},
             settings::{self, AiSettings},
         },
         audit::AuditActor,
@@ -234,6 +237,17 @@ async fn run_digest(State(ctx): State<AppContext>) -> AppResult<Response> {
     )?)
 }
 
+/// `POST /api/ai/alerts/{id}/summary` — gera o resumo do incidente agora,
+/// quando a triagem do Laya o pulou ou o teto por hora o adiou. `summary`
+/// nulo: o alerta já tinha resumo ou já resolveu.
+async fn summarize_alert_now(
+    State(ctx): State<AppContext>,
+    Path(id): Path<i64>,
+) -> AppResult<Response> {
+    let summary = incident::summarize_alert(&ctx, &ProviderDrivers, id).await?;
+    Ok(format::json(serde_json::json!({ "summary": summary }))?)
+}
+
 #[derive(Debug, Deserialize)]
 struct OllamaModelsQuery {
     base_url: Option<String>,
@@ -308,7 +322,14 @@ async fn update_laya(
     State(ctx): State<AppContext>,
     Json(laya): Json<AiLayaSettings>,
 ) -> AppResult<Response> {
-    Ok(format::json(settings::save_laya(&ctx.db, laya).await?)?)
+    let saved = settings::save_laya(&ctx.db, laya).await?;
+    let runtime = LayaRuntime::from_context(&ctx);
+    runtime.invalidate();
+    // Ligado agora: carrega já, para a primeira pergunta não pagar o disco.
+    if saved.enabled {
+        runtime.warm_in_background(&saved);
+    }
+    Ok(format::json(saved)?)
 }
 
 #[derive(Debug, Deserialize)]
@@ -331,10 +352,24 @@ async fn list_laya_models(
 
 /// `POST /api/ai/laya/test` — o Ollaya responde, o modelo está lá, e o que ele
 /// decide para a pergunta de exemplo.
-async fn test_laya(Json(input): Json<TestLayaInput>) -> AppResult<Response> {
+async fn test_laya(
+    State(ctx): State<AppContext>,
+    Json(input): Json<TestLayaInput>,
+) -> AppResult<Response> {
     let laya = input.laya.normalized();
-    let result = diagnostics::test(&laya, input.question.as_deref()).await;
+    let runtime = LayaRuntime::from_context(&ctx);
+    let result = diagnostics::test(&runtime, &laya, input.question.as_deref()).await;
     Ok(format::json(result)?)
+}
+
+/// `POST /api/ai/laya/load` — carrega o modelo na memória em segundo plano.
+/// Responde na hora; o progresso chega pelo SSE (`laya:model_state`).
+async fn load_laya_model(
+    State(ctx): State<AppContext>,
+    Json(input): Json<LayaPullInput>,
+) -> AppResult<Response> {
+    LayaRuntime::from_context(&ctx).warm_in_background(&input.laya.normalized());
+    Ok(format::json(serde_json::json!({ "started": true }))?)
 }
 
 /// `POST /api/ai/laya/pull` — streaming SSE do download do modelo do Laya.
@@ -401,6 +436,7 @@ pub fn routes() -> Routes {
         .add("/digest/latest", get(latest_digest))
         .add("/mentions", get(search_mentions))
         .add("/digest/run", post(run_digest))
+        .add("/alerts/{id}/summary", post(summarize_alert_now))
         .add("/opencode/models", get(list_opencode_models))
         .add("/openrouter/models", get(list_openrouter_models))
         .add("/ollama/models", get(list_ollama_models))
@@ -409,4 +445,5 @@ pub fn routes() -> Routes {
         .add("/laya/models", get(list_laya_models))
         .add("/laya/test", post(test_laya))
         .add("/laya/pull", post(pull_laya_model))
+        .add("/laya/load", post(load_laya_model))
 }

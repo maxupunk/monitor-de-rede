@@ -68,7 +68,11 @@
       <div v-if="episodeInfo(item)" class="text-caption text-warning">
         {{ episodeInfo(item) }}
       </div>
-      <AiAlertSummary :summary="item.data?.aiSummary" />
+      <AiAlertSummary
+        :alert-id="item.id"
+        :summary="item.data?.aiSummary"
+        :triage="item.data?.layaTriage"
+      />
     </template>
 
     <template #item.createdAt="{ item }">
@@ -187,7 +191,11 @@
           >
             {{ episodeInfo(item) }}
           </v-alert>
-          <AiAlertSummary :summary="item.data?.aiSummary" />
+          <AiAlertSummary
+            :alert-id="item.id"
+            :summary="item.data?.aiSummary"
+            :triage="item.data?.layaTriage"
+          />
         </div>
 
         <!-- Footer: Barra de Ações com Padrão Visual Harmonioso -->

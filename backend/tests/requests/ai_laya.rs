@@ -9,11 +9,6 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use axum::{
-    http::{HeaderMap, StatusCode},
-    routing::{get, post},
-    Json, Router,
-};
 use backend::{
     app::App,
     dtos::ai::{ChatMessageInput, LayaModelsResponse, TestConnectionResponse, TestLayaResponse},
@@ -28,7 +23,7 @@ use backend::{
                 tools::{ToolGroup, ToolPolicy},
                 turn::preselect_groups,
             },
-            laya::config::{AiLayaSettings, API_KEY_ENV},
+            laya::config::AiLayaSettings,
             settings::{self, AiSettings},
         },
         shared::errors::AppResult,
@@ -36,54 +31,19 @@ use backend::{
 };
 use futures::StreamExt;
 use loco_rs::testing::prelude::*;
-use serde_json::{json, Value};
+use serde_json::json;
 use serial_test::serial;
 
-use super::prepare_data;
+use super::{
+    fake_ollaya::{self, by_keyword, with_key},
+    prepare_data,
+};
 
-const TOKEN: &str = "chave-do-ollaya";
-
-/// Responde como o Ollaya: exige o Bearer, tem o `laya` instalado e acha
-/// que toda pergunta é sobre Docker.
+/// Acha que toda pergunta é sobre Docker.
 async fn fake_ollaya() -> String {
-    async fn decide(headers: HeaderMap, Json(body): Json<Value>) -> (StatusCode, Json<Value>) {
-        if headers.get("authorization").and_then(|v| v.to_str().ok())
-            != Some("Bearer chave-do-ollaya")
-        {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({ "error": "unauthorized", "code": "UNAUTHORIZED" })),
-            );
-        }
-        let answers: serde_json::Map<String, Value> = body["questions"]
-            .as_object()
-            .unwrap()
-            .keys()
-            .map(|id| {
-                let yes = if id == "docker" { 0.93 } else { 0.08 };
-                (id.clone(), json!({ "type": "noul", "noul": yes }))
-            })
-            .collect();
-        (
-            StatusCode::OK,
-            Json(json!({ "model": "laya:multilingual", "answers": answers })),
-        )
-    }
-    let app = Router::new()
-        .route(
-            "/api/tags",
-            get(|| async { Json(json!({ "models": [{ "name": "laya:multilingual" }] })) }),
-        )
-        .route("/api/decide", post(decide));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    format!("http://{address}")
-}
-
-/// O compose entrega a mesma chave à API e ao Ollaya pelo ambiente.
-fn with_key() {
-    std::env::set_var(API_KEY_ENV, TOKEN);
+    fake_ollaya::start(by_keyword(&[("", "docker")]))
+        .await
+        .base_url
 }
 
 fn laya(base_url: String) -> AiLayaSettings {

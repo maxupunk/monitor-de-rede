@@ -133,6 +133,7 @@
     <AlertRuleCatalogDialog
       v-model="catalogDialog"
       allow-scope-choice
+      :preselect-key="catalogPreselect"
       @applied="onCatalogApplied"
     />
 
@@ -192,6 +193,21 @@ const router = useRouter()
 
 const tab = ref('active')
 const catalogDialog = ref(false)
+/** `?catalog=<chave>`: veio da sugestão de um padrão de log (tela de logs). */
+const catalogPreselect = computed<string | null>(() => {
+  const bruto = route.query.catalog
+  const chave = Array.isArray(bruto) ? bruto[0] : bruto
+  return typeof chave === 'string' && chave ? chave : null
+})
+watch(
+  catalogPreselect,
+  (chave) => {
+    if (!chave) return
+    tab.value = 'rules'
+    catalogDialog.value = true
+  },
+  { immediate: true }
+)
 
 const abasValidas = ['active', 'resolved', 'rules', 'history']
 

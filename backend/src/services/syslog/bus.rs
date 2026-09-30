@@ -102,6 +102,7 @@ mod tests {
             pid: None,
             topics: Vec::new(),
             message: "linha".into(),
+            template_hash: None,
         }
     }
 

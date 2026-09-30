@@ -48,6 +48,26 @@ impl Answer {
             _ => None,
         }
     }
+
+    /// O rótulo escolhido e a confiança dele, quando a resposta é escolha.
+    #[must_use]
+    pub fn choice(&self) -> Option<(&str, f64)> {
+        match self {
+            Self::Choice {
+                choice, confidence, ..
+            } => Some((choice.as_str(), *confidence)),
+            _ => None,
+        }
+    }
+
+    /// Probabilidade de um rótulo específico numa resposta de escolha.
+    #[must_use]
+    pub fn probability_of(&self, label: &str) -> Option<f64> {
+        match self {
+            Self::Choice { probabilities, .. } => probabilities.get(label).copied(),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -119,5 +139,8 @@ mod tests {
         assert_eq!(response.answers["a"].yes(), Some(0.82));
         assert!(matches!(response.answers["b"], Answer::Choice { .. }));
         assert_eq!(response.answers["c"], Answer::Other);
+        assert_eq!(response.answers["b"].choice(), Some(("x", 0.7)));
+        assert_eq!(response.answers["b"].probability_of("y"), Some(0.3));
+        assert_eq!(response.answers["a"].choice(), None);
     }
 }

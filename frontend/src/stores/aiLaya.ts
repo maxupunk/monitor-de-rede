@@ -10,6 +10,29 @@ import { streamModelPull } from '@/utils/modelPull'
 
 export type { AiLayaSettings, LayaModelOption, TestLayaResponse }
 
+/**
+ * Estado do modelo na memória do Ollaya, pelo evento `laya:model_state`.
+ * Carregar tira o modelo do disco (5–20 s): a tela mostra "carregando" em vez
+ * de parecer travada, e o tempo máximo por pergunta não conta isso.
+ */
+export interface LayaModelState {
+  model: string
+  baseUrl: string
+  state: 'loading' | 'ready' | 'failed'
+  loadMs?: number
+  message?: string
+}
+
+export function isLayaModelState(value: unknown): value is LayaModelState {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return (
+    typeof candidate.model === 'string' &&
+    typeof candidate.baseUrl === 'string' &&
+    (candidate.state === 'loading' || candidate.state === 'ready' || candidate.state === 'failed')
+  )
+}
+
 /** Padrões do backend (`services/ai/laya/config.rs`). */
 export function defaultLayaSettings(): AiLayaSettings {
   return {
@@ -18,6 +41,13 @@ export function defaultLayaSettings(): AiLayaSettings {
     model: 'laya',
     minConfidence: 60,
     timeoutMs: 1500,
+    features: {
+      chatTools: true,
+      deviceIdentity: true,
+      interfaces: true,
+      logEvents: false,
+      incidentTriage: 'off',
+    },
   }
 }
 
@@ -84,6 +114,7 @@ export const useAiLayaStore = defineStore('aiLaya', () => {
         online: false,
         errorMessage: errorMessage(err, 'Falha ao consultar o Ollaya'),
         installed: [],
+        loaded: [],
         options: [],
       }
     } finally {
@@ -93,6 +124,36 @@ export const useAiLayaStore = defineStore('aiLaya', () => {
 
   function installed(model: string): boolean {
     return isModelInstalled(models.value?.installed ?? [], model)
+  }
+
+  /** O último estado de carregamento recebido pelo SSE. */
+  const modelState = ref<LayaModelState | null>(null)
+
+  /** O modelo está na memória do Ollaya agora? */
+  function inMemory(model: string): boolean {
+    return isModelInstalled(models.value?.loaded ?? [], model)
+  }
+
+  function applyModelState(state: LayaModelState): void {
+    modelState.value = state
+    if (state.state === 'ready' && models.value && !inMemory(state.model)) {
+      models.value = { ...models.value, loaded: [...models.value.loaded, state.model] }
+    }
+  }
+
+  /** Carrega o modelo em segundo plano; o progresso chega pelo SSE. */
+  async function warmUp(laya: AiLayaSettings): Promise<void> {
+    modelState.value = { model: laya.model, baseUrl: laya.baseUrl, state: 'loading' }
+    try {
+      await apiService.post('/ai/laya/load', { laya })
+    } catch (err) {
+      modelState.value = {
+        model: laya.model,
+        baseUrl: laya.baseUrl,
+        state: 'failed',
+        message: errorMessage(err, 'Falha ao carregar o modelo'),
+      }
+    }
   }
 
   async function test(laya: AiLayaSettings, question?: string): Promise<TestLayaResponse> {
@@ -175,6 +236,10 @@ export const useAiLayaStore = defineStore('aiLaya', () => {
     pullProgress,
     loadModels,
     installed,
+    modelState,
+    inMemory,
+    applyModelState,
+    warmUp,
     test,
     pull,
     cancelPull,

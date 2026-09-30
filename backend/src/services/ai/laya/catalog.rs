@@ -31,6 +31,15 @@ pub async fn list(settings: &AiLayaSettings) -> LayaModelsResponse {
         Err(error) => (None, Some(error.to_string())),
     };
     let online = installed.is_some();
+    // Na memória agora; falha aqui (Ollaya antigo) só deixa a lista vazia.
+    let loaded = if online {
+        LayaClient::new(settings)
+            .loaded_models()
+            .await
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
     let installed = installed.unwrap_or_default();
 
     let mut options: Vec<LayaModelOption> = KNOWN_MODELS
@@ -59,6 +68,7 @@ pub async fn list(settings: &AiLayaSettings) -> LayaModelsResponse {
         online,
         error_message,
         installed,
+        loaded,
         options,
     }
 }

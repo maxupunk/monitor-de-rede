@@ -1,7 +1,7 @@
 //! Escritor em lote: drena a fila e grava no banco de logs.
 //!
 //! Dois gatilhos, o que vier primeiro: **500 linhas** ou **200 ms**. O teto de
-//! linhas vem da conta de parâmetros — 500 × 12 colunas = 6 000, dentro dos
+//! linhas vem da conta de parâmetros — 500 × 13 colunas = 6 500, dentro dos
 //! 32 766 do SQLite ≥ 3.32 (o que o `sqlx` empacota) e dos 65 535 do
 //! PostgreSQL. Subir o lote sem refazer essa conta quebra a gravação inteira,
 //! não uma linha.
@@ -18,8 +18,9 @@ use tokio::sync::mpsc;
 
 use super::{
     bus::LogBus,
+    categorizer::{template_of, TemplateCatalog},
     config::{DEFAULT_BATCH_INTERVAL, DEFAULT_BATCH_SIZE},
-    queue::{IngestMetrics, PendingLog},
+    queue::{IngestMetrics, LogSource, PendingLog},
 };
 use crate::{models::logs::device_logs, views::logs::serialize_entry_sem_nome};
 
@@ -29,6 +30,7 @@ pub async fn run(
     mut receiver: mpsc::Receiver<PendingLog>,
     metrics: Arc<IngestMetrics>,
     bus: LogBus,
+    catalog: Arc<TemplateCatalog>,
 ) {
     run_with(
         db,
@@ -37,6 +39,7 @@ pub async fn run(
         DEFAULT_BATCH_SIZE,
         DEFAULT_BATCH_INTERVAL,
         Some(bus),
+        Some(&catalog),
     )
     .await;
 }
@@ -51,6 +54,7 @@ pub async fn run_with(
     batch_size: usize,
     interval: Duration,
     bus: Option<LogBus>,
+    catalog: Option<&TemplateCatalog>,
 ) {
     let mut lote: Vec<PendingLog> = Vec::with_capacity(batch_size);
     loop {
@@ -63,7 +67,7 @@ pub async fn run_with(
             match tokio::time::timeout(interval, receiver.recv()).await {
                 Ok(recebido) => recebido,
                 Err(_) => {
-                    descarrega(&db, &mut lote, &metrics, bus.as_ref()).await;
+                    descarrega(&db, &mut lote, &metrics, bus.as_ref(), catalog).await;
                     continue;
                 }
             }
@@ -73,13 +77,13 @@ pub async fn run_with(
             Some(log) => {
                 lote.push(log);
                 if lote.len() >= batch_size {
-                    descarrega(&db, &mut lote, &metrics, bus.as_ref()).await;
+                    descarrega(&db, &mut lote, &metrics, bus.as_ref(), catalog).await;
                 }
             }
             // Fila fechada: grava o que sobrou antes de sair. Sem isto, um
             // desligamento gracioso perderia o último lote.
             None => {
-                descarrega(&db, &mut lote, &metrics, bus.as_ref()).await;
+                descarrega(&db, &mut lote, &metrics, bus.as_ref(), catalog).await;
                 return;
             }
         }
@@ -97,12 +101,16 @@ async fn descarrega(
     lote: &mut Vec<PendingLog>,
     metrics: &IngestMetrics,
     bus: Option<&LogBus>,
+    catalog: Option<&TemplateCatalog>,
 ) {
     if lote.is_empty() {
         return;
     }
     let total = lote.len();
-    let linhas: Vec<device_logs::ActiveModel> = lote.drain(..).map(para_active_model).collect();
+    let linhas: Vec<device_logs::ActiveModel> = lote
+        .drain(..)
+        .map(|log| para_active_model(log, catalog))
+        .collect();
 
     // O live tail publica **depois** da gravação, e a partir do que o banco
     // devolveu: assim a linha na tela tem o mesmo `id` que a paginação vai
@@ -143,7 +151,19 @@ async fn descarrega(
     }
 }
 
-fn para_active_model(log: PendingLog) -> device_logs::ActiveModel {
+/// A linha como vai ao banco. Só syslog ganha padrão: o log da aplicação
+/// também passa por aqui, e classificá-lo não diz nada sobre o parque.
+fn para_active_model(
+    log: PendingLog,
+    catalog: Option<&TemplateCatalog>,
+) -> device_logs::ActiveModel {
+    let template_hash = (log.source == LogSource::Syslog).then(|| {
+        let (template, hash) = template_of(&log.parsed.message);
+        if let Some(catalog) = catalog {
+            catalog.observe(hash, &template, &log);
+        }
+        hash
+    });
     device_logs::ActiveModel {
         device_id: Set(log.device_id),
         source_ip: Set(log.source_ip),
@@ -157,6 +177,7 @@ fn para_active_model(log: PendingLog) -> device_logs::ActiveModel {
         topics: Set(log.parsed.topics),
         message: Set(log.parsed.message),
         source: Set(log.source.as_str().to_string()),
+        template_hash: Set(template_hash),
         ..Default::default()
     }
 }
@@ -213,6 +234,7 @@ mod tests {
             3,
             Duration::from_secs(60),
             None,
+            None,
         )
         .await;
 
@@ -239,6 +261,7 @@ mod tests {
             Arc::clone(&metrics),
             500,
             Duration::from_millis(20),
+            None,
             None,
         )
         .await;
@@ -268,6 +291,7 @@ mod tests {
             500,
             Duration::from_secs(60),
             None,
+            None,
         )
         .await;
 
@@ -292,6 +316,7 @@ mod tests {
             metrics,
             1,
             Duration::from_secs(60),
+            None,
             None,
         )
         .await;
@@ -329,6 +354,7 @@ mod tests {
             1,
             Duration::from_secs(60),
             Some(bus),
+            None,
         )
         .await;
 
@@ -358,6 +384,7 @@ mod tests {
             1,
             Duration::from_secs(60),
             Some(bus),
+            None,
         )
         .await;
 

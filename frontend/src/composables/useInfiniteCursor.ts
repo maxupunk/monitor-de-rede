@@ -50,13 +50,22 @@ export interface InfiniteCursor<T> {
   prepend: (entries: T[], keyOf: (entry: T) => string | number) => void
 }
 
-export function useInfiniteCursor<T>(
+export function useInfiniteCursor<T, Extra extends object = Record<string, never>>(
   /**
    * Caminho da API sem `cursor`. É uma função para a lista poder seguir
    * filtros que mudam sem precisar ser recriada.
    */
   endpoint: () => string,
-  options: { limit?: number; label?: string; max?: number } = {}
+  options: {
+    limit?: number
+    label?: string
+    max?: number
+    /**
+     * O que a página trouxe além de `data`/`meta` (ex.: os padrões de log da
+     * página). Chamado só para a resposta que ainda vale.
+     */
+    onResponse?: (response: Partial<Extra>) => void
+  } = {}
 ): InfiniteCursor<T> {
   const limit = options.limit ?? 50
   /** Teto do que fica em memória: o live tail empilha sem parar */
@@ -87,7 +96,7 @@ export function useInfiniteCursor<T>(
       const separator = currentEndpoint.includes('?') ? '&' : '?'
       const currentCursor = cursor.value
       const query = currentCursor ? `&cursor=${encodeURIComponent(currentCursor)}` : ''
-      const response = await apiService.get<CursorResponse<T>>(
+      const response = await apiService.get<CursorResponse<T> & Partial<Extra>>(
         `${currentEndpoint}${separator}limit=${limit}${query}`
       )
 
@@ -99,6 +108,7 @@ export function useInfiniteCursor<T>(
         return
       }
 
+      options.onResponse?.(response)
       const batch = Array.isArray(response.data) ? response.data : []
       if (batch.length > 0) items.value.push(...batch)
       if (response.meta) {

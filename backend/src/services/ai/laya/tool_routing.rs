@@ -10,9 +10,9 @@
 use std::collections::BTreeMap;
 
 use super::{
-    client::LayaClient,
-    config::AiLayaSettings,
-    decision::{self, Decision, Outcome},
+    config::{AiLayaSettings, LayaFeature},
+    decision::{Decision, Outcome},
+    runtime::{Lane, LayaRuntime},
     schema::{Answer, Question},
 };
 use crate::services::{
@@ -72,28 +72,36 @@ impl Decision for ToolRouting<'_> {
     }
 }
 
-/// Pontua os grupos para a pergunta.
+/// Pontua os grupos para a pergunta, pela fila dada do runtime.
+///
+/// # Errors
+///
+/// Laya fora do ar, modelo frio no chat ou resposta inválida.
 pub async fn score(
+    runtime: &LayaRuntime,
     settings: &AiLayaSettings,
+    lane: Lane,
     question: &str,
     groups: &[ToolGroup],
 ) -> AppResult<Outcome<RoutingScores>> {
-    decision::run(
-        &LayaClient::new(settings),
-        question,
-        &ToolRouting { groups },
-    )
-    .await
+    runtime
+        .try_decide_with(settings, lane, question, &ToolRouting { groups })
+        .await
 }
 
 /// Os grupos que o Laya indica para a pergunta do chat. Vazio quando ele está
-/// desligado, não há o que decidir ou o Ollaya falhou — o chat nunca espera
-/// nem quebra por causa dele.
-pub async fn route(settings: &AiLayaSettings, question: &str, groups: &[ToolGroup]) -> ToolGroups {
-    if !settings.enabled || groups.is_empty() || question.trim().is_empty() {
+/// desligado, não há o que decidir, o modelo ainda está carregando ou o
+/// Ollaya falhou — o chat nunca espera nem quebra por causa dele.
+pub async fn route(
+    runtime: &LayaRuntime,
+    settings: &AiLayaSettings,
+    question: &str,
+    groups: &[ToolGroup],
+) -> ToolGroups {
+    if !settings.allows(LayaFeature::ChatTools) || groups.is_empty() || question.trim().is_empty() {
         return ToolGroups::new();
     }
-    match score(settings, question, groups).await {
+    match score(runtime, settings, Lane::Interactive, question, groups).await {
         Ok(outcome) => {
             let selected = outcome.value.selected(settings.threshold());
             tracing::debug!(
@@ -105,7 +113,7 @@ pub async fn route(settings: &AiLayaSettings, question: &str, groups: &[ToolGrou
             selected
         }
         Err(error) => {
-            tracing::warn!(%error, "laya indisponível; seguindo só com as palavras-chave");
+            tracing::debug!(%error, "laya sem resposta nesta pergunta; seguindo com as palavras-chave");
             ToolGroups::new()
         }
     }
@@ -155,7 +163,11 @@ mod tests {
             base_url: "http://127.0.0.1:9".into(),
             ..AiLayaSettings::default()
         };
-        assert!(route(&settings, "por que caiu?", &GROUPS).await.is_empty());
+        assert!(
+            route(&LayaRuntime::default(), &settings, "por que caiu?", &GROUPS)
+                .await
+                .is_empty()
+        );
     }
 
     #[tokio::test]
@@ -166,6 +178,10 @@ mod tests {
             timeout_ms: 500,
             ..AiLayaSettings::default()
         };
-        assert!(route(&settings, "por que caiu?", &GROUPS).await.is_empty());
+        assert!(
+            route(&LayaRuntime::default(), &settings, "por que caiu?", &GROUPS)
+                .await
+                .is_empty()
+        );
     }
 }

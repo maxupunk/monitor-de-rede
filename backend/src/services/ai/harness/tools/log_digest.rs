@@ -15,8 +15,6 @@ use crate::{models::logs::device_logs, views::logs::severity_label};
 
 /// Caracteres máximos de uma mensagem entregue à IA.
 pub const MESSAGE_CHARS: usize = 240;
-/// Caracteres máximos de um padrão.
-const PATTERN_CHARS: usize = 120;
 const TOP_PATTERNS: usize = 8;
 const TOP_ERROR_PATTERNS: usize = 5;
 const TOP_DEVICES: usize = 8;
@@ -26,54 +24,8 @@ const BUSIEST_HOURS: usize = 3;
 /// crítico, alerta, emergência).
 const ERROR_SEVERITY: i16 = 3;
 
-/// Corta em `max` caracteres (não bytes), marcando o corte.
-#[must_use]
-pub fn truncate_chars(text: &str, max: usize) -> String {
-    let text = text.trim();
-    if text.chars().count() <= max {
-        return text.to_string();
-    }
-    let mut cut: String = text.chars().take(max).collect();
-    cut.push('…');
-    cut
-}
-
-/// Token que é só identificador variável: número, IP, MAC, hexadecimal.
-fn is_variable_token(token: &str) -> bool {
-    token.chars().any(|c| c.is_ascii_digit())
-        && token
-            .chars()
-            .all(|c| c.is_ascii_hexdigit() || matches!(c, ':' | '.' | '-' | '/' | 'x' | 'X'))
-}
-
-/// Padrão da mensagem: identificadores viram `#`, dígitos soltos também.
-#[must_use]
-pub fn normalize_message(message: &str) -> String {
-    let normalized: Vec<String> = message
-        .split_whitespace()
-        .map(|token| {
-            let core = token.trim_matches(|c: char| matches!(c, ',' | ';' | '(' | ')' | '[' | ']'));
-            if !core.is_empty() && is_variable_token(core) {
-                return token.replace(core, "#");
-            }
-            let mut out = String::with_capacity(token.len());
-            let mut in_digits = false;
-            for c in token.chars() {
-                if c.is_ascii_digit() {
-                    if !in_digits {
-                        out.push('#');
-                    }
-                    in_digits = true;
-                } else {
-                    in_digits = false;
-                    out.push(c);
-                }
-            }
-            out
-        })
-        .collect();
-    truncate_chars(&normalized.join(" "), PATTERN_CHARS)
-}
+// O padrão e o corte moram onde a ingestão também os usa.
+pub use crate::services::{shared::text::truncate_chars, syslog::template::normalize_message};
 
 /// Rótulo em português da severidade syslog (0–7).
 #[must_use]
@@ -402,6 +354,7 @@ mod tests {
             topics: None,
             message: message.into(),
             source: "syslog".into(),
+            template_hash: None,
             created_at: at,
         }
     }

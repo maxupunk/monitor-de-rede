@@ -2,6 +2,9 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { apiService } from '@/services/apiService'
 import type { DeviceCapabilities } from '@/bindings/DeviceCapabilities'
+import type { InterfaceCandidate } from '@/bindings/InterfaceCandidate'
+import type { InterfaceSuggestions } from '@/bindings/InterfaceSuggestions'
+import type { InterfaceSuggestionsInput } from '@/bindings/InterfaceSuggestionsInput'
 import type { Device } from './devices'
 import type { Monitor } from './monitors'
 
@@ -89,6 +92,63 @@ export interface ScanInterfaceItem {
   isMonitored: boolean
 }
 
+export interface ScanTrafficItem {
+  ifIndex: number
+  inOctets: number
+  outOctets: number
+}
+
+/**
+ * As interfaces do escaneamento no formato que o Laya lê: nome, alias,
+ * descrição, tipo, velocidade, estado e o tráfego acumulado de cada uma.
+ */
+export function scanInterfaceCandidates(scan: ScanResult): InterfaceCandidate[] {
+  const traffic = new Map((scan.traffic ?? []).map((item) => [item.ifIndex, item]))
+  return scan.interfaces.map((iface) => ({
+    ifIndex: iface.ifIndex,
+    name: iface.ifName,
+    alias: iface.ifAlias ?? null,
+    descr: iface.ifDescr ?? null,
+    ifType: iface.ifType ?? null,
+    speed: iface.ifSpeed ?? null,
+    operUp: iface.ifOperStatus == null ? null : iface.ifOperStatus === 'up',
+    inOctets: traffic.get(iface.ifIndex)?.inOctets ?? null,
+    outOctets: traffic.get(iface.ifIndex)?.outOctets ?? null,
+  }))
+}
+
+/** Uma interface oferecida no seletor "Interface de entrada de link". */
+export interface LinkInterfaceOption {
+  id?: number
+  ifIndex?: number
+  name: string
+  alias?: string | null
+  description?: string | null
+  speed?: number | null
+  operStatus?: string | null
+}
+
+/** As opções do seletor no formato que o Laya lê. */
+export function linkInterfaceCandidates(options: LinkInterfaceOption[]): InterfaceCandidate[] {
+  return options.map((option, position) => ({
+    // Sem ifIndex (cadastro antigo), a posição na lista serve de chave.
+    ifIndex: option.ifIndex ?? -(position + 1),
+    name: option.name,
+    alias: option.alias ?? null,
+    descr: option.description ?? null,
+    ifType: null,
+    speed: option.speed ?? null,
+    operUp: option.operStatus == null ? null : option.operStatus.toLowerCase() === 'up',
+    inOctets: null,
+    outOctets: null,
+  }))
+}
+
+function liveStatus(value: unknown): string | undefined {
+  if (typeof value === 'number') return value === 1 ? 'up' : 'down'
+  return typeof value === 'string' ? value : undefined
+}
+
 export interface SensorStateSpec {
   label: string
   color?: string
@@ -147,6 +207,8 @@ export interface ScanResult {
     usedPercent?: number | null
   }
   interfaces: ScanInterfaceItem[]
+  /** Contadores lidos junto com as interfaces (o backend sempre mandou). */
+  traffic?: ScanTrafficItem[]
   collectorErrors: Record<string, string>
   hasCpuMonitor: boolean
   hasMemoryMonitor: boolean
@@ -257,6 +319,99 @@ export const useDeviceDetailStore = defineStore('deviceDetail', () => {
       return false
     } finally {
       pollingSnmp.value = false
+    }
+  }
+
+  /** Palpite do Laya sobre as interfaces do último escaneamento. */
+  const interfaceSuggestions = ref<InterfaceSuggestions | null>(null)
+  const suggestingInterfaces = ref(false)
+
+  /**
+   * Pede ao Laya o uplink e as interfaces que valem monitorar, sem guardar —
+   * para quem tem a própria lista (o formulário do dispositivo). Sem Laya, ou
+   * se falhar, `null`: sugestão nunca atrapalha a tela.
+   */
+  async function fetchInterfaceSuggestions(
+    input: InterfaceSuggestionsInput
+  ): Promise<InterfaceSuggestions | null> {
+    if (input.interfaces.length === 0) return null
+    try {
+      const res = await apiService.post<InterfaceSuggestions>('/snmp/interfaces/suggestions', input)
+      return res.available ? res : null
+    } catch {
+      return null
+    }
+  }
+
+  /** O mesmo, guardado para o modal de escaneamento desta tela. */
+  async function suggestInterfaces(
+    input: InterfaceSuggestionsInput
+  ): Promise<InterfaceSuggestions | null> {
+    interfaceSuggestions.value = null
+    suggestingInterfaces.value = true
+    try {
+      interfaceSuggestions.value = await fetchInterfaceSuggestions(input)
+      return interfaceSuggestions.value
+    } finally {
+      suggestingInterfaces.value = false
+    }
+  }
+
+  /**
+   * Interfaces para o seletor de link do formulário: as do cadastro (depois
+   * de uma coleta ao vivo, se pedido) ou, sem cadastro, uma consulta SNMP
+   * direta ao IP. Falhas viram lista vazia — o seletor aceita digitação.
+   */
+  async function loadLinkInterfaces(params: {
+    deviceId?: number
+    forceLive?: boolean
+    host: string
+    version: string
+    community: string
+  }): Promise<LinkInterfaceOption[]> {
+    if (params.deviceId) {
+      if (params.forceLive) {
+        await apiService.post(`/devices/${params.deviceId}/snmp/poll`, {}).catch(() => undefined)
+      }
+      try {
+        const rows = await apiService.get<DeviceInterface[]>(
+          `/devices/${params.deviceId}/interfaces`
+        )
+        if (Array.isArray(rows) && rows.length > 0) {
+          return rows.map((row) => ({
+            id: row.id,
+            ifIndex: row.ifIndex,
+            name: row.name || row.ifName || '',
+            alias: row.alias,
+            description: row.description,
+            speed: row.speed || row.ifSpeed,
+            operStatus: row.operStatus || row.ifOperStatus,
+          }))
+        }
+      } catch {
+        // sem cadastro legível: tenta ao vivo abaixo
+      }
+    }
+    if (!params.host) return []
+    try {
+      const live = await apiService.post<Array<Record<string, unknown>>>('/snmp/interfaces-query', {
+        host: params.host,
+        port: 161,
+        version: params.version,
+        community: params.community,
+      })
+      if (!Array.isArray(live)) return []
+      return live.map((row) => ({
+        id: typeof row.id === 'number' ? row.id : undefined,
+        ifIndex: Number(row.ifIndex ?? row.if_index) || undefined,
+        name: String(row.ifName ?? row.if_name ?? row.name ?? ''),
+        alias: (row.ifAlias ?? row.if_alias ?? row.alias) as string | null,
+        description: (row.ifDescr ?? row.if_descr ?? row.description) as string | null,
+        speed: Number(row.ifSpeed ?? row.if_speed ?? row.speed) || null,
+        operStatus: liveStatus(row.ifOperStatus ?? row.if_oper_status),
+      }))
+    } catch {
+      return []
     }
   }
 
@@ -495,6 +650,11 @@ export const useDeviceDetailStore = defineStore('deviceDetail', () => {
   return {
     device,
     interfaces,
+    interfaceSuggestions,
+    suggestingInterfaces,
+    suggestInterfaces,
+    fetchInterfaceSuggestions,
+    loadLinkInterfaces,
     metrics,
     monitors,
     events,

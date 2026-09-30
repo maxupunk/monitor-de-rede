@@ -339,6 +339,9 @@ pub struct IdentifyResult {
     pub probed: bool,
     /// A sonda atual não respondeu e a evidência SNMP veio da última descoberta.
     pub from_discovery: bool,
+    /// Palpite do Laya (tipo e sistema) quando a evidência acima é fraca.
+    /// Só sugestão: a tela mostra e o operador decide.
+    pub laya: Option<crate::services::ai::laya::decisions::device_identity::IdentitySuggestion>,
 }
 
 /// Escolhe e normaliza um nome anunciado pelo equipamento.

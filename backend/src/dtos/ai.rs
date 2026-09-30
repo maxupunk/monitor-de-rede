@@ -287,6 +287,10 @@ pub struct LayaModelsResponse {
     pub error_message: Option<String>,
     /// Nomes como o Ollaya os lista (`laya:multilingual`…).
     pub installed: Vec<String>,
+    /// Carregados na memória agora (`/api/ps`). Fora dela, a primeira
+    /// pergunta espera o modelo sair do disco (5–20 s).
+    #[serde(default)]
+    pub loaded: Vec<String>,
     /// Catálogo conhecido mais o que está instalado fora dele.
     pub options: Vec<LayaModelOption>,
 }

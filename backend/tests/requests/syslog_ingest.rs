@@ -96,6 +96,7 @@ async fn pipeline(com_rede: bool, config: SyslogConfig) -> (DatabaseConnection, 
             1,
             Duration::from_millis(10),
             None,
+            None,
         )
         .await;
     });

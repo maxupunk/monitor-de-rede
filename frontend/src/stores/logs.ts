@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { useInfiniteCursor } from '@/composables/useInfiniteCursor'
 import { apiService } from '@/services/apiService'
 import type { LogEntry } from '@/bindings/LogEntry'
+import type { LogTemplateInfo } from '@/bindings/LogTemplateInfo'
 import type { LogSourcesResponse } from '@/bindings/LogSourcesResponse'
 import type { LogSourceEntry } from '@/bindings/LogSourceEntry'
 import type { LogNatDiagnostics } from '@/bindings/LogNatDiagnostics'
@@ -14,6 +15,7 @@ import { getStoredToken } from '@/utils/authStorage'
 
 export type {
   LogEntry,
+  LogTemplateInfo,
   LogSourceEntry,
   LogNatDiagnostics,
   ProvisionHintsResponse,
@@ -31,6 +33,8 @@ export interface LogFilters {
   /** Janela em horas contadas para trás. `null` usa o padrão do backend (24 h). */
   hours: number | null
   search: string
+  /** Categoria do evento (`auth_failure`, `link_change`…). `null` não filtra. */
+  category: string | null
 }
 
 /**
@@ -62,7 +66,7 @@ export const WINDOW_OPTIONS = [
 export const PROVISION_REQUEST_TIMEOUT_MS = 65_000
 
 export function defaultFilters(): LogFilters {
-  return { deviceId: null, severity: null, hours: 24, search: '' }
+  return { deviceId: null, severity: null, hours: 24, search: '', category: null }
 }
 
 export const useLogsStore = defineStore('logs', () => {
@@ -83,11 +87,51 @@ export const useLogsStore = defineStore('logs', () => {
     }
     const termo = filters.value.search.trim()
     if (termo) params.set('q', termo)
+    if (filters.value.category) params.set('category', filters.value.category)
     const query = params.toString()
     return query ? `/logs?${query}` : '/logs'
   }
 
-  const list = useInfiniteCursor<LogEntry>(endpoint, { label: 'os registros de log' })
+  /**
+   * Os padrões de log conhecidos, pela chave. A linha só carrega a chave; a
+   * categoria vem da página ou do evento `logs:template_classified` — e assim
+   * a linha do live tail também a ganha.
+   */
+  const templates = ref<Record<string, LogTemplateInfo>>({})
+
+  function rememberTemplates(list: LogTemplateInfo[]): void {
+    if (list.length === 0) return
+    const next = { ...templates.value }
+    for (const info of list) next[info.templateHash] = info
+    templates.value = next
+  }
+
+  /** Um padrão classificado (pelo Laya) ou confirmado (pelo operador). */
+  function applyTemplateClassified(info: LogTemplateInfo): void {
+    rememberTemplates([info])
+  }
+
+  function templateOf(entry: LogEntry): LogTemplateInfo | null {
+    return entry.templateHash ? (templates.value[entry.templateHash] ?? null) : null
+  }
+
+  /** O operador confirma ou corrige a categoria. Devolve o erro, ou `null`. */
+  async function confirmTemplate(templateHash: string, category: string): Promise<string | null> {
+    try {
+      const info = await apiService.put<LogTemplateInfo>(`/logs/templates/${templateHash}`, {
+        category,
+      })
+      rememberTemplates([info])
+      return null
+    } catch (err) {
+      return err instanceof Error ? err.message : 'Falha ao salvar a categoria'
+    }
+  }
+
+  const list = useInfiniteCursor<LogEntry, { templates: LogTemplateInfo[] }>(endpoint, {
+    label: 'os registros de log',
+    onResponse: (response) => rememberTemplates(response.templates ?? []),
+  })
 
   const isEmpty = computed(() => list.items.value.length === 0)
 
@@ -306,6 +350,7 @@ export const useLogsStore = defineStore('logs', () => {
       const from = new Date(Date.now() - f.hours * 3_600_000)
       params.set('from', from.toISOString())
     }
+    if (f.category) params.set('category', f.category)
     const termo = (f.search ?? '').trim()
     if (termo) params.set('q', termo)
     if (format !== 'txt') params.set('format', format)
@@ -334,6 +379,10 @@ export const useLogsStore = defineStore('logs', () => {
 
   return {
     filters,
+    templates,
+    templateOf,
+    applyTemplateClassified,
+    confirmTemplate,
     entries: list.items,
     scrollKey: list.scrollKey,
     window: list.window,

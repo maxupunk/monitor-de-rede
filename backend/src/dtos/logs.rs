@@ -31,6 +31,8 @@ pub struct LogsQuery {
     /// Cursor opaco devolvido em `meta.nextCursor`.
     pub cursor: Option<String>,
     pub limit: Option<u64>,
+    /// Categoria do evento (`auth_failure`, `link_change`…).
+    pub category: Option<String>,
 }
 
 /// Filtros de `GET /api/logs/export`.
@@ -45,6 +47,7 @@ pub struct LogExportQuery {
     pub q: Option<String>,
     pub limit: Option<u64>,
     pub format: Option<String>,
+    pub category: Option<String>,
 }
 
 /// Uma linha de log como a tela a consome.
@@ -81,6 +84,47 @@ pub struct LogEntry {
     /// Tópicos do RouterOS, já quebrados em lista (`system`, `info`, …).
     pub topics: Vec<String>,
     pub message: String,
+    /// Chave do padrão da mensagem, em hexadecimal (um `i64` perde precisão no
+    /// JavaScript). A categoria vem em `templates` da página ou pelo evento
+    /// `logs:template_classified` — assim a linha do live tail também a ganha.
+    pub template_hash: Option<String>,
+}
+
+/// Um padrão de log e o que ele significa.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct LogTemplateInfo {
+    pub template_hash: String,
+    pub template: String,
+    pub example: String,
+    /// A que vale: a do operador, senão a do Laya.
+    pub category: Option<String>,
+    /// Do palpite do Laya (0–100); `null` quando o operador decidiu.
+    #[ts(type = "number | null")]
+    pub confidence: Option<i16>,
+    pub model: Option<String>,
+    /// O operador confirmou ou corrigiu.
+    pub confirmed: bool,
+    /// Modelo do catálogo de alertas que cobre esta categoria, quando há.
+    pub alert_template: Option<String>,
+    /// Regex que casa as linhas deste padrão, para uma regra `log_pattern`.
+    pub alert_regex: String,
+}
+
+/// Corpo de `PUT /api/logs/templates/{hash}`.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct LogTemplateUpdate {
+    pub category: String,
+}
+
+/// Filtro de `GET /api/logs/templates`.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogTemplatesQuery {
+    pub category: Option<String>,
 }
 
 /// O `meta` do envelope por cursor.
@@ -107,6 +151,9 @@ pub struct LogPageMeta {
 pub struct LogPageResponse {
     pub data: Vec<LogEntry>,
     pub meta: LogPageMeta,
+    /// Os padrões das linhas desta página, com a categoria de cada um.
+    #[serde(default)]
+    pub templates: Vec<LogTemplateInfo>,
 }
 
 /// Uma origem vista pelo servidor desde o último reinício.

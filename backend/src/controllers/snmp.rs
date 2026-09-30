@@ -170,6 +170,16 @@ async fn query_interfaces(Json(input): Json<SnmpTestInput>) -> AppResult<Respons
     Ok(format::json(ifaces)?)
 }
 
+/// `POST /api/snmp/interfaces/suggestions` — o Laya indica o uplink e as
+/// interfaces que valem monitorar. Sem Laya, `available: false`.
+async fn interface_suggestions(
+    State(ctx): State<AppContext>,
+    Json(input): Json<crate::dtos::snmp::InterfaceSuggestionsInput>,
+) -> AppResult<Response> {
+    let suggestions = crate::services::snmp::laya_interfaces::suggest(&ctx, &input).await;
+    Ok(format::json(suggestions)?)
+}
+
 async fn list_profiles(State(ctx): State<AppContext>) -> AppResult<Response> {
     let profiles = crate::services::snmp::profiles::load_all_profiles(&ctx.db).await?;
     Ok(format::json(profiles)?)
@@ -197,6 +207,7 @@ pub fn routes() -> Routes {
     Routes::new()
         .add("/snmp/test", post(test))
         .add("/snmp/interfaces-query", post(query_interfaces))
+        .add("/snmp/interfaces/suggestions", post(interface_suggestions))
         .add("/snmp/profiles", get(list_profiles))
         .add("/snmp/profiles", post(save_profile))
         .add("/snmp/profiles/{id}", delete(delete_profile))

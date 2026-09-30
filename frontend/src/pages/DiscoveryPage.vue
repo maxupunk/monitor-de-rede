@@ -228,6 +228,10 @@
                         }}</v-icon>
                         {{ discoveryDeviceTypeInfo(item.deviceType).label }}
                       </v-chip>
+                      <LayaSuggestionChip
+                        :suggestion="discoveryLaya(item)?.deviceType ?? null"
+                        :format-label="deviceTypeLabel"
+                      />
                       <v-chip v-if="hasSnmp(item)" size="x-small" color="teal" variant="tonal">
                         <v-icon start size="12">mdi-lan-check</v-icon>
                         SNMP {{ snmpVersion(item) }}
@@ -523,6 +527,7 @@ import {
   discoveryIdentity,
   discoveryDeviceName,
   discoveryDeviceTypeInfo,
+  discoveryLaya,
 } from '@/stores/discovery'
 import { useNetworksStore } from '@/stores/networks'
 import { useDevicesStore } from '@/stores/devices'
@@ -533,6 +538,8 @@ import PageHeader from '@/components/PageHeader.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import type { Device } from '@/stores/devices'
 import { confirm } from '@/composables/useConfirm'
+import { deviceTypeLabel, normalizeDeviceType } from '@/utils/deviceTypes'
+import LayaSuggestionChip from '@/components/ai/LayaSuggestionChip.vue'
 
 const PHASE_LABELS: Record<DiscoveryPhase, string> = {
   idle: 'Aguardando',
@@ -659,11 +666,7 @@ const dialogPrefill = computed<Partial<Device> | null>(() => {
   return {
     name: discoveredName || fallbackName,
     ipAddress: result.ipAddress,
-    type: isGateway
-      ? 'router'
-      : typeInfo.isKnown && result.deviceType
-        ? result.deviceType
-        : 'other',
+    type: isGateway ? 'router' : normalizeDeviceType(result.deviceType),
     vendor: result.vendor || identity?.hardwareVendor || undefined,
     model: identity?.hardwareModel || undefined,
     macAddress: result.macAddress || undefined,

@@ -2,5 +2,6 @@
 
 pub mod client;
 pub mod collectors;
+pub mod laya_interfaces;
 pub mod profiles;
 pub mod service;

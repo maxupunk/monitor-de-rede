@@ -21,18 +21,20 @@ use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
 use crate::{
     dtos::logs::{
-        BindSourceInput, BindSourceResponse, LogEntry, LogExportQuery, LogStreamQuery, LogsQuery,
-        ProvisionHintsResponse, ProvisionLoggingInput, ProvisionLoggingResponse,
+        BindSourceInput, BindSourceResponse, LogEntry, LogExportQuery, LogStreamQuery,
+        LogTemplateUpdate, LogTemplatesQuery, LogsQuery, ProvisionHintsResponse,
+        ProvisionLoggingInput, ProvisionLoggingResponse,
     },
     services::{
         devices::{access, systems},
+        events::EventBus,
         network_tools::mactelnet,
         server_addresses,
         shared::errors::{AppError, AppResult},
         syslog::{
             destination, hints, provision,
             repository::{self, Cursor, LogFilters, LogQuery, MAX_EXPORT_LIMIT},
-            resolver, snippets, LogsDb, SyslogService,
+            resolver, snippets, templates, LogsDb, SyslogService,
         },
     },
     views::logs::{
@@ -66,12 +68,13 @@ async fn index(
             q: query.q,
             cursor: query.cursor.as_deref().map(Cursor::decode).transpose()?,
             limit: query.limit,
+            category: query.category,
         },
         Utc::now(),
     );
 
     let pagina = repository::search(logs.connection(), &filtros).await?;
-    let resposta = serialize_page(&ctx.db, pagina, &filtros).await?;
+    let resposta = serialize_page(&ctx.db, logs.connection(), pagina, &filtros).await?;
     Ok(format::json(resposta)?)
 }
 
@@ -93,6 +96,7 @@ async fn export_logs(
             q: query.q,
             cursor: None,
             limit: Some(max_rows),
+            category: query.category,
         },
         Utc::now(),
     );
@@ -765,11 +769,37 @@ fn endereco_do_servidor() -> String {
     host.to_owned()
 }
 
+/// `GET /api/logs/templates` — os padrões de log e a categoria de cada um.
+async fn list_templates(
+    State(ctx): State<AppContext>,
+    Query(query): Query<LogTemplatesQuery>,
+) -> AppResult<Response> {
+    let logs = LogsDb::from_context(&ctx)?;
+    let lista = templates::list(logs.connection(), query.category.as_deref()).await?;
+    Ok(format::json(lista)?)
+}
+
+/// `PUT /api/logs/templates/{hash}` — o operador confirma ou corrige a
+/// categoria de um padrão. Vale mais que o palpite do Laya.
+async fn update_template(
+    State(ctx): State<AppContext>,
+    Path(hash): Path<String>,
+    Json(input): Json<LogTemplateUpdate>,
+) -> AppResult<Response> {
+    let logs = LogsDb::from_context(&ctx)?;
+    let events = EventBus::from_context(&ctx).ok();
+    let info =
+        templates::confirm(logs.connection(), &hash, &input.category, events.as_ref()).await?;
+    Ok(format::json(info)?)
+}
+
 pub fn routes() -> Routes {
     Routes::new()
         .prefix("/logs")
         .add("/", get(index))
         .add("/export", get(export_logs))
+        .add("/templates", get(list_templates))
+        .add("/templates/{hash}", put(update_template))
         .add("/stream", get(stream))
         .add("/sources", get(sources))
         .add("/sources/{ip}/bind", post(bind_source))
@@ -799,6 +829,7 @@ mod tests {
             pid: None,
             topics: Vec::new(),
             message: "linha".into(),
+            template_hash: None,
         }
     }
 

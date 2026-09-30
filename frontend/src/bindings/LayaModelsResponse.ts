@@ -12,6 +12,11 @@ export type LayaModelsResponse = {
    */
   installed: Array<string>
   /**
+   * Carregados na memória agora (`/api/ps`). Fora dela, a primeira
+   * pergunta espera o modelo sair do disco (5–20 s).
+   */
+  loaded: Array<string>
+  /**
    * Catálogo conhecido mais o que está instalado fora dele.
    */
   options: Array<LayaModelOption>

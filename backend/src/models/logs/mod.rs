@@ -5,3 +5,4 @@
 //! mão lá dentro seria apagado na próxima geração.
 
 pub mod device_logs;
+pub mod log_templates;

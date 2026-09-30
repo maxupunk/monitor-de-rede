@@ -29,7 +29,7 @@ use crate::{
         ai::{
             context_window::{self, ContextWindow},
             drivers::traits::{AiChatOptions, AiDriver, AiMessage, AiToolCall, AiUsage},
-            laya::tool_routing,
+            laya::{runtime::LayaRuntime, tool_routing},
             mentions,
             settings::AiSettings,
         },
@@ -498,7 +498,13 @@ pub async fn run_agent_loop(
         let (routed, mut window) = tokio::join!(
             async {
                 if consult_laya {
-                    tool_routing::route(&settings.laya, question, &available).await
+                    tool_routing::route(
+                        &LayaRuntime::from_context(&ctx),
+                        &settings.laya,
+                        question,
+                        &available,
+                    )
+                    .await
                 } else {
                     ToolGroups::new()
                 }

@@ -109,6 +109,26 @@ pub struct SnmpInterface {
     pub is_monitored: bool,
 }
 
+/// Nome curto do `ifType` (IANAifType-MIB) para quem lê a interface — hoje o
+/// Laya. Só os tipos comuns em rede pequena; o resto vira `type N`.
+#[must_use]
+pub fn if_type_label(if_type: u64) -> String {
+    match if_type {
+        6 | 62 | 117 => "ethernet".into(),
+        23 => "ppp".into(),
+        24 => "loopback".into(),
+        53 => "virtual".into(),
+        71 => "wifi".into(),
+        94 => "adsl".into(),
+        131 => "tunnel".into(),
+        135 | 136 => "vlan".into(),
+        161 => "link aggregation (LAG)".into(),
+        209 => "bridge".into(),
+        250 => "gpon".into(),
+        other => format!("type {other}"),
+    }
+}
+
 pub async fn collect_interfaces(client: &SnmpClient) -> Result<Vec<SnmpInterface>, SnmpError> {
     let (base, extended) = tokio::join!(client.walk(OID_IF_TABLE), client.walk(OID_IF_X_TABLE));
     Ok(parse_interfaces(base?, extended.unwrap_or_default()))

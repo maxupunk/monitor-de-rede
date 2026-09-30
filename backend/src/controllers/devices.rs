@@ -31,7 +31,7 @@ use crate::{
         },
         devices::{
             access::{AccessContext, AccessMode},
-            capabilities,
+            capabilities, identify as identify_service,
             system_device::{self, ProposedIdentity},
             systems,
         },
@@ -48,7 +48,6 @@ use crate::{
             pagination::{paginate, MaybePaged},
         },
         snmp::service::{sync_monitor_intervals, DEFAULT_SNMP_POLL_INTERVAL_SECONDS},
-        syslog::hints,
     },
     views::vpn::VpnPeerResponse,
 };
@@ -933,21 +932,6 @@ async fn events(
     Ok(format::json(body)?)
 }
 
-/// Corpo de `POST /api/devices/identify`.
-///
-/// Vem do **formulário**, e não de um id: o operador precisa poder identificar
-/// antes de salvar, e num cadastro novo ainda não há dispositivo para consultar.
-#[derive(Debug, Default, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct IdentifyInput {
-    name: Option<String>,
-    ip_address: Option<String>,
-    snmp_version: Option<String>,
-    snmp_community: Option<String>,
-    vendor: Option<String>,
-    model: Option<String>,
-}
-
 /// `POST /api/devices/identify` — descobre o sistema **agora**, e diz como.
 ///
 /// Consulta o SNMP (quando há comunidade) e lê a identificação do servidor SSH,
@@ -958,170 +942,11 @@ struct IdentifyInput {
 /// **Não grava nada.** É consulta — quem decide o que fica é o formulário.
 async fn identify(
     State(ctx): State<AppContext>,
-    Json(entrada): Json<IdentifyInput>,
+    Json(entrada): Json<identify_service::IdentifyInput>,
 ) -> AppResult<Response> {
-    let host = entrada
-        .ip_address
-        .as_deref()
-        .map(str::trim)
-        .filter(|valor| !valor.is_empty())
-        .and_then(|texto| texto.parse::<std::net::IpAddr>().ok());
-
-    let comunidade = entrada
-        .snmp_community
-        .as_deref()
-        .map(str::trim)
-        .filter(|valor| !valor.is_empty())
-        .unwrap_or(crate::services::preferences::DEFAULT_SNMP_COMMUNITY);
-
-    let (snmp, ssh) = match host {
-        Some(endereco) => {
-            let consulta_snmp = async {
-                hints::identidade_snmp(endereco, comunidade, entrada.snmp_version.as_deref()).await
-            };
-            tokio::join!(consulta_snmp, hints::sonda_ssh(endereco))
-        }
-        None => (None, (false, None)),
-    };
-    let ssh_banner = ssh.1;
-
-    let descoberta = match host {
-        Some(endereco) => {
-            discovery_results::Entity::find()
-                .filter(discovery_results::Column::IpAddress.eq(endereco.to_string()))
-                .order_by_desc(discovery_results::Column::LastSeenAt)
-                .one(&ctx.db)
-                .await?
-        }
-        None => None,
-    };
-
-    let cached_sys_descr = descoberta
-        .as_ref()
-        .and_then(|item| campo_identidade_da_descoberta(item, "sysDescr"));
-    let cached_sys_object_id = descoberta
-        .as_ref()
-        .and_then(|item| campo_identidade_da_descoberta(item, "sysObjectId"));
-    let cached_sys_name = descoberta
-        .as_ref()
-        .and_then(|item| campo_identidade_da_descoberta(item, "sysName"));
-    let sys_descr = snmp
-        .as_ref()
-        .and_then(|info| info.sys_descr.clone())
-        .or(cached_sys_descr);
-    let sys_object_id = snmp
-        .as_ref()
-        .and_then(|info| info.sys_object_id.clone())
-        .or(cached_sys_object_id);
-
-    let suggested_vendor = snmp
-        .as_ref()
-        .and_then(|info| info.hardware_vendor.clone())
-        .or_else(|| {
-            descoberta
-                .as_ref()
-                .and_then(|item| campo_identidade_da_descoberta(item, "hardwareVendor"))
-        })
-        .or_else(|| descoberta.as_ref().and_then(fabricante_da_descoberta))
-        .filter(|valor| {
-            snmp.as_ref()
-                .and_then(|info| info.sys_descr.as_deref())
-                .is_none_or(|descricao| valor.trim() != descricao.trim())
-        })
-        .filter(|valor| !valor.trim().is_empty());
-    let suggested_model = snmp
-        .as_ref()
-        .and_then(|info| info.hardware_model.clone())
-        .or_else(|| {
-            descoberta
-                .as_ref()
-                .and_then(|item| campo_identidade_da_descoberta(item, "hardwareModel"))
-        })
-        .or_else(|| descoberta.as_ref().and_then(modelo_da_descoberta))
-        .filter(|valor| !valor.trim().is_empty());
-    let suggested_name = systems::suggest_name(
-        snmp.as_ref()
-            .and_then(|info| info.sys_name.as_deref())
-            .or(cached_sys_name.as_deref()),
-        descoberta
-            .as_ref()
-            .and_then(|item| item.hostname.as_deref()),
-        descoberta
-            .as_ref()
-            .and_then(|item| item.mdns_name.as_deref()),
-    );
-
-    let achado = systems::detect(&systems::Evidence {
-        // A declaração fica de fora: o botão existe para dizer o que o
-        // **equipamento** é, e devolver de volta o que o operador acabou de
-        // escolher no seletor faria a detecção concordar consigo mesma.
-        declared: None,
-        sys_object_id: sys_object_id.as_deref(),
-        sys_descr: sys_descr.as_deref(),
-        ssh_banner: ssh_banner.as_deref(),
-        name: entrada.name.as_deref().or(suggested_name.as_deref()),
-        vendor: entrada.vendor.as_deref().or(suggested_vendor.as_deref()),
-        model: entrada.model.as_deref().or(suggested_model.as_deref()),
-    });
-
-    let acesso = AccessContext::load(&ctx.db)
-        .await?
-        .resolve_draft(entrada.ip_address.as_deref());
-    let from_discovery = snmp.is_none() && achado.source == systems::source::SNMP;
-    Ok(format::json(systems::IdentifyResult {
-        operating_system: achado.system.id.to_owned(),
-        label: achado.system.label.to_owned(),
-        source: achado.source.to_owned(),
-        reason: achado.reason,
-        sys_descr,
-        sys_object_id,
-        probed: snmp.is_some() || ssh_banner.is_some(),
-        ssh_banner,
-        suggested_vendor,
-        suggested_model,
-        suggested_name,
-        access_mode: acesso.mode.id().to_owned(),
-        access_mode_reason: acesso.reason,
-        from_discovery,
-    })?)
-}
-
-fn campo_identidade_da_descoberta(item: &discovery_results::Model, campo: &str) -> Option<String> {
-    let detalhes = item.data.as_ref()?.get("details")?;
-    detalhes
-        .get("identity")
-        .or_else(|| detalhes.get("snmpSystem"))
-        .and_then(|identidade| identidade.get(campo))
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|valor| !valor.is_empty())
-        .map(str::to_owned)
-}
-
-/// Probes mais novos podem anexar o modelo ao documento livre da descoberta.
-/// Lemos os dois formatos já usados (`details.model` e
-/// `details.snmp.model`) sem transformar `sysDescr` em modelo: descrição de SO
-/// não é identidade de hardware.
-fn modelo_da_descoberta(item: &discovery_results::Model) -> Option<String> {
-    let detalhes = item.data.as_ref()?.get("details")?;
-    detalhes
-        .get("model")
-        .or_else(|| detalhes.get("snmp")?.get("model"))
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|valor| !valor.is_empty())
-        .map(str::to_owned)
-}
-
-/// O scanner antigo gravava `sysDescr` em `vendor` quando o OUI não respondia.
-/// Uma descrição de kernel não pode aparecer como fabricante no formulário.
-fn fabricante_da_descoberta(item: &discovery_results::Model) -> Option<String> {
-    item.vendor
-        .as_deref()
-        .map(str::trim)
-        .filter(|valor| !valor.is_empty() && valor.len() <= 80)
-        .filter(|valor| !crate::services::devices::adapters::registry::is_system_description(valor))
-        .map(str::to_owned)
+    Ok(format::json(
+        identify_service::identify(&ctx, &entrada).await?,
+    )?)
 }
 
 /// `GET /api/devices/systems` — o catálogo de sistemas.

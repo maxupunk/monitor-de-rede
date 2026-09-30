@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { discoveryDeviceName, discoveryDeviceTypeInfo, discoveryIdentity } from '@/stores/discovery'
+import {
+  discoveryDeviceName,
+  discoveryDeviceTypeInfo,
+  discoveryIdentity,
+  discoveryLaya,
+} from '@/stores/discovery'
+import { normalizeDeviceType } from '@/utils/deviceTypes'
 
 describe('discoveryIdentity', () => {
   it('lê a identidade do snapshot SSE', () => {
@@ -78,5 +84,27 @@ describe('discoveryDeviceTypeInfo', () => {
     const info = discoveryDeviceTypeInfo('unknown')
     expect(info.isKnown).toBe(false)
     expect(info.label).toBe('Desconhecido')
+  })
+})
+
+describe('discoveryLaya', () => {
+  const camera = { value: 'camera', confidence: 91, model: 'laya:multilingual' }
+
+  it('lê o palpite do stream ao vivo e do resultado persistido', () => {
+    expect(discoveryLaya({ data: { laya: { deviceType: camera } } })?.deviceType).toEqual(camera)
+    expect(
+      discoveryLaya({ data: { details: { laya: { deviceType: camera } } } })?.deviceType
+    ).toEqual(camera)
+    expect(discoveryLaya({ data: { details: {} } })).toBeNull()
+  })
+})
+
+describe('normalizeDeviceType', () => {
+  it('traduz o vocabulário da descoberta para o do cadastro', () => {
+    expect(normalizeDeviceType('access_point')).toBe('ap')
+    expect(normalizeDeviceType('camera')).toBe('camera')
+    expect(normalizeDeviceType('web_device')).toBe('other')
+    expect(normalizeDeviceType('unknown')).toBe('other')
+    expect(normalizeDeviceType(null)).toBe('other')
   })
 })

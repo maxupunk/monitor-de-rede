@@ -19,6 +19,7 @@ use sea_orm_migration::prelude::*;
 mod m20260815_000001_device_logs;
 mod m20260816_000001_device_logs_fts;
 mod m20260819_000001_device_logs_source;
+mod m20260930_000001_log_templates;
 
 pub struct LogsMigrator;
 
@@ -29,6 +30,7 @@ impl MigratorTrait for LogsMigrator {
             Box::new(m20260815_000001_device_logs::Migration),
             Box::new(m20260816_000001_device_logs_fts::Migration),
             Box::new(m20260819_000001_device_logs_source::Migration),
+            Box::new(m20260930_000001_log_templates::Migration),
         ]
     }
 }

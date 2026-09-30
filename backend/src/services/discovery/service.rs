@@ -143,6 +143,33 @@ impl ScanSessionService {
         state.hosts = hosts.to_vec();
         self.publish(&state);
     }
+    /// Acrescenta um dado a um host da execução ao vivo e republica — o
+    /// palpite do Laya chega depois da varredura. Outra execução em curso
+    /// não é tocada.
+    pub async fn annotate_host(
+        &self,
+        run_id: i64,
+        ip_address: &str,
+        key: &str,
+        value: serde_json::Value,
+    ) {
+        let mut state = self.state.write().await;
+        if state.run_id != Some(run_id) {
+            return;
+        }
+        let Some(host) = state
+            .hosts
+            .iter_mut()
+            .find(|host| host.ip_address == ip_address)
+        else {
+            return;
+        };
+        if !host.data.is_object() {
+            host.data = serde_json::json!({});
+        }
+        host.data[key] = value;
+        self.publish(&state);
+    }
     pub async fn finish(&self, error: Option<String>) {
         {
             let mut state = self.state.write().await;
@@ -193,6 +220,7 @@ pub async fn run_discovery(
     let merged = outcome?;
     session.hosts(&merged).await;
     persist_results(&ctx.db, run_id, &merged).await?;
+    super::laya_identity::spawn(ctx, run_id, merged.clone());
 
     // Auditoria de conflitos/clones de IP e MAC após a varredura
     if let Ok(conflicts) = super::conflicts::analyze_network_conflicts(&ctx.db).await {
@@ -247,6 +275,7 @@ pub async fn complete_remote_discovery(
 
     if error.is_none() {
         persist_results(&ctx.db, run_id, hosts).await?;
+        super::laya_identity::spawn(ctx, run_id, hosts.to_vec());
     }
     discovery_runs::ActiveModel {
         id: Set(run_id),

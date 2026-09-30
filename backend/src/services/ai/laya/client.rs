@@ -27,6 +27,10 @@ use crate::{
 };
 
 const SERVICE: &str = "Ollaya";
+/// Carregar um modelo na memória leva de 5 a 20 s em CPU (medido: 4–17 s).
+/// É prazo próprio: o "tempo máximo por pergunta" vale para a inferência,
+/// não para tirar o modelo do disco.
+pub const LOAD_TIMEOUT: Duration = Duration::from_secs(120);
 
 fn http() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
@@ -66,8 +70,12 @@ impl<'a> LayaClient<'a> {
     }
 
     fn unreachable(&self, error: &reqwest::Error) -> AppError {
+        self.unreachable_after(error, self.timeout())
+    }
+
+    fn unreachable_after(&self, error: &reqwest::Error, waited: Duration) -> AppError {
         let reason = if error.is_timeout() {
-            format!("sem resposta em {} ms", self.settings.timeout_ms)
+            format!("sem resposta em {} ms", waited.as_millis())
         } else {
             error.to_string()
         };
@@ -118,6 +126,49 @@ impl<'a> LayaClient<'a> {
             response,
             latency_ms: duration_to_ms(started.elapsed()),
         })
+    }
+
+    /// Modelos carregados na memória agora (`GET /api/ps`).
+    pub async fn loaded_models(&self) -> AppResult<Vec<String>> {
+        let request = http().get(self.url("/api/ps")).timeout(self.timeout());
+        let res = self
+            .authorized(request)
+            .send()
+            .await
+            .map_err(|e| self.unreachable(&e))?;
+        if !res.status().is_success() {
+            return Err(AppError::service_unavailable(format!(
+                "{SERVICE} respondeu {} ao listar os modelos carregados",
+                res.status()
+            )));
+        }
+        let loaded = res.json::<TagsResponse>().await.map_err(|e| {
+            AppError::service_unavailable(format!("Resposta inválida do {SERVICE}: {e}"))
+        })?;
+        Ok(loaded.models.into_iter().map(|tag| tag.name).collect())
+    }
+
+    /// Carrega o modelo na memória sem responder nada: `/api/decide` sem
+    /// `state` nem perguntas (contrato do Ollaya). Devolve quanto levou.
+    pub async fn load(&self) -> AppResult<f64> {
+        let started = Instant::now();
+        let request = http()
+            .post(self.url("/api/decide"))
+            .timeout(LOAD_TIMEOUT)
+            .json(&serde_json::json!({ "model": self.settings.model }));
+        let res = self
+            .authorized(request)
+            .send()
+            .await
+            .map_err(|e| self.unreachable_after(&e, LOAD_TIMEOUT))?;
+        if !res.status().is_success() {
+            let status = res.status();
+            let body = res.text().await.unwrap_or_default();
+            return Err(AppError::service_unavailable(format!(
+                "{SERVICE} respondeu {status} ao carregar o modelo: {body}"
+            )));
+        }
+        Ok(duration_to_ms(started.elapsed()))
     }
 
     /// Modelos instalados no servidor.

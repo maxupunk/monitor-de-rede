@@ -157,11 +157,44 @@ pub async fn run_if_due(
         Some(now.with_timezone(&Utc).to_rfc3339()),
     )
     .await?;
-    let digest = generate(ctx, &settings, drivers, period_hours(schedule)).await?;
+    let hours = period_hours(schedule);
+    if settings.proactive.skip_quiet_digest && quiet_period(&ctx.db, hours).await? {
+        tracing::info!(hours, "resumo periódico pulado: nenhum alerta no período");
+        return Ok(false);
+    }
+    let digest = generate(ctx, &settings, drivers, hours).await?;
     NotificationService::with_default_channels()
         .notify(ctx, &notification(&digest, schedule))
         .await;
     Ok(true)
+}
+
+/// Nenhum alerta abriu nas últimas `hours` horas e nenhum está aberto?
+///
+/// # Errors
+///
+/// Erro do banco.
+pub async fn quiet_period<C: ConnectionTrait>(db: &C, hours: i64) -> AppResult<bool> {
+    use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
+
+    use crate::models::_entities::alert_events;
+
+    let since = Utc::now() - chrono::Duration::hours(hours);
+    let opened = alert_events::Entity::find()
+        .filter(alert_events::Column::StartedAt.gte(since))
+        .count(db)
+        .await?;
+    if opened > 0 {
+        return Ok(false);
+    }
+    let still_open = alert_events::Entity::find()
+        .filter(
+            alert_events::Column::Status
+                .ne(crate::services::alerts::contracts::AlertStatus::Resolved.as_str()),
+        )
+        .count(db)
+        .await?;
+    Ok(still_open == 0)
 }
 
 /// Confere o agendamento a cada 5 minutos.

@@ -697,7 +697,62 @@ continua no banco; o polling HTTP, o registrador do `vpn-probe` e o fallback
 local do agendador permanecem (AGENTS §6). Resultado pronto com o canal caído
 vai para o buffer do agente e volta como evento na reconexão.
 
-## 12. O que não existe
+## 11-C. Laya — decisões locais sem LLM
+
+O Laya é um classificador (não gera texto) servido pelo container opcional `ollaya`
+(sobe com o `docker compose up`; ocioso ~150 MB, com modelo carregado ~3–4 GB — a tela avisa ao ligar quando o Ollaya é local). Responde perguntas tipadas — sim/não,
+escolha, escala — sobre um texto, em dezenas de milissegundos, com
+probabilidade calibrada. O sistema o consulta onde uma heurística lia texto sem
+saber o quanto estava certa. **Ele só sugere**: toda decisão fica visível com a
+confiança, e quem aplica é o operador. Desligado ou fora do ar, tudo segue como
+antes.
+
+```text
+services/ai/laya/
+  config.rs         chave mestra + uma chave por frente (features)
+  client.rs         HTTP do Ollaya (um reqwest::Client por processo)
+  decision.rs       trait Decision: perguntas + leitura das respostas
+  runtime.rs        LayaRuntime: cache da config, filas, disjuntor
+  suggestion.rs     LayaSuggestion { value, confidence 0–100, model }
+  tool_routing.rs   chat: quais grupos de ferramentas vão ao LLM
+  decisions/        device_identity · interfaces · log_category · incident_triage
+```
+
+**Duas filas.** `Lane::Interactive` (chat, identificar dispositivo, sugerir
+interfaces) passa direto; `Lane::Background` (descoberta, logs, triagem) entra
+um por vez num semáforo e respeita um disjuntor (3 falhas seguidas → 60 s sem
+consultar). O Ollaya em CPU faz uma inferência por vez; um lote de logs não pode
+empurrar o chat além do tempo limite. O disjuntor avisa ao abrir e ao fechar, e
+só: os logs da aplicação viram linhas de log (`syslog::app_layer`), e avisar a
+cada falha encheria o banco com o próprio aviso.
+
+| Frente | Onde entra | Quando consulta | Onde a sugestão aparece |
+|---|---|---|---|
+| Ferramentas do chat | `harness/agent.rs`, junto da janela de contexto | cada pergunta | invisível: soma grupos às palavras-chave |
+| Identificação | `discovery/laya_identity.rs`, depois de gravar a execução | host `unknown`/`web_device` ou sem sistema | chip na Descoberta (pelo stream da varredura) e no cadastro (`/devices/identify`) |
+| Interfaces | `snmp/laya_interfaces.rs` (`POST /api/snmp/interfaces/suggestions`) | ao mostrar a lista de interfaces | "Uplink sugerido", "Vale monitorar", "Selecionar sugeridas" |
+| Eventos de log | `syslog/categorizer.rs`, worker fora do caminho quente | uma vez por **padrão** novo (não por linha) | chip e filtro em `/logs`; "Criar alerta" abre o catálogo |
+| Triagem proativa | `proactive/triage.rs`, antes do teto por hora | cada alerta que abriria resumo | "Resumo pulado pelo Laya" + "Gerar resumo agora" |
+
+**Modelo frio.** Tirar o modelo do disco leva de 5 a 20 s em CPU; o "tempo
+máximo por pergunta" vale só para a inferência, e carregar tem prazo próprio
+(`client::LOAD_TIMEOUT`, 120 s). O runtime consulta `/api/ps` (resultado
+guardado por 20 s) e, com o modelo fora da memória, carrega um por vez
+(`/api/decide` sem `state`) publicando `laya:model_state` (`loading` → `ready`
+/ `failed`) pelo SSE. Por fila: `OnDemand` (o teste da tela, sugerir
+interfaces) e `Background` esperam o carregamento; `Interactive` (chat,
+identificar) não espera — dispara o carregamento e segue sem o Laya naquela
+vez. Ligar o Laya ao salvar já aquece o modelo.
+
+**Logs.** O escritor calcula o padrão da mensagem (`syslog::template`: números,
+IPs e MACs viram `#`) e grava a chave em `device_logs.template_hash`; padrão
+inédito vai por `try_send` a uma fila de 256 — cheia, descarta e tenta na
+próxima aparição. O worker grava o padrão em `log_templates` **mesmo sem Laya**
+e, a cada minuto, classifica o que ficou sem categoria. A correção do operador
+(`user_category`) vence o palpite e nunca é sobrescrita. Só linhas de syslog
+ganham padrão — classificar o log da própria aplicação realimentaria o laço.
+
+
 
 Registrar o que **não** foi construído evita que alguém procure por uma peça
 ausente achando que ela está escondida:

@@ -4,6 +4,7 @@ import { apiService } from '@/services/apiService'
 import { useDevicesStore } from './devices'
 import { useAlertsStore, type AlertEvent } from './alerts'
 import type { AiIncidentSummary } from '@/bindings/AiIncidentSummary'
+import type { LayaTriage } from '@/bindings/LayaTriage'
 import { useMonitorsStore } from './monitors'
 import { useProbesStore } from './probes'
 import { useDiscoveryStore } from './discovery'
@@ -13,6 +14,9 @@ import { useVpnStore } from './vpn'
 import { useMaintenanceWindowsStore } from './maintenanceWindows'
 import { useDockerStore } from './docker'
 import { useAgentsStore } from './agents'
+import { useLogsStore } from './logs'
+import { isLogTemplateInfo } from '@/utils/logCategories'
+import { isLayaModelState, useAiLayaStore } from './aiLaya'
 import { getStoredToken } from '@/utils/authStorage'
 
 export interface RealtimeEventPayload {
@@ -226,6 +230,12 @@ export const useEventsStore = defineStore('events', () => {
         break
       }
 
+      case 'alert:laya_triage': {
+        const triage = data.layaTriage as LayaTriage | undefined
+        if (triage) useAlertsStore().applyLayaTriage(Number(data.id ?? data.alertEventId), triage)
+        break
+      }
+
       case 'alert:ai_summary': {
         const summary = data.aiSummary as AiIncidentSummary | undefined
         if (summary) useAlertsStore().applyAiSummary(Number(data.id ?? data.alertEventId), summary)
@@ -301,6 +311,17 @@ export const useEventsStore = defineStore('events', () => {
           discoveryStore.fetchDiscoveryRuns()
           discoveryStore.fetchConflicts()
         })
+        break
+      }
+
+      case 'laya:model_state': {
+        if (isLayaModelState(data)) useAiLayaStore().applyModelState(data)
+        break
+      }
+
+      case 'logs:template_classified': {
+        // O payload é o `LogTemplateInfo` inteiro (backend `syslog::templates::info`).
+        if (isLogTemplateInfo(data)) useLogsStore().applyTemplateClassified(data)
         break
       }
 

@@ -206,3 +206,33 @@ async fn resumo_periodico_sai_uma_vez_por_periodo_e_fica_consultavel() {
     })
     .await;
 }
+
+#[tokio::test]
+#[serial]
+async fn periodo_quieto_nao_gasta_tokens_com_resumo() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
+        let falso = Falso("Nada a relatar.");
+        let agora = Local.with_ymd_and_hms(2026, 9, 21, 9, 0, 0).unwrap();
+        liga(
+            &ctx,
+            AiProactiveSettings {
+                digest: AiDigestSchedule::Daily,
+                digest_hour: 8,
+                skip_quiet_digest: true,
+                ..AiProactiveSettings::default()
+            },
+        )
+        .await;
+
+        assert!(digest::quiet_period(&ctx.db, 24).await.unwrap());
+        assert!(
+            !digest::run_if_due(&ctx, &falso, agora).await.unwrap(),
+            "nenhum alerta no período: não chama o provedor"
+        );
+        assert!(digest::latest(&ctx.db).await.unwrap().is_none());
+
+        alerta(&ctx).await;
+        assert!(!digest::quiet_period(&ctx.db, 24).await.unwrap());
+    })
+    .await;
+}

@@ -16,12 +16,13 @@
         <template #activator="{ props: tooltipProps }">
           <div v-bind="tooltipProps">
             <v-switch
-              v-model="form.enabled"
+              :model-value="form.enabled"
               color="primary"
               density="compact"
               hide-details
               label="Ativo"
               :disabled="!canToggle"
+              @update:model-value="toggleEnabled"
             />
           </div>
         </template>
@@ -29,9 +30,9 @@
     </v-card-title>
 
     <v-card-subtitle class="text-wrap">
-      Antes de cada pergunta do chat, um modelo local decide em milissegundos quais ferramentas a IA
-      recebe: menos tokens e respostas mais focadas. É opcional — fora do ar, o chat segue
-      normalmente.
+      Um modelo local que decide em milissegundos, sem gastar tokens: quais ferramentas a IA do chat
+      recebe, que tipo de aparelho a descoberta achou, qual interface é o uplink, o que cada log
+      significa e quais alertas merecem resumo. É opcional — fora do ar, tudo segue como antes.
     </v-card-subtitle>
 
     <v-divider class="my-2" />
@@ -79,8 +80,8 @@
       >
         {{ layaStore.models.errorMessage }}
         <div class="mt-1">
-          Sem Ollaya rodando? Suba o serviço opcional com
-          <code>docker compose --profile laya up -d</code> e use <code>http://ollaya:11435</code>.
+          O serviço <code>ollaya</code> sobe junto com o <code>docker compose up</code>; confira se
+          ele está no ar (<code>docker compose ps</code>) e use <code>http://ollaya:11435</code>.
         </div>
       </v-alert>
 
@@ -127,9 +128,31 @@
           </v-combobox>
         </v-col>
         <v-col cols="12" md="6" class="d-flex align-center ga-2">
-          <v-chip v-if="modelReady" color="success" variant="tonal" prepend-icon="mdi-check-circle">
-            Baixado
-          </v-chip>
+          <template v-if="modelReady">
+            <v-chip color="success" variant="tonal" prepend-icon="mdi-check-circle">Baixado</v-chip>
+            <v-chip v-if="modelLoading" color="info" variant="tonal">
+              <v-progress-circular indeterminate size="14" width="2" class="me-2" />
+              Carregando na memória…
+            </v-chip>
+            <v-chip
+              v-else-if="modelInMemory"
+              color="success"
+              variant="tonal"
+              prepend-icon="mdi-memory"
+            >
+              Na memória
+            </v-chip>
+            <v-btn
+              v-else
+              color="primary"
+              variant="tonal"
+              size="small"
+              prepend-icon="mdi-memory"
+              @click="warmUp"
+            >
+              Carregar agora
+            </v-btn>
+          </template>
           <v-btn
             v-else-if="serverOnline && !layaStore.pulling"
             color="warning"
@@ -196,12 +219,37 @@
           color="primary"
           variant="flat"
           prepend-icon="mdi-flask-outline"
-          :loading="layaStore.testing"
-          :disabled="!modelReady || layaStore.pulling"
+          :loading="layaStore.testing && !modelLoading"
+          :disabled="!modelReady || layaStore.pulling || modelLoading"
           @click="runTest"
         >
-          Ver o que o Laya escolhe
+          <v-progress-circular v-if="modelLoading" indeterminate size="16" width="2" class="me-2" />
+          {{ modelLoading ? 'Carregando modelo…' : 'Ver o que o Laya escolhe' }}
         </v-btn>
+      </div>
+      <v-alert
+        v-if="modelLoading"
+        type="info"
+        variant="tonal"
+        density="compact"
+        class="mt-3"
+        icon="mdi-memory"
+      >
+        Tirando o modelo do disco para a memória — leva de 5 a 20 segundos na primeira vez depois de
+        um tempo sem uso. {{ layaStore.testing ? 'A resposta sai assim que terminar.' : '' }}
+      </v-alert>
+      <v-alert
+        v-else-if="modelLoadFailed"
+        type="error"
+        variant="tonal"
+        density="compact"
+        class="mt-3"
+      >
+        Não foi possível carregar o modelo: {{ layaStore.modelState?.message }}
+      </v-alert>
+      <div v-else-if="modelReady && !modelInMemory" class="text-body-2 mt-2">
+        O modelo está fora da memória: o primeiro teste o carrega antes de responder. No chat, a
+        pergunta que chegar nesse momento segue sem o Laya enquanto ele carrega.
       </div>
 
       <template v-if="result">
@@ -257,7 +305,40 @@
         />
       </div>
 
-      <v-expansion-panels variant="accordion" class="mt-2">
+      <!-- Onde usar -->
+      <div class="step-title mt-5">
+        <v-icon color="primary" class="me-2">mdi-map-marker-radius-outline</v-icon>
+        Onde usar
+      </div>
+      <div class="text-body-2 mb-2">
+        O Laya só sugere, sempre com a confiança ao lado; você confirma com um clique.
+      </div>
+      <v-row dense>
+        <v-col v-for="feature in FEATURE_SWITCHES" :key="feature.key" cols="12" md="6">
+          <v-switch
+            v-model="form.features[feature.key]"
+            color="primary"
+            density="compact"
+            hide-details
+            :label="feature.label"
+          />
+          <div class="text-caption ms-12 mt-n1">{{ feature.hint }}</div>
+        </v-col>
+        <v-col cols="12" md="6">
+          <v-select
+            v-model="form.features.incidentTriage"
+            :items="TRIAGE_OPTIONS"
+            label="Triagem da IA proativa"
+            variant="outlined"
+            density="compact"
+            prepend-inner-icon="mdi-filter-check-outline"
+            :hint="triageHint"
+            persistent-hint
+          />
+        </v-col>
+      </v-row>
+
+      <v-expansion-panels variant="accordion" class="mt-4">
         <v-expansion-panel title="Avançado">
           <v-expansion-panel-text>
             <v-text-field
@@ -309,11 +390,45 @@ import {
   type AiLayaSettings,
   type LayaModelOption,
 } from '@/stores/aiLaya'
+import type { LayaTriageMode } from '@/bindings/LayaTriageMode'
 import { formatLatency, formatPercent } from '@/utils/formatters'
+import { isLocalOllaya } from '@/utils/ollaya'
+import { confirm } from '@/composables/useConfirm'
 
 /** A mesma pergunta que o backend usa quando o campo fica vazio. */
 const SAMPLE_QUESTION =
   'Por que o link da filial ficou lento ontem à noite? Mostra um gráfico da latência.'
+
+type FeatureSwitch = 'chatTools' | 'deviceIdentity' | 'interfaces' | 'logEvents'
+
+const FEATURE_SWITCHES: { key: FeatureSwitch; label: string; hint: string }[] = [
+  {
+    key: 'chatTools',
+    label: 'Ferramentas do chat',
+    hint: 'Escolhe o que a IA recebe a cada pergunta.',
+  },
+  {
+    key: 'deviceIdentity',
+    label: 'Identificar dispositivos',
+    hint: 'Sugere tipo e sistema do que a descoberta encontrou.',
+  },
+  {
+    key: 'interfaces',
+    label: 'Uplink e interfaces',
+    hint: 'Sugere o uplink e as interfaces que valem monitorar.',
+  },
+  {
+    key: 'logEvents',
+    label: 'Classificar eventos de log',
+    hint: 'Dá categoria a cada padrão novo de log, em segundo plano.',
+  },
+]
+
+const TRIAGE_OPTIONS: { value: LayaTriageMode; title: string }[] = [
+  { value: 'off', title: 'Desligada' },
+  { value: 'shadow', title: 'Só registrar (resume sempre)' },
+  { value: 'enforce', title: 'Decidir (pula alerta que não merece)' },
+]
 
 const emit = defineEmits<{
   (e: 'saved', message: string, color?: string): void
@@ -327,9 +442,31 @@ const serverOnline = computed(() => !!layaStore.models?.online)
 const installedCount = computed(() => layaStore.models?.installed.length ?? 0)
 /** Testar e ativar só depois que o modelo estiver baixado no Ollaya. */
 const modelReady = computed(() => serverOnline.value && layaStore.installed(form.value.model ?? ''))
+const triageHint = computed(() =>
+  form.value.features.incidentTriage === 'enforce'
+    ? 'Alerta suprimido ganha o botão "Gerar resumo agora".'
+    : 'Decide se um alerta merece resumo do LLM, poupando tokens.'
+)
+
 /** Passo concluído fica verde; pendente, na cor do que falta. */
 function stepColor(done: boolean, pending: string): string {
   return done ? 'success' : pending
+}
+
+/** O estado do carregamento vale para o servidor e o modelo do formulário. */
+const modelStateHere = computed(() => {
+  const state = layaStore.modelState
+  const model = form.value.model ?? ''
+  return state && state.baseUrl === form.value.baseUrl && state.model === model ? state : null
+})
+const modelLoading = computed(() => modelStateHere.value?.state === 'loading')
+const modelLoadFailed = computed(() => modelStateHere.value?.state === 'failed')
+const modelInMemory = computed(
+  () => modelStateHere.value?.state === 'ready' || layaStore.inMemory(form.value.model ?? '')
+)
+
+function warmUp() {
+  void layaStore.warmUp(normalizedForm())
 }
 
 /** Desligar é sempre possível; ligar exige o modelo pronto. */
@@ -343,7 +480,7 @@ const status = computed(() => {
     return { label: 'Modelo não baixado', color: 'warning', icon: 'mdi-download' }
   if (!layaStore.saved?.enabled)
     return { label: 'Pronto, desligado', color: 'info', icon: 'mdi-power' }
-  return { label: 'Ativo no chat', color: 'success', icon: 'mdi-check-circle' }
+  return { label: 'Ativo', color: 'success', icon: 'mdi-check-circle' }
 })
 
 /** Catálogo e instalados; o modelo digitado à mão também aparece na lista. */
@@ -385,6 +522,28 @@ function normalizedForm(): AiLayaSettings {
 const dirty = computed(
   () => !!layaStore.saved && JSON.stringify(normalizedForm()) !== JSON.stringify(layaStore.saved)
 )
+
+/**
+ * Ligar com o Ollaya nesta máquina custa RAM do servidor: avisa antes. Com o
+ * Ollaya em outra máquina não há o que avisar — a memória gasta é a dela.
+ */
+async function toggleEnabled(value: boolean | null) {
+  if (value && isLocalOllaya(form.value.baseUrl)) {
+    const ok = await confirm({
+      title: 'Ligar o Laya neste servidor?',
+      message:
+        'O Ollaya roda nesta mesma máquina. Enquanto um modelo de decisão estiver carregado, ' +
+        'ele usa aproximadamente 3 GB a 4 GB de RAM. Sem uso, o modelo é descarregado e o ' +
+        'serviço volta a ocupar cerca de 150 MB.',
+      confirmText: 'Ligar mesmo assim',
+      confirmColor: 'warning',
+      icon: 'mdi-memory',
+      iconColor: 'warning',
+    })
+    if (!ok) return
+  }
+  form.value.enabled = Boolean(value)
+}
 
 function refreshModels() {
   void layaStore.loadModels(form.value.baseUrl)

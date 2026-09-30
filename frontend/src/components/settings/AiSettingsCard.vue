@@ -943,6 +943,7 @@ function defaultProactive(): AiProactiveSettings {
     maxSummariesPerHour: 6,
     digest: 'off',
     digestHour: 8,
+    skipQuietDigest: false,
   }
 }
 

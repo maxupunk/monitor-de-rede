@@ -404,6 +404,7 @@ import PageHeader from '@/components/PageHeader.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import { getStatusColor } from '@/utils/monitorPresentation'
 import { confirm } from '@/composables/useConfirm'
+import { INFRA_DEVICE_TYPES } from '@/utils/deviceTypes'
 
 const router = useRouter()
 const devicesStore = useDevicesStore()
@@ -442,16 +443,6 @@ function openDiagnosticPlaybook(device: Device) {
   playbookDialog.value = true
 }
 
-const INFRA_TYPES = new Set([
-  'router',
-  'switch',
-  'firewall',
-  'gateway',
-  'unmanaged_switch',
-  'ap',
-  'access_point',
-])
-
 function getIcon(type?: string): string {
   switch (type?.toLowerCase()) {
     case 'router':
@@ -482,7 +473,7 @@ const parentCandidates = computed(() => {
       ipAddress: d.ipAddress || '',
       type: d.type,
       siteName: d.site?.name || '',
-      isInfra: INFRA_TYPES.has(d.type?.toLowerCase() || ''),
+      isInfra: INFRA_DEVICE_TYPES.has(d.type?.toLowerCase() || ''),
       icon: getIcon(d.type),
     }))
     .sort((a, b) => {

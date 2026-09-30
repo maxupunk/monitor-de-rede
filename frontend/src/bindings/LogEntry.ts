@@ -38,4 +38,10 @@ export type LogEntry = {
    */
   topics: Array<string>
   message: string
+  /**
+   * Chave do padrão da mensagem, em hexadecimal (um `i64` perde precisão no
+   * JavaScript). A categoria vem em `templates` da página ou pelo evento
+   * `logs:template_classified` — assim a linha do live tail também a ganha.
+   */
+  templateHash: string | null
 }

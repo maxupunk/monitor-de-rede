@@ -15,6 +15,7 @@ use ts_rs::TS;
 use super::{
     runner::{ask, DriverFactory},
     schedule::HourlyLimiter,
+    triage,
 };
 use crate::{
     models::alert_events,
@@ -184,17 +185,32 @@ pub fn spawn_listener(ctx: AppContext, drivers: Arc<dyn DriverFactory>) {
             let Some(max_per_hour) = wants_summary(&ctx, severity).await else {
                 continue;
             };
-            if !limiter.lock().await.try_acquire(Utc::now(), max_per_hour) {
-                tracing::info!(
-                    alert_id,
-                    "resumo de incidente adiado: teto por hora atingido"
-                );
-                continue;
-            }
 
+            // A triagem e o teto ficam na task: o laço não espera o Laya (o
+            // barramento atrasaria), e alerta suprimido não gasta o teto.
             let ctx = ctx.clone();
             let drivers = Arc::clone(&drivers);
+            let limiter = Arc::clone(&limiter);
             tokio::spawn(async move {
+                match triage::assess(&ctx, alert_id).await {
+                    Ok(Some((opinion, _))) if opinion.suppressed => {
+                        tracing::info!(
+                            alert_id,
+                            actionable = opinion.actionable,
+                            "resumo de incidente pulado pela triagem do Laya"
+                        );
+                        return;
+                    }
+                    Ok(_) => {}
+                    Err(error) => tracing::debug!(%error, alert_id, "triagem do Laya falhou"),
+                }
+                if !limiter.lock().await.try_acquire(Utc::now(), max_per_hour) {
+                    tracing::info!(
+                        alert_id,
+                        "resumo de incidente adiado: teto por hora atingido"
+                    );
+                    return;
+                }
                 if let Err(error) = summarize_alert(&ctx, drivers.as_ref(), alert_id).await {
                     tracing::warn!(%error, alert_id, "falha ao gerar resumo de incidente");
                 }

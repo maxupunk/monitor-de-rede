@@ -51,12 +51,20 @@
             <v-col cols="12" sm="6">
               <v-select
                 v-model="formModel.type"
-                :items="['router', 'switch', 'server', 'firewall', 'printer', 'ap', 'other']"
+                :items="DEVICE_TYPE_OPTIONS"
                 label="Tipo de Dispositivo"
                 variant="outlined"
                 density="comfortable"
                 required
               ></v-select>
+              <LayaSuggestionChip
+                class="mt-1"
+                :suggestion="layaType"
+                :format-label="deviceTypeLabel"
+                action-label="Usar"
+                :disabled="formModel.type === normalizeDeviceType(layaType?.value)"
+                @apply="formModel.type = normalizeDeviceType($event)"
+              />
             </v-col>
 
             <!-- Seleção de Site Opcional com Botão para Novo Site -->
@@ -316,6 +324,14 @@
               >
                 {{ identificacaoErro }}
               </v-alert>
+              <LayaSuggestionChip
+                class="mt-1"
+                :suggestion="layaSystem"
+                :format-label="systemsStore.label"
+                action-label="Usar"
+                :disabled="formModel.operatingSystem === layaSystem?.value"
+                @apply="formModel.operatingSystem = $event"
+              />
             </v-col>
 
             <!--
@@ -451,6 +467,13 @@
                 @update:model-value="onLinkInterfaceSelected"
                 @click:append-inner.stop="carregarInterfaces(true)"
               ></v-select>
+              <LayaSuggestionChip
+                class="mt-1"
+                :suggestion="uplinkSuggestion"
+                action-label="Usar como uplink"
+                :disabled="formModel.linkInterfaceName === uplinkSuggestion?.value"
+                @apply="onLinkInterfaceSelected($event)"
+              />
             </v-col>
             <v-col v-if="formModel.snmpEnabled" cols="12">
               <v-alert
@@ -598,9 +621,16 @@ import {
   type IdentifyResult,
 } from '@/stores/operatingSystems'
 import { createLogSetupTarget, type LogSetupTarget } from '@/utils/syslogProvision'
-import { apiService } from '@/services/apiService'
 import { formatBps } from '@/utils/formatters'
-import type { DeviceInterface } from '@/stores/deviceDetail'
+import { linkInterfaceCandidates, useDeviceDetailStore } from '@/stores/deviceDetail'
+import type { LayaSuggestion } from '@/bindings/LayaSuggestion'
+import {
+  DEVICE_TYPE_OPTIONS,
+  INFRA_DEVICE_TYPES,
+  deviceTypeLabel,
+  normalizeDeviceType,
+} from '@/utils/deviceTypes'
+import LayaSuggestionChip from '@/components/ai/LayaSuggestionChip.vue'
 
 const props = defineProps<{
   modelValue: boolean
@@ -619,6 +649,7 @@ const networksStore = useNetworksStore()
 const snmpTestStore = useSnmpTestStore()
 const prefsStore = usePreferencesStore()
 const systemsStore = useOperatingSystemsStore()
+const deviceDetailStore = useDeviceDetailStore()
 
 const siteDialog = ref(false)
 const saving = ref(false)
@@ -679,6 +710,9 @@ const formModel = reactive<{
 })
 
 const identificacao = ref<IdentifyResult | null>(null)
+/** Palpites do Laya quando a identificação ficou sem evidência forte. */
+const layaType = computed(() => identificacao.value?.laya?.deviceType ?? null)
+const layaSystem = computed(() => identificacao.value?.laya?.operatingSystem ?? null)
 const identificacaoErro = ref('')
 const nameManuallyEdited = ref(false)
 
@@ -751,92 +785,45 @@ function onLinkInterfaceSelected(nome: string | null) {
 }
 
 async function carregarInterfaces(forceLive = false) {
-  const deviceId = props.deviceToEdit?.id
-  const ip = formModel.ipAddress.trim()
-
-  if (deviceId) {
-    if (forceLive) {
-      loadingInterfaces.value = true
-      try {
-        await apiService.post(`/devices/${deviceId}/snmp/poll`, {})
-      } catch {
-        // Silently continue to loading interfaces from db
-      } finally {
-        loadingInterfaces.value = false
-      }
-    }
-
-    loadingInterfaces.value = true
-    try {
-      const res = await apiService.get<DeviceInterface[]>(`/devices/${deviceId}/interfaces`)
-      if (Array.isArray(res) && res.length > 0) {
-        availableInterfaces.value = res.map((i) => ({
-          id: i.id,
-          ifIndex: i.ifIndex,
-          name: i.name || i.ifName || '',
-          alias: i.alias,
-          description: i.description,
-          speed: i.speed || i.ifSpeed,
-          operStatus: i.operStatus || i.ifOperStatus,
-        }))
-        if (formModel.linkInterfaceName && !formModel.linkInterfaceId) {
-          const found = availableInterfaces.value.find(
-            (i) => i.name.toLowerCase() === formModel.linkInterfaceName?.toLowerCase()
-          )
-          if (found?.id) formModel.linkInterfaceId = found.id
-        }
-        return
-      }
-    } catch {
-      // Se falhar o banco, tenta ao vivo se tiver IP
-    } finally {
-      loadingInterfaces.value = false
-    }
-  }
-
-  if (!ip) return
-
   loadingInterfaces.value = true
   try {
-    const res = await apiService.post<Array<Record<string, unknown>>>('/snmp/interfaces-query', {
-      host: ip,
-      port: 161,
+    availableInterfaces.value = await deviceDetailStore.loadLinkInterfaces({
+      deviceId: props.deviceToEdit?.id,
+      forceLive,
+      host: formModel.ipAddress.trim(),
       version: formModel.snmpVersion,
       community: formModel.snmpCommunity,
     })
-    if (Array.isArray(res)) {
-      availableInterfaces.value = res.map((i) => {
-        const operStatusVal = i.ifOperStatus ?? i.if_oper_status
-        const operStr =
-          typeof operStatusVal === 'number'
-            ? operStatusVal === 1
-              ? 'up'
-              : 'down'
-            : typeof operStatusVal === 'string'
-              ? operStatusVal
-              : undefined
-        return {
-          id: typeof i.id === 'number' ? i.id : undefined,
-          ifIndex: Number(i.ifIndex ?? i.if_index) || undefined,
-          name: String(i.ifName ?? i.if_name ?? i.name ?? ''),
-          alias: (i.ifAlias ?? i.if_alias ?? i.alias) as string | null,
-          description: (i.ifDescr ?? i.if_descr ?? i.description) as string | null,
-          speed: Number(i.ifSpeed ?? i.if_speed ?? i.speed) || null,
-          operStatus: operStr,
-        }
-      })
-      if (formModel.linkInterfaceName && !formModel.linkInterfaceId) {
-        const found = availableInterfaces.value.find(
-          (i) => i.name.toLowerCase() === formModel.linkInterfaceName?.toLowerCase()
-        )
-        if (found?.id) formModel.linkInterfaceId = found.id
-      }
-    }
-  } catch {
-    // Falha silenciosa de probe ao vivo
   } finally {
     loadingInterfaces.value = false
   }
+  if (formModel.linkInterfaceName && !formModel.linkInterfaceId) {
+    const found = availableInterfaces.value.find(
+      (i) => i.name.toLowerCase() === formModel.linkInterfaceName?.toLowerCase()
+    )
+    if (found?.id) formModel.linkInterfaceId = found.id
+  }
+  void sugerirUplink()
+}
+
+/** Palpite do Laya para o uplink, a partir da lista que o seletor mostra. */
+const uplinkSuggestion = ref<LayaSuggestion | null>(null)
+
+async function sugerirUplink() {
+  uplinkSuggestion.value = null
+  const candidates = linkInterfaceCandidates(availableInterfaces.value)
+  const res = await deviceDetailStore.fetchInterfaceSuggestions({
+    deviceName: formModel.name || null,
+    deviceType: formModel.type || null,
+    sysDescr: identificacao.value?.sysDescr ?? null,
+    interfaces: candidates,
+  })
+  const uplink = res?.uplink
+  if (!uplink) return
+  const position = candidates.findIndex((item) => String(item.ifIndex) === uplink.value)
+  const name = availableInterfaces.value[position]?.name
+  // O chip mostra e aplica o nome, que é o valor do seletor.
+  uplinkSuggestion.value = name ? { ...uplink, value: name } : null
 }
 
 const suggestedDeviceName = computed(() => identificacao.value?.suggestedName?.trim() || '')
@@ -884,16 +871,6 @@ function getDeviceIcon(type?: string): string {
       return 'mdi-lan'
   }
 }
-
-const INFRASTRUCTURE_TYPES = new Set([
-  'router',
-  'switch',
-  'firewall',
-  'gateway',
-  'unmanaged_switch',
-  'ap',
-  'access_point',
-])
 
 function ipInCidr(ip: string, cidr: string): boolean {
   if (!ip || !cidr || !cidr.includes('/')) return false
@@ -946,7 +923,7 @@ const availableParentDevices = computed(() => {
   const list = devicesStore.devices
     .filter((d) => d.id !== currentId)
     .map((d) => {
-      const isInfra = INFRASTRUCTURE_TYPES.has(d.type?.toLowerCase() || '')
+      const isInfra = INFRA_DEVICE_TYPES.has(d.type?.toLowerCase() || '')
       const sameSite = currentSiteId ? d.siteId === currentSiteId : false
       return {
         id: d.id,

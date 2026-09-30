@@ -6,6 +6,7 @@ pub mod digest;
 pub mod incident;
 pub mod runner;
 pub mod schedule;
+pub mod triage;
 
 use std::sync::Arc;
 

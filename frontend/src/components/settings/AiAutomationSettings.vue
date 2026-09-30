@@ -116,6 +116,15 @@
         />
       </v-col>
     </v-row>
+    <v-switch
+      v-model="proactive.skipQuietDigest"
+      color="primary"
+      density="compact"
+      hide-details
+      class="mt-2"
+      :disabled="proactive.digest === 'off'"
+      label="Não enviar o resumo quando nenhum alerta abriu no período (economiza tokens)"
+    />
   </div>
 </template>
 

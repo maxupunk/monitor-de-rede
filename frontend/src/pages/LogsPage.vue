@@ -66,7 +66,7 @@
 
     <v-card elevation="2" class="rounded-lg mb-6 pa-4">
       <v-row density="compact">
-        <v-col cols="12" md="4">
+        <v-col cols="12" md="3">
           <v-text-field
             v-model="search"
             placeholder="Buscar no texto da mensagem..."
@@ -93,7 +93,7 @@
             @update:model-value="onFilterChange({ deviceId })"
           ></v-select>
         </v-col>
-        <v-col cols="12" sm="6" md="3">
+        <v-col cols="12" sm="6" md="2">
           <v-select
             v-model="severity"
             :items="severityOptions"
@@ -105,6 +105,21 @@
             density="compact"
             variant="outlined"
             @update:model-value="onFilterChange({ severity })"
+          ></v-select>
+        </v-col>
+        <v-col cols="12" sm="6" md="2">
+          <v-select
+            v-model="category"
+            :items="categoryOptions"
+            item-title="title"
+            item-value="value"
+            label="Evento"
+            hide-details
+            clearable
+            density="compact"
+            variant="outlined"
+            prepend-inner-icon="mdi-lightning-bolt-circle"
+            @update:model-value="onFilterChange({ category })"
           ></v-select>
         </v-col>
         <v-col cols="12" sm="6" md="2">
@@ -131,19 +146,29 @@
       :scroll-key="logsStore.scrollKey"
       :load="logsStore.load"
       :error="logsStore.error"
+      :template-of="logsStore.templateOf"
+      @confirm-category="confirmCategory"
+      @create-alert="createAlert"
     />
+
+    <v-snackbar v-model="feedback.visible" :color="feedback.color" timeout="4000">
+      {{ feedback.message }}
+    </v-snackbar>
 
     <LogSourcesDialog v-model="sourcesDialog" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
 import LogTable from '@/components/logs/LogTable.vue'
 import LogSourcesDialog from '@/components/logs/LogSourcesDialog.vue'
 import { useLogsStore, SEVERITY_OPTIONS, WINDOW_OPTIONS, type LogFilters } from '@/stores/logs'
 import { useDevicesStore } from '@/stores/devices'
+import type { LogTemplateInfo } from '@/bindings/LogTemplateInfo'
+import { LOG_CATEGORY_OPTIONS, logCategoryInfo } from '@/utils/logCategories'
 
 const logsStore = useLogsStore()
 const devicesStore = useDevicesStore()
@@ -152,6 +177,10 @@ const search = ref('')
 const deviceId = ref<number | null>(null)
 const severity = ref<number | null>(null)
 const hours = ref<number | null>(24)
+const category = ref<string | null>(null)
+const categoryOptions = LOG_CATEGORY_OPTIONS
+const router = useRouter()
+const feedback = reactive({ visible: false, color: 'success', message: '' })
 const sourcesDialog = ref(false)
 
 const severityOptions = SEVERITY_OPTIONS
@@ -186,6 +215,21 @@ function onFilterChange(next: Partial<LogFilters>): void {
 
 function applySearch(): void {
   onFilterChange({ search: search.value ?? '' })
+}
+
+async function confirmCategory(templateHash: string, value: string): Promise<void> {
+  const error = await logsStore.confirmTemplate(templateHash, value)
+  feedback.color = error ? 'error' : 'success'
+  feedback.message =
+    error ??
+    `Categoria salva: ${logCategoryInfo(value)?.title ?? value}. Vale para todas as linhas deste padrão.`
+  feedback.visible = true
+}
+
+/** Abre o catálogo de alertas com o modelo que cobre o padrão já marcado. */
+function createAlert(template: LogTemplateInfo): void {
+  if (!template.alertTemplate) return
+  void router.push({ name: 'alerts', query: { tab: 'rules', catalog: template.alertTemplate } })
 }
 
 function openSources(): void {

@@ -173,6 +173,11 @@ const props = defineProps<{
    * não oferece a escolha.
    */
   allowScopeChoice?: boolean
+  /**
+   * Modelo já marcado ao abrir — quando se chega pela sugestão de um padrão
+   * de log. Só marca: quem aplica é o operador.
+   */
+  preselectKey?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -240,6 +245,8 @@ watch(
       if (devicesStore.devices.length === 0) void devicesStore.fetchDevices()
     }
     await alertsStore.fetchRuleCatalog(escopoEfetivo.value)
+    const sugerido = alertsStore.ruleTemplates.find((item) => item.key === props.preselectKey)
+    if (sugerido && !bloqueado(sugerido)) selected.value = [sugerido.key]
   }
 )
 

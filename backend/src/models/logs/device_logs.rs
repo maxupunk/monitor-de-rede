@@ -41,6 +41,9 @@ pub struct Model {
     /// `syslog` (rede) ou `application` (este processo). Ver
     /// `migration::logs::m20260819_000001_device_logs_source`.
     pub source: String,
+    /// Chave do padrão da mensagem (`syslog::template::template_hash`), só nas
+    /// linhas de syslog gravadas depois da classificação existir.
+    pub template_hash: Option<i64>,
     pub created_at: DateTimeWithTimeZone,
 }
 

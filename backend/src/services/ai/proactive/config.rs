@@ -55,6 +55,10 @@ pub struct AiProactiveSettings {
     pub digest: AiDigestSchedule,
     /// Hora (0–23, horário do servidor) em que o resumo periódico sai.
     pub digest_hour: u8,
+    /// Não gastar tokens com resumo periódico de um período em que nenhum
+    /// alerta abriu e nenhum ficou aberto — "nada aconteceu" se conta, não se
+    /// pergunta ao LLM.
+    pub skip_quiet_digest: bool,
 }
 
 impl Default for AiProactiveSettings {
@@ -65,6 +69,7 @@ impl Default for AiProactiveSettings {
             max_summaries_per_hour: DEFAULT_MAX_SUMMARIES_PER_HOUR,
             digest: AiDigestSchedule::default(),
             digest_hour: DEFAULT_DIGEST_HOUR,
+            skip_quiet_digest: false,
         }
     }
 }

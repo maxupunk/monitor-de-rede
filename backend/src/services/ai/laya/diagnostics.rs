@@ -4,7 +4,12 @@
 //! Devolve sempre um diagnóstico, nunca erro — cada falha vira uma mensagem
 //! que diz o que fazer.
 
-use super::{client::LayaClient, config::AiLayaSettings, tool_routing};
+use super::{
+    client::LayaClient,
+    config::AiLayaSettings,
+    runtime::{Lane, LayaRuntime},
+    tool_routing,
+};
 use crate::{
     dtos::ai::{LayaGroupScore, TestLayaResponse},
     services::ai::{harness::tools::ToolGroup, local_models},
@@ -26,7 +31,13 @@ fn failure(online: bool, model_installed: bool, message: String) -> TestLayaResp
     }
 }
 
-pub async fn test(settings: &AiLayaSettings, question: Option<&str>) -> TestLayaResponse {
+/// O teste espera o modelo carregar (fila `OnDemand`): foi pedido na tela, e
+/// a tela mostra "carregando o modelo" pelo evento `laya:model_state`.
+pub async fn test(
+    runtime: &LayaRuntime,
+    settings: &AiLayaSettings,
+    question: Option<&str>,
+) -> TestLayaResponse {
     let question = question
         .map(str::trim)
         .filter(|question| !question.is_empty())
@@ -47,7 +58,15 @@ pub async fn test(settings: &AiLayaSettings, question: Option<&str>) -> TestLaya
         );
     }
 
-    match tool_routing::score(settings, question, &ToolGroup::DEFERRED).await {
+    match tool_routing::score(
+        runtime,
+        settings,
+        Lane::OnDemand,
+        question,
+        &ToolGroup::DEFERRED,
+    )
+    .await
+    {
         Ok(outcome) => {
             let threshold = settings.threshold();
             let groups: Vec<LayaGroupScore> = outcome
@@ -91,7 +110,7 @@ mod tests {
             timeout_ms: 500,
             ..AiLayaSettings::default()
         };
-        let result = test(&settings, None).await;
+        let result = test(&LayaRuntime::default(), &settings, None).await;
         assert!(!result.success);
         assert!(!result.online);
         assert!(result.message.contains("127.0.0.1:9"));

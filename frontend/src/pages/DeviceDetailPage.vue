@@ -492,6 +492,16 @@
                 Interfaces de Rede Descobertas ({{ detailStore.scanResult.interfaces.length }})
               </div>
               <div class="d-flex align-center ga-2" style="gap: 8px">
+                <v-btn
+                  v-if="suggestedMonitorIndexes.length"
+                  size="small"
+                  variant="tonal"
+                  color="primary"
+                  prepend-icon="mdi-lightning-bolt-circle"
+                  @click="selectSuggestedInterfaces"
+                >
+                  Selecionar sugeridas ({{ suggestedMonitorIndexes.length }})
+                </v-btn>
                 <v-btn size="small" variant="text" color="primary" @click="selectAllInterfaces">
                   Selecionar Todas
                 </v-btn>
@@ -524,7 +534,44 @@
                       ></v-checkbox>
                     </td>
                     <td>{{ iface.ifIndex }}</td>
-                    <td class="font-weight-bold">{{ iface.ifName }}</td>
+                    <td>
+                      <div class="font-weight-bold">{{ iface.ifName }}</div>
+                      <div
+                        v-if="iface.ifAlias && iface.ifAlias !== iface.ifName"
+                        class="text-caption"
+                      >
+                        {{ iface.ifAlias }}
+                      </div>
+                      <div class="d-flex flex-wrap ga-1 mt-1">
+                        <LayaSuggestionChip
+                          v-if="uplinkSuggestion?.value === String(iface.ifIndex)"
+                          :suggestion="uplinkSuggestion"
+                          :format-label="() => 'uplink'"
+                          :action-label="
+                            isCurrentUplink(iface.ifName) ? undefined : 'Usar como uplink'
+                          "
+                          @apply="useAsUplink(iface)"
+                        />
+                        <v-chip
+                          v-if="monitorConfidence(iface.ifIndex) != null"
+                          size="x-small"
+                          color="primary"
+                          variant="tonal"
+                          prepend-icon="mdi-lightning-bolt-circle"
+                        >
+                          Vale monitorar · {{ formatPercent(monitorConfidence(iface.ifIndex), 0) }}
+                        </v-chip>
+                        <v-chip
+                          v-if="isCurrentUplink(iface.ifName)"
+                          size="x-small"
+                          color="success"
+                          variant="tonal"
+                          prepend-icon="mdi-check-circle"
+                        >
+                          Uplink atual
+                        </v-chip>
+                      </div>
+                    </td>
                     <td>{{ iface.macAddress || 'N/A' }}</td>
                     <td>
                       <v-chip size="x-small" variant="tonal" color="info">
@@ -740,11 +787,13 @@
 import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
+  scanInterfaceCandidates,
   useDeviceDetailStore,
   type DeviceInterface,
   type DeviceMonitor,
   type DiscoveredSensorItem,
 } from '@/stores/deviceDetail'
+import { useDevicesStore } from '@/stores/devices'
 import TrafficChartDialog from '@/components/TrafficChartDialog.vue'
 import VpnScriptViewer from '@/components/VpnScriptViewer.vue'
 import VpnFirewallHintsDialog from '@/components/VpnFirewallHintsDialog.vue'
@@ -763,7 +812,8 @@ import DeviceEventsTab from '@/components/devices/tabs/DeviceEventsTab.vue'
 import DeviceLogsTab from '@/components/devices/tabs/DeviceLogsTab.vue'
 import DeviceVpnTab from '@/components/devices/tabs/DeviceVpnTab.vue'
 import { getStatusColor } from '@/utils/monitorPresentation'
-import { formatBinaryBytes, formatLinkSpeed } from '@/utils/formatters'
+import { formatBinaryBytes, formatLinkSpeed, formatPercent } from '@/utils/formatters'
+import LayaSuggestionChip from '@/components/ai/LayaSuggestionChip.vue'
 import { useVpnStore } from '@/stores/vpn'
 import { useLogsStore } from '@/stores/logs'
 import { confirm } from '@/composables/useConfirm'
@@ -771,6 +821,7 @@ import { confirm } from '@/composables/useConfirm'
 const route = useRoute()
 const router = useRouter()
 const detailStore = useDeviceDetailStore()
+const devicesStore = useDevicesStore()
 const vpnStore = useVpnStore()
 const logsStore = useLogsStore()
 const activeTab = ref('overview')
@@ -989,6 +1040,12 @@ async function openScanModal() {
     selectedCpuMonitor.value = cpuSupported && res.hasCpuMonitor
     selectedMemoryMonitor.value = memSupported && res.hasMemoryMonitor
     selectedIfIndexes.value = res.interfaces.filter((i) => i.isMonitored).map((i) => i.ifIndex)
+    void detailStore.suggestInterfaces({
+      deviceName: detailStore.device?.name ?? null,
+      deviceType: detailStore.device?.type ?? null,
+      sysDescr: res.systemInfo.sysDescr ?? null,
+      interfaces: scanInterfaceCandidates(res),
+    })
     const monitoredSensors = (res.sensors || []).filter((s) => s.isMonitored).map((s) => s.key)
     selectedSensors.value =
       monitoredSensors.length > 0 ? monitoredSensors : (res.sensors || []).map((s) => s.key)
@@ -1007,6 +1064,42 @@ function toggleInterface(ifIndex: number) {
 function selectAllInterfaces() {
   if (detailStore.scanResult) {
     selectedIfIndexes.value = detailStore.scanResult.interfaces.map((i) => i.ifIndex)
+  }
+}
+
+const uplinkSuggestion = computed(() => detailStore.interfaceSuggestions?.uplink ?? null)
+const suggestedMonitorIndexes = computed(
+  () => detailStore.interfaceSuggestions?.monitor.map((item) => item.ifIndex) ?? []
+)
+
+function monitorConfidence(ifIndex: number): number | null {
+  return (
+    detailStore.interfaceSuggestions?.monitor.find((item) => item.ifIndex === ifIndex)
+      ?.confidence ?? null
+  )
+}
+
+/** Soma as sugeridas ao que já estava marcado — nunca desmarca nada. */
+function selectSuggestedInterfaces() {
+  const merged = new Set([...selectedIfIndexes.value, ...suggestedMonitorIndexes.value])
+  selectedIfIndexes.value = [...merged]
+}
+
+function isCurrentUplink(ifName: string): boolean {
+  return detailStore.device?.linkInterfaceName === ifName
+}
+
+async function useAsUplink(iface: { ifIndex: number; ifName: string }) {
+  const known = detailStore.interfaces.find(
+    (item) => (item.ifIndex ?? item.snmpIndex) === iface.ifIndex
+  )
+  const updated = await devicesStore.updateDevice(deviceId.value, {
+    linkInterfaceName: iface.ifName,
+    linkInterfaceId: known?.id ?? null,
+  })
+  if (updated && detailStore.device) {
+    detailStore.device.linkInterfaceName = updated.linkInterfaceName ?? iface.ifName
+    detailStore.device.linkInterfaceId = updated.linkInterfaceId ?? known?.id ?? null
   }
 }
 

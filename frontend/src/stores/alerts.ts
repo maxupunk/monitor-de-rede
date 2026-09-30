@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { apiService } from '@/services/apiService'
 import type { AlertOperator, AlertProblemKind } from '@/utils/alertPresentation'
 import type { AiIncidentSummary } from '@/bindings/AiIncidentSummary'
+import type { LayaTriage } from '@/bindings/LayaTriage'
 
 export interface AlertRuleCondition {
   field: string
@@ -131,6 +132,8 @@ export interface AlertEventData {
   problemTimeline?: string[]
   /** Resumo gerado pela IA quando o alerta abriu (se habilitado) */
   aiSummary?: AiIncidentSummary
+  /** Opinião do Laya sobre o alerta merecer resumo (triagem da IA proativa) */
+  layaTriage?: LayaTriage
   [key: string]: unknown
 }
 
@@ -541,6 +544,26 @@ export const useAlertsStore = defineStore('alerts', () => {
     lastRealtimeUpdateAt.value = new Date().toISOString()
   }
 
+  function applyLayaTriage(id: number, triage: LayaTriage) {
+    const current = alertEvents.value.find((a) => a.id === id)
+    if (!current) return
+    current.data = { ...(current.data ?? {}), layaTriage: triage }
+    lastRealtimeUpdateAt.value = new Date().toISOString()
+  }
+
+  /** Gera o resumo agora — o operador passou por cima da triagem do Laya. */
+  async function requestAiSummary(id: number): Promise<string | null> {
+    try {
+      const res = await apiService.post<{ summary: AiIncidentSummary | null }>(
+        `/ai/alerts/${id}/summary`
+      )
+      if (res.summary) applyAiSummary(id, res.summary)
+      return null
+    } catch (err) {
+      return err instanceof Error ? err.message : 'Falha ao gerar o resumo'
+    }
+  }
+
   function patchAlertEvent(id: number, patch: Partial<AlertEvent>) {
     const current = alertEvents.value.find((a) => a.id === id)
     if (!current) return
@@ -598,6 +621,8 @@ export const useAlertsStore = defineStore('alerts', () => {
     upsertAlertEvent,
     patchAlertEvent,
     applyAiSummary,
+    applyLayaTriage,
+    requestAiSummary,
     upsertAlertRule,
     removeAlertRule,
   }

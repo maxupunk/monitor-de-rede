@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { apiService } from '@/services/apiService'
 import { getStoredToken } from '@/utils/authStorage'
+import type { IdentitySuggestion } from '@/bindings/IdentitySuggestion'
 
 export type DiscoveryPhase = 'icmp' | 'discovery' | 'ports' | 'snmp' | 'idle'
 
@@ -76,16 +77,34 @@ export interface DiscoveryIdentity {
   hardwareModel?: string
 }
 
-/** Lê a identidade tanto do snapshot SSE quanto do resultado persistido. */
-export function discoveryIdentity(
-  result: Pick<DiscoveryResult | StreamedDiscoveryHost, 'data'> | null | undefined
-): DiscoveryIdentity | null {
+/**
+ * Um bloco dos scanners, tanto do snapshot SSE (`data.<chave>`) quanto do
+ * resultado persistido (`data.details.<chave>`).
+ */
+function discoveryDetail(
+  result: Pick<DiscoveryResult | StreamedDiscoveryHost, 'data'> | null | undefined,
+  key: string
+): Record<string, unknown> | null {
   const data = result?.data
   if (!data || typeof data !== 'object') return null
   const details = data.details
   const container = details && typeof details === 'object' ? details : data
-  const identity = (container as Record<string, unknown>).identity
-  return identity && typeof identity === 'object' ? (identity as DiscoveryIdentity) : null
+  const value = (container as Record<string, unknown>)[key]
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : null
+}
+
+/** Lê a identidade tanto do snapshot SSE quanto do resultado persistido. */
+export function discoveryIdentity(
+  result: Pick<DiscoveryResult | StreamedDiscoveryHost, 'data'> | null | undefined
+): DiscoveryIdentity | null {
+  return discoveryDetail(result, 'identity') as DiscoveryIdentity | null
+}
+
+/** O palpite do Laya (tipo e sistema), quando a heurística ficou em dúvida. */
+export function discoveryLaya(
+  result: Pick<DiscoveryResult | StreamedDiscoveryHost, 'data'> | null | undefined
+): IdentitySuggestion | null {
+  return discoveryDetail(result, 'laya') as IdentitySuggestion | null
 }
 
 export interface DeviceTypePresentation {
@@ -148,7 +167,7 @@ export function discoveryDeviceTypeInfo(deviceType?: string | null): DeviceTypeP
     case 'other':
       return { label: 'Outro', icon: 'mdi-devices', color: 'blue-grey', isKnown: true }
     default:
-      return { label: 'Desconhecido', icon: 'mdi-lan', color: 'grey', isKnown: false }
+      return { label: 'Desconhecido', icon: 'mdi-lan', color: 'warning', isKnown: false }
   }
 }
 

@@ -24,6 +24,8 @@ use crate::{
             queue::IngestSnapshot,
             repository::{LogPage, LogQuery},
             sources::{SeenSource, SourceKind},
+            template::hash_hex,
+            templates,
         },
     },
 };
@@ -55,10 +57,17 @@ pub fn severity_label(severity: i16) -> Option<&'static str> {
 /// Propaga erro do banco principal.
 pub async fn serialize_page(
     inventory: &DatabaseConnection,
+    logs: &DatabaseConnection,
     page: LogPage,
     query: &LogQuery,
 ) -> AppResult<LogPageResponse> {
     let nomes = nomes_de_dispositivo(inventory, &page.rows).await?;
+    let hashes: HashSet<i64> = page
+        .rows
+        .iter()
+        .filter_map(|linha| linha.template_hash)
+        .collect();
+    let templates = templates::infos_for(logs, hashes).await?;
     let meta = LogPageMeta {
         next_cursor: page.next_cursor.map(|cursor| cursor.encode()),
         has_more: page.next_cursor.is_some(),
@@ -73,6 +82,7 @@ pub async fn serialize_page(
             .map(|linha| serialize_entry(linha, &nomes))
             .collect(),
         meta,
+        templates,
     })
 }
 
@@ -129,6 +139,7 @@ fn serialize_entry(linha: device_logs::Model, nomes: &HashMap<i64, String>) -> L
                 .collect()
         }),
         message: linha.message,
+        template_hash: linha.template_hash.map(hash_hex),
     }
 }
 
@@ -337,6 +348,7 @@ mod tests {
             topics: topics.map(str::to_owned),
             message: "mensagem".into(),
             source: "syslog".into(),
+            template_hash: None,
             created_at: Utc::now().into(),
         }
     }

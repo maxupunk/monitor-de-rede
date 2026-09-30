@@ -26,8 +26,10 @@ use sea_orm::{
 };
 
 use super::search;
+use sea_orm::sea_query::Query;
+
 use crate::{
-    models::logs::device_logs,
+    models::logs::{device_logs, log_templates},
     services::shared::errors::{AppError, AppResult},
 };
 
@@ -106,6 +108,9 @@ pub struct LogFilters {
     pub q: Option<String>,
     pub cursor: Option<Cursor>,
     pub limit: Option<u64>,
+    /// Categoria do padrão (`auth_failure`, `link_change`…). Vale a do
+    /// operador, senão a do Laya.
+    pub category: Option<String>,
 }
 
 /// Os filtros da tela, já validados.
@@ -122,6 +127,7 @@ pub struct LogQuery {
     pub q: Option<String>,
     pub cursor: Option<Cursor>,
     pub limit: u64,
+    pub category: Option<String>,
 }
 
 impl LogQuery {
@@ -153,6 +159,10 @@ impl LogQuery {
                 .filter(|texto| !texto.is_empty()),
             cursor: filtros.cursor,
             limit: filtros.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT),
+            category: filtros
+                .category
+                .map(|texto| texto.trim().to_owned())
+                .filter(|texto| !texto.is_empty()),
         }
     }
 }
@@ -179,6 +189,25 @@ fn window_condition(query: &LogQuery) -> Condition {
     }
     if let Some(facility) = query.facility {
         condicao = condicao.add(device_logs::Column::Facility.eq(facility));
+    }
+    if let Some(category) = &query.category {
+        // Subconsulta sobre `log_templates`, que mora no mesmo banco: o
+        // `IN (SELECT …)` vale igual no SQLite e no PostgreSQL. A correção do
+        // operador vence o palpite.
+        let padroes = Query::select()
+            .column(log_templates::Column::TemplateHash)
+            .from(log_templates::Entity)
+            .cond_where(
+                Condition::any()
+                    .add(log_templates::Column::UserCategory.eq(category.as_str()))
+                    .add(
+                        Condition::all()
+                            .add(log_templates::Column::UserCategory.is_null())
+                            .add(log_templates::Column::Category.eq(category.as_str())),
+                    ),
+            )
+            .to_owned();
+        condicao = condicao.add(device_logs::Column::TemplateHash.in_subquery(padroes));
     }
     condicao
 }
