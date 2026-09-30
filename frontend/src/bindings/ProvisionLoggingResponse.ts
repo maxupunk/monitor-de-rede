@@ -3,37 +3,34 @@
 /**
  * O que a tela mostra depois da ativação automática.
  */
-export type ProvisionLoggingResponse = {
-  operatingSystem: string
-  /**
-   * Identidade lida diretamente no equipamento e usada para associar os
-   * logs quando o endereço de origem está mascarado ou compartilhado.
-   */
-  identifiedHostname: string | null
-  /**
-   * O endereço que foi gravado no equipamento.
-   */
-  serverAddress: string
-  serverPort: number
-  /**
-   * Os comandos enviados. Nunca a credencial.
-   */
-  commands: Array<string>
-  /**
-   * O que o equipamento respondeu, com a senha raspada.
-   */
-  transcript: string
-  /**
-   * Se chegou log do dispositivo antes do teto de espera. `null` quando não
-   * havia como confirmar (ingestão desligada).
-   */
-  confirmed: boolean | null
-  /**
-   * Se o endereço aplicado também foi lembrado no dispositivo e no catálogo.
-   */
-  addressSaved: boolean
-  /**
-   * Falha parcial posterior à aplicação dos comandos. Nunca contém credenciais.
-   */
-  persistenceWarning: string | null
-}
+export type ProvisionLoggingResponse = { operatingSystem: string, 
+/**
+ * Identidade lida diretamente no equipamento e usada para associar os
+ * logs quando o endereço de origem está mascarado ou compartilhado.
+ */
+identifiedHostname: string | null, 
+/**
+ * O endereço que foi gravado no equipamento.
+ */
+serverAddress: string, serverPort: number, 
+/**
+ * Os comandos enviados. Nunca a credencial.
+ */
+commands: Array<string>, 
+/**
+ * O que o equipamento respondeu, com a senha raspada.
+ */
+transcript: string, 
+/**
+ * Se chegou log do dispositivo antes do teto de espera. `null` quando não
+ * havia como confirmar (ingestão desligada).
+ */
+confirmed: boolean | null, 
+/**
+ * Se o endereço aplicado também foi lembrado no dispositivo e no catálogo.
+ */
+addressSaved: boolean, 
+/**
+ * Falha parcial posterior à aplicação dos comandos. Nunca contém credenciais.
+ */
+persistenceWarning: string | null, };

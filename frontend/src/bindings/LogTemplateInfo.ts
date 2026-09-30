@@ -3,29 +3,24 @@
 /**
  * Um padrão de log e o que ele significa.
  */
-export type LogTemplateInfo = {
-  templateHash: string
-  template: string
-  example: string
-  /**
-   * A que vale: a do operador, senão a do Laya.
-   */
-  category: string | null
-  /**
-   * Do palpite do Laya (0–100); `null` quando o operador decidiu.
-   */
-  confidence: number | null
-  model: string | null
-  /**
-   * O operador confirmou ou corrigiu.
-   */
-  confirmed: boolean
-  /**
-   * Modelo do catálogo de alertas que cobre esta categoria, quando há.
-   */
-  alertTemplate: string | null
-  /**
-   * Regex que casa as linhas deste padrão, para uma regra `log_pattern`.
-   */
-  alertRegex: string
-}
+export type LogTemplateInfo = { templateHash: string, template: string, example: string, 
+/**
+ * A que vale: a do operador, senão a do Laya.
+ */
+category: string | null, 
+/**
+ * Do palpite do Laya (0–100); `null` quando o operador decidiu.
+ */
+confidence: number | null, model: string | null, 
+/**
+ * O operador confirmou ou corrigiu.
+ */
+confirmed: boolean, 
+/**
+ * Modelo do catálogo de alertas que cobre esta categoria, quando há.
+ */
+alertTemplate: string | null, 
+/**
+ * Regex que casa as linhas deste padrão, para uma regra `log_pattern`.
+ */
+alertRegex: string, };

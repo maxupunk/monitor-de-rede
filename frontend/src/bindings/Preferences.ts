@@ -5,19 +5,18 @@
  * motivo do `SetupGuide` do syslog: são os mesmos três campos, e um DTO
  * espelho divergiria deste struct na primeira mudança.
  */
-export type Preferences = {
-  /**
-   * Intervalo aplicado a um monitor novo que não declara o seu.
-   */
-  defaultPingIntervalSeconds: number
-  /**
-   * Comunidade aplicada a um dispositivo com SNMP ligado e sem comunidade.
-   */
-  defaultSnmpCommunity: string
-  /**
-   * Trava global da varredura periódica. Desligada, as redes mantêm o
-   * `scan_enabled` individual — o que este campo faz é impedir o agendador
-   * de disparar qualquer uma delas, sem apagar a configuração de nenhuma.
-   */
-  autoDiscoveryEnabled: boolean
-}
+export type Preferences = { 
+/**
+ * Intervalo aplicado a um monitor novo que não declara o seu.
+ */
+defaultPingIntervalSeconds: number, 
+/**
+ * Comunidade aplicada a um dispositivo com SNMP ligado e sem comunidade.
+ */
+defaultSnmpCommunity: string, 
+/**
+ * Trava global da varredura periódica. Desligada, as redes mantêm o
+ * `scan_enabled` individual — o que este campo faz é impedir o agendador
+ * de disparar qualquer uma delas, sem apagar a configuração de nenhuma.
+ */
+autoDiscoveryEnabled: boolean, };

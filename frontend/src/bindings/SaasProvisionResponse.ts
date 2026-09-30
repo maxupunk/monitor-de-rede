@@ -3,9 +3,4 @@
 /**
  * Resposta do provisionamento de serviços SaaS.
  */
-export type SaasProvisionResponse = {
-  provisionedCount: number
-  createdMonitorIds: Array<bigint>
-  existingMonitorIds: Array<bigint>
-  message: string
-}
+export type SaasProvisionResponse = { provisionedCount: number, createdMonitorIds: Array<bigint>, existingMonitorIds: Array<bigint>, message: string, };

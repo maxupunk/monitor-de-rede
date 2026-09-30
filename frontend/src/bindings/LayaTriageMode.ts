@@ -3,4 +3,4 @@
 /**
  * Triagem da IA proativa: o Laya decide se um alerta merece resumo do LLM.
  */
-export type LayaTriageMode = 'off' | 'shadow' | 'enforce'
+export type LayaTriageMode = "off" | "shadow" | "enforce";

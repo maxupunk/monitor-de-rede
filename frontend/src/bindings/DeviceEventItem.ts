@@ -3,11 +3,4 @@
 /**
  * Evento de alerta de um dispositivo exibido na aba de eventos.
  */
-export type DeviceEventItem = {
-  id: number
-  deviceId: number
-  eventType: string
-  severity: string
-  message: string
-  createdAt: string
-}
+export type DeviceEventItem = { id: number, deviceId: number, eventType: string, severity: string, message: string, createdAt: string, };

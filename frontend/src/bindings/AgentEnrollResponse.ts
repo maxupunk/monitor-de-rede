@@ -3,4 +3,4 @@
 /**
  * Resposta ao agente que trocou o código.
  */
-export type AgentEnrollResponse = { probeId: number; name: string; token: string }
+export type AgentEnrollResponse = { probeId: number, name: string, token: string, };

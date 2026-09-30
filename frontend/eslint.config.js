@@ -1,6 +1,7 @@
 import pluginVue from 'eslint-plugin-vue'
 import tseslint from 'typescript-eslint'
 import vueParser from 'vue-eslint-parser'
+import eslintConfigPrettier from 'eslint-config-prettier/flat'
 
 export default tseslint.config(
   ...pluginVue.configs['flat/recommended'],
@@ -16,15 +17,6 @@ export default tseslint.config(
       },
     },
     rules: {
-      // Regras de apresentação e formatação desativadas: o Prettier é a autoridade única
-      'vue/html-indent': 'off',
-      'vue/script-indent': 'off',
-      'vue/multiline-html-element-content-newline': 'off',
-      'vue/singleline-html-element-content-newline': 'off',
-      'vue/html-closing-bracket-newline': 'off',
-      'vue/max-attributes-per-line': 'off',
-      'vue/html-self-closing': 'off',
-      'vue/html-quotes': 'off',
       'vue/multi-word-component-names': 'off',
       'vue/no-v-html': 'off',
       'vue/require-default-prop': 'off',
@@ -33,6 +25,11 @@ export default tseslint.config(
       '@typescript-eslint/no-explicit-any': 'off',
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
     },
-  }
+  },
+  // Sempre por último: desliga TODA regra de estilo (indentação, quebras,
+  // espaços, aspas) do ESLint e dos plugins. Formatação é só do Prettier; o
+  // ESLint cuida de erro de código. Assim `lint --fix` e `format` nunca
+  // brigam pelo mesmo trecho.
+  eslintConfigPrettier
 )
 

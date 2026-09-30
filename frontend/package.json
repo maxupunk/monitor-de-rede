@@ -13,6 +13,7 @@
     "typecheck": "vue-tsc -b",
     "lint": "eslint src --fix",
     "format": "prettier --write src tests",
+    "format:check": "prettier --check src tests",
     "test": "vitest run"
   },
   "dependencies": {
@@ -32,6 +33,7 @@
     "@vue/test-utils": "^2.4.11",
     "@vue/tsconfig": "^0.9.1",
     "eslint": "^10.4.0",
+    "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-vue": "^10.0.0",
     "jsdom": "^30.0.1",
     "prettier": "^3.8.3",

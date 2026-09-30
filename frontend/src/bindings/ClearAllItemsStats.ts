@@ -3,9 +3,4 @@
 /**
  * Estatísticas retornadas por `POST /api/settings/clear-all-items`.
  */
-export type ClearAllItemsStats = {
-  devicesDeleted: bigint
-  monitorsDeleted: bigint
-  networksDeleted: bigint
-  totalDeleted: bigint
-}
+export type ClearAllItemsStats = { devicesDeleted: bigint, monitorsDeleted: bigint, networksDeleted: bigint, totalDeleted: bigint, };

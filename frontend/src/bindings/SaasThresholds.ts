@@ -3,8 +3,4 @@
 /**
  * Limites sugeridos de latência e perda de pacotes para o serviço SaaS.
  */
-export type SaasThresholds = {
-  warningLatencyMs: number
-  criticalLatencyMs: number
-  maxPacketLossPercent: number | null
-}
+export type SaasThresholds = { warningLatencyMs: number, criticalLatencyMs: number, maxPacketLossPercent: number | null, };

@@ -3,4 +3,4 @@
 /**
  * Tipo do banco de dados detectado.
  */
-export type DbType = 'sqlite' | 'postgres'
+export type DbType = "sqlite" | "postgres";

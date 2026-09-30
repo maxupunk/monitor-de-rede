@@ -3,8 +3,4 @@
 /**
  * Requisição de provisionamento de serviços SaaS em lote ou individual.
  */
-export type SaasProvisionRequest = {
-  presetIds: Array<string>
-  intervalSeconds: number | null
-  timeoutSeconds: number | null
-}
+export type SaasProvisionRequest = { presetIds: Array<string>, intervalSeconds: number | null, timeoutSeconds: number | null, };

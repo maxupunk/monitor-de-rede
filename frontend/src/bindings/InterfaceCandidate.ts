@@ -3,17 +3,8 @@
 /**
  * Uma interface como a tela a conhece — do escaneamento SNMP ou do cadastro.
  */
-export type InterfaceCandidate = {
-  ifIndex: number
-  name: string
-  alias: string | null
-  descr: string | null
-  ifType: number | null
-  /**
-   * bits/s.
-   */
-  speed: number | null
-  operUp: boolean | null
-  inOctets: number | null
-  outOctets: number | null
-}
+export type InterfaceCandidate = { ifIndex: number, name: string, alias: string | null, descr: string | null, ifType: number | null, 
+/**
+ * bits/s.
+ */
+speed: number | null, operUp: boolean | null, inOctets: number | null, outOctets: number | null, };

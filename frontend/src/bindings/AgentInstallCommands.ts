@@ -3,13 +3,9 @@
 /**
  * Comandos de instalação para um endereço desta central.
  */
-export type AgentInstallCommands = {
-  /**
-   * Entrada de "Endereços deste servidor" usada; `None` quando
-   * `AGENT_SERVER_URL` fixa o endereço ou quando não há nenhum cadastrado.
-   */
-  addressId: string | null
-  serverUrl: string
-  dockerCommand: string
-  systemdCommand: string
-}
+export type AgentInstallCommands = { 
+/**
+ * Entrada de "Endereços deste servidor" usada; `None` quando
+ * `AGENT_SERVER_URL` fixa o endereço ou quando não há nenhum cadastrado.
+ */
+addressId: string | null, serverUrl: string, dockerCommand: string, systemdCommand: string, };

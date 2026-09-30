@@ -3,4 +3,4 @@
 /**
  * O que a IA pode fazer com containers Docker (iniciar, parar, reiniciar).
  */
-export type AiContainerActionMode = 'off' | 'confirm' | 'auto'
+export type AiContainerActionMode = "off" | "confirm" | "auto";

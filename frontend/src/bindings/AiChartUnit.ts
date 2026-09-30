@@ -3,4 +3,4 @@
 /**
  * Grandeza do eixo Y de um gráfico da IA — o frontend escolhe o formatador por ela.
  */
-export type AiChartUnit = 'latency' | 'bandwidth' | 'percentage' | 'generic'
+export type AiChartUnit = "latency" | "bandwidth" | "percentage" | "generic";

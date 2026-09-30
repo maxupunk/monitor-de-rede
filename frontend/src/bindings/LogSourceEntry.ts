@@ -3,38 +3,29 @@
 /**
  * Uma origem vista pelo servidor desde o último reinício.
  */
-export type LogSourceEntry = {
-  sourceIp: string
-  /**
-   * A chave a devolver no `bind` — o IP, ou `host:<hostname>` quando a
-   * origem chega mascarada por NAT. A tela não monta esta chave sozinha: só
-   * o servidor sabe se o endereço é gateway.
-   */
-  bindKey: string
-  /**
-   * Se o `sourceIp` é o gateway de um NAT em vez do remetente real. Quando
-   * verdadeiro, o endereço é o mesmo para todos os equipamentos e só o
-   * hostname os separa.
-   */
-  masked: boolean
-  /**
-   * `device` | `network` | `ambiguous` | `unknown`.
-   */
-  kind: string
-  deviceId: number | null
-  deviceName: string | null
-  /**
-   * Candidatos quando o mesmo IP existe em mais de um dispositivo. É o que a
-   * tela oferece no vínculo manual.
-   */
-  candidates: Array<{ id: number; name: string }>
-  hostname: string | null
-  messageCount: number
-  /**
-   * Quantas foram descartadas por não resolver para nada cadastrado.
-   */
-  droppedCount: number
-  firstSeenAt: string
-  lastSeenAt: string
-  lastMessage: string
-}
+export type LogSourceEntry = { sourceIp: string, 
+/**
+ * A chave a devolver no `bind` — o IP, ou `host:<hostname>` quando a
+ * origem chega mascarada por NAT. A tela não monta esta chave sozinha: só
+ * o servidor sabe se o endereço é gateway.
+ */
+bindKey: string, 
+/**
+ * Se o `sourceIp` é o gateway de um NAT em vez do remetente real. Quando
+ * verdadeiro, o endereço é o mesmo para todos os equipamentos e só o
+ * hostname os separa.
+ */
+masked: boolean, 
+/**
+ * `device` | `network` | `ambiguous` | `unknown`.
+ */
+kind: string, deviceId: number | null, deviceName: string | null, 
+/**
+ * Candidatos quando o mesmo IP existe em mais de um dispositivo. É o que a
+ * tela oferece no vínculo manual.
+ */
+candidates: Array<{ id: number, name: string }>, hostname: string | null, messageCount: number, 
+/**
+ * Quantas foram descartadas por não resolver para nada cadastrado.
+ */
+droppedCount: number, firstSeenAt: string, lastSeenAt: string, lastMessage: string, };

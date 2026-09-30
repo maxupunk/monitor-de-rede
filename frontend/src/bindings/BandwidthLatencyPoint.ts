@@ -3,9 +3,4 @@
 /**
  * Ponto da série de correlação banda x latência.
  */
-export type BandwidthLatencyPoint = {
-  time: string
-  timestamp: number
-  bwBps: number
-  latency: number
-}
+export type BandwidthLatencyPoint = { time: string, timestamp: number, bwBps: number, latency: number, };

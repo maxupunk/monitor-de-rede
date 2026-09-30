@@ -3,4 +3,4 @@
 /**
  * O que o eixo X representa.
  */
-export type AiChartAxis = 'time' | 'label'
+export type AiChartAxis = "time" | "label";

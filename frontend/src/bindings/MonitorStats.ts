@@ -3,12 +3,4 @@
 /**
  * Estatísticas agregadas exibidas no detalhe de um monitor.
  */
-export type MonitorStats = {
-  avgLatency: number | null
-  minLatency: number | null
-  maxLatency: number | null
-  lastLatency: number | null
-  uptimePercentage: number
-  totalChecks: number
-  upChecks: number
-}
+export type MonitorStats = { avgLatency: number | null, minLatency: number | null, maxLatency: number | null, lastLatency: number | null, uptimePercentage: number, totalChecks: number, upChecks: number, };

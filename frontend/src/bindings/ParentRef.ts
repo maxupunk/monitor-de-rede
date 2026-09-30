@@ -3,4 +3,4 @@
 /**
  * Referência compacta a um dispositivo pai.
  */
-export type ParentRef = { id: number | null; name: string }
+export type ParentRef = { id: number | null, name: string, };

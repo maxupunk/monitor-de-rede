@@ -4,4 +4,4 @@
  * Janelas oferecidas pela tela. Cada uma tem um passo que mantém a série
  * entre ~60 e ~360 pontos.
  */
-export type MetricsRange = '1h' | '6h' | '24h' | '7d' | '30d'
+export type MetricsRange = "1h" | "6h" | "24h" | "7d" | "30d";

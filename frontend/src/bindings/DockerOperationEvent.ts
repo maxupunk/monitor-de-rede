@@ -3,15 +3,8 @@
 /**
  * Progresso publicado no SSE como `docker:operation`.
  */
-export type DockerOperationEvent = {
-  operationId: string
-  hostKey: string
-  kind: string
-  target: string
-  /**
-   * `running`, `succeeded` ou `failed`.
-   */
-  state: string
-  line: string | null
-  message: string | null
-}
+export type DockerOperationEvent = { operationId: string, hostKey: string, kind: string, target: string, 
+/**
+ * `running`, `succeeded` ou `failed`.
+ */
+state: string, line: string | null, message: string | null, };

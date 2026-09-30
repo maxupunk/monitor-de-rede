@@ -3,9 +3,4 @@
 /**
  * Totais agregados da distribuição de eventos.
  */
-export type HourlyDistributionTotals = {
-  critical: number
-  warning: number
-  info: number
-  total: number
-}
+export type HourlyDistributionTotals = { critical: number, warning: number, info: number, total: number, };

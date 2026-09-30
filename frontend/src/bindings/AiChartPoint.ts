@@ -4,4 +4,4 @@
  * Amostra de uma série: instante RFC 3339 (ou rótulo, conforme o eixo) e
  * valor na unidade do gráfico.
  */
-export type AiChartPoint = { time: string; value: number }
+export type AiChartPoint = { time: string, value: number, };

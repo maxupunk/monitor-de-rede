@@ -3,15 +3,12 @@
 /**
  * Quão provável o Laya acha que um grupo de ferramentas é necessário.
  */
-export type LayaGroupScore = {
-  id: string
-  purpose: string
-  /**
-   * 0–1.
-   */
-  probability: number
-  /**
-   * Passou do limiar configurado: iria para a IA.
-   */
-  selected: boolean
-}
+export type LayaGroupScore = { id: string, purpose: string, 
+/**
+ * 0–1.
+ */
+probability: number, 
+/**
+ * Passou do limiar configurado: iria para a IA.
+ */
+selected: boolean, };

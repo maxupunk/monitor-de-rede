@@ -8,6 +8,16 @@ charset = utf-8
 trim_trailing_whitespace = true
 insert_final_newline = true
 
+# Rust: 4 espaços e 100 colunas, igual ao `backend/.rustfmt.toml`. Sem isto o
+# editor indenta com 2 e o `cargo fmt` reescreve tudo com 4.
+[*.rs]
+indent_size = 4
+max_line_length = 100
+
+# Frontend: 100 colunas, igual ao `frontend/.prettierrc.json`.
+[*.{ts,js,vue,css,scss}]
+max_line_length = 100
+
 [*.json]
 insert_final_newline = unset
 

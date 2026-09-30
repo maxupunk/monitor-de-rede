@@ -3,12 +3,4 @@
 /**
  * Progresso do download de um modelo num servidor local (Ollama ou Ollaya).
  */
-export type ModelPullProgress = {
-  status: string
-  digest: string | null
-  total: number | null
-  completed: number | null
-  percentage: number | null
-  done: boolean
-  error: string | null
-}
+export type ModelPullProgress = { status: string, digest: string | null, total: number | null, completed: number | null, percentage: number | null, done: boolean, error: string | null, };

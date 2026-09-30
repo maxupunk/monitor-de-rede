@@ -3,4 +3,4 @@
 /**
  * Frequência do resumo da rede enviado pelos canais de notificação.
  */
-export type AiDigestSchedule = 'off' | 'daily' | 'weekly'
+export type AiDigestSchedule = "off" | "daily" | "weekly";

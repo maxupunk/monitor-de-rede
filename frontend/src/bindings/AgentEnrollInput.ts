@@ -3,4 +3,4 @@
 /**
  * Troca do código de enrollment pelo token (chamada pelo próprio agente).
  */
-export type AgentEnrollInput = { code: string; hostname: string | null }
+export type AgentEnrollInput = { code: string, hostname: string | null, };

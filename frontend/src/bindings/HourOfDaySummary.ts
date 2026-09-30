@@ -3,11 +3,4 @@
 /**
  * Resumo agregado por hora do dia (0h..23h) ao longo do período selecionado.
  */
-export type HourOfDaySummary = {
-  hour: number
-  avgLatencyMs: number | null
-  minLatencyMs: number | null
-  maxLatencyMs: number | null
-  uptimePercentage: number
-  totalChecks: number
-}
+export type HourOfDaySummary = { hour: number, avgLatencyMs: number | null, minLatencyMs: number | null, maxLatencyMs: number | null, uptimePercentage: number, totalChecks: number, };

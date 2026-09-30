@@ -3,4 +3,4 @@
 /**
  * Par rótulo/valor exibido no resumo "os dados do túnel" antes do script.
  */
-export type ArtifactSummaryItem = { label: string; value: string }
+export type ArtifactSummaryItem = { label: string, value: string, };

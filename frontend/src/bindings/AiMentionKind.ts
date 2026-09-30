@@ -3,4 +3,4 @@
 /**
  * Tipo do que se marca com `@` no chat.
  */
-export type AiMentionKind = 'device' | 'monitor' | 'container' | 'source'
+export type AiMentionKind = "device" | "monitor" | "container" | "source";

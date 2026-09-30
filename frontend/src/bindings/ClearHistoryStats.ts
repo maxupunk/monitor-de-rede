@@ -3,10 +3,4 @@
 /**
  * Estatísticas retornadas por `POST /api/settings/clear-history`.
  */
-export type ClearHistoryStats = {
-  metricsDeleted: bigint
-  resultsDeleted: bigint
-  logsDeleted: bigint
-  alertsDeleted: bigint
-  totalDeleted: bigint
-}
+export type ClearHistoryStats = { metricsDeleted: bigint, resultsDeleted: bigint, logsDeleted: bigint, alertsDeleted: bigint, totalDeleted: bigint, };

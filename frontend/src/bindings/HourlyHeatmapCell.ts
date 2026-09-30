@@ -3,15 +3,4 @@
 /**
  * Célula individual da matriz de calor horária (Data x Hora).
  */
-export type HourlyHeatmapCell = {
-  date: string
-  dayOfWeek: number
-  hour: number
-  avgLatencyMs: number | null
-  minLatencyMs: number | null
-  maxLatencyMs: number | null
-  uptimePercentage: number
-  totalChecks: number
-  upChecks: number
-  downChecks: number
-}
+export type HourlyHeatmapCell = { date: string, dayOfWeek: number, hour: number, avgLatencyMs: number | null, minLatencyMs: number | null, maxLatencyMs: number | null, uptimePercentage: number, totalChecks: number, upChecks: number, downChecks: number, };

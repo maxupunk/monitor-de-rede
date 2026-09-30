@@ -3,13 +3,4 @@
 /**
  * Métrica de um dispositivo exibida na aba de métricas.
  */
-export type DeviceMetricItem = {
-  id: number
-  deviceId: number
-  interfaceId: number | null
-  interfaceName: string | null
-  metricName: string
-  metricValue: number
-  unit: string
-  createdAt: string
-}
+export type DeviceMetricItem = { id: number, deviceId: number, interfaceId: number | null, interfaceName: string | null, metricName: string, metricValue: number, unit: string, createdAt: string, };

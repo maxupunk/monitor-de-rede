@@ -111,6 +111,13 @@
    - **Edições cirúrgicas**: Faça apenas modificações pontuais no escopo estrito da tarefa. **NUNCA** reformate arquivos inteiros nem altere a indentação, espaçamento ou quebras de linha de blocos de código não relacionados à mudança funcional.
    - **Evitar retrabalho com formatadores**: O repositório já possui formatadores padronizados (`cargo fmt` no backend e `pnpm run format` / Prettier no frontend). Alterar indentação arbitrariamente faz com que a etapa de validação (`format`) precise desfazer ou reformatar tudo, inflando diffs e desperdiçando tokens desnecessariamente.
    - **Respeite o estilo local**: Ao escrever código novo, siga rigorosamente o padrão de indentação e espaçamento já presente no arquivo para que o formatador não precise reformatar o bloco na validação final.
+   - **NUNCA gaste tempo alterando indentação — regra para todos os agentes**: indentação, quebras de linha, espaços, aspas e ponto e vírgula **são trabalho do formatador, não do agente**. Não faça edições, passadas ou rodadas extras só para ajustar estilo, não "corrija" indentação à mão e não reescreva um bloco para ele "ficar bonito". Escreva o código funcional e rode o formatador **uma única vez**, no fim.
+   - **Um dono por estilo, sem conflito**:
+     - Frontend: o **Prettier** (`frontend/.prettierrc.json`) é o único dono do estilo. O ESLint carrega `eslint-config-prettier` por último e só aponta erro de código — ele não reformata nada. Ordem única: `pnpm lint` → `pnpm format` (rodar os dois em sequência é idempotente; `pnpm --prefix frontend run format:check` confere sem gravar).
+     - Backend: o **`cargo fmt`** (`backend/.rustfmt.toml`, 4 espaços, 100 colunas) é o único dono.
+     - O `.editorconfig` segue os dois (Rust com 4 espaços, o resto com 2), para o editor não brigar com o formatador.
+     - `frontend/src/bindings/` é gerado pelo `ts-rs` e fica **fora** do Prettier (`frontend/.prettierignore`): não formate esses arquivos; o `cargo test` os reescreve.
+   - **Não crie regra de estilo nova no ESLint** (nem reative as do `eslint-plugin-vue`): toda regra de apresentação vai no `.prettierrc.json`, ou não existe.
 
 9. **Tempo Real Exclusivamente por SSE — Polling Proibido**:
    - **É proibido implementar polling no frontend sob qualquer forma**: não usar `setInterval`, `setTimeout` recursivo, `refetchInterval`, loops temporizados, watchers que consultam repetidamente a API ou qualquer mecanismo equivalente para atualizar dados automaticamente.

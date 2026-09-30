@@ -3,12 +3,4 @@
 /**
  * Metadados resumidos dos monitores abrangidos pelo heatmap.
  */
-export type HourlyHeatmapMonitorSummary = {
-  id: number
-  name: string
-  target: string
-  checkType: string
-  isSaas: boolean
-  saasService: string | null
-  currentStatus: string
-}
+export type HourlyHeatmapMonitorSummary = { id: number, name: string, target: string, checkType: string, isSaas: boolean, saasService: string | null, currentStatus: string, };

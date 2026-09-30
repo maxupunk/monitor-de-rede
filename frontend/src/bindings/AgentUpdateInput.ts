@@ -3,8 +3,4 @@
 /**
  * Alteração do cadastro.
  */
-export type AgentUpdateInput = {
-  name: string | null
-  deviceId: number | null
-  enforceTunnelIp: boolean | null
-}
+export type AgentUpdateInput = { name: string | null, deviceId: number | null, enforceTunnelIp: boolean | null, };

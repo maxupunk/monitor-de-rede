@@ -3,4 +3,4 @@
 /**
  * Um serviço do projeto e o estado dos containers dele (réplicas incluídas).
  */
-export type ComposeService = { name: string; containers: number; running: number }
+export type ComposeService = { name: string, containers: number, running: number, };

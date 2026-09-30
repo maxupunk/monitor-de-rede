@@ -3,9 +3,4 @@
 /**
  * Uma operação longa (pull, update, compose) aceita pela central.
  */
-export type DockerOperationAccepted = {
-  operationId: string
-  hostKey: string
-  kind: string
-  target: string
-}
+export type DockerOperationAccepted = { operationId: string, hostKey: string, kind: string, target: string, };

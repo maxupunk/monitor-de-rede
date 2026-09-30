@@ -1,3 +1,9 @@
+# Todo texto em LF, no repositório e na cópia de trabalho — igual ao Prettier
+# (`endOfLine: lf`), ao `.editorconfig` e ao `cargo fmt`. Sem isto o
+# `core.autocrlf=true` do Windows converte para CRLF no checkout, o formatador
+# volta para LF e o arquivo aparece modificado sem ninguém ter mexido.
+* text=auto eol=lf
+
 # Scripts que entram na imagem precisam de LF mesmo quando o clone é feito no
 # Windows com `core.autocrlf=true`. Um CR no fim do shebang faz o kernel do
 # container procurar por `/bin/sh\r` e o container morre com "no such file or

@@ -3,4 +3,4 @@
 /**
  * Uso de um ponto de montagem no instante da amostra.
  */
-export type DiskUsage = { mount: string; usedBytes: number; totalBytes: number }
+export type DiskUsage = { mount: string, usedBytes: number, totalBytes: number, };

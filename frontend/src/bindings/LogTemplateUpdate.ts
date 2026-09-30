@@ -3,4 +3,4 @@
 /**
  * Corpo de `PUT /api/logs/templates/{hash}`.
  */
-export type LogTemplateUpdate = { category: string }
+export type LogTemplateUpdate = { category: string, };

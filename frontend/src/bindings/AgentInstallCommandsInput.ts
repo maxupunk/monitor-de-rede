@@ -3,10 +3,8 @@
 /**
  * Regera os comandos de instalação para outro endereço desta central.
  */
-export type AgentInstallCommandsInput = {
-  code: string
-  /**
-   * Id de uma entrada de "Endereços deste servidor".
-   */
-  addressId: string
-}
+export type AgentInstallCommandsInput = { code: string, 
+/**
+ * Id de uma entrada de "Endereços deste servidor".
+ */
+addressId: string, };

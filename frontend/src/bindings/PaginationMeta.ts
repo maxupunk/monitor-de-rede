@@ -7,14 +7,4 @@
  * emitidos por compatibilidade defensiva: telas antigas e integrações externas
  * podem ler as URLs, e omiti-las produziria `undefined` silencioso.
  */
-export type PaginationMeta = {
-  total: number
-  perPage: number
-  currentPage: number
-  lastPage: number
-  firstPage: number
-  firstPageUrl: string
-  lastPageUrl: string
-  nextPageUrl: string | null
-  previousPageUrl: string | null
-}
+export type PaginationMeta = { total: number, perPage: number, currentPage: number, lastPage: number, firstPage: number, firstPageUrl: string, lastPageUrl: string, nextPageUrl: string | null, previousPageUrl: string | null, };

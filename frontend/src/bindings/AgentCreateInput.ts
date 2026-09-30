@@ -3,15 +3,12 @@
 /**
  * Cadastro de um agente pela central.
  */
-export type AgentCreateInput = {
-  name: string
-  siteId: number | null
-  /**
-   * Dispositivo (normalmente o peer da VPN) que hospeda o agente.
-   */
-  deviceId: number | null
-  /**
-   * Exigir que a conexão venha do IP do túnel do dispositivo (padrão: sim).
-   */
-  enforceTunnelIp: boolean | null
-}
+export type AgentCreateInput = { name: string, siteId: number | null, 
+/**
+ * Dispositivo (normalmente o peer da VPN) que hospeda o agente.
+ */
+deviceId: number | null, 
+/**
+ * Exigir que a conexão venha do IP do túnel do dispositivo (padrão: sim).
+ */
+enforceTunnelIp: boolean | null, };

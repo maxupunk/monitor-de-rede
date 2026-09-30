@@ -3,11 +3,4 @@
 /**
  * Bin horário da distribuição de eventos.
  */
-export type HourlyDistributionBin = {
-  label: string
-  hour: number
-  timestamp: string
-  critical: number
-  warning: number
-  info: number
-}
+export type HourlyDistributionBin = { label: string, hour: number, timestamp: string, critical: number, warning: number, info: number, };

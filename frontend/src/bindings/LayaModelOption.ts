@@ -3,11 +3,8 @@
 /**
  * Um modelo que a tela oferece no autocomplete.
  */
-export type LayaModelOption = {
-  name: string
-  /**
-   * Só os do catálogo têm; um instalado por fora vem sem.
-   */
-  description: string | null
-  installed: boolean
-}
+export type LayaModelOption = { name: string, 
+/**
+ * Só os do catálogo têm; um instalado por fora vem sem.
+ */
+description: string | null, installed: boolean, };

@@ -3,4 +3,4 @@
 /**
  * Severidade mínima de um alerta para ganhar resumo automático.
  */
-export type AiIncidentSeverity = 'critical' | 'warning'
+export type AiIncidentSeverity = "critical" | "warning";

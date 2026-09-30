@@ -3,23 +3,22 @@
 /**
  * Medida da resposta anterior da conversa.
  */
-export type ContextHint = {
-  /**
-   * Tokens da conversa na última rodada (entrada + saída).
-   */
-  tokens: number
-  /**
-   * Janela do modelo que respondeu.
-   */
-  window: number | null
-  /**
-   * Modelo que respondeu.
-   */
-  model: string | null
-  /**
-   * Grupos de ferramentas que a conversa carregou, na ordem (evento
-   * `usage`). Voltam iguais para a lista de ferramentas não mudar e o
-   * cache de prefixo do provedor continuar valendo.
-   */
-  toolGroups: Array<string>
-}
+export type ContextHint = { 
+/**
+ * Tokens da conversa na última rodada (entrada + saída).
+ */
+tokens: number, 
+/**
+ * Janela do modelo que respondeu.
+ */
+window: number | null, 
+/**
+ * Modelo que respondeu.
+ */
+model: string | null, 
+/**
+ * Grupos de ferramentas que a conversa carregou, na ordem (evento
+ * `usage`). Voltam iguais para a lista de ferramentas não mudar e o
+ * cache de prefixo do provedor continuar valendo.
+ */
+toolGroups: Array<string>, };

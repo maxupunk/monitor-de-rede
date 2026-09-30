@@ -3,4 +3,4 @@
 /**
  * Resposta de uma execução SNMP consolidada do dispositivo.
  */
-export type MonitorSnmpRunResponse = { message: string; result: any }
+export type MonitorSnmpRunResponse = { message: string, result: any, };

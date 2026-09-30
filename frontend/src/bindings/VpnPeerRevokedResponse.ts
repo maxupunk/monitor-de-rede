@@ -3,4 +3,4 @@
 /**
  * Resposta de `DELETE /api/vpn/peers/:id`.
  */
-export type VpnPeerRevokedResponse = { message: string }
+export type VpnPeerRevokedResponse = { message: string, };
