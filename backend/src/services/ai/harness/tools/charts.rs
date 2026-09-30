@@ -222,7 +222,7 @@ impl AiToolHandler for InterfaceTrafficChart {
             "properties": {
                 "device": { "type": "string", "description": "Nome, IP ou id do dispositivo" },
                 "interface": { "type": "string", "description": "Nome, alias, ifIndex ou id da interface (de get_device_interfaces)" },
-                "hours": { "type": "integer", "description": "Janela em horas (1 a 168, padrão 6)" }
+                "hours": { "type": "integer", "description": "Horas: 1–168, padrão 6" }
             },
             "required": ["device", "interface"]
         })
@@ -326,7 +326,7 @@ impl AiToolHandler for DeviceMetricChart {
             "properties": {
                 "device": { "type": "string", "description": "Nome, IP ou id do dispositivo" },
                 "metric": { "type": "string", "description": "cpu_usage (padrão), memory_usage ou outro nome de série" },
-                "hours": { "type": "integer", "description": "Janela em horas (1 a 168, padrão 24)" }
+                "hours": { "type": "integer", "description": "Horas: 1–168, padrão 24" }
             },
             "required": ["device"]
         })

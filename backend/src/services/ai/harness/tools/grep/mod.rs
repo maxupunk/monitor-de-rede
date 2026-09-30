@@ -75,27 +75,25 @@ impl AiToolHandler for Grep {
     }
 
     fn description(&self) -> &'static str {
-        "Procura texto nos dados sem trazê-los inteiros, como o grep. Fontes: 'logs' (syslog dos equipamentos e da aplicação), 'alerts' (mensagens de alertas), 'checks' (mensagens de checagens que falharam) e 'docker' (saída de um container; exige container). \
-Escolha quanto receber: 'count' (total, por origem e por hora), 'sources' (quais dispositivos/monitores), 'patterns' (mensagens distintas com contagem), 'lines' (as ocorrências mais recentes) ou 'auto' (linhas se couberem, senão resumo). \
-Prefira count/sources para medir antes de pedir linhas."
+        "Busca texto sem trazer os dados inteiros. source: logs (syslog e aplicação, padrão), alerts, checks (falhas) ou docker (exige container). output: count (totais por origem e hora) e sources (quem) para medir primeiro; patterns (mensagens distintas); lines (mais recentes); auto."
     }
 
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "pattern": { "type": "string", "description": "Texto a procurar (vazio: tudo)" },
-                "regex": { "type": "boolean", "description": "Trata pattern/exclude como regex" },
+                "pattern": { "type": "string", "description": "Vazio: tudo" },
+                "regex": { "type": "boolean", "description": "pattern/exclude como regex" },
                 "exclude": { "type": "string", "description": "Descarta linhas com este texto" },
-                "source": { "type": "string", "enum": SOURCE_NAMES, "description": "Fonte (padrão: logs)" },
+                "source": { "type": "string", "enum": SOURCE_NAMES },
                 "output": { "type": "string", "enum": ["auto", "count", "sources", "patterns", "lines"] },
-                "device": { "type": "string", "description": "Nome, IP ou id do dispositivo" },
-                "container": { "type": "string", "description": "Só docker: nome ou id do container" },
-                "host": { "type": "string", "description": "Só docker: servidor (padrão: central)" },
-                "severity": { "type": "string", "description": "Só logs: severidade máxima (error, warning, info)" },
-                "hours": { "type": "integer", "description": "Janela em horas (1 a 168, padrão 24)" },
-                "max_lines": { "type": "integer", "description": "Linhas em 'lines'/'auto' (1 a 50, padrão 15)" },
-                "context": { "type": "integer", "description": "Só logs: linhas de contexto (0 a 3, padrão 0)" }
+                "device": { "type": "string", "description": "Nome, IP ou id" },
+                "container": { "type": "string", "description": "Só docker" },
+                "host": { "type": "string", "description": "Só docker; padrão: central" },
+                "severity": { "type": "string", "description": "Só logs: a máxima (error, warning, info)" },
+                "hours": { "type": "integer", "description": "1–168, padrão 24" },
+                "max_lines": { "type": "integer", "description": "1–50, padrão 15" },
+                "context": { "type": "integer", "description": "Só logs: 0–3 linhas ao redor" }
             }
         })
     }

@@ -25,33 +25,35 @@ pub struct ChatContext {
     pub mentions: Vec<AiMention>,
 }
 
-const METHOD: &str = "COMO TRABALHAR:
-1. Responda saudações e cortesias direto, sem ferramentas. Ferramentas só quando a pergunta exigir dados.
-2. Seja cirúrgico: consulte o mínimo que responde. Peça na mesma rodada o que já sabe que vai precisar (cada rodada reenvia a conversa inteira). \
-Aparelho: get_device_detail. Alertas: get_alerts. Visão geral: get_system_summary.
-3. Diagnóstico baseado em dados, nunca em suposição. Vários alertas: busque a causa raiz pela topologia antes de tratar um a um. \
-Origem de alerta: explain_alert. Se uma regra for ruidosa, oriente ajustes antes de excluir.
-4. Logs, alertas, checagens e docker: use grep — meça primeiro ('count'/'sources'), depois 'lines' filtradas; regex para alternativas; exclude para ruído.
-5. Gráficos aparecem ao usuário automaticamente — não os reproduza em texto nem em tabela.
-6. Marcados com @ são o alvo prioritário. Se não estiver claro de qual recurso vem a informação ou se mudar de assunto, chame ask_user com opções antes de consultar.
-7. Dúvidas sobre configuração do NetMonitor ou regras: search_system_docs ou get_alert_rules_guide.";
+// Cada caractere daqui vai em toda rodada de toda pergunta: regra nova entra
+// curta, e só se mudar o comportamento da IA.
+const METHOD: &str = "MÉTODO:
+1. Cortesia: responda sem ferramentas. Ferramenta só quando a pergunta pedir dados.
+2. Mínimo de consultas, e todas as já previstas na mesma rodada (cada rodada reenvia a conversa). \
+Aparelho: get_device_detail; alertas: get_alerts; visão geral: get_system_summary.
+3. Conclua só com dados. Vários alertas: causa raiz pela topologia primeiro. Origem de alerta: explain_alert; \
+regra ruidosa: ajuste antes de excluir.
+4. Logs, alertas, checagens e docker: grep — meça ('count'/'sources') antes de pedir 'lines'.
+5. Gráficos já aparecem ao usuário: não os repita em texto.
+6. O alvo são os marcados com @. Recurso ambíguo ou assunto novo: ask_user com opções antes de consultar.
+7. Dúvida sobre o NetMonitor: search_system_docs ou get_alert_rules_guide.
+Resultados de lista vêm como tabela: {columns, rows}.";
 
 const ACTIVE_TOOLS: &str =
-    "8. Testes ativos (ping, traceroute, portas, DNS, playbooks) confirmam o estado de agora.";
+    "8. Testes ativos (ping, traceroute, portas, DNS, playbooks) dão o estado de agora.";
 
-const ACTIONS: &str = "9. Ações (reconhecer/silenciar alerta, janela de manutenção, criar monitor, criar/ativar/desativar/excluir regra de alerta) só são \
-executadas depois que o usuário confirma no chat. Proponha a ação quando ela resolver o pedido; ao receber \
-'awaiting_user_confirmation', diga em uma frase o que foi proposto e não repita a chamada.";
+const ACTIONS: &str = "9. Ações (alerta, manutenção, monitor, regras) só rodam depois que o usuário confirma no chat. \
+Proponha quando resolverem o pedido; ao receber 'awaiting_user_confirmation', diga em uma frase o que propôs e não repita a chamada.";
 
 /// Regra das ações em container, conforme o modo configurado.
 const fn container_rule(mode: AiContainerActionMode) -> Option<&'static str> {
     match mode {
         AiContainerActionMode::Off => None,
         AiContainerActionMode::Confirm => Some(
-            "10. Containers (docker_container_action: iniciar, parar, reiniciar) só rodam depois que o usuário confirma. Proponha quando o diagnóstico mostrar o container parado ou travado; ao receber 'awaiting_user_confirmation', não repita a chamada.",
+            "10. Containers (docker_container_action) só rodam depois da confirmação. Proponha com o container parado ou travado; ao receber 'awaiting_user_confirmation', não repita a chamada.",
         ),
         AiContainerActionMode::Auto => Some(
-            "10. Containers (docker_container_action: iniciar, parar, reiniciar) rodam na hora, sem confirmação. Só aja quando o usuário pediu ou o diagnóstico mostrou o container parado ou travado — nunca por tentativa. Diga em uma frase o que fez.",
+            "10. Containers (docker_container_action) rodam na hora: só quando pedido ou com o container parado ou travado — nunca por tentativa. Diga em uma frase o que fez.",
         ),
     }
 }
@@ -77,11 +79,13 @@ fn catalog_section(policy: ToolPolicy) -> Option<String> {
     (!lines.is_empty()).then(|| {
         format!(
             "
-FERRAMENTAS SOB DEMANDA — carregue com load_tools (todos os grupos necessários numa chamada) antes de usar; um grupo carregado continua disponível na conversa:
+FERRAMENTAS SOB DEMANDA — load_tools carrega os grupos (todos numa chamada; ficam na conversa):
 {}
 ",
-            lines.join("
-")
+            lines.join(
+                "
+"
+            )
         )
     })
 }
@@ -231,7 +235,7 @@ pub fn build_system_prompt(
 ) -> String {
     let today = Utc::now().format("%Y-%m-%d");
     let mut prompt = format!(
-        "Você é o NetMonitor AI, engenheiro de redes sênior integrado ao NetMonitor. Hoje: {today} (a hora exata vem no bloco <contexto> da pergunta).\n\n{METHOD}\n"
+        "Você é o NetMonitor AI, engenheiro de redes sênior do NetMonitor. Hoje: {today} (a hora vem no <contexto>).\n\n{METHOD}\n"
     );
     if policy.allow_active {
         prompt.push_str(ACTIVE_TOOLS);
@@ -291,4 +295,32 @@ pub async fn build_turn_context<C: ConnectionTrait>(db: &C, context: &ChatContex
     }
     block.push_str("</contexto>\n\n");
     block
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::ai::harness::{compaction::estimate_tokens, tools::ToolGroups};
+
+    /// O que toda pergunta de verdade paga em cada rodada, antes de qualquer
+    /// dado: o system prompt e o núcleo de ferramentas. Medido em 2.662
+    /// tokens (era 3.038). Subir o teto é decisão, não acidente: cada token a
+    /// mais aqui se paga em toda rodada de toda pergunta.
+    #[test]
+    fn custo_fixo_por_rodada_cabe_no_orcamento() {
+        const BUDGET: u64 = 2_800;
+        let settings = AiSettings {
+            allow_actions: true,
+            ..AiSettings::default()
+        };
+        let policy = ToolPolicy::from_settings(&settings);
+        let prompt = build_system_prompt(&settings, policy, true);
+        let core = ToolRegistry::new(policy).definitions_for(&ToolGroups::new());
+        let fixed =
+            estimate_tokens(&prompt) + estimate_tokens(&serde_json::to_string(&core).unwrap());
+        assert!(
+            fixed <= BUDGET,
+            "prompt + núcleo = ~{fixed} tokens, acima do orçamento de {BUDGET}"
+        );
+    }
 }

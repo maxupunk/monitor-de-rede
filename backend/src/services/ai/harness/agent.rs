@@ -17,7 +17,8 @@ use tokio_stream::wrappers::ReceiverStream;
 use super::{
     compaction::{
         estimate_history, estimate_messages, estimate_tokens, fallback_summary, fold_count,
-        prune_tool_results, small_window_notice, summarize, worth_folding, ContextBudget,
+        prune_tool_results, small_window_notice, summarize, supersede_repeated_results,
+        worth_folding, ContextBudget,
     },
     prompt::{build_small_talk_prompt, build_system_prompt, build_turn_context, ChatContext},
     tools::{ToolGroup, ToolGroups, ToolPolicy, ToolRegistry, LOAD_TOOLS},
@@ -678,6 +679,13 @@ pub async fn run_agent_loop(
                 registry.definitions_for(&loaded)
             };
             let tools_tokens = estimate_tokens(&serde_json::to_string(&tools).unwrap_or_default());
+            let repeated = supersede_repeated_results(&mut conversation);
+            if repeated > 0 {
+                tracing::debug!(
+                    repeated,
+                    "consultas repetidas: resultados antigos substituídos"
+                );
+            }
             if prune_tool_results(&mut conversation, tools_tokens, &budget, round_start) {
                 tracing::info!("resultados de ferramenta antigos podados para caber na janela");
             }

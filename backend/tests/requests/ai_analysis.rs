@@ -251,7 +251,7 @@ async fn analises_sem_historico_respondem_sem_inventar() {
             .execute(&ctx, "analyze_root_cause", "{}")
             .await
             .unwrap();
-        assert_eq!(causa.data["open_incidents"], 0);
+        assert_eq!(causa.data["open_incidents"], 0, "incidentes inesperados: {}", causa.data);
 
         let inexistente = registro
             .execute(&ctx, "analyze_root_cause", r#"{"alert_id": 999}"#)

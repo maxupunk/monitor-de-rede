@@ -219,26 +219,34 @@ pub fn parse_ollama_show(show: &Value) -> (Option<u64>, Option<u64>) {
     (max, num_ctx)
 }
 
-/// A janela que o Ollama vai usar: se `num_ctx` foi configurado na tela ou driver,
-/// ele tem precedência (a requisição força esse valor no Ollama com RoPE scaling se necessário).
-/// Senão, vale o do modelo carregado (`running`); senão o `max` do modelo;
-/// senão o padrão do servidor (`OLLAMA_DEFAULT_NUM_CTX`).
+/// A janela que o Ollama vai usar, em ordem:
+///
+/// 1. `forced`: o `num_ctx` da tela, que o driver manda em toda requisição —
+///    o Ollama recarrega o modelo com ele, então é certo;
+/// 2. `running`: a janela do modelo carregado agora (`/api/ps`), que já
+///    reflete Modelfile, `OLLAMA_CONTEXT_LENGTH` e o ajuste por VRAM;
+/// 3. sem modelo carregado, o `num_ctx` do Modelfile (`/api/show`) ou o
+///    padrão do servidor, limitado ao máximo do modelo — só presumido.
+///
+/// O `num_ctx` do Modelfile não pode passar à frente do carregado: é o
+/// valor de partida, e o servidor pode ter subido o modelo com outro.
 #[must_use]
 pub fn ollama_effective_window(
+    forced: Option<u64>,
     running: Option<u64>,
     max: Option<u64>,
-    num_ctx: Option<u64>,
+    modelfile_num_ctx: Option<u64>,
 ) -> Option<LearnedWindow> {
-    if let Some(configured) = num_ctx {
+    if let Some(configured) = forced {
         return Some(LearnedWindow::confident(configured));
     }
     if let Some(tokens) = running {
         return Some(LearnedWindow::confident(tokens));
     }
-    if max.is_none() && num_ctx.is_none() {
+    if max.is_none() && modelfile_num_ctx.is_none() {
         return None;
     }
-    let configured = num_ctx.unwrap_or(OLLAMA_DEFAULT_NUM_CTX);
+    let configured = modelfile_num_ctx.unwrap_or(OLLAMA_DEFAULT_NUM_CTX);
     Some(LearnedWindow {
         tokens: max.map_or(configured, |max| configured.min(max)),
         confident: false,
@@ -300,8 +308,7 @@ impl WindowLookup for OllamaLookup {
             },
             None => (None, None),
         };
-        let effective_num_ctx = self.num_ctx.or(num_ctx);
-        ollama_effective_window(running, max, effective_num_ctx)
+        ollama_effective_window(self.num_ctx, running, max, num_ctx)
             .map(|window| HashMap::from([(model.to_string(), window)]))
             .unwrap_or_default()
     }
@@ -367,15 +374,29 @@ mod tests {
     #[test]
     fn janela_efetiva_do_ollama_e_certa_so_com_o_modelo_carregado() {
         assert_eq!(
-            ollama_effective_window(Some(8192), Some(131_072), None),
+            ollama_effective_window(None, Some(8192), Some(131_072), None),
             Some(LearnedWindow::confident(8192))
         );
         assert_eq!(
-            ollama_effective_window(None, Some(131_072), Some(16_384)),
-            Some(LearnedWindow::confident(16_384))
+            ollama_effective_window(Some(16_384), Some(8192), Some(131_072), Some(4096)),
+            Some(LearnedWindow::confident(16_384)),
+            "o num_ctx da tela vai em toda requisição: vale mais que tudo"
         );
         assert_eq!(
-            ollama_effective_window(None, Some(131_072), None),
+            ollama_effective_window(None, Some(16_384), Some(131_072), Some(8192)),
+            Some(LearnedWindow::confident(16_384)),
+            "o Modelfile não passa à frente do modelo carregado"
+        );
+        assert_eq!(
+            ollama_effective_window(None, None, Some(131_072), Some(8192)),
+            Some(LearnedWindow {
+                tokens: 8192,
+                confident: false
+            }),
+            "sem modelo carregado, o Modelfile vale como presumido"
+        );
+        assert_eq!(
+            ollama_effective_window(None, None, Some(131_072), None),
             Some(LearnedWindow {
                 tokens: OLLAMA_DEFAULT_NUM_CTX,
                 confident: false
@@ -383,11 +404,11 @@ mod tests {
             "sem num_ctx vale o padrão do servidor"
         );
         assert_eq!(
-            ollama_effective_window(None, Some(2048), None).map(|janela| janela.tokens),
+            ollama_effective_window(None, None, Some(2048), None).map(|janela| janela.tokens),
             Some(2048),
             "nunca acima do máximo do modelo"
         );
-        assert_eq!(ollama_effective_window(None, None, None), None);
+        assert_eq!(ollama_effective_window(None, None, None, None), None);
     }
 
     #[test]

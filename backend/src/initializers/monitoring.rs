@@ -10,6 +10,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use loco_rs::{
     app::{AppContext, Initializer},
+    environment::Environment,
     Result,
 };
 
@@ -117,7 +118,7 @@ fn spawn_local_telemetry(ctx: &AppContext) {
 /// pô-lo num processo próprio (`task scheduler_loop`) numa instalação grande,
 /// sem que os dois disputem os mesmos monitores.
 fn spawn_scheduler(ctx: AppContext) {
-    if !scheduler_enabled() {
+    if !scheduler_enabled(&ctx.environment, std::env::var("SCHEDULER_ENABLED").ok()) {
         tracing::info!("scheduler desligado neste processo (SCHEDULER_ENABLED=false)");
         return;
     }
@@ -128,8 +129,17 @@ fn spawn_scheduler(ctx: AppContext) {
 /// Ligado por padrão. Só `false`/`0` desligam — qualquer outro valor mantém o
 /// ciclo de pé, porque um erro de digitação aqui pararia o monitoramento
 /// inteiro em silêncio.
-fn scheduler_enabled() -> bool {
-    std::env::var("SCHEDULER_ENABLED").map_or(true, |value| {
+///
+/// **No ambiente de teste, desligado.** O harness do Loco (`boot_test`) roda
+/// os initializers, e um ciclo real a cada 5 s checava de verdade os
+/// monitores criados pelos testes — um `down` real caía entre os resultados
+/// que o teste injeta e mudava o estado do alerta só quando a suíte estava
+/// lenta. Quem testa o ciclo o chama diretamente.
+fn scheduler_enabled(environment: &Environment, setting: Option<String>) -> bool {
+    if *environment == Environment::Test {
+        return false;
+    }
+    setting.is_none_or(|value| {
         !matches!(
             value.trim().to_ascii_lowercase().as_str(),
             "false" | "0" | "no" | "off"
@@ -168,21 +178,25 @@ fn spawn_event_relay(ctx: AppContext) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serial_test::serial;
 
+    /// Valor que não é uma negação conhecida mantém o ciclo de pé: um erro de
+    /// digitação no compose não pode parar o monitoramento em silêncio.
     #[test]
-    #[serial]
-    fn o_scheduler_vem_ligado_e_so_um_no_explicito_desliga() {
-        std::env::remove_var("SCHEDULER_ENABLED");
-        assert!(scheduler_enabled(), "ausente = ligado");
-        std::env::set_var("SCHEDULER_ENABLED", "false");
-        assert!(!scheduler_enabled());
-        std::env::set_var("SCHEDULER_ENABLED", "0");
-        assert!(!scheduler_enabled());
-        // Valor que não é uma negação conhecida mantém o ciclo de pé: um erro
-        // de digitação no compose não pode parar o monitoramento em silêncio.
-        std::env::set_var("SCHEDULER_ENABLED", "sim");
-        assert!(scheduler_enabled());
-        std::env::remove_var("SCHEDULER_ENABLED");
+    fn o_scheduler_vem_ligado_so_um_no_explicito_desliga_e_nunca_no_teste() {
+        assert!(scheduler_enabled(&Environment::Production, None));
+        assert!(scheduler_enabled(
+            &Environment::Development,
+            Some("sim".into())
+        ));
+        assert!(!scheduler_enabled(
+            &Environment::Production,
+            Some(" False ".into())
+        ));
+        assert!(!scheduler_enabled(
+            &Environment::Production,
+            Some("0".into())
+        ));
+        assert!(!scheduler_enabled(&Environment::Test, None));
+        assert!(!scheduler_enabled(&Environment::Test, Some("true".into())));
     }
 }

@@ -108,7 +108,7 @@ impl AiToolHandler for AcknowledgeAlert {
     }
 
     fn description(&self) -> &'static str {
-        "Propõe reconhecer um alerta aberto (o operador está ciente). O usuário confirma no chat antes de executar."
+        "Propõe reconhecer um alerta aberto (o operador está ciente)."
     }
 
     fn parameters(&self) -> Value {
@@ -149,7 +149,7 @@ impl AiToolHandler for SilenceAlert {
     }
 
     fn description(&self) -> &'static str {
-        "Propõe silenciar as notificações de um alerta por alguns minutos. O usuário confirma no chat antes de executar."
+        "Propõe silenciar as notificações de um alerta por alguns minutos."
     }
 
     fn parameters(&self) -> Value {
@@ -232,7 +232,7 @@ impl AiToolHandler for CreateMaintenanceWindow {
     }
 
     fn description(&self) -> &'static str {
-        "Propõe uma janela de manutenção para um dispositivo (alertas dele não notificam no período). O usuário confirma no chat antes de executar."
+        "Propõe uma janela de manutenção para um dispositivo (alertas dele não notificam no período)."
     }
 
     fn parameters(&self) -> Value {
@@ -369,7 +369,7 @@ impl AiToolHandler for CreateMonitor {
     }
 
     fn description(&self) -> &'static str {
-        "Propõe criar um monitor (ping, http, https, tcp ou dns) para um dispositivo. O usuário confirma no chat antes de executar."
+        "Propõe criar um monitor (ping, http, https, tcp ou dns) para um dispositivo."
     }
 
     fn parameters(&self) -> Value {

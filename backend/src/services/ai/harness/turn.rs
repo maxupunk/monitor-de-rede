@@ -334,6 +334,9 @@ fn halve(items: &mut Vec<Value>) {
 /// continua válido. Só em último caso o texto é cortado.
 #[must_use]
 pub fn compact_for_model(result: &Value) -> String {
+    // Primeiro sem perder nada (tabelas, vazios, casas decimais); só depois,
+    // se ainda não couber, encurtar listas.
+    let result = &super::lean::lean(result);
     let text = result.to_string();
     if text.chars().count() <= MAX_TOOL_RESULT_CHARS {
         return text;
@@ -467,7 +470,8 @@ mod tests {
         let encurtado = compact_for_model(&lista);
         assert!(encurtado.chars().count() <= MAX_TOOL_RESULT_CHARS);
         let lido: Value = serde_json::from_str(&encurtado).expect("continua JSON válido");
-        let itens = lido["itens"].as_array().unwrap();
+        // A lista chega como tabela (`lean`); o encurtamento age nas linhas.
+        let itens = lido["itens"]["rows"].as_array().unwrap();
         let omitidos = itens.last().unwrap()[OMITTED_KEY].as_u64().unwrap();
         assert_eq!(
             itens.len() as u64 - 1 + omitidos,

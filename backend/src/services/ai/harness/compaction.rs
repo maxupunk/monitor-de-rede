@@ -243,6 +243,51 @@ pub fn prune_tool_results(
     pruned
 }
 
+/// No lugar do resultado de uma consulta que a IA repetiu depois.
+pub const REPEATED_NOTICE: &str =
+    "[mesma consulta repetida adiante; vale o resultado mais recente]";
+
+/// A consulta como chave: ferramenta + argumentos canônicos (a ordem das
+/// chaves no JSON não faz duas consultas diferentes).
+fn call_key(name: &str, arguments: &str) -> String {
+    let canonical = serde_json::from_str::<serde_json::Value>(arguments)
+        .map_or_else(|_| arguments.trim().to_string(), |value| value.to_string());
+    format!("{name}|{canonical}")
+}
+
+/// Quando a IA repete uma consulta idêntica, o resultado antigo vira um
+/// aviso: o novo diz o mesmo ou mais atual, e os dois iriam em toda rodada.
+/// Não perde informação — por isso roda sempre, antes da poda por tamanho.
+/// Devolve quantos resultados foram substituídos.
+pub fn supersede_repeated_results(conversation: &mut [AiMessage]) -> usize {
+    use std::collections::{HashMap, HashSet};
+
+    let keys: HashMap<String, String> = conversation
+        .iter()
+        .filter_map(|message| message.tool_calls.as_ref())
+        .flatten()
+        .map(|call| (call.id.clone(), call_key(&call.name, &call.arguments)))
+        .collect();
+    let mut seen = HashSet::new();
+    let mut replaced = 0;
+    for message in conversation.iter_mut().rev() {
+        if message.role != "tool" {
+            continue;
+        }
+        let Some(key) = message.tool_call_id.as_ref().and_then(|id| keys.get(id)) else {
+            continue;
+        };
+        if seen.insert(key.clone()) {
+            continue;
+        }
+        if message.content.as_deref() != Some(REPEATED_NOTICE) {
+            message.content = Some(REPEATED_NOTICE.to_string());
+            replaced += 1;
+        }
+    }
+    replaced
+}
+
 const SUMMARY_PROMPT: &str = "Você resume conversas entre um operador de rede e o assistente do NetMonitor. \
 O resumo substitui as mensagens na memória do assistente, então preserve o que ele precisa para continuar: \
 equipamentos, IPs, ids de alertas/monitores/regras, problemas encontrados e causas, números medidos, \
@@ -350,6 +395,53 @@ pub fn fallback_summary(previous: Option<&str>, folded: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn chamada(id: &str, name: &str, arguments: &str) -> AiMessage {
+        AiMessage {
+            role: "assistant".into(),
+            content: None,
+            tool_calls: Some(vec![crate::services::ai::drivers::traits::AiToolCall {
+                id: id.into(),
+                name: name.into(),
+                arguments: arguments.into(),
+            }]),
+            tool_call_id: None,
+        }
+    }
+
+    fn resultado(id: &str, content: &str) -> AiMessage {
+        AiMessage {
+            role: "tool".into(),
+            content: Some(content.into()),
+            tool_calls: None,
+            tool_call_id: Some(id.into()),
+        }
+    }
+
+    #[test]
+    fn consulta_repetida_deixa_so_o_resultado_mais_recente() {
+        let mut conversation = vec![
+            chamada("a", "get_alerts", r#"{"status":"open","hours":24}"#),
+            resultado("a", "antigo"),
+            chamada("b", "get_device_detail", r#"{"identifier":"Borda"}"#),
+            resultado("b", "borda"),
+            // Mesmos argumentos em outra ordem: é a mesma consulta.
+            chamada("c", "get_alerts", r#"{"hours":24,"status":"open"}"#),
+            resultado("c", "novo"),
+            chamada("d", "get_alerts", r#"{"status":"resolved"}"#),
+            resultado("d", "outra consulta"),
+        ];
+        assert_eq!(supersede_repeated_results(&mut conversation), 1);
+        assert_eq!(conversation[1].content.as_deref(), Some(REPEATED_NOTICE));
+        assert_eq!(conversation[3].content.as_deref(), Some("borda"));
+        assert_eq!(conversation[5].content.as_deref(), Some("novo"));
+        assert_eq!(conversation[7].content.as_deref(), Some("outra consulta"));
+        assert_eq!(
+            supersede_repeated_results(&mut conversation),
+            0,
+            "idempotente"
+        );
+    }
 
     fn fala(role: &str, content: &str) -> ChatMessageInput {
         ChatMessageInput {

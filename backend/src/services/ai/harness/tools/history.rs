@@ -60,9 +60,9 @@ pub(super) async fn metric_samples<C: ConnectionTrait>(
 /// Argumentos comuns para localizar um monitor.
 pub(super) fn monitor_selector_schema() -> serde_json::Map<String, Value> {
     let schema = json!({
-        "monitor_id": { "type": "integer", "description": "Id do monitor (de list_monitors ou get_device_detail)" },
-        "device": { "type": "string", "description": "Alternativa ao monitor_id: nome, IP ou id do dispositivo" },
-        "monitor_type": { "type": "string", "description": "Tipo do monitor do dispositivo (padrão ping)" }
+        "monitor_id": { "type": "integer", "description": "De list_monitors ou get_device_detail" },
+        "device": { "type": "string", "description": "Ou o dispositivo: nome, IP ou id" },
+        "monitor_type": { "type": "string", "description": "Com device; padrão ping" }
     });
     schema.as_object().cloned().unwrap_or_default()
 }
@@ -87,7 +87,7 @@ impl AiToolHandler for MonitorHistory {
         let mut properties = monitor_selector_schema();
         properties.insert(
             "hours".into(),
-            json!({ "type": "integer", "description": "Janela em horas (1 a 720, padrão 24)" }),
+            json!({ "type": "integer", "description": "Horas: 1–720, padrão 24" }),
         );
         json!({ "type": "object", "properties": properties })
     }
@@ -173,7 +173,7 @@ impl AiToolHandler for DeviceMetrics {
             "type": "object",
             "properties": {
                 "device": { "type": "string", "description": "Nome, IP ou id do dispositivo" },
-                "hours": { "type": "integer", "description": "Janela em horas (1 a 168, padrão 24)" }
+                "hours": { "type": "integer", "description": "Horas: 1–168, padrão 24" }
             },
             "required": ["device"]
         })

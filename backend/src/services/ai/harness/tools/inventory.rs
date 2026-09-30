@@ -410,7 +410,7 @@ impl AiToolHandler for Alerts {
                 "status": { "type": "string", "enum": ["open", "resolved", "all"] },
                 "severity": { "type": "string", "enum": ["critical", "warning", "info"] },
                 "device": { "type": "string", "description": DEVICE_ARG },
-                "hours": { "type": "integer", "description": "Janela do histórico em horas (1 a 720, padrão 24)" },
+                "hours": { "type": "integer", "description": "Horas: 1–720, padrão 24" },
                 "limit": { "type": "integer", "description": "Máximo de alertas (1 a 50, padrão 10)" }
             }
         })

@@ -40,7 +40,7 @@ async fn resolve_target(target: &str) -> Result<IpAddr, ToolOutput> {
 
 fn target_schema(extra: Value) -> Value {
     let mut properties = json!({
-        "target": { "type": "string", "description": "IP ou hostname (ex: '192.168.1.1', 'google.com')" }
+        "target": { "type": "string", "description": "IP ou hostname" }
     });
     if let (Some(base), Some(more)) = (properties.as_object_mut(), extra.as_object()) {
         base.extend(more.clone());

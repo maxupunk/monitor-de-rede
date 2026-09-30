@@ -22,7 +22,6 @@ use crate::{
         ai::knowledge::ALERT_RULES_GUIDE,
         alerts::{
             contracts::AlertStatus,
-            fields::ALERT_FIELDS,
             rules::{self, SEVERITIES},
         },
         shared::errors::{AppError, AppResult},
@@ -557,23 +556,25 @@ impl AiToolHandler for CreateAlertRule {
     }
 
     fn description(&self) -> &'static str {
-        "Propõe criar uma regra de alerta. Consulte get_alert_rules_guide para os campos e list_alert_rules para não duplicar. O usuário confirma no chat antes de executar."
+        "Propõe criar uma regra de alerta (o usuário confirma no chat). field vem de get_alert_rules_guide; confira list_alert_rules para não duplicar."
     }
 
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "name": { "type": "string", "description": "Nome claro da regra" },
-                "field": { "type": "string", "enum": &ALERT_FIELDS[..], "description": "Fato avaliado (condition.field)" },
+                "name": { "type": "string" },
+                // Sem enum: ~50 campos em toda rodada custariam mais que o erro
+                // raro, que já devolve a lista válida (`rules::check_vocabulary`).
+                "field": { "type": "string", "description": "Campo do guia (ex.: latencyMs, status)" },
                 "operator": { "type": "string", "enum": OPERATORS },
-                "value": { "description": "Valor de referência (número ou texto, ex.: 150 ou \"down\")" },
+                "value": { "description": "Número ou texto (ex.: 150, \"down\")" },
                 "severity": { "type": "string", "enum": SEVERITIES },
-                "device": { "type": "string", "description": "Restringe a um dispositivo (nome, IP ou id); ausente = global" },
-                "monitor_id": { "type": "integer", "description": "Restringe a um monitor" },
-                "duration_seconds": { "type": "integer", "description": "Tempo que a condição precisa durar (0 a 86400)" },
-                "recovery_window_seconds": { "type": "integer", "description": "Estabilidade exigida para resolver" },
-                "notification_cooldown_seconds": { "type": "integer", "description": "Intervalo mínimo entre notificações" }
+                "device": { "type": "string", "description": "Nome, IP ou id; ausente = global" },
+                "monitor_id": { "type": "integer" },
+                "duration_seconds": { "type": "integer", "description": "Quanto a condição dura (0–86400)" },
+                "recovery_window_seconds": { "type": "integer", "description": "Estabilidade para resolver" },
+                "notification_cooldown_seconds": { "type": "integer", "description": "Intervalo entre notificações" }
             },
             "required": ["name", "field", "operator", "value"]
         })
@@ -666,7 +667,7 @@ impl AiToolHandler for DeleteAlertRule {
     }
 
     fn description(&self) -> &'static str {
-        "Propõe excluir uma regra de alerta — o histórico de alertas dela é apagado junto. Para só parar os avisos, sugira desativar a regra com toggle_alert_rule ou em /alerts. O usuário confirma no chat antes de executar."
+        "Propõe excluir uma regra de alerta — o histórico de alertas dela é apagado junto. Para só parar os avisos, sugira desativar a regra com toggle_alert_rule ou em /alerts."
     }
 
     fn parameters(&self) -> Value {
@@ -778,7 +779,7 @@ impl AiToolHandler for ToggleAlertRule {
     }
 
     fn description(&self) -> &'static str {
-        "Propõe ativar ou desativar uma regra de alerta existente, preservando o histórico de alertas. O usuário confirma no chat antes de executar."
+        "Propõe ativar ou desativar uma regra de alerta existente, preservando o histórico de alertas."
     }
 
     fn parameters(&self) -> Value {
@@ -857,7 +858,7 @@ mod tests {
     #[test]
     fn guia_cobre_o_vocabulario_inteiro_que_a_tela_oferece() {
         // "success" e "type" são fatos internos, fora da tela e do guia.
-        for field in ALERT_FIELDS
+        for field in crate::services::alerts::fields::ALERT_FIELDS
             .iter()
             .filter(|field| !matches!(**field, "success" | "type"))
         {

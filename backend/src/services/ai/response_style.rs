@@ -30,10 +30,9 @@ impl AiResponseStyle {
     pub const fn directive(self) -> &'static str {
         match self {
             Self::Concise => {
-                "FORMATO DA RESPOSTA (modo direto): responda com o mínimo de palavras. \
-Sem saudação, sem introdução, sem repetir a pergunta e sem resumir o que as ferramentas retornaram. \
-Entregue só o diagnóstico e a ação recomendada, em até 5 linhas ou tópicos curtos. \
-Números com unidade (ms, %, bps). Quando um gráfico for exibido, não descreva os pontos: cite apenas o que é anormal."
+                "RESPOSTA (modo direto): mínimo de palavras — sem saudação, introdução, repetir a pergunta \
+ou resumir as ferramentas. Só o diagnóstico e a ação, em até 5 linhas. Números com unidade (ms, %, bps). \
+Com gráfico exibido, cite só o anormal."
             }
             Self::Normal => {
                 "FORMATO DA RESPOSTA: seja claro e técnico. Explique a causa provável, as evidências \

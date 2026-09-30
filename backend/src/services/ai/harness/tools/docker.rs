@@ -40,7 +40,7 @@ const MIB: f64 = 1024.0 * 1024.0;
 
 /// Descrição do argumento `host`, igual em todas as ferramentas Docker.
 pub(super) const HOST_ARG: &str =
-    "Servidor Docker: nome do agente remoto ou 'local' (padrão: esta central). get_docker_hosts lista";
+    "Agente remoto ou 'local' (padrão: esta central); ver get_docker_hosts";
 
 /// O host Docker pelo nome do agente, pela chave (`local`, `agent-3`) ou
 /// pelo id; sem nada, esta central. `Err(mensagem)` para a IA quando não dá.

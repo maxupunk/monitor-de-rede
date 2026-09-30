@@ -38,7 +38,7 @@ fn filter_schema() -> Value {
         "device": { "type": "string", "description": "Nome, IP ou id do dispositivo (omitido: todos)" },
         "severity": { "type": "string", "description": "Severidade máxima: error, warning, notice, info... ou 0-7. 'error' traz erro, crítico, alerta e emergência." },
         "query": { "type": "string", "description": "Restringe às mensagens com este termo (ex: 'link down')" },
-        "hours": { "type": "integer", "description": "Janela em horas (1 a 168, padrão 24)" }
+        "hours": { "type": "integer", "description": "Horas: 1–168, padrão 24" }
     });
     json!({ "type": "object", "properties": properties })
 }
