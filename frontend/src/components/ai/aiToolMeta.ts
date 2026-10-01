@@ -1,3 +1,20 @@
+/**
+ * Ferramentas que tocam um equipamento real (ou gravam plugin): o card mostra
+ * o aviso de alucinação no pedido de confirmação.
+ */
+const DEVICE_ACCESS_TOOLS = new Set([
+  'fingerprint_device',
+  'device_ssh_exec',
+  'device_http_request',
+  'save_plugin_draft',
+  'run_plugin_action',
+  'validate_plugin',
+])
+
+export function isDeviceAccessTool(name: string): boolean {
+  return DEVICE_ACCESS_TOOLS.has(name)
+}
+
 /** Rótulo, ícone e cor de cada ferramenta da IA exibida no chat. */
 export interface AiToolMeta {
   label: string
@@ -93,6 +110,40 @@ const TOOL_META: Record<string, AiToolMeta> = {
     color: 'blue-grey',
   },
   get_topology: { label: 'Topologia', icon: 'mdi-sitemap-outline', color: 'blue-grey' },
+  get_plugin_authoring_guide: {
+    label: 'Guia de Plugins',
+    icon: 'mdi-book-cog-outline',
+    color: 'primary',
+  },
+  list_device_plugins: {
+    label: 'Plugins do Dispositivo',
+    icon: 'mdi-puzzle-outline',
+    color: 'primary',
+  },
+  get_plugin: { label: 'Leitura de Plugin', icon: 'mdi-puzzle-outline', color: 'primary' },
+  run_plugin_tests: { label: 'Testes do Plugin', icon: 'mdi-test-tube', color: 'info' },
+  fingerprint_device: {
+    label: 'Reconhecer Equipamento',
+    icon: 'mdi-fingerprint',
+    color: 'warning',
+  },
+  device_ssh_exec: { label: 'Comando no Equipamento', icon: 'mdi-console', color: 'error' },
+  device_http_request: {
+    label: 'Requisição à Interface Web',
+    icon: 'mdi-web',
+    color: 'error',
+  },
+  save_plugin_draft: {
+    label: 'Salvar Plugin (rascunho)',
+    icon: 'mdi-content-save-outline',
+    color: 'warning',
+  },
+  run_plugin_action: { label: 'Executar Plugin', icon: 'mdi-play-circle-outline', color: 'error' },
+  validate_plugin: {
+    label: 'Validar Plugin no Equipamento',
+    icon: 'mdi-check-decagram-outline',
+    color: 'warning',
+  },
   ask_user: {
     label: 'Pergunta ao Usuário',
     icon: 'mdi-account-question-outline',

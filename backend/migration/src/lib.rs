@@ -50,6 +50,8 @@ mod m20260909_000002_monitors_interface_id;
 mod m20260922_000001_ai_conversations;
 mod m20260922_000002_probes_device_id;
 mod m20260922_000003_metrics_1m;
+mod m20260930_000001_device_plugins;
+mod m20261001_000001_device_plugin_installs;
 
 pub struct Migrator;
 
@@ -167,6 +169,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20260922_000001_ai_conversations::Migration),
             Box::new(m20260922_000002_probes_device_id::Migration),
             Box::new(m20260922_000003_metrics_1m::Migration),
+            Box::new(m20260930_000001_device_plugins::Migration),
+            Box::new(m20261001_000001_device_plugin_installs::Migration),
             // inject-above (do not remove this comment)
         ]
     }

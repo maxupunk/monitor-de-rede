@@ -227,7 +227,9 @@ async fn executa(
 ) -> AppResult<(String, Option<String>)> {
     let mut sessao = match pedido.protocol {
         Protocol::Ssh => Sessao::Ssh(Box::new(ssh::abre(pedido).await?)),
-        Protocol::Telnet => Sessao::Telnet(Box::new(telnet::abre(pedido).await?)),
+        Protocol::Telnet => Sessao::Telnet(Box::new(
+            telnet::abre(pedido.host, pedido.port, &pedido.username, &pedido.password).await?,
+        )),
         Protocol::MacTelnet => {
             let mac = pedido.mac.ok_or_else(|| {
                 AppError::validation(
@@ -465,12 +467,15 @@ impl Sessao {
 /// O que dá errado aqui é quase sempre coisa que o usuário resolve — porta
 /// fechada, senha errada, Telnet desabilitado. Um 500 com "erro interno"
 /// mandaria procurar no lugar errado.
-fn falha_de_acesso(detalhe: impl std::fmt::Display) -> AppError {
+pub(crate) fn falha_de_acesso(detalhe: impl std::fmt::Display) -> AppError {
     AppError::business_rule(format!("Não foi possível acessar o equipamento: {detalhe}"))
 }
 
-mod ssh {
+pub(crate) mod ssh {
     //! Cliente SSH sobre `russh`.
+    //!
+    //! [`conecta`] é compartilhado com o transporte dos plugins de dispositivo
+    //! (`services::plugins::transport::local`), que usa o canal `exec`.
 
     use super::{
         falha_de_acesso, AppError, AppResult, ProvisionRequest, SILENCIO, TETO_DE_CONEXAO,
@@ -481,7 +486,7 @@ mod ssh {
         keys::ssh_key::PublicKey,
         ChannelMsg,
     };
-    use std::sync::Arc;
+    use std::{net::IpAddr, sync::Arc};
     use tokio::time::{timeout, Instant};
 
     /// Aceita a chave de host apresentada, seja ela qual for.
@@ -496,7 +501,7 @@ mod ssh {
     /// IP da rede local que este mesmo sistema monitora, e quem já consegue se
     /// interpor no caminho até o roteador tem caminhos mais curtos. A tela diz
     /// que a conexão não valida a identidade do equipamento.
-    struct AceitaQualquerChave;
+    pub(crate) struct AceitaQualquerChave;
 
     impl client::Handler for AceitaQualquerChave {
         type Error = russh::Error;
@@ -511,7 +516,14 @@ mod ssh {
         _sessao: Handle<AceitaQualquerChave>,
     }
 
-    pub async fn abre(pedido: &ProvisionRequest) -> AppResult<Shell> {
+    /// Conecta e autentica por senha. A sessão devolvida abre quantos canais
+    /// o chamador precisar.
+    pub(crate) async fn conecta(
+        host: IpAddr,
+        port: u16,
+        username: &str,
+        password: &str,
+    ) -> AppResult<Handle<AceitaQualquerChave>> {
         let config = Arc::new(client::Config {
             inactivity_timeout: Some(super::TETO_DA_SESSAO),
             ..client::Config::default()
@@ -519,14 +531,14 @@ mod ssh {
 
         let mut sessao = timeout(
             TETO_DE_CONEXAO,
-            client::connect(config, (pedido.host, pedido.port), AceitaQualquerChave),
+            client::connect(config, (host, port), AceitaQualquerChave),
         )
         .await
         .map_err(|_| falha_de_acesso("tempo esgotado ao conectar na porta SSH"))?
         .map_err(falha_de_acesso)?;
 
         let resultado = sessao
-            .authenticate_password(&pedido.username, &pedido.password)
+            .authenticate_password(username, password)
             .await
             .map_err(falha_de_acesso)?;
         if !matches!(resultado, AuthResult::Success) {
@@ -534,6 +546,11 @@ mod ssh {
                 "Usuário ou senha recusados pelo equipamento.",
             ));
         }
+        Ok(sessao)
+    }
+
+    pub async fn abre(pedido: &ProvisionRequest) -> AppResult<Shell> {
+        let sessao = conecta(pedido.host, pedido.port, &pedido.username, &pedido.password).await?;
 
         let canal = sessao
             .channel_open_session()
@@ -595,7 +612,7 @@ mod ssh {
     }
 }
 
-mod telnet {
+pub(crate) mod telnet {
     //! Cliente Telnet mínimo — o bastante para logar e digitar.
     //!
     //! Não é uma implementação da RFC 854: é um cliente que **recusa todas as
@@ -606,9 +623,9 @@ mod telnet {
     //! está lendo esta sessão em tempo real.
 
     use super::{
-        falha_de_acesso, AppError, AppResult, ProvisionRequest, SILENCIO, TETO_DE_CONEXAO,
-        TETO_POR_COMANDO,
+        falha_de_acesso, AppError, AppResult, SILENCIO, TETO_DE_CONEXAO, TETO_POR_COMANDO,
     };
+    use std::net::IpAddr;
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::TcpStream,
@@ -628,14 +645,11 @@ mod telnet {
         fluxo: TcpStream,
     }
 
-    pub async fn abre(pedido: &ProvisionRequest) -> AppResult<Shell> {
-        let fluxo = timeout(
-            TETO_DE_CONEXAO,
-            TcpStream::connect((pedido.host, pedido.port)),
-        )
-        .await
-        .map_err(|_| falha_de_acesso("tempo esgotado ao conectar na porta Telnet"))?
-        .map_err(falha_de_acesso)?;
+    pub async fn abre(host: IpAddr, port: u16, username: &str, password: &str) -> AppResult<Shell> {
+        let fluxo = timeout(TETO_DE_CONEXAO, TcpStream::connect((host, port)))
+            .await
+            .map_err(|_| falha_de_acesso("tempo esgotado ao conectar na porta Telnet"))?
+            .map_err(falha_de_acesso)?;
 
         let mut shell = Shell { fluxo };
 
@@ -644,10 +658,10 @@ mod telnet {
         // o único caminho — e por isso as duas grafias mais comuns entram.
         let entrada = shell.le_ate_silenciar().await?;
         if contem_algum(&entrada, &["login", "username", "user name", "usuário"]) {
-            shell.envia_linha(&pedido.username).await?;
+            shell.envia_linha(username).await?;
             let pedido_de_senha = shell.le_ate_silenciar().await?;
             if contem_algum(&pedido_de_senha, &["password", "senha"]) {
-                shell.envia_linha(&pedido.password).await?;
+                shell.envia_linha(password).await?;
                 let resposta = shell.le_ate_silenciar().await?;
                 if contem_algum(
                     &resposta,

@@ -24,6 +24,19 @@ import { useAiConversationsStore } from './aiConversations'
 import { readSseJson } from '@/utils/sseReader'
 import { streamModelPull } from '@/utils/modelPull'
 import type { ModelPullProgress } from '@/bindings/ModelPullProgress'
+import type { AutoAcceptState } from '@/bindings/AutoAcceptState'
+import { usePluginsStore } from './plugins'
+
+/**
+ * Identificador desta conversa para o backend. Aleatório de propósito: o modo
+ * "Aceitar automaticamente" dos plugins vale por conversa, e uma chave
+ * previsível (sequencial) seria reaproveitada depois de recarregar a página.
+ */
+function newConversationKey(): string {
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+}
 
 function isCompactionEvent(event: unknown): event is Record<string, unknown> {
   return (
@@ -145,6 +158,12 @@ export const useAiStore = defineStore('ai', () => {
   const isStreaming = ref(false)
   const isDrawerOpen = ref(false)
   const streamError = ref<string | null>(null)
+  /** Chave desta conversa (modo automático dos plugins de dispositivo). */
+  const conversationKey = ref(newConversationKey())
+  /** Equipamento de que a conversa trata, quando aberta a partir dele. */
+  const deviceContextId = ref<number | null>(null)
+  /** Estado do "Aceitar automaticamente" para esta conversa e equipamento. */
+  const autoAccept = ref<AutoAcceptState | null>(null)
 
   let activeAbortController: AbortController | null = null
   let messageSeq = 0
@@ -224,6 +243,10 @@ export const useAiStore = defineStore('ai', () => {
   ) {
     if (!content.trim() || isStreaming.value) return
 
+    if (context.deviceId && context.deviceId !== deviceContextId.value) {
+      deviceContextId.value = context.deviceId
+      void refreshAutoAccept()
+    }
     streamError.value = null
     // O contador desempata perguntas no mesmo milissegundo: o "desfazer" acha a mensagem pelo id.
     const stamp = `${Date.now()}-${++messageSeq}`
@@ -263,6 +286,7 @@ export const useAiStore = defineStore('ai', () => {
           summary: history.summary,
           contextHint: history.contextHint,
           compact,
+          conversationKey: conversationKey.value,
         },
         controller.signal
       )
@@ -326,8 +350,15 @@ export const useAiStore = defineStore('ai', () => {
   }
 
   /** Começa uma conversa nova; a atual continua salva no histórico. */
+  function resetDeviceSession() {
+    conversationKey.value = newConversationKey()
+    deviceContextId.value = null
+    autoAccept.value = null
+  }
+
   function newConversation() {
     cancelGeneration()
+    resetDeviceSession()
     messages.value = []
     compactNext.value = false
     streamError.value = null
@@ -342,6 +373,7 @@ export const useAiStore = defineStore('ai', () => {
   /** Reabre uma conversa salva. Ferramenta que ficou rodando vira falha. */
   async function openConversation(id: number) {
     cancelGeneration()
+    resetDeviceSession()
     const loaded = await conversations.open<AiDisplayMessage>(id)
     if (!loaded) return
     streamError.value = null
@@ -385,10 +417,16 @@ export const useAiStore = defineStore('ai', () => {
     if (!tool || tool.status !== 'awaiting') return
     tool.status = 'running'
     try {
-      const response = await apiService.post<ExecuteToolResponse>('/ai/tools/execute', {
-        name: tool.name,
-        arguments: tool.arguments,
-      })
+      const response = await apiService.post<ExecuteToolResponse>(
+        '/ai/tools/execute',
+        {
+          name: tool.name,
+          arguments: tool.arguments,
+          conversationKey: conversationKey.value,
+        },
+        // Acesso a equipamento pode esperar aprovações no meio da execução.
+        { timeoutMs: 15 * 60_000 }
+      )
       tool.result = response.result
       tool.chart = response.chart ?? null
       tool.status = response.result?.error ? 'error' : 'done'
@@ -405,6 +443,43 @@ export const useAiStore = defineStore('ai', () => {
     if (!tool || tool.status !== 'awaiting') return
     tool.status = 'cancelled'
     void conversations.persist(messages.value)
+  }
+
+  /**
+   * Consulta o modo automático da conversa (ação do usuário ao abrir o chat
+   * de um equipamento — não é ciclo de atualização).
+   */
+  async function refreshAutoAccept() {
+    if (deviceContextId.value === null) {
+      autoAccept.value = null
+      return
+    }
+    try {
+      autoAccept.value = await usePluginsStore().autoAcceptState(
+        conversationKey.value,
+        deviceContextId.value
+      )
+    } catch {
+      autoAccept.value = null
+    }
+  }
+
+  async function enableAutoAccept() {
+    if (deviceContextId.value === null) return
+    autoAccept.value = await usePluginsStore().enableAutoAccept(
+      conversationKey.value,
+      deviceContextId.value
+    )
+  }
+
+  /** "Parar": desliga o modo, interrompe a resposta e cancela o que roda no equipamento. */
+  async function disableAutoAccept() {
+    if (deviceContextId.value === null) return
+    const plugins = usePluginsStore()
+    const deviceId = deviceContextId.value
+    cancelGeneration()
+    autoAccept.value = await plugins.disableAutoAccept(conversationKey.value, deviceId)
+    await Promise.allSettled(plugins.runningRuns(deviceId).map((run) => plugins.cancelRun(run.id)))
   }
 
   function toggleDrawer() {
@@ -606,5 +681,11 @@ export const useAiStore = defineStore('ai', () => {
     confirmTool,
     cancelTool,
     toggleDrawer,
+    conversationKey,
+    deviceContextId,
+    autoAccept,
+    refreshAutoAccept,
+    enableAutoAccept,
+    disableAutoAccept,
   }
 })

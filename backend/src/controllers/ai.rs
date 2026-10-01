@@ -203,9 +203,15 @@ async fn execute_tool(
     let actor = AuditActor::from_headers(&headers, &ctx.db)
         .await
         .unwrap_or_default();
-    let output =
-        confirmation::execute_confirmed(&ctx, &settings, &input.name, input.arguments, actor)
-            .await?;
+    let output = confirmation::execute_confirmed(
+        &ctx,
+        &settings,
+        &input.name,
+        input.arguments,
+        actor,
+        input.conversation_key,
+    )
+    .await?;
     Ok(format::json(ExecuteToolResponse {
         result: output.data,
         chart: output.chart,

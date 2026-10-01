@@ -17,6 +17,16 @@
       </div>
 
       <div class="d-flex align-center ga-1">
+        <v-chip
+          v-if="tool.autoApproved"
+          size="x-small"
+          color="error"
+          variant="flat"
+          title="Executado sem confirmação: o modo “Aceitar automaticamente” está ligado"
+        >
+          <v-icon start size="12">mdi-lightning-bolt</v-icon>
+          Automático
+        </v-chip>
         <v-chip size="x-small" :color="status.color" variant="tonal" class="font-weight-medium">
           <v-progress-circular
             v-if="tool.status === 'running'"
@@ -41,8 +51,21 @@
         <v-icon size="18" :color="tool.status === 'awaiting' ? 'warning' : status.color">
           mdi-hand-back-right-outline
         </v-icon>
-        <span>{{ tool.summary }}</span>
+        <span class="summary-text">{{ tool.summary }}</span>
       </div>
+      <v-alert
+        v-if="deviceAccess && tool.status === 'awaiting'"
+        :type="writes ? 'error' : 'warning'"
+        :variant="writes ? 'flat' : 'tonal'"
+        density="compact"
+        class="mb-2 text-body-small"
+      >
+        {{
+          writes
+            ? 'A IA pode errar (alucinar). Este comando ALTERA a configuração do equipamento — revise antes de aprovar.'
+            : 'Acesso real ao equipamento, só leitura. A IA pode interpretar errado o que ler.'
+        }}
+      </v-alert>
       <div v-if="tool.status === 'awaiting'" class="d-flex ga-2 flex-wrap">
         <v-btn
           size="small"
@@ -96,7 +119,7 @@ import { computed, ref } from 'vue'
 import { useAiStore, type AiToolCallState } from '@/stores/ai'
 import type { AiToolStatus } from '@/utils/aiChatStream'
 import AiToolChart from './AiToolChart.vue'
-import { aiToolMeta, formatToolArgs } from './aiToolMeta'
+import { aiToolMeta, formatToolArgs, isDeviceAccessTool } from './aiToolMeta'
 
 const props = defineProps<{
   tool: AiToolCallState
@@ -107,6 +130,9 @@ const aiStore = useAiStore()
 const expanded = ref(false)
 
 const meta = computed(() => aiToolMeta(props.tool.name))
+const deviceAccess = computed(() => isDeviceAccessTool(props.tool.name))
+/** O backend escreve "ALTERA O EQUIPAMENTO" no resumo quando o efeito é escrita. */
+const writes = computed(() => (props.tool.summary ?? '').includes('ALTERA O EQUIPAMENTO'))
 
 interface StatusPresentation {
   label: string
@@ -150,5 +176,8 @@ const errorText = computed(() => {
 }
 .min-w-0 {
   min-width: 0;
+}
+.summary-text {
+  white-space: pre-line;
 }
 </style>

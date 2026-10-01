@@ -87,7 +87,13 @@ pub const BACKED_UP_TABLES: [&str; 12] = [
 /// id que passou a ser de outro equipamento — um gráfico de tráfego com os
 /// dados do vizinho. As FKs `CASCADE` resolveriam isso no PostgreSQL, mas o
 /// SQLite só as aplica com `foreign_keys=ON`; limpar à mão vale nos dois.
-const DEPENDENT_HISTORY: [&str; 8] = [
+const DEPENDENT_HISTORY: [&str; 12] = [
+    // Plugins de dispositivo: credenciais, execuções e aceites do modo
+    // automático pertencem a um equipamento que a restauração substitui.
+    "device_plugin_installs",
+    "plugin_auto_accept",
+    "plugin_runs",
+    "device_credentials",
     "alert_events",
     "notification_outbox",
     "monitor_results",
@@ -326,6 +332,15 @@ async fn wipe(txn: &sea_orm::DatabaseTransaction) -> AppResult<()> {
         .iter()
         .copied()
         .chain(BACKED_UP_TABLES.iter().rev().copied());
+    // Plugin exclusivo de um equipamento some com ele. Os de modelo ficam: não
+    // pertencem a nenhum id que a restauração troca.
+    if existing.contains("plugins") {
+        txn.execute_raw(Statement::from_string(
+            backend,
+            "DELETE FROM \"plugins\" WHERE \"device_id\" IS NOT NULL",
+        ))
+        .await?;
+    }
     // Um mesmo nome não aparece nas duas listas, mas a ordem final ainda tem de
     // respeitar a hierarquia: histórico primeiro, depois configuração de baixo
     // para cima.

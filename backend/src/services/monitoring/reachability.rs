@@ -196,6 +196,7 @@ mod tests {
             system_key: system.then(|| system_device::NETMONITOR_KEY.to_string()),
             link_interface_id: None,
             link_interface_name: None,
+            firmware_version: None,
             status: "unknown".into(),
             last_seen_at: None,
             created_at: agora.into(),

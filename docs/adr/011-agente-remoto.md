@@ -91,3 +91,18 @@ servidor remoto.
 - Os endpoints de polling do probe (`/api/probes/heartbeat|tasks|results`),
   `probe_run`, o registrador e o fallback local do agendador **permanecem**
   (AGENTS §6).
+
+## Adendo (2026-09-30) — `Command::DeviceIo`
+
+Os plugins de dispositivo ([ADR 012](012-plugins-de-dispositivo.md)) alcançam
+equipamentos da rede de um site pelo agente dele. O desenho acima continua
+valendo:
+
+- o agente recebe só **operações unitárias** (`SshExec`, `HttpRequest`,
+  `TelnetExec`), nunca o script — o enum segue fechado e sem interpretador;
+- permissão nova `device_io`, **fora** do padrão do `AGENT_ALLOW`: o admin do
+  host precisa liberá-la;
+- o agente só aceita alvo em rede privada/CGNAT/link-local, e
+  `AGENT_DEVICE_CIDRS` (opcional) restringe mais;
+- a credencial viaja no pedido, pelo WSS já autenticado, e não é gravada no
+  agente.

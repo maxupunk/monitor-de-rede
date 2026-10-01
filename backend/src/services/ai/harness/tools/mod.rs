@@ -20,6 +20,8 @@
 //! - [`platform`]: o próprio NetMonitor — agentes, VPN, topologia, descoberta,
 //!   redes, manutenção, auditoria e notificações.
 //! - [`ask`]: a IA pergunta ao usuário antes de prosseguir.
+//! - [`plugins`]: plugins de dispositivo — acessar o equipamento (SSH/HTTP),
+//!   criar, testar e executar scripts. Todo acesso passa pelo usuário.
 
 mod actions;
 mod alert_rules;
@@ -36,6 +38,7 @@ mod log_digest;
 mod logs;
 mod lookup;
 mod platform;
+mod plugins;
 mod series;
 mod timeline;
 
@@ -45,6 +48,7 @@ use serde_json::{json, Value};
 
 pub use args::ToolArgs;
 pub use lookup::device_matches;
+pub use plugins::target_device_id;
 
 use crate::{
     dtos::ai::AiChart,
@@ -75,6 +79,11 @@ pub enum ToolKind {
     /// ([`AiContainerActionMode`]): desligado, com confirmação (padrão) ou
     /// automático.
     ContainerAction,
+    /// Acessa um equipamento (SSH/HTTP/Telnet) ou grava um plugin. **Sempre**
+    /// pede confirmação, a cada chamada — exceto com o modo "Aceitar
+    /// automaticamente" ligado para aquela conversa e aquele equipamento
+    /// (`plugins::auto_accept`), decidido no laço do agente.
+    DeviceAccess,
 }
 
 /// Grupo do catálogo. Só o [`ToolGroup::Core`] vai em toda chamada ao
@@ -94,11 +103,12 @@ pub enum ToolGroup {
     Actions,
     AlertRules,
     Platform,
+    Devices,
 }
 
 impl ToolGroup {
     /// Os grupos que podem ser carregados sob demanda, na ordem do catálogo.
-    pub const DEFERRED: [Self; 9] = [
+    pub const DEFERRED: [Self; 10] = [
         Self::History,
         Self::Analysis,
         Self::Charts,
@@ -108,6 +118,7 @@ impl ToolGroup {
         Self::Diagnostics,
         Self::Actions,
         Self::AlertRules,
+        Self::Devices,
     ];
 
     #[must_use]
@@ -123,6 +134,7 @@ impl ToolGroup {
             Self::Actions => "actions",
             Self::AlertRules => "alert_rules",
             Self::Platform => "platform",
+            Self::Devices => "devices",
         }
     }
 
@@ -140,6 +152,9 @@ impl ToolGroup {
             Self::Actions => "ações com confirmação: alertas, manutenção, monitores",
             Self::AlertRules => "origem, guia e gestão de regras de alerta",
             Self::Platform => "agentes, VPN, topologia, descoberta e redes",
+            Self::Devices => {
+                "plugins de dispositivo: acessar por SSH/HTTP, criar, testar e usar scripts"
+            }
         }
     }
 
@@ -159,6 +174,7 @@ impl ToolGroup {
             Self::Actions => "The user wants to change something: acknowledge or silence an alert, schedule maintenance or create a monitor.",
             Self::AlertRules => "The message is about alert rules: where an alert comes from, thresholds, or creating, deleting or toggling a rule.",
             Self::Platform => "The message is about monitoring agents, the VPN, network topology, discovery or networks.",
+            Self::Devices => "The user wants to access a device over SSH or its web interface, run a command or change a setting on it, install a package, or create, test or use a device plugin, driver or script.",
         }
     }
 
@@ -295,6 +311,8 @@ impl ToolPolicy {
             ToolKind::ContainerAction => {
                 !matches!(self.container_actions, AiContainerActionMode::Off)
             }
+            // Só no chat: rotina automática não tem quem aprove cada acesso.
+            ToolKind::DeviceAccess => self.interactive && self.allow_active,
         }
     }
 
@@ -303,7 +321,7 @@ impl ToolPolicy {
         match kind {
             ToolKind::Passive | ToolKind::Interactive => false,
             ToolKind::Active => self.confirm_active,
-            ToolKind::Action => true,
+            ToolKind::Action | ToolKind::DeviceAccess => true,
             ToolKind::ContainerAction => {
                 !matches!(self.container_actions, AiContainerActionMode::Auto)
             }
@@ -381,6 +399,7 @@ pub trait AiToolHandler: Send + Sync {
             ToolKind::Active => ToolGroup::Diagnostics,
             ToolKind::Action => ToolGroup::Actions,
             ToolKind::ContainerAction => ToolGroup::Docker,
+            ToolKind::DeviceAccess => ToolGroup::Devices,
             ToolKind::Passive | ToolKind::Interactive => ToolGroup::Core,
         }
     }
@@ -448,6 +467,16 @@ fn all_handlers() -> Vec<Box<dyn AiToolHandler>> {
         Box::new(alert_rules::CreateAlertRule),
         Box::new(alert_rules::DeleteAlertRule),
         Box::new(alert_rules::ToggleAlertRule),
+        Box::new(plugins::AuthoringGuide),
+        Box::new(plugins::ListDevicePlugins),
+        Box::new(plugins::GetPlugin),
+        Box::new(plugins::RunPluginTests),
+        Box::new(plugins::FingerprintDevice),
+        Box::new(plugins::DeviceSshExec),
+        Box::new(plugins::DeviceHttpRequest),
+        Box::new(plugins::SavePluginDraft),
+        Box::new(plugins::RunPluginAction),
+        Box::new(plugins::ValidatePlugin),
         Box::new(ask::AskUser),
     ]
 }
@@ -552,6 +581,34 @@ impl ToolRegistry {
             .ok_or_else(|| AppError::validation(format!("Ferramenta indisponível: {name}")))
     }
 
+    /// O tipo da ferramenta, se ela está no registro.
+    #[must_use]
+    pub fn kind_of(&self, name: &str) -> Option<ToolKind> {
+        self.handler(name).ok().map(|handler| handler.kind())
+    }
+
+    /// Executa uma ferramenta de acesso a equipamento **já liberada** pelo
+    /// modo "Aceitar automaticamente". Só vale para [`ToolKind::DeviceAccess`]:
+    /// nenhuma outra ferramenta que pede confirmação passa por aqui.
+    ///
+    /// # Errors
+    ///
+    /// Ferramenta fora do registro ou de outro tipo, ou falha da execução.
+    pub async fn execute_auto_approved(
+        &self,
+        ctx: &AppContext,
+        name: &str,
+        arguments: ToolArgs,
+    ) -> AppResult<ToolOutput> {
+        let handler = self.handler(name)?;
+        if handler.kind() != ToolKind::DeviceAccess {
+            return Err(AppError::validation(format!(
+                "A ferramenta {name} não pode ser liberada automaticamente"
+            )));
+        }
+        handler.execute(ctx, &arguments).await
+    }
+
     /// Se a chamada precisa passar pelo usuário antes de rodar.
     #[must_use]
     pub fn needs_confirmation(&self, name: &str) -> bool {
@@ -605,13 +662,32 @@ impl ToolRegistry {
         arguments_json: &str,
         actor: &AuditActor,
     ) -> AppResult<ToolOutput> {
+        self.execute_in(
+            ctx,
+            name,
+            ToolArgs::parse(arguments_json).with_actor(actor.clone()),
+        )
+        .await
+    }
+
+    /// Como [`Self::execute_as`], com os argumentos já montados (autor e
+    /// conversa).
+    ///
+    /// # Errors
+    ///
+    /// Os mesmos de [`Self::execute_as`].
+    pub async fn execute_in(
+        &self,
+        ctx: &AppContext,
+        name: &str,
+        args: ToolArgs,
+    ) -> AppResult<ToolOutput> {
         let handler = self.handler(name)?;
         if self.policy.needs_confirmation(handler.kind()) {
             return Err(AppError::validation(format!(
                 "A ferramenta {name} exige confirmação do usuário"
             )));
         }
-        let args = ToolArgs::parse(arguments_json).with_actor(actor.clone());
         handler.execute(ctx, &args).await
     }
 

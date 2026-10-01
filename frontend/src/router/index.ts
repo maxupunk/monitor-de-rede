@@ -124,6 +124,12 @@ const routes = [
         component: () => import('../pages/AuditPage.vue'),
         meta: { requiresAdmin: true },
       },
+      {
+        path: 'plugins',
+        name: 'plugins',
+        component: () => import('../pages/PluginsPage.vue'),
+        meta: { requiresAdmin: true },
+      },
     ],
   },
 ]

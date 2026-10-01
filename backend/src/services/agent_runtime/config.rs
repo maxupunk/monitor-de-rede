@@ -6,7 +6,8 @@
 //! | `AGENT_ENROLL_CODE`   | usada só se ainda não há token  |
 //! | `AGENT_TOKEN`         | lido de `<state>/token`         |
 //! | `AGENT_STATE_DIR`     | `/var/lib/netmonitor-agent`     |
-//! | `AGENT_ALLOW`         | `read,lifecycle,monitor,discovery` |
+//! | `AGENT_ALLOW`         | `read,lifecycle,monitor,discovery` (`device_io` libera plugins de dispositivo) |
+//! | `AGENT_DEVICE_CIDRS`  | vazio = qualquer rede privada; restringe o alvo dos plugins |
 //! | `AGENT_OUTBOX_MAX`    | 10 000 eventos                  |
 //! | `HOST_PROC`/`HOST_ROOT` | `/proc` e `/`                 |
 

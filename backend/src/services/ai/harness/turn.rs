@@ -192,6 +192,28 @@ const HINTS: &[(ToolGroup, &[&str])] = &[
             "onde",
         ],
     ),
+    (
+        ToolGroup::Devices,
+        &[
+            "ssh",
+            "telnet",
+            "plugin",
+            "plugins",
+            "driver",
+            "drivers",
+            "script",
+            "scripts",
+            "opkg",
+            "pacote",
+            "pacotes",
+            "luci",
+            "uci",
+            "firmware",
+            "credencia",
+            "http",
+            "web",
+        ],
+    ),
 ];
 
 /// Grupos que a pergunta (e o que foi marcado nela) obviamente pede.

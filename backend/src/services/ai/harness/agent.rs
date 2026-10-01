@@ -21,7 +21,10 @@ use super::{
         worth_folding, ContextBudget,
     },
     prompt::{build_small_talk_prompt, build_system_prompt, build_turn_context, ChatContext},
-    tools::{ToolGroup, ToolGroups, ToolPolicy, ToolRegistry, LOAD_TOOLS},
+    tools::{
+        target_device_id, ToolArgs, ToolGroup, ToolGroups, ToolKind, ToolPolicy, ToolRegistry,
+        LOAD_TOOLS,
+    },
     turn::{compact_for_model, is_small_talk, preselect_groups, requested_groups},
 };
 use crate::{
@@ -56,6 +59,10 @@ pub enum HarnessEvent {
         id: String,
         name: String,
         arguments: serde_json::Value,
+        /// Acesso a equipamento liberado pelo modo "Aceitar automaticamente":
+        /// a tela marca o card como executado sem confirmação.
+        #[serde(rename = "autoApproved", skip_serializing_if = "std::ops::Not::not")]
+        auto_approved: bool,
     },
     ToolResult {
         id: String,
@@ -177,6 +184,8 @@ pub struct ConversationMemory {
     pub force_compaction: bool,
     /// Grupos de ferramentas que a conversa já carregou, na ordem.
     pub tool_groups: ToolGroups,
+    /// Identificador da conversa na tela (modo automático dos plugins).
+    pub conversation_key: Option<String>,
 }
 
 /// Modelos que escolhem outro modelo por pergunta.
@@ -223,6 +232,10 @@ impl AgentRequest {
                     .unwrap_or_default(),
                 last_model: request.context_hint.and_then(|hint| hint.model),
                 force_compaction: request.compact,
+                conversation_key: request
+                    .conversation_key
+                    .map(|key| key.trim().chars().take(64).collect::<String>())
+                    .filter(|key| !key.is_empty()),
             },
             actor,
         }
@@ -353,6 +366,39 @@ fn duration_ms(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
 
+/// Aviso mostrado na primeira vez que a IA propõe tocar um equipamento.
+pub const DEVICE_ACCESS_WARNING: &str = "Atenção: a IA vai acessar um equipamento real. Ela pode \
+alucinar — interpretar errado uma saída ou propor um comando incorreto — e uma alteração errada \
+pode derrubar a rede ou cortar o acesso ao equipamento. Leia o comando e o motivo de cada pedido \
+antes de aprovar. O NetMonitor não se responsabiliza por danos causados por ações da IA.";
+
+/// Quem conversa e o estado de acesso a equipamento de uma resposta: o aviso
+/// já dado e a conversa, para consultar o modo "Aceitar automaticamente".
+struct DeviceAccessSession {
+    /// Quem conversa: a ação que roda sem confirmação fica na auditoria dele.
+    actor: AuditActor,
+    conversation_key: Option<String>,
+    warned: bool,
+}
+
+impl DeviceAccessSession {
+    /// O modo automático está ligado para esta conversa e o equipamento da
+    /// chamada. Sem conversa ou sem equipamento identificável, não está.
+    async fn auto_approves(&self, ctx: &AppContext, arguments: &serde_json::Value) -> bool {
+        let Some(key) = self.conversation_key.as_deref() else {
+            return false;
+        };
+        let Some(device_id) = target_device_id(ctx, arguments).await else {
+            return false;
+        };
+        crate::services::plugins::auto_accept::active(&ctx.db, key, device_id)
+            .await
+            .ok()
+            .flatten()
+            .is_some()
+    }
+}
+
 /// O que vem depois de uma chamada de ferramenta.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ToolFlow {
@@ -371,7 +417,7 @@ async fn handle_tool_call(
     sink: &EventSink,
     conversation: &mut Vec<AiMessage>,
     loaded: &mut ToolGroups,
-    actor: &AuditActor,
+    session: &mut DeviceAccessSession,
     tool: AiToolCall,
 ) -> ToolFlow {
     let arguments: serde_json::Value =
@@ -403,7 +449,23 @@ async fn handle_tool_call(
     }
 
     let mut flow = ToolFlow::Continue;
-    let result = if registry.needs_confirmation(&tool.name) {
+    let device_access = registry.kind_of(&tool.name) == Some(ToolKind::DeviceAccess);
+    if device_access && !session.warned {
+        session.warned = true;
+        if !sink
+            .send(HarnessEvent::Notice {
+                message: DEVICE_ACCESS_WARNING.to_string(),
+            })
+            .await
+        {
+            return ToolFlow::Disconnected;
+        }
+    }
+    let auto_approved = device_access && session.auto_approves(ctx, &arguments).await;
+    let args = ToolArgs::parse(&tool.arguments)
+        .with_actor(session.actor.clone())
+        .with_conversation(session.conversation_key.clone());
+    let result = if registry.needs_confirmation(&tool.name) && !auto_approved {
         let summary = registry
             .preview(ctx, &tool.name, &tool.arguments)
             .await
@@ -430,15 +492,18 @@ async fn handle_tool_call(
                 id: tool.id.clone(),
                 name: tool.name.clone(),
                 arguments,
+                auto_approved,
             })
             .await
         {
             return ToolFlow::Disconnected;
         }
-        let (result, chart) = match registry
-            .execute_as(ctx, &tool.name, &tool.arguments, actor)
-            .await
-        {
+        let execution = if auto_approved {
+            registry.execute_auto_approved(ctx, &tool.name, args).await
+        } else {
+            registry.execute_in(ctx, &tool.name, args).await
+        };
+        let (result, chart) = match execution {
             Ok(output) => {
                 if output.ends_turn {
                     flow = ToolFlow::EndTurn;
@@ -537,6 +602,11 @@ pub async fn run_agent_loop(
             .filter(|group| available.contains(group))
             .chain(preselected.iter())
             .collect();
+        let mut device_session = DeviceAccessSession {
+            actor: request.actor.clone(),
+            conversation_key: request.memory.conversation_key.clone(),
+            warned: false,
+        };
         let system_prompt = if small_talk {
             history = recent_history(history, SMALL_TALK_HISTORY);
             build_small_talk_prompt(&settings)
@@ -758,7 +828,7 @@ pub async fn run_agent_loop(
                     &sink,
                     &mut conversation,
                     &mut loaded,
-                    &request.actor,
+                    &mut device_session,
                     tool,
                 )
                 .await

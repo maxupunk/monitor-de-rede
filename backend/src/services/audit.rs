@@ -29,6 +29,8 @@ pub enum AuditAction {
     Delete,
     Login,
     Logout,
+    /// Execução de uma ação sobre um equipamento (plugin de dispositivo).
+    Execute,
 }
 
 impl AuditAction {
@@ -40,6 +42,7 @@ impl AuditAction {
             AuditAction::Delete => "delete",
             AuditAction::Login => "login",
             AuditAction::Logout => "logout",
+            AuditAction::Execute => "execute",
         }
     }
 }
@@ -60,6 +63,7 @@ impl std::str::FromStr for AuditAction {
             "delete" => Ok(AuditAction::Delete),
             "login" => Ok(AuditAction::Login),
             "logout" => Ok(AuditAction::Logout),
+            "execute" => Ok(AuditAction::Execute),
             _ => Err(AppError::validation(format!(
                 "Ação de auditoria inválida: {s}"
             ))),
@@ -84,6 +88,7 @@ pub enum ResourceType {
     DockerNetwork,
     DockerImage,
     SystemSetting,
+    Plugin,
 }
 
 impl ResourceType {
@@ -104,6 +109,7 @@ impl ResourceType {
             ResourceType::DockerNetwork => "docker_network",
             ResourceType::DockerImage => "docker_image",
             ResourceType::SystemSetting => "system_setting",
+            ResourceType::Plugin => "plugin",
         }
     }
 }
@@ -133,6 +139,7 @@ impl std::str::FromStr for ResourceType {
             "docker_network" | "dockernetwork" => Ok(ResourceType::DockerNetwork),
             "docker_image" | "dockerimage" => Ok(ResourceType::DockerImage),
             "system_setting" | "systemsetting" | "settings" => Ok(ResourceType::SystemSetting),
+            "plugin" => Ok(ResourceType::Plugin),
             _ => Err(AppError::validation(format!(
                 "Tipo de recurso inválido: {s}"
             ))),

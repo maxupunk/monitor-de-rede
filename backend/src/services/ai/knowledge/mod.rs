@@ -7,6 +7,11 @@
 /// texto para a busca na documentação e para `get_alert_rules_guide`.
 pub const ALERT_RULES_GUIDE: &str = include_str!("regras_de_alerta.md");
 
+/// Skill de autoria de plugins de dispositivo: como a IA cria, testa e usa um
+/// "driver" de equipamento. Servida por `get_plugin_authoring_guide`. É só da
+/// IA — a documentação de **uso** de cada plugin viaja no próprio pacote.
+pub const PLUGIN_AUTHORING_GUIDE: &str = include_str!("plugins.md");
+
 #[derive(Debug, Clone)]
 pub struct DocTopic {
     pub id: &'static str,
@@ -50,6 +55,18 @@ pub static SYSTEM_DOCS: &[DocTopic] = &[
         title: "Regras de Alerta e Notificações",
         keywords: &["alerta", "alertas", "regra", "regras", "condicao", "limiar", "notificacao", "notificacoes", "webpush", "telegram", "discord", "webhook", "flap", "flapping", "severidade"],
         content: ALERT_RULES_GUIDE,
+    },
+    DocTopic {
+        id: "device_plugins",
+        title: "Plugins de Dispositivo (drivers por SSH/HTTP)",
+        keywords: &["plugin", "plugins", "driver", "drivers", "script", "ssh", "telnet", "http", "porta 80", "openwrt", "opkg", "instalar pacote", "credencial", "extensao", "rhai"],
+        content: "Plugins de dispositivo agem sobre o equipamento por SSH, HTTP (interface web) ou Telnet:
+- Ficam na aba Plugins de /devices/{id}. Um plugin de modelo serve a todos os equipamentos compatíveis (sistema, modelo, firmware); um exclusivo serve só a um.
+- Cada plugin traz manifesto (ações com efeito leitura/escrita), script Rhai em sandbox, documentação de uso, lista de compatibilidade e testes (unitários com respostas gravadas e funcionais no equipamento real).
+- Ciclo: rascunho → testado (testes unitários aprovados) → ativo (o operador ativa). Plugin importado entra em quarentena e passa por revisão de segurança (análise estática + IA) antes de ser instalado; risco crítico bloqueia.
+- Credenciais SSH/HTTP/Telnet ficam cifradas (ENCRYPTION_KEY) ou são pedidas a cada sessão; a senha nunca volta para a tela nem para a IA.
+- Plugin que não está ativo pede aprovação a cada acesso. A IA sempre pede confirmação a cada acesso, exceto com o modo \"Aceitar automaticamente\" ligado para aquela conversa e equipamento, com termo de ciência.
+- Equipamento atrás de agente remoto: o agente precisa liberar device_io no AGENT_ALLOW.",
     },
     DocTopic {
         id: "diagnostics",

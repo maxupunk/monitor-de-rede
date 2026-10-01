@@ -1,0 +1,84 @@
+{
+  "format": 1,
+  "manifest": {
+    "slug": "http-page-info",
+    "name": "Página web – identificação",
+    "version": "1.0.0",
+    "description": "Lê título e servidor da página web do equipamento (porta 80/443). Só leitura, sem login.",
+    "author": "NetMonitor",
+    "transports": [
+      "http"
+    ],
+    "match": {},
+    "actions": [
+      {
+        "id": "detect",
+        "title": "Identificar página",
+        "effect": "read",
+        "output": "kv"
+      },
+      {
+        "id": "http_headers",
+        "title": "Cabeçalhos HTTP",
+        "effect": "read",
+        "output": "table"
+      }
+    ]
+  },
+  "script": "// Página web do equipamento – identificação.\n// Só leitura: GET na raiz, sem login.\n\nfn detect(device, params) {\n    let page = device.get(\"/\");\n    #{\n        status: page.status,\n        server: page.headers[\"server\"],\n        title: regex_capture(page.body, \"(?is)<title[^>]*>\\\\s*(.*?)\\\\s*</title>\")\n    }\n}\n\nfn http_headers(device, params) {\n    let page = device.get(\"/\");\n    let rows = [];\n    for name in page.headers.keys() {\n        rows.push(#{ header: name, value: page.headers[name] });\n    }\n    rows\n}\n",
+  "usage": "# Página web – identificação\n\nFaz um `GET /` na interface web do equipamento, sem login. Serve para descobrir\no que está respondendo na porta 80/443 antes de escrever um plugin específico.\nCredencial HTTP é opcional: sem ela usa a porta 80.\n\n## Identificar página\nStatus HTTP, cabeçalho `Server` e o `<title>` da página.\n\n## Cabeçalhos HTTP\nTodos os cabeçalhos da resposta, em tabela.\n",
+  "compatibility": [],
+  "tests": {
+    "unit": [
+      {
+        "action": "detect",
+        "fixtures": [
+          {
+            "http": "GET /",
+            "status": 200,
+            "headers": {
+              "Server": "uhttpd"
+            },
+            "body": "<html><head><title> LuCI </title></head></html>"
+          }
+        ],
+        "expect": {
+          "status": 200,
+          "server": "uhttpd",
+          "title": "LuCI"
+        }
+      },
+      {
+        "action": "http_headers",
+        "fixtures": [
+          {
+            "http": "GET /",
+            "status": 200,
+            "headers": {
+              "Server": "lighttpd"
+            },
+            "body": ""
+          }
+        ],
+        "expect": [
+          {
+            "header": "server",
+            "value": "lighttpd"
+          }
+        ]
+      }
+    ],
+    "functional": [
+      {
+        "action": "detect",
+        "expectKeys": [
+          "status"
+        ]
+      },
+      {
+        "action": "http_headers",
+        "expectMinRows": 1
+      }
+    ]
+  }
+}

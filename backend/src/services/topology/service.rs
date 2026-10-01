@@ -645,6 +645,7 @@ mod tests {
             system_key: None,
             link_interface_id: None,
             link_interface_name: None,
+            firmware_version: None,
             status: "online".into(),
             last_seen_at: None,
             created_at: chrono::Utc::now().into(),

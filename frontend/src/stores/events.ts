@@ -15,6 +15,7 @@ import { useMaintenanceWindowsStore } from './maintenanceWindows'
 import { useDockerStore } from './docker'
 import { useAgentsStore } from './agents'
 import { useLogsStore } from './logs'
+import { usePluginsStore } from './plugins'
 import { isLogTemplateInfo } from '@/utils/logCategories'
 import { isLayaModelState, useAiLayaStore } from './aiLaya'
 import { getStoredToken } from '@/utils/authStorage'
@@ -404,6 +405,31 @@ export const useEventsStore = defineStore('events', () => {
 
       case 'docker:log': {
         useDockerStore().applyLogStreamEvent(data as never)
+        break
+      }
+
+      case 'plugin:run_started': {
+        usePluginsStore().applyRunStarted(data)
+        break
+      }
+
+      case 'plugin:run_output': {
+        usePluginsStore().applyRunOutput(data)
+        break
+      }
+
+      case 'plugin:run_finished': {
+        usePluginsStore().applyRunFinished(data)
+        break
+      }
+
+      case 'plugin:approval_required': {
+        usePluginsStore().applyApprovalRequired(data)
+        break
+      }
+
+      case 'plugin:approval_resolved': {
+        usePluginsStore().applyApprovalResolved(data)
         break
       }
     }

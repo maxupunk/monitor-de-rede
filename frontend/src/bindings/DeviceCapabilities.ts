@@ -37,6 +37,11 @@ vpn: boolean,
  */
 health: boolean, 
 /**
+ * Plugins de dispositivo (acesso SSH/HTTP): todo equipamento com IP,
+ * menos o do próprio sistema.
+ */
+plugins: boolean, 
+/**
  * Varredura SNMP (descobrir interfaces e sistema).
  */
 canSnmpScan: boolean, 

@@ -24,6 +24,7 @@ export const ACTION_OPTIONS = [
   { value: 'delete', label: 'Exclusão' },
   { value: 'login', label: 'Login' },
   { value: 'logout', label: 'Logout' },
+  { value: 'execute', label: 'Execução no equipamento' },
 ] as const
 
 export const RESOURCE_OPTIONS = [
@@ -40,6 +41,7 @@ export const RESOURCE_OPTIONS = [
   { value: 'docker_volume', label: 'Volume Docker' },
   { value: 'docker_network', label: 'Rede Docker' },
   { value: 'docker_image', label: 'Imagem Docker' },
+  { value: 'plugin', label: 'Plugin de dispositivo' },
 ] as const
 
 export function defaultFilters(): AuditFilters {
@@ -78,6 +80,8 @@ export function actionColor(action: string | null): string {
       return 'primary'
     case 'logout':
       return 'grey'
+    case 'execute':
+      return 'error'
     default:
       return 'grey'
   }

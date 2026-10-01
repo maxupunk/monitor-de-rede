@@ -1,0 +1,567 @@
+{
+  "format": 1,
+  "manifest": {
+    "slug": "openwrt-packages",
+    "name": "Gerenciador de pacotes",
+    "version": "1.0.0",
+    "description": "Lista, busca, instala e remove pacotes do OpenWrt por SSH — opkg até a 24.10, apk a partir da 25.",
+    "author": "NetMonitor",
+    "transports": [
+      "ssh"
+    ],
+    "match": {
+      "platforms": [
+        "openwrt"
+      ],
+      "firmware": ">=19.07"
+    },
+    "actions": [
+      {
+        "id": "detect",
+        "title": "Detectar versão",
+        "effect": "read",
+        "output": "kv",
+        "description": "Lê /etc/openwrt_release, o modelo (ubus system board) e o gerenciador de pacotes."
+      },
+      {
+        "id": "list_packages",
+        "title": "Listar pacotes",
+        "effect": "read",
+        "output": "table",
+        "description": "Sem busca: os pacotes instalados. Com busca: os disponíveis que casam (até 200).",
+        "params": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "title": "Buscar",
+              "default": "",
+              "description": "Parte do nome ou da descrição.",
+              "pattern": "[A-Za-z0-9._+-]{0,64}"
+            }
+          }
+        }
+      },
+      {
+        "id": "update_index",
+        "title": "Atualizar lista de pacotes",
+        "effect": "write",
+        "output": "text",
+        "safeToRetest": true,
+        "description": "opkg update / apk update: baixa a lista de pacotes disponíveis."
+      },
+      {
+        "id": "install_package",
+        "title": "Instalar pacote",
+        "effect": "write",
+        "output": "text",
+        "description": "Atualiza a lista e instala o pacote, se ainda não estiver instalado.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "title": "Pacote",
+              "description": "Nome exato do pacote (ex.: luci-app-sqm).",
+              "pattern": "[a-z0-9][a-z0-9._+-]*",
+              "maxLength": 64
+            }
+          },
+          "required": [
+            "name"
+          ]
+        }
+      },
+      {
+        "id": "remove_package",
+        "title": "Remover pacote",
+        "effect": "write",
+        "output": "text",
+        "description": "Remove o pacote, se estiver instalado.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "title": "Pacote",
+              "description": "Nome exato do pacote (ex.: luci-app-sqm).",
+              "pattern": "[a-z0-9][a-z0-9._+-]*",
+              "maxLength": 64
+            }
+          },
+          "required": [
+            "name"
+          ]
+        }
+      }
+    ],
+    "panel": {
+      "title": "Gerenciador de pacotes",
+      "icon": "mdi-package-variant-closed",
+      "listAction": "list_packages",
+      "searchParam": "query",
+      "keyColumn": "name",
+      "columns": [
+        {
+          "key": "name",
+          "label": "Pacote"
+        },
+        {
+          "key": "version",
+          "label": "Versão"
+        },
+        {
+          "key": "installed",
+          "label": "Instalado"
+        },
+        {
+          "key": "description",
+          "label": "Descrição"
+        }
+      ],
+      "toolbar": [
+        "update_index"
+      ],
+      "rowActions": [
+        {
+          "action": "install_package",
+          "label": "Instalar pacote",
+          "icon": "mdi-download",
+          "params": {
+            "name": "name"
+          },
+          "hideWhen": "installed"
+        },
+        {
+          "action": "remove_package",
+          "label": "Remover pacote",
+          "icon": "mdi-delete-outline",
+          "params": {
+            "name": "name"
+          },
+          "showWhen": "installed"
+        }
+      ]
+    }
+  },
+  "script": "// OpenWrt – Gerenciador de pacotes.\n//\n// OpenWrt 24.10 e anteriores usam `opkg`; 25.x em diante usam `apk`. A versão\n// decide (firmware lido pelo `detect`); sem versão numérica (SNAPSHOT, nunca\n// detectado), vale o binário que existir no roteador.\n\n// Gerenciador para um firmware conhecido; `()` quando a versão não decide.\nfn manager_for_release(firmware) {\n    if firmware == () { return (); }\n    let major = regex_capture(firmware, \"^(\\\\d+)\\\\.\");\n    if major == () { return (); }\n    if parse_int(major) >= 25 { \"apk\" } else { \"opkg\" }\n}\n\nfn manager_from(device, firmware) {\n    let by_release = manager_for_release(firmware);\n    if by_release != () { return by_release; }\n    let found = device.ssh(\"command -v apk >/dev/null 2>&1 && echo apk || echo opkg\");\n    if trimmed(found.stdout) == \"apk\" { \"apk\" } else { \"opkg\" }\n}\n\nfn manager(device) {\n    manager_from(device, device.info.firmware)\n}\n\n// `busybox-1.36.1-r2` → [nome, versão] (formato do apk).\nfn split_apk(token) {\n    let name = regex_capture(token, \"^(.+)-[^-]+-r\\\\d+$\");\n    if name == () { name = regex_capture(token, \"^(.+?)-\\\\d\"); }\n    if name == () { return [token, \"\"]; }\n    [name, token.sub_string(name.len() + 1)]\n}\n\n// Pacotes instalados: nome → versão.\nfn installed_map(device, mgr) {\n    let found = #{};\n    if mgr == \"apk\" {\n        for line in lines(device.run(\"apk list --installed\")) {\n            let parts = split_apk(words(line)[0]);\n            found[parts[0]] = parts[1];\n        }\n    } else {\n        for line in lines(device.run(\"opkg list-installed\")) {\n            let parts = line.split(\" - \");\n            if parts.len() >= 2 { found[parts[0]] = parts[1]; }\n        }\n    }\n    found\n}\n\nfn row(name, version, description, installed) {\n    #{ name: name, version: version, description: description, installed: installed }\n}\n\n// Roda e devolve o que o roteador respondeu, com o comando na frente.\nfn shown(device, command) {\n    let r = device.ssh(command);\n    let text = \"$ \" + command + \"\\n\" + r.stdout;\n    if trimmed(r.stderr) != \"\" { text += \"\\n\" + r.stderr; }\n    #{ text: text, exit: r.exit }\n}\n\nfn detect(device, params) {\n    let release = parse_kv(device.run(\"cat /etc/openwrt_release\"), \"=\");\n    let board = device.ssh(\"ubus call system board\");\n    let model = ();\n    if board.exit == 0 { model = json_parse(board.stdout).model; }\n    let firmware = release.DISTRIB_RELEASE;\n    #{\n        firmware: firmware,\n        target: release.DISTRIB_TARGET,\n        description: release.DISTRIB_DESCRIPTION,\n        model: model,\n        package_manager: manager_from(device, firmware)\n    }\n}\n\nfn list_packages(device, params) {\n    let mgr = manager(device);\n    let installed = installed_map(device, mgr);\n    let query = params.query;\n    let rows = [];\n    if query == () || trimmed(query) == \"\" {\n        for name in installed.keys() {\n            rows.push(row(name, installed[name], \"\", true));\n        }\n        return rows;\n    }\n    let filter = \" | grep -i -- \" + shell_quote(query) + \" | head -n 200\";\n    if mgr == \"apk\" {\n        for line in lines(device.run(\"apk list\" + filter)) {\n            let parts = split_apk(words(line)[0]);\n            rows.push(row(parts[0], parts[1], \"\", installed.contains(parts[0])));\n        }\n    } else {\n        for line in lines(device.run(\"opkg list\" + filter)) {\n            let parts = line.split(\" - \");\n            let description = if parts.len() >= 3 { parts[2] } else { \"\" };\n            let version = if parts.len() >= 2 { parts[1] } else { \"\" };\n            rows.push(row(parts[0], version, description, installed.contains(parts[0])));\n        }\n    }\n    rows\n}\n\nfn update_index(device, params) {\n    let mgr = manager(device);\n    let result = shown(device, mgr + \" update\");\n    if result.exit != 0 { throw result.text; }\n    result.text\n}\n\nfn install_package(device, params) {\n    let mgr = manager(device);\n    let name = shell_quote(params.name);\n    if installed_map(device, mgr).contains(params.name) {\n        return \"O pacote \" + params.name + \" já está instalado. Nada foi alterado.\";\n    }\n    let update = shown(device, mgr + \" update\");\n    let command = if mgr == \"apk\" { \"apk add \" + name } else { \"opkg install \" + name };\n    let install = shown(device, command);\n    let text = update.text + \"\\n\" + install.text;\n    if install.exit != 0 { throw text; }\n    if !installed_map(device, mgr).contains(params.name) {\n        throw text + \"\\nO gerenciador terminou sem o pacote aparecer como instalado.\";\n    }\n    text\n}\n\nfn remove_package(device, params) {\n    let mgr = manager(device);\n    if !installed_map(device, mgr).contains(params.name) {\n        return \"O pacote \" + params.name + \" não está instalado. Nada foi alterado.\";\n    }\n    let name = shell_quote(params.name);\n    let command = if mgr == \"apk\" { \"apk del \" + name } else { \"opkg remove \" + name };\n    let result = shown(device, command);\n    if result.exit != 0 { throw result.text; }\n    result.text\n}\n",
+  "usage": "# Gerenciador de pacotes (OpenWrt)\n\nInstala programas no roteador OpenWrt pelo gerenciador de pacotes, por SSH.\nPrecisa de uma credencial SSH cadastrada (usuário `root`, normalmente).\n\n- **OpenWrt 24.10 e anteriores:** `opkg`.\n- **OpenWrt 25.x em diante:** `apk`.\n\nA versão vem do **Detectar versão**; sem ela, o plugin usa o gerenciador que\nexistir no roteador.\n\n## Detectar versão\nLê `/etc/openwrt_release` e `ubus call system board`: versão, alvo, modelo e\ngerenciador de pacotes. Não altera nada.\n\n## Listar pacotes\nSem busca, mostra os pacotes instalados. Com busca, procura nos disponíveis\n(até 200 resultados) e marca os já instalados. Não altera nada. Lista de\ndisponíveis vazia? Rode **Atualizar lista de pacotes** primeiro — no opkg ela\nfica em memória e some ao reiniciar.\n\n## Atualizar lista de pacotes\n`opkg update` / `apk update`. Baixa o índice dos repositórios; precisa de\ninternet a partir do roteador.\n\n## Instalar pacote\nAtualiza a lista e roda `opkg install` / `apk add`. **Altera o equipamento.**\nSe o pacote já estiver instalado, nada é feito. Devolve o que o roteador\nrespondeu. Pacotes ocupam a flash: em equipamentos de 8 MB confira o espaço\nlivre antes.\n\n## Remover pacote\n`opkg remove` / `apk del`. **Altera o equipamento.** Remover pacote do sistema\n(ex.: `dropbear`, `uhttpd`) pode cortar o acesso.\n\n## Cuidados\nPacotes instalados não sobrevivem a um upgrade de firmware. Mantenha backup da\nconfiguração (`sysupgrade -b`) antes de mudanças.\n",
+  "compatibility": [],
+  "tests": {
+    "unit": [
+      {
+        "name": "24.10 usa opkg (pela versão)",
+        "action": "detect",
+        "fixtures": [
+          {
+            "ssh": "cat /etc/openwrt_release",
+            "stdout": "DISTRIB_ID='OpenWrt'\nDISTRIB_RELEASE='24.10.0'\nDISTRIB_TARGET='ath79/generic'\nDISTRIB_DESCRIPTION='OpenWrt 24.10.0 r28427'\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "ubus call system board",
+            "stdout": "{\"model\": \"TP-Link Archer C7 v5\"}",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expect": {
+          "firmware": "24.10.0",
+          "model": "TP-Link Archer C7 v5",
+          "package_manager": "opkg"
+        }
+      },
+      {
+        "name": "25.12 usa apk (pela versão)",
+        "action": "detect",
+        "fixtures": [
+          {
+            "ssh": "cat /etc/openwrt_release",
+            "stdout": "DISTRIB_RELEASE='25.12.0'\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "ubus call system board",
+            "stdout": "",
+            "stderr": "",
+            "exit": 1
+          }
+        ],
+        "expect": {
+          "firmware": "25.12.0",
+          "model": null,
+          "package_manager": "apk"
+        }
+      },
+      {
+        "name": "SNAPSHOT decide pelo binário",
+        "action": "detect",
+        "fixtures": [
+          {
+            "ssh": "cat /etc/openwrt_release",
+            "stdout": "DISTRIB_RELEASE='SNAPSHOT'\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "ubus call system board",
+            "stdout": "",
+            "stderr": "",
+            "exit": 1
+          },
+          {
+            "ssh": "command -v apk >/dev/null 2>&1 && echo apk || echo opkg",
+            "stdout": "apk\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expect": {
+          "firmware": "SNAPSHOT",
+          "package_manager": "apk"
+        }
+      },
+      {
+        "name": "instalados no opkg",
+        "action": "list_packages",
+        "firmware": "24.10.0",
+        "fixtures": [
+          {
+            "ssh": "opkg list-installed",
+            "stdout": "base-files - 1554-r23630\nbusybox - 1.36.1-1\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expect": [
+          {
+            "name": "base-files",
+            "version": "1554-r23630",
+            "installed": true
+          },
+          {
+            "name": "busybox",
+            "version": "1.36.1-1",
+            "installed": true
+          }
+        ]
+      },
+      {
+        "name": "busca no opkg marca os instalados",
+        "action": "list_packages",
+        "firmware": "23.05.5",
+        "params": {
+          "query": "busy"
+        },
+        "fixtures": [
+          {
+            "ssh": "opkg list-installed",
+            "stdout": "base-files - 1554-r23630\nbusybox - 1.36.1-1\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "opkg list | grep -i -- 'busy' | head -n 200",
+            "stdout": "busybox - 1.36.1-1 - Core utilities for embedded Linux\nbusybox-selinux - 1.36.1-1 - Core utilities (SELinux)\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expect": [
+          {
+            "name": "busybox",
+            "version": "1.36.1-1",
+            "description": "Core utilities for embedded Linux",
+            "installed": true
+          },
+          {
+            "name": "busybox-selinux",
+            "installed": false
+          }
+        ]
+      },
+      {
+        "name": "instalados no apk (25.12)",
+        "action": "list_packages",
+        "firmware": "25.12.0",
+        "fixtures": [
+          {
+            "ssh": "apk list --installed",
+            "stdout": "base-files-1666-r1 x86_64 {base-files} (GPL-2.0-only) [installed]\nbusybox-1.37.0-r5 x86_64 {busybox} (GPL-2.0-only) [installed]\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expect": [
+          {
+            "name": "base-files",
+            "version": "1666-r1",
+            "installed": true
+          },
+          {
+            "name": "busybox",
+            "version": "1.37.0-r5",
+            "installed": true
+          }
+        ]
+      },
+      {
+        "name": "busca no apk",
+        "action": "list_packages",
+        "firmware": "25.12.0",
+        "params": {
+          "query": "sqm"
+        },
+        "fixtures": [
+          {
+            "ssh": "apk list --installed",
+            "stdout": "base-files-1666-r1 x86_64 {base-files} (GPL-2.0-only) [installed]\nbusybox-1.37.0-r5 x86_64 {busybox} (GPL-2.0-only) [installed]\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "apk list | grep -i -- 'sqm' | head -n 200",
+            "stdout": "luci-app-sqm-1.6.0-r1 noarch {luci-app-sqm} (GPL-2.0)\nsqm-scripts-1.6.0-r2 noarch {sqm-scripts} (GPL-2.0)\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expect": [
+          {
+            "name": "luci-app-sqm",
+            "version": "1.6.0-r1",
+            "installed": false
+          },
+          {
+            "name": "sqm-scripts",
+            "version": "1.6.0-r2",
+            "installed": false
+          }
+        ]
+      },
+      {
+        "name": "atualiza a lista (apk)",
+        "action": "update_index",
+        "firmware": "25.12.0",
+        "fixtures": [
+          {
+            "ssh": "apk update",
+            "stdout": "OK: 4321 distinct packages available\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expectContains": "4321 distinct packages"
+      },
+      {
+        "name": "instala com opkg e devolve a saída",
+        "action": "install_package",
+        "firmware": "24.10.0",
+        "params": {
+          "name": "luci-app-sqm"
+        },
+        "fixtures": [
+          {
+            "ssh": "opkg list-installed",
+            "stdout": "base-files - 1554-r23630\nbusybox - 1.36.1-1\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "opkg update",
+            "stdout": "Updated list of available packages in /var/opkg-lists/openwrt_core\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "opkg install 'luci-app-sqm'",
+            "stdout": "Installing luci-app-sqm (1.6.0) to root...\nConfiguring luci-app-sqm.\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "opkg list-installed",
+            "stdout": "base-files - 1554-r23630\nbusybox - 1.36.1-1\nluci-app-sqm - 1.6.0\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expectContains": "Installing luci-app-sqm"
+      },
+      {
+        "name": "instala com apk (25.12)",
+        "action": "install_package",
+        "firmware": "25.12.0",
+        "params": {
+          "name": "luci-app-sqm"
+        },
+        "fixtures": [
+          {
+            "ssh": "apk list --installed",
+            "stdout": "base-files-1666-r1 x86_64 {base-files} (GPL-2.0-only) [installed]\nbusybox-1.37.0-r5 x86_64 {busybox} (GPL-2.0-only) [installed]\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "apk update",
+            "stdout": "OK: 4321 distinct packages available\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "apk add 'luci-app-sqm'",
+            "stdout": "(1/2) Installing sqm-scripts (1.6.0-r2)\n(2/2) Installing luci-app-sqm (1.6.0-r1)\nOK: 12 MiB in 150 packages\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "apk list --installed",
+            "stdout": "base-files-1666-r1 x86_64 {base-files} (GPL-2.0-only) [installed]\nbusybox-1.37.0-r5 x86_64 {busybox} (GPL-2.0-only) [installed]\nluci-app-sqm-1.6.0-r1 noarch {luci-app-sqm} (GPL-2.0) [installed]\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expectContains": "Installing luci-app-sqm (1.6.0-r1)"
+      },
+      {
+        "name": "instalação sem confirmação vira erro",
+        "action": "install_package",
+        "firmware": "24.10.0",
+        "params": {
+          "name": "luci-app-sqm"
+        },
+        "fixtures": [
+          {
+            "ssh": "opkg list-installed",
+            "stdout": "base-files - 1554-r23630\nbusybox - 1.36.1-1\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "opkg update",
+            "stdout": "Updated list\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "opkg install 'luci-app-sqm'",
+            "stdout": "Installing luci-app-sqm (1.6.0) to root...\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expectError": "sem o pacote aparecer"
+      },
+      {
+        "name": "não reinstala o que já existe",
+        "action": "install_package",
+        "firmware": "24.10.0",
+        "params": {
+          "name": "busybox"
+        },
+        "fixtures": [
+          {
+            "ssh": "opkg list-installed",
+            "stdout": "base-files - 1554-r23630\nbusybox - 1.36.1-1\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expectContains": "já está instalado"
+      },
+      {
+        "name": "falha do gerenciador volta como erro com a saída",
+        "action": "install_package",
+        "firmware": "24.10.0",
+        "params": {
+          "name": "inexistente"
+        },
+        "fixtures": [
+          {
+            "ssh": "opkg list-installed",
+            "stdout": "base-files - 1554-r23630\nbusybox - 1.36.1-1\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "opkg update",
+            "stdout": "Updated list\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "opkg install 'inexistente'",
+            "stdout": "",
+            "stderr": "Unknown package 'inexistente'.\n",
+            "exit": 255
+          }
+        ],
+        "expectError": "Unknown package"
+      },
+      {
+        "name": "nome com injeção é recusado antes do roteador",
+        "action": "install_package",
+        "params": {
+          "name": "x; reboot"
+        },
+        "fixtures": [],
+        "expectError": "formato inválido"
+      },
+      {
+        "name": "remove com opkg",
+        "action": "remove_package",
+        "firmware": "24.10.0",
+        "params": {
+          "name": "busybox"
+        },
+        "fixtures": [
+          {
+            "ssh": "opkg list-installed",
+            "stdout": "base-files - 1554-r23630\nbusybox - 1.36.1-1\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "opkg remove 'busybox'",
+            "stdout": "Removing package busybox from root...\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expectContains": "Removing package busybox"
+      },
+      {
+        "name": "remover o que não existe não altera nada",
+        "action": "remove_package",
+        "firmware": "25.12.0",
+        "params": {
+          "name": "luci-app-sqm"
+        },
+        "fixtures": [
+          {
+            "ssh": "apk list --installed",
+            "stdout": "base-files-1666-r1 x86_64 {base-files} (GPL-2.0-only) [installed]\nbusybox-1.37.0-r5 x86_64 {busybox} (GPL-2.0-only) [installed]\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expectContains": "não está instalado"
+      }
+    ],
+    "functional": [
+      {
+        "action": "detect",
+        "expectKeys": [
+          "firmware",
+          "package_manager"
+        ]
+      },
+      {
+        "action": "list_packages",
+        "expectMinRows": 1
+      }
+    ]
+  }
+}

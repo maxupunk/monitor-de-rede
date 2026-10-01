@@ -34,6 +34,9 @@ pub struct DeviceCapabilities {
     pub vpn: bool,
     /// O dispositivo publica métricas de saúde (CPU, memória, …).
     pub health: bool,
+    /// Plugins de dispositivo (acesso SSH/HTTP): todo equipamento com IP,
+    /// menos o do próprio sistema.
+    pub plugins: bool,
 
     // --- Ações do cabeçalho ---
     /// Varredura SNMP (descobrir interfaces e sistema).

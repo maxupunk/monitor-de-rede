@@ -16,6 +16,9 @@ use crate::services::{
 pub struct ToolArgs {
     values: Value,
     actor: AuditActor,
+    /// Conversa de onde veio a chamada — o modo "Aceitar automaticamente" dos
+    /// plugins vale por conversa e equipamento.
+    conversation: Option<String>,
 }
 
 impl ToolArgs {
@@ -36,6 +39,7 @@ impl ToolArgs {
         Self {
             values,
             actor: AuditActor::default(),
+            conversation: None,
         }
     }
 
@@ -49,6 +53,23 @@ impl ToolArgs {
     #[must_use]
     pub const fn actor(&self) -> &AuditActor {
         &self.actor
+    }
+
+    #[must_use]
+    pub fn with_conversation(mut self, conversation: Option<String>) -> Self {
+        self.conversation = conversation.filter(|key| !key.trim().is_empty());
+        self
+    }
+
+    #[must_use]
+    pub fn conversation(&self) -> Option<&str> {
+        self.conversation.as_deref()
+    }
+
+    /// Os argumentos como vieram, para quem precisa do objeto inteiro.
+    #[must_use]
+    pub const fn values(&self) -> &Value {
+        &self.values
     }
 
     /// Texto não vazio, já sem espaços nas pontas. Números também valem,

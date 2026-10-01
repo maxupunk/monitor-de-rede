@@ -3,4 +3,8 @@
 /**
  * Corpo de `POST /api/ai/tools/execute`: a chamada que o usuário confirmou.
  */
-export type ExecuteToolRequest = { name: string, arguments: Record<string, unknown>, };
+export type ExecuteToolRequest = { name: string, arguments: Record<string, unknown>, 
+/**
+ * Conversa de onde veio a confirmação (plugins de dispositivo).
+ */
+conversationKey?: string, };

@@ -163,6 +163,24 @@
         </v-tab>
         <v-tab v-if="can.logs" value="logs" prepend-icon="mdi-text-box-search-outline">Logs</v-tab>
         <v-tab v-if="can.vpn" value="vpn" prepend-icon="mdi-shield-lock-outline">VPN</v-tab>
+        <!-- Plugins instalados: abas próprias, agrupadas e em outra cor -->
+        <template v-if="installedPlugins.length">
+          <v-divider vertical class="mx-1 my-3" />
+          <v-tab
+            v-for="plugin in installedPlugins"
+            :key="plugin.id"
+            :value="pluginTab(plugin.id)"
+            :prepend-icon="plugin.icon"
+            color="secondary"
+            slider-color="secondary"
+            :title="`Plugin: ${plugin.title}`"
+          >
+            {{ plugin.title }}
+          </v-tab>
+        </template>
+        <v-tab v-if="can.plugins" value="plugins" prepend-icon="mdi-puzzle-plus-outline">
+          Plugins
+        </v-tab>
       </v-tabs>
 
       <v-divider></v-divider>
@@ -225,6 +243,31 @@
               @rotate-vpn-keys="rotateVpnKeys"
               @revoke-vpn-access="revokeVpnAccess"
               @show-vpn-firewall-hints="showVpnFirewallHints"
+            />
+          </v-window-item>
+
+          <!-- Aba Plugins: catálogo, credenciais e histórico -->
+          <v-window-item value="plugins">
+            <DevicePluginsTab
+              v-if="activeTab === 'plugins' && detailStore.device"
+              :device-id="deviceId"
+              :device-name="detailStore.device.name"
+              @open-plugin="(id) => (activeTab = pluginTab(id))"
+            />
+          </v-window-item>
+
+          <!-- Uma aba por plugin instalado -->
+          <v-window-item
+            v-for="plugin in installedPlugins"
+            :key="plugin.id"
+            :value="pluginTab(plugin.id)"
+          >
+            <InstalledPluginView
+              v-if="activeTab === pluginTab(plugin.id) && detailStore.device"
+              :item="plugin.item"
+              :device-id="deviceId"
+              :device-name="detailStore.device.name"
+              @uninstalled="activeTab = 'plugins'"
             />
           </v-window-item>
         </v-window>
@@ -811,6 +854,10 @@ import DeviceInterfacesTab from '@/components/devices/tabs/DeviceInterfacesTab.v
 import DeviceEventsTab from '@/components/devices/tabs/DeviceEventsTab.vue'
 import DeviceLogsTab from '@/components/devices/tabs/DeviceLogsTab.vue'
 import DeviceVpnTab from '@/components/devices/tabs/DeviceVpnTab.vue'
+import DevicePluginsTab from '@/components/devices/tabs/DevicePluginsTab.vue'
+import InstalledPluginView from '@/components/plugins/device/InstalledPluginView.vue'
+import { usePluginsStore } from '@/stores/plugins'
+import { installedPluginTabs, pluginTab } from '@/utils/pluginPresentation'
 import { getStatusColor } from '@/utils/monitorPresentation'
 import { formatBinaryBytes, formatLinkSpeed, formatPercent } from '@/utils/formatters'
 import LayaSuggestionChip from '@/components/ai/LayaSuggestionChip.vue'
@@ -824,7 +871,9 @@ const detailStore = useDeviceDetailStore()
 const devicesStore = useDevicesStore()
 const vpnStore = useVpnStore()
 const logsStore = useLogsStore()
+const pluginsStore = usePluginsStore()
 const activeTab = ref('overview')
+const abaPedida = ref<string | null>(null)
 const profilesDialogOpen = ref(false)
 const selectedSensors = ref<string[]>([])
 
@@ -845,6 +894,7 @@ const can = computed(() => {
     logs: caps?.logs ?? false,
     vpn: caps?.vpn ?? Boolean(detailStore.device?.vpnPeer),
     health: caps?.health ?? false,
+    plugins: caps?.plugins ?? false,
     snmpScan,
     snmpCollect,
     scanPorts,
@@ -860,8 +910,15 @@ const abasAplicaveis = computed(() => {
   if (can.value.events) abas.push('events')
   if (can.value.logs) abas.push('logs')
   if (can.value.vpn) abas.push('vpn')
+  if (can.value.plugins) abas.push('plugins')
+  abas.push(...installedPlugins.value.map((plugin) => pluginTab(plugin.id)))
   return abas
 })
+
+/** Plugins instalados neste equipamento — cada um vira uma aba. */
+const installedPlugins = computed(() =>
+  can.value.plugins ? installedPluginTabs(pluginsStore.deviceViews[deviceId.value]) : []
+)
 
 const monitorNames = computed<Record<number, string>>(() =>
   Object.fromEntries(detailStore.monitors.map((monitor) => [monitor.id, monitor.name]))
@@ -927,6 +984,15 @@ const hasMemoryData = computed(() => {
 const selectedIfIndexes = ref<number[]>([])
 
 const deviceId = computed(() => Number(route.params.id))
+// A lista de plugins vem uma vez por equipamento (abertura da tela); instalar e
+// desinstalar atualizam a mesma visão na store.
+watch(
+  () => [deviceId.value, can.value.plugins] as const,
+  ([id, enabled]) => {
+    if (id && enabled && !pluginsStore.deviceViews[id]) void pluginsStore.loadDevice(id)
+  },
+  { immediate: true }
+)
 const aiDevicePrompt = computed(
   () =>
     `Faça um diagnóstico do dispositivo ${detailStore.device?.name || `#${deviceId.value}`}: estado atual, alertas, interfaces com problema e erros recentes nos logs.`
@@ -941,10 +1007,24 @@ onMounted(() => {
 })
 
 watch(
-  [abasAplicaveis, () => route.query.tab],
+  () => route.query.tab,
+  (pedida) => {
+    abaPedida.value = typeof pedida === 'string' ? pedida : null
+  },
+  { immediate: true }
+)
+
+// A aba pedida pela URL espera existir (a de um plugin só aparece depois que a
+// lista de instalados carrega); uma aba que deixou de existir volta à Visão Geral.
+watch(
+  [abasAplicaveis, abaPedida],
   ([abas, pedida]) => {
-    const alvo = typeof pedida === 'string' ? pedida : activeTab.value
-    activeTab.value = abas.includes(alvo) ? alvo : 'overview'
+    if (pedida && abas.includes(pedida)) {
+      activeTab.value = pedida
+      abaPedida.value = null
+    } else if (!abas.includes(activeTab.value)) {
+      activeTab.value = 'overview'
+    }
   },
   { immediate: true }
 )

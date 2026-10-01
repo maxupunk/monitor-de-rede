@@ -7,6 +7,7 @@ pub mod diagnostics;
 pub mod docker;
 pub mod logs;
 pub mod monitors;
+pub mod plugins;
 pub mod resources;
 pub mod saas;
 pub mod server_addresses;

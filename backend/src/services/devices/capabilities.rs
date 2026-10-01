@@ -132,6 +132,13 @@ pub async fn for_device(
         logs,
         vpn,
         health,
+        // Plugins agem sobre o equipamento pelo IP; o dispositivo que
+        // representa a instalação não é alvo — o sistema não se reconfigura.
+        plugins: !is_system
+            && device
+                .ip_address
+                .as_deref()
+                .is_some_and(|ip| !ip.trim().is_empty()),
         // As mesmas capacidades governam os botões. No dispositivo do sistema,
         // escanear as próprias portas ou editar IP e comunidade SNMP de um
         // equipamento protegido não são ações válidas — e um botão que só pode

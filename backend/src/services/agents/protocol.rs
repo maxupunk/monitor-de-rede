@@ -25,6 +25,7 @@ use crate::{
             DockerError,
         },
         monitoring::contracts::CheckResult,
+        plugins::transport::DeviceIoCall,
         probes::{
             dispatcher::{ProbeDiscoveryTask, ProbeTask},
             receiver::ProbeDiscoveryResultPayload,
@@ -199,6 +200,12 @@ pub enum Command {
         #[serde(rename = "intervalMs")]
         interval_ms: u64,
     },
+    /// Uma operação de E/S de plugin de dispositivo (SSH exec, HTTP, Telnet)
+    /// contra um equipamento da rede do agente. É uma operação unitária e
+    /// fechada — o script do plugin roda na central, nunca aqui.
+    DeviceIo {
+        call: DeviceIoCall,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -285,6 +292,7 @@ impl Command {
             Self::Monitor { .. } => Permission::Monitor,
             Self::Discovery { .. } => Permission::Discovery,
             Self::SetLive { .. } => Permission::Read,
+            Self::DeviceIo { .. } => Permission::DeviceIo,
         }
     }
 }

@@ -1,0 +1,129 @@
+{
+  "format": 1,
+  "manifest": {
+    "slug": "linux-ssh-status",
+    "name": "Linux – estado do sistema",
+    "version": "1.0.0",
+    "description": "Versão, carga, memória e uso de disco de qualquer Linux com SSH. Só leitura.",
+    "author": "NetMonitor",
+    "transports": [
+      "ssh"
+    ],
+    "match": {
+      "platforms": [
+        "linux",
+        "openwrt",
+        "ubiquiti",
+        "embedded"
+      ]
+    },
+    "actions": [
+      {
+        "id": "detect",
+        "title": "Detectar sistema",
+        "effect": "read",
+        "output": "kv"
+      },
+      {
+        "id": "system_status",
+        "title": "Estado do sistema",
+        "effect": "read",
+        "output": "kv"
+      },
+      {
+        "id": "disk_usage",
+        "title": "Uso de disco",
+        "effect": "read",
+        "output": "table"
+      }
+    ]
+  },
+  "script": "// Linux (SSH) – estado do sistema.\n// Só leitura: versão, carga, memória e discos.\n\nfn detect(device, params) {\n    let os = parse_kv(device.run(\"cat /etc/os-release 2>/dev/null\"), \"=\");\n    #{\n        firmware: os.VERSION_ID,\n        os: os.PRETTY_NAME,\n        kernel: trimmed(device.run(\"uname -r\")),\n        arch: trimmed(device.run(\"uname -m\"))\n    }\n}\n\nfn system_status(device, params) {\n    let uptime = words(device.run(\"cat /proc/uptime\"));\n    let load = words(device.run(\"cat /proc/loadavg\"));\n    let mem = parse_kv(device.run(\"cat /proc/meminfo\"), \":\");\n    #{\n        uptime_seconds: uptime[0],\n        load_1m: load[0],\n        load_5m: load[1],\n        load_15m: load[2],\n        mem_total: mem.MemTotal,\n        mem_available: mem.MemAvailable\n    }\n}\n\nfn disk_usage(device, params) {\n    let rows = [];\n    let all = lines(device.run(\"df -P\"));\n    for i in 1..all.len() {\n        let cols = words(all[i]);\n        if cols.len() >= 6 {\n            rows.push(#{\n                filesystem: cols[0],\n                size_kb: cols[1],\n                used_kb: cols[2],\n                available_kb: cols[3],\n                used: cols[4],\n                mount: cols[5]\n            });\n        }\n    }\n    rows\n}\n",
+  "usage": "# Linux – estado do sistema\n\nConsulta um Linux por SSH. **Nenhuma ação altera o equipamento.**\n\n## Detectar sistema\nLê `/etc/os-release` e `uname`: distribuição, versão, kernel e arquitetura.\n\n## Estado do sistema\nTempo ligado, carga média (1, 5 e 15 min) e memória total/disponível, de `/proc`.\n\n## Uso de disco\nTabela do `df -P`: cada sistema de arquivos, tamanho, uso e ponto de montagem.\n",
+  "compatibility": [],
+  "tests": {
+    "unit": [
+      {
+        "action": "detect",
+        "fixtures": [
+          {
+            "ssh": "cat /etc/os-release 2>/dev/null",
+            "stdout": "PRETTY_NAME=\"Debian GNU/Linux 12 (bookworm)\"\nVERSION_ID=\"12\"\n"
+          },
+          {
+            "ssh": "uname -r",
+            "stdout": "6.1.0-18-amd64\n"
+          },
+          {
+            "ssh": "uname -m",
+            "stdout": "x86_64\n"
+          }
+        ],
+        "expect": {
+          "firmware": "12",
+          "os": "Debian GNU/Linux 12 (bookworm)",
+          "kernel": "6.1.0-18-amd64",
+          "arch": "x86_64"
+        }
+      },
+      {
+        "action": "system_status",
+        "fixtures": [
+          {
+            "ssh": "cat /proc/uptime",
+            "stdout": "12345.67 23456.78\n"
+          },
+          {
+            "ssh": "cat /proc/loadavg",
+            "stdout": "0.10 0.20 0.30 1/234 5678\n"
+          },
+          {
+            "ssh": "cat /proc/meminfo",
+            "stdout": "MemTotal:       16384 kB\nMemAvailable:    8192 kB\n"
+          }
+        ],
+        "expect": {
+          "uptime_seconds": "12345.67",
+          "load_1m": "0.10",
+          "load_15m": "0.30",
+          "mem_total": "16384 kB"
+        }
+      },
+      {
+        "action": "disk_usage",
+        "fixtures": [
+          {
+            "ssh": "df -P",
+            "stdout": "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda1 1000 400 600 40% /\n"
+          }
+        ],
+        "expect": [
+          {
+            "filesystem": "/dev/sda1",
+            "used": "40%",
+            "mount": "/"
+          }
+        ]
+      }
+    ],
+    "functional": [
+      {
+        "action": "detect",
+        "expectKeys": [
+          "kernel"
+        ]
+      },
+      {
+        "action": "system_status",
+        "expectKeys": [
+          "uptime_seconds",
+          "mem_total"
+        ]
+      },
+      {
+        "action": "disk_usage",
+        "expectMinRows": 1
+      }
+    ]
+  }
+}

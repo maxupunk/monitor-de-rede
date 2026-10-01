@@ -251,7 +251,11 @@ async fn analises_sem_historico_respondem_sem_inventar() {
             .execute(&ctx, "analyze_root_cause", "{}")
             .await
             .unwrap();
-        assert_eq!(causa.data["open_incidents"], 0, "incidentes inesperados: {}", causa.data);
+        assert_eq!(
+            causa.data["open_incidents"], 0,
+            "incidentes inesperados: {}",
+            causa.data
+        );
 
         let inexistente = registro
             .execute(&ctx, "analyze_root_cause", r#"{"alert_id": 999}"#)
@@ -343,6 +347,7 @@ async fn confirmacao_cria_janela_e_monitor_em_nome_do_usuario() {
             "create_monitor",
             json!({ "device": "borda" }),
             ator.clone(),
+            None,
         )
         .await;
         assert!(desligado.is_err(), "assistente desativado não executa nada");
@@ -364,6 +369,7 @@ async fn confirmacao_cria_janela_e_monitor_em_nome_do_usuario() {
             "create_maintenance_window",
             json!({ "device": "borda", "duration_minutes": 90, "reason": "troca de SFP" }),
             ator.clone(),
+            None,
         )
         .await
         .unwrap();
@@ -383,6 +389,7 @@ async fn confirmacao_cria_janela_e_monitor_em_nome_do_usuario() {
             "create_monitor",
             json!({ "device": "borda", "type": "tcp", "port": 22 }),
             ator,
+            None,
         )
         .await
         .unwrap();

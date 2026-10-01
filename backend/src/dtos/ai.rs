@@ -42,6 +42,10 @@ pub struct ChatStreamRequest {
     /// Compactar agora, mesmo cabendo na janela.
     #[serde(default)]
     pub compact: bool,
+    /// Identificador estável da conversa na tela. O modo "Aceitar
+    /// automaticamente" dos plugins de dispositivo vale por conversa.
+    #[serde(default)]
+    pub conversation_key: Option<String>,
 }
 
 /// Medida da resposta anterior da conversa.
@@ -66,8 +70,11 @@ pub struct ContextHint {
     pub tool_groups: Vec<String>,
 }
 
+/// Só vive durante a desserialização: a diferença de tamanho entre as
+/// variantes não custa nada que valha uma caixa.
 #[derive(Deserialize)]
 #[serde(untagged)]
+#[allow(clippy::large_enum_variant)]
 enum ChatStreamRequestHelper {
     #[serde(rename_all = "camelCase")]
     Object {
@@ -88,6 +95,8 @@ enum ChatStreamRequestHelper {
         context_hint: Option<ContextHint>,
         #[serde(default)]
         compact: bool,
+        #[serde(default)]
+        conversation_key: Option<String>,
     },
     Array(Vec<ChatMessageInput>),
 }
@@ -109,6 +118,7 @@ impl<'de> Deserialize<'de> for ChatStreamRequest {
                 summary,
                 context_hint,
                 compact,
+                conversation_key,
             } => Ok(Self {
                 messages,
                 device_id,
@@ -119,6 +129,7 @@ impl<'de> Deserialize<'de> for ChatStreamRequest {
                 summary,
                 context_hint,
                 compact,
+                conversation_key,
             }),
             ChatStreamRequestHelper::Array(messages) => Ok(Self {
                 messages,
@@ -130,6 +141,7 @@ impl<'de> Deserialize<'de> for ChatStreamRequest {
                 summary: None,
                 context_hint: None,
                 compact: false,
+                conversation_key: None,
             }),
         }
     }
@@ -610,6 +622,10 @@ pub struct ExecuteToolRequest {
     #[serde(default)]
     #[ts(type = "Record<string, unknown>")]
     pub arguments: serde_json::Value,
+    /// Conversa de onde veio a confirmação (plugins de dispositivo).
+    #[serde(default)]
+    #[ts(optional)]
+    pub conversation_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, TS)]

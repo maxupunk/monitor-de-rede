@@ -24,4 +24,9 @@ contextHint: ContextHint | null,
 /**
  * Compactar agora, mesmo cabendo na janela.
  */
-compact: boolean, };
+compact: boolean, 
+/**
+ * Identificador estável da conversa na tela. O modo "Aceitar
+ * automaticamente" dos plugins de dispositivo vale por conversa.
+ */
+conversationKey: string | null, };

@@ -27,16 +27,21 @@ pub enum Permission {
     Monitor,
     /// Varredura de rede a partir deste site.
     Discovery,
+    /// Acesso SSH/HTTP/Telnet aos equipamentos da rede deste site, a pedido
+    /// de um plugin de dispositivo. Fora do padrão: executa comandos com a
+    /// credencial do equipamento e precisa ser liberado no host.
+    DeviceIo,
 }
 
 impl Permission {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Read,
         Self::Lifecycle,
         Self::Update,
         Self::Compose,
         Self::Monitor,
         Self::Discovery,
+        Self::DeviceIo,
     ];
 
     #[must_use]
@@ -48,6 +53,7 @@ impl Permission {
             Self::Compose => "compose",
             Self::Monitor => "monitor",
             Self::Discovery => "discovery",
+            Self::DeviceIo => "device_io",
         }
     }
 }
@@ -154,8 +160,16 @@ mod tests {
 
     #[test]
     fn all_libera_tudo_e_vazio_cai_no_padrao() {
-        assert_eq!(Policy::parse("ALL").expect("all").permissions().len(), 6);
+        assert_eq!(Policy::parse("ALL").expect("all").permissions().len(), 7);
         assert_eq!(Policy::parse(" ").expect("vazio"), Policy::default());
+    }
+
+    #[test]
+    fn acesso_a_equipamento_fica_fora_do_padrao() {
+        assert!(!Policy::default().allows(Permission::DeviceIo));
+        assert!(Policy::parse("read,device_io")
+            .expect("política")
+            .allows(Permission::DeviceIo));
     }
 
     #[test]

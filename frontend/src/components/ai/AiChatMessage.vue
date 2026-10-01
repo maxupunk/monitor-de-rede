@@ -188,13 +188,13 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import DOMPurify from 'dompurify'
 import { useAiStore, type AiDisplayMessage } from '@/stores/ai'
 import AiToolCard from './AiToolCard.vue'
 import AiQuestionCard from './AiQuestionCard.vue'
 import { formatCompactCount, formatElapsedMs, formatTokenRate } from '@/utils/formatters'
 import { shortModelName, tokensPerSecond, toolQuestion } from '@/utils/aiChatStream'
 import { mentionKindMeta } from '@/utils/aiMentions'
+import { renderMarkdown } from '@/utils/markdown'
 
 const props = defineProps<{
   message: AiDisplayMessage
@@ -255,53 +255,8 @@ const metrics = computed(() => {
 /** Gráfico precisa da largura toda, mesmo quando o texto da resposta é curto. */
 const hasChart = computed(() => props.message.toolCalls?.some((tool) => tool.chart) ?? false)
 
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;')
-}
-
-/**
- * Conversor leve de Markdown para HTML seguro utilizando DOMPurify.
- */
-const renderedContent = computed(() => {
-  if (!props.message.content) return ''
-
-  let text = props.message.content
-
-  // Bloco de código: ```linguagem\n...\n```
-  text = text.replace(/```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g, (_match, _lang, code) => {
-    return `<pre class="code-block pa-2 rounded my-2 font-mono text-body-small overflow-x-auto"><code>${escapeHtml(code.trim())}</code></pre>`
-  })
-
-  // Código inline: `...`
-  text = text.replace(/`([^`]+)`/g, (_match, code) => {
-    return `<code class="inline-code px-1 rounded font-mono text-body-small">${escapeHtml(code)}</code>`
-  })
-
-  // Negrito: **...**
-  text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-
-  // Itálico: *...*
-  text = text.replace(/\*([^*]+)\*/g, '<em>$1</em>')
-
-  // Listas não ordenadas: - item ou * item
-  text = text.replace(/^[*-]\s+(.+)$/gm, '<li class="ml-4">$1</li>')
-
-  // Listas ordenadas: 1. item
-  text = text.replace(/^\d+\.\s+(.+)$/gm, '<li class="ml-4 list-decimal">$1</li>')
-
-  // Quebras de linha normais
-  text = text.replace(/\n\n/g, '<br/><br/>').replace(/\n/g, '<br/>')
-
-  return DOMPurify.sanitize(text, {
-    ALLOWED_TAGS: ['strong', 'em', 'code', 'pre', 'li', 'ul', 'ol', 'br', 'p', 'span'],
-    ALLOWED_ATTR: ['class'],
-  })
-})
+/** Markdown leve e seguro (ver `utils/markdown`). */
+const renderedContent = computed(() => renderMarkdown(props.message.content))
 
 async function copyContent() {
   if (!props.message.content) return

@@ -228,6 +228,7 @@ mod tests {
             system_key: None,
             link_interface_id: None,
             link_interface_name: None,
+            firmware_version: None,
             status: "up".into(),
             last_seen_at: None,
             created_at: now,

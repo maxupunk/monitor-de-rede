@@ -62,6 +62,21 @@ impl EphemeralSecretStore {
         secrets.remove(key).map(|secret| secret.value)
     }
 
+    /// Lê **sem** descartar — para o segredo de sessão que vale por várias
+    /// leituras até expirar (senha de equipamento pedida a cada sessão).
+    pub fn get(&self, key: &str) -> Option<String> {
+        let mut secrets = self.secrets.lock().ok()?;
+        purge_expired(&mut secrets);
+        secrets.get(key).map(|secret| secret.value.clone())
+    }
+
+    /// Descarta o segredo, se houver.
+    pub fn forget(&self, key: &str) {
+        if let Ok(mut secrets) = self.secrets.lock() {
+            secrets.remove(key);
+        }
+    }
+
     /// Indica se ainda existe segredo disponível, **sem** consumi-lo.
     pub fn has(&self, key: &str) -> bool {
         let Ok(mut secrets) = self.secrets.lock() else {

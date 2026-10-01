@@ -62,6 +62,22 @@ impl Role {
     pub const fn can_manage_docker(self) -> bool {
         matches!(self, Self::Admin)
     }
+
+    /// Plugins de dispositivo executam comandos no equipamento com a
+    /// credencial dele — mesma régua do Docker.
+    #[must_use]
+    pub const fn can_manage_plugins(self) -> bool {
+        matches!(self, Self::Admin)
+    }
+}
+
+/// Rotas de plugin de dispositivo: `/api/plugins*`, `/api/plugin-runs*`,
+/// `/api/plugin-approvals*`, `/api/plugin-auto-accept*` e as de plugin e
+/// credencial sob `/api/devices/{id}`.
+fn is_plugin_path(path: &str) -> bool {
+    path.starts_with("/api/plugin")
+        || (path.starts_with("/api/devices/")
+            && (path.contains("/plugins") || path.contains("/credentials")))
 }
 
 impl FromStr for Role {
@@ -98,6 +114,11 @@ pub fn request_is_allowed(role: Role, method: &Method, path: &str) -> bool {
     if path == "/api/agents" || path.starts_with("/api/agents/") {
         return matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS)
             || role.can_manage_docker();
+    }
+
+    if is_plugin_path(path) {
+        return matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS)
+            || role.can_manage_plugins();
     }
 
     if path == "/api/docker" || path.starts_with("/api/docker/") {
@@ -266,6 +287,37 @@ mod tests {
         assert!(Role::Operator.can_write());
         assert!(!Role::Operator.can_manage_users());
         assert!(!Role::Viewer.can_write());
+    }
+
+    #[test]
+    fn plugin_de_dispositivo_so_e_operado_por_admin() {
+        for path in [
+            "/api/plugins",
+            "/api/plugins/3/test",
+            "/api/plugin-runs/9/cancel",
+            "/api/plugin-approvals/9:1",
+            "/api/devices/4/plugins/2/actions/detect",
+            "/api/devices/4/credentials",
+        ] {
+            assert!(
+                request_is_allowed(Role::Admin, &Method::POST, path),
+                "{path}"
+            );
+            assert!(
+                !request_is_allowed(Role::Operator, &Method::POST, path),
+                "{path}"
+            );
+            assert!(
+                request_is_allowed(Role::Viewer, &Method::GET, path),
+                "{path}"
+            );
+        }
+        // O resto de `/devices` continua liberado ao operador.
+        assert!(request_is_allowed(
+            Role::Operator,
+            &Method::POST,
+            "/api/devices/4/snmp/scan"
+        ));
     }
 
     #[test]

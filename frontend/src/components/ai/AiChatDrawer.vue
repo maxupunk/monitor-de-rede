@@ -79,6 +79,8 @@
       </div>
     </header>
 
+    <AutoAcceptBanner v-if="view === 'chat'" />
+
     <div v-if="view === 'history'" class="ai-drawer__history pa-3">
       <AiConversationList @selected="view = 'chat'" />
     </div>
@@ -115,6 +117,7 @@ import { useAiStore } from '@/stores/ai'
 import { useAiModelInfo } from '@/composables/useAiModelInfo'
 import AiChatThread from './AiChatThread.vue'
 import AiConversationList from './AiConversationList.vue'
+import AutoAcceptBanner from '@/components/plugins/AutoAcceptBanner.vue'
 import { responseStyleOption } from './aiResponseStyle'
 
 /** Largura do painel fora do celular. */

@@ -215,6 +215,7 @@
     <SpeedTestDialog v-model="speedTestDialog" />
     <DiagnosticPlaybookDialog v-model="playbookDialog" />
     <AiChatDrawer />
+    <PluginApprovalDialog />
 
     <!-- Diálogo de Instruções de Instalação no iOS -->
     <v-dialog v-model="showIosDialog" :fullscreen="$vuetify.display.xs" max-width="420">
@@ -266,6 +267,7 @@ import TracerouteDialog from '@/components/TracerouteDialog.vue'
 import SpeedTestDialog from '@/components/SpeedTestDialog.vue'
 import DiagnosticPlaybookDialog from '@/components/DiagnosticPlaybookDialog.vue'
 import AiChatDrawer from '@/components/ai/AiChatDrawer.vue'
+import PluginApprovalDialog from '@/components/plugins/PluginApprovalDialog.vue'
 import { useAiStore } from '@/stores/ai'
 
 interface NavSubItem {
@@ -419,6 +421,7 @@ const navItems = computed<NavItem[]>(() => [
     ? [
         { title: 'Usuários e acessos', icon: 'mdi-account-multiple-outline', to: '/users' },
         { title: 'Trilha de auditoria', icon: 'mdi-shield-account-outline', to: '/audit' },
+        { title: 'Plugins de dispositivo', icon: 'mdi-puzzle-outline', to: '/plugins' },
       ]
     : []),
   { title: 'Configurações', icon: 'mdi-cog', to: '/settings' },

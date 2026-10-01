@@ -18,6 +18,8 @@ export interface AiToolCallState {
   /** Frase do pedido de confirmação ("Silenciar o alerta #12 por 60 min"). */
   summary?: string | null
   status: AiToolStatus
+  /** Acesso a equipamento liberado pelo modo "Aceitar automaticamente". */
+  autoApproved?: boolean
 }
 
 export interface AiUsageInfo {
@@ -129,6 +131,7 @@ export function applyChatEvent(message: AiDisplayMessage, event: unknown): void 
         name: String(event.name),
         arguments: asRecord(event.arguments),
         status: 'running',
+        ...(event.autoApproved === true ? { autoApproved: true } : {}),
       })
       break
     case 'toolResult': {

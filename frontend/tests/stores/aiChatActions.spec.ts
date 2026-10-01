@@ -89,10 +89,15 @@ describe('ações propostas pela IA', () => {
 
     await store.confirmTool(store.messages[1].id, 'c1')
 
-    expect(apiService.post).toHaveBeenCalledWith('/ai/tools/execute', {
-      name: 'silence_alert',
-      arguments: { alert_id: 7, minutes: 30 },
-    })
+    expect(apiService.post).toHaveBeenCalledWith(
+      '/ai/tools/execute',
+      {
+        name: 'silence_alert',
+        arguments: { alert_id: 7, minutes: 30 },
+        conversationKey: store.conversationKey,
+      },
+      expect.objectContaining({ timeoutMs: expect.any(Number) })
+    )
     expect(store.messages[1].toolCalls?.[0].status).toBe('done')
   })
 

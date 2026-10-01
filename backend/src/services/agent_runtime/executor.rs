@@ -28,8 +28,43 @@ use crate::services::{
         DockerError,
     },
     monitoring::runner::{run_monitor_with, CheckDeps, RunOptions},
+    plugins::transport::{self as device_io, local::LocalTransport, DeviceIoCall, DeviceTransport},
     probes::agent::failed_result,
 };
+
+/// Faixas extras que o host do agente aceita como alvo de plugin
+/// (`AGENT_DEVICE_CIDRS=192.168.10.0/24,10.20.0.0/16`). Vazio = qualquer rede
+/// privada. Um IP público nunca é aceito, com ou sem a lista.
+fn device_cidrs() -> &'static [ipnet::IpNet] {
+    static CIDRS: std::sync::OnceLock<Vec<ipnet::IpNet>> = std::sync::OnceLock::new();
+    CIDRS.get_or_init(|| {
+        std::env::var("AGENT_DEVICE_CIDRS")
+            .unwrap_or_default()
+            .split(',')
+            .filter_map(|cidr| cidr.trim().parse().ok())
+            .collect()
+    })
+}
+
+async fn device_io(call: &DeviceIoCall) -> Result<Value, RemoteError> {
+    let ip = call
+        .endpoint()
+        .ip()
+        .map_err(|error| RemoteError::new(ErrorCode::Validation, error))?;
+    if !device_io::target_allowed(ip, device_cidrs()) {
+        return Err(RemoteError::new(
+            ErrorCode::Forbidden,
+            format!("O agente não acessa {ip}: fora das redes permitidas neste host"),
+        ));
+    }
+    let transport = LocalTransport::new("agente")
+        .map_err(|error| RemoteError::new(ErrorCode::Internal, error.to_string()))?;
+    let reply = transport
+        .execute(call)
+        .await
+        .map_err(|error| RemoteError::new(ErrorCode::Unavailable, error.to_string()))?;
+    to_value(reply)
+}
 
 /// Contrato do executor: a sessão do agente só conhece isto.
 #[async_trait]
@@ -262,6 +297,7 @@ impl CommandExecutor for LocalExecutor {
             }
             // O modo ao vivo é da sessão, não do executor.
             Command::SetLive { .. } => Ok(Value::Null),
+            Command::DeviceIo { call } => device_io(&call).await,
         }
     }
 }
@@ -291,6 +327,45 @@ mod tests {
             )
             .await
             .expect_err("negado");
+        assert_eq!(error.code, ErrorCode::Forbidden);
+    }
+
+    #[tokio::test]
+    async fn acesso_a_equipamento_exige_permissao_e_rede_privada() {
+        let call = |host: &str| Command::DeviceIo {
+            call: DeviceIoCall::HttpRequest {
+                endpoint: device_io::Endpoint {
+                    host: host.into(),
+                    port: 1,
+                },
+                https: false,
+                request: device_io::HttpRequest {
+                    method: "GET".into(),
+                    path: "/".into(),
+                    headers: vec![],
+                    body: None,
+                    basic_auth: None,
+                },
+                timeout_ms: 1_000,
+            },
+        };
+        let negado = LocalExecutor::new(Policy::default(), CheckDeps::default());
+        let (chunks, _) = mpsc::unbounded_channel();
+        let error = negado
+            .execute(call("127.0.0.1"), chunks, CancellationToken::new())
+            .await
+            .expect_err("sem device_io");
+        assert_eq!(error.code, ErrorCode::Forbidden);
+
+        let liberado = LocalExecutor::new(
+            Policy::from_permissions([Permission::DeviceIo]),
+            CheckDeps::default(),
+        );
+        let (chunks, _) = mpsc::unbounded_channel();
+        let error = liberado
+            .execute(call("8.8.8.8"), chunks, CancellationToken::new())
+            .await
+            .expect_err("IP público");
         assert_eq!(error.code, ErrorCode::Forbidden);
     }
 

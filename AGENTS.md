@@ -47,7 +47,7 @@
 
 4. **Práticas de Teste (Rust)**:
    - **Isolamento de Banco**: testes de requisição usam
-     `request_with_config::<App, _, _>`; o `Hooks::truncate` limpa as 29 tabelas
+     `request_with_config::<App, _, _>`; o `Hooks::truncate` limpa as 34 tabelas
      entre eles.
    - **`#[serial]`** em tudo que toca estado global de processo: `ScanSessionService`,
      o cofre de chaves da VPN, o rate limiter e qualquer teste que mexa em
@@ -104,6 +104,16 @@
      local (`AGENT_ALLOW`) é soberana — a central não a amplia — e comandos
      Docker novos entram no enum fechado de `services/agents/protocol.rs`, cada
      um com a sua permissão. Proxy genérico para a Engine é proibido.
+   - **Plugins de dispositivo** (ADR 012): o script Rhai roda **só** no sandbox
+     da central e **nunca** abre socket — toda E/S passa por
+     `plugins::transport::DeviceTransport`, que só alcança o IP cadastrado. O
+     agente remoto recebe apenas `Command::DeviceIo` (operação unitária, permissão
+     `device_io` fora do padrão), nunca o script. Senha de equipamento nunca vai
+     para a tela, a IA ou o script (`{{password}}` é trocado no transporte). Todo
+     acesso da IA a equipamento é `ToolKind::DeviceAccess`, confirmado a cada
+     chamada — a única exceção é o modo "Aceitar automaticamente" aceito com termo
+     para aquela conversa e aquele equipamento. Plugin importado entra em
+     quarentena; não crie atalho que o instale sem a revisão.
    - Controller extrai, valida, delega e serializa. Regra de negócio vive em
      `src/services/`, testável sem HTTP.
 

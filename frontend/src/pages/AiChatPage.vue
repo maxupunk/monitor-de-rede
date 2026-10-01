@@ -181,6 +181,7 @@
             </div>
           </div>
 
+          <AutoAcceptBanner />
           <AiChatThread :placeholder="placeholder">
             <template #status>
               <v-tooltip location="top" text="Execução de ping, traceroute e scan de portas">
@@ -212,6 +213,7 @@ import { useAiModelInfo } from '@/composables/useAiModelInfo'
 import PageHeader from '@/components/PageHeader.vue'
 import AiChatThread from '@/components/ai/AiChatThread.vue'
 import AiConversationList from '@/components/ai/AiConversationList.vue'
+import AutoAcceptBanner from '@/components/plugins/AutoAcceptBanner.vue'
 import { responseStyleOption } from '@/components/ai/aiResponseStyle'
 import { AI_SUGGESTIONS } from '@/components/ai/aiSuggestions'
 

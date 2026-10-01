@@ -115,6 +115,14 @@ hex = { version = "0.4" }
 # --- artefatos VPN ---
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 
+# --- plugins de dispositivo ---
+# Motor de script dos plugins. Rust puro, sem runtime externo, e o script só
+# enxerga o que é registrado nele: não há acesso a arquivo, processo nem rede
+# fora do `device`. `sync` porque o motor roda em `spawn_blocking` e atravessa
+# threads; `serde` converte parâmetros e resultado de/para JSON; `no_module`
+# desliga o `import`, que por padrão resolveria arquivos do disco.
+rhai = { version = "1", features = ["sync", "serde", "no_module"] }
+
 # --- utilitários ---
 anyhow = { version = "1" }             # AppError::Internal (§8.1) — erro opaco de infra
 ipnet = { version = "2.9" }            # CIDR IPv4 (discovery + VPN)

@@ -28,6 +28,7 @@ pub async fn execute_confirmed(
     name: &str,
     arguments: Value,
     actor: AuditActor,
+    conversation: Option<String>,
 ) -> AppResult<ToolOutput> {
     if !settings.enabled {
         return Err(AppError::validation(
@@ -35,6 +36,12 @@ pub async fn execute_confirmed(
         ));
     }
     ToolRegistry::new(ToolPolicy::from_settings(settings))
-        .execute_confirmed(ctx, name, ToolArgs::from_value(arguments).with_actor(actor))
+        .execute_confirmed(
+            ctx,
+            name,
+            ToolArgs::from_value(arguments)
+                .with_actor(actor)
+                .with_conversation(conversation),
+        )
         .await
 }
