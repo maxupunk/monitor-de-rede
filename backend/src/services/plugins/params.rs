@@ -1,10 +1,20 @@
-//! Validação dos parâmetros de uma ação contra o esquema do manifesto.
+//! Validação de parâmetros de ação e de configuração de plugin contra o
+//! esquema do manifesto.
 //!
 //! É um subconjunto deliberado do JSON Schema — o que um formulário gerado
-//! consegue desenhar e o que protege o equipamento: `type` (`object` na raiz;
-//! `string`, `integer`, `number`, `boolean` nas propriedades), `required`,
-//! `enum`, `pattern`, `minLength`/`maxLength` e `minimum`/`maximum`. Esquema
-//! que usa algo fora disso é recusado na validação do manifesto, e não
+//! consegue desenhar e o que protege o equipamento:
+//!
+//! * raiz `type: object`, com `properties` e `required`;
+//! * propriedades `string`, `integer`, `number`, `boolean` com `enum`,
+//!   `pattern`, `minLength`/`maxLength`, `minimum`/`maximum`, `default`,
+//!   `title`, `description` — e `secret: true` em texto (senha: cifrada ao
+//!   gravar, mascarada ao ler);
+//! * `array` de escalares (lista de nomes) ou de objetos com propriedades
+//!   escalares (a lista de SSIDs), com `minItems`/`maxItems`. Itens de objeto
+//!   ganham um `id` estável, gerado pelo sistema — é por ele que uma senha
+//!   mantida ("********") volta ao item certo.
+//!
+//! Esquema que usa algo fora disso é recusado na validação do manifesto, e não
 //! ignorado: um `format` silenciosamente ignorado seria uma validação que o
 //! autor acha que existe.
 //!
@@ -14,7 +24,7 @@
 use regex::Regex;
 use serde_json::{Map, Value};
 
-const PROPERTY_TYPES: &[&str] = &["string", "integer", "number", "boolean"];
+const SCALAR_TYPES: &[&str] = &["string", "integer", "number", "boolean"];
 const PROPERTY_KEYS: &[&str] = &[
     "type",
     "title",
@@ -26,7 +36,13 @@ const PROPERTY_KEYS: &[&str] = &[
     "minimum",
     "maximum",
     "default",
+    "secret",
+    "items",
+    "minItems",
+    "maxItems",
 ];
+/// Chave implícita dos itens de objeto (ver a nota do módulo).
+pub const ITEM_ID: &str = "id";
 
 /// Confere se o esquema usa só o subconjunto suportado.
 ///
@@ -34,6 +50,10 @@ const PROPERTY_KEYS: &[&str] = &[
 ///
 /// Mensagem em português apontando a propriedade problemática.
 pub fn validate_schema(schema: &Value) -> Result<(), String> {
+    validate_object_schema(schema, "", true)
+}
+
+fn validate_object_schema(schema: &Value, path: &str, allow_arrays: bool) -> Result<(), String> {
     let root = schema
         .as_object()
         .ok_or("o esquema de parâmetros precisa ser um objeto")?;
@@ -46,47 +66,100 @@ pub fn validate_schema(schema: &Value) -> Result<(), String> {
         Some(_) => return Err("\"properties\" precisa ser um objeto".into()),
     };
     for (name, property) in properties {
-        let property = property
-            .as_object()
-            .ok_or_else(|| format!("a propriedade `{name}` precisa ser um objeto"))?;
-        for key in property.keys() {
-            if !PROPERTY_KEYS.contains(&key.as_str()) {
-                return Err(format!(
-                    "a propriedade `{name}` usa `{key}`, que não é suportado"
-                ));
-            }
-        }
-        let kind = property
-            .get("type")
-            .and_then(Value::as_str)
-            .ok_or_else(|| format!("a propriedade `{name}` precisa de `type`"))?;
-        if !PROPERTY_TYPES.contains(&kind) {
+        let full = join(path, name);
+        if !allow_arrays && name == ITEM_ID {
             return Err(format!(
-                "a propriedade `{name}` tem tipo `{kind}`; use string, integer, number ou boolean"
+                "`{full}`: `{ITEM_ID}` é reservado — o sistema gera o id de cada item"
             ));
         }
-        if let Some(pattern) = property.get("pattern") {
-            let pattern = pattern
-                .as_str()
-                .ok_or_else(|| format!("o `pattern` de `{name}` precisa ser texto"))?;
-            Regex::new(pattern)
-                .map_err(|error| format!("o `pattern` de `{name}` é inválido: {error}"))?;
-        }
+        validate_property_schema(&full, property, allow_arrays)?;
     }
-    if let Some(required) = root.get("required") {
-        let required = required
+    // `required` e `order` (a ordem dos campos na tela — o JSON não guarda a
+    // ordem das chaves, e o `jsonb` do PostgreSQL a reescreve) citam campos.
+    for keyword in ["required", "order"] {
+        let Some(list) = root.get(keyword) else {
+            continue;
+        };
+        let list = list
             .as_array()
-            .ok_or("\"required\" precisa ser uma lista")?;
-        for item in required {
-            let name = item.as_str().ok_or("\"required\" só aceita nomes")?;
+            .ok_or_else(|| format!("\"{keyword}\" precisa ser uma lista"))?;
+        for item in list {
+            let name = item
+                .as_str()
+                .ok_or_else(|| format!("\"{keyword}\" só aceita nomes"))?;
             if !properties.contains_key(name) {
                 return Err(format!(
-                    "`{name}` está em \"required\" mas não em \"properties\""
+                    "`{name}` está em \"{keyword}\" mas não em \"properties\""
                 ));
             }
         }
     }
     Ok(())
+}
+
+fn validate_property_schema(
+    name: &str,
+    property: &Value,
+    allow_arrays: bool,
+) -> Result<(), String> {
+    let property = property
+        .as_object()
+        .ok_or_else(|| format!("a propriedade `{name}` precisa ser um objeto"))?;
+    for key in property.keys() {
+        if !PROPERTY_KEYS.contains(&key.as_str()) {
+            return Err(format!(
+                "a propriedade `{name}` usa `{key}`, que não é suportado"
+            ));
+        }
+    }
+    let kind = property
+        .get("type")
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("a propriedade `{name}` precisa de `type`"))?;
+    if kind == "array" {
+        if !allow_arrays {
+            return Err(format!("`{name}`: lista dentro de lista não é suportada"));
+        }
+        let items = property
+            .get("items")
+            .ok_or_else(|| format!("a lista `{name}` precisa de `items`"))?;
+        return match items.get("type").and_then(Value::as_str) {
+            Some("object") => validate_object_schema(items, name, false),
+            Some(scalar) if SCALAR_TYPES.contains(&scalar) => {
+                validate_property_schema(&format!("{name}[]"), items, false)
+            }
+            _ => Err(format!(
+                "os itens de `{name}` precisam ser `object` ou um tipo simples"
+            )),
+        };
+    }
+    if !SCALAR_TYPES.contains(&kind) {
+        return Err(format!(
+            "a propriedade `{name}` tem tipo `{kind}`; use string, integer, number, boolean ou array"
+        ));
+    }
+    if property.contains_key("items") {
+        return Err(format!("`{name}`: `items` só vale em `array`"));
+    }
+    if property.get("secret").and_then(Value::as_bool) == Some(true) && kind != "string" {
+        return Err(format!("`{name}`: `secret` só vale em texto"));
+    }
+    if let Some(pattern) = property.get("pattern") {
+        let pattern = pattern
+            .as_str()
+            .ok_or_else(|| format!("o `pattern` de `{name}` precisa ser texto"))?;
+        Regex::new(pattern)
+            .map_err(|error| format!("o `pattern` de `{name}` é inválido: {error}"))?;
+    }
+    Ok(())
+}
+
+fn join(path: &str, name: &str) -> String {
+    if path.is_empty() {
+        name.to_owned()
+    } else {
+        format!("{path}.{name}")
+    }
 }
 
 /// Valida `params` e devolve o objeto com os valores padrão aplicados.
@@ -108,6 +181,22 @@ pub fn validate(schema: Option<&Value>, params: &Value) -> Result<Value, Vec<Str
             Err(vec!["esta ação não recebe parâmetros".into()])
         };
     };
+    let mut errors = Vec::new();
+    let output = validate_object(schema, given, "", false, &mut errors);
+    if errors.is_empty() {
+        Ok(Value::Object(output))
+    } else {
+        Err(errors)
+    }
+}
+
+fn validate_object(
+    schema: &Value,
+    given: &Map<String, Value>,
+    path: &str,
+    is_item: bool,
+    errors: &mut Vec<String>,
+) -> Map<String, Value> {
     let properties = schema
         .get("properties")
         .and_then(Value::as_object)
@@ -119,39 +208,93 @@ pub fn validate(schema: Option<&Value>, params: &Value) -> Result<Value, Vec<Str
         .map(|list| list.iter().filter_map(Value::as_str).collect())
         .unwrap_or_default();
 
-    let mut errors = Vec::new();
     let mut output = Map::new();
     for key in given.keys() {
+        if is_item && key == ITEM_ID {
+            continue;
+        }
         if !properties.contains_key(key) {
-            errors.push(format!("parâmetro desconhecido: `{key}`"));
+            errors.push(format!("parâmetro desconhecido: `{}`", join(path, key)));
+        }
+    }
+    if is_item {
+        if let Some(id) = given.get(ITEM_ID).and_then(Value::as_str) {
+            output.insert(ITEM_ID.to_owned(), Value::String(id.to_owned()));
         }
     }
     for (name, property) in &properties {
+        let full = join(path, name);
         let value = given
             .get(name)
             .filter(|value| !value.is_null())
             .or_else(|| property.get("default"));
         let Some(value) = value else {
             if required.contains(&name.as_str()) {
-                errors.push(format!("`{name}` é obrigatório"));
+                errors.push(format!("`{full}` é obrigatório"));
             }
             continue;
         };
-        match check_property(name, property, value) {
-            Ok(value) => {
-                output.insert(name.clone(), value);
-            }
-            Err(error) => errors.push(error),
+        if let Some(value) = check_value(&full, property, value, errors) {
+            output.insert(name.clone(), value);
         }
     }
-    if errors.is_empty() {
-        Ok(Value::Object(output))
-    } else {
-        Err(errors)
-    }
+    output
 }
 
-fn check_property(name: &str, property: &Value, value: &Value) -> Result<Value, String> {
+fn check_value(
+    name: &str,
+    property: &Value,
+    value: &Value,
+    errors: &mut Vec<String>,
+) -> Option<Value> {
+    if property.get("type").and_then(Value::as_str) != Some("array") {
+        return match check_scalar(name, property, value) {
+            Ok(value) => Some(value),
+            Err(error) => {
+                errors.push(error);
+                None
+            }
+        };
+    }
+    let Some(list) = value.as_array() else {
+        errors.push(format!("`{name}` precisa ser uma lista"));
+        return None;
+    };
+    let count = list.len() as u64;
+    if let Some(min) = property.get("minItems").and_then(Value::as_u64) {
+        if count < min {
+            errors.push(format!("`{name}` precisa de ao menos {min} item(ns)"));
+        }
+    }
+    if let Some(max) = property.get("maxItems").and_then(Value::as_u64) {
+        if count > max {
+            errors.push(format!("`{name}` aceita no máximo {max} item(ns)"));
+        }
+    }
+    let items = property.get("items").cloned().unwrap_or(Value::Null);
+    let objects = items.get("type").and_then(Value::as_str) == Some("object");
+    let mut output = Vec::with_capacity(list.len());
+    for (index, item) in list.iter().enumerate() {
+        let item_name = format!("{name}[{}]", index + 1);
+        if objects {
+            let Some(map) = item.as_object() else {
+                errors.push(format!("`{item_name}` precisa ser um objeto"));
+                continue;
+            };
+            output.push(Value::Object(validate_object(
+                &items, map, &item_name, true, errors,
+            )));
+        } else {
+            match check_scalar(&item_name, &items, item) {
+                Ok(value) => output.push(value),
+                Err(error) => errors.push(error),
+            }
+        }
+    }
+    Some(Value::Array(output))
+}
+
+fn check_scalar(name: &str, property: &Value, value: &Value) -> Result<Value, String> {
     let kind = property
         .get("type")
         .and_then(Value::as_str)
@@ -205,6 +348,73 @@ fn check_property(name: &str, property: &Value, value: &Value) -> Result<Value, 
     Ok(value)
 }
 
+/// Onde moram os campos secretos de um esquema.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SecretField {
+    /// Propriedade da raiz.
+    Root(String),
+    /// Campo de cada item de uma lista de objetos.
+    Item { list: String, field: String },
+}
+
+fn is_secret(property: &Value) -> bool {
+    property.get("secret").and_then(Value::as_bool) == Some(true)
+}
+
+/// Os campos `secret: true` do esquema.
+#[must_use]
+pub fn secret_fields(schema: Option<&Value>) -> Vec<SecretField> {
+    let Some(properties) = schema
+        .and_then(|schema| schema.get("properties"))
+        .and_then(Value::as_object)
+    else {
+        return Vec::new();
+    };
+    let mut fields = Vec::new();
+    for (name, property) in properties {
+        if is_secret(property) {
+            fields.push(SecretField::Root(name.clone()));
+        }
+        if let Some(items) = property
+            .get("items")
+            .and_then(|items| items.get("properties"))
+            .and_then(Value::as_object)
+        {
+            for (field, item_property) in items {
+                if is_secret(item_property) {
+                    fields.push(SecretField::Item {
+                        list: name.clone(),
+                        field: field.clone(),
+                    });
+                }
+            }
+        }
+    }
+    fields
+}
+
+/// Listas de objetos do esquema (os itens que ganham `id`).
+#[must_use]
+pub fn object_lists(schema: Option<&Value>) -> Vec<String> {
+    schema
+        .and_then(|schema| schema.get("properties"))
+        .and_then(Value::as_object)
+        .map(|properties| {
+            properties
+                .iter()
+                .filter(|(_, property)| {
+                    property
+                        .get("items")
+                        .and_then(|items| items.get("type"))
+                        .and_then(Value::as_str)
+                        == Some("object")
+                })
+                .map(|(name, _)| name.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Propriedades `string` sem `pattern` nem `enum` — as que podem carregar
 /// injeção para uma linha de shell. Usado pela revisão estática.
 #[must_use]
@@ -243,9 +453,33 @@ mod tests {
         })
     }
 
+    fn wifi() -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "country": { "type": "string", "pattern": "[A-Z]{2}", "default": "BR" },
+                "mesh_key": { "type": "string", "secret": true },
+                "networks": {
+                    "type": "array", "maxItems": 2,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "ssid": { "type": "string", "minLength": 1 },
+                            "key": { "type": "string", "secret": true },
+                            "band_5g": { "type": "boolean", "default": true }
+                        },
+                        "required": ["ssid"]
+                    }
+                },
+                "skip": { "type": "array", "items": { "type": "string", "maxLength": 32 } }
+            }
+        })
+    }
+
     #[test]
     fn esquema_suportado_passa_e_desconhecido_e_recusado() {
         assert!(validate_schema(&schema()).is_ok());
+        assert!(validate_schema(&wifi()).is_ok());
         assert!(validate_schema(&json!({"type": "array"})).is_err());
         assert!(validate_schema(&json!({
             "type": "object",
@@ -259,12 +493,91 @@ mod tests {
     }
 
     #[test]
+    fn ordem_dos_campos_so_cita_campos_do_esquema() {
+        let ordenado = json!({ "type": "object", "order": ["b", "a"],
+            "properties": { "a": { "type": "string" }, "b": { "type": "string" } } });
+        assert!(validate_schema(&ordenado).is_ok());
+        let fantasma = json!({ "type": "object", "order": ["c"],
+            "properties": { "a": { "type": "string" } } });
+        assert!(validate_schema(&fantasma)
+            .unwrap_err()
+            .contains("\"order\""));
+        let item = json!({ "type": "object", "properties": { "l": { "type": "array",
+            "items": { "type": "object", "order": [1],
+                "properties": { "a": { "type": "string" } } } } } });
+        assert!(validate_schema(&item).is_err());
+    }
+
+    #[test]
+    fn lista_dentro_de_lista_id_reservado_e_secret_fora_de_texto_sao_recusados() {
+        let aninhada = json!({ "type": "object", "properties": { "a": { "type": "array",
+            "items": { "type": "object", "properties": { "b": { "type": "array",
+                "items": { "type": "string" } } } } } } });
+        assert!(validate_schema(&aninhada)
+            .unwrap_err()
+            .contains("lista dentro de lista"));
+        let com_id = json!({ "type": "object", "properties": { "a": { "type": "array",
+            "items": { "type": "object", "properties": { "id": { "type": "string" } } } } } });
+        assert!(validate_schema(&com_id).unwrap_err().contains("reservado"));
+        let segredo = json!({ "type": "object", "properties": {
+            "n": { "type": "integer", "secret": true } } });
+        assert!(validate_schema(&segredo).is_err());
+    }
+
+    #[test]
     fn aplica_padrao_e_valida_tipos() {
         let ok = validate(Some(&schema()), &json!({"name": "luci-app-sqm"})).unwrap();
         assert_eq!(ok, json!({"name": "luci-app-sqm", "count": 3}));
         assert!(validate(Some(&schema()), &json!({})).is_err());
         assert!(validate(Some(&schema()), &json!({"name": "x", "count": "3"})).is_err());
         assert!(validate(Some(&schema()), &json!({"name": "x", "extra": 1})).is_err());
+    }
+
+    #[test]
+    fn listas_validam_cada_item_com_caminho_legivel() {
+        let ok = validate(
+            Some(&wifi()),
+            &json!({ "networks": [ { "id": "a1", "ssid": "Loja" } ], "skip": ["Visitantes"] }),
+        )
+        .unwrap();
+        assert_eq!(
+            ok["networks"][0],
+            json!({ "id": "a1", "ssid": "Loja", "band_5g": true })
+        );
+        assert_eq!(ok["country"], "BR");
+
+        let errors = validate(
+            Some(&wifi()),
+            &json!({ "networks": [ { "ssid": "" }, { "ssid": "B", "x": 1 }, { "ssid": "C" } ] }),
+        )
+        .unwrap_err();
+        assert!(
+            errors.iter().any(|e| e.contains("networks[1].ssid")),
+            "{errors:?}"
+        );
+        assert!(
+            errors.iter().any(|e| e.contains("networks[2].x")),
+            "{errors:?}"
+        );
+        assert!(
+            errors.iter().any(|e| e.contains("no máximo 2")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn campos_secretos_e_listas_de_objetos_sao_encontrados() {
+        assert_eq!(
+            secret_fields(Some(&wifi())),
+            vec![
+                SecretField::Root("mesh_key".into()),
+                SecretField::Item {
+                    list: "networks".into(),
+                    field: "key".into()
+                },
+            ]
+        );
+        assert_eq!(object_lists(Some(&wifi())), vec!["networks".to_string()]);
     }
 
     #[test]

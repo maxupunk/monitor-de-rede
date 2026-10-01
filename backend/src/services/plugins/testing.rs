@@ -15,13 +15,16 @@ use tokio_util::sync::CancellationToken;
 use ts_rs::TS;
 
 use super::{
+    builtin,
     gate::AllowAll,
     manifest::TransportKind,
     package::{self, FunctionalTest, PluginPackage, UnitTest},
     params,
     runtime::{
-        self, AccessProfile, Credentials, DeviceInfo, ExecutionContext, Limits, TranscriptEntry,
+        self, AccessProfile, Credentials, DeviceInfo, ExecutionContext, Extras, LibraryPlugin,
+        Limits, TranscriptEntry,
     },
+    settings,
     transport::{fake::FakeTransport, Login},
 };
 
@@ -71,12 +74,32 @@ fn test_credentials() -> Credentials {
     }
 }
 
-/// Roda todos os testes unitários do pacote.
+/// Os plugins embutidos que o pacote usa (`uses`).
+#[must_use]
+pub fn builtin_library(package: &PluginPackage) -> Vec<LibraryPlugin> {
+    builtin::packages()
+        .into_iter()
+        .filter(|other| package.manifest.uses.contains(&other.manifest.slug))
+        .map(|other| LibraryPlugin {
+            slug: other.manifest.slug.clone(),
+            manifest: other.manifest,
+            script: other.script,
+        })
+        .collect()
+}
+
+/// Roda todos os testes unitários do pacote, com os embutidos como
+/// biblioteca de `uses`.
 pub async fn run_unit_tests(package: &PluginPackage) -> TestReport {
+    run_unit_tests_with(package, &builtin_library(package)).await
+}
+
+/// Roda todos os testes unitários do pacote com a biblioteca dada.
+pub async fn run_unit_tests_with(package: &PluginPackage, library: &[LibraryPlugin]) -> TestReport {
     let problems = package::validate(package);
     let mut cases = Vec::with_capacity(package.tests.unit.len());
     for (index, test) in package.tests.unit.iter().enumerate() {
-        cases.push(run_unit_test(package, test, index).await);
+        cases.push(run_unit_test(package, test, index, library).await);
     }
     let failed =
         u32::try_from(cases.iter().filter(|case| !case.passed).count()).unwrap_or(u32::MAX);
@@ -89,7 +112,12 @@ pub async fn run_unit_tests(package: &PluginPackage) -> TestReport {
     }
 }
 
-async fn run_unit_test(package: &PluginPackage, test: &UnitTest, index: usize) -> TestCaseResult {
+async fn run_unit_test(
+    package: &PluginPackage,
+    test: &UnitTest,
+    index: usize,
+    library: &[LibraryPlugin],
+) -> TestCaseResult {
     let name = test
         .name
         .clone()
@@ -103,6 +131,22 @@ async fn run_unit_test(package: &PluginPackage, test: &UnitTest, index: usize) -
             output,
             transcript,
         };
+    let effective = settings::for_test(&package.manifest, test.settings.as_ref());
+    if let Some(reduce) = package
+        .manifest
+        .fleet_action(&test.action)
+        .and_then(|action| action.reduce.clone())
+    {
+        let outcome = runtime::reduce(
+            &package.script,
+            &reduce,
+            test.input.clone().unwrap_or_else(|| Value::Array(vec![])),
+            effective.value,
+            effective.secrets,
+        )
+        .await;
+        return judge(test, name, outcome, Vec::new());
+    }
     let Some(action) = package.manifest.action(&test.action) else {
         return failed(format!("ação inexistente: {}", test.action), None, vec![]);
     };
@@ -126,6 +170,11 @@ async fn run_unit_test(package: &PluginPackage, test: &UnitTest, index: usize) -
         }
     };
     let context = ExecutionContext {
+        extras: Extras {
+            settings: effective.value,
+            secrets: effective.secrets,
+            library: library.to_vec(),
+        },
         device: DeviceInfo {
             id: 0,
             name: "equipamento de teste".into(),
@@ -154,8 +203,26 @@ async fn run_unit_test(package: &PluginPackage, test: &UnitTest, index: usize) -
         },
     };
     let outcome = runtime::execute(&package.script, &action.id, params, context).await;
-    let transcript = outcome.transcript;
-    match (&test.expect_error, outcome.output) {
+    judge(test, name, outcome.output, outcome.transcript)
+}
+
+/// Confere o desfecho contra as expectativas do teste.
+fn judge(
+    test: &UnitTest,
+    name: String,
+    output: Result<Value, String>,
+    transcript: Vec<TranscriptEntry>,
+) -> TestCaseResult {
+    let failed =
+        |message: String, output: Option<Value>, transcript: Vec<TranscriptEntry>| TestCaseResult {
+            name: name.clone(),
+            action: test.action.clone(),
+            passed: false,
+            message: Some(message),
+            output,
+            transcript,
+        };
+    match (&test.expect_error, output) {
         (Some(expected), Err(error)) if error.contains(expected.as_str()) => TestCaseResult {
             name,
             action: test.action.clone(),

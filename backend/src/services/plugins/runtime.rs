@@ -140,7 +140,27 @@ pub struct TranscriptEntry {
 
 pub type Observer = Arc<dyn Fn(&TranscriptEntry) + Send + Sync>;
 
+/// Outro plugin que este pode chamar (`device.use_plugin`).
+#[derive(Debug, Clone)]
+pub struct LibraryPlugin {
+    pub slug: String,
+    pub manifest: super::manifest::PluginManifest,
+    pub script: String,
+}
+
+/// O que a execução recebe além do equipamento: configuração guardada,
+/// segredos a mascarar e plugins reaproveitáveis.
+#[derive(Debug, Clone, Default)]
+pub struct Extras {
+    /// `{ "fleet": {…}, "device": {…} }` — `device.settings` no script.
+    pub settings: Value,
+    /// Segredos da configuração (senha do Wi-Fi), mascarados na saída.
+    pub secrets: Vec<String>,
+    pub library: Vec<LibraryPlugin>,
+}
+
 pub struct ExecutionContext {
+    pub extras: Extras,
     pub device: DeviceInfo,
     pub transports: Vec<TransportKind>,
     pub action_effect: Effect,
@@ -206,9 +226,71 @@ pub async fn execute(
         Ok(result) => result,
         Err(error) => Err(format!("a execução do script falhou: {error}")),
     };
-    let output = output.map_err(|message| inner.mask(&message));
+    let output = match output {
+        Ok(value) => Ok(inner.mask_value(value)),
+        Err(message) => Err(inner.mask(&message)),
+    };
     let transcript = inner.take_transcript();
     ExecutionOutcome { output, transcript }
+}
+
+/// Roda a função `reduce` de uma ação de frota: recebe o resultado de todos
+/// os membros e a configuração, devolve o consolidado. Pura — o `device`
+/// não existe aqui, e qualquer tentativa de acesso falha.
+///
+/// # Errors
+///
+/// Erro de compilação ou de execução do script, já em texto.
+pub async fn reduce(
+    script: &str,
+    function: &str,
+    results: Value,
+    settings: Value,
+    secrets: Vec<String>,
+) -> Result<Value, String> {
+    let script = script.to_owned();
+    let function = function.to_owned();
+    let output = tokio::task::spawn_blocking(move || {
+        let engine = sandboxed_engine(Limits::default(), None);
+        let ast: AST = engine.compile(&script).map_err(|error| error.to_string())?;
+        let results = rhai::serde::to_dynamic(&results).map_err(|error| error.to_string())?;
+        let settings = rhai::serde::to_dynamic(&settings).map_err(|error| error.to_string())?;
+        let mut scope = Scope::new();
+        let value: Dynamic = engine
+            .call_fn(&mut scope, &ast, &function, (results, settings))
+            .map_err(|error| describe_error(&error))?;
+        rhai::serde::from_dynamic::<Value>(&value).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("o cálculo do script falhou: {error}"))??;
+    Ok(mask_json(output, &secrets))
+}
+
+fn mask_text(text: &str, secrets: &[String]) -> String {
+    secrets.iter().fold(text.to_owned(), |text, secret| {
+        text.replace(secret, "********")
+    })
+}
+
+fn mask_json(value: Value, secrets: &[String]) -> Value {
+    if secrets.is_empty() {
+        return value;
+    }
+    match value {
+        Value::String(text) => Value::String(mask_text(&text, secrets)),
+        Value::Array(items) => Value::Array(
+            items
+                .into_iter()
+                .map(|item| mask_json(item, secrets))
+                .collect(),
+        ),
+        Value::Object(map) => Value::Object(
+            map.into_iter()
+                .map(|(key, item)| (key, mask_json(item, secrets)))
+                .collect(),
+        ),
+        other => other,
+    }
 }
 
 fn describe_error(error: &EvalAltResult) -> String {
@@ -271,6 +353,8 @@ fn sandboxed_engine(limits: Limits, inner: Option<Arc<Inner>>) -> Engine {
         .register_fn("get", DeviceHandle::get)
         .register_fn("post_form", DeviceHandle::post_form)
         .register_fn("post_json", DeviceHandle::post_json)
+        .register_get("settings", DeviceHandle::settings)
+        .register_fn("use_plugin", DeviceHandle::use_plugin)
         .register_fn("log", DeviceHandle::log);
     engine
 }
@@ -289,6 +373,13 @@ fn compile_regex(pattern: &str) -> RhaiResult<Regex> {
 }
 
 fn register_utils(engine: &mut Engine) {
+    // Identificador estável derivado de um texto (nome de seção UCI, mobility
+    // domain do 802.11r): o mesmo em todo equipamento, sem guardar nada.
+    engine.register_fn("hash_hex", |text: &str, length: i64| -> String {
+        let digest = crate::services::shared::crypto::sha256_hex(text);
+        let length = usize::try_from(length.clamp(1, 64)).unwrap_or(8);
+        digest[..length].to_owned()
+    });
     engine.register_fn(
         "regex_match",
         |text: &str, pattern: &str| -> RhaiResult<bool> {
@@ -324,6 +415,33 @@ fn register_utils(engine: &mut Engine) {
             .map(|word| Dynamic::from(word.to_owned()))
             .collect()
     });
+    // Todos os grupos de captura (sem o 0), ou `()` quando não casa.
+    engine.register_fn(
+        "regex_groups",
+        |text: &str, pattern: &str| -> RhaiResult<Dynamic> {
+            let re = compile_regex(pattern)?;
+            Ok(re.captures(text).map_or(Dynamic::UNIT, |captures| {
+                let groups: rhai::Array = captures
+                    .iter()
+                    .skip(1)
+                    .map(|group| {
+                        group.map_or(Dynamic::UNIT, |m| Dynamic::from(m.as_str().to_owned()))
+                    })
+                    .collect();
+                Dynamic::from_array(groups)
+            }))
+        },
+    );
+    engine.register_fn(
+        "join_with",
+        |items: rhai::Array, separator: &str| -> String {
+            items
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(separator)
+        },
+    );
     engine.register_fn("lines", |text: &str| -> rhai::Array {
         text.lines()
             .map(str::trim)
@@ -398,11 +516,14 @@ struct Inner {
     transcript: Mutex<Vec<TranscriptEntry>>,
     cookies: Mutex<BTreeMap<String, String>>,
     deadline: Mutex<Instant>,
+    /// Dentro de um `use_plugin`: o plugin usado não usa outro.
+    nested: std::sync::atomic::AtomicBool,
 }
 
 impl Inner {
     fn new(context: ExecutionContext) -> Self {
-        let secrets = context.credentials.secrets();
+        let mut secrets = context.credentials.secrets();
+        secrets.extend(context.extras.secrets.iter().cloned());
         let deadline = Instant::now() + context.limits.deadline;
         Self {
             context,
@@ -411,7 +532,12 @@ impl Inner {
             transcript: Mutex::default(),
             cookies: Mutex::default(),
             deadline: Mutex::new(deadline),
+            nested: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    fn mask_value(&self, value: Value) -> Value {
+        mask_json(value, &self.secrets)
     }
 
     fn mask(&self, text: &str) -> String {
@@ -906,6 +1032,55 @@ impl DeviceHandle {
     fn log(&mut self, text: &str) {
         self.0.log(text);
     }
+
+    fn settings(&mut self) -> RhaiResult<Dynamic> {
+        rhai::serde::to_dynamic(&self.0.context.extras.settings)
+    }
+
+    /// Chama a ação de outro plugin (declarado em `uses`) no mesmo
+    /// equipamento, pelas mesmas portas: o efeito não pode passar o da ação
+    /// atual, e os acessos entram no mesmo transcript.
+    fn use_plugin(&mut self, slug: &str, action: &str, params: Map) -> RhaiResult<Dynamic> {
+        use std::sync::atomic::Ordering;
+        let inner = self.0.clone();
+        let Some(library) = inner
+            .context
+            .extras
+            .library
+            .iter()
+            .find(|plugin| plugin.slug == slug)
+            .cloned()
+        else {
+            return fail(format!(
+                "o plugin `{slug}` não está disponível: declare-o em `uses` e mantenha-o ativo"
+            ));
+        };
+        let Some(declared) = library.manifest.action(action).cloned() else {
+            return fail(format!("o plugin `{slug}` não tem a ação `{action}`"));
+        };
+        if declared.effect > inner.context.action_effect {
+            return fail(format!(
+                "`{slug}.{action}` altera o equipamento; a ação atual é de leitura"
+            ));
+        }
+        let params: Value = rhai::serde::from_dynamic(&Dynamic::from_map(params))?;
+        let params = super::params::validate(declared.params.as_ref(), &params)
+            .or_else(|errors| fail(format!("`{slug}.{action}`: {}", errors.join("; "))))?;
+        if inner.nested.swap(true, Ordering::SeqCst) {
+            return fail("um plugin usado por outro não pode usar um terceiro");
+        }
+        let engine = sandboxed_engine(inner.context.limits, Some(inner.clone()));
+        let result = engine
+            .compile(&library.script)
+            .map_err(|error| Box::<EvalAltResult>::from(error.to_string()))
+            .and_then(|ast| {
+                let params = rhai::serde::to_dynamic(&params)?;
+                let mut scope = Scope::new();
+                engine.call_fn::<Dynamic>(&mut scope, &ast, &declared.id, (self.clone(), params))
+            });
+        inner.nested.store(false, Ordering::SeqCst);
+        result.or_else(|error| fail(format!("`{slug}.{action}`: {}", describe_error(&error))))
+    }
 }
 
 #[cfg(test)]
@@ -918,6 +1093,7 @@ mod tests {
 
     fn context(fixtures: Vec<Fixture>, effect: Effect) -> ExecutionContext {
         ExecutionContext {
+            extras: Extras::default(),
             device: DeviceInfo {
                 id: 1,
                 name: "Roteador".into(),
@@ -1027,9 +1203,105 @@ mod tests {
             context(vec![fixture], Effect::Read),
         )
         .await;
-        assert_eq!(outcome.output.unwrap(), json!("ok s3nh4"));
+        // O equipamento ecoou a senha: ela não chega à tela nem pela saída.
+        assert_eq!(outcome.output.unwrap(), json!("ok ********"));
         assert!(outcome.transcript[0].output.contains("********"));
         assert!(!outcome.transcript[0].output.contains("s3nh4"));
+    }
+
+    fn library(slug: &str, manifest: serde_json::Value, script: &str) -> LibraryPlugin {
+        LibraryPlugin {
+            slug: slug.into(),
+            manifest: serde_json::from_value(manifest).unwrap(),
+            script: script.into(),
+        }
+    }
+
+    fn pacotes() -> LibraryPlugin {
+        library(
+            "pacotes",
+            json!({ "slug": "pacotes", "name": "P", "version": "1.0.0", "transports": ["ssh"],
+                    "actions": [
+                        { "id": "detect", "title": "D", "effect": "read" },
+                        { "id": "listar", "title": "L", "effect": "read" },
+                        { "id": "instalar", "title": "I", "effect": "write",
+                          "params": { "type": "object", "properties": {
+                              "name": { "type": "string", "pattern": "[a-z]+" } } } } ] }),
+            "fn detect(device, params) { 1 }
+             fn listar(device, params) { device.run(\"opkg list-installed\") }
+             fn instalar(device, params) { device.run(\"opkg install \" + params.name) }",
+        )
+    }
+
+    #[tokio::test]
+    async fn use_plugin_reaproveita_outro_plugin_pelas_mesmas_portas() {
+        let script = r#"fn detect(device, params) { device.use_plugin("pacotes", "listar", #{}) }"#;
+        let mut ctx = context(
+            vec![ssh("opkg list-installed", "wpad-basic - 1\n")],
+            Effect::Read,
+        );
+        ctx.extras.library = vec![pacotes()];
+        let outcome = execute(script, "detect", json!({}), ctx).await;
+        assert_eq!(outcome.output.unwrap(), json!("wpad-basic - 1\n"));
+        assert_eq!(outcome.transcript[0].request, "opkg list-installed");
+
+        // A ação de leitura não pode usar uma ação de escrita do outro plugin.
+        let escrita = r#"fn detect(device, params) { device.use_plugin("pacotes", "instalar", #{ name: "x" }) }"#;
+        let mut ctx = context(vec![], Effect::Read);
+        ctx.extras.library = vec![pacotes()];
+        let error = execute(escrita, "detect", json!({}), ctx)
+            .await
+            .output
+            .unwrap_err();
+        assert!(error.contains("altera o equipamento"), "{error}");
+
+        let ausente = r#"fn detect(device, params) { device.use_plugin("outro", "x", #{}) }"#;
+        let error = execute(ausente, "detect", json!({}), context(vec![], Effect::Read))
+            .await
+            .output
+            .unwrap_err();
+        assert!(error.contains("não está disponível"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn configuracao_chega_ao_script_e_segredo_sai_mascarado() {
+        let script = r#"fn detect(device, params) {
+            let s = device.settings;
+            #{ ssid: s.fleet.ssid, key: s.fleet.key, id: hash_hex(s.fleet.ssid, 4) }
+        }"#;
+        let mut ctx = context(vec![], Effect::Read);
+        ctx.extras.settings =
+            json!({ "fleet": { "ssid": "Loja", "key": "senha-wifi" }, "device": {} });
+        ctx.extras.secrets = vec!["senha-wifi".into()];
+        let output = execute(script, "detect", json!({}), ctx)
+            .await
+            .output
+            .unwrap();
+        assert_eq!(output["ssid"], "Loja");
+        assert_eq!(output["key"], "********");
+        assert_eq!(output["id"].as_str().unwrap().len(), 4);
+    }
+
+    #[tokio::test]
+    async fn reduce_e_puro_e_consolida_os_membros() {
+        let script = r#"
+            fn detect(device, params) { 1 }
+            fn somar(results, settings) {
+                let total = 0;
+                for r in results { total += r.output; }
+                #{ total: total, alvo: settings.fleet.alvo }
+            }
+            fn espiar(results, settings) { device.run("uptime") }
+        "#;
+        let results = json!([ { "deviceId": 1, "output": 2 }, { "deviceId": 2, "output": 3 } ]);
+        let settings = json!({ "fleet": { "alvo": 5 } });
+        let total = reduce(script, "somar", results.clone(), settings.clone(), vec![])
+            .await
+            .unwrap();
+        assert_eq!(total, json!({ "total": 5, "alvo": 5 }));
+        assert!(reduce(script, "espiar", results, settings, vec![])
+            .await
+            .is_err());
     }
 
     #[tokio::test]
@@ -1115,6 +1387,21 @@ mod tests {
         ctx.transport = Arc::new(Echo);
         let outcome = execute(script, "detect", json!({}), ctx).await;
         assert_eq!(outcome.output.unwrap(), json!("sysauth=abc"));
+    }
+
+    #[tokio::test]
+    async fn grupos_de_regex_e_juncao() {
+        let script = r#"fn detect(device, params) {
+            let g = regex_groups("wireless.radio0.channel='36'", "^wireless\\.([^.=]+)\\.([^=]+)=(.*)$");
+            #{ groups: g, none: regex_groups("x", "^y$"), joined: join_with(["a", 1, "b"], ", ") }
+        }"#;
+        let output = execute(script, "detect", json!({}), context(vec![], Effect::Read))
+            .await
+            .output
+            .unwrap();
+        assert_eq!(output["groups"], json!(["radio0", "channel", "'36'"]));
+        assert_eq!(output["none"], Value::Null);
+        assert_eq!(output["joined"], "a, 1, b");
     }
 
     #[test]

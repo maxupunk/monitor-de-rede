@@ -793,6 +793,7 @@ async fn run_plugin(
         user_id: Some(user_id),
         reason: args.text("reason"),
         approval,
+        batch_id: None,
     };
     let prepared = match runs::prepare(ctx, spec).await {
         Ok(prepared) => prepared,

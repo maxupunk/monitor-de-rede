@@ -73,10 +73,25 @@ cada acesso ao equipamento (ou ligando, ciente do risco, um modo automático).
    validade de 2 h e botão "Parar". A chave da conversa é aleatória por sessão
    de chat — sequencial seria reaproveitada depois de recarregar a página.
 
+9. **Aplicativos (frota)** — adendo. Um plugin declara onde aparece
+   (`surfaces`: `device`, `fleet` ou os dois). A frota são os equipamentos
+   onde ele está instalado, sem tabela de grupos à parte; o acesso de cada um
+   continua em `device_credentials`. O **estado desejado** fica no sistema
+   (`plugin_settings`: `fleet` e `device`, com segredos cifrados), e o script
+   reconcilia: lê, compara, mostra a diferença, aplica com cópia e volta atrás.
+   Ação de frota é um lote (`plugin_batches`) de execuções comuns
+   (`plugin_runs.batch_id`), com concorrência limitada, andamento pelo SSE e um
+   `reduce` puro no fim — o plano de canais, por exemplo, só **sugere**
+   (`settings_patch`) e o operador aceita. `uses` + `device.use_plugin`
+   reaproveita a ação de outro plugin no mesmo equipamento, sem escalar efeito.
+   Alternativa descartada: o equipamento como fonte da verdade (sem estado
+   guardado) não detecta divergência nem permite pré-visualizar a frota.
+
 ## Consequências
 
 - Quatro tabelas novas (`plugins`, `device_credentials`, `plugin_runs`,
-  `plugin_auto_accept`) e `devices.firmware_version`, gravado pelo `detect`.
+  `plugin_auto_accept`) e `devices.firmware_version`, gravado pelo `detect`;
+  depois `device_plugin_installs`, `plugin_settings` e `plugin_batches`.
 - Guardar senha de equipamento passou a ser possível — é escolha por
   credencial, cifrada, e nunca volta para a tela nem para a IA. A ativação de
   syslog continua sem guardar.

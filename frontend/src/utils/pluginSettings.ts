@@ -1,0 +1,171 @@
+/**
+ * Formulários gerados a partir do esquema de um plugin — parâmetros de ação e
+ * configuração guardada. O backend valida de verdade; aqui as regras só dão o
+ * retorno imediato na tela. Um lugar só para os dois usos.
+ */
+
+export type Schema = Record<string, unknown>
+export type Rule = (value: unknown) => boolean | string
+
+/** Valor que o backend devolve no lugar de um segredo guardado. */
+export const SECRET_MASK = '********'
+
+export interface SchemaField {
+  name: string
+  kind: 'string' | 'integer' | 'number' | 'boolean' | 'list' | 'objects'
+  label: string
+  hint?: string
+  options?: unknown[]
+  secret: boolean
+  required: boolean
+  rules: Rule[]
+  /** Esquema do item (listas de objetos) ou da string (listas simples). */
+  items?: Schema
+  schema: Schema
+}
+
+function asSchema(value: unknown): Schema {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Schema)
+    : {}
+}
+
+export function propertiesOf(schema: unknown): Record<string, Schema> {
+  const properties = asSchema(schema).properties
+  return typeof properties === 'object' && properties !== null
+    ? (properties as Record<string, Schema>)
+    : {}
+}
+
+export function requiredOf(schema: unknown): string[] {
+  const list = asSchema(schema).required
+  return Array.isArray(list) ? list.filter((item): item is string => typeof item === 'string') : []
+}
+
+/** Regras de tela para um campo simples. */
+export function rulesFor(schema: Schema, required: boolean): Rule[] {
+  const rules: Rule[] = []
+  if (required) {
+    rules.push((value) => (value !== '' && value !== null && value !== undefined) || 'Obrigatório')
+  }
+  if (typeof schema.pattern === 'string') {
+    const pattern = new RegExp(`^(?:${schema.pattern})$`)
+    rules.push(
+      (value) =>
+        value === '' ||
+        value === null ||
+        value === undefined ||
+        value === SECRET_MASK ||
+        pattern.test(String(value)) ||
+        'Formato inválido'
+    )
+  }
+  if (typeof schema.minLength === 'number') {
+    const min = schema.minLength
+    rules.push((value) => !value || String(value).length >= min || `Ao menos ${min} caracteres`)
+  }
+  if (typeof schema.maxLength === 'number') {
+    const max = schema.maxLength
+    rules.push((value) => String(value ?? '').length <= max || `No máximo ${max} caracteres`)
+  }
+  if (typeof schema.minimum === 'number') {
+    const min = schema.minimum
+    rules.push((value) => value === '' || value === null || Number(value) >= min || `Mínimo ${min}`)
+  }
+  if (typeof schema.maximum === 'number') {
+    const max = schema.maximum
+    rules.push((value) => value === '' || value === null || Number(value) <= max || `Máximo ${max}`)
+  }
+  return rules
+}
+
+export function fieldsOf(schema: unknown): SchemaField[] {
+  const required = requiredOf(schema)
+  const fields = Object.entries(propertiesOf(schema)).map(([name, property]): SchemaField => {
+    const type = String(property.type ?? 'string')
+    const items = asSchema(property.items)
+    const kind: SchemaField['kind'] =
+      type === 'array'
+        ? items.type === 'object'
+          ? 'objects'
+          : 'list'
+        : ((['integer', 'number', 'boolean'].includes(type)
+            ? type
+            : 'string') as SchemaField['kind'])
+    return {
+      name,
+      kind,
+      label: typeof property.title === 'string' ? property.title : name,
+      hint: typeof property.description === 'string' ? property.description : undefined,
+      options: Array.isArray(property.enum) ? property.enum : undefined,
+      secret: property.secret === true,
+      required: required.includes(name),
+      rules:
+        kind === 'list' || kind === 'objects' ? [] : rulesFor(property, required.includes(name)),
+      items: kind === 'list' || kind === 'objects' ? items : undefined,
+      schema: property,
+    }
+  })
+  return sortByOrder(fields, asSchema(schema).order)
+}
+
+/**
+ * A ordem da tela vem de `order` (o JSON não guarda a ordem das chaves e o
+ * `jsonb` do PostgreSQL a reescreve); campo fora da lista vai para o fim.
+ */
+function sortByOrder(fields: SchemaField[], order: unknown): SchemaField[] {
+  if (!Array.isArray(order)) return fields
+  const position = (name: string) => {
+    const index = order.indexOf(name)
+    return index < 0 ? order.length : index
+  }
+  return [...fields].sort((a, b) => position(a.name) - position(b.name))
+}
+
+/** Um objeto com os valores padrão do esquema (item novo de uma lista). */
+export function defaultsOf(schema: unknown): Record<string, unknown> {
+  const value: Record<string, unknown> = {}
+  for (const field of fieldsOf(schema)) {
+    if (field.schema.default !== undefined) value[field.name] = field.schema.default
+    else if (field.kind === 'boolean') value[field.name] = false
+    else if (field.kind === 'list' || field.kind === 'objects') value[field.name] = []
+    else if (field.kind === 'string') value[field.name] = ''
+  }
+  return value
+}
+
+/** Rótulo de uma opção de `enum` (o vazio vira "manter"). */
+export function optionLabel(option: unknown): string {
+  return option === '' ? '(manter o atual)' : String(option)
+}
+
+/** Converte o que o formulário tem para o que o backend espera (também nos itens de lista). */
+export function normalizeValue(
+  schema: unknown,
+  value: Record<string, unknown>
+): Record<string, unknown> {
+  const output: Record<string, unknown> = { ...value }
+  for (const field of fieldsOf(schema)) {
+    const current = output[field.name]
+    if ((field.kind === 'integer' || field.kind === 'number') && current !== undefined) {
+      if (current === '' || current === null) delete output[field.name]
+      else output[field.name] = Number(current)
+    } else if (field.kind === 'objects' && Array.isArray(current)) {
+      output[field.name] = current.map((item) =>
+        typeof item === 'object' && item !== null && !Array.isArray(item)
+          ? normalizeValue(field.items, item as Record<string, unknown>)
+          : item
+      )
+    }
+  }
+  return output
+}
+
+/** Parâmetros de uma ação: valores convertidos, sem os campos vazios. */
+export function paramsOf(schema: unknown, value: Record<string, unknown>) {
+  return Object.fromEntries(
+    Object.entries(normalizeValue(schema, value)).filter(
+      ([, item]) => item !== '' && item !== null && item !== undefined
+    )
+  )
+}

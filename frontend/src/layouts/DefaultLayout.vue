@@ -269,6 +269,7 @@ import DiagnosticPlaybookDialog from '@/components/DiagnosticPlaybookDialog.vue'
 import AiChatDrawer from '@/components/ai/AiChatDrawer.vue'
 import PluginApprovalDialog from '@/components/plugins/PluginApprovalDialog.vue'
 import { useAiStore } from '@/stores/ai'
+import { usePluginAppsStore } from '@/stores/pluginApps'
 
 interface NavSubItem {
   title: string
@@ -293,6 +294,7 @@ const tracerouteDialog = ref(false)
 const speedTestDialog = ref(false)
 const playbookDialog = ref(false)
 const aiStore = useAiStore()
+const pluginAppsStore = usePluginAppsStore()
 const eventsStore = useEventsStore()
 const authStore = useAuthStore()
 const onboardingStore = useOnboardingStore()
@@ -409,6 +411,19 @@ const navItems = computed<NavItem[]>(() => [
       },
     ],
   },
+  ...(pluginAppsStore.apps.length > 0
+    ? [
+        {
+          title: 'Aplicativos',
+          icon: 'mdi-apps',
+          children: pluginAppsStore.apps.map((app) => ({
+            title: app.title,
+            icon: app.icon,
+            to: '/apps/' + app.id,
+          })),
+        },
+      ]
+    : []),
   {
     title: 'VPN WireGuard',
     icon: 'mdi-shield-lock-outline',
@@ -442,6 +457,7 @@ onMounted(() => {
   void authStore.fetchMe()
   eventsStore.connect()
   void onboardingStore.checkAndOpenIfNeeded()
+  void pluginAppsStore.fetchApps()
 })
 
 onUnmounted(() => {

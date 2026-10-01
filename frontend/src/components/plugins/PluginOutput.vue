@@ -1,9 +1,12 @@
 <template>
   <div class="plugin-output">
-    <v-table v-if="rows" density="compact" class="border rounded-lg">
+    <PluginReport v-if="kind === 'report'" :output="output" :labels="labels" />
+    <v-table v-else-if="rows" density="compact" class="border rounded-lg">
       <thead>
         <tr>
-          <th v-for="column in columns" :key="column" class="font-weight-bold">{{ column }}</th>
+          <th v-for="column in columns" :key="column" class="font-weight-bold">
+            {{ outputLabel(column, labels) }}
+          </th>
         </tr>
       </thead>
       <tbody>
@@ -20,7 +23,7 @@
         v-for="[key, value] in entries"
         :key="key"
         :title="cell(value)"
-        :subtitle="key"
+        :subtitle="outputLabel(key, labels)"
       ></v-list-item>
     </v-list>
 
@@ -31,10 +34,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { OutputKind } from '@/bindings/OutputKind'
+import { outputLabel, type OutputLabels } from '@/utils/pluginPresentation'
+import PluginReport from './PluginReport.vue'
 
 const props = defineProps<{
   output: unknown
   kind?: OutputKind
+  /** Títulos das chaves declarados pela ação (`labels`). */
+  labels?: OutputLabels
 }>()
 
 type Row = Record<string, unknown>

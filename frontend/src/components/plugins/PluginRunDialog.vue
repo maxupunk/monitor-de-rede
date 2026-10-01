@@ -39,7 +39,7 @@
           </v-alert>
           <template v-if="run.output !== null && run.output !== undefined">
             <div class="text-subtitle-2 font-weight-bold mb-1">Resposta do equipamento</div>
-            <PluginOutput :output="run.output" :kind="kind" class="mb-4" />
+            <PluginOutput :output="run.output" :kind="kind" :labels="labels" class="mb-4" />
           </template>
           <v-expansion-panels variant="accordion">
             <v-expansion-panel>
@@ -86,6 +86,7 @@ const props = defineProps<{
   runId: number | null
   title: string
   kind?: OutputKind
+  labels?: Record<string, string>
 }>()
 
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()

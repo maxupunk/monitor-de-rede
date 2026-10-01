@@ -18,6 +18,9 @@ status, alterar um SSID. Decisão de arquitetura: [ADR 012](adr/012-plugins-de-d
 - Ação pela tela só roda com o plugin instalado no equipamento; a IA e a
   validação funcional não exigem a instalação. Leitura sem parâmetro roda
   direto e abre o resultado; escrita sempre passa pela confirmação.
+- **Aplicativos** (`/apps/{id}`): plugins que trabalham com vários
+  equipamentos de uma vez — no menu **Aplicativos** e no topo de `/plugins`.
+  Ver "Aplicativos".
 - **Biblioteca** em `/plugins` (menu de administração): todos os plugins, com
   status, origem, risco da revisão e em quantos equipamentos já foram validados.
 
@@ -47,8 +50,8 @@ criado / IA ──────────────────────�
   explícita antes de começar.
 - Editar o código zera os testes. Editar um plugin **importado** o devolve à
   quarentena.
-- Embutidos (`openwrt-packages`, `linux-ssh-status`, `http-page-info`) não são
-  editados: duplique para personalizar. Embutido que sai do binário (renomeado
+- Embutidos (`openwrt-packages`, `openwrt-wifi`, `linux-ssh-status`,
+  `http-page-info`) não são editados: duplique para personalizar. Embutido que sai do binário (renomeado
   ou aposentado) sai do catálogo no próximo boot.
 
 ## Tela própria (`panel`)
@@ -81,6 +84,70 @@ A versão vem do **Detectar versão** (`/etc/openwrt_release`); sem versão
 numérica (SNAPSHOT), vale o binário presente. Instalar é idempotente, roda
 `update` antes e confirma o pacote na lista depois. É o caminho da IA para
 instalar programas num OpenWrt.
+
+## Aplicativos (vários equipamentos)
+
+O manifesto diz onde o plugin aparece (`surfaces`):
+
+| `surfaces` | Onde aparece | Exemplo |
+|---|---|---|
+| `["device"]` (padrão) | aba no equipamento | Gerenciador de pacotes |
+| `["fleet"]` | só em Aplicativos | um relatório de toda a rede |
+| `["device", "fleet"]` | os dois | Rede Wi-Fi: a rede toda e o ajuste de cada roteador |
+
+- **Membros** são os equipamentos onde o plugin está instalado: "adicionar o
+  roteador à rede" é instalar o plugin nele (pela aba Equipamentos do
+  aplicativo ou pelo Catálogo do dispositivo). O **acesso** (SSH/HTTP) de cada
+  um continua no cadastro do próprio dispositivo, em Plugins → Credenciais.
+- **O sistema é a fonte da verdade.** O plugin guarda o estado desejado em
+  `settings` (`plugin_settings`): `fleet` vale para todos, `device` é o ajuste
+  de um equipamento e sobrepõe o geral. Salvar a configuração não toca nos
+  equipamentos; o script compara o desejado com o que lê e mostra a diferença.
+  Campo `secret` é gravado cifrado e volta como `********` (deixar assim mantém
+  o valor). A tela é gerada do esquema; `order` fixa a ordem dos campos, porque
+  nem o JSON nem o `jsonb` do PostgreSQL guardam a ordem das chaves.
+- **Títulos**: a saída do script usa chaves estáveis (`clients`, `state`); a
+  ação declara em `labels` o título de cada uma ("Clientes", "Estado") para as
+  tabelas, os relatórios e a grade.
+- **Visão geral**: a ação de estado (`statusAction`) roda em todos e a grade
+  (`matrix`) cruza equipamentos × itens (roteadores × SSIDs) com o estado de
+  cada célula — `sincronizado`, `pendente`, `ausente`…
+- **Ações de frota** viram um **lote** (`plugin_batches`): a mesma ação de
+  dispositivo em cada membro escolhido, até 4 ao mesmo tempo, cada uma com a
+  sua execução auditada e as mesmas portas da execução avulsa (efeito,
+  aprovação, confirmação de escrita, máscara). O andamento chega pelo SSE
+  (`plugin:batch_updated`). Cancelar pula quem ainda não começou e interrompe
+  as execuções em andamento.
+- **Consolidado** (`reduce`): função pura do script que recebe o resultado de
+  todos e devolve um relatório. Pode sugerir ajustes por equipamento
+  (`settings_patch`); **Aceitar sugestão** grava esses ajustes na configuração
+  — nada muda nos equipamentos até a configuração ser aplicada.
+- Um plugin reaproveita outro com `uses` + `device.use_plugin` (o Wi-Fi usa o
+  Gerenciador de pacotes para trocar o `wpad` e instalar o `usteer`).
+
+## Rede Wi-Fi (OpenWrt)
+
+`openwrt-wifi` gerencia o Wi-Fi de vários OpenWrt juntos ou separados, por SSH
+e UCI.
+
+- **Multi-SSID**: cada rede escolhe bandas (2,4 / 5 / 6 GHz), criptografia
+  (WPA2/WPA3/misto/aberta), senha, interface de rede, oculta, isolamento de
+  clientes. Um roteador pode **desligar** redes da frota nos ajustes dele.
+- **Roaming** por rede: 802.11r (mobility domain derivado do SSID, igual em
+  todos os roteadores), 802.11k e 802.11v. **Preparar roaming/mesh** troca o
+  `wpad-basic` pelo `wpad-mbedtls` (pelo Gerenciador de pacotes) e instala o
+  **usteer** quando ligado.
+- **Mesh 802.11s** entre os roteadores, numa banda, com senha SAE.
+- **Canais**: canal, largura e potência por rádio nos ajustes de cada roteador.
+  **Planejar canais** varre os vizinhos de cada roteador (`iwinfo scan`) e
+  sugere o canal menos disputado sem repetir entre os vizinhos da frota
+  (2,4 GHz: 1/6/11; 5 GHz: 36/44/149/157); aceitar grava a sugestão nos ajustes.
+- **Aplicação segura**: **Pré-visualizar** mostra o que cada roteador ganha,
+  muda e perde. **Aplicar** guarda uma cópia (`/tmp/netmonitor-wireless.bak`),
+  grava tudo de uma vez, faz `wifi reload`, confere os rádios e **restaura a
+  cópia** se algum rádio que estava no ar caiu.
+- O plugin só mexe nas seções que ele criou (`nm_…`); redes que já existiam no
+  roteador aparecem como "não gerenciadas" e ficam como estão.
 
 ## Importação e revisão de segurança
 

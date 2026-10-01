@@ -75,6 +75,9 @@ pub enum OutputKind {
     Kv,
     /// Qualquer JSON, mostrado formatado.
     Json,
+    /// Relatório: campos simples viram ficha, listas de objetos viram tabelas
+    /// com título (o estado de uma rede Wi-Fi, por exemplo).
+    Report,
 }
 
 /// Uma operação que o plugin oferece.
@@ -98,6 +101,11 @@ pub struct PluginAction {
     /// Ação de escrita idempotente, que pode entrar no teste funcional.
     #[serde(default)]
     pub safe_to_retest: bool,
+    /// Títulos das chaves da saída na tela (`clients` → "Clientes"). A chave
+    /// continua o contrato com o script; o título é só apresentação.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub labels: Option<BTreeMap<String, String>>,
 }
 
 /// Com que equipamentos o plugin diz ser compatível. Todos os campos são
@@ -190,6 +198,108 @@ pub struct PluginPanel {
     pub row_actions: Vec<PanelRowAction>,
 }
 
+/// Onde o plugin aparece.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub enum Surface {
+    /// Aba própria em `/devices/{id}` de cada equipamento onde está instalado.
+    Device,
+    /// Página própria ("Aplicativos"), que reúne todos os equipamentos onde
+    /// está instalado — a frota.
+    Fleet,
+}
+
+fn default_surfaces() -> Vec<Surface> {
+    vec![Surface::Device]
+}
+
+/// Configuração que o plugin guarda: o estado desejado.
+///
+/// `fleet` vale para todos os equipamentos onde o plugin está instalado (ex.:
+/// os SSIDs da rede); `device` é o ajuste de um equipamento (ex.: o canal
+/// daquele rádio). O script recebe as duas em `device.settings`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct SettingsSpec {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "Record<string, unknown>")]
+    pub fleet: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "Record<string, unknown>")]
+    pub device: Option<Value>,
+}
+
+/// Uma ação da frota: a mesma ação de dispositivo em vários equipamentos e,
+/// opcionalmente, um cálculo central sobre os resultados.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct FleetAction {
+    pub id: String,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub icon: Option<String>,
+    /// Ação de dispositivo executada em cada membro.
+    pub action: String,
+    /// Função pura do script, `fn <reduce>(results, settings)`, que recebe o
+    /// resultado de todos os membros e devolve o consolidado — sem acesso a
+    /// equipamento. Pode propor `settings_patch` (ajustes por equipamento) que
+    /// o operador aceita com um clique (ex.: o plano de canais).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reduce: Option<String>,
+    /// Títulos das chaves do consolidado (ver [`PluginAction::labels`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub labels: Option<BTreeMap<String, String>>,
+}
+
+/// A grade membros × itens da página da frota (ex.: roteadores × SSIDs).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct FleetMatrix {
+    /// Lista no resultado da ação de estado (ex.: `networks`).
+    pub field: String,
+    /// Campo que identifica a coluna (ex.: `ssid`).
+    pub key: String,
+    /// Campo com o estado da célula (ex.: `state`).
+    pub state: String,
+    /// Campo com o detalhe mostrado na célula (ex.: `clients`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub detail: Option<String>,
+}
+
+/// A página da frota.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct FleetSpec {
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub description: Option<String>,
+    /// Ação de dispositivo que dá o estado de cada membro (a "visão geral").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub status_action: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub matrix: Option<FleetMatrix>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<FleetAction>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
@@ -211,6 +321,19 @@ pub struct PluginManifest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub panel: Option<PluginPanel>,
+    /// Onde aparece: aba do equipamento, página da frota, ou as duas.
+    #[serde(default = "default_surfaces")]
+    pub surfaces: Vec<Surface>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub settings: Option<SettingsSpec>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub fleet: Option<FleetSpec>,
+    /// Plugins cujas ações este chama (`device.use_plugin`) — reaproveitar em
+    /// vez de copiar. Precisam estar ativos.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub uses: Vec<String>,
 }
 
 impl PluginManifest {
@@ -222,6 +345,28 @@ impl PluginManifest {
     #[must_use]
     pub fn uses(&self, transport: TransportKind) -> bool {
         self.transports.contains(&transport)
+    }
+
+    #[must_use]
+    pub fn shows_on(&self, surface: Surface) -> bool {
+        self.surfaces.contains(&surface)
+    }
+
+    #[must_use]
+    pub fn fleet_action(&self, id: &str) -> Option<&FleetAction> {
+        self.fleet
+            .as_ref()
+            .and_then(|fleet| fleet.actions.iter().find(|action| action.id == id))
+    }
+
+    /// Funções `reduce` que o script precisa definir.
+    #[must_use]
+    pub fn reduce_functions(&self) -> Vec<&str> {
+        self.fleet
+            .iter()
+            .flat_map(|fleet| fleet.actions.iter())
+            .filter_map(|action| action.reduce.as_deref())
+            .collect()
     }
 }
 
@@ -304,6 +449,7 @@ pub fn validate(manifest: &PluginManifest) -> Vec<String> {
                 action.id
             ));
         }
+        validate_labels(&action.id, action.labels.as_ref(), &mut problems);
     }
     match manifest.action(DETECT_ACTION) {
         None => {
@@ -320,7 +466,96 @@ pub fn validate(manifest: &PluginManifest) -> Vec<String> {
     if let Some(panel) = &manifest.panel {
         validate_panel(manifest, panel, &mut problems);
     }
+    validate_surfaces(manifest, &mut problems);
     problems
+}
+
+/// Títulos curtos e em número razoável: é texto de cabeçalho, não conteúdo.
+fn validate_labels(
+    owner: &str,
+    labels: Option<&BTreeMap<String, String>>,
+    problems: &mut Vec<String>,
+) {
+    let Some(labels) = labels else {
+        return;
+    };
+    if labels.len() > 100
+        || labels.iter().any(|(key, title)| {
+            key.is_empty() || title.trim().is_empty() || title.chars().count() > 60
+        })
+    {
+        problems.push(format!(
+            "`labels` de `{owner}`: até 100 títulos, cada um com 1 a 60 caracteres"
+        ));
+    }
+}
+
+fn validate_surfaces(manifest: &PluginManifest, problems: &mut Vec<String>) {
+    if manifest.surfaces.is_empty() {
+        problems.push("declare ao menos uma superfície em `surfaces` (device, fleet)".into());
+    }
+    if let Some(settings) = &manifest.settings {
+        for (scope, schema) in [("fleet", &settings.fleet), ("device", &settings.device)] {
+            if let Some(schema) = schema {
+                if let Err(error) = params::validate_schema(schema) {
+                    problems.push(format!("`settings.{scope}`: {error}"));
+                }
+            }
+        }
+        if settings.fleet.is_some() && !manifest.shows_on(Surface::Fleet) {
+            problems.push("`settings.fleet` só faz sentido com a superfície `fleet`".into());
+        }
+    }
+    match (&manifest.fleet, manifest.shows_on(Surface::Fleet)) {
+        (None, true) => problems.push("a superfície `fleet` precisa do bloco `fleet`".into()),
+        (Some(_), false) => problems.push("o bloco `fleet` precisa da superfície `fleet`".into()),
+        _ => {}
+    }
+    if let Some(fleet) = &manifest.fleet {
+        if fleet.title.trim().is_empty() {
+            problems.push("`fleet.title` é obrigatório".into());
+        }
+        if let Some(status) = &fleet.status_action {
+            match manifest.action(status) {
+                None => problems.push(format!(
+                    "`fleet.statusAction` cita `{status}`, que não existe"
+                )),
+                Some(action) if action.effect != Effect::Read => {
+                    problems.push("`fleet.statusAction` precisa ser uma ação de leitura".into())
+                }
+                Some(_) => {}
+            }
+        }
+        if fleet.matrix.is_some() && fleet.status_action.is_none() {
+            problems.push("`fleet.matrix` precisa de `fleet.statusAction`".into());
+        }
+        let mut ids = HashSet::new();
+        for action in &fleet.actions {
+            if !is_action_id(&action.id) || !ids.insert(action.id.as_str()) {
+                problems.push(format!(
+                    "ação de frota `{}` com id inválido ou repetido",
+                    action.id
+                ));
+            }
+            if manifest.action(&action.action).is_none() {
+                problems.push(format!(
+                    "a ação de frota `{}` cita `{}`, que não é ação do plugin",
+                    action.id, action.action
+                ));
+            }
+            if let Some(reduce) = &action.reduce {
+                if !is_action_id(reduce) {
+                    problems.push(format!("`reduce` inválido em `{}`", action.id));
+                }
+            }
+            validate_labels(&action.id, action.labels.as_ref(), problems);
+        }
+    }
+    for slug in &manifest.uses {
+        if !is_slug(slug) || slug == &manifest.slug {
+            problems.push(format!("`uses` cita `{slug}`, que não é um plugin válido"));
+        }
+    }
 }
 
 /// Nomes das propriedades do esquema de parâmetros de uma ação, e as
@@ -479,6 +714,18 @@ mod tests {
     }
 
     #[test]
+    fn titulos_da_saida_sao_curtos() {
+        let mut ok = manifest();
+        ok.actions[0].labels = Some(BTreeMap::from([("firmware".into(), "Versão".into())]));
+        assert!(validate(&ok).is_empty());
+        let mut longo = manifest();
+        longo.actions[0].labels = Some(BTreeMap::from([("firmware".into(), "x".repeat(61))]));
+        assert!(validate(&longo)
+            .iter()
+            .any(|p| p.contains("`labels` de `detect`")));
+    }
+
+    #[test]
     fn manifesto_valido_nao_tem_problemas() {
         assert!(
             validate(&manifest()).is_empty(),
@@ -568,6 +815,54 @@ mod tests {
             problems.iter().any(|p| p.contains("não vem da linha")),
             "{problems:?}"
         );
+    }
+
+    #[test]
+    fn superficies_e_frota_coerentes() {
+        let mut frota = manifest();
+        frota.surfaces = vec![Surface::Device, Surface::Fleet];
+        assert!(validate(&frota)
+            .iter()
+            .any(|p| p.contains("precisa do bloco `fleet`")));
+        frota.fleet = Some(FleetSpec {
+            title: "Rede".into(),
+            icon: None,
+            description: None,
+            status_action: Some("install_package".into()),
+            matrix: None,
+            actions: vec![FleetAction {
+                id: "aplicar".into(),
+                title: "Aplicar".into(),
+                description: None,
+                icon: None,
+                action: "inexistente".into(),
+                reduce: None,
+                labels: None,
+            }],
+        });
+        let problems = validate(&frota);
+        assert!(
+            problems.iter().any(|p| p.contains("ação de leitura")),
+            "{problems:?}"
+        );
+        assert!(
+            problems.iter().any(|p| p.contains("inexistente")),
+            "{problems:?}"
+        );
+
+        let mut so_device = manifest();
+        so_device.settings = Some(SettingsSpec {
+            fleet: Some(serde_json::json!({ "type": "object" })),
+            device: None,
+        });
+        assert!(validate(&so_device)
+            .iter()
+            .any(|p| p.contains("superfície `fleet`")));
+    }
+
+    #[test]
+    fn manifesto_antigo_continua_so_no_dispositivo() {
+        assert_eq!(manifest().surfaces, vec![Surface::Device]);
     }
 
     #[test]

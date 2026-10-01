@@ -10,62 +10,19 @@
       <v-card-text>
         <p v-if="action.description" class="text-body-2 mb-4">{{ action.description }}</p>
 
-        <v-form ref="form" @submit.prevent="submit">
-          <template v-for="field in fields" :key="field.name">
-            <v-select
-              v-if="field.options"
-              v-model="values[field.name]"
-              :items="field.options"
-              :label="field.label"
-              :hint="field.hint"
-              :rules="field.rules"
-              persistent-hint
-              variant="outlined"
-              density="comfortable"
-              class="mb-3"
-            ></v-select>
-            <v-switch
-              v-else-if="field.kind === 'boolean'"
-              v-model="values[field.name]"
-              :label="field.label"
-              :hint="field.hint"
-              persistent-hint
-              color="primary"
-              inset
-              class="mb-3"
-            ></v-switch>
-            <v-text-field
-              v-else
-              v-model="values[field.name]"
-              :label="field.label"
-              :hint="field.hint"
-              :rules="field.rules"
-              :type="field.kind === 'string' ? 'text' : 'number'"
-              persistent-hint
-              variant="outlined"
-              density="comfortable"
-              class="mb-3"
-            ></v-text-field>
-          </template>
-        </v-form>
+        <SettingsForm
+          v-if="fields.length > 0"
+          ref="form"
+          v-model="values"
+          :schema="action.params ?? {}"
+          compact
+        />
 
         <v-alert v-if="!active" type="warning" variant="tonal" density="compact" class="mb-3">
           Este plugin ainda não está ativo: cada acesso ao equipamento vai pedir sua aprovação.
         </v-alert>
 
-        <template v-if="action.effect === 'write'">
-          <v-alert type="error" variant="tonal" density="compact" class="mb-2">
-            Esta ação <strong>altera a configuração do equipamento</strong>. Confira os parâmetros e
-            tenha um backup da configuração antes de continuar.
-          </v-alert>
-          <v-checkbox
-            v-model="confirmWrite"
-            color="error"
-            density="compact"
-            hide-details
-            label="Entendo que esta ação altera o equipamento"
-          ></v-checkbox>
-        </template>
+        <WriteConfirm v-if="action.effect === 'write'" v-model="confirmWrite" />
       </v-card-text>
 
       <v-card-actions>
@@ -86,9 +43,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { PluginAction } from '@/bindings/PluginAction'
 import { effectPresentation } from '@/utils/pluginPresentation'
+import { defaultsOf, fieldsOf, paramsOf } from '@/utils/pluginSettings'
+import SettingsForm from './settings/SettingsForm.vue'
+import WriteConfirm from './WriteConfirm.vue'
 
 const props = defineProps<{
   modelValue: boolean
@@ -105,75 +65,19 @@ const emit = defineEmits<{
   run: [params: Record<string, unknown>, confirmWrite: boolean]
 }>()
 
-type Rule = (value: unknown) => boolean | string
-
-interface Field {
-  name: string
-  kind: 'string' | 'integer' | 'number' | 'boolean'
-  label: string
-  hint?: string
-  options?: unknown[]
-  rules: Rule[]
-}
-
-const form = ref<{ validate: () => Promise<{ valid: boolean }> } | null>(null)
-const values = reactive<Record<string, unknown>>({})
+const form = ref<{ validate: () => Promise<boolean> } | null>(null)
+const values = ref<Record<string, unknown>>({})
 const confirmWrite = ref(false)
 
 const effect = computed(() => effectPresentation(props.action?.effect ?? 'read'))
-
-function schemaOf(action: PluginAction | null): Record<string, Record<string, unknown>> {
-  const properties = action?.params?.properties
-  return typeof properties === 'object' && properties !== null
-    ? (properties as Record<string, Record<string, unknown>>)
-    : {}
-}
-
-const required = computed<string[]>(() => {
-  const list = props.action?.params?.required
-  return Array.isArray(list) ? list.filter((item): item is string => typeof item === 'string') : []
-})
-
-const fields = computed<Field[]>(() =>
-  Object.entries(schemaOf(props.action)).map(([name, schema]) => {
-    const kind = (
-      ['integer', 'number', 'boolean'].includes(String(schema.type)) ? schema.type : 'string'
-    ) as Field['kind']
-    const rules: Rule[] = []
-    if (required.value.includes(name)) {
-      rules.push(
-        (value) => (value !== '' && value !== null && value !== undefined) || 'Obrigatório'
-      )
-    }
-    if (typeof schema.pattern === 'string') {
-      const pattern = new RegExp(`^(?:${schema.pattern})$`)
-      rules.push((value) => value === '' || pattern.test(String(value ?? '')) || 'Formato inválido')
-    }
-    if (typeof schema.maxLength === 'number') {
-      const max = schema.maxLength
-      rules.push((value) => String(value ?? '').length <= max || `No máximo ${max} caracteres`)
-    }
-    return {
-      name,
-      kind,
-      label: typeof schema.title === 'string' ? schema.title : name,
-      hint: typeof schema.description === 'string' ? schema.description : undefined,
-      options: Array.isArray(schema.enum) ? schema.enum : undefined,
-      rules,
-    }
-  })
-)
+const fields = computed(() => fieldsOf(props.action?.params))
 
 watch(
   () => [props.modelValue, props.action] as const,
   ([open]) => {
     if (!open) return
     confirmWrite.value = false
-    for (const key of Object.keys(values)) delete values[key]
-    for (const [name, schema] of Object.entries(schemaOf(props.action))) {
-      values[name] =
-        props.initialParams?.[name] ?? schema.default ?? (schema.type === 'boolean' ? false : '')
-    }
+    values.value = { ...defaultsOf(props.action?.params), ...(props.initialParams ?? {}) }
   },
   { immediate: true }
 )
@@ -183,14 +87,8 @@ function close(value = false) {
 }
 
 async function submit() {
-  const result = await form.value?.validate()
-  if (result && !result.valid) return
-  const params: Record<string, unknown> = {}
-  for (const field of fields.value) {
-    const value = values[field.name]
-    if (value === '' || value === null || value === undefined) continue
-    params[field.name] = field.kind === 'integer' || field.kind === 'number' ? Number(value) : value
-  }
+  if (form.value && !(await form.value.validate())) return
+  const params = paramsOf(props.action?.params, values.value)
   emit('run', params, confirmWrite.value)
   close(false)
 }

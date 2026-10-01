@@ -7,7 +7,9 @@ use ts_rs::TS;
 use crate::services::plugins::{
     compat::Compat,
     credentials::CredentialView,
-    manifest::{MatchRule, PluginAction, PluginPanel, TransportKind},
+    manifest::{
+        FleetSpec, MatchRule, PluginAction, PluginPanel, SettingsSpec, Surface, TransportKind,
+    },
     package::PluginPackage,
     review::{ReviewReport, Severity},
     runtime::TranscriptEntry,
@@ -37,6 +39,11 @@ pub struct PluginSummary {
     pub matcher: MatchRule,
     /// Tela própria do plugin instalado, quando ele declara uma.
     pub panel: Option<PluginPanel>,
+    /// Onde aparece: aba do equipamento, página da frota (Aplicativos).
+    pub surfaces: Vec<Surface>,
+    /// Esquemas da configuração guardada.
+    pub settings: Option<SettingsSpec>,
+    pub fleet: Option<FleetSpec>,
     /// Risco da última revisão de segurança.
     pub risk: Option<Severity>,
     pub last_test_at: Option<String>,
@@ -67,6 +74,9 @@ pub struct DevicePluginItem {
     /// Instalado neste equipamento: ganha a própria aba.
     pub installed: bool,
     pub installed_at: Option<String>,
+    /// Ajuste deste equipamento (segredos mascarados), quando o plugin tem.
+    #[ts(type = "Record<string, unknown> | null")]
+    pub device_settings: Option<Value>,
 }
 
 /// Agente remoto por onde o acesso pode sair.
@@ -207,4 +217,137 @@ pub struct AutoAcceptState {
     pub terms_version: String,
     /// O texto do termo, para a tela mostrar exatamente o que é aceito.
     pub terms: String,
+}
+
+/// Um equipamento dentro de um lote de frota.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct BatchDevice {
+    #[ts(type = "number")]
+    pub device_id: i64,
+    pub device_name: String,
+    #[ts(type = "number | null")]
+    pub run_id: Option<i64>,
+    /// `pending`, `running`, `succeeded`, `failed` ou `skipped`.
+    pub status: String,
+    pub error: Option<String>,
+    #[ts(type = "unknown")]
+    pub output: Option<Value>,
+}
+
+/// Uma ação de frota em andamento ou concluída.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct PluginBatchView {
+    #[ts(type = "number")]
+    pub id: i64,
+    #[ts(type = "number")]
+    pub plugin_id: i64,
+    pub action: String,
+    pub title: String,
+    /// `running`, `succeeded`, `partial`, `failed` ou `cancelled`.
+    pub status: String,
+    pub devices: Vec<BatchDevice>,
+    /// O consolidado da função `reduce`, quando a ação tem uma.
+    #[ts(type = "unknown")]
+    pub result: Option<Value>,
+    /// O consolidado propõe ajustes por equipamento ainda não aplicados.
+    pub has_patch: bool,
+    pub error: Option<String>,
+    pub created_at: String,
+    pub finished_at: Option<String>,
+}
+
+/// Um equipamento da frota.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct FleetMember {
+    #[ts(type = "number")]
+    pub device_id: i64,
+    pub name: String,
+    pub ip: Option<String>,
+    pub platform: String,
+    pub firmware: Option<String>,
+    pub compat: Compat,
+    pub installed_at: String,
+    /// Há credencial pronta para os transportes do plugin.
+    pub credentials_ready: bool,
+    /// Ajuste deste equipamento (segredos mascarados).
+    #[ts(type = "Record<string, unknown> | null")]
+    pub settings: Option<Value>,
+}
+
+/// Equipamento que pode entrar na frota.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct FleetCandidate {
+    #[ts(type = "number")]
+    pub device_id: i64,
+    pub name: String,
+    pub ip: Option<String>,
+    pub compat: Compat,
+    pub reasons: Vec<String>,
+}
+
+/// A página de um plugin de frota.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct FleetView {
+    pub plugin: PluginSummary,
+    /// Configuração da frota (segredos mascarados).
+    #[ts(type = "Record<string, unknown> | null")]
+    pub settings: Option<Value>,
+    pub members: Vec<FleetMember>,
+    pub candidates: Vec<FleetCandidate>,
+    pub batches: Vec<PluginBatchView>,
+}
+
+/// Um aplicativo (plugin de frota) para o menu.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct PluginApp {
+    #[ts(type = "number")]
+    pub id: i64,
+    pub slug: String,
+    pub title: String,
+    pub icon: String,
+    pub description: Option<String>,
+    pub members: u32,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct FleetRunInput {
+    /// Só estes membros; vazio = todos.
+    #[serde(default)]
+    #[ts(type = "Array<number>")]
+    pub device_ids: Vec<i64>,
+    #[serde(default)]
+    #[ts(type = "Record<string, unknown>")]
+    pub params: Value,
+    #[serde(default)]
+    pub confirm_write: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct BatchStarted {
+    #[ts(type = "number")]
+    pub batch_id: i64,
+}
+
+#[derive(Debug, Clone, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct SettingsInput {
+    #[ts(type = "Record<string, unknown>")]
+    pub value: Value,
 }

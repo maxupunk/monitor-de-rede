@@ -88,6 +88,7 @@ export function packageTemplate(): PluginPackage {
       description: 'O que este plugin faz.',
       transports: ['ssh'],
       match: { platforms: [] },
+      surfaces: ['device'],
       actions: [
         {
           id: 'detect',
@@ -159,11 +160,68 @@ export function installedPluginTabs(
   view: DevicePluginsView | undefined | null
 ): InstalledPluginTab[] {
   return (view?.plugins ?? [])
-    .filter((item) => item.installed)
+    .filter((item) => item.installed && item.plugin.surfaces.includes('device'))
     .map((item) => ({
       id: item.plugin.id,
       title: item.plugin.panel?.title ?? item.plugin.name,
       icon: item.plugin.panel?.icon ?? 'mdi-puzzle',
       item,
     }))
+}
+
+const BATCH_STATUS: Record<string, Presentation> = {
+  running: { label: 'Em andamento', color: 'primary', icon: 'mdi-progress-clock' },
+  succeeded: { label: 'Concluído', color: 'success', icon: 'mdi-check-all' },
+  partial: { label: 'Parcial', color: 'warning', icon: 'mdi-alert-outline' },
+  failed: { label: 'Falhou', color: 'error', icon: 'mdi-alert-circle' },
+  cancelled: { label: 'Cancelado', color: 'warning', icon: 'mdi-cancel' },
+  pending: { label: 'Na fila', color: 'secondary', icon: 'mdi-timer-sand' },
+  skipped: { label: 'Pulado', color: 'warning', icon: 'mdi-debug-step-over' },
+}
+
+export const batchStatusPresentation = (value: string): Presentation =>
+  BATCH_STATUS[value] ?? RUN_STATUS[value] ?? { ...FALLBACK, label: value }
+
+/**
+ * Cor semântica de um estado que um plugin devolve (ex.: o estado de uma rede
+ * Wi-Fi na grade da frota). Palavras conhecidas viram cor; o resto, `info`.
+ */
+const STATE_COLORS: Record<string, string> = {
+  ok: 'success',
+  sincronizado: 'success',
+  ativo: 'success',
+  online: 'success',
+  divergente: 'warning',
+  pendente: 'warning',
+  sem_radio: 'warning',
+  ausente: 'error',
+  falhou: 'error',
+  offline: 'error',
+  desativado: 'secondary',
+  criar: 'success',
+  alterar: 'warning',
+  remover: 'error',
+}
+
+export function stateColor(value: unknown): string {
+  return STATE_COLORS[String(value).toLowerCase()] ?? 'info'
+}
+
+export function stateLabel(value: unknown): string {
+  const text = String(value).replace(/_/g, ' ')
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
+/** Títulos que o plugin declara para as chaves da saída (`labels`). */
+export type OutputLabels = Record<string, string> | undefined
+
+/** Título de uma chave: o declarado pelo plugin ou a própria chave legível. */
+export function outputLabel(key: string, labels?: OutputLabels): string {
+  return labels?.[key] ?? keyLabel(key)
+}
+
+/** Rótulo legível de uma chave (`pending_changes` → "Pending changes"). */
+export function keyLabel(key: string): string {
+  const text = key.replace(/_/g, ' ')
+  return text.charAt(0).toUpperCase() + text.slice(1)
 }

@@ -98,6 +98,16 @@ pub struct UnitTest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub firmware: Option<String>,
+    /// Configuração simulada, `{ "fleet": {…}, "device": {…} }` — os padrões
+    /// do esquema são aplicados como na produção.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "Record<string, unknown>")]
+    pub settings: Option<Value>,
+    /// Em teste de ação de frota com `reduce`: os resultados dos membros que a
+    /// função recebe.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "unknown")]
+    pub input: Option<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -209,6 +219,16 @@ pub fn validate(package: &PluginPackage) -> Vec<String> {
     match runtime::entry_points(&package.script) {
         Err(error) => problems.push(format!("o script não compila: {error}")),
         Ok(functions) => {
+            for reduce in package.manifest.reduce_functions() {
+                if !functions
+                    .iter()
+                    .any(|(name, arity)| name == reduce && *arity == 2)
+                {
+                    problems.push(format!(
+                        "o script precisa definir `fn {reduce}(results, settings)`"
+                    ));
+                }
+            }
             for action in &package.manifest.actions {
                 if !functions
                     .iter()
@@ -246,7 +266,10 @@ fn validate_usage(package: &PluginPackage, problems: &mut Vec<String>) {
 fn validate_tests(package: &PluginPackage, problems: &mut Vec<String>) {
     let manifest = &package.manifest;
     for test in &package.tests.unit {
-        if manifest.action(&test.action).is_none() {
+        let reduce_test = manifest
+            .fleet_action(&test.action)
+            .is_some_and(|action| action.reduce.is_some());
+        if manifest.action(&test.action).is_none() && !reduce_test {
             problems.push(format!(
                 "teste unitário para ação inexistente: `{}`",
                 test.action

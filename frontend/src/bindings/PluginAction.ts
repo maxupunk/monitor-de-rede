@@ -17,4 +17,9 @@ params?: Record<string, unknown>, output: OutputKind,
 /**
  * Ação de escrita idempotente, que pode entrar no teste funcional.
  */
-safeToRetest: boolean, };
+safeToRetest: boolean, 
+/**
+ * Títulos das chaves da saída na tela (`clients` → "Clientes"). A chave
+ * continua o contrato com o script; o título é só apresentação.
+ */
+labels?: { [key in string]: string }, };

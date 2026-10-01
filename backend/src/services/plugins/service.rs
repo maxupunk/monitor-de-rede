@@ -101,6 +101,9 @@ pub fn summary(model: &plugins::Model) -> AppResult<PluginSummary> {
         actions: manifest.actions,
         matcher: manifest.matcher,
         panel: manifest.panel,
+        surfaces: manifest.surfaces,
+        settings: manifest.settings,
+        fleet: manifest.fleet,
         risk: review_of(model).map(|report| report.risk),
         last_test_at: model.last_test_at.map(|at| at.to_rfc3339()),
         last_test_ok: model.last_test_ok,
@@ -465,7 +468,9 @@ pub async fn run_tests<C: ConnectionTrait>(
     id: i64,
 ) -> AppResult<(plugins::Model, TestReport)> {
     let model = find(db, id).await?;
-    let report = testing::run_unit_tests(&package_of(&model)?).await;
+    let package = package_of(&model)?;
+    let library = super::runs::load_library(db, &package.manifest.uses).await?;
+    let report = testing::run_unit_tests_with(&package, &library).await;
     let current = model.status.clone();
     let mut active: plugins::ActiveModel = model.into();
     active.last_test_at = Set(Some(chrono::Utc::now().into()));
@@ -620,6 +625,11 @@ pub async fn for_device<C: ConnectionTrait>(
             reasons: verdict.reasons,
             installed: installs.contains_key(&model.id),
             installed_at: installs.get(&model.id).cloned(),
+            device_settings: if installs.contains_key(&model.id) {
+                super::settings::view(db, model, super::settings::Scope::Device(device.id)).await?
+            } else {
+                None
+            },
         });
     }
     items.sort_by_key(|item| std::cmp::Reverse(item.compat));

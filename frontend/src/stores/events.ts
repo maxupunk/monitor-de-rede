@@ -16,6 +16,7 @@ import { useDockerStore } from './docker'
 import { useAgentsStore } from './agents'
 import { useLogsStore } from './logs'
 import { usePluginsStore } from './plugins'
+import { usePluginAppsStore } from './pluginApps'
 import { isLogTemplateInfo } from '@/utils/logCategories'
 import { isLayaModelState, useAiLayaStore } from './aiLaya'
 import { getStoredToken } from '@/utils/authStorage'
@@ -425,6 +426,11 @@ export const useEventsStore = defineStore('events', () => {
 
       case 'plugin:approval_required': {
         usePluginsStore().applyApprovalRequired(data)
+        break
+      }
+
+      case 'plugin:batch_updated': {
+        usePluginAppsStore().applyBatchUpdated(data)
         break
       }
 

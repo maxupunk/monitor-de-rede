@@ -103,7 +103,8 @@ import { renderMarkdown } from '@/utils/markdown'
 
 const props = defineProps<{
   pluginId: number
-  deviceId: number
+  /** O equipamento cuja aba é atualizada depois dos testes, quando há um. */
+  deviceId?: number | null
   lastTestOk: boolean | null
 }>()
 

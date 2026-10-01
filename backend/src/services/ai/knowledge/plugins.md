@@ -62,8 +62,8 @@ Ele escolhe o gerenciador pela versão: **OpenWrt 24.10 e anteriores usam
 {
   "format": 1,
   "manifest": {
-    "slug": "openwrt-wifi",
-    "name": "OpenWrt – Wi-Fi",
+    "slug": "openwrt-ssid",
+    "name": "OpenWrt – SSID",
     "version": "1.0.0",
     "description": "Lê e altera o SSID do Wi-Fi via UCI.",
     "transports": ["ssh"],
@@ -81,7 +81,7 @@ Ele escolhe o gerenciador pela versão: **OpenWrt 24.10 e anteriores usam
     ]
   },
   "script": "fn detect(device, params) { ... }",
-  "usage": "# OpenWrt – Wi-Fi\n## Detectar versão\n...\n## Listar redes Wi-Fi\n...\n## Alterar SSID\n...",
+  "usage": "# OpenWrt – SSID\n## Detectar versão\n...\n## Listar redes Wi-Fi\n...\n## Alterar SSID\n...",
   "tests": {
     "unit": [ { "action": "detect", "fixtures": [ { "ssh": "cat /etc/openwrt_release", "stdout": "DISTRIB_RELEASE='23.05.2'\n" } ],
                 "expect": { "firmware": "23.05.2" } } ],
@@ -102,13 +102,22 @@ Regras que o sistema confere (e recusa se faltar):
   ou no cabeçalho `Server`).
 - `actions`: `id` = nome da função no script (`fn id(device, params)`),
   `effect` `read`/`write`, `output` `text` | `table` (lista de mapas) | `kv`
-  (mapa) | `json`. `safeToRetest: true` só em escrita idempotente que pode
+  (mapa) | `json` | `report` (mapa com seções: valores simples viram cartões,
+  listas de mapas viram tabelas com título, listas de texto viram bloco de
+  comandos; chaves `state`/`status`/`change` viram selo colorido). `safeToRetest: true` só em escrita idempotente que pode
   entrar no teste funcional.
 - `params`: subconjunto de JSON Schema — `type: object` e propriedades
   `string`/`integer`/`number`/`boolean` com `pattern`, `enum`, `minLength`,
   `maxLength`, `minimum`, `maximum`, `default`, `title`, `description`.
   **Todo texto que vai para um comando precisa de `pattern` ou `enum`** (o
-  `pattern` é ancorado).
+  `pattern` é ancorado). `"order": ["campo", …]` no objeto define a ordem dos
+  campos na tela — sem ele a ordem é alfabética (o JSON não guarda a ordem das
+  chaves).
+- `labels` (opcional, por ação): títulos das chaves da saída na tela,
+  `{ "clients": "Clientes", "pending_changes": "Alterações pendentes" }`. As
+  chaves continuam em inglês/snake_case (são o contrato com testes e
+  `matrix`); o operador lê os títulos. Use uma chave por significado — a
+  mesma chave com sentidos diferentes na mesma saída não tem título que sirva.
 - `usage`: markdown com uma seção por ação (use o `title`), dizendo o que faz,
   o que altera e os cuidados. É o que o operador lê antes de executar.
 - Toda ação tem ao menos um teste unitário; toda ação de leitura, um funcional.
@@ -128,6 +137,8 @@ texto). Erro: `throw "mensagem"`.
 | `device.post_json(path, valor)` | idem |
 | `device.http(#{ method, path, headers, body, form, json, login, https, basic_auth, timeout_ms })` | idem |
 | `device.info` | `#{ id, name, ip, vendor, model, platform, firmware }` |
+| `device.settings` | `#{ fleet, device }` — a configuração guardada (ver "Aplicativos") |
+| `device.use_plugin(slug, ação, #{...})` | o resultado da ação de outro plugin (ver "Reaproveitar outro plugin") |
 | `device.log(texto)` / `print(texto)` | registra no transcript |
 
 HTTP: `path` é **relativo** (`/cgi-bin/luci`); URL absoluta é recusada. Não há
@@ -139,6 +150,9 @@ nele. `basic_auth: true` manda a credencial HTTP como Basic Auth.
 Utilitários: `trimmed(s)`, `lines(s)` (linhas não vazias, aparadas),
 `words(s)`, `parse_kv(s, "=")` (tira aspas), `regex_match(s, re)`,
 `regex_capture(s, re)` (1º grupo ou `()`), `regex_captures(s, re)` (lista),
+`regex_groups(s, re)` (todos os grupos do 1º casamento, ou `()`),
+`join_with(lista, sep)`, `hash_hex(s, n)` (n primeiros hex do SHA-256: um id
+estável derivado de um texto, igual em todo equipamento),
 `json_parse(s)`, `json_encode(v)`, `shell_quote(s)`, `url_encode(s)`.
 
 ### Pegadinhas do Rhai
@@ -222,8 +236,10 @@ fn detect(device, params) {
 }
 ```
 
-Os plugins embutidos (`openwrt-packages`, `linux-ssh-status`, `http-page-info`)
-são exemplos completos: leia-os com `get_plugin`.
+Os plugins embutidos (`openwrt-packages`, `openwrt-wifi`, `linux-ssh-status`,
+`http-page-info`) são exemplos completos: leia-os com `get_plugin`. O
+`openwrt-wifi` é o modelo de aplicativo de frota (configuração, `use_plugin`,
+`reduce`, `report`).
 
 ## Tela própria (`panel`)
 
@@ -249,6 +265,81 @@ escolhida — tudo declarado, nenhum código roda no navegador.
 - `rowActions[].params`: parâmetro da ação → coluna da linha; todo parâmetro
   obrigatório precisa vir da linha. `showWhen`/`hideWhen`: coluna booleana.
 
+## Reaproveitar outro plugin (`uses`)
+
+Não reescreva o que outro plugin já faz. Declare-o e chame a ação dele no mesmo
+equipamento:
+
+```json
+"uses": ["openwrt-packages"]
+```
+
+```rhai
+let base = device.use_plugin("openwrt-packages", "detect", #{});
+device.use_plugin("openwrt-packages", "install_package", #{ name: "usteer" });
+```
+
+- Só plugins declarados em `uses` e ativos; os parâmetros passam pela validação
+  da ação chamada.
+- O efeito da ação chamada não pode passar o da sua: ação `read` não chama
+  `install_package`.
+- Os acessos entram no mesmo transcript. Nos testes unitários, as fixtures
+  cobrem também os comandos do plugin chamado.
+
+## Aplicativos: plugins de vários equipamentos (frota)
+
+Um plugin pode ter tela no equipamento, tela de frota (menu **Aplicativos**) ou
+as duas. A frota são os equipamentos onde o plugin está instalado; o acesso de
+cada um continua no cadastro do dispositivo.
+
+```json
+"surfaces": ["device", "fleet"],
+"settings": {
+  "fleet":  { "type": "object", "properties": { "networks": { "type": "array", "items": {
+              "type": "object", "properties": {
+                "ssid": { "type": "string", "pattern": "[^'\"`$]{1,32}", "title": "Nome da rede" },
+                "key":  { "type": "string", "secret": true, "minLength": 8, "title": "Senha" } },
+              "required": ["ssid"] } },
+              "country": { "type": "string", "enum": ["BR", "US"], "default": "BR" } } },
+  "device": { "type": "object", "properties": {
+              "radio_2g_channel": { "type": "string", "enum": ["", "auto", "1", "6", "11"] } } }
+},
+"fleet": {
+  "title": "Rede Wi-Fi", "icon": "mdi-wifi-cog", "statusAction": "status",
+  "matrix": { "field": "networks", "key": "ssid", "state": "state", "detail": "clients" },
+  "actions": [
+    { "id": "preview", "title": "Pré-visualizar", "action": "preview" },
+    { "id": "apply", "title": "Aplicar", "action": "apply" },
+    { "id": "plan_channels", "title": "Planejar canais", "action": "scan", "reduce": "plan_channels" }
+  ]
+}
+```
+
+- **A fonte da verdade é o sistema**: `settings` guarda o estado desejado. O
+  script lê `device.settings.fleet` (vale para todos) e `device.settings.device`
+  (ajuste deste equipamento, que sobrepõe o geral), compara com o equipamento e
+  só então altera. A ação de estado (`statusAction`) diz se está `sincronizado`,
+  `pendente`, `ausente`…; a grade `matrix` cruza equipamentos × itens.
+- Esquema da configuração: o mesmo dos `params`, mais `array` (de valores
+  simples ou de objetos, um nível). Item de lista de objetos ganha um `id`
+  estável sozinho (não declare `id`). `secret: true` (só em texto): guardado
+  cifrado, mostrado como `********`, mascarado no transcript e na saída. Texto
+  de configuração que vai para comando também precisa de `pattern`/`enum`.
+- **Escrita segura em lote**: `preview` (leitura) mostra as mudanças; `apply`
+  guarda uma cópia, aplica tudo de uma vez, verifica e **restaura a cópia se a
+  verificação falhar**. Nomeie as seções que o plugin gerencia com um prefixo
+  (`nm_…`, com `hash_hex`) e nunca toque nas outras.
+- **`reduce`**: `fn <nome>(results, settings)` — pura, sem `device`. Recebe a
+  lista dos membros (`#{ deviceId, deviceName, status, output, error }`) e a
+  configuração; devolve o consolidado (`report`). Para sugerir ajuste por
+  equipamento, devolva `settings_patch: #{ "<deviceId>": #{ campo: valor } }`:
+  o operador aceita com um clique e a sugestão entra na configuração `device`
+  de cada um — nada muda no equipamento até ele aplicar.
+- Ação de frota também aceita `labels`, para os títulos do consolidado.
+- Testes: `"settings": { "fleet": {...}, "device": {...} }` no teste unitário
+  simula a configuração; teste de `reduce` usa `"action": "<id da ação de
+  frota>"` com `"input": [ ...resultados... ]` e sem fixtures.
+
 ## Antes de salvar
 
 - [ ] `detect` existe, é leitura e devolve `firmware`.
@@ -257,3 +348,6 @@ escolhida — tudo declarado, nenhum código roda no navegador.
 - [ ] Escritas leem antes e são idempotentes.
 - [ ] Fixtures copiadas das respostas reais, não inventadas.
 - [ ] Nenhum comando destrutivo que o usuário não pediu.
+- [ ] Já existe plugin que faz parte disso? Use `uses` + `device.use_plugin`.
+- [ ] Aplicativo de frota: `preview` antes de `apply`, cópia e volta atrás em
+      falha, só seções com o prefixo do plugin, segredos com `secret: true`.

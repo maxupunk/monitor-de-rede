@@ -18,4 +18,14 @@ expectError?: string,
  * Firmware do equipamento simulado (`device.info.firmware`). Permite
  * testar o caminho que depende da versão — ex.: opkg × apk no OpenWrt.
  */
-firmware?: string, };
+firmware?: string, 
+/**
+ * Configuração simulada, `{ "fleet": {…}, "device": {…} }` — os padrões
+ * do esquema são aplicados como na produção.
+ */
+settings?: Record<string, unknown>, 
+/**
+ * Em teste de ação de frota com `reduce`: os resultados dos membros que a
+ * função recebe.
+ */
+input?: unknown, };

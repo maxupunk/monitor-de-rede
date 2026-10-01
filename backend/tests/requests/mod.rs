@@ -40,6 +40,7 @@ mod laya_model_load;
 mod laya_triage;
 mod maintenance_windows;
 mod monitor_interface_binding;
+mod plugin_fleet;
 mod prepare_data;
 mod process_deps;
 mod push;

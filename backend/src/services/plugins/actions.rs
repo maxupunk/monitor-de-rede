@@ -112,6 +112,7 @@ pub async fn start_from_user(
             user_id: Some(user_id),
             reason: None,
             approval,
+            batch_id: None,
         },
     )
     .await?;
@@ -143,6 +144,7 @@ pub async fn start_validation(
             user_id: Some(user_id),
             reason: None,
             approval,
+            batch_id: None,
         },
     )
     .await?;

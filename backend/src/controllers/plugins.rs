@@ -15,8 +15,9 @@ use crate::{
     dtos::{
         optional_body,
         plugins::{
-            ApprovalInput, AutoAcceptInput, AutoAcceptQuery, PluginSaveInput, ReviewAcceptInput,
-            RunActionInput, RunStarted, SessionSecretInput,
+            ApprovalInput, AutoAcceptInput, AutoAcceptQuery, BatchStarted, FleetRunInput,
+            PluginSaveInput, ReviewAcceptInput, RunActionInput, RunStarted, SessionSecretInput,
+            SettingsInput,
         },
     },
     models::plugins as plugin_rows,
@@ -25,10 +26,11 @@ use crate::{
         plugins::{
             actions, auto_accept,
             credentials::{self, CredentialInput},
-            gate,
+            fleet, gate,
             manifest::TransportKind,
             runs,
             service::{self, source},
+            settings::{self as plugin_settings, Scope},
         },
         shared::errors::{AppError, AppResult},
     },
@@ -365,6 +367,113 @@ async fn uninstall(
     Ok(format::json(actions::device_view(&ctx, device_id).await?)?)
 }
 
+// --- Frota (Aplicativos) e configuração guardada ----------------------------
+
+async fn apps(State(ctx): State<AppContext>) -> AppResult<Response> {
+    Ok(format::json(fleet::apps(&ctx.db).await?)?)
+}
+
+async fn fleet_view(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
+    Ok(format::json(fleet::view(&ctx.db, id).await?)?)
+}
+
+async fn fleet_settings(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    Json(input): Json<SettingsInput>,
+) -> AppResult<Response> {
+    let user = authenticated_user(&ctx, &headers).await?;
+    let plugin = service::find(&ctx.db, id).await?;
+    let saved =
+        plugin_settings::save(&ctx.db, &plugin, Scope::Fleet, input.value, Some(user.id)).await?;
+    audit_plugin(
+        &ctx,
+        &headers,
+        AuditAction::Update,
+        &plugin,
+        "Alterou a configuração da frota",
+    )
+    .await;
+    Ok(format::json(saved)?)
+}
+
+async fn device_settings(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Path((device_id, plugin_id)): Path<(i64, i64)>,
+    Json(input): Json<SettingsInput>,
+) -> AppResult<Response> {
+    let user = authenticated_user(&ctx, &headers).await?;
+    let device = actions::device(&ctx, device_id).await?;
+    let plugin = service::find(&ctx.db, plugin_id).await?;
+    if !service::is_installed(&ctx.db, device_id, plugin_id).await? {
+        return Err(AppError::business_rule(
+            "Instale o plugin neste equipamento antes de configurá-lo.",
+        ));
+    }
+    let saved = plugin_settings::save(
+        &ctx.db,
+        &plugin,
+        Scope::Device(device_id),
+        input.value,
+        Some(user.id),
+    )
+    .await?;
+    audit_plugin(
+        &ctx,
+        &headers,
+        AuditAction::Update,
+        &plugin,
+        &format!("Alterou a configuração do plugin em {}", device.name),
+    )
+    .await;
+    Ok(format::json(saved)?)
+}
+
+async fn fleet_run(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Path((plugin_id, action)): Path<(i64, String)>,
+    body: String,
+) -> AppResult<Response> {
+    let user = authenticated_user(&ctx, &headers).await?;
+    let input: FleetRunInput = optional_body(&body);
+    let batch_id = fleet::start(
+        &ctx,
+        plugin_id,
+        &action,
+        &input.device_ids,
+        input.params,
+        input.confirm_write,
+        Some(user.id),
+    )
+    .await?;
+    Ok((StatusCode::ACCEPTED, Json(BatchStarted { batch_id })).into_response())
+}
+
+async fn batch_show(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
+    Ok(format::json(fleet::find_view(&ctx.db, id).await?)?)
+}
+
+async fn batch_cancel(Path(id): Path<i64>) -> AppResult<Response> {
+    if fleet::cancel(id) {
+        Ok(StatusCode::NO_CONTENT.into_response())
+    } else {
+        Err(AppError::not_found("O lote já terminou."))
+    }
+}
+
+async fn batch_apply_patch(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> AppResult<Response> {
+    let user = authenticated_user(&ctx, &headers).await?;
+    let view = fleet::apply_patch(&ctx.db, id, Some(user.id)).await?;
+    Ok(format::json(view)?)
+}
+
 // --- Credenciais ------------------------------------------------------------
 
 async fn credentials_index(
@@ -527,6 +636,17 @@ async fn auto_accept_destroy(
 pub fn routes() -> Routes {
     Routes::new()
         .add("/plugins", get(index).post(store))
+        .add("/plugins/apps", get(apps))
+        .add("/plugins/{id}/fleet", get(fleet_view))
+        .add("/plugins/{id}/settings", put(fleet_settings))
+        .add("/plugins/{id}/fleet/actions/{action}", post(fleet_run))
+        .add(
+            "/devices/{id}/plugins/{plugin_id}/settings",
+            put(device_settings),
+        )
+        .add("/plugin-batches/{id}", get(batch_show))
+        .add("/plugin-batches/{id}/cancel", post(batch_cancel))
+        .add("/plugin-batches/{id}/apply-patch", post(batch_apply_patch))
         .add("/plugins/import", post(import))
         .add("/plugins/{id}", get(show).put(update).delete(destroy))
         .add("/plugins/{id}/export", get(export))

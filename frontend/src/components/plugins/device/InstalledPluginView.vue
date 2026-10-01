@@ -80,8 +80,44 @@
       </v-list-item>
     </v-list>
 
+    <!-- Ajuste deste equipamento (configuração `device` do plugin) -->
+    <v-card v-if="deviceSchema" border flat class="rounded-lg mt-4">
+      <v-card-title class="d-flex align-center ga-2 text-subtitle-1 font-weight-bold">
+        <v-icon color="primary">mdi-tune-variant</v-icon>
+        Ajustes deste equipamento
+      </v-card-title>
+      <v-card-subtitle>
+        Guardados no sistema; valem só aqui e sobrepõem a configuração geral do aplicativo.
+      </v-card-subtitle>
+      <v-card-text>
+        <SettingsForm ref="settingsForm" v-model="settingsDraft" :schema="deviceSchema" />
+      </v-card-text>
+      <v-card-actions>
+        <v-spacer></v-spacer>
+        <v-btn
+          color="primary"
+          variant="flat"
+          prepend-icon="mdi-content-save-outline"
+          :loading="savingSettings"
+          @click="saveSettings"
+        >
+          Salvar ajustes
+        </v-btn>
+      </v-card-actions>
+    </v-card>
+
     <!-- Operação do plugin neste equipamento -->
     <div class="d-flex flex-wrap ga-2 mt-4">
+      <v-btn
+        v-if="item.plugin.surfaces.includes('fleet')"
+        size="small"
+        color="secondary"
+        variant="flat"
+        prepend-icon="mdi-apps"
+        :to="'/apps/' + item.plugin.id"
+      >
+        Abrir aplicativo
+      </v-btn>
       <v-btn
         size="small"
         color="success"
@@ -164,12 +200,13 @@
       :run-id="runDialog.runId"
       :title="runDialog.title"
       :kind="runDialog.kind"
+      :labels="runDialog.labels"
     />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import type { DevicePluginItem } from '@/bindings/DevicePluginItem'
 import type { OutputKind } from '@/bindings/OutputKind'
 import type { PluginAction } from '@/bindings/PluginAction'
@@ -183,6 +220,8 @@ import {
 import PluginActionDialog from '@/components/plugins/PluginActionDialog.vue'
 import PluginRunDialog from '@/components/plugins/PluginRunDialog.vue'
 import PluginEditorDialog from '@/components/plugins/PluginEditorDialog.vue'
+import SettingsForm from '@/components/plugins/settings/SettingsForm.vue'
+import { defaultsOf, normalizeValue } from '@/utils/pluginSettings'
 import PluginAbout from './PluginAbout.vue'
 import PluginPanelView from './PluginPanelView.vue'
 
@@ -215,7 +254,38 @@ const runDialog = reactive({
   runId: null as number | null,
   title: '',
   kind: undefined as OutputKind | undefined,
+  labels: undefined as Record<string, string> | undefined,
 })
+
+const settingsForm = ref<{ validate: () => Promise<boolean> } | null>(null)
+const settingsDraft = ref<Record<string, unknown>>({})
+const savingSettings = ref(false)
+const deviceSchema = computed(() => props.item.plugin.settings?.device ?? null)
+
+watch(
+  () => props.item.deviceSettings,
+  (saved) => {
+    settingsDraft.value = { ...defaultsOf(deviceSchema.value), ...(saved ?? {}) }
+  },
+  { immediate: true }
+)
+
+async function saveSettings() {
+  if (settingsForm.value && !(await settingsForm.value.validate())) return
+  savingSettings.value = true
+  try {
+    await store.saveDeviceSettings(
+      props.deviceId,
+      props.item.plugin.id,
+      normalizeValue(deviceSchema.value, settingsDraft.value)
+    )
+    notify('Ajustes salvos. Aplique a configuração para levar ao equipamento.')
+  } catch (err: unknown) {
+    notify(describe(err, 'Falha ao salvar os ajustes'), 'error')
+  } finally {
+    savingSettings.value = false
+  }
+}
 
 const status = computed(() => statusPresentation(props.item.plugin.status))
 const compat = computed(() => compatPresentation(props.item.compat))
@@ -255,6 +325,7 @@ async function runAction(params: Record<string, unknown>, confirmWrite: boolean)
   runDialog.runId = null
   runDialog.title = action.title
   runDialog.kind = action.output
+  runDialog.labels = action.labels
   runDialog.open = true
   try {
     runDialog.runId = await store.runAction(

@@ -17,6 +17,7 @@ const SOURCES: &[(&str, &str)] = &[
         "linux-ssh-status",
         include_str!("linux-ssh-status.nmplugin.json"),
     ),
+    ("openwrt-wifi", include_str!("openwrt-wifi.nmplugin.json")),
     (
         "http-page-info",
         include_str!("http-page-info.nmplugin.json"),

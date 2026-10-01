@@ -3,4 +3,4 @@
 /**
  * Como a tela apresenta o resultado de uma ação.
  */
-export type OutputKind = "text" | "table" | "kv" | "json";
+export type OutputKind = "text" | "table" | "kv" | "json" | "report";

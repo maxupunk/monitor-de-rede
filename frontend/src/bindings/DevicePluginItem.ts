@@ -9,4 +9,8 @@ export type DevicePluginItem = { plugin: PluginSummary, compat: Compat, reasons:
 /**
  * Instalado neste equipamento: ganha a própria aba.
  */
-installed: boolean, installedAt: string | null, };
+installed: boolean, installedAt: string | null, 
+/**
+ * Ajuste deste equipamento (segredos mascarados), quando o plugin tem.
+ */
+deviceSettings: Record<string, unknown> | null, };

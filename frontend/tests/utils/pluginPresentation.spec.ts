@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import type { DevicePluginItem } from '@/bindings/DevicePluginItem'
 import type { DevicePluginsView } from '@/bindings/DevicePluginsView'
+import type { Surface } from '@/bindings/Surface'
 import { installedPluginTabs, pluginTab } from '@/utils/pluginPresentation'
 
-function item(id: number, installed: boolean, panelTitle?: string): DevicePluginItem {
+function item(
+  id: number,
+  installed: boolean,
+  panelTitle?: string,
+  surfaces: Surface[] = ['device']
+): DevicePluginItem {
   return {
     plugin: {
       id,
@@ -26,6 +32,9 @@ function item(id: number, installed: boolean, panelTitle?: string): DevicePlugin
             keyColumn: 'name',
           }
         : null,
+      surfaces,
+      settings: null,
+      fleet: null,
       risk: null,
       lastTestAt: null,
       lastTestOk: null,
@@ -36,16 +45,23 @@ function item(id: number, installed: boolean, panelTitle?: string): DevicePlugin
     reasons: [],
     installed,
     installedAt: installed ? '2026-10-01T00:00:00Z' : null,
+    deviceSettings: null,
   }
 }
 
 describe('abas de plugins instalados', () => {
-  it('só os instalados viram aba, com o título e o ícone da tela própria', () => {
+  it('só os instalados com tela de dispositivo viram aba, com título e ícone próprios', () => {
     const view: DevicePluginsView = {
       deviceId: 2,
       platform: 'openwrt',
       firmware: null,
-      plugins: [item(1, true, 'Gerenciador de pacotes'), item(2, false), item(3, true)],
+      plugins: [
+        item(1, true, 'Gerenciador de pacotes'),
+        item(2, false),
+        item(3, true),
+        item(4, true, undefined, ['fleet']),
+        item(5, true, undefined, ['device', 'fleet']),
+      ],
       credentials: [],
       runs: [],
       agents: [],
@@ -54,6 +70,7 @@ describe('abas de plugins instalados', () => {
     expect(tabs.map((tab) => [tab.id, tab.title, tab.icon])).toEqual([
       [1, 'Gerenciador de pacotes', 'mdi-package-variant-closed'],
       [3, 'Plugin 3', 'mdi-puzzle'],
+      [5, 'Plugin 5', 'mdi-puzzle'],
     ])
     expect(pluginTab(3)).toBe('plugin-3')
   })

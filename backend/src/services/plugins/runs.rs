@@ -31,9 +31,12 @@ use super::{
     manifest::{PluginAction, TransportKind, DETECT_ACTION},
     package::{CompatEntry, PluginPackage},
     params,
-    runtime::{self, DeviceInfo, ExecutionContext, Limits, Observer, TranscriptEntry},
+    runtime::{
+        self, DeviceInfo, ExecutionContext, Extras, LibraryPlugin, Limits, Observer,
+        TranscriptEntry,
+    },
     service::{self, status},
-    testing,
+    settings, testing,
     transport::{agent::AgentTransport, local::LocalTransport, DeviceTransport},
 };
 use crate::{
@@ -59,6 +62,8 @@ pub enum Origin {
     User,
     Ai,
     Validation,
+    /// Parte de uma ação de frota (vários equipamentos).
+    Fleet,
 }
 
 impl Origin {
@@ -68,6 +73,7 @@ impl Origin {
             Self::User => "user",
             Self::Ai => "ai",
             Self::Validation => "validation",
+            Self::Fleet => "fleet",
         }
     }
 }
@@ -87,7 +93,7 @@ pub fn approval_for(plugin: &plugins::Model, origin: Origin, ai_auto_accept: boo
     let active = plugin.status == status::ACTIVE;
     match origin {
         Origin::Ai if ai_auto_accept => Approval::Auto,
-        Origin::User | Origin::Validation | Origin::Ai if active => Approval::Auto,
+        Origin::User | Origin::Validation | Origin::Fleet | Origin::Ai if active => Approval::Auto,
         _ => Approval::PerCall,
     }
 }
@@ -102,6 +108,8 @@ pub struct RunSpec {
     /// Motivo declarado (IA), repassado a cada pedido de aprovação.
     pub reason: Option<String>,
     pub approval: Approval,
+    /// Lote de frota a que a execução pertence.
+    pub batch_id: Option<i64>,
 }
 
 /// Uma execução pronta para rodar: linha criada, credenciais resolvidas.
@@ -111,6 +119,7 @@ pub struct Prepared {
     package: PluginPackage,
     transport: Arc<dyn DeviceTransport>,
     credentials: runtime::Credentials,
+    extras: Extras,
     cancel: CancellationToken,
 }
 
@@ -205,15 +214,19 @@ pub async fn prepare(ctx: &AppContext, spec: RunSpec) -> AppResult<Prepared> {
     let resolved =
         credentials::resolve(&ctx.db, spec.device.id, &package.manifest.transports).await?;
     let transport = transport_for(ctx, resolved.via_probe_id).await?;
+    let extras = load_extras(&ctx.db, &spec.plugin, &package, spec.device.id).await?;
 
     let run = insert_run(
         &ctx.db,
-        Some(spec.plugin.id),
-        &spec.device,
-        spec.user_id,
-        &spec.action,
-        spec.origin,
-        spec.params.clone(),
+        NewRun {
+            plugin_id: Some(spec.plugin.id),
+            device: &spec.device,
+            user_id: spec.user_id,
+            action: &spec.action,
+            origin: spec.origin,
+            params: spec.params.clone(),
+            batch_id: spec.batch_id,
+        },
     )
     .await?;
     audit_execution(
@@ -236,8 +249,60 @@ pub async fn prepare(ctx: &AppContext, spec: RunSpec) -> AppResult<Prepared> {
         package,
         transport,
         credentials: resolved.credentials,
+        extras,
         cancel,
     })
+}
+
+/// Configuração guardada e plugins reaproveitados (`uses`) da execução.
+///
+/// # Errors
+///
+/// Erro do banco ou de decifra da configuração.
+pub async fn load_extras<C: ConnectionTrait>(
+    db: &C,
+    plugin: &plugins::Model,
+    package: &PluginPackage,
+    device_id: i64,
+) -> AppResult<Extras> {
+    let mut extras = Extras::default();
+    if package.manifest.settings.is_some() {
+        let effective = settings::effective(db, plugin, Some(device_id)).await?;
+        extras.settings = effective.value;
+        extras.secrets = effective.secrets;
+    }
+    extras.library = load_library(db, &package.manifest.uses).await?;
+    Ok(extras)
+}
+
+/// Os plugins ativos que `uses` cita, para `device.use_plugin`.
+///
+/// # Errors
+///
+/// Erro do banco.
+pub async fn load_library<C: ConnectionTrait>(
+    db: &C,
+    uses: &[String],
+) -> AppResult<Vec<LibraryPlugin>> {
+    let mut library = Vec::new();
+    for slug in uses {
+        let found = plugins::Entity::find()
+            .filter(plugins::Column::Slug.eq(slug.clone()))
+            .filter(plugins::Column::Status.eq(status::ACTIVE))
+            .filter(plugins::Column::DeviceId.is_null())
+            .order_by_desc(plugins::Column::Id)
+            .one(db)
+            .await?;
+        if let Some(model) = found {
+            let package = service::package_of(&model)?;
+            library.push(LibraryPlugin {
+                slug: slug.clone(),
+                manifest: package.manifest,
+                script: package.script,
+            });
+        }
+    }
+    Ok(library)
 }
 
 fn device_ip(device: &devices::Model) -> AppResult<String> {
@@ -251,27 +316,31 @@ fn device_ip(device: &devices::Model) -> AppResult<String> {
     Ok(ip)
 }
 
-async fn insert_run<C: ConnectionTrait>(
-    db: &C,
+/// Uma execução prestes a começar (a linha de auditoria em `plugin_runs`).
+struct NewRun<'a> {
     plugin_id: Option<i64>,
-    device: &devices::Model,
+    device: &'a devices::Model,
     user_id: Option<i64>,
-    action: &str,
+    action: &'a str,
     origin: Origin,
     params: Value,
-) -> AppResult<plugin_runs::Model> {
+    batch_id: Option<i64>,
+}
+
+async fn insert_run<C: ConnectionTrait>(db: &C, run: NewRun<'_>) -> AppResult<plugin_runs::Model> {
     Ok(plugin_runs::ActiveModel {
-        plugin_id: Set(plugin_id),
-        device_id: Set(device.id),
-        user_id: Set(user_id),
-        action: Set(action.chars().take(64).collect()),
-        origin: Set(origin.as_str().to_owned()),
+        plugin_id: Set(run.plugin_id),
+        device_id: Set(run.device.id),
+        user_id: Set(run.user_id),
+        action: Set(run.action.chars().take(64).collect()),
+        origin: Set(run.origin.as_str().to_owned()),
         status: Set("running".to_owned()),
-        params: Set(Some(params)),
+        params: Set(Some(run.params)),
         output: Set(None),
         transcript: Set(json!([])),
         error: Set(None),
         finished_at: Set(None),
+        batch_id: Set(run.batch_id),
         ..Default::default()
     }
     .insert(db)
@@ -306,6 +375,7 @@ async fn audit_execution<C: ConnectionTrait>(
                         Origin::Ai => "A IA",
                         Origin::User => "O operador",
                         Origin::Validation => "A validação",
+                        Origin::Fleet => "A frota",
                     },
                     device.name,
                     reason
@@ -376,6 +446,7 @@ impl Prepared {
         observer: Observer,
     ) -> ExecutionContext {
         ExecutionContext {
+            extras: self.extras.clone(),
             device: device_info(&self.spec.device),
             transports: self.package.manifest.transports.clone(),
             action_effect: effect,
@@ -695,12 +766,15 @@ pub async fn run_ad_hoc(ctx: &AppContext, spec: AdHocSpec) -> AppResult<plugin_r
     let effect = spec.effect.max(spec.request.classified_effect());
     let run = insert_run(
         &ctx.db,
-        None,
-        &spec.device,
-        spec.user_id,
-        transport_kind.as_str(),
-        Origin::Ai,
-        spec.request.params(),
+        NewRun {
+            plugin_id: None,
+            device: &spec.device,
+            user_id: spec.user_id,
+            action: transport_kind.as_str(),
+            origin: Origin::Ai,
+            params: spec.request.params(),
+            batch_id: None,
+        },
     )
     .await?;
     audit_execution(
@@ -732,6 +806,7 @@ pub async fn run_ad_hoc(ctx: &AppContext, spec: AdHocSpec) -> AppResult<plugin_r
         "access",
         spec.request.params(),
         ExecutionContext {
+            extras: Extras::default(),
             device: device_info(&spec.device),
             transports: vec![transport_kind],
             action_effect: effect,

@@ -125,6 +125,11 @@ const routes = [
         meta: { requiresAdmin: true },
       },
       {
+        path: 'apps/:id',
+        name: 'plugin-app',
+        component: () => import('../pages/PluginAppPage.vue'),
+      },
+      {
         path: 'plugins',
         name: 'plugins',
         component: () => import('../pages/PluginsPage.vue'),

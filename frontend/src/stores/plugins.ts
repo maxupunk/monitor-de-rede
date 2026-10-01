@@ -230,6 +230,21 @@ export const usePluginsStore = defineStore('plugins', () => {
     )
   }
 
+  /** Salva o ajuste deste equipamento (configuração `device` do plugin). */
+  async function saveDeviceSettings(
+    deviceId: number,
+    pluginId: number,
+    value: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
+    const saved = await apiService.put<Record<string, unknown>>(
+      `/devices/${deviceId}/plugins/${pluginId}/settings`,
+      { value }
+    )
+    const item = deviceViews.value[deviceId]?.plugins.find((entry) => entry.plugin.id === pluginId)
+    if (item) item.deviceSettings = saved
+    return saved
+  }
+
   /** A execução como o SSE a deixou (início, acessos, fim). */
   function runById(deviceId: number, runId: number | null): PluginRunView | null {
     if (runId === null) return null
@@ -379,6 +394,7 @@ export const usePluginsStore = defineStore('plugins', () => {
     runAction,
     installPlugin,
     uninstallPlugin,
+    saveDeviceSettings,
     runById,
     validatePlugin,
     cancelRun,

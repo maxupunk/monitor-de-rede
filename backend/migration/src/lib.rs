@@ -52,6 +52,7 @@ mod m20260922_000002_probes_device_id;
 mod m20260922_000003_metrics_1m;
 mod m20260930_000001_device_plugins;
 mod m20261001_000001_device_plugin_installs;
+mod m20261002_000001_plugin_fleet;
 
 pub struct Migrator;
 
@@ -171,6 +172,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260922_000003_metrics_1m::Migration),
             Box::new(m20260930_000001_device_plugins::Migration),
             Box::new(m20261001_000001_device_plugin_installs::Migration),
+            Box::new(m20261002_000001_plugin_fleet::Migration),
             // inject-above (do not remove this comment)
         ]
     }

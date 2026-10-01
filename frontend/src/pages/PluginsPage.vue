@@ -35,6 +35,32 @@
       store.error
     }}</v-alert>
 
+    <v-card v-if="appsStore.apps.length > 0" elevation="2" class="rounded-lg mb-4">
+      <v-card-title class="d-flex align-center ga-2">
+        <v-icon color="primary">mdi-apps</v-icon>
+        Aplicativos
+      </v-card-title>
+      <v-card-subtitle>
+        Plugins que trabalham com vários equipamentos de uma vez — também no menu Aplicativos.
+      </v-card-subtitle>
+      <v-card-text>
+        <v-row dense>
+          <v-col v-for="app in appsStore.apps" :key="app.id" cols="12" sm="6" lg="4">
+            <v-card border flat class="rounded-lg h-100" :to="'/apps/' + app.id">
+              <v-card-item
+                :prepend-icon="app.icon"
+                :title="app.title"
+                :subtitle="`${app.members} equipamento(s)`"
+              ></v-card-item>
+              <v-card-text v-if="app.description" class="text-body-2">
+                {{ app.description }}
+              </v-card-text>
+            </v-card>
+          </v-col>
+        </v-row>
+      </v-card-text>
+    </v-card>
+
     <v-card elevation="2" class="rounded-lg">
       <v-card-text>
         <v-text-field
@@ -183,6 +209,7 @@ import PluginEditorDialog from '@/components/plugins/PluginEditorDialog.vue'
 import PluginReviewDialog from '@/components/plugins/PluginReviewDialog.vue'
 import { confirm } from '@/composables/useConfirm'
 import { usePluginsStore } from '@/stores/plugins'
+import { usePluginAppsStore } from '@/stores/pluginApps'
 import {
   readPackageFile,
   severityPresentation,
@@ -191,6 +218,7 @@ import {
 } from '@/utils/pluginPresentation'
 
 const store = usePluginsStore()
+const appsStore = usePluginAppsStore()
 const fileInput = ref<HTMLInputElement | null>(null)
 const search = ref('')
 const feedback = reactive({ show: false, text: '', color: 'success' })
@@ -220,6 +248,7 @@ const filtered = computed(() => {
 
 onMounted(() => {
   void store.fetchLibrary()
+  void appsStore.fetchApps()
 })
 
 function notify(text: string, color = 'success') {
@@ -240,6 +269,7 @@ function openEditor(pluginId: number | null) {
 async function step(item: PluginSummary, action: 'promote' | 'enable' | 'disable') {
   try {
     await store.lifecycle(item.id, action)
+    await appsStore.fetchApps()
   } catch (err: unknown) {
     notify(describe(err, 'Falha na operação'), 'error')
   }
@@ -255,6 +285,7 @@ async function remove(item: PluginSummary) {
   if (!ok) return
   try {
     await store.deletePlugin(item.id)
+    await appsStore.fetchApps()
   } catch (err: unknown) {
     notify(describe(err, 'Falha ao excluir'), 'error')
   }
