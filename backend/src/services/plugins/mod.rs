@@ -26,6 +26,7 @@ pub mod effect;
 pub mod fingerprint;
 pub mod fleet;
 pub mod gate;
+pub mod identity;
 pub mod manifest;
 pub mod package;
 pub mod params;

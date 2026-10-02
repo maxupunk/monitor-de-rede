@@ -140,6 +140,11 @@ pub struct TranscriptEntry {
 
 pub type Observer = Arc<dyn Fn(&TranscriptEntry) + Send + Sync>;
 
+/// Prefixo do `kind` do aviso "começou este acesso" que o observador recebe
+/// antes da resposta (não entra no transcript): quem espera vê o que está
+/// rodando agora, e não só o que já terminou.
+pub const STEP_PREFIX: &str = "step:";
+
 /// Outro plugin que este pode chamar (`device.use_plugin`).
 #[derive(Debug, Clone)]
 pub struct LibraryPlugin {
@@ -673,6 +678,19 @@ impl Inner {
         }
 
         let call = build(profile);
+        if let Some(observer) = &self.context.observer {
+            observer(&TranscriptEntry {
+                seq: 0,
+                kind: format!("{STEP_PREFIX}{}", transport.as_str()),
+                request: self.mask(summary),
+                effect: Some(effect),
+                status: None,
+                output: String::new(),
+                duration_ms: 0,
+                origin: self.context.transport.origin(),
+                at: chrono::Utc::now().to_rfc3339(),
+            });
+        }
         let started = Instant::now();
         let reply = self.runtime.block_on(self.context.transport.execute(&call));
         let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);

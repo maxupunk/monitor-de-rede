@@ -115,8 +115,12 @@ export function operatingSystemSourceLabel(origem: string | null | undefined): s
       return 'Identificado pelo SNMP do equipamento'
     case 'sonda':
       return 'Identificado pela sonda do servidor SSH'
+    case 'plugin':
+      return 'Lido no próprio equipamento por um plugin'
+    case 'laya':
+      return 'Palpite do Laya (sem prova do equipamento) — confirme se puder'
     case 'cadastro':
-      return 'Deduzido do fabricante informado no cadastro'
+      return 'Deduzido do fabricante informado no cadastro (hardware, não o sistema)'
     case 'padrão':
       return 'Não foi possível identificar — confirme antes de aplicar'
     default:

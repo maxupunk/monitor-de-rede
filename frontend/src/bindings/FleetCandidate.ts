@@ -2,6 +2,7 @@
 import type { Compat } from "./Compat";
 
 /**
- * Equipamento que pode entrar na frota.
+ * Equipamento cadastrado fora da frota. O incompatível também vem, com o
+ * porquê — escondê-lo deixaria o operador sem saber por que ele não aparece.
  */
 export type FleetCandidate = { deviceId: number, name: string, ip: string | null, compat: Compat, reasons: Array<string>, };

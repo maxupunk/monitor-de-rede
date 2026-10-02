@@ -5,6 +5,7 @@ import type { BatchStarted } from '@/bindings/BatchStarted'
 import type { FleetView } from '@/bindings/FleetView'
 import type { PluginApp } from '@/bindings/PluginApp'
 import type { PluginBatchView } from '@/bindings/PluginBatchView'
+import type { TranscriptEntry } from '@/bindings/TranscriptEntry'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -16,6 +17,15 @@ function isBatch(value: unknown): value is PluginBatchView {
     typeof value.id === 'number' &&
     typeof value.pluginId === 'number' &&
     Array.isArray(value.devices)
+  )
+}
+
+function isEntry(value: unknown): value is TranscriptEntry {
+  return (
+    isRecord(value) &&
+    typeof value.request === 'string' &&
+    typeof value.kind === 'string' &&
+    typeof value.durationMs === 'number'
   )
 }
 
@@ -32,6 +42,9 @@ export const usePluginAppsStore = defineStore('pluginApps', () => {
   const fleets = ref<Record<number, FleetView>>({})
   const loading = ref(false)
   const error = ref<string | null>(null)
+  /** O último acesso de cada execução (o andamento ao vivo de um lote). */
+  const lastSteps = ref<Record<number, TranscriptEntry>>({})
+  const identifying = ref(false)
 
   /** Menu "Aplicativos" — carregado na abertura do layout. */
   async function fetchApps(): Promise<void> {
@@ -96,13 +109,34 @@ export const usePluginAppsStore = defineStore('pluginApps', () => {
     action: string,
     deviceIds: number[],
     confirmWrite: boolean,
-    params: Record<string, unknown> = {}
+    params: Record<string, unknown> = {},
+    /** Parâmetros de cada equipamento, por cima dos comuns. */
+    deviceParams?: Record<number, Record<string, unknown>>
   ): Promise<number> {
     const started = await apiService.post<BatchStarted>(
       `/plugins/${pluginId}/fleet/actions/${encodeURIComponent(action)}`,
-      { deviceIds, params, confirmWrite }
+      { deviceIds, params, confirmWrite, deviceParams }
     )
     return started.batchId
+  }
+
+  /**
+   * "Verificar sistema": vai aos equipamentos (SSH/SNMP; Laya na dúvida) e
+   * devolve a página com a compatibilidade refeita. Sem lista, os em dúvida.
+   */
+  async function identify(pluginId: number, deviceIds: number[] = []): Promise<FleetView> {
+    identifying.value = true
+    try {
+      const view = await apiService.post<FleetView>(
+        `/plugins/${pluginId}/fleet/identify`,
+        { deviceIds },
+        { timeoutMs: 120_000 }
+      )
+      fleets.value[pluginId] = view
+      return view
+    } finally {
+      identifying.value = false
+    }
   }
 
   async function cancelBatch(batchId: number): Promise<void> {
@@ -144,11 +178,20 @@ export const usePluginAppsStore = defineStore('pluginApps', () => {
     if (isBatch(data.batch)) upsertBatch(data.batch)
   }
 
+  function applyRunOutput(data: Record<string, unknown>) {
+    const runId = Number(data.runId)
+    if (Number.isFinite(runId) && isEntry(data.entry)) lastSteps.value[runId] = data.entry
+  }
+
   return {
     apps,
     fleets,
     loading,
     error,
+    lastSteps,
+    identifying,
+    identify,
+    applyRunOutput,
     fetchApps,
     loadFleet,
     saveFleetSettings,

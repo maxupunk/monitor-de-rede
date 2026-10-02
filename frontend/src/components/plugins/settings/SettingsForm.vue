@@ -52,6 +52,18 @@
             density="comfortable"
             @update:model-value="(selected) => set(field.name, selected)"
           ></v-select>
+          <v-combobox
+            v-else-if="suggestions?.[field.name]"
+            :model-value="String(value[field.name] ?? '')"
+            :items="suggestions[field.name]"
+            :label="field.label + (field.required ? ' *' : '')"
+            :hint="field.hint"
+            :persistent-hint="Boolean(field.hint)"
+            :rules="field.rules"
+            variant="outlined"
+            density="comfortable"
+            @update:model-value="(chosen) => set(field.name, chosen ?? '')"
+          ></v-combobox>
           <v-text-field
             v-else
             :model-value="value[field.name] ?? ''"
@@ -88,12 +100,18 @@ const props = defineProps<{
   disabled?: boolean
   /** Uma coluna só (diálogos estreitos). */
   compact?: boolean
+  /** Valores que o campo oferece (ex.: as redes que os roteadores têm). */
+  suggestions?: Record<string, string[]>
+  /** Só estes campos (ex.: os rádios que os equipamentos têm); sem lista, todos. */
+  only?: string[]
 }>()
 
 const emit = defineEmits<{ 'update:modelValue': [value: Record<string, unknown>] }>()
 
 const form = ref<{ validate: () => Promise<{ valid: boolean }> } | null>(null)
-const fields = computed(() => fieldsOf(props.schema))
+const fields = computed(() =>
+  fieldsOf(props.schema).filter((field) => !props.only || props.only.includes(field.name))
+)
 const value = computed(() => props.modelValue ?? {})
 
 function set(name: string, next: unknown) {
@@ -110,11 +128,16 @@ function inputType(field: SchemaField): string {
   return field.kind === 'integer' || field.kind === 'number' ? 'number' : 'text'
 }
 
+/**
+ * Segredo já guardado volta mascarado: aí a dica explica como mantê-lo. Fora
+ * isso vale a do esquema (num parâmetro, ex.: "vazio = manter a do roteador").
+ */
 function secretHint(field: SchemaField): string | undefined {
   if (!field.secret) return undefined
-  return value.value[field.name] === SECRET_MASK
-    ? 'Guardada cifrada. Deixe como está para manter, ou digite uma nova.'
-    : 'Guardada cifrada; nunca volta para a tela.'
+  if (value.value[field.name] === SECRET_MASK) {
+    return 'Guardada cifrada. Deixe como está para manter, ou digite uma nova.'
+  }
+  return field.hint ?? 'Não volta para a tela nem fica no histórico.'
 }
 
 async function validate(): Promise<boolean> {

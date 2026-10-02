@@ -117,6 +117,7 @@ pub async fn collect(
         name: Some(&dispositivo.name),
         vendor: dispositivo.vendor.as_deref(),
         model: dispositivo.model.as_deref(),
+        observed: systems::Evidence::from_device(dispositivo).observed,
     });
 
     // Num container em rede bridge a rota responde com o IP da ponte — correto
@@ -332,10 +333,19 @@ const TETO_DE_BYTES: usize = 255;
 /// leitura devolve `None` sem afetar o "a porta está aberta": são duas
 /// perguntas, e a segunda não pode estragar a primeira.
 pub async fn sonda_ssh(host: IpAddr) -> (bool, Option<String>) {
+    sonda_ssh_em(host, 22).await
+}
+
+/// A mesma sonda numa porta escolhida — o SSH de muitos equipamentos não está
+/// na 22 (a porta da credencial cadastrada diz onde está).
+pub async fn sonda_ssh_em(host: IpAddr, porta: u16) -> (bool, Option<String>) {
     use tokio::io::AsyncReadExt;
 
-    let Ok(Ok(mut fluxo)) =
-        timeout(TETO_DA_SONDA, TcpStream::connect(SocketAddr::new(host, 22))).await
+    let Ok(Ok(mut fluxo)) = timeout(
+        TETO_DA_SONDA,
+        TcpStream::connect(SocketAddr::new(host, porta)),
+    )
+    .await
     else {
         return (false, None);
     };

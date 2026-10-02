@@ -104,6 +104,26 @@ describe('pluginApps store', () => {
     expect(get).toHaveBeenCalledTimes(1)
   })
 
+  it('parâmetros de cada equipamento vão junto com os comuns', async () => {
+    const post = vi.spyOn(apiService, 'post').mockResolvedValue({ batchId: 30 })
+    const store = usePluginAppsStore()
+    const id = await store.runAction(
+      3,
+      'radios',
+      [7, 8],
+      true,
+      {},
+      { 7: { radio_2g_channel: '6' } }
+    )
+    expect(id).toBe(30)
+    expect(post).toHaveBeenCalledWith('/plugins/3/fleet/actions/radios', {
+      deviceIds: [7, 8],
+      params: {},
+      confirmWrite: true,
+      deviceParams: { 7: { radio_2g_channel: '6' } },
+    })
+  })
+
   it('ignora lote de aplicativo não aberto e evento malformado', () => {
     const store = usePluginAppsStore()
     store.applyBatchUpdated({ batch: batch() })

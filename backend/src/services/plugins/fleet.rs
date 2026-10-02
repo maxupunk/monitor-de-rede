@@ -80,6 +80,24 @@ fn resolve_action(manifest: &PluginManifest, id: &str) -> Option<FleetAction> {
         return Some(action.clone());
     }
     let fleet = manifest.fleet.as_ref()?;
+    // A pré-visualização de uma ação de frota roda como lote também.
+    if let Some(owner) = fleet
+        .actions
+        .iter()
+        .find(|action| action.preview.as_deref() == Some(id))
+    {
+        return Some(FleetAction {
+            id: id.to_owned(),
+            title: format!("Pré-visualizar: {}", owner.title),
+            description: None,
+            icon: None,
+            action: id.to_owned(),
+            reduce: None,
+            labels: None,
+            preview: None,
+            current: None,
+        });
+    }
     (fleet.status_action.as_deref() == Some(id)).then(|| FleetAction {
         id: id.to_owned(),
         title: manifest
@@ -90,6 +108,8 @@ fn resolve_action(manifest: &PluginManifest, id: &str) -> Option<FleetAction> {
         action: id.to_owned(),
         reduce: None,
         labels: None,
+        preview: None,
+        current: None,
     })
 }
 
@@ -207,6 +227,7 @@ pub async fn view<C: ConnectionTrait>(db: &C, plugin_id: i64) -> AppResult<Fleet
             platform: facts.platform,
             firmware: facts.firmware,
             compat: verdict.level,
+            reasons: verdict.reasons,
             installed_at: installed_at.clone(),
             credentials_ready: credentials_ready(db, device.id, &package.manifest).await?,
             settings: settings::view(db, &plugin, settings::Scope::Device(device.id)).await?,
@@ -230,15 +251,13 @@ pub async fn view<C: ConnectionTrait>(db: &C, plugin_id: i64) -> AppResult<Fleet
                 &package.compatibility,
                 &DeviceFacts::from_device(&device),
             );
-            if verdict.level != compat::Compat::Incompatible {
-                candidates.push(FleetCandidate {
-                    device_id: device.id,
-                    name: device.name,
-                    ip: device.ip_address,
-                    compat: verdict.level,
-                    reasons: verdict.reasons,
-                });
-            }
+            candidates.push(FleetCandidate {
+                device_id: device.id,
+                name: device.name,
+                ip: device.ip_address,
+                compat: verdict.level,
+                reasons: verdict.reasons,
+            });
         }
         candidates.sort_by_key(|candidate| std::cmp::Reverse(candidate.compat));
     }
@@ -326,6 +345,33 @@ async fn find_batch<C: ConnectionTrait>(db: &C, batch_id: i64) -> AppResult<plug
         .ok_or_else(|| AppError::not_found("Lote não encontrado."))
 }
 
+/// Uma ação de frota a disparar.
+#[derive(Debug, Clone, Default)]
+pub struct FleetRun {
+    /// Ação de frota, a de estado ou a pré-visualização de uma delas.
+    pub action: String,
+    /// Só estes membros; vazio = todos.
+    pub device_ids: Vec<i64>,
+    /// Parâmetros comuns a todos.
+    pub params: Value,
+    /// Parâmetros de um equipamento, por cima dos comuns (ex.: o canal que o
+    /// plano sugeriu para cada roteador).
+    pub device_params: HashMap<i64, Value>,
+    pub confirm_write: bool,
+    pub user_id: Option<i64>,
+}
+
+/// Os parâmetros de um membro: os comuns e, por cima, os dele.
+fn member_params(common: &Value, own: Option<&Value>) -> Value {
+    let mut merged = common.as_object().cloned().unwrap_or_default();
+    if let Some(Value::Object(own)) = own {
+        for (key, value) in own {
+            merged.insert(key.clone(), value.clone());
+        }
+    }
+    Value::Object(merged)
+}
+
 /// Dispara uma ação de frota. Roda em segundo plano; o andamento chega pelo
 /// SSE.
 ///
@@ -333,19 +379,19 @@ async fn find_batch<C: ConnectionTrait>(db: &C, batch_id: i64) -> AppResult<plug
 ///
 /// Plugin sem frota ou bloqueado, ação inexistente, escrita sem
 /// confirmação, ou nenhum membro para atender.
-pub async fn start(
-    ctx: &AppContext,
-    plugin_id: i64,
-    action_id: &str,
-    device_ids: &[i64],
-    params: Value,
-    confirm_write: bool,
-    user_id: Option<i64>,
-) -> AppResult<i64> {
+pub async fn start(ctx: &AppContext, plugin_id: i64, run: FleetRun) -> AppResult<i64> {
+    let FleetRun {
+        action: action_id,
+        device_ids,
+        params,
+        device_params,
+        confirm_write,
+        user_id,
+    } = run;
     let plugin = service::find(&ctx.db, plugin_id).await?;
     let manifest = manifest_of(&plugin)?;
     ensure_fleet(&plugin, &manifest)?;
-    let action = resolve_action(&manifest, action_id).ok_or_else(|| {
+    let action = resolve_action(&manifest, &action_id).ok_or_else(|| {
         AppError::not_found(format!("O plugin não tem a ação de frota `{action_id}`."))
     })?;
     let declared = manifest
@@ -359,6 +405,8 @@ pub async fn start(
     let mut targets = members(&ctx.db, plugin.id).await?;
     if !device_ids.is_empty() {
         targets.retain(|(device, _)| device_ids.contains(&device.id));
+    } else if !device_params.is_empty() {
+        targets.retain(|(device, _)| device_params.contains_key(&device.id));
     }
     if targets.is_empty() {
         return Err(AppError::business_rule(
@@ -376,11 +424,21 @@ pub async fn start(
             output: None,
         })
         .collect();
+    // O banco guarda a máscara no lugar de parâmetro secreto.
+    let schema = declared.params.as_ref();
+    let mut stored = super::params::mask_secrets(schema, &params);
+    if !device_params.is_empty() {
+        let per_device: Map<String, Value> = device_params
+            .iter()
+            .map(|(id, own)| (id.to_string(), super::params::mask_secrets(schema, own)))
+            .collect();
+        stored = json!({ "common": stored, "perDevice": per_device });
+    }
     let batch = plugin_batches::ActiveModel {
         plugin_id: Set(plugin.id),
         action: Set(action.id.chars().take(64).collect()),
         status: Set("running".into()),
-        params: Set(Some(params.clone())),
+        params: Set(Some(stored)),
         devices: Set(serde_json::to_value(&devices).map_err(internal)?),
         result: Set(None),
         error: Set(None),
@@ -402,6 +460,7 @@ pub async fn start(
         action,
         targets: targets.into_iter().map(|(device, _)| device).collect(),
         params,
+        device_params,
         user_id,
         cancel,
         writer: tokio::sync::Mutex::new(()),
@@ -438,6 +497,7 @@ struct Job {
     action: FleetAction,
     targets: Vec<devices::Model>,
     params: Value,
+    device_params: HashMap<i64, Value>,
     user_id: Option<i64>,
     cancel: CancellationToken,
     /// Uma gravação de andamento por vez, sempre do estado mais recente —
@@ -514,11 +574,12 @@ impl Job {
         self.save(state).await;
 
         let approval = runs::approval_for(&self.plugin, Origin::Fleet, false);
+        let params = member_params(&self.params, self.device_params.get(&device.id));
         let spec = RunSpec {
             plugin: self.plugin.clone(),
             device,
             action: self.action.action.clone(),
-            params: self.params.clone(),
+            params,
             origin: Origin::Fleet,
             user_id: self.user_id,
             reason: None,

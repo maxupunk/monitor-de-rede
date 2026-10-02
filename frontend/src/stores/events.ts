@@ -416,6 +416,7 @@ export const useEventsStore = defineStore('events', () => {
 
       case 'plugin:run_output': {
         usePluginsStore().applyRunOutput(data)
+        usePluginAppsStore().applyRunOutput(data)
         break
       }
 
@@ -431,6 +432,16 @@ export const useEventsStore = defineStore('events', () => {
 
       case 'plugin:batch_updated': {
         usePluginAppsStore().applyBatchUpdated(data)
+        break
+      }
+
+      case 'plugin:run_step': {
+        usePluginAppsStore().applyRunOutput(data)
+        break
+      }
+
+      case 'plugin:apps_changed': {
+        void usePluginAppsStore().fetchApps()
         break
       }
 

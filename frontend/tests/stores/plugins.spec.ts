@@ -117,10 +117,14 @@ describe('plugins store', () => {
       if (path.endsWith('/install')) return instalado
       return { runId: 21 }
     })
-    const get = vi.spyOn(apiService, 'get').mockResolvedValue(view())
+    const get = vi
+      .spyOn(apiService, 'get')
+      .mockImplementation(async (path: string) => (path === '/plugins/apps' ? [] : view()))
     const store = usePluginsStore()
     await store.loadDevice(4)
     await store.installPlugin(4, 2)
+    // Instalar pode ligar o plugin: o menu Aplicativos é relido uma vez.
+    expect(get).toHaveBeenLastCalledWith('/plugins/apps')
     expect(store.deviceViews[4].firmware).toBe('24.10.0')
 
     const runId = await store.runAction(4, 2, 'list_packages', {}, false)
@@ -138,7 +142,8 @@ describe('plugins store', () => {
     expect(store.runById(4, 21)?.output).toEqual([
       { name: 'busybox', version: '1.36.1-1', installed: true },
     ])
-    expect(get).toHaveBeenCalledOnce()
+    // A lista chegou pelo SSE: nada de reler a visão do equipamento.
+    expect(get).toHaveBeenCalledTimes(2)
     expect(post).toHaveBeenCalledTimes(2)
   })
 })

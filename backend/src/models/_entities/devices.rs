@@ -45,6 +45,13 @@ pub struct Model {
     pub link_interface_name: Option<String>,
     /// Versão de firmware lida pelo `detect` de um plugin de dispositivo.
     pub firmware_version: Option<String>,
+    /// O sistema que o equipamento mostrou ser (id do catálogo) — evidência de
+    /// software ou o palpite do Laya; o fabricante/modelo é hardware e não entra.
+    pub observed_os: Option<String>,
+    /// De onde veio: `sonda`, `snmp`, `plugin` ou `laya`.
+    pub observed_os_source: Option<String>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub observed_os_reason: Option<String>,
     pub status: String,
     pub last_seen_at: Option<DateTimeWithTimeZone>,
     pub created_at: DateTimeWithTimeZone,

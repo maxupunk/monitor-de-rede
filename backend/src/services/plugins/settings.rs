@@ -21,8 +21,10 @@ use serde_json::{json, Map, Value};
 
 use super::{
     manifest::PluginManifest,
-    params::{self, SecretField, ITEM_ID},
+    params::{self, for_each_secret, SecretField, ITEM_ID},
 };
+
+pub use super::params::SECRET_MASK;
 use crate::{
     models::{plugin_settings, plugins},
     services::shared::{
@@ -31,8 +33,6 @@ use crate::{
     },
 };
 
-/// O que a tela recebe no lugar de um segredo guardado.
-pub const SECRET_MASK: &str = "********";
 const ENCRYPTED_KEY: &str = "$enc";
 
 /// De qual configuração se trata.
@@ -88,28 +88,6 @@ async fn row<C: ConnectionTrait>(
     Ok(query.one(db).await?)
 }
 
-/// Aplica `f` a cada valor de campo secreto (raiz e itens de lista).
-fn for_each_secret(value: &mut Value, fields: &[SecretField], f: &mut dyn FnMut(&mut Value)) {
-    for field in fields {
-        match field {
-            SecretField::Root(name) => {
-                if let Some(slot) = value.get_mut(name) {
-                    f(slot);
-                }
-            }
-            SecretField::Item { list, field } => {
-                if let Some(items) = value.get_mut(list).and_then(Value::as_array_mut) {
-                    for item in items {
-                        if let Some(slot) = item.get_mut(field) {
-                            f(slot);
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
 fn decrypt_in_place(value: &mut Value, fields: &[SecretField]) -> AppResult<()> {
     let mut failure = None;
     for_each_secret(value, fields, &mut |slot| {
@@ -146,18 +124,6 @@ fn mask_in_place(value: &mut Value, fields: &[SecretField]) {
             String::new()
         });
     });
-}
-
-/// Valores dos segredos em claro (para o runtime mascarar).
-fn collect_secrets(value: &Value, fields: &[SecretField]) -> Vec<String> {
-    let mut copy = value.clone();
-    let mut found = Vec::new();
-    for_each_secret(&mut copy, fields, &mut |slot| {
-        if let Some(text) = slot.as_str().filter(|text| text.len() >= 4) {
-            found.push(text.to_owned());
-        }
-    });
-    found
 }
 
 /// A máscara volta a ser o segredo guardado; itens novos ganham `id`.
@@ -360,10 +326,7 @@ pub async fn effective<C: ConnectionTrait>(
     let mut secrets = Vec::new();
     for (scope, value) in [(Scope::Fleet, &fleet), (Scope::Device(0), &device)] {
         if let Some(schema) = schema_of(&manifest, scope) {
-            secrets.extend(collect_secrets(
-                value,
-                &params::secret_fields(Some(&schema)),
-            ));
+            secrets.extend(params::secret_values(Some(&schema), value));
         }
     }
     Ok(Effective {
@@ -388,10 +351,7 @@ pub fn for_test(manifest: &PluginManifest, given: Option<&Value>) -> Effective {
             continue;
         };
         let filled = params::validate(Some(&schema), &raw).unwrap_or(raw);
-        secrets.extend(collect_secrets(
-            &filled,
-            &params::secret_fields(Some(&schema)),
-        ));
+        secrets.extend(params::secret_values(Some(&schema), &filled));
         value[key] = filled;
     }
     Effective { value, secrets }

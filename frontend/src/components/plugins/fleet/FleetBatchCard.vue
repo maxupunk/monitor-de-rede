@@ -29,6 +29,15 @@
       rounded
       class="mb-3"
     ></v-progress-linear>
+    <v-alert
+      v-if="batch.status === 'running' && done === batch.devices.length"
+      type="info"
+      variant="tonal"
+      density="compact"
+      class="mb-3"
+    >
+      Todos os equipamentos responderam — consolidando o resultado…
+    </v-alert>
     <v-alert v-if="batch.error" type="error" variant="tonal" density="compact" class="mb-3">
       {{ batch.error }}
     </v-alert>
@@ -48,12 +57,26 @@
         >
           Aceitar sugestão
         </v-btn>
+        <v-btn
+          v-if="followUp && canWrite && batch.status !== 'running'"
+          size="small"
+          color="success"
+          variant="flat"
+          prepend-icon="mdi-check"
+          @click="emit('applyNext', batch, followUp)"
+        >
+          {{ followUp.title }}
+        </v-btn>
       </v-card-title>
       <v-card-text>
         <PluginReport :output="batch.result" :labels="resultLabels ?? labels" />
         <p v-if="batch.hasPatch" class="text-body-2 mt-3">
           Aceitar grava os ajustes sugeridos na configuração de cada equipamento. Nada muda nos
           roteadores até você aplicar a configuração.
+        </p>
+        <p v-if="followUp" class="text-body-2 mt-3">
+          Nada mudou ainda. Aceitar aplica a sugestão nos
+          {{ Object.keys(followUp.devices).length }} equipamento(s), com confirmação.
         </p>
       </v-card-text>
     </v-card>
@@ -73,6 +96,13 @@
             >
               {{ batchStatusPresentation(device.status).label }}
             </v-chip>
+            <span
+              v-if="device.status === 'running'"
+              class="d-flex align-center ga-1 text-body-small step"
+            >
+              <v-progress-circular indeterminate color="primary" size="12" width="2" />
+              {{ stepLabel(device.runId ? store.lastSteps[device.runId] : undefined) }}
+            </span>
           </div>
         </v-expansion-panel-title>
         <v-expansion-panel-text>
@@ -114,7 +144,13 @@ import type { BatchDevice } from '@/bindings/BatchDevice'
 import type { OutputKind } from '@/bindings/OutputKind'
 import type { PluginBatchView } from '@/bindings/PluginBatchView'
 import { formatDateTime } from '@/utils/formatters'
-import { batchStatusPresentation } from '@/utils/pluginPresentation'
+import { usePluginAppsStore } from '@/stores/pluginApps'
+import {
+  batchStatusPresentation,
+  followUpOf,
+  stepLabel,
+  type FollowUp,
+} from '@/utils/pluginPresentation'
 import PluginOutput from '../PluginOutput.vue'
 import PluginReport from '../PluginReport.vue'
 
@@ -131,10 +167,13 @@ const props = defineProps<{
 const emit = defineEmits<{
   cancel: [batch: PluginBatchView]
   applyPatch: [batch: PluginBatchView]
+  applyNext: [batch: PluginBatchView, followUp: FollowUp]
   openRun: [device: BatchDevice]
 }>()
 
+const store = usePluginAppsStore()
 const status = computed(() => batchStatusPresentation(props.batch.status))
+const followUp = computed(() => followUpOf(props.batch.result))
 const done = computed(
   () =>
     props.batch.devices.filter(
@@ -142,3 +181,12 @@ const done = computed(
     ).length
 )
 </script>
+
+<style scoped>
+.step {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+</style>

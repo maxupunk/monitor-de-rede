@@ -9,6 +9,10 @@ import type { DevicePluginsView } from '@/bindings/DevicePluginsView'
 import type { Effect } from '@/bindings/Effect'
 import type { PluginPackage } from '@/bindings/PluginPackage'
 import type { Severity } from '@/bindings/Severity'
+import type { MatchRule } from '@/bindings/MatchRule'
+import type { Device } from '@/stores/devices'
+import type { TranscriptEntry } from '@/bindings/TranscriptEntry'
+import { formatElapsedMs } from '@/utils/formatters'
 
 export interface Presentation {
   label: string
@@ -194,6 +198,11 @@ const STATE_COLORS: Record<string, string> = {
   divergente: 'warning',
   pendente: 'warning',
   sem_radio: 'warning',
+  fora_do_ar: 'warning',
+  no_ar: 'success',
+  ativa: 'success',
+  desativada: 'secondary',
+  desligado: 'secondary',
   ausente: 'error',
   falhou: 'error',
   offline: 'error',
@@ -224,4 +233,75 @@ export function outputLabel(key: string, labels?: OutputLabels): string {
 export function keyLabel(key: string): string {
   const text = key.replace(/_/g, ' ')
   return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
+/**
+ * Sugestão de um consolidado (`reduce`): rodar a ação de frota `action` com
+ * os parâmetros de cada equipamento (ex.: o canal que o plano escolheu).
+ */
+export interface FollowUp {
+  action: string
+  title: string
+  devices: Record<number, Record<string, unknown>>
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+export function followUpOf(result: unknown): FollowUp | null {
+  const next = isPlainRecord(result) ? result.next : null
+  if (!isPlainRecord(next) || typeof next.action !== 'string' || !isPlainRecord(next.devices)) {
+    return null
+  }
+  const devices: Record<number, Record<string, unknown>> = {}
+  for (const [id, params] of Object.entries(next.devices)) {
+    if (Number.isFinite(Number(id)) && isPlainRecord(params)) devices[Number(id)] = params
+  }
+  if (Object.keys(devices).length === 0) return null
+  return {
+    action: next.action,
+    title: typeof next.title === 'string' ? next.title : 'Aplicar sugestão',
+    devices,
+  }
+}
+
+/** Sistemas que, no cadastro, já sugerem o tipo "roteador". */
+const ROUTER_PLATFORMS = new Set(['openwrt', 'routeros'])
+
+/**
+ * O cadastro de um equipamento novo aberto de dentro de um plugin já vem com o
+ * sistema que o plugin atende — o que também o deixa compatível e liga o
+ * plugin no cadastro.
+ */
+export function devicePrefillFor(matcher: MatchRule): Partial<Device> {
+  const platform = matcher.platforms?.[0]
+  if (!platform) return { isMonitored: true }
+  return {
+    operatingSystem: platform,
+    type: ROUTER_PLATFORMS.has(platform) ? 'router' : 'other',
+    isMonitored: true,
+  }
+}
+
+/** Prefixo do aviso "este acesso começou" (`plugin:run_step`). */
+const STEP_PREFIX = 'step:'
+
+/** Quanto do comando aparece no andamento (o resto vai para o histórico). */
+const STEP_MAX = 70
+
+/**
+ * O último acesso de uma execução em andamento, para quem espera saber o que
+ * está acontecendo ("SSH · iwinfo 'phy0-ap0' scan · 3,2 s").
+ */
+export function stepLabel(entry: TranscriptEntry | undefined): string {
+  if (!entry) return 'Conectando ao equipamento…'
+  const request =
+    entry.request.length > STEP_MAX ? entry.request.slice(0, STEP_MAX) + '…' : entry.request
+  // `step:ssh` = começou e ainda não respondeu; senão, já respondeu.
+  const running = entry.kind.startsWith(STEP_PREFIX)
+  const kind = (running ? entry.kind.slice(STEP_PREFIX.length) : entry.kind).toUpperCase()
+  return running
+    ? `${kind} · ${request} · executando…`
+    : `${kind} · ${request} · respondeu em ${formatElapsedMs(entry.durationMs)}`
 }

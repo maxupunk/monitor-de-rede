@@ -294,47 +294,58 @@ cada um continua no cadastro do dispositivo.
 
 ```json
 "surfaces": ["device", "fleet"],
-"settings": {
-  "fleet":  { "type": "object", "properties": { "networks": { "type": "array", "items": {
-              "type": "object", "properties": {
-                "ssid": { "type": "string", "pattern": "[^'\"`$]{1,32}", "title": "Nome da rede" },
-                "key":  { "type": "string", "secret": true, "minLength": 8, "title": "Senha" } },
-              "required": ["ssid"] } },
-              "country": { "type": "string", "enum": ["BR", "US"], "default": "BR" } } },
-  "device": { "type": "object", "properties": {
-              "radio_2g_channel": { "type": "string", "enum": ["", "auto", "1", "6", "11"] } } }
-},
 "fleet": {
   "title": "Rede Wi-Fi", "icon": "mdi-wifi-cog", "statusAction": "status",
-  "matrix": { "field": "networks", "key": "ssid", "state": "state", "detail": "clients" },
+  "matrix": { "field": "networks", "key": "ssid", "state": "state", "detail": "clients",
+              "edit":   { "action": "network", "params": { "ssid": "ssid", "original_ssid": "ssid" } },
+              "remove": { "action": "remove_network", "params": { "ssid": "ssid" } } },
   "actions": [
-    { "id": "preview", "title": "Pré-visualizar", "action": "preview" },
-    { "id": "apply", "title": "Aplicar", "action": "apply" },
+    { "id": "network", "title": "Adicionar ou alterar rede", "action": "set_network",
+      "preview": "preview_network" },
+    { "id": "remove_network", "title": "Remover rede", "action": "remove_network",
+      "preview": "preview_remove" },
     { "id": "plan_channels", "title": "Planejar canais", "action": "scan", "reduce": "plan_channels" }
   ]
 }
 ```
 
-- **A fonte da verdade é o sistema**: `settings` guarda o estado desejado. O
-  script lê `device.settings.fleet` (vale para todos) e `device.settings.device`
-  (ajuste deste equipamento, que sobrepõe o geral), compara com o equipamento e
-  só então altera. A ação de estado (`statusAction`) diz se está `sincronizado`,
-  `pendente`, `ausente`…; a grade `matrix` cruza equipamentos × itens.
-- Esquema da configuração: o mesmo dos `params`, mais `array` (de valores
-  simples ou de objetos, um nível). Item de lista de objetos ganha um `id`
-  estável sozinho (não declare `id`). `secret: true` (só em texto): guardado
-  cifrado, mostrado como `********`, mascarado no transcript e na saída. Texto
-  de configuração que vai para comando também precisa de `pattern`/`enum`.
-- **Escrita segura em lote**: `preview` (leitura) mostra as mudanças; `apply`
-  guarda uma cópia, aplica tudo de uma vez, verifica e **restaura a cópia se a
-  verificação falhar**. Nomeie as seções que o plugin gerencia com um prefixo
-  (`nm_…`, com `hash_hex`) e nunca toque nas outras.
+- **Prefira o equipamento como fonte da verdade** (é o modelo do
+  `openwrt-wifi`): a ação de estado lê o que ele tem; cada mudança é uma ação
+  com parâmetros que parte do estado atual, muda só o pedido e deixa o resto
+  como está. A grade `matrix` cruza equipamentos × itens; `edit`/`remove`
+  abrem a ação de frota com o formulário preenchido pelo item (parâmetro →
+  campo) e só os equipamentos que o têm marcados.
+- **Formulário a partir do equipamento**: no parâmetro, `"source":
+  "networks.ssid"` oferece os valores da ação de estado (lista `networks`,
+  chave `ssid`); na ação de frota, `"current": "_current.radios"` aponta os
+  valores atuais no formato do formulário (o diálogo mostra e preenche). Chave
+  que começa com `_` na saída é dado para a tela e não aparece no relatório.
+- **Compatibilidade é pelo sistema** (`match.platforms`), não pelo hardware:
+  `vendorRegex`/`modelRegex` só quando o plugin depende mesmo da placa.
+- **`preview`**: toda escrita de frota tem uma ação de leitura com os mesmos
+  parâmetros que mostra o que vai mudar (`#{ summary, changes, commands }`).
+  Escreva um `plan_<op>(estado, params)` puro e use-o nas duas (DRY); a escrita
+  guarda uma cópia, aplica de uma vez, **confere rodando o mesmo plano sobre o
+  resultado (precisa sair vazio)** e restaura a cópia se não.
+- **Segredos do equipamento não vêm para a central**: leia a configuração já
+  mascarada no equipamento (`… | sed -E 's/(\.key)=.*/\1=******/'`) e, para
+  reaproveitar uma senha existente, copie-a lá dentro
+  (`uci set x.key="$(uci -q get y.key)"`). Senha nova é parâmetro
+  `"secret": true` — o script recebe em claro, o histórico guarda `********` e o
+  runtime a mascara na saída.
+- **Plugins nascem desligados**: um plugin desligado não roda nem serve de
+  `uses`. Ele liga ao cadastrar um equipamento compatível, no "Ativar e
+  instalar" do Catálogo ou à mão — se precisar de um desligado, peça ao
+  operador para ativá-lo.
+- `settings` (estado desejado guardado no sistema) continua disponível quando
+  o sistema deve ser a verdade: esquema dos `params` mais `array` (um nível;
+  item ganha `id`), `secret` cifrado, lido em `device.settings.fleet/.device`.
 - **`reduce`**: `fn <nome>(results, settings)` — pura, sem `device`. Recebe a
-  lista dos membros (`#{ deviceId, deviceName, status, output, error }`) e a
-  configuração; devolve o consolidado (`report`). Para sugerir ajuste por
-  equipamento, devolva `settings_patch: #{ "<deviceId>": #{ campo: valor } }`:
-  o operador aceita com um clique e a sugestão entra na configuração `device`
-  de cada um — nada muda no equipamento até ele aplicar.
+  lista dos membros (`#{ deviceId, deviceName, status, output, error }`);
+  devolve o consolidado (`report`). Para sugerir uma ação, devolva
+  `next: #{ action: "<ação de frota>", title, devices: #{ "<deviceId>": #{ param: valor } } }`
+  — o operador confirma e o lote roda com os parâmetros de cada equipamento.
+  (Com `settings`, `settings_patch` grava ajustes na configuração.)
 - Ação de frota também aceita `labels`, para os títulos do consolidado.
 - Testes: `"settings": { "fleet": {...}, "device": {...} }` no teste unitário
   simula a configuração; teste de `reduce` usa `"action": "<id da ação de
@@ -349,5 +360,6 @@ cada um continua no cadastro do dispositivo.
 - [ ] Fixtures copiadas das respostas reais, não inventadas.
 - [ ] Nenhum comando destrutivo que o usuário não pediu.
 - [ ] Já existe plugin que faz parte disso? Use `uses` + `device.use_plugin`.
-- [ ] Aplicativo de frota: `preview` antes de `apply`, cópia e volta atrás em
-      falha, só seções com o prefixo do plugin, segredos com `secret: true`.
+- [ ] Aplicativo de frota: cada escrita com `preview`, cópia, conferência pelo
+      mesmo plano e volta atrás; muda só o pedido; senha do equipamento não sai
+      dele; senha nova com `secret: true`.

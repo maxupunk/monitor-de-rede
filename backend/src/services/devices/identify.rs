@@ -41,6 +41,9 @@ pub struct IdentifyInput {
     pub snmp_community: Option<String>,
     pub vendor: Option<String>,
     pub model: Option<String>,
+    /// Porta do SSH para ler a identificação do servidor (padrão: 22).
+    #[serde(default)]
+    pub ssh_port: Option<u16>,
 }
 
 pub async fn identify(
@@ -66,7 +69,10 @@ pub async fn identify(
             let consulta_snmp = async {
                 hints::identidade_snmp(endereco, comunidade, input.snmp_version.as_deref()).await
             };
-            tokio::join!(consulta_snmp, hints::sonda_ssh(endereco))
+            tokio::join!(
+                consulta_snmp,
+                hints::sonda_ssh_em(endereco, input.ssh_port.unwrap_or(22))
+            )
         }
         None => (None, (false, None)),
     };
@@ -149,6 +155,8 @@ pub async fn identify(
         name: input.name.as_deref().or(suggested_name.as_deref()),
         vendor: input.vendor.as_deref().or(suggested_vendor.as_deref()),
         model: input.model.as_deref().or(suggested_model.as_deref()),
+        // A sonda é a observação; a gravada não pode responder por ela.
+        observed: None,
     });
 
     let acesso = AccessContext::load(&ctx.db)
@@ -272,4 +280,132 @@ fn fabricante_da_descoberta(item: &discovery_results::Model) -> Option<String> {
         .filter(|valor| !valor.is_empty() && valor.len() <= 80)
         .filter(|valor| !crate::services::devices::adapters::registry::is_system_description(valor))
         .map(str::to_owned)
+}
+
+/// O sistema que o equipamento mostrou, pronto para gravar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Observation {
+    pub system: String,
+    pub source: &'static str,
+    pub reason: String,
+}
+
+/// Do resultado da sonda, só o que é **software**: SSH e SNMP decidem; sem
+/// eles, o palpite do Laya. O fabricante/modelo (hardware) nunca vira
+/// observação — uma RouterBOARD da MikroTik pode rodar OpenWrt.
+#[must_use]
+pub fn observation_of(result: &systems::IdentifyResult) -> Option<Observation> {
+    if result.source == systems::source::SNMP || result.source == systems::source::PROBE {
+        return Some(Observation {
+            system: result.operating_system.clone(),
+            source: systems::source::from_stored(&result.source)?,
+            reason: result.reason.clone(),
+        });
+    }
+    let suggestion = result.laya.as_ref()?.operating_system.as_ref()?;
+    let label = systems::find(&suggestion.value)?.label;
+    Some(Observation {
+        system: suggestion.value.clone(),
+        source: systems::source::LAYA,
+        reason: format!(
+            "o Laya identificou {label} ({:.0}% de confiança) — palpite, sem prova do equipamento",
+            suggestion.confidence
+        ),
+    })
+}
+
+/// Vai ao equipamento (SSH e SNMP; Laya se faltar evidência) e grava o que ele
+/// mostrou ser em `devices.observed_os`. Palpite do Laya não apaga uma
+/// observação certa já gravada. Devolve o equipamento como ficou.
+///
+/// # Errors
+///
+/// Erro do banco.
+pub async fn observe(
+    ctx: &AppContext,
+    device: &crate::models::devices::Model,
+    ssh_port: Option<u16>,
+) -> AppResult<crate::models::devices::Model> {
+    use sea_orm::{ActiveModelTrait, Set};
+
+    let input = IdentifyInput {
+        ip_address: device.ip_address.clone(),
+        snmp_version: device.snmp_version.clone(),
+        snmp_community: device.snmp_community.clone(),
+        ssh_port,
+        // Sem nome/fabricante/modelo: o texto do cadastro é o que se quer
+        // conferir, não evidência.
+        ..IdentifyInput::default()
+    };
+    let result = identify(ctx, &input).await?;
+    let Some(found) = observation_of(&result) else {
+        return Ok(device.clone());
+    };
+    let keeps_certain = found.source == systems::source::LAYA
+        && device
+            .observed_os_source
+            .as_deref()
+            .is_some_and(systems::source::is_certain);
+    if keeps_certain {
+        return Ok(device.clone());
+    }
+    let mut active: crate::models::devices::ActiveModel = device.clone().into();
+    active.observed_os = Set(Some(found.system));
+    active.observed_os_source = Set(Some(found.source.to_owned()));
+    active.observed_os_reason = Set(Some(found.reason));
+    Ok(active.update(&ctx.db).await?)
+}
+
+#[cfg(test)]
+mod observation_tests {
+    use super::*;
+    use crate::services::ai::laya::{
+        decisions::device_identity::IdentitySuggestion, suggestion::LayaSuggestion,
+    };
+
+    fn result(source: &str, system: &str) -> systems::IdentifyResult {
+        systems::IdentifyResult {
+            operating_system: system.into(),
+            label: system.into(),
+            source: source.into(),
+            reason: "motivo".into(),
+            sys_descr: None,
+            sys_object_id: None,
+            ssh_banner: None,
+            probed: true,
+            suggested_vendor: None,
+            suggested_model: None,
+            suggested_name: None,
+            access_mode: "direct".into(),
+            access_mode_reason: String::new(),
+            from_discovery: false,
+            laya: None,
+        }
+    }
+
+    #[test]
+    fn ssh_e_snmp_viram_observacao_e_o_cadastro_nao() {
+        let pelo_ssh = observation_of(&result(systems::source::PROBE, "openwrt")).unwrap();
+        assert_eq!(pelo_ssh.system, "openwrt");
+        assert_eq!(pelo_ssh.source, systems::source::PROBE);
+        assert!(observation_of(&result(systems::source::REGISTRY, "routeros")).is_none());
+        assert!(observation_of(&result(systems::source::DEFAULT, "other")).is_none());
+    }
+
+    #[test]
+    fn sem_evidencia_o_laya_decide_como_palpite() {
+        let mut fraco = result(systems::source::REGISTRY, "routeros");
+        fraco.laya = Some(IdentitySuggestion {
+            device_type: None,
+            operating_system: Some(LayaSuggestion {
+                value: "openwrt".into(),
+                confidence: 87.5,
+                model: "laya:teste".into(),
+            }),
+        });
+        let palpite = observation_of(&fraco).unwrap();
+        assert_eq!(palpite.system, "openwrt");
+        assert_eq!(palpite.source, systems::source::LAYA);
+        assert!(palpite.reason.contains("88%"));
+    }
 }

@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { apiService } from '@/services/apiService'
 import { useCrudResource } from './crudResource'
 import type { VpnConnectionStatus } from './vpn'
+import { usePluginAppsStore } from './pluginApps'
 
 export interface DeviceVpnPeer {
   id: number
@@ -108,12 +109,24 @@ export const useDevicesStore = defineStore('devices', () => {
     await resource.fetchAll()
   }
 
+  /**
+   * Cadastrar (ou trocar o sistema de) um equipamento liga os plugins que
+   * servem a ele — o menu Aplicativos pode ganhar um item.
+   */
+  async function refreshApps(saved: Device | null) {
+    if (saved) await usePluginAppsStore().fetchApps()
+  }
+
   async function createDevice(payload: Partial<Device>): Promise<Device | null> {
-    return resource.create(payload)
+    const created = await resource.create(payload)
+    await refreshApps(created)
+    return created
   }
 
   async function updateDevice(id: number, payload: Partial<Device>): Promise<Device | null> {
-    return resource.update(id, payload)
+    const updated = await resource.update(id, payload)
+    if (payload.operatingSystem !== undefined) await refreshApps(updated)
+    return updated
   }
 
   async function deleteDevice(id: number): Promise<boolean> {

@@ -27,12 +27,26 @@ pub enum Compat {
     Validated,
 }
 
+/// O quanto se sabe do sistema do equipamento.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Certainty {
+    /// Nada identificou.
+    #[default]
+    Unknown,
+    /// Palpite: o fabricante/modelo do cadastro (é hardware — uma RouterBOARD
+    /// pode rodar OpenWrt) ou o Laya. Levanta dúvida, nunca reprova.
+    Hint,
+    /// O operador declarou ou o equipamento mostrou (SSH, SNMP, um plugin).
+    Certain,
+}
+
 /// O que se sabe do equipamento.
 #[derive(Debug, Clone, Default)]
 pub struct DeviceFacts {
     pub platform: String,
-    /// Falso quando o sistema caiu no padrão por falta de evidência.
-    pub platform_known: bool,
+    pub certainty: Certainty,
+    /// De onde veio o sistema, para a tela explicar.
+    pub platform_reason: String,
     pub vendor: Option<String>,
     pub model: Option<String>,
     pub firmware: Option<String>,
@@ -41,20 +55,27 @@ pub struct DeviceFacts {
 impl DeviceFacts {
     #[must_use]
     pub fn from_device(device: &devices::Model) -> Self {
-        let detection = systems::detect(&systems::Evidence {
-            declared: device.operating_system.as_deref(),
-            name: Some(&device.name),
-            vendor: device.vendor.as_deref(),
-            model: device.model.as_deref(),
-            ..systems::Evidence::default()
-        });
-        Self {
-            platform: detection.system.id.to_string(),
-            platform_known: detection.source != systems::source::DEFAULT,
+        let mut facts = Self {
             vendor: non_empty(device.vendor.as_deref()),
             model: non_empty(device.model.as_deref()),
             firmware: non_empty(device.firmware_version.as_deref()),
-        }
+            ..Self::default()
+        };
+        facts.set_system(&systems::detect(&systems::Evidence::from_device(device)));
+        facts
+    }
+
+    /// O sistema de uma detecção, com o quanto ela vale.
+    pub fn set_system(&mut self, detection: &systems::Detection) {
+        self.platform = detection.system.id.to_string();
+        self.platform_reason = detection.reason.clone();
+        self.certainty = if detection.source == systems::source::DEFAULT {
+            Certainty::Unknown
+        } else if systems::source::is_certain(detection.source) {
+            Certainty::Certain
+        } else {
+            Certainty::Hint
+        };
     }
 }
 
@@ -83,6 +104,19 @@ fn same(a: Option<&str>, b: Option<&str>) -> bool {
     }
 }
 
+/// O plugin diz, pelo sistema, que é para este equipamento — e o sistema dele
+/// é conhecido. É a prova que liga um plugin sozinho no cadastro; plugin sem
+/// regra de sistema (uma página HTTP qualquer) nunca liga sozinho.
+#[must_use]
+pub fn names_platform(manifest: &PluginManifest, facts: &DeviceFacts) -> bool {
+    facts.certainty != Certainty::Unknown
+        && manifest
+            .matcher
+            .platforms
+            .iter()
+            .any(|platform| platform.eq_ignore_ascii_case(&facts.platform))
+}
+
 #[must_use]
 pub fn evaluate(
     manifest: &PluginManifest,
@@ -98,14 +132,24 @@ pub fn evaluate(
             .platforms
             .iter()
             .any(|platform| platform.eq_ignore_ascii_case(&facts.platform));
-        if !facts.platform_known {
-            missing.push("o sistema do equipamento ainda não foi identificado".to_owned());
-        } else if !listed {
-            against.push(format!(
-                "o plugin é para {}, e o equipamento é {}",
+        // Só o sistema certo reprova. Fabricante/modelo descrevem o hardware
+        // e o Laya é palpite: discordar deles é dúvida, não incompatibilidade.
+        match facts.certainty {
+            Certainty::Unknown => missing.push(
+                "o sistema do equipamento ainda não foi identificado — use \"Verificar sistema\""
+                    .to_owned(),
+            ),
+            Certainty::Hint if !listed => missing.push(format!(
+                "o sistema parece {} ({}), mas isso é palpite — use \"Verificar sistema\" ou defina o sistema no cadastro",
+                facts.platform, facts.platform_reason
+            )),
+            Certainty::Certain if !listed => against.push(format!(
+                "o plugin é para {}, e o equipamento é {} ({})",
                 rule.platforms.join("/"),
-                facts.platform
-            ));
+                facts.platform,
+                facts.platform_reason
+            )),
+            _ => {}
         }
     }
     for (label, pattern, value) in [
@@ -173,6 +217,28 @@ pub fn evaluate(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn so_o_sistema_conhecido_e_citado_liga_sozinho() {
+        let manifest: PluginManifest = serde_json::from_value(serde_json::json!({
+            "slug": "x", "name": "x", "version": "1.0.0", "transports": ["ssh"],
+            "match": { "platforms": ["openwrt"] },
+            "actions": [{ "id": "detect", "title": "D", "effect": "read" }]
+        }))
+        .unwrap();
+        let mut facts = DeviceFacts {
+            platform: "openwrt".into(),
+            certainty: Certainty::Certain,
+            ..DeviceFacts::default()
+        };
+        assert!(names_platform(&manifest, &facts));
+        facts.certainty = Certainty::Unknown;
+        assert!(!names_platform(&manifest, &facts));
+        let mut generic = manifest.clone();
+        generic.matcher.platforms.clear();
+        facts.certainty = Certainty::Certain;
+        assert!(!names_platform(&generic, &facts));
+    }
     use crate::services::plugins::manifest::MatchRule;
     use serde_json::json;
 
@@ -189,7 +255,8 @@ mod tests {
     fn openwrt(firmware: Option<&str>) -> DeviceFacts {
         DeviceFacts {
             platform: "openwrt".into(),
-            platform_known: true,
+            certainty: Certainty::Certain,
+            platform_reason: "definido no cadastro".into(),
             vendor: Some("TP-Link".into()),
             model: Some("Archer C7 v5".into()),
             firmware: firmware.map(str::to_owned),
@@ -239,11 +306,73 @@ mod tests {
             evaluate(&manifest(rule()), &[], &routeros).level,
             Compat::Incompatible
         );
-        routeros.platform_known = false;
+        routeros.certainty = Certainty::Unknown;
         assert_eq!(
             evaluate(&manifest(rule()), &[], &routeros).level,
             Compat::Possible
         );
+    }
+
+    /// Uma RouterBOARD rodando OpenWrt: o cadastro diz "MikroTik" (hardware),
+    /// e isso não pode reprovar o plugin de OpenWrt — só levantar dúvida.
+    #[test]
+    fn palpite_pelo_hardware_e_duvida_e_nao_incompatibilidade() {
+        let mut rb922 = openwrt(Some("25.12.5"));
+        rb922.platform = "routeros".into();
+        rb922.certainty = Certainty::Hint;
+        let verdict = evaluate(&manifest(rule()), &[], &rb922);
+        assert_eq!(verdict.level, Compat::Possible, "{verdict:?}");
+        assert!(verdict.reasons[0].contains("palpite"));
+    }
+
+    #[test]
+    fn observacao_do_equipamento_vence_o_fabricante_do_cadastro() {
+        let device = crate::models::devices::Model {
+            id: 3,
+            site_id: None,
+            network_id: None,
+            parent_id: None,
+            ip_address: Some("10.0.0.3".into()),
+            name: "HeartOfGold".into(),
+            r#type: "router".into(),
+            vendor: Some("MikroTik".into()),
+            model: Some("RouterBOARD 922UAGS-5HPacD".into()),
+            serial_number: None,
+            description: None,
+            is_monitored: true,
+            snmp_enabled: false,
+            snmp_community: None,
+            snmp_version: None,
+            snmp_poll_interval_seconds: 15,
+            access_mode: None,
+            operating_system: None,
+            syslog_server_address: None,
+            system_key: None,
+            link_interface_id: None,
+            link_interface_name: None,
+            firmware_version: None,
+            observed_os: None,
+            observed_os_source: None,
+            observed_os_reason: None,
+            status: "online".into(),
+            last_seen_at: None,
+            created_at: chrono::Utc::now().into(),
+            updated_at: chrono::Utc::now().into(),
+        };
+        let pelo_hardware = DeviceFacts::from_device(&device);
+        assert_eq!(pelo_hardware.platform, "routeros");
+        assert_eq!(pelo_hardware.certainty, Certainty::Hint);
+
+        let observado = crate::models::devices::Model {
+            observed_os: Some("openwrt".into()),
+            observed_os_source: Some(systems::source::PROBE.into()),
+            observed_os_reason: Some("o servidor SSH se identifica como `dropbear`".into()),
+            ..device
+        };
+        let facts = DeviceFacts::from_device(&observado);
+        assert_eq!(facts.platform, "openwrt");
+        assert_eq!(facts.certainty, Certainty::Certain);
+        assert!(facts.platform_reason.contains("dropbear"));
     }
 
     #[test]

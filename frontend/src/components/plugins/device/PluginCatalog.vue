@@ -72,10 +72,9 @@
               variant="flat"
               prepend-icon="mdi-puzzle-plus-outline"
               :loading="installing === item.plugin.id"
-              :disabled="item.plugin.status === 'disabled'"
               @click="emit('install', item.plugin.id)"
             >
-              Instalar
+              {{ item.plugin.status === 'disabled' ? 'Ativar e instalar' : 'Instalar' }}
             </v-btn>
             <v-spacer></v-spacer>
             <v-btn

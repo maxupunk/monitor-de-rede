@@ -4,7 +4,11 @@ import type { Compat } from "./Compat";
 /**
  * Um equipamento da frota.
  */
-export type FleetMember = { deviceId: number, name: string, ip: string | null, platform: string, firmware: string | null, compat: Compat, installedAt: string, 
+export type FleetMember = { deviceId: number, name: string, ip: string | null, platform: string, firmware: string | null, compat: Compat, 
+/**
+ * Por que a compatibilidade é essa (para a tela explicar).
+ */
+reasons: Array<string>, installedAt: string, 
 /**
  * Há credencial pronta para os transportes do plugin.
  */

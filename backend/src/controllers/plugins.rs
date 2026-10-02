@@ -15,9 +15,9 @@ use crate::{
     dtos::{
         optional_body,
         plugins::{
-            ApprovalInput, AutoAcceptInput, AutoAcceptQuery, BatchStarted, FleetRunInput,
-            PluginSaveInput, ReviewAcceptInput, RunActionInput, RunStarted, SessionSecretInput,
-            SettingsInput,
+            ApprovalInput, AutoAcceptInput, AutoAcceptQuery, BatchStarted, FleetIdentifyInput,
+            FleetRunInput, PluginSaveInput, ReviewAcceptInput, RunActionInput, RunStarted,
+            SessionSecretInput, SettingsInput,
         },
     },
     models::plugins as plugin_rows,
@@ -442,14 +442,37 @@ async fn fleet_run(
     let batch_id = fleet::start(
         &ctx,
         plugin_id,
-        &action,
-        &input.device_ids,
-        input.params,
-        input.confirm_write,
-        Some(user.id),
+        fleet::FleetRun {
+            action,
+            device_ids: input.device_ids,
+            params: input.params,
+            device_params: input.device_params,
+            confirm_write: input.confirm_write,
+            user_id: Some(user.id),
+        },
     )
     .await?;
     Ok((StatusCode::ACCEPTED, Json(BatchStarted { batch_id })).into_response())
+}
+
+/// "Verificar sistema": vai aos equipamentos (SSH/SNMP, Laya na dúvida) e
+/// devolve a página do aplicativo com a compatibilidade refeita.
+async fn fleet_identify(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Path(plugin_id): Path<i64>,
+    body: String,
+) -> AppResult<Response> {
+    let user = authenticated_user(&ctx, &headers).await?;
+    let input: FleetIdentifyInput = optional_body(&body);
+    let view = crate::services::plugins::identity::refresh_fleet(
+        &ctx,
+        plugin_id,
+        &input.device_ids,
+        Some(user.id),
+    )
+    .await?;
+    Ok(format::json(view)?)
 }
 
 async fn batch_show(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
@@ -640,6 +663,7 @@ pub fn routes() -> Routes {
         .add("/plugins/{id}/fleet", get(fleet_view))
         .add("/plugins/{id}/settings", put(fleet_settings))
         .add("/plugins/{id}/fleet/actions/{action}", post(fleet_run))
+        .add("/plugins/{id}/fleet/identify", post(fleet_identify))
         .add(
             "/devices/{id}/plugins/{plugin_id}/settings",
             put(device_settings),

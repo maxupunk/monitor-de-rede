@@ -90,8 +90,28 @@ pub mod source {
     pub const SNMP: &str = "snmp";
     /// A identificação que o servidor SSH do equipamento anuncia.
     pub const PROBE: &str = "sonda";
+    /// Um plugin leu o sistema no próprio equipamento (o `detect` dele).
+    pub const PLUGIN: &str = "plugin";
+    /// O palpite do Laya, quando a evidência de software faltou.
+    pub const LAYA: &str = "laya";
     /// Deduzido do fabricante/modelo em texto livre do cadastro.
     pub const REGISTRY: &str = "cadastro";
+
+    /// O que o equipamento **provou** rodar (ou o operador afirmou). Palpite
+    /// (`laya`) e texto do cadastro — que descreve o hardware — não entram:
+    /// uma RouterBOARD da MikroTik pode rodar OpenWrt.
+    #[must_use]
+    pub fn is_certain(source: &str) -> bool {
+        matches!(source, DECLARED | SNMP | PROBE | PLUGIN)
+    }
+
+    /// A constante de uma origem gravada no banco.
+    #[must_use]
+    pub fn from_stored(source: &str) -> Option<&'static str> {
+        [DECLARED, SNMP, PROBE, PLUGIN, LAYA, REGISTRY]
+            .into_iter()
+            .find(|known| *known == source)
+    }
     /// Nada identificou — ver [`super::FALLBACK`].
     pub const DEFAULT: &str = "padrão";
 }
@@ -112,6 +132,42 @@ pub struct Evidence<'a> {
     pub name: Option<&'a str>,
     pub vendor: Option<&'a str>,
     pub model: Option<&'a str>,
+    /// O que já se observou no equipamento e ficou gravado
+    /// (`devices.observed_os`).
+    pub observed: Option<Observed<'a>>,
+}
+
+/// Uma observação gravada: o sistema, de onde veio e por quê.
+#[derive(Debug, Clone, Copy)]
+pub struct Observed<'a> {
+    pub system: &'a str,
+    pub source: &'a str,
+    pub reason: &'a str,
+}
+
+impl<'a> Evidence<'a> {
+    /// O que se sabe de um equipamento cadastrado sem ir à rede: a declaração,
+    /// a observação gravada e o texto do cadastro. Uma fonte só para a lista
+    /// de dispositivos e para a compatibilidade dos plugins.
+    #[must_use]
+    pub fn from_device(device: &'a crate::models::devices::Model) -> Self {
+        let observed = match (&device.observed_os, &device.observed_os_source) {
+            (Some(system), Some(source)) => Some(Observed {
+                system,
+                source,
+                reason: device.observed_os_reason.as_deref().unwrap_or_default(),
+            }),
+            _ => None,
+        };
+        Self {
+            declared: device.operating_system.as_deref(),
+            name: Some(&device.name),
+            vendor: device.vendor.as_deref(),
+            model: device.model.as_deref(),
+            observed,
+            ..Self::default()
+        }
+    }
 }
 
 /// A conclusão, com o porquê.
@@ -138,8 +194,13 @@ pub struct Detection {
 ///    só o `uname`;
 /// 5. **o apelido genérico no `sysDescr`** — a palavra "Linux", que quase todo
 ///    firmware embarcado diz e que por isso só decide quando nada mais decidiu;
-/// 6. o fabricante/modelo do cadastro, específico antes de genérico;
-/// 7. o padrão.
+/// 6. o palpite do Laya, quando foi ele quem observou;
+/// 7. o fabricante/modelo do cadastro, específico antes de genérico — é
+///    hardware, por isso só decide no fim;
+/// 8. o padrão.
+///
+/// A observação gravada (`observed`) entra logo depois da declaração quando é
+/// evidência de software, e no passo 6 quando é palpite do Laya.
 ///
 /// O salto que importa é o 4 vir **antes** do 5. Um OpenWrt cujo `sysDescr` é
 /// `Linux bpi-r3 6.12.87 aarch64` casava com "linux" no passo 3 e parava ali.
@@ -154,6 +215,19 @@ pub fn detect(evidencia: &Evidence) -> Detection {
             source::DECLARED,
             format!("definido no cadastro como \"{}\"", sistema.label),
         );
+    }
+
+    let observado = evidencia.observed.and_then(|observed| {
+        Some((
+            find(observed.system)?,
+            source::from_stored(observed.source)?,
+            observed.reason,
+        ))
+    });
+    if let Some((sistema, origem, motivo)) =
+        observado.filter(|(_, origem, _)| source::is_certain(origem))
+    {
+        return achado(sistema, origem, motivo.to_owned());
     }
 
     if let Some((sistema, oid)) = casa_oid(evidencia.sys_object_id) {
@@ -195,6 +269,10 @@ pub fn detect(evidencia: &Evidence) -> Detection {
                 sistema.label
             ),
         );
+    }
+
+    if let Some((sistema, origem, motivo)) = observado {
+        return achado(sistema, origem, motivo.to_owned());
     }
 
     for nivel in [Especificidade::Especifico, Especificidade::Generico] {

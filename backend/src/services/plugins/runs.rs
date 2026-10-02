@@ -28,7 +28,7 @@ use super::{
     credentials,
     effect::{self, Effect},
     gate::{AccessGate, AllowAll, ApprovalContext, InteractiveGate},
-    manifest::{PluginAction, TransportKind, DETECT_ACTION},
+    manifest::{PluginAction, PluginManifest, TransportKind, DETECT_ACTION},
     package::{CompatEntry, PluginPackage},
     params,
     runtime::{
@@ -45,6 +45,7 @@ use crate::{
     services::{
         agents::hub::AgentHub,
         audit::{AuditAction, AuditActor, AuditEntryInput, AuditService, ResourceType},
+        devices::systems,
         events::EventBus,
         shared::errors::{AppError, AppResult},
     },
@@ -52,6 +53,8 @@ use crate::{
 
 pub const RUN_STARTED_EVENT: &str = "plugin:run_started";
 pub const RUN_OUTPUT_EVENT: &str = "plugin:run_output";
+/// Um acesso começou (o que está rodando agora; ainda sem resposta).
+pub const RUN_STEP_EVENT: &str = "plugin:run_step";
 pub const RUN_FINISHED_EVENT: &str = "plugin:run_finished";
 
 /// Ação sintética que registra a suíte funcional.
@@ -206,15 +209,22 @@ pub async fn prepare(ctx: &AppContext, spec: RunSpec) -> AppResult<Prepared> {
 
     let package = service::package_of(&spec.plugin)?;
     let mut spec = spec;
+    // Parâmetro `secret` (a senha de uma rede Wi-Fi) chega em claro ao
+    // script, mas o banco guarda a máscara e o runtime a esconde da saída.
+    let mut secret_params = Vec::new();
+    let mut stored_params = spec.params.clone();
     if spec.action != VALIDATION_ACTION {
         let action = action_of(&package, &spec.action)?;
         spec.params = params::validate(action.params.as_ref(), &spec.params)
             .map_err(|errors| AppError::validation(errors.join("; ")))?;
+        secret_params = params::secret_values(action.params.as_ref(), &spec.params);
+        stored_params = params::mask_secrets(action.params.as_ref(), &spec.params);
     }
     let resolved =
         credentials::resolve(&ctx.db, spec.device.id, &package.manifest.transports).await?;
     let transport = transport_for(ctx, resolved.via_probe_id).await?;
-    let extras = load_extras(&ctx.db, &spec.plugin, &package, spec.device.id).await?;
+    let mut extras = load_extras(&ctx.db, &spec.plugin, &package, spec.device.id).await?;
+    extras.secrets.extend(secret_params);
 
     let run = insert_run(
         &ctx.db,
@@ -224,7 +234,7 @@ pub async fn prepare(ctx: &AppContext, spec: RunSpec) -> AppResult<Prepared> {
             user_id: spec.user_id,
             action: &spec.action,
             origin: spec.origin,
-            params: spec.params.clone(),
+            params: stored_params,
             batch_id: spec.batch_id,
         },
     )
@@ -412,8 +422,13 @@ impl Shared {
         let shared = self.clone();
         Arc::new(move |entry: &TranscriptEntry| {
             if let Some(bus) = &shared.bus {
+                let event = if entry.kind.starts_with(runtime::STEP_PREFIX) {
+                    RUN_STEP_EVENT
+                } else {
+                    RUN_OUTPUT_EVENT
+                };
                 bus.publish_ephemeral(
-                    RUN_OUTPUT_EVENT,
+                    event,
                     json!({ "runId": shared.run_id, "deviceId": shared.device_id, "entry": entry }),
                 );
             }
@@ -496,7 +511,13 @@ pub async fn run(ctx: &AppContext, prepared: Prepared) -> AppResult<plugin_runs:
         .await;
         if action.id == DETECT_ACTION {
             if let Ok(output) = &outcome.output {
-                remember_detection(&ctx.db, &prepared.spec.device, output).await;
+                remember_detection(
+                    &ctx.db,
+                    &prepared.spec.device,
+                    &prepared.package.manifest,
+                    output,
+                )
+                .await;
             }
         }
         (outcome.output, outcome.transcript)
@@ -539,8 +560,15 @@ pub fn spawn(ctx: AppContext, prepared: Prepared) -> i64 {
 }
 
 /// O `detect` devolveu firmware (e talvez modelo): vale guardar no cadastro,
-/// porque é disso que a compatibilidade depende.
-async fn remember_detection<C: ConnectionTrait>(db: &C, device: &devices::Model, output: &Value) {
+/// porque é disso que a compatibilidade depende. Plugin de um sistema só que
+/// leu o firmware no equipamento também **provou** o sistema — vira a
+/// observação (`observed_os`), que vale mais que o fabricante do cadastro.
+async fn remember_detection<C: ConnectionTrait>(
+    db: &C,
+    device: &devices::Model,
+    manifest: &PluginManifest,
+    output: &Value,
+) {
     let text = |key: &str| {
         output
             .get(key)
@@ -555,6 +583,14 @@ async fn remember_detection<C: ConnectionTrait>(db: &C, device: &devices::Model,
         return;
     }
     let mut active: devices::ActiveModel = device.clone().into();
+    if let (Some(firmware), [platform]) = (&firmware, manifest.matcher.platforms.as_slice()) {
+        active.observed_os = Set(Some(platform.clone()));
+        active.observed_os_source = Set(Some(systems::source::PLUGIN.to_owned()));
+        active.observed_os_reason = Set(Some(format!(
+            "o plugin \"{}\" leu o sistema no equipamento (versão {firmware})",
+            manifest.name
+        )));
+    }
     if let Some(firmware) = firmware {
         active.firmware_version = Set(Some(firmware));
     }
@@ -631,7 +667,13 @@ async fn validate_suite(
         }
     }
     if let Some(output) = &detected {
-        remember_detection(&ctx.db, &prepared.spec.device, output).await;
+        remember_detection(
+            &ctx.db,
+            &prepared.spec.device,
+            &prepared.package.manifest,
+            output,
+        )
+        .await;
     }
     let passed = cases
         .iter()
@@ -944,6 +986,7 @@ mod tests {
             checksum: String::new(),
             last_test_at: None,
             last_test_ok: None,
+            auto_enable: false,
             created_at: chrono::Utc::now().into(),
             updated_at: chrono::Utc::now().into(),
         }

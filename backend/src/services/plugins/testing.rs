@@ -169,10 +169,13 @@ async fn run_unit_test(
             };
         }
     };
+    // Como na execução real: parâmetro secreto chega ao script e sai mascarado.
+    let mut secrets = effective.secrets;
+    secrets.extend(params::secret_values(action.params.as_ref(), &params));
     let context = ExecutionContext {
         extras: Extras {
             settings: effective.value,
-            secrets: effective.secrets,
+            secrets,
             library: library.to_vec(),
         },
         device: DeviceInfo {

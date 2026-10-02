@@ -87,6 +87,35 @@ cada acesso ao equipamento (ou ligando, ciente do risco, um modo automático).
    Alternativa descartada: o equipamento como fonte da verdade (sem estado
    guardado) não detecta divergência nem permite pré-visualizar a frota.
 
+10. **Revisão do adendo 9 — o equipamento como fonte da verdade (Wi-Fi).**
+    Guardar o estado desejado da rede Wi-Fi criava duas verdades: o que o
+    sistema tinha e o que o roteador tinha, e qualquer mudança à mão virava
+    "divergência" a desfazer. O `openwrt-wifi` passou a ler os roteadores e a
+    expressar cada mudança como ação com parâmetros (adicionar/alterar,
+    remover, rádios, mesh), pré-visualizada e aplicada nos equipamentos
+    escolhidos. A plataforma ganhou o que isso pede: `preview` nas ações de
+    frota, `matrix.edit`/`matrix.remove` (formulário preenchido pelo item),
+    parâmetros por equipamento no lote (`deviceParams`, base do `next` de um
+    `reduce`) e máscara de parâmetro `secret` em execução e lote. `settings`
+    continua disponível para plugins em que o sistema é a verdade.
+
+11. **Plugins nascem desligados.** Embutido entra `disabled` e liga sozinho
+    quando um equipamento cadastrado (ou com o sistema trocado) é citado em
+    `match.platforms` e não é incompatível; liga também ao ser instalado
+    ("Ativar e instalar") ou à mão, inclusive pelo assistente inicial.
+    `plugins.auto_enable` separa "nunca ligado" de "desligado pelo operador",
+    que não volta sozinho.
+
+12. **O sistema do equipamento, não o hardware.** A compatibilidade usava o
+    fabricante/modelo do cadastro, e uma RouterBOARD da MikroTik com OpenWrt
+    ficava "incompatível" com o plugin de OpenWrt. Agora há uma ordem de
+    evidências (`systems::detect`, uma só para a lista de dispositivos e para
+    os plugins): declaração > o que o equipamento mostrou (`observed_os`:
+    banner SSH na porta da credencial, SNMP, `detect` de plugin de um sistema
+    só) > Laya > texto do cadastro. Só a declaração e a observação reprovam;
+    palpite vira dúvida. Alternativa descartada: sondar o equipamento a cada
+    listagem — a observação é gravada e refeita no cadastro e sob demanda.
+
 ## Consequências
 
 - Quatro tabelas novas (`plugins`, `device_credentials`, `plugin_runs`,

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { ApiError, apiService } from '@/services/apiService'
+import { usePluginAppsStore } from './pluginApps'
 import type { AccessRequest } from '@/bindings/AccessRequest'
 import type { AutoAcceptState } from '@/bindings/AutoAcceptState'
 import type { CredentialInput } from '@/bindings/CredentialInput'
@@ -222,6 +223,8 @@ export const usePluginsStore = defineStore('plugins', () => {
       `/devices/${deviceId}/plugins/${pluginId}/install`,
       {}
     )
+    // Instalar um desligado o liga: um aplicativo novo pode aparecer no menu.
+    await usePluginAppsStore().fetchApps()
   }
 
   async function uninstallPlugin(deviceId: number, pluginId: number): Promise<void> {

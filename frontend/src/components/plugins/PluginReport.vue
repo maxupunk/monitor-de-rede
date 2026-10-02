@@ -109,7 +109,7 @@ type Section =
 /** Chaves cujo valor é um estado (vira chip colorido). */
 const STATE_KEYS = new Set(['state', 'status', 'change', 'estado'])
 /** Chaves que a tela trata à parte (ex.: a sugestão de configuração do `reduce`). */
-const HIDDEN_KEYS = new Set(['settings_patch'])
+const HIDDEN_KEYS = new Set(['settings_patch', 'next'])
 
 function isRow(value: unknown): value is Row {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -153,7 +153,8 @@ const sections = computed<Section[]>(() => {
   const result: Section[] = []
   const scalars: [string, unknown][] = []
   for (const [key, item] of Object.entries(value)) {
-    if (HIDDEN_KEYS.has(key)) continue
+    // `_chave` é dado para a tela (ex.: valores atuais de um formulário).
+    if (HIDDEN_KEYS.has(key) || key.startsWith('_')) continue
     if (isRowList(item)) {
       result.push({
         kind: 'table',

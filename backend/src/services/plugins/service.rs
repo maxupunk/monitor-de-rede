@@ -176,17 +176,21 @@ pub async fn ensure_builtins<C: ConnectionTrait>(db: &C) -> AppResult<()> {
             .find(|model| model.slug == package.manifest.slug);
         match current {
             Some(model) if model.checksum == checksum => {}
+            // Nova versão do embutido: o código muda, o estado (ligado ou
+            // não) é do operador.
             Some(model) => {
                 let mut active = fill(model.clone().into(), &package)?;
-                active.status = Set(status::ACTIVE.to_owned());
                 active.review = Set(Some(static_review(&package)?));
                 active.update(db).await?;
             }
+            // Nasce desligado; liga ao cadastrar um equipamento compatível
+            // ([`activate_for_device`]) ou à mão.
             None => {
                 let mut active = fill(<plugins::ActiveModel as Default>::default(), &package)?;
                 active.scope = Set(scope::MODEL.to_owned());
                 active.source = Set(source::BUILTIN.to_owned());
-                active.status = Set(status::ACTIVE.to_owned());
+                active.status = Set(status::DISABLED.to_owned());
+                active.auto_enable = Set(true);
                 active.review = Set(Some(static_review(&package)?));
                 active.last_test_ok = Set(Some(true));
                 active.last_test_at = Set(Some(chrono::Utc::now().into()));
@@ -527,7 +531,45 @@ pub async fn set_enabled<C: ConnectionTrait>(
     }
     let mut active: plugins::ActiveModel = model.into();
     active.status = Set(next.to_owned());
+    if !enabled {
+        // Desligado pelo operador: não volta sozinho no próximo cadastro.
+        active.auto_enable = Set(false);
+    }
     Ok(active.update(db).await?)
+}
+
+/// Liga os plugins desligados que ainda podem ligar sozinhos e que dizem,
+/// pelo sistema, ser para este equipamento recém-cadastrado (ou alterado).
+/// Devolve os nomes ligados.
+///
+/// # Errors
+///
+/// Erro do banco.
+pub async fn activate_for_device<C: ConnectionTrait>(
+    db: &C,
+    device: &devices::Model,
+) -> AppResult<Vec<String>> {
+    ensure_builtins(db).await?;
+    let facts = DeviceFacts::from_device(device);
+    let dormant = plugins::Entity::find()
+        .filter(plugins::Column::Status.eq(status::DISABLED))
+        .filter(plugins::Column::AutoEnable.eq(true))
+        .filter(plugins::Column::DeviceId.is_null())
+        .all(db)
+        .await?;
+    let mut activated = Vec::new();
+    for model in dormant {
+        let package = package_of(&model)?;
+        let fits = compat::names_platform(&package.manifest, &facts)
+            && compat::evaluate(&package.manifest, &package.compatibility, &facts).level
+                != compat::Compat::Incompatible;
+        if fits {
+            let name = model.name.clone();
+            set_enabled(db, model.id, true).await?;
+            activated.push(name);
+        }
+    }
+    Ok(activated)
 }
 
 /// Copia um plugin (embutido, geralmente) como próprio, para editar.
@@ -592,7 +634,6 @@ pub async fn for_device<C: ConnectionTrait>(
     ensure_builtins(db).await?;
     let facts = DeviceFacts::from_device(device);
     let rows = plugins::Entity::find()
-        .filter(plugins::Column::Status.ne(status::DISABLED))
         .filter(
             sea_orm::Condition::any()
                 .add(plugins::Column::DeviceId.is_null())
@@ -619,6 +660,10 @@ pub async fn for_device<C: ConnectionTrait>(
         } else {
             compat::evaluate(&package.manifest, &package.compatibility, &facts)
         };
+        // Desligado só aparece onde serviria ("Ativar e instalar").
+        if model.status == status::DISABLED && verdict.level == compat::Compat::Incompatible {
+            continue;
+        }
         items.push(DevicePluginItem {
             plugin: summary(model)?,
             compat: verdict.level,
@@ -693,18 +738,10 @@ pub async fn install<C: ConnectionTrait>(
     user_id: Option<i64>,
 ) -> AppResult<plugins::Model> {
     let model = find(db, plugin_id).await?;
-    match model.status.as_str() {
-        status::QUARANTINE => {
-            return Err(AppError::business_rule(
-                "O plugin está em quarentena: aceite a revisão de segurança antes de instalá-lo.",
-            ))
-        }
-        status::DISABLED => {
-            return Err(AppError::business_rule(
-                "O plugin está desativado. Ative-o na biblioteca para instalar.",
-            ))
-        }
-        _ => {}
+    if model.status == status::QUARANTINE {
+        return Err(AppError::business_rule(
+            "O plugin está em quarentena: aceite a revisão de segurança antes de instalá-lo.",
+        ));
     }
     if model.device_id.is_some_and(|owner| owner != device.id) {
         return Err(AppError::business_rule(
@@ -725,6 +762,12 @@ pub async fn install<C: ConnectionTrait>(
             )));
         }
     }
+    // "Ativar e instalar": instalar um plugin desligado é a decisão de usá-lo.
+    let model = if model.status == status::DISABLED {
+        set_enabled(db, model.id, true).await?
+    } else {
+        model
+    };
     record_install(db, device.id, model.id, user_id).await?;
     Ok(model)
 }
@@ -819,9 +862,11 @@ mod tests {
         ensure_builtins(&db).await.unwrap();
         let all = list(&db).await.unwrap();
         assert_eq!(all.len(), builtin::packages().len());
-        assert!(all
-            .iter()
-            .all(|p| p.status == status::ACTIVE && p.source == source::BUILTIN));
+        assert!(
+            all.iter()
+                .all(|p| p.status == status::DISABLED && p.source == source::BUILTIN),
+            "embutido nasce desligado"
+        );
         assert!(
             delete(&db, all[0].id).await.is_err(),
             "embutido não é excluído"
@@ -950,6 +995,68 @@ mod tests {
 
         uninstall(&db, device.id, pacotes.id).await.unwrap();
         assert!(!is_installed(&db, device.id, pacotes.id).await.unwrap());
+    }
+
+    fn slug_status(all: &[PluginSummary], slug: &str) -> String {
+        all.iter()
+            .find(|plugin| plugin.slug == slug)
+            .map(|plugin| plugin.status.clone())
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn cadastro_compativel_liga_e_desligado_a_mao_fica_desligado() {
+        let db = db().await;
+        ensure_builtins(&db).await.unwrap();
+        let device = openwrt(&db, "SNAPSHOT").await;
+        let ligados = activate_for_device(&db, &device).await.unwrap();
+        assert_eq!(ligados.len(), 3, "{ligados:?}");
+        let all = list(&db).await.unwrap();
+        assert_eq!(slug_status(&all, "openwrt-packages"), status::ACTIVE);
+        assert_eq!(slug_status(&all, "openwrt-wifi"), status::ACTIVE);
+        // O Linux genérico cita o OpenWrt entre os sistemas dele.
+        assert_eq!(slug_status(&all, "linux-ssh-status"), status::ACTIVE);
+        // Sem regra de sistema (serve a qualquer página web): só à mão.
+        assert_eq!(slug_status(&all, "http-page-info"), status::DISABLED);
+
+        let wifi = all
+            .iter()
+            .find(|plugin| plugin.slug == "openwrt-wifi")
+            .unwrap();
+        set_enabled(&db, wifi.id, false).await.unwrap();
+        assert!(activate_for_device(&db, &device).await.unwrap().is_empty());
+        assert_eq!(
+            slug_status(&list(&db).await.unwrap(), "openwrt-wifi"),
+            status::DISABLED
+        );
+    }
+
+    #[tokio::test]
+    async fn instalar_desligado_liga_e_catalogo_esconde_o_incompativel() {
+        let db = db().await;
+        ensure_builtins(&db).await.unwrap();
+        let mut mikrotik = openwrt(&db, "7.15").await;
+        mikrotik.operating_system = Some("routeros".into());
+        let slugs: Vec<String> = for_device(&db, &mikrotik)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|item| item.plugin.slug)
+            .collect();
+        assert!(!slugs.contains(&"openwrt-packages".to_owned()), "{slugs:?}");
+        assert!(slugs.contains(&"http-page-info".to_owned()), "{slugs:?}");
+
+        let device = openwrt(&db, "24.10.0").await;
+        let catalogo = for_device(&db, &device).await.unwrap();
+        let pacotes = catalogo
+            .iter()
+            .find(|item| item.plugin.slug == "openwrt-packages")
+            .expect("desligado e compatível aparece para ativar");
+        assert_eq!(pacotes.plugin.status, status::DISABLED);
+        let instalado = install(&db, &device, pacotes.plugin.id, None)
+            .await
+            .unwrap();
+        assert_eq!(instalado.status, status::ACTIVE);
     }
 
     #[tokio::test]

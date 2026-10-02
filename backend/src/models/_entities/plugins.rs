@@ -32,6 +32,8 @@ pub struct Model {
     pub checksum: String,
     pub last_test_at: Option<DateTimeWithTimeZone>,
     pub last_test_ok: Option<bool>,
+    /// Ainda pode ser ligado sozinho ao cadastrar um equipamento compatível.
+    pub auto_enable: bool,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
 }

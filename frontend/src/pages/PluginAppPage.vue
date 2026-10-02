@@ -48,7 +48,12 @@
 
       <v-window v-model="tab">
         <v-window-item value="overview">
-          <FleetOverview :view="view" :can-write="authStore.isAdmin" @run="openRun" />
+          <FleetOverview
+            :view="view"
+            :can-write="authStore.isAdmin"
+            @run="openRun"
+            @create-device="deviceDialog = true"
+          />
         </v-window-item>
 
         <v-window-item v-if="fleetSchema" value="settings">
@@ -83,7 +88,12 @@
         </v-window-item>
 
         <v-window-item value="members">
-          <FleetMembers :view="view" :can-write="authStore.isAdmin" @notify="notify" />
+          <FleetMembers
+            :view="view"
+            :can-write="authStore.isAdmin"
+            @notify="notify"
+            @create-device="deviceDialog = true"
+          />
         </v-window-item>
 
         <v-window-item value="runs">
@@ -111,6 +121,7 @@
                   :can-write="authStore.isAdmin"
                   @cancel="cancel"
                   @apply-patch="applyPatch"
+                  @apply-next="applyNext"
                   @open-run="openTranscript"
                 />
               </v-expansion-panel-text>
@@ -133,9 +144,14 @@
       v-model="runDialog.open"
       :fleet-action="runDialog.fleetAction"
       :action="runDialog.action"
+      :preview-action="deviceActionOf(fleetActionOf(runDialog.fleetAction?.preview ?? ''))"
+      :initial-params="runDialog.params"
+      :initial-devices="runDialog.devices"
       :members="view.members"
+      :plugin-id="view.plugin.id"
       :plugin-name="view.plugin.name"
       :active="view.plugin.status === 'active'"
+      :spec="spec"
       @run="start"
     />
 
@@ -155,6 +171,7 @@
             :can-write="authStore.isAdmin"
             @cancel="cancel"
             @apply-patch="applyPatch"
+            @apply-next="applyNext"
             @open-run="openTranscript"
           />
           <div v-else class="d-flex align-center ga-3 py-4">
@@ -179,6 +196,13 @@
       :labels="transcript.labels"
     />
 
+    <DeviceDialog
+      v-if="view"
+      v-model="deviceDialog"
+      :prefill-data="devicePrefillFor(view.plugin.matcher)"
+      @saved="onDeviceCreated"
+    />
+
     <v-snackbar v-model="feedback.show" :color="feedback.color" timeout="6000" location="bottom">
       {{ feedback.text }}
     </v-snackbar>
@@ -194,6 +218,7 @@ import type { OutputKind } from '@/bindings/OutputKind'
 import type { PluginAction } from '@/bindings/PluginAction'
 import type { PluginBatchView } from '@/bindings/PluginBatchView'
 import PageHeader from '@/components/PageHeader.vue'
+import DeviceDialog from '@/components/DeviceDialog.vue'
 import PluginRunDialog from '@/components/plugins/PluginRunDialog.vue'
 import PluginAbout from '@/components/plugins/device/PluginAbout.vue'
 import FleetBatchCard from '@/components/plugins/fleet/FleetBatchCard.vue'
@@ -202,9 +227,16 @@ import FleetOverview from '@/components/plugins/fleet/FleetOverview.vue'
 import FleetRunDialog from '@/components/plugins/fleet/FleetRunDialog.vue'
 import SettingsForm from '@/components/plugins/settings/SettingsForm.vue'
 import { useAuthStore } from '@/stores/auth'
+import type { Device } from '@/stores/devices'
 import { usePluginAppsStore } from '@/stores/pluginApps'
 import { formatDateTime } from '@/utils/formatters'
-import { batchStatusPresentation, statusPresentation } from '@/utils/pluginPresentation'
+import {
+  batchStatusPresentation,
+  devicePrefillFor,
+  statusPresentation,
+  type FollowUp,
+} from '@/utils/pluginPresentation'
+import { confirm } from '@/composables/useConfirm'
 import { defaultsOf, fieldsOf, normalizeValue } from '@/utils/pluginSettings'
 
 const route = useRoute()
@@ -212,6 +244,7 @@ const store = usePluginAppsStore()
 const authStore = useAuthStore()
 
 const tab = ref('overview')
+const deviceDialog = ref(false)
 const settingsForm = ref<{ validate: () => Promise<boolean> } | null>(null)
 const draft = ref<Record<string, unknown>>({})
 const saving = ref(false)
@@ -220,6 +253,8 @@ const runDialog = reactive({
   open: false,
   fleetAction: null as FleetAction | null,
   action: null as PluginAction | null,
+  params: {} as Record<string, unknown>,
+  devices: undefined as number[] | undefined,
 })
 const live = reactive({ open: false, title: '', batchId: null as number | null })
 const transcript = reactive({
@@ -248,9 +283,51 @@ watch(
     if (!Number.isFinite(id)) return
     await store.loadFleet(id)
     resetDraft()
+    readIfStale()
   },
   { immediate: true }
 )
+
+/** Leitura mais velha que isto é refeita ao abrir a página. */
+const STALE_MS = 10 * 60 * 1000
+
+/**
+ * Abrir o aplicativo mostra os equipamentos como estão: sem leitura recente,
+ * a ação de estado roda uma vez (só leitura; o resultado chega pelo SSE).
+ */
+function readIfStale() {
+  const statusAction = spec.value?.statusAction
+  const ready = (view.value?.members ?? []).filter((member) => member.credentialsReady)
+  if (!statusAction || ready.length === 0 || !authStore.isAdmin) return
+  const last = store.latestBatch(pluginId.value, statusAction)
+  const running = view.value?.batches.some(
+    (batch) => batch.action === statusAction && batch.status === 'running'
+  )
+  const age = last?.finishedAt ? Date.now() - new Date(last.finishedAt).getTime() : Infinity
+  if (running || age < STALE_MS) return
+  void store
+    .runAction(
+      pluginId.value,
+      statusAction,
+      ready.map((member) => member.deviceId),
+      false
+    )
+    .catch(() => undefined)
+}
+
+/**
+ * O equipamento cadastrado daqui já entra no aplicativo. Sem o acesso
+ * (SSH/HTTP) ele ainda não responde: a aba Equipamentos mostra onde cadastrar.
+ */
+async function onDeviceCreated(device: Device) {
+  try {
+    await store.addMember(pluginId.value, device.id)
+    tab.value = 'members'
+    notify(`${device.name} entrou em ${title.value}. Cadastre o acesso dele para usar.`)
+  } catch (err: unknown) {
+    notify(describe(err, 'Equipamento cadastrado, mas não entrou no aplicativo'), 'error')
+  }
+}
 
 function notify(text: string, color = 'success') {
   feedback.text = text
@@ -281,11 +358,13 @@ async function saveSettings() {
   }
 }
 
-/** A ação da frota pelo id (a de estado também vale). */
+/** A ação da frota pelo id (a de estado e as pré-visualizações também valem). */
 function fleetActionOf(id: string): FleetAction | null {
   const found = spec.value?.actions?.find((item) => item.id === id)
   if (found) return found
-  return spec.value?.statusAction === id ? { id, title: 'Atualizar estado', action: id } : null
+  if (spec.value?.statusAction === id) return { id, title: 'Atualizar estado', action: id }
+  const owner = spec.value?.actions?.find((item) => item.preview === id)
+  return owner ? { id, title: 'Pré-visualizar: ' + owner.title, action: id } : null
 }
 
 function deviceActionOf(fleetAction: FleetAction | null): PluginAction | null {
@@ -304,8 +383,9 @@ function labelsOf(id: string): Record<string, string> | undefined {
 /**
  * Leitura sem parâmetro roda direto em todos os equipamentos prontos; o que
  * altera ou pergunta algo passa pelo diálogo (escolha de equipamentos e ciência).
+ * Vindo de uma coluna da grade, o diálogo abre preenchido.
  */
-function openRun(id: string) {
+function openRun(id: string, params: Record<string, unknown> = {}, devices?: number[]) {
   const fleetAction = fleetActionOf(id)
   const action = deviceActionOf(fleetAction)
   if (!fleetAction || !action) return
@@ -315,8 +395,8 @@ function openRun(id: string) {
       notify('Nenhum equipamento com acesso cadastrado.', 'warning')
       return
     }
-    runDialog.fleetAction = fleetAction
-    void start(
+    void launch(
+      fleetAction,
       ready.map((member) => member.deviceId),
       {},
       false
@@ -325,12 +405,22 @@ function openRun(id: string) {
   }
   runDialog.fleetAction = fleetAction
   runDialog.action = action
+  runDialog.params = params
+  runDialog.devices = devices
   runDialog.open = true
 }
 
-async function start(deviceIds: number[], params: Record<string, unknown>, confirmWrite: boolean) {
-  const fleetAction = runDialog.fleetAction
-  if (!fleetAction) return
+function start(deviceIds: number[], params: Record<string, unknown>, confirmWrite: boolean) {
+  if (runDialog.fleetAction) void launch(runDialog.fleetAction, deviceIds, params, confirmWrite)
+}
+
+async function launch(
+  fleetAction: FleetAction,
+  deviceIds: number[],
+  params: Record<string, unknown>,
+  confirmWrite: boolean,
+  deviceParams?: Record<number, Record<string, unknown>>
+) {
   live.title = fleetAction.title
   live.batchId = null
   live.open = fleetAction.id !== spec.value?.statusAction
@@ -340,12 +430,32 @@ async function start(deviceIds: number[], params: Record<string, unknown>, confi
       fleetAction.id,
       deviceIds,
       confirmWrite,
-      params
+      params,
+      deviceParams
     )
   } catch (err: unknown) {
     live.open = false
     notify(describe(err, 'Falha ao iniciar'), 'error')
   }
+}
+
+/** Aceitar a sugestão de um consolidado: a ação dela, com o de cada equipamento. */
+async function applyNext(_batch: PluginBatchView, followUp: FollowUp) {
+  const fleetAction = fleetActionOf(followUp.action)
+  const action = deviceActionOf(fleetAction)
+  if (!fleetAction || !action) return
+  const count = Object.keys(followUp.devices).length
+  const write = action.effect === 'write'
+  const ok = await confirm({
+    title: followUp.title,
+    message: write
+      ? `Aplicar em ${count} equipamento(s)? Isso altera a configuração deles; cada um guarda uma cópia e volta atrás se a conferência falhar.`
+      : `Rodar em ${count} equipamento(s)?`,
+    confirmText: 'Aplicar',
+    confirmColor: write ? 'error' : 'primary',
+  })
+  if (!ok) return
+  await launch(fleetAction, Object.keys(followUp.devices).map(Number), {}, write, followUp.devices)
 }
 
 async function cancel(batch: PluginBatchView) {

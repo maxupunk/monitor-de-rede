@@ -185,8 +185,7 @@ pub async fn fingerprint<C: ConnectionTrait>(
         ..systems::Evidence::default()
     });
     let mut facts = DeviceFacts::from_device(device);
-    facts.platform = detection.system.id.to_string();
-    facts.platform_known = detection.source != systems::source::DEFAULT;
+    facts.set_system(&detection);
 
     let page_text = http
         .as_ref()

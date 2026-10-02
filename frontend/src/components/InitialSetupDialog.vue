@@ -29,7 +29,7 @@
         </v-card-subtitle>
         <template #append>
           <v-btn
-            v-if="currentStep < 8 && !applying"
+            v-if="currentStep < 9 && !applying"
             variant="text"
             size="small"
             color="grey"
@@ -43,17 +43,17 @@
       </v-card-item>
 
       <!-- Indicador Visual de Etapas -->
-      <div v-if="currentStep < 8" class="px-5 pt-3 pb-2 bg-grey-lighten-5 border-b">
+      <div v-if="currentStep < 9" class="px-5 pt-3 pb-2 bg-grey-lighten-5 border-b">
         <div class="d-flex align-center justify-space-between mb-2">
           <span class="text-caption font-weight-bold text-primary">
-            Etapa {{ currentStep }} de 7: {{ stepTitles[currentStep - 1] }}
+            Etapa {{ currentStep }} de 8: {{ stepTitles[currentStep - 1] }}
           </span>
           <span class="text-caption text-medium-emphasis">
-            {{ Math.round(((currentStep - 1) / 6) * 100) }}% concluído
+            {{ Math.round(((currentStep - 1) / 7) * 100) }}% concluído
           </span>
         </div>
         <v-progress-linear
-          :model-value="((currentStep - 1) / 6) * 100"
+          :model-value="((currentStep - 1) / 7) * 100"
           color="primary"
           height="6"
           rounded
@@ -767,6 +767,10 @@
         <!-- ETAPA 7: Notificações PWA & Preferências Gerais          -->
         <!-- ======================================================== -->
         <div v-else-if="currentStep === 7" class="py-2">
+          <SetupAppsStep v-model="form.apps" :apps="fleetApps" />
+        </div>
+
+        <div v-else-if="currentStep === 8" class="py-2">
           <div class="mb-4">
             <div class="text-h6 font-weight-bold">Notificações & Parâmetros de Monitoramento</div>
             <div class="text-caption text-medium-emphasis">
@@ -880,7 +884,7 @@
         <!-- ======================================================== -->
         <!-- ETAPA 8: Revisão, Aplicação & Conclusão                 -->
         <!-- ======================================================== -->
-        <div v-else-if="currentStep === 8" class="py-2">
+        <div v-else-if="currentStep === 9" class="py-2">
           <template v-if="!appliedSuccess">
             <div class="text-center mb-4">
               <v-avatar color="primary" size="56" variant="tonal" class="mb-2">
@@ -999,6 +1003,15 @@
                     {{ form.preferences.autoDiscoveryEnabled ? 'Ligada' : 'Desligada' }}
                   </v-list-item-subtitle>
                 </v-list-item>
+                <v-list-item v-if="fleetApps.length > 0" class="px-0">
+                  <template #prepend>
+                    <v-avatar color="primary" size="32" variant="tonal" class="mr-3">
+                      <v-icon size="18">mdi-apps</v-icon>
+                    </v-avatar>
+                  </template>
+                  <v-list-item-title class="font-weight-bold">Aplicativos</v-list-item-title>
+                  <v-list-item-subtitle>{{ appsSummary }}</v-list-item-subtitle>
+                </v-list-item>
               </v-list>
             </v-sheet>
 
@@ -1075,7 +1088,7 @@
       <v-card-actions class="pa-4 bg-surface justify-space-between align-center">
         <div>
           <v-btn
-            v-if="currentStep > 1 && currentStep < 8 && !applying"
+            v-if="currentStep > 1 && currentStep < 9 && !applying"
             variant="text"
             prepend-icon="mdi-arrow-left"
             @click="currentStep--"
@@ -1086,7 +1099,7 @@
 
         <div class="d-flex align-center ga-2">
           <v-btn
-            v-if="currentStep < 7"
+            v-if="currentStep < 8"
             color="primary"
             variant="flat"
             append-icon="mdi-arrow-right"
@@ -1096,17 +1109,17 @@
             Avançar
           </v-btn>
           <v-btn
-            v-else-if="currentStep === 7"
+            v-else-if="currentStep === 8"
             color="primary"
             variant="flat"
             append-icon="mdi-check-decagram-outline"
             class="font-weight-bold px-5"
-            @click="currentStep = 8"
+            @click="currentStep = 9"
           >
             Revisar Configurações
           </v-btn>
           <v-btn
-            v-else-if="currentStep === 8 && !appliedSuccess"
+            v-else-if="currentStep === 9 && !appliedSuccess"
             color="success"
             variant="flat"
             size="large"
@@ -1124,9 +1137,12 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useOnboardingStore } from '@/stores/onboarding'
+import { usePluginsStore } from '@/stores/plugins'
+import { usePluginAppsStore } from '@/stores/pluginApps'
+import SetupAppsStep from '@/components/setup/SetupAppsStep.vue'
 import { useSitesStore } from '@/stores/sites'
 import { useNetworksStore } from '@/stores/networks'
 import { useDnsServersStore, type DnsServerPayload } from '@/stores/dnsServers'
@@ -1157,7 +1173,29 @@ const prefsStore = usePreferencesStore()
 const { permissionState, requestPermission, sendNotification } = useNotifications()
 
 const currentStep = ref(1)
-const stepTitles = ['Início', 'Local / Site', 'Endereços', 'Sub-rede', 'DNS', 'VPN', 'Geral']
+const pluginsStore = usePluginsStore()
+const pluginAppsStore = usePluginAppsStore()
+const fleetApps = computed(() =>
+  pluginsStore.library.filter(
+    (plugin) => plugin.surfaces.includes('fleet') && plugin.status !== 'quarantine'
+  )
+)
+const appsSummary = computed(() => {
+  const on = fleetApps.value.filter((app) => form.apps[app.id])
+  return on.length > 0
+    ? on.map((app) => app.fleet?.title ?? app.name).join(', ')
+    : 'Nenhum ligado agora (ligam ao cadastrar um equipamento compatível)'
+})
+const stepTitles = [
+  'Início',
+  'Local / Site',
+  'Endereços',
+  'Sub-rede',
+  'DNS',
+  'VPN',
+  'Aplicativos',
+  'Geral',
+]
 const stepIcons = [
   'mdi-hand-wave-outline',
   'mdi-domain',
@@ -1165,6 +1203,7 @@ const stepIcons = [
   'mdi-lan',
   'mdi-dns-outline',
   'mdi-shield-lock-outline',
+  'mdi-apps',
   'mdi-bell-ring-outline',
 ]
 
@@ -1200,6 +1239,8 @@ const form = reactive({
     cidr: '10.8.0.0/24',
   },
   preferences: defaultPreferences(),
+  /** id do plugin de frota → ligado. */
+  apps: {} as Record<number, boolean>,
 })
 
 // Presets de servidores DNS populares
@@ -1332,6 +1373,14 @@ async function initializeDefaults() {
   // Carrega preferências atuais
   await prefsStore.fetchAll()
   form.preferences = { ...prefsStore.preferences }
+
+  // Aplicativos (plugins com página de frota) e se já estão ligados
+  try {
+    await pluginsStore.fetchLibrary()
+  } catch {
+    // Sem permissão de leitura da biblioteca: a etapa só fica vazia.
+  }
+  form.apps = Object.fromEntries(fleetApps.value.map((app) => [app.id, app.status !== 'disabled']))
 }
 
 async function handleDetectPublicIp() {
@@ -1470,6 +1519,18 @@ async function handleApplyAll() {
         listenPort: form.vpn.listenPort || 51820,
         cidr: form.vpn.cidr.trim() || '10.8.0.0/24',
       })
+    }
+
+    // 6. Ligar/desligar aplicativos (só o que mudou)
+    const changedApps = fleetApps.value.filter(
+      (app) => (form.apps[app.id] ?? false) !== (app.status !== 'disabled')
+    )
+    if (changedApps.length > 0) {
+      applyStatusMessage.value = 'Ligando os aplicativos escolhidos...'
+      for (const app of changedApps) {
+        await pluginsStore.lifecycle(app.id, form.apps[app.id] ? 'enable' : 'disable')
+      }
+      await pluginAppsStore.fetchApps()
     }
 
     // 6. Salvar Preferências Gerais

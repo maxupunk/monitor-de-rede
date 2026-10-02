@@ -198,13 +198,7 @@ fn corpo(
     // o `sysDescr` por SNMP de cada linha transformaria listar dispositivos numa
     // varredura. Quem precisa da versão com SNMP é a tela de ativação de log, e
     // ela pede um dispositivo de cada vez.
-    let sistema = systems::detect(&systems::Evidence {
-        declared: device.operating_system.as_deref(),
-        name: Some(&device.name),
-        vendor: device.vendor.as_deref(),
-        model: device.model.as_deref(),
-        ..systems::Evidence::default()
-    });
+    let sistema = systems::detect(&systems::Evidence::from_device(device));
     DevicePresenterItem {
         id: device.id,
         site_id: device.site_id,
@@ -478,6 +472,7 @@ async fn store(
     }
     .insert(&ctx.db)
     .await?;
+    activate_plugins(&ctx, &row).await;
 
     if let Some(mac) = input
         .mac_address
@@ -540,6 +535,22 @@ async fn show(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<R
         .await?
         .ok_or_else(|| AppError::not_found("Dispositivo não encontrado"))?;
     Ok(format::json(present(&ctx.db, row).await?)?)
+}
+
+/// Cadastro (ou troca de sistema) liga os plugins que dizem servir a este
+/// equipamento. Falhar aqui não desfaz o cadastro.
+async fn activate_plugins(ctx: &AppContext, device: &devices::Model) {
+    if let Err(error) =
+        crate::services::plugins::service::activate_for_device(&ctx.db, device).await
+    {
+        tracing::warn!(%error, device_id = device.id, "falha ao ligar plugins compatíveis");
+    }
+    // Sem sistema declarado, vale o que o equipamento mostrar (SSH/SNMP, ou o
+    // Laya) — e não o fabricante do cadastro. A sonda leva segundos: em
+    // segundo plano, e o menu Aplicativos sabe pelo SSE se algo ligou.
+    if device.operating_system.is_none() {
+        crate::services::plugins::identity::refresh_in_background(ctx, device.clone());
+    }
 }
 
 async fn update(
@@ -637,8 +648,10 @@ async fn update(
         },
     )?;
     let access_mode = access_mode_declarado(input.access_mode.as_deref(), current.access_mode)?;
-    let operating_system =
-        sistema_declarado(input.operating_system.as_deref(), current.operating_system)?;
+    let operating_system = sistema_declarado(
+        input.operating_system.as_deref(),
+        current.operating_system.clone(),
+    )?;
     let snmp_enabled = input.snmp_enabled.unwrap_or(current.snmp_enabled);
     let link_interface_name = if !snmp_enabled {
         None
@@ -664,7 +677,7 @@ async fn update(
         site_id: Set(site_id),
         network_id: Set(network_id),
         parent_id: Set(parent_id),
-        ip_address: Set(input.ip_address.or(current.ip_address)),
+        ip_address: Set(input.ip_address.or(current.ip_address.clone())),
         name: Set(name),
         r#type: Set(kind),
         vendor: Set(input.vendor.or(current.vendor)),
@@ -698,6 +711,9 @@ async fn update(
     }
 
     sync_device_monitor(&ctx.db, &row).await?;
+    if row.operating_system != current.operating_system || row.ip_address != current.ip_address {
+        activate_plugins(&ctx, &row).await;
+    }
     if row.parent_id != current.parent_id {
         emit_topology_updated(&ctx).await;
     }

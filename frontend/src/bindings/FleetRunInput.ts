@@ -4,4 +4,8 @@ export type FleetRunInput = {
 /**
  * Só estes membros; vazio = todos.
  */
-deviceIds: Array<number>, params: Record<string, unknown>, confirmWrite: boolean, };
+deviceIds: Array<number>, params: Record<string, unknown>, 
+/**
+ * Parâmetros de um membro, por cima dos comuns.
+ */
+deviceParams?: Record<number, Record<string, unknown>>, confirmWrite: boolean, };

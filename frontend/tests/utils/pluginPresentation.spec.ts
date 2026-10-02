@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest'
 import type { DevicePluginItem } from '@/bindings/DevicePluginItem'
 import type { DevicePluginsView } from '@/bindings/DevicePluginsView'
 import type { Surface } from '@/bindings/Surface'
-import { installedPluginTabs, pluginTab } from '@/utils/pluginPresentation'
+import {
+  devicePrefillFor,
+  followUpOf,
+  installedPluginTabs,
+  pluginTab,
+  stepLabel,
+} from '@/utils/pluginPresentation'
 
 function item(
   id: number,
@@ -77,5 +83,63 @@ describe('abas de plugins instalados', () => {
 
   it('sem visão carregada não há abas', () => {
     expect(installedPluginTabs(undefined)).toEqual([])
+  })
+})
+
+describe('sugestão de um consolidado', () => {
+  it('lê a ação e os parâmetros de cada equipamento', () => {
+    const next = followUpOf({
+      summary: 'x',
+      next: {
+        action: 'radios',
+        title: 'Aplicar o plano de canais',
+        devices: { '7': { radio_2g_channel: '6' }, lixo: 1 },
+      },
+    })
+    expect(next).toEqual({
+      action: 'radios',
+      title: 'Aplicar o plano de canais',
+      devices: { 7: { radio_2g_channel: '6' } },
+    })
+  })
+
+  it('sem sugestão, ou malformada, não há o que aceitar', () => {
+    expect(followUpOf({ summary: 'ok' })).toBeNull()
+    expect(followUpOf({ next: { action: 'radios', devices: {} } })).toBeNull()
+    expect(followUpOf(null)).toBeNull()
+  })
+})
+
+describe('cadastro aberto de dentro de um plugin', () => {
+  it('já vem com o sistema que o plugin atende', () => {
+    expect(devicePrefillFor({ platforms: ['openwrt'] })).toEqual({
+      operatingSystem: 'openwrt',
+      type: 'router',
+      isMonitored: true,
+    })
+    expect(devicePrefillFor({ platforms: ['linux', 'openwrt'] }).type).toBe('other')
+  })
+
+  it('plugin sem regra de sistema não escolhe por você', () => {
+    expect(devicePrefillFor({})).toEqual({ isMonitored: true })
+  })
+})
+
+describe('andamento de uma execução', () => {
+  const entry = (kind: string, durationMs: number) => ({
+    seq: 0,
+    kind,
+    request: "iwinfo 'phy0-ap0' scan",
+    status: undefined,
+    output: '',
+    durationMs,
+    origin: 'central',
+    at: '2026-10-02T09:00:00Z',
+  })
+
+  it('mostra o que está rodando agora e o que já respondeu', () => {
+    expect(stepLabel(undefined)).toBe('Conectando ao equipamento…')
+    expect(stepLabel(entry('step:ssh', 0))).toBe("SSH · iwinfo 'phy0-ap0' scan · executando…")
+    expect(stepLabel(entry('ssh', 3200))).toBe("SSH · iwinfo 'phy0-ap0' scan · respondeu em 3,2 s")
   })
 })

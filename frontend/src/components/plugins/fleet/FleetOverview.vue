@@ -9,7 +9,7 @@
         prepend-icon="mdi-refresh"
         :loading="refreshing"
         :disabled="!canWrite || view.members.length === 0"
-        @click="emit('run', spec.statusAction)"
+        @click="emit('run', spec.statusAction, {})"
       >
         Atualizar estado
       </v-btn>
@@ -20,7 +20,7 @@
         variant="flat"
         :prepend-icon="item.icon ?? effectPresentation(effectOf(item)).icon"
         :disabled="!canWrite || view.members.length === 0"
-        @click="emit('run', item.id)"
+        @click="emit('run', item.id, {})"
       >
         {{ item.title }}
       </v-btn>
@@ -31,8 +31,18 @@
     </div>
 
     <v-alert v-if="view.members.length === 0" type="info" variant="tonal" class="mb-4">
-      Nenhum equipamento neste aplicativo ainda. Adicione os equipamentos na aba
+      Nenhum equipamento neste aplicativo ainda. Cadastre um novo ou adicione um existente na aba
       <strong>Equipamentos</strong>; o acesso de cada um fica no cadastro do próprio dispositivo.
+      <template v-if="canWrite" #append>
+        <v-btn
+          color="primary"
+          variant="flat"
+          prepend-icon="mdi-plus-network-outline"
+          @click="emit('createDevice')"
+        >
+          Cadastrar equipamento
+        </v-btn>
+      </template>
     </v-alert>
 
     <!-- Grade equipamentos × itens (ex.: roteadores × SSIDs) -->
@@ -43,7 +53,36 @@
             <th class="font-weight-bold">Equipamento</th>
             <th class="font-weight-bold">Estado</th>
             <th v-for="column in columns" :key="column" class="font-weight-bold text-center">
-              {{ column }}
+              <v-menu v-if="canWrite && (matrix?.edit || matrix?.remove)">
+                <template #activator="{ props: menu }">
+                  <v-btn
+                    v-bind="menu"
+                    variant="text"
+                    color="primary"
+                    size="small"
+                    append-icon="mdi-menu-down"
+                    class="font-weight-bold text-none"
+                  >
+                    {{ column }}
+                  </v-btn>
+                </template>
+                <v-list density="compact">
+                  <v-list-item
+                    v-if="matrix?.edit"
+                    prepend-icon="mdi-pencil-outline"
+                    :title="'Editar ' + column"
+                    @click="fromColumn(matrix.edit, column)"
+                  ></v-list-item>
+                  <v-list-item
+                    v-if="matrix?.remove"
+                    prepend-icon="mdi-delete-outline"
+                    base-color="error"
+                    :title="'Remover ' + column"
+                    @click="fromColumn(matrix.remove, column)"
+                  ></v-list-item>
+                </v-list>
+              </v-menu>
+              <span v-else>{{ column }}</span>
             </th>
           </tr>
         </thead>
@@ -115,16 +154,22 @@ import { computed } from 'vue'
 import type { FleetAction } from '@/bindings/FleetAction'
 import type { FleetMember } from '@/bindings/FleetMember'
 import type { FleetView } from '@/bindings/FleetView'
+import type { MatrixAction } from '@/bindings/MatrixAction'
 import { usePluginAppsStore } from '@/stores/pluginApps'
 import { formatRelativeTime } from '@/utils/formatters'
 import { effectPresentation, outputLabel, stateColor, stateLabel } from '@/utils/pluginPresentation'
 
 const props = defineProps<{ view: FleetView; canWrite: boolean }>()
-const emit = defineEmits<{ run: [fleetActionId: string] }>()
+const emit = defineEmits<{
+  /** Ação de frota; ao vir de uma coluna, com o formulário e os equipamentos já escolhidos. */
+  run: [fleetActionId: string, initialParams: Record<string, unknown>, deviceIds?: number[]]
+  /** Cadastrar um equipamento novo já dentro deste aplicativo. */
+  createDevice: []
+}>()
 
 const store = usePluginAppsStore()
 
-type Cell = { state: unknown; detail?: unknown }
+type Cell = { state: unknown; detail?: unknown; item: Record<string, unknown> }
 interface Row {
   member: FleetMember
   state: unknown
@@ -165,6 +210,7 @@ const rows = computed<Row[]>(() =>
         cells[String(item[config.key])] = {
           state: item[config.state],
           detail: config.detail ? item[config.detail] : undefined,
+          item,
         }
       }
     }
@@ -180,6 +226,24 @@ const columns = computed(() => {
   }
   return keys
 })
+
+/**
+ * Editar/remover o item de uma coluna: os parâmetros vêm do item como o
+ * primeiro equipamento que o tem o lê, e só os que o têm ficam marcados.
+ */
+function fromColumn(target: MatrixAction, column: string) {
+  const holders = rows.value.filter((row) => row.cells[column])
+  const item = holders[0]?.cells[column]?.item ?? {}
+  const params = Object.fromEntries(
+    Object.entries(target.params).map(([param, field]) => [param, item[field]])
+  )
+  emit(
+    'run',
+    target.action,
+    params,
+    holders.map((row) => row.member.deviceId)
+  )
+}
 
 function effectOf(item: FleetAction) {
   return props.view.plugin.actions.find((action) => action.id === item.action)?.effect ?? 'read'

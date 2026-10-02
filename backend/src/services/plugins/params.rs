@@ -37,12 +37,16 @@ const PROPERTY_KEYS: &[&str] = &[
     "maximum",
     "default",
     "secret",
+    "source",
     "items",
     "minItems",
     "maxItems",
 ];
 /// Chave implícita dos itens de objeto (ver a nota do módulo).
 pub const ITEM_ID: &str = "id";
+
+/// O que a tela e o histórico recebem no lugar de um segredo.
+pub const SECRET_MASK: &str = "********";
 
 /// Confere se o esquema usa só o subconjunto suportado.
 ///
@@ -116,6 +120,19 @@ fn validate_property_schema(
         .get("type")
         .and_then(Value::as_str)
         .ok_or_else(|| format!("a propriedade `{name}` precisa de `type`"))?;
+    // `source`: o campo oferece os valores que os equipamentos têm — uma lista
+    // da saída da ação de estado e a chave do item (`"networks.ssid"`).
+    if let Some(source) = property.get("source") {
+        let valid = source
+            .as_str()
+            .and_then(|path| path.split_once('.'))
+            .is_some_and(|(list, key)| !list.is_empty() && !key.is_empty() && !key.contains('.'));
+        if !valid || kind != "string" {
+            return Err(format!(
+                "`{name}`: `source` é texto no formato \"lista.chave\" (ex.: \"networks.ssid\") e só em campo de texto"
+            ));
+        }
+    }
     if kind == "array" {
         if !allow_arrays {
             return Err(format!("`{name}`: lista dentro de lista não é suportada"));
@@ -393,6 +410,56 @@ pub fn secret_fields(schema: Option<&Value>) -> Vec<SecretField> {
     fields
 }
 
+/// Aplica `f` a cada valor de campo secreto (raiz e itens de lista).
+pub fn for_each_secret(value: &mut Value, fields: &[SecretField], f: &mut dyn FnMut(&mut Value)) {
+    for field in fields {
+        match field {
+            SecretField::Root(name) => {
+                if let Some(slot) = value.get_mut(name) {
+                    f(slot);
+                }
+            }
+            SecretField::Item { list, field } => {
+                if let Some(items) = value.get_mut(list).and_then(Value::as_array_mut) {
+                    for item in items {
+                        if let Some(slot) = item.get_mut(field) {
+                            f(slot);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Os valores em claro dos campos secretos — a lista que o runtime mascara no
+/// transcript e na saída. Textos curtos demais ficam de fora (mascarar "ab"
+/// apagaria pedaços de qualquer saída).
+#[must_use]
+pub fn secret_values(schema: Option<&Value>, value: &Value) -> Vec<String> {
+    let mut copy = value.clone();
+    let mut found = Vec::new();
+    for_each_secret(&mut copy, &secret_fields(schema), &mut |slot| {
+        if let Some(text) = slot.as_str().filter(|text| text.len() >= 4) {
+            found.push(text.to_owned());
+        }
+    });
+    found
+}
+
+/// Cópia com cada segredo preenchido trocado por [`SECRET_MASK`] — o que vai
+/// para o banco (parâmetros de execução e de lote).
+#[must_use]
+pub fn mask_secrets(schema: Option<&Value>, value: &Value) -> Value {
+    let mut masked = value.clone();
+    for_each_secret(&mut masked, &secret_fields(schema), &mut |slot| {
+        if slot.as_str().is_some_and(|text| !text.is_empty()) {
+            *slot = Value::String(SECRET_MASK.into());
+        }
+    });
+    masked
+}
+
 /// Listas de objetos do esquema (os itens que ganham `id`).
 #[must_use]
 pub fn object_lists(schema: Option<&Value>) -> Vec<String> {
@@ -490,6 +557,37 @@ mod tests {
             "type": "object", "properties": {}, "required": ["fantasma"]
         }))
         .is_err());
+    }
+
+    #[test]
+    fn origem_dos_valores_e_lista_ponto_chave() {
+        let ok = json!({ "type": "object", "properties": {
+            "ssid": { "type": "string", "source": "networks.ssid" } } });
+        assert!(validate_schema(&ok).is_ok());
+        for errado in ["networks", "a.b.c", ".ssid"] {
+            let schema = json!({ "type": "object", "properties": {
+                "ssid": { "type": "string", "source": errado } } });
+            assert!(validate_schema(&schema).is_err(), "{errado}");
+        }
+        let numero = json!({ "type": "object", "properties": {
+            "n": { "type": "integer", "source": "a.b" } } });
+        assert!(validate_schema(&numero).is_err());
+    }
+
+    #[test]
+    fn segredos_saem_mascarados_e_listados() {
+        let value = json!({ "mesh_key": "mesh-secreta", "country": "BR",
+            "networks": [ { "ssid": "Loja", "key": "senha-forte" }, { "ssid": "Aberta", "key": "" } ] });
+        assert_eq!(
+            secret_values(Some(&wifi()), &value),
+            vec!["mesh-secreta".to_owned(), "senha-forte".to_owned()]
+        );
+        let masked = mask_secrets(Some(&wifi()), &value);
+        assert_eq!(masked["mesh_key"], SECRET_MASK);
+        assert_eq!(masked["networks"][0]["key"], SECRET_MASK);
+        assert_eq!(masked["networks"][1]["key"], "");
+        assert_eq!(masked["country"], "BR");
+        assert_eq!(mask_secrets(None, &value), value);
     }
 
     #[test]

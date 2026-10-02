@@ -144,6 +144,16 @@
                 Ativar
               </v-btn>
               <v-btn
+                v-if="opensApp(item)"
+                size="small"
+                color="primary"
+                variant="flat"
+                :prepend-icon="item.fleet?.icon ?? 'mdi-apps'"
+                :to="'/apps/' + item.id"
+              >
+                Abrir
+              </v-btn>
+              <v-btn
                 icon="mdi-pencil-outline"
                 size="small"
                 variant="text"
@@ -264,6 +274,13 @@ function describe(err: unknown, fallback: string): string {
 function openEditor(pluginId: number | null) {
   editor.pluginId = pluginId
   editor.open = true
+}
+
+/** Plugin de frota ligado tem a página dele em Aplicativos. */
+function opensApp(item: PluginSummary): boolean {
+  return (
+    item.surfaces.includes('fleet') && item.status !== 'disabled' && item.status !== 'quarantine'
+  )
 }
 
 async function step(item: PluginSummary, action: 'promote' | 'enable' | 'disable') {

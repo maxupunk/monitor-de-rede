@@ -19,4 +19,15 @@ reduce?: string,
 /**
  * Títulos das chaves do consolidado (ver [`PluginAction::labels`]).
  */
-labels?: { [key in string]: string }, };
+labels?: { [key in string]: string }, 
+/**
+ * Ação de leitura que mostra, com os mesmos parâmetros, o que esta vai
+ * mudar em cada equipamento — o "Pré-visualizar" antes de aplicar.
+ */
+preview?: string, 
+/**
+ * Onde, na saída da ação de estado, estão os valores atuais dos
+ * parâmetros desta ação (`"_current.radios"`): o diálogo mostra os de cada
+ * equipamento e, com um só escolhido, já preenche o formulário.
+ */
+current?: string, };

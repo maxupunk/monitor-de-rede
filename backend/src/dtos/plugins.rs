@@ -272,6 +272,8 @@ pub struct FleetMember {
     pub platform: String,
     pub firmware: Option<String>,
     pub compat: Compat,
+    /// Por que a compatibilidade é essa (para a tela explicar).
+    pub reasons: Vec<String>,
     pub installed_at: String,
     /// Há credencial pronta para os transportes do plugin.
     pub credentials_ready: bool,
@@ -280,7 +282,8 @@ pub struct FleetMember {
     pub settings: Option<Value>,
 }
 
-/// Equipamento que pode entrar na frota.
+/// Equipamento cadastrado fora da frota. O incompatível também vem, com o
+/// porquê — escondê-lo deixaria o operador sem saber por que ele não aparece.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
@@ -321,6 +324,17 @@ pub struct PluginApp {
     pub members: u32,
 }
 
+/// Corpo de "Verificar sistema".
+#[derive(Debug, Clone, Default, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct FleetIdentifyInput {
+    /// Só estes; vazio = os da frota e os candidatos ainda em dúvida.
+    #[serde(default)]
+    #[ts(type = "Array<number>")]
+    pub device_ids: Vec<i64>,
+}
+
 #[derive(Debug, Clone, Default, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
@@ -332,6 +346,10 @@ pub struct FleetRunInput {
     #[serde(default)]
     #[ts(type = "Record<string, unknown>")]
     pub params: Value,
+    /// Parâmetros de um membro, por cima dos comuns.
+    #[serde(default)]
+    #[ts(optional, type = "Record<number, Record<string, unknown>>")]
+    pub device_params: std::collections::HashMap<i64, Value>,
     #[serde(default)]
     pub confirm_write: bool,
 }

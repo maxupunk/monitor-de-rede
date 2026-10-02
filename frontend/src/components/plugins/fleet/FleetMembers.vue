@@ -5,8 +5,9 @@
         <v-autocomplete
           v-model="candidateId"
           :items="candidateItems"
-          label="Adicionar equipamento compatível"
-          :no-data-text="'Nenhum outro equipamento compatível'"
+          item-props
+          label="Adicionar equipamento"
+          no-data-text="Nenhum outro equipamento com IP cadastrado"
           variant="outlined"
           density="compact"
           hide-details
@@ -22,6 +23,24 @@
           @click="add"
         >
           Adicionar
+        </v-btn>
+        <v-btn
+          color="secondary"
+          variant="flat"
+          prepend-icon="mdi-plus-network-outline"
+          @click="emit('createDevice')"
+        >
+          Cadastrar novo
+        </v-btn>
+        <v-btn
+          v-if="doubtful > 0"
+          color="primary"
+          variant="flat"
+          prepend-icon="mdi-magnify-scan"
+          :loading="store.identifying"
+          @click="identify"
+        >
+          Verificar sistema ({{ doubtful }})
         </v-btn>
       </v-card-text>
     </v-card>
@@ -62,6 +81,12 @@
               <v-chip size="small" :color="compatPresentation(member.compat).color" variant="tonal">
                 {{ compatPresentation(member.compat).label }}
               </v-chip>
+              <div
+                v-if="member.compat !== 'likely' && member.compat !== 'validated'"
+                class="text-body-small mt-1"
+              >
+                {{ member.reasons.join('; ') }}
+              </div>
             </td>
             <td>
               <v-chip
@@ -141,7 +166,11 @@ import { defaultsOf, normalizeValue } from '@/utils/pluginSettings'
 import SettingsForm from '../settings/SettingsForm.vue'
 
 const props = defineProps<{ view: FleetView; canWrite: boolean }>()
-const emit = defineEmits<{ notify: [text: string, color: string] }>()
+const emit = defineEmits<{
+  notify: [text: string, color: string]
+  /** Cadastrar um equipamento que ainda não existe no sistema. */
+  createDevice: []
+}>()
 
 const store = usePluginAppsStore()
 const form = ref<{ validate: () => Promise<boolean> } | null>(null)
@@ -155,12 +184,50 @@ const settings = reactive({
 })
 
 const deviceSchema = computed(() => props.view.plugin.settings?.device ?? null)
+/**
+ * Todo equipamento fora da frota, com o veredito e o porquê. O incompatível
+ * aparece desabilitado: sumir com ele deixaria o operador sem saber o motivo
+ * (ex.: o sistema cadastrado não é o que o plugin atende).
+ */
 const candidateItems = computed(() =>
   props.view.candidates.map((candidate) => ({
-    title: `${candidate.name}${candidate.ip ? ' — ' + candidate.ip : ''} (${compatPresentation(candidate.compat).label})`,
+    title: candidate.name + (candidate.ip ? ' — ' + candidate.ip : ''),
+    subtitle: `${compatPresentation(candidate.compat).label}: ${candidate.reasons.join('; ')}`,
     value: candidate.deviceId,
+    disabled: candidate.compat === 'incompatible',
   }))
 )
+
+/** Equipamentos cuja compatibilidade ainda é dúvida (sistema não confirmado). */
+const doubtful = computed(
+  () =>
+    [...props.view.members, ...props.view.candidates].filter(
+      (item) => item.compat === 'possible' || item.compat === 'incompatible'
+    ).length
+)
+
+/**
+ * Vai aos equipamentos em dúvida (SSH, SNMP; o Laya se faltar evidência) e
+ * refaz a compatibilidade pelo sistema que eles mostrarem — não pelo
+ * fabricante do cadastro, que descreve o hardware.
+ */
+async function identify() {
+  try {
+    const view = await store.identify(props.view.plugin.id)
+    const still = [...view.members, ...view.candidates].filter(
+      (item) => item.compat === 'possible'
+    ).length
+    emit(
+      'notify',
+      still > 0
+        ? `Sistemas verificados. ${still} ainda sem confirmação — defina o sistema no cadastro deles.`
+        : 'Sistemas verificados.',
+      still > 0 ? 'warning' : 'success'
+    )
+  } catch (err: unknown) {
+    emit('notify', describe(err, 'Falha ao verificar os sistemas'), 'error')
+  }
+}
 
 function describe(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback

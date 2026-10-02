@@ -258,6 +258,31 @@ pub struct FleetAction {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub labels: Option<BTreeMap<String, String>>,
+    /// Ação de leitura que mostra, com os mesmos parâmetros, o que esta vai
+    /// mudar em cada equipamento — o "Pré-visualizar" antes de aplicar.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub preview: Option<String>,
+    /// Onde, na saída da ação de estado, estão os valores atuais dos
+    /// parâmetros desta ação (`"_current.radios"`): o diálogo mostra os de cada
+    /// equipamento e, com um só escolhido, já preenche o formulário.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub current: Option<String>,
+}
+
+/// Uma ação da frota disparada a partir de um item da grade (ex.: editar o
+/// SSID da coluna): o formulário vem preenchido com campos do item e os
+/// equipamentos que o têm já marcados.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct MatrixAction {
+    /// Ação de frota (`fleet.actions[].id`).
+    pub action: String,
+    /// Parâmetro da ação → campo do item.
+    #[serde(default)]
+    pub params: BTreeMap<String, String>,
 }
 
 /// A grade membros × itens da página da frota (ex.: roteadores × SSIDs).
@@ -275,6 +300,14 @@ pub struct FleetMatrix {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub detail: Option<String>,
+    /// Editar o item da coluna.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub edit: Option<MatrixAction>,
+    /// Remover o item da coluna.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub remove: Option<MatrixAction>,
 }
 
 /// A página da frota.
@@ -529,6 +562,22 @@ fn validate_surfaces(manifest: &PluginManifest, problems: &mut Vec<String>) {
         if fleet.matrix.is_some() && fleet.status_action.is_none() {
             problems.push("`fleet.matrix` precisa de `fleet.statusAction`".into());
         }
+        if let Some(matrix) = &fleet.matrix {
+            for (label, target) in [("edit", &matrix.edit), ("remove", &matrix.remove)] {
+                if let Some(target) = target {
+                    if !fleet
+                        .actions
+                        .iter()
+                        .any(|action| action.id == target.action)
+                    {
+                        problems.push(format!(
+                            "`fleet.matrix.{label}` cita `{}`, que não é ação de frota",
+                            target.action
+                        ));
+                    }
+                }
+            }
+        }
         let mut ids = HashSet::new();
         for action in &fleet.actions {
             if !is_action_id(&action.id) || !ids.insert(action.id.as_str()) {
@@ -549,6 +598,23 @@ fn validate_surfaces(manifest: &PluginManifest, problems: &mut Vec<String>) {
                 }
             }
             validate_labels(&action.id, action.labels.as_ref(), problems);
+            if action.current.is_some() && fleet.status_action.is_none() {
+                problems.push(format!(
+                    "o `current` de `{}` precisa de `fleet.statusAction`",
+                    action.id
+                ));
+            }
+            if let Some(preview) = &action.preview {
+                if manifest
+                    .action(preview)
+                    .is_none_or(|found| found.effect != Effect::Read)
+                {
+                    problems.push(format!(
+                        "o `preview` de `{}` precisa ser uma ação de leitura do plugin",
+                        action.id
+                    ));
+                }
+            }
         }
     }
     for slug in &manifest.uses {
@@ -838,6 +904,8 @@ mod tests {
                 action: "inexistente".into(),
                 reduce: None,
                 labels: None,
+                preview: None,
+                current: None,
             }],
         });
         let problems = validate(&frota);
