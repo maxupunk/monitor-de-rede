@@ -45,94 +45,116 @@
       </v-card-text>
     </v-card>
 
-    <v-alert type="info" variant="tonal" density="compact" class="mb-4">
-      O acesso de cada equipamento (usuário e senha SSH/HTTP) fica no cadastro do próprio
-      dispositivo, na aba <strong>Plugins → Credenciais</strong>. Aqui você só escolhe quem
-      participa e o ajuste de cada um.
+    <v-alert v-if="view.members.length === 0" type="info" variant="tonal" class="mb-4">
+      Nenhum equipamento ainda. Adicione um já cadastrado ou cadastre um novo acima.
     </v-alert>
 
-    <v-card border flat class="rounded-lg">
-      <v-table density="comfortable">
-        <thead>
-          <tr>
-            <th class="font-weight-bold">Equipamento</th>
-            <th class="font-weight-bold">Firmware</th>
-            <th class="font-weight-bold">Compatibilidade</th>
-            <th class="font-weight-bold">Acesso</th>
-            <th class="font-weight-bold text-right">Ações</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-if="view.members.length === 0">
-            <td colspan="5" class="text-body-2">Nenhum equipamento ainda.</td>
-          </tr>
-          <tr v-for="member in view.members" :key="member.deviceId">
-            <td>
-              <router-link
-                :to="{ path: '/devices/' + member.deviceId }"
-                class="font-weight-bold text-primary text-decoration-none"
+    <v-row dense>
+      <v-col v-for="member in view.members" :key="member.deviceId" cols="12" md="6" xl="4">
+        <v-card
+          border
+          flat
+          class="rounded-lg h-100"
+          :link="canConfigure(member)"
+          @click="canConfigure(member) && emit('configure', member.deviceId)"
+        >
+          <v-card-item>
+            <template #prepend>
+              <v-avatar :color="statusOf(member).color" variant="tonal" rounded="lg">
+                <v-icon>mdi-router-wireless</v-icon>
+              </v-avatar>
+            </template>
+            <v-card-title class="font-weight-bold">{{ member.name }}</v-card-title>
+            <v-card-subtitle>
+              {{ [member.ip, member.firmware].filter(Boolean).join(' · ') }}
+            </v-card-subtitle>
+            <template #append>
+              <v-chip size="small" :color="statusOf(member).color" variant="flat" class="mr-1">
+                {{ statusOf(member).label }}
+              </v-chip>
+              <v-menu>
+                <template #activator="{ props: menu }">
+                  <v-btn
+                    v-bind="menu"
+                    icon="mdi-dots-vertical"
+                    size="small"
+                    variant="text"
+                    color="primary"
+                    :aria-label="`Opções de ${member.name}`"
+                    @click.stop
+                  />
+                </template>
+                <v-list density="compact">
+                  <v-list-item
+                    v-if="canConfigure(member)"
+                    prepend-icon="mdi-tune-variant"
+                    :title="deviceActionTitle ?? 'Configurar'"
+                    @click="emit('configure', member.deviceId)"
+                  ></v-list-item>
+                  <v-list-item
+                    v-if="deviceSchema && canWrite"
+                    prepend-icon="mdi-cog-outline"
+                    title="Ajustes guardados"
+                    @click="openSettings(member)"
+                  ></v-list-item>
+                  <v-list-item
+                    prepend-icon="mdi-open-in-new"
+                    title="Abrir o dispositivo"
+                    :to="{ path: '/devices/' + member.deviceId }"
+                  ></v-list-item>
+                  <v-list-item
+                    v-if="canWrite"
+                    prepend-icon="mdi-close-circle-outline"
+                    base-color="error"
+                    title="Tirar deste aplicativo"
+                    @click="remove(member)"
+                  ></v-list-item>
+                </v-list>
+              </v-menu>
+            </template>
+          </v-card-item>
+
+          <v-card-text class="pt-0">
+            <div
+              v-for="row in cardOf(member)"
+              :key="row.label"
+              class="d-flex justify-space-between ga-2 text-body-2 py-1"
+            >
+              <span>{{ row.label }}</span>
+              <strong class="text-right">{{ row.value }}</strong>
+            </div>
+            <div v-if="errorOf(member)" class="text-body-small text-error mt-1">
+              {{ errorOf(member) }}
+            </div>
+            <div
+              v-if="member.compat !== 'likely' && member.compat !== 'validated'"
+              class="text-body-small mt-2"
+            >
+              <v-chip
+                size="x-small"
+                :color="compatPresentation(member.compat).color"
+                variant="tonal"
               >
-                {{ member.name }}
-              </router-link>
-              <div class="text-body-small">{{ member.ip ?? '—' }}</div>
-            </td>
-            <td>{{ member.firmware ?? '—' }}</td>
-            <td>
-              <v-chip size="small" :color="compatPresentation(member.compat).color" variant="tonal">
                 {{ compatPresentation(member.compat).label }}
               </v-chip>
-              <div
-                v-if="member.compat !== 'likely' && member.compat !== 'validated'"
-                class="text-body-small mt-1"
-              >
-                {{ member.reasons.join('; ') }}
-              </div>
-            </td>
-            <td>
-              <v-chip
-                size="small"
-                :color="member.credentialsReady ? 'success' : 'warning'"
-                variant="flat"
-              >
-                {{ member.credentialsReady ? 'Pronto' : 'Sem credencial' }}
-              </v-chip>
-            </td>
-            <td class="text-right text-no-wrap">
-              <v-btn
-                v-if="deviceSchema"
-                size="small"
-                color="primary"
-                variant="text"
-                prepend-icon="mdi-tune-variant"
-                :disabled="!canWrite"
-                @click="openSettings(member)"
-              >
-                Ajustes
-              </v-btn>
-              <v-btn
-                v-if="!member.credentialsReady"
-                size="small"
-                color="warning"
-                variant="text"
-                prepend-icon="mdi-key-outline"
-                :to="{ path: '/devices/' + member.deviceId, query: { tab: 'plugins' } }"
-              >
-                Cadastrar acesso
-              </v-btn>
-              <v-btn
-                size="small"
-                color="error"
-                variant="text"
-                icon="mdi-close-circle-outline"
-                :disabled="!canWrite"
-                :aria-label="`Remover ${member.name}`"
-                @click="remove(member)"
-              />
-            </td>
-          </tr>
-        </tbody>
-      </v-table>
-    </v-card>
+              {{ member.reasons.join('; ') }}
+            </div>
+            <v-btn
+              v-if="!member.credentialsReady"
+              size="small"
+              color="warning"
+              variant="flat"
+              prepend-icon="mdi-key-outline"
+              class="mt-3"
+              :to="{ path: '/devices/' + member.deviceId, query: { tab: 'plugins' } }"
+              @click.stop
+            >
+              Cadastrar o acesso (SSH)
+            </v-btn>
+          </v-card-text>
+        </v-card>
+      </v-col>
+    </v-row>
 
     <v-dialog v-model="settings.open" max-width="640" scrollable>
       <v-card v-if="settings.member" class="rounded-lg">
@@ -161,15 +183,23 @@ import type { FleetMember } from '@/bindings/FleetMember'
 import type { FleetView } from '@/bindings/FleetView'
 import { confirm } from '@/composables/useConfirm'
 import { usePluginAppsStore } from '@/stores/pluginApps'
-import { compatPresentation } from '@/utils/pluginPresentation'
+import { valueAt } from '@/utils/fleetContext'
+import { compatPresentation, stateColor, stateLabel } from '@/utils/pluginPresentation'
 import { defaultsOf, normalizeValue } from '@/utils/pluginSettings'
 import SettingsForm from '../settings/SettingsForm.vue'
 
-const props = defineProps<{ view: FleetView; canWrite: boolean }>()
+const props = defineProps<{
+  view: FleetView
+  canWrite: boolean
+  /** Nome da ação que o clique no equipamento abre (ex.: "Rádios e canais"). */
+  deviceActionTitle?: string
+}>()
 const emit = defineEmits<{
   notify: [text: string, color: string]
   /** Cadastrar um equipamento que ainda não existe no sistema. */
   createDevice: []
+  /** Abrir a ação do equipamento (`fleet.deviceAction`) só para ele. */
+  configure: [deviceId: number]
 }>()
 
 const store = usePluginAppsStore()
@@ -184,6 +214,49 @@ const settings = reactive({
 })
 
 const deviceSchema = computed(() => props.view.plugin.settings?.device ?? null)
+
+// --- O que a última leitura disse de cada equipamento ---
+const statusAction = computed(() => props.view.plugin.fleet?.statusAction ?? null)
+const statusBatch = computed(() =>
+  statusAction.value ? store.latestBatch(props.view.plugin.id, statusAction.value) : null
+)
+
+function readOf(member: FleetMember) {
+  return statusBatch.value?.devices.find((device) => device.deviceId === member.deviceId)
+}
+
+function canConfigure(member: FleetMember): boolean {
+  return props.canWrite && Boolean(props.view.plugin.fleet?.deviceAction) && member.credentialsReady
+}
+
+function statusOf(member: FleetMember): { label: string; color: string } {
+  if (!member.credentialsReady) return { label: 'Sem acesso', color: 'warning' }
+  const read = readOf(member)
+  if (!read) return { label: 'Não lido', color: 'secondary' }
+  if (read.status === 'failed') return { label: 'Sem resposta', color: 'error' }
+  const state = valueAt(read.output, 'state')
+  return state
+    ? { label: stateLabel(state), color: stateColor(state) }
+    : { label: 'Lido', color: 'success' }
+}
+
+function errorOf(member: FleetMember): string | null {
+  const read = readOf(member)
+  return read?.status === 'failed' ? read.error : null
+}
+
+/** As linhas do cartão (`_card` da leitura: cada rádio, clientes…). */
+function cardOf(member: FleetMember): { label: string; value: string }[] {
+  const card = valueAt(readOf(member)?.output, '_card')
+  if (!Array.isArray(card)) return []
+  return card.flatMap((row) => {
+    const label = valueAt(row, 'label')
+    const value = valueAt(row, 'value')
+    return label === undefined || value === undefined
+      ? []
+      : [{ label: String(label), value: String(value) }]
+  })
+}
 /**
  * Todo equipamento fora da frota, com o veredito e o porquê. O incompatível
  * aparece desabilitado: sumir com ele deixaria o operador sem saber o motivo

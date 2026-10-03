@@ -28,4 +28,16 @@ edit?: MatrixAction,
 /**
  * Remover o item da coluna.
  */
-remove?: MatrixAction, };
+remove?: MatrixAction, 
+/**
+ * Como a tela chama a lista e um item ("Redes", "rede").
+ */
+title?: string, itemName?: string, icon?: string, 
+/**
+ * Campos do item mostrados no cartão, abaixo do nome.
+ */
+subtitle?: Array<string>, 
+/**
+ * Ação de frota do botão "Nova …".
+ */
+add?: string, };

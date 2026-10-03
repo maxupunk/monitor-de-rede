@@ -9,4 +9,14 @@ export type FleetSpec = { title: string, icon?: string, description?: string,
 /**
  * Ação de dispositivo que dá o estado de cada membro (a "visão geral").
  */
-statusAction?: string, matrix?: FleetMatrix, actions?: Array<FleetAction>, };
+statusAction?: string, matrix?: FleetMatrix, actions?: Array<FleetAction>, 
+/**
+ * Ação de frota aberta ao clicar num equipamento, só para ele (ex.: os
+ * rádios daquele roteador).
+ */
+deviceAction?: string, 
+/**
+ * Ações de frota da aba "Avançado", na ordem. Sem lista, vão para lá as
+ * que nenhuma outra parte da tela usa.
+ */
+tools?: Array<string>, };

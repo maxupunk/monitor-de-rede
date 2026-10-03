@@ -1,98 +1,47 @@
 <template>
   <v-form ref="form" :disabled="disabled" @submit.prevent>
     <v-row dense>
-      <template v-for="field in fields" :key="field.name">
-        <v-col v-if="field.kind === 'objects'" cols="12">
-          <SettingsListEditor
-            :title="field.label"
-            :hint="field.hint"
-            :item-schema="field.items ?? {}"
-            :model-value="listOf(field.name)"
-            :disabled="disabled"
-            @update:model-value="(items) => set(field.name, items)"
-          />
-        </v-col>
-        <v-col v-else-if="field.kind === 'list'" cols="12" :md="compact ? 12 : 6">
-          <v-combobox
-            :model-value="listOf(field.name)"
-            :label="field.label"
-            :hint="field.hint ?? 'Digite e tecle Enter para incluir'"
-            persistent-hint
-            multiple
-            chips
-            closable-chips
-            variant="outlined"
-            density="comfortable"
-            @update:model-value="(items) => set(field.name, items)"
-          ></v-combobox>
-        </v-col>
-        <v-col v-else-if="field.kind === 'boolean'" cols="12" sm="6">
-          <v-switch
-            :model-value="Boolean(value[field.name])"
-            :label="field.label"
-            :hint="field.hint"
-            :persistent-hint="Boolean(field.hint)"
-            :hide-details="!field.hint"
-            color="primary"
-            inset
-            density="comfortable"
-            @update:model-value="(checked) => set(field.name, Boolean(checked))"
-          ></v-switch>
-        </v-col>
-        <v-col v-else cols="12" :md="compact ? 12 : 6">
-          <v-select
-            v-if="field.options"
-            :model-value="value[field.name] ?? ''"
-            :items="field.options.map((option) => ({ title: optionLabel(option), value: option }))"
-            :label="field.label"
-            :hint="field.hint"
-            :persistent-hint="Boolean(field.hint)"
-            :rules="field.rules"
-            variant="outlined"
-            density="comfortable"
-            @update:model-value="(selected) => set(field.name, selected)"
-          ></v-select>
-          <v-combobox
-            v-else-if="suggestions?.[field.name]"
-            :model-value="String(value[field.name] ?? '')"
-            :items="suggestions[field.name]"
-            :label="field.label + (field.required ? ' *' : '')"
-            :hint="field.hint"
-            :persistent-hint="Boolean(field.hint)"
-            :rules="field.rules"
-            variant="outlined"
-            density="comfortable"
-            @update:model-value="(chosen) => set(field.name, chosen ?? '')"
-          ></v-combobox>
-          <v-text-field
-            v-else
-            :model-value="value[field.name] ?? ''"
-            :label="field.label + (field.required ? ' *' : '')"
-            :hint="secretHint(field) ?? field.hint"
-            :persistent-hint="Boolean(secretHint(field) ?? field.hint)"
-            :rules="field.rules"
-            :type="inputType(field)"
-            :autocomplete="field.secret ? 'new-password' : 'off'"
-            variant="outlined"
-            density="comfortable"
-            @update:model-value="(text) => set(field.name, text)"
-          ></v-text-field>
-        </v-col>
-      </template>
+      <SettingsField
+        v-for="field in basic"
+        :key="field.name"
+        :field="field"
+        :value="value[field.name]"
+        :disabled="disabled"
+        :compact="compact"
+        :suggestions="suggestions?.[field.name]"
+        @update="(next) => set(field.name, next)"
+      />
     </v-row>
+    <v-expansion-panels v-if="advanced.length > 0" variant="accordion" class="mt-2">
+      <v-expansion-panel>
+        <v-expansion-panel-title>
+          <v-icon start color="primary">mdi-tune-variant</v-icon>
+          Opções avançadas
+        </v-expansion-panel-title>
+        <!-- eager: os campos validam mesmo com o painel fechado -->
+        <v-expansion-panel-text eager>
+          <v-row dense>
+            <SettingsField
+              v-for="field in advanced"
+              :key="field.name"
+              :field="field"
+              :value="value[field.name]"
+              :disabled="disabled"
+              :compact="compact"
+              :suggestions="suggestions?.[field.name]"
+              @update="(next) => set(field.name, next)"
+            />
+          </v-row>
+        </v-expansion-panel-text>
+      </v-expansion-panel>
+    </v-expansion-panels>
   </v-form>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import {
-  SECRET_MASK,
-  fieldsOf,
-  optionLabel,
-  type Schema,
-  type SchemaField,
-} from '@/utils/pluginSettings'
-import SettingsListEditor from './SettingsListEditor.vue'
+import { fieldsOf, type Schema } from '@/utils/pluginSettings'
+import SettingsField from './SettingsField.vue'
 
 const props = defineProps<{
   schema: Schema
@@ -109,35 +58,18 @@ const props = defineProps<{
 const emit = defineEmits<{ 'update:modelValue': [value: Record<string, unknown>] }>()
 
 const form = ref<{ validate: () => Promise<{ valid: boolean }> } | null>(null)
-const fields = computed(() =>
-  fieldsOf(props.schema).filter((field) => !props.only || props.only.includes(field.name))
+/** O que aparece: sem os ocultos e, com `only`, só os pedidos. */
+const visible = computed(() =>
+  fieldsOf(props.schema).filter(
+    (field) => !field.hidden && (!props.only || props.only.includes(field.name))
+  )
 )
+const basic = computed(() => visible.value.filter((field) => !field.advanced))
+const advanced = computed(() => visible.value.filter((field) => field.advanced))
 const value = computed(() => props.modelValue ?? {})
 
 function set(name: string, next: unknown) {
   emit('update:modelValue', { ...value.value, [name]: next })
-}
-
-function listOf(name: string): unknown[] {
-  const current = value.value[name]
-  return Array.isArray(current) ? current : []
-}
-
-function inputType(field: SchemaField): string {
-  if (field.secret) return 'password'
-  return field.kind === 'integer' || field.kind === 'number' ? 'number' : 'text'
-}
-
-/**
- * Segredo já guardado volta mascarado: aí a dica explica como mantê-lo. Fora
- * isso vale a do esquema (num parâmetro, ex.: "vazio = manter a do roteador").
- */
-function secretHint(field: SchemaField): string | undefined {
-  if (!field.secret) return undefined
-  if (value.value[field.name] === SECRET_MASK) {
-    return 'Guardada cifrada. Deixe como está para manter, ou digite uma nova.'
-  }
-  return field.hint ?? 'Não volta para a tela nem fica no histórico.'
 }
 
 async function validate(): Promise<boolean> {

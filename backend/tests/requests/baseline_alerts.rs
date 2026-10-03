@@ -16,7 +16,7 @@ use backend::{
     },
 };
 use chrono::{Duration, Utc};
-use loco_rs::{testing::prelude::*, TestServer};
+use loco_rs::{app::Hooks, testing::prelude::*, TestServer};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use serde_json::json;
 use serial_test::serial;
@@ -156,6 +156,44 @@ async fn baseline_e_calculada_a_partir_dos_buckets_horarios() {
                 .uptime_baseline_percent
                 .is_some_and(|value| (value - 95.0).abs() < 0.001),
             "baseline de uptime deveria ser 95%"
+        );
+    })
+    .await;
+}
+
+/// O cache de baseline é do processo e o banco dos testes é zerado a cada
+/// caso: sem esquecer a baseline junto, o monitor do caso seguinte (mesmo id)
+/// herdava os 95% de uptime daqui e um `warning` dele batia a regra padrão de
+/// desvio de uptime — o caso de `alert_problem_kind` falhava conforme a ordem.
+#[tokio::test]
+#[serial]
+async fn zerar_o_banco_esquece_a_baseline_em_memoria() {
+    limpar_cache();
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let monitor = request
+            .post("/api/monitors")
+            .json(&json!({
+                "name": "Baseline ping",
+                "type": "ping",
+                "target": "127.0.0.1",
+            }))
+            .await;
+        let monitor: serde_json::Value = serde_json::from_str(&monitor.text()).unwrap();
+        let monitor_id = monitor["id"].as_i64().unwrap();
+        buckets_de_baseline(&ctx, monitor_id).await;
+        let antes = baseline::for_monitor(&ctx.db, monitor_id).await.unwrap();
+        assert!(!antes.is_empty(), "a baseline entra no cache");
+
+        <App as Hooks>::truncate(&ctx).await.expect("zerar o banco");
+
+        let depois = baseline::for_monitor(&ctx.db, monitor_id).await.unwrap();
+        assert!(
+            depois.is_empty(),
+            "com o banco zerado, a baseline em memória não pode sobreviver"
         );
     })
     .await;

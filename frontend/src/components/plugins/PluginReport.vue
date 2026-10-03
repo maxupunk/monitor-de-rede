@@ -68,12 +68,27 @@
         </v-table>
       </div>
 
-      <div v-else-if="section.kind === 'lines'">
-        <div class="text-subtitle-2 font-weight-bold mb-1">{{ section.title }}</div>
-        <pre class="report-lines pa-3 rounded-lg font-mono text-body-small">{{
-          section.lines.join('\n')
-        }}</pre>
-      </div>
+      <v-expansion-panels
+        v-else-if="section.kind === 'lines'"
+        :model-value="linesOpen ? [section.key] : []"
+        variant="accordion"
+        flat
+        class="border rounded-lg"
+      >
+        <v-expansion-panel :value="section.key">
+          <v-expansion-panel-title class="text-subtitle-2 font-weight-bold">
+            {{ section.title }}
+            <v-chip size="x-small" color="primary" variant="tonal" class="ml-2">
+              {{ section.lines.length }}
+            </v-chip>
+          </v-expansion-panel-title>
+          <v-expansion-panel-text>
+            <pre class="report-lines pa-3 rounded-lg font-mono text-body-small">{{
+              section.lines.join('\n')
+            }}</pre>
+          </v-expansion-panel-text>
+        </v-expansion-panel>
+      </v-expansion-panels>
 
       <v-alert
         v-else
@@ -84,7 +99,7 @@
         :text="section.text"
       ></v-alert>
     </template>
-    <div v-if="sections.length === 0" class="text-body-2">(sem resultado)</div>
+    <div v-if="sections.length === 0" class="text-body-2">Nada a mostrar deste equipamento.</div>
   </div>
 </template>
 
@@ -134,9 +149,14 @@ function display(value: unknown): string {
   return String(value)
 }
 
+/** `_chave` é dado para a tela (ex.: a seção UCI de uma mudança), não coluna. */
+function isVisibleKey(key: string): boolean {
+  return !HIDDEN_KEYS.has(key) && !key.startsWith('_')
+}
+
 function columnsOf(rows: Row[]): string[] {
   const keys = new Set<string>()
-  for (const row of rows) for (const key of Object.keys(row)) keys.add(key)
+  for (const row of rows) for (const key of Object.keys(row)) if (isVisibleKey(key)) keys.add(key)
   return [...keys]
 }
 
@@ -153,8 +173,7 @@ const sections = computed<Section[]>(() => {
   const result: Section[] = []
   const scalars: [string, unknown][] = []
   for (const [key, item] of Object.entries(value)) {
-    // `_chave` é dado para a tela (ex.: valores atuais de um formulário).
-    if (HIDDEN_KEYS.has(key) || key.startsWith('_')) continue
+    if (!isVisibleKey(key)) continue
     if (isRowList(item)) {
       result.push({
         kind: 'table',
@@ -190,6 +209,12 @@ const sections = computed<Section[]>(() => {
   // depois as tabelas e os textos, e os comandos por último.
   return result.sort((a, b) => SECTION_RANK[a.kind] - SECTION_RANK[b.kind])
 })
+
+/**
+ * Listas de linhas (comandos, log) são o detalhe técnico: recolhidas quando há
+ * um resumo ou uma tabela para ler antes; abertas quando são o resultado todo.
+ */
+const linesOpen = computed(() => sections.value.every((section) => section.kind === 'lines'))
 </script>
 
 <style scoped>

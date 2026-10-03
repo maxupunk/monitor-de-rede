@@ -308,6 +308,23 @@ pub struct FleetMatrix {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub remove: Option<MatrixAction>,
+    /// Como a tela chama a lista e um item ("Redes", "rede").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub item_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub icon: Option<String>,
+    /// Campos do item mostrados no cartão, abaixo do nome.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subtitle: Vec<String>,
+    /// Ação de frota do botão "Nova …".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub add: Option<String>,
 }
 
 /// A página da frota.
@@ -331,6 +348,15 @@ pub struct FleetSpec {
     pub matrix: Option<FleetMatrix>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<FleetAction>,
+    /// Ação de frota aberta ao clicar num equipamento, só para ele (ex.: os
+    /// rádios daquele roteador).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub device_action: Option<String>,
+    /// Ações de frota da aba "Avançado", na ordem. Sem lista, vão para lá as
+    /// que nenhuma outra parte da tela usa.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -561,6 +587,26 @@ fn validate_surfaces(manifest: &PluginManifest, problems: &mut Vec<String>) {
         }
         if fleet.matrix.is_some() && fleet.status_action.is_none() {
             problems.push("`fleet.matrix` precisa de `fleet.statusAction`".into());
+        }
+        let is_fleet_action = |id: &str| fleet.actions.iter().any(|action| action.id == id);
+        let referenced = fleet
+            .matrix
+            .as_ref()
+            .and_then(|matrix| matrix.add.as_deref().map(|id| ("matrix.add", id)))
+            .into_iter()
+            .chain(
+                fleet
+                    .device_action
+                    .as_deref()
+                    .map(|id| ("deviceAction", id)),
+            )
+            .chain(fleet.tools.iter().map(|id| ("tools", id.as_str())));
+        for (label, id) in referenced {
+            if !is_fleet_action(id) {
+                problems.push(format!(
+                    "`fleet.{label}` cita `{id}`, que não é ação de frota"
+                ));
+            }
         }
         if let Some(matrix) = &fleet.matrix {
             for (label, target) in [("edit", &matrix.edit), ("remove", &matrix.remove)] {
@@ -896,6 +942,8 @@ mod tests {
             description: None,
             status_action: Some("install_package".into()),
             matrix: None,
+            device_action: Some("fantasma".into()),
+            tools: Vec::new(),
             actions: vec![FleetAction {
                 id: "aplicar".into(),
                 title: "Aplicar".into(),
@@ -911,6 +959,12 @@ mod tests {
         let problems = validate(&frota);
         assert!(
             problems.iter().any(|p| p.contains("ação de leitura")),
+            "{problems:?}"
+        );
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("`fleet.deviceAction` cita `fantasma`")),
             "{problems:?}"
         );
         assert!(

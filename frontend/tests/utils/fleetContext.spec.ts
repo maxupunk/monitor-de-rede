@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import type { PluginBatchView } from '@/bindings/PluginBatchView'
 import {
   currentByDevice,
+  itemRows,
+  toolsOf,
   outputsByDevice,
   paramsFromItem,
   sourceIndex,
@@ -68,5 +70,63 @@ describe('contexto da frota', () => {
     expect(current.get(3)).toEqual({ radio_2g_channel: '11' })
     expect(current.has(4)).toBe(false)
     expect(valueAt({ a: { b: 1 } }, 'a.c')).toBeUndefined()
+  })
+})
+
+describe('telas do aplicativo', () => {
+  it('cada item com quem o tem, o resumo do cartão e a soma do detalhe', () => {
+    const outputs = new Map<number, Record<string, unknown>>([
+      [
+        2,
+        {
+          networks: [
+            { ssid: 'Loja', security: 'WPA2', bands: '2,4 GHz', state: 'ativa', clients: 3 },
+          ],
+        },
+      ],
+      [
+        3,
+        {
+          networks: [
+            { ssid: 'Loja', security: 'WPA2', bands: '2,4 GHz', state: 'desativada', clients: 1 },
+          ],
+        },
+      ],
+    ])
+    const rows = itemRows(
+      outputs,
+      {
+        field: 'networks',
+        key: 'ssid',
+        state: 'state',
+        detail: 'clients',
+        subtitle: ['security', 'bands'],
+      },
+      [
+        { deviceId: 2, name: 'AP Sala' },
+        { deviceId: 3, name: 'AP Loja' },
+      ]
+    )
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.subtitle).toBe('WPA2 · 2,4 GHz')
+    expect(rows[0]?.entries.map((entry) => entry.name)).toEqual(['AP Sala', 'AP Loja'])
+    expect(rows[0]?.detailTotal).toBe(4)
+    expect(rows[0]?.active).toBe(true)
+  })
+
+  it('a aba Avançado: a lista declarada ou o que nenhuma parte da tela usa', () => {
+    const action = (id: string) => ({ id, title: id, action: id })
+    const actions = [action('network'), action('radios'), action('mesh')]
+    expect(
+      toolsOf({ title: 'x', actions, tools: ['mesh'], matrix: undefined }).map((a) => a.id)
+    ).toEqual(['mesh'])
+    expect(
+      toolsOf({
+        title: 'x',
+        actions,
+        deviceAction: 'radios',
+        matrix: { field: 'n', key: 'k', state: 's', add: 'network', subtitle: [] },
+      }).map((a) => a.id)
+    ).toEqual(['mesh'])
   })
 })

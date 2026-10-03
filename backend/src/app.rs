@@ -28,7 +28,7 @@ use crate::{
     initializers::system_device::SystemDeviceInitializer,
     models::_entities::users,
     models::tables,
-    services::syslog,
+    services::{alerts, syslog},
     spa, tasks,
     tasks::scheduler_run::{SchedulerLoop, SchedulerRun},
 };
@@ -231,8 +231,16 @@ impl Hooks for App {
     /// (filhos antes de pais). Tabelas ainda não migradas são puladas, então a
     /// lista já está completa desde a Fase 0 — nenhuma tabela nova precisa ser
     /// lembrada aqui depois.
+    ///
+    /// As memórias do processo chaveadas por id do banco vão junto: com o
+    /// banco zerado, o monitor e a regra do próximo teste ganham os mesmos ids,
+    /// e a baseline (ou a contagem de tolerância) do teste anterior batia uma
+    /// regra que o teste novo nem criou.
     async fn truncate(ctx: &AppContext) -> Result<()> {
-        tables::truncate_all(&ctx.db).await
+        tables::truncate_all(&ctx.db).await?;
+        alerts::baseline::clear_cache();
+        alerts::hysteresis::clear();
+        Ok(())
     }
     async fn seed(ctx: &AppContext, base: &Path) -> Result<()> {
         db::seed::<users::ActiveModel>(&ctx.db, &base.join("users.yaml").display().to_string())

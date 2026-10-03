@@ -143,11 +143,26 @@ O manifesto diz onde o plugin aparece (`surfaces`):
 - **Títulos**: a saída do script usa chaves estáveis (`clients`, `state`); a
   ação declara em `labels` o título de cada uma ("Clientes", "Estado") para as
   tabelas, os relatórios e a grade.
-- **Visão geral**: a ação de estado (`statusAction`) roda em todos e a grade
-  (`matrix`) cruza equipamentos × itens (roteadores × SSIDs) com o estado de
-  cada célula. `matrix.edit`/`matrix.remove` põem um menu no título da coluna:
-  a ação de frota abre com o formulário preenchido pelo item (mapa parâmetro →
-  campo) e só os equipamentos que o têm marcados.
+- **A página do aplicativo**, no jeito dos sistemas de Wi-Fi mais fáceis
+  (UniFi, Omada, eero): um resumo no topo (equipamentos, itens, clientes, "lido
+  há…", **Atualizar**) e abas pelo que o operador gerencia, não pelas ações:
+  - **itens** (`matrix`: `title`, `itemName`, `icon`, `subtitle`, `add`): um
+    cartão por item que os equipamentos têm (ex.: cada rede — nome, segurança,
+    bandas, em quais roteadores, clientes). **Nova …** abre `add`; o clique abre
+    `edit` com o formulário preenchido pelo item (mapa parâmetro → campo) e só
+    os equipamentos que o têm marcados; o menu tem **Remover** (`remove`);
+  - **Equipamentos**: um cartão por equipamento com o estado e as linhas de
+    `_card` da leitura (cada rádio, clientes…); o clique abre `deviceAction`
+    só para ele. Adicionar, cadastrar novo e **Verificar sistema** ficam aqui;
+  - **Avançado** (`tools`): as ações de fora do dia a dia, cada uma em um
+    cartão com a explicação;
+  - **Histórico** e **Como usar**.
+- **Toda ação é um fluxo em passos**: o formulário (só o essencial à vista;
+  campo `advanced` em "Opções avançadas", `hidden` fora da tela, `enumTitles`
+  dá nome às opções, senha com "mostrar") e **Em quais equipamentos**; com
+  `preview`, **Revisar mudanças** mostra o que muda em cada equipamento e só
+  **Aplicar agora** altera — a revisão é a confirmação; depois, o andamento e
+  "Pronto!". Uma escrita relê os equipamentos sozinha ao terminar.
 - **Pré-visualizar**: ação de frota com `preview` (uma ação de leitura com os
   mesmos parâmetros) ganha o botão no diálogo; o resultado de cada equipamento
   aparece ali, e mudar o pedido apaga a pré-visualização.
@@ -190,14 +205,16 @@ e UCI. **O roteador é a fonte da verdade**: nada fica guardado no NetMonitor;
 a visão geral lê as redes de cada roteador e cada ação parte do que ele tem na
 hora — mudança feita à mão aparece na próxima leitura.
 
-- **Redes (multi-SSID)**: a grade mostra cada SSID em cada roteador (ativa ou
-  desativada, clientes). O menu no nome da rede edita ou remove — o formulário
-  vem preenchido com o que o roteador tem e só os roteadores que têm a rede
-  ficam marcados. **Adicionar ou alterar rede** garante a rede nas bandas
-  marcadas (2,4 / 5 / 6 GHz), com segurança (WPA2/WPA3/misto/aberta),
-  interface, oculta, isolamento e ativa; **Nome atual** renomeia. Vale para
-  qualquer rede do roteador, inclusive as criadas à mão; opções que o plugin
-  não conhece ficam como estão.
+- **Redes**: um cartão por rede (nome, segurança, bandas, em quais roteadores,
+  clientes). **Nova rede** pede nome, senha, segurança e bandas; o resto
+  (6 GHz, roaming, rede oculta, isolamento, interface) fica em "Opções
+  avançadas". Clicar numa rede edita — trocar o nome renomeia — e o menu dela
+  remove. Vale para qualquer rede do roteador, inclusive as criadas à mão;
+  opções que o plugin não conhece ficam como estão.
+- **Equipamentos**: um cartão por roteador (no ar ou não, canal e largura de
+  cada rádio, redes, clientes); clicar abre **Rádios e canais** daquele
+  roteador, já com o que ele tem — canais e larguras numa lista, "Manter como
+  está" e "Automático".
 - **Senha**: vazia mantém a do roteador. As senhas do Wi-Fi **não saem do
   roteador** — a leitura vem com elas mascaradas (`sed` no próprio roteador) e,
   ao levar uma rede para outra banda, a senha é copiada lá dentro

@@ -16,6 +16,12 @@ export interface SchemaField {
   label: string
   hint?: string
   options?: unknown[]
+  /** Nome de cada opção (`enumTitles`), na ordem de `options`. */
+  titles?: string[]
+  /** Fica em "Opções avançadas". */
+  advanced: boolean
+  /** Fora da tela; o valor ainda vai (ex.: o nome atual ao renomear). */
+  hidden: boolean
   secret: boolean
   required: boolean
   rules: Rule[]
@@ -98,6 +104,9 @@ export function fieldsOf(schema: unknown): SchemaField[] {
       label: typeof property.title === 'string' ? property.title : name,
       hint: typeof property.description === 'string' ? property.description : undefined,
       options: Array.isArray(property.enum) ? property.enum : undefined,
+      titles: Array.isArray(property.enumTitles) ? property.enumTitles.map(String) : undefined,
+      advanced: property.advanced === true,
+      hidden: property.hidden === true,
       secret: property.secret === true,
       required: required.includes(name),
       rules:
@@ -137,6 +146,28 @@ export function defaultsOf(schema: unknown): Record<string, unknown> {
 /** Rótulo de uma opção de `enum` (o vazio vira "manter"). */
 export function optionLabel(option: unknown): string {
   return option === '' ? '(manter o atual)' : String(option)
+}
+
+/** As opções de um campo com o nome que a tela mostra (`enumTitles` ou o valor). */
+export function optionsOf(field: SchemaField): { title: string; value: unknown }[] {
+  return (field.options ?? []).map((option, index) => ({
+    title: field.titles?.[index] ?? optionLabel(option),
+    value: option,
+  }))
+}
+
+/** Só os valores que o campo aceita — o que o equipamento tem pode não estar entre as opções. */
+export function acceptedValues(
+  schema: unknown,
+  values: Record<string, unknown>
+): Record<string, unknown> {
+  const fields = new Map(fieldsOf(schema).map((field) => [field.name, field]))
+  return Object.fromEntries(
+    Object.entries(values).filter(([name, value]) => {
+      const field = fields.get(name)
+      return field !== undefined && (!field.options || field.options.includes(value))
+    })
+  )
 }
 
 /** Converte o que o formulário tem para o que o backend espera (também nos itens de lista). */

@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { SECRET_MASK, defaultsOf, fieldsOf, normalizeValue, paramsOf } from '@/utils/pluginSettings'
+import {
+  SECRET_MASK,
+  acceptedValues,
+  defaultsOf,
+  fieldsOf,
+  normalizeValue,
+  optionsOf,
+  paramsOf,
+} from '@/utils/pluginSettings'
 
 const schema = {
   type: 'object',
@@ -81,5 +89,35 @@ describe('pluginSettings', () => {
       channel: 6,
       usteer: false,
     })
+  })
+})
+
+describe('apresentação dos campos', () => {
+  const radio = {
+    type: 'object',
+    properties: {
+      channel: {
+        type: 'string',
+        enum: ['', 'auto', '1'],
+        enumTitles: ['Manter', 'Automático', '1'],
+      },
+      txpower: { type: 'integer', advanced: true },
+      old: { type: 'string', hidden: true },
+    },
+  }
+
+  it('opções com o nome amigável, campos avançados e ocultos marcados', () => {
+    const [channel, txpower, old] = fieldsOf(radio)
+    expect(optionsOf(channel!)).toEqual([
+      { title: 'Manter', value: '' },
+      { title: 'Automático', value: 'auto' },
+      { title: '1', value: '1' },
+    ])
+    expect(txpower?.advanced).toBe(true)
+    expect(old?.hidden).toBe(true)
+  })
+
+  it('o que o equipamento tem fora das opções não entra no formulário', () => {
+    expect(acceptedValues(radio, { channel: '14', txpower: 20, other: 1 })).toEqual({ txpower: 20 })
   })
 })

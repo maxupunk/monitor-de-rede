@@ -38,6 +38,9 @@ const PROPERTY_KEYS: &[&str] = &[
     "default",
     "secret",
     "source",
+    "enumTitles",
+    "advanced",
+    "hidden",
     "items",
     "minItems",
     "maxItems",
@@ -120,6 +123,25 @@ fn validate_property_schema(
         .get("type")
         .and_then(Value::as_str)
         .ok_or_else(|| format!("a propriedade `{name}` precisa de `type`"))?;
+    // Apresentação: `enumTitles` dá o nome de cada opção do `enum` (mesma
+    // ordem); `advanced` põe o campo em "Opções avançadas"; `hidden` o tira da
+    // tela (o valor ainda vai — ex.: o nome atual de uma rede ao renomear).
+    if let Some(titles) = property.get("enumTitles") {
+        let count = property.get("enum").and_then(Value::as_array).map(Vec::len);
+        let valid = titles.as_array().is_some_and(|list| {
+            Some(list.len()) == count && list.iter().all(|title| title.as_str().is_some())
+        });
+        if !valid {
+            return Err(format!(
+                "`{name}`: `enumTitles` é uma lista de textos do tamanho do `enum`"
+            ));
+        }
+    }
+    for flag in ["advanced", "hidden"] {
+        if property.get(flag).is_some_and(|value| !value.is_boolean()) {
+            return Err(format!("`{name}`: `{flag}` é verdadeiro ou falso"));
+        }
+    }
     // `source`: o campo oferece os valores que os equipamentos têm — uma lista
     // da saída da ação de estado e a chave do item (`"networks.ssid"`).
     if let Some(source) = property.get("source") {
@@ -557,6 +579,24 @@ mod tests {
             "type": "object", "properties": {}, "required": ["fantasma"]
         }))
         .is_err());
+    }
+
+    #[test]
+    fn titulos_das_opcoes_e_campos_avancados() {
+        let ok = json!({ "type": "object", "properties": {
+            "enc": { "type": "string", "enum": ["psk2", "none"],
+                     "enumTitles": ["WPA2", "Aberta"], "advanced": true },
+            "old": { "type": "string", "hidden": true } } });
+        assert!(validate_schema(&ok).is_ok());
+        let curto = json!({ "type": "object", "properties": {
+            "enc": { "type": "string", "enum": ["psk2", "none"], "enumTitles": ["WPA2"] } } });
+        assert!(validate_schema(&curto).is_err());
+        let sem_enum = json!({ "type": "object", "properties": {
+            "enc": { "type": "string", "enumTitles": ["WPA2"] } } });
+        assert!(validate_schema(&sem_enum).is_err());
+        let flag = json!({ "type": "object", "properties": {
+            "a": { "type": "string", "advanced": "sim" } } });
+        assert!(validate_schema(&flag).is_err());
     }
 
     #[test]

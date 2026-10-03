@@ -81,7 +81,7 @@
       </v-card-text>
     </v-card>
 
-    <v-expansion-panels variant="accordion" multiple>
+    <v-expansion-panels v-model="open" variant="accordion" multiple>
       <v-expansion-panel v-for="device in batch.devices" :key="device.deviceId">
         <v-expansion-panel-title>
           <div class="d-flex align-center ga-2 flex-grow-1">
@@ -139,7 +139,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { BatchDevice } from '@/bindings/BatchDevice'
 import type { OutputKind } from '@/bindings/OutputKind'
 import type { PluginBatchView } from '@/bindings/PluginBatchView'
@@ -162,6 +162,8 @@ const props = defineProps<{
   labels?: Record<string, string>
   resultLabels?: Record<string, string>
   canWrite: boolean
+  /** Cada equipamento já aberto (revisão, andamento). */
+  expandAll?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -172,6 +174,14 @@ const emit = defineEmits<{
 }>()
 
 const store = usePluginAppsStore()
+const open = ref<number[]>([])
+watch(
+  () => [props.expandAll, props.batch.devices.length] as const,
+  ([all, count]) => {
+    if (all) open.value = Array.from({ length: count }, (_, index) => index)
+  },
+  { immediate: true }
+)
 const status = computed(() => batchStatusPresentation(props.batch.status))
 const followUp = computed(() => followUpOf(props.batch.result))
 const done = computed(

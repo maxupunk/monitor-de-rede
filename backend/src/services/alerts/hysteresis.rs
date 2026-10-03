@@ -147,6 +147,15 @@ pub fn sweep(now: DateTime<Utc>, max_idle: Duration) -> usize {
     before - map.len()
 }
 
+/// Esquece todas as contagens. É para quando o banco foi zerado
+/// (`Hooks::truncate`): os ids de regra recomeçam, e uma contagem antiga
+/// passaria a valer para uma regra que não é a mesma.
+pub fn clear() {
+    if let Ok(mut map) = pending().lock() {
+        map.clear();
+    }
+}
+
 /// A contagem em memória, se ainda valer.
 ///
 /// Uma tolerância inteira sem observação rompe a continuidade: o que quer que

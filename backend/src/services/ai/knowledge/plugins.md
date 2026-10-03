@@ -315,6 +315,16 @@ cada um continua no cadastro do dispositivo.
   como está. A grade `matrix` cruza equipamentos × itens; `edit`/`remove`
   abrem a ação de frota com o formulário preenchido pelo item (parâmetro →
   campo) e só os equipamentos que o têm marcados.
+- **Tela fácil**: no parâmetro, `"enumTitles": [...]` dá nome a cada opção do
+  `enum` (mesma ordem — ex.: `"psk2"` → "WPA2 (aparelhos antigos)");
+  `"advanced": true` manda o campo para "Opções avançadas"; `"hidden": true`
+  o tira da tela (o valor ainda vai). Na frota, `matrix.title/itemName/icon/
+  subtitle/add` fazem a aba de cartões (ex.: "Redes", "Nova rede"),
+  `deviceAction` é o que abre ao clicar num equipamento, `tools` é a aba
+  "Avançado" (com `description` em linguagem simples), e `_card` na saída da
+  ação de estado (`[#{ label, value }]`) são as linhas do cartão do
+  equipamento. Escreva `changes[].detail` em palavras ("segurança", "canal
+  6"), não nomes de opção.
 - **Formulário a partir do equipamento**: no parâmetro, `"source":
   "networks.ssid"` oferece os valores da ação de estado (lista `networks`,
   chave `ssid`); na ação de frota, `"current": "_current.radios"` aponta os
