@@ -69,7 +69,7 @@
         </v-btn>
       </v-card-title>
       <v-card-text>
-        <PluginReport :output="batch.result" :labels="resultLabels ?? labels" />
+        <PluginReport :output="batch.result" :presentation="resultPresentation ?? presentation" />
         <p v-if="batch.hasPatch" class="text-body-2 mt-3">
           Aceitar grava os ajustes sugeridos na configuração de cada equipamento. Nada muda nos
           roteadores até você aplicar a configuração.
@@ -118,7 +118,7 @@
             v-if="device.output !== null"
             :output="device.output"
             :kind="kind"
-            :labels="labels"
+            :presentation="presentation"
           />
           <div v-else-if="!device.error" class="text-body-2">Sem resultado ainda.</div>
           <v-btn
@@ -150,6 +150,7 @@ import {
   followUpOf,
   stepLabel,
   type FollowUp,
+  type OutputPresentation,
 } from '@/utils/pluginPresentation'
 import PluginOutput from '../PluginOutput.vue'
 import PluginReport from '../PluginReport.vue'
@@ -158,9 +159,10 @@ const props = defineProps<{
   batch: PluginBatchView
   /** Formato da saída de cada equipamento (o da ação de dispositivo). */
   kind?: OutputKind
-  /** Títulos da saída de cada equipamento e do consolidado. */
-  labels?: Record<string, string>
-  resultLabels?: Record<string, string>
+  /** Títulos e formatos da saída de cada equipamento (a ação de dispositivo)… */
+  presentation?: OutputPresentation
+  /** …e do consolidado (a ação de frota). */
+  resultPresentation?: OutputPresentation
   canWrite: boolean
   /** Cada equipamento já aberto (revisão, andamento). */
   expandAll?: boolean

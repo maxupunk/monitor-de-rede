@@ -159,12 +159,56 @@ async fn biblioteca_ciclo_de_vida_e_quarentena() {
 
 #[tokio::test]
 #[serial]
+async fn previa_roda_os_testes_sem_gravar_e_traz_as_sugestoes() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        session_with_role(&mut request, &ctx, Role::Admin).await;
+        let antes = json_of(&request.get("/api/plugins").await.text())
+            .as_array()
+            .unwrap()
+            .len();
+
+        let mut pacote = package("1.0.0");
+        pacote["manifest"]["actions"][0]["title"] = json!("detect_page");
+        let previa = request
+            .post("/api/plugins/preview")
+            .json(&json!({ "package": pacote }))
+            .await;
+        previa.assert_status_success();
+        let previa = json_of(&previa.text());
+        assert_eq!(previa["report"]["passed"], true, "{previa}");
+        assert_eq!(previa["report"]["cases"][0]["output"]["firmware"], "1.0");
+        assert!(previa["list"].is_null());
+        assert!(
+            previa["report"]["hints"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|hint| hint["at"] == "detect"),
+            "título técnico vira sugestão: {previa}"
+        );
+
+        let depois = json_of(&request.get("/api/plugins").await.text())
+            .as_array()
+            .unwrap()
+            .len();
+        assert_eq!(antes, depois, "a prévia não grava plugin");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
 async fn operador_consulta_mas_nao_opera_plugin() {
     request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
         session_with_role(&mut request, &ctx, Role::Operator).await;
         request.get("/api/plugins").await.assert_status_success();
         request
             .post("/api/plugins")
+            .json(&json!({ "package": package("1.0.0") }))
+            .await
+            .assert_status(axum::http::StatusCode::FORBIDDEN);
+        request
+            .post("/api/plugins/preview")
             .json(&json!({ "package": package("1.0.0") }))
             .await
             .assert_status(axum::http::StatusCode::FORBIDDEN);

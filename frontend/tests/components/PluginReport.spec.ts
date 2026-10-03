@@ -29,12 +29,14 @@ describe('PluginReport.vue', () => {
           commands: ["uci set wireless.nm_70feed55_2g='wifi-iface'"],
           _counts: { create: 1 },
         },
-        labels: {
-          changes: 'Mudanças',
-          change: 'Mudança',
-          detail: 'Detalhe',
-          commands: 'Comandos (técnico)',
-          ssid: 'Rede',
+        presentation: {
+          labels: {
+            changes: 'Mudanças',
+            change: 'Mudança',
+            detail: 'Detalhe',
+            commands: 'Comandos (técnico)',
+            ssid: 'Rede',
+          },
         },
       },
       global: { stubs },
@@ -57,5 +59,30 @@ describe('PluginReport.vue', () => {
 
     expect(wrapper.find('.panels').attributes('data-open')).toBe('1')
     expect(wrapper.text()).toContain('linha 2')
+  })
+
+  it('formata pelo que a ação declara e mostra o resumo do cartão no topo', () => {
+    const wrapper = mount(PluginReport, {
+      props: {
+        output: {
+          _card: [{ label: '5 GHz', value: 'canal 36 · 80 MHz' }],
+          uptime_seconds: 90061,
+          link: 'up',
+        },
+        presentation: {
+          labels: { uptime_seconds: 'Ligado há', link: 'Link' },
+          formats: { uptime_seconds: 'uptime', link: 'state' },
+        },
+      },
+      global: { stubs },
+    })
+
+    const text = wrapper.text()
+    expect(text).toContain('5 GHz')
+    expect(text).toContain('canal 36 · 80 MHz')
+    expect(text).toContain('Ligado há')
+    expect(text).toContain('1 dia')
+    expect(text).not.toContain('90061')
+    expect(text).toContain('Up')
   })
 })

@@ -4,6 +4,15 @@
  * retorno imediato na tela. Um lugar só para os dois usos.
  */
 
+import {
+  ruleHolds,
+  visibleWhenOf,
+  widgetOf,
+  widgetRule,
+  type VisibleWhen,
+  type Widget,
+} from './pluginWidgets'
+
 export type Schema = Record<string, unknown>
 export type Rule = (value: unknown) => boolean | string
 
@@ -22,6 +31,12 @@ export interface SchemaField {
   advanced: boolean
   /** Fora da tela; o valor ainda vai (ex.: o nome atual ao renomear). */
   hidden: boolean
+  /** Componente do campo (IP, MAC, porta…), que traz a própria validação. */
+  widget?: Widget
+  /** Seção do formulário. */
+  group?: string
+  /** Só aparece (e só vale) quando a regra vale — ex.: a senha some na rede aberta. */
+  visibleWhen?: VisibleWhen
   secret: boolean
   required: boolean
   rules: Rule[]
@@ -82,6 +97,8 @@ export function rulesFor(schema: Schema, required: boolean): Rule[] {
     const max = schema.maximum
     rules.push((value) => value === '' || value === null || Number(value) <= max || `Máximo ${max}`)
   }
+  const widget = widgetRule(widgetOf(schema.widget))
+  if (widget) rules.push((value) => value === SECRET_MASK || widget(value))
   return rules
 }
 
@@ -107,6 +124,9 @@ export function fieldsOf(schema: unknown): SchemaField[] {
       titles: Array.isArray(property.enumTitles) ? property.enumTitles.map(String) : undefined,
       advanced: property.advanced === true,
       hidden: property.hidden === true,
+      widget: widgetOf(property.widget),
+      group: typeof property.group === 'string' ? property.group : undefined,
+      visibleWhen: visibleWhenOf(property.visibleWhen),
       secret: property.secret === true,
       required: required.includes(name),
       rules:
@@ -129,6 +149,46 @@ function sortByOrder(fields: SchemaField[], order: unknown): SchemaField[] {
     return index < 0 ? order.length : index
   }
   return [...fields].sort((a, b) => position(a.name) - position(b.name))
+}
+
+/** Os valores com os padrões do esquema — é sobre eles que `visibleWhen` decide. */
+export function effectiveValues(
+  schema: unknown,
+  values: Record<string, unknown>
+): Record<string, unknown> {
+  const effective: Record<string, unknown> = {}
+  for (const [name, property] of Object.entries(propertiesOf(schema))) {
+    const given = values[name]
+    if (given !== undefined && given !== null) effective[name] = given
+    else if (property.default !== undefined) effective[name] = property.default
+  }
+  return effective
+}
+
+/** O campo aparece com estes valores (a regra `visibleWhen` vale)? */
+export function isVisible(
+  field: SchemaField,
+  schema: unknown,
+  values: Record<string, unknown>
+): boolean {
+  return ruleHolds(field.visibleWhen, effectiveValues(schema, values))
+}
+
+/** Uma seção do formulário (`group`); a sem título é a dos campos soltos. */
+export interface FieldSection {
+  title?: string
+  fields: SchemaField[]
+}
+
+/** Agrupa os campos pela seção, na ordem em que cada seção aparece primeiro. */
+export function sectionsOf(fields: SchemaField[]): FieldSection[] {
+  const sections: FieldSection[] = []
+  for (const field of fields) {
+    const section = sections.find((item) => item.title === field.group)
+    if (section) section.fields.push(field)
+    else sections.push({ title: field.group, fields: [field] })
+  }
+  return sections
 }
 
 /** Um objeto com os valores padrão do esquema (item novo de uma lista). */
@@ -177,6 +237,11 @@ export function normalizeValue(
 ): Record<string, unknown> {
   const output: Record<string, unknown> = { ...value }
   for (const field of fieldsOf(schema)) {
+    // Campo que a regra esconde não existe: não vai para o backend.
+    if (!isVisible(field, schema, value)) {
+      delete output[field.name]
+      continue
+    }
     const current = output[field.name]
     if ((field.kind === 'integer' || field.kind === 'number') && current !== undefined) {
       if (current === '' || current === null) delete output[field.name]

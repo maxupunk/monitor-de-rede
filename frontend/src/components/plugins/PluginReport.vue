@@ -1,7 +1,20 @@
 <template>
   <div class="d-flex flex-column ga-3">
     <template v-for="section in sections" :key="section.key">
-      <div v-if="section.kind === 'kv'" class="report-kv">
+      <div v-if="section.kind === 'stats'" class="d-flex flex-wrap ga-2">
+        <v-card
+          v-for="stat in section.stats"
+          :key="stat.label"
+          border
+          flat
+          class="rounded-lg px-4 py-2 stat"
+        >
+          <div class="text-caption font-weight-bold text-primary">{{ stat.label }}</div>
+          <div class="text-body-1 font-weight-bold">{{ stat.value }}</div>
+        </v-card>
+      </div>
+
+      <div v-else-if="section.kind === 'kv'" class="report-kv">
         <div v-if="section.title" class="text-subtitle-2 font-weight-bold mb-1">
           {{ section.title }}
         </div>
@@ -13,7 +26,7 @@
             flat
             class="rounded-lg px-3 py-2"
           >
-            <div class="text-caption">{{ outputLabel(key, labels) }}</div>
+            <div class="text-caption">{{ outputLabel(key, presentation?.labels) }}</div>
             <v-chip
               v-if="isState(key, value)"
               :color="stateColor(value)"
@@ -23,7 +36,7 @@
             >
               {{ stateLabel(value) }}
             </v-chip>
-            <div v-else class="text-body-1 font-weight-bold">{{ display(value) }}</div>
+            <div v-else class="text-body-1 font-weight-bold">{{ display(key, value) }}</div>
           </v-card>
         </div>
       </div>
@@ -39,7 +52,7 @@
           <thead>
             <tr>
               <th v-for="column in section.columns" :key="column" class="font-weight-bold">
-                {{ outputLabel(column, labels) }}
+                {{ outputLabel(column, presentation?.labels) }}
               </th>
             </tr>
           </thead>
@@ -58,10 +71,10 @@
                   v-else-if="isRowList(row[column]) && depth < 1"
                   :output="{ [column]: row[column] }"
                   :depth="depth + 1"
-                  :labels="labels"
+                  :presentation="presentation"
                   class="py-2"
                 />
-                <span v-else>{{ display(row[column]) }}</span>
+                <span v-else>{{ display(column, row[column]) }}</span>
               </td>
             </tr>
           </tbody>
@@ -105,17 +118,31 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { outputLabel, stateColor, stateLabel, type OutputLabels } from '@/utils/pluginPresentation'
+import {
+  formatOutputValue,
+  outputFormat,
+  outputLabel,
+  stateColor,
+  stateLabel,
+  type OutputPresentation,
+} from '@/utils/pluginPresentation'
 
 defineOptions({ name: 'PluginReport' })
 
 const props = withDefaults(
-  defineProps<{ output: unknown; depth?: number; labels?: OutputLabels }>(),
-  { depth: 0, labels: undefined }
+  defineProps<{
+    output: unknown
+    depth?: number
+    /** Títulos e formatos das chaves — a própria ação serve. */
+    presentation?: OutputPresentation
+  }>(),
+  { depth: 0, presentation: undefined }
 )
 
 type Row = Record<string, unknown>
+type Stat = { label: string; value: string }
 type Section =
+  | { kind: 'stats'; key: string; stats: Stat[] }
   | { kind: 'kv'; key: string; title: string; entries: [string, unknown][] }
   | { kind: 'table'; key: string; title: string; rows: Row[]; columns: string[] }
   | { kind: 'lines'; key: string; title: string; lines: string[] }
@@ -135,11 +162,18 @@ function isRowList(value: unknown): value is Row[] {
 }
 
 function isState(key: string, value: unknown): boolean {
-  return STATE_KEYS.has(key) && typeof value === 'string' && value !== ''
+  const declared = outputFormat(key, props.presentation) === 'state'
+  return (declared || STATE_KEYS.has(key)) && typeof value === 'string' && value !== ''
 }
 
-function display(value: unknown): string {
+function display(key: string, value: unknown): string {
   if (value === null || value === undefined || value === '') return '—'
+  const format = outputFormat(key, props.presentation)
+  if (format && typeof value !== 'object') return formatOutputValue(value, format)
+  return plain(value)
+}
+
+function plain(value: unknown): string {
   if (typeof value === 'boolean') return value ? 'Sim' : 'Não'
   if (Array.isArray(value)) {
     if (value.length === 0) return '—'
@@ -160,7 +194,25 @@ function columnsOf(rows: Row[]): string[] {
   return [...keys]
 }
 
-const SECTION_RANK: Record<Section['kind'], number> = { kv: 0, table: 1, text: 2, lines: 3 }
+const SECTION_RANK: Record<Section['kind'], number> = {
+  stats: -1,
+  kv: 0,
+  table: 1,
+  text: 2,
+  lines: 3,
+}
+
+/**
+ * `_card`: as linhas de resumo que o plugin dá para o cartão do equipamento
+ * (`[#{ label, value }]`) — aqui, cartões no topo do relatório.
+ */
+function statsOf(value: unknown): Stat[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter(isRow)
+    .filter((row) => typeof row.label === 'string')
+    .map((row) => ({ label: String(row.label), value: plain(row.value ?? '—') }))
+}
 
 const sections = computed<Section[]>(() => {
   const value = props.output
@@ -171,6 +223,8 @@ const sections = computed<Section[]>(() => {
   if (!isRow(value)) return []
 
   const result: Section[] = []
+  const stats = props.depth === 0 ? statsOf(value._card) : []
+  if (stats.length > 0) result.push({ kind: 'stats', key: '_card', stats })
   const scalars: [string, unknown][] = []
   for (const [key, item] of Object.entries(value)) {
     if (!isVisibleKey(key)) continue
@@ -178,7 +232,7 @@ const sections = computed<Section[]>(() => {
       result.push({
         kind: 'table',
         key,
-        title: outputLabel(key, props.labels),
+        title: outputLabel(key, props.presentation?.labels),
         rows: item,
         columns: columnsOf(item),
       })
@@ -186,7 +240,7 @@ const sections = computed<Section[]>(() => {
       result.push({
         kind: 'lines',
         key,
-        title: outputLabel(key, props.labels),
+        title: outputLabel(key, props.presentation?.labels),
         lines: item.map(String),
       })
     } else if (Array.isArray(item)) {
@@ -195,11 +249,16 @@ const sections = computed<Section[]>(() => {
       result.push({
         kind: 'kv',
         key,
-        title: outputLabel(key, props.labels),
+        title: outputLabel(key, props.presentation?.labels),
         entries: Object.entries(item),
       })
     } else if (typeof item === 'string' && item.length > 80) {
-      result.push({ kind: 'text', key, title: outputLabel(key, props.labels), text: item })
+      result.push({
+        kind: 'text',
+        key,
+        title: outputLabel(key, props.presentation?.labels),
+        text: item,
+      })
     } else {
       scalars.push([key, item])
     }
@@ -218,6 +277,9 @@ const linesOpen = computed(() => sections.value.every((section) => section.kind 
 </script>
 
 <style scoped>
+.stat {
+  min-width: 140px;
+}
 .report-lines {
   background-color: rgb(var(--v-theme-surface));
   border: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));

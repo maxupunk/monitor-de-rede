@@ -5,8 +5,10 @@ import {
   defaultsOf,
   fieldsOf,
   normalizeValue,
+  isVisible,
   optionsOf,
   paramsOf,
+  sectionsOf,
 } from '@/utils/pluginSettings'
 
 const schema = {
@@ -119,5 +121,46 @@ describe('apresentação dos campos', () => {
 
   it('o que o equipamento tem fora das opções não entra no formulário', () => {
     expect(acceptedValues(radio, { channel: '14', txpower: 20, other: 1 })).toEqual({ txpower: 20 })
+  })
+})
+
+describe('componentes, seções e campos condicionais', () => {
+  const rede = {
+    type: 'object',
+    properties: {
+      ssid: { type: 'string', title: 'Nome', group: 'Básico' },
+      encryption: { type: 'string', enum: ['none', 'psk2'], default: 'psk2', group: 'Segurança' },
+      key: {
+        type: 'string',
+        title: 'Senha',
+        secret: true,
+        group: 'Segurança',
+        visibleWhen: { field: 'encryption', notIn: ['none'] },
+      },
+      gateway: { type: 'string', title: 'Gateway', widget: 'ip', group: 'Básico' },
+    },
+    order: ['ssid', 'gateway', 'encryption', 'key'],
+  }
+
+  it('a senha some na rede aberta e o valor escondido não vai ao backend', () => {
+    const key = fieldsOf(rede).find((field) => field.name === 'key')
+    expect(key && isVisible(key, rede, {})).toBe(true)
+    expect(key && isVisible(key, rede, { encryption: 'none' })).toBe(false)
+    expect(paramsOf(rede, { ssid: 'Loja', encryption: 'none', key: 'x' })).toEqual({
+      ssid: 'Loja',
+      encryption: 'none',
+    })
+  })
+
+  it('as seções seguem a ordem dos campos e o componente traz a própria regra', () => {
+    const sections = sectionsOf(fieldsOf(rede))
+    expect(sections.map((section) => section.title)).toEqual(['Básico', 'Segurança'])
+    expect(sections[0]?.fields.map((field) => field.name)).toEqual(['ssid', 'gateway'])
+    const gateway = fieldsOf(rede).find((field) => field.name === 'gateway')
+    expect(gateway?.widget).toBe('ip')
+    expect(gateway?.rules.map((rule) => rule('10.0.0.999'))).toContain(
+      'Precisa ser um endereço IP (ex.: 192.168.1.1)'
+    )
+    expect(gateway?.rules.every((rule) => rule('10.0.0.1') === true)).toBe(true)
   })
 })

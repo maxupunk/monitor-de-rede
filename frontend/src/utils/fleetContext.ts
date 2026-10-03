@@ -5,10 +5,9 @@
  */
 import type { FleetAction } from '@/bindings/FleetAction'
 import type { FleetSpec } from '@/bindings/FleetSpec'
-import type { MatrixAction } from '@/bindings/MatrixAction'
 import type { PluginAction } from '@/bindings/PluginAction'
 import type { PluginBatchView } from '@/bindings/PluginBatchView'
-import { stateColor } from '@/utils/pluginPresentation'
+import { actionsUsedBy } from '@/utils/itemList'
 
 type Record_ = Record<string, unknown>
 
@@ -64,15 +63,6 @@ export function sourceIndex(outputs: Map<number, Record_>, path: string): Map<st
   return index
 }
 
-/** Os parâmetros de uma ação a partir de um item (mapa parâmetro → campo). */
-export function paramsFromItem(target: MatrixAction, item: Record_): Record_ {
-  return Object.fromEntries(
-    Object.entries(target.params)
-      .filter(([, field]) => item[field] !== undefined)
-      .map(([param, field]) => [param, item[field]])
-  )
-}
-
 /** Os valores atuais (`current`) de cada equipamento que os tem. */
 export function currentByDevice(outputs: Map<number, Record_>, path: string): Map<number, Record_> {
   const current = new Map<number, Record_>()
@@ -96,66 +86,6 @@ export interface FlowRequest {
   initialDevices?: number[]
 }
 
-/** Um item da lista (ex.: uma rede) com quem o tem. */
-export interface ItemRow {
-  key: string
-  /** O item como o primeiro equipamento que o tem o leu. */
-  item: Record<string, unknown>
-  /** Os campos do cartão, juntos ("WPA2/WPA3 · 2,4 GHz, 5 GHz"). */
-  subtitle: string
-  /** Algum equipamento o tem ligado (estado de cor "sucesso"). */
-  active: boolean
-  entries: { deviceId: number; name: string; state: unknown }[]
-  /** Soma do campo de detalhe (ex.: clientes); `null` sem detalhe. */
-  detailTotal: number | null
-}
-
-/** Os itens da lista da ação de estado, juntando o que cada equipamento tem. */
-export function itemRows(
-  outputs: Map<number, Record<string, unknown>>,
-  matrix: Pick<MatrixLike, 'field' | 'key' | 'state' | 'detail' | 'subtitle'>,
-  members: { deviceId: number; name: string }[]
-): ItemRow[] {
-  const rows = new Map<string, ItemRow>()
-  for (const member of members) {
-    const list = outputs.get(member.deviceId)?.[matrix.field]
-    if (!Array.isArray(list)) continue
-    for (const item of list) {
-      if (!isRecord(item) || item[matrix.key] === undefined) continue
-      const key = String(item[matrix.key])
-      let row = rows.get(key)
-      if (!row) {
-        row = {
-          key,
-          item,
-          subtitle: (matrix.subtitle ?? [])
-            .map((field) => item[field])
-            .filter((value) => value !== undefined && value !== null && value !== '')
-            .join(' · '),
-          active: false,
-          entries: [],
-          detailTotal: matrix.detail ? 0 : null,
-        }
-        rows.set(key, row)
-      }
-      const state = item[matrix.state]
-      row.entries.push({ deviceId: member.deviceId, name: member.name, state })
-      if (stateColor(state) === 'success') row.active = true
-      const detail = matrix.detail ? Number(item[matrix.detail]) : NaN
-      if (row.detailTotal !== null && Number.isFinite(detail)) row.detailTotal += detail
-    }
-  }
-  return [...rows.values()]
-}
-
-interface MatrixLike {
-  field: string
-  key: string
-  state: string
-  detail?: string
-  subtitle?: string[]
-}
-
 /**
  * As ações da aba "Avançado": as de `fleet.tools`, na ordem; sem lista, as que
  * nenhuma outra parte da tela usa (novo, editar, remover, ação do equipamento).
@@ -166,12 +96,7 @@ export function toolsOf(fleet: FleetSpec | null | undefined): FleetAction[] {
     return fleet.tools.flatMap((id) => actions.filter((action) => action.id === id))
   }
   const used = new Set(
-    [
-      fleet?.matrix?.add,
-      fleet?.matrix?.edit?.action,
-      fleet?.matrix?.remove?.action,
-      fleet?.deviceAction,
-    ].filter((id): id is string => Boolean(id))
+    [...actionsUsedBy(fleet?.list), fleet?.deviceAction].filter((id): id is string => Boolean(id))
   )
   return actions.filter((action) => !used.has(action.id))
 }

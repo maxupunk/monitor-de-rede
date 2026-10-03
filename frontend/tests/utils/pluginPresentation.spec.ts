@@ -5,6 +5,7 @@ import type { Surface } from '@/bindings/Surface'
 import {
   devicePrefillFor,
   followUpOf,
+  formatOutputValue,
   installedPluginTabs,
   pluginTab,
   stepLabel,
@@ -30,12 +31,13 @@ function item(
       transports: ['ssh'],
       actions: [],
       matcher: {},
-      panel: panelTitle
+      list: panelTitle
         ? {
             title: panelTitle,
             icon: 'mdi-package-variant-closed',
-            listAction: 'x',
-            keyColumn: 'name',
+            source: 'x',
+            key: 'name',
+            layout: 'table',
           }
         : null,
       surfaces,
@@ -141,5 +143,22 @@ describe('andamento de uma execução', () => {
     expect(stepLabel(undefined)).toBe('Conectando ao equipamento…')
     expect(stepLabel(entry('step:ssh', 0))).toBe("SSH · iwinfo 'phy0-ap0' scan · executando…")
     expect(stepLabel(entry('ssh', 3200))).toBe("SSH · iwinfo 'phy0-ap0' scan · respondeu em 3,2 s")
+  })
+})
+
+describe('formato dos valores da saída', () => {
+  it('escreve cada formato com os formatadores do sistema', () => {
+    expect(formatOutputValue(1536, 'bytes')).toMatch(/KB|KiB/)
+    expect(formatOutputValue('12.34', 'latency')).toBe('12.3 ms')
+    expect(formatOutputValue(42.5, 'percent')).toBe('42,5%')
+    expect(formatOutputValue(4200, 'duration')).toBe('4,2 s')
+    expect(formatOutputValue(90061, 'uptime')).toContain('1 dia')
+    expect(formatOutputValue(1500, 'count')).toBe('1,5 mil')
+    expect(formatOutputValue('fora_do_ar', 'state')).toBe('Fora do ar')
+  })
+
+  it('valor que não cabe no formato sai como veio', () => {
+    expect(formatOutputValue('16384 kB', 'bytes')).toBe('16384 kB')
+    expect(formatOutputValue('ontem', 'datetime')).toBe('ontem')
   })
 })

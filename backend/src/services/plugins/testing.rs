@@ -26,6 +26,7 @@ use super::{
     },
     settings,
     transport::{fake::FakeTransport, Login},
+    ux_lint::{self, UxHint},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -54,6 +55,8 @@ pub struct TestReport {
     /// Problemas de validação do pacote. Qualquer um reprova.
     pub problems: Vec<String>,
     pub cases: Vec<TestCaseResult>,
+    /// Sugestões de usabilidade da tela ([`ux_lint`]). Não reprovam.
+    pub hints: Vec<UxHint>,
 }
 
 fn test_credentials() -> Credentials {
@@ -103,12 +106,23 @@ pub async fn run_unit_tests_with(package: &PluginPackage, library: &[LibraryPlug
     }
     let failed =
         u32::try_from(cases.iter().filter(|case| !case.passed).count()).unwrap_or(u32::MAX);
+    let outputs: Vec<(&str, &Value)> = cases
+        .iter()
+        .filter(|case| case.passed)
+        .filter_map(|case| {
+            case.output
+                .as_ref()
+                .map(|output| (case.action.as_str(), output))
+        })
+        .collect();
+    let hints = ux_lint::lint(package, &outputs);
     TestReport {
         passed: problems.is_empty() && failed == 0 && !cases.is_empty(),
         total: u32::try_from(cases.len()).unwrap_or(u32::MAX),
         failed,
         problems,
         cases,
+        hints,
     }
 }
 

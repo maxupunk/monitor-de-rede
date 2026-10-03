@@ -13,7 +13,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ts_rs::TS;
 
-use super::{effect::Effect, params, version};
+use super::{
+    effect::Effect,
+    item_list::{self, ItemList, ListScope},
+    params, version,
+};
 
 /// A ação obrigatória de todo plugin: identifica o equipamento (modelo,
 /// firmware) sem alterar nada.
@@ -80,6 +84,35 @@ pub enum OutputKind {
     Report,
 }
 
+/// Como a tela escreve o valor de uma chave da saída — com os formatadores do
+/// sistema, para um plugin mostrar bytes, latência e datas como o resto da
+/// interface mostra.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub enum OutputFormat {
+    /// Quantidade de bytes (`1,2 MB`).
+    Bytes,
+    /// Taxa em bits por segundo (`120 Mbps`).
+    Bps,
+    /// Latência em milissegundos (`12,5 ms`).
+    Latency,
+    /// Percentual (`42,5%`).
+    Percent,
+    /// Duração em milissegundos (`4,2 s`).
+    Duration,
+    /// Tempo ligado em segundos (`3 dias e 4 horas`).
+    Uptime,
+    /// Data e hora (texto ISO ou segundos Unix).
+    Datetime,
+    /// Há quanto tempo (`há 5 minutos`).
+    Relative,
+    /// Contagem compacta (`1,2 mil`).
+    Count,
+    /// Estado (`up`, `down`, `disabled`…), que vira um chip colorido.
+    State,
+}
+
 /// Uma operação que o plugin oferece.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -106,6 +139,10 @@ pub struct PluginAction {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub labels: Option<BTreeMap<String, String>>,
+    /// Como a tela escreve o valor de cada chave (`rx_bytes` → bytes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub formats: Option<BTreeMap<String, OutputFormat>>,
 }
 
 /// Com que equipamentos o plugin diz ser compatível. Todos os campos são
@@ -167,6 +204,9 @@ pub struct PanelColumn {
     pub label: String,
 }
 
+/// Formato antigo da tela do plugin instalado — hoje uma [`ItemList`] em
+/// tabela (ver [`item_list`]). Continua aceito e é convertido na leitura.
+///
 /// A tela própria do plugin instalado: uma lista vinda de uma ação de leitura
 /// (com busca opcional), ações sobre a linha escolhida e botões de barra.
 ///
@@ -258,6 +298,10 @@ pub struct FleetAction {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub labels: Option<BTreeMap<String, String>>,
+    /// Formato das chaves do consolidado (ver [`PluginAction::formats`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub formats: Option<BTreeMap<String, OutputFormat>>,
     /// Ação de leitura que mostra, com os mesmos parâmetros, o que esta vai
     /// mudar em cada equipamento — o "Pré-visualizar" antes de aplicar.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -285,6 +329,9 @@ pub struct MatrixAction {
     pub params: BTreeMap<String, String>,
 }
 
+/// Formato antigo da lista da frota — hoje `fleet.list` (ver [`item_list`]).
+/// Continua aceito e é convertido na leitura.
+///
 /// A grade membros × itens da página da frota (ex.: roteadores × SSIDs).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -343,9 +390,14 @@ pub struct FleetSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub status_action: Option<String>,
+    /// Formato antigo de `list`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub matrix: Option<FleetMatrix>,
+    /// Os itens que os equipamentos têm (ex.: as redes), um cartão cada.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub list: Option<ItemList>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<FleetAction>,
     /// Ação de frota aberta ao clicar num equipamento, só para ele (ex.: os
@@ -376,10 +428,15 @@ pub struct PluginManifest {
     #[serde(default, rename = "match")]
     pub matcher: MatchRule,
     pub actions: Vec<PluginAction>,
-    /// Tela própria do plugin instalado. Sem ela, a aba mostra as ações.
+    /// Formato antigo de `list`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub panel: Option<PluginPanel>,
+    /// Tela própria do plugin instalado: a lista de itens. Sem ela, a aba
+    /// mostra as ações.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub list: Option<ItemList>,
     /// Onde aparece: aba do equipamento, página da frota, ou as duas.
     #[serde(default = "default_surfaces")]
     pub surfaces: Vec<Surface>,
@@ -395,7 +452,34 @@ pub struct PluginManifest {
     pub uses: Vec<String>,
 }
 
+impl FleetSpec {
+    /// A lista da frota, venha de `list` ou do formato antigo (`matrix`).
+    #[must_use]
+    pub fn item_list(&self) -> Option<ItemList> {
+        self.list
+            .clone()
+            .or_else(|| self.matrix.as_ref().map(ItemList::from))
+    }
+
+    /// A frota como a tela a recebe: só `list`, já convertida.
+    #[must_use]
+    pub fn resolved(mut self) -> Self {
+        self.list = self.item_list();
+        self.matrix = None;
+        self
+    }
+}
+
 impl PluginManifest {
+    /// A lista do plugin instalado, venha de `list` ou do formato antigo
+    /// (`panel`).
+    #[must_use]
+    pub fn item_list(&self) -> Option<ItemList> {
+        self.list
+            .clone()
+            .or_else(|| self.panel.as_ref().map(ItemList::from))
+    }
+
     #[must_use]
     pub fn action(&self, id: &str) -> Option<&PluginAction> {
         self.actions.iter().find(|action| action.id == id)
@@ -509,6 +593,7 @@ pub fn validate(manifest: &PluginManifest) -> Vec<String> {
             ));
         }
         validate_labels(&action.id, action.labels.as_ref(), &mut problems);
+        validate_formats(&action.id, action.formats.as_ref(), &mut problems);
     }
     match manifest.action(DETECT_ACTION) {
         None => {
@@ -522,8 +607,20 @@ pub fn validate(manifest: &PluginManifest) -> Vec<String> {
         }
         Some(_) => {}
     }
-    if let Some(panel) = &manifest.panel {
-        validate_panel(manifest, panel, &mut problems);
+    match (&manifest.list, &manifest.panel) {
+        (Some(_), Some(_)) => {
+            problems.push("use só `list` — `panel` é o formato antigo da mesma tela".into());
+        }
+        (Some(list), None) => {
+            item_list::validate(list, ListScope::Device(manifest), "list", &mut problems);
+        }
+        (None, Some(panel)) => item_list::validate(
+            &ItemList::from(panel),
+            ListScope::Device(manifest),
+            "panel",
+            &mut problems,
+        ),
+        (None, None) => {}
     }
     validate_surfaces(manifest, &mut problems);
     problems
@@ -545,6 +642,20 @@ fn validate_labels(
     {
         problems.push(format!(
             "`labels` de `{owner}`: até 100 títulos, cada um com 1 a 60 caracteres"
+        ));
+    }
+}
+
+/// Formatos de no máximo 100 chaves, nenhuma vazia (o valor o serde já
+/// confere: só os do catálogo de [`OutputFormat`]).
+fn validate_formats(
+    owner: &str,
+    formats: Option<&BTreeMap<String, OutputFormat>>,
+    problems: &mut Vec<String>,
+) {
+    if formats.is_some_and(|formats| formats.len() > 100 || formats.keys().any(String::is_empty)) {
+        problems.push(format!(
+            "`formats` de `{owner}`: até 100 chaves, nenhuma vazia"
         ));
     }
 }
@@ -585,43 +696,36 @@ fn validate_surfaces(manifest: &PluginManifest, problems: &mut Vec<String>) {
                 Some(_) => {}
             }
         }
-        if fleet.matrix.is_some() && fleet.status_action.is_none() {
-            problems.push("`fleet.matrix` precisa de `fleet.statusAction`".into());
+        match (&fleet.list, &fleet.matrix) {
+            (Some(_), Some(_)) => problems.push(
+                "use só `fleet.list` — `fleet.matrix` é o formato antigo da mesma lista".into(),
+            ),
+            (Some(list), None) => item_list::validate(
+                list,
+                ListScope::Fleet(manifest, fleet),
+                "fleet.list",
+                problems,
+            ),
+            (None, Some(matrix)) => item_list::validate(
+                &ItemList::from(matrix),
+                ListScope::Fleet(manifest, fleet),
+                "fleet.matrix",
+                problems,
+            ),
+            (None, None) => {}
         }
         let is_fleet_action = |id: &str| fleet.actions.iter().any(|action| action.id == id);
         let referenced = fleet
-            .matrix
-            .as_ref()
-            .and_then(|matrix| matrix.add.as_deref().map(|id| ("matrix.add", id)))
+            .device_action
+            .as_deref()
+            .map(|id| ("deviceAction", id))
             .into_iter()
-            .chain(
-                fleet
-                    .device_action
-                    .as_deref()
-                    .map(|id| ("deviceAction", id)),
-            )
             .chain(fleet.tools.iter().map(|id| ("tools", id.as_str())));
         for (label, id) in referenced {
             if !is_fleet_action(id) {
                 problems.push(format!(
                     "`fleet.{label}` cita `{id}`, que não é ação de frota"
                 ));
-            }
-        }
-        if let Some(matrix) = &fleet.matrix {
-            for (label, target) in [("edit", &matrix.edit), ("remove", &matrix.remove)] {
-                if let Some(target) = target {
-                    if !fleet
-                        .actions
-                        .iter()
-                        .any(|action| action.id == target.action)
-                    {
-                        problems.push(format!(
-                            "`fleet.matrix.{label}` cita `{}`, que não é ação de frota",
-                            target.action
-                        ));
-                    }
-                }
             }
         }
         let mut ids = HashSet::new();
@@ -644,6 +748,7 @@ fn validate_surfaces(manifest: &PluginManifest, problems: &mut Vec<String>) {
                 }
             }
             validate_labels(&action.id, action.labels.as_ref(), problems);
+            validate_formats(&action.id, action.formats.as_ref(), problems);
             if action.current.is_some() && fleet.status_action.is_none() {
                 problems.push(format!(
                     "o `current` de `{}` precisa de `fleet.statusAction`",
@@ -666,112 +771,6 @@ fn validate_surfaces(manifest: &PluginManifest, problems: &mut Vec<String>) {
     for slug in &manifest.uses {
         if !is_slug(slug) || slug == &manifest.slug {
             problems.push(format!("`uses` cita `{slug}`, que não é um plugin válido"));
-        }
-    }
-}
-
-/// Nomes das propriedades do esquema de parâmetros de uma ação, e as
-/// obrigatórias.
-fn param_names(action: &PluginAction) -> (Vec<String>, Vec<String>) {
-    let schema = action.params.as_ref();
-    let names = schema
-        .and_then(|schema| schema.get("properties"))
-        .and_then(Value::as_object)
-        .map(|properties| properties.keys().cloned().collect())
-        .unwrap_or_default();
-    let required = schema
-        .and_then(|schema| schema.get("required"))
-        .and_then(Value::as_array)
-        .map(|list| {
-            list.iter()
-                .filter_map(Value::as_str)
-                .map(str::to_owned)
-                .collect()
-        })
-        .unwrap_or_default();
-    (names, required)
-}
-
-fn validate_panel(manifest: &PluginManifest, panel: &PluginPanel, problems: &mut Vec<String>) {
-    if panel.title.trim().is_empty() {
-        problems.push("`panel.title` é obrigatório".into());
-    }
-    if panel.key_column.trim().is_empty() {
-        problems.push("`panel.keyColumn` é obrigatório".into());
-    }
-    match manifest.action(&panel.list_action) {
-        None => problems.push(format!(
-            "`panel.listAction` cita `{}`, que não é uma ação do plugin",
-            panel.list_action
-        )),
-        Some(list) => {
-            if list.effect != Effect::Read || list.output != OutputKind::Table {
-                problems.push(
-                    "`panel.listAction` precisa ser uma ação de leitura com `output: table`".into(),
-                );
-            }
-            let (names, required) = param_names(list);
-            if let Some(search) = &panel.search_param {
-                if !names.contains(search) {
-                    problems.push(format!(
-                        "`panel.searchParam` cita `{search}`, que não é parâmetro de `{}`",
-                        list.id
-                    ));
-                }
-            }
-            if required
-                .iter()
-                .any(|name| Some(name) != panel.search_param.as_ref())
-            {
-                problems
-                    .push("a ação de lista do painel só pode exigir o parâmetro de busca".into());
-            }
-        }
-    }
-    for column in &panel.columns {
-        if column.key.trim().is_empty() || column.label.trim().is_empty() {
-            problems.push("`panel.columns`: cada coluna precisa de `key` e `label`".into());
-        }
-    }
-    for id in &panel.toolbar {
-        match manifest.action(id) {
-            None => problems.push(format!("`panel.toolbar` cita `{id}`, que não existe")),
-            Some(action) if !param_names(action).1.is_empty() => problems.push(format!(
-                "`panel.toolbar`: a ação `{id}` exige parâmetros e não pode ser um botão da barra"
-            )),
-            Some(_) => {}
-        }
-    }
-    for row in &panel.row_actions {
-        let Some(action) = manifest.action(&row.action) else {
-            problems.push(format!(
-                "`panel.rowActions` cita `{}`, que não existe",
-                row.action
-            ));
-            continue;
-        };
-        let (names, required) = param_names(action);
-        for param in row.params.keys() {
-            if !names.contains(param) {
-                problems.push(format!(
-                    "`panel.rowActions`: `{param}` não é parâmetro de `{}`",
-                    row.action
-                ));
-            }
-        }
-        for name in required {
-            if !row.params.contains_key(&name) {
-                problems.push(format!(
-                    "`panel.rowActions`: o parâmetro obrigatório `{name}` de `{}` não vem da linha",
-                    row.action
-                ));
-            }
-        }
-        if row.label.trim().is_empty() {
-            problems.push(format!(
-                "`panel.rowActions`: `{}` precisa de `label`",
-                row.action
-            ));
         }
     }
 }
@@ -924,9 +923,22 @@ mod tests {
             "{problems:?}"
         );
         assert!(
-            problems.iter().any(|p| p.contains("não vem da linha")),
+            problems.iter().any(|p| p.contains("não vem do item")),
             "{problems:?}"
         );
+        assert!(
+            problems.iter().all(|p| !p.contains("`list")),
+            "o formato antigo é apontado pelo próprio nome: {problems:?}"
+        );
+    }
+
+    #[test]
+    fn lista_e_painel_juntos_sao_recusados() {
+        let mut duplo = com_painel();
+        duplo.list = duplo.item_list();
+        assert!(validate(&duplo).iter().any(|p| p.contains("use só `list`")));
+        duplo.panel = None;
+        assert!(validate(&duplo).is_empty(), "{:?}", validate(&duplo));
     }
 
     #[test]
@@ -942,6 +954,7 @@ mod tests {
             description: None,
             status_action: Some("install_package".into()),
             matrix: None,
+            list: None,
             device_action: Some("fantasma".into()),
             tools: Vec::new(),
             actions: vec![FleetAction {
@@ -952,6 +965,7 @@ mod tests {
                 action: "inexistente".into(),
                 reduce: None,
                 labels: None,
+                formats: None,
                 preview: None,
                 current: None,
             }],

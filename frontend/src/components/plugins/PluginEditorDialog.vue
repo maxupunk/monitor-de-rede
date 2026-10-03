@@ -27,6 +27,7 @@
         <v-tab value="script" prepend-icon="mdi-code-braces">Script</v-tab>
         <v-tab value="usage" prepend-icon="mdi-book-open-variant">Uso</v-tab>
         <v-tab value="tests" prepend-icon="mdi-test-tube">Testes</v-tab>
+        <v-tab value="preview" prepend-icon="mdi-eye-outline">Prévia</v-tab>
         <v-tab v-if="compatibility.length" value="compat" prepend-icon="mdi-check-decagram">
           Compatibilidade ({{ compatibility.length }})
         </v-tab>
@@ -93,6 +94,9 @@
               persistent-hint
             ></v-textarea>
           </v-window-item>
+          <v-window-item value="preview">
+            <PluginPreview ref="previewPane" :pkg="parsed" />
+          </v-window-item>
           <v-window-item value="compat">
             <v-table density="compact" class="border rounded-lg">
               <thead>
@@ -143,6 +147,10 @@
           <ul v-if="report.problems.length" class="ml-4 mt-1 text-body-2">
             <li v-for="problem in report.problems" :key="problem">{{ problem }}</li>
           </ul>
+          <div v-if="report.hints.length" class="text-body-2 mt-1">
+            {{ report.hints.length }} sugestão(ões) de usabilidade —
+            <a href="#" class="font-weight-bold" @click.prevent="tab = 'preview'">ver na Prévia</a>.
+          </div>
           <ul class="ml-4 mt-1 text-body-2">
             <li v-for="item in failedCases" :key="item.name">
               <strong>{{ item.name }}</strong
@@ -205,7 +213,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import type { CompatEntry } from '@/bindings/CompatEntry'
 import type { PluginPackage } from '@/bindings/PluginPackage'
 import type { PluginSummary } from '@/bindings/PluginSummary'
@@ -214,6 +222,7 @@ import { usePluginsStore } from '@/stores/plugins'
 import { formatDateTime } from '@/utils/formatters'
 import { renderMarkdown } from '@/utils/markdown'
 import { packageTemplate, sourcePresentation, statusPresentation } from '@/utils/pluginPresentation'
+import PluginPreview from './editor/PluginPreview.vue'
 
 const props = defineProps<{
   modelValue: boolean
@@ -232,6 +241,9 @@ const emit = defineEmits<{
 
 const store = usePluginsStore()
 const tab = ref('manifest')
+const previewPane = ref<{ refresh: () => Promise<void> } | null>(null)
+/** A prévia roda sozinha na primeira vez que a aba é aberta. */
+const previewed = ref(false)
 const loading = ref(false)
 const busy = ref(false)
 const saveError = ref<string | null>(null)
@@ -290,6 +302,7 @@ watch(
   async (open) => {
     if (!open) return
     tab.value = 'manifest'
+    previewed.value = false
     report.value = null
     saveError.value = null
     exclusive.value = false
@@ -310,6 +323,13 @@ watch(
     }
   }
 )
+
+watch(tab, async (current) => {
+  if (current !== 'preview' || previewed.value) return
+  previewed.value = true
+  await nextTick()
+  await previewPane.value?.refresh()
+})
 
 function close(value = false) {
   emit('update:modelValue', value)

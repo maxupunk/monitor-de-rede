@@ -12,7 +12,18 @@ import type { Severity } from '@/bindings/Severity'
 import type { MatchRule } from '@/bindings/MatchRule'
 import type { Device } from '@/stores/devices'
 import type { TranscriptEntry } from '@/bindings/TranscriptEntry'
-import { formatElapsedMs } from '@/utils/formatters'
+import type { OutputFormat } from '@/bindings/OutputFormat'
+import {
+  formatBps,
+  formatBytes,
+  formatCompactCount,
+  formatDateTime,
+  formatElapsedMs,
+  formatLatency,
+  formatPercent,
+  formatRelativeTime,
+  formatTimeSpan,
+} from '@/utils/formatters'
 
 export interface Presentation {
   label: string
@@ -167,8 +178,8 @@ export function installedPluginTabs(
     .filter((item) => item.installed && item.plugin.surfaces.includes('device'))
     .map((item) => ({
       id: item.plugin.id,
-      title: item.plugin.panel?.title ?? item.plugin.name,
-      icon: item.plugin.panel?.icon ?? 'mdi-puzzle',
+      title: item.plugin.list?.title ?? item.plugin.name,
+      icon: item.plugin.list?.icon ?? 'mdi-puzzle',
       item,
     }))
 }
@@ -223,6 +234,76 @@ export function stateLabel(value: unknown): string {
 
 /** Títulos que o plugin declara para as chaves da saída (`labels`). */
 export type OutputLabels = Record<string, string> | undefined
+
+/**
+ * Como a tela apresenta a saída de uma ação: os títulos (`labels`) e o
+ * formato (`formats`) de cada chave. A própria ação (de dispositivo ou de
+ * frota) serve — as duas declaram os dois campos.
+ */
+export type OutputPresentation =
+  | { labels?: Record<string, string>; formats?: Partial<Record<string, OutputFormat>> }
+  | null
+  | undefined
+
+/** O formato declarado para a chave, se há. */
+export function outputFormat(
+  key: string,
+  presentation?: OutputPresentation
+): OutputFormat | undefined {
+  return presentation?.formats?.[key]
+}
+
+function numberOf(value: unknown): number {
+  if (typeof value === 'number') return value
+  if (typeof value === 'string' && value.trim() !== '') return Number(value)
+  return Number.NaN
+}
+
+/** Data de um valor de saída: texto ISO ou segundos Unix. */
+function dateOf(value: unknown): Date | null {
+  const seconds = numberOf(value)
+  if (Number.isFinite(seconds)) return new Date(seconds * 1000)
+  if (typeof value !== 'string') return null
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+/**
+ * O valor escrito no formato declarado, com os formatadores do sistema. Valor
+ * que não cabe no formato (texto onde se esperava número) sai como veio.
+ */
+export function formatOutputValue(value: unknown, format: OutputFormat): string {
+  const number = numberOf(value)
+  const numeric = Number.isFinite(number)
+  switch (format) {
+    case 'bytes':
+      return numeric ? formatBytes(number) : String(value)
+    case 'bps':
+      return numeric ? formatBps(number) : String(value)
+    case 'latency':
+      return numeric ? formatLatency(number) : String(value)
+    case 'percent':
+      return numeric ? formatPercent(number) : String(value)
+    case 'duration':
+      return numeric ? formatElapsedMs(number) : String(value)
+    case 'uptime':
+      return numeric
+        ? formatTimeSpan(new Date(Date.now() - number * 1000), new Date())
+        : String(value)
+    case 'count':
+      return numeric ? formatCompactCount(number) : String(value)
+    case 'datetime': {
+      const date = dateOf(value)
+      return date ? formatDateTime(date) : String(value)
+    }
+    case 'relative': {
+      const date = dateOf(value)
+      return date ? formatRelativeTime(date) : String(value)
+    }
+    case 'state':
+      return stateLabel(value)
+  }
+}
 
 /** Título de uma chave: o declarado pelo plugin ou a própria chave legível. */
 export function outputLabel(key: string, labels?: OutputLabels): string {

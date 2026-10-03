@@ -9,7 +9,7 @@
           <v-card-item>
             <template #prepend>
               <v-avatar color="primary" variant="tonal" rounded="lg">
-                <v-icon>{{ item.plugin.panel?.icon ?? 'mdi-puzzle-outline' }}</v-icon>
+                <v-icon>{{ item.plugin.list?.icon ?? 'mdi-puzzle-outline' }}</v-icon>
               </v-avatar>
             </template>
             <v-card-title class="text-wrap">{{ item.plugin.name }}</v-card-title>

@@ -374,6 +374,8 @@ fn test_summary(
         "total": report.total,
         "failed": report.failed,
         "problems": report.problems,
+        // Não reprovam, mas a tela fica ruim: corrija e rode de novo.
+        "usability": report.hints.iter().map(|hint| format!("{}: {}", hint.at, hint.message)).collect::<Vec<_>>(),
         "failures": report.cases.iter().filter(|case| !case.passed).map(|case| json!({
             "test": case.name,
             "message": case.message,

@@ -3,7 +3,7 @@
   "manifest": {
     "slug": "linux-ssh-status",
     "name": "Linux – estado do sistema",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "description": "Versão, carga, memória e uso de disco de qualquer Linux com SSH. Só leitura.",
     "author": "NetMonitor",
     "transports": [
@@ -28,13 +28,32 @@
         "id": "system_status",
         "title": "Estado do sistema",
         "effect": "read",
-        "output": "kv"
+        "output": "kv",
+        "labels": {
+          "uptime_seconds": "Ligado há",
+          "load_1m": "Carga (1 min)",
+          "load_5m": "Carga (5 min)",
+          "load_15m": "Carga (15 min)",
+          "mem_total": "Memória total",
+          "mem_available": "Memória livre"
+        },
+        "formats": {
+          "uptime_seconds": "uptime"
+        }
       },
       {
         "id": "disk_usage",
         "title": "Uso de disco",
         "effect": "read",
-        "output": "table"
+        "output": "table",
+        "labels": {
+          "filesystem": "Sistema de arquivos",
+          "size_kb": "Tamanho (KB)",
+          "used_kb": "Usado (KB)",
+          "available_kb": "Livre (KB)",
+          "used": "Uso",
+          "mount": "Montado em"
+        }
       }
     ]
   },

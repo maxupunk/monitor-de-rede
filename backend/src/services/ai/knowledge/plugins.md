@@ -108,15 +108,17 @@ Regras que o sistema confere (e recusa se faltar):
   entrar no teste funcional.
 - `params`: subconjunto de JSON Schema — `type: object` e propriedades
   `string`/`integer`/`number`/`boolean` com `pattern`, `enum`, `minLength`,
-  `maxLength`, `minimum`, `maximum`, `default`, `title`, `description`.
-  **Todo texto que vai para um comando precisa de `pattern` ou `enum`** (o
-  `pattern` é ancorado). `"order": ["campo", …]` no objeto define a ordem dos
+  `maxLength`, `minimum`, `maximum`, `default`, `title`, `description` — e a
+  apresentação do catálogo (`widget`, `group`, `visibleWhen`, `enumTitles`,
+  `advanced`, `hidden`, `secret`; ver "A tela").
+  **Todo texto que vai para um comando precisa de `pattern`, `enum` ou um
+  `widget` que valida** (o `pattern` é ancorado). `"order": ["campo", …]` no objeto define a ordem dos
   campos na tela — sem ele a ordem é alfabética (o JSON não guarda a ordem das
   chaves).
-- `labels` (opcional, por ação): títulos das chaves da saída na tela,
-  `{ "clients": "Clientes", "pending_changes": "Alterações pendentes" }`. As
+- `labels` e `formats` (opcionais, por ação): títulos e formato das chaves da
+  saída na tela, `{ "clients": "Clientes" }` e `{ "rx_bytes": "bytes" }`. As
   chaves continuam em inglês/snake_case (são o contrato com testes e
-  `matrix`); o operador lê os títulos. Use uma chave por significado — a
+  `list`); o operador lê os títulos. Use uma chave por significado — a
   mesma chave com sentidos diferentes na mesma saída não tem título que sirva.
 - `usage`: markdown com uma seção por ação (use o `title`), dizendo o que faz,
   o que altera e os cuidados. É o que o operador lê antes de executar.
@@ -241,29 +243,120 @@ Os plugins embutidos (`openwrt-packages`, `openwrt-wifi`, `linux-ssh-status`,
 `openwrt-wifi` é o modelo de aplicativo de frota (configuração, `use_plugin`,
 `reduce`, `report`).
 
-## Tela própria (`panel`)
+## A tela: catálogo de componentes
 
-Plugin instalado num equipamento ganha uma aba. Sem `panel`, ela lista as
-ações. Com `panel`, a aba vira uma tela: uma lista vinda de uma ação de leitura
-com `output: table`, busca opcional, botões de barra e ações sobre a linha
-escolhida — tudo declarado, nenhum código roda no navegador.
+Você **não escreve tela**. Você diz o que cada coisa é, e a interface desenha
+com os componentes do sistema (as cores, os formatadores, o contraste e o
+comportamento são os mesmos do resto do produto). Nenhum código do plugin roda
+no navegador. São três peças:
+
+**1. Campos** (no esquema de `params` e de `settings`):
+
+| Palavra-chave | O que faz |
+|---|---|
+| `title` | rótulo em palavras ("Senha da rede"), nunca o nome da chave |
+| `enumTitles` | nome de cada opção do `enum`, na mesma ordem ("WPA2 (aparelhos antigos)") |
+| `widget` | o componente: `ip`, `cidr`, `mac`, `hostname`, `url`, `textarea` (texto); `port` (inteiro 1–65535); `slider` (número, com `minimum`/`maximum`); `tags` (lista de textos). O componente **já valida** — `ip`/`cidr`/`mac`/`port`/`hostname`/`url` contam como `pattern` contra injeção |
+| `group` | seção do formulário ("Rede", "Segurança"); as seções aparecem na ordem do primeiro campo de cada uma |
+| `visibleWhen` | `{ "field": "encryption", "notIn": ["none"] }` (ou `equals`/`in`): o campo some quando a regra não vale, deixa de ser obrigatório e **não vai para o script** (leia com `params.campo ?? ""`) |
+| `advanced` | vai para "Opções avançadas", fechado |
+| `hidden` | fora da tela; o valor ainda vai (ex.: o nome atual ao renomear) |
+| `secret` | senha: mascarada, fora do histórico |
+| `source` | oferece os valores da ação de estado (`"networks.ssid"`) |
+
+Até **5 campos à vista por seção**; o resto em `advanced` ou em outra `group`.
+
+**2. A lista de itens** (`list` no manifesto; na frota, `fleet.list`): a tela
+de todo plugin que gerencia "coisas".
+
+| Campo | O que faz |
+|---|---|
+| `title`, `itemName`, `icon` | "Pacotes", "pacote" (o botão vira "Adicionar pacote"), ícone `mdi-*` |
+| `layout` | `cards` (poucos itens com estado: redes, túneis) ou `table` (muitos: pacotes, regras; com seleção) |
+| `source` | equipamento: a ação de leitura que dá a lista (`output: table`, ou `report` + `field`). Na frota fica vazio: é a `statusAction` |
+| `field`, `key` | onde está a lista na saída (`networks`) e o campo que identifica o item (`ssid`) |
+| `subtitle`, `state`, `detail` | campos do cartão abaixo do nome; o estado (vira a cor); o número somado (ex.: `clients`) |
+| `columns` | colunas da tabela `[{ key, label }]`, na ordem |
+| `searchParam`, `toolbar` | busca (parâmetro da ação de lista); botões da barra (ações sem parâmetro obrigatório) |
+| `add` | ação do botão "Adicionar …" |
+| `edit`, `remove`, `rowActions` | botões do item: `{ action, label?, icon?, params: { param: campo_do_item }, showWhen?, hideWhen? }`. `edit` abre ao clicar no item, com o formulário preenchido |
+
+No equipamento os botões citam ações do plugin; na frota, ações de frota. O
+formato antigo (`panel`, `fleet.matrix`) ainda é lido, mas escreva `list`.
+
+**3. A saída** (por ação, e por ação de frota para o consolidado):
+
+- `labels`: título de cada chave (`{ "rx_bytes": "Recebido" }`). Chave da saída
+  continua em inglês/snake_case — é o contrato com os testes;
+- `formats`: como escrever o valor — `bytes`, `bps`, `latency` (ms), `percent`,
+  `duration` (ms), `uptime` (segundos), `datetime`, `relative`, `count`,
+  `state` (selo colorido);
+- `_card`: `[#{ label, value }]` na ação de estado = linhas de resumo (cartão do
+  equipamento na frota, cartões no topo do relatório). Chave começando com `_`
+  é dado para a tela e não aparece como coluna.
+
+**Sugestões de usabilidade.** `save_plugin_draft` e `run_plugin_tests` devolvem
+`usability`: o que funciona mas fica ruim de usar (campos demais à vista,
+`enum` sem `enumTitles`, título técnico, senha sem `secret`, IP sem
+`widget`, escrita de frota sem `preview`, chave técnica sem `labels`). Não
+reprovam — mas corrija e rode de novo até a lista sair vazia. Os plugins
+embutidos saem sem nenhuma; o operador vê a mesma lista na aba **Prévia** do
+editor, com a tela desenhada a partir das saídas dos seus testes.
+
+### Galeria de padrões
+
+Copie o padrão mais próximo em vez de inventar.
+
+**Formulário com seções e campo condicional** (configurar a LAN):
 
 ```json
-"panel": {
-  "title": "Gerenciador de pacotes", "icon": "mdi-package-variant-closed",
-  "listAction": "list_packages", "searchParam": "query", "keyColumn": "name",
+"params": { "type": "object",
+  "properties": {
+    "address":  { "type": "string", "title": "Endereço do roteador", "widget": "ip", "group": "Rede" },
+    "netmask":  { "type": "string", "title": "Rede", "widget": "cidr", "group": "Rede" },
+    "dhcp":     { "type": "boolean", "title": "Distribuir endereços (DHCP)", "default": true, "group": "DHCP" },
+    "dhcp_start": { "type": "integer", "title": "Primeiro endereço", "minimum": 2, "maximum": 254,
+                    "default": 100, "group": "DHCP", "visibleWhen": { "field": "dhcp", "equals": true } },
+    "dns":      { "type": "array", "items": { "type": "string" }, "title": "Servidores DNS",
+                  "widget": "tags", "advanced": true }
+  },
+  "required": ["address", "netmask"],
+  "order": ["address", "netmask", "dhcp", "dhcp_start", "dns"] }
+```
+
+**Lista em tabela com ações por item** (gerenciador de pacotes):
+
+```json
+"list": { "title": "Pacotes", "itemName": "pacote", "icon": "mdi-package-variant-closed",
+  "layout": "table", "source": "list_packages", "key": "name", "searchParam": "query",
+  "columns": [ { "key": "name", "label": "Pacote" }, { "key": "version", "label": "Versão" } ],
   "toolbar": ["update_index"],
   "rowActions": [
-    { "action": "install_package", "label": "Instalar pacote", "icon": "mdi-download",
-      "params": { "name": "name" }, "hideWhen": "installed" }
-  ]
+    { "action": "install_package", "label": "Instalar", "icon": "mdi-download",
+      "params": { "name": "name" }, "hideWhen": "installed" },
+    { "action": "remove_package", "label": "Remover", "icon": "mdi-delete-outline",
+      "params": { "name": "name" }, "showWhen": "installed" } ] }
+```
+
+**Frota com itens em cartões** (redes de vários roteadores) — ver a seção de
+frota abaixo: `fleet.list` com `layout: cards`, `subtitle`, `state`, `add`,
+`edit` e `remove`, e cada escrita com `preview`.
+
+**Estado em cartões** (a ação de estado de um servidor):
+
+```rhai
+fn status(device, params) {
+    let up = parse_int(device.run("cut -d. -f1 /proc/uptime"));
+    #{ uptime_seconds: up, load_1m: "0.10",
+       "_card": [ #{ label: "Ligado há", value: (up / 3600).to_string() + " h" } ] }
 }
 ```
 
-- `listAction`: só pode exigir o parâmetro de busca (`searchParam`).
-- `toolbar`: ações sem parâmetro obrigatório.
-- `rowActions[].params`: parâmetro da ação → coluna da linha; todo parâmetro
-  obrigatório precisa vir da linha. `showWhen`/`hideWhen`: coluna booleana.
+```json
+{ "id": "status", "title": "Estado", "effect": "read", "output": "report",
+  "labels":  { "uptime_seconds": "Ligado há", "load_1m": "Carga (1 min)" },
+  "formats": { "uptime_seconds": "uptime" } }
+```
 
 ## Reaproveitar outro plugin (`uses`)
 
@@ -296,35 +389,36 @@ cada um continua no cadastro do dispositivo.
 "surfaces": ["device", "fleet"],
 "fleet": {
   "title": "Rede Wi-Fi", "icon": "mdi-wifi-cog", "statusAction": "status",
-  "matrix": { "field": "networks", "key": "ssid", "state": "state", "detail": "clients",
-              "edit":   { "action": "network", "params": { "ssid": "ssid", "original_ssid": "ssid" } },
-              "remove": { "action": "remove_network", "params": { "ssid": "ssid" } } },
+  "list": { "title": "Redes", "itemName": "rede", "icon": "mdi-wifi", "layout": "cards",
+            "field": "networks", "key": "ssid", "state": "state", "detail": "clients",
+            "subtitle": ["security", "bands"], "add": "network",
+            "edit":   { "action": "network", "params": { "ssid": "ssid", "original_ssid": "ssid" } },
+            "remove": { "action": "remove_network", "params": { "ssid": "ssid" } } },
   "actions": [
-    { "id": "network", "title": "Adicionar ou alterar rede", "action": "set_network",
+    { "id": "network", "title": "Rede", "action": "set_network",
       "preview": "preview_network" },
     { "id": "remove_network", "title": "Remover rede", "action": "remove_network",
       "preview": "preview_remove" },
-    { "id": "plan_channels", "title": "Planejar canais", "action": "scan", "reduce": "plan_channels" }
-  ]
+    { "id": "plan_channels", "title": "Otimizar canais", "action": "scan", "reduce": "plan_channels",
+      "description": "Escuta os vizinhos e sugere o canal com menos interferência para cada roteador." }
+  ],
+  "deviceAction": "radios",
+  "tools": ["plan_channels"]
 }
 ```
 
 - **Prefira o equipamento como fonte da verdade** (é o modelo do
   `openwrt-wifi`): a ação de estado lê o que ele tem; cada mudança é uma ação
   com parâmetros que parte do estado atual, muda só o pedido e deixa o resto
-  como está. A grade `matrix` cruza equipamentos × itens; `edit`/`remove`
-  abrem a ação de frota com o formulário preenchido pelo item (parâmetro →
-  campo) e só os equipamentos que o têm marcados.
-- **Tela fácil**: no parâmetro, `"enumTitles": [...]` dá nome a cada opção do
-  `enum` (mesma ordem — ex.: `"psk2"` → "WPA2 (aparelhos antigos)");
-  `"advanced": true` manda o campo para "Opções avançadas"; `"hidden": true`
-  o tira da tela (o valor ainda vai). Na frota, `matrix.title/itemName/icon/
-  subtitle/add` fazem a aba de cartões (ex.: "Redes", "Nova rede"),
-  `deviceAction` é o que abre ao clicar num equipamento, `tools` é a aba
-  "Avançado" (com `description` em linguagem simples), e `_card` na saída da
-  ação de estado (`[#{ label, value }]`) são as linhas do cartão do
-  equipamento. Escreva `changes[].detail` em palavras ("segurança", "canal
-  6"), não nomes de opção.
+  como está. A `fleet.list` junta os itens de todos os equipamentos (um cartão
+  por item, com quem o tem); `edit`/`remove` abrem a ação de frota com o
+  formulário preenchido pelo item (parâmetro → campo) e só os equipamentos que
+  o têm marcados.
+- **A página**: `fleet.list` é a aba de itens, `deviceAction` é o que abre ao
+  clicar num equipamento, `tools` é a aba "Avançado" (cada ferramenta com
+  `description` em linguagem simples) e `_card` na saída da ação de estado
+  são as linhas do cartão do equipamento (ver "A tela"). Escreva
+  `changes[].detail` em palavras ("segurança", "canal 6"), não nomes de opção.
 - **Formulário a partir do equipamento**: no parâmetro, `"source":
   "networks.ssid"` oferece os valores da ação de estado (lista `networks`,
   chave `ssid`); na ação de frota, `"current": "_current.radios"` aponta os
@@ -373,3 +467,6 @@ cada um continua no cadastro do dispositivo.
 - [ ] Aplicativo de frota: cada escrita com `preview`, cópia, conferência pelo
       mesmo plano e volta atrás; muda só o pedido; senha do equipamento não sai
       dele; senha nova com `secret: true`.
+- [ ] Tela: títulos em palavras, `enumTitles` nas opções, `widget` nos campos de
+      rede, até 5 campos à vista por seção, `labels`/`formats` na saída, `list`
+      com `title` e `itemName` — e `usability` vazio no relatório.

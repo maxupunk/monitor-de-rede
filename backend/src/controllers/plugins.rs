@@ -16,8 +16,8 @@ use crate::{
         optional_body,
         plugins::{
             ApprovalInput, AutoAcceptInput, AutoAcceptQuery, BatchStarted, FleetIdentifyInput,
-            FleetRunInput, PluginSaveInput, ReviewAcceptInput, RunActionInput, RunStarted,
-            SessionSecretInput, SettingsInput,
+            FleetRunInput, PluginPreviewInput, PluginSaveInput, ReviewAcceptInput, RunActionInput,
+            RunStarted, SessionSecretInput, SettingsInput,
         },
     },
     models::plugins as plugin_rows,
@@ -219,6 +219,16 @@ async fn accept_review(
 async fn test(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
     let (_, report) = service::run_tests(&ctx.db, id).await?;
     Ok(format::json(report)?)
+}
+
+/// A tela simulada do editor: os testes do pacote que está na tela, sem gravar.
+async fn preview(
+    State(ctx): State<AppContext>,
+    Json(input): Json<PluginPreviewInput>,
+) -> AppResult<Response> {
+    Ok(format::json(
+        service::preview(&ctx.db, &input.package).await?,
+    )?)
 }
 
 async fn promote(
@@ -672,6 +682,7 @@ pub fn routes() -> Routes {
         .add("/plugin-batches/{id}/cancel", post(batch_cancel))
         .add("/plugin-batches/{id}/apply-patch", post(batch_apply_patch))
         .add("/plugins/import", post(import))
+        .add("/plugins/preview", post(preview))
         .add("/plugins/{id}", get(show).put(update).delete(destroy))
         .add("/plugins/{id}/export", get(export))
         .add("/plugins/{id}/review", post(review))

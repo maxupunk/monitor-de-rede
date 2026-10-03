@@ -3,6 +3,9 @@ import type { PanelColumn } from "./PanelColumn";
 import type { PanelRowAction } from "./PanelRowAction";
 
 /**
+ * Formato antigo da tela do plugin instalado — hoje uma [`ItemList`] em
+ * tabela (ver [`item_list`]). Continua aceito e é convertido na leitura.
+ *
  * A tela própria do plugin instalado: uma lista vinda de uma ação de leitura
  * (com busca opcional), ações sobre a linha escolhida e botões de barra.
  *

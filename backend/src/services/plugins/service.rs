@@ -27,7 +27,7 @@ use super::{
     testing::{self, TestReport},
 };
 use crate::{
-    dtos::plugins::{DevicePluginItem, PluginDetail, PluginSummary},
+    dtos::plugins::{DevicePluginItem, PluginDetail, PluginPreview, PluginSummary},
     models::{device_plugin_installs, devices, plugins},
     services::shared::errors::{AppError, AppResult},
 };
@@ -87,6 +87,7 @@ pub fn summary(model: &plugins::Model) -> AppResult<PluginSummary> {
         serde_json::from_value(model.manifest.clone()).map_err(internal)?;
     let compatibility: Vec<CompatEntry> =
         serde_json::from_value(model.compatibility.clone()).unwrap_or_default();
+    let list = manifest.item_list();
     Ok(PluginSummary {
         id: model.id,
         slug: model.slug.clone(),
@@ -100,10 +101,10 @@ pub fn summary(model: &plugins::Model) -> AppResult<PluginSummary> {
         transports: manifest.transports,
         actions: manifest.actions,
         matcher: manifest.matcher,
-        panel: manifest.panel,
+        list,
         surfaces: manifest.surfaces,
         settings: manifest.settings,
-        fleet: manifest.fleet,
+        fleet: manifest.fleet.map(manifest::FleetSpec::resolved),
         risk: review_of(model).map(|report| report.risk),
         last_test_at: model.last_test_at.map(|at| at.to_rfc3339()),
         last_test_ok: model.last_test_ok,
@@ -485,6 +486,29 @@ pub async fn run_tests<C: ConnectionTrait>(
         active.status = Set(status::DRAFT.to_owned());
     }
     Ok((active.update(db).await?, report))
+}
+
+/// A prévia do editor: roda os testes unitários de um pacote **sem gravar
+/// nada** — nem o plugin, nem o resultado, nem o status. As saídas dos testes
+/// alimentam a tela simulada; as sugestões de usabilidade vêm junto.
+///
+/// # Errors
+///
+/// Plugin citado em `uses` que não está instalado.
+pub async fn preview<C: ConnectionTrait>(
+    db: &C,
+    package: &PluginPackage,
+) -> AppResult<PluginPreview> {
+    let library = super::runs::load_library(db, &package.manifest.uses).await?;
+    Ok(PluginPreview {
+        report: testing::run_unit_tests_with(package, &library).await,
+        list: package.manifest.item_list(),
+        fleet_list: package
+            .manifest
+            .fleet
+            .as_ref()
+            .and_then(manifest::FleetSpec::item_list),
+    })
 }
 
 /// `tested` → `active`.
@@ -988,10 +1012,7 @@ mod tests {
             .find(|item| item.plugin.id == pacotes.id)
             .unwrap();
         assert!(item.installed);
-        assert!(
-            item.plugin.panel.is_some(),
-            "o gerenciador tem tela própria"
-        );
+        assert!(item.plugin.list.is_some(), "o gerenciador tem tela própria");
 
         uninstall(&db, device.id, pacotes.id).await.unwrap();
         assert!(!is_installed(&db, device.id, pacotes.id).await.unwrap());

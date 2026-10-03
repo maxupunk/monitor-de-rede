@@ -94,6 +94,7 @@ fn resolve_action(manifest: &PluginManifest, id: &str) -> Option<FleetAction> {
             action: id.to_owned(),
             reduce: None,
             labels: None,
+            formats: None,
             preview: None,
             current: None,
         });
@@ -108,6 +109,7 @@ fn resolve_action(manifest: &PluginManifest, id: &str) -> Option<FleetAction> {
         action: id.to_owned(),
         reduce: None,
         labels: None,
+        formats: None,
         preview: None,
         current: None,
     })

@@ -1,146 +1,89 @@
 <template>
-  <div>
-    <div class="d-flex align-center flex-wrap ga-2 mb-4">
-      <v-icon color="primary">{{ matrix.icon ?? 'mdi-format-list-bulleted' }}</v-icon>
-      <span class="text-h6 font-weight-bold">{{ matrix.title ?? 'Itens' }}</span>
-      <v-chip size="small" color="primary" variant="tonal">{{ rows.length }}</v-chip>
-      <v-spacer></v-spacer>
-      <v-btn
-        v-if="canWrite && matrix.add"
-        color="primary"
-        variant="flat"
-        prepend-icon="mdi-plus"
-        @click="emit('add')"
-      >
-        {{ addLabel }}
-      </v-btn>
-    </div>
-
-    <v-alert v-if="!statusBatch" :type="reading ? 'info' : 'warning'" variant="tonal" class="mb-4">
-      {{ reading ? 'Lendo os equipamentos…' : 'Ainda não há leitura dos equipamentos.' }}
-      <template v-if="!reading && canWrite" #append>
-        <v-btn color="primary" variant="flat" prepend-icon="mdi-refresh" @click="emit('refresh')">
-          Ler agora
-        </v-btn>
+  <PluginItemList
+    :list="list"
+    :rows="rows"
+    :actions="actionInfo"
+    :can-write="canWrite"
+    :loading="reading"
+    :members="view.members.length"
+    :presentation="statusAction"
+    @add="emit('add')"
+    @edit="(row) => emit('edit', row)"
+    @remove="(row) => emit('remove', row)"
+    @action="(target, row) => emit('action', target, row)"
+    @toolbar="(id) => emit('toolbar', id)"
+  >
+    <template #status>
+      <v-alert v-if="!statusBatch && !reading" type="warning" variant="tonal" class="mb-4">
+        Ainda não há leitura dos equipamentos.
+        <template v-if="canWrite" #append>
+          <v-btn color="primary" variant="flat" prepend-icon="mdi-refresh" @click="emit('refresh')">
+            Ler agora
+          </v-btn>
+        </template>
+      </v-alert>
+    </template>
+    <template #empty>
+      <v-alert v-if="statusBatch && answered === 0" type="warning" variant="tonal">
+        Nenhum equipamento respondeu à última leitura — veja o motivo na aba Equipamentos.
+      </v-alert>
+      <template v-else-if="statusBatch">
+        {{ (list.title ?? 'Lista') + ': nada nos equipamentos ainda.' }}
       </template>
-    </v-alert>
-    <v-alert v-else-if="rows.length === 0" type="info" variant="tonal" class="mb-4">
-      Nenhuma {{ itemName }} nos equipamentos ainda.
-    </v-alert>
-
-    <v-row dense>
-      <v-col v-for="row in rows" :key="row.key" cols="12" md="6" xl="4">
-        <v-card
-          border
-          flat
-          class="rounded-lg h-100"
-          :link="canEdit"
-          @click="canEdit && emit('edit', row)"
-        >
-          <v-card-item>
-            <template #prepend>
-              <v-avatar :color="row.active ? 'primary' : 'secondary'" variant="tonal" rounded="lg">
-                <v-icon>{{ matrix.icon ?? 'mdi-circle-outline' }}</v-icon>
-              </v-avatar>
-            </template>
-            <v-card-title class="font-weight-bold">{{ row.key }}</v-card-title>
-            <v-card-subtitle>{{ row.subtitle }}</v-card-subtitle>
-            <template v-if="canWrite && (matrix.edit || matrix.remove)" #append>
-              <v-menu>
-                <template #activator="{ props: menu }">
-                  <v-btn
-                    v-bind="menu"
-                    icon="mdi-dots-vertical"
-                    size="small"
-                    variant="text"
-                    color="primary"
-                    :aria-label="`Opções de ${row.key}`"
-                    @click.stop
-                  />
-                </template>
-                <v-list density="compact">
-                  <v-list-item
-                    v-if="matrix.edit"
-                    prepend-icon="mdi-pencil-outline"
-                    title="Editar"
-                    @click="emit('edit', row)"
-                  ></v-list-item>
-                  <v-list-item
-                    v-if="matrix.remove"
-                    prepend-icon="mdi-delete-outline"
-                    base-color="error"
-                    title="Remover"
-                    @click="emit('remove', row)"
-                  ></v-list-item>
-                </v-list>
-              </v-menu>
-            </template>
-          </v-card-item>
-          <v-card-text class="pt-0">
-            <div class="d-flex flex-wrap ga-1 mb-2">
-              <v-chip
-                v-for="entry in row.entries"
-                :key="entry.deviceId"
-                size="small"
-                :color="stateColor(entry.state)"
-                variant="tonal"
-                prepend-icon="mdi-router-wireless"
-              >
-                {{ entry.name }}
-              </v-chip>
-            </div>
-            <div class="text-body-2">
-              Em {{ row.entries.length }} de {{ members }} equipamento(s)
-              <template v-if="row.detailTotal !== null">
-                · {{ row.detailTotal }} {{ detailLabel.toLowerCase() }}
-              </template>
-            </div>
-          </v-card-text>
-        </v-card>
-      </v-col>
-    </v-row>
-  </div>
+    </template>
+  </PluginItemList>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { FleetMatrix } from '@/bindings/FleetMatrix'
 import type { FleetView } from '@/bindings/FleetView'
+import type { ItemAction } from '@/bindings/ItemAction'
+import type { ItemList } from '@/bindings/ItemList'
+import PluginItemList from '@/components/plugins/items/PluginItemList.vue'
 import { usePluginAppsStore } from '@/stores/pluginApps'
-import { itemRows, outputsByDevice, type ItemRow } from '@/utils/fleetContext'
-import { outputLabel, stateColor } from '@/utils/pluginPresentation'
+import { outputsByDevice } from '@/utils/fleetContext'
+import { fleetRows, type ItemRow, type ListActionInfo } from '@/utils/itemList'
 
 /**
- * Os itens que os equipamentos têm (ex.: as redes Wi-Fi), um cartão cada:
- * nome, o que importa, em quais equipamentos está. Clique edita.
+ * Os itens que os equipamentos têm (ex.: as redes Wi-Fi), lidos da última
+ * execução da ação de estado: cada item uma vez, com os equipamentos que o
+ * têm. Os botões citam ações de frota; quem as abre é a página.
  */
-const props = defineProps<{ view: FleetView; matrix: FleetMatrix; canWrite: boolean }>()
+const props = defineProps<{ view: FleetView; list: ItemList; canWrite: boolean }>()
 const emit = defineEmits<{
   add: []
   edit: [row: ItemRow]
   remove: [row: ItemRow]
+  action: [target: ItemAction, row: ItemRow]
+  toolbar: [fleetActionId: string]
   refresh: []
 }>()
 
 const store = usePluginAppsStore()
-const statusAction = computed(() => props.view.plugin.fleet?.statusAction ?? null)
+const statusActionId = computed(() => props.view.plugin.fleet?.statusAction ?? null)
+const statusAction = computed(
+  () => props.view.plugin.actions.find((action) => action.id === statusActionId.value) ?? null
+)
 const statusBatch = computed(() =>
-  statusAction.value ? store.latestBatch(props.view.plugin.id, statusAction.value) : null
+  statusActionId.value ? store.latestBatch(props.view.plugin.id, statusActionId.value) : null
 )
 const reading = computed(() =>
   props.view.batches.some(
-    (batch) => batch.action === statusAction.value && batch.status === 'running'
+    (batch) => batch.action === statusActionId.value && batch.status === 'running'
   )
 )
-const rows = computed(() =>
-  itemRows(outputsByDevice(statusBatch.value), props.matrix, props.view.members)
+const outputs = computed(() => outputsByDevice(statusBatch.value))
+/** Quantos equipamentos responderam à leitura (sem nenhum, a lista vazia não diz nada). */
+const answered = computed(() => outputs.value.size)
+const rows = computed(() => fleetRows(outputs.value, props.list, props.view.members))
+/** Cada ação de frota com o efeito da ação que ela roda nos equipamentos. */
+const actionInfo = computed<ListActionInfo[]>(() =>
+  (props.view.plugin.fleet?.actions ?? []).map((action) => ({
+    id: action.id,
+    title: action.title,
+    icon: action.icon,
+    effect:
+      props.view.plugin.actions.find((device) => device.id === action.action)?.effect ?? 'read',
+  }))
 )
-const members = computed(() => props.view.members.length)
-const itemName = computed(() => props.matrix.itemName ?? 'item')
-const addLabel = computed(() => 'Nova ' + itemName.value)
-const canEdit = computed(() => props.canWrite && Boolean(props.matrix.edit))
-const detailLabel = computed(() => {
-  const status = props.view.plugin.actions.find((action) => action.id === statusAction.value)
-  return outputLabel(props.matrix.detail ?? '', status?.labels)
-})
 </script>

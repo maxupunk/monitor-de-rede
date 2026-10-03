@@ -8,8 +8,8 @@ status, alterar um SSID. Decisão de arquitetura: [ADR 012](adr/012-plugins-de-d
 
 - **Uma aba por plugin instalado** em `/devices/{id}`, depois das abas nativas
   (separada por um divisor e destacada em `secondary` quando selecionada): a
-  tela do plugin (ver "Tela própria") ou a lista de ações, mais validação,
-  código, exportação e "Desinstalar". O título e o ícone vêm do `panel`; o
+  tela do plugin (ver "A tela do plugin") ou a lista de ações, mais validação,
+  código, exportação e "Desinstalar". O título e o ícone vêm da `list`; o
   `?tab=plugin-<id>` abre direto nela.
 - **Aba Plugins** só para gerenciar: **Catálogo** (instalar — não toca o
   equipamento, é escolha de cadastro em `device_plugin_installs`; exclusivo já
@@ -82,21 +82,54 @@ criado / IA ──────────────────────�
   os de frota de uma vez. Na atualização, embutido que nenhum equipamento usa
   passa a desligado; o que já está instalado em algum continua ligado.
 
-## Tela própria (`panel`)
+## A tela do plugin: catálogo de componentes
 
-O manifesto pode declarar a tela do plugin instalado — nenhum código do plugin
-roda no navegador:
+O plugin **não traz tela**: ele declara o que cada coisa é e a interface a
+desenha com os componentes do sistema — as mesmas cores, formatadores e
+contraste do resto do produto. Nenhum código do plugin roda no navegador. É um
+catálogo fechado de propósito: quem escreve o plugin (a IA, inclusive) só
+escolhe e configura peças, e o resultado sai igual ao do resto do sistema.
 
-- `listAction`: ação de leitura com `output: table` que preenche a lista;
-  `searchParam`, o parâmetro dela que recebe a busca; `keyColumn`, a coluna que
-  identifica a linha;
-- `toolbar`: ações sem parâmetro, como botões ("Atualizar lista de pacotes");
-- `rowActions`: ações sobre a linha escolhida, com o mapa parâmetro → coluna e
-  `showWhen`/`hideWhen` por coluna booleana ("Instalar" some se `installed`).
+- **Campos** (esquema de `params` e `settings`): `title`, `enumTitles` (nome
+  de cada opção), `widget` (`ip`, `cidr`, `mac`, `hostname`, `url`,
+  `textarea`, `port`, `slider`, `tags` — cada um com a própria validação, na
+  tela e no backend), `group` (seções), `visibleWhen` (`{ field, equals | in |
+  notIn }`: o campo some, deixa de ser obrigatório e não vai para o script —
+  a senha de uma rede aberta), `advanced`, `hidden`, `secret`, `source`.
+- **A lista de itens** (`list`; na frota, `fleet.list`): um componente só para
+  a aba do equipamento e para a página da frota, em `cards` (poucos itens com
+  estado) ou `table` (muitos, com busca e seleção). Declara título e nome do
+  item ("Adicionar pacote"), de onde vêm os itens (`source` no equipamento; a
+  `statusAction` na frota, com `field`), `key`, `subtitle`, `state`,
+  `detail`, `columns`, `searchParam`, `toolbar`, `add` e os botões do item
+  (`edit`, `remove`, `rowActions`, com o mapa parâmetro → campo e
+  `showWhen`/`hideWhen`). O formato antigo (`panel`, `fleet.matrix`) continua
+  aceito e é convertido na leitura — o JSON gravado não muda, então o checksum
+  de quem já instalou também não.
+- **A saída**: `labels` (título de cada chave), `formats` (`bytes`, `bps`,
+  `latency`, `percent`, `duration`, `uptime`, `datetime`, `relative`, `count`,
+  `state` — escritos com os formatadores do sistema) e `_card` (linhas de
+  resumo: cartão do equipamento na frota, cartões no topo do relatório).
 
-A lista carrega sozinha ao abrir quando o plugin está ativo; o resultado e a
-resposta de cada ação chegam pelo SSE. Ação de linha que termina bem recarrega
-a lista uma vez.
+Na aba do equipamento a lista carrega sozinha ao abrir quando o plugin está
+ativo; o resultado e a resposta de cada ação chegam pelo SSE. Ação de item que
+termina bem recarrega a lista uma vez.
+
+**Sugestões de usabilidade.** Além do que a validação recusa, os testes
+devolvem o que funciona mas fica ruim de usar: campos demais à vista (mais de
+5 por seção), `enum` sem `enumTitles`, título técnico, senha sem `secret`,
+campo de IP/porta sem `widget`, escrita de frota sem `preview`, chave técnica
+sem `labels`, lista sem `title`/`itemName`. Não reprovam. A IA as recebe ao
+salvar e testar e corrige sozinha; os plugins embutidos saem sem nenhuma (é
+teste).
+
+**Prévia no editor.** A aba **Prévia** do editor de plugins desenha a tela com
+os componentes de verdade a partir das saídas dos testes unitários (as
+respostas gravadas): a lista do equipamento e a da frota (cada teste da ação
+de estado vira um equipamento de exemplo), cada formulário — interativo, com
+"O que o script recebe" — e os resultados. Roda sobre o que está no editor,
+sem salvar (`POST /api/plugins/preview`) e sem tocar equipamento; vale também
+para os embutidos.
 
 ## Gerenciador de pacotes (OpenWrt)
 
@@ -146,9 +179,9 @@ O manifesto diz onde o plugin aparece (`surfaces`):
 - **A página do aplicativo**, no jeito dos sistemas de Wi-Fi mais fáceis
   (UniFi, Omada, eero): um resumo no topo (equipamentos, itens, clientes, "lido
   há…", **Atualizar**) e abas pelo que o operador gerencia, não pelas ações:
-  - **itens** (`matrix`: `title`, `itemName`, `icon`, `subtitle`, `add`): um
-    cartão por item que os equipamentos têm (ex.: cada rede — nome, segurança,
-    bandas, em quais roteadores, clientes). **Nova …** abre `add`; o clique abre
+  - **itens** (`fleet.list`): um cartão por item que os equipamentos têm (ex.:
+    cada rede — nome, segurança, bandas, em quais roteadores, clientes).
+    **Adicionar …** abre `add`; o clique abre
     `edit` com o formulário preenchido pelo item (mapa parâmetro → campo) e só
     os equipamentos que o têm marcados; o menu tem **Remover** (`remove`);
   - **Equipamentos**: um cartão por equipamento com o estado e as linhas de
@@ -157,9 +190,9 @@ O manifesto diz onde o plugin aparece (`surfaces`):
   - **Avançado** (`tools`): as ações de fora do dia a dia, cada uma em um
     cartão com a explicação;
   - **Histórico** e **Como usar**.
-- **Toda ação é um fluxo em passos**: o formulário (só o essencial à vista;
-  campo `advanced` em "Opções avançadas", `hidden` fora da tela, `enumTitles`
-  dá nome às opções, senha com "mostrar") e **Em quais equipamentos**; com
+- **Toda ação é um fluxo em passos**: o formulário (só o essencial à vista,
+  em seções, com os componentes do catálogo — ver "A tela do plugin"; senha
+  com "mostrar") e **Em quais equipamentos**; com
   `preview`, **Revisar mudanças** mostra o que muda em cada equipamento e só
   **Aplicar agora** altera — a revisão é a confirmação; depois, o andamento e
   "Pronto!". Uma escrita relê os equipamentos sozinha ao terminar.
@@ -171,7 +204,8 @@ O manifesto diz onde o plugin aparece (`surfaces`):
   minutos, e o diálogo tem **Ler de novo**):
   - parâmetro com `"source": "lista.chave"` (`"networks.ssid"`) vira uma lista
     com os valores dos equipamentos; escolher um preenche o formulário pelo
-    mapa de `matrix.edit`/`remove` e marca só os equipamentos que o têm;
+    mapa do botão do item (`edit`, `remove`) e marca só os equipamentos que o
+    têm;
   - ação de frota com `"current": "_current.radios"` mostra **Como está agora**
     (cada equipamento, nas colunas do formulário); com um equipamento só
     marcado, o formulário vem com os valores dele, e só com os campos que os
@@ -206,7 +240,8 @@ a visão geral lê as redes de cada roteador e cada ação parte do que ele tem 
 hora — mudança feita à mão aparece na próxima leitura.
 
 - **Redes**: um cartão por rede (nome, segurança, bandas, em quais roteadores,
-  clientes). **Nova rede** pede nome, senha, segurança e bandas; o resto
+  clientes). **Adicionar rede** pede nome, senha (que some quando a rede é
+  aberta), segurança e bandas; o resto
   (6 GHz, roaming, rede oculta, isolamento, interface) fica em "Opções
   avançadas". Clicar numa rede edita — trocar o nome renomeia — e o menu dela
   remove. Vale para qualquer rede do roteador, inclusive as criadas à mão;

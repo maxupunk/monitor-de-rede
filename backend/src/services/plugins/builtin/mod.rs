@@ -58,6 +58,7 @@ mod tests {
 
     #[tokio::test]
     async fn todo_embutido_valida_e_passa_nos_proprios_testes() {
+        let mut hints = Vec::new();
         for package in packages() {
             assert!(
                 package::validate(&package).is_empty(),
@@ -67,7 +68,22 @@ mod tests {
             );
             let report = testing::run_unit_tests(&package).await;
             assert!(report.passed, "{}: {report:#?}", package.manifest.slug);
+            hints.extend(
+                report
+                    .hints
+                    .iter()
+                    .map(|hint| format!("{} {}: {}", package.manifest.slug, hint.at, hint.message)),
+            );
         }
+        // Os embutidos são o exemplo que a IA copia: tela sem sugestão.
+        assert!(
+            hints.is_empty(),
+            "{}",
+            hints.join(
+                "
+"
+            )
+        );
     }
 
     #[test]

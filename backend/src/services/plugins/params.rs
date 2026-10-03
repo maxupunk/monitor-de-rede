@@ -14,6 +14,10 @@
 //!   ganham um `id` estável, gerado pelo sistema — é por ele que uma senha
 //!   mantida ("********") volta ao item certo.
 //!
+//! A apresentação também é declarada aqui: `enumTitles`, `advanced`, `hidden`,
+//! `group`, o componente do campo (`widget`: IP, MAC, porta…) e `visibleWhen`
+//! — ver [`super::widgets`].
+//!
 //! Esquema que usa algo fora disso é recusado na validação do manifesto, e não
 //! ignorado: um `format` silenciosamente ignorado seria uma validação que o
 //! autor acha que existe.
@@ -23,6 +27,8 @@
 
 use regex::Regex;
 use serde_json::{Map, Value};
+
+use super::widgets::{self, VisibleWhen, Widget};
 
 const SCALAR_TYPES: &[&str] = &["string", "integer", "number", "boolean"];
 const PROPERTY_KEYS: &[&str] = &[
@@ -41,6 +47,9 @@ const PROPERTY_KEYS: &[&str] = &[
     "enumTitles",
     "advanced",
     "hidden",
+    "widget",
+    "visibleWhen",
+    "group",
     "items",
     "minItems",
     "maxItems",
@@ -81,6 +90,7 @@ fn validate_object_schema(schema: &Value, path: &str, allow_arrays: bool) -> Res
         }
         validate_property_schema(&full, property, allow_arrays)?;
     }
+    widgets::validate_visibility(path, properties)?;
     // `required` e `order` (a ordem dos campos na tela — o JSON não guarda a
     // ordem das chaves, e o `jsonb` do PostgreSQL a reescreve) citam campos.
     for keyword in ["required", "order"] {
@@ -142,6 +152,8 @@ fn validate_property_schema(
             return Err(format!("`{name}`: `{flag}` é verdadeiro ou falso"));
         }
     }
+    // `widget` (o componente do campo) e `group` (a seção do formulário).
+    widgets::validate_presentation(name, property)?;
     // `source`: o campo oferece os valores que os equipamentos têm — uma lista
     // da saída da ação de estado e a chave do item (`"networks.ssid"`).
     if let Some(source) = property.get("source") {
@@ -247,6 +259,9 @@ fn validate_object(
         .map(|list| list.iter().filter_map(Value::as_str).collect())
         .unwrap_or_default();
 
+    // Campo com `visibleWhen` que não vale (a senha de uma rede aberta) não
+    // existe: nem obrigatório, nem enviado ao script.
+    let effective = widgets::effective_values(&properties, given);
     let mut output = Map::new();
     for key in given.keys() {
         if is_item && key == ITEM_ID {
@@ -263,6 +278,13 @@ fn validate_object(
     }
     for (name, property) in &properties {
         let full = join(path, name);
+        let hidden_by_rule = VisibleWhen::of(&full, property)
+            .ok()
+            .flatten()
+            .is_some_and(|rule| !rule.holds(&effective));
+        if hidden_by_rule {
+            continue;
+        }
         let value = given
             .get(name)
             .filter(|value| !value.is_null())
@@ -349,6 +371,11 @@ fn check_scalar(name: &str, property: &Value, value: &Value) -> Result<Value, St
         if !options.contains(&value) {
             return Err(format!("`{name}` não está entre as opções permitidas"));
         }
+    }
+    if let Some(widget) = Widget::of(property) {
+        widget
+            .check(&value)
+            .map_err(|problem| format!("`{name}` {problem}"))?;
     }
     if let Value::String(text) = &value {
         let length = text.chars().count() as u64;
@@ -518,6 +545,7 @@ pub fn unconstrained_strings(schema: Option<&Value>) -> Vec<String> {
                     property.get("type").and_then(Value::as_str) == Some("string")
                         && property.get("pattern").is_none()
                         && property.get("enum").is_none()
+                        && !Widget::of(property).is_some_and(Widget::constrains)
                 })
                 .map(|(name, _)| name.clone())
                 .collect()
@@ -529,6 +557,39 @@ pub fn unconstrained_strings(schema: Option<&Value>) -> Vec<String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn campo_invisivel_nao_e_obrigatorio_nem_enviado_e_o_componente_confere_o_valor() {
+        let esquema = json!({
+            "type": "object",
+            "properties": {
+                "encryption": { "type": "string", "enum": ["none", "psk2"], "default": "psk2" },
+                "key": { "type": "string", "secret": true,
+                         "visibleWhen": { "field": "encryption", "notIn": ["none"] } },
+                "gateway": { "type": "string", "widget": "ip", "group": "Rede" }
+            },
+            "required": ["key"]
+        });
+        assert!(validate_schema(&esquema).is_ok());
+
+        let erros = validate(Some(&esquema), &json!({})).unwrap_err();
+        assert_eq!(erros, vec!["`key` é obrigatório".to_string()]);
+
+        let aberta =
+            validate(Some(&esquema), &json!({ "encryption": "none", "key": "x" })).unwrap();
+        assert!(aberta.get("key").is_none(), "rede aberta não tem senha");
+
+        let erros = validate(
+            Some(&esquema),
+            &json!({ "key": "s3nha", "gateway": "10.0.0.256" }),
+        )
+        .unwrap_err();
+        assert!(erros[0].contains("endereço IP"), "{erros:?}");
+        assert!(
+            unconstrained_strings(Some(&esquema)) == vec!["key".to_string()],
+            "o IP já sai conferido pelo componente"
+        );
+    }
 
     fn schema() -> Value {
         json!({

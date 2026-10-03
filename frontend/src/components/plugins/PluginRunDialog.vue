@@ -39,7 +39,12 @@
           </v-alert>
           <template v-if="run.output !== null && run.output !== undefined">
             <div class="text-subtitle-2 font-weight-bold mb-1">Resposta do equipamento</div>
-            <PluginOutput :output="run.output" :kind="kind" :labels="labels" class="mb-4" />
+            <PluginOutput
+              :output="run.output"
+              :kind="kind"
+              :presentation="presentation"
+              class="mb-4"
+            />
           </template>
           <v-expansion-panels variant="accordion">
             <v-expansion-panel>
@@ -77,6 +82,7 @@ import type { OutputKind } from '@/bindings/OutputKind'
 import { usePluginsStore } from '@/stores/plugins'
 import { runStatusPresentation } from '@/utils/pluginPresentation'
 import PluginOutput from './PluginOutput.vue'
+import type { OutputPresentation } from '@/utils/pluginPresentation'
 import PluginTranscript from './PluginTranscript.vue'
 
 const props = defineProps<{
@@ -86,7 +92,8 @@ const props = defineProps<{
   runId: number | null
   title: string
   kind?: OutputKind
-  labels?: Record<string, string>
+  /** Títulos e formatos da saída — a própria ação. */
+  presentation?: OutputPresentation
 }>()
 
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()

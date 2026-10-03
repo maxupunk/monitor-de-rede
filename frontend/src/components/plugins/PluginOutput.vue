@@ -1,18 +1,18 @@
 <template>
   <div class="plugin-output">
-    <PluginReport v-if="kind === 'report'" :output="output" :labels="labels" />
+    <PluginReport v-if="kind === 'report'" :output="output" :presentation="presentation" />
     <v-table v-else-if="rows" density="compact" class="border rounded-lg">
       <thead>
         <tr>
           <th v-for="column in columns" :key="column" class="font-weight-bold">
-            {{ outputLabel(column, labels) }}
+            {{ outputLabel(column, presentation?.labels) }}
           </th>
         </tr>
       </thead>
       <tbody>
         <tr v-for="(row, index) in rows" :key="index">
           <td v-for="column in columns" :key="column" class="font-mono text-body-small">
-            {{ cell(row[column]) }}
+            {{ cell(column, row[column]) }}
           </td>
         </tr>
       </tbody>
@@ -22,8 +22,8 @@
       <v-list-item
         v-for="[key, value] in entries"
         :key="key"
-        :title="cell(value)"
-        :subtitle="outputLabel(key, labels)"
+        :title="cell(key, value)"
+        :subtitle="outputLabel(key, presentation?.labels)"
       ></v-list-item>
     </v-list>
 
@@ -34,14 +34,19 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { OutputKind } from '@/bindings/OutputKind'
-import { outputLabel, type OutputLabels } from '@/utils/pluginPresentation'
+import {
+  formatOutputValue,
+  outputFormat,
+  outputLabel,
+  type OutputPresentation,
+} from '@/utils/pluginPresentation'
 import PluginReport from './PluginReport.vue'
 
 const props = defineProps<{
   output: unknown
   kind?: OutputKind
-  /** Títulos das chaves declarados pela ação (`labels`). */
-  labels?: OutputLabels
+  /** Títulos e formatos das chaves — a própria ação serve. */
+  presentation?: OutputPresentation
 }>()
 
 type Row = Record<string, unknown>
@@ -76,10 +81,11 @@ const text = computed(() => {
   return JSON.stringify(value, null, 2)
 })
 
-function cell(value: unknown): string {
+function cell(key: string, value: unknown): string {
   if (value === null || value === undefined || value === '') return '—'
   if (typeof value === 'object') return JSON.stringify(value)
-  return String(value)
+  const format = outputFormat(key, props.presentation)
+  return format ? formatOutputValue(value, format) : String(value)
 }
 </script>
 

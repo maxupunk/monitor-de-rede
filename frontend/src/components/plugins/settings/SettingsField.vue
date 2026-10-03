@@ -14,6 +14,7 @@
       :model-value="list"
       :label="field.label"
       :hint="field.hint ?? 'Digite e tecle Enter para incluir'"
+      :disabled="disabled"
       persistent-hint
       multiple
       chips
@@ -49,6 +50,37 @@
       density="comfortable"
       @update:model-value="(selected) => emit('update', selected)"
     ></v-select>
+    <v-slider
+      v-else-if="field.widget === 'slider'"
+      :model-value="sliderValue"
+      :label="field.label"
+      :hint="field.hint"
+      :persistent-hint="Boolean(field.hint)"
+      :min="numberOf(field.schema.minimum, 0)"
+      :max="numberOf(field.schema.maximum, 100)"
+      :step="field.kind === 'integer' ? 1 : undefined"
+      thumb-label
+      color="primary"
+      density="comfortable"
+      @update:model-value="(next) => emit('update', next)"
+    >
+      <template #append>
+        <span class="font-weight-bold slider-value">{{ sliderValue }}</span>
+      </template>
+    </v-slider>
+    <v-textarea
+      v-else-if="field.widget === 'textarea'"
+      :model-value="value ?? ''"
+      :label="label"
+      :hint="field.hint"
+      :persistent-hint="Boolean(field.hint)"
+      :rules="field.rules"
+      rows="3"
+      auto-grow
+      variant="outlined"
+      density="comfortable"
+      @update:model-value="(text) => emit('update', text)"
+    ></v-textarea>
     <v-combobox
       v-else-if="suggestions"
       :model-value="String(value ?? '')"
@@ -69,6 +101,8 @@
       :persistent-hint="Boolean(hint)"
       :rules="field.rules"
       :type="inputType"
+      :placeholder="widgetPlaceholder(field.widget)"
+      :prepend-inner-icon="widgetIcon(field.widget)"
       :autocomplete="field.secret ? 'new-password' : 'off'"
       :append-inner-icon="field.secret ? (revealed ? 'mdi-eye-off' : 'mdi-eye') : undefined"
       variant="outlined"
@@ -82,6 +116,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { SECRET_MASK, optionsOf, type SchemaField } from '@/utils/pluginSettings'
+import { widgetIcon, widgetPlaceholder } from '@/utils/pluginWidgets'
 import SettingsListEditor from './SettingsListEditor.vue'
 
 /** Um campo do formulário gerado do esquema. */
@@ -97,6 +132,21 @@ const props = defineProps<{
 const emit = defineEmits<{ update: [value: unknown] }>()
 
 const revealed = ref(false)
+
+function numberOf(value: unknown, fallback: number): number {
+  return typeof value === 'number' ? value : fallback
+}
+
+/** Valor do controle deslizante: o do formulário ou, vazio, o mínimo. */
+const sliderValue = computed(() => {
+  const current = Number(props.value)
+  return props.value === '' ||
+    props.value === null ||
+    props.value === undefined ||
+    Number.isNaN(current)
+    ? numberOf(props.field.schema.default, numberOf(props.field.schema.minimum, 0))
+    : current
+})
 const list = computed(() => (Array.isArray(props.value) ? props.value : []))
 const label = computed(() => props.field.label + (props.field.required ? ' *' : ''))
 const inputType = computed(() => {
@@ -116,3 +166,10 @@ const hint = computed(() => {
   return props.field.hint
 })
 </script>
+
+<style scoped>
+.slider-value {
+  min-width: 2.5rem;
+  text-align: right;
+}
+</style>

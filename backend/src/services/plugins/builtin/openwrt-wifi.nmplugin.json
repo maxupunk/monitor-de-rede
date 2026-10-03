@@ -3,7 +3,7 @@
   "manifest": {
     "slug": "openwrt-wifi",
     "name": "Rede Wi-Fi (OpenWrt)",
-    "version": "2.2.0",
+    "version": "2.3.0",
     "description": "SSIDs, roaming 802.11r/k/v, mesh 802.11s e canais de vários roteadores OpenWrt, lidos e alterados direto nos roteadores.",
     "author": "NetMonitor",
     "transports": [
@@ -144,6 +144,12 @@
               "secret": true,
               "maxLength": 63,
               "pattern": "[^'\"\\\\`$]{0,63}",
+              "visibleWhen": {
+                "field": "encryption",
+                "notIn": [
+                  "none"
+                ]
+              },
               "description": "De 8 a 63 caracteres. Ao editar, deixe em branco para manter a atual."
             },
             "band_2g": {
@@ -270,6 +276,12 @@
               "secret": true,
               "maxLength": 63,
               "pattern": "[^'\"\\\\`$]{0,63}",
+              "visibleWhen": {
+                "field": "encryption",
+                "notIn": [
+                  "none"
+                ]
+              },
               "description": "De 8 a 63 caracteres. Ao editar, deixe em branco para manter a atual."
             },
             "band_2g": {
@@ -406,6 +418,7 @@
             "radio_2g_state": {
               "type": "string",
               "title": "Rádio 2,4 GHz",
+              "group": "Rádio 2,4 GHz",
               "enum": [
                 "",
                 "ligado",
@@ -421,6 +434,7 @@
             "radio_2g_channel": {
               "type": "string",
               "title": "Canal 2,4 GHz",
+              "group": "Rádio 2,4 GHz",
               "enum": [
                 "",
                 "auto",
@@ -462,6 +476,7 @@
             "radio_2g_htmode": {
               "type": "string",
               "title": "Largura do canal 2,4 GHz",
+              "group": "Rádio 2,4 GHz",
               "enum": [
                 "",
                 "HT20",
@@ -486,6 +501,7 @@
             "radio_2g_txpower": {
               "type": "integer",
               "title": "Potência 2,4 GHz (dBm)",
+              "group": "Rádio 2,4 GHz",
               "minimum": 1,
               "maximum": 30,
               "advanced": true,
@@ -494,6 +510,7 @@
             "radio_5g_state": {
               "type": "string",
               "title": "Rádio 5 GHz",
+              "group": "Rádio 5 GHz",
               "enum": [
                 "",
                 "ligado",
@@ -509,6 +526,7 @@
             "radio_5g_channel": {
               "type": "string",
               "title": "Canal 5 GHz",
+              "group": "Rádio 5 GHz",
               "enum": [
                 "",
                 "auto",
@@ -578,6 +596,7 @@
             "radio_5g_htmode": {
               "type": "string",
               "title": "Largura do canal 5 GHz",
+              "group": "Rádio 5 GHz",
               "enum": [
                 "",
                 "HT20",
@@ -618,6 +637,7 @@
             "radio_5g_txpower": {
               "type": "integer",
               "title": "Potência 5 GHz (dBm)",
+              "group": "Rádio 5 GHz",
               "minimum": 1,
               "maximum": 30,
               "advanced": true,
@@ -626,6 +646,7 @@
             "radio_6g_state": {
               "type": "string",
               "title": "Rádio 6 GHz",
+              "group": "Rádio 6 GHz",
               "enum": [
                 "",
                 "ligado",
@@ -641,6 +662,7 @@
             "radio_6g_channel": {
               "type": "string",
               "title": "Canal 6 GHz",
+              "group": "Rádio 6 GHz",
               "enum": [
                 "",
                 "auto",
@@ -772,6 +794,7 @@
             "radio_6g_htmode": {
               "type": "string",
               "title": "Largura do canal 6 GHz",
+              "group": "Rádio 6 GHz",
               "enum": [
                 "",
                 "HE20",
@@ -802,6 +825,7 @@
             "radio_6g_txpower": {
               "type": "integer",
               "title": "Potência 6 GHz (dBm)",
+              "group": "Rádio 6 GHz",
               "minimum": 1,
               "maximum": 30,
               "advanced": true,
@@ -853,6 +877,7 @@
             "radio_2g_state": {
               "type": "string",
               "title": "Rádio 2,4 GHz",
+              "group": "Rádio 2,4 GHz",
               "enum": [
                 "",
                 "ligado",
@@ -868,6 +893,7 @@
             "radio_2g_channel": {
               "type": "string",
               "title": "Canal 2,4 GHz",
+              "group": "Rádio 2,4 GHz",
               "enum": [
                 "",
                 "auto",
@@ -909,6 +935,7 @@
             "radio_2g_htmode": {
               "type": "string",
               "title": "Largura do canal 2,4 GHz",
+              "group": "Rádio 2,4 GHz",
               "enum": [
                 "",
                 "HT20",
@@ -933,6 +960,7 @@
             "radio_2g_txpower": {
               "type": "integer",
               "title": "Potência 2,4 GHz (dBm)",
+              "group": "Rádio 2,4 GHz",
               "minimum": 1,
               "maximum": 30,
               "advanced": true,
@@ -941,6 +969,7 @@
             "radio_5g_state": {
               "type": "string",
               "title": "Rádio 5 GHz",
+              "group": "Rádio 5 GHz",
               "enum": [
                 "",
                 "ligado",
@@ -956,6 +985,7 @@
             "radio_5g_channel": {
               "type": "string",
               "title": "Canal 5 GHz",
+              "group": "Rádio 5 GHz",
               "enum": [
                 "",
                 "auto",
@@ -1025,6 +1055,7 @@
             "radio_5g_htmode": {
               "type": "string",
               "title": "Largura do canal 5 GHz",
+              "group": "Rádio 5 GHz",
               "enum": [
                 "",
                 "HT20",
@@ -1065,6 +1096,7 @@
             "radio_5g_txpower": {
               "type": "integer",
               "title": "Potência 5 GHz (dBm)",
+              "group": "Rádio 5 GHz",
               "minimum": 1,
               "maximum": 30,
               "advanced": true,
@@ -1073,6 +1105,7 @@
             "radio_6g_state": {
               "type": "string",
               "title": "Rádio 6 GHz",
+              "group": "Rádio 6 GHz",
               "enum": [
                 "",
                 "ligado",
@@ -1088,6 +1121,7 @@
             "radio_6g_channel": {
               "type": "string",
               "title": "Canal 6 GHz",
+              "group": "Rádio 6 GHz",
               "enum": [
                 "",
                 "auto",
@@ -1219,6 +1253,7 @@
             "radio_6g_htmode": {
               "type": "string",
               "title": "Largura do canal 6 GHz",
+              "group": "Rádio 6 GHz",
               "enum": [
                 "",
                 "HE20",
@@ -1249,6 +1284,7 @@
             "radio_6g_txpower": {
               "type": "integer",
               "title": "Potência 6 GHz (dBm)",
+              "group": "Rádio 6 GHz",
               "minimum": 1,
               "maximum": 30,
               "advanced": true,
@@ -1298,7 +1334,11 @@
               "type": "string",
               "title": "Identificador do mesh",
               "pattern": "[A-Za-z0-9_-]{0,32}",
-              "default": "netmonitor-mesh"
+              "default": "netmonitor-mesh",
+              "visibleWhen": {
+                "field": "enabled",
+                "equals": true
+              }
             },
             "key": {
               "type": "string",
@@ -1306,7 +1346,11 @@
               "secret": true,
               "maxLength": 63,
               "pattern": "[^'\"\\\\`$]{0,63}",
-              "description": "Vazio = manter a atual (obrigatória ao criar)."
+              "description": "Vazio = manter a atual (obrigatória ao criar).",
+              "visibleWhen": {
+                "field": "enabled",
+                "equals": true
+              }
             },
             "band": {
               "type": "string",
@@ -1319,14 +1363,22 @@
                 "5 GHz (recomendado)",
                 "2,4 GHz"
               ],
-              "default": "5g"
+              "default": "5g",
+              "visibleWhen": {
+                "field": "enabled",
+                "equals": true
+              }
             },
             "network": {
               "type": "string",
               "title": "Interface do mesh",
               "pattern": "[a-z0-9_]{1,16}",
               "default": "lan",
-              "advanced": true
+              "advanced": true,
+              "visibleWhen": {
+                "field": "enabled",
+                "equals": true
+              }
             }
           },
           "order": [
@@ -1364,7 +1416,11 @@
               "type": "string",
               "title": "Identificador do mesh",
               "pattern": "[A-Za-z0-9_-]{0,32}",
-              "default": "netmonitor-mesh"
+              "default": "netmonitor-mesh",
+              "visibleWhen": {
+                "field": "enabled",
+                "equals": true
+              }
             },
             "key": {
               "type": "string",
@@ -1372,7 +1428,11 @@
               "secret": true,
               "maxLength": 63,
               "pattern": "[^'\"\\\\`$]{0,63}",
-              "description": "Vazio = manter a atual (obrigatória ao criar)."
+              "description": "Vazio = manter a atual (obrigatória ao criar).",
+              "visibleWhen": {
+                "field": "enabled",
+                "equals": true
+              }
             },
             "band": {
               "type": "string",
@@ -1385,14 +1445,22 @@
                 "5 GHz (recomendado)",
                 "2,4 GHz"
               ],
-              "default": "5g"
+              "default": "5g",
+              "visibleWhen": {
+                "field": "enabled",
+                "equals": true
+              }
             },
             "network": {
               "type": "string",
               "title": "Interface do mesh",
               "pattern": "[a-z0-9_]{1,16}",
               "default": "lan",
-              "advanced": true
+              "advanced": true,
+              "visibleWhen": {
+                "field": "enabled",
+                "equals": true
+              }
             }
           },
           "order": [
@@ -1402,6 +1470,30 @@
             "band",
             "network"
           ]
+        }
+      },
+      {
+        "id": "preview_roaming",
+        "title": "Pré-visualizar o roaming",
+        "effect": "read",
+        "output": "report",
+        "description": "O que o roaming vai instalar ou trocar, sem mudar nada.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "usteer": {
+              "type": "boolean",
+              "title": "Instalar o usteer (direciona clientes ao melhor AP)",
+              "default": false
+            }
+          }
+        },
+        "labels": {
+          "summary": "Resumo",
+          "changes": "Mudanças",
+          "change": "Mudança",
+          "package": "Pacote",
+          "detail": "Detalhe"
         }
       },
       {
@@ -1427,14 +1519,14 @@
       "icon": "mdi-wifi-cog",
       "description": "As redes como estão nos roteadores — edite juntas ou separadas, com roaming, mesh e plano de canais.",
       "statusAction": "status",
-      "matrix": {
+      "list": {
+        "title": "Redes",
+        "itemName": "rede",
+        "icon": "mdi-wifi",
         "field": "networks",
         "key": "ssid",
         "state": "state",
         "detail": "clients",
-        "title": "Redes",
-        "itemName": "rede",
-        "icon": "mdi-wifi",
         "subtitle": [
           "security",
           "bands"
@@ -1500,6 +1592,7 @@
           "title": "Roaming rápido e direcionamento",
           "icon": "mdi-swap-horizontal",
           "action": "prepare_roaming",
+          "preview": "preview_roaming",
           "description": "Instala nos roteadores o que eles precisam para o celular trocar de roteador sem cair (wpad completo) e, se você quiser, o usteer, que leva cada aparelho ao roteador mais próximo."
         },
         {
@@ -1528,8 +1621,8 @@
       ]
     }
   },
-  "script": "// Rede Wi-Fi (OpenWrt) — SSIDs, roaming, mesh e canais de vários roteadores.\n//\n// O roteador é a fonte da verdade. Nada fica guardado no NetMonitor: cada\n// ação lê o `/etc/config/wireless` do roteador, calcula só o que muda para\n// atender o pedido e aplica com cópia, conferência e volta atrás. O que\n// alguém mudar à mão aparece na próxima leitura.\n//\n// As senhas do Wi-Fi não saem do roteador: a leitura já vem com elas\n// mascaradas, e quando uma senha existente precisa ir para outra seção ela é\n// copiada lá dentro (`$(uci -q get …)`). Só a senha nova digitada pelo\n// operador passa pela central — e ela é parâmetro secreto, mascarado.\n\n// ---------------------------------------------------------------- leitura\n\nfn unquote(raw) {\n    let v = trimmed(raw);\n    if v.len() >= 2 && v.starts_with(\"'\") && v.ends_with(\"'\") {\n        v = v.sub_string(1, v.len() - 2);\n    }\n    v.replace(\"'\\\\''\", \"'\");\n    v\n}\n\n// `uci show wireless` com as senhas trocadas por ******** no próprio roteador.\nfn read_command() {\n    \"uci show wireless | sed -E \" + shell_quote(\"s/^(wireless\\\\.[^.=]+\\\\.(key|sae_password|password))=.*/\\\\1='********'/\")\n}\n\n// → #{ seção: #{ kind, options } }.\nfn read_wireless(device) {\n    let sections = #{};\n    for line in lines(device.run(read_command())) {\n        let sec = regex_groups(line, \"^wireless\\\\.([^.=]+)=([A-Za-z0-9_-]+)$\");\n        if sec != () {\n            sections[sec[0]] = #{ kind: sec[1], options: #{} };\n            continue;\n        }\n        let opt = regex_groups(line, \"^wireless\\\\.([^.=]+)\\\\.([^=]+)=(.*)$\");\n        if opt != () && sections.contains(opt[0]) {\n            sections[opt[0]].options[opt[1]] = unquote(opt[2]);\n        }\n    }\n    sections\n}\n\nfn band_of(options) {\n    if options.contains(\"band\") { return options.band; }\n    let hw = options.hwmode ?? \"\";\n    if hw == \"11a\" { return \"5g\"; }\n    let ch = options.channel ?? \"auto\";\n    if ch != \"auto\" && parse_int(ch) > 14 { return \"5g\"; }\n    \"2g\"\n}\n\nfn band_label(band) {\n    if band == \"2g\" { return \"2,4 GHz\"; }\n    if band == \"5g\" { return \"5 GHz\"; }\n    if band == \"6g\" { return \"6 GHz\"; }\n    band\n}\n\n// Banda → o primeiro rádio dela.\nfn radios_by_band(sections) {\n    let found = #{};\n    for name in sections.keys() {\n        let section = sections[name];\n        if section.kind == \"wifi-device\" {\n            let band = band_of(section.options);\n            if !found.contains(band) { found[band] = name; }\n        }\n    }\n    found\n}\n\nfn section_band(sections, section) {\n    let radio = section.options.device ?? \"\";\n    if sections.contains(radio) { band_of(sections[radio].options) } else { \"?\" }\n}\n\nfn is_ap(section) {\n    section.kind == \"wifi-iface\" && (section.options.mode ?? \"ap\") == \"ap\"\n}\n\n// As seções de uma rede: #{ banda: seção } (a primeira de cada banda).\nfn ap_sections(sections, ssid) {\n    let found = #{};\n    for name in sections.keys() {\n        let section = sections[name];\n        if !is_ap(section) || (section.options.ssid ?? \"\") != ssid { continue; }\n        let band = section_band(sections, section);\n        if !found.contains(band) { found[band] = name; }\n    }\n    found\n}\n\nfn runtime_status(device) {\n    let r = device.ssh(\"ubus call network.wireless status\");\n    if r.exit != 0 || trimmed(r.stdout) == \"\" { return #{}; }\n    json_parse(r.stdout)\n}\n\nfn ifname_of(rt, section) {\n    for radio in rt.keys() {\n        for iface in rt[radio].interfaces ?? [] {\n            if iface.section == section { return iface.ifname ?? (); }\n        }\n    }\n    ()\n}\n\nfn clients(device, ifname) {\n    if ifname == () { return 0; }\n    let out = device.ssh(\"iwinfo \" + shell_quote(ifname) + \" assoclist\");\n    let total = 0;\n    for line in lines(out.stdout) {\n        if regex_match(line, \"^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}\") { total += 1; }\n    }\n    total\n}\n\n// ---------------------------------------------------------------- plano\n\nfn set_command(section, option, value) {\n    \"uci set wireless.\" + section + \".\" + option + \"=\" + shell_quote(value)\n}\n\nfn new_plan() {\n    #{ commands: [], changes: [] }\n}\n\n// Opções que este plugin escreve numa rede; as demais da seção ficam como o\n// roteador tem.\nfn managed_keys() {\n    [\"hidden\", \"isolate\", \"ieee80211w\", \"ieee80211r\", \"mobility_domain\", \"ft_over_ds\",\n     \"ft_psk_generate_local\", \"ieee80211k\", \"rrm_neighbor_report\", \"rrm_beacon_report\",\n     \"bss_transition\"]\n}\n\nfn iface_options(n, radio) {\n    let o = #{ device: radio, mode: \"ap\", network: n.network, ssid: n.ssid, encryption: n.encryption,\n               disabled: if n.enabled { \"0\" } else { \"1\" } };\n    if n.hidden { o.hidden = \"1\"; }\n    if n.isolate { o.isolate = \"1\"; }\n    if n.encryption == \"sae\" { o.ieee80211w = \"2\"; }\n    if n.encryption == \"sae-mixed\" { o.ieee80211w = \"1\"; }\n    if n.roaming && n.encryption != \"none\" {\n        o.ieee80211r = \"1\";\n        o.mobility_domain = hash_hex(n.ssid, 4);\n        o.ft_over_ds = \"0\";\n        o.ft_psk_generate_local = \"1\";\n        o.ieee80211k = \"1\";\n        o.rrm_neighbor_report = \"1\";\n        o.rrm_beacon_report = \"1\";\n        o.bss_transition = \"1\";\n    }\n    o\n}\n\n// Valor de uma opção como o UCI entende: ausente vale o padrão.\nfn have(current, k) {\n    let v = current[k];\n    if v == () && k == \"disabled\" { return \"0\"; }\n    if v == () && k == \"mode\" { return \"ap\"; }\n    v\n}\n\n// Diferença das opções (sem a senha): comandos e os nomes do que mudou.\nfn option_commands(name, current, want, managed) {\n    let commands = [];\n    let diff = [];\n    for k in want.keys() {\n        if have(current, k) != want[k] {\n            commands.push(set_command(name, k, want[k]));\n            diff.push(k);\n        }\n    }\n    for k in managed {\n        if !want.contains(k) && current.contains(k) {\n            commands.push(\"uci delete wireless.\" + name + \".\" + k);\n            diff.push(k);\n        }\n    }\n    #{ commands: commands, diff: diff }\n}\n\n// A senha de uma seção: a nova, a que o roteador já tem (fica onde está ou é\n// copiada de outra seção da mesma rede, sem sair do roteador) ou nenhuma.\nfn key_commands(name, current, encryption, key, sibling) {\n    let has = (current.key ?? \"\") != \"\";\n    if encryption == \"none\" {\n        if has { return [\"uci delete wireless.\" + name + \".key\"]; }\n        return [];\n    }\n    if key != \"\" { return [set_command(name, \"key\", key)]; }\n    if has { return []; }\n    if sibling == () { throw \"Informe a senha da rede (8 a 63 caracteres).\"; }\n    [\"uci set wireless.\" + name + \".key=\\\"$(uci -q get wireless.\" + sibling + \".key)\\\"\"]\n}\n\nfn check_key(key, label) {\n    if key != \"\" && (key.len() < 8 || key.len() > 63) {\n        throw \"A senha \" + label + \" precisa ter de 8 a 63 caracteres.\";\n    }\n}\n\n// Garante a rede `ssid` com estas opções nas bandas marcadas deste roteador.\n// `original_ssid` renomeia a rede existente.\nfn plan_network(sections, n) {\n    let ssid = n.ssid;\n    let target = if (n.original_ssid ?? \"\") != \"\" { n.original_ssid } else { ssid };\n    if n.band_6g && n.encryption != \"sae\" { throw \"Em 6 GHz a rede precisa de WPA3 (sae).\"; }\n    if !n.band_2g && !n.band_5g && !n.band_6g {\n        throw \"Marque ao menos uma banda. Para tirar a rede do roteador, use Remover rede.\";\n    }\n    if target != ssid && ap_sections(sections, ssid).len() > 0 {\n        throw \"Já existe a rede \" + ssid + \" neste roteador.\";\n    }\n    let key = n.key ?? \"\";\n    check_key(key, \"da rede \" + ssid);\n    let radios = radios_by_band(sections);\n    let current = ap_sections(sections, target);\n    let sibling = ();\n    for band in current.keys() {\n        if (sections[current[band]].options.key ?? \"\") != \"\" { sibling = current[band]; }\n    }\n    let p = new_plan();\n    for band in [\"2g\", \"5g\", \"6g\"] {\n        let wanted = n[\"band_\" + band];\n        let name = current[band];\n        if !wanted {\n            if name != () {\n                p.commands.push(\"uci delete wireless.\" + name);\n                p.changes.push(#{ change: \"remover\", \"_section\": name, ssid: target, detail: band_label(band) });\n            }\n            continue;\n        }\n        if !radios.contains(band) {\n            p.changes.push(#{ change: \"ignorar\", \"_section\": \"\", ssid: ssid, detail: \"o roteador não tem rádio de \" + band_label(band) });\n            continue;\n        }\n        let radio = radios[band];\n        let want = iface_options(n, radio);\n        if name == () {\n            let fresh = \"nm_\" + hash_hex(ssid, 8) + \"_\" + band;\n            while sections.contains(fresh) { fresh += \"x\"; }\n            p.commands.push(\"uci set wireless.\" + fresh + \"=wifi-iface\");\n            for k in want.keys() { p.commands.push(set_command(fresh, k, want[k])); }\n            p.commands += key_commands(fresh, #{}, n.encryption, key, sibling);\n            p.changes.push(#{ change: \"criar\", \"_section\": fresh, ssid: ssid, detail: band_label(band) });\n        } else {\n            let options = sections[name].options;\n            let q = option_commands(name, options, want, managed_keys());\n            let keys = key_commands(name, options, n.encryption, key, sibling);\n            p.commands += q.commands;\n            p.commands += keys;\n            if keys.len() > 0 { q.diff.push(\"senha\"); }\n            if q.diff.len() > 0 {\n                p.changes.push(#{ change: \"alterar\", \"_section\": name, ssid: ssid, detail: friendly(q.diff) });\n            }\n        }\n        if n.enabled && (sections[radio].options.disabled ?? \"0\") == \"1\" {\n            p.commands.push(set_command(radio, \"disabled\", \"0\"));\n            p.changes.push(#{ change: \"rádio\", \"_section\": radio, ssid: band_label(band), detail: \"ligar o rádio (a rede precisa dele no ar)\" });\n        }\n    }\n    p\n}\n\nfn plan_remove(sections, n) {\n    let p = new_plan();\n    for name in sections.keys() {\n        let section = sections[name];\n        if is_ap(section) && (section.options.ssid ?? \"\") == n.ssid {\n            p.commands.push(\"uci delete wireless.\" + name);\n            p.changes.push(#{ change: \"remover\", \"_section\": name, ssid: n.ssid, detail: band_label(section_band(sections, section)) });\n        }\n    }\n    p\n}\n\nfn check_channel(band, ch) {\n    if ch == \"auto\" { return; }\n    let c = parse_int(ch);\n    let ok = if band == \"2g\" { c >= 1 && c <= 14 } else if band == \"5g\" { c >= 32 && c <= 177 } else { c >= 1 && c <= 233 };\n    if !ok { throw \"O canal \" + ch + \" não existe em \" + band_label(band) + \".\"; }\n}\n\nfn check_htmode(band, ht) {\n    if band == \"2g\" && (ht.contains(\"80\") || ht.contains(\"160\") || ht.contains(\"320\")) {\n        throw \"A largura \" + ht + \" não existe em 2,4 GHz (use 20 ou 40).\";\n    }\n    if band == \"6g\" && !ht.starts_with(\"HE\") && !ht.starts_with(\"EHT\") {\n        throw \"Em 6 GHz a largura precisa ser HE ou EHT.\";\n    }\n}\n\n// Canal, largura, potência, ligado/desligado de cada rádio e o país. Campo\n// vazio = manter o que o roteador tem.\nfn plan_radio(sections, n) {\n    let radios = radios_by_band(sections);\n    let country = n.country ?? \"\";\n    let p = new_plan();\n    for band in [\"2g\", \"5g\", \"6g\"] {\n        let prefix = \"radio_\" + band + \"_\";\n        let want = #{};\n        let ch = n[prefix + \"channel\"] ?? \"\";\n        if ch != \"\" { check_channel(band, ch); want.channel = ch; }\n        let ht = n[prefix + \"htmode\"] ?? \"\";\n        if ht != \"\" { check_htmode(band, ht); want.htmode = ht; }\n        let tx = n[prefix + \"txpower\"];\n        if tx != () { want.txpower = tx.to_string(); }\n        let state = n[prefix + \"state\"] ?? \"\";\n        if state == \"ligado\" { want.disabled = \"0\"; }\n        if state == \"desligado\" { want.disabled = \"1\"; }\n        if !radios.contains(band) {\n            if want.len() > 0 {\n                p.changes.push(#{ change: \"ignorar\", \"_section\": \"\", ssid: band_label(band), detail: \"o roteador não tem rádio desta banda\" });\n            }\n            continue;\n        }\n        if country != \"\" { want.country = country; }\n        let radio = radios[band];\n        let current = sections[radio].options;\n        let diff = [];\n        for k in want.keys() {\n            if (current[k] ?? ()) != want[k] {\n                p.commands.push(set_command(radio, k, want[k]));\n                diff.push(radio_change(k, want[k]));\n            }\n        }\n        if diff.len() > 0 {\n            p.changes.push(#{ change: \"rádio\", \"_section\": radio, ssid: band_label(band), detail: join_with(diff, \", \") });\n        }\n    }\n    p\n}\n\n// Mesh 802.11s numa banda (seção `nm_mesh_<banda>`); desligar tira as seções.\nfn plan_mesh(sections, n) {\n    let radios = radios_by_band(sections);\n    let key = n.key ?? \"\";\n    check_key(key, \"do mesh\");\n    let p = new_plan();\n    for band in [\"2g\", \"5g\"] {\n        let name = \"nm_mesh_\" + band;\n        let exists = sections.contains(name);\n        if !n.enabled || n.band != band {\n            if exists {\n                p.commands.push(\"uci delete wireless.\" + name);\n                p.changes.push(#{ change: \"remover\", \"_section\": name, ssid: \"Mesh\", detail: band_label(band) });\n            }\n            continue;\n        }\n        if !radios.contains(band) { throw \"O roteador não tem rádio de \" + band_label(band) + \" para o mesh.\"; }\n        if n.mesh_id == \"\" { throw \"Informe o identificador do mesh.\"; }\n        let want = #{ device: radios[band], mode: \"mesh\", mesh_id: n.mesh_id, encryption: \"sae\",\n                      network: n.network, mesh_fwding: \"1\", mesh_rssi_threshold: \"0\", disabled: \"0\" };\n        let current = if exists { sections[name].options } else { #{} };\n        if !exists {\n            p.commands.push(\"uci set wireless.\" + name + \"=wifi-iface\");\n            for k in want.keys() { p.commands.push(set_command(name, k, want[k])); }\n        }\n        let q = if exists { option_commands(name, current, want, []) } else { #{ commands: [], diff: [] } };\n        let keys = key_commands(name, current, \"sae\", key, ());\n        p.commands += q.commands;\n        p.commands += keys;\n        if !exists {\n            p.changes.push(#{ change: \"criar\", \"_section\": name, ssid: \"Mesh \" + n.mesh_id, detail: band_label(band) });\n        } else {\n            if keys.len() > 0 { q.diff.push(\"senha\"); }\n            if q.diff.len() > 0 {\n                p.changes.push(#{ change: \"alterar\", \"_section\": name, ssid: \"Mesh \" + n.mesh_id, detail: friendly(q.diff) });\n            }\n        }\n    }\n    p\n}\n\nfn plan_of(op, sections, params) {\n    if op == \"network\" { return plan_network(sections, params); }\n    if op == \"remove\" { return plan_remove(sections, params); }\n    if op == \"radio\" { return plan_radio(sections, params); }\n    if op == \"mesh\" { return plan_mesh(sections, params); }\n    throw \"operação desconhecida: \" + op;\n}\n\n// O que mudou, em palavras de gente (e não opções do UCI).\nfn friendly(keys) {\n    let words = [];\n    for k in keys {\n        let w = if k == \"ssid\" { \"nome\" }\n            else if k == \"encryption\" || k == \"ieee80211w\" { \"segurança\" }\n            else if k == \"senha\" { \"senha\" }\n            else if k == \"hidden\" { \"rede oculta\" }\n            else if k == \"isolate\" { \"isolamento de clientes\" }\n            else if k == \"network\" { \"interface\" }\n            else if k == \"disabled\" { \"ativa/desativada\" }\n            else if k == \"device\" { \"rádio\" }\n            else if k == \"mesh_id\" { \"identificador do mesh\" }\n            else if [\"ieee80211r\", \"mobility_domain\", \"ft_over_ds\", \"ft_psk_generate_local\", \"ieee80211k\",\n                     \"rrm_neighbor_report\", \"rrm_beacon_report\", \"bss_transition\"].contains(k) { \"roaming\" }\n            else { k };\n        if !words.contains(w) { words.push(w); }\n    }\n    join_with(words, \", \")\n}\n\nfn radio_change(k, v) {\n    if k == \"channel\" { return if v == \"auto\" { \"canal automático\" } else { \"canal \" + v }; }\n    if k == \"htmode\" { return \"largura \" + width_label(v); }\n    if k == \"txpower\" { return \"potência \" + v + \" dBm\"; }\n    if k == \"disabled\" { return if v == \"1\" { \"desligar o rádio\" } else { \"ligar o rádio\" }; }\n    if k == \"country\" { return \"país \" + v; }\n    k + \" \" + v\n}\n\nfn width_label(ht) {\n    let mhz = regex_capture(ht, \"([0-9]+)$\");\n    if mhz == () { \"padrão\" } else { mhz + \" MHz\" }\n}\n\nfn security_label(encryption) {\n    if encryption == \"sae-mixed\" { return \"WPA2/WPA3\"; }\n    if encryption == \"psk2\" || encryption == \"psk2+ccmp\" || encryption == \"psk-mixed\" { return \"WPA2\"; }\n    if encryption == \"sae\" { return \"WPA3\"; }\n    if encryption == \"none\" { return \"Aberta\"; }\n    encryption\n}\n\nfn summary_of(changes) {\n    let s = #{ create: 0, update: 0, remove: 0, radios: 0 };\n    for c in changes {\n        if c.change == \"criar\" { s.create += 1; }\n        if c.change == \"alterar\" { s.update += 1; }\n        if c.change == \"remover\" { s.remove += 1; }\n        if c.change == \"rádio\" { s.radios += 1; }\n    }\n    s\n}\n\nfn summary_text(changes) {\n    if changes.len() == 0 { return \"Nada a mudar neste equipamento.\"; }\n    changes.len().to_string() + \" mudança(s) neste equipamento.\"\n}\n\nfn preview(device, op, params) {\n    let p = plan_of(op, read_wireless(device), params);\n    #{ summary: summary_text(p.changes), changes: p.changes, commands: p.commands, \"_counts\": summary_of(p.changes) }\n}\n\n// Aplica com cópia do arquivo, confere o resultado e restaura se o roteador\n// não ficou como pedido ou se um rádio que estava no ar caiu.\nfn execute(device, op, params) {\n    let p = plan_of(op, read_wireless(device), params);\n    if p.commands.len() == 0 {\n        return \"Nada a alterar: o roteador já está assim.\";\n    }\n    let before = runtime_status(device);\n    device.run(\"cp /etc/config/wireless /tmp/netmonitor-wireless.bak\");\n    let staged = device.ssh(join_with(p.commands, \" && \"));\n    if staged.exit != 0 {\n        device.ssh(\"uci revert wireless\");\n        throw \"O roteador recusou a configuração (nada foi gravado):\\n\" + staged.stdout + staged.stderr;\n    }\n    device.run(\"uci commit wireless\");\n    let reload = device.ssh(\"wifi reload\");\n    let after = device.ssh(\"sleep 5; ubus call network.wireless status\");\n\n    // Conferência: o mesmo pedido, sobre o que ficou gravado, não muda nada\n    // (a rede já tem o nome novo; a senha ficou onde foi posta).\n    let settled = params;\n    settled.original_ssid = \"\";\n    settled.key = \"\";\n    let now = read_wireless(device);\n    let problems = [];\n    if plan_of(op, now, settled).commands.len() > 0 {\n        problems.push(\"a configuração gravada não confere com a pedida\");\n    }\n    if after.exit == 0 && trimmed(after.stdout) != \"\" {\n        let live = json_parse(after.stdout);\n        for radio in before.keys() {\n            let was_up = before[radio].up ?? false;\n            let off = now.contains(radio) && (now[radio].options.disabled ?? \"0\") == \"1\";\n            let is_up = if live.contains(radio) { live[radio].up ?? false } else { false };\n            if was_up && !off && !is_up { problems.push(\"o rádio \" + radio + \" estava no ar e não voltou\"); }\n        }\n    }\n    if problems.len() > 0 {\n        device.ssh(\"cp /tmp/netmonitor-wireless.bak /etc/config/wireless && wifi reload\");\n        throw \"A aplicação falhou (\" + join_with(problems, \"; \") + \"). A configuração anterior foi restaurada.\\n\" + reload.stdout + reload.stderr;\n    }\n    let text = \"Configuração aplicada: \" + p.changes.len() + \" alteração(ões).\\n\";\n    for c in p.changes {\n        let verb = c.change;\n        text += \"- \" + verb.sub_string(0, 1).to_upper() + verb.sub_string(1) + \" \" + c.ssid;\n        if c.detail != \"\" { text += \": \" + c.detail; }\n        text += \"\\n\";\n    }\n    text\n}\n\n// ---------------------------------------------------------- pacotes (DRY)\n\nfn installed_wpad(device) {\n    let found = \"nenhum\";\n    for row in device.use_plugin(\"openwrt-packages\", \"list_packages\", #{}) {\n        if row.name.starts_with(\"wpad\") { found = row.name; }\n    }\n    found\n}\n\nfn wpad_is_full(name) {\n    name != \"nenhum\" && !name.contains(\"basic\") && !name.contains(\"mini\")\n}\n\n// ---------------------------------------------------------------- ações\n\nfn detect(device, params) {\n    let base = device.use_plugin(\"openwrt-packages\", \"detect\", #{});\n    let radios = radios_by_band(read_wireless(device));\n    let bands = [];\n    for band in radios.keys() { bands.push(band_label(band)); }\n    let wpad = installed_wpad(device);\n    #{\n        firmware: base.firmware,\n        model: base.model,\n        package_manager: base.package_manager,\n        radios: join_with(bands, \", \"),\n        wpad: wpad,\n        roaming_ready: wpad_is_full(wpad),\n        mesh_ready: wpad_is_full(wpad) || wpad.contains(\"mesh\")\n    }\n}\n\n// As redes como o roteador tem agora, agrupadas por SSID.\nfn networks_of(device, sections, rt) {\n    let groups = #{};\n    for name in sections.keys() {\n        let section = sections[name];\n        if !is_ap(section) { continue; }\n        let o = section.options;\n        let ssid = o.ssid ?? \"\";\n        if ssid == \"\" { continue; }\n        if !groups.contains(ssid) {\n            groups[ssid] = #{\n                ssid: ssid, band_2g: false, band_5g: false, band_6g: false,\n                encryption: o.encryption ?? \"none\", network: o.network ?? \"lan\",\n                roaming: (o.ieee80211r ?? \"0\") == \"1\", hidden: (o.hidden ?? \"0\") == \"1\",\n                isolate: (o.isolate ?? \"0\") == \"1\", enabled: false, clients: 0, sections: []\n            };\n        }\n        let g = groups[ssid];\n        let band = section_band(sections, section);\n        if band == \"2g\" || band == \"5g\" || band == \"6g\" { g[\"band_\" + band] = true; }\n        if (o.disabled ?? \"0\") != \"1\" {\n            g.enabled = true;\n            g.clients += clients(device, ifname_of(rt, name));\n        }\n        g.sections.push(name);\n        groups[ssid] = g;\n    }\n    let rows = [];\n    for ssid in groups.keys() {\n        let g = groups[ssid];\n        let bands = [];\n        for band in [\"2g\", \"5g\", \"6g\"] { if g[\"band_\" + band] { bands.push(band_label(band)); } }\n        g.bands = join_with(bands, \", \");\n        g.state = if g.enabled { \"ativa\" } else { \"desativada\" };\n        g.security = security_label(g.encryption);\n        g.sections = join_with(g.sections, \", \");\n        rows.push(g);\n    }\n    rows\n}\n\nfn status(device, params) {\n    let sections = read_wireless(device);\n    let rt = runtime_status(device);\n    let radios = radios_by_band(sections);\n    let radio_rows = [];\n    let any_up = false;\n    let all_off = true;\n    for band in radios.keys() {\n        let name = radios[band];\n        let o = sections[name].options;\n        let up = if rt.contains(name) { rt[name].up ?? false } else { false };\n        let disabled = (o.disabled ?? \"0\") == \"1\";\n        if up { any_up = true; }\n        if !disabled { all_off = false; }\n        radio_rows.push(#{\n            radio: name, band: band_label(band), channel: o.channel ?? \"auto\", htmode: o.htmode ?? \"\",\n            txpower: o.txpower ?? \"\", country: o.country ?? \"\", disabled: disabled, up: up\n        });\n    }\n    let mesh = [];\n    for name in sections.keys() {\n        let section = sections[name];\n        if section.kind == \"wifi-iface\" && (section.options.mode ?? \"\") == \"mesh\" {\n            mesh.push(#{\n                section: name, mesh_id: section.options.mesh_id ?? \"\", band: band_label(section_band(sections, section)),\n                state: if (section.options.disabled ?? \"0\") == \"1\" { \"desativada\" } else { \"ativa\" }\n            });\n        }\n    }\n    let state = if radios.len() == 0 { \"sem_radio\" } else if any_up { \"no_ar\" } else if all_off { \"desligado\" } else { \"fora_do_ar\" };\n    let networks = networks_of(device, sections, rt);\n    // O cartão do roteador na tela: cada rádio e os números que importam.\n    let card = [];\n    for row in radio_rows {\n        card.push(#{ label: row.band, value: if row.disabled { \"desligado\" } else { (if row.channel == \"auto\" { \"canal automático\" } else { \"canal \" + row.channel }) + \" · \" + width_label(row.htmode) } });\n    }\n    let total = 0;\n    for n in networks { total += n.clients; }\n    card.push(#{ label: \"Redes\", value: networks.len().to_string() });\n    card.push(#{ label: \"Clientes\", value: total.to_string() });\n    #{\n        state: state, networks: networks, radios: radio_rows, mesh: mesh,\n        \"_card\": card,\n        // Os valores atuais no formato dos formulários de \"Rádios e canais\" e\n        // \"Mesh\" — a tela mostra e preenche; chave com `_` não vai ao relatório.\n        \"_current\": #{ radios: radio_form(sections, radios), mesh: mesh_form(sections) }\n    }\n}\n\nfn radio_form(sections, radios) {\n    let form = #{ country: \"\" };\n    for band in radios.keys() {\n        let o = sections[radios[band]].options;\n        let prefix = \"radio_\" + band + \"_\";\n        form[prefix + \"channel\"] = o.channel ?? \"\";\n        form[prefix + \"htmode\"] = o.htmode ?? \"\";\n        let tx = o.txpower ?? \"\";\n        if tx != \"\" { form[prefix + \"txpower\"] = parse_int(tx); }\n        form[prefix + \"state\"] = if (o.disabled ?? \"0\") == \"1\" { \"desligado\" } else { \"ligado\" };\n        if form.country == \"\" { form.country = o.country ?? \"\"; }\n    }\n    form\n}\n\nfn mesh_form(sections) {\n    for band in [\"5g\", \"2g\"] {\n        let name = \"nm_mesh_\" + band;\n        if sections.contains(name) {\n            let o = sections[name].options;\n            return #{ enabled: (o.disabled ?? \"0\") != \"1\", mesh_id: o.mesh_id ?? \"\", band: band, network: o.network ?? \"lan\" };\n        }\n    }\n    #{ enabled: false }\n}\n\nfn preview_network(device, params) { preview(device, \"network\", params) }\nfn set_network(device, params) { execute(device, \"network\", params) }\nfn preview_remove(device, params) { preview(device, \"remove\", params) }\nfn remove_network(device, params) { execute(device, \"remove\", params) }\nfn preview_radio(device, params) { preview(device, \"radio\", params) }\nfn set_radio(device, params) { execute(device, \"radio\", params) }\nfn preview_mesh(device, params) { preview(device, \"mesh\", params) }\nfn set_mesh(device, params) { execute(device, \"mesh\", params) }\n\nfn parse_scan(text) {\n    let cells = [];\n    let current = ();\n    for line in lines(text) {\n        if line.starts_with(\"Cell \") {\n            if current != () { cells.push(current); }\n            current = #{ ssid: \"\", channel: 0, signal: -100 };\n            continue;\n        }\n        if current == () { continue; }\n        let essid = regex_capture(line, \"ESSID: \\\"(.*)\\\"\");\n        if essid != () { current.ssid = essid; }\n        let channel = regex_capture(line, \"Channel: (\\\\d+)\");\n        if channel != () { current.channel = parse_int(channel); }\n        let signal = regex_capture(line, \"Signal: (-?\\\\d+) dBm\");\n        if signal != () { current.signal = parse_int(signal); }\n    }\n    if current != () { cells.push(current); }\n    cells\n}\n\nfn scan(device, params) {\n    let sections = read_wireless(device);\n    let radios = radios_by_band(sections);\n    let rt = runtime_status(device);\n    let own = [];\n    for name in sections.keys() {\n        let section = sections[name];\n        let ssid = section.options.ssid ?? \"\";\n        if is_ap(section) && ssid != \"\" && !own.contains(ssid) { own.push(ssid); }\n    }\n    let targets = [];\n    for band in radios.keys() {\n        let radio = radios[band];\n        if !rt.contains(radio) { continue; }\n        let ifaces = rt[radio].interfaces ?? [];\n        if ifaces.len() == 0 { continue; }\n        let ifname = ifaces[0].ifname ?? ();\n        if ifname == () { continue; }\n        targets.push(#{ radio: radio, band: band, ifname: ifname });\n    }\n    let rows = [];\n    if targets.len() > 0 {\n        // A varredura leva segundos por rádio: todos ao mesmo tempo, e cada\n        // linha da saída marcada com o índice do rádio para separar depois.\n        let parts = [];\n        for i in 0..targets.len() {\n            parts.push(\"iwinfo \" + shell_quote(targets[i].ifname) + \" scan 2>&1 | sed \" + shell_quote(\"s/^/\" + i + \"|/\") + \" &\");\n        }\n        let out = device.ssh(join_with(parts, \" \") + \" wait\");\n        let texts = [];\n        for i in 0..targets.len() { texts.push(\"\"); }\n        for line in lines(out.stdout) {\n            let m = regex_groups(line, \"^([0-9]+)\\\\|(.*)$\");\n            if m != () { texts[parse_int(m[0])] += m[1] + \"\\n\"; }\n        }\n        for i in 0..targets.len() {\n            let t = targets[i];\n            rows.push(#{\n                radio: t.radio, band: t.band,\n                channel: sections[t.radio].options.channel ?? \"auto\",\n                neighbors: parse_scan(texts[i])\n            });\n        }\n    }\n    #{ radios: rows, \"_own\": own }\n}\n\nfn prepare_roaming(device, params) {\n    let log = [];\n    let wpad = installed_wpad(device);\n    if wpad_is_full(wpad) {\n        log.push(\"O \" + wpad + \" já suporta roaming 802.11r/k/v e mesh.\");\n    } else {\n        if wpad != \"nenhum\" {\n            log.push(device.use_plugin(\"openwrt-packages\", \"remove_package\", #{ name: wpad }));\n        }\n        try {\n            log.push(device.use_plugin(\"openwrt-packages\", \"install_package\", #{ name: \"wpad-mbedtls\" }));\n        } catch (err) {\n            if wpad != \"nenhum\" {\n                device.use_plugin(\"openwrt-packages\", \"install_package\", #{ name: wpad });\n            }\n            throw \"Não foi possível instalar o wpad completo; o \" + wpad + \" foi reinstalado.\\n\" + err;\n        }\n    }\n    if params.usteer {\n        log.push(device.use_plugin(\"openwrt-packages\", \"install_package\", #{ name: \"usteer\" }));\n        device.run(\"/etc/init.d/usteer enable && /etc/init.d/usteer restart\");\n        log.push(\"usteer habilitado e iniciado.\");\n    }\n    device.ssh(\"wifi reload\");\n    join_with(log, \"\\n\")\n}\n\n// ------------------------------------------------- consolidado (sem rede)\n\nfn overlaps(band, a, b) {\n    let gap = a - b;\n    if gap < 0 { gap = -gap; }\n    if band == \"2g\" { gap < 5 } else { gap < 4 }\n}\n\n// Plano de canais: para cada rádio, o canal com menos interferência dos\n// vizinhos (sinal acima de -100 dBm pesa) e dos outros roteadores da frota.\n// Não muda nada: devolve em `next` a ação \"Rádios e canais\" com o canal de\n// cada roteador, para o operador aceitar.\nfn plan_channels(results, settings) {\n    let own = [];\n    for r in results {\n        if r.status == \"succeeded\" && r.output != () {\n            for ssid in r.output[\"_own\"] ?? [] { if !own.contains(ssid) { own.push(ssid); } }\n        }\n    }\n    let candidates = #{ \"2g\": [1, 6, 11], \"5g\": [36, 44, 149, 157] };\n    let taken = #{ \"2g\": [], \"5g\": [] };\n    let assignments = [];\n    let devices = #{};\n    for r in results {\n        if r.status != \"succeeded\" || r.output == () { continue; }\n        for radio in r.output.radios {\n            let band = radio.band;\n            if !candidates.contains(band) { continue; }\n            let best = 0;\n            let best_cost = 1000000;\n            for ch in candidates[band] {\n                let cost = 0;\n                for n in radio.neighbors {\n                    if !own.contains(n.ssid) && overlaps(band, ch, n.channel) {\n                        let weight = n.signal + 100;\n                        if weight > 0 { cost += weight; }\n                    }\n                }\n                for t in taken[band] {\n                    if overlaps(band, ch, t) { cost += 60; }\n                }\n                if cost < best_cost { best_cost = cost; best = ch; }\n            }\n            taken[band].push(best);\n            let channel = best.to_string();\n            assignments.push(#{ device: r.deviceName, band: band_label(band), current: radio.channel, channel: channel, interference: best_cost });\n            if radio.channel != channel {\n                let key = r.deviceId.to_string();\n                if !devices.contains(key) { devices[key] = #{}; }\n                devices[key][\"radio_\" + band + \"_channel\"] = channel;\n            }\n        }\n    }\n    let changed = devices.len();\n    let out = #{\n        summary: if changed == 0 { \"Os canais atuais já são os de menor interferência.\" } else { changed.to_string() + \" roteador(es) com canal sugerido. Aceite para aplicar.\" },\n        assignments: assignments\n    };\n    if changed > 0 {\n        out.next = #{ action: \"radios\", title: \"Aplicar o plano de canais\", devices: devices };\n    }\n    out\n}\n",
-  "usage": "# Rede Wi-Fi (OpenWrt)\n\nGerencia o Wi-Fi de **vários roteadores OpenWrt** — juntos ou um a um: redes\n(SSIDs) por banda, roaming 802.11r/k/v, mesh 802.11s e o canal/potência de\ncada rádio.\n\n**O roteador é a fonte da verdade.** Nada fica guardado no NetMonitor: a\nVisão geral lê as redes de cada roteador, e cada ação parte do que o roteador\ntem naquela hora. Mudou algo à mão no roteador? Aparece na próxima leitura.\n\nOnde usar:\n- **Aplicativos → Rede Wi-Fi**: a grade roteadores × redes. Clique no nome de\n  uma rede para editá-la ou removê-la nos roteadores que a têm (o formulário\n  vem preenchido com o que eles têm); escolha em quais roteadores aplicar.\n- **Aba Wi-Fi do roteador** (`/devices/{id}`): as mesmas ações, só nele.\n\nSegurança:\n- Toda alteração tem **pré-visualização** com os comandos `uci` exatos.\n- Aplicar faz cópia do `/etc/config/wireless`, grava tudo de uma vez, confere\n  e **restaura a cópia** se o resultado não conferir ou se um rádio que estava\n  no ar não voltar.\n- O plugin só mexe no que a ação pede — opções que ele não conhece ficam como\n  o roteador tem.\n- **As senhas do Wi-Fi não saem do roteador**: a leitura vem com elas\n  mascaradas; ao levar uma rede para outra banda, a senha é copiada no próprio\n  roteador. Só a senha nova que você digita passa pelo NetMonitor, e ela não\n  aparece no histórico.\n\n## Detectar\nFirmware, modelo, rádios (bandas) e o `wpad` instalado — `wpad-basic-*` não faz\nroaming 802.11r nem mesh. Não altera nada.\n\n## Estado\nAs redes do roteador agrupadas por SSID (bandas, segurança, roaming, ativa ou\nnão, clientes conectados), os rádios (canal, largura, potência, país, no ar) e\no mesh. Não altera nada.\n\n## Varrer vizinhos\n`iwinfo <interface> scan` em cada rádio no ar: redes vizinhas, canal e sinal.\nBase do **Planejar canais**. Não altera nada.\n\n## Pré-visualizar rede\nO que **Adicionar ou alterar rede** vai mudar neste roteador. Não altera nada.\n\n## Adicionar ou alterar rede\nGarante a rede nas bandas marcadas: cria a seção que falta, ajusta a que\nexiste, tira a banda desmarcada. **Nome atual** preenchido renomeia. Senha\nvazia mantém a do roteador. **Altera o equipamento** (o Wi-Fi pisca por alguns\nsegundos). A senha digitada é sempre regravada — o plugin não lê a senha do\nroteador para comparar.\n\n## Pré-visualizar remoção\nQuais seções a **Remover rede** vai apagar. Não altera nada.\n\n## Remover rede\nApaga todas as seções daquele SSID no roteador. **Altera o equipamento.**\n\n## Pré-visualizar rádios\nO que **Rádios e canais** vai mudar. Não altera nada.\n\n## Rádios e canais\nCanal, largura, potência, ligar/desligar de cada rádio e o país. Campo vazio\nmantém o que o roteador tem. **Altera o equipamento.**\n\n## Pré-visualizar mesh\nO que **Mesh 802.11s** vai mudar. Não altera nada.\n\n## Mesh 802.11s\nLiga o mesh numa banda (seção `nm_mesh_<banda>`, SAE) ou desliga e tira as\nseções. Exige o `wpad` completo. **Altera o equipamento.**\n\n## Preparar roaming e usteer\nTroca o `wpad-basic-*` pelo `wpad-mbedtls` (reinstala o básico se a troca\nfalhar) e, se marcado, instala e inicia o `usteer`. Usa o Gerenciador de\npacotes. **Altera o equipamento.**\n\n## Planejar canais (na página da rede)\nVarre os vizinhos de todos os roteadores e sugere o canal de menor\ninterferência para cada rádio, sem repetir entre os roteadores da frota. Nada\nmuda até você aceitar — aí roda **Rádios e canais** com o canal de cada um.\n\n## Cuidados\n- Roaming exige a mesma senha e segurança em todos os APs e o `wpad` completo.\n- 6 GHz exige WPA3 (`sae`). Evite canais DFS (52–144) em vários APs.\n- Se você gerencia o roteador **pelo próprio Wi-Fi**, uma alteração errada\n  pode cortar o acesso até a restauração automática.\n",
+  "script": "// Rede Wi-Fi (OpenWrt) — SSIDs, roaming, mesh e canais de vários roteadores.\n//\n// O roteador é a fonte da verdade. Nada fica guardado no NetMonitor: cada\n// ação lê o `/etc/config/wireless` do roteador, calcula só o que muda para\n// atender o pedido e aplica com cópia, conferência e volta atrás. O que\n// alguém mudar à mão aparece na próxima leitura.\n//\n// As senhas do Wi-Fi não saem do roteador: a leitura já vem com elas\n// mascaradas, e quando uma senha existente precisa ir para outra seção ela é\n// copiada lá dentro (`$(uci -q get …)`). Só a senha nova digitada pelo\n// operador passa pela central — e ela é parâmetro secreto, mascarado.\n\n// ---------------------------------------------------------------- leitura\n\nfn unquote(raw) {\n    let v = trimmed(raw);\n    if v.len() >= 2 && v.starts_with(\"'\") && v.ends_with(\"'\") {\n        v = v.sub_string(1, v.len() - 2);\n    }\n    v.replace(\"'\\\\''\", \"'\");\n    v\n}\n\n// `uci show wireless` com as senhas trocadas por ******** no próprio roteador.\nfn read_command() {\n    \"uci show wireless | sed -E \" + shell_quote(\"s/^(wireless\\\\.[^.=]+\\\\.(key|sae_password|password))=.*/\\\\1='********'/\")\n}\n\n// → #{ seção: #{ kind, options } }.\nfn read_wireless(device) {\n    let sections = #{};\n    for line in lines(device.run(read_command())) {\n        let sec = regex_groups(line, \"^wireless\\\\.([^.=]+)=([A-Za-z0-9_-]+)$\");\n        if sec != () {\n            sections[sec[0]] = #{ kind: sec[1], options: #{} };\n            continue;\n        }\n        let opt = regex_groups(line, \"^wireless\\\\.([^.=]+)\\\\.([^=]+)=(.*)$\");\n        if opt != () && sections.contains(opt[0]) {\n            sections[opt[0]].options[opt[1]] = unquote(opt[2]);\n        }\n    }\n    sections\n}\n\nfn band_of(options) {\n    if options.contains(\"band\") { return options.band; }\n    let hw = options.hwmode ?? \"\";\n    if hw == \"11a\" { return \"5g\"; }\n    let ch = options.channel ?? \"auto\";\n    if ch != \"auto\" && parse_int(ch) > 14 { return \"5g\"; }\n    \"2g\"\n}\n\nfn band_label(band) {\n    if band == \"2g\" { return \"2,4 GHz\"; }\n    if band == \"5g\" { return \"5 GHz\"; }\n    if band == \"6g\" { return \"6 GHz\"; }\n    band\n}\n\n// Banda → o primeiro rádio dela.\nfn radios_by_band(sections) {\n    let found = #{};\n    for name in sections.keys() {\n        let section = sections[name];\n        if section.kind == \"wifi-device\" {\n            let band = band_of(section.options);\n            if !found.contains(band) { found[band] = name; }\n        }\n    }\n    found\n}\n\nfn section_band(sections, section) {\n    let radio = section.options.device ?? \"\";\n    if sections.contains(radio) { band_of(sections[radio].options) } else { \"?\" }\n}\n\nfn is_ap(section) {\n    section.kind == \"wifi-iface\" && (section.options.mode ?? \"ap\") == \"ap\"\n}\n\n// As seções de uma rede: #{ banda: seção } (a primeira de cada banda).\nfn ap_sections(sections, ssid) {\n    let found = #{};\n    for name in sections.keys() {\n        let section = sections[name];\n        if !is_ap(section) || (section.options.ssid ?? \"\") != ssid { continue; }\n        let band = section_band(sections, section);\n        if !found.contains(band) { found[band] = name; }\n    }\n    found\n}\n\nfn runtime_status(device) {\n    let r = device.ssh(\"ubus call network.wireless status\");\n    if r.exit != 0 || trimmed(r.stdout) == \"\" { return #{}; }\n    json_parse(r.stdout)\n}\n\nfn ifname_of(rt, section) {\n    for radio in rt.keys() {\n        for iface in rt[radio].interfaces ?? [] {\n            if iface.section == section { return iface.ifname ?? (); }\n        }\n    }\n    ()\n}\n\nfn clients(device, ifname) {\n    if ifname == () { return 0; }\n    let out = device.ssh(\"iwinfo \" + shell_quote(ifname) + \" assoclist\");\n    let total = 0;\n    for line in lines(out.stdout) {\n        if regex_match(line, \"^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}\") { total += 1; }\n    }\n    total\n}\n\n// ---------------------------------------------------------------- plano\n\nfn set_command(section, option, value) {\n    \"uci set wireless.\" + section + \".\" + option + \"=\" + shell_quote(value)\n}\n\nfn new_plan() {\n    #{ commands: [], changes: [] }\n}\n\n// Opções que este plugin escreve numa rede; as demais da seção ficam como o\n// roteador tem.\nfn managed_keys() {\n    [\"hidden\", \"isolate\", \"ieee80211w\", \"ieee80211r\", \"mobility_domain\", \"ft_over_ds\",\n     \"ft_psk_generate_local\", \"ieee80211k\", \"rrm_neighbor_report\", \"rrm_beacon_report\",\n     \"bss_transition\"]\n}\n\nfn iface_options(n, radio) {\n    let o = #{ device: radio, mode: \"ap\", network: n.network, ssid: n.ssid, encryption: n.encryption,\n               disabled: if n.enabled { \"0\" } else { \"1\" } };\n    if n.hidden { o.hidden = \"1\"; }\n    if n.isolate { o.isolate = \"1\"; }\n    if n.encryption == \"sae\" { o.ieee80211w = \"2\"; }\n    if n.encryption == \"sae-mixed\" { o.ieee80211w = \"1\"; }\n    if n.roaming && n.encryption != \"none\" {\n        o.ieee80211r = \"1\";\n        o.mobility_domain = hash_hex(n.ssid, 4);\n        o.ft_over_ds = \"0\";\n        o.ft_psk_generate_local = \"1\";\n        o.ieee80211k = \"1\";\n        o.rrm_neighbor_report = \"1\";\n        o.rrm_beacon_report = \"1\";\n        o.bss_transition = \"1\";\n    }\n    o\n}\n\n// Valor de uma opção como o UCI entende: ausente vale o padrão.\nfn have(current, k) {\n    let v = current[k];\n    if v == () && k == \"disabled\" { return \"0\"; }\n    if v == () && k == \"mode\" { return \"ap\"; }\n    v\n}\n\n// Diferença das opções (sem a senha): comandos e os nomes do que mudou.\nfn option_commands(name, current, want, managed) {\n    let commands = [];\n    let diff = [];\n    for k in want.keys() {\n        if have(current, k) != want[k] {\n            commands.push(set_command(name, k, want[k]));\n            diff.push(k);\n        }\n    }\n    for k in managed {\n        if !want.contains(k) && current.contains(k) {\n            commands.push(\"uci delete wireless.\" + name + \".\" + k);\n            diff.push(k);\n        }\n    }\n    #{ commands: commands, diff: diff }\n}\n\n// A senha de uma seção: a nova, a que o roteador já tem (fica onde está ou é\n// copiada de outra seção da mesma rede, sem sair do roteador) ou nenhuma.\nfn key_commands(name, current, encryption, key, sibling) {\n    let has = (current.key ?? \"\") != \"\";\n    if encryption == \"none\" {\n        if has { return [\"uci delete wireless.\" + name + \".key\"]; }\n        return [];\n    }\n    if key != \"\" { return [set_command(name, \"key\", key)]; }\n    if has { return []; }\n    if sibling == () { throw \"Informe a senha da rede (8 a 63 caracteres).\"; }\n    [\"uci set wireless.\" + name + \".key=\\\"$(uci -q get wireless.\" + sibling + \".key)\\\"\"]\n}\n\nfn check_key(key, label) {\n    if key != \"\" && (key.len() < 8 || key.len() > 63) {\n        throw \"A senha \" + label + \" precisa ter de 8 a 63 caracteres.\";\n    }\n}\n\n// Garante a rede `ssid` com estas opções nas bandas marcadas deste roteador.\n// `original_ssid` renomeia a rede existente.\nfn plan_network(sections, n) {\n    let ssid = n.ssid;\n    let target = if (n.original_ssid ?? \"\") != \"\" { n.original_ssid } else { ssid };\n    if n.band_6g && n.encryption != \"sae\" { throw \"Em 6 GHz a rede precisa de WPA3 (sae).\"; }\n    if !n.band_2g && !n.band_5g && !n.band_6g {\n        throw \"Marque ao menos uma banda. Para tirar a rede do roteador, use Remover rede.\";\n    }\n    if target != ssid && ap_sections(sections, ssid).len() > 0 {\n        throw \"Já existe a rede \" + ssid + \" neste roteador.\";\n    }\n    let key = n.key ?? \"\";\n    check_key(key, \"da rede \" + ssid);\n    let radios = radios_by_band(sections);\n    let current = ap_sections(sections, target);\n    let sibling = ();\n    for band in current.keys() {\n        if (sections[current[band]].options.key ?? \"\") != \"\" { sibling = current[band]; }\n    }\n    let p = new_plan();\n    for band in [\"2g\", \"5g\", \"6g\"] {\n        let wanted = n[\"band_\" + band];\n        let name = current[band];\n        if !wanted {\n            if name != () {\n                p.commands.push(\"uci delete wireless.\" + name);\n                p.changes.push(#{ change: \"remover\", \"_section\": name, ssid: target, detail: band_label(band) });\n            }\n            continue;\n        }\n        if !radios.contains(band) {\n            p.changes.push(#{ change: \"ignorar\", \"_section\": \"\", ssid: ssid, detail: \"o roteador não tem rádio de \" + band_label(band) });\n            continue;\n        }\n        let radio = radios[band];\n        let want = iface_options(n, radio);\n        if name == () {\n            let fresh = \"nm_\" + hash_hex(ssid, 8) + \"_\" + band;\n            while sections.contains(fresh) { fresh += \"x\"; }\n            p.commands.push(\"uci set wireless.\" + fresh + \"=wifi-iface\");\n            for k in want.keys() { p.commands.push(set_command(fresh, k, want[k])); }\n            p.commands += key_commands(fresh, #{}, n.encryption, key, sibling);\n            p.changes.push(#{ change: \"criar\", \"_section\": fresh, ssid: ssid, detail: band_label(band) });\n        } else {\n            let options = sections[name].options;\n            let q = option_commands(name, options, want, managed_keys());\n            let keys = key_commands(name, options, n.encryption, key, sibling);\n            p.commands += q.commands;\n            p.commands += keys;\n            if keys.len() > 0 { q.diff.push(\"senha\"); }\n            if q.diff.len() > 0 {\n                p.changes.push(#{ change: \"alterar\", \"_section\": name, ssid: ssid, detail: friendly(q.diff) });\n            }\n        }\n        if n.enabled && (sections[radio].options.disabled ?? \"0\") == \"1\" {\n            p.commands.push(set_command(radio, \"disabled\", \"0\"));\n            p.changes.push(#{ change: \"rádio\", \"_section\": radio, ssid: band_label(band), detail: \"ligar o rádio (a rede precisa dele no ar)\" });\n        }\n    }\n    p\n}\n\nfn plan_remove(sections, n) {\n    let p = new_plan();\n    for name in sections.keys() {\n        let section = sections[name];\n        if is_ap(section) && (section.options.ssid ?? \"\") == n.ssid {\n            p.commands.push(\"uci delete wireless.\" + name);\n            p.changes.push(#{ change: \"remover\", \"_section\": name, ssid: n.ssid, detail: band_label(section_band(sections, section)) });\n        }\n    }\n    p\n}\n\nfn check_channel(band, ch) {\n    if ch == \"auto\" { return; }\n    let c = parse_int(ch);\n    let ok = if band == \"2g\" { c >= 1 && c <= 14 } else if band == \"5g\" { c >= 32 && c <= 177 } else { c >= 1 && c <= 233 };\n    if !ok { throw \"O canal \" + ch + \" não existe em \" + band_label(band) + \".\"; }\n}\n\nfn check_htmode(band, ht) {\n    if band == \"2g\" && (ht.contains(\"80\") || ht.contains(\"160\") || ht.contains(\"320\")) {\n        throw \"A largura \" + ht + \" não existe em 2,4 GHz (use 20 ou 40).\";\n    }\n    if band == \"6g\" && !ht.starts_with(\"HE\") && !ht.starts_with(\"EHT\") {\n        throw \"Em 6 GHz a largura precisa ser HE ou EHT.\";\n    }\n}\n\n// Canal, largura, potência, ligado/desligado de cada rádio e o país. Campo\n// vazio = manter o que o roteador tem.\nfn plan_radio(sections, n) {\n    let radios = radios_by_band(sections);\n    let country = n.country ?? \"\";\n    let p = new_plan();\n    for band in [\"2g\", \"5g\", \"6g\"] {\n        let prefix = \"radio_\" + band + \"_\";\n        let want = #{};\n        let ch = n[prefix + \"channel\"] ?? \"\";\n        if ch != \"\" { check_channel(band, ch); want.channel = ch; }\n        let ht = n[prefix + \"htmode\"] ?? \"\";\n        if ht != \"\" { check_htmode(band, ht); want.htmode = ht; }\n        let tx = n[prefix + \"txpower\"];\n        if tx != () { want.txpower = tx.to_string(); }\n        let state = n[prefix + \"state\"] ?? \"\";\n        if state == \"ligado\" { want.disabled = \"0\"; }\n        if state == \"desligado\" { want.disabled = \"1\"; }\n        if !radios.contains(band) {\n            if want.len() > 0 {\n                p.changes.push(#{ change: \"ignorar\", \"_section\": \"\", ssid: band_label(band), detail: \"o roteador não tem rádio desta banda\" });\n            }\n            continue;\n        }\n        if country != \"\" { want.country = country; }\n        let radio = radios[band];\n        let current = sections[radio].options;\n        let diff = [];\n        for k in want.keys() {\n            if (current[k] ?? ()) != want[k] {\n                p.commands.push(set_command(radio, k, want[k]));\n                diff.push(radio_change(k, want[k]));\n            }\n        }\n        if diff.len() > 0 {\n            p.changes.push(#{ change: \"rádio\", \"_section\": radio, ssid: band_label(band), detail: join_with(diff, \", \") });\n        }\n    }\n    p\n}\n\n// Mesh 802.11s numa banda (seção `nm_mesh_<banda>`); desligar tira as seções.\nfn plan_mesh(sections, n) {\n    let radios = radios_by_band(sections);\n    let key = n.key ?? \"\";\n    check_key(key, \"do mesh\");\n    let p = new_plan();\n    for band in [\"2g\", \"5g\"] {\n        let name = \"nm_mesh_\" + band;\n        let exists = sections.contains(name);\n        if !n.enabled || n.band != band {\n            if exists {\n                p.commands.push(\"uci delete wireless.\" + name);\n                p.changes.push(#{ change: \"remover\", \"_section\": name, ssid: \"Mesh\", detail: band_label(band) });\n            }\n            continue;\n        }\n        if !radios.contains(band) { throw \"O roteador não tem rádio de \" + band_label(band) + \" para o mesh.\"; }\n        if n.mesh_id == \"\" { throw \"Informe o identificador do mesh.\"; }\n        let want = #{ device: radios[band], mode: \"mesh\", mesh_id: n.mesh_id, encryption: \"sae\",\n                      network: n.network, mesh_fwding: \"1\", mesh_rssi_threshold: \"0\", disabled: \"0\" };\n        let current = if exists { sections[name].options } else { #{} };\n        if !exists {\n            p.commands.push(\"uci set wireless.\" + name + \"=wifi-iface\");\n            for k in want.keys() { p.commands.push(set_command(name, k, want[k])); }\n        }\n        let q = if exists { option_commands(name, current, want, []) } else { #{ commands: [], diff: [] } };\n        let keys = key_commands(name, current, \"sae\", key, ());\n        p.commands += q.commands;\n        p.commands += keys;\n        if !exists {\n            p.changes.push(#{ change: \"criar\", \"_section\": name, ssid: \"Mesh \" + n.mesh_id, detail: band_label(band) });\n        } else {\n            if keys.len() > 0 { q.diff.push(\"senha\"); }\n            if q.diff.len() > 0 {\n                p.changes.push(#{ change: \"alterar\", \"_section\": name, ssid: \"Mesh \" + n.mesh_id, detail: friendly(q.diff) });\n            }\n        }\n    }\n    p\n}\n\nfn plan_of(op, sections, params) {\n    if op == \"network\" { return plan_network(sections, params); }\n    if op == \"remove\" { return plan_remove(sections, params); }\n    if op == \"radio\" { return plan_radio(sections, params); }\n    if op == \"mesh\" { return plan_mesh(sections, params); }\n    throw \"operação desconhecida: \" + op;\n}\n\n// O que mudou, em palavras de gente (e não opções do UCI).\nfn friendly(keys) {\n    let words = [];\n    for k in keys {\n        let w = if k == \"ssid\" { \"nome\" }\n            else if k == \"encryption\" || k == \"ieee80211w\" { \"segurança\" }\n            else if k == \"senha\" { \"senha\" }\n            else if k == \"hidden\" { \"rede oculta\" }\n            else if k == \"isolate\" { \"isolamento de clientes\" }\n            else if k == \"network\" { \"interface\" }\n            else if k == \"disabled\" { \"ativa/desativada\" }\n            else if k == \"device\" { \"rádio\" }\n            else if k == \"mesh_id\" { \"identificador do mesh\" }\n            else if [\"ieee80211r\", \"mobility_domain\", \"ft_over_ds\", \"ft_psk_generate_local\", \"ieee80211k\",\n                     \"rrm_neighbor_report\", \"rrm_beacon_report\", \"bss_transition\"].contains(k) { \"roaming\" }\n            else { k };\n        if !words.contains(w) { words.push(w); }\n    }\n    join_with(words, \", \")\n}\n\nfn radio_change(k, v) {\n    if k == \"channel\" { return if v == \"auto\" { \"canal automático\" } else { \"canal \" + v }; }\n    if k == \"htmode\" { return \"largura \" + width_label(v); }\n    if k == \"txpower\" { return \"potência \" + v + \" dBm\"; }\n    if k == \"disabled\" { return if v == \"1\" { \"desligar o rádio\" } else { \"ligar o rádio\" }; }\n    if k == \"country\" { return \"país \" + v; }\n    k + \" \" + v\n}\n\nfn width_label(ht) {\n    let mhz = regex_capture(ht, \"([0-9]+)$\");\n    if mhz == () { \"padrão\" } else { mhz + \" MHz\" }\n}\n\nfn security_label(encryption) {\n    if encryption == \"sae-mixed\" { return \"WPA2/WPA3\"; }\n    if encryption == \"psk2\" || encryption == \"psk2+ccmp\" || encryption == \"psk-mixed\" { return \"WPA2\"; }\n    if encryption == \"sae\" { return \"WPA3\"; }\n    if encryption == \"none\" { return \"Aberta\"; }\n    encryption\n}\n\nfn summary_of(changes) {\n    let s = #{ create: 0, update: 0, remove: 0, radios: 0 };\n    for c in changes {\n        if c.change == \"criar\" { s.create += 1; }\n        if c.change == \"alterar\" { s.update += 1; }\n        if c.change == \"remover\" { s.remove += 1; }\n        if c.change == \"rádio\" { s.radios += 1; }\n    }\n    s\n}\n\nfn summary_text(changes) {\n    if changes.len() == 0 { return \"Nada a mudar neste equipamento.\"; }\n    changes.len().to_string() + \" mudança(s) neste equipamento.\"\n}\n\nfn preview(device, op, params) {\n    let p = plan_of(op, read_wireless(device), params);\n    #{ summary: summary_text(p.changes), changes: p.changes, commands: p.commands, \"_counts\": summary_of(p.changes) }\n}\n\n// Aplica com cópia do arquivo, confere o resultado e restaura se o roteador\n// não ficou como pedido ou se um rádio que estava no ar caiu.\nfn execute(device, op, params) {\n    let p = plan_of(op, read_wireless(device), params);\n    if p.commands.len() == 0 {\n        return \"Nada a alterar: o roteador já está assim.\";\n    }\n    let before = runtime_status(device);\n    device.run(\"cp /etc/config/wireless /tmp/netmonitor-wireless.bak\");\n    let staged = device.ssh(join_with(p.commands, \" && \"));\n    if staged.exit != 0 {\n        device.ssh(\"uci revert wireless\");\n        throw \"O roteador recusou a configuração (nada foi gravado):\\n\" + staged.stdout + staged.stderr;\n    }\n    device.run(\"uci commit wireless\");\n    let reload = device.ssh(\"wifi reload\");\n    let after = device.ssh(\"sleep 5; ubus call network.wireless status\");\n\n    // Conferência: o mesmo pedido, sobre o que ficou gravado, não muda nada\n    // (a rede já tem o nome novo; a senha ficou onde foi posta).\n    let settled = params;\n    settled.original_ssid = \"\";\n    settled.key = \"\";\n    let now = read_wireless(device);\n    let problems = [];\n    if plan_of(op, now, settled).commands.len() > 0 {\n        problems.push(\"a configuração gravada não confere com a pedida\");\n    }\n    if after.exit == 0 && trimmed(after.stdout) != \"\" {\n        let live = json_parse(after.stdout);\n        for radio in before.keys() {\n            let was_up = before[radio].up ?? false;\n            let off = now.contains(radio) && (now[radio].options.disabled ?? \"0\") == \"1\";\n            let is_up = if live.contains(radio) { live[radio].up ?? false } else { false };\n            if was_up && !off && !is_up { problems.push(\"o rádio \" + radio + \" estava no ar e não voltou\"); }\n        }\n    }\n    if problems.len() > 0 {\n        device.ssh(\"cp /tmp/netmonitor-wireless.bak /etc/config/wireless && wifi reload\");\n        throw \"A aplicação falhou (\" + join_with(problems, \"; \") + \"). A configuração anterior foi restaurada.\\n\" + reload.stdout + reload.stderr;\n    }\n    let text = \"Configuração aplicada: \" + p.changes.len() + \" alteração(ões).\\n\";\n    for c in p.changes {\n        let verb = c.change;\n        text += \"- \" + verb.sub_string(0, 1).to_upper() + verb.sub_string(1) + \" \" + c.ssid;\n        if c.detail != \"\" { text += \": \" + c.detail; }\n        text += \"\\n\";\n    }\n    text\n}\n\n// ---------------------------------------------------------- pacotes (DRY)\n\nfn installed_names(device) {\n    let names = [];\n    for row in device.use_plugin(\"openwrt-packages\", \"list_packages\", #{}) { names.push(row.name); }\n    names\n}\n\nfn wpad_of(names) {\n    let found = \"nenhum\";\n    for name in names { if name.starts_with(\"wpad\") { found = name; } }\n    found\n}\n\nfn installed_wpad(device) { wpad_of(installed_names(device)) }\n\nfn wpad_is_full(name) {\n    name != \"nenhum\" && !name.contains(\"basic\") && !name.contains(\"mini\")\n}\n\n// ---------------------------------------------------------------- ações\n\nfn detect(device, params) {\n    let base = device.use_plugin(\"openwrt-packages\", \"detect\", #{});\n    let radios = radios_by_band(read_wireless(device));\n    let bands = [];\n    for band in radios.keys() { bands.push(band_label(band)); }\n    let wpad = installed_wpad(device);\n    #{\n        firmware: base.firmware,\n        model: base.model,\n        package_manager: base.package_manager,\n        radios: join_with(bands, \", \"),\n        wpad: wpad,\n        roaming_ready: wpad_is_full(wpad),\n        mesh_ready: wpad_is_full(wpad) || wpad.contains(\"mesh\")\n    }\n}\n\n// As redes como o roteador tem agora, agrupadas por SSID.\nfn networks_of(device, sections, rt) {\n    let groups = #{};\n    for name in sections.keys() {\n        let section = sections[name];\n        if !is_ap(section) { continue; }\n        let o = section.options;\n        let ssid = o.ssid ?? \"\";\n        if ssid == \"\" { continue; }\n        if !groups.contains(ssid) {\n            groups[ssid] = #{\n                ssid: ssid, band_2g: false, band_5g: false, band_6g: false,\n                encryption: o.encryption ?? \"none\", network: o.network ?? \"lan\",\n                roaming: (o.ieee80211r ?? \"0\") == \"1\", hidden: (o.hidden ?? \"0\") == \"1\",\n                isolate: (o.isolate ?? \"0\") == \"1\", enabled: false, clients: 0, sections: []\n            };\n        }\n        let g = groups[ssid];\n        let band = section_band(sections, section);\n        if band == \"2g\" || band == \"5g\" || band == \"6g\" { g[\"band_\" + band] = true; }\n        if (o.disabled ?? \"0\") != \"1\" {\n            g.enabled = true;\n            g.clients += clients(device, ifname_of(rt, name));\n        }\n        g.sections.push(name);\n        groups[ssid] = g;\n    }\n    let rows = [];\n    for ssid in groups.keys() {\n        let g = groups[ssid];\n        let bands = [];\n        for band in [\"2g\", \"5g\", \"6g\"] { if g[\"band_\" + band] { bands.push(band_label(band)); } }\n        g.bands = join_with(bands, \", \");\n        g.state = if g.enabled { \"ativa\" } else { \"desativada\" };\n        g.security = security_label(g.encryption);\n        g.sections = join_with(g.sections, \", \");\n        rows.push(g);\n    }\n    rows\n}\n\nfn status(device, params) {\n    let sections = read_wireless(device);\n    let rt = runtime_status(device);\n    let radios = radios_by_band(sections);\n    let radio_rows = [];\n    let any_up = false;\n    let all_off = true;\n    for band in radios.keys() {\n        let name = radios[band];\n        let o = sections[name].options;\n        let up = if rt.contains(name) { rt[name].up ?? false } else { false };\n        let disabled = (o.disabled ?? \"0\") == \"1\";\n        if up { any_up = true; }\n        if !disabled { all_off = false; }\n        radio_rows.push(#{\n            radio: name, band: band_label(band), channel: o.channel ?? \"auto\", htmode: o.htmode ?? \"\",\n            txpower: o.txpower ?? \"\", country: o.country ?? \"\", disabled: disabled, up: up\n        });\n    }\n    let mesh = [];\n    for name in sections.keys() {\n        let section = sections[name];\n        if section.kind == \"wifi-iface\" && (section.options.mode ?? \"\") == \"mesh\" {\n            mesh.push(#{\n                section: name, mesh_id: section.options.mesh_id ?? \"\", band: band_label(section_band(sections, section)),\n                state: if (section.options.disabled ?? \"0\") == \"1\" { \"desativada\" } else { \"ativa\" }\n            });\n        }\n    }\n    let state = if radios.len() == 0 { \"sem_radio\" } else if any_up { \"no_ar\" } else if all_off { \"desligado\" } else { \"fora_do_ar\" };\n    let networks = networks_of(device, sections, rt);\n    // O cartão do roteador na tela: cada rádio e os números que importam.\n    let card = [];\n    for row in radio_rows {\n        card.push(#{ label: row.band, value: if row.disabled { \"desligado\" } else { (if row.channel == \"auto\" { \"canal automático\" } else { \"canal \" + row.channel }) + \" · \" + width_label(row.htmode) } });\n    }\n    let total = 0;\n    for n in networks { total += n.clients; }\n    card.push(#{ label: \"Redes\", value: networks.len().to_string() });\n    card.push(#{ label: \"Clientes\", value: total.to_string() });\n    #{\n        state: state, networks: networks, radios: radio_rows, mesh: mesh,\n        \"_card\": card,\n        // Os valores atuais no formato dos formulários de \"Rádios e canais\" e\n        // \"Mesh\" — a tela mostra e preenche; chave com `_` não vai ao relatório.\n        \"_current\": #{ radios: radio_form(sections, radios), mesh: mesh_form(sections) }\n    }\n}\n\nfn radio_form(sections, radios) {\n    let form = #{ country: \"\" };\n    for band in radios.keys() {\n        let o = sections[radios[band]].options;\n        let prefix = \"radio_\" + band + \"_\";\n        form[prefix + \"channel\"] = o.channel ?? \"\";\n        form[prefix + \"htmode\"] = o.htmode ?? \"\";\n        let tx = o.txpower ?? \"\";\n        if tx != \"\" { form[prefix + \"txpower\"] = parse_int(tx); }\n        form[prefix + \"state\"] = if (o.disabled ?? \"0\") == \"1\" { \"desligado\" } else { \"ligado\" };\n        if form.country == \"\" { form.country = o.country ?? \"\"; }\n    }\n    form\n}\n\nfn mesh_form(sections) {\n    for band in [\"5g\", \"2g\"] {\n        let name = \"nm_mesh_\" + band;\n        if sections.contains(name) {\n            let o = sections[name].options;\n            return #{ enabled: (o.disabled ?? \"0\") != \"1\", mesh_id: o.mesh_id ?? \"\", band: band, network: o.network ?? \"lan\" };\n        }\n    }\n    #{ enabled: false }\n}\n\nfn preview_network(device, params) { preview(device, \"network\", params) }\nfn set_network(device, params) { execute(device, \"network\", params) }\nfn preview_remove(device, params) { preview(device, \"remove\", params) }\nfn remove_network(device, params) { execute(device, \"remove\", params) }\nfn preview_radio(device, params) { preview(device, \"radio\", params) }\nfn set_radio(device, params) { execute(device, \"radio\", params) }\nfn preview_mesh(device, params) { preview(device, \"mesh\", params) }\nfn set_mesh(device, params) { execute(device, \"mesh\", params) }\n\nfn parse_scan(text) {\n    let cells = [];\n    let current = ();\n    for line in lines(text) {\n        if line.starts_with(\"Cell \") {\n            if current != () { cells.push(current); }\n            current = #{ ssid: \"\", channel: 0, signal: -100 };\n            continue;\n        }\n        if current == () { continue; }\n        let essid = regex_capture(line, \"ESSID: \\\"(.*)\\\"\");\n        if essid != () { current.ssid = essid; }\n        let channel = regex_capture(line, \"Channel: (\\\\d+)\");\n        if channel != () { current.channel = parse_int(channel); }\n        let signal = regex_capture(line, \"Signal: (-?\\\\d+) dBm\");\n        if signal != () { current.signal = parse_int(signal); }\n    }\n    if current != () { cells.push(current); }\n    cells\n}\n\nfn scan(device, params) {\n    let sections = read_wireless(device);\n    let radios = radios_by_band(sections);\n    let rt = runtime_status(device);\n    let own = [];\n    for name in sections.keys() {\n        let section = sections[name];\n        let ssid = section.options.ssid ?? \"\";\n        if is_ap(section) && ssid != \"\" && !own.contains(ssid) { own.push(ssid); }\n    }\n    let targets = [];\n    for band in radios.keys() {\n        let radio = radios[band];\n        if !rt.contains(radio) { continue; }\n        let ifaces = rt[radio].interfaces ?? [];\n        if ifaces.len() == 0 { continue; }\n        let ifname = ifaces[0].ifname ?? ();\n        if ifname == () { continue; }\n        targets.push(#{ radio: radio, band: band, ifname: ifname });\n    }\n    let rows = [];\n    if targets.len() > 0 {\n        // A varredura leva segundos por rádio: todos ao mesmo tempo, e cada\n        // linha da saída marcada com o índice do rádio para separar depois.\n        let parts = [];\n        for i in 0..targets.len() {\n            parts.push(\"iwinfo \" + shell_quote(targets[i].ifname) + \" scan 2>&1 | sed \" + shell_quote(\"s/^/\" + i + \"|/\") + \" &\");\n        }\n        let out = device.ssh(join_with(parts, \" \") + \" wait\");\n        let texts = [];\n        for i in 0..targets.len() { texts.push(\"\"); }\n        for line in lines(out.stdout) {\n            let m = regex_groups(line, \"^([0-9]+)\\\\|(.*)$\");\n            if m != () { texts[parse_int(m[0])] += m[1] + \"\\n\"; }\n        }\n        for i in 0..targets.len() {\n            let t = targets[i];\n            rows.push(#{\n                radio: t.radio, band: t.band,\n                channel: sections[t.radio].options.channel ?? \"auto\",\n                neighbors: parse_scan(texts[i])\n            });\n        }\n    }\n    #{ radios: rows, \"_own\": own }\n}\n\n// O que \"Roaming rápido e direcionamento\" vai mudar, sem mudar nada.\nfn preview_roaming(device, params) {\n    let names = installed_names(device);\n    let wpad = wpad_of(names);\n    let changes = [];\n    if !wpad_is_full(wpad) {\n        if wpad != \"nenhum\" {\n            changes.push(#{ change: \"remover\", \"package\": wpad, detail: \"versão básica, sem roaming\" });\n        }\n        changes.push(#{ change: \"instalar\", \"package\": \"wpad-mbedtls\", detail: \"roaming 802.11r/k/v e mesh\" });\n    }\n    if params.usteer && !names.contains(\"usteer\") {\n        changes.push(#{ change: \"instalar\", \"package\": \"usteer\", detail: \"leva cada aparelho ao roteador mais perto\" });\n    }\n    #{ summary: summary_text(changes), changes: changes }\n}\n\nfn prepare_roaming(device, params) {\n    let log = [];\n    let wpad = installed_wpad(device);\n    if wpad_is_full(wpad) {\n        log.push(\"O \" + wpad + \" já suporta roaming 802.11r/k/v e mesh.\");\n    } else {\n        if wpad != \"nenhum\" {\n            log.push(device.use_plugin(\"openwrt-packages\", \"remove_package\", #{ name: wpad }));\n        }\n        try {\n            log.push(device.use_plugin(\"openwrt-packages\", \"install_package\", #{ name: \"wpad-mbedtls\" }));\n        } catch (err) {\n            if wpad != \"nenhum\" {\n                device.use_plugin(\"openwrt-packages\", \"install_package\", #{ name: wpad });\n            }\n            throw \"Não foi possível instalar o wpad completo; o \" + wpad + \" foi reinstalado.\\n\" + err;\n        }\n    }\n    if params.usteer {\n        log.push(device.use_plugin(\"openwrt-packages\", \"install_package\", #{ name: \"usteer\" }));\n        device.run(\"/etc/init.d/usteer enable && /etc/init.d/usteer restart\");\n        log.push(\"usteer habilitado e iniciado.\");\n    }\n    device.ssh(\"wifi reload\");\n    join_with(log, \"\\n\")\n}\n\n// ------------------------------------------------- consolidado (sem rede)\n\nfn overlaps(band, a, b) {\n    let gap = a - b;\n    if gap < 0 { gap = -gap; }\n    if band == \"2g\" { gap < 5 } else { gap < 4 }\n}\n\n// Plano de canais: para cada rádio, o canal com menos interferência dos\n// vizinhos (sinal acima de -100 dBm pesa) e dos outros roteadores da frota.\n// Não muda nada: devolve em `next` a ação \"Rádios e canais\" com o canal de\n// cada roteador, para o operador aceitar.\nfn plan_channels(results, settings) {\n    let own = [];\n    for r in results {\n        if r.status == \"succeeded\" && r.output != () {\n            for ssid in r.output[\"_own\"] ?? [] { if !own.contains(ssid) { own.push(ssid); } }\n        }\n    }\n    let candidates = #{ \"2g\": [1, 6, 11], \"5g\": [36, 44, 149, 157] };\n    let taken = #{ \"2g\": [], \"5g\": [] };\n    let assignments = [];\n    let devices = #{};\n    for r in results {\n        if r.status != \"succeeded\" || r.output == () { continue; }\n        for radio in r.output.radios {\n            let band = radio.band;\n            if !candidates.contains(band) { continue; }\n            let best = 0;\n            let best_cost = 1000000;\n            for ch in candidates[band] {\n                let cost = 0;\n                for n in radio.neighbors {\n                    if !own.contains(n.ssid) && overlaps(band, ch, n.channel) {\n                        let weight = n.signal + 100;\n                        if weight > 0 { cost += weight; }\n                    }\n                }\n                for t in taken[band] {\n                    if overlaps(band, ch, t) { cost += 60; }\n                }\n                if cost < best_cost { best_cost = cost; best = ch; }\n            }\n            taken[band].push(best);\n            let channel = best.to_string();\n            assignments.push(#{ device: r.deviceName, band: band_label(band), current: radio.channel, channel: channel, interference: best_cost });\n            if radio.channel != channel {\n                let key = r.deviceId.to_string();\n                if !devices.contains(key) { devices[key] = #{}; }\n                devices[key][\"radio_\" + band + \"_channel\"] = channel;\n            }\n        }\n    }\n    let changed = devices.len();\n    let out = #{\n        summary: if changed == 0 { \"Os canais atuais já são os de menor interferência.\" } else { changed.to_string() + \" roteador(es) com canal sugerido. Aceite para aplicar.\" },\n        assignments: assignments\n    };\n    if changed > 0 {\n        out.next = #{ action: \"radios\", title: \"Aplicar o plano de canais\", devices: devices };\n    }\n    out\n}\n",
+  "usage": "# Rede Wi-Fi (OpenWrt)\n\nGerencia o Wi-Fi de **vários roteadores OpenWrt** — juntos ou um a um: redes\n(SSIDs) por banda, roaming 802.11r/k/v, mesh 802.11s e o canal/potência de\ncada rádio.\n\n**O roteador é a fonte da verdade.** Nada fica guardado no NetMonitor: a\nVisão geral lê as redes de cada roteador, e cada ação parte do que o roteador\ntem naquela hora. Mudou algo à mão no roteador? Aparece na próxima leitura.\n\nOnde usar:\n- **Aplicativos → Rede Wi-Fi**: a grade roteadores × redes. Clique no nome de\n  uma rede para editá-la ou removê-la nos roteadores que a têm (o formulário\n  vem preenchido com o que eles têm); escolha em quais roteadores aplicar.\n- **Aba Wi-Fi do roteador** (`/devices/{id}`): as mesmas ações, só nele.\n\nSegurança:\n- Toda alteração tem **pré-visualização** com os comandos `uci` exatos.\n- Aplicar faz cópia do `/etc/config/wireless`, grava tudo de uma vez, confere\n  e **restaura a cópia** se o resultado não conferir ou se um rádio que estava\n  no ar não voltar.\n- O plugin só mexe no que a ação pede — opções que ele não conhece ficam como\n  o roteador tem.\n- **As senhas do Wi-Fi não saem do roteador**: a leitura vem com elas\n  mascaradas; ao levar uma rede para outra banda, a senha é copiada no próprio\n  roteador. Só a senha nova que você digita passa pelo NetMonitor, e ela não\n  aparece no histórico.\n\n## Detectar\nFirmware, modelo, rádios (bandas) e o `wpad` instalado — `wpad-basic-*` não faz\nroaming 802.11r nem mesh. Não altera nada.\n\n## Estado\nAs redes do roteador agrupadas por SSID (bandas, segurança, roaming, ativa ou\nnão, clientes conectados), os rádios (canal, largura, potência, país, no ar) e\no mesh. Não altera nada.\n\n## Varrer vizinhos\n`iwinfo <interface> scan` em cada rádio no ar: redes vizinhas, canal e sinal.\nBase do **Planejar canais**. Não altera nada.\n\n## Pré-visualizar rede\nO que **Adicionar ou alterar rede** vai mudar neste roteador. Não altera nada.\n\n## Adicionar ou alterar rede\nGarante a rede nas bandas marcadas: cria a seção que falta, ajusta a que\nexiste, tira a banda desmarcada. **Nome atual** preenchido renomeia. Senha\nvazia mantém a do roteador. **Altera o equipamento** (o Wi-Fi pisca por alguns\nsegundos). A senha digitada é sempre regravada — o plugin não lê a senha do\nroteador para comparar.\n\n## Pré-visualizar remoção\nQuais seções a **Remover rede** vai apagar. Não altera nada.\n\n## Remover rede\nApaga todas as seções daquele SSID no roteador. **Altera o equipamento.**\n\n## Pré-visualizar rádios\nO que **Rádios e canais** vai mudar. Não altera nada.\n\n## Rádios e canais\nCanal, largura, potência, ligar/desligar de cada rádio e o país. Campo vazio\nmantém o que o roteador tem. **Altera o equipamento.**\n\n## Pré-visualizar mesh\nO que **Mesh 802.11s** vai mudar. Não altera nada.\n\n## Mesh 802.11s\nLiga o mesh numa banda (seção `nm_mesh_<banda>`, SAE) ou desliga e tira as\nseções. Exige o `wpad` completo. **Altera o equipamento.**\n\n## Pré-visualizar o roaming\nO que **Preparar roaming e usteer** vai instalar ou trocar (o `wpad` e o\n`usteer`). Só lê a lista de pacotes; não altera nada.\n\n## Preparar roaming e usteer\nTroca o `wpad-basic-*` pelo `wpad-mbedtls` (reinstala o básico se a troca\nfalhar) e, se marcado, instala e inicia o `usteer`. Usa o Gerenciador de\npacotes. **Altera o equipamento.**\n\n## Planejar canais (na página da rede)\nVarre os vizinhos de todos os roteadores e sugere o canal de menor\ninterferência para cada rádio, sem repetir entre os roteadores da frota. Nada\nmuda até você aceitar — aí roda **Rádios e canais** com o canal de cada um.\n\n## Cuidados\n- Roaming exige a mesma senha e segurança em todos os APs e o `wpad` completo.\n- 6 GHz exige WPA3 (`sae`). Evite canais DFS (52–144) em vários APs.\n- Se você gerencia o roteador **pelo próprio Wi-Fi**, uma alteração errada\n  pode cortar o acesso até a restauração automática.\n",
   "compatibility": [],
   "tests": {
     "unit": [
@@ -2353,6 +2446,44 @@
         }
       },
       {
+        "name": "pré-visualiza o roaming sem instalar nada",
+        "action": "preview_roaming",
+        "firmware": "24.10.0",
+        "params": {
+          "usteer": true
+        },
+        "fixtures": [
+          {
+            "ssh": "opkg list-installed",
+            "stdout": "base-files - 1554\nbusybox - 1.36.1-1\nwpad-basic-mbedtls - 1\n",
+            "exit": 0
+          }
+        ],
+        "expect": {
+          "summary": "3 mudança(s) neste equipamento."
+        },
+        "expectContains": "wpad-basic-mbedtls"
+      },
+      {
+        "name": "roaming já pronto não tem nada a mudar",
+        "action": "preview_roaming",
+        "firmware": "24.10.0",
+        "params": {
+          "usteer": true
+        },
+        "fixtures": [
+          {
+            "ssh": "opkg list-installed",
+            "stdout": "base-files - 1554\nbusybox - 1.36.1-1\nwpad-mbedtls - 2024\nusteer - 1\n",
+            "exit": 0
+          }
+        ],
+        "expect": {
+          "summary": "Nada a mudar neste equipamento.",
+          "changes": []
+        }
+      },
+      {
         "name": "prepara o roaming trocando o wpad básico pelo completo",
         "action": "prepare_roaming",
         "firmware": "24.10.0",
@@ -2546,6 +2677,16 @@
         },
         "expectKeys": [
           "summary"
+        ]
+      },
+      {
+        "action": "preview_roaming",
+        "params": {
+          "usteer": false
+        },
+        "expectKeys": [
+          "summary",
+          "changes"
         ]
       }
     ]

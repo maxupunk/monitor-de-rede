@@ -20,7 +20,7 @@ function fleet(): FleetView {
       transports: ['ssh'],
       actions: [],
       matcher: {},
-      panel: null,
+      list: null,
       surfaces: ['device', 'fleet'],
       settings: null,
       fleet: { title: 'Rede Wi-Fi', statusAction: 'status' },

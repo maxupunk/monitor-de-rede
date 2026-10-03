@@ -123,7 +123,7 @@
             v-if="previewBatch"
             :batch="previewBatch"
             :kind="request.previewAction?.output"
-            :labels="request.previewAction?.labels"
+            :presentation="request.previewAction"
             :can-write="false"
             expand-all
           />
@@ -147,8 +147,8 @@
             v-if="runBatch"
             :batch="runBatch"
             :kind="shownAction?.output"
-            :labels="shownAction?.labels"
-            :result-labels="runAction ? undefined : request.fleetAction.labels"
+            :presentation="shownAction"
+            :result-presentation="runAction ? undefined : request.fleetAction"
             :can-write="false"
             :expand-all="step === 'running'"
             @open-run="(device) => emit('openRun', device)"
@@ -247,10 +247,10 @@ import { usePluginAppsStore } from '@/stores/pluginApps'
 import {
   currentByDevice,
   outputsByDevice,
-  paramsFromItem,
   sourceIndex,
   type FlowRequest,
 } from '@/utils/fleetContext'
+import { paramsFromItem } from '@/utils/itemList'
 import { formatRelativeTime } from '@/utils/formatters'
 import { followUpOf } from '@/utils/pluginPresentation'
 import { acceptedValues, defaultsOf, fieldsOf, paramsOf } from '@/utils/pluginSettings'
@@ -334,9 +334,11 @@ const suggestions = computed(() =>
 )
 const itemAction = computed(
   () =>
-    [props.spec?.matrix?.edit, props.spec?.matrix?.remove].find(
-      (target) => target?.action === props.request?.fleetAction.id
-    ) ?? null
+    [
+      props.spec?.list?.edit,
+      props.spec?.list?.remove,
+      ...(props.spec?.list?.rowActions ?? []),
+    ].find((target) => target?.action === props.request?.fleetAction.id) ?? null
 )
 const current = computed(() =>
   props.request?.fleetAction.current

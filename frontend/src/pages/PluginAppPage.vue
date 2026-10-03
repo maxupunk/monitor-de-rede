@@ -37,12 +37,12 @@
           {{ view.members.length }} equipamento(s)
         </v-chip>
         <v-chip
-          v-if="matrix"
+          v-if="list"
           color="primary"
           variant="tonal"
-          :prepend-icon="matrix.icon ?? 'mdi-format-list-bulleted'"
+          :prepend-icon="list.icon ?? 'mdi-format-list-bulleted'"
         >
-          {{ rows.length }} {{ (matrix.title ?? 'itens').toLowerCase() }}
+          {{ rows.length }} {{ (list.title ?? 'itens').toLowerCase() }}
         </v-chip>
         <v-chip
           v-if="detailTotal !== null"
@@ -75,12 +75,8 @@
       </v-alert>
 
       <v-tabs v-model="tab" color="primary" class="mb-4" show-arrows>
-        <v-tab
-          v-if="matrix"
-          value="items"
-          :prepend-icon="matrix.icon ?? 'mdi-format-list-bulleted'"
-        >
-          {{ matrix.title ?? 'Itens' }}
+        <v-tab v-if="list" value="items" :prepend-icon="list.icon ?? 'mdi-format-list-bulleted'">
+          {{ list.title ?? 'Itens' }}
         </v-tab>
         <v-tab value="members" prepend-icon="mdi-router-network">Equipamentos</v-tab>
         <v-tab v-if="tools.length > 0" value="tools" prepend-icon="mdi-tune-variant">
@@ -94,14 +90,16 @@
       </v-tabs>
 
       <v-window v-model="tab">
-        <v-window-item v-if="matrix" value="items">
+        <v-window-item v-if="list" value="items">
           <FleetItems
             :view="view"
-            :matrix="matrix"
+            :list="list"
             :can-write="authStore.isAdmin"
             @add="addItem"
-            @edit="editItem"
-            @remove="removeItem"
+            @edit="(row) => openItemAction(list?.edit, row, 'Editar')"
+            @remove="(row) => openItemAction(list?.remove, row, 'Remover')"
+            @action="(target, row) => openItemAction(target, row)"
+            @toolbar="(id) => openAction(id)"
             @refresh="refresh"
           />
         </v-window-item>
@@ -171,8 +169,8 @@
                 <FleetBatchCard
                   :batch="batch"
                   :kind="kindOf(batch.action)"
-                  :labels="labelsOf(batch.action)"
-                  :result-labels="fleetActionOf(batch.action)?.labels"
+                  :presentation="deviceActionOf(fleetActionOf(batch.action))"
+                  :result-presentation="fleetActionOf(batch.action)"
                   :can-write="authStore.isAdmin"
                   @cancel="cancel"
                   @apply-patch="applyPatch"
@@ -213,7 +211,7 @@
       :run-id="transcript.runId"
       :title="transcript.title"
       :kind="transcript.kind"
-      :labels="transcript.labels"
+      :presentation="transcript.presentation"
     />
 
     <DeviceDialog
@@ -234,6 +232,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import type { BatchDevice } from '@/bindings/BatchDevice'
 import type { FleetAction } from '@/bindings/FleetAction'
+import type { ItemAction } from '@/bindings/ItemAction'
 import type { OutputKind } from '@/bindings/OutputKind'
 import type { PluginAction } from '@/bindings/PluginAction'
 import type { PluginBatchView } from '@/bindings/PluginBatchView'
@@ -251,14 +250,8 @@ import { confirm } from '@/composables/useConfirm'
 import { useAuthStore } from '@/stores/auth'
 import type { Device } from '@/stores/devices'
 import { usePluginAppsStore } from '@/stores/pluginApps'
-import {
-  itemRows,
-  outputsByDevice,
-  paramsFromItem,
-  toolsOf,
-  type FlowRequest,
-  type ItemRow,
-} from '@/utils/fleetContext'
+import { outputsByDevice, toolsOf, type FlowRequest } from '@/utils/fleetContext'
+import { fleetRows, paramsFromItem, type ItemRow } from '@/utils/itemList'
 import { formatDateTime, formatRelativeTime } from '@/utils/formatters'
 import {
   batchStatusPresentation,
@@ -287,13 +280,13 @@ const transcript = reactive({
   runId: null as number | null,
   title: '',
   kind: undefined as OutputKind | undefined,
-  labels: undefined as Record<string, string> | undefined,
+  presentation: null as PluginAction | null,
 })
 
 const pluginId = computed(() => Number(route.params.id))
 const view = computed(() => store.fleets[pluginId.value] ?? null)
 const spec = computed(() => view.value?.plugin.fleet ?? null)
-const matrix = computed(() => spec.value?.matrix ?? null)
+const list = computed(() => spec.value?.list ?? null)
 const title = computed(() => spec.value?.title ?? view.value?.plugin.name ?? 'Aplicativo')
 const subtitle = computed(
   () => spec.value?.description ?? view.value?.plugin.description ?? undefined
@@ -318,17 +311,17 @@ const reading = computed(
     ) ?? false
 )
 const rows = computed(() =>
-  matrix.value
-    ? itemRows(outputsByDevice(statusBatch.value), matrix.value, view.value?.members ?? [])
+  list.value
+    ? fleetRows(outputsByDevice(statusBatch.value), list.value, view.value?.members ?? [])
     : []
 )
 const detailTotal = computed(() => {
-  if (!matrix.value?.detail || rows.value.length === 0) return null
+  if (!list.value?.detail || rows.value.length === 0) return null
   return rows.value.reduce((sum, row) => sum + (row.detailTotal ?? 0), 0)
 })
 const detailLabel = computed(() => {
   const status = view.value?.plugin.actions.find((action) => action.id === spec.value?.statusAction)
-  return outputLabel(matrix.value?.detail ?? '', status?.labels)
+  return outputLabel(list.value?.detail ?? '', status?.labels)
 })
 
 watch(
@@ -336,7 +329,7 @@ watch(
   async (id) => {
     if (!Number.isFinite(id)) return
     await store.loadFleet(id)
-    tab.value = matrix.value ? 'items' : 'members'
+    tab.value = list.value ? 'items' : 'members'
     resetDraft()
     readIfStale()
   },
@@ -386,10 +379,6 @@ function kindOf(id: string): OutputKind | undefined {
   return deviceActionOf(fleetActionOf(id))?.output
 }
 
-function labelsOf(id: string): Record<string, string> | undefined {
-  return deviceActionOf(fleetActionOf(id))?.labels
-}
-
 function openAction(
   id: string,
   options: { title?: string; params?: Record<string, unknown>; devices?: number[] } = {}
@@ -412,27 +401,21 @@ function openAction(
   flow.open = true
 }
 
-const itemName = computed(() => matrix.value?.itemName ?? 'item')
+const itemName = computed(() => list.value?.itemName ?? 'item')
 
 function addItem() {
-  if (matrix.value?.add) openAction(matrix.value.add, { title: 'Nova ' + itemName.value })
+  if (list.value?.add) openAction(list.value.add, { title: `Adicionar ${itemName.value}` })
 }
 
-function editItem(row: ItemRow) {
-  const target = matrix.value?.edit
+/**
+ * Um botão sobre um item: a ação de frota abre com o formulário preenchido
+ * pelo item e só os equipamentos que o têm marcados.
+ */
+function openItemAction(target: ItemAction | null | undefined, row: ItemRow, verb?: string) {
   if (!target) return
+  const label = verb ?? target.label ?? fleetActionOf(target.action)?.title ?? target.action
   openAction(target.action, {
-    title: `Editar ${itemName.value} “${row.key}”`,
-    params: paramsFromItem(target, row.item),
-    devices: row.entries.map((entry) => entry.deviceId),
-  })
-}
-
-function removeItem(row: ItemRow) {
-  const target = matrix.value?.remove
-  if (!target) return
-  openAction(target.action, {
-    title: `Remover ${itemName.value} “${row.key}”`,
+    title: verb ? `${label} ${itemName.value} “${row.key}”` : `${label} — ${row.key}`,
     params: paramsFromItem(target, row.item),
     devices: row.entries.map((entry) => entry.deviceId),
   })
@@ -507,7 +490,7 @@ function openTranscript(device: BatchDevice) {
   transcript.runId = device.runId
   transcript.title = batch?.title ?? 'Execução'
   transcript.kind = batch ? kindOf(batch.action) : undefined
-  transcript.labels = batch ? labelsOf(batch.action) : undefined
+  transcript.presentation = batch ? deviceActionOf(fleetActionOf(batch.action)) : null
   transcript.open = true
 }
 

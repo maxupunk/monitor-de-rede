@@ -2,6 +2,9 @@
 import type { MatrixAction } from "./MatrixAction";
 
 /**
+ * Formato antigo da lista da frota — hoje `fleet.list` (ver [`item_list`]).
+ * Continua aceito e é convertido na leitura.
+ *
  * A grade membros × itens da página da frota (ex.: roteadores × SSIDs).
  */
 export type FleetMatrix = { 

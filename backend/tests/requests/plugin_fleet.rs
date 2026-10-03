@@ -428,7 +428,7 @@ async fn wifi_nasce_desligado_e_liga_ao_cadastrar_um_openwrt() {
         assert_eq!(pagina["settings"], Value::Null);
         assert_eq!(pagina["plugin"]["fleet"]["statusAction"], "status");
         assert_eq!(
-            pagina["plugin"]["fleet"]["matrix"]["edit"]["action"],
+            pagina["plugin"]["fleet"]["list"]["edit"]["action"],
             "network"
         );
 

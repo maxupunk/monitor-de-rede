@@ -2,10 +2,10 @@
   <div>
     <!-- Cabeçalho do plugin -->
     <div class="d-flex align-center flex-wrap ga-2 mb-3">
-      <v-icon color="primary" size="28">{{ item.plugin.panel?.icon ?? 'mdi-puzzle' }}</v-icon>
+      <v-icon color="primary" size="28">{{ item.plugin.list?.icon ?? 'mdi-puzzle' }}</v-icon>
       <div class="min-w-0">
         <div class="text-subtitle-1 font-weight-bold">
-          {{ item.plugin.panel?.title ?? item.plugin.name }}
+          {{ item.plugin.list?.title ?? item.plugin.name }}
           <span class="text-body-small">v{{ item.plugin.version }}</span>
         </div>
         <div v-if="item.plugin.description" class="text-body-2">
@@ -41,11 +41,11 @@
     </v-alert>
 
     <!-- Tela própria do plugin, ou a lista de ações -->
-    <PluginPanelView
-      v-if="item.plugin.panel"
+    <DeviceItemList
+      v-if="item.plugin.list"
       :device-id="deviceId"
       :plugin-id="item.plugin.id"
-      :panel="item.plugin.panel"
+      :list="item.plugin.list"
       :actions="item.plugin.actions"
       :autoload="item.plugin.status === 'active'"
       :disabled="blocked"
@@ -200,7 +200,7 @@
       :run-id="runDialog.runId"
       :title="runDialog.title"
       :kind="runDialog.kind"
-      :labels="runDialog.labels"
+      :presentation="runDialog.presentation"
     />
   </div>
 </template>
@@ -223,7 +223,7 @@ import PluginEditorDialog from '@/components/plugins/PluginEditorDialog.vue'
 import SettingsForm from '@/components/plugins/settings/SettingsForm.vue'
 import { defaultsOf, normalizeValue } from '@/utils/pluginSettings'
 import PluginAbout from './PluginAbout.vue'
-import PluginPanelView from './PluginPanelView.vue'
+import DeviceItemList from './DeviceItemList.vue'
 
 const props = defineProps<{
   item: DevicePluginItem
@@ -254,7 +254,7 @@ const runDialog = reactive({
   runId: null as number | null,
   title: '',
   kind: undefined as OutputKind | undefined,
-  labels: undefined as Record<string, string> | undefined,
+  presentation: undefined as PluginAction | undefined,
 })
 
 const settingsForm = ref<{ validate: () => Promise<boolean> } | null>(null)
@@ -325,7 +325,7 @@ async function runAction(params: Record<string, unknown>, confirmWrite: boolean)
   runDialog.runId = null
   runDialog.title = action.title
   runDialog.kind = action.output
-  runDialog.labels = action.labels
+  runDialog.presentation = action
   runDialog.open = true
   try {
     runDialog.runId = await store.runAction(

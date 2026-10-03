@@ -3,7 +3,7 @@
   "manifest": {
     "slug": "openwrt-packages",
     "name": "Gerenciador de pacotes",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "description": "Lista, busca, instala e remove pacotes do OpenWrt por SSH — opkg até a 24.10, apk a partir da 25.",
     "author": "NetMonitor",
     "transports": [
@@ -21,7 +21,12 @@
         "title": "Detectar versão",
         "effect": "read",
         "output": "kv",
-        "description": "Lê /etc/openwrt_release, o modelo (ubus system board) e o gerenciador de pacotes."
+        "description": "Lê /etc/openwrt_release, o modelo (ubus system board) e o gerenciador de pacotes.",
+        "labels": {
+          "package_manager": "Gerenciador de pacotes",
+          "firmware": "Versão do OpenWrt",
+          "model": "Modelo"
+        }
       },
       {
         "id": "list_packages",
@@ -95,12 +100,13 @@
         }
       }
     ],
-    "panel": {
+    "list": {
       "title": "Gerenciador de pacotes",
+      "itemName": "pacote",
       "icon": "mdi-package-variant-closed",
-      "listAction": "list_packages",
-      "searchParam": "query",
-      "keyColumn": "name",
+      "source": "list_packages",
+      "key": "name",
+      "layout": "table",
       "columns": [
         {
           "key": "name",
@@ -119,6 +125,7 @@
           "label": "Descrição"
         }
       ],
+      "searchParam": "query",
       "toolbar": [
         "update_index"
       ],

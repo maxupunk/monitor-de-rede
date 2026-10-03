@@ -7,12 +7,12 @@ use ts_rs::TS;
 use crate::services::plugins::{
     compat::Compat,
     credentials::CredentialView,
-    manifest::{
-        FleetSpec, MatchRule, PluginAction, PluginPanel, SettingsSpec, Surface, TransportKind,
-    },
+    item_list::ItemList,
+    manifest::{FleetSpec, MatchRule, PluginAction, SettingsSpec, Surface, TransportKind},
     package::PluginPackage,
     review::{ReviewReport, Severity},
     runtime::TranscriptEntry,
+    testing::TestReport,
 };
 
 /// Um plugin na listagem — sem script nem testes.
@@ -37,12 +37,14 @@ pub struct PluginSummary {
     pub transports: Vec<TransportKind>,
     pub actions: Vec<PluginAction>,
     pub matcher: MatchRule,
-    /// Tela própria do plugin instalado, quando ele declara uma.
-    pub panel: Option<PluginPanel>,
+    /// Tela própria do plugin instalado (a lista de itens), quando ele
+    /// declara uma — já convertida do formato antigo (`panel`).
+    pub list: Option<ItemList>,
     /// Onde aparece: aba do equipamento, página da frota (Aplicativos).
     pub surfaces: Vec<Surface>,
     /// Esquemas da configuração guardada.
     pub settings: Option<SettingsSpec>,
+    /// A frota, com a lista já convertida do formato antigo (`matrix`).
     pub fleet: Option<FleetSpec>,
     /// Risco da última revisão de segurança.
     pub risk: Option<Severity>,
@@ -143,6 +145,27 @@ pub struct PluginSaveInput {
     #[serde(default)]
     #[ts(optional, type = "number | null")]
     pub device_id: Option<i64>,
+}
+
+/// Um pacote para a prévia do editor — nada é gravado.
+#[derive(Debug, Clone, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct PluginPreviewInput {
+    pub package: PluginPackage,
+}
+
+/// A prévia do editor: os testes rodados (as saídas viram a tela simulada) e
+/// as listas como a tela as desenha, já convertidas do formato antigo.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct PluginPreview {
+    pub report: TestReport,
+    /// A lista da aba do equipamento.
+    pub list: Option<ItemList>,
+    /// A lista da página da frota.
+    pub fleet_list: Option<ItemList>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, TS)]

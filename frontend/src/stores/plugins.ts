@@ -9,6 +9,7 @@ import type { CredentialView } from '@/bindings/CredentialView'
 import type { DevicePluginsView } from '@/bindings/DevicePluginsView'
 import type { PluginDetail } from '@/bindings/PluginDetail'
 import type { PluginPackage } from '@/bindings/PluginPackage'
+import type { PluginPreview } from '@/bindings/PluginPreview'
 import type { PluginRunView } from '@/bindings/PluginRunView'
 import type { PluginSummary } from '@/bindings/PluginSummary'
 import type { RunStarted } from '@/bindings/RunStarted'
@@ -171,6 +172,15 @@ export const usePluginsStore = defineStore('plugins', () => {
     const detail = await fetchDetail(id)
     await afterChange(detail, refreshDevice)
     return report
+  }
+
+  /** A prévia do editor: os testes do pacote que está na tela, sem gravar nada. */
+  async function previewPackage(pkg: PluginPackage): Promise<PluginPreview> {
+    return apiService.post<PluginPreview>(
+      '/plugins/preview',
+      { package: pkg },
+      { timeoutMs: 60_000 }
+    )
   }
 
   // --- Aba do equipamento ---------------------------------------------------
@@ -390,6 +400,7 @@ export const usePluginsStore = defineStore('plugins', () => {
     lifecycle,
     acceptReview,
     runTests,
+    previewPackage,
     loadDevice,
     saveCredential,
     deleteCredential,
