@@ -26,6 +26,10 @@ labels?: { [key in string]: string },
  */
 formats?: { [key in string]: OutputFormat }, 
 /**
+ * Ordem das chaves do consolidado (ver [`PluginAction::order`]).
+ */
+order?: Array<string>, 
+/**
  * Ação de leitura que mostra, com os mesmos parâmetros, o que esta vai
  * mudar em cada equipamento — o "Pré-visualizar" antes de aplicar.
  */

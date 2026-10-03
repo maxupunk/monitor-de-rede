@@ -36,6 +36,7 @@ import { computed } from 'vue'
 import type { OutputKind } from '@/bindings/OutputKind'
 import {
   formatOutputValue,
+  orderedKeys,
   outputFormat,
   outputLabel,
   type OutputPresentation,
@@ -65,13 +66,16 @@ const rows = computed<Row[] | null>(() => {
 const columns = computed(() => {
   const keys = new Set<string>()
   for (const row of rows.value ?? []) for (const key of Object.keys(row)) keys.add(key)
-  return [...keys]
+  return orderedKeys([...keys], props.presentation)
 })
 
 const entries = computed<[string, unknown][] | null>(() => {
   const value = props.output
   if (!isRow(value) || props.kind === 'json') return null
-  return Object.entries(value)
+  return orderedKeys(Object.keys(value), props.presentation).map((key): [string, unknown] => [
+    key,
+    value[key],
+  ])
 })
 
 const text = computed(() => {

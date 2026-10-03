@@ -416,7 +416,7 @@ async fn wifi_nasce_desligado_e_liga_ao_cadastrar_um_openwrt() {
             .iter()
             .find(|app| app["slug"] == "openwrt-wifi")
             .expect("Rede Wi-Fi ligada pelo cadastro");
-        assert_eq!(wifi["title"], "Rede Wi-Fi");
+        assert_eq!(wifi["title"], "Rede Wi-Fi OpenWrt");
         let id = wifi["id"].as_i64().unwrap();
         let pagina = json_of(
             &request

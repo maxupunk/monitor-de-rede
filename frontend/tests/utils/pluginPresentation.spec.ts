@@ -7,6 +7,7 @@ import {
   followUpOf,
   formatOutputValue,
   installedPluginTabs,
+  orderedKeys,
   pluginTab,
   stepLabel,
 } from '@/utils/pluginPresentation'
@@ -160,5 +161,19 @@ describe('formato dos valores da saída', () => {
   it('valor que não cabe no formato sai como veio', () => {
     expect(formatOutputValue('16384 kB', 'bytes')).toBe('16384 kB')
     expect(formatOutputValue('ontem', 'datetime')).toBe('ontem')
+  })
+})
+
+describe('ordem das chaves na tela', () => {
+  it('segue o `order` da ação e manda o resto para o fim, na ordem em que veio', () => {
+    const keys = ['band', 'channel', 'current', 'decision', 'device']
+    expect(orderedKeys(keys, { order: ['device', 'current', 'channel'] })).toEqual([
+      'device',
+      'current',
+      'channel',
+      'band',
+      'decision',
+    ])
+    expect(orderedKeys(keys, undefined)).toEqual(keys)
   })
 })

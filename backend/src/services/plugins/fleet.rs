@@ -95,6 +95,7 @@ fn resolve_action(manifest: &PluginManifest, id: &str) -> Option<FleetAction> {
             reduce: None,
             labels: None,
             formats: None,
+            order: Vec::new(),
             preview: None,
             current: None,
         });
@@ -110,6 +111,7 @@ fn resolve_action(manifest: &PluginManifest, id: &str) -> Option<FleetAction> {
         reduce: None,
         labels: None,
         formats: None,
+        order: Vec::new(),
         preview: None,
         current: None,
     })

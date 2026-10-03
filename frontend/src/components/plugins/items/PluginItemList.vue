@@ -198,6 +198,7 @@ import {
   effectPresentation,
   formatOutputValue,
   keyLabel,
+  orderedKeys,
   outputFormat,
   outputLabel,
   stateColor,
@@ -326,7 +327,7 @@ const columns = computed(() => {
   const rest = [...keys].filter(
     (key) => key !== props.list.key && !key.startsWith('_') && hasValues(key)
   )
-  return [props.list.key, ...rest]
+  return [props.list.key, ...orderedKeys(rest, props.presentation)]
 })
 
 function columnLabel(key: string): string {

@@ -291,6 +291,9 @@ formato antigo (`panel`, `fleet.matrix`) ainda é lido, mas escreva `list`.
 - `formats`: como escrever o valor — `bytes`, `bps`, `latency` (ms), `percent`,
   `duration` (ms), `uptime` (segundos), `datetime`, `relative`, `count`,
   `state` (selo colorido);
+- `order`: a ordem das chaves na tela (colunas e campos), `["device",
+  "current", "channel"]`. A saída chega com as chaves em ordem alfabética —
+  sem `order`, "Canal sugerido" aparece antes de "Canal atual";
 - `_card`: `[#{ label, value }]` na ação de estado = linhas de resumo (cartão do
   equipamento na frota, cartões no topo do relatório). Chave começando com `_`
   é dado para a tela e não aparece como coluna.

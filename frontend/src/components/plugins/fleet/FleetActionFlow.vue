@@ -215,11 +215,22 @@
             Voltar e editar
           </v-btn>
           <v-spacer></v-spacer>
+          <!-- Nada a mudar: não há o que aplicar, então o caminho é sair. -->
           <v-btn
+            v-if="previewDone && nothingToChange"
+            color="primary"
+            variant="flat"
+            prepend-icon="mdi-check"
+            @click="close(false)"
+          >
+            Fechar
+          </v-btn>
+          <v-btn
+            v-else
             color="error"
             variant="flat"
             prepend-icon="mdi-check"
-            :disabled="!previewDone || reviewedDevices.length === 0 || nothingToChange"
+            :disabled="!previewDone || reviewedDevices.length === 0"
             :loading="busy"
             @click="applyReviewed"
           >

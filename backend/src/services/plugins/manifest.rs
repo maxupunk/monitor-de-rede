@@ -143,6 +143,11 @@ pub struct PluginAction {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub formats: Option<BTreeMap<String, OutputFormat>>,
+    /// Ordem das chaves na tela (colunas e campos). O JSON da saída chega com
+    /// as chaves em ordem alfabética; sem isto, "Canal sugerido" viria antes de
+    /// "Canal atual". Chave fora da lista vai para o fim.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub order: Vec<String>,
 }
 
 /// Com que equipamentos o plugin diz ser compatível. Todos os campos são
@@ -302,6 +307,9 @@ pub struct FleetAction {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub formats: Option<BTreeMap<String, OutputFormat>>,
+    /// Ordem das chaves do consolidado (ver [`PluginAction::order`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub order: Vec<String>,
     /// Ação de leitura que mostra, com os mesmos parâmetros, o que esta vai
     /// mudar em cada equipamento — o "Pré-visualizar" antes de aplicar.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -594,6 +602,7 @@ pub fn validate(manifest: &PluginManifest) -> Vec<String> {
         }
         validate_labels(&action.id, action.labels.as_ref(), &mut problems);
         validate_formats(&action.id, action.formats.as_ref(), &mut problems);
+        validate_order(&action.id, &action.order, &mut problems);
     }
     match manifest.action(DETECT_ACTION) {
         None => {
@@ -656,6 +665,16 @@ fn validate_formats(
     if formats.is_some_and(|formats| formats.len() > 100 || formats.keys().any(String::is_empty)) {
         problems.push(format!(
             "`formats` de `{owner}`: até 100 chaves, nenhuma vazia"
+        ));
+    }
+}
+
+/// Até 100 chaves, sem vazia nem repetida.
+fn validate_order(owner: &str, order: &[String], problems: &mut Vec<String>) {
+    let unique: HashSet<&String> = order.iter().collect();
+    if order.len() > 100 || unique.len() != order.len() || order.iter().any(String::is_empty) {
+        problems.push(format!(
+            "`order` de `{owner}`: até 100 chaves, sem vazia nem repetida"
         ));
     }
 }
@@ -749,6 +768,7 @@ fn validate_surfaces(manifest: &PluginManifest, problems: &mut Vec<String>) {
             }
             validate_labels(&action.id, action.labels.as_ref(), problems);
             validate_formats(&action.id, action.formats.as_ref(), problems);
+            validate_order(&action.id, &action.order, problems);
             if action.current.is_some() && fleet.status_action.is_none() {
                 problems.push(format!(
                     "o `current` de `{}` precisa de `fleet.statusAction`",
@@ -966,6 +986,7 @@ mod tests {
                 reduce: None,
                 labels: None,
                 formats: None,
+                order: Vec::new(),
                 preview: None,
                 current: None,
             }],

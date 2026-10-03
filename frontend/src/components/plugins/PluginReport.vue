@@ -121,6 +121,7 @@ import { computed } from 'vue'
 import {
   formatOutputValue,
   outputFormat,
+  orderedKeys,
   outputLabel,
   stateColor,
   stateLabel,
@@ -191,7 +192,7 @@ function isVisibleKey(key: string): boolean {
 function columnsOf(rows: Row[]): string[] {
   const keys = new Set<string>()
   for (const row of rows) for (const key of Object.keys(row)) if (isVisibleKey(key)) keys.add(key)
-  return [...keys]
+  return orderedKeys([...keys], props.presentation)
 }
 
 const SECTION_RANK: Record<Section['kind'], number> = {
@@ -226,7 +227,8 @@ const sections = computed<Section[]>(() => {
   const stats = props.depth === 0 ? statsOf(value._card) : []
   if (stats.length > 0) result.push({ kind: 'stats', key: '_card', stats })
   const scalars: [string, unknown][] = []
-  for (const [key, item] of Object.entries(value)) {
+  for (const key of orderedKeys(Object.keys(value), props.presentation)) {
+    const item = value[key]
     if (!isVisibleKey(key)) continue
     if (isRowList(item)) {
       result.push({
@@ -250,7 +252,10 @@ const sections = computed<Section[]>(() => {
         kind: 'kv',
         key,
         title: outputLabel(key, props.presentation?.labels),
-        entries: Object.entries(item),
+        entries: orderedKeys(Object.keys(item), props.presentation).map((name) => [
+          name,
+          item[name],
+        ]),
       })
     } else if (typeof item === 'string' && item.length > 80) {
       result.push({
@@ -264,8 +269,8 @@ const sections = computed<Section[]>(() => {
     }
   }
   if (scalars.length > 0) result.unshift({ kind: 'kv', key: '', title: '', entries: scalars })
-  // O JSON chega com as chaves em ordem alfabética: o resumo vem primeiro,
-  // depois as tabelas e os textos, e os comandos por último.
+  // O resumo vem primeiro, depois as tabelas e os textos, e os comandos por
+  // último; dentro de cada tipo, a ordem que a ação declara (`order`).
   return result.sort((a, b) => SECTION_RANK[a.kind] - SECTION_RANK[b.kind])
 })
 

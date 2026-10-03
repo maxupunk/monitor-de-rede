@@ -27,4 +27,10 @@ labels?: { [key in string]: string },
 /**
  * Como a tela escreve o valor de cada chave (`rx_bytes` → bytes).
  */
-formats?: { [key in string]: OutputFormat }, };
+formats?: { [key in string]: OutputFormat }, 
+/**
+ * Ordem das chaves na tela (colunas e campos). O JSON da saída chega com
+ * as chaves em ordem alfabética; sem isto, "Canal sugerido" viria antes de
+ * "Canal atual". Chave fora da lista vai para o fim.
+ */
+order?: Array<string>, };

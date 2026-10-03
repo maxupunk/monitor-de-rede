@@ -220,6 +220,7 @@ const STATE_COLORS: Record<string, string> = {
   desativado: 'secondary',
   criar: 'success',
   alterar: 'warning',
+  manter: 'success',
   remover: 'error',
 }
 
@@ -241,9 +242,28 @@ export type OutputLabels = Record<string, string> | undefined
  * frota) serve — as duas declaram os dois campos.
  */
 export type OutputPresentation =
-  | { labels?: Record<string, string>; formats?: Partial<Record<string, OutputFormat>> }
+  | {
+      labels?: Record<string, string>
+      formats?: Partial<Record<string, OutputFormat>>
+      /** Ordem das chaves na tela (a saída chega em ordem alfabética). */
+      order?: string[]
+    }
   | null
   | undefined
+
+/**
+ * As chaves na ordem que a ação declara (`order`); as de fora vão para o fim,
+ * na ordem em que vieram.
+ */
+export function orderedKeys(keys: string[], presentation?: OutputPresentation): string[] {
+  const order = presentation?.order ?? []
+  if (order.length === 0) return keys
+  const rank = (key: string) => {
+    const index = order.indexOf(key)
+    return index < 0 ? order.length : index
+  }
+  return [...keys].sort((a, b) => rank(a) - rank(b))
+}
 
 /** O formato declarado para a chave, se há. */
 export function outputFormat(

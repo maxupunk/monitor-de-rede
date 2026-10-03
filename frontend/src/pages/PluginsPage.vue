@@ -124,7 +124,7 @@
             </v-chip>
           </template>
           <template #[`item.actions`]="{ item }">
-            <div class="d-flex justify-end ga-1">
+            <div class="d-flex align-center justify-end ga-1">
               <v-btn
                 v-if="item.status === 'quarantine'"
                 size="small"

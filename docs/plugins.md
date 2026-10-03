@@ -106,7 +106,8 @@ escolhe e configura peças, e o resultado sai igual ao do resto do sistema.
   `showWhen`/`hideWhen`). O formato antigo (`panel`, `fleet.matrix`) continua
   aceito e é convertido na leitura — o JSON gravado não muda, então o checksum
   de quem já instalou também não.
-- **A saída**: `labels` (título de cada chave), `formats` (`bytes`, `bps`,
+- **A saída**: `labels` (título de cada chave), `order` (a ordem das chaves
+  na tela — a saída chega em ordem alfabética), `formats` (`bytes`, `bps`,
   `latency`, `percent`, `duration`, `uptime`, `datetime`, `relative`, `count`,
   `state` — escritos com os formatadores do sistema) e `_card` (linhas de
   resumo: cartão do equipamento na frota, cartões no topo do relatório).
@@ -261,10 +262,16 @@ hora — mudança feita à mão aparece na próxima leitura.
   **usteer** se marcado.
 - **Mesh 802.11s** entre os roteadores, numa banda, com senha SAE.
 - **Rádios e canais**: canal, largura, potência, ligar/desligar e país; campo
-  vazio mantém. **Planejar canais** varre os vizinhos de cada roteador
-  (`iwinfo scan`) e sugere o canal menos disputado sem repetir entre os
-  roteadores (2,4 GHz: 1/6/11; 5 GHz: 36/44/149/157); aceitar roda **Rádios e
-  canais** com o canal de cada um.
+  vazio mantém. **Otimizar canais** varre os vizinhos de cada roteador
+  (`iwinfo scan`) e lê os canais que cada rádio pode usar no país configurado
+  (`iwinfo freqlist`; os restritos — radar/DFS — ficam de fora). Só sugere
+  canal permitido (2,4 GHz: 1/6/11; 5 GHz: 36–48 e 149–165), considera a
+  largura de cada rádio, não repete o canal de outro roteador da frota e
+  **mantém o canal atual** quando ele já é o mais limpo. O plano mostra, por
+  rádio, o canal atual e os vizinhos nele, o canal sugerido e os vizinhos nele
+  ("2 rede(s) vizinha(s), a mais forte com −45 dBm") e a decisão
+  (**Manter**/**Alterar**); aceitar roda **Rádios e canais** com o canal de
+  cada um.
 - **Acesso por SSH** (e não ubus por HTTP). Medido num OpenWrt: a leitura de
   estado são 2 comandos, ~0,55 s por roteador, numa sessão SSH só (45–120 ms
   por comando). O ubus por HTTP responde em 5–50 ms por chamada, mas depende

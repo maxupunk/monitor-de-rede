@@ -85,4 +85,31 @@ describe('PluginReport.vue', () => {
     expect(text).not.toContain('90061')
     expect(text).toContain('Up')
   })
+
+  it('as colunas seguem a ordem que a ação declara, não a alfabética', () => {
+    const wrapper = mount(PluginReport, {
+      props: {
+        output: {
+          assignments: [{ band: '5 GHz', channel: '40', current: '36', device: 'AP Sala' }],
+        },
+        presentation: {
+          labels: {
+            device: 'Roteador',
+            current: 'Canal atual',
+            channel: 'Canal sugerido',
+            band: 'Banda',
+          },
+          order: ['device', 'band', 'current', 'channel'],
+        },
+      },
+      global: { stubs },
+    })
+
+    expect(wrapper.findAll('th').map((th) => th.text())).toEqual([
+      'Roteador',
+      'Banda',
+      'Canal atual',
+      'Canal sugerido',
+    ])
+  })
 })
