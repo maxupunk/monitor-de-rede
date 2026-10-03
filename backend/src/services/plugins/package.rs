@@ -300,6 +300,10 @@ fn validate_tests(package: &PluginPackage, problems: &mut Vec<String>) {
                     action.id
                 ));
             }
+            Some(action) if action.reveals => problems.push(format!(
+                "o teste funcional não pode rodar `{}`: revela um segredo (e a validação grava o resultado)",
+                action.id
+            )),
             Some(_) => {}
         }
     }
@@ -313,6 +317,7 @@ fn validate_tests(package: &PluginPackage, problems: &mut Vec<String>) {
             problems.push(format!("a ação `{}` não tem teste unitário", action.id));
         }
         if action.effect == Effect::Read
+            && !action.reveals
             && !package
                 .tests
                 .functional

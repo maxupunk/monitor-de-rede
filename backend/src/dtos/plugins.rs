@@ -147,6 +147,25 @@ pub struct PluginSaveInput {
     pub device_id: Option<i64>,
 }
 
+/// O formulário de onde a ação que revela tira os parâmetros (o nome da rede…).
+#[derive(Debug, Clone, Default, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct RevealInput {
+    #[serde(default)]
+    #[ts(type = "Record<string, unknown>")]
+    pub params: Value,
+}
+
+/// O segredo revelado — só nesta resposta, nunca gravado nem publicado.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct RevealResult {
+    #[ts(type = "Record<string, unknown>")]
+    pub output: Value,
+}
+
 /// Um pacote para a prévia do editor — nada é gravado.
 #[derive(Debug, Clone, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]

@@ -153,7 +153,7 @@ pub fn cancel(run_id: i64) -> bool {
         .is_some()
 }
 
-async fn transport_for(
+pub(super) async fn transport_for(
     ctx: &AppContext,
     via_probe_id: Option<i64>,
 ) -> AppResult<Arc<dyn DeviceTransport>> {
@@ -215,6 +215,11 @@ pub async fn prepare(ctx: &AppContext, spec: RunSpec) -> AppResult<Prepared> {
     let mut stored_params = spec.params.clone();
     if spec.action != VALIDATION_ACTION {
         let action = action_of(&package, &spec.action)?;
+        // Segredo revelado não passa por aqui: esta execução grava saída e
+        // transcrição e publica no SSE (ver `reveal`).
+        if action.reveals {
+            return Err(AppError::business_rule(super::reveal::ONLY_HERE));
+        }
         spec.params = params::validate(action.params.as_ref(), &spec.params)
             .map_err(|errors| AppError::validation(errors.join("; ")))?;
         secret_params = params::secret_values(action.params.as_ref(), &spec.params);
@@ -315,7 +320,7 @@ pub async fn load_library<C: ConnectionTrait>(
     Ok(library)
 }
 
-fn device_ip(device: &devices::Model) -> AppResult<String> {
+pub(super) fn device_ip(device: &devices::Model) -> AppResult<String> {
     let ip = device
         .ip_address
         .clone()
@@ -398,7 +403,7 @@ async fn audit_execution<C: ConnectionTrait>(
         .await;
 }
 
-fn device_info(device: &devices::Model) -> DeviceInfo {
+pub(super) fn device_info(device: &devices::Model) -> DeviceInfo {
     let facts = DeviceFacts::from_device(device);
     DeviceInfo {
         id: device.id,
@@ -632,6 +637,11 @@ async fn validate_suite(
         if action.effect == Effect::Write && !action.safe_to_retest {
             cases.push(json!({ "action": test.action, "passed": false,
                                "message": "ação de escrita fora da suíte funcional" }));
+            continue;
+        }
+        if action.reveals {
+            cases.push(json!({ "action": test.action, "passed": false,
+                               "message": "ação que revela segredo fora da suíte funcional" }));
             continue;
         }
         let params = match params::validate(action.params.as_ref(), &test.params) {

@@ -196,6 +196,125 @@ async fn previa_roda_os_testes_sem_gravar_e_traz_as_sugestoes() {
     .await;
 }
 
+/// Um plugin com uma ação que revela segredo (ex.: a senha atual de uma rede).
+fn package_with_secret() -> Value {
+    json!({
+        "format": 1,
+        "manifest": {
+            "slug": "segredo-teste", "name": "Segredo de teste", "version": "1.0.0",
+            "transports": ["http"],
+            "actions": [
+                { "id": "detect", "title": "Detectar", "effect": "read", "output": "kv" },
+                { "id": "ler_segredo", "title": "Ler o segredo", "effect": "read", "output": "kv",
+                  "reveals": true,
+                  "params": { "type": "object",
+                              "properties": { "campo": { "type": "string", "pattern": "[a-z]+" } },
+                              "required": ["campo"] } }
+            ]
+        },
+        "script": "fn detect(device, params) { device.get(\"/\"); #{ firmware: \"1.0\" } }
+    fn ler_segredo(device, params) { device.get(\"/\"); #{ segredo: \"abc-\" + params.campo } }",
+        "usage": "## Detectar
+Lê a página.
+## Ler o segredo
+Revela o segredo para quem pediu.",
+        "tests": {
+            "unit": [
+                { "action": "detect", "fixtures": [ { "http": "GET /", "status": 200, "body": "ok" } ],
+                  "expect": { "firmware": "1.0" } },
+                { "action": "ler_segredo", "params": { "campo": "x" },
+                  "fixtures": [ { "http": "GET /", "status": 200, "body": "ok" } ],
+                  "expect": { "segredo": "abc-x" } }
+            ],
+            "functional": [ { "action": "detect", "expectKeys": ["firmware"] } ]
+        }
+    })
+}
+
+#[tokio::test]
+#[serial]
+async fn segredo_revelado_so_para_quem_pediu_e_sem_rastro() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        session_with_role(&mut request, &ctx, Role::Admin).await;
+        let port = web_device().await;
+        let device = device(&ctx).await;
+        request
+            .put(&format!("/api/devices/{}/credentials", device.id))
+            .json(
+                &json!({ "kind": "http", "username": "admin", "secret": "senha-do-roteador",
+                           "storage": "vault", "port": port }),
+            )
+            .await
+            .assert_status_success();
+        let criado = json_of(
+            &request
+                .post("/api/plugins")
+                .json(&json!({ "package": package_with_secret() }))
+                .await
+                .text(),
+        );
+        let id = criado["summary"]["id"].as_i64().unwrap();
+        let reveal = format!("/api/devices/{}/plugins/{id}/reveal/ler_segredo", device.id);
+
+        // Rascunho ainda não revela: sem aprovação passo a passo numa requisição.
+        request
+            .post(&reveal)
+            .json(&json!({ "params": { "campo": "x" } }))
+            .await
+            .assert_status_bad_request();
+        let testes = json_of(
+            &request
+                .post(&format!("/api/plugins/{id}/test"))
+                .await
+                .text(),
+        );
+        assert_eq!(testes["passed"], true, "{testes}");
+        request
+            .post(&format!("/api/plugins/{id}/promote"))
+            .await
+            .assert_status_success();
+        request
+            .post(&format!("/api/devices/{}/plugins/{id}/install", device.id))
+            .await
+            .assert_status_success();
+
+        // Os valores do formulário vão juntos; a ação pega o que conhece.
+        let revelado = request
+            .post(&reveal)
+            .json(&json!({ "params": { "campo": "x", "encryption": "psk2" } }))
+            .await;
+        revelado.assert_status_success();
+        assert_eq!(json_of(&revelado.text())["output"]["segredo"], "abc-x");
+
+        // A execução comum (aba, lote, IA) recusa a ação que revela.
+        let comum = request
+            .post(&format!(
+                "/api/devices/{}/plugins/{id}/actions/ler_segredo",
+                device.id
+            ))
+            .json(&json!({ "params": { "campo": "x" } }))
+            .await;
+        comum.assert_status_bad_request();
+        assert!(comum.text().contains("tela de edição"), "{}", comum.text());
+
+        // E nada fica no histórico do equipamento.
+        let aba = request
+            .get(&format!("/api/devices/{}/plugins", device.id))
+            .await;
+        assert!(!aba.text().contains("abc-x"));
+        let execucoes = json_of(&aba.text())["runs"].clone();
+        assert!(
+            execucoes
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|run| run["action"] != "ler_segredo"),
+            "{execucoes}"
+        );
+    })
+    .await;
+}
+
 #[tokio::test]
 #[serial]
 async fn operador_consulta_mas_nao_opera_plugin() {

@@ -57,6 +57,7 @@
             :model-value="values"
             :schema="request.action.params ?? {}"
             :suggestions="suggestions"
+            :notes="secrets.notes.value"
             :only="onlyFields"
             compact
             class="mb-2"
@@ -254,7 +255,9 @@ import type { BatchDevice } from '@/bindings/BatchDevice'
 import type { FleetMember } from '@/bindings/FleetMember'
 import type { FleetSpec } from '@/bindings/FleetSpec'
 import type { PluginAction } from '@/bindings/PluginAction'
+import { useSecretReveal, withoutUnchanged } from '@/composables/useSecretReveal'
 import { usePluginAppsStore } from '@/stores/pluginApps'
+import { usePluginsStore } from '@/stores/plugins'
 import {
   currentByDevice,
   outputsByDevice,
@@ -294,6 +297,11 @@ const form = ref<{ validate: () => Promise<boolean> } | null>(null)
 const step = ref<Step>('form')
 const selected = ref<number[]>([])
 const values = ref<Record<string, unknown>>({})
+/** Editar um item: a senha atual vem do equipamento para o operador conferir. */
+const pluginsStore = usePluginsStore()
+const secrets = useSecretReveal((deviceId, action, params) =>
+  pluginsStore.revealSecret(deviceId, props.pluginId, action, params)
+)
 const edited = ref(false)
 const choosing = ref(false)
 const confirmWrite = ref(false)
@@ -462,10 +470,27 @@ watch(
       : [...readyIds.value]
     choosing.value = selected.value.length !== readyIds.value.length
     values.value = startingValues()
+    secrets.reset()
+    if (request.initialParams && selected.value.length > 0) void revealSecrets(request)
     if (request.action.effect === 'read' && !hasFields.value) void runFromForm()
   },
   { immediate: true }
 )
+
+/**
+ * Edição de um item que tem segredo (a senha da rede): lê o atual do primeiro
+ * equipamento marcado. Só preenche campo que o operador ainda não tocou.
+ */
+async function revealSecrets(request: FlowRequest) {
+  const member = props.members.find((item) => item.deviceId === selected.value[0])
+  if (!member) return
+  const filled = await secrets.load(request.action.params, { ...values.value }, member)
+  if (props.request !== request) return
+  const untouched = Object.fromEntries(
+    Object.entries(filled).filter(([name]) => !values.value[name])
+  )
+  values.value = { ...values.value, ...untouched }
+}
 
 function startingValues(): Record<string, unknown> {
   const schema = props.request?.action.params
@@ -531,7 +556,10 @@ async function readNow() {
 }
 
 function params(): Record<string, unknown> {
-  return paramsOf(props.request?.action.params, values.value)
+  return withoutUnchanged(
+    paramsOf(props.request?.action.params, values.value),
+    secrets.revealed.value
+  )
 }
 
 async function attempt(work: () => Promise<void>) {

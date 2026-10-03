@@ -113,7 +113,11 @@
      acesso da IA a equipamento é `ToolKind::DeviceAccess`, confirmado a cada
      chamada — a única exceção é o modo "Aceitar automaticamente" aceito com termo
      para aquela conversa e aquele equipamento. Plugin importado entra em
-     quarentena; não crie atalho que o instale sem a revisão.
+     quarentena; não crie atalho que o instale sem a revisão. Ação com
+     `reveals: true` (a senha atual de uma rede, para conferir ao editar) só roda
+     por `plugins::reveal`: na hora, para o administrador que pediu, sem gravar
+     execução, saída ou transcrição e sem publicar no SSE. `runs::prepare` a
+     recusa — não abra outro caminho (lote, IA, validação) para ela.
    - Controller extrai, valida, delega e serializa. Regra de negócio vive em
      `src/services/`, testável sem HTTP.
 

@@ -37,6 +37,8 @@ export interface SchemaField {
   group?: string
   /** Só aparece (e só vale) quando a regra vale — ex.: a senha some na rede aberta. */
   visibleWhen?: VisibleWhen
+  /** Ação que lê o valor atual deste segredo, para conferir ao editar. */
+  reveal?: string
   secret: boolean
   required: boolean
   rules: Rule[]
@@ -127,6 +129,7 @@ export function fieldsOf(schema: unknown): SchemaField[] {
       widget: widgetOf(property.widget),
       group: typeof property.group === 'string' ? property.group : undefined,
       visibleWhen: visibleWhenOf(property.visibleWhen),
+      reveal: typeof property.reveal === 'string' ? property.reveal : undefined,
       secret: property.secret === true,
       required: required.includes(name),
       rules:
@@ -149,6 +152,13 @@ function sortByOrder(fields: SchemaField[], order: unknown): SchemaField[] {
     return index < 0 ? order.length : index
   }
   return [...fields].sort((a, b) => position(a.name) - position(b.name))
+}
+
+/** Os segredos que o formulário lê do equipamento ao editar (`reveal`). */
+export function revealFields(schema: unknown): { name: string; action: string }[] {
+  return fieldsOf(schema).flatMap((field) =>
+    field.secret && field.reveal ? [{ name: field.name, action: field.reveal }] : []
+  )
 }
 
 /** Os valores com os padrões do esquema — é sobre eles que `visibleWhen` decide. */

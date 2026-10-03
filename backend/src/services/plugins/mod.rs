@@ -31,6 +31,7 @@ pub mod item_list;
 pub mod manifest;
 pub mod package;
 pub mod params;
+pub mod reveal;
 pub mod review;
 pub mod runs;
 pub mod runtime;

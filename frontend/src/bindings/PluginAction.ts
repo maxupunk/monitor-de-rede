@@ -20,6 +20,13 @@ params?: Record<string, unknown>, output: OutputKind,
  */
 safeToRetest: boolean, 
 /**
+ * Leitura que revela um segredo do equipamento (a senha atual de uma
+ * rede, para conferir ao editar). Só roda pelo caminho de
+ * [`super::reveal`]: na hora, para quem pediu, sem gravar nem publicar —
+ * nunca em lote, pela IA ou na validação funcional.
+ */
+reveals?: boolean, 
+/**
  * Títulos das chaves da saída na tela (`clients` → "Clientes"). A chave
  * continua o contrato com o script; o título é só apresentação.
  */

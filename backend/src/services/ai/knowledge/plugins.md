@@ -262,6 +262,7 @@ no navegador. São três peças:
 | `advanced` | vai para "Opções avançadas", fechado |
 | `hidden` | fora da tela; o valor ainda vai (ex.: o nome atual ao renomear) |
 | `secret` | senha: mascarada, fora do histórico |
+| `reveal` | em campo `secret`: a ação (`reveals: true`) que lê o valor atual para o operador conferir ao editar. Essa ação só roda pela tela, para quem pediu, sem gravar — você (IA) não consegue executá-la |
 | `source` | oferece os valores da ação de estado (`"networks.ssid"`) |
 
 Até **5 campos à vista por seção**; o resto em `advanced` ou em outra `group`.

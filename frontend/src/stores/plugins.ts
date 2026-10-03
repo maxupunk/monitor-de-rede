@@ -10,6 +10,7 @@ import type { DevicePluginsView } from '@/bindings/DevicePluginsView'
 import type { PluginDetail } from '@/bindings/PluginDetail'
 import type { PluginPackage } from '@/bindings/PluginPackage'
 import type { PluginPreview } from '@/bindings/PluginPreview'
+import type { RevealResult } from '@/bindings/RevealResult'
 import type { PluginRunView } from '@/bindings/PluginRunView'
 import type { PluginSummary } from '@/bindings/PluginSummary'
 import type { RunStarted } from '@/bindings/RunStarted'
@@ -181,6 +182,24 @@ export const usePluginsStore = defineStore('plugins', () => {
       { package: pkg },
       { timeoutMs: 60_000 }
     )
+  }
+
+  /**
+   * O segredo que a ação lê (a senha atual de uma rede), só para esta tela:
+   * o backend não grava nem publica — fica fora do histórico e do SSE.
+   */
+  async function revealSecret(
+    deviceId: number,
+    pluginId: number,
+    action: string,
+    params: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
+    const result = await apiService.post<RevealResult>(
+      `/devices/${deviceId}/plugins/${pluginId}/reveal/${action}`,
+      { params },
+      { timeoutMs: 30_000 }
+    )
+    return result.output
   }
 
   // --- Aba do equipamento ---------------------------------------------------
@@ -401,6 +420,7 @@ export const usePluginsStore = defineStore('plugins', () => {
     acceptReview,
     runTests,
     previewPackage,
+    revealSecret,
     loadDevice,
     saveCredential,
     deleteCredential,

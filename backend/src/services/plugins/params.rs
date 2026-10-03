@@ -50,6 +50,7 @@ const PROPERTY_KEYS: &[&str] = &[
     "widget",
     "visibleWhen",
     "group",
+    "reveal",
     "items",
     "minItems",
     "maxItems",
@@ -154,6 +155,15 @@ fn validate_property_schema(
     }
     // `widget` (o componente do campo) e `group` (a seção do formulário).
     widgets::validate_presentation(name, property)?;
+    // `reveal`: a ação que lê o valor atual de um segredo (ver
+    // `plugins::reveal`) — só faz sentido num campo `secret`.
+    if let Some(reveal) = property.get("reveal") {
+        if !reveal.is_string() || property.get("secret").and_then(Value::as_bool) != Some(true) {
+            return Err(format!(
+                "`{name}`: `reveal` é o id de uma ação e só vale em campo `secret`"
+            ));
+        }
+    }
     // `source`: o campo oferece os valores que os equipamentos têm — uma lista
     // da saída da ação de estado e a chave do item (`"networks.ssid"`).
     if let Some(source) = property.get("source") {
@@ -557,6 +567,16 @@ pub fn unconstrained_strings(schema: Option<&Value>) -> Vec<String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn reveal_so_vale_em_campo_secreto() {
+        let ok = json!({ "type": "object", "properties": {
+            "key": { "type": "string", "secret": true, "reveal": "reveal_key" } } });
+        assert!(validate_schema(&ok).is_ok());
+        let aberto = json!({ "type": "object", "properties": {
+            "nome": { "type": "string", "reveal": "reveal_key" } } });
+        assert!(validate_schema(&aberto).unwrap_err().contains("secret"));
+    }
 
     #[test]
     fn campo_invisivel_nao_e_obrigatorio_nem_enviado_e_o_componente_confere_o_valor() {

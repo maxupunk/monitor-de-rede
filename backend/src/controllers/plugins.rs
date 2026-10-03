@@ -16,8 +16,8 @@ use crate::{
         optional_body,
         plugins::{
             ApprovalInput, AutoAcceptInput, AutoAcceptQuery, BatchStarted, FleetIdentifyInput,
-            FleetRunInput, PluginPreviewInput, PluginSaveInput, ReviewAcceptInput, RunActionInput,
-            RunStarted, SessionSecretInput, SettingsInput,
+            FleetRunInput, PluginPreviewInput, PluginSaveInput, RevealInput, RevealResult,
+            ReviewAcceptInput, RunActionInput, RunStarted, SessionSecretInput, SettingsInput,
         },
     },
     models::plugins as plugin_rows,
@@ -28,7 +28,7 @@ use crate::{
             credentials::{self, CredentialInput},
             fleet, gate,
             manifest::TransportKind,
-            runs,
+            reveal, runs,
             service::{self, source},
             settings::{self as plugin_settings, Scope},
         },
@@ -328,6 +328,20 @@ async fn run_action(
     )
     .await?;
     Ok((StatusCode::ACCEPTED, Json(RunStarted { run_id })).into_response())
+}
+
+/// O segredo que a ação lê (a senha atual de uma rede), só para quem pediu.
+async fn reveal_secret(
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Path((device_id, plugin_id, action)): Path<(i64, i64, String)>,
+    body: String,
+) -> AppResult<Response> {
+    let user = authenticated_user(&ctx, &headers).await?;
+    let input: RevealInput = optional_body(&body);
+    let device = actions::device(&ctx, device_id).await?;
+    let output = reveal::reveal(&ctx, &device, plugin_id, &action, &input.params, user.id).await?;
+    Ok(format::json(RevealResult { output })?)
 }
 
 async fn validate(
@@ -698,6 +712,10 @@ pub fn routes() -> Routes {
             post(run_action),
         )
         .add("/devices/{id}/plugins/{plugin_id}/validate", post(validate))
+        .add(
+            "/devices/{id}/plugins/{plugin_id}/reveal/{action}",
+            post(reveal_secret),
+        )
         .add(
             "/devices/{id}/plugins/{plugin_id}/install",
             post(install).delete(uninstall),

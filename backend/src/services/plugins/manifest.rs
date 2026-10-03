@@ -134,6 +134,12 @@ pub struct PluginAction {
     /// Ação de escrita idempotente, que pode entrar no teste funcional.
     #[serde(default)]
     pub safe_to_retest: bool,
+    /// Leitura que revela um segredo do equipamento (a senha atual de uma
+    /// rede, para conferir ao editar). Só roda pelo caminho de
+    /// [`super::reveal`]: na hora, para quem pediu, sem gravar nem publicar —
+    /// nunca em lote, pela IA ou na validação funcional.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reveals: bool,
     /// Títulos das chaves da saída na tela (`clients` → "Clientes"). A chave
     /// continua o contrato com o script; o título é só apresentação.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -593,6 +599,13 @@ pub fn validate(manifest: &PluginManifest) -> Vec<String> {
             if let Err(error) = params::validate_schema(schema) {
                 problems.push(format!("ação `{}`: {error}", action.id));
             }
+            validate_reveals(manifest, &action.id, schema, &mut problems);
+        }
+        if action.reveals && action.effect != Effect::Read {
+            problems.push(format!(
+                "a ação `{}` revela segredo (`reveals`) e precisa ser de leitura",
+                action.id
+            ));
         }
         if action.safe_to_retest && action.effect == Effect::Read {
             problems.push(format!(
@@ -666,6 +679,40 @@ fn validate_formats(
         problems.push(format!(
             "`formats` de `{owner}`: até 100 chaves, nenhuma vazia"
         ));
+    }
+}
+
+/// Campo com `reveal`: a ação citada revela segredo e o formulário tem tudo de
+/// que ela precisa (o nome da rede, por exemplo).
+fn validate_reveals(
+    manifest: &PluginManifest,
+    owner: &str,
+    schema: &Value,
+    problems: &mut Vec<String>,
+) {
+    let Some(properties) = schema.get("properties").and_then(Value::as_object) else {
+        return;
+    };
+    for (name, property) in properties {
+        let Some(target) = property.get("reveal").and_then(Value::as_str) else {
+            continue;
+        };
+        match manifest.action(target) {
+            Some(action) if action.reveals => {
+                let (_, required) = item_list::param_names(action);
+                if let Some(missing) = required
+                    .iter()
+                    .find(|param| !properties.contains_key(*param))
+                {
+                    problems.push(format!(
+                        "`{owner}.{name}`: a ação `{target}` precisa de `{missing}`, que o formulário não tem"
+                    ));
+                }
+            }
+            _ => problems.push(format!(
+                "`{owner}.{name}`: `reveal` cita `{target}`, que não é uma ação com `reveals: true`"
+            )),
+        }
     }
 }
 
@@ -950,6 +997,50 @@ mod tests {
             problems.iter().all(|p| !p.contains("`list")),
             "o formato antigo é apontado pelo próprio nome: {problems:?}"
         );
+    }
+
+    #[test]
+    fn revelar_segredo_e_leitura_e_o_campo_cita_uma_acao_que_revela() {
+        let mut manifesto: PluginManifest = serde_json::from_value(json!({
+            "slug": "segredos", "name": "Segredos", "version": "1.0.0", "transports": ["ssh"],
+            "actions": [
+                { "id": "detect", "title": "Detectar", "effect": "read" },
+                { "id": "reveal_key", "title": "Ler a senha", "effect": "read", "reveals": true,
+                  "params": { "type": "object", "properties": { "ssid": { "type": "string", "pattern": "[a-z]+" } },
+                              "required": ["ssid"] } },
+                { "id": "set_net", "title": "Rede", "effect": "write",
+                  "params": { "type": "object", "properties": {
+                      "ssid": { "type": "string", "pattern": "[a-z]+" },
+                      "key": { "type": "string", "secret": true, "reveal": "reveal_key" } } } }
+            ]
+        }))
+        .unwrap();
+        manifesto.matcher = MatchRule::default();
+        assert!(
+            validate(&manifesto).is_empty(),
+            "{:?}",
+            validate(&manifesto)
+        );
+
+        manifesto.actions[1].effect = Effect::Write;
+        manifesto.actions[2].params = Some(json!({ "type": "object", "properties": {
+            "key": { "type": "string", "secret": true, "reveal": "reveal_key" } } }));
+        let problems = validate(&manifesto);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("precisa ser de leitura")),
+            "{problems:?}"
+        );
+        assert!(
+            problems.iter().any(|p| p.contains("precisa de `ssid`")),
+            "{problems:?}"
+        );
+
+        manifesto.actions[1].reveals = false;
+        assert!(validate(&manifesto)
+            .iter()
+            .any(|p| p.contains("não é uma ação com `reveals: true`")));
     }
 
     #[test]

@@ -8,6 +8,7 @@
       :disabled="disabled"
       :compact="compact"
       :suggestions="suggestions"
+      :notes="notes"
       @update="set"
     />
     <v-expansion-panels v-if="advanced.length > 0" variant="accordion" class="mt-2">
@@ -26,6 +27,7 @@
             :disabled="disabled"
             :compact="compact"
             :suggestions="suggestions"
+            :notes="notes"
             @update="set"
           />
         </v-expansion-panel-text>
@@ -47,6 +49,8 @@ const props = defineProps<{
   compact?: boolean
   /** Valores que o campo oferece (ex.: as redes que os roteadores têm). */
   suggestions?: Record<string, string[]>
+  /** Texto por campo no lugar da dica (ex.: "Senha atual, lida agora de AP Sala"). */
+  notes?: Record<string, string>
   /** Só estes campos (ex.: os rádios que os equipamentos têm); sem lista, todos. */
   only?: string[]
 }>()

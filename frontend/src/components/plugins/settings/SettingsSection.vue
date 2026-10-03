@@ -13,6 +13,7 @@
         :disabled="disabled"
         :compact="compact"
         :suggestions="suggestions?.[field.name]"
+        :note="notes?.[field.name]"
         @update="(next) => emit('update', field.name, next)"
       />
     </v-row>
@@ -30,6 +31,7 @@ defineProps<{
   disabled?: boolean
   compact?: boolean
   suggestions?: Record<string, string[]>
+  notes?: Record<string, string>
 }>()
 
 const emit = defineEmits<{ update: [name: string, value: unknown] }>()

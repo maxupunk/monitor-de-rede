@@ -127,6 +127,8 @@ const props = defineProps<{
   compact?: boolean
   /** Valores oferecidos (o campo vira uma lista em que também se digita). */
   suggestions?: string[]
+  /** Texto no lugar da dica (de onde veio o valor, por que não veio). */
+  note?: string
 }>()
 
 const emit = defineEmits<{ update: [value: unknown] }>()
@@ -159,6 +161,7 @@ const inputType = computed(() => {
  * isso vale a do esquema (num parâmetro, ex.: "vazio = manter a do roteador").
  */
 const hint = computed(() => {
+  if (props.note) return props.note
   if (props.field.secret && props.value === SECRET_MASK) {
     return 'Guardada cifrada. Deixe como está para manter, ou digite uma nova.'
   }

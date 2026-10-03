@@ -251,11 +251,25 @@ hora — mudança feita à mão aparece na próxima leitura.
   cada rádio, redes, clientes); clicar abre **Rádios e canais** daquele
   roteador, já com o que ele tem — canais e larguras numa lista, "Manter como
   está" e "Automático".
-- **Senha**: vazia mantém a do roteador. As senhas do Wi-Fi **não saem do
-  roteador** — a leitura vem com elas mascaradas (`sed` no próprio roteador) e,
-  ao levar uma rede para outra banda, a senha é copiada lá dentro
-  (`$(uci -q get …)`). Só a senha nova digitada passa pela central, como
-  parâmetro secreto.
+- **Senha**: as senhas do Wi-Fi **ficam no roteador** — a leitura de estado
+  vem com elas mascaradas (`sed` no próprio roteador) e, ao levar uma rede para
+  outra banda, a senha é copiada lá dentro (`$(uci -q get …)`). A senha nova
+  digitada passa pela central como parâmetro secreto. Ao **editar uma rede**, a
+  senha atual vem preenchida (mascarada, com "mostrar") para conferir: o campo
+  tem `reveal` e a ação `reveal_key` (`reveals: true`) lê o valor de um
+  roteador na hora, só para o administrador que abriu, pelo caminho próprio
+  (`POST /api/devices/{id}/plugins/{plugin}/reveal/{ação}`) — não grava
+  execução, saída nem transcrição, não publica no SSE, a IA e o lote não
+  conseguem rodá-la, e a auditoria registra que a senha foi revelada (sem o
+  valor). Se o operador não muda a senha, ela não é reenviada.
+- **Segurança**: WPA2/WPA3, WPA2, WPA3, **aberta protegida (OWE)** — sem
+  senha, mas com a conexão de cada aparelho criptografada (802.11w
+  obrigatório; exige o `wpad` completo, e a revisão avisa quando falta) — ou
+  aberta.
+- **Rede do roteador** (avançado): a rede interna onde os aparelhos entram
+  (`lan` é a principal; `guest` para visitantes, com "Isolar os aparelhos"). O
+  campo sugere as redes que o roteador tem (`uci show network`, sem `wan` e
+  `loopback`).
 - **Roaming** por rede: 802.11r (mobility domain derivado do SSID, igual em
   todos os roteadores), 802.11k e 802.11v. **Preparar roaming e usteer** troca
   o `wpad-basic` pelo `wpad-mbedtls` (pelo Gerenciador de pacotes) e instala o
