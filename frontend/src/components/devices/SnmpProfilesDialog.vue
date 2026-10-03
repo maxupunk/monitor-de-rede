@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import CodeTextarea from '@/components/CodeTextarea.vue'
 import { useSnmpProfilesStore, type SnmpDeviceProfile } from '@/stores/snmpProfiles'
 
 const props = defineProps<{
@@ -156,7 +157,7 @@ async function deleteProfile(profile: SnmpDeviceProfile) {
         <v-btn icon="mdi-close" variant="text" size="small" @click="closeDialog"></v-btn>
       </v-card-title>
 
-      <v-tabs v-model="activeTab" bg-color="surface" color="primary">
+      <v-tabs v-model="activeTab" bg-color="surface" color="primary" class="flex-0-0">
         <v-tab value="list" prepend-icon="mdi-format-list-bulleted"> Perfis Disponíveis </v-tab>
         <v-tab value="create" prepend-icon="mdi-code-json">
           Cadastrar / Importar Perfil (JSON)
@@ -348,14 +349,11 @@ async function deleteProfile(profile: SnmpDeviceProfile) {
               {{ jsonError }}
             </v-alert>
 
-            <v-textarea
+            <CodeTextarea
               v-model="jsonEditorContent"
-              variant="outlined"
-              rows="16"
-              class="font-monospace"
               placeholder="Cole o JSON do perfil aqui..."
               hide-details
-            ></v-textarea>
+            ></CodeTextarea>
 
             <div class="d-flex justify-end ga-2 mt-4" style="gap: 8px">
               <v-btn variant="text" @click="activeTab = 'list'"> Cancelar </v-btn>
@@ -383,12 +381,6 @@ async function deleteProfile(profile: SnmpDeviceProfile) {
 </template>
 
 <style scoped>
-.font-monospace :deep(textarea) {
-  font-family:
-    SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace !important;
-  font-size: 0.85rem;
-}
-
 .text-xxs {
   font-size: 0.7rem;
 }

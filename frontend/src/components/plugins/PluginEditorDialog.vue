@@ -18,11 +18,11 @@
         </v-chip>
       </v-card-title>
 
-      <v-alert v-if="readonly" type="info" variant="tonal" density="compact" class="mx-4">
+      <v-alert v-if="readonly" type="info" variant="tonal" density="compact" class="mx-4 flex-0-0">
         Plugins embutidos não são editados. Duplique-o para criar uma versão sua.
       </v-alert>
 
-      <v-tabs v-model="tab" color="primary" density="comfortable" show-arrows>
+      <v-tabs v-model="tab" color="primary" density="comfortable" show-arrows class="flex-0-0">
         <v-tab value="manifest" prepend-icon="mdi-card-text-outline">Manifesto</v-tab>
         <v-tab value="script" prepend-icon="mdi-code-braces">Script</v-tab>
         <v-tab value="usage" prepend-icon="mdi-book-open-variant">Uso</v-tab>
@@ -38,43 +38,31 @@
         <v-progress-linear v-if="loading" indeterminate color="primary"></v-progress-linear>
         <v-window v-else v-model="tab">
           <v-window-item value="manifest">
-            <v-textarea
+            <CodeTextarea
               v-model="manifestText"
               :readonly="readonly"
               :error-messages="jsonError(manifestText)"
-              auto-grow
-              rows="16"
-              variant="outlined"
-              class="font-mono code-area"
               hint="slug, name, version, transports, match e actions (ver a skill de autoria)"
               persistent-hint
-            ></v-textarea>
+            ></CodeTextarea>
           </v-window-item>
           <v-window-item value="script">
-            <v-textarea
+            <CodeTextarea
               v-model="script"
               :readonly="readonly"
-              auto-grow
-              rows="20"
-              variant="outlined"
-              class="font-mono code-area"
               hint="Rhai. Cada ação é fn <id>(device, params). Senhas: {{username}} e {{password}}."
               persistent-hint
-            ></v-textarea>
+            ></CodeTextarea>
           </v-window-item>
           <v-window-item value="usage">
             <v-row>
               <v-col cols="12" md="6">
-                <v-textarea
+                <CodeTextarea
                   v-model="usage"
                   :readonly="readonly"
-                  auto-grow
-                  rows="16"
-                  variant="outlined"
-                  class="font-mono code-area"
                   hint="Markdown com uma seção por ação"
                   persistent-hint
-                ></v-textarea>
+                ></CodeTextarea>
               </v-col>
               <v-col cols="12" md="6">
                 <div class="markdown-body usage-preview pa-3 rounded-lg" v-html="usageHtml"></div>
@@ -82,17 +70,13 @@
             </v-row>
           </v-window-item>
           <v-window-item value="tests">
-            <v-textarea
+            <CodeTextarea
               v-model="testsText"
               :readonly="readonly"
               :error-messages="jsonError(testsText)"
-              auto-grow
-              rows="16"
-              variant="outlined"
-              class="font-mono code-area"
               hint="unit (fixtures com as respostas reais) e functional (no equipamento)"
               persistent-hint
-            ></v-textarea>
+            ></CodeTextarea>
           </v-window-item>
           <v-window-item value="preview">
             <PluginPreview ref="previewPane" :pkg="parsed" />
@@ -222,6 +206,7 @@ import { usePluginsStore } from '@/stores/plugins'
 import { formatDateTime } from '@/utils/formatters'
 import { renderMarkdown } from '@/utils/markdown'
 import { packageTemplate, sourcePresentation, statusPresentation } from '@/utils/pluginPresentation'
+import CodeTextarea from '@/components/CodeTextarea.vue'
 import PluginPreview from './editor/PluginPreview.vue'
 
 const props = defineProps<{
@@ -381,13 +366,10 @@ async function duplicate() {
 .editor-body {
   min-height: 420px;
 }
-.code-area :deep(textarea) {
-  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
-  font-size: 0.82rem;
-  line-height: 1.45;
-}
 .usage-preview {
   border: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
-  min-height: 300px;
+  /* Mesma altura do campo ao lado: o Markdown longo rola aqui dentro. */
+  height: var(--code-editor-height);
+  overflow-y: auto;
 }
 </style>

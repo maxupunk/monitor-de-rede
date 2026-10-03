@@ -143,6 +143,12 @@ body,
   border-radius: 0 !important;
 }
 
+/* Altura dos editores de código em diálogo (CodeTextarea e a prévia ao lado):
+   acompanha a janela e deixa abas e ações do diálogo sempre visíveis. */
+:root {
+  --code-editor-height: max(240px, calc(100dvh - 380px));
+}
+
 /* Suporte a Safe Areas e PWA Native Status Bar */
 :root {
   --pwa-safe-top: env(safe-area-inset-top, 0px);
