@@ -178,6 +178,7 @@ pub async fn identify(
         hardware_vendor: suggested_vendor.clone(),
         hardware_model: suggested_model.clone(),
         ssh_banner: ssh_banner.clone(),
+        ..DeviceFacts::default()
     })
     .await;
     Ok(systems::IdentifyResult {

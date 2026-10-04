@@ -1,174 +1,39 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { apiService } from '@/services/apiService'
-import { getStoredToken } from '@/utils/authStorage'
-import type { IdentitySuggestion } from '@/bindings/IdentitySuggestion'
+import { compareIpAddresses, type DiscoveredHostLike } from '@/utils/discoveryPresentation'
 
-export type DiscoveryPhase = 'icmp' | 'discovery' | 'ports' | 'snmp' | 'idle'
+/** `sweep` acha quem está vivo; `identify` descobre o que cada vivo é. */
+export type DiscoveryPhase = 'sweep' | 'identify' | 'probe' | 'idle'
+
+export type DiscoveryRunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 
 export interface DiscoveryRun {
   id: number
   networkId: number
+  networkName?: string | null
   probeId?: number | null
-  status: 'pending' | 'running' | 'completed' | 'failed'
+  status: DiscoveryRunStatus
   /** Derivado no backend a partir da contagem de `discovery_results` */
   devicesFound: number
-  /** Faixa varrida, vinda da configuração da run ou da rede */
+  /** Faixa varrida, vinda da configuração da run */
   cidr?: string | null
-  networkName?: string | null
   startedAt?: string
   finishedAt?: string | null
   error?: string | null
-  network?: {
-    id: number
-    name: string
-    cidr: string
-    gateway?: string | null
-    siteId?: number
-    site?: { id: number; name: string }
-  } | null
 }
 
-/**
- * Cache do último scan de descoberta. Não há status persistente: um resultado
- * existe enquanto o IP ainda não foi transformado em device.
- */
-export interface DiscoveryResult {
-  id: number
-  discoveryRunId: number
+/** Um host da varredura ao vivo (o snapshot `discovery:scan`). */
+export interface StreamedDiscoveryHost extends DiscoveredHostLike {
   ipAddress: string
   macAddress?: string | null
   hostname?: string | null
   mdnsName?: string | null
   vendor?: string | null
   deviceType?: string | null
-  openPorts?: number[] | null
-  confidence: number
-  discoveryRun?: DiscoveryRun | null
-  firstSeenAt?: string
-  lastSeenAt?: string
-  createdAt?: string
-  data?: Record<string, unknown> | null
-}
-
-export interface StreamedDiscoveryHost {
-  ipAddress: string
-  macAddress?: string
-  hostname?: string
-  mdnsName?: string
-  vendor?: string
-  deviceType?: string
   openPorts?: number[]
   confidence: number
   data?: Record<string, unknown>
-  firstSeenAt?: string
-  lastSeenAt?: string
-}
-
-export interface DiscoveryIdentity {
-  operatingSystem?: string
-  label?: string
-  source?: string
-  reason?: string
-  sysDescr?: string
-  sysObjectId?: string
-  sysName?: string
-  hardwareVendor?: string
-  hardwareModel?: string
-}
-
-/**
- * Um bloco dos scanners, tanto do snapshot SSE (`data.<chave>`) quanto do
- * resultado persistido (`data.details.<chave>`).
- */
-function discoveryDetail(
-  result: Pick<DiscoveryResult | StreamedDiscoveryHost, 'data'> | null | undefined,
-  key: string
-): Record<string, unknown> | null {
-  const data = result?.data
-  if (!data || typeof data !== 'object') return null
-  const details = data.details
-  const container = details && typeof details === 'object' ? details : data
-  const value = (container as Record<string, unknown>)[key]
-  return value && typeof value === 'object' ? (value as Record<string, unknown>) : null
-}
-
-/** Lê a identidade tanto do snapshot SSE quanto do resultado persistido. */
-export function discoveryIdentity(
-  result: Pick<DiscoveryResult | StreamedDiscoveryHost, 'data'> | null | undefined
-): DiscoveryIdentity | null {
-  return discoveryDetail(result, 'identity') as DiscoveryIdentity | null
-}
-
-/** O palpite do Laya (tipo e sistema), quando a heurística ficou em dúvida. */
-export function discoveryLaya(
-  result: Pick<DiscoveryResult | StreamedDiscoveryHost, 'data'> | null | undefined
-): IdentitySuggestion | null {
-  return discoveryDetail(result, 'laya') as IdentitySuggestion | null
-}
-
-export interface DeviceTypePresentation {
-  label: string
-  icon: string
-  color: string
-  isKnown: boolean
-}
-
-/**
- * Retorna o nome mais específico do dispositivo descoberto:
- * 1. Nome SNMP (sysName)
- * 2. Hostname registrado (DNS)
- * 3. Nome mDNS/Bonjour
- * 4. null caso nenhum esteja disponível.
- */
-export function discoveryDeviceName(
-  result:
-    | Pick<DiscoveryResult | StreamedDiscoveryHost, 'data'>
-    | { data?: Record<string, unknown> | null; hostname?: string | null; mdnsName?: string | null }
-    | null
-    | undefined
-): string | null {
-  if (!result) return null
-  const identity = discoveryIdentity(result)
-  const sysName = identity?.sysName?.trim()
-  if (sysName) return sysName
-  const host = result as { hostname?: string | null; mdnsName?: string | null }
-  const hostname = host.hostname?.trim()
-  if (hostname) return hostname
-  const mdns = host.mdnsName?.trim()
-  if (mdns) return mdns
-  return null
-}
-
-/**
- * Mapeamento canônico de ícone, cor e rótulo para apresentação de deviceType.
- */
-export function discoveryDeviceTypeInfo(deviceType?: string | null): DeviceTypePresentation {
-  const type = deviceType?.toLowerCase()?.trim()
-  switch (type) {
-    case 'router':
-      return { label: 'Roteador', icon: 'mdi-router-network', color: 'primary', isKnown: true }
-    case 'switch':
-    case 'unmanaged_switch':
-      return { label: 'Switch', icon: 'mdi-hub', color: 'teal', isKnown: true }
-    case 'access_point':
-    case 'ap':
-      return { label: 'Access Point', icon: 'mdi-access-point', color: 'cyan', isKnown: true }
-    case 'camera':
-      return { label: 'Câmera', icon: 'mdi-cctv', color: 'purple', isKnown: true }
-    case 'server':
-      return { label: 'Servidor', icon: 'mdi-server', color: 'deep-purple', isKnown: true }
-    case 'printer':
-      return { label: 'Impressora', icon: 'mdi-printer', color: 'orange', isKnown: true }
-    case 'web_device':
-      return { label: 'Dispositivo Web', icon: 'mdi-web', color: 'blue', isKnown: true }
-    case 'firewall':
-      return { label: 'Firewall', icon: 'mdi-shield-network', color: 'red', isKnown: true }
-    case 'other':
-      return { label: 'Outro', icon: 'mdi-devices', color: 'blue-grey', isKnown: true }
-    default:
-      return { label: 'Desconhecido', icon: 'mdi-lan', color: 'warning', isKnown: false }
-  }
 }
 
 export interface NetworkConflict {
@@ -189,10 +54,12 @@ export interface DiscoveryEnvironment {
   containerized: boolean
 }
 
+export type ScanStatus = 'idle' | 'pending' | 'running' | 'completed' | 'cancelled' | 'failed'
+
 export interface ScanSessionState {
   runId: number | null
   networkId: number | null
-  status: 'idle' | 'running' | 'completed' | 'cancelled' | 'failed'
+  status: ScanStatus
   phase: DiscoveryPhase
   progressCurrent: number
   progressTotal: number
@@ -203,13 +70,57 @@ export interface ScanSessionState {
   finishedAt: string | null
 }
 
-/** Espera antes de reabrir o SSE da varredura depois de uma queda */
-const RECONNECT_DELAY_MS = 3_000
+const IDLE_SCAN: ScanSessionState = {
+  runId: null,
+  networkId: null,
+  status: 'idle',
+  phase: 'idle',
+  progressCurrent: 0,
+  progressTotal: 0,
+  hosts: [],
+  logs: [],
+  error: null,
+  startedAt: null,
+  finishedAt: null,
+}
+
+function isScanState(value: unknown): value is ScanSessionState {
+  if (typeof value !== 'object' || value === null) return false
+  const state = value as Partial<ScanSessionState>
+  return typeof state.status === 'string' && Array.isArray(state.hosts)
+}
 
 export const useDiscoveryStore = defineStore('discovery', () => {
   const runs = ref<DiscoveryRun[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
+
+  /**
+   * A varredura ao vivo. Chega só pelo stream global (`discovery:scan`): o
+   * backend publica o estado inteiro a cada quadro e o repete a quem conecta.
+   */
+  const scan = ref<ScanSessionState>({ ...IDLE_SCAN })
+  /** Pedido de início em voo — a tela reage antes do primeiro quadro chegar. */
+  const starting = ref(false)
+
+  const scanning = computed(
+    () => starting.value || scan.value.status === 'running' || scan.value.status === 'pending'
+  )
+  const hosts = computed(() =>
+    [...scan.value.hosts].sort((a, b) => compareIpAddresses(a.ipAddress, b.ipAddress))
+  )
+  const progressPercent = computed(() => {
+    const { progressCurrent, progressTotal, status } = scan.value
+    if (status === 'completed') return 100
+    return progressTotal > 0 ? Math.min(100, (progressCurrent / progressTotal) * 100) : 0
+  })
+
+  /** Aplica um quadro do stream; dados malformados são ignorados. */
+  function applyScanSnapshot(data: unknown) {
+    if (!isScanState(data)) return
+    scan.value = { ...IDLE_SCAN, ...data }
+    if (data.status !== 'idle') starting.value = false
+  }
 
   async function fetchDiscoveryRuns(): Promise<DiscoveryRun[]> {
     loading.value = true
@@ -237,97 +148,32 @@ export const useDiscoveryStore = defineStore('discovery', () => {
   }
 
   /**
-   * Busca o estado atual da varredura no backend. Usado ao montar a página
-   * para restaurar o progresso quando o usuário sai e volta.
-   */
-  async function fetchScanState(): Promise<ScanSessionState | null> {
-    try {
-      const response = await apiService.get<{ data: ScanSessionState }>('/discovery/scan-state')
-      return response.data ?? null
-    } catch (err: unknown) {
-      console.error('Erro ao carregar estado da varredura:', err)
-      return null
-    }
-  }
-
-  /**
-   * Inicia uma varredura de forma assíncrona. O scan continua rodando no
-   * servidor mesmo se o fechar a aba.
+   * Pede a varredura. Ela roda no servidor mesmo que a aba feche; o progresso
+   * chega pelo stream global.
    */
   async function startScan(networkId: number): Promise<number | null> {
     error.value = null
+    starting.value = true
     try {
       const response = await apiService.post<{ runId: number; status: string }>('/discovery/scan', {
         networkId,
       })
       return response.runId
     } catch (err: unknown) {
+      starting.value = false
       error.value = err instanceof Error ? err.message : 'Erro ao iniciar varredura'
       return null
     }
   }
 
-  /**
-   * Conecta no SSE /discovery/scan-stream e chama os callbacks a cada
-   * atualização de estado. Retorna uma função para cancelar a inscrição.
-   */
-  function subscribeScanStream(
-    callbacks: {
-      onState?: (state: ScanSessionState) => void
-      onError?: (message: string) => void
-    } = {}
-  ): () => void {
-    // `EventSource` não manda o header Authorization; o backend aceita o JWT
-    // em `?token=` justamente para os streams (ver config `auth.jwt.location`).
-    const token = getStoredToken()
-    const url = token
-      ? `/api/discovery/scan-stream?token=${encodeURIComponent(token)}`
-      : '/api/discovery/scan-stream'
-
-    let source: EventSource | null = null
-    let retry: ReturnType<typeof setTimeout> | null = null
-    let unsubscribed = false
-
-    const connect = () => {
-      if (unsubscribed) return
-      const eventSource = new EventSource(url)
-      source = eventSource
-
-      eventSource.onmessage = (event) => {
-        try {
-          const state = JSON.parse(event.data) as ScanSessionState
-          callbacks.onState?.(state)
-        } catch (err) {
-          console.error('Erro ao parsear evento SSE:', err)
-        }
-      }
-
-      // Uma varredura leva minutos: se a conexão cai no meio, deixar por isso
-      // mesmo congela a barra de progresso até o operador recarregar a página.
-      // Cada reconexão recebe o estado atual inteiro no primeiro evento.
-      eventSource.onerror = () => {
-        eventSource.close()
-        callbacks.onError?.('Conexão com o stream de descoberta caiu; reconectando...')
-        if (!unsubscribed) {
-          retry = setTimeout(connect, RECONNECT_DELAY_MS)
-        }
-      }
-    }
-
-    connect()
-
-    return () => {
-      unsubscribed = true
-      if (retry) clearTimeout(retry)
-      source?.close()
-    }
-  }
-
-  async function cancelScan(): Promise<void> {
+  async function cancelScan(): Promise<boolean> {
     try {
       await apiService.post('/discovery/scan-cancel')
+      starting.value = false
+      return true
     } catch (err: unknown) {
       error.value = err instanceof Error ? err.message : 'Erro ao cancelar varredura'
+      return false
     }
   }
 
@@ -378,14 +224,17 @@ export const useDiscoveryStore = defineStore('discovery', () => {
     runs,
     loading,
     error,
+    scan,
+    scanning,
+    hosts,
+    progressPercent,
     conflicts,
     environment,
     loadingConflicts,
+    applyScanSnapshot,
     fetchDiscoveryRuns,
     cleanup,
-    fetchScanState,
     startScan,
-    subscribeScanStream,
     cancelScan,
     fetchEnvironment,
     fetchConflicts,

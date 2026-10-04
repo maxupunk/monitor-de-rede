@@ -791,6 +791,7 @@ import DeviceDialog from '@/components/DeviceDialog.vue'
 import { useDevicesStore, type Device } from '@/stores/devices'
 import { apiService } from '@/services/apiService'
 import { formatBps } from '@/utils/formatters'
+import { deviceTypeMeta } from '@/utils/deviceTypes'
 
 interface RenderedNode extends TopologyNode {
   x: number
@@ -1764,8 +1765,10 @@ function getNodeIcon(type: string) {
     case 'ap':
     case 'wireless':
       return 'mdi-access-point'
-    default:
-      return 'mdi-desktop-tower'
+    default: {
+      const meta = deviceTypeMeta(type)
+      return meta.isKnown ? meta.icon : 'mdi-desktop-tower'
+    }
   }
 }
 
@@ -1784,8 +1787,10 @@ function getNodeTypeLabel(type: string) {
       return 'Firewall'
     case 'ap':
       return 'Ponto de Acesso Wi-Fi'
-    default:
-      return 'Dispositivo'
+    default: {
+      const meta = deviceTypeMeta(type)
+      return meta.isKnown ? meta.label : 'Dispositivo'
+    }
   }
 }
 

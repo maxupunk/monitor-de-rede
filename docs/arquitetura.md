@@ -146,7 +146,7 @@ backend/
 services/
 ├── devices/        adapters de plataforma, acesso, capacidades e dispositivo do sistema
 ├── monitoring/     checkers/, runner, result_processor, device_status, presenter
-├── discovery/      service, queue, merger, device_identifier, oui_lookup, cidr_range
+├── discovery/      service, pipeline, scanners/, fingerprints, device_identifier, merger, queue
 ├── snmp/           sessões, coletores, perfis
 ├── topology/       ligações e confiança
 ├── alerts/         datasets → evaluator → manager (+ catalog, recovery, repository)
@@ -403,9 +403,8 @@ GET|POST         /api/monitors              GET|PUT|DELETE /api/monitors/{id}
 POST             /api/monitors/{id}/run | /enable | /disable
 GET              /api/monitors/{id}/results | /alerts
 
-GET  /api/discovery/scan-state | /runs | /runs/{id}
-GET  /api/discovery/scan-stream            (SSE)
-POST /api/discovery/scan | /scan-cancel
+GET  /api/discovery/runs | /runs/{id} | /environment | /conflicts
+POST /api/discovery/scan | /scan-cancel | /check-conflicts
 DELETE /api/discovery/cleanup
 
 GET  /api/topology                         POST /api/topology/links
@@ -729,7 +728,7 @@ cada falha encheria o banco com o próprio aviso.
 | Frente | Onde entra | Quando consulta | Onde a sugestão aparece |
 |---|---|---|---|
 | Ferramentas do chat | `harness/agent.rs`, junto da janela de contexto | cada pergunta | invisível: soma grupos às palavras-chave |
-| Identificação | `discovery/laya_identity.rs`, depois de gravar a execução | host `unknown`/`web_device` ou sem sistema | chip na Descoberta (pelo stream da varredura) e no cadastro (`/devices/identify`) |
+| Identificação | `discovery/laya_identity.rs`, depois de gravar a execução | host `unknown`/`web_device` ou sem sistema | chip na Descoberta (pelo snapshot `discovery:scan`) e no cadastro (`/devices/identify`) |
 | Interfaces | `snmp/laya_interfaces.rs` (`POST /api/snmp/interfaces/suggestions`) | ao mostrar a lista de interfaces | "Uplink sugerido", "Vale monitorar", "Selecionar sugeridas" |
 | Eventos de log | `syslog/categorizer.rs`, worker fora do caminho quente | uma vez por **padrão** novo (não por linha) | chip e filtro em `/logs`; "Criar alerta" abre o catálogo |
 | Triagem proativa | `proactive/triage.rs`, antes do teto por hora | cada alerta que abriria resumo | "Resumo pulado pelo Laya" + "Gerar resumo agora" |

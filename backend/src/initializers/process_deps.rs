@@ -25,8 +25,9 @@ use crate::services::{
 /// inclusive `db migrate` e `doctor`. Ver a nota sobre o ICMP abaixo.
 pub fn install(ctx: &AppContext) {
     // Puramente em memória, não falham.
-    ctx.shared_store.insert(EventBus::create());
-    ctx.shared_store.insert(ScanSessionService::create());
+    let bus = EventBus::create();
+    ctx.shared_store.insert(bus.clone());
+    ctx.shared_store.insert(ScanSessionService::create(bus));
     // Registro das conexões de agentes e dos logs em follow. Só o processo da
     // API os povoa, mas existir vazio em todo processo evita um "não
     // inicializado" em quem apenas consulta (ADR 011).

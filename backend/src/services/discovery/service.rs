@@ -1,27 +1,49 @@
-//! Orquestração do discovery: etapas isoladas, cancelamento cooperativo e
-//! persistência do cache de resultados da execução.
+//! Orquestração do discovery: a sessão ao vivo, o ciclo de vida de uma
+//! execução e as consultas do histórico.
+//!
+//! A sessão chega à tela pelo barramento global (`discovery:scan`, snapshot
+//! do [`EventBus`]) — quem abre a página depois recebe o estado atual logo ao
+//! conectar, sem endpoint SSE próprio nem hidratação por HTTP (AGENTS §9).
 
-use chrono::Utc;
+use chrono::{Duration as ChronoDuration, Utc};
 use loco_rs::app::AppContext;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
-use std::sync::Arc;
-use std::time::Instant;
-use tokio::sync::{broadcast, RwLock};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder,
+    QuerySelect, Set,
+};
+use serde::Serialize;
+use std::{collections::HashMap, sync::Arc, time::Duration};
+use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    models::{discovery_results, discovery_runs},
+    models::{
+        _entities::{
+            discovery_results::Column as ResultColumn, discovery_runs::Column as RunColumn,
+        },
+        discovery_results, discovery_runs, networks,
+    },
     services::{
         discovery::{
-            cidr_range::{expand_cidr_batch, parse_cidr_range, MAX_SCAN_HOSTS},
-            merger::{merge_hosts, DiscoveredHost},
-            progress::{ScanEvent, ScanReporter},
-            scanners::{arp, icmp, mdns, ports, snmp, ssdp},
+            cidr_range::parse_cidr_range,
+            merger::DiscoveredHost,
+            pipeline::{self, ScanTarget},
+            progress::{phase, ScanEvent, ScanReporter},
         },
+        events::EventBus,
         monitoring::{checkers::ping::PingClient, runner::CheckDeps},
         shared::errors::{AppError, AppResult},
     },
 };
+
+/// Evento de snapshot da sessão no barramento global.
+pub const SCAN_EVENT: &str = "discovery:scan";
+const SCAN_SNAPSHOT_KEY: &str = "session";
+/// Intervalo mínimo entre quadros publicados durante a varredura: a tela anda
+/// suave e o barramento não recebe uma rajada por host respondido.
+const PUBLISH_INTERVAL: Duration = Duration::from_millis(200);
+/// Linhas de registro guardadas na sessão.
+const MAX_LOGS: usize = 40;
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -44,7 +66,7 @@ impl Default for ScanSessionState {
             run_id: None,
             network_id: None,
             status: "idle".into(),
-            phase: "idle".into(),
+            phase: phase::IDLE.into(),
             progress_current: 0,
             progress_total: 0,
             hosts: vec![],
@@ -56,31 +78,41 @@ impl Default for ScanSessionState {
     }
 }
 
+impl ScanSessionState {
+    fn is_active(&self) -> bool {
+        matches!(self.status.as_str(), "running" | "pending")
+    }
+
+    fn log(&mut self, line: impl Into<String>) {
+        self.logs.push(line.into());
+        if self.logs.len() > MAX_LOGS {
+            let excess = self.logs.len() - MAX_LOGS;
+            self.logs.drain(..excess);
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct ScanSessionService {
     state: Arc<RwLock<ScanSessionState>>,
-    updates: broadcast::Sender<ScanSessionState>,
+    bus: EventBus,
     cancel: Arc<RwLock<Option<CancellationToken>>>,
 }
 impl ScanSessionService {
     #[must_use]
-    pub fn create() -> Self {
-        // Uma varredura publica dezenas de atualizações por fase; um buffer
-        // curto faria o assinante do SSE ficar para trás logo no sweep ICMP.
-        let (updates, _) = broadcast::channel(256);
-        Self {
+    pub fn create(bus: EventBus) -> Self {
+        let service = Self {
             state: Arc::new(RwLock::new(ScanSessionState::default())),
-            updates,
+            bus,
             cancel: Arc::new(RwLock::new(None)),
-        }
+        };
+        service.publish(&ScanSessionState::default());
+        service
     }
     pub fn from_context(ctx: &AppContext) -> AppResult<Self> {
         ctx.shared_store.get::<Self>().ok_or_else(|| {
             AppError::Internal(anyhow::anyhow!("Sessão de discovery não inicializada"))
         })
-    }
-    pub fn subscribe(&self) -> broadcast::Receiver<ScanSessionState> {
-        self.updates.subscribe()
     }
     pub async fn state(&self) -> ScanSessionState {
         self.state.read().await.clone()
@@ -93,7 +125,7 @@ impl ScanSessionService {
             run_id: Some(run_id),
             network_id: Some(network_id),
             status: "running".into(),
-            phase: "icmp".into(),
+            phase: phase::SWEEP.into(),
             started_at: Some(Utc::now().to_rfc3339()),
             logs: vec!["Varredura iniciada.".into()],
             ..Default::default()
@@ -106,41 +138,57 @@ impl ScanSessionService {
             token.cancel();
         }
         let mut state = self.state.write().await;
-        if state.status == "running" {
+        if state.is_active() {
             state.status = "cancelled".into();
+            state.phase = phase::IDLE.into();
             state.finished_at = Some(Utc::now().to_rfc3339());
-            state.logs.push("Varredura cancelada.".into());
+            state.log("Varredura cancelada.");
             self.publish(&state);
         }
     }
     pub async fn wait_for_probe(&self) {
         let mut state = self.state.write().await;
         state.status = "pending".into();
-        state.phase = "probe".into();
-        state
-            .logs
-            .push("Aguardando execução pelo probe remoto.".into());
+        state.phase = phase::PROBE.into();
+        state.log("Aguardando execução pelo probe remoto.");
         self.publish(&state);
     }
     pub async fn remote_started(&self, run_id: i64) {
         let mut state = self.state.write().await;
         if state.run_id == Some(run_id) && state.status == "pending" {
             state.status = "running".into();
-            state.phase = "probe".into();
-            state.logs.push("Probe remoto iniciou a varredura.".into());
+            state.phase = phase::PROBE.into();
+            state.log("Probe remoto iniciou a varredura.");
             self.publish(&state);
         }
-    }
-    pub async fn progress(&self, phase: &str, current: usize, total: usize) {
-        let mut state = self.state.write().await;
-        state.phase = phase.into();
-        state.progress_current = current;
-        state.progress_total = total;
-        self.publish(&state);
     }
     pub async fn hosts(&self, hosts: &[DiscoveredHost]) {
         let mut state = self.state.write().await;
         state.hosts = hosts.to_vec();
+        self.publish(&state);
+    }
+    /// Aplica vários eventos dos scanners e publica um quadro só.
+    async fn apply(&self, events: Vec<ScanEvent>) {
+        let mut state = self.state.write().await;
+        // Evento atrasado de uma varredura cancelada não ressuscita a sessão.
+        if state.status != "running" {
+            return;
+        }
+        for event in events {
+            match event {
+                ScanEvent::Progress {
+                    phase,
+                    current,
+                    total,
+                } => {
+                    state.phase = phase.into();
+                    state.progress_current = current;
+                    state.progress_total = total;
+                }
+                ScanEvent::Hosts(hosts) => state.hosts = hosts,
+                ScanEvent::Log(line) => state.log(line),
+            }
+        }
         self.publish(&state);
     }
     /// Acrescenta um dado a um host da execução ao vivo e republica — o
@@ -183,25 +231,223 @@ impl ScanSessionService {
             .into();
             state.error = error;
             state.finished_at = Some(Utc::now().to_rfc3339());
-            state.phase = "idle".into();
-            let completed = state.status == "completed";
-            state.logs.push(if completed {
-                "Varredura finalizada.".into()
+            state.phase = phase::IDLE.into();
+            if state.status == "completed" {
+                state.progress_current = state.progress_total;
+                let found = state.hosts.len();
+                state.log(format!(
+                    "Varredura finalizada: {found} dispositivo(s) encontrado(s)."
+                ));
             } else {
-                "Varredura encerrada.".into()
-            });
+                state.log("Varredura encerrada.");
+            }
             self.publish(&state);
         }
         *self.cancel.write().await = None;
     }
     fn publish(&self, state: &ScanSessionState) {
-        let _ = self.updates.send(state.clone());
+        if let Ok(payload) = serde_json::to_value(state) {
+            self.bus
+                .publish_snapshot(SCAN_EVENT, SCAN_SNAPSHOT_KEY, payload);
+        }
     }
+}
+
+/// Resposta de `POST /api/discovery/scan`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanStarted {
+    pub run_id: i64,
+    pub status: &'static str,
+    pub usable_hosts: u32,
+    pub truncated: bool,
+    pub execution: &'static str,
+}
+
+/// Inicia a varredura de uma rede: local, em segundo plano, ou entregue ao
+/// probe remoto dono da rede.
+///
+/// # Errors
+///
+/// Rede inexistente, faixa não varredurável ou outra varredura em andamento.
+pub async fn start_scan(ctx: &AppContext, network_id: i64) -> AppResult<ScanStarted> {
+    let network = networks::Entity::find_by_id(network_id)
+        .one(&ctx.db)
+        .await?
+        .ok_or_else(|| AppError::not_found("Rede não encontrada"))?;
+    let range = parse_cidr_range(&network.cidr).map_err(|_| {
+        AppError::business_rule(format!(
+            "A rede \"{}\" não tem uma faixa CIDR varredurável (valor atual: \"{}\").",
+            network.name, network.cidr
+        ))
+    })?;
+    let session = ScanSessionService::from_context(ctx)?;
+    // A sessão ao vivo é uma só: uma segunda varredura sobrescreveria a tela
+    // da primeira, que seguiria rodando sem dono.
+    if session.state().await.is_active() {
+        return Err(AppError::business_rule(
+            "Já existe uma varredura em andamento — aguarde ou cancele para iniciar outra.",
+        ));
+    }
+    let remote = network.probe_id.is_some();
+    let run = discovery_runs::ActiveModel {
+        network_id: Set(network.id),
+        probe_id: Set(network.probe_id),
+        status: Set(if remote { "pending" } else { "running" }.into()),
+        started_at: Set(Utc::now().into()),
+        configuration: Set(Some(serde_json::json!({
+            "cidr": network.cidr,
+            "usableHosts": range.usable_hosts,
+            "truncated": range.truncated,
+        }))),
+        ..Default::default()
+    }
+    .insert(&ctx.db)
+    .await?;
+    let cancel = session.start(run.id, network.id).await;
+    if remote {
+        session.wait_for_probe().await;
+    } else {
+        let ctx = ctx.clone();
+        let target = ScanTarget::new(network.cidr.clone()).with_gateway(network.gateway.as_deref());
+        tokio::spawn(async move {
+            if let Err(error) = execute_run(&ctx, run.id, network.id, &target, cancel).await {
+                tracing::warn!(%error, run_id = run.id, "falha ao concluir a varredura");
+            }
+        });
+    }
+    Ok(ScanStarted {
+        run_id: run.id,
+        status: if remote { "pending" } else { "running" },
+        usable_hosts: range.usable_hosts,
+        truncated: range.truncated,
+        execution: if remote { "probe" } else { "local" },
+    })
+}
+
+/// Roda uma execução local já marcada `running` até o fim: grava o status,
+/// encerra a sessão e publica o evento durável da varredura. É o único lugar
+/// que conhece esse ciclo — o botão "Escanear" e o agendador passam por aqui.
+///
+/// # Errors
+///
+/// Só falhas ao gravar o status; o erro da varredura vira status `failed`.
+pub async fn execute_run(
+    ctx: &AppContext,
+    run_id: i64,
+    network_id: i64,
+    target: &ScanTarget,
+    cancel: CancellationToken,
+) -> AppResult<()> {
+    let session = ScanSessionService::from_context(ctx)?;
+    publish_run_event(
+        ctx,
+        "discovery:started",
+        serde_json::json!({
+            "runId": run_id,
+            "networkId": network_id,
+            "cidr": target.cidr,
+            "message": format!("Varredura de {} iniciada", target.cidr),
+        }),
+    )
+    .await;
+    let outcome = run_discovery(ctx, target, run_id, cancel.clone()).await;
+    let (status, error) = match &outcome {
+        Ok(_) => ("completed", None),
+        // Cancelamento não é falha: a run interrompida pelo operador precisa
+        // aparecer como `cancelled` na lista (§7.7).
+        Err(_) if cancel.is_cancelled() => ("cancelled", None),
+        Err(error) => ("failed", Some(error.to_string())),
+    };
+    discovery_runs::ActiveModel {
+        id: Set(run_id),
+        status: Set(status.into()),
+        finished_at: Set(Some(Utc::now().into())),
+        error: Set(error.clone()),
+        ..Default::default()
+    }
+    .update(&ctx.db)
+    .await?;
+    session.finish(error.clone()).await;
+
+    let (event, message) = match (&outcome, status) {
+        (Ok(hosts), _) => (
+            "discovery:completed",
+            format!(
+                "Varredura de {} concluída: {} dispositivo(s)",
+                target.cidr,
+                hosts.len()
+            ),
+        ),
+        (_, "cancelled") => (
+            "discovery:cancelled",
+            format!("Varredura de {} cancelada", target.cidr),
+        ),
+        _ => (
+            "discovery:failed",
+            format!(
+                "Varredura de {} falhou: {}",
+                target.cidr,
+                error.as_deref().unwrap_or("erro desconhecido")
+            ),
+        ),
+    };
+    publish_run_event(
+        ctx,
+        event,
+        serde_json::json!({
+            "runId": run_id,
+            "networkId": network_id,
+            "cidr": target.cidr,
+            "devicesFound": outcome.as_ref().map_or(0, Vec::len),
+            "error": error,
+            "message": message,
+        }),
+    )
+    .await;
+    Ok(())
+}
+
+/// Evento durável no histórico de eventos. Falhar aqui não pode derrubar a
+/// varredura: o resultado já está gravado.
+async fn publish_run_event(ctx: &AppContext, event: &str, payload: serde_json::Value) {
+    if let Ok(bus) = EventBus::from_context(ctx) {
+        if let Err(error) = bus.publish(&ctx.db, event, payload).await {
+            tracing::debug!(%error, event, "evento de discovery não publicado");
+        }
+    }
+}
+
+/// Cancela a varredura ao vivo e marca a run.
+///
+/// # Errors
+///
+/// Falha de banco ao marcar a run.
+pub async fn cancel_scan(ctx: &AppContext) -> AppResult<()> {
+    let session = ScanSessionService::from_context(ctx)?;
+    let run_id = session.state().await.run_id;
+    session.cancel().await;
+    if let Some(run_id) = run_id {
+        discovery_runs::Entity::update_many()
+            .col_expr(
+                RunColumn::Status,
+                sea_orm::sea_query::Expr::value("cancelled"),
+            )
+            .col_expr(
+                RunColumn::FinishedAt,
+                sea_orm::sea_query::Expr::value(Some(Utc::now())),
+            )
+            .filter(RunColumn::Id.eq(run_id))
+            .filter(RunColumn::Status.is_in(["pending", "running"]))
+            .exec(&ctx.db)
+            .await?;
+    }
+    Ok(())
 }
 
 pub async fn run_discovery(
     ctx: &AppContext,
-    cidr: &str,
+    target: &ScanTarget,
     run_id: i64,
     cancel: CancellationToken,
 ) -> AppResult<Vec<DiscoveredHost>> {
@@ -209,7 +455,7 @@ pub async fn run_discovery(
     let (reporter, events) = ScanReporter::channel();
     let pump = tokio::spawn(pump_events(session.clone(), events));
     let outcome = match PingClient::from_context(ctx) {
-        Ok(ping) => scan_phases(&ping, cidr, cancel, &reporter).await,
+        Ok(ping) => pipeline::scan(&ping, target, cancel, &reporter).await,
         Err(error) => Err(error),
     };
     // Derrubar o repórter fecha o canal e encerra o pump: só depois disso o
@@ -248,7 +494,13 @@ pub async fn scan_network_with(
     cidr: &str,
     cancel: CancellationToken,
 ) -> AppResult<Vec<DiscoveredHost>> {
-    scan_phases(&deps.ping_client()?, cidr, cancel, &ScanReporter::silent()).await
+    pipeline::scan(
+        &deps.ping_client()?,
+        &ScanTarget::new(cidr),
+        cancel,
+        &ScanReporter::silent(),
+    )
+    .await
 }
 
 /// Valida e finaliza o resultado devolvido por um probe. O vínculo da run com
@@ -299,130 +551,42 @@ pub async fn complete_remote_discovery(
         }
         session.finish(error.map(ToString::to_string)).await;
     }
+    publish_run_event(
+        ctx,
+        if error.is_some() {
+            "discovery:failed"
+        } else {
+            "discovery:completed"
+        },
+        serde_json::json!({
+            "runId": run_id,
+            "networkId": run.network_id,
+            "devicesFound": hosts.len(),
+            "error": error,
+            "message": error.map_or_else(
+                || format!("Varredura remota concluída: {} dispositivo(s)", hosts.len()),
+                |error| format!("Varredura remota falhou: {error}"),
+            ),
+        }),
+    )
+    .await;
     Ok(())
 }
 
-/// Aplica na sessão o que os scanners relatam, na ordem em que chega.
+/// Aplica na sessão o que os scanners relatam, em quadros de no máximo
+/// [`PUBLISH_INTERVAL`]: os eventos que chegam no intervalo viram um quadro só.
 async fn pump_events(
     session: ScanSessionService,
     mut events: tokio::sync::mpsc::UnboundedReceiver<ScanEvent>,
 ) {
-    while let Some(event) = events.recv().await {
-        match event {
-            ScanEvent::Progress {
-                phase,
-                current,
-                total,
-            } => session.progress(phase, current, total).await,
-            ScanEvent::Hosts(hosts) => session.hosts(&hosts).await,
+    while let Some(first) = events.recv().await {
+        let mut batch = vec![first];
+        while let Ok(next) = events.try_recv() {
+            batch.push(next);
         }
+        session.apply(batch).await;
+        tokio::time::sleep(PUBLISH_INTERVAL).await;
     }
-}
-
-async fn scan_phases(
-    ping: &PingClient,
-    cidr: &str,
-    cancel: CancellationToken,
-    reporter: &ScanReporter,
-) -> AppResult<Vec<DiscoveredHost>> {
-    let range = parse_cidr_range(cidr)?;
-    let total = range.usable_hosts as usize;
-    reporter.phase("discovery", 0, total);
-    // Multicast pertence à interface, não a um lote do CIDR: executá-lo uma vez
-    // evita respostas duplicadas em faixas grandes.
-    let (mdns_hosts, ssdp_hosts) = tokio::join!(mdns::scan(), ssdp::scan());
-    let mut merged = merge_hosts([mdns_hosts, ssdp_hosts]);
-    let mut offset = 0_u32;
-
-    while offset < range.usable_hosts {
-        let batch_started = Instant::now();
-        if cancel.is_cancelled() {
-            return Err(AppError::BusinessRule("Varredura cancelada.".into()));
-        }
-        let addresses = expand_cidr_batch(cidr, offset, MAX_SCAN_HOSTS as usize)?;
-        if addresses.is_empty() {
-            break;
-        }
-        let completed = (offset as usize + addresses.len()).min(total);
-
-        reporter.phase("icmp", offset as usize, total);
-        let phase_started = Instant::now();
-        let icmp_hosts =
-            icmp::scan(ping, &addresses, cancel.clone(), &ScanReporter::silent()).await?;
-        tracing::info!(
-            phase = "icmp",
-            cidr,
-            offset,
-            tested = addresses.len(),
-            found = icmp_hosts.len(),
-            duration_ms = phase_started.elapsed().as_millis(),
-            "fase de discovery concluída"
-        );
-        reporter.progress("icmp", completed, total);
-
-        reporter.phase("discovery", offset as usize, total);
-        let phase_started = Instant::now();
-        let arp_hosts = arp::scan(&addresses).await;
-        tracing::info!(
-            phase = "neighbors",
-            cidr,
-            offset,
-            found = arp_hosts.len(),
-            duration_ms = phase_started.elapsed().as_millis(),
-            "fase de discovery concluída"
-        );
-        merged = merge_hosts([merged, icmp_hosts, arp_hosts]);
-
-        // Equivalente seguro ao `-Pn`: portas-chave são testadas em todo IP,
-        // mesmo quando ICMP e ARP não produziram resposta.
-        reporter.phase("ports", offset as usize, total);
-        let candidates: Vec<_> = addresses
-            .iter()
-            .map(|ip| DiscoveredHost {
-                ip_address: ip.to_string(),
-                data: serde_json::json!({ "scanner": "tcp-connect" }),
-                ..Default::default()
-            })
-            .collect();
-        let phase_started = Instant::now();
-        let mut port_hosts =
-            ports::enrich(candidates.clone(), cancel.clone(), &ScanReporter::silent()).await;
-        port_hosts.retain(|host| !host.open_ports.is_empty());
-        let port_host_count = port_hosts.len();
-        merged = merge_hosts([merged, port_hosts]);
-        reporter.progress("ports", completed, total);
-        tracing::info!(
-            phase = "ports",
-            cidr,
-            offset,
-            found = port_host_count,
-            duration_ms = phase_started.elapsed().as_millis(),
-            "fase de discovery concluída"
-        );
-
-        reporter.phase("snmp", offset as usize, total);
-        let phase_started = Instant::now();
-        let mut snmp_hosts =
-            snmp::enrich(candidates, cancel.clone(), &ScanReporter::silent()).await;
-        snmp_hosts.retain(|host| host.data.get("snmp").is_some());
-        let snmp_host_count = snmp_hosts.len();
-        merged = merge_hosts([merged, snmp_hosts]);
-        reporter.progress("snmp", completed, total);
-        reporter.hosts(&merged);
-        tracing::info!(
-            phase = "snmp",
-            cidr,
-            offset,
-            found = snmp_host_count,
-            duration_ms = phase_started.elapsed().as_millis(),
-            batch_duration_ms = batch_started.elapsed().as_millis(),
-            "fase de discovery concluída"
-        );
-
-        offset = offset.saturating_add(addresses.len() as u32);
-    }
-
-    Ok(merge_hosts([merged]))
 }
 
 async fn persist_results(
@@ -433,12 +597,13 @@ async fn persist_results(
     // discovery_results é o cache da última execução desta run; reexecuções não
     // acumulam entradas antigas que já não existem na rede.
     discovery_results::Entity::delete_many()
-        .filter(crate::models::_entities::discovery_results::Column::DiscoveryRunId.eq(run_id))
+        .filter(ResultColumn::DiscoveryRunId.eq(run_id))
         .exec(db)
         .await?;
-    for host in hosts {
-        let now = Utc::now();
-        discovery_results::ActiveModel {
+    let now = Utc::now();
+    let rows: Vec<_> = hosts
+        .iter()
+        .map(|host| discovery_results::ActiveModel {
             discovery_run_id: Set(run_id),
             ip_address: Set(host.ip_address.clone()),
             mac_address: Set(host.mac_address.clone()),
@@ -453,9 +618,114 @@ async fn persist_results(
             first_seen_at: Set(now.into()),
             last_seen_at: Set(now.into()),
             ..Default::default()
-        }
-        .insert(db)
-        .await?;
+        })
+        .collect();
+    // Em lotes: o SQLite limita as variáveis por comando.
+    for chunk in rows.chunks(50) {
+        discovery_results::Entity::insert_many(chunk.to_vec())
+            .exec(db)
+            .await?;
     }
     Ok(())
+}
+
+/// Uma linha do histórico de varreduras.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunSummary {
+    pub id: i64,
+    pub network_id: i64,
+    pub network_name: Option<String>,
+    pub probe_id: Option<i64>,
+    pub status: String,
+    pub devices_found: i64,
+    pub cidr: Option<String>,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub error: Option<String>,
+}
+
+/// Histórico de varreduras, da mais recente para a mais antiga, com a
+/// contagem de resultados numa consulta agrupada (não uma por run).
+///
+/// # Errors
+///
+/// Falha de banco.
+pub async fn list_runs<C: ConnectionTrait>(db: &C) -> AppResult<Vec<RunSummary>> {
+    let runs = discovery_runs::Entity::find()
+        .order_by_desc(RunColumn::Id)
+        .all(db)
+        .await?;
+    let counts: HashMap<i64, i64> = discovery_results::Entity::find()
+        .select_only()
+        .column(ResultColumn::DiscoveryRunId)
+        .column_as(ResultColumn::Id.count(), "found")
+        .group_by(ResultColumn::DiscoveryRunId)
+        .into_tuple::<(i64, i64)>()
+        .all(db)
+        .await?
+        .into_iter()
+        .collect();
+    let names: HashMap<i64, String> = networks::Entity::find()
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|network| (network.id, network.name))
+        .collect();
+    Ok(runs
+        .into_iter()
+        .map(|run| RunSummary {
+            id: run.id,
+            network_id: run.network_id,
+            network_name: names.get(&run.network_id).cloned(),
+            probe_id: run.probe_id,
+            status: run.status,
+            devices_found: counts.get(&run.id).copied().unwrap_or(0),
+            cidr: run
+                .configuration
+                .as_ref()
+                .and_then(|value| value.get("cidr"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string),
+            started_at: run.started_at.to_rfc3339(),
+            finished_at: run.finished_at.map(|value| value.to_rfc3339()),
+            error: run.error,
+        })
+        .collect())
+}
+
+/// Uma execução com os resultados gravados.
+///
+/// # Errors
+///
+/// [`AppError::NotFound`] quando a run não existe.
+pub async fn run_details<C: ConnectionTrait>(db: &C, id: i64) -> AppResult<serde_json::Value> {
+    let run = discovery_runs::Entity::find_by_id(id)
+        .one(db)
+        .await?
+        .ok_or_else(|| AppError::not_found("Execução de discovery não encontrada"))?;
+    let results = discovery_results::Entity::find()
+        .filter(ResultColumn::DiscoveryRunId.eq(id))
+        .all(db)
+        .await?;
+    Ok(serde_json::json!({
+        "id": run.id,
+        "networkId": run.network_id,
+        "status": run.status,
+        "configuration": run.configuration,
+        "results": results,
+    }))
+}
+
+/// Apaga as runs criadas há mais de `days` dias (mínimo 1).
+///
+/// # Errors
+///
+/// Falha de banco.
+pub async fn cleanup_runs<C: ConnectionTrait>(db: &C, days: i64) -> AppResult<u64> {
+    let result = discovery_runs::Entity::delete_many()
+        .filter(RunColumn::CreatedAt.lt(Utc::now() - ChronoDuration::days(days.max(1))))
+        .exec(db)
+        .await?;
+    Ok(result.rows_affected)
 }

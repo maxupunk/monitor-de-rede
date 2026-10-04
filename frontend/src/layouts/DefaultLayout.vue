@@ -61,7 +61,7 @@
         </template>
       </v-list>
       <template #append>
-        <div class="pa-4 text-center text-caption text-grey border-t">
+        <div class="app-footer-bar justify-center px-4 text-caption text-grey border-t">
           &copy; 2026 Master Sistemas
         </div>
       </template>

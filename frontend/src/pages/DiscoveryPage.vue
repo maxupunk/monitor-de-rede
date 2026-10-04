@@ -1,727 +1,303 @@
 <template>
   <div>
     <PageHeader
-      title="Central de Descoberta (Discovery)"
-      subtitle="Encontre e aprove novos equipamentos na rede"
+      title="Descoberta de rede"
+      subtitle="Varra uma rede e cadastre o que for encontrado — o tipo de cada equipamento é identificado automaticamente"
     >
       <template #actions>
-        <v-btn color="primary" prepend-icon="mdi-refresh" @click="refreshData">
-          <span class="hidden-sm-and-down">Atualizar</span>
-          <span class="hidden-md-and-up">Atualizar</span>
+        <v-btn color="primary" variant="tonal" prepend-icon="mdi-refresh" @click="refreshData">
+          Atualizar
         </v-btn>
+        <v-btn color="primary" variant="text" prepend-icon="mdi-lan" to="/networks"> Redes </v-btn>
       </template>
     </PageHeader>
 
-    <!-- Disparo de varredura por faixa cadastrada em /networks -->
-    <v-card elevation="2" rounded="lg" class="mb-4 mb-md-6 pa-2 pa-md-4">
-      <div class="d-flex flex-column flex-md-row align-start align-md-center ga-3">
-        <v-icon color="secondary" size="28" class="hidden-sm-and-down">mdi-radar</v-icon>
-        <div class="flex-grow-1 w-100" style="min-width: 260px">
-          <v-select
-            v-model="selectedNetworkId"
-            :items="scannableNetworks"
-            item-title="label"
-            item-value="id"
-            label="Varrer o bloco de IP de uma rede cadastrada"
-            variant="outlined"
-            density="compact"
-            hide-details
-            :no-data-text="
-              networksStore.networks.length === 0
-                ? 'Nenhuma rede cadastrada — cadastre uma em Redes'
-                : 'Nenhuma rede com faixa CIDR válida'
-            "
-          ></v-select>
-        </div>
-        <div class="d-flex ga-2 w-100 w-md-auto">
-          <v-btn
-            v-if="!scanning"
-            color="secondary"
-            prepend-icon="mdi-radar"
-            :disabled="selectedNetworkId === null"
-            class="flex-grow-1 flex-md-grow-0"
-            @click="scanSelectedNetwork"
-          >
-            <span class="hidden-sm-and-down">Escanear bloco</span>
-            <span class="hidden-md-and-up">Escanear</span>
-          </v-btn>
-          <v-btn
-            v-else
-            color="error"
-            variant="tonal"
-            prepend-icon="mdi-stop-circle-outline"
-            class="flex-grow-1 flex-md-grow-0"
-            @click="cancelScan"
-          >
-            <span class="hidden-sm-and-down">Cancelar varredura</span>
-            <span class="hidden-md-and-up">Cancelar</span>
-          </v-btn>
-          <v-btn
-            variant="text"
-            prepend-icon="mdi-lan"
-            to="/networks"
-            class="flex-grow-1 flex-md-grow-0"
-          >
-            <span class="hidden-sm-and-down">Gerenciar redes</span>
-            <span class="hidden-md-and-up">Redes</span>
-          </v-btn>
-        </div>
+    <!-- Disparo da varredura -->
+    <v-card variant="outlined" rounded="lg" class="mb-4 pa-3 pa-md-4">
+      <div class="d-flex flex-column flex-md-row align-stretch align-md-center ga-3">
+        <v-select
+          v-model="selectedNetworkId"
+          :items="scannableNetworks"
+          item-title="label"
+          item-value="id"
+          label="Rede a varrer"
+          prepend-inner-icon="mdi-lan"
+          variant="outlined"
+          density="comfortable"
+          hide-details
+          class="flex-grow-1"
+          :disabled="discoveryStore.scanning"
+          :no-data-text="
+            networksStore.networks.length === 0
+              ? 'Nenhuma rede cadastrada — cadastre uma em Redes'
+              : 'Nenhuma rede com faixa CIDR válida'
+          "
+        >
+          <template #item="{ props: itemProps, item }">
+            <v-list-item v-bind="itemProps" :subtitle="item.detail"></v-list-item>
+          </template>
+        </v-select>
+        <v-btn
+          v-if="!discoveryStore.scanning"
+          color="primary"
+          variant="flat"
+          size="large"
+          prepend-icon="mdi-radar"
+          :disabled="selectedNetworkId === null"
+          @click="scanSelectedNetwork"
+        >
+          Escanear
+        </v-btn>
+        <v-btn
+          v-else
+          color="error"
+          variant="flat"
+          size="large"
+          prepend-icon="mdi-stop-circle-outline"
+          @click="cancelScan"
+        >
+          Cancelar varredura
+        </v-btn>
       </div>
     </v-card>
 
-    <!-- Abas: Resultados & Execuções -->
-    <v-card elevation="2" rounded="lg">
-      <v-tabs v-model="tab" color="primary">
-        <v-tab value="results">Resultados Encontrados</v-tab>
-        <v-tab value="runs">Histórico de Escaneamento</v-tab>
-        <v-tab value="conflicts">
-          <v-badge
-            v-if="discoveryStore.conflicts.length > 0"
-            color="error"
-            :content="discoveryStore.conflicts.length"
-            inline
+    <DiscoveryScanProgress
+      v-if="scan.status !== 'idle'"
+      :scan="scan"
+      :percent="discoveryStore.progressPercent"
+      :network-label="scanNetwork?.name ?? null"
+      class="mb-4"
+    />
+
+    <v-card variant="outlined" rounded="lg">
+      <v-tabs v-model="tab" color="primary" show-arrows>
+        <v-tab value="results" prepend-icon="mdi-devices">
+          Equipamentos
+          <v-chip
+            v-if="hosts.length > 0"
+            size="x-small"
+            color="primary"
+            variant="flat"
+            class="ms-2"
           >
-            Conflitos e Clones
-          </v-badge>
-          <span v-else>Conflitos e Clones</span>
+            {{ hosts.length }}
+          </v-chip>
+        </v-tab>
+        <v-tab value="runs" prepend-icon="mdi-history">Histórico</v-tab>
+        <v-tab value="conflicts" prepend-icon="mdi-shield-alert-outline">
+          Conflitos
+          <v-chip
+            v-if="discoveryStore.conflicts.length > 0"
+            size="x-small"
+            color="error"
+            variant="flat"
+            class="ms-2"
+          >
+            {{ discoveryStore.conflicts.length }}
+          </v-chip>
         </v-tab>
       </v-tabs>
       <v-divider></v-divider>
 
-      <v-card-text class="pa-2 pa-sm-4">
+      <v-card-text class="pa-3 pa-md-4">
         <v-window v-model="tab" :touch="false">
-          <!-- Resultados Encontrados -->
           <v-window-item value="results">
-            <!-- Card de progresso durante a varredura -->
-            <v-card v-if="scanning" variant="outlined" rounded="lg" class="pa-3 mb-3">
-              <div
-                class="d-flex align-start align-md-center justify-space-between flex-column flex-md-row ga-2 mb-2"
-              >
-                <div>
-                  <div class="text-subtitle-2 font-weight-medium">
-                    <v-icon color="primary" class="mr-2">mdi-radar</v-icon>
-                    {{ PHASE_LABELS[scanPhase] }}
-                  </div>
-                  <div class="text-caption text-grey">{{ PHASE_SUBTITLES[scanPhase] }}</div>
-                </div>
-                <div class="text-caption text-grey text-md-right">
-                  <div class="font-weight-medium">{{ streamedHosts.length }} encontrado(s)</div>
-                  <div>{{ scanProgressText }}</div>
-                </div>
-              </div>
-
-              <v-progress-linear
-                :model-value="scanProgressPercent"
-                color="primary"
-                height="8"
-                rounded
-              ></v-progress-linear>
-
-              <div
-                v-if="scanLog.length > 0"
-                class="mt-2 pt-2 border-t thin text-caption text-grey font-mono"
-              >
-                <div v-for="(log, idx) in scanLog" :key="idx" class="scan-log-line">
-                  {{ log }}
-                </div>
-              </div>
-            </v-card>
-
-            <!-- Estado vazio -->
-            <v-card
-              v-if="streamedHosts.length === 0 && !scanning"
-              variant="outlined"
-              rounded="lg"
-              class="pa-6 text-center text-grey"
-            >
-              <v-icon size="40" color="grey-lighten-1" class="mb-2">mdi-radar</v-icon>
-              <div class="text-subtitle-2 font-weight-medium">Nenhum dispositivo encontrado.</div>
-              <div class="text-caption text-grey mb-3">
-                Selecione uma rede cadastrada e inicie uma varredura.
-              </div>
-              <v-btn
-                color="secondary"
-                prepend-icon="mdi-radar"
-                :disabled="selectedNetworkId === null"
-                @click="scanSelectedNetwork"
-              >
-                Escanear agora
-              </v-btn>
-            </v-card>
-
-            <!-- Lista de resultados -->
-            <div v-if="streamedHosts.length > 0" class="d-flex flex-column ga-2">
-              <div v-if="!scanning" class="d-flex align-center justify-space-between mb-2">
-                <div class="text-subtitle-2 font-weight-medium">
-                  Última varredura: {{ streamedHosts.length }} dispositivo(s)
-                </div>
-                <v-btn
-                  size="small"
-                  color="primary"
-                  variant="tonal"
-                  prepend-icon="mdi-refresh"
-                  @click="startNewScan"
-                >
-                  Nova varredura
-                </v-btn>
-              </div>
-
-              <v-card
-                v-for="item in streamedHosts"
-                :key="item.ipAddress"
-                variant="outlined"
-                rounded="lg"
-                class="pa-3 cursor-pointer"
-                @click="openDetailDialog(item)"
-              >
-                <div class="d-flex align-start ga-3">
-                  <v-avatar
-                    :color="discoveryDeviceTypeInfo(item.deviceType).color"
-                    size="44"
-                    variant="tonal"
-                    class="rounded-lg flex-shrink-0"
-                  >
-                    <v-icon
-                      :icon="discoveryDeviceTypeInfo(item.deviceType).icon"
-                      size="24"
-                    ></v-icon>
-                  </v-avatar>
-
-                  <div class="flex-grow-1 text-break min-width-0">
-                    <div class="d-flex align-center justify-space-between ga-2">
-                      <div class="text-subtitle-1 font-weight-bold text-primary">
-                        {{ item.ipAddress }}
-                      </div>
-                      <div class="text-caption font-weight-medium text-success">
-                        {{ Math.ceil(item.confidence) }}%
-                      </div>
-                    </div>
-
-                    <div class="text-body-2 font-weight-medium text-grey-darken-3">
-                      {{ hostName(item) }}
-                    </div>
-                    <div v-if="hostDescription(item)" class="text-caption text-grey">
-                      {{ hostDescription(item) }}
-                    </div>
-
-                    <div class="d-flex flex-wrap align-center ga-2 mt-2">
-                      <v-chip
-                        v-if="
-                          selectedNetwork?.gateway && item.ipAddress === selectedNetwork.gateway
-                        "
-                        size="x-small"
-                        color="primary"
-                        variant="flat"
-                        class="font-weight-bold"
-                      >
-                        <v-icon start size="12">mdi-router-network</v-icon>
-                        GATEWAY DA REDE
-                      </v-chip>
-                      <v-chip
-                        v-if="discoveryDeviceTypeInfo(item.deviceType).isKnown"
-                        size="x-small"
-                        :color="discoveryDeviceTypeInfo(item.deviceType).color"
-                        variant="tonal"
-                      >
-                        <v-icon start size="12">{{
-                          discoveryDeviceTypeInfo(item.deviceType).icon
-                        }}</v-icon>
-                        {{ discoveryDeviceTypeInfo(item.deviceType).label }}
-                      </v-chip>
-                      <LayaSuggestionChip
-                        :suggestion="discoveryLaya(item)?.deviceType ?? null"
-                        :format-label="deviceTypeLabel"
-                      />
-                      <v-chip v-if="hasSnmp(item)" size="x-small" color="teal" variant="tonal">
-                        <v-icon start size="12">mdi-lan-check</v-icon>
-                        SNMP {{ snmpVersion(item) }}
-                      </v-chip>
-                      <v-chip size="x-small" color="info" variant="tonal">
-                        {{
-                          item.vendor ||
-                          discoveryIdentity(item)?.hardwareVendor ||
-                          'Fabricante desconhecido'
-                        }}
-                      </v-chip>
-                      <v-chip
-                        v-if="isIpAdded(item.ipAddress)"
-                        size="x-small"
-                        color="success"
-                        variant="tonal"
-                      >
-                        JÁ ADICIONADO
-                      </v-chip>
-                      <v-chip
-                        v-if="item.openPorts && item.openPorts.length > 0"
-                        size="x-small"
-                        color="success"
-                        variant="tonal"
-                      >
-                        {{ item.openPorts.length }} porta(s)
-                      </v-chip>
-                    </div>
-
-                    <div v-if="selectedNetwork" class="text-caption text-grey mt-1">
-                      {{ selectedNetwork.name }} — {{ selectedNetwork.cidr }}
-                    </div>
-                  </div>
-                </div>
-
-                <div v-if="!isIpAdded(item.ipAddress)" class="d-flex ga-2 mt-2">
-                  <v-btn
-                    size="small"
-                    color="success"
-                    prepend-icon="mdi-plus"
-                    variant="flat"
-                    block
-                    @click.stop="handleAdd(item)"
-                  >
-                    Adicionar
-                  </v-btn>
-                </div>
-                <div v-else class="mt-2">
-                  <v-chip size="small" color="success" variant="tonal">Já adicionado</v-chip>
-                </div>
-              </v-card>
-            </div>
+            <DiscoveryResultsTab
+              :hosts="hosts"
+              :added-ips="addedIps"
+              :gateway="scanNetwork?.gateway ?? null"
+              :scanning="discoveryStore.scanning"
+              :can-scan="selectedNetworkId !== null"
+              @open="openDetails"
+              @add="openRegistration"
+              @scan="scanSelectedNetwork"
+            />
           </v-window-item>
 
-          <!-- Histórico de Varreduras -->
           <v-window-item value="runs">
-            <div class="d-flex align-center justify-space-between mb-4">
-              <div class="text-subtitle-2 text-grey">
-                Varreduras anteriores ficam aqui para auditoria.
-              </div>
-              <v-btn
-                size="small"
-                color="error"
-                variant="outlined"
-                prepend-icon="mdi-delete-sweep"
-                :loading="cleanupLoading"
-                @click="handleCleanup"
-              >
-                Limpar histórico antigo
-              </v-btn>
-            </div>
-
-            <div v-if="loadingRuns" class="pa-4 text-center">
-              <v-progress-circular indeterminate color="primary"></v-progress-circular>
-            </div>
-
-            <ResponsiveDataTable
-              v-else
-              :headers="runHeaders"
-              :items="discoveryRuns"
-              :items-per-page="-1"
-              hide-default-footer
-              no-data-text="Nenhuma varredura registrada."
-              :clickable="false"
-            >
-              <template #item.id="{ item }">
-                <span class="font-weight-medium">#{{ item.id }}</span>
-              </template>
-
-              <template #item.network="{ item }">
-                <span>{{ item.networkName || `Rede #${item.networkId}` }}</span>
-              </template>
-
-              <template #item.status="{ item }">
-                <v-chip :color="runStatusColor(item.status)" size="small">
-                  {{ runStatusLabel(item.status) }}
-                </v-chip>
-              </template>
-
-              <template #item.startedAt="{ item }">
-                <span class="text-body-2">{{ formatDateTime(item.startedAt) }}</span>
-              </template>
-
-              <template #mobile-item="{ item }">
-                <div class="d-flex flex-column ga-2">
-                  <div class="d-flex align-start justify-space-between ga-2">
-                    <div class="flex-grow-1 text-break">
-                      <div class="text-subtitle-1 font-weight-bold">
-                        {{ item.networkName || `Rede #${item.networkId}` }}
-                      </div>
-                      <div class="text-caption text-grey-darken-1">
-                        {{ item.cidr || '—' }}
-                      </div>
-                      <div class="d-flex flex-wrap align-center ga-2 mt-1">
-                        <v-chip :color="runStatusColor(item.status)" size="x-small" variant="tonal">
-                          {{ runStatusLabel(item.status) }}
-                        </v-chip>
-                        <span class="text-caption text-grey">
-                          {{ formatDateTime(item.startedAt) }}
-                        </span>
-                      </div>
-                    </div>
-                    <div class="text-caption font-weight-medium">
-                      {{ item.devicesFound }} encontrados
-                    </div>
-                  </div>
-                </div>
-              </template>
-            </ResponsiveDataTable>
+            <DiscoveryRunsTab
+              :runs="discoveryStore.runs"
+              :loading="discoveryStore.loading"
+              :cleaning="cleaning"
+              @cleanup="handleCleanup"
+            />
           </v-window-item>
 
-          <!-- Conflitos e Clones (MAC / IP) -->
           <v-window-item value="conflicts">
-            <!-- Banner de Modo de Rede -->
-            <v-alert
-              v-if="discoveryStore.environment?.isHostMode"
-              type="success"
-              variant="tonal"
-              density="comfortable"
-              rounded="lg"
-              class="mb-4"
-              prepend-icon="mdi-check-decagram"
-            >
-              <div class="text-subtitle-2 font-weight-bold">Modo de Rede Host Ativo</div>
-              <div class="text-caption">
-                O container possui acesso nativo à Camada 2 (L2/ARP). A detecção de clones,
-                conflitos de IP e MACs duplicados opera diretamente na rede física.
-              </div>
-            </v-alert>
-            <v-alert
-              v-else
-              type="warning"
-              variant="tonal"
-              density="comfortable"
-              rounded="lg"
-              class="mb-4"
-              prepend-icon="mdi-alert-circle-outline"
-            >
-              <div class="text-subtitle-2 font-weight-bold">Ambiente em Rede Bridge (Isolada)</div>
-              <div class="text-caption">
-                Em modo bridge o Docker mascara a camada 2 via NAT. Para que a detecção de conflitos
-                ARP e MACs duplicados na LAN física funcione, utilize o arquivo
-                <code>docker-compose.host.yml</code> com <code>network_mode: host</code>.
-              </div>
-            </v-alert>
-
-            <!-- Ações e cabeçalho da auditoria de conflitos -->
-            <div class="d-flex flex-wrap align-center justify-space-between ga-2 mb-4">
-              <div>
-                <div class="text-subtitle-1 font-weight-bold d-flex align-center ga-2">
-                  <v-icon color="primary">mdi-shield-alert-outline</v-icon>
-                  Auditoria de Conflitos e Clones de Rede
-                </div>
-                <div class="text-caption text-grey">
-                  Identifica múltiplos MACs respondendo pelo mesmo IP ou o mesmo MAC ativo em
-                  múltiplos IPs.
-                </div>
-              </div>
-              <v-btn
-                color="primary"
-                prepend-icon="mdi-shield-search"
-                :loading="discoveryStore.loadingConflicts"
-                @click="onScanConflicts"
-              >
-                Escanear Conflitos Agora
-              </v-btn>
-            </div>
-
-            <!-- Estado Vazio -->
-            <v-card
-              v-if="discoveryStore.conflicts.length === 0"
-              variant="outlined"
-              rounded="lg"
-              class="pa-6 text-center text-grey"
-            >
-              <v-icon size="44" color="success" class="mb-2">mdi-shield-check</v-icon>
-              <div class="text-subtitle-2 font-weight-medium text-high-emphasis">
-                Nenhum conflito ou clonagem de rede detectado
-              </div>
-              <div class="text-caption text-grey">
-                Todos os endereços IP e MACs monitorados estão consistentes e sem duplicidades na
-                tabela de vizinhos.
-              </div>
-            </v-card>
-
-            <!-- Lista de Conflitos Encontrados -->
-            <div v-else class="d-flex flex-column ga-3">
-              <v-card
-                v-for="conflict in discoveryStore.conflicts"
-                :key="conflict.id"
-                border
-                rounded="lg"
-                class="pa-4"
-              >
-                <div class="d-flex flex-wrap align-center justify-space-between ga-2 mb-2">
-                  <div class="d-flex align-center ga-2">
-                    <v-chip
-                      :color="conflict.severity === 'critical' ? 'error' : 'warning'"
-                      size="small"
-                      variant="flat"
-                      class="font-weight-bold"
-                    >
-                      {{ conflictTypeLabel(conflict.conflictType) }}
-                    </v-chip>
-                    <span class="text-subtitle-2 font-mono font-weight-bold">
-                      {{ conflict.ipAddress }}
-                    </span>
-                  </div>
-                  <span class="text-caption text-grey">
-                    {{ formatDateTime(conflict.detectedAt) }}
-                  </span>
-                </div>
-
-                <div class="text-body-2 mb-2">
-                  {{ conflict.description }}
-                </div>
-
-                <div class="d-flex flex-wrap align-center ga-3 text-caption text-medium-emphasis">
-                  <div class="d-flex align-center ga-1">
-                    <v-icon size="14">mdi-ethernet</v-icon>
-                    <span>MAC(s):</span>
-                    <span class="font-mono font-weight-medium">
-                      {{ conflict.macAddresses.join(', ') }}
-                    </span>
-                  </div>
-                  <div v-if="conflict.vendors.length > 0" class="d-flex align-center ga-1">
-                    <v-icon size="14">mdi-domain</v-icon>
-                    <span>Fabricante(s):</span>
-                    <span class="font-weight-medium">{{ conflict.vendors.join(', ') }}</span>
-                  </div>
-                  <div v-if="conflict.affectedDeviceName" class="d-flex align-center ga-1">
-                    <v-icon size="14">mdi-server-network</v-icon>
-                    <span>Dispositivo:</span>
-                    <router-link
-                      :to="'/devices/' + conflict.affectedDeviceId"
-                      class="text-decoration-none font-weight-medium text-primary"
-                    >
-                      {{ conflict.affectedDeviceName }}
-                    </router-link>
-                  </div>
-                </div>
-              </v-card>
-            </div>
+            <DiscoveryConflictsTab
+              :conflicts="discoveryStore.conflicts"
+              :host-mode="discoveryStore.environment?.isHostMode ?? false"
+              :loading="discoveryStore.loadingConflicts"
+              @check="onCheckConflicts"
+            />
           </v-window-item>
         </v-window>
       </v-card-text>
     </v-card>
 
-    <v-snackbar v-model="feedback.visible" :color="feedback.color" timeout="7000">
+    <v-snackbar v-model="feedback.visible" :color="feedback.color" timeout="6000">
       {{ feedback.message }}
     </v-snackbar>
 
-    <DeviceDialog v-model="deviceDialogOpen" :prefill-data="dialogPrefill" @saved="onDeviceSaved" />
-
-    <DiscoveryResultDialog
-      v-model="resultDialogOpen"
-      :result="selectedDetailResult"
-      @add="handleDetailAdd"
+    <DiscoveryHostDialog
+      v-model="detailsOpen"
+      :host="detailsHost"
+      :added="detailsHost ? addedIps.has(detailsHost.ipAddress) : false"
+      :is-gateway="isGateway(detailsHost)"
+      @add="openRegistration"
     />
+
+    <DeviceDialog v-model="registrationOpen" :prefill-data="prefill" @saved="onDeviceSaved" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted, reactive } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import {
-  useDiscoveryStore,
-  type DiscoveryResult,
-  type DiscoveryRun,
-  type DiscoveryPhase,
-  type StreamedDiscoveryHost,
-  type ScanSessionState,
-  discoveryIdentity,
-  discoveryDeviceName,
-  discoveryDeviceTypeInfo,
-  discoveryLaya,
-} from '@/stores/discovery'
-import { useNetworksStore } from '@/stores/networks'
-import { useDevicesStore } from '@/stores/devices'
-import { formatDateTime } from '@/utils/formatters'
-import DeviceDialog from '@/components/DeviceDialog.vue'
-import DiscoveryResultDialog from '@/components/DiscoveryResultDialog.vue'
+import { storeToRefs } from 'pinia'
 import PageHeader from '@/components/PageHeader.vue'
-import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
-import type { Device } from '@/stores/devices'
+import DeviceDialog from '@/components/DeviceDialog.vue'
+import DiscoveryScanProgress from '@/components/discovery/DiscoveryScanProgress.vue'
+import DiscoveryResultsTab from '@/components/discovery/DiscoveryResultsTab.vue'
+import DiscoveryRunsTab from '@/components/discovery/DiscoveryRunsTab.vue'
+import DiscoveryConflictsTab from '@/components/discovery/DiscoveryConflictsTab.vue'
+import DiscoveryHostDialog from '@/components/discovery/DiscoveryHostDialog.vue'
 import { confirm } from '@/composables/useConfirm'
-import { deviceTypeLabel, normalizeDeviceType } from '@/utils/deviceTypes'
-import LayaSuggestionChip from '@/components/ai/LayaSuggestionChip.vue'
-
-const PHASE_LABELS: Record<DiscoveryPhase, string> = {
-  idle: 'Aguardando',
-  icmp: 'Ping (ICMP)',
-  discovery: 'Descoberta (ARP/mDNS/SSDP)',
-  ports: 'Varredura de portas',
-  snmp: 'Consulta SNMP',
-}
-
-const PHASE_SUBTITLES: Record<DiscoveryPhase, string> = {
-  idle: 'Preparando varredura...',
-  icmp: 'Hosts que respondem ao ping aparecem abaixo em tempo real.',
-  discovery: 'Descobrindo nome, fabricante e endereço MAC da rede local.',
-  ports: 'Testando portas abertas em cada host encontrado.',
-  snmp: 'Consultando informações do sistema via SNMP.',
-}
+import { useDiscoveryStore, type StreamedDiscoveryHost } from '@/stores/discovery'
+import { useNetworksStore } from '@/stores/networks'
+import { useDevicesStore, type Device } from '@/stores/devices'
+import {
+  discoveryDeviceName,
+  discoveryHasSnmp,
+  discoveryIdentity,
+  discoveryRegistrationType,
+  discoveryTypeMeta,
+  discoveryVendor,
+} from '@/utils/discoveryPresentation'
 
 const route = useRoute()
 const router = useRouter()
 const discoveryStore = useDiscoveryStore()
 const networksStore = useNetworksStore()
 const devicesStore = useDevicesStore()
+const { scan, hosts } = storeToRefs(discoveryStore)
+
 const tab = ref('results')
 const selectedNetworkId = ref<number | null>(null)
 const feedback = reactive({ visible: false, message: '', color: 'success' })
-const deviceDialogOpen = ref(false)
-const selectedResult = ref<DiscoveryResult | StreamedDiscoveryHost | null>(null)
-const resultDialogOpen = ref(false)
-const selectedDetailResult = ref<DiscoveryResult | StreamedDiscoveryHost | null>(null)
-const cleanupLoading = ref(false)
+const cleaning = ref(false)
+const detailsOpen = ref(false)
+const detailsHost = ref<StreamedDiscoveryHost | null>(null)
+const registrationOpen = ref(false)
+const registrationHost = ref<StreamedDiscoveryHost | null>(null)
 
-const scanning = ref(false)
-const scanPhase = ref<DiscoveryPhase>('idle')
-const scanProgressCurrent = ref(0)
-const scanProgressTotal = ref(100)
-const streamedHostMap = ref(new Map<string, StreamedDiscoveryHost>())
-const scanError = ref<string | null>(null)
-const scanLog = ref<string[]>([])
-let unsubscribeScanStream: (() => void) | null = null
-
-const streamedHosts = computed(() =>
-  Array.from(streamedHostMap.value.values()).sort((a, b) => a.ipAddress.localeCompare(b.ipAddress))
-)
-
-const scanProgressPercent = computed(() =>
-  scanProgressTotal.value > 0 ? (scanProgressCurrent.value / scanProgressTotal.value) * 100 : 0
-)
-
-const scanProgressText = computed(() => {
-  if (scanPhase.value === 'icmp') {
-    return `${scanProgressCurrent.value} de ${scanProgressTotal.value} endereços testados`
-  }
-  return `${scanProgressCurrent.value} de ${scanProgressTotal.value} hosts analisados`
-})
-
-const discoveryRuns = ref<DiscoveryRun[]>([])
-const loadingRuns = ref(false)
-
-const addedIpSet = computed(
-  () => new Set(devicesStore.devices.map((d) => d.ipAddress).filter(Boolean))
-)
-
-function isIpAdded(ip: string): boolean {
-  return addedIpSet.value.has(ip)
+function notify(message: string, color = 'success') {
+  feedback.message = message
+  feedback.color = color
+  feedback.visible = true
 }
 
-function hostName(item: DiscoveryResult | StreamedDiscoveryHost): string {
-  const name = discoveryDeviceName(item)
-  if (name) return name
-  const typeInfo = discoveryDeviceTypeInfo(item.deviceType)
-  if (typeInfo.isKnown) return typeInfo.label
-  return 'Dispositivo sem nome'
-}
-
-function hostDescription(item: DiscoveryResult | StreamedDiscoveryHost): string | null {
-  const identity = discoveryIdentity(item)
-  if (identity?.sysDescr) return identity.sysDescr
-  return null
-}
-
-function hasSnmp(item: DiscoveryResult | StreamedDiscoveryHost): boolean {
-  if (!item.data) return false
-  const snmp = (item.data as Record<string, unknown>).snmp as Record<string, unknown> | undefined
-  if (snmp?.detected) return true
-  const identity = discoveryIdentity(item)
-  return identity?.source === 'snmp'
-}
-
-function snmpVersion(item: DiscoveryResult | StreamedDiscoveryHost): string {
-  if (!item.data) return ''
-  const snmp = (item.data as Record<string, unknown>).snmp as Record<string, unknown> | undefined
-  if (typeof snmp?.version === 'string') return snmp.version
-  return ''
-}
-
-const selectedNetwork = computed(() =>
-  networksStore.networks.find((n) => n.id === selectedNetworkId.value)
-)
-
-const dialogPrefill = computed<Partial<Device> | null>(() => {
-  if (!selectedResult.value) return null
-  const result = selectedResult.value
-  const identity = discoveryIdentity(result)
-  const typeInfo = discoveryDeviceTypeInfo(result.deviceType)
-  const isGateway = Boolean(
-    selectedNetwork.value?.gateway && result.ipAddress === selectedNetwork.value.gateway
-  )
-
-  let parentId: number | null = null
-  if (!isGateway && selectedNetwork.value?.gateway) {
-    const gwDevice = devicesStore.devices.find(
-      (d) => d.ipAddress === selectedNetwork.value?.gateway
-    )
-    if (gwDevice) {
-      parentId = gwDevice.id
-    }
-  }
-
-  const discoveredName = discoveryDeviceName(result)
-  const fallbackName = typeInfo.isKnown
-    ? `${typeInfo.label} (${result.ipAddress})`
-    : result.ipAddress
-
-  return {
-    name: discoveredName || fallbackName,
-    ipAddress: result.ipAddress,
-    type: isGateway ? 'router' : normalizeDeviceType(result.deviceType),
-    vendor: result.vendor || identity?.hardwareVendor || undefined,
-    model: identity?.hardwareModel || undefined,
-    macAddress: result.macAddress || undefined,
-    siteId: selectedNetwork.value?.siteId ?? null,
-    networkId: selectedNetwork.value?.id ?? null,
-    parentId,
-    isMonitored: true,
-    snmpEnabled: hasSnmp(result),
-  }
-})
-
-const runHeaders = [
-  { title: 'ID Run', key: 'id', width: '80px' },
-  { title: 'Rede', key: 'network' },
-  { title: 'Faixa', key: 'cidr' },
-  { title: 'Dispositivos Encontrados', key: 'devicesFound', width: '120px' },
-  { title: 'Status', key: 'status', width: '110px' },
-  { title: 'Iniciado em', key: 'startedAt', width: '160px' },
-]
-
-/**
- * O tamanho da faixa entra no próprio rótulo da opção: como `hint` renderiza
- * uma linha extra sob o campo, ele desalinhava o select dos botões ao lado.
- */
 const scannableNetworks = computed(() =>
   networksStore.networks
     .filter((network) => network.scannable !== false)
-    .map((network) => {
-      const usableHosts = network.usableHosts ?? 0
-      const scope = `${usableHosts} endereço(s), processados em lotes`
-
-      return {
-        id: network.id,
-        label: `${network.name} — ${network.cidr} · ${scope}`,
-      }
-    })
+    .map((network) => ({
+      id: network.id,
+      label: `${network.name} — ${network.cidr}`,
+      detail: `${network.usableHosts ?? 0} endereço(s)${network.probeId ? ' · via probe remoto' : ''}`,
+    }))
 )
 
+/** A rede da varredura ao vivo; sem ela, a escolhida no seletor. */
+const scanNetwork = computed(() => {
+  const id = scan.value.networkId ?? selectedNetworkId.value
+  return networksStore.networks.find((network) => network.id === id) ?? null
+})
+
+const addedIps = computed<ReadonlySet<string>>(
+  () =>
+    new Set(
+      devicesStore.devices
+        .map((device) => device.ipAddress)
+        .filter((ip): ip is string => Boolean(ip))
+    )
+)
+
+function isGateway(host: StreamedDiscoveryHost | null): boolean {
+  return Boolean(host && scanNetwork.value?.gateway === host.ipAddress)
+}
+
+// A tela segue a varredura que está rodando, inclusive a iniciada em outra aba.
+watch(
+  [() => scan.value.networkId, scannableNetworks],
+  ([networkId, networks]) => {
+    if (
+      networkId !== null &&
+      discoveryStore.scanning &&
+      networks.some((network) => network.id === networkId)
+    ) {
+      selectedNetworkId.value = networkId
+    }
+  },
+  { immediate: true }
+)
+
+// O desfecho chega pelo stream: o aviso sai daqui, não do clique.
+watch(
+  () => scan.value.status,
+  (status, previous) => {
+    if (previous !== 'running' && previous !== 'pending') return
+    if (status === 'completed') {
+      notify(`Varredura concluída: ${scan.value.hosts.length} dispositivo(s) encontrado(s).`)
+    } else if (status === 'failed') {
+      notify(scan.value.error || 'Erro durante a varredura.', 'error')
+    } else if (status === 'cancelled') {
+      notify('Varredura cancelada.', 'warning')
+    }
+  }
+)
+
+const prefill = computed<Partial<Device> | null>(() => {
+  const host = registrationHost.value
+  if (!host) return null
+  const network = scanNetwork.value
+  const gateway = isGateway(host)
+  const parent =
+    !gateway && network?.gateway
+      ? devicesStore.devices.find((device) => device.ipAddress === network.gateway)
+      : undefined
+  const type = discoveryTypeMeta(host)
+  return {
+    name: discoveryDeviceName(host) || `${type.label} (${host.ipAddress})`,
+    ipAddress: host.ipAddress,
+    type: discoveryRegistrationType(host, gateway),
+    vendor: discoveryVendor(host) ?? undefined,
+    model: discoveryIdentity(host)?.hardwareModel || undefined,
+    macAddress: host.macAddress || undefined,
+    siteId: network?.siteId ?? null,
+    networkId: network?.id ?? null,
+    parentId: parent?.id ?? null,
+    isMonitored: true,
+    snmpEnabled: discoveryHasSnmp(host),
+  }
+})
+
 onMounted(async () => {
-  devicesStore.fetchDevices()
-  discoveryStore.fetchEnvironment()
-  discoveryStore.fetchConflicts()
-  // A rede precisa estar carregada antes de honrar o `?networkId=` da URL:
-  // sem a lista, não há como saber se o bloco pedido existe e é varredurável.
+  void devicesStore.fetchDevices()
+  void discoveryStore.fetchEnvironment()
+  void discoveryStore.fetchConflicts()
+  void discoveryStore.fetchDiscoveryRuns()
+  // A lista de redes precisa existir antes de honrar o `?networkId=` da URL.
   await networksStore.fetchNetworks()
-  await loadRuns()
-  await restoreScanState()
+  if (selectedNetworkId.value === null && scannableNetworks.value.length === 1) {
+    selectedNetworkId.value = scannableNetworks.value[0].id
+  }
   await applyRouteIntent()
 })
 
 /**
- * O botão "Escanear" de /networks manda o operador para cá com o bloco já
- * escolhido (`networkId`) e, quando o clique pediu a varredura, com `scan=1`.
- * A ordem é consumida uma única vez — a query sai da URL antes do disparo,
- * senão recarregar a página iniciaria uma varredura nova a cada F5.
+ * O botão "Escanear" de /networks traz o bloco escolhido (`networkId`) e, quando
+ * pediu a varredura, `scan=1`. A ordem é consumida uma vez — a query sai da URL
+ * antes do disparo, senão cada F5 iniciaria uma varredura nova.
  */
 async function applyRouteIntent() {
   const requestedId = Number(route.query.networkId)
@@ -731,229 +307,69 @@ async function applyRouteIntent() {
   if (shouldScan) {
     await router.replace({ path: '/discovery', query: { networkId: String(requestedId) } })
   }
-
   if (!scannableNetworks.value.some((network) => network.id === requestedId)) {
-    feedback.color = 'warning'
-    feedback.message = 'A rede escolhida não tem uma faixa CIDR varredurável.'
-    feedback.visible = true
+    notify('A rede escolhida não tem uma faixa CIDR varredurável.', 'warning')
     return
   }
-
-  // A varredura é uma só no servidor: trocar a seleção enquanto outra roda
-  // mostraria o progresso de um bloco no rótulo de outro.
-  if (scanning.value) {
-    feedback.color = 'warning'
-    feedback.message =
-      'Já existe uma varredura em andamento — aguarde ou cancele para iniciar outra.'
-    feedback.visible = true
+  if (discoveryStore.scanning) {
+    notify(
+      'Já existe uma varredura em andamento — aguarde ou cancele para iniciar outra.',
+      'warning'
+    )
     return
   }
-
   selectedNetworkId.value = requestedId
-  if (shouldScan) {
-    await scanSelectedNetwork()
-  }
+  if (shouldScan) await scanSelectedNetwork()
 }
-
-onUnmounted(() => {
-  unsubscribeScanStream?.()
-})
 
 async function refreshData() {
   await Promise.all([
     devicesStore.fetchDevices(),
-    loadRuns(),
+    discoveryStore.fetchDiscoveryRuns(),
     discoveryStore.fetchEnvironment(),
     discoveryStore.fetchConflicts(),
   ])
 }
 
-function conflictTypeLabel(type: string): string {
-  switch (type) {
-    case 'ipCollision':
-      return 'IP Clonado / Colisão'
-    case 'macDuplicated':
-      return 'MAC Duplicado / Clonado'
-    case 'deviceMacMismatch':
-      return 'Divergência de Cadastro'
-    default:
-      return 'Conflito de Rede'
-  }
-}
-
-async function onScanConflicts() {
-  await discoveryStore.checkConflicts()
-  if (discoveryStore.conflicts.length > 0) {
-    feedback.color = 'warning'
-    feedback.message = `${discoveryStore.conflicts.length} anomalia(s) ou conflito(s) de rede detectado(s)!`
-    feedback.visible = true
-  } else {
-    feedback.color = 'success'
-    feedback.message = 'Auditoria concluída: nenhum conflito de rede detectado.'
-    feedback.visible = true
-  }
-}
-
-async function loadRuns() {
-  loadingRuns.value = true
-  try {
-    discoveryRuns.value = await discoveryStore.fetchDiscoveryRuns()
-  } catch (err: unknown) {
-    console.error('Erro ao carregar histórico de varreduras:', err)
-    discoveryRuns.value = []
-  } finally {
-    loadingRuns.value = false
-  }
-}
-
-function resetScanState() {
-  scanning.value = false
-  scanPhase.value = 'idle'
-  scanProgressCurrent.value = 0
-  scanProgressTotal.value = 100
-  streamedHostMap.value = new Map()
-  scanError.value = null
-  scanLog.value = []
-}
-
-function applyScanState(state: ScanSessionState) {
-  scanning.value = state.status === 'running'
-  scanPhase.value = state.phase
-  scanProgressCurrent.value = state.progressCurrent
-  scanProgressTotal.value = state.progressTotal
-  scanError.value = state.error
-  scanLog.value = state.logs
-
-  if (state.networkId && selectedNetworkId.value !== state.networkId) {
-    selectedNetworkId.value = state.networkId
-  }
-
-  streamedHostMap.value = new Map(
-    state.hosts.map((host) => [host.ipAddress, host as StreamedDiscoveryHost])
-  )
-}
-
-async function restoreScanState() {
-  const state = await discoveryStore.fetchScanState()
-  if (!state || state.status === 'idle') {
-    resetScanState()
-    return
-  }
-
-  applyScanState(state)
-
-  if (state.status === 'running') {
-    subscribeToScanStream()
-  }
-}
-
-function subscribeToScanStream() {
-  unsubscribeScanStream?.()
-  unsubscribeScanStream = discoveryStore.subscribeScanStream({
-    onState: (state) => {
-      applyScanState(state)
-      if (state.status === 'completed') {
-        feedback.color = 'success'
-        feedback.message = `Varredura concluída: ${streamedHosts.value.length} dispositivo(s) encontrado(s).`
-        feedback.visible = true
-        loadRuns()
-      } else if (state.status === 'failed') {
-        feedback.color = 'error'
-        feedback.message = state.error || 'Erro durante a varredura.'
-        feedback.visible = true
-        loadRuns()
-      } else if (state.status === 'cancelled') {
-        feedback.color = 'warning'
-        feedback.message = 'Varredura cancelada.'
-        feedback.visible = true
-        loadRuns()
-      }
-    },
-    onError: (message) => {
-      console.error(message)
-    },
-  })
-}
-
-function startNewScan() {
-  resetScanState()
-  unsubscribeScanStream?.()
-  unsubscribeScanStream = null
-  window.scrollTo({ top: 0, behavior: 'smooth' })
-}
-
 async function scanSelectedNetwork() {
   if (selectedNetworkId.value === null) return
-
-  startNewScan()
-  scanning.value = true
-  scanPhase.value = 'idle'
-  scanProgressCurrent.value = 0
-  scanProgressTotal.value = 100
-
+  tab.value = 'results'
   const runId = await discoveryStore.startScan(selectedNetworkId.value)
-  if (!runId) {
-    scanning.value = false
-    feedback.color = 'error'
-    feedback.message = discoveryStore.error || 'Não foi possível iniciar a varredura.'
-    feedback.visible = true
-    return
+  if (runId === null) {
+    notify(discoveryStore.error || 'Não foi possível iniciar a varredura.', 'error')
   }
-
-  subscribeToScanStream()
 }
 
 async function cancelScan() {
-  unsubscribeScanStream?.()
-  unsubscribeScanStream = null
-  await discoveryStore.cancelScan()
-  scanning.value = false
-  feedback.color = 'warning'
-  feedback.message = 'Varredura cancelada.'
-  feedback.visible = true
-  await loadRuns()
+  const cancelled = await discoveryStore.cancelScan()
+  if (!cancelled) notify(discoveryStore.error || 'Não foi possível cancelar.', 'error')
 }
 
-const RUN_STATUS: Record<string, { label: string; color: string }> = {
-  pending: { label: 'Na fila', color: 'grey' },
-  running: { label: 'Em execução', color: 'info' },
-  completed: { label: 'Concluída', color: 'success' },
-  failed: { label: 'Falhou', color: 'error' },
-}
-
-function runStatusLabel(status: string): string {
-  return RUN_STATUS[status]?.label ?? status
-}
-
-function runStatusColor(status: string): string {
-  return RUN_STATUS[status]?.color ?? 'grey'
-}
-
-function handleAdd(item: DiscoveryResult | StreamedDiscoveryHost) {
-  selectedResult.value = item
-  deviceDialogOpen.value = true
-}
-
-function openDetailDialog(item: DiscoveryResult | StreamedDiscoveryHost) {
-  selectedDetailResult.value = item
-  resultDialogOpen.value = true
-}
-
-function handleDetailAdd() {
-  resultDialogOpen.value = false
-  if (selectedDetailResult.value) {
-    handleAdd(selectedDetailResult.value)
+async function onCheckConflicts() {
+  const found = await discoveryStore.checkConflicts()
+  if (found.length > 0) {
+    notify(`${found.length} conflito(s) de rede detectado(s).`, 'warning')
+  } else {
+    notify('Auditoria concluída: nenhum conflito de rede detectado.')
   }
-  selectedDetailResult.value = null
+}
+
+function openDetails(host: StreamedDiscoveryHost) {
+  detailsHost.value = host
+  detailsOpen.value = true
+}
+
+function openRegistration(host: StreamedDiscoveryHost) {
+  detailsOpen.value = false
+  registrationHost.value = host
+  registrationOpen.value = true
 }
 
 async function onDeviceSaved() {
-  selectedResult.value = null
-  deviceDialogOpen.value = false
+  registrationHost.value = null
+  registrationOpen.value = false
   await devicesStore.fetchDevices()
-  feedback.color = 'success'
-  feedback.message = 'Dispositivo cadastrado com sucesso.'
-  feedback.visible = true
+  notify('Dispositivo cadastrado com sucesso.')
 }
 
 async function handleCleanup() {
@@ -964,22 +380,16 @@ async function handleCleanup() {
     confirmColor: 'warning',
     icon: 'mdi-broom',
   })
-  if (!ok) {
-    return
-  }
+  if (!ok) return
 
-  cleanupLoading.value = true
+  cleaning.value = true
   const result = await discoveryStore.cleanup(7)
-  cleanupLoading.value = false
-
-  feedback.color = result ? 'success' : 'error'
-  feedback.message = result
-    ? `${result.removedRuns} varredura(s) antiga(s) removida(s).`
-    : (discoveryStore.error ?? 'Não foi possível limpar o histórico.')
-  feedback.visible = true
-
+  cleaning.value = false
   if (result) {
-    await loadRuns()
+    notify(`${result.removedRuns} varredura(s) antiga(s) removida(s).`)
+    await discoveryStore.fetchDiscoveryRuns()
+  } else {
+    notify(discoveryStore.error ?? 'Não foi possível limpar o histórico.', 'error')
   }
 }
 </script>

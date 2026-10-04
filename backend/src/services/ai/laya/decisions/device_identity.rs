@@ -62,6 +62,19 @@ pub struct DeviceFacts {
     pub hardware_model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ssh_banner: Option<String>,
+    /// `Server` e título da página web do aparelho.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub web_server: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub web_title: Option<String>,
+    /// Fabricante e modelo que a descrição UPnP declara.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upnp_model: Option<String>,
+    /// Serviços anunciados por mDNS (`_googlecast._tcp`, `_ipp._tcp`…).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub mdns_services: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub netbios_name: Option<String>,
 }
 
 fn text(value: &Value, key: &str) -> Option<String> {
@@ -85,6 +98,13 @@ impl DeviceFacts {
         data: &Value,
     ) -> Self {
         let identity = data.get("identity").cloned().unwrap_or(Value::Null);
+        let http = data.get("http").cloned().unwrap_or(Value::Null);
+        let ssdp = data.get("ssdp").cloned().unwrap_or(Value::Null);
+        let upnp_model = [text(&ssdp, "manufacturer"), text(&ssdp, "modelName")]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" ");
         let clean = |value: Option<&str>| {
             value
                 .map(str::trim)
@@ -103,6 +123,23 @@ impl DeviceFacts {
             hardware_vendor: text(&identity, "hardwareVendor"),
             hardware_model: text(&identity, "hardwareModel"),
             ssh_banner: None,
+            web_server: text(&http, "server"),
+            web_title: text(&http, "title"),
+            upnp_model: (!upnp_model.is_empty()).then_some(upnp_model),
+            mdns_services: data
+                .pointer("/mdns/services")
+                .and_then(Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default(),
+            netbios_name: data
+                .pointer("/netbios")
+                .and_then(|value| text(value, "name")),
         }
     }
 
@@ -116,6 +153,11 @@ impl DeviceFacts {
             || self.ssdp_server.is_some()
             || self.sys_descr.is_some()
             || self.ssh_banner.is_some()
+            || self.web_server.is_some()
+            || self.web_title.is_some()
+            || self.upnp_model.is_some()
+            || !self.mdns_services.is_empty()
+            || self.netbios_name.is_some()
     }
 
     /// O estado enviado ao Laya.

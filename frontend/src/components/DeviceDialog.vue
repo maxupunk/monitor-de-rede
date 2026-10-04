@@ -628,6 +628,7 @@ import {
   DEVICE_TYPE_OPTIONS,
   INFRA_DEVICE_TYPES,
   deviceTypeLabel,
+  deviceTypeMeta,
   normalizeDeviceType,
 } from '@/utils/deviceTypes'
 import LayaSuggestionChip from '@/components/ai/LayaSuggestionChip.vue'
@@ -850,28 +851,6 @@ function applySuggestedName(): void {
   nameManuallyEdited.value = true
 }
 
-function getDeviceIcon(type?: string): string {
-  switch (type?.toLowerCase()) {
-    case 'router':
-    case 'gateway':
-      return 'mdi-router-network'
-    case 'switch':
-    case 'unmanaged_switch':
-      return 'mdi-hub'
-    case 'firewall':
-      return 'mdi-shield-network'
-    case 'ap':
-    case 'access_point':
-      return 'mdi-access-point'
-    case 'server':
-      return 'mdi-server'
-    case 'printer':
-      return 'mdi-printer'
-    default:
-      return 'mdi-lan'
-  }
-}
-
 function ipInCidr(ip: string, cidr: string): boolean {
   if (!ip || !cidr || !cidr.includes('/')) return false
   const [rangeIp, prefixStr] = cidr.split('/')
@@ -934,7 +913,7 @@ const availableParentDevices = computed(() => {
         siteName: d.site?.name || '',
         isInfrastructure: isInfra,
         sameSite,
-        icon: getDeviceIcon(d.type),
+        icon: deviceTypeMeta(d.type).icon,
       }
     })
 

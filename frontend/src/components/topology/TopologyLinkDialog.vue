@@ -313,6 +313,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch } from 'vue'
 import { useTopologyStore, type DeviceInterfaceItem } from '@/stores/topology'
+import { deviceTypeMeta } from '@/utils/deviceTypes'
 
 const props = defineProps<{
   modelValue: boolean
@@ -498,8 +499,10 @@ function getNodeIcon(type: string) {
     case 'ap':
     case 'wireless':
       return 'mdi-access-point'
-    default:
-      return 'mdi-desktop-tower'
+    default: {
+      const meta = deviceTypeMeta(type)
+      return meta.isKnown ? meta.icon : 'mdi-desktop-tower'
+    }
   }
 }
 

@@ -404,7 +404,7 @@ import PageHeader from '@/components/PageHeader.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import { getStatusColor } from '@/utils/monitorPresentation'
 import { confirm } from '@/composables/useConfirm'
-import { INFRA_DEVICE_TYPES } from '@/utils/deviceTypes'
+import { INFRA_DEVICE_TYPES, deviceTypeMeta } from '@/utils/deviceTypes'
 
 const router = useRouter()
 const devicesStore = useDevicesStore()
@@ -443,26 +443,6 @@ function openDiagnosticPlaybook(device: Device) {
   playbookDialog.value = true
 }
 
-function getIcon(type?: string): string {
-  switch (type?.toLowerCase()) {
-    case 'router':
-    case 'gateway':
-      return 'mdi-router-network'
-    case 'switch':
-    case 'unmanaged_switch':
-      return 'mdi-hub'
-    case 'firewall':
-      return 'mdi-shield-network'
-    case 'ap':
-    case 'access_point':
-      return 'mdi-access-point'
-    case 'server':
-      return 'mdi-server'
-    default:
-      return 'mdi-lan'
-  }
-}
-
 const parentCandidates = computed(() => {
   const selectedSet = new Set(selectedDeviceIds.value)
   return devicesStore.devices
@@ -474,7 +454,7 @@ const parentCandidates = computed(() => {
       type: d.type,
       siteName: d.site?.name || '',
       isInfra: INFRA_DEVICE_TYPES.has(d.type?.toLowerCase() || ''),
-      icon: getIcon(d.type),
+      icon: deviceTypeMeta(d.type).icon,
     }))
     .sort((a, b) => {
       if (a.isInfra !== b.isInfra) return a.isInfra ? -1 : 1

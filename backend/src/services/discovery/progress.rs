@@ -17,6 +17,15 @@ use super::merger::DiscoveredHost;
 /// mensagens. Uma barra que anda de 2% em 2% já é "tempo real" para quem olha.
 const PROGRESS_STEPS: usize = 50;
 
+/// Fases que a tela mostra. `sweep` acha quem está vivo; `identify` descobre
+/// o que cada vivo é.
+pub mod phase {
+    pub const SWEEP: &str = "sweep";
+    pub const IDENTIFY: &str = "identify";
+    pub const PROBE: &str = "probe";
+    pub const IDLE: &str = "idle";
+}
+
 #[derive(Debug)]
 pub enum ScanEvent {
     Progress {
@@ -25,6 +34,7 @@ pub enum ScanEvent {
         total: usize,
     },
     Hosts(Vec<DiscoveredHost>),
+    Log(String),
 }
 
 /// Emissor dos eventos. Clonável e não-bloqueante: relatar progresso nunca
@@ -74,11 +84,61 @@ impl ScanReporter {
         self.send(ScanEvent::Hosts(hosts.to_vec()));
     }
 
+    /// Uma linha para o registro da varredura na tela.
+    pub fn log(&self, message: impl Into<String>) {
+        self.send(ScanEvent::Log(message.into()));
+    }
+
+    /// Um trecho da barra: a etapa anda de `start` a `start + span` dentro do
+    /// total da varredura, e a barra nunca volta quando a etapa muda.
+    #[must_use]
+    pub fn stage(&self, phase: &'static str, start: usize, span: usize, total: usize) -> Stage {
+        Stage {
+            reporter: self.clone(),
+            phase,
+            start,
+            span,
+            total,
+        }
+    }
+
     fn send(&self, event: ScanEvent) {
         if let Some(sender) = &self.sender {
             // Receptor fechado significa varredura encerrada: o scanner que
             // ainda estiver drenando não deve falhar por causa disso.
             let _ = sender.send(event);
+        }
+    }
+}
+
+/// Um trecho da barra de progresso, entregue a um scanner que só sabe contar
+/// o próprio trabalho (`done` de `of`).
+#[derive(Clone)]
+pub struct Stage {
+    reporter: ScanReporter,
+    phase: &'static str,
+    start: usize,
+    span: usize,
+    total: usize,
+}
+
+impl Stage {
+    /// Etapa sem tela — scanners chamados fora de uma sessão.
+    #[must_use]
+    pub fn silent() -> Self {
+        ScanReporter::silent().stage(phase::IDLE, 0, 0, 0)
+    }
+
+    pub fn begin(&self) {
+        self.reporter.phase(self.phase, self.start, self.total);
+    }
+
+    /// Os marcos são os da própria etapa (`done` de `of`): o fim dela sempre
+    /// aparece, mesmo quando não cai num marco da varredura inteira.
+    pub fn advance(&self, done: usize, of: usize) {
+        if emits_at(done, of) {
+            let current = self.start + self.span * done.min(of) / of.max(1);
+            self.reporter.phase(self.phase, current, self.total);
         }
     }
 }
@@ -130,6 +190,22 @@ mod tests {
             }
         }
         assert_eq!(published, ["ports"]);
+    }
+
+    #[tokio::test]
+    async fn etapa_anda_dentro_do_seu_trecho() {
+        let (reporter, mut events) = ScanReporter::channel();
+        let stage = reporter.stage(phase::IDENTIFY, 100, 50, 200);
+        stage.begin();
+        stage.advance(5, 5);
+        drop((reporter, stage));
+        let mut published = Vec::new();
+        while let Some(event) = events.recv().await {
+            if let ScanEvent::Progress { current, .. } = event {
+                published.push(current);
+            }
+        }
+        assert_eq!(published, [100, 150]);
     }
 
     #[tokio::test]

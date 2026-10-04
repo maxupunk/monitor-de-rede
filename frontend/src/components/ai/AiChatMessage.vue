@@ -147,8 +147,8 @@
       <v-avatar
         v-if="message.role === 'user'"
         size="32"
-        color="grey-darken-1"
-        class="ml-2 elevation-1 flex-shrink-0 mt-1"
+        color="secondary"
+        class="ml-2 elevation-1 flex-shrink-0 mt-1 d-none d-sm-flex"
       >
         <v-icon size="18" color="white">mdi-account</v-icon>
       </v-avatar>
@@ -164,7 +164,7 @@
               ? 'Contexto compactado — as mensagens acima foram resumidas para a IA'
               : 'Contexto reduzido — mensagens antigas saíram da memória da IA sem resumo'
           }}
-          <span class="text-medium-emphasis">
+          <span class="font-weight-medium">
             ({{ formatCompactCount(message.compaction.tokensBefore) }} →
             {{ formatCompactCount(message.compaction.tokensAfter) }} tokens)
           </span>
@@ -275,6 +275,7 @@ async function copyContent() {
 <style scoped>
 .message-bubble-wrapper {
   max-width: 85%;
+  min-width: 0;
 }
 .message-bubble-wrapper.has-chart {
   width: 85%;
@@ -287,7 +288,26 @@ async function copyContent() {
 }
 .message-bubble {
   word-break: break-word;
+  overflow-wrap: anywhere;
   line-height: 1.5;
+}
+/* Código, tabela e imagem rolam dentro do balão — nunca alargam a conversa. */
+.message-bubble :deep(pre),
+.message-bubble :deep(table) {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+/* No balão do usuário (fundo primary) link e borda seguem o texto branco. */
+.message-bubble.text-white :deep(a),
+.message-bubble.text-white :deep(.md-table th),
+.message-bubble.text-white :deep(.md-table td) {
+  color: inherit;
+  border-color: rgba(255, 255, 255, 0.4);
+}
+.message-bubble :deep(img) {
+  max-width: 100%;
+  height: auto;
 }
 /* Cinza fixo (`bg-grey-lighten-*`) deixava o texto claro do tema escuro
    ilegível: fundo e texto acompanham o tema. */

@@ -41,10 +41,10 @@ pub fn is_valid_mac(mac: &str) -> bool {
 pub async fn read_system_neighbors() -> Vec<NeighborEntry> {
     #[cfg(target_os = "linux")]
     {
+        // `ip neigh` primeiro: ele diz o estado real (REACHABLE, STALE…). O
+        // `/proc/net/arp` não tem estado e só completa o que faltar — a
+        // deduplicação fica com a primeira observação de cada par.
         let mut entries = Vec::new();
-        if let Ok(content) = tokio::fs::read_to_string("/proc/net/arp").await {
-            entries.extend(parse_proc_arp(&content));
-        }
         if let Ok(output) = tokio::process::Command::new("ip")
             .args(["neigh", "show"])
             .output()
@@ -52,6 +52,9 @@ pub async fn read_system_neighbors() -> Vec<NeighborEntry> {
         {
             let text = String::from_utf8_lossy(&output.stdout);
             entries.extend(parse_ip_neigh(&text));
+        }
+        if let Ok(content) = tokio::fs::read_to_string("/proc/net/arp").await {
+            entries.extend(parse_proc_arp(&content));
         }
         dedup_neighbors(entries)
     }

@@ -7,84 +7,86 @@
         :class="compact ? 'pa-3' : 'pa-4'"
         @scroll.passive="onScroll"
       >
-        <v-alert
-          v-if="aiStore.settings && !aiStore.settings.enabled"
-          type="warning"
-          variant="tonal"
-          density="compact"
-          class="mb-3"
-        >
-          O Assistente IA está desativado. Ative-o em
-          <router-link
-            to="/settings"
-            class="text-decoration-underline font-weight-bold"
-            @click="emit('navigate')"
+        <div class="ai-thread__column">
+          <v-alert
+            v-if="aiStore.settings && !aiStore.settings.enabled"
+            type="warning"
+            variant="tonal"
+            density="compact"
+            class="mb-3"
           >
-            Configurações</router-link
-          >.
-        </v-alert>
-
-        <!-- Conversa vazia: o que dá para pedir -->
-        <div v-if="aiStore.messages.length === 0" class="ai-thread__empty">
-          <v-avatar :size="compact ? 52 : 64" color="primary" variant="tonal" class="mb-3">
-            <v-icon :size="compact ? 28 : 34">mdi-creation-outline</v-icon>
-          </v-avatar>
-          <div
-            :class="compact ? 'text-title-medium' : 'text-title-large'"
-            class="font-weight-bold mb-1"
-          >
-            Como posso ajudar?
-          </div>
-          <p class="text-body-medium text-medium-emphasis mb-4 ai-thread__intro">
-            Pergunte sobre a rede, peça um diagnóstico ou tire dúvidas sobre o NetMonitor. Use
-            <strong>@</strong> para marcar um equipamento.
-          </p>
-
-          <div v-if="compact" class="d-flex flex-column ga-2">
-            <v-btn
-              v-for="suggestion in visibleSuggestions"
-              :key="suggestion.prompt"
-              variant="tonal"
-              color="primary"
-              class="ai-thread__suggestion text-none"
-              :prepend-icon="suggestion.icon"
-              :disabled="!canSend"
-              @click="send(suggestion.prompt)"
+            O Assistente IA está desativado. Ative-o em
+            <router-link
+              to="/settings"
+              class="text-decoration-underline font-weight-bold"
+              @click="emit('navigate')"
             >
-              {{ suggestion.prompt }}
-            </v-btn>
-          </div>
-          <v-row v-else dense class="ai-thread__cards text-left">
-            <v-col
-              v-for="suggestion in visibleSuggestions"
-              :key="suggestion.prompt"
-              cols="12"
-              sm="6"
+              Configurações</router-link
+            >.
+          </v-alert>
+
+          <!-- Conversa vazia: o que dá para pedir -->
+          <div v-if="aiStore.messages.length === 0" class="ai-thread__empty">
+            <v-avatar :size="compact ? 52 : 64" color="primary" variant="tonal" class="mb-3">
+              <v-icon :size="compact ? 28 : 34">mdi-creation-outline</v-icon>
+            </v-avatar>
+            <div
+              :class="compact ? 'text-title-medium' : 'text-title-large'"
+              class="font-weight-bold mb-1"
             >
-              <v-card
-                variant="outlined"
-                class="pa-3 rounded-lg fill-height ai-thread__card"
+              Como posso ajudar?
+            </div>
+            <p class="text-body-medium mb-4 ai-thread__intro">
+              Pergunte sobre a rede, peça um diagnóstico ou tire dúvidas sobre o NetMonitor. Use
+              <strong>@</strong> para marcar um equipamento.
+            </p>
+
+            <div v-if="compact" class="d-flex flex-column ga-2">
+              <v-btn
+                v-for="suggestion in visibleSuggestions"
+                :key="suggestion.prompt"
+                variant="tonal"
+                color="primary"
+                class="ai-thread__suggestion text-none"
+                :prepend-icon="suggestion.icon"
                 :disabled="!canSend"
                 @click="send(suggestion.prompt)"
               >
-                <div class="d-flex align-center ga-2 mb-1">
-                  <v-icon size="18" :color="suggestion.color">{{ suggestion.icon }}</v-icon>
-                  <span class="text-body-small font-weight-bold">{{ suggestion.title }}</span>
-                </div>
-                <p class="text-body-small text-medium-emphasis mb-0">{{ suggestion.prompt }}</p>
-              </v-card>
-            </v-col>
-          </v-row>
-        </div>
+                {{ suggestion.prompt }}
+              </v-btn>
+            </div>
+            <v-row v-else dense class="ai-thread__cards text-left">
+              <v-col
+                v-for="suggestion in visibleSuggestions"
+                :key="suggestion.prompt"
+                cols="12"
+                sm="6"
+              >
+                <v-card
+                  variant="outlined"
+                  class="pa-3 rounded-lg fill-height ai-thread__card"
+                  :disabled="!canSend"
+                  @click="send(suggestion.prompt)"
+                >
+                  <div class="d-flex align-center ga-2 mb-1">
+                    <v-icon size="18" :color="suggestion.color">{{ suggestion.icon }}</v-icon>
+                    <span class="text-body-small font-weight-bold">{{ suggestion.title }}</span>
+                  </div>
+                  <p class="text-body-small mb-0">{{ suggestion.prompt }}</p>
+                </v-card>
+              </v-col>
+            </v-row>
+          </div>
 
-        <template v-else>
-          <AiChatMessage
-            v-for="message in aiStore.messages"
-            :key="message.id"
-            :message="message"
-            @rewind="handleRewind"
-          />
-        </template>
+          <template v-else>
+            <AiChatMessage
+              v-for="message in aiStore.messages"
+              :key="message.id"
+              :message="message"
+              @rewind="handleRewind"
+            />
+          </template>
+        </div>
       </div>
 
       <v-fade-transition>
@@ -105,6 +107,7 @@
     <div class="ai-thread__composer" :class="compact ? 'pa-2' : 'pa-3'">
       <AiChatComposer
         ref="composer"
+        class="ai-thread__column"
         :compact="compact"
         :max-rows="compact ? 6 : 8"
         :placeholder="placeholder"
@@ -205,6 +208,13 @@ defineExpose({
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+
+/* Linhas longas cansam a leitura: em tela larga a conversa vira uma coluna. */
+.ai-thread__column {
+  width: 100%;
+  max-width: 920px;
+  margin-inline: auto;
 }
 
 .ai-thread__composer {

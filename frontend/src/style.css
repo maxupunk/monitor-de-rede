@@ -149,6 +149,18 @@ body,
   --code-editor-height: max(240px, calc(100dvh - 380px));
 }
 
+/* Rodapé das colunas laterais (menu principal e conversas da IA): a mesma
+   altura faz as linhas de cima dos dois se alinharem lado a lado. */
+:root {
+  --app-footer-height: 57px;
+}
+.app-footer-bar {
+  box-sizing: border-box;
+  min-height: var(--app-footer-height);
+  display: flex;
+  align-items: center;
+}
+
 /* Suporte a Safe Areas e PWA Native Status Bar */
 :root {
   --pwa-safe-top: env(safe-area-inset-top, 0px);
@@ -168,4 +180,68 @@ body,
   body {
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
+}
+
+/* Markdown renderizado (`utils/markdown.ts`): chat da IA e uso dos plugins.
+   Cores do tema — legível no claro e no escuro. */
+.markdown-body > :first-child {
+  margin-top: 0;
+}
+.markdown-body > :last-child {
+  margin-bottom: 0;
+}
+.markdown-body p {
+  margin: 0 0 0.6em;
+}
+.markdown-body .md-heading {
+  font-weight: 700;
+  line-height: 1.3;
+  margin: 0.9em 0 0.4em;
+}
+.markdown-body h3.md-heading {
+  font-size: 1.15rem;
+}
+.markdown-body h4.md-heading {
+  font-size: 1.05rem;
+}
+.markdown-body h5.md-heading,
+.markdown-body h6.md-heading {
+  font-size: 0.95rem;
+}
+.markdown-body .md-list {
+  margin: 0 0 0.6em;
+  padding-left: 1.4em;
+}
+.markdown-body .md-list li + li {
+  margin-top: 0.2em;
+}
+.markdown-body .md-table {
+  border-collapse: collapse;
+  margin: 0.4em 0 0.8em;
+  font-size: 0.9em;
+}
+.markdown-body .md-table th,
+.markdown-body .md-table td {
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.2);
+  padding: 4px 10px;
+  text-align: left;
+}
+.markdown-body .md-table th {
+  background: rgba(var(--v-theme-on-surface), 0.06);
+  font-weight: 700;
+}
+.markdown-body .md-quote {
+  margin: 0 0 0.6em;
+  padding: 4px 12px;
+  border-left: 3px solid rgb(var(--v-theme-primary));
+  background: rgba(var(--v-theme-primary), 0.06);
+}
+.markdown-body .md-rule {
+  border: 0;
+  border-top: 1px solid rgba(var(--v-theme-on-surface), 0.2);
+  margin: 0.8em 0;
+}
+.markdown-body a {
+  color: rgb(var(--v-theme-primary));
+  text-decoration: underline;
 }

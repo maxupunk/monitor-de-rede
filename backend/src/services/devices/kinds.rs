@@ -1,8 +1,9 @@
 //! Os tipos de dispositivo que o cadastro aceita, num lugar só.
 //!
-//! O formulário grava estes ids; a descoberta ainda fala `access_point`,
-//! `web_device` e `unknown` e a tela traduz (`frontend/src/utils/deviceTypes.ts`,
-//! espelho desta lista). A descrição em inglês é o que o Laya lê para decidir.
+//! O formulário grava estes ids e a descoberta classifica com eles
+//! (`discovery::fingerprints::kind`); só `web_device` e `unknown` são dela, de
+//! dúvida. A tela espelha a lista em `frontend/src/utils/deviceTypes.ts`. A
+//! descrição em inglês é o que o Laya lê para decidir.
 
 pub struct DeviceKind {
     pub id: &'static str,
@@ -48,9 +49,44 @@ pub const DEVICE_KINDS: &[DeviceKind] = &[
         laya_hint: "IP camera or video recorder (NVR/DVR, Hikvision, Dahua, Intelbras, ONVIF, RTSP).",
     },
     DeviceKind {
+        id: "nas",
+        label: "Armazenamento (NAS)",
+        laya_hint: "Network storage appliance (Synology, QNAP, TrueNAS, Unraid, WD My Cloud).",
+    },
+    DeviceKind {
+        id: "workstation",
+        label: "Computador",
+        laya_hint: "Desktop or laptop computer used by a person (Windows PC, Mac, Linux desktop).",
+    },
+    DeviceKind {
+        id: "mobile",
+        label: "Celular / tablet",
+        laya_hint: "Phone or tablet (iPhone, iPad, Android), often with a randomized private MAC.",
+    },
+    DeviceKind {
+        id: "media",
+        label: "Smart TV / mídia",
+        laya_hint: "Smart TV, streaming stick or box, game console, smart speaker or AV receiver (Chromecast, Roku, Apple TV, Sonos, PlayStation).",
+    },
+    DeviceKind {
+        id: "iot",
+        label: "IoT / automação",
+        laya_hint: "IoT or home/building automation device: smart plug, bulb, sensor, ESP8266/ESP32 module, Shelly, Tuya, Home Assistant hub, access control, industrial PLC.",
+    },
+    DeviceKind {
+        id: "voip",
+        label: "Telefone IP / VoIP",
+        laya_hint: "VoIP phone, ATA or PBX (Yealink, Grandstream, Polycom, Asterisk).",
+    },
+    DeviceKind {
+        id: "ups",
+        label: "Nobreak / energia",
+        laya_hint: "UPS, PDU, inverter or solar charge controller (APC, Eaton, SMS, MPPT).",
+    },
+    DeviceKind {
         id: "other",
         label: "Outro",
-        laya_hint: "Anything else: IoT, UPS, solar charge controller, phone, workstation, smart TV.",
+        laya_hint: "Anything that fits none of the other kinds.",
     },
 ];
 

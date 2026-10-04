@@ -180,6 +180,7 @@ export const useEventsStore = defineStore('events', () => {
       payload.type === 'docker:inventory' ||
       payload.type === 'docker:operation' ||
       payload.type === 'docker:log' ||
+      payload.type === 'discovery:scan' ||
       payload.type === 'interface:traffic'
     if (payload.type !== 'stream:connected' && !isEphemeralTelemetry) {
       recentEvents.value.unshift(payload)
@@ -305,8 +306,15 @@ export const useEventsStore = defineStore('events', () => {
         break
       }
 
+      case 'discovery:scan': {
+        // Estado inteiro da varredura ao vivo — e o snapshot de quem conecta.
+        useDiscoveryStore().applyScanSnapshot(data)
+        break
+      }
+
       case 'discovery:started':
       case 'discovery:completed':
+      case 'discovery:cancelled':
       case 'discovery:failed': {
         const discoveryStore = useDiscoveryStore()
         scheduleRefresh('discovery', () => {

@@ -31,10 +31,7 @@
         <div class="text-title-small font-weight-bold">
           {{ view === 'history' ? 'Conversas salvas' : 'Assistente IA' }}
         </div>
-        <div
-          v-if="view === 'chat'"
-          class="text-body-small text-medium-emphasis font-mono text-truncate"
-        >
+        <div v-if="view === 'chat'" class="text-body-small font-mono text-truncate">
           {{ modelLabel }}
         </div>
       </div>

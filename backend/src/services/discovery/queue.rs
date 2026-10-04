@@ -9,7 +9,10 @@ use sea_orm::{
 use crate::{
     models::{discovery_runs, networks},
     services::{
-        discovery::service::{run_discovery, ScanSessionService},
+        discovery::{
+            pipeline::ScanTarget,
+            service::{execute_run, ScanSessionService},
+        },
         shared::errors::{AppError, AppResult},
     },
 };
@@ -268,32 +271,12 @@ async fn execute_claimed_run(
     session: &ScanSessionService,
 ) -> AppResult<()> {
     let cancel = session.start(run.id, run.network_id).await;
-    match run_discovery(ctx, cidr, run.id, cancel).await {
-        Ok(_) => {
-            discovery_runs::ActiveModel {
-                id: Set(run.id),
-                status: Set("completed".into()),
-                finished_at: Set(Some(Utc::now().into())),
-                ..Default::default()
-            }
-            .update(&ctx.db)
-            .await?;
-            session.finish(None).await;
-        }
-        Err(error) => {
-            discovery_runs::ActiveModel {
-                id: Set(run.id),
-                status: Set("failed".into()),
-                finished_at: Set(Some(Utc::now().into())),
-                error: Set(Some(error.to_string())),
-                ..Default::default()
-            }
-            .update(&ctx.db)
-            .await?;
-            session.finish(Some(error.to_string())).await;
-        }
-    }
-    Ok(())
+    let gateway = networks::Entity::find_by_id(run.network_id)
+        .one(&ctx.db)
+        .await?
+        .and_then(|network| network.gateway);
+    let target = ScanTarget::new(cidr).with_gateway(gateway.as_deref());
+    execute_run(ctx, run.id, run.network_id, &target, cancel).await
 }
 
 /// Processa uma varredura local e aguarda sua conclusão.

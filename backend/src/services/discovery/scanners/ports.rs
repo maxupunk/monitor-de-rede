@@ -1,84 +1,157 @@
-//! Discovery de portas comuns reutilizando a mesma estratégia de varredura.
+//! Portas TCP da descoberta, em duas medidas:
+//!
+//! * [`liveness`] — poucas portas em todo endereço que ficou mudo no ping e
+//!   no ARP: um `RST` já prova que o host existe (o `-Pn` do nmap).
+//! * [`scan`] — a tabela inteira de [`fingerprints::PORT_RULES`], só nos hosts
+//!   vivos, para dizer o que cada um é.
+//!
+//! As duas jogam todos os pares host×porta num único fluxo com teto global de
+//! conexões: rodar host por host deixava a fase esperando o host mais lento.
 
-use crate::services::{
-    discovery::{merger::DiscoveredHost, progress::ScanReporter},
-    network_tools::port_scanner::{self, PortProtocol, PortScanEvent, ScanProfile, ScanStrategy},
-};
-use std::net::IpAddr;
-use tokio::sync::mpsc;
+use std::{collections::BTreeMap, net::IpAddr, time::Duration};
+
+use futures::{stream, StreamExt};
 use tokio_util::sync::CancellationToken;
 
-pub const COMMON_PORTS: &[u16] = &[
-    21, 22, 23, 53, 80, 139, 443, 445, 554, 3389, 8000, 8080, 8291, 8443, 9100,
-];
+use crate::services::{
+    discovery::{fingerprints, merger::DiscoveredHost, progress::Stage},
+    network_tools::tcp_probe::{probe_tcp, TcpProbeState},
+};
 
-/// Hosts sondados ao mesmo tempo.
-///
-/// Cada host custa ~800 ms de timeout, e em série uma faixa com 40 aparelhos
-/// deixava a fase de portas mais de meio minuto sem sinal de vida. Oito de cada
-/// vez são 64 conexões TCP simultâneas — folga confortável em qualquer sistema.
-const CONCURRENT_HOSTS: usize = 8;
+/// Conexões TCP abertas ao mesmo tempo, somando todos os hosts.
+const CONCURRENCY: usize = 256;
+/// Prova de vida: quem existe responde (SYN-ACK ou RST) em milissegundos.
+const LIVENESS_TIMEOUT: Duration = Duration::from_millis(600);
+/// Porta filtrada por firewall só responde com silêncio; esperar mais que
+/// isso não muda a conclusão, só atrasa a fase.
+const PORT_TIMEOUT: Duration = Duration::from_millis(800);
 
-pub async fn enrich(
-    hosts: Vec<DiscoveredHost>,
-    cancel: CancellationToken,
-    reporter: &ScanReporter,
-) -> Vec<DiscoveredHost> {
-    let total = hosts.len();
-    let mut scanned = Vec::with_capacity(total);
-    let mut done = 0;
-    reporter.phase("ports", 0, total);
-
-    // Os lotes preservam a ordem de entrada e mantêm o relatório previsível:
-    // cada rodada publica o que já foi sondado até ali.
-    for batch in hosts.chunks(CONCURRENT_HOSTS) {
-        if cancel.is_cancelled() {
-            scanned.extend_from_slice(batch);
-            done += batch.len();
-            continue;
-        }
-        let results = futures::future::join_all(
-            batch
-                .iter()
-                .cloned()
-                .map(|host| scan_host(host, cancel.clone())),
-        )
-        .await;
-        done += results.len();
-        scanned.extend(results);
-        reporter.progress("ports", done, total);
-        reporter.hosts(&scanned);
-    }
-    scanned
+#[derive(Default)]
+struct Observed {
+    alive: bool,
+    open: Vec<u16>,
 }
 
-async fn scan_host(mut host: DiscoveredHost, cancel: CancellationToken) -> DiscoveredHost {
-    let Ok(ip) = host.ip_address.parse::<IpAddr>() else {
-        return host;
-    };
-    let (sender, mut receiver) = mpsc::channel(16);
-    let worker_cancel = cancel.child_token();
-    let ports = COMMON_PORTS.to_vec();
-    let worker = tokio::spawn(async move {
-        port_scanner::scan(
-            ip,
-            &ports,
-            PortProtocol::Tcp,
-            ScanStrategy::for_profile(ScanProfile::Reliable, 1_200),
-            sender,
-            worker_cancel,
-        )
-        .await;
-    });
-    while let Some(event) = receiver.recv().await {
-        if let PortScanEvent::Result(item) = event {
-            if item.status == "open" {
-                host.open_ports.push(item.port);
+async fn sweep(
+    ips: &[IpAddr],
+    ports: &[u16],
+    timeout: Duration,
+    cancel: &CancellationToken,
+    stage: &Stage,
+) -> BTreeMap<IpAddr, Observed> {
+    let pairs: Vec<(IpAddr, u16)> = ips
+        .iter()
+        .flat_map(|ip| ports.iter().map(move |port| (*ip, *port)))
+        .collect();
+    let total = pairs.len();
+    let cancel = cancel.clone();
+    let mut probes = stream::iter(pairs)
+        .map(move |(ip, port)| {
+            let cancel = cancel.clone();
+            async move {
+                if cancel.is_cancelled() {
+                    return (ip, port, TcpProbeState::Error);
+                }
+                (ip, port, probe_tcp((ip, port), timeout).await.state)
+            }
+        })
+        .buffer_unordered(CONCURRENCY);
+
+    let mut observed = BTreeMap::<IpAddr, Observed>::new();
+    let mut done = 0;
+    while let Some((ip, port, state)) = probes.next().await {
+        done += 1;
+        if state.proves_reachability() {
+            let entry = observed.entry(ip).or_default();
+            entry.alive = true;
+            if state == TcpProbeState::Open {
+                entry.open.push(port);
             }
         }
+        stage.advance(done, total);
     }
-    let _ = worker.await;
-    host.open_ports.sort_unstable();
-    host.confidence = (host.confidence + if host.open_ports.is_empty() { 0 } else { 20 }).min(100);
-    host
+    observed
+}
+
+fn into_hosts(observed: BTreeMap<IpAddr, Observed>, scanner: &str) -> Vec<DiscoveredHost> {
+    observed
+        .into_iter()
+        .filter(|(_, seen)| seen.alive)
+        .map(|(ip, mut seen)| {
+            seen.open.sort_unstable();
+            DiscoveredHost {
+                ip_address: ip.to_string(),
+                open_ports: seen.open,
+                confidence: 60,
+                data: serde_json::json!({ "scanner": scanner }),
+                ..Default::default()
+            }
+        })
+        .collect()
+}
+
+/// Hosts que provaram existir por TCP, com as portas que já vieram abertas.
+pub async fn liveness(
+    addresses: &[IpAddr],
+    cancel: &CancellationToken,
+    stage: &Stage,
+) -> Vec<DiscoveredHost> {
+    stage.begin();
+    let observed = sweep(
+        addresses,
+        fingerprints::LIVENESS_PORTS,
+        LIVENESS_TIMEOUT,
+        cancel,
+        stage,
+    )
+    .await;
+    into_hosts(observed, "tcp")
+}
+
+/// Portas abertas de cada host vivo, pela tabela de assinaturas.
+pub async fn scan(
+    ips: &[IpAddr],
+    cancel: &CancellationToken,
+    stage: &Stage,
+) -> Vec<DiscoveredHost> {
+    let ports: Vec<u16> = fingerprints::PORT_RULES
+        .iter()
+        .map(|rule| rule.port)
+        .collect();
+    let observed = sweep(ips, &ports, PORT_TIMEOUT, cancel, stage).await;
+    into_hosts(observed, "tcp")
+}
+
+#[cfg(test)]
+mod tests {
+    use tokio::net::TcpListener;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn porta_aberta_e_porta_fechada_provam_o_host() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let open = listener.local_addr().unwrap().port();
+        let ip: IpAddr = "127.0.0.1".parse().unwrap();
+        let observed = sweep(
+            &[ip],
+            &[open, 1],
+            Duration::from_secs(5),
+            &CancellationToken::new(),
+            &Stage::silent(),
+        )
+        .await;
+        let hosts = into_hosts(observed, "tcp");
+        assert_eq!(hosts.len(), 1);
+        assert_eq!(hosts[0].open_ports, vec![open]);
+    }
+
+    #[tokio::test]
+    async fn cancelado_nao_abre_conexao() {
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let ip: IpAddr = "127.0.0.1".parse().unwrap();
+        let hosts = liveness(&[ip], &cancel, &Stage::silent()).await;
+        assert!(hosts.is_empty());
+    }
 }

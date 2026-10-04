@@ -1,84 +1,90 @@
 //! Identifica agentes SNMP autorizados durante discovery. Falhas são esperadas.
 
+use std::net::IpAddr;
+
 use crate::services::{
     devices::systems,
-    discovery::{merger::DiscoveredHost, progress::ScanReporter},
+    discovery::{fingerprints, merger::DiscoveredHost},
     snmp::service::detect_connection,
 };
 use futures::{stream, StreamExt};
 use tokio_util::sync::CancellationToken;
 
-pub async fn enrich(
-    hosts: Vec<DiscoveredHost>,
-    cancel: CancellationToken,
-    reporter: &ScanReporter,
-) -> Vec<DiscoveredHost> {
-    let total = hosts.len();
-    let mut queried = stream::iter(hosts)
-        .map(|mut host| {
+/// Agentes consultados ao mesmo tempo. Cada consulta testa as comunidades e
+/// versões configuradas em paralelo, então o custo real é este número vezes
+/// as combinações.
+const CONCURRENCY: usize = 48;
+
+/// Consulta SNMP nos hosts vivos e devolve só os que responderam.
+pub async fn enrich(ips: &[IpAddr], cancel: &CancellationToken) -> Vec<DiscoveredHost> {
+    let cancel = cancel.clone();
+    stream::iter(ips.to_vec())
+        .map(move |ip| {
             let cancel = cancel.clone();
             async move {
                 if cancel.is_cancelled() {
-                    return host;
+                    return None;
                 }
-                if let Ok(result) = detect_connection(&host.ip_address, 161, None).await {
-                    if result.detected {
-                        host.confidence = host.confidence.max(95);
-                        if let Some(details) = result.result {
-                            let identity = systems::detect(&systems::Evidence {
-                                sys_object_id: details.system.sys_object_id.as_deref(),
-                                sys_descr: details.system.sys_descr.as_deref(),
-                                ..systems::Evidence::default()
-                            });
-                            if host.hostname.as_deref().unwrap_or("").trim().is_empty() {
-                                if let Some(sys_name) = &details.system.sys_name {
-                                    let trimmed = sys_name.trim();
-                                    if !trimmed.is_empty() {
-                                        host.hostname = Some(trimmed.to_string());
-                                    }
-                                }
-                            }
-                            if host.vendor.is_none() {
-                                host.vendor =
-                                    details.system.hardware_vendor.clone().or_else(|| {
-                                        infer_snmp_vendor(
-                                            details.system.sys_object_id.as_deref(),
-                                            details.system.sys_descr.as_deref(),
-                                            details.system.sys_name.as_deref(),
-                                        )
-                                    });
-                            }
-                            host.data["identity"] = serde_json::json!({
-                                "operatingSystem": identity.system.id,
-                                "label": identity.system.label,
-                                "source": identity.source,
-                                "reason": identity.reason,
-                                "sysDescr": details.system.sys_descr,
-                                "sysObjectId": details.system.sys_object_id,
-                                "sysName": details.system.sys_name,
-                                "hardwareVendor": details.system.hardware_vendor,
-                                "hardwareModel": details.system.hardware_model,
-                            });
-                        }
-                        host.data["snmp"] = serde_json::json!({
-                            "detected": true,
-                            "protocol": "udp",
-                            "port": 161,
-                            "version": result.version,
-                        });
-                    }
-                }
-                host
+                query(ip).await
             }
         })
-        .buffer_unordered(32);
+        .buffer_unordered(CONCURRENCY)
+        .filter_map(std::future::ready)
+        .collect()
+        .await
+}
 
-    let mut enriched = Vec::with_capacity(total);
-    while let Some(host) = queried.next().await {
-        enriched.push(host);
-        reporter.progress("snmp", enriched.len(), total);
+async fn query(ip: IpAddr) -> Option<DiscoveredHost> {
+    let ip_address = ip.to_string();
+    let result = detect_connection(&ip_address, 161, None).await.ok()?;
+    if !result.detected {
+        return None;
     }
-    enriched
+    let mut host = DiscoveredHost {
+        ip_address,
+        confidence: 95,
+        data: serde_json::json!({ "scanner": "snmp" }),
+        ..Default::default()
+    };
+    if let Some(details) = result.result {
+        let system = &details.system;
+        let identity = systems::detect(&systems::Evidence {
+            sys_object_id: system.sys_object_id.as_deref(),
+            sys_descr: system.sys_descr.as_deref(),
+            ..systems::Evidence::default()
+        });
+        host.hostname = system
+            .sys_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_string);
+        host.vendor = system.hardware_vendor.clone().or_else(|| {
+            infer_snmp_vendor(
+                system.sys_object_id.as_deref(),
+                system.sys_descr.as_deref(),
+                system.sys_name.as_deref(),
+            )
+        });
+        host.data["identity"] = serde_json::json!({
+            "operatingSystem": identity.system.id,
+            "label": identity.system.label,
+            "source": identity.source,
+            "reason": identity.reason,
+            "sysDescr": system.sys_descr,
+            "sysObjectId": system.sys_object_id,
+            "sysName": system.sys_name,
+            "hardwareVendor": system.hardware_vendor,
+            "hardwareModel": system.hardware_model,
+        });
+    }
+    host.data["snmp"] = serde_json::json!({
+        "detected": true,
+        "protocol": "udp",
+        "port": 161,
+        "version": result.version,
+    });
+    Some(host)
 }
 
 fn infer_snmp_vendor(
@@ -86,26 +92,8 @@ fn infer_snmp_vendor(
     sys_descr: Option<&str>,
     sys_name: Option<&str>,
 ) -> Option<String> {
-    if let Some(oid) = sys_object_id {
-        let clean = oid.trim().trim_start_matches('.');
-        if clean.starts_with("1.3.6.1.4.1.17095") {
-            return Some("Volt Tecnologia".to_string());
-        }
-        if clean.starts_with("1.3.6.1.4.1.14988") {
-            return Some("MikroTik".to_string());
-        }
-        if clean.starts_with("1.3.6.1.4.1.9.") {
-            return Some("Cisco".to_string());
-        }
-        if clean.starts_with("1.3.6.1.4.1.41112.") {
-            return Some("Ubiquiti".to_string());
-        }
-        if clean.starts_with("1.3.6.1.4.1.4881.") {
-            return Some("Intelbras".to_string());
-        }
-        if clean.starts_with("1.3.6.1.4.1.311.") {
-            return Some("Microsoft".to_string());
-        }
+    if let Some(entry) = sys_object_id.and_then(fingerprints::enterprise_for) {
+        return Some(entry.vendor.to_string());
     }
 
     let context = format!(

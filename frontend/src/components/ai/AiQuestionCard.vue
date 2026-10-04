@@ -18,7 +18,7 @@
         {{ option }}
       </v-btn>
     </div>
-    <div v-if="answerable" class="text-body-small text-medium-emphasis mt-2">
+    <div v-if="answerable" class="text-body-small mt-2">
       Escolha uma opção ou responda no campo — use <strong>@</strong> para marcar o recurso.
     </div>
   </v-card>

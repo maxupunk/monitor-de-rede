@@ -16,6 +16,14 @@ export interface FormattedEventDetails {
   rawJson: string
 }
 
+/** Mensagem e cor padrão de cada etapa de uma varredura de descoberta. */
+const DISCOVERY_OUTCOMES: Record<string, { message: string; color: string }> = {
+  'discovery:started': { message: 'Descoberta iniciada', color: 'info' },
+  'discovery:completed': { message: 'Descoberta finalizada com sucesso', color: 'success' },
+  'discovery:cancelled': { message: 'Descoberta cancelada', color: 'warning' },
+  'discovery:failed': { message: 'Erro durante a descoberta', color: 'error' },
+}
+
 export function formatEventDetails(evt: RealtimeEventPayload): FormattedEventDetails {
   const d = (evt.data || {}) as Record<string, any>
   const dateStr = formatClockTime(evt.timestamp)
@@ -176,20 +184,14 @@ export function formatEventDetails(evt: RealtimeEventPayload): FormattedEventDet
     }
     case 'discovery:started':
     case 'discovery:completed':
+    case 'discovery:cancelled':
     case 'discovery:failed': {
-      const isOk = evt.type === 'discovery:completed'
-      const isFail = evt.type === 'discovery:failed'
+      const outcome = DISCOVERY_OUTCOMES[evt.type] ?? DISCOVERY_OUTCOMES['discovery:started']
       return {
         title: 'Varredura de Rede',
-        message:
-          d.message ||
-          (isOk
-            ? 'Descoberta finalizada com sucesso'
-            : isFail
-              ? 'Erro durante a descoberta'
-              : 'Descoberta iniciada'),
-        icon: isOk ? 'mdi-radar' : isFail ? 'mdi-radar' : 'mdi-radar',
-        color: isOk ? 'success' : isFail ? 'error' : 'info',
+        message: d.message || outcome.message,
+        icon: 'mdi-radar',
+        color: outcome.color,
         time: dateStr,
         rawJson,
       }
