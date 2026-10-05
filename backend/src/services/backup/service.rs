@@ -34,10 +34,11 @@
 
 use sea_orm::{
     ActiveModelTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection, EntityTrait,
-    IntoActiveModel, Statement, TransactionTrait,
+    IntoActiveModel, Statement,
 };
 use serde::{de::DeserializeOwned, Serialize};
 
+use crate::services::shared::transaction::begin_write;
 use crate::{
     models::{
         _entities::{
@@ -195,7 +196,7 @@ pub async fn restore(db: &DatabaseConnection, file: &BackupFile) -> AppResult<Ta
     // apagar tudo primeiro para só então descobrir que não dava.
     inspect(file)?;
 
-    let txn = db.begin().await?;
+    let txn = begin_write(db).await?;
     wipe(&txn).await?;
 
     let mut counts = Vec::new();

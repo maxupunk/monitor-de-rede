@@ -4,6 +4,12 @@
 > backend no repositório, nem "referência de comportamento" a consultar: se a
 > pergunta é como o sistema se comporta, a resposta está em `backend/`.
 
+> **Sempre seguir as boas práticas, princípios SOLID e DRY** — e sempre buscar
+> a melhor usabilidade e experiência de usuário. Vale para toda tarefa, por
+> menor que seja: antes de escrever, procure o que já existe para reaproveitar
+> (§11); ao terminar, confira se a tela ficou clara para quem usa (§12) e se
+> cada peça tem uma responsabilidade só (§10).
+
 ## 🧪 Padrões Obrigatórios de Teste & Estabilidade
 
 1. **Validação Obrigatória Pré-Finalização**:
@@ -36,6 +42,11 @@
      (instalações grandes, via `DATABASE_URL`). Toda consulta precisa valer nos
      dois dialetos — a produção padrão passou a ser o SQLite, então quebrar o
      dialeto dele agora quebra a instalação real, não só a suíte.
+   - **Transação que escreve abre com `shared::transaction::begin_write`**,
+     nunca com `begin()`: o `BEGIN` deferido do SQLite falha na hora com
+     `database is locked` quando outra conexão escreve entre a leitura e a
+     escrita da transação (`BEGIN IMMEDIATE` espera a vez; no PostgreSQL a
+     opção é ignorada).
    - **Entidades do `sea-orm` são geradas contra o PostgreSQL**, nunca contra o
      SQLite: o SQLite reporta todo inteiro como `INTEGER` e o `db entities`
      rodado contra ele produz `i64` onde o Postgres tem `INT4` — e aí o `sqlx`
@@ -47,7 +58,7 @@
 
 4. **Práticas de Teste (Rust)**:
    - **Isolamento de Banco**: testes de requisição usam
-     `request_with_config::<App, _, _>`; o `Hooks::truncate` limpa as 36 tabelas
+     `request_with_config::<App, _, _>`; o `Hooks::truncate` limpa as 37 tabelas
      entre eles.
    - **`#[serial]`** em tudo que toca estado global de processo: `ScanSessionService`,
      o cofre de chaves da VPN, o rate limiter e qualquer teste que mexa em

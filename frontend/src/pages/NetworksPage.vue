@@ -1,8 +1,8 @@
 <template>
   <div>
     <PageHeader
-      title="Sub-redes (Networks)"
-      subtitle="Faixas de IP CIDR e gatilhos de descoberta automática"
+      title="Redes IP"
+      subtitle="Faixas de IP (CIDR) que a Descoberta varre, com gateway, site e agenda de varredura"
     >
       <template #actions>
         <v-btn color="primary" prepend-icon="mdi-plus" @click="openDialog()">

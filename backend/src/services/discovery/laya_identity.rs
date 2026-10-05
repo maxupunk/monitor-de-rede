@@ -11,7 +11,7 @@ use loco_rs::app::AppContext;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use serde_json::Value;
 
-use super::{merger::DiscoveredHost, service::ScanSessionService};
+use super::{device_identifier::scores, merger::DiscoveredHost, service::ScanSessionService};
 use crate::{
     models::discovery_results,
     services::{
@@ -67,6 +67,35 @@ pub fn plan_for(
     facts.has_evidence().then_some((facts, decision))
 }
 
+/// Quanto sobra da confiança de um palpite sem nenhuma evidência a favor.
+const UNSUPPORTED_FACTOR: f64 = 0.6;
+
+/// Confere o palpite de tipo contra a heurística. Quando ela viu evidência
+/// de **outros** tipos e nenhuma do tipo escolhido, o palpite perde 40% da
+/// confiança e some se cair abaixo do mínimo — foi assim que um OpenWrt
+/// (Net-SNMP, SSH, HTTP) virou "NAS 98%". Sem evidência alguma, o palpite
+/// fica como veio: é justamente quando o Laya mais ajuda.
+#[must_use]
+pub fn calibrate(
+    mut suggestion: IdentitySuggestion,
+    host: &DiscoveredHost,
+    min_confidence: u8,
+) -> IdentitySuggestion {
+    let Some(device_type) = suggestion.device_type.as_mut() else {
+        return suggestion;
+    };
+    let scores = scores(host, None);
+    let supported = scores.iter().any(|(kind, _)| *kind == device_type.value);
+    if !supported && !scores.is_empty() {
+        device_type.confidence =
+            (device_type.confidence * UNSUPPORTED_FACTOR * 10.0).round() / 10.0;
+        if device_type.confidence < f64::from(min_confidence) {
+            suggestion.device_type = None;
+        }
+    }
+    suggestion
+}
+
 /// Dispara o enriquecimento sem prender quem chamou.
 pub fn spawn(ctx: &AppContext, run_id: i64, hosts: Vec<DiscoveredHost>) {
     let ctx = ctx.clone();
@@ -102,7 +131,11 @@ pub async fn enrich(ctx: &AppContext, run_id: i64, hosts: &[DiscoveredHost]) -> 
         else {
             continue;
         };
-        let suggestion = outcome.value.answered_by(&outcome.model);
+        let suggestion = calibrate(
+            outcome.value.answered_by(&outcome.model),
+            host,
+            settings.min_confidence,
+        );
         if suggestion.is_empty() {
             continue;
         }
@@ -179,6 +212,44 @@ mod tests {
                 .1
                 .ask_system
         );
+    }
+
+    fn suggestion(kind: &str, confidence: f64) -> IdentitySuggestion {
+        IdentitySuggestion {
+            device_type: Some(crate::services::ai::laya::suggestion::LayaSuggestion {
+                value: kind.into(),
+                confidence,
+                model: "laya:multilingual".into(),
+            }),
+            operating_system: None,
+        }
+    }
+
+    #[test]
+    fn palpite_sem_evidencia_a_favor_perde_confianca() {
+        // O caso real: OpenWrt com Net-SNMP, SSH e HTTP chamado de NAS.
+        let openwrt = DiscoveredHost {
+            ip_address: "10.0.0.2".into(),
+            vendor: Some("Net-SNMP".into()),
+            open_ports: vec![22, 53, 80, 443],
+            data: json!({}),
+            ..DiscoveredHost::default()
+        };
+        let nas = calibrate(suggestion("nas", 98.0), &openwrt, 60);
+        assert!(nas.device_type.is_none(), "58,8% fica abaixo do mínimo");
+
+        let router = calibrate(suggestion("router", 90.0), &openwrt, 60);
+        assert_eq!(router.device_type.unwrap().confidence, 90.0);
+    }
+
+    #[test]
+    fn sem_evidencia_nenhuma_o_palpite_fica_como_veio() {
+        let bare = DiscoveredHost {
+            ip_address: "10.0.0.9".into(),
+            ..DiscoveredHost::default()
+        };
+        let kept = calibrate(suggestion("iot", 80.0), &bare, 60);
+        assert_eq!(kept.device_type.unwrap().confidence, 80.0);
     }
 
     #[test]

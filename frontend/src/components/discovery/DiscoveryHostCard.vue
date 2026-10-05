@@ -64,8 +64,7 @@
         {{ description }}
       </div>
       <div class="text-caption mt-1">
-        <v-icon size="14" class="me-1">mdi-domain</v-icon
-        >{{ vendor ?? 'Fabricante não identificado' }}
+        <v-icon size="14" class="me-1">mdi-domain</v-icon>{{ vendor }}
       </div>
       <div v-if="reason" class="text-caption mt-1 text-info host-card__clamp" :title="reason">
         <v-icon size="14" class="me-1">mdi-lightbulb-on-outline</v-icon>{{ reason }}
@@ -115,7 +114,7 @@ import {
   discoveryReasons,
   discoverySnmpVersion,
   discoveryTypeMeta,
-  discoveryVendor,
+  discoveryVendorLabel,
 } from '@/utils/discoveryPresentation'
 import { formatPercent } from '@/utils/formatters'
 
@@ -133,7 +132,7 @@ const emit = defineEmits<{
 const type = computed(() => discoveryTypeMeta(props.host))
 const name = computed(() => discoveryDeviceName(props.host) ?? type.value.label)
 const description = computed(() => discoveryDescription(props.host))
-const vendor = computed(() => discoveryVendor(props.host))
+const vendor = computed(() => discoveryVendorLabel(props.host))
 const reason = computed(() => discoveryReasons(props.host)[0] ?? null)
 const ports = computed(() => discoveryOpenPorts(props.host))
 const snmpVersion = computed(() => discoverySnmpVersion(props.host))

@@ -249,6 +249,17 @@ pub fn detect(evidencia: &Evidence) -> Detection {
         );
     }
 
+    if let Some(sistema) = casa_kernel(evidencia.sys_descr) {
+        return achado(
+            sistema,
+            source::SNMP,
+            format!(
+                "o kernel no sysDescr foi compilado como o do {} (versão de build #0)",
+                sistema.label
+            ),
+        );
+    }
+
     if let Some((sistema, marca)) = casa_banner(evidencia.ssh_banner) {
         return achado(
             sistema,
@@ -328,6 +339,15 @@ fn casa(texto: Option<&str>, nivel: Especificidade) -> Option<&'static Operating
                 .iter()
                 .any(|agulha| bruto.contains(agulha))
         })
+        .map(|adapter| adapter.platform())
+}
+
+/// A plataforma cuja assinatura de kernel aparece no `sysDescr`.
+fn casa_kernel(sys_descr: Option<&str>) -> Option<&'static OperatingSystem> {
+    let texto = sys_descr?.to_ascii_lowercase();
+    registry::all()
+        .iter()
+        .find(|adapter| adapter.kernel_signature(&texto))
         .map(|adapter| adapter.platform())
 }
 
@@ -465,6 +485,38 @@ pub fn options() -> Vec<OperatingSystemOption> {
 mod tests {
     use super::*;
 
+    fn by_sys_descr(sys_descr: &str) -> Detection {
+        detect(&Evidence {
+            sys_descr: Some(sys_descr),
+            sys_object_id: Some("1.3.6.1.4.1.8072.3.2.10"),
+            ..Evidence::default()
+        })
+    }
+
+    #[test]
+    fn kernel_compilado_como_o_do_openwrt_identifica_o_sistema() {
+        for sys_descr in [
+            "Linux bpi-r3-assistencia 6.12.94 #0 SMP Mon Jun 29 12:59:20 2026 aarch64",
+            "Linux RB922-terraco 6.12.94 #0 Mon Jun 29 12:59:20 2026 mips",
+            "Linux gl-mt3000 5.15.167 #0 SMP PREEMPT Sat Sep 21 2024 aarch64",
+        ] {
+            let found = by_sys_descr(sys_descr);
+            assert_eq!(found.system.id, "openwrt", "{sys_descr}");
+            assert!(found.reason.contains("#0"), "{}", found.reason);
+        }
+    }
+
+    #[test]
+    fn kernel_de_distribuicao_continua_linux() {
+        for sys_descr in [
+            "Linux srv 6.1.0-18-amd64 #1 SMP PREEMPT_DYNAMIC Debian 6.1.76-1 x86_64",
+            "Linux ubuntu 5.15.0-91-generic #101-Ubuntu SMP Tue Nov 14 13:30:08 UTC 2023 x86_64",
+            "Linux nas 6.6.22-0-lts #1-Alpine SMP PREEMPT_DYNAMIC Fri, 15 Mar 2024 x86_64",
+        ] {
+            assert_eq!(by_sys_descr(sys_descr).system.id, "linux", "{sys_descr}");
+        }
+    }
+
     #[test]
     fn o_nome_prefere_sysname_e_descarta_ip_ou_controle() {
         assert_eq!(
@@ -584,7 +636,11 @@ mod tests {
         // responde só o `uname`, e a palavra "Linux" bastava para encerrar a
         // dedução no sistema errado. O `dropbear` chega antes de qualquer
         // autenticação, no mesmo `connect` que já sondava a porta 22.
-        let uname = "Linux bpi-r3-assistencia 6.12.87 #0 SMP Wed May 13 22:42:09 2026 aarch64";
+        //
+        // O kernel `#0` já denuncia o OpenWrt (ver
+        // `kernel_compilado_como_o_do_openwrt_identifica_o_sistema`); aqui o
+        // `uname` é de uma build sem essa marca, e só o banner decide.
+        let uname = "Linux bpi-r3-assistencia 6.12.87 #1 SMP Wed May 13 22:42:09 2026 aarch64";
         assert_eq!(por_descricao(uname).system.id, "linux");
 
         let achado = detect(&Evidence {

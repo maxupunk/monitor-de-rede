@@ -17,9 +17,8 @@ use serde_json::Value;
 use super::{
     fingerprints::{self, kind, Match},
     merger::DiscoveredHost,
-    oui_lookup,
 };
-use crate::services::devices::adapters::registry;
+use crate::services::{devices::adapters::registry, vendors::builtin};
 
 /// Pontuação mínima para afirmar um tipo; abaixo disso a resposta é dúvida.
 const MIN_SCORE: i32 = 18;
@@ -318,14 +317,14 @@ fn vote_link_layer(ballot: &mut Ballot, host: &DiscoveredHost) {
     let Some(mac) = host.mac_address.as_deref() else {
         return;
     };
-    if oui_lookup::lookup_vendor(mac) == Some("Docker (contêiner)") {
+    if builtin::is_docker(mac) {
         ballot.vote(
             kind::SERVER,
             "docker-mac",
             35,
             "MAC de contêiner Docker".into(),
         );
-    } else if oui_lookup::is_locally_administered(mac) {
+    } else if builtin::is_locally_administered(mac) {
         ballot.vote(
             kind::MOBILE,
             "private-mac",
@@ -353,6 +352,23 @@ fn canonical(kind_id: &'static str) -> &'static str {
 /// gateway cadastrado da rede varrida, quando há.
 #[must_use]
 pub fn classify(host: &DiscoveredHost, gateway: Option<&str>) -> Classification {
+    let ranked = ballot_for(host, gateway).ranked();
+    decide(host, &ranked)
+}
+
+/// Pontos da heurística para cada tipo que recebeu algum voto, do mais
+/// votado ao menos. É o que permite conferir um palpite de fora (o do Laya)
+/// contra a evidência que existe.
+#[must_use]
+pub fn scores(host: &DiscoveredHost, gateway: Option<&str>) -> Vec<(&'static str, i32)> {
+    ballot_for(host, gateway)
+        .ranked()
+        .into_iter()
+        .map(|(kind, score, _)| (kind, score))
+        .collect()
+}
+
+fn ballot_for(host: &DiscoveredHost, gateway: Option<&str>) -> Ballot {
     let texts = texts(host);
     let mut ballot = Ballot::default();
     vote_adapters(&mut ballot, &texts);
@@ -369,8 +385,10 @@ pub fn classify(host: &DiscoveredHost, gateway: Option<&str>) -> Classification 
             "É o gateway cadastrado da rede".into(),
         );
     }
+    ballot
+}
 
-    let ranked = ballot.ranked();
+fn decide(host: &DiscoveredHost, ranked: &[(&'static str, i32, Vec<String>)]) -> Classification {
     match ranked.first() {
         Some((device_type, score, reasons)) if *score >= MIN_SCORE => {
             let runner_up = ranked.get(1);
@@ -403,6 +421,21 @@ pub fn classify(host: &DiscoveredHost, gateway: Option<&str>) -> Classification 
             alternative: None,
         },
     }
+}
+
+/// O tipo que o fabricante (e o próprio MAC) sugere sozinho — o palpite do
+/// cadastro de dispositivo enquanto o operador digita o MAC. `None` quando a
+/// evidência não basta para afirmar um tipo.
+#[must_use]
+pub fn hint_from_mac(mac_address: &str, vendor: Option<&str>) -> Option<Classification> {
+    let host = DiscoveredHost {
+        mac_address: Some(mac_address.to_string()),
+        vendor: vendor.map(str::to_string),
+        ..DiscoveredHost::default()
+    };
+    let classification = classify(&host, None);
+    (classification.device_type != kind::UNKNOWN && classification.device_type != kind::WEB_DEVICE)
+        .then_some(classification)
 }
 
 #[cfg(test)]
@@ -540,6 +573,39 @@ mod tests {
         let split = classify(&host(Some("tv"), None, &[9100], json!({})), None);
         assert!(clear.confidence > split.confidence);
         assert!(split.alternative.is_some());
+    }
+
+    /// O caso real: OpenWrt numa Banana Pi R3, agente Net-SNMP, sem "openwrt"
+    /// escrito em lugar nenhum — o Laya chegou a chamar de NAS com 98%.
+    #[test]
+    fn openwrt_pelo_kernel_vira_roteador() {
+        let bpi = host(
+            Some("HeartOfGold"),
+            Some("Net-SNMP"),
+            &[22, 80, 443],
+            json!({ "identity": {
+                "sysDescr": "Linux bpi-r3-assistencia 6.12.94 #0 SMP Mon Jun 29 12:59:20 2026 aarch64",
+                "sysObjectId": "1.3.6.1.4.1.8072.3.2.10",
+            } }),
+        );
+        let classification = classify(&bpi, None);
+        assert_eq!(classification.device_type, "router");
+        assert!(
+            classification
+                .reasons
+                .iter()
+                .any(|reason| reason.contains("OpenWrt")),
+            "{:?}",
+            classification.reasons
+        );
+    }
+
+    #[test]
+    fn fabricante_sozinho_sugere_tipo_so_quando_basta() {
+        let iot = hint_from_mac("5c:cf:7f:00:11:22", Some("Espressif")).unwrap();
+        assert_eq!(iot.device_type, "iot");
+        assert!(iot.reasons[0].contains("espressif"));
+        assert!(hint_from_mac("00:11:22:33:44:55", Some("Fabricante Genérico")).is_none());
     }
 
     #[test]

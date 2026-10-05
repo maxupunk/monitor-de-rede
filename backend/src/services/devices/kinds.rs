@@ -16,7 +16,7 @@ pub const DEVICE_KINDS: &[DeviceKind] = &[
     DeviceKind {
         id: "router",
         label: "Roteador",
-        laya_hint: "Router or gateway that routes between networks (MikroTik, OpenWrt, edge router, ISP CPE).",
+        laya_hint: "Router or gateway that routes between networks: MikroTik RouterOS, OpenWrt (sysDescr like 'Linux <host> <version> #0 SMP ...', Net-SNMP agent, dropbear SSH, LuCI web, DNS on port 53), Banana Pi BPI-R, GL.iNet, edge router, ISP CPE/ONT.",
     },
     DeviceKind {
         id: "switch",
@@ -36,7 +36,7 @@ pub const DEVICE_KINDS: &[DeviceKind] = &[
     DeviceKind {
         id: "server",
         label: "Servidor",
-        laya_hint: "Server, NAS or virtualization host (Linux, Windows Server, VMware, Proxmox, Synology).",
+        laya_hint: "General-purpose server or virtualization host: Windows Server, Linux distribution (Debian, Ubuntu, RHEL), VMware ESXi, Proxmox, databases, mail, LDAP.",
     },
     DeviceKind {
         id: "printer",
@@ -51,7 +51,7 @@ pub const DEVICE_KINDS: &[DeviceKind] = &[
     DeviceKind {
         id: "nas",
         label: "Armazenamento (NAS)",
-        laya_hint: "Network storage appliance (Synology, QNAP, TrueNAS, Unraid, WD My Cloud).",
+        laya_hint: "Network storage appliance — only with storage evidence: SMB/AFP/NFS shares, Synology DSM (ports 5000/5001), QNAP, TrueNAS, Unraid, WD My Cloud, names like DiskStation.",
     },
     DeviceKind {
         id: "workstation",

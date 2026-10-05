@@ -26,13 +26,14 @@ use crate::{
     services::{
         discovery::{
             cidr_range::parse_cidr_range,
-            merger::DiscoveredHost,
+            merger::{merge_hosts, DiscoveredHost},
             pipeline::{self, ScanTarget},
             progress::{phase, ScanEvent, ScanReporter},
         },
         events::EventBus,
         monitoring::{checkers::ping::PingClient, runner::CheckDeps},
         shared::errors::{AppError, AppResult},
+        vendors,
     },
 };
 
@@ -452,6 +453,8 @@ pub async fn run_discovery(
     cancel: CancellationToken,
 ) -> AppResult<Vec<DiscoveredHost>> {
     let session = ScanSessionService::from_context(ctx)?;
+    // O merger consulta o fabricante de cada MAC na memória do processo.
+    vendors::service::ensure_loaded(&ctx.db).await;
     let (reporter, events) = ScanReporter::channel();
     let pump = tokio::spawn(pump_events(session.clone(), events));
     let outcome = match PingClient::from_context(ctx) {
@@ -525,6 +528,10 @@ pub async fn complete_remote_discovery(
         return Ok(());
     }
 
+    // O agente só conhece a tabela embutida; a central completa fabricante e
+    // classificação com o registro do IEEE dela.
+    vendors::service::ensure_loaded(&ctx.db).await;
+    let hosts = &merge_hosts([hosts.to_vec()]);
     if error.is_none() {
         persist_results(&ctx.db, run_id, hosts).await?;
         super::laya_identity::spawn(ctx, run_id, hosts.to_vec());

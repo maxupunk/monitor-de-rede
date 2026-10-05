@@ -1,3 +1,4 @@
+use crate::services::shared::transaction::begin_write;
 use async_trait::async_trait;
 use chrono::{offset::Local, Duration};
 use loco_rs::{auth::jwt, hash, prelude::*};
@@ -294,7 +295,7 @@ impl Model {
         let email = params.email.trim().to_lowercase();
         let name = params.name.trim().to_string();
 
-        let txn = db.begin().await?;
+        let txn = begin_write(db).await?;
 
         if users::Entity::find()
             .filter(

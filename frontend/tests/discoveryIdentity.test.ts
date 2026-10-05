@@ -9,6 +9,7 @@ import {
   discoveryReasons,
   discoverySources,
   discoveryTypeMeta,
+  discoveryVendorLabel,
 } from '@/utils/discoveryPresentation'
 import { deviceTypeMeta, normalizeDeviceType } from '@/utils/deviceTypes'
 
@@ -124,6 +125,15 @@ describe('evidências da descoberta', () => {
     const persisted = { ...live, data: { openPorts: [8008], details: live.data } }
     expect(discoveryDeviceName(persisted)).toBe('TV da Sala')
     expect(discoveryReasons(persisted)).toHaveLength(1)
+  })
+
+  it('explica o fabricante ausente de um MAC aleatório', () => {
+    expect(discoveryVendorLabel({ data: { macPrivate: true } })).toBe('MAC aleatório (privacidade)')
+    expect(discoveryVendorLabel({ data: { details: { macPrivate: true } } })).toBe(
+      'MAC aleatório (privacidade)'
+    )
+    expect(discoveryVendorLabel({ data: {} })).toBe('Fabricante não identificado')
+    expect(discoveryVendorLabel({ vendor: 'Espressif', data: {} })).toBe('Espressif')
   })
 
   it('ordena IPs numericamente', () => {

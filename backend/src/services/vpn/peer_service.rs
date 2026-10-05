@@ -8,9 +8,9 @@ use std::net::Ipv4Addr;
 
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
-    TransactionTrait,
 };
 
+use crate::services::shared::transaction::begin_write;
 use crate::{
     models::{devices, monitors, networks, probes, vpn_peers, vpn_servers},
     services::{
@@ -246,7 +246,7 @@ pub async fn create(
         let key_pair = key_pair.clone();
         let preshared_key = preshared_key.clone();
         async move {
-            let txn = db.begin().await?;
+            let txn = begin_write(db).await?;
             let device = devices::ActiveModel {
                 site_id: Set(payload.site_id.or(network.site_id)),
                 network_id: Set(Some(server.network_id)),
@@ -364,7 +364,7 @@ pub async fn rename(
         return Ok((bundle.peer, Some(device)));
     }
 
-    let txn = db.begin().await?;
+    let txn = begin_write(db).await?;
     let mut active: devices::ActiveModel = device.into();
     active.name = Set(new_name.to_string());
     let device = active.update(&txn).await?;

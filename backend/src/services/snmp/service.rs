@@ -4,10 +4,10 @@ use chrono::{DateTime, Utc};
 use futures::future;
 use sea_orm::{
     sea_query::Expr, ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set,
-    TransactionTrait,
 };
 use std::collections::{BTreeMap, HashMap};
 
+use crate::services::shared::transaction::begin_write;
 use crate::services::{
     alerts::fields as alert_fields,
     events::EventBus,
@@ -1151,7 +1151,7 @@ pub async fn apply_monitors(
     // só valem juntas — métricas, monitor e a própria linha. Sem ela, o pool de
     // uma conexão do SQLite estourando o `connect_timeout` no meio do laço
     // deixava o equipamento pela metade: interface apagada, monitor de pé.
-    let removal = ctx.db.begin().await?;
+    let removal = begin_write(&ctx.db).await?;
     for db_iface in db_interfaces {
         let Some(snmp_idx) = db_iface.snmp_index else {
             continue;

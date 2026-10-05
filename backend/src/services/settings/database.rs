@@ -6,11 +6,12 @@
 
 use sea_orm::{
     prelude::DateTimeWithTimeZone, ConnectionTrait, DatabaseBackend, DatabaseConnection,
-    EntityTrait, QueryOrder, QuerySelect, Statement, TransactionTrait,
+    EntityTrait, QueryOrder, QuerySelect, Statement,
 };
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::services::shared::transaction::begin_write;
 use crate::{
     models::{
         _entities::{
@@ -176,7 +177,7 @@ pub async fn clear_all_items(
     db: &DatabaseConnection,
     logs_db: Option<&DatabaseConnection>,
 ) -> AppResult<ClearAllItemsStats> {
-    let txn = db.begin().await?;
+    let txn = begin_write(db).await?;
 
     let mut total_deleted = 0u64;
 

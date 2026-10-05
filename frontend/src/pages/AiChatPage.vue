@@ -108,7 +108,7 @@
             icon="mdi-cog-outline"
             variant="text"
             color="primary"
-            to="/settings"
+            to="/settings?tab=ia"
             aria-label="Configurações da IA"
             title="Configurações da IA"
           ></v-btn>

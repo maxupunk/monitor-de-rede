@@ -52,6 +52,8 @@ impl Initializer for MonitoringInitializer {
         agents_background::spawn(ctx.clone());
         spawn_local_telemetry(ctx);
         spawn_scheduler(ctx.clone());
+        // Registro de fabricantes do IEEE: carrega e mantém em dia.
+        crate::services::vendors::service::spawn_auto_update(ctx);
 
         // Cadastro é uma conveniência de boot: banco indisponível não impede o
         // processo HTTP de subir, e a operação é idempotente em banco vazio.

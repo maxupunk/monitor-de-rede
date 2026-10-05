@@ -31,5 +31,6 @@ pub mod syslog;
 pub mod telemetry;
 pub mod topology;
 pub mod users;
+pub mod vendors;
 pub mod vpn;
 pub mod webpush;

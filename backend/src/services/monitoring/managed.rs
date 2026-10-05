@@ -17,11 +17,9 @@
 //! 3. **Boots concorrentes.** O índice único por `(device_id, type)` decide o
 //!    vencedor, e o perdedor relê a linha do outro.
 
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set,
-    TransactionTrait,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 
+use crate::services::shared::transaction::begin_write;
 use crate::{
     models::monitors,
     services::shared::errors::{AppError, AppResult},
@@ -55,7 +53,7 @@ pub async fn ensure_system_health_monitor(
         return repair(db, row).await;
     }
 
-    let txn = db.begin().await?;
+    let txn = begin_write(db).await?;
     let inserted = monitors::ActiveModel {
         device_id: Set(Some(device_id)),
         // Nunca um probe: ver a armadilha 1 na nota do módulo.

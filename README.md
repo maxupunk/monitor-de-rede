@@ -241,7 +241,7 @@ de preferência pelo túnel da VPN — e não abre porta nenhuma no servidor
 1. **Pela VPN (recomendado):** em VPN → Novo peer, perfil Linux, marque
    "Conectar este servidor à central". O script do túnel termina instalando o
    agente com um código de uso único, e ele já nasce vinculado ao dispositivo.
-2. **Manual:** Infraestrutura → Servidores remotos → Conectar servidor. Escolha
+2. **Manual:** Coleta remota → Servidores remotos → Conectar servidor. Escolha
    por qual dos "Endereços deste servidor" (túnel, rede local, internet ou um
    personalizado) ele alcança a central; a tela mostra o comando systemd
    (`curl …/api/agents/install.sh | sudo … sh`) e o `docker run` com esse

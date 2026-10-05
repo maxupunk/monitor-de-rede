@@ -77,20 +77,21 @@ function isBlock(value: unknown): value is Block {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-/** Um bloco dos scanners, do snapshot ao vivo ou do resultado persistido. */
-function block(host: DiscoveredHostLike | null | undefined, key: string): Block | null {
+/** Um campo dos scanners, do snapshot ao vivo ou do resultado persistido. */
+function detail(host: DiscoveredHostLike | null | undefined, key: string): unknown {
   const data = host?.data
-  if (!isBlock(data)) return null
+  if (!isBlock(data)) return undefined
   const container = isBlock(data.details) ? data.details : data
-  const value = container[key]
+  return container[key]
+}
+
+function block(host: DiscoveredHostLike | null | undefined, key: string): Block | null {
+  const value = detail(host, key)
   return isBlock(value) ? value : null
 }
 
 function list(host: DiscoveredHostLike | null | undefined, key: string): unknown[] {
-  const data = host?.data
-  if (!isBlock(data)) return []
-  const container = isBlock(data.details) ? data.details : data
-  const value = container[key]
+  const value = detail(host, key)
   return Array.isArray(value) ? value : []
 }
 
@@ -165,6 +166,18 @@ export function discoveryVendor(host: DiscoveredHostLike | null | undefined): st
     text(discoveryUpnp(host)?.manufacturer) ??
     null
   )
+}
+
+/**
+ * Fabricante para mostrar, ou o porquê de não haver: MAC aleatório não tem
+ * dono no registro do IEEE, e "não identificado" sozinho parece falha.
+ */
+export function discoveryVendorLabel(host: DiscoveredHostLike | null | undefined): string {
+  const vendor = discoveryVendor(host)
+  if (vendor) return vendor
+  return detail(host, 'macPrivate') === true
+    ? 'MAC aleatório (privacidade)'
+    : 'Fabricante não identificado'
 }
 
 export function discoveryTypeMeta(host: DiscoveredHostLike | null | undefined) {

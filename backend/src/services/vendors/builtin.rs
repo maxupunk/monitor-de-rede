@@ -1,4 +1,9 @@
-//! Tabela OUI estática. `phf` mantém a consulta O(1) sem heap.
+//! Tabela OUI embutida: a reserva que vale sem internet.
+//!
+//! Curada para o que a descoberta mais encontra (IoT, câmeras, TVs,
+//! impressoras, redes). O registro completo do IEEE, quando baixado, tem
+//! precedência — ver [`super::registry::lookup`]. `phf` mantém a consulta O(1)
+//! sem heap.
 
 use phf::phf_map;
 
@@ -638,15 +643,29 @@ fn oui(mac_address: &str) -> Option<String> {
     (normalized.len() == 6).then_some(normalized)
 }
 
-/// Fabricante pelo OUI. Um MAC de contêiner Docker (`02:42:…`) é
-/// administrado localmente, mas a origem dele é conhecida.
+/// Prefixo dos MACs que o Docker dá aos contêineres.
+const DOCKER_PREFIX: &str = "0242";
+
+/// Quantos prefixos a tabela embutida conhece.
+#[must_use]
+pub fn len() -> usize {
+    VENDORS.len()
+}
+
+/// MAC de contêiner Docker (`02:42:…`).
+#[must_use]
+pub fn is_docker(mac_address: &str) -> bool {
+    oui(mac_address).is_some_and(|oui| oui.starts_with(DOCKER_PREFIX))
+}
+
+/// Fabricante pelo OUI. Um MAC de contêiner Docker é administrado
+/// localmente, mas a origem dele é conhecida.
 #[must_use]
 pub fn lookup_vendor(mac_address: &str) -> Option<&'static str> {
-    let oui = oui(mac_address)?;
-    if oui.starts_with("0242") {
+    if is_docker(mac_address) {
         return Some("Docker (contêiner)");
     }
-    VENDORS.get(oui.as_str()).copied()
+    VENDORS.get(oui(mac_address)?.as_str()).copied()
 }
 
 /// MAC administrado localmente (bit `0x02` do primeiro octeto): é o endereço

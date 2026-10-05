@@ -33,11 +33,9 @@
 
 use std::sync::atomic::{AtomicI64, Ordering};
 
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set,
-    TransactionTrait,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 
+use crate::services::shared::transaction::begin_write;
 use crate::{
     models::devices,
     services::shared::errors::{AppError, AppResult},
@@ -121,7 +119,7 @@ impl<'a> SystemDeviceService<'a> {
             return Ok(row);
         }
 
-        let txn = self.db.begin().await?;
+        let txn = begin_write(self.db).await?;
         let inserted = devices::ActiveModel {
             name: Set(NETMONITOR_DEFAULT_NAME.to_string()),
             r#type: Set(NETMONITOR_TYPE.to_string()),

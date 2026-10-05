@@ -55,6 +55,7 @@ mod m20261001_000001_device_plugin_installs;
 mod m20261002_000001_plugin_fleet;
 mod m20261003_000001_plugin_auto_enable;
 mod m20261004_000001_device_observed_os;
+mod m20261005_000001_oui_vendors;
 
 pub struct Migrator;
 
@@ -177,6 +178,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261002_000001_plugin_fleet::Migration),
             Box::new(m20261003_000001_plugin_auto_enable::Migration),
             Box::new(m20261004_000001_device_observed_os::Migration),
+            Box::new(m20261005_000001_oui_vendors::Migration),
             // inject-above (do not remove this comment)
         ]
     }

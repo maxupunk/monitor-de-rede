@@ -7,9 +7,10 @@
 use chrono::{DateTime, Duration, Utc};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection, EntityTrait,
-    FromQueryResult, QueryFilter, QueryOrder, Set, Statement, TransactionTrait, Value,
+    FromQueryResult, QueryFilter, QueryOrder, Set, Statement, Value,
 };
 
+use crate::services::shared::transaction::begin_write;
 use crate::{
     models::{monitor_results, monitor_results_hourly},
     services::shared::errors::{AppError, AppResult},
@@ -87,7 +88,7 @@ pub async fn rollup_monitor_results(
         return Ok(RollupStats::default());
     }
 
-    let txn = db.begin().await?;
+    let txn = begin_write(db).await?;
     let aggregates = aggregate_range(&txn, start, end).await?;
     let rows_aggregated = aggregates.iter().try_fold(0_u64, |total, row| {
         u64::try_from(row.total_checks)

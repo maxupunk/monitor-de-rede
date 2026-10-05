@@ -93,18 +93,12 @@ fn into_hosts(observed: BTreeMap<IpAddr, Observed>, scanner: &str) -> Vec<Discov
 /// Hosts que provaram existir por TCP, com as portas que já vieram abertas.
 pub async fn liveness(
     addresses: &[IpAddr],
+    ports: &[u16],
     cancel: &CancellationToken,
     stage: &Stage,
 ) -> Vec<DiscoveredHost> {
     stage.begin();
-    let observed = sweep(
-        addresses,
-        fingerprints::LIVENESS_PORTS,
-        LIVENESS_TIMEOUT,
-        cancel,
-        stage,
-    )
-    .await;
+    let observed = sweep(addresses, ports, LIVENESS_TIMEOUT, cancel, stage).await;
     into_hosts(observed, "tcp")
 }
 
@@ -151,7 +145,13 @@ mod tests {
         let cancel = CancellationToken::new();
         cancel.cancel();
         let ip: IpAddr = "127.0.0.1".parse().unwrap();
-        let hosts = liveness(&[ip], &cancel, &Stage::silent()).await;
+        let hosts = liveness(
+            &[ip],
+            fingerprints::LIVENESS_PORTS,
+            &cancel,
+            &Stage::silent(),
+        )
+        .await;
         assert!(hosts.is_empty());
     }
 }

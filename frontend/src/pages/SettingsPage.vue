@@ -2,55 +2,86 @@
   <div>
     <PageHeader
       title="Configurações do Sistema"
-      subtitle="Preferências globais, parâmetros de monitoramento e notificações"
+      subtitle="Preferências, rede deste servidor, notificações, inteligência artificial e sistema"
     />
 
-    <v-row dense>
-      <v-col cols="12" md="6">
-        <PreferencesCard
-          ref="preferencesCard"
-          @saved="
-            notify('Preferências salvas — já valem para os próximos monitores e dispositivos.')
-          "
-        />
-      </v-col>
+    <v-card elevation="2" class="rounded-lg mb-4">
+      <v-tabs v-model="tab" color="primary" show-arrows>
+        <v-tab v-for="item in TABS" :key="item.value" :value="item.value" :prepend-icon="item.icon">
+          {{ item.title }}
+        </v-tab>
+      </v-tabs>
+    </v-card>
 
-      <v-col cols="12" md="6">
-        <ServerAddressesCard @open-dialog="addressesDialog = true" />
-      </v-col>
+    <v-window v-model="tab" :touch="false">
+      <!-- `eager`: o cartão de preferências recebe os valores no carregamento da página. -->
+      <v-window-item value="geral" eager>
+        <v-row dense>
+          <v-col cols="12" md="6">
+            <PreferencesCard
+              ref="preferencesCard"
+              @saved="
+                notify('Preferências salvas — já valem para os próximos monitores e dispositivos.')
+              "
+            />
+          </v-col>
+          <v-col cols="12" md="6">
+            <DashboardSyncCard />
+          </v-col>
+          <v-col cols="12">
+            <OnboardingCard />
+          </v-col>
+        </v-row>
+      </v-window-item>
 
-      <v-col cols="12" md="6">
-        <DashboardSyncCard />
-      </v-col>
+      <v-window-item value="rede">
+        <v-row dense>
+          <v-col cols="12" md="6">
+            <ServerAddressesCard @open-dialog="addressesDialog = true" />
+          </v-col>
+          <v-col cols="12" md="6">
+            <DnsServersCard />
+          </v-col>
+          <v-col cols="12">
+            <VendorRegistryCard @saved="notify" />
+          </v-col>
+        </v-row>
+      </v-window-item>
 
-      <v-col cols="12" md="6">
-        <NotificationsCard @test-notification="testNotification" />
-      </v-col>
+      <v-window-item value="notificacoes">
+        <v-row dense>
+          <v-col cols="12" md="8" lg="6">
+            <NotificationsCard @test-notification="testNotification" />
+          </v-col>
+        </v-row>
+      </v-window-item>
 
-      <v-col cols="12">
-        <AiSettingsCard @saved="notify" />
-      </v-col>
+      <v-window-item value="ia">
+        <v-row dense>
+          <v-col cols="12">
+            <AiSettingsCard @saved="notify" />
+          </v-col>
+          <v-col cols="12">
+            <LayaSettingsCard @saved="notify" />
+          </v-col>
+        </v-row>
+      </v-window-item>
 
-      <v-col cols="12">
-        <LayaSettingsCard @saved="notify" />
-      </v-col>
-
-      <v-col cols="12">
-        <OnboardingCard />
-      </v-col>
-
-      <v-col cols="12">
-        <BackupCard
-          @export="onExport"
-          @file-selected="onFileSelected"
-          @confirm-restore="confirmDialog = true"
-        />
-      </v-col>
-
-      <v-col cols="12">
-        <DatabaseInfoCard />
-      </v-col>
-    </v-row>
+      <v-window-item value="sistema">
+        <v-row dense>
+          <v-col cols="12">
+            <BackupCard
+              @export="onExport"
+              @file-selected="onFileSelected"
+              @confirm-restore="confirmDialog = true"
+            />
+          </v-col>
+          <v-col cols="12">
+            <DatabaseInfoCard />
+          </v-col>
+        </v-row>
+      </v-window-item>
+    </v-window>
 
     <v-dialog v-model="confirmDialog" :fullscreen="$vuetify.display.xs" max-width="520">
       <v-card class="rounded-lg">
@@ -86,7 +117,8 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useServerAddressesStore } from '@/stores/serverAddresses'
 import { usePreferencesStore } from '@/stores/preferences'
 import { useBackupStore } from '@/stores/backup'
@@ -94,6 +126,8 @@ import { useNotifications } from '@/composables/useNotifications'
 import ServerAddressesDialog from '@/components/ServerAddressesDialog.vue'
 import PreferencesCard from '@/components/settings/PreferencesCard.vue'
 import ServerAddressesCard from '@/components/settings/ServerAddressesCard.vue'
+import DnsServersCard from '@/components/settings/DnsServersCard.vue'
+import VendorRegistryCard from '@/components/settings/VendorRegistryCard.vue'
 import DashboardSyncCard from '@/components/settings/DashboardSyncCard.vue'
 import NotificationsCard from '@/components/settings/NotificationsCard.vue'
 import OnboardingCard from '@/components/settings/OnboardingCard.vue'
@@ -102,6 +136,24 @@ import DatabaseInfoCard from '@/components/settings/DatabaseInfoCard.vue'
 import AiSettingsCard from '@/components/settings/AiSettingsCard.vue'
 import LayaSettingsCard from '@/components/settings/LayaSettingsCard.vue'
 import PageHeader from '@/components/PageHeader.vue'
+
+/** Abas da página; a escolhida fica na URL (`?tab=rede`) para links diretos. */
+const TABS = [
+  { value: 'geral', title: 'Geral', icon: 'mdi-tune-variant' },
+  { value: 'rede', title: 'Rede', icon: 'mdi-lan' },
+  { value: 'notificacoes', title: 'Notificações', icon: 'mdi-bell-outline' },
+  { value: 'ia', title: 'Inteligência artificial', icon: 'mdi-robot-outline' },
+  { value: 'sistema', title: 'Sistema', icon: 'mdi-database-cog-outline' },
+] as const
+
+type SettingsTab = (typeof TABS)[number]['value']
+
+const route = useRoute()
+const router = useRouter()
+const tab = computed<SettingsTab>({
+  get: () => TABS.find((item) => item.value === route.query.tab)?.value ?? 'geral',
+  set: (value) => void router.replace({ query: { ...route.query, tab: value } }),
+})
 
 const addressesStore = useServerAddressesStore()
 const prefsStore = usePreferencesStore()

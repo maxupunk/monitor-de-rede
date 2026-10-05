@@ -147,6 +147,7 @@ services/
 ├── devices/        adapters de plataforma, acesso, capacidades e dispositivo do sistema
 ├── monitoring/     checkers/, runner, result_processor, device_status, presenter
 ├── discovery/      service, pipeline, scanners/, fingerprints, device_identifier, merger, queue
+├── vendors/        fabricante por MAC: registro do IEEE (`oui_vendors`) + base embutida
 ├── snmp/           sessões, coletores, perfis
 ├── topology/       ligações e confiança
 ├── alerts/         datasets → evaluator → manager (+ catalog, recovery, repository)
@@ -322,6 +323,11 @@ definidos; qualquer coisa fora do catálogo é rejeitada.
 - O cliente SNMP usa `async-snmp`: transporte UDP compartilhado, correlação de
   origem/request ID, GETBULK com fallback GETNEXT e SNMPv3 USM com cache de
   engine e chaves derivadas.
+- O fabricante de um MAC vem do registro do IEEE (MA-L/MA-M/MA-S, tabela
+  `oui_vendors`, baixado pelo servidor a cada 30 dias — `OUI_AUTO_UPDATE`,
+  `OUI_SOURCES`) com a base embutida como reserva offline; a consulta é em
+  memória, pelo bloco mais específico. A tabela fica fora do backup: é dado
+  público, baixado de novo.
 - Credenciais automáticas de discovery vêm apenas de
   `SNMP_DISCOVERY_COMMUNITIES` e `SNMP_DISCOVERY_V3_PROFILES`; nunca são
   persistidas dentro do resultado descoberto.
@@ -405,6 +411,7 @@ GET              /api/monitors/{id}/results | /alerts
 
 GET  /api/discovery/runs | /runs/{id} | /environment | /conflicts
 POST /api/discovery/scan | /scan-cancel | /check-conflicts
+GET  /api/vendors/lookup?mac= | /status    POST /api/vendors/refresh
 DELETE /api/discovery/cleanup
 
 GET  /api/topology                         POST /api/topology/links
@@ -697,6 +704,9 @@ local do agendador permanecem (AGENTS §6). Resultado pronto com o canal caído
 vai para o buffer do agente e volta como evento na reconexão.
 
 ## 11-C. Laya — decisões locais sem LLM
+
+> Plano de treinamento da identificação de dispositivos, com o diagnóstico de
+> um caso real: [laya-treinamento.md](laya-treinamento.md).
 
 O Laya é um classificador (não gera texto) servido pelo container opcional `ollaya`
 (sobe com o `docker compose up`; ocioso ~150 MB, com modelo carregado ~3–4 GB — a tela avisa ao ligar quando o Ollaya é local). Responde perguntas tipadas — sim/não,

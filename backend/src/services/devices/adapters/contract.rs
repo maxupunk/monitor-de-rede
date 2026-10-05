@@ -87,4 +87,10 @@ pub trait DeviceAdapter: Send + Sync {
     fn is_system_description(&self, _value: &str) -> bool {
         false
     }
+
+    /// O texto (um `sysDescr`, em minúsculas) traz a assinatura do kernel
+    /// desta plataforma — evidência de software mesmo sem o nome dela escrito.
+    fn kernel_signature(&self, _text: &str) -> bool {
+        false
+    }
 }

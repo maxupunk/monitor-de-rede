@@ -6,8 +6,9 @@
 
 use std::net::IpAddr;
 
-use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, Set, TransactionTrait};
+use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, Set};
 
+use crate::services::shared::transaction::begin_write;
 use crate::{
     models::_entities::devices,
     services::{
@@ -90,7 +91,7 @@ pub async fn remember(
             .is_some_and(|value| same_address(value, &address))
     });
 
-    let transaction = db.begin().await?;
+    let transaction = begin_write(db).await?;
     let device = devices::Entity::find_by_id(device_id)
         .one(&transaction)
         .await?

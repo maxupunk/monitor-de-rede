@@ -5,11 +5,8 @@
 //! somadas, blocos de `data` fundidos em profundidade e `data.sources` com
 //! todos que o enxergaram. No fim, o [`classify`] decide o tipo.
 
-use super::{
-    device_identifier::classify,
-    fingerprints,
-    oui_lookup::{is_locally_administered, lookup_vendor},
-};
+use super::{device_identifier::classify, fingerprints};
+use crate::services::vendors::{self, builtin::is_locally_administered};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -150,8 +147,7 @@ fn finalize(host: &mut DiscoveredHost, gateway: Option<&str>) {
         host.vendor = host
             .mac_address
             .as_deref()
-            .and_then(lookup_vendor)
-            .map(str::to_string)
+            .and_then(vendors::vendor_name)
             .or_else(|| text(&host.data, &["identity", "hardwareVendor"]))
             .or_else(|| text(&host.data, &["ssdp", "manufacturer"]));
     }

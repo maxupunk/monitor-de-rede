@@ -17,7 +17,7 @@
           >
             O Assistente IA está desativado. Ative-o em
             <router-link
-              to="/settings"
+              to="/settings?tab=ia"
               class="text-decoration-underline font-weight-bold"
               @click="emit('navigate')"
             >

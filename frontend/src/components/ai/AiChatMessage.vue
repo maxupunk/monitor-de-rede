@@ -71,7 +71,7 @@
                 variant="outlined"
                 color="warning"
                 prepend-icon="mdi-cog-outline"
-                to="/settings"
+                to="/settings?tab=ia"
               >
                 Ajustar Configurações de IA
               </v-btn>

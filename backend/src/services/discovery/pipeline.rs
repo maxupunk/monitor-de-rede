@@ -24,8 +24,9 @@ use tokio_util::sync::CancellationToken;
 
 use super::{
     cidr_range::{expand_cidr_batch, parse_cidr_range, MAX_SCAN_HOSTS},
+    fingerprints,
     merger::{merge_with_gateway, DiscoveredHost},
-    progress::{phase, ScanReporter},
+    progress::{phase, ScanReporter, Stage},
     scanners::{arp, http, icmp, mdns, names, ports, snmp, ssdp},
 };
 use crate::services::{
@@ -76,10 +77,9 @@ struct Batch {
 }
 
 impl Batch {
-    const fn split(&self, from_percent: usize, to_percent: usize) -> (usize, usize) {
-        let start = self.offset + self.len * from_percent / 100;
-        let end = self.offset + self.len * to_percent / 100;
-        (start, end - start)
+    /// Posição na barra a `percent`% do lote.
+    const fn at(&self, percent: usize) -> usize {
+        self.offset + self.len * percent / 100
     }
 }
 
@@ -110,29 +110,79 @@ pub async fn scan(
             total,
         };
 
-        let alive = sweep(ping, &addresses, &cancel, reporter, &batch).await?;
-        let mut found = vec![alive];
+        let presence = presence(ping, &addresses, &cancel, reporter, &batch).await?;
+        let mut found = vec![presence.alive.clone()];
         if let Some(task) = multicast.take() {
             found.push(task.await.unwrap_or_default());
         }
         merged = merge_with_gateway(std::iter::once(merged).chain(found), gateway.as_deref());
         reporter.hosts(&merged);
+        reporter.log(presence.summary(addresses.len()));
 
+        // Primeiro quem já respondeu: a prova de vida por TCP dos mudos é uma
+        // rajada de SYN para endereços que não existem, e um proxy de rede
+        // (Docker Desktop, rootless) leva segundos para se recuperar dela —
+        // feita antes, ela zerava as portas de todo mundo.
         ensure_running(&cancel)?;
         let in_batch: BTreeSet<String> = addresses.iter().map(ToString::to_string).collect();
         let living: Vec<&DiscoveredHost> = merged
             .iter()
             .filter(|host| in_batch.contains(&host.ip_address))
             .collect();
-        reporter.log(format!(
-            "{} host(s) ativo(s) entre {} endereço(s); identificando…",
-            living.len(),
-            addresses.len()
-        ));
-        let identified =
-            identify(&living, &client, target.gateway, &cancel, reporter, &batch).await;
+        let known: BTreeSet<String> = living.iter().map(|host| host.ip_address.clone()).collect();
+        let identified = identify(
+            &living,
+            &client,
+            target.gateway,
+            &cancel,
+            &reporter.stage(
+                phase::IDENTIFY,
+                batch.at(25),
+                batch.at(80) - batch.at(25),
+                total,
+            ),
+        )
+        .await;
         merged = merge_with_gateway([merged, identified], gateway.as_deref());
         reporter.hosts(&merged);
+
+        ensure_running(&cancel)?;
+        let proven = prove_silent(&presence, &cancel, reporter, &batch).await;
+        let newcomers: BTreeSet<String> = proven
+            .iter()
+            .map(|host| host.ip_address.clone())
+            .filter(|ip| !known.contains(ip))
+            .collect();
+        if !proven.is_empty() {
+            merged = merge_with_gateway([merged, proven], gateway.as_deref());
+        }
+        if !newcomers.is_empty() {
+            let hosts: Vec<&DiscoveredHost> = merged
+                .iter()
+                .filter(|host| newcomers.contains(&host.ip_address))
+                .collect();
+            let identified = identify(
+                &hosts,
+                &client,
+                target.gateway,
+                &cancel,
+                &reporter.stage(
+                    phase::IDENTIFY,
+                    batch.at(90),
+                    batch.at(100) - batch.at(90),
+                    total,
+                ),
+            )
+            .await;
+            merged = merge_with_gateway([merged, identified], gateway.as_deref());
+        }
+        reporter.hosts(&merged);
+        reporter.log(identification_summary(
+            merged
+                .iter()
+                .filter(|host| in_batch.contains(&host.ip_address)),
+            newcomers.len(),
+        ));
 
         offset = offset.saturating_add(addresses.len() as u32);
     }
@@ -140,16 +190,49 @@ pub async fn scan(
     Ok(merged)
 }
 
-/// Estágio 1: quem responde ICMP, ARP ou TCP.
-async fn sweep(
+/// O que o ping e a tabela de vizinhos deixam: quem já está provado e quem
+/// ainda precisa de prova por TCP.
+struct Presence {
+    /// Responderam ao ping ou estão confirmados na tabela de vizinhos.
+    alive: Vec<DiscoveredHost>,
+    /// Mudos a provar por TCP.
+    silent: Vec<IpAddr>,
+    /// Vizinhos lembrados (com MAC), que só valem se o TCP provar.
+    stale: Vec<DiscoveredHost>,
+    pinged: usize,
+    neighbors: usize,
+}
+
+impl Presence {
+    fn summary(&self, addresses: usize) -> String {
+        let mut line = format!(
+            "{} de {addresses} endereço(s) responderam ao ping; {} na tabela de vizinhos (ARP).",
+            self.pinged, self.neighbors
+        );
+        if self.neighbors == 0 && self.pinged > 0 {
+            line.push_str(
+                " Sem MAC visível nesta faixa (contêiner em bridge ou rede roteada): o fabricante \
+                 pelo MAC fica indisponível — use o docker-compose.host.yml para ver a camada 2.",
+            );
+        }
+        line
+    }
+}
+
+/// Estágio 1: quem responde ICMP ou ARP.
+async fn presence(
     ping: &PingClient,
     addresses: &[IpAddr],
     cancel: &CancellationToken,
     reporter: &ScanReporter,
     batch: &Batch,
-) -> AppResult<Vec<DiscoveredHost>> {
-    let (start, span) = batch.split(0, 30);
-    let stage = reporter.stage(phase::SWEEP, start, span, batch.total);
+) -> AppResult<Presence> {
+    let stage = reporter.stage(
+        phase::SWEEP,
+        batch.at(0),
+        batch.at(25) - batch.at(0),
+        batch.total,
+    );
     let icmp_hosts = icmp::scan(ping, addresses, cancel.clone(), &stage).await?;
     let pinged: BTreeSet<String> = icmp_hosts
         .iter()
@@ -159,6 +242,7 @@ async fn sweep(
     // O ping obriga o kernel a resolver o MAC de cada endereço: quem bloqueia
     // ICMP ainda aparece na tabela de vizinhos.
     let neighbors = arp::scan(addresses).await;
+    let neighbor_count = neighbors.len();
     let on_link = neighbors.iter().any(arp::is_confirmed);
     let (confirmed, stale): (Vec<_>, Vec<_>) = neighbors
         .into_iter()
@@ -183,24 +267,80 @@ async fn sweep(
             .copied()
             .collect()
     };
-    let (start, span) = batch.split(30, 50);
-    let tcp_hosts = ports::liveness(
-        &silent,
-        cancel,
-        &reporter.stage(phase::SWEEP, start, span, batch.total),
-    )
-    .await;
+    Ok(Presence {
+        pinged: pinged.len(),
+        neighbors: neighbor_count,
+        alive: [icmp_hosts, confirmed].concat(),
+        silent,
+        stale,
+    })
+}
+
+/// Prova de vida por TCP dos mudos. Se a rede responde ping, quem não
+/// respondeu quase sempre é Windows com firewall ou um painel web: poucas
+/// portas bastam e a rajada fica pequena. Sem nenhum ping, a lista é a
+/// completa.
+async fn prove_silent(
+    presence: &Presence,
+    cancel: &CancellationToken,
+    reporter: &ScanReporter,
+    batch: &Batch,
+) -> Vec<DiscoveredHost> {
+    if presence.silent.is_empty() {
+        return Vec::new();
+    }
+    let ports = if presence.pinged > 0 {
+        fingerprints::LIVENESS_PORTS_LIGHT
+    } else {
+        fingerprints::LIVENESS_PORTS
+    };
+    let stage = reporter.stage(
+        phase::SWEEP,
+        batch.at(80),
+        batch.at(90) - batch.at(80),
+        batch.total,
+    );
+    let tcp_hosts = ports::liveness(&presence.silent, ports, cancel, &stage).await;
     let proven: BTreeSet<&str> = tcp_hosts
         .iter()
         .map(|host| host.ip_address.as_str())
         .collect();
-    let stale_alive: Vec<DiscoveredHost> = stale
+    let stale_alive: Vec<DiscoveredHost> = presence
+        .stale
         .iter()
         .filter(|host| proven.contains(host.ip_address.as_str()))
         .cloned()
         .collect();
+    [stale_alive, tcp_hosts].concat()
+}
 
-    Ok([icmp_hosts, confirmed, stale_alive, tcp_hosts].concat())
+/// Uma linha para o registro: o que a identificação conseguiu de cada fonte.
+fn identification_summary<'a>(
+    hosts: impl Iterator<Item = &'a DiscoveredHost>,
+    proven_by_tcp: usize,
+) -> String {
+    let (mut total, mut with_ports, mut ports, mut snmp, mut named, mut web, mut mac) =
+        (0, 0, 0, 0, 0, 0, 0);
+    for host in hosts {
+        total += 1;
+        if !host.open_ports.is_empty() {
+            with_ports += 1;
+            ports += host.open_ports.len();
+        }
+        snmp += usize::from(host.data.get("snmp").is_some());
+        named += usize::from(host.hostname.is_some() || host.mdns_name.is_some());
+        web += usize::from(host.data.get("http").is_some());
+        mac += usize::from(host.mac_address.is_some());
+    }
+    let tcp = if proven_by_tcp > 0 {
+        format!(" {proven_by_tcp} achado(s) só por TCP (bloqueiam ping).")
+    } else {
+        String::new()
+    };
+    format!(
+        "Identificação: {ports} porta(s) aberta(s) em {with_ports} de {total} host(s); \
+         SNMP em {snmp}; nome em {named}; página web em {web}; MAC em {mac}.{tcp}"
+    )
 }
 
 /// Estágio 2: o que cada host vivo é.
@@ -209,11 +349,8 @@ async fn identify(
     client: &Client,
     gateway: Option<IpAddr>,
     cancel: &CancellationToken,
-    reporter: &ScanReporter,
-    batch: &Batch,
+    stage: &Stage,
 ) -> Vec<DiscoveredHost> {
-    let (start, span) = batch.split(50, 100);
-    let stage = reporter.stage(phase::IDENTIFY, start, span, batch.total);
     stage.begin();
     let ips: Vec<IpAddr> = hosts
         .iter()
@@ -224,7 +361,7 @@ async fn identify(
         return Vec::new();
     }
     let (port_hosts, snmp_hosts, name_hosts) = tokio::join!(
-        ports::scan(&ips, cancel, &stage),
+        ports::scan(&ips, cancel, stage),
         snmp::enrich(&ips, cancel),
         names::resolve(&ips, gateway),
     );
@@ -269,11 +406,35 @@ mod tests {
             len: 254,
             total: 2_048,
         };
-        let (sweep_start, sweep_span) = batch.split(0, 50);
-        let (identify_start, identify_span) = batch.split(50, 100);
-        assert_eq!(sweep_start, 1_024);
-        assert_eq!(sweep_start + sweep_span, identify_start);
-        assert_eq!(identify_start + identify_span, 1_024 + 254);
+        assert_eq!(batch.at(0), 1_024);
+        assert!(batch.at(25) < batch.at(80));
+        assert_eq!(batch.at(100), 1_024 + 254);
+    }
+
+    #[test]
+    fn resumo_diz_o_que_cada_fonte_achou_e_explica_a_falta_de_mac() {
+        let presence = Presence {
+            alive: Vec::new(),
+            silent: Vec::new(),
+            stale: Vec::new(),
+            pinged: 48,
+            neighbors: 0,
+        };
+        assert!(presence.summary(254).contains("Sem MAC visível"));
+        let host = DiscoveredHost {
+            ip_address: "10.0.0.1".into(),
+            hostname: Some("gw".into()),
+            open_ports: vec![22, 80],
+            data: serde_json::json!({ "snmp": {}, "http": {} }),
+            ..DiscoveredHost::default()
+        };
+        let line = identification_summary([&host].into_iter(), 2);
+        assert!(line.contains("2 porta(s) aberta(s) em 1 de 1"), "{line}");
+        assert!(
+            line.contains("SNMP em 1; nome em 1; página web em 1; MAC em 0"),
+            "{line}"
+        );
+        assert!(line.contains("2 achado(s) só por TCP"), "{line}");
     }
 
     #[test]

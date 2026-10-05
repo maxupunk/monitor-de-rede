@@ -29,5 +29,6 @@ pub mod sites;
 pub mod snmp;
 pub mod topology;
 pub mod users;
+pub mod vendors;
 pub mod vpn_peers;
 pub mod vpn_servers;

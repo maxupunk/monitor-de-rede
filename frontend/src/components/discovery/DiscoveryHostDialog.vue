@@ -200,7 +200,7 @@ import {
   discoverySources,
   discoveryTypeMeta,
   discoveryUpnp,
-  discoveryVendor,
+  discoveryVendorLabel,
   discoveryWebPage,
 } from '@/utils/discoveryPresentation'
 import { formatPercent } from '@/utils/formatters'
@@ -240,7 +240,7 @@ const facts = computed(() => {
   const sources = discoverySources(host)
   const entries: { label: string; value: string | null | undefined; mono?: boolean }[] = [
     { label: 'Endereço MAC', value: host.macAddress, mono: true },
-    { label: 'Fabricante', value: discoveryVendor(host) },
+    { label: 'Fabricante', value: discoveryVendorLabel(host) },
     { label: 'Modelo / descrição', value: discoveryDescription(host) },
     { label: 'Sistema', value: identity.value?.label },
     { label: 'Nome DNS', value: host.hostname, mono: true },

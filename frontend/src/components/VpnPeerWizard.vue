@@ -112,7 +112,7 @@
                 ></v-switch>
                 <div class="text-caption text-medium-emphasis ml-2">
                   O script do túnel termina instalando o agente NetMonitor, que se conecta pela VPN
-                  com um código de uso único. Acompanhe em Infraestrutura → Servidores remotos.
+                  com um código de uso único. Acompanhe em Coleta remota → Servidores remotos.
                 </div>
               </v-col>
             </v-row>

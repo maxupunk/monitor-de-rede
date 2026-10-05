@@ -23,6 +23,7 @@ pub mod monitor_results_hourly;
 pub mod monitors;
 pub mod networks;
 pub mod notification_outbox;
+pub mod oui_vendors;
 pub mod plugin_auto_accept;
 pub mod plugin_batches;
 pub mod plugin_runs;

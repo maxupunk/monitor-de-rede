@@ -19,6 +19,7 @@ pub use super::monitor_results::Entity as MonitorResults;
 pub use super::monitors::Entity as Monitors;
 pub use super::networks::Entity as Networks;
 pub use super::notification_outbox::Entity as NotificationOutbox;
+pub use super::oui_vendors::Entity as OuiVendors;
 pub use super::plugin_auto_accept::Entity as PluginAutoAccept;
 pub use super::plugin_batches::Entity as PluginBatches;
 pub use super::plugin_runs::Entity as PluginRuns;

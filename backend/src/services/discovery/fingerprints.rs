@@ -125,6 +125,12 @@ pub const LIVENESS_PORTS: &[u16] = &[
     80, 443, 22, 445, 139, 3389, 8080, 554, 53, 23, 8291, 62078, 9100, 7547, 8443, 5000,
 ];
 
+/// Prova de vida quando a rede responde ping: quem não respondeu quase sempre
+/// é Windows com firewall (445, 3389) ou um painel web. Seis portas por
+/// endereço mudo mantêm a rajada pequena — um proxy de rede (Docker Desktop)
+/// trava com milhares de SYN pendentes para IPs inexistentes.
+pub const LIVENESS_PORTS_LIGHT: &[u16] = &[445, 3389, 80, 443, 22, 8080];
+
 /// Portas em que se pede a página inicial, na ordem de preferência.
 pub const WEB_PORTS: &[(u16, &str)] = &[
     (80, "http"),
@@ -235,6 +241,14 @@ pub const KEYWORD_RULES: &[KeywordRule] = &[
     word("zte", ROUTER, 20),
     prefix("huawei", ROUTER, 10),
     prefix("cisco", ROUTER, 15),
+    // Fabricantes de CPE/ONT entregues pelas operadoras (nome do IEEE).
+    prefix("sagemcom", ROUTER, 35),
+    prefix("technicolor", ROUTER, 30),
+    prefix("arcadyan", ROUTER, 35),
+    prefix("askey", ROUTER, 30),
+    prefix("sercomm", ROUTER, 30),
+    prefix("zyxel", ROUTER, 30),
+    prefix("fiberhome", ROUTER, 35),
     // Firewalls.
     word("firewall", FIREWALL, 40),
     prefix("pfsense", FIREWALL, 55),
@@ -377,6 +391,8 @@ pub const KEYWORD_RULES: &[KeywordRule] = &[
     prefix("smartphone", MOBILE, 45),
     prefix("tablet", MOBILE, 40),
     prefix("apple", MOBILE, 15),
+    prefix("oppo", MOBILE, 45),
+    prefix("realme", MOBILE, 45),
     prefix("samsung", MOBILE, 15),
     // Smart TVs, consoles e mídia.
     word("smart tv", MEDIA, 50),
@@ -431,6 +447,7 @@ pub const KEYWORD_RULES: &[KeywordRule] = &[
     prefix("smartplug", IOT, 50),
     word("smart life", IOT, 45),
     word("philips hue", IOT, 55),
+    word("philips lighting", IOT, 50),
     word("hue bridge", IOT, 55),
     prefix("signify", IOT, 45),
     prefix("ewelink", IOT, 50),
@@ -487,6 +504,16 @@ pub const KEYWORD_RULES: &[KeywordRule] = &[
     word("control id", IOT, 45),
     prefix("catraca", IOT, 45),
     prefix("raspberrypi", IOT, 20),
+    // Quem fabrica módulos e acessórios IoT, como aparece no registro do IEEE.
+    prefix("allterco", IOT, 55),
+    prefix("aqara", IOT, 55),
+    word("lumi united", IOT, 50),
+    prefix("itead", IOT, 55),
+    prefix("ecobee", IOT, 55),
+    word("silicon laboratories", IOT, 25),
+    word("nordic semiconductor", IOT, 30),
+    prefix("murata", IOT, 20),
+    word("texas instruments", IOT, 15),
     // Câmeras e gravadores.
     prefix("camera", CAMERA, 45),
     prefix("câmera", CAMERA, 45),
@@ -518,6 +545,7 @@ pub const KEYWORD_RULES: &[KeywordRule] = &[
     prefix("mobotix", CAMERA, 55),
     prefix("netsurveillance", CAMERA, 55),
     prefix("axis", CAMERA, 30),
+    prefix("arlo", CAMERA, 50),
     // Impressoras.
     prefix("printer", PRINTER, 50),
     prefix("impressora", PRINTER, 50),
@@ -852,6 +880,7 @@ mod tests {
     fn portas_de_vida_e_web_sao_testadas_no_enriquecimento() {
         for port in LIVENESS_PORTS
             .iter()
+            .chain(LIVENESS_PORTS_LIGHT)
             .chain(WEB_PORTS.iter().map(|(port, _)| port))
         {
             assert!(port_rule(*port).is_some(), "porta {port} fora da tabela");

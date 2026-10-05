@@ -20,7 +20,7 @@
 
       <v-divider class="mb-2" />
 
-      <v-list density="compact" nav class="px-2">
+      <v-list v-model:opened="openedGroups" density="compact" nav class="px-2">
         <template v-for="item in navItems" :key="item.title">
           <v-list-item
             v-if="!item.children"
@@ -206,8 +206,6 @@
     </v-main>
 
     <!-- Modal Gerenciamento de Servidores DNS e Assistente Inicial -->
-    <DnsServersDialog v-model="dnsServersDialog" />
-    <ServerAddressesDialog v-model="serverAddressesDialog" />
     <InitialSetupDialog v-model="onboardingStore.showWizard" />
 
     <!-- Modais de Diagnóstico de Rede -->
@@ -260,8 +258,6 @@ import { useAuthStore } from '@/stores/auth'
 import { useOnboardingStore } from '@/stores/onboarding'
 import { useNotifications } from '@/composables/useNotifications'
 import { usePwaInstall } from '@/composables/usePwaInstall'
-import DnsServersDialog from '@/components/DnsServersDialog.vue'
-import ServerAddressesDialog from '@/components/ServerAddressesDialog.vue'
 import InitialSetupDialog from '@/components/InitialSetupDialog.vue'
 import TracerouteDialog from '@/components/TracerouteDialog.vue'
 import SpeedTestDialog from '@/components/SpeedTestDialog.vue'
@@ -288,8 +284,6 @@ interface NavItem {
 
 const display = useDisplay()
 const drawer = ref(!display.mdAndDown.value)
-const dnsServersDialog = ref(false)
-const serverAddressesDialog = ref(false)
 const tracerouteDialog = ref(false)
 const speedTestDialog = ref(false)
 const playbookDialog = ref(false)
@@ -328,7 +322,7 @@ async function handleNotificationClick() {
   if (permissionState.value === 'default') {
     await requestPermission()
   } else {
-    await router.push('/settings')
+    await router.push('/settings?tab=notificacoes')
   }
 }
 
@@ -338,7 +332,6 @@ const navItems = computed<NavItem[]>(() => [
   { title: 'Monitores', icon: 'mdi-heart-pulse', to: '/monitors' },
   { title: 'Alertas', icon: 'mdi-bell-outline', to: '/alerts' },
   { title: 'Manutenção', icon: 'mdi-wrench-clock', to: '/maintenance-windows' },
-  { title: 'Descoberta', icon: 'mdi-radar', to: '/discovery' },
   { title: 'Eventos', icon: 'mdi-history', to: '/events' },
   { title: 'Logs', icon: 'mdi-text-box-search-outline', to: '/logs' },
   {
@@ -354,29 +347,28 @@ const navItems = computed<NavItem[]>(() => [
       { title: 'Histórico', icon: 'mdi-chart-timeline-variant', to: '/docker/history' },
     ],
   },
+  /*
+   * A rede monitorada: as faixas IP ficam ao lado da varredura que as usa.
+   * Servidores DNS e endereços deste servidor são configuração do próprio
+   * NetMonitor — moram em Configurações › Rede, não aqui.
+   */
   {
-    title: 'Infraestrutura',
+    title: 'Rede',
+    icon: 'mdi-lan',
+    children: [
+      { title: 'Descoberta', icon: 'mdi-radar', to: '/discovery' },
+      { title: 'Redes IP', icon: 'mdi-ip-network-outline', to: '/networks' },
+      { title: 'Sites', icon: 'mdi-domain', to: '/sites' },
+      { title: 'Topologia', icon: 'mdi-sitemap', to: '/topology' },
+    ],
+  },
+  // Quem mede de fora da central.
+  {
+    title: 'Coleta remota',
     icon: 'mdi-server-network',
     children: [
-      { title: 'Sites', icon: 'mdi-domain', to: '/sites' },
-      { title: 'Redes', icon: 'mdi-lan', to: '/networks' },
-      { title: 'Topologia', icon: 'mdi-sitemap', to: '/topology' },
       { title: 'Servidores remotos', icon: 'mdi-server', to: '/remote-servers' },
       { title: 'Sondas de rede', icon: 'mdi-access-point-network', to: '/probes' },
-      {
-        title: 'Servidores DNS',
-        icon: 'mdi-dns-outline',
-        click: () => {
-          dnsServersDialog.value = true
-        },
-      },
-      {
-        title: 'Endereços do servidor',
-        icon: 'mdi-server-network',
-        click: () => {
-          serverAddressesDialog.value = true
-        },
-      },
     ],
   },
   {
@@ -452,6 +444,28 @@ const navItems = computed<NavItem[]>(() => [
       ]
     : []),
 ])
+
+/** Grupos abertos no menu; o da página atual abre sozinho ao navegar. */
+const openedGroups = ref<string[]>([])
+
+function groupOf(path: string): string | undefined {
+  return navItems.value.find((item) =>
+    item.children?.some(
+      (child) => child.to && (path === child.to || path.startsWith(child.to + '/'))
+    )
+  )?.title
+}
+
+watch(
+  () => route.path,
+  (path) => {
+    const group = groupOf(path)
+    if (group && !openedGroups.value.includes(group)) {
+      openedGroups.value = [...openedGroups.value, group]
+    }
+  },
+  { immediate: true }
+)
 
 onMounted(() => {
   void authStore.fetchMe()

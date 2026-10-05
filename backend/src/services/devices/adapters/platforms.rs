@@ -153,16 +153,31 @@ impl DeviceAdapter for OpenWrtAdapter {
     }
 
     fn device_type_hint(&self, evidence: &str) -> Option<&'static str> {
-        self.aliases()
-            .iter()
-            .any(|alias| evidence.contains(alias))
-            .then_some("router")
+        (self.aliases().iter().any(|alias| evidence.contains(alias))
+            || self.kernel_signature(evidence))
+        .then_some("router")
     }
 
     fn default_device_type(&self) -> &'static str {
         "router"
     }
+
+    /// O OpenWrt compila o kernel com a versão de build zerada: o `uname -v`
+    /// é `#0 SMP Mon Jun 29 …` (ou `#0 Mon …` sem SMP). Debian, Ubuntu, Alpine
+    /// e Arch usam `#1`, `#58-Ubuntu`… — então `Linux <host> 6.12.94 #0 SMP`
+    /// é OpenWrt mesmo quando o `sysDescr` não escreve o nome dele.
+    fn kernel_signature(&self, text: &str) -> bool {
+        OPENWRT_KERNEL.is_match(text)
+    }
 }
+
+/// `linux <host> <versão> #0 [smp] [preempt] <dia da semana>`.
+static OPENWRT_KERNEL: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(
+        r"linux \S+ \d+\.\d+(?:\.\d+)?\S* #0 (?:smp )?(?:preempt\S* )?(?:mon|tue|wed|thu|fri|sat|sun) ",
+    )
+    .expect("regex do kernel do OpenWrt")
+});
 
 impl DeviceAdapter for UbiquitiAdapter {
     fn platform(&self) -> &'static DevicePlatform {

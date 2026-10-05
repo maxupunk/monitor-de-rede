@@ -4,9 +4,9 @@ use chrono::Utc;
 use loco_rs::app::AppContext;
 use sea_orm::{
     sea_query::Expr, ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter, Set,
-    TransactionTrait,
 };
 
+use crate::services::shared::transaction::begin_write;
 use crate::{
     models::{_entities::metrics, devices, monitor_results, monitors},
     services::{
@@ -127,7 +127,7 @@ pub async fn process_result(
     result: &CheckResult,
     probe_id: Option<i64>,
 ) -> AppResult<Option<monitor_results::Model>> {
-    let txn = ctx.db.begin().await?;
+    let txn = begin_write(&ctx.db).await?;
     let Some(monitor) = monitors::Entity::find_by_id(monitor_id).one(&txn).await? else {
         txn.commit().await?;
         return Ok(None);

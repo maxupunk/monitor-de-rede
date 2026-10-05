@@ -48,6 +48,10 @@ pub struct DeviceFacts {
     pub vendor: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub open_ports: Vec<u16>,
+    /// O nome de cada porta aberta ("SSH", "RTSP", "Impressão RAW") — o
+    /// modelo entende o serviço melhor que o número.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub services: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ssdp_server: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -116,6 +120,17 @@ impl DeviceFacts {
             mdns_name: clean(mdns_name),
             vendor: clean(vendor),
             open_ports: open_ports.to_vec(),
+            services: data
+                .get("services")
+                .and_then(Value::as_object)
+                .map(|labels| {
+                    labels
+                        .values()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default(),
             ssdp_server: text(data, "server"),
             sys_descr: text(&identity, "sysDescr"),
             sys_object_id: text(&identity, "sysObjectId"),

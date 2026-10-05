@@ -33,6 +33,13 @@
                 hint="Permite rastrear o equipamento automaticamente se o IP mudar"
                 persistent-hint
               ></v-text-field>
+              <MacVendorHint
+                :mac="formModel.macAddress"
+                :current-vendor="formModel.vendor"
+                :current-type="formModel.type"
+                @apply-vendor="formModel.vendor = $event"
+                @apply-type="formModel.type = normalizeDeviceType($event)"
+              />
             </v-col>
             <v-col cols="12" sm="6">
               <v-text-field
@@ -632,6 +639,7 @@ import {
   normalizeDeviceType,
 } from '@/utils/deviceTypes'
 import LayaSuggestionChip from '@/components/ai/LayaSuggestionChip.vue'
+import MacVendorHint from '@/components/devices/MacVendorHint.vue'
 
 const props = defineProps<{
   modelValue: boolean

@@ -9,11 +9,11 @@ use std::collections::{BTreeMap, HashMap};
 use crate::{
     models::_entities::{alert_events, device_interfaces, devices},
     services::{
-        discovery::oui_lookup::lookup_vendor,
         events::EventBus,
         monitoring::ip_reconciliation::can_inspect_l2,
         network_tools::neighbor_cache::{self, NeighborEntry},
         shared::errors::AppResult,
+        vendors,
     },
 };
 
@@ -50,6 +50,7 @@ pub async fn analyze_network_conflicts(db: &DatabaseConnection) -> AppResult<Vec
     if !can_inspect_l2() {
         return Ok(Vec::new());
     }
+    vendors::service::ensure_loaded(db).await;
 
     let mut neighbors = neighbor_cache::read_system_neighbors().await;
 
@@ -125,7 +126,7 @@ pub async fn evaluate_conflicts_pure(
         let dev = device_by_ip.get(&ip);
         let vendors: Vec<String> = macs
             .iter()
-            .map(|m| lookup_vendor(m).unwrap_or("Desconhecido").to_string())
+            .map(|m| vendors::vendor_name(m).unwrap_or_else(|| "Desconhecido".into()))
             .collect();
 
         let dev_name = dev.map(|d| d.name.clone());
@@ -161,7 +162,7 @@ pub async fn evaluate_conflicts_pure(
     for (mac, ips) in mac_duplicates {
         let dev_id = device_by_mac.get(&mac).copied();
         let dev = dev_id.and_then(|id| device_by_id.get(&id));
-        let vendor = lookup_vendor(&mac).unwrap_or("Desconhecido").to_string();
+        let vendor = vendors::vendor_name(&mac).unwrap_or_else(|| "Desconhecido".into());
 
         let description = format!(
             "MAC Duplicado/Clonado: O endereço MAC {mac} ({vendor}) está ativo simultaneamente em múltiplos IPs: {}.",
@@ -193,9 +194,8 @@ pub async fn evaluate_conflicts_pure(
             if let Some(ref ip) = dev.ip_address {
                 if let Some(observed_mac) = neighbor_by_ip.get(ip) {
                     if !registered_macs.contains(observed_mac) {
-                        let observed_vendor = lookup_vendor(observed_mac)
-                            .unwrap_or("Desconhecido")
-                            .to_string();
+                        let observed_vendor = vendors::vendor_name(observed_mac)
+                            .unwrap_or_else(|| "Desconhecido".into());
 
                         let desc = format!(
                             "Divergência de Equipamento: O dispositivo '{}' (IP {ip}) está cadastrado com MAC {}, mas na rede física está respondendo com MAC {observed_mac} ({observed_vendor}).",
