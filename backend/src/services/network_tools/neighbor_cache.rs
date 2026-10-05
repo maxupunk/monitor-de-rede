@@ -59,10 +59,19 @@ pub async fn read_system_neighbors() -> Vec<NeighborEntry> {
         dedup_neighbors(entries)
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "windows")]
     {
-        // Em ambientes de desenvolvimento como Windows/macOS sem Linux nativo,
-        // retorna lista vazia por padrão.
+        let mut entries = Vec::new();
+        if let Ok(output) = tokio::process::Command::new("arp").arg("-a").output().await {
+            let text = String::from_utf8_lossy(&output.stdout);
+            entries.extend(parse_windows_arp(&text));
+        }
+        dedup_neighbors(entries)
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    {
+        // Em outros ambientes de desenvolvimento sem suporte nativo a ARP.
         Vec::new()
     }
 }
@@ -130,6 +139,56 @@ pub fn parse_ip_neigh(content: &str) -> Vec<NeighborEntry> {
             })
         })
         .collect()
+}
+
+/// Analisa a saída do comando `arp -a` no Windows.
+#[must_use]
+pub fn parse_windows_arp(content: &str) -> Vec<NeighborEntry> {
+    let mut entries = Vec::new();
+    let mut current_interface: Option<String> = None;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("Interface:") {
+            current_interface = trimmed.split_whitespace().nth(1).map(ToString::to_string);
+            continue;
+        }
+
+        let fields: Vec<&str> = trimmed.split_whitespace().collect();
+        if fields.len() < 3 {
+            continue;
+        }
+
+        let raw_ip = fields[0];
+        let raw_mac = fields[1];
+
+        let Ok(ip) = raw_ip.parse::<std::net::Ipv4Addr>() else {
+            continue;
+        };
+        if ip.is_multicast() || ip.is_broadcast() || ip.is_unspecified() {
+            continue;
+        }
+        let ip_str = ip.to_string();
+        if ip_str.ends_with(".255") {
+            continue;
+        }
+
+        let Some(mac) = normalize_mac(raw_mac) else {
+            continue;
+        };
+        if mac.starts_with("01:00:5e") || mac.starts_with("33:33:") {
+            continue;
+        }
+
+        entries.push(NeighborEntry {
+            ip_address: ip_str,
+            mac_address: mac,
+            interface: current_interface.clone(),
+            state: Some("REACHABLE".to_string()),
+        });
+    }
+
+    entries
 }
 
 /// Remove duplicatas preservando a primeira observação válida de cada par (IP, MAC).
@@ -287,5 +346,33 @@ IP address       HW type     Flags       HW address            Mask     Device
         let duplicates = find_mac_duplicates(&entries);
         assert_eq!(duplicates.len(), 1);
         assert_eq!(duplicates["48:8f:5a:aa:bb:cc"].len(), 2);
+    }
+
+    #[test]
+    fn faz_parsing_da_tabela_arp_do_windows() {
+        let sample = "\
+Interface: 10.0.0.170 --- 0x2
+  Endereço IP           Endereço físico       Tipo
+  10.0.0.1              d6-8c-72-59-65-fc     dinâmico
+  10.0.0.2              3a-f0-65-2f-f0-0e     dinâmico
+  10.0.0.255            ff-ff-ff-ff-ff-ff     estático
+  224.0.0.22            01-00-5e-00-00-16     estático
+
+Interface: 192.168.1.50 --- 0x3
+  Internet Address      Physical Address      Type
+  192.168.1.1           00-11-22-33-44-55     dynamic
+";
+        let parsed = parse_windows_arp(sample);
+        assert_eq!(parsed.len(), 3);
+        assert_eq!(parsed[0].ip_address, "10.0.0.1");
+        assert_eq!(parsed[0].mac_address, "d6:8c:72:59:65:fc");
+        assert_eq!(parsed[0].interface.as_deref(), Some("10.0.0.170"));
+
+        assert_eq!(parsed[1].ip_address, "10.0.0.2");
+        assert_eq!(parsed[1].mac_address, "3a:f0:65:2f:f0:0e");
+
+        assert_eq!(parsed[2].ip_address, "192.168.1.1");
+        assert_eq!(parsed[2].mac_address, "00:11:22:33:44:55");
+        assert_eq!(parsed[2].interface.as_deref(), Some("192.168.1.50"));
     }
 }

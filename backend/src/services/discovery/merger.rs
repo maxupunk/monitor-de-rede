@@ -149,7 +149,8 @@ fn finalize(host: &mut DiscoveredHost, gateway: Option<&str>) {
             .as_deref()
             .and_then(vendors::vendor_name)
             .or_else(|| text(&host.data, &["identity", "hardwareVendor"]))
-            .or_else(|| text(&host.data, &["ssdp", "manufacturer"]));
+            .or_else(|| text(&host.data, &["ssdp", "manufacturer"]))
+            .or_else(|| infer_vendor_from_evidence(host));
     }
     if let Some(object) = host.data.as_object_mut() {
         let services: serde_json::Map<String, Value> = host
@@ -171,6 +172,138 @@ fn finalize(host: &mut DiscoveredHost, gateway: Option<&str>) {
     host.device_type = Some(classification.device_type.into());
     host.confidence = classification.confidence;
     host.data["classification"] = serde_json::to_value(&classification).unwrap_or(Value::Null);
+}
+
+fn infer_vendor_from_evidence(host: &DiscoveredHost) -> Option<String> {
+    // 1. Portas proprietárias / exclusivas de fabricantes conhecidos
+    for port in &host.open_ports {
+        match *port {
+            8291 | 8728 => return Some("MikroTik".into()),
+            34567 => return Some("Xiongmai".into()),
+            37777 => return Some("Dahua".into()),
+            6053 => return Some("Espressif".into()),
+            6668 => return Some("Tuya".into()),
+            5001 => return Some("Synology".into()),
+            8001 => return Some("Samsung".into()),
+            8060 => return Some("Roku".into()),
+            1400 => return Some("Sonos".into()),
+            _ => {}
+        }
+    }
+
+    // 2. HTTP Server / Realm / Title
+    if let Some(server) = text(&host.data, &["http", "server"]) {
+        let s = server.to_ascii_lowercase();
+        if s.contains("mikrotik") || s.contains("routeros") {
+            return Some("MikroTik".into());
+        }
+        if s.contains("hikvision") {
+            return Some("Hikvision".into());
+        }
+        if s.contains("dahua") {
+            return Some("Dahua".into());
+        }
+        if s.contains("openwrt") || s.contains("luci") {
+            return Some("OpenWrt".into());
+        }
+        if s.contains("rompager") || s.contains("tp-link") {
+            return Some("TP-Link".into());
+        }
+        if s.contains("intelbras") {
+            return Some("Intelbras".into());
+        }
+        if s.contains("cisco") {
+            return Some("Cisco".into());
+        }
+        if s.contains("ubiquiti") || s.contains("unifi") || s.contains("airos") {
+            return Some("Ubiquiti".into());
+        }
+    }
+
+    if let Some(realm) = text(&host.data, &["http", "realm"]) {
+        let r = realm.to_ascii_lowercase();
+        if r.contains("mikrotik") || r.contains("routeros") {
+            return Some("MikroTik".into());
+        }
+        if r.contains("tp-link") {
+            return Some("TP-Link".into());
+        }
+        if r.contains("hikvision") {
+            return Some("Hikvision".into());
+        }
+        if r.contains("dahua") {
+            return Some("Dahua".into());
+        }
+        if r.contains("intelbras") {
+            return Some("Intelbras".into());
+        }
+        if r.contains("zte") {
+            return Some("ZTE".into());
+        }
+        if r.contains("huawei") {
+            return Some("Huawei".into());
+        }
+    }
+
+    if let Some(title) = text(&host.data, &["http", "title"]) {
+        let t = title.to_ascii_lowercase();
+        if t.contains("netsurveillance") {
+            return Some("Xiongmai".into());
+        }
+        if t.contains("mikrotik") || t.contains("routeros") {
+            return Some("MikroTik".into());
+        }
+        if t.contains("hikvision") {
+            return Some("Hikvision".into());
+        }
+        if t.contains("dahua") {
+            return Some("Dahua".into());
+        }
+        if t.contains("tp-link") {
+            return Some("TP-Link".into());
+        }
+        if t.contains("intelbras") {
+            return Some("Intelbras".into());
+        }
+        if t.contains("synology") {
+            return Some("Synology".into());
+        }
+        if t.contains("qnap") {
+            return Some("QNAP".into());
+        }
+    }
+
+    // 3. Hostname / mDNS / NetBIOS
+    for name in [
+        host.hostname.as_deref(),
+        host.mdns_name.as_deref(),
+        text(&host.data, &["netbios", "name"]).as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let n = name.to_ascii_lowercase();
+        if n.starts_with("mikrotik") {
+            return Some("MikroTik".into());
+        }
+        if n.starts_with("shelly") {
+            return Some("Shelly".into());
+        }
+        if n.starts_with("sonoff") {
+            return Some("Sonoff".into());
+        }
+        if n.starts_with("tasmota") {
+            return Some("Tasmota".into());
+        }
+        if n.starts_with("esphome") {
+            return Some("Espressif".into());
+        }
+        if n.starts_with("tuya") {
+            return Some("Tuya".into());
+        }
+    }
+
+    None
 }
 
 #[cfg(test)]
@@ -240,5 +373,41 @@ mod tests {
         blank.hostname = Some(" ".into());
         let merged = merge_hosts([vec![named, blank]]);
         assert_eq!(merged[0].hostname.as_deref(), Some("core-sw"));
+    }
+
+    #[test]
+    fn infere_fabricante_por_portas_e_evidencias_web() {
+        // Porta 8291 (Winbox) infere MikroTik mesmo sem MAC
+        let mut router = seen("10.0.0.4", "tcp", json!({}));
+        router.open_ports = vec![8291];
+        let merged = merge_hosts([vec![router]]);
+        assert_eq!(merged[0].vendor.as_deref(), Some("MikroTik"));
+
+        // Porta 34567 (DVR) infere Xiongmai
+        let mut dvr = seen("10.0.0.10", "tcp", json!({}));
+        dvr.open_ports = vec![34567];
+        let merged = merge_hosts([vec![dvr]]);
+        assert_eq!(merged[0].vendor.as_deref(), Some("Xiongmai"));
+
+        // Porta 6053 (ESPHome) infere Espressif
+        let mut esp = seen("10.0.0.106", "tcp", json!({}));
+        esp.open_ports = vec![6053];
+        let merged = merge_hosts([vec![esp]]);
+        assert_eq!(merged[0].vendor.as_deref(), Some("Espressif"));
+
+        // Porta 6668 infere Tuya
+        let mut tuya = seen("10.0.0.107", "tcp", json!({}));
+        tuya.open_ports = vec![6668];
+        let merged = merge_hosts([vec![tuya]]);
+        assert_eq!(merged[0].vendor.as_deref(), Some("Tuya"));
+
+        // Título web com netsurveillance infere Xiongmai
+        let web_cam = seen(
+            "10.0.0.11",
+            "http",
+            json!({ "http": { "title": "NETSurveillance WEB" } }),
+        );
+        let merged = merge_hosts([vec![web_cam]]);
+        assert_eq!(merged[0].vendor.as_deref(), Some("Xiongmai"));
     }
 }

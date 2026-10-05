@@ -148,14 +148,14 @@ pub async fn scan(
 
         ensure_running(&cancel)?;
         let proven = prove_silent(&presence, &cancel, reporter, &batch).await;
-        let newcomers: BTreeSet<String> = proven
-            .iter()
-            .map(|host| host.ip_address.clone())
-            .filter(|ip| !known.contains(ip))
-            .collect();
         if !proven.is_empty() {
             merged = merge_with_gateway([merged, proven], gateway.as_deref());
         }
+        let newcomers: BTreeSet<String> = merged
+            .iter()
+            .map(|host| host.ip_address.clone())
+            .filter(|ip| in_batch.contains(ip) && !known.contains(ip))
+            .collect();
         if !newcomers.is_empty() {
             let hosts: Vec<&DiscoveredHost> = merged
                 .iter()

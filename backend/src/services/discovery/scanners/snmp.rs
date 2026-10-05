@@ -5,7 +5,11 @@ use std::net::IpAddr;
 use crate::services::{
     devices::systems,
     discovery::{fingerprints, merger::DiscoveredHost},
-    snmp::service::detect_connection,
+    snmp::{
+        client::{SnmpClient, SnmpConfig, SnmpVersion},
+        collectors,
+        service::detect_connection,
+    },
 };
 use futures::{stream, StreamExt};
 use tokio_util::sync::CancellationToken;
@@ -23,25 +27,29 @@ pub async fn enrich(ips: &[IpAddr], cancel: &CancellationToken) -> Vec<Discovere
             let cancel = cancel.clone();
             async move {
                 if cancel.is_cancelled() {
-                    return None;
+                    return Vec::new();
                 }
                 query(ip).await
             }
         })
         .buffer_unordered(CONCURRENCY)
-        .filter_map(std::future::ready)
-        .collect()
+        .collect::<Vec<_>>()
         .await
+        .into_iter()
+        .flatten()
+        .collect()
 }
 
-async fn query(ip: IpAddr) -> Option<DiscoveredHost> {
+async fn query(ip: IpAddr) -> Vec<DiscoveredHost> {
     let ip_address = ip.to_string();
-    let result = detect_connection(&ip_address, 161, None).await.ok()?;
+    let Ok(result) = detect_connection(&ip_address, 161, None).await else {
+        return Vec::new();
+    };
     if !result.detected {
-        return None;
+        return Vec::new();
     }
     let mut host = DiscoveredHost {
-        ip_address,
+        ip_address: ip_address.clone(),
         confidence: 95,
         data: serde_json::json!({ "scanner": "snmp" }),
         ..Default::default()
@@ -84,7 +92,42 @@ async fn query(ip: IpAddr) -> Option<DiscoveredHost> {
         "port": 161,
         "version": result.version,
     });
-    Some(host)
+
+    let version = result
+        .version
+        .as_deref()
+        .and_then(SnmpVersion::parse)
+        .unwrap_or(SnmpVersion::V2c);
+    let community = result.community.unwrap_or_else(|| "public".to_string());
+    let mut config = SnmpConfig::v2c(&ip_address, community, 161);
+    config.version = version;
+    config.timeout_ms = 1_000;
+    let client = SnmpClient::new(config);
+
+    if let Ok(macs) = collectors::collect_interface_macs(&client).await {
+        if let Some(mac) = macs.into_iter().next() {
+            host.mac_address = Some(mac);
+        }
+    }
+
+    let mut found = vec![host];
+
+    if let Ok(arp_entries) = collectors::collect_arp_table(&client).await {
+        for entry in arp_entries {
+            found.push(DiscoveredHost {
+                ip_address: entry.ip_address,
+                mac_address: Some(entry.mac_address),
+                confidence: 80,
+                data: serde_json::json!({
+                    "scanner": "snmp_arp",
+                    "sourceRouter": ip_address,
+                }),
+                ..Default::default()
+            });
+        }
+    }
+
+    found
 }
 
 fn infer_snmp_vendor(
@@ -92,8 +135,15 @@ fn infer_snmp_vendor(
     sys_descr: Option<&str>,
     sys_name: Option<&str>,
 ) -> Option<String> {
-    if let Some(entry) = sys_object_id.and_then(fingerprints::enterprise_for) {
-        return Some(entry.vendor.to_string());
+    let enterprise_vendor = sys_object_id
+        .and_then(fingerprints::enterprise_for)
+        .map(|entry| entry.vendor);
+
+    // Se o enterprise for específico e não for apenas o daemon Net-SNMP, usa ele
+    if let Some(vendor) = enterprise_vendor {
+        if vendor != "Net-SNMP" {
+            return Some(vendor.to_string());
+        }
     }
 
     let context = format!(
@@ -116,6 +166,12 @@ fn infer_snmp_vendor(
     {
         return Some("MikroTik".to_string());
     }
+    if context.contains("bpi-r") || context.contains("bananapi") || context.contains("banana pi") {
+        return Some("Sinovoip (Banana Pi)".to_string());
+    }
+    if context.contains("openwrt") {
+        return Some("OpenWrt".to_string());
+    }
     if context.contains("ubiquiti") || context.contains("unifi") || context.contains("edgerouter") {
         return Some("Ubiquiti".to_string());
     }
@@ -132,7 +188,7 @@ fn infer_snmp_vendor(
         return Some("Volt Tecnologia".to_string());
     }
 
-    None
+    enterprise_vendor.map(ToString::to_string)
 }
 
 #[cfg(test)]
@@ -168,6 +224,23 @@ mod tests {
                 Some("HeartOfGold")
             ),
             Some("MikroTik".to_string())
+        );
+        // Quando OID é Net-SNMP mas o hardware está identificado na descrição
+        assert_eq!(
+            infer_snmp_vendor(
+                Some("1.3.6.1.4.1.8072"),
+                Some("Linux RB922-terraco 6.12.94 #0 Mon Jun 29 12:59:20 2026 mips"),
+                Some("HeartOfGold")
+            ),
+            Some("MikroTik".to_string())
+        );
+        assert_eq!(
+            infer_snmp_vendor(
+                Some("1.3.6.1.4.1.8072"),
+                Some("Linux bpi-r3-borda 6.12.94 #0 SMP Mon Jun 29 12:59:20 2026 aarch64"),
+                Some("HeartOfGold")
+            ),
+            Some("Sinovoip (Banana Pi)".to_string())
         );
     }
 }

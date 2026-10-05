@@ -87,6 +87,19 @@ pub async fn collect_hardware(
 pub const OID_IF_TABLE: &str = "1.3.6.1.2.1.2.2.1";
 /// `ifXTable` — RFC 2863, contadores de 64 bits e nomes longos.
 pub const OID_IF_X_TABLE: &str = "1.3.6.1.2.1.31.1.1.1";
+/// `ipNetToMediaPhysAddress` — RFC 1213 / IP-MIB (tabela ARP do agente).
+pub const OID_IP_NET_TO_MEDIA_PHYS_ADDRESS: &str = "1.3.6.1.2.1.4.22.1.2";
+/// `ipNetToPhysicalPhysAddress` — RFC 4293 (IP-MIB moderno).
+pub const OID_IP_NET_TO_PHYSICAL_PHYS_ADDRESS: &str = "1.3.6.1.2.1.4.35.1.4";
+/// `ifPhysAddress` — RFC 1213 (endereço MAC de cada interface).
+pub const OID_IF_PHYS_ADDRESS: &str = "1.3.6.1.2.1.2.2.1.6";
+
+/// Entrada resolvida na tabela ARP de um agente SNMP (ex: roteador).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SnmpArpEntry {
+    pub ip_address: String,
+    pub mac_address: String,
+}
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -202,6 +215,73 @@ pub fn parse_interfaces(
                 is_monitored: false,
             }
         })
+        .collect()
+}
+
+pub async fn collect_arp_table(client: &SnmpClient) -> Result<Vec<SnmpArpEntry>, SnmpError> {
+    let entries = match client.walk(OID_IP_NET_TO_MEDIA_PHYS_ADDRESS).await {
+        Ok(entries) if !entries.is_empty() => entries,
+        _ => client
+            .walk(OID_IP_NET_TO_PHYSICAL_PHYS_ADDRESS)
+            .await
+            .unwrap_or_default(),
+    };
+    Ok(parse_arp_table(entries))
+}
+
+pub async fn collect_interface_macs(client: &SnmpClient) -> Result<Vec<String>, SnmpError> {
+    let entries = client.walk(OID_IF_PHYS_ADDRESS).await.unwrap_or_default();
+    Ok(parse_interface_macs(entries))
+}
+
+#[must_use]
+pub fn parse_arp_table(
+    entries: impl IntoIterator<Item = super::client::SnmpWalkEntry>,
+) -> Vec<SnmpArpEntry> {
+    let mut result = Vec::new();
+    for entry in entries {
+        if let Some(mac) = entry
+            .value
+            .mac()
+            .and_then(|m| crate::services::network_tools::neighbor_cache::normalize_mac(&m))
+        {
+            let parts: Vec<&str> = entry.oid.split('.').collect();
+            if parts.len() >= 4 {
+                let len = parts.len();
+                let ip_str = format!(
+                    "{}.{}.{}.{}",
+                    parts[len - 4],
+                    parts[len - 3],
+                    parts[len - 2],
+                    parts[len - 1]
+                );
+                if let Ok(ip) = ip_str.parse::<std::net::Ipv4Addr>() {
+                    let s = ip.to_string();
+                    if !ip.is_multicast()
+                        && !ip.is_broadcast()
+                        && !ip.is_unspecified()
+                        && !s.ends_with(".255")
+                    {
+                        result.push(SnmpArpEntry {
+                            ip_address: s,
+                            mac_address: mac,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    result
+}
+
+#[must_use]
+pub fn parse_interface_macs(
+    entries: impl IntoIterator<Item = super::client::SnmpWalkEntry>,
+) -> Vec<String> {
+    entries
+        .into_iter()
+        .filter_map(|entry| entry.value.mac())
+        .filter_map(|mac| crate::services::network_tools::neighbor_cache::normalize_mac(&mac))
         .collect()
 }
 
@@ -577,6 +657,7 @@ fn text(values: &BTreeMap<String, Option<SnmpValue>>, oid: &str) -> Option<Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::snmp::client::SnmpWalkEntry;
 
     #[test]
     fn memoria_prefere_disponivel_do_sistema() {
@@ -862,5 +943,47 @@ mod tests {
             ..Default::default()
         };
         assert!(!so_texto_livre.responded());
+    }
+
+    #[test]
+    fn parse_arp_table_extrai_ip_e_mac() {
+        let entries = vec![
+            SnmpWalkEntry {
+                oid: "1.3.6.1.2.1.4.22.1.2.1.10.0.0.10".into(),
+                value: SnmpValue::Bytes(vec![0x00, 0x12, 0x42, 0x51, 0x2b, 0xb0]),
+            },
+            SnmpWalkEntry {
+                oid: "1.3.6.1.2.1.4.22.1.2.1.10.0.0.255".into(),
+                value: SnmpValue::Bytes(vec![0xff, 0xff, 0xff, 0xff, 0xff, 0xff]),
+            },
+            SnmpWalkEntry {
+                oid: "1.3.6.1.2.1.4.35.1.4.2.1.4.10.0.0.106".into(),
+                value: SnmpValue::Bytes(vec![0xbc, 0xdd, 0xc2, 0x4c, 0x93, 0x95]),
+            },
+        ];
+        let parsed = parse_arp_table(entries);
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].ip_address, "10.0.0.10");
+        assert_eq!(parsed[0].mac_address, "00:12:42:51:2b:b0");
+
+        assert_eq!(parsed[1].ip_address, "10.0.0.106");
+        assert_eq!(parsed[1].mac_address, "bc:dd:c2:4c:93:95");
+    }
+
+    #[test]
+    fn parse_interface_macs_ignora_vazios_e_broadcast() {
+        let entries = vec![
+            SnmpWalkEntry {
+                oid: "1.3.6.1.2.1.2.2.1.6.1".into(),
+                value: SnmpValue::Bytes(vec![0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
+            },
+            SnmpWalkEntry {
+                oid: "1.3.6.1.2.1.2.2.1.6.2".into(),
+                value: SnmpValue::Bytes(vec![0xd6, 0x8c, 0x72, 0x59, 0x65, 0xfc]),
+            },
+        ];
+        let macs = parse_interface_macs(entries);
+        assert_eq!(macs.len(), 1);
+        assert_eq!(macs[0], "d6:8c:72:59:65:fc");
     }
 }

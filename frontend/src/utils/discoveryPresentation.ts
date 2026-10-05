@@ -144,16 +144,46 @@ export function discoveryDeviceName(host: DiscoveredHostLike | null | undefined)
   )
 }
 
+/**
+ * Identifica títulos genéricos de erro HTTP (ex: 401 Unauthorized) que não
+ * devem ser exibidos como identidade ou descrição de um equipamento.
+ */
+export function isGenericHttpErrorTitle(title: string | null | undefined): boolean {
+  if (!title) return false
+  const lower = title.trim().toLowerCase()
+  return (
+    lower.includes('401 unauthorized') ||
+    lower.includes('authorization required') ||
+    lower === 'unauthorized' ||
+    lower.includes('403 forbidden') ||
+    lower === 'forbidden' ||
+    lower === 'access denied' ||
+    lower.includes('404 not found') ||
+    lower === 'not found' ||
+    lower.includes('500 internal server error') ||
+    lower.includes('502 bad gateway') ||
+    lower.includes('503 service unavailable') ||
+    lower.startsWith('error 40') ||
+    lower.startsWith('error 50')
+  )
+}
+
 /** Uma linha que descreve o aparelho: modelo, título da página ou sysDescr. */
 export function discoveryDescription(host: DiscoveredHostLike | null | undefined): string | null {
   const upnp = discoveryUpnp(host)
   const model = [text(upnp?.manufacturer), text(upnp?.modelName)].filter(Boolean).join(' ')
+  const web = discoveryWebPage(host)
+  const rawTitle = text(web?.title)
+  const validWebTitle = isGenericHttpErrorTitle(rawTitle) ? null : rawTitle
+  const realm = text(web?.realm)
+
   return (
     text(model) ??
     text(discoveryMdns(host)?.model) ??
     text(discoveryIdentity(host)?.sysDescr) ??
-    text(discoveryWebPage(host)?.title) ??
-    text(discoveryWebPage(host)?.realm) ??
+    validWebTitle ??
+    realm ??
+    (web?.status === 401 ? 'Painel web protegido (login necessário)' : null) ??
     null
   )
 }

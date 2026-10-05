@@ -10,6 +10,7 @@ import {
   discoverySources,
   discoveryTypeMeta,
   discoveryVendorLabel,
+  isGenericHttpErrorTitle,
 } from '@/utils/discoveryPresentation'
 import { deviceTypeMeta, normalizeDeviceType } from '@/utils/deviceTypes'
 
@@ -142,6 +143,35 @@ describe('evidências da descoberta', () => {
       '10.0.0.10',
       '10.0.0.100',
     ])
+  })
+
+  it('ignora títulos genéricos de erro HTTP 401 e prefere realm ou mensagem descritiva', () => {
+    expect(isGenericHttpErrorTitle('401 Unauthorized')).toBe(true)
+    expect(isGenericHttpErrorTitle('403 Forbidden')).toBe(true)
+    expect(isGenericHttpErrorTitle('RouterOS router configuration page')).toBe(false)
+
+    // Com título de erro 401 mas com realm: usa o realm
+    const webWithRealm = {
+      data: {
+        http: {
+          status: 401,
+          title: '401 Unauthorized',
+          realm: 'TP-LINK Archer C6',
+        },
+      },
+    }
+    expect(discoveryDescription(webWithRealm)).toBe('TP-LINK Archer C6')
+
+    // Com título de erro 401 e sem realm: mostra painel web protegido em vez do código de erro
+    const webProtected = {
+      data: {
+        http: {
+          status: 401,
+          title: '401 Unauthorized',
+        },
+      },
+    }
+    expect(discoveryDescription(webProtected)).toBe('Painel web protegido (login necessário)')
   })
 })
 

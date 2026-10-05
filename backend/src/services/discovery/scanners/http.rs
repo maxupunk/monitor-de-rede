@@ -157,7 +157,10 @@ async fn visit(client: &Client, mut url: Url, port: u16) -> Option<HttpFingerpri
             }
         }
         let html = String::from_utf8_lossy(&body);
-        found.title = found.title.or_else(|| capture(&TITLE, &html));
+        found.title = found
+            .title
+            .or_else(|| capture(&TITLE, &html))
+            .filter(|title| !is_generic_http_error_title(title));
         let redirect = redirect.or_else(|| capture(&SCRIPT_REDIRECT, &html));
         let Some(target) = redirect else {
             break;
@@ -201,6 +204,26 @@ fn clean(text: &str) -> String {
         .replace("&#39;", "'");
     let collapsed = decoded.split_whitespace().collect::<Vec<_>>().join(" ");
     collapsed.chars().take(MAX_TEXT).collect()
+}
+
+/// Títulos genéricos de páginas de erro HTTP (ex: 401 Unauthorized, 403 Forbidden)
+/// que não descrevem o equipamento e não devem ser exibidos como identidade na tela.
+#[must_use]
+pub fn is_generic_http_error_title(title: &str) -> bool {
+    let lower = title.trim().to_ascii_lowercase();
+    lower.contains("401 unauthorized")
+        || lower.contains("authorization required")
+        || lower == "unauthorized"
+        || lower.contains("403 forbidden")
+        || lower == "forbidden"
+        || lower == "access denied"
+        || lower.contains("404 not found")
+        || lower == "not found"
+        || lower.contains("500 internal server error")
+        || lower.contains("502 bad gateway")
+        || lower.contains("503 service unavailable")
+        || lower.starts_with("error 40")
+        || lower.starts_with("error 50")
 }
 
 #[cfg(test)]
@@ -266,5 +289,36 @@ mod tests {
             ),
             Some("/cgi-bin/luci".into())
         );
+    }
+
+    #[tokio::test]
+    async fn titulo_de_erro_401_nao_e_usado_como_identidade() {
+        let port = panel(
+            "HTTP/1.1 401 Unauthorized\r\nServer: Boa/0.94.14rc21\r\nWWW-Authenticate: Basic realm=\"TP-LINK Wireless Router\"\r\nConnection: close\r\n\r\n<html><head><title>401 Unauthorized</title></head><body><h1>401 Unauthorized</h1></body></html>",
+        )
+        .await;
+        let url = Url::parse(&format!("http://127.0.0.1:{port}/")).unwrap();
+        let found =
+            tokio::time::timeout(Duration::from_secs(5), visit(&client().unwrap(), url, 80))
+                .await
+                .unwrap()
+                .unwrap();
+        assert_eq!(found.status, 401);
+        assert_eq!(found.server.as_deref(), Some("Boa/0.94.14rc21"));
+        assert_eq!(found.realm.as_deref(), Some("TP-LINK Wireless Router"));
+        assert!(found.title.is_none());
+    }
+
+    #[test]
+    fn valida_reconhecimento_de_titulos_genericos_de_erro() {
+        assert!(is_generic_http_error_title("401 Unauthorized"));
+        assert!(is_generic_http_error_title("401 Authorization Required"));
+        assert!(is_generic_http_error_title("403 Forbidden"));
+        assert!(is_generic_http_error_title("404 Not Found"));
+        assert!(is_generic_http_error_title("500 Internal Server Error"));
+        assert!(!is_generic_http_error_title(
+            "RouterOS router configuration page"
+        ));
+        assert!(!is_generic_http_error_title("NETSurveillance WEB"));
     }
 }

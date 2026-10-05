@@ -614,4 +614,30 @@ mod tests {
         phone.mac_address = Some("da:a1:19:00:11:22".into());
         assert_eq!(kind_of(&phone), "mobile");
     }
+
+    #[test]
+    fn fabricantes_comuns_de_iot_sao_classificados_corretamente() {
+        let hiflying = host(
+            None,
+            Some("Shanghai High-Flying Electronics Technology"),
+            &[],
+            json!({}),
+        );
+        assert_eq!(kind_of(&hiflying), "iot");
+
+        let fnlink = host(None, Some("HUNAN FN-LINK TECHNOLOGY"), &[], json!({}));
+        assert_eq!(kind_of(&fnlink), "iot");
+
+        let millennial = host(None, Some("Millennial Net"), &[], json!({}));
+        assert_eq!(kind_of(&millennial), "iot");
+    }
+
+    #[test]
+    fn cameras_com_ouis_clonados_sao_classificadas_como_camera() {
+        let motion = host(None, Some("Motion Control Systems"), &[], json!({}));
+        assert_eq!(kind_of(&motion), "camera");
+
+        let tokki = host(None, Some("JRC TOKKI"), &[], json!({}));
+        assert_eq!(kind_of(&tokki), "camera");
+    }
 }
