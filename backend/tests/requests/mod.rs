@@ -51,6 +51,7 @@ mod scheduler_probes_lifecycle;
 mod server_addresses;
 mod settings;
 mod snmp_collection_integration;
+mod storages;
 mod syslog_api;
 mod syslog_ingest;
 mod system_device;

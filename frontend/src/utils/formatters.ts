@@ -274,6 +274,18 @@ export function formatRelativeTime(value?: string | Date | null, emptyLabel = 'n
   return `há ${Math.floor(elapsedSeconds / 86400)} dias`
 }
 
+/** Tempo que falta em português: "em 5 min", "em 3 h", "em 2 dias"; vencido é "agora" */
+export function formatTimeUntil(value?: string | Date | null, emptyLabel = '—'): string {
+  const date = toDate(value)
+  if (!date) return emptyLabel
+
+  const remainingSeconds = Math.floor((date.getTime() - Date.now()) / 1000)
+  if (remainingSeconds < 60) return 'agora'
+  if (remainingSeconds < 3600) return `em ${Math.floor(remainingSeconds / 60)} min`
+  if (remainingSeconds < 86400) return `em ${Math.floor(remainingSeconds / 3600)} h`
+  return `em ${Math.floor(remainingSeconds / 86400)} dias`
+}
+
 /**
  * Intervalo de tempo formatado em dias e horas: "15 dias e 4 horas", "1 dia", "6 horas", etc.
  */

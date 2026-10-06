@@ -7,6 +7,7 @@ import { useMonitorsStore } from '@/stores/monitors'
 import { useAlertsStore } from '@/stores/alerts'
 import { useDockerStore } from '@/stores/docker'
 import { useTopologyStore } from '@/stores/topology'
+import { useStoragesStore } from '@/stores/storages'
 
 class FakeEventSource {
   static latest: FakeEventSource | null = null
@@ -250,5 +251,47 @@ describe('events store', () => {
     expect(events.recentEvents).toHaveLength(0) // Efêmero, não polui feed
     expect(apiGet).not.toHaveBeenCalled()
     events.disconnect()
+  })
+
+  it('storages:updated não consulta a API de quem nunca abriu a tela (rota de admin)', () => {
+    vi.useFakeTimers()
+    const apiGet = vi.spyOn(apiService, 'get').mockResolvedValue([])
+    const events = useEventsStore()
+    events.connect()
+
+    FakeEventSource.latest?.onmessage?.({
+      data: JSON.stringify({
+        type: 'storages:updated',
+        timestamp: '2026-10-06T12:00:00Z',
+        data: {},
+      }),
+    } as MessageEvent<string>)
+    vi.runAllTimers()
+
+    expect(apiGet).not.toHaveBeenCalled()
+    events.disconnect()
+    vi.useRealTimers()
+  })
+
+  it('storages:updated recarrega a lista quando a tela já está carregada', () => {
+    vi.useFakeTimers()
+    const apiGet = vi.spyOn(apiService, 'get').mockResolvedValue([])
+    useStoragesStore().loaded = true
+    const events = useEventsStore()
+    events.connect()
+
+    FakeEventSource.latest?.onmessage?.({
+      data: JSON.stringify({
+        type: 'storages:updated',
+        timestamp: '2026-10-06T12:00:00Z',
+        data: {},
+      }),
+    } as MessageEvent<string>)
+    vi.runAllTimers()
+
+    expect(apiGet).toHaveBeenCalledTimes(1)
+    expect(apiGet).toHaveBeenCalledWith('/storages')
+    events.disconnect()
+    vi.useRealTimers()
   })
 })

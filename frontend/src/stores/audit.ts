@@ -37,6 +37,7 @@ export const RESOURCE_OPTIONS = [
   { value: 'vpn_peer', label: 'Peer VPN' },
   { value: 'alert_rule', label: 'Regra de alerta' },
   { value: 'maintenance_window', label: 'Janela de manutenção' },
+  { value: 'storage', label: 'Armazenamento' },
   { value: 'docker_container', label: 'Container Docker' },
   { value: 'docker_volume', label: 'Volume Docker' },
   { value: 'docker_network', label: 'Rede Docker' },

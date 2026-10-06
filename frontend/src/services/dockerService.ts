@@ -20,6 +20,7 @@ import type { DockerVolumeDetail } from '@/bindings/DockerVolumeDetail'
 import type { DockerVolumeSummary } from '@/bindings/DockerVolumeSummary'
 import type { HostHistoryResponse } from '@/bindings/HostHistoryResponse'
 import type { MetricsRange } from '@/bindings/MetricsRange'
+import { triggerDownload } from '@/utils/download'
 
 export interface DockerListing<T> {
   available: boolean
@@ -43,17 +44,6 @@ function query(params: Record<string, string | number | boolean | undefined>): s
   }
   const serialized = values.toString()
   return serialized ? `?${serialized}` : ''
-}
-
-function triggerDownload(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = filename
-  document.body.appendChild(anchor)
-  anchor.click()
-  anchor.remove()
-  URL.revokeObjectURL(url)
 }
 
 /**

@@ -13,6 +13,24 @@
       </p>
 
       <v-alert
+        v-if="authStore.isAdmin"
+        type="info"
+        variant="tonal"
+        density="compact"
+        icon="mdi-database-lock-outline"
+        class="mb-4"
+      >
+        <div class="d-flex flex-wrap align-center ga-2">
+          <span class="flex-grow-1">
+            Backup automático e cópias num NAS ou na nuvem ficam em Armazenamentos.
+          </span>
+          <v-btn size="small" color="info" variant="flat" :to="{ name: 'storages' }">
+            Abrir Armazenamentos
+          </v-btn>
+        </div>
+      </v-alert>
+
+      <v-alert
         v-if="backupStore.error"
         type="error"
         variant="tonal"
@@ -68,22 +86,12 @@
               @update:model-value="onFileSelected"
             ></v-file-input>
 
-            <div v-if="backupStore.pendingCounts" class="mb-3">
-              <div class="text-caption text-grey-darken-1 mb-1">
-                <strong>{{ backupStore.pendingName }}</strong> —
-                {{ backupStore.pendingCounts.totalRows }} registros
-              </div>
-              <v-chip
-                v-for="row in backupStore.pendingCounts.tables"
-                :key="row.table"
-                size="x-small"
-                variant="tonal"
-                color="info"
-                class="mr-1 mb-1"
-              >
-                {{ tableLabel(row.table) }}: {{ row.rows }}
-              </v-chip>
-            </div>
+            <BackupCountsSummary
+              v-if="backupStore.pendingCounts"
+              :name="backupStore.pendingName ?? ''"
+              :counts="backupStore.pendingCounts"
+              class="mb-3"
+            />
 
             <v-spacer></v-spacer>
             <div>
@@ -117,7 +125,9 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { useBackupStore, tableLabel } from '@/stores/backup'
+import { useBackupStore } from '@/stores/backup'
+import { useAuthStore } from '@/stores/auth'
+import BackupCountsSummary from './BackupCountsSummary.vue'
 
 const emit = defineEmits<{
   export: []
@@ -126,6 +136,7 @@ const emit = defineEmits<{
 }>()
 
 const backupStore = useBackupStore()
+const authStore = useAuthStore()
 const selectedFile = ref<File | File[] | null>(null)
 
 async function onFileSelected(value: File | File[] | null) {

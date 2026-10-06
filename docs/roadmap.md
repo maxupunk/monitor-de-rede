@@ -573,6 +573,19 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
   - [x] **Plugins nascem desligados** 🟢 Concluído — ligam ao cadastrar equipamento compatível (`plugins.auto_enable`), em "Ativar e instalar" no Catálogo ou à mão; etapa **Aplicativos** no Assistente de Configuração Inicial.
   - [x] **Segurança da importação** 🟢 Concluído — quarentena, análise estática (flash, fábrica, credenciais, gerência, download+exec, ofuscação, injeção, leitura que escreve) e revisão pela IA; crítico bloqueia, alto exige declaração.
 
+- [x] **Armazenamentos e backup automático das configurações** 🟢 Concluído
+  - **Severidade:** 🟠 Alta
+  - **Esforço:** Médio
+  - **Arquivos:** `backend/src/services/storage/{mod,config,provider,local,cloud,sftp,service,backups,schedule}.rs`, `backend/src/controllers/storages.rs`, `backend/src/views/{storages,backup}.rs`, `backend/src/dtos/storages.rs`, `backend/migration/src/m20261006_000001_storage_destinations.rs`, `frontend/src/pages/StoragesPage.vue`, `frontend/src/components/storages/`, `frontend/src/stores/storages.ts`, `frontend/src/utils/storagePresentation.ts`, `backend/tests/requests/storages.rs`
+  - **Implementado:**
+    - Destinos portados do `backup_multi-db`: pasta no servidor (sob `STORAGE_LOCAL_ROOT`, sem `..` nem caminho absoluto), SFTP (`russh` + `russh-sftp`), Amazon S3, Cloudflare R2, MinIO, outro S3-compatível, Google Cloud Storage e Azure Blob (`opendal`, já na árvore pelo Loco).
+    - Credencial cifrada em `storage_destinations.config_encrypted` (mesma `ENCRYPTION_KEY` da VPN); a tela nunca a recebe de volta (`secretsSet`), e segredo em branco na edição mantém o gravado. Trocar o SFTP de chave para senha (ou o inverso) descarta o método anterior.
+    - SFTP confere a identidade do servidor (TOFU): a impressão digital vista no teste é memorizada ao salvar e uma chave diferente derruba a conexão; "Aceitar nova" na edição.
+    - Backup automático por destino (frequência e quantas cópias manter): o ciclo no servidor confere vencimentos a cada minuto, tenta de novo em 1 h após falha, grava o resultado no cadastro e publica `storages:updated`. A retenção só apaga `netmonitor-backups/netmonitor-backup-AAAAMMDD-HHMMSS.json`.
+    - O arquivo é o mesmo JSON do download em Configurações: cópias da nuvem restauram pelo upload e vice-versa. Restaurar a partir do destino mostra a prévia por tabela antes de aplicar.
+    - Tela **Armazenamentos** (admin): escolha do tipo em cartões, campos por tipo, teste ao salvar ("Salvar mesmo assim" quando o destino não responde), cartões com último/próximo backup e erro, "Fazer backup agora", cópias com download e restauração, explorador de arquivos.
+    - Rotas `/api/storages` só para administrador, inclusive a leitura; auditoria de cadastro, backup manual, restauração e exclusão de arquivo.
+
 ---
 
 ## 7. Matriz obrigatória de validação

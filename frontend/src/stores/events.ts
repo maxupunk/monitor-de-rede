@@ -12,6 +12,7 @@ import { useDeviceDetailStore } from './deviceDetail'
 import { useTopologyStore } from './topology'
 import { useVpnStore } from './vpn'
 import { useMaintenanceWindowsStore } from './maintenanceWindows'
+import { useStoragesStore } from './storages'
 import { useDockerStore } from './docker'
 import { useAgentsStore } from './agents'
 import { useLogsStore } from './logs'
@@ -392,6 +393,12 @@ export const useEventsStore = defineStore('events', () => {
       case 'maintenance_windows:updated': {
         const maintenanceStore = useMaintenanceWindowsStore()
         scheduleRefresh('maintenance_windows', () => maintenanceStore.fetchWindows())
+        break
+      }
+
+      case 'storages:updated': {
+        const storagesStore = useStoragesStore()
+        scheduleRefresh('storages', () => storagesStore.refreshIfLoaded())
         break
       }
 

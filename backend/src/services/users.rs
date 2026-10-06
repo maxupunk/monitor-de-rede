@@ -101,6 +101,10 @@ pub fn request_is_allowed(role: Role, method: &Method, path: &str) -> bool {
     if path == "/api/users"
         || path.starts_with("/api/users/")
         || path == "/api/settings/clear-history"
+        // Armazenamentos guardam credencial de nuvem e restauram a
+        // configuração inteira: nem a leitura é de quem só opera.
+        || path == "/api/storages"
+        || path.starts_with("/api/storages/")
     {
         return role.can_manage_users();
     }
@@ -318,6 +322,19 @@ mod tests {
             &Method::POST,
             "/api/devices/4/snmp/scan"
         ));
+    }
+
+    #[test]
+    fn armazenamentos_sao_so_do_administrador_inclusive_a_leitura() {
+        for (method, path) in [
+            (Method::GET, "/api/storages"),
+            (Method::GET, "/api/storages/3/download"),
+            (Method::POST, "/api/storages/3/backups/restore"),
+        ] {
+            assert!(request_is_allowed(Role::Admin, &method, path), "{path}");
+            assert!(!request_is_allowed(Role::Operator, &method, path), "{path}");
+            assert!(!request_is_allowed(Role::Viewer, &method, path), "{path}");
+        }
     }
 
     #[test]

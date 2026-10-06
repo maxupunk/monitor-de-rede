@@ -130,6 +130,12 @@ const routes = [
         meta: { requiresAdmin: true },
       },
       {
+        path: 'storages',
+        name: 'storages',
+        component: () => import('../pages/StoragesPage.vue'),
+        meta: { requiresAdmin: true },
+      },
+      {
         path: 'apps/:id',
         name: 'plugin-app',
         component: () => import('../pages/PluginAppPage.vue'),

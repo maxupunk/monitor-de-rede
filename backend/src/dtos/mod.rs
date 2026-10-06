@@ -12,6 +12,7 @@ pub mod resources;
 pub mod saas;
 pub mod server_addresses;
 pub mod snmp;
+pub mod storages;
 pub mod users;
 
 /// Lê um corpo de requisição **opcional** sem deixá-lo mascarar o erro real.

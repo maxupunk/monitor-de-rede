@@ -33,6 +33,7 @@ pub mod probe_tasks;
 pub mod probes;
 pub mod push_subscriptions;
 pub mod sites;
+pub mod storage_destinations;
 pub mod system_settings;
 pub mod tables;
 pub mod users;

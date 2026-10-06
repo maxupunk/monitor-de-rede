@@ -169,6 +169,7 @@ impl Hooks for App {
             .add_route(controllers::agents::agent_routes())
             .add_route(controllers::dashboard::routes().layer(business_auth.clone()))
             .add_route(controllers::backup::routes().layer(business_auth.clone()))
+            .add_route(controllers::storages::routes().layer(business_auth.clone()))
             .add_route(controllers::sites::routes().layer(business_auth.clone()))
             .add_route(controllers::networks::routes().layer(business_auth.clone()))
             .add_route(controllers::devices::routes().layer(business_auth.clone()))

@@ -30,7 +30,7 @@ tokio = { version = "1.45", default-features = false, features = [
   "io-util",
 ] }
 tokio-stream = { version = "0.1", features = ["sync"] }
-tokio-util = { version = "0.7" }
+tokio-util = { version = "0.7", features = ["io"] }
 # Serve o `dist` da SPA no lugar do nginx (ver `src/spa.rs`). Já está na árvore
 # via Loco; entra como dependência direta porque o `ServeDir` é usado aqui.
 tower-http = { version = "0.6", features = ["fs", "set-header"] }
@@ -96,6 +96,20 @@ syslog_loose = { version = "0.23" }
 # requisito de toolchain. `rsa` fica ligado porque roteador antigo ainda
 # apresenta host key `ssh-rsa` — sem ela o handshake nem começa.
 russh = { version = "0.62", default-features = false, features = ["ring", "rsa"] }
+# Armazenamentos (destinos dos backups). SFTP sobre o mesmo `russh`: Rust
+# puro, sem o binário `ssh` que o service SFTP do `opendal` exigiria.
+russh-sftp = { version = "2.1" }
+# S3 (AWS, MinIO, Cloudflare R2), GCS e Azure Blob. **Não** é crate nova: o
+# `opendal` já está na árvore como base do `ctx.storage` do Loco; aqui só se
+# ligam os services que vinham desligados. Mesma versão do Loco.
+opendal = { version = "0.57", default-features = false, features = [
+  "executors-tokio",
+  "layers-retry",
+  "services-s3",
+  "services-gcs",
+  "services-azblob",
+  "reqwest-rustls-tls",
+] }
 # MD5 é o que o MAC-Telnet da MikroTik define para a resposta ao desafio de
 # autenticação — não é escolha de projeto, e trocá-lo tornaria o cliente
 # incompatível. Já estava na árvore como transitiva do `async-snmp` e do
@@ -175,5 +189,6 @@ path = "examples/spikes/syslog_parse.rs"
 async-snmp = { version = "0.16", default-features = false, features = ["agent", "crypto-rustcrypto"] }
 loco-rs = { workspace = true, features = ["testing"] }
 serial_test = { version = "3.1.1" }
+tempfile = { version = "3" }
 rstest = { version = "0.25" }
 insta = { version = "1.34", features = ["redactions", "yaml", "filters"] }

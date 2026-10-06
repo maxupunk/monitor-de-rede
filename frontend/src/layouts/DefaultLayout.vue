@@ -429,6 +429,7 @@ const navItems = computed<NavItem[]>(() => [
         { title: 'Usuários e acessos', icon: 'mdi-account-multiple-outline', to: '/users' },
         { title: 'Trilha de auditoria', icon: 'mdi-shield-account-outline', to: '/audit' },
         { title: 'Plugins de dispositivo', icon: 'mdi-puzzle-outline', to: '/plugins' },
+        { title: 'Armazenamentos', icon: 'mdi-database-lock-outline', to: '/storages' },
       ]
     : []),
   { title: 'Configurações', icon: 'mdi-cog', to: '/settings' },

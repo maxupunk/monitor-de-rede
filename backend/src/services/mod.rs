@@ -27,6 +27,7 @@ pub mod server_addresses;
 pub mod settings;
 pub mod shared;
 pub mod snmp;
+pub mod storage;
 pub mod syslog;
 pub mod telemetry;
 pub mod topology;

@@ -14,37 +14,11 @@ use loco_rs::{app::Hooks, prelude::*};
 use crate::{
     app::App,
     services::{
-        backup::service::{self, BackupFile, TableCounts},
+        backup::service::{self, BackupFile},
         shared::errors::AppResult,
     },
+    views::backup::BackupCountsResponse,
 };
-
-/// `{"tables": [{"table": "...", "rows": n}], "totalRows": n}`.
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct CountsResponse {
-    tables: Vec<TableCount>,
-    total_rows: usize,
-}
-
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct TableCount {
-    table: String,
-    rows: usize,
-}
-
-impl From<TableCounts> for CountsResponse {
-    fn from(counts: TableCounts) -> Self {
-        Self {
-            total_rows: counts.iter().map(|(_, rows)| rows).sum(),
-            tables: counts
-                .into_iter()
-                .map(|(table, rows)| TableCount { table, rows })
-                .collect(),
-        }
-    }
-}
 
 /// Baixa o backup como anexo.
 ///
@@ -69,7 +43,7 @@ async fn export(State(ctx): State<AppContext>) -> AppResult<Response> {
 /// Lê o arquivo e diz o que ele contém, sem escrever nada.
 async fn preview(Json(file): Json<BackupFile>) -> AppResult<Response> {
     let counts = service::inspect(&file)?;
-    Ok(format::json(CountsResponse::from(counts))?)
+    Ok(format::json(BackupCountsResponse::from(counts))?)
 }
 
 /// Substitui a configuração atual pela do arquivo.
@@ -78,7 +52,7 @@ async fn restore(
     Json(file): Json<BackupFile>,
 ) -> AppResult<Response> {
     let counts = service::restore(&ctx.db, &file).await?;
-    Ok((StatusCode::OK, Json(CountsResponse::from(counts))).into_response())
+    Ok((StatusCode::OK, Json(BackupCountsResponse::from(counts))).into_response())
 }
 
 pub fn routes() -> Routes {

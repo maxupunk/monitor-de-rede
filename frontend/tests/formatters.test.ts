@@ -6,6 +6,7 @@ import {
   formatMeasuredValue,
   formatPercent,
   formatTimeSpan,
+  formatTimeUntil,
   resolveAutoUnit,
   resolveSpeedUnit,
   convertSpeedFromMbps,
@@ -126,5 +127,14 @@ describe('formatters', () => {
 
       expect(formatSpeedByUnit(null, 'auto')).toBe('--')
     })
+  })
+
+  it('formata o tempo que falta e trata o vencido como agora', () => {
+    const inMinutes = (minutes: number) => new Date(Date.now() + minutes * 60_000 + 5_000)
+    expect(formatTimeUntil(inMinutes(-30))).toBe('agora')
+    expect(formatTimeUntil(inMinutes(5))).toBe('em 5 min')
+    expect(formatTimeUntil(inMinutes(180))).toBe('em 3 h')
+    expect(formatTimeUntil(inMinutes(60 * 49))).toBe('em 2 dias')
+    expect(formatTimeUntil(null)).toBe('—')
   })
 })

@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import { apiService } from '@/services/apiService'
+import type { BackupCountsResponse } from '@/bindings/BackupCountsResponse'
 
 /**
  * Envelope do arquivo de backup (`services::backup::service::BackupFile`).
@@ -16,10 +17,7 @@ export interface BackupFile {
   tables: Record<string, unknown[]>
 }
 
-export interface BackupCounts {
-  tables: Array<{ table: string; rows: number }>
-  totalRows: number
-}
+export type BackupCounts = BackupCountsResponse
 
 /** Rótulos em português para os nomes de tabela do arquivo. */
 const TABLE_LABELS: Record<string, string> = {

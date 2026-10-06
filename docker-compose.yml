@@ -110,6 +110,15 @@ services:
       # Porta UDP de escuta e externa da VPN WireGuard
       WG_LISTEN_PORT: ${WG_LISTEN_PORT:-51820}
       WG_EXTERNAL_PORT: ${WG_EXTERNAL_PORT:-51820}
+      # --- armazenamentos (destinos do backup das configurações) ---
+      # Raiz dos armazenamentos do tipo "Pasta no servidor": a tela só deixa
+      # escolher subpastas daqui. Fica no volume de dados, então sobrevive a
+      # recriar o container — mas não a perder o volume. Para gravar num disco
+      # externo ou NAS, monte-o dentro da raiz, por exemplo em `volumes:`:
+      #   - /mnt/nas/netmonitor:/data/storage/nas
+      # e cadastre a subpasta `nas`. Sem interpolação, pelo mesmo motivo da
+      # `DATABASE_URL`: é um caminho visto de dentro do container.
+      STORAGE_LOCAL_ROOT: /data/storage
       # --- servidor de syslog ---
       # Sem interpolação no caminho do banco, pelo mesmo motivo da
       # `DATABASE_URL`: o `.env` descreve a máquina, não o container. Vazio

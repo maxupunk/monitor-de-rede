@@ -25,3 +25,7 @@ target/
 
 # Insta test snapshot proposals
 *.snap.new
+
+# Armazenamentos locais de desenvolvimento (STORAGE_LOCAL_ROOT padrão):
+# cópias do backup, que carregam community SNMP dos equipamentos.
+/storage/
