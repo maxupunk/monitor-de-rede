@@ -640,4 +640,48 @@ mod tests {
         let tokki = host(None, Some("JRC TOKKI"), &[], json!({}));
         assert_eq!(kind_of(&tokki), "camera");
     }
+
+    #[test]
+    fn amazon_e_apple_sao_classificados_por_fabricante() {
+        let alexa = host(None, Some("Amazon Technologies"), &[], json!({}));
+        assert_eq!(kind_of(&alexa), "iot");
+
+        let iphone = host(None, Some("Apple"), &[], json!({}));
+        assert_eq!(kind_of(&iphone), "mobile");
+    }
+
+    #[test]
+    fn hostnames_do_dhcp_classificam_equipamentos_reais() {
+        let debora = host(Some("iPhonedeDebora"), None, &[], json!({}));
+        assert_eq!(kind_of(&debora), "mobile");
+
+        let s23 = host(Some("S23-de-Maxuel"), None, &[], json!({}));
+        assert_eq!(kind_of(&s23), "mobile");
+
+        let washer = host(Some("Samsung-Washer"), Some("SAMJIN"), &[], json!({}));
+        assert_eq!(kind_of(&washer), "iot");
+
+        let ac = host(
+            Some("Samsung-Room-Airconditioner"),
+            Some("SAMJIN"),
+            &[],
+            json!({}),
+        );
+        assert_eq!(kind_of(&ac), "iot");
+
+        let printer = host(Some("hp-p1102w"), None, &[], json!({}));
+        assert_eq!(kind_of(&printer), "printer");
+
+        let inverter = host(Some("Microinversor-deye-2250"), None, &[], json!({}));
+        assert_eq!(kind_of(&inverter), "ups");
+
+        let desktop = host(Some("DESKTOP-IIE64TT"), None, &[], json!({}));
+        assert_eq!(kind_of(&desktop), "workstation");
+
+        let fan = host(Some("fan-controller"), None, &[], json!({}));
+        assert_eq!(kind_of(&fan), "iot");
+
+        let camera = host(Some("Camera-cozinha"), None, &[], json!({}));
+        assert_eq!(kind_of(&camera), "camera");
+    }
 }

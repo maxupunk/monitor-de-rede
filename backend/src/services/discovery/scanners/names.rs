@@ -41,7 +41,7 @@ pub async fn resolve(ips: &[IpAddr], gateway: Option<IpAddr>) -> Vec<DiscoveredH
     if ipv4.is_empty() {
         return Vec::new();
     }
-    let servers = dns_servers(gateway).await;
+    let servers = dns_servers(&ipv4, gateway).await;
     let (ptr, netbios) = tokio::join!(reverse_dns(&ipv4, &servers), netbios(&ipv4));
 
     let mut hosts = BTreeMap::<Ipv4Addr, DiscoveredHost>::new();
@@ -75,12 +75,26 @@ pub async fn resolve(ips: &[IpAddr], gateway: Option<IpAddr>) -> Vec<DiscoveredH
 }
 
 /// O gateway da rede primeiro (é quem conhece os nomes do DHCP), depois os
-/// servidores do sistema.
-async fn dns_servers(gateway: Option<IpAddr>) -> Vec<SocketAddr> {
+/// gateways candidatos da sub-rede (.1) e por fim os servidores do sistema.
+async fn dns_servers(ips: &[Ipv4Addr], gateway: Option<IpAddr>) -> Vec<SocketAddr> {
     let mut servers: Vec<SocketAddr> = gateway
         .into_iter()
         .map(|ip| SocketAddr::new(ip, 53))
         .collect();
+
+    // Se o gateway não for informado explicitamente no cadastro, deduz os
+    // roteadores/DNS padrão das sub-redes dos próprios IPs (o .1 da sub-rede).
+    if servers.is_empty() {
+        let mut candidates = std::collections::BTreeSet::new();
+        for ip in ips {
+            let [a, b, c, _] = ip.octets();
+            candidates.insert(Ipv4Addr::new(a, b, c, 1));
+        }
+        for candidate in candidates {
+            servers.push(SocketAddr::new(IpAddr::V4(candidate), 53));
+        }
+    }
+
     if let Ok(content) = tokio::fs::read_to_string("/etc/resolv.conf").await {
         servers.extend(
             parse_resolv_conf(&content)
@@ -89,7 +103,7 @@ async fn dns_servers(gateway: Option<IpAddr>) -> Vec<SocketAddr> {
         );
     }
     servers.dedup();
-    servers.truncate(MAX_DNS_SERVERS);
+    servers.truncate(MAX_DNS_SERVERS + 2);
     servers
 }
 
