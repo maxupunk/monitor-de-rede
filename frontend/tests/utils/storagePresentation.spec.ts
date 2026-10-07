@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { intervalLabel, providerInfo, STORAGE_PROVIDERS } from '@/utils/storagePresentation'
+import { intervalLabel } from '@/utils/backupSchedule'
+import { providerInfo, STORAGE_PROVIDERS } from '@/utils/storagePresentation'
 
 describe('storagePresentation', () => {
   it('a família S3 compartilha o mesmo formato de config', () => {

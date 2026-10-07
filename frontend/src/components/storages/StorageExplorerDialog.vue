@@ -208,8 +208,8 @@ async function remove(item: StorageObjectResponse) {
   const ok = await confirm({
     title: item.isDirectory ? 'Excluir pasta' : 'Excluir arquivo',
     message: item.isDirectory
-      ? `A pasta "${item.name}" e tudo o que está dentro dela serão apagados do armazenamento. Não há como desfazer.`
-      : `"${item.name}" será apagado do armazenamento. Não há como desfazer.`,
+      ? `A pasta "${item.name}" e tudo o que está dentro dela serão apagados do destino. Não há como desfazer.`
+      : `"${item.name}" será apagado do destino. Não há como desfazer.`,
     confirmText: 'Excluir',
     confirmColor: 'error',
     icon: 'mdi-delete-alert-outline',

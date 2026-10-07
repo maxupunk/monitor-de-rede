@@ -1,30 +1,34 @@
-//! Backup das configurações num armazenamento.
+//! Cópias da configuração do NetMonitor num destino.
 //!
-//! O arquivo é o **mesmo** JSON que a tela de Configurações baixa
-//! ([`backup::service::export`]): uma cópia tirada do S3 restaura pela tela de
-//! upload, e um arquivo baixado pode ser posto no NAS à mão e restaurado daqui.
+//! O arquivo é o **mesmo** JSON do "Baixar arquivo" ([`backup::export`]): uma
+//! cópia tirada do S3 restaura pelo envio de arquivo, e um arquivo baixado pode
+//! ser posto no NAS à mão e restaurado daqui.
 //!
 //! Tudo o que o sistema grava fica em [`BACKUP_DIR`], dentro do prefixo do
 //! destino, com nome que carrega o instante (`netmonitor-backup-AAAAMMDD-HHMMSS.json`).
 //! É o que torna a retenção segura: ela só apaga o que casa com esse padrão,
 //! naquela pasta — nunca um arquivo que o operador guardou no mesmo bucket.
 
-use std::collections::HashSet;
-use std::sync::{LazyLock, Mutex};
-
 use chrono::{DateTime, Utc};
 use sea_orm::{ActiveModelTrait, DatabaseConnection, Set};
 use tokio::io::AsyncReadExt;
 
 use super::{
-    service::{self, Destination},
-    ListOptions, StorageExplorer, MAX_LIST_LIMIT,
+    plan::PLAN_ID,
+    service::{self as backup, BackupFile, TableCounts},
 };
 use crate::{
-    models::storage_destinations,
+    models::system_backup_plan,
     services::{
-        backup::service::{self as backup, BackupFile, TableCounts},
-        shared::errors::{AppError, AppResult},
+        shared::{
+            errors::{AppError, AppResult},
+            run_guard::RunGuard,
+        },
+        storage::{
+            normalize_path,
+            service::{self, Destination},
+            ListOptions, StorageError, StorageExplorer, MAX_LIST_LIMIT,
+        },
     },
 };
 
@@ -42,36 +46,8 @@ const MAX_BACKUP_BYTES: u64 = 256 * 1024 * 1024;
 pub const STATUS_SUCCESS: &str = "success";
 pub const STATUS_FAILED: &str = "failed";
 
-/// Destinos com backup em andamento neste processo.
-///
-/// O clique em "Fazer backup agora" pode coincidir com o agendador; dois
-/// uploads do mesmo instante gravariam o mesmo nome e a retenção de um
-/// apagaria o arquivo que o outro ainda está enviando.
-static RUNNING: LazyLock<Mutex<HashSet<i64>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
-
-struct RunGuard(i64);
-
-impl RunGuard {
-    fn acquire(id: i64) -> AppResult<Self> {
-        let mut running = RUNNING
-            .lock()
-            .map_err(|_| AppError::Internal(anyhow::anyhow!("trava de backup envenenada")))?;
-        if !running.insert(id) {
-            return Err(AppError::conflict(
-                "Já há um backup em andamento para este armazenamento",
-            ));
-        }
-        Ok(Self(id))
-    }
-}
-
-impl Drop for RunGuard {
-    fn drop(&mut self) {
-        if let Ok(mut running) = RUNNING.lock() {
-            running.remove(&self.0);
-        }
-    }
-}
+/// Escopo da trava de execução (ver [`RunGuard`]): uma cópia do sistema por vez.
+pub const RUN_SCOPE: &str = "system-backup";
 
 /// Uma cópia guardada no destino.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,7 +78,7 @@ pub fn file_name_for(at: DateTime<Utc>) -> String {
 /// inteiro, mas restaurar só aceita o que tem forma de backup.
 #[must_use]
 pub fn is_backup_key(key: &str) -> bool {
-    let key = super::normalize_path(key);
+    let key = normalize_path(key);
     let Some((dir, name)) = key.rsplit_once('/') else {
         return false;
     };
@@ -124,26 +100,32 @@ fn is_backup_name(name: &str) -> bool {
         })
 }
 
-/// Envia uma cópia da configuração atual e aplica a retenção.
+/// Envia uma cópia da configuração atual ao destino do plano e aplica a
+/// retenção do plano.
 ///
-/// O resultado — sucesso ou a mensagem do erro — fica gravado no cadastro, que
-/// é o que a tela e o agendador leem.
+/// O resultado — sucesso ou a mensagem do erro — fica gravado no plano, que é
+/// o que a tela e o agendador leem.
 ///
 /// # Errors
 ///
-/// `409` com outro backup em andamento; qualquer falha da exportação, do envio
+/// `409` com outra cópia em andamento; qualquer falha da exportação, do envio
 /// ou do banco. A falha da **retenção** não falha o backup: a cópia nova já
 /// está lá, e é ela que importa.
 pub async fn run(
     db: &DatabaseConnection,
+    plan: &system_backup_plan::Model,
     destination: &Destination,
     app_version: String,
 ) -> AppResult<RunOutcome> {
-    let _guard = RunGuard::acquire(destination.row.id)?;
+    let _guard = RunGuard::acquire(
+        RUN_SCOPE,
+        PLAN_ID,
+        "Já há um backup do NetMonitor em andamento",
+    )?;
     let started = Utc::now();
-    let result = upload(db, destination, app_version, started).await;
+    let result = upload(db, destination, plan.backup_retention, app_version, started).await;
 
-    let mut row: storage_destinations::ActiveModel = destination.row.clone().into();
+    let mut row: system_backup_plan::ActiveModel = plan.clone().into();
     row.last_backup_at = Set(Some(started.into()));
     match &result {
         Ok(_) => {
@@ -162,6 +144,7 @@ pub async fn run(
 async fn upload(
     db: &DatabaseConnection,
     destination: &Destination,
+    retention: i32,
     app_version: String,
     at: DateTime<Utc>,
 ) -> AppResult<RunOutcome> {
@@ -190,7 +173,7 @@ async fn upload(
     // Primeiro uso de um SFTP: a identidade vista no envio passa a valer.
     service::remember_identity(db, destination, explorer.as_ref()).await?;
 
-    let pruned = match prune(explorer.as_ref(), destination.row.backup_retention).await {
+    let pruned = match prune(explorer.as_ref(), retention).await {
         Ok(pruned) => pruned,
         Err(error) => {
             tracing::warn!(
@@ -223,9 +206,7 @@ pub async fn list(destination: &Destination) -> AppResult<Vec<BackupEntry>> {
     Ok(list_with(explorer.as_ref()).await?)
 }
 
-async fn list_with(
-    explorer: &dyn StorageExplorer,
-) -> Result<Vec<BackupEntry>, super::StorageError> {
+async fn list_with(explorer: &dyn StorageExplorer) -> Result<Vec<BackupEntry>, StorageError> {
     let mut entries = Vec::new();
     let mut cursor = None;
     loop {
@@ -262,10 +243,7 @@ async fn list_with(
 }
 
 /// Apaga as cópias além das `retention` mais recentes.
-async fn prune(
-    explorer: &dyn StorageExplorer,
-    retention: i32,
-) -> Result<usize, super::StorageError> {
+async fn prune(explorer: &dyn StorageExplorer, retention: i32) -> Result<usize, StorageError> {
     let keep = usize::try_from(retention.max(1)).unwrap_or(1);
     let entries = list_with(explorer).await?;
     let mut pruned = 0;
@@ -426,13 +404,5 @@ mod tests {
         let explorer = LocalExplorer::new(&LocalConfig::default(), dir.path()).unwrap();
         assert!(list_with(&explorer).await.unwrap().is_empty());
         assert!(Path::new(dir.path()).exists());
-    }
-
-    #[test]
-    fn dois_backups_do_mesmo_destino_nao_correm_juntos() {
-        let first = RunGuard::acquire(-42).unwrap();
-        assert!(RunGuard::acquire(-42).is_err());
-        drop(first);
-        assert!(RunGuard::acquire(-42).is_ok());
     }
 }

@@ -583,8 +583,31 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
     - SFTP confere a identidade do servidor (TOFU): a impressão digital vista no teste é memorizada ao salvar e uma chave diferente derruba a conexão; "Aceitar nova" na edição.
     - Backup automático por destino (frequência e quantas cópias manter): o ciclo no servidor confere vencimentos a cada minuto, tenta de novo em 1 h após falha, grava o resultado no cadastro e publica `storages:updated`. A retenção só apaga `netmonitor-backups/netmonitor-backup-AAAAMMDD-HHMMSS.json`.
     - O arquivo é o mesmo JSON do download em Configurações: cópias da nuvem restauram pelo upload e vice-versa. Restaurar a partir do destino mostra a prévia por tabela antes de aplicar.
-    - Tela **Armazenamentos** (admin): escolha do tipo em cartões, campos por tipo, teste ao salvar ("Salvar mesmo assim" quando o destino não responde), cartões com último/próximo backup e erro, "Fazer backup agora", cópias com download e restauração, explorador de arquivos.
+    - Tela **Armazenamentos** (admin) — hoje a aba **Destinos** da tela Backup: escolha do tipo em cartões, campos por tipo, teste ao salvar ("Salvar mesmo assim" quando o destino não responde), explorador de arquivos.
     - Rotas `/api/storages` só para administrador, inclusive a leitura; auditoria de cadastro, backup manual, restauração e exclusão de arquivo.
+
+- [x] **Backup nativo de bancos de dados (PostgreSQL, MySQL, MariaDB)** 🟢 Concluído
+  - **Severidade:** 🟠 Alta
+  - **Esforço:** Alto
+  - **Arquivos:** `backend/src/services/databases/{mod,sql/*,dump,restore,postgres,mysql,service,backups,jobs,schedule}.rs`, `backend/src/services/shared/{backup_schedule,run_guard}.rs`, `backend/src/controllers/databases.rs`, `backend/src/{dtos,views}/databases.rs`, `backend/migration/src/m20261007_000001_database_connections.rs`, `frontend/src/pages/DatabasesPage.vue`, `frontend/src/components/databases/`, `frontend/src/components/backup/BackupPolicyFields.vue`, `frontend/src/composables/{useVerifiedSave,useSecretFields}.ts`, `frontend/src/stores/databases.ts`, `backend/tests/requests/{databases,database_roundtrip}.rs`
+  - **Implementado:**
+    - Dump **sem `pg_dump`/`mysqldump`**, pelo `sqlx` (já na árvore pelo Sea-ORM): PostgreSQL pelo catálogo (`pg_get_*def`, `format_type`, `format('%I')`) e `COPY TO STDOUT`, numa transação `REPEATABLE READ READ ONLY`; MySQL/MariaDB por `SHOW CREATE` (sem `DEFINER`) e `INSERT` estendido com valores citados pelo servidor (`QUOTE`/`HEX`), em `CONSISTENT SNAPSHOT`. Ordem do arquivo como a do `pg_dump` (dados antes de índices e FKs; views em ordem de dependência).
+    - Arquivo `.sql.gz` em fluxo (SQL → SHA-256 → gzip → disco), compatível com `psql`/`mysql`. Avisos por backup do que não vai (agregados, tipos compostos, regras, tabelas estrangeiras, large objects, eventos, sequências do MariaDB).
+    - Restauração nativa: divisor de comandos que entende literais, escapes, comentários, `$tag$` e `DELIMITER`; `COPY FROM STDIN` direto; soma conferida antes do `COMMIT`. Banco novo (apagado se falhar) ou substituir — no PostgreSQL numa transação só (tudo ou nada); no MySQL com aviso e confirmação digitando o nome.
+    - Conexões com senha cifrada (nunca volta à tela), TLS (desligado/preferido/obrigatório), "todos os bancos" ou escolhidos a partir do teste, armazenamento de destino, agenda e retenção por banco (arquivo e histórico). Backup e restauração em segundo plano com andamento ao vivo pelo SSE (`database_jobs:updated`, snapshot por conexão).
+    - Agenda e trava de execução compartilhadas com o backup das configurações (`shared::backup_schedule`, `shared::run_guard`); no frontend, `BackupPolicyFields`, `useVerifiedSave` e `useSecretFields` servem os dois formulários.
+    - Testes de ida e volta contra servidores reais (PostgreSQL 17 e 18, MySQL 8.4, MariaDB 11) com enum, domínio, identidade, coluna gerada, partições, view sobre view, view materializada, funções, procedures, triggers e dados com aspas, barras, quebras de linha, NUL, emoji e binário — rodam quando `NETMONITOR_TEST_POSTGRES/MYSQL/MARIADB` apontam para um servidor local.
+
+- [x] **Backup numa tela só, organizado pelo que se protege** 🟢 Concluído
+  - **Severidade:** 🟠 Alta (usabilidade)
+  - **Esforço:** Médio
+  - **Arquivos:** `backend/migration/src/m20261008_000001_system_backup_plan.rs`, `backend/src/services/backup/{plan,copies,schedule}.rs`, `backend/src/controllers/backup.rs`, `backend/src/{dtos,views}/backup.rs`, `backend/src/services/audit.rs` (`record`), `frontend/src/pages/BackupPage.vue`, `frontend/src/components/backup/`, `frontend/src/stores/backup.ts`, `frontend/src/utils/backupSchedule.ts`
+  - **Implementado:**
+    - O backup do NetMonitor virou um **plano único** (`system_backup_plan`: destino, agenda, retenção, último resultado), no mesmo formato do plano de cada banco. A migração herda o armazenamento que já tinha a cópia automática ligada — o que vinha dando certo, depois o mais recente — e tira essas colunas de `storage_destinations`, que voltou a ser só o **onde**. Testada para cima e para baixo em SQLite e PostgreSQL.
+    - Rotas `/api/backup/system` (plano, "Fazer backup agora", cópias, prévia, restauração); as de cópia saíram de `/api/storages`. `/api/backup` inteiro passou a ser só de administrador (antes o download do arquivo com as communities SNMP era aberto a qualquer usuário logado).
+    - Tela **Backup** (`/backup`) no lugar de Armazenamentos e Bancos de dados: aba **O que está protegido** (o NetMonitor e cada banco no mesmo cartão — o quê, selo "Protegido / Último backup falhou / Só manual / Não protegido", onde, quando, "Fazer backup agora" e "Restaurar…") e aba **Destinos** (só o lugar, com "Guarda os backups de:"). Primeiro uso guiado em três passos; cadastrar o primeiro destino já abre o plano do NetMonitor; destino novo cadastra-se de dentro do formulário (`DestinationSelect`).
+    - "Restaurar…" do NetMonitor reúne as duas origens — uma cópia num destino ou um arquivo do computador —, com a mesma prévia e a mesma confirmação, e recarrega a página ao terminar nos dois casos. O cartão de backup saiu de Configurações (fica um atalho); `/storages` e `/databases` redirecionam.
+    - Peças compartilhadas: `BackupPlanCard`, `backupHealth`, `DestinationSelect`, `SystemRestoreConfirm`, `audit::record`; `formatRelativeTime`/`formatTimeUntil` dizem "1 dia".
 
 ---
 

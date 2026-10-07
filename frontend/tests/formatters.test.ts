@@ -7,6 +7,7 @@ import {
   formatPercent,
   formatTimeSpan,
   formatTimeUntil,
+  formatRelativeTime,
   resolveAutoUnit,
   resolveSpeedUnit,
   convertSpeedFromMbps,
@@ -136,5 +137,12 @@ describe('formatters', () => {
     expect(formatTimeUntil(inMinutes(180))).toBe('em 3 h')
     expect(formatTimeUntil(inMinutes(60 * 49))).toBe('em 2 dias')
     expect(formatTimeUntil(null)).toBe('—')
+  })
+
+  it('um dia no singular', () => {
+    const day = 86_400_000
+    expect(formatRelativeTime(new Date(Date.now() - day - 5_000))).toBe('há 1 dia')
+    expect(formatRelativeTime(new Date(Date.now() - 3 * day - 5_000))).toBe('há 3 dias')
+    expect(formatTimeUntil(new Date(Date.now() + day + 5_000))).toBe('em 1 dia')
   })
 })

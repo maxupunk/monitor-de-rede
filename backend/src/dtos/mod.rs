@@ -1,7 +1,9 @@
 pub mod agents;
 pub mod ai;
 pub mod alerts;
+pub mod backup;
 pub mod common;
+pub mod databases;
 pub mod devices;
 pub mod diagnostics;
 pub mod docker;

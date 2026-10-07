@@ -90,6 +90,8 @@ pub enum ResourceType {
     SystemSetting,
     Plugin,
     Storage,
+    DatabaseConnection,
+    Backup,
 }
 
 impl ResourceType {
@@ -112,6 +114,8 @@ impl ResourceType {
             ResourceType::SystemSetting => "system_setting",
             ResourceType::Plugin => "plugin",
             ResourceType::Storage => "storage",
+            ResourceType::DatabaseConnection => "database_connection",
+            ResourceType::Backup => "backup",
         }
     }
 }
@@ -143,6 +147,8 @@ impl std::str::FromStr for ResourceType {
             "system_setting" | "systemsetting" | "settings" => Ok(ResourceType::SystemSetting),
             "plugin" => Ok(ResourceType::Plugin),
             "storage" => Ok(ResourceType::Storage),
+            "database_connection" | "databaseconnection" => Ok(ResourceType::DatabaseConnection),
+            "backup" => Ok(ResourceType::Backup),
             _ => Err(AppError::validation(format!(
                 "Tipo de recurso inválido: {s}"
             ))),
@@ -212,6 +218,41 @@ pub struct AuditEntryInput {
     pub resource_label: Option<String>,
     pub description: Option<String>,
     pub changes: Option<AuditChanges>,
+}
+
+/// Registra uma ação do usuário da requisição sobre um recurso, sem
+/// alteração detalhada.
+///
+/// É o atalho que os controllers usam: o ator sai dos cabeçalhos e uma falha de
+/// gravação vira só log — a operação principal não falha porque a auditoria
+/// falhou.
+pub async fn record(
+    db: &DatabaseConnection,
+    headers: &HeaderMap,
+    action: AuditAction,
+    resource_type: ResourceType,
+    resource: (i64, &str),
+    description: impl Into<String>,
+) {
+    let actor = AuditActor::from_headers(headers, db)
+        .await
+        .unwrap_or_default();
+    if let Err(error) = AuditService::new(db)
+        .log(
+            actor,
+            AuditEntryInput {
+                action,
+                resource_type,
+                resource_id: Some(resource.0),
+                resource_label: Some(resource.1.to_owned()),
+                description: Some(description.into()),
+                changes: None,
+            },
+        )
+        .await
+    {
+        tracing::warn!(%error, "falha ao gravar a auditoria");
+    }
 }
 
 /// Filtros para listagem de auditoria.

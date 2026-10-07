@@ -7,6 +7,7 @@ pub mod auth;
 pub mod auth_guard;
 pub mod backup;
 pub mod dashboard;
+pub mod databases;
 pub mod devices;
 pub mod diagnostics;
 pub mod discovery;

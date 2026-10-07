@@ -13,6 +13,8 @@ import { useTopologyStore } from './topology'
 import { useVpnStore } from './vpn'
 import { useMaintenanceWindowsStore } from './maintenanceWindows'
 import { useStoragesStore } from './storages'
+import { useBackupStore } from './backup'
+import { isDatabaseJobSnapshot, useDatabasesStore } from './databases'
 import { useDockerStore } from './docker'
 import { useAgentsStore } from './agents'
 import { useLogsStore } from './logs'
@@ -396,9 +398,26 @@ export const useEventsStore = defineStore('events', () => {
         break
       }
 
+      case 'backup_plan:updated': {
+        const backupStore = useBackupStore()
+        scheduleRefresh('backup_plan', () => backupStore.refreshPlanIfLoaded())
+        break
+      }
+
       case 'storages:updated': {
         const storagesStore = useStoragesStore()
         scheduleRefresh('storages', () => storagesStore.refreshIfLoaded())
+        break
+      }
+
+      case 'database_connections:updated': {
+        const databasesStore = useDatabasesStore()
+        scheduleRefresh('database_connections', () => databasesStore.refreshIfLoaded())
+        break
+      }
+
+      case 'database_jobs:updated': {
+        if (isDatabaseJobSnapshot(data)) useDatabasesStore().applyJob(data)
         break
       }
 

@@ -112,7 +112,7 @@ impl NatDetector {
         Self {
             gateways,
             default_gateway,
-            containerized: em_container(),
+            containerized: crate::services::shared::runtime::in_container(),
         }
     }
 
@@ -231,14 +231,6 @@ fn gateway_padrao() -> Option<IpAddr> {
 fn hex_little_endian(texto: &str) -> Option<Ipv4Addr> {
     let bruto = u32::from_str_radix(texto, 16).ok()?;
     Some(Ipv4Addr::from(bruto.to_le_bytes()))
-}
-
-/// Se o processo roda dentro de um container. Usado só para o texto do aviso:
-/// nada muda de comportamento por causa disto.
-fn em_container() -> bool {
-    std::path::Path::new("/.dockerenv").exists()
-        || std::fs::read_to_string("/proc/1/cgroup")
-            .is_ok_and(|texto| texto.contains("docker") || texto.contains("containerd"))
 }
 
 #[cfg(test)]

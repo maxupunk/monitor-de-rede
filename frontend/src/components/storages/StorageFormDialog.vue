@@ -14,7 +14,7 @@
       <v-card-subtitle class="px-6 pb-2 text-wrap">
         {{
           step === 'provider'
-            ? 'Escolha onde as cópias de segurança das configurações vão ficar.'
+            ? 'Onde as cópias de segurança vão ficar — do NetMonitor e dos seus bancos.'
             : selected?.hint
         }}
       </v-card-subtitle>
@@ -106,7 +106,7 @@
               v-model="form.secretAccessKey"
               label="Secret Access Key"
               variant="outlined"
-              v-bind="secretField('secretAccessKey')"
+              v-bind="secrets.field('secretAccessKey')"
               class="mb-2"
             ></v-text-field>
             <v-text-field
@@ -134,7 +134,7 @@
               variant="outlined"
               rows="4"
               class="mono mb-2"
-              v-bind="secretHint('credentialsJson')"
+              v-bind="secrets.hint('credentialsJson')"
             ></v-textarea>
             <v-text-field
               v-model="form.prefix"
@@ -150,7 +150,7 @@
               v-model="form.connectionString"
               label="Connection string"
               variant="outlined"
-              v-bind="secretField('connectionString')"
+              v-bind="secrets.field('connectionString')"
               class="mb-2"
             ></v-text-field>
             <v-text-field
@@ -178,6 +178,7 @@
                   placeholder="nas.local ou 192.168.0.20"
                   variant="outlined"
                   :rules="[required('Informe o servidor')]"
+                  v-bind="loopbackFieldHint(form.host)"
                 ></v-text-field>
               </v-col>
               <v-col cols="4" sm="3">
@@ -214,7 +215,7 @@
               v-model="form.password"
               label="Senha"
               variant="outlined"
-              v-bind="secretField('password')"
+              v-bind="secrets.field('password')"
               class="mb-2"
             ></v-text-field>
             <template v-else>
@@ -225,13 +226,13 @@
                 variant="outlined"
                 rows="4"
                 class="mono mb-2"
-                v-bind="secretHint('privateKey')"
+                v-bind="secrets.hint('privateKey')"
               ></v-textarea>
               <v-text-field
                 v-model="form.passphrase"
                 label="Passphrase da chave"
                 variant="outlined"
-                v-bind="secretField('passphrase', false)"
+                v-bind="secrets.field('passphrase', false)"
                 class="mb-2"
               ></v-text-field>
             </template>
@@ -271,8 +272,8 @@
               color="info"
               variant="tonal"
               prepend-icon="mdi-connection"
-              :loading="testing"
-              @click="runTest"
+              :loading="verified.testing.value"
+              @click="verified.run"
             >
               Testar conexão
             </v-btn>
@@ -296,48 +297,16 @@
               identidade será memorizada no primeiro uso.
             </div>
           </v-alert>
-
-          <div class="section-title mt-6">Backup automático</div>
-          <v-switch
-            v-model="form.backupEnabled"
-            color="success"
-            inset
-            hide-details
-            label="Enviar cópias das configurações automaticamente"
-            class="mb-2"
-          ></v-switch>
-          <v-row dense>
-            <v-col cols="12" sm="6">
-              <v-select
-                v-model="form.backupIntervalHours"
-                :items="intervalItems"
-                label="Frequência"
-                variant="outlined"
-                :disabled="!form.backupEnabled"
-              ></v-select>
-            </v-col>
-            <v-col cols="12" sm="6">
-              <v-text-field
-                v-model.number="form.backupRetention"
-                label="Manter as últimas"
-                type="number"
-                suffix="cópias"
-                variant="outlined"
-                min="1"
-                max="365"
-                :rules="[retentionRule]"
-              ></v-text-field>
-            </v-col>
-          </v-row>
-          <div class="text-caption text-high-emphasis">
-            As cópias mais antigas que isso são apagadas sozinhas — só os arquivos de backup que o
-            sistema criou, na pasta <code>netmonitor-backups</code>. O arquivo traz a community SNMP
-            dos equipamentos: prefira um destino privado.
-          </div>
         </v-form>
 
-        <v-alert v-if="saveError" type="error" variant="tonal" density="compact" class="mt-4">
-          {{ saveError }}
+        <v-alert
+          v-if="saveError || verified.error.value"
+          type="error"
+          variant="tonal"
+          density="compact"
+          class="mt-4"
+        >
+          {{ saveError || verified.error.value }}
         </v-alert>
       </v-card-text>
 
@@ -354,12 +323,12 @@
         <v-btn variant="text" @click="close">Cancelar</v-btn>
         <v-btn
           v-if="step === 'form'"
-          :color="forceSave ? 'warning' : 'primary'"
+          :color="verified.forceSave.value ? 'warning' : 'primary'"
           variant="flat"
           :loading="saving"
           @click="save"
         >
-          {{ forceSave ? 'Salvar mesmo assim' : storageId ? 'Salvar' : 'Criar' }}
+          {{ verified.forceSave.value ? 'Salvar mesmo assim' : storageId ? 'Salvar' : 'Criar' }}
         </v-btn>
       </v-card-actions>
     </v-card>
@@ -374,18 +343,15 @@ import type { StorageDestinationInput } from '@/bindings/StorageDestinationInput
 import type { StorageProvider } from '@/bindings/StorageProvider'
 import type { StorageTestResponse } from '@/bindings/StorageTestResponse'
 import { useStoragesStore } from '@/stores/storages'
-import {
-  BACKUP_INTERVALS,
-  intervalLabel,
-  providerInfo,
-  SECRET_LABELS,
-  STORAGE_PROVIDERS,
-} from '@/utils/storagePresentation'
+import { providerInfo, SECRET_LABELS, STORAGE_PROVIDERS } from '@/utils/storagePresentation'
 import { requiredRule } from '@/utils/formRules'
+import { loopbackFieldHint } from '@/utils/hostHints'
+import { useSecretFields } from '@/composables/useSecretFields'
+import { useVerifiedSave } from '@/composables/useVerifiedSave'
 
 const props = defineProps<{
   modelValue: boolean
-  /** `null` cria um armazenamento novo. */
+  /** `null` cria um destino novo. */
   storageId: number | null
 }>()
 
@@ -400,14 +366,8 @@ const formRef = ref<{ validate: () => Promise<{ valid: boolean }> } | null>(null
 const step = ref<'provider' | 'form'>('provider')
 const provider = ref<StorageProvider>('local')
 const saving = ref(false)
-const testing = ref(false)
-const testResult = ref<StorageTestResponse | null>(null)
-/** Config testada por último — mudou depois disso, o teste não vale mais. */
-const testedSignature = ref<string | null>(null)
-const forceSave = ref(false)
 const saveError = ref<string | null>(null)
-const secretsSet = ref<string[]>([])
-const visibleSecrets = ref<string[]>([])
+const secrets = useSecretFields(SECRET_LABELS)
 
 const form = reactive({
   name: '',
@@ -429,18 +389,13 @@ const form = reactive({
   privateKey: '',
   passphrase: '',
   hostKeyFingerprint: '',
-  backupEnabled: true,
-  backupIntervalHours: 24,
-  backupRetention: 14,
 })
 
 const selected = computed(() => (step.value === 'form' ? providerInfo(provider.value) : null))
 const configType = computed(() => providerInfo(provider.value).configType)
 const title = computed(() => {
-  if (props.storageId) return 'Editar armazenamento'
-  return step.value === 'provider'
-    ? 'Novo armazenamento'
-    : `Novo armazenamento — ${selected.value?.label}`
+  if (props.storageId) return 'Editar destino'
+  return step.value === 'provider' ? 'Novo destino' : `Novo destino — ${selected.value?.label}`
 })
 const localRootPrefix = computed(() => {
   const root = storagesStore.meta?.localRoot ?? 'storage'
@@ -456,55 +411,8 @@ const endpointPlaceholder = computed(() => {
       return 'https://s3.us-west-002.backblazeb2.com'
   }
 })
-const intervalItems = computed(() => {
-  const items = [...BACKUP_INTERVALS]
-  // Frequência gravada fora dos presets (pela API) continua selecionável.
-  if (!items.some((item) => item.value === form.backupIntervalHours)) {
-    items.push({ value: form.backupIntervalHours, title: intervalLabel(form.backupIntervalHours) })
-  }
-  return items
-})
-
 function required(message: string) {
   return requiredRule(message)
-}
-
-function retentionRule(value: number | string): true | string {
-  const n = Number(value)
-  return (Number.isInteger(n) && n >= 1 && n <= 365) || 'Entre 1 e 365 cópias'
-}
-
-/**
- * Campo de segredo: mascarado, com o olho para conferir o que se digitou, e
- * sem autopreenchimento — o navegador não pode oferecer a senha do login aqui.
- * Na edição, o segredo gravado nunca vem: o campo vazio mantém o atual.
- */
-function secretField(name: string, requiredOnCreate = true) {
-  const visible = visibleSecrets.value.includes(name)
-  return {
-    type: visible ? 'text' : 'password',
-    autocomplete: 'new-password',
-    'append-inner-icon': visible ? 'mdi-eye-off' : 'mdi-eye',
-    'onClick:appendInner': () => toggleSecret(name),
-    rules: requiredOnCreate && !secretsSet.value.includes(name) ? [required('Obrigatório')] : [],
-    ...secretHint(name),
-  }
-}
-
-function secretHint(name: string) {
-  return secretsSet.value.includes(name)
-    ? {
-        placeholder: '••••••••',
-        hint: `${SECRET_LABELS[name] ?? 'Valor'} gravado — deixe em branco para manter.`,
-        'persistent-hint': true,
-      }
-    : {}
-}
-
-function toggleSecret(name: string) {
-  visibleSecrets.value = visibleSecrets.value.includes(name)
-    ? visibleSecrets.value.filter((item) => item !== name)
-    : [...visibleSecrets.value, name]
 }
 
 function trimmed(value: string): string | undefined {
@@ -560,9 +468,6 @@ function buildInput(): StorageDestinationInput {
     name: form.name.trim(),
     provider: provider.value,
     config: buildConfig(),
-    backupEnabled: form.backupEnabled,
-    backupIntervalHours: form.backupIntervalHours,
-    backupRetention: Number(form.backupRetention),
   }
 }
 
@@ -570,17 +475,17 @@ function signature(): string {
   return JSON.stringify({ provider: provider.value, config: buildConfig() })
 }
 
-// Mudou a conexão depois do teste: o resultado não vale mais.
-watch(
-  () => signature(),
-  (current) => {
-    if (testedSignature.value && current !== testedSignature.value) {
-      testResult.value = null
-      testedSignature.value = null
-      forceSave.value = false
-    }
-  }
-)
+const verified = useVerifiedSave<StorageTestResponse>({
+  signature,
+  test: () =>
+    storagesStore.testDraft({
+      id: props.storageId,
+      provider: provider.value,
+      config: buildConfig(),
+    }),
+  succeeded: (result) => result.ok,
+})
+const testResult = verified.result
 
 function resetForm() {
   Object.assign(form, {
@@ -603,25 +508,16 @@ function resetForm() {
     privateKey: '',
     passphrase: '',
     hostKeyFingerprint: '',
-    backupEnabled: true,
-    backupIntervalHours: 24,
-    backupRetention: 14,
   })
-  secretsSet.value = []
-  visibleSecrets.value = []
-  testResult.value = null
-  testedSignature.value = null
-  forceSave.value = false
+  secrets.reset()
+  verified.reset()
   saveError.value = null
 }
 
 function fillFrom(detail: StorageDestinationDetail) {
   provider.value = detail.provider
   form.name = detail.name
-  form.backupEnabled = detail.backupEnabled
-  form.backupIntervalHours = detail.backupIntervalHours
-  form.backupRetention = detail.backupRetention
-  secretsSet.value = detail.secretsSet
+  secrets.reset(detail.secretsSet)
   const config = detail.config
   switch (config.type) {
     case 'local':
@@ -667,7 +563,7 @@ watch(
     try {
       fillFrom(await storagesStore.fetchDetail(props.storageId))
     } catch (err) {
-      saveError.value = err instanceof Error ? err.message : 'Erro ao carregar o armazenamento'
+      saveError.value = err instanceof Error ? err.message : 'Erro ao carregar o destino'
     }
   }
 )
@@ -684,26 +580,6 @@ function forgetHostKey() {
   form.hostKeyFingerprint = ''
 }
 
-async function runTest(): Promise<StorageTestResponse | null> {
-  testing.value = true
-  saveError.value = null
-  try {
-    const current = signature()
-    testResult.value = await storagesStore.testDraft({
-      id: props.storageId,
-      provider: provider.value,
-      config: buildConfig(),
-    })
-    testedSignature.value = current
-    return testResult.value
-  } catch (err) {
-    saveError.value = err instanceof Error ? err.message : 'Erro ao testar a conexão'
-    return null
-  } finally {
-    testing.value = false
-  }
-}
-
 /**
  * Salvar testa antes, se a config mudou desde o último teste. Falhou: o botão
  * vira "Salvar mesmo assim" — dá para cadastrar um NAS que está desligado
@@ -713,18 +589,11 @@ async function save() {
   const validation = await formRef.value?.validate()
   if (validation && !validation.valid) return
 
-  if (!forceSave.value) {
-    const fresh = testResult.value && testedSignature.value === signature()
-    const result = fresh ? testResult.value : await runTest()
-    if (!result) return
-    if (!result.ok) {
-      forceSave.value = true
-      return
-    }
-    // A identidade que o teste acabou de ver é a que fica memorizada.
-    if (configType.value === 'sftp' && !form.hostKeyFingerprint && result.hostKeyFingerprint) {
-      form.hostKeyFingerprint = result.hostKeyFingerprint
-    }
+  const { ok, result } = await verified.ready()
+  if (!ok) return
+  // A identidade que o teste acabou de ver é a que fica memorizada.
+  if (configType.value === 'sftp' && !form.hostKeyFingerprint && result?.hostKeyFingerprint) {
+    form.hostKeyFingerprint = result.hostKeyFingerprint
   }
 
   saving.value = true
@@ -735,7 +604,7 @@ async function save() {
     emit('saved', saved, created)
     close()
   } catch (err) {
-    saveError.value = err instanceof Error ? err.message : 'Erro ao salvar o armazenamento'
+    saveError.value = err instanceof Error ? err.message : 'Erro ao salvar o destino'
   } finally {
     saving.value = false
   }

@@ -21,21 +21,12 @@ use crate::{
     },
 };
 
-/// Intervalo máximo entre backups automáticos: 30 dias.
-pub const MAX_INTERVAL_HOURS: i32 = 24 * 30;
-
-/// Quantas cópias um destino pode guardar no máximo.
-pub const MAX_RETENTION: i32 = 365;
-
-/// O que o formulário envia para criar ou editar um armazenamento.
+/// O que o formulário envia para criar ou editar um destino.
 #[derive(Debug, Clone)]
 pub struct StorageInput {
     pub name: String,
     pub provider: StorageProvider,
     pub config: StorageConfig,
-    pub backup_enabled: bool,
-    pub backup_interval_hours: i32,
-    pub backup_retention: i32,
 }
 
 /// Um armazenamento com a config já decifrada.
@@ -129,9 +120,6 @@ pub async fn create<C: ConnectionTrait>(
         name: Set(input.name),
         provider: Set(input.provider.as_str().to_string()),
         config_encrypted: Set(seal(&input.config)?),
-        backup_enabled: Set(input.backup_enabled),
-        backup_interval_hours: Set(input.backup_interval_hours),
-        backup_retention: Set(input.backup_retention),
         ..Default::default()
     }
     .insert(db)
@@ -158,9 +146,6 @@ pub async fn update<C: ConnectionTrait>(
     row.name = Set(input.name);
     row.provider = Set(input.provider.as_str().to_string());
     row.config_encrypted = Set(seal(&input.config)?);
-    row.backup_enabled = Set(input.backup_enabled);
-    row.backup_interval_hours = Set(input.backup_interval_hours);
-    row.backup_retention = Set(input.backup_retention);
     Ok(row.update(db).await?)
 }
 
@@ -334,17 +319,6 @@ fn normalize(mut input: StorageInput) -> AppResult<StorageInput> {
             "O nome pode ter no máximo 120 caracteres",
         ));
     }
-    if !(1..=MAX_INTERVAL_HOURS).contains(&input.backup_interval_hours) {
-        return Err(AppError::validation(format!(
-            "A frequência do backup deve ficar entre 1 hora e {} dias",
-            MAX_INTERVAL_HOURS / 24
-        )));
-    }
-    if !(1..=MAX_RETENTION).contains(&input.backup_retention) {
-        return Err(AppError::validation(format!(
-            "Mantenha entre 1 e {MAX_RETENTION} cópias"
-        )));
-    }
     validate_config(input.provider, &input.config)?;
     Ok(input)
 }
@@ -445,9 +419,6 @@ mod tests {
             name: "  NAS do escritório  ".into(),
             provider,
             config,
-            backup_enabled: true,
-            backup_interval_hours: 24,
-            backup_retention: 14,
         }
     }
 
@@ -459,17 +430,6 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(ok.name, "NAS do escritório");
-    }
-
-    #[test]
-    fn frequencia_e_retencao_fora_da_faixa_sao_recusadas() {
-        let local = StorageConfig::Local(LocalConfig::default());
-        for (interval, retention) in [(0, 14), (MAX_INTERVAL_HOURS + 1, 14), (24, 0), (24, 366)] {
-            let mut bad = input(StorageProvider::Local, local.clone());
-            bad.backup_interval_hours = interval;
-            bad.backup_retention = retention;
-            assert!(normalize(bad).is_err(), "{interval}h / {retention}");
-        }
     }
 
     #[test]

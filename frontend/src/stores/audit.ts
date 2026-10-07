@@ -38,6 +38,7 @@ export const RESOURCE_OPTIONS = [
   { value: 'alert_rule', label: 'Regra de alerta' },
   { value: 'maintenance_window', label: 'Janela de manutenção' },
   { value: 'storage', label: 'Armazenamento' },
+  { value: 'database_connection', label: 'Conexão de banco' },
   { value: 'docker_container', label: 'Container Docker' },
   { value: 'docker_volume', label: 'Volume Docker' },
   { value: 'docker_network', label: 'Rede Docker' },

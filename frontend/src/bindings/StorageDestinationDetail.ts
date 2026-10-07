@@ -18,8 +18,4 @@ secretsSet: Array<string>, id: number, name: string, provider: StorageProvider,
  * Para onde vão os arquivos, num texto só: `s3://bucket/prefixo`,
  * `backup@nas:22/srv/copias`. Nulo quando a credencial não decifra.
  */
-target: string | null, backupEnabled: boolean, backupIntervalHours: number, backupRetention: number, lastBackupAt: string | null, 
-/**
- * `success` | `failed`.
- */
-lastBackupStatus: string | null, lastBackupError: string | null, nextBackupAt: string | null, createdAt: string, updatedAt: string, };
+target: string | null, createdAt: string, updatedAt: string, };

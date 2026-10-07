@@ -2,9 +2,6 @@ import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import { apiService } from '@/services/apiService'
 import { triggerDownload } from '@/utils/download'
-import type { BackupCountsResponse } from '@/bindings/BackupCountsResponse'
-import type { StorageBackupResponse } from '@/bindings/StorageBackupResponse'
-import type { StorageBackupRunResponse } from '@/bindings/StorageBackupRunResponse'
 import type { StorageBrowseResponse } from '@/bindings/StorageBrowseResponse'
 import type { StorageDestinationDetail } from '@/bindings/StorageDestinationDetail'
 import type { StorageDestinationInput } from '@/bindings/StorageDestinationInput'
@@ -14,12 +11,13 @@ import type { StorageTestInput } from '@/bindings/StorageTestInput'
 import type { StorageTestResponse } from '@/bindings/StorageTestResponse'
 
 /**
- * Armazenamentos: os destinos das cópias do backup das configurações.
+ * Destinos: os lugares onde as cópias de backup ficam (pasta, SFTP, nuvem).
  *
- * A lista é a única coisa que vive aqui como estado; cópias, prévia e
- * explorador são consultas pontuais de um diálogo aberto, e devolvem o
- * resultado a quem pediu. Um `storages:updated` no SSE recarrega a lista —
- * mas só se esta tela já a carregou, porque a rota é de administrador.
+ * Só o **onde**: o que vai para cada destino é dos planos — do NetMonitor
+ * (`stores/backup`) e de cada banco (`stores/databases`). A lista é a única
+ * coisa que vive aqui como estado; o explorador faz consultas pontuais. Um
+ * `storages:updated` no SSE recarrega a lista — mas só se a tela já a
+ * carregou, porque a rota é de administrador.
  */
 export const useStoragesStore = defineStore('storages', () => {
   const storages = ref<StorageDestinationResponse[]>([])
@@ -27,8 +25,6 @@ export const useStoragesStore = defineStore('storages', () => {
   const loading = ref(false)
   const loaded = ref(false)
   const error = ref<string | null>(null)
-  /** Destinos com "Fazer backup agora" em andamento nesta aba. */
-  const running = ref<number[]>([])
 
   function message(err: unknown, fallback: string): string {
     return err instanceof Error ? err.message : fallback
@@ -42,7 +38,7 @@ export const useStoragesStore = defineStore('storages', () => {
       loaded.value = true
       return true
     } catch (err) {
-      error.value = message(err, 'Erro ao carregar os armazenamentos')
+      error.value = message(err, 'Erro ao carregar os destinos')
       return false
     } finally {
       loading.value = false
@@ -96,7 +92,7 @@ export const useStoragesStore = defineStore('storages', () => {
       storages.value = storages.value.filter((item) => item.id !== id)
       return true
     } catch (err) {
-      error.value = message(err, 'Erro ao excluir o armazenamento')
+      error.value = message(err, 'Erro ao excluir o destino')
       return false
     }
   }
@@ -107,33 +103,6 @@ export const useStoragesStore = defineStore('storages', () => {
 
   function testSaved(id: number): Promise<StorageTestResponse> {
     return apiService.post<StorageTestResponse>(`/storages/${id}/test`)
-  }
-
-  /**
-   * Envia uma cópia agora e relê a lista ao fim — inclusive quando falha,
-   * porque a falha também fica gravada no cadastro. As outras abas recebem a
-   * mudança pelo SSE (`storages:updated`).
-   */
-  async function runBackup(id: number): Promise<StorageBackupRunResponse> {
-    running.value = [...running.value, id]
-    try {
-      return await apiService.post<StorageBackupRunResponse>(`/storages/${id}/backups`)
-    } finally {
-      running.value = running.value.filter((item) => item !== id)
-      void fetchStorages()
-    }
-  }
-
-  function listBackups(id: number): Promise<StorageBackupResponse[]> {
-    return apiService.get<StorageBackupResponse[]>(`/storages/${id}/backups`)
-  }
-
-  function previewBackup(id: number, key: string): Promise<BackupCountsResponse> {
-    return apiService.post<BackupCountsResponse>(`/storages/${id}/backups/preview`, { key })
-  }
-
-  function restoreBackup(id: number, key: string): Promise<BackupCountsResponse> {
-    return apiService.post<BackupCountsResponse>(`/storages/${id}/backups/restore`, { key })
   }
 
   function browse(
@@ -163,7 +132,6 @@ export const useStoragesStore = defineStore('storages', () => {
     loading,
     loaded,
     error,
-    running,
     fetchStorages,
     refreshIfLoaded,
     fetchMeta,
@@ -172,10 +140,6 @@ export const useStoragesStore = defineStore('storages', () => {
     remove,
     testDraft,
     testSaved,
-    runBackup,
-    listBackups,
-    previewBackup,
-    restoreBackup,
     browse,
     downloadObject,
     deleteObject,

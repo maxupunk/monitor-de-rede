@@ -26,6 +26,12 @@ services:
       nofile:
         soft: 8192
         hard: 65536
+    # Dentro do container `127.0.0.1` é o próprio container. Para fazer backup
+    # de um banco ou NAS que roda nesta máquina, cadastre o servidor como
+    # `host.docker.internal` — o Docker Desktop já o resolve; esta linha faz o
+    # mesmo no Docker do Linux.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       # Interface web e API na mesma porta — não há mais duas.
       - "${APP_EXTERNAL_PORT:-3333}:${APP_PORT:-3333}"

@@ -57,6 +57,8 @@ mod m20261003_000001_plugin_auto_enable;
 mod m20261004_000001_device_observed_os;
 mod m20261005_000001_oui_vendors;
 mod m20261006_000001_storage_destinations;
+mod m20261007_000001_database_connections;
+mod m20261008_000001_system_backup_plan;
 
 pub struct Migrator;
 
@@ -181,6 +183,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20261004_000001_device_observed_os::Migration),
             Box::new(m20261005_000001_oui_vendors::Migration),
             Box::new(m20261006_000001_storage_destinations::Migration),
+            Box::new(m20261007_000001_database_connections::Migration),
+            Box::new(m20261008_000001_system_backup_plan::Migration),
             // inject-above (do not remove this comment)
         ]
     }

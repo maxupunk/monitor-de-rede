@@ -2,6 +2,10 @@ import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import { apiService } from '@/services/apiService'
 import type { BackupCountsResponse } from '@/bindings/BackupCountsResponse'
+import type { SystemBackupCopyResponse } from '@/bindings/SystemBackupCopyResponse'
+import type { SystemBackupPlanInput } from '@/bindings/SystemBackupPlanInput'
+import type { SystemBackupPlanResponse } from '@/bindings/SystemBackupPlanResponse'
+import type { SystemBackupRunResponse } from '@/bindings/SystemBackupRunResponse'
 
 /**
  * Envelope do arquivo de backup (`services::backup::service::BackupFile`).
@@ -39,7 +43,25 @@ export function tableLabel(table: string): string {
   return TABLE_LABELS[table] ?? table
 }
 
+/**
+ * A restauração trocou sites, redes, dispositivos e monitores por baixo de
+ * todas as stores já carregadas. Recarregar a aplicação é mais honesto do que
+ * invalidar uma por uma e deixar alguma tela com dado morto.
+ */
+export function reloadAfterRestore() {
+  window.location.reload()
+}
+
+/**
+ * Backup do próprio NetMonitor: o plano (destino, agenda, retenção), as cópias
+ * guardadas nos destinos e o caminho por arquivo (baixar e enviar o `.json`).
+ *
+ * O plano chega por HTTP ao abrir a tela; depois, `backup_plan:updated` no SSE
+ * o recarrega — inclusive quando o backup automático roda sozinho.
+ */
 export const useBackupStore = defineStore('backup', () => {
+  const plan = ref<SystemBackupPlanResponse | null>(null)
+  const running = ref(false)
   const exporting = ref(false)
   const restoring = ref(false)
   const error = ref<string | null>(null)
@@ -54,6 +76,56 @@ export const useBackupStore = defineStore('backup', () => {
 
   function message(err: unknown, fallback: string): string {
     return err instanceof Error ? err.message : fallback
+  }
+
+  async function fetchPlan(): Promise<SystemBackupPlanResponse | null> {
+    try {
+      plan.value = await apiService.get<SystemBackupPlanResponse>('/backup/system')
+    } catch (err) {
+      error.value = message(err, 'Erro ao carregar o plano de backup')
+    }
+    return plan.value
+  }
+
+  /** O que o SSE chama: sem efeito para quem nunca abriu a tela (rota de admin). */
+  function refreshPlanIfLoaded() {
+    if (plan.value) void fetchPlan()
+  }
+
+  async function savePlan(input: SystemBackupPlanInput): Promise<SystemBackupPlanResponse> {
+    plan.value = await apiService.put<SystemBackupPlanResponse>('/backup/system', input)
+    return plan.value
+  }
+
+  /** "Fazer backup agora". O resultado — inclusive a falha — vai para o plano. */
+  async function runNow(): Promise<SystemBackupRunResponse> {
+    running.value = true
+    try {
+      return await apiService.post<SystemBackupRunResponse>('/backup/system/run')
+    } finally {
+      running.value = false
+      void fetchPlan()
+    }
+  }
+
+  /** Cópias num destino; sem `storageId`, no destino do plano. */
+  function listCopies(storageId?: number | null): Promise<SystemBackupCopyResponse[]> {
+    const query = storageId != null ? `?storageDestinationId=${storageId}` : ''
+    return apiService.get<SystemBackupCopyResponse[]>(`/backup/system/copies${query}`)
+  }
+
+  function previewCopy(storageDestinationId: number, key: string): Promise<BackupCounts> {
+    return apiService.post<BackupCounts>('/backup/system/copies/preview', {
+      storageDestinationId,
+      key,
+    })
+  }
+
+  function restoreCopy(storageDestinationId: number, key: string): Promise<BackupCounts> {
+    return apiService.post<BackupCounts>('/backup/system/copies/restore', {
+      storageDestinationId,
+      key,
+    })
   }
 
   /**
@@ -135,6 +207,15 @@ export const useBackupStore = defineStore('backup', () => {
   }
 
   return {
+    plan,
+    running,
+    fetchPlan,
+    refreshPlanIfLoaded,
+    savePlan,
+    runNow,
+    listCopies,
+    previewCopy,
+    restoreCopy,
     exporting,
     restoring,
     error,

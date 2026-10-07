@@ -1,36 +1,32 @@
-//! Armazenamentos: cadastro, teste, explorador e backups guardados.
+//! Destinos (armazenamentos): cadastro, teste e explorador de arquivos.
 //!
-//! Só administrador chega aqui (`users::request_is_allowed`): o cadastro
-//! carrega credenciais de nuvem, e restaurar substitui a configuração inteira.
+//! O que vai para cada destino é dos planos de backup (`/backup/system`,
+//! `/databases`). Só administrador chega aqui (`users::request_is_allowed`):
+//! o cadastro carrega credenciais de nuvem.
 
 use axum::{
     body::Body,
     http::{header, HeaderMap, StatusCode},
     response::IntoResponse,
 };
-use loco_rs::{app::Hooks, prelude::*};
+use loco_rs::prelude::*;
 
 use crate::{
-    app::App,
     dtos::storages::{
-        StorageBackupKeyInput, StorageBrowseQuery, StorageDestinationInput, StorageObjectQuery,
-        StorageTestInput,
+        StorageBrowseQuery, StorageDestinationInput, StorageObjectQuery, StorageTestInput,
     },
     services::{
-        audit::{AuditAction, AuditActor, AuditEntryInput, AuditService, ResourceType},
+        audit::{AuditAction, ResourceType},
         shared::errors::AppResult,
-        storage::{assert_deletable, backups, normalize_path, service},
+        storage::{assert_deletable, normalize_path, service},
     },
-    views::{
-        backup::BackupCountsResponse,
-        storages::{
-            StorageBackupResponse, StorageBackupRunResponse, StorageBrowseResponse,
-            StorageDestinationDetail, StorageDestinationResponse, StorageTestResponse,
-            StoragesMetaResponse,
-        },
+    views::storages::{
+        StorageBrowseResponse, StorageDestinationDetail, StorageDestinationResponse,
+        StorageTestResponse, StoragesMetaResponse,
     },
 };
 
+/// Registra uma ação sobre um destino.
 async fn audit(
     ctx: &AppContext,
     headers: &HeaderMap,
@@ -38,22 +34,15 @@ async fn audit(
     resource: (i64, &str),
     description: String,
 ) {
-    let actor = AuditActor::from_headers(headers, &ctx.db)
-        .await
-        .unwrap_or_default();
-    let _ = AuditService::new(&ctx.db)
-        .log(
-            actor,
-            AuditEntryInput {
-                action,
-                resource_type: ResourceType::Storage,
-                resource_id: Some(resource.0),
-                resource_label: Some(resource.1.to_owned()),
-                description: Some(description),
-                changes: None,
-            },
-        )
-        .await;
+    crate::services::audit::record(
+        &ctx.db,
+        headers,
+        action,
+        ResourceType::Storage,
+        resource,
+        description,
+    )
+    .await;
 }
 
 async fn index(State(ctx): State<AppContext>) -> AppResult<Response> {
@@ -93,7 +82,7 @@ async fn store(
         AuditAction::Create,
         (destination.row.id, &destination.row.name),
         format!(
-            "Armazenamento '{}' ({}) cadastrado",
+            "Destino '{}' ({}) cadastrado",
             destination.row.name,
             destination.provider.label()
         ),
@@ -120,7 +109,7 @@ async fn update(
         &headers,
         AuditAction::Update,
         (destination.row.id, &destination.row.name),
-        format!("Armazenamento '{}' atualizado", destination.row.name),
+        format!("Destino '{}' atualizado", destination.row.name),
     )
     .await;
     Ok(format::json(StorageDestinationDetail::from(&destination))?)
@@ -139,7 +128,7 @@ async fn destroy(
         AuditAction::Delete,
         (row.id, &row.name),
         format!(
-            "Armazenamento '{}' removido (os arquivos no destino foram mantidos)",
+            "Destino '{}' removido (os arquivos nele foram mantidos)",
             row.name
         ),
     )
@@ -219,86 +208,13 @@ async fn delete_object(
         AuditAction::Delete,
         (destination.row.id, &destination.row.name),
         format!(
-            "{} '{key}' excluído do armazenamento '{}'",
+            "{} '{key}' excluído do destino '{}'",
             if query.directory { "Pasta" } else { "Arquivo" },
             destination.row.name
         ),
     )
     .await;
     Ok(StatusCode::NO_CONTENT.into_response())
-}
-
-async fn list_backups(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
-    let destination = service::load(&ctx.db, id).await?;
-    let entries = backups::list(&destination).await?;
-    Ok(format::json(
-        entries
-            .into_iter()
-            .map(StorageBackupResponse::from)
-            .collect::<Vec<_>>(),
-    )?)
-}
-
-async fn run_backup(
-    State(ctx): State<AppContext>,
-    headers: HeaderMap,
-    Path(id): Path<i64>,
-) -> AppResult<Response> {
-    let destination = service::load(&ctx.db, id).await?;
-    let result = backups::run(&ctx.db, &destination, App::app_version()).await;
-    // O resultado — inclusive a falha — já foi gravado no cadastro: a lista
-    // aberta em outras abas precisa ver o novo status nos dois casos.
-    service::publish_updated(&ctx).await;
-    let outcome = result?;
-    audit(
-        &ctx,
-        &headers,
-        AuditAction::Execute,
-        (destination.row.id, &destination.row.name),
-        format!(
-            "Backup '{}' enviado ao armazenamento '{}'",
-            outcome.entry.name, destination.row.name
-        ),
-    )
-    .await;
-    Ok((
-        StatusCode::CREATED,
-        Json(StorageBackupRunResponse::from(outcome)),
-    )
-        .into_response())
-}
-
-async fn preview_backup(
-    State(ctx): State<AppContext>,
-    Path(id): Path<i64>,
-    Json(input): Json<StorageBackupKeyInput>,
-) -> AppResult<Response> {
-    let destination = service::load(&ctx.db, id).await?;
-    let counts = backups::preview(&destination, &input.key).await?;
-    Ok(format::json(BackupCountsResponse::from(counts))?)
-}
-
-async fn restore_backup(
-    State(ctx): State<AppContext>,
-    headers: HeaderMap,
-    Path(id): Path<i64>,
-    Json(input): Json<StorageBackupKeyInput>,
-) -> AppResult<Response> {
-    let destination = service::load(&ctx.db, id).await?;
-    let counts = backups::restore(&ctx.db, &destination, &input.key).await?;
-    audit(
-        &ctx,
-        &headers,
-        AuditAction::Execute,
-        (destination.row.id, &destination.row.name),
-        format!(
-            "Configuração restaurada a partir de '{}' do armazenamento '{}'",
-            crate::services::storage::leaf_name(&input.key),
-            destination.row.name
-        ),
-    )
-    .await;
-    Ok(format::json(BackupCountsResponse::from(counts))?)
 }
 
 pub fn routes() -> Routes {
@@ -312,7 +228,4 @@ pub fn routes() -> Routes {
         .add("/{id}/browse", get(browse))
         .add("/{id}/download", get(download))
         .add("/{id}/objects", delete(delete_object))
-        .add("/{id}/backups", get(list_backups).post(run_backup))
-        .add("/{id}/backups/preview", post(preview_backup))
-        .add("/{id}/backups/restore", post(restore_backup))
 }

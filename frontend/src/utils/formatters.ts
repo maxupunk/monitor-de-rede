@@ -271,7 +271,8 @@ export function formatRelativeTime(value?: string | Date | null, emptyLabel = 'n
   if (elapsedSeconds < 60) return `há ${Math.max(elapsedSeconds, 0)}s`
   if (elapsedSeconds < 3600) return `há ${Math.floor(elapsedSeconds / 60)} min`
   if (elapsedSeconds < 86400) return `há ${Math.floor(elapsedSeconds / 3600)} h`
-  return `há ${Math.floor(elapsedSeconds / 86400)} dias`
+  const days = Math.floor(elapsedSeconds / 86400)
+  return `há ${days} ${days === 1 ? 'dia' : 'dias'}`
 }
 
 /** Tempo que falta em português: "em 5 min", "em 3 h", "em 2 dias"; vencido é "agora" */
@@ -283,7 +284,8 @@ export function formatTimeUntil(value?: string | Date | null, emptyLabel = '—'
   if (remainingSeconds < 60) return 'agora'
   if (remainingSeconds < 3600) return `em ${Math.floor(remainingSeconds / 60)} min`
   if (remainingSeconds < 86400) return `em ${Math.floor(remainingSeconds / 3600)} h`
-  return `em ${Math.floor(remainingSeconds / 86400)} dias`
+  const days = Math.floor(remainingSeconds / 86400)
+  return `em ${days} ${days === 1 ? 'dia' : 'dias'}`
 }
 
 /**

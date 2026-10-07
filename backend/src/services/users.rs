@@ -103,8 +103,14 @@ pub fn request_is_allowed(role: Role, method: &Method, path: &str) -> bool {
         || path == "/api/settings/clear-history"
         // Armazenamentos guardam credencial de nuvem e restauram a
         // configuração inteira: nem a leitura é de quem só opera.
+        // Backup e restauração da configuração inteira e das cópias.
+        || path == "/api/backup"
+        || path.starts_with("/api/backup/")
         || path == "/api/storages"
         || path.starts_with("/api/storages/")
+        // Conexões de banco levam a senha do banco do cliente.
+        || path == "/api/databases"
+        || path.starts_with("/api/databases/")
     {
         return role.can_manage_users();
     }
@@ -325,11 +331,15 @@ mod tests {
     }
 
     #[test]
-    fn armazenamentos_sao_so_do_administrador_inclusive_a_leitura() {
+    fn backup_e_destinos_sao_so_do_administrador_inclusive_a_leitura() {
         for (method, path) in [
             (Method::GET, "/api/storages"),
             (Method::GET, "/api/storages/3/download"),
-            (Method::POST, "/api/storages/3/backups/restore"),
+            (Method::GET, "/api/storages/3/browse"),
+            (Method::GET, "/api/backup/export"),
+            (Method::POST, "/api/backup/system/run"),
+            (Method::GET, "/api/databases"),
+            (Method::POST, "/api/databases/backups/9/restore"),
         ] {
             assert!(request_is_allowed(Role::Admin, &method, path), "{path}");
             assert!(!request_is_allowed(Role::Operator, &method, path), "{path}");

@@ -1,19 +1,17 @@
-//! Serialização dos armazenamentos.
+//! Serialização dos destinos (armazenamentos).
 //!
 //! Nenhum tipo aqui carrega segredo: a config sai pela
 //! [`StorageConfig::redacted`], e o que estava preenchido vira só o nome do
 //! campo em `secretsSet`.
 
-use chrono::Utc;
 use serde::Serialize;
 use ts_rs::TS;
 
 use crate::{
     models::storage_destinations,
     services::storage::{
-        backups::{BackupEntry, RunOutcome},
         config::{join_key, DEFAULT_SFTP_PORT},
-        local_root, schedule,
+        local_root,
         service::{Destination, TestOutcome},
         BucketObject, ListPage, StorageConfig, StorageProvider,
     },
@@ -31,14 +29,6 @@ pub struct StorageDestinationResponse {
     /// Para onde vão os arquivos, num texto só: `s3://bucket/prefixo`,
     /// `backup@nas:22/srv/copias`. Nulo quando a credencial não decifra.
     pub target: Option<String>,
-    pub backup_enabled: bool,
-    pub backup_interval_hours: i32,
-    pub backup_retention: i32,
-    pub last_backup_at: Option<String>,
-    /// `success` | `failed`.
-    pub last_backup_status: Option<String>,
-    pub last_backup_error: Option<String>,
-    pub next_backup_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -52,13 +42,6 @@ impl StorageDestinationResponse {
             name: row.name.clone(),
             provider: StorageProvider::parse(&row.provider).unwrap_or(StorageProvider::Local),
             target: config.map(target_of),
-            backup_enabled: row.backup_enabled,
-            backup_interval_hours: row.backup_interval_hours,
-            backup_retention: row.backup_retention,
-            last_backup_at: row.last_backup_at.map(|at| at.to_rfc3339()),
-            last_backup_status: row.last_backup_status.clone(),
-            last_backup_error: row.last_backup_error.clone(),
-            next_backup_at: schedule::next_run(row, Utc::now()).map(|at| at.to_rfc3339()),
             created_at: row.created_at.to_rfc3339(),
             updated_at: row.updated_at.to_rfc3339(),
         }
@@ -168,49 +151,6 @@ impl StorageBrowseResponse {
             path,
             objects: page.objects.into_iter().map(Into::into).collect(),
             next_cursor: page.next_cursor.filter(|_| page.is_truncated),
-        }
-    }
-}
-
-/// Uma cópia de backup guardada no destino.
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct StorageBackupResponse {
-    pub key: String,
-    pub name: String,
-    #[ts(type = "number | null")]
-    pub size: Option<i64>,
-    pub last_modified: Option<String>,
-}
-
-impl From<BackupEntry> for StorageBackupResponse {
-    fn from(entry: BackupEntry) -> Self {
-        Self {
-            key: entry.key,
-            name: entry.name,
-            size: entry.size,
-            last_modified: entry.last_modified,
-        }
-    }
-}
-
-/// Resultado de "Fazer backup agora".
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct StorageBackupRunResponse {
-    pub backup: StorageBackupResponse,
-    /// Cópias antigas apagadas pela retenção.
-    #[ts(type = "number")]
-    pub pruned: usize,
-}
-
-impl From<RunOutcome> for StorageBackupRunResponse {
-    fn from(outcome: RunOutcome) -> Self {
-        Self {
-            backup: outcome.entry.into(),
-            pruned: outcome.pruned,
         }
     }
 }

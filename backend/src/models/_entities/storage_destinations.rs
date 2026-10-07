@@ -13,13 +13,6 @@ pub struct Model {
     pub provider: String,
     #[sea_orm(column_type = "Text")]
     pub config_encrypted: String,
-    pub backup_enabled: bool,
-    pub backup_interval_hours: i32,
-    pub backup_retention: i32,
-    pub last_backup_at: Option<DateTimeWithTimeZone>,
-    pub last_backup_status: Option<String>,
-    #[sea_orm(column_type = "Text", nullable)]
-    pub last_backup_error: Option<String>,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
 }

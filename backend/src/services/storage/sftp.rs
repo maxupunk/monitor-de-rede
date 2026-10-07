@@ -120,8 +120,11 @@ impl SftpExplorer {
                         )));
                     }
                 }
+                let hint = crate::services::shared::runtime::loopback_hint(address.0)
+                    .map(|hint| format!(". {hint}"))
+                    .unwrap_or_default();
                 return Err(StorageError::Backend(format!(
-                    "Falha ao conectar por SSH: {err}"
+                    "Falha ao conectar por SSH: {err}{hint}"
                 )));
             }
         };

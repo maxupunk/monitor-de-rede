@@ -8,6 +8,8 @@ import { useAlertsStore } from '@/stores/alerts'
 import { useDockerStore } from '@/stores/docker'
 import { useTopologyStore } from '@/stores/topology'
 import { useStoragesStore } from '@/stores/storages'
+import { useDatabasesStore } from '@/stores/databases'
+import { useBackupStore } from '@/stores/backup'
 
 class FakeEventSource {
   static latest: FakeEventSource | null = null
@@ -291,6 +293,84 @@ describe('events store', () => {
 
     expect(apiGet).toHaveBeenCalledTimes(1)
     expect(apiGet).toHaveBeenCalledWith('/storages')
+    events.disconnect()
+    vi.useRealTimers()
+  })
+
+  it('database_jobs:updated aplica o andamento sem consultar endpoints', () => {
+    const apiGet = vi.spyOn(apiService, 'get')
+    const events = useEventsStore()
+    events.connect()
+    const snapshot = {
+      id: 'job-1',
+      kind: 'backup',
+      connectionId: 4,
+      database: 'vendas',
+      stage: 'Dados de "public"."pedidos"',
+      rows: 1200,
+      bytes: 4096,
+      databasesDone: 0,
+      databasesTotal: 2,
+      status: 'running',
+      message: null,
+      startedAt: '2026-10-07T12:00:00Z',
+      finishedAt: null,
+    }
+    FakeEventSource.latest?.onmessage?.({
+      data: JSON.stringify({
+        type: 'database_jobs:updated',
+        timestamp: '2026-10-07T12:00:01Z',
+        data: snapshot,
+      }),
+    } as MessageEvent<string>)
+    // Payload estranho é ignorado, não quebra a store.
+    FakeEventSource.latest?.onmessage?.({
+      data: JSON.stringify({
+        type: 'database_jobs:updated',
+        timestamp: '2026-10-07T12:00:02Z',
+        data: { x: 1 },
+      }),
+    } as MessageEvent<string>)
+
+    expect(useDatabasesStore().jobFor('backup', 4)?.rows).toBe(1200)
+    expect(apiGet).not.toHaveBeenCalled()
+    events.disconnect()
+  })
+
+  it('backup_plan:updated só recarrega o plano de quem já abriu a tela de Backup', () => {
+    vi.useFakeTimers()
+    const apiGet = vi.spyOn(apiService, 'get').mockResolvedValue({})
+    const events = useEventsStore()
+    events.connect()
+    const send = () =>
+      FakeEventSource.latest?.onmessage?.({
+        data: JSON.stringify({
+          type: 'backup_plan:updated',
+          timestamp: '2026-10-08T03:00:00Z',
+          data: {},
+        }),
+      } as MessageEvent<string>)
+
+    send()
+    vi.runAllTimers()
+    expect(apiGet).not.toHaveBeenCalled()
+
+    useBackupStore().plan = {
+      storageDestinationId: 1,
+      storageDestinationName: 'NAS',
+      backupEnabled: true,
+      backupIntervalHours: 24,
+      backupRetention: 14,
+      lastBackupAt: null,
+      lastBackupStatus: null,
+      lastBackupError: null,
+      nextBackupAt: null,
+      running: false,
+    }
+    send()
+    vi.runAllTimers()
+    expect(apiGet).toHaveBeenCalledTimes(1)
+    expect(apiGet).toHaveBeenCalledWith('/backup/system')
     events.disconnect()
     vi.useRealTimers()
   })

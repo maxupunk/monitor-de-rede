@@ -16,8 +16,8 @@ use std::collections::HashSet;
 use loco_rs::Result;
 use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 
-/// As 38 tabelas do esquema, na ordem de criação da §6 (pais antes de filhos).
-pub const CREATION_ORDER: [&str; 38] = [
+/// As 41 tabelas do esquema, na ordem de criação da §6 (pais antes de filhos).
+pub const CREATION_ORDER: [&str; 41] = [
     "users",
     "sites",
     "probes",
@@ -69,6 +69,12 @@ pub const CREATION_ORDER: [&str; 38] = [
     "oui_vendors",
     // Armazenamentos, destinos do backup das configurações. Sem FK.
     "storage_destinations",
+    // Bancos de terceiros e o histórico dos backups deles. Depois de
+    // `storage_destinations` pela FK do destino.
+    "database_connections",
+    "database_backups",
+    // Plano de backup do próprio NetMonitor. Depois de `storage_destinations`.
+    "system_backup_plan",
     // Opcional (§6 #23 / §10). **Não migrada:** a §10.2 optou por
     // `loco_rs::auth::JWT`, que não guarda token no banco. Fica listada porque
     // a limpeza pula tabelas inexistentes e a Fase 6 ainda pode voltar atrás.
@@ -164,9 +170,9 @@ mod tests {
 
     #[test]
     fn cobre_as_27_tabelas_sem_repetir() {
-        assert_eq!(CREATION_ORDER.len(), 38);
+        assert_eq!(CREATION_ORDER.len(), 41);
         let unicas: HashSet<&&str> = CREATION_ORDER.iter().collect();
-        assert_eq!(unicas.len(), 38, "há nome de tabela repetido");
+        assert_eq!(unicas.len(), 41, "há nome de tabela repetido");
     }
 
     #[test]

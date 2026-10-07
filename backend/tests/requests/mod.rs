@@ -22,6 +22,8 @@ mod audit;
 mod auth;
 mod backup;
 mod baseline_alerts;
+mod database_roundtrip;
+mod databases;
 mod device_access_mode;
 mod device_history_cleanup;
 mod device_operating_system;

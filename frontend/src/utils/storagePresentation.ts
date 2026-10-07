@@ -91,22 +91,6 @@ export function providerInfo(provider: StorageProvider): StorageProviderInfo {
   return STORAGE_PROVIDERS.find((item) => item.value === provider) ?? STORAGE_PROVIDERS[0]!
 }
 
-/** Frequências oferecidas no formulário, em horas. */
-export const BACKUP_INTERVALS = [
-  { value: 6, title: 'A cada 6 horas' },
-  { value: 12, title: 'A cada 12 horas' },
-  { value: 24, title: 'Diariamente' },
-  { value: 168, title: 'Semanalmente' },
-]
-
-/** "Diário", "a cada 6 h", "semanal" — o que cabe num chip. */
-export function intervalLabel(hours: number): string {
-  if (hours === 24) return 'Diário'
-  if (hours === 168) return 'Semanal'
-  if (hours % 24 === 0) return `A cada ${hours / 24} dias`
-  return `A cada ${hours} h`
-}
-
 /** Rótulos dos segredos, para a dica "definida — deixe em branco para manter". */
 export const SECRET_LABELS: Record<string, string> = {
   secretAccessKey: 'Secret Access Key',

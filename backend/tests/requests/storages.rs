@@ -30,11 +30,11 @@ fn isolated_local_root() -> tempfile::TempDir {
     dir
 }
 
-/// O ciclo que dá sentido ao recurso: cadastrar a pasta, mandar a cópia,
-/// encontrá-la na lista e restaurar a partir dela.
+/// O ciclo que dá sentido ao recurso: cadastrar o destino, apontar o plano do
+/// NetMonitor para ele, fazer o backup, achar a cópia e restaurar a partir dela.
 #[tokio::test]
 #[serial]
-async fn backup_numa_pasta_local_vai_e_volta() {
+async fn backup_do_netmonitor_numa_pasta_local_vai_e_volta() {
     let root = isolated_local_root();
     request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
         session_with_role(&mut request, &ctx, Role::Admin).await;
@@ -50,24 +50,53 @@ async fn backup_numa_pasta_local_vai_e_volta() {
             .json(&json!({
                 "name": "Disco do servidor",
                 "provider": "local",
-                "config": { "type": "local", "basePath": "copias" },
+                "config": { "type": "local", "basePath": "copias" }
+            }))
+            .await;
+        assert_eq!(created.status_code(), 201, "{}", created.text());
+        let id = body(&created.text())["id"].as_i64().unwrap();
+
+        // Sem destino no plano não há backup, e a razão é dita.
+        let without = request.post("/api/backup/system/run").await;
+        assert_eq!(without.status_code(), 422, "{}", without.text());
+
+        // Ligar o automático sem destino é recusado.
+        let invalid = request
+            .put("/api/backup/system")
+            .json(&json!({
+                "storageDestinationId": null,
                 "backupEnabled": true,
                 "backupIntervalHours": 24,
                 "backupRetention": 7
             }))
             .await;
-        assert_eq!(created.status_code(), 201, "{}", created.text());
-        let id = body(&created.text())["id"].as_i64().unwrap();
+        assert_eq!(invalid.status_code(), 422, "{}", invalid.text());
+
+        let planned = request
+            .put("/api/backup/system")
+            .json(&json!({
+                "storageDestinationId": id,
+                "backupEnabled": true,
+                "backupIntervalHours": 24,
+                "backupRetention": 7
+            }))
+            .await;
+        assert_eq!(planned.status_code(), 200, "{}", planned.text());
+        let planned = body(&planned.text());
+        assert_eq!(
+            planned["storageDestinationName"],
+            json!("Disco do servidor")
+        );
         // Nunca fez backup: o próximo é "agora".
-        assert!(body(&created.text())["nextBackupAt"].is_string());
+        assert!(planned["nextBackupAt"].is_string());
 
         let tested = request.post(&format!("/api/storages/{id}/test")).await;
         assert_eq!(tested.status_code(), 200, "{}", tested.text());
         assert_eq!(body(&tested.text())["ok"], json!(true), "{}", tested.text());
 
-        let ran = request.post(&format!("/api/storages/{id}/backups")).await;
+        let ran = request.post("/api/backup/system/run").await;
         assert_eq!(ran.status_code(), 201, "{}", ran.text());
-        let key = body(&ran.text())["backup"]["key"]
+        let key = body(&ran.text())["copy"]["key"]
             .as_str()
             .unwrap()
             .to_string();
@@ -77,15 +106,15 @@ async fn backup_numa_pasta_local_vai_e_volta() {
         );
         assert!(root.path().join("copias").join(&key).is_file());
 
-        let listed = request.get(&format!("/api/storages/{id}/backups")).await;
+        let listed = request.get("/api/backup/system/copies").await;
         assert_eq!(body(&listed.text()).as_array().map(Vec::len), Some(1));
 
-        let shown = request.get("/api/storages").await;
-        assert_eq!(body(&shown.text())[0]["lastBackupStatus"], json!("success"));
+        let shown = request.get("/api/backup/system").await;
+        assert_eq!(body(&shown.text())["lastBackupStatus"], json!("success"));
 
         let preview = request
-            .post(&format!("/api/storages/{id}/backups/preview"))
-            .json(&json!({ "key": key }))
+            .post("/api/backup/system/copies/preview")
+            .json(&json!({ "storageDestinationId": id, "key": key }))
             .await;
         assert_eq!(preview.status_code(), 200, "{}", preview.text());
         let sites = body(&preview.text())["tables"]
@@ -102,8 +131,8 @@ async fn backup_numa_pasta_local_vai_e_volta() {
         assert!(deleted.status_code().is_success(), "{}", deleted.text());
 
         let restored = request
-            .post(&format!("/api/storages/{id}/backups/restore"))
-            .json(&json!({ "key": key }))
+            .post("/api/backup/system/copies/restore")
+            .json(&json!({ "storageDestinationId": id, "key": key }))
             .await;
         assert_eq!(restored.status_code(), 200, "{}", restored.text());
         let sites = request.get("/api/sites").await;
@@ -131,10 +160,7 @@ async fn o_segredo_do_s3_nunca_volta_para_a_tela() {
                     "endpoint": "https://conta.r2.cloudflarestorage.com",
                     "accessKeyId": "AKIA-TESTE",
                     "secretAccessKey": secret
-                },
-                "backupEnabled": false,
-                "backupIntervalHours": 24,
-                "backupRetention": 14
+                }
             })
         };
 
@@ -183,9 +209,7 @@ async fn cadastro_invalido_e_recusado_com_a_razao() {
             .json(&json!({
                 "name": "MinIO",
                 "provider": "minio",
-                "config": { "type": "s3", "bucket": "b", "accessKeyId": "k", "secretAccessKey": "s" },
-                "backupIntervalHours": 24,
-                "backupRetention": 14
+                "config": { "type": "s3", "bucket": "b", "accessKeyId": "k", "secretAccessKey": "s" }
             }))
             .await;
         assert_eq!(minio.status_code(), 422, "{}", minio.text());
@@ -197,9 +221,7 @@ async fn cadastro_invalido_e_recusado_com_a_razao() {
             .json(&json!({
                 "name": "Fuga",
                 "provider": "local",
-                "config": { "type": "local", "basePath": "../" },
-                "backupIntervalHours": 24,
-                "backupRetention": 14
+                "config": { "type": "local", "basePath": "../" }
             }))
             .await;
         assert_eq!(escape.status_code(), 422, "{}", escape.text());

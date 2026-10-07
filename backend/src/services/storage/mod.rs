@@ -1,4 +1,4 @@
-//! Armazenamentos: os lugares para onde vão as cópias do backup.
+//! Destinos (armazenamentos): os lugares onde as cópias de backup ficam.
 //!
 //! Um trait, três implementações e oito providers mapeados sobre elas:
 //!
@@ -9,8 +9,10 @@
 //! | `google_gcs`, `azure_blob` | [`cloud::CloudExplorer`] |
 //! | `sftp` | [`sftp::SftpExplorer`] |
 //!
-//! O cadastro e a credencial cifrada moram em [`service`]; o backup que usa os
-//! destinos, em [`backups`]; o ciclo que o dispara sozinho, em [`schedule`].
+//! O cadastro e a credencial cifrada moram em [`service`]. **O quê** vai para
+//! cada destino, e quando, não é assunto deste módulo: é do plano de backup do
+//! sistema ([`crate::services::backup::plan`]) e do de cada banco
+//! ([`crate::services::databases`]).
 //!
 //! ## O adapter nasce da config, não a recebe a cada chamada
 //!
@@ -24,12 +26,10 @@
 //! services de S3, GCS e Azure. O SFTP fica com o `russh`, que o projeto já usa
 //! para falar com roteadores (ver o cabeçalho de [`sftp`]).
 
-pub mod backups;
 pub mod cloud;
 pub mod config;
 pub mod local;
 pub mod provider;
-pub mod schedule;
 pub mod service;
 pub mod sftp;
 

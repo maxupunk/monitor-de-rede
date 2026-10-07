@@ -16,10 +16,6 @@ pub struct StorageDestinationInput {
     pub name: String,
     pub provider: StorageProvider,
     pub config: StorageConfig,
-    #[serde(default)]
-    pub backup_enabled: bool,
-    pub backup_interval_hours: i32,
-    pub backup_retention: i32,
 }
 
 impl From<StorageDestinationInput> for StorageInput {
@@ -28,9 +24,6 @@ impl From<StorageDestinationInput> for StorageInput {
             name: input.name,
             provider: input.provider,
             config: input.config,
-            backup_enabled: input.backup_enabled,
-            backup_interval_hours: input.backup_interval_hours,
-            backup_retention: input.backup_retention,
         }
     }
 }
@@ -74,12 +67,4 @@ pub struct StorageObjectQuery {
     pub key: String,
     #[serde(default)]
     pub directory: bool,
-}
-
-/// Uma cópia de backup do destino (prévia e restauração).
-#[derive(Debug, Clone, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct StorageBackupKeyInput {
-    pub key: String,
 }

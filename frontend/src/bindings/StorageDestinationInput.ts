@@ -6,4 +6,4 @@ import type { StorageProvider } from "./StorageProvider";
  * Formulário de criação e edição. Na edição, segredo em branco mantém o
  * gravado.
  */
-export type StorageDestinationInput = { name: string, provider: StorageProvider, config: StorageConfig, backupEnabled: boolean, backupIntervalHours: number, backupRetention: number, };
+export type StorageDestinationInput = { name: string, provider: StorageProvider, config: StorageConfig, };

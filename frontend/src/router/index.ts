@@ -130,11 +130,14 @@ const routes = [
         meta: { requiresAdmin: true },
       },
       {
-        path: 'storages',
-        name: 'storages',
-        component: () => import('../pages/StoragesPage.vue'),
+        path: 'backup',
+        name: 'backup',
+        component: () => import('../pages/BackupPage.vue'),
         meta: { requiresAdmin: true },
       },
+      // Endereços antigos, de antes de o backup virar uma tela só.
+      { path: 'storages', redirect: { name: 'backup', query: { tab: 'destinos' } } },
+      { path: 'databases', redirect: { name: 'backup' } },
       {
         path: 'apps/:id',
         name: 'plugin-app',

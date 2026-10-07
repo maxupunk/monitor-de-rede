@@ -3,6 +3,7 @@ pub mod alerts;
 pub mod audit;
 pub mod auth;
 pub mod backup;
+pub mod databases;
 pub mod docker;
 pub mod logs;
 pub mod maintenance_windows;
