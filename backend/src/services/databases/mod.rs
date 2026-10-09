@@ -36,6 +36,7 @@ pub mod dump;
 pub mod jobs;
 pub mod mysql;
 pub mod postgres;
+pub mod reach;
 pub mod restore;
 pub mod schedule;
 pub mod service;
@@ -184,6 +185,9 @@ pub struct DatabaseTarget {
     pub ssl_mode: SslMode,
     /// Banco ao qual se conectar. `None` usa o de manutenção do SGBD.
     pub database: Option<String>,
+    /// Nome do agente quando a conexão passa pela ponte dele (ADR 013) — e
+    /// então `host:port` é a ponta local da ponte, não o banco.
+    pub via: Option<String>,
 }
 
 impl DatabaseTarget {
@@ -271,8 +275,15 @@ pub trait Driver: Send + Sync {
 
 #[derive(Debug, thiserror::Error)]
 pub enum DatabaseError {
+    /// O servidor respondeu e recusou (senha, banco inexistente).
     #[error("Não foi possível conectar: {0}")]
     Connection(String),
+    /// A rede não chegou ao servidor (recusa TCP, tempo esgotado).
+    #[error("Não foi possível conectar: {0}")]
+    Unreachable(String),
+    /// A conexão já aberta caiu no meio do trabalho.
+    #[error("A conexão com o banco caiu: {0}")]
+    Dropped(String),
     #[error("{0}")]
     Query(String),
     #[error("Nome de banco inválido: {0}")]
@@ -289,7 +300,17 @@ pub enum DatabaseError {
 
 impl DatabaseError {
     pub(crate) fn query(error: &sqlx::Error) -> Self {
-        Self::Query(describe_sqlx(error))
+        match error {
+            sqlx::Error::Io(_) => Self::Dropped(describe_sqlx(error)),
+            _ => Self::Query(describe_sqlx(error)),
+        }
+    }
+
+    /// Falha de caminho, não de conteúdo: repetir pode dar certo. Senha
+    /// errada, SQL recusado ou disco cheio falhariam igual de novo.
+    #[must_use]
+    pub const fn is_transient(&self) -> bool {
+        matches!(self, Self::Unreachable(_) | Self::Dropped(_))
     }
 
     pub(crate) fn io(error: impl std::fmt::Display) -> Self {
@@ -322,13 +343,15 @@ impl From<DatabaseError> for AppError {
     }
 }
 
-/// Aplica o teto de [`CONNECT_TIMEOUT`] a uma conexão com `host`.
+/// Aplica o teto de [`CONNECT_TIMEOUT`] a uma conexão com `target`.
 ///
 /// Falha de rede num endereço local, com este servidor num container, ganha a
 /// explicação de [`runtime::loopback_hint`]: "conexão recusada em 127.0.0.1"
 /// sozinho leva o operador a procurar o problema no banco, que está no ar.
+/// Pela ponte de um agente o endereço local é a própria ponte: a dica não
+/// cabe, e a mensagem diz por qual agente a conexão passou.
 pub(crate) async fn connect_with_timeout<T>(
-    host: &str,
+    target: &DatabaseTarget,
     future: impl std::future::Future<Output = Result<T, sqlx::Error>>,
 ) -> Result<T, DatabaseError> {
     let error = match tokio::time::timeout(CONNECT_TIMEOUT, future).await {
@@ -341,10 +364,11 @@ pub(crate) async fn connect_with_timeout<T>(
         Ok(Err(error)) => describe_sqlx(&error),
         Err(_) => format!("tempo esgotado ({} s)", CONNECT_TIMEOUT.as_secs()),
     };
-    Err(DatabaseError::Connection(
-        match runtime::loopback_hint(host) {
-            Some(hint) => format!("{error}. {hint}"),
-            None => error,
+    Err(DatabaseError::Unreachable(
+        match (&target.via, runtime::loopback_hint(&target.host)) {
+            (Some(agent), _) => format!("{error} (pela ponte do agente {agent})"),
+            (None, Some(hint)) => format!("{error}. {hint}"),
+            (None, None) => error,
         },
     ))
 }

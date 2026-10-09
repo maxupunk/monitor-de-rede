@@ -1,9 +1,23 @@
 //! Entradas HTTP dos agentes remotos (ADR 011).
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::services::docker::maintenance::ComposeAction;
+
+/// Agente remoto por onde um acesso pode sair (plugin de dispositivo, ponte
+/// de banco). A tela desabilita quem não serve e diz por quê.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct AgentRouteOption {
+    #[ts(type = "number")]
+    pub id: i64,
+    pub name: String,
+    pub connected: bool,
+    /// O agente anunciou a permissão do recurso no `AGENT_ALLOW`.
+    pub allowed: bool,
+}
 
 /// Cadastro de um agente pela central.
 #[derive(Debug, Clone, Deserialize, TS)]

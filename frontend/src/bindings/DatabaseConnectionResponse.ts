@@ -6,7 +6,11 @@ export type DatabaseConnectionResponse = { id: number, name: string, engine: Dat
 /**
  * Vazio é "todos os bancos".
  */
-databases: Array<string>, storageDestinationId: number | null, storageDestinationName: string | null, backupEnabled: boolean, backupIntervalHours: number, backupRetention: number, lastBackupAt: string | null, 
+databases: Array<string>, storageDestinationId: number | null, storageDestinationName: string | null, 
+/**
+ * Agente pelo qual a central chega ao banco; nulo é direto.
+ */
+viaProbeId: number | null, viaProbeName: string | null, backupEnabled: boolean, backupIntervalHours: number, backupRetention: number, lastBackupAt: string | null, 
 /**
  * `success` | `failed`.
  */

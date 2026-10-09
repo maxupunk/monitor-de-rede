@@ -7,7 +7,7 @@ use sea_orm::{ActiveModelTrait, IntoActiveModel, Set};
 use serde_json::{json, Value};
 use serial_test::serial;
 
-use super::prepare_data;
+use super::{agent_harness::tunnel_agent, prepare_data};
 
 async fn session_with_role(request: &mut TestServer, ctx: &AppContext, role: Role) -> users::Model {
     let session = prepare_data::init_operator(ctx).await;
@@ -120,6 +120,62 @@ async fn servidor_que_nao_responde_volta_com_a_razao() {
             .await;
         assert_eq!(response.status_code(), 400, "{}", response.text());
         assert!(response.text().contains("conectar"), "{}", response.text());
+    })
+    .await;
+}
+
+/// "Acessar a partir de": a conexão guarda o agente, a lista de agentes diz
+/// quem serve, e o teste pela ponte devolve a recusa do agente com a razão.
+#[tokio::test]
+#[serial]
+async fn conexao_pela_ponte_do_agente() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        session_with_role(&mut request, &ctx, Role::Admin).await;
+        let probe = tunnel_agent(&ctx, "filial-sp", "10.0.0.20:5432").await;
+
+        let agents = body(&request.get("/api/databases/agents").await.text());
+        let agent = agents
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|agent| agent["id"] == json!(probe.id))
+            .expect("agente na lista");
+        assert_eq!(agent["connected"], json!(true));
+        assert_eq!(agent["allowed"], json!(true));
+        assert!(
+            agent.get("supported").is_none(),
+            "sem modo \"agente antigo\" no v2"
+        );
+
+        let mut input = connection("ERP da filial", 5432, "x", None);
+        input["host"] = json!("10.0.0.20");
+        input["viaProbeId"] = json!(probe.id);
+        let created = request.post("/api/databases").json(&input).await;
+        assert_eq!(created.status_code(), 201, "{}", created.text());
+        let created = body(&created.text());
+        assert_eq!(created["viaProbeId"], json!(probe.id));
+        assert_eq!(created["viaProbeName"], json!("filial-sp"));
+
+        // Outro host da filial, fora da lista local do agente.
+        let refused = request
+            .post("/api/databases/probe")
+            .json(&json!({
+                "engine": "postgres", "host": "10.0.0.99", "port": 5432,
+                "username": "postgres", "password": "x", "sslMode": "disable",
+                "viaProbeId": probe.id
+            }))
+            .await;
+        assert_eq!(refused.status_code(), 400, "{}", refused.text());
+        assert!(
+            refused.text().contains("AGENT_DATABASE_TARGETS"),
+            "{}",
+            refused.text()
+        );
+
+        let mut ghost = connection("Agente que não existe", 5432, "x", None);
+        ghost["viaProbeId"] = json!(999_999);
+        let ghost = request.post("/api/databases").json(&ghost).await;
+        assert_eq!(ghost.status_code(), 422, "{}", ghost.text());
     })
     .await;
 }

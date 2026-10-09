@@ -103,6 +103,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { AgentRouteOption } from '@/bindings/AgentRouteOption'
+import { agentRouteItems } from '@/utils/agentRoutes'
 import type { CredentialInput } from '@/bindings/CredentialInput'
 import type { CredentialView } from '@/bindings/CredentialView'
 import type { SecretStorage } from '@/bindings/SecretStorage'
@@ -146,16 +147,9 @@ const secretHint = computed(() => {
   return 'Obrigatória para guardar cifrada.'
 })
 
-const routes = computed(() => [
-  { title: 'Central (este servidor)', value: null, props: {} },
-  ...props.agents.map((agent) => ({
-    title: `Agente ${agent.name}${agent.connected ? '' : ' (desconectado)'}${
-      agent.allowsDeviceIo ? '' : ' — sem device_io no AGENT_ALLOW'
-    }`,
-    value: agent.id,
-    props: { disabled: !agent.allowsDeviceIo && agent.connected },
-  })),
-])
+const routes = computed(() =>
+  agentRouteItems(props.agents, 'device_io', 'O equipamento é alcançável daqui')
+)
 
 watch(
   () => props.modelValue,

@@ -1,6 +1,7 @@
 //! Uma conexão do agente com a central, vista pelo agente.
 //!
-//! Como a sessão da central, não conhece WebSocket: fala texto por canais.
+//! Como a sessão da central, não conhece WebSocket: fala [`WireFrame`]s por
+//! canais.
 //! Isso permite ligar as duas pontas em memória nos testes e é o mesmo
 //! código que o cliente real liga ao socket.
 
@@ -16,7 +17,11 @@ use crate::{
     services::{
         agents::{
             policy::Permission,
-            protocol::{AgentEvent, Body, Command, Envelope, Hello, Outcome, RemoteError, Welcome},
+            protocol::{
+                AgentEvent, Body, Command, Envelope, ErrorCode, Hello, Outcome, RemoteError,
+                TunnelFrame, TunnelPayload, Welcome, WireFrame,
+            },
+            tunnel::{pump, INBOUND_CAPACITY},
         },
         docker::{
             realtime::{inventory_snapshot, live_snapshot},
@@ -28,12 +33,17 @@ use crate::{
     views::docker::{DockerInventorySnapshot, DockerLiveSnapshot},
 };
 
-use super::{executor::CommandExecutor, outbox::Outbox};
+use super::{executor::CommandExecutor, outbox::Outbox, tunnel::TunnelOpener};
 
 const WELCOME_TIMEOUT: Duration = Duration::from_secs(15);
 const OUTBOX_FLUSH: Duration = Duration::from_secs(5);
 const MAX_CONCURRENT_REQUESTS: usize = 16;
 const INVENTORY_EVERY: u32 = 5;
+/// Pontes de banco simultâneas (ADR 013): o resto dos pedidos não pode ficar
+/// sem vaga por causa de backups.
+const MAX_TUNNELS: usize = 2;
+/// Quadros de ponte na fila de saída; o controle passa na frente.
+const TUNNEL_BUFFER: usize = 16;
 
 /// De onde vêm os snapshots ao vivo (o Docker local, nos testes um falso).
 #[async_trait]
@@ -76,6 +86,7 @@ pub struct SessionDeps {
     pub executor: Arc<dyn CommandExecutor>,
     pub outbox: Arc<Outbox>,
     pub live: Arc<dyn LiveSource>,
+    pub tunnels: Arc<dyn TunnelOpener>,
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -153,16 +164,26 @@ impl Replay {
 pub async fn run(
     deps: SessionDeps,
     hello: Hello,
-    mut incoming: mpsc::Receiver<String>,
-    outgoing: mpsc::Sender<String>,
+    mut incoming: mpsc::Receiver<WireFrame>,
+    outgoing: mpsc::Sender<WireFrame>,
 ) -> Result<Welcome, SessionError> {
     let (envelopes, mut to_send) = mpsc::channel::<Envelope>(64);
+    let (tunnel_out, mut tunnel_frames) = mpsc::channel::<WireFrame>(TUNNEL_BUFFER);
+    // Controle primeiro: resultado de monitor não espera atrás de um dump.
     let writer = tokio::spawn(async move {
-        while let Some(envelope) = to_send.recv().await {
-            let Ok(text) = envelope.encode() else {
-                continue;
+        loop {
+            let frame = tokio::select! {
+                biased;
+                envelope = to_send.recv() => match envelope {
+                    Some(envelope) => match envelope.encode() {
+                        Ok(text) => WireFrame::Text(text),
+                        Err(_) => continue,
+                    },
+                    None => break,
+                },
+                Some(frame) = tunnel_frames.recv() => frame,
             };
-            if outgoing.send(text).await.is_err() {
+            if outgoing.send(frame).await.is_err() {
                 break;
             }
         }
@@ -177,13 +198,19 @@ pub async fn run(
         return Err(SessionError::Closed);
     }
     let welcome = match tokio::time::timeout(WELCOME_TIMEOUT, incoming.recv()).await {
-        Ok(Some(text)) => match Envelope::decode(&text).map(|envelope| envelope.body) {
-            Ok(Body::Welcome(welcome)) => welcome,
-            _ => {
-                writer.abort();
-                return Err(SessionError::NoWelcome);
+        Ok(Some(WireFrame::Text(text))) => {
+            match Envelope::decode(&text).map(|envelope| envelope.body) {
+                Ok(Body::Welcome(welcome)) => welcome,
+                _ => {
+                    writer.abort();
+                    return Err(SessionError::NoWelcome);
+                }
             }
-        },
+        }
+        Ok(Some(WireFrame::Binary(_))) => {
+            writer.abort();
+            return Err(SessionError::NoWelcome);
+        }
         Ok(None) => {
             writer.abort();
             return Err(SessionError::Closed);
@@ -197,7 +224,9 @@ pub async fn run(
 
     let refresh = Arc::new(Notify::new());
     let limiter = Arc::new(Semaphore::new(MAX_CONCURRENT_REQUESTS));
+    let tunnel_slots = Arc::new(Semaphore::new(MAX_TUNNELS));
     let mut in_flight: HashMap<Uuid, CancellationToken> = HashMap::new();
+    let mut tunnel_routes: HashMap<Uuid, mpsc::Sender<TunnelPayload>> = HashMap::new();
     let (finished_tx, mut finished) = mpsc::unbounded_channel::<Uuid>();
     let mut live_interval = welcome.live_interval_ms;
     let mut live_ticks: u32 = 0;
@@ -207,7 +236,14 @@ pub async fn run(
     loop {
         tokio::select! {
             frame = incoming.recv() => {
-                let Some(text) = frame else { break };
+                let text = match frame {
+                    Some(WireFrame::Text(text)) => text,
+                    Some(WireFrame::Binary(bytes)) => {
+                        route_tunnel_frame(&mut tunnel_routes, &bytes);
+                        continue;
+                    }
+                    None => break,
+                };
                 let Ok(envelope) = Envelope::decode(&text) else {
                     tracing::warn!("quadro inválido da central");
                     continue;
@@ -220,6 +256,24 @@ pub async fn run(
                         let _ = envelopes
                             .send(Envelope::reply(envelope.id, Body::Response { outcome: Outcome::Ok { value: Value::Null } }))
                             .await;
+                    }
+                    Body::Request { command: Command::DatabaseTunnel { host, port }, .. } => {
+                        let token = CancellationToken::new();
+                        in_flight.insert(envelope.id, token.clone());
+                        let (route, frames) = mpsc::channel(INBOUND_CAPACITY);
+                        tunnel_routes.insert(envelope.id, route);
+                        tokio::spawn(serve_tunnel(TunnelRequest {
+                            opener: deps.tunnels.clone(),
+                            slots: tunnel_slots.clone(),
+                            envelopes: envelopes.clone(),
+                            tunnel_out: tunnel_out.clone(),
+                            finished: finished_tx.clone(),
+                            id: envelope.id,
+                            host,
+                            port,
+                            frames,
+                            token,
+                        }));
                     }
                     Body::Request { deadline_ms, command } => {
                         let token = CancellationToken::new();
@@ -246,6 +300,7 @@ pub async fn run(
             }
             Some(id) = finished.recv() => {
                 in_flight.remove(&id);
+                tunnel_routes.remove(&id);
             }
             _ = live_timer.tick(), if live_interval > 0 => {
                 publish_live(&deps, &envelopes, live_ticks.is_multiple_of(INVENTORY_EVERY)).await;
@@ -263,6 +318,8 @@ pub async fn run(
     for token in in_flight.into_values() {
         token.cancel();
     }
+    drop(tunnel_routes);
+    drop(tunnel_out);
     drop(envelopes);
     writer.abort();
     Ok(welcome)
@@ -386,6 +443,93 @@ async fn handle_request(
             deps.outbox.push(event);
         }
     }
+}
+
+/// Entrega um quadro binário à ponte dele. Quem estoura a janela de crédito
+/// perde a ponte — é violação do protocolo, não carga.
+fn route_tunnel_frame(routes: &mut HashMap<Uuid, mpsc::Sender<TunnelPayload>>, bytes: &[u8]) {
+    let Ok(frame) = TunnelFrame::decode(bytes) else {
+        tracing::warn!("quadro de ponte inválido da central");
+        return;
+    };
+    if let Some(route) = routes.get(&frame.id) {
+        if route.try_send(frame.payload).is_err() {
+            tracing::warn!("ponte excedeu a janela de crédito; encerrada");
+            routes.remove(&frame.id);
+        }
+    }
+}
+
+/// O que atender uma ponte precisa.
+struct TunnelRequest {
+    opener: Arc<dyn TunnelOpener>,
+    slots: Arc<Semaphore>,
+    envelopes: mpsc::Sender<Envelope>,
+    tunnel_out: mpsc::Sender<WireFrame>,
+    finished: mpsc::UnboundedSender<Uuid>,
+    id: Uuid,
+    host: String,
+    port: u16,
+    frames: mpsc::Receiver<TunnelPayload>,
+    token: CancellationToken,
+}
+
+/// Abre a conexão com o banco, avisa "aberta" e bombeia até o fim. A
+/// resposta leva os totais; cancelada pela central, não há resposta.
+async fn serve_tunnel(request: TunnelRequest) {
+    let TunnelRequest {
+        opener,
+        slots,
+        envelopes,
+        tunnel_out,
+        finished,
+        id,
+        host,
+        port,
+        frames,
+        token,
+    } = request;
+    let result = async {
+        let _slot = slots.try_acquire_owned().map_err(|_| {
+            RemoteError::new(
+                ErrorCode::Conflict,
+                format!(
+                    "Este agente já tem {MAX_TUNNELS} pontes de banco abertas; tente em seguida"
+                ),
+            )
+        })?;
+        let stream = opener.open(&host, port).await?;
+        envelopes
+            .send(Envelope::reply(
+                id,
+                Body::Chunk {
+                    data: serde_json::json!({ "opened": true }),
+                },
+            ))
+            .await
+            .map_err(|_| RemoteError::disconnected())?;
+        let totals = pump(id, stream, frames, tunnel_out, token.clone())
+            .await
+            .map_err(|error| RemoteError::new(ErrorCode::Unavailable, error.to_string()))?;
+        Ok(serde_json::json!({
+            "sent": totals.sent,
+            "sentOnWire": totals.sent_on_wire,
+            "received": totals.received,
+        }))
+    }
+    .await;
+    let _ = finished.send(id);
+    if token.is_cancelled() {
+        return;
+    }
+    let _ = envelopes
+        .send(Envelope::reply(
+            id,
+            Body::Response {
+                outcome: result.into(),
+            },
+        ))
+        .await;
 }
 
 /// Destino do amostrador no agente: o minuto fechado entra no buffer e sai

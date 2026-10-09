@@ -280,6 +280,7 @@ const PERMISSION_LABELS: Record<Permission, string> = {
   monitor: 'Monitores',
   discovery: 'Descoberta',
   device_io: 'Acesso a equipamentos (plugins)',
+  database: 'Ponte de banco (backup)',
 }
 
 function permissionLabel(permission: Permission): string {

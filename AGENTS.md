@@ -115,6 +115,16 @@
      local (`AGENT_ALLOW`) é soberana — a central não a amplia — e comandos
      Docker novos entram no enum fechado de `services/agents/protocol.rs`, cada
      um com a sua permissão. Proxy genérico para a Engine é proibido.
+   - **Ponte de banco** (ADR 013): o backup de um banco da rede do agente passa
+     por `Command::DatabaseTunnel` — o agente **só copia bytes** até um
+     `host:porta` de `AGENT_DATABASE_TARGETS` (lista local obrigatória, rede
+     privada), com a permissão `database` fora do padrão. O dump continua
+     **na central**: não leve driver de banco, SQL ou credencial de destino ao
+     agente, e não generalize a ponte para outros protocolos sem um ADR. Os
+     dados vão em quadros binários com janela de crédito, na fila de menor
+     prioridade — não os mova para o canal de controle. Mudança que um lado
+     não entenderia sobe `PROTOCOL_VERSION` (o handshake é estrito); não
+     crie campo de "recursos opcionais" para conviver com versão antiga.
    - **Plugins de dispositivo** (ADR 012): o script Rhai roda **só** no sandbox
      da central e **nunca** abre socket — toda E/S passa por
      `plugins::transport::DeviceTransport`, que só alcança o IP cadastrado. O

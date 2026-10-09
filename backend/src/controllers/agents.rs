@@ -30,7 +30,7 @@ use crate::{
             connection,
             hub::AgentHub,
             install, install_address,
-            protocol::MAX_FRAME_BYTES,
+            protocol::{WireFrame, MAX_FRAME_BYTES},
             service::{publish_status, to_view, AgentService, ENROLLMENT_TTL_SECONDS},
         },
         audit::{AuditAction, AuditActor, AuditEntryInput, AuditService, ResourceType},
@@ -309,27 +309,31 @@ async fn connect(
         .on_upgrade(move |socket| bridge(ctx, probe, socket)))
 }
 
-/// Liga o socket aos canais de texto do serviço.
+/// Liga o socket aos canais de quadros do serviço.
 async fn bridge(ctx: AppContext, probe: probes::Model, socket: WebSocket) {
     let (mut sink, mut stream) = socket.split();
-    let (incoming_tx, incoming_rx) = mpsc::channel::<String>(64);
-    let (outgoing_tx, mut outgoing_rx) = mpsc::channel::<String>(64);
+    let (incoming_tx, incoming_rx) = mpsc::channel::<WireFrame>(64);
+    let (outgoing_tx, mut outgoing_rx) = mpsc::channel::<WireFrame>(64);
     let reader = tokio::spawn(async move {
         while let Some(Ok(message)) = stream.next().await {
-            match message {
-                Message::Text(text) => {
-                    if incoming_tx.send(text.to_string()).await.is_err() {
-                        break;
-                    }
-                }
+            let frame = match message {
+                Message::Text(text) => WireFrame::Text(text.to_string()),
+                Message::Binary(bytes) => WireFrame::Binary(bytes.to_vec()),
                 Message::Close(_) => break,
-                _ => {}
+                _ => continue,
+            };
+            if incoming_tx.send(frame).await.is_err() {
+                break;
             }
         }
     });
     let writer = tokio::spawn(async move {
-        while let Some(text) = outgoing_rx.recv().await {
-            if sink.send(Message::Text(text.into())).await.is_err() {
+        while let Some(frame) = outgoing_rx.recv().await {
+            let message = match frame {
+                WireFrame::Text(text) => Message::Text(text.into()),
+                WireFrame::Binary(bytes) => Message::Binary(bytes.into()),
+            };
+            if sink.send(message).await.is_err() {
                 break;
             }
         }

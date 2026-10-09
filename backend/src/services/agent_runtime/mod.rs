@@ -12,3 +12,4 @@ pub mod executor;
 pub mod identity;
 pub mod outbox;
 pub mod session;
+pub mod tunnel;

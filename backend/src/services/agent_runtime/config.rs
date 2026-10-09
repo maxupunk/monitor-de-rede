@@ -8,12 +8,15 @@
 //! | `AGENT_STATE_DIR`     | `/var/lib/netmonitor-agent`     |
 //! | `AGENT_ALLOW`         | `read,lifecycle,monitor,discovery` (`device_io` libera plugins de dispositivo) |
 //! | `AGENT_DEVICE_CIDRS`  | vazio = qualquer rede privada; restringe o alvo dos plugins |
+//! | `AGENT_DATABASE_TARGETS` | vazio = nenhum; `IP:porta` ou `faixa:porta` liberados para a ponte de banco (exige `database` em `AGENT_ALLOW`) |
 //! | `AGENT_OUTBOX_MAX`    | 10 000 eventos                  |
 //! | `HOST_PROC`/`HOST_ROOT` | `/proc` e `/`                 |
 
 use std::path::{Path, PathBuf};
 
 use crate::services::agents::policy::Policy;
+
+use super::tunnel::{parse_targets, TunnelTarget};
 
 pub const DEFAULT_STATE_DIR: &str = "/var/lib/netmonitor-agent";
 const DEFAULT_OUTBOX_MAX: usize = 10_000;
@@ -26,6 +29,8 @@ pub struct AgentConfig {
     pub state_dir: PathBuf,
     pub policy: Policy,
     pub outbox_max: usize,
+    /// Bancos que a ponte pode alcançar (ADR 013).
+    pub database_targets: Vec<TunnelTarget>,
 }
 
 fn env(key: &str) -> Option<String> {
@@ -43,6 +48,7 @@ impl AgentConfig {
         let server_url = env("AGENT_SERVER_URL")
             .ok_or("AGENT_SERVER_URL é obrigatória (ex.: http://10.8.0.1:3333)")?;
         let policy = Policy::parse(&env("AGENT_ALLOW").unwrap_or_default())?;
+        let database_targets = parse_targets(&env("AGENT_DATABASE_TARGETS").unwrap_or_default())?;
         Ok(Self {
             server_url: normalize_server_url(&server_url)?,
             enroll_code: env("AGENT_ENROLL_CODE"),
@@ -54,6 +60,7 @@ impl AgentConfig {
                 .and_then(|value| value.parse().ok())
                 .filter(|value| *value > 0)
                 .unwrap_or(DEFAULT_OUTBOX_MAX),
+            database_targets,
         })
     }
 

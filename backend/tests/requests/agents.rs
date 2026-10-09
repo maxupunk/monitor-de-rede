@@ -8,18 +8,16 @@ use backend::{
     app::App,
     models::{devices, monitor_results, monitors, probes, users},
     services::{
-        agent_runtime::{
-            executor::CommandExecutor,
-            outbox::Outbox,
-            session::{self as agent_session, NoLiveSource, SessionDeps},
-        },
+        agent_runtime::{executor::CommandExecutor, tunnel::LocalTunnelOpener},
         agents::{
-            background, connection,
+            background,
+            connection::{self, HandshakeError},
             hub::AgentHub,
             inbound,
-            policy::Permission,
+            policy::{Permission, Policy},
             protocol::{
-                AgentEvent, Capability, Command, DockerCall, Hello, RemoteError, PROTOCOL_VERSION,
+                AgentEvent, Body, Capability, Command, DockerCall, Envelope, Hello, RemoteError,
+                WireFrame, PROTOCOL_VERSION,
             },
             service::AgentService,
         },
@@ -43,7 +41,10 @@ use serial_test::serial;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use super::prepare_data;
+use super::{
+    agent_harness::{connect_agent_with, enrolled_agent},
+    prepare_data,
+};
 
 fn json_of(text: &str) -> Value {
     serde_json::from_str(text).expect("resposta JSON")
@@ -116,53 +117,16 @@ fn hello() -> Hello {
     }
 }
 
-/// Cadastra um agente e troca o código pelo token.
-async fn enrolled_agent(ctx: &AppContext, name: &str) -> (probes::Model, String) {
-    let service = AgentService::new(&ctx.db);
-    let (probe, code) = service
-        .create(&serde_json::from_value(json!({ "name": name })).expect("entrada"))
-        .await
-        .expect("agente cadastrado");
-    let (_, token) = service
-        .enroll(&serde_json::from_value(json!({ "code": code })).expect("enroll"))
-        .await
-        .expect("enroll");
-    (
-        probes::Entity::find_by_id(probe.id)
-            .one(&ctx.db)
-            .await
-            .unwrap()
-            .unwrap(),
-        token,
-    )
-}
-
-/// Liga a central (`connection::serve`) a um agente em memória
-/// (`agent_session::run`) e espera o hub registrar a sessão.
+/// Liga a central a um agente em memória, sem ponte de banco liberada.
 async fn connect_agent(ctx: &AppContext, probe: probes::Model) -> tokio::task::JoinHandle<()> {
-    let (to_server, server_in) = mpsc::channel::<String>(64);
-    let (server_out, to_agent) = mpsc::channel::<String>(64);
-    let probe_id = probe.id;
-    let server_ctx = ctx.clone();
-    tokio::spawn(async move {
-        let _ = connection::serve(server_ctx, probe, server_in, server_out).await;
-    });
-    let agent = tokio::spawn(async move {
-        let deps = SessionDeps {
-            executor: Arc::new(FakeExecutor),
-            outbox: Arc::new(Outbox::in_memory(100)),
-            live: Arc::new(NoLiveSource),
-        };
-        let _ = agent_session::run(deps, hello(), to_agent, to_server).await;
-    });
-    let hub = AgentHub::from_context(ctx).expect("hub");
-    for _ in 0..100 {
-        if hub.get(probe_id).is_some() {
-            return agent;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    panic!("o agente não se registrou no hub");
+    connect_agent_with(
+        ctx,
+        probe,
+        hello(),
+        Arc::new(FakeExecutor),
+        Arc::new(LocalTunnelOpener::new(Policy::default(), Vec::new())),
+    )
+    .await
 }
 
 #[tokio::test]
@@ -786,6 +750,41 @@ async fn compose_na_propria_central_e_aceito_e_falha_pelo_sse() {
         assert_eq!(accepted["kind"], "compose");
         assert_eq!(accepted["hostKey"], "local");
         assert!(accepted["operationId"].is_string());
+    })
+    .await;
+}
+
+/// Central e agente sobem juntos: um agente de outra versão do protocolo é
+/// recusado no handshake, com a mensagem de qual lado atualizar, e não entra
+/// no hub.
+#[tokio::test]
+#[serial]
+async fn handshake_recusa_agente_de_outra_versao_do_protocolo() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
+        let (probe, _) = enrolled_agent(&ctx, "antigo").await;
+        let probe_id = probe.id;
+        let (to_server, incoming) = mpsc::channel(4);
+        let (outgoing, _from_server) = mpsc::channel(4);
+        let old = Hello {
+            protocol: PROTOCOL_VERSION - 1,
+            ..hello()
+        };
+        to_server
+            .send(WireFrame::Text(
+                Envelope::new(Body::Hello(old)).encode().unwrap(),
+            ))
+            .await
+            .unwrap();
+
+        let error = connection::serve(ctx.clone(), probe, incoming, outgoing)
+            .await
+            .expect_err("versão diferente é recusada");
+        assert!(matches!(error, HandshakeError::Protocol(v) if v == PROTOCOL_VERSION - 1));
+        assert!(error.to_string().contains("atualize"), "{error}");
+        assert!(AgentHub::from_context(&ctx)
+            .unwrap()
+            .get(probe_id)
+            .is_none());
     })
     .await;
 }

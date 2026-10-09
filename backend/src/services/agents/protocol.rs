@@ -7,6 +7,11 @@
 //! agente: snapshots ao vivo, rollups de métricas, resultados que ficaram
 //! presos no buffer offline.
 //!
+//! Os dados de uma ponte de banco (`Command::DatabaseTunnel`, ADR 013) não
+//! viajam em JSON: vão em quadros **binários** ([`TunnelFrame`]) com o `id` do
+//! pedido, nos dois sentidos, sob uma janela de crédito. O texto continua
+//! sendo o canal de controle.
+//!
 //! Os comandos Docker formam um **enum fechado**. Não existe "encaminhe este
 //! caminho para a Engine": cada operação é declarada, tem permissão própria
 //! ([`Command::permission`]) e é validada dos dois lados.
@@ -38,12 +43,130 @@ use crate::{
 
 use super::policy::Permission;
 
-/// Versão do protocolo. Muda só quando um lado deixaria de entender o outro;
-/// campos novos e opcionais não a alteram.
-pub const PROTOCOL_VERSION: u16 = 1;
+/// Versão do protocolo. Muda quando um lado deixaria de entender o outro, e o
+/// handshake recusa versão diferente: central e agente sobem juntos.
+///
+/// * **1** — texto JSON só;
+/// * **2** — quadros binários de ponte ([`TunnelFrame`]) e
+///   `Command::DatabaseTunnel` (ADR 013).
+pub const PROTOCOL_VERSION: u16 = 2;
 
 /// Teto de um quadro. Logs e inventários grandes são quebrados em chunks.
 pub const MAX_FRAME_BYTES: usize = 4 * 1024 * 1024;
+
+/// Um quadro do WebSocket, como os dois lados o trocam com o socket.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WireFrame {
+    /// Um [`Envelope`] em JSON.
+    Text(String),
+    /// Um [`TunnelFrame`] codificado.
+    Binary(Vec<u8>),
+}
+
+/// Teto dos dados de um quadro de ponte.
+pub const TUNNEL_DATA_MAX: usize = 64 * 1024;
+
+/// O que um quadro de ponte carrega.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TunnelPayload {
+    /// Bytes da conexão.
+    Data(Vec<u8>),
+    /// Crédito devolvido: quem recebe pode mandar mais estes bytes.
+    Ack(u32),
+    /// Quem mandou não vai escrever mais (meio-fechamento).
+    Eof,
+}
+
+/// Quadro binário de uma ponte: `[id 16 bytes][tipo 1 byte][conteúdo]`.
+///
+/// Binário e não JSON: o dado de um banco atravessaria em base64, um terço
+/// maior, e passaria duas vezes pelo serializador.
+///
+/// Dados podem ir crus ou comprimidos com zstd ([`TunnelFrame::encode_data`]);
+/// quem recebe não precisa saber qual — [`TunnelFrame::decode`] devolve sempre
+/// os bytes originais.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TunnelFrame {
+    pub id: Uuid,
+    pub payload: TunnelPayload,
+}
+
+const KIND_DATA: u8 = 0;
+const KIND_ACK: u8 = 1;
+const KIND_EOF: u8 = 2;
+const KIND_DATA_ZSTD: u8 = 3;
+
+/// Nível do zstd: o mais rápido. A ponte comprime em tempo real, no caminho de
+/// um dump; ganhar uns pontos de taxa não vale segurar o banco.
+const ZSTD_LEVEL: i32 = 1;
+
+impl TunnelFrame {
+    #[must_use]
+    pub fn encode(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(17 + TUNNEL_DATA_MAX);
+        out.extend_from_slice(self.id.as_bytes());
+        match &self.payload {
+            TunnelPayload::Data(bytes) => {
+                out.push(KIND_DATA);
+                out.extend_from_slice(bytes);
+            }
+            TunnelPayload::Ack(credit) => {
+                out.push(KIND_ACK);
+                out.extend_from_slice(&credit.to_be_bytes());
+            }
+            TunnelPayload::Eof => out.push(KIND_EOF),
+        }
+        out
+    }
+
+    /// Quadro de dados comprimido, se a compressão compensar.
+    ///
+    /// Devolve `None` quando o resultado não fica ao menos 10% menor — dado já
+    /// cifrado (banco com TLS) ou já compactado não comprime, e mandar cru
+    /// poupa o outro lado de descomprimir à toa.
+    #[must_use]
+    pub fn encode_compressed(id: Uuid, data: &[u8]) -> Option<Vec<u8>> {
+        let packed = zstd::bulk::compress(data, ZSTD_LEVEL).ok()?;
+        if packed.len() * 10 > data.len() * 9 {
+            return None;
+        }
+        let mut out = Vec::with_capacity(17 + packed.len());
+        out.extend_from_slice(id.as_bytes());
+        out.push(KIND_DATA_ZSTD);
+        out.extend_from_slice(&packed);
+        Some(out)
+    }
+
+    /// # Errors
+    ///
+    /// Quadro curto, tipo desconhecido, dados acima de [`TUNNEL_DATA_MAX`] —
+    /// também depois de descomprimidos — ou compressão inválida.
+    pub fn decode(bytes: &[u8]) -> Result<Self, ProtocolError> {
+        let malformed = |why: &str| ProtocolError::Malformed(format!("quadro de ponte {why}"));
+        if bytes.len() < 17 {
+            return Err(malformed("curto demais"));
+        }
+        let id = Uuid::from_slice(&bytes[..16]).map_err(|_| malformed("sem id"))?;
+        let rest = &bytes[17..];
+        let payload = match bytes[16] {
+            KIND_DATA if rest.len() <= TUNNEL_DATA_MAX => TunnelPayload::Data(rest.to_vec()),
+            KIND_DATA => return Err(ProtocolError::FrameTooLarge),
+            KIND_ACK => TunnelPayload::Ack(u32::from_be_bytes(
+                rest.try_into()
+                    .map_err(|_| malformed("com crédito inválido"))?,
+            )),
+            KIND_EOF if rest.is_empty() => TunnelPayload::Eof,
+            // O teto vale para o descomprimido: um quadro pequeno não pode
+            // virar gigabytes do outro lado.
+            KIND_DATA_ZSTD => TunnelPayload::Data(
+                zstd::bulk::decompress(rest, TUNNEL_DATA_MAX)
+                    .map_err(|_| malformed("com compressão inválida ou grande demais"))?,
+            ),
+            _ => return Err(malformed("de tipo desconhecido")),
+        };
+        Ok(Self { id, payload })
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -206,6 +329,14 @@ pub enum Command {
     DeviceIo {
         call: DeviceIoCall,
     },
+    /// Ponte TCP até um banco da rede do agente (ADR 013). O agente só copia
+    /// bytes — não fala SQL — e só alcança destinos da lista local
+    /// `AGENT_DATABASE_TARGETS`. Depois do `Chunk` `{"opened": true}` os dados
+    /// vão em [`TunnelFrame`]s com o id deste pedido.
+    DatabaseTunnel {
+        host: String,
+        port: u16,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -293,6 +424,7 @@ impl Command {
             Self::Discovery { .. } => Permission::Discovery,
             Self::SetLive { .. } => Permission::Read,
             Self::DeviceIo { .. } => Permission::DeviceIo,
+            Self::DatabaseTunnel { .. } => Permission::Database,
         }
     }
 }
@@ -457,6 +589,88 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn quadro_de_ponte_faz_ida_e_volta() {
+        let id = Uuid::new_v4();
+        for payload in [
+            TunnelPayload::Data(b"SELECT 1".to_vec()),
+            TunnelPayload::Data(Vec::new()),
+            TunnelPayload::Ack(256 * 1024),
+            TunnelPayload::Eof,
+        ] {
+            let frame = TunnelFrame { id, payload };
+            assert_eq!(TunnelFrame::decode(&frame.encode()).unwrap(), frame);
+        }
+    }
+
+    #[test]
+    fn dado_comprimivel_vai_comprimido_e_volta_igual() {
+        let id = Uuid::new_v4();
+        let data = b"INSERT INTO clientes VALUES (1, 'Ana');\n".repeat(1000);
+        let wire = TunnelFrame::encode_compressed(id, &data).expect("comprime");
+        assert!(
+            wire.len() < data.len() / 5,
+            "{} de {}",
+            wire.len(),
+            data.len()
+        );
+        assert_eq!(
+            TunnelFrame::decode(&wire).unwrap(),
+            TunnelFrame {
+                id,
+                payload: TunnelPayload::Data(data),
+            }
+        );
+    }
+
+    #[test]
+    fn dado_que_nao_comprime_nao_e_comprimido() {
+        // Bytes pseudoaleatórios: o que um banco com TLS manda pela ponte.
+        let mut state: u32 = 0x1234_5678;
+        let noise: Vec<u8> = (0..32 * 1024)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 17;
+                state ^= state << 5;
+                state.to_le_bytes()[0]
+            })
+            .collect();
+        assert!(TunnelFrame::encode_compressed(Uuid::new_v4(), &noise).is_none());
+    }
+
+    #[test]
+    fn quadro_comprimido_que_estoura_o_teto_e_recusado() {
+        let id = Uuid::new_v4();
+        let bomb = zstd::bulk::compress(&vec![0_u8; TUNNEL_DATA_MAX + 1], 1).unwrap();
+        let mut wire = id.as_bytes().to_vec();
+        wire.push(KIND_DATA_ZSTD);
+        wire.extend_from_slice(&bomb);
+        assert!(TunnelFrame::decode(&wire).is_err());
+    }
+
+    #[test]
+    fn quadro_de_ponte_invalido_e_recusado() {
+        let id = Uuid::new_v4();
+        assert!(TunnelFrame::decode(&[0; 10]).is_err());
+        let mut unknown = id.as_bytes().to_vec();
+        unknown.push(9);
+        assert!(TunnelFrame::decode(&unknown).is_err());
+        let mut big = id.as_bytes().to_vec();
+        big.push(0);
+        big.extend(vec![0; TUNNEL_DATA_MAX + 1]);
+        assert_eq!(TunnelFrame::decode(&big), Err(ProtocolError::FrameTooLarge));
+    }
+
+    #[test]
+    fn ponte_de_banco_exige_permissao_propria() {
+        let command = Command::DatabaseTunnel {
+            host: "10.0.0.20".into(),
+            port: 5432,
+        };
+        assert_eq!(command.permission(), Permission::Database);
+        assert!(!crate::services::agents::policy::Policy::default().allows(Permission::Database));
+    }
 
     #[test]
     fn envelope_faz_ida_e_volta() {

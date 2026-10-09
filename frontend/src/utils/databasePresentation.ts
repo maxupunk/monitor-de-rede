@@ -1,3 +1,4 @@
+import type { DatabaseConnectionResponse } from '@/bindings/DatabaseConnectionResponse'
 import type { DatabaseEngine } from '@/bindings/DatabaseEngine'
 import type { SslMode } from '@/bindings/SslMode'
 
@@ -52,6 +53,20 @@ export const SSL_MODES: Array<{ value: SslMode; title: string; subtitle: string 
   { value: 'require', title: 'Obrigatório', subtitle: 'Falha se o servidor não tiver TLS' },
   { value: 'disable', title: 'Desligado', subtitle: 'Só em rede interna confiável' },
 ]
+
+/** "pelo agente filial-sp" quando a conexão passa por uma ponte; vazio se direta. */
+export function routeLabel(
+  connection: Pick<DatabaseConnectionResponse, 'viaProbeId' | 'viaProbeName'>
+): string {
+  if (connection.viaProbeId == null) return ''
+  return `pelo agente ${connection.viaProbeName ?? '#' + connection.viaProbeId}`
+}
+
+/** "PostgreSQL em 10.0.0.20 pelo agente filial · erp, rh" — a linha da conexão. */
+export function connectionSummary(connection: DatabaseConnectionResponse): string {
+  const where = [connection.host, routeLabel(connection)].filter(Boolean).join(' ')
+  return `${engineInfo(connection.engine).label} em ${where} · ${databasesLabel(connection.databases)}`
+}
 
 /** Os bancos de uma conexão num texto curto. */
 export function databasesLabel(databases: string[]): string {

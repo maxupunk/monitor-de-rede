@@ -29,6 +29,10 @@ pub struct DatabaseConnectionResponse {
     #[ts(type = "number | null")]
     pub storage_destination_id: Option<i64>,
     pub storage_destination_name: Option<String>,
+    /// Agente pelo qual a central chega ao banco; nulo é direto.
+    #[ts(type = "number | null")]
+    pub via_probe_id: Option<i64>,
+    pub via_probe_name: Option<String>,
     pub backup_enabled: bool,
     pub backup_interval_hours: i32,
     pub backup_retention: i32,
@@ -42,9 +46,14 @@ pub struct DatabaseConnectionResponse {
 }
 
 impl DatabaseConnectionResponse {
-    /// `storage_name` é o nome do armazenamento da conexão, quando há um.
+    /// `storage_name` e `agent_name`: os nomes do armazenamento e do agente
+    /// da conexão, quando há.
     #[must_use]
-    pub fn new(row: &database_connections::Model, storage_name: Option<String>) -> Self {
+    pub fn new(
+        row: &database_connections::Model,
+        storage_name: Option<String>,
+        agent_name: Option<String>,
+    ) -> Self {
         Self {
             id: row.id,
             name: row.name.clone(),
@@ -57,6 +66,8 @@ impl DatabaseConnectionResponse {
             databases: databases_of(row),
             storage_destination_id: row.storage_destination_id,
             storage_destination_name: storage_name,
+            via_probe_id: row.via_probe_id,
+            via_probe_name: agent_name,
             backup_enabled: row.backup_enabled,
             backup_interval_hours: row.backup_interval_hours,
             backup_retention: row.backup_retention,

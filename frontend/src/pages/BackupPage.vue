@@ -265,7 +265,7 @@ import { confirm } from '@/composables/useConfirm'
 import { useBackupStore } from '@/stores/backup'
 import { useDatabasesStore } from '@/stores/databases'
 import { useStoragesStore } from '@/stores/storages'
-import { DATABASE_ENGINES, databasesLabel, engineInfo } from '@/utils/databasePresentation'
+import { connectionSummary, DATABASE_ENGINES, engineInfo } from '@/utils/databasePresentation'
 import { formatBytes } from '@/utils/formatters'
 
 const route = useRoute()
@@ -332,7 +332,7 @@ async function backupSystem() {
 // ── Bancos de dados ─────────────────────────────────────────────────────────
 
 function describeConnection(connection: DatabaseConnectionResponse): string {
-  return `${engineInfo(connection.engine).label} em ${connection.host} · ${databasesLabel(connection.databases)}`
+  return connectionSummary(connection)
 }
 
 /** O backup em curso — ou o que acabou de terminar, por alguns minutos. */

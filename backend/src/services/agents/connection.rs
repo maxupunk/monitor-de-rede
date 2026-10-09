@@ -1,6 +1,6 @@
 //! Ciclo de vida de uma conexão de agente, do lado da central.
 //!
-//! Independente de WebSocket: recebe e envia texto por canais. O controller
+//! Independente de WebSocket: recebe e envia quadros ([`WireFrame`]) por canais. O controller
 //! só faz a ponte entre o socket e estes canais, e os testes ligam os canais
 //! direto num agente em memória.
 
@@ -17,7 +17,7 @@ use crate::{
 use super::{
     hub::AgentHub,
     inbound,
-    protocol::{Body, Envelope, Welcome, PROTOCOL_VERSION},
+    protocol::{Body, Envelope, Welcome, WireFrame, PROTOCOL_VERSION},
     service::{publish_status, AgentService},
     session::AgentSession,
 };
@@ -27,6 +27,9 @@ const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 /// Frequência com que a conexão aberta renova o `last_seen_at`.
 const TOUCH_INTERVAL: Duration = Duration::from_secs(30);
 const OUTBOUND_BUFFER: usize = 64;
+/// Quadros de ponte na fila de saída. Pequena de propósito: a janela de
+/// crédito já limita o que cada ponte manda, e o controle passa na frente.
+const TUNNEL_BUFFER: usize = 16;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum HandshakeError {
@@ -34,11 +37,13 @@ pub enum HandshakeError {
     Timeout,
     #[error("o primeiro quadro precisa ser Hello")]
     NotHello,
-    #[error("versão de protocolo {0} não suportada (esperada {PROTOCOL_VERSION})")]
+    #[error(
+        "o agente fala o protocolo {0} e a central o {PROTOCOL_VERSION} — atualize o lado mais antigo"
+    )]
     Protocol(u16),
 }
 
-/// Atende a conexão até ela cair. `incoming`/`outgoing` são quadros de texto.
+/// Atende a conexão até ela cair.
 ///
 /// # Errors
 ///
@@ -46,14 +51,16 @@ pub enum HandshakeError {
 pub async fn serve(
     ctx: AppContext,
     probe: probes::Model,
-    mut incoming: mpsc::Receiver<String>,
-    outgoing: mpsc::Sender<String>,
+    mut incoming: mpsc::Receiver<WireFrame>,
+    outgoing: mpsc::Sender<WireFrame>,
 ) -> Result<(), HandshakeError> {
     let hello = match tokio::time::timeout(HELLO_TIMEOUT, incoming.recv()).await {
-        Ok(Some(text)) => match Envelope::decode(&text).map(|envelope| envelope.body) {
-            Ok(Body::Hello(hello)) => hello,
-            _ => return Err(HandshakeError::NotHello),
-        },
+        Ok(Some(WireFrame::Text(text))) => {
+            match Envelope::decode(&text).map(|envelope| envelope.body) {
+                Ok(Body::Hello(hello)) => hello,
+                _ => return Err(HandshakeError::NotHello),
+            }
+        }
         _ => return Err(HandshakeError::Timeout),
     };
     if hello.protocol != PROTOCOL_VERSION {
@@ -74,24 +81,33 @@ pub async fn serve(
     };
 
     let (envelopes, mut to_send) = mpsc::channel::<Envelope>(OUTBOUND_BUFFER);
-    let session = Arc::new(AgentSession::new(
-        probe.id,
-        probe.name.clone(),
-        hello,
-        envelopes.clone(),
-    ));
+    let (tunnel_out, mut tunnel_frames) = mpsc::channel::<WireFrame>(TUNNEL_BUFFER);
+    let session = Arc::new(
+        AgentSession::new(probe.id, probe.name.clone(), hello, envelopes.clone())
+            .with_tunnel_out(tunnel_out),
+    );
     hub.register(session.clone());
     tracing::info!(probe_id = probe.id, name = %probe.name, "agente conectado");
 
+    // Controle primeiro: um dump pela ponte não pode atrasar monitores e Docker.
     let writer = tokio::spawn(async move {
-        while let Some(envelope) = to_send.recv().await {
-            match envelope.encode() {
-                Ok(text) => {
-                    if outgoing.send(text).await.is_err() {
-                        break;
-                    }
-                }
-                Err(error) => tracing::warn!(%error, "quadro para o agente descartado"),
+        loop {
+            let frame = tokio::select! {
+                biased;
+                envelope = to_send.recv() => match envelope {
+                    Some(envelope) => match envelope.encode() {
+                        Ok(text) => WireFrame::Text(text),
+                        Err(error) => {
+                            tracing::warn!(%error, "quadro para o agente descartado");
+                            continue;
+                        }
+                    },
+                    None => break,
+                },
+                Some(frame) = tunnel_frames.recv() => frame,
+            };
+            if outgoing.send(frame).await.is_err() {
+                break;
             }
         }
     });
@@ -109,7 +125,14 @@ pub async fn serve(
     loop {
         tokio::select! {
             frame = incoming.recv() => {
-                let Some(text) = frame else { break };
+                let text = match frame {
+                    Some(WireFrame::Text(text)) => text,
+                    Some(WireFrame::Binary(bytes)) => {
+                        session.handle_tunnel_frame(&bytes);
+                        continue;
+                    }
+                    None => break,
+                };
                 match Envelope::decode(&text) {
                     Ok(envelope) => {
                         if let Some(event) = session.handle(envelope) {

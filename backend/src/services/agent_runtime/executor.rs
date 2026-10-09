@@ -298,6 +298,11 @@ impl CommandExecutor for LocalExecutor {
             // O modo ao vivo é da sessão, não do executor.
             Command::SetLive { .. } => Ok(Value::Null),
             Command::DeviceIo { call } => device_io(&call).await,
+            // A ponte precisa dos quadros binários do canal: é da sessão.
+            Command::DatabaseTunnel { .. } => Err(RemoteError::new(
+                ErrorCode::Unsupported,
+                "a ponte de banco é atendida pela sessão do agente",
+            )),
         }
     }
 }

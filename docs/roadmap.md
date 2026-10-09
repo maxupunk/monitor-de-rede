@@ -609,6 +609,16 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
     - "Restaurar…" do NetMonitor reúne as duas origens — uma cópia num destino ou um arquivo do computador —, com a mesma prévia e a mesma confirmação, e recarrega a página ao terminar nos dois casos. O cartão de backup saiu de Configurações (fica um atalho); `/storages` e `/databases` redirecionam.
     - Peças compartilhadas: `BackupPlanCard`, `backupHealth`, `DestinationSelect`, `SystemRestoreConfirm`, `audit::record`; `formatRelativeTime`/`formatTimeUntil` dizem "1 dia".
 
+- [x] **Backup de banco pela ponte do agente remoto** 🟢 Concluído ([ADR 013](adr/013-ponte-de-banco-pelo-agente.md))
+  - **Arquivos:** `backend/src/services/agents/{protocol,tunnel,bridge,routes,session,connection}.rs`, `backend/src/services/agent_runtime/{tunnel,session,client,config}.rs`, `backend/src/services/databases/reach.rs`, `backend/migration/src/m20261009_000001_database_connections_via_probe.rs`, `frontend/src/components/databases/DatabaseFormDialog.vue`, `frontend/src/utils/agentRoutes.ts`, `backend/tests/requests/{agent_harness,agent_tunnel,database_roundtrip,databases}.rs`
+  - **Implementado:**
+    - Protocolo do agente na **versão 2** (handshake estrito): quadros binários no canal (dados nos dois sentidos, janela de crédito de 256 KiB com custo mínimo de 4 KiB por quadro, meio-fechamento) e compressão zstd adaptativa por quadro, que desiste sozinha em dado que não comprime (TLS).
+    - Comando fechado `DatabaseTunnel { host, port }` com permissão `database` fora do padrão, lista local obrigatória `AGENT_DATABASE_TARGETS` (IP, faixa ou IPv6, com porta) e só rede privada; no máximo 2 pontes por agente; fila de controle à frente da de dados.
+    - Central: `LocalBridge` em `127.0.0.1` abre a primeira ponte antes de entregar o endereço (a recusa do agente chega com a razão); `databases::reach` aponta o `sqlx` para ela — drivers de PostgreSQL e MySQL sem mudança.
+    - "Acessar a partir de" na conexão de banco (`via_probe_id`), com a lista de agentes compartilhada com os plugins (`agents::routes`, `utils/agentRoutes.ts`), as linhas a configurar no host do agente e "pelo agente X" na conexão, no histórico e na auditoria.
+    - Queda do canal: a ponte local segue a sessão atual do agente, e o backup refaz o banco do zero (até 3 tentativas, esperando o agente reconectar até 60 s) na mesma linha do histórico, com aviso; recusa do servidor e erro de SQL não repetem; restauração não é refeita.
+    - Testes: ida e volta pela ponte contra PostgreSQL, MySQL e MariaDB reais com resultado idêntico à rota direta; recusas com a razão; 48 MB pela ponte sem atrasar outros pedidos do agente; vagas liberadas; compressão > 3×; ponte que segue o agente após reconexão; política de nova tentativa.
+
 ---
 
 ## 7. Matriz obrigatória de validação

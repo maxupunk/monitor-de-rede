@@ -81,19 +81,6 @@ pub struct DevicePluginItem {
     pub device_settings: Option<Value>,
 }
 
-/// Agente remoto por onde o acesso pode sair.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct AgentRouteOption {
-    #[ts(type = "number")]
-    pub id: i64,
-    pub name: String,
-    pub connected: bool,
-    /// O agente anunciou `device_io` no `AGENT_ALLOW`.
-    pub allows_device_io: bool,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
@@ -133,7 +120,7 @@ pub struct DevicePluginsView {
     pub plugins: Vec<DevicePluginItem>,
     pub credentials: Vec<CredentialView>,
     pub runs: Vec<PluginRunView>,
-    pub agents: Vec<AgentRouteOption>,
+    pub agents: Vec<crate::dtos::agents::AgentRouteOption>,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]

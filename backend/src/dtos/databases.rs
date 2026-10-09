@@ -32,6 +32,11 @@ pub struct DatabaseConnectionInput {
     pub databases: Vec<String>,
     #[ts(type = "number | null")]
     pub storage_destination_id: Option<i64>,
+    /// "Acessar a partir de": agente pelo qual a central chega ao banco;
+    /// nulo é direto (ADR 013).
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub via_probe_id: Option<i64>,
     #[serde(default)]
     pub backup_enabled: bool,
     pub backup_interval_hours: i32,
@@ -50,6 +55,7 @@ impl From<DatabaseConnectionInput> for ConnectionInput {
             ssl_mode: input.ssl_mode,
             databases: input.databases,
             storage_destination_id: input.storage_destination_id,
+            via_probe_id: input.via_probe_id,
             backup_enabled: input.backup_enabled,
             backup_interval_hours: input.backup_interval_hours,
             backup_retention: input.backup_retention,
@@ -72,6 +78,10 @@ pub struct DatabaseProbeInput {
     #[ts(optional)]
     pub password: Option<String>,
     pub ssl_mode: SslMode,
+    /// Testar pela ponte deste agente.
+    #[serde(default)]
+    #[ts(type = "number | null", optional)]
+    pub via_probe_id: Option<i64>,
 }
 
 impl From<DatabaseProbeInput> for ProbeInput {
@@ -84,6 +94,7 @@ impl From<DatabaseProbeInput> for ProbeInput {
             username: input.username,
             password: filled(input.password),
             ssl_mode: input.ssl_mode,
+            via_probe_id: input.via_probe_id,
         }
     }
 }

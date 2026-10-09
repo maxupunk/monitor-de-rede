@@ -49,6 +49,38 @@
           ></v-text-field>
 
           <div class="section-title">Conexão</div>
+          <v-select
+            v-model="form.viaProbeId"
+            :items="routes"
+            item-title="title"
+            item-value="value"
+            item-props="props"
+            label="Acessar a partir de"
+            hint="Banco numa filial que esta central não alcança? Escolha o agente remoto de lá."
+            persistent-hint
+            variant="outlined"
+            class="mb-4"
+          ></v-select>
+          <v-alert
+            v-if="viaAgent"
+            type="info"
+            variant="tonal"
+            density="compact"
+            class="mb-4"
+            icon="mdi-transit-connection-variant"
+          >
+            <div class="text-body-2 mb-2">
+              O backup continua sendo feito aqui; o agente <strong>{{ viaAgent.name }}</strong> só
+              leva os bytes até o banco. No host do agente, libere a ponte e este destino:
+            </div>
+            <CopyableCommand label="Permissão" :command="allowLine" class="mb-2" />
+            <CopyableCommand label="Destino" :command="targetLine" />
+            <div class="text-caption text-high-emphasis mt-2">
+              O banco vê a conexão vinda do IP do agente — o usuário de backup precisa ter acesso a
+              partir dele (<code>pg_hba.conf</code> no PostgreSQL, <code>GRANT … @'ip'</code> no
+              MySQL).
+            </div>
+          </v-alert>
           <v-row dense>
             <v-col cols="8" sm="9">
               <v-text-field
@@ -57,7 +89,7 @@
                 placeholder="10.0.0.20 ou db.empresa.local"
                 variant="outlined"
                 :rules="[requiredRule('Informe o servidor')]"
-                v-bind="loopbackFieldHint(form.host)"
+                v-bind="form.viaProbeId == null ? loopbackFieldHint(form.host) : {}"
               ></v-text-field>
             </v-col>
             <v-col cols="4" sm="3">
@@ -228,6 +260,7 @@ import type { DatabaseEngine } from '@/bindings/DatabaseEngine'
 import type { DatabaseProbeResponse } from '@/bindings/DatabaseProbeResponse'
 import type { SslMode } from '@/bindings/SslMode'
 import BackupPolicyFields from '@/components/backup/BackupPolicyFields.vue'
+import CopyableCommand from '@/components/CopyableCommand.vue'
 import DestinationSelect from '@/components/backup/DestinationSelect.vue'
 import { useSecretFields } from '@/composables/useSecretFields'
 import { useVerifiedSave } from '@/composables/useVerifiedSave'
@@ -236,6 +269,7 @@ import { useStoragesStore } from '@/stores/storages'
 import { DATABASE_ENGINES, engineInfo, SSL_MODES } from '@/utils/databasePresentation'
 import { requiredRule } from '@/utils/formRules'
 import { loopbackFieldHint } from '@/utils/hostHints'
+import { agentRouteItems } from '@/utils/agentRoutes'
 
 const props = defineProps<{
   modelValue: boolean
@@ -268,6 +302,7 @@ const form = reactive({
   sslMode: 'prefer' as SslMode,
   databases: [] as string[],
   storageDestinationId: null as number | null,
+  viaProbeId: null as number | null,
   backupEnabled: true,
   backupIntervalHours: 24,
   backupRetention: 7,
@@ -279,8 +314,21 @@ const title = computed(() => {
   return step.value === 'engine' ? 'Nova conexão de banco' : `Nova conexão — ${engine.value.label}`
 })
 
+const routes = computed(() =>
+  agentRouteItems(databasesStore.agents, 'database', 'O servidor de banco é alcançável daqui')
+)
+const viaAgent = computed(
+  () => databasesStore.agents.find((agent) => agent.id === form.viaProbeId) ?? null
+)
+const targetPort = computed(() => Number(form.port) || engine.value.defaultPort)
+const allowLine = 'AGENT_ALLOW=read,lifecycle,monitor,discovery,database'
+const targetLine = computed(
+  () => `AGENT_DATABASE_TARGETS=${form.host.trim() || '<ip-do-banco>'}:${targetPort.value}`
+)
+
 function signature(): string {
   return JSON.stringify({
+    viaProbeId: form.viaProbeId,
     engine: form.engine,
     host: form.host.trim(),
     port: Number(form.port),
@@ -301,6 +349,7 @@ const verified = useVerifiedSave<DatabaseProbeResponse>({
       username: form.username.trim(),
       password: form.password || undefined,
       sslMode: form.sslMode,
+      viaProbeId: form.viaProbeId,
     }),
   succeeded: () => true,
 })
@@ -331,6 +380,7 @@ function resetForm() {
     sslMode: 'prefer',
     databases: [],
     storageDestinationId: storagesStore.storages[0]?.id ?? null,
+    viaProbeId: null,
     backupEnabled: storagesStore.storages.length > 0,
     backupIntervalHours: 24,
     backupRetention: 7,
@@ -352,6 +402,7 @@ function fillFrom(row: DatabaseConnectionResponse) {
     sslMode: row.sslMode,
     databases: [...row.databases],
     storageDestinationId: row.storageDestinationId,
+    viaProbeId: row.viaProbeId,
     backupEnabled: row.backupEnabled,
     backupIntervalHours: row.backupIntervalHours,
     backupRetention: row.backupRetention,
@@ -364,7 +415,10 @@ watch(
   () => props.modelValue,
   async (open) => {
     if (!open) return
-    if (!storagesStore.loaded) await storagesStore.fetchStorages()
+    await Promise.all([
+      storagesStore.loaded ? Promise.resolve() : storagesStore.fetchStorages(),
+      databasesStore.fetchAgents(),
+    ])
     resetForm()
     const existing = databasesStore.connections.find((item) => item.id === props.connectionId)
     if (existing) {
@@ -399,6 +453,7 @@ function buildInput(): DatabaseConnectionInput {
     sslMode: form.sslMode,
     databases: scope.value === 'all' ? [] : form.databases,
     storageDestinationId: form.storageDestinationId,
+    viaProbeId: form.viaProbeId,
     backupEnabled: form.backupEnabled && form.storageDestinationId != null,
     backupIntervalHours: form.backupIntervalHours,
     backupRetention: Number(form.backupRetention),

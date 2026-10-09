@@ -13,6 +13,7 @@
 //! O lado do agente mora em [`crate::services::agent_runtime`].
 
 pub mod background;
+pub mod bridge;
 pub mod connection;
 pub mod enrollment;
 pub mod hub;
@@ -22,5 +23,7 @@ pub mod install_address;
 pub mod policy;
 pub mod protocol;
 pub mod remote_engine;
+pub mod routes;
 pub mod service;
 pub mod session;
+pub mod tunnel;

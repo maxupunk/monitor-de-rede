@@ -21,7 +21,11 @@ use uuid::Uuid;
 
 use super::{
     policy::Permission,
-    protocol::{AgentEvent, Body, Command, Envelope, ErrorCode, Hello, RemoteError},
+    protocol::{
+        AgentEvent, Body, Command, Envelope, ErrorCode, Hello, RemoteError, TunnelFrame,
+        TunnelPayload, WireFrame,
+    },
+    tunnel::INBOUND_CAPACITY,
 };
 
 /// Um pedido à espera de resposta.
@@ -63,6 +67,11 @@ pub struct AgentSession {
     pub hello: Hello,
     pub connected_at: DateTime<Utc>,
     outbound: mpsc::Sender<Envelope>,
+    /// Fila dos quadros binários de ponte — separada e de menor prioridade
+    /// que a de controle, para um dump não atrasar monitores e Docker.
+    tunnel_out: Option<mpsc::Sender<WireFrame>>,
+    /// Pontes abertas: para onde vão os quadros binários de cada uma.
+    tunnels: Mutex<HashMap<Uuid, mpsc::Sender<TunnelPayload>>>,
     pending: Mutex<HashMap<Uuid, Pending>>,
     closed: AtomicBool,
 }
@@ -81,9 +90,64 @@ impl AgentSession {
             hello,
             connected_at: Utc::now(),
             outbound,
+            tunnel_out: None,
+            tunnels: Mutex::new(HashMap::new()),
             pending: Mutex::new(HashMap::new()),
             closed: AtomicBool::new(false),
         }
+    }
+
+    /// Liga a fila de quadros binários (sem ela, a sessão não abre pontes).
+    #[must_use]
+    pub fn with_tunnel_out(mut self, tunnel_out: mpsc::Sender<WireFrame>) -> Self {
+        self.tunnel_out = Some(tunnel_out);
+        self
+    }
+
+    /// Fila de saída das pontes, se o canal tiver uma.
+    #[must_use]
+    pub fn tunnel_out(&self) -> Option<mpsc::Sender<WireFrame>> {
+        self.tunnel_out.clone()
+    }
+
+    /// Reserva a rota dos quadros que chegarem para a ponte `id`.
+    pub fn register_tunnel(&self, id: Uuid) -> mpsc::Receiver<TunnelPayload> {
+        let (tx, rx) = mpsc::channel(INBOUND_CAPACITY);
+        self.lock_tunnels().insert(id, tx);
+        rx
+    }
+
+    pub fn unregister_tunnel(&self, id: Uuid) {
+        self.lock_tunnels().remove(&id);
+    }
+
+    /// Entrega um quadro binário à ponte dele. Quadro inválido, de ponte
+    /// desconhecida ou que estoura a janela é descartado — no último caso a
+    /// ponte cai, porque o outro lado violou o crédito.
+    pub fn handle_tunnel_frame(&self, bytes: &[u8]) {
+        let frame = match TunnelFrame::decode(bytes) {
+            Ok(frame) => frame,
+            Err(error) => {
+                tracing::warn!(%error, agent = %self.name, "quadro de ponte inválido");
+                return;
+            }
+        };
+        let mut tunnels = self.lock_tunnels();
+        let Some(route) = tunnels.get(&frame.id) else {
+            return;
+        };
+        if route.try_send(frame.payload).is_err() {
+            tracing::warn!(agent = %self.name, "ponte excedeu a janela de crédito; encerrada");
+            tunnels.remove(&frame.id);
+        }
+    }
+
+    fn lock_tunnels(
+        &self,
+    ) -> std::sync::MutexGuard<'_, HashMap<Uuid, mpsc::Sender<TunnelPayload>>> {
+        self.tunnels
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// O que a política local anunciou. A decisão final é do agente; isto só
@@ -198,6 +262,8 @@ impl AgentSession {
     /// Canal caiu: todo pedido pendente termina com `Disconnected`.
     pub fn close(&self) {
         self.closed.store(true, Ordering::SeqCst);
+        // Sem rota, as bombas das pontes veem o fim e encerram.
+        self.lock_tunnels().clear();
         for (_, pending) in self.lock_pending().drain() {
             let _ = pending.reply.send(Err(RemoteError::disconnected()));
         }

@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
+  connectionSummary,
   DATABASE_ENGINES,
   databasesLabel,
   engineInfo,
   restoredDatabaseName,
+  routeLabel,
 } from '@/utils/databasePresentation'
 
 /** A mesma regra de `validate_database_name` no backend. */
@@ -28,5 +30,45 @@ describe('apresentação dos bancos', () => {
     expect(databasesLabel([])).toBe('Todos os bancos')
     expect(databasesLabel(['a', 'b'])).toBe('a, b')
     expect(databasesLabel(['a', 'b', 'c', 'd', 'e'])).toBe('a, b e mais 3')
+  })
+})
+
+describe('rota da conexão', () => {
+  const base = {
+    id: 1,
+    name: 'ERP',
+    engine: 'postgres' as const,
+    host: '10.0.0.20',
+    port: 5432,
+    username: 'postgres',
+    passwordSet: true,
+    sslMode: 'prefer' as const,
+    databases: ['erp', 'rh'],
+    storageDestinationId: null,
+    storageDestinationName: null,
+    viaProbeId: null,
+    viaProbeName: null,
+    backupEnabled: false,
+    backupIntervalHours: 24,
+    backupRetention: 7,
+    lastBackupAt: null,
+    lastBackupStatus: null,
+    lastBackupError: null,
+    nextBackupAt: null,
+    createdAt: '',
+    updatedAt: '',
+  }
+
+  it('conexão direta não fala de agente', () => {
+    expect(routeLabel(base)).toBe('')
+    expect(connectionSummary(base)).toBe('PostgreSQL em 10.0.0.20 · erp, rh')
+  })
+
+  it('conexão pela ponte diz por qual agente passa', () => {
+    const viaAgent = { ...base, viaProbeId: 4, viaProbeName: 'filial-sp' }
+    expect(connectionSummary(viaAgent)).toBe(
+      'PostgreSQL em 10.0.0.20 pelo agente filial-sp · erp, rh'
+    )
+    expect(routeLabel({ viaProbeId: 9, viaProbeName: null })).toBe('pelo agente #9')
   })
 })

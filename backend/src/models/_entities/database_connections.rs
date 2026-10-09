@@ -20,6 +20,8 @@ pub struct Model {
     #[sea_orm(column_type = "JsonBinary")]
     pub databases: Json,
     pub storage_destination_id: Option<i64>,
+    /// Agente pelo qual a central alcança o banco (ADR 013); nulo = direto.
+    pub via_probe_id: Option<i64>,
     pub backup_enabled: bool,
     pub backup_interval_hours: i32,
     pub backup_retention: i32,
@@ -43,6 +45,14 @@ pub enum Relation {
         on_delete = "SetNull"
     )]
     StorageDestinations,
+    #[sea_orm(
+        belongs_to = "super::probes::Entity",
+        from = "Column::ViaProbeId",
+        to = "super::probes::Column::Id",
+        on_update = "Cascade",
+        on_delete = "SetNull"
+    )]
+    Probes,
 }
 
 impl Related<super::database_backups::Entity> for Entity {

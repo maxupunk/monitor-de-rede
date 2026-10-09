@@ -88,8 +88,7 @@ pub async fn run_due(ctx: &AppContext, now: DateTime<Utc>) -> AppResult<usize> {
                     id,
                     u32::try_from(connection.databases.len()).unwrap_or(0),
                 );
-                backups::run_backup(&ctx.db, &connection, &destination, &job, Trigger::Scheduled)
-                    .await;
+                backups::run_backup(ctx, &connection, &destination, &job, Trigger::Scheduled).await;
             }
             Err(error) => {
                 tracing::warn!(connection = id, %error, "backup automático de banco não começou")

@@ -13,10 +13,10 @@ use super::{
     service,
 };
 use crate::{
-    dtos::plugins::{AgentRouteOption, AutoAcceptState, DevicePluginsView},
+    dtos::plugins::{AutoAcceptState, DevicePluginsView},
     models::devices,
     services::{
-        agents::{hub::AgentHub, policy::Permission, service::AgentService},
+        agents::{policy::Permission, routes::route_options},
         shared::errors::{AppError, AppResult},
     },
 };
@@ -42,22 +42,7 @@ pub async fn device(ctx: &AppContext, device_id: i64) -> AppResult<devices::Mode
 pub async fn device_view(ctx: &AppContext, device_id: i64) -> AppResult<DevicePluginsView> {
     let device = device(ctx, device_id).await?;
     let facts = DeviceFacts::from_device(&device);
-    let hub = AgentHub::from_context(ctx).ok();
-    let agents = AgentService::new(&ctx.db)
-        .list()
-        .await?
-        .into_iter()
-        .map(|agent| {
-            let session = hub.as_ref().and_then(|hub| hub.get(agent.id));
-            AgentRouteOption {
-                id: agent.id,
-                name: agent.name,
-                connected: session.is_some(),
-                allows_device_io: session
-                    .is_some_and(|session| session.allows(Permission::DeviceIo)),
-            }
-        })
-        .collect();
+    let agents = route_options(ctx, Permission::DeviceIo).await?;
     Ok(DevicePluginsView {
         device_id,
         platform: facts.platform,

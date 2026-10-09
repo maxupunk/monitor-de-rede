@@ -11,9 +11,11 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc, RwLock,
     },
+    time::Duration,
 };
 
 use loco_rs::app::AppContext;
+use tokio::sync::Notify;
 
 use crate::services::shared::errors::{AppError, AppResult};
 
@@ -23,6 +25,8 @@ use super::session::AgentSession;
 pub struct AgentHub {
     sessions: Arc<RwLock<HashMap<i64, Arc<AgentSession>>>>,
     live_interval_ms: Arc<AtomicU64>,
+    /// Acorda quem espera um agente voltar ([`Self::wait_for`]).
+    arrivals: Arc<Notify>,
 }
 
 impl AgentHub {
@@ -48,6 +52,7 @@ impl AgentHub {
         if let Some(previous) = previous {
             previous.close();
         }
+        self.arrivals.notify_waiters();
     }
 
     /// Remove a sessão **se ainda for a mesma**: a queda de uma conexão já
@@ -68,6 +73,24 @@ impl AgentHub {
     #[must_use]
     pub fn get(&self, probe_id: i64) -> Option<Arc<AgentSession>> {
         self.read().get(&probe_id).cloned()
+    }
+
+    /// A sessão viva do agente, esperando até `within` que ele (re)conecte.
+    ///
+    /// Acorda pelo registro da sessão nova, não por consulta repetida.
+    pub async fn wait_for(&self, probe_id: i64, within: Duration) -> Option<Arc<AgentSession>> {
+        let deadline = tokio::time::Instant::now() + within;
+        loop {
+            // Inscrito antes de olhar: um registro entre a consulta e a
+            // espera não se perde.
+            let arrival = self.arrivals.notified();
+            tokio::pin!(arrival);
+            arrival.as_mut().enable();
+            if let Some(session) = self.get(probe_id).filter(|session| !session.is_closed()) {
+                return Some(session);
+            }
+            tokio::time::timeout_at(deadline, arrival).await.ok()?;
+        }
     }
 
     #[must_use]
@@ -127,6 +150,28 @@ mod tests {
         assert!(Arc::ptr_eq(&hub.get(1).expect("nova"), &new));
         assert!(hub.unregister(&new));
         assert!(hub.get(1).is_none());
+    }
+
+    #[tokio::test]
+    async fn espera_o_agente_voltar_sem_consultar_de_novo() {
+        let hub = AgentHub::default();
+        let old = session(1);
+        hub.register(old.clone());
+        old.close();
+        assert!(
+            hub.wait_for(1, Duration::from_millis(50)).await.is_none(),
+            "sessão fechada não conta"
+        );
+
+        let waiting = tokio::spawn({
+            let hub = hub.clone();
+            async move { hub.wait_for(1, Duration::from_secs(5)).await }
+        });
+        tokio::task::yield_now().await;
+        let new = session(1);
+        hub.register(new.clone());
+        let found = waiting.await.unwrap().expect("acordou com a reconexão");
+        assert!(Arc::ptr_eq(&found, &new));
     }
 
     #[test]

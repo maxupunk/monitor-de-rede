@@ -25,7 +25,7 @@ export function useSecretFields(labels: Record<string, string>) {
     return stored.value.includes(name)
       ? {
           placeholder: '••••••••',
-          hint: `${labels[name] ?? 'Valor'} gravado — deixe em branco para manter.`,
+          hint: `${labels[name] ?? 'Valor'}: já há um valor salvo — deixe em branco para manter.`,
           'persistent-hint': true,
         }
       : {}

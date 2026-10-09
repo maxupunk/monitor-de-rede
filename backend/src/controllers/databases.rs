@@ -16,6 +16,7 @@ use crate::{
     dtos::databases::{DatabaseConnectionInput, DatabaseProbeInput, DatabaseRestoreInput},
     models::database_connections,
     services::{
+        agents::{policy::Permission, routes::route_options, service::AgentService},
         audit::{AuditAction, ResourceType},
         databases::{
             backups::{self, Trigger},
@@ -46,23 +47,36 @@ async fn audit(
     .await;
 }
 
-/// Nome de cada armazenamento, para a linha mostrar para onde vão as cópias.
-async fn storage_names(ctx: &AppContext) -> AppResult<HashMap<i64, String>> {
-    Ok(storage::service::list(&ctx.db)
-        .await?
-        .into_iter()
-        .map(|row| (row.id, row.name))
-        .collect())
+/// Nomes que a linha mostra: para onde vão as cópias e por qual agente.
+struct Names {
+    storages: HashMap<i64, String>,
+    agents: HashMap<i64, String>,
 }
 
-fn respond(
-    row: &database_connections::Model,
-    names: &HashMap<i64, String>,
-) -> DatabaseConnectionResponse {
-    let storage_name = row
-        .storage_destination_id
-        .and_then(|id| names.get(&id).cloned());
-    DatabaseConnectionResponse::new(row, storage_name)
+async fn storage_names(ctx: &AppContext) -> AppResult<Names> {
+    Ok(Names {
+        storages: storage::service::list(&ctx.db)
+            .await?
+            .into_iter()
+            .map(|row| (row.id, row.name))
+            .collect(),
+        agents: AgentService::new(&ctx.db)
+            .list()
+            .await?
+            .into_iter()
+            .map(|row| (row.id, row.name))
+            .collect(),
+    })
+}
+
+fn respond(row: &database_connections::Model, names: &Names) -> DatabaseConnectionResponse {
+    let name =
+        |map: &HashMap<i64, String>, id: Option<i64>| id.and_then(|id| map.get(&id).cloned());
+    DatabaseConnectionResponse::new(
+        row,
+        name(&names.storages, row.storage_destination_id),
+        name(&names.agents, row.via_probe_id),
+    )
 }
 
 async fn index(State(ctx): State<AppContext>) -> AppResult<Response> {
@@ -150,8 +164,28 @@ async fn probe(
     State(ctx): State<AppContext>,
     Json(input): Json<DatabaseProbeInput>,
 ) -> AppResult<Response> {
-    let probe = service::probe(&ctx.db, input.into()).await?;
+    let probe = service::probe(&ctx, input.into()).await?;
     Ok(format::json(DatabaseProbeResponse::from(probe))?)
+}
+
+/// " pela ponte do agente 'X'" para a trilha de auditoria (ADR 013).
+async fn route_note(ctx: &AppContext, row: &database_connections::Model) -> String {
+    let Some(probe_id) = row.via_probe_id else {
+        return String::new();
+    };
+    let name = storage_names(ctx)
+        .await
+        .ok()
+        .and_then(|names| names.agents.get(&probe_id).cloned())
+        .unwrap_or_else(|| format!("#{probe_id}"));
+    format!(" pela ponte do agente '{name}'")
+}
+
+/// Agentes que podem levar a central até um banco (ADR 013).
+async fn agents(State(ctx): State<AppContext>) -> AppResult<Response> {
+    Ok(format::json(
+        route_options(&ctx, Permission::Database).await?,
+    )?)
 }
 
 async fn history(State(ctx): State<AppContext>, Path(id): Path<i64>) -> AppResult<Response> {
@@ -176,7 +210,11 @@ async fn run_backup(
         &headers,
         AuditAction::Execute,
         (row.id, &row.name),
-        format!("Backup manual da conexão '{}' iniciado", row.name),
+        format!(
+            "Backup manual da conexão '{}' iniciado{}",
+            row.name,
+            route_note(&ctx, &row).await
+        ),
     )
     .await;
     Ok((StatusCode::ACCEPTED, Json(job)).into_response())
@@ -200,12 +238,13 @@ async fn restore(
         AuditAction::Execute,
         (row.id, &row.name),
         format!(
-            "Restauração da cópia #{backup_id} em '{database}' ({}) da conexão '{}' iniciada",
+            "Restauração da cópia #{backup_id} em '{database}' ({}) da conexão '{}' iniciada{}",
             match mode {
                 crate::services::databases::RestoreMode::NewDatabase => "banco novo",
                 crate::services::databases::RestoreMode::Replace => "substituindo o existente",
             },
-            row.name
+            row.name,
+            route_note(&ctx, &row).await
         ),
     )
     .await;
@@ -217,6 +256,7 @@ pub fn routes() -> Routes {
         .prefix("/databases")
         .add("/", get(index).post(store))
         .add("/probe", post(probe))
+        .add("/agents", get(agents))
         .add("/{id}", get(show).put(update).delete(destroy))
         .add("/{id}/backups", get(history).post(run_backup))
         .add("/backups/{backup_id}/restore", post(restore))

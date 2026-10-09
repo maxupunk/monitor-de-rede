@@ -66,7 +66,7 @@ async fn connect(
     if let Some(database) = database {
         options = options.database(database);
     }
-    connect_with_timeout(&target.host, MySqlConnection::connect_with(&options)).await
+    connect_with_timeout(target, MySqlConnection::connect_with(&options)).await
 }
 
 async fn exec(conn: &mut MySqlConnection, sql: &str) -> Result<u64, DatabaseError> {

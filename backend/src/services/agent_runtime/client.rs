@@ -6,6 +6,7 @@
 
 use std::{sync::Arc, time::Duration};
 
+use crate::services::agents::protocol::WireFrame;
 use futures::{SinkExt, StreamExt};
 use rand::Rng;
 use tokio::sync::mpsc;
@@ -28,6 +29,7 @@ use super::{
     identity,
     outbox::Outbox,
     session::{self, DockerLiveSource, OutboxSink, SessionDeps},
+    tunnel::LocalTunnelOpener,
 };
 
 const TOKEN_HEADER: &str = "x-probe-token";
@@ -110,6 +112,10 @@ pub async fn run_forever(config: AgentConfig) {
         )),
         outbox: outbox.clone(),
         live: Arc::new(DockerLiveSource),
+        tunnels: Arc::new(LocalTunnelOpener::new(
+            config.policy.clone(),
+            config.database_targets.clone(),
+        )),
     };
     sampler::spawn(
         sampler::Sampler::new(HostMetricsReader::from_env(), Arc::new(LocalEngine)),
@@ -147,18 +153,18 @@ async fn connect_once(config: &AgentConfig, token: &str, deps: SessionDeps) -> R
         .map_err(|error| error.to_string())?;
     let (mut sink, mut stream) = socket.split();
 
-    let (incoming_tx, incoming_rx) = mpsc::channel::<String>(64);
-    let (outgoing_tx, mut outgoing_rx) = mpsc::channel::<String>(64);
+    let (incoming_tx, incoming_rx) = mpsc::channel::<WireFrame>(64);
+    let (outgoing_tx, mut outgoing_rx) = mpsc::channel::<WireFrame>(64);
     let reader = tokio::spawn(async move {
         while let Some(Ok(message)) = stream.next().await {
-            match message {
-                Message::Text(text) => {
-                    if incoming_tx.send(text.to_string()).await.is_err() {
-                        break;
-                    }
-                }
+            let frame = match message {
+                Message::Text(text) => WireFrame::Text(text.to_string()),
+                Message::Binary(bytes) => WireFrame::Binary(bytes.to_vec()),
                 Message::Close(_) => break,
-                _ => {}
+                _ => continue,
+            };
+            if incoming_tx.send(frame).await.is_err() {
+                break;
             }
         }
     });
@@ -166,9 +172,13 @@ async fn connect_once(config: &AgentConfig, token: &str, deps: SessionDeps) -> R
         let mut ping = tokio::time::interval(PING_INTERVAL);
         loop {
             tokio::select! {
-                text = outgoing_rx.recv() => {
-                    let Some(text) = text else { break };
-                    if sink.send(Message::Text(text.into())).await.is_err() {
+                frame = outgoing_rx.recv() => {
+                    let message = match frame {
+                        Some(WireFrame::Text(text)) => Message::Text(text.into()),
+                        Some(WireFrame::Binary(bytes)) => Message::Binary(bytes.into()),
+                        None => break,
+                    };
+                    if sink.send(message).await.is_err() {
                         break;
                     }
                 }

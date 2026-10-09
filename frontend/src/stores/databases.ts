@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import { apiService } from '@/services/apiService'
+import type { AgentRouteOption } from '@/bindings/AgentRouteOption'
 import type { DatabaseBackupResponse } from '@/bindings/DatabaseBackupResponse'
 import type { DatabaseConnectionInput } from '@/bindings/DatabaseConnectionInput'
 import type { DatabaseConnectionResponse } from '@/bindings/DatabaseConnectionResponse'
@@ -35,6 +36,8 @@ export function jobKey(kind: DatabaseJobSnapshot['kind'], connectionId: number):
 export const useDatabasesStore = defineStore('databases', () => {
   const connections = ref<DatabaseConnectionResponse[]>([])
   const jobs = ref<Record<string, DatabaseJobSnapshot>>({})
+  /** Agentes que podem levar a central até um banco (ADR 013). */
+  const agents = ref<AgentRouteOption[]>([])
   const loading = ref(false)
   const loaded = ref(false)
   const error = ref<string | null>(null)
@@ -51,6 +54,15 @@ export const useDatabasesStore = defineStore('databases', () => {
       return false
     } finally {
       loading.value = false
+    }
+  }
+
+  /** Lido ao abrir o formulário: o estado dos agentes muda a cada conexão. */
+  async function fetchAgents(): Promise<void> {
+    try {
+      agents.value = await apiService.get<AgentRouteOption[]>('/databases/agents')
+    } catch {
+      agents.value = []
     }
   }
 
@@ -133,6 +145,8 @@ export const useDatabasesStore = defineStore('databases', () => {
   return {
     connections,
     jobs,
+    agents,
+    fetchAgents,
     loading,
     loaded,
     error,

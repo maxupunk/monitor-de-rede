@@ -4,6 +4,10 @@
 //! armazenamento → uma linha em `database_backups` → retenção. Um banco que
 //! falha não impede os outros; o resumo vai para o cadastro da conexão.
 //!
+//! Pela ponte de um agente, o dump que perde o canal é refeito do zero
+//! ([`Reached::retrying`]) na mesma linha do histórico. A restauração não:
+//! reaplicar um arquivo pela metade não é seguro, e ela falha com a causa.
+//!
 //! As duas operações rodam em segundo plano: a rota devolve o andamento inicial
 //! e o resto chega pelo SSE ([`super::jobs`]). A trava ([`RunGuard`]) é pega
 //! **antes** de devolver, para o segundo clique receber `409` na hora, e não
@@ -16,12 +20,13 @@ use sea_orm::{
 };
 
 use super::{
-    dump::DumpWriter,
+    dump::{DumpFile, DumpStats, DumpWriter},
     jobs::{DatabaseJobKind, DatabaseJobSnapshot, Job},
+    reach::{reach, Reached},
     restore::LineReader,
     service::{self, Connection},
     sql::validate_database_name,
-    Progress, RestoreMode,
+    DatabaseError, DatabaseTarget, Progress, RestoreMode,
 };
 use crate::{
     models::{database_backups, database_connections},
@@ -132,7 +137,7 @@ pub async fn start_backup(
     let ctx = ctx.clone();
     tokio::spawn(async move {
         let _guard = guard;
-        run_backup(&ctx.db, &connection, &destination, &job, trigger).await;
+        run_backup(&ctx, &connection, &destination, &job, trigger).await;
         service::publish_updated(&ctx).await;
     });
     Ok(snapshot)
@@ -161,14 +166,15 @@ pub async fn destination_of(
 /// Não devolve erro: cada falha fica no histórico do banco e no resumo da
 /// conexão, que é o que a tela e o agendador leem.
 pub async fn run_backup(
-    db: &DatabaseConnection,
+    ctx: &AppContext,
     connection: &Connection,
     destination: &Destination,
     job: &Job,
     trigger: Trigger,
 ) {
+    let db = &ctx.db;
     let started = Utc::now();
-    let outcome = backup_all(db, connection, destination, job, trigger).await;
+    let outcome = backup_all(ctx, connection, destination, job, trigger).await;
 
     let (ok, message) = match &outcome {
         Ok(summary) if summary.failures.is_empty() => (
@@ -218,16 +224,26 @@ struct Summary {
 
 /// `Err` só quando nem deu para começar; falha de um banco vai no resumo.
 async fn backup_all(
-    db: &DatabaseConnection,
+    ctx: &AppContext,
     connection: &Connection,
     destination: &Destination,
     job: &Job,
     trigger: Trigger,
 ) -> AppResult<Summary> {
+    let db = &ctx.db;
     let explorer = destination.explorer()?;
-    let target = connection.target();
+    if connection.row.via_probe_id.is_some() {
+        job.stage("Abrindo a ponte pelo agente");
+    }
+    // A ponte (se houver) vive até o último banco ser copiado.
+    let reached = reach(ctx, connection.target(), connection.row.via_probe_id).await?;
     let databases = if connection.databases.is_empty() {
-        connection.engine.driver().probe(&target).await?.databases
+        let driver = connection.engine.driver();
+        reached
+            .retrying(job, || driver.probe(&reached.target))
+            .await?
+            .value
+            .databases
     } else {
         connection.databases.clone()
     };
@@ -242,19 +258,18 @@ async fn backup_all(
         copied: Vec::new(),
         failures: Vec::new(),
     };
+    let run = Run {
+        db,
+        connection,
+        destination,
+        explorer: explorer.as_ref(),
+        reached: &reached,
+        job,
+        trigger,
+    };
     for database in &databases {
         job.begin_database(database);
-        match backup_one(
-            db,
-            connection,
-            destination,
-            explorer.as_ref(),
-            database,
-            job,
-            trigger,
-        )
-        .await
-        {
+        match backup_one(&run, database).await {
             Ok(()) => summary.copied.push(database.clone()),
             Err(error) => summary.failures.push(format!("{database}: {error}")),
         }
@@ -263,15 +278,28 @@ async fn backup_all(
     Ok(summary)
 }
 
-async fn backup_one(
-    db: &DatabaseConnection,
-    connection: &Connection,
-    destination: &Destination,
-    explorer: &dyn storage::StorageExplorer,
-    database: &str,
-    job: &Job,
+/// O que é igual para todos os bancos de uma execução.
+struct Run<'a> {
+    db: &'a DatabaseConnection,
+    connection: &'a Connection,
+    destination: &'a Destination,
+    explorer: &'a dyn storage::StorageExplorer,
+    /// Já resolvido: direto ou a ponta local da ponte do agente.
+    reached: &'a Reached,
+    job: &'a Job,
     trigger: Trigger,
-) -> AppResult<()> {
+}
+
+async fn backup_one(run: &Run<'_>, database: &str) -> AppResult<()> {
+    let Run {
+        db,
+        connection,
+        destination,
+        explorer,
+        reached,
+        job,
+        trigger,
+    } = *run;
     let started = Utc::now();
     let history = database_backups::ActiveModel {
         connection_id: Set(connection.row.id),
@@ -292,13 +320,20 @@ async fn backup_one(
         uuid::Uuid::new_v4()
     ));
     let result = async {
-        let mut writer = DumpWriter::create(&temp).await?;
-        let stats = connection
-            .engine
-            .driver()
-            .dump(&connection.target(), database, &mut writer, job)
+        // Cada tentativa recria o arquivo: refazer é começar do zero.
+        let attempted = reached
+            .retrying(job, || {
+                dump_to(connection, &reached.target, database, &temp, job)
+            })
             .await?;
-        let file = writer.finish().await?;
+        let (mut stats, file) = attempted.value;
+        if attempted.attempts > 1 {
+            stats.warnings.push(format!(
+                "O canal com o agente caiu durante a cópia; ela foi refeita do zero e \
+                 concluída na tentativa {}",
+                attempted.attempts
+            ));
+        }
         job.stage("Enviando ao armazenamento");
         let key = object_key(&connection.row, database, started);
         explorer
@@ -336,6 +371,23 @@ async fn backup_one(
             Err(error)
         }
     }
+}
+
+/// Uma tentativa de dump de `database` em `path`.
+async fn dump_to(
+    connection: &Connection,
+    target: &DatabaseTarget,
+    database: &str,
+    path: &std::path::Path,
+    job: &Job,
+) -> Result<(DumpStats, DumpFile), DatabaseError> {
+    let mut writer = DumpWriter::create(path).await?;
+    let stats = connection
+        .engine
+        .driver()
+        .dump(target, database, &mut writer, job)
+        .await?;
+    Ok((stats, writer.finish().await?))
 }
 
 /// Apaga as cópias além da retenção — o arquivo e a linha.
@@ -459,9 +511,14 @@ pub async fn start_restore(
     job.begin_database(&database);
     let snapshot = job.snapshot();
     let checksum = backup.checksum.clone();
+    let ctx = ctx.clone();
     tokio::spawn(async move {
         let _guard = guard;
         let result = async {
+            if target.row.via_probe_id.is_some() {
+                job.stage("Abrindo a ponte pelo agente");
+            }
+            let reached = reach(&ctx, target.target(), target.row.via_probe_id).await?;
             let reader = destination
                 .explorer()?
                 .read_object(&key)
@@ -471,7 +528,7 @@ pub async fn start_restore(
             let stats = target
                 .engine
                 .driver()
-                .restore(&target.target(), &database, request.mode, &mut lines, &job)
+                .restore(&reached.target, &database, request.mode, &mut lines, &job)
                 .await?;
             Ok::<_, AppError>(stats)
         }
@@ -527,6 +584,7 @@ mod tests {
             ssl_mode: "prefer".into(),
             databases: serde_json::json!([]),
             storage_destination_id: None,
+            via_probe_id: None,
             backup_enabled: false,
             backup_interval_hours: 24,
             backup_retention: 7,

@@ -9,4 +9,8 @@ export type DatabaseProbeInput = {
 /**
  * Conexão em edição: senha vazia vem dela.
  */
-id?: number | null, engine: DatabaseEngine, host: string, port: number, username: string, password?: string, sslMode: SslMode, };
+id?: number | null, engine: DatabaseEngine, host: string, port: number, username: string, password?: string, sslMode: SslMode, 
+/**
+ * Testar pela ponte deste agente.
+ */
+viaProbeId?: number | null, };

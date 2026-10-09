@@ -13,6 +13,7 @@
       </v-card-title>
       <v-card-subtitle class="px-6 text-wrap">
         {{ engine.label }} em <code>{{ connection.host }}:{{ connection.port }}</code>
+        <span v-if="connection.viaProbeId != null"> {{ routeLabel(connection) }}</span>
         <span v-if="connection.storageDestinationName">
           → {{ connection.storageDestinationName }}</span
         >
@@ -139,7 +140,7 @@ import type { DatabaseConnectionResponse } from '@/bindings/DatabaseConnectionRe
 import DatabaseJobProgress from './DatabaseJobProgress.vue'
 import { useDatabasesStore } from '@/stores/databases'
 import { useStoragesStore } from '@/stores/storages'
-import { engineInfo } from '@/utils/databasePresentation'
+import { engineInfo, routeLabel } from '@/utils/databasePresentation'
 import {
   formatBytes,
   formatCompactCount,

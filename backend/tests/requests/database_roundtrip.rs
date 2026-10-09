@@ -12,12 +12,24 @@
 //!
 //! Sem a variável o teste passa sem fazer nada — a suíte não pode depender de
 //! um banco que a máquina do desenvolvedor não tem.
+//!
+//! Cada ida e volta roda duas vezes: direto e **pela ponte de um agente em
+//! memória** (ADR 013). A fixture e a impressão digital usam sempre a conexão
+//! direta; o dump e a restauração usam a rota testada — então "pela ponte"
+//! precisa produzir exatamente o mesmo banco que "direto".
 
-use backend::services::databases::{
-    dump::DumpWriter, restore::LineReader, DatabaseEngine, DatabaseTarget, NoProgress, RestoreMode,
-    SslMode,
+use backend::{
+    app::App,
+    services::databases::{
+        dump::DumpWriter, reach::reach, restore::LineReader, DatabaseEngine, DatabaseTarget,
+        NoProgress, RestoreMode, SslMode,
+    },
 };
+use loco_rs::testing::prelude::*;
+use serial_test::serial;
 use sqlx::{AssertSqlSafe, Connection, MySqlConnection, PgConnection, Row};
+
+use super::agent_harness::tunnel_agent;
 
 fn target_from_env(variable: &str, engine: DatabaseEngine) -> Option<DatabaseTarget> {
     let raw = std::env::var(variable).ok()?;
@@ -35,6 +47,7 @@ fn target_from_env(variable: &str, engine: DatabaseEngine) -> Option<DatabaseTar
         password: parts.next()?.to_string(),
         ssl_mode: SslMode::Disable,
         database: None,
+        via: None,
     })
 }
 
@@ -180,27 +193,25 @@ async fn pg_fingerprint(conn: &mut PgConnection) -> Vec<String> {
     out
 }
 
-#[tokio::test]
-async fn postgres_ida_e_volta_preserva_estrutura_e_dados() {
-    let Some(target) = target_from_env("NETMONITOR_TEST_POSTGRES", DatabaseEngine::Postgres) else {
-        return;
-    };
+/// `target` é a conexão direta (fixture e conferência); `route`, por onde o
+/// dump e a restauração passam.
+async fn postgres_roundtrip(target: &DatabaseTarget, route: &DatabaseTarget) {
     let source = unique("nm_src");
     let copy = unique("nm_dst");
-    let mut admin = pg(&target, "postgres").await;
+    let mut admin = pg(target, "postgres").await;
     sqlx::raw_sql(AssertSqlSafe(format!("CREATE DATABASE {source}")))
         .execute(&mut admin)
         .await
         .unwrap();
-    let mut conn = pg(&target, &source).await;
+    let mut conn = pg(target, &source).await;
     sqlx::raw_sql(PG_FIXTURE).execute(&mut conn).await.unwrap();
     let expected = pg_fingerprint(&mut conn).await;
 
-    let (stats, _) = dump_and_restore(&target, &source, &copy, RestoreMode::NewDatabase).await;
+    let (stats, _) = dump_and_restore(route, &source, &copy, RestoreMode::NewDatabase).await;
     assert_eq!(stats.tables, 5, "clientes, pedidos e as três de medições");
     assert_eq!(stats.rows, 3003 + 5000 + 63);
 
-    let mut restored = pg(&target, &copy).await;
+    let mut restored = pg(target, &copy).await;
     assert_eq!(pg_fingerprint(&mut restored).await, expected);
 
     // Identidade, serial e trigger continuam vivos depois da restauração.
@@ -221,8 +232,8 @@ async fn postgres_ida_e_volta_preserva_estrutura_e_dados() {
     let _ = restored.close().await;
 
     // Substituir: tudo ou nada, e o resultado é a cópia de novo.
-    let (_, _) = dump_and_restore(&target, &source, &copy, RestoreMode::Replace).await;
-    let mut replaced = pg(&target, &copy).await;
+    let (_, _) = dump_and_restore(route, &source, &copy, RestoreMode::Replace).await;
+    let mut replaced = pg(target, &copy).await;
     assert_eq!(pg_fingerprint(&mut replaced).await, expected);
     let _ = replaced.close().await;
     let _ = conn.close().await;
@@ -235,6 +246,14 @@ async fn postgres_ida_e_volta_preserva_estrutura_e_dados() {
         .await
         .unwrap();
     }
+}
+
+#[tokio::test]
+async fn postgres_ida_e_volta_preserva_estrutura_e_dados() {
+    let Some(target) = target_from_env("NETMONITOR_TEST_POSTGRES", DatabaseEngine::Postgres) else {
+        return;
+    };
+    postgres_roundtrip(&target, &target).await;
 }
 
 // --- MySQL / MariaDB ---------------------------------------------------------
@@ -340,20 +359,17 @@ async fn my_fingerprint(conn: &mut MySqlConnection) -> Vec<String> {
     out
 }
 
-async fn mysql_roundtrip(variable: &str, engine: DatabaseEngine) {
-    let Some(target) = target_from_env(variable, engine) else {
-        return;
-    };
+async fn mysql_roundtrip(target: &DatabaseTarget, route: &DatabaseTarget) {
     let source = unique("nm_src");
     let copy = unique("nm_dst");
-    let mut admin = my(&target, None).await;
+    let mut admin = my(target, None).await;
     sqlx::raw_sql(AssertSqlSafe(format!(
         "CREATE DATABASE {source} CHARACTER SET utf8mb4"
     )))
     .execute(&mut admin)
     .await
     .unwrap();
-    let mut conn = my(&target, Some(&source)).await;
+    let mut conn = my(target, Some(&source)).await;
     for statement in MY_FIXTURE {
         sqlx::raw_sql(AssertSqlSafe(statement.to_string()))
             .execute(&mut conn)
@@ -362,11 +378,11 @@ async fn mysql_roundtrip(variable: &str, engine: DatabaseEngine) {
     }
     let expected = my_fingerprint(&mut conn).await;
 
-    let (stats, _) = dump_and_restore(&target, &source, &copy, RestoreMode::NewDatabase).await;
+    let (stats, _) = dump_and_restore(route, &source, &copy, RestoreMode::NewDatabase).await;
     assert_eq!(stats.tables, 2);
     assert!(stats.rows > 6000, "linhas: {}", stats.rows);
 
-    let mut restored = my(&target, Some(&copy)).await;
+    let mut restored = my(target, Some(&copy)).await;
     assert_eq!(my_fingerprint(&mut restored).await, expected);
     // Procedure e trigger restaurados funcionam.
     sqlx::raw_sql("CALL conta_pedidos(3, @n)")
@@ -384,8 +400,8 @@ async fn mysql_roundtrip(variable: &str, engine: DatabaseEngine) {
     assert_eq!(nome, "aparado");
     let _ = restored.close().await;
 
-    let (_, _) = dump_and_restore(&target, &source, &copy, RestoreMode::Replace).await;
-    let mut replaced = my(&target, Some(&copy)).await;
+    let (_, _) = dump_and_restore(route, &source, &copy, RestoreMode::Replace).await;
+    let mut replaced = my(target, Some(&copy)).await;
     assert_eq!(my_fingerprint(&mut replaced).await, expected);
     let _ = replaced.close().await;
     let _ = conn.close().await;
@@ -400,10 +416,129 @@ async fn mysql_roundtrip(variable: &str, engine: DatabaseEngine) {
 
 #[tokio::test]
 async fn mysql_ida_e_volta_preserva_estrutura_e_dados() {
-    mysql_roundtrip("NETMONITOR_TEST_MYSQL", DatabaseEngine::Mysql).await;
+    if let Some(target) = target_from_env("NETMONITOR_TEST_MYSQL", DatabaseEngine::Mysql) {
+        mysql_roundtrip(&target, &target).await;
+    }
 }
 
 #[tokio::test]
 async fn mariadb_ida_e_volta_preserva_estrutura_e_dados() {
-    mysql_roundtrip("NETMONITOR_TEST_MARIADB", DatabaseEngine::Mariadb).await;
+    if let Some(target) = target_from_env("NETMONITOR_TEST_MARIADB", DatabaseEngine::Mariadb) {
+        mysql_roundtrip(&target, &target).await;
+    }
+}
+
+// --- Pela ponte do agente (ADR 013) ------------------------------------------
+
+/// Sobe um agente em memória com o banco liberado e abre a rota por ele.
+async fn through_agent(
+    ctx: &loco_rs::app::AppContext,
+    target: &DatabaseTarget,
+) -> backend::services::databases::reach::Reached {
+    let probe = tunnel_agent(ctx, "filial", &format!("{}:{}", target.host, target.port)).await;
+    reach(ctx, target.clone(), Some(probe.id))
+        .await
+        .unwrap_or_else(|error| panic!("ponte não abriu: {error}"))
+}
+
+#[tokio::test]
+#[serial]
+async fn postgres_pela_ponte_do_agente_da_o_mesmo_banco() {
+    let Some(target) = target_from_env("NETMONITOR_TEST_POSTGRES", DatabaseEngine::Postgres) else {
+        return;
+    };
+    request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
+        let reached = through_agent(&ctx, &target).await;
+        assert_eq!(
+            reached.target.host, "127.0.0.1",
+            "o sqlx conecta na ponta local"
+        );
+        assert_eq!(reached.target.via.as_deref(), Some("filial"));
+        postgres_roundtrip(&target, &reached.target).await;
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn mysql_pela_ponte_do_agente_da_o_mesmo_banco() {
+    for (variable, engine) in [
+        ("NETMONITOR_TEST_MYSQL", DatabaseEngine::Mysql),
+        ("NETMONITOR_TEST_MARIADB", DatabaseEngine::Mariadb),
+    ] {
+        let Some(target) = target_from_env(variable, engine) else {
+            continue;
+        };
+        request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
+            let reached = through_agent(&ctx, &target).await;
+            mysql_roundtrip(&target, &reached.target).await;
+        })
+        .await;
+    }
+}
+
+/// Destino fora de `AGENT_DATABASE_TARGETS`: a recusa é do agente e a
+/// mensagem dele chega inteira — não um "connection reset" do `sqlx`.
+#[tokio::test]
+#[serial]
+async fn destino_fora_da_lista_do_agente_e_recusado_com_a_razao() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
+        let probe = tunnel_agent(&ctx, "filial", "10.0.0.20:5432").await;
+        let target = DatabaseTarget {
+            engine: DatabaseEngine::Postgres,
+            host: "10.0.0.21".into(),
+            port: 5432,
+            username: "postgres".into(),
+            password: "x".into(),
+            ssl_mode: SslMode::Disable,
+            database: None,
+            via: None,
+        };
+        let Err(error) = reach(&ctx, target, Some(probe.id)).await else {
+            panic!("a ponte abriu para um destino fora da lista");
+        };
+        let message = error.to_string();
+        assert!(message.contains("AGENT_DATABASE_TARGETS"), "{message}");
+        assert!(message.contains("filial"), "{message}");
+    })
+    .await;
+}
+
+/// Agente sem a permissão `database`: a central nem pede a ponte.
+#[tokio::test]
+#[serial]
+async fn agente_sem_permissao_database_nao_abre_ponte() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
+        let (probe, _) = super::agent_harness::enrolled_agent(&ctx, "sem-ponte").await;
+        super::agent_harness::connect_agent_with(
+            &ctx,
+            probe.clone(),
+            super::agent_harness::agent_hello(vec![
+                backend::services::agents::policy::Permission::Read,
+            ]),
+            std::sync::Arc::new(super::agent_harness::NoCommands),
+            std::sync::Arc::new(
+                backend::services::agent_runtime::tunnel::LocalTunnelOpener::new(
+                    backend::services::agents::policy::Policy::default(),
+                    Vec::new(),
+                ),
+            ),
+        )
+        .await;
+        let target = DatabaseTarget {
+            engine: DatabaseEngine::Mysql,
+            host: "10.0.0.20".into(),
+            port: 3306,
+            username: "root".into(),
+            password: "x".into(),
+            ssl_mode: SslMode::Disable,
+            database: None,
+            via: None,
+        };
+        let Err(error) = reach(&ctx, target, Some(probe.id)).await else {
+            panic!("abriu ponte sem a permissão");
+        };
+        assert!(error.to_string().contains("'database'"), "{error}");
+    })
+    .await;
 }

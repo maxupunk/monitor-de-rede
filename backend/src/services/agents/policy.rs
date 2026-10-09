@@ -31,10 +31,14 @@ pub enum Permission {
     /// de um plugin de dispositivo. Fora do padrão: executa comandos com a
     /// credencial do equipamento e precisa ser liberado no host.
     DeviceIo,
+    /// Ponte TCP até um banco de dados da rede deste site, para o backup
+    /// feito pela central (ADR 013). Fora do padrão, e mesmo liberada só
+    /// alcança os destinos de `AGENT_DATABASE_TARGETS`.
+    Database,
 }
 
 impl Permission {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Read,
         Self::Lifecycle,
         Self::Update,
@@ -42,6 +46,7 @@ impl Permission {
         Self::Monitor,
         Self::Discovery,
         Self::DeviceIo,
+        Self::Database,
     ];
 
     #[must_use]
@@ -54,6 +59,7 @@ impl Permission {
             Self::Monitor => "monitor",
             Self::Discovery => "discovery",
             Self::DeviceIo => "device_io",
+            Self::Database => "database",
         }
     }
 }
@@ -160,8 +166,19 @@ mod tests {
 
     #[test]
     fn all_libera_tudo_e_vazio_cai_no_padrao() {
-        assert_eq!(Policy::parse("ALL").expect("all").permissions().len(), 7);
+        assert_eq!(
+            Policy::parse("ALL").expect("all").permissions().len(),
+            Permission::ALL.len()
+        );
         assert_eq!(Policy::parse(" ").expect("vazio"), Policy::default());
+    }
+
+    #[test]
+    fn ponte_de_banco_fica_fora_do_padrao() {
+        assert!(!Policy::default().allows(Permission::Database));
+        assert!(Policy::parse("read,database")
+            .expect("política")
+            .allows(Permission::Database));
     }
 
     #[test]

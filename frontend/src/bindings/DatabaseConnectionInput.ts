@@ -9,4 +9,9 @@ export type DatabaseConnectionInput = { name: string, engine: DatabaseEngine, ho
 /**
  * Vazio é "todos os bancos".
  */
-databases: Array<string>, storageDestinationId: number | null, backupEnabled: boolean, backupIntervalHours: number, backupRetention: number, };
+databases: Array<string>, storageDestinationId: number | null, 
+/**
+ * "Acessar a partir de": agente pelo qual a central chega ao banco;
+ * nulo é direto (ADR 013).
+ */
+viaProbeId: number | null, backupEnabled: boolean, backupIntervalHours: number, backupRetention: number, };

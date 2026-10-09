@@ -9,9 +9,9 @@ use sea_orm::{
     QueryOrder, Set,
 };
 
-use super::{DatabaseEngine, DatabaseTarget, Probe, SslMode};
+use super::{reach::reach, DatabaseEngine, DatabaseTarget, Probe, SslMode};
 use crate::{
-    models::{database_connections, storage_destinations},
+    models::{database_connections, probes, storage_destinations},
     services::shared::{
         backup_schedule::validate_policy,
         crypto,
@@ -33,6 +33,8 @@ pub struct ConnectionInput {
     /// Bancos a copiar; vazio é "todos", inclusive os criados depois.
     pub databases: Vec<String>,
     pub storage_destination_id: Option<i64>,
+    /// Agente pelo qual a central chega ao banco; `None` = direto (ADR 013).
+    pub via_probe_id: Option<i64>,
     pub backup_enabled: bool,
     pub backup_interval_hours: i32,
     pub backup_retention: i32,
@@ -59,6 +61,7 @@ impl Connection {
             password: self.password.clone(),
             ssl_mode: self.ssl_mode,
             database: None,
+            via: None,
         }
     }
 }
@@ -146,6 +149,7 @@ pub async fn create<C: ConnectionTrait>(
         ssl_mode: Set(input.ssl_mode.as_str().to_string()),
         databases: Set(serde_json::json!(input.databases)),
         storage_destination_id: Set(input.storage_destination_id),
+        via_probe_id: Set(input.via_probe_id),
         backup_enabled: Set(input.backup_enabled),
         backup_interval_hours: Set(input.backup_interval_hours),
         backup_retention: Set(input.backup_retention),
@@ -180,6 +184,7 @@ pub async fn update<C: ConnectionTrait>(
     row.ssl_mode = Set(input.ssl_mode.as_str().to_string());
     row.databases = Set(serde_json::json!(input.databases));
     row.storage_destination_id = Set(input.storage_destination_id);
+    row.via_probe_id = Set(input.via_probe_id);
     row.backup_enabled = Set(input.backup_enabled);
     row.backup_interval_hours = Set(input.backup_interval_hours);
     row.backup_retention = Set(input.backup_retention);
@@ -209,6 +214,8 @@ pub struct ProbeInput {
     pub username: String,
     pub password: Option<String>,
     pub ssl_mode: SslMode,
+    /// Testar pela ponte deste agente.
+    pub via_probe_id: Option<i64>,
 }
 
 /// Testa os dados do formulário. Com `id` e senha ausente, usa a gravada.
@@ -217,10 +224,10 @@ pub struct ProbeInput {
 ///
 /// Só falhas daqui (cadastro inexistente, senha ilegível, campo inválido); o
 /// servidor que não responde volta como erro de conexão com a mensagem dele.
-pub async fn probe<C: ConnectionTrait>(db: &C, input: ProbeInput) -> AppResult<Probe> {
+pub async fn probe(ctx: &loco_rs::app::AppContext, input: ProbeInput) -> AppResult<Probe> {
     let password = match (input.password, input.id) {
         (Some(password), _) => password,
-        (None, Some(id)) => load(db, id).await?.password,
+        (None, Some(id)) => load(&ctx.db, id).await?.password,
         (None, None) => String::new(),
     };
     let target = DatabaseTarget {
@@ -231,8 +238,10 @@ pub async fn probe<C: ConnectionTrait>(db: &C, input: ProbeInput) -> AppResult<P
         password,
         ssl_mode: input.ssl_mode,
         database: None,
+        via: None,
     };
-    Ok(input.engine.driver().probe(&target).await?)
+    let reached = reach(ctx, target, input.via_probe_id).await?;
+    Ok(input.engine.driver().probe(&reached.target).await?)
 }
 
 /// Avisa as telas abertas que a lista mudou.
@@ -277,6 +286,12 @@ async fn normalize<C: ConnectionTrait>(
         return Err(AppError::validation(
             "Escolha um armazenamento para ligar o backup automático",
         ));
+    }
+    if let Some(probe_id) = input.via_probe_id {
+        probes::Entity::find_by_id(probe_id)
+            .one(db)
+            .await?
+            .ok_or_else(|| AppError::validation("O agente escolhido não existe mais"))?;
     }
     if let Some(destination) = input.storage_destination_id {
         storage_destinations::Entity::find_by_id(destination)

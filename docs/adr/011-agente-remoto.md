@@ -106,3 +106,23 @@ valendo:
   `AGENT_DEVICE_CIDRS` (opcional) restringe mais;
 - a credencial viaja no pedido, pelo WSS já autenticado, e não é gravada no
   agente.
+
+## Adendo (2026-10-08) — ponte de banco (`Command::DatabaseTunnel`)
+
+O backup de bancos que só a rede de um site alcança passa pelo agente dele
+([ADR 013](013-ponte-de-banco-pelo-agente.md)). O "nenhum proxy genérico"
+continua valendo — a ponte é um comando fechado, como o `device_io` é por
+operação:
+
+- o agente só **copia bytes** até um `host:porta` — não fala SQL, não recebe
+  dump nem script; o dump continua na central;
+- permissão nova `database`, **fora** do padrão do `AGENT_ALLOW`;
+- lista local **obrigatória** `AGENT_DATABASE_TARGETS` (vazia recusa tudo), só
+  rede privada/CGNAT/link-local; a central não a amplia;
+- vida curta (só durante um backup ou restauração), no máximo 2 pontes por
+  agente, e o canal de controle passa na frente dos dados;
+- os dados vão em quadros **binários** com janela de crédito e zstd
+  adaptativo; continua sem nenhuma porta aberta no agente;
+- o protocolo passou para a **versão 2**, e o handshake recusa versão
+  diferente: central e agente sobem juntos.
+

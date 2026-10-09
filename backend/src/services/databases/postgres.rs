@@ -75,7 +75,7 @@ async fn connect(target: &DatabaseTarget, database: &str) -> Result<PgConnection
             SslMode::Prefer => PgSslMode::Prefer,
             SslMode::Require => PgSslMode::Require,
         });
-    connect_with_timeout(&target.host, PgConnection::connect_with(&options)).await
+    connect_with_timeout(target, PgConnection::connect_with(&options)).await
 }
 
 fn maintenance(target: &DatabaseTarget) -> &str {
