@@ -406,6 +406,13 @@ pub trait AiToolHandler: Send + Sync {
 
     async fn execute(&self, ctx: &AppContext, args: &ToolArgs) -> AppResult<ToolOutput>;
 
+    /// Host ou IP que o teste ativo vai alcançar; `None` quando a ferramenta
+    /// não gera tráfego para um alvo. O agente confere a origem dele antes de
+    /// executar ou pedir confirmação (`harness::grounding`).
+    fn network_target(&self, _args: &ToolArgs) -> Option<String> {
+        None
+    }
+
     /// Frase que o usuário lê antes de confirmar ("Silenciar o alerta #12 por
     /// 60 min"). Só é chamada para ferramentas que pedem confirmação.
     async fn preview(&self, _ctx: &AppContext, _args: &ToolArgs) -> AppResult<String> {
@@ -607,6 +614,14 @@ impl ToolRegistry {
             )));
         }
         handler.execute(ctx, &arguments).await
+    }
+
+    /// O alvo de rede da chamada, se a ferramenta tem um.
+    #[must_use]
+    pub fn network_target(&self, name: &str, arguments_json: &str) -> Option<String> {
+        self.handler(name)
+            .ok()?
+            .network_target(&ToolArgs::parse(arguments_json))
     }
 
     /// Se a chamada precisa passar pelo usuário antes de rodar.

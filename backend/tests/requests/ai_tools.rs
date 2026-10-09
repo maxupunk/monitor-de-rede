@@ -10,7 +10,13 @@ use backend::{
     models::_entities::{
         alert_events, device_interfaces, devices, metrics, monitor_results, monitors,
     },
-    services::ai::harness::tools::{ToolPolicy, ToolRegistry},
+    services::ai::{
+        drivers::traits::AiMessage,
+        harness::{
+            grounding::invented_target,
+            tools::{ToolPolicy, ToolRegistry},
+        },
+    },
 };
 use chrono::{Duration, Utc};
 use loco_rs::{prelude::AppContext, testing::prelude::*};
@@ -292,6 +298,91 @@ async fn alvo_inexistente_volta_como_dado_e_ferramenta_ativa_desligada_nao_roda(
                 .await
                 .is_err(),
             "ping fora do registro quando as ferramentas ativas estão desligadas"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn monitores_instaveis_saem_numa_consulta_so() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
+        let dev = aparelho(&ctx).await;
+        let oscilando = ping(&ctx, dev.id).await;
+        let estavel = ping(&ctx, dev.id).await;
+        let inicio = Utc::now() - Duration::hours(1);
+        alert_events::ActiveModel {
+            monitor_id: Set(Some(oscilando.id)),
+            scope_key: Set(Some(format!("monitor:{}", oscilando.id))),
+            status: Set("flapping".into()),
+            severity: Set("warning".into()),
+            started_at: Set(inicio.into()),
+            data: Set(Some(json!({ "recurrenceCount": 3 }))),
+            created_at: Set(inicio.into()),
+            updated_at: Set(inicio.into()),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .unwrap();
+
+        let registro = ToolRegistry::new(ToolPolicy::passive());
+        let todos = registro
+            .execute(&ctx, "list_monitors", r#"{"type": "ping"}"#)
+            .await
+            .unwrap();
+        assert_eq!(todos.data["total"], 2);
+
+        let instaveis = registro
+            .execute(
+                &ctx,
+                "list_monitors",
+                r#"{"type": "ping", "unstable": true}"#,
+            )
+            .await
+            .unwrap();
+        assert_eq!(instaveis.data["total"], 1, "{}", instaveis.data);
+        let linha = &instaveis.data["monitors"][0];
+        assert_eq!(linha["id"], oscilando.id);
+        assert_eq!(linha["drops_24h"], 4, "o episódio e as três recaídas");
+        assert_eq!(linha["flapping"], true);
+        assert_ne!(linha["id"], estavel.id);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn alvo_interno_sem_origem_e_recusado_antes_do_teste() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
+        let dev = aparelho(&ctx).await;
+        ping(&ctx, dev.id).await;
+        let conversa = [AiMessage {
+            role: "user".into(),
+            content: Some("quais ping estão instáveis agora? e o 192.168.7.7?".into()),
+            tool_calls: None,
+            tool_call_id: None,
+        }];
+
+        let inventado = invented_target(&ctx.db, &conversa, "10.0.0.2").await;
+        assert!(inventado.unwrap().contains("ask_user"));
+        assert!(
+            invented_target(&ctx.db, &conversa, "10.0.0.1")
+                .await
+                .is_none(),
+            "IP cadastrado no inventário"
+        );
+        assert!(
+            invented_target(&ctx.db, &conversa, "192.168.7.7")
+                .await
+                .is_none(),
+            "IP que o usuário escreveu"
+        );
+        assert!(
+            invented_target(&ctx.db, &conversa, "8.8.8.8")
+                .await
+                .is_none(),
+            "alvo público é conhecimento geral"
         );
     })
     .await;

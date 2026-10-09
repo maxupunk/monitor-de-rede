@@ -70,6 +70,10 @@ impl AiToolHandler for Ping {
         ToolKind::Active
     }
 
+    fn network_target(&self, args: &ToolArgs) -> Option<String> {
+        args.text("target")
+    }
+
     async fn preview(&self, _ctx: &AppContext, args: &ToolArgs) -> AppResult<String> {
         let count = args.integer_in("count", 3, 1, 5);
         Ok(format!(
@@ -121,6 +125,10 @@ impl AiToolHandler for Traceroute {
 
     fn kind(&self) -> ToolKind {
         ToolKind::Active
+    }
+
+    fn network_target(&self, args: &ToolArgs) -> Option<String> {
+        args.text("target")
     }
 
     async fn preview(&self, _ctx: &AppContext, args: &ToolArgs) -> AppResult<String> {
@@ -191,6 +199,10 @@ impl AiToolHandler for ScanPorts {
 
     fn kind(&self) -> ToolKind {
         ToolKind::Active
+    }
+
+    fn network_target(&self, args: &ToolArgs) -> Option<String> {
+        args.text("target")
     }
 
     async fn preview(&self, _ctx: &AppContext, args: &ToolArgs) -> AppResult<String> {
@@ -265,6 +277,15 @@ impl AiToolHandler for DnsLookup {
         ToolKind::Active
     }
 
+    fn network_target(&self, args: &ToolArgs) -> Option<String> {
+        let server = args.text("server")?;
+        Some(
+            server
+                .parse::<std::net::SocketAddr>()
+                .map_or(server, |address| address.ip().to_string()),
+        )
+    }
+
     async fn preview(&self, _ctx: &AppContext, args: &ToolArgs) -> AppResult<String> {
         Ok(format!(
             "Resolver {} no DNS {}",
@@ -320,6 +341,12 @@ impl AiToolHandler for Playbook {
 
     fn kind(&self) -> ToolKind {
         ToolKind::Active
+    }
+
+    fn network_target(&self, args: &ToolArgs) -> Option<String> {
+        (args.text("playbook_type").as_deref() == Some("device_reachability"))
+            .then(|| args.text("target"))
+            .flatten()
     }
 
     async fn preview(&self, _ctx: &AppContext, args: &ToolArgs) -> AppResult<String> {

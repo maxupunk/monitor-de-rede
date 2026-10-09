@@ -66,6 +66,12 @@
             : 'Acesso real ao equipamento, só leitura. A IA pode interpretar errado o que ler.'
         }}
       </v-alert>
+      <div v-if="activeTest && tool.status === 'awaiting'" class="text-body-small mb-2">
+        Pedido porque “Pedir minha confirmação antes de cada teste ativo” está ligado.
+        <router-link :to="{ name: 'settings', query: { tab: 'ia' } }" class="text-primary">
+          Mudar nas configurações da IA
+        </router-link>
+      </div>
       <div v-if="tool.status === 'awaiting'" class="d-flex ga-2 flex-wrap">
         <v-btn
           size="small"
@@ -119,7 +125,7 @@ import { computed, ref } from 'vue'
 import { useAiStore, type AiToolCallState } from '@/stores/ai'
 import type { AiToolStatus } from '@/utils/aiChatStream'
 import AiToolChart from './AiToolChart.vue'
-import { aiToolMeta, formatToolArgs, isDeviceAccessTool } from './aiToolMeta'
+import { aiToolMeta, formatToolArgs, isActiveTestTool, isDeviceAccessTool } from './aiToolMeta'
 
 const props = defineProps<{
   tool: AiToolCallState
@@ -131,6 +137,7 @@ const expanded = ref(false)
 
 const meta = computed(() => aiToolMeta(props.tool.name))
 const deviceAccess = computed(() => isDeviceAccessTool(props.tool.name))
+const activeTest = computed(() => isActiveTestTool(props.tool.name))
 /** O backend escreve "ALTERA O EQUIPAMENTO" no resumo quando o efeito é escrita. */
 const writes = computed(() => (props.tool.summary ?? '').includes('ALTERA O EQUIPAMENTO'))
 

@@ -20,6 +20,7 @@ use super::{
         prune_tool_results, small_window_notice, summarize, supersede_repeated_results,
         worth_folding, ContextBudget,
     },
+    grounding::invented_target,
     prompt::{build_small_talk_prompt, build_system_prompt, build_turn_context, ChatContext},
     tools::{
         target_device_id, ToolArgs, ToolGroup, ToolGroups, ToolKind, ToolPolicy, ToolRegistry,
@@ -446,6 +447,21 @@ async fn handle_tool_call(
             tool_call_id: Some(tool.id),
         });
         return ToolFlow::Continue;
+    }
+
+    // Alvo interno inventado volta para a IA como erro, sem card nem pedido
+    // de confirmação: o usuário não tem o que decidir sobre um IP sem origem.
+    if let Some(target) = registry.network_target(&tool.name, &tool.arguments) {
+        if let Some(rejection) = invented_target(&ctx.db, conversation, &target).await {
+            tracing::info!(tool = %tool.name, %target, "teste ativo recusado: alvo sem origem");
+            conversation.push(AiMessage {
+                role: "tool".to_string(),
+                content: Some(json!({ "error": rejection }).to_string()),
+                tool_calls: None,
+                tool_call_id: Some(tool.id),
+            });
+            return ToolFlow::Continue;
+        }
     }
 
     let mut flow = ToolFlow::Continue;

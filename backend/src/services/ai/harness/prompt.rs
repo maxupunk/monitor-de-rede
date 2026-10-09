@@ -40,7 +40,7 @@ regra ruidosa: ajuste antes de excluir.
 Resultados de lista vêm como tabela: {columns, rows}.";
 
 const ACTIVE_TOOLS: &str =
-    "8. Testes ativos (ping, traceroute, portas, DNS, playbooks) dão o estado de agora.";
+    "8. Testes ativos (ping, traceroute, portas, DNS, playbooks) dão o estado de agora; nunca invente o alvo.";
 
 const ACTIONS: &str = "9. Ações (alerta, manutenção, monitor, regras) só rodam depois que o usuário confirma no chat. \
 Proponha quando resolverem o pedido; ao receber 'awaiting_user_confirmation', diga em uma frase o que propôs e não repita a chamada.";

@@ -15,6 +15,22 @@ export function isDeviceAccessTool(name: string): boolean {
   return DEVICE_ACCESS_TOOLS.has(name)
 }
 
+/**
+ * Testes ativos de rede: só pedem confirmação quando "Pedir minha confirmação
+ * antes de cada teste ativo" está ligado — o card diz isso ao usuário.
+ */
+const ACTIVE_TEST_TOOLS = new Set([
+  'ping_host',
+  'traceroute',
+  'scan_ports',
+  'dns_lookup',
+  'run_playbook',
+])
+
+export function isActiveTestTool(name: string): boolean {
+  return ACTIVE_TEST_TOOLS.has(name)
+}
+
 /** Rótulo, ícone e cor de cada ferramenta da IA exibida no chat. */
 export interface AiToolMeta {
   label: string

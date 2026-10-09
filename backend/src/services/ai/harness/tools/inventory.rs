@@ -17,8 +17,13 @@ use super::{
 use crate::{
     models::_entities::{alert_events, device_interfaces, devices, monitors},
     services::{
-        ai::knowledge, alerts::contracts::AlertStatus,
-        monitoring::metrics_repository::latest_for_interfaces, shared::errors::AppResult,
+        ai::knowledge,
+        alerts::{
+            contracts::{AlertScopeKey, AlertStatus},
+            instability::{self, ScopeInstability},
+        },
+        monitoring::metrics_repository::latest_for_interfaces,
+        shared::errors::AppResult,
     },
 };
 
@@ -337,7 +342,7 @@ impl AiToolHandler for ListMonitors {
     }
 
     fn description(&self) -> &'static str {
-        "Lista monitores (id, nome, tipo, status, dispositivo). Use para achar o monitor_id antes de consultar histórico ou gráfico."
+        "Lista monitores (id, nome, tipo, status, dispositivo, quedas em 24h). Instáveis: unstable=true. Use para achar o monitor_id antes de histórico ou gráfico."
     }
 
     fn parameters(&self) -> Value {
@@ -346,7 +351,8 @@ impl AiToolHandler for ListMonitors {
             "properties": {
                 "device": { "type": "string", "description": DEVICE_ARG },
                 "type": { "type": "string", "description": "Tipo do monitor: ping, http, tcp, dns, snmp..." },
-                "status": { "type": "string", "enum": ["up", "down", "warning", "unknown"] }
+                "status": { "type": "string", "enum": ["up", "down", "warning", "unknown"] },
+                "unstable": { "type": "boolean", "description": "Só os que caíram em 24h ou oscilam" }
             }
         })
     }
@@ -366,12 +372,24 @@ impl AiToolHandler for ListMonitors {
             query = query.filter(monitors::Column::Status.eq(status));
         }
 
-        let found = query.all(&ctx.db).await?;
+        let instability: HashMap<String, ScopeInstability> =
+            instability::load(&ctx.db, instability::DEFAULT_HOURS, None)
+                .await?
+                .into_iter()
+                .map(|scope| (scope.scope_key.clone(), scope))
+                .collect();
+        let shaky =
+            |monitor: &monitors::Model| instability.get(&AlertScopeKey::monitor(monitor.id));
+        let mut found = query.all(&ctx.db).await?;
+        if args.flag("unstable") {
+            found.retain(|monitor| shaky(monitor).is_some());
+        }
         let names = device_names(&ctx.db, found.iter().filter_map(|m| m.device_id)).await?;
         let rows: Vec<Value> = found
             .iter()
             .take(MAX_LIST_ROWS)
             .map(|monitor| {
+                let scope = shaky(monitor);
                 json!({
                     "id": monitor.id,
                     "name": monitor.name,
@@ -380,6 +398,8 @@ impl AiToolHandler for ListMonitors {
                     "enabled": monitor.enabled,
                     "device": monitor.device_id.and_then(|id| names.get(&id)),
                     "last_run": monitor.last_run_at,
+                    "drops_24h": scope.map_or(0, |scope| scope.oscillations),
+                    "flapping": scope.is_some_and(|scope| scope.flapping),
                 })
             })
             .collect();
