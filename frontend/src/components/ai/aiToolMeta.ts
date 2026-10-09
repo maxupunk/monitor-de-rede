@@ -31,14 +31,40 @@ export function isActiveTestTool(name: string): boolean {
   return ACTIVE_TEST_TOOLS.has(name)
 }
 
+/**
+ * Natureza da ferramenta, que decide quanto espaço ela ocupa no chat:
+ * - `lookup`: consulta passiva aos dados da plataforma — concluída, vira uma linha;
+ * - `test`: teste ativo de rede (ping, traceroute…);
+ * - `chart`: desenha um gráfico na conversa;
+ * - `action`: altera algo na plataforma (alerta, monitor, container…);
+ * - `device`: toca um equipamento real ou grava plugin.
+ */
+export type AiToolKind = 'lookup' | 'test' | 'chart' | 'action' | 'device'
+
+/** Ferramentas que alteram a plataforma (ou interrompem a IA para perguntar). */
+const ACTION_TOOLS = new Set([
+  'docker_container_action',
+  'acknowledge_alert',
+  'silence_alert',
+  'create_maintenance_window',
+  'create_monitor',
+  'create_alert_rule',
+  'toggle_alert_rule',
+  'delete_alert_rule',
+  'ask_user',
+])
+
 /** Rótulo, ícone e cor de cada ferramenta da IA exibida no chat. */
 export interface AiToolMeta {
   label: string
   icon: string
   color: string
+  kind: AiToolKind
 }
 
-const TOOL_META: Record<string, AiToolMeta> = {
+type AiToolLook = Omit<AiToolMeta, 'kind'>
+
+const TOOL_META: Record<string, AiToolLook> = {
   get_system_summary: {
     label: 'Resumo da Infraestrutura',
     icon: 'mdi-chart-box-outline',
@@ -219,8 +245,21 @@ const TOOL_META: Record<string, AiToolMeta> = {
   },
 }
 
+/**
+ * Natureza da ferramenta. Uma ferramenta desconhecida conta como `action`:
+ * sem saber o que ela faz, o chat a mostra inteira em vez de escondê-la.
+ */
+export function aiToolKind(name: string): AiToolKind {
+  if (DEVICE_ACCESS_TOOLS.has(name)) return 'device'
+  if (ACTIVE_TEST_TOOLS.has(name)) return 'test'
+  if (name.startsWith('chart_')) return 'chart'
+  if (ACTION_TOOLS.has(name) || !(name in TOOL_META)) return 'action'
+  return 'lookup'
+}
+
 export function aiToolMeta(name: string): AiToolMeta {
-  return TOOL_META[name] ?? { label: name, icon: 'mdi-cog-outline', color: 'grey' }
+  const look = TOOL_META[name] ?? { label: name, icon: 'mdi-cog-outline', color: 'primary' }
+  return { ...look, kind: aiToolKind(name) }
 }
 
 /** Resumo de uma linha dos argumentos, na ordem do que mais identifica a chamada. */

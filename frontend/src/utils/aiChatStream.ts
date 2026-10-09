@@ -292,7 +292,7 @@ export function applyCompaction(
 }
 
 /** Nome da ferramenta com que a IA pergunta ao usuário antes de prosseguir. */
-export const ASK_USER_TOOL = 'ask_user'
+const ASK_USER_TOOL = 'ask_user'
 
 export interface AiQuestion {
   question: string
@@ -308,6 +308,20 @@ export function toolQuestion(tool: AiToolCallState): AiQuestion | null {
   return { question: tool.result.question, options }
 }
 
+/** Teto do rótulo de uma decisão: o resumo pode ter várias linhas e avisos. */
+const MAX_DECISION_LABEL = 120
+
+/**
+ * O que identifica a ação na nota: a primeira linha do resumo, curta. O resto
+ * (avisos de acesso a equipamento, detalhes) já foi lido pelo usuário e só
+ * custaria tokens em toda pergunta seguinte.
+ */
+function decisionLabel(tool: AiToolCallState): string {
+  const first = (tool.summary ?? '').split('\n')[0].trim()
+  if (!first) return tool.name
+  return first.length > MAX_DECISION_LABEL ? `${first.slice(0, MAX_DECISION_LABEL)}…` : first
+}
+
 /**
  * Nota que conta à IA o que ficou fora do texto: o que o usuário decidiu
  * sobre uma ação proposta, ou a pergunta que ela mesma fez.
@@ -318,7 +332,7 @@ function decisionNote(tool: AiToolCallState): string | null {
     const options = question.options.length ? ` Opções: ${question.options.join(', ')}.` : ''
     return `[Perguntei ao usuário: ${question.question}${options}]`
   }
-  const label = tool.summary || tool.name
+  const label = decisionLabel(tool)
   if (tool.status === 'cancelled') return `[Ação cancelada pelo usuário: ${label}]`
   if (tool.status === 'awaiting') return `[Ação ainda aguardando confirmação: ${label}]`
   if (tool.summary && tool.status === 'done') return `[Ação confirmada e executada: ${label}]`
@@ -327,23 +341,21 @@ function decisionNote(tool: AiToolCallState): string | null {
 }
 
 /**
- * Histórico enviado ao backend. Mensagens com erro ficam de fora; as
- * respostas levam anotadas as decisões sobre ações propostas, para a IA não
- * propor de novo o que já foi feito ou recusado.
+ * Cada mensagem enviada junto do id da mensagem da tela de onde saiu.
+ * Mensagens com erro ficam de fora; as respostas levam anotadas as decisões
+ * sobre ações propostas, para a IA não propor de novo o que já foi feito ou
+ * recusado. As marcações da última pergunta não viram nota: vão em `mentions`
+ * e o backend as expande no contexto da vez.
  */
-export function toApiMessages(messages: AiDisplayMessage[]): ApiChatMessage[] {
-  return toApiEntries(messages).map((entry) => entry.message)
-}
-
-/** Cada mensagem enviada junto do id da mensagem da tela de onde saiu. */
 function toApiEntries(messages: AiDisplayMessage[]): { id: string; message: ApiChatMessage }[] {
+  const last = messages[messages.length - 1]
   return messages
     .filter((message) => !message.error)
     .map((message) => {
       const notes = (message.toolCalls ?? [])
         .map(decisionNote)
         .filter((note): note is string => note !== null)
-      if (message.mentions?.length) {
+      if (message.mentions?.length && message !== last) {
         notes.push(`[Marcados com @: ${message.mentions.map(describeMention).join('; ')}]`)
       }
       const content = [message.content, ...notes].filter((part) => part.trim()).join('\n')

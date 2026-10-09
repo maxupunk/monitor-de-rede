@@ -3,1453 +3,229 @@
     <v-card-title class="font-weight-bold d-flex align-center justify-space-between flex-wrap ga-2">
       <div class="d-flex align-center">
         <v-icon start color="primary">mdi-robot-outline</v-icon>
-        Assistente Inteligente (IA)
+        Assistente inteligente (IA)
       </div>
-      <div class="d-flex align-center ga-3">
-        <v-btn
-          color="primary"
-          variant="flat"
-          size="small"
-          :loading="aiStore.savingSettings"
-          @click="handleSave"
-        >
-          <v-icon start size="16">mdi-content-save-outline</v-icon>
-          Salvar
-        </v-btn>
-        <v-switch
-          v-model="form.enabled"
-          color="primary"
-          density="compact"
-          hide-details
-          label="Ativo"
-        />
-      </div>
+      <v-switch
+        v-model="form.enabled"
+        color="primary"
+        density="compact"
+        hide-details
+        label="Ativo"
+      />
     </v-card-title>
 
-    <v-card-subtitle>
-      Configuração do provedor de IA para diagnósticos de rede e dúvidas do sistema
+    <v-card-subtitle class="text-wrap">
+      Provedor de IA para diagnósticos de rede e dúvidas sobre o sistema
     </v-card-subtitle>
 
     <v-divider class="my-2" />
 
     <v-card-text class="flex-grow-1">
-      <!-- Alerta de erro ao salvar -->
-      <v-alert
-        v-if="localSaveError || aiStore.saveError"
-        type="error"
-        variant="tonal"
-        density="compact"
-        class="mb-3"
-        icon="mdi-alert-circle-outline"
-        closable
-        @click:close="dismissSaveError"
-      >
-        <strong>Erro ao salvar:</strong> {{ localSaveError || aiStore.saveError }}
-      </v-alert>
+      <v-progress-linear v-if="!loaded" indeterminate color="primary" />
+      <template v-else>
+        <v-alert v-if="!form.enabled" type="info" variant="tonal" density="compact" class="mb-4">
+          O assistente está desligado. Ligue a chave <strong>Ativo</strong> no topo do cartão para
+          usar o chat de diagnóstico e suporte.
+        </v-alert>
 
-      <!-- Alerta de sucesso ao salvar -->
-      <v-alert
-        v-if="localSaveSuccess"
-        type="success"
-        variant="tonal"
-        density="compact"
-        class="mb-3"
-        icon="mdi-check-circle-outline"
-        closable
-        @click:close="localSaveSuccess = null"
-      >
-        {{ localSaveSuccess }}
-      </v-alert>
+        <!-- Provedor e modelo -->
+        <div class="font-weight-bold mb-2">Provedor</div>
+        <v-select
+          v-model="form.activeDriver"
+          label="Provedor de IA"
+          :items="DRIVER_OPTIONS"
+          item-title="title"
+          item-value="value"
+          variant="outlined"
+          density="compact"
+          prepend-inner-icon="mdi-swap-horizontal"
+          hide-details="auto"
+          class="mb-3"
+        />
+        <OllamaProviderFields
+          v-if="driver === 'ollama'"
+          v-model:base-url="form.ollamaBaseUrl"
+          v-model:model="form.ollamaModel"
+          v-model:num-ctx="form.ollamaNumCtx"
+          @open-catalog="showModelSearchDialog = true"
+          @install="installOllamaModel"
+        />
+        <OpenrouterProviderFields
+          v-else-if="driver === 'openrouter'"
+          v-model:api-key="form.openrouterApiKey"
+          v-model:model="form.openrouterModel"
+          @open-catalog="showModelSearchDialog = true"
+        />
+        <OpencodeProviderFields
+          v-else
+          v-model:api-key="form.opencodeApiKey"
+          v-model:model="form.opencodeModel"
+          :base-url="form.opencodeBaseUrl"
+          @open-catalog="showModelSearchDialog = true"
+        />
 
-      <v-alert v-if="!form.enabled" type="info" variant="tonal" density="compact" class="mb-4">
-        O assistente IA está desativado. Ative-o acima para habilitar o chat de diagnóstico e
-        suporte.
-      </v-alert>
+        <v-divider class="my-5" />
 
-      <v-row dense>
-        <!-- Seleção do Driver -->
-        <v-col cols="12">
-          <v-select
-            v-model="form.activeDriver"
-            label="Provedor / Driver de IA"
-            :items="driverOptions"
-            item-title="title"
-            item-value="value"
-            variant="outlined"
-            density="compact"
-            prepend-inner-icon="mdi-swap-horizontal"
-            hide-details="auto"
-            class="mb-3"
-          />
-        </v-col>
+        <!-- Como a IA responde e o que ela pode fazer -->
+        <AiModeToggle
+          v-model="form.responseStyle"
+          title="Estilo de resposta"
+          :options="RESPONSE_STYLE_OPTIONS"
+          class="mb-5"
+        />
+        <AiAutomationSettings
+          v-model:allow-active-tools="form.allowActiveTools"
+          v-model:require-tool-confirmation="form.requireToolConfirmation"
+          v-model:allow-actions="form.allowActions"
+          v-model:container-actions="form.containerActions"
+          v-model:proactive="form.proactive"
+        />
+      </template>
 
-        <!-- Campos: OpenCode Go / Zen -->
-        <template v-if="form.activeDriver === 'opencode'">
-          <v-col cols="12">
-            <div class="d-flex align-center justify-space-between pa-2 px-3 rounded-lg border mb-2">
-              <div class="d-flex align-center ga-2">
-                <v-icon color="primary" size="18">mdi-link-variant</v-icon>
-                <span class="text-caption font-weight-medium">Endpoint Oficial Fixo:</span>
-                <code class="text-caption font-mono font-weight-bold text-primary"
-                  >https://opencode.ai/zen/v1</code
-                >
-              </div>
-              <v-chip size="x-small" color="primary" variant="tonal">OpenCode Zen Gateway</v-chip>
-            </div>
-          </v-col>
-
-          <v-col cols="12" md="6">
-            <v-text-field
-              v-model="form.opencodeApiKey"
-              label="API Key do OpenCode Zen"
-              placeholder="oc_sk_..."
-              :type="showApiKey ? 'text' : 'password'"
-              variant="outlined"
-              density="compact"
-              prepend-inner-icon="mdi-key-outline"
-              :append-inner-icon="showApiKey ? 'mdi-eye-off' : 'mdi-eye'"
-              hide-details="auto"
-              class="mb-3"
-              @click:append-inner="showApiKey = !showApiKey"
-              @blur="handleOpencodeApiKeyBlur"
-            />
-          </v-col>
-
-          <v-col cols="12" md="6">
-            <v-combobox
-              v-model="form.opencodeModel"
-              label="Modelo OpenCode"
-              :items="opencodeModelOptions"
-              item-title="id"
-              item-value="id"
-              :return-object="false"
-              :custom-filter="customModelFilter"
-              :loading="aiStore.loadingOpencodeModels"
-              variant="outlined"
-              density="compact"
-              prepend-inner-icon="mdi-cube-outline"
-              placeholder="muse-spark-1.3-contributor-free"
-              hide-details="auto"
-              class="mb-1"
-              @update:model-value="(val) => (form.opencodeModel = extractModelId(val))"
-            >
-              <template #append-inner>
-                <v-btn
-                  icon="mdi-magnify"
-                  variant="text"
-                  size="x-small"
-                  color="primary"
-                  title="Buscar e explorar modelos no catálogo"
-                  @click.stop="openModelSearchDialog"
-                />
-                <v-btn
-                  icon="mdi-refresh"
-                  variant="text"
-                  size="x-small"
-                  :loading="aiStore.loadingOpencodeModels"
-                  title="Atualizar lista de modelos do OpenCode"
-                  @click.stop="refreshOpencodeModels"
-                />
-              </template>
-              <template #item="{ item, props: itemProps }">
-                <v-list-item
-                  v-bind="itemProps"
-                  :title="item.name || item.id"
-                  :subtitle="item.id !== item.name ? item.id : undefined"
-                >
-                  <template #append>
-                    <v-chip
-                      v-if="item.isFree"
-                      color="success"
-                      size="x-small"
-                      variant="tonal"
-                      class="ms-1 font-weight-bold"
-                    >
-                      Gratuito (Free)
-                    </v-chip>
-                    <v-chip v-else color="primary" size="x-small" variant="outlined" class="ms-1">
-                      Pro / Standard
-                    </v-chip>
-                    <v-chip
-                      v-if="item.supportsTools"
-                      color="warning"
-                      size="x-small"
-                      variant="tonal"
-                      class="ms-1"
-                      title="Suporta execução de ferramentas"
-                    >
-                      <v-icon start size="12">mdi-tools</v-icon>
-                      Tools
-                    </v-chip>
-                  </template>
-                </v-list-item>
-              </template>
-            </v-combobox>
-
-            <div class="d-flex align-center justify-end">
-              <v-btn
-                variant="text"
-                size="x-small"
-                color="primary"
-                prepend-icon="mdi-magnify"
-                @click="openModelSearchDialog"
-              >
-                Buscar no catálogo completo ({{ aiStore.opencodeModels.length || 75 }} modelos)
-              </v-btn>
-            </div>
-          </v-col>
-
-          <v-col v-if="aiStore.opencodeError" cols="12">
-            <v-alert
-              type="info"
-              variant="tonal"
-              density="compact"
-              class="mb-3"
-              closable
-              icon="mdi-information-outline"
-              @click:close="aiStore.opencodeError = null"
-            >
-              {{ aiStore.opencodeError }}
-            </v-alert>
-          </v-col>
-        </template>
-
-        <!-- Campos: OpenRouter -->
-        <template v-if="form.activeDriver === 'openrouter'">
-          <v-col cols="12" md="6">
-            <v-text-field
-              v-model="form.openrouterApiKey"
-              label="OpenRouter API Key"
-              placeholder="sk-or-..."
-              :type="showApiKey ? 'text' : 'password'"
-              variant="outlined"
-              density="compact"
-              prepend-inner-icon="mdi-key-outline"
-              :append-inner-icon="showApiKey ? 'mdi-eye-off' : 'mdi-eye'"
-              hide-details="auto"
-              class="mb-3"
-              @click:append-inner="showApiKey = !showApiKey"
-              @blur="handleOpenrouterApiKeyBlur"
-            />
-          </v-col>
-          <v-col cols="12" md="6">
-            <v-combobox
-              v-model="form.openrouterModel"
-              label="Modelo OpenRouter"
-              :items="openRouterModelOptions"
-              item-title="id"
-              item-value="id"
-              :return-object="false"
-              :custom-filter="customModelFilter"
-              :loading="aiStore.loadingOpenrouterModels"
-              placeholder="openrouter/free"
-              variant="outlined"
-              density="compact"
-              prepend-inner-icon="mdi-cube-outline"
-              hide-details="auto"
-              class="mb-1"
-              @update:model-value="(val) => (form.openrouterModel = extractModelId(val))"
-            >
-              <template #append-inner>
-                <v-btn
-                  icon="mdi-magnify"
-                  variant="text"
-                  size="x-small"
-                  color="primary"
-                  title="Buscar e explorar modelos no catálogo completo"
-                  @click.stop="openModelSearchDialog"
-                />
-                <v-btn
-                  icon="mdi-refresh"
-                  variant="text"
-                  size="x-small"
-                  :loading="aiStore.loadingOpenrouterModels"
-                  title="Atualizar lista de modelos do OpenRouter"
-                  @click.stop="refreshOpenrouterModels"
-                />
-              </template>
-              <template #item="{ item, props: itemProps }">
-                <v-list-item
-                  v-bind="itemProps"
-                  :title="item.name || item.id"
-                  :subtitle="item.id !== item.name ? item.id : undefined"
-                >
-                  <template #append>
-                    <v-chip
-                      v-if="item.isFree"
-                      color="success"
-                      size="x-small"
-                      variant="tonal"
-                      class="ms-1 font-weight-bold"
-                    >
-                      {{ item.id === 'openrouter/free' ? 'Auto Free Router' : 'Gratuito' }}
-                    </v-chip>
-                    <v-chip v-else color="primary" size="x-small" variant="outlined" class="ms-1">
-                      Standard / Créditos
-                    </v-chip>
-                    <v-chip
-                      v-if="item.supportsTools"
-                      color="warning"
-                      size="x-small"
-                      variant="tonal"
-                      class="ms-1"
-                      title="Suporta execução de ferramentas"
-                    >
-                      <v-icon start size="12">mdi-tools</v-icon>
-                      Tools
-                    </v-chip>
-                  </template>
-                </v-list-item>
-              </template>
-            </v-combobox>
-
-            <div class="d-flex align-center justify-space-between flex-wrap ga-1">
-              <div class="text-caption text-medium-emphasis">
-                💡 <code>openrouter/free</code> roteia automaticamente para modelos gratuitos.
-              </div>
-              <v-btn
-                variant="text"
-                size="x-small"
-                color="primary"
-                prepend-icon="mdi-magnify"
-                @click="openModelSearchDialog"
-              >
-                Buscar na lista ({{ aiStore.openrouterModels.length || 440 }} modelos)
-              </v-btn>
-            </div>
-          </v-col>
-          <v-col v-if="aiStore.openrouterError" cols="12">
-            <v-alert
-              type="info"
-              variant="tonal"
-              density="compact"
-              class="mb-3"
-              closable
-              icon="mdi-information-outline"
-              @click:close="aiStore.openrouterError = null"
-            >
-              {{ aiStore.openrouterError }}
-            </v-alert>
-          </v-col>
-        </template>
-
-        <!-- Campos: Ollama Local -->
-        <template v-if="form.activeDriver === 'ollama'">
-          <v-col cols="12" md="6">
-            <v-text-field
-              v-model="form.ollamaBaseUrl"
-              label="URL Base do Ollama"
-              placeholder="http://localhost:11434/v1"
-              variant="outlined"
-              density="compact"
-              prepend-inner-icon="mdi-server"
-              hide-details="auto"
-              class="mb-3"
-              @blur="handleOllamaBaseUrlBlur"
-            />
-          </v-col>
-          <v-col cols="12" md="6">
-            <v-combobox
-              v-model="form.ollamaModel"
-              label="Modelo Ollama Ativo (em uso)"
-              :items="ollamaModelOptions"
-              item-title="id"
-              item-value="id"
-              :return-object="false"
-              :custom-filter="customModelFilter"
-              variant="outlined"
-              density="compact"
-              prepend-inner-icon="mdi-cube-outline"
-              :loading="aiStore.loadingOllamaModels"
-              hide-details="auto"
-              class="mb-1"
-              clearable
-              @update:model-value="(val) => (form.ollamaModel = extractModelId(val))"
-            >
-              <template #append-inner>
-                <v-btn
-                  icon="mdi-magnify"
-                  variant="text"
-                  size="x-small"
-                  color="primary"
-                  title="Buscar e explorar catálogo do Ollama"
-                  @click.stop="openModelSearchDialog"
-                />
-                <v-btn
-                  icon="mdi-refresh"
-                  variant="text"
-                  size="x-small"
-                  :loading="aiStore.loadingOllamaModels"
-                  title="Atualizar lista de modelos do Ollama"
-                  @click.stop="refreshOllamaModels"
-                />
-              </template>
-              <template #item="{ item, props: itemProps }">
-                <v-list-item
-                  v-bind="itemProps"
-                  :title="item.name"
-                  :subtitle="item.description || undefined"
-                >
-                  <template #append>
-                    <v-chip
-                      v-if="item.isInstalled"
-                      color="success"
-                      size="x-small"
-                      variant="tonal"
-                      class="ms-1"
-                    >
-                      Instalado
-                      <span v-if="item.size" class="ms-1 font-weight-regular">
-                        ({{ item.size }})
-                      </span>
-                    </v-chip>
-                    <v-chip
-                      v-else-if="item.isRecommended"
-                      color="primary"
-                      size="x-small"
-                      variant="outlined"
-                      class="ms-1"
-                    >
-                      Recomendado
-                    </v-chip>
-                    <v-chip
-                      v-if="item.contextWindow"
-                      color="info"
-                      size="x-small"
-                      variant="tonal"
-                      class="ms-1"
-                      title="Janela de contexto arquitetural"
-                    >
-                      {{ item.contextWindow }}
-                    </v-chip>
-                    <v-chip
-                      v-if="item.supportsTools"
-                      color="warning"
-                      size="x-small"
-                      variant="tonal"
-                      class="ms-1"
-                    >
-                      <v-icon start size="12">mdi-tools</v-icon>
-                      Tool Use
-                    </v-chip>
-                  </template>
-                </v-list-item>
-              </template>
-            </v-combobox>
-
-            <div class="d-flex align-center justify-end">
-              <v-btn
-                variant="text"
-                size="x-small"
-                color="primary"
-                prepend-icon="mdi-magnify"
-                @click="openModelSearchDialog"
-              >
-                Buscar na biblioteca de modelos Ollama
-              </v-btn>
-            </div>
-          </v-col>
-
-          <v-col cols="12" md="6">
-            <v-select
-              v-model="form.ollamaNumCtx"
-              label="Janela de Contexto no Ollama (num_ctx)"
-              :items="ollamaNumCtxOptions"
-              item-title="title"
-              item-value="value"
-              variant="outlined"
-              density="compact"
-              prepend-inner-icon="mdi-memory"
-              hide-details="auto"
-              class="mb-3"
-            />
-          </v-col>
-          <v-col cols="12" md="6" class="d-flex align-center">
-            <div class="text-caption text-secondary mb-3">
-              <v-icon size="14" color="primary" class="me-1">mdi-information-outline</v-icon>
-              Garante tamanho de contexto suficiente (16k a 32k recomendado para modelos locais).
-              <strong>Nota:</strong> Salve as configurações no botão <strong>Salvar</strong> acima
-              para aplicar o novo limite ao servidor Ollama.
-            </div>
-          </v-col>
-
-          <!-- Campo Exclusivo para Baixar e Instalar Modelos no Ollama -->
-          <v-col cols="12">
-            <v-card variant="outlined" class="pa-4 rounded-lg">
-              <div class="d-flex align-center justify-space-between flex-wrap ga-2 mb-3">
-                <div class="d-flex align-center ga-2">
-                  <v-icon color="primary" size="20">mdi-download-box-outline</v-icon>
-                  <span class="text-subtitle-2 font-weight-bold">
-                    Instalar Modelo no Ollama (Download Local)
-                  </span>
-                </div>
-                <span class="text-caption">
-                  Campo exclusivo para baixar e instalar modelos no servidor Ollama
-                </span>
-              </div>
-
-              <v-row dense align="center">
-                <v-col cols="12" sm="8" md="9">
-                  <v-combobox
-                    v-model="modelToInstall"
-                    :items="aiStore.recommendedOllamaModels"
-                    item-title="name"
-                    item-value="name"
-                    :return-object="false"
-                    :custom-filter="customModelFilter"
-                    label="Modelo para baixar e instalar no Ollama"
-                    placeholder="Selecione um recomendado ou digite qualquer tag (ex: ornith-1.5:9b, qwen3.8:27b, mistral)..."
-                    variant="outlined"
-                    density="compact"
-                    hide-details="auto"
-                    prepend-inner-icon="mdi-cloud-download-outline"
-                    clearable
-                    :disabled="!!aiStore.pullingModelName"
-                    @update:model-value="(val) => (modelToInstall = extractModelId(val))"
-                    @keydown.enter.prevent="handleInstallFromField"
-                  >
-                    <template #item="{ item, props: itemProps }">
-                      <v-list-item
-                        v-bind="itemProps"
-                        :title="item.name"
-                        :subtitle="item.description"
-                      >
-                        <template #append>
-                          <div class="d-flex align-center ga-1">
-                            <v-chip
-                              v-if="item.name === 'ornith-1.5:9b'"
-                              size="x-small"
-                              color="amber-darken-2"
-                              variant="flat"
-                            >
-                              <v-icon start size="10">mdi-star</v-icon>
-                              Mais Recomendado
-                            </v-chip>
-                            <v-chip
-                              v-if="item.parameterSize"
-                              size="x-small"
-                              variant="tonal"
-                              color="secondary"
-                            >
-                              {{ item.parameterSize }}
-                            </v-chip>
-                            <v-chip
-                              v-if="item.contextWindow"
-                              size="x-small"
-                              variant="tonal"
-                              color="info"
-                              title="Janela de contexto suportada pelo modelo"
-                            >
-                              {{ item.contextWindow }}
-                            </v-chip>
-                            <v-chip
-                              v-if="item.toolCallingOptimized"
-                              size="x-small"
-                              color="warning"
-                              variant="tonal"
-                              title="Otimizado para execução de ferramentas e diagnósticos"
-                            >
-                              <v-icon start size="10">mdi-tools</v-icon>
-                              Tools
-                            </v-chip>
-                            <v-chip
-                              v-if="item.isInstalled"
-                              size="x-small"
-                              color="success"
-                              variant="tonal"
-                            >
-                              Instalado
-                            </v-chip>
-                            <v-chip v-else size="x-small" color="primary" variant="outlined">
-                              Disponível
-                            </v-chip>
-                          </div>
-                        </template>
-                      </v-list-item>
-                    </template>
-                  </v-combobox>
-                </v-col>
-
-                <v-col cols="12" sm="4" md="3">
-                  <v-btn
-                    color="primary"
-                    variant="flat"
-                    block
-                    class="text-none font-weight-medium"
-                    height="40"
-                    :loading="aiStore.pullingModelName === cleanModelToInstall"
-                    :disabled="!cleanModelToInstall || !!aiStore.pullingModelName"
-                    @click="handleInstallFromField"
-                  >
-                    <v-icon start size="16">mdi-download</v-icon>
-                    {{ isModelToInstallInstalled ? 'Reinstalar' : 'Baixar Modelo' }}
-                  </v-btn>
-                </v-col>
-              </v-row>
-
-              <div class="d-flex align-center justify-space-between mt-3 flex-wrap ga-2">
-                <span class="text-caption">
-                  💡 Selecione na lista com especificações e contexto já testados ou digite qualquer
-                  tag do repositório (ex: <code>qwen3.8:27b</code>, <code>mistral:7b</code>).
-                </span>
-                <div v-if="cleanModelToInstall" class="d-flex align-center ga-1">
-                  <v-chip
-                    v-if="selectedRecommendedMeta?.parameterSize"
-                    size="x-small"
-                    variant="tonal"
-                    color="secondary"
-                  >
-                    {{ selectedRecommendedMeta.parameterSize }}
-                  </v-chip>
-                  <v-chip
-                    v-if="selectedRecommendedMeta?.contextWindow"
-                    size="x-small"
-                    variant="tonal"
-                    color="info"
-                    title="Janela de contexto arquitetural"
-                  >
-                    {{ selectedRecommendedMeta.contextWindow }}
-                  </v-chip>
-                  <v-chip
-                    v-if="selectedRecommendedMeta?.toolCallingOptimized"
-                    size="x-small"
-                    color="warning"
-                    variant="tonal"
-                    title="Otimizado para Function Calling"
-                  >
-                    <v-icon start size="10">mdi-tools</v-icon>
-                    Tools
-                  </v-chip>
-                  <v-chip
-                    v-if="isModelToInstallInstalled"
-                    size="x-small"
-                    color="success"
-                    variant="tonal"
-                    class="font-weight-medium"
-                  >
-                    <v-icon start size="12">mdi-check</v-icon>
-                    Já instalado
-                  </v-chip>
-                  <v-chip
-                    v-else
-                    size="x-small"
-                    color="primary"
-                    variant="outlined"
-                    class="font-weight-medium"
-                  >
-                    Pronto para baixar
-                  </v-chip>
-                </div>
-              </div>
-            </v-card>
-          </v-col>
-
-          <!-- Alerta se Ollama estiver offline / inacessível -->
-          <v-col v-if="!aiStore.ollamaOnline" cols="12">
-            <v-alert
-              type="warning"
-              variant="tonal"
-              density="compact"
-              class="mb-3"
-              icon="mdi-server-off"
-            >
-              <div class="d-flex align-center justify-space-between flex-wrap ga-2">
-                <div>
-                  <div class="font-weight-bold text-body-2">
-                    Serviço Ollama offline ou inacessível
-                  </div>
-                  <div class="text-caption">
-                    {{
-                      aiStore.ollamaError ||
-                      'Não foi possível conectar ao Ollama. Verifique se o serviço está em execução.'
-                    }}
-                  </div>
-                </div>
-                <v-btn
-                  variant="outlined"
-                  color="warning"
-                  size="small"
-                  :loading="aiStore.loadingOllamaModels"
-                  @click="refreshOllamaModels"
-                >
-                  <v-icon start size="14">mdi-refresh</v-icon>
-                  Tentar Novamente
-                </v-btn>
-              </div>
-            </v-alert>
-          </v-col>
-
-          <!-- Alerta de Erro no Download / Instalação -->
-          <v-col v-if="aiStore.pullError" cols="12">
-            <v-alert
-              type="error"
-              variant="tonal"
-              density="compact"
-              class="mb-3"
-              icon="mdi-alert-circle-outline"
-              closable
-              @click:close="aiStore.pullError = null"
-            >
-              <div class="font-weight-bold text-body-2 mb-1">
-                Falha ao conectar ou instalar modelo no Ollama
-              </div>
-              <div class="text-body-2 mb-1">
-                {{ aiStore.pullError }}
-              </div>
-              <div class="text-caption text-medium-emphasis">
-                Certifique-se de que o Ollama está instalado na máquina e em execução (ex: execute
-                <code>ollama serve</code> no terminal).
-              </div>
-            </v-alert>
-          </v-col>
-
-          <!-- Card de Progresso de Instalação de Modelo -->
-          <v-col v-if="aiStore.pullingModelName" cols="12">
-            <v-card variant="outlined" color="primary" class="pa-3 mb-3">
-              <div class="d-flex align-center justify-space-between mb-2">
-                <div class="d-flex align-center ga-2">
-                  <v-progress-circular indeterminate color="primary" size="20" width="2" />
-                  <span class="font-weight-bold text-body-2">
-                    Instalando modelo: {{ aiStore.pullingModelName }}
-                  </span>
-                </div>
-                <v-chip size="x-small" color="primary" variant="flat" class="font-weight-bold">
-                  {{
-                    aiStore.pullProgress?.percentage != null
-                      ? `${aiStore.pullProgress.percentage.toFixed(1)}%`
-                      : 'Baixando'
-                  }}
-                </v-chip>
-              </div>
-
-              <v-progress-linear
-                :model-value="aiStore.pullProgress?.percentage ?? 0"
-                :indeterminate="aiStore.pullProgress?.percentage == null"
-                color="primary"
-                height="8"
-                rounded
-                striped
-                class="mb-2"
-              />
-
-              <div class="d-flex align-center justify-space-between text-caption">
-                <span>{{
-                  aiStore.pullProgress?.status || 'Processando download no Ollama...'
-                }}</span>
-                <span v-if="aiStore.pullProgress?.completed && aiStore.pullProgress?.total">
-                  {{ formatDecimalBytes(aiStore.pullProgress.completed) }} de
-                  {{ formatDecimalBytes(aiStore.pullProgress.total) }}
-                </span>
-              </div>
-
-              <div v-if="aiStore.pullProgress?.error" class="text-caption text-error mt-2">
-                {{ aiStore.pullProgress.error }}
-              </div>
-
-              <div class="d-flex justify-end mt-2">
-                <v-btn
-                  color="error"
-                  variant="text"
-                  size="x-small"
-                  prepend-icon="mdi-close-circle-outline"
-                  @click="aiStore.cancelOllamaPull()"
-                >
-                  Cancelar download
-                </v-btn>
-              </div>
-            </v-card>
-          </v-col>
-
-          <!-- Alerta quando o modelo selecionado/digitado não está instalado -->
-          <v-col v-if="shouldShowInstallAlert" cols="12">
-            <v-alert
-              type="warning"
-              variant="tonal"
-              density="compact"
-              class="mb-3"
-              icon="mdi-cloud-download-outline"
-            >
-              <div class="d-flex align-center justify-space-between flex-wrap ga-2">
-                <div>
-                  <div class="font-weight-bold text-body-2">
-                    O modelo "{{ form.ollamaModel }}" não foi detectado no seu Ollama.
-                  </div>
-                  <div class="text-caption">
-                    Deseja baixar e instalar este modelo na sua máquina agora?
-                  </div>
-                </div>
-                <v-btn
-                  color="warning"
-                  variant="flat"
-                  size="small"
-                  :loading="aiStore.pullingModelName === form.ollamaModel"
-                  :disabled="!!aiStore.pullingModelName"
-                  @click="handleInstallModel(form.ollamaModel)"
-                >
-                  <v-icon start size="16">mdi-download</v-icon>
-                  Instalar "{{ form.ollamaModel }}"
-                </v-btn>
-              </div>
-            </v-alert>
-          </v-col>
-        </template>
-
-        <!-- Estilo de Resposta -->
-        <v-col cols="12">
-          <div class="text-subtitle-2 font-weight-bold mb-2">Estilo de resposta</div>
-          <v-btn-toggle
-            v-model="form.responseStyle"
-            mandatory
-            divided
-            color="primary"
-            variant="outlined"
-            density="comfortable"
-          >
-            <v-btn v-for="option in responseStyleOptions" :key="option.value" :value="option.value">
-              <v-icon start size="18">{{ option.icon }}</v-icon>
-              {{ option.title }}
-            </v-btn>
-          </v-btn-toggle>
-          <div class="text-caption text-medium-emphasis mt-2">
-            {{ selectedResponseStyle.hint }}
-          </div>
-        </v-col>
-
-        <!-- Ferramentas, ações e IA proativa -->
-        <v-col cols="12">
-          <AiAutomationSettings
-            v-model:allow-active-tools="form.allowActiveTools"
-            v-model:require-tool-confirmation="form.requireToolConfirmation"
-            v-model:allow-actions="form.allowActions"
-            v-model:container-actions="form.containerActions"
-            v-model:proactive="form.proactive"
-          />
-        </v-col>
-      </v-row>
-
-      <!-- Feedback de Teste de Conexão -->
       <v-alert
         v-if="aiStore.testResult"
         :type="aiStore.testResult.success ? 'success' : 'error'"
         variant="tonal"
         density="compact"
-        class="mt-3"
+        class="mt-4"
         closable
         @click:close="aiStore.testResult = null"
       >
         {{ aiStore.testResult.message }}
         <span v-if="aiStore.testResult.success">
-          (Latência: {{ aiStore.testResult.latencyMs }}ms)
+          (latência: {{ formatLatency(aiStore.testResult.latencyMs) }})
         </span>
+      </v-alert>
+
+      <v-alert
+        v-if="aiStore.saveError"
+        type="error"
+        variant="tonal"
+        density="compact"
+        class="mt-4"
+        icon="mdi-alert-circle-outline"
+        closable
+        @click:close="aiStore.saveError = null"
+      >
+        <strong>Não foi possível salvar:</strong> {{ aiStore.saveError }}
       </v-alert>
     </v-card-text>
 
-    <v-card-actions class="pa-4 pt-0 justify-space-between">
+    <v-card-actions class="pa-4 pt-0 justify-space-between flex-wrap ga-2">
       <v-btn
         variant="outlined"
         color="primary"
-        size="small"
+        prepend-icon="mdi-lan-connect"
         :loading="aiStore.testingConnection"
+        :disabled="!loaded"
         @click="handleTestConnection"
       >
-        <v-icon start size="16">mdi-lan-connect</v-icon>
-        Testar Conexão
+        Testar conexão
       </v-btn>
-
       <v-btn
         color="primary"
         variant="flat"
-        size="small"
+        prepend-icon="mdi-content-save-outline"
         :loading="aiStore.savingSettings"
+        :disabled="!loaded"
         @click="handleSave"
       >
-        <v-icon start size="16">mdi-content-save-outline</v-icon>
-        Salvar Configurações
+        Salvar
       </v-btn>
     </v-card-actions>
   </v-card>
 
-  <!-- Diálogo Modal de Catálogo e Busca de Modelos -->
   <AiModelSearchDialog
     v-model="showModelSearchDialog"
-    :driver="currentDriver"
-    :current-model="currentModelForDriver"
-    :api-key="currentApiKeyForDriver"
-    :base-url="currentBaseUrlForDriver"
-    @select="handleModelSelectedFromDialog"
-    @install="handleInstallModel"
+    :driver="driver"
+    :current-model="currentModel"
+    :api-key="providerAccess.apiKey"
+    :base-url="providerAccess.baseUrl"
+    @select="selectModel"
+    @install="installOllamaModel"
   />
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useAiStore, type AiSettings } from '@/stores/ai'
-import { RESPONSE_STYLE_OPTIONS, responseStyleOption } from '@/components/ai/aiResponseStyle'
-import { formatDecimalBytes } from '@/utils/formatters'
+import { RESPONSE_STYLE_OPTIONS } from '@/components/ai/aiResponseStyle'
+import { formatLatency } from '@/utils/formatters'
 import AiModelSearchDialog from './AiModelSearchDialog.vue'
 import AiAutomationSettings from './AiAutomationSettings.vue'
-import type { AiProactiveSettings } from '@/bindings/AiProactiveSettings'
-import type { OllamaRecommendedModel } from '@/bindings/OllamaRecommendedModel'
+import AiModeToggle from './ai/AiModeToggle.vue'
+import OllamaProviderFields from './ai/OllamaProviderFields.vue'
+import OpencodeProviderFields from './ai/OpencodeProviderFields.vue'
+import OpenrouterProviderFields from './ai/OpenrouterProviderFields.vue'
+import {
+  DRIVER_OPTIONS,
+  MODEL_FIELDS,
+  connectionTestInput,
+  defaultAiSettings,
+  extractModelId,
+  modelForDriver,
+  normalizeAiSettings,
+  resolveDriver,
+} from './ai/aiProviders'
 
+/**
+ * Orquestra o formulário do Assistente IA: carrega, normaliza, testa e salva.
+ * Os campos de cada provedor, o instalador do Ollama e as permissões vivem
+ * nos componentes de `./ai/`. Sucesso sai pelo `saved` (snackbar da página);
+ * erro de gravação fica no alerta junto do botão, até ser corrigido.
+ */
 const emit = defineEmits<{
   (e: 'saved', message: string, color?: string): void
 }>()
 
 const aiStore = useAiStore()
-const showApiKey = ref(false)
 const showModelSearchDialog = ref(false)
+const loaded = ref(false)
 
-const driverOptions = [
-  { title: 'Ollama (Local / On-Premise)', value: 'ollama' },
-  { title: 'OpenRouter (Multi-Model Gateway)', value: 'openrouter' },
-  { title: 'OpenCode Go / Zen', value: 'opencode' },
-]
+// `customSystemPrompt` não tem campo na tela, mas viaja no formulário de volta à API.
+const form = reactive<AiSettings>(defaultAiSettings())
 
-const responseStyleOptions = RESPONSE_STYLE_OPTIONS
-const selectedResponseStyle = computed(() => responseStyleOption(form.responseStyle))
+const driver = computed(() => resolveDriver(form.activeDriver))
+const currentModel = computed(() => modelForDriver(form))
+/** Chave e endpoint do provedor ativo, os mesmos do teste de conexão. */
+const providerAccess = computed(() => connectionTestInput(form))
 
-const localSaveError = ref<string | null>(null)
-const localSaveSuccess = ref<string | null>(null)
-
-function dismissSaveError() {
-  localSaveError.value = null
-  aiStore.saveError = null
+function normalizeForm() {
+  Object.assign(form, normalizeAiSettings(form))
 }
 
-const form = reactive<AiSettings>({
-  enabled: false,
-  activeDriver: 'ollama',
-  opencodeBaseUrl: 'https://opencode.ai/zen/v1',
-  opencodeApiKey: '',
-  opencodeModel: 'muse-spark-1.3-contributor-free',
-  openrouterApiKey: '',
-  openrouterModel: 'openrouter/free',
-  ollamaBaseUrl: 'http://localhost:11434/v1',
-  ollamaModel: 'ornith-1.5:9b',
-  ollamaNumCtx: 16384,
-  allowActiveTools: true,
-  requireToolConfirmation: false,
-  allowActions: false,
-  containerActions: 'confirm',
-  responseStyle: 'concise',
-  proactive: defaultProactive(),
-  customSystemPrompt: '',
-})
-
-function defaultProactive(): AiProactiveSettings {
-  return {
-    incidentSummaries: false,
-    incidentMinSeverity: 'critical',
-    maxSummariesPerHour: 6,
-    digest: 'off',
-    digestHour: 8,
-    skipQuietDigest: false,
-  }
+function selectModel(modelId: string) {
+  form[MODEL_FIELDS[driver.value]] = extractModelId(modelId)
 }
 
-interface ModelOption {
-  id: string
-  name: string
-  isFree: boolean
-  description?: string | null
-  supportsTools?: boolean
-}
-
-interface OllamaOption {
-  id: string
-  name: string
-  isInstalled: boolean
-  isRecommended: boolean
-  size?: string | null
-  description?: string | null
-  supportsTools?: boolean
-  contextWindow?: string | null
-}
-
-const ollamaNumCtxOptions = [
-  { title: '8.192 tokens (8k - Econômico)', value: 8192 },
-  { title: '16.384 tokens (16k - Padrão Recomendado)', value: 16384 },
-  { title: '32.768 tokens (32k - Médio)', value: 32768 },
-  { title: '65.536 tokens (64k - Amplo)', value: 65536 },
-  { title: '131.072 tokens (128k - Máximo)', value: 131072 },
-]
-
-// Extrai string pura (slug ou nome) de qualquer modelo recebido (seja string ou objeto com id/name/value)
-function extractModelId(val: unknown): string {
-  if (!val) return ''
-  if (typeof val === 'string') return val.trim()
-  if (typeof val === 'object' && val !== null) {
-    const obj = val as Record<string, unknown>
-    if (typeof obj.id === 'string' && obj.id.trim()) {
-      return obj.id.trim()
-    }
-    if (typeof obj.name === 'string' && obj.name.trim()) {
-      return obj.name.trim()
-    }
-    if (typeof obj.value === 'string' && obj.value.trim()) {
-      return obj.value.trim()
-    }
-  }
-  return String(val).trim()
-}
-
-// Filtro inteligente para busca nos campos autocomplete/combobox
-function customModelFilter(value: string, query: string, item?: any): boolean {
-  if (!query) return true
-  const q = query.trim().toLowerCase()
-  const raw = item?.raw || item
-  if (!raw) return (value || '').toLowerCase().includes(q)
-  const id = (raw.id || raw.name || '').toLowerCase()
-  const name = (raw.name || '').toLowerCase()
-  const desc = (raw.description || '').toLowerCase()
-  const ctx = (raw.contextWindow || '').toLowerCase()
-  const param = (raw.parameterSize || '').toLowerCase()
-  return (
-    id.includes(q) || name.includes(q) || desc.includes(q) || ctx.includes(q) || param.includes(q)
-  )
-}
-
-const openRouterModelOptions = computed<ModelOption[]>(() => {
-  if (aiStore.openrouterModels.length > 0) {
-    return aiStore.openrouterModels.map((m) => ({
-      id: m.id,
-      name: m.name || m.id,
-      isFree: m.isFree,
-      description: m.description,
-      supportsTools: m.supportsTools ?? undefined,
-    }))
-  }
-  return [
-    {
-      id: 'openrouter/free',
-      name: 'Free Models Router (Automático Gratuito)',
-      isFree: true,
-      description: 'Roteia para o melhor modelo gratuito',
-      supportsTools: true,
-    },
-    {
-      id: 'google/gemma-4-31b-it:free',
-      name: 'Google: Gemma 4 31B (Gratuito)',
-      isFree: true,
-      description: 'Excelente raciocínio e suporte gratuito',
-      supportsTools: true,
-    },
-    {
-      id: 'qwen/qwen3.8-27b:free',
-      name: 'Qwen: Qwen 3.8 27B (Gratuito)',
-      isFree: true,
-      description: 'Alta performance em código e raciocínio técnico',
-      supportsTools: true,
-    },
-    {
-      id: 'nvidia/nemotron-3.5-lightning:free',
-      name: 'NVIDIA: Nemotron 3.5 Lightning (Gratuito)',
-      isFree: true,
-      description: 'Velocidade e precisão para diagnósticos de rede',
-      supportsTools: true,
-    },
-    {
-      id: 'meta-llama/llama-3.3-70b-instruct',
-      name: 'Meta: Llama 3.3 70B Instruct (Padrão / Créditos)',
-      isFree: false,
-      description: 'Modelo recomendado da Meta para alta complexidade',
-      supportsTools: true,
-    },
-    {
-      id: 'openai/gpt-4o-mini',
-      name: 'OpenAI: GPT-4o Mini',
-      isFree: false,
-      description: 'Rápido, econômico e altamente capaz',
-      supportsTools: true,
-    },
-    {
-      id: 'anthropic/claude-3.5-sonnet',
-      name: 'Anthropic: Claude 3.5 Sonnet',
-      isFree: false,
-      description: 'Estado da arte em raciocínio e engenharia',
-      supportsTools: true,
-    },
-    {
-      id: 'deepseek/deepseek-chat',
-      name: 'DeepSeek: DeepSeek Chat (V3)',
-      isFree: false,
-      description: 'Excelente custo-benefício em análise de sistemas',
-      supportsTools: true,
-    },
-  ]
-})
-
-const opencodeModelOptions = computed<ModelOption[]>(() => {
-  if (aiStore.opencodeModels.length > 0) {
-    return aiStore.opencodeModels.map((m) => ({
-      id: m.id,
-      name: m.name || m.id,
-      isFree: m.isFree,
-      description: m.description,
-      supportsTools: m.supportsTools ?? true,
-    }))
-  }
-  return [
-    {
-      id: 'muse-spark-1.3-contributor-free',
-      name: 'Muse Spark 1.3 Contributor (Gratuito)',
-      isFree: true,
-      description: 'Modelo recomendado gratuito com excelente raciocínio',
-      supportsTools: true,
-    },
-    {
-      id: 'mimo-v2.6-flash-free',
-      name: 'Mimo v2.6 Flash (Gratuito)',
-      isFree: true,
-      description: 'Modelo ultra-rápido gratuito otimizado para chamadas e código',
-      supportsTools: true,
-    },
-    {
-      id: 'jev-1.13-free',
-      name: 'Jev 1.13 (Gratuito)',
-      isFree: true,
-      description: 'Modelo gratuito de uso geral para diagnósticos',
-      supportsTools: true,
-    },
-    {
-      id: 'deepseek-v4.1-flash',
-      name: 'DeepSeek v4.1 Flash',
-      isFree: false,
-      description: 'Alta performance em análise de rede e scripts',
-      supportsTools: true,
-    },
-    {
-      id: 'gemini-3.8-flash',
-      name: 'Gemini 3.8 Flash',
-      isFree: false,
-      description: 'Latência reduzida e raciocínio avançado',
-      supportsTools: true,
-    },
-    {
-      id: 'glm-5.3-flash',
-      name: 'GLM 5.3 Flash',
-      isFree: false,
-      description: 'Excelente para tarefas de diagnóstico e suporte',
-      supportsTools: true,
-    },
-    {
-      id: 'gpt-6-astra',
-      name: 'GPT-6 Astra',
-      isFree: false,
-      description: 'Modelo de ponta para análise profunda e playbooks',
-      supportsTools: true,
-    },
-    {
-      id: 'qwen3.8-flash',
-      name: 'Qwen 3.8 Flash',
-      isFree: false,
-      description: 'Modelo rápido para consultas e suporte operacional',
-      supportsTools: true,
-    },
-  ]
-})
-
-const ollamaModelOptions = computed<OllamaOption[]>(() => {
-  const map = new Map<string, OllamaOption>()
-
-  for (const inst of aiStore.installedOllamaModels) {
-    map.set(inst.name, {
-      id: inst.name,
-      name: inst.name,
-      isInstalled: true,
-      isRecommended: false,
-      size: inst.size ? formatDecimalBytes(inst.size) : null,
-      description: `Modelo instalado localmente (${inst.parameterSize || 'tamanho não informado'})`,
-      supportsTools:
-        inst.name.toLowerCase().includes('tool') || inst.name.toLowerCase().includes('groq'),
-    })
-  }
-
-  for (const rec of aiStore.recommendedOllamaModels) {
-    const existing = map.get(rec.name)
-    if (existing) {
-      existing.isRecommended = true
-      existing.supportsTools = rec.toolCallingOptimized
-      existing.contextWindow = rec.contextWindow
-      if (rec.description) existing.description = rec.description
-    } else {
-      map.set(rec.name, {
-        id: rec.name,
-        name: rec.name,
-        isInstalled: rec.isInstalled,
-        isRecommended: true,
-        supportsTools: rec.toolCallingOptimized,
-        contextWindow: rec.contextWindow,
-        description: rec.description,
-      })
-    }
-  }
-
-  if (form.ollamaModel && form.ollamaModel.trim() && !map.has(form.ollamaModel.trim())) {
-    const custom = form.ollamaModel.trim()
-    map.set(custom, {
-      id: custom,
-      name: custom,
-      isInstalled: isModelInstalled(custom),
-      isRecommended: false,
-      description: 'Modelo customizado',
-    })
-  }
-
-  return Array.from(map.values())
-})
-
-const currentDriver = computed<'openrouter' | 'opencode' | 'ollama'>(() => {
-  if (form.activeDriver === 'openrouter') return 'openrouter'
-  if (form.activeDriver === 'opencode') return 'opencode'
-  return 'ollama'
-})
-
-const currentModelForDriver = computed<string>(() => {
-  if (form.activeDriver === 'openrouter') return form.openrouterModel || ''
-  if (form.activeDriver === 'opencode') return form.opencodeModel || ''
-  if (form.activeDriver === 'ollama') return form.ollamaModel || ''
-  return ''
-})
-
-const currentApiKeyForDriver = computed(() => {
-  if (form.activeDriver === 'openrouter') return form.openrouterApiKey
-  if (form.activeDriver === 'opencode') return form.opencodeApiKey
-  return null
-})
-
-const currentBaseUrlForDriver = computed(() => {
-  if (form.activeDriver === 'opencode') return form.opencodeBaseUrl
-  if (form.activeDriver === 'ollama') return form.ollamaBaseUrl
-  return null
-})
-
-function openModelSearchDialog() {
-  showModelSearchDialog.value = true
-}
-
-function handleModelSelectedFromDialog(modelId: string) {
-  const cleanId = extractModelId(modelId)
-  if (form.activeDriver === 'openrouter') {
-    form.openrouterModel = cleanId
-  } else if (form.activeDriver === 'opencode') {
-    form.opencodeModel = cleanId
-  } else if (form.activeDriver === 'ollama') {
-    form.ollamaModel = cleanId
-  }
-}
-
-function isModelInstalled(modelName: string): boolean {
-  if (!modelName) return false
-  const target = modelName.trim().toLowerCase()
-  return aiStore.installedOllamaModels.some((m) => {
-    const n = m.name.toLowerCase()
-    return (
-      n === target ||
-      n === `${target}:latest` ||
-      (target.endsWith(':latest') && n === target.slice(0, -7)) ||
-      n.startsWith(`${target}:`)
-    )
-  })
-}
-
-const isCurrentModelInstalled = computed(() => {
-  if (!form.ollamaModel) return true
-  return isModelInstalled(form.ollamaModel)
-})
-
-const shouldShowInstallAlert = computed(() => {
-  if (form.activeDriver !== 'ollama' || !form.ollamaModel || !form.ollamaModel.trim()) {
-    return false
-  }
-  // Se estiver baixando este modelo atualmente, não mostra o alerta (mostra o card de progresso)
-  if (aiStore.pullingModelName === form.ollamaModel.trim()) {
-    return false
-  }
-  return !isCurrentModelInstalled.value
-})
-
-const modelToInstall = ref<string>('')
-
-const cleanModelToInstall = computed<string>(() => {
-  return extractModelId(modelToInstall.value)
-})
-
-const isModelToInstallInstalled = computed<boolean>(() => {
-  if (!cleanModelToInstall.value) return false
-  return isModelInstalled(cleanModelToInstall.value)
-})
-
-const selectedRecommendedMeta = computed<OllamaRecommendedModel | null>(() => {
-  if (!cleanModelToInstall.value) return null
-  const target = cleanModelToInstall.value.toLowerCase()
-  return (
-    aiStore.recommendedOllamaModels.find((m) => {
-      const n = m.name.toLowerCase()
-      return (
-        n === target ||
-        n === `${target}:latest` ||
-        (target.endsWith(':latest') && n === target.slice(0, -7)) ||
-        n.startsWith(`${target}:`)
-      )
-    }) ?? null
-  )
-})
-
-async function handleInstallFromField() {
-  const target = cleanModelToInstall.value
+/** Único caminho de download no Ollama: o instalador do cartão e o catálogo. */
+async function installOllamaModel(modelName: string) {
+  const target = modelName.trim()
   if (!target) return
-  await handleInstallModel(target)
-}
-
-async function refreshOllamaModels() {
-  await aiStore.loadOllamaModels(form.ollamaBaseUrl)
-}
-
-function handleOllamaBaseUrlBlur() {
-  if (form.activeDriver === 'ollama' && form.ollamaBaseUrl) {
-    refreshOllamaModels()
-  }
-}
-
-async function handleInstallModel(modelName?: string | null) {
-  const target = (modelName || form.ollamaModel || '').trim()
-  if (!target) return
-
-  aiStore.pullError = null
   await aiStore.pullOllamaModel(target, form.ollamaBaseUrl, () => {
     form.ollamaModel = target
-    emit('saved', `Modelo ${target} baixado e instalado com sucesso no Ollama!`)
+    emit('saved', `Modelo ${target} baixado e instalado no Ollama.`, 'success')
   })
 }
-
-async function refreshOpencodeModels() {
-  await aiStore.loadOpencodeModels(form.opencodeApiKey, form.opencodeBaseUrl)
-}
-
-function handleOpencodeApiKeyBlur() {
-  if (form.activeDriver === 'opencode' && form.opencodeApiKey) {
-    refreshOpencodeModels()
-  }
-}
-
-async function refreshOpenrouterModels() {
-  await aiStore.loadOpenrouterModels(form.openrouterApiKey)
-}
-
-function handleOpenrouterApiKeyBlur() {
-  if (form.activeDriver === 'openrouter' && form.openrouterApiKey) {
-    refreshOpenrouterModels()
-  }
-}
-
-watch(
-  () => form.activeDriver,
-  (newDriver) => {
-    if (newDriver === 'ollama') {
-      refreshOllamaModels()
-    } else if (newDriver === 'opencode') {
-      if (!form.opencodeBaseUrl) form.opencodeBaseUrl = 'https://opencode.ai/zen/v1'
-      refreshOpencodeModels()
-    } else if (newDriver === 'openrouter') {
-      if (
-        !form.openrouterModel ||
-        form.openrouterModel === 'meta-llama/llama-3.3-70b-instruct:free'
-      ) {
-        form.openrouterModel = 'openrouter/free'
-      }
-      refreshOpenrouterModels()
-    }
-  }
-)
-
-onMounted(async () => {
-  await aiStore.loadSettings()
-  if (aiStore.settings) {
-    Object.assign(form, aiStore.settings)
-    // Cópia própria: editar o formulário não pode mexer na store antes de salvar.
-    form.proactive = { ...defaultProactive(), ...aiStore.settings.proactive }
-    if (!form.ollamaNumCtx) {
-      form.ollamaNumCtx = 16384
-    }
-  }
-  if (!form.opencodeBaseUrl) {
-    form.opencodeBaseUrl = 'https://opencode.ai/zen/v1'
-  }
-  if (!form.openrouterModel || form.openrouterModel === 'meta-llama/llama-3.3-70b-instruct:free') {
-    form.openrouterModel = 'openrouter/free'
-  }
-  if (form.activeDriver === 'ollama') {
-    await refreshOllamaModels()
-  } else if (form.activeDriver === 'opencode') {
-    await refreshOpencodeModels()
-  } else if (form.activeDriver === 'openrouter') {
-    await refreshOpenrouterModels()
-  }
-})
 
 async function handleTestConnection() {
-  form.opencodeModel = extractModelId(form.opencodeModel)
-  form.openrouterModel = extractModelId(form.openrouterModel)
-  form.ollamaModel = extractModelId(form.ollamaModel)
-
-  let baseUrl: string | null = null
-  let apiKey: string | null = null
-  let model = ''
-
-  if (form.activeDriver === 'opencode') {
-    baseUrl = form.opencodeBaseUrl || 'https://opencode.ai/zen/v1'
-    apiKey = form.opencodeApiKey || null
-    model = form.opencodeModel || 'muse-spark-1.3-contributor-free'
-  } else if (form.activeDriver === 'openrouter') {
-    apiKey = form.openrouterApiKey || null
-    model = form.openrouterModel || 'openrouter/free'
-    if (model === 'meta-llama/llama-3.3-70b-instruct:free') {
-      model = 'openrouter/free'
-      form.openrouterModel = 'openrouter/free'
-    }
-  } else if (form.activeDriver === 'ollama') {
-    baseUrl = form.ollamaBaseUrl || 'http://localhost:11434/v1'
-    model = form.ollamaModel || 'ornith-1.5:9b'
-  }
-
-  await aiStore.testConnection({
-    driver: form.activeDriver,
-    baseUrl,
-    apiKey,
-    model: extractModelId(model),
-  })
+  normalizeForm()
+  await aiStore.testConnection(connectionTestInput(form))
 }
 
 async function handleSave() {
-  localSaveError.value = null
-  localSaveSuccess.value = null
-
-  form.opencodeModel = extractModelId(form.opencodeModel)
-  form.openrouterModel = extractModelId(form.openrouterModel)
-  form.ollamaModel = extractModelId(form.ollamaModel)
-
-  if (form.activeDriver === 'opencode' && !form.opencodeBaseUrl) {
-    form.opencodeBaseUrl = 'https://opencode.ai/zen/v1'
-  }
-  if (
-    form.activeDriver === 'openrouter' &&
-    (!form.openrouterModel || form.openrouterModel === 'meta-llama/llama-3.3-70b-instruct:free')
-  ) {
-    form.openrouterModel = 'openrouter/free'
-  }
-
-  // Campo numérico apagado chega como '' — o backend exige um inteiro.
-  form.proactive.maxSummariesPerHour = Number(form.proactive.maxSummariesPerHour) || 6
-
-  const res = await aiStore.saveSettings({ ...form })
-  if (res.success) {
-    localSaveSuccess.value = 'Configurações de IA salvas com sucesso!'
-    emit('saved', 'Configurações de IA salvas com sucesso!', 'success')
-  } else {
-    const errorMsg = res.message || aiStore.saveError || 'Erro ao salvar configurações de IA'
-    localSaveError.value = errorMsg
-    emit('saved', errorMsg, 'error')
-  }
+  normalizeForm()
+  const result = await aiStore.saveSettings({ ...form })
+  if (result.success) emit('saved', 'Configurações de IA salvas.', 'success')
 }
+
+onMounted(async () => {
+  await aiStore.loadSettings()
+  // Cópia própria (normalizeAiSettings copia `proactive`): editar não mexe na store antes de salvar.
+  Object.assign(
+    form,
+    normalizeAiSettings(aiStore.settings ? { ...defaultAiSettings(), ...aiStore.settings } : form)
+  )
+  loaded.value = true
+})
 </script>

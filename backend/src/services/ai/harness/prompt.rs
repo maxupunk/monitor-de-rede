@@ -42,15 +42,15 @@ Resultados de lista vêm como tabela: {columns, rows}.";
 const ACTIVE_TOOLS: &str =
     "8. Testes ativos (ping, traceroute, portas, DNS, playbooks) dão o estado de agora; nunca invente o alvo.";
 
-const ACTIONS: &str = "9. Ações (alerta, manutenção, monitor, regras) só rodam depois que o usuário confirma no chat. \
-Proponha quando resolverem o pedido; ao receber 'awaiting_user_confirmation', diga em uma frase o que propôs e não repita a chamada.";
+const ACTIONS: &str =
+    "9. Ações (alerta, manutenção, monitor, regras) passam pela confirmação do usuário: proponha só quando resolverem o pedido.";
 
 /// Regra das ações em container, conforme o modo configurado.
 const fn container_rule(mode: AiContainerActionMode) -> Option<&'static str> {
     match mode {
         AiContainerActionMode::Off => None,
         AiContainerActionMode::Confirm => Some(
-            "10. Containers (docker_container_action) só rodam depois da confirmação. Proponha com o container parado ou travado; ao receber 'awaiting_user_confirmation', não repita a chamada.",
+            "10. Containers (docker_container_action) passam pela confirmação: proponha só com o container parado ou travado.",
         ),
         AiContainerActionMode::Auto => Some(
             "10. Containers (docker_container_action) rodam na hora: só quando pedido ou com o container parado ou travado — nunca por tentativa. Diga em uma frase o que fez.",
@@ -79,7 +79,7 @@ fn catalog_section(policy: ToolPolicy) -> Option<String> {
     (!lines.is_empty()).then(|| {
         format!(
             "
-FERRAMENTAS SOB DEMANDA — load_tools carrega os grupos (todos numa chamada; ficam na conversa):
+FERRAMENTAS SOB DEMANDA (load_tools, todos os grupos numa chamada):
 {}
 ",
             lines.join(
@@ -303,12 +303,12 @@ mod tests {
     use crate::services::ai::harness::{compaction::estimate_tokens, tools::ToolGroups};
 
     /// O que toda pergunta de verdade paga em cada rodada, antes de qualquer
-    /// dado: o system prompt e o núcleo de ferramentas. Medido em 2.662
-    /// tokens (era 3.038). Subir o teto é decisão, não acidente: cada token a
-    /// mais aqui se paga em toda rodada de toda pergunta.
+    /// dado: o system prompt e o núcleo de ferramentas. Medido em 2.589
+    /// tokens (era 3.038, depois 2.795). Subir o teto é decisão, não acidente:
+    /// cada token a mais aqui se paga em toda rodada de toda pergunta.
     #[test]
     fn custo_fixo_por_rodada_cabe_no_orcamento() {
-        const BUDGET: u64 = 2_800;
+        const BUDGET: u64 = 2_650;
         let settings = AiSettings {
             allow_actions: true,
             ..AiSettings::default()

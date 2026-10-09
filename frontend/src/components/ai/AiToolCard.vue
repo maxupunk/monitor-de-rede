@@ -1,8 +1,18 @@
 <template>
-  <v-card variant="outlined" density="compact" class="my-2 rounded-lg tool-card" :color="cardColor">
+  <v-card
+    variant="outlined"
+    density="compact"
+    :class="['my-2 rounded-lg tool-card', { 'tool-card--idle': !cardColor }]"
+    :color="cardColor"
+  >
     <div
-      class="pa-2 d-flex align-center justify-space-between cursor-pointer"
-      @click="expanded = !expanded"
+      class="tool-card__header pa-2 d-flex align-center justify-space-between cursor-pointer"
+      role="button"
+      tabindex="0"
+      :aria-expanded="expanded"
+      @click="toggle"
+      @keydown.enter.self.prevent="toggle"
+      @keydown.space.self.prevent="toggle"
     >
       <div class="d-flex align-center ga-2 min-w-0">
         <v-avatar size="28" :color="meta.color" variant="tonal">
@@ -10,7 +20,7 @@
         </v-avatar>
         <div class="min-w-0">
           <div class="text-body-small font-weight-bold">{{ meta.label }}</div>
-          <div class="text-body-small text-grey text-truncate max-w-300">
+          <div class="text-body-small text-truncate max-w-300">
             {{ formatToolArgs(tool.arguments) }}
           </div>
         </div>
@@ -27,7 +37,13 @@
           <v-icon start size="12">mdi-lightning-bolt</v-icon>
           Automático
         </v-chip>
-        <v-chip size="x-small" :color="status.color" variant="tonal" class="font-weight-medium">
+        <v-chip
+          v-if="tool.status !== 'done'"
+          size="x-small"
+          :color="status.color"
+          variant="tonal"
+          class="font-weight-medium"
+        >
           <v-progress-circular
             v-if="tool.status === 'running'"
             indeterminate
@@ -39,9 +55,9 @@
           {{ status.label }}
         </v-chip>
 
-        <v-btn icon size="x-small" variant="text" :color="cardColor">
-          <v-icon size="16">{{ expanded ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
-        </v-btn>
+        <v-icon size="16" :color="cardColor ?? 'primary'" aria-hidden="true">
+          {{ expanded ? 'mdi-chevron-up' : 'mdi-chevron-down' }}
+        </v-icon>
       </div>
     </div>
 
@@ -67,7 +83,7 @@
         }}
       </v-alert>
       <div v-if="activeTest && tool.status === 'awaiting'" class="text-body-small mb-2">
-        Pedido porque “Pedir minha confirmação antes de cada teste ativo” está ligado.
+        Pedido porque os testes ativos estão em “Pedir permissão”.
         <router-link :to="{ name: 'settings', query: { tab: 'ia' } }" class="text-primary">
           Mudar nas configurações da IA
         </router-link>
@@ -103,17 +119,15 @@
 
     <v-expand-transition>
       <div v-if="expanded" class="pa-3 pt-0 border-t mt-1">
-        <div class="text-body-small font-weight-bold text-grey-darken-1 mb-1">Parâmetros:</div>
-        <pre
-          class="bg-grey-lighten-4 pa-2 rounded text-body-small font-mono mb-2 overflow-x-auto"
-          >{{ JSON.stringify(tool.arguments, null, 2) }}</pre>
+        <div class="text-body-small font-weight-bold mb-1">Parâmetros:</div>
+        <pre class="code-block pa-2 rounded text-body-small font-mono mb-2 overflow-x-auto">{{
+          JSON.stringify(tool.arguments, null, 2)
+        }}</pre>
 
-        <div v-if="tool.result" class="text-body-small font-weight-bold text-grey-darken-1 mb-1">
-          Resultado:
-        </div>
+        <div v-if="tool.result" class="text-body-small font-weight-bold mb-1">Resultado:</div>
         <pre
           v-if="tool.result"
-          class="bg-grey-lighten-4 pa-2 rounded text-body-small font-mono overflow-x-auto max-h-200"
+          class="code-block pa-2 rounded text-body-small font-mono overflow-x-auto max-h-200"
           >{{ JSON.stringify(tool.result, null, 2) }}</pre>
       </div>
     </v-expand-transition>
@@ -135,6 +149,10 @@ const props = defineProps<{
 const aiStore = useAiStore()
 const expanded = ref(false)
 
+function toggle() {
+  expanded.value = !expanded.value
+}
+
 const meta = computed(() => aiToolMeta(props.tool.name))
 const deviceAccess = computed(() => isDeviceAccessTool(props.tool.name))
 const activeTest = computed(() => isActiveTestTool(props.tool.name))
@@ -152,16 +170,17 @@ const STATUS: Record<AiToolStatus, StatusPresentation> = {
   done: { label: 'Concluído', icon: 'mdi-check', color: 'success' },
   error: { label: 'Falha', icon: 'mdi-alert-circle', color: 'error' },
   awaiting: { label: 'Aguardando você', icon: 'mdi-account-question', color: 'warning' },
-  cancelled: { label: 'Cancelado', icon: 'mdi-cancel', color: 'grey' },
+  cancelled: { label: 'Cancelado', icon: 'mdi-cancel', color: 'secondary' },
 }
 
 const status = computed(() => STATUS[props.tool.status])
 
+/** Só o que pede atenção tinge o cartão; concluído e cancelado ficam na cor do tema. */
 const cardColor = computed(() => {
   if (props.tool.status === 'awaiting') return 'warning'
   if (props.tool.status === 'running') return 'primary'
   if (props.tool.status === 'error') return 'error'
-  return 'grey-lighten-1'
+  return undefined
 })
 
 const errorText = computed(() => {
@@ -174,6 +193,14 @@ const errorText = computed(() => {
 .tool-card {
   background-color: rgba(var(--v-theme-surface), 0.9);
   transition: border-color 0.2s ease;
+}
+.tool-card--idle {
+  border-color: rgba(var(--v-border-color), var(--v-border-opacity));
+  color: rgb(var(--v-theme-on-surface));
+}
+.tool-card__header:focus-visible {
+  outline: 2px solid rgb(var(--v-theme-primary));
+  outline-offset: -2px;
 }
 .max-w-300 {
   max-width: 300px;

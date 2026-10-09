@@ -7,14 +7,12 @@
   >
     <v-card class="d-flex flex-column">
       <!-- Cabeçalho do Modal -->
-      <v-card-title class="d-flex align-center justify-space-between pa-4 bg-surface-variant">
+      <v-card-title class="d-flex align-center justify-space-between pa-4">
         <div class="d-flex align-center ga-2">
           <v-icon color="primary" size="24">{{ providerIcon }}</v-icon>
           <div>
-            <div class="text-h6 font-weight-bold">
-              Catálogo e Busca de Modelos — {{ providerName }}
-            </div>
-            <div class="text-caption text-medium-emphasis">
+            <div class="text-h6 font-weight-bold">Catálogo de modelos — {{ providerName }}</div>
+            <div class="text-body-2 text-wrap">
               {{ providerSubtitle }}
             </div>
           </div>
@@ -25,14 +23,17 @@
             icon="mdi-refresh"
             variant="text"
             size="small"
+            color="primary"
             :loading="isLoading"
-            title="Atualizar catálogo via API"
+            title="Atualizar catálogo"
             @click="refreshModels"
           />
           <v-btn
             icon="mdi-close"
             variant="text"
             size="small"
+            color="primary"
+            title="Fechar"
             @click="emit('update:modelValue', false)"
           />
         </div>
@@ -62,7 +63,7 @@
             selected-class="text-primary font-weight-bold"
             mandatory
           >
-            <v-chip filter value="all" size="small" variant="tonal">
+            <v-chip filter value="all" size="small" variant="tonal" color="primary">
               Todos ({{ totalCount }})
             </v-chip>
             <v-chip
@@ -73,7 +74,7 @@
               variant="tonal"
               color="success"
             >
-              Gratuitos (Free) ({{ freeCount }})
+              Gratuitos ({{ freeCount }})
             </v-chip>
             <v-chip
               v-if="hasToolsFilter"
@@ -84,7 +85,7 @@
               color="warning"
             >
               <v-icon start size="14">mdi-tools</v-icon>
-              Suporte a Ferramentas ({{ toolsCount }})
+              Com ferramentas ({{ toolsCount }})
             </v-chip>
             <v-chip
               v-if="driver === 'ollama'"
@@ -113,7 +114,7 @@
             v-if="driver === 'openrouter' && vendorList.length > 0"
             class="d-flex align-center ga-1"
           >
-            <span class="text-caption text-medium-emphasis">Fornecedor:</span>
+            <span class="text-body-2">Fornecedor:</span>
             <v-select
               v-model="selectedVendor"
               :items="['Todos', ...vendorList]"
@@ -131,7 +132,7 @@
         <!-- Indicador de Carregamento -->
         <div v-if="isLoading" class="d-flex flex-column align-center justify-center pa-8">
           <v-progress-circular indeterminate color="primary" size="36" width="3" class="mb-3" />
-          <span class="text-body-2 text-medium-emphasis">Consultando catálogo de modelos...</span>
+          <span class="text-body-2">Consultando catálogo de modelos...</span>
         </div>
 
         <!-- Lista Vazia (Sem Resultados) -->
@@ -139,9 +140,9 @@
           v-else-if="filteredModels.length === 0"
           class="d-flex flex-column align-center justify-center pa-8 text-center"
         >
-          <v-icon size="48" color="grey" class="mb-2">mdi-cube-off-outline</v-icon>
-          <div class="text-subtitle-1 font-weight-bold mb-1">Nenhum modelo encontrado</div>
-          <div class="text-caption text-medium-emphasis mb-4" style="max-width: 400px">
+          <v-icon size="48" color="info" class="mb-2">mdi-cube-off-outline</v-icon>
+          <div class="font-weight-bold mb-1">Nenhum modelo encontrado</div>
+          <div v-if="searchQuery" class="text-body-2 mb-4" style="max-width: 400px">
             Não foram encontrados modelos que correspondam ao termo "{{ searchQuery }}".
           </div>
           <v-btn
@@ -157,9 +158,7 @@
 
         <!-- Lista de Resultados -->
         <div v-else>
-          <div
-            class="d-flex align-center justify-space-between mb-3 text-caption text-medium-emphasis"
-          >
+          <div class="d-flex align-center justify-space-between mb-3 text-body-2">
             <span>
               Exibindo <strong>{{ paginatedModels.length }}</strong> de
               <strong>{{ filteredModels.length }}</strong> modelos encontrados
@@ -177,81 +176,23 @@
               >
                 <div class="d-flex align-start justify-space-between ga-2">
                   <div class="flex-grow-1" style="min-width: 0">
-                    <!-- Linha 1: Nome Amigável e Badges -->
+                    <!-- Linha 1: Nome Amigável e Selos -->
                     <div class="d-flex align-center flex-wrap ga-2 mb-1">
                       <span class="font-weight-bold text-body-1 text-truncate">
                         {{ item.name }}
                       </span>
-
-                      <!-- Badge: Gratuito vs Créditos -->
-                      <v-chip
-                        v-if="item.isFree"
-                        size="x-small"
-                        color="success"
-                        variant="tonal"
-                        class="font-weight-bold"
-                      >
-                        {{ item.id === 'openrouter/free' ? 'Auto Free Router' : 'Gratuito (Free)' }}
-                      </v-chip>
-                      <v-chip v-else size="x-small" color="primary" variant="outlined">
-                        Standard / Créditos
-                      </v-chip>
-
-                      <!-- Badge: Suporte a Ferramentas (Tools) -->
-                      <v-chip
-                        v-if="item.supportsTools"
-                        size="x-small"
-                        color="warning"
-                        variant="tonal"
-                        title="Suporta execução de Ping, Traceroute e Diagnósticos de Rede"
-                      >
-                        <v-icon start size="12">mdi-tools</v-icon>
-                        Tool Use
-                      </v-chip>
-
-                      <!-- Badge: Context Length -->
-                      <v-chip
-                        v-if="item.contextWindow || item.contextLength"
-                        size="x-small"
-                        color="info"
-                        variant="tonal"
-                      >
-                        {{ item.contextWindow || formatContextLength(item.contextLength) }}
-                      </v-chip>
-
-                      <!-- Badge para Ollama: Instalado ou Recomendado -->
-                      <v-chip
-                        v-if="driver === 'ollama' && item.isInstalled"
-                        size="x-small"
-                        color="success"
-                        variant="flat"
-                      >
-                        <v-icon start size="12">mdi-check</v-icon>
-                        Instalado {{ item.size ? `(${item.size})` : '' }}
-                      </v-chip>
-                      <v-chip
-                        v-else-if="driver === 'ollama' && item.isRecommended"
-                        size="x-small"
-                        :color="item.id === 'ornith-1.5:9b' ? 'amber-darken-2' : 'primary'"
-                        :variant="item.id === 'ornith-1.5:9b' ? 'flat' : 'tonal'"
-                      >
-                        <v-icon v-if="item.id === 'ornith-1.5:9b'" start size="12">mdi-star</v-icon>
-                        {{ item.id === 'ornith-1.5:9b' ? 'Mais Recomendado' : 'Recomendado' }}
-                      </v-chip>
+                      <AiModelChips :item="item" :driver="driver" />
                     </div>
 
                     <!-- Linha 2: Slug / Identificador -->
                     <div class="d-flex align-center ga-1 mb-2">
-                      <code class="text-caption bg-surface-light px-2 py-0-5 rounded text-truncate">
+                      <code class="text-body-2 bg-surface-light px-2 py-0-5 rounded text-truncate">
                         {{ item.id }}
                       </code>
                     </div>
 
                     <!-- Linha 3: Descrição -->
-                    <p
-                      v-if="item.description"
-                      class="text-caption text-medium-emphasis mb-0 line-clamp-2"
-                    >
+                    <p v-if="item.description" class="text-body-2 mb-0 line-clamp-2">
                       {{ item.description }}
                     </p>
                   </div>
@@ -277,7 +218,7 @@
                         Instalar
                       </v-btn>
                       <v-btn
-                        size="x-small"
+                        size="small"
                         variant="text"
                         color="primary"
                         class="mt-1"
@@ -320,10 +261,12 @@
 
       <!-- Rodapé do Modal -->
       <v-card-actions class="pa-4 bg-surface d-flex justify-space-between">
-        <div class="text-caption text-medium-emphasis">
-          Total disponível no catálogo: <strong>{{ totalCount }} modelos</strong>
+        <div class="text-body-2">
+          Total no catálogo: <strong>{{ totalCount }} modelos</strong>
         </div>
-        <v-btn variant="text" @click="emit('update:modelValue', false)">Fechar</v-btn>
+        <v-btn variant="text" color="primary" @click="emit('update:modelValue', false)">
+          Fechar
+        </v-btn>
       </v-card-actions>
     </v-card>
   </v-dialog>
@@ -332,25 +275,19 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useAiStore } from '@/stores/ai'
-import { formatDecimalBytes } from '@/utils/formatters'
-
-interface UniversalModelItem {
-  id: string
-  name: string
-  isFree: boolean
-  description?: string | null
-  contextLength?: number | bigint | null
-  contextWindow?: string | null
-  supportsTools?: boolean | null
-  isInstalled?: boolean
-  isRecommended?: boolean
-  size?: string | null
-  vendor?: string
-}
+import AiModelChips from './ai/AiModelChips.vue'
+import {
+  matchesModelQuery,
+  ollamaChoices,
+  opencodeChoices,
+  openrouterChoices,
+  type AiModelChoice,
+} from './ai/aiModelCatalog'
+import { DRIVER_LABELS, type AiDriver } from './ai/aiProviders'
 
 const props = defineProps<{
   modelValue: boolean
-  driver: 'openrouter' | 'opencode' | 'ollama'
+  driver: AiDriver
   currentModel?: string
   apiKey?: string | null
   baseUrl?: string | null
@@ -369,45 +306,21 @@ const selectedVendor = ref<string>('Todos')
 const currentPage = ref(1)
 const itemsPerPage = 20
 
-// Identificação visual do provedor ativo
-const providerName = computed(() => {
-  switch (props.driver) {
-    case 'openrouter':
-      return 'OpenRouter Gateway'
-    case 'opencode':
-      return 'OpenCode Go / Zen'
-    case 'ollama':
-      return 'Ollama Local'
-    default:
-      return 'Provedor de IA'
-  }
-})
+const PROVIDER_ICONS: Record<AiDriver, string> = {
+  openrouter: 'mdi-router-network',
+  opencode: 'mdi-xml',
+  ollama: 'mdi-server',
+}
 
-const providerIcon = computed(() => {
-  switch (props.driver) {
-    case 'openrouter':
-      return 'mdi-router-network'
-    case 'opencode':
-      return 'mdi-xml'
-    case 'ollama':
-      return 'mdi-server'
-    default:
-      return 'mdi-robot'
-  }
-})
+const PROVIDER_SUBTITLES: Record<AiDriver, string> = {
+  openrouter: 'Catálogo do OpenRouter, com o roteador gratuito e modelos que executam ferramentas',
+  opencode: 'Modelos gratuitos e de alto desempenho da plataforma OpenCode Zen',
+  ollama: 'Modelos instalados no seu Ollama e recomendados para diagnósticos de rede',
+}
 
-const providerSubtitle = computed(() => {
-  switch (props.driver) {
-    case 'openrouter':
-      return 'Catálogo completo com 440+ modelos de ponta, roteamento gratuito e suporte a chamadas de ferramentas'
-    case 'opencode':
-      return 'Modelos de alto desempenho e gratuitos da plataforma OpenCode Zen'
-    case 'ollama':
-      return 'Modelos instalados localmente e catálogo recomendado para diagnósticos de rede'
-    default:
-      return ''
-  }
-})
+const providerName = computed(() => DRIVER_LABELS[props.driver])
+const providerIcon = computed(() => PROVIDER_ICONS[props.driver])
+const providerSubtitle = computed(() => PROVIDER_SUBTITLES[props.driver])
 
 const isLoading = computed(() => {
   switch (props.driver) {
@@ -415,96 +328,29 @@ const isLoading = computed(() => {
       return aiStore.loadingOpenrouterModels
     case 'opencode':
       return aiStore.loadingOpencodeModels
-    case 'ollama':
-      return aiStore.loadingOllamaModels
     default:
-      return false
+      return aiStore.loadingOllamaModels
   }
 })
 
 // Lista canônica unificada de modelos de acordo com o driver
-const rawModels = computed<UniversalModelItem[]>(() => {
-  if (props.driver === 'openrouter') {
-    return aiStore.openrouterModels.map((m) => {
-      const parts = m.id.split('/')
-      const vendor = parts.length > 1 ? parts[0] : 'other'
-      return {
-        id: m.id,
-        name: m.name || m.id,
-        isFree: m.isFree,
-        description: m.description,
-        contextLength: m.contextLength,
-        supportsTools: m.supportsTools,
-        vendor,
-      }
-    })
+const rawModels = computed<AiModelChoice[]>(() => {
+  switch (props.driver) {
+    case 'openrouter':
+      return openrouterChoices(aiStore.openrouterModels)
+    case 'opencode':
+      return opencodeChoices(aiStore.opencodeModels)
+    default:
+      return ollamaChoices(aiStore.installedOllamaModels, aiStore.recommendedOllamaModels)
   }
-
-  if (props.driver === 'opencode') {
-    return aiStore.opencodeModels.map((m) => {
-      return {
-        id: m.id,
-        name: m.name || m.id,
-        isFree: m.isFree,
-        description: m.description,
-        supportsTools: m.supportsTools ?? true,
-      }
-    })
-  }
-
-  if (props.driver === 'ollama') {
-    const map = new Map<string, UniversalModelItem>()
-
-    // Modelos instalados
-    for (const inst of aiStore.installedOllamaModels) {
-      map.set(inst.name, {
-        id: inst.name,
-        name: inst.name,
-        isFree: true,
-        isInstalled: true,
-        size: inst.size ? formatDecimalBytes(inst.size) : null,
-        description: `Modelo instalado no Ollama local (${inst.parameterSize || 'tamanho não informado'}).`,
-        supportsTools:
-          inst.name.toLowerCase().includes('tool') || inst.name.toLowerCase().includes('groq'),
-      })
-    }
-
-    // Modelos recomendados
-    for (const rec of aiStore.recommendedOllamaModels) {
-      const existing = map.get(rec.name)
-      if (existing) {
-        existing.isRecommended = true
-        existing.supportsTools = rec.toolCallingOptimized
-        existing.contextWindow = rec.contextWindow
-        if (rec.description) existing.description = rec.description
-      } else {
-        map.set(rec.name, {
-          id: rec.name,
-          name: rec.name,
-          isFree: true,
-          isInstalled: rec.isInstalled,
-          isRecommended: true,
-          supportsTools: rec.toolCallingOptimized,
-          contextWindow: rec.contextWindow,
-          description: rec.description,
-        })
-      }
-    }
-
-    return Array.from(map.values())
-  }
-
-  return []
 })
 
-// Extrai fornecedores únicos para OpenRouter (ex: meta-llama, google, anthropic, openai)
+// Fornecedores únicos do OpenRouter (ex: meta-llama, google, anthropic, openai)
 const vendorList = computed<string[]>(() => {
   if (props.driver !== 'openrouter') return []
   const set = new Set<string>()
   for (const m of rawModels.value) {
-    if (m.vendor && m.vendor !== 'other') {
-      set.add(m.vendor)
-    }
+    if (m.vendor) set.add(m.vendor)
   }
   return Array.from(set).sort()
 })
@@ -519,22 +365,9 @@ const hasFreeFilter = computed(() => props.driver === 'openrouter' || props.driv
 const hasToolsFilter = computed(() => props.driver === 'openrouter' || props.driver === 'ollama')
 
 // Filtragem em tempo real por busca de texto, categoria e fornecedor
-const filteredModels = computed<UniversalModelItem[]>(() => {
-  let list = rawModels.value
-  const query = searchQuery.value.trim().toLowerCase()
+const filteredModels = computed<AiModelChoice[]>(() => {
+  let list = rawModels.value.filter((m) => matchesModelQuery(m, searchQuery.value))
 
-  // Filtro por texto
-  if (query) {
-    list = list.filter((m) => {
-      const idMatch = m.id.toLowerCase().includes(query)
-      const nameMatch = m.name.toLowerCase().includes(query)
-      const descMatch = (m.description || '').toLowerCase().includes(query)
-      const vendorMatch = (m.vendor || '').toLowerCase().includes(query)
-      return idMatch || nameMatch || descMatch || vendorMatch
-    })
-  }
-
-  // Filtro por categoria ativa
   if (activeCategory.value === 'free') {
     list = list.filter((m) => m.isFree)
   } else if (activeCategory.value === 'tools') {
@@ -545,7 +378,6 @@ const filteredModels = computed<UniversalModelItem[]>(() => {
     list = list.filter((m) => m.isRecommended)
   }
 
-  // Filtro por fornecedor no OpenRouter
   if (props.driver === 'openrouter' && selectedVendor.value && selectedVendor.value !== 'Todos') {
     list = list.filter((m) => m.vendor === selectedVendor.value)
   }
@@ -570,18 +402,6 @@ function isItemActive(modelId: string): boolean {
   return props.currentModel.trim().toLowerCase() === modelId.trim().toLowerCase()
 }
 
-function formatContextLength(ctx: number | bigint | null | undefined): string {
-  if (!ctx) return ''
-  const num = typeof ctx === 'bigint' ? Number(ctx) : ctx
-  if (num >= 1_000_000) {
-    return `${(num / 1_000_000).toFixed(1)}M context`
-  }
-  if (num >= 1000) {
-    return `${Math.round(num / 1000)}k context`
-  }
-  return `${num} tokens`
-}
-
 function handleSelect(modelId: string) {
   emit('select', modelId)
   emit('update:modelValue', false)
@@ -596,7 +416,7 @@ async function refreshModels() {
     await aiStore.loadOpenrouterModels(props.apiKey)
   } else if (props.driver === 'opencode') {
     await aiStore.loadOpencodeModels(props.apiKey, props.baseUrl)
-  } else if (props.driver === 'ollama') {
+  } else {
     await aiStore.loadOllamaModels(props.baseUrl)
   }
 }

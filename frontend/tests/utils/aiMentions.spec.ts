@@ -7,7 +7,7 @@ import {
   mentionsInText,
   type AiMention,
 } from '@/utils/aiMentions'
-import { rewindTo, toApiMessages, type AiDisplayMessage } from '@/utils/aiChatStream'
+import { buildChatHistory, rewindTo, type AiDisplayMessage } from '@/utils/aiChatStream'
 import { useMentionPicker } from '@/composables/useMentionPicker'
 
 const mppt: AiMention = { kind: 'device', id: '12', label: 'MPPT Bateria' }
@@ -46,16 +46,20 @@ describe('marcações da pergunta', () => {
     expect(describeMention(mppt)).toBe('dispositivo "MPPT Bateria" (id 12)')
     expect(describeMention(logs)).toBe('fonte Logs')
 
-    const historico = toApiMessages([
+    const historico = buildChatHistory([
       { id: 'u1', role: 'user', content: 'tensão da @MPPT Bateria?', mentions: [mppt] },
-    ])
+      { id: 'a1', role: 'assistant', content: '12,8 V' },
+      { id: 'u2', role: 'user', content: 'e os @Logs?', mentions: [logs] },
+    ]).messages
     expect(historico[0].content).toBe(
       'tensão da @MPPT Bateria?\n[Marcados com @: dispositivo "MPPT Bateria" (id 12)]'
     )
+    // A pergunta atual leva as marcações em `mentions`, expandidas pelo backend.
+    expect(historico[2].content).toBe('e os @Logs?')
   })
 
   it('a pergunta da IA entra no histórico mesmo sem texto na resposta', () => {
-    const historico = toApiMessages([
+    const { messages: historico } = buildChatHistory([
       { id: 'u1', role: 'user', content: 'e a bateria?' },
       {
         id: 'a1',

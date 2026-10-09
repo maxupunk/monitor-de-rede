@@ -160,6 +160,12 @@ export const useAiStore = defineStore('ai', () => {
   const streamError = ref<string | null>(null)
   /** Chave desta conversa (modo automático dos plugins de dispositivo). */
   const conversationKey = ref(newConversationKey())
+  /**
+   * Tela de onde a conversa foi aberta ("Diagnosticar com IA"). Vale para
+   * todas as perguntas dela, não só a primeira: "e ontem?" continua sendo
+   * sobre aquele alerta.
+   */
+  const screenContext = ref<AiChatContext>({})
   /** Equipamento de que a conversa trata, quando aberta a partir dele. */
   const deviceContextId = ref<number | null>(null)
   /** Estado do "Aceitar automaticamente" para esta conversa e equipamento. */
@@ -243,6 +249,8 @@ export const useAiStore = defineStore('ai', () => {
   ) {
     if (!content.trim() || isStreaming.value) return
 
+    if (Object.values(context).some((id) => id != null)) screenContext.value = { ...context }
+    const screen = screenContext.value
     if (context.deviceId && context.deviceId !== deviceContextId.value) {
       deviceContextId.value = context.deviceId
       void refreshAutoAccept()
@@ -278,10 +286,10 @@ export const useAiStore = defineStore('ai', () => {
         '/ai/chat/stream',
         {
           messages: history.messages,
-          deviceId: context.deviceId ?? undefined,
-          monitorId: context.monitorId ?? undefined,
-          alertId: context.alertId ?? undefined,
-          ruleId: context.ruleId ?? undefined,
+          deviceId: screen.deviceId ?? undefined,
+          monitorId: screen.monitorId ?? undefined,
+          alertId: screen.alertId ?? undefined,
+          ruleId: screen.ruleId ?? undefined,
           mentions,
           summary: history.summary,
           contextHint: history.contextHint,
@@ -352,6 +360,7 @@ export const useAiStore = defineStore('ai', () => {
   /** Começa uma conversa nova; a atual continua salva no histórico. */
   function resetDeviceSession() {
     conversationKey.value = newConversationKey()
+    screenContext.value = {}
     deviceContextId.value = null
     autoAccept.value = null
   }
@@ -363,11 +372,6 @@ export const useAiStore = defineStore('ai', () => {
     compactNext.value = false
     streamError.value = null
     conversations.startNew()
-  }
-
-  /** Mantido para as telas que já chamavam "limpar": abre uma conversa nova. */
-  function clearMessages() {
-    newConversation()
   }
 
   /** Reabre uma conversa salva. Ferramenta que ficou rodando vira falha. */
@@ -673,7 +677,6 @@ export const useAiStore = defineStore('ai', () => {
     rewind,
     searchMentions,
     cancelGeneration,
-    clearMessages,
     newConversation,
     openConversation,
     deleteConversation,

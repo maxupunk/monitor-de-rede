@@ -143,18 +143,16 @@ impl ToolGroup {
     pub const fn purpose(self) -> &'static str {
         match self {
             Self::Core => "consultas básicas",
-            Self::History => "uptime e métricas no tempo",
-            Self::Analysis => "causa raiz, baseline e linha do tempo",
-            Self::Charts => "gráficos de latência, tráfego e recursos",
-            Self::Logs => "panorama de logs por padrão",
-            Self::Docker => "containers e servidores Docker (estado, consumo, logs)",
-            Self::Diagnostics => "ping, traceroute, portas, DNS e playbooks",
-            Self::Actions => "ações com confirmação: alertas, manutenção, monitores",
-            Self::AlertRules => "origem, guia e gestão de regras de alerta",
+            Self::History => "histórico",
+            Self::Analysis => "causa raiz e incidente",
+            Self::Charts => "gráficos",
+            Self::Logs => "logs",
+            Self::Docker => "containers",
+            Self::Diagnostics => "testes ativos",
+            Self::Actions => "ações",
+            Self::AlertRules => "regras de alerta",
             Self::Platform => "agentes, VPN, topologia, descoberta e redes",
-            Self::Devices => {
-                "plugins de dispositivo: acessar por SSH/HTTP, criar, testar e usar scripts"
-            }
+            Self::Devices => "equipamento por SSH/HTTP e plugins",
         }
     }
 
@@ -586,6 +584,12 @@ impl ToolRegistry {
             .find(|handler| handler.name() == name)
             .map(AsRef::as_ref)
             .ok_or_else(|| AppError::validation(format!("Ferramenta indisponível: {name}")))
+    }
+
+    /// O grupo da ferramenta, se ela está no registro.
+    #[must_use]
+    pub fn group_of(&self, name: &str) -> Option<ToolGroup> {
+        self.handler(name).ok().map(|handler| handler.group())
     }
 
     /// O tipo da ferramenta, se ela está no registro.

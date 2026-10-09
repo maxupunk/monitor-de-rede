@@ -281,4 +281,21 @@ describe('conversas salvas na conta', () => {
     expect(corpo).toMatchObject({ alertId: 3, deviceId: 9 })
     expect(corpo.monitorId).toBeUndefined()
   })
+
+  it('as perguntas seguintes continuam com o contexto da tela; conversa nova o zera', async () => {
+    vi.mocked(apiService.postStream).mockImplementation(async () => sseResponse([{ type: 'done' }]))
+    const store = useAiStore()
+    store.askAbout('Investigue o alerta #3', { alertId: 3, deviceId: 9 })
+    await vi.waitFor(() => expect(store.isStreaming).toBe(false))
+
+    await store.sendMessage('e ontem?')
+    const seguinte = vi.mocked(apiService.postStream).mock.calls[1][1] as Record<string, unknown>
+    expect(seguinte).toMatchObject({ alertId: 3, deviceId: 9 })
+
+    store.newConversation()
+    await store.sendMessage('outro assunto')
+    const nova = vi.mocked(apiService.postStream).mock.calls[2][1] as Record<string, unknown>
+    expect(nova.alertId).toBeUndefined()
+    expect(nova.deviceId).toBeUndefined()
+  })
 })

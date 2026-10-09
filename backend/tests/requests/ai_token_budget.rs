@@ -255,3 +255,29 @@ async fn rotina_automatica_recebe_o_catalogo_inteiro() {
     })
     .await;
 }
+
+#[tokio::test]
+#[serial]
+async fn chamada_direta_pelo_catalogo_carrega_o_grupo_sem_load_tools() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
+        let roteiro = vec![chamada("get_logs_overview", json!({})), texto("Pronto.")];
+        let (rodadas, _) = conversar(
+            &ctx,
+            "quais dispositivos estão offline?",
+            roteiro,
+            ToolLoading::OnDemand,
+        )
+        .await;
+
+        assert!(!rodadas[0]
+            .ferramentas
+            .contains(&"get_logs_overview".to_string()));
+        assert!(
+            rodadas[1]
+                .ferramentas
+                .contains(&"get_logs_overview".to_string()),
+            "o grupo da ferramenta chamada entra para a rodada seguinte ter o contrato"
+        );
+    })
+    .await;
+}

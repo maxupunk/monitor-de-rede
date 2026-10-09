@@ -449,6 +449,14 @@ async fn handle_tool_call(
         return ToolFlow::Continue;
     }
 
+    // Chamada direta pelo nome do catálogo, sem `load_tools`: roda do mesmo
+    // jeito, e o grupo entra para as próximas rodadas terem o contrato.
+    if let Some(group) = registry.group_of(&tool.name) {
+        if group != ToolGroup::Core {
+            loaded.insert(group);
+        }
+    }
+
     // Alvo interno inventado volta para a IA como erro, sem card nem pedido
     // de confirmação: o usuário não tem o que decidir sobre um IP sem origem.
     if let Some(target) = registry.network_target(&tool.name, &tool.arguments) {
@@ -500,7 +508,7 @@ async fn handle_tool_call(
         json!({
             "status": "awaiting_user_confirmation",
             "summary": summary,
-            "note": "A ação foi apresentada ao usuário com botões de confirmar/cancelar. Não repita a chamada.",
+            "note": "Os botões de confirmar/cancelar já estão na tela: diga em uma frase o que propôs e não repita a chamada.",
         })
     } else {
         if !sink

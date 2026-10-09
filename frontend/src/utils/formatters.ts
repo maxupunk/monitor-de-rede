@@ -193,6 +193,11 @@ export function formatCompactCount(value?: number | null, fallback = '—'): str
   return `${(value / divisor).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} ${suffix}`
 }
 
+/** Hora cheia do dia (0–23) como relógio: `8` ➔ `08:00` (agendas diárias). */
+export function formatHourOfDay(hour: number): string {
+  return `${String(hour).padStart(2, '0')}:00`
+}
+
 /** Velocidade de geração da IA: `42,3 tok/s` (uma casa abaixo de 100). */
 export function formatTokenRate(value?: number | null, fallback = '—'): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return fallback

@@ -98,7 +98,8 @@ describe('apresentação das ferramentas e do estilo', () => {
     expect(aiToolMeta('ferramenta_nova')).toEqual({
       label: 'ferramenta_nova',
       icon: 'mdi-cog-outline',
-      color: 'grey',
+      color: 'primary',
+      kind: 'action',
     })
   })
 

@@ -190,43 +190,6 @@
         {{ layaStore.pullProgress.error }}
       </v-alert>
 
-      <!-- 3. Experimentar -->
-      <div class="step-title mt-5">
-        <v-avatar
-          size="24"
-          :color="stepColor(!!result?.success, modelReady ? 'primary' : 'warning')"
-          class="me-2"
-          >3</v-avatar
-        >
-        Experimentar
-      </div>
-      <div v-if="!modelReady" class="text-body-2 text-warning mb-2">
-        Disponível depois que o modelo estiver baixado.
-      </div>
-      <div class="d-flex flex-wrap align-center ga-2">
-        <v-text-field
-          v-model="question"
-          label="Pergunta de exemplo"
-          :placeholder="SAMPLE_QUESTION"
-          variant="outlined"
-          density="compact"
-          hide-details
-          class="flex-grow-1 question-field"
-          :disabled="!modelReady"
-          @keydown.enter.prevent="runTest"
-        />
-        <v-btn
-          color="primary"
-          variant="flat"
-          prepend-icon="mdi-flask-outline"
-          :loading="layaStore.testing && !modelLoading"
-          :disabled="!modelReady || layaStore.pulling || modelLoading"
-          @click="runTest"
-        >
-          <v-progress-circular v-if="modelLoading" indeterminate size="16" width="2" class="me-2" />
-          {{ modelLoading ? 'Carregando modelo…' : 'Ver o que o Laya escolhe' }}
-        </v-btn>
-      </div>
       <v-alert
         v-if="modelLoading"
         type="info"
@@ -247,63 +210,6 @@
       >
         Não foi possível carregar o modelo: {{ layaStore.modelState?.message }}
       </v-alert>
-      <div v-else-if="modelReady && !modelInMemory" class="text-body-2 mt-2">
-        O modelo está fora da memória: o primeiro teste o carrega antes de responder. No chat, a
-        pergunta que chegar nesse momento segue sem o Laya enquanto ele carrega.
-      </div>
-
-      <template v-if="result">
-        <v-alert :type="resultType" variant="tonal" density="compact" class="mt-3">
-          {{ result.message }}
-          <div v-if="result.success" class="d-flex flex-wrap ga-2 mt-1">
-            <v-chip size="small" color="primary" variant="tonal" prepend-icon="mdi-chip">
-              {{ result.model }}
-            </v-chip>
-            <v-chip size="small" color="info" variant="tonal" prepend-icon="mdi-timer-outline">
-              {{ formatLatency(result.latencyMs) }}
-            </v-chip>
-          </div>
-        </v-alert>
-
-        <div v-if="result.groups.length" class="mt-3">
-          <div v-for="group in scoredGroups" :key="group.id" class="mb-2">
-            <div class="d-flex align-center justify-space-between text-body-2">
-              <span>
-                <v-icon
-                  size="16"
-                  :color="group.selected ? 'success' : 'info'"
-                  :icon="group.selected ? 'mdi-check-circle' : 'mdi-minus-circle-outline'"
-                />
-                <strong class="ms-1">{{ group.id }}</strong>
-                <span class="ms-1">— {{ group.purpose }}</span>
-              </span>
-              <strong>{{ formatPercent(group.probability * 100, 0) }}</strong>
-            </div>
-            <v-progress-linear
-              :model-value="group.probability * 100"
-              :color="group.selected ? 'success' : 'info'"
-              height="6"
-              rounded
-            />
-          </div>
-        </div>
-      </template>
-
-      <div class="mt-3">
-        <div class="text-body-2">
-          Confiança mínima para uma ferramenta ir à IA:
-          <strong>{{ formatPercent(form.minConfidence, 0) }}</strong>
-          <span v-if="result?.groups.length"> — em verde, o que iria com este valor.</span>
-        </div>
-        <v-slider
-          v-model="form.minConfidence"
-          :min="30"
-          :max="95"
-          :step="5"
-          color="primary"
-          hide-details
-        />
-      </div>
 
       <!-- Onde usar -->
       <div class="step-title mt-5">
@@ -322,25 +228,140 @@
             hide-details
             :label="feature.label"
           />
-          <div class="text-caption ms-12 mt-n1">{{ feature.hint }}</div>
+          <div class="text-body-2 ms-12 mt-n1">{{ feature.hint }}</div>
         </v-col>
         <v-col cols="12" md="6">
-          <v-select
-            v-model="form.features.incidentTriage"
-            :items="TRIAGE_OPTIONS"
-            label="Triagem da IA proativa"
-            variant="outlined"
+          <v-switch
+            v-model="triageEnabled"
+            color="primary"
             density="compact"
-            prepend-inner-icon="mdi-filter-check-outline"
-            :hint="triageHint"
-            persistent-hint
+            hide-details
+            label="Triagem da IA proativa"
           />
+          <div class="text-body-2 ms-12 mt-n1">
+            Decide se um alerta merece resumo do LLM, poupando tokens.
+          </div>
         </v-col>
       </v-row>
 
       <v-expansion-panels variant="accordion" class="mt-4">
         <v-expansion-panel title="Avançado">
           <v-expansion-panel-text>
+            <!-- Experimentar: o que o Laya escolheria e com que confiança -->
+            <div class="font-weight-bold mb-1">Experimentar</div>
+            <div v-if="!modelReady" class="text-body-2 text-warning mb-2">
+              Disponível depois que o modelo estiver baixado.
+            </div>
+            <div class="d-flex flex-wrap align-center ga-2">
+              <v-text-field
+                v-model="question"
+                label="Pergunta de exemplo"
+                :placeholder="SAMPLE_QUESTION"
+                variant="outlined"
+                density="compact"
+                hide-details
+                class="flex-grow-1 question-field"
+                :disabled="!modelReady"
+                @keydown.enter.prevent="runTest"
+              />
+              <v-btn
+                color="primary"
+                variant="flat"
+                prepend-icon="mdi-flask-outline"
+                :loading="layaStore.testing && !modelLoading"
+                :disabled="!modelReady || layaStore.pulling || modelLoading"
+                @click="runTest"
+              >
+                <v-progress-circular
+                  v-if="modelLoading"
+                  indeterminate
+                  size="16"
+                  width="2"
+                  class="me-2"
+                />
+                {{ modelLoading ? 'Carregando modelo…' : 'Ver o que o Laya escolhe' }}
+              </v-btn>
+            </div>
+            <div
+              v-if="modelReady && !modelInMemory && !modelLoading && !modelLoadFailed"
+              class="text-body-2 mt-2"
+            >
+              O modelo está fora da memória: o primeiro teste o carrega antes de responder. No chat,
+              a pergunta que chegar nesse momento segue sem o Laya enquanto ele carrega.
+            </div>
+
+            <template v-if="result">
+              <v-alert :type="resultType" variant="tonal" density="compact" class="mt-3">
+                {{ result.message }}
+                <div v-if="result.success" class="d-flex flex-wrap ga-2 mt-1">
+                  <v-chip size="small" color="primary" variant="tonal" prepend-icon="mdi-chip">
+                    {{ result.model }}
+                  </v-chip>
+                  <v-chip
+                    size="small"
+                    color="info"
+                    variant="tonal"
+                    prepend-icon="mdi-timer-outline"
+                  >
+                    {{ formatLatency(result.latencyMs) }}
+                  </v-chip>
+                </div>
+              </v-alert>
+
+              <div v-if="result.groups.length" class="mt-3">
+                <div v-for="group in scoredGroups" :key="group.id" class="mb-2">
+                  <div class="d-flex align-center justify-space-between text-body-2">
+                    <span>
+                      <v-icon
+                        size="16"
+                        :color="group.selected ? 'success' : 'info'"
+                        :icon="group.selected ? 'mdi-check-circle' : 'mdi-minus-circle-outline'"
+                      />
+                      <strong class="ms-1">{{ group.id }}</strong>
+                      <span class="ms-1">— {{ group.purpose }}</span>
+                    </span>
+                    <strong>{{ formatPercent(group.probability * 100, 0) }}</strong>
+                  </div>
+                  <v-progress-linear
+                    :model-value="group.probability * 100"
+                    :color="group.selected ? 'success' : 'info'"
+                    height="6"
+                    rounded
+                  />
+                </div>
+              </div>
+            </template>
+
+            <v-divider class="my-4" />
+
+            <div class="text-body-2">
+              Confiança mínima para uma ferramenta ir à IA:
+              <strong>{{ formatPercent(form.minConfidence, 0) }}</strong>
+              <span v-if="result?.groups.length"> — em verde, o que iria com este valor.</span>
+            </div>
+            <v-slider
+              v-model="form.minConfidence"
+              :min="30"
+              :max="95"
+              :step="5"
+              color="primary"
+              hide-details
+              class="mb-3"
+            />
+
+            <v-select
+              v-model="form.features.incidentTriage"
+              :items="TRIAGE_MODE_OPTIONS"
+              label="Modo da triagem da IA proativa"
+              variant="outlined"
+              density="compact"
+              prepend-inner-icon="mdi-filter-check-outline"
+              :disabled="!triageEnabled"
+              :hint="triageHint"
+              persistent-hint
+              class="mb-3"
+            />
+
             <v-text-field
               v-model.number="form.timeoutMs"
               type="number"
@@ -424,10 +445,10 @@ const FEATURE_SWITCHES: { key: FeatureSwitch; label: string; hint: string }[] = 
   },
 ]
 
-const TRIAGE_OPTIONS: { value: LayaTriageMode; title: string }[] = [
-  { value: 'off', title: 'Desligada' },
-  { value: 'shadow', title: 'Só registrar (resume sempre)' },
+/** Modos da triagem ligada; desligar é a chave em "Onde usar". */
+const TRIAGE_MODE_OPTIONS: { value: LayaTriageMode; title: string }[] = [
   { value: 'enforce', title: 'Decidir (pula alerta que não merece)' },
+  { value: 'shadow', title: 'Só registrar (resume sempre)' },
 ]
 
 const emit = defineEmits<{
@@ -442,10 +463,17 @@ const serverOnline = computed(() => !!layaStore.models?.online)
 const installedCount = computed(() => layaStore.models?.installed.length ?? 0)
 /** Testar e ativar só depois que o modelo estiver baixado no Ollaya. */
 const modelReady = computed(() => serverOnline.value && layaStore.installed(form.value.model ?? ''))
+/** Triagem ligada decide por padrão; "Só registrar" fica no Avançado. */
+const triageEnabled = computed({
+  get: () => form.value.features.incidentTriage !== 'off',
+  set: (on: boolean) => {
+    form.value.features.incidentTriage = on ? 'enforce' : 'off'
+  },
+})
 const triageHint = computed(() =>
-  form.value.features.incidentTriage === 'enforce'
-    ? 'Alerta suprimido ganha o botão "Gerar resumo agora".'
-    : 'Decide se um alerta merece resumo do LLM, poupando tokens.'
+  form.value.features.incidentTriage === 'shadow'
+    ? 'Só registrar: o Laya anota o que decidiria, mas todo alerta continua ganhando resumo.'
+    : 'Decidir: alerta que não merece fica sem resumo e ganha o botão "Gerar resumo agora".'
 )
 
 /** Passo concluído fica verde; pendente, na cor do que falta. */

@@ -18,15 +18,13 @@
           { 'has-chart': hasChart },
         ]"
       >
-        <!-- Tool Cards Executados -->
-        <div v-if="toolCards.length > 0" class="mb-2">
-          <AiToolCard
-            v-for="tool in toolCards"
-            :key="tool.id"
-            :tool="tool"
-            :message-id="message.id"
-          />
-        </div>
+        <!-- Ferramentas executadas: consultas concluídas viram uma linha só -->
+        <AiToolActivity
+          v-if="toolCards.length > 0"
+          :tools="toolCards"
+          :message-id="message.id"
+          class="mb-2"
+        />
 
         <!-- Pergunta da IA antes de prosseguir -->
         <AiQuestionCard
@@ -104,19 +102,28 @@
             class="d-flex align-center justify-end ga-2 mt-1"
           >
             <div
-              v-if="metrics"
-              class="usage-metrics d-flex align-center flex-wrap ga-2 me-auto text-body-small"
-              :title="metrics.detail"
+              v-if="metrics && (metrics.model || metrics.details.length > 0)"
+              class="usage-metrics d-flex align-center ga-1 me-auto text-body-small"
             >
               <span v-if="metrics.model" class="usage-model d-inline-flex align-center ga-1">
                 <v-icon size="12">mdi-chip</v-icon>
-                {{ metrics.model }}
+                <span class="text-truncate">{{ metrics.model }}</span>
               </span>
-              <span v-if="metrics.tokens">{{ metrics.tokens }}</span>
-              <span v-if="metrics.speed" class="d-inline-flex align-center ga-1">
-                <v-icon size="12">mdi-speedometer</v-icon>
-                {{ metrics.speed }}
-              </span>
+              <v-tooltip v-if="metrics.details.length > 0" location="top" max-width="360">
+                <template #activator="{ props: tooltipProps }">
+                  <v-btn
+                    v-bind="tooltipProps"
+                    icon
+                    size="x-small"
+                    variant="text"
+                    color="primary"
+                    aria-label="Consumo da resposta"
+                  >
+                    <v-icon size="14">mdi-information-outline</v-icon>
+                  </v-btn>
+                </template>
+                <div v-for="line in metrics.details" :key="line">{{ line }}</div>
+              </v-tooltip>
             </div>
             <v-btn
               v-if="message.role === 'user'"
@@ -189,10 +196,11 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useAiStore, type AiDisplayMessage } from '@/stores/ai'
-import AiToolCard from './AiToolCard.vue'
+import AiToolActivity from './AiToolActivity.vue'
 import AiQuestionCard from './AiQuestionCard.vue'
-import { formatCompactCount, formatElapsedMs, formatTokenRate } from '@/utils/formatters'
-import { shortModelName, tokensPerSecond, toolQuestion } from '@/utils/aiChatStream'
+import { summarizeUsage } from './aiUsageSummary'
+import { formatCompactCount } from '@/utils/formatters'
+import { toolQuestion } from '@/utils/aiChatStream'
 import { mentionKindMeta } from '@/utils/aiMentions'
 import { renderMarkdown } from '@/utils/markdown'
 
@@ -228,29 +236,8 @@ const answerable = computed(
 const copied = ref(false)
 const showSummary = ref(false)
 
-/** Modelo, consumo e velocidade da resposta, quando o provedor informou. */
-const metrics = computed(() => {
-  const usage = props.message.usage
-  if (!usage) return null
-  const rate = tokensPerSecond(usage)
-  const hasTokens = usage.promptTokens > 0 || usage.completionTokens > 0
-  const detail = [
-    usage.model ? `Modelo: ${usage.model}` : null,
-    hasTokens
-      ? `Tokens enviados ao provedor (↑): ${usage.promptTokens} · gerados na resposta (↓): ${usage.completionTokens}`
-      : null,
-    rate !== null ? `Velocidade de geração: ${formatTokenRate(rate)}` : null,
-    usage.durationMs ? `Tempo total da resposta: ${formatElapsedMs(usage.durationMs)}` : null,
-  ].filter((line): line is string => line !== null)
-  return {
-    model: shortModelName(usage.model),
-    tokens: hasTokens
-      ? `↑ ${formatCompactCount(usage.promptTokens)} · ↓ ${formatCompactCount(usage.completionTokens)} tokens`
-      : null,
-    speed: rate !== null ? formatTokenRate(rate) : null,
-    detail: detail.join('\n'),
-  }
-})
+/** Modelo à vista; consumo, velocidade e contexto no detalhe (ⓘ). */
+const metrics = computed(() => summarizeUsage(props.message.usage))
 
 /** Gráfico precisa da largura toda, mesmo quando o texto da resposta é curto. */
 const hasChart = computed(() => props.message.toolCalls?.some((tool) => tool.chart) ?? false)
@@ -310,8 +297,9 @@ async function copyContent() {
   height: auto;
 }
 /* Cinza fixo (`bg-grey-lighten-*`) deixava o texto claro do tema escuro
-   ilegível: fundo e texto acompanham o tema. */
-.message-bubble :deep(.code-block) {
+   ilegível: fundo e texto acompanham o tema. Vale também para os blocos de
+   parâmetros e resultado dos cartões de ferramenta. */
+.message-bubble-wrapper :deep(.code-block) {
   background: rgba(var(--v-theme-on-surface), 0.08);
   border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
   color: rgb(var(--v-theme-on-surface));
@@ -337,10 +325,13 @@ async function copyContent() {
   color: rgb(var(--v-theme-on-surface));
 }
 .usage-metrics {
-  color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity));
+  color: rgb(var(--v-theme-on-surface));
   line-height: 1.4;
+  min-width: 0;
 }
 .usage-model {
+  min-width: 0;
+  max-width: 220px;
   padding: 0 6px;
   border-radius: 6px;
   background: rgba(var(--v-theme-primary), 0.14);

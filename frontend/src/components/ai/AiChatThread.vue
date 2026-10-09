@@ -1,5 +1,7 @@
 <template>
   <div class="ai-thread">
+    <AutoAcceptBanner />
+
     <div class="ai-thread__viewport">
       <div
         ref="scroller"
@@ -113,7 +115,7 @@
         :placeholder="placeholder"
       >
         <template #status>
-          <slot name="status" />
+          <AiChatStatusChips />
         </template>
       </AiChatComposer>
     </div>
@@ -126,11 +128,14 @@ import { useAiStore } from '@/stores/ai'
 import { useChatAutoScroll } from '@/composables/useChatAutoScroll'
 import AiChatMessage from './AiChatMessage.vue'
 import AiChatComposer from './AiChatComposer.vue'
+import AiChatStatusChips from './AiChatStatusChips.vue'
+import AutoAcceptBanner from '@/components/plugins/AutoAcceptBanner.vue'
 import { AI_SUGGESTIONS } from './aiSuggestions'
 
 /**
- * A conversa com a IA: mensagens, estado vazio com sugestões, rolagem que
- * respeita quem está lendo e o campo da pergunta. O painel lateral e a tela
+ * A conversa com a IA: aviso do modo automático, mensagens, estado vazio com
+ * sugestões, rolagem que respeita quem está lendo e o campo da pergunta com o
+ * estilo de resposta e os testes ativos. O painel lateral e a tela
  * cheia usam este mesmo componente — só a moldura muda.
  */
 const props = withDefaults(

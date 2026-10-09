@@ -17,26 +17,17 @@
           {{ modelLabel }}
         </div>
       </div>
-      <v-chip
-        size="x-small"
-        :color="aiStore.settings?.enabled ? 'success' : 'warning'"
-        variant="flat"
-      >
-        {{ aiStore.settings?.enabled ? 'Ativo' : 'Desativado' }}
-      </v-chip>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { useAiStore } from '@/stores/ai'
 import { useAiModelInfo } from '@/composables/useAiModelInfo'
 import AiConversationList from './AiConversationList.vue'
 
 /** Coluna de conversas do chat em tela cheia (e o painel dela no celular). */
 const emit = defineEmits<{ selected: [] }>()
 
-const aiStore = useAiStore()
 const { driverLabel, modelLabel } = useAiModelInfo()
 </script>
 

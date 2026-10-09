@@ -1,62 +1,46 @@
 <template>
   <div class="ai-automation-settings">
-    <!-- Ferramentas e ações -->
-    <div class="text-subtitle-2 font-weight-bold mb-1">Ferramentas e ações</div>
-    <v-checkbox
-      v-model="allowActiveTools"
-      color="primary"
-      density="compact"
-      hide-details
-      label="Permitir testes ativos de rede (ping, traceroute, scan de portas, DNS e playbooks)"
+    <!-- Testes ativos de rede -->
+    <AiModeToggle
+      v-model="toolsMode"
+      title="Testes ativos de rede (ping, traceroute, portas, DNS e playbooks)"
+      :options="ACTIVE_TOOLS_OPTIONS"
+      class="mb-5"
     />
-    <v-checkbox
-      v-model="requireToolConfirmation"
-      color="primary"
-      density="compact"
-      hide-details
-      :disabled="!allowActiveTools"
-      label="Pedir minha confirmação antes de cada teste ativo"
-    />
+
+    <!-- Ações: tudo que muda algo no sistema -->
+    <div class="font-weight-bold mb-1">Ações</div>
+    <div class="text-body-2 mb-2">
+      Ações mudam algo no sistema, ao contrário dos testes. Cada uma aparece no chat e fica
+      registrada na auditoria em seu nome.
+    </div>
     <v-checkbox
       v-model="allowActions"
       color="primary"
       density="compact"
       hide-details
-      label="Permitir que a IA proponha ações: reconhecer ou silenciar alerta, janela de manutenção e criar monitor"
+      label="Alertas, manutenção e monitores: a IA pode propor reconhecer ou silenciar alerta, abrir janela de manutenção e criar monitor"
     />
-    <div class="text-caption text-medium-emphasis ms-10 mb-4">
-      Toda ação aparece no chat com os botões Confirmar e Cancelar; nada é alterado sem o seu
-      clique, e a execução fica registrada na auditoria em seu nome.
+    <div class="text-body-2 ms-10 mb-4">
+      Essas ações sempre pedem o seu clique em Confirmar; nada é alterado sem ele.
     </div>
 
-    <!-- Ações em containers Docker -->
-    <div class="text-subtitle-2 font-weight-bold mb-2">
-      Iniciar, parar e reiniciar containers Docker
-    </div>
-    <v-btn-toggle
+    <AiModeToggle
       v-model="containerActions"
-      mandatory
-      divided
-      color="primary"
-      variant="outlined"
-      density="comfortable"
+      title="Containers Docker: iniciar, parar e reiniciar"
+      :options="CONTAINER_ACTION_OPTIONS"
+      class="mb-5"
     >
-      <v-btn v-for="option in containerActionOptions" :key="option.value" :value="option.value">
-        <v-icon start size="18">{{ option.icon }}</v-icon>
-        {{ option.title }}
-      </v-btn>
-    </v-btn-toggle>
-    <div class="text-caption text-medium-emphasis mt-2 mb-4">
-      {{ selectedContainerAction.hint }} Vale para a central e para os agentes remotos que permitem
-      (política local do agente). Remover ou atualizar container nunca fica com a IA.
-    </div>
+      Vale para a central e para os agentes remotos que permitem (política local do agente). Remover
+      ou atualizar container nunca fica com a IA.
+    </AiModeToggle>
 
     <!-- IA proativa -->
     <div class="d-flex align-center ga-2 mb-1">
-      <span class="text-subtitle-2 font-weight-bold">IA proativa</span>
+      <span class="font-weight-bold">IA proativa</span>
       <v-chip size="x-small" color="warning" variant="tonal">consome tokens</v-chip>
     </div>
-    <div class="text-caption text-medium-emphasis mb-2">
+    <div class="text-body-2 mb-2">
       Rotinas que chamam o provedor sem você perguntar. Usam só consultas de leitura e respondem no
       modo direto.
     </div>
@@ -134,6 +118,15 @@ import type { AiContainerActionMode } from '@/bindings/AiContainerActionMode'
 import type { AiDigestSchedule } from '@/bindings/AiDigestSchedule'
 import type { AiIncidentSeverity } from '@/bindings/AiIncidentSeverity'
 import type { AiProactiveSettings } from '@/bindings/AiProactiveSettings'
+import { formatHourOfDay } from '@/utils/formatters'
+import AiModeToggle from './ai/AiModeToggle.vue'
+import {
+  ACTIVE_TOOLS_OPTIONS,
+  CONTAINER_ACTION_OPTIONS,
+  activeToolsFlags,
+  activeToolsMode,
+  type AiActiveToolsMode,
+} from './ai/aiAutomationModes'
 
 const allowActiveTools = defineModel<boolean>('allowActiveTools', { required: true })
 const requireToolConfirmation = defineModel<boolean>('requireToolConfirmation', {
@@ -145,36 +138,15 @@ const containerActions = defineModel<AiContainerActionMode>('containerActions', 
 })
 const proactive = defineModel<AiProactiveSettings>('proactive', { required: true })
 
-const containerActionOptions: {
-  title: string
-  value: AiContainerActionMode
-  icon: string
-  hint: string
-}[] = [
-  {
-    title: 'Desligado',
-    value: 'off',
-    icon: 'mdi-cancel',
-    hint: 'A IA só consulta os containers; nunca muda o estado deles.',
+/** Os dois booleanos do contrato vistos como uma escolha só. */
+const toolsMode = computed<AiActiveToolsMode>({
+  get: () => activeToolsMode(allowActiveTools.value, requireToolConfirmation.value),
+  set: (mode) => {
+    const flags = activeToolsFlags(mode, requireToolConfirmation.value)
+    allowActiveTools.value = flags.allowActiveTools
+    requireToolConfirmation.value = flags.requireToolConfirmation
   },
-  {
-    title: 'Pedir permissão',
-    value: 'confirm',
-    icon: 'mdi-hand-back-right-outline',
-    hint: 'A IA propõe a ação no chat e só executa depois do seu clique em Confirmar.',
-  },
-  {
-    title: 'Automático',
-    value: 'auto',
-    icon: 'mdi-robot-outline',
-    hint: 'A IA executa sozinha quando o diagnóstico pede; a ação aparece no chat e fica na auditoria em seu nome.',
-  },
-]
-const selectedContainerAction = computed(
-  () =>
-    containerActionOptions.find((option) => option.value === containerActions.value) ??
-    containerActionOptions[1]
-)
+})
 
 const severityOptions: { title: string; value: AiIncidentSeverity }[] = [
   { title: 'Só críticos', value: 'critical' },
@@ -188,7 +160,7 @@ const digestOptions: { title: string; value: AiDigestSchedule }[] = [
 ]
 
 const hourOptions = Array.from({ length: 24 }, (_, hour) => ({
-  title: `${String(hour).padStart(2, '0')}:00`,
+  title: formatHourOfDay(hour),
   value: hour,
 }))
 </script>

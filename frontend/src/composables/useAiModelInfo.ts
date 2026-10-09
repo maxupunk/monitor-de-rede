@@ -1,36 +1,30 @@
 import { computed } from 'vue'
 import { useAiStore } from '@/stores/ai'
+import {
+  DEFAULT_MODELS,
+  DRIVER_LABELS,
+  modelForDriver,
+  type AiDriver,
+} from '@/components/settings/ai/aiProviders'
 
-/** Modelo usado quando o provedor está configurado sem modelo escolhido. */
-const DEFAULT_MODELS: Record<string, string> = {
-  opencode: 'muse-spark-1.3-contributor-free',
-  openrouter: 'openrouter/free',
-  ollama: 'ornith-1.5:9b',
-}
-
-const DRIVER_LABELS: Record<string, string> = {
-  opencode: 'OpenCode Go / Zen',
-  openrouter: 'OpenRouter Gateway',
-  ollama: 'Ollama Local',
+function isKnownDriver(driver: string | undefined): driver is AiDriver {
+  return driver !== undefined && driver in DRIVER_LABELS
 }
 
 /** Provedor e modelo configurados do Assistente IA, para cabeçalhos e cartões. */
 export function useAiModelInfo() {
   const aiStore = useAiStore()
 
-  const driverLabel = computed(
-    () => DRIVER_LABELS[aiStore.settings?.activeDriver ?? ''] ?? 'Provedor desconhecido'
-  )
+  const driverLabel = computed(() => {
+    const driver = aiStore.settings?.activeDriver
+    return isKnownDriver(driver) ? DRIVER_LABELS[driver] : 'Provedor desconhecido'
+  })
 
   const modelLabel = computed(() => {
     const settings = aiStore.settings
     if (!settings) return 'Carregando...'
-    const configured = {
-      opencode: settings.opencodeModel,
-      openrouter: settings.openrouterModel,
-      ollama: settings.ollamaModel,
-    }[settings.activeDriver]
-    return configured || DEFAULT_MODELS[settings.activeDriver] || 'Padrão'
+    if (!isKnownDriver(settings.activeDriver)) return 'Padrão'
+    return modelForDriver(settings) || DEFAULT_MODELS[settings.activeDriver]
   })
 
   return { driverLabel, modelLabel }

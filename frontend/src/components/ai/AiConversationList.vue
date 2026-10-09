@@ -1,16 +1,6 @@
 <template>
   <div class="ai-conversation-list" :class="{ 'ai-conversation-list--fill': fill }">
-    <v-btn
-      block
-      color="primary"
-      variant="flat"
-      prepend-icon="mdi-plus"
-      class="mb-2 flex-grow-0"
-      :disabled="aiStore.isStreaming"
-      @click="startNew"
-    >
-      Nova conversa
-    </v-btn>
+    <AiNewConversationButton labeled class="mb-2 flex-grow-0" @started="emit('selected')" />
 
     <v-text-field
       v-if="conversations.summaries.length > SEARCH_FROM"
@@ -89,6 +79,7 @@ import { useAiStore } from '@/stores/ai'
 import { useAiConversationsStore } from '@/stores/aiConversations'
 import { confirm } from '@/composables/useConfirm'
 import { formatRelativeTime } from '@/utils/formatters'
+import AiNewConversationButton from './AiNewConversationButton.vue'
 
 /** A busca só aparece quando a lista deixa de caber de uma olhada. */
 const SEARCH_FROM = 6
@@ -118,11 +109,6 @@ const visibleSummaries = computed(() => {
 
 // Sempre do servidor ao abrir: pode ter conversa nova vinda de outro computador.
 onMounted(() => void conversations.load())
-
-function startNew() {
-  aiStore.newConversation()
-  emit('selected')
-}
 
 async function open(id: number) {
   await aiStore.openConversation(id)

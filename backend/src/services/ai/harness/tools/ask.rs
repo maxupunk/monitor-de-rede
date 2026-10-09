@@ -43,8 +43,7 @@ impl AiToolHandler for AskUser {
     }
 
     fn description(&self) -> &'static str {
-        "Pergunta ao usuário antes de prosseguir, com opções clicáveis. Use quando não estiver claro de qual dispositivo ou recurso vem a informação, \
-em vez de adivinhar. A rodada termina aqui: não escreva mais nada depois de chamar."
+        "Pergunta ao usuário, com opções clicáveis, quando não estiver claro de qual recurso vem a informação — em vez de adivinhar. Encerra a rodada."
     }
 
     fn parameters(&self) -> Value {
@@ -55,7 +54,7 @@ em vez de adivinhar. A rodada termina aqui: não escreva mais nada depois de cha
                 "options": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "Até 6 respostas prováveis (ex: nomes de dispositivos de list_devices). O usuário também pode responder livremente."
+                    "description": "Até 6 respostas prováveis (ex: nomes de list_devices)"
                 }
             },
             "required": ["question"]

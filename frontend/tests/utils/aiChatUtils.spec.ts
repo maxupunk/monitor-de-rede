@@ -8,9 +8,9 @@ import {
 import { readSseJson } from '@/utils/sseReader'
 import {
   applyChatEvent,
+  buildChatHistory,
   contextUsage,
   shortModelName,
-  toApiMessages,
   tokensPerSecond,
   type AiDisplayMessage,
 } from '@/utils/aiChatStream'
@@ -97,7 +97,30 @@ describe('eventos do chat', () => {
       { id: '2', role: 'assistant', content: '', error: 'falhou' },
       { id: '3', role: 'assistant', content: '' },
     ]
-    expect(toApiMessages(mensagens)).toEqual([{ role: 'user', content: 'oi' }])
+    expect(buildChatHistory(mensagens).messages).toEqual([{ role: 'user', content: 'oi' }])
+  })
+
+  it('decisão sobre uma ação volta à IA só com a primeira linha do resumo', () => {
+    const mensagens: AiDisplayMessage[] = [
+      { id: '1', role: 'user', content: 'reinicie o roteador' },
+      {
+        id: '2',
+        role: 'assistant',
+        content: 'Proponho reiniciar.',
+        toolCalls: [
+          {
+            id: 't1',
+            name: 'device_ssh_exec',
+            arguments: {},
+            summary: 'Executar reboot em Borda\nATENÇÃO: ALTERA O EQUIPAMENTO\nmotivo: travado',
+            status: 'cancelled',
+          },
+        ],
+      },
+    ]
+    expect(buildChatHistory(mensagens).messages[1].content).toBe(
+      'Proponho reiniciar.\n[Ação cancelada pelo usuário: Executar reboot em Borda]'
+    )
   })
 })
 
