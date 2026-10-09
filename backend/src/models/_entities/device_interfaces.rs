@@ -21,6 +21,11 @@ pub struct Model {
     pub last_seen_at: Option<DateTimeWithTimeZone>,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
+    pub in_octets: Option<i64>,
+    pub out_octets: Option<i64>,
+    pub in_errors: Option<i64>,
+    pub out_errors: Option<i64>,
+    pub counters_at: Option<DateTimeWithTimeZone>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

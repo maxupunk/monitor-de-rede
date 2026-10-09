@@ -548,16 +548,6 @@ const interfaceTrafficSummaries = computed(() => {
   return detailStore.interfaces
     .filter((intf) => intf.isMonitored)
     .map((intf) => {
-      const inOctetsMetric = detailStore.metrics.find(
-        (m) =>
-          (m.metricName === 'ifHCInOctets' || m.metricName === 'ifInOctets') &&
-          m.interfaceId === intf.id
-      )
-      const outOctetsMetric = detailStore.metrics.find(
-        (m) =>
-          (m.metricName === 'ifHCOutOctets' || m.metricName === 'ifOutOctets') &&
-          m.interfaceId === intf.id
-      )
       const inBpsMetric = detailStore.metrics.find(
         (m) => m.metricName === 'inBps' && m.interfaceId === intf.id
       )
@@ -565,8 +555,10 @@ const interfaceTrafficSummaries = computed(() => {
         (m) => m.metricName === 'outBps' && m.interfaceId === intf.id
       )
 
-      const inOctets = inOctetsMetric ? Number(inOctetsMetric.metricValue) : 0
-      const outOctets = outOctetsMetric ? Number(outOctetsMetric.metricValue) : 0
+      // O acumulado é o contador da última coleta, guardado na própria
+      // interface — não é mais uma série histórica.
+      const inOctets = intf.inOctets ?? 0
+      const outOctets = intf.outOctets ?? 0
       const inBps = inBpsMetric ? Number(inBpsMetric.metricValue) : 0
       const outBps = outBpsMetric ? Number(outBpsMetric.metricValue) : 0
 

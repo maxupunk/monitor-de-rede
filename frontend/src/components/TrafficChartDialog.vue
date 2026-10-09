@@ -258,21 +258,23 @@ const chartSeries = computed<ChartSeriesInput[]>(() => {
     return series
   }
 
-  const targetNames =
-    selectedTab.value === 'inBps'
-      ? ['inBps']
-      : selectedTab.value === 'outBps'
-        ? ['outBps']
-        : selectedTab.value === 'inOctets'
-          ? ['ifHCInOctets', 'ifInOctets']
-          : ['ifHCOutOctets', 'ifOutOctets']
-
-  const list = filteredMetrics.value.filter((m) => targetNames.includes(m.metricName))
+  // A volumetria sai da mesma série de taxas: o contador acumulado do
+  // equipamento não é guardado como histórico, e o que interessa é quanto
+  // passou em cada intervalo, não o total desde o boot.
+  const rateName = selectedTab.value.toLowerCase().includes('out') ? 'outBps' : 'inBps'
+  const list = filteredMetrics.value.filter((m) => m.metricName === rateName)
   if (list.length === 0) return []
 
   const isRate = isRateMetric.value
   const label = formatMetricLabel(selectedTab.value)
-  const color = selectedTab.value.toLowerCase().includes('out') ? '#2196F3' : '#4CAF50'
+  const color = rateName === 'outBps' ? '#2196F3' : '#4CAF50'
+  const points = isRate
+    ? list.map((m) => ({ time: m.createdAt, value: Number(m.metricValue) || 0 }))
+    : list.slice(1).map((m, index) => {
+        const seconds =
+          (new Date(m.createdAt).getTime() - new Date(list[index].createdAt).getTime()) / 1000
+        return { time: m.createdAt, value: ((Number(m.metricValue) || 0) * seconds) / 8 }
+      })
 
   return [
     {
@@ -280,14 +282,10 @@ const chartSeries = computed<ChartSeriesInput[]>(() => {
       label,
       color,
       fillArea: true,
-      data: list.map((m) => {
-        const val = Number(m.metricValue) || 0
-        return {
-          time: m.createdAt,
-          value: val,
-          formattedValue: isRate ? formatBps(val) : formatBytes(val),
-        }
-      }),
+      data: points.map((point) => ({
+        ...point,
+        formattedValue: isRate ? formatBps(point.value) : formatBytes(point.value),
+      })),
     },
   ]
 })
@@ -345,9 +343,9 @@ function formatMetricLabel(name: string): string {
     case 'outBps':
       return 'Taxa Upload (OUT)'
     case 'inOctets':
-      return 'Volumetria Entrada'
+      return 'Volume recebido por intervalo'
     case 'outOctets':
-      return 'Volumetria Saída'
+      return 'Volume enviado por intervalo'
     default:
       return name
   }

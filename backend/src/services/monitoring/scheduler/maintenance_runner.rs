@@ -55,6 +55,8 @@ pub async fn run_data_pruner_if_due(ctx: &AppContext) -> AppResult<()> {
             alertas = stats.alert_events_deleted,
             notificacoes = stats.notifications_deleted,
             telemetria = stats.telemetry_deleted,
+            auditoria = stats.audit_deleted,
+            plugins = stats.plugin_runs_deleted,
             "purga de dados antigos executada"
         );
     }

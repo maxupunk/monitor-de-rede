@@ -88,53 +88,6 @@ fn format_traffic_bps(bps: f64) -> String {
     }
 }
 
-pub async fn get_topology_with_live(
-    ctx: &loco_rs::app::AppContext,
-    site_id: Option<i64>,
-    live: bool,
-) -> AppResult<TopologyGraph> {
-    if live {
-        let all_devices = devices::Entity::find().all(&ctx.db).await?;
-        let snmp_devices: Vec<_> = all_devices
-            .into_iter()
-            .filter(|d| {
-                d.snmp_enabled
-                    && d.ip_address
-                        .as_ref()
-                        .is_some_and(|ip| !ip.trim().is_empty())
-                    && site_id.is_none_or(|site| d.site_id == Some(site))
-            })
-            .collect();
-
-        if !snmp_devices.is_empty() {
-            let futures: Vec<_> = snmp_devices
-                .iter()
-                .filter_map(|device| {
-                    crate::services::snmp::service::device_config(device)
-                        .ok()
-                        .map(|config| {
-                            let ctx_clone = ctx;
-                            let device_ref = device;
-                            async move {
-                                let _ = tokio::time::timeout(
-                                    std::time::Duration::from_millis(1500),
-                                    crate::services::snmp::service::poll_device(
-                                        ctx_clone, device_ref, config,
-                                    ),
-                                )
-                                .await;
-                            }
-                        })
-                })
-                .collect();
-
-            futures::future::join_all(futures).await;
-        }
-    }
-
-    get_topology(&ctx.db, site_id).await
-}
-
 /// Acrescenta a aresta virtual do `parentId` quando não existe enlace real
 /// entre pai e filho (matriz de paridade #48).
 ///

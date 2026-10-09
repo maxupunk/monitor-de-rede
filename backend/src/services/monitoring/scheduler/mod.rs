@@ -13,4 +13,7 @@ pub use maintenance_runner::{
     sync_vpn_traffic_if_due,
 };
 pub use monitor_executor::{execute_one, run_local_confirming_failure, MAX_RETRIES};
-pub use snmp_group_executor::{execute_snmp_device_group, local_snmp_device_id};
+pub use snmp_group_executor::{
+    collect_unmonitored_device, due_unmonitored_snmp_devices, execute_snmp_device_group,
+    local_snmp_device_id,
+};

@@ -32,12 +32,8 @@ async fn index(
     Query(query): Query<BTreeMap<String, String>>,
 ) -> AppResult<Response> {
     let site_id = parse_site_id(&query)?;
-    let live = query
-        .get("live")
-        .map(|v| v == "true" || v == "1")
-        .unwrap_or(false);
     Ok(format::json(
-        service::get_topology_with_live(&ctx, site_id, live).await?,
+        service::get_topology(&ctx.db, site_id).await?,
     )?)
 }
 

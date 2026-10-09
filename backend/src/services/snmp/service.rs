@@ -15,7 +15,7 @@ use crate::services::{
         contracts::{CheckMetric, CheckResult, MonitorStatus},
         device_status::{self, DeviceStatus},
         execution_guard::calculate_smart_timeout_seconds,
-        interface_monitoring, metrics_repository,
+        interface_monitoring,
     },
     shared::errors::{AppError, AppResult},
     snmp::{
@@ -567,10 +567,26 @@ pub async fn poll_device(
         .await?;
     let mut conhecidas = InterfaceMatcher::resolve(existing_interfaces, &scan.interfaces);
 
+    let traffic_by_index: HashMap<i32, &InterfaceTraffic> = scan
+        .traffic
+        .iter()
+        .map(|traffic| (traffic.if_index, traffic))
+        .collect();
     let mut interfaces = std::collections::BTreeMap::new();
+    let mut previous_octets = HashMap::new();
     for (posicao, interface) in scan.interfaces.iter().enumerate() {
         let existing = conhecidas.take(posicao);
-        let saved = sync_interface(&ctx.db, device.id, interface, existing.as_ref()).await?;
+        let saved = sync_interface(
+            &ctx.db,
+            device.id,
+            interface,
+            existing.as_ref(),
+            traffic_by_index.get(&interface.if_index).copied(),
+        )
+        .await?;
+        if let Some(reading) = saved.previous_octets {
+            previous_octets.insert(interface.if_index, reading);
+        }
         // Só interface administrativamente habilitada é avaliada: uma porta
         // que o operador desligou não pode gerar alerta de queda de link.
         if saved.interface.admin_status.as_deref() == Some("up") {
@@ -600,14 +616,6 @@ pub async fn poll_device(
     let previous_uptime = latest_device_metric(&ctx.db, device.id, "snmp_uptime")
         .await?
         .map(|metric| metric.value.max(0.0) as u64);
-    let interface_ids: Vec<i64> = interfaces.values().map(|row| row.id).collect();
-    let mut previous_metrics = latest_metrics_for_interfaces(
-        &ctx.db,
-        device.id,
-        &interface_ids,
-        &["ifHCInOctets", "ifHCOutOctets"],
-    )
-    .await?;
 
     // Acumula métricas de tráfego e sistema para inserção em massa (QUA-04).
     let mut pending_metrics: Vec<PendingMetric> = Vec::new();
@@ -619,9 +627,9 @@ pub async fn poll_device(
         };
         let (metrics, reboot) = build_traffic_metrics(
             device.id,
-            interface,
+            interface.id,
             traffic,
-            &mut previous_metrics,
+            previous_octets.get(&traffic.if_index).copied(),
             previous_uptime,
             scan.system_info.sys_up_time,
         );
@@ -696,6 +704,25 @@ pub async fn poll_device(
     })
 }
 
+/// Coleta o dispositivo com a configuração efetiva — a comunidade própria ou,
+/// sem ela, a padrão das preferências.
+///
+/// A preferência entra aqui, e não no `device_config` sem banco: é a coleta
+/// que precisa dela, e é onde o dispositivo sem comunidade própria aparece.
+/// Todo caminho periódico passa por esta função, para que nenhum colete com
+/// uma comunidade diferente do outro.
+pub async fn collect_device(
+    ctx: &loco_rs::app::AppContext,
+    device: &devices::Model,
+) -> AppResult<SnmpPollResult> {
+    let comunidade = crate::services::preferences::load(&ctx.db)
+        .await
+        .map(|preferencias| preferencias.default_snmp_community)
+        .unwrap_or_else(|_| crate::services::preferences::DEFAULT_SNMP_COMMUNITY.to_owned());
+    let config = device_config_with(device, &comunidade)?;
+    poll_device(ctx, device, config).await
+}
+
 /// Executa uma coleta única e deriva o resultado individual de cada monitor
 /// SNMP do dispositivo. Assim o histórico e os alertas continuam por item, mas
 /// CPU, memória, interfaces e tráfego não abrem consultas independentes.
@@ -705,16 +732,7 @@ pub async fn poll_device_monitors(
     monitored_items: &[monitors::Model],
 ) -> Vec<(i64, CheckResult)> {
     let started_at = Utc::now();
-    // A preferência entra aqui, e não no `device_config` sem banco: é a coleta
-    // que precisa dela, e é onde o dispositivo sem comunidade própria aparece.
-    let comunidade = crate::services::preferences::load(&ctx.db)
-        .await
-        .map(|preferencias| preferencias.default_snmp_community)
-        .unwrap_or_else(|_| crate::services::preferences::DEFAULT_SNMP_COMMUNITY.to_owned());
-    let poll = match device_config_with(device, &comunidade) {
-        Ok(config) => poll_device(ctx, device, config).await,
-        Err(error) => Err(error),
-    };
+    let poll = collect_device(ctx, device).await;
     let finished_at = Utc::now();
     match poll {
         Ok(poll) => {
@@ -1201,7 +1219,7 @@ pub async fn apply_monitors(
         .collect::<std::collections::BTreeSet<_>>();
     for (posicao, source) in scan.interfaces.iter().enumerate() {
         let existing = conhecidas.take(posicao);
-        let interface = sync_interface(&ctx.db, device.id, source, existing.as_ref())
+        let interface = sync_interface(&ctx.db, device.id, source, existing.as_ref(), None)
             .await?
             .interface;
         set_monitoring(
@@ -1472,6 +1490,9 @@ pub struct DeviceInterfaceView {
     pub admin_status: Option<String>,
     pub oper_status: Option<String>,
     pub is_monitored: bool,
+    /// Octetos acumulados na última coleta (o contador do equipamento).
+    pub in_octets: Option<u64>,
+    pub out_octets: Option<u64>,
 }
 
 /// Interfaces já conhecidas do equipamento.
@@ -1514,6 +1535,8 @@ pub async fn list_interfaces(
             speed: row.speed,
             admin_status: row.admin_status,
             oper_status: row.oper_status,
+            in_octets: row.in_octets.map(counter_from_column),
+            out_octets: row.out_octets.map(counter_from_column),
         })
         .collect())
 }
@@ -1634,6 +1657,39 @@ pub struct SyncedInterface {
     pub interface: device_interfaces::Model,
     pub previous_oper_status: Option<String>,
     pub previous_speed: Option<i64>,
+    /// Leitura de octetos da coleta anterior — a base da taxa desta.
+    pub previous_octets: Option<OctetReading>,
+}
+
+/// Contadores de octetos lidos numa coleta e o instante da leitura.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OctetReading {
+    pub in_octets: u64,
+    pub out_octets: u64,
+    pub recorded_at: chrono::DateTime<Utc>,
+}
+
+impl OctetReading {
+    fn from_row(row: &device_interfaces::Model) -> Option<Self> {
+        Some(Self {
+            in_octets: counter_from_column(row.in_octets?),
+            out_octets: counter_from_column(row.out_octets?),
+            recorded_at: row.counters_at?.with_timezone(&Utc),
+        })
+    }
+}
+
+/// O contador SNMP é `u64` e a coluna é `BIGINT` (com sinal): a conversão
+/// reinterpreta os bits, então a ida e a volta devolvem o valor exato mesmo
+/// acima de `i64::MAX`.
+#[allow(clippy::cast_possible_wrap)]
+const fn counter_to_column(value: u64) -> i64 {
+    value as i64
+}
+
+#[allow(clippy::cast_sign_loss)]
+const fn counter_from_column(value: i64) -> u64 {
+    value as u64
 }
 
 /// Espelha uma interface lida do agente na tabela local.
@@ -1648,11 +1704,22 @@ pub async fn sync_interface(
     device_id: i64,
     source: &SnmpInterface,
     existing: Option<&device_interfaces::Model>,
+    traffic: Option<&InterfaceTraffic>,
 ) -> AppResult<SyncedInterface> {
     let now = Utc::now();
     let admin_status = existing.and_then(|row| row.admin_status.clone());
     let previous_oper_status = existing.and_then(|row| row.oper_status.clone());
     let previous_speed = existing.and_then(|row| row.speed);
+    let previous_octets = existing.and_then(OctetReading::from_row);
+    // A leitura vai na mesma escrita que já atualiza a linha: guardar a base
+    // da próxima taxa não custa um `INSERT` por série, como custava em `metrics`.
+    // Sem tráfego nesta coleta, as colunas ficam `NotSet` e a leitura anterior
+    // continua valendo.
+    let counter = |value: fn(&InterfaceTraffic) -> u64| {
+        traffic
+            .map(|reading| Set(Some(counter_to_column(value(reading)))))
+            .unwrap_or_default()
+    };
     let model = device_interfaces::ActiveModel {
         id: existing.map(|row| Set(row.id)).unwrap_or_default(),
         device_id: Set(device_id),
@@ -1673,6 +1740,13 @@ pub async fn sync_interface(
             .if_oper_status
             .map(|value| status_label(value).into())),
         last_seen_at: Set(Some(now.into())),
+        in_octets: counter(|reading| reading.in_octets),
+        out_octets: counter(|reading| reading.out_octets),
+        in_errors: counter(|reading| reading.in_errors),
+        out_errors: counter(|reading| reading.out_errors),
+        counters_at: traffic
+            .map(|reading| Set(Some(reading.recorded_at.into())))
+            .unwrap_or_default(),
         ..Default::default()
     };
     let interface = if existing.is_some() {
@@ -1684,54 +1758,36 @@ pub async fn sync_interface(
         interface,
         previous_oper_status,
         previous_speed,
+        previous_octets,
     })
 }
 
-/// Constrói as métricas de tráfego de uma interface para inserção em massa.
+/// Constrói as taxas de tráfego de uma interface para inserção em massa.
 ///
 /// Não grava no banco: apenas devolve os `PendingMetric` e a flag de reboot,
-/// permitindo ao chamador um único `insert_many` por coleta SNMP.
+/// permitindo ao chamador um único `insert_many` por coleta SNMP. Só as taxas
+/// viram série — os contadores acumulados ficam na linha da interface
+/// (`sync_interface`), que é onde a próxima coleta os procura. Sem leitura
+/// anterior (primeira coleta) não há taxa a calcular.
 fn build_traffic_metrics(
     device_id: i64,
-    interface: &device_interfaces::Model,
+    interface_id: i64,
     current: &InterfaceTraffic,
-    previous_metrics: &mut HashMap<(i64, String), metrics::Model>,
+    previous: Option<OctetReading>,
     previous_uptime: Option<u64>,
     current_uptime: Option<u64>,
 ) -> (Vec<PendingMetric>, bool) {
-    let previous_in = previous_metrics
-        .get(&(interface.id, "ifHCInOctets".to_string()))
-        .cloned();
-    let previous_out = previous_metrics
-        .get(&(interface.id, "ifHCOutOctets".to_string()))
-        .cloned();
-    let mut pending = Vec::with_capacity(6);
-    for (name, value) in [
-        ("ifHCInOctets", current.in_octets as f64),
-        ("ifHCOutOctets", current.out_octets as f64),
-        ("ifInErrors", current.in_errors as f64),
-        ("ifOutErrors", current.out_errors as f64),
-    ] {
-        pending.push(PendingMetric {
-            device_id,
-            interface_id: Some(interface.id),
-            name: name.into(),
-            value,
-            unit: "bytes".into(),
-            recorded_at: current.recorded_at,
-        });
-    }
-    let (Some(previous_in), Some(previous_out)) = (previous_in, previous_out) else {
-        return (pending, false);
+    let Some(previous) = previous else {
+        return (Vec::new(), false);
     };
     let previous = InterfaceTraffic {
         if_index: current.if_index,
-        in_octets: previous_in.value.max(0.0) as u64,
-        out_octets: previous_out.value.max(0.0) as u64,
+        in_octets: previous.in_octets,
+        out_octets: previous.out_octets,
         in_errors: 0,
         out_errors: 0,
         counter_bits: current.counter_bits,
-        recorded_at: previous_in.recorded_at.with_timezone(&Utc),
+        recorded_at: previous.recorded_at,
     };
     let rates = crate::services::snmp::collectors::calculate_rates_detailed(
         &previous,
@@ -1739,25 +1795,21 @@ fn build_traffic_metrics(
         previous_uptime,
         current_uptime,
     );
-    if !rates.reboot_detected {
-        pending.push(PendingMetric {
-            device_id,
-            interface_id: Some(interface.id),
-            name: "inBps".into(),
-            value: rates.in_bps,
-            unit: "bps".into(),
-            recorded_at: current.recorded_at,
-        });
-        pending.push(PendingMetric {
-            device_id,
-            interface_id: Some(interface.id),
-            name: "outBps".into(),
-            value: rates.out_bps,
-            unit: "bps".into(),
-            recorded_at: current.recorded_at,
-        });
+    if rates.reboot_detected {
+        return (Vec::new(), true);
     }
-    (pending, rates.reboot_detected)
+    let pending = [("inBps", rates.in_bps), ("outBps", rates.out_bps)]
+        .into_iter()
+        .map(|(name, value)| PendingMetric {
+            device_id,
+            interface_id: Some(interface_id),
+            name: name.into(),
+            value,
+            unit: "bps".into(),
+            recorded_at: current.recorded_at,
+        })
+        .collect();
+    (pending, false)
 }
 
 /// Constrói as métricas de sistema (CPU, memória, uptime) para inserção em massa.
@@ -1797,29 +1849,6 @@ fn build_system_metrics(device_id: i64, scan: &SnmpScanResult) -> Vec<PendingMet
         }
     }
     pending
-}
-
-/// Busca a métrica mais recente de cada `(interface_id, nome)` em uma única
-/// query, eliminando o N+1 do loop de contadores SNMP.
-pub async fn latest_metrics_for_interfaces(
-    db: &sea_orm::DatabaseConnection,
-    device_id: i64,
-    interface_ids: &[i64],
-    names: &[&str],
-) -> AppResult<HashMap<(i64, String), metrics::Model>> {
-    if interface_ids.is_empty() || names.is_empty() {
-        return Ok(HashMap::new());
-    }
-    let rows = metrics_repository::latest_for_interfaces(db, Some(device_id), interface_ids, names)
-        .await?;
-    let mut map = HashMap::new();
-    for row in rows {
-        if let Some(interface_id) = row.interface_id {
-            let key = (interface_id, row.name.clone());
-            map.entry(key).or_insert(row);
-        }
-    }
-    Ok(map)
 }
 
 async fn latest_device_metric(
@@ -2056,6 +2085,11 @@ mod tests {
             last_seen_at: Some(agora),
             created_at: agora,
             updated_at: agora,
+            in_octets: None,
+            out_octets: None,
+            in_errors: None,
+            out_errors: None,
+            counters_at: None,
         }
     }
 
@@ -2458,5 +2492,80 @@ mod tests {
         let result = monitor_result_from_poll(&monitor, &poll, Utc::now(), Utc::now());
         assert_eq!(result.status, MonitorStatus::Up);
         assert!(result.success);
+    }
+
+    fn trafego(in_octets: u64, out_octets: u64, recorded_at: DateTime<Utc>) -> InterfaceTraffic {
+        InterfaceTraffic {
+            if_index: 1,
+            in_octets,
+            out_octets,
+            in_errors: 0,
+            out_errors: 0,
+            counter_bits: 64,
+            recorded_at,
+        }
+    }
+
+    #[test]
+    fn contador_acima_de_i64_max_volta_exato_da_coluna() {
+        for valor in [0, 1, i64::MAX as u64, i64::MAX as u64 + 1, u64::MAX] {
+            assert_eq!(counter_from_column(counter_to_column(valor)), valor);
+        }
+    }
+
+    #[test]
+    fn primeira_coleta_nao_grava_serie_alguma() {
+        let (pendentes, reboot) =
+            build_traffic_metrics(1, 7, &trafego(500, 900, Utc::now()), None, None, None);
+        assert!(pendentes.is_empty(), "sem leitura anterior não há taxa");
+        assert!(!reboot);
+    }
+
+    #[test]
+    fn so_as_taxas_viram_serie_e_os_contadores_ficam_na_interface() {
+        let agora = Utc::now();
+        let anterior = OctetReading {
+            in_octets: 1_000,
+            out_octets: 2_000,
+            recorded_at: agora - chrono::Duration::seconds(10),
+        };
+        let (pendentes, reboot) = build_traffic_metrics(
+            1,
+            7,
+            &trafego(13_500, 4_500, agora),
+            Some(anterior),
+            None,
+            None,
+        );
+        assert!(!reboot);
+        let series: Vec<(&str, f64)> = pendentes
+            .iter()
+            .map(|metric| (metric.name.as_str(), metric.value))
+            .collect();
+        // 12 500 bytes em 10 s = 10 000 bps; 2 500 bytes em 10 s = 2 000 bps.
+        assert_eq!(series, vec![("inBps", 10_000.0), ("outBps", 2_000.0)]);
+        assert!(pendentes
+            .iter()
+            .all(|metric| metric.interface_id == Some(7) && metric.unit == "bps"));
+    }
+
+    #[test]
+    fn reboot_do_equipamento_nao_vira_pico_de_taxa() {
+        let agora = Utc::now();
+        let anterior = OctetReading {
+            in_octets: 9_000_000,
+            out_octets: 9_000_000,
+            recorded_at: agora - chrono::Duration::seconds(15),
+        };
+        let (pendentes, reboot) = build_traffic_metrics(
+            1,
+            7,
+            &trafego(10, 10, agora),
+            Some(anterior),
+            Some(5_000),
+            Some(30),
+        );
+        assert!(reboot);
+        assert!(pendentes.is_empty());
     }
 }

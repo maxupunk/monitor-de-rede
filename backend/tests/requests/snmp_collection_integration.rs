@@ -18,7 +18,6 @@ use backend::{
             metrics_repository,
             presenter::{present_monitors, RECENT_RESULTS_LIMIT},
         },
-        snmp::service::latest_metrics_for_interfaces,
     },
 };
 use chrono::Utc;
@@ -708,7 +707,7 @@ async fn admin_status_escolhido_pelo_operador_sobrevive_ao_poll() {
     };
 
     // Primeiro poll: cria a linha com o que o agente informou.
-    let criada = sync_interface(db, device.id, &lida(1), None)
+    let criada = sync_interface(db, device.id, &lida(1), None, None)
         .await
         .expect("primeiro poll");
     assert_eq!(criada.interface.admin_status.as_deref(), Some("up"));
@@ -732,7 +731,7 @@ async fn admin_status_escolhido_pelo_operador_sobrevive_ao_poll() {
         .expect("interface existe");
 
     // Poll seguinte: o agente continua dizendo "up", mas a escolha prevalece.
-    let repolada = sync_interface(db, device.id, &lida(2), Some(&atualizada))
+    let repolada = sync_interface(db, device.id, &lida(2), Some(&atualizada), None)
         .await
         .expect("segundo poll");
     assert_eq!(
@@ -743,6 +742,78 @@ async fn admin_status_escolhido_pelo_operador_sobrevive_ao_poll() {
     // O estado operacional, esse sim, acompanha o agente.
     assert_eq!(repolada.interface.oper_status.as_deref(), Some("down"));
     assert_eq!(repolada.previous_oper_status.as_deref(), Some("up"));
+}
+
+/// Os contadores acumulados ficam na linha da interface, não em `metrics`.
+///
+/// A coleta seguinte precisa da leitura anterior para calcular a taxa; antes
+/// ela vinha de quatro séries gravadas a cada coleta, que eram dois terços da
+/// tabela. Uma coleta sem tráfego para a porta não pode apagar a base.
+#[tokio::test]
+#[serial]
+async fn a_leitura_dos_contadores_fica_na_interface_e_serve_de_base_para_a_proxima() {
+    use backend::services::snmp::{
+        collectors::{InterfaceTraffic, SnmpInterface},
+        service::sync_interface,
+    };
+
+    let boot = boot_test::<App>().await.expect("subir app de teste");
+    let db = &boot.app_context.db;
+    let device = dispositivo(db, "sw-contadores", "online").await;
+    let porta = SnmpInterface {
+        if_index: 5,
+        if_name: "Gi0/5".into(),
+        if_descr: None,
+        if_alias: None,
+        if_type: Some(6),
+        if_speed: Some(1_000_000_000),
+        if_admin_status: Some(1),
+        if_oper_status: Some(1),
+        mac_address: None,
+        is_monitored: false,
+    };
+    let lida_em = Utc::now() - chrono::Duration::seconds(15);
+    // Acima de `i64::MAX`: a coluna é `BIGINT` com sinal e o valor tem de voltar exato.
+    let enorme = u64::MAX - 10;
+    let leitura = InterfaceTraffic {
+        if_index: 5,
+        in_octets: enorme,
+        out_octets: 42,
+        in_errors: 3,
+        out_errors: 4,
+        counter_bits: 64,
+        recorded_at: lida_em,
+    };
+
+    let primeira = sync_interface(db, device.id, &porta, None, Some(&leitura))
+        .await
+        .expect("primeira coleta");
+    assert!(primeira.previous_octets.is_none());
+    assert_eq!(primeira.interface.in_errors, Some(3));
+
+    let sem_trafego = sync_interface(db, device.id, &porta, Some(&primeira.interface), None)
+        .await
+        .expect("coleta sem tráfego");
+    let base = sem_trafego
+        .previous_octets
+        .expect("a leitura anterior continua valendo");
+    assert_eq!(base.in_octets, enorme);
+    assert_eq!(base.out_octets, 42);
+    assert_eq!(base.recorded_at.timestamp(), lida_em.timestamp());
+    assert_eq!(
+        sem_trafego.interface.in_octets, primeira.interface.in_octets,
+        "coleta sem tráfego apagou a base da próxima taxa"
+    );
+
+    assert_eq!(
+        metrics::Entity::find()
+            .all(db)
+            .await
+            .expect("consultar métricas")
+            .len(),
+        0,
+        "contador acumulado não é série histórica"
+    );
 }
 
 /// A aba "Interfaces SNMP" marca a porta pelo monitor, não pelo `adminStatus`.
@@ -783,6 +854,7 @@ async fn a_interface_so_conta_como_monitorada_quando_tem_monitor_habilitado() {
             mac_address: None,
             is_monitored: false,
         },
+        None,
         None,
     )
     .await
@@ -935,31 +1007,4 @@ async fn busca_metricas_anteriores_de_interfaces_em_uma_query_sozinha() {
     .await
     .expect("buscar linhas mais recentes");
     assert_eq!(linhas.len(), 4, "o histórico não pode atravessar a query");
-
-    let encontradas = latest_metrics_for_interfaces(
-        db,
-        device.id,
-        &[interface_a.id, interface_b.id],
-        &["ifHCInOctets", "ifHCOutOctets"],
-    )
-    .await
-    .expect("buscar métricas em grupo");
-
-    assert_eq!(
-        encontradas.len(),
-        4,
-        "deveria trazer uma entrada por (interface, nome)"
-    );
-    assert_eq!(
-        encontradas
-            .get(&(interface_a.id, "ifHCInOctets".into()))
-            .map(|m| m.value),
-        Some(9_999.0)
-    );
-    assert_eq!(
-        encontradas
-            .get(&(interface_b.id, "ifHCOutOctets".into()))
-            .map(|m| m.value),
-        Some(4_000.0)
-    );
 }

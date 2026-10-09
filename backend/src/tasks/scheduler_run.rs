@@ -30,7 +30,8 @@ use crate::{
     services::{
         discovery::queue::{process_pending_runs, schedule_due_networks, spawn_pending_run},
         monitoring::scheduler::{
-            dispatch_notifications, execute_one, execute_snmp_device_group, local_snmp_device_id,
+            collect_unmonitored_device, dispatch_notifications, due_unmonitored_snmp_devices,
+            execute_one, execute_snmp_device_group, local_snmp_device_id,
             rollup_monitor_results_if_due, run_data_pruner_if_due, sync_vpn_traffic_if_due,
         },
         probes::liveness::mark_stale_probes_offline,
@@ -165,6 +166,18 @@ async fn run_cycle_inner(ctx: &AppContext, detach_discovery: bool) -> AppResult<
             }
         })
         .await;
+    match due_unmonitored_snmp_devices(ctx, now).await {
+        Ok(devices) => {
+            stream::iter(devices)
+                .for_each_concurrent(MONITOR_CONCURRENCY, |device| async move {
+                    if let Err(error) = collect_unmonitored_device(ctx, &device).await {
+                        tracing::debug!(%error, device_id = device.id, "falha na coleta SNMP do dispositivo");
+                    }
+                })
+                .await;
+        }
+        Err(error) => tracing::warn!(%error, "falha ao listar dispositivos SNMP sem monitor"),
+    }
     if let Err(error) = sync_vpn_traffic_if_due(ctx).await {
         tracing::warn!(%error, "falha ao sincronizar tráfego VPN");
     }

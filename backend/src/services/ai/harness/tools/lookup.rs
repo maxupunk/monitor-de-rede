@@ -256,6 +256,11 @@ mod tests {
             last_seen_at: None,
             created_at: now,
             updated_at: now,
+            in_octets: None,
+            out_octets: None,
+            in_errors: None,
+            out_errors: None,
+            counters_at: None,
         }
     }
 

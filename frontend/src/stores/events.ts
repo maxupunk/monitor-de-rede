@@ -388,7 +388,7 @@ export const useEventsStore = defineStore('events', () => {
         const topologyStore = useTopologyStore()
         // Novos enlaces exigem recarregar o grafo: não dá para deduzir
         // a geometria do mapa a partir do evento. Recarrega em background sem spinner global.
-        scheduleRefresh('topology', () => topologyStore.fetchTopology(null, false, false))
+        scheduleRefresh('topology', () => topologyStore.fetchTopology(null, false))
         break
       }
 

@@ -24,6 +24,7 @@ mod audit;
 mod auth;
 mod backup;
 mod baseline_alerts;
+mod data_retention;
 mod database_roundtrip;
 mod databases;
 mod device_access_mode;

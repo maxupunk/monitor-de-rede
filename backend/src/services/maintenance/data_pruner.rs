@@ -18,13 +18,9 @@ use sea_orm::{
 };
 
 use crate::{
-    models::{
-        _entities::{
-            alert_events as alert_events_entity, discovery_runs as discovery_runs_entity,
-            event_outbox as event_outbox_entity, metrics as metrics_entity,
-            monitor_results as monitor_results_entity,
-        },
-        alert_events, discovery_runs, event_outbox, metrics, monitor_results, notification_outbox,
+    models::_entities::{
+        alert_events, audit_logs, discovery_runs, event_outbox, metrics, monitor_results,
+        notification_outbox, plugin_runs,
     },
     services::{alerts::contracts::AlertStatus, shared::errors::AppResult, telemetry},
 };
@@ -44,7 +40,18 @@ pub const DEFAULT_RETENTION_ALERT_EVENTS_DAYS: i64 = 90;
 /// O diário de notificações acompanha as métricas: passado esse prazo ele já não
 /// alimenta cooldown, agrupamento nem a pergunta "por que não fui avisado?".
 pub const DEFAULT_RETENTION_NOTIFICATIONS_DAYS: i64 = 30;
+/// Um ano da trilha de auditoria — quem entrou, quem mudou o quê. É o prazo
+/// que uma revisão de acesso costuma pedir, e a tabela cresce por ação de
+/// gente, não por ciclo.
+pub const DEFAULT_RETENTION_AUDIT_DAYS: i64 = 365;
+/// Execuções de plugin terminadas, com a transcrição do acesso ao
+/// equipamento: o mesmo prazo do histórico de incidentes.
+pub const DEFAULT_RETENTION_PLUGIN_RUNS_DAYS: i64 = 90;
 const DELETE_BATCH_SIZE: u64 = 10_000;
+/// Folga entre lotes. No SQLite há um escritor só: sem ela, a purga de uma
+/// tabela grande segura o lock em sequência e a coleta, o syslog e as telas
+/// esperam até estourar o `busy_timeout`.
+const BATCH_PAUSE: std::time::Duration = std::time::Duration::from_millis(100);
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PruneStats {
@@ -56,6 +63,8 @@ pub struct PruneStats {
     pub notifications_deleted: u64,
     /// Histórico de 1 minuto de host e containers (ADR 011).
     pub telemetry_deleted: u64,
+    pub audit_deleted: u64,
+    pub plugin_runs_deleted: u64,
 }
 
 impl PruneStats {
@@ -68,6 +77,8 @@ impl PruneStats {
             + self.alert_events_deleted
             + self.notifications_deleted
             + self.telemetry_deleted
+            + self.audit_deleted
+            + self.plugin_runs_deleted
     }
 }
 
@@ -92,73 +103,106 @@ pub fn retention_days(variable: &str, default: i64) -> i64 {
 /// Propaga erro do banco.
 pub async fn prune_all<C: ConnectionTrait>(db: &C) -> AppResult<PruneStats> {
     let now = Utc::now();
+    let cutoff =
+        |variable: &str, default: i64| now - Duration::days(retention_days(variable, default));
 
-    let outbox_deleted =
-        prune_event_outbox(db, now - Duration::minutes(OUTBOX_RETENTION_MINUTES)).await?;
+    let outbox_deleted = delete_in_batches::<event_outbox::Entity, _>(
+        db,
+        event_outbox::Column::Id,
+        Condition::all().add(
+            event_outbox::Column::CreatedAt.lt(now - Duration::minutes(OUTBOX_RETENTION_MINUTES)),
+        ),
+    )
+    .await?;
 
-    let results_cutoff = now
-        - Duration::days(retention_days(
+    let results_deleted = delete_in_batches::<monitor_results::Entity, _>(
+        db,
+        monitor_results::Column::Id,
+        Condition::all().add(monitor_results::Column::CreatedAt.lt(cutoff(
             "RETENTION_MONITOR_RESULTS_DAYS",
             DEFAULT_RETENTION_MONITOR_RESULTS_DAYS,
-        ));
-    let results_deleted = prune_monitor_results(db, results_cutoff).await?;
+        ))),
+    )
+    .await?;
 
-    let metrics_cutoff = now
-        - Duration::days(retention_days(
-            "RETENTION_METRICS_DAYS",
-            DEFAULT_RETENTION_METRICS_DAYS,
-        ));
-    let metrics_deleted = prune_metrics(db, metrics_cutoff).await?;
+    let metrics_cutoff = cutoff("RETENTION_METRICS_DAYS", DEFAULT_RETENTION_METRICS_DAYS);
+    let metrics_deleted = delete_in_batches::<metrics::Entity, _>(
+        db,
+        metrics::Column::Id,
+        Condition::all().add(metrics::Column::CreatedAt.lt(metrics_cutoff)),
+    )
+    .await?;
     // Mesma janela das métricas SNMP: é a mesma natureza de dado.
     let telemetry_deleted = telemetry::store::prune(db, metrics_cutoff).await?;
 
-    let discovery_cutoff = now
-        - Duration::days(retention_days(
+    let discovery_deleted = delete_in_batches::<discovery_runs::Entity, _>(
+        db,
+        discovery_runs::Column::Id,
+        Condition::all().add(discovery_runs::Column::CreatedAt.lt(cutoff(
             "RETENTION_DISCOVERY_DAYS",
             DEFAULT_RETENTION_DISCOVERY_DAYS,
-        ));
-    let discovery_deleted = discovery_runs::Entity::delete_many()
-        .filter(discovery_runs_entity::Column::CreatedAt.lt(discovery_cutoff))
-        .exec(db)
-        .await?
-        .rows_affected;
+        ))),
+    )
+    .await?;
 
     // Só episódio **fechado** envelhece: um alerta ainda aberto é o que o
     // operador precisa ver na Central, por mais antigo que seja.
-    let alert_events_cutoff = now
-        - Duration::days(retention_days(
-            "RETENTION_ALERT_EVENTS_DAYS",
-            DEFAULT_RETENTION_ALERT_EVENTS_DAYS,
-        ));
-    let alert_events_deleted = alert_events::Entity::delete_many()
-        .filter(alert_events_entity::Column::Status.eq(AlertStatus::Resolved))
-        .filter(
-            // `resolved_at` pode faltar em linha antiga fechada antes de a
-            // coluna ser preenchida: a abertura serve de âncora.
-            Condition::any()
-                .add(alert_events_entity::Column::ResolvedAt.lt(alert_events_cutoff))
-                .add(
-                    Condition::all()
-                        .add(alert_events_entity::Column::ResolvedAt.is_null())
-                        .add(alert_events_entity::Column::StartedAt.lt(alert_events_cutoff)),
-                ),
-        )
-        .exec(db)
-        .await?
-        .rows_affected;
+    let alert_events_cutoff = cutoff(
+        "RETENTION_ALERT_EVENTS_DAYS",
+        DEFAULT_RETENTION_ALERT_EVENTS_DAYS,
+    );
+    let alert_events_deleted = delete_in_batches::<alert_events::Entity, _>(
+        db,
+        alert_events::Column::Id,
+        Condition::all()
+            .add(alert_events::Column::Status.eq(AlertStatus::Resolved))
+            .add(
+                // `resolved_at` pode faltar em linha antiga fechada antes de a
+                // coluna ser preenchida: a abertura serve de âncora.
+                Condition::any()
+                    .add(alert_events::Column::ResolvedAt.lt(alert_events_cutoff))
+                    .add(
+                        Condition::all()
+                            .add(alert_events::Column::ResolvedAt.is_null())
+                            .add(alert_events::Column::StartedAt.lt(alert_events_cutoff)),
+                    ),
+            ),
+    )
+    .await?;
 
     // Idem para o diário: linha ainda pendente é notificação por entregar.
-    let notifications_cutoff = now
-        - Duration::days(retention_days(
-            "RETENTION_NOTIFICATIONS_DAYS",
-            DEFAULT_RETENTION_NOTIFICATIONS_DAYS,
-        ));
-    let notifications_deleted = notification_outbox::Entity::delete_many()
-        .filter(notification_outbox::Column::Status.ne("pending"))
-        .filter(notification_outbox::Column::CreatedAt.lt(notifications_cutoff))
-        .exec(db)
-        .await?
-        .rows_affected;
+    let notifications_deleted = delete_in_batches::<notification_outbox::Entity, _>(
+        db,
+        notification_outbox::Column::Id,
+        Condition::all()
+            .add(notification_outbox::Column::Status.ne("pending"))
+            .add(notification_outbox::Column::CreatedAt.lt(cutoff(
+                "RETENTION_NOTIFICATIONS_DAYS",
+                DEFAULT_RETENTION_NOTIFICATIONS_DAYS,
+            ))),
+    )
+    .await?;
+
+    let audit_deleted = delete_in_batches::<audit_logs::Entity, _>(
+        db,
+        audit_logs::Column::Id,
+        Condition::all().add(
+            audit_logs::Column::CreatedAt
+                .lt(cutoff("RETENTION_AUDIT_DAYS", DEFAULT_RETENTION_AUDIT_DAYS)),
+        ),
+    )
+    .await?;
+
+    // Execução em curso não tem `finished_at` e nunca envelhece.
+    let plugin_runs_deleted = delete_in_batches::<plugin_runs::Entity, _>(
+        db,
+        plugin_runs::Column::Id,
+        Condition::all().add(plugin_runs::Column::FinishedAt.lt(cutoff(
+            "RETENTION_PLUGIN_RUNS_DAYS",
+            DEFAULT_RETENTION_PLUGIN_RUNS_DAYS,
+        ))),
+    )
+    .await?;
 
     Ok(PruneStats {
         outbox_deleted,
@@ -168,20 +212,28 @@ pub async fn prune_all<C: ConnectionTrait>(db: &C) -> AppResult<PruneStats> {
         alert_events_deleted,
         notifications_deleted,
         telemetry_deleted,
+        audit_deleted,
+        plugin_runs_deleted,
     })
 }
 
-async fn prune_event_outbox<C: ConnectionTrait>(
-    db: &C,
-    cutoff: chrono::DateTime<Utc>,
-) -> AppResult<u64> {
+/// Apaga, em lotes por `id`, as linhas que `filter` seleciona.
+///
+/// Um `DELETE` único de milhões de linhas seguraria o escritor do SQLite do
+/// começo ao fim; em lotes, cada um é uma transação curta e a pausa entre eles
+/// devolve a vez a quem está gravando.
+async fn delete_in_batches<E, C>(db: &C, id: E::Column, filter: Condition) -> AppResult<u64>
+where
+    E: EntityTrait,
+    C: ConnectionTrait,
+{
     let mut deleted = 0;
     loop {
-        let ids = event_outbox::Entity::find()
+        let ids = E::find()
             .select_only()
-            .column(event_outbox_entity::Column::Id)
-            .filter(event_outbox_entity::Column::CreatedAt.lt(cutoff))
-            .order_by_asc(event_outbox_entity::Column::Id)
+            .column(id)
+            .filter(filter.clone())
+            .order_by_asc(id)
             .limit(DELETE_BATCH_SIZE)
             .into_tuple::<i64>()
             .all(db)
@@ -189,63 +241,16 @@ async fn prune_event_outbox<C: ConnectionTrait>(
         if ids.is_empty() {
             return Ok(deleted);
         }
-        deleted += event_outbox::Entity::delete_many()
-            .filter(event_outbox_entity::Column::Id.is_in(ids))
+        let last_batch = (ids.len() as u64) < DELETE_BATCH_SIZE;
+        deleted += E::delete_many()
+            .filter(id.is_in(ids))
             .exec(db)
             .await?
             .rows_affected;
-    }
-}
-
-async fn prune_monitor_results<C: ConnectionTrait>(
-    db: &C,
-    cutoff: chrono::DateTime<Utc>,
-) -> AppResult<u64> {
-    let mut deleted = 0;
-    loop {
-        let ids = monitor_results::Entity::find()
-            .select_only()
-            .column(monitor_results_entity::Column::Id)
-            .filter(monitor_results_entity::Column::CreatedAt.lt(cutoff))
-            .order_by_asc(monitor_results_entity::Column::Id)
-            .limit(DELETE_BATCH_SIZE)
-            .into_tuple::<i64>()
-            .all(db)
-            .await?;
-        if ids.is_empty() {
+        if last_batch {
             return Ok(deleted);
         }
-        deleted += monitor_results::Entity::delete_many()
-            .filter(monitor_results_entity::Column::Id.is_in(ids))
-            .exec(db)
-            .await?
-            .rows_affected;
-    }
-}
-
-async fn prune_metrics<C: ConnectionTrait>(
-    db: &C,
-    cutoff: chrono::DateTime<Utc>,
-) -> AppResult<u64> {
-    let mut deleted = 0;
-    loop {
-        let ids = metrics::Entity::find()
-            .select_only()
-            .column(metrics_entity::Column::Id)
-            .filter(metrics_entity::Column::CreatedAt.lt(cutoff))
-            .order_by_asc(metrics_entity::Column::Id)
-            .limit(DELETE_BATCH_SIZE)
-            .into_tuple::<i64>()
-            .all(db)
-            .await?;
-        if ids.is_empty() {
-            return Ok(deleted);
-        }
-        deleted += metrics::Entity::delete_many()
-            .filter(metrics_entity::Column::Id.is_in(ids))
-            .exec(db)
-            .await?
-            .rows_affected;
+        tokio::time::sleep(BATCH_PAUSE).await;
     }
 }
 
@@ -282,7 +287,7 @@ mod tests {
     }
 
     #[test]
-    fn o_total_soma_as_sete_origens() {
+    fn o_total_soma_todas_as_origens() {
         let stats = PruneStats {
             outbox_deleted: 1,
             results_deleted: 2,
@@ -291,8 +296,10 @@ mod tests {
             alert_events_deleted: 5,
             notifications_deleted: 6,
             telemetry_deleted: 7,
+            audit_deleted: 8,
+            plugin_runs_deleted: 9,
         };
-        assert_eq!(stats.total(), 28);
+        assert_eq!(stats.total(), 45);
         assert_eq!(PruneStats::default().total(), 0);
     }
 
