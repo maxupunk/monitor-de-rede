@@ -1,7 +1,7 @@
 //! Historico de alertas e stream SSE de eventos de dominio.
 
 use axum::extract::Query;
-use axum::http::{header, HeaderValue};
+use axum::http::{header, HeaderMap, HeaderValue};
 use axum::response::{
     sse::{Event, KeepAlive, Sse},
     IntoResponse,
@@ -23,7 +23,8 @@ use crate::{
     },
     models::alert_events,
     services::{
-        events::{DomainEvent, EventBus},
+        audit::AuditActor,
+        events::{DomainEvent, EventBus, Presence},
         shared::{
             errors::AppResult,
             pagination::{paginate, PaginatedResponse},
@@ -53,8 +54,15 @@ async fn index(
     })?)
 }
 
-async fn stream(State(ctx): State<AppContext>) -> AppResult<Response> {
+async fn stream(State(ctx): State<AppContext>, headers: HeaderMap) -> AppResult<Response> {
     let bus = EventBus::from_context(&ctx)?;
+    // Enquanto o stream estiver aberto, o usuário conta como online: um pedido
+    // de aprovação da IA chega na tela, não como notificação no celular.
+    let presence = AuditActor::from_headers(&headers, &ctx.db)
+        .await
+        .ok()
+        .and_then(|actor| actor.user_id)
+        .map(|user_id| Presence::from_context(&ctx).connect(user_id));
     let mut updates = bus.subscribe();
     let snapshots = bus.current_snapshots();
     let (sender, receiver) = mpsc::channel(32);
@@ -98,7 +106,9 @@ async fn stream(State(ctx): State<AppContext>) -> AppResult<Response> {
             }
         }
     });
-    let stream = ReceiverStream::new(receiver).map(|(event, first)| {
+    let stream = ReceiverStream::new(receiver).map(move |(event, first)| {
+        // O guarda vive com o stream: o navegador fechou, ele cai junto.
+        let _presence = &presence;
         let frame =
             Event::default().data(serde_json::to_string(&event).unwrap_or_else(|_| "{}".into()));
         Ok::<Event, Infallible>(if first {

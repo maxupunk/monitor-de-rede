@@ -73,7 +73,7 @@ export function defaultAiSettings(): AiSettings {
     ollamaNumCtx: DEFAULT_OLLAMA_NUM_CTX,
     allowActiveTools: true,
     requireToolConfirmation: false,
-    allowActions: false,
+    actionMode: 'off',
     containerActions: 'confirm',
     responseStyle: 'concise',
     proactive: defaultProactive(),

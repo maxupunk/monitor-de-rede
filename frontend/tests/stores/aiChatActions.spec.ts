@@ -41,6 +41,8 @@ const proposta = {
   name: 'silence_alert',
   arguments: { alert_id: 7, minutes: 30 },
   summary: 'Silenciar o alerta #7 por 30 min',
+  risk: 'high',
+  reason: 'Um problema real pode passar despercebido',
 }
 
 async function conversaComProposta() {
@@ -78,6 +80,8 @@ describe('ações propostas pela IA', () => {
       name: 'silence_alert',
       status: 'awaiting',
       summary: 'Silenciar o alerta #7 por 30 min',
+      risk: 'high',
+      reason: 'Um problema real pode passar despercebido',
     })
     expect(resposta.usage).toEqual({ promptTokens: 1500, completionTokens: 40 })
     expect(apiService.post).not.toHaveBeenCalledWith('/ai/tools/execute', expect.anything())
@@ -95,6 +99,7 @@ describe('ações propostas pela IA', () => {
         name: 'silence_alert',
         arguments: { alert_id: 7, minutes: 30 },
         conversationKey: store.conversationKey,
+        callId: 'c1',
       },
       expect.objectContaining({ timeoutMs: expect.any(Number) })
     )
@@ -112,6 +117,58 @@ describe('ações propostas pela IA', () => {
     const tool = store.messages[1].toolCalls?.[0]
     expect(tool?.status).toBe('error')
     expect(tool?.result).toEqual({ error: 'Sem permissão' })
+  })
+
+  it('cancelar tira o pedido do aviso das outras telas', async () => {
+    const store = await conversaComProposta()
+    store.cancelTool(store.messages[1].id, 'c1')
+    await vi.waitFor(() => expect(api.dismissed).toEqual(['c1']))
+    expect(store.messages[1].toolCalls?.[0].status).toBe('cancelled')
+  })
+
+  it('cancelado em outra tela, o card da conversa acompanha', async () => {
+    const store = await conversaComProposta()
+    store.applyApprovalDecision({ callId: 'c1', decision: 'dismissed' })
+    expect(store.messages[1].toolCalls?.[0].status).toBe('cancelled')
+  })
+
+  it('confirmado fora do card, o resultado da execução vale mesmo depois do aviso SSE', async () => {
+    const store = await conversaComProposta()
+    store.applyApprovalDecision({ callId: 'c1', decision: 'confirmed' })
+    expect(store.messages[1].toolCalls?.[0].status).toBe('done')
+
+    store.applyApprovalDecision(
+      { callId: 'c1', decision: 'confirmed' },
+      { result: { done: true, status: 'silenced' }, chart: null }
+    )
+    expect(store.messages[1].toolCalls?.[0]).toMatchObject({
+      status: 'done',
+      result: { done: true, status: 'silenced' },
+    })
+  })
+
+  it('ação que o modo automático rodou sozinha guarda o risco que a regra viu', async () => {
+    vi.mocked(apiService.postStream).mockResolvedValueOnce(
+      sseResponse([
+        {
+          type: 'toolCall',
+          id: 'a1',
+          name: 'acknowledge_alert',
+          arguments: { alert_id: 7 },
+          risk: 'low',
+          reason: 'Só registra que alguém está ciente',
+        },
+        { type: 'toolResult', id: 'a1', name: 'acknowledge_alert', result: { done: true } },
+        { type: 'done' },
+      ])
+    )
+    const store = useAiStore()
+    await store.sendMessage('Reconheça o alerta 7')
+    expect(store.messages[1].toolCalls?.[0]).toMatchObject({
+      status: 'done',
+      risk: 'low',
+      reason: 'Só registra que alguém está ciente',
+    })
   })
 
   it('a decisão do usuário vai anotada no histórico da próxima pergunta', async () => {

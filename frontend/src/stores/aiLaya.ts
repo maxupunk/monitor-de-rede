@@ -47,6 +47,7 @@ export function defaultLayaSettings(): AiLayaSettings {
       interfaces: true,
       logEvents: false,
       incidentTriage: 'off',
+      actionReview: true,
     },
   }
 }

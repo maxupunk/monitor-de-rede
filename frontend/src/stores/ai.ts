@@ -8,7 +8,7 @@ import type { OpenRouterModelsResponse } from '@/bindings/OpenRouterModelsRespon
 import type { AiChart } from '@/bindings/AiChart'
 import type { AiProactiveSettings } from '@/bindings/AiProactiveSettings'
 import type { AiResponseStyle } from '@/bindings/AiResponseStyle'
-import type { AiContainerActionMode } from '@/bindings/AiContainerActionMode'
+import type { AiAutomationMode } from '@/bindings/AiAutomationMode'
 import type { ExecuteToolResponse } from '@/bindings/ExecuteToolResponse'
 import {
   applyChatEvent,
@@ -20,6 +20,7 @@ import {
   type AiToolCallState,
 } from '@/utils/aiChatStream'
 import type { AiMention } from '@/utils/aiMentions'
+import { useAiApprovalsStore, type AiApprovalResolved } from './aiApprovals'
 import { useAiConversationsStore } from './aiConversations'
 import { readSseJson } from '@/utils/sseReader'
 import { streamModelPull } from '@/utils/modelPull'
@@ -73,9 +74,10 @@ export interface AiSettings {
   ollamaNumCtx?: number | null
   allowActiveTools: boolean
   requireToolConfirmation: boolean
-  allowActions: boolean
+  /** Ações (alertas, manutenção, monitores, regras): desligado, com confirmação ou automático. */
+  actionMode: AiAutomationMode
   /** Iniciar, parar e reiniciar containers: desligado, com confirmação ou automático. */
-  containerActions: AiContainerActionMode
+  containerActions: AiAutomationMode
   responseStyle: AiResponseStyle
   proactive: AiProactiveSettings
   customSystemPrompt?: string | null
@@ -415,6 +417,47 @@ export const useAiStore = defineStore('ai', () => {
     return message?.toolCalls?.find((tool) => tool.id === toolId) ?? null
   }
 
+  /** A chamada na conversa aberta, em qualquer mensagem. */
+  function findToolById(toolId: string): AiToolCallState | null {
+    for (const message of messages.value) {
+      const tool = message.toolCalls?.find((item) => item.id === toolId)
+      if (tool) return tool
+    }
+    return null
+  }
+
+  /** O pedido está na conversa aberta (o card já o mostra quando o chat está visível). */
+  function hasTool(toolId: string): boolean {
+    return findToolById(toolId) !== null
+  }
+
+  function applyExecution(tool: AiToolCallState, response: ExecuteToolResponse) {
+    tool.result = response.result
+    tool.chart = response.chart ?? null
+    tool.status = response.result?.error ? 'error' : 'done'
+  }
+
+  /**
+   * O pedido foi decidido fora do card (aviso global ou outra aba): o card da
+   * conversa aberta acompanha. Com a resposta da execução, ela vale mesmo que
+   * o evento SSE tenha chegado antes.
+   */
+  function applyApprovalDecision(resolved: AiApprovalResolved, response?: ExecuteToolResponse) {
+    const tool = findToolById(resolved.callId)
+    if (!tool) return
+    if (response) {
+      applyExecution(tool, response)
+    } else if (tool.status === 'awaiting') {
+      tool.status = resolved.decision === 'confirmed' ? 'done' : 'cancelled'
+      if (resolved.decision === 'confirmed') {
+        tool.result = { note: 'Confirmado em outra tela' }
+      }
+    } else {
+      return
+    }
+    void conversations.persist(messages.value)
+  }
+
   /** Executa a ação que a IA propôs e o usuário confirmou. */
   async function confirmTool(messageId: string, toolId: string) {
     const tool = findTool(messageId, toolId)
@@ -427,13 +470,12 @@ export const useAiStore = defineStore('ai', () => {
           name: tool.name,
           arguments: tool.arguments,
           conversationKey: conversationKey.value,
+          callId: tool.id,
         },
         // Acesso a equipamento pode esperar aprovações no meio da execução.
         { timeoutMs: 15 * 60_000 }
       )
-      tool.result = response.result
-      tool.chart = response.chart ?? null
-      tool.status = response.result?.error ? 'error' : 'done'
+      applyExecution(tool, response)
     } catch (err: unknown) {
       tool.result = { error: errorMessage(err, 'Falha ao executar a ação') }
       tool.status = 'error'
@@ -447,6 +489,11 @@ export const useAiStore = defineStore('ai', () => {
     if (!tool || tool.status !== 'awaiting') return
     tool.status = 'cancelled'
     void conversations.persist(messages.value)
+    // Tira o pedido do aviso das outras telas; sem pendência no servidor
+    // (reinício, expirou), não há o que desfazer.
+    useAiApprovalsStore()
+      .dismiss(tool.id)
+      .catch(() => undefined)
   }
 
   /**
@@ -683,6 +730,8 @@ export const useAiStore = defineStore('ai', () => {
     askAbout,
     confirmTool,
     cancelTool,
+    hasTool,
+    applyApprovalDecision,
     toggleDrawer,
     conversationKey,
     deviceContextId,

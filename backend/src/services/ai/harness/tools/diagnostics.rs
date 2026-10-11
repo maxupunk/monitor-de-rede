@@ -8,7 +8,7 @@ use loco_rs::prelude::AppContext;
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 
-use super::{AiToolHandler, ToolArgs, ToolKind, ToolOutput};
+use super::{AiToolHandler, RiskAssessment, ToolArgs, ToolKind, ToolOutput};
 use crate::services::{
     network_tools::{
         dns::latency::{measure_dns_lookup, DnsLookupOptions, DnsProtocol},
@@ -21,6 +21,8 @@ use crate::services::{
 };
 
 const DEFAULT_PORTS: [u16; 8] = [80, 443, 22, 53, 8080, 3389, 445, 161];
+/// Acima disso o scan deixa de ser um teste pontual e vira varredura.
+const WIDE_SCAN_PORTS: usize = 20;
 
 /// IP literal ou resolvido por DNS; a falha de resolução volta como dado
 /// para a IA, não como erro da ferramenta.
@@ -203,6 +205,19 @@ impl AiToolHandler for ScanPorts {
 
     fn network_target(&self, args: &ToolArgs) -> Option<String> {
         args.text("target")
+    }
+
+    async fn risk(&self, _ctx: &AppContext, args: &ToolArgs) -> RiskAssessment {
+        let count = args
+            .ports("ports")
+            .map_or(DEFAULT_PORTS.len(), |ports| ports.len());
+        if count > WIDE_SCAN_PORTS {
+            RiskAssessment::medium(format!(
+                "Varredura de {count} portas: pode disparar alarmes de IDS no alvo"
+            ))
+        } else {
+            RiskAssessment::for_kind(self.kind())
+        }
     }
 
     async fn preview(&self, _ctx: &AppContext, args: &ToolArgs) -> AppResult<String> {

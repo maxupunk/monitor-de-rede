@@ -214,6 +214,7 @@
     <DiagnosticPlaybookDialog v-model="playbookDialog" />
     <AiChatDrawer />
     <PluginApprovalDialog />
+    <AiApprovalNotice />
 
     <!-- Diálogo de Instruções de Instalação no iOS -->
     <v-dialog v-model="showIosDialog" :fullscreen="$vuetify.display.xs" max-width="420">
@@ -264,6 +265,7 @@ import SpeedTestDialog from '@/components/SpeedTestDialog.vue'
 import DiagnosticPlaybookDialog from '@/components/DiagnosticPlaybookDialog.vue'
 import AiChatDrawer from '@/components/ai/AiChatDrawer.vue'
 import PluginApprovalDialog from '@/components/plugins/PluginApprovalDialog.vue'
+import AiApprovalNotice from '@/components/ai/AiApprovalNotice.vue'
 import { useAiStore } from '@/stores/ai'
 import { usePluginAppsStore } from '@/stores/pluginApps'
 

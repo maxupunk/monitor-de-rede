@@ -12,7 +12,9 @@ use loco_rs::prelude::AppContext;
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect};
 use serde_json::{json, Value};
 
-use super::{lookup::find_device, AiToolHandler, ToolArgs, ToolGroup, ToolKind, ToolOutput};
+use super::{
+    lookup::find_device, AiToolHandler, RiskAssessment, ToolArgs, ToolGroup, ToolKind, ToolOutput,
+};
 use crate::{
     dtos::resources::AlertRuleInput,
     models::_entities::{
@@ -584,6 +586,10 @@ impl AiToolHandler for CreateAlertRule {
         ToolKind::Action
     }
 
+    async fn risk(&self, _ctx: &AppContext, _args: &ToolArgs) -> RiskAssessment {
+        RiskAssessment::low("Só acrescenta uma regra; não silencia nenhum alerta")
+    }
+
     fn group(&self) -> ToolGroup {
         ToolGroup::AlertRules
     }
@@ -682,6 +688,10 @@ impl AiToolHandler for DeleteAlertRule {
 
     fn kind(&self) -> ToolKind {
         ToolKind::Action
+    }
+
+    async fn risk(&self, _ctx: &AppContext, _args: &ToolArgs) -> RiskAssessment {
+        RiskAssessment::high("Exclui a regra e o histórico de alertas dela; não há desfazer")
     }
 
     fn group(&self) -> ToolGroup {
@@ -796,6 +806,16 @@ impl AiToolHandler for ToggleAlertRule {
 
     fn kind(&self) -> ToolKind {
         ToolKind::Action
+    }
+
+    async fn risk(&self, _ctx: &AppContext, args: &ToolArgs) -> RiskAssessment {
+        match args.raw("enabled").and_then(Value::as_bool) {
+            Some(true) => RiskAssessment::low("Reativa uma regra: os alertas dela voltam a abrir"),
+            Some(false) => {
+                RiskAssessment::high("Desativa a regra: os alertas dela deixam de abrir")
+            }
+            None => RiskAssessment::for_kind(self.kind()),
+        }
     }
 
     fn group(&self) -> ToolGroup {

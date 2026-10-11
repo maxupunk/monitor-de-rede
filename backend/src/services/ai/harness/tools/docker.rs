@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 use super::{
     actions::{audit, VIA_AI},
     series::round2,
-    AiToolHandler, ToolArgs, ToolGroup, ToolKind, ToolOutput,
+    AiToolHandler, RiskAssessment, ToolArgs, ToolGroup, ToolKind, ToolOutput,
 };
 use crate::{
     services::{
@@ -454,6 +454,20 @@ impl LifecycleAction {
         }
     }
 
+    /// Risco da ação num container qualquer; o do próprio NetMonitor é
+    /// sempre alto (ver [`DockerContainerAction::risk`]).
+    fn risk(self) -> RiskAssessment {
+        match self {
+            Self::Start => RiskAssessment::low("Inicia um container parado"),
+            Self::Restart => {
+                RiskAssessment::medium("O serviço do container fica fora por alguns segundos")
+            }
+            Self::Stop => RiskAssessment::high(
+                "O serviço do container fica fora até alguém iniciá-lo de novo",
+            ),
+        }
+    }
+
     const fn engine(self) -> ContainerAction {
         match self {
             Self::Start => ContainerAction::Start,
@@ -526,6 +540,30 @@ impl AiToolHandler for DockerContainerAction {
 
     fn kind(&self) -> ToolKind {
         ToolKind::ContainerAction
+    }
+
+    async fn risk(&self, ctx: &AppContext, args: &ToolArgs) -> RiskAssessment {
+        let Some(action) = args
+            .text("action")
+            .as_deref()
+            .and_then(LifecycleAction::parse)
+        else {
+            return RiskAssessment::for_kind(self.kind());
+        };
+        if action == LifecycleAction::Start {
+            return action.risk();
+        }
+        // Parar ou reiniciar a central derruba o próprio chat no meio.
+        if let Ok(Ok(target)) = resolve_target(ctx, args).await {
+            if target.host.key.is_local()
+                && docker::log_clear::is_current_container(&target.container.id)
+            {
+                return RiskAssessment::high(
+                    "É o container do próprio NetMonitor: a central fica fora do ar",
+                );
+            }
+        }
+        action.risk()
     }
 
     fn description(&self) -> &'static str {

@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod approval;
 pub mod compaction;
 pub mod confirmation;
 pub mod grounding;

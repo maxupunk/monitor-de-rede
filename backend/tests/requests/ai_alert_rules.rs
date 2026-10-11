@@ -18,18 +18,18 @@ use serial_test::serial;
 
 const COM_ACOES: ToolPolicy = ToolPolicy {
     allow_active: false,
-    allow_actions: true,
+    actions: backend::services::ai::settings::AiAutomationMode::Confirm,
     confirm_active: false,
     interactive: true,
-    container_actions: backend::services::ai::settings::AiContainerActionMode::Off,
+    container_actions: backend::services::ai::settings::AiAutomationMode::Off,
 };
 
 const SO_LEITURA: ToolPolicy = ToolPolicy {
     allow_active: false,
-    allow_actions: false,
+    actions: backend::services::ai::settings::AiAutomationMode::Off,
     confirm_active: false,
     interactive: true,
-    container_actions: backend::services::ai::settings::AiContainerActionMode::Off,
+    container_actions: backend::services::ai::settings::AiAutomationMode::Off,
 };
 
 async fn aparelho(ctx: &AppContext) -> devices::Model {

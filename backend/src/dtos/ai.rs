@@ -626,6 +626,11 @@ pub struct ExecuteToolRequest {
     #[serde(default)]
     #[ts(optional)]
     pub conversation_key: Option<String>,
+    /// Id da chamada da IA (o card): decidida aqui, sai do aviso das outras
+    /// telas e não roda de novo em outra aba.
+    #[serde(default)]
+    #[ts(optional)]
+    pub call_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, TS)]

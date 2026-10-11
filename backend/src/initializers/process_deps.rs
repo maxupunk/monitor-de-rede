@@ -15,8 +15,12 @@
 use loco_rs::app::AppContext;
 
 use crate::services::{
-    agents::hub::AgentHub, discovery::service::ScanSessionService, docker::log_stream::LogStreams,
-    events::EventBus, monitoring::checkers::ping::PingClient,
+    agents::hub::AgentHub,
+    ai::approvals::ApprovalDesk,
+    discovery::service::ScanSessionService,
+    docker::log_stream::LogStreams,
+    events::{EventBus, Presence},
+    monitoring::checkers::ping::PingClient,
 };
 
 /// Popula o `shared_store` do contexto.
@@ -33,6 +37,10 @@ pub fn install(ctx: &AppContext) {
     // inicializado" em quem apenas consulta (ADR 011).
     AgentHub::install(ctx);
     LogStreams::install(ctx);
+    // Quem está com o NetMonitor aberto (stream SSE): decide se um pedido de
+    // aprovação da IA vira notificação no celular.
+    Presence::install(ctx);
+    ApprovalDesk::install(ctx);
 
     // O socket ICMP é a única peça que pode falhar, e falha por configuração do
     // ambiente, não por bug: sem `net.ipv4.ping_group_range` liberado, o

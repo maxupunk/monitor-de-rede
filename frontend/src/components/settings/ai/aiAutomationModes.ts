@@ -1,4 +1,4 @@
-import type { AiContainerActionMode } from '@/bindings/AiContainerActionMode'
+import type { AiAutomationMode } from '@/bindings/AiAutomationMode'
 
 /** Uma opção de escolha única com ícone e a explicação que aparece embaixo. */
 export interface AiModeOption<T extends string> {
@@ -32,11 +32,32 @@ export const ACTIVE_TOOLS_OPTIONS: AiModeOption<AiActiveToolsMode>[] = [
     value: 'auto',
     title: 'Automático',
     icon: 'mdi-robot-outline',
-    hint: 'A IA executa os testes sozinha quando o diagnóstico pede; cada um aparece no chat.',
+    hint: 'A IA executa os testes sozinha quando o diagnóstico pede; cada um aparece no chat. Varreduras amplas passam pela revisão do Laya.',
   },
 ]
 
-export const CONTAINER_ACTION_OPTIONS: AiModeOption<AiContainerActionMode>[] = [
+export const ACTION_OPTIONS: AiModeOption<AiAutomationMode>[] = [
+  {
+    value: 'off',
+    title: 'Desligado',
+    icon: 'mdi-cancel',
+    hint: 'A IA só consulta e explica; nunca muda nada no sistema.',
+  },
+  {
+    value: 'confirm',
+    title: 'Pedir permissão',
+    icon: 'mdi-hand-back-right-outline',
+    hint: 'A IA propõe cada ação no chat e só executa depois do seu clique em Confirmar.',
+  },
+  {
+    value: 'auto',
+    title: 'Automático',
+    icon: 'mdi-robot-outline',
+    hint: 'A IA executa sozinha o que é de baixo risco (reconhecer alerta, criar monitor ou regra) e pede sua confirmação no que pode esconder um problema ou apagar dado (silenciar por mais de 30 min, manutenção longa, desativar ou excluir regra). Se você não estiver no sistema, o pedido chega como notificação.',
+  },
+]
+
+export const CONTAINER_ACTION_OPTIONS: AiModeOption<AiAutomationMode>[] = [
   {
     value: 'off',
     title: 'Desligado',
@@ -53,7 +74,7 @@ export const CONTAINER_ACTION_OPTIONS: AiModeOption<AiContainerActionMode>[] = [
     value: 'auto',
     title: 'Automático',
     icon: 'mdi-robot-outline',
-    hint: 'A IA executa sozinha quando o diagnóstico pede; a ação aparece no chat e fica na auditoria em seu nome.',
+    hint: 'A IA inicia e reinicia sozinha quando o diagnóstico pede; parar um container ou mexer no próprio NetMonitor sempre pede sua confirmação. Tudo aparece no chat e fica na auditoria em seu nome.',
   },
 ]
 

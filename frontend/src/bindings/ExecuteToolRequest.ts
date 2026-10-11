@@ -7,4 +7,9 @@ export type ExecuteToolRequest = { name: string, arguments: Record<string, unkno
 /**
  * Conversa de onde veio a confirmação (plugins de dispositivo).
  */
-conversationKey?: string, };
+conversationKey?: string, 
+/**
+ * Id da chamada da IA (o card): decidida aqui, sai do aviso das outras
+ * telas e não roda de novo em outra aba.
+ */
+callId?: string, };

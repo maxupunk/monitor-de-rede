@@ -22,6 +22,8 @@ import { usePluginsStore } from './plugins'
 import { usePluginAppsStore } from './pluginApps'
 import { isLogTemplateInfo } from '@/utils/logCategories'
 import { isLayaModelState, useAiLayaStore } from './aiLaya'
+import { asApprovalResolved, useAiApprovalsStore } from './aiApprovals'
+import { useAiStore } from './ai'
 import { getStoredToken } from '@/utils/authStorage'
 
 export interface RealtimeEventPayload {
@@ -481,6 +483,20 @@ export const useEventsStore = defineStore('events', () => {
 
       case 'plugin:approval_resolved': {
         usePluginsStore().applyApprovalResolved(data)
+        break
+      }
+
+      case 'ai:approval_pending': {
+        useAiApprovalsStore().applyPending(data)
+        break
+      }
+
+      case 'ai:approval_resolved': {
+        const resolved = asApprovalResolved(data)
+        if (!resolved) break
+        useAiApprovalsStore().applyResolved(resolved)
+        // Decidido em outra aba: o card da conversa aberta acompanha.
+        useAiStore().applyApprovalDecision(resolved)
         break
       }
     }

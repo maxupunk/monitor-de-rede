@@ -15,6 +15,7 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use super::{
+    approval::{self, ActionReviewer, GateDecision, RunPlan},
     compaction::{
         estimate_history, estimate_messages, estimate_tokens, fallback_summary, fold_count,
         prune_tool_results, small_window_notice, summarize, supersede_repeated_results,
@@ -23,8 +24,8 @@ use super::{
     grounding::invented_target,
     prompt::{build_small_talk_prompt, build_system_prompt, build_turn_context, ChatContext},
     tools::{
-        target_device_id, ToolArgs, ToolGroup, ToolGroups, ToolKind, ToolPolicy, ToolRegistry,
-        LOAD_TOOLS,
+        target_device_id, AiToolRisk, RiskAssessment, ToolArgs, ToolGroup, ToolGroups, ToolKind,
+        ToolPolicy, ToolRegistry, LOAD_TOOLS,
     },
     turn::{compact_for_model, is_small_talk, preselect_groups, requested_groups},
 };
@@ -32,6 +33,7 @@ use crate::{
     dtos::ai::{AiChart, ChatMessageInput, ChatStreamRequest},
     services::{
         ai::{
+            approvals::{self, ApprovalRequest},
             context_window::{self, ContextWindow},
             drivers::traits::{AiChatOptions, AiDriver, AiMessage, AiToolCall, AiUsage},
             laya::{runtime::LayaRuntime, tool_routing},
@@ -64,6 +66,12 @@ pub enum HarnessEvent {
         /// a tela marca o card como executado sem confirmação.
         #[serde(rename = "autoApproved", skip_serializing_if = "std::ops::Not::not")]
         auto_approved: bool,
+        /// Ação ou teste que o modo automático rodou sem perguntar: o risco
+        /// que a regra viu, para a tela dizer por que não perguntou.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        risk: Option<AiToolRisk>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
     },
     ToolResult {
         id: String,
@@ -80,6 +88,9 @@ pub enum HarnessEvent {
         name: String,
         arguments: serde_json::Value,
         summary: String,
+        risk: AiToolRisk,
+        /// Por que pergunta ("Exclui a regra…", "O Laya avaliou…").
+        reason: String,
     },
     /// Métricas da resposta: tokens somados de todas as rodadas, o modelo
     /// que respondeu, o tempo gasto e quanto da janela a conversa ocupa.
@@ -373,16 +384,18 @@ alucinar — interpretar errado uma saída ou propor um comando incorreto — e 
 pode derrubar a rede ou cortar o acesso ao equipamento. Leia o comando e o motivo de cada pedido \
 antes de aprovar. O NetMonitor não se responsabiliza por danos causados por ações da IA.";
 
-/// Quem conversa e o estado de acesso a equipamento de uma resposta: o aviso
-/// já dado e a conversa, para consultar o modo "Aceitar automaticamente".
-struct DeviceAccessSession {
+/// Quem conversa e o que decide as chamadas de uma resposta: o aviso de
+/// equipamento já dado, a conversa (modo "Aceitar automaticamente") e o Laya
+/// que revisa as ações do modo automático.
+struct ToolSession {
     /// Quem conversa: a ação que roda sem confirmação fica na auditoria dele.
     actor: AuditActor,
     conversation_key: Option<String>,
     warned: bool,
+    reviewer: Option<ActionReviewer>,
 }
 
-impl DeviceAccessSession {
+impl ToolSession {
     /// O modo automático está ligado para esta conversa e o equipamento da
     /// chamada. Sem conversa ou sem equipamento identificável, não está.
     async fn auto_approves(&self, ctx: &AppContext, arguments: &serde_json::Value) -> bool {
@@ -397,6 +410,33 @@ impl DeviceAccessSession {
             .ok()
             .flatten()
             .is_some()
+    }
+
+    /// A chamada voltou ao usuário: fica registrada para aparecer em
+    /// qualquer tela e avisar no celular quem não está olhando.
+    fn await_user(
+        &self,
+        ctx: &AppContext,
+        tool: &AiToolCall,
+        arguments: serde_json::Value,
+        summary: &str,
+        risk: &RiskAssessment,
+    ) {
+        let Some(user_id) = self.actor.user_id else {
+            return;
+        };
+        approvals::open(
+            ctx,
+            ApprovalRequest {
+                call_id: &tool.id,
+                user_id,
+                tool: &tool.name,
+                arguments,
+                summary,
+                risk,
+                conversation_key: self.conversation_key.clone(),
+            },
+        );
     }
 }
 
@@ -418,7 +458,7 @@ async fn handle_tool_call(
     sink: &EventSink,
     conversation: &mut Vec<AiMessage>,
     loaded: &mut ToolGroups,
-    session: &mut DeviceAccessSession,
+    session: &mut ToolSession,
     tool: AiToolCall,
 ) -> ToolFlow {
     let arguments: serde_json::Value =
@@ -489,65 +529,84 @@ async fn handle_tool_call(
     let args = ToolArgs::parse(&tool.arguments)
         .with_actor(session.actor.clone())
         .with_conversation(session.conversation_key.clone());
-    let result = if registry.needs_confirmation(&tool.name) && !auto_approved {
-        let summary = registry
-            .preview(ctx, &tool.name, &tool.arguments)
-            .await
-            .unwrap_or_else(|error| error.to_string());
-        if !sink
-            .send(HarnessEvent::ConfirmationRequired {
-                id: tool.id.clone(),
-                name: tool.name.clone(),
-                arguments,
-                summary: summary.clone(),
-            })
-            .await
-        {
-            return ToolFlow::Disconnected;
-        }
-        json!({
-            "status": "awaiting_user_confirmation",
-            "summary": summary,
-            "note": "Os botões de confirmar/cancelar já estão na tela: diga em uma frase o que propôs e não repita a chamada.",
-        })
+    let decision = if auto_approved {
+        GateDecision::Run(RunPlan::auto_accepted())
     } else {
-        if !sink
-            .send(HarnessEvent::ToolCall {
-                id: tool.id.clone(),
-                name: tool.name.clone(),
-                arguments,
-                auto_approved,
-            })
-            .await
-        {
-            return ToolFlow::Disconnected;
-        }
-        let execution = if auto_approved {
-            registry.execute_auto_approved(ctx, &tool.name, args).await
-        } else {
-            registry.execute_in(ctx, &tool.name, args).await
-        };
-        let (result, chart) = match execution {
-            Ok(output) => {
-                if output.ends_turn {
-                    flow = ToolFlow::EndTurn;
-                }
-                (output.data, output.chart)
+        approval::decide(
+            ctx,
+            registry,
+            session.reviewer.as_ref(),
+            &tool.name,
+            &args,
+            &tool.arguments,
+        )
+        .await
+    };
+    let result = match decision {
+        GateDecision::Ask(risk) => {
+            let summary = registry
+                .preview(ctx, &tool.name, &tool.arguments)
+                .await
+                .unwrap_or_else(|error| error.to_string());
+            if !sink
+                .send(HarnessEvent::ConfirmationRequired {
+                    id: tool.id.clone(),
+                    name: tool.name.clone(),
+                    arguments: arguments.clone(),
+                    summary: summary.clone(),
+                    risk: risk.level,
+                    reason: risk.reason.clone(),
+                })
+                .await
+            {
+                return ToolFlow::Disconnected;
             }
-            Err(err) => (json!({ "error": err.to_string() }), None),
-        };
-        if !sink
-            .send(HarnessEvent::ToolResult {
-                id: tool.id.clone(),
-                name: tool.name.clone(),
-                result: result.clone(),
-                chart,
+            session.await_user(ctx, &tool, arguments, &summary, &risk);
+            json!({
+                "status": "awaiting_user_confirmation",
+                "summary": summary,
+                "why": risk.reason,
+                "note": "Os botões de confirmar/cancelar já estão na tela: diga em uma frase o que propôs e não repita a chamada.",
             })
-            .await
-        {
-            return ToolFlow::Disconnected;
         }
-        result
+        GateDecision::Run(plan) => {
+            let shown = plan.risk;
+            if !sink
+                .send(HarnessEvent::ToolCall {
+                    id: tool.id.clone(),
+                    name: tool.name.clone(),
+                    arguments,
+                    auto_approved,
+                    risk: shown.as_ref().map(|risk| risk.level),
+                    reason: shown.map(|risk| risk.reason),
+                })
+                .await
+            {
+                return ToolFlow::Disconnected;
+            }
+            let execution = plan.execution.run(ctx, registry, &tool.name, args).await;
+            let (result, chart) = match execution {
+                Ok(output) => {
+                    if output.ends_turn {
+                        flow = ToolFlow::EndTurn;
+                    }
+                    (output.data, output.chart)
+                }
+                Err(err) => (json!({ "error": err.to_string() }), None),
+            };
+            if !sink
+                .send(HarnessEvent::ToolResult {
+                    id: tool.id.clone(),
+                    name: tool.name.clone(),
+                    result: result.clone(),
+                    chart,
+                })
+                .await
+            {
+                return ToolFlow::Disconnected;
+            }
+            result
+        }
     };
 
     conversation.push(AiMessage {
@@ -626,10 +685,16 @@ pub async fn run_agent_loop(
             .filter(|group| available.contains(group))
             .chain(preselected.iter())
             .collect();
-        let mut device_session = DeviceAccessSession {
+        let mut device_session = ToolSession {
             actor: request.actor.clone(),
             conversation_key: request.memory.conversation_key.clone(),
             warned: false,
+            // Só o chat tem pedido do usuário para o Laya ler.
+            reviewer: (request.tool_loading == ToolLoading::OnDemand).then(|| ActionReviewer {
+                runtime: LayaRuntime::from_context(&ctx),
+                settings: settings.laya.clone(),
+                request: question.to_string(),
+            }),
         };
         let system_prompt = if small_talk {
             history = recent_history(history, SMALL_TALK_HISTORY);
@@ -982,10 +1047,43 @@ mod tests {
             name: "silence_alert".into(),
             arguments: json!({ "alert_id": 3 }),
             summary: "Silenciar o alerta #3 por 60 min".into(),
+            risk: AiToolRisk::High,
+            reason: "Um problema real pode passar despercebido".into(),
         })
         .unwrap();
         assert_eq!(pedido["type"], "confirmationRequired");
         assert_eq!(pedido["summary"], "Silenciar o alerta #3 por 60 min");
+        assert_eq!(pedido["risk"], "high");
+        assert_eq!(
+            pedido["reason"],
+            "Um problema real pode passar despercebido"
+        );
+
+        let automatica = serde_json::to_value(HarnessEvent::ToolCall {
+            id: "c2".into(),
+            name: "docker_container_action".into(),
+            arguments: json!({}),
+            auto_approved: false,
+            risk: Some(AiToolRisk::Low),
+            reason: Some("Inicia um container parado".into()),
+        })
+        .unwrap();
+        assert_eq!(automatica["risk"], "low");
+        assert!(automatica.get("autoApproved").is_none());
+
+        let consulta = serde_json::to_value(HarnessEvent::ToolCall {
+            id: "c3".into(),
+            name: "get_alerts".into(),
+            arguments: json!({}),
+            auto_approved: false,
+            risk: None,
+            reason: None,
+        })
+        .unwrap();
+        assert!(
+            consulta.get("risk").is_none(),
+            "consulta não tem risco a mostrar"
+        );
     }
 
     #[test]

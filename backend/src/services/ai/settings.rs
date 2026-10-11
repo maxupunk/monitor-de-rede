@@ -101,10 +101,13 @@ struct AiSettingsHelper {
     allow_active_tools: bool,
     #[serde(default)]
     require_tool_confirmation: bool,
+    /// Configuração antiga (antes de `actionMode`): `true` vira "pedir permissão".
     #[serde(default)]
     allow_actions: bool,
     #[serde(default)]
-    container_actions: AiContainerActionMode,
+    action_mode: Option<AiAutomationMode>,
+    #[serde(default)]
+    container_actions: AiAutomationMode,
     #[serde(default)]
     response_style: AiResponseStyle,
     #[serde(default)]
@@ -115,17 +118,21 @@ struct AiSettingsHelper {
     custom_system_prompt: Option<String>,
 }
 
-/// O que a IA pode fazer com containers Docker (iniciar, parar, reiniciar).
+/// Quanto a IA pode fazer sozinha numa família de ferramentas (ações,
+/// containers).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
-pub enum AiContainerActionMode {
-    /// A IA não mexe em container.
+pub enum AiAutomationMode {
+    /// A IA não usa essas ferramentas.
     Off,
-    /// A IA propõe e o usuário confirma no chat.
+    /// A IA propõe e o usuário confirma no chat, sempre.
     #[default]
     Confirm,
-    /// A IA executa sozinha; a ação aparece no chat e na auditoria.
+    /// Automático com critério: o que é de risco baixo ou médio roda na hora
+    /// (aparece no chat e na auditoria); o de risco alto — ou o que o Laya
+    /// julgar perigoso no contexto — volta a pedir confirmação
+    /// (`harness::tools::risk`).
     Auto,
 }
 
@@ -162,13 +169,14 @@ pub struct AiSettings {
     /// Exige confirmação do usuário antes de rodar ferramentas ativas
     pub require_tool_confirmation: bool,
 
-    /// Permite que a IA proponha ações (reconhecer/silenciar alerta, janela de
-    /// manutenção, criar monitor). Toda ação passa pela confirmação do usuário.
-    pub allow_actions: bool,
+    /// Ações (reconhecer/silenciar alerta, janela de manutenção, criar
+    /// monitor, regras de alerta): desligadas (padrão), com confirmação ou
+    /// automáticas com critério de risco.
+    pub action_mode: AiAutomationMode,
 
     /// Iniciar, parar e reiniciar containers: desligado, com confirmação
-    /// (padrão) ou automático.
-    pub container_actions: AiContainerActionMode,
+    /// (padrão) ou automático com critério de risco.
+    pub container_actions: AiAutomationMode,
 
     /// Quanto texto a IA devolve: direto (mínimo de tokens) ou normal.
     pub response_style: AiResponseStyle,
@@ -201,7 +209,11 @@ impl<'de> Deserialize<'de> for AiSettings {
             ollama_num_ctx: h.ollama_num_ctx,
             allow_active_tools: h.allow_active_tools,
             require_tool_confirmation: h.require_tool_confirmation,
-            allow_actions: h.allow_actions,
+            action_mode: h.action_mode.unwrap_or(if h.allow_actions {
+                AiAutomationMode::Confirm
+            } else {
+                AiAutomationMode::Off
+            }),
             container_actions: h.container_actions,
             response_style: h.response_style,
             proactive: h.proactive,
@@ -258,8 +270,8 @@ impl Default for AiSettings {
             ollama_num_ctx: Some(DEFAULT_OLLAMA_NUM_CTX),
             allow_active_tools: true,
             require_tool_confirmation: false,
-            allow_actions: false,
-            container_actions: AiContainerActionMode::default(),
+            action_mode: AiAutomationMode::Off,
+            container_actions: AiAutomationMode::default(),
             response_style: AiResponseStyle::default(),
             proactive: AiProactiveSettings::default(),
             laya: AiLayaSettings::default(),
@@ -517,14 +529,14 @@ mod tests {
     #[test]
     fn acoes_em_container_pedem_confirmacao_por_padrao() {
         let antiga: AiSettings = serde_json::from_str(r#"{ "enabled": true }"#).unwrap();
-        assert_eq!(antiga.container_actions, AiContainerActionMode::Confirm);
+        assert_eq!(antiga.container_actions, AiAutomationMode::Confirm);
         assert_eq!(
             AiSettings::default().container_actions,
-            AiContainerActionMode::Confirm
+            AiAutomationMode::Confirm
         );
 
         let auto: AiSettings = serde_json::from_str(r#"{ "containerActions": "auto" }"#).unwrap();
-        assert_eq!(auto.container_actions, AiContainerActionMode::Auto);
+        assert_eq!(auto.container_actions, AiAutomationMode::Auto);
     }
 
     #[test]
@@ -539,7 +551,21 @@ mod tests {
     #[test]
     fn configuracao_antiga_nao_libera_acoes_nem_rotinas_automaticas() {
         let settings: AiSettings = serde_json::from_str(r#"{ "enabled": true }"#).unwrap();
-        assert!(!settings.allow_actions);
+        assert_eq!(settings.action_mode, AiAutomationMode::Off);
         assert!(!settings.proactive.incident_summaries);
+    }
+
+    #[test]
+    fn acoes_liberadas_na_configuracao_antiga_continuam_pedindo_permissao() {
+        let antiga: AiSettings = serde_json::from_str(r#"{ "allowActions": true }"#).unwrap();
+        assert_eq!(antiga.action_mode, AiAutomationMode::Confirm);
+
+        let nova: AiSettings =
+            serde_json::from_str(r#"{ "allowActions": true, "actionMode": "auto" }"#).unwrap();
+        assert_eq!(nova.action_mode, AiAutomationMode::Auto);
+
+        let gravada = serde_json::to_value(&nova).unwrap();
+        assert_eq!(gravada["actionMode"], "auto");
+        assert!(gravada.get("allowActions").is_none());
     }
 }

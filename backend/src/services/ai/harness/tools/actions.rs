@@ -8,7 +8,7 @@ use loco_rs::prelude::AppContext;
 use sea_orm::EntityTrait;
 use serde_json::{json, Value};
 
-use super::{lookup::find_device, AiToolHandler, ToolArgs, ToolKind, ToolOutput};
+use super::{lookup::find_device, AiToolHandler, RiskAssessment, ToolArgs, ToolKind, ToolOutput};
 use crate::{
     dtos::resources::MonitorInput,
     models::{alert_events, devices},
@@ -25,6 +25,10 @@ const SILENCE_MIN: i64 = 5;
 const SILENCE_MAX: i64 = 24 * 60;
 const WINDOW_MIN: i64 = 15;
 const WINDOW_MAX: i64 = 7 * 24 * 60;
+/// Acima disso, silenciar ou abrir manutenção esconde problema demais para
+/// o modo automático decidir sozinho: volta a pedir confirmação.
+const SILENCE_AUTO_MAX: i64 = 30;
+const WINDOW_AUTO_MAX: i64 = 60;
 /// Tipos que a IA pode criar: os que só precisam de um alvo.
 const CREATABLE_MONITORS: &[&str] = &["ping", "http", "https", "tcp", "dns"];
 
@@ -119,6 +123,10 @@ impl AiToolHandler for AcknowledgeAlert {
         ToolKind::Action
     }
 
+    async fn risk(&self, _ctx: &AppContext, _args: &ToolArgs) -> RiskAssessment {
+        RiskAssessment::low("Só registra que alguém está ciente; o alerta continua aberto")
+    }
+
     async fn preview(&self, ctx: &AppContext, args: &ToolArgs) -> AppResult<String> {
         let loaded = load_alert(ctx, args).await?;
         Ok(preview_or_error(
@@ -160,6 +168,18 @@ impl AiToolHandler for SilenceAlert {
 
     fn kind(&self) -> ToolKind {
         ToolKind::Action
+    }
+
+    async fn risk(&self, _ctx: &AppContext, args: &ToolArgs) -> RiskAssessment {
+        let minutes = args.integer_in("minutes", 60, SILENCE_MIN, SILENCE_MAX);
+        let reason = format!("Silencia as notificações do alerta por {minutes} min");
+        if minutes > SILENCE_AUTO_MAX {
+            RiskAssessment::high(format!(
+                "{reason}: um problema real pode passar despercebido"
+            ))
+        } else {
+            RiskAssessment::medium(reason)
+        }
     }
 
     async fn preview(&self, ctx: &AppContext, args: &ToolArgs) -> AppResult<String> {
@@ -251,6 +271,16 @@ impl AiToolHandler for CreateMaintenanceWindow {
 
     fn kind(&self) -> ToolKind {
         ToolKind::Action
+    }
+
+    async fn risk(&self, _ctx: &AppContext, args: &ToolArgs) -> RiskAssessment {
+        let duration = args.integer_in("duration_minutes", 60, WINDOW_MIN, WINDOW_MAX);
+        let reason = format!("Os alertas do dispositivo não notificam por {duration} min");
+        if duration > WINDOW_AUTO_MAX {
+            RiskAssessment::high(format!("{reason}: uma queda real pode passar despercebida"))
+        } else {
+            RiskAssessment::medium(reason)
+        }
     }
 
     async fn preview(&self, ctx: &AppContext, args: &ToolArgs) -> AppResult<String> {
@@ -388,6 +418,10 @@ impl AiToolHandler for CreateMonitor {
 
     fn kind(&self) -> ToolKind {
         ToolKind::Action
+    }
+
+    async fn risk(&self, _ctx: &AppContext, _args: &ToolArgs) -> RiskAssessment {
+        RiskAssessment::low("Só acrescenta uma checagem; não muda o que já existe")
     }
 
     async fn preview(&self, ctx: &AppContext, args: &ToolArgs) -> AppResult<String> {

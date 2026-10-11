@@ -52,6 +52,9 @@ pub struct LayaFeatures {
     /// Classificar cada padrão novo de log (falha de login, link, reboot…).
     pub log_events: bool,
     pub incident_triage: LayaTriageMode,
+    /// Revisar as ações que o modo automático rodaria sozinho: o que ele achar
+    /// perigoso no contexto volta a pedir confirmação. Só sobe o risco.
+    pub action_review: bool,
 }
 
 impl Default for LayaFeatures {
@@ -64,6 +67,8 @@ impl Default for LayaFeatures {
             // Roda em segundo plano sobre todo log novo: só com escolha explícita.
             log_events: false,
             incident_triage: LayaTriageMode::Off,
+            // Só torna o automático mais cauteloso, e só nas ações de risco médio.
+            action_review: true,
         }
     }
 }
@@ -76,6 +81,7 @@ pub enum LayaFeature {
     Interfaces,
     LogEvents,
     IncidentTriage,
+    ActionReview,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -138,6 +144,7 @@ impl AiLayaSettings {
                 LayaFeature::Interfaces => features.interfaces,
                 LayaFeature::LogEvents => features.log_events,
                 LayaFeature::IncidentTriage => features.incident_triage != LayaTriageMode::Off,
+                LayaFeature::ActionReview => features.action_review,
             }
     }
 

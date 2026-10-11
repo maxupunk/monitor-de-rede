@@ -10,6 +10,8 @@ import { useTopologyStore } from '@/stores/topology'
 import { useStoragesStore } from '@/stores/storages'
 import { useDatabasesStore } from '@/stores/databases'
 import { useBackupStore } from '@/stores/backup'
+import { useAiApprovalsStore } from '@/stores/aiApprovals'
+import { useAuthStore } from '@/stores/auth'
 
 class FakeEventSource {
   static latest: FakeEventSource | null = null
@@ -373,5 +375,35 @@ describe('events store', () => {
     expect(apiGet).toHaveBeenCalledWith('/backup/system')
     events.disconnect()
     vi.useRealTimers()
+  })
+  it('pedido de aprovação da IA chega pelo SSE, só para o dono, e sai ao ser decidido', () => {
+    const apiGet = vi.spyOn(apiService, 'get')
+    useAuthStore().user = { id: 7, role: 'operator' } as never
+    const approvals = useAiApprovalsStore()
+    const events = useEventsStore()
+    events.connect()
+    const send = (type: string, data: unknown) =>
+      FakeEventSource.latest?.onmessage?.({
+        data: JSON.stringify({ type, timestamp: '2026-10-09T12:00:00Z', data }),
+      } as MessageEvent<string>)
+    const pedido = (callId: string, userId: number) => ({
+      callId,
+      userId,
+      tool: 'docker_container_action',
+      summary: 'Parar o container web (central)',
+      risk: 'high',
+      reason: 'O serviço fica fora até alguém iniciá-lo de novo',
+      createdAt: '2026-10-09T12:00:00Z',
+    })
+
+    send('ai:approval_pending', pedido('c1', 7))
+    send('ai:approval_pending', pedido('c2', 8))
+    send('ai:approval_pending', pedido('c1', 7))
+    expect(approvals.mine.map((item) => item.callId)).toEqual(['c1'])
+
+    send('ai:approval_resolved', { callId: 'c1', userId: 7, decision: 'confirmed' })
+    expect(approvals.mine).toEqual([])
+    expect(apiGet).not.toHaveBeenCalled()
+    events.disconnect()
   })
 })

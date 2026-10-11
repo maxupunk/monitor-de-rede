@@ -22,6 +22,8 @@
 //! - [`ask`]: a IA pergunta ao usuário antes de prosseguir.
 //! - [`plugins`]: plugins de dispositivo — acessar o equipamento (SSH/HTTP),
 //!   criar, testar e executar scripts. Todo acesso passa pelo usuário.
+//! - [`risk`]: o risco de cada chamada, que decide se o modo automático roda
+//!   ou pergunta.
 
 mod actions;
 mod alert_rules;
@@ -39,6 +41,7 @@ mod logs;
 mod lookup;
 mod platform;
 mod plugins;
+pub mod risk;
 mod series;
 mod timeline;
 
@@ -49,13 +52,14 @@ use serde_json::{json, Value};
 pub use args::ToolArgs;
 pub use lookup::device_matches;
 pub use plugins::target_device_id;
+pub use risk::{AiToolRisk, Approval, RiskAssessment};
 
 use crate::{
     dtos::ai::AiChart,
     services::{
         ai::{
             drivers::traits::{AiTool, AiToolFunction},
-            settings::{AiContainerActionMode, AiSettings},
+            settings::{AiAutomationMode, AiSettings},
         },
         audit::AuditActor,
         shared::errors::{AppError, AppResult},
@@ -69,15 +73,15 @@ pub enum ToolKind {
     Passive,
     /// Envia pacotes (ping, traceroute, scan). Depende de `allow_active_tools`.
     Active,
-    /// Muda o estado do sistema (silenciar alerta, criar monitor). Depende de
-    /// `allow_actions` e **sempre** passa pela confirmação do usuário.
+    /// Muda o estado do sistema (silenciar alerta, criar monitor). Segue o
+    /// modo das ações: desligado, com confirmação ou automático por risco.
     Action,
     /// Conversa com o usuário (perguntar antes de prosseguir). Só no chat —
     /// nas rotinas automáticas não há ninguém para responder.
     Interactive,
     /// Inicia, para ou reinicia container. Tem configuração própria
-    /// ([`AiContainerActionMode`]): desligado, com confirmação (padrão) ou
-    /// automático.
+    /// ([`AiAutomationMode`]): desligado, com confirmação (padrão) ou
+    /// automático por risco.
     ContainerAction,
     /// Acessa um equipamento (SSH/HTTP/Telnet) ou grava um plugin. **Sempre**
     /// pede confirmação, a cada chamada — exceto com o modo "Aceitar
@@ -266,13 +270,14 @@ pub const LOAD_TOOLS: &str = "load_tools";
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ToolPolicy {
     pub allow_active: bool,
-    pub allow_actions: bool,
+    /// Ações (alertas, manutenção, monitores, regras).
+    pub actions: AiAutomationMode,
     /// Pede confirmação também antes dos testes ativos.
     pub confirm_active: bool,
     /// Há alguém do outro lado para responder (chat, não rotina automática).
     pub interactive: bool,
     /// Ações em container: desligadas, com confirmação ou automáticas.
-    pub container_actions: AiContainerActionMode,
+    pub container_actions: AiAutomationMode,
 }
 
 impl ToolPolicy {
@@ -281,10 +286,10 @@ impl ToolPolicy {
     pub const fn passive() -> Self {
         Self {
             allow_active: false,
-            allow_actions: false,
+            actions: AiAutomationMode::Off,
             confirm_active: false,
             interactive: false,
-            container_actions: AiContainerActionMode::Off,
+            container_actions: AiAutomationMode::Off,
         }
     }
 
@@ -292,39 +297,82 @@ impl ToolPolicy {
     pub const fn from_settings(settings: &AiSettings) -> Self {
         Self {
             allow_active: settings.allow_active_tools,
-            allow_actions: settings.allow_actions,
+            actions: settings.action_mode,
             confirm_active: settings.require_tool_confirmation,
             interactive: true,
             container_actions: settings.container_actions,
         }
     }
 
+    /// O modo que vale para o tipo de ferramenta.
     #[must_use]
-    pub const fn allows(self, kind: ToolKind) -> bool {
+    pub const fn mode(self, kind: ToolKind) -> AiAutomationMode {
         match kind {
-            ToolKind::Passive => true,
-            ToolKind::Active => self.allow_active,
-            ToolKind::Action => self.allow_actions,
-            ToolKind::Interactive => self.interactive,
-            ToolKind::ContainerAction => {
-                !matches!(self.container_actions, AiContainerActionMode::Off)
+            ToolKind::Passive | ToolKind::Interactive => AiAutomationMode::Auto,
+            ToolKind::Active => {
+                if !self.allow_active {
+                    AiAutomationMode::Off
+                } else if self.confirm_active {
+                    AiAutomationMode::Confirm
+                } else {
+                    AiAutomationMode::Auto
+                }
             }
-            // Só no chat: rotina automática não tem quem aprove cada acesso.
-            ToolKind::DeviceAccess => self.interactive && self.allow_active,
+            ToolKind::Action => self.actions,
+            ToolKind::ContainerAction => self.container_actions,
+            // ADR 012: todo acesso a equipamento é confirmado; o único atalho
+            // é o "Aceitar automaticamente" da conversa, decidido no agente.
+            ToolKind::DeviceAccess => AiAutomationMode::Confirm,
         }
     }
 
     #[must_use]
-    pub const fn needs_confirmation(self, kind: ToolKind) -> bool {
+    pub const fn allows(self, kind: ToolKind) -> bool {
         match kind {
-            ToolKind::Passive | ToolKind::Interactive => false,
-            ToolKind::Active => self.confirm_active,
-            ToolKind::Action | ToolKind::DeviceAccess => true,
-            ToolKind::ContainerAction => {
-                !matches!(self.container_actions, AiContainerActionMode::Auto)
-            }
+            ToolKind::Interactive => self.interactive,
+            // Só no chat: rotina automática não tem quem aprove cada acesso.
+            ToolKind::DeviceAccess => self.interactive && self.allow_active,
+            _ => !matches!(self.mode(kind), AiAutomationMode::Off),
         }
     }
+
+    /// Pede confirmação sempre, qualquer que seja o risco da chamada.
+    #[must_use]
+    pub const fn needs_confirmation(self, kind: ToolKind) -> bool {
+        matches!(self.mode(kind), AiAutomationMode::Confirm)
+    }
+
+    /// Roda ou pergunta: no modo automático, só o risco alto pergunta.
+    #[must_use]
+    pub const fn approval(self, kind: ToolKind, risk: AiToolRisk) -> Approval {
+        match (self.mode(kind), risk) {
+            (AiAutomationMode::Auto, AiToolRisk::Low | AiToolRisk::Medium) => Approval::Run,
+            _ => Approval::Ask,
+        }
+    }
+}
+
+/// Licença para executar sem confirmação. Só [`ToolRegistry::assess`] a
+/// cria, e ela vale para a ferramenta avaliada: não há como chegar à
+/// execução sem passar pela política e pelo risco da chamada.
+#[derive(Debug)]
+pub struct Clearance {
+    tool: &'static str,
+}
+
+/// O que a política decidiu sobre uma chamada.
+#[derive(Debug)]
+pub enum Verdict {
+    Run(Clearance),
+    Ask,
+}
+
+/// O risco de uma chamada e o veredito da política.
+#[derive(Debug)]
+pub struct Assessment {
+    pub kind: ToolKind,
+    pub risk: RiskAssessment,
+    pub verdict: Verdict,
 }
 
 /// Resultado de uma ferramenta.
@@ -403,6 +451,13 @@ pub trait AiToolHandler: Send + Sync {
     }
 
     async fn execute(&self, ctx: &AppContext, args: &ToolArgs) -> AppResult<ToolOutput>;
+
+    /// O risco desta chamada, com o motivo. Nunca falha: sem como avaliar
+    /// melhor (alvo não encontrado, por exemplo), vale o padrão do tipo — e a
+    /// execução recusa o argumento inválido do mesmo jeito.
+    async fn risk(&self, _ctx: &AppContext, _args: &ToolArgs) -> RiskAssessment {
+        RiskAssessment::for_kind(self.kind())
+    }
 
     /// Host ou IP que o teste ativo vai alcançar; `None` quando a ferramenta
     /// não gera tráfego para um alvo. O agente confere a origem dele antes de
@@ -628,11 +683,52 @@ impl ToolRegistry {
             .network_target(&ToolArgs::parse(arguments_json))
     }
 
-    /// Se a chamada precisa passar pelo usuário antes de rodar.
+    /// Se a ferramenta pede confirmação sempre, qualquer que seja o risco.
     #[must_use]
     pub fn needs_confirmation(&self, name: &str) -> bool {
         self.handler(name)
             .is_ok_and(|handler| self.policy.needs_confirmation(handler.kind()))
+    }
+
+    /// Avalia o risco da chamada e decide se ela roda sem confirmação.
+    ///
+    /// # Errors
+    ///
+    /// Ferramenta fora do registro.
+    pub async fn assess(
+        &self,
+        ctx: &AppContext,
+        name: &str,
+        args: &ToolArgs,
+    ) -> AppResult<Assessment> {
+        let handler = self.handler(name)?;
+        let kind = handler.kind();
+        let risk = handler.risk(ctx, args).await;
+        let verdict = match self.policy.approval(kind, risk.level) {
+            Approval::Run => Verdict::Run(Clearance {
+                tool: handler.name(),
+            }),
+            Approval::Ask => Verdict::Ask,
+        };
+        Ok(Assessment {
+            kind,
+            risk,
+            verdict,
+        })
+    }
+
+    /// Executa uma chamada liberada por [`Self::assess`].
+    ///
+    /// # Errors
+    ///
+    /// Argumento inválido ou falha da execução.
+    pub async fn execute_cleared(
+        &self,
+        ctx: &AppContext,
+        clearance: Clearance,
+        args: ToolArgs,
+    ) -> AppResult<ToolOutput> {
+        self.handler(clearance.tool)?.execute(ctx, &args).await
     }
 
     /// Texto mostrado ao usuário no pedido de confirmação.
@@ -701,13 +797,12 @@ impl ToolRegistry {
         name: &str,
         args: ToolArgs,
     ) -> AppResult<ToolOutput> {
-        let handler = self.handler(name)?;
-        if self.policy.needs_confirmation(handler.kind()) {
-            return Err(AppError::validation(format!(
+        match self.assess(ctx, name, &args).await?.verdict {
+            Verdict::Run(clearance) => self.execute_cleared(ctx, clearance, args).await,
+            Verdict::Ask => Err(AppError::validation(format!(
                 "A ferramenta {name} exige confirmação do usuário"
-            )));
+            ))),
         }
-        handler.execute(ctx, &args).await
     }
 
     /// Executa o que o usuário confirmou no chat, em nome dele.
@@ -778,10 +873,10 @@ mod tests {
 
         let todas = ToolRegistry::new(ToolPolicy {
             allow_active: true,
-            allow_actions: true,
+            actions: AiAutomationMode::Confirm,
             confirm_active: false,
             interactive: true,
-            container_actions: AiContainerActionMode::Confirm,
+            container_actions: AiAutomationMode::Confirm,
         });
         assert_eq!(todas.definitions().len(), all_handlers().len());
     }
@@ -790,10 +885,10 @@ mod tests {
     fn catalogo_sob_demanda_manda_o_nucleo_e_so_o_que_foi_carregado() {
         let registro = ToolRegistry::new(ToolPolicy {
             allow_active: true,
-            allow_actions: false,
+            actions: AiAutomationMode::Off,
             confirm_active: false,
             interactive: true,
-            container_actions: AiContainerActionMode::Confirm,
+            container_actions: AiAutomationMode::Confirm,
         });
         let nomes = |carregados: &ToolGroups| -> Vec<String> {
             registro
@@ -867,13 +962,13 @@ mod tests {
             "o padrão é pedir permissão"
         );
 
-        let auto = modo(AiContainerActionMode::Auto);
+        let auto = modo(AiAutomationMode::Auto);
         assert!(!auto.needs_confirmation("docker_container_action"));
         assert!(auto
             .tool_names(ToolGroup::Docker)
             .contains(&"docker_container_action"));
 
-        let desligado = modo(AiContainerActionMode::Off);
+        let desligado = modo(AiAutomationMode::Off);
         assert!(!desligado
             .tool_names(ToolGroup::Docker)
             .contains(&"docker_container_action"));
@@ -891,10 +986,10 @@ mod tests {
     fn acoes_sempre_pedem_confirmacao_e_testes_ativos_so_quando_configurado() {
         let sem = ToolPolicy {
             allow_active: true,
-            allow_actions: true,
+            actions: AiAutomationMode::Confirm,
             confirm_active: false,
             interactive: true,
-            container_actions: AiContainerActionMode::Confirm,
+            container_actions: AiAutomationMode::Confirm,
         };
         assert!(!sem.needs_confirmation(ToolKind::Passive));
         assert!(!sem.needs_confirmation(ToolKind::Active));
@@ -912,5 +1007,53 @@ mod tests {
         assert!(registro.needs_confirmation("ping_host"));
         assert!(!registro.needs_confirmation("get_alerts"));
         assert!(!registro.needs_confirmation("inexistente"));
+    }
+
+    #[test]
+    fn automatico_roda_risco_baixo_e_medio_e_pergunta_o_alto() {
+        let politica = ToolPolicy {
+            actions: AiAutomationMode::Auto,
+            ..ToolPolicy::from_settings(&AiSettings::default())
+        };
+        assert!(!politica.needs_confirmation(ToolKind::Action));
+        assert_eq!(
+            politica.approval(ToolKind::Action, AiToolRisk::Medium),
+            Approval::Run
+        );
+        assert_eq!(
+            politica.approval(ToolKind::Action, AiToolRisk::High),
+            Approval::Ask
+        );
+
+        let pedir = ToolPolicy {
+            actions: AiAutomationMode::Confirm,
+            ..politica
+        };
+        assert_eq!(
+            pedir.approval(ToolKind::Action, AiToolRisk::Low),
+            Approval::Ask,
+            "pedir permissão pergunta mesmo o risco baixo"
+        );
+        assert_eq!(
+            politica.approval(ToolKind::Passive, AiToolRisk::Low),
+            Approval::Run
+        );
+    }
+
+    #[test]
+    fn acesso_a_equipamento_nunca_e_liberado_pelo_risco() {
+        let politica = ToolPolicy {
+            allow_active: true,
+            confirm_active: false,
+            actions: AiAutomationMode::Auto,
+            interactive: true,
+            container_actions: AiAutomationMode::Auto,
+        };
+        assert!(politica.needs_confirmation(ToolKind::DeviceAccess));
+        assert_eq!(
+            politica.approval(ToolKind::DeviceAccess, AiToolRisk::Low),
+            Approval::Ask,
+            "ADR 012: só o aceitar automaticamente da conversa dispensa"
+        );
     }
 }

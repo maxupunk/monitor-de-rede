@@ -4,22 +4,17 @@
 
 use axum::http::HeaderMap;
 use loco_rs::prelude::*;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, Set,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::{
     controllers::auth_guard::AUTHENTICATED_USER_HEADER,
     models::{_entities::push_subscriptions, users},
     services::{
         shared::errors::{AppError, AppResult},
-        webpush::{
-            crypto::SubscriptionKeys, get_or_create_vapid_keys, get_public_key, send_push,
-            PushOutcome,
-        },
+        webpush::{deliver, get_public_key, Audience},
     },
 };
 
@@ -186,25 +181,6 @@ async fn delete_subscription(
 /// `POST /api/push/test` — Dispara uma notificação Web Push de teste para os dispositivos do usuário.
 async fn test_push(State(ctx): State<AppContext>, headers: HeaderMap) -> AppResult<Response> {
     let user_id = get_current_user_id(&ctx, &headers).await;
-    let vapid = get_or_create_vapid_keys(&ctx.db).await?;
-
-    // Busca subscrições do usuário ou todas se for teste global
-    let mut query =
-        push_subscriptions::Entity::find().order_by_desc(push_subscriptions::Column::Id);
-    if let Some(uid) = user_id {
-        query = query.filter(push_subscriptions::Column::UserId.eq(uid));
-    }
-    let subs = query.all(&ctx.db).await?;
-
-    if subs.is_empty() {
-        return Ok(format::json(TestPushResponse {
-            success: false,
-            sent: 0,
-            expired_pruned: 0,
-            message: "Nenhum dispositivo inscrito para receber notificações Web Push. Ative as notificações no navegador primeiro.".to_string(),
-        })?);
-    }
-
     let payload = json!({
         "title": "🔔 Teste de Notificação Web Push",
         "body": "Sucesso! Seu dispositivo está configurado para receber alertas em segundo plano do NetMonitor.",
@@ -216,37 +192,19 @@ async fn test_push(State(ctx): State<AppContext>, headers: HeaderMap) -> AppResu
             "timestamp": chrono::Utc::now().to_rfc3339()
         }
     });
+    // Sem usuário identificado, o teste vai a todas as inscrições.
+    let audience = user_id.map_or(Audience::Everyone, Audience::User);
+    let delivery = deliver(&ctx.db, audience, &payload).await?;
 
-    let mut sent = 0;
-    let mut expired = Vec::new();
-
-    for sub in &subs {
-        let keys = SubscriptionKeys {
-            p256dh: sub.p256dh.clone(),
-            auth: sub.auth.clone(),
-        };
-
-        match send_push(&sub.endpoint, &keys, &vapid, &payload).await {
-            Ok(PushOutcome::Success) => {
-                sent += 1;
-            }
-            Ok(PushOutcome::Expired) => {
-                expired.push(sub.id);
-            }
-            Err(e) => {
-                warn!(subscription_id = sub.id, error = %e, "Falha ao enviar notificação de teste Web Push");
-            }
-        }
+    if delivery.subscriptions == 0 {
+        return Ok(format::json(TestPushResponse {
+            success: false,
+            sent: 0,
+            expired_pruned: 0,
+            message: "Nenhum dispositivo inscrito para receber notificações Web Push. Ative as notificações no navegador primeiro.".to_string(),
+        })?);
     }
-
-    // Limpa subscrições expiradas
-    let expired_count = expired.len() as u64;
-    if !expired.is_empty() {
-        let _ = push_subscriptions::Entity::delete_many()
-            .filter(push_subscriptions::Column::Id.is_in(expired))
-            .exec(&ctx.db)
-            .await;
-    }
+    let (sent, expired_count) = (delivery.sent, delivery.expired_pruned);
 
     Ok(format::json(TestPushResponse {
         success: sent > 0,

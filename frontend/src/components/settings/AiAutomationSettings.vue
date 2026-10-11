@@ -9,21 +9,15 @@
     />
 
     <!-- Ações: tudo que muda algo no sistema -->
-    <div class="font-weight-bold mb-1">Ações</div>
-    <div class="text-body-2 mb-2">
+    <AiModeToggle
+      v-model="actionMode"
+      title="Ações: alertas, manutenção, monitores e regras de alerta"
+      :options="ACTION_OPTIONS"
+      class="mb-5"
+    >
       Ações mudam algo no sistema, ao contrário dos testes. Cada uma aparece no chat e fica
       registrada na auditoria em seu nome.
-    </div>
-    <v-checkbox
-      v-model="allowActions"
-      color="primary"
-      density="compact"
-      hide-details
-      label="Alertas, manutenção e monitores: a IA pode propor reconhecer ou silenciar alerta, abrir janela de manutenção e criar monitor"
-    />
-    <div class="text-body-2 ms-10 mb-4">
-      Essas ações sempre pedem o seu clique em Confirmar; nada é alterado sem ele.
-    </div>
+    </AiModeToggle>
 
     <AiModeToggle
       v-model="containerActions"
@@ -114,13 +108,14 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { AiContainerActionMode } from '@/bindings/AiContainerActionMode'
+import type { AiAutomationMode } from '@/bindings/AiAutomationMode'
 import type { AiDigestSchedule } from '@/bindings/AiDigestSchedule'
 import type { AiIncidentSeverity } from '@/bindings/AiIncidentSeverity'
 import type { AiProactiveSettings } from '@/bindings/AiProactiveSettings'
 import { formatHourOfDay } from '@/utils/formatters'
 import AiModeToggle from './ai/AiModeToggle.vue'
 import {
+  ACTION_OPTIONS,
   ACTIVE_TOOLS_OPTIONS,
   CONTAINER_ACTION_OPTIONS,
   activeToolsFlags,
@@ -132,8 +127,8 @@ const allowActiveTools = defineModel<boolean>('allowActiveTools', { required: tr
 const requireToolConfirmation = defineModel<boolean>('requireToolConfirmation', {
   required: true,
 })
-const allowActions = defineModel<boolean>('allowActions', { required: true })
-const containerActions = defineModel<AiContainerActionMode>('containerActions', {
+const actionMode = defineModel<AiAutomationMode>('actionMode', { required: true })
+const containerActions = defineModel<AiAutomationMode>('containerActions', {
   required: true,
 })
 const proactive = defineModel<AiProactiveSettings>('proactive', { required: true })

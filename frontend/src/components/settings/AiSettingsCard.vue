@@ -76,7 +76,7 @@
         <AiAutomationSettings
           v-model:allow-active-tools="form.allowActiveTools"
           v-model:require-tool-confirmation="form.requireToolConfirmation"
-          v-model:allow-actions="form.allowActions"
+          v-model:action-mode="form.actionMode"
           v-model:container-actions="form.containerActions"
           v-model:proactive="form.proactive"
         />

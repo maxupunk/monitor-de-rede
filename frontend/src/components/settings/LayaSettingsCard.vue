@@ -420,13 +420,18 @@ import { confirm } from '@/composables/useConfirm'
 const SAMPLE_QUESTION =
   'Por que o link da filial ficou lento ontem à noite? Mostra um gráfico da latência.'
 
-type FeatureSwitch = 'chatTools' | 'deviceIdentity' | 'interfaces' | 'logEvents'
+type FeatureSwitch = 'chatTools' | 'actionReview' | 'deviceIdentity' | 'interfaces' | 'logEvents'
 
 const FEATURE_SWITCHES: { key: FeatureSwitch; label: string; hint: string }[] = [
   {
     key: 'chatTools',
     label: 'Ferramentas do chat',
     hint: 'Escolhe o que a IA recebe a cada pergunta.',
+  },
+  {
+    key: 'actionReview',
+    label: 'Revisar ações automáticas',
+    hint: 'No modo automático, manda para a sua confirmação a ação que parecer perigosa no contexto da conversa. Só deixa a IA mais cautelosa.',
   },
   {
     key: 'deviceIdentity',

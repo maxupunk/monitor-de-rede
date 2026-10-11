@@ -32,18 +32,18 @@ use serial_test::serial;
 
 const LEITURA: ToolPolicy = ToolPolicy {
     allow_active: false,
-    allow_actions: false,
+    actions: backend::services::ai::settings::AiAutomationMode::Off,
     confirm_active: false,
     interactive: false,
-    container_actions: backend::services::ai::settings::AiContainerActionMode::Off,
+    container_actions: backend::services::ai::settings::AiAutomationMode::Off,
 };
 
 const COM_ACOES: ToolPolicy = ToolPolicy {
     allow_active: false,
-    allow_actions: true,
+    actions: backend::services::ai::settings::AiAutomationMode::Confirm,
     confirm_active: false,
     interactive: false,
-    container_actions: backend::services::ai::settings::AiContainerActionMode::Off,
+    container_actions: backend::services::ai::settings::AiAutomationMode::Off,
 };
 
 async fn aparelho(ctx: &AppContext) -> devices::Model {
@@ -356,7 +356,7 @@ async fn confirmacao_cria_janela_e_monitor_em_nome_do_usuario() {
             &ctx.db,
             AiSettings {
                 enabled: true,
-                allow_actions: true,
+                action_mode: settings::AiAutomationMode::Confirm,
                 ..AiSettings::default()
             },
         )

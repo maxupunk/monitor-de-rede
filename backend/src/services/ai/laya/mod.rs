@@ -8,6 +8,7 @@
 //! É opcional e nunca obrigatório: desligado ou fora do ar, o chat segue com
 //! as heurísticas de sempre.
 
+pub mod action_review;
 pub mod catalog;
 pub mod client;
 pub mod config;

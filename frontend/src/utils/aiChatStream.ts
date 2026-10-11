@@ -5,6 +5,7 @@
 import type { AiChart } from '@/bindings/AiChart'
 import type { ContextHint } from '@/bindings/ContextHint'
 import { describeMention, type AiMention } from './aiMentions'
+import { isAiToolRisk, type AiToolRisk } from './aiRisk'
 
 export type AiToolStatus = 'running' | 'done' | 'error' | 'awaiting' | 'cancelled'
 
@@ -20,6 +21,12 @@ export interface AiToolCallState {
   status: AiToolStatus
   /** Acesso a equipamento liberado pelo modo "Aceitar automaticamente". */
   autoApproved?: boolean
+  /**
+   * Risco que o backend viu: no pedido de confirmação, por que pergunta; numa
+   * ação que o modo automático rodou sozinho, por que não perguntou.
+   */
+  risk?: AiToolRisk
+  reason?: string
 }
 
 export interface AiUsageInfo {
@@ -77,6 +84,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+/** Risco e motivo do evento, quando vierem. */
+function riskFrom(event: Record<string, unknown>): Pick<AiToolCallState, 'risk' | 'reason'> {
+  if (!isAiToolRisk(event.risk)) return {}
+  return {
+    risk: event.risk,
+    ...(typeof event.reason === 'string' && event.reason ? { reason: event.reason } : {}),
+  }
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   return isRecord(value) ? value : {}
 }
@@ -132,6 +148,7 @@ export function applyChatEvent(message: AiDisplayMessage, event: unknown): void 
         arguments: asRecord(event.arguments),
         status: 'running',
         ...(event.autoApproved === true ? { autoApproved: true } : {}),
+        ...riskFrom(event),
       })
       break
     case 'toolResult': {
@@ -150,6 +167,7 @@ export function applyChatEvent(message: AiDisplayMessage, event: unknown): void 
         arguments: asRecord(event.arguments),
         summary: typeof event.summary === 'string' ? event.summary : null,
         status: 'awaiting',
+        ...riskFrom(event),
       })
       break
     case 'usage':

@@ -42,14 +42,14 @@
             </template>
             <v-card rounded="lg" class="pa-4">
               <div class="text-title-small font-weight-bold mb-2">O que o assistente faz</div>
-              <div v-if="aiStore.settings?.allowActions" class="d-flex flex-wrap ga-1 mb-3">
+              <div v-if="actionsChip" class="d-flex flex-wrap ga-1 mb-3">
                 <v-chip
                   size="small"
                   color="warning"
                   variant="tonal"
-                  prepend-icon="mdi-hand-back-right-outline"
+                  :prepend-icon="actionsChip.icon"
                 >
-                  Ações com confirmação
+                  {{ actionsChip.label }}
                 </v-chip>
               </div>
               <ul class="ai-page__capabilities text-body-medium">
@@ -109,6 +109,19 @@ const thread = ref<InstanceType<typeof AiChatThread> | null>(null)
 const historyOpen = ref(false)
 
 const wide = computed(() => display.mdAndUp.value)
+const actionsChip = computed(() => {
+  switch (aiStore.settings?.actionMode) {
+    case 'confirm':
+      return { label: 'Ações com confirmação', icon: 'mdi-hand-back-right-outline' }
+    case 'auto':
+      return {
+        label: 'Ações automáticas (arriscadas pedem confirmação)',
+        icon: 'mdi-robot-outline',
+      }
+    default:
+      return null
+  }
+})
 const { placeholder } = useAiChatShell(thread, { focusOnMount: true })
 </script>
 

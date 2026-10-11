@@ -203,9 +203,10 @@ async fn execute_tool(
     let actor = AuditActor::from_headers(&headers, &ctx.db)
         .await
         .unwrap_or_default();
-    let output = confirmation::execute_confirmed(
+    let output = confirmation::confirm_in_chat(
         &ctx,
         &settings,
+        input.call_id.as_deref(),
         &input.name,
         input.arguments,
         actor,
@@ -216,6 +217,37 @@ async fn execute_tool(
         result: output.data,
         chart: output.chart,
     })?)
+}
+
+/// `POST /api/ai/approvals/{call_id}/confirm` — confirma um pedido da IA
+/// fora do chat (o aviso de outra tela), executando a proposta guardada.
+async fn confirm_approval(
+    State(ctx): State<AppContext>,
+    Path(call_id): Path<String>,
+    headers: HeaderMap,
+) -> AppResult<Response> {
+    let settings = settings::load(&ctx.db).await?;
+    let actor = AuditActor::from_headers(&headers, &ctx.db)
+        .await
+        .unwrap_or_default();
+    let output = confirmation::confirm_pending(&ctx, &settings, &call_id, actor).await?;
+    Ok(format::json(ExecuteToolResponse {
+        result: output.data,
+        chart: output.chart,
+    })?)
+}
+
+/// `POST /api/ai/approvals/{call_id}/dismiss` — o usuário cancelou o pedido.
+async fn dismiss_approval(
+    State(ctx): State<AppContext>,
+    Path(call_id): Path<String>,
+    headers: HeaderMap,
+) -> AppResult<Response> {
+    let actor = AuditActor::from_headers(&headers, &ctx.db)
+        .await
+        .unwrap_or_default();
+    confirmation::dismiss(&ctx, &actor, &call_id);
+    Ok(format::empty()?)
 }
 
 /// `GET /api/ai/digest/latest` — último resumo da rede gerado pela IA (ou `null`).
@@ -439,6 +471,8 @@ pub fn routes() -> Routes {
         .add("/test-connection", post(test_connection))
         .add("/chat/stream", post(chat_stream))
         .add("/tools/execute", post(execute_tool))
+        .add("/approvals/{call_id}/confirm", post(confirm_approval))
+        .add("/approvals/{call_id}/dismiss", post(dismiss_approval))
         .add("/digest/latest", get(latest_digest))
         .add("/mentions", get(search_mentions))
         .add("/digest/run", post(run_digest))

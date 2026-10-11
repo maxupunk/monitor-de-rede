@@ -24,6 +24,8 @@ export function installFakeAiApi() {
   let nextId = 1
   let clock = 0
   const toolResponses: Array<() => unknown> = []
+  /** Pedidos de aprovação cancelados (`/ai/approvals/{id}/dismiss`). */
+  const dismissed: string[] = []
 
   const summary = (item: StoredConversation): AiConversationSummary => ({
     id: item.id,
@@ -57,6 +59,11 @@ export function installFakeAiApi() {
       if (!next) throw new Error('execução não programada no teste')
       return next()
     }
+    const dismiss = /^\/ai\/approvals\/([^/]+)\/dismiss$/.exec(path)
+    if (dismiss) {
+      dismissed.push(decodeURIComponent(dismiss[1]))
+      return undefined
+    }
     const input = body as ConversationBody
     const created = { id: nextId++, ...input, updatedAt: touch() }
     conversations.set(created.id, created)
@@ -77,6 +84,7 @@ export function installFakeAiApi() {
 
   return {
     conversations,
+    dismissed,
     /** Próxima resposta de `/ai/tools/execute` (valor ou exceção). */
     onToolExecute(respond: () => unknown) {
       toolResponses.push(respond)

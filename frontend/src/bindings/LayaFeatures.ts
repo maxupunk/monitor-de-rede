@@ -20,4 +20,9 @@ interfaces: boolean,
 /**
  * Classificar cada padrão novo de log (falha de login, link, reboot…).
  */
-logEvents: boolean, incidentTriage: LayaTriageMode, };
+logEvents: boolean, incidentTriage: LayaTriageMode, 
+/**
+ * Revisar as ações que o modo automático rodaria sozinho: o que ele achar
+ * perigoso no contexto volta a pedir confirmação. Só sobe o risco.
+ */
+actionReview: boolean, };

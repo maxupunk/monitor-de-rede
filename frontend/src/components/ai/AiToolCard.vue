@@ -38,6 +38,16 @@
           Automático
         </v-chip>
         <v-chip
+          v-else-if="autoRunRisk"
+          size="x-small"
+          :color="autoRunRisk.color"
+          variant="flat"
+          :title="autoRunTitle"
+        >
+          <v-icon start size="12">mdi-robot-outline</v-icon>
+          Automático · {{ autoRunRisk.label.toLowerCase() }}
+        </v-chip>
+        <v-chip
           v-if="tool.status !== 'done'"
           size="x-small"
           :color="status.color"
@@ -68,6 +78,16 @@
           mdi-hand-back-right-outline
         </v-icon>
         <span class="summary-text">{{ tool.summary }}</span>
+      </div>
+      <div
+        v-if="askRisk && tool.status === 'awaiting'"
+        class="d-flex align-start ga-2 mb-2 text-body-small"
+      >
+        <v-chip size="x-small" :color="askRisk.color" variant="flat" class="flex-shrink-0">
+          <v-icon start size="12">{{ askRisk.icon }}</v-icon>
+          {{ askRisk.label }}
+        </v-chip>
+        <span v-if="tool.reason">{{ tool.reason }}</span>
       </div>
       <v-alert
         v-if="deviceAccess && tool.status === 'awaiting'"
@@ -138,6 +158,7 @@
 import { computed, ref } from 'vue'
 import { useAiStore, type AiToolCallState } from '@/stores/ai'
 import type { AiToolStatus } from '@/utils/aiChatStream'
+import { aiRiskPresentation } from '@/utils/aiRisk'
 import AiToolChart from './AiToolChart.vue'
 import { aiToolMeta, formatToolArgs, isActiveTestTool, isDeviceAccessTool } from './aiToolMeta'
 
@@ -158,6 +179,23 @@ const deviceAccess = computed(() => isDeviceAccessTool(props.tool.name))
 const activeTest = computed(() => isActiveTestTool(props.tool.name))
 /** O backend escreve "ALTERA O EQUIPAMENTO" no resumo quando o efeito é escrita. */
 const writes = computed(() => (props.tool.summary ?? '').includes('ALTERA O EQUIPAMENTO'))
+
+/** Por que a IA pergunta (risco e motivo vindos do backend). */
+const askRisk = computed(() => (props.tool.risk ? aiRiskPresentation(props.tool.risk) : null))
+
+/**
+ * Ação que o modo automático rodou sem perguntar. Teste de rede de risco
+ * baixo não ganha selo: seria ruído em todo ping.
+ */
+const autoRunRisk = computed(() => {
+  const { risk, summary } = props.tool
+  if (!risk || summary) return null
+  if (risk === 'low' && meta.value.kind !== 'action') return null
+  return aiRiskPresentation(risk)
+})
+const autoRunTitle = computed(() =>
+  ['Executado sem confirmação pelo modo automático', props.tool.reason].filter(Boolean).join(': ')
+)
 
 interface StatusPresentation {
   label: string

@@ -10,7 +10,7 @@ use crate::{
     models::{alert_events, alert_rules, devices, monitors},
     services::ai::{
         mentions,
-        settings::{AiContainerActionMode, AiSettings},
+        settings::{AiAutomationMode, AiSettings},
     },
 };
 
@@ -42,18 +42,28 @@ Resultados de lista vêm como tabela: {columns, rows}.";
 const ACTIVE_TOOLS: &str =
     "8. Testes ativos (ping, traceroute, portas, DNS, playbooks) dão o estado de agora; nunca invente o alvo.";
 
-const ACTIONS: &str =
-    "9. Ações (alerta, manutenção, monitor, regras) passam pela confirmação do usuário: proponha só quando resolverem o pedido.";
+/// Regra das ações (alerta, manutenção, monitor, regras), conforme o modo.
+const fn actions_rule(mode: AiAutomationMode) -> Option<&'static str> {
+    match mode {
+        AiAutomationMode::Off => None,
+        AiAutomationMode::Confirm => Some(
+            "9. Ações (alerta, manutenção, monitor, regras) passam pela confirmação do usuário: proponha só quando resolverem o pedido.",
+        ),
+        AiAutomationMode::Auto => Some(
+            "9. Ações (alerta, manutenção, monitor, regras): as de risco baixo rodam na hora; as arriscadas voltam como pedido de confirmação. Só quando resolverem o pedido; diga em uma frase o que fez ou propôs.",
+        ),
+    }
+}
 
 /// Regra das ações em container, conforme o modo configurado.
-const fn container_rule(mode: AiContainerActionMode) -> Option<&'static str> {
+const fn container_rule(mode: AiAutomationMode) -> Option<&'static str> {
     match mode {
-        AiContainerActionMode::Off => None,
-        AiContainerActionMode::Confirm => Some(
+        AiAutomationMode::Off => None,
+        AiAutomationMode::Confirm => Some(
             "10. Containers (docker_container_action) passam pela confirmação: proponha só com o container parado ou travado.",
         ),
-        AiContainerActionMode::Auto => Some(
-            "10. Containers (docker_container_action) rodam na hora: só quando pedido ou com o container parado ou travado — nunca por tentativa. Diga em uma frase o que fez.",
+        AiAutomationMode::Auto => Some(
+            "10. Containers (docker_container_action) rodam na hora, salvo parar ou mexer na central (pedem confirmação): só quando pedido ou com o container parado ou travado — nunca por tentativa. Diga em uma frase o que fez.",
         ),
     }
 }
@@ -241,8 +251,8 @@ pub fn build_system_prompt(
         prompt.push_str(ACTIVE_TOOLS);
         prompt.push('\n');
     }
-    if policy.allow_actions {
-        prompt.push_str(ACTIONS);
+    if let Some(rule) = actions_rule(policy.actions) {
+        prompt.push_str(rule);
         prompt.push('\n');
     }
     if let Some(rule) = container_rule(policy.container_actions) {
@@ -310,7 +320,8 @@ mod tests {
     fn custo_fixo_por_rodada_cabe_no_orcamento() {
         const BUDGET: u64 = 2_650;
         let settings = AiSettings {
-            allow_actions: true,
+            action_mode: AiAutomationMode::Auto,
+            container_actions: AiAutomationMode::Auto,
             ..AiSettings::default()
         };
         let policy = ToolPolicy::from_settings(&settings);
