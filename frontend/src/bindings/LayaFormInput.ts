@@ -2,6 +2,7 @@
 import type { AiLayaSettings } from "./AiLayaSettings";
 
 /**
- * Baixa o modelo do Laya no Ollaya do formulário.
+ * O formulário do Laya, para listar, baixar ou carregar modelos com o que
+ * está na tela (ainda sem gravar).
  */
-export type LayaPullInput = { laya: AiLayaSettings, };
+export type LayaFormInput = { laya: AiLayaSettings, };

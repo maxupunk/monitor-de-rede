@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import type { LayaModelSpecView } from '@/bindings/LayaModelSpecView'
-import { isLocalOllaya, memoryLabel, modelFacts, timeoutForModel } from '@/utils/ollaya'
+import type { LayaProviderView } from '@/bindings/LayaProviderView'
+import { defaultLayaSettings } from '@/stores/aiLaya'
+import {
+  formForProvider,
+  isLocalOllaya,
+  memoryLabel,
+  modelFacts,
+  providerMissing,
+  timeoutForModel,
+} from '@/utils/ollaya'
 
 describe('isLocalOllaya', () => {
   it('reconhece o Ollaya desta máquina', () => {
@@ -98,5 +107,64 @@ describe('tempo máximo ao trocar de modelo', () => {
   it('modelo fora do catálogo não mexe no tempo', () => {
     expect(timeoutForModel(1500, laya, null, 1500)).toBe(1500)
     expect(timeoutForModel(1500, null, kev4b, 1500)).toBe(2500)
+  })
+})
+
+const ollaya: LayaProviderView = {
+  id: 'ollaya',
+  label: 'Ollaya',
+  description: '',
+  protocol: 'ollaya',
+  defaultBaseUrl: 'http://ollaya:11435',
+  defaultModel: 'laya',
+  models: [],
+  requiresKey: false,
+  requiresAccount: false,
+  cloud: false,
+  managesModels: true,
+  suggestedTimeoutMs: 1500,
+}
+
+const cloudflare: LayaProviderView = {
+  id: 'cloudflare',
+  label: 'Cloudflare (Clef)',
+  description: '',
+  protocol: 'cloudflare',
+  defaultBaseUrl: 'https://api.cloudflare.com/client/v4',
+  defaultModel: 'clef-flash',
+  models: [],
+  requiresKey: true,
+  requiresAccount: true,
+  keyUrl: 'https://dash.cloudflare.com/profile/api-tokens',
+  cloud: true,
+  managesModels: false,
+  suggestedTimeoutMs: 3000,
+}
+
+describe('troca de provedor', () => {
+  const form = { ...defaultLayaSettings(), apiKey: 'segredo', accountId: 'x' }
+
+  it('leva os padrões do novo e nunca a chave nem a conta do anterior', () => {
+    const next = formForProvider(form, ollaya, laya, cloudflare, 1500)
+    expect(next.provider).toBe('cloudflare')
+    expect(next.baseUrl).toBe('https://api.cloudflare.com/client/v4')
+    expect(next.model).toBe('clef-flash')
+    expect(next.apiKey).toBeUndefined()
+    expect(next.accountId).toBeUndefined()
+    expect(next.timeoutMs).toBe(3000)
+  })
+
+  it('URL mudada pelo usuário fica (Ollaya em outra máquina, gateway próprio)', () => {
+    const proprio = { ...form, baseUrl: 'http://10.0.0.5:11435' }
+    expect(formForProvider(proprio, ollaya, laya, cloudflare, 1500).baseUrl).toBe(
+      'http://10.0.0.5:11435'
+    )
+  })
+
+  it('diz o que falta, em português', () => {
+    const vazio = { ...defaultLayaSettings(), provider: 'cloudflare' as const, model: 'clef-flash' }
+    expect(providerMissing(vazio, cloudflare)).toBe('Faltam o ID da conta e a chave de acesso')
+    expect(providerMissing({ ...vazio, accountId: 'c', apiKey: '********' }, cloudflare)).toBeNull()
+    expect(providerMissing(defaultLayaSettings(), ollaya)).toBeNull()
   })
 })

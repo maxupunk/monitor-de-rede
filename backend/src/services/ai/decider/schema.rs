@@ -78,17 +78,10 @@ impl Answer {
 #[derive(Debug, Clone, Deserialize)]
 pub struct DecideResponse {
     /// O modelo que respondeu de fato (o roteador `laya` devolve `laya:en`…).
+    #[serde(default)]
     pub model: String,
     #[serde(default)]
     pub answers: BTreeMap<String, Answer>,
-}
-
-/// Corpo de erro comum a todos os endpoints.
-#[derive(Debug, Deserialize)]
-pub struct ErrorBody {
-    pub error: String,
-    #[serde(default)]
-    pub code: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

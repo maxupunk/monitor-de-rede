@@ -3,6 +3,8 @@ import { ref } from 'vue'
 import { apiService, ApiError } from '@/services/apiService'
 import type { AiLayaSettings } from '@/bindings/AiLayaSettings'
 import type { LayaModelOption } from '@/bindings/LayaModelOption'
+import type { LayaProvider } from '@/bindings/LayaProvider'
+import type { LayaProviderView } from '@/bindings/LayaProviderView'
 import type { LayaModelSpecView } from '@/bindings/LayaModelSpecView'
 import type { LayaModelsResponse } from '@/bindings/LayaModelsResponse'
 import type { ModelPullProgress } from '@/bindings/ModelPullProgress'
@@ -38,6 +40,8 @@ export function isLayaModelState(value: unknown): value is LayaModelState {
 export function defaultLayaSettings(): AiLayaSettings {
   return {
     enabled: false,
+    provider: 'ollaya',
+    customProtocol: 'systemone',
     baseUrl: 'http://ollaya:11435',
     model: 'laya',
     minConfidence: 60,
@@ -105,16 +109,36 @@ export const useAiLayaStore = defineStore('aiLaya', () => {
     }
   }
 
-  /** Consulta pontual: ao abrir a tela, ao trocar a URL, depois de um download. */
-  async function loadModels(baseUrl: string): Promise<void> {
+  /** Os provedores de decisão que o backend oferece; lista fixa, lida uma vez. */
+  const providers = ref<LayaProviderView[]>([])
+
+  async function loadProviders(): Promise<void> {
+    if (providers.value.length) return
+    try {
+      providers.value = await apiService.get<LayaProviderView[]>('/ai/laya/providers')
+    } catch {
+      providers.value = []
+    }
+  }
+
+  function provider(id: LayaProvider): LayaProviderView | null {
+    return providers.value.find((item) => item.id === id) ?? null
+  }
+
+  /**
+   * Consulta pontual (ao abrir a tela, ao trocar provedor ou URL, depois de
+   * um download), com o formulário inteiro: a lista depende do provedor, e
+   * um Ollaya em outra máquina pode pedir a chave ainda não gravada.
+   */
+  async function loadModels(laya: AiLayaSettings): Promise<void> {
     loadingModels.value = true
     try {
-      const query = baseUrl.trim() ? `?base_url=${encodeURIComponent(baseUrl.trim())}` : ''
-      models.value = await apiService.get<LayaModelsResponse>(`/ai/laya/models${query}`)
+      models.value = await apiService.post<LayaModelsResponse>('/ai/laya/models', { laya })
     } catch (err) {
       models.value = {
         online: false,
-        errorMessage: errorMessage(err, 'Falha ao consultar o Ollaya'),
+        managesModels: laya.provider === 'ollaya',
+        errorMessage: errorMessage(err, 'Falha ao consultar o provedor'),
         installed: [],
         loaded: [],
         options: [],
@@ -215,7 +239,7 @@ export const useAiLayaStore = defineStore('aiLaya', () => {
         pullProgress.value = progress
       })
       pullProgress.value = null
-      await loadModels(laya.baseUrl)
+      await loadModels(laya)
       await test(laya, question)
       return true
     } catch (err) {
@@ -245,6 +269,9 @@ export const useAiLayaStore = defineStore('aiLaya', () => {
     saving,
     load,
     save,
+    providers,
+    loadProviders,
+    provider,
     loadingModels,
     models,
     testing,

@@ -9,6 +9,7 @@ mod ai_conversations;
 mod ai_device_plugins;
 mod ai_grep;
 mod ai_laya;
+mod ai_laya_cloud;
 mod ai_mentions;
 mod ai_proactive;
 mod ai_token_budget;

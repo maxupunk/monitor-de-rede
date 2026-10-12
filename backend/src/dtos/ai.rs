@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::services::ai::laya::config::AiLayaSettings;
+use crate::services::ai::laya::{
+    config::AiLayaSettings,
+    providers::{DecisionProtocol, LayaProvider},
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -269,11 +272,12 @@ pub struct TestLayaInput {
     pub question: Option<String>,
 }
 
-/// Baixa o modelo do Laya no Ollaya do formulário.
+/// O formulário do Laya, para listar, baixar ou carregar modelos com o que
+/// está na tela (ainda sem gravar).
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct LayaPullInput {
+pub struct LayaFormInput {
     pub laya: AiLayaSettings,
 }
 
@@ -344,8 +348,13 @@ pub struct LayaModelSpecView {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct LayaModelsResponse {
-    /// O Ollaya respondeu.
+    /// O servidor respondeu. Em nuvem não há o que listar: vale `true` e a
+    /// conexão se confere no teste (passo 3).
     pub online: bool,
+    /// O provedor baixa e carrega modelos (só o Ollaya): a tela mostra
+    /// download, memória e "carregar agora".
+    #[serde(default)]
+    pub manages_models: bool,
     #[serde(default)]
     pub error_message: Option<String>,
     /// Nomes como o Ollaya os lista (`laya:multilingual`…).
@@ -356,6 +365,40 @@ pub struct LayaModelsResponse {
     pub loaded: Vec<String>,
     /// Catálogo conhecido mais o que está instalado fora dele.
     pub options: Vec<LayaModelOption>,
+}
+
+/// Um provedor de decisões, como a tela o oferece (`laya::providers`).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct LayaProviderView {
+    pub id: LayaProvider,
+    pub label: String,
+    pub description: String,
+    /// `None` no "Outro": o operador escolhe o formato.
+    #[serde(default)]
+    #[ts(optional)]
+    pub protocol: Option<DecisionProtocol>,
+    pub default_base_url: String,
+    pub default_model: String,
+    pub models: Vec<LayaProviderModel>,
+    pub requires_key: bool,
+    pub requires_account: bool,
+    #[serde(default)]
+    #[ts(optional)]
+    pub key_url: Option<String>,
+    /// Os textos saem da rede: a tela avisa antes de ligar.
+    pub cloud: bool,
+    pub manages_models: bool,
+    pub suggested_timeout_ms: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct LayaProviderModel {
+    pub name: String,
+    pub description: String,
 }
 
 /// Quão provável o Laya acha que um grupo de ferramentas é necessário.

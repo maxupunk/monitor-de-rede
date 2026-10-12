@@ -3,6 +3,8 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use super::providers::{self, DecisionProtocol, LayaProvider, ProviderPreset};
+
 /// O serviço `ollaya` do `docker-compose.yml`, na rede interna.
 pub const DEFAULT_LAYA_BASE_URL: &str = "http://ollaya:11435";
 /// O roteador: escolhe `laya:en` ou `laya:multilingual` pela língua da pergunta.
@@ -15,13 +17,16 @@ pub const DEFAULT_LAYA_TIMEOUT_MS: u32 = 1_500;
 /// containers, e ninguém precisa copiá-la para a tela.
 pub const API_KEY_ENV: &str = "OLLAYA_API_KEY";
 
-/// A chave do Ollaya, lida no ponto de uso. Vazia = servidor sem autenticação.
-#[must_use]
-pub fn api_key() -> Option<String> {
-    std::env::var(API_KEY_ENV)
-        .ok()
-        .map(|key| key.trim().to_string())
-        .filter(|key| !key.is_empty())
+/// A chave do Ollaya do compose, lida no ponto de uso. Vazia = servidor sem
+/// autenticação.
+fn env_api_key() -> Option<String> {
+    trimmed(std::env::var(API_KEY_ENV).ok())
+}
+
+fn trimmed(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 /// Triagem da IA proativa: o Laya decide se um alerta merece resumo do LLM.
@@ -90,7 +95,20 @@ pub enum LayaFeature {
 pub struct AiLayaSettings {
     /// Chave mestra: desligado, nenhuma frente consulta o Laya.
     pub enabled: bool,
+    /// Quem responde: o Ollaya (padrão) ou um serviço na nuvem.
+    pub provider: LayaProvider,
+    /// Formato da API no provedor "Outro"; os demais têm o seu.
+    pub custom_protocol: DecisionProtocol,
     pub base_url: String,
+    /// Chave do provedor. Vai mascarada à tela (como as chaves do chat). No
+    /// Ollaya, vazia usa a `OLLAYA_API_KEY` do compose.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub api_key: Option<String>,
+    /// ID da conta (Cloudflare).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub account_id: Option<String>,
     pub model: String,
     /// 1–99: quanto maior, menos grupos entram por palpite do Laya.
     pub min_confidence: u8,
@@ -103,7 +121,11 @@ impl Default for AiLayaSettings {
     fn default() -> Self {
         Self {
             enabled: false,
+            provider: LayaProvider::Ollaya,
+            custom_protocol: DecisionProtocol::Systemone,
             base_url: DEFAULT_LAYA_BASE_URL.to_string(),
+            api_key: None,
+            account_id: None,
             model: DEFAULT_LAYA_MODEL.to_string(),
             min_confidence: DEFAULT_LAYA_MIN_CONFIDENCE,
             timeout_ms: DEFAULT_LAYA_TIMEOUT_MS,
@@ -116,18 +138,25 @@ impl AiLayaSettings {
     /// Traz valores vazios ou fora da faixa de volta para ela.
     #[must_use]
     pub fn normalized(mut self) -> Self {
+        let preset = self.preset();
         let base_url = self.base_url.trim().trim_end_matches('/');
         self.base_url = if base_url.is_empty() {
-            DEFAULT_LAYA_BASE_URL.to_string()
+            preset.default_base_url.to_string()
         } else {
             base_url.to_string()
         };
         let model = self.model.trim();
         self.model = if model.is_empty() {
-            DEFAULT_LAYA_MODEL.to_string()
+            preset.default_model.to_string()
         } else {
             model.to_string()
         };
+        // O Ollaya fala o próprio formato; o "Outro" escolhe entre os de nuvem.
+        if self.custom_protocol == DecisionProtocol::Ollaya {
+            self.custom_protocol = DecisionProtocol::Systemone;
+        }
+        self.api_key = trimmed(self.api_key);
+        self.account_id = trimmed(self.account_id);
         self.min_confidence = self.min_confidence.clamp(1, 99);
         self.timeout_ms = self.timeout_ms.clamp(200, 10_000);
         self
@@ -146,6 +175,35 @@ impl AiLayaSettings {
                 LayaFeature::IncidentTriage => features.incident_triage != LayaTriageMode::Off,
                 LayaFeature::ActionReview => features.action_review,
             }
+    }
+
+    #[must_use]
+    pub fn preset(&self) -> &'static ProviderPreset {
+        providers::preset(self.provider)
+    }
+
+    /// O formato da API de quem responde.
+    #[must_use]
+    pub fn protocol(&self) -> DecisionProtocol {
+        self.preset().protocol.unwrap_or(self.custom_protocol)
+    }
+
+    /// Baixa e carrega modelos (só o Ollaya).
+    #[must_use]
+    pub fn manages_models(&self) -> bool {
+        self.protocol() == DecisionProtocol::Ollaya
+    }
+
+    /// A chave a usar: a da tela ou, no Ollaya, a do compose.
+    #[must_use]
+    pub fn effective_api_key(&self) -> Option<String> {
+        trimmed(self.api_key.clone()).or_else(|| {
+            if self.provider == LayaProvider::Ollaya {
+                env_api_key()
+            } else {
+                None
+            }
+        })
     }
 
     /// Limiar como probabilidade (0–1).
@@ -167,13 +225,67 @@ mod tests {
             model: String::new(),
             min_confidence: 0,
             timeout_ms: 50_000,
-            features: LayaFeatures::default(),
+            api_key: Some("  ".into()),
+            ..AiLayaSettings::default()
         }
         .normalized();
+        assert_eq!(settings.api_key, None);
         assert_eq!(settings.base_url, "http://ollaya:11435");
         assert_eq!(settings.model, DEFAULT_LAYA_MODEL);
         assert_eq!(settings.min_confidence, 1);
         assert_eq!(settings.timeout_ms, 10_000);
+    }
+
+    #[test]
+    fn provedor_de_nuvem_sem_url_nem_modelo_recebe_os_do_preset() {
+        let settings = AiLayaSettings {
+            provider: LayaProvider::Cloudflare,
+            base_url: String::new(),
+            model: String::new(),
+            ..AiLayaSettings::default()
+        }
+        .normalized();
+        assert_eq!(settings.base_url, "https://api.cloudflare.com/client/v4");
+        assert_eq!(settings.model, "clef-flash");
+        assert_eq!(settings.protocol(), DecisionProtocol::Cloudflare);
+        assert!(!settings.manages_models());
+    }
+
+    #[test]
+    fn outro_usa_o_formato_escolhido_e_nunca_o_do_ollaya() {
+        let settings = AiLayaSettings {
+            provider: LayaProvider::Custom,
+            custom_protocol: DecisionProtocol::Ollaya,
+            ..AiLayaSettings::default()
+        }
+        .normalized();
+        assert_eq!(settings.protocol(), DecisionProtocol::Systemone);
+        let openai = AiLayaSettings {
+            custom_protocol: DecisionProtocol::Openai,
+            ..settings
+        };
+        assert_eq!(openai.protocol(), DecisionProtocol::Openai);
+    }
+
+    #[test]
+    fn configuracao_antiga_e_ollaya() {
+        let settings: AiLayaSettings = serde_json::from_str(r#"{"enabled":true}"#).unwrap();
+        assert_eq!(settings.provider, LayaProvider::Ollaya);
+        assert!(settings.manages_models());
+    }
+
+    #[test]
+    fn chave_da_tela_vale_antes_da_do_compose_e_so_o_ollaya_usa_o_compose() {
+        let tela = AiLayaSettings {
+            api_key: Some("da-tela".into()),
+            ..AiLayaSettings::default()
+        };
+        assert_eq!(tela.effective_api_key().as_deref(), Some("da-tela"));
+        let nuvem = AiLayaSettings {
+            provider: LayaProvider::Typesafe,
+            ..AiLayaSettings::default()
+        };
+        assert_eq!(nuvem.effective_api_key(), None);
     }
 
     #[test]

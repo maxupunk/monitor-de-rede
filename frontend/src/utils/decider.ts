@@ -1,4 +1,6 @@
+import type { AiLayaSettings } from '@/bindings/AiLayaSettings'
 import type { LayaModelLanguage } from '@/bindings/LayaModelLanguage'
+import type { LayaProviderView } from '@/bindings/LayaProviderView'
 import type { LayaModelSpecView } from '@/bindings/LayaModelSpecView'
 import { formatDecimalBytes, formatElapsedMs, formatPercent } from './formatters'
 
@@ -30,6 +32,11 @@ export function isLocalOllaya(url: string | null | undefined): boolean {
 }
 
 const MB = 1_000_000
+
+/** Quem sugere o tempo máximo por pergunta: um modelo do Ollaya ou um provedor. */
+export interface TimeoutSource {
+  suggestedTimeoutMs: number
+}
 
 /** Um fato da ficha do modelo, já como chip. */
 export interface ModelFact {
@@ -104,11 +111,62 @@ export function memoryLabel(spec: LayaModelSpecView): string {
  */
 export function timeoutForModel(
   current: number,
-  previous: LayaModelSpecView | null | undefined,
-  next: LayaModelSpecView | null | undefined,
+  previous: TimeoutSource | null | undefined,
+  next: TimeoutSource | null | undefined,
   fallback: number
 ): number {
   if (!next) return current
   const untouched = current === (previous?.suggestedTimeoutMs ?? fallback)
   return untouched ? next.suggestedTimeoutMs : Math.max(current, next.suggestedTimeoutMs)
+}
+
+/**
+ * O formulário ao trocar de provedor. O modelo é do provedor e volta ao
+ * padrão dele; a URL também, a não ser que o usuário a tenha mudado; chave e
+ * ID da conta nunca passam de um provedor para outro; o tempo máximo segue a
+ * regra de {@link timeoutForModel}.
+ */
+export function formForProvider(
+  form: AiLayaSettings,
+  previous: LayaProviderView | null,
+  previousTimeout: TimeoutSource | null,
+  next: LayaProviderView,
+  fallbackTimeout: number
+): AiLayaSettings {
+  const url = form.baseUrl.trim()
+  const keepUrl = url !== '' && url !== previous?.defaultBaseUrl
+  return {
+    ...form,
+    provider: next.id,
+    baseUrl: keepUrl ? form.baseUrl : next.defaultBaseUrl,
+    model: next.defaultModel,
+    apiKey: undefined,
+    accountId: undefined,
+    timeoutMs: timeoutForModel(
+      Number(form.timeoutMs) || fallbackTimeout,
+      previousTimeout,
+      next,
+      fallbackTimeout
+    ),
+  }
+}
+
+/**
+ * O que falta para o provedor responder, em palavras para a tela; `null`
+ * quando está tudo lá. A chave mascarada (já gravada) conta como presente.
+ */
+export function providerMissing(
+  form: AiLayaSettings,
+  provider: LayaProviderView | null
+): string | null {
+  if (!provider) return null
+  const missing: string[] = []
+  if (!form.baseUrl.trim() && !provider.defaultBaseUrl) missing.push('a URL')
+  if (provider.requiresAccount && !form.accountId?.trim()) missing.push('o ID da conta')
+  if (provider.requiresKey && !form.apiKey?.trim()) missing.push('a chave de acesso')
+  if (!form.model.trim()) missing.push('o modelo')
+  if (!missing.length) return null
+  return missing.length === 1
+    ? `Falta ${missing[0]}`
+    : `Faltam ${missing.slice(0, -1).join(', ')} e ${missing.at(-1)}`
 }

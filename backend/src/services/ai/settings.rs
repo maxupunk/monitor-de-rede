@@ -431,11 +431,39 @@ pub async fn save(db: &DatabaseConnection, mut new_settings: AiSettings) -> AppR
 
 /// Grava só a parte do Laya, sem passar pelas validações do provedor: um
 /// provedor mal configurado não pode impedir de ligar ou desligar o Laya.
+/// Devolve como a tela vê: a chave mascarada.
 pub async fn save_laya(db: &DatabaseConnection, laya: AiLayaSettings) -> AppResult<AiLayaSettings> {
     let mut settings = load(db).await?;
-    settings.laya = laya.normalized();
+    settings.laya = with_stored_key(laya, &settings.laya).normalized();
     persist(db, &settings).await?;
-    Ok(settings.laya)
+    Ok(masked_laya(settings.laya))
+}
+
+/// O Laya como a tela vê: a chave mascarada.
+#[must_use]
+pub fn masked_laya(mut laya: AiLayaSettings) -> AiLayaSettings {
+    mask_secret(&mut laya.api_key);
+    laya
+}
+
+/// O formulário do Laya pronto para uso (teste, download, lista de modelos):
+/// a máscara volta a ser a chave gravada.
+pub async fn resolve_laya<C: ConnectionTrait>(
+    db: &C,
+    form: AiLayaSettings,
+) -> AppResult<AiLayaSettings> {
+    Ok(with_stored_key(form, &load(db).await?.laya).normalized())
+}
+
+/// A máscara vira a chave gravada — só se o provedor é o mesmo: trocar de
+/// provedor sem digitar chave nova nunca manda a chave de um para o outro.
+fn with_stored_key(mut form: AiLayaSettings, stored: &AiLayaSettings) -> AiLayaSettings {
+    if form.provider == stored.provider {
+        restore_secret(&mut form.api_key, &stored.api_key);
+    } else if form.api_key.as_deref() == Some(MASKED_KEY) {
+        form.api_key = None;
+    }
+    form
 }
 
 async fn persist(db: &DatabaseConnection, settings: &AiSettings) -> AppResult<()> {
@@ -524,6 +552,29 @@ mod tests {
         assert_eq!(settings.openrouter_model, None);
         assert_eq!(settings.opencode_model, None);
         assert_eq!(settings.ollama_model, None);
+    }
+
+    #[test]
+    fn chave_do_laya_volta_da_mascara_so_no_mesmo_provedor() {
+        use crate::services::ai::laya::providers::LayaProvider;
+        let stored = AiLayaSettings {
+            provider: LayaProvider::Typesafe,
+            api_key: Some("ts-secreta".into()),
+            ..AiLayaSettings::default()
+        };
+        let mesma = with_stored_key(masked_laya(stored.clone()), &stored);
+        assert_eq!(mesma.api_key.as_deref(), Some("ts-secreta"));
+
+        let trocou = AiLayaSettings {
+            provider: LayaProvider::Openai,
+            ..masked_laya(stored.clone())
+        };
+        assert_eq!(
+            with_stored_key(trocou, &stored).api_key,
+            None,
+            "a chave da TypeSafe não vai para a OpenAI"
+        );
+        assert_eq!(masked_laya(stored).api_key.as_deref(), Some(MASKED_KEY));
     }
 
     #[test]

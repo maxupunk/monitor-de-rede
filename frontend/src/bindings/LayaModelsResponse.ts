@@ -3,9 +3,15 @@ import type { LayaModelOption } from "./LayaModelOption";
 
 export type LayaModelsResponse = { 
 /**
- * O Ollaya respondeu.
+ * O servidor respondeu. Em nuvem não há o que listar: vale `true` e a
+ * conexão se confere no teste (passo 3).
  */
-online: boolean, errorMessage: string | null, 
+online: boolean, 
+/**
+ * O provedor baixa e carrega modelos (só o Ollaya): a tela mostra
+ * download, memória e "carregar agora".
+ */
+managesModels: boolean, errorMessage: string | null, 
 /**
  * Nomes como o Ollaya os lista (`laya:multilingual`…).
  */

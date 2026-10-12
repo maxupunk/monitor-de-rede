@@ -30,68 +30,32 @@
     </v-card-title>
 
     <v-card-subtitle class="text-wrap">
-      Um modelo local que decide em milissegundos, sem gastar tokens: quais ferramentas a IA do chat
-      recebe, que tipo de aparelho a descoberta achou, qual interface é o uplink, o que cada log
-      significa e quais alertas merecem resumo. É opcional — fora do ar, tudo segue como antes.
+      Um modelo de decisão — no Ollaya desta máquina, em outra da sua rede ou na nuvem — que decide
+      em milissegundos, sem gastar tokens do chat: quais ferramentas a IA recebe, que tipo de
+      aparelho a descoberta achou, qual interface é o uplink, o que cada log significa e quais
+      alertas merecem resumo. É opcional — fora do ar, tudo segue como antes.
     </v-card-subtitle>
 
     <v-divider class="my-2" />
 
     <v-card-text>
-      <!-- 1. Servidor -->
+      <!-- 1. Provedor -->
       <div class="step-title">
-        <v-avatar size="24" :color="stepColor(serverOnline, 'error')" class="me-2">1</v-avatar>
-        Servidor Ollaya
+        <v-avatar size="24" :color="stepColor(providerReady, 'error')" class="me-2">1</v-avatar>
+        Onde o Laya decide
       </div>
-      <v-row dense>
-        <v-col cols="12" md="6">
-          <v-text-field
-            v-model="form.baseUrl"
-            label="URL do Ollaya"
-            placeholder="http://ollaya:11435"
-            variant="outlined"
-            density="compact"
-            hide-details
-            prepend-inner-icon="mdi-lan"
-            append-inner-icon="mdi-refresh"
-            :loading="layaStore.loadingModels"
-            @blur="refreshModels"
-            @keydown.enter.prevent="refreshModels"
-            @click:append-inner="refreshModels"
-          />
-        </v-col>
-        <v-col cols="12" md="6" class="d-flex align-center">
-          <v-chip
-            v-if="serverOnline"
-            color="success"
-            variant="tonal"
-            prepend-icon="mdi-check-circle"
-          >
-            Conectado — {{ installedCount }} modelo(s) instalado(s)
-          </v-chip>
-        </v-col>
-      </v-row>
-      <v-alert
-        v-if="layaStore.models && !serverOnline"
-        type="error"
-        variant="tonal"
-        density="compact"
-        class="mt-2"
-      >
-        {{ layaStore.models.errorMessage }}
-        <div class="mt-1">
-          O serviço <code>ollaya</code> sobe junto com o <code>docker compose up</code>; confira se
-          ele está no ar (<code>docker compose ps</code>) e use <code>http://ollaya:11435</code>.
-        </div>
-      </v-alert>
+      <LayaProviderStep v-model:form="form" @refresh="refreshModels" @test="runTest" />
 
       <!-- 2. Modelo -->
       <div class="step-title mt-5">
         <v-avatar size="24" :color="stepColor(modelReady, 'warning')" class="me-2">2</v-avatar>
         Modelo
       </div>
-      <div v-if="layaStore.models && !serverOnline" class="text-body-2 text-warning mb-2">
-        Conecte o servidor (passo 1) para ver o que está baixado e baixar o modelo.
+      <div
+        v-if="managesModels && layaStore.models && !serverOnline"
+        class="text-body-2 text-warning mb-2"
+      >
+        Conecte o Ollaya (passo 1) para ver o que está baixado e baixar o modelo.
       </div>
       <v-row dense>
         <v-col cols="12" md="6">
@@ -102,7 +66,7 @@
             item-value="name"
             :return-object="false"
             label="Modelo"
-            placeholder="Escolha ou digite, ex.: laya"
+            :placeholder="modelPlaceholder"
             variant="outlined"
             density="compact"
             hide-details
@@ -156,7 +120,7 @@
             </template>
           </v-combobox>
         </v-col>
-        <v-col cols="12" md="6" class="d-flex align-center ga-2">
+        <v-col v-if="managesModels" cols="12" md="6" class="d-flex align-center ga-2">
           <template v-if="modelReady">
             <v-chip color="success" variant="tonal" prepend-icon="mdi-check-circle">Baixado</v-chip>
             <v-chip v-if="modelLoading" color="info" variant="tonal">
@@ -219,8 +183,8 @@
           Este modelo não atende português. As perguntas que o NetMonitor faz a ele já vão em
           inglês, mas o texto analisado (perguntas do chat, logs, nomes) costuma estar em português,
           e aí as probabilidades perdem confiança. Prefira um multilíngue — <strong>laya</strong> em
-          CPU ou <strong>winnow:e4b</strong> em GPU — ou experimente com perguntas reais no passo 3
-          antes de ligar.
+          CPU ou <strong>winnow:e4b</strong> em GPU — ou experimente com perguntas reais em Avançado
+          › Experimentar antes de ligar.
         </v-alert>
         <v-alert
           v-if="selectedSpec.gpuRecommended"
@@ -323,7 +287,11 @@
             <!-- Experimentar: o que o Laya escolheria e com que confiança -->
             <div class="font-weight-bold mb-1">Experimentar</div>
             <div v-if="!modelReady" class="text-body-2 text-warning mb-2">
-              Disponível depois que o modelo estiver baixado.
+              {{
+                managesModels
+                  ? 'Disponível depois que o modelo estiver baixado.'
+                  : 'Disponível depois de preencher o passo 1.'
+              }}
             </div>
             <div class="d-flex flex-wrap align-center ga-2">
               <v-text-field
@@ -356,7 +324,9 @@
               </v-btn>
             </div>
             <div
-              v-if="modelReady && !modelInMemory && !modelLoading && !modelLoadFailed"
+              v-if="
+                managesModels && modelReady && !modelInMemory && !modelLoading && !modelLoadFailed
+              "
               class="text-body-2 mt-2"
             >
               O modelo está fora da memória: o primeiro teste o carrega antes de responder. No chat,
@@ -491,9 +461,11 @@ import {
   languageFact,
   memoryLabel,
   modelFacts,
+  providerMissing,
   timeoutForModel,
 } from '@/utils/ollaya'
 import { confirm } from '@/composables/useConfirm'
+import LayaProviderStep from './laya/LayaProviderStep.vue'
 
 /** A mesma pergunta que o backend usa quando o campo fica vazio. */
 const SAMPLE_QUESTION =
@@ -543,10 +515,26 @@ const layaStore = useAiLayaStore()
 const form = ref<AiLayaSettings>(defaultLayaSettings())
 const question = ref('')
 
+/** O provedor do formulário e o que falta para ele responder. */
+const currentProvider = computed(() => layaStore.provider(form.value.provider))
+/** Só o Ollaya baixa e carrega modelos; na nuvem eles já estão prontos. */
+const managesModels = computed(() => currentProvider.value?.managesModels ?? true)
+const providerGap = computed(() => providerMissing(form.value, currentProvider.value))
 const serverOnline = computed(() => !!layaStore.models?.online)
-const installedCount = computed(() => layaStore.models?.installed.length ?? 0)
-/** Testar e ativar só depois que o modelo estiver baixado no Ollaya. */
-const modelReady = computed(() => serverOnline.value && layaStore.installed(form.value.model ?? ''))
+/** Passo 1 pronto: Ollaya respondendo, ou nuvem com tudo preenchido. */
+const providerReady = computed(() =>
+  managesModels.value ? serverOnline.value : !providerGap.value
+)
+/** Exemplo de modelo no campo vazio: o padrão do provedor, ou o do Jev no "Outro". */
+const modelPlaceholder = computed(
+  () => `Escolha ou digite, ex.: ${currentProvider.value?.defaultModel || 'jev-latest'}`
+)
+/** Testar e ativar: no Ollaya, com o modelo baixado; na nuvem, com o passo 1 completo. */
+const modelReady = computed(() =>
+  managesModels.value
+    ? serverOnline.value && layaStore.installed(form.value.model ?? '')
+    : !providerGap.value
+)
 /** Triagem ligada decide por padrão; "Só registrar" fica no Avançado. */
 const triageEnabled = computed({
   get: () => form.value.features.incidentTriage !== 'off',
@@ -586,6 +574,8 @@ const canToggle = computed(() => form.value.enabled || modelReady.value)
 
 const status = computed(() => {
   if (!layaStore.models) return { label: 'Verificando...', color: 'info', icon: 'mdi-timer-sand' }
+  if (!managesModels.value && providerGap.value)
+    return { label: providerGap.value, color: 'warning', icon: 'mdi-key-alert-outline' }
   if (!serverOnline.value)
     return { label: 'Ollaya fora do ar', color: 'error', icon: 'mdi-lan-disconnect' }
   if (!modelReady.value)
@@ -665,11 +655,26 @@ const loadedMemory = computed(() =>
 )
 
 /**
- * Ligar com o Ollaya nesta máquina custa RAM do servidor: avisa antes. Com o
- * Ollaya em outra máquina não há o que avisar — a memória gasta é a dela.
+ * Ligar avisa o que custa: na nuvem, os textos saem da rede e o uso é cobrado;
+ * com o Ollaya nesta máquina, RAM do servidor. Com o Ollaya em outra máquina
+ * não há o que avisar — a memória gasta é a dela.
  */
 async function toggleEnabled(value: boolean | null) {
-  if (value && isLocalOllaya(form.value.baseUrl)) {
+  const provider = currentProvider.value
+  if (value && provider?.cloud) {
+    const ok = await confirm({
+      title: `Ligar o Laya com ${provider.label}?`,
+      message:
+        `Cada decisão manda a ${provider.label} o texto que ela analisa: perguntas do chat, ` +
+        'mensagens de log, nomes, IPs e descrições de dispositivos e interfaces. O uso é ' +
+        'cobrado na sua conta, por token de entrada. Para nada sair da rede, use o Ollaya.',
+      confirmText: 'Ligar e enviar',
+      confirmColor: 'warning',
+      icon: 'mdi-cloud-alert-outline',
+      iconColor: 'warning',
+    })
+    if (!ok) return
+  } else if (value && isLocalOllaya(form.value.baseUrl)) {
     const ok = await confirm({
       title: 'Ligar o Laya neste servidor?',
       message:
@@ -687,7 +692,7 @@ async function toggleEnabled(value: boolean | null) {
 }
 
 function refreshModels() {
-  void layaStore.loadModels(form.value.baseUrl)
+  void layaStore.loadModels(normalizedForm())
 }
 
 function runTest() {
@@ -714,6 +719,7 @@ async function save() {
 }
 
 onMounted(async () => {
+  void layaStore.loadProviders()
   try {
     form.value = { ...(await layaStore.load()) }
   } catch {

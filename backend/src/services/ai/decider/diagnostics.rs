@@ -44,19 +44,23 @@ pub async fn test(
         .filter(|question| !question.is_empty())
         .unwrap_or(SAMPLE_QUESTION);
 
-    let installed = match LayaClient::new(settings).installed_models().await {
-        Ok(installed) => installed,
-        Err(error) => return failure(false, false, error.to_string()),
-    };
-    if !catalog::is_available(&installed, &settings.model) {
-        return failure(
-            true,
-            false,
-            format!(
-                "O Ollaya respondeu, mas o modelo '{}' não está instalado. Use \"Baixar modelo\".",
-                settings.model
-            ),
-        );
+    // No Ollaya, o modelo precisa estar baixado; na nuvem a própria decisão
+    // confere a chave e o modelo.
+    if settings.manages_models() {
+        let installed = match LayaClient::new(settings).installed_models().await {
+            Ok(installed) => installed,
+            Err(error) => return failure(false, false, error.to_string()),
+        };
+        if !catalog::is_available(&installed, &settings.model) {
+            return failure(
+                true,
+                false,
+                format!(
+                    "O Ollaya respondeu, mas o modelo '{}' não está instalado. Use \"Baixar modelo\".",
+                    settings.model
+                ),
+            );
+        }
     }
 
     match tool_routing::score(
@@ -96,7 +100,8 @@ pub async fn test(
                 groups,
             }
         }
-        Err(error) => failure(true, true, error.to_string()),
+        // Na nuvem a falha pode ser de rede ou de chave: a mensagem diz qual.
+        Err(error) => failure(settings.manages_models(), true, error.to_string()),
     }
 }
 

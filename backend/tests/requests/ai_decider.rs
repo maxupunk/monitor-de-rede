@@ -64,8 +64,9 @@ async fn autocomplete_junta_catalogo_e_instalados() {
         let sessao = prepare_data::init_user_login(&request, &ctx).await;
         let (h, v) = prepare_data::auth_header(&sessao.token);
         let response = request
-            .get(&format!("/api/ai/laya/models?base_url={base_url}"))
+            .post("/api/ai/laya/models")
             .add_header(h, v)
+            .json(&json!({ "laya": laya(base_url) }))
             .await;
         response.assert_status_ok();
         let models: LayaModelsResponse = response.json();

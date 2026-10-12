@@ -198,6 +198,9 @@ services:
   #   - winnow:e4b / credence:e4b (multilíngues, os mais precisos): ~9 GB e GPU;
   #   - kev, decider, jeb, jeeves, clef… (só inglês): de 4 a 20 GB e GPU —
   #     em CPU cada pergunta do chat espera segundos.
+  # Sem RAM ou GPU sobrando aqui? Na mesma tela dá para apontar para um Ollaya
+  # em outra máquina ou para um provedor na nuvem (TypeSafe, OpenRouter,
+  # Cloudflare, OpenAI) — aí este serviço pode até ser removido.
   # A API fala com ele pela rede interna (`http://ollaya:11435`), sem porta
   # publicada. GPU NVIDIA? Troque a imagem por `ghcr.io/ollaya-dev/ollaya:cuda`
   # e acrescente `gpus: all`.

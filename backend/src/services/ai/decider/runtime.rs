@@ -265,7 +265,8 @@ impl LayaRuntime {
     /// O modelo está fora da memória? Na dúvida (Ollaya antigo sem
     /// `/api/ps`, erro), responde que não — e a consulta segue como antes.
     async fn is_cold(&self, settings: &AiLayaSettings) -> bool {
-        if self.recently_warm(settings) {
+        // Na nuvem o modelo está sempre pronto.
+        if !settings.manages_models() || self.recently_warm(settings) {
             return false;
         }
         match LayaClient::new(settings).loaded_models().await {

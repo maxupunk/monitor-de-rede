@@ -16,7 +16,7 @@ use serde::Deserialize;
 
 use crate::{
     dtos::ai::{
-        AiMentionQuery, ChatStreamRequest, ExecuteToolRequest, ExecuteToolResponse, LayaPullInput,
+        AiMentionQuery, ChatStreamRequest, ExecuteToolRequest, ExecuteToolResponse, LayaFormInput,
         ModelPullProgress, OllamaPullRequest, TestConnectionInput, TestConnectionResponse,
         TestLayaInput,
     },
@@ -28,7 +28,7 @@ use crate::{
                 confirmation,
             },
             laya::{
-                catalog, client::LayaClient, config::AiLayaSettings, diagnostics,
+                catalog, client::LayaClient, config::AiLayaSettings, diagnostics, providers,
                 runtime::LayaRuntime,
             },
             mentions, ollama, opencode, openrouter,
@@ -350,9 +350,21 @@ fn pull_progress_sse(
     response
 }
 
-/// `GET /api/ai/laya` — configuração do Laya.
+/// `GET /api/ai/laya` — configuração do Laya, com a chave mascarada.
 async fn show_laya(State(ctx): State<AppContext>) -> AppResult<Response> {
-    Ok(format::json(settings::load(&ctx.db).await?.laya)?)
+    Ok(format::json(settings::masked_laya(
+        settings::load(&ctx.db).await?.laya,
+    ))?)
+}
+
+/// `GET /api/ai/laya/providers` — os provedores de decisão que a tela oferece.
+async fn list_laya_providers() -> AppResult<Response> {
+    Ok(format::json(
+        providers::PRESETS
+            .iter()
+            .map(providers::ProviderPreset::view)
+            .collect::<Vec<_>>(),
+    )?)
 }
 
 /// `PUT /api/ai/laya` — grava só o Laya; o resto da IA fica como está.
@@ -365,27 +377,19 @@ async fn update_laya(
     runtime.invalidate();
     // Ligado agora: carrega já, para a primeira pergunta não pagar o disco.
     if saved.enabled {
-        runtime.warm_in_background(&saved);
+        runtime.warm_in_background(&settings::resolve_laya(&ctx.db, saved.clone()).await?);
     }
     Ok(format::json(saved)?)
 }
 
-#[derive(Debug, Deserialize)]
-struct LayaModelsQuery {
-    base_url: Option<String>,
-}
-
-/// `GET /api/ai/laya/models` — catálogo do Laya e o que o Ollaya já tem
-/// instalado, para o autocomplete da tela.
+/// `POST /api/ai/laya/models` — os modelos do provedor do formulário: no
+/// Ollaya, o catálogo e o que ele já tem instalado; na nuvem, os do preset.
 async fn list_laya_models(
     State(ctx): State<AppContext>,
-    Query(query): Query<LayaModelsQuery>,
+    Json(input): Json<LayaFormInput>,
 ) -> AppResult<Response> {
-    let mut laya = settings::load(&ctx.db).await?.laya;
-    if let Some(base_url) = query.base_url.filter(|url| !url.trim().is_empty()) {
-        laya.base_url = base_url;
-    }
-    Ok(format::json(catalog::list(&laya.normalized()).await)?)
+    let laya = settings::resolve_laya(&ctx.db, input.laya).await?;
+    Ok(format::json(catalog::list(&laya).await)?)
 }
 
 /// `POST /api/ai/laya/test` — o Ollaya responde, o modelo está lá, e o que ele
@@ -394,7 +398,7 @@ async fn test_laya(
     State(ctx): State<AppContext>,
     Json(input): Json<TestLayaInput>,
 ) -> AppResult<Response> {
-    let laya = input.laya.normalized();
+    let laya = settings::resolve_laya(&ctx.db, input.laya).await?;
     let runtime = LayaRuntime::from_context(&ctx);
     let result = diagnostics::test(&runtime, &laya, input.question.as_deref()).await;
     Ok(format::json(result)?)
@@ -404,15 +408,19 @@ async fn test_laya(
 /// Responde na hora; o progresso chega pelo SSE (`laya:model_state`).
 async fn load_laya_model(
     State(ctx): State<AppContext>,
-    Json(input): Json<LayaPullInput>,
+    Json(input): Json<LayaFormInput>,
 ) -> AppResult<Response> {
-    LayaRuntime::from_context(&ctx).warm_in_background(&input.laya.normalized());
+    let laya = settings::resolve_laya(&ctx.db, input.laya).await?;
+    LayaRuntime::from_context(&ctx).warm_in_background(&laya);
     Ok(format::json(serde_json::json!({ "started": true }))?)
 }
 
 /// `POST /api/ai/laya/pull` — streaming SSE do download do modelo do Laya.
-async fn pull_laya_model(Json(input): Json<LayaPullInput>) -> AppResult<Response> {
-    let laya = input.laya.normalized();
+async fn pull_laya_model(
+    State(ctx): State<AppContext>,
+    Json(input): Json<LayaFormInput>,
+) -> AppResult<Response> {
+    let laya = settings::resolve_laya(&ctx.db, input.laya).await?;
     let progress = LayaClient::new(&laya).pull().await?;
     Ok(pull_progress_sse(progress))
 }
@@ -482,7 +490,8 @@ pub fn routes() -> Routes {
         .add("/ollama/models", get(list_ollama_models))
         .add("/ollama/pull", post(pull_ollama_model))
         .add("/laya", get(show_laya).put(update_laya))
-        .add("/laya/models", get(list_laya_models))
+        .add("/laya/providers", get(list_laya_providers))
+        .add("/laya/models", post(list_laya_models))
         .add("/laya/test", post(test_laya))
         .add("/laya/pull", post(pull_laya_model))
         .add("/laya/load", post(load_laya_model))

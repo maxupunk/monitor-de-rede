@@ -597,8 +597,43 @@ pub fn is_available<S: AsRef<str>>(names: &[S], model: &str) -> bool {
     }
 }
 
+/// Os modelos de um provedor de nuvem: os do preset, prontos para uso — e o
+/// digitado, quando é outro. Não vai à rede: a chave se confere no teste.
+fn cloud_models(settings: &AiLayaSettings) -> LayaModelsResponse {
+    let mut options: Vec<LayaModelOption> = settings
+        .preset()
+        .models
+        .iter()
+        .map(|(name, description)| LayaModelOption {
+            name: (*name).to_string(),
+            description: Some((*description).to_string()),
+            installed: true,
+            spec: None,
+        })
+        .collect();
+    if !settings.model.is_empty() && !options.iter().any(|option| option.name == settings.model) {
+        options.push(LayaModelOption {
+            name: settings.model.clone(),
+            description: None,
+            installed: true,
+            spec: None,
+        });
+    }
+    LayaModelsResponse {
+        online: true,
+        manages_models: false,
+        error_message: None,
+        installed: Vec::new(),
+        loaded: Vec::new(),
+        options,
+    }
+}
+
 /// Nunca falha: fora do ar vira `online: false` com o motivo.
 pub async fn list(settings: &AiLayaSettings) -> LayaModelsResponse {
+    if !settings.manages_models() {
+        return cloud_models(settings);
+    }
     let (installed, error_message) = match LayaClient::new(settings).installed_models().await {
         Ok(installed) => (Some(installed), None),
         Err(error) => (None, Some(error.to_string())),
@@ -638,6 +673,7 @@ pub async fn list(settings: &AiLayaSettings) -> LayaModelsResponse {
 
     LayaModelsResponse {
         online,
+        manages_models: true,
         error_message,
         installed,
         loaded,
@@ -665,6 +701,25 @@ mod tests {
         assert_eq!(models.options.len(), KNOWN_MODELS.len());
         assert!(models.options.iter().all(|option| !option.installed));
         assert!(models.options.iter().all(|option| option.spec.is_some()));
+    }
+
+    #[tokio::test]
+    async fn nuvem_lista_os_modelos_do_preset_sem_ir_a_rede() {
+        let settings = AiLayaSettings {
+            provider: crate::services::ai::laya::providers::LayaProvider::Cloudflare,
+            base_url: "http://127.0.0.1:9".into(),
+            model: "clef".into(),
+            ..AiLayaSettings::default()
+        };
+        let models = list(&settings).await;
+        assert!(models.online && !models.manages_models);
+        let nomes: Vec<&str> = models
+            .options
+            .iter()
+            .map(|option| option.name.as_str())
+            .collect();
+        assert_eq!(nomes, ["clef-flash", "clef"]);
+        assert!(models.options.iter().all(|option| option.installed));
     }
 
     #[test]

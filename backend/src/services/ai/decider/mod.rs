@@ -15,6 +15,8 @@ pub mod config;
 pub mod decision;
 pub mod decisions;
 pub mod diagnostics;
+pub mod protocols;
+pub mod providers;
 pub mod runtime;
 pub mod schema;
 pub mod suggestion;
