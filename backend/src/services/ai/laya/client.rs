@@ -14,6 +14,7 @@ use reqwest::RequestBuilder;
 use tokio_stream::wrappers::ReceiverStream;
 
 use super::{
+    catalog,
     config::{self, AiLayaSettings},
     schema::{DecideRequest, DecideResponse, ErrorBody, Question, TagsResponse},
 };
@@ -27,10 +28,6 @@ use crate::{
 };
 
 const SERVICE: &str = "Ollaya";
-/// Carregar um modelo na memória leva de 5 a 20 s em CPU (medido: 4–17 s).
-/// É prazo próprio: o "tempo máximo por pergunta" vale para a inferência,
-/// não para tirar o modelo do disco.
-pub const LOAD_TIMEOUT: Duration = Duration::from_secs(120);
 
 fn http() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
@@ -150,17 +147,22 @@ impl<'a> LayaClient<'a> {
 
     /// Carrega o modelo na memória sem responder nada: `/api/decide` sem
     /// `state` nem perguntas (contrato do Ollaya). Devolve quanto levou.
+    ///
+    /// O prazo é o do modelo ([`catalog::load_timeout`]), não o "tempo máximo
+    /// por pergunta": um Laya sai do disco em 5 a 20 s em CPU, um Kev 9B
+    /// tem quase 20 GB.
     pub async fn load(&self) -> AppResult<f64> {
         let started = Instant::now();
+        let load_timeout = catalog::load_timeout(&self.settings.model);
         let request = http()
             .post(self.url("/api/decide"))
-            .timeout(LOAD_TIMEOUT)
+            .timeout(load_timeout)
             .json(&serde_json::json!({ "model": self.settings.model }));
         let res = self
             .authorized(request)
             .send()
             .await
-            .map_err(|e| self.unreachable_after(&e, LOAD_TIMEOUT))?;
+            .map_err(|e| self.unreachable_after(&e, load_timeout))?;
         if !res.status().is_success() {
             let status = res.status();
             let body = res.text().await.unwrap_or_default();

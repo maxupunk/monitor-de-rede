@@ -11,8 +11,13 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum Question {
-    /// Escolher um rótulo: `criteria` mapeia rótulo → descrição.
-    Choice { criteria: BTreeMap<String, String> },
+    /// Escolher um rótulo: `criteria` mapeia rótulo → descrição. As
+    /// instruções dizem o que se escolhe — alguns modelos do Ollaya (decider,
+    /// clef, jeb) recusam a pergunta sem elas, e para os outros elas ajudam.
+    Choice {
+        instructions: String,
+        criteria: BTreeMap<String, String>,
+    },
     /// Sim/não: responde a probabilidade de `instructions` valer.
     Noul { instructions: String },
 }
@@ -121,6 +126,22 @@ mod tests {
                 "model": "laya",
                 "state": "oi",
                 "questions": { "history": { "type": "noul", "instructions": "Needs history?" } }
+            })
+        );
+    }
+
+    #[test]
+    fn escolha_vai_com_instrucoes_e_criterios_como_objeto() {
+        let question = Question::Choice {
+            instructions: "Which device type is this?".into(),
+            criteria: BTreeMap::from([("router".to_string(), "Routes traffic".to_string())]),
+        };
+        assert_eq!(
+            serde_json::to_value(question).unwrap(),
+            serde_json::json!({
+                "type": "choice",
+                "instructions": "Which device type is this?",
+                "criteria": { "router": "Routes traffic" }
             })
         );
     }

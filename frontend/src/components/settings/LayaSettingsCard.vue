@@ -96,7 +96,7 @@
       <v-row dense>
         <v-col cols="12" md="6">
           <v-combobox
-            v-model="form.model"
+            :model-value="form.model"
             :items="modelOptions"
             item-title="name"
             item-value="name"
@@ -107,6 +107,7 @@
             density="compact"
             hide-details
             prepend-inner-icon="mdi-source-branch"
+            @update:model-value="chooseModel"
           >
             <template #item="{ props: itemProps, item }">
               <v-list-item
@@ -115,13 +116,41 @@
                 :subtitle="item.description ?? 'Instalado no Ollaya'"
               >
                 <template #append>
-                  <v-chip
-                    size="x-small"
-                    variant="tonal"
-                    :color="item.installed ? 'success' : 'warning'"
-                  >
-                    {{ item.installed ? 'baixado' : 'não baixado' }}
-                  </v-chip>
+                  <div class="d-flex ga-1">
+                    <v-chip
+                      v-if="item.spec?.recommended"
+                      size="x-small"
+                      color="primary"
+                      variant="flat"
+                    >
+                      recomendado
+                    </v-chip>
+                    <v-chip
+                      v-if="item.spec"
+                      size="x-small"
+                      variant="tonal"
+                      :color="languageFact(item.spec.language).color"
+                      :title="languageFact(item.spec.language).label"
+                    >
+                      {{ languageFact(item.spec.language).short }}
+                    </v-chip>
+                    <v-chip
+                      v-if="item.spec?.gpuRecommended"
+                      size="x-small"
+                      variant="tonal"
+                      color="warning"
+                      title="GPU recomendada"
+                    >
+                      GPU
+                    </v-chip>
+                    <v-chip
+                      size="x-small"
+                      variant="tonal"
+                      :color="item.installed ? 'success' : 'warning'"
+                    >
+                      {{ item.installed ? 'baixado' : 'não baixado' }}
+                    </v-chip>
+                  </div>
                 </template>
               </v-list-item>
             </template>
@@ -165,6 +194,50 @@
           </v-btn>
         </v-col>
       </v-row>
+
+      <!-- Ficha do modelo escolhido: o que pesa na escolha -->
+      <template v-if="selectedSpec">
+        <div class="d-flex flex-wrap ga-1 mt-2">
+          <v-chip
+            v-for="fact in selectedFacts"
+            :key="fact.label"
+            size="small"
+            :color="fact.color"
+            variant="tonal"
+            :prepend-icon="fact.icon"
+          >
+            {{ fact.label }}
+          </v-chip>
+        </div>
+        <v-alert
+          v-if="selectedSpec.language === 'english'"
+          type="info"
+          variant="tonal"
+          density="compact"
+          class="mt-2 text-body-2"
+        >
+          Este modelo não atende português. As perguntas que o NetMonitor faz a ele já vão em
+          inglês, mas o texto analisado (perguntas do chat, logs, nomes) costuma estar em português,
+          e aí as probabilidades perdem confiança. Prefira um multilíngue — <strong>laya</strong> em
+          CPU ou <strong>winnow:e4b</strong> em GPU — ou experimente com perguntas reais no passo 3
+          antes de ligar.
+        </v-alert>
+        <v-alert
+          v-if="selectedSpec.gpuRecommended"
+          type="warning"
+          variant="tonal"
+          density="compact"
+          class="mt-2 text-body-2"
+        >
+          Em CPU, cada pergunta do chat pode esperar alguns segundos por este modelo. Para o dia a
+          dia, rode o Ollaya com GPU (imagem <code>ollaya:cuda</code>) ou aponte o passo 1 para um
+          Ollaya numa máquina com GPU.
+        </v-alert>
+        <div v-if="timeoutNote" class="d-flex align-center ga-1 mt-2 text-body-2">
+          <v-icon size="16" color="info">mdi-timer-cog-outline</v-icon>
+          {{ timeoutNote }}
+        </div>
+      </template>
       <div v-if="layaStore.pulling && layaStore.pullProgress" class="mt-2">
         <div class="d-flex align-center justify-space-between text-body-2 mb-1">
           <span>{{ layaStore.pullProgress.status }}</span>
@@ -412,8 +485,14 @@ import {
   type LayaModelOption,
 } from '@/stores/aiLaya'
 import type { LayaTriageMode } from '@/bindings/LayaTriageMode'
-import { formatLatency, formatPercent } from '@/utils/formatters'
-import { isLocalOllaya } from '@/utils/ollaya'
+import { formatElapsedMs, formatLatency, formatPercent } from '@/utils/formatters'
+import {
+  isLocalOllaya,
+  languageFact,
+  memoryLabel,
+  modelFacts,
+  timeoutForModel,
+} from '@/utils/ollaya'
 import { confirm } from '@/composables/useConfirm'
 
 /** A mesma pergunta que o backend usa quando o campo fica vazio. */
@@ -516,6 +595,30 @@ const status = computed(() => {
   return { label: 'Ativo', color: 'success', icon: 'mdi-check-circle' }
 })
 
+/** A ficha do modelo do formulário; `null` para um fora do catálogo. */
+const selectedSpec = computed(() => layaStore.spec(form.value.model ?? ''))
+const selectedFacts = computed(() => (selectedSpec.value ? modelFacts(selectedSpec.value) : []))
+
+/** Avisa quando trocar de modelo mexeu no tempo máximo por pergunta. */
+const timeoutNote = ref<string | null>(null)
+
+/**
+ * Escolha do usuário no seletor (não a carga do formulário): o tempo máximo
+ * acompanha o sugerido do modelo, e a tela diz que mudou.
+ */
+function chooseModel(next: string | null) {
+  const previous = layaStore.spec(form.value.model ?? '')
+  const nextSpec = layaStore.spec(next ?? '')
+  const current = Number(form.value.timeoutMs) || defaultLayaSettings().timeoutMs
+  const timeout = timeoutForModel(current, previous, nextSpec, defaultLayaSettings().timeoutMs)
+  timeoutNote.value =
+    timeout === current
+      ? null
+      : `Tempo máximo por pergunta ajustado para ${formatElapsedMs(timeout)}, o sugerido para ${next}.`
+  form.value.timeoutMs = timeout
+  form.value.model = next ?? ''
+}
+
 /** Catálogo e instalados; o modelo digitado à mão também aparece na lista. */
 const modelOptions = computed<LayaModelOption[]>(() => {
   const options = layaStore.models?.options ?? []
@@ -556,6 +659,11 @@ const dirty = computed(
   () => !!layaStore.saved && JSON.stringify(normalizedForm()) !== JSON.stringify(layaStore.saved)
 )
 
+/** Quanto o modelo escolhido ocupa carregado, para o aviso ao ligar. */
+const loadedMemory = computed(() =>
+  selectedSpec.value ? memoryLabel(selectedSpec.value) : 'alguns GB'
+)
+
 /**
  * Ligar com o Ollaya nesta máquina custa RAM do servidor: avisa antes. Com o
  * Ollaya em outra máquina não há o que avisar — a memória gasta é a dela.
@@ -565,9 +673,9 @@ async function toggleEnabled(value: boolean | null) {
     const ok = await confirm({
       title: 'Ligar o Laya neste servidor?',
       message:
-        'O Ollaya roda nesta mesma máquina. Enquanto um modelo de decisão estiver carregado, ' +
-        'ele usa aproximadamente 3 GB a 4 GB de RAM. Sem uso, o modelo é descarregado e o ' +
-        'serviço volta a ocupar cerca de 150 MB.',
+        'O Ollaya roda nesta mesma máquina. Enquanto o modelo ' +
+        `${form.value.model} estiver carregado, ele usa ${loadedMemory.value} de memória. ` +
+        'Sem uso, o modelo é descarregado e o serviço volta a ocupar cerca de 150 MB.',
       confirmText: 'Ligar mesmo assim',
       confirmColor: 'warning',
       icon: 'mdi-memory',

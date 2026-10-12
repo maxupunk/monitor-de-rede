@@ -189,8 +189,15 @@ services:
 
   # Laya: modelos de decisão servidos pelo Ollaya (IA de decisão, sem tokens).
   # Sobe sempre junto — parado, sem modelo carregado, ocupa ~150 MB. Só pesa
-  # (~3–4 GB de RAM) quando o Laya é ligado em Configurações → IA e um modelo
-  # é carregado; `OLLAYA_KEEP_ALIVE` o descarrega depois do tempo ocioso.
+  # quando o Laya é ligado em Configurações → IA e um modelo é carregado;
+  # `OLLAYA_KEEP_ALIVE` o descarrega depois do tempo ocioso. Quanto pesa
+  # depende do modelo escolhido na tela, que lista todos os modelos
+  # compatíveis do Ollaya com a ficha de cada um. Em resumo:
+  #   - laya (padrão, multilíngue): ~3–4 GB de RAM, bem em CPU — decima e os
+  #     classificadores NLI também rodam em CPU;
+  #   - winnow:e4b / credence:e4b (multilíngues, os mais precisos): ~9 GB e GPU;
+  #   - kev, decider, jeb, jeeves, clef… (só inglês): de 4 a 20 GB e GPU —
+  #     em CPU cada pergunta do chat espera segundos.
   # A API fala com ele pela rede interna (`http://ollaya:11435`), sem porta
   # publicada. GPU NVIDIA? Troque a imagem por `ghcr.io/ollaya-dev/ollaya:cuda`
   # e acrescente `gpus: all`.

@@ -64,7 +64,13 @@ impl Decision for LogCategory {
             .iter()
             .map(|(id, hint)| ((*id).to_string(), (*hint).to_string()))
             .collect();
-        BTreeMap::from([(CATEGORY.to_string(), Question::Choice { criteria })])
+        BTreeMap::from([(
+            CATEGORY.to_string(),
+            Question::Choice {
+                instructions: "Which category best describes this log message?".to_string(),
+                criteria,
+            },
+        )])
     }
 
     fn interpret(&self, answers: &BTreeMap<String, Answer>) -> Option<LayaSuggestion> {
@@ -85,7 +91,7 @@ mod tests {
     #[test]
     fn uma_escolha_com_todas_as_categorias() {
         let questions = LogCategory { min_confidence: 60 }.questions();
-        let Question::Choice { criteria } = &questions[CATEGORY] else {
+        let Question::Choice { criteria, .. } = &questions[CATEGORY] else {
             panic!("categoria é escolha");
         };
         assert_eq!(criteria.len(), LOG_CATEGORIES.len());

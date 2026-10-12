@@ -216,7 +216,14 @@ impl Decision for DeviceIdentity {
                 .iter()
                 .map(|kind| (kind.id.to_string(), kind.laya_hint.to_string()))
                 .collect();
-            questions.insert(DEVICE_TYPE.to_string(), Question::Choice { criteria });
+            questions.insert(
+                DEVICE_TYPE.to_string(),
+                Question::Choice {
+                    instructions: "Which kind of network device is described by this state?"
+                        .to_string(),
+                    criteria,
+                },
+            );
         }
         if self.ask_system {
             let criteria = systems::catalog()
@@ -225,7 +232,13 @@ impl Decision for DeviceIdentity {
                     system_hint(system.id).map(|hint| (system.id.to_string(), hint.to_string()))
                 })
                 .collect();
-            questions.insert(OPERATING_SYSTEM.to_string(), Question::Choice { criteria });
+            questions.insert(
+                OPERATING_SYSTEM.to_string(),
+                Question::Choice {
+                    instructions: "Which operating system does this device run?".to_string(),
+                    criteria,
+                },
+            );
         }
         questions
     }
@@ -297,7 +310,7 @@ mod tests {
         };
         let questions = only_type.questions();
         assert_eq!(questions.len(), 1);
-        let Question::Choice { criteria } = &questions[DEVICE_TYPE] else {
+        let Question::Choice { criteria, .. } = &questions[DEVICE_TYPE] else {
             panic!("tipo é escolha");
         };
         assert!(criteria.contains_key("camera") && criteria.contains_key("ap"));

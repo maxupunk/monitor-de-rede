@@ -10,6 +10,7 @@ use serde_json::json;
 use crate::{
     dtos::snmp::{InterfaceSuggestions, InterfaceSuggestionsInput},
     services::ai::laya::{
+        catalog,
         config::LayaFeature,
         decisions::interfaces::{rank_candidates, InterfaceAdvice},
         runtime::{Lane, LayaRuntime},
@@ -21,7 +22,10 @@ pub async fn suggest(ctx: &AppContext, input: &InterfaceSuggestionsInput) -> Int
     let Some(settings) = runtime.settings_for(&ctx.db, LayaFeature::Interfaces).await else {
         return InterfaceSuggestions::default();
     };
-    let ranked = rank_candidates(&input.interfaces);
+    let ranked = rank_candidates(
+        &input.interfaces,
+        catalog::max_choice_options(&settings.model),
+    );
     if ranked.is_empty() {
         return InterfaceSuggestions::default();
     }

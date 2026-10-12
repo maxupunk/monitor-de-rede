@@ -5,6 +5,7 @@
 //! que diz o que fazer.
 
 use super::{
+    catalog,
     client::LayaClient,
     config::AiLayaSettings,
     runtime::{Lane, LayaRuntime},
@@ -12,7 +13,7 @@ use super::{
 };
 use crate::{
     dtos::ai::{LayaGroupScore, TestLayaResponse},
-    services::ai::{harness::tools::ToolGroup, local_models},
+    services::ai::harness::tools::ToolGroup,
 };
 
 /// Pergunta usada quando a tela não manda uma.
@@ -47,7 +48,7 @@ pub async fn test(
         Ok(installed) => installed,
         Err(error) => return failure(false, false, error.to_string()),
     };
-    if !local_models::is_installed(&installed, &settings.model) {
+    if !catalog::is_available(&installed, &settings.model) {
         return failure(
             true,
             false,

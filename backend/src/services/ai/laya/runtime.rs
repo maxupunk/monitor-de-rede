@@ -33,12 +33,13 @@ use serde_json::json;
 use tokio::sync::Semaphore;
 
 use super::{
+    catalog,
     client::LayaClient,
     config::{AiLayaSettings, LayaFeature},
     decision::{self, Decision, Outcome},
 };
 use crate::services::{
-    ai::{local_models, settings},
+    ai::settings,
     events::EventBus,
     shared::errors::{AppError, AppResult},
 };
@@ -269,7 +270,7 @@ impl LayaRuntime {
         }
         match LayaClient::new(settings).loaded_models().await {
             Ok(loaded) => {
-                let warm = local_models::is_installed(&loaded, &settings.model);
+                let warm = catalog::is_available(&loaded, &settings.model);
                 if warm {
                     self.mark_warm(settings);
                 }

@@ -125,6 +125,14 @@ confiança dele.
 **Critério de aceite:** relatório com as quatro métricas para o modelo atual.
 É a linha de base das fases seguintes.
 
+O mesmo conjunto mede os outros modelos compatíveis do Ollaya, que a tela já
+oferece (`laya/catalog.rs`). Os candidatos naturais são os multilíngues mais
+precisos (`winnow:e4b`, `credence:e4b`, ~0,72 contra ~0,36 do Laya no
+typed-decisions, mas pedem GPU) e, em CPU, o `decima:base`. Os só em inglês
+(Kev, Decider, Jeb…) precisam provar que a precisão compensa o estado em
+português — só os números da avaliação decidem se algum vira o padrão no
+lugar do `laya`.
+
 ### 5.2 Fase 1 — Estado e critérios (sem mexer no modelo) — ✅ iniciada
 
 Continuar o que a §3 começou, sempre medindo contra a fase 0:

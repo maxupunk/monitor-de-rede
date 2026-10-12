@@ -287,6 +287,57 @@ pub struct LayaModelOption {
     #[serde(default)]
     pub description: Option<String>,
     pub installed: bool,
+    /// A ficha do modelo; `None` para um instalado fora do catálogo.
+    #[serde(default)]
+    #[ts(optional)]
+    pub spec: Option<LayaModelSpecView>,
+}
+
+/// Língua que o modelo atende.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub enum LayaModelLanguage {
+    /// Mais de 100 línguas (o português entre elas).
+    Multilingual,
+    /// Inglês (alguns também italiano ou chinês) — sem português.
+    English,
+}
+
+/// O que a tela precisa para orientar a escolha de um modelo do catálogo.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct LayaModelSpecView {
+    /// Família ("Laya", "Kev"), para agrupar na lista.
+    pub family: String,
+    pub language: LayaModelLanguage,
+    /// Tamanho do download, em MB, quando publicado.
+    #[serde(default)]
+    #[ts(optional)]
+    pub download_mb: Option<u32>,
+    /// Memória com o modelo carregado, em MB (VRAM com GPU; em CPU, RAM),
+    /// quando publicada.
+    #[serde(default)]
+    #[ts(optional)]
+    pub memory_mb: Option<u32>,
+    /// Mediana publicada para cinco perguntas: em CPU, ou numa RTX 4090 quando
+    /// `gpu_recommended`.
+    pub latency_ms: u32,
+    /// Em CPU responde devagar demais para o chat.
+    pub gpu_recommended: bool,
+    /// Acerto no typed-decisions (0–1), quando comparável.
+    #[serde(default)]
+    #[ts(optional)]
+    pub accuracy: Option<f64>,
+    /// Teto de opções por escolha, quando o modelo tem um.
+    #[serde(default)]
+    #[ts(optional)]
+    pub max_choice_options: Option<u16>,
+    /// Tempo máximo por decisão sugerido para este modelo.
+    pub suggested_timeout_ms: u32,
+    /// O recomendado da família.
+    pub recommended: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

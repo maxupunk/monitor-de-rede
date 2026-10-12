@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { apiService, ApiError } from '@/services/apiService'
 import type { AiLayaSettings } from '@/bindings/AiLayaSettings'
 import type { LayaModelOption } from '@/bindings/LayaModelOption'
+import type { LayaModelSpecView } from '@/bindings/LayaModelSpecView'
 import type { LayaModelsResponse } from '@/bindings/LayaModelsResponse'
 import type { ModelPullProgress } from '@/bindings/ModelPullProgress'
 import type { TestLayaResponse } from '@/bindings/TestLayaResponse'
@@ -123,8 +124,23 @@ export const useAiLayaStore = defineStore('aiLaya', () => {
     }
   }
 
+  /** O modelo no catálogo devolvido pelo backend (com a ficha). */
+  function option(model: string): LayaModelOption | null {
+    const target = model.trim().toLowerCase()
+    return models.value?.options.find((item) => item.name.toLowerCase() === target) ?? null
+  }
+
+  /** A ficha do modelo; `null` para um fora do catálogo. */
+  function spec(model: string): LayaModelSpecView | null {
+    return option(model)?.spec ?? null
+  }
+
+  /**
+   * Para o do catálogo vale o veredito do backend, que conhece os apelidos
+   * (`kev` baixado é o `kev:4b`); o resto, pela regra de nomes.
+   */
   function installed(model: string): boolean {
-    return isModelInstalled(models.value?.installed ?? [], model)
+    return option(model)?.installed ?? isModelInstalled(models.value?.installed ?? [], model)
   }
 
   /** O último estado de carregamento recebido pelo SSE. */
@@ -237,6 +253,7 @@ export const useAiLayaStore = defineStore('aiLaya', () => {
     pullProgress,
     loadModels,
     installed,
+    spec,
     modelState,
     inMemory,
     applyModelState,

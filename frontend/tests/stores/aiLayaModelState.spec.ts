@@ -41,4 +41,21 @@ describe('estado do modelo do Laya pelo SSE', () => {
     expect(isLayaModelState({ model: 'laya', baseUrl: 'x', state: 'outro' })).toBe(false)
     expect(isLayaModelState(null)).toBe(false)
   })
+  it('modelo do catálogo vale o veredito do backend, que conhece os apelidos', () => {
+    const store = useAiLayaStore()
+    store.models = {
+      online: true,
+      errorMessage: null,
+      installed: ['kev:latest', 'kev:9b'],
+      loaded: [],
+      options: [
+        { name: 'kev:4b', description: 'Kev 4B', installed: true },
+        { name: 'kev:0.8b', description: 'Kev 0.8B', installed: false },
+      ],
+    }
+    expect(store.installed('kev:4b')).toBe(true)
+    expect(store.installed('kev:0.8b')).toBe(false)
+    expect(store.installed('kev:9b')).toBe(true)
+    expect(store.spec('kev:4b')).toBeNull()
+  })
 })

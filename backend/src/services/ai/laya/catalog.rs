@@ -1,28 +1,601 @@
-//! Modelos do Laya para a tela escolher: os conhecidos, com o que cada um é,
-//! e os que o Ollaya já tem instalados.
+//! Modelos de decisão para a tela escolher: todos os do registro oficial do
+//! Ollaya que respondem às perguntas do NetMonitor, com a ficha de cada um, e
+//! os que o Ollaya já tem instalados.
+//!
+//! **Compatível** quer dizer: responde a perguntas livres sobre texto dos dois
+//! tipos que as decisões usam — `noul` (sim/não) e `choice` (escolha) — pela
+//! `/api/decide`, com pelo menos as opções da maior escolha fixa (os tipos de
+//! dispositivo). Ficam de fora:
+//!
+//! - `qwen3guard`: só responde às próprias perguntas de segurança (422 nas outras);
+//! - `decider:2b-vision`: no máximo 10 opções por escolha;
+//! - as tags `*-vision` de winnow e credence: o mesmo modelo de texto com um
+//!   projetor de imagem, sem uso de texto documentado;
+//! - as tags `*-fp16`/`*-fp32` do Laya: o mesmo modelo com a precisão fixada;
+//! - `afm-de`/`afm-dd`: só existem num fork, fora do registro que a imagem
+//!   `ghcr.io/ollaya-dev/ollaya` usa.
+//!
+//! A ficha ([`ModelSpec`]) guarda só o que o Ollaya publica (ollaya.dev,
+//! páginas `/library/<família>` e `/results`); o resto — GPU recomendada,
+//! tempo sugerido por pergunta, prazo de carregamento — sai de regras únicas
+//! aqui, sem número solto por modelo. Nenhuma página cita português: "100+
+//! línguas" é o que separa multilíngue de inglês.
+
+use std::time::Duration;
 
 use super::{client::LayaClient, config::AiLayaSettings};
 use crate::{
-    dtos::ai::{LayaModelOption, LayaModelsResponse},
+    dtos::ai::{
+        LayaModelLanguage::{self, English, Multilingual},
+        LayaModelOption, LayaModelSpecView, LayaModelsResponse,
+    },
     services::ai::local_models,
 };
 
-/// Modelos publicados no Ollaya, o recomendado primeiro.
-pub const KNOWN_MODELS: &[(&str, &str)] = &[
-    (
-        "laya",
-        "Roteador (recomendado): responde com laya:en ou laya:multilingual conforme a língua da pergunta",
-    ),
-    (
-        "laya:multilingual",
-        "mmBERT 322M, mais de 100 línguas — o que de fato responde perguntas em português",
-    ),
-    ("laya:en", "ModernBERT-large 421M, só inglês, o mais rápido"),
-    (
-        "laya:typed-decisions",
-        "ModernBERT-large ajustado para decisões tipadas (inglês)",
-    ),
+/// Prazo de carregamento de um modelo fora do catálogo.
+pub const DEFAULT_LOAD_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Onde o Ollaya mediu a latência publicada — e onde o modelo deve rodar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Hardware {
+    /// Medido num i9-13900K: roda bem sem placa de vídeo.
+    Cpu,
+    /// Medido numa RTX 4090: em CPU, segundos por pergunta.
+    Gpu,
+}
+
+/// A ficha de um modelo conhecido, como o Ollaya a publica.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ModelSpec {
+    pub name: &'static str,
+    /// Outros nomes do mesmo modelo no Ollaya (`kev` e `kev:latest` são o 4B).
+    pub aliases: &'static [&'static str],
+    pub family: &'static str,
+    pub description: &'static str,
+    pub language: LayaModelLanguage,
+    pub download_mb: Option<u32>,
+    /// Memória com o modelo carregado, quando publicada.
+    pub memory_mb: Option<u32>,
+    /// Mediana publicada para cinco perguntas, no hardware de [`Self::hardware`].
+    pub latency_ms: u32,
+    pub hardware: Hardware,
+    /// Acerto no typed-decisions, em milésimos — só quando comparável (sem
+    /// o benchmark no treino).
+    pub accuracy_permille: Option<u16>,
+    /// Teto de opções por escolha, quando o modelo tem um.
+    pub max_choice_options: Option<u16>,
+    /// Recomendado para o NetMonitor (um em CPU, um em GPU).
+    pub recommended: bool,
+}
+
+/// O que não muda de um modelo para outro; cada entrada diz só o que é dela.
+const BASE: ModelSpec = ModelSpec {
+    name: "",
+    aliases: &[],
+    family: "",
+    description: "",
+    language: English,
+    download_mb: None,
+    memory_mb: None,
+    latency_ms: 0,
+    hardware: Hardware::Cpu,
+    accuracy_permille: None,
+    max_choice_options: None,
+    recommended: false,
+};
+
+/// Medido em CPU pelo NetMonitor: com um modelo Laya carregado, de 3 a 4 GB.
+const LAYA_MEMORY_MB: u32 = 4_000;
+
+/// Faixa do "tempo máximo por pergunta" da configuração.
+const MIN_TIMEOUT_MS: u32 = 1_500;
+const MAX_TIMEOUT_MS: u32 = 10_000;
+
+impl ModelSpec {
+    #[must_use]
+    pub const fn gpu_recommended(&self) -> bool {
+        matches!(self.hardware, Hardware::Gpu)
+    }
+
+    /// Tempo máximo por pergunta sugerido. A latência publicada é de cinco
+    /// perguntas; a escolha de ferramentas do chat faz por volta de dez. Em
+    /// CPU a medição já é a do hardware comum (×3 de folga); em GPU ela é de
+    /// uma RTX 4090, e uma placa comum é mais lenta (×6). Arredonda para
+    /// cima, de 500 em 500 ms, dentro da faixa da configuração.
+    #[must_use]
+    pub const fn suggested_timeout_ms(&self) -> u32 {
+        let factor = match self.hardware {
+            Hardware::Cpu => 3,
+            Hardware::Gpu => 6,
+        };
+        let raw = self.latency_ms * factor;
+        let rounded = raw.div_ceil(500) * 500;
+        if rounded < MIN_TIMEOUT_MS {
+            MIN_TIMEOUT_MS
+        } else if rounded > MAX_TIMEOUT_MS {
+            MAX_TIMEOUT_MS
+        } else {
+            rounded
+        }
+    }
+
+    /// Tirar o modelo do disco: 30 s por GB baixado, de 2 a 15 minutos — um
+    /// Laya sai em 5 a 20 s, um 9B tem quase 20 GB.
+    #[must_use]
+    pub fn load_timeout(&self) -> Duration {
+        let secs = self.download_mb.map_or(0, |mb| u64::from(mb) * 30 / 1_000);
+        Duration::from_secs(secs.clamp(120, 900))
+    }
+
+    fn answers_to(&self, name: &str) -> bool {
+        same_tag(self.name, name) || self.aliases.iter().any(|alias| same_tag(alias, name))
+    }
+
+    fn view(&self) -> LayaModelSpecView {
+        LayaModelSpecView {
+            family: self.family.to_string(),
+            language: self.language,
+            download_mb: self.download_mb,
+            memory_mb: self.memory_mb,
+            latency_ms: self.latency_ms,
+            gpu_recommended: self.gpu_recommended(),
+            accuracy: self
+                .accuracy_permille
+                .map(|permille| f64::from(permille) / 1_000.0),
+            max_choice_options: self.max_choice_options,
+            suggested_timeout_ms: self.suggested_timeout_ms(),
+            recommended: self.recommended,
+        }
+    }
+}
+
+/// Os modelos compatíveis, agrupados por família: primeiro os multilíngues
+/// (Laya, que é o padrão, depois os de GPU), depois os em inglês que rodam em
+/// CPU, por fim os em inglês que pedem GPU.
+pub const KNOWN_MODELS: &[ModelSpec] = &[
+    // ── Laya (Convai Innovations): encoders leves, o padrão ──
+    ModelSpec {
+        name: "laya",
+        family: "Laya",
+        description: "Laya: roteador — perguntas fora do inglês vão ao laya:multilingual, em inglês ao laya:en. Leve, o padrão para CPU",
+        language: Multilingual,
+        download_mb: Some(1_536),
+        memory_mb: Some(LAYA_MEMORY_MB),
+        latency_ms: 307,
+        accuracy_permille: Some(361),
+        max_choice_options: Some(125),
+        recommended: true,
+        ..BASE
+    },
+    ModelSpec {
+        name: "laya:multilingual",
+        family: "Laya",
+        description: "Laya: mmBERT 322M, 100+ línguas — o que de fato responde em português",
+        language: Multilingual,
+        download_mb: Some(683),
+        memory_mb: Some(LAYA_MEMORY_MB),
+        latency_ms: 307,
+        accuracy_permille: Some(362),
+        max_choice_options: Some(250),
+        ..BASE
+    },
+    ModelSpec {
+        name: "laya:en",
+        family: "Laya",
+        description: "Laya: ModernBERT-large 421M, só inglês",
+        download_mb: Some(853),
+        memory_mb: Some(LAYA_MEMORY_MB),
+        latency_ms: 619,
+        accuracy_permille: Some(361),
+        max_choice_options: Some(125),
+        ..BASE
+    },
+    ModelSpec {
+        name: "laya:typed-decisions",
+        family: "Laya",
+        description: "Laya: ModernBERT-large ajustado nas decisões tipadas, só inglês",
+        download_mb: Some(852),
+        memory_mb: Some(LAYA_MEMORY_MB),
+        // Sem medição própria em CPU: o mesmo backbone do laya:en.
+        latency_ms: 619,
+        ..BASE
+    },
+    // ── Multilíngues para GPU: os mais precisos ──
+    ModelSpec {
+        name: "winnow:e4b",
+        family: "Winnow",
+        description: "Winnow (EldanRing): Gemma 4 E4B, 100+ línguas e entre os mais precisos (0,722) — o recomendado do Ollaya para GPU",
+        language: Multilingual,
+        download_mb: Some(8_000),
+        memory_mb: Some(9_000),
+        latency_ms: 89,
+        hardware: Hardware::Gpu,
+        accuracy_permille: Some(722),
+        max_choice_options: Some(64),
+        recommended: true,
+        ..BASE
+    },
+    ModelSpec {
+        name: "winnow:12b",
+        aliases: &["winnow"],
+        family: "Winnow",
+        description: "Winnow (EldanRing): Gemma 4 12B, 100+ línguas, sem calibração",
+        language: Multilingual,
+        download_mb: Some(12_700),
+        memory_mb: Some(14_000),
+        latency_ms: 131,
+        hardware: Hardware::Gpu,
+        accuracy_permille: Some(702),
+        max_choice_options: Some(64),
+        ..BASE
+    },
+    ModelSpec {
+        name: "credence:e4b",
+        aliases: &["credence"],
+        family: "Credence",
+        description: "Credence (Txoka): Winnow-E4B refinado, 100+ línguas, o mais preciso (0,724)",
+        language: Multilingual,
+        download_mb: Some(8_700),
+        latency_ms: 97,
+        hardware: Hardware::Gpu,
+        accuracy_permille: Some(724),
+        max_choice_options: Some(64),
+        ..BASE
+    },
+    ModelSpec {
+        name: "credence:e4b-calibrated",
+        family: "Credence",
+        description: "Credence (Txoka): a versão com a melhor calibração das probabilidades, 100+ línguas",
+        language: Multilingual,
+        download_mb: Some(8_700),
+        // Sem medição própria: o mesmo motor do credence:e4b.
+        latency_ms: 97,
+        hardware: Hardware::Gpu,
+        accuracy_permille: Some(722),
+        max_choice_options: Some(64),
+        ..BASE
+    },
+    ModelSpec {
+        name: "cygnet:12b",
+        aliases: &["cygnet"],
+        family: "Cygnet",
+        description: "Cygnet (blockbrain-ai): Gemma 4 12B, 100+ línguas, até 20 opções por escolha",
+        language: Multilingual,
+        download_mb: Some(12_700),
+        latency_ms: 202,
+        hardware: Hardware::Gpu,
+        accuracy_permille: Some(683),
+        max_choice_options: Some(20),
+        ..BASE
+    },
+    ModelSpec {
+        name: "arbiter:4b",
+        aliases: &["arbiter"],
+        family: "Arbiter",
+        description: "Arbiter (Zyot Lab): Gemma 3 4B, 100+ línguas, até 16 opções por escolha",
+        language: Multilingual,
+        download_mb: Some(8_800),
+        memory_mb: Some(8_000),
+        latency_ms: 154,
+        hardware: Hardware::Gpu,
+        max_choice_options: Some(16),
+        ..BASE
+    },
+    // ── Multilíngues leves para CPU ──
+    ModelSpec {
+        name: "decima:base",
+        aliases: &["decima"],
+        family: "Decima",
+        description: "Decima: mmBERT-base, multilíngue e leve em CPU, um pouco mais preciso que o Laya (0,495)",
+        language: Multilingual,
+        download_mb: Some(1_300),
+        latency_ms: 438,
+        accuracy_permille: Some(495),
+        ..BASE
+    },
+    ModelSpec {
+        name: "decima:agent",
+        family: "Decima",
+        description: "Decima: ajustado para decisões de agentes de código (comandos, segredos, ferramentas), multilíngue",
+        language: Multilingual,
+        download_mb: Some(1_300),
+        latency_ms: 439,
+        accuracy_permille: Some(486),
+        ..BASE
+    },
+    ModelSpec {
+        name: "decima:small",
+        family: "Decima",
+        description: "Decima: o mais rápido em CPU que o Ollaya roda (122M), avaliado em 20 línguas",
+        language: Multilingual,
+        download_mb: Some(510),
+        latency_ms: 146,
+        accuracy_permille: Some(432),
+        ..BASE
+    },
+    // ── Em inglês, leves para CPU ──
+    ModelSpec {
+        name: "kev:0.8b",
+        family: "Kev",
+        description: "Kev (Jared Palmer): Qwen3.5 0,8B, o Kev que cabe em CPU, só inglês",
+        download_mb: Some(1_800),
+        latency_ms: 1_270,
+        accuracy_permille: Some(460),
+        ..BASE
+    },
+    ModelSpec {
+        name: "decision:eos",
+        aliases: &["decision"],
+        family: "Decision",
+        description: "Decision (vLLM Semantic Router): Qwen3.5 0,8B, inglês e chinês",
+        download_mb: Some(1_500),
+        latency_ms: 2_000,
+        ..BASE
+    },
+    ModelSpec {
+        name: "nli:deberta-v3-large",
+        aliases: &["nli"],
+        family: "NLI",
+        description: "NLI (Moritz Laurer): classificador zero-shot DeBERTa-v3, só inglês, sem calibração",
+        download_mb: Some(884),
+        latency_ms: 781,
+        accuracy_permille: Some(548),
+        ..BASE
+    },
+    ModelSpec {
+        name: "nli:modernbert-large",
+        family: "NLI",
+        description: "NLI (Moritz Laurer): classificador zero-shot ModernBERT, só inglês, sem calibração",
+        download_mb: Some(799),
+        latency_ms: 594,
+        accuracy_permille: Some(515),
+        ..BASE
+    },
+    ModelSpec {
+        name: "gliclass:large",
+        aliases: &["gliclass"],
+        family: "GLiClass",
+        description: "GLiClass (Knowledgator): classificador zero-shot, só inglês, fraco em sim/não",
+        download_mb: Some(1_800),
+        latency_ms: 563,
+        accuracy_permille: Some(477),
+        ..BASE
+    },
+    ModelSpec {
+        name: "von:1.1",
+        aliases: &["von"],
+        family: "Von",
+        description: "Von: ModernBERT-large, só inglês; texto longo fica caro em CPU",
+        download_mb: Some(1_600),
+        latency_ms: 760,
+        accuracy_permille: Some(447),
+        ..BASE
+    },
+    // ── Em inglês, para GPU ──
+    ModelSpec {
+        name: "kev:4b",
+        aliases: &["kev"],
+        family: "Kev",
+        description: "Kev (Jared Palmer): Qwen3.5 4B, preciso (0,669), só inglês",
+        download_mb: Some(9_500),
+        memory_mb: Some(11_000),
+        latency_ms: 354,
+        hardware: Hardware::Gpu,
+        accuracy_permille: Some(669),
+        ..BASE
+    },
+    ModelSpec {
+        name: "kev:9b",
+        family: "Kev",
+        description: "Kev (Jared Palmer): Qwen3.5 9B, o Kev mais preciso (0,722), só inglês",
+        download_mb: Some(19_500),
+        memory_mb: Some(18_000),
+        latency_ms: 498,
+        hardware: Hardware::Gpu,
+        accuracy_permille: Some(722),
+        ..BASE
+    },
+    ModelSpec {
+        name: "decider:2b",
+        aliases: &["decider"],
+        family: "Decider",
+        description: "Decider (Mapika): Qwen3.5 2B, só inglês",
+        download_mb: Some(3_800),
+        memory_mb: Some(13_000),
+        latency_ms: 190,
+        hardware: Hardware::Gpu,
+        accuracy_permille: Some(591),
+        max_choice_options: Some(255),
+        ..BASE
+    },
+    ModelSpec {
+        name: "decider:4b",
+        family: "Decider",
+        description: "Decider (Mapika): Qwen3.5 4B, o Decider mais preciso (0,680), só inglês",
+        download_mb: Some(8_400),
+        memory_mb: Some(14_000),
+        latency_ms: 520,
+        hardware: Hardware::Gpu,
+        accuracy_permille: Some(680),
+        max_choice_options: Some(255),
+        ..BASE
+    },
+    ModelSpec {
+        name: "decider:0.8b",
+        family: "Decider",
+        description: "Decider (Mapika): Qwen3.5 0,8B, o menor Decider, só inglês",
+        download_mb: Some(1_500),
+        latency_ms: 155,
+        hardware: Hardware::Gpu,
+        accuracy_permille: Some(506),
+        max_choice_options: Some(255),
+        ..BASE
+    },
+    ModelSpec {
+        name: "jeb:9b",
+        aliases: &["jeb"],
+        family: "Jeb",
+        description: "Jeb (Jason Brashear): Qwen3.5 9B, só inglês (sem nota comparável: treinou no benchmark)",
+        download_mb: Some(9_800),
+        latency_ms: 124,
+        hardware: Hardware::Gpu,
+        max_choice_options: Some(255),
+        ..BASE
+    },
+    ModelSpec {
+        name: "jeb:4b",
+        family: "Jeb",
+        description: "Jeb (Jason Brashear): Qwen3.5 4B, o menor e mais rápido Jeb, só inglês",
+        download_mb: Some(4_600),
+        latency_ms: 96,
+        hardware: Hardware::Gpu,
+        max_choice_options: Some(255),
+        ..BASE
+    },
+    ModelSpec {
+        name: "jeb:27b",
+        family: "Jeb",
+        description: "Jeb (Jason Brashear): Qwen3.8 27B para GPU de 24 GB, só inglês",
+        download_mb: Some(16_800),
+        latency_ms: 309,
+        hardware: Hardware::Gpu,
+        max_choice_options: Some(255),
+        ..BASE
+    },
+    ModelSpec {
+        name: "jeeves:9b",
+        aliases: &["jeeves"],
+        family: "Jeeves",
+        description: "Jeeves (PostHog): Qwen3.5 9B, bem calibrado, só inglês",
+        download_mb: Some(17_900),
+        memory_mb: Some(18_000),
+        latency_ms: 838,
+        hardware: Hardware::Gpu,
+        accuracy_permille: Some(680),
+        ..BASE
+    },
+    ModelSpec {
+        name: "clef:flash",
+        aliases: &["clef"],
+        family: "Clef",
+        description: "Clef (Cloudflare): Qwen3.5 9B, preciso (0,703) e o mais bem calibrado, só inglês",
+        download_mb: Some(19_100),
+        memory_mb: Some(19_000),
+        latency_ms: 532,
+        hardware: Hardware::Gpu,
+        accuracy_permille: Some(703),
+        ..BASE
+    },
+    ModelSpec {
+        name: "nimble:9b",
+        aliases: &["nimble"],
+        family: "Nimble",
+        description: "Nimble (Bespoke Labs): Qwen3.5 9B, lento mesmo em GPU, só inglês",
+        download_mb: Some(19_500),
+        memory_mb: Some(18_000),
+        latency_ms: 2_297,
+        hardware: Hardware::Gpu,
+        accuracy_permille: Some(665),
+        max_choice_options: Some(255),
+        ..BASE
+    },
+    ModelSpec {
+        name: "jevk5:4b",
+        aliases: &["jevk5"],
+        family: "JevK5",
+        description: "JevK5 (alibiserikbay): Qwen3.5 4B, até 16 opções por escolha, só inglês",
+        download_mb: Some(4_500),
+        latency_ms: 105,
+        hardware: Hardware::Gpu,
+        accuracy_permille: Some(625),
+        max_choice_options: Some(16),
+        ..BASE
+    },
+    ModelSpec {
+        name: "snap:2b",
+        aliases: &["snap"],
+        family: "Snap",
+        description: "Snap (logitlab): MiniCPM5 2B, inglês e italiano, até 26 opções, sem calibração",
+        download_mb: Some(2_700),
+        memory_mb: Some(3_000),
+        latency_ms: 68,
+        hardware: Hardware::Gpu,
+        accuracy_permille: Some(648),
+        max_choice_options: Some(26),
+        ..BASE
+    },
+    ModelSpec {
+        name: "snap:2b-q4_k_m",
+        family: "Snap",
+        description: "Snap (logitlab): o mesmo 2B quantizado em 4 bits, menor, inglês e italiano",
+        download_mb: Some(1_600),
+        latency_ms: 63,
+        hardware: Hardware::Gpu,
+        accuracy_permille: Some(660),
+        max_choice_options: Some(26),
+        ..BASE
+    },
+    ModelSpec {
+        name: "clm:8b",
+        aliases: &["clm"],
+        family: "CLM",
+        description: "CLM (Contrastive-LM): feito para agentes e jogos — perto do acaso em triagem geral, só inglês",
+        download_mb: Some(16_500),
+        memory_mb: Some(16_000),
+        latency_ms: 500,
+        hardware: Hardware::Gpu,
+        accuracy_permille: Some(357),
+        ..BASE
+    },
 ];
+
+/// O mesmo modelo: sem caixa e com `:latest` implícito.
+fn same_tag(a: &str, b: &str) -> bool {
+    let normalize = |tag: &str| {
+        let tag = tag.trim().to_lowercase();
+        tag.strip_suffix(":latest")
+            .map(str::to_string)
+            .unwrap_or(tag)
+    };
+    normalize(a) == normalize(b)
+}
+
+/// A ficha do modelo, pelo nome ou por um apelido.
+#[must_use]
+pub fn spec(model: &str) -> Option<&'static ModelSpec> {
+    KNOWN_MODELS.iter().find(|spec| spec.answers_to(model))
+}
+
+/// Quanto esperar o Ollaya tirar o modelo do disco.
+#[must_use]
+pub fn load_timeout(model: &str) -> Duration {
+    spec(model).map_or(DEFAULT_LOAD_TIMEOUT, ModelSpec::load_timeout)
+}
+
+/// Teto de opções por escolha do modelo; `None` quando ele não tem um.
+#[must_use]
+pub fn max_choice_options(model: &str) -> Option<usize> {
+    spec(model)
+        .and_then(|spec| spec.max_choice_options)
+        .map(usize::from)
+}
+
+/// O modelo está na lista do Ollaya (instalados ou carregados), por qualquer
+/// nome dele: `kev:4b` vale para quem baixou `kev`. O apelido é comparado
+/// exato — `kev` não pode casar com um `kev:9b` instalado.
+///
+/// Nome sem tag (o roteador `laya`) mantém a regra de sempre: qualquer
+/// `laya:*` instalado conta.
+#[must_use]
+pub fn is_available<S: AsRef<str>>(names: &[S], model: &str) -> bool {
+    match spec(model) {
+        Some(spec) if spec.name.contains(':') => {
+            names.iter().any(|name| spec.answers_to(name.as_ref()))
+        }
+        Some(spec) => local_models::is_installed(names, spec.name),
+        None => local_models::is_installed(names, model),
+    }
+}
 
 /// Nunca falha: fora do ar vira `online: false` com o motivo.
 pub async fn list(settings: &AiLayaSettings) -> LayaModelsResponse {
@@ -44,22 +617,21 @@ pub async fn list(settings: &AiLayaSettings) -> LayaModelsResponse {
 
     let mut options: Vec<LayaModelOption> = KNOWN_MODELS
         .iter()
-        .map(|&(name, description)| LayaModelOption {
-            name: name.to_string(),
-            description: Some(description.to_string()),
-            installed: local_models::is_installed(&installed, name),
+        .map(|spec| LayaModelOption {
+            name: spec.name.to_string(),
+            description: Some(spec.description.to_string()),
+            installed: is_available(&installed, spec.name),
+            spec: Some(spec.view()),
         })
         .collect();
     // Instalado fora do catálogo (um modelo próprio, uma tag nova) também aparece.
     for name in &installed {
-        if !options
-            .iter()
-            .any(|option| option.name.eq_ignore_ascii_case(name))
-        {
+        if spec(name).is_none() {
             options.push(LayaModelOption {
                 name: name.clone(),
                 description: None,
                 installed: true,
+                spec: None,
             });
         }
     }
@@ -75,7 +647,10 @@ pub async fn list(settings: &AiLayaSettings) -> LayaModelsResponse {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use super::*;
+    use crate::services::devices::kinds::DEVICE_KINDS;
 
     #[tokio::test]
     async fn fora_do_ar_ainda_oferece_o_catalogo() {
@@ -89,5 +664,120 @@ mod tests {
         assert!(models.error_message.is_some());
         assert_eq!(models.options.len(), KNOWN_MODELS.len());
         assert!(models.options.iter().all(|option| !option.installed));
+        assert!(models.options.iter().all(|option| option.spec.is_some()));
+    }
+
+    #[test]
+    fn padrao_e_o_laya_multilingue_em_cpu() {
+        let padrao = spec(super::super::config::DEFAULT_LAYA_MODEL).unwrap();
+        assert!(padrao.recommended);
+        assert_eq!(padrao.language, Multilingual);
+        assert!(!padrao.gpu_recommended());
+        assert_eq!(
+            padrao.suggested_timeout_ms(),
+            super::super::config::DEFAULT_LAYA_TIMEOUT_MS,
+            "o tempo padrão da configuração é o sugerido para o padrão"
+        );
+    }
+
+    #[test]
+    fn um_recomendado_em_cpu_e_um_em_gpu() {
+        let recomendados: Vec<&ModelSpec> = KNOWN_MODELS
+            .iter()
+            .filter(|spec| spec.recommended)
+            .collect();
+        assert_eq!(recomendados.len(), 2);
+        assert!(recomendados.iter().any(|spec| !spec.gpu_recommended()));
+        assert!(recomendados.iter().any(|spec| spec.gpu_recommended()));
+        assert!(recomendados
+            .iter()
+            .all(|spec| spec.language == Multilingual));
+    }
+
+    #[test]
+    fn nomes_e_apelidos_sao_unicos() {
+        let mut seen = HashSet::new();
+        for spec in KNOWN_MODELS {
+            for name in std::iter::once(&spec.name).chain(spec.aliases) {
+                assert!(seen.insert(name.to_lowercase()), "{name} repetido");
+            }
+        }
+    }
+
+    #[test]
+    fn todo_modelo_aceita_a_maior_escolha_fixa() {
+        for spec in KNOWN_MODELS {
+            if let Some(max) = spec.max_choice_options {
+                assert!(
+                    usize::from(max) >= DEVICE_KINDS.len(),
+                    "{} não escolhe entre os {} tipos de dispositivo",
+                    spec.name,
+                    DEVICE_KINDS.len()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn toda_ficha_tem_latencia_e_descricao() {
+        for spec in KNOWN_MODELS {
+            assert!(spec.latency_ms > 0, "{}", spec.name);
+            assert!(!spec.description.is_empty(), "{}", spec.name);
+            assert!(!spec.family.is_empty(), "{}", spec.name);
+        }
+    }
+
+    #[test]
+    fn apelido_resolve_para_o_tamanho_padrao_da_familia() {
+        assert_eq!(spec("kev").map(|spec| spec.name), Some("kev:4b"));
+        assert_eq!(spec("KEV:latest").map(|spec| spec.name), Some("kev:4b"));
+        assert_eq!(spec("winnow").map(|spec| spec.name), Some("winnow:12b"));
+        assert_eq!(spec("decima").map(|spec| spec.name), Some("decima:base"));
+        assert!(spec("qwen3guard").is_none(), "incompatível fica fora");
+        assert!(spec("modelo-proprio").is_none());
+    }
+
+    #[test]
+    fn disponivel_pelo_apelido_sem_confundir_tamanhos() {
+        assert!(
+            is_available(&["kev:latest"], "kev:4b"),
+            "baixou `kev`, tem o 4B"
+        );
+        assert!(is_available(&["kev:4b"], "kev:4b"));
+        assert!(!is_available(&["kev:9b"], "kev:4b"), "o 9B não é o 4B");
+        assert!(!is_available(&["kev:0.8b"], "kev:9b"));
+        assert!(is_available(&["laya:latest"], "laya"));
+        assert!(is_available(&["meu-modelo"], "meu-modelo"));
+    }
+
+    #[test]
+    fn tempo_sugerido_segue_a_latencia_e_o_hardware() {
+        let tempo = |name: &str| spec(name).unwrap().suggested_timeout_ms();
+        assert_eq!(tempo("laya:en"), 2_000, "619 ms em CPU × 3");
+        assert_eq!(tempo("kev:4b"), 2_500, "354 ms numa 4090 × 6");
+        assert_eq!(tempo("nimble:9b"), MAX_TIMEOUT_MS, "o teto da configuração");
+        assert_eq!(tempo("decima:small"), MIN_TIMEOUT_MS, "o piso");
+        for spec in KNOWN_MODELS {
+            assert!(
+                (MIN_TIMEOUT_MS..=MAX_TIMEOUT_MS).contains(&spec.suggested_timeout_ms()),
+                "{}",
+                spec.name
+            );
+        }
+    }
+
+    #[test]
+    fn modelo_grande_tem_prazo_maior_para_carregar() {
+        assert!(load_timeout("kev:9b") > load_timeout("kev:4b"));
+        assert!(load_timeout("kev:4b") > load_timeout("laya"));
+        assert_eq!(load_timeout("laya"), Duration::from_secs(120));
+        assert_eq!(load_timeout("desconhecido"), DEFAULT_LOAD_TIMEOUT);
+    }
+
+    #[test]
+    fn teto_de_opcoes_vem_da_ficha() {
+        assert_eq!(max_choice_options("jevk5"), Some(16));
+        assert_eq!(max_choice_options("kev:4b"), None);
+        assert_eq!(max_choice_options("desconhecido"), None);
     }
 }
