@@ -280,7 +280,7 @@ const doubtful = computed(
 )
 
 /**
- * Vai aos equipamentos em dúvida (SSH, SNMP; o Laya se faltar evidência) e
+ * Vai aos equipamentos em dúvida (SSH, SNMP; o Decisor se faltar evidência) e
  * refaz a compatibilidade pelo sistema que eles mostrarem — não pelo
  * fabricante do cadastro, que descreve o hardware.
  */

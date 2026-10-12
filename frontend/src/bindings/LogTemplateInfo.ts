@@ -5,11 +5,11 @@
  */
 export type LogTemplateInfo = { templateHash: string, template: string, example: string, 
 /**
- * A que vale: a do operador, senão a do Laya.
+ * A que vale: a do operador, senão a do Decisor.
  */
 category: string | null, 
 /**
- * Do palpite do Laya (0–100); `null` quando o operador decidiu.
+ * Do palpite do Decisor (0–100); `null` quando o operador decidiu.
  */
 confidence: number | null, model: string | null, 
 /**

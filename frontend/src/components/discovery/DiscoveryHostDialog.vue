@@ -59,8 +59,8 @@
           <div v-if="alternative" class="text-body-2 mt-2">
             Também pode ser: <strong>{{ alternative.label }}</strong>
           </div>
-          <LayaSuggestionChip
-            :suggestion="laya?.deviceType ?? null"
+          <DeciderSuggestionChip
+            :suggestion="decider?.deviceType ?? null"
             :format-label="deviceTypeLabel"
             class="mt-2"
           />
@@ -182,7 +182,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import LayaSuggestionChip from '@/components/ai/LayaSuggestionChip.vue'
+import DeciderSuggestionChip from '@/components/ai/DeciderSuggestionChip.vue'
 import type { StreamedDiscoveryHost } from '@/stores/discovery'
 import { deviceTypeLabel } from '@/utils/deviceTypes'
 import {
@@ -191,7 +191,7 @@ import {
   discoveryDescription,
   discoveryDeviceName,
   discoveryIdentity,
-  discoveryLaya,
+  discoveryDecider,
   discoveryMdns,
   discoveryNetbios,
   discoveryOpenPorts,
@@ -223,7 +223,7 @@ const type = computed(() => discoveryTypeMeta(props.host))
 const name = computed(() => discoveryDeviceName(props.host) ?? type.value.label)
 const identity = computed(() => discoveryIdentity(props.host))
 const webPage = computed(() => discoveryWebPage(props.host))
-const laya = computed(() => discoveryLaya(props.host))
+const decider = computed(() => discoveryDecider(props.host))
 const reasons = computed(() => discoveryReasons(props.host))
 const alternative = computed(() => discoveryAlternative(props.host))
 const ports = computed(() => discoveryOpenPorts(props.host))

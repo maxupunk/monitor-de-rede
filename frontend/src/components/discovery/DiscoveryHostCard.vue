@@ -56,7 +56,10 @@
       >
         Cadastrado
       </v-chip>
-      <LayaSuggestionChip :suggestion="laya?.deviceType ?? null" :format-label="deviceTypeLabel" />
+      <DeciderSuggestionChip
+        :suggestion="decider?.deviceType ?? null"
+        :format-label="deviceTypeLabel"
+      />
     </div>
 
     <div class="px-3 pt-2 flex-grow-1">
@@ -102,14 +105,14 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import LayaSuggestionChip from '@/components/ai/LayaSuggestionChip.vue'
+import DeciderSuggestionChip from '@/components/ai/DeciderSuggestionChip.vue'
 import type { StreamedDiscoveryHost } from '@/stores/discovery'
 import { deviceTypeLabel } from '@/utils/deviceTypes'
 import {
   discoveryConfidenceColor,
   discoveryDescription,
   discoveryDeviceName,
-  discoveryLaya,
+  discoveryDecider,
   discoveryOpenPorts,
   discoveryReasons,
   discoverySnmpVersion,
@@ -136,7 +139,7 @@ const vendor = computed(() => discoveryVendorLabel(props.host))
 const reason = computed(() => discoveryReasons(props.host)[0] ?? null)
 const ports = computed(() => discoveryOpenPorts(props.host))
 const snmpVersion = computed(() => discoverySnmpVersion(props.host))
-const laya = computed(() => discoveryLaya(props.host))
+const decider = computed(() => discoveryDecider(props.host))
 const confidenceColor = computed(() => discoveryConfidenceColor(props.host.confidence))
 const confidenceLabel = computed(() => formatPercent(props.host.confidence, 0))
 </script>

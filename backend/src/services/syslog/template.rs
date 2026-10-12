@@ -3,7 +3,7 @@
 //! contador — são um padrão só.
 //!
 //! Serve a dois donos: as ferramentas da IA agrupam por ele na hora da
-//! consulta, e a classificação de eventos o usa como chave — o Laya responde
+//! consulta, e a classificação de eventos o usa como chave — o Decisor responde
 //! uma vez por padrão, não uma vez por linha.
 
 use sha2::{Digest, Sha256};

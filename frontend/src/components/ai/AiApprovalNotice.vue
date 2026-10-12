@@ -12,7 +12,7 @@
     <template v-if="approval">
       <div class="d-flex align-center ga-2 mb-2 flex-wrap">
         <v-icon color="warning">mdi-robot-outline</v-icon>
-        <span class="font-weight-bold">Laya aguarda sua aprovação</span>
+        <span class="font-weight-bold">Decisor aguarda sua aprovação</span>
         <v-chip size="x-small" :color="risk.color" variant="flat">
           <v-icon start size="12">{{ risk.icon }}</v-icon>
           {{ risk.label }}

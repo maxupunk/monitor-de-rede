@@ -1,4 +1,4 @@
-//! Um Ollaya falso em `127.0.0.1:0` para os testes do Laya.
+//! Um Ollaya falso em `127.0.0.1:0` para os testes do Decisor.
 //!
 //! Exige o Bearer de [`TOKEN`], lista o `laya:multilingual` como instalado e
 //! responde `/api/decide` pelo `Responder` dado. Conta as chamadas e guarda
@@ -21,7 +21,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use backend::services::ai::laya::config::{AiLayaSettings, API_KEY_ENV};
+use backend::services::ai::decider::config::{AiDeciderSettings, API_KEY_ENV};
 use serde_json::{json, Value};
 
 pub const TOKEN: &str = "chave-do-ollaya";
@@ -48,12 +48,14 @@ impl FakeOllaya {
     }
 
     /// Configuração ligada apontando para este servidor.
-    pub fn settings(&self) -> AiLayaSettings {
-        AiLayaSettings {
+    pub fn settings(&self) -> AiDeciderSettings {
+        AiDeciderSettings {
             enabled: true,
             base_url: self.base_url.clone(),
+            // O que o Ollaya falso tem instalado (o padrão do Decisor é outro).
+            model: "laya".into(),
             timeout_ms: 5_000,
-            ..AiLayaSettings::default()
+            ..AiDeciderSettings::default()
         }
     }
 }

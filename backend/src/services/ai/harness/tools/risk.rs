@@ -8,7 +8,7 @@
 //! | risco | o que é | no modo automático |
 //! |---|---|---|
 //! | baixo | não muda nada ou só acrescenta (ping, reconhecer alerta, criar monitor) | roda |
-//! | médio | muda algo reversível (reiniciar container, silenciar por pouco tempo) | roda — salvo se o Laya achar perigoso no contexto |
+//! | médio | muda algo reversível (reiniciar container, silenciar por pouco tempo) | roda — salvo se o Decisor achar perigoso no contexto |
 //! | alto | pode derrubar um serviço, apagar dado ou esconder um problema real | sempre pergunta |
 //!
 //! [`AiToolHandler::risk`]: super::AiToolHandler::risk
@@ -29,7 +29,7 @@ pub enum AiToolRisk {
 }
 
 impl AiToolRisk {
-    /// Em inglês, para o estado que o Laya lê.
+    /// Em inglês, para o estado que o Decisor lê.
     #[must_use]
     pub const fn id(self) -> &'static str {
         match self {
@@ -84,7 +84,7 @@ impl RiskAssessment {
         }
     }
 
-    /// Sobe para alto com o motivo dado (o Laya viu perigo no contexto).
+    /// Sobe para alto com o motivo dado (o Decisor viu perigo no contexto).
     #[must_use]
     pub fn escalated(reason: impl Into<String>) -> Self {
         Self::high(reason)

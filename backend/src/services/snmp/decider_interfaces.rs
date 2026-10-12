@@ -1,4 +1,4 @@
-//! O Laya indicando o uplink e as interfaces que valem monitorar.
+//! O Decisor indicando o uplink e as interfaces que valem monitorar.
 //!
 //! Consulta pontual, disparada quando a tela mostra a lista de interfaces
 //! (fila interativa: alguém espera). Não grava nada — quem aplica é o
@@ -9,17 +9,20 @@ use serde_json::json;
 
 use crate::{
     dtos::snmp::{InterfaceSuggestions, InterfaceSuggestionsInput},
-    services::ai::laya::{
+    services::ai::decider::{
         catalog,
-        config::LayaFeature,
+        config::DeciderFeature,
         decisions::interfaces::{rank_candidates, InterfaceAdvice},
-        runtime::{Lane, LayaRuntime},
+        runtime::{DeciderRuntime, Lane},
     },
 };
 
 pub async fn suggest(ctx: &AppContext, input: &InterfaceSuggestionsInput) -> InterfaceSuggestions {
-    let runtime = LayaRuntime::from_context(ctx);
-    let Some(settings) = runtime.settings_for(&ctx.db, LayaFeature::Interfaces).await else {
+    let runtime = DeciderRuntime::from_context(ctx);
+    let Some(settings) = runtime
+        .settings_for(&ctx.db, DeciderFeature::Interfaces)
+        .await
+    else {
         return InterfaceSuggestions::default();
     };
     let ranked = rank_candidates(

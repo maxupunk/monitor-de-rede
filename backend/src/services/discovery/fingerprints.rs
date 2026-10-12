@@ -9,7 +9,7 @@
 //! impressão RAW (9100) vale mais que um "tv" solto num nome.
 
 /// Tipos que a descoberta devolve — os ids de `devices::kinds::DEVICE_KINDS`
-/// mais os dois de dúvida (`web_device`, `unknown`), que o Laya tenta resolver.
+/// mais os dois de dúvida (`web_device`, `unknown`), que o Decisor tenta resolver.
 pub mod kind {
     pub const ROUTER: &str = "router";
     pub const SWITCH: &str = "switch";

@@ -98,9 +98,9 @@ pub struct LogTemplateInfo {
     pub template_hash: String,
     pub template: String,
     pub example: String,
-    /// A que vale: a do operador, senão a do Laya.
+    /// A que vale: a do operador, senão a do Decisor.
     pub category: Option<String>,
-    /// Do palpite do Laya (0–100); `null` quando o operador decidiu.
+    /// Do palpite do Decisor (0–100); `null` quando o operador decidiu.
     #[ts(type = "number | null")]
     pub confidence: Option<i16>,
     pub model: Option<String>,

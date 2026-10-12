@@ -3,17 +3,17 @@
 //!
 //! O que se afirma aqui, contra um Ollaya falso que leva mais que o tempo
 //! máximo para carregar: o teste da tela espera o carregamento e responde;
-//! o chat não espera — segue sem o Laya e deixa o modelo carregando; e dois
+//! o chat não espera — segue sem o Decisor e deixa o modelo carregando; e dois
 //! pedidos ao mesmo tempo carregam o modelo uma vez só.
 
 use std::time::Duration;
 
 use backend::{
     app::App,
-    dtos::ai::TestLayaResponse,
+    dtos::ai::TestDeciderResponse,
     services::ai::{
+        decider::{config::AiDeciderSettings, runtime::DeciderRuntime, tool_routing},
         harness::tools::ToolGroup,
-        laya::{config::AiLayaSettings, runtime::LayaRuntime, tool_routing},
     },
 };
 use loco_rs::testing::prelude::*;
@@ -28,12 +28,14 @@ use super::{
 /// Carregar leva 1,2 s; o tempo máximo por pergunta é 400 ms.
 const LOAD: Duration = Duration::from_millis(1_200);
 
-fn settings(base_url: String) -> AiLayaSettings {
-    AiLayaSettings {
+fn settings(base_url: String) -> AiDeciderSettings {
+    AiDeciderSettings {
         enabled: true,
         base_url,
+        // O que o Ollaya falso tem instalado (o padrão do Decisor é outro).
+        model: "laya".into(),
         timeout_ms: 400,
-        ..AiLayaSettings::default()
+        ..AiDeciderSettings::default()
     }
 }
 
@@ -47,15 +49,15 @@ async fn teste_da_tela_espera_o_modelo_carregar_e_responde() {
         let (h, v) = prepare_data::auth_header(&sessao.token);
 
         let response = request
-            .post("/api/ai/laya/test")
+            .post("/api/ai/decider/test")
             .add_header(h, v)
             .json(&json!({
-                "laya": settings(ollaya.base_url.clone()),
+                "decider": settings(ollaya.base_url.clone()),
                 "question": "e os containers?"
             }))
             .await;
         response.assert_status_ok();
-        let result: TestLayaResponse = response.json();
+        let result: TestDeciderResponse = response.json();
 
         assert!(result.success, "{}", result.message);
         assert_eq!(ollaya.loads(), 1, "carregou uma vez, com prazo próprio");
@@ -69,7 +71,7 @@ async fn teste_da_tela_espera_o_modelo_carregar_e_responde() {
 async fn chat_nao_espera_o_carregamento_e_deixa_o_modelo_subindo() {
     with_key();
     let ollaya = fake_ollaya::start_cold(by_keyword(&[("", "docker")]), LOAD).await;
-    let runtime = LayaRuntime::default();
+    let runtime = DeciderRuntime::default();
     let settings = settings(ollaya.base_url.clone());
 
     let started = std::time::Instant::now();
@@ -96,7 +98,10 @@ async fn chat_nao_espera_o_carregamento_e_deixa_o_modelo_subindo() {
         &ToolGroup::DEFERRED,
     )
     .await;
-    assert!(groups.contains(&ToolGroup::Docker), "quente: o Laya decide");
+    assert!(
+        groups.contains(&ToolGroup::Docker),
+        "quente: o Decisor decide"
+    );
 }
 
 #[tokio::test]
@@ -104,7 +109,7 @@ async fn chat_nao_espera_o_carregamento_e_deixa_o_modelo_subindo() {
 async fn pedidos_simultaneos_carregam_uma_vez_so() {
     with_key();
     let ollaya = fake_ollaya::start_cold(by_keyword(&[]), LOAD).await;
-    let runtime = LayaRuntime::default();
+    let runtime = DeciderRuntime::default();
     let settings = settings(ollaya.base_url.clone());
 
     let (a, b) = tokio::join!(

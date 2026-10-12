@@ -1,4 +1,4 @@
-//! Laya com um provedor de decisão na nuvem.
+//! Decisor com um provedor de decisão na nuvem.
 //!
 //! O que se afirma aqui, contra um servidor falso em `127.0.0.1` que fala os
 //! três formatos (System One da TypeSafe, Workers AI da Cloudflare e
@@ -14,10 +14,10 @@ use axum::{
 };
 use backend::{
     app::App,
-    dtos::ai::{LayaModelsResponse, TestLayaResponse},
-    services::ai::laya::{
-        config::AiLayaSettings,
-        providers::{DecisionProtocol, LayaProvider},
+    dtos::ai::{DeciderModelsResponse, TestDeciderResponse},
+    services::ai::decider::{
+        config::AiDeciderSettings,
+        providers::{DeciderProvider, DecisionProtocol},
     },
 };
 use loco_rs::testing::prelude::*;
@@ -116,8 +116,12 @@ async fn start() -> String {
     format!("http://{address}")
 }
 
-fn laya(provider: LayaProvider, base_url: &str, protocol: DecisionProtocol) -> AiLayaSettings {
-    AiLayaSettings {
+fn decider(
+    provider: DeciderProvider,
+    base_url: &str,
+    protocol: DecisionProtocol,
+) -> AiDeciderSettings {
+    AiDeciderSettings {
         enabled: true,
         provider,
         custom_protocol: protocol,
@@ -126,20 +130,20 @@ fn laya(provider: LayaProvider, base_url: &str, protocol: DecisionProtocol) -> A
         api_key: Some(KEY.into()),
         account_id: Some("conta-1".into()),
         timeout_ms: 5_000,
-        ..AiLayaSettings::default()
+        ..AiDeciderSettings::default()
     }
 }
 
 async fn test_with(
     request: &loco_rs::TestServer,
     token: &str,
-    laya: &AiLayaSettings,
-) -> TestLayaResponse {
+    decider: &AiDeciderSettings,
+) -> TestDeciderResponse {
     let (h, v) = prepare_data::auth_header(token);
     let response = request
-        .post("/api/ai/laya/test")
+        .post("/api/ai/decider/test")
         .add_header(h, v)
-        .json(&json!({ "laya": laya, "question": "o container do banco caiu" }))
+        .json(&json!({ "decider": decider, "question": "o container do banco caiu" }))
         .await;
     response.assert_status_ok();
     response.json()
@@ -155,19 +159,23 @@ async fn teste_da_tela_funciona_nos_tres_formatos_de_nuvem() {
         for (nome, settings) in [
             (
                 "System One",
-                laya(LayaProvider::Custom, &base_url, DecisionProtocol::Systemone),
+                decider(
+                    DeciderProvider::Custom,
+                    &base_url,
+                    DecisionProtocol::Systemone,
+                ),
             ),
             (
                 "Cloudflare",
-                laya(
-                    LayaProvider::Cloudflare,
+                decider(
+                    DeciderProvider::Cloudflare,
                     &base_url,
                     DecisionProtocol::Systemone,
                 ),
             ),
             (
                 "OpenAI",
-                laya(LayaProvider::Custom, &base_url, DecisionProtocol::Openai),
+                decider(DeciderProvider::Custom, &base_url, DecisionProtocol::Openai),
             ),
         ] {
             let result = test_with(&request, &sessao.token, &settings).await;
@@ -192,17 +200,17 @@ async fn chave_vai_mascarada_a_tela_e_volta_da_mascara_no_teste() {
         let (h, v) = prepare_data::auth_header(&sessao.token);
 
         request
-            .put("/api/ai/laya")
+            .put("/api/ai/decider")
             .add_header(h.clone(), v.clone())
-            .json(&laya(
-                LayaProvider::Custom,
+            .json(&decider(
+                DeciderProvider::Custom,
                 &base_url,
                 DecisionProtocol::Systemone,
             ))
             .await
             .assert_status_ok();
-        let tela: AiLayaSettings = request
-            .get("/api/ai/laya")
+        let tela: AiDeciderSettings = request
+            .get("/api/ai/decider")
             .add_header(h.clone(), v.clone())
             .await
             .json();
@@ -212,7 +220,7 @@ async fn chave_vai_mascarada_a_tela_e_volta_da_mascara_no_teste() {
         let result = test_with(&request, &sessao.token, &tela).await;
         assert!(result.success, "{}", result.message);
 
-        let errada = AiLayaSettings {
+        let errada = AiDeciderSettings {
             api_key: Some("outra".into()),
             ..tela
         };
@@ -234,30 +242,30 @@ async fn nuvem_lista_os_modelos_do_preset_sem_download() {
     request_with_config::<App, _, _>(RequestConfig::default(), |request, ctx| async move {
         let sessao = prepare_data::init_user_login(&request, &ctx).await;
         let (h, v) = prepare_data::auth_header(&sessao.token);
-        let typesafe = AiLayaSettings {
-            provider: LayaProvider::Typesafe,
+        let typesafe = AiDeciderSettings {
+            provider: DeciderProvider::Typesafe,
             base_url: String::new(),
             model: String::new(),
-            ..AiLayaSettings::default()
+            ..AiDeciderSettings::default()
         };
-        let models: LayaModelsResponse = request
-            .post("/api/ai/laya/models")
+        let models: DeciderModelsResponse = request
+            .post("/api/ai/decider/models")
             .add_header(h.clone(), v.clone())
-            .json(&json!({ "laya": typesafe }))
+            .json(&json!({ "decider": typesafe }))
             .await
             .json();
         assert!(models.online && !models.manages_models);
         assert_eq!(models.options[0].name, "jev-latest");
 
         let download = request
-            .post("/api/ai/laya/pull")
+            .post("/api/ai/decider/pull")
             .add_header(h.clone(), v.clone())
-            .json(&json!({ "laya": typesafe }))
+            .json(&json!({ "decider": typesafe }))
             .await;
         assert_eq!(download.status_code(), 422, "nuvem não baixa modelo");
 
         let providers: Value = request
-            .get("/api/ai/laya/providers")
+            .get("/api/ai/decider/providers")
             .add_header(h, v)
             .await
             .json();

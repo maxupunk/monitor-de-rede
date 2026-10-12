@@ -1,4 +1,4 @@
-//! Que aparelho é este e que sistema ele roda — o palpite do Laya sobre o que
+//! Que aparelho é este e que sistema ele roda — o palpite do Decisor sobre o que
 //! a descoberta viu (SNMP, portas, SSDP, mDNS, banner).
 //!
 //! A heurística (`discovery::device_identifier`, `devices::systems::detect`)
@@ -10,10 +10,10 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::services::{
-    ai::laya::{
+    ai::decider::{
         decision::Decision,
         schema::{Answer, Question},
-        suggestion::LayaSuggestion,
+        suggestion::DeciderSuggestion,
     },
     devices::{kinds::DEVICE_KINDS, systems},
 };
@@ -175,7 +175,7 @@ impl DeviceFacts {
             || self.netbios_name.is_some()
     }
 
-    /// O estado enviado ao Laya.
+    /// O estado enviado ao Decisor.
     #[must_use]
     pub fn state(&self) -> String {
         serde_json::to_string(self).unwrap_or_default()
@@ -194,9 +194,9 @@ pub struct DeviceIdentity {
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct IdentitySuggestion {
     /// Um id de `devices::kinds::DEVICE_KINDS`.
-    pub device_type: Option<LayaSuggestion>,
+    pub device_type: Option<DeciderSuggestion>,
     /// Um id de `devices::systems::catalog()`.
-    pub operating_system: Option<LayaSuggestion>,
+    pub operating_system: Option<DeciderSuggestion>,
 }
 
 impl IdentitySuggestion {
@@ -214,7 +214,7 @@ impl Decision for DeviceIdentity {
         if self.ask_type {
             let criteria = DEVICE_KINDS
                 .iter()
-                .map(|kind| (kind.id.to_string(), kind.laya_hint.to_string()))
+                .map(|kind| (kind.id.to_string(), kind.decider_hint.to_string()))
                 .collect();
             questions.insert(
                 DEVICE_TYPE.to_string(),
@@ -246,8 +246,12 @@ impl Decision for DeviceIdentity {
     fn interpret(&self, answers: &BTreeMap<String, Answer>) -> IdentitySuggestion {
         let min = self.min_confidence;
         IdentitySuggestion {
-            device_type: LayaSuggestion::from_choice(answers.get(DEVICE_TYPE), "", min),
-            operating_system: LayaSuggestion::from_choice(answers.get(OPERATING_SYSTEM), "", min),
+            device_type: DeciderSuggestion::from_choice(answers.get(DEVICE_TYPE), "", min),
+            operating_system: DeciderSuggestion::from_choice(
+                answers.get(OPERATING_SYSTEM),
+                "",
+                min,
+            ),
         }
     }
 }

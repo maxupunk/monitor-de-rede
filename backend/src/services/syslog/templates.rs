@@ -21,7 +21,7 @@ use crate::{
     dtos::logs::LogTemplateInfo,
     models::logs::log_templates,
     services::{
-        ai::laya::decisions::log_category::is_category,
+        ai::decider::decisions::log_category::is_category,
         events::EventBus,
         shared::errors::{AppError, AppResult},
     },
@@ -146,7 +146,7 @@ pub async fn confirm(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::ai::laya::decisions::log_category::LOG_CATEGORIES;
+    use crate::services::ai::decider::decisions::log_category::LOG_CATEGORIES;
 
     #[test]
     fn todo_modelo_de_alerta_aponta_para_categoria_conhecida() {

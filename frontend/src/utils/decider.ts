@@ -1,7 +1,8 @@
-import type { AiLayaSettings } from '@/bindings/AiLayaSettings'
-import type { LayaModelLanguage } from '@/bindings/LayaModelLanguage'
-import type { LayaProviderView } from '@/bindings/LayaProviderView'
-import type { LayaModelSpecView } from '@/bindings/LayaModelSpecView'
+import type { AiDeciderSettings } from '@/bindings/AiDeciderSettings'
+import type { DeciderBenchmarkView } from '@/bindings/DeciderBenchmarkView'
+import type { DeciderModelLanguage } from '@/bindings/DeciderModelLanguage'
+import type { DeciderProviderView } from '@/bindings/DeciderProviderView'
+import type { DeciderModelSpecView } from '@/bindings/DeciderModelSpecView'
 import { formatDecimalBytes, formatElapsedMs, formatPercent } from './formatters'
 
 /**
@@ -41,31 +42,74 @@ export interface TimeoutSource {
 /** Um fato da ficha do modelo, já como chip. */
 export interface ModelFact {
   label: string
-  color: 'success' | 'warning' | 'info'
+  color: 'success' | 'warning' | 'info' | 'error'
   icon: string
 }
 
+/** O teste público publicado em 10/10/2026, de onde vêm os acertos medidos. */
+export const BENCHMARK_URL =
+  'https://akitaonrails.com/2026/10/10/qual-modelo-de-decisao-classificador-de-ia-tipo-jev-e-melhor/'
+
+/** Abaixo disso o modelo fica perto do chute (~31% no teste) — mesma régua do backend. */
+const USEFUL_ACCURACY = 0.6
+const GOOD_ACCURACY = 0.85
+
+function percent(value: number): string {
+  return formatPercent(value * 100, 0)
+}
+
+/** O resultado no teste público: acerto geral e em português, com a sigla para a lista. */
+export function benchmarkFact(benchmark: DeciderBenchmarkView): ModelFact & { short: string } {
+  let color: ModelFact['color'] = 'error'
+  if (benchmark.accuracy >= GOOD_ACCURACY) color = 'success'
+  else if (benchmark.accuracy >= USEFUL_ACCURACY) color = 'info'
+  return {
+    label: `Acerto ${percent(benchmark.accuracy)} · PT ${percent(benchmark.portuguese)}`,
+    short: percent(benchmark.accuracy),
+    color,
+    icon: 'mdi-target',
+  }
+}
+
+/** Acertou tão pouco no teste público que fica perto de escolher no chute. */
+export function isNearChance(
+  benchmark: DeciderBenchmarkView | null | undefined
+): benchmark is DeciderBenchmarkView {
+  return benchmark != null && benchmark.accuracy < USEFUL_ACCURACY
+}
+
 /** A língua do modelo, com a sigla curta para a lista. */
-export function languageFact(language: LayaModelLanguage): ModelFact & { short: string } {
+export function languageFact(language: DeciderModelLanguage): ModelFact & { short: string } {
   return language === 'multilingual'
     ? { label: 'Multilíngue (100+ línguas)', short: 'PT', color: 'success', icon: 'mdi-translate' }
     : { label: 'Sem português', short: 'EN', color: 'warning', icon: 'mdi-translate-off' }
 }
 
 /**
- * O que pesa na escolha: língua, acerto, velocidade, tamanho, memória e se
- * precisa de GPU. Só o que o Ollaya publica — sem número, sem chip.
+ * O que pesa na escolha: acerto, velocidade, tamanho, memória e se precisa de
+ * GPU. O teste público (com português medido) vale antes do número do autor e
+ * da língua declarada; sem número publicado, sem chip.
  */
-export function modelFacts(spec: LayaModelSpecView): ModelFact[] {
-  const { label, color, icon } = languageFact(spec.language)
-  const facts: ModelFact[] = [{ label, color, icon }]
-  if (spec.accuracy != null) {
-    facts.push({
-      label: `Acerto ${formatPercent(spec.accuracy * 100, 0)}`,
-      color: 'info',
-      icon: 'mdi-target',
-    })
+export function modelFacts(
+  spec: DeciderModelSpecView | null,
+  benchmark?: DeciderBenchmarkView | null
+): ModelFact[] {
+  const facts: ModelFact[] = []
+  if (benchmark) {
+    const { label, color, icon } = benchmarkFact(benchmark)
+    facts.push({ label, color, icon })
+  } else if (spec) {
+    const { label, color, icon } = languageFact(spec.language)
+    facts.push({ label, color, icon })
+    if (spec.accuracy != null) {
+      facts.push({
+        label: `Acerto ${percent(spec.accuracy)} (teste do autor)`,
+        color: 'info',
+        icon: 'mdi-target',
+      })
+    }
   }
+  if (!spec) return facts
   facts.push({
     label: `${formatElapsedMs(spec.latencyMs)} por 5 perguntas (${spec.gpuRecommended ? 'RTX 4090' : 'CPU'})`,
     color: 'info',
@@ -97,7 +141,7 @@ export function modelFacts(spec: LayaModelSpecView): ModelFact[] {
  * Memória do modelo carregado, para o aviso ao ligar. Sem número publicado,
  * o download é o piso: o modelo não cabe em menos que o próprio arquivo.
  */
-export function memoryLabel(spec: LayaModelSpecView): string {
+export function memoryLabel(spec: DeciderModelSpecView): string {
   if (spec.memoryMb) return `aproximadamente ${formatDecimalBytes(spec.memoryMb * MB)}`
   if (spec.downloadMb) return `pelo menos ${formatDecimalBytes(spec.downloadMb * MB)}`
   return 'alguns GB'
@@ -107,7 +151,7 @@ export function memoryLabel(spec: LayaModelSpecView): string {
  * Tempo máximo por decisão ao trocar de modelo. Valor que o usuário não
  * mexeu (o sugerido do modelo anterior, ou o padrão) segue o sugerido do
  * novo; valor ajustado à mão só sobe, nunca desce — um Kev em CPU com o
- * tempo do Laya erraria toda pergunta do chat.
+ * tempo do Decisor erraria toda pergunta do chat.
  */
 export function timeoutForModel(
   current: number,
@@ -127,12 +171,12 @@ export function timeoutForModel(
  * regra de {@link timeoutForModel}.
  */
 export function formForProvider(
-  form: AiLayaSettings,
-  previous: LayaProviderView | null,
+  form: AiDeciderSettings,
+  previous: DeciderProviderView | null,
   previousTimeout: TimeoutSource | null,
-  next: LayaProviderView,
+  next: DeciderProviderView,
   fallbackTimeout: number
-): AiLayaSettings {
+): AiDeciderSettings {
   const url = form.baseUrl.trim()
   const keepUrl = url !== '' && url !== previous?.defaultBaseUrl
   return {
@@ -156,8 +200,8 @@ export function formForProvider(
  * quando está tudo lá. A chave mascarada (já gravada) conta como presente.
  */
 export function providerMissing(
-  form: AiLayaSettings,
-  provider: LayaProviderView | null
+  form: AiDeciderSettings,
+  provider: DeciderProviderView | null
 ): string | null {
   if (!provider) return null
   const missing: string[] = []

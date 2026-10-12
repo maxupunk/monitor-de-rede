@@ -99,7 +99,7 @@ export interface ScanTrafficItem {
 }
 
 /**
- * As interfaces do escaneamento no formato que o Laya lê: nome, alias,
+ * As interfaces do escaneamento no formato que o Decisor lê: nome, alias,
  * descrição, tipo, velocidade, estado e o tráfego acumulado de cada uma.
  */
 export function scanInterfaceCandidates(scan: ScanResult): InterfaceCandidate[] {
@@ -128,7 +128,7 @@ export interface LinkInterfaceOption {
   operStatus?: string | null
 }
 
-/** As opções do seletor no formato que o Laya lê. */
+/** As opções do seletor no formato que o Decisor lê. */
 export function linkInterfaceCandidates(options: LinkInterfaceOption[]): InterfaceCandidate[] {
   return options.map((option, position) => ({
     // Sem ifIndex (cadastro antigo), a posição na lista serve de chave.
@@ -322,13 +322,13 @@ export const useDeviceDetailStore = defineStore('deviceDetail', () => {
     }
   }
 
-  /** Palpite do Laya sobre as interfaces do último escaneamento. */
+  /** Palpite do Decisor sobre as interfaces do último escaneamento. */
   const interfaceSuggestions = ref<InterfaceSuggestions | null>(null)
   const suggestingInterfaces = ref(false)
 
   /**
-   * Pede ao Laya o uplink e as interfaces que valem monitorar, sem guardar —
-   * para quem tem a própria lista (o formulário do dispositivo). Sem Laya, ou
+   * Pede ao Decisor o uplink e as interfaces que valem monitorar, sem guardar —
+   * para quem tem a própria lista (o formulário do dispositivo). Sem Decisor, ou
    * se falhar, `null`: sugestão nunca atrapalha a tela.
    */
   async function fetchInterfaceSuggestions(

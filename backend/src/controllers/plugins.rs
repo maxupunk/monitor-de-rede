@@ -479,7 +479,7 @@ async fn fleet_run(
     Ok((StatusCode::ACCEPTED, Json(BatchStarted { batch_id })).into_response())
 }
 
-/// "Verificar sistema": vai aos equipamentos (SSH/SNMP, Laya na dúvida) e
+/// "Verificar sistema": vai aos equipamentos (SSH/SNMP, Decisor na dúvida) e
 /// devolve a página do aplicativo com a compatibilidade refeita.
 async fn fleet_identify(
     State(ctx): State<AppContext>,

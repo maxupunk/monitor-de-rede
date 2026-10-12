@@ -34,7 +34,7 @@ pub enum Certainty {
     #[default]
     Unknown,
     /// Palpite: o fabricante/modelo do cadastro (é hardware — uma RouterBOARD
-    /// pode rodar OpenWrt) ou o Laya. Levanta dúvida, nunca reprova.
+    /// pode rodar OpenWrt) ou o Decisor. Levanta dúvida, nunca reprova.
     Hint,
     /// O operador declarou ou o equipamento mostrou (SSH, SNMP, um plugin).
     Certain,
@@ -133,7 +133,7 @@ pub fn evaluate(
             .iter()
             .any(|platform| platform.eq_ignore_ascii_case(&facts.platform));
         // Só o sistema certo reprova. Fabricante/modelo descrevem o hardware
-        // e o Laya é palpite: discordar deles é dúvida, não incompatibilidade.
+        // e o Decisor é palpite: discordar deles é dúvida, não incompatibilidade.
         match facts.certainty {
             Certainty::Unknown => missing.push(
                 "o sistema do equipamento ainda não foi identificado — use \"Verificar sistema\""

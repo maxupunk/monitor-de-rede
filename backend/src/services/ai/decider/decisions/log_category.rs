@@ -8,15 +8,15 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
-use crate::services::ai::laya::{
+use crate::services::ai::decider::{
     decision::Decision,
     schema::{Answer, Question},
-    suggestion::LayaSuggestion,
+    suggestion::DeciderSuggestion,
 };
 
 pub const CATEGORY: &str = "category";
 
-/// As categorias, com a descrição em inglês que o Laya lê. Os ids são o
+/// As categorias, com a descrição em inglês que o Decisor lê. Os ids são o
 /// contrato com a tela (`frontend/src/utils/logCategories.ts`).
 pub const LOG_CATEGORIES: &[(&str, &str)] = &[
     ("auth_failure", "Failed login or authentication: wrong password, invalid user, access denied."),
@@ -31,7 +31,7 @@ pub const LOG_CATEGORIES: &[(&str, &str)] = &[
     ("informational", "Routine informational message with nothing to act on (successful login, periodic status)."),
 ];
 
-/// Um padrão como o Laya o lê.
+/// Um padrão como o Decisor o lê.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogPattern<'a> {
@@ -57,7 +57,7 @@ pub struct LogCategory {
 }
 
 impl Decision for LogCategory {
-    type Output = Option<LayaSuggestion>;
+    type Output = Option<DeciderSuggestion>;
 
     fn questions(&self) -> BTreeMap<String, Question> {
         let criteria = LOG_CATEGORIES
@@ -73,8 +73,8 @@ impl Decision for LogCategory {
         )])
     }
 
-    fn interpret(&self, answers: &BTreeMap<String, Answer>) -> Option<LayaSuggestion> {
-        LayaSuggestion::from_choice(answers.get(CATEGORY), "", self.min_confidence)
+    fn interpret(&self, answers: &BTreeMap<String, Answer>) -> Option<DeciderSuggestion> {
+        DeciderSuggestion::from_choice(answers.get(CATEGORY), "", self.min_confidence)
     }
 }
 

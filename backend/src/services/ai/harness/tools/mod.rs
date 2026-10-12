@@ -160,9 +160,9 @@ impl ToolGroup {
         }
     }
 
-    /// Afirmação sim/não que o Laya avalia sobre a pergunta do usuário. Em
+    /// Afirmação sim/não que o Decisor avalia sobre a pergunta do usuário. Em
     /// inglês: é a língua em que os modelos de decisão foram treinados, e o
-    /// roteador do Laya lê a língua da pergunta, não a da afirmação.
+    /// roteador do Decisor lê a língua da pergunta, não a da afirmação.
     #[must_use]
     pub const fn intent(self) -> &'static str {
         match self {

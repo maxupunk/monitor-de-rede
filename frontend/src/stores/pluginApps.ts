@@ -121,7 +121,7 @@ export const usePluginAppsStore = defineStore('pluginApps', () => {
   }
 
   /**
-   * "Verificar sistema": vai aos equipamentos (SSH/SNMP; Laya na dúvida) e
+   * "Verificar sistema": vai aos equipamentos (SSH/SNMP; Decisor na dúvida) e
    * devolve a página com a compatibilidade refeita. Sem lista, os em dúvida.
    */
   async function identify(pluginId: number, deviceIds: number[] = []): Promise<FleetView> {

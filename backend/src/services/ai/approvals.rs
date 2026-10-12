@@ -268,7 +268,7 @@ fn notification(approval: &AiPendingApproval) -> Value {
         AiToolRisk::Low => "Risco baixo",
     };
     json!({
-        "title": "Laya aguarda sua aprovação",
+        "title": "Decisor aguarda sua aprovação",
         "body": format!("{}\n{risk}: {}", approval.summary, approval.reason),
         "icon": "/pwa-192x192.png",
         "badge": "/pwa-192x192.png",
@@ -397,7 +397,7 @@ mod tests {
     #[test]
     fn notificacao_abre_o_chat_e_diz_o_risco() {
         let payload = notification(&proposal("c3", 1).approval);
-        assert_eq!(payload["title"], "Laya aguarda sua aprovação");
+        assert_eq!(payload["title"], "Decisor aguarda sua aprovação");
         assert_eq!(payload["data"]["url"], "/ai-chat");
         assert_eq!(payload["tag"], "ai-approval-c3");
         assert!(payload["body"]

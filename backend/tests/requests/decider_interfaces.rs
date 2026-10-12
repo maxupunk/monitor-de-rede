@@ -1,4 +1,4 @@
-//! O Laya indicando o uplink e as interfaces que valem monitorar.
+//! O Decisor indicando o uplink e as interfaces que valem monitorar.
 //!
 //! O que se afirma aqui, contra o Ollaya falso: o uplink sugerido é a
 //! interface cujo texto diz WAN, devolvido pelo ifIndex; as que valem
@@ -8,7 +8,7 @@
 use backend::{
     app::App,
     dtos::snmp::InterfaceSuggestions,
-    services::ai::{laya::decisions::interfaces::InterfaceCandidate, settings},
+    services::ai::{decider::decisions::interfaces::InterfaceCandidate, settings},
 };
 use loco_rs::testing::prelude::*;
 use serde_json::json;
@@ -45,7 +45,9 @@ async fn sugere_o_uplink_pelo_texto_e_as_que_valem_monitorar() {
         with_key();
         // Escolha: o critério que menciona WAN. Sim/não: só a pergunta da ether5.
         let fake = fake_ollaya::start(by_keyword(&[("wan", "*"), ("", "mon_if5")])).await;
-        settings::save_laya(&ctx.db, fake.settings()).await.unwrap();
+        settings::save_decider(&ctx.db, fake.settings())
+            .await
+            .unwrap();
         let session = prepare_data::init_user_login(&request, &ctx).await;
         let (h, v) = prepare_data::auth_header(&session.token);
 
@@ -74,9 +76,9 @@ async fn frente_desligada_nao_consulta() {
     request_with_config::<App, _, _>(RequestConfig::default(), |request, ctx| async move {
         with_key();
         let fake = fake_ollaya::start(by_keyword(&[("wan", "*")])).await;
-        let mut laya = fake.settings();
-        laya.features.interfaces = false;
-        settings::save_laya(&ctx.db, laya).await.unwrap();
+        let mut decider = fake.settings();
+        decider.features.interfaces = false;
+        settings::save_decider(&ctx.db, decider).await.unwrap();
         let session = prepare_data::init_user_login(&request, &ctx).await;
         let (h, v) = prepare_data::auth_header(&session.token);
 

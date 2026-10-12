@@ -1,4 +1,4 @@
-//! Decisões do Laya fora do chat. Cada uma é pura — perguntas e leitura das
+//! Decisões do Decisor fora do chat. Cada uma é pura — perguntas e leitura das
 //! respostas, sem banco nem rede — e se testa em unidade; quem consulta é o
 //! [`runtime`](super::runtime).
 

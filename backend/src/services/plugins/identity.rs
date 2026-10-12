@@ -2,7 +2,7 @@
 //!
 //! O cadastro costuma trazer fabricante e modelo, que descrevem o **hardware**
 //! (uma RouterBOARD da MikroTik pode rodar OpenWrt). Aqui se vai ao
-//! equipamento ([`identify::observe`]: SSH e SNMP; o Laya quando eles não
+//! equipamento ([`identify::observe`]: SSH e SNMP; o Decisor quando eles não
 //! decidem), grava-se o que ele mostrou e liga-se o que passou a servir.
 
 use futures::StreamExt;

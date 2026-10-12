@@ -780,7 +780,7 @@ async fn list_templates(
 }
 
 /// `PUT /api/logs/templates/{hash}` — o operador confirma ou corrige a
-/// categoria de um padrão. Vale mais que o palpite do Laya.
+/// categoria de um padrão. Vale mais que o palpite do Decisor.
 async fn update_template(
     State(ctx): State<AppContext>,
     Path(hash): Path<String>,

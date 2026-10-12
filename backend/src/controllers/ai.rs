@@ -16,20 +16,20 @@ use serde::Deserialize;
 
 use crate::{
     dtos::ai::{
-        AiMentionQuery, ChatStreamRequest, ExecuteToolRequest, ExecuteToolResponse, LayaFormInput,
-        ModelPullProgress, OllamaPullRequest, TestConnectionInput, TestConnectionResponse,
-        TestLayaInput,
+        AiMentionQuery, ChatStreamRequest, DeciderFormInput, ExecuteToolRequest,
+        ExecuteToolResponse, ModelPullProgress, OllamaPullRequest, TestConnectionInput,
+        TestConnectionResponse, TestDeciderInput,
     },
     services::{
         ai::{
+            decider::{
+                catalog, client::DeciderClient, config::AiDeciderSettings, diagnostics, providers,
+                runtime::DeciderRuntime,
+            },
             drivers::{create_driver, openai_compatible::OpenAiCompatibleDriver, traits::AiDriver},
             harness::{
                 agent::{run_agent_loop, AgentRequest},
                 confirmation,
-            },
-            laya::{
-                catalog, client::LayaClient, config::AiLayaSettings, diagnostics, providers,
-                runtime::LayaRuntime,
             },
             mentions, ollama, opencode, openrouter,
             proactive::{digest, incident, runner::ProviderDrivers, schedule::period_hours},
@@ -276,7 +276,7 @@ async fn run_digest(State(ctx): State<AppContext>) -> AppResult<Response> {
 }
 
 /// `POST /api/ai/alerts/{id}/summary` — gera o resumo do incidente agora,
-/// quando a triagem do Laya o pulou ou o teto por hora o adiou. `summary`
+/// quando a triagem do Decisor o pulou ou o teto por hora o adiou. `summary`
 /// nulo: o alerta já tinha resumo ou já resolveu.
 async fn summarize_alert_now(
     State(ctx): State<AppContext>,
@@ -350,15 +350,15 @@ fn pull_progress_sse(
     response
 }
 
-/// `GET /api/ai/laya` — configuração do Laya, com a chave mascarada.
-async fn show_laya(State(ctx): State<AppContext>) -> AppResult<Response> {
-    Ok(format::json(settings::masked_laya(
-        settings::load(&ctx.db).await?.laya,
+/// `GET /api/ai/decider` — configuração do Decisor, com a chave mascarada.
+async fn show_decider(State(ctx): State<AppContext>) -> AppResult<Response> {
+    Ok(format::json(settings::masked_decider(
+        settings::load(&ctx.db).await?.decider,
     ))?)
 }
 
-/// `GET /api/ai/laya/providers` — os provedores de decisão que a tela oferece.
-async fn list_laya_providers() -> AppResult<Response> {
+/// `GET /api/ai/decider/providers` — os provedores de decisão que a tela oferece.
+async fn list_decider_providers() -> AppResult<Response> {
     Ok(format::json(
         providers::PRESETS
             .iter()
@@ -367,61 +367,61 @@ async fn list_laya_providers() -> AppResult<Response> {
     )?)
 }
 
-/// `PUT /api/ai/laya` — grava só o Laya; o resto da IA fica como está.
-async fn update_laya(
+/// `PUT /api/ai/decider` — grava só o Decisor; o resto da IA fica como está.
+async fn update_decider(
     State(ctx): State<AppContext>,
-    Json(laya): Json<AiLayaSettings>,
+    Json(decider): Json<AiDeciderSettings>,
 ) -> AppResult<Response> {
-    let saved = settings::save_laya(&ctx.db, laya).await?;
-    let runtime = LayaRuntime::from_context(&ctx);
+    let saved = settings::save_decider(&ctx.db, decider).await?;
+    let runtime = DeciderRuntime::from_context(&ctx);
     runtime.invalidate();
     // Ligado agora: carrega já, para a primeira pergunta não pagar o disco.
     if saved.enabled {
-        runtime.warm_in_background(&settings::resolve_laya(&ctx.db, saved.clone()).await?);
+        runtime.warm_in_background(&settings::resolve_decider(&ctx.db, saved.clone()).await?);
     }
     Ok(format::json(saved)?)
 }
 
-/// `POST /api/ai/laya/models` — os modelos do provedor do formulário: no
+/// `POST /api/ai/decider/models` — os modelos do provedor do formulário: no
 /// Ollaya, o catálogo e o que ele já tem instalado; na nuvem, os do preset.
-async fn list_laya_models(
+async fn list_decider_models(
     State(ctx): State<AppContext>,
-    Json(input): Json<LayaFormInput>,
+    Json(input): Json<DeciderFormInput>,
 ) -> AppResult<Response> {
-    let laya = settings::resolve_laya(&ctx.db, input.laya).await?;
-    Ok(format::json(catalog::list(&laya).await)?)
+    let decider = settings::resolve_decider(&ctx.db, input.decider).await?;
+    Ok(format::json(catalog::list(&decider).await)?)
 }
 
-/// `POST /api/ai/laya/test` — o Ollaya responde, o modelo está lá, e o que ele
+/// `POST /api/ai/decider/test` — o Ollaya responde, o modelo está lá, e o que ele
 /// decide para a pergunta de exemplo.
-async fn test_laya(
+async fn test_decider(
     State(ctx): State<AppContext>,
-    Json(input): Json<TestLayaInput>,
+    Json(input): Json<TestDeciderInput>,
 ) -> AppResult<Response> {
-    let laya = settings::resolve_laya(&ctx.db, input.laya).await?;
-    let runtime = LayaRuntime::from_context(&ctx);
-    let result = diagnostics::test(&runtime, &laya, input.question.as_deref()).await;
+    let decider = settings::resolve_decider(&ctx.db, input.decider).await?;
+    let runtime = DeciderRuntime::from_context(&ctx);
+    let result = diagnostics::test(&runtime, &decider, input.question.as_deref()).await;
     Ok(format::json(result)?)
 }
 
-/// `POST /api/ai/laya/load` — carrega o modelo na memória em segundo plano.
-/// Responde na hora; o progresso chega pelo SSE (`laya:model_state`).
-async fn load_laya_model(
+/// `POST /api/ai/decider/load` — carrega o modelo na memória em segundo plano.
+/// Responde na hora; o progresso chega pelo SSE (`decider:model_state`).
+async fn load_decider_model(
     State(ctx): State<AppContext>,
-    Json(input): Json<LayaFormInput>,
+    Json(input): Json<DeciderFormInput>,
 ) -> AppResult<Response> {
-    let laya = settings::resolve_laya(&ctx.db, input.laya).await?;
-    LayaRuntime::from_context(&ctx).warm_in_background(&laya);
+    let decider = settings::resolve_decider(&ctx.db, input.decider).await?;
+    DeciderRuntime::from_context(&ctx).warm_in_background(&decider);
     Ok(format::json(serde_json::json!({ "started": true }))?)
 }
 
-/// `POST /api/ai/laya/pull` — streaming SSE do download do modelo do Laya.
-async fn pull_laya_model(
+/// `POST /api/ai/decider/pull` — streaming SSE do download do modelo do Decisor.
+async fn pull_decider_model(
     State(ctx): State<AppContext>,
-    Json(input): Json<LayaFormInput>,
+    Json(input): Json<DeciderFormInput>,
 ) -> AppResult<Response> {
-    let laya = settings::resolve_laya(&ctx.db, input.laya).await?;
-    let progress = LayaClient::new(&laya).pull().await?;
+    let decider = settings::resolve_decider(&ctx.db, input.decider).await?;
+    let progress = DeciderClient::new(&decider).pull().await?;
     Ok(pull_progress_sse(progress))
 }
 
@@ -489,10 +489,10 @@ pub fn routes() -> Routes {
         .add("/openrouter/models", get(list_openrouter_models))
         .add("/ollama/models", get(list_ollama_models))
         .add("/ollama/pull", post(pull_ollama_model))
-        .add("/laya", get(show_laya).put(update_laya))
-        .add("/laya/providers", get(list_laya_providers))
-        .add("/laya/models", post(list_laya_models))
-        .add("/laya/test", post(test_laya))
-        .add("/laya/pull", post(pull_laya_model))
-        .add("/laya/load", post(load_laya_model))
+        .add("/decider", get(show_decider).put(update_decider))
+        .add("/decider/providers", get(list_decider_providers))
+        .add("/decider/models", post(list_decider_models))
+        .add("/decider/test", post(test_decider))
+        .add("/decider/pull", post(pull_decider_model))
+        .add("/decider/load", post(load_decider_model))
 }

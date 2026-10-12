@@ -23,11 +23,11 @@
 
 use std::time::Duration;
 
-use super::{client::LayaClient, config::AiLayaSettings};
+use super::{benchmark::Benchmark, client::DeciderClient, config::AiDeciderSettings};
 use crate::{
     dtos::ai::{
-        LayaModelLanguage::{self, English, Multilingual},
-        LayaModelOption, LayaModelSpecView, LayaModelsResponse,
+        DeciderModelLanguage::{self, English, Multilingual},
+        DeciderModelOption, DeciderModelSpecView, DeciderModelsResponse,
     },
     services::ai::local_models,
 };
@@ -52,7 +52,7 @@ pub struct ModelSpec {
     pub aliases: &'static [&'static str],
     pub family: &'static str,
     pub description: &'static str,
-    pub language: LayaModelLanguage,
+    pub language: DeciderModelLanguage,
     pub download_mb: Option<u32>,
     /// Memória com o modelo carregado, quando publicada.
     pub memory_mb: Option<u32>,
@@ -64,6 +64,8 @@ pub struct ModelSpec {
     pub accuracy_permille: Option<u16>,
     /// Teto de opções por escolha, quando o modelo tem um.
     pub max_choice_options: Option<u16>,
+    /// Resultado no teste público (`decider::benchmark`), quando avaliado.
+    pub benchmark: Option<Benchmark>,
     /// Recomendado para o NetMonitor (um em CPU, um em GPU).
     pub recommended: bool,
 }
@@ -81,11 +83,12 @@ const BASE: ModelSpec = ModelSpec {
     hardware: Hardware::Cpu,
     accuracy_permille: None,
     max_choice_options: None,
+    benchmark: None,
     recommended: false,
 };
 
 /// Medido em CPU pelo NetMonitor: com um modelo Laya carregado, de 3 a 4 GB.
-const LAYA_MEMORY_MB: u32 = 4_000;
+const DECIDER_MEMORY_MB: u32 = 4_000;
 
 /// Faixa do "tempo máximo por pergunta" da configuração.
 const MIN_TIMEOUT_MS: u32 = 1_500;
@@ -127,12 +130,26 @@ impl ModelSpec {
         Duration::from_secs(secs.clamp(120, 900))
     }
 
+    /// Posição na lista, do menor e mais eficiente ao maior e menos
+    /// eficiente: primeiro os que o teste público aprovou (acima do chute),
+    /// do menor para o maior; depois os não avaliados; por fim os que ficaram
+    /// perto do chute.
+    #[must_use]
+    pub fn rank(&self) -> (u8, u32) {
+        let tier = match self.benchmark {
+            Some(benchmark) if benchmark.is_useful() => 0,
+            None => 1,
+            Some(_) => 2,
+        };
+        (tier, self.download_mb.unwrap_or(u32::MAX))
+    }
+
     fn answers_to(&self, name: &str) -> bool {
         same_tag(self.name, name) || self.aliases.iter().any(|alias| same_tag(alias, name))
     }
 
-    fn view(&self) -> LayaModelSpecView {
-        LayaModelSpecView {
+    fn view(&self) -> DeciderModelSpecView {
+        DeciderModelSpecView {
             family: self.family.to_string(),
             language: self.language,
             download_mb: self.download_mb,
@@ -156,24 +173,25 @@ pub const KNOWN_MODELS: &[ModelSpec] = &[
     // ── Laya (Convai Innovations): encoders leves, o padrão ──
     ModelSpec {
         name: "laya",
+        benchmark: Some(Benchmark::new(369, 381, 19)),
         family: "Laya",
-        description: "Laya: roteador — perguntas fora do inglês vão ao laya:multilingual, em inglês ao laya:en. Leve, o padrão para CPU",
+        description: "Laya: roteador entre laya:multilingual e laya:en. O mais leve, mas perto do chute no teste público (37%)",
         language: Multilingual,
         download_mb: Some(1_536),
-        memory_mb: Some(LAYA_MEMORY_MB),
+        memory_mb: Some(DECIDER_MEMORY_MB),
         latency_ms: 307,
         accuracy_permille: Some(361),
         max_choice_options: Some(125),
-        recommended: true,
         ..BASE
     },
     ModelSpec {
         name: "laya:multilingual",
+        benchmark: Some(Benchmark::new(369, 381, 19)),
         family: "Laya",
-        description: "Laya: mmBERT 322M, 100+ línguas — o que de fato responde em português",
+        description: "Laya: mmBERT 322M, 100+ línguas, mas perto do chute no teste público (37%)",
         language: Multilingual,
         download_mb: Some(683),
-        memory_mb: Some(LAYA_MEMORY_MB),
+        memory_mb: Some(DECIDER_MEMORY_MB),
         latency_ms: 307,
         accuracy_permille: Some(362),
         max_choice_options: Some(250),
@@ -181,10 +199,11 @@ pub const KNOWN_MODELS: &[ModelSpec] = &[
     },
     ModelSpec {
         name: "laya:en",
+        benchmark: Some(Benchmark::new(429, 417, 41)),
         family: "Laya",
         description: "Laya: ModernBERT-large 421M, só inglês",
         download_mb: Some(853),
-        memory_mb: Some(LAYA_MEMORY_MB),
+        memory_mb: Some(DECIDER_MEMORY_MB),
         latency_ms: 619,
         accuracy_permille: Some(361),
         max_choice_options: Some(125),
@@ -192,10 +211,11 @@ pub const KNOWN_MODELS: &[ModelSpec] = &[
     },
     ModelSpec {
         name: "laya:typed-decisions",
+        benchmark: Some(Benchmark::new(429, 357, 43)),
         family: "Laya",
         description: "Laya: ModernBERT-large ajustado nas decisões tipadas, só inglês",
         download_mb: Some(852),
-        memory_mb: Some(LAYA_MEMORY_MB),
+        memory_mb: Some(DECIDER_MEMORY_MB),
         // Sem medição própria em CPU: o mesmo backbone do laya:en.
         latency_ms: 619,
         ..BASE
@@ -204,7 +224,7 @@ pub const KNOWN_MODELS: &[ModelSpec] = &[
     ModelSpec {
         name: "winnow:e4b",
         family: "Winnow",
-        description: "Winnow (EldanRing): Gemma 4 E4B, 100+ línguas e entre os mais precisos (0,722) — o recomendado do Ollaya para GPU",
+        description: "Winnow (EldanRing): Gemma 4 E4B, 100+ línguas e entre os mais precisos (0,722) no teste do autor",
         language: Multilingual,
         download_mb: Some(8_000),
         memory_mb: Some(9_000),
@@ -212,7 +232,6 @@ pub const KNOWN_MODELS: &[ModelSpec] = &[
         hardware: Hardware::Gpu,
         accuracy_permille: Some(722),
         max_choice_options: Some(64),
-        recommended: true,
         ..BASE
     },
     ModelSpec {
@@ -316,8 +335,10 @@ pub const KNOWN_MODELS: &[ModelSpec] = &[
     // ── Em inglês, leves para CPU ──
     ModelSpec {
         name: "kev:0.8b",
+        benchmark: Some(Benchmark::new(631, 619, 86)),
+        recommended: true,
         family: "Kev",
-        description: "Kev (Jared Palmer): Qwen3.5 0,8B, o Kev que cabe em CPU, só inglês",
+        description: "Kev (Jared Palmer): Qwen3.5 0,8B — o melhor custo-benefício em CPU: o mais preciso abaixo de 1B no teste público, também em português",
         download_mb: Some(1_800),
         latency_ms: 1_270,
         accuracy_permille: Some(460),
@@ -374,9 +395,10 @@ pub const KNOWN_MODELS: &[ModelSpec] = &[
     // ── Em inglês, para GPU ──
     ModelSpec {
         name: "kev:4b",
+        benchmark: Some(Benchmark::new(875, 869, 246)),
         aliases: &["kev"],
         family: "Kev",
-        description: "Kev (Jared Palmer): Qwen3.5 4B, preciso (0,669), só inglês",
+        description: "Kev (Jared Palmer): Qwen3.5 4B — 87,5% no teste público, quase igual em português (87%)",
         download_mb: Some(9_500),
         memory_mb: Some(11_000),
         latency_ms: 354,
@@ -386,8 +408,9 @@ pub const KNOWN_MODELS: &[ModelSpec] = &[
     },
     ModelSpec {
         name: "kev:9b",
+        benchmark: Some(Benchmark::new(881, 833, 561)),
         family: "Kev",
-        description: "Kev (Jared Palmer): Qwen3.5 9B, o Kev mais preciso (0,722), só inglês",
+        description: "Kev (Jared Palmer): Qwen3.5 9B — 88% no teste público, mas cai para 83% em português; o 4B rende quase o mesmo com metade do tamanho",
         download_mb: Some(19_500),
         memory_mb: Some(18_000),
         latency_ms: 498,
@@ -410,8 +433,9 @@ pub const KNOWN_MODELS: &[ModelSpec] = &[
     },
     ModelSpec {
         name: "decider:4b",
+        benchmark: Some(Benchmark::new(875, 857, 186)),
         family: "Decider",
-        description: "Decider (Mapika): Qwen3.5 4B, o Decider mais preciso (0,680), só inglês",
+        description: "Decider (Mapika): Qwen3.5 4B — 87,5% no teste público, 86% em português; o mais rápido dos 4B",
         download_mb: Some(8_400),
         memory_mb: Some(14_000),
         latency_ms: 520,
@@ -444,8 +468,10 @@ pub const KNOWN_MODELS: &[ModelSpec] = &[
     },
     ModelSpec {
         name: "jeb:4b",
+        benchmark: Some(Benchmark::new(905, 893, 205)),
+        recommended: true,
         family: "Jeb",
-        description: "Jeb (Jason Brashear): Qwen3.5 4B, o menor e mais rápido Jeb, só inglês",
+        description: "Jeb (Jason Brashear): Qwen3.5 4B — o melhor 4B do teste público (90,5%, 89% em português); com GPU, o melhor custo-benefício",
         download_mb: Some(4_600),
         latency_ms: 96,
         hardware: Hardware::Gpu,
@@ -476,9 +502,10 @@ pub const KNOWN_MODELS: &[ModelSpec] = &[
     },
     ModelSpec {
         name: "clef:flash",
+        benchmark: Some(Benchmark::new(875, 857, 618)),
         aliases: &["clef"],
         family: "Clef",
-        description: "Clef (Cloudflare): Qwen3.5 9B, preciso (0,703) e o mais bem calibrado, só inglês",
+        description: "Clef-flash (Cloudflare): Qwen3.5 9B — 87,5% no teste público, 86% em português, bem calibrado; o mais lento dos aprovados",
         download_mb: Some(19_100),
         memory_mb: Some(19_000),
         latency_ms: 532,
@@ -599,27 +626,29 @@ pub fn is_available<S: AsRef<str>>(names: &[S], model: &str) -> bool {
 
 /// Os modelos de um provedor de nuvem: os do preset, prontos para uso — e o
 /// digitado, quando é outro. Não vai à rede: a chave se confere no teste.
-fn cloud_models(settings: &AiLayaSettings) -> LayaModelsResponse {
-    let mut options: Vec<LayaModelOption> = settings
+fn cloud_models(settings: &AiDeciderSettings) -> DeciderModelsResponse {
+    let mut options: Vec<DeciderModelOption> = settings
         .preset()
         .models
         .iter()
-        .map(|(name, description)| LayaModelOption {
-            name: (*name).to_string(),
-            description: Some((*description).to_string()),
+        .map(|model| DeciderModelOption {
+            name: model.name.to_string(),
+            description: Some(model.description.to_string()),
             installed: true,
             spec: None,
+            benchmark: model.benchmark.map(|benchmark| benchmark.view()),
         })
         .collect();
     if !settings.model.is_empty() && !options.iter().any(|option| option.name == settings.model) {
-        options.push(LayaModelOption {
+        options.push(DeciderModelOption {
             name: settings.model.clone(),
             description: None,
             installed: true,
             spec: None,
+            benchmark: None,
         });
     }
-    LayaModelsResponse {
+    DeciderModelsResponse {
         online: true,
         manages_models: false,
         error_message: None,
@@ -630,18 +659,18 @@ fn cloud_models(settings: &AiLayaSettings) -> LayaModelsResponse {
 }
 
 /// Nunca falha: fora do ar vira `online: false` com o motivo.
-pub async fn list(settings: &AiLayaSettings) -> LayaModelsResponse {
+pub async fn list(settings: &AiDeciderSettings) -> DeciderModelsResponse {
     if !settings.manages_models() {
         return cloud_models(settings);
     }
-    let (installed, error_message) = match LayaClient::new(settings).installed_models().await {
+    let (installed, error_message) = match DeciderClient::new(settings).installed_models().await {
         Ok(installed) => (Some(installed), None),
         Err(error) => (None, Some(error.to_string())),
     };
     let online = installed.is_some();
     // Na memória agora; falha aqui (Ollaya antigo) só deixa a lista vazia.
     let loaded = if online {
-        LayaClient::new(settings)
+        DeciderClient::new(settings)
             .loaded_models()
             .await
             .unwrap_or_default()
@@ -650,28 +679,31 @@ pub async fn list(settings: &AiLayaSettings) -> LayaModelsResponse {
     };
     let installed = installed.unwrap_or_default();
 
-    let mut options: Vec<LayaModelOption> = KNOWN_MODELS
+    let mut options: Vec<DeciderModelOption> = KNOWN_MODELS
         .iter()
-        .map(|spec| LayaModelOption {
+        .map(|spec| DeciderModelOption {
             name: spec.name.to_string(),
             description: Some(spec.description.to_string()),
             installed: is_available(&installed, spec.name),
             spec: Some(spec.view()),
+            benchmark: spec.benchmark.map(|benchmark| benchmark.view()),
         })
         .collect();
+    options.sort_by_key(|option| spec(&option.name).map(ModelSpec::rank));
     // Instalado fora do catálogo (um modelo próprio, uma tag nova) também aparece.
     for name in &installed {
         if spec(name).is_none() {
-            options.push(LayaModelOption {
+            options.push(DeciderModelOption {
                 name: name.clone(),
                 description: None,
                 installed: true,
                 spec: None,
+                benchmark: None,
             });
         }
     }
 
-    LayaModelsResponse {
+    DeciderModelsResponse {
         online,
         manages_models: true,
         error_message,
@@ -690,10 +722,10 @@ mod tests {
 
     #[tokio::test]
     async fn fora_do_ar_ainda_oferece_o_catalogo() {
-        let settings = AiLayaSettings {
+        let settings = AiDeciderSettings {
             base_url: "http://127.0.0.1:9".into(),
             timeout_ms: 500,
-            ..AiLayaSettings::default()
+            ..AiDeciderSettings::default()
         };
         let models = list(&settings).await;
         assert!(!models.online);
@@ -705,11 +737,11 @@ mod tests {
 
     #[tokio::test]
     async fn nuvem_lista_os_modelos_do_preset_sem_ir_a_rede() {
-        let settings = AiLayaSettings {
-            provider: crate::services::ai::laya::providers::LayaProvider::Cloudflare,
+        let settings = AiDeciderSettings {
+            provider: crate::services::ai::decider::providers::DeciderProvider::Cloudflare,
             base_url: "http://127.0.0.1:9".into(),
             model: "clef".into(),
-            ..AiLayaSettings::default()
+            ..AiDeciderSettings::default()
         };
         let models = list(&settings).await;
         assert!(models.online && !models.manages_models);
@@ -723,14 +755,17 @@ mod tests {
     }
 
     #[test]
-    fn padrao_e_o_laya_multilingue_em_cpu() {
-        let padrao = spec(super::super::config::DEFAULT_LAYA_MODEL).unwrap();
+    fn padrao_e_o_kev_08b_em_cpu() {
+        let padrao = spec(super::super::config::DEFAULT_DECIDER_MODEL).unwrap();
+        assert_eq!(padrao.name, "kev:0.8b");
         assert!(padrao.recommended);
-        assert_eq!(padrao.language, Multilingual);
         assert!(!padrao.gpu_recommended());
+        assert!(padrao
+            .benchmark
+            .is_some_and(|benchmark| benchmark.is_useful()));
         assert_eq!(
             padrao.suggested_timeout_ms(),
-            super::super::config::DEFAULT_LAYA_TIMEOUT_MS,
+            super::super::config::DEFAULT_DECIDER_TIMEOUT_MS,
             "o tempo padrão da configuração é o sugerido para o padrão"
         );
     }
@@ -744,9 +779,36 @@ mod tests {
         assert_eq!(recomendados.len(), 2);
         assert!(recomendados.iter().any(|spec| !spec.gpu_recommended()));
         assert!(recomendados.iter().any(|spec| spec.gpu_recommended()));
-        assert!(recomendados
-            .iter()
-            .all(|spec| spec.language == Multilingual));
+        assert!(
+            recomendados.iter().all(|spec| spec
+                .benchmark
+                .is_some_and(|benchmark| benchmark.portuguese_permille >= 600)),
+            "recomendado acerta também em português no teste público"
+        );
+    }
+
+    #[test]
+    fn lista_vai_do_menor_e_mais_eficiente_ao_maior_e_menos_eficiente() {
+        let mut nomes: Vec<&str> = KNOWN_MODELS.iter().map(|spec| spec.name).collect();
+        nomes.sort_by_key(|name| spec(name).map(ModelSpec::rank));
+        assert_eq!(
+            &nomes[..6],
+            [
+                "kev:0.8b",
+                "jeb:4b",
+                "decider:4b",
+                "kev:4b",
+                "clef:flash",
+                "kev:9b"
+            ],
+            "aprovados no teste, do menor ao maior"
+        );
+        assert!(
+            nomes[nomes.len() - 4..]
+                .iter()
+                .all(|name| name.starts_with("laya")),
+            "os perto do chute vão para o fim: {nomes:?}"
+        );
     }
 
     #[test]

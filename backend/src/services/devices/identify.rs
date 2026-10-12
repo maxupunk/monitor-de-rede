@@ -6,7 +6,7 @@
 //! OpenWrt ficou identificado errado sem ninguém perceber.
 //!
 //! **Não grava nada.** É consulta — quem decide o que fica é o formulário.
-//! Quando a evidência é fraca (`padrão`/`cadastro`), o Laya dá um palpite ao
+//! Quando a evidência é fraca (`padrão`/`cadastro`), o Decisor dá um palpite ao
 //! lado — sugestão, nunca a conclusão.
 
 use loco_rs::app::AppContext;
@@ -17,12 +17,12 @@ use super::{access::AccessContext, systems};
 use crate::{
     models::_entities::discovery_results,
     services::{
-        ai::laya::{
-            config::LayaFeature,
+        ai::decider::{
+            config::DeciderFeature,
             decisions::device_identity::{DeviceFacts, DeviceIdentity, IdentitySuggestion},
-            runtime::{Lane, LayaRuntime},
+            runtime::{DeciderRuntime, Lane},
         },
-        discovery::laya_identity::LAYA_KEY,
+        discovery::decider_identity::{DECIDER_KEY, LEGACY_DECIDER_KEY},
         shared::errors::AppResult,
         syslog::hints,
     },
@@ -163,7 +163,7 @@ pub async fn identify(
         .await?
         .resolve_draft(input.ip_address.as_deref());
     let from_discovery = snmp.is_none() && achado.source == systems::source::SNMP;
-    let laya = laya_suggestion(ctx, &achado, descoberta.as_ref(), || DeviceFacts {
+    let decider = decider_suggestion(ctx, &achado, descoberta.as_ref(), || DeviceFacts {
         hostname: descoberta.as_ref().and_then(|item| item.hostname.clone()),
         mdns_name: descoberta.as_ref().and_then(|item| item.mdns_name.clone()),
         vendor: suggested_vendor.clone(),
@@ -196,13 +196,13 @@ pub async fn identify(
         access_mode: acesso.mode.id().to_owned(),
         access_mode_reason: acesso.reason,
         from_discovery,
-        laya,
+        decider,
     })
 }
 
-/// O palpite do Laya quando a detecção ficou sem evidência forte. Reaproveita o
+/// O palpite do Decisor quando a detecção ficou sem evidência forte. Reaproveita o
 /// da última descoberta; sem ele, pergunta agora (fila interativa: alguém espera).
-async fn laya_suggestion(
+async fn decider_suggestion(
     ctx: &AppContext,
     achado: &systems::Detection,
     descoberta: Option<&discovery_results::Model>,
@@ -212,7 +212,13 @@ async fn laya_suggestion(
         return None;
     }
     let cached = descoberta
-        .and_then(|item| item.data.as_ref()?.get("details")?.get(LAYA_KEY).cloned())
+        .and_then(|item| {
+            let details = item.data.as_ref()?.get("details")?;
+            details
+                .get(DECIDER_KEY)
+                .or_else(|| details.get(LEGACY_DECIDER_KEY))
+                .cloned()
+        })
         .and_then(|value| serde_json::from_value::<IdentitySuggestion>(value).ok())
         .filter(|suggestion| !suggestion.is_empty());
     if cached.is_some() {
@@ -222,9 +228,9 @@ async fn laya_suggestion(
     if !facts.has_evidence() {
         return None;
     }
-    let runtime = LayaRuntime::from_context(ctx);
+    let runtime = DeciderRuntime::from_context(ctx);
     let settings = runtime
-        .settings_for(&ctx.db, LayaFeature::DeviceIdentity)
+        .settings_for(&ctx.db, DeciderFeature::DeviceIdentity)
         .await?;
     let decision = DeviceIdentity {
         ask_type: true,
@@ -292,7 +298,7 @@ pub struct Observation {
 }
 
 /// Do resultado da sonda, só o que é **software**: SSH e SNMP decidem; sem
-/// eles, o palpite do Laya. O fabricante/modelo (hardware) nunca vira
+/// eles, o palpite do Decisor. O fabricante/modelo (hardware) nunca vira
 /// observação — uma RouterBOARD da MikroTik pode rodar OpenWrt.
 #[must_use]
 pub fn observation_of(result: &systems::IdentifyResult) -> Option<Observation> {
@@ -303,20 +309,20 @@ pub fn observation_of(result: &systems::IdentifyResult) -> Option<Observation> {
             reason: result.reason.clone(),
         });
     }
-    let suggestion = result.laya.as_ref()?.operating_system.as_ref()?;
+    let suggestion = result.decider.as_ref()?.operating_system.as_ref()?;
     let label = systems::find(&suggestion.value)?.label;
     Some(Observation {
         system: suggestion.value.clone(),
-        source: systems::source::LAYA,
+        source: systems::source::DECIDER,
         reason: format!(
-            "o Laya identificou {label} ({:.0}% de confiança) — palpite, sem prova do equipamento",
+            "o Decisor identificou {label} ({:.0}% de confiança) — palpite, sem prova do equipamento",
             suggestion.confidence
         ),
     })
 }
 
-/// Vai ao equipamento (SSH e SNMP; Laya se faltar evidência) e grava o que ele
-/// mostrou ser em `devices.observed_os`. Palpite do Laya não apaga uma
+/// Vai ao equipamento (SSH e SNMP; Decisor se faltar evidência) e grava o que ele
+/// mostrou ser em `devices.observed_os`. Palpite do Decisor não apaga uma
 /// observação certa já gravada. Devolve o equipamento como ficou.
 ///
 /// # Errors
@@ -342,7 +348,7 @@ pub async fn observe(
     let Some(found) = observation_of(&result) else {
         return Ok(device.clone());
     };
-    let keeps_certain = found.source == systems::source::LAYA
+    let keeps_certain = found.source == systems::source::DECIDER
         && device
             .observed_os_source
             .as_deref()
@@ -360,8 +366,8 @@ pub async fn observe(
 #[cfg(test)]
 mod observation_tests {
     use super::*;
-    use crate::services::ai::laya::{
-        decisions::device_identity::IdentitySuggestion, suggestion::LayaSuggestion,
+    use crate::services::ai::decider::{
+        decisions::device_identity::IdentitySuggestion, suggestion::DeciderSuggestion,
     };
 
     fn result(source: &str, system: &str) -> systems::IdentifyResult {
@@ -380,7 +386,7 @@ mod observation_tests {
             access_mode: "direct".into(),
             access_mode_reason: String::new(),
             from_discovery: false,
-            laya: None,
+            decider: None,
         }
     }
 
@@ -394,11 +400,11 @@ mod observation_tests {
     }
 
     #[test]
-    fn sem_evidencia_o_laya_decide_como_palpite() {
+    fn sem_evidencia_o_decider_decide_como_palpite() {
         let mut fraco = result(systems::source::REGISTRY, "routeros");
-        fraco.laya = Some(IdentitySuggestion {
+        fraco.decider = Some(IdentitySuggestion {
             device_type: None,
-            operating_system: Some(LayaSuggestion {
+            operating_system: Some(DeciderSuggestion {
                 value: "openwrt".into(),
                 confidence: 87.5,
                 model: "laya:teste".into(),
@@ -406,7 +412,7 @@ mod observation_tests {
         });
         let palpite = observation_of(&fraco).unwrap();
         assert_eq!(palpite.system, "openwrt");
-        assert_eq!(palpite.source, systems::source::LAYA);
+        assert_eq!(palpite.source, systems::source::DECIDER);
         assert!(palpite.reason.contains("88%"));
     }
 }

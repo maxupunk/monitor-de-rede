@@ -170,13 +170,13 @@ async fn query_interfaces(Json(input): Json<SnmpTestInput>) -> AppResult<Respons
     Ok(format::json(ifaces)?)
 }
 
-/// `POST /api/snmp/interfaces/suggestions` — o Laya indica o uplink e as
-/// interfaces que valem monitorar. Sem Laya, `available: false`.
+/// `POST /api/snmp/interfaces/suggestions` — o Decisor indica o uplink e as
+/// interfaces que valem monitorar. Sem Decisor, `available: false`.
 async fn interface_suggestions(
     State(ctx): State<AppContext>,
     Json(input): Json<crate::dtos::snmp::InterfaceSuggestionsInput>,
 ) -> AppResult<Response> {
-    let suggestions = crate::services::snmp::laya_interfaces::suggest(&ctx, &input).await;
+    let suggestions = crate::services::snmp::decider_interfaces::suggest(&ctx, &input).await;
     Ok(format::json(suggestions)?)
 }
 

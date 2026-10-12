@@ -4,7 +4,7 @@
 //! udp/tcp:5514 → parser → resolvedor → fila(10k) → escritor em lote
 //!                            │                          ↓            ╲ padrão inédito
 //!                       fontes vistas              logs.sqlite        ↘ (try_send)
-//!                                                       ↑         categorizador → Laya
+//!                                                       ↑         categorizador → Decisor
 //!                                                  log_templates ←──────┘
 //! ```
 //!
@@ -112,13 +112,13 @@ pub fn build(ctx: &AppContext, config: &SyslogConfig) -> AppResult<SyslogService
     app_layer::install_queue(queue.clone());
 
     // Categoria dos padrões novos: o escritor só enfileira, o worker grava e
-    // pergunta ao Laya (que decide sozinho se a frente está ligada).
+    // pergunta ao Decisor (que decide sozinho se a frente está ligada).
     let (catalog, jobs) = categorizer::TemplateCatalog::create();
     tokio::spawn(categorizer::run_worker(
         logs.connection().clone(),
         Arc::clone(&catalog),
         jobs,
-        Arc::new(categorizer::LayaTemplateClassifier::new(ctx.clone())),
+        Arc::new(categorizer::DeciderTemplateClassifier::new(ctx.clone())),
         crate::services::events::EventBus::from_context(ctx).ok(),
     ));
 

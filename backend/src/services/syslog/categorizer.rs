@@ -1,18 +1,18 @@
 //! Categoria de cada padrão novo de log, em segundo plano.
 //!
 //! ```text
-//! writer ── padrão inédito? ──try_send──► fila(256) ──► worker ──► Laya
+//! writer ── padrão inédito? ──try_send──► fila(256) ──► worker ──► Decisor
 //!   │ (nunca espera)                                     │
 //!   └─ grava a linha com template_hash                   └─► log_templates
 //! ```
 //!
 //! O caminho quente não muda: o escritor só calcula o padrão e, se for
 //! inédito, tenta pôr na fila — cheia, descarta e tenta de novo da próxima
-//! vez que o padrão aparecer. O worker grava o padrão **mesmo sem Laya**, para
+//! vez que o padrão aparecer. O worker grava o padrão **mesmo sem Decisor**, para
 //! a varredura periódica classificá-lo quando ele for ligado.
 //!
 //! Só linhas de syslog: os logs da própria aplicação também viram linhas
-//! (`app_layer`), e classificar o aviso de que o Laya falhou geraria outro
+//! (`app_layer`), e classificar o aviso de que o Decisor falhou geraria outro
 //! aviso a classificar.
 
 use std::{
@@ -35,11 +35,11 @@ use super::{queue::PendingLog, template::normalize_message};
 use crate::{
     models::logs::log_templates,
     services::{
-        ai::laya::{
-            config::LayaFeature,
+        ai::decider::{
+            config::DeciderFeature,
             decisions::log_category::{LogCategory, LogPattern},
-            runtime::{Lane, LayaRuntime},
-            suggestion::LayaSuggestion,
+            runtime::{DeciderRuntime, Lane},
+            suggestion::DeciderSuggestion,
         },
         events::EventBus,
         shared::text::truncate_chars,
@@ -51,7 +51,7 @@ use crate::{
 const MAX_SEEN: usize = 50_000;
 const QUEUE_CAPACITY: usize = 256;
 const EXAMPLE_CHARS: usize = 500;
-/// A cada minuto, classifica o que ficou sem categoria (Laya desligado ou
+/// A cada minuto, classifica o que ficou sem categoria (Decisor desligado ou
 /// fora do ar quando o padrão apareceu).
 const BACKFILL_EVERY: Duration = Duration::from_secs(60);
 const BACKFILL_BATCH: u64 = 50;
@@ -80,19 +80,19 @@ impl TemplateJob {
     }
 }
 
-/// Quem dá a categoria. O Laya em produção; um stub nos testes.
+/// Quem dá a categoria. O Decisor em produção; um stub nos testes.
 #[async_trait]
 pub trait TemplateClassifier: Send + Sync {
     /// Vale a pena tentar agora? Falso com a frente desligada.
     async fn ready(&self) -> bool;
-    async fn classify(&self, job: &TemplateJob) -> Option<LayaSuggestion>;
+    async fn classify(&self, job: &TemplateJob) -> Option<DeciderSuggestion>;
 }
 
-pub struct LayaTemplateClassifier {
+pub struct DeciderTemplateClassifier {
     ctx: AppContext,
 }
 
-impl LayaTemplateClassifier {
+impl DeciderTemplateClassifier {
     #[must_use]
     pub const fn new(ctx: AppContext) -> Self {
         Self { ctx }
@@ -100,18 +100,18 @@ impl LayaTemplateClassifier {
 }
 
 #[async_trait]
-impl TemplateClassifier for LayaTemplateClassifier {
+impl TemplateClassifier for DeciderTemplateClassifier {
     async fn ready(&self) -> bool {
-        LayaRuntime::from_context(&self.ctx)
-            .settings_for(&self.ctx.db, LayaFeature::LogEvents)
+        DeciderRuntime::from_context(&self.ctx)
+            .settings_for(&self.ctx.db, DeciderFeature::LogEvents)
             .await
             .is_some()
     }
 
-    async fn classify(&self, job: &TemplateJob) -> Option<LayaSuggestion> {
-        let runtime = LayaRuntime::from_context(&self.ctx);
+    async fn classify(&self, job: &TemplateJob) -> Option<DeciderSuggestion> {
+        let runtime = DeciderRuntime::from_context(&self.ctx);
         let settings = runtime
-            .settings_for(&self.ctx.db, LayaFeature::LogEvents)
+            .settings_for(&self.ctx.db, DeciderFeature::LogEvents)
             .await?;
         let decision = LogCategory {
             min_confidence: settings.min_confidence,
@@ -216,7 +216,7 @@ async fn store_template(db: &DatabaseConnection, job: &TemplateJob) {
 async fn store_classification(
     db: &DatabaseConnection,
     hash: i64,
-    suggestion: &LayaSuggestion,
+    suggestion: &DeciderSuggestion,
     events: Option<&EventBus>,
 ) {
     #[allow(clippy::cast_possible_truncation)]
@@ -359,12 +359,12 @@ mod tests {
             self.ready
         }
 
-        async fn classify(&self, _job: &TemplateJob) -> Option<LayaSuggestion> {
+        async fn classify(&self, _job: &TemplateJob) -> Option<DeciderSuggestion> {
             if !self.ready {
                 return None;
             }
             self.calls.fetch_add(1, Ordering::SeqCst);
-            Some(LayaSuggestion {
+            Some(DeciderSuggestion {
                 value: "auth_failure".into(),
                 confidence: 91.0,
                 model: "stub".into(),
@@ -449,7 +449,7 @@ mod tests {
 
     #[tokio::test]
     #[serial]
-    async fn sem_laya_grava_o_padrao_e_a_varredura_classifica_depois() {
+    async fn sem_decider_grava_o_padrao_e_a_varredura_classifica_depois() {
         let db = banco().await;
         let (catalog, receiver) = TemplateCatalog::create();
         let (template, hash) = template_of("ether3 link down");

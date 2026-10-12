@@ -16,7 +16,7 @@ pub struct Model {
     #[sea_orm(column_type = "Text")]
     pub example: String,
     pub app_name: Option<String>,
-    /// O palpite do Laya.
+    /// O palpite do Decisor.
     pub category: Option<String>,
     /// 0–100.
     pub confidence: Option<i16>,
@@ -34,7 +34,7 @@ pub enum Relation {}
 impl ActiveModelBehavior for ActiveModel {}
 
 impl Model {
-    /// A categoria que vale: a do operador, senão a do Laya.
+    /// A categoria que vale: a do operador, senão a do Decisor.
     #[must_use]
     pub fn effective_category(&self) -> Option<&str> {
         self.user_category.as_deref().or(self.category.as_deref())

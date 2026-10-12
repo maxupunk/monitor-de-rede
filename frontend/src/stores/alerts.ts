@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import { apiService } from '@/services/apiService'
 import type { AlertOperator, AlertProblemKind } from '@/utils/alertPresentation'
 import type { AiIncidentSummary } from '@/bindings/AiIncidentSummary'
-import type { LayaTriage } from '@/bindings/LayaTriage'
+import type { DeciderTriage } from '@/bindings/DeciderTriage'
 
 export interface AlertRuleCondition {
   field: string
@@ -132,8 +132,8 @@ export interface AlertEventData {
   problemTimeline?: string[]
   /** Resumo gerado pela IA quando o alerta abriu (se habilitado) */
   aiSummary?: AiIncidentSummary
-  /** Opinião do Laya sobre o alerta merecer resumo (triagem da IA proativa) */
-  layaTriage?: LayaTriage
+  /** Opinião do Decisor sobre o alerta merecer resumo (triagem da IA proativa) */
+  deciderTriage?: DeciderTriage
   [key: string]: unknown
 }
 
@@ -544,14 +544,14 @@ export const useAlertsStore = defineStore('alerts', () => {
     lastRealtimeUpdateAt.value = new Date().toISOString()
   }
 
-  function applyLayaTriage(id: number, triage: LayaTriage) {
+  function applyDeciderTriage(id: number, triage: DeciderTriage) {
     const current = alertEvents.value.find((a) => a.id === id)
     if (!current) return
-    current.data = { ...(current.data ?? {}), layaTriage: triage }
+    current.data = { ...(current.data ?? {}), deciderTriage: triage }
     lastRealtimeUpdateAt.value = new Date().toISOString()
   }
 
-  /** Gera o resumo agora — o operador passou por cima da triagem do Laya. */
+  /** Gera o resumo agora — o operador passou por cima da triagem do Decisor. */
   async function requestAiSummary(id: number): Promise<string | null> {
     try {
       const res = await apiService.post<{ summary: AiIncidentSummary | null }>(
@@ -621,7 +621,7 @@ export const useAlertsStore = defineStore('alerts', () => {
     upsertAlertEvent,
     patchAlertEvent,
     applyAiSummary,
-    applyLayaTriage,
+    applyDeciderTriage,
     requestAiSummary,
     upsertAlertRule,
     removeAlertRule,

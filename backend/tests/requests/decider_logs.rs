@@ -1,4 +1,4 @@
-//! Categoria de eventos de log pelo Laya, e o filtro que ela habilita.
+//! Categoria de eventos de log pelo Decisor, e o filtro que ela habilita.
 //!
 //! O que se afirma aqui, contra o Ollaya falso: cada padrão é classificado uma
 //! vez (duas linhas de "login failure" com IPs diferentes são uma pergunta
@@ -12,7 +12,7 @@ use backend::{
     services::{
         ai::settings,
         syslog::{
-            categorizer::{backfill, template_of, LayaTemplateClassifier},
+            categorizer::{backfill, template_of, DeciderTemplateClassifier},
             template::hash_hex,
             LogsDb,
         },
@@ -69,16 +69,16 @@ async fn classifica_por_padrao_filtra_e_respeita_a_correcao() {
             ("link down", "link_change"),
         ]))
         .await;
-        let mut laya = fake.settings();
-        laya.features.log_events = true;
-        settings::save_laya(&ctx.db, laya).await.unwrap();
+        let mut decider = fake.settings();
+        decider.features.log_events = true;
+        settings::save_decider(&ctx.db, decider).await.unwrap();
 
         let logs = logs_db(&ctx);
         line(&logs, "login failure for user admin from 10.0.0.5").await;
         line(&logs, "login failure for user admin from 10.0.0.9").await;
         let link = line(&logs, "ether3 link down").await;
 
-        let classifier = LayaTemplateClassifier::new(ctx.clone());
+        let classifier = DeciderTemplateClassifier::new(ctx.clone());
         assert_eq!(backfill(&logs, &classifier, None, 10).await, 2);
         assert_eq!(fake.calls(), 2, "uma consulta por padrão, não por linha");
 
@@ -151,11 +151,13 @@ async fn frente_desligada_nao_classifica() {
         with_key();
         let fake = fake_ollaya::start(by_keyword(&[("login failure", "auth_failure")])).await;
         // O padrão já sai com `log_events: false`.
-        settings::save_laya(&ctx.db, fake.settings()).await.unwrap();
+        settings::save_decider(&ctx.db, fake.settings())
+            .await
+            .unwrap();
         let logs = logs_db(&ctx);
         line(&logs, "login failure for user admin from 10.0.0.5").await;
 
-        let classifier = LayaTemplateClassifier::new(ctx.clone());
+        let classifier = DeciderTemplateClassifier::new(ctx.clone());
         assert_eq!(backfill(&logs, &classifier, None, 10).await, 0);
         assert_eq!(fake.calls(), 0);
     })

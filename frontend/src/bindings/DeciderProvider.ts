@@ -3,4 +3,4 @@
 /**
  * Quem responde às decisões.
  */
-export type LayaProvider = "ollaya" | "typesafe" | "openrouter" | "cloudflare" | "openai" | "custom";
+export type DeciderProvider = "ollaya" | "typesafe" | "openrouter" | "cloudflare" | "openai" | "custom";

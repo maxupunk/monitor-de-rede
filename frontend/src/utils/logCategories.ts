@@ -2,7 +2,7 @@ import type { LogTemplateInfo } from '@/bindings/LogTemplateInfo'
 
 /**
  * Categorias de evento de log — espelho de
- * `backend/src/services/ai/laya/decisions/log_category.rs` (`LOG_CATEGORIES`).
+ * `backend/src/services/ai/decider/decisions/log_category.rs` (`LOG_CATEGORIES`).
  * Rótulo, ícone e cor ficam aqui, e não nos componentes.
  */
 export const LOG_CATEGORY_OPTIONS = [

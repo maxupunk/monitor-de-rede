@@ -92,13 +92,13 @@ pub mod source {
     pub const PROBE: &str = "sonda";
     /// Um plugin leu o sistema no próprio equipamento (o `detect` dele).
     pub const PLUGIN: &str = "plugin";
-    /// O palpite do Laya, quando a evidência de software faltou.
-    pub const LAYA: &str = "laya";
+    /// O palpite do Decisor, quando a evidência de software faltou.
+    pub const DECIDER: &str = "decisor";
     /// Deduzido do fabricante/modelo em texto livre do cadastro.
     pub const REGISTRY: &str = "cadastro";
 
     /// O que o equipamento **provou** rodar (ou o operador afirmou). Palpite
-    /// (`laya`) e texto do cadastro — que descreve o hardware — não entram:
+    /// (`decisor`) e texto do cadastro — que descreve o hardware — não entram:
     /// uma RouterBOARD da MikroTik pode rodar OpenWrt.
     #[must_use]
     pub fn is_certain(source: &str) -> bool {
@@ -108,7 +108,7 @@ pub mod source {
     /// A constante de uma origem gravada no banco.
     #[must_use]
     pub fn from_stored(source: &str) -> Option<&'static str> {
-        [DECLARED, SNMP, PROBE, PLUGIN, LAYA, REGISTRY]
+        [DECLARED, SNMP, PROBE, PLUGIN, DECIDER, REGISTRY]
             .into_iter()
             .find(|known| *known == source)
     }
@@ -194,13 +194,13 @@ pub struct Detection {
 ///    só o `uname`;
 /// 5. **o apelido genérico no `sysDescr`** — a palavra "Linux", que quase todo
 ///    firmware embarcado diz e que por isso só decide quando nada mais decidiu;
-/// 6. o palpite do Laya, quando foi ele quem observou;
+/// 6. o palpite do Decisor, quando foi ele quem observou;
 /// 7. o fabricante/modelo do cadastro, específico antes de genérico — é
 ///    hardware, por isso só decide no fim;
 /// 8. o padrão.
 ///
 /// A observação gravada (`observed`) entra logo depois da declaração quando é
-/// evidência de software, e no passo 6 quando é palpite do Laya.
+/// evidência de software, e no passo 6 quando é palpite do Decisor.
 ///
 /// O salto que importa é o 4 vir **antes** do 5. Um OpenWrt cujo `sysDescr` é
 /// `Linux bpi-r3 6.12.87 aarch64` casava com "linux" no passo 3 e parava ali.
@@ -437,9 +437,10 @@ pub struct IdentifyResult {
     pub probed: bool,
     /// A sonda atual não respondeu e a evidência SNMP veio da última descoberta.
     pub from_discovery: bool,
-    /// Palpite do Laya (tipo e sistema) quando a evidência acima é fraca.
+    /// Palpite do Decisor (tipo e sistema) quando a evidência acima é fraca.
     /// Só sugestão: a tela mostra e o operador decide.
-    pub laya: Option<crate::services::ai::laya::decisions::device_identity::IdentitySuggestion>,
+    pub decider:
+        Option<crate::services::ai::decider::decisions::device_identity::IdentitySuggestion>,
 }
 
 /// Escolhe e normaliza um nome anunciado pelo equipamento.

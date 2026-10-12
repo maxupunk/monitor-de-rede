@@ -1,6 +1,6 @@
 //! Padrões de log e o que cada um significa.
 //!
-//! O Laya classifica **padrões**, não linhas: "login failure for user admin
+//! O Decisor classifica **padrões**, não linhas: "login failure for user admin
 //! from #" é uma pergunta só, venha ela mil vezes. A linha guarda só a chave
 //! do padrão (`template_hash`); a categoria, a confiança e a correção do
 //! operador moram uma vez em `log_templates`.
@@ -40,7 +40,7 @@ impl MigrationTrait for Migration {
         let mut stmt = table("log_templates");
         stmt.col(big_integer("template_hash").primary_key())
             .col(text("template"))
-            // Uma linha real do padrão: o Laya lê melhor com um exemplo.
+            // Uma linha real do padrão: o Decisor lê melhor com um exemplo.
             .col(text("example"))
             .col(string_null("app_name"))
             .col(string_len_null("category", 32))

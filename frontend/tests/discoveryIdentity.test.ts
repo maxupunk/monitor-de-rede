@@ -4,7 +4,7 @@ import {
   discoveryDescription,
   discoveryDeviceName,
   discoveryIdentity,
-  discoveryLaya,
+  discoveryDecider,
   discoveryPortLabel,
   discoveryReasons,
   discoverySources,
@@ -175,15 +175,17 @@ describe('evidências da descoberta', () => {
   })
 })
 
-describe('discoveryLaya', () => {
+describe('discoveryDecider', () => {
   const camera = { value: 'camera', confidence: 91, model: 'laya:multilingual' }
 
   it('lê o palpite do stream ao vivo e do resultado persistido', () => {
-    expect(discoveryLaya({ data: { laya: { deviceType: camera } } })?.deviceType).toEqual(camera)
+    expect(discoveryDecider({ data: { decider: { deviceType: camera } } })?.deviceType).toEqual(
+      camera
+    )
     expect(
-      discoveryLaya({ data: { details: { laya: { deviceType: camera } } } })?.deviceType
+      discoveryDecider({ data: { details: { decider: { deviceType: camera } } } })?.deviceType
     ).toEqual(camera)
-    expect(discoveryLaya({ data: { details: {} } })).toBeNull()
+    expect(discoveryDecider({ data: { details: {} } })).toBeNull()
   })
 })
 

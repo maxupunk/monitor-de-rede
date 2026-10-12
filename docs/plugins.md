@@ -45,11 +45,11 @@ sistema do equipamento vem, nesta ordem:
 2. do que o **equipamento mostrou** (`devices.observed_os`): a identificação
    do servidor SSH (`dropbear` = OpenWrt, lida na porta da credencial SSH), o
    SNMP, ou um plugin de um sistema só cujo **Detectar** leu o sistema;
-3. do **Laya**, quando nada disso decidiu — palpite, com a confiança;
+3. do **Decisor**, quando nada disso decidiu — palpite, com a confiança;
 4. do fabricante/modelo do cadastro — palpite.
 
 Só a declaração e o que o equipamento mostrou podem tornar um plugin
-**Incompatível**; palpite (Laya, cadastro) que discorda vira **Talvez**, com o
+**Incompatível**; palpite (Decisor, cadastro) que discorda vira **Talvez**, com o
 porquê. A observação acontece sozinha depois do cadastro (em segundo plano;
 o menu Aplicativos é avisado pelo SSE se algum plugin ligou) e no botão
 **Verificar sistema** do aplicativo, que também roda o **Detectar** do plugin

@@ -1,4 +1,4 @@
-//! Laya: decisões tipadas (sim/não, escolha, escala) servidas pelo Ollaya.
+//! Decisor: decisões tipadas (sim/não, escolha, escala) servidas pelo Ollaya.
 //!
 //! Não é um LLM — é um classificador que responde várias perguntas numa
 //! passada só, em dezenas de milissegundos. O NetMonitor o usa para decidir
@@ -9,6 +9,7 @@
 //! as heurísticas de sempre.
 
 pub mod action_review;
+pub mod benchmark;
 pub mod catalog;
 pub mod client;
 pub mod config;

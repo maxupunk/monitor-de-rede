@@ -1,8 +1,8 @@
-//! Segunda opinião do Laya antes de o modo automático rodar uma ação.
+//! Segunda opinião do Decisor antes de o modo automático rodar uma ação.
 //!
 //! A regra de cada ferramenta ([`RiskAssessment`]) não enxerga o contexto:
 //! reiniciar um container é risco médio, mas reiniciar o banco no meio de um
-//! incidente, sem o usuário ter pedido, não é. O Laya lê o pedido e a ação
+//! incidente, sem o usuário ter pedido, não é. O Decisor lê o pedido e a ação
 //! proposta e diz se rodar agora é perigoso.
 //!
 //! Ele **só sobe** o risco: um "perigoso" vira pedido de confirmação; um
@@ -13,20 +13,20 @@
 use std::collections::BTreeMap;
 
 use super::{
-    config::{AiLayaSettings, LayaFeature},
+    config::{AiDeciderSettings, DeciderFeature},
     decision::Decision,
-    runtime::{Lane, LayaRuntime},
+    runtime::{DeciderRuntime, Lane},
     schema::{Answer, Question},
 };
 use crate::services::ai::harness::tools::{AiToolRisk, RiskAssessment};
 
 const DANGEROUS: &str = "dangerous";
 
-/// Motivo mostrado ao usuário quando o Laya pede a confirmação.
+/// Motivo mostrado ao usuário quando o Decisor pede a confirmação.
 pub const ESCALATION_REASON: &str =
-    "O Laya avaliou que rodar isto agora, neste contexto, pode causar impacto";
+    "O Decisor avaliou que rodar isto agora, neste contexto, pode causar impacto";
 
-/// O que o Laya lê: o pedido do usuário e a ação que a IA quer rodar.
+/// O que o Decisor lê: o pedido do usuário e a ação que a IA quer rodar.
 pub struct ActionReview<'a> {
     pub request: &'a str,
     pub action: &'a str,
@@ -72,15 +72,16 @@ could cause an outage, lose data or hide a real problem from the operators."
     }
 }
 
-/// `true` quando o Laya acha perigoso rodar a ação sem perguntar. Desligado,
+/// `true` quando o Decisor acha perigoso rodar a ação sem perguntar. Desligado,
 /// fora do ar ou com o modelo frio, `false`: o chat não espera por ele e
 /// vale a regra da ferramenta.
 pub async fn flags_danger(
-    runtime: &LayaRuntime,
-    settings: &AiLayaSettings,
+    runtime: &DeciderRuntime,
+    settings: &AiDeciderSettings,
     review: &ActionReview<'_>,
 ) -> bool {
-    if !settings.allows(LayaFeature::ActionReview) || !ActionReview::worth_reviewing(review.risk) {
+    if !settings.allows(DeciderFeature::ActionReview) || !ActionReview::worth_reviewing(review.risk)
+    {
         return false;
     }
     match runtime
@@ -92,12 +93,12 @@ pub async fn flags_danger(
                 model = %outcome.model,
                 latency_ms = outcome.latency_ms,
                 dangerous = outcome.value,
-                "laya: ação revisada"
+                "decisor: ação revisada"
             );
             outcome.value >= settings.threshold()
         }
         Err(error) => {
-            tracing::debug!(%error, "laya sem resposta na revisão da ação; vale a regra da ferramenta");
+            tracing::debug!(%error, "decisor sem resposta na revisão da ação; vale a regra da ferramenta");
             false
         }
     }
@@ -143,9 +144,9 @@ mod tests {
 
     #[tokio::test]
     async fn desligado_nao_consulta_nada() {
-        let settings = AiLayaSettings {
+        let settings = AiDeciderSettings {
             base_url: "http://127.0.0.1:9".into(),
-            ..AiLayaSettings::default()
+            ..AiDeciderSettings::default()
         };
         let risk = RiskAssessment::medium("x");
         let review = ActionReview {
@@ -153,6 +154,6 @@ mod tests {
             action: "Reiniciar",
             risk: &risk,
         };
-        assert!(!flags_danger(&LayaRuntime::default(), &settings, &review).await);
+        assert!(!flags_danger(&DeciderRuntime::default(), &settings, &review).await);
     }
 }

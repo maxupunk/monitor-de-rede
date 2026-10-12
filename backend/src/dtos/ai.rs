@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::services::ai::laya::{
-    config::AiLayaSettings,
-    providers::{DecisionProtocol, LayaProvider},
+use crate::services::ai::decider::{
+    config::AiDeciderSettings,
+    providers::{DeciderProvider, DecisionProtocol},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -261,31 +261,31 @@ pub struct TestConnectionResponse {
     pub model: Option<String>,
 }
 
-/// Testa o Laya com o que está no formulário, ainda não salvo.
+/// Testa o Decisor com o que está no formulário, ainda não salvo.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct TestLayaInput {
-    pub laya: AiLayaSettings,
+pub struct TestDeciderInput {
+    pub decider: AiDeciderSettings,
     /// Pergunta de exemplo; sem ela, vale a padrão do servidor.
     #[serde(default)]
     pub question: Option<String>,
 }
 
-/// O formulário do Laya, para listar, baixar ou carregar modelos com o que
+/// O formulário do Decisor, para listar, baixar ou carregar modelos com o que
 /// está na tela (ainda sem gravar).
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct LayaFormInput {
-    pub laya: AiLayaSettings,
+pub struct DeciderFormInput {
+    pub decider: AiDeciderSettings,
 }
 
 /// Um modelo que a tela oferece no autocomplete.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct LayaModelOption {
+pub struct DeciderModelOption {
     pub name: String,
     /// Só os do catálogo têm; um instalado por fora vem sem.
     #[serde(default)]
@@ -294,14 +294,32 @@ pub struct LayaModelOption {
     /// A ficha do modelo; `None` para um instalado fora do catálogo.
     #[serde(default)]
     #[ts(optional)]
-    pub spec: Option<LayaModelSpecView>,
+    pub spec: Option<DeciderModelSpecView>,
+    /// Resultado no teste público, quando o modelo foi avaliado.
+    #[serde(default)]
+    #[ts(optional)]
+    pub benchmark: Option<DeciderBenchmarkView>,
+}
+
+/// Resultado no teste público (`decider::benchmark`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeciderBenchmarkView {
+    /// Acerto geral, inglês e português (0–1).
+    pub accuracy: f64,
+    /// Acerto só em português (0–1).
+    pub portuguese: f64,
+    #[serde(default)]
+    #[ts(optional)]
+    pub latency_ms: Option<u32>,
 }
 
 /// Língua que o modelo atende.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
-pub enum LayaModelLanguage {
+pub enum DeciderModelLanguage {
     /// Mais de 100 línguas (o português entre elas).
     Multilingual,
     /// Inglês (alguns também italiano ou chinês) — sem português.
@@ -312,10 +330,10 @@ pub enum LayaModelLanguage {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct LayaModelSpecView {
-    /// Família ("Laya", "Kev"), para agrupar na lista.
+pub struct DeciderModelSpecView {
+    /// Família ("Decisor", "Kev"), para agrupar na lista.
     pub family: String,
-    pub language: LayaModelLanguage,
+    pub language: DeciderModelLanguage,
     /// Tamanho do download, em MB, quando publicado.
     #[serde(default)]
     #[ts(optional)]
@@ -347,7 +365,7 @@ pub struct LayaModelSpecView {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct LayaModelsResponse {
+pub struct DeciderModelsResponse {
     /// O servidor respondeu. Em nuvem não há o que listar: vale `true` e a
     /// conexão se confere no teste (passo 3).
     pub online: bool,
@@ -364,15 +382,15 @@ pub struct LayaModelsResponse {
     #[serde(default)]
     pub loaded: Vec<String>,
     /// Catálogo conhecido mais o que está instalado fora dele.
-    pub options: Vec<LayaModelOption>,
+    pub options: Vec<DeciderModelOption>,
 }
 
-/// Um provedor de decisões, como a tela o oferece (`laya::providers`).
+/// Um provedor de decisões, como a tela o oferece (`decider::providers`).
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct LayaProviderView {
-    pub id: LayaProvider,
+pub struct DeciderProviderView {
+    pub id: DeciderProvider,
     pub label: String,
     pub description: String,
     /// `None` no "Outro": o operador escolhe o formato.
@@ -381,7 +399,7 @@ pub struct LayaProviderView {
     pub protocol: Option<DecisionProtocol>,
     pub default_base_url: String,
     pub default_model: String,
-    pub models: Vec<LayaProviderModel>,
+    pub models: Vec<DeciderProviderModel>,
     pub requires_key: bool,
     pub requires_account: bool,
     #[serde(default)]
@@ -396,16 +414,19 @@ pub struct LayaProviderView {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct LayaProviderModel {
+pub struct DeciderProviderModel {
     pub name: String,
     pub description: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub benchmark: Option<DeciderBenchmarkView>,
 }
 
-/// Quão provável o Laya acha que um grupo de ferramentas é necessário.
+/// Quão provável o Decisor acha que um grupo de ferramentas é necessário.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct LayaGroupScore {
+pub struct DeciderGroupScore {
     pub id: String,
     pub purpose: String,
     /// 0–1.
@@ -417,7 +438,7 @@ pub struct LayaGroupScore {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct TestLayaResponse {
+pub struct TestDeciderResponse {
     pub success: bool,
     /// O Ollaya respondeu.
     pub online: bool,
@@ -428,7 +449,7 @@ pub struct TestLayaResponse {
     /// Quem respondeu de fato (`laya:en`, `laya:multilingual`…).
     #[serde(default)]
     pub model: Option<String>,
-    pub groups: Vec<LayaGroupScore>,
+    pub groups: Vec<DeciderGroupScore>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

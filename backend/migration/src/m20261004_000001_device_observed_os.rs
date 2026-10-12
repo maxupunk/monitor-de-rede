@@ -3,7 +3,7 @@
 //! `devices.operating_system` é a declaração do operador; o que o fabricante e
 //! o modelo sugerem é hardware (uma RouterBOARD pode rodar OpenWrt). Faltava
 //! guardar a evidência de software — o servidor SSH (`dropbear`), o SNMP, um
-//! plugin que leu `/etc/openwrt_release` — ou, sem ela, o palpite do Laya. É
+//! plugin que leu `/etc/openwrt_release` — ou, sem ela, o palpite do Decisor. É
 //! isso que decide a compatibilidade de um plugin quando ninguém declarou.
 
 use sea_orm_migration::prelude::*;

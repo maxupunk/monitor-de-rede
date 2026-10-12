@@ -1,7 +1,7 @@
 //! Qual interface é o uplink e quais valem monitorar.
 //!
 //! Hoje a escolha é toda manual: o operador lê nome, alias e velocidade de
-//! cada porta. O Laya lê o mesmo texto — e acerta o que um nome como
+//! cada porta. O Decisor lê o mesmo texto — e acerta o que um nome como
 //! `ether1` não diz sozinho quando o alias é `WAN-Vivo`.
 //!
 //! O texto de cada interface vai nos critérios das perguntas, não no estado:
@@ -13,10 +13,10 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::services::{
-    ai::laya::{
+    ai::decider::{
         decision::Decision,
         schema::{Answer, Question},
-        suggestion::LayaSuggestion,
+        suggestion::DeciderSuggestion,
     },
     snmp::collectors::if_type_label,
 };
@@ -136,7 +136,7 @@ fn scaled(value: u64, step: u64, units: &[&str]) -> String {
 
 /// As interfaces que vale perguntar: sem loopback, as ativas e com mais
 /// tráfego primeiro, até o limite de opções de uma escolha — o do Ollaya ou,
-/// se menor, o do modelo (`max_options`, ver `laya::catalog`). Como a lista
+/// se menor, o do modelo (`max_options`, ver `decider::catalog`). Como a lista
 /// já vem por relevância, o corte tira só as menos prováveis de ser o uplink.
 #[must_use]
 pub fn rank_candidates(
@@ -176,7 +176,7 @@ pub struct MonitorSuggestion {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct InterfaceAdviceOutput {
     /// `value` é o ifIndex.
-    pub uplink: Option<LayaSuggestion>,
+    pub uplink: Option<DeciderSuggestion>,
     pub monitor: Vec<MonitorSuggestion>,
 }
 
@@ -220,19 +220,20 @@ impl Decision for InterfaceAdvice<'_> {
 
     fn interpret(&self, answers: &BTreeMap<String, Answer>) -> InterfaceAdviceOutput {
         let min = self.min_confidence;
-        let uplink =
-            LayaSuggestion::from_choice(answers.get(UPLINK), "", min).and_then(|mut suggestion| {
+        let uplink = DeciderSuggestion::from_choice(answers.get(UPLINK), "", min).and_then(
+            |mut suggestion| {
                 let if_index = suggestion.value.strip_prefix("if")?.to_string();
                 suggestion.value = if_index;
                 Some(suggestion)
-            });
+            },
+        );
         let monitor = self
             .ranked
             .iter()
             .take(MAX_MONITOR_QUESTIONS)
             .filter_map(|interface| {
                 let probability = answers.get(&monitor_key(interface.if_index))?.yes()?;
-                LayaSuggestion::from_probability("", probability, "", min).map(|suggestion| {
+                DeciderSuggestion::from_probability("", probability, "", min).map(|suggestion| {
                     MonitorSuggestion {
                         if_index: interface.if_index,
                         confidence: suggestion.confidence,

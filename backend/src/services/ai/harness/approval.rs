@@ -5,7 +5,7 @@
 //! 1. **A regra da ferramenta** ([`ToolRegistry::assess`]): o modo
 //!    configurado e o risco da chamada. "Pedir permissão" sempre pergunta;
 //!    "automático" roda o risco baixo e o médio e pergunta o alto.
-//! 2. **O Laya** ([`action_review`]): no automático, lê o pedido do usuário e
+//! 2. **O Decisor** ([`action_review`]): no automático, lê o pedido do usuário e
 //!    a ação de risco médio e pode mandá-la de volta para confirmação. Só
 //!    sobe o risco — nunca libera o que a regra mandou perguntar.
 //!
@@ -19,18 +19,18 @@ use super::tools::{
     Clearance, RiskAssessment, ToolArgs, ToolKind, ToolOutput, ToolRegistry, Verdict,
 };
 use crate::services::{
-    ai::laya::{
+    ai::decider::{
         action_review::{self, ActionReview, ESCALATION_REASON},
-        config::AiLayaSettings,
-        runtime::LayaRuntime,
+        config::AiDeciderSettings,
+        runtime::DeciderRuntime,
     },
     shared::errors::{AppError, AppResult},
 };
 
-/// O Laya e o pedido do usuário, para revisar as ações do automático.
+/// O Decisor e o pedido do usuário, para revisar as ações do automático.
 pub struct ActionReviewer {
-    pub runtime: LayaRuntime,
-    pub settings: AiLayaSettings,
+    pub runtime: DeciderRuntime,
+    pub settings: AiDeciderSettings,
     /// A última pergunta do usuário: o contexto da ação.
     pub request: String,
 }
@@ -93,7 +93,7 @@ impl Execution {
 }
 
 /// Decide a chamada. `arguments_json` é o texto que a IA mandou (o resumo
-/// para o Laya sai dele).
+/// para o Decisor sai dele).
 pub async fn decide(
     ctx: &AppContext,
     registry: &ToolRegistry,
@@ -123,7 +123,7 @@ pub async fn decide(
     }
     if let Some(reviewer) = reviewer {
         if ActionReview::worth_reviewing(&assessment.risk)
-            && laya_flags_danger(
+            && decider_flags_danger(
                 ctx,
                 registry,
                 reviewer,
@@ -133,7 +133,7 @@ pub async fn decide(
             )
             .await
         {
-            tracing::info!(tool = %name, "laya mandou a ação do modo automático para confirmação");
+            tracing::info!(tool = %name, "decisor mandou a ação do modo automático para confirmação");
             return GateDecision::Ask(RiskAssessment::escalated(ESCALATION_REASON));
         }
     }
@@ -143,7 +143,7 @@ pub async fn decide(
     })
 }
 
-async fn laya_flags_danger(
+async fn decider_flags_danger(
     ctx: &AppContext,
     registry: &ToolRegistry,
     reviewer: &ActionReviewer,

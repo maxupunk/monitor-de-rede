@@ -1,8 +1,8 @@
-//! Depois da varredura, o Laya dá o palpite onde a heurística ficou em dúvida:
+//! Depois da varredura, o Decisor dá o palpite onde a heurística ficou em dúvida:
 //! tipo `unknown`/`web_device` ou sistema sem evidência.
 //!
 //! Roda em segundo plano, depois que a execução já foi gravada e concluída —
-//! a varredura nunca espera por ele. O palpite vai para `details.laya` do
+//! a varredura nunca espera por ele. O palpite vai para `details.decider` do
 //! resultado (JSON, sem migração) e, se a sessão ao vivo ainda é desta
 //! execução, para o host dela: a tela recebe pelo stream da varredura que já
 //! está aberto, sem chamada nova.
@@ -15,17 +15,19 @@ use super::{device_identifier::scores, merger::DiscoveredHost, service::ScanSess
 use crate::{
     models::discovery_results,
     services::{
-        ai::laya::{
-            config::LayaFeature,
+        ai::decider::{
+            config::DeciderFeature,
             decisions::device_identity::{DeviceFacts, DeviceIdentity, IdentitySuggestion},
-            runtime::{Lane, LayaRuntime},
+            runtime::{DeciderRuntime, Lane},
         },
         shared::errors::AppResult,
     },
 };
 
 /// Chave do palpite em `details` do resultado e em `data` do host ao vivo.
-pub const LAYA_KEY: &str = "laya";
+pub const DECIDER_KEY: &str = "decider";
+/// A mesma chave em varreduras gravadas antes do renome para Decisor.
+pub const LEGACY_DECIDER_KEY: &str = "laya";
 /// Uma rede grande não vira uma fila de minutos no Ollaya.
 const MAX_HOSTS_PER_RUN: usize = 64;
 
@@ -74,7 +76,7 @@ const UNSUPPORTED_FACTOR: f64 = 0.6;
 /// de **outros** tipos e nenhuma do tipo escolhido, o palpite perde 40% da
 /// confiança e some se cair abaixo do mínimo — foi assim que um OpenWrt
 /// (Net-SNMP, SSH, HTTP) virou "NAS 98%". Sem evidência alguma, o palpite
-/// fica como veio: é justamente quando o Laya mais ajuda.
+/// fica como veio: é justamente quando o Decisor mais ajuda.
 #[must_use]
 pub fn calibrate(
     mut suggestion: IdentitySuggestion,
@@ -101,17 +103,17 @@ pub fn spawn(ctx: &AppContext, run_id: i64, hosts: Vec<DiscoveredHost>) {
     let ctx = ctx.clone();
     tokio::spawn(async move {
         if let Err(error) = enrich(&ctx, run_id, &hosts).await {
-            tracing::debug!(%error, run_id, "laya: enriquecimento da descoberta falhou");
+            tracing::debug!(%error, run_id, "decisor: enriquecimento da descoberta falhou");
         }
     });
 }
 
-/// Pergunta ao Laya sobre os hosts em dúvida e grava os palpites. Devolve
+/// Pergunta ao Decisor sobre os hosts em dúvida e grava os palpites. Devolve
 /// quantos hosts ganharam sugestão.
 pub async fn enrich(ctx: &AppContext, run_id: i64, hosts: &[DiscoveredHost]) -> AppResult<usize> {
-    let runtime = LayaRuntime::from_context(ctx);
+    let runtime = DeciderRuntime::from_context(ctx);
     let Some(settings) = runtime
-        .settings_for(&ctx.db, LayaFeature::DeviceIdentity)
+        .settings_for(&ctx.db, DeciderFeature::DeviceIdentity)
         .await
     else {
         return Ok(0);
@@ -157,20 +159,20 @@ async fn store(
         .filter(crate::models::_entities::discovery_results::Column::IpAddress.eq(ip_address))
         .one(&ctx.db)
         .await?;
-    // O IP pode ter virado dispositivo enquanto o Laya pensava: nada a gravar.
+    // O IP pode ter virado dispositivo enquanto o Decisor pensava: nada a gravar.
     if let Some(row) = row {
         let mut data = row.data.clone().unwrap_or_else(|| serde_json::json!({}));
         if !data.get("details").is_some_and(Value::is_object) {
             data["details"] = serde_json::json!({});
         }
-        data["details"][LAYA_KEY] = value.clone();
+        data["details"][DECIDER_KEY] = value.clone();
         let mut active: discovery_results::ActiveModel = row.into();
         active.data = Set(Some(data));
         active.update(&ctx.db).await?;
     }
     if let Ok(session) = ScanSessionService::from_context(ctx) {
         session
-            .annotate_host(run_id, ip_address, LAYA_KEY, value)
+            .annotate_host(run_id, ip_address, DECIDER_KEY, value)
             .await;
     }
     Ok(())
@@ -216,11 +218,13 @@ mod tests {
 
     fn suggestion(kind: &str, confidence: f64) -> IdentitySuggestion {
         IdentitySuggestion {
-            device_type: Some(crate::services::ai::laya::suggestion::LayaSuggestion {
-                value: kind.into(),
-                confidence,
-                model: "laya:multilingual".into(),
-            }),
+            device_type: Some(
+                crate::services::ai::decider::suggestion::DeciderSuggestion {
+                    value: kind.into(),
+                    confidence,
+                    model: "laya:multilingual".into(),
+                },
+            ),
             operating_system: None,
         }
     }

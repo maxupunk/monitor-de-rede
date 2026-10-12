@@ -1,5 +1,5 @@
 //! O que é comum aos servidores locais de modelos no molde do Ollama — o
-//! próprio Ollama (LLM do chat) e o Ollaya (modelos de decisão do Laya).
+//! próprio Ollama (LLM do chat) e o Ollaya (modelos de decisão do Decisor).
 //!
 //! Os dois falam o mesmo `/api/pull` (NDJSON com `status`, `digest`,
 //! `total`, `completed`) e o mesmo `/api/tags`; só muda o nome do campo do

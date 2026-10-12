@@ -2,13 +2,14 @@
 //!
 //! As decisões falam só a língua interna ([`Question`] e [`DecideResponse`],
 //! a do Ollaya). Cada formato traduz o pedido e a resposta, sem rede — o
-//! cliente (`laya::client`) faz a chamada. Formato novo é um tipo novo que
+//! cliente (`decider::client`) faz a chamada. Formato novo é um tipo novo que
 //! implementa [`WireFormat`]; nada mais muda.
 //!
 //! | formato | caminho | diferenças da língua interna |
 //! |---|---|---|
 //! | Ollaya | `/api/decide` | nenhuma |
 //! | System One (TypeSafe) | `/v1/systemone` | nenhuma (campos a mais na resposta são ignorados) |
+//! | OpenRouter Decisions | `/alpha/decisions` | nenhuma: o corpo do System One em outro caminho |
 //! | Cloudflare | `/accounts/{conta}/ai/run/@cf/cloudflare/{modelo}` | resposta dentro de `result` |
 //! | OpenAI Decisions | `/v1/decisions` | `input`, perguntas em lista com `name`, `predicate`, `choices` e `probabilities` em lista |
 
@@ -18,7 +19,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::{
-    config::AiLayaSettings,
+    config::AiDeciderSettings,
     providers::DecisionProtocol,
     schema::{Answer, DecideRequest, DecideResponse, Question},
 };
@@ -39,7 +40,7 @@ pub trait WireFormat: Send + Sync {
     /// Falta um dado que o formato exige (o ID da conta na Cloudflare).
     fn request(
         &self,
-        settings: &AiLayaSettings,
+        settings: &AiDeciderSettings,
         state: &str,
         questions: &BTreeMap<String, Question>,
     ) -> AppResult<WireRequest>;
@@ -49,7 +50,7 @@ pub trait WireFormat: Send + Sync {
     /// # Errors
     ///
     /// Corpo fora do formato.
-    fn parse(&self, settings: &AiLayaSettings, body: Value) -> AppResult<DecideResponse>;
+    fn parse(&self, settings: &AiDeciderSettings, body: Value) -> AppResult<DecideResponse>;
 }
 
 /// O formato do provedor configurado.
@@ -60,10 +61,11 @@ pub fn wire_for(protocol: DecisionProtocol) -> &'static dyn WireFormat {
         DecisionProtocol::Systemone => &Native("/v1/systemone"),
         DecisionProtocol::Cloudflare => &Cloudflare,
         DecisionProtocol::Openai => &OpenAiDecisions,
+        DecisionProtocol::Openrouter => &Native("/alpha/decisions"),
     }
 }
 
-fn url(settings: &AiLayaSettings, path: &str) -> String {
+fn url(settings: &AiDeciderSettings, path: &str) -> String {
     format!("{}{path}", settings.base_url.trim_end_matches('/'))
 }
 
@@ -73,7 +75,7 @@ fn invalid(error: impl std::fmt::Display) -> AppError {
 
 /// O corpo da língua interna, que Ollaya, TypeSafe e Cloudflare aceitam.
 fn native_body(
-    settings: &AiLayaSettings,
+    settings: &AiDeciderSettings,
     state: &str,
     questions: &BTreeMap<String, Question>,
 ) -> AppResult<Value> {
@@ -91,7 +93,7 @@ struct Native(&'static str);
 impl WireFormat for Native {
     fn request(
         &self,
-        settings: &AiLayaSettings,
+        settings: &AiDeciderSettings,
         state: &str,
         questions: &BTreeMap<String, Question>,
     ) -> AppResult<WireRequest> {
@@ -101,7 +103,7 @@ impl WireFormat for Native {
         })
     }
 
-    fn parse(&self, _settings: &AiLayaSettings, body: Value) -> AppResult<DecideResponse> {
+    fn parse(&self, _settings: &AiDeciderSettings, body: Value) -> AppResult<DecideResponse> {
         serde_json::from_value(body).map_err(invalid)
     }
 }
@@ -112,7 +114,7 @@ struct Cloudflare;
 impl WireFormat for Cloudflare {
     fn request(
         &self,
-        settings: &AiLayaSettings,
+        settings: &AiDeciderSettings,
         state: &str,
         questions: &BTreeMap<String, Question>,
     ) -> AppResult<WireRequest> {
@@ -133,7 +135,7 @@ impl WireFormat for Cloudflare {
         })
     }
 
-    fn parse(&self, settings: &AiLayaSettings, mut body: Value) -> AppResult<DecideResponse> {
+    fn parse(&self, settings: &AiDeciderSettings, mut body: Value) -> AppResult<DecideResponse> {
         let inner = body.get_mut("result").map_or(Value::Null, Value::take);
         Native("").parse(settings, if inner.is_null() { body } else { inner })
     }
@@ -181,7 +183,7 @@ fn label(value: &Value) -> String {
 impl WireFormat for OpenAiDecisions {
     fn request(
         &self,
-        settings: &AiLayaSettings,
+        settings: &AiDeciderSettings,
         state: &str,
         questions: &BTreeMap<String, Question>,
     ) -> AppResult<WireRequest> {
@@ -213,7 +215,7 @@ impl WireFormat for OpenAiDecisions {
         })
     }
 
-    fn parse(&self, settings: &AiLayaSettings, body: Value) -> AppResult<DecideResponse> {
+    fn parse(&self, settings: &AiDeciderSettings, body: Value) -> AppResult<DecideResponse> {
         let response: OpenAiResponse = serde_json::from_value(body).map_err(invalid)?;
         let answers = response
             .answers
@@ -273,7 +275,7 @@ pub fn error_message(body: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::ai::laya::providers::LayaProvider;
+    use crate::services::ai::decider::providers::DeciderProvider;
 
     fn questions() -> BTreeMap<String, Question> {
         BTreeMap::from([
@@ -296,20 +298,20 @@ mod tests {
         ])
     }
 
-    fn settings(provider: LayaProvider) -> AiLayaSettings {
-        AiLayaSettings {
+    fn settings(provider: DeciderProvider) -> AiDeciderSettings {
+        AiDeciderSettings {
             provider,
             base_url: String::new(),
             model: String::new(),
             account_id: Some("abc123".into()),
-            ..AiLayaSettings::default()
+            ..AiDeciderSettings::default()
         }
         .normalized()
     }
 
     #[test]
     fn system_one_e_o_corpo_do_ollaya_em_outro_caminho() {
-        let typesafe = settings(LayaProvider::Typesafe);
+        let typesafe = settings(DeciderProvider::Typesafe);
         let request = wire_for(typesafe.protocol())
             .request(&typesafe, "o link caiu", &questions())
             .unwrap();
@@ -336,8 +338,19 @@ mod tests {
     }
 
     #[test]
+    fn openrouter_usa_o_caminho_de_decisoes_com_o_corpo_do_system_one() {
+        let openrouter = settings(DeciderProvider::Openrouter);
+        let request = wire_for(openrouter.protocol())
+            .request(&openrouter, "s", &questions())
+            .unwrap();
+        assert_eq!(request.url, "https://openrouter.ai/api/alpha/decisions");
+        assert_eq!(request.body["model"], "microsoft/microsoft-decision-1");
+        assert_eq!(request.body["questions"]["urgent"]["type"], "noul");
+    }
+
+    #[test]
     fn cloudflare_poe_conta_e_modelo_na_url_e_tira_o_envelope() {
-        let cloudflare = settings(LayaProvider::Cloudflare);
+        let cloudflare = settings(DeciderProvider::Cloudflare);
         let request = wire_for(cloudflare.protocol())
             .request(&cloudflare, "s", &questions())
             .unwrap();
@@ -361,9 +374,9 @@ mod tests {
 
     #[test]
     fn cloudflare_sem_conta_diz_o_que_falta() {
-        let sem_conta = AiLayaSettings {
+        let sem_conta = AiDeciderSettings {
             account_id: None,
-            ..settings(LayaProvider::Cloudflare)
+            ..settings(DeciderProvider::Cloudflare)
         };
         let erro = wire_for(sem_conta.protocol())
             .request(&sem_conta, "s", &questions())
@@ -373,7 +386,7 @@ mod tests {
 
     #[test]
     fn openai_traduz_perguntas_e_respostas() {
-        let openai = settings(LayaProvider::Openai);
+        let openai = settings(DeciderProvider::Openai);
         let request = wire_for(openai.protocol())
             .request(&openai, "o link caiu", &questions())
             .unwrap();

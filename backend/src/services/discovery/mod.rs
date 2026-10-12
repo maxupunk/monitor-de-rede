@@ -6,9 +6,9 @@
 
 pub mod cidr_range;
 pub mod conflicts;
+pub mod decider_identity;
 pub mod device_identifier;
 pub mod fingerprints;
-pub mod laya_identity;
 pub mod merger;
 pub mod pipeline;
 pub mod progress;

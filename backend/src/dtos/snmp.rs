@@ -3,9 +3,9 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::services::ai::laya::{
+use crate::services::ai::decider::{
     decisions::interfaces::{InterfaceCandidate, MonitorSuggestion},
-    suggestion::LayaSuggestion,
+    suggestion::DeciderSuggestion,
 };
 
 /// `POST /api/snmp/interfaces/suggestions` — vem da tela, sem id: funciona
@@ -27,11 +27,11 @@ pub struct InterfaceSuggestionsInput {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct InterfaceSuggestions {
-    /// Falso com o Laya desligado, sem a frente liberada ou fora do ar — a
+    /// Falso com o Decisor desligado, sem a frente liberada ou fora do ar — a
     /// tela simplesmente não mostra sugestão.
     pub available: bool,
     /// `value` é o ifIndex.
-    pub uplink: Option<LayaSuggestion>,
+    pub uplink: Option<DeciderSuggestion>,
     pub monitor: Vec<MonitorSuggestion>,
     pub model: Option<String>,
 }

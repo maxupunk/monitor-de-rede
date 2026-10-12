@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use super::{
-    laya::config::AiLayaSettings, proactive::config::AiProactiveSettings,
+    decider::config::AiDeciderSettings, proactive::config::AiProactiveSettings,
     response_style::AiResponseStyle,
 };
 use crate::{
@@ -112,8 +112,9 @@ struct AiSettingsHelper {
     response_style: AiResponseStyle,
     #[serde(default)]
     proactive: AiProactiveSettings,
-    #[serde(default)]
-    laya: AiLayaSettings,
+    /// Gravada como `laya` antes do renome para Decisor.
+    #[serde(default, alias = "laya")]
+    decider: AiDeciderSettings,
     #[serde(default)]
     custom_system_prompt: Option<String>,
 }
@@ -130,7 +131,7 @@ pub enum AiAutomationMode {
     #[default]
     Confirm,
     /// Automático com critério: o que é de risco baixo ou médio roda na hora
-    /// (aparece no chat e na auditoria); o de risco alto — ou o que o Laya
+    /// (aparece no chat e na auditoria); o de risco alto — ou o que o Decisor
     /// julgar perigoso no contexto — volta a pedir confirmação
     /// (`harness::tools::risk`).
     Auto,
@@ -184,8 +185,8 @@ pub struct AiSettings {
     /// O que a IA faz sozinha: resumo de incidente e resumo periódico.
     pub proactive: AiProactiveSettings,
 
-    /// Laya (via Ollaya): decide antes do chat quais ferramentas mandar.
-    pub laya: AiLayaSettings,
+    /// Decisor (via Ollaya): decide antes do chat quais ferramentas mandar.
+    pub decider: AiDeciderSettings,
 
     pub custom_system_prompt: Option<String>,
 }
@@ -217,7 +218,7 @@ impl<'de> Deserialize<'de> for AiSettings {
             container_actions: h.container_actions,
             response_style: h.response_style,
             proactive: h.proactive,
-            laya: h.laya,
+            decider: h.decider,
             custom_system_prompt: h.custom_system_prompt,
         })
     }
@@ -274,7 +275,7 @@ impl Default for AiSettings {
             container_actions: AiAutomationMode::default(),
             response_style: AiResponseStyle::default(),
             proactive: AiProactiveSettings::default(),
-            laya: AiLayaSettings::default(),
+            decider: AiDeciderSettings::default(),
             custom_system_prompt: None,
         }
     }
@@ -331,9 +332,9 @@ pub async fn save(db: &DatabaseConnection, mut new_settings: AiSettings) -> AppR
     let existing = load(db).await?;
     new_settings.merge_unmasked(&existing);
     new_settings.proactive = new_settings.proactive.normalized();
-    // O Laya tem card e endpoint próprios (`save_laya`): o formulário do
+    // O Decisor tem card e endpoint próprios (`save_decider`): o formulário do
     // provedor não o altera, nem com uma cópia desatualizada.
-    new_settings.laya = existing.laya;
+    new_settings.decider = existing.decider;
 
     // Validações básicas
     match new_settings.active_driver.as_str() {
@@ -429,35 +430,38 @@ pub async fn save(db: &DatabaseConnection, mut new_settings: AiSettings) -> AppR
     Ok(new_settings)
 }
 
-/// Grava só a parte do Laya, sem passar pelas validações do provedor: um
-/// provedor mal configurado não pode impedir de ligar ou desligar o Laya.
+/// Grava só a parte do Decisor, sem passar pelas validações do provedor: um
+/// provedor mal configurado não pode impedir de ligar ou desligar o Decisor.
 /// Devolve como a tela vê: a chave mascarada.
-pub async fn save_laya(db: &DatabaseConnection, laya: AiLayaSettings) -> AppResult<AiLayaSettings> {
+pub async fn save_decider(
+    db: &DatabaseConnection,
+    decider: AiDeciderSettings,
+) -> AppResult<AiDeciderSettings> {
     let mut settings = load(db).await?;
-    settings.laya = with_stored_key(laya, &settings.laya).normalized();
+    settings.decider = with_stored_key(decider, &settings.decider).normalized();
     persist(db, &settings).await?;
-    Ok(masked_laya(settings.laya))
+    Ok(masked_decider(settings.decider))
 }
 
-/// O Laya como a tela vê: a chave mascarada.
+/// O Decisor como a tela vê: a chave mascarada.
 #[must_use]
-pub fn masked_laya(mut laya: AiLayaSettings) -> AiLayaSettings {
-    mask_secret(&mut laya.api_key);
-    laya
+pub fn masked_decider(mut decider: AiDeciderSettings) -> AiDeciderSettings {
+    mask_secret(&mut decider.api_key);
+    decider
 }
 
-/// O formulário do Laya pronto para uso (teste, download, lista de modelos):
+/// O formulário do Decisor pronto para uso (teste, download, lista de modelos):
 /// a máscara volta a ser a chave gravada.
-pub async fn resolve_laya<C: ConnectionTrait>(
+pub async fn resolve_decider<C: ConnectionTrait>(
     db: &C,
-    form: AiLayaSettings,
-) -> AppResult<AiLayaSettings> {
-    Ok(with_stored_key(form, &load(db).await?.laya).normalized())
+    form: AiDeciderSettings,
+) -> AppResult<AiDeciderSettings> {
+    Ok(with_stored_key(form, &load(db).await?.decider).normalized())
 }
 
 /// A máscara vira a chave gravada — só se o provedor é o mesmo: trocar de
 /// provedor sem digitar chave nova nunca manda a chave de um para o outro.
-fn with_stored_key(mut form: AiLayaSettings, stored: &AiLayaSettings) -> AiLayaSettings {
+fn with_stored_key(mut form: AiDeciderSettings, stored: &AiDeciderSettings) -> AiDeciderSettings {
     if form.provider == stored.provider {
         restore_secret(&mut form.api_key, &stored.api_key);
     } else if form.api_key.as_deref() == Some(MASKED_KEY) {
@@ -555,26 +559,36 @@ mod tests {
     }
 
     #[test]
-    fn chave_do_laya_volta_da_mascara_so_no_mesmo_provedor() {
-        use crate::services::ai::laya::providers::LayaProvider;
-        let stored = AiLayaSettings {
-            provider: LayaProvider::Typesafe,
+    fn chave_do_decider_volta_da_mascara_so_no_mesmo_provedor() {
+        use crate::services::ai::decider::providers::DeciderProvider;
+        let stored = AiDeciderSettings {
+            provider: DeciderProvider::Typesafe,
             api_key: Some("ts-secreta".into()),
-            ..AiLayaSettings::default()
+            ..AiDeciderSettings::default()
         };
-        let mesma = with_stored_key(masked_laya(stored.clone()), &stored);
+        let mesma = with_stored_key(masked_decider(stored.clone()), &stored);
         assert_eq!(mesma.api_key.as_deref(), Some("ts-secreta"));
 
-        let trocou = AiLayaSettings {
-            provider: LayaProvider::Openai,
-            ..masked_laya(stored.clone())
+        let trocou = AiDeciderSettings {
+            provider: DeciderProvider::Openai,
+            ..masked_decider(stored.clone())
         };
         assert_eq!(
             with_stored_key(trocou, &stored).api_key,
             None,
             "a chave da TypeSafe não vai para a OpenAI"
         );
-        assert_eq!(masked_laya(stored).api_key.as_deref(), Some(MASKED_KEY));
+        assert_eq!(masked_decider(stored).api_key.as_deref(), Some(MASKED_KEY));
+    }
+
+    #[test]
+    fn configuracao_gravada_como_laya_continua_valendo() {
+        let antiga: AiSettings =
+            serde_json::from_str(r#"{ "laya": { "enabled": true, "model": "laya:en" } }"#).unwrap();
+        assert!(antiga.decider.enabled);
+        assert_eq!(antiga.decider.model, "laya:en");
+        let gravada = serde_json::to_value(&antiga).unwrap();
+        assert!(gravada.get("decider").is_some() && gravada.get("laya").is_none());
     }
 
     #[test]

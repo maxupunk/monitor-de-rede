@@ -32,7 +32,7 @@ export const ACTIVE_TOOLS_OPTIONS: AiModeOption<AiActiveToolsMode>[] = [
     value: 'auto',
     title: 'Automático',
     icon: 'mdi-robot-outline',
-    hint: 'A IA executa os testes sozinha quando o diagnóstico pede; cada um aparece no chat. Varreduras amplas passam pela revisão do Laya.',
+    hint: 'A IA executa os testes sozinha quando o diagnóstico pede; cada um aparece no chat. Varreduras amplas passam pela revisão do Decisor.',
   },
 ]
 

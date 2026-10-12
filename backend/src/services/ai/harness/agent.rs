@@ -35,8 +35,8 @@ use crate::{
         ai::{
             approvals::{self, ApprovalRequest},
             context_window::{self, ContextWindow},
+            decider::{runtime::DeciderRuntime, tool_routing},
             drivers::traits::{AiChatOptions, AiDriver, AiMessage, AiToolCall, AiUsage},
-            laya::{runtime::LayaRuntime, tool_routing},
             mentions,
             settings::AiSettings,
         },
@@ -89,7 +89,7 @@ pub enum HarnessEvent {
         arguments: serde_json::Value,
         summary: String,
         risk: AiToolRisk,
-        /// Por que pergunta ("Exclui a regra…", "O Laya avaliou…").
+        /// Por que pergunta ("Exclui a regra…", "O Decisor avaliou…").
         reason: String,
     },
     /// Métricas da resposta: tokens somados de todas as rodadas, o modelo
@@ -385,7 +385,7 @@ pode derrubar a rede ou cortar o acesso ao equipamento. Leia o comando e o motiv
 antes de aprovar. O NetMonitor não se responsabiliza por danos causados por ações da IA.";
 
 /// Quem conversa e o que decide as chamadas de uma resposta: o aviso de
-/// equipamento já dado, a conversa (modo "Aceitar automaticamente") e o Laya
+/// equipamento já dado, a conversa (modo "Aceitar automaticamente") e o Decisor
 /// que revisa as ações do modo automático.
 struct ToolSession {
     /// Quem conversa: a ação que roda sem confirmação fica na auditoria dele.
@@ -641,15 +641,15 @@ pub async fn run_agent_loop(
             .last()
             .map_or("", |message| message.content.as_str());
         let configured_model = driver.model().unwrap_or_default().to_string();
-        // O Laya decide enquanto a janela de contexto é consultada: as duas
+        // O Decisor decide enquanto a janela de contexto é consultada: as duas
         // são chamadas de rede e nenhuma depende da outra.
-        let consult_laya = request.tool_loading == ToolLoading::OnDemand && !small_talk;
+        let consult_decider = request.tool_loading == ToolLoading::OnDemand && !small_talk;
         let (routed, mut window) = tokio::join!(
             async {
-                if consult_laya {
+                if consult_decider {
                     tool_routing::route(
-                        &LayaRuntime::from_context(&ctx),
-                        &settings.laya,
+                        &DeciderRuntime::from_context(&ctx),
+                        &settings.decider,
                         question,
                         &available,
                     )
@@ -664,7 +664,7 @@ pub async fn run_agent_loop(
             ToolLoading::Everything => available.iter().copied().collect(),
             ToolLoading::OnDemand => {
                 let mut groups = preselect_groups(question, &request.context.mentions);
-                // O Laya só acrescenta: o que as palavras-chave acharam fica.
+                // O Decisor só acrescenta: o que as palavras-chave acharam fica.
                 groups.extend(routed.iter());
                 if request.context.alert_id.is_some() || request.context.rule_id.is_some() {
                     groups.insert(ToolGroup::AlertRules);
@@ -689,10 +689,10 @@ pub async fn run_agent_loop(
             actor: request.actor.clone(),
             conversation_key: request.memory.conversation_key.clone(),
             warned: false,
-            // Só o chat tem pedido do usuário para o Laya ler.
+            // Só o chat tem pedido do usuário para o Decisor ler.
             reviewer: (request.tool_loading == ToolLoading::OnDemand).then(|| ActionReviewer {
-                runtime: LayaRuntime::from_context(&ctx),
-                settings: settings.laya.clone(),
+                runtime: DeciderRuntime::from_context(&ctx),
+                settings: settings.decider.clone(),
                 request: question.to_string(),
             }),
         };

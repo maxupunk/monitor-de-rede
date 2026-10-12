@@ -123,7 +123,7 @@ pub struct SnmpInterface {
 }
 
 /// Nome curto do `ifType` (IANAifType-MIB) para quem lê a interface — hoje o
-/// Laya. Só os tipos comuns em rede pequena; o resto vira `type N`.
+/// Decisor. Só os tipos comuns em rede pequena; o resto vira `type N`.
 #[must_use]
 pub fn if_type_label(if_type: u64) -> String {
     match if_type {

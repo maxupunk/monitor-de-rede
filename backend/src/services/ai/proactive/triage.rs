@@ -1,13 +1,13 @@
-//! Triagem do resumo automático pelo Laya.
+//! Triagem do resumo automático pelo Decisor.
 //!
 //! - **Desligada** (padrão): nada muda — vale severidade e teto por hora.
-//! - **Só registrar**: o Laya opina, a opinião fica no alerta, e o resumo sai
-//!   sempre. Serve para calibrar antes de deixar o Laya decidir.
-//! - **Decidir**: alerta que o Laya não acha acionável fica sem resumo — e
+//! - **Só registrar**: o Decisor opina, a opinião fica no alerta, e o resumo sai
+//!   sempre. Serve para calibrar antes de deixar o Decisor decidir.
+//! - **Decidir**: alerta que o Decisor não acha acionável fica sem resumo — e
 //!   sem gastar o teto por hora. A tela mostra o porquê e oferece "Gerar
 //!   resumo agora".
 //!
-//! Nunca acrescenta chamada ao LLM. Laya fora do ar = comportamento de hoje.
+//! Nunca acrescenta chamada ao LLM. Decisor fora do ar = comportamento de hoje.
 
 use chrono::{Duration, Utc};
 use loco_rs::prelude::AppContext;
@@ -22,10 +22,10 @@ use crate::{
         alert_events,
     },
     services::{
-        ai::laya::{
-            config::{LayaFeature, LayaTriageMode},
+        ai::decider::{
+            config::{DeciderFeature, DeciderTriageMode},
             decisions::incident_triage::{IncidentTriage, TriageVerdict},
-            runtime::{Lane, LayaRuntime},
+            runtime::{DeciderRuntime, Lane},
             suggestion::percent,
         },
         alerts::{
@@ -36,20 +36,33 @@ use crate::{
     },
 };
 
-/// Campo de `alert_events.data` com a opinião do Laya.
-pub const TRIAGE_FIELD: &str = "layaTriage";
-pub const TRIAGE_EVENT: &str = "alert:laya_triage";
+/// Campo de `alert_events.data` com a opinião do Decisor.
+pub const TRIAGE_FIELD: &str = "deciderTriage";
+/// O mesmo campo em alertas gravados antes do renome para Decisor.
+const LEGACY_TRIAGE_FIELD: &str = "layaTriage";
+
+/// Alerta gravado antes do renome traz a opinião em `layaTriage`: quem lê
+/// recebe em [`TRIAGE_FIELD`], sem migrar o JSON de cada alerta no banco.
+pub fn upgrade_legacy_triage(data: &mut Value) {
+    let Some(object) = data.as_object_mut() else {
+        return;
+    };
+    if let Some(legacy) = object.remove(LEGACY_TRIAGE_FIELD) {
+        object.entry(TRIAGE_FIELD).or_insert(legacy);
+    }
+}
+pub const TRIAGE_EVENT: &str = "alert:decider_triage";
 
 /// A opinião gravada no alerta. Percentuais 0–100.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct LayaTriage {
+pub struct DeciderTriage {
     pub actionable: f64,
     pub symptom: f64,
     pub transient: f64,
     pub model: String,
-    pub mode: LayaTriageMode,
+    pub mode: DeciderTriageMode,
     /// O resumo automático não saiu por causa desta opinião.
     pub suppressed: bool,
     pub assessed_at: String,
@@ -59,17 +72,17 @@ pub struct LayaTriage {
 /// só se o alerta for acionável no limiar configurado.
 #[must_use]
 pub fn should_summarize(
-    mode: LayaTriageMode,
+    mode: DeciderTriageMode,
     verdict: Option<&TriageVerdict>,
     threshold: f64,
 ) -> bool {
     match (mode, verdict) {
-        (LayaTriageMode::Enforce, Some(verdict)) => verdict.actionable >= threshold,
+        (DeciderTriageMode::Enforce, Some(verdict)) => verdict.actionable >= threshold,
         _ => true,
     }
 }
 
-/// O que o Laya lê sobre o alerta — só consultas baratas: numa tempestade de
+/// O que o Decisor lê sobre o alerta — só consultas baratas: numa tempestade de
 /// alertas, a correlação completa (que carrega o parque inteiro) não cabe
 /// aqui.
 async fn build_state(ctx: &AppContext, alert: &alert_events::Model) -> AppResult<String> {
@@ -124,17 +137,17 @@ async fn build_state(ctx: &AppContext, alert: &alert_events::Model) -> AppResult
     .to_string())
 }
 
-/// Pergunta ao Laya e grava a opinião no alerta. `None` com a triagem
-/// desligada, o Laya fora do ar ou o alerta sumido — e aí o resumo segue
+/// Pergunta ao Decisor e grava a opinião no alerta. `None` com a triagem
+/// desligada, o Decisor fora do ar ou o alerta sumido — e aí o resumo segue
 /// como sempre.
 ///
 /// # Errors
 ///
 /// Erro do banco.
-pub async fn assess(ctx: &AppContext, alert_id: i64) -> AppResult<Option<(LayaTriage, f64)>> {
-    let runtime = LayaRuntime::from_context(ctx);
+pub async fn assess(ctx: &AppContext, alert_id: i64) -> AppResult<Option<(DeciderTriage, f64)>> {
+    let runtime = DeciderRuntime::from_context(ctx);
     let Some(settings) = runtime
-        .settings_for(&ctx.db, LayaFeature::IncidentTriage)
+        .settings_for(&ctx.db, DeciderFeature::IncidentTriage)
         .await
     else {
         return Ok(None);
@@ -154,7 +167,7 @@ pub async fn assess(ctx: &AppContext, alert_id: i64) -> AppResult<Option<(LayaTr
     };
     let mode = settings.features.incident_triage;
     let threshold = settings.threshold();
-    let triage = LayaTriage {
+    let triage = DeciderTriage {
         actionable: percent(outcome.value.actionable),
         symptom: percent(outcome.value.symptom),
         transient: percent(outcome.value.transient),
@@ -186,7 +199,7 @@ pub async fn assess(ctx: &AppContext, alert_id: i64) -> AppResult<Option<(LayaTr
             "id": updated.id,
             "alertEventId": updated.id,
             "deviceId": updated.device_id,
-            "layaTriage": triage,
+            "deciderTriage": triage,
         }),
     )
     .await;
@@ -208,16 +221,20 @@ mod tests {
     #[test]
     fn so_o_modo_decidir_suprime() {
         let low = verdict(0.2);
-        assert!(should_summarize(LayaTriageMode::Off, Some(&low), 0.6));
-        assert!(should_summarize(LayaTriageMode::Shadow, Some(&low), 0.6));
-        assert!(!should_summarize(LayaTriageMode::Enforce, Some(&low), 0.6));
+        assert!(should_summarize(DeciderTriageMode::Off, Some(&low), 0.6));
+        assert!(should_summarize(DeciderTriageMode::Shadow, Some(&low), 0.6));
+        assert!(!should_summarize(
+            DeciderTriageMode::Enforce,
+            Some(&low),
+            0.6
+        ));
         assert!(should_summarize(
-            LayaTriageMode::Enforce,
+            DeciderTriageMode::Enforce,
             Some(&verdict(0.6)),
             0.6
         ));
         assert!(
-            should_summarize(LayaTriageMode::Enforce, None, 0.6),
+            should_summarize(DeciderTriageMode::Enforce, None, 0.6),
             "sem opinião, resume como sempre"
         );
     }

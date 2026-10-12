@@ -3,7 +3,7 @@
     <v-card-title class="font-weight-bold d-flex align-center justify-space-between flex-wrap ga-2">
       <div class="d-flex align-center flex-wrap ga-2">
         <v-icon color="primary">mdi-tools</v-icon>
-        Laya — ferramentas da IA
+        Decisor — escolhas rápidas da IA
         <v-chip size="small" variant="tonal" :color="status.color" :prepend-icon="status.icon">
           {{ status.label }}
         </v-chip>
@@ -42,9 +42,9 @@
       <!-- 1. Provedor -->
       <div class="step-title">
         <v-avatar size="24" :color="stepColor(providerReady, 'error')" class="me-2">1</v-avatar>
-        Onde o Laya decide
+        Onde o Decisor decide
       </div>
-      <LayaProviderStep v-model:form="form" @refresh="refreshModels" @test="runTest" />
+      <DeciderProviderStep v-model:form="form" @refresh="refreshModels" @test="runTest" />
 
       <!-- 2. Modelo -->
       <div class="step-title mt-5">
@@ -52,7 +52,7 @@
         Modelo
       </div>
       <div
-        v-if="managesModels && layaStore.models && !serverOnline"
+        v-if="managesModels && deciderStore.models && !serverOnline"
         class="text-body-2 text-warning mb-2"
       >
         Conecte o Ollaya (passo 1) para ver o que está baixado e baixar o modelo.
@@ -90,7 +90,16 @@
                       recomendado
                     </v-chip>
                     <v-chip
-                      v-if="item.spec"
+                      v-if="item.benchmark"
+                      size="x-small"
+                      variant="tonal"
+                      :color="benchmarkFact(item.benchmark).color"
+                      :title="`${benchmarkFact(item.benchmark).label} no teste público`"
+                    >
+                      {{ benchmarkFact(item.benchmark).short }}
+                    </v-chip>
+                    <v-chip
+                      v-else-if="item.spec"
                       size="x-small"
                       variant="tonal"
                       :color="languageFact(item.spec.language).color"
@@ -147,7 +156,7 @@
             </v-btn>
           </template>
           <v-btn
-            v-else-if="serverOnline && !layaStore.pulling"
+            v-else-if="serverOnline && !deciderStore.pulling"
             color="warning"
             variant="flat"
             prepend-icon="mdi-download"
@@ -160,7 +169,7 @@
       </v-row>
 
       <!-- Ficha do modelo escolhido: o que pesa na escolha -->
-      <template v-if="selectedSpec">
+      <template v-if="selectedSpec || selectedBenchmark">
         <div class="d-flex flex-wrap ga-1 mt-2">
           <v-chip
             v-for="fact in selectedFacts"
@@ -174,20 +183,34 @@
           </v-chip>
         </div>
         <v-alert
-          v-if="selectedSpec.language === 'english'"
+          v-if="nearChance"
+          type="warning"
+          variant="tonal"
+          density="compact"
+          class="mt-2 text-body-2"
+        >
+          No
+          <a :href="BENCHMARK_URL" target="_blank" rel="noopener" class="text-primary"
+            >teste público</a
+          >
+          (23 modelos, em inglês e português), este modelo acertou
+          {{ nearChance }} — perto de escolher no chute (~31%). Prefira <strong>kev:0.8b</strong> em
+          CPU ou <strong>jeb:4b</strong> com GPU.
+        </v-alert>
+        <v-alert
+          v-else-if="selectedSpec?.language === 'english' && !selectedBenchmark"
           type="info"
           variant="tonal"
           density="compact"
           class="mt-2 text-body-2"
         >
-          Este modelo não atende português. As perguntas que o NetMonitor faz a ele já vão em
-          inglês, mas o texto analisado (perguntas do chat, logs, nomes) costuma estar em português,
-          e aí as probabilidades perdem confiança. Prefira um multilíngue — <strong>laya</strong> em
-          CPU ou <strong>winnow:e4b</strong> em GPU — ou experimente com perguntas reais em Avançado
-          › Experimentar antes de ligar.
+          Este modelo não declara português e não foi avaliado no teste público. O texto analisado
+          (perguntas do chat, logs, nomes) costuma estar em português: prefira um avaliado —
+          <strong>kev:0.8b</strong> em CPU ou <strong>jeb:4b</strong> com GPU — ou experimente com
+          perguntas reais em Avançado › Experimentar antes de ligar.
         </v-alert>
         <v-alert
-          v-if="selectedSpec.gpuRecommended"
+          v-if="selectedSpec?.gpuRecommended"
           type="warning"
           variant="tonal"
           density="compact"
@@ -202,29 +225,29 @@
           {{ timeoutNote }}
         </div>
       </template>
-      <div v-if="layaStore.pulling && layaStore.pullProgress" class="mt-2">
+      <div v-if="deciderStore.pulling && deciderStore.pullProgress" class="mt-2">
         <div class="d-flex align-center justify-space-between text-body-2 mb-1">
-          <span>{{ layaStore.pullProgress.status }}</span>
-          <v-btn size="small" color="error" variant="text" @click="layaStore.cancelPull()">
+          <span>{{ deciderStore.pullProgress.status }}</span>
+          <v-btn size="small" color="error" variant="text" @click="deciderStore.cancelPull()">
             Cancelar
           </v-btn>
         </div>
         <v-progress-linear
-          :model-value="layaStore.pullProgress.percentage ?? 0"
-          :indeterminate="layaStore.pullProgress.percentage == null"
+          :model-value="deciderStore.pullProgress.percentage ?? 0"
+          :indeterminate="deciderStore.pullProgress.percentage == null"
           color="primary"
           height="8"
           rounded
         />
       </div>
       <v-alert
-        v-else-if="layaStore.pullProgress?.error"
+        v-else-if="deciderStore.pullProgress?.error"
         type="error"
         variant="tonal"
         density="compact"
         class="mt-2"
       >
-        {{ layaStore.pullProgress.error }}
+        {{ deciderStore.pullProgress.error }}
       </v-alert>
 
       <v-alert
@@ -236,7 +259,7 @@
         icon="mdi-memory"
       >
         Tirando o modelo do disco para a memória — leva de 5 a 20 segundos na primeira vez depois de
-        um tempo sem uso. {{ layaStore.testing ? 'A resposta sai assim que terminar.' : '' }}
+        um tempo sem uso. {{ deciderStore.testing ? 'A resposta sai assim que terminar.' : '' }}
       </v-alert>
       <v-alert
         v-else-if="modelLoadFailed"
@@ -245,7 +268,7 @@
         density="compact"
         class="mt-3"
       >
-        Não foi possível carregar o modelo: {{ layaStore.modelState?.message }}
+        Não foi possível carregar o modelo: {{ deciderStore.modelState?.message }}
       </v-alert>
 
       <!-- Onde usar -->
@@ -254,7 +277,7 @@
         Onde usar
       </div>
       <div class="text-body-2 mb-2">
-        O Laya só sugere, sempre com a confiança ao lado; você confirma com um clique.
+        O Decisor só sugere, sempre com a confiança ao lado; você confirma com um clique.
       </div>
       <v-row dense>
         <v-col v-for="feature in FEATURE_SWITCHES" :key="feature.key" cols="12" md="6">
@@ -284,7 +307,7 @@
       <v-expansion-panels variant="accordion" class="mt-4">
         <v-expansion-panel title="Avançado">
           <v-expansion-panel-text>
-            <!-- Experimentar: o que o Laya escolheria e com que confiança -->
+            <!-- Experimentar: o que o Decisor escolheria e com que confiança -->
             <div class="font-weight-bold mb-1">Experimentar</div>
             <div v-if="!modelReady" class="text-body-2 text-warning mb-2">
               {{
@@ -309,8 +332,8 @@
                 color="primary"
                 variant="flat"
                 prepend-icon="mdi-flask-outline"
-                :loading="layaStore.testing && !modelLoading"
-                :disabled="!modelReady || layaStore.pulling || modelLoading"
+                :loading="deciderStore.testing && !modelLoading"
+                :disabled="!modelReady || deciderStore.pulling || modelLoading"
                 @click="runTest"
               >
                 <v-progress-circular
@@ -320,7 +343,7 @@
                   width="2"
                   class="me-2"
                 />
-                {{ modelLoading ? 'Carregando modelo…' : 'Ver o que o Laya escolhe' }}
+                {{ modelLoading ? 'Carregando modelo…' : 'Ver o que o Decider escolhe' }}
               </v-btn>
             </div>
             <div
@@ -330,7 +353,7 @@
               class="text-body-2 mt-2"
             >
               O modelo está fora da memória: o primeiro teste o carrega antes de responder. No chat,
-              a pergunta que chegar nesse momento segue sem o Laya enquanto ele carrega.
+              a pergunta que chegar nesse momento segue sem o Decisor enquanto ele carrega.
             </div>
 
             <template v-if="result">
@@ -412,7 +435,7 @@
               max="10000"
               step="100"
               label="Tempo máximo por pergunta (ms)"
-              hint="Passou disso, o chat segue sem a escolha do Laya."
+              hint="Passou disso, o chat segue sem a escolha do Decisor."
               persistent-hint
               variant="outlined"
               density="compact"
@@ -437,7 +460,7 @@
         variant="flat"
         prepend-icon="mdi-content-save-outline"
         :disabled="!dirty"
-        :loading="layaStore.saving"
+        :loading="deciderStore.saving"
         @click="save"
       >
         Salvar
@@ -449,23 +472,26 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import {
-  defaultLayaSettings,
-  useAiLayaStore,
-  type AiLayaSettings,
-  type LayaModelOption,
-} from '@/stores/aiLaya'
-import type { LayaTriageMode } from '@/bindings/LayaTriageMode'
+  defaultDeciderSettings,
+  useAiDeciderStore,
+  type AiDeciderSettings,
+  type DeciderModelOption,
+} from '@/stores/aiDecider'
+import type { DeciderTriageMode } from '@/bindings/DeciderTriageMode'
 import { formatElapsedMs, formatLatency, formatPercent } from '@/utils/formatters'
 import {
+  BENCHMARK_URL,
+  benchmarkFact,
   isLocalOllaya,
+  isNearChance,
   languageFact,
   memoryLabel,
   modelFacts,
   providerMissing,
   timeoutForModel,
-} from '@/utils/ollaya'
+} from '@/utils/decider'
 import { confirm } from '@/composables/useConfirm'
-import LayaProviderStep from './laya/LayaProviderStep.vue'
+import DeciderProviderStep from './decider/DeciderProviderStep.vue'
 
 /** A mesma pergunta que o backend usa quando o campo fica vazio. */
 const SAMPLE_QUESTION =
@@ -502,7 +528,7 @@ const FEATURE_SWITCHES: { key: FeatureSwitch; label: string; hint: string }[] = 
 ]
 
 /** Modos da triagem ligada; desligar é a chave em "Onde usar". */
-const TRIAGE_MODE_OPTIONS: { value: LayaTriageMode; title: string }[] = [
+const TRIAGE_MODE_OPTIONS: { value: DeciderTriageMode; title: string }[] = [
   { value: 'enforce', title: 'Decidir (pula alerta que não merece)' },
   { value: 'shadow', title: 'Só registrar (resume sempre)' },
 ]
@@ -511,16 +537,16 @@ const emit = defineEmits<{
   (e: 'saved', message: string, color?: string): void
 }>()
 
-const layaStore = useAiLayaStore()
-const form = ref<AiLayaSettings>(defaultLayaSettings())
+const deciderStore = useAiDeciderStore()
+const form = ref<AiDeciderSettings>(defaultDeciderSettings())
 const question = ref('')
 
 /** O provedor do formulário e o que falta para ele responder. */
-const currentProvider = computed(() => layaStore.provider(form.value.provider))
+const currentProvider = computed(() => deciderStore.provider(form.value.provider))
 /** Só o Ollaya baixa e carrega modelos; na nuvem eles já estão prontos. */
 const managesModels = computed(() => currentProvider.value?.managesModels ?? true)
 const providerGap = computed(() => providerMissing(form.value, currentProvider.value))
-const serverOnline = computed(() => !!layaStore.models?.online)
+const serverOnline = computed(() => !!deciderStore.models?.online)
 /** Passo 1 pronto: Ollaya respondendo, ou nuvem com tudo preenchido. */
 const providerReady = computed(() =>
   managesModels.value ? serverOnline.value : !providerGap.value
@@ -532,7 +558,7 @@ const modelPlaceholder = computed(
 /** Testar e ativar: no Ollaya, com o modelo baixado; na nuvem, com o passo 1 completo. */
 const modelReady = computed(() =>
   managesModels.value
-    ? serverOnline.value && layaStore.installed(form.value.model ?? '')
+    ? serverOnline.value && deciderStore.installed(form.value.model ?? '')
     : !providerGap.value
 )
 /** Triagem ligada decide por padrão; "Só registrar" fica no Avançado. */
@@ -544,7 +570,7 @@ const triageEnabled = computed({
 })
 const triageHint = computed(() =>
   form.value.features.incidentTriage === 'shadow'
-    ? 'Só registrar: o Laya anota o que decidiria, mas todo alerta continua ganhando resumo.'
+    ? 'Só registrar: o Decisor anota o que decidiria, mas todo alerta continua ganhando resumo.'
     : 'Decidir: alerta que não merece fica sem resumo e ganha o botão "Gerar resumo agora".'
 )
 
@@ -555,39 +581,45 @@ function stepColor(done: boolean, pending: string): string {
 
 /** O estado do carregamento vale para o servidor e o modelo do formulário. */
 const modelStateHere = computed(() => {
-  const state = layaStore.modelState
+  const state = deciderStore.modelState
   const model = form.value.model ?? ''
   return state && state.baseUrl === form.value.baseUrl && state.model === model ? state : null
 })
 const modelLoading = computed(() => modelStateHere.value?.state === 'loading')
 const modelLoadFailed = computed(() => modelStateHere.value?.state === 'failed')
 const modelInMemory = computed(
-  () => modelStateHere.value?.state === 'ready' || layaStore.inMemory(form.value.model ?? '')
+  () => modelStateHere.value?.state === 'ready' || deciderStore.inMemory(form.value.model ?? '')
 )
 
 function warmUp() {
-  void layaStore.warmUp(normalizedForm())
+  void deciderStore.warmUp(normalizedForm())
 }
 
 /** Desligar é sempre possível; ligar exige o modelo pronto. */
 const canToggle = computed(() => form.value.enabled || modelReady.value)
 
 const status = computed(() => {
-  if (!layaStore.models) return { label: 'Verificando...', color: 'info', icon: 'mdi-timer-sand' }
+  if (!deciderStore.models)
+    return { label: 'Verificando...', color: 'info', icon: 'mdi-timer-sand' }
   if (!managesModels.value && providerGap.value)
     return { label: providerGap.value, color: 'warning', icon: 'mdi-key-alert-outline' }
   if (!serverOnline.value)
     return { label: 'Ollaya fora do ar', color: 'error', icon: 'mdi-lan-disconnect' }
   if (!modelReady.value)
     return { label: 'Modelo não baixado', color: 'warning', icon: 'mdi-download' }
-  if (!layaStore.saved?.enabled)
+  if (!deciderStore.saved?.enabled)
     return { label: 'Pronto, desligado', color: 'info', icon: 'mdi-power' }
   return { label: 'Ativo', color: 'success', icon: 'mdi-check-circle' }
 })
 
 /** A ficha do modelo do formulário; `null` para um fora do catálogo. */
-const selectedSpec = computed(() => layaStore.spec(form.value.model ?? ''))
-const selectedFacts = computed(() => (selectedSpec.value ? modelFacts(selectedSpec.value) : []))
+const selectedSpec = computed(() => deciderStore.spec(form.value.model ?? ''))
+const selectedBenchmark = computed(() => deciderStore.benchmark(form.value.model ?? ''))
+const selectedFacts = computed(() => modelFacts(selectedSpec.value, selectedBenchmark.value))
+/** O acerto do modelo escolhido quando ele fica perto do chute; `null` quando não. */
+const nearChance = computed(() =>
+  isNearChance(selectedBenchmark.value) ? benchmarkFact(selectedBenchmark.value).short : null
+)
 
 /** Avisa quando trocar de modelo mexeu no tempo máximo por pergunta. */
 const timeoutNote = ref<string | null>(null)
@@ -597,10 +629,10 @@ const timeoutNote = ref<string | null>(null)
  * acompanha o sugerido do modelo, e a tela diz que mudou.
  */
 function chooseModel(next: string | null) {
-  const previous = layaStore.spec(form.value.model ?? '')
-  const nextSpec = layaStore.spec(next ?? '')
-  const current = Number(form.value.timeoutMs) || defaultLayaSettings().timeoutMs
-  const timeout = timeoutForModel(current, previous, nextSpec, defaultLayaSettings().timeoutMs)
+  const previous = deciderStore.spec(form.value.model ?? '')
+  const nextSpec = deciderStore.spec(next ?? '')
+  const current = Number(form.value.timeoutMs) || defaultDeciderSettings().timeoutMs
+  const timeout = timeoutForModel(current, previous, nextSpec, defaultDeciderSettings().timeoutMs)
   timeoutNote.value =
     timeout === current
       ? null
@@ -610,17 +642,17 @@ function chooseModel(next: string | null) {
 }
 
 /** Catálogo e instalados; o modelo digitado à mão também aparece na lista. */
-const modelOptions = computed<LayaModelOption[]>(() => {
-  const options = layaStore.models?.options ?? []
+const modelOptions = computed<DeciderModelOption[]>(() => {
+  const options = deciderStore.models?.options ?? []
   const typed = (form.value.model ?? '').trim()
   if (!typed || options.some((option) => option.name === typed)) return options
   return [
     ...options,
-    { name: typed, description: 'Digitado', installed: layaStore.installed(typed) },
+    { name: typed, description: 'Digitado', installed: deciderStore.installed(typed) },
   ]
 })
 
-const result = computed(() => layaStore.testResult)
+const result = computed(() => deciderStore.testResult)
 const resultType = computed(() => {
   if (!result.value) return 'info'
   if (result.value.success) return 'success'
@@ -637,16 +669,17 @@ const scoredGroups = computed(() => {
 })
 
 /** Campo numérico apagado chega como '' — o backend exige um inteiro. */
-function normalizedForm(): AiLayaSettings {
+function normalizedForm(): AiDeciderSettings {
   return {
     ...form.value,
     model: (form.value.model ?? '').trim(),
-    timeoutMs: Number(form.value.timeoutMs) || defaultLayaSettings().timeoutMs,
+    timeoutMs: Number(form.value.timeoutMs) || defaultDeciderSettings().timeoutMs,
   }
 }
 
 const dirty = computed(
-  () => !!layaStore.saved && JSON.stringify(normalizedForm()) !== JSON.stringify(layaStore.saved)
+  () =>
+    !!deciderStore.saved && JSON.stringify(normalizedForm()) !== JSON.stringify(deciderStore.saved)
 )
 
 /** Quanto o modelo escolhido ocupa carregado, para o aviso ao ligar. */
@@ -663,7 +696,7 @@ async function toggleEnabled(value: boolean | null) {
   const provider = currentProvider.value
   if (value && provider?.cloud) {
     const ok = await confirm({
-      title: `Ligar o Laya com ${provider.label}?`,
+      title: `Ligar o Decisor com ${provider.label}?`,
       message:
         `Cada decisão manda a ${provider.label} o texto que ela analisa: perguntas do chat, ` +
         'mensagens de log, nomes, IPs e descrições de dispositivos e interfaces. O uso é ' +
@@ -676,7 +709,7 @@ async function toggleEnabled(value: boolean | null) {
     if (!ok) return
   } else if (value && isLocalOllaya(form.value.baseUrl)) {
     const ok = await confirm({
-      title: 'Ligar o Laya neste servidor?',
+      title: 'Ligar o Decisor neste servidor?',
       message:
         'O Ollaya roda nesta mesma máquina. Enquanto o modelo ' +
         `${form.value.model} estiver carregado, ele usa ${loadedMemory.value} de memória. ` +
@@ -692,38 +725,38 @@ async function toggleEnabled(value: boolean | null) {
 }
 
 function refreshModels() {
-  void layaStore.loadModels(normalizedForm())
+  void deciderStore.loadModels(normalizedForm())
 }
 
 function runTest() {
-  void layaStore.test(normalizedForm(), question.value)
+  void deciderStore.test(normalizedForm(), question.value)
 }
 
 function runPull() {
-  void layaStore.pull(normalizedForm(), question.value)
+  void deciderStore.pull(normalizedForm(), question.value)
 }
 
 function discard() {
-  if (layaStore.saved) form.value = { ...layaStore.saved }
+  if (deciderStore.saved) form.value = { ...deciderStore.saved }
   refreshModels()
 }
 
 async function save() {
-  const error = await layaStore.save(normalizedForm())
+  const error = await deciderStore.save(normalizedForm())
   if (error) {
     emit('saved', error, 'error')
     return
   }
   discard()
-  emit('saved', 'Laya salvo com sucesso!', 'success')
+  emit('saved', 'Decisor salvo com sucesso!', 'success')
 }
 
 onMounted(async () => {
-  void layaStore.loadProviders()
+  void deciderStore.loadProviders()
   try {
-    form.value = { ...(await layaStore.load()) }
+    form.value = { ...(await deciderStore.load()) }
   } catch {
-    emit('saved', 'Não foi possível carregar a configuração do Laya', 'error')
+    emit('saved', 'Não foi possível carregar a configuração do Decisor', 'error')
   }
   refreshModels()
 })

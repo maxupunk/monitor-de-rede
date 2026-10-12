@@ -115,7 +115,7 @@ fn into_host(ip: Ipv4Addr, seen: Seen, description: BTreeMap<&str, String>) -> D
     DiscoveredHost {
         ip_address: ip.to_string(),
         confidence: 60,
-        // `server` no topo é o contrato antigo que o Laya ainda lê.
+        // `server` no topo é o contrato antigo que o Decisor ainda lê.
         data: serde_json::json!({
             "scanner": "ssdp",
             "server": seen.server,

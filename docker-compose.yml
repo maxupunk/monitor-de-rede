@@ -66,7 +66,7 @@ services:
       - "${SYSLOG_EXTERNAL_PORT:-514}:${SYSLOG_LISTEN_PORT:-5514}/tcp"
     environment:
       LOCO_ENV: production
-      # Chave do Laya/Ollaya, lida pela API no ponto de uso — o mesmo valor
+      # Chave do Ollaya, lida pela API (Decisor) no ponto de uso — o mesmo valor
       # vai ao serviço `ollaya` abaixo, então não se digita em tela nenhuma.
       OLLAYA_API_KEY: ${OLLAYA_API_KEY:-}
       TZ: ${TZ:-America/Fortaleza}
@@ -187,17 +187,17 @@ services:
       retries: 3
       start_period: 10s
 
-  # Laya: modelos de decisão servidos pelo Ollaya (IA de decisão, sem tokens).
-  # Sobe sempre junto — parado, sem modelo carregado, ocupa ~150 MB. Só pesa
-  # quando o Laya é ligado em Configurações → IA e um modelo é carregado;
-  # `OLLAYA_KEEP_ALIVE` o descarrega depois do tempo ocioso. Quanto pesa
-  # depende do modelo escolhido na tela, que lista todos os modelos
-  # compatíveis do Ollaya com a ficha de cada um. Em resumo:
-  #   - laya (padrão, multilíngue): ~3–4 GB de RAM, bem em CPU — decima e os
-  #     classificadores NLI também rodam em CPU;
-  #   - winnow:e4b / credence:e4b (multilíngues, os mais precisos): ~9 GB e GPU;
-  #   - kev, decider, jeb, jeeves, clef… (só inglês): de 4 a 20 GB e GPU —
-  #     em CPU cada pergunta do chat espera segundos.
+  # Ollaya: serve os modelos de decisão do Decisor (escolhas rápidas da IA,
+  # sem tokens). Sobe sempre junto — parado, sem modelo carregado, ocupa
+  # ~150 MB. Só pesa quando o Decisor é ligado em Configurações → IA e um
+  # modelo é carregado; `OLLAYA_KEEP_ALIVE` o descarrega depois do tempo
+  # ocioso. Quanto pesa depende do modelo, que a tela lista do menor e mais
+  # eficiente ao maior, pelo teste público de 10/10/2026. Em resumo:
+  #   - kev:0.8b (padrão): 1,8 GB, o melhor custo-benefício em CPU (63%);
+  #   - jeb:4b: 4,6 GB, o melhor com GPU (90,5%, 89% em português);
+  #   - kev:4b, decider:4b, kev:9b…: de 8 a 20 GB e GPU — em CPU cada pergunta
+  #     do chat espera segundos;
+  #   - laya: o mais leve, mas perto do chute no teste (37–43%).
   # Sem RAM ou GPU sobrando aqui? Na mesma tela dá para apontar para um Ollaya
   # em outra máquina ou para um provedor na nuvem (TypeSafe, OpenRouter,
   # Cloudflare, OpenAI) — aí este serviço pode até ser removido.

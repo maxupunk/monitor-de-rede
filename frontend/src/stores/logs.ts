@@ -106,7 +106,7 @@ export const useLogsStore = defineStore('logs', () => {
     templates.value = next
   }
 
-  /** Um padrão classificado (pelo Laya) ou confirmado (pelo operador). */
+  /** Um padrão classificado (pelo Decisor) ou confirmado (pelo operador). */
   function applyTemplateClassified(info: LogTemplateInfo): void {
     rememberTemplates([info])
   }

@@ -16,7 +16,7 @@ use crate::{
         _entities::{alert_events as alert_events_entity, devices as devices_entity},
         alert_events, alert_rules, devices, monitors,
     },
-    services::shared::errors::AppResult,
+    services::{ai::proactive::triage, shared::errors::AppResult},
 };
 
 /// Regra como o frontend a consome.
@@ -254,7 +254,10 @@ pub fn serialize_event(
         status: event.status.clone(),
         severity: event.severity.clone(),
         message: event.message.clone(),
-        data: event.data.clone(),
+        data: event.data.clone().map(|mut data| {
+            triage::upgrade_legacy_triage(&mut data);
+            data
+        }),
         started_at: Some(event.started_at.to_rfc3339()),
         resolved_at: event.resolved_at.map(|value| value.to_rfc3339()),
         created_at: Some(event.created_at.to_rfc3339()),

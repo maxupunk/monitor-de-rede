@@ -1,7 +1,7 @@
-//! Triagem do resumo automático de incidente pelo Laya.
+//! Triagem do resumo automático de incidente pelo Decisor.
 //!
 //! O que se afirma aqui, contra o Ollaya falso: no modo "decidir", um alerta
-//! que o Laya não acha acionável fica marcado como suprimido, com a opinião
+//! que o Decisor não acha acionável fica marcado como suprimido, com a opinião
 //! gravada sem apagar o resto do `data`; no modo "só registrar", a opinião é
 //! gravada e nada é suprimido; desligada, não há consulta; e fora do ar, a
 //! triagem não dá opinião — o resumo segue como sempre.
@@ -10,7 +10,7 @@ use backend::{
     app::App,
     models::_entities::{alert_events, devices},
     services::ai::{
-        laya::config::{AiLayaSettings, LayaTriageMode},
+        decider::config::{AiDeciderSettings, DeciderTriageMode},
         proactive::triage::{self, TRIAGE_FIELD},
         settings,
     },
@@ -54,10 +54,10 @@ async fn cetico() -> FakeOllaya {
     fake_ollaya::start(by_keyword(&[("", "symptom")])).await
 }
 
-async fn modo(ctx: &AppContext, fake: &FakeOllaya, mode: LayaTriageMode) {
-    let mut laya = fake.settings();
-    laya.features.incident_triage = mode;
-    settings::save_laya(&ctx.db, laya).await.unwrap();
+async fn modo(ctx: &AppContext, fake: &FakeOllaya, mode: DeciderTriageMode) {
+    let mut decider = fake.settings();
+    decider.features.incident_triage = mode;
+    settings::save_decider(&ctx.db, decider).await.unwrap();
 }
 
 #[tokio::test]
@@ -66,7 +66,7 @@ async fn decidir_suprime_o_que_nao_e_acionavel_e_preserva_o_data() {
     request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
         with_key();
         let fake = cetico().await;
-        modo(&ctx, &fake, LayaTriageMode::Enforce).await;
+        modo(&ctx, &fake, DeciderTriageMode::Enforce).await;
         let evento = alerta(&ctx).await;
 
         let (opinion, _) = triage::assess(&ctx, evento.id)
@@ -98,7 +98,7 @@ async fn so_registrar_nunca_suprime() {
     request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
         with_key();
         let fake = cetico().await;
-        modo(&ctx, &fake, LayaTriageMode::Shadow).await;
+        modo(&ctx, &fake, DeciderTriageMode::Shadow).await;
         let evento = alerta(&ctx).await;
 
         let (opinion, _) = triage::assess(&ctx, evento.id)
@@ -106,7 +106,7 @@ async fn so_registrar_nunca_suprime() {
             .unwrap()
             .expect("opinião");
         assert!(!opinion.suppressed);
-        assert_eq!(opinion.mode, LayaTriageMode::Shadow);
+        assert_eq!(opinion.mode, DeciderTriageMode::Shadow);
     })
     .await;
 }
@@ -117,20 +117,20 @@ async fn desligada_nao_consulta_e_fora_do_ar_nao_opina() {
     request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
         with_key();
         let fake = cetico().await;
-        modo(&ctx, &fake, LayaTriageMode::Off).await;
+        modo(&ctx, &fake, DeciderTriageMode::Off).await;
         let evento = alerta(&ctx).await;
         assert!(triage::assess(&ctx, evento.id).await.unwrap().is_none());
         assert_eq!(fake.calls(), 0);
 
-        let mut down = AiLayaSettings {
+        let mut down = AiDeciderSettings {
             enabled: true,
             base_url: "http://127.0.0.1:9".into(),
             timeout_ms: 300,
-            ..AiLayaSettings::default()
+            ..AiDeciderSettings::default()
         };
-        down.features.incident_triage = LayaTriageMode::Enforce;
-        settings::save_laya(&ctx.db, down).await.unwrap();
-        backend::services::ai::laya::runtime::LayaRuntime::from_context(&ctx).invalidate();
+        down.features.incident_triage = DeciderTriageMode::Enforce;
+        settings::save_decider(&ctx.db, down).await.unwrap();
+        backend::services::ai::decider::runtime::DeciderRuntime::from_context(&ctx).invalidate();
         assert!(
             triage::assess(&ctx, evento.id).await.unwrap().is_none(),
             "sem opinião o resumo segue como sempre"

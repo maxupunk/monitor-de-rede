@@ -703,13 +703,19 @@ continua no banco; o polling HTTP, o registrador do `vpn-probe` e o fallback
 local do agendador permanecem (AGENTS §6). Resultado pronto com o canal caído
 vai para o buffer do agente e volta como evento na reconexão.
 
-## 11-C. Laya — decisões locais sem LLM
+## 11-C. Decisor — escolhas rápidas sem LLM
 
 > Plano de treinamento da identificação de dispositivos, com o diagnóstico de
-> um caso real: [laya-treinamento.md](laya-treinamento.md).
+> um caso real: [laya-treinamento.md](laya-treinamento.md) (escrito quando o
+> Decisor se chamava Laya, o nome da família de modelos que ele usava).
 
-O Laya é um classificador (não gera texto) servido pelo container opcional `ollaya`
-(sobe com o `docker compose up`; ocioso ~150 MB, com modelo carregado ~3–4 GB — a tela avisa ao ligar quando o Ollaya é local). Responde perguntas tipadas — sim/não,
+O Decisor consulta um **modelo de decisão** — um classificador que não gera
+texto. Ele roda no container opcional `ollaya` (que sobe com o
+`docker compose up`; o peso depende do modelo e a tela avisa ao ligar), num
+Ollaya em outra máquina ou num serviço na nuvem (TypeSafe, OpenRouter,
+Cloudflare, OpenAI; ver `providers.rs`). O padrão é o `kev:0.8b`, o melhor
+custo-benefício em CPU no teste público (`benchmark.rs`). Responde perguntas
+tipadas — sim/não,
 escolha, escala — sobre um texto, em dezenas de milissegundos, com
 probabilidade calibrada. O sistema o consulta onde uma heurística lia texto sem
 saber o quanto estava certa. **Ele só sugere**: toda decisão fica visível com a
@@ -717,13 +723,18 @@ confiança, e quem aplica é o operador. Desligado ou fora do ar, tudo segue com
 antes.
 
 ```text
-services/ai/laya/
-  config.rs         chave mestra + uma chave por frente (features)
-  client.rs         HTTP do Ollaya (um reqwest::Client por processo)
+services/ai/decider/
+  config.rs         chave mestra, provedor, chave de acesso, uma chave por frente (features)
+  providers.rs      presets: Ollaya, TypeSafe, OpenRouter, Cloudflare, OpenAI, Outro
+  protocols.rs      os formatos de API (Ollaya, System One, Cloudflare, OpenAI, OpenRouter)
+  client.rs         HTTP dos provedores (um reqwest::Client por processo)
+  catalog.rs        fichas dos modelos do Ollaya, na ordem da recomendação
+  benchmark.rs      resultados do teste público (acerto geral e em português)
   decision.rs       trait Decision: perguntas + leitura das respostas
-  runtime.rs        LayaRuntime: cache da config, filas, disjuntor
-  suggestion.rs     LayaSuggestion { value, confidence 0–100, model }
+  runtime.rs        DeciderRuntime: cache da config, filas, disjuntor
+  suggestion.rs     DeciderSuggestion { value, confidence 0–100, model }
   tool_routing.rs   chat: quais grupos de ferramentas vão ao LLM
+  action_review.rs  modo automático: a ação de risco médio parece perigosa?
   decisions/        device_identity · interfaces · log_category · incident_triage
 ```
 
@@ -738,25 +749,26 @@ cada falha encheria o banco com o próprio aviso.
 | Frente | Onde entra | Quando consulta | Onde a sugestão aparece |
 |---|---|---|---|
 | Ferramentas do chat | `harness/agent.rs`, junto da janela de contexto | cada pergunta | invisível: soma grupos às palavras-chave |
-| Identificação | `discovery/laya_identity.rs`, depois de gravar a execução | host `unknown`/`web_device` ou sem sistema | chip na Descoberta (pelo snapshot `discovery:scan`) e no cadastro (`/devices/identify`) |
-| Interfaces | `snmp/laya_interfaces.rs` (`POST /api/snmp/interfaces/suggestions`) | ao mostrar a lista de interfaces | "Uplink sugerido", "Vale monitorar", "Selecionar sugeridas" |
+| Identificação | `discovery/decider_identity.rs`, depois de gravar a execução | host `unknown`/`web_device` ou sem sistema | chip na Descoberta (pelo snapshot `discovery:scan`) e no cadastro (`/devices/identify`) |
+| Interfaces | `snmp/decider_interfaces.rs` (`POST /api/snmp/interfaces/suggestions`) | ao mostrar a lista de interfaces | "Uplink sugerido", "Vale monitorar", "Selecionar sugeridas" |
 | Eventos de log | `syslog/categorizer.rs`, worker fora do caminho quente | uma vez por **padrão** novo (não por linha) | chip e filtro em `/logs`; "Criar alerta" abre o catálogo |
-| Triagem proativa | `proactive/triage.rs`, antes do teto por hora | cada alerta que abriria resumo | "Resumo pulado pelo Laya" + "Gerar resumo agora" |
+| Triagem proativa | `proactive/triage.rs`, antes do teto por hora | cada alerta que abriria resumo | "Resumo pulado pelo Decisor" + "Gerar resumo agora" |
 
-**Modelo frio.** Tirar o modelo do disco leva de 5 a 20 s em CPU; o "tempo
-máximo por pergunta" vale só para a inferência, e carregar tem prazo próprio
-(`client::LOAD_TIMEOUT`, 120 s). O runtime consulta `/api/ps` (resultado
+**Modelo frio** (só no Ollaya; na nuvem o modelo está sempre pronto). Tirar o
+modelo do disco leva de segundos a minutos; o "tempo máximo por pergunta" vale
+só para a inferência, e carregar tem prazo próprio (`catalog::load_timeout`,
+30 s por GB, de 2 a 15 minutos). O runtime consulta `/api/ps` (resultado
 guardado por 20 s) e, com o modelo fora da memória, carrega um por vez
-(`/api/decide` sem `state`) publicando `laya:model_state` (`loading` → `ready`
+(`/api/decide` sem `state`) publicando `decider:model_state` (`loading` → `ready`
 / `failed`) pelo SSE. Por fila: `OnDemand` (o teste da tela, sugerir
 interfaces) e `Background` esperam o carregamento; `Interactive` (chat,
-identificar) não espera — dispara o carregamento e segue sem o Laya naquela
-vez. Ligar o Laya ao salvar já aquece o modelo.
+identificar) não espera — dispara o carregamento e segue sem o Decisor naquela
+vez. Ligar o Decisor ao salvar já aquece o modelo.
 
 **Logs.** O escritor calcula o padrão da mensagem (`syslog::template`: números,
 IPs e MACs viram `#`) e grava a chave em `device_logs.template_hash`; padrão
 inédito vai por `try_send` a uma fila de 256 — cheia, descarta e tenta na
-próxima aparição. O worker grava o padrão em `log_templates` **mesmo sem Laya**
+próxima aparição. O worker grava o padrão em `log_templates` **mesmo sem Decisor**
 e, a cada minuto, classifica o que ficou sem categoria. A correção do operador
 (`user_category`) vence o palpite e nunca é sobrescrita. Só linhas de syslog
 ganham padrão — classificar o log da própria aplicação realimentaria o laço.

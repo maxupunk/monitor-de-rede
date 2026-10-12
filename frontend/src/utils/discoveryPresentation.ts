@@ -103,9 +103,10 @@ export function discoveryIdentity(host: DiscoveredHostLike | null | undefined) {
   return block(host, 'identity') as DiscoveryIdentity | null
 }
 
-/** O palpite do Laya (tipo e sistema), quando a heurística ficou em dúvida. */
-export function discoveryLaya(host: DiscoveredHostLike | null | undefined) {
-  return block(host, 'laya') as IdentitySuggestion | null
+/** O palpite do Decisor (tipo e sistema), quando a heurística ficou em dúvida. */
+export function discoveryDecider(host: DiscoveredHostLike | null | undefined) {
+  // `laya`: varreduras gravadas antes do renome para Decisor.
+  return (block(host, 'decider') ?? block(host, 'laya')) as IdentitySuggestion | null
 }
 
 export function discoveryWebPage(host: DiscoveredHostLike | null | undefined) {

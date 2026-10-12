@@ -1,10 +1,10 @@
 pub mod approvals;
 pub mod context_window;
 pub mod conversations;
+pub mod decider;
 pub mod drivers;
 pub mod harness;
 pub mod knowledge;
-pub mod laya;
 pub mod local_models;
 pub mod mentions;
 pub mod ollama;

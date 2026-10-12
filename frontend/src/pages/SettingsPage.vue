@@ -62,7 +62,7 @@
             <AiSettingsCard @saved="notify" />
           </v-col>
           <v-col cols="12">
-            <LayaSettingsCard @saved="notify" />
+            <DeciderSettingsCard @saved="notify" />
           </v-col>
         </v-row>
       </v-window-item>
@@ -117,7 +117,7 @@ import NotificationsCard from '@/components/settings/NotificationsCard.vue'
 import OnboardingCard from '@/components/settings/OnboardingCard.vue'
 import DatabaseInfoCard from '@/components/settings/DatabaseInfoCard.vue'
 import AiSettingsCard from '@/components/settings/AiSettingsCard.vue'
-import LayaSettingsCard from '@/components/settings/LayaSettingsCard.vue'
+import DeciderSettingsCard from '@/components/settings/DeciderSettingsCard.vue'
 import PageHeader from '@/components/PageHeader.vue'
 
 /** Abas da página; a escolhida fica na URL (`?tab=rede`) para links diretos. */

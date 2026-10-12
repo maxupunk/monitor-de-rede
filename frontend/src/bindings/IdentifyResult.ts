@@ -46,7 +46,7 @@ probed: boolean,
  */
 fromDiscovery: boolean, 
 /**
- * Palpite do Laya (tipo e sistema) quando a evidência acima é fraca.
+ * Palpite do Decisor (tipo e sistema) quando a evidência acima é fraca.
  * Só sugestão: a tela mostra e o operador decide.
  */
-laya: IdentitySuggestion | null, };
+decider: IdentitySuggestion | null, };

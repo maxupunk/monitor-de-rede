@@ -3,4 +3,4 @@
 /**
  * Formato da API.
  */
-export type DecisionProtocol = "ollaya" | "systemone" | "cloudflare" | "openai";
+export type DecisionProtocol = "ollaya" | "systemone" | "cloudflare" | "openai" | "openrouter";

@@ -2,7 +2,7 @@ import type { FilterFunction } from 'vuetify'
 import type { OpenCodeModelItem } from '@/bindings/OpenCodeModelItem'
 import type { OpenRouterModelItem } from '@/bindings/OpenRouterModelItem'
 import type { OllamaModelItem, OllamaRecommendedModel } from '@/stores/ai'
-import { isModelInstalled } from '@/stores/aiLaya'
+import { isModelInstalled } from '@/stores/aiDecider'
 import { formatCompactCount, formatDecimalBytes } from '@/utils/formatters'
 
 /**

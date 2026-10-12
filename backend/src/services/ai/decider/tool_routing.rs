@@ -1,4 +1,4 @@
-//! Primeira decisão do Laya: quais grupos de ferramentas a pergunta pede.
+//! Primeira decisão do Decisor: quais grupos de ferramentas a pergunta pede.
 //!
 //! Uma pergunta sim/não por grupo, todas na mesma passada — uma pergunta
 //! costuma pedir mais de um grupo, então uma escolha única não serviria.
@@ -10,9 +10,9 @@
 use std::collections::BTreeMap;
 
 use super::{
-    config::{AiLayaSettings, LayaFeature},
+    config::{AiDeciderSettings, DeciderFeature},
     decision::{Decision, Outcome},
-    runtime::{Lane, LayaRuntime},
+    runtime::{DeciderRuntime, Lane},
     schema::{Answer, Question},
 };
 use crate::services::{
@@ -76,10 +76,10 @@ impl Decision for ToolRouting<'_> {
 ///
 /// # Errors
 ///
-/// Laya fora do ar, modelo frio no chat ou resposta inválida.
+/// Decisor fora do ar, modelo frio no chat ou resposta inválida.
 pub async fn score(
-    runtime: &LayaRuntime,
-    settings: &AiLayaSettings,
+    runtime: &DeciderRuntime,
+    settings: &AiDeciderSettings,
     lane: Lane,
     question: &str,
     groups: &[ToolGroup],
@@ -89,16 +89,19 @@ pub async fn score(
         .await
 }
 
-/// Os grupos que o Laya indica para a pergunta do chat. Vazio quando ele está
+/// Os grupos que o Decisor indica para a pergunta do chat. Vazio quando ele está
 /// desligado, não há o que decidir, o modelo ainda está carregando ou o
 /// Ollaya falhou — o chat nunca espera nem quebra por causa dele.
 pub async fn route(
-    runtime: &LayaRuntime,
-    settings: &AiLayaSettings,
+    runtime: &DeciderRuntime,
+    settings: &AiDeciderSettings,
     question: &str,
     groups: &[ToolGroup],
 ) -> ToolGroups {
-    if !settings.allows(LayaFeature::ChatTools) || groups.is_empty() || question.trim().is_empty() {
+    if !settings.allows(DeciderFeature::ChatTools)
+        || groups.is_empty()
+        || question.trim().is_empty()
+    {
         return ToolGroups::new();
     }
     match score(runtime, settings, Lane::Interactive, question, groups).await {
@@ -108,12 +111,12 @@ pub async fn route(
                 model = %outcome.model,
                 latency_ms = outcome.latency_ms,
                 groups = ?selected.ids(),
-                "laya: grupos de ferramentas decididos"
+                "decisor: grupos de ferramentas decididos"
             );
             selected
         }
         Err(error) => {
-            tracing::debug!(%error, "laya sem resposta nesta pergunta; seguindo com as palavras-chave");
+            tracing::debug!(%error, "decisor sem resposta nesta pergunta; seguindo com as palavras-chave");
             ToolGroups::new()
         }
     }
@@ -158,30 +161,36 @@ mod tests {
 
     #[tokio::test]
     async fn desligado_nao_consulta_nada() {
-        let settings = AiLayaSettings {
+        let settings = AiDeciderSettings {
             // Endereço que não responde: se consultasse, o teste demoraria/falharia.
             base_url: "http://127.0.0.1:9".into(),
-            ..AiLayaSettings::default()
+            ..AiDeciderSettings::default()
         };
-        assert!(
-            route(&LayaRuntime::default(), &settings, "por que caiu?", &GROUPS)
-                .await
-                .is_empty()
-        );
+        assert!(route(
+            &DeciderRuntime::default(),
+            &settings,
+            "por que caiu?",
+            &GROUPS
+        )
+        .await
+        .is_empty());
     }
 
     #[tokio::test]
     async fn servidor_fora_do_ar_devolve_vazio() {
-        let settings = AiLayaSettings {
+        let settings = AiDeciderSettings {
             enabled: true,
             base_url: "http://127.0.0.1:9".into(),
             timeout_ms: 500,
-            ..AiLayaSettings::default()
+            ..AiDeciderSettings::default()
         };
-        assert!(
-            route(&LayaRuntime::default(), &settings, "por que caiu?", &GROUPS)
-                .await
-                .is_empty()
-        );
+        assert!(route(
+            &DeciderRuntime::default(),
+            &settings,
+            "por que caiu?",
+            &GROUPS
+        )
+        .await
+        .is_empty());
     }
 }

@@ -186,7 +186,7 @@ pub fn spawn_listener(ctx: AppContext, drivers: Arc<dyn DriverFactory>) {
                 continue;
             };
 
-            // A triagem e o teto ficam na task: o laço não espera o Laya (o
+            // A triagem e o teto ficam na task: o laço não espera o Decisor (o
             // barramento atrasaria), e alerta suprimido não gasta o teto.
             let ctx = ctx.clone();
             let drivers = Arc::clone(&drivers);
@@ -197,12 +197,12 @@ pub fn spawn_listener(ctx: AppContext, drivers: Arc<dyn DriverFactory>) {
                         tracing::info!(
                             alert_id,
                             actionable = opinion.actionable,
-                            "resumo de incidente pulado pela triagem do Laya"
+                            "resumo de incidente pulado pela triagem do Decisor"
                         );
                         return;
                     }
                     Ok(_) => {}
-                    Err(error) => tracing::debug!(%error, alert_id, "triagem do Laya falhou"),
+                    Err(error) => tracing::debug!(%error, alert_id, "triagem do Decisor falhou"),
                 }
                 if !limiter.lock().await.try_acquire(Utc::now(), max_per_hour) {
                     tracing::info!(

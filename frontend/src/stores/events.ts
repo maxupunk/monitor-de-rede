@@ -4,7 +4,7 @@ import { apiService } from '@/services/apiService'
 import { useDevicesStore } from './devices'
 import { useAlertsStore, type AlertEvent } from './alerts'
 import type { AiIncidentSummary } from '@/bindings/AiIncidentSummary'
-import type { LayaTriage } from '@/bindings/LayaTriage'
+import type { DeciderTriage } from '@/bindings/DeciderTriage'
 import { useMonitorsStore } from './monitors'
 import { useProbesStore } from './probes'
 import { useDiscoveryStore } from './discovery'
@@ -21,7 +21,7 @@ import { useLogsStore } from './logs'
 import { usePluginsStore } from './plugins'
 import { usePluginAppsStore } from './pluginApps'
 import { isLogTemplateInfo } from '@/utils/logCategories'
-import { isLayaModelState, useAiLayaStore } from './aiLaya'
+import { isDeciderModelState, useAiDeciderStore } from './aiDecider'
 import { asApprovalResolved, useAiApprovalsStore } from './aiApprovals'
 import { useAiStore } from './ai'
 import { getStoredToken } from '@/utils/authStorage'
@@ -238,9 +238,10 @@ export const useEventsStore = defineStore('events', () => {
         break
       }
 
-      case 'alert:laya_triage': {
-        const triage = data.layaTriage as LayaTriage | undefined
-        if (triage) useAlertsStore().applyLayaTriage(Number(data.id ?? data.alertEventId), triage)
+      case 'alert:decider_triage': {
+        const triage = data.deciderTriage as DeciderTriage | undefined
+        if (triage)
+          useAlertsStore().applyDeciderTriage(Number(data.id ?? data.alertEventId), triage)
         break
       }
 
@@ -329,8 +330,8 @@ export const useEventsStore = defineStore('events', () => {
         break
       }
 
-      case 'laya:model_state': {
-        if (isLayaModelState(data)) useAiLayaStore().applyModelState(data)
+      case 'decider:model_state': {
+        if (isDeciderModelState(data)) useAiDeciderStore().applyModelState(data)
         break
       }
 

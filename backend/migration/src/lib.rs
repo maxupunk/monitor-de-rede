@@ -61,6 +61,7 @@ mod m20261007_000001_database_connections;
 mod m20261008_000001_system_backup_plan;
 mod m20261009_000001_database_connections_via_probe;
 mod m20261010_000001_interface_counters;
+mod m20261012_000001_decider_os_source;
 
 pub struct Migrator;
 
@@ -189,6 +190,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261008_000001_system_backup_plan::Migration),
             Box::new(m20261009_000001_database_connections_via_probe::Migration),
             Box::new(m20261010_000001_interface_counters::Migration),
+            Box::new(m20261012_000001_decider_os_source::Migration),
             // inject-above (do not remove this comment)
         ]
     }

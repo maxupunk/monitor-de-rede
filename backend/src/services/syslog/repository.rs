@@ -109,7 +109,7 @@ pub struct LogFilters {
     pub cursor: Option<Cursor>,
     pub limit: Option<u64>,
     /// Categoria do padrão (`auth_failure`, `link_change`…). Vale a do
-    /// operador, senão a do Laya.
+    /// operador, senão a do Decisor.
     pub category: Option<String>,
 }
 

@@ -4,7 +4,7 @@
 //! pergunta do chat, e o pool de conexões é o que a mantém barata. O tempo
 //! limite vai por requisição, porque vem da configuração.
 //!
-//! A decisão vale para todo provedor (o formato vem de `laya::protocols`);
+//! A decisão vale para todo provedor (o formato vem de `decider::protocols`);
 //! listar, baixar e carregar modelos é só do Ollaya.
 
 use std::{
@@ -18,7 +18,7 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use super::{
     catalog,
-    config::AiLayaSettings,
+    config::AiDeciderSettings,
     protocols::{self, wire_for},
     schema::{DecideResponse, Question, TagsResponse},
 };
@@ -43,13 +43,13 @@ pub struct Decided {
     pub latency_ms: f64,
 }
 
-pub struct LayaClient<'a> {
-    settings: &'a AiLayaSettings,
+pub struct DeciderClient<'a> {
+    settings: &'a AiDeciderSettings,
 }
 
-impl<'a> LayaClient<'a> {
+impl<'a> DeciderClient<'a> {
     #[must_use]
-    pub const fn new(settings: &'a AiLayaSettings) -> Self {
+    pub const fn new(settings: &'a AiDeciderSettings) -> Self {
         Self { settings }
     }
 
@@ -171,7 +171,7 @@ impl<'a> LayaClient<'a> {
     /// `state` nem perguntas (contrato do Ollaya). Devolve quanto levou.
     ///
     /// O prazo é o do modelo ([`catalog::load_timeout`]), não o "tempo máximo
-    /// por pergunta": um Laya sai do disco em 5 a 20 s em CPU, um Kev 9B
+    /// por pergunta": um Decisor sai do disco em 5 a 20 s em CPU, um Kev 9B
     /// tem quase 20 GB.
     pub async fn load(&self) -> AppResult<f64> {
         self.ensure_manages_models()?;

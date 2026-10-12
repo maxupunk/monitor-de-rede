@@ -71,7 +71,7 @@
       <AiAlertSummary
         :alert-id="item.id"
         :summary="item.data?.aiSummary"
-        :triage="item.data?.layaTriage"
+        :triage="item.data?.deciderTriage"
       />
     </template>
 
@@ -194,7 +194,7 @@
           <AiAlertSummary
             :alert-id="item.id"
             :summary="item.data?.aiSummary"
-            :triage="item.data?.layaTriage"
+            :triage="item.data?.deciderTriage"
           />
         </div>
 

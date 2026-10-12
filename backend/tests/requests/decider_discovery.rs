@@ -1,8 +1,8 @@
-//! O Laya sugerindo tipo e sistema do que a descoberta encontrou.
+//! O Decisor sugerindo tipo e sistema do que a descoberta encontrou.
 //!
 //! O que se afirma aqui, contra o Ollaya falso: um host em dúvida ganha o
-//! palpite em `details.laya`, sem mudar o tipo que a heurística gravou; com o
-//! Laya desligado não há consulta; fora do ar, o enriquecimento só não
+//! palpite em `details.decider`, sem mudar o tipo que a heurística gravou; com o
+//! Decisor desligado não há consulta; fora do ar, o enriquecimento só não
 //! acontece; e o "identificar" do cadastro devolve o palpite quando a
 //! evidência dele é fraca.
 
@@ -10,8 +10,8 @@ use backend::{
     app::App,
     models::{discovery_results, discovery_runs, networks},
     services::{
-        ai::{laya::config::AiLayaSettings, settings},
-        discovery::{laya_identity, merger::DiscoveredHost},
+        ai::{decider::config::AiDeciderSettings, settings},
+        discovery::{decider_identity, merger::DiscoveredHost},
     },
 };
 use chrono::Utc;
@@ -97,11 +97,15 @@ async fn host_em_duvida_ganha_o_palpite_sem_mudar_o_tipo_gravado() {
     request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
         with_key();
         let fake = fake_ollaya::start(by_keyword(&[("hikvision", "camera")])).await;
-        settings::save_laya(&ctx.db, fake.settings()).await.unwrap();
+        settings::save_decider(&ctx.db, fake.settings())
+            .await
+            .unwrap();
         let host = camera_host();
         let (run_id, row_id) = persisted_run(&ctx, &host).await;
 
-        let enriched = laya_identity::enrich(&ctx, run_id, &[host]).await.unwrap();
+        let enriched = decider_identity::enrich(&ctx, run_id, &[host])
+            .await
+            .unwrap();
 
         assert_eq!(enriched, 1);
         assert_eq!(fake.calls(), 1, "uma consulta por host em dúvida");
@@ -111,10 +115,10 @@ async fn host_em_duvida_ganha_o_palpite_sem_mudar_o_tipo_gravado() {
             Some("web_device"),
             "a heurística fica"
         );
-        let laya = &row.data.unwrap()["details"]["laya"];
-        assert_eq!(laya["deviceType"]["value"], "camera");
-        assert_eq!(laya["deviceType"]["model"], "laya:multilingual");
-        assert!(laya["deviceType"]["confidence"].as_f64().unwrap() >= 60.0);
+        let decider = &row.data.unwrap()["details"]["decider"];
+        assert_eq!(decider["deviceType"]["value"], "camera");
+        assert_eq!(decider["deviceType"]["model"], "laya:multilingual");
+        assert!(decider["deviceType"]["confidence"].as_f64().unwrap() >= 60.0);
         let state = fake.states.lock().unwrap()[0].clone();
         assert!(
             state.contains("Hikvision-Webs"),
@@ -130,14 +134,16 @@ async fn desligado_nao_consulta_e_nao_mexe_no_resultado() {
     request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
         with_key();
         let fake = fake_ollaya::start(by_keyword(&[("hikvision", "camera")])).await;
-        let mut laya = fake.settings();
-        laya.features.device_identity = false;
-        settings::save_laya(&ctx.db, laya).await.unwrap();
+        let mut decider = fake.settings();
+        decider.features.device_identity = false;
+        settings::save_decider(&ctx.db, decider).await.unwrap();
         let host = camera_host();
         let (run_id, row_id) = persisted_run(&ctx, &host).await;
 
         assert_eq!(
-            laya_identity::enrich(&ctx, run_id, &[host]).await.unwrap(),
+            decider_identity::enrich(&ctx, run_id, &[host])
+                .await
+                .unwrap(),
             0
         );
         assert_eq!(fake.calls(), 0);
@@ -152,18 +158,20 @@ async fn desligado_nao_consulta_e_nao_mexe_no_resultado() {
 #[serial]
 async fn fora_do_ar_so_nao_enriquece() {
     request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
-        let down = AiLayaSettings {
+        let down = AiDeciderSettings {
             enabled: true,
             base_url: "http://127.0.0.1:9".into(),
             timeout_ms: 300,
-            ..AiLayaSettings::default()
+            ..AiDeciderSettings::default()
         };
-        settings::save_laya(&ctx.db, down).await.unwrap();
+        settings::save_decider(&ctx.db, down).await.unwrap();
         let host = camera_host();
         let (run_id, _) = persisted_run(&ctx, &host).await;
 
         assert_eq!(
-            laya_identity::enrich(&ctx, run_id, &[host]).await.unwrap(),
+            decider_identity::enrich(&ctx, run_id, &[host])
+                .await
+                .unwrap(),
             0
         );
     })
@@ -176,7 +184,9 @@ async fn identificar_devolve_o_palpite_quando_a_evidencia_e_fraca() {
     request_with_config::<App, _, _>(RequestConfig::default(), |request, ctx| async move {
         with_key();
         let fake = fake_ollaya::start(by_keyword(&[("hikvision", "camera")])).await;
-        settings::save_laya(&ctx.db, fake.settings()).await.unwrap();
+        settings::save_decider(&ctx.db, fake.settings())
+            .await
+            .unwrap();
         // Sem SNMP nem SSH no loopback: a detecção fica no `padrão`.
         let host = DiscoveredHost {
             ip_address: "127.0.0.1".into(),
@@ -195,7 +205,7 @@ async fn identificar_devolve_o_palpite_quando_a_evidencia_e_fraca() {
         let body: Value = serde_json::from_str(&response.text()).unwrap();
 
         assert_eq!(body["source"], "padrão", "{body}");
-        assert_eq!(body["laya"]["deviceType"]["value"], "camera", "{body}");
+        assert_eq!(body["decider"]["deviceType"]["value"], "camera", "{body}");
     })
     .await;
 }

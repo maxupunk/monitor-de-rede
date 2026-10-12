@@ -586,7 +586,7 @@
                         {{ iface.ifAlias }}
                       </div>
                       <div class="d-flex flex-wrap ga-1 mt-1">
-                        <LayaSuggestionChip
+                        <DeciderSuggestionChip
                           v-if="uplinkSuggestion?.value === String(iface.ifIndex)"
                           :suggestion="uplinkSuggestion"
                           :format-label="() => 'uplink'"
@@ -860,7 +860,7 @@ import { usePluginsStore } from '@/stores/plugins'
 import { installedPluginTabs, pluginTab } from '@/utils/pluginPresentation'
 import { getStatusColor } from '@/utils/monitorPresentation'
 import { formatBinaryBytes, formatLinkSpeed, formatPercent } from '@/utils/formatters'
-import LayaSuggestionChip from '@/components/ai/LayaSuggestionChip.vue'
+import DeciderSuggestionChip from '@/components/ai/DeciderSuggestionChip.vue'
 import { useVpnStore } from '@/stores/vpn'
 import { useLogsStore } from '@/stores/logs'
 import { confirm } from '@/composables/useConfirm'

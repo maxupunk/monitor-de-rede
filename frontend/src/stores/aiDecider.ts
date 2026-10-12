@@ -1,24 +1,25 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { apiService, ApiError } from '@/services/apiService'
-import type { AiLayaSettings } from '@/bindings/AiLayaSettings'
-import type { LayaModelOption } from '@/bindings/LayaModelOption'
-import type { LayaProvider } from '@/bindings/LayaProvider'
-import type { LayaProviderView } from '@/bindings/LayaProviderView'
-import type { LayaModelSpecView } from '@/bindings/LayaModelSpecView'
-import type { LayaModelsResponse } from '@/bindings/LayaModelsResponse'
+import type { AiDeciderSettings } from '@/bindings/AiDeciderSettings'
+import type { DeciderModelOption } from '@/bindings/DeciderModelOption'
+import type { DeciderProvider } from '@/bindings/DeciderProvider'
+import type { DeciderProviderView } from '@/bindings/DeciderProviderView'
+import type { DeciderBenchmarkView } from '@/bindings/DeciderBenchmarkView'
+import type { DeciderModelSpecView } from '@/bindings/DeciderModelSpecView'
+import type { DeciderModelsResponse } from '@/bindings/DeciderModelsResponse'
 import type { ModelPullProgress } from '@/bindings/ModelPullProgress'
-import type { TestLayaResponse } from '@/bindings/TestLayaResponse'
+import type { TestDeciderResponse } from '@/bindings/TestDeciderResponse'
 import { streamModelPull } from '@/utils/modelPull'
 
-export type { AiLayaSettings, LayaModelOption, TestLayaResponse }
+export type { AiDeciderSettings, DeciderModelOption, TestDeciderResponse }
 
 /**
  * Estado do modelo na memória do Ollaya, pelo evento `laya:model_state`.
  * Carregar tira o modelo do disco (5–20 s): a tela mostra "carregando" em vez
  * de parecer travada, e o tempo máximo por pergunta não conta isso.
  */
-export interface LayaModelState {
+export interface DeciderModelState {
   model: string
   baseUrl: string
   state: 'loading' | 'ready' | 'failed'
@@ -26,7 +27,7 @@ export interface LayaModelState {
   message?: string
 }
 
-export function isLayaModelState(value: unknown): value is LayaModelState {
+export function isDeciderModelState(value: unknown): value is DeciderModelState {
   if (!value || typeof value !== 'object') return false
   const candidate = value as Record<string, unknown>
   return (
@@ -36,16 +37,16 @@ export function isLayaModelState(value: unknown): value is LayaModelState {
   )
 }
 
-/** Padrões do backend (`services/ai/laya/config.rs`). */
-export function defaultLayaSettings(): AiLayaSettings {
+/** Padrões do backend (`services/ai/decider/config.rs`). */
+export function defaultDeciderSettings(): AiDeciderSettings {
   return {
     enabled: false,
     provider: 'ollaya',
     customProtocol: 'systemone',
     baseUrl: 'http://ollaya:11435',
-    model: 'laya',
+    model: 'kev:0.8b',
     minConfidence: 60,
-    timeoutMs: 1500,
+    timeoutMs: 4000,
     features: {
       chatTools: true,
       deviceIdentity: true,
@@ -76,52 +77,52 @@ function errorMessage(err: unknown, fallback: string): string {
   return fallback
 }
 
-/** Laya via Ollaya: modelos disponíveis, testar o que ele decide e baixar o modelo. */
-export const useAiLayaStore = defineStore('aiLaya', () => {
+/** Decisor via Ollaya: modelos disponíveis, testar o que ele decide e baixar o modelo. */
+export const useAiDeciderStore = defineStore('aiDecider', () => {
   /** O que está gravado no servidor; o card compara com o formulário. */
-  const saved = ref<AiLayaSettings | null>(null)
+  const saved = ref<AiDeciderSettings | null>(null)
   const saving = ref(false)
   const loadingModels = ref(false)
-  const models = ref<LayaModelsResponse | null>(null)
+  const models = ref<DeciderModelsResponse | null>(null)
 
   const testing = ref(false)
-  const testResult = ref<TestLayaResponse | null>(null)
+  const testResult = ref<TestDeciderResponse | null>(null)
 
   const pulling = ref(false)
   const pullProgress = ref<ModelPullProgress | null>(null)
   let pullController: AbortController | null = null
 
-  async function load(): Promise<AiLayaSettings> {
-    saved.value = await apiService.get<AiLayaSettings>('/ai/laya')
+  async function load(): Promise<AiDeciderSettings> {
+    saved.value = await apiService.get<AiDeciderSettings>('/ai/decider')
     return saved.value
   }
 
-  /** Grava só o Laya; devolve a mensagem de erro, ou `null` se deu certo. */
-  async function save(laya: AiLayaSettings): Promise<string | null> {
+  /** Grava só o Decisor; devolve a mensagem de erro, ou `null` se deu certo. */
+  async function save(decider: AiDeciderSettings): Promise<string | null> {
     saving.value = true
     try {
-      saved.value = await apiService.put<AiLayaSettings>('/ai/laya', laya)
+      saved.value = await apiService.put<AiDeciderSettings>('/ai/decider', decider)
       return null
     } catch (err) {
-      return errorMessage(err, 'Falha ao salvar o Laya')
+      return errorMessage(err, 'Falha ao salvar o Decisor')
     } finally {
       saving.value = false
     }
   }
 
   /** Os provedores de decisão que o backend oferece; lista fixa, lida uma vez. */
-  const providers = ref<LayaProviderView[]>([])
+  const providers = ref<DeciderProviderView[]>([])
 
   async function loadProviders(): Promise<void> {
     if (providers.value.length) return
     try {
-      providers.value = await apiService.get<LayaProviderView[]>('/ai/laya/providers')
+      providers.value = await apiService.get<DeciderProviderView[]>('/ai/decider/providers')
     } catch {
       providers.value = []
     }
   }
 
-  function provider(id: LayaProvider): LayaProviderView | null {
+  function provider(id: DeciderProvider): DeciderProviderView | null {
     return providers.value.find((item) => item.id === id) ?? null
   }
 
@@ -130,14 +131,14 @@ export const useAiLayaStore = defineStore('aiLaya', () => {
    * um download), com o formulário inteiro: a lista depende do provedor, e
    * um Ollaya em outra máquina pode pedir a chave ainda não gravada.
    */
-  async function loadModels(laya: AiLayaSettings): Promise<void> {
+  async function loadModels(decider: AiDeciderSettings): Promise<void> {
     loadingModels.value = true
     try {
-      models.value = await apiService.post<LayaModelsResponse>('/ai/laya/models', { laya })
+      models.value = await apiService.post<DeciderModelsResponse>('/ai/decider/models', { decider })
     } catch (err) {
       models.value = {
         online: false,
-        managesModels: laya.provider === 'ollaya',
+        managesModels: decider.provider === 'ollaya',
         errorMessage: errorMessage(err, 'Falha ao consultar o provedor'),
         installed: [],
         loaded: [],
@@ -149,14 +150,19 @@ export const useAiLayaStore = defineStore('aiLaya', () => {
   }
 
   /** O modelo no catálogo devolvido pelo backend (com a ficha). */
-  function option(model: string): LayaModelOption | null {
+  function option(model: string): DeciderModelOption | null {
     const target = model.trim().toLowerCase()
     return models.value?.options.find((item) => item.name.toLowerCase() === target) ?? null
   }
 
   /** A ficha do modelo; `null` para um fora do catálogo. */
-  function spec(model: string): LayaModelSpecView | null {
+  function spec(model: string): DeciderModelSpecView | null {
     return option(model)?.spec ?? null
+  }
+
+  /** O resultado no teste público; `null` para quem não foi avaliado. */
+  function benchmark(model: string): DeciderBenchmarkView | null {
+    return option(model)?.benchmark ?? null
   }
 
   /**
@@ -168,14 +174,14 @@ export const useAiLayaStore = defineStore('aiLaya', () => {
   }
 
   /** O último estado de carregamento recebido pelo SSE. */
-  const modelState = ref<LayaModelState | null>(null)
+  const modelState = ref<DeciderModelState | null>(null)
 
   /** O modelo está na memória do Ollaya agora? */
   function inMemory(model: string): boolean {
     return isModelInstalled(models.value?.loaded ?? [], model)
   }
 
-  function applyModelState(state: LayaModelState): void {
+  function applyModelState(state: DeciderModelState): void {
     modelState.value = state
     if (state.state === 'ready' && models.value && !inMemory(state.model)) {
       models.value = { ...models.value, loaded: [...models.value.loaded, state.model] }
@@ -183,25 +189,25 @@ export const useAiLayaStore = defineStore('aiLaya', () => {
   }
 
   /** Carrega o modelo em segundo plano; o progresso chega pelo SSE. */
-  async function warmUp(laya: AiLayaSettings): Promise<void> {
-    modelState.value = { model: laya.model, baseUrl: laya.baseUrl, state: 'loading' }
+  async function warmUp(decider: AiDeciderSettings): Promise<void> {
+    modelState.value = { model: decider.model, baseUrl: decider.baseUrl, state: 'loading' }
     try {
-      await apiService.post('/ai/laya/load', { laya })
+      await apiService.post('/ai/decider/load', { decider })
     } catch (err) {
       modelState.value = {
-        model: laya.model,
-        baseUrl: laya.baseUrl,
+        model: decider.model,
+        baseUrl: decider.baseUrl,
         state: 'failed',
         message: errorMessage(err, 'Falha ao carregar o modelo'),
       }
     }
   }
 
-  async function test(laya: AiLayaSettings, question?: string): Promise<TestLayaResponse> {
+  async function test(decider: AiDeciderSettings, question?: string): Promise<TestDeciderResponse> {
     testing.value = true
     try {
-      testResult.value = await apiService.post<TestLayaResponse>('/ai/laya/test', {
-        laya,
+      testResult.value = await apiService.post<TestDeciderResponse>('/ai/decider/test', {
+        decider,
         question: question?.trim() || null,
       })
     } catch (err) {
@@ -210,7 +216,7 @@ export const useAiLayaStore = defineStore('aiLaya', () => {
         online: false,
         modelInstalled: false,
         latencyMs: 0,
-        message: errorMessage(err, 'Falha ao testar o Laya'),
+        message: errorMessage(err, 'Falha ao testar o Decisor'),
         model: null,
         groups: [],
       }
@@ -221,7 +227,7 @@ export const useAiLayaStore = defineStore('aiLaya', () => {
   }
 
   /** Baixa o modelo e, dando certo, testa de novo para a tela refletir. */
-  async function pull(laya: AiLayaSettings, question?: string): Promise<boolean> {
+  async function pull(decider: AiDeciderSettings, question?: string): Promise<boolean> {
     if (pulling.value) return false
     pulling.value = true
     pullProgress.value = {
@@ -235,12 +241,12 @@ export const useAiLayaStore = defineStore('aiLaya', () => {
     }
     pullController = new AbortController()
     try {
-      await streamModelPull('/ai/laya/pull', { laya }, pullController.signal, (progress) => {
+      await streamModelPull('/ai/decider/pull', { decider }, pullController.signal, (progress) => {
         pullProgress.value = progress
       })
       pullProgress.value = null
-      await loadModels(laya)
-      await test(laya, question)
+      await loadModels(decider)
+      await test(decider, question)
       return true
     } catch (err) {
       const cancelled = err instanceof Error && err.name === 'AbortError'
@@ -281,6 +287,7 @@ export const useAiLayaStore = defineStore('aiLaya', () => {
     loadModels,
     installed,
     spec,
+    benchmark,
     modelState,
     inMemory,
     applyModelState,

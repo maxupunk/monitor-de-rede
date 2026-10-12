@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { apiService } from '@/services/apiService'
-import { isLayaModelState, useAiLayaStore } from '@/stores/aiLaya'
+import { isDeciderModelState, useAiDeciderStore } from '@/stores/aiDecider'
 
-describe('estado do modelo do Laya pelo SSE', () => {
+describe('estado do modelo do Decisor pelo SSE', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
   })
@@ -15,7 +15,7 @@ describe('estado do modelo do Laya pelo SSE', () => {
   it('carregando → na memória, sem consultar a API', () => {
     const get = vi.spyOn(apiService, 'get')
     const post = vi.spyOn(apiService, 'post')
-    const store = useAiLayaStore()
+    const store = useAiDeciderStore()
     store.models = {
       online: true,
       errorMessage: null,
@@ -37,12 +37,12 @@ describe('estado do modelo do Laya pelo SSE', () => {
   })
 
   it('só aceita o payload do evento', () => {
-    expect(isLayaModelState({ model: 'laya', baseUrl: 'x', state: 'loading' })).toBe(true)
-    expect(isLayaModelState({ model: 'laya', baseUrl: 'x', state: 'outro' })).toBe(false)
-    expect(isLayaModelState(null)).toBe(false)
+    expect(isDeciderModelState({ model: 'laya', baseUrl: 'x', state: 'loading' })).toBe(true)
+    expect(isDeciderModelState({ model: 'laya', baseUrl: 'x', state: 'outro' })).toBe(false)
+    expect(isDeciderModelState(null)).toBe(false)
   })
   it('modelo do catálogo vale o veredito do backend, que conhece os apelidos', () => {
-    const store = useAiLayaStore()
+    const store = useAiDeciderStore()
     store.models = {
       online: true,
       errorMessage: null,

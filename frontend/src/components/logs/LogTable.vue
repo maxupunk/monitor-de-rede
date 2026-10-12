@@ -67,7 +67,7 @@
                     >
                       {{ categoryOf(entry)?.option.title }}
                       <template v-if="!categoryOf(entry)?.info.confirmed">
-                        · Laya {{ formatPercent(categoryOf(entry)?.info.confidence, 0) }}
+                        · Decisor {{ formatPercent(categoryOf(entry)?.info.confidence, 0) }}
                       </template>
                     </v-chip>
                   </template>

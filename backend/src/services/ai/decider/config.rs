@@ -1,18 +1,19 @@
-//! Configuração do Laya: onde está o Ollaya e quão seguro ele precisa estar.
+//! Configuração do Decisor: onde está o Ollaya e quão seguro ele precisa estar.
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use super::providers::{self, DecisionProtocol, LayaProvider, ProviderPreset};
+use super::providers::{self, DeciderProvider, DecisionProtocol, ProviderPreset};
 
 /// O serviço `ollaya` do `docker-compose.yml`, na rede interna.
-pub const DEFAULT_LAYA_BASE_URL: &str = "http://ollaya:11435";
+pub const DEFAULT_DECIDER_BASE_URL: &str = "http://ollaya:11435";
 /// O roteador: escolhe `laya:en` ou `laya:multilingual` pela língua da pergunta.
-pub const DEFAULT_LAYA_MODEL: &str = "laya";
+/// O melhor custo-benefício em CPU no teste público (`decider::benchmark`).
+pub const DEFAULT_DECIDER_MODEL: &str = "kev:0.8b";
 /// Probabilidade mínima (%) para um grupo de ferramentas entrar.
-pub const DEFAULT_LAYA_MIN_CONFIDENCE: u8 = 60;
+pub const DEFAULT_DECIDER_MIN_CONFIDENCE: u8 = 60;
 /// Tempo máximo de uma decisão. Estourou, o chat segue sem ela.
-pub const DEFAULT_LAYA_TIMEOUT_MS: u32 = 1_500;
+pub const DEFAULT_DECIDER_TIMEOUT_MS: u32 = 4_000;
 /// A mesma variável que o Ollaya lê: o compose entrega o mesmo valor aos dois
 /// containers, e ninguém precisa copiá-la para a tela.
 pub const API_KEY_ENV: &str = "OLLAYA_API_KEY";
@@ -29,25 +30,25 @@ fn trimmed(value: Option<String>) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-/// Triagem da IA proativa: o Laya decide se um alerta merece resumo do LLM.
+/// Triagem da IA proativa: o Decisor decide se um alerta merece resumo do LLM.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
-pub enum LayaTriageMode {
+pub enum DeciderTriageMode {
     /// Não consulta: vale só severidade e teto por hora.
     #[default]
     Off,
     /// Consulta e registra no alerta, mas resume sempre — para calibrar.
     Shadow,
-    /// Pula o resumo quando o Laya acha que o alerta não merece.
+    /// Pula o resumo quando o Decisor acha que o alerta não merece.
     Enforce,
 }
 
-/// Onde o Laya é consultado. Cada frente só sugere; nenhuma muda dado sozinha.
+/// Onde o Decisor é consultado. Cada frente só sugere; nenhuma muda dado sozinha.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", default)]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct LayaFeatures {
+pub struct DeciderFeatures {
     /// Escolher os grupos de ferramentas de cada pergunta do chat.
     pub chat_tools: bool,
     /// Sugerir tipo e sistema dos dispositivos encontrados na descoberta.
@@ -56,22 +57,22 @@ pub struct LayaFeatures {
     pub interfaces: bool,
     /// Classificar cada padrão novo de log (falha de login, link, reboot…).
     pub log_events: bool,
-    pub incident_triage: LayaTriageMode,
+    pub incident_triage: DeciderTriageMode,
     /// Revisar as ações que o modo automático rodaria sozinho: o que ele achar
     /// perigoso no contexto volta a pedir confirmação. Só sobe o risco.
     pub action_review: bool,
 }
 
-impl Default for LayaFeatures {
+impl Default for DeciderFeatures {
     fn default() -> Self {
         Self {
-            // Era o único uso: quem já tinha o Laya ligado continua igual.
+            // Era o único uso: quem já tinha o Decisor ligado continua igual.
             chat_tools: true,
             device_identity: true,
             interfaces: true,
             // Roda em segundo plano sobre todo log novo: só com escolha explícita.
             log_events: false,
-            incident_triage: LayaTriageMode::Off,
+            incident_triage: DeciderTriageMode::Off,
             // Só torna o automático mais cauteloso, e só nas ações de risco médio.
             action_review: true,
         }
@@ -80,7 +81,7 @@ impl Default for LayaFeatures {
 
 /// Uma frente, para perguntar se ela está liberada.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum LayaFeature {
+pub enum DeciderFeature {
     ChatTools,
     DeviceIdentity,
     Interfaces,
@@ -92,11 +93,11 @@ pub enum LayaFeature {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", default)]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct AiLayaSettings {
-    /// Chave mestra: desligado, nenhuma frente consulta o Laya.
+pub struct AiDeciderSettings {
+    /// Chave mestra: desligado, nenhuma frente consulta o Decisor.
     pub enabled: bool,
     /// Quem responde: o Ollaya (padrão) ou um serviço na nuvem.
-    pub provider: LayaProvider,
+    pub provider: DeciderProvider,
     /// Formato da API no provedor "Outro"; os demais têm o seu.
     pub custom_protocol: DecisionProtocol,
     pub base_url: String,
@@ -110,31 +111,31 @@ pub struct AiLayaSettings {
     #[ts(optional)]
     pub account_id: Option<String>,
     pub model: String,
-    /// 1–99: quanto maior, menos grupos entram por palpite do Laya.
+    /// 1–99: quanto maior, menos grupos entram por palpite do Decisor.
     pub min_confidence: u8,
     /// 200–10.000 ms.
     pub timeout_ms: u32,
-    pub features: LayaFeatures,
+    pub features: DeciderFeatures,
 }
 
-impl Default for AiLayaSettings {
+impl Default for AiDeciderSettings {
     fn default() -> Self {
         Self {
             enabled: false,
-            provider: LayaProvider::Ollaya,
+            provider: DeciderProvider::Ollaya,
             custom_protocol: DecisionProtocol::Systemone,
-            base_url: DEFAULT_LAYA_BASE_URL.to_string(),
+            base_url: DEFAULT_DECIDER_BASE_URL.to_string(),
             api_key: None,
             account_id: None,
-            model: DEFAULT_LAYA_MODEL.to_string(),
-            min_confidence: DEFAULT_LAYA_MIN_CONFIDENCE,
-            timeout_ms: DEFAULT_LAYA_TIMEOUT_MS,
-            features: LayaFeatures::default(),
+            model: DEFAULT_DECIDER_MODEL.to_string(),
+            min_confidence: DEFAULT_DECIDER_MIN_CONFIDENCE,
+            timeout_ms: DEFAULT_DECIDER_TIMEOUT_MS,
+            features: DeciderFeatures::default(),
         }
     }
 }
 
-impl AiLayaSettings {
+impl AiDeciderSettings {
     /// Traz valores vazios ou fora da faixa de volta para ela.
     #[must_use]
     pub fn normalized(mut self) -> Self {
@@ -162,18 +163,20 @@ impl AiLayaSettings {
         self
     }
 
-    /// O Laya está ligado e a frente liberada?
+    /// O Decisor está ligado e a frente liberada?
     #[must_use]
-    pub fn allows(&self, feature: LayaFeature) -> bool {
+    pub fn allows(&self, feature: DeciderFeature) -> bool {
         let features = &self.features;
         self.enabled
             && match feature {
-                LayaFeature::ChatTools => features.chat_tools,
-                LayaFeature::DeviceIdentity => features.device_identity,
-                LayaFeature::Interfaces => features.interfaces,
-                LayaFeature::LogEvents => features.log_events,
-                LayaFeature::IncidentTriage => features.incident_triage != LayaTriageMode::Off,
-                LayaFeature::ActionReview => features.action_review,
+                DeciderFeature::ChatTools => features.chat_tools,
+                DeciderFeature::DeviceIdentity => features.device_identity,
+                DeciderFeature::Interfaces => features.interfaces,
+                DeciderFeature::LogEvents => features.log_events,
+                DeciderFeature::IncidentTriage => {
+                    features.incident_triage != DeciderTriageMode::Off
+                }
+                DeciderFeature::ActionReview => features.action_review,
             }
     }
 
@@ -198,7 +201,7 @@ impl AiLayaSettings {
     #[must_use]
     pub fn effective_api_key(&self) -> Option<String> {
         trimmed(self.api_key.clone()).or_else(|| {
-            if self.provider == LayaProvider::Ollaya {
+            if self.provider == DeciderProvider::Ollaya {
                 env_api_key()
             } else {
                 None
@@ -219,30 +222,30 @@ mod tests {
 
     #[test]
     fn normaliza_valores_vazios_e_fora_da_faixa() {
-        let settings = AiLayaSettings {
+        let settings = AiDeciderSettings {
             enabled: true,
             base_url: " http://ollaya:11435/ ".into(),
             model: String::new(),
             min_confidence: 0,
             timeout_ms: 50_000,
             api_key: Some("  ".into()),
-            ..AiLayaSettings::default()
+            ..AiDeciderSettings::default()
         }
         .normalized();
         assert_eq!(settings.api_key, None);
         assert_eq!(settings.base_url, "http://ollaya:11435");
-        assert_eq!(settings.model, DEFAULT_LAYA_MODEL);
+        assert_eq!(settings.model, DEFAULT_DECIDER_MODEL);
         assert_eq!(settings.min_confidence, 1);
         assert_eq!(settings.timeout_ms, 10_000);
     }
 
     #[test]
     fn provedor_de_nuvem_sem_url_nem_modelo_recebe_os_do_preset() {
-        let settings = AiLayaSettings {
-            provider: LayaProvider::Cloudflare,
+        let settings = AiDeciderSettings {
+            provider: DeciderProvider::Cloudflare,
             base_url: String::new(),
             model: String::new(),
-            ..AiLayaSettings::default()
+            ..AiDeciderSettings::default()
         }
         .normalized();
         assert_eq!(settings.base_url, "https://api.cloudflare.com/client/v4");
@@ -253,14 +256,14 @@ mod tests {
 
     #[test]
     fn outro_usa_o_formato_escolhido_e_nunca_o_do_ollaya() {
-        let settings = AiLayaSettings {
-            provider: LayaProvider::Custom,
+        let settings = AiDeciderSettings {
+            provider: DeciderProvider::Custom,
             custom_protocol: DecisionProtocol::Ollaya,
-            ..AiLayaSettings::default()
+            ..AiDeciderSettings::default()
         }
         .normalized();
         assert_eq!(settings.protocol(), DecisionProtocol::Systemone);
-        let openai = AiLayaSettings {
+        let openai = AiDeciderSettings {
             custom_protocol: DecisionProtocol::Openai,
             ..settings
         };
@@ -269,51 +272,51 @@ mod tests {
 
     #[test]
     fn configuracao_antiga_e_ollaya() {
-        let settings: AiLayaSettings = serde_json::from_str(r#"{"enabled":true}"#).unwrap();
-        assert_eq!(settings.provider, LayaProvider::Ollaya);
+        let settings: AiDeciderSettings = serde_json::from_str(r#"{"enabled":true}"#).unwrap();
+        assert_eq!(settings.provider, DeciderProvider::Ollaya);
         assert!(settings.manages_models());
     }
 
     #[test]
     fn chave_da_tela_vale_antes_da_do_compose_e_so_o_ollaya_usa_o_compose() {
-        let tela = AiLayaSettings {
+        let tela = AiDeciderSettings {
             api_key: Some("da-tela".into()),
-            ..AiLayaSettings::default()
+            ..AiDeciderSettings::default()
         };
         assert_eq!(tela.effective_api_key().as_deref(), Some("da-tela"));
-        let nuvem = AiLayaSettings {
-            provider: LayaProvider::Typesafe,
-            ..AiLayaSettings::default()
+        let nuvem = AiDeciderSettings {
+            provider: DeciderProvider::Typesafe,
+            ..AiDeciderSettings::default()
         };
         assert_eq!(nuvem.effective_api_key(), None);
     }
 
     #[test]
     fn configuracao_antiga_continua_roteando_o_chat() {
-        let settings: AiLayaSettings = serde_json::from_str(r#"{"enabled":true}"#).unwrap();
-        assert!(settings.allows(LayaFeature::ChatTools));
-        assert!(settings.allows(LayaFeature::DeviceIdentity));
-        assert!(!settings.allows(LayaFeature::LogEvents));
-        assert!(!settings.allows(LayaFeature::IncidentTriage));
+        let settings: AiDeciderSettings = serde_json::from_str(r#"{"enabled":true}"#).unwrap();
+        assert!(settings.allows(DeciderFeature::ChatTools));
+        assert!(settings.allows(DeciderFeature::DeviceIdentity));
+        assert!(!settings.allows(DeciderFeature::LogEvents));
+        assert!(!settings.allows(DeciderFeature::IncidentTriage));
     }
 
     #[test]
     fn chave_mestra_desligada_bloqueia_toda_frente() {
-        let mut settings = AiLayaSettings::default();
+        let mut settings = AiDeciderSettings::default();
         settings.features.log_events = true;
-        settings.features.incident_triage = LayaTriageMode::Shadow;
-        assert!(!settings.allows(LayaFeature::ChatTools));
-        assert!(!settings.allows(LayaFeature::LogEvents));
+        settings.features.incident_triage = DeciderTriageMode::Shadow;
+        assert!(!settings.allows(DeciderFeature::ChatTools));
+        assert!(!settings.allows(DeciderFeature::LogEvents));
         settings.enabled = true;
-        assert!(settings.allows(LayaFeature::LogEvents));
-        assert!(settings.allows(LayaFeature::IncidentTriage));
+        assert!(settings.allows(DeciderFeature::LogEvents));
+        assert!(settings.allows(DeciderFeature::IncidentTriage));
     }
 
     #[test]
-    fn configuracao_antiga_sem_laya_recebe_os_padroes() {
-        let settings: AiLayaSettings = serde_json::from_str(r#"{"enabled":true}"#).unwrap();
+    fn configuracao_antiga_sem_decider_recebe_os_padroes() {
+        let settings: AiDeciderSettings = serde_json::from_str(r#"{"enabled":true}"#).unwrap();
         assert!(settings.enabled);
-        assert_eq!(settings.min_confidence, DEFAULT_LAYA_MIN_CONFIDENCE);
+        assert_eq!(settings.min_confidence, DEFAULT_DECIDER_MIN_CONFIDENCE);
         assert!((settings.threshold() - 0.6).abs() < f64::EPSILON);
     }
 }

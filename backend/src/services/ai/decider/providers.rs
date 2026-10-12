@@ -1,8 +1,8 @@
-//! Onde o Laya pede as decisões: o Ollaya (nesta máquina ou em outra) ou um
+//! Onde o Decisor pede as decisões: o Ollaya (nesta máquina ou em outra) ou um
 //! serviço de modelos de decisão na nuvem.
 //!
 //! Por trás de todos há só três formatos de API ([`DecisionProtocol`], ver
-//! `laya::protocols`): o nativo do Ollaya, o System One da TypeSafe (que Jev,
+//! `decider::protocols`): o nativo do Ollaya, o System One da TypeSafe (que Jev,
 //! OpenRouter, Vercel, LiteLLM e o Clef da Cloudflare seguem) e o Decisions
 //! da OpenAI. Cada provedor aqui é um preset — formato, endereço padrão,
 //! modelos conhecidos e o que a tela precisa pedir (chave, ID da conta) —
@@ -11,19 +11,20 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::dtos::ai::{LayaProviderModel, LayaProviderView};
+use super::benchmark::Benchmark;
+use crate::dtos::ai::{DeciderProviderModel, DeciderProviderView};
 
 /// Quem responde às decisões.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
-pub enum LayaProvider {
+pub enum DeciderProvider {
     /// Ollaya nesta máquina (o serviço do compose) ou em outra.
     #[default]
     Ollaya,
     /// Jev, da TypeSafe.
     Typesafe,
-    /// Jev pelo OpenRouter.
+    /// OpenRouter: Microsoft Decision-1, Perplexity Decider e Jev numa conta só.
     Openrouter,
     /// Clef, nos Workers AI da Cloudflare.
     Cloudflare,
@@ -47,12 +48,36 @@ pub enum DecisionProtocol {
     Cloudflare,
     /// `POST /v1/decisions` — o formato da OpenAI.
     Openai,
+    /// `POST /alpha/decisions` do OpenRouter: o corpo do System One, o único
+    /// caminho que serve Microsoft Decision-1 e Perplexity Decider.
+    Openrouter,
+}
+
+/// Um modelo oferecido por um provedor de nuvem.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProviderModel {
+    pub name: &'static str,
+    pub description: &'static str,
+    /// Resultado no teste público (`decider::benchmark`), quando avaliado.
+    pub benchmark: Option<Benchmark>,
+}
+
+const fn model(
+    name: &'static str,
+    description: &'static str,
+    benchmark: Option<Benchmark>,
+) -> ProviderModel {
+    ProviderModel {
+        name,
+        description,
+        benchmark,
+    }
 }
 
 /// O preset de um provedor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProviderPreset {
-    pub provider: LayaProvider,
+    pub provider: DeciderProvider,
     pub label: &'static str,
     pub description: &'static str,
     /// `None` no "Outro": o operador escolhe.
@@ -60,7 +85,7 @@ pub struct ProviderPreset {
     pub default_base_url: &'static str,
     pub default_model: &'static str,
     /// Modelos que o provedor oferece, com o que cada um é.
-    pub models: &'static [(&'static str, &'static str)],
+    pub models: &'static [ProviderModel],
     pub requires_key: bool,
     pub requires_account: bool,
     /// Onde o operador cria a chave.
@@ -68,7 +93,7 @@ pub struct ProviderPreset {
     /// Os textos saem da rede: a tela avisa antes de ligar.
     pub cloud: bool,
     /// Tempo máximo por pergunta sugerido (rede incluída). No Ollaya vale o
-    /// do modelo (`laya::catalog`).
+    /// do modelo (`decider::catalog`).
     pub suggested_timeout_ms: u32,
 }
 
@@ -80,8 +105,8 @@ impl ProviderPreset {
     }
 
     #[must_use]
-    pub fn view(&self) -> LayaProviderView {
-        LayaProviderView {
+    pub fn view(&self) -> DeciderProviderView {
+        DeciderProviderView {
             id: self.provider,
             label: self.label.to_string(),
             description: self.description.to_string(),
@@ -91,9 +116,10 @@ impl ProviderPreset {
             models: self
                 .models
                 .iter()
-                .map(|(name, description)| LayaProviderModel {
-                    name: (*name).to_string(),
-                    description: (*description).to_string(),
+                .map(|model| DeciderProviderModel {
+                    name: model.name.to_string(),
+                    description: model.description.to_string(),
+                    benchmark: model.benchmark.map(|benchmark| benchmark.view()),
                 })
                 .collect(),
             requires_key: self.requires_key,
@@ -111,29 +137,37 @@ const CLOUD_TIMEOUT_MS: u32 = 3_000;
 
 pub const PRESETS: &[ProviderPreset] = &[
     ProviderPreset {
-        provider: LayaProvider::Ollaya,
+        provider: DeciderProvider::Ollaya,
         label: "Ollaya",
         description: "Modelos abertos rodando nesta máquina (o serviço do compose) ou em outra da sua rede. Nada sai da rede.",
         protocol: Some(DecisionProtocol::Ollaya),
-        default_base_url: super::config::DEFAULT_LAYA_BASE_URL,
-        default_model: super::config::DEFAULT_LAYA_MODEL,
+        default_base_url: super::config::DEFAULT_DECIDER_BASE_URL,
+        default_model: super::config::DEFAULT_DECIDER_MODEL,
         models: &[],
         requires_key: false,
         requires_account: false,
         key_url: None,
         cloud: false,
-        suggested_timeout_ms: super::config::DEFAULT_LAYA_TIMEOUT_MS,
+        suggested_timeout_ms: super::config::DEFAULT_DECIDER_TIMEOUT_MS,
     },
     ProviderPreset {
-        provider: LayaProvider::Typesafe,
+        provider: DeciderProvider::Typesafe,
         label: "TypeSafe (Jev)",
         description: "Jev, o modelo de decisão da TypeSafe, direto na API dela. Cobrado por token de entrada.",
         protocol: Some(DecisionProtocol::Systemone),
         default_base_url: "https://api.typesafe.ai",
         default_model: "jev-latest",
         models: &[
-            ("jev-latest", "Jev estável (hoje o jev-1.13.0)"),
-            ("jev-preview", "Jev em prévia: as novidades antes do estável"),
+            model(
+                "jev-latest",
+                "Jev estável (hoje o jev-1.13.0): 97,6% no teste público, igual em português",
+                Some(Benchmark::new(976, 976, 255)),
+            ),
+            model(
+                "jev-preview",
+                "Jev em prévia: as novidades antes do estável",
+                None,
+            ),
         ],
         requires_key: true,
         requires_account: false,
@@ -142,15 +176,29 @@ pub const PRESETS: &[ProviderPreset] = &[
         suggested_timeout_ms: CLOUD_TIMEOUT_MS,
     },
     ProviderPreset {
-        provider: LayaProvider::Openrouter,
-        label: "OpenRouter (Jev)",
-        description: "O Jev da TypeSafe pela conta do OpenRouter, sem lista de espera. Cobrado por token de entrada.",
-        protocol: Some(DecisionProtocol::Systemone),
+        provider: DeciderProvider::Openrouter,
+        label: "OpenRouter",
+        description: "Os melhores do teste público numa conta só — Microsoft Decision-1, Perplexity Decider e Jev —, sem lista de espera. Cobrado por token de entrada.",
+        protocol: Some(DecisionProtocol::Openrouter),
         default_base_url: "https://openrouter.ai/api",
-        default_model: "~typesafe/jev-latest",
+        default_model: "microsoft/microsoft-decision-1",
         models: &[
-            ("~typesafe/jev-latest", "Jev estável, sempre a versão mais nova"),
-            ("typesafe/jev-1.13", "Jev 1.13, versão fixa"),
+            model(
+                "microsoft/microsoft-decision-1",
+                "Microsoft Decision-1 9B: 97,6% no teste público e 100% em português, pelo menor custo medido",
+                Some(Benchmark::new(976, 1_000, 422)),
+            ),
+            model(
+                "perplexity/pplx-decider-v1.1-27b",
+                "Perplexity Decider 1.1 27B: o mais preciso do teste público (99,4%, 100% em português)",
+                Some(Benchmark::accuracy_only(994, 1_000)),
+            ),
+            model(
+                "~typesafe/jev-latest",
+                "Jev, sempre a versão mais nova",
+                Some(Benchmark::new(976, 976, 255)),
+            ),
+            model("typesafe/jev-1.13", "Jev 1.13, versão fixa", Some(Benchmark::new(976, 976, 255))),
         ],
         requires_key: true,
         requires_account: false,
@@ -159,15 +207,23 @@ pub const PRESETS: &[ProviderPreset] = &[
         suggested_timeout_ms: 4_000,
     },
     ProviderPreset {
-        provider: LayaProvider::Cloudflare,
+        provider: DeciderProvider::Cloudflare,
         label: "Cloudflare (Clef)",
         description: "Clef, o modelo de decisão aberto da Cloudflare, nos Workers AI. Pede o ID da conta e um token com permissão de Workers AI.",
         protocol: Some(DecisionProtocol::Cloudflare),
         default_base_url: "https://api.cloudflare.com/client/v4",
         default_model: "clef-flash",
         models: &[
-            ("clef-flash", "Clef-flash 9B: dezenas de milissegundos, o mais barato"),
-            ("clef", "Clef 27B: o mais preciso da Cloudflare"),
+            model(
+                "clef-flash",
+                "Clef-flash 9B: barato e cabe na cota gratuita diária; cai 8 pontos em português",
+                Some(Benchmark::new(875, 833, 394)),
+            ),
+            model(
+                "clef",
+                "Clef 27B: o mais preciso da Cloudflare",
+                Some(Benchmark::new(958, 940, 302)),
+            ),
         ],
         requires_key: true,
         requires_account: true,
@@ -176,13 +232,17 @@ pub const PRESETS: &[ProviderPreset] = &[
         suggested_timeout_ms: CLOUD_TIMEOUT_MS,
     },
     ProviderPreset {
-        provider: LayaProvider::Openai,
+        provider: DeciderProvider::Openai,
         label: "OpenAI Decisions",
         description: "A API Decisions da OpenAI (beta), com o gpt-6-luna. Cobrado por token de entrada.",
         protocol: Some(DecisionProtocol::Openai),
         default_base_url: "https://api.openai.com",
         default_model: "gpt-6-luna",
-        models: &[("gpt-6-luna", "O modelo de decisão da OpenAI")],
+        models: &[model(
+            "gpt-6-luna",
+            "O modelo de decisão da OpenAI",
+            Some(Benchmark::new(905, 905, 222)),
+        )],
         requires_key: true,
         requires_account: false,
         key_url: Some("https://platform.openai.com/api-keys"),
@@ -190,7 +250,7 @@ pub const PRESETS: &[ProviderPreset] = &[
         suggested_timeout_ms: CLOUD_TIMEOUT_MS,
     },
     ProviderPreset {
-        provider: LayaProvider::Custom,
+        provider: DeciderProvider::Custom,
         label: "Outro compatível",
         description: "Qualquer endereço no formato System One (TypeSafe) ou Decisions (OpenAI): Vercel AI Gateway, LiteLLM, um Kev servido por você…",
         protocol: None,
@@ -207,7 +267,7 @@ pub const PRESETS: &[ProviderPreset] = &[
 
 /// O preset do provedor. Todo provedor tem um.
 #[must_use]
-pub fn preset(provider: LayaProvider) -> &'static ProviderPreset {
+pub fn preset(provider: DeciderProvider) -> &'static ProviderPreset {
     PRESETS
         .iter()
         .find(|preset| preset.provider == provider)
@@ -221,12 +281,12 @@ mod tests {
     #[test]
     fn todo_provedor_tem_preset() {
         for provider in [
-            LayaProvider::Ollaya,
-            LayaProvider::Typesafe,
-            LayaProvider::Openrouter,
-            LayaProvider::Cloudflare,
-            LayaProvider::Openai,
-            LayaProvider::Custom,
+            DeciderProvider::Ollaya,
+            DeciderProvider::Typesafe,
+            DeciderProvider::Openrouter,
+            DeciderProvider::Cloudflare,
+            DeciderProvider::Openai,
+            DeciderProvider::Custom,
         ] {
             assert_eq!(preset(provider).provider, provider);
         }
@@ -237,11 +297,11 @@ mod tests {
         for preset in PRESETS {
             assert_eq!(
                 preset.manages_models(),
-                preset.provider == LayaProvider::Ollaya,
+                preset.provider == DeciderProvider::Ollaya,
                 "{}",
                 preset.label
             );
-            assert_eq!(preset.cloud, preset.provider != LayaProvider::Ollaya);
+            assert_eq!(preset.cloud, preset.provider != DeciderProvider::Ollaya);
         }
     }
 
@@ -249,7 +309,7 @@ mod tests {
     fn nuvem_conhecida_pede_chave_e_traz_o_modelo_padrao_na_lista() {
         for preset in PRESETS
             .iter()
-            .filter(|preset| preset.cloud && preset.provider != LayaProvider::Custom)
+            .filter(|preset| preset.cloud && preset.provider != DeciderProvider::Custom)
         {
             assert!(preset.requires_key, "{}", preset.label);
             assert!(preset.key_url.is_some(), "{}", preset.label);
@@ -257,7 +317,7 @@ mod tests {
                 preset
                     .models
                     .iter()
-                    .any(|(name, _)| *name == preset.default_model),
+                    .any(|model| model.name == preset.default_model),
                 "{}",
                 preset.label
             );

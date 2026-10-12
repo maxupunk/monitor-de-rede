@@ -1,4 +1,4 @@
-//! Onde o resto do sistema consulta o Laya.
+//! Onde o resto do sistema consulta o Decisor.
 //!
 //! Três cuidados que cada chamador teria de repetir ficam aqui:
 //!
@@ -11,7 +11,7 @@
 //! - **Modelo frio.** Tirar o modelo do disco leva de 5 a 20 s; o tempo
 //!   máximo por pergunta vale só para a inferência. Quem está na tela
 //!   esperando uma resposta pedida (`OnDemand`) e as rotinas (`Background`)
-//!   aguardam o carregamento — a tela recebe `laya:model_state` pelo SSE e
+//!   aguardam o carregamento — a tela recebe `decider:model_state` pelo SSE e
 //!   mostra "carregando". O chat (`Interactive`) não espera: dispara o
 //!   carregamento e segue com as heurísticas naquela pergunta.
 //! - **Disjuntor** para o segundo plano: 3 falhas seguidas o abrem por 60 s.
@@ -19,7 +19,7 @@
 //!   avisar a cada falha encheria o banco com o aviso. Avisa ao abrir e ao
 //!   fechar, e só.
 //!
-//! Nunca falha: sem Laya, a resposta é `None` e quem chamou segue com a
+//! Nunca falha: sem Decisor, a resposta é `None` e quem chamou segue com a
 //! heurística de sempre.
 
 use std::{
@@ -34,8 +34,8 @@ use tokio::sync::Semaphore;
 
 use super::{
     catalog,
-    client::LayaClient,
-    config::{AiLayaSettings, LayaFeature},
+    client::DeciderClient,
+    config::{AiDeciderSettings, DeciderFeature},
     decision::{self, Decision, Outcome},
 };
 use crate::services::{
@@ -45,7 +45,7 @@ use crate::services::{
 };
 
 /// Evento SSE com o estado do modelo: `loading`, `ready` ou `failed`.
-pub const MODEL_STATE_EVENT: &str = "laya:model_state";
+pub const MODEL_STATE_EVENT: &str = "decider:model_state";
 /// Por quanto tempo "está na memória" vale sem perguntar de novo ao Ollaya.
 /// Curto: o `OLLAYA_KEEP_ALIVE` pode descarregar o modelo a qualquer momento.
 const LOADED_TTL: Duration = Duration::from_secs(20);
@@ -94,7 +94,7 @@ impl Breaker {
 }
 
 struct Inner {
-    settings: RwLock<Option<(AiLayaSettings, Instant)>>,
+    settings: RwLock<Option<(AiDeciderSettings, Instant)>>,
     background: Semaphore,
     breaker: Mutex<Breaker>,
     /// Um carregamento por vez: quem chega depois espera e encontra quente.
@@ -105,11 +105,11 @@ struct Inner {
 }
 
 #[derive(Clone)]
-pub struct LayaRuntime {
+pub struct DeciderRuntime {
     inner: Arc<Inner>,
 }
 
-impl Default for LayaRuntime {
+impl Default for DeciderRuntime {
     fn default() -> Self {
         Self {
             inner: Arc::new(Inner {
@@ -124,7 +124,7 @@ impl Default for LayaRuntime {
     }
 }
 
-impl LayaRuntime {
+impl DeciderRuntime {
     /// O runtime do processo, criado na primeira consulta.
     #[must_use]
     pub fn from_context(ctx: &AppContext) -> Self {
@@ -146,7 +146,7 @@ impl LayaRuntime {
         }
     }
 
-    fn cached_settings(&self) -> Option<AiLayaSettings> {
+    fn cached_settings(&self) -> Option<AiDeciderSettings> {
         let cached = self.inner.settings.read().ok()?;
         cached
             .as_ref()
@@ -154,16 +154,16 @@ impl LayaRuntime {
             .map(|(settings, _)| settings.clone())
     }
 
-    /// A configuração, se o Laya está ligado e a frente liberada.
+    /// A configuração, se o Decisor está ligado e a frente liberada.
     pub async fn settings_for<C: ConnectionTrait>(
         &self,
         db: &C,
-        feature: LayaFeature,
-    ) -> Option<AiLayaSettings> {
+        feature: DeciderFeature,
+    ) -> Option<AiDeciderSettings> {
         let settings = match self.cached_settings() {
             Some(settings) => settings,
             None => {
-                let settings = settings::load(db).await.ok()?.laya.normalized();
+                let settings = settings::load(db).await.ok()?.decider.normalized();
                 if let Ok(mut cached) = self.inner.settings.write() {
                     *cached = Some((settings.clone(), Instant::now()));
                 }
@@ -177,7 +177,7 @@ impl LayaRuntime {
     pub async fn decide<D: Decision + Sync, C: ConnectionTrait>(
         &self,
         db: &C,
-        feature: LayaFeature,
+        feature: DeciderFeature,
         lane: Lane,
         state: &str,
         decision: &D,
@@ -189,7 +189,7 @@ impl LayaRuntime {
     /// Consulta com uma configuração dada (a do formulário, ou a de um teste).
     pub async fn decide_with<D: Decision + Sync>(
         &self,
-        settings: &AiLayaSettings,
+        settings: &AiDeciderSettings,
         lane: Lane,
         state: &str,
         decision: &D,
@@ -206,7 +206,7 @@ impl LayaRuntime {
     /// Disjuntor aberto, modelo frio no chat, falha ao carregar ou ao decidir.
     pub async fn try_decide_with<D: Decision + Sync>(
         &self,
-        settings: &AiLayaSettings,
+        settings: &AiDeciderSettings,
         lane: Lane,
         state: &str,
         decision: &D,
@@ -216,7 +216,7 @@ impl LayaRuntime {
             Lane::Background => {
                 if self.breaker_open() {
                     return Err(AppError::service_unavailable(
-                        "Laya em pausa depois de falhas seguidas",
+                        "Decisor em pausa depois de falhas seguidas",
                     ));
                 }
                 self.inner.background.acquire().await.ok()
@@ -227,13 +227,13 @@ impl LayaRuntime {
                 if self.is_cold(settings).await {
                     self.warm_in_background(settings);
                     return Err(AppError::service_unavailable(
-                        "O modelo do Laya está sendo carregado na memória",
+                        "O modelo do Decisor está sendo carregado na memória",
                     ));
                 }
             }
             Lane::OnDemand | Lane::Background => self.ensure_loaded(settings).await?,
         }
-        let result = decision::run(&LayaClient::new(settings), state, decision).await;
+        let result = decision::run(&DeciderClient::new(settings), state, decision).await;
         if result.is_ok() {
             self.mark_warm(settings);
         }
@@ -244,17 +244,17 @@ impl LayaRuntime {
         result
     }
 
-    fn warm_key(settings: &AiLayaSettings) -> String {
+    fn warm_key(settings: &AiDeciderSettings) -> String {
         format!("{}|{}", settings.base_url, settings.model)
     }
 
-    fn mark_warm(&self, settings: &AiLayaSettings) {
+    fn mark_warm(&self, settings: &AiDeciderSettings) {
         if let Ok(mut warm) = self.inner.warm.lock() {
             *warm = Some((Self::warm_key(settings), Instant::now()));
         }
     }
 
-    fn recently_warm(&self, settings: &AiLayaSettings) -> bool {
+    fn recently_warm(&self, settings: &AiDeciderSettings) -> bool {
         let key = Self::warm_key(settings);
         self.inner.warm.lock().is_ok_and(|warm| {
             warm.as_ref()
@@ -264,12 +264,12 @@ impl LayaRuntime {
 
     /// O modelo está fora da memória? Na dúvida (Ollaya antigo sem
     /// `/api/ps`, erro), responde que não — e a consulta segue como antes.
-    async fn is_cold(&self, settings: &AiLayaSettings) -> bool {
+    async fn is_cold(&self, settings: &AiDeciderSettings) -> bool {
         // Na nuvem o modelo está sempre pronto.
         if !settings.manages_models() || self.recently_warm(settings) {
             return false;
         }
-        match LayaClient::new(settings).loaded_models().await {
+        match DeciderClient::new(settings).loaded_models().await {
             Ok(loaded) => {
                 let warm = catalog::is_available(&loaded, &settings.model);
                 if warm {
@@ -281,7 +281,7 @@ impl LayaRuntime {
         }
     }
 
-    fn publish_state(&self, settings: &AiLayaSettings, state: &str, extra: serde_json::Value) {
+    fn publish_state(&self, settings: &AiDeciderSettings, state: &str, extra: serde_json::Value) {
         if let Some(events) = &self.inner.events {
             let mut payload = json!({
                 "model": settings.model,
@@ -301,7 +301,7 @@ impl LayaRuntime {
     /// # Errors
     ///
     /// O Ollaya não conseguiu carregar o modelo no prazo de carregamento.
-    pub async fn ensure_loaded(&self, settings: &AiLayaSettings) -> AppResult<()> {
+    pub async fn ensure_loaded(&self, settings: &AiDeciderSettings) -> AppResult<()> {
         if !self.is_cold(settings).await {
             return Ok(());
         }
@@ -310,12 +310,12 @@ impl LayaRuntime {
             return Ok(());
         }
         self.publish_state(settings, "loading", json!({}));
-        tracing::info!(model = %settings.model, "laya: carregando o modelo na memória");
-        match LayaClient::new(settings).load().await {
+        tracing::info!(model = %settings.model, "decisor: carregando o modelo na memória");
+        match DeciderClient::new(settings).load().await {
             Ok(load_ms) => {
                 self.mark_warm(settings);
                 self.publish_state(settings, "ready", json!({ "loadMs": load_ms }));
-                tracing::info!(model = %settings.model, load_ms, "laya: modelo carregado");
+                tracing::info!(model = %settings.model, load_ms, "decisor: modelo carregado");
                 Ok(())
             }
             Err(error) => {
@@ -326,7 +326,7 @@ impl LayaRuntime {
     }
 
     /// Dispara o carregamento sem esperar. Se já há um em curso, não faz nada.
-    pub fn warm_in_background(&self, settings: &AiLayaSettings) {
+    pub fn warm_in_background(&self, settings: &AiDeciderSettings) {
         if self.inner.loading.try_lock().is_err() {
             return;
         }
@@ -334,7 +334,7 @@ impl LayaRuntime {
         let settings = settings.clone();
         tokio::spawn(async move {
             if let Err(error) = runtime.ensure_loaded(&settings).await {
-                tracing::debug!(%error, "laya: aquecimento do modelo falhou");
+                tracing::debug!(%error, "decisor: aquecimento do modelo falhou");
             }
         });
     }
@@ -353,13 +353,13 @@ impl LayaRuntime {
         match breaker.record(ok, Instant::now()) {
             Some(true) => tracing::warn!(
                 error = error.as_deref().unwrap_or_default(),
-                "laya: {BREAKER_THRESHOLD} falhas seguidas; rotinas em segundo plano pausadas por {}s",
+                "decisor: {BREAKER_THRESHOLD} falhas seguidas; rotinas em segundo plano pausadas por {}s",
                 BREAKER_COOLDOWN.as_secs()
             ),
-            Some(false) => tracing::info!("laya: respondendo de novo; rotinas retomadas"),
+            Some(false) => tracing::info!("decisor: respondendo de novo; rotinas retomadas"),
             None => {
                 if let Some(error) = error {
-                    tracing::debug!(%error, "laya: consulta falhou");
+                    tracing::debug!(%error, "decisor: consulta falhou");
                 }
             }
         }
@@ -371,7 +371,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::services::ai::laya::schema::{Answer, Question};
+    use crate::services::ai::decider::schema::{Answer, Question};
 
     struct Nothing;
 
@@ -390,12 +390,12 @@ mod tests {
         fn interpret(&self, _answers: &BTreeMap<String, Answer>) {}
     }
 
-    fn unreachable_settings() -> AiLayaSettings {
-        AiLayaSettings {
+    fn unreachable_settings() -> AiDeciderSettings {
+        AiDeciderSettings {
             enabled: true,
             base_url: "http://127.0.0.1:9".into(),
             timeout_ms: 300,
-            ..AiLayaSettings::default()
+            ..AiDeciderSettings::default()
         }
     }
 
@@ -415,7 +415,7 @@ mod tests {
 
     #[tokio::test]
     async fn segundo_plano_para_de_consultar_com_o_disjuntor_aberto() {
-        let runtime = LayaRuntime::default();
+        let runtime = DeciderRuntime::default();
         let settings = unreachable_settings();
         for _ in 0..BREAKER_THRESHOLD {
             assert!(runtime
@@ -437,7 +437,7 @@ mod tests {
 
     #[tokio::test]
     async fn fila_interativa_nao_espera_o_segundo_plano() {
-        let runtime = LayaRuntime::default();
+        let runtime = DeciderRuntime::default();
         let _held = runtime.inner.background.acquire().await.unwrap();
         let result = tokio::time::timeout(
             Duration::from_secs(3),

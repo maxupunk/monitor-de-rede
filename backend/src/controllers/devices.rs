@@ -546,7 +546,7 @@ async fn activate_plugins(ctx: &AppContext, device: &devices::Model) {
         tracing::warn!(%error, device_id = device.id, "falha ao ligar plugins compatíveis");
     }
     // Sem sistema declarado, vale o que o equipamento mostrar (SSH/SNMP, ou o
-    // Laya) — e não o fabricante do cadastro. A sonda leva segundos: em
+    // Decisor) — e não o fabricante do cadastro. A sonda leva segundos: em
     // segundo plano, e o menu Aplicativos sabe pelo SSE se algo ligou.
     if device.operating_system.is_none() {
         crate::services::plugins::identity::refresh_in_background(ctx, device.clone());

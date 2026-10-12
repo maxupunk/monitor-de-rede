@@ -1,4 +1,4 @@
-//! A forma única com que um palpite do Laya chega à tela: o valor sugerido,
+//! A forma única com que um palpite do Decisor chega à tela: o valor sugerido,
 //! quão seguro ele está e quem respondeu. A tela mostra e o usuário decide —
 //! nada aplica uma sugestão sozinho.
 
@@ -10,7 +10,7 @@ use super::schema::Answer;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct LayaSuggestion {
+pub struct DeciderSuggestion {
     pub value: String,
     /// 0–100, uma casa decimal.
     pub confidence: f64,
@@ -24,7 +24,7 @@ pub fn percent(probability: f64) -> f64 {
     (probability.clamp(0.0, 1.0) * 1000.0).round() / 10.0
 }
 
-impl LayaSuggestion {
+impl DeciderSuggestion {
     /// Um valor com a probabilidade dele; `None` abaixo da confiança mínima.
     #[must_use]
     pub fn from_probability(
@@ -66,14 +66,16 @@ mod tests {
 
     #[test]
     fn sugere_so_acima_da_confianca_minima() {
-        let hit = LayaSuggestion::from_choice(Some(&choice("camera", 0.874)), "laya:en", 60)
+        let hit = DeciderSuggestion::from_choice(Some(&choice("camera", 0.874)), "laya:en", 60)
             .expect("acima do limiar");
         assert_eq!(hit.value, "camera");
         assert!((hit.confidence - 87.4).abs() < f64::EPSILON);
         assert_eq!(hit.model, "laya:en");
 
-        assert!(LayaSuggestion::from_choice(Some(&choice("camera", 0.59)), "m", 60).is_none());
-        assert!(LayaSuggestion::from_choice(None, "m", 60).is_none());
-        assert!(LayaSuggestion::from_choice(Some(&Answer::Noul { noul: 0.9 }), "m", 60).is_none());
+        assert!(DeciderSuggestion::from_choice(Some(&choice("camera", 0.59)), "m", 60).is_none());
+        assert!(DeciderSuggestion::from_choice(None, "m", 60).is_none());
+        assert!(
+            DeciderSuggestion::from_choice(Some(&Answer::Noul { noul: 0.9 }), "m", 60).is_none()
+        );
     }
 }

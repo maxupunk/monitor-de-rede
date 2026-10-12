@@ -357,7 +357,7 @@ pub fn classify(host: &DiscoveredHost, gateway: Option<&str>) -> Classification 
 }
 
 /// Pontos da heurística para cada tipo que recebeu algum voto, do mais
-/// votado ao menos. É o que permite conferir um palpite de fora (o do Laya)
+/// votado ao menos. É o que permite conferir um palpite de fora (o do Decisor)
 /// contra a evidência que existe.
 #[must_use]
 pub fn scores(host: &DiscoveredHost, gateway: Option<&str>) -> Vec<(&'static str, i32)> {
@@ -576,7 +576,7 @@ mod tests {
     }
 
     /// O caso real: OpenWrt numa Banana Pi R3, agente Net-SNMP, sem "openwrt"
-    /// escrito em lugar nenhum — o Laya chegou a chamar de NAS com 98%.
+    /// escrito em lugar nenhum — o Decisor chegou a chamar de NAS com 98%.
     #[test]
     fn openwrt_pelo_kernel_vira_roteador() {
         let bpi = host(

@@ -64,12 +64,12 @@
                 density="comfortable"
                 required
               ></v-select>
-              <LayaSuggestionChip
+              <DeciderSuggestionChip
                 class="mt-1"
-                :suggestion="layaType"
+                :suggestion="deciderType"
                 :format-label="deviceTypeLabel"
                 action-label="Usar"
-                :disabled="formModel.type === normalizeDeviceType(layaType?.value)"
+                :disabled="formModel.type === normalizeDeviceType(deciderType?.value)"
                 @apply="formModel.type = normalizeDeviceType($event)"
               />
             </v-col>
@@ -331,12 +331,12 @@
               >
                 {{ identificacaoErro }}
               </v-alert>
-              <LayaSuggestionChip
+              <DeciderSuggestionChip
                 class="mt-1"
-                :suggestion="layaSystem"
+                :suggestion="deciderSystem"
                 :format-label="systemsStore.label"
                 action-label="Usar"
-                :disabled="formModel.operatingSystem === layaSystem?.value"
+                :disabled="formModel.operatingSystem === deciderSystem?.value"
                 @apply="formModel.operatingSystem = $event"
               />
             </v-col>
@@ -474,7 +474,7 @@
                 @update:model-value="onLinkInterfaceSelected"
                 @click:append-inner.stop="carregarInterfaces(true)"
               ></v-select>
-              <LayaSuggestionChip
+              <DeciderSuggestionChip
                 class="mt-1"
                 :suggestion="uplinkSuggestion"
                 action-label="Usar como uplink"
@@ -630,7 +630,7 @@ import {
 import { createLogSetupTarget, type LogSetupTarget } from '@/utils/syslogProvision'
 import { formatBps } from '@/utils/formatters'
 import { linkInterfaceCandidates, useDeviceDetailStore } from '@/stores/deviceDetail'
-import type { LayaSuggestion } from '@/bindings/LayaSuggestion'
+import type { DeciderSuggestion } from '@/bindings/DeciderSuggestion'
 import {
   DEVICE_TYPE_OPTIONS,
   INFRA_DEVICE_TYPES,
@@ -638,7 +638,7 @@ import {
   deviceTypeMeta,
   normalizeDeviceType,
 } from '@/utils/deviceTypes'
-import LayaSuggestionChip from '@/components/ai/LayaSuggestionChip.vue'
+import DeciderSuggestionChip from '@/components/ai/DeciderSuggestionChip.vue'
 import MacVendorHint from '@/components/devices/MacVendorHint.vue'
 
 const props = defineProps<{
@@ -719,9 +719,9 @@ const formModel = reactive<{
 })
 
 const identificacao = ref<IdentifyResult | null>(null)
-/** Palpites do Laya quando a identificação ficou sem evidência forte. */
-const layaType = computed(() => identificacao.value?.laya?.deviceType ?? null)
-const layaSystem = computed(() => identificacao.value?.laya?.operatingSystem ?? null)
+/** Palpites do Decisor quando a identificação ficou sem evidência forte. */
+const deciderType = computed(() => identificacao.value?.decider?.deviceType ?? null)
+const deciderSystem = computed(() => identificacao.value?.decider?.operatingSystem ?? null)
 const identificacaoErro = ref('')
 const nameManuallyEdited = ref(false)
 
@@ -815,8 +815,8 @@ async function carregarInterfaces(forceLive = false) {
   void sugerirUplink()
 }
 
-/** Palpite do Laya para o uplink, a partir da lista que o seletor mostra. */
-const uplinkSuggestion = ref<LayaSuggestion | null>(null)
+/** Palpite do Decisor para o uplink, a partir da lista que o seletor mostra. */
+const uplinkSuggestion = ref<DeciderSuggestion | null>(null)
 
 async function sugerirUplink() {
   uplinkSuggestion.value = null

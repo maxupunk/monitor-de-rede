@@ -2,7 +2,7 @@
   <div>
     <v-select
       :model-value="form.provider"
-      :items="layaStore.providers"
+      :items="deciderStore.providers"
       item-title="label"
       item-value="id"
       label="Provedor"
@@ -50,7 +50,7 @@
           density="compact"
           prepend-inner-icon="mdi-link-variant"
           :append-inner-icon="managesModels ? 'mdi-refresh' : undefined"
-          :loading="managesModels && layaStore.loadingModels"
+          :loading="managesModels && deciderStore.loadingModels"
           @blur="emit('refresh')"
           @keydown.enter.prevent="emit('refresh')"
           @click:append-inner="emit('refresh')"
@@ -99,15 +99,15 @@
     <div class="mt-3">
       <template v-if="managesModels">
         <v-chip
-          v-if="layaStore.models?.online"
+          v-if="deciderStore.models?.online"
           color="success"
           variant="tonal"
           prepend-icon="mdi-check-circle"
         >
-          Conectado — {{ layaStore.models.installed.length }} modelo(s) instalado(s)
+          Conectado — {{ deciderStore.models.installed.length }} modelo(s) instalado(s)
         </v-chip>
-        <v-alert v-else-if="layaStore.models" type="error" variant="tonal" density="compact">
-          {{ layaStore.models.errorMessage }}
+        <v-alert v-else-if="deciderStore.models" type="error" variant="tonal" density="compact">
+          {{ deciderStore.models.errorMessage }}
           <div class="mt-1">
             Nesta máquina, o serviço <code>ollaya</code> sobe junto com o
             <code>docker compose up</code> (<code>http://ollaya:11435</code>). Em outra, use o
@@ -129,25 +129,27 @@
             color="primary"
             variant="tonal"
             prepend-icon="mdi-connection"
-            :loading="layaStore.testing"
+            :loading="deciderStore.testing"
             @click="emit('test')"
           >
             Testar conexão
           </v-btn>
           <v-chip
-            v-if="layaStore.testResult"
-            :color="layaStore.testResult.success ? 'success' : 'error'"
+            v-if="deciderStore.testResult"
+            :color="deciderStore.testResult.success ? 'success' : 'error'"
             variant="tonal"
-            :prepend-icon="layaStore.testResult.success ? 'mdi-check-circle' : 'mdi-alert-circle'"
+            :prepend-icon="
+              deciderStore.testResult.success ? 'mdi-check-circle' : 'mdi-alert-circle'
+            "
           >
             {{ connectionSummary }}
           </v-chip>
         </div>
         <div
-          v-if="layaStore.testResult && !layaStore.testResult.success"
+          v-if="deciderStore.testResult && !deciderStore.testResult.success"
           class="text-body-2 text-error mt-1"
         >
-          {{ layaStore.testResult.message }}
+          {{ deciderStore.testResult.message }}
         </div>
         <v-alert type="info" variant="tonal" density="compact" class="mt-2 text-body-2">
           Na nuvem, o texto de cada decisão — perguntas do chat, logs, nomes e IPs de dispositivos —
@@ -161,19 +163,19 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { AiLayaSettings } from '@/bindings/AiLayaSettings'
-import type { LayaProviderView } from '@/bindings/LayaProviderView'
-import { defaultLayaSettings, useAiLayaStore } from '@/stores/aiLaya'
+import type { AiDeciderSettings } from '@/bindings/AiDeciderSettings'
+import type { DeciderProviderView } from '@/bindings/DeciderProviderView'
+import { defaultDeciderSettings, useAiDeciderStore } from '@/stores/aiDecider'
 import { formatLatency } from '@/utils/formatters'
-import { formForProvider, providerMissing } from '@/utils/ollaya'
+import { formForProvider, providerMissing } from '@/utils/decider'
 
-const form = defineModel<AiLayaSettings>('form', { required: true })
+const form = defineModel<AiDeciderSettings>('form', { required: true })
 const emit = defineEmits<{ refresh: []; test: [] }>()
 
-const layaStore = useAiLayaStore()
+const deciderStore = useAiDeciderStore()
 const showKey = ref(false)
 
-const provider = computed(() => layaStore.provider(form.value.provider))
+const provider = computed(() => deciderStore.provider(form.value.provider))
 const managesModels = computed(() => provider.value?.managesModels ?? true)
 const missing = computed(() => providerMissing(form.value, provider.value))
 
@@ -186,7 +188,7 @@ const destination = computed(() =>
 
 /** O teste em uma linha: quem respondeu e em quanto tempo. */
 const connectionSummary = computed(() => {
-  const result = layaStore.testResult
+  const result = deciderStore.testResult
   if (!result) return ''
   if (!result.success) return 'Não conectou'
   return `Respondeu em ${formatLatency(result.latencyMs)}${result.model ? ` — ${result.model}` : ''}`
@@ -206,27 +208,27 @@ const keyHint = computed(() => {
   return 'Fica guardada no servidor e nunca volta inteira para a tela.'
 })
 
-function providerIcon(item: LayaProviderView | null): string {
+function providerIcon(item: DeciderProviderView | null): string {
   if (!item) return 'mdi-server-network'
   return item.cloud ? 'mdi-cloud-outline' : 'mdi-server-network'
 }
 
 /** Troca de provedor: padrões do novo, sem levar chave nem conta do anterior. */
-function chooseProvider(id: AiLayaSettings['provider'] | null) {
-  const next = id ? layaStore.provider(id) : null
+function chooseProvider(id: AiDeciderSettings['provider'] | null) {
+  const next = id ? deciderStore.provider(id) : null
   if (!next || next.id === form.value.provider) return
   const previous = provider.value
-  const previousTimeout = layaStore.spec(form.value.model) ?? previous
+  const previousTimeout = deciderStore.spec(form.value.model) ?? previous
   form.value = formForProvider(
     form.value,
     previous,
     previousTimeout,
     next,
-    defaultLayaSettings().timeoutMs
+    defaultDeciderSettings().timeoutMs
   )
   showKey.value = false
   // O resultado era do provedor anterior.
-  layaStore.testResult = null
+  deciderStore.testResult = null
   emit('refresh')
 }
 </script>

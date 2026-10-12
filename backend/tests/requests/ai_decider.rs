@@ -1,19 +1,22 @@
-//! Laya (via Ollaya) decidindo quais ferramentas vão para a IA do chat.
+//! Decisor (via Ollaya) decidindo quais ferramentas vão para a IA do chat.
 //!
 //! O que se afirma aqui, contra um Ollaya falso em `127.0.0.1`: a chave vem
 //! de `OLLAYA_API_KEY`, nunca da tela; o autocomplete junta o catálogo ao que
 //! está instalado; o teste da tela mostra a probabilidade de cada grupo; e no
 //! chat, um grupo que as palavras-chave não acharam chega ao provedor porque
-//! o Laya o indicou.
+//! o Decisor o indicou.
 
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use backend::{
     app::App,
-    dtos::ai::{ChatMessageInput, LayaModelsResponse, TestConnectionResponse, TestLayaResponse},
+    dtos::ai::{
+        ChatMessageInput, DeciderModelsResponse, TestConnectionResponse, TestDeciderResponse,
+    },
     services::{
         ai::{
+            decider::config::AiDeciderSettings,
             drivers::traits::{
                 AiChatChunk, AiChatOptions, AiChunkStream, AiDriver, AiMessage, AiTool,
             },
@@ -23,7 +26,6 @@ use backend::{
                 tools::{ToolGroup, ToolPolicy},
                 turn::preselect_groups,
             },
-            laya::config::AiLayaSettings,
             settings::{self, AiSettings},
         },
         shared::errors::AppResult,
@@ -46,12 +48,14 @@ async fn fake_ollaya() -> String {
         .base_url
 }
 
-fn laya(base_url: String) -> AiLayaSettings {
-    AiLayaSettings {
+fn decider(base_url: String) -> AiDeciderSettings {
+    AiDeciderSettings {
         enabled: true,
         base_url,
+        // O que o Ollaya falso tem instalado (o padrão do Decisor é outro).
+        model: "laya".into(),
         timeout_ms: 5_000,
-        ..AiLayaSettings::default()
+        ..AiDeciderSettings::default()
     }
 }
 
@@ -64,12 +68,12 @@ async fn autocomplete_junta_catalogo_e_instalados() {
         let sessao = prepare_data::init_user_login(&request, &ctx).await;
         let (h, v) = prepare_data::auth_header(&sessao.token);
         let response = request
-            .post("/api/ai/laya/models")
+            .post("/api/ai/decider/models")
             .add_header(h, v)
-            .json(&json!({ "laya": laya(base_url) }))
+            .json(&json!({ "decider": decider(base_url) }))
             .await;
         response.assert_status_ok();
-        let models: LayaModelsResponse = response.json();
+        let models: DeciderModelsResponse = response.json();
 
         assert!(models.online, "{:?}", models.error_message);
         assert_eq!(models.installed, ["laya:multilingual"]);
@@ -79,8 +83,13 @@ async fn autocomplete_junta_catalogo_e_instalados() {
             .filter(|option| option.installed)
             .map(|option| option.name.as_str())
             .collect();
-        // O roteador `laya` casa com a variante instalada.
-        assert_eq!(installed, ["laya", "laya:multilingual"]);
+        // O roteador `laya` casa com a variante instalada; os dois vão para o
+        // fim da lista (perto do chute no teste público), do menor ao maior.
+        assert_eq!(installed, ["laya:multilingual", "laya"]);
+        assert_eq!(
+            models.options[0].name, "kev:0.8b",
+            "o recomendado em CPU abre a lista"
+        );
         assert!(models
             .options
             .iter()
@@ -98,12 +107,12 @@ async fn teste_da_tela_usa_a_chave_do_ambiente_e_mostra_cada_grupo() {
         let sessao = prepare_data::init_user_login(&request, &ctx).await;
         let (h, v) = prepare_data::auth_header(&sessao.token);
         let response = request
-            .post("/api/ai/laya/test")
+            .post("/api/ai/decider/test")
             .add_header(h, v)
-            .json(&json!({ "laya": laya(base_url), "question": "e o financeiro?" }))
+            .json(&json!({ "decider": decider(base_url), "question": "e o financeiro?" }))
             .await;
         response.assert_status_ok();
-        let result: TestLayaResponse = response.json();
+        let result: TestDeciderResponse = response.json();
 
         assert!(result.success, "{}", result.message);
         assert_eq!(result.model.as_deref(), Some("laya:multilingual"));
@@ -162,7 +171,7 @@ impl AiDriver for Anota {
 
 #[tokio::test]
 #[serial]
-async fn grupo_indicado_pelo_laya_chega_ao_provedor() {
+async fn grupo_indicado_pelo_decider_chega_ao_provedor() {
     request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
         let question = "a aplicação do financeiro está de pé?";
         assert!(
@@ -172,7 +181,7 @@ async fn grupo_indicado_pelo_laya_chega_ao_provedor() {
 
         with_key();
         let settings = AiSettings {
-            laya: laya(fake_ollaya().await),
+            decider: decider(fake_ollaya().await),
             ..AiSettings::default()
         };
         let tools = Arc::new(Mutex::new(Vec::new()));
@@ -203,7 +212,7 @@ async fn grupo_indicado_pelo_laya_chega_ao_provedor() {
         );
         assert!(
             !tools.iter().any(|name| name == "ping_host"),
-            "só o que o Laya indicou entra: {tools:?}"
+            "só o que o Decisor indicou entra: {tools:?}"
         );
     })
     .await;
@@ -211,21 +220,21 @@ async fn grupo_indicado_pelo_laya_chega_ao_provedor() {
 
 #[tokio::test]
 #[serial]
-async fn laya_e_provedor_gravam_cada_um_a_sua_parte() {
+async fn decider_e_provedor_gravam_cada_um_a_sua_parte() {
     request_with_config::<App, _, _>(RequestConfig::default(), |request, ctx| async move {
         let sessao = prepare_data::init_user_login(&request, &ctx).await;
         let (h, v) = prepare_data::auth_header(&sessao.token);
 
         let response = request
-            .put("/api/ai/laya")
+            .put("/api/ai/decider")
             .add_header(h.clone(), v.clone())
-            .json(&laya("http://ollaya:11435".into()))
+            .json(&decider("http://ollaya:11435".into()))
             .await;
         response.assert_status_ok();
-        assert!(settings::load(&ctx.db).await.unwrap().laya.enabled);
+        assert!(settings::load(&ctx.db).await.unwrap().decider.enabled);
 
-        // O card do provedor manda a própria cópia, com o Laya desligado:
-        // a gravação dele não pode desfazer o que o card do Laya salvou.
+        // O card do provedor manda a própria cópia, com o Decisor desligado:
+        // a gravação dele não pode desfazer o que o card do Decisor salvou.
         let mut provider = serde_json::to_value(AiSettings::default()).unwrap();
         provider["responseStyle"] = json!("normal");
         request
@@ -236,7 +245,7 @@ async fn laya_e_provedor_gravam_cada_um_a_sua_parte() {
             .assert_status_ok();
 
         let stored = settings::load(&ctx.db).await.unwrap();
-        assert!(stored.laya.enabled, "o Laya continua ligado");
+        assert!(stored.decider.enabled, "o Decisor continua ligado");
         assert_eq!(
             serde_json::to_value(stored.response_style).unwrap(),
             json!("normal")

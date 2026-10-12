@@ -1,4 +1,4 @@
-//! Teste do Laya pela tela de configurações: o servidor responde? O modelo
+//! Teste do Decisor pela tela de configurações: o servidor responde? O modelo
 //! está instalado? O que ele decide para uma pergunta de exemplo?
 //!
 //! Devolve sempre um diagnóstico, nunca erro — cada falha vira uma mensagem
@@ -6,13 +6,13 @@
 
 use super::{
     catalog,
-    client::LayaClient,
-    config::AiLayaSettings,
-    runtime::{Lane, LayaRuntime},
+    client::DeciderClient,
+    config::AiDeciderSettings,
+    runtime::{DeciderRuntime, Lane},
     tool_routing,
 };
 use crate::{
-    dtos::ai::{LayaGroupScore, TestLayaResponse},
+    dtos::ai::{DeciderGroupScore, TestDeciderResponse},
     services::ai::harness::tools::ToolGroup,
 };
 
@@ -20,8 +20,8 @@ use crate::{
 pub const SAMPLE_QUESTION: &str =
     "Por que o link da filial ficou lento ontem à noite? Mostra um gráfico da latência.";
 
-fn failure(online: bool, model_installed: bool, message: String) -> TestLayaResponse {
-    TestLayaResponse {
+fn failure(online: bool, model_installed: bool, message: String) -> TestDeciderResponse {
+    TestDeciderResponse {
         success: false,
         online,
         model_installed,
@@ -33,12 +33,12 @@ fn failure(online: bool, model_installed: bool, message: String) -> TestLayaResp
 }
 
 /// O teste espera o modelo carregar (fila `OnDemand`): foi pedido na tela, e
-/// a tela mostra "carregando o modelo" pelo evento `laya:model_state`.
+/// a tela mostra "carregando o modelo" pelo evento `decider:model_state`.
 pub async fn test(
-    runtime: &LayaRuntime,
-    settings: &AiLayaSettings,
+    runtime: &DeciderRuntime,
+    settings: &AiDeciderSettings,
     question: Option<&str>,
-) -> TestLayaResponse {
+) -> TestDeciderResponse {
     let question = question
         .map(str::trim)
         .filter(|question| !question.is_empty())
@@ -47,7 +47,7 @@ pub async fn test(
     // No Ollaya, o modelo precisa estar baixado; na nuvem a própria decisão
     // confere a chave e o modelo.
     if settings.manages_models() {
-        let installed = match LayaClient::new(settings).installed_models().await {
+        let installed = match DeciderClient::new(settings).installed_models().await {
             Ok(installed) => installed,
             Err(error) => return failure(false, false, error.to_string()),
         };
@@ -74,11 +74,11 @@ pub async fn test(
     {
         Ok(outcome) => {
             let threshold = settings.threshold();
-            let groups: Vec<LayaGroupScore> = outcome
+            let groups: Vec<DeciderGroupScore> = outcome
                 .value
                 .0
                 .iter()
-                .map(|(group, probability)| LayaGroupScore {
+                .map(|(group, probability)| DeciderGroupScore {
                     id: group.id().to_string(),
                     purpose: group.purpose().to_string(),
                     probability: *probability,
@@ -86,7 +86,7 @@ pub async fn test(
                 })
                 .collect();
             let chosen = groups.iter().filter(|group| group.selected).count();
-            TestLayaResponse {
+            TestDeciderResponse {
                 success: true,
                 online: true,
                 model_installed: true,
@@ -111,12 +111,12 @@ mod tests {
 
     #[tokio::test]
     async fn servidor_fora_do_ar_vira_diagnostico() {
-        let settings = AiLayaSettings {
+        let settings = AiDeciderSettings {
             base_url: "http://127.0.0.1:9".into(),
             timeout_ms: 500,
-            ..AiLayaSettings::default()
+            ..AiDeciderSettings::default()
         };
-        let result = test(&LayaRuntime::default(), &settings, None).await;
+        let result = test(&DeciderRuntime::default(), &settings, None).await;
         assert!(!result.success);
         assert!(!result.online);
         assert!(result.message.contains("127.0.0.1:9"));

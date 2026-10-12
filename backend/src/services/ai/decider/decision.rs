@@ -1,4 +1,4 @@
-//! Uma decisão do Laya: as perguntas que ela faz e como ler as respostas.
+//! Uma decisão do Decisor: as perguntas que ela faz e como ler as respostas.
 //!
 //! Cada decisão nova (roteamento de ferramentas hoje; estilo de resposta,
 //! urgência de alerta, triagem do proativo amanhã) implementa [`Decision`] e
@@ -8,12 +8,12 @@
 use std::collections::BTreeMap;
 
 use super::{
-    client::LayaClient,
+    client::DeciderClient,
     schema::{Answer, Question},
 };
 use crate::services::shared::errors::AppResult;
 
-/// O Laya lê até ~1.024 tokens; o começo da pergunta é o que decide.
+/// O Decisor lê até ~1.024 tokens; o começo da pergunta é o que decide.
 const MAX_STATE_CHARS: usize = 3_000;
 
 pub trait Decision {
@@ -44,7 +44,7 @@ fn clip(state: &str) -> &str {
 }
 
 pub async fn run<D: Decision>(
-    client: &LayaClient<'_>,
+    client: &DeciderClient<'_>,
     state: &str,
     decision: &D,
 ) -> AppResult<Outcome<D::Output>> {

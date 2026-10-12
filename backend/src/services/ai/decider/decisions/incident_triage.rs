@@ -2,13 +2,13 @@
 //!
 //! O resumo automático custa uma investigação inteira do LLM, e o teto por
 //! hora é por ordem de chegada: numa cascata, os filhos consomem o teto antes
-//! da causa raiz. O Laya lê o alerta com o contexto barato (ancestral em
+//! da causa raiz. O Decisor lê o alerta com o contexto barato (ancestral em
 //! alerta, recaídas, outros alertas no mesmo minuto) e diz se ele é um
 //! incidente novo, um sintoma de outro ou uma oscilação passageira.
 
 use std::collections::BTreeMap;
 
-use crate::services::ai::laya::{
+use crate::services::ai::decider::{
     decision::Decision,
     schema::{Answer, Question},
 };
