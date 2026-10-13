@@ -410,8 +410,8 @@
                 icon="mdi-text-box-check-outline"
               >
                 Ao salvar, o sistema abre a configuração com o IP, o sistema, a forma de acesso e o
-                endereço do NetMonitor já identificados. Você só precisará fornecer a credencial,
-                usada uma única vez e nunca armazenada.
+                endereço do NetMonitor já identificados. Se o dispositivo tiver uma credencial
+                salva, ela é usada; senão, você informa o login e escolhe se quer salvá-lo.
               </v-alert>
             </v-col>
 

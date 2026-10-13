@@ -10,6 +10,8 @@ import type { LogNatDiagnostics } from '@/bindings/LogNatDiagnostics'
 import type { ProvisionHintsResponse } from '@/bindings/ProvisionHintsResponse'
 import type { ProvisionLoggingResponse } from '@/bindings/ProvisionLoggingResponse'
 import type { SetupGuide } from '@/bindings/SetupGuide'
+import type { TransportKind } from '@/bindings/TransportKind'
+import { usePluginsStore } from './plugins'
 import { observedApplicationAddress } from '@/utils/syslogProvision'
 import { getStoredToken } from '@/utils/authStorage'
 
@@ -278,8 +280,9 @@ export const useLogsStore = defineStore('logs', () => {
   /**
    * Manda o servidor entrar no equipamento e configurar o envio de syslog.
    *
-   * A credencial vai no corpo e não é guardada em lugar nenhum — nem aqui, nem
-   * no backend. O chamador é responsável por descartá-la depois.
+   * O login é a credencial salva do equipamento (`savedCredential`) ou o
+   * digitado, que o backend só guarda se `saveCredential` pedir e o acesso
+   * funcionar. Nada fica aqui: o chamador descarta a senha depois.
    */
   async function provisionDevice(
     deviceId: number,
@@ -288,6 +291,8 @@ export const useLogsStore = defineStore('logs', () => {
       port: number | null
       username: string
       password: string
+      savedCredential: TransportKind | null
+      saveCredential: boolean
       /** Id do catálogo de sistemas — ver `stores/operatingSystems`. */
       operatingSystem: string | null
       /**
@@ -308,6 +313,10 @@ export const useLogsStore = defineStore('logs', () => {
     // O que acabou de ser configurado muda a lista de origens e pode ter
     // vinculado o dispositivo — recarregar aqui evita a tela mostrar o estado
     // anterior logo depois de dizer "pronto".
+    // A credencial salva aqui é a mesma da aba Plugins › Credenciais.
+    if (resposta.savedCredential) {
+      usePluginsStore().replaceCredential(deviceId, resposta.savedCredential)
+    }
     await fetchSources()
     list.reset()
     return resposta

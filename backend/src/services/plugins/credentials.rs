@@ -1,8 +1,10 @@
 //! Credenciais de acesso ao equipamento, com a escolha de guardar ou não.
 //!
-//! O provisionamento de syslog decidiu **não** guardar senha — ela é usada
-//! uma vez por aparelho. Plugins são outro caso: rodam de novo, validam em
-//! outro dia, são testados pela IA. Por isso a escolha é por credencial:
+//! É o lugar único das credenciais do equipamento: plugins rodam de novo,
+//! validam em outro dia, são testados pela IA, e a ativação do syslog
+//! ([`crate::services::syslog::login`]) usa a mesma credencial — ou grava aqui
+//! a que o operador digitou, quando ele pede para salvar. Por isso a escolha é
+//! por credencial:
 //!
 //! * `vault` — a senha é cifrada (`crypto::encrypt`, `ENCRYPTION_KEY`) e
 //!   gravada. Nunca volta para a tela, nem para a IA, nem para o script: é
@@ -157,6 +159,28 @@ fn to_view(model: &device_credentials::Model) -> AppResult<CredentialView> {
         has_stored_secret: model.secret_encrypted.is_some(),
         session_active: session_store().has(&session_key(model.device_id, kind)),
     })
+}
+
+/// A senha pronta para uso agora: a guardada, decifrada, ou a da sessão.
+fn password_of(
+    model: &device_credentials::Model,
+    kind: TransportKind,
+) -> AppResult<Option<String>> {
+    match SecretStorage::parse(&model.storage) {
+        SecretStorage::Vault => model
+            .secret_encrypted
+            .as_deref()
+            .map(crypto::decrypt)
+            .transpose(),
+        SecretStorage::Ask => Ok(session_store().get(&session_key(model.device_id, kind))),
+    }
+}
+
+fn session_missing(kind: TransportKind) -> AppError {
+    AppError::conflict(format!(
+        "A senha {} deste equipamento é pedida a cada sessão. Informe-a para continuar.",
+        kind.as_str().to_uppercase()
+    ))
 }
 
 /// # Errors
@@ -337,20 +361,11 @@ pub async fn resolve<C: ConnectionTrait>(
                 kind.as_str().to_uppercase()
             )));
         };
-        let password = match SecretStorage::parse(&model.storage) {
-            SecretStorage::Vault => model
-                .secret_encrypted
-                .as_deref()
-                .map(crypto::decrypt)
-                .transpose()?,
-            SecretStorage::Ask => Some(session_store().get(&session_key(device_id, kind)).ok_or_else(
-                || {
-                    AppError::conflict(format!(
-                        "A senha {} deste equipamento é pedida a cada sessão. Informe-a para continuar.",
-                        kind.as_str().to_uppercase()
-                    ))
-                },
-            )?),
+        let password = match password_of(&model, kind)? {
+            None if SecretStorage::parse(&model.storage) == SecretStorage::Ask => {
+                return Err(session_missing(kind))
+            }
+            password => password,
         };
         let profile = AccessProfile {
             login: Login {
@@ -370,4 +385,73 @@ pub async fn resolve<C: ConnectionTrait>(
         }
     }
     Ok(resolved)
+}
+
+/// O login salvo de um tipo, para quem entra no equipamento fora de um plugin
+/// (a ativação do syslog). A senha é decifrada aqui e não sai do servidor.
+///
+/// # Errors
+///
+/// Credencial inexistente, sem senha guardada, `ask` sem sessão aberta, ou
+/// falha ao decifrar.
+pub async fn stored_login<C: ConnectionTrait>(
+    db: &C,
+    device_id: i64,
+    kind: TransportKind,
+) -> AppResult<Login> {
+    let label = kind.as_str().to_uppercase();
+    let model = find(db, device_id, kind).await?.ok_or_else(|| {
+        AppError::validation(format!(
+            "Este equipamento não tem credencial {label} salva. Informe usuário e senha."
+        ))
+    })?;
+    let password = match password_of(&model, kind)? {
+        Some(password) => password,
+        None if SecretStorage::parse(&model.storage) == SecretStorage::Ask => {
+            return Err(session_missing(kind))
+        }
+        None => {
+            return Err(AppError::validation(format!(
+                "A credencial {label} deste equipamento está sem senha guardada. Informe a senha."
+            )))
+        }
+    };
+    Ok(Login {
+        username: model.username,
+        password: Some(password),
+    })
+}
+
+/// Guarda, cifrado, um login que acabou de funcionar no equipamento.
+///
+/// O resto da credencial daquele tipo (HTTPS, agente remoto) é preservado:
+/// salvar a senha não pode desfazer a rota que um plugin já usa. Sem `port`,
+/// vale a já cadastrada.
+///
+/// # Errors
+///
+/// Os mesmos de [`upsert`].
+pub async fn remember_login<C: ConnectionTrait>(
+    db: &C,
+    device_id: i64,
+    kind: TransportKind,
+    login: &Login,
+    port: Option<u16>,
+) -> AppResult<CredentialView> {
+    let existing = find(db, device_id, kind).await?;
+    let input = CredentialInput {
+        kind,
+        username: login.username.clone(),
+        secret: login.password.clone(),
+        storage: SecretStorage::Vault,
+        port: port.or_else(|| {
+            existing
+                .as_ref()
+                .and_then(|model| model.port)
+                .and_then(|port| u16::try_from(port).ok())
+        }),
+        https: existing.as_ref().map(https_of),
+        via_probe_id: existing.as_ref().and_then(|model| model.via_probe_id),
+    };
+    upsert(db, device_id, input).await
 }

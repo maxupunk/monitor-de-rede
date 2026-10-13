@@ -28,7 +28,7 @@ do desenho original mudaram; estão marcados com **⚠** onde aparecem.
 | ⚠ Regra de log casa **na ingestão** | regex sobre janela não usa índice; na ingestão são ~120 regex/s |
 | ⚠ IP de origem verificado no spike | se o Docker mascarar a origem, nada é gravado e não há erro visível |
 | ⚠ **O Docker mascara mesmo** (Fase 7) | medido em produção. Resolvedor cai para o `HOSTNAME`, limitador e lista de fontes separam por nome, e o *bind* do gateway é recusado. `network_mode: host` é a correção de raiz |
-| ⚠ Credencial de ativação não é persistida | guardar a senha de admin de 30 roteadores para poupar um trabalho pontual inverte o custo/benefício |
+| ⚠ Credencial de ativação só é salva a pedido | é a mesma credencial do equipamento (aba Plugins › Credenciais); guardar a senha de admin de 30 roteadores sem o operador pedir inverteria o custo/benefício |
 | ⚠ `devices.access_mode` guarda a **declaração**, nunca a dedução (Fase 8) | a dedução envelhece: gravá-la deixaria um equipamento que saiu da VPN marcado como VPN para sempre |
 
 ---
@@ -455,11 +455,13 @@ aparelho identificável de um anônimo.
 - [x] `SyslogAutoSetupDialog.vue` e o botão na aba **Logs** do
       `DeviceDetailPage`
 
-**A credencial não é guardada, e isso é decisão, não pendência.** Guardar a
-senha de administrador de trinta roteadores faria deste sistema o alvo mais
-valioso da rede que ele monitora, para poupar um trabalho que se faz uma vez por
-aparelho. O custo aceito é ter de digitar de novo ao reconfigurar; a tela avisa
-antes de pedir.
+**A credencial só é guardada quando o operador pede.** Guardar a senha de
+administrador de trinta roteadores sem pedir faria deste sistema o alvo mais
+valioso da rede que ele monitora. Desde a unificação com os plugins (ADR 012),
+o login é o do equipamento: a ativação usa a credencial salva na aba
+**Plugins › Credenciais**, se houver, e o login digitado só vai para lá — cifrado
+— quando "Salvar para os próximos acessos" está marcado **e** o acesso
+funcionou (`services/syslog/login.rs`).
 
 Duas escolhas que a implementação cobrou:
 

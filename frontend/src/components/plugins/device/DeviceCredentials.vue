@@ -16,9 +16,13 @@
     </v-card-title>
     <v-card-text>
       <div v-if="credentials.length === 0" class="text-body-2">
-        Nenhuma credencial. Plugins por SSH/Telnet precisam de uma; HTTP sem login funciona sem.
+        Nenhuma credencial. Plugins por SSH/Telnet e a ativação automática do log usam a daqui; HTTP
+        sem login funciona sem.
       </div>
-      <v-list v-else density="compact" class="py-0">
+      <div v-else class="text-body-2 mb-2">
+        Usadas pelos plugins e pela ativação automática do log (SSH/Telnet).
+      </div>
+      <v-list v-if="credentials.length" density="compact" class="py-0">
         <v-list-item
           v-for="credential in credentials"
           :key="credential.kind"
@@ -80,6 +84,7 @@ import type { CredentialView } from '@/bindings/CredentialView'
 import { usePluginsStore } from '@/stores/plugins'
 import { confirm, prompt } from '@/composables/useConfirm'
 import CredentialDialog from '@/components/plugins/CredentialDialog.vue'
+import { credentialReady, credentialSubtitle } from '@/utils/deviceCredentials'
 
 const props = defineProps<{
   deviceId: number
@@ -98,25 +103,6 @@ const dialog = reactive({
 
 function describe(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback
-}
-
-function credentialReady(credential: CredentialView): boolean {
-  return credential.storage === 'vault' ? credential.hasStoredSecret : credential.sessionActive
-}
-
-function credentialSubtitle(credential: CredentialView): string {
-  const where = credential.viaProbeId
-    ? `via agente #${credential.viaProbeId}`
-    : 'a partir da central'
-  const secret =
-    credential.storage === 'vault'
-      ? credential.hasStoredSecret
-        ? 'senha guardada cifrada'
-        : 'sem senha guardada'
-      : credential.sessionActive
-        ? 'senha da sessão informada'
-        : 'senha pedida a cada sessão'
-  return `porta ${credential.port}${credential.https ? ' (HTTPS)' : ''} · ${secret} · ${where}`
 }
 
 function openCredential(existing: CredentialView | null) {

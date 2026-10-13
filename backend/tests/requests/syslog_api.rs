@@ -861,3 +861,114 @@ async fn export_de_logs_respeita_filtros_e_retorna_anexo_formatado() {
     })
     .await;
 }
+
+/// Dispositivo em `127.0.0.1`: a porta 9 fechada faz a ativação falhar na
+/// conexão, depois de todo o caminho do login já ter sido percorrido.
+async fn dispositivo_local(request: &loco_rs::TestServer) -> i64 {
+    let site = request
+        .post("/api/sites")
+        .json(&serde_json::json!({ "name": "Matriz" }))
+        .await;
+    let site: serde_json::Value = serde_json::from_str(&site.text()).unwrap();
+    let device = request
+        .post("/api/devices")
+        .json(&serde_json::json!({
+            "name": "local", "type": "router", "ipAddress": "127.0.0.1",
+            "siteId": site["id"].as_i64().unwrap()
+        }))
+        .await;
+    assert_eq!(device.status_code(), 201, "{}", device.text());
+    let device: serde_json::Value = serde_json::from_str(&device.text()).unwrap();
+    device["id"].as_i64().unwrap()
+}
+
+#[tokio::test]
+#[serial]
+async fn a_ativacao_usa_a_credencial_salva_do_equipamento() {
+    // A credencial é a mesma da aba Plugins › Credenciais: sem ela, a recusa
+    // diz o que falta; pedida a cada sessão sem sessão aberta, pede a senha;
+    // guardada, segue até o equipamento sem pedir nada.
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let device_id = dispositivo_local(&request).await;
+        let rota = format!("/api/logs/devices/{device_id}/provision");
+        let corpo = serde_json::json!({
+            "protocol": "telnet", "port": 9, "savedCredential": "telnet",
+            "operatingSystem": "linux", "serverAddress": "192.168.1.10"
+        });
+
+        let sem_credencial = request.post(&rota).json(&corpo).await;
+        assert_eq!(
+            sem_credencial.status_code(),
+            422,
+            "{}",
+            sem_credencial.text()
+        );
+        assert!(
+            sem_credencial.text().contains("credencial TELNET"),
+            "{}",
+            sem_credencial.text()
+        );
+
+        let credenciais = format!("/api/devices/{device_id}/credentials");
+        let pedida = request
+            .put(&credenciais)
+            .json(&serde_json::json!({ "kind": "telnet", "username": "admin", "storage": "ask" }))
+            .await;
+        assert_eq!(pedida.status_code(), 200, "{}", pedida.text());
+        let sem_sessao = request.post(&rota).json(&corpo).await;
+        assert_eq!(sem_sessao.status_code(), 409, "{}", sem_sessao.text());
+
+        let guardada = request
+            .put(&credenciais)
+            .json(&serde_json::json!({
+                "kind": "telnet", "username": "admin", "secret": "x", "storage": "vault"
+            }))
+            .await;
+        assert_eq!(guardada.status_code(), 200, "{}", guardada.text());
+        let com_credencial = request.post(&rota).json(&corpo).await;
+        assert!(
+            ![409, 422].contains(&com_credencial.status_code().as_u16()),
+            "o login salvo deveria levar até a conexão: {}",
+            com_credencial.text()
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn a_senha_digitada_so_e_salva_se_a_ativacao_entrar() {
+    // Guardar uma senha que nem chegou ao equipamento só adiaria o erro para
+    // o próximo plugin.
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let session = prepare_data::init_user_login(&request, &ctx).await;
+        let (header, value) = prepare_data::auth_header(&session.token);
+        request.add_header(header, value);
+
+        let device_id = dispositivo_local(&request).await;
+        let resposta = request
+            .post(&format!("/api/logs/devices/{device_id}/provision"))
+            .json(&serde_json::json!({
+                "protocol": "telnet", "port": 9, "username": "admin", "password": "x",
+                "saveCredential": true, "operatingSystem": "linux",
+                "serverAddress": "192.168.1.10"
+            }))
+            .await;
+        assert!(
+            resposta.status_code().as_u16() >= 400,
+            "{}",
+            resposta.text()
+        );
+
+        let lista = request
+            .get(&format!("/api/devices/{device_id}/credentials"))
+            .await;
+        let lista: serde_json::Value = serde_json::from_str(&lista.text()).unwrap();
+        assert_eq!(lista, serde_json::json!([]));
+    })
+    .await;
+}

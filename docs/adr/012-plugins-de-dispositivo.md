@@ -123,7 +123,9 @@ cada acesso ao equipamento (ou ligando, ciente do risco, um modo automático).
   depois `device_plugin_installs`, `plugin_settings` e `plugin_batches`.
 - Guardar senha de equipamento passou a ser possível — é escolha por
   credencial, cifrada, e nunca volta para a tela nem para a IA. A ativação de
-  syslog continua sem guardar.
+  syslog usa a mesma credencial (`services/syslog/login.rs`): a salva, se
+  houver, ou a digitada — gravada aqui só quando o operador marca "salvar" e
+  o acesso funcionou.
 - A heurística de efeito pode errar para "escrita" (confirmação a mais); errar
   para o outro lado custaria o equipamento.
 - Rotas de escrita de plugin são só de administrador, como o Docker.

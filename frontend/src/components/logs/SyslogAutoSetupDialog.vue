@@ -15,24 +15,13 @@
       <v-divider></v-divider>
 
       <v-card-text>
-        <!--
-          O aviso de credencial vem antes dos campos, e não depois: depois do
-          botão ele seria lido só por quem já digitou a senha.
-        -->
-        <v-alert type="info" variant="tonal" density="comfortable" class="mb-5" border="start">
-          <div class="font-weight-bold mb-1">Estes dados são usados uma única vez.</div>
-          O usuário e a senha valem só para esta conexão: eles não são gravados no banco, não são
-          cifrados em lugar nenhum e não ficam em cache. Para reconfigurar este equipamento depois,
-          será preciso digitá-los de novo.
-        </v-alert>
-
         <div v-if="loadingHints" class="d-flex align-center ga-2 mb-4 text-caption text-grey">
           <v-progress-circular indeterminate size="16" width="2"></v-progress-circular>
           Verificando o equipamento — portas de acesso, SNMP e endereço deste servidor...
         </div>
 
         <v-row density="compact">
-          <v-col cols="12" sm="7">
+          <v-col cols="12" sm="6">
             <!--
               O mesmo catálogo do cadastro do dispositivo e do assistente da
               VPN. Os sistemas sem receita aparecem **desabilitados** em vez de
@@ -65,7 +54,7 @@
               correto para continuar.
             </v-alert>
           </v-col>
-          <v-col cols="12" sm="5">
+          <v-col cols="7" sm="3">
             <v-select
               v-model="protocol"
               :items="protocolOptions"
@@ -82,20 +71,7 @@
             ></v-select>
           </v-col>
 
-          <v-col cols="12" sm="8">
-            <v-text-field
-              v-model="username"
-              label="Usuário"
-              autocomplete="off"
-              density="compact"
-              variant="outlined"
-              :error-messages="fieldErrors.username"
-              :disabled="running"
-              prepend-inner-icon="mdi-account-outline"
-              @update:model-value="fieldErrors.username = ''"
-            ></v-text-field>
-          </v-col>
-          <v-col cols="12" sm="4">
+          <v-col cols="5" sm="3">
             <v-text-field
               v-model.number="port"
               label="Porta"
@@ -105,23 +81,6 @@
               :disabled="running || protocol === 'mactelnet'"
               :hint="protocol === 'mactelnet' ? 'Fixa no protocolo' : `Padrão ${defaultPort}`"
               persistent-hint
-            ></v-text-field>
-          </v-col>
-
-          <v-col cols="12">
-            <v-text-field
-              v-model="password"
-              label="Senha"
-              autocomplete="new-password"
-              :type="showPassword ? 'text' : 'password'"
-              :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
-              density="compact"
-              variant="outlined"
-              :error-messages="fieldErrors.password"
-              :disabled="running"
-              prepend-inner-icon="mdi-lock-outline"
-              @click:append-inner="showPassword = !showPassword"
-              @update:model-value="fieldErrors.password = ''"
             ></v-text-field>
           </v-col>
 
@@ -143,6 +102,25 @@
               persistent-hint
               @update:model-value="fieldErrors.macAddress = ''"
             ></v-text-field>
+          </v-col>
+
+          <!--
+            O login é o do equipamento, o mesmo da aba Plugins › Credenciais:
+            com um salvo, nada é pedido; sem ele, o digitado pode ficar salvo lá.
+          -->
+          <v-col cols="12">
+            <div class="text-subtitle-2 font-weight-bold mb-2">Login no equipamento</div>
+            <DeviceLoginPicker
+              v-model:use-saved="login.useSaved"
+              v-model:username="login.username"
+              v-model:password="login.password"
+              v-model:save="login.save"
+              :device-id="target.id"
+              :saved="savedCredential"
+              :errors="fieldErrors"
+              :disabled="running"
+              @manage="open = false"
+            />
           </v-col>
 
           <v-col v-if="enderecoFalhou" cols="12" class="pb-0">
@@ -272,6 +250,17 @@
           </v-alert>
 
           <v-alert
+            v-if="result.savedCredential"
+            type="success"
+            variant="tonal"
+            density="compact"
+            class="mt-3"
+            icon="mdi-lock-check-outline"
+          >
+            Login salvo nas credenciais do dispositivo — os próximos acessos não pedem a senha.
+          </v-alert>
+
+          <v-alert
             v-if="result.persistenceWarning"
             type="warning"
             variant="tonal"
@@ -336,6 +325,10 @@ import {
 } from '@/stores/logs'
 import { useServerAddressesStore } from '@/stores/serverAddresses'
 import ServerAddressesButton from '@/components/ServerAddressesButton.vue'
+import DeviceLoginPicker from '@/components/devices/DeviceLoginPicker.vue'
+import type { CredentialView } from '@/bindings/CredentialView'
+import { usePluginsStore } from '@/stores/plugins'
+import { credentialKindFor, credentialReady, pickShellCredential } from '@/utils/deviceCredentials'
 import { operatingSystemSourceLabel, useOperatingSystemsStore } from '@/stores/operatingSystems'
 import {
   buildProvisionAddressOptions,
@@ -357,17 +350,19 @@ const logsStore = useLogsStore()
 const addressesStore = useServerAddressesStore()
 
 const systemsStore = useOperatingSystemsStore()
+const pluginsStore = usePluginsStore()
 
 const operatingSystem = ref('')
 const protocol = ref('ssh')
 const port = ref<number | null>(22)
-const username = ref('')
-const password = ref('')
+/** O login escolhido no `DeviceLoginPicker`. */
+const login = reactive({ useSaved: false, username: '', password: '', save: false })
+/** As credenciais do equipamento — as mesmas da aba Plugins › Credenciais. */
+const credentials = ref<CredentialView[]>([])
 const macAddress = ref('')
 const serverAddress = ref('')
 /** A sondagem de palpites falhou — o seletor abre com o aviso, não em silêncio. */
 const hintsFalhou = ref(false)
-const showPassword = ref(false)
 const running = ref(false)
 const loadingHints = ref(false)
 const error = ref('')
@@ -385,6 +380,42 @@ const fieldErrors = reactive({
 const DEFAULT_PORTS: Record<string, number> = { ssh: 22, telnet: 23, mactelnet: 20561 }
 
 const defaultPort = computed(() => DEFAULT_PORTS[protocol.value] ?? 22)
+
+const savedCredential = computed(() => pickShellCredential(credentials.value, protocol.value))
+
+/**
+ * A porta de um meio de acesso: a da credencial salva daquele tipo, que é a
+ * que o equipamento de fato usa, ou a padrão. O MAC-Telnet tem porta própria.
+ */
+function portFor(chave: string): number {
+  const saved = pickShellCredential(credentials.value, chave)
+  if (chave !== 'mactelnet' && saved?.kind === credentialKindFor(chave)) return saved.port
+  return DEFAULT_PORTS[chave] ?? 22
+}
+
+// Com uma credencial pronta, ela é o padrão — salvo se o operador já começou
+// a digitar outra senha. Sem ela, o usuário salvo ao menos poupa digitação.
+watch(savedCredential, (saved) => {
+  if (!saved) {
+    login.useSaved = false
+    return
+  }
+  if (credentialReady(saved)) {
+    if (!login.password) login.useSaved = true
+  } else {
+    login.useSaved = false
+    if (!login.username) login.username = saved.username
+  }
+})
+
+// O erro de um campo some quando o operador mexe nele ou troca de login.
+watch(
+  () => [login.username, login.password, login.useSaved],
+  () => {
+    fieldErrors.username = ''
+    fieldErrors.password = ''
+  }
+)
 
 interface SystemOption {
   value: string
@@ -594,7 +625,7 @@ function onProtocolChange(escolhido: unknown): void {
   const chave = typeof escolhido === 'string' ? escolhido : protocol.value
   // A porta padrão é **setada**, não deixada em branco: um campo vazio com
   // placeholder obriga a saber qual é o padrão para conferir se está certo.
-  port.value = DEFAULT_PORTS[chave] ?? 22
+  port.value = portFor(chave)
   fieldErrors.macAddress = ''
 }
 
@@ -608,8 +639,9 @@ watch(operatingSystem, () => {
 })
 
 function valida(): boolean {
-  fieldErrors.username = username.value.trim() ? '' : 'Informe o usuário de acesso'
-  fieldErrors.password = password.value ? '' : 'Informe a senha de acesso'
+  const typed = !login.useSaved
+  fieldErrors.username = typed && !login.username.trim() ? 'Informe o usuário de acesso' : ''
+  fieldErrors.password = typed && !login.password ? 'Informe a senha de acesso' : ''
   fieldErrors.serverAddress = serverAddress.value.trim()
     ? serverAddressLooksLocal.value
       ? 'Este endereço aponta o roteador para ele mesmo'
@@ -645,8 +677,10 @@ async function submit(): Promise<void> {
     const provisioned = await logsStore.provisionDevice(deviceId, {
       protocol: protocol.value,
       port: port.value || null,
-      username: username.value,
-      password: password.value,
+      username: login.useSaved ? '' : login.username,
+      password: login.useSaved ? '' : login.password,
+      savedCredential: login.useSaved ? (savedCredential.value?.kind ?? null) : null,
+      saveCredential: !login.useSaved && login.save,
       operatingSystem: operatingSystem.value,
       serverAddress: serverAddress.value.trim(),
       macAddress: macAddress.value.trim() || null,
@@ -662,6 +696,13 @@ async function submit(): Promise<void> {
     )
       return
     result.value = provisioned
+    if (provisioned.savedCredential) {
+      // Salvo, o login passa a ser o padrão: "Aplicar de novo" não pede nada.
+      const saved = provisioned.savedCredential
+      credentials.value = [...credentials.value.filter((c) => c.kind !== saved.kind), saved]
+      login.password = ''
+      login.save = false
+    }
     void addressesStore.fetchAll(true)
   } catch (erro) {
     if (
@@ -694,6 +735,8 @@ function mensagemDeErro(erro: unknown): string {
  */
 function pista(mensagem: string): string {
   const texto = mensagem.toLowerCase()
+  // A mensagem sobre a credencial salva já diz o que fazer.
+  if (texto.includes('credencial')) return ''
   if (texto.includes('recusad') || texto.includes('senha')) {
     return 'Confirme se o usuário tem permissão de administrador para alterar a configuração de logs do equipamento.'
   }
@@ -718,13 +761,16 @@ async function carregaPalpites(): Promise<void> {
   try {
     // A lista de endereços e os palpites do equipamento são independentes; em
     // série somariam a sondagem de portas à leitura da lista sem motivo.
-    const [dicas] = await Promise.all([
+    const [dicas, salvas] = await Promise.all([
       logsStore.fetchProvisionHints(deviceId),
+      // Sem as credenciais a tela ainda funciona: só pede o login digitado.
+      pluginsStore.fetchCredentials(deviceId).catch((): CredentialView[] => []),
       addressesStore.fetchAll(true),
       systemsStore.fetchAll(),
     ])
     if (!isProvisionSessionCurrent(open.value, sequence, hintsSequence, deviceId, props.target.id))
       return
+    credentials.value = salvas
     hints.value = dicas
     // `null` é falha da sondagem, não "nada a sugerir" — a tela precisa saber
     // a diferença para avisar em vez de só mostrar o seletor.
@@ -742,7 +788,7 @@ async function carregaPalpites(): Promise<void> {
     // faria o operador esperar um timeout para descobrir sozinho.
     if (dicas.sshOpen) protocol.value = 'ssh'
     else if (dicas.telnetOpen) protocol.value = 'telnet'
-    port.value = DEFAULT_PORTS[protocol.value] ?? 22
+    port.value = portFor(protocol.value)
   } finally {
     if (sequence === hintsSequence) loadingHints.value = false
   }
@@ -755,11 +801,10 @@ watch(
       operatingSystem.value = resolveProvisionOperatingSystem(null, props.target.operatingSystem)
       protocol.value = 'ssh'
       port.value = 22
-      username.value = ''
-      password.value = ''
+      Object.assign(login, { useSaved: false, username: '', password: '', save: false })
+      credentials.value = []
       macAddress.value = ''
       serverAddress.value = ''
-      showPassword.value = false
       error.value = ''
       errorHint.value = ''
       result.value = null
@@ -775,8 +820,7 @@ watch(
       // A senha só é descartada **ao fechar**. Limpá-la logo depois de aplicar
       // deixava o campo vazio marcado como obrigatório ao lado de uma mensagem de
       // sucesso, o que lia como falha — e obrigava a redigitar para reaplicar.
-      password.value = ''
-      showPassword.value = false
+      login.password = ''
     }
   },
   // O componente nasce via `v-if` com `open=true`; sem execução imediata o

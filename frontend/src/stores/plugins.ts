@@ -226,6 +226,17 @@ export const usePluginsStore = defineStore('plugins', () => {
     view.credentials = [...others, credential].sort((a, b) => a.kind.localeCompare(b.kind))
   }
 
+  /**
+   * As credenciais do equipamento, para quem precisa delas fora da aba (a
+   * ativação do log). Mantém a aba em dia se ela já estiver carregada.
+   */
+  async function fetchCredentials(deviceId: number): Promise<CredentialView[]> {
+    const credentials = await apiService.get<CredentialView[]>(`/devices/${deviceId}/credentials`)
+    const view = deviceViews.value[deviceId]
+    if (view) view.credentials = credentials
+    return credentials
+  }
+
   async function saveCredential(deviceId: number, input: CredentialInput): Promise<CredentialView> {
     const saved = await apiService.put<CredentialView>(`/devices/${deviceId}/credentials`, input)
     replaceCredential(deviceId, saved)
@@ -422,6 +433,8 @@ export const usePluginsStore = defineStore('plugins', () => {
     previewPackage,
     revealSecret,
     loadDevice,
+    fetchCredentials,
+    replaceCredential,
     saveCredential,
     deleteCredential,
     openSession,

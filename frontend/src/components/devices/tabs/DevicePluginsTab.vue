@@ -124,7 +124,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import type { PluginDetail } from '@/bindings/PluginDetail'
 import { usePluginsStore } from '@/stores/plugins'
 import { useAiStore } from '@/stores/ai'
@@ -149,7 +150,18 @@ const emit = defineEmits<{
 const store = usePluginsStore()
 const aiStore = useAiStore()
 const fileInput = ref<HTMLInputElement | null>(null)
+const route = useRoute()
 const section = ref('catalog')
+
+// `?section=credentials` abre direto nas credenciais — é o link de quem chega
+// da ativação do log para gerenciar o login salvo.
+watch(
+  () => route.query.section,
+  (pedida) => {
+    if (pedida === 'credentials' || pedida === 'history') section.value = pedida
+  },
+  { immediate: true }
+)
 const installing = ref<number | null>(null)
 
 const feedback = reactive({ show: false, text: '', color: 'success' })

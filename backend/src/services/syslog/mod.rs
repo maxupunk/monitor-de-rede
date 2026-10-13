@@ -27,6 +27,7 @@ pub mod destination;
 pub mod hints;
 pub mod ingest;
 pub mod listener;
+pub mod login;
 pub mod matcher;
 pub mod nat;
 pub mod parser;

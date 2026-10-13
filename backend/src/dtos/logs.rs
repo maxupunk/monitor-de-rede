@@ -11,6 +11,8 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::services::plugins::{credentials::CredentialView, manifest::TransportKind};
+
 /// Filtros de `GET /api/logs`, como chegam na query string.
 ///
 /// Tudo opcional: a tela abre sem filtro nenhum e recebe as últimas 24 h.
@@ -269,12 +271,12 @@ pub struct BindSourceInput {
 
 /// Corpo de `POST /api/logs/devices/{id}/provision`.
 ///
-/// **As credenciais não são persistidas.** `username` e `password` existem
-/// enquanto a requisição dura e morrem com ela — não há coluna, cache nem
-/// `system_settings` que os receba, nem cifrados. Depois de os comandos serem
-/// aplicados, somente o `server_address` é lembrado no dispositivo. Ver a nota
-/// do módulo [`crate::services::syslog::provision`]. O DTO fica sem `Debug`
-/// derivado de propósito: um `tracing` distraído despejaria a senha no log.
+/// O login vem de um de dois lugares: `savedCredential` usa a credencial salva
+/// do equipamento (a da aba "Plugins › Credenciais"); sem ele, valem
+/// `username` e `password`, usados só nesta requisição — a menos que
+/// `saveCredential` peça para guardá-los, cifrados, depois que funcionarem.
+/// Ver [`crate::services::syslog::login`]. O DTO fica sem `Debug` derivado de
+/// propósito: um `tracing` distraído despejaria a senha no log.
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProvisionLoggingInput {
@@ -282,8 +284,18 @@ pub struct ProvisionLoggingInput {
     pub protocol: String,
     /// Ausente cai na porta padrão do protocolo (22, 23 ou 20561).
     pub port: Option<u16>,
+    #[serde(default)]
     pub username: String,
+    #[serde(default)]
     pub password: String,
+    /// Tipo da credencial salva a usar. Presente, `username` e `password` são
+    /// ignorados.
+    #[serde(default)]
+    pub saved_credential: Option<TransportKind>,
+    /// Guarda o login digitado como a credencial do equipamento, se a ativação
+    /// conseguir entrar com ele.
+    #[serde(default)]
+    pub save_credential: bool,
     /// Id do catálogo de sistemas. Ausente, o servidor deduz do cadastro.
     pub operating_system: Option<String>,
     /// Endereço deste servidor como o **equipamento** o alcança. Vazio, ou
@@ -363,6 +375,8 @@ pub struct ProvisionLoggingResponse {
     pub address_saved: bool,
     /// Falha parcial posterior à aplicação dos comandos. Nunca contém credenciais.
     pub persistence_warning: Option<String>,
+    /// A credencial gravada a pedido do operador — sem a senha.
+    pub saved_credential: Option<CredentialView>,
 }
 
 /// Resposta do vínculo/desvínculo manual de uma origem de syslog.

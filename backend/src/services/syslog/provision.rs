@@ -6,16 +6,14 @@
 //! preenchido. Este módulo fecha a outra metade: o servidor entra no
 //! equipamento, roda o mesmo comando e devolve o que o aparelho respondeu.
 //!
-//! # A credencial não é guardada
+//! # A credencial é a do equipamento, e salvar é escolha do operador
 //!
-//! Ela chega no corpo da requisição, vive nesta função e morre com ela. Não há
-//! coluna, não há `system_settings`, não há cache — nem cifrada. É uma decisão,
-//! não uma pendência: guardar a senha de administrador de trinta roteadores
-//! transformaria este sistema no alvo mais valioso da rede que ele monitora, e
-//! o ganho seria reconfigurar o log, algo que se faz uma vez por aparelho.
-//!
-//! A consequência aceita é que reconfigurar exige digitar de novo. A tela diz
-//! isso antes de pedir.
+//! Este módulo recebe usuário e senha prontos e não guarda nada. De onde eles
+//! vêm é de [`super::login`]: digitados na hora (usados uma vez) ou a
+//! credencial salva do equipamento — a mesma da aba "Plugins › Credenciais".
+//! Guardar a senha de administrador de trinta roteadores torna o sistema um
+//! alvo valioso, então isso nunca é implícito: só acontece quando o operador
+//! marca "salvar", e a senha vai cifrada para o mesmo cofre dos plugins.
 //!
 //! # Por que um shell interativo, e não `exec`
 //!
@@ -46,6 +44,7 @@ use super::{
 use crate::services::{
     devices::adapters::{registry as device_adapters, DeviceAccessMethod},
     network_tools::mactelnet,
+    plugins::manifest::TransportKind,
     shared::errors::{AppError, AppResult},
 };
 
@@ -98,6 +97,16 @@ impl Protocol {
     #[must_use]
     pub const fn by_mac(self) -> bool {
         matches!(self, Self::MacTelnet)
+    }
+
+    /// Onde o login deste acesso fica salvo no equipamento. O MAC-Telnet entra
+    /// com o mesmo usuário do Telnet — só muda como o equipamento é endereçado.
+    #[must_use]
+    pub const fn credential_kind(self) -> TransportKind {
+        match self {
+            Self::Ssh => TransportKind::Ssh,
+            Self::Telnet | Self::MacTelnet => TransportKind::Telnet,
+        }
     }
 
     /// # Errors

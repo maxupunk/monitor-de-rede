@@ -26,13 +26,14 @@ use crate::{
         ProvisionLoggingInput, ProvisionLoggingResponse,
     },
     services::{
+        audit::{self, AuditAction, ResourceType},
         devices::{access, systems},
         events::EventBus,
         network_tools::mactelnet,
         server_addresses,
         shared::errors::{AppError, AppResult},
         syslog::{
-            destination, hints, provision,
+            destination, hints, login, provision,
             repository::{self, Cursor, LogFilters, LogQuery, MAX_EXPORT_LIMIT},
             resolver, snippets, templates, LogsDb, SyslogService,
         },
@@ -375,10 +376,11 @@ fn do_cadastro(
 /// `POST /api/logs/devices/{id}/provision` — entra no equipamento e configura
 /// o envio de syslog.
 ///
-/// A credencial vem no corpo, é usada uma vez e não é gravada em lugar nenhum
-/// — ver a nota do módulo [`crate::services::syslog::provision`].
+/// O login é a credencial salva do equipamento ou o digitado, que só é gravado
+/// a pedido e depois de funcionar — ver [`crate::services::syslog::login`].
 async fn provision_device(
     State(ctx): State<AppContext>,
+    headers: HeaderMap,
     Path(id): Path<i64>,
     Json(entrada): Json<ProvisionLoggingInput>,
 ) -> AppResult<Response> {
@@ -387,12 +389,15 @@ async fn provision_device(
         .await?
         .ok_or_else(|| AppError::NotFound("Dispositivo não encontrado.".into()))?;
 
-    if entrada.username.trim().is_empty() {
-        return Err(AppError::validation("Informe o usuário de acesso."));
-    }
-    if entrada.password.is_empty() {
-        return Err(AppError::validation("Informe a senha de acesso."));
-    }
+    let escolha = entrada.saved_credential.map_or(
+        login::LoginChoice::Typed {
+            username: &entrada.username,
+            password: &entrada.password,
+        },
+        login::LoginChoice::Saved,
+    );
+    let acesso = login::resolve(&ctx.db, id, escolha).await?;
+    let salvar = entrada.save_credential && entrada.saved_credential.is_none();
 
     let protocolo = provision::Protocol::parse(&entrada.protocol)?;
 
@@ -477,14 +482,15 @@ async fn provision_device(
 
     let server_port = snippets::published_port();
     let servico = service(&ctx).ok();
+    let porta = entrada.port.unwrap_or_else(|| protocolo.default_port());
     let pedido = provision::ProvisionRequest {
         // Só o MAC-Telnet chega aqui sem IP, e ele não usa este campo.
         host: host.unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED)),
         mac,
-        port: entrada.port.unwrap_or_else(|| protocolo.default_port()),
+        port: porta,
         protocol: protocolo,
-        username: entrada.username.trim().to_owned(),
-        password: entrada.password.clone(),
+        username: acesso.username.clone(),
+        password: acesso.password.clone().unwrap_or_default(),
         operating_system: operating_system.clone(),
         server_address: server_address.clone(),
         server_port,
@@ -493,6 +499,37 @@ async fn provision_device(
     let resultado = provision::run(&pedido, servico.as_ref().map(|s| &s.sources), id).await?;
 
     let mut persistence_warnings = Vec::new();
+    // A sessão entrou no equipamento: só agora a senha digitada merece ser
+    // guardada. Falhar aqui não desfaz a configuração já aplicada.
+    let saved_credential = if salvar {
+        match login::remember(&ctx.db, id, protocolo, &acesso, porta).await {
+            Ok(credencial) => {
+                audit::record(
+                    &ctx.db,
+                    &headers,
+                    AuditAction::Update,
+                    ResourceType::Device,
+                    (id, &dispositivo.name),
+                    format!(
+                        "Salvou a credencial {} de acesso ao ativar o log",
+                        credencial.kind.as_str().to_uppercase()
+                    ),
+                )
+                .await;
+                Some(credencial)
+            }
+            Err(error) => {
+                tracing::error!(device_id = id, %error, "log ativado, mas a credencial não foi salva");
+                persistence_warnings.push(
+                    "O log foi ativado, mas a credencial não foi salva. Cadastre-a na aba Plugins › Credenciais do dispositivo."
+                        .to_owned(),
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
     if let Some(hostname) = resultado.identified_hostname.as_deref() {
         let runtime = servico
             .as_ref()
@@ -568,6 +605,7 @@ async fn provision_device(
         confirmed: resultado.confirmed,
         address_saved,
         persistence_warning,
+        saved_credential,
     })?)
 }
 
