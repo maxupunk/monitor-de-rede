@@ -204,6 +204,7 @@
           <v-btn icon="mdi-close" variant="text" @click="detailDialog = false"></v-btn>
         </v-card-title>
         <v-tabs v-model="detailTab" color="primary" show-arrows>
+          <v-tab value="usage" prepend-icon="mdi-chart-areaspline">Consumo</v-tab>
           <v-tab value="overview">Detalhes</v-tab>
           <v-tab value="mounts">Volumes</v-tab>
           <v-tab value="networks">Redes</v-tab>
@@ -212,6 +213,72 @@
         <v-divider></v-divider>
         <v-card-text class="pa-0 docker-detail-body">
           <v-window v-model="detailTab">
+            <v-window-item value="usage" class="pa-5">
+              <div class="d-flex flex-wrap align-center ga-2 mb-4">
+                <v-chip
+                  v-if="detailMetric"
+                  color="info"
+                  variant="tonal"
+                  prepend-icon="mdi-cpu-64-bit"
+                >
+                  CPU agora: {{ formatPercent(detailMetric.cpu.usagePercent, 1) }}
+                </v-chip>
+                <v-chip
+                  v-if="detailMetric"
+                  color="primary"
+                  variant="tonal"
+                  prepend-icon="mdi-memory"
+                >
+                  RAM agora: {{ formatBinaryBytes(detailMetric.memory.usageBytes) }}
+                </v-chip>
+                <v-spacer></v-spacer>
+                <v-btn-toggle
+                  v-model="usageRange"
+                  mandatory
+                  color="primary"
+                  variant="outlined"
+                  density="compact"
+                  divided
+                >
+                  <v-btn v-for="option in usageRanges" :key="option" :value="option" size="small">
+                    {{ option }}
+                  </v-btn>
+                </v-btn-toggle>
+              </div>
+              <v-skeleton-loader
+                v-if="usageLoading && !usage"
+                type="card, card"
+              ></v-skeleton-loader>
+              <v-alert v-else-if="usageError" type="error" variant="tonal" density="compact">
+                {{ usageError }}
+              </v-alert>
+              <v-alert
+                v-else-if="!usage || usage.points.length === 0"
+                type="info"
+                variant="tonal"
+                density="compact"
+              >
+                Ainda não há consumo registrado nesta janela. O primeiro minuto aparece cerca de um
+                minuto depois de o container começar a enviar métricas.
+              </v-alert>
+              <v-row v-else dense>
+                <v-col cols="12" md="6">
+                  <div class="text-subtitle-2 mb-2">CPU</div>
+                  <BaseMetricChart
+                    :series="usageCpuSeries"
+                    unit-type="percentage"
+                  ></BaseMetricChart>
+                </v-col>
+                <v-col cols="12" md="6">
+                  <div class="text-subtitle-2 mb-2">Memória</div>
+                  <BaseMetricChart :series="usageMemorySeries" unit-type="bytes"></BaseMetricChart>
+                </v-col>
+              </v-row>
+              <div class="text-caption mt-3">
+                Médias de 1 minuto guardadas por 30 dias.
+                <router-link :to="{ name: 'docker-history' }">Ver histórico do host</router-link>
+              </div>
+            </v-window-item>
             <v-window-item value="overview" class="pa-5">
               <v-skeleton-loader v-if="detailLoading" type="article"></v-skeleton-loader>
               <v-row v-else-if="detail">
@@ -432,6 +499,9 @@ import type { DockerContainerSummary } from '@/bindings/DockerContainerSummary'
 import type { DockerLogEntry } from '@/bindings/DockerLogEntry'
 import { formatBinaryBytes, formatPercent } from '@/utils/formatters'
 import LiveIndicator from '@/components/LiveIndicator.vue'
+import BaseMetricChart, { type ChartSeriesInput } from '@/components/BaseMetricChart.vue'
+import type { ContainerHistoryResponse } from '@/bindings/ContainerHistoryResponse'
+import type { MetricsRange } from '@/bindings/MetricsRange'
 
 type ContainerActionName = 'start' | 'stop' | 'restart' | 'remove'
 interface ContainerGroup {
@@ -452,7 +522,13 @@ const expandedGroups = ref<string[]>([])
 const detailDialog = ref(false)
 const detailLoading = ref(false)
 const detail = ref<DockerContainerDetail | null>(null)
-const detailTab = ref('overview')
+const detailTab = ref('usage')
+const usageRanges: MetricsRange[] = ['1h', '6h', '24h', '7d', '30d']
+const usageRange = ref<MetricsRange>('1h')
+const usage = ref<ContainerHistoryResponse | null>(null)
+const usageLoading = ref(false)
+const usageError = ref<string | null>(null)
+let usageContainerName = ''
 const logs = ref<DockerLogEntry[]>([])
 const logsLoading = ref(false)
 const logsDownloading = ref(false)
@@ -572,9 +648,57 @@ watch(
   { immediate: true }
 )
 
+const detailMetric = computed(() => (detail.value ? metricFor(detail.value.id) : undefined))
+
+const usageCpuSeries = computed<ChartSeriesInput[]>(() => [
+  {
+    id: 'usage-cpu-avg',
+    label: 'Média',
+    color: '#2196F3',
+    fillArea: true,
+    data: (usage.value?.points ?? []).map((point) => ({ time: point.at, value: point.cpuAvg })),
+  },
+  {
+    id: 'usage-cpu-max',
+    label: 'Pico',
+    color: '#FF7043',
+    data: (usage.value?.points ?? []).map((point) => ({ time: point.at, value: point.cpuMax })),
+  },
+])
+
+const usageMemorySeries = computed<ChartSeriesInput[]>(() => [
+  {
+    id: 'usage-memory',
+    label: 'Pico',
+    color: '#7E57C2',
+    fillArea: true,
+    data: (usage.value?.points ?? []).map((point) => ({
+      time: point.at,
+      value: point.memoryMax,
+      formattedValue: formatBinaryBytes(point.memoryMax),
+    })),
+  },
+])
+
+/** Histórico sob demanda (não-live): só carrega ao abrir a aba ou trocar a janela. */
+async function loadUsage(): Promise<void> {
+  if (!usageContainerName) return
+  usageLoading.value = true
+  usageError.value = null
+  try {
+    usage.value = await docker.api.containerHistory(usageContainerName, usageRange.value)
+  } catch (reason: unknown) {
+    usageError.value = reason instanceof Error ? reason.message : 'Erro ao carregar o consumo'
+  } finally {
+    usageLoading.value = false
+  }
+}
+
 watch(detailTab, (tab) => {
   if (tab === 'logs' && logs.value.length === 0) void loadLogs()
 })
+
+watch(usageRange, () => void loadUsage())
 
 function containerName(container: DockerContainerSummary): string {
   return container.names[0]?.replace(/^\//, '') || shortId(container.id)
@@ -614,9 +738,12 @@ function onRowClick(_event: MouseEvent, row: { item: DockerContainerSummary }): 
 async function openDetail(container: DockerContainerSummary): Promise<void> {
   detail.value = null
   detailDialog.value = true
-  detailTab.value = 'overview'
+  detailTab.value = 'usage'
   detailLoading.value = true
   logs.value = []
+  usage.value = null
+  usageContainerName = containerName(container)
+  void loadUsage()
   networkToConnect.value = null
   try {
     detail.value = await docker.api.container(container.id)
