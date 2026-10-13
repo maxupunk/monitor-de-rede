@@ -8,6 +8,7 @@
 //! listar, baixar e carregar modelos é só do Ollaya.
 
 use std::{
+    borrow::Cow,
     collections::BTreeMap,
     sync::OnceLock,
     time::{Duration, Instant},
@@ -19,6 +20,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use super::{
     catalog,
     config::AiDeciderSettings,
+    locate::{self, Located},
     protocols::{self, wire_for},
     schema::{DecideResponse, Question, TagsResponse},
 };
@@ -30,6 +32,18 @@ use crate::{
         shared::errors::{AppError, AppResult},
     },
 };
+
+/// O motivo de fato: o `reqwest` diz só "error sending request", e o que
+/// separa "o nome não resolve" de "conexão recusada" está na cadeia de causas.
+fn root_cause(error: &reqwest::Error) -> String {
+    let mut reason = error.to_string();
+    let mut source = std::error::Error::source(error);
+    while let Some(cause) = source {
+        reason = cause.to_string();
+        source = cause.source();
+    }
+    reason
+}
 
 fn http() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
@@ -44,13 +58,34 @@ pub struct Decided {
 }
 
 pub struct DeciderClient<'a> {
-    settings: &'a AiDeciderSettings,
+    settings: Cow<'a, AiDeciderSettings>,
+    /// Onde o Ollaya foi procurado sem responder — vai na mensagem de erro.
+    tried: Vec<String>,
 }
 
 impl<'a> DeciderClient<'a> {
+    /// Fala com a URL configurada, exatamente como está.
     #[must_use]
     pub const fn new(settings: &'a AiDeciderSettings) -> Self {
-        Self { settings }
+        Self {
+            settings: Cow::Borrowed(settings),
+            tried: Vec::new(),
+        }
+    }
+
+    /// Fala com o Ollaya onde ele de fato está, quando a URL é a padrão do
+    /// compose — ver [`locate`].
+    pub async fn connect(settings: &'a AiDeciderSettings) -> Self {
+        match locate::resolve(settings).await {
+            Located::Ready(settings) => Self {
+                settings,
+                tried: Vec::new(),
+            },
+            Located::NotFound(settings, tried) => Self {
+                settings: Cow::Borrowed(settings),
+                tried,
+            },
+        }
     }
 
     fn url(&self, path: &str) -> String {
@@ -109,10 +144,15 @@ impl<'a> DeciderClient<'a> {
         let reason = if error.is_timeout() {
             format!("sem resposta em {} ms", waited.as_millis())
         } else {
-            error.to_string()
+            root_cause(error)
+        };
+        let tried = if self.tried.len() > 1 {
+            format!(" Também procurado em: {}.", self.tried[1..].join(", "))
+        } else {
+            String::new()
         };
         AppError::service_unavailable(format!(
-            "Não foi possível falar com {} em '{}': {reason}",
+            "Não foi possível falar com {} em '{}': {reason}.{tried}",
             self.service(),
             self.settings.base_url
         ))
@@ -126,7 +166,7 @@ impl<'a> DeciderClient<'a> {
     ) -> AppResult<Decided> {
         let started = Instant::now();
         let wire = wire_for(self.settings.protocol());
-        let call = wire.request(self.settings, state, questions)?;
+        let call = wire.request(&self.settings, state, questions)?;
         let request = http()
             .post(call.url)
             .timeout(self.timeout())
@@ -142,7 +182,7 @@ impl<'a> DeciderClient<'a> {
         let body = res.json::<serde_json::Value>().await.map_err(|e| {
             AppError::service_unavailable(format!("Resposta inválida de {}: {e}", self.service()))
         })?;
-        let response: DecideResponse = wire.parse(self.settings, body)?;
+        let response: DecideResponse = wire.parse(&self.settings, body)?;
         Ok(Decided {
             response,
             latency_ms: duration_to_ms(started.elapsed()),
@@ -221,5 +261,27 @@ impl<'a> DeciderClient<'a> {
             service: self.service(),
         })
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn o_erro_diz_a_causa_e_nao_so_error_sending_request() {
+        let settings = AiDeciderSettings {
+            base_url: "http://127.0.0.1:9".into(),
+            timeout_ms: 2_000,
+            ..AiDeciderSettings::default()
+        };
+        let message = DeciderClient::connect(&settings)
+            .await
+            .installed_models()
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(message.contains("127.0.0.1:9"), "{message}");
+        assert!(!message.contains("error sending request"), "{message}");
     }
 }

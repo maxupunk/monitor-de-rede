@@ -20,3 +20,12 @@ services:
       APP_EXTERNAL_PORT: ${APP_PORT:-3333}
       # No modo host, a porta anunciada para a VPN é a própria porta de escuta do WireGuard.
       WG_EXTERNAL_PORT: ${WG_LISTEN_PORT:-51820}
+      # Fora da rede do compose o nome `ollaya` não resolve: a API alcança o
+      # Ollaya pela porta publicada no loopback, logo abaixo.
+      OLLAYA_URL: http://127.0.0.1:${OLLAYA_HOST_PORT:-11435}
+
+  # Só o loopback: o Ollaya continua invisível para a rede, e a API — que no
+  # modo host *é* o host — o encontra em 127.0.0.1.
+  ollaya:
+    ports:
+      - "127.0.0.1:${OLLAYA_HOST_PORT:-11435}:11435"

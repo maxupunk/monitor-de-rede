@@ -47,7 +47,11 @@ pub async fn test(
     // No Ollaya, o modelo precisa estar baixado; na nuvem a própria decisão
     // confere a chave e o modelo.
     if settings.manages_models() {
-        let installed = match DeciderClient::new(settings).installed_models().await {
+        let installed = match DeciderClient::connect(settings)
+            .await
+            .installed_models()
+            .await
+        {
             Ok(installed) => installed,
             Err(error) => return failure(false, false, error.to_string()),
         };

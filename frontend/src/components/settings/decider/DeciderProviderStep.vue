@@ -110,8 +110,9 @@
           {{ deciderStore.models.errorMessage }}
           <div class="mt-1">
             Nesta máquina, o serviço <code>ollaya</code> sobe junto com o
-            <code>docker compose up</code> (<code>http://ollaya:11435</code>). Em outra, use o
-            endereço dela (porta 11435) e a chave, se ela exigir.
+            <code>docker compose up</code>. Com a URL padrão, o servidor o procura pelo nome do
+            serviço, em <code>127.0.0.1:11435</code> e em <code>host.docker.internal:11435</code>.
+            Em outra máquina, use o endereço dela (porta 11435) e a chave, se ela exigir.
           </div>
         </v-alert>
       </template>
@@ -196,7 +197,7 @@ const connectionSummary = computed(() => {
 
 const urlHint = computed(() => {
   if (managesModels.value)
-    return 'Nesta máquina: http://ollaya:11435. Em outra: o IP dela, porta 11435.'
+    return 'Nesta máquina: deixe http://ollaya:11435 — o servidor acha o Ollaya do compose. Em outra: o IP dela, porta 11435.'
   if (form.value.provider === 'custom')
     return 'Sem o caminho final: o NetMonitor acrescenta o do formato.'
   return 'O padrão do provedor; mude só para passar por um proxy ou gateway.'

@@ -663,17 +663,15 @@ pub async fn list(settings: &AiDeciderSettings) -> DeciderModelsResponse {
     if !settings.manages_models() {
         return cloud_models(settings);
     }
-    let (installed, error_message) = match DeciderClient::new(settings).installed_models().await {
+    let client = DeciderClient::connect(settings).await;
+    let (installed, error_message) = match client.installed_models().await {
         Ok(installed) => (Some(installed), None),
         Err(error) => (None, Some(error.to_string())),
     };
     let online = installed.is_some();
     // Na memória agora; falha aqui (Ollaya antigo) só deixa a lista vazia.
     let loaded = if online {
-        DeciderClient::new(settings)
-            .loaded_models()
-            .await
-            .unwrap_or_default()
+        client.loaded_models().await.unwrap_or_default()
     } else {
         Vec::new()
     };

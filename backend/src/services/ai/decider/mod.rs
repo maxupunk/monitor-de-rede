@@ -16,6 +16,7 @@ pub mod config;
 pub mod decision;
 pub mod decisions;
 pub mod diagnostics;
+pub mod locate;
 pub mod protocols;
 pub mod providers;
 pub mod runtime;

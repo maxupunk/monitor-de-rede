@@ -233,7 +233,7 @@ impl DeciderRuntime {
             }
             Lane::OnDemand | Lane::Background => self.ensure_loaded(settings).await?,
         }
-        let result = decision::run(&DeciderClient::new(settings), state, decision).await;
+        let result = decision::run(&DeciderClient::connect(settings).await, state, decision).await;
         if result.is_ok() {
             self.mark_warm(settings);
         }
@@ -269,7 +269,7 @@ impl DeciderRuntime {
         if !settings.manages_models() || self.recently_warm(settings) {
             return false;
         }
-        match DeciderClient::new(settings).loaded_models().await {
+        match DeciderClient::connect(settings).await.loaded_models().await {
             Ok(loaded) => {
                 let warm = catalog::is_available(&loaded, &settings.model);
                 if warm {
@@ -311,7 +311,7 @@ impl DeciderRuntime {
         }
         self.publish_state(settings, "loading", json!({}));
         tracing::info!(model = %settings.model, "decisor: carregando o modelo na memória");
-        match DeciderClient::new(settings).load().await {
+        match DeciderClient::connect(settings).await.load().await {
             Ok(load_ms) => {
                 self.mark_warm(settings);
                 self.publish_state(settings, "ready", json!({ "loadMs": load_ms }));

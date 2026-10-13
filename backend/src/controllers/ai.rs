@@ -421,7 +421,7 @@ async fn pull_decider_model(
     Json(input): Json<DeciderFormInput>,
 ) -> AppResult<Response> {
     let decider = settings::resolve_decider(&ctx.db, input.decider).await?;
-    let progress = DeciderClient::new(&decider).pull().await?;
+    let progress = DeciderClient::connect(&decider).await.pull().await?;
     Ok(pull_progress_sse(progress))
 }
 
