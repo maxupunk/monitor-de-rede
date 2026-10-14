@@ -241,13 +241,13 @@
         />
       </div>
       <v-alert
-        v-else-if="deciderStore.pullProgress?.error"
+        v-else-if="pullErrorHere"
         type="error"
         variant="tonal"
         density="compact"
         class="mt-2"
       >
-        {{ deciderStore.pullProgress.error }}
+        {{ pullErrorHere }}
       </v-alert>
 
       <v-alert
@@ -584,6 +584,13 @@ const modelStateHere = computed(() => {
   const state = deciderStore.modelState
   const model = form.value.model ?? ''
   return state && state.baseUrl === form.value.baseUrl && state.model === model ? state : null
+})
+/** O erro do último download, só enquanto o formulário estiver no mesmo modelo e servidor. */
+const pullErrorHere = computed(() => {
+  const target = deciderStore.pullTarget
+  if (!target || target.model !== form.value.model || target.baseUrl !== form.value.baseUrl)
+    return null
+  return deciderStore.pullProgress?.error ?? null
 })
 const modelLoading = computed(() => modelStateHere.value?.state === 'loading')
 const modelLoadFailed = computed(() => modelStateHere.value?.state === 'failed')

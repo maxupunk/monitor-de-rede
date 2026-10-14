@@ -371,7 +371,10 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::services::ai::decider::schema::{Answer, Question};
+    use crate::services::ai::decider::{
+        providers::DeciderProvider,
+        schema::{Answer, Question},
+    };
 
     struct Nothing;
 
@@ -391,8 +394,11 @@ mod tests {
     }
 
     fn unreachable_settings() -> AiDeciderSettings {
+        // "Outro compatível": no Ollaya, o loopback dispararia a procura do
+        // `locate`, e o teste mediria as sondas, não a fila.
         AiDeciderSettings {
             enabled: true,
+            provider: DeciderProvider::Custom,
             base_url: "http://127.0.0.1:9".into(),
             timeout_ms: 300,
             ..AiDeciderSettings::default()

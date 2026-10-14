@@ -203,7 +203,8 @@ services:
   # Cloudflare, OpenAI) — aí este serviço pode até ser removido.
   # A API fala com ele pela rede interna (`http://ollaya:11435`), sem porta
   # publicada. No modo host (`docker-compose.host.yml`) a API sai dessa rede: o
-  # override publica o Ollaya em `127.0.0.1` e define `OLLAYA_URL`. Montado de
+  # override põe o Ollaya também na rede do host, só no loopback
+  # (`127.0.0.1`), e define `OLLAYA_URL`. Montado de
   # outro jeito, a API ainda procura sozinha em 127.0.0.1:11435 e
   # host.docker.internal:11435 (`decider/locate.rs`). GPU NVIDIA? Troque a imagem por `ghcr.io/ollaya-dev/ollaya:cuda`
   # e acrescente `gpus: all`.

@@ -90,6 +90,8 @@ export const useAiDeciderStore = defineStore('aiDecider', () => {
 
   const pulling = ref(false)
   const pullProgress = ref<ModelPullProgress | null>(null)
+  /** De qual modelo e servidor é o download (e o erro) em `pullProgress`. */
+  const pullTarget = ref<{ model: string; baseUrl: string } | null>(null)
   let pullController: AbortController | null = null
 
   async function load(): Promise<AiDeciderSettings> {
@@ -230,6 +232,7 @@ export const useAiDeciderStore = defineStore('aiDecider', () => {
   async function pull(decider: AiDeciderSettings, question?: string): Promise<boolean> {
     if (pulling.value) return false
     pulling.value = true
+    pullTarget.value = { model: decider.model, baseUrl: decider.baseUrl }
     pullProgress.value = {
       status: 'Iniciando download...',
       digest: null,
@@ -284,6 +287,7 @@ export const useAiDeciderStore = defineStore('aiDecider', () => {
     testResult,
     pulling,
     pullProgress,
+    pullTarget,
     loadModels,
     installed,
     spec,

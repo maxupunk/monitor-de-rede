@@ -63,12 +63,29 @@ fn percentage(completed: Option<u64>, total: Option<u64>) -> Option<f64> {
     }
 }
 
+/// O erro do servidor, com o que fazer quando ele é velho demais para o
+/// modelo ("… which this version of ollaya cannot run; upgrade ollaya"): a
+/// imagem do compose é `:latest`, mas só muda com um `pull` explícito.
+fn explain_pull_error(service: &str, error: String) -> String {
+    if error.to_lowercase().contains("upgrade") {
+        format!(
+            "{error} — o {service} desta instalação é anterior a este modelo. Atualize a imagem no \
+             servidor (`docker compose pull` e `docker compose up -d`) ou escolha outro modelo."
+        )
+    } else {
+        error
+    }
+}
+
 /// Converte uma linha do NDJSON em progresso. `None` para linha vazia ou
 /// que não é JSON.
-fn parse_line(line: &str) -> Option<ModelPullProgress> {
+fn parse_line(line: &str, service: &str) -> Option<ModelPullProgress> {
     let raw: PullLine = serde_json::from_str(line.trim()).ok()?;
     if let Some(error) = raw.error {
-        return Some(ModelPullProgress::failed("Erro", error));
+        return Some(ModelPullProgress::failed(
+            "Erro",
+            explain_pull_error(service, error),
+        ));
     }
     let status = raw.status.unwrap_or_else(|| "Processando...".to_string());
     let done = status.eq_ignore_ascii_case("success");
@@ -133,7 +150,7 @@ pub async fn stream_pull(target: PullTarget<'_>) -> AppResult<ReceiverStream<Mod
 
             while let Some(pos) = line_buffer.find('\n') {
                 let line: String = line_buffer.drain(..=pos).collect();
-                let Some(progress) = parse_line(&line) else {
+                let Some(progress) = parse_line(&line, service) else {
                     continue;
                 };
                 let finished = progress.done;
@@ -178,17 +195,27 @@ mod tests {
     #[test]
     fn converte_linhas_do_pull() {
         let line = r#"{"status":"pulling 8d32","digest":"sha256:8d32","total":200,"completed":50}"#;
-        let progress = parse_line(line).expect("linha válida");
+        let progress = parse_line(line, "Ollaya").expect("linha válida");
         assert_eq!(progress.percentage, Some(25.0));
         assert!(!progress.done);
 
-        assert!(parse_line(r#"{"status":"success"}"#).is_some_and(|p| p.done));
+        assert!(parse_line(r#"{"status":"success"}"#, "Ollaya").is_some_and(|p| p.done));
 
-        let failed = parse_line(r#"{"error":"model not found"}"#).expect("erro");
+        let failed = parse_line(r#"{"error":"model not found"}"#, "Ollaya").expect("erro");
         assert!(failed.done);
         assert_eq!(failed.error.as_deref(), Some("model not found"));
 
-        assert!(parse_line("").is_none());
-        assert!(parse_line("keep-alive").is_none());
+        assert!(parse_line("", "Ollaya").is_none());
+        assert!(parse_line("keep-alive", "Ollaya").is_none());
+
+        let old = parse_line(
+            r#"{"error":"jeb:4b uses the jebadiah-v1 layout, which this version of ollaya cannot run; upgrade ollaya"}"#,
+            "Ollaya",
+        )
+        .expect("erro");
+        assert!(old
+            .error
+            .as_deref()
+            .is_some_and(|e| e.contains("docker compose pull")));
     }
 }
