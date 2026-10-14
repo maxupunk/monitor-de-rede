@@ -14,7 +14,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use reqwest::RequestBuilder;
+use reqwest::{RequestBuilder, StatusCode};
 use tokio_stream::wrappers::ReceiverStream;
 
 use super::{
@@ -119,17 +119,7 @@ impl<'a> DeciderClient<'a> {
     async fn failure(&self, res: reqwest::Response, action: &str) -> AppError {
         let status = res.status();
         let detail = protocols::error_message(&res.text().await.unwrap_or_default());
-        let hint = match status.as_u16() {
-            401 | 403 => " — confira a chave de acesso (e, na Cloudflare, o ID da conta).",
-            402 => " — a conta está sem crédito.",
-            404 => " — confira a URL e o nome do modelo.",
-            429 => " — limite de uso atingido; tente de novo em instantes.",
-            _ => "",
-        };
-        AppError::service_unavailable(format!(
-            "{} respondeu {status} {action}: {detail}{hint}",
-            self.service()
-        ))
+        AppError::service_unavailable(failure_message(&self.settings, status, action, &detail))
     }
 
     fn timeout(&self) -> Duration {
@@ -264,9 +254,43 @@ impl<'a> DeciderClient<'a> {
     }
 }
 
+/// A mensagem de uma resposta de erro. Num provedor de nuvem com a URL fora
+/// do padrão, quem respondeu foi esse endereço, não o provedor: a mensagem diz
+/// qual e aponta o padrão — o caso clássico é a URL do Ollaya esquecida no
+/// OpenRouter.
+fn failure_message(
+    settings: &AiDeciderSettings,
+    status: StatusCode,
+    action: &str,
+    detail: &str,
+) -> String {
+    let preset = settings.preset();
+    let standard = preset.default_base_url;
+    let elsewhere = preset.cloud && !standard.is_empty() && settings.base_url != standard;
+    let who = if elsewhere {
+        format!("O endereço '{}'", settings.base_url)
+    } else {
+        preset.label.to_string()
+    };
+    let hint = match status.as_u16() {
+        401 | 403 => " — confira a chave de acesso (e, na Cloudflare, o ID da conta).".to_string(),
+        402 => " — a conta está sem crédito.".to_string(),
+        404 if elsewhere => format!(
+            " — esse não é o endereço de {} ({standard}). Use o padrão, a não ser que seja um proxy ou gateway.",
+            preset.label
+        ),
+        404 if preset.cloud => " — confira o nome do modelo.".to_string(),
+        404 => " — confira a URL e o nome do modelo.".to_string(),
+        429 => " — limite de uso atingido; tente de novo em instantes.".to_string(),
+        _ => String::new(),
+    };
+    format!("{who} respondeu {status} {action}: {detail}{hint}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::ai::decider::providers::DeciderProvider;
 
     #[tokio::test]
     async fn o_erro_diz_a_causa_e_nao_so_error_sending_request() {
@@ -283,5 +307,45 @@ mod tests {
             .to_string();
         assert!(message.contains("127.0.0.1:9"), "{message}");
         assert!(!message.contains("error sending request"), "{message}");
+    }
+
+    fn openrouter_at(base_url: &str) -> AiDeciderSettings {
+        AiDeciderSettings {
+            provider: DeciderProvider::Openrouter,
+            base_url: base_url.into(),
+            ..AiDeciderSettings::default()
+        }
+    }
+
+    #[test]
+    fn url_esquecida_de_outro_provedor_e_apontada_no_404() {
+        let settings = openrouter_at("http://127.0.0.1:11435");
+        let message = failure_message(&settings, StatusCode::NOT_FOUND, "à decisão", "not found");
+        assert!(
+            message.starts_with("O endereço 'http://127.0.0.1:11435' respondeu 404 Not Found"),
+            "{message}"
+        );
+        assert!(message.contains("https://openrouter.ai/api"), "{message}");
+    }
+
+    #[test]
+    fn no_endereco_padrao_quem_responde_e_o_provedor() {
+        let settings = openrouter_at("https://openrouter.ai/api");
+        let message = failure_message(&settings, StatusCode::NOT_FOUND, "à decisão", "not found");
+        assert!(
+            message.starts_with("OpenRouter respondeu 404 Not Found"),
+            "{message}"
+        );
+        assert!(message.ends_with("confira o nome do modelo."), "{message}");
+    }
+
+    #[test]
+    fn ollaya_achado_fora_da_url_padrao_continua_sendo_o_ollaya() {
+        let settings = AiDeciderSettings {
+            base_url: "http://127.0.0.1:11435".into(),
+            ..AiDeciderSettings::default()
+        };
+        let message = failure_message(&settings, StatusCode::NOT_FOUND, "à decisão", "x");
+        assert!(message.starts_with("Ollaya respondeu"), "{message}");
     }
 }

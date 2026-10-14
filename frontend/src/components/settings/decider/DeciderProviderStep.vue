@@ -39,22 +39,28 @@
         </v-btn-toggle>
       </v-col>
 
-      <v-col cols="12" md="6">
+      <v-col v-if="showUrlField" cols="12" md="6">
         <v-text-field
           v-model="form.baseUrl"
           :label="managesModels ? 'URL do Ollaya' : 'URL da API'"
           :placeholder="provider?.defaultBaseUrl || 'https://…'"
           :hint="urlHint"
+          :color="customUrl ? 'warning' : undefined"
+          :base-color="customUrl ? 'warning' : undefined"
           persistent-hint
           variant="outlined"
           density="compact"
           prepend-inner-icon="mdi-link-variant"
-          :append-inner-icon="managesModels ? 'mdi-refresh' : undefined"
+          :append-inner-icon="urlAction?.icon"
           :loading="managesModels && deciderStore.loadingModels"
           @blur="emit('refresh')"
           @keydown.enter.prevent="emit('refresh')"
-          @click:append-inner="emit('refresh')"
-        />
+          @click:append-inner="urlAction?.run()"
+        >
+          <template v-if="customUrl" #message>
+            <span class="text-warning">{{ urlHint }}</span>
+          </template>
+        </v-text-field>
       </v-col>
 
       <v-col cols="12" md="6">
@@ -80,6 +86,15 @@
         >
           Criar uma chave em {{ provider.label }}
           <v-icon size="14">mdi-open-in-new</v-icon>
+        </a>
+      </v-col>
+      <v-col v-if="!showUrlField" cols="12" md="6" class="d-flex flex-column justify-center">
+        <div class="text-body-2">
+          <v-icon size="16" color="success" class="me-1">mdi-check-circle</v-icon>
+          Endereço da API já configurado: <code>{{ provider?.defaultBaseUrl }}</code>
+        </div>
+        <a href="#" class="text-body-2 text-primary mt-1 ms-5" @click.prevent="editingUrl = true">
+          Passar por um proxy ou gateway
         </a>
       </v-col>
       <v-col v-if="provider?.requiresAccount" cols="12" md="6">
@@ -168,13 +183,16 @@ import type { AiDeciderSettings } from '@/bindings/AiDeciderSettings'
 import type { DeciderProviderView } from '@/bindings/DeciderProviderView'
 import { defaultDeciderSettings, useAiDeciderStore } from '@/stores/aiDecider'
 import { formatLatency } from '@/utils/formatters'
-import { formForProvider, providerMissing } from '@/utils/decider'
+import { formForProvider, providerMissing, usesCustomUrl } from '@/utils/decider'
 
 const form = defineModel<AiDeciderSettings>('form', { required: true })
 const emit = defineEmits<{ refresh: []; test: [] }>()
 
 const deciderStore = useAiDeciderStore()
 const showKey = ref(false)
+const editingUrl = ref(false)
+/** URL digitada para cada provedor nesta tela, para voltar a ela ao trocar de novo. */
+const typedUrls = new Map<AiDeciderSettings['provider'], string>()
 
 const provider = computed(() => deciderStore.provider(form.value.provider))
 const managesModels = computed(() => provider.value?.managesModels ?? true)
@@ -195,13 +213,40 @@ const connectionSummary = computed(() => {
   return `Respondeu em ${formatLatency(result.latencyMs)}${result.model ? ` — ${result.model}` : ''}`
 })
 
+/** A URL foge do padrão do provedor (proxy, gateway — ou sobra de outro provedor). */
+const customUrl = computed(() => usesCustomUrl(form.value, provider.value))
+
+/**
+ * O endereço de um provedor de nuvem conhecido já vem pronto: o campo só
+ * aparece se o usuário pedir ou se a URL gravada não for a padrão.
+ */
+const showUrlField = computed(
+  () =>
+    managesModels.value || form.value.provider === 'custom' || editingUrl.value || customUrl.value
+)
+
+/** O botão dentro do campo: buscar o Ollaya ou voltar ao endereço padrão. */
+const urlAction = computed(() => {
+  if (managesModels.value) return { icon: 'mdi-refresh', run: () => emit('refresh') }
+  if (customUrl.value) return { icon: 'mdi-restore', run: restoreDefaultUrl }
+  return null
+})
+
 const urlHint = computed(() => {
   if (managesModels.value)
     return 'Nesta máquina: deixe http://ollaya:11435 — o servidor acha o Ollaya do compose. Em outra: o IP dela, porta 11435.'
   if (form.value.provider === 'custom')
     return 'Sem o caminho final: o NetMonitor acrescenta o do formato.'
-  return 'O padrão do provedor; mude só para passar por um proxy ou gateway.'
+  if (customUrl.value)
+    return `Diferente do endereço de ${provider.value?.label} (${provider.value?.defaultBaseUrl}). Só mude para um proxy ou gateway — clique em ↺ para voltar ao padrão.`
+  return 'Endereço de um proxy ou gateway que repasse para o provedor. Vazio, vale o padrão.'
 })
+
+function restoreDefaultUrl() {
+  form.value = { ...form.value, baseUrl: provider.value?.defaultBaseUrl ?? '' }
+  editingUrl.value = false
+  deciderStore.testResult = null
+}
 
 const keyHint = computed(() => {
   if (form.value.apiKey === '********') return 'Gravada. Digite outra para trocar.'
@@ -218,16 +263,17 @@ function providerIcon(item: DeciderProviderView | null): string {
 function chooseProvider(id: AiDeciderSettings['provider'] | null) {
   const next = id ? deciderStore.provider(id) : null
   if (!next || next.id === form.value.provider) return
-  const previous = provider.value
-  const previousTimeout = deciderStore.spec(form.value.model) ?? previous
+  const previousTimeout = deciderStore.spec(form.value.model) ?? provider.value
+  typedUrls.set(form.value.provider, form.value.baseUrl)
   form.value = formForProvider(
     form.value,
-    previous,
     previousTimeout,
     next,
-    defaultDeciderSettings().timeoutMs
+    defaultDeciderSettings().timeoutMs,
+    typedUrls.get(next.id)
   )
   showKey.value = false
+  editingUrl.value = false
   // O resultado era do provedor anterior.
   deciderStore.testResult = null
   emit('refresh')

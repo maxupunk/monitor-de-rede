@@ -11,6 +11,7 @@ import {
   modelFacts,
   providerMissing,
   timeoutForModel,
+  usesCustomUrl,
 } from '@/utils/decider'
 
 describe('isLocalOllaya', () => {
@@ -148,7 +149,7 @@ describe('troca de provedor', () => {
   const form = { ...defaultDeciderSettings(), timeoutMs: 1500, apiKey: 'segredo', accountId: 'x' }
 
   it('leva os padrões do novo e nunca a chave nem a conta do anterior', () => {
-    const next = formForProvider(form, ollaya, decider, cloudflare, 1500)
+    const next = formForProvider(form, decider, cloudflare, 1500)
     expect(next.provider).toBe('cloudflare')
     expect(next.baseUrl).toBe('https://api.cloudflare.com/client/v4')
     expect(next.model).toBe('clef-flash')
@@ -157,11 +158,27 @@ describe('troca de provedor', () => {
     expect(next.timeoutMs).toBe(3000)
   })
 
-  it('URL mudada pelo usuário fica (Ollaya em outra máquina, gateway próprio)', () => {
-    const proprio = { ...form, baseUrl: 'http://10.0.0.5:11435' }
-    expect(formForProvider(proprio, ollaya, decider, cloudflare, 1500).baseUrl).toBe(
+  it('URL de um provedor nunca vai para outro (Ollaya local não vira OpenRouter)', () => {
+    const local = { ...form, baseUrl: 'http://127.0.0.1:11435' }
+    expect(formForProvider(local, decider, cloudflare, 1500).baseUrl).toBe(
+      'https://api.cloudflare.com/client/v4'
+    )
+  })
+
+  it('volta a URL já digitada para o provedor nesta tela', () => {
+    const outra = { ...form, provider: 'cloudflare' as const, baseUrl: cloudflare.defaultBaseUrl }
+    expect(formForProvider(outra, cloudflare, ollaya, 1500, 'http://10.0.0.5:11435').baseUrl).toBe(
       'http://10.0.0.5:11435'
     )
+  })
+
+  it('URL fora do padrão só quando difere do padrão do provedor', () => {
+    const cf = { ...form, provider: 'cloudflare' as const }
+    expect(
+      usesCustomUrl({ ...cf, baseUrl: 'https://api.cloudflare.com/client/v4/' }, cloudflare)
+    ).toBe(false)
+    expect(usesCustomUrl({ ...cf, baseUrl: '' }, cloudflare)).toBe(false)
+    expect(usesCustomUrl({ ...cf, baseUrl: 'http://127.0.0.1:11435' }, cloudflare)).toBe(true)
   })
 
   it('diz o que falta, em português', () => {

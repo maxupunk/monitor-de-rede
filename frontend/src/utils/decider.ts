@@ -164,25 +164,42 @@ export function timeoutForModel(
   return untouched ? next.suggestedTimeoutMs : Math.max(current, next.suggestedTimeoutMs)
 }
 
+/** Tira espaços e a barra final, como o backend grava. */
+function normalizedUrl(url: string | null | undefined): string {
+  return (url ?? '').trim().replace(/\/+$/, '')
+}
+
 /**
- * O formulário ao trocar de provedor. O modelo é do provedor e volta ao
- * padrão dele; a URL também, a não ser que o usuário a tenha mudado; chave e
- * ID da conta nunca passam de um provedor para outro; o tempo máximo segue a
- * regra de {@link timeoutForModel}.
+ * A URL foge do padrão do provedor? Vazia não foge: o backend usa o padrão.
+ * O "Outro" não tem padrão — qualquer URL é a dele.
+ */
+export function usesCustomUrl(
+  form: AiDeciderSettings,
+  provider: DeciderProviderView | null
+): boolean {
+  const url = normalizedUrl(form.baseUrl)
+  const standard = normalizedUrl(provider?.defaultBaseUrl)
+  return url !== '' && standard !== '' && url !== standard
+}
+
+/**
+ * O formulário ao trocar de provedor. Modelo e URL são do provedor: voltam
+ * ao padrão dele, ou à URL que o usuário já tinha digitado para ele nesta
+ * tela (`rememberedUrl`) — nunca passam de um provedor para outro, senão a
+ * URL do Ollaya iria parar no OpenRouter. Chave e ID da conta também não
+ * passam; o tempo máximo segue a regra de {@link timeoutForModel}.
  */
 export function formForProvider(
   form: AiDeciderSettings,
-  previous: DeciderProviderView | null,
   previousTimeout: TimeoutSource | null,
   next: DeciderProviderView,
-  fallbackTimeout: number
+  fallbackTimeout: number,
+  rememberedUrl?: string
 ): AiDeciderSettings {
-  const url = form.baseUrl.trim()
-  const keepUrl = url !== '' && url !== previous?.defaultBaseUrl
   return {
     ...form,
     provider: next.id,
-    baseUrl: keepUrl ? form.baseUrl : next.defaultBaseUrl,
+    baseUrl: rememberedUrl?.trim() || next.defaultBaseUrl,
     model: next.defaultModel,
     apiKey: undefined,
     accountId: undefined,
