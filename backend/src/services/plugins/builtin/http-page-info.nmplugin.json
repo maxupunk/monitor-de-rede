@@ -4,7 +4,7 @@
     "slug": "http-page-info",
     "name": "Página web – identificação",
     "version": "1.0.0",
-    "description": "Lê título e servidor da página web do equipamento (porta 80/443). Só leitura, sem login.",
+    "description": "Identifica o equipamento pela página web: lê o título da página e o nome do servidor web (portas 80 e 443). Só leitura, não precisa de login.",
     "author": "NetMonitor",
     "transports": [
       "http"

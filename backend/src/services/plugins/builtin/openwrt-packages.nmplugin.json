@@ -4,7 +4,7 @@
     "slug": "openwrt-packages",
     "name": "Gerenciador de pacotes",
     "version": "1.1.0",
-    "description": "Lista, busca, instala e remove pacotes do OpenWrt por SSH — opkg até a 24.10, apk a partir da 25.",
+    "description": "Mostra, procura, instala e remove programas (pacotes) do roteador OpenWrt por SSH. Instalar e remover alteram o roteador. Usa opkg até a versão 24.10 e apk a partir da 25.",
     "author": "NetMonitor",
     "transports": [
       "ssh"

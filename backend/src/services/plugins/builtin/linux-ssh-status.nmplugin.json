@@ -4,7 +4,7 @@
     "slug": "linux-ssh-status",
     "name": "Linux – estado do sistema",
     "version": "1.1.0",
-    "description": "Versão, carga, memória e uso de disco de qualquer Linux com SSH. Só leitura.",
+    "description": "Mostra a versão do sistema, a carga de CPU, a memória e o uso de disco de um equipamento Linux acessado por SSH. Só leitura: não altera nada.",
     "author": "NetMonitor",
     "transports": [
       "ssh"

@@ -83,6 +83,9 @@
           <template #[`item.name`]="{ item }">
             <div class="font-weight-bold">{{ item.name }}</div>
             <div class="text-body-small font-mono">{{ item.slug }} · v{{ item.version }}</div>
+            <div v-if="item.description" class="text-body-2 mt-1" style="max-width: 60ch">
+              {{ item.description }}
+            </div>
           </template>
           <template #[`item.status`]="{ item }">
             <v-chip size="small" :color="statusPresentation(item.status).color" variant="flat">

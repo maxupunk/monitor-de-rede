@@ -4,7 +4,7 @@
     "slug": "openwrt-wifi",
     "name": "Rede Wi-Fi (OpenWrt)",
     "version": "2.5.0",
-    "description": "SSIDs, roaming 802.11r/k/v, mesh 802.11s e canais de vários roteadores OpenWrt, lidos e alterados direto nos roteadores.",
+    "description": "Gerencia as redes Wi-Fi de vários roteadores OpenWrt: nome (SSID), senha, roaming (802.11r/k/v), mesh (802.11s) e canal. Lê e altera direto no roteador, sem guardar cópia no NetMonitor.",
     "author": "NetMonitor",
     "transports": [
       "ssh"
