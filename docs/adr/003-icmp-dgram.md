@@ -113,6 +113,18 @@ no log; aí sim se reavalia com um caso concreto.
   `ping_client` (§9.5), e compartilhado entre o monitor e o *sweep* ICMP do
   discovery. Cada medição usa seu próprio `PingIdentifier`; é o `Client` que
   multiplexa as respostas.
+- **Rede do host (`docker-compose.host.yml`).** Com `network_mode: host` o
+  compose não aceita `sysctls` e o valor que manda é o do host, que no kernel
+  puro é `1 0` — e um valor ajustado à mão some no reboot do servidor, que
+  foi o que derrubou a produção em 2026-10-14. O override sobe o guardião
+  `icmp-sysctl` (privilegiado só para esse sysctl, `restart: unless-stopped`,
+  `docker/ping-group-range.sh --watch`), que libera o valor no host a cada
+  boot e o confere periodicamente; a API continua sem capability nenhuma.
+  `CAP_NET_RAW` na API foi considerado e recusado: em rede do host ele
+  permitiria forjar e capturar pacotes nas interfaces do servidor. E o cliente deixou de ser criado só no boot: a
+  `PingClientCell` tenta de novo a cada uso, então liberar o sysctl à mão
+  também resolve sem reiniciar. Sem ICMP, a descoberta segue por ARP e TCP em
+  vez de falhar.
 - **Correção na §3.1:** `socket2` fica em `0.6`, não `0.5`. O `surge-ping` 0.8
   depende de `socket2 ^0.6`, e `sock_type_hint` recebe o `socket2::Type`
   **daquela** versão. Com as duas majors na árvore, o tipo não unifica e o

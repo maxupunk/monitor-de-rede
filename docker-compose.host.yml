@@ -7,10 +7,41 @@
 # `!reset` remove publicação de portas e sysctls do namespace do container,
 # opções incompatíveis com `network_mode: host`.
 services:
+  # ⚠ Sem os sysctls do compose, o `net.ipv4.ping_group_range` que vale é o
+  # **do host** — e o padrão do kernel (`1 0`) fecha o ping sem privilégio da
+  # API (ADR 003): monitores de ping e varredura ICMP falham com "Ping
+  # indisponível". Pior: um valor ajustado à mão no host some no próximo
+  # reboot do servidor — foi o que derrubou a produção em 2026-10-14.
+  #
+  # Este guardião é privilegiado só para gravar esse sysctl no host; a API
+  # continua sem capability nenhuma. Ele sobe com o Docker a cada boot
+  # (`unless-stopped` — um serviço que grava e sai não voltaria) e confere a
+  # cada `ICMP_SYSCTL_INTERVAL` segundos. Só amplia (`0 2147483647`, ou
+  # `0 65535` no Synology); se o host já libera, não toca em nada. A ordem
+  # entre ele e a API não importa: a API tenta abrir o socket a cada uso.
+  # Prefere cuidar disso no host? Persista o sysctl em /etc/sysctl.d/ e o
+  # guardião só observa.
+  icmp-sysctl:
+    build:
+      context: .
+      target: runtime
+    image: netmonitor:latest
+    network_mode: host
+    privileged: true
+    restart: unless-stopped
+    entrypoint: ["/usr/local/bin/ping-group-range.sh", "--watch"]
+    environment:
+      ICMP_SYSCTL_INTERVAL: ${ICMP_SYSCTL_INTERVAL:-300}
+    # Não tem porta, banco nem estado; o healthcheck da imagem é o da API.
+    healthcheck:
+      disable: true
+
   netmonitor:
     network_mode: host
     ports: !reset []
     sysctls: !reset {}
+    depends_on:
+      - icmp-sysctl
     environment:
       # Sem mapeamento, a porta escutada é também a que entra nos comandos dos
       # roteadores. Pode ser alterada por SYSLOG_LISTEN_PORT no `.env`.

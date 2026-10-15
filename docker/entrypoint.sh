@@ -105,15 +105,10 @@ cleanup() {
 trap cleanup TERM INT
 
 # --- 2.1. socket ICMP sem privilégio (ADR 003) ------------------------------
-# Se o sysctl net.ipv4.ping_group_range não foi injetado pelo compose/orquestrador,
-# tenta ativá-lo como root no namespace de rede do container antes de largar os privilégios.
-# Synology DSM e kernels de 16-bit exigem '0 65535'; 2147483647 devolve 'invalid argument'.
-if [ -w /proc/sys/net/ipv4/ping_group_range ]; then
-  { echo "0 65535" > /proc/sys/net/ipv4/ping_group_range 2>/dev/null \
-    || echo "0 2147483647" > /proc/sys/net/ipv4/ping_group_range 2>/dev/null; } \
-    && log "net.ipv4.ping_group_range configurado com sucesso" \
-    || true
-fi
+# Confere o sysctl e, se der, o libera como root antes de largar os privilégios.
+# Quando não dá, o aviso sai no log com o comando para o host — antes era
+# silêncio, e o primeiro sinal era o "ping indisponível" na tela.
+/usr/local/bin/ping-group-range.sh "$(id -g "${APP_USER}")"
 
 # --- 3. aplicação, sem privilégio -------------------------------------------
 # `--inh-caps=-all` esvazia o conjunto herdável: nem por engano a aplicação

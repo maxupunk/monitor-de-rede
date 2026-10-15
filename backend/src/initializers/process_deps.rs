@@ -20,7 +20,7 @@ use crate::services::{
     discovery::service::ScanSessionService,
     docker::log_stream::LogStreams,
     events::{EventBus, Presence},
-    monitoring::checkers::ping::PingClient,
+    monitoring::checkers::ping::PingClientCell,
 };
 
 /// Popula o `shared_store` do contexto.
@@ -44,23 +44,13 @@ pub fn install(ctx: &AppContext) {
 
     // O socket ICMP é a única peça que pode falhar, e falha por configuração do
     // ambiente, não por bug: sem `net.ipv4.ping_group_range` liberado, o
-    // `SOCK_DGRAM` volta `EACCES` (ADR 003). O container `migration` não recebe
-    // esse sysctl — e não precisa, porque não pinga. Derrubar o `db migrate`
-    // por causa disso travaria a stack inteira, então aqui o erro vira aviso.
+    // `SOCK_DGRAM` volta `EPERM` (ADR 003). Derrubar o `db migrate` por causa
+    // disso travaria a stack inteira, então aqui o erro vira aviso — e a célula
+    // tenta de novo a cada uso, para o ping voltar sozinho quando o sysctl for
+    // liberado, sem reiniciar o processo.
     //
     // Quem realmente precisa do cliente descobre no lugar certo: o
-    // `PingChecker::from_context` devolve erro nomeado, que vira a mensagem do
-    // `monitor_results`.
-    match PingClient::create() {
-        Ok(client) => {
-            ctx.shared_store.insert(client);
-        }
-        Err(error) => {
-            tracing::warn!(
-                %error,
-                "cliente ICMP indisponível neste processo; monitores de ping locais vão falhar. \
-                 Confira o sysctl net.ipv4.ping_group_range (ADR 003)."
-            );
-        }
-    }
+    // `PingClient::from_context` devolve erro nomeado, que vira a mensagem do
+    // `monitor_results` e da descoberta.
+    ctx.shared_store.insert(PingClientCell::open());
 }

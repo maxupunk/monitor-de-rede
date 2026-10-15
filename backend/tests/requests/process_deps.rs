@@ -9,6 +9,7 @@ use backend::{
     services::{
         discovery::service::ScanSessionService,
         events::{relay::relay_pending, EventBus},
+        monitoring::checkers::ping::PingClientCell,
     },
     tasks::scheduler_run::run_cycle,
 };
@@ -51,6 +52,12 @@ async fn contexto_de_tarefa_tem_as_dependencias_de_processo() {
     assert!(
         ScanSessionService::from_context(&ctx).is_ok(),
         "sessão de scan ausente num contexto de tarefa"
+    );
+    // Instalada mesmo quando o socket não abre: é ela que tenta de novo
+    // depois que o `ping_group_range` é liberado, sem reiniciar o processo.
+    assert!(
+        ctx.shared_store.contains::<PingClientCell>(),
+        "célula do cliente ICMP ausente num contexto de tarefa"
     );
 }
 

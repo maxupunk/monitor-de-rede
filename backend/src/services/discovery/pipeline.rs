@@ -83,8 +83,11 @@ impl Batch {
     }
 }
 
+/// `ping` ausente não interrompe a varredura: sem ICMP, a presença vem da
+/// tabela de vizinhos e da prova por TCP em todos os endereços — mais lenta,
+/// mas encontra o parque em vez de falhar inteira.
 pub async fn scan(
-    ping: &PingClient,
+    ping: Option<&PingClient>,
     target: &ScanTarget,
     cancel: CancellationToken,
     reporter: &ScanReporter,
@@ -201,10 +204,18 @@ struct Presence {
     stale: Vec<DiscoveredHost>,
     pinged: usize,
     neighbors: usize,
+    /// O ping rodou. Sem ele, `pinged` é zero por falta de medição, não de hosts.
+    icmp: bool,
 }
 
 impl Presence {
     fn summary(&self, addresses: usize) -> String {
+        if !self.icmp {
+            return format!(
+                "Ping indisponível: {} de {addresses} endereço(s) na tabela de vizinhos (ARP);                  os demais passam pela prova de vida por TCP.",
+                self.neighbors
+            );
+        }
         let mut line = format!(
             "{} de {addresses} endereço(s) responderam ao ping; {} na tabela de vizinhos (ARP).",
             self.pinged, self.neighbors
@@ -221,7 +232,7 @@ impl Presence {
 
 /// Estágio 1: quem responde ICMP ou ARP.
 async fn presence(
-    ping: &PingClient,
+    ping: Option<&PingClient>,
     addresses: &[IpAddr],
     cancel: &CancellationToken,
     reporter: &ScanReporter,
@@ -233,7 +244,10 @@ async fn presence(
         batch.at(25) - batch.at(0),
         batch.total,
     );
-    let icmp_hosts = icmp::scan(ping, addresses, cancel.clone(), &stage).await?;
+    let icmp_hosts = match ping {
+        Some(ping) => icmp::scan(ping, addresses, cancel.clone(), &stage).await?,
+        None => Vec::new(),
+    };
     let pinged: BTreeSet<String> = icmp_hosts
         .iter()
         .map(|host| host.ip_address.clone())
@@ -254,8 +268,9 @@ async fn presence(
         .collect();
 
     // No mesmo enlace, quem não respondeu ARP não existe: só as lembranças
-    // velhas da tabela precisam de prova. Fora dele, todo mudo é suspeito.
-    let silent: Vec<IpAddr> = if on_link {
+    // velhas da tabela precisam de prova. Fora dele, todo mudo é suspeito — e
+    // sem ping também, porque foi o ping que faria o kernel perguntar o ARP.
+    let silent: Vec<IpAddr> = if on_link && ping.is_some() {
         stale
             .iter()
             .filter_map(|host| host.ip_address.parse().ok())
@@ -270,6 +285,7 @@ async fn presence(
     Ok(Presence {
         pinged: pinged.len(),
         neighbors: neighbor_count,
+        icmp: ping.is_some(),
         alive: [icmp_hosts, confirmed].concat(),
         silent,
         stale,
@@ -419,8 +435,18 @@ mod tests {
             stale: Vec::new(),
             pinged: 48,
             neighbors: 0,
+            icmp: true,
         };
         assert!(presence.summary(254).contains("Sem MAC visível"));
+        let sem_ping = Presence {
+            pinged: 0,
+            neighbors: 3,
+            icmp: false,
+            ..presence
+        };
+        let line = sem_ping.summary(254);
+        assert!(line.starts_with("Ping indisponível"), "{line}");
+        assert!(line.contains("3 de 254"), "{line}");
         let host = DiscoveredHost {
             ip_address: "10.0.0.1".into(),
             hostname: Some("gw".into()),

@@ -11,7 +11,7 @@ use crate::services::{
             dns::{DnsChecker, DnsConfig},
             host_resources::{HostResourcesChecker, HostResourcesConfig},
             http::{HttpChecker, HttpConfig},
-            ping::{PingChecker, PingClient, PingConfig},
+            ping::{PingChecker, PingClient, PingClientCell, PingConfig},
             snmp::{SnmpChecker, SnmpCheckerConfig},
             system_health::{SystemHealthChecker, SystemHealthConfig},
             tcp::{TcpChecker, TcpConfig},
@@ -48,22 +48,26 @@ pub fn merge_timeout(config: &Value, timeout_ms: Option<u64>) -> Value {
 pub struct CheckDeps {
     /// Opcional porque só o ping precisa dele: sem o socket ICMP, os demais
     /// tipos continuam rodando e só o ping falha — como antes do refactor.
-    pub ping: Option<PingClient>,
+    /// A célula tenta abrir de novo a cada uso (ver [`PingClientCell`]).
+    pub ping: Option<PingClientCell>,
 }
 
 impl CheckDeps {
     #[must_use]
     pub fn from_context(ctx: &AppContext) -> Self {
         Self {
-            ping: PingClient::from_context(ctx).ok(),
+            ping: ctx.shared_store.get::<PingClientCell>(),
         }
     }
 
     /// Cliente ICMP ou o mesmo erro que `PingClient::from_context` devolveria.
     pub fn ping_client(&self) -> AppResult<PingClient> {
         self.ping
-            .clone()
-            .ok_or_else(|| AppError::Internal(anyhow::anyhow!("Cliente ICMP não inicializado")))
+            .as_ref()
+            .ok_or_else(|| {
+                AppError::ServiceUnavailable("Ping não habilitado neste processo".to_string())
+            })?
+            .client()
     }
 }
 

@@ -457,10 +457,10 @@ pub async fn run_discovery(
     vendors::service::ensure_loaded(&ctx.db).await;
     let (reporter, events) = ScanReporter::channel();
     let pump = tokio::spawn(pump_events(session.clone(), events));
-    let outcome = match PingClient::from_context(ctx) {
-        Ok(ping) => pipeline::scan(&ping, target, cancel, &reporter).await,
-        Err(error) => Err(error),
-    };
+    let ping = PingClient::from_context(ctx)
+        .map_err(|error| reporter.log(format!("{error} A varredura segue sem ping.")))
+        .ok();
+    let outcome = pipeline::scan(ping.as_ref(), target, cancel, &reporter).await;
     // Derrubar o repórter fecha o canal e encerra o pump: só depois disso o
     // estado publicado é o final, e não uma atualização atrasada de fase.
     drop(reporter);
@@ -497,8 +497,12 @@ pub async fn scan_network_with(
     cidr: &str,
     cancel: CancellationToken,
 ) -> AppResult<Vec<DiscoveredHost>> {
+    let ping = deps
+        .ping_client()
+        .map_err(|error| tracing::warn!(%error, "varredura sem ping"))
+        .ok();
     pipeline::scan(
-        &deps.ping_client()?,
+        ping.as_ref(),
         &ScanTarget::new(cidr),
         cancel,
         &ScanReporter::silent(),

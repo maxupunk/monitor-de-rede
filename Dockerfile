@@ -157,8 +157,9 @@ COPY --from=agent-builder /usr/local/bin/netmonitor-agent /app/agent-dist/netmon
 RUN mv /app/agent-dist/netmonitor-agent "/app/agent-dist/netmonitor-agent-$(uname -m)"
 COPY --from=builder /usr/src/app/config /app/config
 COPY --from=web /web/dist /app/web
-COPY docker/entrypoint.sh docker/wireguard-watcher.sh docker/healthcheck.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/wireguard-watcher.sh /usr/local/bin/healthcheck.sh
+COPY docker/entrypoint.sh docker/wireguard-watcher.sh docker/healthcheck.sh docker/ping-group-range.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/wireguard-watcher.sh /usr/local/bin/healthcheck.sh \
+    /usr/local/bin/ping-group-range.sh
 
 # Banco (SQLite) e configuração do túnel, no mesmo volume — um só. O entrypoint
 # acerta o dono antes de largar o privilégio: volume nomeado nasce do root.

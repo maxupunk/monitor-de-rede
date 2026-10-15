@@ -17,7 +17,7 @@ use tokio_tungstenite::tungstenite::{
 use crate::{
     services::{
         docker::source::LocalEngine,
-        monitoring::{checkers::ping::PingClient, runner::CheckDeps},
+        monitoring::{checkers::ping::PingClientCell, runner::CheckDeps},
         telemetry::{host_metrics::HostMetricsReader, sampler},
     },
     views::agents::AgentEnrollResponse,
@@ -105,9 +105,7 @@ pub async fn run_forever(config: AgentConfig) {
         executor: Arc::new(LocalExecutor::new(
             config.policy.clone(),
             CheckDeps {
-                ping: PingClient::create()
-                    .map_err(|error| tracing::warn!(%error, "ICMP indisponível neste host"))
-                    .ok(),
+                ping: Some(PingClientCell::open()),
             },
         )),
         outbox: outbox.clone(),
