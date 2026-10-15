@@ -6,7 +6,8 @@
 //! * [`session`] / [`hub`] — conexões vivas e correlação de pedidos;
 //! * [`connection`] — handshake e vida de uma conexão (sem WebSocket);
 //! * [`service`] / [`enrollment`] — cadastro, código de uso único, token;
-//! * [`remote_engine`] — o Docker do host remoto como fonte da central;
+//! * [`remote_engine`] — o Docker do host do agente como fonte da central;
+//! * [`local`] — o agente ao lado da central, dono do Docker dela (ADR 014);
 //! * [`inbound`] / [`background`] — eventos recebidos, modo ao vivo e pump
 //!   de tarefas.
 //!
@@ -20,6 +21,7 @@ pub mod hub;
 pub mod inbound;
 pub mod install;
 pub mod install_address;
+pub mod local;
 pub mod policy;
 pub mod protocol;
 pub mod remote_engine;

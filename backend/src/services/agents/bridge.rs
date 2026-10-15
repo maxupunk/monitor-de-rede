@@ -14,6 +14,10 @@
 //! A ponte local guarda o **agente**, não a conexão dele: cada conexão aceita
 //! pede a sessão atual ao [`AgentHub`]. Se o canal cair e o agente reconectar
 //! no meio de um backup, a tentativa seguinte já sai pela conexão nova.
+//!
+//! A mesma ponte, só de ida, traz o tar de um volume ([`download_volume`],
+//! ADR 014): o Docker de todo host — o desta central inclusive — chega pelo
+//! agente, e o download não pode ir em JSON.
 
 use std::{
     net::{Ipv4Addr, SocketAddr},
@@ -23,7 +27,8 @@ use std::{
 
 use serde_json::Value;
 use tokio::{
-    net::{TcpListener, TcpStream},
+    io::{AsyncRead, AsyncWrite, AsyncWriteExt, DuplexStream},
+    net::TcpListener,
     sync::mpsc,
     task::JoinHandle,
 };
@@ -33,12 +38,12 @@ use uuid::Uuid;
 use super::{
     hub::AgentHub,
     policy::Permission,
-    protocol::{Command, ErrorCode, RemoteError, TunnelPayload},
+    protocol::{Command, ErrorCode, RemoteError, TunnelPayload, TUNNEL_DATA_MAX},
     session::{AgentSession, Call},
     tunnel::{pump, TunnelTotals},
 };
 
-/// Tempo para o agente conectar no banco e confirmar a ponte.
+/// Tempo para o agente abrir a ponta dele (banco ou volume) e confirmar.
 const OPEN_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Vida máxima de uma ponte: o maior dump que se espera, com folga.
@@ -56,41 +61,52 @@ pub struct OpenTunnel {
     done: Option<JoinHandle<Result<Value, RemoteError>>>,
 }
 
+/// Por que a política anunciada recusa a ponte, com o que liberar no host.
+fn refusal(agent: &str, command: &Command) -> String {
+    match command.permission() {
+        Permission::Database => format!(
+            "O agente em {agent} não libera ponte de banco: acrescente 'database' em \
+             AGENT_ALLOW e o destino em AGENT_DATABASE_TARGETS no host"
+        ),
+        permission => format!(
+            "O agente em {agent} não libera '{permission}': acrescente a permissão em \
+             AGENT_ALLOW no host"
+        ),
+    }
+}
+
+/// A ponta do agente, para as mensagens.
+fn describe(command: &Command) -> String {
+    match command {
+        Command::DatabaseTunnel { host, port } => format!("{host}:{port}"),
+        Command::VolumeExport { name } => format!("o volume {name}"),
+        _ => "a ponte".to_string(),
+    }
+}
+
 impl OpenTunnel {
-    /// Pede ao agente uma ponte até `host:port` e espera ela abrir.
+    /// Pede ao agente a ponte de `command` (`DatabaseTunnel` ou
+    /// `VolumeExport`) e espera ela abrir.
     ///
     /// # Errors
     ///
-    /// Agente sem a permissão `database` ou sem suporte a ponte, recusa do
-    /// agente (destino fora da lista, banco inacessível) ou tempo esgotado.
-    pub async fn open(
-        session: Arc<AgentSession>,
-        host: &str,
-        port: u16,
-    ) -> Result<Self, RemoteError> {
-        if !session.allows(Permission::Database) {
+    /// Agente sem a permissão do comando ou sem suporte a ponte, recusa do
+    /// agente (destino fora da lista, banco inacessível, volume inexistente)
+    /// ou tempo esgotado.
+    pub async fn open(session: Arc<AgentSession>, command: Command) -> Result<Self, RemoteError> {
+        if !session.allows(command.permission()) {
             return Err(RemoteError::new(
                 ErrorCode::Forbidden,
-                format!(
-                    "O agente em {} não libera ponte de banco: acrescente 'database' em \
-                     AGENT_ALLOW e o destino em AGENT_DATABASE_TARGETS no host",
-                    session.name
-                ),
+                refusal(&session.name, &command),
             ));
         }
         if session.tunnel_out().is_none() {
             return Err(RemoteError::disconnected());
         }
 
+        let target = describe(&command);
         let (chunks_tx, mut chunks) = mpsc::unbounded_channel();
-        let call = Call::new(
-            Command::DatabaseTunnel {
-                host: host.to_string(),
-                port,
-            },
-            MAX_LIFETIME,
-        )
-        .with_chunks(chunks_tx);
+        let call = Call::new(command, MAX_LIFETIME).with_chunks(chunks_tx);
         let id = call.id;
         let inbound = session.register_tunnel(id);
         let mut done = {
@@ -117,7 +133,7 @@ impl OpenTunnel {
                 done.abort();
                 Err(RemoteError::new(
                     ErrorCode::Timeout,
-                    format!("O agente não abriu a ponte até {host}:{port} a tempo"),
+                    format!("O agente não abriu a ponte até {target} a tempo"),
                 ))
             }
         }
@@ -134,8 +150,10 @@ impl OpenTunnel {
     /// # Errors
     ///
     /// Falha no socket local.
-    pub async fn run(mut self, stream: TcpStream) -> std::io::Result<TunnelTotals> {
-        let _ = stream.set_nodelay(true);
+    pub async fn run<S>(mut self, stream: S) -> std::io::Result<TunnelTotals>
+    where
+        S: AsyncRead + AsyncWrite + Unpin,
+    {
         let Some(outbound) = self.session.tunnel_out() else {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::NotConnected,
@@ -152,10 +170,44 @@ impl OpenTunnel {
             enviados = totals.sent,
             no_fio = totals.sent_on_wire,
             recebidos = totals.received,
-            "ponte de banco encerrada"
+            "ponte encerrada"
         );
         Ok(totals)
     }
+}
+
+/// O tar do volume `name` do host do agente, como um leitor (ADR 014).
+///
+/// A central não manda nada pela ponte: fecha a escrita do seu lado na hora
+/// e lê até o agente fechar o dele. Soltar o leitor antes do fim (o download
+/// foi cancelado) derruba a bomba, e a queda cancela a ponte no agente — que
+/// então remove o container auxiliar da exportação.
+///
+/// # Errors
+///
+/// Ver [`OpenTunnel::open`].
+pub async fn download_volume(
+    session: Arc<AgentSession>,
+    name: &str,
+) -> Result<DuplexStream, RemoteError> {
+    let tunnel = OpenTunnel::open(
+        session,
+        Command::VolumeExport {
+            name: name.to_string(),
+        },
+    )
+    .await?;
+    let (mut reader, pump_side) = tokio::io::duplex(TUNNEL_DATA_MAX * 2);
+    reader
+        .shutdown()
+        .await
+        .map_err(|error| RemoteError::new(ErrorCode::Internal, error.to_string()))?;
+    tokio::spawn(async move {
+        if let Err(error) = tunnel.run(pump_side).await {
+            tracing::debug!(%error, "download de volume interrompido");
+        }
+    });
+    Ok(reader)
 }
 
 /// A ponte sai do agente quando sai daqui: fechar a rota e cancelar o pedido
@@ -223,6 +275,7 @@ impl LocalBridge {
                 };
                 match tunnel {
                     Ok(tunnel) => {
+                        let _ = stream.set_nodelay(true);
                         tokio::spawn(async move {
                             if let Err(error) = tunnel.run(stream).await {
                                 tracing::debug!(%error, "ponte de banco encerrada com erro");
@@ -251,7 +304,14 @@ async fn open_current(
     port: u16,
 ) -> Result<OpenTunnel, RemoteError> {
     let session = hub.get(probe_id).ok_or_else(RemoteError::disconnected)?;
-    OpenTunnel::open(session, host, port).await
+    OpenTunnel::open(
+        session,
+        Command::DatabaseTunnel {
+            host: host.to_string(),
+            port,
+        },
+    )
+    .await
 }
 
 impl Drop for LocalBridge {

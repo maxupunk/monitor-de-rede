@@ -4,7 +4,9 @@
 
 Aceito em 2026-09-22. Implementado em seis fases (F0–F6, ver `roadmap.md`):
 canal e enrollment, Docker remoto, telemetria e histórico, absorção do probe,
-pull/update/compose e provisionamento pela VPN.
+pull/update/compose e provisionamento pela VPN. Desde o
+[ADR 014](014-docker-local-pelo-agente.md) o Docker da própria central também
+é atendido por um agente (o local), e o host `local` deixou de existir.
 
 Validação ponta a ponta feita com a central em PostgreSQL e o agente em
 container (imagem `--target agent`) contra o Docker Desktop: enrollment,

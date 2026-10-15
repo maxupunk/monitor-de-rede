@@ -1,22 +1,21 @@
 //! Laço de amostragem: host + containers a cada 10 s, minuto fechado para um
 //! destino.
 //!
-//! O destino é a única diferença entre a central e o agente (inversão de
-//! dependência): a central grava direto no banco com a chave `local`; o
-//! agente manda o minuto pelo canal e, sem conexão, para o buffer offline.
+//! Roda no agente — o remoto e o local, ao lado da central (ADR 014). O
+//! destino é uma abstração (inversão de dependência): o agente manda o minuto
+//! pelo canal e, sem conexão, para o buffer offline; a central grava com a
+//! chave do host ([`crate::services::agents::inbound`]).
 
 use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use chrono::Utc;
-use sea_orm::DatabaseConnection;
 
 use crate::services::docker::source::DockerEngine;
 
 use super::{
     host_metrics::HostMetricsReader,
     rollup::{ContainerSample, MetricsRollup, RollupAccumulator},
-    store,
 };
 
 pub const SAMPLE_INTERVAL: Duration = Duration::from_secs(10);
@@ -24,31 +23,6 @@ pub const SAMPLE_INTERVAL: Duration = Duration::from_secs(10);
 #[async_trait]
 pub trait RollupSink: Send + Sync {
     async fn accept(&self, rollup: MetricsRollup);
-}
-
-/// Grava o minuto no histórico da própria central.
-pub struct DatabaseSink {
-    db: DatabaseConnection,
-    host_key: String,
-}
-
-impl DatabaseSink {
-    #[must_use]
-    pub fn new(db: DatabaseConnection, host_key: impl Into<String>) -> Self {
-        Self {
-            db,
-            host_key: host_key.into(),
-        }
-    }
-}
-
-#[async_trait]
-impl RollupSink for DatabaseSink {
-    async fn accept(&self, rollup: MetricsRollup) {
-        if let Err(error) = store::save(&self.db, &self.host_key, &rollup).await {
-            tracing::warn!(%error, host = %self.host_key, "falha ao gravar o minuto de métricas");
-        }
-    }
 }
 
 pub struct Sampler {
@@ -97,7 +71,8 @@ pub fn spawn(mut sampler: Sampler, sink: Arc<dyn RollupSink>) -> tokio::task::Jo
     })
 }
 
-/// `TELEMETRY_ENABLED=false` desliga o histórico do host local.
+/// `TELEMETRY_ENABLED=false` no ambiente do agente desliga o histórico do
+/// host dele.
 #[must_use]
 pub fn enabled() -> bool {
     std::env::var("TELEMETRY_ENABLED").map_or(true, |value| {

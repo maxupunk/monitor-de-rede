@@ -37,6 +37,19 @@
           <v-card-title class="d-flex align-center ga-2">
             <v-icon color="primary">mdi-file-cabinet</v-icon>
             <span class="text-truncate">{{ project.name }}</span>
+            <v-chip
+              v-if="project.protected"
+              size="small"
+              color="info"
+              variant="tonal"
+              prepend-icon="mdi-shield-lock"
+            >
+              Instalação NetMonitor
+              <v-tooltip activator="parent" location="top" max-width="280">
+                Projeto desta central: só baixar imagens é permitido. Subir, parar ou derrubar
+                derrubaria a própria tela.
+              </v-tooltip>
+            </v-chip>
             <v-spacer></v-spacer>
             <v-chip size="small" variant="tonal" :color="runningColor(project)">
               {{ project.running }}/{{ project.containers }} rodando
@@ -49,7 +62,7 @@
               <div class="text-overline text-medium-emphasis">Projeto inteiro</div>
               <div class="d-flex flex-wrap ga-2 mb-4">
                 <v-btn
-                  v-for="action in projectActions"
+                  v-for="action in projectActionsFor(project)"
                   :key="action.value"
                   :color="action.color"
                   :prepend-icon="action.icon"
@@ -84,7 +97,7 @@
                 <template v-if="canAct" #append>
                   <div class="d-flex ga-1">
                     <v-btn
-                      v-for="action in serviceActions(service)"
+                      v-for="action in serviceActions(service, project.protected)"
                       :key="action.value"
                       :icon="action.icon"
                       :color="action.color"
@@ -210,10 +223,18 @@ const ACTIONS: Record<ComposeAction, ActionMeta> = {
 
 const projectActions = [ACTIONS.pull, ACTIONS.up, ACTIONS.restart, ACTIONS.stop, ACTIONS.down]
 
+const pullService: ActionMeta = { ...ACTIONS.pull, title: 'Baixar imagem de' }
+
+/** Projeto da instalação (protegido): o agente só aceita `pull` (ADR 014). */
+function projectActionsFor(project: ComposeProject): ActionMeta[] {
+  return project.protected ? [ACTIONS.pull] : projectActions
+}
+
 /** `down` não existe para um serviço só; parar/iniciar depende do estado. */
-function serviceActions(service: ComposeService): ActionMeta[] {
+function serviceActions(service: ComposeService, isProtected: boolean): ActionMeta[] {
+  if (isProtected) return [pullService]
   const toggle = service.running > 0 ? ACTIONS.stop : { ...ACTIONS.up, title: 'Iniciar' }
-  return [ACTIONS.restart, toggle, { ...ACTIONS.pull, title: 'Baixar imagem de' }]
+  return [ACTIONS.restart, toggle, pullService]
 }
 
 const composeReady = computed(
@@ -222,13 +243,12 @@ const composeReady = computed(
 const canAct = computed(() => composeReady.value && auth.isAdmin)
 
 const composeUnavailableReason = computed(() => {
-  if (!docker.selectedHost || docker.selectedHost.kind === 'local') {
-    return 'Ações de compose rodam em servidores remotos. Nesta central os projetos são apenas listados.'
+  if (!docker.selectedHost?.composeAvailable) {
+    return 'O agente deste servidor não tem o plugin docker compose instalado.'
   }
-  if (!docker.selectedHost.composeAvailable) {
-    return 'Este servidor não tem o plugin docker compose instalado.'
-  }
-  return 'A política local deste servidor não libera ações de compose (AGENT_ALLOW).'
+  return docker.selectedHost.kind === 'local'
+    ? 'A política do agente local não libera ações de compose (LOCAL_AGENT_ALLOW).'
+    : 'A política local deste servidor não libera ações de compose (AGENT_ALLOW).'
 })
 
 function runningColor(item: { running: number; containers: number }): string {
@@ -255,6 +275,7 @@ const confirmHint = computed(() => confirmMeta.value.hint)
 const confirmColor = computed(() => confirmMeta.value.color)
 
 async function load() {
+  if (!docker.selectedHostKey) return
   loading.value = true
   error.value = null
   try {

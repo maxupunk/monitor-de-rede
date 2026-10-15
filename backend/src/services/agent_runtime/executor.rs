@@ -2,8 +2,8 @@
 //!
 //! É aqui que a política local é aplicada — a cada pedido, antes de qualquer
 //! efeito (ADR 011). As operações usam o **mesmo** código da central:
-//! `LocalEngine` para o Docker, `run_monitor_with`/`scan_network_with` para
-//! as checagens, `compose` para os projetos.
+//! `LocalEngine` para o Docker (compose incluído), `run_monitor_with`/
+//! `scan_network_with` para as checagens.
 
 use std::sync::Arc;
 
@@ -20,10 +20,9 @@ use crate::services::{
     },
     discovery::service::scan_network_with,
     docker::{
-        compose,
-        engine::{self, ContainerAction},
-        log_clear::is_current_container,
-        maintenance::{ComposeRequest, DockerMaintenance, Progress},
+        engine::ContainerAction,
+        maintenance::{DockerMaintenance, Progress},
+        protection::{is_current_container, is_protected_inspect},
         source::{DockerEngine, LocalEngine, LogChunk},
         DockerError,
     },
@@ -119,9 +118,10 @@ impl LocalExecutor {
         }
     }
 
-    /// Nenhuma mutação atinge o container que executa o próprio agente:
-    /// derrubá-lo cortaria a central do host sem volta.
-    async fn guard_self(&self, id: &str) -> Result<(), RemoteError> {
+    /// Nenhuma mutação atinge o container que executa o próprio agente nem
+    /// um container protegido da instalação (a central, ao lado do agente
+    /// local): derrubá-los cortaria a central do host sem volta (ADR 014).
+    async fn guard(&self, id: &str) -> Result<(), RemoteError> {
         let inspected = self
             .engine
             .inspect_container_raw(id)
@@ -134,26 +134,28 @@ impl LocalExecutor {
                 "O agente não executa ações sobre o próprio container",
             ));
         }
+        if is_protected_inspect(&inspected) {
+            return Err(RemoteError::new(
+                ErrorCode::Forbidden,
+                "Container protegido da instalação NetMonitor: a ação derrubaria a central",
+            ));
+        }
         Ok(())
     }
 
-    async fn compose(
-        &self,
-        request: &ComposeRequest,
-        progress: &Progress,
-    ) -> Result<Value, RemoteError> {
-        compose::availability().await.map_err(|reason| {
-            RemoteError::new(
-                ErrorCode::Unsupported,
-                format!("Compose indisponível: {reason}"),
-            )
-        })?;
-        let containers = engine::list_containers(self.engine.as_ref())
-            .await
-            .map_err(RemoteError::from)?;
-        let args = compose::build_args(&compose::projects(&containers), request)
-            .map_err(RemoteError::from)?;
-        docker(compose::run(args, request, progress).await)
+    /// Operação longa: o progresso vira chunks de texto até o fim.
+    async fn long<T, F>(
+        chunks: mpsc::UnboundedSender<Value>,
+        operation: impl FnOnce(Progress) -> F,
+    ) -> Result<Value, RemoteError>
+    where
+        T: Serialize,
+        F: std::future::Future<Output = Result<T, DockerError>>,
+    {
+        let (progress, forward) = progress_to_chunks(chunks);
+        let result = operation(progress).await;
+        let _ = forward.await;
+        docker(result)
     }
 
     async fn follow(
@@ -193,7 +195,7 @@ impl LocalExecutor {
             DockerCall::InspectContainer { id } => docker(engine.inspect_container_raw(&id).await),
             DockerCall::ContainerAction { id, action } => {
                 if action != ContainerAction::Start {
-                    self.guard_self(&id).await?;
+                    self.guard(&id).await?;
                 }
                 docker(engine.container_action(&id, action).await)
             }
@@ -228,7 +230,7 @@ impl LocalExecutor {
                 container,
                 force,
             } => {
-                self.guard_self(&container).await?;
+                self.guard(&container).await?;
                 docker(engine.disconnect_network(&network, &container, force).await)
             }
             DockerCall::ListImages => docker(engine.list_images_raw().await),
@@ -236,24 +238,23 @@ impl LocalExecutor {
             DockerCall::RemoveImage { id, force } => docker(engine.remove_image(&id, force).await),
             DockerCall::PruneImages => docker(engine.prune_images_raw().await),
             DockerCall::PullImage { image } => {
-                let (progress, forward) = progress_to_chunks(chunks);
-                let result = engine.pull_image(&image, progress).await;
-                let _ = forward.await;
-                docker(result)
+                Self::long(chunks, |progress| async move {
+                    engine.pull_image(&image, progress).await
+                })
+                .await
             }
             DockerCall::UpdateContainer { id } => {
-                self.guard_self(&id).await?;
-                let (progress, forward) = progress_to_chunks(chunks);
-                let result = engine.update_container(&id, progress).await;
-                let _ = forward.await;
-                docker(result)
+                self.guard(&id).await?;
+                Self::long(chunks, |progress| async move {
+                    engine.update_container(&id, progress).await
+                })
+                .await
             }
             DockerCall::Compose { request } => {
-                let (progress, forward) = progress_to_chunks(chunks);
-                let result = self.compose(&request, &progress).await;
-                drop(progress);
-                let _ = forward.await;
-                result
+                Self::long(chunks, |progress| async move {
+                    engine.compose(&request, progress).await
+                })
+                .await
             }
         }
     }
@@ -299,9 +300,9 @@ impl CommandExecutor for LocalExecutor {
             Command::SetLive { .. } => Ok(Value::Null),
             Command::DeviceIo { call } => device_io(&call).await,
             // A ponte precisa dos quadros binários do canal: é da sessão.
-            Command::DatabaseTunnel { .. } => Err(RemoteError::new(
+            Command::DatabaseTunnel { .. } | Command::VolumeExport { .. } => Err(RemoteError::new(
                 ErrorCode::Unsupported,
-                "a ponte de banco é atendida pela sessão do agente",
+                "pontes são atendidas pela sessão do agente",
             )),
         }
     }

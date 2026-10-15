@@ -3,8 +3,6 @@ import { defineStore } from 'pinia'
 import {
   createDockerService,
   dockerHostsService,
-  dockerService,
-  LOCAL_HOST_KEY,
   type DockerService,
 } from '@/services/dockerService'
 import type { DockerContainerSummary } from '@/bindings/DockerContainerSummary'
@@ -35,7 +33,7 @@ export interface DockerAggregateSample {
   containerNames: Record<string, string>
 }
 
-/** Estado de um host Docker (a central ou um agente), alimentado pelo SSE. */
+/** Estado de um host Docker (um agente: o local ou um remoto), alimentado pelo SSE. */
 export interface DockerHostState {
   status: DockerStatusResponse | null
   containers: DockerContainerSummary[]
@@ -87,8 +85,10 @@ function emptyHost(): DockerHostState {
 
 export const useDockerStore = defineStore('docker', () => {
   const hosts = ref<DockerHostView[]>([])
-  const hostStates = ref<Record<string, DockerHostState>>({ [LOCAL_HOST_KEY]: emptyHost() })
-  const selectedHostKey = ref<string>(LOCAL_HOST_KEY)
+  const hostsLoaded = ref(false)
+  const hostStates = ref<Record<string, DockerHostState>>({})
+  /** Vazio até a lista de hosts chegar: não há host para consultar antes disso. */
+  const selectedHostKey = ref<string>('')
   const operations = ref<DockerOperationState[]>([])
   const logStreams = ref<Record<string, DockerLogStreamState>>({})
   const loading = ref(false)
@@ -123,23 +123,28 @@ export const useDockerStore = defineStore('docker', () => {
   const selectedHost = computed<DockerHostView | null>(
     () => hosts.value.find((host) => host.key === selectedHostKey.value) ?? null
   )
-  /** Serviço do host selecionado: as telas nunca montam caminho sozinhas. */
-  const api = computed<DockerService>(() =>
-    selectedHostKey.value === LOCAL_HOST_KEY
-      ? dockerService
-      : createDockerService(selectedHostKey.value)
+  /** O agente local: o Docker desta central (ADR 014). */
+  const localHost = computed<DockerHostView | null>(
+    () => hosts.value.find((host) => host.kind === 'local') ?? null
   )
+  /** Host aberto quando ninguém escolheu: o desta central, senão o primeiro. */
+  const defaultHostKey = computed(() => localHost.value?.key ?? hosts.value[0]?.key ?? '')
+  /** Serviço do host selecionado: as telas nunca montam caminho sozinhas. */
+  const api = computed<DockerService>(() => createDockerService(selectedHostKey.value))
 
   /** O que a política do host selecionado libera (ADR 011). */
   function allows(permission: Permission): boolean {
-    const host = selectedHost.value
-    if (!host) return permission !== 'compose'
-    return host.policy.includes(permission)
+    return selectedHost.value?.policy.includes(permission) ?? false
   }
 
   function hostView(hostKey: string): DockerHostState {
     return hostStates.value[hostKey] ?? emptyHost()
   }
+
+  /** Estado do Docker desta central, qualquer que seja o host aberto na tela Docker. */
+  const localView = computed<DockerHostState>(() =>
+    localHost.value ? hostView(localHost.value.key) : emptyHost()
+  )
 
   function fail(reason: unknown, fallback: string): void {
     error.value = reason instanceof Error ? reason.message : fallback
@@ -195,7 +200,8 @@ export const useDockerStore = defineStore('docker', () => {
   }
 
   function applyLiveSnapshot(snapshot: DockerLiveSnapshot): void {
-    const state = stateOf(snapshot.hostKey || LOCAL_HOST_KEY)
+    if (!snapshot.hostKey) return
+    const state = stateOf(snapshot.hostKey)
     state.status = snapshot.status
     if (!snapshot.status.available) {
       clearUnavailableState(state)
@@ -204,18 +210,19 @@ export const useDockerStore = defineStore('docker', () => {
       state.metrics = snapshot.metrics
       recordAggregate(state, snapshot.metrics)
     }
-    if ((snapshot.hostKey || LOCAL_HOST_KEY) === selectedHostKey.value) {
+    if (snapshot.hostKey === selectedHostKey.value) {
       loading.value = false
       error.value = null
     }
   }
 
   function applyInventorySnapshot(snapshot: DockerInventorySnapshot): void {
-    const state = stateOf(snapshot.hostKey || LOCAL_HOST_KEY)
+    if (!snapshot.hostKey) return
+    const state = stateOf(snapshot.hostKey)
     state.volumes = snapshot.volumes
     state.networks = snapshot.networks
     state.images = snapshot.images
-    if ((snapshot.hostKey || LOCAL_HOST_KEY) === selectedHostKey.value) {
+    if (snapshot.hostKey === selectedHostKey.value) {
       error.value = null
     }
   }
@@ -298,20 +305,23 @@ export const useDockerStore = defineStore('docker', () => {
     try {
       hosts.value = await dockerHostsService.hosts()
       if (!hosts.value.some((host) => host.key === selectedHostKey.value)) {
-        selectedHostKey.value = LOCAL_HOST_KEY
+        selectedHostKey.value = defaultHostKey.value
       }
     } catch (reason: unknown) {
       fail(reason, 'Erro ao listar os hosts Docker')
+    } finally {
+      hostsLoaded.value = true
     }
   }
 
   function selectHost(hostKey: string): void {
-    selectedHostKey.value = hostKey || LOCAL_HOST_KEY
-    stateOf(selectedHostKey.value)
+    selectedHostKey.value = hostKey || defaultHostKey.value
+    if (selectedHostKey.value) stateOf(selectedHostKey.value)
     error.value = null
   }
 
   async function refreshAll(): Promise<void> {
+    if (!selectedHostKey.value) return
     loading.value = true
     error.value = null
     const state = stateOf(selectedHostKey.value)
@@ -345,6 +355,7 @@ export const useDockerStore = defineStore('docker', () => {
   }
 
   async function refreshContainers(): Promise<void> {
+    if (!selectedHostKey.value) return
     const state = stateOf(selectedHostKey.value)
     const service = api.value
     try {
@@ -378,9 +389,13 @@ export const useDockerStore = defineStore('docker', () => {
 
   return {
     hosts,
+    hostsLoaded,
     hostStates,
     selectedHostKey,
     selectedHost,
+    localHost,
+    localView,
+    defaultHostKey,
     api,
     operations,
     logStreams,

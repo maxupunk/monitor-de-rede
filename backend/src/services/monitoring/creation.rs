@@ -11,6 +11,7 @@ use crate::{
     dtos::resources::MonitorInput,
     models::{devices, monitors},
     services::{
+        agents::local,
         monitoring::{execution_guard::calculate_smart_timeout_seconds, reachability},
         preferences,
         shared::errors::{AppError, AppResult},
@@ -80,6 +81,23 @@ pub const SUPPORTED_MONITOR_TYPES: &[&str] = &[
     "container",
     "host_resources",
 ];
+
+/// Onde o monitor roda quando ninguém escolheu: um container sem probe é um
+/// container desta central, e o Docker dela é o do agente local (ADR 014).
+///
+/// # Errors
+///
+/// Propaga erro do banco.
+pub async fn default_probe<C: ConnectionTrait>(
+    db: &C,
+    kind: &str,
+    chosen: Option<i64>,
+) -> AppResult<Option<i64>> {
+    if chosen.is_some() || !kind.eq_ignore_ascii_case("container") {
+        return Ok(chosen);
+    }
+    Ok(local::find(db).await?.map(|probe| probe.id))
+}
 
 /// Tipo e nome obrigatórios e válidos.
 ///
@@ -209,9 +227,10 @@ pub async fn create<C: ConnectionTrait>(db: &C, input: MonitorInput) -> AppResul
         input.port,
         None,
     );
+    let probe_id = default_probe(db, &kind, input.probe_id).await?;
     Ok(monitors::ActiveModel {
         device_id: Set(input.device_id),
-        probe_id: Set(input.probe_id),
+        probe_id: Set(probe_id),
         r#type: Set(kind),
         name: Set(name),
         configuration: Set(config),

@@ -34,9 +34,6 @@ export interface DockerLogFilters {
   timestamps?: boolean
 }
 
-/** Host da própria central; os demais são `agent-<id>` (ADR 011). */
-export const LOCAL_HOST_KEY = 'local'
-
 function query(params: Record<string, string | number | boolean | undefined>): string {
   const values = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
@@ -47,12 +44,11 @@ function query(params: Record<string, string | number | boolean | undefined>): s
 }
 
 /**
- * Endpoints Docker de um host. O host local mantém as rotas históricas
- * (`/docker/...`); os remotos vão por `/docker/hosts/<chave>/...`.
+ * Endpoints Docker de um host (`agent-<id>`). Todo host é um agente — o desta
+ * central é o agente local (ADR 014) —, então o caminho é sempre o mesmo.
  */
-export function createDockerService(hostKey: string = LOCAL_HOST_KEY) {
-  const base =
-    hostKey === LOCAL_HOST_KEY ? '/docker' : `/docker/hosts/${encodeURIComponent(hostKey)}`
+export function createDockerService(hostKey: string) {
+  const base = `/docker/hosts/${encodeURIComponent(hostKey)}`
 
   function resource(path: string): string {
     return `${base}${path}`
@@ -225,9 +221,6 @@ export function createDockerService(hostKey: string = LOCAL_HOST_KEY) {
 }
 
 export type DockerService = ReturnType<typeof createDockerService>
-
-/** Serviço do Docker desta central — compatível com os usos anteriores. */
-export const dockerService = createDockerService(LOCAL_HOST_KEY)
 
 /** Operações que não pertencem a um host. */
 export const dockerHostsService = {

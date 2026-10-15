@@ -145,7 +145,6 @@ import PageHeader from '@/components/PageHeader.vue'
 import ResponsiveDataTable from '@/components/ResponsiveDataTable.vue'
 import { confirm } from '@/composables/useConfirm'
 import { useAuthStore } from '@/stores/auth'
-import { LOCAL_HOST_KEY } from '@/services/dockerService'
 import { useDockerStore } from '@/stores/docker'
 import { formatDateTime } from '@/utils/formatters'
 import type { DockerVolumeDetail } from '@/bindings/DockerVolumeDetail'
@@ -153,8 +152,8 @@ import type { DockerVolumeSummary } from '@/bindings/DockerVolumeSummary'
 
 const docker = useDockerStore()
 
-/** A exportação transmite o tar pelo socket local: não atravessa o agente. */
-const canExport = computed(() => auth.isAdmin && docker.selectedHostKey === LOCAL_HOST_KEY)
+/** O tar vem pela ponte do agente, se a política dele liberar (ADR 014). */
+const canExport = computed(() => auth.isAdmin && docker.allows('volume_export'))
 const auth = useAuthStore()
 const search = ref('')
 const detailDialog = ref(false)

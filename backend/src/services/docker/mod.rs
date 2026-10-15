@@ -2,6 +2,11 @@
 //!
 //! Esta é a única fronteira do sistema que conhece `bollard`. Controllers
 //! trabalham apenas com DTOs da aplicação e nunca executam o binário `docker`.
+//!
+//! O código daqui que fala com a Engine ([`source::LocalEngine`] e os módulos
+//! que ele usa) roda **no agente** — o remoto e o local, ao lado da central
+//! (ADR 014). O processo da API não monta o socket: vê todo host Docker pelo
+//! canal do agente ([`hosts`]).
 
 pub mod compose;
 pub mod engine;
@@ -11,6 +16,7 @@ pub mod log_stream;
 pub mod maintenance;
 pub mod metrics;
 pub mod operations;
+pub mod protection;
 pub mod realtime;
 pub mod source;
 pub mod update;
@@ -19,15 +25,14 @@ pub mod volume_export;
 use std::{future::Future, time::Duration};
 
 use bollard::Docker;
-use loco_rs::app::AppContext;
 
 use crate::services::shared::errors::{AppError, AppResult};
 
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(12);
 
 pub const DISABLED_REASON: &str =
-    "Integração Docker desativada: DOCKER_ENABLED=false no ambiente do backend";
-pub const UNAVAILABLE_REASON: &str = "O backend não conseguiu acessar a Docker Engine. A Engine pode estar desligada, o socket pode não estar montado ou o usuário da aplicação pode não ter permissão";
+    "Integração Docker desativada: DOCKER_ENABLED=false no ambiente do agente";
+pub const UNAVAILABLE_REASON: &str = "O agente não conseguiu acessar a Docker Engine. A Engine pode estar desligada, o socket pode não estar montado no container do agente ou ele pode não ter permissão";
 
 #[derive(Debug, thiserror::Error)]
 pub enum DockerError {
@@ -82,10 +87,6 @@ pub fn client() -> Result<Docker, DockerError> {
         return Err(DockerError::Disabled);
     }
     Docker::connect_with_local_defaults().map_err(|_| DockerError::Unavailable)
-}
-
-pub fn install(ctx: &AppContext) {
-    metrics::install(ctx);
 }
 
 pub(crate) async fn call<T>(

@@ -51,6 +51,9 @@ pub struct AgentView {
     pub last_seen_at: Option<String>,
     pub registered_at: Option<String>,
     pub enforce_tunnel_ip: bool,
+    /// O agente local, ao lado desta central (ADR 014): sobe com a
+    /// instalação e não é revogado nem removido pela tela.
+    pub local: bool,
     pub host: AgentHostInfo,
     pub created_at: String,
 }
@@ -98,7 +101,8 @@ pub struct AgentEnrollResponse {
     pub token: String,
 }
 
-/// Um host Docker disponível para a tela: a própria central ou um agente.
+/// Um host Docker disponível para a tela. Todo host é um agente (ADR 014):
+/// `kind` é `local` para o desta central e `agent` para os remotos.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
@@ -107,8 +111,8 @@ pub struct DockerHostView {
     pub name: String,
     pub kind: String,
     pub online: bool,
-    #[ts(type = "number | null")]
-    pub agent_id: Option<i64>,
+    #[ts(type = "number")]
+    pub agent_id: i64,
     pub docker_available: bool,
     pub compose_available: bool,
     pub policy: Vec<Permission>,

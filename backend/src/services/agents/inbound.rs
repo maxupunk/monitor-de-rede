@@ -9,7 +9,10 @@ use chrono::{DateTime, Duration, Utc};
 use loco_rs::app::AppContext;
 
 use crate::services::{
-    docker::hosts::HostKey,
+    docker::{
+        hosts::HostKey,
+        realtime::{INVENTORY_EVENT, LIVE_EVENT},
+    },
     events::EventBus,
     probes::receiver::{self, ProbeResultPayload},
     telemetry::{
@@ -39,18 +42,13 @@ pub async fn handle(ctx: &AppContext, probe_id: i64, event: AgentEvent) {
     match event {
         AgentEvent::DockerLive { mut snapshot } => {
             snapshot.host_key.clone_from(&host_key);
-            publish(
-                ctx,
-                "docker:snapshot",
-                &host_key,
-                serde_json::to_value(snapshot),
-            );
+            publish(ctx, LIVE_EVENT, &host_key, serde_json::to_value(snapshot));
         }
         AgentEvent::DockerInventory { mut snapshot } => {
             snapshot.host_key.clone_from(&host_key);
             publish(
                 ctx,
-                "docker:inventory",
+                INVENTORY_EVENT,
                 &host_key,
                 serde_json::to_value(snapshot),
             );

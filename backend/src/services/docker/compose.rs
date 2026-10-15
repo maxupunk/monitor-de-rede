@@ -2,9 +2,9 @@
 //!
 //! A Engine não conhece compose — só as labels que o CLI grava nos
 //! containers. A descoberta e a montagem da linha de comando são puras e
-//! rodam em qualquer processo. A **execução** ([`run`]) só é chamada pelo
-//! agente, no host remoto: o processo da API nunca executa o CLI `docker`
-//! (ADR 010, AGENTS §7).
+//! rodam em qualquer processo. A **execução** ([`execute`]) só acontece no
+//! agente — o remoto ou o local, ao lado da central (ADR 014): o processo da
+//! API nunca executa o CLI `docker` (ADR 010, AGENTS §7).
 
 use std::{collections::BTreeMap, process::Stdio, time::Duration};
 
@@ -15,7 +15,10 @@ use ts_rs::TS;
 use crate::views::docker::{DockerActionResponse, DockerContainerSummary};
 
 use super::{
+    engine,
     maintenance::{ComposeAction, ComposeRequest, Progress},
+    protection::{is_current_container, is_protected},
+    source::DockerEngine,
     DockerError,
 };
 
@@ -46,6 +49,9 @@ pub struct ComposeProject {
     pub services: Vec<ComposeService>,
     pub containers: usize,
     pub running: usize,
+    /// Algum container do projeto é protegido (a instalação do NetMonitor):
+    /// só `pull` é aceito, para o projeto não derrubar a própria central.
+    pub protected: bool,
 }
 
 impl ComposeProject {
@@ -95,7 +101,9 @@ pub fn projects(containers: &[DockerContainerSummary]) -> Vec<ComposeProject> {
                 services: Vec::new(),
                 containers: 0,
                 running: 0,
+                protected: false,
             });
+        project.protected |= is_protected(&container.labels) || is_current_container(&container.id);
         let running = usize::from(container.state == "running");
         project.containers += 1;
         project.running += running;
@@ -141,6 +149,12 @@ pub fn build_args(
         .ok_or_else(|| {
             DockerError::Validation("Projeto compose não encontrado neste host".into())
         })?;
+    if project.protected && request.action != ComposeAction::Pull {
+        return Err(DockerError::Forbidden(
+            "Projeto da instalação NetMonitor: ações de compose derrubariam a própria central"
+                .into(),
+        ));
+    }
     if let Some(service) = &request.service {
         if !project.has_service(service) {
             return Err(DockerError::Validation(
@@ -178,6 +192,25 @@ pub fn build_args(
         args.push(service.clone());
     }
     Ok(args)
+}
+
+/// Executa a ação no host desta Engine: confere o CLI, descobre o projeto
+/// pelas labels, monta os argumentos e repassa a saída como progresso.
+///
+/// # Errors
+///
+/// `Unsupported` sem o CLI; as recusas de [`build_args`]; as de [`run`].
+pub async fn execute(
+    engine: &dyn DockerEngine,
+    request: &ComposeRequest,
+    progress: &Progress,
+) -> Result<DockerActionResponse, DockerError> {
+    availability()
+        .await
+        .map_err(|reason| DockerError::Unsupported(format!("Compose indisponível: {reason}")))?;
+    let containers = engine::list_containers(engine).await?;
+    let args = build_args(&projects(&containers), request)?;
+    run(args, request, progress).await
 }
 
 /// Se o CLI com o plugin compose existe neste host.
@@ -296,6 +329,7 @@ mod tests {
             ports: Vec::new(),
             created: 0,
             project_name: Some(project.into()),
+            protected: false,
         }
     }
 
@@ -352,6 +386,34 @@ mod tests {
             })
             .collect();
         insta::assert_snapshot!(rendered.join("\n"));
+    }
+
+    #[test]
+    fn projeto_da_instalacao_so_aceita_pull() {
+        let mut central = container("netmonitor", "netmonitor", "running");
+        central.labels.insert(
+            crate::services::docker::protection::PROTECTED_LABEL.into(),
+            "true".into(),
+        );
+        let known = projects(&[central, container("netmonitor", "ollaya", "running")]);
+        assert!(known[0].protected);
+        let request = |action| ComposeRequest {
+            project: "netmonitor".into(),
+            action,
+            service: None,
+        };
+        assert!(build_args(&known, &request(ComposeAction::Pull)).is_ok());
+        for action in [
+            ComposeAction::Up,
+            ComposeAction::Restart,
+            ComposeAction::Stop,
+            ComposeAction::Down,
+        ] {
+            assert!(matches!(
+                build_args(&known, &request(action)),
+                Err(DockerError::Forbidden(_))
+            ));
+        }
     }
 
     #[test]

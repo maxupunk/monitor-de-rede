@@ -16,12 +16,10 @@ use loco_rs::{
 
 use crate::{
     services::{
-        agents::background as agents_background,
+        agents::{background as agents_background, local as local_agent},
         alerts::catalog::service as alert_catalog,
-        docker::{hosts::LOCAL_HOST_KEY, realtime as docker_realtime, source::LocalEngine},
         events::relay::relay_pending,
         network_tools::dns::registry::DnsServerRegistry,
-        telemetry::{host_metrics::HostMetricsReader, sampler},
         vpn::probe_is_external,
         vpn::probe_registrar as vpn_probe_registrar,
     },
@@ -45,10 +43,10 @@ impl Initializer for MonitoringInitializer {
 
     async fn before_run(&self, ctx: &AppContext) -> Result<()> {
         spawn_event_relay(ctx.clone());
-        docker_realtime::spawn(ctx.clone());
-        // Canal dos agentes remotos: modo ao vivo e entrega de tarefas (ADR 011).
+        // Canal dos agentes — o local e os remotos: modo ao vivo e entrega de
+        // tarefas (ADR 011). O Docker e o histórico de métricas deste host
+        // chegam pelo agente local (ADR 014).
         agents_background::spawn(ctx.clone());
-        spawn_local_telemetry(ctx);
         spawn_scheduler(ctx.clone());
         // Registro de fabricantes do IEEE: carrega e mantém em dia.
         crate::services::vendors::service::spawn_auto_update(ctx);
@@ -95,25 +93,24 @@ impl Initializer for MonitoringInitializer {
                 tracing::warn!(%error, "não foi possível registrar o probe dedicado da VPN");
             }
         }
+        ensure_local_agent(ctx).await;
         Ok(())
     }
 }
 
-/// Histórico de 1 minuto do host desta central (`TELEMETRY_ENABLED=false`
-/// desliga). Amostra `/proc` e o Docker local e grava direto no banco — o
-/// mesmo amostrador que o agente usa nos servidores remotos.
-fn spawn_local_telemetry(ctx: &AppContext) {
-    if !sampler::enabled() {
-        tracing::info!("histórico de métricas do host desligado (TELEMETRY_ENABLED=false)");
+/// Cadastro idempotente do agente local e do token dele (ADR 014). Sem
+/// `LOCAL_AGENT_TOKEN_FILE` não há agente local — desenvolvimento fora do
+/// Docker. Falha aqui não impede o boot: a tela de Docker só fica sem o host
+/// desta central até o próximo.
+async fn ensure_local_agent(ctx: &AppContext) {
+    let Some(path) = local_agent::token_file() else {
+        tracing::info!("sem LOCAL_AGENT_TOKEN_FILE: o Docker desta central não será gerenciado");
         return;
+    };
+    match local_agent::ensure(&ctx.db, &path).await {
+        Ok(probe) => tracing::info!(probe_id = probe.id, "agente local pronto"),
+        Err(error) => tracing::warn!(%error, "não foi possível preparar o agente local"),
     }
-    sampler::spawn(
-        sampler::Sampler::new(
-            HostMetricsReader::from_env(),
-            std::sync::Arc::new(LocalEngine),
-        ),
-        std::sync::Arc::new(sampler::DatabaseSink::new(ctx.db.clone(), LOCAL_HOST_KEY)),
-    );
 }
 
 /// Sobe o ciclo do scheduler dentro do processo do servidor.

@@ -2,7 +2,11 @@
 
 ## Status
 
-Aceito em 2026-08-30.
+Aceito em 2026-08-30. **Em parte substituído pelo
+[ADR 014](014-docker-local-pelo-agente.md)** (2026-10-15): o socket saiu do
+processo da API e passou ao agente local, ao lado dela. O resto vale —
+`bollard` como única fronteira, nenhum CLI na API, mutações administrativas e
+auditadas.
 
 ## Contexto
 

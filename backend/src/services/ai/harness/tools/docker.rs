@@ -23,7 +23,6 @@ use crate::{
             self,
             engine::{self, ContainerAction},
             hosts::{self, DockerHost, HostKey},
-            realtime,
             source::DockerEngine,
             DockerError,
         },
@@ -42,21 +41,27 @@ const MIB: f64 = 1024.0 * 1024.0;
 pub(super) const HOST_ARG: &str =
     "Agente remoto ou 'local' (padrão: esta central); ver get_docker_hosts";
 
-/// O host Docker pelo nome do agente, pela chave (`local`, `agent-3`) ou
-/// pelo id; sem nada, esta central. `Err(mensagem)` para a IA quando não dá.
+/// O host Docker pelo nome do agente, pela chave (`agent-3`) ou pelo id; sem
+/// nada (ou `local`), o desta central — o do agente local (ADR 014).
+/// `Err(mensagem)` para a IA quando não dá.
 pub(super) async fn resolve_host(
     ctx: &AppContext,
     identifier: Option<&str>,
 ) -> AppResult<Result<DockerHost, String>> {
     let wanted = identifier.map(str::trim).unwrap_or_default().to_lowercase();
     if wanted.is_empty() || wanted == "local" || wanted == "central" {
-        return Ok(Ok(DockerHost::local()));
+        let Some(key) = hosts::default_key(ctx).await? else {
+            return Ok(Err(
+                "Esta central não tem o agente local: o Docker dela não está ao alcance".into(),
+            ));
+        };
+        return Ok(hosts::resolve(ctx, key).map_err(|error| format!("Esta central: {error}")));
     }
     let listed = hosts::list(ctx).await?;
     let exact = listed.iter().find(|host| {
         host.key.eq_ignore_ascii_case(&wanted)
             || host.name.eq_ignore_ascii_case(&wanted)
-            || host.agent_id.is_some_and(|id| id.to_string() == wanted)
+            || host.agent_id.to_string() == wanted
     });
     let found = exact.or_else(|| {
         let mut partial = listed
@@ -335,7 +340,7 @@ impl AiToolHandler for DockerUsage {
         };
         let container = args.text("container").map(|name| name.to_lowercase());
         let Some(hours) = args.integer("hours").map(|hours| hours.clamp(1, 720)) else {
-            return Ok(live_usage(ctx, &host, container.as_deref()).await);
+            return Ok(live_usage(&host, container.as_deref()).await);
         };
 
         let range = range_for(hours);
@@ -386,9 +391,9 @@ impl AiToolHandler for DockerUsage {
     }
 }
 
-/// Consumo de agora: o ranking por CPU, do cache de métricas do host.
-async fn live_usage(ctx: &AppContext, host: &DockerHost, container: Option<&str>) -> ToolOutput {
-    let metrics = host.metrics(ctx).await;
+/// Consumo de agora: o ranking por CPU, calculado pelo agente do host.
+async fn live_usage(host: &DockerHost, container: Option<&str>) -> ToolOutput {
+    let metrics = host.engine.metrics().await;
     if !metrics.docker_available {
         return ToolOutput::not_found(
             metrics
@@ -506,18 +511,14 @@ async fn resolve_target(ctx: &AppContext, args: &ToolArgs) -> AppResult<Result<T
         Ok(host) => host,
         Err(message) => return Ok(Err(message)),
     };
-    let host_name = if host.key.is_local() {
-        "central".to_string()
-    } else {
-        let listed = hosts::list(ctx).await?;
-        let view = listed.iter().find(|view| view.key == host.key.to_string());
-        if !view.is_some_and(|view| view.policy.contains(&Permission::Lifecycle)) {
-            return Ok(Err(
-                "A política deste agente (AGENT_ALLOW) não permite iniciar/parar containers".into(),
-            ));
-        }
-        view.map_or_else(|| host.key.to_string(), |view| view.name.clone())
-    };
+    let listed = hosts::list(ctx).await?;
+    let view = listed.iter().find(|view| view.key == host.key.to_string());
+    if !view.is_some_and(|view| view.policy.contains(&Permission::Lifecycle)) {
+        return Ok(Err(
+            "A política deste agente (AGENT_ALLOW) não permite iniciar/parar containers".into(),
+        ));
+    }
+    let host_name = view.map_or_else(|| host.key.to_string(), |view| view.name.clone());
     let container = match resolve_container(host.engine.as_ref(), &identifier).await {
         Ok(container) => container,
         Err(message) => return Ok(Err(message)),
@@ -553,13 +554,12 @@ impl AiToolHandler for DockerContainerAction {
         if action == LifecycleAction::Start {
             return action.risk();
         }
-        // Parar ou reiniciar a central derruba o próprio chat no meio.
+        // Parar ou reiniciar a central derrubaria o próprio chat no meio: o
+        // agente recusa, e a confirmação já avisa.
         if let Ok(Ok(target)) = resolve_target(ctx, args).await {
-            if target.host.key.is_local()
-                && docker::log_clear::is_current_container(&target.container.id)
-            {
+            if target.container.protected {
                 return RiskAssessment::high(
-                    "É o container do próprio NetMonitor: a central fica fora do ar",
+                    "É um container da instalação NetMonitor: o agente recusa a ação",
                 );
             }
         }
@@ -613,12 +613,7 @@ Conforme a configuração, roda direto ou pede confirmação ao usuário."
                 target.action.verb().to_lowercase()
             )));
         }
-        realtime::refresh(ctx, target.host.key).await;
-        let label = if target.host.key.is_local() {
-            name.clone()
-        } else {
-            format!("{}/{name}", target.host.key)
-        };
+        let label = format!("{}/{name}", target.host.key);
         audit(
             ctx,
             args,
@@ -662,6 +657,7 @@ mod tests {
             ports: Vec::new(),
             created: 0,
             project_name: None,
+            protected: false,
         }
     }
 

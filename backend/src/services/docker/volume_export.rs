@@ -1,4 +1,7 @@
 //! Exporta volumes via Docker API usando um container auxiliar efêmero.
+//!
+//! Roda no agente, dono do socket; a central recebe o tar pela ponte
+//! ([`crate::services::agents::bridge::download_volume`], ADR 014).
 
 use std::{pin::Pin, task::Poll};
 
@@ -126,7 +129,9 @@ pub(crate) async fn ensure_image(client: &bollard::Docker) -> Result<(), DockerE
     Ok(())
 }
 
-fn file_name(volume_name: &str) -> String {
+/// Nome do arquivo baixado: o volume sem separadores e a data.
+#[must_use]
+pub fn file_name(volume_name: &str) -> String {
     let safe = volume_name
         .chars()
         .map(|character| {

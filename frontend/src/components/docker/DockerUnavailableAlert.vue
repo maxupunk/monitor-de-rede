@@ -3,53 +3,50 @@
     <div class="font-weight-bold text-subtitle-1">Docker Engine indisponível</div>
     <div class="mt-1">{{ reason }}</div>
     <div class="mt-2 text-body-2">
-      A configuração é feita no servidor onde o NetMonitor está instalado — não no navegador.
+      Quem acessa a Engine é o agente NetMonitor {{ placeLabel }} — a correção é feita lá, não no
+      navegador.
     </div>
 
     <v-expansion-panels :model-value="0" variant="accordion" class="mt-4">
       <v-expansion-panel>
         <v-expansion-panel-title>
-          <span class="font-weight-medium">Como corrigir em uma instalação Docker Compose</span>
+          <span class="font-weight-medium">Como corrigir o agente</span>
         </v-expansion-panel-title>
         <v-expansion-panel-text>
           <ol class="docker-help-steps pl-5">
             <li>
-              Na pasta de instalação, abra o arquivo <code>.env</code> que fica ao lado de
-              <code>docker-compose.yml</code> e adicione:
+              {{ folderLabel }}, abra o arquivo <code>.env</code> que fica ao lado de
+              <code>docker-compose.yml</code> e confirme:
               <pre class="docker-help-code"><code>DOCKER_ENABLED=true</code></pre>
             </li>
             <li>
-              Confirme que o serviço <code>netmonitor</code> possui a variável e a montagem do
-              socket:
+              Confirme que o serviço <code>netmonitor-agent</code> monta o socket da Engine:
               <pre class="docker-help-code"><code>services:
-  netmonitor:
-    environment:
-      DOCKER_ENABLED: ${DOCKER_ENABLED:-true}
+  netmonitor-agent:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock</code></pre>
             </li>
             <li>
-              Salve os arquivos e recrie o container a partir dessa mesma pasta:
+              Salve os arquivos e recrie o agente a partir dessa mesma pasta:
               <pre
                 class="docker-help-code"
-              ><code>docker compose up -d --force-recreate netmonitor</code></pre>
+              ><code>docker compose up -d --force-recreate netmonitor-agent</code></pre>
             </li>
           </ol>
 
           <div class="font-weight-medium mt-4">Diagnóstico rápido</div>
           <div class="text-body-2 mt-1">
             O primeiro comando deve listar o socket; o segundo mostra mensagens de permissão ou
-            conexão do backend.
+            conexão do agente.
           </div>
           <pre
             class="docker-help-code"
-          ><code>docker compose exec netmonitor ls -l /var/run/docker.sock
-docker compose logs --tail=100 netmonitor</code></pre>
+          ><code>docker compose exec netmonitor-agent ls -l /var/run/docker.sock
+docker compose logs --tail=100 netmonitor-agent</code></pre>
 
-          <v-alert type="info" variant="tonal" density="compact" class="mt-3">
-            Se o backend roda diretamente no host, defina <code>DOCKER_ENABLED=true</code> no
-            ambiente do processo e confirme que Docker Desktop ou Docker Engine está em execução.
-            Nesse modo não existe montagem de socket no <code>docker-compose.yml</code>.
+          <v-alert v-if="local" type="info" variant="tonal" density="compact" class="mt-3">
+            A API do NetMonitor não monta o socket: por segurança, só o agente local o acessa, sob a
+            política de <code>LOCAL_AGENT_ALLOW</code>.
           </v-alert>
         </v-expansion-panel-text>
       </v-expansion-panel>
@@ -58,9 +55,22 @@ docker compose logs --tail=100 netmonitor</code></pre>
 </template>
 
 <script setup lang="ts">
-defineProps<{
+import { computed } from 'vue'
+
+const props = defineProps<{
   reason: string
+  /** O host é o desta central (agente local) ou um servidor remoto. */
+  local: boolean
 }>()
+
+const placeLabel = computed(() =>
+  props.local ? 'que roda ao lado desta central' : 'instalado no servidor remoto'
+)
+const folderLabel = computed(() =>
+  props.local
+    ? 'Na pasta de instalação do NetMonitor'
+    : 'No servidor remoto, na pasta onde o agente foi instalado'
+)
 </script>
 
 <style scoped>

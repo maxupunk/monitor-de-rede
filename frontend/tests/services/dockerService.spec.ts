@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createDockerService, dockerHostsService, dockerService } from '@/services/dockerService'
+import { createDockerService, dockerHostsService } from '@/services/dockerService'
 import { apiService } from '@/services/apiService'
+
+const dockerService = createDockerService('agent-1')
 
 describe('dockerService', () => {
   beforeEach(() => {
@@ -12,7 +14,7 @@ describe('dockerService', () => {
 
     await dockerService.container('sha256:abc/def')
 
-    expect(get).toHaveBeenCalledWith('/docker/containers/sha256%3Aabc%2Fdef')
+    expect(get).toHaveBeenCalledWith('/docker/hosts/agent-1/containers/sha256%3Aabc%2Fdef')
   })
 
   it('serializa filtros de log no contrato do backend', async () => {
@@ -21,7 +23,7 @@ describe('dockerService', () => {
     await dockerService.logs('abc', { tail: 500, since: 10, until: 20, timestamps: true })
 
     expect(get).toHaveBeenCalledWith(
-      '/docker/containers/abc/logs?tail=500&since=10&until=20&timestamps=true'
+      '/docker/hosts/agent-1/containers/abc/logs?tail=500&since=10&until=20&timestamps=true'
     )
   })
 
@@ -30,7 +32,7 @@ describe('dockerService', () => {
 
     await dockerService.clearLogs('sha256:abc/def')
 
-    expect(remove).toHaveBeenCalledWith('/docker/containers/sha256%3Aabc%2Fdef/logs')
+    expect(remove).toHaveBeenCalledWith('/docker/hosts/agent-1/containers/sha256%3Aabc%2Fdef/logs')
   })
 
   it('envia force explicitamente nas remoções', async () => {
@@ -38,17 +40,17 @@ describe('dockerService', () => {
 
     await dockerService.removeContainer('abc', true)
 
-    expect(remove).toHaveBeenCalledWith('/docker/containers/abc?force=true')
+    expect(remove).toHaveBeenCalledWith('/docker/hosts/agent-1/containers/abc?force=true')
   })
 
-  it('mantém as rotas históricas no host local e prefixa os hosts remotos', async () => {
+  it('todo host, o desta central inclusive, vai por /docker/hosts/<chave>', async () => {
     const get = vi.spyOn(apiService, 'get').mockResolvedValue({})
 
     await dockerService.status()
     await createDockerService('agent-3').status()
     await createDockerService('agent-3').history('7d')
 
-    expect(get).toHaveBeenNthCalledWith(1, '/docker/status')
+    expect(get).toHaveBeenNthCalledWith(1, '/docker/hosts/agent-1/status')
     expect(get).toHaveBeenNthCalledWith(2, '/docker/hosts/agent-3/status')
     expect(get).toHaveBeenNthCalledWith(3, '/docker/hosts/agent-3/history?range=7d')
   })

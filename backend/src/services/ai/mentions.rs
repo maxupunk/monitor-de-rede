@@ -15,7 +15,10 @@ use super::harness::tools::device_matches;
 use crate::{
     dtos::ai::{AiMention, AiMentionKind},
     models::{devices, monitors},
-    services::{docker, shared::errors::AppResult},
+    services::{
+        docker::{engine, source::DockerEngine},
+        shared::errors::AppResult,
+    },
 };
 
 /// Sugestões por tipo na lista do `@`.
@@ -113,12 +116,13 @@ fn source_mentions(term: &str) -> Vec<AiMention> {
         .collect()
 }
 
-/// Containers só quando a Docker Engine responde; sem ela, a lista segue sem eles.
-async fn container_mentions(term: &str) -> Vec<AiMention> {
-    if !docker::enabled() {
+/// Containers do host desta central (o agente local) só quando ele responde;
+/// sem ele, a lista segue sem containers.
+async fn container_mentions(docker: Option<&dyn DockerEngine>, term: &str) -> Vec<AiMention> {
+    let Some(docker) = docker else {
         return Vec::new();
-    }
-    let Ok(containers) = docker::engine::list_containers(&docker::source::LocalEngine).await else {
+    };
+    let Ok(containers) = engine::list_containers(docker).await else {
         return Vec::new();
     };
     containers
@@ -140,7 +144,11 @@ async fn container_mentions(term: &str) -> Vec<AiMention> {
 /// # Errors
 ///
 /// Falha do banco.
-pub async fn search<C: ConnectionTrait>(db: &C, query: &str) -> AppResult<Vec<AiMention>> {
+pub async fn search<C: ConnectionTrait>(
+    db: &C,
+    docker: Option<&dyn DockerEngine>,
+    query: &str,
+) -> AppResult<Vec<AiMention>> {
     let term = fold(query);
     let mut mentions: Vec<AiMention> = devices::Entity::find()
         .order_by_asc(devices::Column::Name)
@@ -162,7 +170,7 @@ pub async fn search<C: ConnectionTrait>(db: &C, query: &str) -> AppResult<Vec<Ai
             .map(monitor_mention),
     );
     mentions.extend(source_mentions(&term));
-    mentions.extend(container_mentions(&term).await);
+    mentions.extend(container_mentions(docker, &term).await);
     Ok(mentions)
 }
 

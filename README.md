@@ -52,38 +52,39 @@ WireGuard e só importa a quem usa a VPN.
 
 ### Gerenciamento Docker
 
-O compose monta `/var/run/docker.sock` no NetMonitor e a página **Docker** usa
-a API nativa da Engine; o container não instala nem executa o CLI `docker`.
-Consultas de inventário e métricas ficam disponíveis a todos os perfis
-autenticados. Iniciar, parar, reiniciar ou remover containers, alterar redes,
-remover volumes/imagens, exportar dados de volumes e executar limpeza exigem
-administrador e entram na trilha de auditoria.
+O Docker deste host é gerenciado pelo **agente local** (serviço
+`netmonitor-agent` do compose, [ADR 014](docs/adr/014-docker-local-pelo-agente.md)):
+é ele, e não a API, que monta `/var/run/docker.sock`. A API o comanda pelo
+mesmo canal dos agentes de servidores remotos, então a página **Docker** trata
+este host e os remotos do mesmo jeito. Consultas de inventário e métricas
+ficam disponíveis a todos os perfis autenticados. Iniciar, parar, reiniciar ou
+remover containers, alterar redes, remover volumes/imagens, exportar dados de
+volumes e executar limpeza exigem administrador e entram na trilha de
+auditoria.
 
-> O socket Docker concede controle equivalente a administrador do host. Em uma
-> instalação que precise apenas de monitoramento de rede, defina
-> `DOCKER_ENABLED=false` e remova a montagem do socket em
-> [`docker-compose.yml`](docker-compose.yml).
+O que o agente aceita é decidido no host, por `LOCAL_AGENT_ALLOW` no `.env`
+(padrão `read,lifecycle,update,compose,volume_export,monitor`), e a central não amplia
+a lista. Os containers da própria instalação (API e agente) levam a label
+`com.netmonitor.protected=true`: o agente recusa pará-los, removê-los ou
+recriá-los, e o projeto compose deles só aceita `pull`.
 
-O entrypoint descobre o GID real do socket e o aplica como grupo suplementar do
-processo `app`; não altera o filesystem somente leitura, não usa `chmod 666` e
-a API continua sem capabilities Linux. A Engine
+> O socket Docker concede controle equivalente a administrador do host — por
+> isso ele fica no agente, sob a política local, e não no processo da API. Em
+> uma instalação que precise apenas de monitoramento de rede, remova o serviço
+> `netmonitor-agent` do [`docker-compose.yml`](docker-compose.yml).
+
+O agente se registra sozinho: no boot a API grava o token dele num volume que
+só os dois montam (`LOCAL_AGENT_TOKEN_FILE` / `AGENT_TOKEN_FILE`). A Engine
 pode ficar indisponível sem derrubar o restante do sistema: as telas distinguem
 explicitamente indisponibilidade de inventário vazio.
 
-Se a tela informar que a Engine está indisponível, configure a variável no
-arquivo `.env` que fica **na mesma pasta do `docker-compose.yml`**:
-
-```env
-DOCKER_ENABLED=true
-```
-
-Confirme também a montagem `/var/run/docker.sock:/var/run/docker.sock` no
-serviço `netmonitor` e aplique a configuração com:
+Se a tela informar que o Docker deste servidor está indisponível, confira o
+agente local:
 
 ```bash
-docker compose up -d --force-recreate netmonitor
-docker compose exec netmonitor ls -l /var/run/docker.sock
-docker compose logs --tail=100 netmonitor
+docker compose ps netmonitor-agent
+docker compose logs --tail=100 netmonitor-agent
+docker compose exec netmonitor-agent ls -l /var/run/docker.sock
 ```
 
 ### Usar a rede do host

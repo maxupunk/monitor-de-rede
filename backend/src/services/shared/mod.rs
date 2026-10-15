@@ -7,5 +7,6 @@ pub mod errors;
 pub mod pagination;
 pub mod run_guard;
 pub mod runtime;
+pub mod secret_file;
 pub mod text;
 pub mod transaction;

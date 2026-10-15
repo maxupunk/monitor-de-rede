@@ -1,6 +1,7 @@
-//! Métricas de containers com coleta concorrente e cache curto.
+//! Métricas de containers com coleta concorrente, calculadas no host do
+//! agente (a amostra de CPU depende de duas leituras da mesma Engine).
 
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 use bollard::{
     container::{ListContainersOptions, MemoryStatsStats, StatsOptions},
@@ -8,8 +9,6 @@ use bollard::{
     Docker,
 };
 use futures::{stream, StreamExt};
-use loco_rs::app::AppContext;
-use tokio::sync::Mutex;
 
 use crate::views::docker::{
     DockerContainerMetrics, DockerCpuMetrics, DockerIoMetrics, DockerMemoryMetrics,
@@ -18,52 +17,8 @@ use crate::views::docker::{
 
 use super::{client, DockerError, DISABLED_REASON, UNAVAILABLE_REASON};
 
-// O produtor SSE coleta estado a cada 3 s enquanto há clientes conectados. O
-// cache ligeiramente menor evita devolver a mesma amostra em dois ciclos
-// seguidos e também agrega leituras manuais concorrentes.
-const CACHE_TTL: Duration = Duration::from_secs(2);
 const STATS_TIMEOUT: Duration = Duration::from_secs(4);
 const MAX_CONCURRENT_STATS: usize = 8;
-
-#[derive(Clone, Default)]
-pub struct MetricsState {
-    value: Arc<Mutex<Option<(tokio::time::Instant, DockerMetricsResponse)>>>,
-}
-
-pub fn install(ctx: &AppContext) {
-    if !ctx.shared_store.contains::<MetricsState>() {
-        ctx.shared_store.insert(MetricsState::default());
-    }
-}
-
-pub async fn overview(ctx: &AppContext) -> DockerMetricsResponse {
-    let state = ctx.shared_store.get::<MetricsState>();
-    if let Some(cached) = cached(state.as_ref()).await {
-        return cached;
-    }
-
-    let result = collect().await;
-    if let Some(state) = state {
-        *state.value.lock().await = Some((tokio::time::Instant::now(), result.clone()));
-    }
-    result
-}
-
-/// Descarta uma amostra anterior depois de qualquer mutação na Engine.
-///
-/// Sem isso, a publicação imediata disparada por start/stop/restart poderia
-/// reenviar por até dois segundos o snapshot anterior à ação.
-pub async fn invalidate(ctx: &AppContext) {
-    if let Some(state) = ctx.shared_store.get::<MetricsState>() {
-        *state.value.lock().await = None;
-    }
-}
-
-async fn cached(state: Option<&MetricsState>) -> Option<DockerMetricsResponse> {
-    let guard = state?.value.lock().await;
-    let (measured_at, value) = guard.as_ref()?;
-    (measured_at.elapsed() < CACHE_TTL).then(|| value.clone())
-}
 
 pub(crate) async fn collect() -> DockerMetricsResponse {
     let client = match client() {

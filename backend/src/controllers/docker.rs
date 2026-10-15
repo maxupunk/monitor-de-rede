@@ -1,9 +1,9 @@
 //! Endpoints de monitoramento e administração da Docker Engine.
 //!
-//! Cada rota existe duas vezes: `/api/docker/...` (a central, como sempre
-//! foi) e `/api/docker/hosts/{host}/...` (a central com `host=local`, ou um
-//! servidor remoto com `host=agent-<id>`, ADR 011). O handler não sabe qual:
-//! recebe o [`DockerHost`] já resolvido e usa os mesmos serviços.
+//! Toda rota é por host: `/api/docker/hosts/{host}/...`, com
+//! `host=agent-<id>`. O Docker desta central é o do agente local, ao lado
+//! dela (ADR 014); os demais, de agentes remotos (ADR 011). O handler não
+//! distingue: recebe o [`DockerHost`] já resolvido e usa os mesmos serviços.
 
 use async_compression::tokio::bufread::GzipEncoder;
 use axum::{
@@ -34,7 +34,6 @@ use crate::{
             log_stream::LogStreams,
             maintenance::ComposeRequest,
             operations::{self, Operation},
-            realtime, volume_export,
         },
         shared::errors::{AppError, AppResult},
         telemetry::store,
@@ -73,8 +72,7 @@ struct StreamPath {
     stream_id: String,
 }
 
-/// O host da rota (`local` quando não há `{host}`), já resolvido para as
-/// fontes. Agente desconectado vira 503.
+/// O host da rota, já resolvido para as fontes. Agente desconectado vira 503.
 struct Target(DockerHost);
 
 impl FromRequestParts<AppContext> for Target {
@@ -90,18 +88,16 @@ impl FromRequestParts<AppContext> for Target {
         let key = params
             .iter()
             .find(|(name, _)| *name == "host")
-            .map_or(Ok(HostKey::Local), |(_, value)| value.parse::<HostKey>())?;
+            .ok_or_else(|| AppError::validation("Host Docker inválido"))?
+            .1
+            .parse::<HostKey>()?;
         Ok(Self(hosts::resolve(ctx, key)?))
     }
 }
 
-/// Rótulo de auditoria: recursos remotos levam o host na frente.
+/// Rótulo de auditoria: o recurso com o host na frente.
 fn label(host: &DockerHost, resource: &str) -> String {
-    if host.key.is_local() {
-        resource.to_string()
-    } else {
-        format!("{}/{resource}", host.key)
-    }
+    format!("{}/{resource}", host.key)
 }
 
 async fn host_list(State(ctx): State<AppContext>) -> AppResult<Response> {
@@ -112,11 +108,8 @@ async fn status(Target(host): Target) -> AppResult<Response> {
     Ok(format::json(engine::status(host.engine.as_ref()).await)?)
 }
 
-async fn container_metrics(
-    State(ctx): State<AppContext>,
-    Target(host): Target,
-) -> AppResult<Response> {
-    Ok(format::json(host.metrics(&ctx).await)?)
+async fn container_metrics(Target(host): Target) -> AppResult<Response> {
+    Ok(format::json(host.engine.metrics().await)?)
 }
 
 async fn containers(Target(host): Target) -> AppResult<Response> {
@@ -208,7 +201,6 @@ async fn clear_container_logs(
 ) -> AppResult<Response> {
     let id = docker::validate_identifier(&path.id, "Container")?;
     let response = host.maintenance.clear_logs(&id).await?;
-    realtime::refresh(&ctx, host.key).await;
     audit(
         &ctx,
         &headers,
@@ -276,7 +268,6 @@ async fn container_action(
 ) -> AppResult<Response> {
     let id = docker::validate_identifier(id, "Container")?;
     let response = engine::container_action(host.engine.as_ref(), &id, action).await?;
-    realtime::refresh(ctx, host.key).await;
     audit(
         ctx,
         headers,
@@ -428,7 +419,6 @@ async fn remove_volume(
     let name = docker::validate_identifier(&path.name, "Volume")?;
     let response =
         engine::remove_volume(host.engine.as_ref(), &name, query.force.unwrap_or(false)).await?;
-    realtime::refresh(&ctx, host.key).await;
     audit(
         &ctx,
         &headers,
@@ -441,32 +431,26 @@ async fn remove_volume(
     Ok(format::json(response)?)
 }
 
-/// Exportação transmite o tar pelo socket local; não atravessa o canal do
-/// agente.
+/// O tar vem do agente pela ponte binária (ADR 014) e sai comprimido.
 async fn export_volume(
     State(ctx): State<AppContext>,
     Target(host): Target,
     headers: HeaderMap,
     Path(path): Path<NamePath>,
 ) -> AppResult<Response> {
-    if !host.key.is_local() {
-        return Err(AppError::business_rule(
-            "A exportação de volume só está disponível para o Docker desta central",
-        ));
-    }
     let name = docker::validate_identifier(&path.name, "Volume")?;
-    let export = volume_export::export(&name).await?;
+    let archive = host.maintenance.export_volume(&name).await?;
     audit(
         &ctx,
         &headers,
         AuditAction::Create,
         ResourceType::DockerVolume,
-        &name,
+        &label(&host, &name),
         "Exportação de volume iniciada",
     )
     .await;
-    let file_name = export.file_name.clone();
-    let gzip = GzipEncoder::new(BufReader::new(export));
+    let file_name = archive.file_name;
+    let gzip = GzipEncoder::new(BufReader::new(archive.reader));
     let body = Body::from_stream(tokio_util::io::ReaderStream::new(gzip));
     Ok((
         StatusCode::OK,
@@ -505,7 +489,6 @@ async fn create_network(
         return Err(AppError::validation("Driver de rede não suportado"));
     }
     let response = engine::create_network(host.engine.as_ref(), name.clone(), driver).await?;
-    realtime::refresh(&ctx, host.key).await;
     audit(
         &ctx,
         &headers,
@@ -526,7 +509,6 @@ async fn remove_network(
 ) -> AppResult<Response> {
     let id = docker::validate_identifier(&path.id, "Rede")?;
     let response = engine::remove_network(host.engine.as_ref(), &id).await?;
-    realtime::refresh(&ctx, host.key).await;
     audit(
         &ctx,
         &headers,
@@ -580,7 +562,6 @@ async fn network_connection(
     } else {
         engine::connect_network(host.engine.as_ref(), &id, container).await?
     };
-    realtime::refresh(ctx, host.key).await;
     audit(
         ctx,
         headers,
@@ -614,7 +595,6 @@ async fn remove_image(
     let id = docker::validate_identifier(&path.id, "Imagem")?;
     let response =
         engine::remove_image(host.engine.as_ref(), &id, query.force.unwrap_or(false)).await?;
-    realtime::refresh(&ctx, host.key).await;
     audit(
         &ctx,
         &headers,
@@ -633,7 +613,6 @@ async fn prune_images(
     headers: HeaderMap,
 ) -> AppResult<Response> {
     let response = engine::prune_images(host.engine.as_ref()).await?;
-    realtime::refresh(&ctx, host.key).await;
     audit(
         &ctx,
         &headers,
@@ -694,29 +673,24 @@ async fn container_history(
 /// O histórico é do banco: não exige o agente conectado.
 #[derive(Deserialize)]
 struct HostPath {
-    host: Option<String>,
+    host: String,
 }
 
 impl HostPath {
     fn key(&self) -> AppResult<HostKey> {
-        self.host
-            .as_deref()
-            .map_or(Ok(HostKey::Local), str::parse::<HostKey>)
+        self.host.parse()
     }
 }
 
 #[derive(Deserialize)]
 struct HostNamePath {
-    host: Option<String>,
+    host: String,
     name: String,
 }
 
 impl HostNamePath {
     fn key(&self) -> AppResult<HostKey> {
-        HostPath {
-            host: self.host.clone(),
-        }
-        .key()
+        self.host.parse()
     }
 }
 
@@ -764,7 +738,7 @@ async fn audit(
         .await;
 }
 
-/// Rotas que existem por host. Registradas com e sem o `{host}`.
+/// Rotas que existem por host, sob `/hosts/{host}`.
 fn per_host() -> Vec<(&'static str, MethodRouter<AppContext>)> {
     vec![
         ("/status", get(status)),
@@ -804,9 +778,7 @@ pub fn routes() -> Routes {
         .add("/hosts", get(host_list))
         .add("/log-streams/{stream_id}", delete(stop_log_stream));
     for (path, handler) in per_host() {
-        routes = routes
-            .add(path, handler.clone())
-            .add(&format!("/hosts/{{host}}{path}"), handler);
+        routes = routes.add(&format!("/hosts/{{host}}{path}"), handler);
     }
     routes
 }

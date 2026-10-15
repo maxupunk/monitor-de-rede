@@ -104,7 +104,7 @@ pub static SYSTEM_DOCS: &[DocTopic] = &[
         keywords: &["syslog", "log", "docker", "nat", "container", "containers", "imagem", "volume"],
         content: "Syslog e Docker:
 - Servidor Syslog nativo escutando em UDP/TCP 514 com detecção automática de conexões NAT e vinculação a dispositivos.
-- Monitoramento de Docker Engine: monitora containers (CPU, memória, status de saúde), imagens e volumes em tempo real via socket Docker.",
+- Monitoramento de Docker Engine: monitora containers (CPU, memória, status de saúde), imagens e volumes em tempo real. Todo host Docker é atendido por um agente NetMonitor: o desta central é o agente local (serviço netmonitor-agent, dono do socket), os demais são agentes remotos.",
     },
 ];
 

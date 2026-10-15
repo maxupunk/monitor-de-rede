@@ -3,8 +3,10 @@
 use loco_rs::app::AppContext;
 use serde_json::Value;
 
+use std::sync::Arc;
+
 use crate::services::{
-    docker::source::LocalEngine,
+    docker::source::DockerEngine,
     monitoring::{
         checkers::{
             container::{ContainerChecker, ContainerConfig},
@@ -50,6 +52,10 @@ pub struct CheckDeps {
     /// tipos continuam rodando e só o ping falha — como antes do refactor.
     /// A célula tenta abrir de novo a cada uso (ver [`PingClientCell`]).
     pub ping: Option<PingClientCell>,
+    /// A Docker Engine deste host. Só o agente tem (ADR 014): na central o
+    /// monitor de container é despachado ao agente local, e a execução local
+    /// de reserva (§6) responde que o Docker daqui é do agente.
+    pub docker: Option<Arc<dyn DockerEngine>>,
 }
 
 impl CheckDeps {
@@ -57,6 +63,7 @@ impl CheckDeps {
     pub fn from_context(ctx: &AppContext) -> Self {
         Self {
             ping: ctx.shared_store.get::<PingClientCell>(),
+            docker: None,
         }
     }
 
@@ -115,7 +122,13 @@ pub async fn run_monitor_with(
         // Docker e recursos do host onde o monitor roda: a central, ou o
         // agente do servidor remoto quando o monitor pertence a ele (ADR 011).
         "container" => {
-            ContainerChecker::new(std::sync::Arc::new(LocalEngine))
+            let engine = deps.docker.clone().ok_or_else(|| {
+                AppError::ServiceUnavailable(
+                    "O Docker deste servidor é atendido pelo agente local, que não está conectado"
+                        .to_string(),
+                )
+            })?;
+            ContainerChecker::new(engine)
                 .execute(parse_config::<ContainerConfig>(
                     &configuration,
                     "container",

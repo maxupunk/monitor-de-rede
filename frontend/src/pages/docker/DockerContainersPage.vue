@@ -122,6 +122,19 @@
                   title="Inspecionar"
                   @click="openDetail(item)"
                 ></v-btn>
+                <v-icon
+                  v-if="item.protected"
+                  color="info"
+                  size="small"
+                  class="ma-2"
+                  aria-label="Container protegido"
+                >
+                  mdi-shield-lock
+                  <v-tooltip activator="parent" location="top" max-width="280">
+                    Container da instalação NetMonitor: parar, reiniciar, recriar ou remover
+                    derrubaria a central.
+                  </v-tooltip>
+                </v-icon>
                 <v-btn
                   v-if="canOperate && item.state !== 'running'"
                   icon="mdi-play"
@@ -133,7 +146,7 @@
                   @click="runContainerAction(item, 'start')"
                 ></v-btn>
                 <v-btn
-                  v-if="canOperate && item.state === 'running'"
+                  v-if="canOperate && !item.protected && item.state === 'running'"
                   icon="mdi-stop"
                   size="small"
                   color="warning"
@@ -143,7 +156,7 @@
                   @click="runContainerAction(item, 'stop')"
                 ></v-btn>
                 <v-btn
-                  v-if="canOperate"
+                  v-if="canOperate && !item.protected"
                   icon="mdi-restart"
                   size="small"
                   color="info"
@@ -153,7 +166,7 @@
                   @click="runContainerAction(item, 'restart')"
                 ></v-btn>
                 <v-btn
-                  v-if="canUpdate"
+                  v-if="canUpdate && !item.protected"
                   icon="mdi-update"
                   size="small"
                   color="primary"
@@ -163,7 +176,7 @@
                   @click="updateContainer(item)"
                 ></v-btn>
                 <v-btn
-                  v-if="canOperate"
+                  v-if="canOperate && !item.protected"
                   icon="mdi-delete-outline"
                   size="small"
                   color="error"

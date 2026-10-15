@@ -55,6 +55,14 @@ services:
       # Ollaya no loopback do host, logo abaixo.
       OLLAYA_URL: http://127.0.0.1:${OLLAYA_HOST_PORT:-11435}
 
+  # Com a API na rede do host o nome `netmonitor` não resolve: o agente local
+  # vai junto para a rede do host e a alcança no loopback, sem publicação no
+  # meio. Com isso as métricas de interface também passam a ser as do host.
+  netmonitor-agent:
+    network_mode: host
+    environment:
+      AGENT_SERVER_URL: http://127.0.0.1:${APP_PORT:-3333}
+
   # O Ollaya também na rede do host, escutando só no loopback: continua
   # invisível para a rede, e a API — que no modo host *é* o host — o encontra
   # em 127.0.0.1 sem publicação de porta no meio. Publicar em `127.0.0.1`

@@ -48,8 +48,10 @@ use super::policy::Permission;
 ///
 /// * **1** — texto JSON só;
 /// * **2** — quadros binários de ponte ([`TunnelFrame`]) e
-///   `Command::DatabaseTunnel` (ADR 013).
-pub const PROTOCOL_VERSION: u16 = 2;
+///   `Command::DatabaseTunnel` (ADR 013);
+/// * **3** — `Command::VolumeExport`: o tar de um volume pela mesma ponte
+///   (ADR 014, o Docker da central atendido pelo agente local).
+pub const PROTOCOL_VERSION: u16 = 3;
 
 /// Teto de um quadro. Logs e inventários grandes são quebrados em chunks.
 pub const MAX_FRAME_BYTES: usize = 4 * 1024 * 1024;
@@ -337,6 +339,12 @@ pub enum Command {
         host: String,
         port: u16,
     },
+    /// O tar do volume `name`, só de ida (ADR 014): os bytes vêm em
+    /// [`TunnelFrame`]s com o id deste pedido, sob a mesma janela de crédito
+    /// da ponte de banco, depois do `Chunk` `{"opened": true}`.
+    VolumeExport {
+        name: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -425,6 +433,7 @@ impl Command {
             Self::SetLive { .. } => Permission::Read,
             Self::DeviceIo { .. } => Permission::DeviceIo,
             Self::DatabaseTunnel { .. } => Permission::Database,
+            Self::VolumeExport { .. } => Permission::VolumeExport,
         }
     }
 }

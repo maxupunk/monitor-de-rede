@@ -15,15 +15,16 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     services::docker::{
         engine::{ContainerAction, LogFilters},
-        maintenance::{ComposeRequest, DockerMaintenance, Progress},
+        maintenance::{ComposeRequest, DockerMaintenance, Progress, VolumeArchive},
         metrics,
         source::{DockerEngine, EngineStatusRaw, LogChunk},
-        DockerError,
+        volume_export, DockerError,
     },
     views::docker::{DockerActionResponse, DockerMetricsResponse},
 };
 
 use super::{
+    bridge,
     protocol::{Command, DockerCall},
     session::{AgentSession, Call},
 };
@@ -298,5 +299,16 @@ impl DockerMaintenance for AgentEngine {
             progress,
         )
         .await
+    }
+
+    /// O tar não cabe em JSON: vem pela ponte binária (ADR 014).
+    async fn export_volume(&self, name: &str) -> Result<VolumeArchive, DockerError> {
+        let reader = bridge::download_volume(self.session.clone(), name)
+            .await
+            .map_err(DockerError::from)?;
+        Ok(VolumeArchive {
+            file_name: volume_export::file_name(name),
+            reader: Box::pin(reader),
+        })
     }
 }

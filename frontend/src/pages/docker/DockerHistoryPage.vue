@@ -172,6 +172,7 @@ const error = ref<string | null>(null)
 
 /** Consulta sob demanda (histórico não-live): muda só com host ou janela. */
 async function load() {
+  if (!docker.selectedHostKey) return
   loading.value = true
   error.value = null
   try {

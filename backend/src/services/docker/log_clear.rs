@@ -10,7 +10,10 @@ use futures::StreamExt;
 
 use crate::views::docker::DockerActionResponse;
 
-use super::{call, client, engine, source::LocalEngine, volume_export, DockerError};
+use super::{
+    call, client, engine, protection::is_current_container, source::LocalEngine, volume_export,
+    DockerError,
+};
 
 const LOG_MOUNT_POINT: &str = "/docker-log/container.log";
 const HELPER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
@@ -127,15 +130,6 @@ fn validate_log_path(id: &str, value: &str) -> Result<(), DockerError> {
         ));
     }
     Ok(())
-}
-
-/// Container que executa este processo — o Docker usa o id curto como hostname.
-pub(crate) fn is_current_container(id: &str) -> bool {
-    std::env::var("HOSTNAME")
-        .ok()
-        .map(|hostname| hostname.trim().to_ascii_lowercase())
-        .filter(|hostname| hostname.len() >= 12)
-        .is_some_and(|hostname| id.to_ascii_lowercase().starts_with(&hostname))
 }
 
 async fn truncate_with_helper(client: &bollard::Docker, source: &str) -> Result<(), DockerError> {

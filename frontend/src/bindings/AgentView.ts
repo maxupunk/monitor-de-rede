@@ -9,4 +9,9 @@ hostKey: string, siteId: number | null, deviceId: number | null, deviceName: str
 /**
  * Canal aberto com este processo agora.
  */
-connected: boolean, version: string | null, lastSeenAt: string | null, registeredAt: string | null, enforceTunnelIp: boolean, host: AgentHostInfo, createdAt: string, };
+connected: boolean, version: string | null, lastSeenAt: string | null, registeredAt: string | null, enforceTunnelIp: boolean, 
+/**
+ * O agente local, ao lado desta central (ADR 014): sobe com a
+ * instalação e não é revogado nem removido pela tela.
+ */
+local: boolean, host: AgentHostInfo, createdAt: string, };

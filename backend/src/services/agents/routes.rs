@@ -5,10 +5,13 @@
 
 use loco_rs::app::AppContext;
 
-use super::{hub::AgentHub, policy::Permission, service::AgentService};
+use super::{hub::AgentHub, local, policy::Permission, service::AgentService};
 use crate::{dtos::agents::AgentRouteOption, services::shared::errors::AppResult};
 
-/// Todos os agentes cadastrados, com o que cada um permite agora.
+/// Os agentes remotos cadastrados, com o que cada um permite agora.
+///
+/// O agente local fica de fora: a rota "Central" já é este servidor, e ele
+/// existe para o Docker daqui (ADR 014), não para alcançar redes.
 ///
 /// Desconectado conta como "permitido" até prova em contrário:
 /// a política só é conhecida pelo `Hello`, e esconder o agente da lista
@@ -26,6 +29,7 @@ pub async fn route_options(
         .list()
         .await?
         .into_iter()
+        .filter(|agent| !local::is_local(agent))
         .map(|agent| {
             let session = hub.as_ref().and_then(|hub| hub.get(agent.id));
             AgentRouteOption {

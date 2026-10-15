@@ -111,10 +111,18 @@
      até a primeira leitura. Depois disso, só rotacionando.
    - O agente remoto (`netmonitor-agent`, ADR 011) **só disca para fora**: nunca
      abra porta nele nem faça a central chamá-lo. `docker compose` roda **só no
-     agente**, no host remoto; a central continua sem CLI `docker`. A política
+     agente**, no host dele; a central continua sem CLI `docker`. A política
      local (`AGENT_ALLOW`) é soberana — a central não a amplia — e comandos
      Docker novos entram no enum fechado de `services/agents/protocol.rs`, cada
      um com a sua permissão. Proxy genérico para a Engine é proibido.
+   - **O processo da API não monta o `docker.sock`** (ADR 014). O Docker da
+     central é o do **agente local** — o serviço `netmonitor-agent` do compose,
+     ao lado da API, registrado pelo token que ela grava em
+     `LOCAL_AGENT_TOKEN_FILE` (nunca um token padrão). Todo host Docker é um
+     agente (`HostKey` = `agent-<id>`): não recrie a variante "local", rotas sem
+     `{host}` nem coletor/amostrador Docker na central. Containers com
+     `com.netmonitor.protected=true` não são parados, recriados nem removidos
+     pelo agente (`docker/protection.rs`).
    - **Ponte de banco** (ADR 013): o backup de um banco da rede do agente passa
      por `Command::DatabaseTunnel` — o agente **só copia bytes** até um
      `host:porta` de `AGENT_DATABASE_TARGETS` (lista local obrigatória, rede

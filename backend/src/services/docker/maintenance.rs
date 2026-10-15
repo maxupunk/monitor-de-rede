@@ -1,17 +1,20 @@
-//! Operações de manutenção: limpar logs, atualizar imagem e compose.
+//! Operações de manutenção: limpar logs, atualizar imagem, compose e
+//! exportação de volume.
 //!
 //! Ficam fora de [`super::source::DockerEngine`] de propósito (segregação de
 //! interface): consultas e ciclo de vida são rápidos e sem estado; estas
-//! operações são longas, relatam progresso e nem todo host oferece todas —
-//! compose, por exemplo, só existe onde há um agente para executar o CLI.
+//! operações são longas, relatam progresso ou transmitem bytes, e nem todo
+//! host oferece todas — compose, por exemplo, depende do CLI no agente.
+
+use std::pin::Pin;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::{io::AsyncRead, sync::mpsc::UnboundedSender};
 
 use crate::views::docker::DockerActionResponse;
 
-use super::{log_clear, source::LocalEngine, update, DockerError};
+use super::{compose, log_clear, source::LocalEngine, update, volume_export, DockerError};
 
 /// Linhas de progresso de uma operação longa. Envio que falha (ninguém
 /// ouvindo) não interrompe a operação.
@@ -51,6 +54,13 @@ pub struct ComposeRequest {
     pub service: Option<String>,
 }
 
+/// O tar de um volume a caminho do download. Ler até o fim e soltar o leitor
+/// libera o que a origem alocou (o container auxiliar, a ponte do agente).
+pub struct VolumeArchive {
+    pub file_name: String,
+    pub reader: Pin<Box<dyn AsyncRead + Send>>,
+}
+
 #[async_trait]
 pub trait DockerMaintenance: Send + Sync {
     async fn clear_logs(&self, id: &str) -> Result<DockerActionResponse, DockerError>;
@@ -71,8 +81,12 @@ pub trait DockerMaintenance: Send + Sync {
         request: &ComposeRequest,
         progress: Progress,
     ) -> Result<DockerActionResponse, DockerError>;
+    /// Conteúdo do volume em tar, para download.
+    async fn export_volume(&self, name: &str) -> Result<VolumeArchive, DockerError>;
 }
 
+/// A Engine deste host. Só o agente a usa (ADR 014): é ele que monta o socket
+/// e tem o CLI do compose.
 #[async_trait]
 impl DockerMaintenance for LocalEngine {
     async fn clear_logs(&self, id: &str) -> Result<DockerActionResponse, DockerError> {
@@ -95,15 +109,19 @@ impl DockerMaintenance for LocalEngine {
         update::update_container(id, &progress).await
     }
 
-    /// O processo da API nunca executa o CLI `docker` (ADR 010, AGENTS §7).
-    /// Compose só existe do lado do agente, que atende o host remoto.
     async fn compose(
         &self,
-        _request: &ComposeRequest,
-        _progress: Progress,
+        request: &ComposeRequest,
+        progress: Progress,
     ) -> Result<DockerActionResponse, DockerError> {
-        Err(DockerError::Unsupported(
-            "Ações de compose exigem o agente NetMonitor no servidor de destino".to_string(),
-        ))
+        compose::execute(self, request, &progress).await
+    }
+
+    async fn export_volume(&self, name: &str) -> Result<VolumeArchive, DockerError> {
+        let export = volume_export::export(name).await?;
+        Ok(VolumeArchive {
+            file_name: export.file_name.clone(),
+            reader: Box::pin(export),
+        })
     }
 }

@@ -83,14 +83,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import MonitorSparkline, { type SparklinePoint } from '@/components/MonitorSparkline.vue'
-import { LOCAL_HOST_KEY } from '@/services/dockerService'
 import { useDockerStore } from '@/stores/docker'
 import { formatBinaryBytes, formatDecimalBytes } from '@/utils/formatters'
 
 const dockerStore = useDockerStore()
-/** O dashboard é da central: sempre o Docker local, qualquer que seja o host aberto na tela Docker. */
+/** O dashboard é da central: sempre o Docker dela (o agente local), qualquer que seja o host aberto na tela Docker. */
 const docker = computed(() => {
-  const local = dockerStore.hostView(LOCAL_HOST_KEY)
+  const local = dockerStore.localView
   const running = local.containers.filter((container) => container.state === 'running').length
   return {
     available: local.status?.available === true,

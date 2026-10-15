@@ -27,7 +27,7 @@ redes remotas.
 | Tempo real | SSE |
 | Frontend | Vue 3 + TypeScript + Vite + Vuetify + Pinia + PWA, servido pela própria API |
 | Túnel | WireGuard (`wireguard-tools` no mesmo container) |
-| Implantação | Docker Compose — **um serviço** |
+| Implantação | Docker Compose — a aplicação e o agente local do Docker ([ADR 014](adr/014-docker-local-pelo-agente.md)) |
 
 Não há Redis, nem fila externa, nem broker. Ver [§12](#12-o-que-não-existe).
 
@@ -77,19 +77,23 @@ dois — de container para processo vizinho —, não o contrato. O entrypoint c
 a aplicação com `setpriv --inh-caps=-all`: o `NET_ADMIN` concedido ao container
 não chega a ela.
 
-Quando o módulo Docker está habilitado, a API acessa a **Docker Engine API**
-diretamente pelo socket montado, via `bollard`; não chama `docker`, `docker exec`
-nem shell. Essa montagem é uma autoridade separada das capabilities Linux e
-equivale a administração do host. Por isso mutações e exportação de volume são
-exclusivas de `admin` e auditadas. A decisão e as consequências estão na
-[ADR 010](adr/010-docker-engine-api.md).
+**O processo da API também não monta o socket da Docker Engine.** Quem monta é
+o **agente local** (`netmonitor-agent`), um container ao lado da API com o mesmo
+binário dos agentes remotos; a API o comanda pelo canal dos agentes
+([ADR 011](adr/011-agente-remoto.md)), e ele fala com a Engine pelo `bollard`
+— sem `docker exec` nem shell ([ADR 010](adr/010-docker-engine-api.md)). O
+socket equivale a administração do host; com ele fora da API, um
+comprometimento dela só alcança o que `LOCAL_AGENT_ALLOW` libera e nunca os
+containers marcados com `com.netmonitor.protected`. Mutações e exportação de
+volume continuam exclusivas de `admin` e auditadas
+([ADR 014](adr/014-docker-local-pelo-agente.md)).
 
 A camada Docker separa a **fonte** dos dados crus (`services/docker/source.rs`,
 trait `DockerEngine`) do **mapeamento** para DTO, da redação de segredos e das
-regras (`services/docker/engine.rs`). Hoje a única fonte é `LocalEngine`, o
-`bollard` pelo socket. É por esse ponto que o agente remoto vai servir o Docker
-de outros servidores sem duplicar o mapeamento
-([ADR 011](adr/011-agente-remoto.md)).
+regras (`services/docker/engine.rs`). No agente a fonte é `LocalEngine`, o
+`bollard` pelo socket; na central, `AgentEngine`, o mesmo contrato pelo canal.
+Todo host Docker — o desta central inclusive — é um agente, com a chave
+`agent-<id>` (`services/docker/hosts.rs`).
 
 ### Estáticos
 
@@ -110,7 +114,8 @@ confundido com arquivo — e é por isso que a identificação do serviço saiu 
 
 ### Modos de instalação
 
-- **Standalone** — `docker compose up -d --build`. Um container, um volume.
+- **Standalone** — `docker compose up -d --build`. A aplicação e o agente
+  local do Docker; sem o serviço `netmonitor-agent`, um container só.
 - **Central com probes remotos** — a mesma imagem em outro site, com
   `backend-cli task probe_run` e `PROBE_SERVER_URL` apontando para o
   servidor. O probe fala por HTTP autenticado; **nunca** acessa o banco.
@@ -434,16 +439,19 @@ POST /api/port-scan
 POST /api/dns/lookup | /benchmark          GET /api/dns/performance
 GET|POST /api/dns-servers                  PUT|DELETE /api/dns-servers/{id}
 
-GET  /api/docker/status | /metrics
-GET  /api/docker/containers | /containers/{id} | /containers/{id}/logs
-POST /api/docker/containers/{id}/start | /stop | /restart
-DELETE /api/docker/containers/{id}
-GET  /api/docker/volumes | /volumes/{name} | /volumes/{name}/export
-DELETE /api/docker/volumes/{name}
-GET|POST /api/docker/networks              GET|DELETE /api/docker/networks/{id}
-POST /api/docker/networks/{id}/connect | /disconnect
-GET  /api/docker/images | /images/{id}     DELETE /api/docker/images/{id}
-POST /api/docker/images/prune
+GET  /api/docker/hosts                     DELETE /api/docker/log-streams/{id}
+     (o resto é por host: /api/docker/hosts/{agent-<id>}/...)
+GET  .../status | /metrics | /history | /history/containers/{name}
+GET  .../containers | /containers/{id} | /containers/{id}/logs
+POST .../containers/{id}/start | /stop | /restart | /update | /logs/follow
+DELETE .../containers/{id} | /containers/{id}/logs
+GET  .../volumes | /volumes/{name} | /volumes/{name}/export
+DELETE .../volumes/{name}
+GET|POST .../networks                      GET|DELETE .../networks/{id}
+POST .../networks/{id}/connect | /disconnect
+GET  .../images | /images/{id}             DELETE .../images/{id}
+POST .../images/prune | /images/pull
+GET  .../compose                           POST .../compose/{project}
 
 GET|PUT  /api/vpn/server                   POST /api/vpn/server/preflight | /detect-endpoint
 GET|POST /api/vpn/peers                    PATCH|DELETE /api/vpn/peers/{id}

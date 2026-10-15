@@ -55,6 +55,9 @@ pub struct DockerContainerSummary {
     #[ts(type = "number")]
     pub created: i64,
     pub project_name: Option<String>,
+    /// Container da instalação NetMonitor (label `com.netmonitor.protected`):
+    /// o agente recusa parar, remover ou recriar (ADR 014).
+    pub protected: bool,
 }
 
 impl DockerContainerSummary {
@@ -366,9 +369,9 @@ pub struct DockerMetricsResponse {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct DockerLiveSnapshot {
-    /// Host de origem: `local` ou `agent-<id>`. A central carimba o valor ao
-    /// publicar, então o agente não precisa (nem consegue) escolher a chave.
-    #[serde(default = "local_host_key")]
+    /// Host de origem (`agent-<id>`). A central carimba o valor ao publicar,
+    /// então o agente não precisa (nem consegue) escolher a chave.
+    #[serde(default)]
     pub host_key: String,
     pub status: DockerStatusResponse,
     pub containers: Vec<DockerContainerSummary>,
@@ -379,14 +382,10 @@ pub struct DockerLiveSnapshot {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct DockerInventorySnapshot {
-    #[serde(default = "local_host_key")]
+    #[serde(default)]
     pub host_key: String,
     pub collected_at: String,
     pub volumes: Vec<DockerVolumeSummary>,
     pub networks: Vec<DockerNetworkSummary>,
     pub images: Vec<DockerImageSummary>,
-}
-
-fn local_host_key() -> String {
-    crate::services::docker::hosts::LOCAL_HOST_KEY.to_string()
 }

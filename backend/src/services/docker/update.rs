@@ -30,7 +30,7 @@ use serde_json::{Map, Value};
 
 use crate::views::docker::DockerActionResponse;
 
-use super::{call, client, log_clear::is_current_container, maintenance::Progress, DockerError};
+use super::{call, client, maintenance::Progress, protection::is_current_container, DockerError};
 
 const PULL_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const PULL_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);

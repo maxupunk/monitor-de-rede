@@ -61,6 +61,19 @@
           <v-card-title class="d-flex align-center ga-2 flex-wrap">
             <v-icon :color="statusMeta(agent).color">mdi-server</v-icon>
             <span class="text-truncate">{{ agent.name }}</span>
+            <v-chip
+              v-if="agent.local"
+              size="small"
+              color="primary"
+              variant="tonal"
+              prepend-icon="mdi-home-variant"
+            >
+              Esta central
+              <v-tooltip activator="parent" location="top" max-width="300">
+                Agente local: gerencia o Docker deste servidor e sobe com o docker-compose.yml.
+                Revogar ou remover é feito lá, removendo o serviço netmonitor-agent.
+              </v-tooltip>
+            </v-chip>
             <v-spacer></v-spacer>
             <v-chip size="small" variant="tonal" :color="statusMeta(agent).color">
               {{ statusMeta(agent).label }}
@@ -87,6 +100,7 @@
                 :subtitle="agent.host.compose.version || agent.host.compose.reason || '—'"
               ></v-list-item>
               <v-list-item
+                v-if="!agent.local"
                 prepend-icon="mdi-vpn"
                 :title="
                   agent.deviceName ? `Dispositivo ${agent.deviceName}` : 'Sem dispositivo vinculado'
@@ -130,7 +144,7 @@
             >
               Histórico
             </v-btn>
-            <template v-if="auth.isAdmin">
+            <template v-if="auth.isAdmin && !agent.local">
               <v-btn
                 v-if="agent.status !== 'revoked'"
                 color="info"
@@ -281,6 +295,7 @@ const PERMISSION_LABELS: Record<Permission, string> = {
   discovery: 'Descoberta',
   device_io: 'Acesso a equipamentos (plugins)',
   database: 'Ponte de banco (backup)',
+  volume_export: 'Exportar volumes',
 }
 
 function permissionLabel(permission: Permission): string {
@@ -288,7 +303,7 @@ function permissionLabel(permission: Permission): string {
 }
 
 function permissionColor(permission: Permission): string {
-  return permission === 'update' || permission === 'compose' ? 'warning' : 'primary'
+  return ['update', 'compose', 'volume_export'].includes(permission) ? 'warning' : 'primary'
 }
 
 function statusMeta(agent: AgentView): { label: string; color: string } {

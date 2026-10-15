@@ -279,6 +279,28 @@ pub async fn forget_host<C: ConnectionTrait>(db: &C, host_key: &str) -> AppResul
     Ok(hosts + containers)
 }
 
+/// Passa o histórico de `from` para `to`. Idempotente: sem linhas de `from`,
+/// não faz nada.
+///
+/// # Errors
+///
+/// Propaga erro do banco.
+pub async fn rename_host<C: ConnectionTrait>(db: &C, from: &str, to: &str) -> AppResult<u64> {
+    let hosts = host_metrics_1m::Entity::update_many()
+        .col_expr(host_metrics_1m::Column::HostKey, Expr::value(to))
+        .filter(host_metrics_1m::Column::HostKey.eq(from))
+        .exec(db)
+        .await?
+        .rows_affected;
+    let containers = container_metrics_1m::Entity::update_many()
+        .col_expr(container_metrics_1m::Column::HostKey, Expr::value(to))
+        .filter(container_metrics_1m::Column::HostKey.eq(from))
+        .exec(db)
+        .await?
+        .rows_affected;
+    Ok(hosts + containers)
+}
+
 /// Retenção: apaga baldes anteriores a `cutoff`.
 ///
 /// # Errors

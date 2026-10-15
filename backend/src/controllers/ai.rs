@@ -36,6 +36,7 @@ use crate::{
             settings::{self, AiSettings},
         },
         audit::AuditActor,
+        docker::hosts,
         shared::errors::{AppError, AppResult},
     },
 };
@@ -261,7 +262,11 @@ async fn search_mentions(
     Query(query): Query<AiMentionQuery>,
 ) -> AppResult<Response> {
     let term = query.q.unwrap_or_default();
-    Ok(format::json(mentions::search(&ctx.db, &term).await?)?)
+    let docker = hosts::default_host(&ctx).await.ok().flatten();
+    let engine = docker.as_ref().map(|host| host.engine.as_ref());
+    Ok(format::json(
+        mentions::search(&ctx.db, engine, &term).await?,
+    )?)
 }
 
 /// `POST /api/ai/digest/run` — gera o resumo agora, cobrindo o período da

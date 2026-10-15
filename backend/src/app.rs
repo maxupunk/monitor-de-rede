@@ -76,7 +76,6 @@ impl Hooks for App {
     async fn after_context(ctx: AppContext) -> Result<AppContext> {
         require_jwt_secret_in_production();
         process_deps::install(&ctx);
-        crate::services::docker::install(&ctx);
         enable_sqlite_wal(&ctx).await;
         migration::purge_removed_migrations(&ctx.db)
             .await

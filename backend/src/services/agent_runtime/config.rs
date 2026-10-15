@@ -4,7 +4,8 @@
 //! |-----------------------|---------------------------------|
 //! | `AGENT_SERVER_URL`    | obrigatória                     |
 //! | `AGENT_ENROLL_CODE`   | usada só se ainda não há token  |
-//! | `AGENT_TOKEN`         | lido de `<state>/token`         |
+//! | `AGENT_TOKEN`         | lido de `AGENT_TOKEN_FILE`      |
+//! | `AGENT_TOKEN_FILE`    | `<state>/token`; o agente local lê o que a central grava (ADR 014) |
 //! | `AGENT_STATE_DIR`     | `/var/lib/netmonitor-agent`     |
 //! | `AGENT_ALLOW`         | `read,lifecycle,monitor,discovery` (`device_io` libera plugins de dispositivo) |
 //! | `AGENT_DEVICE_CIDRS`  | vazio = qualquer rede privada; restringe o alvo dos plugins |
@@ -12,7 +13,7 @@
 //! | `AGENT_OUTBOX_MAX`    | 10 000 eventos                  |
 //! | `HOST_PROC`/`HOST_ROOT` | `/proc` e `/`                 |
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::services::agents::policy::Policy;
 
@@ -26,6 +27,8 @@ pub struct AgentConfig {
     pub server_url: String,
     pub enroll_code: Option<String>,
     pub token: Option<String>,
+    /// Onde o token fica (ou de onde é lido, no agente local).
+    pub token_file: Option<PathBuf>,
     pub state_dir: PathBuf,
     pub policy: Policy,
     pub outbox_max: usize,
@@ -53,6 +56,7 @@ impl AgentConfig {
             server_url: normalize_server_url(&server_url)?,
             enroll_code: env("AGENT_ENROLL_CODE"),
             token: env("AGENT_TOKEN"),
+            token_file: env("AGENT_TOKEN_FILE").map(PathBuf::from),
             state_dir: env("AGENT_STATE_DIR")
                 .map_or_else(|| DEFAULT_STATE_DIR.into(), PathBuf::from),
             policy,
@@ -66,7 +70,9 @@ impl AgentConfig {
 
     #[must_use]
     pub fn token_path(&self) -> PathBuf {
-        self.state_dir.join("token")
+        self.token_file
+            .clone()
+            .unwrap_or_else(|| self.state_dir.join("token"))
     }
 
     #[must_use]
@@ -109,34 +115,6 @@ pub fn websocket_url(server_url: &str) -> String {
     format!("{base}/api/agents/connect")
 }
 
-/// Lê o token salvo por um enrollment anterior.
-#[must_use]
-pub fn read_token(path: &Path) -> Option<String> {
-    std::fs::read_to_string(path)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-}
-
-/// Grava o token com permissão 0600: é a credencial do host.
-///
-/// # Errors
-///
-/// Falha de escrita.
-pub fn write_token(path: &Path, token: &str) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let temporary = path.with_extension("tmp");
-    std::fs::write(&temporary, token)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o600))?;
-    }
-    std::fs::rename(temporary, path)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,15 +134,5 @@ mod tests {
             "http://10.8.0.1:3333"
         );
         assert!(normalize_server_url("10.8.0.1:3333").is_err());
-    }
-
-    #[test]
-    fn token_e_gravado_e_lido_de_volta() {
-        let dir = std::env::temp_dir().join(format!("nm-agent-{}", uuid::Uuid::new_v4()));
-        let path = dir.join("token");
-        assert_eq!(read_token(&path), None);
-        write_token(&path, "segredo\n").expect("grava");
-        assert_eq!(read_token(&path).as_deref(), Some("segredo"));
-        let _ = std::fs::remove_dir_all(dir);
     }
 }

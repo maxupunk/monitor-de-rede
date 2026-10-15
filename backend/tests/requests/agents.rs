@@ -424,7 +424,7 @@ async fn docker_do_host_remoto_atravessa_o_canal_com_o_mesmo_mapeamento() {
             .find(|host| host["key"] == format!("agent-{}", probe.id))
             .expect("host do agente na lista");
         assert_eq!(remote["online"], true);
-        assert_eq!(hosts_list[0]["key"], "local");
+        assert_eq!(remote["kind"], "agent");
 
         // Política anunciada barra antes de enviar: update não foi liberado.
         let forbidden = request
@@ -457,12 +457,13 @@ async fn docker_do_host_remoto_atravessa_o_canal_com_o_mesmo_mapeamento() {
 async fn rotas_por_host_validam_a_chave_e_a_conexao() {
     request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
         session_with_role(&mut request, &ctx, Role::Viewer).await;
+        // `local` não é mais chave: o Docker da central é o do agente local.
         assert_eq!(
             request
                 .get("/api/docker/hosts/local/status")
                 .await
                 .status_code(),
-            200
+            422
         );
         assert_eq!(
             request
@@ -738,17 +739,22 @@ async fn peer_da_vpn_com_agente_leva_a_instalacao_no_script_linux() {
 
 #[tokio::test]
 #[serial]
-async fn compose_na_propria_central_e_aceito_e_falha_pelo_sse() {
+async fn compose_e_aceito_e_o_resultado_segue_pelo_sse() {
     request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        let (probe, _) = enrolled_agent(&ctx, "srv-compose").await;
+        let _agent = connect_agent(&ctx, probe.clone()).await;
         session_with_role(&mut request, &ctx, Role::Admin).await;
         let response = request
-            .post("/api/docker/compose/portal")
+            .post(&format!(
+                "/api/docker/hosts/agent-{}/compose/portal",
+                probe.id
+            ))
             .json(&json!({ "action": "up" }))
             .await;
         assert_eq!(response.status_code(), 202, "{}", response.text());
         let accepted = json_of(&response.text());
         assert_eq!(accepted["kind"], "compose");
-        assert_eq!(accepted["hostKey"], "local");
+        assert_eq!(accepted["hostKey"], format!("agent-{}", probe.id));
         assert!(accepted["operationId"].is_string());
     })
     .await;

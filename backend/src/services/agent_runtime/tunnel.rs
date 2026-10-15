@@ -1,4 +1,5 @@
-//! Ponte de banco no agente (ADR 013): quem abre o socket até o banco.
+//! Pontes no agente: quem abre a ponta local — o socket até o banco (ADR 013)
+//! ou o tar de um volume (ADR 014).
 //!
 //! O agente não fala SQL — só conecta e copia bytes ([`crate::services::agents::tunnel::pump`]).
 //! O que ele decide, e decide sozinho, é **se** conecta:
@@ -8,6 +9,9 @@
 //!    vazia recusa tudo; a central não a amplia;
 //! 3. o IP resolvido precisa ser de rede privada/CGNAT/link-local, a mesma
 //!    regra do `device_io`.
+//!
+//! O volume só exige `volume_export` na política: o nome vai à Engine deste
+//! host, que valida a existência, e o tar sai só de ida.
 
 use std::{
     net::{IpAddr, SocketAddr},
@@ -22,7 +26,9 @@ use crate::services::{
     agents::{
         policy::{Permission, Policy},
         protocol::{ErrorCode, RemoteError},
+        tunnel::TunnelStream,
     },
+    docker::{maintenance::DockerMaintenance, source::LocalEngine},
     plugins::transport::is_reachable_target,
 };
 
@@ -79,10 +85,21 @@ pub fn parse_targets(raw: &str) -> Result<Vec<TunnelTarget>, String> {
         .collect()
 }
 
-/// Quem abre a conexão até o banco. Trait para os testes trocarem a rede.
+/// Quem abre a ponta local de uma ponte. Trait para os testes trocarem a
+/// rede e a Engine.
 #[async_trait]
 pub trait TunnelOpener: Send + Sync {
-    async fn open(&self, host: &str, port: u16) -> Result<TcpStream, RemoteError>;
+    /// Conexão TCP até o banco `host:port`.
+    async fn open(&self, host: &str, port: u16) -> Result<TunnelStream, RemoteError>;
+    /// O tar do volume `name`. A escrita é descartada: a ponte é só de ida.
+    async fn open_volume(&self, name: &str) -> Result<TunnelStream, RemoteError>;
+}
+
+fn forbidden(permission: Permission) -> RemoteError {
+    RemoteError::new(
+        ErrorCode::Forbidden,
+        format!("A política deste host não libera a permissão '{permission}'"),
+    )
 }
 
 /// O de verdade: política + lista + rede privada, e então TCP.
@@ -108,12 +125,9 @@ impl LocalTunnelOpener {
 
 #[async_trait]
 impl TunnelOpener for LocalTunnelOpener {
-    async fn open(&self, host: &str, port: u16) -> Result<TcpStream, RemoteError> {
+    async fn open(&self, host: &str, port: u16) -> Result<TunnelStream, RemoteError> {
         if !self.policy.allows(Permission::Database) {
-            return Err(RemoteError::new(
-                ErrorCode::Forbidden,
-                "A política deste host não libera a permissão 'database'",
-            ));
+            return Err(forbidden(Permission::Database));
         }
         if self.targets.is_empty() {
             return Err(RemoteError::new(
@@ -158,7 +172,18 @@ impl TunnelOpener for LocalTunnelOpener {
                 )
             })?;
         let _ = stream.set_nodelay(true);
-        Ok(stream)
+        Ok(Box::new(stream))
+    }
+
+    async fn open_volume(&self, name: &str) -> Result<TunnelStream, RemoteError> {
+        if !self.policy.allows(Permission::VolumeExport) {
+            return Err(forbidden(Permission::VolumeExport));
+        }
+        let archive = LocalEngine
+            .export_volume(name)
+            .await
+            .map_err(RemoteError::from)?;
+        Ok(Box::new(tokio::io::join(archive.reader, tokio::io::sink())))
     }
 }
 
@@ -201,12 +226,14 @@ mod tests {
         let error = opener(&[], "127.0.0.1:5432")
             .open("127.0.0.1", 5432)
             .await
-            .unwrap_err();
+            .err()
+            .expect("recusado");
         assert_eq!(error.code, ErrorCode::Forbidden);
         let error = opener(&[Permission::Database], "")
             .open("127.0.0.1", 5432)
             .await
-            .unwrap_err();
+            .err()
+            .expect("recusado");
         assert!(
             error.message.contains("AGENT_DATABASE_TARGETS"),
             "{}",
@@ -219,8 +246,20 @@ mod tests {
         let error = opener(&[Permission::Database], "127.0.0.1:5432")
             .open("127.0.0.1", 3306)
             .await
-            .unwrap_err();
+            .err()
+            .expect("recusado");
         assert_eq!(error.code, ErrorCode::Forbidden);
+    }
+
+    #[tokio::test]
+    async fn volume_exige_a_permissao_antes_de_tocar_a_engine() {
+        let error = opener(&[Permission::Database], "")
+            .open_volume("dados")
+            .await
+            .err()
+            .expect("recusado");
+        assert_eq!(error.code, ErrorCode::Forbidden);
+        assert!(error.message.contains("volume_export"), "{}", error.message);
     }
 
     #[test]

@@ -243,10 +243,13 @@ async fn update(
     let timeout_seconds = calculate_smart_timeout_seconds(&kind, interval_seconds)
         .min((interval_seconds - 1).max(1))
         .max(1);
+    let probe_id =
+        monitor_creation::default_probe(&ctx.db, &kind, input.probe_id.or(current.probe_id))
+            .await?;
     let row = monitors::ActiveModel {
         id: Set(id),
         device_id: Set(device_id),
-        probe_id: Set(input.probe_id.or(current.probe_id)),
+        probe_id: Set(probe_id),
         r#type: Set(kind.clone()),
         name: Set(name),
         configuration: Set(build_configuration(

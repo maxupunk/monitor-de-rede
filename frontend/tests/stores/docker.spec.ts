@@ -1,27 +1,42 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useDockerStore } from '@/stores/docker'
-import { dockerHostsService, dockerService } from '@/services/dockerService'
+import { createDockerService, dockerHostsService } from '@/services/dockerService'
+import type { DockerHostView } from '@/bindings/DockerHostView'
+
+/** O mesmo serviço falso para qualquer host: o que importa é a chave usada. */
+const hostApi = vi.hoisted(() => ({
+  status: vi.fn(),
+  containers: vi.fn(),
+  volumes: vi.fn(),
+  networks: vi.fn(),
+  images: vi.fn(),
+  metrics: vi.fn(),
+  followLogs: vi.fn(),
+}))
 
 vi.mock('@/services/dockerService', () => ({
-  LOCAL_HOST_KEY: 'local',
-  dockerService: {
-    status: vi.fn(),
-    containers: vi.fn(),
-    volumes: vi.fn(),
-    networks: vi.fn(),
-    images: vi.fn(),
-    metrics: vi.fn(),
-    followLogs: vi.fn(),
-  },
-  createDockerService: vi.fn(),
+  createDockerService: vi.fn(() => hostApi),
   dockerHostsService: {
     hosts: vi.fn(),
     stopLogStream: vi.fn(),
   },
 }))
 
-const mocked = vi.mocked(dockerService)
+const mocked = hostApi
+
+function host(key: string, kind: 'local' | 'agent', name: string): DockerHostView {
+  return {
+    key,
+    name,
+    kind,
+    online: true,
+    agentId: Number(key.replace('agent-', '')),
+    dockerAvailable: true,
+    composeAvailable: false,
+    policy: ['read', 'lifecycle'],
+  }
+}
 
 describe('docker store', () => {
   beforeEach(() => {
@@ -46,9 +61,11 @@ describe('docker store', () => {
       images: null,
     })
     const store = useDockerStore()
+    store.selectHost('agent-1')
 
     await store.refreshAll()
 
+    expect(createDockerService).toHaveBeenLastCalledWith('agent-1')
     expect(store.available).toBe(false)
     expect(mocked.containers).not.toHaveBeenCalled()
     expect(store.error).toBeNull()
@@ -84,6 +101,7 @@ describe('docker store', () => {
           ports: [],
           created: 1,
           projectName: null,
+          protected: false,
         },
       ],
     })
@@ -111,6 +129,7 @@ describe('docker store', () => {
       ],
     })
     const store = useDockerStore()
+    store.selectHost('agent-1')
 
     await store.refreshAll()
 
@@ -133,11 +152,40 @@ describe('docker store', () => {
     expect(store.loading).toBe(false)
   })
 
-  it('aplica snapshots SSE sem consultar os endpoints Docker', () => {
+  it('sem host escolhido não consulta nada', async () => {
     const store = useDockerStore()
 
+    await store.refreshAll()
+    await store.refreshContainers()
+
+    expect(mocked.status).not.toHaveBeenCalled()
+    expect(store.loading).toBe(false)
+  })
+
+  it('abre o agente local por padrão e o expõe ao dashboard', async () => {
+    vi.mocked(dockerHostsService).hosts.mockResolvedValue([
+      host('agent-1', 'local', 'Este servidor'),
+      host('agent-7', 'agent', 'srv-remoto'),
+    ])
+    const store = useDockerStore()
+    await store.fetchHosts()
+
+    expect(store.hostsLoaded).toBe(true)
+    expect(store.selectedHostKey).toBe('agent-1')
+    expect(store.defaultHostKey).toBe('agent-1')
+
+    store.selectHost('agent-7')
+    store.applyLiveSnapshot(liveSnapshot('agent-1', 'central', ['db']))
+    expect(store.localView.containers).toHaveLength(1)
+    expect(store.containers).toHaveLength(0)
+  })
+
+  it('aplica snapshots SSE sem consultar os endpoints Docker', () => {
+    const store = useDockerStore()
+    store.selectHost('agent-1')
+
     store.applyLiveSnapshot({
-      hostKey: 'local',
+      hostKey: 'agent-1',
       status: {
         available: true,
         reason: null,
@@ -165,6 +213,7 @@ describe('docker store', () => {
           ports: [],
           created: 1,
           projectName: 'app',
+          protected: false,
         },
       ],
       metrics: {
@@ -176,7 +225,7 @@ describe('docker store', () => {
       },
     })
     store.applyInventorySnapshot({
-      hostKey: 'local',
+      hostKey: 'agent-1',
       collectedAt: '2026-08-31T12:00:03Z',
       volumes: [],
       networks: [],
@@ -192,8 +241,9 @@ describe('docker store', () => {
 
   it('mantém o estado de cada host separado e mostra o selecionado', () => {
     const store = useDockerStore()
+    store.selectHost('agent-1')
     store.applyLiveSnapshot(liveSnapshot('agent-7', 'srv-remoto', ['web', 'api']))
-    store.applyLiveSnapshot(liveSnapshot('local', 'central', ['db']))
+    store.applyLiveSnapshot(liveSnapshot('agent-1', 'central', ['db']))
 
     expect(store.containers).toHaveLength(1)
     expect(store.status?.name).toBe('central')
@@ -201,24 +251,13 @@ describe('docker store', () => {
     store.selectHost('agent-7')
     expect(store.status?.name).toBe('srv-remoto')
     expect(store.containers.map((container) => container.id)).toEqual(['web', 'api'])
-    expect(store.hostView('local').containers).toHaveLength(1)
+    expect(store.hostView('agent-1').containers).toHaveLength(1)
     expect(mocked.containers).not.toHaveBeenCalled()
   })
 
   it('probe:status do agente muda o host para offline sem nova consulta', async () => {
     const hostsService = vi.mocked(dockerHostsService)
-    hostsService.hosts.mockResolvedValue([
-      {
-        key: 'agent-7',
-        name: 'srv-remoto',
-        kind: 'agent',
-        online: true,
-        agentId: 7,
-        dockerAvailable: true,
-        composeAvailable: false,
-        policy: ['read', 'lifecycle'],
-      },
-    ])
+    hostsService.hosts.mockResolvedValue([host('agent-7', 'agent', 'srv-remoto')])
     const store = useDockerStore()
     await store.fetchHosts()
     store.selectHost('agent-7')
@@ -258,18 +297,19 @@ describe('docker store', () => {
   it('logs ao vivo chegam pelo SSE depois de uma única requisição de início', async () => {
     mocked.followLogs.mockResolvedValue({ streamId: 's-1' })
     const store = useDockerStore()
+    store.selectHost('agent-1')
 
     const streamId = await store.startLogStream('web', 100)
     store.applyLogStreamEvent({
       streamId,
-      hostKey: 'local',
+      hostKey: 'agent-1',
       containerId: 'web',
       entries: [{ timestamp: '2026-09-22T10:00:00Z', stream: 'stdout', message: 'pronto' }],
       ended: null,
     })
     store.applyLogStreamEvent({
       streamId,
-      hostKey: 'local',
+      hostKey: 'agent-1',
       containerId: 'web',
       entries: [],
       ended: 'Acompanhamento encerrado',
@@ -314,6 +354,7 @@ function liveSnapshot(hostKey: string, name: string, ids: string[]) {
       ports: [],
       created: 1,
       projectName: null,
+      protected: false,
     })),
     metrics: {
       dockerAvailable: true,

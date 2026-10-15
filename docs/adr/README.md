@@ -13,7 +13,8 @@ decisão cria.
 | [007](007-scheduler-processo-unico.md) | Scheduler: laço em processo único; deps de processo em `after_context` | — | aceito |
 | [008](008-syslog-parser.md) | Syslog: `syslog_loose` com resgate do `<pri>` e severidade por tópico | SPIKE-06 | aceito |
 | [009](009-device-adapters.md) | Plataformas: registro único com `DeviceAdapter` e adapters especializados | — | aceito |
-| [010](010-docker-engine-api.md) | Docker: API nativa pelo socket, com mutações administrativas e auditadas | — | aceito |
+| [010](010-docker-engine-api.md) | Docker: API nativa pelo socket, com mutações administrativas e auditadas | — | aceito (socket movido pelo 014) |
 | [011](011-agente-remoto.md) | Agente remoto: WebSocket de saída sobre a VPN, política local soberana, Docker por fonte injetável | — | aceito |
 | [012](012-plugins-de-dispositivo.md) | Plugins de dispositivo: script Rhai em sandbox, E/S por transporte único, aprovação por chamada | — | aceito |
 | [013](013-ponte-de-banco-pelo-agente.md) | Backup de banco que só o agente alcança: ponte TCP tipada, dump continua na central | — | aceito |
+| [014](014-docker-local-pelo-agente.md) | Docker da central atendido por um agente local: socket fora da API, um caminho só para todo host | — | aceito |

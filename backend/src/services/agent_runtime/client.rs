@@ -18,13 +18,14 @@ use crate::{
     services::{
         docker::source::LocalEngine,
         monitoring::{checkers::ping::PingClientCell, runner::CheckDeps},
+        shared::secret_file,
         telemetry::{host_metrics::HostMetricsReader, sampler},
     },
     views::agents::AgentEnrollResponse,
 };
 
 use super::{
-    config::{read_token, write_token, AgentConfig},
+    config::AgentConfig,
     executor::LocalExecutor,
     identity,
     outbox::Outbox,
@@ -38,6 +39,8 @@ const BACKOFF_MAX: Duration = Duration::from_secs(60);
 /// Conexão que durou isto é considerada estável e zera o backoff.
 const STABLE_AFTER: Duration = Duration::from_secs(60);
 const PING_INTERVAL: Duration = Duration::from_secs(20);
+/// Sem token (código ausente, central fora do ar, arquivo ainda não gravado).
+const TOKEN_RETRY: Duration = Duration::from_secs(30);
 
 /// Próxima espera: dobra até o teto e sorteia entre metade e o total.
 #[must_use]
@@ -50,7 +53,11 @@ fn jitter(base: Duration) -> Duration {
     Duration::from_millis(rand::thread_rng().gen_range(millis / 2..=millis.max(1)))
 }
 
-/// Obtém o token: ambiente, arquivo salvo ou troca do código de enrollment.
+/// Obtém o token: ambiente, arquivo ou troca do código de enrollment.
+///
+/// Chamada a cada tentativa de conexão: o agente local lê um arquivo que a
+/// central regrava quando gera um token novo (ADR 014), e um token recusado
+/// não pode prender o agente até reiniciar.
 ///
 /// # Errors
 ///
@@ -59,13 +66,13 @@ pub async fn obtain_token(config: &AgentConfig) -> Result<String, String> {
     if let Some(token) = &config.token {
         return Ok(token.clone());
     }
-    if let Some(token) = read_token(&config.token_path()) {
+    if let Some(token) = secret_file::read(&config.token_path()) {
         return Ok(token);
     }
-    let code = config
-        .enroll_code
-        .as_deref()
-        .ok_or("Sem token salvo: defina AGENT_ENROLL_CODE com o código gerado na central")?;
+    let code = config.enroll_code.as_deref().ok_or(
+        "Sem token: defina AGENT_ENROLL_CODE com o código gerado na central (ou, no \
+             agente local, monte o arquivo de AGENT_TOKEN_FILE que a central grava)",
+    )?;
     let response = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
@@ -82,30 +89,34 @@ pub async fn obtain_token(config: &AgentConfig) -> Result<String, String> {
         ));
     }
     let enrolled: AgentEnrollResponse = response.json().await.map_err(|error| error.to_string())?;
-    write_token(&config.token_path(), &enrolled.token)
+    secret_file::write(&config.token_path(), &enrolled.token)
         .map_err(|error| format!("não foi possível salvar o token: {error}"))?;
     tracing::info!(probe_id = enrolled.probe_id, name = %enrolled.name, "agente registrado na central");
     Ok(enrolled.token)
 }
 
-/// Roda o agente para sempre.
-pub async fn run_forever(config: AgentConfig) {
-    let token = loop {
-        match obtain_token(&config).await {
-            Ok(token) => break token,
+/// Espera até ter um token.
+async fn wait_for_token(config: &AgentConfig) -> String {
+    loop {
+        match obtain_token(config).await {
+            Ok(token) => return token,
             Err(error) => {
                 tracing::error!(%error, "não foi possível obter o token do agente");
-                tokio::time::sleep(Duration::from_secs(30)).await;
+                tokio::time::sleep(TOKEN_RETRY).await;
             }
         }
-    };
+    }
+}
 
+/// Roda o agente para sempre.
+pub async fn run_forever(config: AgentConfig) {
     let outbox = Arc::new(Outbox::open(config.outbox_path(), config.outbox_max));
     let deps = SessionDeps {
         executor: Arc::new(LocalExecutor::new(
             config.policy.clone(),
             CheckDeps {
                 ping: Some(PingClientCell::open()),
+                docker: Some(Arc::new(LocalEngine)),
             },
         )),
         outbox: outbox.clone(),
@@ -115,13 +126,18 @@ pub async fn run_forever(config: AgentConfig) {
             config.database_targets.clone(),
         )),
     };
-    sampler::spawn(
-        sampler::Sampler::new(HostMetricsReader::from_env(), Arc::new(LocalEngine)),
-        Arc::new(OutboxSink(outbox)),
-    );
+    if sampler::enabled() {
+        sampler::spawn(
+            sampler::Sampler::new(HostMetricsReader::from_env(), Arc::new(LocalEngine)),
+            Arc::new(OutboxSink(outbox)),
+        );
+    } else {
+        tracing::info!("histórico de métricas do host desligado (TELEMETRY_ENABLED=false)");
+    }
 
     let mut backoff = BACKOFF_MIN;
     loop {
+        let token = wait_for_token(&config).await;
         let started = tokio::time::Instant::now();
         match connect_once(&config, &token, deps.clone()).await {
             Ok(()) => tracing::warn!("conexão com a central encerrada"),

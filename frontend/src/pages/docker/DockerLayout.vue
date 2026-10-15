@@ -39,7 +39,18 @@
       </div>
     </v-card>
     <v-alert
-      v-if="docker.selectedHost && !docker.selectedHost.online"
+      v-if="docker.hostsLoaded && docker.hosts.length === 0"
+      type="info"
+      variant="tonal"
+      class="mb-4"
+      icon="mdi-docker"
+    >
+      Nenhum host Docker. O Docker deste servidor é gerenciado pelo agente local (serviço
+      <code>netmonitor-agent</code> do <code>docker-compose.yml</code>); servidores remotos entram
+      pela tela de agentes.
+    </v-alert>
+    <v-alert
+      v-else-if="docker.selectedHost && !docker.selectedHost.online"
       type="warning"
       variant="tonal"
       class="mb-4"
@@ -50,7 +61,8 @@
     </v-alert>
     <DockerUnavailableAlert
       v-else-if="docker.status && !docker.available"
-      :reason="docker.status.reason || 'A Docker Engine não respondeu ao backend.'"
+      :reason="docker.status.reason || 'A Docker Engine não respondeu ao agente.'"
+      :local="docker.selectedHost?.kind === 'local'"
     ></DockerUnavailableAlert>
     <DockerOperationsPanel class="mb-4"></DockerOperationsPanel>
     <router-view />
@@ -62,7 +74,6 @@ import { computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import DockerOperationsPanel from '@/components/docker/DockerOperationsPanel.vue'
 import DockerUnavailableAlert from '@/components/docker/DockerUnavailableAlert.vue'
-import { LOCAL_HOST_KEY } from '@/services/dockerService'
 import { useDockerStore } from '@/stores/docker'
 
 const docker = useDockerStore()
@@ -79,55 +90,48 @@ const tabs = [
   { title: 'Histórico', icon: 'mdi-chart-timeline-variant', to: '/docker/history' },
 ]
 
+/** O host padrão (o desta central) não vai na URL; os demais, sim. */
 const hostQuery = computed(() =>
-  docker.selectedHostKey === LOCAL_HOST_KEY ? {} : { host: docker.selectedHostKey }
+  docker.selectedHostKey && docker.selectedHostKey !== docker.defaultHostKey
+    ? { host: docker.selectedHostKey }
+    : {}
 )
 
-const hostItems = computed(() => {
-  const items = docker.hosts.map((host) => ({
+const hostItems = computed(() =>
+  docker.hosts.map((host) => ({
     title: host.name,
     value: host.key,
     subtitle: host.kind === 'local' ? 'Docker desta central' : 'Servidor remoto',
     online: host.online,
   }))
-  if (items.length === 0) {
-    items.push({
-      title: 'Este servidor',
-      value: LOCAL_HOST_KEY,
-      subtitle: 'Docker desta central',
-      online: true,
-    })
-  }
-  return items
-})
+)
 
 function routeHost(): string {
   const value = route.query.host
-  return typeof value === 'string' && value ? value : LOCAL_HOST_KEY
+  return typeof value === 'string' ? value : ''
 }
 
 function changeHost(hostKey: string | null) {
-  const key = hostKey || LOCAL_HOST_KEY
   const query = { ...route.query }
-  if (key === LOCAL_HOST_KEY) {
+  if (!hostKey || hostKey === docker.defaultHostKey) {
     delete query.host
   } else {
-    query.host = key
+    query.host = hostKey
   }
   router.replace({ path: route.path, query })
 }
 
-watch(
-  () => route.query.host,
-  () => {
-    const key = routeHost()
-    if (key !== docker.selectedHostKey) docker.selectHost(key)
-  },
-  { immediate: true }
-)
+/** A URL manda; sem `host`, o padrão — que só se conhece com a lista carregada. */
+function syncHost() {
+  const key = routeHost() || docker.defaultHostKey
+  if (key && key !== docker.selectedHostKey) docker.selectHost(key)
+}
 
-onMounted(() => {
-  docker.fetchHosts()
+watch(() => route.query.host, syncHost)
+
+onMounted(async () => {
+  await docker.fetchHosts()
+  syncHost()
 })
 </script>
 

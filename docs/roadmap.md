@@ -630,6 +630,15 @@ Cada item carrega severidade, esforço, responsável sugerido e critério de ace
     - Queda do canal: a ponte local segue a sessão atual do agente, e o backup refaz o banco do zero (até 3 tentativas, esperando o agente reconectar até 60 s) na mesma linha do histórico, com aviso; recusa do servidor e erro de SQL não repetem; restauração não é refeita.
     - Testes: ida e volta pela ponte contra PostgreSQL, MySQL e MariaDB reais com resultado idêntico à rota direta; recusas com a razão; 48 MB pela ponte sem atrasar outros pedidos do agente; vagas liberadas; compressão > 3×; ponte que segue o agente após reconexão; política de nova tentativa.
 
+- [x] **Docker da central atendido por um agente local** 🟢 Concluído ([ADR 014](adr/014-docker-local-pelo-agente.md))
+  - **Arquivos:** `backend/src/services/agents/{local,bridge,protocol,policy,routes,service,remote_engine}.rs`, `backend/src/services/agent_runtime/{client,config,executor,session,tunnel}.rs`, `backend/src/services/docker/{hosts,protection,maintenance,compose,realtime,metrics,volume_export}.rs`, `backend/src/services/shared/secret_file.rs`, `backend/src/controllers/docker.rs`, `backend/src/initializers/monitoring.rs`, `docker-compose.yml`, `docker-compose.host.yml`, `docker/entrypoint.sh`, `frontend/src/{stores/docker.ts,services/dockerService.ts}`, `frontend/src/pages/docker/`, `backend/tests/requests/{docker,local_agent}.rs`
+  - **Implementado:**
+    - O processo da API **não monta mais o `docker.sock`**: o serviço `netmonitor-agent` do compose (mesma imagem dos agentes remotos) é o dono dele, sob `LOCAL_AGENT_ALLOW`. Registro zero-config sem token padrão: a API grava o token num volume que só os dois montam e o agente o relê a cada conexão.
+    - Um caminho só para todo host: `HostKey::Local`, o alias `local`, as rotas sem `{host}`, o coletor SSE, o cache de métricas, o `refresh()` pós-mutação e o amostrador da central saíram; monitores de container e o histórico `local` são adotados pelo agente local.
+    - Containers protegidos (`com.netmonitor.protected=true`, na API e no agente): o agente recusa parar/reiniciar/recriar/remover/desconectar, e o projeto compose deles só aceita `pull`; a tela troca os botões por um escudo.
+    - Exportar volume em qualquer host: `Command::VolumeExport` (permissão `volume_export`, fora do padrão) pelos quadros binários da ponte; protocolo na **versão 3**. Compose também vale para o host da central.
+    - Testes: contrato HTTP por host com a Engine fora do ar, export de volume de ponta a ponta (gzip idêntico) e recusa pela política, cadastro e rotação do token do agente local, adoção de monitores e histórico, recusa de revogar/remover o agente local, projeto compose protegido.
+
 ---
 
 ## 7. Matriz obrigatória de validação

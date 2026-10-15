@@ -5,7 +5,8 @@
 # Roda como root só o que precisa de root, e larga o privilégio antes de chamar
 # a aplicação:
 #
-#   1. acerta o dono de /data e /config — volume nomeado nasce do root;
+#   1. acerta o dono de /data, /config e do volume do token do agente local
+#      — volume nomeado nasce do root;
 #   2. sobe o watcher do WireGuard, se o container tiver NET_ADMIN, e o
 #      reinicia automaticamente se ele morrer;
 #   3. `exec` na aplicação como `app`, com todas as capabilities removidas.
@@ -36,24 +37,16 @@ mkdir -p "${DATA_DIR}" "${WG_CONFIG_DIR}"
 chown -R "${APP_USER}:${APP_USER}" "${DATA_DIR}" "${WG_CONFIG_DIR}" 2>/dev/null \
   || log "aviso: não foi possível ajustar o dono de ${DATA_DIR}/${WG_CONFIG_DIR}"
 
-# O socket da Docker Engine costuma pertencer a um GID diferente em cada host.
-# O filesystem do container é somente leitura, portanto /etc/group não pode ser
-# alterado com usermod. Guardamos o GID para passá-lo diretamente ao setpriv:
-# isso mantém a aplicação não-root, evita chmod 666 e funciona com qualquer
-# GID do host. O acesso continua equivalendo a administração do host, por isso
-# a API aplica autorização e auditoria nas operações mutáveis.
-DOCKER_SOCKET="${DOCKER_SOCKET:-/var/run/docker.sock}"
-APP_GROUPS=$(id -G "${APP_USER}" | tr ' ' ',')
-if [ -S "${DOCKER_SOCKET}" ]; then
-  docker_gid=$(stat -c '%g' "${DOCKER_SOCKET}" 2>/dev/null || true)
-  if [ -n "${docker_gid}" ]; then
-    case ",${APP_GROUPS}," in
-      *,"${docker_gid}",*) ;;
-      *) APP_GROUPS="${APP_GROUPS},${docker_gid}" ;;
-    esac
-    log "socket Docker liberado para ${APP_USER} pelo GID ${docker_gid}"
-  fi
+# A API não monta o socket da Docker Engine (ADR 014): quem monta é o agente
+# local, em outro container. Daqui ela só grava o token dele, num volume que os
+# dois compartilham — e que nasce do root.
+if [ -n "${LOCAL_AGENT_TOKEN_FILE:-}" ]; then
+  agent_dir=$(dirname "${LOCAL_AGENT_TOKEN_FILE}")
+  mkdir -p "${agent_dir}"
+  chown "${APP_USER}:${APP_USER}" "${agent_dir}" 2>/dev/null \
+    || log "aviso: não foi possível ajustar o dono de ${agent_dir}"
 fi
+APP_GROUPS=$(id -G "${APP_USER}" | tr ' ' ',')
 
 # --- 2. watcher do WireGuard ------------------------------------------------
 # CAP_NET_ADMIN é o bit 12 do CapEff. Sem ele o `wg-quick` não cria interface

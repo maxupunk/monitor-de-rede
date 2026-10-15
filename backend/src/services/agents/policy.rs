@@ -35,10 +35,13 @@ pub enum Permission {
     /// feito pela central (ADR 013). Fora do padrão, e mesmo liberada só
     /// alcança os destinos de `AGENT_DATABASE_TARGETS`.
     Database,
+    /// Exportar o conteúdo de um volume (tar) para download na central.
+    /// Fora do padrão: um volume guarda dados de aplicação, banco inclusive.
+    VolumeExport,
 }
 
 impl Permission {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Read,
         Self::Lifecycle,
         Self::Update,
@@ -47,6 +50,7 @@ impl Permission {
         Self::Discovery,
         Self::DeviceIo,
         Self::Database,
+        Self::VolumeExport,
     ];
 
     #[must_use]
@@ -60,6 +64,7 @@ impl Permission {
             Self::Discovery => "discovery",
             Self::DeviceIo => "device_io",
             Self::Database => "database",
+            Self::VolumeExport => "volume_export",
         }
     }
 }
@@ -187,6 +192,14 @@ mod tests {
         assert!(Policy::parse("read,device_io")
             .expect("política")
             .allows(Permission::DeviceIo));
+    }
+
+    #[test]
+    fn exportacao_de_volume_fica_fora_do_padrao() {
+        assert!(!Policy::default().allows(Permission::VolumeExport));
+        assert!(Policy::parse("read,volume_export")
+            .expect("política")
+            .allows(Permission::VolumeExport));
     }
 
     #[test]

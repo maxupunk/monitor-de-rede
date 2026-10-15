@@ -1,5 +1,6 @@
 # Stack do NetMonitor: aplicação, SPA, scheduler, Syslog e WireGuard no mesmo
-# serviço. Para compartilhar diretamente a rede do host, use o override
+# serviço, e o agente local ao lado, dono do Docker deste host (ADR 014). Para
+# compartilhar diretamente a rede do host, use o override
 # `docker-compose.host.yml`, selecionável pelo `.env`.
 
 services:
@@ -8,6 +9,10 @@ services:
       context: .
       target: runtime
     image: netmonitor:latest
+    # A interface não para, remove nem recria este container: o agente local
+    # recusa ação sobre quem tem esta label (derrubaria a própria tela).
+    labels:
+      com.netmonitor.protected: "true"
     # `ping_group_range` habilita o socket ICMP `SOCK_DGRAM` sem `CAP_NET_RAW`
     # (SPIKE-03 / ADR 003) — é o que permite a aplicação pingar como `app`.
     # Os outros dois são do WireGuard: roteamento entre peers e a marca de
@@ -154,20 +159,19 @@ services:
       # linha com os três índices (ADR 008).
       RETENTION_LOGS_DAYS: ${RETENTION_LOGS_DAYS:-7}
       RETENTION_LOGS_MAX_MB: ${RETENTION_LOGS_MAX_MB:-4096}
-      # Gerenciador Docker. O socket abaixo concede controle administrativo da
-      # Engine ao processo da API; por isso as mutações exigem perfil admin e
-      # entram na trilha de auditoria. Defina false para desativar a
-      # integração sem precisar reconstruir a imagem.
-      DOCKER_ENABLED: ${DOCKER_ENABLED:-true}
+      # Gerenciador Docker (ADR 014). A API **não** monta o socket da Engine:
+      # quem monta é o agente local, logo abaixo, e a API fala com ele pelo
+      # mesmo canal dos agentes remotos. No boot ela grava aqui o token dele
+      # — o arquivo só existe no volume que os dois compartilham. Sem esta
+      # variável o Docker deste host simplesmente não aparece na tela.
+      LOCAL_AGENT_TOKEN_FILE: /local-agent/token
     volumes:
       # Um volume só: o banco em /data/netmonitor.sqlite e a configuração do
       # túnel em /data/wg. O `wg0.conf` é reescrito a partir do banco a cada
       # mudança de peer, então o que precisa mesmo sobreviver é o banco.
       - netmonitor-data:/data
-      # API nativa da Engine: não instala nem executa o CLI `docker`.
-      # Remova esta montagem junto com DOCKER_ENABLED=false se a instalação
-      # não for administrar o host Docker.
-      - /var/run/docker.sock:/var/run/docker.sock
+      # Só o token do agente local: a API escreve, o agente lê.
+      - netmonitor-local-agent:/local-agent
     restart: unless-stopped
     read_only: true
     tmpfs:
@@ -186,6 +190,61 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
+  # Agente local (ADR 014): o Docker deste host, gerenciado pela tela. É ele —
+  # e não a API — que monta o socket da Engine; a API o comanda pelo canal dos
+  # agentes remotos (ADR 011), e o que ele aceita é decidido aqui, em
+  # `LOCAL_AGENT_ALLOW`: a central não amplia a lista. Um comprometimento da
+  # API, portanto, não vira root no host. Sem Docker para gerenciar? Remova
+  # este serviço; a tela de Docker fica só com os servidores remotos.
+  netmonitor-agent:
+    build:
+      context: .
+      target: agent
+    image: netmonitor-agent:latest
+    # Parar o agente cortaria o Docker da tela sem volta: ele mesmo recusa,
+    # e a label o marca para a tela não oferecer o botão.
+    labels:
+      com.netmonitor.protected: "true"
+    depends_on:
+      - netmonitor
+    environment:
+      # A API pela rede interna do compose. Não é a porta publicada: o agente
+      # fala direto com o container.
+      AGENT_SERVER_URL: http://netmonitor:${APP_PORT:-3333}
+      # O token que a API grava no boot (`LOCAL_AGENT_TOKEN_FILE`). O agente
+      # relê o arquivo a cada tentativa de conexão: um token novo vale sem
+      # reiniciar nada.
+      AGENT_TOKEN_FILE: /local-agent/token
+      # Política local. O padrão libera o que a tela oferece para este host:
+      # ver, ciclo de vida, pull/recriação, compose, exportar volume e rodar os
+      # monitores de container deste servidor (`monitor`). Para um host só de
+      # leitura, `read,monitor`.
+      AGENT_ALLOW: ${LOCAL_AGENT_ALLOW:-read,lifecycle,update,compose,volume_export,monitor}
+      # Desliga o acesso à Engine sem reconstruir a imagem.
+      DOCKER_ENABLED: ${DOCKER_ENABLED:-true}
+      TZ: ${TZ:-America/Fortaleza}
+    volumes:
+      # API nativa da Engine. Só este container a monta.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Métricas do host (CPU, memória, disco) para o histórico.
+      - /proc:/host/proc:ro
+      - /:/host:ro
+      - netmonitor-local-agent:/local-agent:ro
+      # Resultados que esperam a central voltar (buffer offline).
+      - netmonitor-agent-state:/var/lib/netmonitor-agent
+      # Compose: os projetos precisam aparecer no mesmo caminho do host.
+      # Descomente e ajuste para as pastas dos seus projetos.
+      # - /srv:/srv:ro
+      # - /opt:/opt:ro
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
 
   # Ollaya: serve os modelos de decisão do Decisor (escolhas rápidas da IA,
   # sem tokens). Sobe sempre junto — parado, sem modelo carregado, ocupa
@@ -234,4 +293,6 @@ services:
 
 volumes:
   netmonitor-data:
+  netmonitor-local-agent:
+  netmonitor-agent-state:
   ollaya-models:

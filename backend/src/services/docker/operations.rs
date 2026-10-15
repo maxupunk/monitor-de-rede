@@ -20,7 +20,7 @@ use crate::{
     },
 };
 
-use super::{hosts::HostKey, maintenance::Progress, realtime, DockerError};
+use super::{hosts::HostKey, maintenance::Progress, DockerError};
 
 pub const EVENT: &str = "docker:operation";
 /// Intervalo mínimo entre dois eventos de progresso da mesma operação.
@@ -114,8 +114,9 @@ where
             Ok(response) => operation.event(&id, "succeeded", None, Some(response.message.clone())),
             Err(error) => operation.event(&id, "failed", None, Some(error.to_string())),
         };
+        // O estado novo dos containers vem do agente, que publica o snapshot
+        // seguinte a toda mutação.
         publish(&ctx, &event);
-        realtime::refresh(&ctx, operation.host).await;
     });
     accepted
 }

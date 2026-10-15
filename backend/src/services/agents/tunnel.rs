@@ -64,6 +64,14 @@ const GIVE_UP_AFTER: u32 = 16;
 /// pode mudar (o banco recusou TLS e o resto é texto, por exemplo).
 const RETRY_EVERY: u32 = 256;
 
+/// A ponta local de uma ponte: um socket até o banco (ADR 013) ou o tar de
+/// um volume com a escrita descartada (ADR 014). A bomba não distingue.
+pub trait TunnelIo: AsyncRead + AsyncWrite + Send + Unpin {}
+
+impl<T: AsyncRead + AsyncWrite + Send + Unpin> TunnelIo for T {}
+
+pub type TunnelStream = Box<dyn TunnelIo>;
+
 /// Custo de um quadro de dados de `len` bytes na janela.
 #[must_use]
 pub fn frame_cost(len: usize) -> u32 {

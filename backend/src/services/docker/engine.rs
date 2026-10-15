@@ -1,8 +1,8 @@
 //! Operações e normalização do contrato da Docker Engine.
 //!
 //! Cada operação recebe a fonte dos dados crus ([`DockerEngine`]) e aplica o
-//! mesmo mapeamento e a mesma redação de segredos, seja o host local ou um
-//! servidor remoto atendido por agente.
+//! mesmo mapeamento e a mesma redação de segredos, qualquer que seja o agente
+//! que atende o host — o local, ao lado da central, ou um remoto.
 
 use std::collections::HashMap;
 
@@ -410,6 +410,7 @@ fn container_summary(raw: &Value) -> DockerContainerSummary {
         state: string(raw, &["State", "state"]),
         status: string(raw, &["Status", "status"]),
         project_name: project_name(&labels),
+        protected: super::protection::is_protected(&labels),
         labels,
         ports: field(raw, &["Ports", "ports"])
             .and_then(Value::as_array)

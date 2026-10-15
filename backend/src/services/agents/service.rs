@@ -36,7 +36,7 @@ use crate::{
     views::agents::{AgentCapabilityView, AgentHostInfo, AgentView},
 };
 
-use super::{enrollment, protocol::Hello};
+use super::{enrollment, local, protocol::Hello};
 
 pub const ROLE_AGENT: &str = "agent";
 const STATUS_PENDING: &str = "pending";
@@ -44,7 +44,7 @@ const STATUS_PENDING: &str = "pending";
 pub const ENROLLMENT_TTL_SECONDS: u64 = 15 * 60;
 const MAX_NAME: usize = 120;
 
-fn is_agent(probe: &probes::Model) -> bool {
+pub(crate) fn is_agent(probe: &probes::Model) -> bool {
     probe
         .configuration
         .as_ref()
@@ -176,6 +176,7 @@ pub fn to_view(
         last_seen_at: probe.last_seen_at.map(|value| value.to_rfc3339()),
         registered_at: probe.registered_at.map(|value| value.to_rfc3339()),
         enforce_tunnel_ip: enforce_tunnel_ip(probe),
+        local: local::is_local(probe),
         host,
         created_at: probe.created_at.to_rfc3339(),
     }
@@ -359,6 +360,7 @@ impl<'a> AgentService<'a> {
     /// Agente inexistente ou revogado.
     pub async fn reissue_code(&self, id: i64) -> AppResult<String> {
         let probe = self.find(id).await?;
+        local::ensure_managed_by_user(&probe, "reinstalado por código")?;
         if probe.status == probes::STATUS_REVOKED {
             return Err(AppError::business_rule(
                 "Agente revogado: cadastre um novo para reinstalar",
@@ -482,6 +484,7 @@ impl<'a> AgentService<'a> {
     /// Agente inexistente ou erro do banco.
     pub async fn revoke(&self, id: i64) -> AppResult<probes::Model> {
         let probe = self.find(id).await?;
+        local::ensure_managed_by_user(&probe, "revogado")?;
         let mut active: probes::ActiveModel = probe.into();
         active.status = Set(probes::STATUS_REVOKED.into());
         active.revoked_at = Set(Some(Utc::now().into()));
@@ -497,6 +500,7 @@ impl<'a> AgentService<'a> {
     /// Agente inexistente ou erro do banco.
     pub async fn delete(&self, id: i64) -> AppResult<probes::Model> {
         let probe = self.find(id).await?;
+        local::ensure_managed_by_user(&probe, "removido")?;
         telemetry::store::forget_host(self.db, &HostKey::agent(probe.id).to_string()).await?;
         ResourceCleanupService::delete_probe(self.db, probe.id).await?;
         Ok(probe)

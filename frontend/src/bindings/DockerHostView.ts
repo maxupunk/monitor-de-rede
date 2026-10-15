@@ -2,6 +2,7 @@
 import type { Permission } from "./Permission";
 
 /**
- * Um host Docker disponível para a tela: a própria central ou um agente.
+ * Um host Docker disponível para a tela. Todo host é um agente (ADR 014):
+ * `kind` é `local` para o desta central e `agent` para os remotos.
  */
-export type DockerHostView = { key: string, name: string, kind: string, online: boolean, agentId: number | null, dockerAvailable: boolean, composeAvailable: boolean, policy: Array<Permission>, };
+export type DockerHostView = { key: string, name: string, kind: string, online: boolean, agentId: number, dockerAvailable: boolean, composeAvailable: boolean, policy: Array<Permission>, };

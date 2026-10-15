@@ -92,7 +92,7 @@ async fn lista_do_arroba_encontra_dispositivo_e_fonte_pelo_que_foi_digitado() {
         assert_eq!(fontes[0]["kind"], "source");
         assert_eq!(fontes[0]["id"], "logs");
 
-        let tudo = mentions::search(&ctx.db, "").await.unwrap();
+        let tudo = mentions::search(&ctx.db, None, "").await.unwrap();
         assert!(tudo.iter().any(|m| m.label == "Borda"));
         assert!(tudo.iter().any(|m| m.kind == AiMentionKind::Source));
     })
