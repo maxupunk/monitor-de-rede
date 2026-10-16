@@ -70,7 +70,8 @@ criado / IA ──────────────────────�
 - Editar o código zera os testes. Editar um plugin **importado** o devolve à
   quarentena.
 - Embutidos (`openwrt-packages`, `openwrt-wifi`, `linux-ssh-status`,
-  `http-page-info`) não são editados: duplique para personalizar. Embutido que sai do binário (renomeado
+  `http-page-info`, `mikrotik-routeros`, `openwrt-link-test`,
+  `linux-link-test`) não são editados: duplique para personalizar. Embutido que sai do binário (renomeado
   ou aposentado) sai do catálogo no próximo boot.
 - **Embutidos nascem desligados.** Ligam sozinhos quando um equipamento
   compatível é cadastrado (ou tem o sistema trocado): o plugin precisa citar o
@@ -258,7 +259,21 @@ O manifesto diz onde o plugin aparece (`surfaces`):
   dirige (`iperf3`, `btest`) e as ações `prepare` (opcional), `serve`, `stop`
   (escrita) e `run` (leitura), com os parâmetros fixos do ADR 015 §3 — a
   validação do manifesto recusa parâmetro faltando, a mais, de outro tipo ou
-  senha sem `secret: true`. Detalhes na skill de autoria.
+  senha sem `secret: true`. Detalhes na skill de autoria. A ação `run` não
+  precisa de teste funcional (ela exige um servidor do outro lado; o próprio
+  teste de enlace é o funcional dela).
+- **Embutidos com papéis**:
+  - `mikrotik-routeros` (RouterOS 6.43+) — serve e dirige `btest` com o
+    Bandwidth Test nativo: `tp_serve` liga o `/tool bandwidth-server` (com
+    usuário temporário `nm-test-…`, grupo `read`, ou `authenticate=no`) e
+    guarda o estado anterior no `handle`; `tp_stop` remove o usuário e devolve
+    `enabled`/`authenticate`; `tp_run` é o `/tool bandwidth-test` (TCP, uma
+    conexão, porta 2000). Também lê estado do sistema e interfaces.
+  - `openwrt-link-test` — serve `iperf3` (`iperf3 -s -D`, encerrado pelo PID)
+    e dirige `iperf3` ou `btest` sem autenticação (`mikrotik_btest`, até 29 s);
+    `tp_prepare` instala `iperf3`/`mikrotik-btest` pelo `openwrt-packages`.
+  - `linux-link-test` — serve e dirige `iperf3`; `tp_prepare` só confere se o
+    `iperf3` existe (não instala pacote em servidor).
 - **Execução por outro serviço**: o orquestrador chama uma ação sem HTTP por
   `plugins::invoke` (`prepare` → `run_id`, `finish` → desfecho, ou
   `execute`), com origem `link_test`, amostras num canal e cancelamento por

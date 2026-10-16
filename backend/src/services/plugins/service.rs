@@ -1076,10 +1076,14 @@ mod tests {
         ensure_builtins(&db).await.unwrap();
         let device = openwrt(&db, "SNAPSHOT").await;
         let ligados = activate_for_device(&db, &device).await.unwrap();
-        assert_eq!(ligados.len(), 3, "{ligados:?}");
+        assert_eq!(ligados.len(), 4, "{ligados:?}");
         let all = list(&db).await.unwrap();
         assert_eq!(slug_status(&all, "openwrt-packages"), status::ACTIVE);
         assert_eq!(slug_status(&all, "openwrt-wifi"), status::ACTIVE);
+        assert_eq!(slug_status(&all, "openwrt-link-test"), status::ACTIVE);
+        // Os papéis de outro sistema não ligam num OpenWrt.
+        assert_eq!(slug_status(&all, "mikrotik-routeros"), status::DISABLED);
+        assert_eq!(slug_status(&all, "linux-link-test"), status::DISABLED);
         // O Linux genérico cita o OpenWrt entre os sistemas dele.
         assert_eq!(slug_status(&all, "linux-ssh-status"), status::ACTIVE);
         // Sem regra de sistema (serve a qualquer página web): só à mão.

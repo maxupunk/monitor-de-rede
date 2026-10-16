@@ -1,0 +1,663 @@
+{
+  "format": 1,
+  "manifest": {
+    "slug": "linux-link-test",
+    "name": "Linux – teste de enlace",
+    "version": "1.0.0",
+    "description": "Dá a um Linux os papéis de iperf3 do teste de enlace da topologia: servidor (iperf3 -s em segundo plano, encerrado ao fim) e cliente. Não instala pacotes: o iperf3 precisa estar instalado.",
+    "author": "NetMonitor",
+    "transports": [
+      "ssh"
+    ],
+    "match": {
+      "platforms": [
+        "linux"
+      ]
+    },
+    "actions": [
+      {
+        "id": "detect",
+        "title": "Detectar sistema",
+        "effect": "read",
+        "output": "kv",
+        "description": "Distribuição, versão e a versão do iperf3 instalado.",
+        "labels": {
+          "firmware": "Versão",
+          "os": "Sistema",
+          "iperf3": "iperf3"
+        },
+        "order": [
+          "os",
+          "firmware",
+          "iperf3"
+        ]
+      },
+      {
+        "id": "tp_prepare",
+        "title": "Preparar teste de enlace",
+        "effect": "write",
+        "output": "kv",
+        "description": "Usada pelo teste de enlace: deixa o equipamento pronto para o papel pedido.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "engine": {
+              "type": "string",
+              "title": "Motor",
+              "enum": [
+                "iperf3"
+              ],
+              "enumTitles": [
+                "iperf3"
+              ],
+              "hidden": true
+            },
+            "role": {
+              "type": "string",
+              "title": "Papel",
+              "enum": [
+                "serve",
+                "drive"
+              ],
+              "enumTitles": [
+                "Servidor",
+                "Cliente"
+              ],
+              "hidden": true
+            }
+          }
+        },
+        "labels": {
+          "ready": "Pronto",
+          "installed": "Instalado agora",
+          "message": "Situação"
+        },
+        "order": [
+          "ready",
+          "message",
+          "installed"
+        ]
+      },
+      {
+        "id": "tp_serve",
+        "title": "Ligar servidor de teste de vazão",
+        "effect": "write",
+        "output": "kv",
+        "description": "Usada pelo teste de enlace: sobe o iperf3 -s em segundo plano na porta pedida. O tp_stop encerra.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "engine": {
+              "type": "string",
+              "title": "Motor",
+              "enum": [
+                "iperf3"
+              ],
+              "enumTitles": [
+                "iperf3"
+              ],
+              "hidden": true
+            },
+            "port": {
+              "type": "integer",
+              "title": "Porta",
+              "widget": "port",
+              "hidden": true
+            },
+            "peer": {
+              "type": "string",
+              "title": "Quem vai testar",
+              "pattern": "[A-Za-z0-9.:-]{0,253}",
+              "hidden": true
+            },
+            "user": {
+              "type": "string",
+              "title": "Usuário do teste",
+              "pattern": "[A-Za-z0-9_.-]{0,64}",
+              "hidden": true
+            },
+            "password": {
+              "type": "string",
+              "title": "Senha do teste",
+              "secret": true,
+              "pattern": "[A-Za-z0-9_.-]{0,128}",
+              "hidden": true
+            },
+            "requireAuth": {
+              "type": "boolean",
+              "title": "Exigir autenticação",
+              "hidden": true
+            }
+          }
+        },
+        "labels": {
+          "port": "Porta",
+          "handle": "Para desfazer"
+        },
+        "order": [
+          "port",
+          "handle"
+        ]
+      },
+      {
+        "id": "tp_stop",
+        "title": "Desligar servidor de teste de vazão",
+        "effect": "write",
+        "output": "kv",
+        "description": "Usada pelo teste de enlace: encerra o iperf3 -s pelo PID guardado.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "engine": {
+              "type": "string",
+              "title": "Motor",
+              "enum": [
+                "iperf3"
+              ],
+              "enumTitles": [
+                "iperf3"
+              ],
+              "hidden": true
+            },
+            "handle": {
+              "type": "string",
+              "title": "O que desfazer",
+              "pattern": "[A-Za-z0-9{}\":,._ -]{2,512}",
+              "hidden": true
+            }
+          }
+        },
+        "labels": {
+          "stopped": "Desfeito"
+        }
+      },
+      {
+        "id": "tp_run",
+        "title": "Medir vazão até outro equipamento",
+        "effect": "read",
+        "output": "kv",
+        "description": "iperf3 -c contra um iperf3 -s (outro Linux, um OpenWrt).",
+        "params": {
+          "type": "object",
+          "properties": {
+            "target": {
+              "type": "string",
+              "title": "Destino",
+              "description": "IP ou nome do servidor do teste.",
+              "pattern": "[A-Za-z0-9][A-Za-z0-9.:-]{0,252}"
+            },
+            "direction": {
+              "type": "string",
+              "title": "Sentido",
+              "enum": [
+                "both",
+                "send",
+                "receive"
+              ],
+              "enumTitles": [
+                "Os dois sentidos",
+                "Este equipamento envia",
+                "Este equipamento recebe"
+              ],
+              "default": "both"
+            },
+            "durationS": {
+              "type": "integer",
+              "title": "Duração (segundos)",
+              "minimum": 1,
+              "maximum": 60,
+              "default": 5
+            },
+            "engine": {
+              "type": "string",
+              "title": "Motor",
+              "enum": [
+                "iperf3"
+              ],
+              "enumTitles": [
+                "iperf3"
+              ],
+              "default": "iperf3",
+              "advanced": true
+            },
+            "port": {
+              "type": "integer",
+              "title": "Porta do servidor",
+              "widget": "port",
+              "advanced": true,
+              "description": "Vazio: 5201 no iperf3, 2000 no btest."
+            },
+            "streams": {
+              "type": "integer",
+              "title": "Fluxos paralelos",
+              "description": "Só no iperf3; o btest usa uma conexão.",
+              "minimum": 1,
+              "maximum": 8,
+              "default": 1,
+              "advanced": true
+            },
+            "limitMbps": {
+              "type": "number",
+              "title": "Limite de banda (Mbit/s)",
+              "description": "Vazio: sem limite.",
+              "minimum": 0.001,
+              "advanced": true
+            },
+            "user": {
+              "type": "string",
+              "title": "Usuário do servidor",
+              "pattern": "nm-test-a1b2",
+              "advanced": true
+            },
+            "password": {
+              "type": "string",
+              "title": "Senha do servidor",
+              "secret": true,
+              "pattern": "[A-Za-z0-9_.-]{0,128}",
+              "advanced": true
+            }
+          }
+        },
+        "labels": {
+          "engine": "Motor",
+          "txBps": "Envio",
+          "rxBps": "Recepção",
+          "txBytes": "Enviado",
+          "rxBytes": "Recebido",
+          "retransmits": "Retransmissões",
+          "samples": "Amostras"
+        },
+        "formats": {
+          "txBps": "bps",
+          "rxBps": "bps",
+          "txBytes": "bytes",
+          "rxBytes": "bytes",
+          "retransmits": "count"
+        },
+        "order": [
+          "engine",
+          "txBps",
+          "rxBps",
+          "txBytes",
+          "rxBytes",
+          "retransmits",
+          "samples"
+        ]
+      }
+    ],
+    "throughput": {
+      "serve": [
+        {
+          "engine": "iperf3"
+        }
+      ],
+      "drive": [
+        {
+          "engine": "iperf3",
+          "auth": true
+        }
+      ],
+      "actions": {
+        "prepare": "tp_prepare",
+        "serve": "tp_serve",
+        "stop": "tp_stop",
+        "run": "tp_run"
+      }
+    }
+  },
+  "script": "// Linux (SSH) – papéis no teste de enlace (ADR 015).\n//\n// Serve e dirige iperf3. Servidor não ganha pacote instalado por aqui: o\n// `tp_prepare` só confere se o iperf3 existe e, se não, diz como instalar.\n// O `iperf3 -s` sobe em segundo plano, com o PID em /tmp (o usuário do SSH\n// nem sempre é root), e o `tp_stop` encerra por esse PID.\n\nfn pid_dir() {\n    \"/tmp\"\n}\n\n// ---------------------------------------------------------------- utilitários\n\nfn or_default(value, fallback) {\n    if value == () { fallback } else { value }\n}\n\n// Ação de papel chamada sem os parâmetros do teste (pela aba, à mão): recusa\n// antes de mexer em qualquer coisa.\nfn require_link_test(params, key) {\n    if params[key] == () {\n        throw \"Esta ação faz parte do teste de enlace e recebe os parâmetros dele: rode o teste pela topologia.\";\n    }\n}\n\n// Mensagem de um erro pego por `catch` (texto do `throw` ou erro do sistema).\nfn error_text(err) {\n    if type_of(err) == \"map\" && err.message != () { err.message } else { err.to_string() }\n}\n\nfn has_binary(device, name) {\n    trimmed(device.ssh(\"command -v \" + name + \" >/dev/null 2>&1 && echo yes || echo no\").stdout) == \"yes\"\n}\n\n// Teto de banda em kbit/s (inteiro), ou `()` sem limite.\nfn limit_kbps(limit) {\n    if limit == () { return (); }\n    let mbps = if type_of(limit) == \"f64\" { limit } else { limit.to_float() };\n    let kbps = (mbps * 1000.0).round().to_int();\n    if kbps > 0 { kbps } else { () }\n}\n\nfn parse_handle(text) {\n    let handle = ();\n    try {\n        handle = json_parse(text);\n    } catch (err) {\n        handle = ();\n    }\n    if type_of(handle) != \"map\" {\n        throw \"O `handle` do teste de enlace não é o que o tp_serve devolveu.\";\n    }\n    handle\n}\n\nfn empty_report(engine) {\n    #{ engine: engine, txBps: (), rxBps: (), txBytes: 0, rxBytes: 0, retransmits: (), samples: [] }\n}\n\n// -------------------------------------------------------------------- iperf3\n\nfn iperf3_pidfile(port) {\n    pid_dir() + \"/nm-iperf3-\" + port + \".pid\"\n}\n\nfn is_iperf3(device, pid) {\n    device.ssh(\"cat /proc/\" + pid + \"/cmdline 2>/dev/null | tr '\\\\000' ' '\").stdout.contains(\"iperf3\")\n}\n\n// `iperf3 -s` em segundo plano, com o PID num arquivo para o `tp_stop`.\nfn iperf3_serve(device, params) {\n    let port = or_default(params.port, 5201);\n    let pidfile = iperf3_pidfile(port);\n    let r = device.ssh(\"iperf3 -s -D -p \" + port + \" -I \" + pidfile + \" >/dev/null 2>&1; sleep 1; cat \" + pidfile + \" 2>/dev/null\");\n    let pid = regex_capture(r.stdout, \"([0-9]+)\");\n    if pid == () || !is_iperf3(device, pid) {\n        throw \"O iperf3 não ficou de pé na porta \" + port + \" (porta ocupada?). \" + trimmed(r.stdout + \" \" + r.stderr);\n    }\n    #{ port: port, handle: json_encode(#{ engine: \"iperf3\", pid: parse_int(pid), port: port }) }\n}\n\n// Encerra o servidor pelo PID do `handle` — só se ainda for um iperf3.\nfn iperf3_stop(device, handle) {\n    let pid = handle.pid;\n    let port = handle.port;\n    if type_of(pid) != \"i64\" || pid < 2 || type_of(port) != \"i64\" || port < 1 || port > 65535 {\n        throw \"O `handle` não traz o PID e a porta do iperf3 que o tp_serve subiu.\";\n    }\n    if is_iperf3(device, pid) {\n        device.run(\"kill \" + pid);\n    }\n    device.run(\"rm -f \" + iperf3_pidfile(port));\n    #{ stopped: true }\n}\n\n// \"56.0\" + \"M\" (de MBytes) → bytes; o iperf3 conta bytes em potências de 1024.\nfn iperf3_bytes(value, prefix) {\n    let factor = if prefix == \"K\" { 1024.0 } else if prefix == \"M\" { 1048576.0 } else if prefix == \"G\" { 1073741824.0 } else if prefix == \"T\" { 1099511627776.0 } else { 1.0 };\n    (parse_float(value) * factor).round().to_int()\n}\n\n// \"94.0\" + \"M\" (de Mbits/sec) → bits por segundo (potências de 1000).\nfn iperf3_bps(value, prefix) {\n    let factor = if prefix == \"K\" { 1000.0 } else if prefix == \"M\" { 1000000.0 } else if prefix == \"G\" { 1000000000.0 } else if prefix == \"T\" { 1000000000000.0 } else { 1.0 };\n    parse_float(value) * factor\n}\n\n// O resumo final (`sender`/`receiver`). Vale o `receiver` (o que chegou);\n// as retransmissões vêm do `sender`.\nfn iperf3_summary(stdout, stderr, streams) {\n    let text = stdout + \"\\n\" + stderr;\n    let failure = regex_capture(text, \"iperf3: error - ([^\\\\n]+)\");\n    if failure != () {\n        throw \"O iperf3 falhou: \" + trimmed(failure);\n    }\n    let id = if streams > 1 { \"SUM\" } else { \"\\\\s*[0-9]+\" };\n    let pattern = \"^\\\\[\" + id + \"\\\\]\\\\s+[0-9.]+-[0-9.]+\\\\s+sec\\\\s+([0-9.]+)\\\\s+([KMGT]?)Bytes\\\\s+([0-9.]+)\\\\s+([KMGT]?)bits/sec(?:\\\\s+([0-9]+))?\\\\s+(sender|receiver)$\";\n    let sender = ();\n    let receiver = ();\n    for line in lines(text) {\n        let g = regex_groups(line, pattern);\n        if g == () { continue; }\n        let entry = #{\n            bytes: iperf3_bytes(g[0], g[1]),\n            bps: iperf3_bps(g[2], g[3]),\n            retransmits: if g[4] == () { () } else { parse_int(g[4]) }\n        };\n        if g[5] == \"sender\" { sender = entry; } else { receiver = entry; }\n    }\n    if sender == () && receiver == () {\n        throw \"O iperf3 terminou sem o resumo final: \" + trimmed(text);\n    }\n    let best = if receiver != () { receiver } else { sender };\n    #{ bps: best.bps, bytes: best.bytes, retransmits: if sender == () { () } else { sender.retransmits } }\n}\n\n// Um sentido do teste, com as linhas de 1 s viradas amostras ao vivo (o\n// resumo final, que termina em sender/receiver, fica de fora).\nfn iperf3_leg(device, command, duration, streams, flow) {\n    let id = if streams > 1 { \"\\\\[SUM\\\\]\" } else { \"\\\\[\\\\s*[0-9]+\\\\]\" };\n    let r = device.ssh_live(command, #{\n        timeout_ms: duration * 1000 + 20000,\n        progress: #{\n            pattern: \"^\" + id + \"\\\\s+[0-9.]+-[0-9.]+\\\\s+sec\\\\s+[0-9.]+\\\\s+[KMGT]?Bytes\\\\s+(?<value>[0-9.]+)\\\\s*(?<unit>[KMGT]?bits/sec)(?:\\\\s+[0-9]+(?:\\\\s+[0-9.]+\\\\s+[KMGT]?Bytes)?)?\\\\s*$\",\n            flow: flow\n        }\n    });\n    iperf3_summary(r.stdout, r.stderr, streams)\n}\n\nfn add_retransmits(total, more) {\n    if more == () { total } else if total == () { more } else { total + more }\n}\n\n// `send` mede este equipamento enviando; `receive`, recebendo (`-R`); `both`,\n// os dois em sequência.\nfn iperf3_run(device, params) {\n    let port = or_default(params.port, 5201);\n    let duration = or_default(params.durationS, 5);\n    let streams = or_default(params.streams, 1);\n    let direction = or_default(params.direction, \"both\");\n    let command = \"iperf3 -c \" + shell_quote(params.target) + \" -p \" + port + \" -t \" + duration + \" -P \" + streams;\n    let limit = limit_kbps(params.limitMbps);\n    if limit != () {\n        let per_stream = limit / streams;\n        if per_stream < 1 { per_stream = 1; }\n        command += \" -b \" + per_stream + \"K\";\n    }\n    command += \" --forceflush -i 1 -f m\";\n    let report = empty_report(\"iperf3\");\n    if direction != \"receive\" {\n        let leg = iperf3_leg(device, command, duration, streams, \"tx\");\n        report.txBps = leg.bps;\n        report.txBytes = leg.bytes;\n        report.retransmits = add_retransmits(report.retransmits, leg.retransmits);\n    }\n    if direction != \"send\" {\n        let leg = iperf3_leg(device, command + \" -R\", duration, streams, \"rx\");\n        report.rxBps = leg.bps;\n        report.rxBytes = leg.bytes;\n        report.retransmits = add_retransmits(report.retransmits, leg.retransmits);\n    }\n    report\n}\n\n// -------------------------------------------------------------------- ações\n\nfn detect(device, params) {\n    let os = parse_kv(device.run(\"cat /etc/os-release 2>/dev/null\"), \"=\");\n    let version = ();\n    if has_binary(device, \"iperf3\") {\n        version = regex_capture(device.run(\"iperf3 --version 2>&1 | head -n 1\"), \"iperf ([0-9][0-9.]*)\");\n    }\n    #{\n        firmware: os.VERSION_ID,\n        os: os.PRETTY_NAME,\n        iperf3: if version == () { \"não instalado\" } else { version }\n    }\n}\n\nfn tp_prepare(device, params) {\n    require_link_test(params, \"engine\");\n    if params.engine != \"iperf3\" {\n        return #{ ready: false, installed: [], message: \"No Linux o teste de enlace usa só o iperf3.\" };\n    }\n    if has_binary(device, \"iperf3\") {\n        return #{ ready: true, installed: [], message: \"O iperf3 já está instalado.\" };\n    }\n    #{ ready: false, installed: [], message: \"Instale o iperf3 no servidor (apt install iperf3, dnf install iperf3 ou apk add iperf3): o NetMonitor não instala pacotes em servidores.\" }\n}\n\nfn tp_serve(device, params) {\n    require_link_test(params, \"engine\");\n    if params.engine != \"iperf3\" {\n        throw \"No Linux o teste de enlace usa só o iperf3.\";\n    }\n    iperf3_serve(device, params)\n}\n\nfn tp_stop(device, params) {\n    require_link_test(params, \"handle\");\n    iperf3_stop(device, parse_handle(params.handle))\n}\n\nfn tp_run(device, params) {\n    require_link_test(params, \"target\");\n    if or_default(params.engine, \"iperf3\") != \"iperf3\" {\n        throw \"No Linux o teste de enlace usa só o iperf3.\";\n    }\n    iperf3_run(device, params)\n}\n",
+  "usage": "# Linux – teste de enlace\n\nDá a um Linux os papéis de **iperf3** do teste de enlace da topologia, por SSH:\nservidor (o outro lado é um OpenWrt, outro Linux ou o NetMonitor) e cliente.\n\n**Não instala pacotes em servidor.** O `iperf3` precisa estar instalado\n(`apt install iperf3`, `dnf install iperf3`, `apk add iperf3`). Não precisa de\nroot: o servidor roda com o usuário do SSH.\n\n## Detectar sistema\nLê `/etc/os-release` e a versão do `iperf3` (`iperf3 --version`). Não altera\nnada.\n\n## Teste de enlace\n\nAs ações abaixo são chamadas pelo teste de enlace, que passa os parâmetros,\ngrava o que precisa ser desfeito antes de usar o servidor e desfaz em toda\nsaída. Pela aba do equipamento só faz sentido a medição.\n\n### Preparar teste de enlace\nSó **confere** se o `iperf3` existe (`command -v iperf3`). Sem ele, responde\n*não pronto* com \"Instale o iperf3 no servidor\" — nada é instalado.\n\n### Ligar servidor de teste de vazão\n**Deixa um processo rodando enquanto o teste dura:** `iperf3 -s -D` na porta\nescolhida pelo teste (5201–5299), com o PID em `/tmp/nm-iperf3-<porta>.pid`.\nDevolve a porta e um `handle` com PID e porta. Porta ocupada vira erro.\n\n### Desligar servidor de teste de vazão\nEncerra o servidor pelo PID do `handle` — só se aquele PID ainda for um\n`iperf3` (`/proc/<pid>/cmdline`) — e apaga o arquivo do PID. Rodar de novo não\nmuda nada.\n\n### Medir vazão até outro equipamento\n`iperf3 -c <destino> -p <porta> -t <s> -P <fluxos> --forceflush -i 1 -f m`\n(`-b` divide o limite entre os fluxos). *Os dois sentidos* roda o envio e\ndepois o `-R` (recepção). O andamento de 1 s aparece ao vivo; vale o resumo\n`receiver`, e as retransmissões vêm do `sender`. \"unable to connect\" e saída\nsem resumo viram erro.\n\n## Requisitos de rede\nQuem testa contra este servidor precisa alcançar **TCP 5201–5299**: libere no\nfirewall (`ufw allow 5201:5299/tcp`, `firewall-cmd --add-port=5201-5299/tcp`).\n",
+  "compatibility": [],
+  "tests": {
+    "unit": [
+      {
+        "name": "Debian com iperf3",
+        "action": "detect",
+        "fixtures": [
+          {
+            "ssh": "cat /etc/os-release 2>/dev/null",
+            "stdout": "PRETTY_NAME=\"Debian GNU/Linux 12 (bookworm)\"\nVERSION_ID=\"12\"\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "command -v iperf3 >/dev/null 2>&1 && echo yes || echo no",
+            "stdout": "yes\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "iperf3 --version 2>&1 | head -n 1",
+            "stdout": "iperf 3.12 (cJSON 1.7.15)\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expect": {
+          "firmware": "12",
+          "os": "Debian GNU/Linux 12 (bookworm)",
+          "iperf3": "3.12"
+        }
+      },
+      {
+        "name": "sem iperf3",
+        "action": "detect",
+        "fixtures": [
+          {
+            "ssh": "cat /etc/os-release 2>/dev/null",
+            "stdout": "PRETTY_NAME=\"Ubuntu 24.04 LTS\"\nVERSION_ID=\"24.04\"\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "command -v iperf3 >/dev/null 2>&1 && echo yes || echo no",
+            "stdout": "no\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expect": {
+          "firmware": "24.04",
+          "iperf3": "não instalado"
+        }
+      },
+      {
+        "name": "iperf3 presente: pronto",
+        "action": "tp_prepare",
+        "params": {
+          "engine": "iperf3",
+          "role": "serve"
+        },
+        "fixtures": [
+          {
+            "ssh": "command -v iperf3 >/dev/null 2>&1 && echo yes || echo no",
+            "stdout": "yes\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expect": {
+          "ready": true,
+          "installed": []
+        }
+      },
+      {
+        "name": "iperf3 ausente: pede para instalar, não instala",
+        "action": "tp_prepare",
+        "params": {
+          "engine": "iperf3",
+          "role": "drive"
+        },
+        "fixtures": [
+          {
+            "ssh": "command -v iperf3 >/dev/null 2>&1 && echo yes || echo no",
+            "stdout": "no\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expect": {
+          "ready": false,
+          "installed": []
+        },
+        "expectContains": "Instale o iperf3 no servidor (apt install iperf3"
+      },
+      {
+        "name": "pela aba, sem os parâmetros do teste, não faz nada",
+        "action": "tp_serve",
+        "expectError": "rode o teste pela topologia"
+      },
+      {
+        "name": "sobe o iperf3 -s e devolve o PID no handle",
+        "action": "tp_serve",
+        "params": {
+          "engine": "iperf3",
+          "port": 5201,
+          "peer": "10.0.0.1",
+          "requireAuth": false
+        },
+        "fixtures": [
+          {
+            "ssh": "iperf3 -s -D -p 5201 -I /tmp/nm-iperf3-5201.pid >/dev/null 2>&1; sleep 1; cat /tmp/nm-iperf3-5201.pid 2>/dev/null",
+            "stdout": "4242\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "cat /proc/4242/cmdline 2>/dev/null | tr '\\000' ' '",
+            "stdout": "iperf3 -s -D -p 5201 -I /tmp/nm-iperf3-5201.pid ",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expect": {
+          "port": 5201,
+          "handle": "{\"engine\":\"iperf3\",\"pid\":4242,\"port\":5201}"
+        }
+      },
+      {
+        "name": "porta ocupada: o servidor não sobe",
+        "action": "tp_serve",
+        "params": {
+          "engine": "iperf3",
+          "port": 5202,
+          "peer": "10.0.0.1"
+        },
+        "fixtures": [
+          {
+            "ssh": "iperf3 -s -D -p 5202 -I /tmp/nm-iperf3-5202.pid >/dev/null 2>&1; sleep 1; cat /tmp/nm-iperf3-5202.pid 2>/dev/null",
+            "stdout": "",
+            "stderr": "",
+            "exit": 1
+          }
+        ],
+        "expectError": "não ficou de pé na porta 5202"
+      },
+      {
+        "name": "encerra o iperf3 pelo PID do handle",
+        "action": "tp_stop",
+        "params": {
+          "engine": "iperf3",
+          "handle": "{\"engine\":\"iperf3\",\"pid\":4242,\"port\":5201}"
+        },
+        "fixtures": [
+          {
+            "ssh": "cat /proc/4242/cmdline 2>/dev/null | tr '\\000' ' '",
+            "stdout": "iperf3 -s -D -p 5201 -I /tmp/nm-iperf3-5201.pid ",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "kill 4242",
+            "stdout": "",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "rm -f /tmp/nm-iperf3-5201.pid",
+            "stdout": "",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expect": {
+          "stopped": true
+        }
+      },
+      {
+        "name": "encerrar de novo só limpa o arquivo (idempotente)",
+        "action": "tp_stop",
+        "params": {
+          "engine": "iperf3",
+          "handle": "{\"engine\":\"iperf3\",\"pid\":4242,\"port\":5201}"
+        },
+        "fixtures": [
+          {
+            "ssh": "cat /proc/4242/cmdline 2>/dev/null | tr '\\000' ' '",
+            "stdout": "",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "rm -f /tmp/nm-iperf3-5201.pid",
+            "stdout": "",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expect": {
+          "stopped": true
+        }
+      },
+      {
+        "name": "PID reaproveitado por outro processo não é morto",
+        "action": "tp_stop",
+        "params": {
+          "engine": "iperf3",
+          "handle": "{\"engine\":\"iperf3\",\"pid\":4242,\"port\":5201}"
+        },
+        "fixtures": [
+          {
+            "ssh": "cat /proc/4242/cmdline 2>/dev/null | tr '\\000' ' '",
+            "stdout": "/usr/sbin/dnsmasq -C /var/etc/dnsmasq.conf ",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "rm -f /tmp/nm-iperf3-5201.pid",
+            "stdout": "",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expect": {
+          "stopped": true
+        }
+      },
+      {
+        "name": "handle sem PID é recusado",
+        "action": "tp_stop",
+        "params": {
+          "engine": "iperf3",
+          "handle": "{\"engine\":\"iperf3\",\"port\":5201}"
+        },
+        "expectError": "não traz o PID"
+      },
+      {
+        "name": "iperf3 nos dois sentidos, com limite (envio e depois -R)",
+        "action": "tp_run",
+        "params": {
+          "engine": "iperf3",
+          "target": "10.0.0.2",
+          "port": 5201,
+          "direction": "both",
+          "durationS": 5,
+          "streams": 1,
+          "limitMbps": 100
+        },
+        "fixtures": [
+          {
+            "ssh": "iperf3 -c '10.0.0.2' -p 5201 -t 5 -P 1 -b 100000K --forceflush -i 1 -f m",
+            "stdout": "Connecting to host 10.0.0.2, port 5201\n[  5] local 10.0.0.1 port 43210 connected to 10.0.0.2 port 5201\n[ ID] Interval           Transfer     Bitrate         Retr  Cwnd\n[  5]   0.00-1.00   sec  11.2 MBytes  94.0 Mbits/sec    0    345 KBytes\n[  5]   1.00-2.00   sec  11.4 MBytes  95.5 Mbits/sec    3    345 KBytes\n- - - - - - - - - - - - - - - - - - - - - - - - -\n[ ID] Interval           Transfer     Bitrate         Retr\n[  5]   0.00-5.00   sec  56.0 MBytes  95.0 Mbits/sec    3             sender\n[  5]   0.00-5.04   sec  55.5 MBytes  94.0 Mbits/sec                  receiver\n\niperf Done.\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "iperf3 -c '10.0.0.2' -p 5201 -t 5 -P 1 -b 100000K --forceflush -i 1 -f m -R",
+            "stdout": "Connecting to host 10.0.0.2, port 5201\nReverse mode, remote host 10.0.0.2 is sending\n[  5] local 10.0.0.1 port 43210 connected to 10.0.0.2 port 5201\n[ ID] Interval           Transfer     Bitrate         Retr  Cwnd\n[  5]   0.00-1.00   sec  10.0 MBytes  84.0 Mbits/sec\n[  5]   1.00-2.00   sec  10.1 MBytes  85.0 Mbits/sec\n- - - - - - - - - - - - - - - - - - - - - - - - -\n[ ID] Interval           Transfer     Bitrate         Retr\n[  5]   0.00-5.04   sec  51.0 MBytes  85.0 Mbits/sec    7             sender\n[  5]   0.00-5.00   sec  50.5 MBytes  84.5 Mbits/sec                  receiver\n\niperf Done.\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expect": {
+          "engine": "iperf3",
+          "txBps": 94000000,
+          "rxBps": 84500000,
+          "txBytes": 58195968,
+          "rxBytes": 52953088,
+          "retransmits": 10,
+          "samples": []
+        }
+      },
+      {
+        "name": "iperf3 com dois fluxos usa as linhas [SUM]",
+        "action": "tp_run",
+        "params": {
+          "engine": "iperf3",
+          "target": "10.0.0.2",
+          "port": 5202,
+          "direction": "send",
+          "durationS": 3,
+          "streams": 2
+        },
+        "fixtures": [
+          {
+            "ssh": "iperf3 -c '10.0.0.2' -p 5202 -t 3 -P 2 --forceflush -i 1 -f m",
+            "stdout": "Connecting to host 10.0.0.2, port 5202\n[  5]   0.00-1.00   sec  5.60 MBytes  47.0 Mbits/sec    0    120 KBytes\n[  7]   0.00-1.00   sec  5.60 MBytes  47.0 Mbits/sec    0    120 KBytes\n[SUM]   0.00-1.00   sec  11.2 MBytes  94.0 Mbits/sec    0\n- - - - - - - - - - - - - - - - - - - - - - - - -\n[  5]   0.00-3.00   sec  16.0 MBytes  44.7 Mbits/sec    1             sender\n[  5]   0.00-3.04   sec  15.9 MBytes  43.9 Mbits/sec                  receiver\n[  7]   0.00-3.00   sec  16.0 MBytes  44.7 Mbits/sec    1             sender\n[  7]   0.00-3.04   sec  15.9 MBytes  43.9 Mbits/sec                  receiver\n[SUM]   0.00-3.00   sec  32.0 MBytes  89.5 Mbits/sec    2             sender\n[SUM]   0.00-3.04   sec  31.8 MBytes  88.0 Mbits/sec                  receiver\n\niperf Done.\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expect": {
+          "txBps": 88000000,
+          "rxBps": null,
+          "retransmits": 2
+        }
+      },
+      {
+        "name": "iperf3 sem servidor do outro lado",
+        "action": "tp_run",
+        "params": {
+          "engine": "iperf3",
+          "target": "10.0.0.2",
+          "direction": "send"
+        },
+        "fixtures": [
+          {
+            "ssh": "iperf3 -c '10.0.0.2' -p 5201 -t 5 -P 1 --forceflush -i 1 -f m",
+            "stdout": "",
+            "stderr": "iperf3: error - unable to connect to server - server may have stopped running or use a different port, firewall issue, etc.: Connection refused\n",
+            "exit": 1
+          }
+        ],
+        "expectError": "unable to connect to server"
+      },
+      {
+        "name": "iperf3 interrompido antes do resumo",
+        "action": "tp_run",
+        "params": {
+          "engine": "iperf3",
+          "target": "10.0.0.2",
+          "direction": "receive"
+        },
+        "fixtures": [
+          {
+            "ssh": "iperf3 -c '10.0.0.2' -p 5201 -t 5 -P 1 --forceflush -i 1 -f m -R",
+            "stdout": "Connecting to host 10.0.0.2, port 5201\n[  5]   0.00-1.00   sec  10.0 MBytes  84.0 Mbits/sec\n",
+            "stderr": "",
+            "exit": 1
+          }
+        ],
+        "expectError": "sem o resumo final"
+      },
+      {
+        "name": "destino que começa com hífen é recusado (injeção de opção)",
+        "action": "tp_run",
+        "params": {
+          "engine": "iperf3",
+          "target": "-sD"
+        },
+        "expectError": "formato inválido"
+      }
+    ],
+    "functional": [
+      {
+        "action": "detect",
+        "expectKeys": [
+          "firmware",
+          "iperf3"
+        ]
+      }
+    ]
+  }
+}

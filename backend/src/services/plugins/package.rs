@@ -316,8 +316,17 @@ fn validate_tests(package: &PluginPackage, problems: &mut Vec<String>) {
         {
             problems.push(format!("a ação `{}` não tem teste unitário", action.id));
         }
+        // O `run` do teste de enlace precisa de um servidor do outro lado,
+        // que a validação no equipamento não tem: o teste de enlace é o
+        // funcional dele.
+        let throughput_run = manifest
+            .throughput
+            .as_ref()
+            .and_then(|roles| roles.actions.run.as_deref())
+            == Some(action.id.as_str());
         if action.effect == Effect::Read
             && !action.reveals
+            && !throughput_run
             && !package
                 .tests
                 .functional
@@ -393,6 +402,44 @@ mod tests {
         assert!(problems.iter().any(|p| p.contains("teste unitário")));
         assert!(problems.iter().any(|p| p.contains("teste funcional")));
         assert!(problems.iter().any(|p| p.contains("não explica")));
+    }
+
+    #[test]
+    fn run_do_teste_de_enlace_dispensa_teste_funcional() {
+        let text = || json!({ "type": "string", "pattern": "[a-z0-9.:-]*" });
+        let number = || json!({ "type": "integer" });
+        let secret = || json!({ "type": "string", "secret": true, "pattern": "[a-z]*" });
+        let mut pacote = package();
+        pacote.manifest = serde_json::from_value(json!({
+            "slug": "exemplo", "name": "Exemplo", "version": "1.0.0", "transports": ["ssh"],
+            "actions": [
+                { "id": "detect", "title": "Detectar", "effect": "read", "output": "kv" },
+                { "id": "tp_run", "title": "Medir", "effect": "read",
+                  "params": { "type": "object", "properties": {
+                      "engine": text(), "target": text(), "port": number(),
+                      "direction": text(), "durationS": number(), "streams": number(),
+                      "limitMbps": { "type": "number" }, "user": text(), "password": secret() } } }
+            ],
+            "throughput": { "drive": [{ "engine": "btest" }], "actions": { "run": "tp_run" } }
+        }))
+        .unwrap();
+        pacote
+            .script
+            .push_str("\nfn tp_run(device, params) { #{} }");
+        pacote.usage.push_str("\n## Medir");
+        pacote.tests.unit.push(UnitTest {
+            name: None,
+            action: "tp_run".into(),
+            params: Value::Null,
+            fixtures: vec![],
+            expect: None,
+            expect_contains: None,
+            expect_error: None,
+            firmware: None,
+            settings: None,
+            input: None,
+        });
+        assert!(validate(&pacote).is_empty(), "{:?}", validate(&pacote));
     }
 
     #[test]

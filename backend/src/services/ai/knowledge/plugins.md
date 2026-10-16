@@ -241,7 +241,8 @@ fn detect(device, params) {
 ```
 
 Os plugins embutidos (`openwrt-packages`, `openwrt-wifi`, `linux-ssh-status`,
-`http-page-info`) são exemplos completos: leia-os com `get_plugin`. O
+`http-page-info`, `mikrotik-routeros`, `openwrt-link-test`, `linux-link-test`)
+são exemplos completos: leia-os com `get_plugin`. O
 `openwrt-wifi` é o modelo de aplicativo de frota (configuração, `use_plugin`,
 `reduce`, `report`).
 
@@ -519,6 +520,10 @@ Plugin que participa do teste de enlace declara o que o equipamento **serve**
   são a credencial do equipamento (não use `{{password}}` aqui).
 - `stop` desfaz **exatamente** o que o `handle` diz (o usuário temporário, o
   `authenticate` anterior, o PID do `iperf3 -s`).
+- A ação `run` dispensa teste funcional (precisa de um servidor do outro lado);
+  cubra-a com testes unitários. Modelos prontos: `mikrotik-routeros` (btest),
+  `openwrt-link-test` (iperf3 + `mikrotik_btest`, `prepare` com `use_plugin`) e
+  `linux-link-test` (iperf3).
 
 ## Topologia (`topology`)
 

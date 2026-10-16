@@ -22,6 +22,19 @@ const SOURCES: &[(&str, &str)] = &[
         "http-page-info",
         include_str!("http-page-info.nmplugin.json"),
     ),
+    // Papéis no teste de enlace (ADR 015 §3/§4).
+    (
+        "mikrotik-routeros",
+        include_str!("mikrotik-routeros.nmplugin.json"),
+    ),
+    (
+        "openwrt-link-test",
+        include_str!("openwrt-link-test.nmplugin.json"),
+    ),
+    (
+        "linux-link-test",
+        include_str!("linux-link-test.nmplugin.json"),
+    ),
 ];
 
 /// Os pacotes embutidos.
@@ -42,11 +55,21 @@ pub fn packages() -> Vec<PluginPackage> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use tokio_util::sync::CancellationToken;
+
     use super::*;
     use crate::services::plugins::{
-        package,
+        gate::AllowAll,
+        package, params,
         review::{self, Severity},
+        runtime::{
+            self, AccessProfile, Credentials, DeviceInfo, ExecutionContext, Extras, Limits,
+            ProgressFlow, ProgressSample,
+        },
         testing,
+        transport::{fake::FakeTransport, Login},
     };
 
     #[test]
@@ -83,6 +106,110 @@ mod tests {
                 "
 "
             )
+        );
+    }
+
+    /// As amostras ao vivo que o `progress` de um caso de teste produz.
+    async fn samples_of(slug: &str, case: &str) -> Vec<(ProgressFlow, f64)> {
+        let package = packages()
+            .into_iter()
+            .find(|package| package.manifest.slug == slug)
+            .expect("embutido existe");
+        let test = package
+            .tests
+            .unit
+            .iter()
+            .find(|test| test.name.as_deref() == Some(case))
+            .expect("caso existe");
+        let action = package.manifest.action(&test.action).expect("ação existe");
+        let params = params::validate(action.params.as_ref(), &test.params).expect("parâmetros");
+        let samples = Arc::new(Mutex::new(Vec::new()));
+        let sink = samples.clone();
+        let context = ExecutionContext {
+            extras: Extras {
+                library: testing::builtin_library(&package),
+                ..Extras::default()
+            },
+            device: DeviceInfo {
+                ip: "192.0.2.1".into(),
+                platform: package.manifest.matcher.platforms[0].clone(),
+                ..DeviceInfo::default()
+            },
+            transports: package.manifest.transports.clone(),
+            action_effect: action.effect,
+            reason: None,
+            credentials: Credentials {
+                ssh: Some(AccessProfile {
+                    login: Login {
+                        username: "root".into(),
+                        password: None,
+                    },
+                    port: 22,
+                    https: false,
+                }),
+                ..Credentials::default()
+            },
+            transport: Arc::new(FakeTransport::new(test.fixtures.clone())),
+            gate: Arc::new(AllowAll),
+            cancel: CancellationToken::new(),
+            observer: None,
+            progress: Some(Arc::new(move |sample: &ProgressSample| {
+                sink.lock().unwrap().push((sample.flow, sample.bps));
+            })),
+            limits: Limits::default(),
+        };
+        let outcome = runtime::execute(&package.script, &action.id, params, context).await;
+        assert!(
+            outcome.output.is_ok(),
+            "{slug} {case}: {:?}",
+            outcome.output
+        );
+        let collected = samples.lock().unwrap().clone();
+        collected
+    }
+
+    fn assert_samples(actual: &[(ProgressFlow, f64)], expected: &[(ProgressFlow, f64)]) {
+        assert_eq!(actual.len(), expected.len(), "{actual:?}");
+        for ((flow, bps), (want_flow, want_bps)) in actual.iter().zip(expected) {
+            assert_eq!(flow, want_flow, "{actual:?}");
+            assert!((bps - want_bps).abs() < 1.0, "{actual:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn papeis_de_teste_de_enlace_emitem_andamento_ao_vivo() {
+        use ProgressFlow::{Rx, Tx};
+        // RouterOS: `tx-current`/`rx-current` de cada quadro, nunca as médias.
+        assert_samples(
+            &samples_of(
+                "mikrotik-routeros",
+                "mede os dois sentidos com autenticação e limite",
+            )
+            .await,
+            &[(Tx, 90.1e6), (Rx, 1.1e9), (Tx, 94.5e6), (Rx, 1.3e9)],
+        );
+        // iperf3: as linhas de 1 s de cada sentido; o resumo sender/receiver
+        // fica de fora.
+        let iperf3 = [(Tx, 94e6), (Tx, 95.5e6), (Rx, 84e6), (Rx, 85e6)];
+        for slug in ["openwrt-link-test", "linux-link-test"] {
+            assert_samples(
+                &samples_of(
+                    slug,
+                    "iperf3 nos dois sentidos, com limite (envio e depois -R)",
+                )
+                .await,
+                &iperf3,
+            );
+            // Com vários fluxos, só a soma.
+            assert_samples(
+                &samples_of(slug, "iperf3 com dois fluxos usa as linhas [SUM]").await,
+                &[(Tx, 94e6)],
+            );
+        }
+        // mikrotik_btest: um quadro por `\r`, com o número impresso.
+        assert_samples(
+            &samples_of("openwrt-link-test", "btest só recebendo").await,
+            &[(Rx, 10e6), (Rx, 12e6), (Rx, 11e6)],
         );
     }
 

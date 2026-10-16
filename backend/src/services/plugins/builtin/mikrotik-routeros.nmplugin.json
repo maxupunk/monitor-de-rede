@@ -1,0 +1,887 @@
+{
+  "format": 1,
+  "manifest": {
+    "slug": "mikrotik-routeros",
+    "name": "MikroTik RouterOS",
+    "version": "1.0.0",
+    "description": "Mostra o estado e as interfaces de um MikroTik (RouterOS 6.43+ e 7) por SSH e dá a ele o papel de servidor e de cliente do Bandwidth Test no teste de enlace da topologia. Ligar o servidor de teste altera o roteador por alguns segundos e é desfeito ao fim.",
+    "author": "NetMonitor",
+    "transports": [
+      "ssh"
+    ],
+    "match": {
+      "platforms": [
+        "routeros"
+      ],
+      "firmware": ">=6.43"
+    },
+    "actions": [
+      {
+        "id": "detect",
+        "title": "Detectar RouterOS",
+        "effect": "read",
+        "output": "kv",
+        "description": "Versão, canal, modelo e arquitetura (/system resource e /system routerboard).",
+        "labels": {
+          "firmware": "Versão do RouterOS",
+          "channel": "Canal",
+          "model": "Modelo",
+          "board": "Placa",
+          "architecture": "Arquitetura",
+          "routerboard": "RouterBOARD"
+        },
+        "order": [
+          "firmware",
+          "channel",
+          "model",
+          "board",
+          "architecture",
+          "routerboard"
+        ]
+      },
+      {
+        "id": "system_status",
+        "title": "Estado do sistema",
+        "effect": "read",
+        "output": "kv",
+        "description": "Tempo ligado, carga de CPU e memória (/system resource print).",
+        "labels": {
+          "version": "Versão",
+          "board": "Placa",
+          "uptime": "Ligado há",
+          "cpu_load": "Carga de CPU",
+          "cpu_count": "Núcleos",
+          "free_memory": "Memória livre",
+          "total_memory": "Memória total"
+        },
+        "formats": {
+          "uptime": "uptime",
+          "cpu_load": "percent",
+          "free_memory": "bytes",
+          "total_memory": "bytes"
+        },
+        "order": [
+          "version",
+          "board",
+          "uptime",
+          "cpu_load",
+          "cpu_count",
+          "free_memory",
+          "total_memory"
+        ]
+      },
+      {
+        "id": "interfaces",
+        "title": "Interfaces",
+        "effect": "read",
+        "output": "table",
+        "description": "Cada interface com tipo, estado e bytes recebidos/enviados desde que ligou.",
+        "labels": {
+          "name": "Interface",
+          "type": "Tipo",
+          "state": "Estado",
+          "rx_bytes": "Recebido",
+          "tx_bytes": "Enviado"
+        },
+        "formats": {
+          "state": "state",
+          "rx_bytes": "bytes",
+          "tx_bytes": "bytes"
+        },
+        "order": [
+          "name",
+          "type",
+          "state",
+          "rx_bytes",
+          "tx_bytes"
+        ]
+      },
+      {
+        "id": "tp_serve",
+        "title": "Ligar servidor de teste de vazão",
+        "effect": "write",
+        "output": "kv",
+        "description": "Usada pelo teste de enlace: liga o bandwidth-server (e, se pedido, um usuário temporário nm-test-…). O tp_stop desfaz.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "engine": {
+              "type": "string",
+              "title": "Motor",
+              "enum": [
+                "btest"
+              ],
+              "enumTitles": [
+                "Bandwidth Test (MikroTik)"
+              ],
+              "hidden": true
+            },
+            "port": {
+              "type": "integer",
+              "title": "Porta",
+              "widget": "port",
+              "hidden": true
+            },
+            "peer": {
+              "type": "string",
+              "title": "Quem vai testar",
+              "pattern": "[A-Za-z0-9.:-]{0,253}",
+              "hidden": true
+            },
+            "user": {
+              "type": "string",
+              "title": "Usuário do teste",
+              "pattern": "nm-test-[A-Za-z0-9_-]{1,40}",
+              "hidden": true
+            },
+            "password": {
+              "type": "string",
+              "title": "Senha do teste",
+              "secret": true,
+              "pattern": "[A-Za-z0-9_.-]{0,128}",
+              "hidden": true
+            },
+            "requireAuth": {
+              "type": "boolean",
+              "title": "Exigir autenticação",
+              "hidden": true
+            }
+          }
+        },
+        "labels": {
+          "port": "Porta",
+          "handle": "Para desfazer"
+        },
+        "order": [
+          "port",
+          "handle"
+        ]
+      },
+      {
+        "id": "tp_stop",
+        "title": "Desligar servidor de teste de vazão",
+        "effect": "write",
+        "output": "kv",
+        "description": "Usada pelo teste de enlace: remove o usuário temporário e devolve o bandwidth-server ao estado anterior.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "engine": {
+              "type": "string",
+              "title": "Motor",
+              "enum": [
+                "btest"
+              ],
+              "enumTitles": [
+                "Bandwidth Test (MikroTik)"
+              ],
+              "hidden": true
+            },
+            "handle": {
+              "type": "string",
+              "title": "O que desfazer",
+              "pattern": "[A-Za-z0-9{}\":,._ -]{2,512}",
+              "hidden": true
+            }
+          }
+        },
+        "labels": {
+          "stopped": "Desfeito"
+        }
+      },
+      {
+        "id": "tp_run",
+        "title": "Medir vazão até outro equipamento",
+        "effect": "read",
+        "output": "kv",
+        "description": "/tool bandwidth-test (TCP, uma conexão) contra um servidor btest — outro MikroTik ou o NetMonitor.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "target": {
+              "type": "string",
+              "title": "Destino",
+              "description": "IP ou nome do servidor do teste.",
+              "pattern": "[A-Za-z0-9][A-Za-z0-9.:-]{0,252}"
+            },
+            "direction": {
+              "type": "string",
+              "title": "Sentido",
+              "enum": [
+                "both",
+                "send",
+                "receive"
+              ],
+              "enumTitles": [
+                "Os dois sentidos",
+                "Este equipamento envia",
+                "Este equipamento recebe"
+              ],
+              "default": "both"
+            },
+            "durationS": {
+              "type": "integer",
+              "title": "Duração (segundos)",
+              "minimum": 1,
+              "maximum": 60,
+              "default": 5
+            },
+            "engine": {
+              "type": "string",
+              "title": "Motor",
+              "enum": [
+                "btest"
+              ],
+              "enumTitles": [
+                "Bandwidth Test (MikroTik)"
+              ],
+              "default": "btest",
+              "advanced": true
+            },
+            "port": {
+              "type": "integer",
+              "title": "Porta do servidor",
+              "widget": "port",
+              "advanced": true,
+              "description": "O btest do RouterOS usa sempre a 2000.",
+              "default": 2000
+            },
+            "streams": {
+              "type": "integer",
+              "title": "Fluxos paralelos",
+              "description": "Só no iperf3; o btest usa uma conexão.",
+              "minimum": 1,
+              "maximum": 8,
+              "default": 1,
+              "advanced": true
+            },
+            "limitMbps": {
+              "type": "number",
+              "title": "Limite de banda (Mbit/s)",
+              "description": "Vazio: sem limite.",
+              "minimum": 0.001,
+              "advanced": true
+            },
+            "user": {
+              "type": "string",
+              "title": "Usuário do servidor",
+              "pattern": "nm-test-a1b2",
+              "advanced": true
+            },
+            "password": {
+              "type": "string",
+              "title": "Senha do servidor",
+              "secret": true,
+              "pattern": "[A-Za-z0-9_.-]{0,128}",
+              "advanced": true
+            }
+          }
+        },
+        "labels": {
+          "engine": "Motor",
+          "txBps": "Envio",
+          "rxBps": "Recepção",
+          "txBytes": "Enviado",
+          "rxBytes": "Recebido",
+          "retransmits": "Retransmissões",
+          "samples": "Amostras"
+        },
+        "formats": {
+          "txBps": "bps",
+          "rxBps": "bps",
+          "txBytes": "bytes",
+          "rxBytes": "bytes",
+          "retransmits": "count"
+        },
+        "order": [
+          "engine",
+          "txBps",
+          "rxBps",
+          "txBytes",
+          "rxBytes",
+          "retransmits",
+          "samples"
+        ]
+      }
+    ],
+    "throughput": {
+      "serve": [
+        {
+          "engine": "btest"
+        }
+      ],
+      "drive": [
+        {
+          "engine": "btest",
+          "auth": true
+        }
+      ],
+      "actions": {
+        "serve": "tp_serve",
+        "stop": "tp_stop",
+        "run": "tp_run"
+      }
+    }
+  },
+  "script": "// MikroTik RouterOS (SSH) – estado do sistema, interfaces e o papel btest\n// no teste de enlace (ADR 015).\n//\n// O teste de enlace usa o Bandwidth Test nativo do RouterOS: o\n// `bandwidth-server` serve (porta 2000/TCP, fixa no RouterOS) e o\n// `/tool bandwidth-test` dirige. Nada é instalado. O `tp_serve` anota no\n// `handle` o estado anterior do servidor e o usuário temporário que criou; o\n// `tp_stop` desfaz exatamente isso, e só isso.\n\n// ---------------------------------------------------------------- utilitários\n\nfn or_default(value, fallback) {\n    if value == () { fallback } else { value }\n}\n\n// Ação de papel chamada sem os parâmetros do teste (pela aba, à mão): recusa\n// antes de mexer em qualquer coisa.\nfn require_link_test(params, key) {\n    if params[key] == () {\n        throw \"Esta ação faz parte do teste de enlace e recebe os parâmetros dele: rode o teste pela topologia.\";\n    }\n}\n\n// Mensagem de um erro pego por `catch` (texto do `throw` ou erro do sistema).\nfn error_text(err) {\n    if type_of(err) == \"map\" && err.message != () { err.message } else { err.to_string() }\n}\n\n// \"1w2d3h4m5s\" ou \"2d 03:04:05\" → segundos.\nfn ros_seconds(text) {\n    if text == () { return (); }\n    let value = trimmed(text);\n    let weights = [604800, 86400, 3600, 60, 1];\n    let g = regex_groups(value, \"^(?:([0-9]+)w)?(?:([0-9]+)d)?(?:([0-9]+)h)?(?:([0-9]+)m)?(?:([0-9]+)s)?$\");\n    if g == () {\n        g = regex_groups(value, \"^(?:([0-9]+)w)?(?:([0-9]+)d)?\\\\s*([0-9]+):([0-9]+):([0-9]+)$\");\n    }\n    if g == () { return (); }\n    let total = 0;\n    for i in 0..5 {\n        if g[i] != () { total += parse_int(g[i]) * weights[i]; }\n    }\n    total\n}\n\n// \"857.6MiB\" → bytes.\nfn ros_bytes(text) {\n    if text == () { return (); }\n    let g = regex_groups(text, \"([0-9.]+)\\\\s*([KMGT]?)i?B\");\n    if g == () { return (); }\n    let factor = if g[1] == \"K\" { 1024.0 } else if g[1] == \"M\" { 1048576.0 } else if g[1] == \"G\" { 1073741824.0 } else if g[1] == \"T\" { 1099511627776.0 } else { 1.0 };\n    (parse_float(g[0]) * factor).round().to_int()\n}\n\nfn ros_percent(text) {\n    if text == () { return (); }\n    let digits = regex_capture(text, \"([0-9]+)\");\n    if digits == () { () } else { parse_int(digits) }\n}\n\n// \"94.5Mbps\" (valor e unidade separados) → bits por segundo.\nfn rate_bps(value, unit) {\n    let n = parse_float(value);\n    let u = unit.to_lower();\n    if u.starts_with(\"t\") { n * 1000000000000.0 }\n    else if u.starts_with(\"g\") { n * 1000000000.0 }\n    else if u.starts_with(\"m\") { n * 1000000.0 }\n    else if u.starts_with(\"k\") { n * 1000.0 }\n    else { n }\n}\n\n// Teto de banda em kbit/s (inteiro), ou `()` sem limite.\nfn limit_kbps(limit) {\n    if limit == () { return (); }\n    let mbps = if type_of(limit) == \"f64\" { limit } else { limit.to_float() };\n    let kbps = (mbps * 1000.0).round().to_int();\n    if kbps > 0 { kbps } else { () }\n}\n\nfn yes_no(value) {\n    if value == \"yes\" || value == \"true\" { \"yes\" } else { \"no\" }\n}\n\n// --------------------------------------------------------------- leitura\n\nfn resource(device) {\n    parse_kv(device.run(\"/system resource print\"), \":\")\n}\n\nfn detect(device, params) {\n    let res = resource(device);\n    let board = parse_kv(device.run(\"/system routerboard print\"), \":\");\n    let version = res.version;\n    let model = board.model;\n    if model == () { model = res[\"board-name\"]; }\n    #{\n        firmware: if version == () { () } else { regex_capture(version, \"^([0-9][0-9A-Za-z.]*)\") },\n        channel: if version == () { () } else { regex_capture(version, \"\\\\(([a-z -]+)\\\\)\") },\n        model: model,\n        board: res[\"board-name\"],\n        architecture: res[\"architecture-name\"],\n        routerboard: board.routerboard == \"yes\"\n    }\n}\n\nfn system_status(device, params) {\n    let res = resource(device);\n    #{\n        version: res.version,\n        board: res[\"board-name\"],\n        uptime: ros_seconds(res.uptime),\n        cpu_load: ros_percent(res[\"cpu-load\"]),\n        cpu_count: res[\"cpu-count\"],\n        free_memory: ros_bytes(res[\"free-memory\"]),\n        total_memory: ros_bytes(res[\"total-memory\"])\n    }\n}\n\nfn interfaces(device, params) {\n    let out = device.run(\":foreach i in=[/interface find] do={:put ([/interface get $i type] . \\\";\\\" . [/interface get $i running] . \\\";\\\" . [/interface get $i disabled] . \\\";\\\" . [/interface get $i rx-byte] . \\\";\\\" . [/interface get $i tx-byte] . \\\";\\\" . [/interface get $i name])}\");\n    let rows = [];\n    for line in lines(out) {\n        let cols = line.split(\";\");\n        if cols.len() < 6 { continue; }\n        let name = cols[5];\n        for i in 6..cols.len() { name += \";\" + cols[i]; }\n        let state = if cols[2] == \"true\" { \"disabled\" } else if cols[1] == \"true\" { \"up\" } else { \"down\" };\n        rows.push(#{\n            name: name,\n            \"type\": cols[0],\n            state: state,\n            rx_bytes: parse_int(cols[3]),\n            tx_bytes: parse_int(cols[4])\n        });\n    }\n    rows\n}\n\n// --------------------------------------------------- teste de enlace (btest)\n\n// Só usuário com este prefixo é criado e removido pelo teste.\nfn test_user(user) {\n    if user == () || !regex_match(user, \"^nm-test-[A-Za-z0-9_-]+$\") {\n        throw \"Usuário de teste inválido: o teste de enlace só cria e remove usuários nm-test-….\";\n    }\n    user\n}\n\nfn server_state(device) {\n    let s = parse_kv(device.run(\"/tool bandwidth-server print\"), \":\");\n    #{ enabled: yes_no(s.enabled), authenticate: yes_no(s.authenticate) }\n}\n\n// Leva o servidor a `enabled`/`authenticate`, mexendo só no que difere.\nfn set_server(device, current, enabled, authenticate) {\n    let args = \"\";\n    if current.enabled != enabled { args += \" enabled=\" + enabled; }\n    if current.authenticate != authenticate { args += \" authenticate=\" + authenticate; }\n    if args != \"\" { device.run(\"/tool bandwidth-server set\" + args); }\n}\n\nfn user_exists(device, user) {\n    trimmed(device.run(\":put [:len [/user find name=\\\"\" + user + \"\\\"]]\")) != \"0\"\n}\n\nfn remove_user(device, user) {\n    if user_exists(device, user) {\n        device.run(\"/user remove [find name=\\\"\" + user + \"\\\"]\");\n    }\n}\n\nfn tp_serve(device, params) {\n    require_link_test(params, \"engine\");\n    if params.engine != \"btest\" {\n        throw \"O RouterOS só serve o btest (Bandwidth Test); iperf3 não roda nele.\";\n    }\n    let before = server_state(device);\n    let user = \"\";\n    if params.requireAuth == true {\n        user = test_user(params.user);\n        if params.password == () || params.password == \"\" {\n            throw \"O teste com autenticação precisa da senha do usuário de teste.\";\n        }\n        remove_user(device, user);\n        device.run(\"/user add name=\\\"\" + user + \"\\\" group=read password=\\\"\" + params.password + \"\\\" comment=\\\"NetMonitor: teste de enlace\\\"\");\n        let failure = ();\n        try {\n            set_server(device, before, \"yes\", before.authenticate);\n        } catch (err) {\n            failure = error_text(err);\n        }\n        if failure != () {\n            remove_user(device, user);\n            throw failure;\n        }\n    } else {\n        set_server(device, before, \"yes\", \"no\");\n    }\n    #{\n        port: 2000,\n        handle: json_encode(#{\n            engine: \"btest\",\n            prevEnabled: before.enabled,\n            prevAuthenticate: before.authenticate,\n            user: user\n        })\n    }\n}\n\nfn parse_handle(text) {\n    let handle = ();\n    try {\n        handle = json_parse(text);\n    } catch (err) {\n        handle = ();\n    }\n    if type_of(handle) != \"map\" {\n        throw \"O `handle` do teste de enlace não é o que o tp_serve devolveu.\";\n    }\n    handle\n}\n\nfn tp_stop(device, params) {\n    require_link_test(params, \"handle\");\n    let handle = parse_handle(params.handle);\n    let enabled = handle.prevEnabled;\n    let authenticate = handle.prevAuthenticate;\n    if (enabled != \"yes\" && enabled != \"no\") || (authenticate != \"yes\" && authenticate != \"no\") {\n        throw \"O `handle` não traz o estado anterior do bandwidth-server (prevEnabled/prevAuthenticate).\";\n    }\n    if handle.user != () && handle.user != \"\" {\n        remove_user(device, test_user(handle.user));\n    }\n    set_server(device, server_state(device), enabled, authenticate);\n    #{ stopped: true }\n}\n\n// Lê a saída do `/tool bandwidth-test`: o último `*-total-average` de cada\n// sentido é o resultado; o último `status` explica a falha.\nfn parse_bandwidth_test(text, direction) {\n    let t = text;\n    t.replace(\"\\r\", \"\\n\");\n    let status = \"\";\n    let tx = ();\n    let rx = ();\n    for line in lines(t) {\n        let s = regex_capture(line, \"^status:\\\\s*(.+)$\");\n        if s != () { status = trimmed(s); }\n        let g = regex_groups(line, \"^(tx|rx)-total-average:\\\\s*([0-9.]+)\\\\s*([A-Za-z]*)\");\n        if g != () {\n            if g[0] == \"tx\" { tx = rate_bps(g[1], g[2]); } else { rx = rate_bps(g[1], g[2]); }\n        }\n    }\n    if status.contains(\"authentication\") {\n        throw \"O servidor btest recusou o usuário e a senha do teste (\" + status + \").\";\n    }\n    if tx == () && rx == () {\n        let reason = if status == \"\" { trimmed(text) } else { status };\n        throw \"O teste não trouxe resultado: \" + reason;\n    }\n    #{\n        engine: \"btest\",\n        txBps: if direction == \"receive\" { () } else { or_default(tx, 0.0) },\n        rxBps: if direction == \"send\" { () } else { or_default(rx, 0.0) },\n        txBytes: 0,\n        rxBytes: 0,\n        retransmits: (),\n        samples: []\n    }\n}\n\nfn tp_run(device, params) {\n    require_link_test(params, \"target\");\n    if or_default(params.engine, \"btest\") != \"btest\" {\n        throw \"O RouterOS só dirige o btest (Bandwidth Test).\";\n    }\n    if params.port != () && params.port != 2000 {\n        throw \"O RouterOS só testa contra a porta 2000 do servidor btest.\";\n    }\n    let direction = or_default(params.direction, \"both\");\n    let duration = or_default(params.durationS, 5);\n    let ros_direction = if direction == \"send\" { \"transmit\" } else if direction == \"receive\" { \"receive\" } else { \"both\" };\n    let command = \"/tool bandwidth-test address=\" + params.target + \" protocol=tcp direction=\" + ros_direction + \" duration=\" + duration + \"s connection-count=1\";\n    let limit = limit_kbps(params.limitMbps);\n    if limit != () {\n        if direction != \"receive\" { command += \" local-tx-speed=\" + limit + \"k\"; }\n        if direction != \"send\" { command += \" remote-tx-speed=\" + limit + \"k\"; }\n    }\n    if params.user != () && params.user != \"\" {\n        command += \" user=\" + params.user;\n        if params.password != () { command += \" password=\\\"\" + params.password + \"\\\"\"; }\n    }\n    let r = device.ssh_live(command, #{\n        timeout_ms: duration * 1000 + 20000,\n        progress: #{ pattern: \"(?<flow>tx|rx)-current:\\\\s*(?<value>[0-9.]+)\\\\s*(?<unit>[A-Za-z]*bps)\" }\n    });\n    parse_bandwidth_test(r.stdout + \"\\n\" + r.stderr, direction)\n}\n",
+  "usage": "# MikroTik RouterOS\n\nConsulta um MikroTik (RouterOS 6.43 ou mais novo, inclusive o 7) por SSH e dá\na ele os papéis do **teste de enlace** da topologia com o Bandwidth Test\nnativo do RouterOS — nada é instalado no roteador.\n\nPrecisa de uma credencial SSH cadastrada. Para o teste de enlace, o usuário\nprecisa poder criar usuários e alterar o `/tool bandwidth-server` (grupo\n`full`).\n\n## Detectar RouterOS\nLê `/system resource print` e `/system routerboard print`: versão, canal\n(stable, long-term…), modelo, placa e arquitetura. Não altera nada.\n\n## Estado do sistema\nTempo ligado, carga de CPU, núcleos e memória livre/total, de\n`/system resource print`. Não altera nada.\n\n## Interfaces\nCada interface com tipo, estado (ligada, desligada ou desabilitada) e os bytes\nrecebidos e enviados desde que o roteador ligou. Não altera nada.\n\n## Teste de enlace (Bandwidth Test)\n\nAs ações abaixo são chamadas pelo **teste de enlace** da topologia, que passa\nos parâmetros, grava o que precisa ser desfeito **antes** de usar o servidor e\ndesfaz em toda saída — sucesso, falha ou cancelamento. Pela aba do equipamento\nsó faz sentido a medição.\n\n### Ligar servidor de teste de vazão\n**Altera o roteador por alguns segundos.** Lê o estado do\n`/tool bandwidth-server` e:\n\n- **com autenticação:** cria um usuário temporário `nm-test-…` (grupo `read`,\n  que tem a política `test`) com a senha gerada para aquele teste e liga o\n  servidor (`enabled=yes`), sem mexer no `authenticate`;\n- **sem autenticação** (o cliente é o NetMonitor, um agente ou um OpenWrt):\n  liga o servidor e põe `authenticate=no`.\n\nSó muda o que está diferente. Devolve a porta (sempre **2000/TCP** no RouterOS)\ne um `handle` com o estado anterior (`enabled`, `authenticate`) e o usuário\ncriado. Se ligar o servidor falhar, o usuário recém-criado é removido na hora.\n\n### Desligar servidor de teste de vazão\nDesfaz **exatamente** o que o `handle` diz: remove o usuário temporário (só\nusuários `nm-test-…`; qualquer outro nome é recusado) e devolve `enabled` e\n`authenticate` aos valores anteriores. Rodar de novo não muda nada.\n\n### Medir vazão até outro equipamento\n`/tool bandwidth-test` em TCP, com **uma** conexão, contra um servidor btest —\noutro MikroTik ou o servidor btest do próprio NetMonitor. Sentido do ponto de\nvista deste roteador: *envia* (`transmit`), *recebe* (`receive`) ou os dois ao\nmesmo tempo. O limite de banda vira `local-tx-speed`/`remote-tx-speed`. O\nandamento (`tx-current`/`rx-current`) aparece ao vivo; o resultado é o último\n`tx-total-average`/`rx-total-average`. Senha errada (`authentication failed`)\nou servidor fora do ar viram erro com o status do RouterOS.\n\n## Requisitos de rede\n- O firewall do roteador que **serve** precisa aceitar **TCP 2000** de quem\n  testa (`/ip firewall filter` — o plugin não abre porta).\n- O RouterOS só fala btest na porta 2000: servidor btest em outra porta não é\n  alcançável por ele.\n\n## Cuidados\nMedir o enlace satura o enlace: rode em janela combinada e com duração curta.\n",
+  "compatibility": [],
+  "tests": {
+    "unit": [
+      {
+        "name": "RouterOS 7 numa RouterBOARD",
+        "action": "detect",
+        "fixtures": [
+          {
+            "ssh": "/system resource print",
+            "stdout": "                   uptime: 1w2d3h4m5s\n                  version: 7.14.2 (stable)\n               build-time: 2024-03-27 13:16:24\n              free-memory: 857.6MiB\n             total-memory: 1024.0MiB\n                      cpu: ARM64\n                cpu-count: 4\n                 cpu-load: 12%\n           free-hdd-space: 98.3MiB\n        architecture-name: arm64\n               board-name: RB5009UG+S+\n                 platform: MikroTik\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "/system routerboard print",
+            "stdout": "       routerboard: yes\n             model: RB5009UG+S+IN\n     serial-number: HD1234567\n     firmware-type: 70x0\n  current-firmware: 7.14.2\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expect": {
+          "firmware": "7.14.2",
+          "channel": "stable",
+          "model": "RB5009UG+S+IN",
+          "board": "RB5009UG+S+",
+          "architecture": "arm64",
+          "routerboard": true
+        }
+      },
+      {
+        "name": "RouterOS 6 num CHR (sem RouterBOARD)",
+        "action": "detect",
+        "fixtures": [
+          {
+            "ssh": "/system resource print",
+            "stdout": "             uptime: 2d03:04:05\n            version: 6.49.10 (long-term)\n        free-memory: 200.0KiB\n       total-memory: 1.0GiB\n           cpu-load: 0%\n  architecture-name: x86_64\n         board-name: CHR\n           platform: MikroTik\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "/system routerboard print",
+            "stdout": "  routerboard: no\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expect": {
+          "firmware": "6.49.10",
+          "channel": "long-term",
+          "model": "CHR",
+          "routerboard": false
+        }
+      },
+      {
+        "name": "estado do RouterOS 7",
+        "action": "system_status",
+        "fixtures": [
+          {
+            "ssh": "/system resource print",
+            "stdout": "                   uptime: 1w2d3h4m5s\n                  version: 7.14.2 (stable)\n               build-time: 2024-03-27 13:16:24\n              free-memory: 857.6MiB\n             total-memory: 1024.0MiB\n                      cpu: ARM64\n                cpu-count: 4\n                 cpu-load: 12%\n           free-hdd-space: 98.3MiB\n        architecture-name: arm64\n               board-name: RB5009UG+S+\n                 platform: MikroTik\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expect": {
+          "version": "7.14.2 (stable)",
+          "uptime": 788645,
+          "cpu_load": 12,
+          "cpu_count": "4",
+          "free_memory": 899258778,
+          "total_memory": 1073741824
+        }
+      },
+      {
+        "name": "tempo ligado no formato 2d03:04:05",
+        "action": "system_status",
+        "fixtures": [
+          {
+            "ssh": "/system resource print",
+            "stdout": "             uptime: 2d03:04:05\n            version: 6.49.10 (long-term)\n        free-memory: 200.0KiB\n       total-memory: 1.0GiB\n           cpu-load: 0%\n  architecture-name: x86_64\n         board-name: CHR\n           platform: MikroTik\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expect": {
+          "uptime": 183845,
+          "cpu_load": 0,
+          "free_memory": 204800,
+          "total_memory": 1073741824
+        }
+      },
+      {
+        "name": "interfaces com estado e contadores",
+        "action": "interfaces",
+        "fixtures": [
+          {
+            "ssh": ":foreach i in=[/interface find] do={:put ([/interface get $i type] . \";\" . [/interface get $i running] . \";\" . [/interface get $i disabled] . \";\" . [/interface get $i rx-byte] . \";\" . [/interface get $i tx-byte] . \";\" . [/interface get $i name])}",
+            "stdout": "ether;true;false;123456;654321;ether1\nether;false;false;0;0;ether2\nbridge;true;false;10;20;bridge;lan\nwlan;false;true;0;0;wlan1\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expect": [
+          {
+            "name": "ether1",
+            "type": "ether",
+            "state": "up",
+            "rx_bytes": 123456,
+            "tx_bytes": 654321
+          },
+          {
+            "name": "ether2",
+            "state": "down"
+          },
+          {
+            "name": "bridge;lan",
+            "type": "bridge",
+            "state": "up"
+          },
+          {
+            "name": "wlan1",
+            "state": "disabled"
+          }
+        ]
+      },
+      {
+        "name": "servidor com autenticação: usuário temporário e servidor ligado",
+        "action": "tp_serve",
+        "params": {
+          "engine": "btest",
+          "port": 2000,
+          "peer": "10.0.0.1",
+          "user": "nm-test-a1b2",
+          "password": "Teste-Senha1",
+          "requireAuth": true
+        },
+        "fixtures": [
+          {
+            "ssh": "/tool bandwidth-server print",
+            "stdout": "                  enabled: no\n             authenticate: yes\n  allocate-udp-ports-from: 2000\n             max-sessions: 100\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": ":put [:len [/user find name=\"nm-test-a1b2\"]]",
+            "stdout": "0\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "/user add name=\"nm-test-a1b2\" group=read password=\"Teste-Senha1\" comment=\"NetMonitor: teste de enlace\"",
+            "stdout": "",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "/tool bandwidth-server set enabled=yes",
+            "stdout": "",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expect": {
+          "port": 2000,
+          "handle": "{\"engine\":\"btest\",\"prevAuthenticate\":\"yes\",\"prevEnabled\":\"no\",\"user\":\"nm-test-a1b2\"}"
+        }
+      },
+      {
+        "name": "servidor sem autenticação desliga o authenticate",
+        "action": "tp_serve",
+        "params": {
+          "engine": "btest",
+          "port": 2000,
+          "peer": "10.0.0.1",
+          "requireAuth": false
+        },
+        "fixtures": [
+          {
+            "ssh": "/tool bandwidth-server print",
+            "stdout": "                  enabled: no\n             authenticate: yes\n  allocate-udp-ports-from: 2000\n             max-sessions: 100\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "/tool bandwidth-server set enabled=yes authenticate=no",
+            "stdout": "",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expect": {
+          "port": 2000,
+          "handle": "{\"engine\":\"btest\",\"prevAuthenticate\":\"yes\",\"prevEnabled\":\"no\",\"user\":\"\"}"
+        }
+      },
+      {
+        "name": "servidor já do jeito pedido não é alterado",
+        "action": "tp_serve",
+        "params": {
+          "engine": "btest",
+          "port": 2000,
+          "peer": "10.0.0.1",
+          "requireAuth": false
+        },
+        "fixtures": [
+          {
+            "ssh": "/tool bandwidth-server print",
+            "stdout": "                  enabled: yes\n             authenticate: no\n  allocate-udp-ports-from: 2000\n             max-sessions: 100\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expect": {
+          "port": 2000,
+          "handle": "{\"engine\":\"btest\",\"prevAuthenticate\":\"no\",\"prevEnabled\":\"yes\",\"user\":\"\"}"
+        }
+      },
+      {
+        "name": "falha ao ligar o servidor remove o usuário criado",
+        "action": "tp_serve",
+        "params": {
+          "engine": "btest",
+          "user": "nm-test-a1b2",
+          "password": "Teste-Senha1",
+          "requireAuth": true
+        },
+        "fixtures": [
+          {
+            "ssh": "/tool bandwidth-server print",
+            "stdout": "                  enabled: no\n             authenticate: yes\n  allocate-udp-ports-from: 2000\n             max-sessions: 100\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": ":put [:len [/user find name=\"nm-test-a1b2\"]]",
+            "stdout": "0\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": ":put [:len [/user find name=\"nm-test-a1b2\"]]",
+            "stdout": "1\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "/user add name=\"nm-test-a1b2\" group=read password=\"Teste-Senha1\" comment=\"NetMonitor: teste de enlace\"",
+            "stdout": "",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "/tool bandwidth-server set enabled=yes",
+            "stdout": "",
+            "stderr": "failure: not permitted\n",
+            "exit": 1
+          },
+          {
+            "ssh": "/user remove [find name=\"nm-test-a1b2\"]",
+            "stdout": "",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expectError": "not permitted"
+      },
+      {
+        "name": "autenticação sem senha é recusada antes do roteador",
+        "action": "tp_serve",
+        "params": {
+          "engine": "btest",
+          "user": "nm-test-a1b2",
+          "requireAuth": true
+        },
+        "fixtures": [
+          {
+            "ssh": "/tool bandwidth-server print",
+            "stdout": "                  enabled: no\n             authenticate: yes\n  allocate-udp-ports-from: 2000\n             max-sessions: 100\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expectError": "precisa da senha"
+      },
+      {
+        "name": "usuário fora do prefixo nm-test é recusado",
+        "action": "tp_serve",
+        "params": {
+          "engine": "btest",
+          "user": "admin",
+          "password": "Teste-Senha1",
+          "requireAuth": true
+        },
+        "expectError": "formato inválido"
+      },
+      {
+        "name": "pela aba, sem os parâmetros do teste, não mexe em nada",
+        "action": "tp_serve",
+        "expectError": "rode o teste pela topologia"
+      },
+      {
+        "name": "desfaz: remove o usuário e volta o servidor a desligado",
+        "action": "tp_stop",
+        "params": {
+          "engine": "btest",
+          "handle": "{\"engine\":\"btest\",\"prevAuthenticate\":\"yes\",\"prevEnabled\":\"no\",\"user\":\"nm-test-a1b2\"}"
+        },
+        "fixtures": [
+          {
+            "ssh": ":put [:len [/user find name=\"nm-test-a1b2\"]]",
+            "stdout": "1\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "/user remove [find name=\"nm-test-a1b2\"]",
+            "stdout": "",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "/tool bandwidth-server print",
+            "stdout": "                  enabled: yes\n             authenticate: yes\n  allocate-udp-ports-from: 2000\n             max-sessions: 100\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "/tool bandwidth-server set enabled=no",
+            "stdout": "",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expect": {
+          "stopped": true
+        }
+      },
+      {
+        "name": "desfazer de novo não altera nada (idempotente)",
+        "action": "tp_stop",
+        "params": {
+          "engine": "btest",
+          "handle": "{\"engine\":\"btest\",\"prevAuthenticate\":\"yes\",\"prevEnabled\":\"no\",\"user\":\"nm-test-a1b2\"}"
+        },
+        "fixtures": [
+          {
+            "ssh": ":put [:len [/user find name=\"nm-test-a1b2\"]]",
+            "stdout": "0\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "/tool bandwidth-server print",
+            "stdout": "                  enabled: no\n             authenticate: yes\n  allocate-udp-ports-from: 2000\n             max-sessions: 100\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expect": {
+          "stopped": true
+        }
+      },
+      {
+        "name": "desfaz o authenticate=no",
+        "action": "tp_stop",
+        "params": {
+          "engine": "btest",
+          "handle": "{\"engine\":\"btest\",\"prevAuthenticate\":\"yes\",\"prevEnabled\":\"yes\",\"user\":\"\"}"
+        },
+        "fixtures": [
+          {
+            "ssh": "/tool bandwidth-server print",
+            "stdout": "                  enabled: yes\n             authenticate: no\n  allocate-udp-ports-from: 2000\n             max-sessions: 100\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "/tool bandwidth-server set authenticate=yes",
+            "stdout": "",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expect": {
+          "stopped": true
+        }
+      },
+      {
+        "name": "handle com usuário que não é de teste é recusado",
+        "action": "tp_stop",
+        "params": {
+          "engine": "btest",
+          "handle": "{\"engine\":\"btest\",\"prevAuthenticate\":\"yes\",\"prevEnabled\":\"yes\",\"user\":\"admin\"}"
+        },
+        "expectError": "nm-test"
+      },
+      {
+        "name": "handle que não veio do tp_serve é recusado",
+        "action": "tp_stop",
+        "params": {
+          "engine": "btest",
+          "handle": "nada disso"
+        },
+        "expectError": "não é o que o tp_serve devolveu"
+      },
+      {
+        "name": "mede os dois sentidos com autenticação e limite",
+        "action": "tp_run",
+        "params": {
+          "engine": "btest",
+          "target": "10.0.0.2",
+          "port": 2000,
+          "direction": "both",
+          "durationS": 5,
+          "streams": 1,
+          "limitMbps": 100,
+          "user": "nm-test-a1b2",
+          "password": "Teste-Senha1"
+        },
+        "fixtures": [
+          {
+            "ssh": "/tool bandwidth-test address=10.0.0.2 protocol=tcp direction=both duration=5s connection-count=1 local-tx-speed=100000k remote-tx-speed=100000k user=nm-test-a1b2 password=\"Teste-Senha1\"",
+            "stdout": "                status: connecting\n              duration: 5s\n          lost-packets: 0\n      connection-count: 1\n\n                status: running\n              duration: 5s\n            tx-current: 90.1Mbps\n      tx-total-average: 90.1Mbps\n            rx-current: 1.1Gbps\n      rx-total-average: 1.1Gbps\n          lost-packets: 0\n      connection-count: 1\n\n                status: done testing\n              duration: 5s\n            tx-current: 94.5Mbps\n      tx-total-average: 94.5Mbps\n            rx-current: 1.3Gbps\n      rx-total-average: 1.25Gbps\n          lost-packets: 0\n      connection-count: 1\n\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expect": {
+          "engine": "btest",
+          "txBps": 94500000,
+          "rxBps": 1250000000,
+          "txBytes": 0,
+          "rxBytes": 0,
+          "retransmits": null,
+          "samples": []
+        }
+      },
+      {
+        "name": "só envio, em kbps, sem autenticação (servidor do NetMonitor)",
+        "action": "tp_run",
+        "params": {
+          "engine": "btest",
+          "target": "192.0.2.10",
+          "direction": "send",
+          "durationS": 3
+        },
+        "fixtures": [
+          {
+            "ssh": "/tool bandwidth-test address=192.0.2.10 protocol=tcp direction=transmit duration=3s connection-count=1",
+            "stdout": "                status: done testing\n              duration: 5s\n            tx-current: 512kbps\n      tx-total-average: 512kbps\n          lost-packets: 0\n      connection-count: 1\n\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expect": {
+          "txBps": 512000,
+          "rxBps": null
+        }
+      },
+      {
+        "name": "só recepção, saída redesenhada com \\r",
+        "action": "tp_run",
+        "params": {
+          "target": "10.0.0.2",
+          "direction": "receive",
+          "durationS": 2
+        },
+        "fixtures": [
+          {
+            "ssh": "/tool bandwidth-test address=10.0.0.2 protocol=tcp direction=receive duration=2s connection-count=1",
+            "stdout": "status: running\rrx-current: 80Mbps\rrx-total-average: 80Mbps\rstatus: done testing\rrx-current: 81Mbps\rrx-total-average: 80.5Mbps\r\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expect": {
+          "txBps": null,
+          "rxBps": 80500000
+        }
+      },
+      {
+        "name": "senha recusada pelo servidor",
+        "action": "tp_run",
+        "params": {
+          "engine": "btest",
+          "target": "10.0.0.2",
+          "port": 2000,
+          "direction": "both",
+          "durationS": 5,
+          "streams": 1,
+          "limitMbps": 100,
+          "user": "nm-test-a1b2",
+          "password": "Teste-Senha1"
+        },
+        "fixtures": [
+          {
+            "ssh": "/tool bandwidth-test address=10.0.0.2 protocol=tcp direction=both duration=5s connection-count=1 local-tx-speed=100000k remote-tx-speed=100000k user=nm-test-a1b2 password=\"Teste-Senha1\"",
+            "stdout": "status: connecting\nstatus: authentication failed\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expectError": "recusou o usuário e a senha"
+      },
+      {
+        "name": "servidor fora do ar",
+        "action": "tp_run",
+        "params": {
+          "engine": "btest",
+          "target": "10.0.0.2",
+          "port": 2000,
+          "direction": "both",
+          "durationS": 5,
+          "streams": 1,
+          "limitMbps": 100,
+          "user": "nm-test-a1b2",
+          "password": "Teste-Senha1"
+        },
+        "fixtures": [
+          {
+            "ssh": "/tool bandwidth-test address=10.0.0.2 protocol=tcp direction=both duration=5s connection-count=1 local-tx-speed=100000k remote-tx-speed=100000k user=nm-test-a1b2 password=\"Teste-Senha1\"",
+            "stdout": "status: connecting\nstatus: can not connect\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expectError": "não trouxe resultado: can not connect"
+      },
+      {
+        "name": "porta diferente de 2000 é recusada",
+        "action": "tp_run",
+        "params": {
+          "target": "10.0.0.2",
+          "port": 5201
+        },
+        "expectError": "porta 2000"
+      }
+    ],
+    "functional": [
+      {
+        "action": "detect",
+        "expectKeys": [
+          "firmware",
+          "board"
+        ]
+      },
+      {
+        "action": "system_status",
+        "expectKeys": [
+          "uptime",
+          "total_memory"
+        ]
+      },
+      {
+        "action": "interfaces",
+        "expectMinRows": 1
+      }
+    ]
+  }
+}

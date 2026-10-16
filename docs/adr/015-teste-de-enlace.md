@@ -281,7 +281,8 @@ topologia (menu do enlace, do nó e da barra), alimentado pelos papéis do §3.
 - Três tabelas novas, um evento efêmero e um de snapshot no barramento.
 - O plugin do MikroTik (`mikrotik-routeros`) passa a existir; o OpenWrt ganha
   `openwrt-link-test` (usa `openwrt-packages` para instalar `iperf3` e
-  `mikrotik-btest`); o `linux-ssh-status` ganha os papéis de iperf3.
+  `mikrotik-btest`); os papéis de iperf3 do Linux ficam num plugin próprio,
+  `linux-link-test` (o `linux-ssh-status` continua só leitura).
 - Medir o enlace satura o enlace: confirmação explícita, duração curta e
   cancelamento sempre à vista.
 - UDP, jitter e perda ficam para uma segunda etapa (o contrato já reserva
