@@ -38,10 +38,14 @@ pub enum Permission {
     /// Exportar o conteúdo de um volume (tar) para download na central.
     /// Fora do padrão: um volume guarda dados de aplicação, banco inclusive.
     VolumeExport,
+    /// Dirigir um teste de vazão (iperf3/btest, lado cliente) até um
+    /// equipamento da rede deste site (ADR 015 §6). Fora do padrão: satura o
+    /// enlace medido. O agente só disca para fora — nunca serve o teste.
+    Throughput,
 }
 
 impl Permission {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::Read,
         Self::Lifecycle,
         Self::Update,
@@ -51,6 +55,7 @@ impl Permission {
         Self::DeviceIo,
         Self::Database,
         Self::VolumeExport,
+        Self::Throughput,
     ];
 
     #[must_use]
@@ -65,6 +70,7 @@ impl Permission {
             Self::DeviceIo => "device_io",
             Self::Database => "database",
             Self::VolumeExport => "volume_export",
+            Self::Throughput => "throughput",
         }
     }
 }
@@ -200,6 +206,17 @@ mod tests {
         assert!(Policy::parse("read,volume_export")
             .expect("política")
             .allows(Permission::VolumeExport));
+    }
+
+    #[test]
+    fn teste_de_vazao_fica_fora_do_padrao() {
+        assert!(!Policy::default().allows(Permission::Throughput));
+        let policy = Policy::parse("read, throughput").expect("política");
+        assert!(policy.allows(Permission::Throughput));
+        assert_eq!(Permission::Throughput.to_string(), "throughput");
+        assert!(Policy::parse("all")
+            .expect("all")
+            .allows(Permission::Throughput));
     }
 
     #[test]

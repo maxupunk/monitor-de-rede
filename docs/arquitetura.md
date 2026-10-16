@@ -695,8 +695,12 @@ seja o `vpn-probe` e, com o dispositivo vinculado em modo `vpn`, exige que a
 conexão venha do IP do túnel.
 
 **Política local.** `AGENT_ALLOW` no servidor remoto (`read`, `lifecycle`,
-`update`, `compose`, `monitor`, `discovery`) é aplicada pelo agente a cada
-pedido; a central só a usa para não oferecer o que seria recusado.
+`update`, `compose`, `monitor`, `discovery`, `device_io`, `database`,
+`volume_export`, `throughput`) é aplicada pelo agente a cada pedido; a central
+só a usa para não oferecer o que seria recusado. `throughput` (ADR 015 §6)
+deixa o agente dirigir um teste de vazão — só como cliente, sem abrir porta —
+até um equipamento da rede dele; amostras chegam em `Chunk` e a central as
+consome pelo `AgentDriver` (`services/agents/throughput.rs`).
 
 **Docker por host.** `services/docker/source.rs` (`DockerEngine`) e
 `maintenance.rs` (`DockerMaintenance`) são as fontes; `hosts.rs` resolve

@@ -8,6 +8,7 @@
 //! * [`service`] / [`enrollment`] — cadastro, código de uso único, token;
 //! * [`remote_engine`] — o Docker do host do agente como fonte da central;
 //! * [`local`] — o agente ao lado da central, dono do Docker dela (ADR 014);
+//! * [`throughput`] — o agente como origem de teste de vazão (ADR 015 §6);
 //! * [`inbound`] / [`background`] — eventos recebidos, modo ao vivo e pump
 //!   de tarefas.
 //!
@@ -28,4 +29,5 @@ pub mod remote_engine;
 pub mod routes;
 pub mod service;
 pub mod session;
+pub mod throughput;
 pub mod tunnel;

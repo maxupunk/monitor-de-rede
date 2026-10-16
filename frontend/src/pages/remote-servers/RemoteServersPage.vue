@@ -296,6 +296,7 @@ const PERMISSION_LABELS: Record<Permission, string> = {
   device_io: 'Acesso a equipamentos (plugins)',
   database: 'Ponte de banco (backup)',
   volume_export: 'Exportar volumes',
+  throughput: 'Teste de vazão (enlace)',
 }
 
 function permissionLabel(permission: Permission): string {
@@ -303,7 +304,9 @@ function permissionLabel(permission: Permission): string {
 }
 
 function permissionColor(permission: Permission): string {
-  return ['update', 'compose', 'volume_export'].includes(permission) ? 'warning' : 'primary'
+  return ['update', 'compose', 'volume_export', 'throughput'].includes(permission)
+    ? 'warning'
+    : 'primary'
 }
 
 function statusMeta(agent: AgentView): { label: string; color: string } {

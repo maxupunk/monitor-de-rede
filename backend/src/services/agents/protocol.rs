@@ -12,11 +12,16 @@
 //! pedido, nos dois sentidos, sob uma janela de crédito. O texto continua
 //! sendo o canal de controle.
 //!
+//! Um teste de vazão (`Command::Throughput`, ADR 015 §6) manda cada amostra
+//! de 1 s num `Chunk` (`ThroughputSample` em JSON) e termina no `Response`
+//! com o `ThroughputReport`. O agente só **dirige** o teste — nunca abre
+//! porta para servi-lo.
+//!
 //! Os comandos Docker formam um **enum fechado**. Não existe "encaminhe este
 //! caminho para a Engine": cada operação é declarada, tem permissão própria
 //! ([`Command::permission`]) e é validada dos dois lados.
 
-use std::fmt;
+use std::{fmt, net::IpAddr};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -30,6 +35,7 @@ use crate::{
             DockerError,
         },
         monitoring::contracts::CheckResult,
+        network_tools::throughput::{btest::BtestAuth, driver::DriveRequest, ThroughputSpec},
         plugins::transport::DeviceIoCall,
         probes::{
             dispatcher::{ProbeDiscoveryTask, ProbeTask},
@@ -50,8 +56,10 @@ use super::policy::Permission;
 /// * **2** — quadros binários de ponte ([`TunnelFrame`]) e
 ///   `Command::DatabaseTunnel` (ADR 013);
 /// * **3** — `Command::VolumeExport`: o tar de um volume pela mesma ponte
-///   (ADR 014, o Docker da central atendido pelo agente local).
-pub const PROTOCOL_VERSION: u16 = 3;
+///   (ADR 014, o Docker da central atendido pelo agente local);
+/// * **4** — `Command::Throughput` e saída de `DeviceIo` em `Chunk`
+///   (ADR 015 §6).
+pub const PROTOCOL_VERSION: u16 = 4;
 
 /// Teto de um quadro. Logs e inventários grandes são quebrados em chunks.
 pub const MAX_FRAME_BYTES: usize = 4 * 1024 * 1024;
@@ -327,7 +335,9 @@ pub enum Command {
     },
     /// Uma operação de E/S de plugin de dispositivo (SSH exec, HTTP, Telnet)
     /// contra um equipamento da rede do agente. É uma operação unitária e
-    /// fechada — o script do plugin roda na central, nunca aqui.
+    /// fechada — o script do plugin roda na central, nunca aqui. Cada linha
+    /// da saída vai num `Chunk` (texto) enquanto o comando roda; a resposta
+    /// final é a completa, como sempre.
     DeviceIo {
         call: DeviceIoCall,
     },
@@ -345,6 +355,63 @@ pub enum Command {
     VolumeExport {
         name: String,
     },
+    /// Teste de vazão dirigido pelo agente (cliente iperf3/btest) até
+    /// `target:port`, um equipamento da rede dele (ADR 015 §6). Só rede
+    /// privada e, quando houver, `AGENT_DEVICE_CIDRS`. Cada amostra de 1 s vai
+    /// num `Chunk`; o `Response` leva o relatório. `Cancel` interrompe.
+    Throughput {
+        target: IpAddr,
+        port: u16,
+        spec: ThroughputSpec,
+        auth: Option<ThroughputAuth>,
+    },
+}
+
+/// Credencial MD5 do btest no fio. O `Debug` não mostra a senha: o comando
+/// aparece em log de erro e em `tracing`.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThroughputAuth {
+    pub user: String,
+    pub password: String,
+}
+
+impl fmt::Debug for ThroughputAuth {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ThroughputAuth")
+            .field("user", &self.user)
+            .field("password", &"<oculta>")
+            .finish()
+    }
+}
+
+impl From<&BtestAuth> for ThroughputAuth {
+    fn from(auth: &BtestAuth) -> Self {
+        Self {
+            user: auth.user.clone(),
+            password: auth.password.clone(),
+        }
+    }
+}
+
+impl From<ThroughputAuth> for BtestAuth {
+    fn from(auth: ThroughputAuth) -> Self {
+        Self {
+            user: auth.user,
+            password: auth.password,
+        }
+    }
+}
+
+impl From<&DriveRequest> for Command {
+    fn from(request: &DriveRequest) -> Self {
+        Self::Throughput {
+            target: request.target.ip(),
+            port: request.target.port(),
+            spec: request.spec.clone(),
+            auth: request.auth.as_ref().map(ThroughputAuth::from),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -434,6 +501,7 @@ impl Command {
             Self::DeviceIo { .. } => Permission::DeviceIo,
             Self::DatabaseTunnel { .. } => Permission::Database,
             Self::VolumeExport { .. } => Permission::VolumeExport,
+            Self::Throughput { .. } => Permission::Throughput,
         }
     }
 }
@@ -536,6 +604,12 @@ impl RemoteError {
     pub fn timeout() -> Self {
         Self::new(ErrorCode::Timeout, "O agente não respondeu a tempo")
     }
+
+    /// A central desistiu do pedido (cancelamento ou prazo local).
+    #[must_use]
+    pub fn cancelled() -> Self {
+        Self::new(ErrorCode::Timeout, "Pedido cancelado")
+    }
 }
 
 impl fmt::Display for RemoteError {
@@ -555,6 +629,28 @@ impl From<DockerError> for RemoteError {
             DockerError::Engine => ErrorCode::Engine,
             DockerError::Forbidden(_) => ErrorCode::Forbidden,
             DockerError::Unsupported(_) => ErrorCode::Unsupported,
+        };
+        Self::new(code, error.to_string())
+    }
+}
+
+/// Erro de um serviço do agente (motor de vazão, por exemplo) no fio. Regra de
+/// negócio vai como `Engine` com a mensagem exata, para a central reconhecer
+/// erros conhecidos (EC-SRP5, por exemplo) pelo texto.
+impl From<AppError> for RemoteError {
+    fn from(error: AppError) -> Self {
+        let code = match &error {
+            AppError::Validation(_) | AppError::ValidationFields(_) => ErrorCode::Validation,
+            AppError::NotFound(_) => ErrorCode::NotFound,
+            AppError::Conflict(_) => ErrorCode::Conflict,
+            AppError::Unauthorized(_) | AppError::Forbidden(_) => ErrorCode::Forbidden,
+            AppError::ServiceUnavailable(_) | AppError::RateLimited { .. } => {
+                ErrorCode::Unavailable
+            }
+            AppError::BusinessRule(_) => ErrorCode::Engine,
+            AppError::Internal(_) => {
+                return Self::new(ErrorCode::Internal, "Erro interno no agente");
+            }
         };
         Self::new(code, error.to_string())
     }
@@ -679,6 +775,156 @@ mod tests {
         };
         assert_eq!(command.permission(), Permission::Database);
         assert!(!crate::services::agents::policy::Policy::default().allows(Permission::Database));
+    }
+
+    fn throughput_command() -> Command {
+        use crate::services::network_tools::throughput::{
+            TestDirection, TestProtocol, ThroughputEngine,
+        };
+        Command::Throughput {
+            target: "192.168.88.1".parse().unwrap(),
+            port: 2000,
+            spec: ThroughputSpec {
+                engine: ThroughputEngine::Btest,
+                direction: TestDirection::Both,
+                protocol: TestProtocol::Tcp,
+                duration_s: 5,
+                streams: 1,
+                limit_mbps: Some(100),
+            },
+            auth: Some(ThroughputAuth {
+                user: "nm-teste".into(),
+                password: "s3nh4-do-teste".into(),
+            }),
+        }
+    }
+
+    #[test]
+    fn teste_de_vazao_faz_ida_e_volta_com_permissao_propria() {
+        let command = throughput_command();
+        assert_eq!(command.permission(), Permission::Throughput);
+        let text = Envelope::new(Body::Request {
+            deadline_ms: 30_000,
+            command,
+        })
+        .encode()
+        .expect("codifica");
+        let value: Value = serde_json::from_str(&text).expect("json");
+        let wire = &value["body"]["command"];
+        assert_eq!(wire["op"], "throughput");
+        assert_eq!(wire["target"], "192.168.88.1");
+        assert_eq!(wire["port"], 2000);
+        assert_eq!(wire["spec"]["engine"], "btest");
+        assert_eq!(wire["spec"]["durationS"], 5);
+        assert_eq!(wire["auth"]["user"], "nm-teste");
+
+        let again = Envelope::decode(&text).expect("decodifica");
+        assert_eq!(again.encode().expect("recodifica"), text);
+        let Body::Request {
+            command: Command::Throughput { auth, spec, .. },
+            ..
+        } = again.body
+        else {
+            panic!("pedido de vazão");
+        };
+        assert_eq!(spec.limit_mbps, Some(100));
+        let auth: BtestAuth = auth.expect("credencial").into();
+        assert_eq!(auth.password, "s3nh4-do-teste");
+    }
+
+    #[test]
+    fn debug_do_teste_de_vazao_nao_mostra_a_senha() {
+        let debug = format!("{:?}", throughput_command());
+        assert!(debug.contains("nm-teste"));
+        assert!(!debug.contains("s3nh4-do-teste"), "{debug}");
+    }
+
+    #[test]
+    fn pedido_do_motor_vira_comando_de_vazao() {
+        let Command::Throughput {
+            target, port, spec, ..
+        } = throughput_command()
+        else {
+            unreachable!()
+        };
+        let request = DriveRequest {
+            target: std::net::SocketAddr::new(target, port),
+            spec,
+            auth: None,
+        };
+        let Command::Throughput {
+            target, port, auth, ..
+        } = Command::from(&request)
+        else {
+            panic!("vazão");
+        };
+        assert_eq!(target.to_string(), "192.168.88.1");
+        assert_eq!(port, 2000);
+        assert!(auth.is_none());
+    }
+
+    #[test]
+    fn amostra_e_relatorio_viajam_em_chunk_e_resposta() {
+        use crate::services::network_tools::throughput::{
+            Flow, ThroughputEngine, ThroughputReport, ThroughputSample,
+        };
+        let sample = ThroughputSample {
+            t_ms: 1_000,
+            flow: Flow::Rx,
+            bps: 94_500_000.0,
+        };
+        let chunk = Envelope::reply(
+            Uuid::nil(),
+            Body::Chunk {
+                data: serde_json::to_value(sample).unwrap(),
+            },
+        );
+        let Body::Chunk { data } = Envelope::decode(&chunk.encode().unwrap()).unwrap().body else {
+            panic!("chunk");
+        };
+        assert_eq!(
+            serde_json::from_value::<ThroughputSample>(data).unwrap(),
+            sample
+        );
+
+        let mut report = ThroughputReport::empty(ThroughputEngine::Iperf3);
+        report.samples.push(sample);
+        let reply = Envelope::reply(
+            Uuid::nil(),
+            Body::Response {
+                outcome: Outcome::Ok {
+                    value: serde_json::to_value(&report).unwrap(),
+                },
+            },
+        );
+        let Body::Response {
+            outcome: Outcome::Ok { value },
+        } = Envelope::decode(&reply.encode().unwrap()).unwrap().body
+        else {
+            panic!("resposta");
+        };
+        assert_eq!(
+            serde_json::from_value::<ThroughputReport>(value).unwrap(),
+            report
+        );
+    }
+
+    #[test]
+    fn erro_de_servico_vira_codigo_do_protocolo_com_a_mensagem() {
+        let rule = RemoteError::from(AppError::business_rule("EC-SRP5"));
+        assert_eq!(rule.code, ErrorCode::Engine);
+        assert_eq!(rule.message, "EC-SRP5");
+        assert_eq!(
+            RemoteError::from(AppError::conflict("ocupado")).code,
+            ErrorCode::Conflict
+        );
+        assert_eq!(
+            RemoteError::from(AppError::service_unavailable("mudo")).code,
+            ErrorCode::Unavailable
+        );
+        let internal = RemoteError::from(AppError::Internal(anyhow::anyhow!("segredo")));
+        assert_eq!(internal.code, ErrorCode::Internal);
+        assert!(!internal.message.contains("segredo"));
     }
 
     #[test]

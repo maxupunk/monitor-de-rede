@@ -255,8 +255,11 @@ de preferência pelo túnel da VPN — e não abre porta nenhuma no servidor
    `APP_EXTERNAL_PORT` publicada.
 
 A política é **local**: `AGENT_ALLOW` no servidor remoto define o que ele aceita
-(`read,lifecycle,monitor,discovery` por padrão; `update` e `compose` só quando
-explicitamente liberados). A central não consegue ampliá-la.
+(`read,lifecycle,monitor,discovery` por padrão; `update`, `compose`,
+`device_io`, `database`, `volume_export` e `throughput` — teste de vazão do
+enlace a partir do site — só quando explicitamente liberados). A central não
+consegue ampliá-la. `AGENT_DEVICE_CIDRS` restringe ainda mais os alvos de
+`device_io` e `throughput`; IP público nunca é alvo.
 
 **Imagem do agente.** O `docker run` exibido usa
 `ghcr.io/maxupunk/netmonitor-agent:latest`, publicada pelo workflow

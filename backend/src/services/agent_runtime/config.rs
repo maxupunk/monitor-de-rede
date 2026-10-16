@@ -7,8 +7,8 @@
 //! | `AGENT_TOKEN`         | lido de `AGENT_TOKEN_FILE`      |
 //! | `AGENT_TOKEN_FILE`    | `<state>/token`; o agente local lê o que a central grava (ADR 014) |
 //! | `AGENT_STATE_DIR`     | `/var/lib/netmonitor-agent`     |
-//! | `AGENT_ALLOW`         | `read,lifecycle,monitor,discovery` (`device_io` libera plugins de dispositivo) |
-//! | `AGENT_DEVICE_CIDRS`  | vazio = qualquer rede privada; restringe o alvo dos plugins |
+//! | `AGENT_ALLOW`         | `read,lifecycle,monitor,discovery` (`device_io` libera plugins de dispositivo; `throughput`, testes de vazão) |
+//! | `AGENT_DEVICE_CIDRS`  | vazio = qualquer rede privada; restringe o alvo dos plugins e dos testes de vazão |
 //! | `AGENT_DATABASE_TARGETS` | vazio = nenhum; `IP:porta` ou `faixa:porta` liberados para a ponte de banco (exige `database` em `AGENT_ALLOW`) |
 //! | `AGENT_OUTBOX_MAX`    | 10 000 eventos                  |
 //! | `HOST_PROC`/`HOST_ROOT` | `/proc` e `/`                 |

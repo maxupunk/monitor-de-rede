@@ -21,7 +21,9 @@ services:
       AGENT_SERVER_URL: ${AGENT_SERVER_URL:?defina AGENT_SERVER_URL}
       AGENT_ENROLL_CODE: ${AGENT_ENROLL_CODE:-}
       # Política local: a central não consegue ampliá-la. Acrescente `update`
-      # e `compose` só se este host deve aceitar pull/recriação/compose.
+      # e `compose` só se este host deve aceitar pull/recriação/compose;
+      # `device_io` (plugins), `database`, `volume_export` e `throughput`
+      # (teste de vazão a partir deste site) também ficam fora do padrão.
       AGENT_ALLOW: ${AGENT_ALLOW:-read,lifecycle,monitor,discovery}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

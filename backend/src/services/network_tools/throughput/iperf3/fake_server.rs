@@ -25,7 +25,7 @@ use tokio_util::sync::CancellationToken;
 use super::wire::{self, COOKIE_SIZE};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Behavior {
+pub(crate) enum Behavior {
     Normal,
     AccessDenied,
     ServerError,
@@ -36,7 +36,7 @@ pub(super) enum Behavior {
 
 /// O que o servidor viu de um teste completo.
 #[derive(Debug, Clone, Default)]
-pub(super) struct SeenTest {
+pub(crate) struct SeenTest {
     pub reverse: bool,
     pub parallel: usize,
     pub bandwidth: Option<u64>,
@@ -52,13 +52,13 @@ struct Shared {
     client_terminated: bool,
 }
 
-pub(super) struct FakeServer {
+pub(crate) struct FakeServer {
     pub addr: SocketAddr,
     shared: Arc<Mutex<Shared>>,
 }
 
 impl FakeServer {
-    pub(super) async fn start(behavior: Behavior) -> Self {
+    pub(crate) async fn start(behavior: Behavior) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind do servidor falso");
@@ -73,7 +73,7 @@ impl FakeServer {
         Self { addr, shared }
     }
 
-    pub(super) async fn last_test(&self) -> SeenTest {
+    pub(crate) async fn last_test(&self) -> SeenTest {
         self.shared
             .lock()
             .await
@@ -83,12 +83,12 @@ impl FakeServer {
             .expect("um teste completo")
     }
 
-    pub(super) async fn tests(&self) -> usize {
+    pub(crate) async fn tests(&self) -> usize {
         self.shared.lock().await.tests.len()
     }
 
     /// O cliente mandou `CLIENT_TERMINATE` (espera até 2 s pela tarefa).
-    pub(super) async fn client_terminated(&self) -> bool {
+    pub(crate) async fn client_terminated(&self) -> bool {
         for _ in 0..40 {
             if self.shared.lock().await.client_terminated {
                 return true;

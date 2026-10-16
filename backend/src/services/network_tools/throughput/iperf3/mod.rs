@@ -28,7 +28,7 @@
 mod wire;
 
 #[cfg(test)]
-mod fake_server;
+pub(crate) mod fake_server;
 
 use std::{net::SocketAddr, time::Duration};
 

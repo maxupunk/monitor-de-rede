@@ -12,4 +12,6 @@ pub mod executor;
 pub mod identity;
 pub mod outbox;
 pub mod session;
+pub mod targets;
+pub mod throughput;
 pub mod tunnel;

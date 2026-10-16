@@ -17,6 +17,7 @@ use std::{
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use tokio::sync::{mpsc, oneshot};
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use super::{
@@ -221,14 +222,51 @@ impl AgentSession {
         }
     }
 
+    /// Pedido cujos chunks vão a `on_chunk`, na ordem, no próprio laço de
+    /// quem espera — sem tarefa à parte, então `on_chunk` pode emprestar
+    /// referências. Todo chunk é entregue antes do resultado. `cancel`
+    /// interrompe: o agente recebe o `Cancel` e o erro é
+    /// [`RemoteError::cancelled`].
+    ///
+    /// # Errors
+    ///
+    /// Ver [`Self::request`].
+    pub async fn stream(
+        &self,
+        command: Command,
+        timeout: Duration,
+        cancel: &CancellationToken,
+        mut on_chunk: impl FnMut(Value) + Send,
+    ) -> Result<Value, RemoteError> {
+        let (chunks, mut received) = mpsc::unbounded_channel();
+        let call = Call::new(command, timeout).with_chunks(chunks);
+        let id = call.id;
+        let reply = self.call(call);
+        tokio::pin!(reply);
+        let result = loop {
+            tokio::select! {
+                biased;
+                () = cancel.cancelled() => {
+                    self.cancel(id).await;
+                    return Err(RemoteError::cancelled());
+                }
+                Some(chunk) = received.recv() => on_chunk(chunk),
+                result = &mut reply => break result,
+            }
+        };
+        // A resposta chega depois dos chunks, mas pode vencer a corrida do
+        // `select!`: o que ficou no canal ainda é deste pedido.
+        while let Ok(chunk) = received.try_recv() {
+            on_chunk(chunk);
+        }
+        result
+    }
+
     /// Interrompe um pedido em andamento. A espera local é resolvida na hora;
     /// o agente recebe o `Cancel` e para o que estiver fazendo.
     pub async fn cancel(&self, id: Uuid) {
         if let Some(pending) = self.lock_pending().remove(&id) {
-            let _ = pending.reply.send(Err(RemoteError::new(
-                ErrorCode::Timeout,
-                "Pedido cancelado",
-            )));
+            let _ = pending.reply.send(Err(RemoteError::cancelled()));
         }
         let _ = self.outbound.send(Envelope::reply(id, Body::Cancel)).await;
     }
@@ -348,6 +386,66 @@ pub(crate) mod tests {
         ));
         assert_eq!(caller.await.expect("tarefa").expect("ok"), json!([1]));
         assert_eq!(chunks_rx.recv().await, Some(json!("parcial")));
+        assert_eq!(session.pending_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn stream_entrega_os_chunks_antes_do_resultado() {
+        let (session, mut outbound) = session(vec![Permission::Read]);
+        let session = std::sync::Arc::new(session);
+        let agent = {
+            let session = session.clone();
+            tokio::spawn(async move {
+                let request = outbound.recv().await.expect("pedido");
+                for n in 1..=3 {
+                    session.handle(Envelope::reply(request.id, Body::Chunk { data: json!(n) }));
+                }
+                session.handle(Envelope::reply(
+                    request.id,
+                    Body::Response {
+                        outcome: Outcome::Ok {
+                            value: json!("fim"),
+                        },
+                    },
+                ));
+            })
+        };
+        let mut seen = Vec::new();
+        let value = session
+            .stream(
+                list(),
+                Duration::from_secs(5),
+                &CancellationToken::new(),
+                |chunk| seen.push(chunk),
+            )
+            .await
+            .expect("ok");
+        agent.await.expect("agente");
+        assert_eq!(value, json!("fim"));
+        assert_eq!(seen, vec![json!(1), json!(2), json!(3)]);
+    }
+
+    #[tokio::test]
+    async fn stream_cancelado_avisa_o_agente() {
+        let (session, mut outbound) = session(vec![Permission::Read]);
+        let cancel = CancellationToken::new();
+        let stopper = {
+            let cancel = cancel.clone();
+            tokio::spawn(async move {
+                let request = outbound.recv().await.expect("pedido");
+                cancel.cancel();
+                let next = outbound.recv().await.expect("cancelamento");
+                (request.id, next)
+            })
+        };
+        let error = session
+            .stream(list(), Duration::from_secs(5), &cancel, |_| {})
+            .await
+            .expect_err("cancelado");
+        assert_eq!(error, RemoteError::cancelled());
+        let (id, next) = stopper.await.expect("tarefa");
+        assert_eq!(next.id, id);
+        assert!(matches!(next.body, Body::Cancel));
         assert_eq!(session.pending_count(), 0);
     }
 

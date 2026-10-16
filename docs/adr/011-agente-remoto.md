@@ -128,3 +128,40 @@ operação:
 - o protocolo passou para a **versão 2**, e o handshake recusa versão
   diferente: central e agente sobem juntos.
 
+## Adendo (2026-10-16) — teste de vazão (`Command::Throughput`) e protocolo 4
+
+O teste de enlace ([ADR 015](015-teste-de-enlace.md), §6) pode partir do
+agente de um site. O desenho continua o mesmo — comando fechado, política local
+soberana, nenhuma porta aberta no agente:
+
+- `Command::Throughput { target, port, spec, auth }`: o agente **só dirige**
+  (cliente iperf3/btest nativo, o mesmo `LocalDriver` da central) até
+  `target:port`; nunca serve um teste nem abre porta. Cada amostra de 1 s vai
+  num `Chunk`; o `Response` leva o relatório; `Cancel` interrompe e o servidor
+  do outro lado é avisado;
+- permissão nova `throughput`, **fora** do padrão do `AGENT_ALLOW` (medir
+  satura o enlace);
+- alvo só em rede privada/CGNAT/link-local e, quando houver,
+  `AGENT_DEVICE_CIDRS` — checado nos dois lados, e a decisão é do agente;
+- um teste por agente de cada vez (o segundo recebe `Conflict`);
+- a credencial do btest, quando houver, viaja no pedido e o `Debug` não a
+  mostra;
+- `Command::DeviceIo` passa a mandar cada linha da saída em `Chunk` enquanto o
+  comando roda (`device.ssh_live`); a resposta final continua a completa;
+- o protocolo passou para a **versão 4**.
+
+Permissões do `AGENT_ALLOW`, para referência:
+
+| Permissão | Padrão | Libera |
+|---|---|---|
+| `read` | sim (sempre) | inventário, inspeção, logs e métricas Docker |
+| `lifecycle` | sim | start/stop/restart/remove, redes, volumes, imagens |
+| `monitor` | sim | monitores da central executados do site |
+| `discovery` | sim | varredura de rede do site |
+| `update` | não | pull de imagem e recriação de container |
+| `compose` | não | ações de projeto compose (CLI no host) |
+| `device_io` | não | SSH/HTTP/Telnet de plugins até equipamentos do site |
+| `database` | não | ponte TCP de backup de banco (ADR 013) |
+| `volume_export` | não | exportar o conteúdo de um volume (ADR 014) |
+| `throughput` | não | dirigir teste de vazão até equipamento do site (ADR 015) |
+
