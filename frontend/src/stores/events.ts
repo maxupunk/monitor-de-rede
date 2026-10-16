@@ -20,6 +20,7 @@ import { useAgentsStore } from './agents'
 import { useLogsStore } from './logs'
 import { usePluginsStore } from './plugins'
 import { usePluginAppsStore } from './pluginApps'
+import { useLinkTestsStore } from './linkTests'
 import { isLogTemplateInfo } from '@/utils/logCategories'
 import { isDeciderModelState, useAiDeciderStore } from './aiDecider'
 import { asApprovalResolved, useAiApprovalsStore } from './aiApprovals'
@@ -186,7 +187,11 @@ export const useEventsStore = defineStore('events', () => {
       payload.type === 'docker:operation' ||
       payload.type === 'docker:log' ||
       payload.type === 'discovery:scan' ||
-      payload.type === 'interface:traffic'
+      payload.type === 'interface:traffic' ||
+      // O teste de enlace publica um snapshot por etapa e uma amostra por
+      // segundo: estado ao vivo, não notícia para o feed.
+      payload.type === 'link_test:updated' ||
+      payload.type === 'link_test:sample'
     if (payload.type !== 'stream:connected' && !isEphemeralTelemetry) {
       recentEvents.value.unshift(payload)
       if (recentEvents.value.length > FEED_LIMIT) {
@@ -483,6 +488,21 @@ export const useEventsStore = defineStore('events', () => {
 
       case 'plugin:run_progress': {
         usePluginsStore().applyRunProgress(data)
+        break
+      }
+
+      case 'link_test:updated': {
+        useLinkTestsStore().applyUpdated(data)
+        break
+      }
+
+      case 'link_test:sample': {
+        useLinkTestsStore().applySample(data)
+        break
+      }
+
+      case 'link_test_schedule:updated': {
+        useLinkTestsStore().applyScheduleUpdated(data)
         break
       }
 

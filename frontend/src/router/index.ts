@@ -34,6 +34,11 @@ const routes = [
         meta: { fullBleed: true },
       },
       {
+        path: 'link-tests',
+        name: 'link-tests',
+        component: () => import('../pages/LinkTestsPage.vue'),
+      },
+      {
         path: 'discovery',
         name: 'discovery',
         component: () => import('../pages/DiscoveryPage.vue'),

@@ -362,6 +362,7 @@ const navItems = computed<NavItem[]>(() => [
       { title: 'Redes IP', icon: 'mdi-ip-network-outline', to: '/networks' },
       { title: 'Sites', icon: 'mdi-domain', to: '/sites' },
       { title: 'Topologia', icon: 'mdi-sitemap', to: '/topology' },
+      { title: 'Testes de Enlace', icon: 'mdi-speedometer', to: '/link-tests' },
     ],
   },
   // Quem mede de fora da central.

@@ -91,6 +91,11 @@
           @add-switch="host.addUnmanagedSwitch()"
           @all-sites="prefs.siteId = null"
         />
+        <TopologyLinkTestLayer
+          ref="linkTestLayer"
+          :fit-nodes="(ids) => canvas?.fit(ids)"
+          :narrow="smAndDown"
+        />
       </div>
 
       <TopologyInspector
@@ -178,6 +183,7 @@ import TopologyMobileSheet from '@/components/topology/TopologyMobileSheet.vue'
 import TopologyDialogs from '@/components/topology/TopologyDialogs.vue'
 import TopologyPluginRunner from '@/components/topology/TopologyPluginRunner.vue'
 import TopologyFeedback from '@/components/topology/TopologyFeedback.vue'
+import TopologyLinkTestLayer from '@/components/topology/linkTests/TopologyLinkTestLayer.vue'
 
 const store = useTopologyStore()
 const overlay = useTopologyOverlayStore()
@@ -194,6 +200,7 @@ const { smAndDown, mdAndDown, height } = useDisplay()
 const root = ref<HTMLElement | null>(null)
 const canvas = ref<InstanceType<typeof TopologyCanvas> | null>(null)
 const pluginRunner = ref<InstanceType<typeof TopologyPluginRunner> | null>(null)
+const linkTestLayer = ref<InstanceType<typeof TopologyLinkTestLayer> | null>(null)
 const zoom = ref(1)
 const moreOpen = ref(false)
 
@@ -201,7 +208,8 @@ const editMode = computed(() => prefs.editMode && auth.canWrite)
 const hasNodes = computed(() => store.nodes.length > 0)
 const insets = computed(() => ({
   top: editMode.value ? 64 : 0,
-  right: smAndDown.value ? 0 : 64,
+  // O painel do teste de enlace, aberto, também tira espaço à direita.
+  right: smAndDown.value ? 0 : Math.max(64, linkTestLayer.value?.occupiedRight ?? 0),
   // No celular o inspetor é uma folha que cobre a parte de baixo do mapa.
   bottom: smAndDown.value && view.selectedTarget.value ? Math.round(height.value * 0.55) : 56,
   left: prefs.legendOpen && !smAndDown.value ? 230 : 0,
@@ -251,7 +259,8 @@ const anyDialogOpen = computed(
     moreOpen.value ||
     dialogs.link.open ||
     dialogs.unmanagedSwitch.open ||
-    dialogs.device.open
+    dialogs.device.open ||
+    Boolean(linkTestLayer.value?.dialogOpen)
 )
 
 function toggleProblems() {
@@ -276,8 +285,8 @@ watch(
 onMounted(async () => {
   if (sites.sites.length === 0) void sites.fetchSites()
   void pluginActions.load()
-  // O cadastro diz qual nó é o servidor NetMonitor (e alimenta a edição).
-  if (devices.devices.length === 0) await devices.fetchDevices()
+  // O cadastro alimenta a edição e os seletores do teste de enlace.
+  if (devices.devices.length === 0) void devices.fetchDevices()
   await loadSite()
 })
 </script>

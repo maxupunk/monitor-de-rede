@@ -2,14 +2,17 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { ApiError, apiService } from '@/services/apiService'
 import { useDevicesStore } from './devices'
+import type { TopologyActionsByDevice, TopologyNodeAction } from './plugins'
 import { formatBps } from '@/utils/formatters'
+import type { TopologyEdge as TopologyEdgeBinding } from '@/bindings/TopologyEdge'
+import type { TopologyGraph } from '@/bindings/TopologyGraph'
+import type { TopologyNode as TopologyNodeBinding } from '@/bindings/TopologyNode'
+import type { TopologyPath } from '@/bindings/TopologyPath'
 
 /*
- * Tipos do grafo de topologia — o ÚNICO lugar com tipos escritos à mão para
- * a topologia. Quando os bindings `Topology*.ts` do `ts-rs` chegarem em
- * `@/bindings/`, troque estas interfaces por eles aqui; o resto da tela
- * importa daqui. Campos marcados como opcionais chegam com a Topologia 2.0 do
- * backend: até lá a tela degrada (sem status calculado, sem uso, sem site).
+ * Tipos do grafo de topologia: os bindings do `ts-rs` (`@/bindings/Topology*`)
+ * são a fonte; aqui só se acrescentam os campos calculados no cliente. O resto
+ * da tela importa daqui.
  */
 
 export interface DeviceInterfaceItem {
@@ -30,65 +33,22 @@ export interface DeviceInterfaceItem {
 export type TopologyNodeStatus = 'online' | 'offline' | 'warning' | 'unknown'
 export type TopologyEdgeStatus = 'up' | 'down' | 'unknown'
 
-export interface TopologyNode {
-  id: number
-  name: string
-  type: string
-  vendor?: string | null
-  model?: string | null
-  status: TopologyNodeStatus | string
-  siteId?: number | null
-  siteName?: string | null
-  interfaceCount: number
-  ipAddress?: string | null
-  /** Alias novo do backend para `ipAddress`. */
-  ip?: string | null
-  snmpEnabled?: boolean
-  parentId?: number | null
-  /** O próprio servidor NetMonitor (dito pelo backend, nunca deduzido). */
-  isSystem?: boolean
-}
+export type TopologyNode = TopologyNodeBinding
 
-export interface TopologyEdge {
-  /** Negativo para a aresta virtual de hierarquia (`-childId`). */
-  id: number
-  source: number
-  target: number
-  sourceDeviceId?: number
-  targetDeviceId?: number
-  sourceDeviceName?: string | null
-  targetDeviceName?: string | null
-  sourceInterfaceId?: number | null
-  targetInterfaceId?: number | null
-  sourceInterfaceName?: string | null
-  targetInterfaceName?: string | null
-  sourceInterfaceSpeed?: number | null
-  targetInterfaceSpeed?: number | null
-  sourceInterfaceStatus?: string | null
-  targetInterfaceStatus?: string | null
-  inBps?: number | null
-  outBps?: number | null
-  trafficBps?: number | null
-  trafficLabel?: string | null
+export interface TopologyEdge extends TopologyEdgeBinding {
+  /** Rótulos de tráfego calculados no cliente (tooltip, inspetor). */
   inBpsLabel?: string | null
   outBpsLabel?: string | null
-  linkType: string
-  discoveryMethod: string
-  /** 0–100 (o backend grava inteiro). */
-  confidence?: number | null
-  confirmed?: boolean
-  status?: TopologyEdgeStatus | string
-  speedBps?: number | null
-  /** 0..1 — fração da velocidade do enlace em uso. */
-  utilization?: number | null
-  stale?: boolean
-  lastSeenAt?: string | null
 }
 
-export interface TopologyData {
-  nodes: TopologyNode[]
-  edges: TopologyEdge[]
-}
+export type { TopologyPath }
+
+/** Ação de plugin oferecida no nó (`GET /api/plugins/topology-actions`). */
+export type TopologyPluginAction = TopologyNodeAction
+
+export type TopologyPluginActionMap = TopologyActionsByDevice
+
+export type TopologyData = TopologyGraph
 
 export interface UnmanagedSwitchPayload {
   name: string
@@ -114,24 +74,6 @@ export interface TopologyPosition {
   y: number
 }
 
-export interface TopologyPath {
-  deviceIds: number[]
-  edgeIds: number[]
-}
-
-/** Ação de plugin oferecida no nó (`GET /api/plugins/topology-actions`). */
-export interface TopologyPluginAction {
-  pluginId: number
-  pluginSlug: string
-  pluginName: string
-  action: string
-  title: string
-  effect: string
-  hasParams: boolean
-}
-
-export type TopologyPluginActionMap = Record<number, TopologyPluginAction[]>
-
 export interface LinkPayload {
   sourceDeviceId: number
   targetDeviceId: number
@@ -152,40 +94,6 @@ function describe(err: unknown, fallback: string): string {
 
 function siteQuery(siteId: number | null): string {
   return siteId ? `?siteId=${siteId}` : ''
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
-
-function isPluginAction(value: unknown): value is TopologyPluginAction {
-  return (
-    isRecord(value) &&
-    typeof value.pluginId === 'number' &&
-    typeof value.action === 'string' &&
-    typeof value.title === 'string'
-  )
-}
-
-/** Valida o mapa `{ [deviceId]: TopologyPluginAction[] }` vindo da API. */
-export function parsePluginActionMap(raw: unknown): TopologyPluginActionMap {
-  const result: TopologyPluginActionMap = {}
-  if (!isRecord(raw)) return result
-  for (const [key, list] of Object.entries(raw)) {
-    const deviceId = Number(key)
-    if (!Number.isFinite(deviceId) || !Array.isArray(list)) continue
-    const actions = list.filter(isPluginAction).map((item) => ({
-      pluginId: item.pluginId,
-      pluginSlug: String(item.pluginSlug ?? ''),
-      pluginName: String(item.pluginName ?? ''),
-      action: item.action,
-      title: item.title,
-      effect: String(item.effect ?? 'read'),
-      hasParams: Boolean(item.hasParams),
-    }))
-    if (actions.length > 0) result[deviceId] = actions
-  }
-  return result
 }
 
 /** Normaliza uma aresta: ids de ponta, rótulos de tráfego e status. */
@@ -260,17 +168,9 @@ export const useTopologyStore = defineStore('topology', () => {
     error.value = null
     try {
       const data = await apiService.get<TopologyData>(`/topology${siteQuery(site)}`)
-      // Até o backend mandar `isSystem` no grafo, vale o que o cadastro já diz.
-      const systemIds = new Set(
-        useDevicesStore()
-          .devices.filter((device) => device.isSystem)
-          .map((device) => device.id)
-      )
       nodes.value = (data.nodes || []).map((node) => ({
         ...node,
         status: node.status || 'unknown',
-        ipAddress: node.ipAddress ?? node.ip ?? null,
-        isSystem: node.isSystem ?? systemIds.has(node.id),
       }))
       edges.value = (data.edges || []).map(normalizeEdge)
       loaded.value = true
@@ -468,25 +368,14 @@ export const useTopologyStore = defineStore('topology', () => {
     try {
       const path = await apiService.get<TopologyPath>(`/topology/path?from=${from}&to=${to}`)
       return {
-        deviceIds: Array.isArray(path?.deviceIds) ? path.deviceIds.map(Number) : [],
-        edgeIds: Array.isArray(path?.edgeIds) ? path.edgeIds.map(Number) : [],
+        ...path,
+        deviceIds: Array.isArray(path?.deviceIds) ? path.deviceIds : [],
+        edgeIds: Array.isArray(path?.edgeIds) ? path.edgeIds : [],
       }
     } catch (err: unknown) {
       actionError.value = describe(err, 'Não foi possível calcular o caminho')
       return null
     }
-  }
-
-  /** Ações de plugin por dispositivo. Falha (rota ainda ausente) = nenhuma ação. */
-  async function fetchPluginActions(): Promise<TopologyPluginActionMap> {
-    try {
-      pluginActions.value = parsePluginActionMap(
-        await apiService.get<unknown>('/plugins/topology-actions')
-      )
-    } catch {
-      pluginActions.value = {}
-    }
-    return pluginActions.value
   }
 
   function setPluginActions(map: TopologyPluginActionMap) {
@@ -656,7 +545,6 @@ export const useTopologyStore = defineStore('topology', () => {
     patchLayout,
     applyLayoutUpdated,
     fetchPath,
-    fetchPluginActions,
     setPluginActions,
     applyRealtimeStatus,
     applyRealtimeTraffic,

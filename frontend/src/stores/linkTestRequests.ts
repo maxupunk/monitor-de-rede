@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import type { LinkTestKind, LinkTestRequest as ContractRequest } from '@/types/linkTests'
 
 /**
  * Ponto único por onde a topologia pede um teste de enlace (ADR 015). O mapa
@@ -7,15 +8,13 @@ import { ref } from 'vue'
  * execução) observa `pending` e chama `take()` ao assumir o pedido.
  */
 
-export type LinkTestKind = 'link' | 'path' | 'server'
+export type { LinkTestKind }
 
-export interface LinkTestRequest {
-  kind: LinkTestKind
-  /** Enlace a medir (`kind: 'link'`). */
-  linkId?: number
-  sourceDeviceId?: number
-  targetDeviceId?: number
-}
+/**
+ * O pedido da tela: o alvo e, opcionalmente, os parâmetros ("repetir o
+ * último teste"). A confirmação é do assistente, nunca do pedido.
+ */
+export type LinkTestRequest = Omit<ContractRequest, 'confirm'>
 
 export interface RecordedLinkTestRequest extends LinkTestRequest {
   /** Sequencial da sessão — distingue dois pedidos iguais seguidos. */

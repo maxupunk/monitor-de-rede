@@ -131,8 +131,8 @@ export const NODE_CATEGORY_OPTIONS: ReadonlyArray<{ value: string; title: string
     { value: 'unknown', title: 'Desconhecido', icon: 'mdi-help-network-outline' },
   ]
 
-export function nodeIp(node: Pick<TopologyNode, 'ipAddress' | 'ip'>): string | null {
-  return node.ipAddress || node.ip || null
+export function nodeIp(node: Pick<TopologyNode, 'ipAddress'>): string | null {
+  return node.ipAddress || null
 }
 
 // --- Enlaces ---------------------------------------------------------------

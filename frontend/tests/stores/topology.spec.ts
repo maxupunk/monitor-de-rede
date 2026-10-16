@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { ApiError, apiService } from '@/services/apiService'
-import { parsePluginActionMap, useTopologyStore } from '@/stores/topology'
+import { useTopologyStore } from '@/stores/topology'
+import { usePluginsStore } from '@/stores/plugins'
+import { useTopologyPluginActions } from '@/composables/topology/useTopologyPluginActions'
 import { useLinkTestRequestsStore } from '@/stores/linkTestRequests'
 import { edge, node } from '../utils/topology/fixtures'
 
@@ -9,9 +11,9 @@ describe('store da topologia', () => {
   beforeEach(() => setActivePinia(createPinia()))
   afterEach(() => vi.restoreAllMocks())
 
-  it('carrega o grafo no site pedido e normaliza ip/isSystem', async () => {
+  it('carrega o grafo no site pedido (bindings do backend) e normaliza status/rótulos', async () => {
     const get = vi.spyOn(apiService, 'get').mockResolvedValue({
-      nodes: [{ ...node(1), ip: '10.0.0.1', status: '' }],
+      nodes: [{ ...node(1), ipAddress: '10.0.0.1', isSystem: false, status: '' }],
       edges: [{ ...edge(5, 1, 2), sourceDeviceId: undefined, inBps: 1500 }],
     })
     const store = useTopologyStore()
@@ -138,29 +140,18 @@ describe('store da topologia', () => {
     expect(store.actionError).toBe('Portas já ocupadas')
   })
 
-  it('valida o mapa de ações de plugin', () => {
-    expect(
-      parsePluginActionMap({
-        '5': [
-          { pluginId: 1, action: 'reboot', title: 'Reiniciar', effect: 'write', hasParams: 0 },
-          { lixo: true },
-        ],
-        x: [],
-      })
-    ).toEqual({
-      5: [
-        {
-          pluginId: 1,
-          pluginSlug: '',
-          pluginName: '',
-          action: 'reboot',
-          title: 'Reiniciar',
-          effect: 'write',
-          hasParams: false,
-        },
-      ],
-    })
-    expect(parsePluginActionMap(null)).toEqual({})
+  it('ações de plugin do mapa vêm da consulta única do store de plugins', async () => {
+    const map = { 5: [{ pluginId: 1, action: 'reboot', title: 'Reiniciar' }] }
+    const fetch = vi
+      .spyOn(usePluginsStore(), 'fetchTopologyActions')
+      .mockResolvedValue(map as never)
+    const store = useTopologyStore()
+    await useTopologyPluginActions().load()
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(store.pluginActions).toEqual(map)
+    fetch.mockRejectedValueOnce(new Error('404'))
+    await useTopologyPluginActions().load()
+    expect(store.pluginActions).toEqual({})
   })
 })
 

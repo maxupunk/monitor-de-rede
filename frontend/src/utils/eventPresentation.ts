@@ -218,6 +218,16 @@ export function formatEventDetails(evt: RealtimeEventPayload): FormattedEventDet
         rawJson,
       }
     }
+    case 'link_test_schedule:updated': {
+      return {
+        title: 'Teste de enlace',
+        message: 'Agendamento de teste de enlace atualizado',
+        icon: 'mdi-calendar-clock',
+        color: 'info',
+        time: dateStr,
+        rawJson,
+      }
+    }
     case 'topology:updated': {
       return {
         title: 'Topologia de Rede',

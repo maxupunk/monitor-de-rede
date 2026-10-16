@@ -189,8 +189,8 @@ export function useTopologyHost(deps: HostDeps) {
       })
     },
     requestLinkTest(request) {
+      // A camada do teste de enlace assume o pedido e abre o assistente.
       linkTests.requestLinkTest(request)
-      notify('Teste de enlace solicitado.', 'info')
     },
     runPluginAction(node, action) {
       deps.runPlugin(node, action)

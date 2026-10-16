@@ -61,20 +61,17 @@ function describe(err: unknown, fallback: string): string {
 }
 
 async function open(node: TopologyNode, item: TopologyPluginAction) {
-  // A aba do dispositivo é carregada sob demanda: dá a definição completa da
-  // ação e é onde o SSE pendura as execuções que o diálogo acompanha.
+  // A definição completa da ação vem no próprio item. A aba do dispositivo é
+  // carregada sob demanda só porque é nela que o SSE pendura as execuções
+  // que o diálogo acompanha.
   if (!store.deviceViews[node.id]) await store.loadDevice(node.id)
-  const entry = store.deviceViews[node.id]?.plugins.find((p) => p.plugin.id === item.pluginId)
-  const action = entry?.plugin.actions.find((a) => a.id === item.action) ?? null
-  if (!entry || !action) {
-    emit('error', store.error ?? 'Esta ação não está mais disponível neste dispositivo.')
-    return
-  }
+  const action = item.definition
   actionDialog.action = action
   actionDialog.pluginId = item.pluginId
-  actionDialog.pluginName = entry.plugin.name
+  actionDialog.pluginName = item.pluginName
   actionDialog.deviceName = node.name
-  actionDialog.active = entry.plugin.status === 'active'
+  // A consulta só devolve ações de plugins ativos.
+  actionDialog.active = true
   runDialog.deviceId = node.id
 
   const needsForm = item.hasParams || action.effect !== 'read'

@@ -79,6 +79,11 @@ export const usePluginsStore = defineStore('plugins', () => {
   const deviceViews = ref<Record<number, DevicePluginsView>>({})
   const deviceLoading = ref(false)
   const pendingApprovals = ref<PluginApprovalRequest[]>([])
+  /**
+   * Execuções abertas por id, fora da aba do equipamento (a etapa de um teste
+   * de enlace aponta o `runId`). O SSE as mantém em dia como as da aba.
+   */
+  const looseRuns = ref<Record<number, PluginRunView>>({})
   /** Últimas amostras de andamento de cada execução (`plugin:run_progress`). */
   const runProgress = ref<Record<number, ProgressSample[]>>({})
   const error = ref<string | null>(null)
@@ -311,7 +316,18 @@ export const usePluginsStore = defineStore('plugins', () => {
   /** A execução como o SSE a deixou (início, acessos, fim). */
   function runById(deviceId: number, runId: number | null): PluginRunView | null {
     if (runId === null) return null
-    return deviceViews.value[deviceId]?.runs.find((run) => run.id === runId) ?? null
+    return (
+      deviceViews.value[deviceId]?.runs.find((run) => run.id === runId) ??
+      looseRuns.value[runId] ??
+      null
+    )
+  }
+
+  /** `GET /api/plugin-runs/{id}` — abre uma execução pelo id (ação do usuário). */
+  async function fetchRun(runId: number): Promise<PluginRunView> {
+    const run = await apiService.get<PluginRunView>(`/plugin-runs/${runId}`)
+    looseRuns.value = { ...looseRuns.value, [run.id]: run }
+    return run
   }
 
   async function runAction(
@@ -391,6 +407,7 @@ export const usePluginsStore = defineStore('plugins', () => {
   // --- SSE ----------------------------------------------------------------------
 
   function upsertRun(run: PluginRunView) {
+    if (looseRuns.value[run.id]) looseRuns.value = { ...looseRuns.value, [run.id]: run }
     const view = deviceViews.value[run.deviceId]
     if (!view) return
     const index = view.runs.findIndex((item) => item.id === run.id)
@@ -406,11 +423,21 @@ export const usePluginsStore = defineStore('plugins', () => {
     const runId = data.runId
     const deviceId = data.deviceId
     if (typeof runId !== 'number' || typeof deviceId !== 'number' || !isRecord(data.entry)) return
+    const entry = data.entry as TranscriptEntry
+    appendLooseEntry(runId, entry)
     const run = deviceViews.value[deviceId]?.runs.find((item) => item.id === runId)
     if (!run) return
-    const entry = data.entry as TranscriptEntry
     if (!run.transcript.some((item) => item.seq === entry.seq)) {
       run.transcript = [...run.transcript, entry]
+    }
+  }
+
+  function appendLooseEntry(runId: number, entry: TranscriptEntry) {
+    const loose = looseRuns.value[runId]
+    if (!loose || loose.transcript.some((item) => item.seq === entry.seq)) return
+    looseRuns.value = {
+      ...looseRuns.value,
+      [runId]: { ...loose, transcript: [...loose.transcript, entry] },
     }
   }
 
@@ -418,7 +445,8 @@ export const usePluginsStore = defineStore('plugins', () => {
     if (!isRunView(data.run)) return
     const finished = data.run
     const view = deviceViews.value[finished.deviceId]
-    const previous = view?.runs.find((item) => item.id === finished.id)
+    const previous =
+      view?.runs.find((item) => item.id === finished.id) ?? looseRuns.value[finished.id]
     // O nome do plugin só vem no início; o fim pode chegar sem ele.
     upsertRun({ ...finished, pluginName: finished.pluginName ?? previous?.pluginName ?? null })
     // O `detect` pode ter lido o firmware: a compatibilidade depende dele.
@@ -495,6 +523,7 @@ export const usePluginsStore = defineStore('plugins', () => {
     uninstallPlugin,
     saveDeviceSettings,
     runById,
+    fetchRun,
     validatePlugin,
     fetchTopologyActions,
     cancelRun,

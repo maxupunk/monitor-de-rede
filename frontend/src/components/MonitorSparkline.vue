@@ -157,7 +157,7 @@
               <div class="d-flex align-center ga-2 mb-1">
                 <span class="status-indicator-dot" :style="{ backgroundColor: inColor }"></span>
                 <span style="font-size: 12px; color: #4ade80" class="font-weight-medium"
-                  >↓ Entrada:</span
+                  >↓ {{ inLabel }}:</span
                 >
                 <span style="font-size: 12px; color: #ffffff" class="font-weight-bold">
                   {{ formatPointValue(col.inVal) }}
@@ -166,7 +166,7 @@
               <div class="d-flex align-center ga-2 mb-1">
                 <span class="status-indicator-dot" :style="{ backgroundColor: outColor }"></span>
                 <span style="font-size: 12px; color: #38bdf8" class="font-weight-medium"
-                  >↑ Saída:</span
+                  >↑ {{ outLabel }}:</span
                 >
                 <span style="font-size: 12px; color: #ffffff" class="font-weight-bold">
                   {{ formatPointValue(col.outVal) }}
@@ -234,6 +234,9 @@ const props = withDefaults(
     height?: number
     unit?: string
     formatValue?: (val: number) => string
+    /** Nome das séries no modo duplo (padrão: tráfego de interface). */
+    inLabel?: string
+    outLabel?: string
   }>(),
   {
     data: () => [],
@@ -246,6 +249,8 @@ const props = withDefaults(
     height: 28,
     unit: '%',
     formatValue: undefined,
+    inLabel: 'Entrada',
+    outLabel: 'Saída',
   }
 )
 
