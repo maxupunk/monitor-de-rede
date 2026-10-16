@@ -4,6 +4,7 @@ pub mod backup_schedule;
 pub mod cidr;
 pub mod crypto;
 pub mod errors;
+pub mod incident;
 pub mod pagination;
 pub mod run_guard;
 pub mod runtime;

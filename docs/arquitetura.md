@@ -486,6 +486,12 @@ instalação só devolve VPN funcional com a mesma chave.
   falha se faltar. As duas exceções (`TopologyLinkRequest`, `TopologyQuery`)
   estão listadas lá com justificativa.
 - **Erros** saem como `{"message": "..."}`, em português — é o que o frontend lê.
+  **Todo 500** — `AppError::Internal`, erro do Loco ou pânico — sai como
+  `{"message", "incidentId"}` com o cabeçalho `x-incident-id`: um código de 8
+  caracteres que também está na linha do log com método, caminho e causa (no
+  pânico, a mensagem e o `arquivo:linha`). Quem faz isso é o middleware
+  `services/shared/incident.rs`, por fora dos do Loco; não devolva o corpo
+  `internal_server_error` do framework nem registre um 500 sem o código.
 - **Paginação** no envelope `{data, meta}` (`services/shared/pagination.rs`), e
   não no `PaginationResponse` do Loco: o `useInfiniteList` do frontend decide o
   fim da lista por `meta.currentPage >= meta.lastPage`.

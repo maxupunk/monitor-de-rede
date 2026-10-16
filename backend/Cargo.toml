@@ -207,3 +207,6 @@ serial_test = { version = "3.1.1" }
 tempfile = { version = "3" }
 rstest = { version = "0.25" }
 insta = { version = "1.34", features = ["redactions", "yaml", "filters"] }
+# `ServiceExt::oneshot` para exercitar middlewares sem subir servidor. Já na
+# árvore pelo axum; aqui só vira direto.
+tower = { version = "0.5", features = ["util"] }

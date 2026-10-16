@@ -75,6 +75,9 @@ impl Hooks for App {
     /// aplicado.
     async fn after_context(ctx: AppContext) -> Result<AppContext> {
         require_jwt_secret_in_production();
+        // Todo pânico do processo vai ao log com o local e, dentro de uma
+        // requisição, com o código do incidente que a tela mostra.
+        crate::services::shared::incident::install_panic_hook();
         process_deps::install(&ctx);
         enable_sqlite_wal(&ctx).await;
         migration::purge_removed_migrations(&ctx.db)
@@ -207,8 +210,16 @@ impl Hooks for App {
     /// O `fallback_service` do [`spa::mount`] atende o que não casou com rota
     /// nenhuma; qualquer caminho sob `/api` continua sendo da API. É esta
     /// inversão que aposenta o nginx: um processo, uma porta, uma origem.
+    ///
+    /// O middleware de incidente entra por último, e por isso por **fora** dos
+    /// do Loco: vê o 500 que o `CatchPanic` dele produz e o troca pelo nosso
+    /// corpo, com o código que liga a tela ao log.
     async fn after_routes(router: AxumRouter, _ctx: &AppContext) -> Result<AxumRouter> {
-        Ok(spa::mount(router, &spa::web_root()))
+        Ok(
+            spa::mount(router, &spa::web_root()).layer(axum::middleware::from_fn(
+                crate::services::shared::incident::track,
+            )),
+        )
     }
     /// Nenhum worker de fila registrado — o trabalho de background é o ciclo do
     /// `scheduler` e o agente do `probe`, ambos processos próprios.

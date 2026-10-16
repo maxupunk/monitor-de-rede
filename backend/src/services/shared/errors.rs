@@ -127,16 +127,28 @@ impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let status = self.status();
 
-        // O detalhe do 500 fica no log; o cliente recebe texto genérico.
+        // O detalhe do 500 fica no log, com o código do incidente que o
+        // middleware põe na tela (ver `incident`); o cliente recebe só o código.
         if status == StatusCode::INTERNAL_SERVER_ERROR {
-            tracing::error!(error.msg = %self, error.details = ?self, "app_error");
+            tracing::error!(
+                incident = super::incident::current_incident().as_deref().unwrap_or("-"),
+                error.msg = %self,
+                error.details = ?self,
+                "app_error"
+            );
         } else {
             tracing::debug!(error.msg = %self, status = %status, "app_error");
         }
 
         let (message, errors) = match &self {
             Self::ValidationFields(fields) => (self.to_string(), Some(fields.as_slice())),
-            Self::Internal(_) => ("Erro interno do servidor".to_string(), None),
+            Self::Internal(_) => (
+                super::incident::current_incident().map_or_else(
+                    || "Erro interno do servidor".to_string(),
+                    |incident| super::incident::public_message(&incident),
+                ),
+                None,
+            ),
             _ => (self.to_string(), None),
         };
 
@@ -146,6 +158,11 @@ impl IntoResponse for AppError {
             if let Ok(value) = retry_after.to_string().parse() {
                 response.headers_mut().insert(header::RETRY_AFTER, value);
             }
+        }
+        if status == StatusCode::INTERNAL_SERVER_ERROR {
+            response
+                .extensions_mut()
+                .insert(super::incident::IncidentLogged);
         }
 
         response

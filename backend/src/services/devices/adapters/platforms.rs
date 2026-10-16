@@ -433,8 +433,12 @@ impl SyslogConfigurationAdapter for UbiquitiSyslogAdapter {
     }
 }
 
+/// `uname -n` primeiro: é POSIX e existe em todo BusyBox. O OpenWrt 25.12 não
+/// traz mais o applet `hostname`, e com ele só a identidade voltava vazia em
+/// todo roteador — o vínculo pelo nome nunca acontecia. `hostname` fica de
+/// reserva para um `uname` sem `-n`.
 fn unix_identity_command(marker: &str) -> String {
-    format!(r#"printf '{marker}%s\n' "$(hostname 2>/dev/null)""#)
+    format!(r#"printf '{marker}%s\n' "$(uname -n 2>/dev/null || hostname 2>/dev/null)""#)
 }
 
 fn logger_test_command(message: &str) -> String {
