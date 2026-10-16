@@ -18,6 +18,7 @@ use crate::{
             ApprovalInput, AutoAcceptInput, AutoAcceptQuery, BatchStarted, FleetIdentifyInput,
             FleetRunInput, PluginPreviewInput, PluginSaveInput, RevealInput, RevealResult,
             ReviewAcceptInput, RunActionInput, RunStarted, SessionSecretInput, SettingsInput,
+            TopologyActionsQuery,
         },
     },
     models::plugins as plugin_rows,
@@ -31,6 +32,7 @@ use crate::{
             reveal, runs,
             service::{self, source},
             settings::{self as plugin_settings, Scope},
+            topology,
         },
         shared::errors::{AppError, AppResult},
     },
@@ -391,6 +393,20 @@ async fn uninstall(
     Ok(format::json(actions::device_view(&ctx, device_id).await?)?)
 }
 
+// --- Topologia ----------------------------------------------------------------
+
+/// As ações que os plugins ativos instalados oferecem no nó de cada
+/// equipamento (`?deviceIds=1,2,3`, ou todos).
+async fn topology_actions(
+    State(ctx): State<AppContext>,
+    Query(query): Query<TopologyActionsQuery>,
+) -> AppResult<Response> {
+    let ids = query.ids().map_err(AppError::validation)?;
+    Ok(format::json(
+        topology::node_actions(&ctx.db, ids.as_deref()).await?,
+    )?)
+}
+
 // --- Frota (Aplicativos) e configuração guardada ----------------------------
 
 async fn apps(State(ctx): State<AppContext>) -> AppResult<Response> {
@@ -684,6 +700,7 @@ pub fn routes() -> Routes {
     Routes::new()
         .add("/plugins", get(index).post(store))
         .add("/plugins/apps", get(apps))
+        .add("/plugins/topology-actions", get(topology_actions))
         .add("/plugins/{id}/fleet", get(fleet_view))
         .add("/plugins/{id}/settings", put(fleet_settings))
         .add("/plugins/{id}/fleet/actions/{action}", post(fleet_run))

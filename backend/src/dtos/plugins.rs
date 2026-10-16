@@ -7,6 +7,7 @@ use ts_rs::TS;
 use crate::services::plugins::{
     compat::Compat,
     credentials::CredentialView,
+    effect::Effect,
     item_list::ItemList,
     manifest::{FleetSpec, MatchRule, PluginAction, SettingsSpec, Surface, TransportKind},
     package::PluginPackage,
@@ -14,6 +15,56 @@ use crate::services::plugins::{
     runtime::TranscriptEntry,
     testing::TestReport,
 };
+
+/// Uma ação de plugin oferecida no nó da topologia (`topology.nodeActions`).
+/// A resposta de `GET /api/plugins/topology-actions` é
+/// `{ "<deviceId>": TopologyNodeAction[] }`.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct TopologyNodeAction {
+    #[ts(type = "number")]
+    pub plugin_id: i64,
+    pub plugin_slug: String,
+    pub plugin_name: String,
+    /// Id da ação no manifesto.
+    pub action: String,
+    pub title: String,
+    pub effect: Effect,
+    /// Abre o formulário antes de rodar.
+    pub has_params: bool,
+    /// A ação inteira, para o mesmo diálogo de execução da aba do equipamento.
+    pub definition: PluginAction,
+}
+
+/// `?deviceIds=1,2,3` — sem ele, todos os equipamentos.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopologyActionsQuery {
+    #[serde(default)]
+    pub device_ids: Option<String>,
+}
+
+impl TopologyActionsQuery {
+    /// # Errors
+    ///
+    /// Id que não é número.
+    pub fn ids(&self) -> Result<Option<Vec<i64>>, String> {
+        self.device_ids
+            .as_deref()
+            .filter(|text| !text.trim().is_empty())
+            .map(|text| {
+                text.split(',')
+                    .map(|id| {
+                        id.trim()
+                            .parse()
+                            .map_err(|_| format!("`deviceIds` inválido: {id}"))
+                    })
+                    .collect()
+            })
+            .transpose()
+    }
+}
 
 /// Um plugin na listagem — sem script nem testes.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

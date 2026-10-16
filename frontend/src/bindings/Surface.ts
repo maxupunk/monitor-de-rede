@@ -3,4 +3,4 @@
 /**
  * Onde o plugin aparece.
  */
-export type Surface = "device" | "fleet";
+export type Surface = "device" | "fleet" | "topology";

@@ -121,11 +121,10 @@ fn tem_camel_case(s: &StructDeclarado) -> bool {
         .any(|attr| attr.contains(CAMEL_CASE_ATTR))
 }
 
-/// Exceções deliberadas: `POST /api/topology/links` e
-/// `GET /api/topology?site_id=` recebem snake_case porque é assim que o
-/// frontend envia hoje. Trocar para camelCase quebraria a tela sem aviso.
-/// Qualquer struct acrescentado aqui precisa vir com a justificativa escrita.
-const EXCECOES_SNAKE_CASE: &[&str] = &["TopologyLinkRequest", "TopologyQuery"];
+/// Exceções deliberadas. Qualquer struct acrescentado aqui precisa vir com a
+/// justificativa escrita. Hoje não há nenhuma: os DTOs de topologia, que eram
+/// a exceção, passaram a camelCase como o frontend já enviava.
+const EXCECOES_SNAKE_CASE: &[&str] = &[];
 
 #[test]
 fn todo_dto_serializavel_declara_camel_case() {

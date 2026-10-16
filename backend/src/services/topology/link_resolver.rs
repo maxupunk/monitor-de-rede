@@ -3,9 +3,15 @@
 use std::collections::BTreeMap;
 
 use chrono::Utc;
-use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+use sea_orm::{ActiveModelTrait, ConnectionTrait, EntityTrait, Set};
 
-use crate::{models::device_links, services::shared::errors::AppResult};
+use crate::{
+    models::device_links,
+    services::{
+        shared::{errors::AppResult, transaction::begin_write},
+        topology::edge_state::OBSERVED_METHODS,
+    },
+};
 
 #[derive(Debug, Clone)]
 pub struct NetworkLink {
@@ -64,15 +70,100 @@ pub fn is_material_change(row: &device_links::Model, link: &NetworkLink) -> bool
         || row.confirmed != link.confirmed
 }
 
+/// O que fazer com um enlace que chegou, dada a linha já gravada para o par.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UpsertPlan {
+    /// Par inédito: grava o enlace.
+    Insert,
+    /// O enlace que chegou vale pelo menos o gravado: substitui.
+    Overwrite { changed: bool },
+    /// O gravado vale mais (manual, confirmado ou mais confiável): **não** é
+    /// rebaixado. Só completa interfaces que ele não tinha e, quando o enlace
+    /// que chegou é observação do cabeamento, renova a prova de vida.
+    Keep {
+        source_interface_id: Option<i64>,
+        target_interface_id: Option<i64>,
+        touch_last_seen: bool,
+    },
+}
+
+/// Decide como um enlace que chegou afeta a linha existente do mesmo par.
+///
+/// A regra é "nunca rebaixar": uma varredura LLDP (95, não confirmada) que
+/// encontra o enlace que o operador desenhou à mão (100, confirmado) não troca
+/// o tipo, o método nem a confiança — só confirma que o cabo continua lá.
+#[must_use]
+pub fn plan_upsert(row: Option<&device_links::Model>, link: &NetworkLink) -> UpsertPlan {
+    let Some(row) = row else {
+        return UpsertPlan::Insert;
+    };
+    let downgrade = link.confidence < row.confidence || (row.confirmed && !link.confirmed);
+    if !downgrade {
+        return UpsertPlan::Overwrite {
+            changed: is_material_change(row, link),
+        };
+    }
+    // As interfaces vêm na orientação do enlace que chegou; se o par está
+    // gravado ao contrário, as pontas trocam de lugar.
+    let same_direction = row.source_device_id == link.source_device_id;
+    let (incoming_source, incoming_target) = if same_direction {
+        (link.source_interface_id, link.target_interface_id)
+    } else {
+        (link.target_interface_id, link.source_interface_id)
+    };
+    UpsertPlan::Keep {
+        source_interface_id: row.source_interface_id.or(incoming_source),
+        target_interface_id: row.target_interface_id.or(incoming_target),
+        touch_last_seen: OBSERVED_METHODS.contains(&link.discovery_method.as_str()),
+    }
+}
+
+/// Grava os enlaces resolvidos, um por par de dispositivos, sem rebaixar os
+/// que valem mais (ver [`plan_upsert`]). Tudo numa transação de escrita.
+///
+/// # Errors
+///
+/// Propaga erro do banco.
 pub async fn persist_resolved_links_detailed(
     db: &sea_orm::DatabaseConnection,
     links: Vec<NetworkLink>,
 ) -> AppResult<PersistedLinks> {
-    let existing = device_links::Entity::find().all(db).await?;
+    if links.is_empty() {
+        return Ok(PersistedLinks {
+            links: Vec::new(),
+            created: 0,
+            updated: 0,
+        });
+    }
+    let txn = begin_write(db).await?;
+    let persisted = persist_links_in(&txn, links).await?;
+    txn.commit().await?;
+    Ok(persisted)
+}
+
+/// Mesma gravação de [`persist_resolved_links_detailed`], dentro de uma
+/// conexão/transação que o chamador já abriu.
+///
+/// # Errors
+///
+/// Propaga erro do banco.
+pub async fn persist_links_in<C: ConnectionTrait>(
+    txn: &C,
+    links: Vec<NetworkLink>,
+) -> AppResult<PersistedLinks> {
+    let links = resolve_links(links);
+    if links.is_empty() {
+        return Ok(PersistedLinks {
+            links: Vec::new(),
+            created: 0,
+            updated: 0,
+        });
+    }
+    let existing = device_links::Entity::find().all(txn).await?;
     let mut saved = Vec::new();
     let mut created = 0;
     let mut updated = 0;
-    for link in resolve_links(links) {
+    for link in links {
         let row = existing.iter().find(|row| {
             (row.source_device_id == link.source_device_id
                 && row.target_device_id == link.target_device_id)
@@ -80,43 +171,69 @@ pub async fn persist_resolved_links_detailed(
                     && row.target_device_id == link.source_device_id)
         });
         let now = Utc::now();
-        if let Some(row) = row {
-            let changed = is_material_change(row, &link);
-            let saved_row = device_links::ActiveModel {
-                id: Set(row.id),
-                source_interface_id: Set(link.source_interface_id),
-                target_interface_id: Set(link.target_interface_id),
-                link_type: Set(link.link_type),
-                discovery_method: Set(link.discovery_method),
-                confidence: Set(link.confidence),
-                confirmed: Set(link.confirmed),
-                last_seen_at: Set(Some(now.into())),
-                ..Default::default()
+        let saved_row = match (plan_upsert(row, &link), row) {
+            (UpsertPlan::Overwrite { changed }, Some(row)) => {
+                if changed {
+                    updated += 1;
+                }
+                device_links::ActiveModel {
+                    id: Set(row.id),
+                    source_interface_id: Set(link.source_interface_id),
+                    target_interface_id: Set(link.target_interface_id),
+                    link_type: Set(link.link_type),
+                    discovery_method: Set(link.discovery_method),
+                    confidence: Set(link.confidence),
+                    confirmed: Set(link.confirmed),
+                    last_seen_at: Set(Some(now.into())),
+                    ..Default::default()
+                }
+                .update(txn)
+                .await?
             }
-            .update(db)
-            .await?;
-            if changed {
-                updated += 1;
+            (
+                UpsertPlan::Keep {
+                    source_interface_id,
+                    target_interface_id,
+                    touch_last_seen,
+                },
+                Some(row),
+            ) => {
+                let filled = source_interface_id != row.source_interface_id
+                    || target_interface_id != row.target_interface_id;
+                if !filled && !touch_last_seen {
+                    saved.push(row.clone());
+                    continue;
+                }
+                if filled {
+                    updated += 1;
+                }
+                let mut active: device_links::ActiveModel = row.clone().into();
+                active.source_interface_id = Set(source_interface_id);
+                active.target_interface_id = Set(target_interface_id);
+                if touch_last_seen {
+                    active.last_seen_at = Set(Some(now.into()));
+                }
+                active.update(txn).await?
             }
-            saved.push(saved_row);
-        } else {
-            let saved_row = device_links::ActiveModel {
-                source_device_id: Set(link.source_device_id),
-                target_device_id: Set(link.target_device_id),
-                source_interface_id: Set(link.source_interface_id),
-                target_interface_id: Set(link.target_interface_id),
-                link_type: Set(link.link_type),
-                discovery_method: Set(link.discovery_method),
-                confidence: Set(link.confidence),
-                confirmed: Set(link.confirmed),
-                last_seen_at: Set(Some(now.into())),
-                ..Default::default()
+            _ => {
+                created += 1;
+                device_links::ActiveModel {
+                    source_device_id: Set(link.source_device_id),
+                    target_device_id: Set(link.target_device_id),
+                    source_interface_id: Set(link.source_interface_id),
+                    target_interface_id: Set(link.target_interface_id),
+                    link_type: Set(link.link_type),
+                    discovery_method: Set(link.discovery_method),
+                    confidence: Set(link.confidence),
+                    confirmed: Set(link.confirmed),
+                    last_seen_at: Set(Some(now.into())),
+                    ..Default::default()
+                }
+                .insert(txn)
+                .await?
             }
-            .insert(db)
-            .await?;
-            created += 1;
-            saved.push(saved_row);
-        }
+        };
+        saved.push(saved_row);
     }
     Ok(PersistedLinks {
         links: saved,
@@ -232,5 +349,139 @@ mod tests {
                 "mudança material não detectada: {mutacao:?}"
             );
         }
+    }
+
+    fn manual() -> device_links::Model {
+        device_links::Model {
+            id: 7,
+            source_device_id: 1,
+            target_device_id: 2,
+            source_interface_id: None,
+            target_interface_id: None,
+            link_type: "manual".into(),
+            discovery_method: "user_defined".into(),
+            confidence: 100,
+            confirmed: true,
+            last_seen_at: None,
+            created_at: Utc::now().into(),
+            updated_at: Utc::now().into(),
+        }
+    }
+
+    fn lldp(source: i64, target: i64) -> NetworkLink {
+        NetworkLink {
+            source_device_id: source,
+            target_device_id: target,
+            source_interface_id: Some(10),
+            target_interface_id: Some(20),
+            link_type: "lldp".into(),
+            discovery_method: "lldp".into(),
+            confidence: 95,
+            confirmed: false,
+        }
+    }
+
+    #[test]
+    fn par_inedito_e_inserido() {
+        assert_eq!(plan_upsert(None, &lldp(1, 2)), UpsertPlan::Insert);
+    }
+
+    #[test]
+    fn lldp_nao_rebaixa_enlace_manual_so_completa_portas() {
+        let plano = plan_upsert(Some(&manual()), &lldp(1, 2));
+        assert_eq!(
+            plano,
+            UpsertPlan::Keep {
+                source_interface_id: Some(10),
+                target_interface_id: Some(20),
+                touch_last_seen: true,
+            }
+        );
+    }
+
+    #[test]
+    fn portas_descobertas_no_sentido_inverso_trocam_de_ponta() {
+        // Gravado 1 → 2; o LLDP de 2 viu o enlace como 2 → 1.
+        let plano = plan_upsert(Some(&manual()), &lldp(2, 1));
+        assert_eq!(
+            plano,
+            UpsertPlan::Keep {
+                source_interface_id: Some(20),
+                target_interface_id: Some(10),
+                touch_last_seen: true,
+            }
+        );
+    }
+
+    #[test]
+    fn portas_escolhidas_pelo_operador_sao_preservadas() {
+        let linha = device_links::Model {
+            source_interface_id: Some(1),
+            target_interface_id: Some(2),
+            ..manual()
+        };
+        let plano = plan_upsert(Some(&linha), &lldp(1, 2));
+        assert_eq!(
+            plano,
+            UpsertPlan::Keep {
+                source_interface_id: Some(1),
+                target_interface_id: Some(2),
+                touch_last_seen: true,
+            }
+        );
+    }
+
+    #[test]
+    fn inferencia_nao_renova_a_prova_de_vida_do_lldp() {
+        // Senão o recálculo por sub-rede esconderia um enlace LLDP obsoleto.
+        let linha = device_links::Model {
+            link_type: "lldp".into(),
+            discovery_method: "lldp".into(),
+            confidence: 95,
+            confirmed: false,
+            ..manual()
+        };
+        let inferido = NetworkLink {
+            link_type: "inferred".into(),
+            discovery_method: "subnet_inference".into(),
+            confidence: 60,
+            source_interface_id: None,
+            target_interface_id: None,
+            ..lldp(1, 2)
+        };
+        assert_eq!(
+            plan_upsert(Some(&linha), &inferido),
+            UpsertPlan::Keep {
+                source_interface_id: None,
+                target_interface_id: None,
+                touch_last_seen: false,
+            }
+        );
+    }
+
+    #[test]
+    fn enlace_de_mesma_confianca_ou_maior_substitui() {
+        let linha = device_links::Model {
+            link_type: "lldp".into(),
+            discovery_method: "lldp".into(),
+            confidence: 95,
+            confirmed: false,
+            ..manual()
+        };
+        assert_eq!(
+            plan_upsert(Some(&linha), &lldp(1, 2)),
+            UpsertPlan::Overwrite { changed: true }
+        );
+        let manual_novo = NetworkLink {
+            link_type: "manual".into(),
+            discovery_method: "user_defined".into(),
+            confidence: 100,
+            confirmed: true,
+            ..lldp(1, 2)
+        };
+        assert!(matches!(
+            plan_upsert(Some(&linha), &manual_novo),
+            UpsertPlan::Overwrite { changed: true }
+        ));
     }
 }

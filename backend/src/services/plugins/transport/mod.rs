@@ -154,14 +154,82 @@ pub enum DeviceIoReply {
     },
 }
 
+/// Quem recebe cada linha da saída enquanto o comando roda.
+pub type LineSink<'a> = &'a (dyn Fn(&str) + Send + Sync);
+
 /// O contrato que o runtime conhece. Uma chamada por vez; quem implementa
 /// decide se reaproveita conexão.
 #[async_trait]
 pub trait DeviceTransport: Send + Sync {
     async fn execute(&self, call: &DeviceIoCall) -> AppResult<DeviceIoReply>;
 
+    /// Igual a [`Self::execute`], entregando a `on_line` cada linha da saída
+    /// (`device.ssh_live`). A resposta completa volta no fim, como sempre.
+    ///
+    /// A implementação padrão só entrega as linhas depois que o comando
+    /// termina; quem consegue ler a saída aos pedaços (o SSH local) entrega
+    /// à medida que chegam.
+    async fn execute_streaming(
+        &self,
+        call: &DeviceIoCall,
+        on_line: LineSink<'_>,
+    ) -> AppResult<DeviceIoReply> {
+        let reply = self.execute(call).await?;
+        feed_lines(&reply, on_line);
+        Ok(reply)
+    }
+
     /// De onde a chamada parte, para o transcript ("central", "agente Filial").
     fn origin(&self) -> String;
+}
+
+/// Entrega as linhas não vazias do stdout de uma resposta já completa.
+pub fn feed_lines(reply: &DeviceIoReply, on_line: LineSink<'_>) {
+    if let DeviceIoReply::Exec { stdout, .. } = reply {
+        stdout
+            .split(['\n', '\r'])
+            .filter(|line| !line.trim().is_empty())
+            .for_each(on_line);
+    }
+}
+
+/// Linha sem fim maior que isto é entregue assim mesmo, para o buffer não
+/// crescer sem limite.
+const MAX_PENDING_LINE: usize = 64 * 1024;
+
+/// Junta pedaços de saída e entrega cada linha completa assim que o fim dela
+/// chega. `\r` também encerra linha: equipamento que redesenha o andamento na
+/// mesma linha entrega uma linha por quadro. Linha vazia não é entregue.
+#[derive(Debug, Default)]
+pub struct LineSplitter {
+    pending: Vec<u8>,
+}
+
+impl LineSplitter {
+    pub fn push(&mut self, data: &[u8], on_line: LineSink<'_>) {
+        for &byte in data {
+            if byte == b'\n' || byte == b'\r' {
+                self.flush(on_line);
+            } else {
+                self.pending.push(byte);
+                if self.pending.len() >= MAX_PENDING_LINE {
+                    self.flush(on_line);
+                }
+            }
+        }
+    }
+
+    /// Entrega o que sobrou (a última linha, sem `\n`).
+    pub fn flush(&mut self, on_line: LineSink<'_>) {
+        if self.pending.is_empty() {
+            return;
+        }
+        let line = String::from_utf8_lossy(&self.pending).into_owned();
+        self.pending.clear();
+        if !line.trim().is_empty() {
+            on_line(&line);
+        }
+    }
 }
 
 /// Converte bytes lidos em texto, com teto. Equipamento manda latin-1 e byte
@@ -264,6 +332,44 @@ mod tests {
         for ip in ["8.8.8.8", "1.1.1.1", "2001:4860::8888"] {
             assert!(!is_reachable_target(ip.parse().unwrap()), "{ip}");
         }
+    }
+
+    fn collect(chunks: &[&[u8]]) -> Vec<String> {
+        let lines = std::sync::Mutex::new(Vec::new());
+        let sink = |line: &str| lines.lock().unwrap().push(line.to_owned());
+        let mut splitter = LineSplitter::default();
+        for chunk in chunks {
+            splitter.push(chunk, &sink);
+        }
+        splitter.flush(&sink);
+        lines.into_inner().unwrap()
+    }
+
+    #[test]
+    fn linhas_partidas_entre_pedacos_sao_remontadas() {
+        assert_eq!(
+            collect(&[
+                b"tx-current: 94",
+                b".5Mbps\r\nrx-cur",
+                b"rent: 10Mbps\n\n",
+                b"fim"
+            ]),
+            ["tx-current: 94.5Mbps", "rx-current: 10Mbps", "fim"]
+        );
+    }
+
+    #[test]
+    fn resposta_completa_entrega_as_linhas_no_fim() {
+        let lines = std::sync::Mutex::new(Vec::new());
+        let reply = DeviceIoReply::Exec {
+            stdout: "a\n\nb\n".into(),
+            stderr: String::new(),
+            exit_code: Some(0),
+        };
+        feed_lines(&reply, &|line: &str| {
+            lines.lock().unwrap().push(line.to_owned());
+        });
+        assert_eq!(lines.into_inner().unwrap(), ["a", "b"]);
     }
 
     #[test]

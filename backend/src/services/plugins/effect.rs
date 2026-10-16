@@ -62,6 +62,9 @@ const WRITE_COMMANDS: &[&str] = &[
     r"(passwd|useradd|userdel|usermod|adduser|deluser|chpasswd)",
     r"crontab",
     r"(kill|killall|pkill)",
+    // servidor de teste de vazão que fica rodando (`iperf3 -s -D`); o
+    // cliente (`iperf3 -c`, `btest -c`) só gera tráfego e é leitura
+    r"(iperf3?|btest)\s+(?:[^;&|]*\s)?(-s|--server|-D|--daemon)",
     // RouterOS
     r"/[a-z0-9-]+(\s+[a-z0-9-]+)*?\s+(add|set|remove|enable|disable|reset|import)",
     r"/system\s+(reboot|reset-configuration|shutdown)",
@@ -74,9 +77,9 @@ fn write_patterns() -> &'static [Regex] {
             .iter()
             .map(|pattern| {
                 // Início de comando: começo da linha ou depois de `;`, `&&`,
-                // `||`, `|`, `(` e `sudo`/`xargs`.
+                // `||`, `|`, `(` e `sudo`/`xargs`/`nohup`.
                 Regex::new(&format!(
-                    r"(?:^|[;&|(`]\s*|\$\(\s*|\bsudo\s+|\bxargs\s+)(?:{pattern})\b"
+                    r"(?:^|[;&|(`]\s*|\$\(\s*|\bsudo\s+|\bxargs\s+|\bnohup\s+)(?:{pattern})\b"
                 ))
                 .expect("padrão de comando de escrita válido")
             })
@@ -140,6 +143,11 @@ mod tests {
             "ip addr show",
             "ls -la /tmp 2>/dev/null",
             "/system resource print",
+            "iperf3 -c 10.0.0.2 -p 5201 -t 5 -J",
+            "iperf3 -c my-server -R",
+            "btest -c 10.0.0.2 -d both",
+            "/tool bandwidth-test address=10.0.0.2 duration=5s direction=both user=nm-test-a1",
+            "/tool bandwidth-server print",
             "grep -c processor /proc/cpuinfo",
             "concatena firmware",
         ] {
@@ -161,6 +169,12 @@ mod tests {
             "/ip address add address=10.0.0.1/24 interface=ether1",
             "cat x | tee /etc/config/x",
             "$(rm -f /etc/passwd)",
+            "iperf3 -s -D -p 5201 -I /tmp/iperf.pid",
+            "nohup iperf3 --server -p 5202 >/dev/null 2>&1 &",
+            "kill $(cat /tmp/iperf.pid)",
+            "/user add name=nm-test-a1 group=read password=x",
+            "/tool bandwidth-server set enabled=yes authenticate=no",
+            "/user remove nm-test-a1",
         ] {
             assert_eq!(classify_command(command), Effect::Write, "{command}");
         }

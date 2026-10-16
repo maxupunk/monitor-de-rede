@@ -147,7 +147,11 @@ sistema:
 
 - TCP `APP_PORT` para a interface/API;
 - UDP e, se utilizado, TCP `SYSLOG_LISTEN_PORT` para Syslog;
-- UDP da porta configurada no servidor WireGuard, quando a VPN estiver ativa.
+- UDP da porta configurada no servidor WireGuard, quando a VPN estiver ativa;
+- TCP 2000 (ou a porta de `BTEST_LISTEN`) para o teste de enlace MikroTik →
+  central ([ADR 015](docs/adr/015-teste-de-enlace.md)). O servidor btest só
+  atende o equipamento para o qual a central armou uma sessão; `BTEST_LISTEN=`
+  vazio o desliga.
 
 #### Voltar ao modo bridge
 

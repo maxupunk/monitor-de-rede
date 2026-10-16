@@ -1,56 +1,101 @@
-//! Topologia baseada em `petgraph`, serializada no contrato simples do Vue.
+//! Grafo da topologia (dispositivos, enlaces e hierarquia) no contrato do Vue.
+//!
+//! As regras puras ficam nos módulos vizinhos — estado do enlace em
+//! [`edge_state`], inferência em [`inference`], menor caminho em [`path`] — e
+//! aqui só se carrega o banco e monta a resposta.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use petgraph::{algo::is_cyclic_directed, graph::Graph};
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter};
+use chrono::Utc;
+use sea_orm::{
+    sea_query::Query, ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, EntityTrait,
+    PaginatorTrait, QueryFilter, QueryOrder, QuerySelect,
+};
+use ts_rs::TS;
 
 use crate::{
     dtos::resources::UnmanagedSwitchInput,
     models::{
-        _entities::device_interfaces as device_interfaces_entity, device_interfaces, device_links,
-        devices,
+        _entities::{
+            device_interfaces as device_interfaces_entity, device_links as device_links_entity,
+        },
+        device_interfaces, device_links, devices, monitors, sites,
     },
     services::{
+        devices::system_device::NETMONITOR_KEY,
         monitoring::metrics_repository,
-        shared::errors::{AppError, AppResult},
+        shared::{
+            errors::{AppError, AppResult},
+            transaction::begin_write,
+        },
         snmp::collectors::LldpNeighbor,
-        topology::link_resolver::{persist_resolved_links_detailed, NetworkLink},
+        topology::{
+            edge_state::{edge_speed_bps, edge_status, edge_utilization, is_stale, EndpointState},
+            inference::{infer_uplinks, pair_key, INFERRED_METHOD},
+            link_resolver::{persist_links_in, persist_resolved_links_detailed, NetworkLink},
+            path::{shortest_path, PathEdge, TopologyPath},
+        },
     },
 };
 
-#[derive(Debug, Clone, serde::Serialize)]
+/// Quantos ids vão num `IN (...)`: longe do teto de parâmetros do SQLite
+/// (32766) e do PostgreSQL (65535).
+const IDS_PER_QUERY: usize = 500;
+
+#[derive(Debug, Clone, serde::Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct TopologyNode {
+    #[ts(type = "number")]
     pub id: i64,
     pub name: String,
     #[serde(rename = "type")]
     pub device_type: String,
     pub status: String,
+    #[ts(type = "number | null")]
     pub site_id: Option<i64>,
+    pub site_name: Option<String>,
     pub interface_count: usize,
     pub ip_address: Option<String>,
     pub vendor: Option<String>,
     pub model: Option<String>,
     pub snmp_enabled: bool,
+    #[ts(type = "number | null")]
     pub parent_id: Option<i64>,
+    /// O próprio NetMonitor (`devices.system_key = 'netmonitor'`): a origem
+    /// natural de um teste "servidor → roteador".
+    pub is_system: bool,
+    /// Monitores habilitados deste dispositivo que estão `down` agora.
+    pub monitors_down: usize,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct TopologyEdge {
+    /// Positivo: linha de `device_links`. Negativo: aresta virtual de
+    /// hierarquia, `-id do filho` (ver [`parent_edge_id`]).
+    #[ts(type = "number")]
     pub id: i64,
+    #[ts(type = "number")]
     pub source: i64,
+    #[ts(type = "number")]
     pub target: i64,
+    #[ts(type = "number")]
     pub source_device_id: i64,
+    #[ts(type = "number")]
     pub target_device_id: i64,
     pub source_device_name: Option<String>,
     pub target_device_name: Option<String>,
+    #[ts(type = "number | null")]
     pub source_interface_id: Option<i64>,
+    #[ts(type = "number | null")]
     pub target_interface_id: Option<i64>,
     pub source_interface_name: Option<String>,
     pub target_interface_name: Option<String>,
+    #[ts(type = "number | null")]
     pub source_interface_speed: Option<i64>,
+    #[ts(type = "number | null")]
     pub target_interface_speed: Option<i64>,
     pub source_interface_status: Option<String>,
     pub target_interface_status: Option<String>,
@@ -58,15 +103,26 @@ pub struct TopologyEdge {
     pub out_bps: Option<f64>,
     pub traffic_bps: Option<f64>,
     pub traffic_label: Option<String>,
+    /// Velocidade do enlace (a menor das pontas conhecidas), em bps.
+    #[ts(type = "number | null")]
+    pub speed_bps: Option<i64>,
+    /// Sentido mais carregado sobre a velocidade, de 0 a 1.
+    pub utilization: Option<f64>,
     pub link_type: String,
     pub discovery_method: String,
     pub confidence: i32,
     pub confirmed: bool,
+    /// `up`, `down` ou `unknown` (ver [`edge_status`]).
     pub status: String,
+    /// Enlace LLDP/CDP não revisto há mais de 7 dias. Manual nunca envelhece.
+    pub stale: bool,
+    /// Última vez que a descoberta viu o enlace (RFC 3339).
+    pub last_seen_at: Option<String>,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct TopologyGraph {
     pub nodes: Vec<TopologyNode>,
     pub edges: Vec<TopologyEdge>,
@@ -88,6 +144,43 @@ fn format_traffic_bps(bps: f64) -> String {
     }
 }
 
+/// Id da aresta virtual de hierarquia do filho `child_id`.
+///
+/// Um filho tem **um** pai, então `-child_id` identifica a aresta sem colisão
+/// (o esquema antigo `-(filho * 1000 + pai)` colidia com pai ≥ 1000) e volta ao
+/// filho sem varrer a tabela.
+#[must_use]
+pub const fn parent_edge_id(child_id: i64) -> i64 {
+    -child_id
+}
+
+/// O filho dono de uma aresta virtual, ou `None` para id de enlace real.
+#[must_use]
+pub const fn parent_edge_child(edge_id: i64) -> Option<i64> {
+    if edge_id < 0 {
+        Some(-edge_id)
+    } else {
+        None
+    }
+}
+
+/// Pares (pai, filho) que viram aresta virtual: os dois no recorte e sem
+/// enlace real entre eles (um enlace real já descreve a ligação — duplicar
+/// desenharia duas linhas entre o mesmo par).
+fn parent_pairs<'a>(
+    devices: impl IntoIterator<Item = &'a devices::Model>,
+    ids: &BTreeSet<i64>,
+    linked: &BTreeSet<(i64, i64)>,
+) -> Vec<(i64, i64)> {
+    devices
+        .into_iter()
+        .filter_map(|device| {
+            let parent = device.parent_id.filter(|parent| ids.contains(parent))?;
+            (!linked.contains(&pair_key(parent, device.id))).then_some((parent, device.id))
+        })
+        .collect()
+}
+
 /// Acrescenta a aresta virtual do `parentId` quando não existe enlace real
 /// entre pai e filho (matriz de paridade #48).
 ///
@@ -104,220 +197,346 @@ fn append_parent_edges(
     ids: &BTreeSet<i64>,
 ) {
     let devices_by_id: BTreeMap<i64, &devices::Model> = devices.iter().map(|d| (d.id, d)).collect();
-    for device in devices {
-        let Some(parent) = device.parent_id.filter(|parent| ids.contains(parent)) else {
-            continue;
-        };
-        // Um enlace real entre os dois já descreve a ligação — duplicar
-        // desenharia duas linhas entre o mesmo par de nós.
-        let ja_ligados = edges.iter().any(|edge| {
-            (edge.source == parent && edge.target == device.id)
-                || (edge.target == parent && edge.source == device.id)
-        });
-        if ja_ligados {
-            continue;
-        }
-        let parent_name = devices_by_id.get(&parent).map(|d| d.name.clone());
+    let linked: BTreeSet<_> = edges
+        .iter()
+        .map(|edge| pair_key(edge.source, edge.target))
+        .collect();
+    for (parent, child) in parent_pairs(devices, ids, &linked) {
+        let parent_device = devices_by_id.get(&parent);
+        let child_device = devices_by_id.get(&child);
+        let status = edge_status(
+            EndpointState {
+                device_status: parent_device.map(|d| d.status.as_str()),
+                ..EndpointState::default()
+            },
+            EndpointState {
+                device_status: child_device.map(|d| d.status.as_str()),
+                ..EndpointState::default()
+            },
+        );
         edges.push(TopologyEdge {
-            id: -(device.id * 1000 + parent),
+            id: parent_edge_id(child),
             source: parent,
-            target: device.id,
+            target: child,
             source_device_id: parent,
-            target_device_id: device.id,
-            source_device_name: parent_name,
-            target_device_name: Some(device.name.clone()),
-            source_interface_id: None,
-            target_interface_id: None,
-            source_interface_name: None,
-            target_interface_name: None,
-            source_interface_speed: None,
-            target_interface_speed: None,
-            source_interface_status: None,
-            target_interface_status: None,
-            in_bps: None,
-            out_bps: None,
-            traffic_bps: None,
-            traffic_label: None,
+            target_device_id: child,
+            source_device_name: parent_device.map(|d| d.name.clone()),
+            target_device_name: child_device.map(|d| d.name.clone()),
             link_type: "parent".into(),
             discovery_method: "parent_hierarchy".into(),
             confidence: 100,
             confirmed: true,
-            status: "up".into(),
+            status: status.into(),
+            ..TopologyEdge::default()
         });
     }
 }
 
+/// Recorte de dispositivos do grafo. Com site, entra também o dispositivo do
+/// sistema — o NetMonitor não pertence a site nenhum, mas é a origem dos
+/// testes; ele sai depois se não tiver ligação com o site.
+fn device_scope(site_id: Option<i64>) -> Option<Condition> {
+    site_id.map(|site| {
+        Condition::any()
+            .add(devices::Column::SiteId.eq(site))
+            .add(devices::Column::SystemKey.eq(NETMONITOR_KEY))
+    })
+}
+
+/// Busca linhas por id em lotes de [`IDS_PER_QUERY`].
+async fn interfaces_by_ids<C: ConnectionTrait>(
+    db: &C,
+    ids: &BTreeSet<i64>,
+) -> AppResult<Vec<device_interfaces::Model>> {
+    let ids: Vec<i64> = ids.iter().copied().collect();
+    let mut rows = Vec::with_capacity(ids.len());
+    for chunk in ids.chunks(IDS_PER_QUERY) {
+        rows.extend(
+            device_interfaces::Entity::find()
+                .filter(device_interfaces_entity::Column::Id.is_in(chunk.to_vec()))
+                .all(db)
+                .await?,
+        );
+    }
+    Ok(rows)
+}
+
+/// Última taxa de entrada/saída de cada interface citada pelos enlaces.
+async fn latest_traffic(
+    db: &sea_orm::DatabaseConnection,
+    interface_ids: &BTreeSet<i64>,
+) -> AppResult<BTreeMap<i64, (Option<f64>, Option<f64>)>> {
+    let mut latest: BTreeMap<i64, (Option<f64>, Option<f64>)> = BTreeMap::new();
+    if interface_ids.is_empty() {
+        return Ok(latest);
+    }
+    let ids: Vec<i64> = interface_ids.iter().copied().collect();
+    let recent_metrics = metrics_repository::latest_for_interfaces(
+        db,
+        None,
+        &ids,
+        &["inBps", "outBps", "traffic_rx_bytes", "traffic_tx_bytes"],
+    )
+    .await?;
+    for m in recent_metrics {
+        if let Some(iface_id) = m.interface_id {
+            let entry = latest.entry(iface_id).or_insert((None, None));
+            if (m.name == "inBps" || m.name == "traffic_rx_bytes") && entry.0.is_none() {
+                entry.0 = Some(m.value);
+            } else if (m.name == "outBps" || m.name == "traffic_tx_bytes") && entry.1.is_none() {
+                entry.1 = Some(m.value);
+            }
+        }
+    }
+    Ok(latest)
+}
+
+/// Monta o grafo, com o filtro de site aplicado **no SQL**: dispositivos do
+/// site, enlaces com as duas pontas nele e só as interfaces que os enlaces citam.
+///
+/// # Errors
+///
+/// Propaga erro do banco.
 pub async fn get_topology(
     db: &sea_orm::DatabaseConnection,
     site_id: Option<i64>,
 ) -> AppResult<TopologyGraph> {
-    let all = devices::Entity::find().all(db).await?;
-    let devices: Vec<_> = all
-        .into_iter()
-        .filter(|device| site_id.is_none_or(|site| device.site_id == Some(site)))
-        .collect();
+    let scope = device_scope(site_id);
+    let mut device_query = devices::Entity::find().order_by_asc(devices::Column::Id);
+    if let Some(scope) = scope.clone() {
+        device_query = device_query.filter(scope);
+    }
+    let devices = device_query.all(db).await?;
     let ids: BTreeSet<_> = devices.iter().map(|device| device.id).collect();
-    let devices_by_id: BTreeMap<i64, &devices::Model> = devices.iter().map(|d| (d.id, d)).collect();
 
-    let interfaces = crate::models::device_interfaces::Entity::find()
-        .all(db)
-        .await?;
-    let interfaces_by_id: BTreeMap<i64, &device_interfaces::Model> =
-        interfaces.iter().map(|i| (i.id, i)).collect();
+    // `IN (SELECT id FROM devices WHERE …)`: igual no SQLite e no PostgreSQL.
+    let scoped_ids = scope.map(|scope| {
+        Query::select()
+            .column(devices::Column::Id)
+            .from(devices::Entity)
+            .cond_where(scope)
+            .to_owned()
+    });
 
-    let counts = interfaces
-        .iter()
-        .filter(|interface| ids.contains(&interface.device_id))
-        .fold(BTreeMap::<i64, usize>::new(), |mut counts, interface| {
-            *counts.entry(interface.device_id).or_default() += 1;
-            counts
-        });
-    let links = device_links::Entity::find()
+    let mut counts_query = device_interfaces::Entity::find()
+        .select_only()
+        .column(device_interfaces_entity::Column::DeviceId)
+        .column_as(device_interfaces_entity::Column::Id.count(), "total")
+        .group_by(device_interfaces_entity::Column::DeviceId);
+    let mut monitors_query = monitors::Entity::find()
+        .select_only()
+        .column(monitors::Column::DeviceId)
+        .column_as(monitors::Column::Id.count(), "total")
+        .filter(monitors::Column::Enabled.eq(true))
+        .filter(monitors::Column::Status.eq("down"))
+        .filter(monitors::Column::DeviceId.is_not_null())
+        .group_by(monitors::Column::DeviceId);
+    let mut links_query =
+        device_links::Entity::find().order_by_asc(device_links_entity::Column::Id);
+    if let Some(subquery) = scoped_ids {
+        counts_query = counts_query
+            .filter(device_interfaces_entity::Column::DeviceId.in_subquery(subquery.clone()));
+        monitors_query =
+            monitors_query.filter(monitors::Column::DeviceId.in_subquery(subquery.clone()));
+        links_query = links_query
+            .filter(device_links_entity::Column::SourceDeviceId.in_subquery(subquery.clone()))
+            .filter(device_links_entity::Column::TargetDeviceId.in_subquery(subquery));
+    }
+    let interface_counts: BTreeMap<i64, i64> = counts_query
+        .into_tuple::<(i64, i64)>()
         .all(db)
         .await?
         .into_iter()
-        .filter(|link| ids.contains(&link.source_device_id) && ids.contains(&link.target_device_id))
-        .collect::<Vec<_>>();
+        .collect();
+    let monitors_down: BTreeMap<i64, i64> = monitors_query
+        .into_tuple::<(Option<i64>, i64)>()
+        .all(db)
+        .await?
+        .into_iter()
+        .filter_map(|(device, total)| device.map(|device| (device, total)))
+        .collect();
+    let links = links_query.all(db).await?;
 
-    let iface_ids: Vec<i64> = links
+    let interface_ids: BTreeSet<i64> = links
         .iter()
         .flat_map(|l| [l.source_interface_id, l.target_interface_id])
         .flatten()
         .collect();
-
-    let mut latest_traffic: BTreeMap<i64, (Option<f64>, Option<f64>)> = BTreeMap::new();
-    if !iface_ids.is_empty() {
-        let recent_metrics = metrics_repository::latest_for_interfaces(
-            db,
-            None,
-            &iface_ids,
-            &["inBps", "outBps", "traffic_rx_bytes", "traffic_tx_bytes"],
-        )
-        .await?;
-
-        for m in recent_metrics {
-            if let Some(iface_id) = m.interface_id {
-                let entry = latest_traffic.entry(iface_id).or_insert((None, None));
-                if (m.name == "inBps" || m.name == "traffic_rx_bytes") && entry.0.is_none() {
-                    entry.0 = Some(m.value);
-                } else if (m.name == "outBps" || m.name == "traffic_tx_bytes") && entry.1.is_none()
-                {
-                    entry.1 = Some(m.value);
-                }
-            }
-        }
-    }
-
-    let mut graph = Graph::<i64, i64>::new();
-    let nodes_map: BTreeMap<_, _> = devices
-        .iter()
-        .map(|device| (device.id, graph.add_node(device.id)))
-        .collect();
-    for link in &links {
-        if let (Some(source), Some(target)) = (
-            nodes_map.get(&link.source_device_id),
-            nodes_map.get(&link.target_device_id),
-        ) {
-            graph.add_edge(*source, *target, link.id);
-        }
-    }
-    // Detecta grafo inconsistente, preservando ciclos válidos de redundância.
-    let _has_cycle = is_cyclic_directed(&graph);
-
-    let mut edges: Vec<_> = links
+    let interfaces = interfaces_by_ids(db, &interface_ids).await?;
+    let traffic = latest_traffic(db, &interface_ids).await?;
+    let site_names: BTreeMap<i64, String> = sites::Entity::find()
+        .all(db)
+        .await?
         .into_iter()
-        .map(|l| edge(l, &devices_by_id, &interfaces_by_id, &latest_traffic))
+        .map(|site| (site.id, site.name))
         .collect();
+
+    let lookup = EdgeLookup {
+        devices: devices.iter().map(|d| (d.id, d)).collect(),
+        interfaces: interfaces.iter().map(|i| (i.id, i)).collect(),
+        traffic: &traffic,
+        now: Utc::now(),
+    };
+    let mut edges: Vec<_> = links.into_iter().map(|l| lookup.edge(l)).collect();
     append_parent_edges(&mut edges, &devices, &ids);
-    Ok(TopologyGraph {
-        nodes: devices
-            .into_iter()
-            .map(|device| TopologyNode {
-                id: device.id,
-                name: device.name,
-                device_type: device.r#type,
-                status: device.status,
-                site_id: device.site_id,
-                interface_count: *counts.get(&device.id).unwrap_or(&0),
-                ip_address: device.ip_address,
-                vendor: device.vendor,
-                model: device.model,
-                snmp_enabled: device.snmp_enabled,
-                parent_id: device.parent_id,
-            })
-            .collect(),
-        edges,
-    })
+
+    let connected: BTreeSet<i64> = edges
+        .iter()
+        .flat_map(|edge| [edge.source, edge.target])
+        .collect();
+    let nodes = devices
+        .into_iter()
+        // O NetMonitor entra no mapa de um site só se estiver ligado a ele.
+        .filter(|device| {
+            site_id.is_none() || device.site_id == site_id || connected.contains(&device.id)
+        })
+        .map(|device| TopologyNode {
+            id: device.id,
+            site_name: device
+                .site_id
+                .and_then(|site| site_names.get(&site).cloned()),
+            interface_count: count(&interface_counts, device.id),
+            monitors_down: count(&monitors_down, device.id),
+            is_system: device.system_key.as_deref() == Some(NETMONITOR_KEY),
+            name: device.name,
+            device_type: device.r#type,
+            status: device.status,
+            site_id: device.site_id,
+            ip_address: device.ip_address,
+            vendor: device.vendor,
+            model: device.model,
+            snmp_enabled: device.snmp_enabled,
+            parent_id: device.parent_id,
+        })
+        .collect();
+    Ok(TopologyGraph { nodes, edges })
 }
 
-fn edge(
-    link: device_links::Model,
-    devices_by_id: &BTreeMap<i64, &devices::Model>,
-    interfaces_by_id: &BTreeMap<i64, &device_interfaces::Model>,
-    latest_traffic: &BTreeMap<i64, (Option<f64>, Option<f64>)>,
-) -> TopologyEdge {
-    let source_iface = link
-        .source_interface_id
-        .and_then(|id| interfaces_by_id.get(&id).copied());
-    let target_iface = link
-        .target_interface_id
-        .and_then(|id| interfaces_by_id.get(&id).copied());
+fn count(counts: &BTreeMap<i64, i64>, device_id: i64) -> usize {
+    counts
+        .get(&device_id)
+        .and_then(|total| usize::try_from(*total).ok())
+        .unwrap_or(0)
+}
 
-    let (src_in, src_out) = link
-        .source_interface_id
-        .and_then(|id| latest_traffic.get(&id))
-        .copied()
-        .unwrap_or((None, None));
-    let (tgt_in, tgt_out) = link
-        .target_interface_id
-        .and_then(|id| latest_traffic.get(&id))
-        .copied()
-        .unwrap_or((None, None));
-
-    let in_bps = src_in.or(tgt_in);
-    let out_bps = src_out.or(tgt_out);
-    let total_bps = match (in_bps, out_bps) {
-        (Some(i), Some(o)) => Some(i + o),
-        (Some(i), None) => Some(i),
-        (None, Some(o)) => Some(o),
-        (None, None) => None,
-    };
-    let traffic_label = total_bps.map(format_traffic_bps);
-
-    TopologyEdge {
-        id: link.id,
-        source: link.source_device_id,
-        target: link.target_device_id,
-        source_device_id: link.source_device_id,
-        target_device_id: link.target_device_id,
-        source_device_name: devices_by_id
-            .get(&link.source_device_id)
-            .map(|d| d.name.clone()),
-        target_device_name: devices_by_id
-            .get(&link.target_device_id)
-            .map(|d| d.name.clone()),
-        source_interface_id: link.source_interface_id,
-        target_interface_id: link.target_interface_id,
-        source_interface_name: source_iface.map(|i| i.name.clone()),
-        target_interface_name: target_iface.map(|i| i.name.clone()),
-        source_interface_speed: source_iface.and_then(|i| i.speed),
-        target_interface_speed: target_iface.and_then(|i| i.speed),
-        source_interface_status: source_iface
-            .and_then(|i| i.oper_status.clone().or_else(|| i.admin_status.clone())),
-        target_interface_status: target_iface
-            .and_then(|i| i.oper_status.clone().or_else(|| i.admin_status.clone())),
-        in_bps,
-        out_bps,
-        traffic_bps: total_bps,
-        traffic_label,
-        link_type: link.link_type,
-        discovery_method: link.discovery_method,
-        confidence: link.confidence,
-        confirmed: link.confirmed,
-        status: "up".into(),
+/// Ponta de um enlace real: a interface (se o enlace a conhece) e o dispositivo.
+fn endpoint<'a>(
+    iface: Option<&'a device_interfaces::Model>,
+    device: Option<&'a devices::Model>,
+) -> EndpointState<'a> {
+    EndpointState {
+        oper_status: iface.and_then(|i| i.oper_status.as_deref()),
+        admin_status: iface.and_then(|i| i.admin_status.as_deref()),
+        device_status: device.map(|d| d.status.as_str()),
     }
 }
 
+/// O que a montagem de uma aresta consulta, indexado por id.
+struct EdgeLookup<'a> {
+    devices: BTreeMap<i64, &'a devices::Model>,
+    interfaces: BTreeMap<i64, &'a device_interfaces::Model>,
+    traffic: &'a BTreeMap<i64, (Option<f64>, Option<f64>)>,
+    now: chrono::DateTime<Utc>,
+}
+
+impl EdgeLookup<'_> {
+    fn edge(&self, link: device_links::Model) -> TopologyEdge {
+        let source_iface = link
+            .source_interface_id
+            .and_then(|id| self.interfaces.get(&id).copied());
+        let target_iface = link
+            .target_interface_id
+            .and_then(|id| self.interfaces.get(&id).copied());
+        let source_device = self.devices.get(&link.source_device_id).copied();
+        let target_device = self.devices.get(&link.target_device_id).copied();
+
+        let traffic_of = |id: Option<i64>| {
+            id.and_then(|id| self.traffic.get(&id))
+                .copied()
+                .unwrap_or((None, None))
+        };
+        let (src_in, src_out) = traffic_of(link.source_interface_id);
+        let (tgt_in, tgt_out) = traffic_of(link.target_interface_id);
+        let in_bps = src_in.or(tgt_in);
+        let out_bps = src_out.or(tgt_out);
+        let total_bps = match (in_bps, out_bps) {
+            (Some(i), Some(o)) => Some(i + o),
+            (one, other) => one.or(other),
+        };
+        let source_speed = source_iface.and_then(|i| i.speed);
+        let target_speed = target_iface.and_then(|i| i.speed);
+        let speed_bps = edge_speed_bps(source_speed, target_speed);
+
+        let status = edge_status(
+            endpoint(source_iface, source_device),
+            endpoint(target_iface, target_device),
+        );
+        let interface_status = |iface: Option<&device_interfaces::Model>| {
+            iface.and_then(|i| i.oper_status.clone().or_else(|| i.admin_status.clone()))
+        };
+
+        TopologyEdge {
+            id: link.id,
+            source: link.source_device_id,
+            target: link.target_device_id,
+            source_device_id: link.source_device_id,
+            target_device_id: link.target_device_id,
+            source_device_name: source_device.map(|d| d.name.clone()),
+            target_device_name: target_device.map(|d| d.name.clone()),
+            source_interface_id: link.source_interface_id,
+            target_interface_id: link.target_interface_id,
+            source_interface_name: source_iface.map(|i| i.name.clone()),
+            target_interface_name: target_iface.map(|i| i.name.clone()),
+            source_interface_speed: source_speed,
+            target_interface_speed: target_speed,
+            source_interface_status: interface_status(source_iface),
+            target_interface_status: interface_status(target_iface),
+            in_bps,
+            out_bps,
+            traffic_bps: total_bps,
+            traffic_label: total_bps.map(format_traffic_bps),
+            speed_bps,
+            utilization: edge_utilization(in_bps, out_bps, speed_bps),
+            stale: is_stale(&link.discovery_method, link.last_seen_at.as_ref(), self.now),
+            last_seen_at: link.last_seen_at.map(|seen| seen.to_rfc3339()),
+            link_type: link.link_type,
+            discovery_method: link.discovery_method,
+            confidence: link.confidence,
+            confirmed: link.confirmed,
+            status: status.into(),
+        }
+    }
+}
+
+/// Recusa interface que não pertence ao dispositivo daquela ponta — sem isso a
+/// tela desenharia a porta de um equipamento no enlace de outro.
+async fn ensure_interface_belongs(
+    db: &sea_orm::DatabaseConnection,
+    interface_id: Option<i64>,
+    device_id: i64,
+) -> AppResult<()> {
+    let Some(interface_id) = interface_id else {
+        return Ok(());
+    };
+    let belongs = device_interfaces::Entity::find_by_id(interface_id)
+        .one(db)
+        .await?
+        .is_some_and(|interface| interface.device_id == device_id);
+    if belongs {
+        Ok(())
+    } else {
+        Err(AppError::validation(
+            "A interface escolhida não pertence ao dispositivo da ligação",
+        ))
+    }
+}
+
+/// Cria (ou promove a manual) o enlace entre dois dispositivos.
+///
+/// # Errors
+///
+/// Validação (mesmo dispositivo, interface de outro equipamento), dispositivo
+/// inexistente ou erro do banco.
 pub async fn create_manual_link(
     db: &sea_orm::DatabaseConnection,
     source: i64,
@@ -331,6 +550,15 @@ pub async fn create_manual_link(
             "Uma ligação deve conectar dispositivos diferentes",
         ));
     }
+    let found = devices::Entity::find()
+        .filter(devices::Column::Id.is_in([source, target]))
+        .count(db)
+        .await?;
+    if found < 2 {
+        return Err(AppError::not_found("Dispositivo não encontrado"));
+    }
+    ensure_interface_belongs(db, source_interface, source).await?;
+    ensure_interface_belongs(db, target_interface, target).await?;
     let result = persist_resolved_links_detailed(
         db,
         vec![NetworkLink {
@@ -352,6 +580,14 @@ pub async fn create_manual_link(
         .ok_or_else(|| AppError::Internal(anyhow::anyhow!("Falha ao criar ligação")))
 }
 
+/// Edita as portas/tipo de um enlace. Editar é uma decisão do operador: o
+/// enlace passa a valer como manual (100, confirmado), e a descoberta seguinte
+/// não desfaz a escolha.
+///
+/// # Errors
+///
+/// Validação (aresta virtual, interface de outro equipamento), enlace
+/// inexistente ou erro do banco.
 pub async fn update_manual_link(
     db: &sea_orm::DatabaseConnection,
     link_id: i64,
@@ -368,6 +604,8 @@ pub async fn update_manual_link(
         .one(db)
         .await?
         .ok_or_else(|| AppError::not_found("Ligação não encontrada"))?;
+    ensure_interface_belongs(db, source_interface, link.source_device_id).await?;
+    ensure_interface_belongs(db, target_interface, link.target_device_id).await?;
 
     let mut active: device_links::ActiveModel = link.into();
     active.source_interface_id = sea_orm::Set(source_interface);
@@ -375,7 +613,10 @@ pub async fn update_manual_link(
     if let Some(t) = link_type {
         active.link_type = sea_orm::Set(t);
     }
-    active.updated_at = sea_orm::Set(chrono::Utc::now().into());
+    active.discovery_method = sea_orm::Set("user_defined".into());
+    active.confidence = sea_orm::Set(100);
+    active.confirmed = sea_orm::Set(true);
+    active.updated_at = sea_orm::Set(Utc::now().into());
     let updated = active.update(db).await?;
     Ok(updated)
 }
@@ -429,26 +670,26 @@ pub async fn create_unmanaged_switch(
     Ok(device_model)
 }
 
+/// Remove um enlace real ou, para id negativo, a hierarquia pai/filho que a
+/// aresta virtual representa (o filho perde o `parent_id`).
+///
+/// # Errors
+///
+/// Propaga erro do banco.
 pub async fn delete_link(db: &sea_orm::DatabaseConnection, id: i64) -> AppResult<bool> {
-    if id < 0 {
-        // Enlace virtual de hierarquia pai/filho gerado por append_parent_edges:
-        // id = -(device.id * 1000 + parent)
-        let devices = devices::Entity::find()
+    if let Some(child_id) = parent_edge_child(id) {
+        let Some(child) = devices::Entity::find_by_id(child_id)
             .filter(devices::Column::ParentId.is_not_null())
-            .all(db)
-            .await?;
-        for dev in devices {
-            if let Some(parent) = dev.parent_id {
-                if -(dev.id * 1000 + parent) == id {
-                    let mut active: devices::ActiveModel = dev.into();
-                    active.parent_id = sea_orm::Set(None);
-                    active.updated_at = sea_orm::Set(chrono::Utc::now().into());
-                    active.update(db).await?;
-                    return Ok(true);
-                }
-            }
-        }
-        return Ok(false);
+            .one(db)
+            .await?
+        else {
+            return Ok(false);
+        };
+        let mut active: devices::ActiveModel = child.into();
+        active.parent_id = sea_orm::Set(None);
+        active.updated_at = sea_orm::Set(Utc::now().into());
+        active.update(db).await?;
+        return Ok(true);
     }
     Ok(device_links::Entity::delete_by_id(id)
         .exec(db)
@@ -457,42 +698,111 @@ pub async fn delete_link(db: &sea_orm::DatabaseConnection, id: i64) -> AppResult
         > 0)
 }
 
+/// Recalcula os enlaces inferidos por sub-rede (ver [`infer_uplinks`]).
+///
+/// Os inferidos não confirmados de rodadas anteriores que não saem mais da
+/// regra são removidos — é o que limpa o N×M antigo. Enlace observado, manual
+/// ou confirmado nunca é tocado. Devolve quantos enlaces inferidos existem
+/// depois do recálculo.
+///
+/// # Errors
+///
+/// Propaga erro do banco.
 pub async fn infer_subnet_links(db: &sea_orm::DatabaseConnection) -> AppResult<usize> {
+    let txn = begin_write(db).await?;
+    let devices = devices::Entity::find()
+        .order_by_asc(devices::Column::Id)
+        .all(&txn)
+        .await?;
+    let links = device_links::Entity::find().all(&txn).await?;
+    let is_replaceable =
+        |link: &device_links::Model| link.discovery_method == INFERRED_METHOD && !link.confirmed;
+    let taken: BTreeSet<_> = links
+        .iter()
+        .filter(|link| !is_replaceable(link))
+        .map(|link| pair_key(link.source_device_id, link.target_device_id))
+        .collect();
+    let inferred = infer_uplinks(&devices, &taken);
+    let wanted: BTreeSet<_> = inferred
+        .iter()
+        .map(|link| pair_key(link.source_device_id, link.target_device_id))
+        .collect();
+    let obsolete: Vec<i64> = links
+        .iter()
+        .filter(|link| is_replaceable(link))
+        .filter(|link| !wanted.contains(&pair_key(link.source_device_id, link.target_device_id)))
+        .map(|link| link.id)
+        .collect();
+    for chunk in obsolete.chunks(IDS_PER_QUERY) {
+        device_links::Entity::delete_many()
+            .filter(device_links_entity::Column::Id.is_in(chunk.to_vec()))
+            .exec(&txn)
+            .await?;
+    }
+    let total = inferred.len();
+    persist_links_in(&txn, inferred).await?;
+    txn.commit().await?;
+    Ok(total)
+}
+
+/// Arestas do grafo inteiro no formato de [`shortest_path`]: os enlaces de
+/// `device_links` e as arestas virtuais de hierarquia que não duplicam um
+/// enlace. Enlace confirmado conta com confiança 100.
+///
+/// # Errors
+///
+/// Propaga erro do banco.
+pub async fn load_path_edges<C: ConnectionTrait>(db: &C) -> AppResult<Vec<PathEdge>> {
+    let links = device_links::Entity::find().all(db).await?;
     let devices = devices::Entity::find().all(db).await?;
-    let mut raw = Vec::new();
-    let mut groups = BTreeMap::<i64, Vec<_>>::new();
-    for device in devices {
-        if let Some(network) = device.network_id {
-            groups.entry(network).or_default().push(device);
-        }
-    }
-    for devices in groups.into_values() {
-        for source in devices.iter().filter(|device| {
-            matches!(
-                device.r#type.as_str(),
-                "router" | "switch" | "firewall" | "unmanaged_switch"
+    let ids: BTreeSet<i64> = devices.iter().map(|device| device.id).collect();
+    let linked: BTreeSet<_> = links
+        .iter()
+        .map(|link| pair_key(link.source_device_id, link.target_device_id))
+        .collect();
+    let mut edges: Vec<PathEdge> = links
+        .iter()
+        .map(|link| {
+            let confidence = if link.confirmed {
+                100
+            } else {
+                u8::try_from(link.confidence.clamp(0, 100)).unwrap_or(0)
+            };
+            (
+                link.id,
+                link.source_device_id,
+                link.target_device_id,
+                confidence,
             )
-        }) {
-            for target in devices.iter().filter(|device| {
-                !matches!(
-                    device.r#type.as_str(),
-                    "router" | "switch" | "firewall" | "unmanaged_switch"
-                )
-            }) {
-                raw.push(NetworkLink {
-                    source_device_id: source.id,
-                    target_device_id: target.id,
-                    source_interface_id: None,
-                    target_interface_id: target.link_interface_id,
-                    link_type: "inferred".into(),
-                    discovery_method: "subnet_inference".into(),
-                    confidence: 60,
-                    confirmed: false,
-                });
-            }
-        }
+        })
+        .collect();
+    edges.extend(
+        parent_pairs(&devices, &ids, &linked)
+            .into_iter()
+            .map(|(parent, child)| (parent_edge_id(child), parent, child, 100)),
+    );
+    Ok(edges)
+}
+
+/// Menor caminho entre dois dispositivos cadastrados.
+///
+/// # Errors
+///
+/// `NotFound` se algum dos dispositivos não existe; erro do banco.
+pub async fn find_path(
+    db: &sea_orm::DatabaseConnection,
+    from: i64,
+    to: i64,
+) -> AppResult<Option<TopologyPath>> {
+    let found = devices::Entity::find()
+        .filter(devices::Column::Id.is_in([from, to]))
+        .count(db)
+        .await?;
+    let expected = if from == to { 1 } else { 2 };
+    if found < expected {
+        return Err(AppError::not_found("Dispositivo não encontrado"));
     }
-    Ok(persist_resolved_links_detailed(db, raw).await?.links.len())
+    Ok(shortest_path(&load_path_edges(db).await?, from, to))
 }
 
 /// Converte os vizinhos LLDP/CDP observados no poll SNMP em enlaces persistidos.
@@ -616,25 +926,12 @@ mod tests {
             target,
             source_device_id: source,
             target_device_id: target,
-            source_device_name: None,
-            target_device_name: None,
-            source_interface_id: None,
-            target_interface_id: None,
-            source_interface_name: None,
-            target_interface_name: None,
-            source_interface_speed: None,
-            target_interface_speed: None,
-            source_interface_status: None,
-            target_interface_status: None,
-            in_bps: None,
-            out_bps: None,
-            traffic_bps: None,
-            traffic_label: None,
             link_type: "snmp".into(),
             discovery_method: "lldp".into(),
             confidence: 90,
             confirmed: true,
             status: "up".into(),
+            ..TopologyEdge::default()
         }
     }
 
@@ -648,12 +945,13 @@ mod tests {
         assert_eq!(edges.len(), 1);
         let aresta = &edges[0];
         // Matriz de paridade #48: id negativo distingue hierarquia de enlace real.
-        assert_eq!(aresta.id, -(7 * 1000 + 1));
-        assert!(aresta.id < 0);
+        assert_eq!(aresta.id, -7);
         assert_eq!(aresta.source, 1);
         assert_eq!(aresta.target, 7);
         assert_eq!(aresta.link_type, "parent");
         assert_eq!(aresta.discovery_method, "parent_hierarchy");
+        assert_eq!(aresta.status, "up");
+        assert!(!aresta.stale);
     }
 
     #[test]
@@ -691,10 +989,34 @@ mod tests {
 
     #[test]
     fn aresta_virtual_tem_id_negativo_reversivel() {
-        let child_id = 3;
-        let parent_id = 1;
-        let virtual_id = -(child_id * 1000 + parent_id);
-        assert_eq!(virtual_id, -3001);
-        assert_eq!(-(child_id * 1000 + parent_id), virtual_id);
+        assert_eq!(parent_edge_id(3), -3);
+        assert_eq!(parent_edge_child(parent_edge_id(3)), Some(3));
+        assert_eq!(parent_edge_child(42), None);
+        assert_eq!(parent_edge_child(0), None);
+    }
+
+    #[test]
+    fn ids_de_hierarquia_nao_colidem_com_pai_acima_de_mil() {
+        // Esquema antigo: -(1 * 1000 + 1001) == -(2 * 1000 + 1) == -2001.
+        let devices = vec![
+            dispositivo(1, Some(1001)),
+            dispositivo(2, Some(1)),
+            dispositivo(1001, None),
+        ];
+        let ids = BTreeSet::from([1, 2, 1001]);
+        let mut edges = Vec::new();
+        append_parent_edges(&mut edges, &devices, &ids);
+        let edge_ids: BTreeSet<_> = edges.iter().map(|edge| edge.id).collect();
+        assert_eq!(edge_ids, BTreeSet::from([-1, -2]));
+    }
+
+    #[test]
+    fn aresta_virtual_cai_quando_uma_ponta_esta_offline() {
+        let mut filho = dispositivo(7, Some(1));
+        filho.status = "offline".into();
+        let devices = vec![dispositivo(1, None), filho];
+        let mut edges = Vec::new();
+        append_parent_edges(&mut edges, &devices, &BTreeSet::from([1, 7]));
+        assert_eq!(edges[0].status, "down");
     }
 }

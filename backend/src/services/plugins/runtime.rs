@@ -26,10 +26,19 @@
 //! Orçamento de operações, profundidade, tamanho de string/lista/mapa e um
 //! prazo de relógio. O tempo que uma chamada passa esperando aprovação é
 //! devolvido ao prazo: o operador pensando não pode derrubar a execução.
+//! Uma chamada longa (`device.ssh_live`, até 5 min) estica o prazo para
+//! caber inteira, mais uma folga — nunca além do teto de duas vezes o prazo.
+//!
+//! # Andamento ao vivo
+//!
+//! `device.ssh_live(cmd, #{ progress })` lê a saída linha a linha enquanto o
+//! comando roda; cada linha que casa com o padrão vira uma
+//! [`ProgressSample`] (bps normalizado) entregue ao observador de andamento
+//! da execução. `device.progress(#{ flow, bps })` emite à mão.
 
 use std::{
     collections::BTreeMap,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, MutexGuard},
     time::{Duration, Instant},
 };
 
@@ -44,13 +53,26 @@ use super::{
     effect::{self, Effect},
     gate::{AccessGate, AccessRequest},
     manifest::TransportKind,
-    transport::{DeviceIoCall, DeviceIoReply, DeviceTransport, Endpoint, HttpRequest, Login},
+    transport::{
+        DeviceIoCall, DeviceIoReply, DeviceTransport, Endpoint, HttpRequest, LineSink, Login,
+    },
 };
-use crate::services::shared::text::truncate_chars;
+use crate::services::shared::{errors::AppError, text::truncate_chars};
 
 /// Quanto de cada saída entra no transcript. O script recebe a saída inteira.
 const TRANSCRIPT_OUTPUT_CHARS: usize = 8_000;
 const DEFAULT_CALL_TIMEOUT_MS: u64 = 30_000;
+/// Prazo máximo de um `device.ssh_live` (um teste de vazão de 60 s com
+/// instalação e aquecimento cabe com folga).
+pub const MAX_LIVE_TIMEOUT_MS: u64 = 300_000;
+/// Tempo que sobra ao script, depois de um `ssh_live`, para tratar a saída.
+const LIVE_GRACE: Duration = Duration::from_secs(30);
+/// Amostras de andamento por segundo que uma execução publica; o excesso é
+/// descartado (um laço de `device.progress` não inunda o SSE).
+const MAX_SAMPLES_PER_SECOND: u32 = 20;
+/// Taxa acima disto (10 Tbit/s) é leitura errada, não amostra.
+const MAX_BPS: f64 = 1e13;
+const CANCELLED: &str = "execução cancelada pelo operador";
 const PASSWORD_PLACEHOLDER: &str = "{{password}}";
 const USERNAME_PLACEHOLDER: &str = "{{username}}";
 
@@ -140,6 +162,81 @@ pub struct TranscriptEntry {
 
 pub type Observer = Arc<dyn Fn(&TranscriptEntry) + Send + Sync>;
 
+/// O sentido de uma amostra, do ponto de vista de quem roda o comando:
+/// `tx` envia, `rx` recebe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub enum ProgressFlow {
+    Tx,
+    Rx,
+}
+
+impl ProgressFlow {
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "tx" => Some(Self::Tx),
+            "rx" => Some(Self::Rx),
+            _ => None,
+        }
+    }
+}
+
+/// Uma amostra de andamento — `device.ssh_live` com `progress` ou
+/// `device.progress`. Não é gravada: vai ao SSE (`plugin:run_progress`) e a
+/// quem pediu a execução.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct ProgressSample {
+    /// Milissegundos desde o começo da execução.
+    #[ts(type = "number")]
+    pub t_ms: u64,
+    pub flow: ProgressFlow,
+    /// Bits por segundo.
+    pub bps: f64,
+}
+
+pub type ProgressObserver = Arc<dyn Fn(&ProgressSample) + Send + Sync>;
+
+/// Taxa em bps a partir do número e da unidade como os equipamentos a
+/// escrevem: `94.5` + `Mbps` (RouterOS), `94.0` + `Mbits/sec` (iperf3), com
+/// ou sem espaço, sem diferença de maiúsculas. Sem unidade, bps. Unidade de
+/// bytes (`MB/s`, `MBytes`) ou desconhecida: `None` — melhor perder a amostra
+/// que mostrar um número oito vezes errado.
+#[must_use]
+pub fn parse_rate(value: &str, unit: Option<&str>) -> Option<f64> {
+    let number: f64 = value.trim().replace(',', ".").parse().ok()?;
+    let unit: String = unit
+        .unwrap_or("bps")
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    if unit.contains('B') {
+        return None;
+    }
+    let unit = unit.to_ascii_lowercase();
+    let base = unit
+        .strip_suffix("/sec")
+        .or_else(|| unit.strip_suffix("/s"))
+        .or_else(|| unit.strip_suffix("ps"))?;
+    let prefix = base
+        .strip_suffix("bits")
+        .or_else(|| base.strip_suffix("bit"))
+        .or_else(|| base.strip_suffix('b'))?;
+    let multiplier = match prefix {
+        "" => 1.0,
+        "k" => 1e3,
+        "m" => 1e6,
+        "g" => 1e9,
+        "t" => 1e12,
+        _ => return None,
+    };
+    let bps = number * multiplier;
+    (bps.is_finite() && (0.0..=MAX_BPS).contains(&bps)).then_some(bps)
+}
+
 /// Prefixo do `kind` do aviso "começou este acesso" que o observador recebe
 /// antes da resposta (não entra no transcript): quem espera vê o que está
 /// rodando agora, e não só o que já terminou.
@@ -176,6 +273,8 @@ pub struct ExecutionContext {
     pub gate: Arc<dyn AccessGate>,
     pub cancel: CancellationToken,
     pub observer: Option<Observer>,
+    /// Quem recebe as amostras de andamento. Sem ele, elas são descartadas.
+    pub progress: Option<ProgressObserver>,
     pub limits: Limits,
 }
 
@@ -352,6 +451,9 @@ fn sandboxed_engine(limits: Limits, inner: Option<Arc<Inner>>) -> Engine {
         .register_type_with_name::<DeviceHandle>("Device")
         .register_get("info", DeviceHandle::info)
         .register_fn("ssh", DeviceHandle::ssh)
+        .register_fn("ssh_live", DeviceHandle::ssh_live)
+        .register_fn("ssh_live", DeviceHandle::ssh_live_default)
+        .register_fn("progress", DeviceHandle::progress)
         .register_fn("run", DeviceHandle::run)
         .register_fn("telnet", DeviceHandle::telnet)
         .register_fn("http", DeviceHandle::http)
@@ -514,13 +616,24 @@ pub fn url_encode(text: &str) -> String {
         .collect()
 }
 
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 struct Inner {
     context: ExecutionContext,
     runtime: tokio::runtime::Handle,
     secrets: Vec<String>,
     transcript: Mutex<Vec<TranscriptEntry>>,
     cookies: Mutex<BTreeMap<String, String>>,
+    started: Instant,
     deadline: Mutex<Instant>,
+    /// Até onde uma chamada longa pode esticar o prazo.
+    ceiling: Mutex<Instant>,
+    /// Segundo da execução e amostras já publicadas nele.
+    sample_window: Mutex<(u64, u32)>,
     /// Dentro de um `use_plugin`: o plugin usado não usa outro.
     nested: std::sync::atomic::AtomicBool,
 }
@@ -529,16 +642,62 @@ impl Inner {
     fn new(context: ExecutionContext) -> Self {
         let mut secrets = context.credentials.secrets();
         secrets.extend(context.extras.secrets.iter().cloned());
-        let deadline = Instant::now() + context.limits.deadline;
+        let started = Instant::now();
+        let deadline = started + context.limits.deadline;
+        let ceiling = started + context.limits.deadline * 2;
         Self {
             context,
             runtime: tokio::runtime::Handle::current(),
             secrets,
             transcript: Mutex::default(),
             cookies: Mutex::default(),
+            started,
             deadline: Mutex::new(deadline),
+            ceiling: Mutex::new(ceiling),
+            sample_window: Mutex::new((u64::MAX, 0)),
             nested: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    /// Estica o prazo para caber uma chamada de `wanted` mais a folga, sem
+    /// passar do teto. Devolve quanto a chamada pode durar de fato.
+    fn reserve(&self, wanted: Duration) -> Duration {
+        let now = Instant::now();
+        let ceiling = *lock(&self.ceiling);
+        let mut deadline = lock(&self.deadline);
+        let end = (now + wanted + LIVE_GRACE).min(ceiling);
+        if end > *deadline {
+            *deadline = end;
+        }
+        ceiling
+            .saturating_duration_since(now)
+            .saturating_sub(LIVE_GRACE)
+            .min(wanted)
+    }
+
+    /// Publica uma amostra, respeitando o teto por segundo. `false` quando
+    /// ela foi descartada.
+    fn emit_progress(&self, flow: ProgressFlow, bps: f64) -> bool {
+        let Some(observer) = &self.context.progress else {
+            return false;
+        };
+        if !bps.is_finite() || !(0.0..=MAX_BPS).contains(&bps) {
+            return false;
+        }
+        let t_ms = u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX);
+        {
+            let mut window = lock(&self.sample_window);
+            let second = t_ms / 1_000;
+            if window.0 != second {
+                *window = (second, 0);
+            }
+            if window.1 >= MAX_SAMPLES_PER_SECOND {
+                return false;
+            }
+            window.1 += 1;
+        }
+        observer(&ProgressSample { t_ms, flow, bps });
+        true
     }
 
     fn mask_value(&self, value: Value) -> Value {
@@ -553,7 +712,7 @@ impl Inner {
 
     fn should_stop(&self) -> Option<String> {
         if self.context.cancel.is_cancelled() {
-            return Some("execução cancelada pelo operador".into());
+            return Some(CANCELLED.into());
         }
         let deadline = *self
             .deadline
@@ -568,6 +727,7 @@ impl Inner {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         *deadline += by;
+        *lock(&self.ceiling) += by;
     }
 
     fn record(&self, mut entry: TranscriptEntry) {
@@ -628,12 +788,15 @@ impl Inner {
         )
     }
 
-    /// As três portas da nota do módulo, e depois o transporte.
+    /// As três portas da nota do módulo, e depois o transporte. Com
+    /// `on_line`, a saída chega linha a linha enquanto o comando roda.
+    /// Cancelar a execução interrompe a chamada em andamento.
     fn call(
         &self,
         transport: TransportKind,
         summary: &str,
         effect: Effect,
+        on_line: Option<LineSink<'_>>,
         build: impl FnOnce(&AccessProfile) -> DeviceIoCall,
     ) -> RhaiResult<DeviceIoReply> {
         if let Some(reason) = self.should_stop() {
@@ -692,7 +855,23 @@ impl Inner {
             });
         }
         let started = Instant::now();
-        let reply = self.runtime.block_on(self.context.transport.execute(&call));
+        let reply = self.runtime.block_on(async {
+            let work = async {
+                match on_line {
+                    Some(on_line) => {
+                        self.context
+                            .transport
+                            .execute_streaming(&call, on_line)
+                            .await
+                    }
+                    None => self.context.transport.execute(&call).await,
+                }
+            };
+            tokio::select! {
+                reply = work => reply,
+                () = self.context.cancel.cancelled() => Err(AppError::business_rule(CANCELLED)),
+            }
+        });
         let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
         let at = chrono::Utc::now().to_rfc3339();
         let origin = self.context.transport.origin();
@@ -757,8 +936,41 @@ impl Inner {
         transport: TransportKind,
         command: &str,
     ) -> RhaiResult<(String, String, Option<i32>)> {
+        self.exec_with(transport, command, DEFAULT_CALL_TIMEOUT_MS, None)
+    }
+
+    /// `device.ssh_live`: o mesmo `exec`, com prazo próprio e cada linha da
+    /// saída virando amostra quando casa com o padrão de `progress`.
+    fn exec_live(
+        &self,
+        command: &str,
+        options: &LiveOptions,
+    ) -> RhaiResult<(String, String, Option<i32>)> {
+        let allowed = self.reserve(Duration::from_millis(options.timeout_ms));
+        let timeout_ms = u64::try_from(allowed.as_millis())
+            .unwrap_or(options.timeout_ms)
+            .max(1_000);
+        let on_line = |line: &str| {
+            if let Some((flow, bps)) = options
+                .progress
+                .as_ref()
+                .and_then(|pattern| pattern.sample(line))
+            {
+                self.emit_progress(flow, bps);
+            }
+        };
+        self.exec_with(TransportKind::Ssh, command, timeout_ms, Some(&on_line))
+    }
+
+    fn exec_with(
+        &self,
+        transport: TransportKind,
+        command: &str,
+        timeout_ms: u64,
+        on_line: Option<LineSink<'_>>,
+    ) -> RhaiResult<(String, String, Option<i32>)> {
         let effect = effect::classify_command(command);
-        let reply = self.call(transport, command, effect, |profile| {
+        let reply = self.call(transport, command, effect, on_line, |profile| {
             let endpoint = self.endpoint(profile);
             let command = self.substitute(command, &profile.login);
             let login = profile.login.clone();
@@ -767,14 +979,14 @@ impl Inner {
                     endpoint,
                     login,
                     command,
-                    timeout_ms: DEFAULT_CALL_TIMEOUT_MS,
+                    timeout_ms,
                 }
             } else {
                 DeviceIoCall::SshExec {
                     endpoint,
                     login,
                     command,
-                    timeout_ms: DEFAULT_CALL_TIMEOUT_MS,
+                    timeout_ms,
                 }
             }
         })?;
@@ -816,7 +1028,7 @@ impl Inner {
                     .join("; ")
             })
         };
-        let reply = self.call(TransportKind::Http, &summary, effect, |profile| {
+        let reply = self.call(TransportKind::Http, &summary, effect, None, |profile| {
             let mut headers: Vec<(String, String)> = spec
                 .headers
                 .iter()
@@ -951,6 +1163,115 @@ impl HttpSpec {
     }
 }
 
+fn text_of(map: &Map, key: &str) -> Option<String> {
+    map.get(key)
+        .filter(|value| !value.is_unit())
+        .and_then(|value| value.clone().into_string().ok())
+}
+
+/// Como uma linha da saída vira amostra (`progress` do `ssh_live`).
+#[derive(Debug)]
+struct ProgressPattern {
+    regex: Regex,
+    /// Sentido fixo; o grupo `flow` da regex, quando casa, vale mais.
+    flow: Option<ProgressFlow>,
+}
+
+impl ProgressPattern {
+    fn from_map(map: &Map) -> RhaiResult<Self> {
+        let Some(pattern) = text_of(map, "pattern") else {
+            return fail("`progress.pattern` é obrigatório (uma regex)");
+        };
+        let regex = compile_regex(&pattern)?;
+        let has_group = |name: &str| regex.capture_names().flatten().any(|group| group == name);
+        if !has_group("value") {
+            return fail(
+                "`progress.pattern` precisa do grupo nomeado `value` (e, se houver, `unit`): \
+                 \"tx-current: (?<value>[0-9.]+)\\\\s*(?<unit>\\\\w+)\"",
+            );
+        }
+        let flow = match map.get("flow").filter(|value| !value.is_unit()) {
+            None => None,
+            Some(value) => Some(
+                value
+                    .clone()
+                    .into_string()
+                    .ok()
+                    .and_then(|text| ProgressFlow::parse(&text))
+                    .ok_or_else(|| Box::<EvalAltResult>::from("`progress.flow` é `tx` ou `rx`"))?,
+            ),
+        };
+        if flow.is_none() && !has_group("flow") {
+            return fail(
+                "diga o sentido das amostras: `progress.flow` (`tx`/`rx`) ou um grupo `flow` na regex",
+            );
+        }
+        Ok(Self { regex, flow })
+    }
+
+    fn sample(&self, line: &str) -> Option<(ProgressFlow, f64)> {
+        let captures = self.regex.captures(line)?;
+        let flow = captures
+            .name("flow")
+            .and_then(|group| ProgressFlow::parse(group.as_str()))
+            .or(self.flow)?;
+        let bps = parse_rate(
+            captures.name("value")?.as_str(),
+            captures.name("unit").map(|group| group.as_str()),
+        )?;
+        Some((flow, bps))
+    }
+}
+
+/// As opções de `device.ssh_live(cmd, #{ timeout_ms, progress })`.
+#[derive(Debug)]
+struct LiveOptions {
+    timeout_ms: u64,
+    progress: Option<ProgressPattern>,
+}
+
+impl LiveOptions {
+    fn from_map(map: &Map) -> RhaiResult<Self> {
+        let timeout_ms = match map.get("timeout_ms").filter(|value| !value.is_unit()) {
+            None => DEFAULT_CALL_TIMEOUT_MS,
+            Some(value) => value
+                .as_int()
+                .ok()
+                .and_then(|ms| u64::try_from(ms).ok())
+                .filter(|ms| (1_000..=MAX_LIVE_TIMEOUT_MS).contains(ms))
+                .ok_or_else(|| {
+                    Box::<EvalAltResult>::from(format!(
+                        "`timeout_ms` vai de 1000 a {MAX_LIVE_TIMEOUT_MS}"
+                    ))
+                })?,
+        };
+        let progress = match map.get("progress").filter(|value| !value.is_unit()) {
+            None => None,
+            Some(value) => {
+                let Some(progress) = value.read_lock::<Map>() else {
+                    return fail("`progress` precisa ser um mapa: #{ pattern, flow }");
+                };
+                Some(ProgressPattern::from_map(&progress)?)
+            }
+        };
+        Ok(Self {
+            timeout_ms,
+            progress,
+        })
+    }
+}
+
+fn exec_map(stdout: String, stderr: String, exit_code: Option<i32>) -> Map {
+    let mut map = Map::new();
+    map.insert("stdout".into(), Dynamic::from(stdout));
+    map.insert("stderr".into(), Dynamic::from(stderr));
+    map.insert(
+        "exit".into(),
+        exit_code.map_or(Dynamic::UNIT, |code| Dynamic::from(i64::from(code))),
+    );
+    map
+}
+
 fn form_encode(form: &Map) -> String {
     form.iter()
         .map(|(key, value)| format!("{}={}", url_encode(key), url_encode(&value.to_string())))
@@ -985,14 +1306,42 @@ impl DeviceHandle {
 
     fn ssh(&mut self, command: &str) -> RhaiResult<Map> {
         let (stdout, stderr, exit_code) = self.0.exec(TransportKind::Ssh, command)?;
-        let mut map = Map::new();
-        map.insert("stdout".into(), Dynamic::from(stdout));
-        map.insert("stderr".into(), Dynamic::from(stderr));
-        map.insert(
-            "exit".into(),
-            exit_code.map_or(Dynamic::UNIT, |code| Dynamic::from(i64::from(code))),
-        );
-        Ok(map)
+        Ok(exec_map(stdout, stderr, exit_code))
+    }
+
+    /// `device.ssh_live(cmd, #{ timeout_ms, progress: #{ pattern, flow } })`:
+    /// o mesmo `ssh` (portas, transcript, máscara), com prazo próprio e
+    /// amostras de andamento a partir das linhas da saída.
+    fn ssh_live(&mut self, command: &str, options: Map) -> RhaiResult<Map> {
+        let options = LiveOptions::from_map(&options)?;
+        let (stdout, stderr, exit_code) = self.0.exec_live(command, &options)?;
+        Ok(exec_map(stdout, stderr, exit_code))
+    }
+
+    fn ssh_live_default(&mut self, command: &str) -> RhaiResult<Map> {
+        self.ssh_live(command, Map::new())
+    }
+
+    /// `device.progress(#{ flow, bps })`: uma amostra à mão.
+    #[allow(clippy::cast_precision_loss)]
+    fn progress(&mut self, sample: Map) -> RhaiResult<()> {
+        let flow = text_of(&sample, "flow")
+            .and_then(|text| ProgressFlow::parse(&text))
+            .ok_or_else(|| Box::<EvalAltResult>::from("`flow` é `tx` ou `rx`"))?;
+        let bps = sample
+            .get("bps")
+            .and_then(|value| {
+                value
+                    .as_float()
+                    .ok()
+                    .or_else(|| value.as_int().ok().map(|bps| bps as f64))
+            })
+            .filter(|bps| bps.is_finite() && (0.0..=MAX_BPS).contains(bps))
+            .ok_or_else(|| {
+                Box::<EvalAltResult>::from("`bps` é um número de 0 a 10 Tbit/s (bits por segundo)")
+            })?;
+        self.0.emit_progress(flow, bps);
+        Ok(())
     }
 
     fn run(&mut self, command: &str) -> RhaiResult<String> {
@@ -1145,8 +1494,233 @@ mod tests {
             gate: Arc::new(AllowAll),
             cancel: CancellationToken::new(),
             observer: None,
+            progress: None,
             limits: Limits::default(),
         }
+    }
+
+    /// Contexto que guarda as amostras de andamento.
+    fn with_samples(
+        mut ctx: ExecutionContext,
+    ) -> (ExecutionContext, Arc<Mutex<Vec<ProgressSample>>>) {
+        let samples = Arc::new(Mutex::new(Vec::new()));
+        let sink = samples.clone();
+        ctx.progress = Some(Arc::new(move |sample: &ProgressSample| {
+            sink.lock().unwrap().push(*sample);
+        }));
+        (ctx, samples)
+    }
+
+    #[test]
+    fn taxa_normalizada_em_bps() {
+        for (value, unit, bps) in [
+            ("94.5", Some("Mbps"), 94.5e6),
+            ("94.0", Some("Mbits/sec"), 94.0e6),
+            ("1.2", Some("Gbits/sec"), 1.2e9),
+            ("512", Some("Kbps"), 512e3),
+            ("800", Some("kbits / sec"), 800e3),
+            ("10", Some("bits/sec"), 10.0),
+            ("10", Some("bps"), 10.0),
+            ("10", None, 10.0),
+            ("2,5", Some("Gbps"), 2.5e9),
+        ] {
+            let parsed = parse_rate(value, unit).unwrap();
+            assert!((parsed - bps).abs() < 1e-3, "{value} {unit:?} → {parsed}");
+        }
+        for (value, unit) in [
+            ("11.2", Some("MBytes")),
+            ("5", Some("MB/s")),
+            ("5", Some("furlongs")),
+            ("x", Some("Mbps")),
+            ("-1", Some("Mbps")),
+        ] {
+            assert_eq!(parse_rate(value, unit), None, "{value} {unit:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn ssh_live_transforma_linhas_em_amostras() {
+        let script = r#"
+            fn tp_run(device, params) {
+                let r = device.ssh_live("iperf3 -c 10.0.0.2 -t 2", #{
+                    timeout_ms: 60000,
+                    progress: #{ pattern: "\\]\\s+[0-9.]+-[0-9.]+\\s+sec\\s+[0-9.]+\\s+\\w+\\s+(?<value>[0-9.]+)\\s*(?<unit>\\S+)", flow: "tx" }
+                });
+                r.exit
+            }
+        "#;
+        let stdout = "Connecting to host 10.0.0.2, port 5201\n\
+                      [  5]   0.00-1.00   sec  11.2 MBytes  94.0 Mbits/sec\n\
+                      [  5]   1.00-2.00   sec  11.4 MBytes  95.5 Mbits/sec\n\
+                      iperf Done.\n";
+        let (ctx, samples) = with_samples(context(
+            vec![ssh("iperf3 -c 10.0.0.2 -t 2", stdout)],
+            Effect::Read,
+        ));
+        let outcome = execute(script, "tp_run", json!({}), ctx).await;
+        assert_eq!(outcome.output.unwrap(), json!(0));
+        let samples = samples.lock().unwrap().clone();
+        let rates: Vec<f64> = samples.iter().map(|sample| sample.bps).collect();
+        assert_eq!(rates, [94.0e6, 95.5e6]);
+        assert!(samples.iter().all(|sample| sample.flow == ProgressFlow::Tx));
+        assert_eq!(outcome.transcript.len(), 1);
+        assert_eq!(outcome.transcript[0].kind, "ssh");
+    }
+
+    #[tokio::test]
+    async fn sentido_pode_vir_da_propria_linha() {
+        let script = r#"
+            fn tp_run(device, params) {
+                device.ssh_live("/tool bandwidth-test address=10.0.0.2 duration=2s direction=both", #{
+                    progress: #{ pattern: "(?<flow>tx|rx)-current:\\s*(?<value>[0-9.]+)\\s*(?<unit>\\w+)" }
+                });
+                ()
+            }
+        "#;
+        let stdout = "status: running\ntx-current: 94.5Mbps\nrx-current: 12Mbps\n";
+        let (ctx, samples) = with_samples(context(
+            vec![ssh(
+                "/tool bandwidth-test address=10.0.0.2 duration=2s direction=both",
+                stdout,
+            )],
+            Effect::Read,
+        ));
+        execute(script, "tp_run", json!({}), ctx)
+            .await
+            .output
+            .unwrap();
+        let samples: Vec<(ProgressFlow, f64)> = samples
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|sample| (sample.flow, sample.bps))
+            .collect();
+        assert_eq!(
+            samples,
+            [(ProgressFlow::Tx, 94.5e6), (ProgressFlow::Rx, 12e6)]
+        );
+    }
+
+    #[tokio::test]
+    async fn opcoes_invalidas_do_ssh_live_sao_recusadas() {
+        for (options, message) in [
+            ("#{ timeout_ms: 500 }", "timeout_ms"),
+            ("#{ timeout_ms: 400000 }", "timeout_ms"),
+            (
+                "#{ progress: #{ pattern: \"x\", flow: \"tx\" } }",
+                "`value`",
+            ),
+            (
+                "#{ progress: #{ pattern: \"(?<value>\\\\d+)\" } }",
+                "sentido",
+            ),
+            (
+                "#{ progress: #{ pattern: \"(?<value>\\\\d+)\", flow: \"up\" } }",
+                "`tx` ou `rx`",
+            ),
+        ] {
+            let script =
+                format!("fn tp_run(device, params) {{ device.ssh_live(\"uptime\", {options}) }}");
+            let error = execute(&script, "tp_run", json!({}), context(vec![], Effect::Read))
+                .await
+                .output
+                .unwrap_err();
+            assert!(error.contains(message), "{options}: {error}");
+        }
+    }
+
+    #[tokio::test]
+    async fn servidor_em_segundo_plano_e_escrita() {
+        let script = r#"fn tp_run(device, params) { device.ssh_live("iperf3 -s -D -p 5201") }"#;
+        let outcome = execute(
+            script,
+            "tp_run",
+            json!({}),
+            context(vec![ssh("iperf3 -s -D -p 5201", "")], Effect::Read),
+        )
+        .await;
+        assert!(outcome.output.unwrap_err().contains("leitura"));
+        assert_eq!(outcome.transcript[0].kind, "denied");
+    }
+
+    #[tokio::test]
+    async fn progress_manual_valida_e_respeita_o_teto_por_segundo() {
+        let script = r#"fn tp_run(device, params) {
+            for i in 0..50 { device.progress(#{ flow: "rx", bps: 1000 + i }); }
+            device.progress(#{ flow: "tx", bps: 2.5e6 });
+        }"#;
+        let (ctx, samples) = with_samples(context(vec![], Effect::Read));
+        execute(script, "tp_run", json!({}), ctx)
+            .await
+            .output
+            .unwrap();
+        let count = samples.lock().unwrap().len();
+        assert!(count <= MAX_SAMPLES_PER_SECOND as usize * 2, "{count}");
+        assert!(count >= 1);
+
+        let errado = r#"fn tp_run(device, params) { device.progress(#{ flow: "up", bps: 1 }) }"#;
+        let error = execute(errado, "tp_run", json!({}), context(vec![], Effect::Read))
+            .await
+            .output
+            .unwrap_err();
+        assert!(error.contains("`tx` ou `rx`"), "{error}");
+        let negativo = r#"fn tp_run(device, params) { device.progress(#{ flow: "tx", bps: -1 }) }"#;
+        assert!(
+            execute(negativo, "tp_run", json!({}), context(vec![], Effect::Read))
+                .await
+                .output
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn cancelar_interrompe_a_chamada_em_andamento() {
+        struct Lento;
+        #[async_trait::async_trait]
+        impl DeviceTransport for Lento {
+            async fn execute(
+                &self,
+                _call: &DeviceIoCall,
+            ) -> crate::services::shared::errors::AppResult<DeviceIoReply> {
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                unreachable!("cancelada antes")
+            }
+            fn origin(&self) -> String {
+                "lento".into()
+            }
+        }
+        let script =
+            r#"fn tp_run(device, params) { device.ssh_live("sleep 30", #{ timeout_ms: 60000 }) }"#;
+        let mut ctx = context(vec![], Effect::Read);
+        ctx.transport = Arc::new(Lento);
+        let cancel = ctx.cancel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            cancel.cancel();
+        });
+        let started = Instant::now();
+        let outcome = execute(script, "tp_run", json!({}), ctx).await;
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(outcome.output.unwrap_err().contains("cancelada"));
+    }
+
+    #[test]
+    fn chamada_longa_estica_o_prazo_ate_o_teto() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let _guard = runtime.enter();
+        let mut ctx = context(vec![], Effect::Read);
+        ctx.limits.deadline = Duration::from_secs(60);
+        let inner = Inner::new(ctx);
+        // Cabe: o prazo passa a cobrir a chamada e a folga.
+        assert_eq!(
+            inner.reserve(Duration::from_secs(50)),
+            Duration::from_secs(50)
+        );
+        assert!(*lock(&inner.deadline) >= inner.started + Duration::from_secs(80));
+        // Não cabe: limitada ao teto (2 × prazo) menos a folga.
+        let allowed = inner.reserve(Duration::from_secs(300));
+        assert!(allowed <= Duration::from_secs(90), "{allowed:?}");
+        assert!(*lock(&inner.deadline) <= inner.started + Duration::from_secs(121));
     }
 
     fn ssh(command: &str, stdout: &str) -> Fixture {

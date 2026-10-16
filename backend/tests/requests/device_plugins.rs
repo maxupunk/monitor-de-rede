@@ -593,3 +593,155 @@ async fn modo_automatico_exige_o_termo_e_vale_por_conversa() {
     })
     .await;
 }
+
+/// Plugin com ação no nó da topologia que emite andamento.
+fn topology_package() -> Value {
+    json!({
+        "format": 1,
+        "manifest": {
+            "slug": "medidor-teste",
+            "name": "Medidor de teste",
+            "version": "1.0.0",
+            "transports": ["http"],
+            "surfaces": ["device", "topology"],
+            "actions": [
+                { "id": "detect", "title": "Detectar", "effect": "read", "output": "kv" },
+                { "id": "medir", "title": "Medir", "effect": "read", "output": "kv" }
+            ],
+            "topology": { "nodeActions": ["medir"] }
+        },
+        "script": "fn detect(device, params) { let p = device.get(\"/\"); #{ status: p.status, firmware: \"1.0\" } }\nfn medir(device, params) { let p = device.get(\"/\"); device.progress(#{ flow: \"rx\", bps: 1000 }); #{ status: p.status } }",
+        "usage": "## Detectar\nLê a página inicial.\n## Medir\nLê a página e informa o andamento.",
+        "tests": {
+            "unit": [
+                { "action": "detect",
+                  "fixtures": [ { "http": "GET /", "status": 200, "body": "ok" } ],
+                  "expect": { "status": 200, "firmware": "1.0" } },
+                { "action": "medir",
+                  "fixtures": [ { "http": "GET /", "status": 200, "body": "ok" } ],
+                  "expect": { "status": 200 } }
+            ],
+            "functional": [
+                { "action": "detect", "expectKeys": ["status"] },
+                { "action": "medir", "expectKeys": ["status"] }
+            ]
+        }
+    })
+}
+
+#[tokio::test]
+#[serial]
+async fn topologia_mostra_acoes_do_no_e_servico_executa_com_andamento() {
+    use backend::services::plugins::{
+        invoke::{self, RunStatus, ServiceRunRequest},
+        runs::Origin,
+        runtime::ProgressFlow,
+    };
+
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        session_with_role(&mut request, &ctx, Role::Admin).await;
+        let port = web_device().await;
+        let device = device(&ctx).await;
+        request
+            .put(&format!("/api/devices/{}/credentials", device.id))
+            .json(
+                &json!({ "kind": "http", "username": "admin", "secret": "s3nh4",
+                           "storage": "vault", "port": port }),
+            )
+            .await
+            .assert_status_success();
+
+        let criado = request
+            .post("/api/plugins")
+            .json(&json!({ "package": topology_package() }))
+            .await;
+        criado.assert_status(axum::http::StatusCode::CREATED);
+        let id = json_of(&criado.text())["summary"]["id"].as_i64().unwrap();
+        let testes = json_of(
+            &request
+                .post(&format!("/api/plugins/{id}/test"))
+                .await
+                .text(),
+        );
+        assert_eq!(testes["passed"], true, "{testes}");
+        request
+            .post(&format!("/api/plugins/{id}/promote"))
+            .await
+            .assert_status_success();
+
+        // Antes de instalar, o nó não oferece nada.
+        let vazio = json_of(&request.get("/api/plugins/topology-actions").await.text());
+        assert_eq!(vazio, json!({}));
+        request
+            .post(&format!("/api/devices/{}/plugins/{id}/install", device.id))
+            .await
+            .assert_status_success();
+
+        let acoes = json_of(
+            &request
+                .get(&format!(
+                    "/api/plugins/topology-actions?deviceIds={}",
+                    device.id
+                ))
+                .await
+                .text(),
+        );
+        let do_no = &acoes[device.id.to_string()];
+        assert_eq!(do_no.as_array().unwrap().len(), 1, "{acoes}");
+        assert_eq!(do_no[0]["pluginSlug"], "medidor-teste");
+        assert_eq!(do_no[0]["action"], "medir");
+        assert_eq!(do_no[0]["effect"], "read");
+        assert_eq!(do_no[0]["hasParams"], false);
+        assert_eq!(do_no[0]["definition"]["title"], "Medir");
+        request
+            .get("/api/plugins/topology-actions?deviceIds=abc")
+            .await
+            .assert_status_not_ok();
+
+        // O orquestrador chama a ação sem HTTP e recebe as amostras.
+        let (sender, mut samples) = tokio::sync::mpsc::unbounded_channel();
+        let outcome = invoke::execute(
+            &ctx,
+            ServiceRunRequest {
+                device_id: device.id,
+                plugin_slug: "medidor-teste".into(),
+                action: "medir".into(),
+                params: json!({}),
+                origin: Origin::LinkTest,
+                user_id: None,
+                reason: Some("teste de enlace".into()),
+                progress: Some(sender),
+                cancel: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(outcome.status, RunStatus::Succeeded, "{outcome:?}");
+        assert_eq!(outcome.output.unwrap()["status"], 200);
+        let sample = samples.try_recv().expect("amostra de andamento");
+        assert_eq!(sample.flow, ProgressFlow::Rx);
+        assert!((sample.bps - 1000.0).abs() < f64::EPSILON);
+
+        let run = finished_run(&request, outcome.run_id).await;
+        assert_eq!(run["origin"], "link_test");
+        assert_eq!(run["transcript"][0]["kind"], "http");
+
+        let ausente = invoke::execute(
+            &ctx,
+            ServiceRunRequest {
+                device_id: device.id,
+                plugin_slug: "nao-existe".into(),
+                action: "medir".into(),
+                params: json!({}),
+                origin: Origin::LinkTest,
+                user_id: None,
+                reason: None,
+                progress: None,
+                cancel: None,
+            },
+        )
+        .await;
+        assert!(ausente.is_err());
+    })
+    .await;
+}

@@ -748,6 +748,51 @@ pub async fn is_installed<C: ConnectionTrait>(
         .is_some())
 }
 
+/// Os plugins **ativos** instalados em cada equipamento — `(device_id,
+/// plugin)`, só dos equipamentos de `device_ids` quando há lista. É a base do
+/// que a topologia oferece no nó e do que o teste de enlace pode usar.
+///
+/// # Errors
+///
+/// Erro do banco.
+pub async fn installed_active<C: ConnectionTrait>(
+    db: &C,
+    device_ids: Option<&[i64]>,
+) -> AppResult<Vec<(i64, plugins::Model)>> {
+    let mut installs = device_plugin_installs::Entity::find();
+    if let Some(ids) = device_ids {
+        installs = installs.filter(device_plugin_installs::Column::DeviceId.is_in(ids.to_vec()));
+    }
+    let installs = installs.all(db).await?;
+    if installs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let plugin_ids: HashSet<i64> = installs.iter().map(|install| install.plugin_id).collect();
+    let active: HashMap<i64, plugins::Model> = plugins::Entity::find()
+        .filter(plugins::Column::Id.is_in(plugin_ids))
+        .filter(plugins::Column::Status.eq(status::ACTIVE))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|plugin| (plugin.id, plugin))
+        .collect();
+    let mut found: Vec<(i64, plugins::Model)> = installs
+        .into_iter()
+        .filter_map(|install| {
+            active
+                .get(&install.plugin_id)
+                // Exclusivo de outro equipamento não vale aqui (instalação
+                // antiga, de antes de o plugin virar exclusivo).
+                .filter(|plugin| plugin.device_id.is_none_or(|id| id == install.device_id))
+                .map(|plugin| (install.device_id, plugin.clone()))
+        })
+        .collect();
+    found.sort_by(|(a_device, a), (b_device, b)| {
+        a_device.cmp(b_device).then_with(|| a.name.cmp(&b.name))
+    });
+    Ok(found)
+}
+
 /// Instala o plugin no equipamento — dá a ele uma aba. Não acessa o
 /// equipamento; é a escolha do operador. Idempotente.
 ///

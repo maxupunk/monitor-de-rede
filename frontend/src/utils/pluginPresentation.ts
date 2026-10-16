@@ -77,6 +77,8 @@ const ORIGIN: Record<string, string> = {
   user: 'Operador',
   ai: 'IA',
   validation: 'Validação',
+  fleet: 'Frota',
+  link_test: 'Teste de enlace',
 }
 
 const FALLBACK: Presentation = { label: '—', color: 'secondary', icon: 'mdi-help' }

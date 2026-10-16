@@ -21,6 +21,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use crate::{
     controllers,
     initializers::ai::AiInitializer,
+    initializers::btest::BtestInitializer,
     initializers::monitoring::MonitoringInitializer,
     initializers::process_deps,
     initializers::setup::SetupInitializer,
@@ -147,6 +148,7 @@ impl Hooks for App {
             Box::new(SystemDeviceInitializer),
             Box::new(SyslogInitializer),
             Box::new(AiInitializer),
+            Box::new(BtestInitializer),
         ])
     }
 

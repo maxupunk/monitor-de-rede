@@ -4,6 +4,10 @@
 //! canal que ele mantém. E o agente decide — `Permission::DeviceIo` precisa
 //! estar no `AGENT_ALLOW` do host, e o alvo precisa ser da rede privada. A
 //! checagem de permissão aqui só evita mandar um pedido que seria recusado.
+//!
+//! `execute_streaming` ainda é o padrão do trait (as linhas chegam no fim):
+//! o repasse dos `Chunk` do agente enquanto o comando roda vem com o
+//! protocolo 4 (ADR 015, §6).
 
 use std::{sync::Arc, time::Duration};
 

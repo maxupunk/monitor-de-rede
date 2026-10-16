@@ -12,5 +12,6 @@ pub mod playbook;
 pub mod port_scanner;
 pub mod speedtest;
 pub mod tcp_probe;
+pub mod throughput;
 pub mod traceroute;
 pub mod udp_probes;

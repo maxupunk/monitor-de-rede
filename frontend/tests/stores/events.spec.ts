@@ -257,6 +257,38 @@ describe('events store', () => {
     events.disconnect()
   })
 
+  it('topology:updated não recarrega o grafo de quem nunca abriu o mapa', () => {
+    vi.useFakeTimers()
+    const apiGet = vi.spyOn(apiService, 'get')
+    const events = useEventsStore()
+    events.connect()
+    FakeEventSource.latest?.onmessage?.({
+      data: JSON.stringify({ type: 'topology:updated', timestamp: 'x', data: {} }),
+    } as MessageEvent<string>)
+    vi.advanceTimersByTime(1000)
+    expect(apiGet).not.toHaveBeenCalled()
+    events.disconnect()
+    vi.useRealTimers()
+  })
+
+  it('topology:layout_updated do site em exibição avisa a tela, sem consultar a API', () => {
+    const apiGet = vi.spyOn(apiService, 'get')
+    const topology = useTopologyStore()
+    topology.siteId = 7
+    const events = useEventsStore()
+    events.connect()
+    FakeEventSource.latest?.onmessage?.({
+      data: JSON.stringify({
+        type: 'topology:layout_updated',
+        timestamp: 'x',
+        data: { siteId: 7 },
+      }),
+    } as MessageEvent<string>)
+    expect(topology.remoteLayoutRevision).toBe(1)
+    expect(apiGet).not.toHaveBeenCalled()
+    events.disconnect()
+  })
+
   it('storages:updated não consulta a API de quem nunca abriu a tela (rota de admin)', () => {
     vi.useFakeTimers()
     const apiGet = vi.spyOn(apiService, 'get').mockResolvedValue([])

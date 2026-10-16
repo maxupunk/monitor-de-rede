@@ -18,3 +18,4 @@ decisão cria.
 | [012](012-plugins-de-dispositivo.md) | Plugins de dispositivo: script Rhai em sandbox, E/S por transporte único, aprovação por chamada | — | aceito |
 | [013](013-ponte-de-banco-pelo-agente.md) | Backup de banco que só o agente alcança: ponte TCP tipada, dump continua na central | — | aceito |
 | [014](014-docker-local-pelo-agente.md) | Docker da central atendido por um agente local: socket fora da API, um caminho só para todo host | — | aceito |
+| [015](015-teste-de-enlace.md) | Teste de enlace: motores iperf3/btest nativos, papéis declarados por plugin, orquestração na central | — | aceito |

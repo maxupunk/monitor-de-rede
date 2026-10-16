@@ -133,6 +133,8 @@ texto). Erro: `throw "mensagem"`.
 |---|---|
 | `device.run(cmd)` | stdout (texto); **lança erro** se o código de saída ≠ 0 |
 | `device.ssh(cmd)` | `#{ stdout, stderr, exit }` — não lança |
+| `device.ssh_live(cmd, #{ timeout_ms, progress })` | igual a `ssh`, para comando longo (teste de vazão): prazo próprio (padrão 30 000, de 1 000 a 300 000 ms) e, com `progress: #{ pattern, flow }`, cada linha da saída que casa vira amostra ao vivo (ver "Andamento ao vivo") |
+| `device.progress(#{ flow, bps })` | emite uma amostra à mão (`flow`: `tx`/`rx`; `bps` em bits/s) |
 | `device.telnet(cmd)` | saída (texto) |
 | `device.get(path)` | `#{ status, headers, body }` |
 | `device.post_form(path, #{ campo: valor })` | idem |
@@ -458,6 +460,72 @@ cada um continua no cadastro do dispositivo.
 - Testes: `"settings": { "fleet": {...}, "device": {...} }` no teste unitário
   simula a configuração; teste de `reduce` usa `"action": "<id da ação de
   frota>"` com `"input": [ ...resultados... ]` e sem fixtures.
+
+## Andamento ao vivo (`device.ssh_live`)
+
+Comando que demora e imprime o andamento (teste de vazão) usa `ssh_live`. O
+`pattern` é uma regex com o grupo nomeado `value` e, opcionalmente, `unit`
+(`bps`, `Kbps`, `Mbps`, `Gbps`, `bits/sec`, `Kbits/sec`, `Mbits/sec`,
+`Gbits/sec` — com ou sem espaço; unidade de bytes é ignorada). O sentido vem de
+`flow` (`tx` = este equipamento envia, `rx` = recebe) ou de um grupo `flow` na
+própria regex. Cada linha que casa vira uma amostra em bps no SSE
+(`plugin:run_progress`); nada disso é gravado — o resultado da ação continua
+sendo o que ela devolve.
+
+```rhai
+// RouterOS: "tx-current: 94.5Mbps" / "rx-current: 12Mbps"
+let r = device.ssh_live("/tool bandwidth-test address=" + params.target + " duration=" + params.durationS + "s direction=both",
+    #{ timeout_ms: (params.durationS + 20) * 1000,
+       progress: #{ pattern: "(?<flow>tx|rx)-current:\\s*(?<value>[0-9.]+)\\s*(?<unit>\\w+)" } });
+// iperf3: "[  5]   0.00-1.00   sec  11.2 MBytes  94.0 Mbits/sec"
+device.ssh_live("iperf3 -c " + shell_quote(params.target) + " -t 5",
+    #{ progress: #{ pattern: "sec\\s+\\S+\\s+\\S+\\s+(?<value>[0-9.]+)\\s*(?<unit>\\S+/sec)", flow: "tx" } });
+```
+
+O efeito é classificado como o do `ssh`: o cliente (`iperf3 -c`,
+`/tool bandwidth-test`, `btest -c`) é leitura; servidor em segundo plano
+(`iperf3 -s -D`), `kill`, `/user add` e `/tool bandwidth-server set` são
+escrita.
+
+## Teste de enlace (`throughput`)
+
+Plugin que participa do teste de enlace declara o que o equipamento **serve**
+(hospeda o servidor) e o que **dirige** (é o cliente), e as ações de cada papel:
+
+```json
+"throughput": {
+  "serve": [{ "engine": "btest" }],
+  "drive": [{ "engine": "btest", "auth": true }],
+  "actions": { "prepare": "tp_prepare", "serve": "tp_serve", "stop": "tp_stop", "run": "tp_run" }
+}
+```
+
+- Motores: `iperf3`, `btest`. `auth: false` = o cliente só fala com servidor
+  sem autenticação. Com `serve`, `actions.serve` e `actions.stop` são
+  obrigatórias; com `drive`, `actions.run`. `prepare` (instalar o que falta) é
+  opcional.
+- `prepare`, `serve` e `stop` são `write`; `run` é `read`.
+- Os parâmetros são **fixos** — a plataforma passa estes e só estes (sem
+  `required`: o que não se aplica não vem):
+
+| Papel | Parâmetros | Devolve |
+|---|---|---|
+| `prepare` | `engine`, `role` (`serve`/`drive`) | `#{ ready, installed: [...] }` |
+| `serve` | `engine`, `port` (número), `peer`, `user`, `password` (`secret: true`), `requireAuth` (boolean) | `#{ port, handle }` — `handle` é texto opaco (use `json_encode`), volta intacto no `stop` |
+| `stop` | `engine`, `handle` | `#{ stopped }` |
+| `run` | `engine`, `target`, `port`, `direction`, `durationS`, `streams`, `limitMbps` (números), `user`, `password` (`secret: true`) | `#{ engine, txBps, rxBps, txBytes, rxBytes, retransmits, samples }` |
+
+- `user`/`password` do teste são gerados a cada teste e nunca gravados — não
+  são a credencial do equipamento (não use `{{password}}` aqui).
+- `stop` desfaz **exatamente** o que o `handle` diz (o usuário temporário, o
+  `authenticate` anterior, o PID do `iperf3 -s`).
+
+## Topologia (`topology`)
+
+Com `"surfaces": [..., "topology"]` e `"topology": { "nodeActions": ["acao", …] }`,
+as ações aparecem no painel e no menu do nó dos equipamentos onde o plugin está
+instalado e ativo, com o mesmo diálogo de execução da aba. Bloco e superfície
+andam juntos; ação que revela segredo (`reveals`) não entra.
 
 ## Antes de salvar
 

@@ -6,6 +6,10 @@
 //! execução. Telnet reaproveita o cliente da ativação de syslog. HTTP é um
 //! `reqwest` único por execução, sem seguir redirecionamento — o plugin vê o
 //! `302` e o `Set-Cookie` do login, que o runtime guarda.
+//!
+//! Só o SSH entrega a saída linha a linha de verdade (`execute_streaming`):
+//! as mensagens `Data` do canal chegam aos pedaços enquanto o comando roda.
+//! Telnet e HTTP entregam as linhas no fim.
 
 use std::{collections::HashMap, net::IpAddr, sync::Arc, time::Duration};
 
@@ -14,8 +18,8 @@ use russh::{client::Handle, ChannelMsg};
 use tokio::{sync::Mutex, time::timeout};
 
 use super::{
-    bytes_to_text, DeviceIoCall, DeviceIoReply, DeviceTransport, Endpoint, HttpRequest, Login,
-    MAX_OUTPUT_BYTES,
+    bytes_to_text, feed_lines, DeviceIoCall, DeviceIoReply, DeviceTransport, Endpoint, HttpRequest,
+    LineSink, LineSplitter, Login, MAX_OUTPUT_BYTES,
 };
 use crate::services::{
     shared::errors::{AppError, AppResult},
@@ -70,6 +74,7 @@ impl LocalTransport {
         endpoint: &Endpoint,
         login: &Login,
         command: &str,
+        on_line: Option<LineSink<'_>>,
     ) -> AppResult<DeviceIoReply> {
         let session = self.ssh_session(endpoint, login).await?;
         let mut channel = session
@@ -81,9 +86,15 @@ impl LocalTransport {
             .await
             .map_err(falha_de_acesso)?;
         let (mut stdout, mut stderr, mut exit_code) = (Vec::new(), Vec::new(), None);
+        let mut lines = LineSplitter::default();
         while let Some(message) = channel.wait().await {
             match message {
-                ChannelMsg::Data { data } => append_capped(&mut stdout, &data),
+                ChannelMsg::Data { data } => {
+                    if let Some(on_line) = on_line {
+                        lines.push(&data, on_line);
+                    }
+                    append_capped(&mut stdout, &data);
+                }
                 ChannelMsg::ExtendedData { data, .. } => append_capped(&mut stderr, &data),
                 ChannelMsg::ExitStatus { exit_status } => {
                     exit_code = i32::try_from(exit_status).ok();
@@ -91,6 +102,9 @@ impl LocalTransport {
                 ChannelMsg::Eof | ChannelMsg::Close if exit_code.is_some() => break,
                 _ => {}
             }
+        }
+        if let Some(on_line) = on_line {
+            lines.flush(on_line);
         }
         let _ = channel.close().await;
         Ok(DeviceIoReply::Exec {
@@ -196,9 +210,14 @@ fn strip_echo(output: &str, command: &str) -> String {
     }
 }
 
-#[async_trait]
-impl DeviceTransport for LocalTransport {
-    async fn execute(&self, call: &DeviceIoCall) -> AppResult<DeviceIoReply> {
+impl LocalTransport {
+    /// A chamada, com o prazo dela; `on_line` recebe a saída do SSH aos
+    /// pedaços e a dos outros transportes no fim.
+    async fn dispatch(
+        &self,
+        call: &DeviceIoCall,
+        on_line: Option<LineSink<'_>>,
+    ) -> AppResult<DeviceIoReply> {
         let limit = Duration::from_millis(call.timeout_ms().clamp(1_000, 300_000));
         let work = async {
             match call {
@@ -207,13 +226,19 @@ impl DeviceTransport for LocalTransport {
                     login,
                     command,
                     ..
-                } => self.ssh_exec(endpoint, login, command).await,
+                } => self.ssh_exec(endpoint, login, command, on_line).await,
                 DeviceIoCall::TelnetExec {
                     endpoint,
                     login,
                     command,
                     ..
-                } => Self::telnet_exec(endpoint, login, command).await,
+                } => {
+                    let reply = Self::telnet_exec(endpoint, login, command).await?;
+                    if let Some(on_line) = on_line {
+                        feed_lines(&reply, on_line);
+                    }
+                    Ok(reply)
+                }
                 DeviceIoCall::HttpRequest {
                     endpoint,
                     https,
@@ -231,6 +256,21 @@ impl DeviceTransport for LocalTransport {
                 limit.as_secs()
             ))
         })?
+    }
+}
+
+#[async_trait]
+impl DeviceTransport for LocalTransport {
+    async fn execute(&self, call: &DeviceIoCall) -> AppResult<DeviceIoReply> {
+        self.dispatch(call, None).await
+    }
+
+    async fn execute_streaming(
+        &self,
+        call: &DeviceIoCall,
+        on_line: LineSink<'_>,
+    ) -> AppResult<DeviceIoReply> {
+        self.dispatch(call, Some(on_line)).await
     }
 
     fn origin(&self) -> String {
@@ -305,7 +345,14 @@ AAAEDv3xpp8fBhWhAcvTQ+b0Y4gcPVjhRxTQhYBMDhiXU/7g0vAFOwfz8VL8IF81Q2NCy6
         ) -> Result<(), Self::Error> {
             let command = String::from_utf8_lossy(data).to_string();
             session.channel_success(channel)?;
-            session.data(channel, format!("ran: {command}\n").into_bytes())?;
+            if command == "stream" {
+                // A saída chega em pedaços que não respeitam o fim da linha.
+                for chunk in ["tx: 1Mb", "ps\ntx: 2Mbps\n", "tx: 3Mbps"] {
+                    session.data(channel, chunk.as_bytes().to_vec())?;
+                }
+            } else {
+                session.data(channel, format!("ran: {command}\n").into_bytes())?;
+            }
             session.exit_status_request(channel, u32::from(command == "false"))?;
             session.eof(channel)?;
             session.close(channel)?;
@@ -374,6 +421,26 @@ AAAEDv3xpp8fBhWhAcvTQ+b0Y4gcPVjhRxTQhYBMDhiXU/7g0vAFOwfz8VL8IF81Q2NCy6
             1,
             "uma sessão só"
         );
+    }
+
+    #[tokio::test]
+    async fn ssh_ao_vivo_entrega_linha_a_linha_e_a_saida_inteira_no_fim() {
+        let port = ssh_server().await;
+        let transport = LocalTransport::new("central").unwrap();
+        let lines = std::sync::Mutex::new(Vec::new());
+        let sink = |line: &str| lines.lock().unwrap().push(line.to_owned());
+        let reply = transport
+            .execute_streaming(&ssh_call(port, "s3nh4", "stream"), &sink)
+            .await
+            .unwrap();
+        assert_eq!(
+            lines.into_inner().unwrap(),
+            ["tx: 1Mbps", "tx: 2Mbps", "tx: 3Mbps"]
+        );
+        let DeviceIoReply::Exec { stdout, .. } = reply else {
+            panic!("resposta de exec esperada");
+        };
+        assert_eq!(stdout, "tx: 1Mbps\ntx: 2Mbps\ntx: 3Mbps");
     }
 
     #[tokio::test]

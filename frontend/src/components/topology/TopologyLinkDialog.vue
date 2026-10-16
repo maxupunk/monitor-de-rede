@@ -35,12 +35,22 @@
             variant="text"
             density="comfortable"
             color="white"
+            aria-label="Fechar"
             @click="close"
           ></v-btn>
         </div>
       </v-card-item>
 
       <v-card-text class="pa-4 pa-sm-6 flex-grow-1 overflow-y-auto">
+        <v-alert
+          v-if="saveError"
+          type="error"
+          variant="tonal"
+          density="compact"
+          class="mb-4"
+          :text="saveError"
+        ></v-alert>
+
         <!-- Visual Connection Preview Banner -->
         <div class="connection-preview-card pa-4 rounded-lg mb-6 elevation-1">
           <div class="text-caption font-weight-bold text-medium-emphasis mb-2 text-uppercase">
@@ -54,7 +64,7 @@
               </div>
               <v-chip
                 size="x-small"
-                :color="selectedSourceInterface ? 'primary' : 'default'"
+                :color="selectedSourceInterface ? 'primary' : 'info'"
                 class="mt-1 font-weight-medium"
               >
                 {{ selectedSourceInterface?.name || 'Porta Automática/Padrão' }}
@@ -63,11 +73,11 @@
 
             <!-- Cable Indicator -->
             <div class="d-flex flex-column align-center px-3">
-              <v-icon :color="getLinkColor(form.linkType)" size="28" class="cable-pulse-icon">
-                {{ getLinkTypeIcon(form.linkType) }}
+              <v-icon :color="linkLook.color" size="28" class="cable-pulse-icon">
+                {{ linkLook.icon }}
               </v-icon>
               <span class="text-caption font-weight-bold mt-1 text-primary">
-                {{ getLinkTypeLabel(form.linkType) }}
+                {{ linkLook.label }}
               </span>
             </div>
 
@@ -78,7 +88,7 @@
               </div>
               <v-chip
                 size="x-small"
-                :color="selectedTargetInterface ? 'success' : 'default'"
+                :color="selectedTargetInterface ? 'success' : 'info'"
                 class="mt-1 font-weight-medium"
               >
                 {{ selectedTargetInterface?.name || 'Porta Automática/Padrão' }}
@@ -115,8 +125,8 @@
                   <template #item="{ props: itemProps, item }">
                     <v-list-item v-bind="itemProps" :subtitle="item.ipAddress || item.type">
                       <template #prepend>
-                        <v-icon :color="item.status === 'online' ? 'success' : 'grey'">
-                          {{ getNodeIcon(item.type) }}
+                        <v-icon :color="nodeStatusPresentation(item.status).color">
+                          {{ nodeIcon(item) }}
                         </v-icon>
                       </template>
                     </v-list-item>
@@ -165,10 +175,10 @@
                         <template #append>
                           <v-chip
                             size="x-small"
-                            :color="item.operStatus === 'up' ? 'success' : 'grey'"
+                            :color="interfaceStatusColor(item.operStatus)"
                             variant="tonal"
                           >
-                            {{ item.operStatus || 'up' }}
+                            {{ item.operStatus || 'sem dados' }}
                           </v-chip>
                         </template>
                       </v-list-item>
@@ -204,8 +214,8 @@
                   <template #item="{ props: itemProps, item }">
                     <v-list-item v-bind="itemProps" :subtitle="item.ipAddress || item.type">
                       <template #prepend>
-                        <v-icon :color="item.status === 'online' ? 'success' : 'grey'">
-                          {{ getNodeIcon(item.type) }}
+                        <v-icon :color="nodeStatusPresentation(item.status).color">
+                          {{ nodeIcon(item) }}
                         </v-icon>
                       </template>
                     </v-list-item>
@@ -254,10 +264,10 @@
                         <template #append>
                           <v-chip
                             size="x-small"
-                            :color="item.operStatus === 'up' ? 'success' : 'grey'"
+                            :color="interfaceStatusColor(item.operStatus)"
                             variant="tonal"
                           >
-                            {{ item.operStatus || 'up' }}
+                            {{ item.operStatus || 'sem dados' }}
                           </v-chip>
                         </template>
                       </v-list-item>
@@ -295,7 +305,7 @@
       <v-divider></v-divider>
 
       <v-card-actions class="pa-4 px-6 justify-end bg-surface border-t flex-shrink-0">
-        <v-btn variant="text" :disabled="saving" @click="close">Cancelar</v-btn>
+        <v-btn variant="text" color="secondary" :disabled="saving" @click="close"> Cancelar </v-btn>
         <v-btn
           color="primary"
           variant="elevated"
@@ -313,7 +323,14 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch } from 'vue'
 import { useTopologyStore, type DeviceInterfaceItem } from '@/stores/topology'
-import { deviceTypeMeta } from '@/utils/deviceTypes'
+import {
+  LINK_TYPE_OPTIONS,
+  linkKind,
+  linkKindPresentation,
+  nodeIcon,
+  nodeStatusPresentation,
+} from '@/utils/topology/presentation'
+import { formatLinkSpeed } from '@/utils/formatters'
 
 const props = defineProps<{
   modelValue: boolean
@@ -361,38 +378,15 @@ const rules = {
     !v || v !== form.sourceDeviceId || 'Origem e Destino devem ser equipamentos diferentes',
 }
 
-const linkTypeOptions = [
-  {
-    value: 'manual',
-    label: 'Cabo Ethernet / Par Trançado (UTP)',
-    icon: 'mdi-ethernet',
-    color: '#2196F3',
-  },
-  {
-    value: 'fiber',
-    label: 'Fibra Óptica (GBIC / SFP)',
-    icon: 'mdi-laser-pointer',
-    color: '#9C27B0',
-  },
-  {
-    value: 'wireless',
-    label: 'Enlace Sem Fio / Rádio (Wireless)',
-    icon: 'mdi-wifi',
-    color: '#4CAF50',
-  },
-  {
-    value: 'vpn',
-    label: 'Túnel VPN / Lógico',
-    icon: 'mdi-shield-lock',
-    color: '#FF9800',
-  },
-  {
-    value: 'lldp',
-    label: 'Descoberto via LLDP',
-    icon: 'mdi-auto-fix',
-    color: '#00BCD4',
-  },
-]
+const linkTypeOptions = LINK_TYPE_OPTIONS
+
+/** Tipo gravado (lldp, snmp, inferred…) → opção do seletor (meio físico). */
+function optionFor(linkType?: string | null): string {
+  const kind = linkKind(linkType)
+  return kind === 'fiber' || kind === 'wireless' || kind === 'vpn' ? kind : 'manual'
+}
+const linkLook = computed(() => linkKindPresentation(form.linkType))
+const saveError = ref<string | null>(null)
 
 const deviceOptions = computed(() => topologyStore.nodes)
 const targetDeviceOptions = computed(() =>
@@ -420,11 +414,12 @@ watch(
   () => props.modelValue,
   async (isOpen) => {
     if (isOpen) {
+      saveError.value = null
       form.sourceDeviceId = props.initialSourceDeviceId ?? null
       form.targetDeviceId = props.initialTargetDeviceId ?? null
       form.sourceInterfaceId = props.initialSourceInterfaceId ?? null
       form.targetInterfaceId = props.initialTargetInterfaceId ?? null
-      form.linkType = props.initialLinkType || 'manual'
+      form.linkType = optionFor(props.initialLinkType)
 
       if (form.sourceDeviceId) {
         await loadSourceInterfaces(form.sourceDeviceId)
@@ -476,49 +471,14 @@ function formatInterfaceSubtitle(iface: DeviceInterfaceItem): string {
   if (iface.alias) {
     parts.push(`Alias: ${iface.alias}`)
   }
-  if (iface.speed) {
-    const mbps = iface.speed / 1_000_000
-    parts.push(mbps >= 1000 ? `${mbps / 1000} Gbps` : `${mbps} Mbps`)
-  }
+  if (iface.speed) parts.push(formatLinkSpeed(iface.speed))
   return parts.join(' • ') || 'Interface padrão'
 }
 
-function getNodeIcon(type: string) {
-  switch (type?.toLowerCase()) {
-    case 'router':
-      return 'mdi-router'
-    case 'switch':
-      return 'mdi-expansion-card'
-    case 'unmanaged_switch':
-    case 'hub':
-      return 'mdi-hub'
-    case 'server':
-      return 'mdi-server'
-    case 'firewall':
-      return 'mdi-shield-check'
-    case 'ap':
-    case 'wireless':
-      return 'mdi-access-point'
-    default: {
-      const meta = deviceTypeMeta(type)
-      return meta.isKnown ? meta.icon : 'mdi-desktop-tower'
-    }
-  }
-}
-
-function getLinkColor(type: string): string {
-  const opt = linkTypeOptions.find((o) => o.value === type)
-  return opt ? opt.color : '#2196F3'
-}
-
-function getLinkTypeIcon(type: string): string {
-  const opt = linkTypeOptions.find((o) => o.value === type)
-  return opt ? opt.icon : 'mdi-ethernet'
-}
-
-function getLinkTypeLabel(type: string): string {
-  const opt = linkTypeOptions.find((o) => o.value === type)
-  return opt ? opt.label : 'Cabo Ethernet'
+function interfaceStatusColor(status?: string): 'success' | 'error' | 'info' {
+  if (status === 'up') return 'success'
+  if (status === 'down') return 'error'
+  return 'info'
 }
 
 function close() {
@@ -549,6 +509,7 @@ async function save() {
         linkType: form.linkType,
       })
     }
+    if (!success) saveError.value = topologyStore.actionError
     if (success) {
       emit('saved')
       close()

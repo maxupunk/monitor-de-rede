@@ -176,12 +176,12 @@ fn function_bodies(script: &str) -> Vec<(String, u32, String)> {
     bodies
 }
 
-/// Os comandos literais passados a `run`/`ssh`/`telnet` num trecho — o
-/// começo da linha de shell, mesmo quando o resto é concatenado.
+/// Os comandos literais passados a `run`/`ssh`/`ssh_live`/`telnet` num
+/// trecho — o começo da linha de shell, mesmo quando o resto é concatenado.
 fn shell_commands(code: &str) -> Vec<String> {
     static COMMAND: OnceLock<Regex> = OnceLock::new();
     let command = COMMAND.get_or_init(|| {
-        Regex::new(r#"\.(?:run|ssh|telnet)\s*\(\s*(?:"((?:[^"\\]|\\.)*)"|`([^`]*)`)"#)
+        Regex::new(r#"\.(?:run|ssh|ssh_live|telnet)\s*\(\s*(?:"((?:[^"\\]|\\.)*)"|`([^`]*)`)"#)
             .expect("regex de comando válida")
     });
     command
@@ -367,6 +367,13 @@ mod tests {
         let script = "fn detect(device, params) { 1 }\nfn acao(device, params) { device.run(\"uci commit network\") }";
         let found = scan(&package(script, "read", None));
         assert!(rules(&found).contains(&"read-action-writes"), "{found:?}");
+
+        // O comando ao vivo passa pela mesma análise: o servidor em segundo
+        // plano é escrita; o cliente do teste, não.
+        let servidor = "fn detect(device, params) { 1 }\nfn acao(device, params) { device.ssh_live(\"iperf3 -s -D -p 5201\") }";
+        assert!(rules(&scan(&package(servidor, "read", None))).contains(&"read-action-writes"));
+        let cliente = "fn detect(device, params) { 1 }\nfn acao(device, params) { device.ssh_live(\"/tool bandwidth-test address=10.0.0.2 duration=5s\", #{}) }";
+        assert!(scan(&package(cliente, "read", None)).is_empty());
     }
 
     #[test]

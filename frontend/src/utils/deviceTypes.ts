@@ -70,7 +70,7 @@ export interface DeviceTypePresentation {
 const TYPE_LOOK: Record<DeviceTypeId, { icon: string; color: string }> = {
   router: { icon: 'mdi-router-network', color: 'primary' },
   switch: { icon: 'mdi-switch', color: 'teal' },
-  firewall: { icon: 'mdi-shield-network', color: 'red' },
+  firewall: { icon: 'mdi-wall-fire', color: 'red' },
   ap: { icon: 'mdi-access-point', color: 'cyan' },
   server: { icon: 'mdi-server', color: 'deep-purple' },
   nas: { icon: 'mdi-nas', color: 'indigo' },

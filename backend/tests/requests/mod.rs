@@ -65,6 +65,7 @@ mod syslog_ingest;
 mod system_device;
 mod system_device_lifecycle;
 mod system_health;
+mod topology;
 mod users_crud;
 mod vendors;
 mod vpn_orchestration;

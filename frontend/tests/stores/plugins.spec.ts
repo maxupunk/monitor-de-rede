@@ -146,4 +146,35 @@ describe('plugins store', () => {
     expect(get).toHaveBeenCalledTimes(2)
     expect(post).toHaveBeenCalledTimes(2)
   })
+
+  it('andamento ao vivo chega pelo SSE, limitado e sem consultar a API', () => {
+    const get = vi.spyOn(apiService, 'get')
+    const store = usePluginsStore()
+    for (let second = 0; second < 130; second += 1) {
+      store.applyRunProgress({
+        runId: 31,
+        deviceId: 4,
+        flow: 'tx',
+        bps: 1e6 + second,
+        tMs: second * 1000,
+      })
+    }
+    store.applyRunProgress({ runId: 31, flow: 'up', bps: 1, tMs: 1 })
+    store.applyRunProgress({ runId: 31, flow: 'rx', bps: '1', tMs: 1 })
+
+    const samples = store.progressOf(31)
+    expect(samples).toHaveLength(120)
+    expect(samples[samples.length - 1]).toEqual({ tMs: 129_000, flow: 'tx', bps: 1e6 + 129 })
+    expect(store.progressOf(99)).toEqual([])
+    expect(get).not.toHaveBeenCalled()
+  })
+
+  it('ações do nó da topologia vêm de uma consulta só', async () => {
+    const get = vi.spyOn(apiService, 'get').mockResolvedValue({ 4: [] })
+    const store = usePluginsStore()
+    await store.fetchTopologyActions([4, 5])
+    expect(get).toHaveBeenCalledWith('/plugins/topology-actions?deviceIds=4,5')
+    await store.fetchTopologyActions()
+    expect(get).toHaveBeenLastCalledWith('/plugins/topology-actions')
+  })
 })

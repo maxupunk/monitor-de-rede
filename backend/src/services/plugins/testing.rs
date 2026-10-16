@@ -214,6 +214,7 @@ async fn run_unit_test(
         gate: Arc::new(AllowAll),
         cancel: CancellationToken::new(),
         observer: None,
+        progress: None,
         limits: Limits {
             deadline: Duration::from_secs(20),
             ..Limits::default()

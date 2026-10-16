@@ -6,6 +6,8 @@ import type { PluginAction } from "./PluginAction";
 import type { PluginPanel } from "./PluginPanel";
 import type { SettingsSpec } from "./SettingsSpec";
 import type { Surface } from "./Surface";
+import type { ThroughputRoles } from "./ThroughputRoles";
+import type { TopologySpec } from "./TopologySpec";
 import type { TransportKind } from "./TransportKind";
 
 export type PluginManifest = { slug: string, name: string, version: string, description?: string, author?: string, transports: Array<TransportKind>, match: MatchRule, actions: Array<PluginAction>, 
@@ -26,4 +28,12 @@ surfaces: Array<Surface>, settings?: SettingsSpec, fleet?: FleetSpec,
  * Plugins cujas ações este chama (`device.use_plugin`) — reaproveitar em
  * vez de copiar. Precisam estar ativos.
  */
-uses?: Array<string>, };
+uses?: Array<string>, 
+/**
+ * Ações oferecidas no nó da topologia (superfície `topology`).
+ */
+topology?: TopologySpec, 
+/**
+ * Papéis num teste de enlace: o que serve, o que dirige.
+ */
+throughput?: ThroughputRoles, };

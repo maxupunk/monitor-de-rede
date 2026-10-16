@@ -4,12 +4,18 @@
 //! `site_id` (ou uma chave global quando nenhum site é informado). Essa escolha
 //! evita nova migration: o par já existe e é replicado nos backups.
 
-use sea_orm::DatabaseConnection;
+use std::collections::BTreeMap;
+
+use sea_orm::{ConnectionTrait, DatabaseConnection};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::{
     models::system_settings,
-    services::shared::errors::{AppError, AppResult},
+    services::shared::{
+        errors::{AppError, AppResult},
+        transaction::begin_write,
+    },
 };
 
 const STORAGE_KEY: &str = "topology_layout";
@@ -22,16 +28,19 @@ fn storage_key(site_id: Option<i64>) -> String {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct TopologyLayoutNode {
+    #[ts(type = "number")]
     pub device_id: i64,
     pub x: f64,
     pub y: f64,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct TopologyLayout {
     pub nodes: Vec<TopologyLayoutNode>,
 }
@@ -41,8 +50,8 @@ pub struct TopologyLayout {
 /// # Errors
 ///
 /// Propaga erro do banco.
-pub async fn load_layout(
-    db: &DatabaseConnection,
+pub async fn load_layout<C: ConnectionTrait>(
+    db: &C,
     site_id: Option<i64>,
 ) -> AppResult<TopologyLayout> {
     let setting = system_settings::Model::get(db, &storage_key(site_id)).await?;
@@ -53,7 +62,34 @@ pub async fn load_layout(
     Ok(layout)
 }
 
-/// Grava o layout para o site (ou o layout global).
+fn validate(layout: &TopologyLayout) -> AppResult<()> {
+    if layout.nodes.len() > MAX_NODES {
+        return Err(AppError::validation(format!(
+            "Layout excede o limite de {MAX_NODES} nós"
+        )));
+    }
+    if layout
+        .nodes
+        .iter()
+        .any(|node| !node.x.is_finite() || !node.y.is_finite())
+    {
+        return Err(AppError::validation("Posição de nó inválida no layout"));
+    }
+    Ok(())
+}
+
+async fn store<C: ConnectionTrait>(
+    db: &C,
+    site_id: Option<i64>,
+    layout: &TopologyLayout,
+) -> AppResult<()> {
+    let value = serde_json::to_string(layout)
+        .map_err(|error| AppError::Internal(anyhow::Error::new(error)))?;
+    system_settings::Model::set(db, &storage_key(site_id), Some(value)).await?;
+    Ok(())
+}
+
+/// Grava o layout inteiro para o site (ou o layout global), substituindo o anterior.
 ///
 /// # Errors
 ///
@@ -63,16 +99,51 @@ pub async fn save_layout(
     site_id: Option<i64>,
     layout: TopologyLayout,
 ) -> AppResult<TopologyLayout> {
-    if layout.nodes.len() > MAX_NODES {
-        return Err(AppError::validation(format!(
-            "Layout excede o limite de {MAX_NODES} nós"
-        )));
-    }
-
-    let value = serde_json::to_string(&layout)
-        .map_err(|error| AppError::Internal(anyhow::Error::new(error)))?;
-    system_settings::Model::set(db, &storage_key(site_id), Some(value)).await?;
+    validate(&layout)?;
+    store(db, site_id, &layout).await?;
     Ok(layout)
+}
+
+/// Funde posições parciais no layout gravado: nó já presente muda de lugar,
+/// nó novo entra no fim, o resto fica como estava. Se o mesmo nó vier duas
+/// vezes no lote, vale a última posição.
+#[must_use]
+pub fn merge_layout(stored: TopologyLayout, changes: Vec<TopologyLayoutNode>) -> TopologyLayout {
+    let mut latest = BTreeMap::new();
+    let mut order = Vec::new();
+    for node in changes {
+        if latest.insert(node.device_id, node.clone()).is_none() {
+            order.push(node.device_id);
+        }
+    }
+    let mut nodes: Vec<TopologyLayoutNode> = stored
+        .nodes
+        .into_iter()
+        .map(|node| latest.remove(&node.device_id).unwrap_or(node))
+        .collect();
+    nodes.extend(order.into_iter().filter_map(|id| latest.remove(&id)));
+    TopologyLayout { nodes }
+}
+
+/// Grava só as posições que mudaram (a tela arrasta um nó e manda só ele).
+///
+/// Ler, fundir e gravar ficam na mesma transação de escrita: duas abas
+/// arrastando nós diferentes ao mesmo tempo não apagam a posição uma da outra.
+///
+/// # Errors
+///
+/// Propaga erro do banco ou rejeita um layout resultante grande demais.
+pub async fn patch_layout(
+    db: &DatabaseConnection,
+    site_id: Option<i64>,
+    changes: Vec<TopologyLayoutNode>,
+) -> AppResult<TopologyLayout> {
+    let txn = begin_write(db).await?;
+    let merged = merge_layout(load_layout(&txn, site_id).await?, changes);
+    validate(&merged)?;
+    store(&txn, site_id, &merged).await?;
+    txn.commit().await?;
+    Ok(merged)
 }
 
 #[cfg(test)]
@@ -174,5 +245,54 @@ mod tests {
             .await
             .expect_err("devia recusar");
         assert!(format!("{erro:?}").contains("limite"));
+    }
+
+    fn no(device_id: i64, x: f64) -> TopologyLayoutNode {
+        TopologyLayoutNode { device_id, x, y: x }
+    }
+
+    #[test]
+    fn fusao_move_existentes_acrescenta_novos_e_preserva_o_resto() {
+        let gravado = TopologyLayout {
+            nodes: vec![no(1, 1.0), no(2, 2.0), no(3, 3.0)],
+        };
+        let fundido = merge_layout(gravado, vec![no(4, 40.0), no(2, 20.0), no(4, 44.0)]);
+        let ids: Vec<_> = fundido.nodes.iter().map(|n| n.device_id).collect();
+        assert_eq!(ids, vec![1, 2, 3, 4]);
+        assert!((fundido.nodes[1].x - 20.0).abs() < f64::EPSILON);
+        assert!((fundido.nodes[0].x - 1.0).abs() < f64::EPSILON);
+        // Repetido no lote: vale a última posição.
+        assert!((fundido.nodes[3].x - 44.0).abs() < f64::EPSILON);
+    }
+
+    #[tokio::test]
+    async fn patch_grava_so_o_que_mudou() {
+        let db = banco().await;
+        save_layout(
+            &db,
+            Some(5),
+            TopologyLayout {
+                nodes: vec![no(1, 1.0), no(2, 2.0)],
+            },
+        )
+        .await
+        .expect("gravar");
+
+        patch_layout(&db, Some(5), vec![no(2, 9.0)])
+            .await
+            .expect("patch");
+        let carregado = load_layout(&db, Some(5)).await.expect("carregar");
+        assert_eq!(carregado.nodes.len(), 2);
+        assert!((carregado.nodes[0].x - 1.0).abs() < f64::EPSILON);
+        assert!((carregado.nodes[1].x - 9.0).abs() < f64::EPSILON);
+    }
+
+    #[tokio::test]
+    async fn posicao_nao_finita_e_recusada() {
+        let db = banco().await;
+        let erro = patch_layout(&db, None, vec![no(1, f64::NAN)])
+            .await
+            .expect_err("devia recusar");
+        assert!(format!("{erro:?}").contains("inválida"));
     }
 }

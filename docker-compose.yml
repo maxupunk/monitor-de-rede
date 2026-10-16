@@ -69,6 +69,12 @@ services:
       # existe: é ela que entra nos comandos que a tela gera.
       - "${SYSLOG_EXTERNAL_PORT:-514}:${SYSLOG_LISTEN_PORT:-5514}/udp"
       - "${SYSLOG_EXTERNAL_PORT:-514}:${SYSLOG_LISTEN_PORT:-5514}/tcp"
+      # Servidor btest (MikroTik Bandwidth Test) do teste de enlace, ADR 015.
+      # Fica fechado: só atende o IP de origem para o qual a central armou uma
+      # sessão. Como no syslog, a publicação pode reescrever o IP de origem
+      # (Docker Desktop, `userland-proxy`); aí o teste MikroTik → central não
+      # casa com a sessão e é preciso a rede do host (docker-compose.host.yml).
+      - "2000:2000/tcp"
     environment:
       LOCO_ENV: production
       # Chave do Ollaya, lida pela API (Decisor) no ponto de uso — o mesmo valor
@@ -155,6 +161,10 @@ services:
       # rede encher o volume sozinho — a tela /logs mostra as fontes vistas
       # justamente para não ser preciso.
       SYSLOG_ACCEPT_UNKNOWN_SOURCES: ${SYSLOG_ACCEPT_UNKNOWN_SOURCES:-false}
+      # --- teste de enlace (ADR 015) ---
+      # Escuta do servidor btest da central. Vazio desliga; porta ocupada só
+      # gera aviso no log, sem derrubar a API.
+      BTEST_LISTEN: ${BTEST_LISTEN-0.0.0.0:2000}
       # Retenção: dias e tamanho, o que vencer primeiro. Medido em ~290 B por
       # linha com os três índices (ADR 008).
       RETENTION_LOGS_DAYS: ${RETENTION_LOGS_DAYS:-7}

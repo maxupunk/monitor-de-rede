@@ -164,7 +164,6 @@ mdns-sd = { version = "0.13" }
 # A 0.4 exige generators nightly (`futures-async-stream`) e não compila no
 # Rust estável usado pelo Loco. A API 2.x mantém SSDP assíncrono sem esse risco.
 ssdp-client = { version = "2.1" }
-petgraph = { version = "0.7" }
 phf = { version = "0.11", features = ["macros"] }
 
 # `statvfs` para o armazenamento do coletor de saúde. Só em Unix: no Windows o

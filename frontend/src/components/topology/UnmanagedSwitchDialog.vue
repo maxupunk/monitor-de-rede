@@ -52,6 +52,15 @@
           ramificados.
         </v-alert>
 
+        <v-alert
+          v-if="saveError"
+          type="error"
+          variant="tonal"
+          density="compact"
+          class="mb-4"
+          :text="saveError"
+        ></v-alert>
+
         <v-form ref="formRef" @submit.prevent="save">
           <v-row dense>
             <v-col cols="12">
@@ -199,6 +208,7 @@ const sitesStore = useSitesStore()
 const devicesStore = useDevicesStore()
 const formRef = ref()
 const saving = ref(false)
+const saveError = ref<string | null>(null)
 
 const isEditMode = computed(() => Boolean(props.switchToEdit?.id))
 
@@ -218,6 +228,7 @@ watch(
   () => props.modelValue,
   (isOpen) => {
     if (isOpen) {
+      saveError.value = null
       if (sitesStore.sites.length === 0) void sitesStore.fetchSites()
       if (props.switchToEdit) {
         form.name = props.switchToEdit.name || ''
@@ -253,8 +264,9 @@ async function save() {
         model: form.model?.trim() || undefined,
         siteId: form.siteId,
       })
+      if (!updated) saveError.value = devicesStore.error || 'Não foi possível salvar o switch'
       if (updated) {
-        await topologyStore.fetchTopology(null, false)
+        await topologyStore.fetchTopology(topologyStore.siteId, false)
         emit('created')
         close()
       }
@@ -266,6 +278,7 @@ async function save() {
         portCount: form.portCount,
         siteId: form.siteId,
       })
+      if (!success) saveError.value = topologyStore.actionError
       if (success) {
         emit('created')
         close()

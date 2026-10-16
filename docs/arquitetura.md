@@ -419,8 +419,12 @@ POST /api/discovery/scan | /scan-cancel | /check-conflicts
 GET  /api/vendors/lookup?mac= | /status    POST /api/vendors/refresh
 DELETE /api/discovery/cleanup
 
-GET  /api/topology                         POST /api/topology/links
-POST /api/topology/recalculate             DELETE /api/topology/links/{id}
+GET  /api/topology?siteId=                 POST /api/topology/links
+PUT|DELETE /api/topology/links/{id}        POST /api/topology/unmanaged-switch
+POST /api/topology/recalculate             GET  /api/topology/path?from=&to=
+GET|PUT|PATCH /api/topology/layout?siteId=   (PATCH funde só os nós enviados)
+     (SSE: topology:updated, topology:layout_updated {siteId}; aresta com
+      id negativo = hierarquia parentId, -id do filho)
 
 GET|POST /api/probes                       GET|PUT|DELETE /api/probes/{id}
 POST     /api/probes/{id}/revoke | /test
@@ -483,8 +487,7 @@ instalação só devolve VPN funcional com a mesma chave.
 ### Convenções de contrato
 
 - **`camelCase` em todo DTO.** Não é estilo: `tests/conventions/camel_case.rs`
-  falha se faltar. As duas exceções (`TopologyLinkRequest`, `TopologyQuery`)
-  estão listadas lá com justificativa.
+  falha se faltar, e não há exceção.
 - **Erros** saem como `{"message": "..."}`, em português — é o que o frontend lê.
   **Todo 500** — `AppError::Internal`, erro do Loco ou pânico — sai como
   `{"message", "incidentId"}` com o cabeçalho `x-incident-id`: um código de 8

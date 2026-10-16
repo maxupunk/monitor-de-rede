@@ -374,10 +374,8 @@ export const useEventsStore = defineStore('events', () => {
       case 'metric:recorded': {
         const deviceDetailStore = useDeviceDetailStore()
         const monitorsStore = useMonitorsStore()
-        const topologyStore = useTopologyStore()
         deviceDetailStore.applyRecordedMetrics(data)
         monitorsStore.applyRealtimeMetrics(data)
-        topologyStore.applyRealtimeMetric(data)
         break
       }
 
@@ -390,8 +388,14 @@ export const useEventsStore = defineStore('events', () => {
       case 'topology:updated': {
         const topologyStore = useTopologyStore()
         // Novos enlaces exigem recarregar o grafo: não dá para deduzir
-        // a geometria do mapa a partir do evento. Recarrega em background sem spinner global.
-        scheduleRefresh('topology', () => topologyStore.fetchTopology(null, false))
+        // a geometria do mapa a partir do evento. Recarrega em background
+        // (sem spinner, no site em exibição) e só para quem já abriu o mapa.
+        scheduleRefresh('topology', () => topologyStore.refreshIfLoaded())
+        break
+      }
+
+      case 'topology:layout_updated': {
+        useTopologyStore().applyLayoutUpdated(data)
         break
       }
 
@@ -474,6 +478,11 @@ export const useEventsStore = defineStore('events', () => {
 
       case 'plugin:run_step': {
         usePluginAppsStore().applyRunOutput(data)
+        break
+      }
+
+      case 'plugin:run_progress': {
+        usePluginsStore().applyRunProgress(data)
         break
       }
 

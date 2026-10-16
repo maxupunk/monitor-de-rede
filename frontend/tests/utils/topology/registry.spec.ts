@@ -1,0 +1,166 @@
+import { describe, expect, it, vi } from 'vitest'
+import { defineComponent } from 'vue'
+import {
+  EDIT_MODE_REASON,
+  groupActions,
+  READ_ONLY_REASON,
+  registerActionProvider,
+  registerInspectorTab,
+  resolveActions,
+  resolveTabs,
+  type TopologyHost,
+  type TopologyTarget,
+} from '@/utils/topology/inspectorRegistry'
+import {
+  edgeActions,
+  linkTestActions,
+  nodeActions,
+  pluginActionsProvider,
+} from '@/utils/topology/builtinActions'
+import { edge, node } from './fixtures'
+
+function host(patch: Partial<TopologyHost> = {}): TopologyHost {
+  return {
+    canWrite: true,
+    editMode: false,
+    selectedNodeId: null,
+    systemNodeId: 1,
+    openDevice: vi.fn(),
+    editNode: vi.fn(),
+    deleteNode: vi.fn(),
+    connectFrom: vi.fn(),
+    startCable: vi.fn(),
+    editEdge: vi.fn(),
+    deleteEdge: vi.fn(),
+    confirmEdge: vi.fn(),
+    focusNode: vi.fn(),
+    selectEdge: vi.fn(),
+    highlightPath: vi.fn(),
+    requestLinkTest: vi.fn(),
+    runPluginAction: vi.fn(),
+    addUnmanagedSwitch: vi.fn(),
+    discoverLinks: vi.fn(),
+    addLink: vi.fn(),
+    fit: vi.fn(),
+    ...patch,
+  }
+}
+
+const nodeTarget: TopologyTarget = { kind: 'node', node: node(5, { name: 'SW' }) }
+
+describe('registro de ações e abas da topologia', () => {
+  it('extensões entram no menu sem editar o inspetor; cancelar remove', () => {
+    const off = registerActionProvider('teste.extra', (target) =>
+      target.kind === 'node'
+        ? [{ id: 'x.ping', title: 'Ping', icon: 'mdi-lan', group: 'test', run: () => undefined }]
+        : []
+    )
+    expect(resolveActions(nodeTarget, host()).some((a) => a.id === 'x.ping')).toBe(true)
+    off()
+    expect(resolveActions(nodeTarget, host()).some((a) => a.id === 'x.ping')).toBe(false)
+  })
+
+  it('perfil somente leitura desabilita (com motivo) o que escreve', () => {
+    const off = registerActionProvider('builtin.node', nodeActions)
+    const actions = resolveActions(nodeTarget, host({ canWrite: false }))
+    const remove = actions.find((a) => a.id === 'node.delete')
+    expect(remove?.disabledReason).toBe(READ_ONLY_REASON)
+    expect(actions.find((a) => a.id === 'node.focus')?.disabledReason).toBeNull()
+    const cable = resolveActions(nodeTarget, host()).find((a) => a.id === 'node.cable')
+    expect(cable?.disabledReason).toBe(EDIT_MODE_REASON)
+    off()
+  })
+
+  it('ordena por grupo: navegar, editar, testes, plugins, remover', () => {
+    const offs = [
+      registerActionProvider('builtin.node', nodeActions),
+      registerActionProvider('builtin.link-tests', linkTestActions),
+    ]
+    const groups = groupActions(resolveActions(nodeTarget, host())).map((g) => g.group)
+    expect(groups).toEqual(['navigate', 'edit', 'test', 'danger'])
+    offs.forEach((off) => off())
+  })
+
+  it('pedidos de teste de enlace saem com o alvo certo', () => {
+    const h = host({ selectedNodeId: 9 })
+    const link = linkTestActions({ kind: 'edge', edge: edge(30, 2, 3) }, h)
+    void link[0].run()
+    expect(h.requestLinkTest).toHaveBeenCalledWith({
+      kind: 'link',
+      linkId: 30,
+      sourceDeviceId: 2,
+      targetDeviceId: 3,
+    })
+    const nodeEntries = linkTestActions(nodeTarget, h)
+    void nodeEntries.find((a) => a.id === 'test.path')!.run()
+    expect(h.requestLinkTest).toHaveBeenCalledWith({
+      kind: 'path',
+      targetDeviceId: 5,
+      sourceDeviceId: 9,
+    })
+    void nodeEntries.find((a) => a.id === 'test.server')!.run()
+    expect(h.requestLinkTest).toHaveBeenCalledWith({
+      kind: 'server',
+      targetDeviceId: 5,
+      sourceDeviceId: 1,
+    })
+    // Hierarquia virtual não tem o que medir.
+    expect(
+      linkTestActions({ kind: 'edge', edge: edge(-5, 1, 2, { linkType: 'parent' }) }, h)
+    ).toEqual([])
+  })
+
+  it('enlace descoberto oferece "Confirmar"; hierarquia vira "Desvincular"', () => {
+    const discovered = edgeActions(
+      { kind: 'edge', edge: edge(7, 1, 2, { discoveryMethod: 'lldp', confirmed: false }) },
+      host()
+    )
+    expect(discovered.some((a) => a.id === 'edge.confirm')).toBe(true)
+    const parent = edgeActions(
+      { kind: 'edge', edge: edge(-2, 1, 2, { linkType: 'parent' }) },
+      host()
+    )
+    expect(parent.find((a) => a.id === 'edge.delete')?.title).toBe('Desvincular hierarquia')
+    expect(parent.some((a) => a.id === 'edge.confirm')).toBe(false)
+  })
+
+  it('ações de plugin do nó; escrita exige perfil com escrita', () => {
+    const h = host()
+    const provider = pluginActionsProvider(() => ({
+      5: [
+        {
+          pluginId: 3,
+          pluginSlug: 'openwrt',
+          pluginName: 'OpenWrt',
+          action: 'reboot',
+          title: 'Reiniciar',
+          effect: 'write',
+          hasParams: false,
+        },
+      ],
+    }))
+    const [action] = provider(nodeTarget, h)
+    expect(action.requiresWrite).toBe(true)
+    expect(action.subtitle).toBe('OpenWrt')
+    void action.run()
+    expect(h.runPluginAction).toHaveBeenCalled()
+  })
+
+  it('abas: extensão entra na ordem e só para o tipo pedido', () => {
+    const Tab = defineComponent({ template: '<div />' })
+    const off = registerInspectorTab({
+      id: 'link-tests',
+      title: 'Testes',
+      icon: 'mdi-speedometer',
+      appliesTo: ['edge'],
+      order: 30,
+      component: Tab,
+    })
+    expect(resolveTabs({ kind: 'edge', edge: edge(1, 1, 2) }).map((t) => t.id)).toContain(
+      'link-tests'
+    )
+    expect(resolveTabs(nodeTarget).map((t) => t.id)).not.toContain('link-tests')
+    expect(resolveTabs({ kind: 'background' })).toEqual([])
+    off()
+  })
+})

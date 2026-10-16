@@ -259,6 +259,150 @@ pub enum Surface {
     /// Página própria ("Aplicativos"), que reúne todos os equipamentos onde
     /// está instalado — a frota.
     Fleet,
+    /// Ações no painel e no menu do nó, na topologia, dos equipamentos onde
+    /// está instalado (bloco `topology`).
+    Topology,
+}
+
+/// O que o plugin oferece na topologia.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct TopologySpec {
+    /// Ações do plugin no painel e no menu de contexto do nó, na ordem — com
+    /// o mesmo diálogo de execução da aba do equipamento.
+    pub node_actions: Vec<String>,
+}
+
+/// Motor de teste de vazão que um plugin sabe hospedar ou dirigir (ADR 015) —
+/// o mesmo tipo dos motores nativos: um vocabulário só.
+pub use crate::services::network_tools::throughput::ThroughputEngine;
+
+/// Um motor que o equipamento hospeda (é o servidor do teste).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct ThroughputServe {
+    pub engine: ThroughputEngine,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// Um motor que o equipamento dirige (é o cliente do teste).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct ThroughputDrive {
+    pub engine: ThroughputEngine,
+    /// `false`: o cliente só fala com servidor sem autenticação (o
+    /// `mikrotik-btest` do OpenWrt, os clientes nativos).
+    #[serde(default = "yes")]
+    pub auth: bool,
+}
+
+/// As ações do manifesto que cumprem cada papel.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct ThroughputActions {
+    /// Instala o que falta (escrita, opcional).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub prepare: Option<String>,
+    /// Sobe o servidor (escrita).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub serve: Option<String>,
+    /// Desfaz o `serve` pelo `handle` (escrita).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub stop: Option<String>,
+    /// Dirige o teste contra um servidor (leitura).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub run: Option<String>,
+}
+
+/// Os papéis do equipamento num teste de enlace (ADR 015, §3): o que ele
+/// sabe servir, o que sabe dirigir e as ações que fazem cada coisa. Os
+/// parâmetros dessas ações são um contrato fixo ([`THROUGHPUT_CONTRACTS`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct ThroughputRoles {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub serve: Vec<ThroughputServe>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub drive: Vec<ThroughputDrive>,
+    pub actions: ThroughputActions,
+}
+
+/// Tipo de um parâmetro do contrato fixo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContractType {
+    Text,
+    /// Texto com `secret: true` (a senha do teste).
+    Secret,
+    /// `integer` ou `number`.
+    Number,
+    Boolean,
+}
+
+/// Os parâmetros que a plataforma passa a cada papel — o script não inventa
+/// outros. Ordem: `prepare`, `serve`, `stop`, `run`.
+pub const THROUGHPUT_CONTRACTS: [(&str, &[(&str, ContractType)]); 4] = [
+    (
+        "prepare",
+        &[("engine", ContractType::Text), ("role", ContractType::Text)],
+    ),
+    (
+        "serve",
+        &[
+            ("engine", ContractType::Text),
+            ("port", ContractType::Number),
+            ("peer", ContractType::Text),
+            ("user", ContractType::Text),
+            ("password", ContractType::Secret),
+            ("requireAuth", ContractType::Boolean),
+        ],
+    ),
+    (
+        "stop",
+        &[
+            ("engine", ContractType::Text),
+            ("handle", ContractType::Text),
+        ],
+    ),
+    (
+        "run",
+        &[
+            ("engine", ContractType::Text),
+            ("target", ContractType::Text),
+            ("port", ContractType::Number),
+            ("direction", ContractType::Text),
+            ("durationS", ContractType::Number),
+            ("streams", ContractType::Number),
+            ("limitMbps", ContractType::Number),
+            ("user", ContractType::Text),
+            ("password", ContractType::Secret),
+        ],
+    ),
+];
+
+impl ThroughputActions {
+    /// `(papel, ação)` de cada papel declarado.
+    fn declared(&self) -> impl Iterator<Item = (&'static str, &str)> {
+        [
+            ("prepare", &self.prepare),
+            ("serve", &self.serve),
+            ("stop", &self.stop),
+            ("run", &self.run),
+        ]
+        .into_iter()
+        .filter_map(|(role, action)| action.as_deref().map(|action| (role, action)))
+    }
 }
 
 fn default_surfaces() -> Vec<Surface> {
@@ -464,6 +608,14 @@ pub struct PluginManifest {
     /// vez de copiar. Precisam estar ativos.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub uses: Vec<String>,
+    /// Ações oferecidas no nó da topologia (superfície `topology`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub topology: Option<TopologySpec>,
+    /// Papéis num teste de enlace: o que serve, o que dirige.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub throughput: Option<ThroughputRoles>,
 }
 
 impl FleetSpec {
@@ -645,7 +797,162 @@ pub fn validate(manifest: &PluginManifest) -> Vec<String> {
         (None, None) => {}
     }
     validate_surfaces(manifest, &mut problems);
+    validate_topology(manifest, &mut problems);
+    if let Some(roles) = &manifest.throughput {
+        validate_throughput(manifest, roles, &mut problems);
+    }
     problems
+}
+
+/// Bloco e superfície andam juntos, como na frota: um sem o outro é engano
+/// de quem escreveu. As ações existem, sem repetir, e nenhuma revela segredo
+/// (essas só rodam pelo caminho próprio, nunca de um menu).
+fn validate_topology(manifest: &PluginManifest, problems: &mut Vec<String>) {
+    match (&manifest.topology, manifest.shows_on(Surface::Topology)) {
+        (None, true) => {
+            problems.push("a superfície `topology` precisa do bloco `topology`".into());
+        }
+        (Some(_), false) => {
+            problems.push("o bloco `topology` precisa da superfície `topology`".into());
+        }
+        _ => {}
+    }
+    let Some(topology) = &manifest.topology else {
+        return;
+    };
+    if topology.node_actions.is_empty() {
+        problems.push("`topology.nodeActions` precisa de ao menos uma ação".into());
+    }
+    let mut seen = HashSet::new();
+    for id in &topology.node_actions {
+        if !seen.insert(id.as_str()) {
+            problems.push(format!("`topology.nodeActions` repete `{id}`"));
+        }
+        match manifest.action(id) {
+            None => problems.push(format!(
+                "`topology.nodeActions` cita `{id}`, que não é ação do plugin"
+            )),
+            Some(action) if action.reveals => problems.push(format!(
+                "`topology.nodeActions`: `{id}` revela segredo e não roda de um menu"
+            )),
+            Some(_) => {}
+        }
+    }
+}
+
+/// O bloco `throughput` (ADR 015, §3): papéis coerentes, ações existentes com
+/// o efeito do papel e os parâmetros do contrato fixo.
+fn validate_throughput(
+    manifest: &PluginManifest,
+    roles: &ThroughputRoles,
+    problems: &mut Vec<String>,
+) {
+    if roles.serve.is_empty() && roles.drive.is_empty() {
+        problems.push("`throughput` precisa de ao menos um motor em `serve` ou em `drive`".into());
+    }
+    let serve: HashSet<_> = roles.serve.iter().map(|serve| serve.engine).collect();
+    let drive: HashSet<_> = roles.drive.iter().map(|drive| drive.engine).collect();
+    if serve.len() != roles.serve.len() || drive.len() != roles.drive.len() {
+        problems.push("`throughput` repete motor em `serve` ou em `drive`".into());
+    }
+    let actions = &roles.actions;
+    let (serves, drives) = (!roles.serve.is_empty(), !roles.drive.is_empty());
+    for (role, present, list, required) in [
+        ("serve", actions.serve.is_some(), "serve", serves),
+        ("stop", actions.stop.is_some(), "serve", serves),
+        ("run", actions.run.is_some(), "drive", drives),
+    ] {
+        match (required, present) {
+            (true, false) => problems.push(format!(
+                "`throughput.{list}` não está vazio: declare `throughput.actions.{role}`"
+            )),
+            (false, true) => problems.push(format!(
+                "`throughput.actions.{role}` sem motor em `throughput.{list}`"
+            )),
+            _ => {}
+        }
+    }
+
+    for (role, id) in actions.declared() {
+        let Some(action) = manifest.action(id) else {
+            problems.push(format!(
+                "`throughput.actions.{role}` cita `{id}`, que não é ação do plugin"
+            ));
+            continue;
+        };
+        let expected = if role == "run" {
+            Effect::Read
+        } else {
+            Effect::Write
+        };
+        if action.effect != expected {
+            problems.push(format!(
+                "`throughput.actions.{role}` (`{id}`) precisa ser de {}",
+                if expected == Effect::Read {
+                    "leitura (`effect: read`)"
+                } else {
+                    "escrita (`effect: write`)"
+                }
+            ));
+        }
+        let contract = THROUGHPUT_CONTRACTS
+            .iter()
+            .find(|(name, _)| *name == role)
+            .map_or(&[][..], |(_, contract)| *contract);
+        validate_contract(role, id, action.params.as_ref(), contract, problems);
+    }
+}
+
+/// Os parâmetros da ação são exatamente os do contrato, com o tipo dele.
+/// Nenhum é exigido (`required`): a plataforma omite o que não se aplica
+/// (`limitMbps` sem limite, `user`/`password` sem autenticação).
+fn validate_contract(
+    role: &str,
+    id: &str,
+    schema: Option<&Value>,
+    contract: &[(&str, ContractType)],
+    problems: &mut Vec<String>,
+) {
+    let empty = serde_json::Map::new();
+    let properties = schema
+        .and_then(|schema| schema.get("properties"))
+        .and_then(Value::as_object)
+        .unwrap_or(&empty);
+    for (name, kind) in contract {
+        let Some(property) = properties.get(*name) else {
+            problems.push(format!(
+                "`throughput.actions.{role}` (`{id}`) precisa do parâmetro `{name}`"
+            ));
+            continue;
+        };
+        let declared = property.get("type").and_then(Value::as_str);
+        let secret = property.get("secret").and_then(Value::as_bool) == Some(true);
+        let (valid, expected) = match kind {
+            ContractType::Text => (declared == Some("string") && !secret, "texto"),
+            ContractType::Secret => (
+                declared == Some("string") && secret,
+                "texto com `secret: true`",
+            ),
+            ContractType::Number => (
+                matches!(declared, Some("integer" | "number")),
+                "número (`integer` ou `number`)",
+            ),
+            ContractType::Boolean => (declared == Some("boolean"), "`boolean`"),
+        };
+        if !valid {
+            problems.push(format!(
+                "`{id}.{name}` (papel `{role}` do teste de enlace) precisa ser {expected}"
+            ));
+        }
+    }
+    for name in properties.keys() {
+        if !contract.iter().any(|(expected, _)| expected == name) {
+            problems.push(format!(
+                "`{id}.{name}` não faz parte do contrato do papel `{role}` do teste de enlace — \
+                 a plataforma não o preenche"
+            ));
+        }
+    }
 }
 
 /// Títulos curtos e em número razoável: é texto de cabeçalho, não conteúdo.
@@ -728,7 +1035,8 @@ fn validate_order(owner: &str, order: &[String], problems: &mut Vec<String>) {
 
 fn validate_surfaces(manifest: &PluginManifest, problems: &mut Vec<String>) {
     if manifest.surfaces.is_empty() {
-        problems.push("declare ao menos uma superfície em `surfaces` (device, fleet)".into());
+        problems
+            .push("declare ao menos uma superfície em `surfaces` (device, fleet, topology)".into());
     }
     if let Some(settings) = &manifest.settings {
         for (scope, schema) in [("fleet", &settings.fleet), ("device", &settings.device)] {
@@ -1111,6 +1419,146 @@ mod tests {
     #[test]
     fn manifesto_antigo_continua_so_no_dispositivo() {
         assert_eq!(manifest().surfaces, vec![Surface::Device]);
+    }
+
+    /// Um MikroTik: serve e dirige btest.
+    fn com_teste_de_enlace() -> PluginManifest {
+        let text = || json!({ "type": "string", "pattern": "[a-z0-9.:-]+" });
+        let secret = || json!({ "type": "string", "secret": true });
+        let number = || json!({ "type": "integer", "minimum": 0 });
+        serde_json::from_value(json!({
+            "slug": "mikrotik", "name": "MikroTik", "version": "1.0.0", "transports": ["ssh"],
+            "surfaces": ["device", "topology"],
+            "actions": [
+                { "id": "detect", "title": "Detectar", "effect": "read" },
+                { "id": "tp_serve", "title": "Servir", "effect": "write",
+                  "params": { "type": "object", "properties": {
+                      "engine": text(), "port": number(), "peer": text(), "user": text(),
+                      "password": secret(), "requireAuth": { "type": "boolean" } } } },
+                { "id": "tp_stop", "title": "Parar", "effect": "write",
+                  "params": { "type": "object", "properties": {
+                      "engine": text(), "handle": { "type": "string" } } } },
+                { "id": "tp_run", "title": "Medir", "effect": "read",
+                  "params": { "type": "object", "properties": {
+                      "engine": text(), "target": text(), "port": number(),
+                      "direction": text(), "durationS": number(), "streams": number(),
+                      "limitMbps": { "type": "number" }, "user": text(), "password": secret() } } }
+            ],
+            "topology": { "nodeActions": ["detect"] },
+            "throughput": {
+                "serve": [{ "engine": "btest" }],
+                "drive": [{ "engine": "btest" }],
+                "actions": { "serve": "tp_serve", "stop": "tp_stop", "run": "tp_run" }
+            }
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn papeis_do_teste_de_enlace_coerentes_passam() {
+        let manifesto = com_teste_de_enlace();
+        assert!(
+            validate(&manifesto).is_empty(),
+            "{:?}",
+            validate(&manifesto)
+        );
+        let roles = manifesto.throughput.unwrap();
+        assert!(roles.drive[0].auth, "auth é verdadeiro por padrão");
+        assert_eq!(roles.serve[0].engine, ThroughputEngine::Btest);
+    }
+
+    #[test]
+    fn papeis_incoerentes_sao_apontados() {
+        let mut ruim = com_teste_de_enlace();
+        let roles = ruim.throughput.as_mut().unwrap();
+        roles.actions.stop = None;
+        roles.actions.prepare = Some("fantasma".into());
+        roles.drive.clear();
+        // `run` sem `drive`, `serve` sem `stop`, `prepare` inexistente.
+        let problems = validate(&ruim);
+        for esperado in [
+            "declare `throughput.actions.stop`",
+            "`throughput.actions.run` sem motor",
+            "`throughput.actions.prepare` cita `fantasma`",
+        ] {
+            assert!(
+                problems.iter().any(|p| p.contains(esperado)),
+                "{esperado}: {problems:?}"
+            );
+        }
+
+        let mut efeito = com_teste_de_enlace();
+        efeito.actions[3].effect = Effect::Write; // tp_run
+        efeito.actions[1].effect = Effect::Read; // tp_serve
+        let problems = validate(&efeito);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("`throughput.actions.run` (`tp_run`) precisa ser de leitura")),
+            "{problems:?}"
+        );
+        assert!(
+            problems
+                .iter()
+                .any(|p| p
+                    .contains("`throughput.actions.serve` (`tp_serve`) precisa ser de escrita")),
+            "{problems:?}"
+        );
+
+        let mut vazio = com_teste_de_enlace();
+        let roles = vazio.throughput.as_mut().unwrap();
+        roles.serve.clear();
+        roles.drive.clear();
+        roles.actions = ThroughputActions::default();
+        assert!(validate(&vazio)
+            .iter()
+            .any(|p| p.contains("ao menos um motor")));
+    }
+
+    #[test]
+    fn parametros_seguem_o_contrato_fixo() {
+        let mut ruim = com_teste_de_enlace();
+        ruim.actions[3].params = Some(json!({ "type": "object", "properties": {
+            "engine": { "type": "string" }, "target": { "type": "string" },
+            "port": { "type": "string" }, "direction": { "type": "string" },
+            "durationS": { "type": "integer" }, "streams": { "type": "integer" },
+            "user": { "type": "string" }, "password": { "type": "string" },
+            "extra": { "type": "string" } } }));
+        let problems = validate(&ruim);
+        for esperado in [
+            "`tp_run.port` (papel `run` do teste de enlace) precisa ser número",
+            "`tp_run.password` (papel `run` do teste de enlace) precisa ser texto com `secret: true`",
+            "precisa do parâmetro `limitMbps`",
+            "`tp_run.extra` não faz parte do contrato",
+        ] {
+            assert!(
+                problems.iter().any(|p| p.contains(esperado)),
+                "{esperado}: {problems:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn topologia_exige_bloco_e_acoes_existentes() {
+        let mut sem_superficie = com_teste_de_enlace();
+        sem_superficie.surfaces = vec![Surface::Device];
+        assert!(validate(&sem_superficie)
+            .iter()
+            .any(|p| p.contains("o bloco `topology` precisa da superfície")));
+
+        let mut sem_bloco = com_teste_de_enlace();
+        sem_bloco.topology = None;
+        assert!(validate(&sem_bloco)
+            .iter()
+            .any(|p| p.contains("precisa do bloco `topology`")));
+
+        let mut acoes = com_teste_de_enlace();
+        acoes.topology = Some(TopologySpec {
+            node_actions: vec!["detect".into(), "detect".into(), "fantasma".into()],
+        });
+        let problems = validate(&acoes);
+        assert!(problems.iter().any(|p| p.contains("repete `detect`")));
+        assert!(problems.iter().any(|p| p.contains("cita `fantasma`")));
     }
 
     #[test]

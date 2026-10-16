@@ -129,6 +129,7 @@ pub async fn reveal(
             cancel: CancellationToken::new(),
             // Sem observador: nenhum passo vai para o SSE.
             observer: None,
+            progress: None,
             limits: Limits::default(),
         },
     )

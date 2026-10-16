@@ -156,6 +156,7 @@ O manifesto diz onde o plugin aparece (`surfaces`):
 | `["device"]` (padrão) | aba no equipamento | Gerenciador de pacotes |
 | `["fleet"]` | só em Aplicativos | um relatório de toda a rede |
 | `["device", "fleet"]` | os dois | Rede Wi-Fi: todos os roteadores, ou um só na aba dele |
+| `[..., "topology"]` | também no nó da topologia | as ações de `topology.nodeActions` no painel e no menu do nó |
 
 - **Membros** são os equipamentos onde o plugin está instalado: "adicionar o
   roteador à rede" é instalar o plugin nele (pela aba Equipamentos do
@@ -232,6 +233,37 @@ O manifesto diz onde o plugin aparece (`surfaces`):
     nada muda nos equipamentos até ela ser aplicada.
 - Um plugin reaproveita outro com `uses` + `device.use_plugin` (o Wi-Fi usa o
   Gerenciador de pacotes para trocar o `wpad` e instalar o `usteer`).
+
+## Topologia, andamento ao vivo e teste de enlace (ADR 015)
+
+- **Topologia**: `"surfaces": [..., "topology"]` com
+  `"topology": { "nodeActions": ["acao", …] }` põe as ações no painel e no
+  menu do nó de cada equipamento onde o plugin está **instalado e ativo**, com
+  o mesmo diálogo de execução da aba. Bloco e superfície andam juntos; ação
+  com `reveals` não entra. A tela lê tudo de uma vez em
+  `GET /api/plugins/topology-actions?deviceIds=1,2` →
+  `{ "<deviceId>": [{ pluginId, pluginSlug, pluginName, action, title, effect,
+  hasParams, definition }] }`.
+- **Andamento ao vivo**: `device.ssh_live(cmd, #{ timeout_ms, progress })` é o
+  `ssh` com prazo próprio (até 300 s; a execução estica o prazo para caber a
+  chamada, até o teto de 10 min) e, com `progress: #{ pattern, flow }`, cada
+  linha da saída que casa com a regex (grupos `value` e `unit`; `flow` fixo ou
+  grupo `flow`) vira uma amostra em bps; `device.progress(#{ flow, bps })`
+  emite à mão. As amostras saem pelo SSE como `plugin:run_progress`
+  `{ runId, deviceId, flow, bps, tMs }` — efêmeras, até 20 por segundo, nunca
+  gravadas. Pelo SSH local a saída chega linha a linha enquanto o comando
+  roda; pelo agente remoto, por enquanto, no fim. Cancelar a execução
+  interrompe a chamada em andamento.
+- **Papéis no teste de enlace** (`throughput`): o que o equipamento serve e
+  dirige (`iperf3`, `btest`) e as ações `prepare` (opcional), `serve`, `stop`
+  (escrita) e `run` (leitura), com os parâmetros fixos do ADR 015 §3 — a
+  validação do manifesto recusa parâmetro faltando, a mais, de outro tipo ou
+  senha sem `secret: true`. Detalhes na skill de autoria.
+- **Execução por outro serviço**: o orquestrador chama uma ação sem HTTP por
+  `plugins::invoke` (`prepare` → `run_id`, `finish` → desfecho, ou
+  `execute`), com origem `link_test`, amostras num canal e cancelamento por
+  token. A execução grava `plugin_runs` como qualquer outra — o transcript fica
+  a um clique da etapa.
 
 ## Rede Wi-Fi (OpenWrt)
 

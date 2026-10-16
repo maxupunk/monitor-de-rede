@@ -13,8 +13,11 @@ import type { PluginPreview } from '@/bindings/PluginPreview'
 import type { RevealResult } from '@/bindings/RevealResult'
 import type { PluginRunView } from '@/bindings/PluginRunView'
 import type { PluginSummary } from '@/bindings/PluginSummary'
+import type { ProgressFlow } from '@/bindings/ProgressFlow'
+import type { ProgressSample } from '@/bindings/ProgressSample'
 import type { RunStarted } from '@/bindings/RunStarted'
 import type { TestReport } from '@/bindings/TestReport'
+import type { TopologyNodeAction } from '@/bindings/TopologyNodeAction'
 import type { TranscriptEntry } from '@/bindings/TranscriptEntry'
 import type { TransportKind } from '@/bindings/TransportKind'
 
@@ -47,6 +50,10 @@ function isApprovalRequest(value: unknown): value is PluginApprovalRequest {
   )
 }
 
+function isProgressFlow(value: unknown): value is ProgressFlow {
+  return value === 'tx' || value === 'rx'
+}
+
 function describe(err: unknown, fallback: string): string {
   if (err instanceof Error) return err.message
   return fallback
@@ -55,12 +62,25 @@ function describe(err: unknown, fallback: string): string {
 /** Quantas execuções a aba mantém em memória. */
 const RUNS_LIMIT = 20
 
+/** Quantas amostras de andamento ficam por execução (2 min a 1 por segundo). */
+const PROGRESS_LIMIT = 120
+
+/** De quantas execuções as amostras ficam em memória. */
+const PROGRESS_RUNS_LIMIT = 20
+
+/** Ações de plugin no nó da topologia, por equipamento. */
+export type TopologyActionsByDevice = Record<number, TopologyNodeAction[]>
+
+export type { TopologyNodeAction }
+
 export const usePluginsStore = defineStore('plugins', () => {
   const library = ref<PluginSummary[]>([])
   const libraryLoading = ref(false)
   const deviceViews = ref<Record<number, DevicePluginsView>>({})
   const deviceLoading = ref(false)
   const pendingApprovals = ref<PluginApprovalRequest[]>([])
+  /** Últimas amostras de andamento de cada execução (`plugin:run_progress`). */
+  const runProgress = ref<Record<number, ProgressSample[]>>({})
   const error = ref<string | null>(null)
 
   const nextApproval = computed(() => pendingApprovals.value[0] ?? null)
@@ -308,6 +328,15 @@ export const usePluginsStore = defineStore('plugins', () => {
     return started.runId
   }
 
+  /**
+   * As ações que os plugins ativos instalados oferecem no nó de cada
+   * equipamento (`topology.nodeActions`). Sem lista, de todos.
+   */
+  function fetchTopologyActions(deviceIds?: number[]): Promise<TopologyActionsByDevice> {
+    const query = deviceIds?.length ? `?deviceIds=${deviceIds.join(',')}` : ''
+    return apiService.get<TopologyActionsByDevice>(`/plugins/topology-actions${query}`)
+  }
+
   async function validatePlugin(deviceId: number, pluginId: number): Promise<number> {
     const started = await apiService.post<RunStarted>(
       `/devices/${deviceId}/plugins/${pluginId}/validate`,
@@ -401,6 +430,28 @@ export const usePluginsStore = defineStore('plugins', () => {
     }
   }
 
+  /** Amostra efêmera de andamento: guarda as últimas de cada execução. */
+  function applyRunProgress(data: Record<string, unknown>) {
+    const { runId, flow, bps, tMs } = data
+    if (typeof runId !== 'number' || !isProgressFlow(flow)) return
+    if (typeof bps !== 'number' || typeof tMs !== 'number') return
+    const samples = [...(runProgress.value[runId] ?? []), { tMs, flow, bps }]
+    const next: Record<number, ProgressSample[]> = {
+      ...runProgress.value,
+      [runId]: samples.slice(-PROGRESS_LIMIT),
+    }
+    // Só as execuções mais recentes ficam em memória.
+    const runs = Object.keys(next)
+      .map(Number)
+      .sort((a, b) => a - b)
+    for (const old of runs.slice(0, -PROGRESS_RUNS_LIMIT)) delete next[old]
+    runProgress.value = next
+  }
+
+  function progressOf(runId: number): ProgressSample[] {
+    return runProgress.value[runId] ?? []
+  }
+
   function applyApprovalRequired(data: Record<string, unknown>) {
     if (!isApprovalRequest(data)) return
     if (pendingApprovals.value.some((item) => item.key === data.key)) return
@@ -419,6 +470,7 @@ export const usePluginsStore = defineStore('plugins', () => {
     deviceLoading,
     pendingApprovals,
     nextApproval,
+    runProgress,
     error,
     fetchLibrary,
     fetchDetail,
@@ -444,6 +496,7 @@ export const usePluginsStore = defineStore('plugins', () => {
     saveDeviceSettings,
     runById,
     validatePlugin,
+    fetchTopologyActions,
     cancelRun,
     respondApproval,
     autoAcceptState,
@@ -453,6 +506,8 @@ export const usePluginsStore = defineStore('plugins', () => {
     applyRunStarted,
     applyRunOutput,
     applyRunFinished,
+    applyRunProgress,
+    progressOf,
     applyApprovalRequired,
     applyApprovalResolved,
   }

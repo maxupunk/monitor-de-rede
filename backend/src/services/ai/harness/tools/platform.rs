@@ -484,23 +484,15 @@ mod tests {
             target_device_id: 2,
             source_device_name: Some("core".into()),
             target_device_name: Some("acesso-1".into()),
-            source_interface_id: None,
-            target_interface_id: None,
             source_interface_name: Some("ge-0/0/1".into()),
             target_interface_name: Some("eth0".into()),
-            source_interface_speed: None,
-            target_interface_speed: None,
-            source_interface_status: None,
-            target_interface_status: None,
-            in_bps: None,
-            out_bps: None,
-            traffic_bps: None,
             traffic_label: Some("12.0 Mbps".into()),
             link_type: "ethernet".into(),
             discovery_method: "lldp".into(),
             confidence: 100,
             confirmed: true,
             status: "up".into(),
+            ..TopologyEdge::default()
         }
     }
 

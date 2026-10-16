@@ -563,45 +563,118 @@ pub struct LldpNeighbor {
     pub remote_mgmt_address: Option<String>,
     pub protocol: String,
 }
+/// `lldpRemTable` (LLDP-MIB): índice `timeMark.localPortNum.remIndex`.
+/// Colunas: 4 = `lldpRemChassisIdSubtype`, 5 = `lldpRemChassisId`,
+/// 7 = `lldpRemPortId`, 8 = `lldpRemPortDesc`, 9 = `lldpRemSysName`.
+pub const OID_LLDP_REM_TABLE: &str = "1.0.8802.1.1.2.1.4.1.1";
+/// `lldpRemManAddrTable`: o endereço de gerência mora **no índice**
+/// (`timeMark.localPortNum.remIndex.addrSubtype.addrLen.addr…`); as colunas
+/// acessíveis (3 = `lldpRemManAddrIfSubtype`, ...) só servem para o walk achar a linha.
+pub const OID_LLDP_REM_MAN_ADDR_TABLE: &str = "1.0.8802.1.1.2.1.4.2.1";
+/// `cdpCacheTable` (CISCO-CDP-MIB): índice `ifIndex.deviceIndex`.
+/// Colunas: 3 = `cdpCacheAddressType`, 4 = `cdpCacheAddress`,
+/// 6 = `cdpCacheDeviceId`, 7 = `cdpCacheDevicePort`.
+pub const OID_CDP_CACHE_TABLE: &str = "1.3.6.1.4.1.9.9.23.1.2.1.1";
+
 pub async fn collect_lldp(client: &SnmpClient) -> Result<Vec<LldpNeighbor>, SnmpError> {
-    const LLDP_REMOTE: &str = "1.0.8802.1.1.2.1.4.1.1";
-    const CDP_CACHE: &str = "1.3.6.1.4.1.9.9.23.1.2.1.1";
-    let (lldp, cdp) = tokio::join!(client.walk(LLDP_REMOTE), client.walk(CDP_CACHE));
+    let (remote, management, cdp) = tokio::join!(
+        client.walk(OID_LLDP_REM_TABLE),
+        client.walk(OID_LLDP_REM_MAN_ADDR_TABLE),
+        client.walk(OID_CDP_CACHE_TABLE)
+    );
+    Ok(parse_neighbors(
+        &remote.unwrap_or_default(),
+        &management.unwrap_or_default(),
+        &cdp.unwrap_or_default(),
+    ))
+}
+
+/// IPv4 de gerência codificado no índice da `lldpRemManAddrTable`, a partir
+/// do `addrSubtype`. O `lldpRemManAddr` é `OCTET STRING` não-`IMPLIED`, então
+/// vem prefixado pelo tamanho (`1.4.a.b.c.d`); alguns agentes omitem o
+/// tamanho (`1.a.b.c.d`) e os dois formatos são aceitos. Só IPv4 (subtipo 1).
+fn lldp_management_ipv4(address_index: &[u32]) -> Option<String> {
+    let octets = match address_index {
+        [1, 4, a, b, c, d] | [1, a, b, c, d] => [*a, *b, *c, *d],
+        _ => return None,
+    };
+    let [a, b, c, d] = octets.map(|octet| u8::try_from(octet).ok());
+    Some(std::net::Ipv4Addr::new(a?, b?, c?, d?).to_string())
+}
+
+/// IPv4 do `cdpCacheAddress` (tipo 1 = IP): 4 bytes crus, nunca texto — o
+/// `text()` de `0a 30 41 42` daria "0AB".
+fn cdp_address_ipv4(value: &SnmpValue) -> Option<String> {
+    match value {
+        SnmpValue::Bytes(bytes) if bytes.len() == 4 => {
+            Some(std::net::Ipv4Addr::new(bytes[0], bytes[1], bytes[2], bytes[3]).to_string())
+        }
+        SnmpValue::Text(text) => text
+            .parse::<std::net::Ipv4Addr>()
+            .ok()
+            .map(|ip| ip.to_string()),
+        _ => None,
+    }
+}
+
+/// Interpreta os walks de LLDP e CDP em vizinhos. Puro: sem transporte.
+#[must_use]
+pub fn parse_neighbors(
+    lldp_remote: &[super::client::SnmpWalkEntry],
+    lldp_management: &[super::client::SnmpWalkEntry],
+    cdp: &[super::client::SnmpWalkEntry],
+) -> Vec<LldpNeighbor> {
     let mut neighbors = Vec::new();
 
-    let mut lldp_fields = BTreeMap::<(i32, i32), BTreeMap<u32, String>>::new();
-    for entry in lldp.unwrap_or_default() {
-        if let Some((column, index)) = table_column_and_index(&entry.oid, LLDP_REMOTE) {
+    // Chave (localPortNum, remIndex): o timeMark muda a cada alteração do
+    // vizinho e não identifica a linha.
+    let mut lldp_fields = BTreeMap::<(u32, u32), BTreeMap<u32, String>>::new();
+    for entry in lldp_remote {
+        if let Some((column, index)) = table_column_and_index(&entry.oid, OID_LLDP_REM_TABLE) {
             if index.len() >= 3 {
                 lldp_fields
-                    .entry((index[1] as i32, index[2] as i32))
+                    .entry((index[1], index[2]))
                     .or_default()
                     .insert(column, entry.value.text());
             }
         }
     }
-    neighbors.extend(lldp_fields.into_iter().filter_map(
-        |((local_port, _remote_index), fields)| {
-            let remote_sys_name = fields.get(&9).cloned();
-            let remote_port = fields.get(&7).cloned();
-            (remote_sys_name.is_some() || remote_port.is_some()).then(|| LldpNeighbor {
-                local_port: local_port.to_string(),
-                remote_port,
-                remote_sys_name,
-                remote_mgmt_address: fields.get(&4).cloned(),
-                protocol: "lldp".into(),
-            })
-        },
-    ));
+    let mut lldp_addresses = BTreeMap::<(u32, u32), String>::new();
+    for entry in lldp_management {
+        if let Some((_column, index)) =
+            table_column_and_index(&entry.oid, OID_LLDP_REM_MAN_ADDR_TABLE)
+        {
+            if index.len() > 3 {
+                if let Some(address) = lldp_management_ipv4(&index[3..]) {
+                    // Primeiro IPv4 da linha vence; as várias colunas repetem o índice.
+                    lldp_addresses
+                        .entry((index[1], index[2]))
+                        .or_insert(address);
+                }
+            }
+        }
+    }
+    neighbors.extend(lldp_fields.into_iter().filter_map(|(key, fields)| {
+        let non_empty = |column: u32| fields.get(&column).filter(|v| !v.is_empty()).cloned();
+        let remote_sys_name = non_empty(9);
+        let remote_port = non_empty(7).or_else(|| non_empty(8));
+        (remote_sys_name.is_some() || remote_port.is_some()).then(|| LldpNeighbor {
+            local_port: key.0.to_string(),
+            remote_port,
+            remote_sys_name,
+            remote_mgmt_address: lldp_addresses.get(&key).cloned(),
+            protocol: "lldp".into(),
+        })
+    }));
 
-    let mut cdp_fields = BTreeMap::<(i32, i32), BTreeMap<u32, String>>::new();
-    for entry in cdp.unwrap_or_default() {
-        if let Some((column, index)) = table_column_and_index(&entry.oid, CDP_CACHE) {
+    let mut cdp_fields = BTreeMap::<(u32, u32), BTreeMap<u32, &SnmpValue>>::new();
+    for entry in cdp {
+        if let Some((column, index)) = table_column_and_index(&entry.oid, OID_CDP_CACHE_TABLE) {
             if index.len() >= 2 {
                 cdp_fields
-                    .entry((index[0] as i32, index[1] as i32))
+                    .entry((index[0], index[1]))
                     .or_default()
-                    .insert(column, entry.value.text());
+                    .insert(column, &entry.value);
             }
         }
     }
@@ -609,18 +682,29 @@ pub async fn collect_lldp(client: &SnmpClient) -> Result<Vec<LldpNeighbor>, Snmp
         cdp_fields
             .into_iter()
             .filter_map(|((local_port, _remote_index), fields)| {
-                let remote_sys_name = fields.get(&6).cloned();
-                let remote_port = fields.get(&7).cloned();
+                let text = |column: u32| {
+                    fields
+                        .get(&column)
+                        .map(|value| value.text())
+                        .filter(|value| !value.is_empty())
+                };
+                let remote_sys_name = text(6);
+                let remote_port = text(7);
+                let is_ip = fields.get(&3).is_none_or(|kind| kind.number() == Some(1));
+                let remote_mgmt_address = fields
+                    .get(&4)
+                    .filter(|_| is_ip)
+                    .and_then(|value| cdp_address_ipv4(value));
                 (remote_sys_name.is_some() || remote_port.is_some()).then(|| LldpNeighbor {
                     local_port: local_port.to_string(),
                     remote_port,
                     remote_sys_name,
-                    remote_mgmt_address: fields.get(&3).cloned(),
+                    remote_mgmt_address,
                     protocol: "cdp".into(),
                 })
             }),
     );
-    Ok(neighbors)
+    neighbors
 }
 
 fn table_column_and_index(oid: &str, base: &str) -> Option<(u32, Vec<u32>)> {
@@ -985,5 +1069,106 @@ mod tests {
         let macs = parse_interface_macs(entries);
         assert_eq!(macs.len(), 1);
         assert_eq!(macs[0], "d6:8c:72:59:65:fc");
+    }
+    fn entrada(oid: String, value: SnmpValue) -> super::super::client::SnmpWalkEntry {
+        super::super::client::SnmpWalkEntry { oid, value }
+    }
+
+    #[test]
+    fn lldp_le_o_endereco_de_gerencia_do_indice_da_man_addr_table() {
+        // Vizinho na porta local 5, remIndex 2. A coluna 4 da lldpRemTable é o
+        // subtipo do chassis (4 = macAddress), não um endereço.
+        let remoto = vec![
+            entrada(
+                format!("{OID_LLDP_REM_TABLE}.4.0.5.2"),
+                SnmpValue::Text("4".into()),
+            ),
+            entrada(
+                format!("{OID_LLDP_REM_TABLE}.7.0.5.2"),
+                SnmpValue::Bytes(b"Gi0/1".to_vec()),
+            ),
+            entrada(
+                format!("{OID_LLDP_REM_TABLE}.9.0.5.2"),
+                SnmpValue::Bytes(b"core-sw".to_vec()),
+            ),
+        ];
+        let gerencia = vec![
+            entrada(
+                format!("{OID_LLDP_REM_MAN_ADDR_TABLE}.3.0.5.2.1.4.10.0.0.1"),
+                SnmpValue::Text("2".into()),
+            ),
+            entrada(
+                format!("{OID_LLDP_REM_MAN_ADDR_TABLE}.4.0.5.2.1.4.10.0.0.1"),
+                SnmpValue::Text("1".into()),
+            ),
+        ];
+        let vizinhos = parse_neighbors(&remoto, &gerencia, &[]);
+        assert_eq!(vizinhos.len(), 1);
+        let vizinho = &vizinhos[0];
+        assert_eq!(vizinho.local_port, "5");
+        assert_eq!(vizinho.remote_port.as_deref(), Some("Gi0/1"));
+        assert_eq!(vizinho.remote_sys_name.as_deref(), Some("core-sw"));
+        assert_eq!(vizinho.remote_mgmt_address.as_deref(), Some("10.0.0.1"));
+        assert_eq!(vizinho.protocol, "lldp");
+    }
+
+    #[test]
+    fn lldp_aceita_indice_sem_prefixo_de_tamanho_e_ignora_ipv6() {
+        assert_eq!(
+            lldp_management_ipv4(&[1, 192, 168, 0, 9]).as_deref(),
+            Some("192.168.0.9")
+        );
+        assert_eq!(
+            lldp_management_ipv4(&[1, 4, 192, 168, 0, 9]).as_deref(),
+            Some("192.168.0.9")
+        );
+        // Subtipo 2 = IPv6.
+        assert_eq!(lldp_management_ipv4(&[2, 16, 254, 128, 0, 0]), None);
+        assert_eq!(lldp_management_ipv4(&[1, 4, 300, 0, 0, 1]), None);
+    }
+
+    #[test]
+    fn lldp_sem_man_addr_fica_sem_endereco() {
+        let remoto = vec![entrada(
+            format!("{OID_LLDP_REM_TABLE}.9.100.3.1"),
+            SnmpValue::Text("ap-01".into()),
+        )];
+        let vizinhos = parse_neighbors(&remoto, &[], &[]);
+        assert_eq!(vizinhos.len(), 1);
+        assert_eq!(vizinhos[0].remote_mgmt_address, None);
+        assert_eq!(vizinhos[0].local_port, "3");
+    }
+
+    #[test]
+    fn cdp_le_o_endereco_cru_da_coluna_4() {
+        // 10.48.65.66 em bytes é "\n0AB": o texto daria lixo.
+        let cdp = vec![
+            entrada(
+                format!("{OID_CDP_CACHE_TABLE}.3.12.1"),
+                SnmpValue::Text("1".into()),
+            ),
+            entrada(
+                format!("{OID_CDP_CACHE_TABLE}.4.12.1"),
+                SnmpValue::Bytes(vec![10, 48, 65, 66]),
+            ),
+            entrada(
+                format!("{OID_CDP_CACHE_TABLE}.6.12.1"),
+                SnmpValue::Bytes(b"dist-sw".to_vec()),
+            ),
+            entrada(
+                format!("{OID_CDP_CACHE_TABLE}.7.12.1"),
+                SnmpValue::Bytes(b"Te1/0/1".to_vec()),
+            ),
+        ];
+        let vizinhos = parse_neighbors(&[], &[], &cdp);
+        assert_eq!(vizinhos.len(), 1);
+        assert_eq!(vizinhos[0].local_port, "12");
+        assert_eq!(vizinhos[0].remote_sys_name.as_deref(), Some("dist-sw"));
+        assert_eq!(vizinhos[0].remote_port.as_deref(), Some("Te1/0/1"));
+        assert_eq!(
+            vizinhos[0].remote_mgmt_address.as_deref(),
+            Some("10.48.65.66")
+        );
+        assert_eq!(vizinhos[0].protocol, "cdp");
     }
 }

@@ -5,10 +5,13 @@
 //!
 //! * `plugin:run_started` / `plugin:run_finished` — o estado da execução;
 //! * `plugin:run_output` — cada acesso ao equipamento, à medida que acontece;
+//! * `plugin:run_progress` — amostra de andamento (`device.ssh_live` com
+//!   `progress`, `device.progress`), efêmera: nunca é gravada;
 //! * `plugin:approval_required` — quando o gate pede aprovação (ver `gate`).
 //!
 //! O mesmo caminho serve à tela (em segundo plano, [`spawn`]), à IA e à
-//! validação funcional (esperando o fim, [`run`]).
+//! validação funcional (esperando o fim, [`run`]) — e a outro serviço, como o
+//! teste de enlace (ver [`super::invoke`]).
 
 use std::{
     collections::HashMap,
@@ -21,6 +24,7 @@ use sea_orm::{
     QuerySelect, Set,
 };
 use serde_json::{json, Value};
+use tokio::sync::mpsc::UnboundedSender;
 use tokio_util::sync::CancellationToken;
 
 use super::{
@@ -33,7 +37,7 @@ use super::{
     params,
     runtime::{
         self, DeviceInfo, ExecutionContext, Extras, LibraryPlugin, Limits, Observer,
-        TranscriptEntry,
+        ProgressObserver, ProgressSample, TranscriptEntry,
     },
     service::{self, status},
     settings, testing,
@@ -56,6 +60,8 @@ pub const RUN_OUTPUT_EVENT: &str = "plugin:run_output";
 /// Um acesso começou (o que está rodando agora; ainda sem resposta).
 pub const RUN_STEP_EVENT: &str = "plugin:run_step";
 pub const RUN_FINISHED_EVENT: &str = "plugin:run_finished";
+/// Amostra de andamento, `{ runId, deviceId, flow, bps, tMs }` — efêmera.
+pub const RUN_PROGRESS_EVENT: &str = "plugin:run_progress";
 
 /// Ação sintética que registra a suíte funcional.
 pub const VALIDATION_ACTION: &str = "validate";
@@ -67,6 +73,8 @@ pub enum Origin {
     Validation,
     /// Parte de uma ação de frota (vários equipamentos).
     Fleet,
+    /// Uma etapa de um teste de enlace (ADR 015).
+    LinkTest,
 }
 
 impl Origin {
@@ -77,6 +85,18 @@ impl Origin {
             Self::Ai => "ai",
             Self::Validation => "validation",
             Self::Fleet => "fleet",
+            Self::LinkTest => "link_test",
+        }
+    }
+
+    /// Quem executou, para a auditoria.
+    const fn actor(self) -> &'static str {
+        match self {
+            Self::Ai => "A IA",
+            Self::User => "O operador",
+            Self::Validation => "A validação",
+            Self::Fleet => "A frota",
+            Self::LinkTest => "O teste de enlace",
         }
     }
 }
@@ -96,7 +116,11 @@ pub fn approval_for(plugin: &plugins::Model, origin: Origin, ai_auto_accept: boo
     let active = plugin.status == status::ACTIVE;
     match origin {
         Origin::Ai if ai_auto_accept => Approval::Auto,
-        Origin::User | Origin::Validation | Origin::Fleet | Origin::Ai if active => Approval::Auto,
+        Origin::User | Origin::Validation | Origin::Fleet | Origin::LinkTest | Origin::Ai
+            if active =>
+        {
+            Approval::Auto
+        }
         _ => Approval::PerCall,
     }
 }
@@ -124,12 +148,31 @@ pub struct Prepared {
     credentials: runtime::Credentials,
     extras: Extras,
     cancel: CancellationToken,
+    /// Quem pediu a execução e quer as amostras de andamento (além do SSE).
+    progress: Option<UnboundedSender<ProgressSample>>,
 }
 
 impl Prepared {
     #[must_use]
     pub const fn run_id(&self) -> i64 {
         self.run.id
+    }
+
+    /// Entrega a `sender` cada amostra de andamento da execução.
+    #[must_use]
+    pub fn with_progress(mut self, sender: UnboundedSender<ProgressSample>) -> Self {
+        self.progress = Some(sender);
+        self
+    }
+
+    /// Cancelar `parent` cancela esta execução (o cancelamento de um teste de
+    /// enlace chega à etapa em andamento). `POST /plugin-runs/{id}/cancel`
+    /// continua valendo só para ela.
+    #[must_use]
+    pub fn cancelled_by(mut self, parent: &CancellationToken) -> Self {
+        self.cancel = parent.child_token();
+        lock_cancellations().insert(self.run.id, self.cancel.clone());
+        self
     }
 }
 
@@ -266,6 +309,7 @@ pub async fn prepare(ctx: &AppContext, spec: RunSpec) -> AppResult<Prepared> {
         credentials: resolved.credentials,
         extras,
         cancel,
+        progress: None,
     })
 }
 
@@ -386,12 +430,7 @@ async fn audit_execution<C: ConnectionTrait>(
                 resource_label: Some(label.to_owned()),
                 description: Some(format!(
                     "{} executou {what} em {} ({ip}){}",
-                    match origin {
-                        Origin::Ai => "A IA",
-                        Origin::User => "O operador",
-                        Origin::Validation => "A validação",
-                        Origin::Fleet => "A frota",
-                    },
+                    origin.actor(),
                     device.name,
                     reason
                         .map(|reason| format!(" — motivo: {reason}"))
@@ -420,9 +459,34 @@ struct Shared {
     bus: Option<EventBus>,
     run_id: i64,
     device_id: i64,
+    progress: Option<UnboundedSender<ProgressSample>>,
 }
 
 impl Shared {
+    /// Amostras vão ao SSE (efêmeras — não há o que reidratar de uma
+    /// execução que já acabou) e a quem pediu a execução.
+    fn progress_observer(self: &Arc<Self>) -> ProgressObserver {
+        let shared = self.clone();
+        Arc::new(move |sample: &ProgressSample| {
+            if let Some(bus) = &shared.bus {
+                bus.publish_ephemeral(
+                    RUN_PROGRESS_EVENT,
+                    json!({
+                        "runId": shared.run_id,
+                        "deviceId": shared.device_id,
+                        "flow": sample.flow,
+                        "bps": sample.bps,
+                        "tMs": sample.t_ms,
+                    }),
+                );
+            }
+            if let Some(sender) = &shared.progress {
+                // Quem pediu pode ter desistido de ouvir; a execução segue.
+                let _ = sender.send(*sample);
+            }
+        })
+    }
+
     fn observer(self: &Arc<Self>) -> Observer {
         let shared = self.clone();
         Arc::new(move |entry: &TranscriptEntry| {
@@ -463,7 +527,7 @@ impl Prepared {
         &self,
         effect: Effect,
         gate: Arc<dyn AccessGate>,
-        observer: Observer,
+        (observer, progress): (Observer, ProgressObserver),
     ) -> ExecutionContext {
         ExecutionContext {
             extras: self.extras.clone(),
@@ -476,6 +540,7 @@ impl Prepared {
             gate,
             cancel: self.cancel.clone(),
             observer: Some(observer),
+            progress: Some(progress),
             limits: Limits::default(),
         }
     }
@@ -493,6 +558,7 @@ pub async fn run(ctx: &AppContext, prepared: Prepared) -> AppResult<plugin_runs:
         bus: bus.clone(),
         run_id: prepared.run.id,
         device_id: prepared.spec.device.id,
+        progress: prepared.progress.clone(),
     });
     if let Some(bus) = &bus {
         bus.publish_ephemeral(
@@ -501,7 +567,7 @@ pub async fn run(ctx: &AppContext, prepared: Prepared) -> AppResult<plugin_runs:
         );
     }
     let gate = prepared.gate(bus.clone());
-    let observer = shared.observer();
+    let observer = (shared.observer(), shared.progress_observer());
 
     let (output, transcript) = if prepared.spec.action == VALIDATION_ACTION {
         validate_suite(ctx, &prepared, gate, observer).await
@@ -618,7 +684,7 @@ async fn validate_suite(
     ctx: &AppContext,
     prepared: &Prepared,
     gate: Arc<dyn AccessGate>,
-    observer: Observer,
+    observer: (Observer, ProgressObserver),
 ) -> (Result<Value, String>, Vec<TranscriptEntry>) {
     let package = &prepared.package;
     if package.tests.functional.is_empty() {
@@ -850,6 +916,7 @@ pub async fn run_ad_hoc(ctx: &AppContext, spec: AdHocSpec) -> AppResult<plugin_r
         bus: bus.clone(),
         run_id: run.id,
         device_id: spec.device.id,
+        progress: None,
     });
     let cancel = CancellationToken::new();
     lock_cancellations().insert(run.id, cancel.clone());
@@ -868,6 +935,7 @@ pub async fn run_ad_hoc(ctx: &AppContext, spec: AdHocSpec) -> AppResult<plugin_r
             gate: Arc::new(AllowAll),
             cancel: cancel.clone(),
             observer: Some(shared.observer()),
+            progress: None,
             limits: Limits::default(),
         },
     )
@@ -1028,5 +1096,14 @@ mod tests {
             approval_for(&plugin("active"), Origin::Ai, false),
             Approval::Auto
         );
+        assert_eq!(
+            approval_for(&plugin("active"), Origin::LinkTest, false),
+            Approval::Auto
+        );
+        assert_eq!(
+            approval_for(&plugin("draft"), Origin::LinkTest, false),
+            Approval::PerCall
+        );
+        assert_eq!(Origin::LinkTest.as_str(), "link_test");
     }
 }
