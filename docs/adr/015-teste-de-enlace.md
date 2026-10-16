@@ -198,6 +198,64 @@ API:
 
 Escrita (rodar, cancelar, agendar) é de `operator`/`admin`; leitura de todos.
 
+#### 5.1 Contrato de dados (camelCase, exportado por `ts-rs`)
+
+`forward` é sempre o sentido **A→B** da perna; `reverse`, B→A.
+
+```ts
+type LinkTestKind = 'link' | 'path' | 'server'
+type LinkTestStatus = 'queued' | 'running' | 'succeeded' | 'partial' | 'failed' | 'cancelled'
+type LinkTestStepStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'skipped' | 'cancelled'
+type LinkTestFlow = 'forward' | 'reverse'
+
+type LinkTestSpecInput = { durationS?: number /* 5; 1–60 */, direction?: 'both' | 'forward' | 'reverse',
+                           streams?: number /* 1; 1–8, iperf3 */, limitMbps?: number | null }
+type LinkTestRequest = { kind: LinkTestKind, linkId?: number, sourceDeviceId?: number,
+                         targetDeviceId?: number, spec?: LinkTestSpecInput, confirm?: boolean }
+
+type LinkTestEndpoint = { kind: 'device' | 'central' | 'agent', deviceId: number | null,
+                          agentId: number | null, name: string, ip: string | null, platform: string | null }
+
+type LinkTestPlan = { kind: LinkTestKind, legs: LinkTestPlanLeg[], estimatedSeconds: number,
+                      warnings: string[], blocking: string[] /* não vazio = não roda */,
+                      willInstall: { deviceId: number, deviceName: string, packages: string[] }[] }
+type LinkTestPlanLeg = { seq: number, kind: 'link' | 'end_to_end', a: LinkTestEndpoint, b: LinkTestEndpoint,
+                         edgeId: number | null, engine: 'iperf3' | 'btest' | null, serverSide: 'a' | 'b' | null,
+                         durationS: number, runnable: boolean, issues: string[] }
+
+type LinkTestStage = { key: 'prepare_a' | 'prepare_b' | 'serve' | 'forward' | 'reverse' | 'stop',
+                       label: string, status: LinkTestStepStatus, message: string | null,
+                       runId: number | null, startedAt: string | null, finishedAt: string | null }
+type LinkTestLeg = LinkTestPlanLeg & { status: LinkTestStepStatus, stages: LinkTestStage[],
+                   forwardBps: number | null, reverseBps: number | null, retransmits: number | null,
+                   error: string | null, startedAt: string | null, finishedAt: string | null,
+                   samples?: { flow: LinkTestFlow, bps: number, tMs: number }[] /* só no GET de detalhe */ }
+
+type LinkTest = { id: number, kind: LinkTestKind, status: LinkTestStatus, origin: 'user' | 'schedule',
+                  scheduleId: number | null, linkId: number | null, sourceDeviceId: number | null,
+                  targetDeviceId: number | null, spec: Required<LinkTestSpecInput>, legs: LinkTestLeg[],
+                  summary: { bottleneckLegSeq: number | null, minForwardBps: number | null,
+                             minReverseBps: number | null } | null,
+                  error: string | null, requestedBy: { id: number, name: string } | null,
+                  createdAt: string, startedAt: string | null, finishedAt: string | null }
+
+type LinkTestPage = { items: LinkTest[], total: number, page: number, perPage: number }
+
+type LinkTestSchedule = { id: number, name: string, kind: LinkTestKind, linkId: number | null,
+                          sourceDeviceId: number | null, targetDeviceId: number | null,
+                          spec: Required<LinkTestSpecInput>, intervalMinutes: number /* ≥ 15 */,
+                          windowStart: string | null /* "HH:MM" */, windowEnd: string | null,
+                          enabled: boolean, lastRunAt: string | null, nextRunAt: string | null,
+                          lastTestId: number | null, lastStatus: LinkTestStatus | null,
+                          createdAt: string, updatedAt: string }
+type LinkTestScheduleInput = Omit<LinkTestSchedule, 'id' | 'lastRunAt' | 'nextRunAt' | 'lastTestId' |
+                             'lastStatus' | 'createdAt' | 'updatedAt' | 'spec'> & { spec?: LinkTestSpecInput }
+```
+
+Eventos SSE: `link_test:updated` carrega um `LinkTest` (sem `samples`);
+`link_test:sample` carrega `{ testId, legSeq, flow, bps, tMs }`;
+`link_test_schedule:updated` carrega `{ id }` (a tela relê a lista).
+
 ### 6. Agente — protocolo 4
 
 - `Command::Throughput { target, port, spec, auth }` com permissão própria

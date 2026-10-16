@@ -14,6 +14,7 @@
 //! para o sentido do enlace.
 
 pub mod btest;
+pub mod driver;
 pub mod iperf3;
 mod meter;
 
