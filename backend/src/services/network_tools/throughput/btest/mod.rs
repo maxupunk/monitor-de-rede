@@ -98,7 +98,7 @@ pub fn listen_addr_from_env() -> Result<Option<SocketAddr>, String> {
 #[cfg(test)]
 mod tests {
     use std::{
-        net::{IpAddr, Ipv4Addr},
+        net::{IpAddr, Ipv4Addr, SocketAddr},
         time::Duration,
     };
 
@@ -153,6 +153,43 @@ mod tests {
         )
         .await
         .expect("cliente dentro de 5 s")
+    }
+
+    /// Interoperabilidade com um `bandwidth-server` de RouterOS **real**
+    /// (autenticação desligada, como o plugin deixa na janela do teste).
+    /// Fora da suíte: `NM_BTEST_TARGET=ip:porta cargo test --lib
+    /// btest_contra_routeros_real -- --ignored --nocapture`.
+    #[tokio::test]
+    #[ignore = "precisa de um RouterOS real em NM_BTEST_TARGET"]
+    async fn btest_contra_routeros_real() {
+        let target: SocketAddr = std::env::var("NM_BTEST_TARGET")
+            .expect("NM_BTEST_TARGET=ip:porta")
+            .parse()
+            .expect("endereço");
+        for direction in [TestDirection::Send, TestDirection::Receive] {
+            let (sink, mut live) = sample_channel();
+            let spec = ThroughputSpec {
+                duration_s: 5,
+                ..spec(direction)
+            };
+            let report = run_client(target, &spec, None, &sink, &CancellationToken::new())
+                .await
+                .expect("o RouterOS aceitou o teste");
+            drop(sink);
+            let mut samples = 0;
+            while live.recv().await.is_some() {
+                samples += 1;
+            }
+            println!(
+                "{direction:?}: tx={:?} rx={:?} amostras ao vivo={samples}",
+                report.tx_bps, report.rx_bps
+            );
+            match direction {
+                TestDirection::Send => assert!(report.tx_bps.unwrap_or(0.0) > 0.0),
+                _ => assert!(report.rx_bps.unwrap_or(0.0) > 0.0),
+            }
+            assert!(samples > 0, "amostras de 1 s chegaram durante o teste");
+        }
     }
 
     async fn loopback(direction: TestDirection) -> (ThroughputReport, ThroughputReport, usize) {
