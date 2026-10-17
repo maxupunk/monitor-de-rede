@@ -265,7 +265,7 @@
             "user": {
               "type": "string",
               "title": "Usuário do servidor",
-              "pattern": "nm-test-a1b2",
+              "pattern": "[A-Za-z0-9_.-]{1,64}",
               "advanced": true
             },
             "password": {

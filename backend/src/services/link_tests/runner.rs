@@ -239,6 +239,48 @@ impl Measured {
     }
 }
 
+/// Parâmetros do `serve` de um plugin (contrato do ADR 015 §3).
+fn serve_params(
+    engine: ThroughputEngine,
+    port: u16,
+    peer: &str,
+    require_auth: bool,
+    auth: Option<&TestAuth>,
+) -> Value {
+    let mut params = json!({
+        "engine": engine.as_str(),
+        "port": port,
+        "peer": peer,
+        "requireAuth": require_auth,
+    });
+    with_auth(&mut params, auth);
+    params
+}
+
+/// Parâmetros do `run` de um plugin (contrato do ADR 015 §3).
+fn run_params(spec: &ThroughputSpec, target: &Target, auth: Option<&TestAuth>) -> Value {
+    let mut params = json!({
+        "engine": spec.engine.as_str(),
+        "target": target.host,
+        "port": target.port,
+        "direction": as_db(&spec.direction),
+        "durationS": spec.duration_s,
+        "streams": spec.streams,
+    });
+    if let Some(limit) = spec.limit_mbps {
+        params["limitMbps"] = json!(limit);
+    }
+    with_auth(&mut params, auth);
+    params
+}
+
+fn with_auth(params: &mut Value, auth: Option<&TestAuth>) {
+    if let Some(auth) = auth {
+        params["user"] = json!(auth.user);
+        params["password"] = json!(auth.password);
+    }
+}
+
 /// Medida de um `run` de plugin que terminou bem — zerada é falha.
 fn measured_from_run(output: Option<Value>) -> Result<Measured, StageError> {
     let measured = parse_report(output);
@@ -718,16 +760,13 @@ impl Job {
                     ThroughputEngine::Iperf3 => self.reservation.port,
                     ThroughputEngine::Btest => btest::DEFAULT_PORT,
                 };
-                let mut params = json!({
-                    "engine": n.engine.as_str(),
-                    "port": port,
-                    "peer": peer.unwrap_or_default(),
-                    "requireAuth": n.require_auth,
-                });
-                if let Some(auth) = auth {
-                    params["user"] = json!(auth.user);
-                    params["password"] = json!(auth.password);
-                }
+                let params = serve_params(
+                    n.engine,
+                    port,
+                    &peer.unwrap_or_default(),
+                    n.require_auth,
+                    auth,
+                );
                 let serve_action = plugin.roles.actions.serve.clone().unwrap_or_default();
                 let stop_action = plugin.roles.actions.stop.clone().unwrap_or_default();
                 let call = Call {
@@ -937,21 +976,7 @@ impl Job {
                 device,
                 plugin: Some(plugin),
             } => {
-                let mut params = json!({
-                    "engine": n.engine.as_str(),
-                    "target": target.host,
-                    "port": target.port,
-                    "direction": as_db(&direction),
-                    "durationS": spec.duration_s,
-                    "streams": spec.streams,
-                });
-                if let Some(limit) = spec.limit_mbps {
-                    params["limitMbps"] = json!(limit);
-                }
-                if let Some(auth) = auth {
-                    params["user"] = json!(auth.user);
-                    params["password"] = json!(auth.password);
-                }
+                let params = run_params(&spec, target, auth);
                 let mut call = Call {
                     device_id: device.id,
                     slug: plugin.slug.clone(),
@@ -1298,6 +1323,78 @@ fn parse_report(output: Option<Value>) -> Measured {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Contrato entre o orquestrador e os plugins embutidos: o que o runner
+    /// manda no `serve` e no `run` — inclusive a credencial gerada a cada
+    /// teste — passa na validação de parâmetros de cada plugin. Um padrão
+    /// errado num plugin (já houve um `pattern` com um valor de exemplo)
+    /// derruba o teste só no equipamento real; aqui ele quebra antes.
+    #[test]
+    fn parametros_do_orquestrador_passam_nos_plugins_embutidos() {
+        use crate::services::plugins::{builtin, params};
+        let auth = TestAuth::generate();
+        let mut checked = 0;
+        for package in builtin::packages() {
+            let manifest = &package.manifest;
+            let Some(roles) = &manifest.throughput else {
+                continue;
+            };
+            let schema = |id: &Option<String>| {
+                let id = id.as_deref()?;
+                manifest
+                    .actions
+                    .iter()
+                    .find(|action| action.id == id)
+                    .map(|action| action.params.clone())
+            };
+            for serve in &roles.serve {
+                let port = match serve.engine {
+                    ThroughputEngine::Iperf3 => 5_201,
+                    ThroughputEngine::Btest => btest::DEFAULT_PORT,
+                };
+                let modes: &[bool] = if serve.engine == ThroughputEngine::Btest {
+                    &[true, false]
+                } else {
+                    &[false]
+                };
+                for &require_auth in modes {
+                    let auth = require_auth.then_some(&auth);
+                    let sent = serve_params(serve.engine, port, "10.0.0.2", require_auth, auth);
+                    let declared = schema(&roles.actions.serve).expect("serve declarado");
+                    params::validate(declared.as_ref(), &sent).unwrap_or_else(|errors| {
+                        panic!("{} serve {sent}: {errors:?}", manifest.slug)
+                    });
+                    checked += 1;
+                }
+            }
+            for drive in &roles.drive {
+                for direction in [TestDirection::Send, TestDirection::Receive] {
+                    let spec = ThroughputSpec {
+                        engine: drive.engine,
+                        direction,
+                        protocol: TestProtocol::Tcp,
+                        duration_s: 5,
+                        streams: 1,
+                        limit_mbps: Some(100),
+                    };
+                    let target = Target {
+                        host: "10.0.0.1".to_owned(),
+                        port: 2_000,
+                    };
+                    // Como na negociação: credencial só no btest com cliente
+                    // que autentica.
+                    let with_auth = drive.engine == ThroughputEngine::Btest && drive.auth;
+                    let sent = run_params(&spec, &target, with_auth.then_some(&auth));
+                    let declared = schema(&roles.actions.run).expect("run declarado");
+                    params::validate(declared.as_ref(), &sent).unwrap_or_else(|errors| {
+                        panic!("{} run {sent}: {errors:?}", manifest.slug)
+                    });
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked > 0, "nenhum plugin embutido com papel de teste");
+    }
 
     #[test]
     fn credencial_do_teste_e_aleatoria_e_mascarada() {
