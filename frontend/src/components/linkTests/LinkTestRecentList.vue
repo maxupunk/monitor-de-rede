@@ -12,13 +12,15 @@
           {{ testStatusPresentation(test.status).icon }}
         </v-icon>
         <span class="flex-grow-1 overflow-hidden">
-          <span class="d-block font-weight-bold text-truncate">{{ testTitle(test) }}</span>
+          <span class="d-block font-weight-bold title" :title="testTitle(test)">
+            {{ testTitle(test) }}
+          </span>
           <span class="d-block text-body-small meta">
             {{ testStatusPresentation(test.status).label }} ·
             {{ formatRelativeTime(test.createdAt) }}
           </span>
+          <span v-if="resultOf(test)" class="d-block result">{{ resultOf(test) }}</span>
         </span>
-        <span v-if="resultOf(test)" class="result">{{ resultOf(test) }}</span>
         <v-icon size="18">mdi-chevron-right</v-icon>
       </button>
     </li>
@@ -81,6 +83,14 @@ function resultOf(test: LinkTest): string | null {
 }
 .meta {
   color: rgb(var(--v-theme-on-surface));
+}
+/* O nome do teste é o que diferencia um do outro: até duas linhas, sem cortar cedo. */
+.title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .result {
   font-weight: 700;

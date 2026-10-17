@@ -22,10 +22,7 @@ use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    env::{
-        BtestArmer, CentralAddress, DriverResolver, LinkTestEnv, PluginInvoker, ServerArmer,
-        AGENT_NOT_WIRED,
-    },
+    env::{BtestArmer, CentralAddress, DriverResolver, LinkTestEnv, PluginInvoker, ServerArmer},
     events, guard, janitor,
     model::{
         as_db, LinkTest, LinkTestKind, LinkTestOrigin, LinkTestRequest, LinkTestScheduleInput,
@@ -183,7 +180,7 @@ impl DriverResolver for Drivers {
     }
 
     fn agent(&self, _agent_id: i64) -> AppResult<Arc<dyn ThroughputDriver>> {
-        Err(AppError::business_rule(AGENT_NOT_WIRED))
+        Err(AppError::business_rule("sem agente nos testes"))
     }
 }
 

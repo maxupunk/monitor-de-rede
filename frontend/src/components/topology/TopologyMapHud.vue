@@ -7,6 +7,8 @@
       variant="flat"
       size="small"
       prepend-icon="mdi-map-legend"
+      append-icon="mdi-chevron-down"
+      aria-label="Mostrar legenda (L)"
       @click="$emit('update:legendOpen', true)"
     >
       Legenda
@@ -41,11 +43,11 @@
       Organizando o mapa…
     </v-chip>
   </div>
-  <div v-if="showPanels" class="float bottom-left">
+  <div v-if="showPanels && minimapOpen" class="float bottom-left">
     <TopologyMinimap :source="minimapSource" :palette="palette" />
   </div>
   <template v-if="hasNodes">
-    <div class="float bottom-center">
+    <div class="float bottom-center" :class="{ 'beside-minimap': showPanels && minimapOpen }">
       <TopologyStatusBar
         :summary="summary"
         :problems-only="problemsOnly"
@@ -55,10 +57,13 @@
     <div class="float bottom-right">
       <TopologyZoomControls
         :zoom="zoom"
+        :compact="narrow"
+        :minimap-open="minimapOpen"
         @zoom-in="$emit('zoom', 1.25)"
         @zoom-out="$emit('zoom', 0.8)"
         @fit="$emit('fit')"
         @reset="$emit('reset-zoom')"
+        @toggle-minimap="$emit('toggle-minimap')"
       />
     </div>
   </template>
@@ -70,7 +75,7 @@
  * resumo e zoom). Só posiciona e repassa eventos — o estado é da página.
  */
 import { computed } from 'vue'
-import type { MinimapSource } from '@/utils/topology/canvasTypes'
+import { TOPOLOGY_LEGEND_WIDTH, type MinimapSource } from '@/utils/topology/canvasTypes'
 import type { TopologyPalette } from '@/utils/topology/style'
 import TopologyLegend from './TopologyLegend.vue'
 import TopologyEditBar from './TopologyEditBar.vue'
@@ -89,6 +94,7 @@ const props = defineProps<{
   highlighted: boolean
   computing: boolean
   minimapSource: MinimapSource | null
+  minimapOpen: boolean
   palette: TopologyPalette
   summary: TopologySummary
   problemsOnly: boolean
@@ -105,6 +111,7 @@ defineEmits<{
   zoom: [factor: number]
   fit: []
   'reset-zoom': []
+  'toggle-minimap': []
 }>()
 
 const showPanels = computed(() => props.hasNodes && !props.narrow)
@@ -136,10 +143,10 @@ const showPanels = computed(() => props.hasNodes && !props.narrow)
 }
 /* Não cobre o botão nem o cartão da legenda. */
 .top-center.beside-button {
-  left: 132px;
+  left: 150px;
 }
 .top-center.beside-legend {
-  left: 240px;
+  left: v-bind('`${TOPOLOGY_LEGEND_WIDTH + 24}px`');
 }
 .bottom-left {
   bottom: 12px;
@@ -147,9 +154,12 @@ const showPanels = computed(() => props.hasNodes && !props.narrow)
 }
 .bottom-center {
   bottom: 12px;
-  left: 210px;
+  left: 12px;
   right: 76px;
   justify-content: center;
+}
+.bottom-center.beside-minimap {
+  left: 210px;
 }
 .bottom-right {
   bottom: 12px;

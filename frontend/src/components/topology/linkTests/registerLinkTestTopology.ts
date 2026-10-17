@@ -37,7 +37,10 @@ export function linkTestHistoryActions(
         color: status.color,
         group: 'test',
         order: 40,
-        run: () => store.focus(test.id),
+        run: () => {
+          host.openInspectorTab(LINK_TESTS_TAB)
+          store.focus(test.id)
+        },
       },
       {
         id: 'test.repeat',
@@ -62,13 +65,16 @@ export function linkTestHistoryActions(
   }
 }
 
+/** Id da aba "Testes" do inspetor. */
+export const LINK_TESTS_TAB = 'link-tests'
+
 let registered = false
 
 export function registerLinkTestTopology() {
   if (registered) return
   registered = true
   registerInspectorTab({
-    id: 'link-tests',
+    id: LINK_TESTS_TAB,
     title: 'Testes',
     icon: 'mdi-speedometer',
     appliesTo: ['node', 'edge'],

@@ -84,6 +84,43 @@ export function iconDataUri(path: string, color: string): string {
 export const TRAFFIC_ZOOM = 1.9
 
 /**
+ * Nível de detalhe dos rótulos dos nós, pelo zoom:
+ * - `near`: nome e IP;
+ * - `mid`: só o nome (o IP vira ruído quando os nós se aproximam);
+ * - `far`: só o nome da infraestrutura e de quem tem problema, em fonte maior;
+ * - `xfar`: só os marcos (servidor, roteadores, firewalls).
+ */
+export type LodLevel = 'near' | 'mid' | 'far' | 'xfar'
+
+export const LOD_CLASSES = 'lod-mid lod-far lod-xfar'
+
+export function lodLevel(zoom: number): LodLevel {
+  if (zoom >= 0.95) return 'near'
+  if (zoom >= 0.55) return 'mid'
+  if (zoom >= 0.3) return 'far'
+  return 'xfar'
+}
+
+/** Diferença vertical mínima para o enlace virar ortogonal (abaixo, curva). */
+export const ROUTE_MIN_DY = 70
+export const ROUTE_CLASSES = 'route-down route-up'
+
+/**
+ * Traçado ortogonal de árvore (`taxi`): a curva vira barramento quando uma
+ * ponta está bem acima da outra. A dobra fica sempre junto do nó de BAIXO
+ * (o filho) — os irmãos de uma fileira dividem o mesmo barramento logo acima
+ * deles, e o tronco desce pelo corredor que o layout deixou livre.
+ */
+export function edgeRouteClass(
+  source: { x: number; y: number },
+  target: { x: number; y: number }
+): 'route-down' | 'route-up' | null {
+  const dy = target.y - source.y
+  if (Math.abs(dy) < ROUTE_MIN_DY) return null
+  return dy > 0 ? 'route-down' : 'route-up'
+}
+
+/**
  * Deslocamento do rótulo abaixo do nó. O rótulo é centralizado e empurrado
  * para baixo (em vez de `text-valign: bottom`): com fundo e várias linhas, o
  * Cytoscape corta a segunda linha (o IP) quando o alinhamento é `bottom`.
@@ -98,6 +135,47 @@ export function labelOffset(nodeSize: number, lines: number, fontSize = 12): num
 
 function block(selector: string, style: StylesheetStyle['style']): StylesheetStyle {
   return { selector, style }
+}
+
+/** Rótulo de uma linha (só o nome) num tamanho de fonte, para cada forma de nó. */
+function nameLabel(selector: string, fontSize: number, maxWidth: number): StylesheetStyle[] {
+  const sizes: Array<[string, number]> = [
+    ['', 46],
+    ['.unmanaged', 40],
+    ['.system', 60],
+  ]
+  return sizes.map(([shape, size]) =>
+    block(
+      selector
+        .split(',')
+        .map((part) => `${part.trim()}${shape}`)
+        .join(', '),
+      {
+        label: 'data(name)',
+        'font-size': fontSize,
+        'text-max-width': `${maxWidth}px`,
+        'text-margin-y': labelOffset(size, 1, fontSize),
+      }
+    )
+  )
+}
+
+/** Nível de detalhe: o canvas põe `lod-*` nos nós; aqui só se decide o rótulo. */
+function lodBlocks(): StylesheetStyle[] {
+  return [
+    ...nameLabel('node.lod-mid', 14, 170),
+    block('node.lod-far, node.lod-xfar', { label: '' }),
+    ...nameLabel(
+      'node.lod-far.rank-core, node.lod-far.rank-infra, node.lod-far.status-offline, node.lod-far.status-warning, node.lod-far.path-highlight, node.lod-far:selected',
+      28,
+      320
+    ),
+    ...nameLabel(
+      'node.lod-xfar.rank-core, node.lod-xfar.path-highlight, node.lod-xfar:selected',
+      42,
+      460
+    ),
+  ]
 }
 
 export function buildStylesheet(p: TopologyPalette = FALLBACK): StylesheetJson {
@@ -189,6 +267,7 @@ export function buildStylesheet(p: TopologyPalette = FALLBACK): StylesheetJson {
     block('node.unmanaged.two-line', { 'text-margin-y': labelOffset(40, 2) }),
     block('node.system', { 'text-margin-y': labelOffset(60, 1) }),
     block('node.system.two-line', { 'text-margin-y': labelOffset(60, 2) }),
+    ...lodBlocks(),
     block('node.hover', { 'underlay-opacity': 0.18 }),
     block('node:selected', { 'underlay-opacity': 0.4, 'underlay-padding': 10 }),
     block('node.connect-source', {
@@ -243,6 +322,15 @@ export function buildStylesheet(p: TopologyPalette = FALLBACK): StylesheetJson {
       'transition-property': 'opacity, line-color, width',
       'transition-duration': 150,
     }),
+    // Traçado ortogonal (árvore): o canvas escolhe a classe pela posição das pontas.
+    block('edge.route-down, edge.route-up', {
+      'curve-style': 'round-taxi',
+      'taxi-direction': 'vertical',
+      'taxi-radius': 10,
+      'taxi-turn-min-distance': 6,
+    }),
+    block('edge.route-down', { 'taxi-turn': '-16px' }),
+    block('edge.route-up', { 'taxi-turn': '16px' }),
     block('edge.tier-slow', { width: 1.5 }),
     block('edge.tier-gigabit', { width: 2.75 }),
     block('edge.tier-fast', { width: 4.5 }),
@@ -375,6 +463,11 @@ export function buildStylesheet(p: TopologyPalette = FALLBACK): StylesheetJson {
     block('edge.ov-labeled.ov-succeeded', pill(mix(p.success, '#000000', 0.25))),
     block('edge.ov-labeled.ov-failed', pill(mix(p.error, '#000000', 0.2))),
     block('edge.ov-labeled.ov-skipped', pill(mix(p.warning, '#000000', 0.35))),
+    // De longe, a pílula do resultado cresce com o nível de detalhe: o número
+    // da medição continua legível com o caminho inteiro enquadrado.
+    block('edge.ov-labeled.lod-mid', { 'font-size': 20 }),
+    block('edge.ov-labeled.lod-far', { 'font-size': 34, 'text-background-padding': '8px' }),
+    block('edge.ov-labeled.lod-xfar', { 'font-size': 56, 'text-background-padding': '12px' }),
     block('node.ov-running', {
       'underlay-color': p.info,
       'underlay-opacity': 0.45,

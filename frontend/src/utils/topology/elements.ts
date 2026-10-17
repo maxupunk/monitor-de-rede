@@ -85,6 +85,7 @@ export function nodeElement(
   const classes = [
     `status-${nodeStatusKey(node.status)}`,
     node.isSystem ? 'system' : null,
+    `rank-${nodeRank(node)}`,
     ip ? 'two-line' : null,
     isUnmanagedSwitch(node) ? 'unmanaged' : null,
     filterClass(input.filter, input.filter?.nodes, node.id),
@@ -95,10 +96,12 @@ export function nodeElement(
   const data: TopologyElement['data'] = {
     id: nodeElementId(node.id),
     deviceId: node.id,
-    // Nome e IP num rótulo só, fixo: trocar o texto do rótulo de um nó já
-    // desenhado deixa o Cytoscape com a caixa antiga (corta a 2ª linha). O
-    // nível de detalhe vem do tamanho mínimo de fonte (some de longe).
+    // Os dois textos ficam fixos no dado; o nível de detalhe troca só a
+    // CLASSE do nó (`lod-mid`/`lod-far`) e a folha de estilo escolhe qual
+    // dado vira rótulo — trocar o texto de um rótulo já desenhado deixa o
+    // Cytoscape com a caixa antiga (corta a 2ª linha).
     label: ip ? `${node.name}\n${ip}` : node.name,
+    name: node.name,
     iconKey: nodeIconKey(node),
   }
   if (input.groupBySite) data.parent = siteElementId(node.siteId)
@@ -107,6 +110,22 @@ export function nodeElement(
   const position = input.positions[node.id]
   if (position) element.position = { x: position.x, y: position.y }
   return element
+}
+
+/**
+ * Peso do nó no nível de detalhe: `core` (servidor, roteador, firewall) tem o
+ * nome visível até de muito longe; `infra` (switches, APs) de longe; `edge`
+ * (a ponta) só de perto.
+ */
+export type NodeRank = 'core' | 'infra' | 'edge'
+
+const CORE_ICONS = new Set(['system', 'router', 'firewall'])
+const INFRA_ICONS = new Set(['switch', 'unmanaged_switch', 'ap'])
+
+export function nodeRank(node: Pick<TopologyNode, 'type' | 'isSystem'>): NodeRank {
+  const key = nodeIconKey(node)
+  if (CORE_ICONS.has(key)) return 'core'
+  return INFRA_ICONS.has(key) ? 'infra' : 'edge'
 }
 
 export function edgeElement(

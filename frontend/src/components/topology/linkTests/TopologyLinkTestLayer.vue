@@ -39,10 +39,11 @@
 
     <div
       v-if="panelTest && !narrow && panelOpen"
+      ref="panel"
       class="lt-panel"
       role="dialog"
       aria-modal="false"
-      :aria-label="`Teste de enlace: ${cardTitle}`"
+      :aria-label="`Teste de velocidade: ${cardTitle}`"
     >
       <LinkTestRunPanel :test="panelTest" closable @close="closePanel">
         <template #actions>
@@ -61,7 +62,7 @@
 
     <v-bottom-sheet
       v-if="narrow"
-      :model-value="panelOpen && panelTest !== null"
+      :model-value="sheets.isTop('link-test') && panelTest !== null"
       scrollable
       @update:model-value="(open) => !open && closePanel()"
     >
@@ -86,8 +87,9 @@
  * ao vivo do teste em foco e pinta a camada de sobreposição (caminho,
  * enlace em teste, resultado). Fechar o painel limpa o mapa.
  */
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { useLinkTestContext } from '@/composables/linkTests/useLinkTestContext'
+import { useSheetStack } from '@/composables/topology/useSheetStack'
 import { useLinkTestsStore } from '@/stores/linkTests'
 import { useLinkTestRequestsStore, type LinkTestRequest } from '@/stores/linkTestRequests'
 import { useTopologyOverlayStore } from '@/stores/topologyOverlay'
@@ -127,6 +129,8 @@ const store = useLinkTestsStore()
 const requests = useLinkTestRequestsStore()
 const overlay = useTopologyOverlayStore()
 const ctx = useLinkTestContext()
+/** Celular: o painel do teste entra na pilha de folhas (uma por vez). */
+const sheets = useSheetStack()
 
 // --- Assistente ---------------------------------------------------------------
 
@@ -165,6 +169,12 @@ function onStarted(testId: number) {
 
 const panelTest = computed(() => store.focused)
 const panelOpen = computed(() => store.focusedId !== null)
+
+watch(
+  () => panelOpen.value && props.narrow,
+  (open) => (open ? sheets.open('link-test') : sheets.close('link-test')),
+  { immediate: true }
+)
 const cardTest = computed<LinkTest | null>(() => store.focused ?? store.active[0] ?? null)
 const cardActive = computed(() => (cardTest.value ? isActiveStatus(cardTest.value.status) : false))
 const cardStatus = computed(() => testStatusPresentation(cardTest.value?.status ?? 'queued'))
@@ -286,11 +296,31 @@ onBeforeUnmount(() => {
 })
 
 const dialogOpen = computed(() => wizardOpen.value)
+
+/**
+ * Largura real do painel (ele encolhe quando o inspetor também está aberto),
+ * medida pelo próprio elemento — o enquadramento desconta exatamente isso.
+ */
+const panel = shallowRef<HTMLElement | null>(null)
+const panelWidth = ref(PANEL_WIDTH)
+let panelObserver: ResizeObserver | null = null
+watch(panel, (element) => {
+  panelObserver?.disconnect()
+  panelObserver = null
+  if (!element) return
+  panelWidth.value = element.offsetWidth
+  panelObserver = new ResizeObserver(() => (panelWidth.value = element.offsetWidth))
+  panelObserver.observe(element)
+})
+onBeforeUnmount(() => panelObserver?.disconnect())
+
 /** Largura que o painel flutuante tira do mapa (a página desconta ao enquadrar). */
 const occupiedRight = computed(() =>
-  panelOpen.value && panelTest.value !== null && !props.narrow ? PANEL_RIGHT + PANEL_WIDTH : 0
+  panelOpen.value && panelTest.value !== null && !props.narrow ? PANEL_RIGHT + panelWidth.value : 0
 )
-defineExpose({ dialogOpen, occupiedRight })
+/** Há teste (ou plano) pintado no mapa — o aviso "Caminho destacado" é dele, não do mapa. */
+const overlayActive = computed(() => model.value !== null)
+defineExpose({ dialogOpen, occupiedRight, overlayActive })
 </script>
 
 <style scoped>
@@ -344,8 +374,9 @@ defineExpose({ dialogOpen, occupiedRight })
   right: v-bind('`${PANEL_RIGHT}px`');
   bottom: 12px;
   z-index: 7;
-  width: v-bind('`${PANEL_WIDTH}px`');
-  max-width: calc(100% - 100px);
+  /* Com o inspetor aberto o mapa estreita: o painel fica com no máximo metade. */
+  width: min(v-bind('`${PANEL_WIDTH}px`'), 45%);
+  min-width: 320px;
   overflow-y: auto;
   border-radius: 14px;
   border: 1px solid rgba(var(--v-theme-on-surface), 0.2);

@@ -4,7 +4,7 @@ import { useTopologyStore } from '@/stores/topology'
 import { useTopologyOverlayStore } from '@/stores/topologyOverlay'
 import { buildElements } from '@/utils/topology/elements'
 import { applyFilters, isProblemEdge } from '@/utils/topology/filters'
-import type { TopologyTarget } from '@/utils/topology/inspectorRegistry'
+import type { TabChoice, TopologyTarget } from '@/utils/topology/inspectorRegistry'
 import { edgeStatusKey, nodeStatusKey } from '@/utils/topology/presentation'
 import type { TopologyPrefs } from '@/utils/topology/prefs'
 import type { CanvasPointerEvent } from '@/utils/topology/canvasTypes'
@@ -21,6 +21,15 @@ export function useTopologyView(prefs: TopologyPrefs) {
 
   const selection = ref<Selection | null>(null)
   const hover = ref<CanvasPointerEvent | null>(null)
+  const inspectorTab = ref<TabChoice>({})
+
+  /** Abre a aba no inspetor do item selecionado (ou nos dois tipos, sem seleção). */
+  function openTab(tabId: string) {
+    const kind = selection.value?.kind
+    inspectorTab.value = kind
+      ? { ...inspectorTab.value, [kind]: tabId }
+      : { node: tabId, edge: tabId }
+  }
 
   const filterResult = computed(() => applyFilters(store.nodes, store.edges, prefs.filters))
 
@@ -93,6 +102,8 @@ export function useTopologyView(prefs: TopologyPrefs) {
   return {
     selection,
     hover,
+    inspectorTab,
+    openTab,
     filterResult,
     elements,
     summary,

@@ -66,7 +66,7 @@
         </v-btn>
       </template>
       <template v-else>
-        <div class="text-title-medium font-weight-bold">Nenhum teste de enlace ainda</div>
+        <div class="text-title-medium font-weight-bold">Nenhum teste de velocidade ainda</div>
         <p class="text-body-medium mb-2">
           Meça quanto passa entre dois equipamentos, enlace por enlace ao longo de um caminho ou do
           servidor até um roteador. Também dá para começar pelo mapa: clique com o botão direito num

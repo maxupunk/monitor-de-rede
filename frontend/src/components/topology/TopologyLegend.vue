@@ -1,97 +1,104 @@
 <template>
   <v-card class="topology-legend" elevation="6" border>
-    <div class="d-flex align-center px-3 pt-2">
+    <div class="d-flex align-center px-3 pt-1">
       <v-icon size="18" color="primary" class="mr-1">mdi-map-legend</v-icon>
       <span class="text-subtitle-2 font-weight-bold">Legenda</span>
       <v-spacer></v-spacer>
       <v-btn
-        icon="mdi-close"
-        size="x-small"
+        icon="mdi-chevron-up"
+        size="small"
         variant="text"
-        aria-label="Esconder legenda (L)"
+        color="primary"
+        aria-label="Recolher legenda (L)"
         @click="$emit('close')"
       ></v-btn>
     </div>
     <div class="px-3 pb-3 legend-body">
       <div class="legend-title">Dispositivo</div>
-      <div v-for="(status, key) in NODE_STATUS" :key="key" class="legend-row">
-        <span
-          class="ring"
-          :class="{ dashed: key === 'unknown' }"
-          :style="{ borderColor: `rgb(var(--v-theme-${status.color}))` }"
-        ></span>
-        {{ status.label }}
-      </div>
-      <div class="legend-row">
-        <span class="ring system"></span>
-        Servidor NetMonitor
+      <div class="legend-grid">
+        <div v-for="(status, key) in NODE_STATUS" :key="key" class="legend-row">
+          <span
+            class="ring"
+            :class="{ dashed: key === 'unknown' }"
+            :style="{ borderColor: `rgb(var(--v-theme-${status.color}))` }"
+          ></span>
+          {{ status.label }}
+        </div>
+        <div class="legend-row">
+          <span class="ring system"></span>
+          Servidor
+        </div>
       </div>
 
       <div class="legend-title">Enlace — estado e uso</div>
-      <div class="legend-row">
-        <svg width="34" height="10" aria-hidden="true">
-          <line x1="2" y1="5" x2="32" y2="5" class="neutral" stroke-width="3" />
-        </svg>
-        Ativo, sem medição
-      </div>
-      <div v-for="(level, key) in UTILIZATION_LEVELS" :key="key" class="legend-row">
-        <svg width="34" height="10" aria-hidden="true">
-          <line
-            x1="2"
-            y1="5"
-            x2="32"
-            y2="5"
-            stroke-width="3"
-            :style="{ stroke: `rgb(var(--v-theme-${level.color}))` }"
-          />
-        </svg>
-        {{ level.label }}
-      </div>
-      <div class="legend-row">
-        <svg width="34" height="10" aria-hidden="true">
-          <line x1="2" y1="5" x2="32" y2="5" stroke-width="3" class="down" />
-          <line x1="17" y1="0" x2="17" y2="10" stroke-width="2.5" class="down" />
-        </svg>
-        Fora do ar
+      <div class="legend-grid">
+        <div class="legend-row">
+          <svg width="26" height="10" aria-hidden="true">
+            <line x1="2" y1="5" x2="24" y2="5" class="neutral" stroke-width="3" />
+          </svg>
+          Ativo, sem medição
+        </div>
+        <div v-for="(level, key) in UTILIZATION_LEVELS" :key="key" class="legend-row">
+          <svg width="26" height="10" aria-hidden="true">
+            <line
+              x1="2"
+              y1="5"
+              x2="24"
+              y2="5"
+              stroke-width="3"
+              :style="{ stroke: `rgb(var(--v-theme-${level.color}))` }"
+            />
+          </svg>
+          {{ level.label }}
+        </div>
+        <div class="legend-row">
+          <svg width="26" height="10" aria-hidden="true">
+            <line x1="2" y1="5" x2="24" y2="5" stroke-width="3" class="down" />
+            <line x1="13" y1="0" x2="13" y2="10" stroke-width="2.5" class="down" />
+          </svg>
+          Fora do ar
+        </div>
       </div>
 
       <div class="legend-title">Enlace — tipo</div>
-      <div v-for="(kind, key) in LINK_KINDS" :key="key" class="legend-row">
-        <svg width="34" height="10" aria-hidden="true">
-          <line
-            v-if="key === 'fiber'"
-            x1="2"
-            y1="5"
-            x2="32"
-            y2="5"
-            stroke-width="6"
-            class="fiber-outline"
-          />
-          <line
-            x1="2"
-            y1="5"
-            x2="32"
-            y2="5"
-            stroke-width="2.5"
-            class="neutral"
-            :stroke-dasharray="DASH[key]"
-          />
-        </svg>
-        {{ kind.label }}
-      </div>
-      <div class="legend-row">
-        <svg width="34" height="10" aria-hidden="true">
-          <line
-            x1="2"
-            y1="5"
-            x2="32"
-            y2="5"
-            stroke-width="2.5"
-            class="neutral stale"
-            stroke-dasharray="1 4"
-          />
-        </svg>
-        Não visto há algum tempo
+      <div class="legend-grid">
+        <div v-for="(kind, key) in LINK_KINDS" :key="key" class="legend-row">
+          <svg width="26" height="10" aria-hidden="true">
+            <line
+              v-if="key === 'fiber'"
+              x1="2"
+              y1="5"
+              x2="24"
+              y2="5"
+              stroke-width="6"
+              class="fiber-outline"
+            />
+            <line
+              x1="2"
+              y1="5"
+              x2="24"
+              y2="5"
+              stroke-width="2.5"
+              class="neutral"
+              :stroke-dasharray="DASH[key]"
+            />
+          </svg>
+          {{ kind.label }}
+        </div>
+        <div class="legend-row">
+          <svg width="26" height="10" aria-hidden="true">
+            <line
+              x1="2"
+              y1="5"
+              x2="24"
+              y2="5"
+              stroke-width="2.5"
+              class="neutral stale"
+              stroke-dasharray="1 4"
+            />
+          </svg>
+          Defasado
+        </div>
       </div>
       <div class="legend-hint">Espessura = velocidade (≤100M, 1G, ≥10G)</div>
     </div>
@@ -99,6 +106,7 @@
 </template>
 
 <script setup lang="ts">
+import { TOPOLOGY_LEGEND_WIDTH } from '@/utils/topology/canvasTypes'
 import {
   LINK_KINDS,
   NODE_STATUS,
@@ -107,6 +115,9 @@ import {
 } from '@/utils/topology/presentation'
 
 defineEmits<{ close: [] }>()
+
+/** Largura do cartão — a página desconta do enquadramento quando aberto. */
+const LEGEND_WIDTH = TOPOLOGY_LEGEND_WIDTH
 
 /** Mesmos traços de `style.ts` (padrão de tracejado do canvas). */
 const DASH: Record<LinkKind, string | undefined> = {
@@ -121,7 +132,7 @@ const DASH: Record<LinkKind, string | undefined> = {
 
 <style scoped>
 .topology-legend {
-  width: 214px;
+  width: v-bind('`${LEGEND_WIDTH}px`');
   max-height: calc(100% - 24px);
   overflow-y: auto;
   background: rgb(var(--v-theme-surface));
@@ -137,11 +148,17 @@ const DASH: Record<LinkKind, string | undefined> = {
   letter-spacing: 0.05em;
   margin: 8px 0 2px;
 }
+.legend-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 10px;
+}
 .legend-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-height: 18px;
+  gap: 6px;
+  min-height: 20px;
+  white-space: nowrap;
 }
 .ring {
   width: 16px;

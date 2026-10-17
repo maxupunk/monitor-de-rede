@@ -9,7 +9,7 @@
       <v-card-title class="d-flex align-center justify-space-between pa-4 bg-primary text-white">
         <div class="d-flex align-center ga-2" style="gap: 8px">
           <v-icon>mdi-speedometer</v-icon>
-          <span>Teste de Velocidade</span>
+          <span>Velocidade do navegador</span>
         </div>
         <v-btn icon variant="text" color="white" @click="close">
           <v-icon>mdi-close</v-icon>

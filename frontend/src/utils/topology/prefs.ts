@@ -7,23 +7,47 @@
 import { EMPTY_FILTERS, type TopologyFilters } from './filters'
 import type { LinkKind, NodeStatusKey } from './presentation'
 
+/** Minimapa: `auto` aparece só em mapa grande, onde ele ajuda a se achar. */
+export type MinimapPref = 'auto' | 'on' | 'off'
+
+/** A partir de quantos nós o minimapa `auto` aparece. */
+export const MINIMAP_AUTO_NODES = 150
+
 export interface TopologyPrefs {
   siteId: number | null
   filters: TopologyFilters
+  /** Legenda aberta AGORA. Não é lembrada: abre na primeira visita e depois começa fechada. */
   legendOpen: boolean
+  /** Já viu a legenda aberta uma vez (primeira visita). */
+  legendSeen: boolean
   editMode: boolean
   groupBySite: boolean
   /** Mostra o tráfego de todos os enlaces, não só de perto. */
   alwaysDetail: boolean
+  /** Enlaces em ângulo reto (árvore) em vez de curvas. */
+  orthogonalEdges: boolean
+  minimap: MinimapPref
+  /** Fechou a dica de primeiro uso do mapa. */
+  tipsDismissed: boolean
 }
 
 export const DEFAULT_PREFS: TopologyPrefs = {
   siteId: null,
   filters: EMPTY_FILTERS,
-  legendOpen: false,
+  legendOpen: true,
+  legendSeen: false,
   editMode: false,
   groupBySite: false,
   alwaysDetail: false,
+  orthogonalEdges: true,
+  minimap: 'auto',
+  tipsDismissed: false,
+}
+
+const MINIMAP_PREFS: MinimapPref[] = ['auto', 'on', 'off']
+
+export function minimapVisible(pref: MinimapPref, nodeCount: number): boolean {
+  return pref === 'on' || (pref === 'auto' && nodeCount > MINIMAP_AUTO_NODES)
 }
 
 const KEY = 'netmonitor.topology.prefs.v2'
@@ -56,10 +80,17 @@ export function parsePrefs(raw: string | null): TopologyPrefs {
         problemsOnly: filters.problemsOnly === true,
         mode: filters.mode === 'hide' ? 'hide' : 'dim',
       },
-      legendOpen: record.legendOpen === true,
+      // Só a primeira visita abre a legenda; depois ela começa fechada.
+      legendOpen: record.legendSeen !== true,
+      legendSeen: record.legendSeen === true,
       editMode: record.editMode === true,
       groupBySite: record.groupBySite === true,
       alwaysDetail: record.alwaysDetail === true,
+      orthogonalEdges: record.orthogonalEdges !== false,
+      minimap: MINIMAP_PREFS.includes(record.minimap as MinimapPref)
+        ? (record.minimap as MinimapPref)
+        : 'auto',
+      tipsDismissed: record.tipsDismissed === true,
     }
   } catch {
     return { ...DEFAULT_PREFS }

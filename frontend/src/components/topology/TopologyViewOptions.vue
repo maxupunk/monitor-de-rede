@@ -41,6 +41,26 @@
       </template>
     </v-list-item>
     <v-list-item
+      title="Enlaces em ângulo reto"
+      subtitle="Traçado de árvore entre níveis (desligado: curvas)"
+      @click="toggle('orthogonalEdges')"
+    >
+      <template #prepend>
+        <v-icon color="primary">mdi-vector-polyline</v-icon>
+      </template>
+      <template #append>
+        <v-switch
+          :model-value="orthogonalEdges"
+          color="primary"
+          density="compact"
+          hide-details
+          inset
+          readonly
+          aria-label="Enlaces em ângulo reto"
+        ></v-switch>
+      </template>
+    </v-list-item>
+    <v-list-item
       title="Tráfego sempre visível"
       subtitle="Rótulo de tráfego em todos os enlaces"
       @click="toggle('alwaysDetail')"
@@ -64,16 +84,23 @@
 </template>
 
 <script setup lang="ts">
-const props = defineProps<{ legendOpen: boolean; groupBySite: boolean; alwaysDetail: boolean }>()
+const props = defineProps<{
+  legendOpen: boolean
+  groupBySite: boolean
+  alwaysDetail: boolean
+  orthogonalEdges: boolean
+}>()
 const emit = defineEmits<{
   'update:legendOpen': [value: boolean]
   'update:groupBySite': [value: boolean]
   'update:alwaysDetail': [value: boolean]
+  'update:orthogonalEdges': [value: boolean]
 }>()
 
-function toggle(key: 'legendOpen' | 'groupBySite' | 'alwaysDetail') {
+function toggle(key: 'legendOpen' | 'groupBySite' | 'alwaysDetail' | 'orthogonalEdges') {
   if (key === 'legendOpen') emit('update:legendOpen', !props.legendOpen)
   else if (key === 'groupBySite') emit('update:groupBySite', !props.groupBySite)
+  else if (key === 'orthogonalEdges') emit('update:orthogonalEdges', !props.orthogonalEdges)
   else emit('update:alwaysDetail', !props.alwaysDetail)
 }
 </script>

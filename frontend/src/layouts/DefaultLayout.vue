@@ -362,7 +362,7 @@ const navItems = computed<NavItem[]>(() => [
       { title: 'Redes IP', icon: 'mdi-ip-network-outline', to: '/networks' },
       { title: 'Sites', icon: 'mdi-domain', to: '/sites' },
       { title: 'Topologia', icon: 'mdi-sitemap', to: '/topology' },
-      { title: 'Testes de Enlace', icon: 'mdi-speedometer', to: '/link-tests' },
+      { title: 'Testes de velocidade', icon: 'mdi-speedometer', to: '/link-tests' },
     ],
   },
   // Quem mede de fora da central.
@@ -398,8 +398,9 @@ const navItems = computed<NavItem[]>(() => [
         },
       },
       {
-        title: 'Teste de Velocidade',
-        icon: 'mdi-speedometer',
+        // "Testes de velocidade" (Rede) mede entre equipamentos; este mede do navegador.
+        title: 'Velocidade do navegador',
+        icon: 'mdi-speedometer-medium',
         click: () => {
           speedTestDialog.value = true
         },

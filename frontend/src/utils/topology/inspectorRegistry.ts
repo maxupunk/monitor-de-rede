@@ -31,6 +31,9 @@ export type TopologyTarget =
 
 export type TopologyTargetKind = TopologyTarget['kind']
 
+/** Aba escolhida no inspetor, por tipo de alvo (id do `registerInspectorTab`). */
+export type TabChoice = Partial<Record<'node' | 'edge', string>>
+
 /**
  * O que a página oferece às ações. Ações nunca chamam a API direto: pedem à
  * página (que abre o diálogo certo, confirma, mostra o erro).
@@ -56,6 +59,11 @@ export interface TopologyHost {
   selectEdge(edgeId: number): void
   highlightPath(fromId: number, toId: number): void
   requestLinkTest(request: LinkTestRequest): void
+  /**
+   * Abre uma aba do inspetor pelo id (`registerInspectorTab`) para o item
+   * selecionado — ex.: "Ver último teste" abre a aba "Testes".
+   */
+  openInspectorTab(tabId: string): void
   runPluginAction(node: TopologyNode, action: TopologyPluginAction): void
   addUnmanagedSwitch(): void
   discoverLinks(): void

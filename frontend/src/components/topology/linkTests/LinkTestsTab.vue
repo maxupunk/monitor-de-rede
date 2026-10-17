@@ -90,7 +90,7 @@ import {
   type TopologyHost,
   type TopologyTarget,
 } from '@/utils/topology/inspectorRegistry'
-import { edgeEndpoints } from '@/utils/topology/presentation'
+import { edgeLinkTestRequest } from '@/utils/topology/builtinActions'
 import LinkTestRecentList from '@/components/linkTests/LinkTestRecentList.vue'
 import LinkTestRunPanel from '@/components/linkTests/LinkTestRunPanel.vue'
 
@@ -115,10 +115,7 @@ const recent = computed(() =>
 
 const testRequest = computed<LinkTestRequest | null>(() => {
   const target = props.target
-  if (target.kind === 'edge') {
-    const { source, target: to } = edgeEndpoints(target.edge)
-    return { kind: 'link', linkId: target.edge.id, sourceDeviceId: source, targetDeviceId: to }
-  }
+  if (target.kind === 'edge') return edgeLinkTestRequest(target.edge)
   if (target.kind !== 'node') return null
   const system = props.host.systemNodeId
   if (system !== null && system !== target.node.id) {
@@ -128,7 +125,7 @@ const testRequest = computed<LinkTestRequest | null>(() => {
 })
 
 const testLabel = computed(() => {
-  if (props.target.kind === 'edge') return 'Testar este enlace agora'
+  if (props.target.kind === 'edge') return 'Testar velocidade deste enlace'
   return testRequest.value?.kind === 'server'
     ? 'Testar do servidor até aqui'
     : 'Testar caminho até aqui'

@@ -1,7 +1,7 @@
 <template>
   <div>
     <PageHeader
-      title="Testes de Enlace"
+      title="Testes de velocidade"
       subtitle="Quanto passa em cada enlace da rede: entre dois equipamentos, ao longo de um caminho ou do servidor até um roteador"
     >
       <template #actions>
@@ -94,7 +94,7 @@
 
 <script setup lang="ts">
 /**
- * Testes de Enlace (ADR 015): histórico filtrável, agendamentos e o "Novo
+ * Testes de velocidade entre equipamentos (ADR 015, "teste de enlace"): histórico filtrável, agendamentos e o "Novo
  * teste". Testes em andamento chegam pelo SSE (snapshot ao conectar); o
  * detalhe abre por `?test=<id>` (link direto).
  */

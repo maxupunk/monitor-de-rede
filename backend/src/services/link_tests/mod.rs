@@ -39,4 +39,4 @@ pub mod view;
 #[cfg(test)]
 mod tests;
 
-pub use env::{agent_driver, LinkTestEnv};
+pub use env::LinkTestEnv;

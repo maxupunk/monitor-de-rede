@@ -73,6 +73,9 @@ defineEmits<{ 'toggle-problems': [] }>()
   white-space: nowrap;
 }
 .problems {
+  font: inherit;
+  background: transparent;
+  cursor: pointer;
   flex-wrap: wrap;
   white-space: normal;
   gap: 2px 8px;

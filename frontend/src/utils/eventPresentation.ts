@@ -220,8 +220,8 @@ export function formatEventDetails(evt: RealtimeEventPayload): FormattedEventDet
     }
     case 'link_test_schedule:updated': {
       return {
-        title: 'Teste de enlace',
-        message: 'Agendamento de teste de enlace atualizado',
+        title: 'Teste de velocidade',
+        message: 'Agendamento de teste de velocidade atualizado',
         icon: 'mdi-calendar-clock',
         color: 'info',
         time: dateStr,

@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildElkGraph,
+  buildHierarchy,
   chooseRoots,
   freeSpotAround,
   gridLayout,
   groupLeaves,
+  leafGroupBlocks,
   orientEdges,
   placeNewNodes,
   positionsFromElk,
@@ -65,6 +67,89 @@ describe('layouts automáticos', () => {
     expect(chooseRoots([node(1), node(2), node(3), node(4)], edges)).toEqual([2])
   })
 
+  it('com roteador, a raiz é o roteador de borda (o mais perto do servidor)', () => {
+    // servidor(1) — núcleo(2) — firewall(3) — borda(4) — VPN — filial(5)
+    const nodes = [
+      node(1, { isSystem: true, type: 'server' }),
+      node(2, { type: 'switch' }),
+      node(3, { type: 'firewall' }),
+      node(4, { type: 'router' }),
+      node(5, { type: 'router' }),
+      node(6),
+    ]
+    const edges = [edge(1, 1, 2), edge(2, 2, 3), edge(3, 3, 4), edge(4, 4, 5), edge(5, 2, 6)]
+    expect(chooseRoots(nodes, edges)).toEqual([4])
+  })
+
+  it('uma raiz por componente ligado; nó sem enlace não tem raiz', () => {
+    const nodes = [
+      node(1, { type: 'router' }),
+      node(2),
+      node(3, { type: 'switch' }),
+      node(4),
+      node(9),
+    ]
+    expect(chooseRoots(nodes, [edge(1, 1, 2), edge(2, 3, 4)]).sort()).toEqual([1, 3])
+  })
+
+  it('hierárquico: árvore pura vira um bloco só; o ELK só empacota', () => {
+    const nodes = [
+      node(1, { type: 'router' }),
+      node(2, { type: 'switch' }),
+      node(3),
+      node(4),
+      node(5),
+      node(9),
+    ]
+    const edges = [edge(1, 1, 2), edge(2, 2, 3), edge(3, 2, 4), edge(4, 2, 5)]
+    const plan = buildHierarchy(nodes, edges)
+    const ids = (plan.graph.children ?? []).map((child) => child.id).sort()
+    expect(ids).toEqual(['b1', 'i0'])
+    const result: ElkNodeJson = {
+      id: 'root',
+      children: (plan.graph.children ?? []).map((child, index) => ({
+        ...child,
+        x: index * 2000,
+        y: 0,
+      })),
+    }
+    const positions = positionsFromElk(result, plan.blocks)
+    expect(
+      Object.keys(positions)
+        .map(Number)
+        .sort((a, b) => a - b)
+    ).toEqual([1, 2, 3, 4, 5, 9])
+    // Pai acima dos filhos, folhas acima de nada: hierarquia de cima para baixo.
+    expect(positions[1].y).toBeLessThan(positions[2].y)
+    expect(positions[2].y).toBeLessThan(positions[3].y)
+  })
+
+  it('hierárquico: só o núcleo com enlace redundante vai solto para o ELK', () => {
+    const nodes = [
+      node(1, { type: 'router' }),
+      node(2, { type: 'switch' }),
+      node(3, { type: 'switch' }),
+      node(4),
+      node(5),
+      node(6),
+    ]
+    // 2 e 3 têm um enlace entre si (redundância): núcleo. 4–6 são folhas de 2.
+    const edges = [
+      edge(1, 1, 2),
+      edge(2, 1, 3),
+      edge(3, 2, 3),
+      edge(4, 2, 4),
+      edge(5, 2, 5),
+      edge(6, 2, 6),
+    ]
+    const plan = buildHierarchy(nodes, edges)
+    const ids = (plan.graph.children ?? []).map((child) => child.id)
+    expect(ids).toEqual(expect.arrayContaining(['n1', 'n2', 'n3', 'p2']))
+    expect(ids).not.toContain('n4')
+    expect(plan.graph.edges?.some((e) => e.sources[0] === 'n2' && e.targets[0] === 'p2')).toBe(true)
+    expect(plan.graph.layoutOptions?.['elk.algorithm']).toBe('layered')
+  })
+
   it('orienta os enlaces da raiz para a borda', () => {
     const oriented = orientEdges([node(1), node(2), node(3)], [edge(5, 2, 1), edge(6, 3, 2)], [1])
     expect(oriented).toEqual([
@@ -84,12 +169,12 @@ describe('layouts automáticos', () => {
     expect(groups.get(1)?.leaves).toHaveLength(5)
     expect(groups.has(2)).toBe(false)
 
-    const graph = buildElkGraph('hierarchical', nodes, edges, groups)
+    const graph = buildElkGraph('organic', nodes, edges, groups)
     const ids = (graph.children ?? []).map((child) => child.id)
     expect(ids).toContain('g1')
     expect(ids).not.toContain('n10')
     expect(graph.edges?.some((e) => e.targets[0] === 'g1' && e.sources[0] === 'n1')).toBe(true)
-    expect(graph.layoutOptions?.['elk.algorithm']).toBe('layered')
+    expect(graph.layoutOptions?.['elk.algorithm']).toBe('stress')
   })
 
   it('abre o bloco de folhas em grade ao ler o resultado do ELK', () => {
@@ -108,7 +193,7 @@ describe('layouts automáticos', () => {
         { id: 'g1', x: 500, y: 300, width: 400, height: 200 },
       ],
     }
-    const positions = positionsFromElk(result, groups)
+    const positions = positionsFromElk(result, leafGroupBlocks(groups))
     expect(positions[1]).toEqual({ x: 62, y: 42 })
     for (const leaf of groups.get(1)!.leaves) {
       expect(positions[leaf].x).toBeGreaterThanOrEqual(500)

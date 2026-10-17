@@ -37,6 +37,7 @@ function host(patch: Partial<TopologyHost> = {}): TopologyHost {
     selectEdge: vi.fn(),
     highlightPath: vi.fn(),
     requestLinkTest: vi.fn(),
+    openInspectorTab: vi.fn(),
     runPluginAction: vi.fn(),
     addUnmanagedSwitch: vi.fn(),
     discoverLinks: vi.fn(),

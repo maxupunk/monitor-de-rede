@@ -48,9 +48,11 @@
               :legend-open="legendOpen"
               :group-by-site="groupBySite"
               :always-detail="alwaysDetail"
+              :orthogonal-edges="orthogonalEdges"
               @update:legend-open="$emit('update:legendOpen', $event)"
               @update:group-by-site="$emit('update:groupBySite', $event)"
               @update:always-detail="$emit('update:alwaysDetail', $event)"
+              @update:orthogonal-edges="$emit('update:orthogonalEdges', $event)"
             />
             <div class="d-flex flex-wrap ga-2 pa-2">
               <v-btn color="info" variant="flat" prepend-icon="mdi-image-move" @click="onExport">
@@ -83,6 +85,7 @@ defineProps<{
   legendOpen: boolean
   groupBySite: boolean
   alwaysDetail: boolean
+  orthogonalEdges: boolean
 }>()
 
 const emit = defineEmits<{
@@ -91,6 +94,7 @@ const emit = defineEmits<{
   'update:legendOpen': [value: boolean]
   'update:groupBySite': [value: boolean]
   'update:alwaysDetail': [value: boolean]
+  'update:orthogonalEdges': [value: boolean]
   layout: [kind: LayoutKind]
   'arrange-new': []
   add: [kind: AddKind]

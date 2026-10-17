@@ -78,9 +78,11 @@
           :legend-open="legendOpen"
           :group-by-site="groupBySite"
           :always-detail="alwaysDetail"
+          :orthogonal-edges="orthogonalEdges"
           @update:legend-open="$emit('update:legendOpen', $event)"
           @update:group-by-site="$emit('update:groupBySite', $event)"
           @update:always-detail="$emit('update:alwaysDetail', $event)"
+          @update:orthogonal-edges="$emit('update:orthogonalEdges', $event)"
         />
       </v-menu>
 
@@ -206,6 +208,7 @@ const props = defineProps<{
   legendOpen: boolean
   groupBySite: boolean
   alwaysDetail: boolean
+  orthogonalEdges: boolean
   computing: LayoutKind | null
   newCount: number
   fullscreen: boolean
@@ -220,6 +223,7 @@ defineEmits<{
   'update:legendOpen': [value: boolean]
   'update:groupBySite': [value: boolean]
   'update:alwaysDetail': [value: boolean]
+  'update:orthogonalEdges': [value: boolean]
   search: []
   layout: [kind: LayoutKind]
   'arrange-new': []

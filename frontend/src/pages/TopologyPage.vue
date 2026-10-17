@@ -6,6 +6,7 @@
       v-model:legend-open="prefs.legendOpen"
       v-model:group-by-site="prefs.groupBySite"
       v-model:always-detail="prefs.alwaysDetail"
+      v-model:orthogonal-edges="prefs.orthogonalEdges"
       :edit-mode="editMode"
       :sites="sites.sites"
       :nodes="store.nodes"
@@ -36,17 +37,18 @@
           :editable="editMode"
           :connect-source-id="cmd.cable.source"
           :always-detail="prefs.alwaysDetail"
+          :orthogonal="prefs.orthogonalEdges"
           :selection="view.selection.value"
           :insets="insets"
-          @ready="canvas?.fit()"
-          @node-tap="cmd.onNodeTap"
+          @ready="onCanvasReady"
+          @node-tap="onNodeTap"
           @edge-tap="(id) => (view.selection.value = { kind: 'edge', id })"
           @background-tap="view.selection.value = null"
-          @context="cmd.openContext"
-          @hover="(event) => (view.hover.value = event)"
+          @context="onContext"
+          @hover="onHover"
           @positions-changed="layout.onUserMoved"
           @drag-state="layout.setDragging"
-          @viewport="(v) => (zoom = v.zoom)"
+          @viewport="onViewport"
         />
         <TopologyTooltip
           v-if="view.hover.value && !cmd.context.open"
@@ -54,6 +56,14 @@
           :edge="view.hoveredEdge.value"
           :x="view.hover.value.x"
           :y="view.hover.value.y"
+        />
+        <TopologyEdgeQuickTest
+          v-if="quickTest.state.value && !cmd.context.open && !cmd.cable.active"
+          :x="quickTest.state.value.x"
+          :y="quickTest.state.value.y"
+          @test="testQuickEdge"
+          @hold="quickTest.hold"
+          @release="quickTest.release"
         />
 
         <TopologyMapHud
@@ -63,9 +73,10 @@
           :edit-mode="editMode"
           :cable-active="cmd.cable.active"
           :cable-source-name="cableSourceName"
-          :highlighted="overlay.highlight !== null"
+          :highlighted="overlay.highlight !== null && !linkTestLayer?.overlayActive"
           :computing="layout.computing.value !== null"
           :minimap-source="canvas?.minimapSource ?? null"
+          :minimap-open="minimapOpen"
           :palette="palette"
           :summary="view.summary.value"
           :problems-only="prefs.filters.problemsOnly"
@@ -76,9 +87,18 @@
           @clear-highlight="overlay.setPathHighlight(null)"
           @toggle-problems="toggleProblems"
           @zoom="(factor) => canvas?.zoomBy(factor)"
-          @fit="canvas?.fit()"
+          @fit="fitMap()"
           @reset-zoom="canvas?.resetZoom()"
+          @toggle-minimap="toggleMinimap"
         />
+        <div v-if="showTips" class="tips-wrap" :class="{ narrow: smAndDown }">
+          <TopologyTips
+            :narrow="smAndDown"
+            :can-write="auth.canWrite"
+            @dismiss="prefs.tipsDismissed = true"
+            @shortcuts="cmd.shortcutsOpen.value = true"
+          />
+        </div>
         <TopologyEmptyState
           v-if="(!layout.ready.value && !store.error) || store.error || (store.loaded && !hasNodes)"
           :loading="!layout.ready.value && !store.error"
@@ -91,24 +111,23 @@
           @add-switch="host.addUnmanagedSwitch()"
           @all-sites="prefs.siteId = null"
         />
-        <TopologyLinkTestLayer
-          ref="linkTestLayer"
-          :fit-nodes="(ids) => canvas?.fit(ids)"
-          :narrow="smAndDown"
-        />
+        <TopologyLinkTestLayer ref="linkTestLayer" :fit-nodes="fitMap" :narrow="smAndDown" />
       </div>
 
       <TopologyInspector
         v-if="view.selectedTarget.value && !smAndDown"
+        v-model:tab-choice="view.inspectorTab.value"
         :target="view.selectedTarget.value"
         :host="host"
         @close="view.selection.value = null"
       />
     </div>
 
-    <v-bottom-sheet v-if="smAndDown" v-model="sheetOpen">
+    <!-- Celular: folha sem véu, o item selecionado continua visível acima dela. -->
+    <v-bottom-sheet v-if="smAndDown" v-model="sheetOpen" :scrim="false">
       <TopologyInspector
         v-if="view.selectedTarget.value"
+        v-model:tab-choice="view.inspectorTab.value"
         :target="view.selectedTarget.value"
         :host="host"
         sheet
@@ -132,6 +151,7 @@
       v-model:legend-open="prefs.legendOpen"
       v-model:group-by-site="prefs.groupBySite"
       v-model:always-detail="prefs.alwaysDetail"
+      v-model:orthogonal-edges="prefs.orthogonalEdges"
       :nodes="store.nodes"
       :can-write="auth.canWrite"
       :new-count="layout.autoPlaced.value.size"
@@ -152,7 +172,7 @@
  * a barra comanda. Estado e regras vivem nos composables e utilitários de
  * `topology/`; extensões entram pelo `inspectorRegistry`.
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useDisplay } from 'vuetify'
 import { useAuthStore } from '@/stores/auth'
 import { useDevicesStore } from '@/stores/devices'
@@ -160,7 +180,16 @@ import { useSitesStore } from '@/stores/sites'
 import { useTopologyStore } from '@/stores/topology'
 import { useTopologyOverlayStore } from '@/stores/topologyOverlay'
 import { activeFilterCount } from '@/utils/topology/filters'
-import { registerBuiltinTopologyActions } from '@/utils/topology/builtinActions'
+import {
+  edgeLinkTestRequest,
+  registerBuiltinTopologyActions,
+} from '@/utils/topology/builtinActions'
+import {
+  mapInsets,
+  type CanvasPointerEvent,
+  type CanvasViewport,
+} from '@/utils/topology/canvasTypes'
+import { minimapVisible } from '@/utils/topology/prefs'
 import { useTopologyPrefs } from '@/composables/topology/useTopologyPrefs'
 import { useTopologyPalette } from '@/composables/topology/useTopologyPalette'
 import { useTopologyView } from '@/composables/topology/useTopologyView'
@@ -170,6 +199,8 @@ import { useTopologyHost } from '@/composables/topology/useTopologyHost'
 import { useTopologyCommands } from '@/composables/topology/useTopologyCommands'
 import { useTopologyKeyboard } from '@/composables/topology/useTopologyKeyboard'
 import { useTopologyPluginActions } from '@/composables/topology/useTopologyPluginActions'
+import { provideSheetStack } from '@/composables/topology/useSheetStack'
+import { useEdgeQuickTest } from '@/composables/topology/useEdgeQuickTest'
 import TopologyCanvas from '@/components/topology/canvas/TopologyCanvas.vue'
 import TopologyToolbar from '@/components/topology/TopologyToolbar.vue'
 import TopologyTooltip from '@/components/topology/TopologyTooltip.vue'
@@ -184,6 +215,8 @@ import TopologyDialogs from '@/components/topology/TopologyDialogs.vue'
 import TopologyPluginRunner from '@/components/topology/TopologyPluginRunner.vue'
 import TopologyFeedback from '@/components/topology/TopologyFeedback.vue'
 import TopologyLinkTestLayer from '@/components/topology/linkTests/TopologyLinkTestLayer.vue'
+import TopologyTips from '@/components/topology/TopologyTips.vue'
+import TopologyEdgeQuickTest from '@/components/topology/TopologyEdgeQuickTest.vue'
 
 const store = useTopologyStore()
 const overlay = useTopologyOverlayStore()
@@ -202,18 +235,35 @@ const canvas = ref<InstanceType<typeof TopologyCanvas> | null>(null)
 const pluginRunner = ref<InstanceType<typeof TopologyPluginRunner> | null>(null)
 const linkTestLayer = ref<InstanceType<typeof TopologyLinkTestLayer> | null>(null)
 const zoom = ref(1)
-const moreOpen = ref(false)
+/** O Cytoscape já desenhou: antes disso, enquadrar vira pedido na fila. */
+const canvasReady = ref(false)
+/** Celular: folhas inferiores, uma por vez (a última vence; voltar devolve a anterior). */
+const sheets = provideSheetStack()
 
+const moreOpen = computed({
+  get: () => sheets.isTop('options'),
+  set: (open) => (open ? sheets.open('options') : sheets.close('options')),
+})
 const editMode = computed(() => prefs.editMode && auth.canWrite)
 const hasNodes = computed(() => store.nodes.length > 0)
-const insets = computed(() => ({
-  top: editMode.value ? 64 : 0,
-  // O painel do teste de enlace, aberto, também tira espaço à direita.
-  right: smAndDown.value ? 0 : Math.max(64, linkTestLayer.value?.occupiedRight ?? 0),
-  // No celular o inspetor é uma folha que cobre a parte de baixo do mapa.
-  bottom: smAndDown.value && view.selectedTarget.value ? Math.round(height.value * 0.55) : 56,
-  left: prefs.legendOpen && !smAndDown.value ? 230 : 0,
-}))
+const minimapOpen = computed(
+  () => !smAndDown.value && minimapVisible(prefs.minimap, store.nodes.length)
+)
+const showTips = computed(
+  () => !prefs.tipsDismissed && hasNodes.value && layout.ready.value && !editMode.value
+)
+const insets = computed(() =>
+  mapInsets({
+    narrow: smAndDown.value,
+    editMode: editMode.value,
+    legendOpen: prefs.legendOpen && hasNodes.value,
+    minimap: minimapOpen.value,
+    // No celular a folha de cima cobre a parte de baixo do mapa.
+    sheetHeight: sheets.top && sheets.top !== 'options' ? Math.round(height.value * 0.6) : 0,
+    // O painel do teste de velocidade, aberto, tira espaço à direita.
+    panelRight: linkTestLayer.value?.occupiedRight ?? 0,
+  })
+)
 
 const layout = useTopologyLayout({ canvas: () => canvas.value, canPersist: () => auth.canWrite })
 const cmd = useTopologyCommands({
@@ -237,7 +287,14 @@ const { host, notify } = useTopologyHost({
   }),
   dialogs,
   canvas: () => canvas.value,
+  fit: (ids) => fitMap(ids),
+  openTab: view.openTab,
   runPlugin: (node, item) => void pluginRunner.value?.open(node, item),
+})
+const quickTest = useEdgeQuickTest((edgeId) => {
+  if (!auth.canWrite || smAndDown.value || cmd.cable.active) return false
+  const edge = store.edgesById.get(edgeId)
+  return edge !== undefined && edgeLinkTestRequest(edge) !== null
 })
 registerBuiltinTopologyActions(() => store.pluginActions)
 useTopologyKeyboard(cmd.onCommand, () => !anyDialogOpen.value)
@@ -246,11 +303,73 @@ const cableSourceName = computed(() =>
   cmd.cable.source !== null ? (store.nodesById.get(cmd.cable.source)?.name ?? null) : null
 )
 const sheetOpen = computed({
-  get: () => Boolean(view.selectedTarget.value),
+  get: () => sheets.isTop('inspector') && Boolean(view.selectedTarget.value),
   set: (open) => {
     if (!open) view.selection.value = null
   },
 })
+
+// Selecionar põe o inspetor por cima (mesmo com o teste aberto); limpar o tira.
+watch(
+  () => view.selection.value,
+  (selection) => (selection ? sheets.open('inspector') : sheets.close('inspector'))
+)
+
+/**
+ * Enquadra agora ou, se o canvas ainda não desenhou (troca de site, carga da
+ * página vinda de "Ver no mapa"), assim que ele avisar que está pronto.
+ */
+let queuedFit: { ids?: number[] } | null = null
+function fitMap(ids?: number[]) {
+  if (canvasReady.value && canvas.value) canvas.value.fit(ids)
+  else queuedFit = { ids }
+}
+
+function onCanvasReady() {
+  canvasReady.value = true
+  const request = queuedFit
+  queuedFit = null
+  canvas.value?.fit(request?.ids)
+}
+
+watch(
+  () => layout.ready.value,
+  (ready) => {
+    if (!ready) canvasReady.value = false
+  }
+)
+
+function onNodeTap(id: number) {
+  cmd.onNodeTap(id)
+  // O painel/folha que abre pode cobrir o nó: traz ele para a área livre.
+  if (!cmd.cable.active) void nextTick(() => canvas.value?.reveal(id))
+}
+
+function onContext(event: CanvasPointerEvent) {
+  quickTest.hide()
+  cmd.openContext(event)
+}
+
+function onHover(event: CanvasPointerEvent | null) {
+  view.hover.value = event
+  quickTest.onHover(event)
+}
+
+function onViewport(viewport: CanvasViewport) {
+  if (viewport.zoom !== zoom.value) quickTest.hide()
+  zoom.value = viewport.zoom
+}
+
+function testQuickEdge() {
+  const edge = quickTest.state.value ? store.edgesById.get(quickTest.state.value.edgeId) : null
+  const request = edge ? edgeLinkTestRequest(edge) : null
+  quickTest.hide()
+  if (request) host.requestLinkTest(request)
+}
+
+function toggleMinimap() {
+  prefs.minimap = minimapOpen.value ? 'off' : 'on'
+}
 const anyDialogOpen = computed(
   () =>
     cmd.searchOpen.value ||
@@ -269,6 +388,7 @@ function toggleProblems() {
 
 async function loadSite() {
   view.selection.value = null
+  quickTest.hide()
   await store.fetchTopology(prefs.siteId)
   if (!store.error) await layout.initialize()
 }
@@ -310,5 +430,18 @@ onMounted(async () => {
   flex: 1;
   min-width: 0;
   overflow: hidden;
+}
+.tips-wrap {
+  position: absolute;
+  z-index: 6;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+.tips-wrap.narrow {
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  transform: none;
 }
 </style>

@@ -1,5 +1,5 @@
 <template>
-  <section class="run-panel" :aria-label="`Teste de enlace: ${title}`">
+  <section class="run-panel" :aria-label="`Teste de velocidade: ${title}`">
     <header class="run-header">
       <div class="d-flex align-start ga-3">
         <v-avatar :color="kind.color" size="40" rounded="lg">

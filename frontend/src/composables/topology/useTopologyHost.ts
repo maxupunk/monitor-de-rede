@@ -41,7 +41,11 @@ interface HostDeps {
   editMode: () => boolean
   cableSource: Ref<number | null>
   dialogs: TopologyDialogs
-  canvas: () => { centerOn(id: number): void; fit(ids?: number[]): void } | null
+  canvas: () => { centerOn(id: number): void } | null
+  /** Enquadra (agora ou assim que o canvas ficar pronto). */
+  fit: (deviceIds?: number[]) => void
+  /** Escolhe a aba do inspetor para o item selecionado. */
+  openTab: (tabId: string) => void
   runPlugin: (node: TopologyNode, item: TopologyPluginAction) => void
 }
 
@@ -182,7 +186,7 @@ export function useTopologyHost(deps: HostDeps) {
         return
       }
       overlay.setPathHighlight({ nodeIds: path.deviceIds, edgeIds: path.edgeIds })
-      deps.canvas()?.fit(path.deviceIds)
+      deps.fit(path.deviceIds)
       notify(`Caminho com ${path.edgeIds.length} enlace(s) destacado.`, 'info', {
         label: 'Limpar',
         run: () => overlay.setPathHighlight(null),
@@ -191,6 +195,9 @@ export function useTopologyHost(deps: HostDeps) {
     requestLinkTest(request) {
       // A camada do teste de enlace assume o pedido e abre o assistente.
       linkTests.requestLinkTest(request)
+    },
+    openInspectorTab(tabId) {
+      deps.openTab(tabId)
     },
     runPluginAction(node, action) {
       deps.runPlugin(node, action)
@@ -209,7 +216,7 @@ export function useTopologyHost(deps: HostDeps) {
       deps.dialogs.openNewLink()
     },
     fit() {
-      deps.canvas()?.fit()
+      deps.fit()
     },
   }
 

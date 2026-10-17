@@ -16,10 +16,26 @@
  * muda por `applyPositions` (layout, outra aba) ou pelo arraste do usuário.
  */
 import { onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
-import type { Core, EdgeSingular, EventObject, NodeCollection, NodeSingular } from 'cytoscape'
+import type {
+  Core,
+  EdgeCollection,
+  EdgeSingular,
+  EventObject,
+  NodeCollection,
+  NodeSingular,
+} from 'cytoscape'
 import type { TopologyPosition } from '@/stores/topology'
 import { parseElementId, type TopologyElement } from '@/utils/topology/elements'
-import { buildStylesheet, TRAFFIC_ZOOM, type TopologyPalette } from '@/utils/topology/style'
+import {
+  buildStylesheet,
+  edgeRouteClass,
+  lodLevel,
+  LOD_CLASSES,
+  ROUTE_CLASSES,
+  TRAFFIC_ZOOM,
+  type LodLevel,
+  type TopologyPalette,
+} from '@/utils/topology/style'
 import type {
   CanvasPointerEvent,
   CanvasViewport,
@@ -41,6 +57,8 @@ const props = defineProps<{
   connectSourceId: number | null
   /** Rótulos de detalhe sempre, não só com zoom. */
   alwaysDetail: boolean
+  /** Enlaces em ângulo reto (árvore) quando uma ponta está acima da outra. */
+  orthogonal: boolean
   selection: CanvasSelection | null
   /** Faixas cobertas por painéis flutuantes — o enquadramento as evita. */
   insets?: { top: number; right: number; bottom: number; left: number }
@@ -66,6 +84,7 @@ let sceneFrame = 0
 let antsFrame = 0
 let antsOffset = 0
 let trafficOn = false
+let lod: LodLevel = 'near'
 let draggedBatch: Record<number, TopologyPosition> = {}
 let dragFlushQueued = false
 let destroyed = false
@@ -161,6 +180,8 @@ function syncElements(core: Core, elements: TopologyElement[]) {
         ele.scratch(BASE_CLASSES, def?.classes ?? '')
       })
       if (trafficOn) added.edges().addClass('lod-detail')
+      if (lod !== 'near') added.filter('[deviceId], [edgeId]').addClass(`lod-${lod}`)
+      routeEdges(core, added.edges().union(added.nodes().connectedEdges()))
     }
 
     // Remoção por último: um site (nó composto) só sai depois que os filhos
@@ -181,13 +202,47 @@ function syncElements(core: Core, elements: TopologyElement[]) {
  * nó selecionado ou sob o mouse) mostra — dezenas de pílulas ao mesmo tempo
  * viram ruído. Os rótulos dos nós somem sozinhos de longe (fonte mínima).
  */
+/**
+ * Troca a classe de nível de detalhe na hora do zoom (no evento, não no
+ * próximo quadro): se o Cytoscape desenhar o novo zoom antes da troca, ele
+ * guarda a textura do nó com a caixa do rótulo antigo e corta o novo.
+ */
+function updateLod(core: Core) {
+  const level = lodLevel(core.zoom())
+  if (level === lod) return
+  lod = level
+  core.batch(() => {
+    const items = core.elements('[deviceId], [edgeId]')
+    items.removeClass(LOD_CLASSES)
+    if (level !== 'near') items.addClass(`lod-${level}`)
+  })
+}
+
 function updateDetail(core: Core) {
+  updateLod(core)
   const edges = props.alwaysDetail || core.zoom() >= TRAFFIC_ZOOM
   if (edges === trafficOn) return
   trafficOn = edges
   core.batch(() => {
     if (edges) core.edges().addClass('lod-detail')
     else core.edges().removeClass('lod-detail')
+  })
+}
+
+// --- Traçado ortogonal -----------------------------------------------------------
+
+/** Recalcula o traçado dos enlaces dados (ou de todos) pela posição das pontas. */
+function routeEdges(core: Core, edges: EdgeCollection = core.edges()) {
+  core.batch(() => {
+    edges.forEach((edge) => {
+      if (edge.id().startsWith('__')) return
+      const wanted = props.orthogonal
+        ? edgeRouteClass(edge.source().position(), edge.target().position())
+        : null
+      if (wanted && edge.hasClass(wanted)) return
+      edge.removeClass(ROUTE_CLASSES)
+      if (wanted) edge.addClass(wanted)
+    })
   })
 }
 
@@ -340,6 +395,7 @@ async function init() {
   core.on('dragfree', 'node', (event) => {
     const node = event.target as NodeSingular
     if (!isDeviceNode(node)) return
+    routeEdges(core, node.connectedEdges())
     const parsed = parseElementId(node.id())
     if (!parsed) return
     const pos = node.position()
@@ -355,6 +411,7 @@ async function init() {
     })
   })
   core.on('free', 'node', () => emit('drag-state', false))
+  core.on('zoom', () => updateLod(core))
   core.on('viewport position', scheduleScene)
   core.on('add remove', scheduleScene)
 
@@ -424,6 +481,12 @@ watch(
 watch(
   () => props.connectSourceId,
   () => updateGhost()
+)
+watch(
+  () => props.orthogonal,
+  () => {
+    if (cy.value) routeEdges(cy.value)
+  }
 )
 watch(
   () => props.alwaysDetail,
@@ -510,6 +573,34 @@ const api = {
       easing: 'ease-in-out-cubic',
     })
   },
+  /**
+   * Garante o nó visível na área livre (fora de painéis e folhas), sem mudar
+   * o zoom — só desloca quando ele está escondido.
+   */
+  reveal(deviceId: number) {
+    const core = cy.value
+    const node = core?.getElementById(`n${deviceId}`)
+    if (!core || !node || node.empty()) return
+    core.resize()
+    const insets = props.insets ?? { top: 0, right: 0, bottom: 0, left: 0 }
+    const pad = 48
+    const pos = node.renderedPosition()
+    const left = insets.left + pad
+    const right = core.width() - insets.right - pad
+    const top = insets.top + pad
+    const bottom = core.height() - insets.bottom - pad
+    if (right <= left || bottom <= top) return
+    if (pos.x >= left && pos.x <= right && pos.y >= top && pos.y <= bottom) return
+    const pan = core.pan()
+    core.animate({
+      pan: {
+        x: pan.x + (left + right) / 2 - pos.x,
+        y: pan.y + (top + bottom) / 2 - pos.y,
+      },
+      duration: 260,
+      easing: 'ease-out-cubic',
+    })
+  },
   /** Move nós para as posições dadas (layout, outra aba). Só os listados. */
   applyPositions(positions: Record<number, TopologyPosition>, animate = true, fitAfter = false) {
     const core = cy.value
@@ -530,7 +621,10 @@ const api = {
       animationEasing: 'ease-in-out-cubic',
       fit: false,
     })
-    if (fitAfter) layout.one('layoutstop', () => api.fit())
+    layout.one('layoutstop', () => {
+      routeEdges(core, nodes.connectedEdges())
+      if (fitAfter) api.fit()
+    })
     layout.run()
   },
   getPositions(): Record<number, TopologyPosition> {
@@ -547,6 +641,7 @@ const api = {
     const pos = node.position()
     const next = { x: pos.x + dx, y: pos.y + dy }
     node.position(next)
+    if (cy.value) routeEdges(cy.value, node.connectedEdges())
     emit('positions-changed', { [deviceId]: next })
   },
   async exportPng(): Promise<Blob | null> {

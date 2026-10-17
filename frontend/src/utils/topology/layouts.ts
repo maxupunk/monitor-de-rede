@@ -10,6 +10,20 @@
  */
 import type { TopologyEdge, TopologyNode, TopologyPosition } from '@/stores/topology'
 import { edgeEndpoints, nodeCategory } from './presentation'
+import {
+  arrangeCompact,
+  arrangeSubtree,
+  childrenPack,
+  closedNodes,
+  compareNodes,
+  isolatedGrid,
+  leafGrid,
+  spanningForest,
+  LEAF_GROUP_MIN,
+  LEVEL_GAP,
+  NODE_BOX,
+  type TreeBox,
+} from './treeLayout'
 
 export type LayoutKind = 'hierarchical' | 'radial' | 'organic' | 'grid' | 'sites'
 
@@ -22,7 +36,7 @@ export const LAYOUT_OPTIONS: ReadonlyArray<{
   {
     value: 'hierarchical',
     title: 'Hierárquico',
-    subtitle: 'Do servidor/roteador para a borda, seguindo os enlaces',
+    subtitle: 'Do roteador de borda até a ponta, em árvore compacta',
     icon: 'mdi-family-tree',
   },
   {
@@ -53,40 +67,69 @@ export const LAYOUT_OPTIONS: ReadonlyArray<{
 
 export type PositionMap = Record<number, TopologyPosition>
 
-/** Tamanho que cada nó ocupa no layout (ícone + rótulo). */
-export const NODE_BOX = { width: 124, height: 84 }
+export { LEAF_GROUP_MIN, NODE_BOX } from './treeLayout'
 
 // --- Raízes ------------------------------------------------------------------
 
 const ROOT_CATEGORIES = new Set(['router', 'firewall'])
 
+/** Distâncias (em saltos) a partir de um nó. */
+function hops(start: number, adjacency: ReadonlyMap<number, readonly number[]>) {
+  const distance = new Map<number, number>([[start, 0]])
+  const queue = [start]
+  while (queue.length > 0) {
+    const current = queue.shift()!
+    for (const other of adjacency.get(current) ?? []) {
+      if (distance.has(other)) continue
+      distance.set(other, distance.get(current)! + 1)
+      queue.push(other)
+    }
+  }
+  return distance
+}
+
 /**
- * Raízes da hierarquia: o servidor NetMonitor (dito pelo backend); senão os
- * roteadores/firewalls; senão o nó de maior grau.
+ * Raiz de cada componente ligado (nós sem enlace não precisam de raiz): o
+ * roteador de borda — o roteador (senão o firewall) mais perto do servidor
+ * NetMonitor, que é por onde a rede sai; sem roteador, o servidor; sem
+ * servidor, o nó de maior grau. A internet fica em cima, a ponta embaixo.
  */
 export function chooseRoots(nodes: readonly TopologyNode[], edges: readonly TopologyEdge[]) {
-  const linked = new Set<number>()
+  const byId = new Map(nodes.map((node) => [node.id, node]))
+  const adjacency = new Map<number, number[]>()
   for (const edge of edges) {
     const { source, target } = edgeEndpoints(edge)
-    linked.add(source)
-    linked.add(target)
+    if (source === target || !byId.has(source) || !byId.has(target)) continue
+    if (!adjacency.has(source)) adjacency.set(source, [])
+    if (!adjacency.has(target)) adjacency.set(target, [])
+    adjacency.get(source)!.push(target)
+    adjacency.get(target)!.push(source)
   }
-  // O servidor só é raiz quando está ligado à rede no mapa.
-  const system = nodes.filter((node) => node.isSystem && linked.has(node.id))
-  if (system.length > 0) return system.map((node) => node.id)
-  const routers = nodes.filter((node) => ROOT_CATEGORIES.has(nodeCategory(node)))
-  if (routers.length > 0) return routers.map((node) => node.id)
-  const degree = new Map<number, number>()
-  for (const edge of edges) {
-    const { source, target } = edgeEndpoints(edge)
-    degree.set(source, (degree.get(source) ?? 0) + 1)
-    degree.set(target, (degree.get(target) ?? 0) + 1)
+  const degree = (id: number) => adjacency.get(id)?.length ?? 0
+  const byDegree = (a: number, b: number) => degree(b) - degree(a) || a - b
+
+  const roots: number[] = []
+  const seen = new Set<number>()
+  for (const node of [...nodes].sort(compareNodes)) {
+    if (seen.has(node.id) || !adjacency.has(node.id)) continue
+    const reach = hops(node.id, adjacency)
+    const members = [...reach.keys()]
+    members.forEach((id) => seen.add(id))
+    const system = members.find((id) => byId.get(id)?.isSystem)
+    const routers = members.filter((id) => nodeCategory(byId.get(id)!) === 'router')
+    const firewalls = members.filter((id) => nodeCategory(byId.get(id)!) === 'firewall')
+    const candidates = routers.length > 0 ? routers : firewalls
+    if (candidates.length > 0) {
+      const fromSystem = system !== undefined ? hops(system, adjacency) : null
+      const distance = (id: number) => fromSystem?.get(id) ?? 0
+      roots.push([...candidates].sort((a, b) => distance(a) - distance(b) || byDegree(a, b))[0])
+    } else if (system !== undefined) {
+      roots.push(system)
+    } else {
+      roots.push([...members].sort(byDegree)[0])
+    }
   }
-  let best: number | null = null
-  for (const node of nodes) {
-    if (best === null || (degree.get(node.id) ?? 0) > (degree.get(best) ?? 0)) best = node.id
-  }
-  return best === null ? [] : [best]
+  return roots
 }
 
 /**
@@ -167,6 +210,15 @@ export interface ElkEdgeJson {
   targets: string[]
 }
 
+/** Blocos já arrumados que o ELK trata como uma caixa só (id ELK → bloco). */
+export type ElkBlocks = ReadonlyMap<string, TreeBox>
+
+/** O que vai para o worker e como ler a volta. */
+export interface ElkPlan {
+  graph: ElkNodeJson
+  blocks: ElkBlocks
+}
+
 const BASE_OPTIONS: Record<string, string> = {
   'elk.spacing.nodeNode': '40',
   'elk.padding': '[top=40,left=40,bottom=40,right=40]',
@@ -176,13 +228,16 @@ const OPTIONS: Record<Exclude<LayoutKind, 'grid'>, Record<string, string>> = {
   hierarchical: {
     'elk.algorithm': 'layered',
     'elk.direction': 'DOWN',
-    'elk.layered.spacing.nodeNodeBetweenLayers': '70',
-    'elk.spacing.nodeNode': '24',
+    'elk.layered.spacing.nodeNodeBetweenLayers': String(LEVEL_GAP),
+    'elk.spacing.nodeNode': '32',
     'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
+    'elk.layered.crossingMinimization.greedySwitch.type': 'TWO_SIDED',
     'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
+    'elk.layered.nodePlacement.bk.fixedAlignment': 'BALANCED',
     'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
     'elk.separateConnectedComponents': 'true',
-    'elk.spacing.componentComponent': '80',
+    'elk.spacing.componentComponent': '120',
+    'elk.aspectRatio': '1.6',
   },
   radial: {
     'elk.algorithm': 'radial',
@@ -207,13 +262,8 @@ const OPTIONS: Record<Exclude<LayoutKind, 'grid'>, Record<string, string>> = {
 export interface LeafGroup {
   anchor: number
   leaves: number[]
-  cols: number
-  rows: number
+  box: TreeBox
 }
-
-/** A partir de quantas folhas no mesmo vizinho elas viram um bloco. */
-export const LEAF_GROUP_MIN = 3
-const LEAF_ROW_HEIGHT = NODE_BOX.height + 8
 
 /**
  * Agrupa as folhas (grau 1) por vizinho. No layout, cada grupo vira um bloco
@@ -250,18 +300,8 @@ export function groupLeaves(
   const groups = new Map<number, LeafGroup>()
   for (const [anchor, leaves] of pending) {
     if (leaves.length < LEAF_GROUP_MIN) continue
-    const sorted = [...leaves].sort((a, b) => {
-      const ca = CATEGORY_ORDER.indexOf(nodeCategory(a))
-      const cb = CATEGORY_ORDER.indexOf(nodeCategory(b))
-      return ca - cb || a.name.localeCompare(b.name)
-    })
-    const cols = Math.min(6, Math.ceil(Math.sqrt(sorted.length * 1.6)))
-    groups.set(anchor, {
-      anchor,
-      leaves: sorted.map((node) => node.id),
-      cols,
-      rows: Math.ceil(sorted.length / cols),
-    })
+    const ids = [...leaves].sort(compareNodes).map((node) => node.id)
+    groups.set(anchor, { anchor, leaves: ids, box: leafGrid(ids) })
   }
   return groups
 }
@@ -270,7 +310,12 @@ const elkNodeId = (id: number) => `n${id}`
 const elkGroupId = (anchor: number) => `g${anchor}`
 const elkSiteId = (siteId: number | null | undefined) => `s${siteId ?? 'none'}`
 
-/** Monta o grafo que o ELK posiciona. Pura — o worker só executa. */
+/** Os blocos de folhas de `groupLeaves`, no formato que `positionsFromElk` abre. */
+export function leafGroupBlocks(groups: ReadonlyMap<number, LeafGroup>): ElkBlocks {
+  return new Map([...groups.values()].map((group) => [elkGroupId(group.anchor), group.box]))
+}
+
+/** Monta o grafo que o ELK posiciona (radial, orgânico, por site). Pura — o worker só executa. */
 export function buildElkGraph(
   kind: Exclude<LayoutKind, 'grid'>,
   nodes: readonly TopologyNode[],
@@ -317,8 +362,8 @@ export function buildElkGraph(
   })
   const block = (group: LeafGroup): ElkNodeJson => ({
     id: elkGroupId(group.anchor),
-    width: group.cols * NODE_BOX.width,
-    height: group.rows * LEAF_ROW_HEIGHT,
+    width: group.box.width,
+    height: group.box.height,
   })
 
   const root: ElkNodeJson = {
@@ -356,29 +401,84 @@ export function buildElkGraph(
   return root
 }
 
-/** Posições (centro do nó) a partir do resultado do ELK, abrindo os blocos de folhas. */
-export function positionsFromElk(
-  graph: ElkNodeJson,
-  groups: ReadonlyMap<number, LeafGroup> = new Map()
-): PositionMap {
+/**
+ * Hierárquico: a parte que é árvore pura vira bloco compacto (`treeLayout`);
+ * só o núcleo com enlaces redundantes vai como nós soltos para o ELK
+ * minimizar cruzamentos. Cada nó do núcleo leva junto o conjunto dos filhos
+ * que são árvore (`p<id>`); componentes que são árvore inteira viram um bloco
+ * (`b<id>`); nós sem enlace, uma grade (`i0`).
+ */
+export function buildHierarchy(
+  nodes: readonly TopologyNode[],
+  edges: readonly TopologyEdge[]
+): ElkPlan {
+  const roots = chooseRoots(nodes, edges)
+  const forest = spanningForest(nodes, edges, roots)
+  const closed = closedNodes(forest)
+  const blocks = new Map<string, TreeBox>()
+  const children: ElkNodeJson[] = []
+  const box = (id: string, tree: TreeBox): ElkNodeJson => {
+    blocks.set(id, tree)
+    return { id, width: tree.width, height: tree.height }
+  }
+
+  const core = nodes.filter((node) => forest.parent.has(node.id) && !closed.has(node.id))
+  const coreIds = new Set(core.map((node) => node.id))
+  const packEdges: ElkEdgeJson[] = []
+  for (const node of core) {
+    children.push({ id: elkNodeId(node.id), width: NODE_BOX.width, height: NODE_BOX.height })
+    const kids = (forest.children.get(node.id) ?? []).filter((id) => closed.has(id))
+    const pack = arrangeCompact((options) => childrenPack(kids, forest.children, options))
+    if (!pack) continue
+    children.push(box(`p${node.id}`, pack))
+    packEdges.push({ id: `pe${node.id}`, sources: [elkNodeId(node.id)], targets: [`p${node.id}`] })
+  }
+  for (const [id, parent] of forest.parent) {
+    if (parent !== null || !closed.has(id)) continue
+    const tree = arrangeCompact((options) => arrangeSubtree(id, forest.children, options))
+    if (tree) children.push(box(`b${id}`, tree))
+  }
+  const isolated = isolatedGrid(forest.isolated)
+  if (isolated) children.push(box('i0', isolated))
+
+  const coreEdges = edges.filter((edge) => {
+    const { source, target } = edgeEndpoints(edge)
+    return coreIds.has(source) && coreIds.has(target)
+  })
+  const oriented = orientEdges(core, coreEdges, roots).map((edge) => ({
+    id: `e${edge.id}`,
+    sources: [elkNodeId(edge.source)],
+    targets: [elkNodeId(edge.target)],
+  }))
+
+  return {
+    graph: {
+      id: 'root',
+      layoutOptions: { ...BASE_OPTIONS, ...OPTIONS.hierarchical },
+      children,
+      edges: [...oriented, ...packEdges],
+    },
+    blocks,
+  }
+}
+
+/** Posições (centro do nó) a partir do resultado do ELK, abrindo os blocos. */
+export function positionsFromElk(graph: ElkNodeJson, blocks: ElkBlocks = new Map()): PositionMap {
   const positions: PositionMap = {}
   const walk = (node: ElkNodeJson, offsetX: number, offsetY: number) => {
     const x = offsetX + (node.x ?? 0)
     const y = offsetY + (node.y ?? 0)
+    const block = blocks.get(node.id)
     const id = Number(node.id.slice(1))
-    if (node.id.startsWith('n') && Number.isFinite(id)) {
+    if (block) {
+      for (const [leaf, pos] of block.positions) {
+        positions[leaf] = { x: Math.round(x + pos.x), y: Math.round(y + pos.y) }
+      }
+    } else if (node.id.startsWith('n') && Number.isFinite(id)) {
       positions[id] = {
         x: Math.round(x + (node.width ?? NODE_BOX.width) / 2),
         y: Math.round(y + (node.height ?? NODE_BOX.height) / 2),
       }
-    } else if (node.id.startsWith('g') && groups.has(id)) {
-      const group = groups.get(id)!
-      group.leaves.forEach((leaf, index) => {
-        positions[leaf] = {
-          x: Math.round(x + (index % group.cols) * NODE_BOX.width + NODE_BOX.width / 2),
-          y: Math.round(y + Math.floor(index / group.cols) * LEAF_ROW_HEIGHT + NODE_BOX.height / 2),
-        }
-      })
     }
     for (const child of node.children ?? []) walk(child, x, y)
   }
@@ -388,35 +488,10 @@ export function positionsFromElk(
 
 // --- Grade --------------------------------------------------------------------
 
-const CATEGORY_ORDER = [
-  'router',
-  'firewall',
-  'switch',
-  'ap',
-  'server',
-  'nas',
-  'workstation',
-  'printer',
-  'camera',
-  'voip',
-  'iot',
-  'media',
-  'mobile',
-  'ups',
-  'web_device',
-  'other',
-  'unknown',
-]
-
 /** Grade com uma faixa por tipo, do núcleo para a borda. */
 export function gridLayout(nodes: readonly TopologyNode[], columns?: number): PositionMap {
   const cols = columns ?? Math.max(4, Math.ceil(Math.sqrt(nodes.length * 1.6)))
-  const sorted = [...nodes].sort((a, b) => {
-    if (a.isSystem !== b.isSystem) return a.isSystem ? -1 : 1
-    const ca = CATEGORY_ORDER.indexOf(nodeCategory(a))
-    const cb = CATEGORY_ORDER.indexOf(nodeCategory(b))
-    return ca - cb || a.name.localeCompare(b.name)
-  })
+  const sorted = [...nodes].sort(compareNodes)
   const positions: PositionMap = {}
   sorted.forEach((node, index) => {
     positions[node.id] = {
@@ -562,8 +637,13 @@ export async function computeLayout(
 ): Promise<PositionMap> {
   if (nodes.length === 0) return {}
   if (kind === 'grid') return gridLayout(nodes)
-  const groups = groupLeaves(nodes, edges)
-  const graph = buildElkGraph(kind, nodes, edges, groups)
+  let plan: ElkPlan
+  if (kind === 'hierarchical') {
+    plan = buildHierarchy(nodes, edges)
+  } else {
+    const groups = groupLeaves(nodes, edges)
+    plan = { graph: buildElkGraph(kind, nodes, edges, groups), blocks: leafGroupBlocks(groups) }
+  }
   const elk = await getRunner()
-  return positionsFromElk(await elk.layout(graph), groups)
+  return positionsFromElk(await elk.layout(plan.graph), plan.blocks)
 }

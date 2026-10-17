@@ -311,7 +311,8 @@
         },
         {
           "engine": "btest",
-          "auth": false
+          "auth": false,
+          "maxDurationS": 29
         }
       ],
       "actions": {

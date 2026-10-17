@@ -5,7 +5,7 @@
 //! * [`PluginInvoker`] — as ações `prepare`/`serve`/`stop`/`run` dos plugins
 //!   (padrão: [`invoke::prepare`] + [`invoke::finish`]);
 //! * [`DriverResolver`] — quem dirige pela central ([`LocalDriver`]) ou por um
-//!   agente ([`agent_driver`], o ponto que o integrador liga);
+//!   agente ([`agent_driver`], o `AgentDriver` do protocolo 4);
 //! * [`BtestArmer`] — o servidor btest armado da central;
 //! * [`CentralAddress`] — por qual endereço um equipamento alcança a central.
 
@@ -19,6 +19,7 @@ use tokio::sync::oneshot;
 use crate::{
     models::devices,
     services::{
+        agents::throughput::agent_driver,
         events::EventBus,
         network_tools::throughput::{
             btest::{ArmedSession, BtestServer},
@@ -29,9 +30,6 @@ use crate::{
         shared::errors::{AppError, AppResult},
     },
 };
-
-/// Mensagem enquanto o teste a partir de um agente não está ligado.
-pub const AGENT_NOT_WIRED: &str = "teste a partir do agente ainda não ligado";
 
 /// Chama uma ação de plugin num equipamento.
 #[async_trait]
@@ -79,8 +77,7 @@ pub trait DriverResolver: Send + Sync {
     ///
     /// # Errors
     ///
-    /// Agente indisponível — ou, enquanto o `AgentDriver` não estiver
-    /// ligado, [`AGENT_NOT_WIRED`].
+    /// Agente desconectado ou sem a permissão `throughput`.
     fn agent(&self, agent_id: i64) -> AppResult<Arc<dyn ThroughputDriver>>;
 }
 
@@ -97,22 +94,6 @@ impl DriverResolver for DefaultDrivers {
     fn agent(&self, agent_id: i64) -> AppResult<Arc<dyn ThroughputDriver>> {
         agent_driver(&self.ctx, agent_id)
     }
-}
-
-/// **PONTO DE INTEGRAÇÃO do agente (ADR 015 §6).** Devolve o
-/// `ThroughputDriver` que dirige o teste a partir do agente `agent_id` (o id
-/// da linha em `probes`) pelo `Command::Throughput`.
-///
-/// Enquanto o `AgentDriver` não existir, recusa com [`AGENT_NOT_WIRED`] — o
-/// plano mostra a perna como "não roda" com esse motivo. Troque o corpo por
-/// `Ok(Arc::new(AgentDriver::new(ctx, agent_id)?))`.
-///
-/// # Errors
-///
-/// [`AppError::BusinessRule`] com [`AGENT_NOT_WIRED`].
-pub fn agent_driver(ctx: &AppContext, agent_id: i64) -> AppResult<Arc<dyn ThroughputDriver>> {
-    let _ = (ctx, agent_id);
-    Err(AppError::business_rule(AGENT_NOT_WIRED))
 }
 
 /// O servidor btest da central, armado por teste.

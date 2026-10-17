@@ -3,7 +3,8 @@
  * (`inspectorRegistry.ts`). Inspetor e menu de contexto mostram exatamente
  * esta lista — uma ação nunca existe só num dos dois.
  */
-import type { TopologyPluginActionMap } from '@/stores/topology'
+import type { LinkTestRequest } from '@/stores/linkTestRequests'
+import type { TopologyEdge, TopologyPluginActionMap } from '@/stores/topology'
 import {
   registerActionProvider,
   type TopologyAction,
@@ -205,12 +206,18 @@ export const backgroundActions: TopologyActionProvider = (target, host) => {
   ]
 }
 
-/** Entradas do teste de enlace (ADR 015) — o mapa só registra o pedido. */
+/** Pedido de teste de velocidade de um enlace (`null` se o enlace não é testável). */
+export function edgeLinkTestRequest(edge: TopologyEdge): LinkTestRequest | null {
+  if (isVirtualEdge(edge)) return null
+  const { source, target } = edgeEndpoints(edge)
+  return { kind: 'link', linkId: edge.id, sourceDeviceId: source, targetDeviceId: target }
+}
+
+/** Entradas do teste de velocidade (ADR 015) — o mapa só registra o pedido. */
 export const linkTestActions: TopologyActionProvider = (target, host) => {
   if (target.kind === 'edge') {
-    if (isVirtualEdge(target.edge)) return []
-    const edge = target.edge
-    const { source, target: to } = edgeEndpoints(edge)
+    const request = edgeLinkTestRequest(target.edge)
+    if (!request) return []
     return [
       {
         id: 'test.link',
@@ -220,13 +227,7 @@ export const linkTestActions: TopologyActionProvider = (target, host) => {
         group: 'test',
         order: 10,
         requiresWrite: true,
-        run: () =>
-          host.requestLinkTest({
-            kind: 'link',
-            linkId: edge.id,
-            sourceDeviceId: source,
-            targetDeviceId: to,
-          }),
+        run: () => host.requestLinkTest(request),
       },
     ]
   }

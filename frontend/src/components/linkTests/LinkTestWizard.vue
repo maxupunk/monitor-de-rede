@@ -11,7 +11,7 @@
     <v-card class="wizard" :rounded="smAndDown ? 0 : 'lg'">
       <v-card-title class="d-flex align-center ga-2 pt-4">
         <v-icon color="primary">mdi-speedometer</v-icon>
-        <span class="flex-grow-1">Novo teste de enlace</span>
+        <span class="flex-grow-1">Novo teste de velocidade</span>
         <v-btn
           icon="mdi-close"
           variant="text"

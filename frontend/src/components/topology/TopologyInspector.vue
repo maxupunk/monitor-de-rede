@@ -26,7 +26,7 @@
       </div>
     </header>
 
-    <v-tabs v-model="tab" color="primary" density="compact" show-arrows class="px-2">
+    <v-tabs v-model="tab" color="primary" grow stacked height="58" class="inspector-tabs">
       <v-tab v-for="item in tabs" :key="item.id" :value="item.id" :prepend-icon="item.icon">
         {{ item.title }}
       </v-tab>
@@ -45,9 +45,10 @@
  * As abas vêm do registro (`inspectorRegistry`) — extensões entram sem
  * editar este componente.
  */
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import {
   resolveTabs,
+  type TabChoice,
   type TopologyHost,
   type TopologyTarget,
 } from '@/utils/topology/inspectorRegistry'
@@ -67,15 +68,18 @@ const props = defineProps<{
   host: TopologyHost
   /** Exibido como folha inferior (celular). */
   sheet?: boolean
+  /**
+   * Aba escolhida por tipo de alvo. Mora na página para o mapa poder abrir
+   * uma aba pelo id (`host.openInspectorTab`).
+   */
+  tabChoice: TabChoice
 }>()
 
-defineEmits<{ close: [] }>()
+const emit = defineEmits<{ close: []; 'update:tabChoice': [value: TabChoice] }>()
 
 registerBuiltinInspectorTabs()
 
 const tabs = computed(() => resolveTabs(props.target))
-/** Última aba escolhida por tipo de alvo (nó, enlace). */
-const chosen = ref<Record<string, string>>({})
 
 /**
  * Aba ativa derivada (nunca um id que não existe para o alvo atual): trocar
@@ -83,12 +87,15 @@ const chosen = ref<Record<string, string>>({})
  */
 const tab = computed<string>({
   get: () => {
-    const wanted = chosen.value[props.target.kind]
-    return tabs.value.some((item) => item.id === wanted) ? wanted : (tabs.value[0]?.id ?? '')
+    const kind = props.target.kind
+    const wanted = kind === 'background' ? undefined : props.tabChoice[kind]
+    const valid = tabs.value.find((item) => item.id === wanted)
+    return valid?.id ?? tabs.value[0]?.id ?? ''
   },
   set: (value) => {
-    if (!value || !tabs.value.some((item) => item.id === value)) return
-    chosen.value = { ...chosen.value, [props.target.kind]: value }
+    if (!value || props.target.kind === 'background') return
+    if (!tabs.value.some((item) => item.id === value)) return
+    emit('update:tabChoice', { ...props.tabChoice, [props.target.kind]: value })
   },
 })
 
@@ -141,6 +148,17 @@ const header = computed(() => {
 }
 .subtitle {
   color: rgb(var(--v-theme-on-surface));
+}
+.inspector-tabs {
+  /* `grow` do Vuetify estica o grupo; numa coluna, só na largura. */
+  flex: 0 0 auto;
+}
+.inspector-tabs :deep(.v-tab) {
+  min-width: 0;
+  padding: 0 4px;
+  font-size: 0.75rem;
+  letter-spacing: 0;
+  text-transform: none;
 }
 .inspector-body {
   flex: 1;
