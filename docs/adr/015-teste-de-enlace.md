@@ -303,6 +303,14 @@ RouterOS como cliente, um servidor de teste do nosso lado):
   RouterOS, sem autenticação: os dois sentidos medidos, com amostras ao vivo
   (teste `btest_contra_routeros_real`, ignorado na suíte; `NM_BTEST_TARGET`).
 
+- **MikroTik↔MikroTik com dois RouterOS reais** ligados por um enlace
+  direto: A sobe o `bandwidth-server` com o usuário temporário, B mede contra
+  A nos dois sentidos (o RouterOS autentica o usuário por EC-SRP5 sozinho) e
+  A desfaz tudo. Achado: o `tp_run` do plugin tinha um valor de exemplo como
+  `pattern` do `user` e recusava qualquer usuário gerado — agora um teste de
+  contrato confere que os parâmetros do orquestrador (com a credencial
+  gerada) passam na validação de todo plugin embutido com papel de teste.
+
 Com um **OpenWrt 24.10.4** real (imagem oficial `openwrt/rootfs`):
 
 - `tp_prepare` instalou o `mikrotik-btest` e o `iperf3` pelo `openwrt-packages`
