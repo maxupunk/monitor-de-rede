@@ -21,7 +21,7 @@ use super::{
 use crate::{
     models::{device_links, devices},
     services::{
-        devices::system_device::SystemDeviceService,
+        devices::system_device::{SystemDeviceService, NETMONITOR_KEY},
         network_tools::throughput::ThroughputEngine,
         shared::errors::{AppError, AppResult},
         topology::service::{find_path, parent_edge_child},
@@ -103,7 +103,13 @@ impl Endpoints<'_> {
             return Ok(found.clone());
         }
         let device = find_device(self.env, id).await?;
-        let built = endpoint::device_endpoint(&self.env.db, device).await?;
+        // O próprio servidor nunca é "um equipamento com plugin": em qualquer
+        // tipo de teste ele é a central, com os motores nativos.
+        let built = if device.system_key.as_deref() == Some(NETMONITOR_KEY) {
+            endpoint::central_endpoint(Some(device))
+        } else {
+            endpoint::device_endpoint(&self.env.db, device).await?
+        };
         self.cache.insert(id, built.clone());
         Ok(built)
     }

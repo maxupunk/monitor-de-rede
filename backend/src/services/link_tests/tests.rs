@@ -648,6 +648,39 @@ async fn central_mede_openwrt_por_iperf3_em_loopback() {
 
 #[tokio::test]
 #[serial(link_tests)]
+async fn enlace_com_o_servidor_usa_a_central_e_nao_um_plugin() {
+    let server = FakeServer::start(Behavior::Normal).await;
+    let plugins = Arc::new(FakePlugins {
+        serve_port: Some(server.addr.port()),
+        ..FakePlugins::default()
+    });
+    let env = env_with(db().await, Arc::clone(&plugins), None);
+    let sistema = device(&env.db, "Servidor NetMonitor", "127.0.0.2", true).await;
+    let p = openwrt_plugin(&env.db).await;
+    let alvo = device(&env.db, "OpenWrt", "127.0.0.1", false).await;
+    install(&env.db, &alvo, &p).await;
+    let enlace = link(&env.db, sistema.id, alvo.id).await;
+
+    let started = service::start(
+        Arc::clone(&env),
+        &LinkTestRequest {
+            link_id: Some(enlace),
+            ..request(LinkTestKind::Link)
+        },
+        user(),
+    )
+    .await
+    .unwrap();
+    let test = finished(&env, started.id).await;
+    assert_eq!(test.status, LinkTestStatus::Succeeded, "{test:#?}");
+    let leg = &test.legs[0];
+    assert_eq!(leg.plan.a.kind, super::model::LinkTestEndpointKind::Central);
+    assert_eq!(leg.plan.a.device_id, Some(sistema.id));
+    assert!(plugins.calls("tp_run").is_empty(), "quem dirige é a central");
+}
+
+#[tokio::test]
+#[serial(link_tests)]
 async fn mikrotik_disca_no_btest_armado_da_central() {
     let server = BtestServer::bind("127.0.0.1:0".parse().unwrap())
         .await
