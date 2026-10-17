@@ -676,7 +676,10 @@ async fn enlace_com_o_servidor_usa_a_central_e_nao_um_plugin() {
     let leg = &test.legs[0];
     assert_eq!(leg.plan.a.kind, super::model::LinkTestEndpointKind::Central);
     assert_eq!(leg.plan.a.device_id, Some(sistema.id));
-    assert!(plugins.calls("tp_run").is_empty(), "quem dirige é a central");
+    assert!(
+        plugins.calls("tp_run").is_empty(),
+        "quem dirige é a central"
+    );
 }
 
 #[tokio::test]

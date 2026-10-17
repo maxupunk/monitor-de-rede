@@ -60,6 +60,10 @@ struct Pending {
 struct Inner {
     local_addr: SocketAddr,
     sessions: Mutex<HashMap<IpAddr, Pending>>,
+    /// A última conexão recusada por não ter sessão armada — só diagnóstico:
+    /// quando um equipamento armado não conecta, ela costuma ser ele chegando
+    /// por NAT com outro endereço de origem.
+    last_refused: Mutex<Option<(IpAddr, Instant)>>,
     next_id: AtomicU64,
     shutdown: CancellationToken,
 }
@@ -71,6 +75,22 @@ impl Inner {
         self.sessions
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn remember_refused(&self, peer: IpAddr) {
+        *self
+            .last_refused
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((peer, Instant::now()));
+    }
+
+    /// IP recusado desde `since`, se houve.
+    fn refused_since(&self, since: Instant) -> Option<IpAddr> {
+        self.last_refused
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .filter(|(_, at)| *at >= since)
+            .map(|(ip, _)| ip)
     }
 
     /// Tira a sessão do mapa se ainda for a mesma (`id`).
@@ -116,6 +136,7 @@ impl BtestServer {
         let inner = Arc::new(Inner {
             local_addr,
             sessions: Mutex::new(HashMap::new()),
+            last_refused: Mutex::new(None),
             next_id: AtomicU64::new(1),
             shutdown: CancellationToken::new(),
         });
@@ -287,17 +308,40 @@ async fn expire(
     ttl: Duration,
     cancel: CancellationToken,
 ) {
-    let error = tokio::select! {
-        () = tokio::time::sleep(ttl) => AppError::service_unavailable(format!(
-            "O equipamento {peer} não conectou ao servidor btest dentro do prazo"
-        )),
-        () = cancel.cancelled() => cancelled(),
+    let armed_at = Instant::now();
+    let timed_out = tokio::select! {
+        () = tokio::time::sleep(ttl) => true,
+        () = cancel.cancelled() => false,
     };
     let Some(inner) = server.upgrade() else {
         return;
     };
+    let error = if timed_out {
+        AppError::service_unavailable(no_show_message(peer, inner.refused_since(armed_at)))
+    } else {
+        cancelled()
+    };
     if let Some(pending) = inner.take(peer, id) {
         let _ = pending.report.send(Err(error));
+    }
+}
+
+/// Mensagem de quem foi armado e não conectou. Se outro IP bateu na porta
+/// durante a janela, quase sempre é o próprio equipamento atrás de NAT — dizer
+/// isso poupa o operador de caçar firewall que não existe.
+fn no_show_message(peer: IpAddr, refused: Option<IpAddr>) -> String {
+    match refused {
+        Some(other) => format!(
+            "O equipamento {peer} não conectou ao servidor btest dentro do prazo. Uma conexão \
+             chegou de {other}, que não é o IP cadastrado: há NAT entre o equipamento e o \
+             servidor? Cadastre o IP pelo qual o servidor vê o equipamento ou rode o teste \
+             sem NAT no caminho"
+        ),
+        None => format!(
+            "O equipamento {peer} não conectou ao servidor btest dentro do prazo: confira se \
+             ele alcança o servidor na porta TCP do btest (firewall, rota) e o endereço do \
+             servidor em Configurações"
+        ),
     }
 }
 
@@ -343,6 +387,7 @@ async fn accept_loop(listener: TcpListener, server: Weak<Inner>, shutdown: Cance
                 // Fechar sem dizer nada: quem não foi armado não sabe nem que
                 // isto é um btest.
                 tracing::debug!(%peer, "btest: conexão sem sessão armada recusada");
+                inner.remember_refused(peer);
                 drop(stream);
             }
         }

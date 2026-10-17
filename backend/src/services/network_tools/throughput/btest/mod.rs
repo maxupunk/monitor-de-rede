@@ -263,7 +263,12 @@ mod tests {
             .expect_err("outro IP");
         assert!(matches!(err, AppError::ServiceUnavailable(_)));
         let expirou = session.outcome.wait().await.expect_err("ninguém conectou");
-        assert!(matches!(&expirou, AppError::ServiceUnavailable(m) if m.contains("prazo")));
+        // A recusa continua; o diagnóstico aponta o IP que chegou (NAT?).
+        assert!(
+            matches!(&expirou, AppError::ServiceUnavailable(m)
+                if m.contains("prazo") && m.contains("127.0.0.1") && m.contains("NAT")),
+            "{expirou:?}"
+        );
     }
 
     #[tokio::test]
@@ -274,7 +279,8 @@ mod tests {
             .expect("armado");
         let err = session.outcome.wait().await.expect_err("expirou");
         assert!(
-            matches!(&err, AppError::ServiceUnavailable(m) if m.contains("prazo")),
+            matches!(&err, AppError::ServiceUnavailable(m)
+                if m.contains("prazo") && m.contains("firewall") && !m.contains("NAT")),
             "{err:?}"
         );
         assert!(client(&server, &spec(TestDirection::Send), None)
