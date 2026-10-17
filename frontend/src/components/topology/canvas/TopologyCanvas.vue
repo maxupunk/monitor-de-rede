@@ -293,6 +293,19 @@ function updateAnts() {
 
 // --- Cabo em andamento (modo conectar) -------------------------------------------
 
+/** Destino válido sob o cursor enquanto se puxa o cabo. */
+let connectTarget: NodeSingular | null = null
+
+function markConnectTarget(ele: NodeSingular | EdgeSingular) {
+  if (props.connectSourceId === null || !ele.isNode()) return
+  const node = ele as NodeSingular
+  const parsed = parseElementId(node.id())
+  if (!isDeviceNode(node) || parsed?.kind !== 'node' || parsed.id === props.connectSourceId) return
+  connectTarget = node
+  node.addClass('connect-target')
+  updateGhost({ ...node.position() })
+}
+
 function updateGhost(position?: TopologyPosition) {
   const core = cy.value
   if (!core) return
@@ -301,7 +314,8 @@ function updateGhost(position?: TopologyPosition) {
   if (sourceId === null) {
     core.remove(core.getElementById(GHOST_EDGE))
     core.remove(ghostNode)
-    core.nodes('.connect-source').removeClass('connect-source')
+    core.nodes('.connect-source, .connect-target').removeClass('connect-source connect-target')
+    connectTarget = null
     return
   }
   const source = core.getElementById(`n${sourceId}`)
@@ -369,6 +383,7 @@ async function init() {
     const ele = event.target as NodeSingular | EdgeSingular
     if (ele.id().startsWith('__') || ele.hasClass('site-group')) return
     ele.addClass('hover')
+    markConnectTarget(ele)
     const parsed = parseElementId(ele.id())
     if (!parsed || parsed.kind === 'site') return
     const rect = container.value?.getBoundingClientRect()
@@ -382,11 +397,14 @@ async function init() {
     })
   })
   core.on('mouseout', 'node, edge', (event) => {
-    ;(event.target as NodeSingular | EdgeSingular).removeClass('hover')
+    ;(event.target as NodeSingular | EdgeSingular).removeClass('hover connect-target')
+    if (connectTarget === event.target) connectTarget = null
     emit('hover', null)
   })
   core.on('mousemove', (event) => {
-    if (props.connectSourceId !== null) updateGhost({ ...event.position })
+    if (props.connectSourceId === null) return
+    // Sobre um destino válido, o cabo "encaixa" no centro dele.
+    updateGhost(connectTarget ? { ...connectTarget.position() } : { ...event.position })
   })
 
   core.on('grab', 'node', () => {

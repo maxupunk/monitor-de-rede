@@ -275,6 +275,12 @@ export function buildStylesheet(p: TopologyPalette = FALLBACK): StylesheetJson {
       'underlay-opacity': 0.55,
       'underlay-padding': 12,
     }),
+    // Destino válido sob o cursor durante o "puxar cabo".
+    block('node.connect-target', {
+      'underlay-color': p.success,
+      'underlay-opacity': 0.55,
+      'underlay-padding': 12,
+    }),
 
     // Grupo por site (nó composto)
     block('node.site-group', {
@@ -382,8 +388,11 @@ export function buildStylesheet(p: TopologyPalette = FALLBACK): StylesheetJson {
       width: 3,
       'target-arrow-shape': 'triangle',
       'target-arrow-color': p.secondary,
+      // O fantasma fica sob o cursor: não pode roubar o clique nem o hover
+      // do dispositivo de destino.
+      events: 'no',
     }),
-    block('node.ghost', { width: 1, height: 1, opacity: 0, label: '' }),
+    block('node.ghost', { width: 1, height: 1, opacity: 0, label: '', events: 'no' }),
 
     // Filtro
     block('.filtered-dimmed', { opacity: 0.14 }),
