@@ -207,6 +207,7 @@ impl BtestServer {
             },
             cancel,
             id,
+            armed_at: Instant::now(),
             server: Arc::downgrade(&self.inner),
         })
     }
@@ -248,10 +249,22 @@ pub struct ArmedSession {
     pub outcome: SessionOutcome,
     cancel: CancellationToken,
     id: u64,
+    armed_at: Instant,
     server: Weak<Inner>,
 }
 
 impl ArmedSession {
+    /// IP de uma conexão recusada desde que a sessão foi armada — quase
+    /// sempre o próprio equipamento chegando por NAT. Só diagnóstico: a
+    /// recusa continua valendo.
+    #[must_use]
+    pub fn stray_peer(&self) -> Option<IpAddr> {
+        self.server
+            .upgrade()
+            .and_then(|inner| inner.refused_since(self.armed_at))
+            .filter(|ip| *ip != self.peer)
+    }
+
     /// Cancela: desarma se ainda não conectou, ou interrompe o teste.
     pub fn cancel(&self) {
         self.cancel.cancel();

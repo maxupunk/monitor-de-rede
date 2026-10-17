@@ -92,7 +92,6 @@ pub(super) async fn run(
         writer,
         WriteSide {
             send: plan.send,
-            receive: plan.receive,
             block: plan.block,
             pace_bps: plan.pace_bps,
         },
@@ -123,8 +122,15 @@ pub(super) async fn run(
     if was_cancelled {
         return Err(cancelled());
     }
+    // O que saiu do socket não é o que chegou (fica no buffer): quando o par
+    // informa o que recebeu, é essa a medida de quem transmite.
+    let sent = if scanner.peer_received > 0 {
+        scanner.peer_received
+    } else {
+        sent.get()
+    };
     Ok(DuplexOutcome {
-        sent: sent.get(),
+        sent,
         received: received.get().saturating_sub(scanner.control_bytes()),
         elapsed,
         samples,
@@ -160,7 +166,6 @@ async fn read_loop(
 
 struct WriteSide {
     send: bool,
-    receive: bool,
     block: usize,
     pace_bps: Option<u64>,
 }
@@ -178,7 +183,7 @@ async fn write_loop(
     let mut seq: u32 = 0;
     let mut reported = 0u64;
     loop {
-        if side.receive && Instant::now() >= next_status {
+        if Instant::now() >= next_status {
             seq = seq.wrapping_add(1);
             let total = received.get();
             let status = Status {

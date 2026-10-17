@@ -718,11 +718,19 @@ async fn mikrotik_disca_no_btest_armado_da_central() {
     // O MikroTik (B) dirige: o que ele envia é B→A.
     assert!(leg.forward_bps.unwrap() > 0.0);
     assert!(leg.reverse_bps.unwrap() > 0.0);
+    // Um sentido por vez (o "both" em TCP não devolve o envio num RouterOS
+    // real), cada um numa sessão armada nova da central.
     let runs = plugins.calls("tp_run");
-    assert_eq!(runs.len(), 1, "btest: os dois sentidos numa chamada");
-    assert_eq!(runs[0].1["direction"], "both");
-    assert_eq!(runs[0].1["target"], "127.0.0.1");
-    assert_eq!(runs[0].1["port"], server.local_addr().port());
+    assert_eq!(runs.len(), 2, "btest: um sentido por chamada");
+    let directions: Vec<&str> = runs
+        .iter()
+        .map(|run| run.1["direction"].as_str().unwrap_or_default())
+        .collect();
+    assert!(directions.contains(&"send") && directions.contains(&"receive"));
+    for run in &runs {
+        assert_eq!(run.1["target"], "127.0.0.1");
+        assert_eq!(run.1["port"], server.local_addr().port());
+    }
     assert!(
         plugins.calls("tp_serve").is_empty(),
         "a central serve, não o plugin"
@@ -732,7 +740,8 @@ async fn mikrotik_disca_no_btest_armado_da_central() {
         stage(LinkTestStageKey::Stop).status,
         LinkTestStepStatus::Succeeded
     );
-    assert_eq!(
+    // Cada sentido tem a sua execução (e o seu transcript).
+    assert_ne!(
         stage(LinkTestStageKey::Forward).run_id,
         stage(LinkTestStageKey::Reverse).run_id
     );

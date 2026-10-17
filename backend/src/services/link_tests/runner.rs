@@ -228,6 +228,39 @@ struct Measured {
     retransmits: Option<u64>,
 }
 
+impl Measured {
+    /// Nenhum sentido passou um bit: o motor "terminou" sem medir (o RouterOS
+    /// imprime médias zeradas quando nem conecta).
+    fn is_empty(&self) -> bool {
+        ![self.tx_bps, self.rx_bps]
+            .into_iter()
+            .flatten()
+            .any(|bps| bps > 0.0)
+    }
+}
+
+/// Medida de um `run` de plugin que terminou bem — zerada é falha.
+fn measured_from_run(output: Option<Value>) -> Result<Measured, StageError> {
+    let measured = parse_report(output);
+    if measured.is_empty() {
+        Err(StageError::Failed(
+            "o equipamento terminou o teste sem medir nada (nenhum byte passou)".to_owned(),
+        ))
+    } else {
+        Ok(measured)
+    }
+}
+
+/// O equipamento armado não conectou, mas outro IP bateu na porta do btest
+/// durante a janela.
+fn nat_message(expected: std::net::IpAddr, stray: std::net::IpAddr) -> String {
+    format!(
+        "O equipamento não conectou ao servidor btest da central como {expected}: a conexão \
+         chegou de {stray}. Há NAT entre ele e a central — cadastre o IP pelo qual a central o \
+         vê ({stray}) ou rode o teste sem NAT no caminho"
+    )
+}
+
 /// O relatório que o `run` de um plugin devolve, lido com tolerância.
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -816,31 +849,49 @@ impl Job {
                 );
             }
         }
-        // O btest mede os dois sentidos ao mesmo tempo, numa chamada só.
-        if n.engine == ThroughputEngine::Btest && flows.len() == 2 {
-            if !self.cancelled() {
-                self.measure_call(
-                    idx,
-                    planned,
-                    n,
-                    served,
-                    target,
-                    auth,
-                    TestDirection::Both,
-                    &flows,
-                )
-                .await;
-            }
-            return;
-        }
-        for flow in flows {
+        // Um sentido por vez, em todo motor. O btest até aceita os dois ao
+        // mesmo tempo, mas num RouterOS real o "both" em TCP não devolve o
+        // envio (tx 0) — e um sentido de cada vez mede melhor roteador de CPU
+        // fraca, sem um sentido roubar CPU do outro.
+        for (index, flow) in flows.into_iter().enumerate() {
             if self.cancelled() {
                 return;
+            }
+            // A sessão armada da central é de uso único: o segundo sentido
+            // arma outra para o mesmo equipamento.
+            if index > 0 {
+                if let Err(message) = self.rearm(served) {
+                    self.set(
+                        idx,
+                        LinkTestStageKey::of_flow(flow),
+                        LinkTestStepStatus::Failed,
+                        Some(message),
+                    );
+                    continue;
+                }
             }
             let direction = driver_direction(n.driver(), flow);
             self.measure_call(idx, planned, n, served, target, auth, direction, &[flow])
                 .await;
         }
+    }
+
+    /// Troca a sessão btest já usada por uma nova, para o mesmo IP. Outros
+    /// servidores (plugin) atendem várias medidas e ficam como estão.
+    fn rearm(&self, served: &mut Served) -> Result<(), String> {
+        let Served::Armed(previous) = served else {
+            return Ok(());
+        };
+        let peer = previous.peer;
+        // Desarma antes: o mesmo IP não pode ter duas sessões armadas.
+        *served = Served::Nothing;
+        let session = self
+            .env
+            .btest
+            .arm(peer, btest::DEFAULT_ARM_TTL)
+            .map_err(|error| error.to_string())?;
+        *served = Served::Armed(session);
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -931,7 +982,7 @@ impl Job {
                     drain(forwarder).await;
                     match result {
                         Ok(run) if run.status == RunStatus::Succeeded => {
-                            Ok(parse_report(run.output))
+                            measured_from_run(run.output)
                         }
                         Ok(run) => Err(StageError::from_outcome(&run, "A medida")),
                         Err(error) => Err(StageError::from_error(&error)),
@@ -1078,13 +1129,23 @@ impl Job {
         };
         let (plugin, server) = tokio::join!(plugin, session.outcome.wait());
         drain(forwarder).await;
+        if server.is_err() {
+            // Ninguém conectou ao servidor armado. Se uma conexão chegou de
+            // outro IP na janela, é o equipamento atrás de NAT: dizer isso
+            // vale mais que qualquer número que o plugin tenha impresso.
+            if let Some(stray) = session.stray_peer() {
+                return Err(StageError::Failed(nat_message(session.peer, stray)));
+            }
+        }
         match (server, plugin) {
             (Ok(report), _) => Ok(Measured {
                 tx_bps: report.tx_bps,
                 rx_bps: report.rx_bps,
                 retransmits: report.retransmits,
             }),
-            (Err(_), Ok(run)) if run.status == RunStatus::Succeeded => Ok(parse_report(run.output)),
+            (Err(error), Ok(run)) if run.status == RunStatus::Succeeded => {
+                measured_from_run(run.output).map_err(|_| StageError::from_error(&error))
+            }
             (Err(_), Ok(run)) => Err(StageError::from_outcome(&run, "A medida")),
             (Err(_), Err(error)) => Err(StageError::from_error(&error)),
         }

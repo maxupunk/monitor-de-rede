@@ -129,8 +129,14 @@ impl Command {
     }
 }
 
-/// Mensagem de estado: `07`, sequência u32 **BE**, 3 bytes zerados, bytes
-/// recebidos no intervalo u32 **LE** (assim no `btest-opensource`).
+/// Flag do byte 1 do estado: "carga de CPU válida" (os 7 bits de baixo são a
+/// carga em %). O RouterOS **derruba a conexão** se ela faltar.
+const STATUS_CPU_VALID: u8 = 0x80;
+
+/// Mensagem de estado, como o RouterOS 7 a manda em TCP (capturada de um
+/// RouterOS 7.23.8 real): `07`, `80 | cpu%`, `00 00`, sequência u32 **LE**,
+/// bytes recebidos no último segundo u32 **LE**. Os dois lados mandam uma
+/// por segundo; quem transmite lê no estado do par quanto de fato chegou.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Status {
     pub seq: u32,
@@ -141,14 +147,15 @@ impl Status {
     pub(super) fn encode(&self) -> [u8; STATUS_LEN] {
         let mut buf = [0u8; STATUS_LEN];
         buf[0] = STATUS_ID;
-        buf[1..5].copy_from_slice(&self.seq.to_be_bytes());
+        buf[1] = STATUS_CPU_VALID;
+        buf[4..8].copy_from_slice(&self.seq.to_le_bytes());
         buf[8..12].copy_from_slice(&self.received.to_le_bytes());
         buf
     }
 
     pub(super) fn decode(buf: &[u8; STATUS_LEN]) -> Option<Self> {
         (buf[0] == STATUS_ID).then(|| Self {
-            seq: u32::from_be_bytes([buf[1], buf[2], buf[3], buf[4]]),
+            seq: u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]),
             received: u32::from_le_bytes([buf[8], buf[9], buf[10], buf[11]]),
         })
     }
@@ -308,8 +315,35 @@ mod tests {
                 received: 0x0003_6e36
             }
         );
-        assert_eq!(status.encode(), buf);
         assert_eq!(Status::decode(&[0u8; STATUS_LEN]), None);
+    }
+
+    #[test]
+    fn estado_do_routeros_7_real() {
+        // Capturado de um RouterOS 7.23.8 recebendo a 109 Mbit/s: CPU 4 %
+        // (`84`), sequência 1 LE, 0x00d02c60 = 13 642 848 bytes no segundo.
+        let mut buf = [0u8; STATUS_LEN];
+        buf.copy_from_slice(&hex("0784000001000000602cd000"));
+        let status = Status::decode(&buf).expect("estado");
+        assert_eq!(
+            status,
+            Status {
+                seq: 1,
+                received: 13_642_848
+            }
+        );
+        // Sequência acima de 255 deixa claro que é LE nos bytes 4–7.
+        let mut buf = [0u8; STATUS_LEN];
+        buf.copy_from_slice(&hex("07a6000002010000a0d3b901"));
+        assert_eq!(Status::decode(&buf).expect("estado").seq, 0x0102);
+        // O que mandamos leva a flag de CPU — sem ela o RouterOS desconecta.
+        let ours = Status {
+            seq: 300,
+            received: 5,
+        }
+        .encode();
+        assert_eq!(ours[1] & 0x80, 0x80);
+        assert_eq!(Status::decode(&ours).expect("estado").seq, 300);
     }
 
     #[test]

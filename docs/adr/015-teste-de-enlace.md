@@ -277,6 +277,29 @@ no menu de contexto do nó dos dispositivos onde o plugin está instalado, com
 o mesmo diálogo de execução de sempre. O teste de enlace é nativo da
 topologia (menu do enlace, do nó e da barra), alimentado pelos papéis do §3.
 
+### 8. Validação num RouterOS real (adendo, 2026-10-17)
+
+Com um RouterOS CHR 7.23.8 de verdade (o `bandwidth-test` do próprio
+RouterOS como cliente, um servidor de teste do nosso lado):
+
+- **Formato do estado em TCP**, capturado do RouterOS: `07`, `80 | cpu%`,
+  `00 00`, sequência u32 **LE** (bytes 4–7), bytes recebidos no último
+  segundo u32 **LE** (bytes 8–11). Os dois lados mandam um por segundo. A
+  versão anterior (do `btest-opensource`, que só implementa o estado em UDP)
+  mandava `00` no byte 1: o RouterOS **derrubava a conexão** ao transmitir.
+- Quem transmite mede pelo estado do par (o que de fato chegou), não pelo que
+  escreveu no socket — o buffer inflava o número.
+- O **"both" simultâneo em TCP** não devolve o envio no RouterOS (tx 0 com
+  qualquer posição do estado no fluxo). O teste mede **um sentido por vez**,
+  como no iperf3; a sessão armada da central é rearmada entre os sentidos.
+- O RouterOS imprime médias **zeradas** quando nem conecta (`status: can not
+  connect`): o plugin decide pelo status final, e o orquestrador nunca aceita
+  uma medida zerada como sucesso.
+- Sem autenticação, o plugin restringe o `bandwidth-server` ao IP do par
+  (`allowed-addresses4`, RouterOS 7) durante a janela, e restaura no `stop`.
+- Medido: central→MikroTik 42,7 Mbit/s (o RouterOS viu 45,1); MikroTik→central
+  1,20 Mbit/s (o RouterOS viu 1,26) — CHR emulado, sem KVM.
+
 ## Consequências
 
 - Porta nova publicada na central (2000/TCP), fechada a quem não tem sessão
