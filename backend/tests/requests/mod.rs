@@ -45,6 +45,7 @@ mod docker;
 mod fake_ollaya;
 mod health_rules;
 mod interface_duplicate_merge;
+mod link_tests;
 mod local_agent;
 mod maintenance_windows;
 mod monitor_interface_binding;

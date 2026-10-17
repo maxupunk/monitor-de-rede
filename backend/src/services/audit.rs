@@ -92,6 +92,9 @@ pub enum ResourceType {
     Storage,
     DatabaseConnection,
     Backup,
+    /// Teste de enlace (ADR 015).
+    LinkTest,
+    LinkTestSchedule,
 }
 
 impl ResourceType {
@@ -116,6 +119,8 @@ impl ResourceType {
             ResourceType::Storage => "storage",
             ResourceType::DatabaseConnection => "database_connection",
             ResourceType::Backup => "backup",
+            ResourceType::LinkTest => "link_test",
+            ResourceType::LinkTestSchedule => "link_test_schedule",
         }
     }
 }
@@ -149,6 +154,8 @@ impl std::str::FromStr for ResourceType {
             "storage" => Ok(ResourceType::Storage),
             "database_connection" | "databaseconnection" => Ok(ResourceType::DatabaseConnection),
             "backup" => Ok(ResourceType::Backup),
+            "link_test" | "linktest" => Ok(ResourceType::LinkTest),
+            "link_test_schedule" | "linktestschedule" => Ok(ResourceType::LinkTestSchedule),
             _ => Err(AppError::validation(format!(
                 "Tipo de recurso inválido: {s}"
             ))),

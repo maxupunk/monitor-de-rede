@@ -4,12 +4,18 @@ use chrono::Utc;
 use loco_rs::app::AppContext;
 
 use super::cadence::{
-    is_due, DATA_PRUNE_INTERVAL_SECONDS, ROLLUP_INTERVAL_SECONDS, VPN_STATUS_INTERVAL_SECONDS,
-    VPN_TRAFFIC_INTERVAL_SECONDS,
+    is_due, DATA_PRUNE_INTERVAL_SECONDS, LINK_TEST_SCHEDULES_INTERVAL_SECONDS,
+    ROLLUP_INTERVAL_SECONDS, VPN_STATUS_INTERVAL_SECONDS, VPN_TRAFFIC_INTERVAL_SECONDS,
 };
 use crate::services::{
-    alerts::hysteresis, maintenance::data_pruner, monitoring::rollup, notifications::outbox,
-    shared::errors::AppResult, syslog, vpn::traffic_recorder,
+    alerts::hysteresis,
+    link_tests::{schedules as link_test_schedules, LinkTestEnv},
+    maintenance::data_pruner,
+    monitoring::rollup,
+    notifications::outbox,
+    shared::errors::AppResult,
+    syslog,
+    vpn::traffic_recorder,
 };
 
 /// Sincroniza o status (10s) e histórico (30s) do tráfego dos túneis VPN.
@@ -57,6 +63,7 @@ pub async fn run_data_pruner_if_due(ctx: &AppContext) -> AppResult<()> {
             telemetria = stats.telemetry_deleted,
             auditoria = stats.audit_deleted,
             plugins = stats.plugin_runs_deleted,
+            testes_de_enlace = stats.link_tests_deleted,
             "purga de dados antigos executada"
         );
     }
@@ -100,6 +107,26 @@ pub async fn rollup_monitor_results_if_due(ctx: &AppContext) -> AppResult<()> {
             apagadas = stats.rows_deleted,
             "rollup de resultados de monitoramento executado"
         );
+    }
+    Ok(())
+}
+
+/// Dispara os agendamentos de teste de enlace vencidos (ADR 015 §5).
+///
+/// Confere a cada minuto; o teste em si roda em segundo plano, com a mesma
+/// trava de concorrência dos testes pedidos pela tela.
+pub async fn run_link_test_schedules_if_due(ctx: &AppContext) -> AppResult<()> {
+    let now = Utc::now();
+    if !is_due(
+        "link_test_schedules",
+        LINK_TEST_SCHEDULES_INTERVAL_SECONDS,
+        now,
+    ) {
+        return Ok(());
+    }
+    let started = link_test_schedules::run_due(LinkTestEnv::from_context(ctx), now).await?;
+    if started > 0 {
+        tracing::info!(started, "agendamentos de teste de enlace disparados");
     }
     Ok(())
 }

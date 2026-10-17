@@ -277,6 +277,7 @@ pub struct TopologySpec {
 /// Motor de teste de vazão que um plugin sabe hospedar ou dirigir (ADR 015) —
 /// o mesmo tipo dos motores nativos: um vocabulário só.
 pub use crate::services::network_tools::throughput::ThroughputEngine;
+use crate::services::network_tools::throughput::{MAX_DURATION_S, MIN_DURATION_S};
 
 /// Um motor que o equipamento hospeda (é o servidor do teste).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -300,6 +301,11 @@ pub struct ThroughputDrive {
     /// `mikrotik-btest` do OpenWrt, os clientes nativos).
     #[serde(default = "yes")]
     pub auth: bool,
+    /// Teto do cliente por sentido, em segundos (1–60): o `mikrotik-btest`
+    /// recusa `-t` ≥ 30 e declara `29`. O plano limita a duração e avisa.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub max_duration_s: Option<u8>,
 }
 
 /// As ações do manifesto que cumprem cada papel.
@@ -854,6 +860,15 @@ fn validate_throughput(
     let drive: HashSet<_> = roles.drive.iter().map(|drive| drive.engine).collect();
     if serve.len() != roles.serve.len() || drive.len() != roles.drive.len() {
         problems.push("`throughput` repete motor em `serve` ou em `drive`".into());
+    }
+    if roles.drive.iter().any(|drive| {
+        drive
+            .max_duration_s
+            .is_some_and(|max| !(MIN_DURATION_S..=MAX_DURATION_S).contains(&max))
+    }) {
+        problems.push(format!(
+            "`throughput.drive[].maxDurationS` precisa ficar entre {MIN_DURATION_S} e {MAX_DURATION_S} segundos"
+        ));
     }
     let actions = &roles.actions;
     let (serves, drives) = (!roles.serve.is_empty(), !roles.drive.is_empty());
@@ -1465,6 +1480,33 @@ mod tests {
         let roles = manifesto.throughput.unwrap();
         assert!(roles.drive[0].auth, "auth é verdadeiro por padrão");
         assert_eq!(roles.serve[0].engine, ThroughputEngine::Btest);
+    }
+
+    #[test]
+    fn teto_de_duracao_do_cliente_e_validado() {
+        let mut manifesto = com_teste_de_enlace();
+        let drive = &mut manifesto.throughput.as_mut().unwrap().drive[0];
+        assert_eq!(drive.max_duration_s, None, "opcional");
+        drive.max_duration_s = Some(29);
+        assert!(
+            validate(&manifesto).is_empty(),
+            "{:?}",
+            validate(&manifesto)
+        );
+        let lido: ThroughputDrive =
+            serde_json::from_value(json!({ "engine": "btest", "auth": false, "maxDurationS": 29 }))
+                .unwrap();
+        assert_eq!(lido.max_duration_s, Some(29));
+        assert!(!lido.auth);
+        for fora in [0, 61] {
+            manifesto.throughput.as_mut().unwrap().drive[0].max_duration_s = Some(fora);
+            assert!(
+                validate(&manifesto)
+                    .iter()
+                    .any(|p| p.contains("`throughput.drive[].maxDurationS`")),
+                "{fora}"
+            );
+        }
     }
 
     #[test]

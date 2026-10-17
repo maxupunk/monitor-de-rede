@@ -155,6 +155,7 @@ services/
 ├── vendors/        fabricante por MAC: registro do IEEE (`oui_vendors`) + base embutida
 ├── snmp/           sessões, coletores, perfis
 ├── topology/       ligações e confiança
+├── link_tests/     teste de enlace (ADR 015): plano, negociação de motor, pernas e etapas, agendamentos
 ├── alerts/         datasets → evaluator → manager (+ catalog, recovery, repository)
 ├── notifications/  channels/ (telegram, discord, webhook, email) + formatter
 ├── probes/         agent, dispatcher, receiver, liveness, buffer
@@ -425,6 +426,15 @@ POST /api/topology/recalculate             GET  /api/topology/path?from=&to=
 GET|PUT|PATCH /api/topology/layout?siteId=   (PATCH funde só os nós enviados)
      (SSE: topology:updated, topology:layout_updated {siteId}; aresta com
       id negativo = hierarquia parentId, -id do filho)
+
+POST /api/link-tests/plan                  POST /api/link-tests  (confirm: true → 202 {id})
+GET  /api/link-tests?deviceId=&linkId=&status=&kind=&since=&page=&perPage=
+GET  /api/link-tests/{id}  (com amostras)  POST /api/link-tests/{id}/cancel
+GET|POST /api/link-test-schedules          GET|PUT|DELETE /api/link-test-schedules/{id}
+POST /api/link-test-schedules/{id}/run
+     (SSE: link_test:updated — snapshot enquanto roda —, link_test:sample,
+      link_test_schedule:updated {id}; escrita é de operator/admin; 409 com
+      dispositivo já em teste ou 2 testes no sistema)
 
 GET|POST /api/probes                       GET|PUT|DELETE /api/probes/{id}
 POST     /api/probes/{id}/revoke | /test

@@ -88,7 +88,12 @@ pub const BACKED_UP_TABLES: [&str; 12] = [
 /// id que passou a ser de outro equipamento — um gráfico de tráfego com os
 /// dados do vizinho. As FKs `CASCADE` resolveriam isso no PostgreSQL, mas o
 /// SQLite só as aplica com `foreign_keys=ON`; limpar à mão vale nos dois.
-const DEPENDENT_HISTORY: [&str; 13] = [
+const DEPENDENT_HISTORY: [&str; 16] = [
+    // Teste de enlace: pernas, testes e agendamentos citam ids de
+    // equipamentos e de enlaces que a restauração substitui.
+    "link_test_legs",
+    "link_tests",
+    "link_test_schedules",
     // Plugins de dispositivo: credenciais, execuções e aceites do modo
     // automático pertencem a um equipamento que a restauração substitui.
     "plugin_batches",

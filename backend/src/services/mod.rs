@@ -15,6 +15,7 @@ pub mod devices;
 pub mod discovery;
 pub mod docker;
 pub mod events;
+pub mod link_tests;
 pub mod maintenance;
 pub mod maintenance_windows;
 pub mod monitoring;

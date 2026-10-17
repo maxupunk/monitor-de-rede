@@ -47,6 +47,9 @@ pub const DEFAULT_RETENTION_AUDIT_DAYS: i64 = 365;
 /// Execuções de plugin terminadas, com a transcrição do acesso ao
 /// equipamento: o mesmo prazo do histórico de incidentes.
 pub const DEFAULT_RETENTION_PLUGIN_RUNS_DAYS: i64 = 90;
+/// Testes de enlace terminados (com pernas e amostras): o mesmo prazo das
+/// execuções de plugin que cada etapa gerou.
+pub const DEFAULT_RETENTION_LINK_TESTS_DAYS: i64 = 90;
 const DELETE_BATCH_SIZE: u64 = 10_000;
 /// Folga entre lotes. No SQLite há um escritor só: sem ela, a purga de uma
 /// tabela grande segura o lock em sequência e a coleta, o syslog e as telas
@@ -65,6 +68,7 @@ pub struct PruneStats {
     pub telemetry_deleted: u64,
     pub audit_deleted: u64,
     pub plugin_runs_deleted: u64,
+    pub link_tests_deleted: u64,
 }
 
 impl PruneStats {
@@ -79,6 +83,7 @@ impl PruneStats {
             + self.telemetry_deleted
             + self.audit_deleted
             + self.plugin_runs_deleted
+            + self.link_tests_deleted
     }
 }
 
@@ -204,6 +209,16 @@ pub async fn prune_all<C: ConnectionTrait>(db: &C) -> AppResult<PruneStats> {
     )
     .await?;
 
+    // Teste em curso não tem `finished_at` e nunca envelhece.
+    let link_tests_deleted = crate::services::link_tests::repository::prune(
+        db,
+        cutoff(
+            "RETENTION_LINK_TESTS_DAYS",
+            DEFAULT_RETENTION_LINK_TESTS_DAYS,
+        ),
+    )
+    .await?;
+
     Ok(PruneStats {
         outbox_deleted,
         results_deleted,
@@ -214,6 +229,7 @@ pub async fn prune_all<C: ConnectionTrait>(db: &C) -> AppResult<PruneStats> {
         telemetry_deleted,
         audit_deleted,
         plugin_runs_deleted,
+        link_tests_deleted,
     })
 }
 
@@ -298,8 +314,9 @@ mod tests {
             telemetry_deleted: 7,
             audit_deleted: 8,
             plugin_runs_deleted: 9,
+            link_tests_deleted: 10,
         };
-        assert_eq!(stats.total(), 45);
+        assert_eq!(stats.total(), 55);
         assert_eq!(PruneStats::default().total(), 0);
     }
 

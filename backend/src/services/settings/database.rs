@@ -16,9 +16,10 @@ use crate::{
     models::{
         _entities::{
             alert_events, alert_rules, device_interfaces, device_links, devices, discovery_results,
-            discovery_runs, dns_servers, event_outbox, maintenance_windows, metrics,
-            monitor_results, monitor_results_hourly, monitors, networks, notification_outbox,
-            probe_tasks, probes, sites, vpn_peers, vpn_servers,
+            discovery_runs, dns_servers, event_outbox, link_test_legs, link_test_schedules,
+            link_tests, maintenance_windows, metrics, monitor_results, monitor_results_hourly,
+            monitors, networks, notification_outbox, probe_tasks, probes, sites, vpn_peers,
+            vpn_servers,
         },
         logs::device_logs,
     },
@@ -181,7 +182,20 @@ pub async fn clear_all_items(
 
     let mut total_deleted = 0u64;
 
-    // 1. Histórico e telemetria dependente (filhos antes de pais)
+    // 1. Histórico e telemetria dependente (filhos antes de pais). Os testes
+    // de enlace citam equipamentos e enlaces que somem logo abaixo.
+    total_deleted += link_test_legs::Entity::delete_many()
+        .exec(&txn)
+        .await?
+        .rows_affected;
+    total_deleted += link_tests::Entity::delete_many()
+        .exec(&txn)
+        .await?
+        .rows_affected;
+    total_deleted += link_test_schedules::Entity::delete_many()
+        .exec(&txn)
+        .await?
+        .rows_affected;
     total_deleted += probe_tasks::Entity::delete_many()
         .exec(&txn)
         .await?

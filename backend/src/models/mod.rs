@@ -16,6 +16,9 @@ pub mod discovery_runs;
 pub mod dns_servers;
 pub mod event_outbox;
 pub mod host_metrics_1m;
+pub mod link_test_legs;
+pub mod link_test_schedules;
+pub mod link_tests;
 /// Entidades do banco de logs, separado do principal.
 pub mod logs;
 pub mod maintenance_windows;

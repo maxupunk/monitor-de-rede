@@ -10,7 +10,7 @@ pub use cadence::{
 };
 pub use maintenance_runner::{
     dispatch_notifications, rollup_monitor_results_if_due, run_data_pruner_if_due,
-    sync_vpn_traffic_if_due,
+    run_link_test_schedules_if_due, sync_vpn_traffic_if_due,
 };
 pub use monitor_executor::{execute_one, run_local_confirming_failure, MAX_RETRIES};
 pub use snmp_group_executor::{

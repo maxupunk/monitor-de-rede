@@ -9,4 +9,9 @@ export type ThroughputDrive = { engine: ThroughputEngine,
  * `false`: o cliente só fala com servidor sem autenticação (o
  * `mikrotik-btest` do OpenWrt, os clientes nativos).
  */
-auth: boolean, };
+auth: boolean, 
+/**
+ * Teto do cliente por sentido, em segundos (1–60): o `mikrotik-btest`
+ * recusa `-t` ≥ 30 e declara `29`. O plano limita a duração e avisa.
+ */
+maxDurationS?: number, };

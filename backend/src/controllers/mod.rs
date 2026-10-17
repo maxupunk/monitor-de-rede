@@ -15,6 +15,7 @@ pub mod dns;
 pub mod dns_servers;
 pub mod docker;
 pub mod events;
+pub mod link_tests;
 pub mod logs;
 pub mod maintenance_windows;
 pub mod monitors;
