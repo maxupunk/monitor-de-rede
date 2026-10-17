@@ -21,7 +21,7 @@ export interface LinkTestTargetDraft {
 }
 
 export const READ_ONLY_TEST_REASON =
-  'Seu perfil é somente leitura: você vê o plano, mas só um operador ou administrador inicia o teste.'
+  'Seu perfil é somente leitura: só um operador ou administrador planeja e inicia testes de velocidade.'
 
 function id(value: number | null | undefined): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
@@ -136,4 +136,19 @@ export function issueHint(
 /** Todas as pontas do plano (para achar o equipamento citado num problema). */
 export function planEndpoints(plan: Pick<LinkTestPlan, 'legs'>): LinkTestEndpoint[] {
   return plan.legs.flatMap((leg) => [leg.a, leg.b])
+}
+
+/**
+ * Subtítulo do enlace na lista do assistente: as portas (quando o mapa as
+ * conhece) e a velocidade. Enlace manual, sem nenhum dos dois, diz isso em vez
+ * de "? ↔ ?".
+ */
+export function linkOptionSubtitle(
+  sourcePort: string | null | undefined,
+  targetPort: string | null | undefined,
+  speed: string | null
+): string {
+  const ports = sourcePort || targetPort ? `${sourcePort || '?'} ↔ ${targetPort || '?'}` : null
+  const parts = [ports, speed].filter((part): part is string => Boolean(part))
+  return parts.length > 0 ? parts.join(' · ') : 'Portas não identificadas'
 }

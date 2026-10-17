@@ -32,6 +32,8 @@ use crate::{
 const LEG_OVERHEAD_S: u32 = 4;
 /// Folga de um `prepare` (pode instalar pacote).
 const PREPARE_S: u32 = 20;
+/// Folga de um `prepare` que só confere (`prepareChecksOnly`).
+const CHECK_S: u32 = 2;
 /// Folga de `serve` + `stop` num equipamento.
 const SERVE_STOP_S: u32 = 8;
 /// Folga de cada medida (abertura e relatório).
@@ -327,14 +329,18 @@ fn estimated_seconds(leg: &PlannedLeg, spec: &LinkTestSpec) -> u32 {
     let Some(n) = leg.negotiation.as_ref().filter(|_| leg.view.runnable) else {
         return 0;
     };
-    let prepares = [&leg.a, &leg.b]
+    let prepare_s: u32 = [&leg.a, &leg.b]
         .into_iter()
-        .filter(|endpoint| {
-            endpoint
-                .plugin()
-                .is_some_and(|plugin| plugin.roles.actions.prepare.is_some())
+        .filter_map(|endpoint| endpoint.plugin())
+        .filter(|plugin| plugin.roles.actions.prepare.is_some())
+        .map(|plugin| {
+            if plugin.roles.prepare_checks_only {
+                CHECK_S
+            } else {
+                PREPARE_S
+            }
         })
-        .count();
+        .sum();
     let serve_stop = if leg.endpoint(n.server).view.kind == LinkTestEndpointKind::Device {
         SERVE_STOP_S
     } else {
@@ -347,7 +353,7 @@ fn estimated_seconds(leg: &PlannedLeg, spec: &LinkTestSpec) -> u32 {
         } else {
             per_flow * u32::try_from(spec.direction.flows().len()).unwrap_or(2)
         };
-    LEG_OVERHEAD_S + PREPARE_S * u32::try_from(prepares).unwrap_or(0) + serve_stop + measure
+    LEG_OVERHEAD_S + prepare_s + serve_stop + measure
 }
 
 fn evaluate(env: &LinkTestEnv, seq: u32, raw: RawLeg, spec: &LinkTestSpec) -> PlannedLeg {
@@ -399,7 +405,8 @@ fn will_install(legs: &[PlannedLeg]) -> Vec<LinkTestInstall> {
             let (Some(device_id), Some(plugin)) = (endpoint.device_id(), endpoint.plugin()) else {
                 continue;
             };
-            if plugin.roles.actions.prepare.is_none() {
+            // Só confere (Linux): não há o que prometer instalar.
+            if plugin.roles.actions.prepare.is_none() || plugin.roles.prepare_checks_only {
                 continue;
             }
             let packages = endpoint::packages_for(n.engine, side == n.server);
@@ -548,12 +555,25 @@ mod tests {
                             prepare: with_prepare.then(|| "tp_prepare".to_owned()),
                             ..ThroughputActions::default()
                         },
+                        prepare_checks_only: false,
                     },
                 }),
             },
             caps,
             issues: Vec::new(),
         }
+    }
+
+    /// Ponta cujo `prepare` só confere (o Linux).
+    fn checks_only(mut endpoint: Endpoint) -> Endpoint {
+        if let Role::Device {
+            plugin: Some(plugin),
+            ..
+        } = &mut endpoint.role
+        {
+            plugin.roles.prepare_checks_only = true;
+        }
+        endpoint
     }
 
     fn test_device() -> devices::Model {
@@ -659,6 +679,16 @@ mod tests {
         let mut parado = btest;
         parado.view.runnable = false;
         assert_eq!(estimated_seconds(&parado, &spec), 0);
+        // `prepare` que só confere (Linux) não conta o tempo de instalar.
+        let linux = leg(
+            device_endpoint(1, iperf3(), false),
+            checks_only(device_endpoint(2, iperf3(), true)),
+            negotiation(ThroughputEngine::Iperf3, LinkTestSide::B),
+        );
+        assert_eq!(
+            estimated_seconds(&linux, &spec),
+            LEG_OVERHEAD_S + CHECK_S + SERVE_STOP_S + 2 * (5 + MEASURE_OVERHEAD_S)
+        );
     }
 
     #[test]
@@ -681,5 +711,15 @@ mod tests {
         let install = will_install(&legs);
         assert_eq!(install.len(), 1, "só quem declara prepare");
         assert_eq!(install[0].packages, ["mikrotik-btest"], "o cliente btest");
+
+        // Linux: o `prepare` só confere — o plano não promete instalar nada.
+        let legs = vec![leg(
+            checks_only(device_endpoint(6, iperf3(), true)),
+            device_endpoint(7, iperf3(), true),
+            negotiation(ThroughputEngine::Iperf3, LinkTestSide::B),
+        )];
+        let install = will_install(&legs);
+        assert_eq!(install.len(), 1, "{install:?}");
+        assert_eq!(install[0].device_name, "D7");
     }
 }

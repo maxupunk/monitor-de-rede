@@ -36,11 +36,12 @@ import {
   type LodLevel,
   type TopologyPalette,
 } from '@/utils/topology/style'
-import type {
-  CanvasPointerEvent,
-  CanvasViewport,
-  MinimapData,
-  MinimapSource,
+import {
+  fitViewport,
+  type CanvasPointerEvent,
+  type CanvasViewport,
+  type MinimapData,
+  type MinimapSource,
 } from '@/utils/topology/canvasTypes'
 
 export interface CanvasSelection {
@@ -521,27 +522,13 @@ const api = {
     if (eles.empty()) return
     // Enquadra na área livre: legenda, barra de edição e rodapé cobrem o canvas.
     const insets = props.insets ?? { top: 0, right: 0, bottom: 0, left: 0 }
-    const pad = 40
-    const width = core.width() - insets.left - insets.right - pad * 2
-    const height = core.height() - insets.top - insets.bottom - pad * 2
-    if (width < 120 || height < 120) {
-      core.animate({ fit: { eles, padding: pad }, duration: 260, easing: 'ease-out-cubic' })
-      return
-    }
-    const box = eles.boundingBox({ includeLabels: true })
-    const zoom = Math.max(
-      core.minZoom(),
-      Math.min(1.6, width / Math.max(1, box.w), height / Math.max(1, box.h))
+    const { zoom, pan } = fitViewport(
+      eles.boundingBox({ includeLabels: true }),
+      { width: core.width(), height: core.height() },
+      insets,
+      core.minZoom()
     )
-    core.animate({
-      zoom,
-      pan: {
-        x: insets.left + pad + width / 2 - ((box.x1 + box.x2) / 2) * zoom,
-        y: insets.top + pad + height / 2 - ((box.y1 + box.y2) / 2) * zoom,
-      },
-      duration: 260,
-      easing: 'ease-out-cubic',
-    })
+    core.animate({ zoom, pan, duration: 260, easing: 'ease-out-cubic' })
   },
   zoomBy(factor: number) {
     const core = cy.value

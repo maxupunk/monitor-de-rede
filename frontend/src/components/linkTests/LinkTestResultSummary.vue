@@ -145,7 +145,8 @@ const rows = computed(() =>
   font-variant-numeric: tabular-nums;
 }
 .explanation {
-  margin: 0;
+  /* O CSS do componente vence os utilitários do Vuetify: o `mb-3` mora aqui. */
+  margin: 0 0 12px;
 }
 .table-wrap {
   overflow-x: auto;

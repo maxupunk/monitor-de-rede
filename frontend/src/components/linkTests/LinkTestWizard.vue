@@ -124,6 +124,7 @@
           color="primary"
           variant="flat"
           append-icon="mdi-arrow-right"
+          :disabled="step + 1 > maxReachable && targetProblems.length === 0"
           @click="next"
         >
           {{ step === 1 ? 'Continuar' : 'Ver o plano' }}
@@ -208,7 +209,11 @@ const showTargetErrors = ref(false)
 let planSeq = 0
 
 const targetProblems = computed(() => targetErrors(draft.value))
-const maxReachable = computed(() => (targetProblems.value.length > 0 ? 1 : 3))
+/** Pedir o plano já é escrita no backend: perfil somente leitura para no "Como". */
+const maxReachable = computed(() => {
+  if (targetProblems.value.length > 0) return 1
+  return auth.canWrite ? 3 : 2
+})
 const runReasons = computed(() => runBlockers(plan.value, auth.canWrite))
 
 function describe(err: unknown, fallback: string): string {

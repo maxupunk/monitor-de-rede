@@ -155,7 +155,7 @@ import { useTopologyStore, type TopologyEdge } from '@/stores/topology'
 import type { LinkTestKind } from '@/types/linkTests'
 import { formatLinkSpeed } from '@/utils/formatters'
 import { KIND_OPTIONS } from '@/utils/linkTests/presentation'
-import type { LinkTestTargetDraft } from '@/utils/linkTests/wizard'
+import { linkOptionSubtitle, type LinkTestTargetDraft } from '@/utils/linkTests/wizard'
 import {
   edgeEndpoints,
   edgeSpeed,
@@ -220,11 +220,12 @@ function edgeTitle(edge: TopologyEdge, from: number): string {
 }
 
 function edgeSubtitle(edge: TopologyEdge): string {
-  const ports = [edge.sourceInterfaceName, edge.targetInterfaceName]
-    .map((name) => name || '?')
-    .join(' ↔ ')
   const speed = edgeSpeed(edge)
-  return speed ? `${ports} · ${formatLinkSpeed(speed)}` : ports
+  return linkOptionSubtitle(
+    edge.sourceInterfaceName,
+    edge.targetInterfaceName,
+    speed ? formatLinkSpeed(speed) : null
+  )
 }
 
 const edgeItems = computed(() => {

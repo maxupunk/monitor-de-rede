@@ -52,6 +52,11 @@ use crate::services::shared::errors::{AppError, AppResult};
 /// Porta padrão do `iperf3 -s`.
 pub const DEFAULT_PORT: u16 = 5201;
 
+/// Novas tentativas de uma fase enquanto o servidor responde "ocupado".
+const BUSY_RETRIES: u32 = 4;
+/// Espera entre essas tentativas.
+const BUSY_BACKOFF: Duration = Duration::from_millis(500);
+
 /// Executa um teste iperf3 contra o servidor em `addr`.
 ///
 /// `spec.engine` precisa ser [`ThroughputEngine::Iperf3`]. Cada segundo de
@@ -78,13 +83,13 @@ pub async fn run_client(
     let mut report = ThroughputReport::empty(ThroughputEngine::Iperf3);
     let mut offset_ms = 0;
     if spec.direction.sends() {
-        let phase = run_phase(addr, spec, false, sink, cancel, offset_ms).await?;
+        let phase = run_phase_patiently(addr, spec, false, sink, cancel, offset_ms).await?;
         report.set_tx(phase.server.bytes, phase.elapsed);
         report.samples.extend(phase.samples);
         offset_ms = elapsed_ms(phase.elapsed);
     }
     if spec.direction.receives() {
-        let phase = run_phase(addr, spec, true, sink, cancel, offset_ms).await?;
+        let phase = run_phase_patiently(addr, spec, true, sink, cancel, offset_ms).await?;
         report.set_rx(phase.local_bytes, phase.elapsed);
         report.retransmits = phase.server.retransmits;
         report.samples.extend(phase.samples);
@@ -99,6 +104,35 @@ struct PhaseOutcome {
     elapsed: Duration,
     server: ServerResults,
     samples: Vec<ThroughputSample>,
+}
+
+/// Uma fase, tentando de novo enquanto o servidor responde `ACCESS_DENIED`.
+///
+/// O `iperf3 -s` leva um instante para liberar a vaga depois de uma fase: a
+/// volta, que conecta logo depois da ida, pode chegar antes disso — sobretudo
+/// num equipamento de CPU fraca ou ocupada — e levar um "ocupado". A recusa
+/// vem no handshake, antes de qualquer amostra, então tentar de novo é seguro.
+async fn run_phase_patiently(
+    addr: SocketAddr,
+    spec: &ThroughputSpec,
+    reverse: bool,
+    sink: &SampleSink,
+    cancel: &CancellationToken,
+    offset_ms: u64,
+) -> AppResult<PhaseOutcome> {
+    let mut retries = 0;
+    loop {
+        match run_phase(addr, spec, reverse, sink, cancel, offset_ms).await {
+            Err(AppError::Conflict(_)) if retries < BUSY_RETRIES => {
+                retries += 1;
+                tokio::select! {
+                    () = cancel.cancelled() => return Err(cancelled()),
+                    () = tokio::time::sleep(BUSY_BACKOFF) => {}
+                }
+            }
+            outcome => return outcome,
+        }
+    }
 }
 
 async fn run_phase(
@@ -446,6 +480,18 @@ mod tests {
             "{}",
             report.tx_bytes
         );
+    }
+
+    #[tokio::test]
+    async fn servidor_ocupado_por_um_instante_tenta_de_novo() {
+        // A volta conecta logo depois da ida e o servidor ainda não liberou a
+        // vaga: o cliente espera e tenta de novo, sem perder a medida.
+        let server = FakeServer::start(Behavior::BusyOnce).await;
+        let report = run(&server, &spec(TestDirection::Both, 1))
+            .await
+            .expect("tenta de novo depois do ocupado");
+        assert_eq!(server.tests().await, 2);
+        assert!(report.tx_bps.is_some() && report.rx_bps.is_some());
     }
 
     #[tokio::test]

@@ -121,6 +121,9 @@ sessão é de uso único e expira (TTL padrão 90 s). O compose publica
   limita a duração pedida e avisa.
 - As ações referenciadas existem no manifesto; `prepare`, `serve` e `stop` são
   `write`; `run` é `read`. `prepare` é opcional (só quem instala algo).
+- `"prepareChecksOnly": true` declara um `prepare` que só **confere** o que
+  falta (o Linux: o NetMonitor não instala pacote em servidor). O plano não o
+  lista em `willInstall` nem conta o tempo de instalar.
 - **Parâmetros fixos** (validados pela plataforma, o script não inventa):
 
 | Ação | Parâmetros | Devolve |

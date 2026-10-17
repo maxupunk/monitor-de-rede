@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { createSheetStack, pushSheet, removeSheet } from '@/composables/topology/useSheetStack'
-import { mapInsets, TOPOLOGY_LEGEND_WIDTH } from '@/utils/topology/canvasTypes'
+import {
+  FIT_MAX_ZOOM,
+  fitViewport,
+  mapInsets,
+  TOPOLOGY_LEGEND_WIDTH,
+} from '@/utils/topology/canvasTypes'
 import { buildElements, nodeRank } from '@/utils/topology/elements'
 import { DEFAULT_PREFS, minimapVisible, parsePrefs } from '@/utils/topology/prefs'
 import { edgeRouteClass, lodLevel } from '@/utils/topology/style'
@@ -105,5 +110,44 @@ describe('preferências de primeira visita', () => {
     expect(minimapVisible('off', 800)).toBe(false)
     expect(minimapVisible('on', 5)).toBe(true)
     expect(parsePrefs(JSON.stringify({ minimap: 'bogus' })).minimap).toBe('auto')
+  })
+})
+
+describe('enquadrar', () => {
+  const box = { x1: 0, y1: 0, x2: 200, y2: 100, w: 200, h: 100 }
+  const none = { top: 0, right: 0, bottom: 0, left: 0 }
+
+  it('centra na área livre, descontando os painéis', () => {
+    const { zoom, pan } = fitViewport(
+      box,
+      { width: 1200, height: 800 },
+      { ...none, left: 300 },
+      0.05
+    )
+    expect(zoom).toBe(FIT_MAX_ZOOM)
+    // Centro da área livre: 300 + 40 + (1200 − 300 − 80) / 2 = 750.
+    expect(pan.x).toBeCloseTo(750 - 100 * FIT_MAX_ZOOM)
+    expect(pan.y).toBeCloseTo(400 - 50 * FIT_MAX_ZOOM)
+  })
+
+  it('pouca área livre (inspetor + painel do teste + legenda): ignora a legenda, sem passar do teto', () => {
+    const insets = { top: 44, right: 516, bottom: 60, left: 332 }
+    const { zoom, pan } = fitViewport(box, { width: 800, height: 800 }, insets, 0.05)
+    // Área sem a legenda: 800 − 516 − 80 = 204 px de largura, à esquerda do painel.
+    expect(zoom).toBeCloseTo(204 / 200)
+    expect(pan.x).toBeCloseTo(40 + 102 - 100 * (204 / 200))
+  })
+
+  it('nem sem a legenda cabe: usa o canvas inteiro', () => {
+    const insets = { top: 44, right: 700, bottom: 60, left: 332 }
+    const { zoom, pan } = fitViewport(box, { width: 800, height: 800 }, insets, 0.05)
+    expect(zoom).toBe(FIT_MAX_ZOOM)
+    expect(pan.x).toBeCloseTo(400 - 100 * FIT_MAX_ZOOM)
+  })
+
+  it('caixa maior que a tela reduz o zoom, até o mínimo', () => {
+    const wide = { x1: 0, y1: 0, x2: 10_000, y2: 100, w: 10_000, h: 100 }
+    expect(fitViewport(wide, { width: 1080, height: 800 }, none, 0.05).zoom).toBeCloseTo(0.1)
+    expect(fitViewport(wide, { width: 1080, height: 800 }, none, 0.2).zoom).toBe(0.2)
   })
 })

@@ -33,8 +33,9 @@ use super::{
     events,
     guard::Reservation,
     model::{
-        as_db, LinkTestFlow, LinkTestSample, LinkTestSampleEvent, LinkTestSide, LinkTestSpec,
-        LinkTestStage, LinkTestStageKey, LinkTestStatus, LinkTestStepStatus, LinkTestUserRef,
+        as_db, LinkTestFlow, LinkTestLegKind, LinkTestSample, LinkTestSampleEvent, LinkTestSide,
+        LinkTestSpec, LinkTestStage, LinkTestStageKey, LinkTestStatus, LinkTestStepStatus,
+        LinkTestUserRef,
     },
     negotiate::{driver_direction, link_flow, link_rates, Negotiation},
     outcome,
@@ -1188,6 +1189,8 @@ impl Job {
             .map(|(row, status)| {
                 (
                     u32::try_from(row.seq).unwrap_or_default(),
+                    crate::services::link_tests::model::from_db(&row.kind)
+                        .unwrap_or(LinkTestLegKind::Link),
                     *status,
                     row.forward_bps,
                     row.reverse_bps,

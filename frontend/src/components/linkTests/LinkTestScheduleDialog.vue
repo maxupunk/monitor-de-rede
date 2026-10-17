@@ -262,7 +262,8 @@ function close() {
 <style scoped>
 .hint {
   color: rgb(var(--v-theme-on-surface));
-  margin: 0;
+  /* O espaço até o próximo campo: `margin: 0` aqui anulava o `mb-4`. */
+  margin: 0 0 16px;
 }
 .interval-field {
   max-width: 130px;

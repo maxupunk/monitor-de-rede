@@ -73,7 +73,13 @@
           enlace.
         </p>
         <div class="d-flex flex-wrap justify-center ga-2">
-          <v-btn color="primary" variant="flat" prepend-icon="mdi-plus" @click="$emit('new')">
+          <v-btn
+            v-if="auth.canWrite"
+            color="primary"
+            variant="flat"
+            prepend-icon="mdi-plus"
+            @click="$emit('new')"
+          >
             Novo teste
           </v-btn>
           <v-btn color="secondary" variant="flat" prepend-icon="mdi-sitemap" to="/topology">
@@ -114,10 +120,10 @@
         </template>
 
         <template #mobile-item="{ item }">
-          <div class="d-flex flex-column ga-1">
-            <div class="d-flex align-center justify-space-between ga-2">
-              <span class="font-weight-bold text-truncate">{{ testTitle(item) }}</span>
-              <LinkTestStatusChip :status="item.status" size="x-small" />
+          <div class="d-flex flex-column ga-1 mobile-item">
+            <div class="d-flex align-start justify-space-between ga-2">
+              <span class="font-weight-bold mobile-title">{{ testTitle(item) }}</span>
+              <LinkTestStatusChip :status="item.status" size="x-small" class="flex-shrink-0" />
             </div>
             <div class="text-body-small">
               {{ formatDateTime(item.createdAt) }} · {{ originOf(item) }}
@@ -144,6 +150,7 @@
 <script setup lang="ts">
 /** Aba "Histórico": filtros, tabela paginada no servidor e abertura do detalhe. */
 import { computed, onMounted, reactive, watch } from 'vue'
+import { useAuthStore } from '@/stores/auth'
 import { useDevicesStore } from '@/stores/devices'
 import { HISTORY_PER_PAGE, useLinkTestsStore } from '@/stores/linkTests'
 import type { LinkTest, LinkTestKind, LinkTestStatus } from '@/types/linkTests'
@@ -164,6 +171,7 @@ defineEmits<{ open: [testId: number]; new: [] }>()
 
 const store = useLinkTestsStore()
 const devices = useDevicesStore()
+const auth = useAuthStore()
 
 const PERIODS = [
   { title: 'Últimas 24 horas', value: 1 },
@@ -277,6 +285,14 @@ onMounted(() => {
 }
 .empty p {
   max-width: 560px;
+}
+.mobile-item {
+  min-width: 0;
+}
+/* Celular: o título quebra linha em vez de empurrar o estado para fora do cartão. */
+.mobile-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .result {
   font-weight: 700;

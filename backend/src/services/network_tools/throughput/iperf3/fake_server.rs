@@ -28,6 +28,9 @@ use super::wire::{self, COOKIE_SIZE};
 pub(crate) enum Behavior {
     Normal,
     AccessDenied,
+    /// Recusa (`ACCESS_DENIED`) a primeira conexão e atende as seguintes —
+    /// o servidor que ainda não liberou a vaga da fase anterior.
+    BusyOnce,
     ServerError,
     MalformedResults,
     BogusState,
@@ -50,6 +53,7 @@ pub(crate) struct SeenTest {
 struct Shared {
     tests: Vec<SeenTest>,
     client_terminated: bool,
+    denied: u32,
 }
 
 pub(crate) struct FakeServer {
@@ -113,6 +117,13 @@ async fn handle(
             return Ok(());
         }
         Behavior::AccessDenied => return ctrl.write_i8(-1).await,
+        Behavior::BusyOnce => {
+            let mut state = shared.lock().await;
+            if state.denied == 0 {
+                state.denied += 1;
+                return ctrl.write_i8(-1).await;
+            }
+        }
         _ => {}
     }
 

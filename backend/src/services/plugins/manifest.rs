@@ -343,6 +343,11 @@ pub struct ThroughputRoles {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub drive: Vec<ThroughputDrive>,
     pub actions: ThroughputActions,
+    /// `true`: o `prepare` só **confere** o que falta e não instala nada (o
+    /// Linux, onde o NetMonitor não instala pacote em servidor). O plano não
+    /// promete instalação nem conta o tempo dela.
+    #[serde(default)]
+    pub prepare_checks_only: bool,
 }
 
 /// Tipo de um parâmetro do contrato fixo.

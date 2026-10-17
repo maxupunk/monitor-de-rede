@@ -3,6 +3,7 @@ import {
   compactBps,
   endpointLabel,
   flowPairLabel,
+  legNotes,
   legTitle,
   requestTargetLabel,
   serverSideLabel,
@@ -11,7 +12,7 @@ import {
   testStatusPresentation,
   testTitle,
 } from '@/utils/linkTests/presentation'
-import { endpoint, leg, test } from './fixtures'
+import { endpoint, leg, stage, test } from './fixtures'
 
 describe('apresentação do teste de enlace', () => {
   it('estados com cor semântica (nunca cinza) e queda segura para valor desconhecido', () => {
@@ -83,5 +84,53 @@ describe('apresentação do teste de enlace', () => {
     expect(
       requestTargetLabel({ kind: 'path', sourceDeviceId: 3, targetDeviceId: null }, name)
     ).toBe('D3 → ?')
+  })
+})
+
+describe('problemas da perna', () => {
+  it('perna pulada mostra o motivo uma vez, não uma por etapa', () => {
+    const reason = 'Switch não tem plugin de teste de enlace ativo e instalado'
+    const notes = legNotes(
+      leg(2, {
+        status: 'skipped',
+        error: reason,
+        issues: [reason],
+        stages: [
+          stage('prepare_a', { status: 'skipped', message: reason }),
+          stage('serve', { status: 'skipped', message: reason }),
+          stage('forward', { status: 'skipped', message: reason }),
+        ],
+      })
+    )
+    expect(notes).toHaveLength(1)
+    expect(notes[0]).toMatchObject({ text: reason, color: 'error' })
+  })
+
+  it('mensagens diferentes continuam, com a etapa no texto', () => {
+    const notes = legNotes(
+      leg(1, {
+        error: 'tempo esgotado ao conectar na porta SSH',
+        stages: [
+          stage('prepare_a', {
+            status: 'skipped',
+            label: 'Preparar A',
+            message: 'nada a preparar',
+          }),
+          stage('forward', {
+            status: 'failed',
+            message: 'tempo esgotado ao conectar na porta SSH',
+          }),
+          stage('reverse', {
+            status: 'failed',
+            message: 'tempo esgotado ao conectar na porta SSH',
+          }),
+          stage('stop', { status: 'succeeded', message: 'servidor encerrado' }),
+        ],
+      })
+    )
+    expect(notes.map((note) => note.text)).toEqual([
+      'tempo esgotado ao conectar na porta SSH',
+      'Preparar A: nada a preparar',
+    ])
   })
 })

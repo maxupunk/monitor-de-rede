@@ -12,6 +12,7 @@ import type {
   LinkTestEndpoint,
   LinkTestEngine,
   LinkTestKind,
+  LinkTestLeg,
   LinkTestPlanLeg,
   LinkTestStageKey,
   LinkTestStatus,
@@ -218,4 +219,37 @@ export function flowPairLabel(
   if (typeof forwardBps === 'number') parts.push(`↓ ${compactBps(forwardBps)}`)
   if (typeof reverseBps === 'number') parts.push(`↑ ${compactBps(reverseBps)}`)
   return parts.length > 0 ? parts.join(' ') : null
+}
+
+export interface LegNote {
+  text: string
+  icon: string
+  color: ThemeColorToken
+}
+
+/**
+ * Problemas da perna, sem repetição: o erro, os motivos do plano e as
+ * mensagens das etapas que falharam ou foram puladas. Uma perna pulada leva o
+ * mesmo motivo em todas as etapas — ele aparece uma vez só.
+ */
+export function legNotes(leg: Pick<LinkTestLeg, 'error' | 'issues' | 'stages'>): LegNote[] {
+  const notes: LegNote[] = []
+  const seen = new Set<string>()
+  const add = (message: string, note: LegNote) => {
+    if (seen.has(message)) return
+    seen.add(message)
+    notes.push(note)
+  }
+  if (leg.error) add(leg.error, { text: leg.error, icon: 'mdi-close-circle', color: 'error' })
+  for (const issue of leg.issues) add(issue, { text: issue, icon: 'mdi-alert', color: 'warning' })
+  for (const stage of leg.stages) {
+    if (!stage.message || (stage.status !== 'failed' && stage.status !== 'skipped')) continue
+    const failed = stage.status === 'failed'
+    add(stage.message, {
+      text: `${stage.label || STAGES[stage.key].label}: ${stage.message}`,
+      icon: failed ? 'mdi-close-circle' : 'mdi-debug-step-over',
+      color: failed ? 'error' : 'warning',
+    })
+  }
+  return notes
 }

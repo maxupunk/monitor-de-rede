@@ -119,7 +119,7 @@ import { useLinkTestContext } from '@/composables/linkTests/useLinkTestContext'
 import { useAuthStore } from '@/stores/auth'
 import { useLinkTestsStore } from '@/stores/linkTests'
 import type { LinkTest } from '@/types/linkTests'
-import { formatDateTime, formatElapsedMs, formatRelativeTime } from '@/utils/formatters'
+import { formatDateTime, formatElapsedMs, formatShortDateTime } from '@/utils/formatters'
 import {
   TEST_KINDS,
   isActiveStatus,
@@ -181,8 +181,9 @@ const timing = computed(() => {
     if (remaining !== null && remaining > 0) parts.push(`faltam ~${formatElapsedMs(remaining)}`)
     return parts.join(' · ')
   }
+  // Hora absoluta: o painel não tem relógio próprio, e um "há 0s" congelaria.
   const when = props.test.finishedAt ?? props.test.createdAt
-  return `${formatRelativeTime(when)}${elapsed !== null ? ` · durou ${formatElapsedMs(elapsed)}` : ''}`
+  return `terminou em ${formatShortDateTime(when)}${elapsed !== null ? ` · durou ${formatElapsedMs(elapsed)}` : ''}`
 })
 
 const originText = computed(() => {

@@ -51,7 +51,13 @@
       </ul>
     </v-alert>
 
-    <v-alert type="warning" variant="tonal" icon="mdi-speedometer" class="mb-3">
+    <v-alert
+      v-if="runnableCount > 0"
+      type="warning"
+      variant="tonal"
+      icon="mdi-speedometer"
+      class="mb-3"
+    >
       O teste <strong>satura o enlace durante a medição</strong>: por {{ estimate }}, quem usa a
       rede por ele pode sentir lentidão. Prefira horários de pouco uso.
     </v-alert>
@@ -172,8 +178,11 @@ const props = defineProps<{
   spec: LinkTestSpec
 }>()
 
-const estimate = computed(() => estimatedDurationText(props.plan.estimatedSeconds))
 const runnableCount = computed(() => props.plan.legs.filter((leg) => leg.runnable).length)
+/** Nada roda: não há tempo a estimar (nem enlace a saturar). */
+const estimate = computed(() =>
+  runnableCount.value > 0 ? estimatedDurationText(props.plan.estimatedSeconds) : '—'
+)
 const specText = computed(() => specSummary(props.spec))
 
 const blockingHints = computed(() =>

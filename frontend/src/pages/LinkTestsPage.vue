@@ -5,9 +5,21 @@
       subtitle="Quanto passa em cada enlace da rede: entre dois equipamentos, ao longo de um caminho ou do servidor até um roteador"
     >
       <template #actions>
-        <v-btn color="primary" variant="flat" prepend-icon="mdi-plus" @click="openWizard">
-          Novo teste
-        </v-btn>
+        <v-tooltip :text="READ_ONLY_REASON" :disabled="auth.canWrite">
+          <template #activator="{ props: tip }">
+            <span v-bind="tip">
+              <v-btn
+                color="primary"
+                variant="flat"
+                prepend-icon="mdi-plus"
+                :disabled="!auth.canWrite"
+                @click="openWizard"
+              >
+                Novo teste
+              </v-btn>
+            </span>
+          </template>
+        </v-tooltip>
       </template>
     </PageHeader>
 
@@ -101,10 +113,12 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useDisplay } from 'vuetify'
+import { useAuthStore } from '@/stores/auth'
 import { useLinkTestsStore } from '@/stores/linkTests'
 import type { LinkTest } from '@/types/linkTests'
 import { flowPairLabel, legTitle, testTitle } from '@/utils/linkTests/presentation'
 import { currentLeg, legsDone } from '@/utils/linkTests/progress'
+import { READ_ONLY_REASON } from '@/utils/topology/inspectorRegistry'
 import PageHeader from '@/components/PageHeader.vue'
 import LinkTestHistoryPanel from '@/components/linkTests/LinkTestHistoryPanel.vue'
 import LinkTestRunPanel from '@/components/linkTests/LinkTestRunPanel.vue'
@@ -116,6 +130,7 @@ const route = useRoute()
 const router = useRouter()
 const { smAndDown } = useDisplay()
 const store = useLinkTestsStore()
+const auth = useAuthStore()
 
 const wizardOpen = ref(false)
 const detailLoading = ref(false)

@@ -2,7 +2,17 @@
   <div class="pa-4">
     <template v-if="activeTest">
       <div class="section-title">Em andamento agora</div>
-      <div class="active-card mb-4">
+      <v-alert
+        v-if="followed"
+        type="info"
+        variant="tonal"
+        density="compact"
+        icon="mdi-speedometer"
+        class="mb-4"
+      >
+        {{ testTitle(activeTest) }} — acompanhe pelo painel do teste.
+      </v-alert>
+      <div v-else class="active-card mb-4">
         <LinkTestRunPanel :test="activeTest" compact>
           <template #actions>
             <v-btn
@@ -84,7 +94,7 @@
 import { computed, ref, watch } from 'vue'
 import { useLinkTestsStore } from '@/stores/linkTests'
 import type { LinkTestRequest } from '@/stores/linkTestRequests'
-import { isActiveStatus } from '@/utils/linkTests/presentation'
+import { isActiveStatus, testTitle } from '@/utils/linkTests/presentation'
 import {
   READ_ONLY_REASON,
   type TopologyHost,
@@ -109,6 +119,10 @@ const related = computed(() => {
   return []
 })
 const activeTest = computed(() => related.value.find((test) => isActiveStatus(test.status)) ?? null)
+/** Já aberto no painel do teste: repetir o painel inteiro aqui só espreme o mapa. */
+const followed = computed(
+  () => activeTest.value !== null && store.focusedId === activeTest.value.id
+)
 const recent = computed(() =>
   related.value.filter((test) => test.id !== activeTest.value?.id).slice(0, 5)
 )

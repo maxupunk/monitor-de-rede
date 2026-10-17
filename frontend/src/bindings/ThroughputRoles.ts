@@ -8,4 +8,10 @@ import type { ThroughputServe } from "./ThroughputServe";
  * sabe servir, o que sabe dirigir e as ações que fazem cada coisa. Os
  * parâmetros dessas ações são um contrato fixo ([`THROUGHPUT_CONTRACTS`]).
  */
-export type ThroughputRoles = { serve?: Array<ThroughputServe>, drive?: Array<ThroughputDrive>, actions: ThroughputActions, };
+export type ThroughputRoles = { serve?: Array<ThroughputServe>, drive?: Array<ThroughputDrive>, actions: ThroughputActions, 
+/**
+ * `true`: o `prepare` só **confere** o que falta e não instala nada (o
+ * Linux, onde o NetMonitor não instala pacote em servidor). O plano não
+ * promete instalação nem conta o tempo dela.
+ */
+prepareChecksOnly: boolean, };

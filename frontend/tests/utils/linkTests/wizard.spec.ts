@@ -3,6 +3,7 @@ import {
   READ_ONLY_TEST_REASON,
   draftFromRequest,
   issueHint,
+  linkOptionSubtitle,
   planEndpoints,
   requestFromDraft,
   runBlockers,
@@ -80,5 +81,14 @@ describe('assistente do teste de enlace', () => {
     )
     expect(issueHint('Sem caminho conhecido', ends).to).toBeNull()
     expect(planEndpoints(plan())).toHaveLength(2)
+  })
+})
+
+describe('enlace na lista do assistente', () => {
+  it('portas e velocidade quando o mapa sabe; enlace manual não vira "? ↔ ?"', () => {
+    expect(linkOptionSubtitle('ether1', 'eth0', '1 Gbps')).toBe('ether1 ↔ eth0 · 1 Gbps')
+    expect(linkOptionSubtitle('ether1', null, null)).toBe('ether1 ↔ ?')
+    expect(linkOptionSubtitle(null, null, '100 Mbps')).toBe('100 Mbps')
+    expect(linkOptionSubtitle(null, undefined, null)).toBe('Portas não identificadas')
   })
 })

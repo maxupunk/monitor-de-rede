@@ -127,6 +127,11 @@ describe('telas do teste de enlace', () => {
     expect(wrapper.findAll('tbody tr')).toHaveLength(2)
     expect(wrapper.find('tr.bottleneck').text()).toContain('Dev-2 → Dev-3')
     expect(text).not.toContain('Cancelar teste')
+    // Hora absoluta (sem relógio, um "há 0s" ficaria congelado).
+    expect(text).toContain('terminou em')
+    expect(text).not.toContain('há 0s')
+    // Sem a velocidade da porta, nenhum selo repete o número do medidor.
+    expect(wrapper.findAll('.gauge .v-chip')).toHaveLength(0)
   })
 
   it('plano: bloqueio com dica acionável, aviso de saturação e o que vai instalar', async () => {
@@ -149,6 +154,22 @@ describe('telas do teste de enlace', () => {
     expect(text).toContain('iperf3 em OpenWrt-Sala')
     expect(text).toContain('29 s por sentido')
     expect(wrapper.find('a[href="/devices/2?tab=plugins&section=credentials"]').exists()).toBe(true)
+  })
+
+  it('plano que não roda: sem tempo estimado nem aviso de saturação', async () => {
+    setRole('admin')
+    const p = plan({ blocking: ['Switch não tem plugin de teste de enlace ativo e instalado'] })
+    p.legs[0].runnable = false
+    const wrapper = mountWith(LinkTestPlanView, {
+      plan: p,
+      spec: { durationS: 5, direction: 'both', streams: 1, limitMbps: null },
+    })
+    await flushPromises()
+    const text = wrapper.text()
+    expect(text).toContain('O teste não pode rodar assim')
+    expect(text).toContain('0 de 1 vão rodar')
+    expect(text).not.toContain('satura o enlace')
+    expect(text).not.toContain('alguns segundos')
   })
 
   it('assistente: pedido do mapa começa no "Como"; plano carregado ao avançar; inicia com confirm', async () => {
@@ -188,17 +209,19 @@ describe('telas do teste de enlace', () => {
     expect(wrapper.emitted('started')?.[0]).toEqual([33])
   })
 
-  it('assistente: perfil somente leitura vê o plano, mas não inicia', async () => {
+  it('assistente: perfil somente leitura não pede o plano (o backend recusa) nem inicia', async () => {
     setRole('viewer')
     vi.spyOn(apiService, 'get').mockResolvedValue([])
-    vi.spyOn(apiService, 'post').mockResolvedValueOnce(plan())
+    const post = vi.spyOn(apiService, 'post').mockResolvedValueOnce(plan())
     mountWith(LinkTestWizard, { modelValue: true, request: { kind: 'server', targetDeviceId: 2 } })
     await flushPromises()
     expect(document.body.textContent).toContain('somente leitura')
     const button = (label: string) =>
       [...document.body.querySelectorAll('button')].find((b) => b.textContent?.includes(label))
+    expect(button('Ver o plano')?.hasAttribute('disabled')).toBe(true)
     button('Ver o plano')?.click()
     await flushPromises()
-    expect(button('Iniciar teste')?.hasAttribute('disabled')).toBe(true)
+    expect(post).not.toHaveBeenCalled()
+    expect(button('Iniciar teste')).toBeUndefined()
   })
 })

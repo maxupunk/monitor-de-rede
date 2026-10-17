@@ -138,13 +138,13 @@
 /** Uma perna do teste: pontas, motor, medidores ao vivo, gráfico e etapas. */
 import { computed } from 'vue'
 import type { LinkTestFlow, LinkTestLeg, LinkTestSample, LinkTestStage } from '@/types/linkTests'
-import type { ThemeColorToken } from '@/utils/topology/presentation'
 import {
   ENGINES,
   STAGES,
   compactBps,
   endpointLabel,
   engineLabel,
+  legNotes,
   legTitle,
   serverSideLabel,
   stageEndpoint,
@@ -210,7 +210,9 @@ const gauges = computed<Gauge[]>(() => {
       value:
         shown !== null ? compactBps(shown) : active ? 'medindo…' : running ? 'aguardando' : '—',
       active,
-      comparison: !running && final !== null ? resultVsSpeed(final, props.speedBps) : null,
+      // Sem a velocidade da porta, a comparação só repetiria o número grande.
+      comparison:
+        !running && final !== null && props.speedBps ? resultVsSpeed(final, props.speedBps) : null,
     }
   })
 })
@@ -249,30 +251,7 @@ function openRun(stage: LinkTestStage) {
   )
 }
 
-interface Note {
-  text: string
-  icon: string
-  color: ThemeColorToken
-}
-
-const notes = computed<Note[]>(() => {
-  const list: Note[] = []
-  if (props.leg.error)
-    list.push({ text: props.leg.error, icon: 'mdi-close-circle', color: 'error' })
-  for (const issue of props.leg.issues) {
-    list.push({ text: issue, icon: 'mdi-alert', color: 'warning' })
-  }
-  for (const stage of props.leg.stages) {
-    if (stage.message && (stage.status === 'failed' || stage.status === 'skipped')) {
-      list.push({
-        text: `${stage.label || STAGES[stage.key].label}: ${stage.message}`,
-        icon: stage.status === 'failed' ? 'mdi-close-circle' : 'mdi-debug-step-over',
-        color: stage.status === 'failed' ? 'error' : 'warning',
-      })
-    }
-  }
-  return list
-})
+const notes = computed(() => legNotes(props.leg))
 
 const ariaLabel = computed(() => `Perna ${props.leg.seq}: ${title.value}, ${status.value.label}`)
 </script>

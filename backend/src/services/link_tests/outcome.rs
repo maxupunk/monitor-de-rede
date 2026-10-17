@@ -5,10 +5,14 @@
 //!   se nada rodou;
 //! * teste: `succeeded` (todas as pernas), `partial` (algumas), `failed`
 //!   (nenhuma) ou `cancelled`;
-//! * resumo: o **gargalo** é a perna, entre as que mediram, com a menor vazão
-//!   em qualquer dos sentidos.
+//! * resumo: o **gargalo** é a perna de **enlace**, entre as que mediram, com
+//!   a menor vazão em qualquer dos sentidos. O ponta a ponta é a referência
+//!   com que o gargalo se compara, não concorre com ele — e só entra nos
+//!   mínimos quando nenhum enlace mediu.
 
-use super::model::{LinkTestStage, LinkTestStatus, LinkTestStepStatus, LinkTestSummary};
+use super::model::{
+    LinkTestLegKind, LinkTestStage, LinkTestStatus, LinkTestStepStatus, LinkTestSummary,
+};
 
 /// Estado da perna a partir das etapas.
 #[must_use]
@@ -54,8 +58,14 @@ pub fn test_status(legs: &[LinkTestStepStatus], cancelled: bool) -> LinkTestStat
     }
 }
 
-/// Uma perna para o resumo: `(seq, estado, forward, reverse)`.
-pub type LegRates = (u32, LinkTestStepStatus, Option<f64>, Option<f64>);
+/// Uma perna para o resumo: `(seq, tipo, estado, forward, reverse)`.
+pub type LegRates = (
+    u32,
+    LinkTestLegKind,
+    LinkTestStepStatus,
+    Option<f64>,
+    Option<f64>,
+);
 
 fn min_of(values: impl Iterator<Item = f64>) -> Option<f64> {
     values.fold(None, |acc, value| {
@@ -68,24 +78,30 @@ fn min_of(values: impl Iterator<Item = f64>) -> Option<f64> {
 pub fn summarize(legs: &[LegRates]) -> Option<LinkTestSummary> {
     let measured: Vec<&LegRates> = legs
         .iter()
-        .filter(|(_, status, forward, reverse)| {
+        .filter(|(_, _, status, forward, reverse)| {
             *status == LinkTestStepStatus::Succeeded && (forward.is_some() || reverse.is_some())
         })
         .collect();
     if measured.is_empty() {
         return None;
     }
-    let bottleneck = measured
+    let links: Vec<&LegRates> = measured
         .iter()
-        .filter_map(|(seq, _, forward, reverse)| {
+        .copied()
+        .filter(|leg| leg.1 == LinkTestLegKind::Link)
+        .collect();
+    let bottleneck = links
+        .iter()
+        .filter_map(|(seq, _, _, forward, reverse)| {
             min_of(forward.iter().chain(reverse.iter()).copied()).map(|rate| (*seq, rate))
         })
         .min_by(|(_, x), (_, y)| x.total_cmp(y))
         .map(|(seq, _)| seq);
+    let pool = if links.is_empty() { &measured } else { &links };
     Some(LinkTestSummary {
         bottleneck_leg_seq: bottleneck,
-        min_forward_bps: min_of(measured.iter().filter_map(|leg| leg.2)),
-        min_reverse_bps: min_of(measured.iter().filter_map(|leg| leg.3)),
+        min_forward_bps: min_of(pool.iter().filter_map(|leg| leg.3)),
+        min_reverse_bps: min_of(pool.iter().filter_map(|leg| leg.4)),
     })
 }
 
@@ -185,18 +201,49 @@ mod tests {
 
     #[test]
     fn resumo_aponta_o_gargalo() {
+        use LinkTestLegKind::Link;
         let legs = [
-            (1, Succeeded, Some(900e6), Some(850e6)),
-            (2, Succeeded, Some(400e6), Some(95e6)),
-            (3, Failed, Some(1.0), None),
-            (4, Succeeded, Some(300e6), None),
+            (1, Link, Succeeded, Some(900e6), Some(850e6)),
+            (2, Link, Succeeded, Some(400e6), Some(95e6)),
+            (3, Link, Failed, Some(1.0), None),
+            (4, Link, Succeeded, Some(300e6), None),
         ];
         let summary = summarize(&legs).unwrap();
         assert_eq!(summary.bottleneck_leg_seq, Some(2), "95 Mbit/s na volta");
         assert_eq!(summary.min_forward_bps, Some(300e6));
         assert_eq!(summary.min_reverse_bps, Some(95e6));
-        assert_eq!(summarize(&[(1, Failed, None, None)]), None);
+        assert_eq!(summarize(&[(1, Link, Failed, None, None)]), None);
         assert_eq!(summarize(&[]), None);
+    }
+
+    #[test]
+    fn ponta_a_ponta_nao_concorre_ao_gargalo() {
+        use LinkTestLegKind::{EndToEnd, Link};
+        // O ponta a ponta mede menos que qualquer enlace (atravessa todos),
+        // mas o gargalo é um enlace — é com ele que a tela o compara.
+        let legs = [
+            (1, EndToEnd, Succeeded, Some(23e6), Some(17e6)),
+            (2, Link, Succeeded, Some(27e6), Some(50e6)),
+            (3, Link, Succeeded, Some(900e6), Some(800e6)),
+        ];
+        let summary = summarize(&legs).unwrap();
+        assert_eq!(summary.bottleneck_leg_seq, Some(2));
+        assert_eq!(
+            summary.min_forward_bps,
+            Some(27e6),
+            "pior enlace, não o ponta a ponta"
+        );
+        assert_eq!(summary.min_reverse_bps, Some(50e6));
+
+        // Nenhum enlace mediu: sem gargalo, e os mínimos vêm do ponta a ponta.
+        let legs = [
+            (1, EndToEnd, Succeeded, Some(23e6), Some(17e6)),
+            (2, Link, Cancelled, None, None),
+        ];
+        let summary = summarize(&legs).unwrap();
+        assert_eq!(summary.bottleneck_leg_seq, None);
+        assert_eq!(summary.min_forward_bps, Some(23e6));
+        assert_eq!(summary.min_reverse_bps, Some(17e6));
     }
 
     #[test]

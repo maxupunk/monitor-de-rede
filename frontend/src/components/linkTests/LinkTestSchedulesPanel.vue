@@ -249,7 +249,9 @@ function deviceName(id: number): string {
 }
 
 function targetOf(item: LinkTestSchedule): string {
-  return `${TEST_KINDS[item.kind].label} · ${requestTargetLabel(item, deviceName)}`
+  const target = requestTargetLabel(item, deviceName)
+  // "Servidor → X" já diz o tipo; "Do servidor até… · Servidor → X" repetiria.
+  return item.kind === 'server' ? target : `${TEST_KINDS[item.kind].label} · ${target}`
 }
 
 function openDialog(schedule: LinkTestSchedule | null) {
