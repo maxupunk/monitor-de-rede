@@ -299,6 +299,19 @@ RouterOS como cliente, um servidor de teste do nosso lado):
   (`allowed-addresses4`, RouterOS 7) durante a janela, e restaura no `stop`.
 - Medido: central→MikroTik 42,7 Mbit/s (o RouterOS viu 45,1); MikroTik→central
   1,20 Mbit/s (o RouterOS viu 1,26) — CHR emulado, sem KVM.
+- O **cliente btest nativo** (o do agente) contra o `bandwidth-server` do
+  RouterOS, sem autenticação: os dois sentidos medidos, com amostras ao vivo
+  (teste `btest_contra_routeros_real`, ignorado na suíte; `NM_BTEST_TARGET`).
+
+Com um **OpenWrt 24.10.4** real (imagem oficial `openwrt/rootfs`):
+
+- `tp_prepare` instalou o `mikrotik-btest` e o `iperf3` pelo `openwrt-packages`
+  (opkg), como pedido.
+- `mikrotik_btest` do OpenWrt contra o RouterOS: os dois sentidos. O
+  transporte tira o `\r`, e os quadros de segundo chegam colados numa linha
+  só — o resumo é o **último** valor (o plugin pegava o primeiro).
+- Teste de enlace central↔OpenWrt pelo orquestrador, com iperf3 real: instala,
+  sobe o servidor na 5201, mede os dois sentidos e encerra sem sobras.
 
 ## Consequências
 
