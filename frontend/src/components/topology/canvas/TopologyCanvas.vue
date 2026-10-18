@@ -27,6 +27,12 @@ import type {
 import type { TopologyPosition } from '@/stores/topology'
 import { parseElementId, type TopologyElement } from '@/utils/topology/elements'
 import {
+  polylineBoxes,
+  resolveLabelOverlaps,
+  type LabelRect,
+  type Obstacle,
+} from '@/utils/topology/labelLayout'
+import {
   buildStylesheet,
   edgeRouteClass,
   lodLevel,
@@ -194,6 +200,7 @@ function syncElements(core: Core, elements: TopologyElement[]) {
   })
   updateAnts()
   scheduleScene()
+  scheduleLabels()
 }
 
 // --- Rótulos por nível de zoom (LOD) --------------------------------------------
@@ -217,6 +224,7 @@ function updateLod(core: Core) {
     items.removeClass(LOD_CLASSES)
     if (level !== 'near') items.addClass(`lod-${level}`)
   })
+  scheduleLabels()
 }
 
 function updateDetail(core: Core) {
@@ -228,6 +236,7 @@ function updateDetail(core: Core) {
     if (edges) core.edges().addClass('lod-detail')
     else core.edges().removeClass('lod-detail')
   })
+  scheduleLabels()
 }
 
 // --- Traçado ortogonal -----------------------------------------------------------
@@ -244,6 +253,87 @@ function routeEdges(core: Core, edges: EdgeCollection = core.edges()) {
       edge.removeClass(ROUTE_CLASSES)
       if (wanted) edge.addClass(wanted)
     })
+  })
+  scheduleLabels()
+}
+
+// --- Rótulos de enlace sem sobreposição ------------------------------------------
+
+/** Deslocamento vertical que o arranjo deu ao rótulo de um enlace. */
+const LABEL_DY = '_labelDy'
+let labelsFrame = 0
+
+/**
+ * Refaz o arranjo dos rótulos no próximo quadro (um só, mesmo com vários
+ * pedidos). Só quando muda o que define um rótulo — dados, traçado, nível de
+ * detalhe, seleção, hover —, nunca no pan/zoom: o rótulo vive no modelo.
+ */
+function scheduleLabels() {
+  if (labelsFrame || destroyed) return
+  labelsFrame = requestAnimationFrame(() => {
+    labelsFrame = 0
+    if (cy.value) layoutEdgeLabels(cy.value)
+  })
+}
+
+function labelDy(edge: EdgeSingular): number {
+  return (edge.scratch(LABEL_DY) as number | undefined) ?? 0
+}
+
+function setLabelDy(edge: EdgeSingular, dy: number) {
+  if (labelDy(edge) === dy) return
+  if (dy === 0) {
+    edge.removeStyle('text-margin-y')
+    edge.removeScratch(LABEL_DY)
+  } else {
+    edge.style('text-margin-y', dy)
+    edge.scratch(LABEL_DY, dy)
+  }
+}
+
+/** Afasta os rótulos de enlace que se cobrem (ver `utils/topology/labelLayout`). */
+function layoutEdgeLabels(core: Core) {
+  const labels: LabelRect[] = []
+  core.edges().forEach((edge) => {
+    if (edge.id().startsWith('__')) return
+    const text = String(edge.style('label') ?? '')
+    if (!text || !edge.visible()) {
+      setLabelDy(edge, 0)
+      return
+    }
+    const box = edge.boundingBox({
+      includeNodes: false,
+      includeEdges: false,
+      includeLabels: true,
+      includeMainLabels: true,
+      includeSourceLabels: false,
+      includeTargetLabels: false,
+      includeOverlays: false,
+    })
+    if (!(box.w > 0)) return
+    // A caixa já está deslocada pelo arranjo anterior: volta à posição base.
+    const dy = labelDy(edge)
+    labels.push({ id: edge.id(), x1: box.x1, x2: box.x2, y1: box.y1 - dy, y2: box.y2 - dy })
+  })
+  if (labels.length === 0) return
+  const obstacles: Obstacle[] = core
+    .nodes('[deviceId]')
+    .filter((node) => node.visible())
+    .map((node) => {
+      const b = node.boundingBox({ includeLabels: true, includeOverlays: false })
+      return { x1: b.x1, x2: b.x2, y1: b.y1, y2: b.y2 }
+    })
+  // O traçado de cada enlace (pontas e dobras): um rótulo não fica sobre a
+  // linha de outro enlace — no barramento da árvore, a linha riscaria o texto.
+  core.edges().forEach((edge) => {
+    if (edge.id().startsWith('__') || !edge.visible()) return
+    const bends = edge.segmentPoints() ?? []
+    const points = [edge.sourceEndpoint(), ...bends, edge.targetEndpoint()]
+    obstacles.push(...polylineBoxes(points, edge.id()))
+  })
+  const shifts = resolveLabelOverlaps(labels, obstacles)
+  core.batch(() => {
+    shifts.forEach((dy, id) => setLabelDy(core.getElementById(id) as EdgeSingular, dy))
   })
 }
 
@@ -432,6 +522,8 @@ async function init() {
   core.on('free', 'node', () => emit('drag-state', false))
   core.on('zoom', () => updateLod(core))
   core.on('viewport position', scheduleScene)
+  // Seleção e hover mostram o rótulo de um enlace: entra no arranjo.
+  core.on('select unselect mouseover mouseout', 'edge', scheduleLabels)
   core.on('add remove', scheduleScene)
 
   resizeObserver = new ResizeObserver(() => {
@@ -475,6 +567,7 @@ onBeforeUnmount(() => {
   destroyed = true
   if (sceneFrame) cancelAnimationFrame(sceneFrame)
   if (antsFrame) cancelAnimationFrame(antsFrame)
+  if (labelsFrame) cancelAnimationFrame(labelsFrame)
   resizeObserver?.disconnect()
   sceneListeners.clear()
   cy.value?.destroy()
