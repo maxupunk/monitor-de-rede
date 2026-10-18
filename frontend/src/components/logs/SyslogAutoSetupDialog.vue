@@ -330,7 +330,12 @@ import DeviceLoginPicker from '@/components/devices/DeviceLoginPicker.vue'
 import { withAccess } from '@/composables/useDeviceAccess'
 import type { CredentialView } from '@/bindings/CredentialView'
 import { usePluginsStore } from '@/stores/plugins'
-import { credentialKindFor, credentialReady, pickShellCredential } from '@/utils/deviceCredentials'
+import {
+  credentialKindFor,
+  credentialReady,
+  missingAccessOf,
+  pickShellCredential,
+} from '@/utils/deviceCredentials'
 import { operatingSystemSourceLabel, useOperatingSystemsStore } from '@/stores/operatingSystems'
 import {
   buildProvisionAddressOptions,
@@ -725,7 +730,7 @@ async function submit(): Promise<void> {
     )
       return
     error.value = mensagemDeErro(erro)
-    errorHint.value = pista(error.value)
+    errorHint.value = pista(erro, error.value)
   } finally {
     running.value = false
   }
@@ -747,10 +752,11 @@ function mensagemDeErro(erro: unknown): string {
  * O backend já explica **o que** aconteceu; o que faltava era o que fazer a
  * respeito, e é isso que separa um erro útil de um erro que só interrompe.
  */
-function pista(mensagem: string): string {
+function pista(erro: unknown, mensagem: string): string {
+  // Falta de acesso já tem o próprio caminho (o formulário único, aberto pelo
+  // `withAccess`); reconhecida pelo código do erro, nunca pelo texto.
+  if (missingAccessOf(erro)) return ''
   const texto = mensagem.toLowerCase()
-  // A mensagem sobre a credencial salva já diz o que fazer.
-  if (texto.includes('credencial')) return ''
   if (texto.includes('recusad') || texto.includes('senha')) {
     return 'Confirme se o usuário tem permissão de administrador para alterar a configuração de logs do equipamento.'
   }

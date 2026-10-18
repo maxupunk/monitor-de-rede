@@ -317,6 +317,14 @@ describe('telas do teste de enlace', () => {
     expect(post).toHaveBeenCalledTimes(4)
     expect(body()).toContain('Pronto: o que faltava foi feito')
     expect(button('Iniciar teste')?.hasAttribute('disabled')).toBe(false)
+    // Volta para onde estava: o diálogo de acesso fechou e o assistente
+    // continua aberto no mesmo passo (o plano), sem ter saído da tela.
+    const accessDialogOpen = [...document.body.querySelectorAll('.v-overlay--active')].some((o) =>
+      o.textContent?.includes('Salvar acesso')
+    )
+    expect(accessDialogOpen).toBe(false)
+    expect(body()).toContain('Ordem das medições')
+    expect(button('Ver o plano')).toBeUndefined()
     settleAccess(null)
   })
 
