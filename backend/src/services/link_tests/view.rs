@@ -52,6 +52,7 @@ pub fn leg(row: &link_test_legs::Model, with_samples: bool) -> LinkTestLeg {
             duration_s: u8::try_from(row.duration_s).unwrap_or_default(),
             runnable: row.runnable,
             issues: json_or(&row.issues, Vec::new()),
+            fixes: Vec::new(),
         },
         status: from_db(&row.status).unwrap_or(LinkTestStepStatus::Pending),
         stages: json_or(&row.stages, LinkTestStage::all_pending()),

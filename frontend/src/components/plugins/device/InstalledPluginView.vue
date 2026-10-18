@@ -224,6 +224,7 @@ import SettingsForm from '@/components/plugins/settings/SettingsForm.vue'
 import { defaultsOf, normalizeValue } from '@/utils/pluginSettings'
 import PluginAbout from './PluginAbout.vue'
 import DeviceItemList from './DeviceItemList.vue'
+import { withAccess } from '@/composables/useDeviceAccess'
 
 const props = defineProps<{
   item: DevicePluginItem
@@ -328,13 +329,13 @@ async function runAction(params: Record<string, unknown>, confirmWrite: boolean)
   runDialog.presentation = action
   runDialog.open = true
   try {
-    runDialog.runId = await store.runAction(
-      props.deviceId,
-      props.item.plugin.id,
-      action.id,
-      params,
-      confirmWrite
+    // Sem o acesso, o formulário dele abre aqui mesmo e a ação roda de novo.
+    const runId = await withAccess(
+      () => store.runAction(props.deviceId, props.item.plugin.id, action.id, params, confirmWrite),
+      { retry: action.effect === 'read' ? 'auto' : 'confirm', what: action.title }
     )
+    if (runId === null) runDialog.open = false
+    else runDialog.runId = runId
   } catch (err: unknown) {
     runDialog.open = false
     notify(describe(err, 'Falha ao iniciar a execução'), 'error')
@@ -347,7 +348,10 @@ async function validate() {
   runDialog.kind = 'json'
   runDialog.open = true
   try {
-    runDialog.runId = await store.validatePlugin(props.deviceId, props.item.plugin.id)
+    runDialog.runId = await withAccess(
+      () => store.validatePlugin(props.deviceId, props.item.plugin.id),
+      { retry: 'auto', what: 'Validação no equipamento' }
+    )
   } catch (err: unknown) {
     runDialog.open = false
     notify(describe(err, 'Falha ao iniciar a validação'), 'error')

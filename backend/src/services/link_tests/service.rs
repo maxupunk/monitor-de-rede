@@ -9,8 +9,8 @@ use super::{
     env::LinkTestEnv,
     events, guard,
     model::{
-        as_db, from_db, LinkTest, LinkTestPage, LinkTestPlan, LinkTestQuery, LinkTestRequest,
-        LinkTestStatus, LinkTestStepStatus,
+        as_db, from_db, LinkTest, LinkTestFix, LinkTestPage, LinkTestPlan, LinkTestQuery,
+        LinkTestRequest, LinkTestStatus, LinkTestStepStatus,
     },
     plan,
     repository::{self, Requester},
@@ -50,6 +50,15 @@ pub async fn start(
     let reservation = guard::reserve(&built.device_ids(), &|id| built.device_name(id))?;
     if !built.view.blocking.is_empty() {
         return Err(AppError::business_rule(built.view.blocking.join("; ")));
+    }
+    // Só faltam passos (instalar, cadastrar o acesso), mas nenhuma perna
+    // roda sem eles.
+    if !built.legs.iter().any(|leg| leg.view.runnable) {
+        let steps: Vec<&str> = built.view.fixes.iter().map(LinkTestFix::message).collect();
+        return Err(AppError::business_rule(format!(
+            "Antes de testar, falta: {}",
+            steps.join("; ")
+        )));
     }
     let (test, legs) = repository::insert(&env.db, &built, requester).await?;
     reservation.bind(test.id);

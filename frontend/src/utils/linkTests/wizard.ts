@@ -1,16 +1,19 @@
 /**
  * Regras puras do assistente de teste de enlace (e do diálogo de
  * agendamento, que escolhe o mesmo alvo): rascunho do alvo, validação, o
- * pedido enviado à API, o que impede rodar e a dica acionável de cada
- * problema do plano.
+ * pedido enviado à API, o que impede rodar, os passos que faltam e a dica
+ * de cada problema do plano.
  */
 import type {
   LinkTestEndpoint,
+  LinkTestFix,
   LinkTestKind,
   LinkTestPlan,
+  LinkTestPlanLeg,
   LinkTestRequest,
   LinkTestSpecInput,
 } from '@/types/linkTests'
+import { transportLabel } from '@/utils/deviceCredentials'
 import { normalizeSpec } from './spec'
 
 export interface LinkTestTargetDraft {
@@ -90,24 +93,50 @@ export function runBlockers(plan: LinkTestPlan | null, canWrite: boolean): strin
   if (!canWrite) reasons.push(READ_ONLY_TEST_REASON)
   reasons.push(...plan.blocking)
   if (plan.blocking.length === 0 && !plan.legs.some((leg) => leg.runnable)) {
-    reasons.push('Nenhuma perna do plano pode rodar — veja os problemas de cada uma abaixo.')
+    reasons.push(
+      plan.fixes.length > 0
+        ? 'Faça o que falta (no topo do plano) para liberar o teste.'
+        : 'Nenhuma perna do plano pode rodar — veja os problemas de cada uma abaixo.'
+    )
   }
   return reasons
 }
 
+/** Identidade de um passo, estável entre um plano e o seguinte. */
+export function fixKey(fix: LinkTestFix): string {
+  return fix.kind === 'install_plugin'
+    ? `install:${fix.deviceId}:${fix.pluginId}`
+    : `access:${fix.deviceId}:${fix.transport}`
+}
+
+/** O passo, como item da lista "Antes de testar, falta". */
+export function fixLabel(fix: LinkTestFix): string {
+  return fix.kind === 'install_plugin'
+    ? `Instalar o plugin «${fix.pluginName}» em ${fix.deviceName}`
+    : `Cadastrar o acesso ${transportLabel(fix.transport)} de ${fix.deviceName}`
+}
+
+/** Os problemas da perna que nenhum passo resolve ali mesmo. */
+export function legOpenIssues(leg: Pick<LinkTestPlanLeg, 'issues' | 'fixes'>): string[] {
+  return leg.issues.filter((issue) => !leg.fixes.some((fix) => fix.message === issue))
+}
+
+/** A perna só espera um passo (instalar, cadastrar o acesso) — não é erro. */
+export function legNeedsSteps(leg: LinkTestPlanLeg): boolean {
+  return !leg.runnable && leg.fixes.length > 0 && legOpenIssues(leg).length === 0
+}
+
 export interface IssueHint {
   text: string
-  /** Rota que resolve o problema (ficha do equipamento na seção certa). */
+  /** A ficha do equipamento citado no problema. */
   to: string | null
   actionLabel: string | null
 }
 
-const CREDENTIAL_PATTERN = /credencia|ssh|senha|login|usu[aá]rio|autentica/i
-const PLUGIN_PATTERN = /plugin|instal|pacote|ativ/i
-
 /**
- * Dica acionável para um problema do plano: se o texto cita um equipamento
- * do plano e fala de credencial ou plugin, aponta para a seção da ficha dele.
+ * Dica para um problema do plano que não tem passo ali mesmo (sem IP, por
+ * exemplo): se o texto cita um equipamento do plano, aponta para a ficha
+ * dele. Plugin e acesso que faltam não chegam aqui — viram `fixes`.
  */
 export function issueHint(
   text: string,
@@ -120,16 +149,6 @@ export function issueHint(
     .find((endpoint) => lowered.includes(endpoint.name.toLowerCase()))
   const deviceId = device?.deviceId ?? (endpoints.length === 1 ? endpoints[0].deviceId : null)
   if (deviceId === null || deviceId === undefined) return { text, to: null, actionLabel: null }
-  if (CREDENTIAL_PATTERN.test(text)) {
-    return {
-      text,
-      to: `/devices/${deviceId}?tab=plugins&section=credentials`,
-      actionLabel: 'Cadastrar credencial',
-    }
-  }
-  if (PLUGIN_PATTERN.test(text)) {
-    return { text, to: `/devices/${deviceId}?tab=plugins`, actionLabel: 'Abrir plugins' }
-  }
   return { text, to: `/devices/${deviceId}`, actionLabel: 'Abrir equipamento' }
 }
 

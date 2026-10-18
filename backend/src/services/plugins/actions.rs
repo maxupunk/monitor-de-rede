@@ -13,7 +13,7 @@ use super::{
     service,
 };
 use crate::{
-    dtos::plugins::{AutoAcceptState, DevicePluginsView},
+    dtos::plugins::{AutoAcceptState, DeviceAccessView, DevicePluginsView},
     models::devices,
     services::{
         agents::{policy::Permission, routes::route_options},
@@ -51,6 +51,22 @@ pub async fn device_view(ctx: &AppContext, device_id: i64) -> AppResult<DevicePl
         credentials: credentials::list(&ctx.db, device_id).await?,
         runs: runs::recent(&ctx.db, device_id, RECENT_RUNS).await?,
         agents,
+    })
+}
+
+/// O acesso do equipamento: as credenciais (sem senha) e os agentes por onde
+/// ele pode sair.
+///
+/// # Errors
+///
+/// Dispositivo inexistente ou erro do banco.
+pub async fn access_view(ctx: &AppContext, device_id: i64) -> AppResult<DeviceAccessView> {
+    let device = device(ctx, device_id).await?;
+    Ok(DeviceAccessView {
+        device_id,
+        device_name: device.name,
+        credentials: credentials::list(&ctx.db, device_id).await?,
+        agents: route_options(ctx, Permission::DeviceIo).await?,
     })
 }
 

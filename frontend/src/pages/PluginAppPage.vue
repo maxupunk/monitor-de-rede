@@ -176,6 +176,7 @@
                   @apply-patch="applyPatch"
                   @apply-next="applyNext"
                   @open-run="openTranscript"
+                  @access-saved="retryWithAccess"
                 />
               </v-expansion-panel-text>
             </v-expansion-panel>
@@ -247,6 +248,7 @@ import FleetMembers from '@/components/plugins/fleet/FleetMembers.vue'
 import FleetTools from '@/components/plugins/fleet/FleetTools.vue'
 import SettingsForm from '@/components/plugins/settings/SettingsForm.vue'
 import { confirm } from '@/composables/useConfirm'
+import { askMemberAccess } from '@/composables/useFleetAccess'
 import { useAuthStore } from '@/stores/auth'
 import type { Device } from '@/stores/devices'
 import { usePluginAppsStore } from '@/stores/pluginApps'
@@ -481,6 +483,40 @@ async function applyPatch(batch: PluginBatchView) {
   }
 }
 
+/**
+ * O acesso que faltava a um equipamento do lote foi salvo: a frota é relida e
+ * a ação roda de novo só nele — direto numa leitura, com confirmação numa
+ * escrita. Ação com parâmetros não se repete sozinha: os valores do lote não
+ * voltam do servidor.
+ */
+async function retryWithAccess(batch: PluginBatchView, device: BatchDevice) {
+  await store.loadFleet(pluginId.value).catch(() => undefined)
+  const action = deviceActionOf(fleetActionOf(batch.action))
+  const properties = action?.params?.properties
+  const hasParams =
+    typeof properties === 'object' && properties !== null && Object.keys(properties).length > 0
+  if (!action || hasParams) {
+    notify(`Acesso salvo. Rode «${batch.title}» de novo para incluir ${device.deviceName}.`)
+    return
+  }
+  const write = action.effect !== 'read'
+  if (write) {
+    const ok = await confirm({
+      title: batch.title,
+      message: `Acesso salvo. Rodar «${batch.title}» de novo em ${device.deviceName}? Isso altera o equipamento.`,
+      confirmText: 'Rodar',
+      confirmColor: 'warning',
+    })
+    if (!ok) return
+  }
+  try {
+    await store.runAction(pluginId.value, batch.action, [device.deviceId], write)
+    notify(`Acesso salvo. «${batch.title}» rodando de novo em ${device.deviceName}.`)
+  } catch (err: unknown) {
+    notify(describe(err, 'Falha ao rodar de novo'), 'error')
+  }
+}
+
 function openTranscript(device: BatchDevice) {
   const batch = view.value?.batches.find((item) =>
     item.devices.some((entry) => entry.runId === device.runId)
@@ -497,17 +533,23 @@ function openTranscript(device: BatchDevice) {
 // --- Equipamentos e configuração guardada ---
 
 /**
- * O equipamento cadastrado daqui já entra no aplicativo. Sem o acesso
- * (SSH/HTTP) ele ainda não responde: o cartão dele mostra onde cadastrar.
+ * O equipamento cadastrado daqui já entra no aplicativo e, sem o acesso que o
+ * plugin usa, o formulário dele abre na hora ("Agora não" deixa para o cartão).
  */
 async function onDeviceCreated(device: Device) {
   try {
     await store.addMember(pluginId.value, device.id)
     tab.value = 'members'
-    notify(`${device.name} entrou em ${title.value}. Cadastre o acesso dele para usar.`)
   } catch (err: unknown) {
     notify(describe(err, 'Equipamento cadastrado, mas não entrou no aplicativo'), 'error')
+    return
   }
+  const saved = await askMemberAccess(pluginId.value, device.id)
+  notify(
+    saved
+      ? `${device.name} entrou em ${title.value}, com o acesso salvo.`
+      : `${device.name} entrou em ${title.value}.`
+  )
 }
 
 function resetDraft() {

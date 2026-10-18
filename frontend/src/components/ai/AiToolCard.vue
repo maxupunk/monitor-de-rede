@@ -131,6 +131,17 @@
       <div v-else-if="tool.status === 'error' && errorText" class="text-body-small text-error">
         {{ errorText }}
       </div>
+      <div v-if="missingAccess" class="d-flex flex-wrap align-center ga-2 mt-2">
+        <DeviceAccessButton
+          :device-id="missingAccess.deviceId"
+          :transport="missingAccess.transport"
+          :reason="errorText ?? undefined"
+          @saved="accessSaved = true"
+        />
+        <span v-if="accessSaved" class="text-body-small">
+          Acesso salvo. Peça ao assistente para tentar de novo.
+        </span>
+      </div>
     </div>
 
     <div v-if="tool.chart" class="px-2 pb-2">
@@ -159,6 +170,8 @@ import { computed, ref } from 'vue'
 import { useAiStore, type AiToolCallState } from '@/stores/ai'
 import type { AiToolStatus } from '@/utils/aiChatStream'
 import { aiRiskPresentation } from '@/utils/aiRisk'
+import DeviceAccessButton from '@/components/devices/access/DeviceAccessButton.vue'
+import { missingAccessIn } from '@/utils/deviceCredentials'
 import AiToolChart from './AiToolChart.vue'
 import { aiToolMeta, formatToolArgs, isActiveTestTool, isDeviceAccessTool } from './aiToolMeta'
 
@@ -220,6 +233,10 @@ const cardColor = computed(() => {
   if (props.tool.status === 'error') return 'error'
   return undefined
 })
+
+/** A ferramenta parou por falta do acesso ao equipamento: o cartão oferece cadastrá-lo. */
+const missingAccess = computed(() => missingAccessIn(props.tool.result))
+const accessSaved = ref(false)
 
 const errorText = computed(() => {
   const error = props.tool.result?.error

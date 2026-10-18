@@ -8,8 +8,12 @@ import {
   requestFromDraft,
   runBlockers,
   targetErrors,
+  fixKey,
+  fixLabel,
+  legNeedsSteps,
+  legOpenIssues,
 } from '@/utils/linkTests/wizard'
-import { endpoint, plan } from './fixtures'
+import { accessFix, endpoint, installFix, plan } from './fixtures'
 
 describe('assistente do teste de enlace', () => {
   it('rascunho a partir do pedido do mapa (ou vazio)', () => {
@@ -69,18 +73,38 @@ describe('assistente do teste de enlace', () => {
     expect(runBlockers(stuck, true)[0]).toContain('Nenhuma perna')
   })
 
-  it('dica acionável aponta para a seção certa da ficha do equipamento citado', () => {
+  it('dica do problema sem passo aponta para a ficha do equipamento citado', () => {
     const ends = [endpoint(1, 'OpenWrt-Sala'), endpoint(2, 'MikroTik-Torre')]
-    expect(issueHint('Cadastre a credencial SSH de MikroTik-Torre', ends)).toEqual({
-      text: 'Cadastre a credencial SSH de MikroTik-Torre',
-      to: '/devices/2?tab=plugins&section=credentials',
-      actionLabel: 'Cadastrar credencial',
+    expect(issueHint('MikroTik-Torre não tem IP cadastrado', ends)).toEqual({
+      text: 'MikroTik-Torre não tem IP cadastrado',
+      to: '/devices/2',
+      actionLabel: 'Abrir equipamento',
     })
-    expect(issueHint('OpenWrt-Sala sem o plugin openwrt-link-test ativo', ends).to).toBe(
-      '/devices/1?tab=plugins'
-    )
     expect(issueHint('Sem caminho conhecido', ends).to).toBeNull()
     expect(planEndpoints(plan())).toHaveLength(2)
+  })
+
+  it('passos que faltam: rótulo, identidade e a perna que só espera por eles', () => {
+    const install = installFix()
+    const access = accessFix()
+    expect(fixLabel(install)).toBe('Instalar o plugin «OpenWrt — teste de enlace» em AP-terraço')
+    expect(fixLabel(access)).toBe('Cadastrar o acesso SSH de AP-terraço')
+    expect(fixKey(install)).toBe('install:7:30')
+    expect(fixKey(access)).toBe('access:7:ssh')
+
+    const waiting = plan({ fixes: [install, access] })
+    waiting.legs[0].runnable = false
+    waiting.legs[0].issues = [install.message, access.message]
+    waiting.legs[0].fixes = [install, access]
+    expect(legOpenIssues(waiting.legs[0])).toEqual([])
+    expect(legNeedsSteps(waiting.legs[0])).toBe(true)
+    expect(runBlockers(waiting, true)).toEqual([
+      'Faça o que falta (no topo do plano) para liberar o teste.',
+    ])
+
+    waiting.legs[0].issues.push('AP-terraço não tem IP cadastrado')
+    expect(legOpenIssues(waiting.legs[0])).toEqual(['AP-terraço não tem IP cadastrado'])
+    expect(legNeedsSteps(waiting.legs[0])).toBe(false)
   })
 })
 

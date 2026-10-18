@@ -25,8 +25,9 @@ use super::{
     env::{BtestArmer, CentralAddress, DriverResolver, LinkTestEnv, PluginInvoker, ServerArmer},
     events, guard, janitor,
     model::{
-        as_db, LinkTest, LinkTestKind, LinkTestOrigin, LinkTestRequest, LinkTestScheduleInput,
-        LinkTestSide, LinkTestSpecInput, LinkTestStageKey, LinkTestStatus, LinkTestStepStatus,
+        as_db, LinkTest, LinkTestFix, LinkTestKind, LinkTestOrigin, LinkTestRequest,
+        LinkTestScheduleInput, LinkTestSide, LinkTestSpecInput, LinkTestStageKey, LinkTestStatus,
+        LinkTestStepStatus,
     },
     plan, repository,
     repository::Requester,
@@ -44,7 +45,9 @@ use crate::{
             sample_channel, TestDirection, TestProtocol, ThroughputEngine, ThroughputSpec,
         },
         plugins::{
+            credentials::{self, CredentialInput, SecretStorage},
             invoke::{RunOutcome, RunStatus, ServiceRunRequest},
+            manifest::TransportKind,
             package::PluginPackage,
             runtime::{ProgressFlow, ProgressSample},
             service::{self as plugin_service, source},
@@ -507,6 +510,127 @@ async fn plano_de_caminho_tem_uma_perna_por_enlace() {
     let edges: Vec<_> = built.view.legs.iter().map(|leg| leg.edge_id).collect();
     assert_eq!(edges, [Some(l1), Some(l2)]);
     assert_eq!(built.view.legs[1].seq, 2);
+}
+
+/// Um OpenWrt identificado (sistema escolhido no cadastro), sem plugin.
+async fn openwrt_sem_plugin(db: &DatabaseConnection, name: &str) -> devices::Model {
+    devices::ActiveModel {
+        name: Set(name.into()),
+        r#type: Set("router".into()),
+        status: Set("online".into()),
+        ip_address: Set(Some("10.0.9.1".into())),
+        operating_system: Set(Some("openwrt".into())),
+        ..Default::default()
+    }
+    .insert(db)
+    .await
+    .unwrap()
+}
+
+fn ssh(secret: &str) -> CredentialInput {
+    CredentialInput {
+        kind: TransportKind::Ssh,
+        username: "root".into(),
+        secret: Some(secret.into()),
+        storage: SecretStorage::Vault,
+        port: None,
+        https: None,
+        via_probe_id: None,
+    }
+}
+
+#[tokio::test]
+#[serial(link_tests)]
+async fn plano_oferece_instalar_o_plugin_e_cadastrar_o_acesso() {
+    let env = env_with(db().await, Arc::default(), None);
+    let ap = openwrt_sem_plugin(&env.db, "AP-terraço").await;
+    let pedido = LinkTestRequest {
+        target_device_id: Some(ap.id),
+        ..request(LinkTestKind::Server)
+    };
+    let built = plan::build(&env, &pedido).await.unwrap();
+    let view = &built.view;
+    let leg = &view.legs[0];
+    assert!(!leg.runnable);
+    assert!(
+        view.blocking.is_empty(),
+        "só faltam passos: {:?}",
+        view.blocking
+    );
+    assert_eq!(view.fixes.len(), 2, "{:?}", view.fixes);
+    let LinkTestFix::InstallPlugin {
+        plugin_id,
+        plugin_slug,
+        device_id,
+        ..
+    } = &view.fixes[0]
+    else {
+        panic!("primeiro, instalar: {:?}", view.fixes)
+    };
+    assert_eq!(plugin_slug, "openwrt-link-test");
+    assert_eq!(*device_id, ap.id);
+    assert!(matches!(
+        &view.fixes[1],
+        LinkTestFix::AddCredential { transport: TransportKind::Ssh, device_id, .. } if *device_id == ap.id
+    ));
+    assert_eq!(leg.fixes, view.fixes, "a perna diz os mesmos passos");
+    assert_eq!(
+        leg.engine,
+        Some(ThroughputEngine::Iperf3),
+        "já mostra como vai medir"
+    );
+    let erro = service::start(Arc::clone(&env), &built.request, user())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&erro, AppError::BusinessRule(text) if text.starts_with("Antes de testar, falta")),
+        "{erro:?}"
+    );
+
+    // Instalado (o embutido desligado liga junto), falta só o acesso.
+    plugin_service::install(&env.db, &ap, *plugin_id, None)
+        .await
+        .unwrap();
+    let built = plan::build(&env, &pedido).await.unwrap();
+    assert!(matches!(
+        built.view.fixes.as_slice(),
+        [LinkTestFix::AddCredential { message, .. }] if message == "AP-terraço está sem acesso SSH"
+    ));
+    assert!(built.view.blocking.is_empty(), "{:?}", built.view.blocking);
+
+    // Com o acesso, a perna roda.
+    credentials::upsert(&env.db, ap.id, ssh("segredo"))
+        .await
+        .unwrap();
+    let built = plan::build(&env, &pedido).await.unwrap();
+    assert!(built.view.fixes.is_empty(), "{:?}", built.view.fixes);
+    assert!(
+        built.view.legs[0].runnable,
+        "{:?}",
+        built.view.legs[0].issues
+    );
+}
+
+#[tokio::test]
+#[serial(link_tests)]
+async fn sistema_desconhecido_nao_ganha_sugestao() {
+    let env = env_with(db().await, Arc::default(), None);
+    let switch = device(&env.db, "Switch", "10.0.0.2", false).await;
+    let built = plan::build(
+        &env,
+        &LinkTestRequest {
+            target_device_id: Some(switch.id),
+            ..request(LinkTestKind::Server)
+        },
+    )
+    .await
+    .unwrap();
+    assert!(built.view.fixes.is_empty(), "{:?}", built.view.fixes);
+    assert!(
+        built.view.blocking[0].contains("Switch não tem plugin de teste de enlace"),
+        "{:?}",
+        built.view.blocking
+    );
 }
 
 // --- Execução ----------------------------------------------------------------

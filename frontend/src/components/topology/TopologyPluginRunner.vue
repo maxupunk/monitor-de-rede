@@ -31,6 +31,7 @@ import { reactive } from 'vue'
 import type { OutputKind } from '@/bindings/OutputKind'
 import type { PluginAction } from '@/bindings/PluginAction'
 import { usePluginsStore } from '@/stores/plugins'
+import { withAccess } from '@/composables/useDeviceAccess'
 import type { TopologyNode, TopologyPluginAction } from '@/stores/topology'
 import PluginActionDialog from '@/components/plugins/PluginActionDialog.vue'
 import PluginRunDialog from '@/components/plugins/PluginRunDialog.vue'
@@ -91,14 +92,15 @@ async function run(params: Record<string, unknown>, confirmWrite: boolean) {
   runDialog.kind = action.output
   runDialog.presentation = action
   runDialog.open = true
+  const pluginId = actionDialog.pluginId
   try {
-    runDialog.runId = await store.runAction(
-      deviceId,
-      actionDialog.pluginId,
-      action.id,
-      params,
-      confirmWrite
+    // Sem o acesso, o formulário dele abre aqui mesmo e a ação roda de novo.
+    const runId = await withAccess(
+      () => store.runAction(deviceId, pluginId, action.id, params, confirmWrite),
+      { retry: action.effect === 'read' ? 'auto' : 'confirm', what: action.title }
     )
+    if (runId === null) runDialog.open = false
+    else runDialog.runId = runId
   } catch (err: unknown) {
     runDialog.open = false
     emit('error', describe(err, 'Falha ao iniciar a execução'))

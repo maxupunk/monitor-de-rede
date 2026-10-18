@@ -139,18 +139,14 @@
               </v-chip>
               {{ member.reasons.join('; ') }}
             </div>
-            <v-btn
+            <DeviceAccessButton
               v-if="!member.credentialsReady"
-              size="small"
-              color="warning"
-              variant="flat"
-              prepend-icon="mdi-key-outline"
+              :device-id="member.deviceId"
+              :transport="member.missingAccess ?? 'ssh'"
+              :reason="accessNeededReason(member.name, member.missingAccess ?? 'ssh')"
               class="mt-3"
-              :to="{ path: '/devices/' + member.deviceId, query: { tab: 'plugins' } }"
-              @click.stop
-            >
-              Cadastrar o acesso (SSH)
-            </v-btn>
+              @saved="accessSaved(member)"
+            />
           </v-card-text>
         </v-card>
       </v-col>
@@ -182,10 +178,13 @@ import { computed, reactive, ref } from 'vue'
 import type { FleetMember } from '@/bindings/FleetMember'
 import type { FleetView } from '@/bindings/FleetView'
 import { confirm } from '@/composables/useConfirm'
+import { askMemberAccess } from '@/composables/useFleetAccess'
 import { usePluginAppsStore } from '@/stores/pluginApps'
+import { accessNeededReason } from '@/utils/deviceCredentials'
 import { valueAt } from '@/utils/fleetContext'
 import { compatPresentation, stateColor, stateLabel } from '@/utils/pluginPresentation'
 import { defaultsOf, normalizeValue } from '@/utils/pluginSettings'
+import DeviceAccessButton from '@/components/devices/access/DeviceAccessButton.vue'
 import SettingsForm from '../settings/SettingsForm.vue'
 
 const props = defineProps<{
@@ -306,17 +305,36 @@ function describe(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback
 }
 
+/** Adiciona e, se faltar o acesso que o plugin usa, já o pede ali mesmo. */
 async function add() {
-  if (candidateId.value === null) return
+  const deviceId = candidateId.value
+  if (deviceId === null) return
   adding.value = true
   try {
-    await store.addMember(props.view.plugin.id, candidateId.value)
+    await store.addMember(props.view.plugin.id, deviceId)
     candidateId.value = null
-    emit('notify', 'Equipamento adicionado.', 'success')
   } catch (err: unknown) {
     emit('notify', describe(err, 'Falha ao adicionar'), 'error')
+    return
   } finally {
     adding.value = false
+  }
+  // O aviso vem depois do formulário do acesso, para não cobrir os botões dele.
+  const saved = await askMemberAccess(props.view.plugin.id, deviceId)
+  emit(
+    'notify',
+    saved ? 'Equipamento adicionado, com o acesso salvo.' : 'Equipamento adicionado.',
+    'success'
+  )
+}
+
+/** O acesso do cartão foi salvo: a frota é relida (o cartão deixa de dizer "Sem acesso"). */
+async function accessSaved(member: FleetMember) {
+  try {
+    await store.loadFleet(props.view.plugin.id)
+    emit('notify', `Acesso de ${member.name} salvo.`, 'success')
+  } catch (err: unknown) {
+    emit('notify', describe(err, 'Falha ao reler o aplicativo'), 'error')
   }
 }
 

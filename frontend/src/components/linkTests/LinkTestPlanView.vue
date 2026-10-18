@@ -1,5 +1,7 @@
 <template>
   <div class="plan-view">
+    <LinkTestFixList :fixes="plan.fixes" :refreshing="refreshing" @fixed="emit('fixed')" />
+
     <div class="facts mb-3">
       <div class="fact">
         <v-icon color="primary">mdi-timer-outline</v-icon>
@@ -95,9 +97,9 @@
         v-for="leg in plan.legs"
         :key="leg.seq"
         class="plan-leg"
-        :class="{ blocked: !leg.runnable }"
+        :class="{ blocked: !leg.runnable && !legNeedsSteps(leg), waiting: legNeedsSteps(leg) }"
       >
-        <v-avatar :color="leg.runnable ? 'primary' : 'error'" size="28" class="flex-shrink-0">
+        <v-avatar :color="legColor(leg)" size="28" class="flex-shrink-0">
           <span class="seq">{{ leg.seq }}</span>
         </v-avatar>
         <div class="flex-grow-1 overflow-hidden">
@@ -128,7 +130,17 @@
             >
               {{ engineLabel(leg.engine) }}
             </v-chip>
-            <v-chip v-if="!leg.runnable" size="x-small" color="error" variant="flat" label>
+            <v-chip
+              v-if="legNeedsSteps(leg)"
+              size="x-small"
+              color="warning"
+              variant="flat"
+              prepend-icon="mdi-format-list-checks"
+              label
+            >
+              Falta um passo
+            </v-chip>
+            <v-chip v-else-if="!leg.runnable" size="x-small" color="error" variant="flat" label>
               Não vai rodar
             </v-chip>
             <span class="text-body-small meta">
@@ -136,7 +148,11 @@
             </span>
           </div>
           <ul v-if="leg.issues.length > 0" class="issues mt-1">
-            <li v-for="(issue, index) in leg.issues" :key="index" class="leg-issue">
+            <li v-for="fix in leg.fixes" :key="fixKey(fix)" class="leg-issue">
+              <v-icon size="14" color="warning">mdi-format-list-checks</v-icon>
+              <span>{{ fix.message }} — resolva em “Antes de testar, falta”.</span>
+            </li>
+            <li v-for="(issue, index) in legOpenIssues(leg)" :key="index" class="leg-issue">
               <v-icon size="14" color="error">mdi-alert-circle</v-icon>
               <span>{{ issue }}</span>
               <v-btn
@@ -159,7 +175,10 @@
 </template>
 
 <script setup lang="ts">
-/** O plano do backend, legível: tempo, avisos, bloqueios acionáveis e pernas. */
+/**
+ * O plano do backend, legível: o que falta fazer (com o botão de cada passo),
+ * tempo, avisos, bloqueios e pernas.
+ */
 import { computed } from 'vue'
 import type { LinkTestPlan, LinkTestPlanLeg, LinkTestSpec } from '@/types/linkTests'
 import {
@@ -171,12 +190,31 @@ import {
   serverSideLabel,
 } from '@/utils/linkTests/presentation'
 import { estimatedDurationText, specSummary } from '@/utils/linkTests/spec'
-import { issueHint, planEndpoints } from '@/utils/linkTests/wizard'
+import {
+  fixKey,
+  issueHint,
+  legNeedsSteps,
+  legOpenIssues,
+  planEndpoints,
+} from '@/utils/linkTests/wizard'
+import LinkTestFixList from './LinkTestFixList.vue'
 
 const props = defineProps<{
   plan: LinkTestPlan
   spec: LinkTestSpec
+  /** O plano está sendo refeito depois de um passo. */
+  refreshing?: boolean
 }>()
+
+const emit = defineEmits<{
+  /** Um passo foi feito: o assistente refaz o plano. */
+  fixed: []
+}>()
+
+function legColor(leg: LinkTestPlanLeg): string {
+  if (leg.runnable) return 'primary'
+  return legNeedsSteps(leg) ? 'warning' : 'error'
+}
 
 const runnableCount = computed(() => props.plan.legs.filter((leg) => leg.runnable).length)
 /** Nada roda: não há tempo a estimar (nem enlace a saturar). */
@@ -244,6 +282,9 @@ function legMeta(leg: LinkTestPlanLeg): string {
 }
 .plan-leg.blocked {
   border-color: rgb(var(--v-theme-error));
+}
+.plan-leg.waiting {
+  border-color: rgb(var(--v-theme-warning));
 }
 .leg-issue {
   list-style: none;

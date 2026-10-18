@@ -584,10 +584,7 @@ pub async fn activate_for_device<C: ConnectionTrait>(
     let mut activated = Vec::new();
     for model in dormant {
         let package = package_of(&model)?;
-        let fits = compat::names_platform(&package.manifest, &facts)
-            && compat::evaluate(&package.manifest, &package.compatibility, &facts).level
-                != compat::Compat::Incompatible;
-        if fits {
+        if compat::fits_platform(&package.manifest, &package.compatibility, &facts) {
             let name = model.name.clone();
             set_enabled(db, model.id, true).await?;
             activated.push(name);
@@ -791,6 +788,15 @@ pub async fn installed_active<C: ConnectionTrait>(
         a_device.cmp(b_device).then_with(|| a.name.cmp(&b.name))
     });
     Ok(found)
+}
+
+/// Instalar deixa o plugin ativo: o que já está ativo e o embutido desligado
+/// (que [`install`] liga). Um próprio desligado religa como rascunho ou
+/// testado — ainda não roda sozinho.
+#[must_use]
+pub fn active_once_installed(model: &plugins::Model) -> bool {
+    model.status == status::ACTIVE
+        || (model.status == status::DISABLED && model.source == source::BUILTIN)
 }
 
 /// Instala o plugin no equipamento — dá a ele uma aba. Não acessa o

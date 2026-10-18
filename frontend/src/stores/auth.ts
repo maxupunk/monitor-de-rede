@@ -57,6 +57,11 @@ export const useAuthStore = defineStore('auth', () => {
   const isAuthenticated = computed(() => Boolean(token.value))
   const isAdmin = computed(() => user.value?.role === 'admin')
   const canWrite = computed(() => user.value?.role === 'admin' || user.value?.role === 'operator')
+  /**
+   * Instalar plugin e cadastrar o acesso (credencial) de um equipamento — a
+   * mesma régua do `Role::can_manage_plugins` do backend: só administrador.
+   */
+  const canManagePlugins = computed(() => isAdmin.value)
   const currentRoleLabel = computed(() => roleLabel(user.value?.role))
 
   function persistSession(res: LoginResponse, remember = false) {
@@ -161,6 +166,7 @@ export const useAuthStore = defineStore('auth', () => {
     isAuthenticated,
     isAdmin,
     canWrite,
+    canManagePlugins,
     currentRoleLabel,
     clearError,
     refreshSetupStatus,

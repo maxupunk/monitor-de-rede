@@ -7,7 +7,8 @@ use std::net::IpAddr;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 
 use super::{
-    model::{LinkTestEndpoint, LinkTestEndpointKind},
+    fixes::{self, PluginOffer},
+    model::{LinkTestEndpoint, LinkTestEndpointKind, LinkTestFix},
     negotiate::{Capabilities, Party},
 };
 use crate::{
@@ -52,6 +53,10 @@ pub struct Endpoint {
     pub caps: Capabilities,
     /// O que impede a ponta de participar (credencial, por exemplo).
     pub issues: Vec<String>,
+    /// Os passos que resolvem parte de `issues` ali mesmo.
+    pub fixes: Vec<LinkTestFix>,
+    /// Sem plugin de teste: os que ela pode receber, do mais indicado.
+    pub offers: Vec<PluginOffer>,
 }
 
 impl Endpoint {
@@ -165,15 +170,23 @@ pub async fn device_endpoint<C: ConnectionTrait>(
         platform: platform(&device),
     };
     let mut issues = Vec::new();
+    let mut steps = Vec::new();
+    let mut offers = Vec::new();
     let found = device_plugin(db, device.id).await?;
     if let Some((plugin, _)) = &found {
         let transports = service::package_of(plugin)?.manifest.transports;
-        if let Err(error) = credentials::resolve(db, device.id, &transports).await {
+        if let Some(gap) = credentials::access_gap(db, device.id, &transports).await? {
+            let fix = fixes::access_fix(device.id, &device.name, gap);
+            issues.push(fix.message().to_owned());
+            steps.push(fix);
+        } else if let Err(error) = credentials::resolve(db, device.id, &transports).await {
             match error {
                 AppError::Internal(_) => return Err(error),
                 other => issues.push(format!("{}: {other}", device.name)),
             }
         }
+    } else {
+        offers = fixes::offers(db, &device).await?;
     }
     if view.ip.is_none() {
         issues.push(format!("{} não tem IP cadastrado", device.name));
@@ -191,6 +204,8 @@ pub async fn device_endpoint<C: ConnectionTrait>(
         },
         caps,
         issues,
+        fixes: steps,
+        offers,
     })
 }
 
@@ -218,6 +233,8 @@ pub fn central_endpoint(system: Option<devices::Model>) -> Endpoint {
         },
         caps: Capabilities::central(),
         issues: Vec::new(),
+        fixes: Vec::new(),
+        offers: Vec::new(),
     }
 }
 
@@ -247,6 +264,8 @@ pub async fn agent_endpoint<C: ConnectionTrait>(db: &C, agent_id: i64) -> AppRes
         role: Role::Agent { agent_id: probe.id },
         caps: Capabilities::agent(),
         issues: Vec::new(),
+        fixes: Vec::new(),
+        offers: Vec::new(),
     })
 }
 

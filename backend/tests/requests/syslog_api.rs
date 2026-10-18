@@ -900,13 +900,19 @@ async fn a_ativacao_usa_a_credencial_salva_do_equipamento() {
             "operatingSystem": "linux", "serverAddress": "192.168.1.10"
         });
 
+        // Falta o acesso: o erro tipado que a tela reconhece para abrir o
+        // formulário dele ali mesmo.
         let sem_credencial = request.post(&rota).json(&corpo).await;
         assert_eq!(
             sem_credencial.status_code(),
-            422,
+            409,
             "{}",
             sem_credencial.text()
         );
+        let corpo_erro: serde_json::Value = serde_json::from_str(&sem_credencial.text()).unwrap();
+        assert_eq!(corpo_erro["code"], "missing_credential");
+        assert_eq!(corpo_erro["deviceId"], device_id);
+        assert_eq!(corpo_erro["transport"], "telnet");
         assert!(
             sem_credencial.text().contains("credencial TELNET"),
             "{}",
@@ -921,6 +927,11 @@ async fn a_ativacao_usa_a_credencial_salva_do_equipamento() {
         assert_eq!(pedida.status_code(), 200, "{}", pedida.text());
         let sem_sessao = request.post(&rota).json(&corpo).await;
         assert_eq!(sem_sessao.status_code(), 409, "{}", sem_sessao.text());
+        assert!(
+            sem_sessao.text().contains("missing_credential"),
+            "{}",
+            sem_sessao.text()
+        );
 
         let guardada = request
             .put(&credenciais)

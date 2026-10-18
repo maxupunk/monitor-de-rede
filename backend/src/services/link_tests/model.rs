@@ -10,6 +10,7 @@ use crate::services::{
     network_tools::throughput::{
         ThroughputEngine, MAX_DURATION_S, MAX_STREAMS, MIN_DURATION_S, MIN_STREAMS,
     },
+    plugins::manifest::TransportKind,
     shared::errors::{AppError, AppResult},
 };
 
@@ -248,6 +249,44 @@ pub struct LinkTestInstall {
     pub packages: Vec<String>,
 }
 
+/// Um passo que o operador faz ali mesmo para a perna poder rodar. `message`
+/// é a frase que também vai em `issues` — a tela a troca pelo botão.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub enum LinkTestFix {
+    /// Instalar (e ligar, se desligado) o plugin de teste no equipamento.
+    #[serde(rename_all = "camelCase")]
+    InstallPlugin {
+        #[ts(type = "number")]
+        device_id: i64,
+        device_name: String,
+        #[ts(type = "number")]
+        plugin_id: i64,
+        plugin_slug: String,
+        plugin_name: String,
+        message: String,
+    },
+    /// Cadastrar (ou completar) o acesso do equipamento por um transporte.
+    #[serde(rename_all = "camelCase")]
+    AddCredential {
+        #[ts(type = "number")]
+        device_id: i64,
+        device_name: String,
+        transport: TransportKind,
+        message: String,
+    },
+}
+
+impl LinkTestFix {
+    #[must_use]
+    pub fn message(&self) -> &str {
+        match self {
+            Self::InstallPlugin { message, .. } | Self::AddCredential { message, .. } => message,
+        }
+    }
+}
+
 /// Tipo de perna.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
@@ -302,6 +341,10 @@ pub struct LinkTestPlanLeg {
     pub duration_s: u8,
     pub runnable: bool,
     pub issues: Vec<String>,
+    /// Os passos que resolvem parte de `issues` ali mesmo (instalar o
+    /// plugin, cadastrar o acesso). Só no plano.
+    #[serde(default)]
+    pub fixes: Vec<LinkTestFix>,
 }
 
 /// O plano antes de rodar: pernas, motores, o que será instalado, o que
@@ -314,9 +357,13 @@ pub struct LinkTestPlan {
     pub legs: Vec<LinkTestPlanLeg>,
     pub estimated_seconds: u32,
     pub warnings: Vec<String>,
-    /// Não vazio = não roda.
+    /// O que impede de rodar e não se resolve com um dos `fixes`.
     pub blocking: Vec<String>,
     pub will_install: Vec<LinkTestInstall>,
+    /// Os passos que faltam, sem repetição. Enquanto nenhuma perna roda, eles
+    /// também impedem o teste: roda quando `blocking` está vazio e há perna
+    /// executável.
+    pub fixes: Vec<LinkTestFix>,
 }
 
 /// Etapa de uma perna.
@@ -722,6 +769,7 @@ mod tests {
                 duration_s: 5,
                 runnable: true,
                 issues: vec![],
+                fixes: vec![],
             },
             status: LinkTestStepStatus::Pending,
             stages: LinkTestStage::all_pending(),
@@ -742,6 +790,18 @@ mod tests {
         assert!(valor.get("samples").is_none(), "só no detalhe");
         let volta: LinkTestLeg = serde_json::from_value(valor).unwrap();
         assert_eq!(volta, perna);
+
+        let passo = LinkTestFix::AddCredential {
+            device_id: 2,
+            device_name: "R1".into(),
+            transport: TransportKind::Ssh,
+            message: "R1 está sem acesso SSH".into(),
+        };
+        assert_eq!(
+            serde_json::to_value(&passo).unwrap(),
+            json!({ "kind": "add_credential", "deviceId": 2, "deviceName": "R1",
+                    "transport": "ssh", "message": "R1 está sem acesso SSH" })
+        );
     }
 
     #[test]

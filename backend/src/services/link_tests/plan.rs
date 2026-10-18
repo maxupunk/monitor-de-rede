@@ -13,10 +13,11 @@ use super::{
     env::LinkTestEnv,
     guard,
     model::{
-        LinkTestDirection, LinkTestEndpointKind, LinkTestInstall, LinkTestKind, LinkTestLegKind,
-        LinkTestPlan, LinkTestPlanLeg, LinkTestRequest, LinkTestSide, LinkTestSpec,
+        LinkTestDirection, LinkTestEndpointKind, LinkTestFix, LinkTestInstall, LinkTestKind,
+        LinkTestLegKind, LinkTestPlan, LinkTestPlanLeg, LinkTestRequest, LinkTestSide,
+        LinkTestSpec,
     },
-    negotiate::{negotiate, Negotiation},
+    negotiate::{negotiate, Capabilities, Negotiation, Party},
 };
 use crate::{
     models::{device_links, devices},
@@ -356,6 +357,54 @@ fn estimated_seconds(leg: &PlannedLeg, spec: &LinkTestSpec) -> u32 {
     LEG_OVERHEAD_S + prepare_s + serve_stop + measure
 }
 
+/// Sem combinação com o que está instalado: tenta de novo como se cada
+/// ponta sem plugin já tivesse um dos que pode receber, do mais indicado para
+/// o menos. Devolve a combinação que passaria a valer e os passos para chegar
+/// a ela (instalar, cadastrar o acesso).
+fn rescue(a: &Endpoint, b: &Endpoint, duration_s: u8) -> Option<(Negotiation, Vec<LinkTestFix>)> {
+    if a.offers.is_empty() && b.offers.is_empty() {
+        return None;
+    }
+    // Quem tem plugin (ou não tem oferta) entra como está.
+    let options = |endpoint: &Endpoint| -> Vec<Option<usize>> {
+        if endpoint.offers.is_empty() {
+            vec![None]
+        } else {
+            (0..endpoint.offers.len()).map(Some).collect()
+        }
+    };
+    let caps = |endpoint: &Endpoint, pick: Option<usize>| -> Capabilities {
+        pick.map_or_else(
+            || endpoint.caps.clone(),
+            |index| endpoint.offers[index].caps.clone(),
+        )
+    };
+    for pick_a in options(a) {
+        for pick_b in options(b) {
+            let (caps_a, caps_b) = (caps(a, pick_a), caps(b, pick_b));
+            let party_a = Party {
+                caps: &caps_a,
+                ..a.party()
+            };
+            let party_b = Party {
+                caps: &caps_b,
+                ..b.party()
+            };
+            let Ok(n) = negotiate(party_a, party_b, duration_s) else {
+                continue;
+            };
+            let mut fixes = Vec::new();
+            for (endpoint, pick) in [(a, pick_a), (b, pick_b)] {
+                if let (Some(index), Some(device_id)) = (pick, endpoint.device_id()) {
+                    fixes.extend(endpoint.offers[index].fixes(device_id, &endpoint.view.name));
+                }
+            }
+            return Some((n, fixes));
+        }
+    }
+    None
+}
+
 fn evaluate(env: &LinkTestEnv, seq: u32, raw: RawLeg, spec: &LinkTestSpec) -> PlannedLeg {
     let (kind, a, b, edge_id) = raw;
     let mut view = LinkTestPlanLeg {
@@ -369,17 +418,31 @@ fn evaluate(env: &LinkTestEnv, seq: u32, raw: RawLeg, spec: &LinkTestSpec) -> Pl
         duration_s: spec.duration_s,
         runnable: false,
         issues: Vec::new(),
+        fixes: a.fixes.iter().chain(&b.fixes).cloned().collect(),
+    };
+    let sides = |n: &Negotiation| match n.server {
+        LinkTestSide::A => (&a, &b),
+        LinkTestSide::B => (&b, &a),
     };
     let negotiation = match negotiate(a.party(), b.party(), spec.duration_s) {
         Err(reason) => {
-            view.issues.push(reason);
+            match rescue(&a, &b, spec.duration_s) {
+                // Roda depois dos passos: a perna já mostra como vai medir.
+                Some((n, fixes)) => {
+                    let (server, driver) = sides(&n);
+                    view.issues = fixes.iter().map(|fix| fix.message().to_owned()).collect();
+                    view.issues.extend(runtime_issues(env, server, driver, &n));
+                    view.fixes.splice(0..0, fixes);
+                    view.engine = Some(n.engine);
+                    view.server_side = Some(n.server);
+                    view.duration_s = n.duration_s;
+                }
+                None => view.issues.push(reason),
+            }
             None
         }
         Ok(n) => {
-            let (server, driver) = match n.server {
-                LinkTestSide::A => (&a, &b),
-                LinkTestSide::B => (&b, &a),
-            };
+            let (server, driver) = sides(&n);
             view.issues = runtime_issues(env, server, driver, &n);
             view.engine = Some(n.engine);
             view.server_side = Some(n.server);
@@ -437,6 +500,31 @@ fn describe(leg: &PlannedLeg) -> String {
     )
 }
 
+/// O que impede a perna e não tem passo que resolva ali mesmo.
+fn open_issues(leg: &LinkTestPlanLeg) -> Vec<&str> {
+    leg.issues
+        .iter()
+        .map(String::as_str)
+        .filter(|issue| !leg.fixes.iter().any(|fix| fix.message() == *issue))
+        .collect()
+}
+
+/// Os passos das pernas que ainda não rodam, sem repetição, na ordem em que
+/// aparecem.
+fn plan_fixes(legs: &[PlannedLeg]) -> Vec<LinkTestFix> {
+    let mut fixes: Vec<LinkTestFix> = Vec::new();
+    for fix in legs
+        .iter()
+        .filter(|leg| !leg.view.runnable)
+        .flat_map(|leg| &leg.view.fixes)
+    {
+        if !fixes.contains(fix) {
+            fixes.push(fix.clone());
+        }
+    }
+    fixes
+}
+
 /// Monta o plano do pedido.
 ///
 /// # Errors
@@ -477,7 +565,20 @@ pub async fn build(env: &LinkTestEnv, request: &LinkTestRequest) -> AppResult<Bu
     }
     let runnable = legs.iter().filter(|leg| leg.view.runnable).count();
     for leg in legs.iter().filter(|leg| !leg.view.runnable) {
-        let text = format!("{}: {}", describe(leg), leg.view.issues.join("; "));
+        let open = open_issues(&leg.view);
+        // Só falta um passo (instalar, cadastrar o acesso): não é erro — a
+        // tela oferece o passo. Sem nenhuma perna pronta, os passos também
+        // impedem (ver `LinkTestPlan::fixes`).
+        if open.is_empty() {
+            if runnable > 0 {
+                warnings.push(format!(
+                    "{}: falta um passo (veja acima) — sem ele, esta perna será pulada",
+                    describe(leg)
+                ));
+            }
+            continue;
+        }
+        let text = format!("{}: {}", describe(leg), open.join("; "));
         if runnable == 0 {
             blocking.push(text);
         } else {
@@ -496,6 +597,7 @@ pub async fn build(env: &LinkTestEnv, request: &LinkTestRequest) -> AppResult<Bu
             warnings: Vec::new(),
             blocking: Vec::new(),
             will_install: will_install(&legs),
+            fixes: plan_fixes(&legs),
         },
         legs,
         spec,
@@ -561,6 +663,8 @@ mod tests {
             },
             caps,
             issues: Vec::new(),
+            fixes: Vec::new(),
+            offers: Vec::new(),
         }
     }
 
@@ -636,6 +740,7 @@ mod tests {
                 duration_s: n.duration_s,
                 runnable: true,
                 issues: Vec::new(),
+                fixes: Vec::new(),
             },
             a,
             b,

@@ -642,7 +642,7 @@ impl From<AppError> for RemoteError {
         let code = match &error {
             AppError::Validation(_) | AppError::ValidationFields(_) => ErrorCode::Validation,
             AppError::NotFound(_) => ErrorCode::NotFound,
-            AppError::Conflict(_) => ErrorCode::Conflict,
+            AppError::Conflict(_) | AppError::MissingCredential { .. } => ErrorCode::Conflict,
             AppError::Unauthorized(_) | AppError::Forbidden(_) => ErrorCode::Forbidden,
             AppError::ServiceUnavailable(_) | AppError::RateLimited { .. } => {
                 ErrorCode::Unavailable

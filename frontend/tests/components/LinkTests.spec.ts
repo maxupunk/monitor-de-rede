@@ -11,7 +11,17 @@ import { useLinkTestsStore } from '@/stores/linkTests'
 import LinkTestRunPanel from '@/components/linkTests/LinkTestRunPanel.vue'
 import LinkTestPlanView from '@/components/linkTests/LinkTestPlanView.vue'
 import LinkTestWizard from '@/components/linkTests/LinkTestWizard.vue'
-import { endpoint, leg, plan, stage, test } from '../utils/linkTests/fixtures'
+import DeviceAccessHost from '@/components/devices/access/DeviceAccessHost.vue'
+import { settleAccess } from '@/composables/useDeviceAccess'
+import {
+  accessFix,
+  endpoint,
+  installFix,
+  leg,
+  plan,
+  stage,
+  test,
+} from '../utils/linkTests/fixtures'
 
 class FakeResizeObserver {
   observe() {}
@@ -25,7 +35,7 @@ function vuetify() {
 
 let pinia: Pinia
 
-function setRole(role: 'admin' | 'viewer') {
+function setRole(role: 'admin' | 'operator' | 'viewer') {
   const auth = useAuthStore()
   auth.user = { id: 1, name: 'Ana', email: 'a@b.c', role } as never
 }
@@ -137,7 +147,7 @@ describe('telas do teste de enlace', () => {
   it('plano: bloqueio com dica acionável, aviso de saturação e o que vai instalar', async () => {
     setRole('admin')
     const p = plan({
-      blocking: ['Cadastre a credencial SSH de MikroTik-Torre'],
+      blocking: ['MikroTik-Torre não tem IP cadastrado'],
       willInstall: [{ deviceId: 1, deviceName: 'OpenWrt-Sala', packages: ['iperf3'] }],
       warnings: ['O cliente btest limita a 29 s por sentido.'],
     })
@@ -153,7 +163,7 @@ describe('telas do teste de enlace', () => {
     expect(text).toContain('satura o enlace durante a medição')
     expect(text).toContain('iperf3 em OpenWrt-Sala')
     expect(text).toContain('29 s por sentido')
-    expect(wrapper.find('a[href="/devices/2?tab=plugins&section=credentials"]').exists()).toBe(true)
+    expect(wrapper.find('a[href="/devices/2"]').exists()).toBe(true)
   })
 
   it('plano que não roda: sem tempo estimado nem aviso de saturação', async () => {
@@ -223,5 +233,105 @@ describe('telas do teste de enlace', () => {
     await flushPromises()
     expect(post).not.toHaveBeenCalled()
     expect(button('Iniciar teste')).toBeUndefined()
+  })
+
+  it('assistente: o plano oferece instalar e cadastrar o acesso ali mesmo, e se refaz a cada passo', async () => {
+    setRole('admin')
+    const waiting = () => {
+      const p = plan({ fixes: [installFix(), accessFix()] })
+      p.legs[0].runnable = false
+      p.legs[0].b = endpoint(7, 'AP-terraço')
+      p.legs[0].issues = [installFix().message, accessFix().message]
+      p.legs[0].fixes = [installFix(), accessFix()]
+      return p
+    }
+    const onlyAccess = () => {
+      const p = waiting()
+      p.fixes = [accessFix()]
+      p.legs[0].issues = [accessFix().message]
+      p.legs[0].fixes = [accessFix()]
+      return p
+    }
+    vi.spyOn(apiService, 'get').mockImplementation(async (path: string) =>
+      path === '/devices/7/access'
+        ? { deviceId: 7, deviceName: 'AP-terraço', credentials: [], agents: [] }
+        : []
+    )
+    const post = vi.spyOn(apiService, 'post').mockImplementation(async (path: string) => {
+      if (path === '/devices/7/plugins/30/install') return { deviceId: 7 }
+      throw new Error(`inesperado: ${path}`)
+    })
+    post
+      .mockResolvedValueOnce(waiting())
+      .mockResolvedValueOnce({ deviceId: 7 })
+      .mockResolvedValueOnce(onlyAccess())
+      .mockResolvedValueOnce(plan())
+    const put = vi.spyOn(apiService, 'put').mockResolvedValue({
+      kind: 'ssh',
+      username: 'root',
+      storage: 'vault',
+      port: 22,
+      https: false,
+      viaProbeId: null,
+      hasStoredSecret: true,
+      sessionActive: false,
+    })
+    mountWith(DeviceAccessHost, {})
+    mountWith(LinkTestWizard, { modelValue: true, request: { kind: 'server', targetDeviceId: 7 } })
+    await flushPromises()
+    const body = () => document.body.textContent ?? ''
+    const button = (label: string) =>
+      [...document.body.querySelectorAll('button')].find((b) => b.textContent?.includes(label))
+
+    button('Ver o plano')?.click()
+    await flushPromises()
+    expect(body()).toContain('Antes de testar, falta')
+    expect(body()).toContain('Instalar o plugin «OpenWrt — teste de enlace» em AP-terraço')
+    expect(body()).toContain('Cadastrar o acesso SSH de AP-terraço')
+    // Falta um passo não é erro: nada de "O teste não pode rodar assim".
+    expect(body()).toContain('Falta um passo')
+    expect(body()).not.toContain('O teste não pode rodar assim')
+    expect(button('Iniciar teste')?.hasAttribute('disabled')).toBe(true)
+
+    button('Instalar agora')?.click()
+    await flushPromises()
+    expect(post).toHaveBeenCalledWith('/devices/7/plugins/30/install', {})
+    // Refez o plano sozinho; o passo feito continua marcado.
+    expect(post).toHaveBeenCalledTimes(3)
+    expect(body()).toContain('Feito.')
+
+    button('Cadastrar acesso')?.click()
+    await flushPromises()
+    expect(body()).toContain('Acesso SSH')
+    const password = document.body.querySelector<HTMLInputElement>('input[type="password"]')
+    expect(password).not.toBeNull()
+    ;(password as HTMLInputElement).value = 'segredo'
+    password?.dispatchEvent(new Event('input'))
+    await flushPromises()
+    button('Salvar acesso')?.click()
+    await flushPromises()
+    expect(put).toHaveBeenCalledWith(
+      '/devices/7/credentials',
+      expect.objectContaining({ kind: 'ssh', secret: 'segredo' })
+    )
+    expect(post).toHaveBeenCalledTimes(4)
+    expect(body()).toContain('Pronto: o que faltava foi feito')
+    expect(button('Iniciar teste')?.hasAttribute('disabled')).toBe(false)
+    settleAccess(null)
+  })
+
+  it('plano visto por operador: os passos dizem quem pode fazê-los', async () => {
+    setRole('operator')
+    const p = plan({ fixes: [installFix(), accessFix()] })
+    p.legs[0].runnable = false
+    const wrapper = mountWith(LinkTestPlanView, {
+      plan: p,
+      spec: { durationS: 5, direction: 'both', streams: 1, limitMbps: null },
+    })
+    await flushPromises()
+    const text = wrapper.text()
+    expect(text).toContain('Peça a um administrador para instalar «OpenWrt — teste de enlace»')
+    expect(text).toContain('Peça a um administrador para cadastrar o acesso SSH')
+    expect(wrapper.findAll('button').some((b) => b.text().includes('Instalar agora'))).toBe(false)
   })
 })

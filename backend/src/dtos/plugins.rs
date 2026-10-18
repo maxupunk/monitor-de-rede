@@ -174,6 +174,20 @@ pub struct DevicePluginsView {
     pub agents: Vec<crate::dtos::agents::AgentRouteOption>,
 }
 
+/// O acesso do equipamento, para o formulário que o cadastra de qualquer
+/// tela (teste de enlace, aplicativo, execução que falhou por falta dele).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeviceAccessView {
+    #[ts(type = "number")]
+    pub device_id: i64,
+    pub device_name: String,
+    pub credentials: Vec<CredentialView>,
+    /// Agentes remotos por onde o acesso pode sair.
+    pub agents: Vec<crate::dtos::agents::AgentRouteOption>,
+}
+
 #[derive(Debug, Clone, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
@@ -314,6 +328,10 @@ pub struct BatchDevice {
     pub error: Option<String>,
     #[ts(type = "unknown")]
     pub output: Option<Value>,
+    /// Falhou por falta do acesso deste transporte: a tela oferece
+    /// cadastrá-lo ali mesmo.
+    #[serde(default)]
+    pub missing_access: Option<TransportKind>,
 }
 
 /// Uma ação de frota em andamento ou concluída.
@@ -357,6 +375,9 @@ pub struct FleetMember {
     pub installed_at: String,
     /// Há credencial pronta para os transportes do plugin.
     pub credentials_ready: bool,
+    /// O transporte cujo acesso falta (`ssh`, `telnet`), quando falta — o
+    /// botão "Cadastrar o acesso (SSH)" abre o formulário já nele.
+    pub missing_access: Option<TransportKind>,
     /// Ajuste deste equipamento (segredos mascarados).
     #[ts(type = "Record<string, unknown> | null")]
     pub settings: Option<Value>,

@@ -96,10 +96,10 @@
         color="primary"
         size="small"
         prepend-icon="mdi-key-variant"
-        :to="manageRoute"
-        @click="emit('manage')"
+        :disabled="disabled || !auth.canManagePlugins"
+        @click="manage"
       >
-        Gerenciar credenciais
+        {{ saved ? 'Editar o acesso salvo' : 'Cadastrar o acesso' }}
       </v-btn>
     </div>
   </div>
@@ -108,25 +108,33 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { CredentialView } from '@/bindings/CredentialView'
+import type { TransportKind } from '@/bindings/TransportKind'
+import { requestAccess } from '@/composables/useDeviceAccess'
+import { useAuthStore } from '@/stores/auth'
 import { credentialReady, credentialSecretLabel } from '@/utils/deviceCredentials'
 
 /**
  * O login de acesso ao equipamento: a credencial salva (a mesma da aba
  * "Plugins › Credenciais") ou usuário e senha digitados, com a opção de
- * salvá-los ali.
+ * salvá-los ali. Cadastrar ou editar o acesso abre o formulário único ali
+ * mesmo — sem sair da tela.
  */
 const props = defineProps<{
   deviceId: number
   /** A credencial que serve ao meio de acesso escolhido — ver `pickShellCredential`. */
   saved: CredentialView | null
+  /** O tipo de credencial do meio de acesso escolhido (`credentialKindFor`). */
+  kind: TransportKind
   errors: { username: string; password: string }
   disabled?: boolean
 }>()
 
 const emit = defineEmits<{
-  /** O operador foi gerenciar as credenciais — quem abriu esta tela a fecha. */
-  manage: []
+  /** O acesso foi salvo no formulário — quem guarda a lista a atualiza. */
+  saved: [credential: CredentialView]
 }>()
+
+const auth = useAuthStore()
 
 const useSaved = defineModel<boolean>('useSaved', { required: true })
 const username = defineModel<string>('username', { required: true })
@@ -139,10 +147,10 @@ const ready = computed(() => Boolean(props.saved && credentialReady(props.saved)
 const kindLabel = computed(() => props.saved?.kind.toUpperCase() ?? '')
 const secretLabel = computed(() => (props.saved ? credentialSecretLabel(props.saved) : ''))
 
-const manageRoute = computed(() => ({
-  path: `/devices/${props.deviceId}`,
-  query: { tab: 'plugins', section: 'credentials' },
-}))
+async function manage() {
+  const saved = await requestAccess({ deviceId: props.deviceId, transport: props.kind })
+  if (saved) emit('saved', saved)
+}
 
 // A senha visível não sobrevive à troca de login.
 watch(useSaved, () => {

@@ -175,6 +175,19 @@ o que será instalado, o que falta (credencial, plugin ativo) e quanto tempo
 leva. A tela mostra o plano e pede confirmação; só então
 `POST /api/link-tests` com `confirm: true`.
 
+O que falta e tem conserto ali mesmo vira **passo** (`fixes`), não erro:
+equipamento sem plugin de teste ganha a sugestão do plugin certo — o que tem
+bloco `throughput`, fica ativo ao instalar e casa com o sistema dele pela
+mesma régua que liga um embutido sozinho no cadastro
+(`compat::fits_platform`; o exclusivo do equipamento vem antes) e cujos papéis
+fecham a negociação com a outra ponta; equipamento sem o acesso que o plugin
+usa ganha "cadastrar o acesso" (`credentials::access_gap`). Sistema
+desconhecido não ganha sugestão: o motivo segue por extenso em `blocking`. A
+tela mostra "Antes de testar, falta" com **Instalar agora** e **Cadastrar
+acesso** (o formulário único do acesso, sem sair do assistente) e refaz o
+plano depois de cada passo. Instalar e cadastrar o acesso são de
+administrador; o operador vê a quem pedir.
+
 Limites: duração padrão 5 s por sentido (1–60), um teste por dispositivo por
 vez, no máximo 2 testes simultâneos no sistema, sempre cancelável.
 
@@ -220,11 +233,18 @@ type LinkTestEndpoint = { kind: 'device' | 'central' | 'agent', deviceId: number
                           agentId: number | null, name: string, ip: string | null, platform: string | null }
 
 type LinkTestPlan = { kind: LinkTestKind, legs: LinkTestPlanLeg[], estimatedSeconds: number,
-                      warnings: string[], blocking: string[] /* não vazio = não roda */,
-                      willInstall: { deviceId: number, deviceName: string, packages: string[] }[] }
+                      warnings: string[], blocking: string[] /* o que impede e não tem passo */,
+                      willInstall: { deviceId: number, deviceName: string, packages: string[] }[],
+                      fixes: LinkTestFix[] /* roda: blocking vazio e alguma perna runnable */ }
 type LinkTestPlanLeg = { seq: number, kind: 'link' | 'end_to_end', a: LinkTestEndpoint, b: LinkTestEndpoint,
                          edgeId: number | null, engine: 'iperf3' | 'btest' | null, serverSide: 'a' | 'b' | null,
-                         durationS: number, runnable: boolean, issues: string[] }
+                         durationS: number, runnable: boolean, issues: string[], fixes: LinkTestFix[] }
+// Um passo que o operador faz no próprio plano; `message` é a frase que também está em `issues`.
+type LinkTestFix =
+  | { kind: 'install_plugin', deviceId: number, deviceName: string, pluginId: number,
+      pluginSlug: string, pluginName: string, message: string }
+  | { kind: 'add_credential', deviceId: number, deviceName: string,
+      transport: 'ssh' | 'telnet' | 'http', message: string }
 
 type LinkTestStage = { key: 'prepare_a' | 'prepare_b' | 'serve' | 'forward' | 'reverse' | 'stop',
                        label: string, status: LinkTestStepStatus, message: string | null,

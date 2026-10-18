@@ -114,6 +114,14 @@
             class="mb-3"
             :text="device.error"
           ></v-alert>
+          <DeviceAccessButton
+            v-if="device.missingAccess && device.status === 'failed' && canWrite"
+            :device-id="device.deviceId"
+            :transport="device.missingAccess"
+            :reason="device.error ?? undefined"
+            class="mb-3"
+            @saved="emit('accessSaved', batch, device)"
+          />
           <PluginOutput
             v-if="device.output !== null"
             :output="device.output"
@@ -152,6 +160,7 @@ import {
   type FollowUp,
   type OutputPresentation,
 } from '@/utils/pluginPresentation'
+import DeviceAccessButton from '@/components/devices/access/DeviceAccessButton.vue'
 import PluginOutput from '../PluginOutput.vue'
 import PluginReport from '../PluginReport.vue'
 
@@ -173,6 +182,8 @@ const emit = defineEmits<{
   applyPatch: [batch: PluginBatchView]
   applyNext: [batch: PluginBatchView, followUp: FollowUp]
   openRun: [device: BatchDevice]
+  /** O acesso que faltava a um equipamento foi salvo ali mesmo. */
+  accessSaved: [batch: PluginBatchView, device: BatchDevice]
 }>()
 
 const store = usePluginAppsStore()

@@ -1,6 +1,7 @@
 import type {
   LinkTest,
   LinkTestEndpoint,
+  LinkTestFix,
   LinkTestLeg,
   LinkTestPlan,
   LinkTestStage,
@@ -42,6 +43,7 @@ export function leg(seq: number, patch: Partial<LinkTestLeg> = {}): LinkTestLeg 
     durationS: 5,
     runnable: true,
     issues: [],
+    fixes: [],
     status: 'pending',
     stages: [stage('serve'), stage('forward'), stage('reverse'), stage('stop')],
     forwardBps: null,
@@ -95,6 +97,29 @@ export function plan(patch: Partial<LinkTestPlan> = {}): LinkTestPlan {
     warnings: [],
     blocking: [],
     willInstall: [],
+    fixes: [],
     ...patch,
+  }
+}
+
+export function installFix(): LinkTestFix {
+  return {
+    kind: 'install_plugin',
+    deviceId: 7,
+    deviceName: 'AP-terraço',
+    pluginId: 30,
+    pluginSlug: 'openwrt-link-test',
+    pluginName: 'OpenWrt — teste de enlace',
+    message: 'AP-terraço precisa do plugin «OpenWrt — teste de enlace»',
+  }
+}
+
+export function accessFix(): LinkTestFix {
+  return {
+    kind: 'add_credential',
+    deviceId: 7,
+    deviceName: 'AP-terraço',
+    transport: 'ssh',
+    message: 'AP-terraço está sem acesso SSH',
   }
 }

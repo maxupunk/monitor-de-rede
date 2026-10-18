@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import type { CredentialView } from '@/bindings/CredentialView'
+import { ApiError } from '@/services/apiService'
 import {
+  accessNeededReason,
+  accessReady,
+  accessTitle,
   credentialKindFor,
   credentialReady,
   credentialSubtitle,
+  missingAccessIn,
+  missingAccessOf,
   pickShellCredential,
 } from '@/utils/deviceCredentials'
 
@@ -54,5 +60,39 @@ describe('credenciais do equipamento', () => {
 
   it('HTTP não abre shell e não serve para ativar o log', () => {
     expect(pickShellCredential([credential({ kind: 'http', port: 80 })], 'ssh')).toBeNull()
+  })
+
+  it('acesso pronto pelo tipo: HTTP sem login vale; SSH/Telnet precisam de senha', () => {
+    expect(accessReady([], 'http')).toBe(true)
+    expect(accessReady([], 'ssh')).toBe(false)
+    expect(accessReady([credential({})], 'ssh')).toBe(true)
+    expect(accessReady([credential({ hasStoredSecret: false })], 'ssh')).toBe(false)
+    expect(accessReady([credential({ kind: 'telnet' })], 'ssh')).toBe(false)
+    expect(accessTitle('http')).toBe('Acesso HTTP (interface web)')
+    expect(accessNeededReason('AP-terraço', 'ssh')).toBe(
+      'Para gerenciar AP-terraço o NetMonitor precisa do acesso SSH dele.'
+    )
+  })
+
+  it('reconhece "falta o acesso" só pelo código do backend', () => {
+    const missing = new ApiError('Cadastre a credencial SSH', 409, {
+      message: 'Cadastre a credencial SSH',
+      code: 'missing_credential',
+      deviceId: 7,
+      transport: 'ssh',
+    })
+    expect(missingAccessOf(missing)).toEqual({ deviceId: 7, transport: 'ssh' })
+    // Mesmo texto, sem o código: não é reconhecido (nada de casar texto).
+    expect(missingAccessOf(new ApiError('Cadastre a credencial SSH', 409, {}))).toBeNull()
+    expect(missingAccessOf(new Error('x'))).toBeNull()
+    expect(
+      missingAccessOf(
+        new ApiError('x', 409, { code: 'missing_credential', deviceId: 7, transport: 'ftp' })
+      )
+    ).toBeNull()
+    expect(
+      missingAccessIn({ error: 'x', missingAccess: { deviceId: 3, transport: 'telnet' } })
+    ).toEqual({ deviceId: 3, transport: 'telnet' })
+    expect(missingAccessIn({ error: 'x' })).toBeNull()
   })
 })

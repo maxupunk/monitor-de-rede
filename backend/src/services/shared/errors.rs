@@ -60,6 +60,18 @@ pub enum AppError {
     #[error("{0}")]
     BusinessRule(String),
 
+    /// 409 — falta o acesso (credencial) do equipamento por um transporte.
+    /// O corpo leva `code: "missing_credential"`, `deviceId` e `transport`:
+    /// a tela abre o formulário do acesso ali mesmo, sem casar texto. Quem
+    /// monta é `plugins::credentials`; quem lê, `credentials::missing_access_of`.
+    #[error("{message}")]
+    MissingCredential {
+        device_id: i64,
+        /// `ssh`, `telnet` ou `http`.
+        transport: &'static str,
+        message: String,
+    },
+
     /// 500 — nunca vaza detalhe para o cliente; o detalhe vai para o log.
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
@@ -71,7 +83,7 @@ impl AppError {
         match self {
             Self::Validation(_) | Self::ValidationFields(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::NotFound(_) => StatusCode::NOT_FOUND,
-            Self::Conflict(_) => StatusCode::CONFLICT,
+            Self::Conflict(_) | Self::MissingCredential { .. } => StatusCode::CONFLICT,
             Self::Unauthorized(_) => StatusCode::UNAUTHORIZED,
             Self::Forbidden(_) => StatusCode::FORBIDDEN,
             Self::ServiceUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
@@ -117,11 +129,22 @@ impl AppError {
 /// Corpo de erro que o frontend entende. `errors` só aparece na variante por
 /// campo — `skip_serializing_if` evita mandar `null` e confundir o cliente.
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ErrorBody<'a> {
     message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     errors: Option<&'a [FieldError]>,
+    /// Erro que a tela trata sozinha (`missing_credential`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    code: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    device_id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    transport: Option<&'static str>,
 }
+
+/// O código que o frontend reconhece para "falta o acesso".
+pub const MISSING_CREDENTIAL_CODE: &str = "missing_credential";
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
@@ -152,7 +175,26 @@ impl IntoResponse for AppError {
             _ => (self.to_string(), None),
         };
 
-        let mut response = (status, Json(ErrorBody { message, errors })).into_response();
+        let (code, device_id, transport) = match &self {
+            Self::MissingCredential {
+                device_id,
+                transport,
+                ..
+            } => (
+                Some(MISSING_CREDENTIAL_CODE),
+                Some(*device_id),
+                Some(*transport),
+            ),
+            _ => (None, None, None),
+        };
+        let body = ErrorBody {
+            message,
+            errors,
+            code,
+            device_id,
+            transport,
+        };
+        let mut response = (status, Json(body)).into_response();
 
         if let Self::RateLimited { retry_after, .. } = &self {
             if let Ok(value) = retry_after.to_string().parse() {

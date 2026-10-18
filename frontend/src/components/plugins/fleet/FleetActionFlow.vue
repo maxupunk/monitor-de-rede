@@ -272,6 +272,7 @@ import SettingsForm from '../settings/SettingsForm.vue'
 import WriteConfirm from '../WriteConfirm.vue'
 import FleetBatchCard from './FleetBatchCard.vue'
 import FleetCurrentValues from './FleetCurrentValues.vue'
+import { withAccess } from '@/composables/useDeviceAccess'
 
 type Step = 'form' | 'review' | 'running' | 'done'
 
@@ -300,7 +301,10 @@ const values = ref<Record<string, unknown>>({})
 /** Editar um item: a senha atual vem do equipamento para o operador conferir. */
 const pluginsStore = usePluginsStore()
 const secrets = useSecretReveal((deviceId, action, params) =>
-  pluginsStore.revealSecret(deviceId, props.pluginId, action, params)
+  withAccess(() => pluginsStore.revealSecret(deviceId, props.pluginId, action, params), {
+    retry: 'auto',
+    what: 'Ler a senha atual',
+  })
 )
 const edited = ref(false)
 const choosing = ref(false)

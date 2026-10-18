@@ -7,6 +7,7 @@
 export type { LinkTest } from '@/bindings/LinkTest'
 export type { LinkTestDirection } from '@/bindings/LinkTestDirection'
 export type { LinkTestEndpoint } from '@/bindings/LinkTestEndpoint'
+export type { LinkTestFix } from '@/bindings/LinkTestFix'
 export type { LinkTestFlow } from '@/bindings/LinkTestFlow'
 export type { LinkTestKind } from '@/bindings/LinkTestKind'
 export type { LinkTestLeg } from '@/bindings/LinkTestLeg'

@@ -252,6 +252,83 @@ async fn plano_execucao_e_historico_pela_api() {
 
 #[tokio::test]
 #[serial]
+async fn plano_traz_os_passos_que_faltam_e_eles_se_resolvem_pela_api() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        session_with_role(&mut request, &ctx, Role::Admin).await;
+        let ap = devices::ActiveModel {
+            name: Set("AP-terraço".into()),
+            r#type: Set("router".into()),
+            status: Set("online".into()),
+            ip_address: Set(Some("127.0.0.3".into())),
+            operating_system: Set(Some("openwrt".into())),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .unwrap();
+        let pedido =
+            json!({ "kind": "server", "targetDeviceId": ap.id, "spec": { "durationS": 1 } });
+
+        let plano = json_of(
+            &request
+                .post("/api/link-tests/plan")
+                .json(&pedido)
+                .await
+                .text(),
+        );
+        assert_eq!(plano["blocking"], json!([]), "{plano}");
+        assert_eq!(plano["legs"][0]["runnable"], false);
+        let fixes = plano["fixes"].as_array().expect("fixes");
+        assert_eq!(fixes.len(), 2, "{plano}");
+        assert_eq!(fixes[0]["kind"], "install_plugin");
+        assert_eq!(fixes[0]["pluginSlug"], "openwrt-link-test");
+        assert_eq!(fixes[0]["deviceId"], ap.id);
+        assert_eq!(fixes[1]["kind"], "add_credential");
+        assert_eq!(fixes[1]["transport"], "ssh");
+        assert_eq!(fixes[1]["message"], "AP-terraço está sem acesso SSH");
+        assert_eq!(plano["legs"][0]["fixes"], plano["fixes"]);
+
+        // O formulário do acesso lê o que o equipamento já tem.
+        let acesso = json_of(
+            &request
+                .get(&format!("/api/devices/{}/access", ap.id))
+                .await
+                .text(),
+        );
+        assert_eq!(acesso["deviceName"], "AP-terraço");
+        assert_eq!(acesso["credentials"], json!([]));
+        assert!(acesso["agents"].is_array());
+
+        // "Instalar agora" e "Cadastrar acesso": as rotas de sempre.
+        let plugin_id = fixes[0]["pluginId"].as_i64().unwrap();
+        request
+            .post(&format!(
+                "/api/devices/{}/plugins/{plugin_id}/install",
+                ap.id
+            ))
+            .json(&json!({}))
+            .await
+            .assert_status_ok();
+        request
+            .put(&format!("/api/devices/{}/credentials", ap.id))
+            .json(&json!({ "kind": "ssh", "username": "root", "secret": "x", "storage": "vault" }))
+            .await
+            .assert_status_ok();
+        let plano = json_of(
+            &request
+                .post("/api/link-tests/plan")
+                .json(&pedido)
+                .await
+                .text(),
+        );
+        assert_eq!(plano["fixes"], json!([]), "{plano}");
+        assert_eq!(plano["legs"][0]["runnable"], true, "{plano}");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
 async fn agendamentos_crud_e_rodar_agora() {
     request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
         session_with_role(&mut request, &ctx, Role::Admin).await;

@@ -6,6 +6,7 @@ import type { AccessRequest } from '@/bindings/AccessRequest'
 import type { AutoAcceptState } from '@/bindings/AutoAcceptState'
 import type { CredentialInput } from '@/bindings/CredentialInput'
 import type { CredentialView } from '@/bindings/CredentialView'
+import type { DeviceAccessView } from '@/bindings/DeviceAccessView'
 import type { DevicePluginsView } from '@/bindings/DevicePluginsView'
 import type { PluginDetail } from '@/bindings/PluginDetail'
 import type { PluginPackage } from '@/bindings/PluginPackage'
@@ -262,6 +263,17 @@ export const usePluginsStore = defineStore('plugins', () => {
     return credentials
   }
 
+  /**
+   * O acesso do equipamento (credenciais sem senha e os agentes por onde ele
+   * pode sair), para o formulário que o cadastra de qualquer tela.
+   */
+  async function fetchAccess(deviceId: number): Promise<DeviceAccessView> {
+    const access = await apiService.get<DeviceAccessView>(`/devices/${deviceId}/access`)
+    const view = deviceViews.value[deviceId]
+    if (view) view.credentials = access.credentials
+    return access
+  }
+
   async function saveCredential(deviceId: number, input: CredentialInput): Promise<CredentialView> {
     const saved = await apiService.put<CredentialView>(`/devices/${deviceId}/credentials`, input)
     replaceCredential(deviceId, saved)
@@ -514,6 +526,7 @@ export const usePluginsStore = defineStore('plugins', () => {
     revealSecret,
     loadDevice,
     fetchCredentials,
+    fetchAccess,
     replaceCredential,
     saveCredential,
     deleteCredential,

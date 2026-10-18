@@ -6,6 +6,7 @@ import type { FleetView } from '@/bindings/FleetView'
 import type { PluginApp } from '@/bindings/PluginApp'
 import type { PluginBatchView } from '@/bindings/PluginBatchView'
 import type { TranscriptEntry } from '@/bindings/TranscriptEntry'
+import { usePluginsStore } from '@/stores/plugins'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -91,11 +92,10 @@ export const usePluginAppsStore = defineStore('pluginApps', () => {
     return saved
   }
 
-  /** Adiciona um equipamento à frota (instala o plugin nele). */
+  /** Adiciona um equipamento à frota: a mesma instalação da aba do equipamento. */
   async function addMember(pluginId: number, deviceId: number): Promise<void> {
-    await apiService.post(`/devices/${deviceId}/plugins/${pluginId}/install`, {})
+    await usePluginsStore().installPlugin(deviceId, pluginId)
     await loadFleet(pluginId)
-    await fetchApps()
   }
 
   async function removeMember(pluginId: number, deviceId: number): Promise<void> {

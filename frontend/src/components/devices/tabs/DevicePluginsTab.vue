@@ -92,7 +92,6 @@
           <DeviceCredentials
             :device-id="deviceId"
             :credentials="view.credentials"
-            :agents="view.agents"
             @notify="notify"
           />
         </v-window-item>

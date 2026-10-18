@@ -547,6 +547,13 @@ async fn credentials_index(
     Ok(format::json(credentials::list(&ctx.db, device_id).await?)?)
 }
 
+async fn access_show(
+    State(ctx): State<AppContext>,
+    Path(device_id): Path<i64>,
+) -> AppResult<Response> {
+    Ok(format::json(actions::access_view(&ctx, device_id).await?)?)
+}
+
 async fn credentials_upsert(
     State(ctx): State<AppContext>,
     headers: HeaderMap,
@@ -737,6 +744,7 @@ pub fn routes() -> Routes {
             "/devices/{id}/plugins/{plugin_id}/install",
             post(install).delete(uninstall),
         )
+        .add("/devices/{id}/access", get(access_show))
         .add(
             "/devices/{id}/credentials",
             get(credentials_index).put(credentials_upsert),

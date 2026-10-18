@@ -79,25 +79,35 @@
           </v-window-item>
 
           <v-window-item :value="3">
-            <div v-if="planning" class="d-flex align-center ga-3 py-8 justify-center">
+            <div v-if="planning && !plan" class="d-flex align-center ga-3 py-8 justify-center">
               <v-progress-circular indeterminate color="primary"></v-progress-circular>
               <span class="text-body-medium">
                 Calculando o plano: caminho, motores e o que cada ponta precisa…
               </span>
             </div>
-            <v-alert v-else-if="planError" type="error" variant="tonal" class="mb-2">
+            <v-alert v-else-if="planError && !plan" type="error" variant="tonal" class="mb-2">
               <div class="mb-2">{{ planError }}</div>
               <v-btn
                 color="error"
                 variant="flat"
                 size="small"
                 prepend-icon="mdi-refresh"
-                @click="loadPlan"
+                @click="loadPlan()"
               >
                 Tentar de novo
               </v-btn>
             </v-alert>
-            <LinkTestPlanView v-else-if="plan" :plan="plan" :spec="spec" />
+            <template v-else-if="plan">
+              <v-alert v-if="planError" type="error" variant="tonal" density="compact" class="mb-2">
+                {{ planError }}
+              </v-alert>
+              <LinkTestPlanView
+                :plan="plan"
+                :spec="spec"
+                :refreshing="planning"
+                @fixed="loadPlan(true)"
+              />
+            </template>
           </v-window-item>
         </v-window>
 
@@ -249,11 +259,15 @@ watch([draft, spec], () => {
 
 watch(plan, (value) => emit('planned', value))
 
-async function loadPlan() {
+/**
+ * Pede o plano. `keep`: um passo acabou de ser feito (instalar, cadastrar o
+ * acesso) — o plano atual fica na tela enquanto o novo chega.
+ */
+async function loadPlan(keep = false) {
   const seq = ++planSeq
   planning.value = true
   planError.value = null
-  plan.value = null
+  if (!keep) plan.value = null
   try {
     const result = await store.plan(requestFromDraft(draft.value, spec.value))
     if (seq === planSeq) plan.value = result

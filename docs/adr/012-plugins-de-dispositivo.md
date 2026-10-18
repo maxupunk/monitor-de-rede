@@ -126,6 +126,16 @@ cada acesso ao equipamento (ou ligando, ciente do risco, um modo automático).
   syslog usa a mesma credencial (`services/syslog/login.rs`): a salva, se
   houver, ou a digitada — gravada aqui só quando o operador marca "salvar" e
   o acesso funcionou.
+- Falta de acesso é **erro tipado**, não texto: `AppError::MissingCredential`
+  (409, corpo com `code: "missing_credential"`, `deviceId` e `transport`),
+  montado só em `credentials` (`missing_credential`) e lido só por
+  `credentials::missing_access_of` (lote de frota guarda `missingAccess`; a
+  ferramenta da IA devolve `missingAccess` no resultado). A tela reconhece o
+  código em `utils/deviceCredentials.missingAccessOf` e abre o formulário único
+  do acesso (`DeviceAccessForm`/`DeviceAccessDialog`, via `useDeviceAccess`)
+  ali mesmo: `withAccess` repete a leitura sozinha e pergunta antes de repetir
+  uma escrita. `GET /api/devices/{id}/access` dá ao formulário as credenciais
+  (sem senha) e os agentes.
 - A heurística de efeito pode errar para "escrita" (confirmação a mais); errar
   para o outro lado custaria o equipamento.
 - Rotas de escrita de plugin são só de administrador, como o Docker.

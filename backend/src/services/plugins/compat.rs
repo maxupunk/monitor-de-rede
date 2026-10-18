@@ -117,6 +117,19 @@ pub fn names_platform(manifest: &PluginManifest, facts: &DeviceFacts) -> bool {
             .any(|platform| platform.eq_ignore_ascii_case(&facts.platform))
 }
 
+/// O plugin é para este equipamento pelo sistema e nada o contradiz: a
+/// régua que liga um embutido sozinho no cadastro e que escolhe o plugin a
+/// sugerir quando falta um (teste de enlace).
+#[must_use]
+pub fn fits_platform(
+    manifest: &PluginManifest,
+    validated: &[CompatEntry],
+    facts: &DeviceFacts,
+) -> bool {
+    names_platform(manifest, facts)
+        && evaluate(manifest, validated, facts).level != Compat::Incompatible
+}
+
 #[must_use]
 pub fn evaluate(
     manifest: &PluginManifest,

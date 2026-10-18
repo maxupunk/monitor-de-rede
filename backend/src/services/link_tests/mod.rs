@@ -11,6 +11,7 @@
 //! | [`negotiate`] | escolha pura de motor e papéis; tradução de sentido |
 //! | [`endpoint`] | as pontas: equipamento (plugin), central, agente |
 //! | [`plan`] | o plano antes de rodar |
+//! | [`fixes`] | os passos que o plano oferece (instalar o plugin, cadastrar o acesso) |
 //! | [`guard`] | um teste por dispositivo, no máximo dois no sistema |
 //! | [`runner`] | a máquina de estados (pernas e etapas, cancelamento, limpeza) |
 //! | [`outcome`] | desfecho de perna e teste, gargalo |
@@ -24,6 +25,7 @@
 pub mod endpoint;
 pub mod env;
 pub mod events;
+pub mod fixes;
 pub mod guard;
 pub mod janitor;
 pub mod model;

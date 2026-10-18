@@ -9,7 +9,15 @@ export interface ApiErrorResponse {
   error?: string
   description?: string
   errors?: Array<{ field?: string; message: string }>
+  /** Erro que a tela trata sozinha — hoje só `missing_credential`. */
+  code?: string
+  /** Com `missing_credential`: o equipamento e o transporte do acesso que falta. */
+  deviceId?: number
+  transport?: string
 }
+
+/** O código do backend para "falta o acesso do equipamento" (`AppError::MissingCredential`). */
+export const MISSING_CREDENTIAL_CODE = 'missing_credential'
 
 /**
  * Endpoints em que um 401 é resposta de negócio, não sessão expirada.

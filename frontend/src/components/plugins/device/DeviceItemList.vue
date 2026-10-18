@@ -54,6 +54,7 @@ import type { ItemList } from '@/bindings/ItemList'
 import type { PluginAction } from '@/bindings/PluginAction'
 import PluginItemList from '@/components/plugins/items/PluginItemList.vue'
 import { usePluginsStore } from '@/stores/plugins'
+import { withAccess } from '@/composables/useDeviceAccess'
 import { deviceRows, paramsFromItem, type ItemRow, type ListActionInfo } from '@/utils/itemList'
 
 /**
@@ -128,12 +129,10 @@ async function load(term: string) {
   const params: Record<string, unknown> = {}
   if (props.list.searchParam && text) params[props.list.searchParam] = text
   try {
-    listRunId.value = await store.runAction(
-      props.deviceId,
-      props.pluginId,
-      props.list.source,
-      params,
-      false
+    const source = props.list.source
+    listRunId.value = await withAccess(
+      () => store.runAction(props.deviceId, props.pluginId, source, params, false),
+      { retry: 'auto', what: props.list.title ?? 'Carregar a lista' }
     )
     searched.value = text
   } catch (err: unknown) {

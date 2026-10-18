@@ -224,6 +224,9 @@ pub async fn view<C: ConnectionTrait>(db: &C, plugin_id: i64) -> AppResult<Fleet
     for (device, installed_at) in &membership {
         let facts = DeviceFacts::from_device(device);
         let verdict = compat::evaluate(&package.manifest, &package.compatibility, &facts);
+        let missing_access = credentials::access_gap(db, device.id, &package.manifest.transports)
+            .await?
+            .map(credentials::AccessGap::kind);
         list.push(FleetMember {
             device_id: device.id,
             name: device.name.clone(),
@@ -233,7 +236,8 @@ pub async fn view<C: ConnectionTrait>(db: &C, plugin_id: i64) -> AppResult<Fleet
             compat: verdict.level,
             reasons: verdict.reasons,
             installed_at: installed_at.clone(),
-            credentials_ready: credentials_ready(db, device.id, &package.manifest).await?,
+            credentials_ready: missing_access.is_none(),
+            missing_access,
             settings: settings::view(db, &plugin, settings::Scope::Device(device.id)).await?,
         });
     }
@@ -272,22 +276,6 @@ pub async fn view<C: ConnectionTrait>(db: &C, plugin_id: i64) -> AppResult<Fleet
         candidates,
         batches: recent(db, &plugin, RECENT_BATCHES).await?,
     })
-}
-
-async fn credentials_ready<C: ConnectionTrait>(
-    db: &C,
-    device_id: i64,
-    manifest: &PluginManifest,
-) -> AppResult<bool> {
-    let list = credentials::list(db, device_id).await?;
-    Ok(manifest.transports.iter().all(|transport| {
-        // HTTP sem login funciona sem credencial; SSH/Telnet não.
-        *transport == super::manifest::TransportKind::Http
-            || list.iter().any(|credential| {
-                credential.kind == *transport
-                    && (credential.has_stored_secret || credential.session_active)
-            })
-    }))
 }
 
 fn has_patch(result: Option<&Value>) -> bool {
@@ -426,6 +414,7 @@ pub async fn start(ctx: &AppContext, plugin_id: i64, run: FleetRun) -> AppResult
             status: "pending".into(),
             error: None,
             output: None,
+            missing_access: None,
         })
         .collect();
     // O banco guarda a máscara no lugar de parâmetro secreto.
@@ -566,6 +555,7 @@ impl Job {
             status: "running".into(),
             error: None,
             output: None,
+            missing_access: None,
         };
         if self.cancel.is_cancelled() {
             entry.status = "skipped".into();
@@ -593,6 +583,7 @@ impl Job {
         match runs::prepare(&self.ctx, spec).await {
             Err(error) => {
                 entry.status = "failed".into();
+                entry.missing_access = credentials::missing_access_of(&error).map(|(_, kind)| kind);
                 entry.error = Some(error.to_string());
             }
             Ok(prepared) => {

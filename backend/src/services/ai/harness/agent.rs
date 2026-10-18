@@ -41,9 +41,20 @@ use crate::{
             settings::AiSettings,
         },
         audit::AuditActor,
+        plugins::credentials,
         shared::errors::{AppError, AppResult},
     },
 };
+
+/// O erro de uma ferramenta, para o modelo e para a tela. Falta de acesso
+/// leva o equipamento e o transporte: o cartão oferece cadastrá-lo ali mesmo.
+fn tool_error(err: &AppError) -> serde_json::Value {
+    let mut value = json!({ "error": err.to_string() });
+    if let Some((device_id, kind)) = credentials::missing_access_of(err) {
+        value["missingAccess"] = json!({ "deviceId": device_id, "transport": kind });
+    }
+    value
+}
 
 /// Rodadas de raciocínio (chamada ao provedor + ferramentas) por pergunta.
 const MAX_ITERATIONS: usize = 6;
@@ -592,7 +603,7 @@ async fn handle_tool_call(
                     }
                     (output.data, output.chart)
                 }
-                Err(err) => (json!({ "error": err.to_string() }), None),
+                Err(err) => (tool_error(&err), None),
             };
             if !sink
                 .send(HarnessEvent::ToolResult {

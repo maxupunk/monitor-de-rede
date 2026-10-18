@@ -176,11 +176,42 @@ fn password_of(
     }
 }
 
-fn session_missing(kind: TransportKind) -> AppError {
-    AppError::conflict(format!(
-        "A senha {} deste equipamento é pedida a cada sessão. Informe-a para continuar.",
-        kind.as_str().to_uppercase()
-    ))
+/// O erro único de "falta o acesso": a tela o reconhece pelo código e abre o
+/// formulário do acesso daquele transporte (ver [`AppError::MissingCredential`]).
+#[must_use]
+pub fn missing_credential(device_id: i64, kind: TransportKind, message: String) -> AppError {
+    AppError::MissingCredential {
+        device_id,
+        transport: kind.as_str(),
+        message,
+    }
+}
+
+/// `(device_id, transporte)` de um erro de acesso faltando — para quem guarda
+/// a falha (lote de frota) dizer à tela qual acesso pedir.
+#[must_use]
+pub fn missing_access_of(error: &AppError) -> Option<(i64, TransportKind)> {
+    match error {
+        AppError::MissingCredential {
+            device_id,
+            transport,
+            ..
+        } => TransportKind::parse(transport)
+            .ok()
+            .map(|kind| (*device_id, kind)),
+        _ => None,
+    }
+}
+
+fn session_missing(device_id: i64, kind: TransportKind) -> AppError {
+    missing_credential(
+        device_id,
+        kind,
+        format!(
+            "A senha {} deste equipamento é pedida a cada sessão. Informe-a para continuar.",
+            kind.as_str().to_uppercase()
+        ),
+    )
 }
 
 /// # Errors
@@ -321,6 +352,76 @@ pub async fn delete<C: ConnectionTrait>(
     Ok(())
 }
 
+/// O que falta para entrar no equipamento por um transporte — o mesmo
+/// critério na frota ("Sem acesso"), no plano do teste de enlace e na tela
+/// que pede o acesso.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccessGap {
+    /// Nenhuma credencial deste tipo.
+    Missing(TransportKind),
+    /// Guardada cifrada, mas sem senha.
+    NoSecret(TransportKind),
+    /// Pedida a cada sessão, e a sessão não está aberta.
+    SessionPending(TransportKind),
+}
+
+impl AccessGap {
+    #[must_use]
+    pub const fn kind(self) -> TransportKind {
+        match self {
+            Self::Missing(kind) | Self::NoSecret(kind) | Self::SessionPending(kind) => kind,
+        }
+    }
+
+    /// A frase para a tela: "`AP-terraço` está sem acesso SSH".
+    #[must_use]
+    pub fn describe(self, device_name: &str) -> String {
+        let label = self.kind().as_str().to_uppercase();
+        match self {
+            Self::Missing(_) => format!("{device_name} está sem acesso {label}"),
+            Self::NoSecret(_) => {
+                format!("{device_name} tem o acesso {label} cadastrado sem a senha")
+            }
+            Self::SessionPending(_) => format!(
+                "A senha {label} de {device_name} é pedida a cada sessão e ainda não foi informada"
+            ),
+        }
+    }
+}
+
+/// A primeira lacuna de acesso entre as credenciais já carregadas. HTTP sem
+/// credencial vale (página pública); SSH/Telnet precisam de senha pronta.
+#[must_use]
+pub fn gap_in(list: &[CredentialView], transports: &[TransportKind]) -> Option<AccessGap> {
+    transports
+        .iter()
+        .filter(|kind| **kind != TransportKind::Http)
+        .find_map(|&kind| match list.iter().find(|view| view.kind == kind) {
+            None => Some(AccessGap::Missing(kind)),
+            Some(view) => match view.storage {
+                SecretStorage::Vault if !view.has_stored_secret => Some(AccessGap::NoSecret(kind)),
+                SecretStorage::Ask if !view.session_active => Some(AccessGap::SessionPending(kind)),
+                _ => None,
+            },
+        })
+}
+
+/// O que falta para entrar no equipamento pelos transportes pedidos.
+///
+/// # Errors
+///
+/// Erro do banco.
+pub async fn access_gap<C: ConnectionTrait>(
+    db: &C,
+    device_id: i64,
+    transports: &[TransportKind],
+) -> AppResult<Option<AccessGap>> {
+    if transports.iter().all(|kind| *kind == TransportKind::Http) {
+        return Ok(None);
+    }
+    Ok(gap_in(&list(db, device_id).await?, transports))
+}
+
 /// Credenciais prontas para uma execução, e por qual agente sair.
 #[derive(Debug, Clone, Default)]
 pub struct Resolved {
@@ -356,14 +457,18 @@ pub async fn resolve<C: ConnectionTrait>(
                 });
                 continue;
             }
-            return Err(AppError::business_rule(format!(
-                "Cadastre a credencial {} deste equipamento para usar o plugin.",
-                kind.as_str().to_uppercase()
-            )));
+            return Err(missing_credential(
+                device_id,
+                kind,
+                format!(
+                    "Cadastre a credencial {} deste equipamento para usar o plugin.",
+                    kind.as_str().to_uppercase()
+                ),
+            ));
         };
         let password = match password_of(&model, kind)? {
             None if SecretStorage::parse(&model.storage) == SecretStorage::Ask => {
-                return Err(session_missing(kind))
+                return Err(session_missing(device_id, kind))
             }
             password => password,
         };
@@ -401,19 +506,25 @@ pub async fn stored_login<C: ConnectionTrait>(
 ) -> AppResult<Login> {
     let label = kind.as_str().to_uppercase();
     let model = find(db, device_id, kind).await?.ok_or_else(|| {
-        AppError::validation(format!(
-            "Este equipamento não tem credencial {label} salva. Informe usuário e senha."
-        ))
+        missing_credential(
+            device_id,
+            kind,
+            format!("Este equipamento não tem credencial {label} salva. Informe usuário e senha."),
+        )
     })?;
     let password = match password_of(&model, kind)? {
         Some(password) => password,
         None if SecretStorage::parse(&model.storage) == SecretStorage::Ask => {
-            return Err(session_missing(kind))
+            return Err(session_missing(device_id, kind))
         }
         None => {
-            return Err(AppError::validation(format!(
+            return Err(missing_credential(
+                device_id,
+                kind,
+                format!(
                 "A credencial {label} deste equipamento está sem senha guardada. Informe a senha."
-            )))
+            ),
+            ))
         }
     };
     Ok(Login {
@@ -454,4 +565,68 @@ pub async fn remember_login<C: ConnectionTrait>(
         via_probe_id: existing.as_ref().and_then(|model| model.via_probe_id),
     };
     upsert(db, device_id, input).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn view(
+        kind: TransportKind,
+        storage: SecretStorage,
+        stored: bool,
+        session: bool,
+    ) -> CredentialView {
+        CredentialView {
+            kind,
+            username: "root".into(),
+            storage,
+            port: kind.default_port(),
+            https: false,
+            via_probe_id: None,
+            has_stored_secret: stored,
+            session_active: session,
+        }
+    }
+
+    #[test]
+    fn lacuna_de_acesso_por_transporte() {
+        let ssh = [TransportKind::Ssh];
+        assert_eq!(
+            gap_in(&[], &ssh),
+            Some(AccessGap::Missing(TransportKind::Ssh))
+        );
+        assert_eq!(
+            gap_in(&[], &[TransportKind::Http]),
+            None,
+            "HTTP sem login vale"
+        );
+        let guardada = view(TransportKind::Ssh, SecretStorage::Vault, true, false);
+        assert_eq!(gap_in(&[guardada], &ssh), None);
+        let sem_senha = view(TransportKind::Ssh, SecretStorage::Vault, false, false);
+        assert_eq!(
+            gap_in(&[sem_senha], &ssh),
+            Some(AccessGap::NoSecret(TransportKind::Ssh))
+        );
+        let sessao = view(TransportKind::Ssh, SecretStorage::Ask, false, false);
+        assert_eq!(
+            gap_in(std::slice::from_ref(&sessao), &ssh),
+            Some(AccessGap::SessionPending(TransportKind::Ssh))
+        );
+        let aberta = CredentialView {
+            session_active: true,
+            ..sessao
+        };
+        assert_eq!(gap_in(&[aberta], &ssh), None);
+        // A do outro tipo não serve.
+        let telnet = view(TransportKind::Telnet, SecretStorage::Vault, true, false);
+        assert_eq!(
+            gap_in(&[telnet], &ssh),
+            Some(AccessGap::Missing(TransportKind::Ssh))
+        );
+        assert_eq!(
+            AccessGap::Missing(TransportKind::Ssh).describe("AP-terraço"),
+            "AP-terraço está sem acesso SSH"
+        );
+    }
 }

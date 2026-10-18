@@ -117,9 +117,10 @@
               v-model:save="login.save"
               :device-id="target.id"
               :saved="savedCredential"
+              :kind="credentialKindFor(protocol)"
               :errors="fieldErrors"
               :disabled="running"
-              @manage="open = false"
+              @saved="rememberCredential"
             />
           </v-col>
 
@@ -326,6 +327,7 @@ import {
 import { useServerAddressesStore } from '@/stores/serverAddresses'
 import ServerAddressesButton from '@/components/ServerAddressesButton.vue'
 import DeviceLoginPicker from '@/components/devices/DeviceLoginPicker.vue'
+import { withAccess } from '@/composables/useDeviceAccess'
 import type { CredentialView } from '@/bindings/CredentialView'
 import { usePluginsStore } from '@/stores/plugins'
 import { credentialKindFor, credentialReady, pickShellCredential } from '@/utils/deviceCredentials'
@@ -674,17 +676,24 @@ async function submit(): Promise<void> {
   const sessionId = props.target.sessionId
   const deviceId = props.target.id
   try {
-    const provisioned = await logsStore.provisionDevice(deviceId, {
-      protocol: protocol.value,
-      port: port.value || null,
-      username: login.useSaved ? '' : login.username,
-      password: login.useSaved ? '' : login.password,
-      savedCredential: login.useSaved ? (savedCredential.value?.kind ?? null) : null,
-      saveCredential: !login.useSaved && login.save,
-      operatingSystem: operatingSystem.value,
-      serverAddress: serverAddress.value.trim(),
-      macAddress: macAddress.value.trim() || null,
-    })
+    // A credencial salva escolhida pede a senha da sessão (ou sumiu): o
+    // formulário do acesso abre aqui e a ativação roda de novo, com confirmação.
+    const provisioned = await withAccess(
+      () =>
+        logsStore.provisionDevice(deviceId, {
+          protocol: protocol.value,
+          port: port.value || null,
+          username: login.useSaved ? '' : login.username,
+          password: login.useSaved ? '' : login.password,
+          savedCredential: login.useSaved ? (savedCredential.value?.kind ?? null) : null,
+          saveCredential: !login.useSaved && login.save,
+          operatingSystem: operatingSystem.value,
+          serverAddress: serverAddress.value.trim(),
+          macAddress: macAddress.value.trim() || null,
+        }),
+      { retry: 'confirm', what: 'Ativar o log', onSaved: rememberCredential }
+    )
+    if (provisioned === null) return
     if (
       !isProvisionSessionCurrent(
         open.value,
@@ -720,6 +729,11 @@ async function submit(): Promise<void> {
   } finally {
     running.value = false
   }
+}
+
+/** O acesso salvo no formulário passa a ser o da tela (substitui o do mesmo tipo). */
+function rememberCredential(saved: CredentialView) {
+  credentials.value = [...credentials.value.filter((c) => c.kind !== saved.kind), saved]
 }
 
 function mensagemDeErro(erro: unknown): string {

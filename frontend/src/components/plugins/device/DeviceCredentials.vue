@@ -65,62 +65,33 @@
         </v-list-item>
       </v-list>
     </v-card-text>
-
-    <CredentialDialog
-      v-model="dialog.open"
-      :existing="dialog.existing"
-      :agents="agents"
-      :saving="dialog.saving"
-      @save="saveCredential"
-    />
   </v-card>
 </template>
 
 <script setup lang="ts">
-import { reactive } from 'vue'
-import type { AgentRouteOption } from '@/bindings/AgentRouteOption'
-import type { CredentialInput } from '@/bindings/CredentialInput'
 import type { CredentialView } from '@/bindings/CredentialView'
 import { usePluginsStore } from '@/stores/plugins'
 import { confirm, prompt } from '@/composables/useConfirm'
-import CredentialDialog from '@/components/plugins/CredentialDialog.vue'
+import { requestAccess } from '@/composables/useDeviceAccess'
 import { credentialReady, credentialSubtitle } from '@/utils/deviceCredentials'
 
 const props = defineProps<{
   deviceId: number
   credentials: CredentialView[]
-  agents: AgentRouteOption[]
 }>()
 
 const emit = defineEmits<{ notify: [message: string, color: string] }>()
 
 const store = usePluginsStore()
-const dialog = reactive({
-  open: false,
-  existing: null as CredentialView | null,
-  saving: false,
-})
 
 function describe(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback
 }
 
-function openCredential(existing: CredentialView | null) {
-  dialog.existing = existing
-  dialog.open = true
-}
-
-async function saveCredential(input: CredentialInput) {
-  dialog.saving = true
-  try {
-    await store.saveCredential(props.deviceId, input)
-    dialog.open = false
-    emit('notify', 'Credencial salva.', 'success')
-  } catch (err: unknown) {
-    emit('notify', describe(err, 'Falha ao salvar a credencial'), 'error')
-  } finally {
-    dialog.saving = false
-  }
+/** O mesmo formulário do acesso de todas as telas; editar fixa o tipo. */
+async function openCredential(existing: CredentialView | null) {
+  const saved = await requestAccess({ deviceId: props.deviceId, transport: existing?.kind ?? null })
+  if (saved) emit('notify', 'Credencial salva.', 'success')
 }
 
 async function removeCredential(credential: CredentialView) {
