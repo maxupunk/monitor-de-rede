@@ -140,10 +140,21 @@ export function legEdgeIds(leg: Pick<LinkTestPlanLeg, 'edgeId' | 'edgeIds'>): nu
   return leg.edgeId !== null ? [leg.edgeId] : []
 }
 
+/** "switch-a › switch-b": os equipamentos sem IP atravessados, em ordem. */
+export function viaText(names: ReadonlyArray<string> | null | undefined): string | null {
+  return names && names.length > 0 ? names.join(' › ') : null
+}
+
 /** "via switch-a › switch-b" — a perna atravessa equipamentos sem IP. */
 export function legViaLabel(leg: Pick<LinkTestPlanLeg, 'viaNames'>): string | null {
-  const names = leg.viaNames ?? []
-  return names.length > 0 ? `via ${names.join(' › ')}` : null
+  const via = viaText(leg.viaNames)
+  return via ? `via ${via}` : null
+}
+
+/** A explicação completa do chip "via" (dica e leitor de tela). */
+export function legViaDescription(leg: Pick<LinkTestPlanLeg, 'viaNames'>): string | null {
+  const via = viaText(leg.viaNames)
+  return via ? `Passa por ${via} (sem IP): a perna mede os cabos entre as duas pontas` : null
 }
 
 /** "OpenWrt-Sala → MikroTik-Torre". */

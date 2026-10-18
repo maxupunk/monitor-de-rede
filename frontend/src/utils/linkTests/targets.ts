@@ -6,10 +6,12 @@
  * IP, atravessando os transparentes do meio.
  *
  * Funções puras sobre o grafo do mapa: quem é transparente, os destinos de
- * "Enlace" a partir de um equipamento e qual opção o rascunho escolheu.
+ * "Enlace" a partir de um equipamento e qual opção o rascunho escolheu. A
+ * legenda "a › b" é de `presentation.ts` (`viaText`).
  */
-import type { TopologyEdge, TopologyNode } from '@/stores/topology'
-import { edgeEndpoints, isVirtualEdge } from '@/utils/topology/presentation'
+import type { TopologyNode } from '@/stores/topology'
+import { pathEdge, routeTree, type PathEdgeSource } from '@/utils/topology/path'
+import { edgeEndpoints, isUnmanagedSwitch } from '@/utils/topology/presentation'
 
 /** O que a régua precisa saber de um equipamento (nó do mapa ou cadastro). */
 export type TransparencySubject = {
@@ -23,19 +25,31 @@ export function isLinkTestTransparent(device: TransparencySubject): boolean {
   return !device.ipAddress || device.ipAddress.trim() === ''
 }
 
+/**
+ * Pode ser ponta de um teste (seletores de equipamento): nem transparente,
+ * nem switch não gerenciável (que, mesmo com IP cadastrado, não roda plugin).
+ */
+export function isLinkTestEndpoint(device: TransparencySubject & { type: string }): boolean {
+  return !isUnmanagedSwitch(device) && !isLinkTestTransparent(device)
+}
+
 /** Dica dos seletores de equipamento, que não oferecem os transparentes. */
 export const TRANSPARENT_HINT = 'Switches sem IP não entram no teste — o enlace passa por eles.'
 
-/** "switch-a › switch-b": os equipamentos sem IP atravessados, em ordem. */
-export function viaText(names: ReadonlyArray<string>): string | null {
-  return names.length > 0 ? names.join(' › ') : null
+/**
+ * Transparência por id, a partir do mapa. Nó fora do mapa conta como
+ * equipamento com IP: o backend decide.
+ */
+function transparentIn(
+  nodeOf: (id: number) => TransparencySubject | undefined
+): (id: number) => boolean {
+  return (id) => {
+    const node = nodeOf(id)
+    return node !== undefined && isLinkTestTransparent(node)
+  }
 }
 
 type NodeLike = Pick<TopologyNode, 'id' | 'name'> & TransparencySubject
-type EdgeLike = Pick<
-  TopologyEdge,
-  'id' | 'linkType' | 'source' | 'target' | 'sourceDeviceId' | 'targetDeviceId'
->
 
 /** Um destino de "Enlace" a partir do equipamento escolhido. */
 export interface LinkTarget {
@@ -51,92 +65,57 @@ export interface LinkTarget {
   viaNames: string[]
 }
 
-interface Step {
-  neighbor: number
-  edgeId: number
-}
-
-function adjacency(edges: ReadonlyArray<EdgeLike>): Map<number, Step[]> {
-  const map = new Map<number, Step[]>()
-  const add = (from: number, step: Step) => {
-    const list = map.get(from)
-    if (list) list.push(step)
-    else map.set(from, [step])
-  }
-  // Hierarquia virtual não é cabo: não se mede nem se atravessa.
-  for (const edge of edges) {
-    if (isVirtualEdge(edge)) continue
-    const { source, target } = edgeEndpoints(edge)
-    if (source === target) continue
-    add(source, { neighbor: target, edgeId: edge.id })
-    add(target, { neighbor: source, edgeId: edge.id })
-  }
-  for (const list of map.values()) list.sort((a, b) => a.edgeId - b.edgeId)
-  return map
-}
-
 /**
  * Os destinos testáveis de "Enlace" a partir de `from`: os vizinhos com IP
- * (enlace direto) e, atrás de cada vizinho sem IP, os primeiros equipamentos
- * com IP alcançados só por equipamentos sem IP (busca em largura: o trecho
- * mais curto fica). Um destino que também é vizinho direto fica só como
- * direto. Ordem: pelo nome.
+ * (cada enlace direto, a hierarquia declarada inclusive) e, atrás dos
+ * vizinhos sem IP, os equipamentos com IP alcançados só por equipamentos sem
+ * IP. A rota até cada um é a do backend (`utils/topology/path`: menos
+ * saltos, depois maior confiança, depois os ids) — a opção mostrada é o
+ * trecho medido. Um destino com enlace direto fica só como direto. Ordem:
+ * pelo nome.
  */
 export function linkTargets(
   from: number,
   nodeOf: (id: number) => NodeLike | undefined,
-  edges: ReadonlyArray<EdgeLike>
+  edges: ReadonlyArray<PathEdgeSource>
 ): LinkTarget[] {
-  const graph = adjacency(edges)
   const name = (id: number) => nodeOf(id)?.name ?? `#${id}`
-  // Nó fora do mapa conta como equipamento com IP: o backend decide.
-  const transparent = (id: number) => {
-    const node = nodeOf(id)
-    return node !== undefined && isLinkTestTransparent(node)
-  }
+  const transparent = transparentIn(nodeOf)
+  const graph = edges.map(pathEdge)
 
   const direct: LinkTarget[] = []
-  for (const { neighbor, edgeId } of graph.get(from) ?? []) {
-    if (neighbor === from || transparent(neighbor)) continue
+  for (const edge of graph) {
+    const neighbor = edge.a === from ? edge.b : edge.b === from ? edge.a : null
+    if (neighbor === null || neighbor === from || transparent(neighbor)) continue
     direct.push({
-      key: `edge:${edgeId}`,
+      key: `edge:${edge.id}`,
       deviceId: neighbor,
       name: name(neighbor),
-      linkId: edgeId,
-      edgeIds: [edgeId],
+      linkId: edge.id,
+      edgeIds: [edge.id],
       viaDeviceIds: [],
       viaNames: [],
     })
   }
 
-  const reached = new Set(direct.map((target) => target.deviceId))
+  // Só a origem e os transparentes são atravessados: cada equipamento com IP
+  // alcançado é ponta, como no recorte `segment_edges` do backend.
+  const tree = routeTree(graph, from, transparent)
   const beyond: LinkTarget[] = []
-  const visited = new Set<number>([from])
-  const queue: Array<{ device: number; edgeIds: number[]; via: number[] }> = [
-    { device: from, edgeIds: [], via: [] },
-  ]
-  while (queue.length > 0) {
-    const current = queue.shift()!
-    for (const { neighbor, edgeId } of graph.get(current.device) ?? []) {
-      if (visited.has(neighbor)) continue
-      const edgeIds = [...current.edgeIds, edgeId]
-      if (transparent(neighbor)) {
-        visited.add(neighbor)
-        queue.push({ device: neighbor, edgeIds, via: [...current.via, neighbor] })
-        continue
-      }
-      if (current.via.length === 0 || reached.has(neighbor)) continue
-      reached.add(neighbor)
-      beyond.push({
-        key: `device:${neighbor}`,
-        deviceId: neighbor,
-        name: name(neighbor),
-        linkId: null,
-        edgeIds,
-        viaDeviceIds: current.via,
-        viaNames: current.via.map(name),
-      })
-    }
+  for (const deviceId of tree.reached()) {
+    if (transparent(deviceId)) continue
+    const route = tree.routeTo(deviceId)
+    const via = route ? route.deviceIds.slice(1, -1) : []
+    if (!route || via.length === 0) continue
+    beyond.push({
+      key: `device:${deviceId}`,
+      deviceId,
+      name: name(deviceId),
+      linkId: null,
+      edgeIds: route.edgeIds,
+      viaDeviceIds: via,
+      viaNames: via.map(name),
+    })
   }
 
   return [...direct, ...beyond].sort(
@@ -161,14 +140,11 @@ export function selectedTargetKey(
  * duas pontas têm IP (enlace direto) ou nenhuma tem (nada a medir ali).
  */
 export function transparentEdgeOrigin(
-  edge: EdgeLike,
+  edge: PathEdgeSource,
   nodeOf: (id: number) => TransparencySubject | undefined
 ): { origin: number | null; direct: boolean } {
   const { source, target } = edgeEndpoints(edge)
-  const through = (id: number) => {
-    const node = nodeOf(id)
-    return node !== undefined && isLinkTestTransparent(node)
-  }
+  const through = transparentIn(nodeOf)
   const [sourceThrough, targetThrough] = [through(source), through(target)]
   if (!sourceThrough && !targetThrough) return { origin: null, direct: true }
   if (sourceThrough && targetThrough) return { origin: null, direct: false }

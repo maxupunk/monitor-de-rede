@@ -24,17 +24,7 @@
         <v-chip v-if="leg.kind === 'end_to_end'" size="x-small" color="info" variant="flat" label>
           Ponta a ponta
         </v-chip>
-        <v-chip
-          v-if="viaLabel"
-          size="x-small"
-          color="secondary"
-          variant="flat"
-          prepend-icon="mdi-switch"
-          label
-          title="A perna atravessa equipamentos sem IP: mede os cabos entre as duas pontas"
-        >
-          {{ viaLabel }}
-        </v-chip>
+        <LinkTestViaChip :leg="leg" />
         <v-chip
           v-if="leg.engine"
           size="x-small"
@@ -166,6 +156,7 @@ import { resultVsSpeed, type SpeedComparison } from '@/utils/linkTests/results'
 import { runningLegFlow } from '@/utils/linkTests/overlay'
 import MonitorSparkline from '@/components/MonitorSparkline.vue'
 import LinkTestStatusChip from './LinkTestStatusChip.vue'
+import LinkTestViaChip from './LinkTestViaChip.vue'
 
 const props = defineProps<{
   leg: LinkTestLeg
@@ -266,7 +257,11 @@ function openRun(stage: LinkTestStage) {
 
 const notes = computed(() => legNotes(props.leg))
 
-const ariaLabel = computed(() => `Perna ${props.leg.seq}: ${title.value}, ${status.value.label}`)
+const ariaLabel = computed(() =>
+  [`Perna ${props.leg.seq}: ${title.value}`, viaLabel.value, status.value.label]
+    .filter(Boolean)
+    .join(', ')
+)
 </script>
 
 <style scoped>

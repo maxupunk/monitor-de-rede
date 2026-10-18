@@ -299,6 +299,14 @@ NetMonitor nunca é transparente.
 - **`link` pelas duas pontas.** Sem `linkId`, `sourceDeviceId` +
   `targetDeviceId` pedem "o enlace entre os dois através de switches sem IP":
   o menor caminho no recorte do grafo em que só transparentes ficam no meio.
+  A hierarquia declarada (`parentId`, aresta de id negativo) conta como
+  enlace: é um `linkId` válido e é atravessada como qualquer cabo.
+- **Mesma rota nos dois lados.** O desempate (menos saltos → maior confiança
+  somada, confirmado = 100 → menor id) é o algoritmo de
+  `services/topology/path.rs`, copiado passo a passo em
+  `frontend/src/utils/topology/path.ts`: a opção "até BORDA · passando por
+  X" do assistente é a rota que o backend mede. As duas suítes leem as mesmas
+  rotas (`backend/tests/fixtures/link_test_routes.json`).
   Sem esse caminho, mas com outro (passando por equipamento com IP), é `422`
   sugerindo **Caminho completo**; sem caminho nenhum, `blocking`.
 - `edgeId` fica com a aresta quando a perna tem uma só (e `null` com mais),

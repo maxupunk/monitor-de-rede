@@ -1,0 +1,37 @@
+{
+  "_doc": "Rotas do teste de enlace através de equipamentos sem IP (ADR 015 §5.2). O MESMO arquivo é lido pelo backend (services/link_tests/transparent.rs) e pela tela (frontend/tests/utils/linkTests/targets.spec.ts): a opção que o assistente mostra é a rota que o backend mede. Desempate: menos saltos, depois maior confiança somada (confirmado = 100), depois a ordem dos ids.",
+  "devices": [
+    { "id": 1, "name": "AP-terraço", "ipAddress": "10.0.0.3" },
+    { "id": 2, "name": "switch-inferido", "ipAddress": null },
+    { "id": 3, "name": "switch-lldp", "ipAddress": null },
+    { "id": 5, "name": "BORDA", "ipAddress": "10.0.0.1" },
+    { "id": 20, "name": "Rádio", "ipAddress": "10.0.2.1" },
+    { "id": 22, "name": "switch-22", "ipAddress": null },
+    { "id": 24, "name": "switch-24", "ipAddress": null },
+    { "id": 25, "name": "Câmera", "ipAddress": "10.0.2.5" },
+    { "id": 40, "name": "Torre", "ipAddress": "10.0.4.1" },
+    { "id": 41, "name": "switch-torre", "ipAddress": null },
+    { "id": 42, "name": "CPE", "ipAddress": "10.0.4.2" },
+    { "id": 43, "name": "Antena", "ipAddress": "10.0.4.3" }
+  ],
+  "edges": [
+    { "id": 10, "source": 1, "target": 2, "confidence": 60, "confirmed": false, "linkType": "ethernet" },
+    { "id": 11, "source": 2, "target": 5, "confidence": 100, "confirmed": true, "linkType": "ethernet" },
+    { "id": 12, "source": 1, "target": 3, "confidence": 95, "confirmed": false, "linkType": "ethernet" },
+    { "id": 13, "source": 3, "target": 5, "confidence": 40, "confirmed": true, "linkType": "ethernet" },
+    { "id": 30, "source": 20, "target": 24, "confidence": 100, "confirmed": true, "linkType": "ethernet" },
+    { "id": 31, "source": 24, "target": 25, "confidence": 100, "confirmed": true, "linkType": "ethernet" },
+    { "id": 32, "source": 20, "target": 22, "confidence": 100, "confirmed": true, "linkType": "ethernet" },
+    { "id": 33, "source": 22, "target": 25, "confidence": 100, "confirmed": true, "linkType": "ethernet" },
+    { "id": -41, "source": 40, "target": 41, "confidence": 100, "confirmed": true, "linkType": "parent" },
+    { "id": 50, "source": 41, "target": 42, "confidence": 100, "confirmed": true, "linkType": "ethernet" },
+    { "id": -43, "source": 40, "target": 43, "confidence": 100, "confirmed": true, "linkType": "parent" }
+  ],
+  "cases": [
+    { "name": "mesmo número de saltos: a confiança decide", "from": 1, "to": 5, "via": [3], "edgeIds": [12, 13] },
+    { "name": "empate total: o menor id decide", "from": 20, "to": 25, "via": [22], "edgeIds": [32, 33] },
+    { "name": "empate total, no sentido contrário", "from": 25, "to": 20, "via": [22], "edgeIds": [33, 32] },
+    { "name": "hierarquia atravessada pelo switch sem IP", "from": 42, "to": 40, "via": [41], "edgeIds": [50, -41] },
+    { "name": "hierarquia como enlace direto", "from": 40, "to": 43, "via": [], "edgeIds": [-43] }
+  ]
+}

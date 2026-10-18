@@ -73,6 +73,7 @@
         "
         :hint="linkHint"
         persistent-hint
+        :list-props="TARGET_LIST_PROPS"
         @update:model-value="chooseTarget"
       ></v-select>
     </template>
@@ -151,21 +152,20 @@
  * pelo diálogo de agendamento (mesmo alvo, mesmas regras).
  */
 import { computed, onMounted, ref, watch } from 'vue'
-import { useDevicesStore, type Device } from '@/stores/devices'
+import { useDevicesStore } from '@/stores/devices'
 import { useTopologyStore, type TopologyEdge } from '@/stores/topology'
 import type { LinkTestKind } from '@/types/linkTests'
 import { formatLinkSpeed } from '@/utils/formatters'
-import { KIND_OPTIONS } from '@/utils/linkTests/presentation'
+import { KIND_OPTIONS, viaText } from '@/utils/linkTests/presentation'
 import {
   TRANSPARENT_HINT,
-  isLinkTestTransparent,
+  isLinkTestEndpoint,
   linkTargets,
   selectedTargetKey,
-  viaText,
   type LinkTarget,
 } from '@/utils/linkTests/targets'
 import { linkOptionSubtitle, type LinkTestTargetDraft } from '@/utils/linkTests/wizard'
-import { edgeEndpoints, edgeSpeed, isUnmanagedSwitch } from '@/utils/topology/presentation'
+import { edgeEndpoints, edgeSpeed } from '@/utils/topology/presentation'
 
 const props = defineProps<{
   modelValue: LinkTestTargetDraft
@@ -197,16 +197,20 @@ function swap() {
   })
 }
 
-/** Switch sem IP não é ponta de teste: o enlace passa por ele. */
-function selectable(device: Device): boolean {
-  return !isUnmanagedSwitch(device) && !isLinkTestTransparent(device)
-}
+/**
+ * O subtítulo da opção ("passando por switch-a › switch-b") é parte da
+ * escolha, não um detalhe: opacidade cheia, e ele quebra linha em vez de
+ * sumir na tela estreita.
+ */
+const TARGET_LIST_PROPS = { style: { '--v-list-item-subtitle-opacity': '1' } }
 
-const hiddenCount = computed(() => devices.devices.filter((device) => !selectable(device)).length)
+const hiddenCount = computed(
+  () => devices.devices.filter((device) => !isLinkTestEndpoint(device)).length
+)
 
 const deviceItems = computed(() =>
   devices.devices
-    .filter(selectable)
+    .filter(isLinkTestEndpoint)
     .map((device) => ({
       title: device.name,
       subtitle: device.isSystem ? 'Servidor NetMonitor' : (device.ipAddress ?? ''),

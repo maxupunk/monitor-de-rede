@@ -107,10 +107,18 @@ describe('registro de ações e abas da topologia', () => {
       targetDeviceId: 5,
       sourceDeviceId: 1,
     })
-    // Hierarquia virtual não tem o que medir.
-    expect(
-      linkTestActions({ kind: 'edge', edge: edge(-5, 1, 2, { linkType: 'parent' }) }, h)
-    ).toEqual([])
+    // A hierarquia declarada também se mede (o backend aceita `linkId` negativo).
+    const parent = linkTestActions(
+      { kind: 'edge', edge: edge(-5, 1, 2, { linkType: 'parent' }) },
+      h
+    )
+    void parent.find((a) => a.id === 'test.link')!.run()
+    expect(h.requestLinkTest).toHaveBeenCalledWith({
+      kind: 'link',
+      linkId: -5,
+      sourceDeviceId: 1,
+      targetDeviceId: 2,
+    })
   })
 
   it('enlace com um switch sem IP abre o assistente na ponta com IP', () => {

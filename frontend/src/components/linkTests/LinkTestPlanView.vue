@@ -120,17 +120,7 @@
             >
               Ponta a ponta
             </v-chip>
-            <v-chip
-              v-if="legViaLabel(leg)"
-              size="x-small"
-              color="secondary"
-              variant="flat"
-              prepend-icon="mdi-switch"
-              label
-              title="A perna atravessa equipamentos sem IP: mede os cabos entre as duas pontas"
-            >
-              {{ legViaLabel(leg) }}
-            </v-chip>
+            <LinkTestViaChip :leg="leg" />
             <v-chip
               v-if="leg.engine"
               size="x-small"
@@ -198,7 +188,6 @@ import {
   endpointIcon,
   endpointLabel,
   engineLabel,
-  legViaLabel,
   serverSideLabel,
 } from '@/utils/linkTests/presentation'
 import { estimatedDurationText, specSummary } from '@/utils/linkTests/spec'
@@ -210,6 +199,7 @@ import {
   planEndpoints,
 } from '@/utils/linkTests/wizard'
 import LinkTestFixList from './LinkTestFixList.vue'
+import LinkTestViaChip from './LinkTestViaChip.vue'
 
 const props = defineProps<{
   plan: LinkTestPlan

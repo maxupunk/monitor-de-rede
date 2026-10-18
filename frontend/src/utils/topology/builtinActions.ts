@@ -209,7 +209,8 @@ export const backgroundActions: TopologyActionProvider = (target, host) => {
 
 /**
  * Pedido de teste de velocidade de um enlace (`null` se o enlace não é
- * testável). Uma ponta sem IP (switch não gerenciável) não mede: o pedido
+ * testável). A hierarquia declarada (id negativo) também se mede, como no
+ * backend. Uma ponta sem IP (switch não gerenciável) não mede: o pedido
  * abre o assistente na ponta com IP, para escolher o destino depois do
  * switch — o teste passa por ele.
  */
@@ -217,7 +218,6 @@ export function edgeLinkTestRequest(
   edge: TopologyEdge,
   nodeOf: (deviceId: number) => TopologyNode | undefined = () => undefined
 ): LinkTestRequest | null {
-  if (isVirtualEdge(edge)) return null
   const { source, target } = edgeEndpoints(edge)
   const through = transparentEdgeOrigin(edge, nodeOf)
   if (through.direct) {

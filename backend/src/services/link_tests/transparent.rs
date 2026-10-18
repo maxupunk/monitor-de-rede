@@ -127,7 +127,7 @@ pub fn segment_edges(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::topology::path::shortest_path;
+    use crate::services::topology::{path::shortest_path, service::path_confidence};
 
     fn hop(a: i64, b: i64, via: &[i64], edges: &[i64]) -> Hop {
         Hop {
@@ -232,5 +232,57 @@ mod tests {
         // Sem switch, só há caminho por um equipamento com IP: nada.
         let sem_switch = segment_edges(&edges[2..], 1, 3, |id| id == 2);
         assert!(shortest_path(&sem_switch, 1, 3).is_none());
+    }
+
+    /// As rotas do arquivo que a tela também lê
+    /// (`frontend/tests/utils/linkTests/targets.spec.ts`): o desempate daqui
+    /// e o de lá escolhem o mesmo switch.
+    #[test]
+    fn rotas_compartilhadas_com_a_tela() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/link_test_routes.json"
+        ))
+        .expect("JSON das rotas");
+        let int = |value: &serde_json::Value| value.as_i64().expect("inteiro");
+        let ids = |value: &serde_json::Value| -> Vec<i64> {
+            value.as_array().expect("lista").iter().map(int).collect()
+        };
+        let hidden: Vec<i64> = fixture["devices"]
+            .as_array()
+            .expect("devices")
+            .iter()
+            .filter(|row| is_transparent(&device(row["ipAddress"].as_str(), false)))
+            .map(|row| int(&row["id"]))
+            .collect();
+        let edges: Vec<PathEdge> = fixture["edges"]
+            .as_array()
+            .expect("edges")
+            .iter()
+            .map(|row| {
+                let confidence = i32::try_from(int(&row["confidence"])).expect("confiança");
+                let confirmed = row["confirmed"].as_bool().expect("confirmed");
+                (
+                    int(&row["id"]),
+                    int(&row["source"]),
+                    int(&row["target"]),
+                    path_confidence(confirmed, confidence),
+                )
+            })
+            .collect();
+        for case in fixture["cases"].as_array().expect("cases") {
+            let name = case["name"].as_str().expect("nome");
+            let (from, to) = (int(&case["from"]), int(&case["to"]));
+            let through = |id: i64| hidden.contains(&id);
+            let segment = segment_edges(&edges, from, to, through);
+            let path = shortest_path(&segment, from, to).expect(name);
+            let hops = collapse(&path.device_ids, &path.edge_ids, through).expect(name);
+            assert_eq!(hops.len(), 1, "{name}: {hops:?}");
+            assert_eq!(hops[0].via_device_ids, ids(&case["via"]), "{name}");
+            assert_eq!(hops[0].edge_ids, ids(&case["edgeIds"]), "{name}");
+            // A ordem das arestas não muda a escolha.
+            let mut reversed = segment.clone();
+            reversed.reverse();
+            assert_eq!(shortest_path(&reversed, from, to), Some(path), "{name}");
+        }
     }
 }

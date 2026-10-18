@@ -745,6 +745,18 @@ pub async fn infer_subnet_links(db: &sea_orm::DatabaseConnection) -> AppResult<u
     Ok(total)
 }
 
+/// Confiança de uma aresta para o menor caminho: confirmada conta 100; senão,
+/// a do enlace, em `0..=100`. A tela tem a mesma régua
+/// (`frontend/src/utils/topology/path.ts`, `pathConfidence`).
+#[must_use]
+pub fn path_confidence(confirmed: bool, confidence: i32) -> u8 {
+    if confirmed {
+        100
+    } else {
+        u8::try_from(confidence.clamp(0, 100)).unwrap_or(0)
+    }
+}
+
 /// Arestas do grafo inteiro no formato de [`shortest_path`]: os enlaces de
 /// `device_links` e as arestas virtuais de hierarquia que não duplicam um
 /// enlace. Enlace confirmado conta com confiança 100.
@@ -763,16 +775,11 @@ pub async fn load_path_edges<C: ConnectionTrait>(db: &C) -> AppResult<Vec<PathEd
     let mut edges: Vec<PathEdge> = links
         .iter()
         .map(|link| {
-            let confidence = if link.confirmed {
-                100
-            } else {
-                u8::try_from(link.confidence.clamp(0, 100)).unwrap_or(0)
-            };
             (
                 link.id,
                 link.source_device_id,
                 link.target_device_id,
-                confidence,
+                path_confidence(link.confirmed, link.confidence),
             )
         })
         .collect();

@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest'
+import { viaText } from '@/utils/linkTests/presentation'
 import {
+  isLinkTestEndpoint,
   isLinkTestTransparent,
   linkTargets,
   selectedTargetKey,
   transparentEdgeOrigin,
-  viaText,
 } from '@/utils/linkTests/targets'
+import type { TopologyEdge } from '@/stores/topology'
 import { edge, node } from '../topology/fixtures'
+// O mesmo arquivo que o backend lê (`services/link_tests/transparent.rs`).
+import routes from '../../../../backend/tests/fixtures/link_test_routes.json'
 
 /**
  * O cenário do dono do produto, ampliado:
@@ -32,8 +36,6 @@ const edges = [
   edge(14, 4, 5),
   edge(15, 1, 6),
   edge(16, 6, 1),
-  // Hierarquia virtual não se mede nem se atravessa.
-  edge(-3, 1, 3, { linkType: 'parent' }),
 ]
 
 describe('equipamentos sem IP no teste de enlace', () => {
@@ -43,6 +45,10 @@ describe('equipamentos sem IP no teste de enlace', () => {
     expect(isLinkTestTransparent({})).toBe(true)
     expect(isLinkTestTransparent({ ipAddress: '10.0.0.1' })).toBe(false)
     expect(isLinkTestTransparent({ ipAddress: null, isSystem: true })).toBe(false)
+    // Ponta de teste: com IP e não é switch não gerenciável.
+    expect(isLinkTestEndpoint({ type: 'router', ipAddress: '10.0.0.1' })).toBe(true)
+    expect(isLinkTestEndpoint({ type: 'unmanaged_switch', ipAddress: '10.0.0.9' })).toBe(false)
+    expect(isLinkTestEndpoint({ type: 'router', ipAddress: null })).toBe(false)
   })
 
   it('vizinho sem IP vira os equipamentos com IP depois dele', () => {
@@ -99,5 +105,47 @@ describe('equipamentos sem IP no teste de enlace', () => {
     expect(transparentEdgeOrigin(edge(15, 1, 6), nodeOf)).toEqual({ origin: null, direct: true })
     // Nó fora do mapa: segue como enlace direto (o backend decide).
     expect(transparentEdgeOrigin(edge(99, 1, 98), nodeOf)).toEqual({ origin: null, direct: true })
+  })
+
+  it('hierarquia declarada é enlace direto e é atravessada, como no backend', () => {
+    // Torre(10) ← switch-torre(11, sem IP) — CPE(12); Torre ← Antena(13).
+    const map = new Map([
+      [10, node(10, { name: 'Torre', ipAddress: '10.0.4.1' })],
+      [11, node(11, { name: 'switch-torre', type: 'unmanaged_switch', ipAddress: null })],
+      [12, node(12, { name: 'CPE', ipAddress: '10.0.4.2' })],
+      [13, node(13, { name: 'Antena', ipAddress: '10.0.4.3' })],
+    ])
+    const parent = { linkType: 'parent', discoveryMethod: 'parent_hierarchy', confirmed: true }
+    const graph = [edge(-11, 10, 11, parent), edge(50, 11, 12), edge(-13, 10, 13, parent)]
+    expect(linkTargets(10, (id) => map.get(id), graph)).toEqual([
+      expect.objectContaining({ key: 'edge:-13', deviceId: 13, linkId: -13, edgeIds: [-13] }),
+      expect.objectContaining({
+        key: 'device:12',
+        linkId: null,
+        edgeIds: [-11, 50],
+        viaDeviceIds: [11],
+        viaNames: ['switch-torre'],
+      }),
+    ])
+  })
+
+  describe('rotas compartilhadas com o backend (mesmo desempate)', () => {
+    const devices = new Map(
+      routes.devices.map((device) => [device.id, node(device.id, device)] as const)
+    )
+    const graph: TopologyEdge[] = routes.edges.map(({ id, source, target, ...rest }) =>
+      edge(id, source, target, rest)
+    )
+    it.each(routes.cases)('$name', ({ from, to, via, edgeIds }) => {
+      const target = linkTargets(from, (id) => devices.get(id), graph).find(
+        (option) => option.deviceId === to
+      )
+      expect(target).toMatchObject({ viaDeviceIds: via, edgeIds })
+      // A ordem em que as arestas chegam não muda a escolha.
+      const reversed = linkTargets(from, (id) => devices.get(id), [...graph].reverse()).find(
+        (option) => option.deviceId === to
+      )
+      expect(reversed).toMatchObject({ viaDeviceIds: via, edgeIds })
+    })
   })
 })

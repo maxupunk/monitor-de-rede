@@ -12,6 +12,7 @@ import LinkTestRunPanel from '@/components/linkTests/LinkTestRunPanel.vue'
 import LinkTestPlanView from '@/components/linkTests/LinkTestPlanView.vue'
 import LinkTestWizard from '@/components/linkTests/LinkTestWizard.vue'
 import LinkTestTargetFields from '@/components/linkTests/LinkTestTargetFields.vue'
+import LinkTestViaChip from '@/components/linkTests/LinkTestViaChip.vue'
 import { useDevicesStore } from '@/stores/devices'
 import { useTopologyStore } from '@/stores/topology'
 import { edge, node } from '../utils/topology/fixtures'
@@ -193,6 +194,25 @@ describe('telas do teste de enlace', () => {
     expect(text).toContain('via switch-assistencia')
   })
 
+  it('chip "via": cadeia longa encurta e o texto inteiro fica na dica e no rótulo acessível', () => {
+    const names = ['switch-assistencia', 'switch-b', 'switch-do-galpão-dos-fundos']
+    const wrapper = mountWith(LinkTestViaChip, { leg: { viaNames: names } })
+    const chip = wrapper.find('.via-chip')
+    const full = `Passa por ${names.join(' › ')} (sem IP): a perna mede os cabos entre as duas pontas`
+    expect(chip.text()).toBe(`via ${names.join(' › ')}`)
+    expect(chip.attributes('aria-label')).toBe(full)
+    expect(chip.attributes('title')).toBe(full)
+    expect(chip.find('.via-text').exists()).toBe(true)
+    // Contorno na cor viva: não se confunde com o chip cheio do motor btest.
+    expect(chip.classes()).toContain('v-chip--variant-outlined')
+    expect(chip.classes()).toContain('text-secondary')
+    expect(
+      mountWith(LinkTestViaChip, { leg: { viaNames: [] } })
+        .find('.v-chip')
+        .exists()
+    ).toBe(false)
+  })
+
   it('"Enlace": o switch sem IP some do seletor e vira "até BORDA, passando por…"', async () => {
     setRole('admin')
     vi.spyOn(apiService, 'get').mockResolvedValue([])
@@ -223,6 +243,9 @@ describe('telas do teste de enlace', () => {
     expect(body).toContain('até BORDA')
     expect(body).toContain('passando por switch-assistencia')
     expect(body).not.toContain('até switch-assistencia')
+    // O "passando por…" é parte da escolha: opacidade cheia no subtítulo.
+    const list = document.body.querySelector('.v-overlay-container .v-list') as HTMLElement
+    expect(list.style.getPropertyValue('--v-list-item-subtitle-opacity')).toBe('1')
 
     const option = [...document.body.querySelectorAll('.v-list-item')].find((item) =>
       item.textContent?.includes('até BORDA')

@@ -15,7 +15,7 @@ import {
   type TopologyAction,
   type TopologyActionProvider,
 } from '@/utils/topology/inspectorRegistry'
-import { isUnmanagedSwitch, isVirtualEdge } from '@/utils/topology/presentation'
+import { isUnmanagedSwitch } from '@/utils/topology/presentation'
 import LinkTestsTab from './LinkTestsTab.vue'
 
 /** Ações sobre o último teste do alvo (repetir com os mesmos parâmetros, abrir). */
@@ -80,7 +80,7 @@ export function registerLinkTestTopology() {
     appliesTo: ['node', 'edge'],
     order: 40,
     visible: (target) => {
-      if (target.kind === 'edge') return !isVirtualEdge(target.edge)
+      if (target.kind === 'edge') return true
       if (target.kind === 'node') return !isUnmanagedSwitch(target.node)
       return false
     },

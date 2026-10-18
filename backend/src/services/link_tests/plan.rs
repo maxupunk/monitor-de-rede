@@ -301,7 +301,9 @@ async fn draft_segment(env: &LinkTestEnv, request: &LinkTestRequest) -> AppResul
         let hops = transparent::collapse(&path.device_ids, &path.edge_ids, |id| {
             hidden.contains_key(&id)
         })
-        .map_err(|id| transparent::not_an_endpoint(names.get(&id).map_or("?", String::as_str)))?;
+        .map_err(|id| {
+            transparent::not_an_endpoint(names.get(&id).map_or("O equipamento", String::as_str))
+        })?;
         for hop in hops {
             draft.legs.push(RawLeg {
                 kind: LinkTestLegKind::Link,

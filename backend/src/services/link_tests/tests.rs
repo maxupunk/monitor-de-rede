@@ -53,6 +53,7 @@ use crate::{
             service::{self as plugin_service, source},
         },
         shared::errors::{AppError, AppResult},
+        topology::service::parent_edge_id,
     },
 };
 
@@ -711,6 +712,109 @@ async fn enlace_pelas_pontas_recusa_equipamento_com_ip_no_meio() {
         "{:?}",
         built.view.blocking
     );
+}
+
+/// `device` passa a ficar atrás de `parent` (a aresta virtual de hierarquia).
+async fn atras_de(db: &DatabaseConnection, device: &devices::Model, parent: i64) {
+    let mut active = device.clone().into_active_model();
+    active.parent_id = Set(Some(parent));
+    active.update(db).await.unwrap();
+}
+
+#[tokio::test]
+#[serial(link_tests)]
+async fn hierarquia_e_enlace_direto_e_atravessa_o_switch() {
+    let env = env_with(db().await, Arc::default(), None);
+    let p = openwrt_plugin(&env.db).await;
+    let torre = device(&env.db, "Torre", "10.0.4.1", false).await;
+    let cpe = device(&env.db, "CPE", "10.0.4.2", false).await;
+    let antena = device(&env.db, "Antena", "10.0.4.3", false).await;
+    for equipamento in [&torre, &cpe, &antena] {
+        install(&env.db, equipamento, &p).await;
+    }
+    // Torre ← switch-torre (sem IP) — CPE; Torre ← Antena. As setas são a
+    // hierarquia declarada (`parentId`), sem cabo cadastrado.
+    let switch = switch_sem_ip(&env.db, "switch-torre").await;
+    atras_de(&env.db, &switch, torre.id).await;
+    atras_de(&env.db, &antena, torre.id).await;
+    let cabo = link(&env.db, switch.id, cpe.id).await;
+    let (ate_switch, ate_antena) = (parent_edge_id(switch.id), parent_edge_id(antena.id));
+
+    // `linkId` negativo: a hierarquia como enlace direto.
+    let built = plan::build(
+        &env,
+        &LinkTestRequest {
+            link_id: Some(ate_antena),
+            ..request(LinkTestKind::Link)
+        },
+    )
+    .await
+    .unwrap();
+    assert!(built.view.blocking.is_empty(), "{:?}", built.view.blocking);
+    let leg = &built.view.legs[0];
+    assert_eq!(
+        (leg.a.device_id, leg.b.device_id),
+        (Some(torre.id), Some(antena.id))
+    );
+    assert_eq!(
+        (leg.edge_id, leg.edge_ids.clone()),
+        (Some(ate_antena), vec![ate_antena])
+    );
+    assert!(leg.via_device_ids.is_empty());
+
+    // Pelas pontas: o trecho atravessa o switch por cabo e por hierarquia.
+    let built = plan::build(
+        &env,
+        &LinkTestRequest {
+            source_device_id: Some(cpe.id),
+            target_device_id: Some(torre.id),
+            ..request(LinkTestKind::Link)
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(built.view.legs.len(), 1, "{:?}", built.view.legs);
+    let leg = &built.view.legs[0];
+    assert_eq!(
+        (leg.a.device_id, leg.b.device_id),
+        (Some(cpe.id), Some(torre.id))
+    );
+    assert_eq!(leg.edge_ids, [cabo, ate_switch]);
+    assert_eq!(leg.edge_id, None);
+    assert_eq!(leg.via_device_ids, [switch.id]);
+    assert_eq!(leg.via_names, ["switch-torre"]);
+    assert!(leg.runnable, "{:?}", leg.issues);
+
+    // Gravado, o filtro pela aresta de hierarquia (id negativo) acha o teste.
+    let (test, _) = repository::insert(&env.db, &built, user()).await.unwrap();
+    let page = repository::page(
+        &env.db,
+        &LinkTestQuery {
+            link_id: Some(ate_switch),
+            ..LinkTestQuery::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        page.items.iter().map(|item| item.id).collect::<Vec<_>>(),
+        [test.id]
+    );
+
+    // A hierarquia que encosta no switch não é enlace sozinha.
+    let erro = plan::build(
+        &env,
+        &LinkTestRequest {
+            link_id: Some(ate_switch),
+            ..request(LinkTestKind::Link)
+        },
+    )
+    .await
+    .unwrap_err();
+    let AppError::Validation(texto) = &erro else {
+        panic!("{erro:?}");
+    };
+    assert!(texto.contains("switch-torre não tem IP"), "{texto}");
 }
 
 #[tokio::test]
