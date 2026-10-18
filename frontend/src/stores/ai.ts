@@ -27,6 +27,7 @@ import { streamModelPull } from '@/utils/modelPull'
 import type { ModelPullProgress } from '@/bindings/ModelPullProgress'
 import type { AutoAcceptState } from '@/bindings/AutoAcceptState'
 import { usePluginsStore } from './plugins'
+import { accessSavedFollowUp, type MissingAccess } from '@/utils/deviceCredentials'
 
 /**
  * Identificador desta conversa para o backend. Aleatório de propósito: o modo
@@ -175,6 +176,8 @@ export const useAiStore = defineStore('ai', () => {
 
   let activeAbortController: AbortController | null = null
   let messageSeq = 0
+  /** Mensagem que espera a resposta em andamento terminar, na mesma conversa. */
+  let queuedFollowUp: { content: string; conversationKey: string } | null = null
 
   const conversations = useAiConversationsStore()
 
@@ -323,6 +326,42 @@ export const useAiStore = defineStore('ai', () => {
       activeAbortController = null
       void conversations.persist(messages.value)
     }
+    flushFollowUp()
+  }
+
+  function flushFollowUp() {
+    const next = queuedFollowUp
+    queuedFollowUp = null
+    if (next && next.conversationKey === conversationKey.value) void sendMessage(next.content)
+  }
+
+  /**
+   * Uma mensagem do usuário que a tela manda por ele (ex.: "cadastrei o
+   * acesso"). Com uma resposta em andamento, espera ela terminar — na mesma
+   * conversa; trocar de conversa a descarta.
+   */
+  function sendFollowUp(content: string): 'sent' | 'queued' {
+    if (isStreaming.value) {
+      queuedFollowUp = { content, conversationKey: conversationKey.value }
+      return 'queued'
+    }
+    void sendMessage(content)
+    return 'sent'
+  }
+
+  /**
+   * O acesso que faltava a uma ferramenta foi salvo no cartão dela: a conversa
+   * continua sozinha, com uma mensagem do usuário pedindo para tentar de novo.
+   * A próxima chamada da IA ao equipamento passa pela confirmação de sempre.
+   */
+  async function continueAfterAccess(missing: MissingAccess): Promise<'sent' | 'queued' | null> {
+    const key = conversationKey.value
+    const name = await usePluginsStore()
+      .fetchAccess(missing.deviceId)
+      .then((access) => access.deviceName)
+      .catch(() => null)
+    if (key !== conversationKey.value) return null
+    return sendFollowUp(accessSavedFollowUp(missing.transport, name))
   }
 
   /** Compactar o contexto junto da próxima pergunta (pedido do usuário). */
@@ -721,6 +760,7 @@ export const useAiStore = defineStore('ai', () => {
     pullOllamaModel,
     cancelOllamaPull,
     sendMessage,
+    continueAfterAccess,
     rewind,
     searchMentions,
     cancelGeneration,

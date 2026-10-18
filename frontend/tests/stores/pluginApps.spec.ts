@@ -124,6 +124,65 @@ describe('pluginApps store', () => {
     })
   })
 
+  it('lote lançado daqui roda de novo num equipamento com os mesmos valores, uma vez', async () => {
+    const post = vi
+      .spyOn(apiService, 'post')
+      .mockResolvedValueOnce({ batchId: 30 })
+      .mockResolvedValueOnce({ batchId: 31 })
+    const store = usePluginAppsStore()
+    await store.runAction(
+      3,
+      'set_wifi',
+      [7, 8],
+      true,
+      { ssid: 'Loja', key: 'segredo' },
+      { 7: { channel: '6' }, 8: { channel: '11' } }
+    )
+    expect(store.canRerun(30, 7)).toBe(true)
+    // Os valores (com a senha) ficam fora do estado da store.
+    expect(JSON.stringify(store.$state)).not.toContain('segredo')
+
+    await expect(store.rerunDevice(30, 7, true)).resolves.toBe(31)
+    expect(post).toHaveBeenLastCalledWith('/plugins/3/fleet/actions/set_wifi', {
+      deviceIds: [7],
+      params: { ssid: 'Loja', key: 'segredo' },
+      confirmWrite: true,
+      deviceParams: { 7: { channel: '6' } },
+    })
+    // O lote antigo esquece o equipamento; o novo guarda os seus.
+    expect(store.canRerun(30, 7)).toBe(false)
+    expect(store.canRerun(30, 8)).toBe(true)
+    expect(store.canRerun(31, 7)).toBe(true)
+    await expect(store.rerunDevice(30, 7, true)).resolves.toBeNull()
+    expect(post).toHaveBeenCalledTimes(2)
+  })
+
+  it('sem os valores (outra aba, página recarregada, página fechada) não roda de novo', async () => {
+    vi.spyOn(apiService, 'post').mockResolvedValue({ batchId: 30 })
+    const store = usePluginAppsStore()
+    expect(store.canRerun(30, 7)).toBe(false)
+    await expect(store.rerunDevice(30, 7, false)).resolves.toBeNull()
+
+    await store.runAction(3, 'set_wifi', [7], true, { ssid: 'Loja' })
+    expect(store.canRerun(30, 7)).toBe(true)
+    store.forgetLaunched(4)
+    expect(store.canRerun(30, 7)).toBe(true)
+    store.forgetLaunched(3)
+    expect(store.canRerun(30, 7)).toBe(false)
+  })
+
+  it('lote que sai da lista leva junto os valores guardados', async () => {
+    vi.spyOn(apiService, 'get').mockResolvedValue(fleet())
+    vi.spyOn(apiService, 'post').mockResolvedValue({ batchId: 1 })
+    const store = usePluginAppsStore()
+    await store.loadFleet(3)
+    await store.runAction(3, 'set_wifi', [7], true, { ssid: 'Loja' })
+    store.applyBatchUpdated({ batch: batch({ id: 1 }) })
+    for (let id = 2; id <= 16; id += 1) store.applyBatchUpdated({ batch: batch({ id }) })
+    expect(store.batchById(3, 1)).toBeNull()
+    expect(store.canRerun(1, 7)).toBe(false)
+  })
+
   it('ignora lote de aplicativo não aberto e evento malformado', () => {
     const store = usePluginAppsStore()
     store.applyBatchUpdated({ batch: batch() })

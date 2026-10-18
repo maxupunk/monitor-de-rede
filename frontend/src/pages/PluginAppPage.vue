@@ -172,11 +172,13 @@
                   :presentation="deviceActionOf(fleetActionOf(batch.action))"
                   :result-presentation="fleetActionOf(batch.action)"
                   :can-write="authStore.isAdmin"
+                  :needs-form="formNeeded[batch.id]"
                   @cancel="cancel"
                   @apply-patch="applyPatch"
                   @apply-next="applyNext"
                   @open-run="openTranscript"
                   @access-saved="retryWithAccess"
+                  @open-form="openRerunForm"
                 />
               </v-expansion-panel-text>
             </v-expansion-panel>
@@ -229,7 +231,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import type { BatchDevice } from '@/bindings/BatchDevice'
 import type { FleetAction } from '@/bindings/FleetAction'
@@ -248,7 +250,7 @@ import FleetMembers from '@/components/plugins/fleet/FleetMembers.vue'
 import FleetTools from '@/components/plugins/fleet/FleetTools.vue'
 import SettingsForm from '@/components/plugins/settings/SettingsForm.vue'
 import { confirm } from '@/composables/useConfirm'
-import { askMemberAccess } from '@/composables/useFleetAccess'
+import { askMemberAccess, rerunAfterAccess } from '@/composables/useFleetAccess'
 import { useAuthStore } from '@/stores/auth'
 import type { Device } from '@/stores/devices'
 import { usePluginAppsStore } from '@/stores/pluginApps'
@@ -275,6 +277,8 @@ const draft = ref<Record<string, unknown>>({})
 const saving = ref(false)
 const feedback = reactive({ show: false, text: '', color: 'success' })
 const flow = reactive({ open: false, request: null as FlowRequest | null })
+/** Por lote, quem teve o acesso salvo mas só roda de novo pelo formulário. */
+const formNeeded = reactive<Record<number, number[]>>({})
 const transcript = reactive({
   open: false,
   deviceId: 0,
@@ -337,6 +341,14 @@ watch(
   },
   { immediate: true }
 )
+
+// Os valores guardados dos lotes lançados daqui só valem enquanto a página
+// do aplicativo está aberta.
+watch(pluginId, (_, previous) => {
+  if (Number.isFinite(previous)) store.forgetLaunched(previous)
+  for (const id of Object.keys(formNeeded)) delete formNeeded[Number(id)]
+})
+onBeforeUnmount(() => store.forgetLaunched(pluginId.value))
 
 /** Leitura mais velha que isto é refeita ao abrir a página. */
 const STALE_MS = 10 * 60 * 1000
@@ -485,36 +497,37 @@ async function applyPatch(batch: PluginBatchView) {
 
 /**
  * O acesso que faltava a um equipamento do lote foi salvo: a frota é relida e
- * a ação roda de novo só nele — direto numa leitura, com confirmação numa
- * escrita. Ação com parâmetros não se repete sozinha: os valores do lote não
- * voltam do servidor.
+ * a ação roda de novo só nele, com os valores com que o lote foi lançado
+ * (`rerunAfterAccess`). Sem eles (lote de outro lugar, página recarregada), o
+ * cartão oferece o formulário da ação já com o equipamento marcado.
  */
 async function retryWithAccess(batch: PluginBatchView, device: BatchDevice) {
   await store.loadFleet(pluginId.value).catch(() => undefined)
   const action = deviceActionOf(fleetActionOf(batch.action))
-  const properties = action?.params?.properties
-  const hasParams =
-    typeof properties === 'object' && properties !== null && Object.keys(properties).length > 0
-  if (!action || hasParams) {
+  if (!action) {
     notify(`Acesso salvo. Rode «${batch.title}» de novo para incluir ${device.deviceName}.`)
     return
   }
-  const write = action.effect !== 'read'
-  if (write) {
-    const ok = await confirm({
-      title: batch.title,
-      message: `Acesso salvo. Rodar «${batch.title}» de novo em ${device.deviceName}? Isso altera o equipamento.`,
-      confirmText: 'Rodar',
-      confirmColor: 'warning',
-    })
-    if (!ok) return
-  }
   try {
-    await store.runAction(pluginId.value, batch.action, [device.deviceId], write)
-    notify(`Acesso salvo. «${batch.title}» rodando de novo em ${device.deviceName}.`)
+    const outcome = await rerunAfterAccess(batch, device, action)
+    if (outcome === 'needsForm') {
+      formNeeded[batch.id] = [...(formNeeded[batch.id] ?? []), device.deviceId]
+    } else if (outcome === 'started') {
+      notify(`Acesso salvo. «${batch.title}» rodando de novo em ${device.deviceName}.`)
+    }
   } catch (err: unknown) {
     notify(describe(err, 'Falha ao rodar de novo'), 'error')
   }
+}
+
+/** O formulário da ação do lote (a dona, se o lote foi uma revisão), só com o equipamento. */
+function openRerunForm(batch: PluginBatchView, device: BatchDevice) {
+  const owner = spec.value?.actions?.find((item) => item.preview === batch.action)
+  const id = owner?.id ?? batch.action
+  openAction(id, {
+    title: `${fleetActionOf(id)?.title ?? batch.title} — ${device.deviceName}`,
+    devices: [device.deviceId],
+  })
 }
 
 function openTranscript(device: BatchDevice) {

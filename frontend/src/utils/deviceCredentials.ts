@@ -135,3 +135,12 @@ export function missingAccessIn(value: unknown): MissingAccess | null {
 export function accessNeededReason(deviceName: string, kind: TransportKind): string {
   return `Para gerenciar ${deviceName} o NetMonitor precisa do acesso ${transportLabel(kind)} dele.`
 }
+
+/**
+ * O que o chat diz ao assistente depois que o acesso que faltava foi salvo
+ * no cartão da ferramenta: ele tenta de novo sozinho.
+ */
+export function accessSavedFollowUp(kind: TransportKind, deviceName: string | null): string {
+  const device = deviceName ? `de ${deviceName}` : 'do equipamento'
+  return `Cadastrei o acesso ${transportLabel(kind)} ${device}; pode tentar de novo.`
+}

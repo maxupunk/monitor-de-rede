@@ -114,8 +114,29 @@
             class="mb-3"
             :text="device.error"
           ></v-alert>
+          <v-alert
+            v-if="needsForm?.includes(device.deviceId)"
+            type="info"
+            variant="tonal"
+            density="compact"
+            class="mb-3"
+          >
+            Acesso salvo. Os valores usados neste lote não ficaram neste navegador: abra o
+            formulário para rodar de novo em {{ device.deviceName }}.
+            <template #append>
+              <v-btn
+                size="small"
+                color="primary"
+                variant="flat"
+                prepend-icon="mdi-play"
+                @click="emit('openForm', batch, device)"
+              >
+                Abrir o formulário
+              </v-btn>
+            </template>
+          </v-alert>
           <DeviceAccessButton
-            v-if="device.missingAccess && device.status === 'failed' && canWrite"
+            v-else-if="device.missingAccess && device.status === 'failed' && canWrite"
             :device-id="device.deviceId"
             :transport="device.missingAccess"
             :reason="device.error ?? undefined"
@@ -175,6 +196,8 @@ const props = defineProps<{
   canWrite: boolean
   /** Cada equipamento já aberto (revisão, andamento). */
   expandAll?: boolean
+  /** Equipamentos com o acesso salvo que só o formulário roda de novo. */
+  needsForm?: number[]
 }>()
 
 const emit = defineEmits<{
@@ -184,6 +207,8 @@ const emit = defineEmits<{
   openRun: [device: BatchDevice]
   /** O acesso que faltava a um equipamento foi salvo ali mesmo. */
   accessSaved: [batch: PluginBatchView, device: BatchDevice]
+  /** Rodar de novo pelo formulário da ação, com o equipamento marcado. */
+  openForm: [batch: PluginBatchView, device: BatchDevice]
 }>()
 
 const store = usePluginAppsStore()

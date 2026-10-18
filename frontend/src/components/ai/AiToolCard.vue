@@ -131,16 +131,28 @@
       <div v-else-if="tool.status === 'error' && errorText" class="text-body-small text-error">
         {{ errorText }}
       </div>
-      <div v-if="missingAccess" class="d-flex flex-wrap align-center ga-2 mt-2">
+    </div>
+
+    <div v-if="missingAccess" class="px-3 pb-3">
+      <div v-if="!tool.summary && errorText" class="text-body-small text-error mb-2">
+        {{ errorText }}
+      </div>
+      <div class="d-flex flex-wrap align-center ga-2">
+        <span v-if="followUp" class="d-flex align-center ga-1 text-body-small">
+          <v-icon size="16" color="success">mdi-check-circle</v-icon>
+          {{
+            followUp === 'queued'
+              ? 'Acesso salvo. Assim que o assistente terminar esta resposta, peço para ele tentar de novo.'
+              : 'Acesso salvo. Pedi ao assistente para tentar de novo.'
+          }}
+        </span>
         <DeviceAccessButton
+          v-else
           :device-id="missingAccess.deviceId"
           :transport="missingAccess.transport"
           :reason="errorText ?? undefined"
-          @saved="accessSaved = true"
+          @saved="onAccessSaved"
         />
-        <span v-if="accessSaved" class="text-body-small">
-          Acesso salvo. Peça ao assistente para tentar de novo.
-        </span>
       </div>
     </div>
 
@@ -236,7 +248,13 @@ const cardColor = computed(() => {
 
 /** A ferramenta parou por falta do acesso ao equipamento: o cartão oferece cadastrá-lo. */
 const missingAccess = computed(() => missingAccessIn(props.tool.result))
-const accessSaved = ref(false)
+/** O acesso foi salvo daqui e a conversa seguiu (ou segue quando a resposta terminar). */
+const followUp = ref<'sent' | 'queued' | null>(null)
+
+async function onAccessSaved() {
+  if (!missingAccess.value) return
+  followUp.value = await aiStore.continueAfterAccess(missingAccess.value)
+}
 
 const errorText = computed(() => {
   const error = props.tool.result?.error
