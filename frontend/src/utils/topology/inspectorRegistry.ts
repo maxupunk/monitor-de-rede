@@ -45,6 +45,8 @@ export interface TopologyHost {
   readonly selectedNodeId: number | null
   /** O servidor NetMonitor no mapa, quando o backend o identifica. */
   readonly systemNodeId: number | null
+  /** O nó do mapa pelo id (ex.: saber se uma ponta do enlace tem IP). */
+  nodeById(deviceId: number): TopologyNode | undefined
   openDevice(deviceId: number): void
   editNode(node: TopologyNode): void
   deleteNode(node: TopologyNode): void

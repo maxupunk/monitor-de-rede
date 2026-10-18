@@ -78,12 +78,12 @@ pub async fn insert(
     plan: &BuiltPlan,
     requester: Requester,
 ) -> AppResult<(link_tests::Model, Vec<link_test_legs::Model>)> {
-    let devices = view::device_ids_column(
-        plan.legs
-            .iter()
-            .flat_map(|leg| [leg.view.a.device_id, leg.view.b.device_id])
-            .flatten(),
-    );
+    let devices = view::device_ids_column(plan.legs.iter().flat_map(|leg| {
+        [leg.view.a.device_id, leg.view.b.device_id]
+            .into_iter()
+            .flatten()
+            .chain(leg.view.via_device_ids.iter().copied())
+    }));
     let txn = begin_write(db).await?;
     let test = new_test(
         &plan.request,
@@ -106,6 +106,8 @@ pub async fn insert(
                 a: Set(json(&view.a)?),
                 b: Set(json(&view.b)?),
                 edge_id: Set(view.edge_id),
+                edge_ids: Set(view::edge_ids_column(&view.edge_ids)),
+                via: Set(view::via_column(view)),
                 engine: Set(view.engine.map(|engine| engine.as_str().to_owned())),
                 server_side: Set(view.server_side.map(|side| side.as_str().to_owned())),
                 duration_s: Set(i32::from(view.duration_s)),
@@ -275,7 +277,14 @@ pub async fn page<C: ConnectionTrait>(db: &C, query: &LinkTestQuery) -> AppResul
                         Query::select()
                             .column(link_test_legs::Column::TestId)
                             .from(link_test_legs::Entity)
-                            .and_where(link_test_legs::Column::EdgeId.eq(link_id))
+                            .cond_where(
+                                Condition::any()
+                                    .add(link_test_legs::Column::EdgeId.eq(link_id))
+                                    .add(
+                                        link_test_legs::Column::EdgeIds
+                                            .contains(format!(",{link_id},")),
+                                    ),
+                            )
                             .to_owned(),
                     ),
                 ),

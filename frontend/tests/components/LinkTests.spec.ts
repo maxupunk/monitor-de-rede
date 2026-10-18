@@ -11,6 +11,10 @@ import { useLinkTestsStore } from '@/stores/linkTests'
 import LinkTestRunPanel from '@/components/linkTests/LinkTestRunPanel.vue'
 import LinkTestPlanView from '@/components/linkTests/LinkTestPlanView.vue'
 import LinkTestWizard from '@/components/linkTests/LinkTestWizard.vue'
+import LinkTestTargetFields from '@/components/linkTests/LinkTestTargetFields.vue'
+import { useDevicesStore } from '@/stores/devices'
+import { useTopologyStore } from '@/stores/topology'
+import { edge, node } from '../utils/topology/fixtures'
 import DeviceAccessHost from '@/components/devices/access/DeviceAccessHost.vue'
 import { settleAccess } from '@/composables/useDeviceAccess'
 import {
@@ -164,6 +168,70 @@ describe('telas do teste de enlace', () => {
     expect(text).toContain('iperf3 em OpenWrt-Sala')
     expect(text).toContain('29 s por sentido')
     expect(wrapper.find('a[href="/devices/2"]').exists()).toBe(true)
+  })
+
+  it('plano: perna através do switch sem IP mostra as pontas com IP e o chip "via"', async () => {
+    setRole('admin')
+    const p = plan()
+    p.legs[0] = {
+      ...p.legs[0],
+      a: endpoint(1, 'AP-terraço'),
+      b: endpoint(3, 'BORDA'),
+      edgeId: null,
+      edgeIds: [11, 12],
+      viaDeviceIds: [2],
+      viaNames: ['switch-assistencia'],
+    }
+    const wrapper = mountWith(LinkTestPlanView, {
+      plan: p,
+      spec: { durationS: 5, direction: 'both', streams: 1, limitMbps: null },
+    })
+    await flushPromises()
+    const text = wrapper.text()
+    expect(text).toContain('AP-terraço')
+    expect(text).toContain('BORDA')
+    expect(text).toContain('via switch-assistencia')
+  })
+
+  it('"Enlace": o switch sem IP some do seletor e vira "até BORDA, passando por…"', async () => {
+    setRole('admin')
+    vi.spyOn(apiService, 'get').mockResolvedValue([])
+    const topology = useTopologyStore()
+    topology.nodes = [
+      node(1, { name: 'AP-terraço', ipAddress: '10.0.0.3' }),
+      node(2, { name: 'switch-assistencia', type: 'unmanaged_switch', ipAddress: null }),
+      node(3, { name: 'BORDA', ipAddress: '10.0.0.1' }),
+    ]
+    topology.edges = [edge(11, 1, 2), edge(12, 2, 3)]
+    topology.loaded = true
+    const devices = useDevicesStore()
+    devices.devices = [
+      { id: 1, name: 'AP-terraço', type: 'router', ipAddress: '10.0.0.3' },
+      { id: 2, name: 'switch-assistencia', type: 'unmanaged_switch' },
+      { id: 3, name: 'BORDA', type: 'router', ipAddress: '10.0.0.1' },
+    ] as never
+    const wrapper = mountWith(LinkTestTargetFields, {
+      modelValue: { kind: 'link', linkId: null, sourceDeviceId: 1, targetDeviceId: null },
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Switches sem IP não entram no teste')
+
+    const select = wrapper.findAll('.v-select .v-field')
+    await select[0].trigger('mousedown')
+    await flushPromises()
+    const body = document.body.textContent ?? ''
+    expect(body).toContain('até BORDA')
+    expect(body).toContain('passando por switch-assistencia')
+    expect(body).not.toContain('até switch-assistencia')
+
+    const option = [...document.body.querySelectorAll('.v-list-item')].find((item) =>
+      item.textContent?.includes('até BORDA')
+    ) as HTMLElement
+    option.click()
+    await flushPromises()
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([
+      { kind: 'link', linkId: null, sourceDeviceId: 1, targetDeviceId: 3 },
+    ])
   })
 
   it('plano que não roda: sem tempo estimado nem aviso de saturação', async () => {

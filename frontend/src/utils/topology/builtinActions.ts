@@ -4,7 +4,8 @@
  * esta lista — uma ação nunca existe só num dos dois.
  */
 import type { LinkTestRequest } from '@/stores/linkTestRequests'
-import type { TopologyEdge, TopologyPluginActionMap } from '@/stores/topology'
+import type { TopologyEdge, TopologyNode, TopologyPluginActionMap } from '@/stores/topology'
+import { transparentEdgeOrigin } from '@/utils/linkTests/targets'
 import {
   registerActionProvider,
   type TopologyAction,
@@ -206,22 +207,42 @@ export const backgroundActions: TopologyActionProvider = (target, host) => {
   ]
 }
 
-/** Pedido de teste de velocidade de um enlace (`null` se o enlace não é testável). */
-export function edgeLinkTestRequest(edge: TopologyEdge): LinkTestRequest | null {
+/**
+ * Pedido de teste de velocidade de um enlace (`null` se o enlace não é
+ * testável). Uma ponta sem IP (switch não gerenciável) não mede: o pedido
+ * abre o assistente na ponta com IP, para escolher o destino depois do
+ * switch — o teste passa por ele.
+ */
+export function edgeLinkTestRequest(
+  edge: TopologyEdge,
+  nodeOf: (deviceId: number) => TopologyNode | undefined = () => undefined
+): LinkTestRequest | null {
   if (isVirtualEdge(edge)) return null
   const { source, target } = edgeEndpoints(edge)
-  return { kind: 'link', linkId: edge.id, sourceDeviceId: source, targetDeviceId: target }
+  const through = transparentEdgeOrigin(edge, nodeOf)
+  if (through.direct) {
+    return { kind: 'link', linkId: edge.id, sourceDeviceId: source, targetDeviceId: target }
+  }
+  return through.origin !== null ? { kind: 'link', sourceDeviceId: through.origin } : null
+}
+
+/** O pedido do enlace só escolhe a origem: o destino fica além de um switch sem IP. */
+export function choosesTargetBeyond(request: LinkTestRequest): boolean {
+  return request.kind === 'link' && request.linkId === undefined
 }
 
 /** Entradas do teste de velocidade (ADR 015) — o mapa só registra o pedido. */
 export const linkTestActions: TopologyActionProvider = (target, host) => {
   if (target.kind === 'edge') {
-    const request = edgeLinkTestRequest(target.edge)
+    const request = edgeLinkTestRequest(target.edge, (id) => host.nodeById(id))
     if (!request) return []
     return [
       {
         id: 'test.link',
         title: 'Testar velocidade do enlace',
+        ...(choosesTargetBeyond(request)
+          ? { subtitle: 'Passa pelo switch sem IP — escolha o destino' }
+          : {}),
         icon: 'mdi-speedometer',
         color: 'info',
         group: 'test',

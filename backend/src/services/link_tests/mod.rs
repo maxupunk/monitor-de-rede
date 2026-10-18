@@ -11,6 +11,7 @@
 //! | [`negotiate`] | escolha pura de motor e papéis; tradução de sentido |
 //! | [`endpoint`] | as pontas: equipamento (plugin), central, agente |
 //! | [`plan`] | o plano antes de rodar |
+//! | [`transparent`] | equipamento sem IP: o teste passa por ele, não para nele |
 //! | [`fixes`] | os passos que o plano oferece (instalar o plugin, cadastrar o acesso) |
 //! | [`guard`] | um teste por dispositivo, no máximo dois no sistema |
 //! | [`runner`] | a máquina de estados (pernas e etapas, cancelamento, limpeza) |
@@ -36,6 +37,7 @@ pub mod repository;
 pub mod runner;
 pub mod schedules;
 pub mod service;
+pub mod transparent;
 pub mod view;
 
 #[cfg(test)]

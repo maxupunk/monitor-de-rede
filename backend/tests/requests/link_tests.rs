@@ -18,7 +18,7 @@ use backend::{
     },
 };
 use loco_rs::{app::AppContext, testing::prelude::*};
-use sea_orm::{ActiveModelTrait, IntoActiveModel, Set};
+use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel, Set};
 use serde_json::{json, Value};
 use serial_test::serial;
 
@@ -246,6 +246,87 @@ async fn plano_execucao_e_historico_pela_api() {
             .get("/api/link-tests/999999")
             .await
             .assert_status(StatusCode::NOT_FOUND);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn enlace_atraves_do_switch_sem_ip_pela_api() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        session_with_role(&mut request, &ctx, Role::Operator).await;
+        // Roteador A — switch-assistencia (sem IP) — Roteador B.
+        let (a, b, direto) = cenario(&ctx).await;
+        let switch = devices::ActiveModel {
+            name: Set("switch-assistencia".into()),
+            r#type: Set("unmanaged_switch".into()),
+            status: Set("unknown".into()),
+            ..Default::default()
+        }
+        .insert(&ctx.db)
+        .await
+        .unwrap();
+        // Sem o cabo direto: o único caminho passa pelo switch.
+        device_links::Entity::delete_by_id(direto)
+            .exec(&ctx.db)
+            .await
+            .unwrap();
+        let now = chrono::Utc::now().into();
+        let mut cabos = Vec::new();
+        for (de, para) in [(a, switch.id), (switch.id, b)] {
+            let cabo = device_links::ActiveModel {
+                source_device_id: Set(de),
+                target_device_id: Set(para),
+                link_type: Set("ethernet".into()),
+                discovery_method: Set("manual".into()),
+                confidence: Set(100),
+                confirmed: Set(true),
+                created_at: Set(now),
+                updated_at: Set(now),
+                ..Default::default()
+            }
+            .insert(&ctx.db)
+            .await
+            .unwrap();
+            cabos.push(cabo.id);
+        }
+
+        let plano = request
+            .post("/api/link-tests/plan")
+            .json(
+                &json!({ "kind": "link", "sourceDeviceId": a, "targetDeviceId": b,
+                           "spec": { "durationS": 1 } }),
+            )
+            .await;
+        plano.assert_status_ok();
+        let plano = json_of(&plano.text());
+        assert_eq!(plano["blocking"], json!([]), "{plano}");
+        let perna = &plano["legs"][0];
+        assert_eq!(plano["legs"].as_array().unwrap().len(), 1, "{plano}");
+        assert_eq!(
+            (
+                perna["a"]["deviceId"].as_i64(),
+                perna["b"]["deviceId"].as_i64()
+            ),
+            (Some(a), Some(b))
+        );
+        assert_eq!(perna["edgeIds"], json!(cabos));
+        assert_eq!(perna["edgeId"], Value::Null);
+        assert_eq!(perna["viaDeviceIds"], json!([switch.id]));
+        assert_eq!(perna["viaNames"], json!(["switch-assistencia"]));
+        assert_eq!(perna["runnable"], true);
+
+        // O cabo que encosta no switch não é um enlace testável sozinho.
+        let recusado = request
+            .post("/api/link-tests/plan")
+            .json(&pedido(cabos[0]))
+            .await;
+        recusado.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(
+            recusado.text().contains("switch-assistencia não tem IP"),
+            "{}",
+            recusado.text()
+        );
     })
     .await;
 }

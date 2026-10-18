@@ -66,6 +66,7 @@ import {
   bottleneckExplanation,
   bottleneckLeg,
   legCapacityBps,
+  legSpeedBps,
   resultVsSpeed,
 } from '@/utils/linkTests/results'
 
@@ -105,7 +106,7 @@ const rows = computed(() =>
   props.test.legs
     .filter((leg) => legCapacityBps(leg) !== null || leg.status !== 'pending')
     .map((leg) => {
-      const speed = leg.edgeId !== null ? props.speedOf(leg.edgeId) : null
+      const speed = legSpeedBps(leg, props.speedOf)
       const capacity = legCapacityBps(leg)
       const comparison = capacity !== null && speed ? resultVsSpeed(capacity, speed) : null
       return {

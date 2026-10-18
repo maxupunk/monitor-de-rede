@@ -334,8 +334,23 @@ pub struct LinkTestPlanLeg {
     pub kind: LinkTestLegKind,
     pub a: LinkTestEndpoint,
     pub b: LinkTestEndpoint,
+    /// A aresta quando a perna é uma só; `null` na ponta a ponta e na perna
+    /// que atravessa equipamentos sem IP (veja `edgeIds`).
     #[ts(type = "number | null")]
     pub edge_id: Option<i64>,
+    /// Todas as arestas da perna, em ordem de A a B. Mais de uma quando ela
+    /// passa por equipamentos sem IP (switch não gerenciável); vazia na
+    /// ponta a ponta.
+    #[serde(default)]
+    #[ts(type = "number[]")]
+    pub edge_ids: Vec<i64>,
+    /// Os equipamentos sem IP que a perna atravessa, em ordem de A a B.
+    #[serde(default)]
+    #[ts(type = "number[]")]
+    pub via_device_ids: Vec<i64>,
+    /// Os nomes deles, na mesma ordem (o histórico sobrevive à exclusão).
+    #[serde(default)]
+    pub via_names: Vec<String>,
     pub engine: Option<ThroughputEngine>,
     pub server_side: Option<LinkTestSide>,
     pub duration_s: u8,
@@ -764,6 +779,9 @@ mod tests {
                     platform: Some("routeros".into()),
                 },
                 edge_id: None,
+                edge_ids: vec![],
+                via_device_ids: vec![],
+                via_names: vec![],
                 engine: Some(ThroughputEngine::Btest),
                 server_side: Some(LinkTestSide::A),
                 duration_s: 5,

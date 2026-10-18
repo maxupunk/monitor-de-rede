@@ -104,6 +104,9 @@ export function useTopologyHost(deps: HostDeps) {
     get systemNodeId() {
       return systemNodeId.value
     },
+    nodeById(deviceId) {
+      return store.nodesById.get(deviceId)
+    },
     openDevice(deviceId) {
       void router.push(`/devices/${deviceId}`)
     },

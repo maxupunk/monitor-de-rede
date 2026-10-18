@@ -38,6 +38,10 @@ pub struct Model {
     pub samples: Option<Json>,
     #[sea_orm(column_type = "JsonBinary", nullable)]
     pub cleanup: Option<Json>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub edge_ids: Option<String>,
+    #[sea_orm(column_type = "JsonBinary", nullable)]
+    pub via: Option<Json>,
     pub started_at: Option<DateTimeWithTimeZone>,
     pub finished_at: Option<DateTimeWithTimeZone>,
     pub created_at: DateTimeWithTimeZone,

@@ -32,12 +32,16 @@ export function stage(
 }
 
 export function leg(seq: number, patch: Partial<LinkTestLeg> = {}): LinkTestLeg {
+  const edgeId = patch.edgeId !== undefined ? patch.edgeId : 100 + seq
   return {
     seq,
     kind: 'link',
     a: endpoint(seq, `Dev-${seq}`),
     b: endpoint(seq + 1, `Dev-${seq + 1}`),
-    edgeId: 100 + seq,
+    edgeId,
+    edgeIds: edgeId !== null ? [edgeId] : [],
+    viaDeviceIds: [],
+    viaNames: [],
     engine: 'iperf3',
     serverSide: 'b',
     durationS: 5,

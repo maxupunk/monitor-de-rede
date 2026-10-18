@@ -47,8 +47,15 @@ export function draftFromRequest(
 /** O que falta escolher no passo "O que testar". Vazio = pode seguir. */
 export function targetErrors(draft: LinkTestTargetDraft): string[] {
   if (draft.kind === 'link') {
-    if (draft.linkId === null) return ['Escolha o enlace a medir.']
-    return []
+    // Enlace direto (`linkId`) ou o trecho até um equipamento depois de um
+    // switch sem IP (as duas pontas, sem `linkId`).
+    if (draft.linkId !== null) return []
+    if (draft.sourceDeviceId === null || draft.targetDeviceId === null) {
+      return ['Escolha o enlace a medir.']
+    }
+    return draft.sourceDeviceId === draft.targetDeviceId
+      ? ['As pontas do enlace precisam ser equipamentos diferentes.']
+      : []
   }
   if (draft.kind === 'path') {
     const errors: string[] = []

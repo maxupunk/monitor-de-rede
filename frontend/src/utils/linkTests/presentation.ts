@@ -131,6 +131,21 @@ export function endpointIcon(endpoint: Pick<LinkTestEndpoint, 'kind'>): string {
   return 'mdi-router-network'
 }
 
+/**
+ * As arestas da perna, em ordem de A a B (várias quando ela atravessa
+ * equipamentos sem IP). Perna de um backend anterior só traz o `edgeId`.
+ */
+export function legEdgeIds(leg: Pick<LinkTestPlanLeg, 'edgeId' | 'edgeIds'>): number[] {
+  if (leg.edgeIds && leg.edgeIds.length > 0) return leg.edgeIds
+  return leg.edgeId !== null ? [leg.edgeId] : []
+}
+
+/** "via switch-a › switch-b" — a perna atravessa equipamentos sem IP. */
+export function legViaLabel(leg: Pick<LinkTestPlanLeg, 'viaNames'>): string | null {
+  const names = leg.viaNames ?? []
+  return names.length > 0 ? `via ${names.join(' › ')}` : null
+}
+
 /** "OpenWrt-Sala → MikroTik-Torre". */
 export function legTitle(leg: Pick<LinkTestPlanLeg, 'a' | 'b'>): string {
   return `${endpointLabel(leg.a)} → ${endpointLabel(leg.b)}`

@@ -15,7 +15,26 @@ export type LinkTestLeg = { status: LinkTestStepStatus, stages: Array<LinkTestSt
 /**
  * Só no `GET` de detalhe.
  */
-samples?: Array<LinkTestSample>, seq: number, kind: LinkTestLegKind, a: LinkTestEndpoint, b: LinkTestEndpoint, edgeId: number | null, engine: ThroughputEngine | null, serverSide: LinkTestSide | null, durationS: number, runnable: boolean, issues: Array<string>, 
+samples?: Array<LinkTestSample>, seq: number, kind: LinkTestLegKind, a: LinkTestEndpoint, b: LinkTestEndpoint, 
+/**
+ * A aresta quando a perna é uma só; `null` na ponta a ponta e na perna
+ * que atravessa equipamentos sem IP (veja `edgeIds`).
+ */
+edgeId: number | null, 
+/**
+ * Todas as arestas da perna, em ordem de A a B. Mais de uma quando ela
+ * passa por equipamentos sem IP (switch não gerenciável); vazia na
+ * ponta a ponta.
+ */
+edgeIds: number[], 
+/**
+ * Os equipamentos sem IP que a perna atravessa, em ordem de A a B.
+ */
+viaDeviceIds: number[], 
+/**
+ * Os nomes deles, na mesma ordem (o histórico sobrevive à exclusão).
+ */
+viaNames: Array<string>, engine: ThroughputEngine | null, serverSide: LinkTestSide | null, durationS: number, runnable: boolean, issues: Array<string>, 
 /**
  * Os passos que resolvem parte de `issues` ali mesmo (instalar o
  * plugin, cadastrar o acesso). Só no plano.

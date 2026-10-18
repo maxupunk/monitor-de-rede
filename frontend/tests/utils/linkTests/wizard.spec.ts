@@ -32,6 +32,19 @@ describe('assistente do teste de enlace', () => {
   it('valida o alvo por tipo', () => {
     expect(targetErrors(draftFromRequest({ kind: 'link' }))).toEqual(['Escolha o enlace a medir.'])
     expect(targetErrors(draftFromRequest({ kind: 'link', linkId: 4 }))).toEqual([])
+    // Destino depois de um switch sem IP: as duas pontas, sem enlace.
+    expect(targetErrors(draftFromRequest({ kind: 'link', sourceDeviceId: 3 }))).toEqual([
+      'Escolha o enlace a medir.',
+    ])
+    expect(
+      targetErrors(draftFromRequest({ kind: 'link', sourceDeviceId: 3, targetDeviceId: 9 }))
+    ).toEqual([])
+    expect(
+      requestFromDraft({ kind: 'link', linkId: null, sourceDeviceId: 3, targetDeviceId: 9 })
+    ).toMatchObject({ kind: 'link', sourceDeviceId: 3, targetDeviceId: 9 })
+    expect(
+      requestFromDraft({ kind: 'link', linkId: null, sourceDeviceId: 3, targetDeviceId: 9 })
+    ).not.toHaveProperty('linkId')
     expect(targetErrors(draftFromRequest({ kind: 'path', sourceDeviceId: 3 }))).toEqual([
       'Escolha o destino do caminho.',
     ])

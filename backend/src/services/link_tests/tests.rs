@@ -25,9 +25,9 @@ use super::{
     env::{BtestArmer, CentralAddress, DriverResolver, LinkTestEnv, PluginInvoker, ServerArmer},
     events, guard, janitor,
     model::{
-        as_db, LinkTest, LinkTestFix, LinkTestKind, LinkTestOrigin, LinkTestRequest,
-        LinkTestScheduleInput, LinkTestSide, LinkTestSpecInput, LinkTestStageKey, LinkTestStatus,
-        LinkTestStepStatus,
+        as_db, LinkTest, LinkTestFix, LinkTestKind, LinkTestLegKind, LinkTestOrigin, LinkTestQuery,
+        LinkTestRequest, LinkTestScheduleInput, LinkTestSide, LinkTestSpecInput, LinkTestStageKey,
+        LinkTestStatus, LinkTestStepStatus,
     },
     plan, repository,
     repository::Requester,
@@ -510,6 +510,252 @@ async fn plano_de_caminho_tem_uma_perna_por_enlace() {
     let edges: Vec<_> = built.view.legs.iter().map(|leg| leg.edge_id).collect();
     assert_eq!(edges, [Some(l1), Some(l2)]);
     assert_eq!(built.view.legs[1].seq, 2);
+}
+
+/// Switch não gerenciável: sem IP, o teste passa por ele.
+async fn switch_sem_ip(db: &DatabaseConnection, name: &str) -> devices::Model {
+    devices::ActiveModel {
+        name: Set(name.into()),
+        r#type: Set("unmanaged_switch".into()),
+        status: Set("unknown".into()),
+        ..Default::default()
+    }
+    .insert(db)
+    .await
+    .unwrap()
+}
+
+/// O cenário do dono do produto: AP-terraço — switch-assistencia (sem IP) —
+/// BORDA, os dois com o plugin. Devolve `(ap, switch, borda, l1, l2)`.
+async fn ap_switch_borda(
+    db: &DatabaseConnection,
+) -> (devices::Model, devices::Model, devices::Model, i64, i64) {
+    let p = openwrt_plugin(db).await;
+    let ap = device(db, "AP-terraço", "10.0.0.3", false).await;
+    let switch = switch_sem_ip(db, "switch-assistencia").await;
+    let borda = device(db, "BORDA", "10.0.0.1", false).await;
+    install(db, &ap, &p).await;
+    install(db, &borda, &p).await;
+    let l1 = link(db, ap.id, switch.id).await;
+    let l2 = link(db, switch.id, borda.id).await;
+    (ap, switch, borda, l1, l2)
+}
+
+#[tokio::test]
+#[serial(link_tests)]
+async fn perna_atravessa_o_switch_sem_ip() {
+    let env = env_with(db().await, Arc::default(), None);
+    let (ap, switch, borda, l1, l2) = ap_switch_borda(&env.db).await;
+
+    // Caminho completo e "Enlace" pelas duas pontas dão a mesma perna única.
+    for pedido in [
+        LinkTestRequest {
+            source_device_id: Some(ap.id),
+            target_device_id: Some(borda.id),
+            ..request(LinkTestKind::Path)
+        },
+        LinkTestRequest {
+            source_device_id: Some(ap.id),
+            target_device_id: Some(borda.id),
+            ..request(LinkTestKind::Link)
+        },
+    ] {
+        let built = plan::build(&env, &pedido).await.unwrap();
+        let view = &built.view;
+        assert!(view.blocking.is_empty(), "{:?}", view.blocking);
+        assert_eq!(view.legs.len(), 1, "{:?}", view.legs);
+        let leg = &view.legs[0];
+        assert_eq!(
+            (leg.a.device_id, leg.b.device_id),
+            (Some(ap.id), Some(borda.id))
+        );
+        assert_eq!(leg.edge_ids, [l1, l2]);
+        assert_eq!(leg.edge_id, None, "mais de uma aresta");
+        assert_eq!(leg.via_device_ids, [switch.id]);
+        assert_eq!(leg.via_names, ["switch-assistencia"]);
+        assert!(leg.runnable, "{:?}", leg.issues);
+        assert!(
+            !built.device_ids().contains(&switch.id),
+            "o switch não é ocupado"
+        );
+    }
+
+    // Gravado e lido de volta; o filtro do enlace acha a perna pelas arestas.
+    let built = plan::build(
+        &env,
+        &LinkTestRequest {
+            source_device_id: Some(ap.id),
+            target_device_id: Some(borda.id),
+            ..request(LinkTestKind::Link)
+        },
+    )
+    .await
+    .unwrap();
+    let (test, _) = repository::insert(&env.db, &built, user()).await.unwrap();
+    let detail = repository::detail(&env.db, test.id).await.unwrap();
+    assert_eq!(detail.legs[0].plan.edge_ids, [l1, l2]);
+    assert_eq!(detail.legs[0].plan.via_names, ["switch-assistencia"]);
+    for (query, total) in [
+        (
+            LinkTestQuery {
+                link_id: Some(l2),
+                ..LinkTestQuery::default()
+            },
+            1,
+        ),
+        (
+            LinkTestQuery {
+                device_id: Some(switch.id),
+                ..LinkTestQuery::default()
+            },
+            1,
+        ),
+        (
+            LinkTestQuery {
+                link_id: Some(l2 + 100),
+                ..LinkTestQuery::default()
+            },
+            0,
+        ),
+    ] {
+        assert_eq!(
+            repository::page(&env.db, &query).await.unwrap().total,
+            total,
+            "{query:?}"
+        );
+    }
+}
+
+#[tokio::test]
+#[serial(link_tests)]
+async fn switch_sem_ip_nunca_e_ponta() {
+    let env = env_with(db().await, Arc::default(), None);
+    let (ap, switch, _, l1, _) = ap_switch_borda(&env.db).await;
+    let pedidos = [
+        LinkTestRequest {
+            link_id: Some(l1),
+            ..request(LinkTestKind::Link)
+        },
+        LinkTestRequest {
+            source_device_id: Some(ap.id),
+            target_device_id: Some(switch.id),
+            ..request(LinkTestKind::Path)
+        },
+        LinkTestRequest {
+            source_device_id: Some(ap.id),
+            target_device_id: Some(switch.id),
+            ..request(LinkTestKind::Link)
+        },
+        LinkTestRequest {
+            target_device_id: Some(switch.id),
+            ..request(LinkTestKind::Server)
+        },
+    ];
+    for pedido in pedidos {
+        let erro = plan::build(&env, &pedido).await.unwrap_err();
+        let AppError::Validation(texto) = &erro else {
+            panic!("{pedido:?}: {erro:?}");
+        };
+        assert!(
+            texto.contains("switch-assistencia não tem IP — escolha um equipamento depois dele"),
+            "{texto}"
+        );
+    }
+}
+
+#[tokio::test]
+#[serial(link_tests)]
+async fn enlace_pelas_pontas_recusa_equipamento_com_ip_no_meio() {
+    let env = env_with(db().await, Arc::default(), None);
+    let p = openwrt_plugin(&env.db).await;
+    let mut ids = Vec::new();
+    for (index, name) in ["R1", "R2", "R3"].into_iter().enumerate() {
+        let d = device(&env.db, name, &format!("10.0.1.{}", index + 1), false).await;
+        install(&env.db, &d, &p).await;
+        ids.push(d.id);
+    }
+    link(&env.db, ids[0], ids[1]).await;
+    link(&env.db, ids[1], ids[2]).await;
+    let erro = plan::build(
+        &env,
+        &LinkTestRequest {
+            source_device_id: Some(ids[0]),
+            target_device_id: Some(ids[2]),
+            ..request(LinkTestKind::Link)
+        },
+    )
+    .await
+    .unwrap_err();
+    let AppError::Validation(texto) = &erro else {
+        panic!("{erro:?}");
+    };
+    assert!(
+        texto.contains("(R2)") && texto.contains("Caminho completo"),
+        "{texto}"
+    );
+
+    // Sem ligação nenhuma: não é erro, é bloqueio (como no caminho).
+    let solto = device(&env.db, "R4", "10.0.1.4", false).await;
+    let built = plan::build(
+        &env,
+        &LinkTestRequest {
+            source_device_id: Some(ids[0]),
+            target_device_id: Some(solto.id),
+            ..request(LinkTestKind::Link)
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        built.view.blocking[0].contains("Não há caminho"),
+        "{:?}",
+        built.view.blocking
+    );
+}
+
+#[tokio::test]
+#[serial(link_tests)]
+async fn servidor_ate_a_borda_passa_pelo_switch() {
+    let env = env_with(db().await, Arc::default(), None);
+    let (ap, switch, borda, l1, l2) = ap_switch_borda(&env.db).await;
+    let central = device(&env.db, "NetMonitor", "10.0.0.9", true).await;
+    let l0 = link(&env.db, central.id, ap.id).await;
+    let built = plan::build(
+        &env,
+        &LinkTestRequest {
+            target_device_id: Some(borda.id),
+            ..request(LinkTestKind::Server)
+        },
+    )
+    .await
+    .unwrap();
+    let legs = &built.view.legs;
+    assert_eq!(legs.len(), 3, "{legs:?}");
+    assert_eq!(legs[0].kind, LinkTestLegKind::EndToEnd);
+    assert!(legs[0].edge_ids.is_empty());
+    assert_eq!(
+        (legs[1].edge_id, legs[1].edge_ids.clone()),
+        (Some(l0), vec![l0])
+    );
+    assert_eq!(legs[2].edge_ids, [l1, l2]);
+    assert_eq!(legs[2].via_device_ids, [switch.id]);
+    assert_eq!(legs[2].a.device_id, Some(ap.id));
+
+    // Só o switch entre a central e o destino: a perna ponta a ponta basta.
+    let direto = device(&env.db, "R-direto", "10.0.0.20", false).await;
+    let outro = switch_sem_ip(&env.db, "switch-2").await;
+    link(&env.db, central.id, outro.id).await;
+    link(&env.db, outro.id, direto.id).await;
+    let built = plan::build(
+        &env,
+        &LinkTestRequest {
+            target_device_id: Some(direto.id),
+            ..request(LinkTestKind::Server)
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(built.view.legs.len(), 1, "{:?}", built.view.legs);
 }
 
 /// Um OpenWrt identificado (sistema escolhido no cadastro), sem plugin.

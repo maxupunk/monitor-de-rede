@@ -14,7 +14,7 @@ import type {
   LinkTestScheduleInput,
   LinkTestStatus,
 } from '@/types/linkTests'
-import { isActiveStatus } from '@/utils/linkTests/presentation'
+import { isActiveStatus, legEdgeIds } from '@/utils/linkTests/presentation'
 
 /**
  * Teste de enlace (ADR 015 §5): toda a conversa HTTP da funcionalidade mora
@@ -96,7 +96,7 @@ export function involvesDevice(test: LinkTest, deviceId: number): boolean {
 
 /** Teste mede o enlace (pedido ou aresta de alguma perna)? */
 export function involvesEdge(test: LinkTest, edgeId: number): boolean {
-  return test.linkId === edgeId || test.legs.some((leg) => leg.edgeId === edgeId)
+  return test.linkId === edgeId || test.legs.some((leg) => legEdgeIds(leg).includes(edgeId))
 }
 
 /** O teste entra na página filtrada? (Para inserir o que chega pelo SSE.) */

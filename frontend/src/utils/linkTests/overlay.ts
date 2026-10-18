@@ -3,6 +3,8 @@
  * (`stores/topologyOverlay`): caminho destacado, estado de cada enlace
  * (pendente → em teste, com a animação no sentido medido → resultado) e o
  * rótulo com os Mbps. Pernas ponta a ponta não têm aresta: marcam só as pontas.
+ * Perna que atravessa switches sem IP marca todas as arestas do trecho; o
+ * rótulo fica só na primeira.
  */
 import type {
   EdgeOverlay,
@@ -19,7 +21,7 @@ import type {
   LinkTestPlanLeg,
   LinkTestStepStatus,
 } from '@/types/linkTests'
-import { flowPairLabel } from './presentation'
+import { flowPairLabel, legEdgeIds } from './presentation'
 
 export interface LinkTestOverlay {
   highlight: PathHighlight
@@ -58,17 +60,24 @@ export function runningLegFlow(leg: Pick<LinkTestLeg, 'stages'>): LinkTestFlow |
 }
 
 /**
- * Sentido da animação no canvas. A perna mede A→B (`forward`); se a aresta
- * do mapa foi desenhada de B para A, o mesmo fluxo anda ao contrário.
+ * Sentido da animação no canvas para a aresta `index` da perna. A perna mede
+ * A→B (`forward`); a aresta `index` liga o `index`-ésimo equipamento da
+ * cadeia A, switches…, B ao seguinte. Se o mapa a desenhou ao contrário, o
+ * mesmo fluxo anda ao contrário.
  */
 export function canvasFlow(
-  leg: Pick<LinkTestLeg, 'stages' | 'edgeId' | 'a' | 'b'>,
-  edgeSource: EdgeSource = () => null
+  leg: Pick<LinkTestLeg, 'stages' | 'edgeId' | 'edgeIds' | 'viaDeviceIds' | 'a' | 'b'>,
+  edgeSource: EdgeSource = () => null,
+  index = 0
 ): OverlayFlow {
   const flow = runningLegFlow(leg)
   if (flow === null) return 'both'
-  const source = leg.edgeId !== null ? edgeSource(leg.edgeId) : null
-  const inverted = source !== null && source === leg.b.deviceId && source !== leg.a.deviceId
+  const edgeId = legEdgeIds(leg)[index] ?? null
+  const chain = [leg.a.deviceId, ...(leg.viaDeviceIds ?? []), leg.b.deviceId]
+  const near = chain[index] ?? null
+  const far = chain[index + 1] ?? null
+  const source = edgeId !== null ? edgeSource(edgeId) : null
+  const inverted = source !== null && source === far && source !== near
   if (!inverted) return flow
   return flow === 'forward' ? 'reverse' : 'forward'
 }
@@ -87,22 +96,24 @@ export function legOverlayLabel(leg: LinkTestLeg, live: LiveRate = () => null): 
   return undefined
 }
 
-function endpointIds(legs: ReadonlyArray<Pick<LinkTestPlanLeg, 'a' | 'b'>>): number[] {
+type PathLeg = Pick<LinkTestPlanLeg, 'a' | 'b' | 'edgeId' | 'edgeIds' | 'viaDeviceIds'>
+
+/** As pontas e os switches sem IP atravessados, em ordem. */
+function nodeIds(legs: ReadonlyArray<PathLeg>): number[] {
   const ids: number[] = []
   for (const leg of legs) {
     if (leg.a.deviceId !== null) ids.push(leg.a.deviceId)
+    ids.push(...(leg.viaDeviceIds ?? []))
     if (leg.b.deviceId !== null) ids.push(leg.b.deviceId)
   }
   return [...new Set(ids)]
 }
 
 /** Nós e arestas do caminho (para destacar e enquadrar). */
-export function pathOf(
-  legs: ReadonlyArray<Pick<LinkTestPlanLeg, 'a' | 'b' | 'edgeId'>>
-): PathHighlight {
+export function pathOf(legs: ReadonlyArray<PathLeg>): PathHighlight {
   return {
-    nodeIds: endpointIds(legs),
-    edgeIds: [...new Set(legs.map((leg) => leg.edgeId).filter((id): id is number => id !== null))],
+    nodeIds: nodeIds(legs),
+    edgeIds: [...new Set(legs.flatMap(legEdgeIds))],
   }
 }
 
@@ -116,12 +127,15 @@ export function overlayForTest(
   for (const leg of test.legs) {
     const state = overlayState(leg.status)
     const label = legOverlayLabel(leg, live)
-    if (leg.edgeId !== null) {
-      edges[leg.edgeId] = {
-        state,
-        ...(label ? { label } : {}),
-        ...(state === 'running' ? { flow: canvasFlow(leg, edgeSource) } : {}),
-      }
+    const legEdges = legEdgeIds(leg)
+    if (legEdges.length > 0) {
+      legEdges.forEach((edgeId, index) => {
+        edges[edgeId] = {
+          state,
+          ...(label && index === 0 ? { label } : {}),
+          ...(state === 'running' ? { flow: canvasFlow(leg, edgeSource, index) } : {}),
+        }
+      })
     } else if (leg.kind === 'end_to_end') {
       for (const id of [leg.a.deviceId, leg.b.deviceId]) {
         if (id !== null) nodes[id] = { state, ...(label ? { label } : {}) }
@@ -135,7 +149,9 @@ export function overlayForTest(
 export function overlayForPlan(plan: Pick<LinkTestPlan, 'legs'>): LinkTestOverlay {
   const edges: Record<number, EdgeOverlay> = {}
   for (const leg of plan.legs) {
-    if (leg.edgeId !== null) edges[leg.edgeId] = { state: leg.runnable ? 'pending' : 'skipped' }
+    for (const edgeId of legEdgeIds(leg)) {
+      edges[edgeId] = { state: leg.runnable ? 'pending' : 'skipped' }
+    }
   }
   return { highlight: pathOf(plan.legs), edges, nodes: {} }
 }

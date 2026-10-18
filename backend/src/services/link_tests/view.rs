@@ -2,7 +2,7 @@
 //! e o executor montam o `LinkTest` pelo mesmo caminho.
 
 use sea_orm::prelude::DateTimeWithTimeZone;
-use serde::de::DeserializeOwned;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use super::model::{
     from_db, LinkTest, LinkTestEndpoint, LinkTestEndpointKind, LinkTestKind, LinkTestLeg,
@@ -37,9 +37,67 @@ fn unknown_endpoint() -> LinkTestEndpoint {
     }
 }
 
+/// Um equipamento sem IP que a perna atravessa, como fica na coluna `via`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ViaDevice {
+    pub device_id: i64,
+    pub name: String,
+}
+
+/// `,10,20,` — as arestas da perna, **em ordem** (coluna `edge_ids`, filtrada
+/// por `LIKE`). Sem aresta, nula.
+#[must_use]
+pub fn edge_ids_column(ids: &[i64]) -> Option<String> {
+    if ids.is_empty() {
+        return None;
+    }
+    let joined: Vec<String> = ids.iter().map(ToString::to_string).collect();
+    Some(format!(",{},", joined.join(",")))
+}
+
+fn parse_ids(column: &str) -> Vec<i64> {
+    column
+        .split(',')
+        .filter_map(|id| id.trim().parse().ok())
+        .collect()
+}
+
+/// A coluna `via`: os ids e os nomes, juntos. Sem passagem, nula.
+#[must_use]
+pub fn via_column(plan: &LinkTestPlanLeg) -> Option<serde_json::Value> {
+    if plan.via_device_ids.is_empty() {
+        return None;
+    }
+    let via: Vec<ViaDevice> = plan
+        .via_device_ids
+        .iter()
+        .enumerate()
+        .map(|(index, &device_id)| ViaDevice {
+            device_id,
+            name: plan
+                .via_names
+                .get(index)
+                .cloned()
+                .unwrap_or_else(|| format!("#{device_id}")),
+        })
+        .collect();
+    serde_json::to_value(via).ok()
+}
+
 /// A perna como a tela a vê. `samples` só quando pedido (detalhe).
 #[must_use]
 pub fn leg(row: &link_test_legs::Model, with_samples: bool) -> LinkTestLeg {
+    // Perna anterior à coluna: a lista é a aresta única.
+    let edge_ids = row
+        .edge_ids
+        .as_deref()
+        .map_or_else(|| row.edge_id.into_iter().collect(), parse_ids);
+    let via: Vec<ViaDevice> = row
+        .via
+        .as_ref()
+        .map(|via| json_or(via, Vec::new()))
+        .unwrap_or_default();
     LinkTestLeg {
         plan: LinkTestPlanLeg {
             seq: u32::try_from(row.seq).unwrap_or_default(),
@@ -47,6 +105,9 @@ pub fn leg(row: &link_test_legs::Model, with_samples: bool) -> LinkTestLeg {
             a: json_or(&row.a, unknown_endpoint()),
             b: json_or(&row.b, unknown_endpoint()),
             edge_id: row.edge_id,
+            edge_ids,
+            via_device_ids: via.iter().map(|device| device.device_id).collect(),
+            via_names: via.into_iter().map(|device| device.name).collect(),
             engine: row.engine.as_deref().and_then(from_db),
             server_side: row.server_side.as_deref().and_then(from_db::<LinkTestSide>),
             duration_s: u8::try_from(row.duration_s).unwrap_or_default(),
@@ -153,5 +214,16 @@ mod tests {
         assert_eq!(device_ids_column([]), "");
         assert!(device_ids_column([1, 15]).contains(",15,"));
         assert!(!device_ids_column([15]).contains(",1,"));
+    }
+
+    #[test]
+    fn arestas_da_perna_guardam_a_ordem() {
+        assert_eq!(
+            edge_ids_column(&[20, 10, -3]).as_deref(),
+            Some(",20,10,-3,")
+        );
+        assert_eq!(edge_ids_column(&[]), None);
+        assert_eq!(parse_ids(",20,10,-3,"), [20, 10, -3]);
+        assert!(!edge_ids_column(&[-3]).unwrap().contains(",3,"));
     }
 }

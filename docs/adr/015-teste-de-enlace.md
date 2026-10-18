@@ -228,6 +228,8 @@ type LinkTestSpecInput = { durationS?: number /* 5; 1–60 */, direction?: 'both
                            streams?: number /* 1; 1–8, iperf3 */, limitMbps?: number | null }
 type LinkTestRequest = { kind: LinkTestKind, linkId?: number, sourceDeviceId?: number,
                          targetDeviceId?: number, spec?: LinkTestSpecInput, confirm?: boolean }
+// `link`: `linkId` (enlace direto) ou, sem ele, `sourceDeviceId` + `targetDeviceId` — o
+// trecho entre dois equipamentos com IP que só tem equipamentos sem IP no meio (§5.2).
 
 type LinkTestEndpoint = { kind: 'device' | 'central' | 'agent', deviceId: number | null,
                           agentId: number | null, name: string, ip: string | null, platform: string | null }
@@ -237,7 +239,10 @@ type LinkTestPlan = { kind: LinkTestKind, legs: LinkTestPlanLeg[], estimatedSeco
                       willInstall: { deviceId: number, deviceName: string, packages: string[] }[],
                       fixes: LinkTestFix[] /* roda: blocking vazio e alguma perna runnable */ }
 type LinkTestPlanLeg = { seq: number, kind: 'link' | 'end_to_end', a: LinkTestEndpoint, b: LinkTestEndpoint,
-                         edgeId: number | null, engine: 'iperf3' | 'btest' | null, serverSide: 'a' | 'b' | null,
+                         edgeId: number | null /* a aresta quando é uma só */,
+                         edgeIds: number[] /* todas, em ordem de A a B (§5.2); vazia na ponta a ponta */,
+                         viaDeviceIds: number[], viaNames: string[] /* equipamentos sem IP atravessados */,
+                         engine: 'iperf3' | 'btest' | null, serverSide: 'a' | 'b' | null,
                          durationS: number, runnable: boolean, issues: string[], fixes: LinkTestFix[] }
 // Um passo que o operador faz no próprio plano; `message` é a frase que também está em `issues`.
 type LinkTestFix =
@@ -274,6 +279,41 @@ type LinkTestSchedule = { id: number, name: string, kind: LinkTestKind, linkId: 
 type LinkTestScheduleInput = Omit<LinkTestSchedule, 'id' | 'lastRunAt' | 'nextRunAt' | 'lastTestId' |
                              'lastStatus' | 'createdAt' | 'updatedAt' | 'spec'> & { spec?: LinkTestSpecInput }
 ```
+
+#### 5.2 Equipamentos sem IP (switch não gerenciável, hub)
+
+Um equipamento **sem IP** é **transparente** (`link_tests/transparent.rs`;
+na tela, `utils/linkTests/targets.ts`, a mesma régua): não fala SSH, não
+roda plugin e não recebe conexão, mas o tráfego passa por ele. O próprio
+NetMonitor nunca é transparente.
+
+- **Nunca é ponta.** Pedir um teste até ele (ou um `linkId` que encosta
+  nele) é `422`: "switch-assistencia não tem IP — escolha um equipamento
+  depois dele…".
+- **É atravessado.** Em `path` e nas pernas enlace por enlace do `server`,
+  cada sequência de transparentes vira **uma** perna entre os equipamentos
+  com IP de cada lado, com `edgeIds` (todas as arestas do trecho, em ordem) e
+  `viaDeviceIds`/`viaNames`. É a medida real, em L2, dos cabos entre os dois.
+  No `server`, se o caminho inteiro colapsa numa perna só, ela é a própria
+  ponta a ponta.
+- **`link` pelas duas pontas.** Sem `linkId`, `sourceDeviceId` +
+  `targetDeviceId` pedem "o enlace entre os dois através de switches sem IP":
+  o menor caminho no recorte do grafo em que só transparentes ficam no meio.
+  Sem esse caminho, mas com outro (passando por equipamento com IP), é `422`
+  sugerindo **Caminho completo**; sem caminho nenhum, `blocking`.
+- `edgeId` fica com a aresta quando a perna tem uma só (e `null` com mais),
+  para quem lê o contrato antigo. Destaque no mapa, filtro `?linkId=` (coluna
+  `link_test_legs.edge_ids`, `,10,20,`, `LIKE` igual nos dois bancos) e
+  velocidade nominal da perna (a menor das arestas) usam `edgeIds`. O switch
+  não é ocupado pelo guarda de "um teste por dispositivo"; entra em
+  `link_tests.device_ids` para o histórico dele.
+- Na tela: o seletor de equipamento não oferece transparentes ("Switches sem
+  IP não entram no teste — o enlace passa por eles"); em **Enlace**, um
+  vizinho sem IP vira os equipamentos com IP depois dele ("até BORDA ·
+  passando por switch-assistencia", vários unidos por "›"). "Testar velocidade
+  do enlace" num enlace que encosta num switch sem IP abre o assistente na
+  ponta com IP, para escolher o destino. A perna mostra o chip "via …"; o
+  mapa marca todas as arestas, com o rótulo do resultado na primeira.
 
 Eventos SSE: `link_test:updated` carrega um `LinkTest` (sem `samples`);
 `link_test:sample` carrega `{ testId, legSeq, flow, bps, tMs }`;

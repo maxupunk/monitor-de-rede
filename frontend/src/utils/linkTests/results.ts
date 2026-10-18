@@ -5,7 +5,7 @@
 import { formatLinkSpeed, formatPercent } from '@/utils/formatters'
 import type { ThemeColorToken } from '@/utils/topology/presentation'
 import type { LinkTest, LinkTestLeg } from '@/types/linkTests'
-import { compactBps, legTitle } from './presentation'
+import { compactBps, legEdgeIds, legTitle } from './presentation'
 
 export interface SpeedComparison {
   /** "487 Mbps de 1 Gbps — 49%" (ou só "487 Mbps" sem velocidade conhecida). */
@@ -13,6 +13,20 @@ export interface SpeedComparison {
   /** 0..1 (pode passar de 1 se a porta informar menos do que passou). */
   ratio: number | null
   color: ThemeColorToken
+}
+
+/**
+ * Velocidade nominal da perna: a menor das arestas que ela atravessa (o
+ * trecho por um switch sem IP é tão rápido quanto o cabo mais lento).
+ */
+export function legSpeedBps(
+  leg: Pick<LinkTestLeg, 'edgeId' | 'edgeIds'>,
+  speedOf: (edgeId: number) => number | null
+): number | null {
+  const speeds = legEdgeIds(leg)
+    .map(speedOf)
+    .filter((speed): speed is number => speed !== null && speed > 0)
+  return speeds.length > 0 ? Math.min(...speeds) : null
 }
 
 /** A partir de quanto da porta o enlace é considerado saudável. */
@@ -102,7 +116,7 @@ export function bottleneckExplanation(
   }
 
   const capacity = legCapacityBps(worst) ?? 0
-  const speed = worst.edgeId !== null ? speedOf(worst.edgeId) : null
+  const speed = legSpeedBps(worst, speedOf)
   const ratio = speed ? capacity / speed : null
   const portNote =
     ratio === null

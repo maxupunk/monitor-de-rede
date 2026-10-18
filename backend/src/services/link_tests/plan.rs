@@ -6,7 +6,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use sea_orm::EntityTrait;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
 use super::{
     endpoint::{self, Endpoint, Role},
@@ -18,6 +18,7 @@ use super::{
         LinkTestSpec,
     },
     negotiate::{negotiate, Capabilities, Negotiation, Party},
+    transparent::{self, Hop},
 };
 use crate::{
     models::{device_links, devices},
@@ -25,7 +26,10 @@ use crate::{
         devices::system_device::{SystemDeviceService, NETMONITOR_KEY},
         network_tools::throughput::ThroughputEngine,
         shared::errors::{AppError, AppResult},
-        topology::service::{find_path, parent_edge_child},
+        topology::{
+            path::{shortest_path, TopologyPath},
+            service::{find_path, load_path_edges, parent_edge_child},
+        },
     },
 };
 
@@ -106,6 +110,10 @@ impl Endpoints<'_> {
             return Ok(found.clone());
         }
         let device = find_device(self.env, id).await?;
+        // Sem IP não mede: o teste passa por ele (ver `transparent`).
+        if transparent::is_transparent(&device) {
+            return Err(transparent::not_an_endpoint(&device.name));
+        }
         // O próprio servidor nunca é "um equipamento com plugin": em qualquer
         // tipo de teste ele é a central, com os motores nativos.
         let built = if device.system_key.as_deref() == Some(NETMONITOR_KEY) {
@@ -142,8 +150,73 @@ async fn edge_pair(env: &LinkTestEnv, edge_id: i64) -> AppResult<(i64, i64)> {
     Ok((link.source_device_id, link.target_device_id))
 }
 
-/// Pernas ainda sem avaliação: `(tipo, a, b, aresta)`.
-type RawLeg = (LinkTestLegKind, Endpoint, Endpoint, Option<i64>);
+/// Por onde a perna passa: as arestas, em ordem de A a B, e os equipamentos
+/// sem IP do meio.
+#[derive(Debug, Clone, Default)]
+struct Route {
+    edge_ids: Vec<i64>,
+    via_device_ids: Vec<i64>,
+    via_names: Vec<String>,
+}
+
+impl Route {
+    fn edge(edge_id: i64) -> Self {
+        Self {
+            edge_ids: vec![edge_id],
+            ..Self::default()
+        }
+    }
+
+    fn of(hop: &Hop, names: &HashMap<i64, String>) -> Self {
+        Self {
+            edge_ids: hop.edge_ids.clone(),
+            via_device_ids: hop.via_device_ids.clone(),
+            via_names: hop
+                .via_device_ids
+                .iter()
+                .map(|id| names.get(id).cloned().unwrap_or_else(|| format!("#{id}")))
+                .collect(),
+        }
+    }
+}
+
+/// Perna ainda sem avaliação.
+struct RawLeg {
+    kind: LinkTestLegKind,
+    a: Endpoint,
+    b: Endpoint,
+    route: Route,
+}
+
+/// Os equipamentos sem IP dentre `ids`, com o nome.
+async fn transparent_names(env: &LinkTestEnv, ids: &[i64]) -> AppResult<HashMap<i64, String>> {
+    Ok(devices::Entity::find()
+        .filter(devices::Column::Id.is_in(ids.iter().copied()))
+        .all(&env.db)
+        .await?
+        .into_iter()
+        .filter(transparent::is_transparent)
+        .map(|device| (device.id, device.name))
+        .collect())
+}
+
+/// O caminho em pernas entre equipamentos com IP: cada sequência de
+/// equipamentos sem IP vira uma perna só. `origin` (a central, o agente)
+/// nunca é transparente.
+async fn hops_of(
+    env: &LinkTestEnv,
+    path: &TopologyPath,
+    origin: Option<i64>,
+) -> AppResult<(Vec<Hop>, HashMap<i64, String>)> {
+    let names = transparent_names(env, &path.device_ids).await?;
+    let hops = transparent::collapse(&path.device_ids, &path.edge_ids, |id| {
+        Some(id) != origin && names.contains_key(&id)
+    })
+    .map_err(|id| {
+        transparent::not_an_endpoint(names.get(&id).map_or("O equipamento", String::as_str))
+    })?;
+    Ok((hops, names))
+}
 
 struct Draft {
     legs: Vec<RawLeg>,
@@ -156,7 +229,9 @@ fn required(value: Option<i64>, field: &str) -> AppResult<i64> {
 }
 
 async fn draft_link(env: &LinkTestEnv, request: &LinkTestRequest) -> AppResult<Draft> {
-    let link_id = required(request.link_id, "o enlace (linkId)")?;
+    let Some(link_id) = request.link_id else {
+        return draft_segment(env, request).await;
+    };
     let (a, b) = edge_pair(env, link_id).await?;
     // Quem pediu pode orientar o enlace pela origem escolhida.
     let (a, b) = if request.source_device_id == Some(b) {
@@ -169,15 +244,93 @@ async fn draft_link(env: &LinkTestEnv, request: &LinkTestRequest) -> AppResult<D
         cache: HashMap::new(),
     };
     Ok(Draft {
-        legs: vec![(
-            LinkTestLegKind::Link,
-            endpoints.device(a).await?,
-            endpoints.device(b).await?,
-            Some(link_id),
-        )],
+        legs: vec![RawLeg {
+            kind: LinkTestLegKind::Link,
+            a: endpoints.device(a).await?,
+            b: endpoints.device(b).await?,
+            route: Route::edge(link_id),
+        }],
         warnings: Vec::new(),
         blocking: Vec::new(),
     })
+}
+
+/// `link` sem `linkId`: o trecho entre dois equipamentos com IP que só tem
+/// equipamentos sem IP no meio (AP — switch não gerenciável — roteador). Com
+/// outro equipamento com IP no caminho, o pedido é de caminho, não de enlace.
+async fn draft_segment(env: &LinkTestEnv, request: &LinkTestRequest) -> AppResult<Draft> {
+    let source = required(
+        request.source_device_id,
+        "o enlace (linkId) ou as duas pontas (sourceDeviceId)",
+    )?;
+    let target = required(
+        request.target_device_id,
+        "o enlace (linkId) ou as duas pontas (targetDeviceId)",
+    )?;
+    if source == target {
+        return Err(AppError::validation(
+            "As pontas do enlace precisam ser dispositivos diferentes",
+        ));
+    }
+    let mut endpoints = Endpoints {
+        env,
+        cache: HashMap::new(),
+    };
+    let (from, to) = (
+        endpoints.device(source).await?,
+        endpoints.device(target).await?,
+    );
+    let devices = devices::Entity::find().all(&env.db).await?;
+    let names: HashMap<i64, String> = devices
+        .iter()
+        .map(|device| (device.id, device.name.clone()))
+        .collect();
+    let hidden: HashMap<i64, String> = devices
+        .into_iter()
+        .filter(transparent::is_transparent)
+        .map(|device| (device.id, device.name))
+        .collect();
+    let edges = load_path_edges(&env.db).await?;
+    let segment = transparent::segment_edges(&edges, source, target, |id| hidden.contains_key(&id));
+    let mut draft = Draft {
+        legs: Vec::new(),
+        warnings: Vec::new(),
+        blocking: Vec::new(),
+    };
+    if let Some(path) = shortest_path(&segment, source, target) {
+        let hops = transparent::collapse(&path.device_ids, &path.edge_ids, |id| {
+            hidden.contains_key(&id)
+        })
+        .map_err(|id| transparent::not_an_endpoint(names.get(&id).map_or("?", String::as_str)))?;
+        for hop in hops {
+            draft.legs.push(RawLeg {
+                kind: LinkTestLegKind::Link,
+                a: from.clone(),
+                b: to.clone(),
+                route: Route::of(&hop, &hidden),
+            });
+        }
+        return Ok(draft);
+    }
+    let Some(path) = shortest_path(&edges, source, target) else {
+        draft.blocking.push(format!(
+            "Não há caminho conhecido na topologia entre {} e {}",
+            from.view.name, to.view.name
+        ));
+        return Ok(draft);
+    };
+    let between: Vec<&str> = path.device_ids[1..path.device_ids.len() - 1]
+        .iter()
+        .filter(|id| !hidden.contains_key(id))
+        .filter_map(|id| names.get(id).map(String::as_str))
+        .collect();
+    Err(AppError::validation(format!(
+        "Entre {} e {} há outros equipamentos com IP ({}): não é um enlace só. Para medir \
+         enlace por enlace, use «Caminho completo»",
+        from.view.name,
+        to.view.name,
+        between.join(", ")
+    )))
 }
 
 async fn draft_path(env: &LinkTestEnv, request: &LinkTestRequest) -> AppResult<Draft> {
@@ -207,13 +360,14 @@ async fn draft_path(env: &LinkTestEnv, request: &LinkTestRequest) -> AppResult<D
             from.view.name, to.view.name
         )),
         Some(path) => {
-            for (index, edge_id) in path.edge_ids.iter().enumerate() {
-                draft.legs.push((
-                    LinkTestLegKind::Link,
-                    endpoints.device(path.device_ids[index]).await?,
-                    endpoints.device(path.device_ids[index + 1]).await?,
-                    Some(*edge_id),
-                ));
+            let (hops, names) = hops_of(env, &path, None).await?;
+            for hop in hops {
+                draft.legs.push(RawLeg {
+                    kind: LinkTestLegKind::Link,
+                    a: endpoints.device(hop.a).await?,
+                    b: endpoints.device(hop.b).await?,
+                    route: Route::of(&hop, &names),
+                });
             }
         }
     }
@@ -254,12 +408,12 @@ async fn draft_server(env: &LinkTestEnv, request: &LinkTestRequest) -> AppResult
         None => endpoint::central_endpoint(system),
     };
     let mut draft = Draft {
-        legs: vec![(
-            LinkTestLegKind::EndToEnd,
-            origin.clone(),
-            destination.clone(),
-            None,
-        )],
+        legs: vec![RawLeg {
+            kind: LinkTestLegKind::EndToEnd,
+            a: origin.clone(),
+            b: destination.clone(),
+            route: Route::default(),
+        }],
         warnings: Vec::new(),
         blocking: Vec::new(),
     };
@@ -276,17 +430,21 @@ async fn draft_server(env: &LinkTestEnv, request: &LinkTestRequest) -> AppResult
             "Não há caminho conhecido na topologia entre {} e {}: só a perna ponta a ponta roda",
             origin.view.name, destination.view.name
         )),
-        // Um salto só é a própria perna ponta a ponta.
-        Some(path) if path.hops >= 2 => {
-            for (index, edge_id) in path.edge_ids.iter().enumerate() {
-                let a = hop(&mut endpoints, path.device_ids[index], from, &origin).await?;
-                let b = hop(&mut endpoints, path.device_ids[index + 1], from, &origin).await?;
-                draft
-                    .legs
-                    .push((LinkTestLegKind::Link, a, b, Some(*edge_id)));
+        Some(path) => {
+            let (hops, names) = hops_of(env, &path, Some(from)).await?;
+            // Uma perna só (um salto, ou só switches sem IP no meio) é a
+            // própria perna ponta a ponta.
+            if hops.len() >= 2 {
+                for leg in hops {
+                    draft.legs.push(RawLeg {
+                        kind: LinkTestLegKind::Link,
+                        a: hop(&mut endpoints, leg.a, from, &origin).await?,
+                        b: hop(&mut endpoints, leg.b, from, &origin).await?,
+                        route: Route::of(&leg, &names),
+                    });
+                }
             }
         }
-        Some(_) => {}
     }
     Ok(draft)
 }
@@ -406,13 +564,16 @@ fn rescue(a: &Endpoint, b: &Endpoint, duration_s: u8) -> Option<(Negotiation, Ve
 }
 
 fn evaluate(env: &LinkTestEnv, seq: u32, raw: RawLeg, spec: &LinkTestSpec) -> PlannedLeg {
-    let (kind, a, b, edge_id) = raw;
+    let RawLeg { kind, a, b, route } = raw;
     let mut view = LinkTestPlanLeg {
         seq,
         kind,
         a: a.view.clone(),
         b: b.view.clone(),
-        edge_id,
+        edge_id: transparent::single_edge(&route.edge_ids),
+        edge_ids: route.edge_ids,
+        via_device_ids: route.via_device_ids,
+        via_names: route.via_names,
         engine: None,
         server_side: None,
         duration_s: spec.duration_s,
@@ -735,6 +896,9 @@ mod tests {
                 a: a.view.clone(),
                 b: b.view.clone(),
                 edge_id: Some(1),
+                edge_ids: vec![1],
+                via_device_ids: Vec::new(),
+                via_names: Vec::new(),
                 engine: Some(n.engine),
                 server_side: Some(n.server),
                 duration_s: n.duration_s,

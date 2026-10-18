@@ -86,7 +86,7 @@
           :direction="test.spec.direction"
           :forward-samples="store.samplesFor(test.id, leg.seq, 'forward')"
           :reverse-samples="store.samplesFor(test.id, leg.seq, 'reverse')"
-          :speed-bps="leg.edgeId !== null ? ctx.speedOf(leg.edgeId) : null"
+          :speed-bps="legSpeedBps(leg, ctx.speedOf)"
           :bottleneck="!active && bottleneckSeq === leg.seq && test.legs.length > 1"
           :last="index === shownLegs.length - 1"
           :compact="compact"
@@ -134,7 +134,7 @@ import {
   testProgress,
   testRemainingMs,
 } from '@/utils/linkTests/progress'
-import { bottleneckLeg } from '@/utils/linkTests/results'
+import { bottleneckLeg, legSpeedBps } from '@/utils/linkTests/results'
 import { specSummary } from '@/utils/linkTests/spec'
 import { READ_ONLY_REASON } from '@/utils/topology/inspectorRegistry'
 import LinkTestLegItem from './LinkTestLegItem.vue'

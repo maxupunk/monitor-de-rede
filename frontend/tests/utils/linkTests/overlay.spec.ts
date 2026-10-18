@@ -53,6 +53,41 @@ describe('sobreposição do teste no mapa', () => {
     expect(canvasFlow(leg(1, { status: 'running' }))).toBe('both')
   })
 
+  it('perna através de switch sem IP: todas as arestas, rótulo só na primeira', () => {
+    // AP-terraço (1) — switch-assistencia (5) — BORDA (2): arestas 11 e 12.
+    const through = leg(1, {
+      a: endpoint(1, 'AP-terraço'),
+      b: endpoint(2, 'BORDA'),
+      edgeId: null,
+      edgeIds: [11, 12],
+      viaDeviceIds: [5],
+      viaNames: ['switch-assistencia'],
+      status: 'running',
+      stages: [stage('forward', { status: 'running' })],
+    })
+    // A aresta 12 foi desenhada de BORDA para o switch: a ida anda ao contrário nela.
+    const source = (id: number) => (id === 11 ? 1 : id === 12 ? 2 : null)
+    const live = () => 480e6
+    const result = overlayForTest(test(1, { legs: [through] }), live, source)
+    expect(result.edges[11]).toEqual({
+      state: 'running',
+      label: '↓ 480 Mbps ↑ 480 Mbps',
+      flow: 'forward',
+    })
+    expect(result.edges[12]).toEqual({ state: 'running', flow: 'reverse' })
+    expect(result.highlight).toEqual({ nodeIds: [1, 5, 2], edgeIds: [11, 12] })
+
+    const done = { ...through, status: 'succeeded' as const, forwardBps: 9e8, reverseBps: 8e8 }
+    const final = overlayForTest(test(1, { legs: [done] }), () => null, source)
+    expect(final.edges[11]).toEqual({ state: 'succeeded', label: '↓ 900 Mbps ↑ 800 Mbps' })
+    expect(final.edges[12]).toEqual({ state: 'succeeded' })
+
+    const p = plan({
+      legs: [{ ...plan().legs[0], edgeId: null, edgeIds: [11, 12], viaDeviceIds: [5] }],
+    })
+    expect(overlayForPlan(p).edges).toEqual({ 11: { state: 'pending' }, 12: { state: 'pending' } })
+  })
+
   it('perna ponta a ponta não tem aresta: marca só as pontas', () => {
     const e2e = leg(1, {
       kind: 'end_to_end',
@@ -78,7 +113,7 @@ describe('sobreposição do teste no mapa', () => {
 
   it('plano: caminho destacado, enlaces pendentes e os que não rodam marcados', () => {
     const p = plan()
-    p.legs.push({ ...p.legs[0], seq: 2, edgeId: 102, runnable: false })
+    p.legs.push({ ...p.legs[0], seq: 2, edgeId: 102, edgeIds: [102], runnable: false })
     expect(overlayForPlan(p).edges).toEqual({
       101: { state: 'pending' },
       102: { state: 'skipped' },

@@ -121,6 +121,17 @@
               Ponta a ponta
             </v-chip>
             <v-chip
+              v-if="legViaLabel(leg)"
+              size="x-small"
+              color="secondary"
+              variant="flat"
+              prepend-icon="mdi-switch"
+              label
+              title="A perna atravessa equipamentos sem IP: mede os cabos entre as duas pontas"
+            >
+              {{ legViaLabel(leg) }}
+            </v-chip>
+            <v-chip
               v-if="leg.engine"
               size="x-small"
               :color="ENGINES[leg.engine].color"
@@ -187,6 +198,7 @@ import {
   endpointIcon,
   endpointLabel,
   engineLabel,
+  legViaLabel,
   serverSideLabel,
 } from '@/utils/linkTests/presentation'
 import { estimatedDurationText, specSummary } from '@/utils/linkTests/spec'

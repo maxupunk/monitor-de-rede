@@ -325,7 +325,9 @@ export function confidencePercent(confidence?: number | null): number | null {
   return Math.round(Math.max(0, Math.min(100, value)))
 }
 
-export function edgeEndpoints(edge: TopologyEdge): { source: number; target: number } {
+export function edgeEndpoints(
+  edge: Pick<TopologyEdge, 'source' | 'target' | 'sourceDeviceId' | 'targetDeviceId'>
+): { source: number; target: number } {
   return {
     source: edge.sourceDeviceId ?? edge.source,
     target: edge.targetDeviceId ?? edge.target,

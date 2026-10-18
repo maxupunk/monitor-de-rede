@@ -25,6 +25,17 @@
           Ponta a ponta
         </v-chip>
         <v-chip
+          v-if="viaLabel"
+          size="x-small"
+          color="secondary"
+          variant="flat"
+          prepend-icon="mdi-switch"
+          label
+          title="A perna atravessa equipamentos sem IP: mede os cabos entre as duas pontas"
+        >
+          {{ viaLabel }}
+        </v-chip>
+        <v-chip
           v-if="leg.engine"
           size="x-small"
           :color="ENGINES[leg.engine].color"
@@ -146,6 +157,7 @@ import {
   engineLabel,
   legNotes,
   legTitle,
+  legViaLabel,
   serverSideLabel,
   stageEndpoint,
   stepStatusPresentation,
@@ -171,6 +183,7 @@ const emit = defineEmits<{ 'open-run': [runId: number, title: string, deviceName
 
 const status = computed(() => stepStatusPresentation(props.leg.status))
 const title = computed(() => legTitle(props.leg))
+const viaLabel = computed(() => legViaLabel(props.leg))
 const serverText = computed(() => serverSideLabel(props.leg))
 const runningFlow = computed(() =>
   props.leg.status === 'running' ? runningLegFlow(props.leg) : null

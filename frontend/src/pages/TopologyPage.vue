@@ -291,10 +291,11 @@ const { host, notify } = useTopologyHost({
   openTab: view.openTab,
   runPlugin: (node, item) => void pluginRunner.value?.open(node, item),
 })
+const nodeOf = (id: number) => store.nodesById.get(id)
 const quickTest = useEdgeQuickTest((edgeId) => {
   if (!auth.canWrite || smAndDown.value || cmd.cable.active) return false
   const edge = store.edgesById.get(edgeId)
-  return edge !== undefined && edgeLinkTestRequest(edge) !== null
+  return edge !== undefined && edgeLinkTestRequest(edge, nodeOf) !== null
 })
 registerBuiltinTopologyActions(() => store.pluginActions)
 useTopologyKeyboard(cmd.onCommand, () => !anyDialogOpen.value)
@@ -362,7 +363,7 @@ function onViewport(viewport: CanvasViewport) {
 
 function testQuickEdge() {
   const edge = quickTest.state.value ? store.edgesById.get(quickTest.state.value.edgeId) : null
-  const request = edge ? edgeLinkTestRequest(edge) : null
+  const request = edge ? edgeLinkTestRequest(edge, nodeOf) : null
   quickTest.hide()
   if (request) host.requestLinkTest(request)
 }

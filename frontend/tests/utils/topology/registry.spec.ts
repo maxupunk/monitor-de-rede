@@ -13,6 +13,7 @@ import {
 } from '@/utils/topology/inspectorRegistry'
 import {
   edgeActions,
+  edgeLinkTestRequest,
   linkTestActions,
   nodeActions,
   pluginActionsProvider,
@@ -25,6 +26,7 @@ function host(patch: Partial<TopologyHost> = {}): TopologyHost {
     editMode: false,
     selectedNodeId: null,
     systemNodeId: 1,
+    nodeById: () => undefined,
     openDevice: vi.fn(),
     editNode: vi.fn(),
     deleteNode: vi.fn(),
@@ -109,6 +111,29 @@ describe('registro de ações e abas da topologia', () => {
     expect(
       linkTestActions({ kind: 'edge', edge: edge(-5, 1, 2, { linkType: 'parent' }) }, h)
     ).toEqual([])
+  })
+
+  it('enlace com um switch sem IP abre o assistente na ponta com IP', () => {
+    const nodes = new Map([
+      [2, node(2, { name: 'AP-terraço', ipAddress: '10.0.0.3' })],
+      [3, node(3, { name: 'switch-assistencia', type: 'unmanaged_switch', ipAddress: null })],
+      [4, node(4, { name: 'switch-b', type: 'unmanaged_switch', ipAddress: null })],
+    ])
+    const h = host({ nodeById: (id) => nodes.get(id) })
+    const [action] = linkTestActions({ kind: 'edge', edge: edge(30, 3, 2) }, h)
+    expect(action.subtitle).toBe('Passa pelo switch sem IP — escolha o destino')
+    void action.run()
+    // Sem `linkId`: o destino (depois do switch) é escolhido no assistente.
+    expect(h.requestLinkTest).toHaveBeenCalledWith({ kind: 'link', sourceDeviceId: 2 })
+    expect(edgeLinkTestRequest(edge(31, 3, 4), (id) => nodes.get(id))).toBeNull()
+    // Duas pontas com IP: o enlace direto de sempre.
+    nodes.set(5, node(5, { ipAddress: '10.0.0.5' }))
+    expect(edgeLinkTestRequest(edge(32, 2, 5), (id) => nodes.get(id))).toEqual({
+      kind: 'link',
+      linkId: 32,
+      sourceDeviceId: 2,
+      targetDeviceId: 5,
+    })
   })
 
   it('enlace descoberto oferece "Confirmar"; hierarquia vira "Desvincular"', () => {

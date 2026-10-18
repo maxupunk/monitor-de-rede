@@ -37,6 +37,11 @@
       </v-item>
     </v-item-group>
 
+    <p v-if="hiddenCount > 0" class="transparent-hint text-body-small mb-3">
+      <v-icon size="16" color="info">mdi-information</v-icon>
+      <span>{{ TRANSPARENT_HINT }}</span>
+    </p>
+
     <template v-if="modelValue.kind === 'link'">
       <v-autocomplete
         :model-value="modelValue.sourceDeviceId"
@@ -51,7 +56,7 @@
         @update:model-value="setLinkDevice"
       ></v-autocomplete>
       <v-select
-        :model-value="modelValue.linkId"
+        :model-value="selectedKey"
         :items="edgeItems"
         item-props
         label="Enlace"
@@ -64,15 +69,11 @@
         :no-data-text="
           modelValue.sourceDeviceId === null
             ? 'Escolha o equipamento primeiro'
-            : 'Este equipamento não tem enlaces no mapa'
+            : 'Este equipamento não tem enlaces testáveis no mapa'
         "
-        :hint="
-          modelValue.sourceDeviceId === null
-            ? 'Escolha o equipamento para ver os enlaces dele.'
-            : ''
-        "
+        :hint="linkHint"
         persistent-hint
-        @update:model-value="setLink"
+        @update:model-value="chooseTarget"
       ></v-select>
     </template>
 
@@ -150,18 +151,21 @@
  * pelo diálogo de agendamento (mesmo alvo, mesmas regras).
  */
 import { computed, onMounted, ref, watch } from 'vue'
-import { useDevicesStore } from '@/stores/devices'
+import { useDevicesStore, type Device } from '@/stores/devices'
 import { useTopologyStore, type TopologyEdge } from '@/stores/topology'
 import type { LinkTestKind } from '@/types/linkTests'
 import { formatLinkSpeed } from '@/utils/formatters'
 import { KIND_OPTIONS } from '@/utils/linkTests/presentation'
-import { linkOptionSubtitle, type LinkTestTargetDraft } from '@/utils/linkTests/wizard'
 import {
-  edgeEndpoints,
-  edgeSpeed,
-  isUnmanagedSwitch,
-  isVirtualEdge,
-} from '@/utils/topology/presentation'
+  TRANSPARENT_HINT,
+  isLinkTestTransparent,
+  linkTargets,
+  selectedTargetKey,
+  viaText,
+  type LinkTarget,
+} from '@/utils/linkTests/targets'
+import { linkOptionSubtitle, type LinkTestTargetDraft } from '@/utils/linkTests/wizard'
+import { edgeEndpoints, edgeSpeed, isUnmanagedSwitch } from '@/utils/topology/presentation'
 
 const props = defineProps<{
   modelValue: LinkTestTargetDraft
@@ -193,9 +197,16 @@ function swap() {
   })
 }
 
+/** Switch sem IP não é ponta de teste: o enlace passa por ele. */
+function selectable(device: Device): boolean {
+  return !isUnmanagedSwitch(device) && !isLinkTestTransparent(device)
+}
+
+const hiddenCount = computed(() => devices.devices.filter((device) => !selectable(device)).length)
+
 const deviceItems = computed(() =>
   devices.devices
-    .filter((device) => !isUnmanagedSwitch(device))
+    .filter(selectable)
     .map((device) => ({
       title: device.name,
       subtitle: device.isSystem ? 'Servidor NetMonitor' : (device.ipAddress ?? ''),
@@ -213,12 +224,6 @@ function deviceName(id: number): string {
   )
 }
 
-function edgeTitle(edge: TopologyEdge, from: number): string {
-  const { source, target } = edgeEndpoints(edge)
-  const other = source === from ? target : source
-  return `até ${deviceName(other)}`
-}
-
 function edgeSubtitle(edge: TopologyEdge): string {
   const speed = edgeSpeed(edge)
   return linkOptionSubtitle(
@@ -228,39 +233,54 @@ function edgeSubtitle(edge: TopologyEdge): string {
   )
 }
 
-const edgeItems = computed(() => {
+/** Vizinhos com IP e, atrás de switches sem IP, os equipamentos com IP. */
+const targets = computed<LinkTarget[]>(() => {
   const from = props.modelValue.sourceDeviceId
   if (from === null) return []
-  return topology.edges
-    .filter((edge) => !isVirtualEdge(edge))
-    .filter((edge) => {
-      const { source, target } = edgeEndpoints(edge)
-      return source === from || target === from
-    })
-    .map((edge) => ({
-      title: edgeTitle(edge, from),
-      subtitle: edgeSubtitle(edge),
-      value: edge.id,
-    }))
+  return linkTargets(from, (id) => topology.nodesById.get(id), topology.edges)
+})
+
+function targetSubtitle(target: LinkTarget): string {
+  const via = viaText(target.viaNames)
+  if (via) return `passando por ${via}`
+  const edge = target.linkId !== null ? topology.edgesById.get(target.linkId) : undefined
+  return edge ? edgeSubtitle(edge) : ''
+}
+
+const edgeItems = computed(() =>
+  targets.value.map((target) => ({
+    title: `até ${target.name}`,
+    subtitle: targetSubtitle(target),
+    value: target.key,
+    prependIcon: target.viaNames.length > 0 ? 'mdi-switch' : 'mdi-lan',
+  }))
+)
+
+const selectedKey = computed(() => selectedTargetKey(props.modelValue, targets.value))
+
+const linkHint = computed(() => {
+  if (props.modelValue.sourceDeviceId === null) {
+    return 'Escolha o equipamento para ver os enlaces dele.'
+  }
+  const chosen = targets.value.find((target) => target.key === selectedKey.value)
+  const via = chosen ? viaText(chosen.viaNames) : null
+  return via
+    ? `Mede os cabos entre ${deviceName(props.modelValue.sourceDeviceId)} e ${chosen?.name}, passando por ${via} (sem IP).`
+    : ''
 })
 
 function setLinkDevice(value: number | null) {
   patch({ sourceDeviceId: value ?? null, targetDeviceId: null, linkId: null })
 }
 
-function setLink(value: number | null) {
-  const edge = value !== null ? topology.edgesById.get(value) : undefined
-  if (!edge) {
+function chooseTarget(key: string | null) {
+  const from = props.modelValue.sourceDeviceId
+  const chosen = key !== null ? targets.value.find((target) => target.key === key) : undefined
+  if (!chosen || from === null) {
     patch({ linkId: null, targetDeviceId: null })
     return
   }
-  const { source, target } = edgeEndpoints(edge)
-  const from = props.modelValue.sourceDeviceId
-  patch({
-    linkId: edge.id,
-    sourceDeviceId: from ?? source,
-    targetDeviceId: from === target ? source : target,
-  })
+  patch({ linkId: chosen.linkId, sourceDeviceId: from, targetDeviceId: chosen.deviceId })
 }
 
 /** Os enlaces vêm do mapa: fora da topologia, carrega o grafo sob demanda. */
@@ -279,7 +299,9 @@ function completeFromLink() {
   const { linkId, sourceDeviceId } = props.modelValue
   if (linkId === null || sourceDeviceId !== null) return
   const edge = topology.edgesById.get(linkId)
-  if (edge) setLink(edge.id)
+  if (!edge) return
+  const { source, target } = edgeEndpoints(edge)
+  patch({ sourceDeviceId: source, targetDeviceId: target })
 }
 
 watch(
@@ -322,5 +344,11 @@ onMounted(() => {
 }
 .swap {
   align-self: flex-start;
+}
+.transparent-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: rgb(var(--v-theme-on-surface));
 }
 </style>

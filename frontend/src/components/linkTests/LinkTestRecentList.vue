@@ -31,7 +31,12 @@
 /** Lista curta de testes (aba da topologia): estado, quando e o resultado. */
 import type { LinkTest } from '@/types/linkTests'
 import { formatRelativeTime } from '@/utils/formatters'
-import { flowPairLabel, testStatusPresentation, testTitle } from '@/utils/linkTests/presentation'
+import {
+  flowPairLabel,
+  legEdgeIds,
+  testStatusPresentation,
+  testTitle,
+} from '@/utils/linkTests/presentation'
 
 const props = defineProps<{
   tests: LinkTest[]
@@ -44,7 +49,8 @@ defineEmits<{ open: [testId: number] }>()
 
 function resultOf(test: LinkTest): string | null {
   if (props.edgeId !== null && props.edgeId !== undefined) {
-    const leg = test.legs.find((item) => item.edgeId === props.edgeId)
+    const edgeId = props.edgeId
+    const leg = test.legs.find((item) => legEdgeIds(item).includes(edgeId))
     if (leg) return flowPairLabel(leg.forwardBps, leg.reverseBps)
   }
   return flowPairLabel(test.summary?.minForwardBps, test.summary?.minReverseBps)
