@@ -436,9 +436,19 @@ com o aceite no plano):
   sem espaço, pacote inexistente); a saída inteira fica em "Ver execução".
 - Medido: AP↔AP pelo switch 363 / 235 Mbit/s; central→AP 252 / 243 e
   306 / 483 Mbit/s. Nenhum `iperf3 -s` nem arquivo de `/tmp` sobrou.
-- OpenWrt↔MikroTik **não** foi rodado: o OpenWrt só dirige btest, e servir no
-  RouterOS (`tp_serve`) cria um usuário temporário e restringe o
-  `bandwidth-server` — mudança de configuração, que o dono vetou em produção.
+- O aviso apareceu na tela com o aparelho de verdade: sem o iperf3, o
+  AP de relógio atrasado instalou pelo espelho HTTP depois do aceite, e o passo
+  do plano mostrou "Atenção: … o relógio dele marca … acerte o NTP".
+- **OpenWrt↔MikroTik** (RB2011iL, RouterOS 7.18.2, `bandwidth-server` já
+  ligado com `authenticate=yes`): o `mikrotik_btest` 0.5.1 tem `-u/-p`, mas só
+  fala o login antigo — contra o EC-SRP5 do RouterOS 7 dá `Auth failed` mesmo
+  com a senha certa. O OpenWrt não tem servidor btest e o RouterOS não tem
+  iperf3: o único arranjo é o MikroTik servir **sem autenticação, só para o
+  IP do AP**, durante a janela — o que o `tp_serve` faz. Com a autorização do
+  dono para essa mudança temporária: AP→MikroTik 100,9 Mbit/s, MikroTik→AP
+  32,5 Mbit/s (CPU MIPS de 600 MHz servindo), e o `/export` do RouterOS
+  depois do `tp_stop` ficou **idêntico** ao de antes (só o "último login"
+  do admin mudou).
 
 ### 9. Diagnóstico rápido por ping (adendo, 2026-10-19)
 
