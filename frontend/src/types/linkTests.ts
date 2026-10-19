@@ -15,6 +15,7 @@ export type { LinkTestPage } from '@/bindings/LinkTestPage'
 export type { LinkTestPlan } from '@/bindings/LinkTestPlan'
 export type { LinkTestPlanLeg } from '@/bindings/LinkTestPlanLeg'
 export type { LinkTestRequest } from '@/bindings/LinkTestRequest'
+export type { LinkTestRole } from '@/bindings/LinkTestRole'
 export type { LinkTestSample } from '@/bindings/LinkTestSample'
 export type { LinkTestSampleEvent } from '@/bindings/LinkTestSampleEvent'
 export type { LinkTestSchedule } from '@/bindings/LinkTestSchedule'
@@ -27,7 +28,11 @@ export type { LinkTestStatus } from '@/bindings/LinkTestStatus'
 export type { LinkTestStepStatus } from '@/bindings/LinkTestStepStatus'
 export type { LinkTestSummary } from '@/bindings/LinkTestSummary'
 
+import type { LinkTestFix } from '@/bindings/LinkTestFix'
 import type { ThroughputEngine } from '@/bindings/ThroughputEngine'
 
 /** Motor de uma perna (`iperf3` ou `btest`). */
 export type LinkTestEngine = ThroughputEngine
+
+/** O passo "instalar o pacote" do plano (o `check` do plugin achou faltando). */
+export type LinkTestInstallPackageFix = Extract<LinkTestFix, { kind: 'install_package' }>

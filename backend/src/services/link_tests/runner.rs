@@ -1,7 +1,9 @@
 //! A máquina de estados de um teste de enlace (ADR 015 §5).
 //!
 //! As pernas rodam **uma por vez**, em ordem; cada perna percorre as etapas
-//! `prepare_a` → `prepare_b` → `serve` → `forward`/`reverse` → `stop`. O
+//! `prepare_a` → `prepare_b` → `serve` → `forward`/`reverse` → `stop`. A
+//! primeira etapa de cada lado só **confere** (`check`): instalar o que falta
+//! é um passo que o operador aceita no plano, nunca uma surpresa aqui. O
 //! `stop` roda **sempre** — sucesso, falha ou cancelamento — e o `handle` do
 //! servidor que um equipamento subiu é gravado na perna **antes** de ser
 //! usado: se o processo cair no meio, o boot o desfaz ([`super::janitor`]).
@@ -33,13 +35,14 @@ use super::{
     events,
     guard::Reservation,
     model::{
-        as_db, LinkTestFlow, LinkTestLegKind, LinkTestSample, LinkTestSampleEvent, LinkTestSide,
-        LinkTestSpec, LinkTestStage, LinkTestStageKey, LinkTestStatus, LinkTestStepStatus,
-        LinkTestUserRef,
+        as_db, LinkTestFlow, LinkTestLegKind, LinkTestRole, LinkTestSample, LinkTestSampleEvent,
+        LinkTestSide, LinkTestSpec, LinkTestStage, LinkTestStageKey, LinkTestStatus,
+        LinkTestStepStatus, LinkTestUserRef,
     },
     negotiate::{driver_direction, link_flow, link_rates, Negotiation},
     outcome,
     plan::PlannedLeg,
+    readiness::{self, Readiness},
     repository, schedules, view,
 };
 use crate::{
@@ -657,22 +660,30 @@ impl Job {
         self.persist(idx).await;
     }
 
-    /// `prepare` de cada lado que declara a ação. `false` = a perna para.
+    /// A primeira etapa de cada lado. Com `check`, só **confere** — faltando
+    /// algo, a perna para com a frase do plugin (instalar é o passo aceito no
+    /// plano). Plugin sem `check` (o contrato de antes) roda o `prepare`.
+    /// `false` = a perna para.
     async fn prepare(&mut self, idx: usize, planned: &PlannedLeg, n: &Negotiation) -> bool {
         for side in [LinkTestSide::A, LinkTestSide::B] {
             let key = LinkTestStageKey::prepare_of(side);
             let endpoint = planned.endpoint(side);
-            let action = endpoint
-                .plugin()
-                .and_then(|plugin| plugin.roles.actions.prepare.clone());
-            let (Some(device_id), Some(plugin), Some(action)) =
-                (endpoint.device_id(), endpoint.plugin(), action)
+            let step = endpoint.plugin().and_then(|plugin| {
+                let actions = &plugin.roles.actions;
+                actions
+                    .check
+                    .clone()
+                    .map(|action| (action, true))
+                    .or_else(|| actions.prepare.clone().map(|action| (action, false)))
+            });
+            let (Some(device_id), Some(plugin), Some((action, checks))) =
+                (endpoint.device_id(), endpoint.plugin(), step)
             else {
                 self.end(
                     idx,
                     key,
                     LinkTestStepStatus::Skipped,
-                    Some("nada a preparar".to_owned()),
+                    Some("nada a conferir".to_owned()),
                 )
                 .await;
                 continue;
@@ -681,51 +692,44 @@ impl Job {
                 return false;
             }
             self.begin(idx, &[key]).await;
-            let role = if side == n.server { "serve" } else { "drive" };
             let call = Call {
                 device_id,
                 slug: plugin.slug.clone(),
                 action,
-                params: json!({ "engine": n.engine.as_str(), "role": role }),
+                params: readiness::params(n.engine, LinkTestRole::of(side == n.server)),
                 progress: None,
                 cancel: self.reservation.cancel.clone(),
             };
-            let result = self.invoke(idx, &[key], call).await;
-            let error = match result {
+            let installs = plugin.roles.actions.prepare.is_some();
+            let verdict = match self.invoke(idx, &[key], call).await {
                 Ok(run) if run.status == RunStatus::Succeeded => {
                     let output = run.output.unwrap_or(Value::Null);
-                    if output.get("ready").and_then(Value::as_bool) == Some(false) {
-                        StageError::Failed(format!(
-                            "{} não ficou pronto para o teste ({})",
-                            endpoint.view.name,
-                            n.engine.as_str()
-                        ))
+                    if checks {
+                        checked(&endpoint.view.name, n.engine, installs, &output)
                     } else {
-                        let installed: Vec<String> = output
-                            .get("installed")
-                            .and_then(Value::as_array)
-                            .map(|list| {
-                                list.iter()
-                                    .filter_map(Value::as_str)
-                                    .map(str::to_owned)
-                                    .collect()
-                            })
-                            .unwrap_or_default();
-                        let message = if installed.is_empty() {
-                            "pronto".to_owned()
-                        } else {
-                            format!("instalado: {}", installed.join(", "))
-                        };
-                        self.end(idx, key, LinkTestStepStatus::Succeeded, Some(message))
-                            .await;
-                        continue;
+                        prepared(&endpoint.view.name, n.engine, &output)
                     }
                 }
-                Ok(run) => StageError::from_outcome(&run, "O preparo"),
-                Err(error) => StageError::from_error(&error),
+                Ok(run) => Err(StageError::from_outcome(
+                    &run,
+                    if checks {
+                        "A conferência"
+                    } else {
+                        "O preparo"
+                    },
+                )),
+                Err(error) => Err(StageError::from_error(&error)),
             };
-            self.fail_stage(idx, key, error).await;
-            return false;
+            match verdict {
+                Ok(message) => {
+                    self.end(idx, key, LinkTestStepStatus::Succeeded, Some(message))
+                        .await;
+                }
+                Err(error) => {
+                    self.fail_stage(idx, key, error).await;
+                    return false;
+                }
+            }
         }
         true
     }
@@ -1313,6 +1317,64 @@ impl Job {
 }
 
 /// O relatório do plugin, tolerante a campos ausentes.
+/// O desfecho do `check` na etapa: pronto segue; faltando, a perna para com
+/// a frase do plugin e, quando o plugin instala, o caminho para resolver.
+fn checked(
+    device_name: &str,
+    engine: ThroughputEngine,
+    installs: bool,
+    output: &Value,
+) -> Result<String, StageError> {
+    let readiness = Readiness::from_output(Some(output))
+        .map_err(|error| StageError::Failed(format!("{device_name}: {error}")))?;
+    if readiness.ready {
+        return Ok("pronto".to_owned());
+    }
+    let reason = readiness.reason(device_name, engine);
+    Err(StageError::Failed(if readiness.can_install && installs {
+        format!("{reason} — aceite a instalação no plano do teste")
+    } else {
+        reason
+    }))
+}
+
+/// O desfecho do `prepare` de um plugin sem `check` (pode ter instalado).
+fn prepared(
+    device_name: &str,
+    engine: ThroughputEngine,
+    output: &Value,
+) -> Result<String, StageError> {
+    if output.get("ready").and_then(Value::as_bool) == Some(false) {
+        // O plugin sabe por que não ficou pronto (sem internet, sem espaço,
+        // pacote fora do repositório): essa é a parte útil da mensagem.
+        let reason = output
+            .get("message")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty());
+        return Err(StageError::Failed(match reason {
+            Some(reason) => format!(
+                "{device_name} não ficou pronto para o teste ({}): {reason}",
+                engine.as_str()
+            ),
+            None => format!(
+                "{device_name} não ficou pronto para o teste ({})",
+                engine.as_str()
+            ),
+        }));
+    }
+    let installed: Vec<&str> = output
+        .get("installed")
+        .and_then(Value::as_array)
+        .map(|list| list.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    Ok(if installed.is_empty() {
+        "pronto".to_owned()
+    } else {
+        format!("instalado: {}", installed.join(", "))
+    })
+}
+
 fn parse_report(output: Option<Value>) -> Measured {
     output
         .and_then(|output| serde_json::from_value::<PluginReport>(output).ok())
@@ -1388,6 +1450,32 @@ mod tests {
                     let declared = schema(&roles.actions.run).expect("run declarado");
                     params::validate(declared.as_ref(), &sent).unwrap_or_else(|errors| {
                         panic!("{} run {sent}: {errors:?}", manifest.slug)
+                    });
+                    checked += 1;
+                }
+            }
+            // Conferir e instalar recebem `{ engine, role }` em cada papel.
+            let papers = roles
+                .serve
+                .iter()
+                .map(|serve| (serve.engine, LinkTestRole::Serve))
+                .chain(
+                    roles
+                        .drive
+                        .iter()
+                        .map(|drive| (drive.engine, LinkTestRole::Drive)),
+                );
+            for (engine, role) in papers {
+                let sent = readiness::params(engine, role);
+                for (name, action) in [
+                    ("check", &roles.actions.check),
+                    ("prepare", &roles.actions.prepare),
+                ] {
+                    let Some(declared) = schema(action) else {
+                        continue;
+                    };
+                    params::validate(declared.as_ref(), &sent).unwrap_or_else(|errors| {
+                        panic!("{} {name} {sent}: {errors:?}", manifest.slug)
                     });
                     checked += 1;
                 }

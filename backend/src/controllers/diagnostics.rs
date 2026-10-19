@@ -1,4 +1,5 @@
-//! Endpoints de diagnóstico de rede: traceroute, speedtest e playbooks com streaming NDJSON.
+//! Endpoints de diagnóstico de rede: traceroute, speedtest e playbooks com streaming NDJSON,
+//! e o diagnóstico rápido por ping (resposta única, ~3,5 s).
 
 use std::{convert::Infallible, net::IpAddr, time::Instant};
 
@@ -19,8 +20,12 @@ use crate::{
     dtos::diagnostics::{PlaybookRunInput, SpeedTestInput, TracerouteInput},
     models::devices,
     services::{
-        monitoring::execution_guard::{try_acquire_speedtest, try_acquire_traceroute},
+        monitoring::{
+            checkers::ping::PingClient,
+            execution_guard::{try_acquire_speedtest, try_acquire_traceroute},
+        },
         network_tools::{
+            ping_capacity::{self, model::QuickPingInput},
             playbook::{
                 run_device_reachability_playbook, run_internet_health_playbook, PlaybookEvent,
             },
@@ -310,6 +315,19 @@ async fn run_playbook(
         .map_err(|err| AppError::Internal(err.into()))
 }
 
+/// Diagnóstico rápido por ping (ADR 015 §9). Escrita pela regra padrão
+/// (`operator`/`admin`): gera tráfego a partir da central, ainda que leve.
+/// Se o cliente desiste, o handler é descartado e a rodada para junto.
+async fn quick_ping(
+    State(ctx): State<AppContext>,
+    Json(input): Json<QuickPingInput>,
+) -> AppResult<Response> {
+    let target = ping_capacity::service::resolve_target(&ctx.db, &input).await?;
+    let client = PingClient::from_context(&ctx)?;
+    let report = ping_capacity::service::run(&client, target, &CancellationToken::new()).await?;
+    Ok(format::json(report)?)
+}
+
 pub fn routes() -> Routes {
     Routes::new()
         .add("/diagnostics/traceroute", post(traceroute))
@@ -320,4 +338,5 @@ pub fn routes() -> Routes {
             post(lan_upload).layer(axum::extract::DefaultBodyLimit::max(50 * 1024 * 1024)),
         )
         .add("/diagnostics/playbook/run", post(run_playbook))
+        .add("/diagnostics/quick-ping", post(quick_ping))
 }

@@ -3,8 +3,8 @@
   "manifest": {
     "slug": "openwrt-link-test",
     "name": "OpenWrt – teste de enlace",
-    "version": "1.0.0",
-    "description": "Dá ao OpenWrt os papéis do teste de enlace da topologia: serve iperf3 e dirige iperf3 ou Bandwidth Test (contra MikroTik). Instala o iperf3 e o mikrotik-btest quando faltam, pelo Gerenciador de pacotes.",
+    "version": "1.1.1",
+    "description": "Dá ao OpenWrt os papéis do teste de enlace da topologia: serve iperf3 e dirige iperf3 ou Bandwidth Test (contra MikroTik). Antes do teste, confere se o iperf3 e o mikrotik-btest estão instalados; instala pelo Gerenciador de pacotes só quando o operador aceita no plano.",
     "author": "NetMonitor",
     "transports": [
       "ssh"
@@ -40,10 +40,10 @@
       },
       {
         "id": "tp_prepare",
-        "title": "Preparar teste de enlace",
+        "title": "Instalar o que o teste de enlace precisa",
         "effect": "write",
         "output": "kv",
-        "description": "Usada pelo teste de enlace: deixa o equipamento pronto para o papel pedido.",
+        "description": "Instala o pacote do papel pedido (iperf3 ou mikrotik-btest) pelo Gerenciador de pacotes. O plano do teste de enlace roda esta ação quando o operador aceita a instalação; o teste em si nunca instala.",
         "params": {
           "type": "object",
           "properties": {
@@ -84,6 +84,56 @@
           "ready",
           "message",
           "installed"
+        ]
+      },
+      {
+        "id": "tp_check",
+        "title": "Conferir teste de enlace",
+        "effect": "read",
+        "output": "kv",
+        "description": "Usada pelo teste de enlace: confere, sem alterar nada, se o programa do papel pedido está instalado.",
+        "params": {
+          "type": "object",
+          "properties": {
+            "engine": {
+              "type": "string",
+              "title": "Motor",
+              "enum": [
+                "iperf3",
+                "btest"
+              ],
+              "enumTitles": [
+                "iperf3",
+                "Bandwidth Test (MikroTik)"
+              ],
+              "hidden": true
+            },
+            "role": {
+              "type": "string",
+              "title": "Papel",
+              "enum": [
+                "serve",
+                "drive"
+              ],
+              "enumTitles": [
+                "Servidor",
+                "Cliente"
+              ],
+              "hidden": true
+            }
+          }
+        },
+        "labels": {
+          "ready": "Pronto",
+          "missing": "Falta instalar",
+          "canInstall": "Instala pelo NetMonitor",
+          "message": "Situação"
+        },
+        "order": [
+          "ready",
+          "message",
+          "missing",
+          "canInstall"
         ]
       },
       {
@@ -317,14 +367,15 @@
       ],
       "actions": {
         "prepare": "tp_prepare",
+        "check": "tp_check",
         "serve": "tp_serve",
         "stop": "tp_stop",
         "run": "tp_run"
       }
     }
   },
-  "script": "// OpenWrt (SSH) – papéis no teste de enlace (ADR 015).\n//\n// Serve iperf3 (`iperf3 -s` em segundo plano, encerrado pelo PID) e dirige\n// iperf3 ou btest — este pelo `mikrotik_btest`, o cliente do pacote oficial\n// `mikrotik-btest`, que só fala com servidor sem autenticação e recusa\n// `-t` ≥ 30. Os pacotes que faltam são instalados pelo Gerenciador de pacotes\n// (`openwrt-packages`), que já sabe opkg × apk.\n\nfn pid_dir() {\n    \"/var/run\"\n}\n\n// ---------------------------------------------------------------- utilitários\n\nfn or_default(value, fallback) {\n    if value == () { fallback } else { value }\n}\n\n// Ação de papel chamada sem os parâmetros do teste (pela aba, à mão): recusa\n// antes de mexer em qualquer coisa.\nfn require_link_test(params, key) {\n    if params[key] == () {\n        throw \"Esta ação faz parte do teste de enlace e recebe os parâmetros dele: rode o teste pela topologia.\";\n    }\n}\n\n// Mensagem de um erro pego por `catch` (texto do `throw` ou erro do sistema).\nfn error_text(err) {\n    if type_of(err) == \"map\" && err.message != () { err.message } else { err.to_string() }\n}\n\nfn has_binary(device, name) {\n    trimmed(device.ssh(\"command -v \" + name + \" >/dev/null 2>&1 && echo yes || echo no\").stdout) == \"yes\"\n}\n\n// Teto de banda em kbit/s (inteiro), ou `()` sem limite.\nfn limit_kbps(limit) {\n    if limit == () { return (); }\n    let mbps = if type_of(limit) == \"f64\" { limit } else { limit.to_float() };\n    let kbps = (mbps * 1000.0).round().to_int();\n    if kbps > 0 { kbps } else { () }\n}\n\nfn parse_handle(text) {\n    let handle = ();\n    try {\n        handle = json_parse(text);\n    } catch (err) {\n        handle = ();\n    }\n    if type_of(handle) != \"map\" {\n        throw \"O `handle` do teste de enlace não é o que o tp_serve devolveu.\";\n    }\n    handle\n}\n\nfn empty_report(engine) {\n    #{ engine: engine, txBps: (), rxBps: (), txBytes: 0, rxBytes: 0, retransmits: (), samples: [] }\n}\n\n// -------------------------------------------------------------------- iperf3\n\nfn iperf3_pidfile(port) {\n    pid_dir() + \"/nm-iperf3-\" + port + \".pid\"\n}\n\nfn is_iperf3(device, pid) {\n    device.ssh(\"cat /proc/\" + pid + \"/cmdline 2>/dev/null | tr '\\\\000' ' '\").stdout.contains(\"iperf3\")\n}\n\n// `iperf3 -s` em segundo plano, com o PID num arquivo para o `tp_stop`.\nfn iperf3_serve(device, params) {\n    let port = or_default(params.port, 5201);\n    let pidfile = iperf3_pidfile(port);\n    let r = device.ssh(\"iperf3 -s -D -p \" + port + \" -I \" + pidfile + \" >/dev/null 2>&1; sleep 1; cat \" + pidfile + \" 2>/dev/null\");\n    let pid = regex_capture(r.stdout, \"([0-9]+)\");\n    if pid == () || !is_iperf3(device, pid) {\n        throw \"O iperf3 não ficou de pé na porta \" + port + \" (porta ocupada?). \" + trimmed(r.stdout + \" \" + r.stderr);\n    }\n    #{ port: port, handle: json_encode(#{ engine: \"iperf3\", pid: parse_int(pid), port: port }) }\n}\n\n// Encerra o servidor pelo PID do `handle` — só se ainda for um iperf3.\nfn iperf3_stop(device, handle) {\n    let pid = handle.pid;\n    let port = handle.port;\n    if type_of(pid) != \"i64\" || pid < 2 || type_of(port) != \"i64\" || port < 1 || port > 65535 {\n        throw \"O `handle` não traz o PID e a porta do iperf3 que o tp_serve subiu.\";\n    }\n    if is_iperf3(device, pid) {\n        device.run(\"kill \" + pid);\n    }\n    device.run(\"rm -f \" + iperf3_pidfile(port));\n    #{ stopped: true }\n}\n\n// \"56.0\" + \"M\" (de MBytes) → bytes; o iperf3 conta bytes em potências de 1024.\nfn iperf3_bytes(value, prefix) {\n    let factor = if prefix == \"K\" { 1024.0 } else if prefix == \"M\" { 1048576.0 } else if prefix == \"G\" { 1073741824.0 } else if prefix == \"T\" { 1099511627776.0 } else { 1.0 };\n    (parse_float(value) * factor).round().to_int()\n}\n\n// \"94.0\" + \"M\" (de Mbits/sec) → bits por segundo (potências de 1000).\nfn iperf3_bps(value, prefix) {\n    let factor = if prefix == \"K\" { 1000.0 } else if prefix == \"M\" { 1000000.0 } else if prefix == \"G\" { 1000000000.0 } else if prefix == \"T\" { 1000000000000.0 } else { 1.0 };\n    parse_float(value) * factor\n}\n\n// O resumo final (`sender`/`receiver`). Vale o `receiver` (o que chegou);\n// as retransmissões vêm do `sender`.\nfn iperf3_summary(stdout, stderr, streams) {\n    let text = stdout + \"\\n\" + stderr;\n    let failure = regex_capture(text, \"iperf3: error - ([^\\\\n]+)\");\n    if failure != () {\n        throw \"O iperf3 falhou: \" + trimmed(failure);\n    }\n    let id = if streams > 1 { \"SUM\" } else { \"\\\\s*[0-9]+\" };\n    let pattern = \"^\\\\[\" + id + \"\\\\]\\\\s+[0-9.]+-[0-9.]+\\\\s+sec\\\\s+([0-9.]+)\\\\s+([KMGT]?)Bytes\\\\s+([0-9.]+)\\\\s+([KMGT]?)bits/sec(?:\\\\s+([0-9]+))?\\\\s+(sender|receiver)$\";\n    let sender = ();\n    let receiver = ();\n    for line in lines(text) {\n        let g = regex_groups(line, pattern);\n        if g == () { continue; }\n        let entry = #{\n            bytes: iperf3_bytes(g[0], g[1]),\n            bps: iperf3_bps(g[2], g[3]),\n            retransmits: if g[4] == () { () } else { parse_int(g[4]) }\n        };\n        if g[5] == \"sender\" { sender = entry; } else { receiver = entry; }\n    }\n    if sender == () && receiver == () {\n        throw \"O iperf3 terminou sem o resumo final: \" + trimmed(text);\n    }\n    let best = if receiver != () { receiver } else { sender };\n    #{ bps: best.bps, bytes: best.bytes, retransmits: if sender == () { () } else { sender.retransmits } }\n}\n\n// Um sentido do teste, com as linhas de 1 s viradas amostras ao vivo (o\n// resumo final, que termina em sender/receiver, fica de fora).\nfn iperf3_leg(device, command, duration, streams, flow) {\n    let id = if streams > 1 { \"\\\\[SUM\\\\]\" } else { \"\\\\[\\\\s*[0-9]+\\\\]\" };\n    let r = device.ssh_live(command, #{\n        timeout_ms: duration * 1000 + 20000,\n        progress: #{\n            pattern: \"^\" + id + \"\\\\s+[0-9.]+-[0-9.]+\\\\s+sec\\\\s+[0-9.]+\\\\s+[KMGT]?Bytes\\\\s+(?<value>[0-9.]+)\\\\s*(?<unit>[KMGT]?bits/sec)(?:\\\\s+[0-9]+(?:\\\\s+[0-9.]+\\\\s+[KMGT]?Bytes)?)?\\\\s*$\",\n            flow: flow\n        }\n    });\n    iperf3_summary(r.stdout, r.stderr, streams)\n}\n\nfn add_retransmits(total, more) {\n    if more == () { total } else if total == () { more } else { total + more }\n}\n\n// `send` mede este equipamento enviando; `receive`, recebendo (`-R`); `both`,\n// os dois em sequência.\nfn iperf3_run(device, params) {\n    let port = or_default(params.port, 5201);\n    let duration = or_default(params.durationS, 5);\n    let streams = or_default(params.streams, 1);\n    let direction = or_default(params.direction, \"both\");\n    let command = \"iperf3 -c \" + shell_quote(params.target) + \" -p \" + port + \" -t \" + duration + \" -P \" + streams;\n    let limit = limit_kbps(params.limitMbps);\n    if limit != () {\n        let per_stream = limit / streams;\n        if per_stream < 1 { per_stream = 1; }\n        command += \" -b \" + per_stream + \"K\";\n    }\n    command += \" --forceflush -i 1 -f m\";\n    let report = empty_report(\"iperf3\");\n    if direction != \"receive\" {\n        let leg = iperf3_leg(device, command, duration, streams, \"tx\");\n        report.txBps = leg.bps;\n        report.txBytes = leg.bytes;\n        report.retransmits = add_retransmits(report.retransmits, leg.retransmits);\n    }\n    if direction != \"send\" {\n        let leg = iperf3_leg(device, command + \" -R\", duration, streams, \"rx\");\n        report.rxBps = leg.bps;\n        report.rxBytes = leg.bytes;\n        report.retransmits = add_retransmits(report.retransmits, leg.retransmits);\n    }\n    report\n}\n\n// --------------------------------------------------------------------- btest\n\n// Teto do `mikrotik_btest` por sentido: ele recusa `-t` de 30 em diante.\nfn btest_max_duration() {\n    29\n}\n\n// \"Rx:   94.50 Mb/s\\tTx:   93.20 Mb/s\" — o `mikrotik_btest` divide por\n// 1048576 (Mibit/s), apesar do rótulo; a última linha é o resumo.\nfn btest_run(device, params) {\n    let duration = or_default(params.durationS, 5);\n    if duration > btest_max_duration() { duration = btest_max_duration(); }\n    let port = or_default(params.port, 2000);\n    let direction = or_default(params.direction, \"both\");\n    let command = \"mikrotik_btest -t \" + duration + \" -d \" + direction + \" \" + shell_quote(params.target + \":\" + port);\n    let r = device.ssh_live(command, #{\n        timeout_ms: duration * 1000 + 20000,\n        progress: #{ pattern: \"(?<flow>Rx|Tx):\\\\s*(?<value>[0-9.]+)\\\\s*(?<unit>Mb/s)\" }\n    });\n    let text = r.stdout + \"\\n\" + r.stderr;\n    if text.contains(\"Auth failed\") {\n        throw \"O servidor btest pediu autenticação, e o cliente do OpenWrt só fala com servidor sem autenticação (Auth failed).\";\n    }\n    if text.contains(\"failed to connect\") || text.contains(\"Invalid host\") {\n        throw \"O mikrotik_btest não conectou em \" + params.target + \":\" + port + \": \" + trimmed(text);\n    }\n    // Um quadro por segundo separado por \\r e o resumo no fim. O transporte\n    // tira o \\r, e os quadros chegam colados numa linha só: o resumo é o\n    // ÚLTIMO valor de cada sentido, onde quer que ele esteja.\n    let rxs = regex_captures(text, \"Rx:\\\\s*([0-9.]+)\\\\s*Mb/s\");\n    let txs = regex_captures(text, \"Tx:\\\\s*([0-9.]+)\\\\s*Mb/s\");\n    if rxs.len() == 0 && txs.len() == 0 {\n        throw \"O mikrotik_btest terminou sem resultado: \" + trimmed(text);\n    }\n    let rx = if rxs.len() > 0 { rxs[rxs.len() - 1] } else { () };\n    let tx = if txs.len() > 0 { txs[txs.len() - 1] } else { () };\n    let report = empty_report(\"btest\");\n    if direction != \"receive\" && tx != () { report.txBps = parse_float(tx) * 1048576.0; }\n    if direction != \"send\" && rx != () { report.rxBps = parse_float(rx) * 1048576.0; }\n    report\n}\n\n// -------------------------------------------------------------------- ações\n\nfn detect(device, params) {\n    let release = parse_kv(device.run(\"cat /etc/openwrt_release\"), \"=\");\n    #{\n        firmware: release.DISTRIB_RELEASE,\n        target: release.DISTRIB_TARGET,\n        iperf3: has_binary(device, \"iperf3\"),\n        btest: has_binary(device, \"mikrotik_btest\")\n    }\n}\n\nfn tp_prepare(device, params) {\n    require_link_test(params, \"engine\");\n    let role = or_default(params.role, \"drive\");\n    if params.engine == \"btest\" && role == \"serve\" {\n        return #{ ready: false, installed: [], message: \"O OpenWrt não tem servidor btest: aqui o btest só dirige (cliente).\" };\n    }\n    let pkg_name = if params.engine == \"btest\" { \"mikrotik-btest\" } else { \"iperf3\" };\n    let binary = if params.engine == \"btest\" { \"mikrotik_btest\" } else { \"iperf3\" };\n    if has_binary(device, binary) {\n        return #{ ready: true, installed: [], message: \"O \" + binary + \" já está instalado.\" };\n    }\n    let failure = ();\n    try {\n        device.use_plugin(\"openwrt-packages\", \"install_package\", #{ name: pkg_name });\n    } catch (err) {\n        failure = error_text(err);\n    }\n    if failure != () {\n        return #{\n            ready: false,\n            installed: [],\n            message: \"Não deu para instalar o pacote \" + pkg_name + \" (o mikrotik-btest só existe nos repositórios a partir do OpenWrt 23.05; o roteador precisa de internet e de espaço na flash). \" + failure\n        };\n    }\n    if !has_binary(device, binary) {\n        return #{ ready: false, installed: [pkg_name], message: \"O pacote \" + pkg_name + \" foi instalado, mas o \" + binary + \" não apareceu no PATH.\" };\n    }\n    #{ ready: true, installed: [pkg_name], message: \"Pacote \" + pkg_name + \" instalado.\" }\n}\n\nfn tp_serve(device, params) {\n    require_link_test(params, \"engine\");\n    if params.engine != \"iperf3\" {\n        throw \"O OpenWrt só serve iperf3; o btest aqui só dirige.\";\n    }\n    iperf3_serve(device, params)\n}\n\nfn tp_stop(device, params) {\n    require_link_test(params, \"handle\");\n    iperf3_stop(device, parse_handle(params.handle))\n}\n\nfn tp_run(device, params) {\n    require_link_test(params, \"target\");\n    if or_default(params.engine, \"iperf3\") == \"btest\" {\n        btest_run(device, params)\n    } else {\n        iperf3_run(device, params)\n    }\n}\n",
-  "usage": "# OpenWrt – teste de enlace\n\nDá ao roteador OpenWrt os papéis do **teste de enlace** da topologia, por SSH:\n\n- **serve** iperf3 (o outro lado é um OpenWrt, um Linux ou o NetMonitor);\n- **dirige** iperf3, ou Bandwidth Test contra um MikroTik ou o servidor btest do\n  NetMonitor, pelo `mikrotik_btest` (pacote oficial `mikrotik-btest`). Esse\n  cliente só fala com servidor **sem autenticação** e no máximo **29 s** por\n  sentido.\n\nPrecisa de uma credencial SSH (usuário `root`, normalmente) e do plugin\n**Gerenciador de pacotes** ativo — é ele que instala o que falta.\n\n## Detectar OpenWrt\nLê `/etc/openwrt_release` e confere se o `iperf3` e o `mikrotik_btest` estão\ninstalados. Não altera nada.\n\n## Teste de enlace\n\nAs ações abaixo são chamadas pelo teste de enlace, que passa os parâmetros,\ngrava o que precisa ser desfeito antes de usar o servidor e desfaz em toda\nsaída. Pela aba do equipamento só faz sentido a medição.\n\n### Preparar teste de enlace\n**Pode alterar o roteador:** se faltar o programa do papel pedido, instala o\npacote pelo Gerenciador de pacotes (`opkg` até o 24.10, `apk` a partir do 25):\n`iperf3` para o iperf3, `mikrotik-btest` para dirigir o btest. O\n`mikrotik-btest` só existe nos repositórios a partir do OpenWrt 23.05; sem ele\n(ou sem internet, ou sem espaço na flash), a resposta é *não pronto* com o\nmotivo, e o plano do teste avisa. O pacote instalado **fica** no roteador.\n\n### Ligar servidor de teste de vazão\n**Altera o roteador enquanto o teste dura:** sobe `iperf3 -s -D` na porta\nescolhida pelo teste (5201–5299), com o PID em\n`/var/run/nm-iperf3-<porta>.pid`. Devolve a porta e um `handle` com PID e porta.\nPorta ocupada vira erro.\n\n### Desligar servidor de teste de vazão\nEncerra o servidor pelo PID do `handle` — só se aquele PID ainda for um\n`iperf3` (`/proc/<pid>/cmdline`) — e apaga o arquivo do PID. Rodar de novo não\nmuda nada.\n\n### Medir vazão até outro equipamento\n- **iperf3:** `iperf3 -c <destino> -p <porta> -t <s> -P <fluxos> --forceflush\n  -i 1 -f m` (`-b` divide o limite entre os fluxos). *Os dois sentidos* roda o\n  envio e depois o `-R` (recepção). Vale o resumo `receiver`; as\n  retransmissões vêm do `sender`. \"unable to connect\" e saída sem resumo viram\n  erro.\n- **btest:** `mikrotik_btest -t <s> -d <send|receive|both> <destino>:<porta>`\n  (porta 2000 por padrão; duração limitada a 29 s). O programa mede em Mibit/s\n  (divide por 1 048 576), e o resultado é convertido para bit/s; o andamento ao\n  vivo usa o número impresso. Servidor que exige senha responde \"Auth failed\".\n\n## Requisitos de rede\n- Quem testa contra este roteador precisa alcançar a porta do iperf3\n  (**TCP 5201–5299**): libere no firewall (zona de origem → *input*).\n- Para dirigir o btest, o servidor do outro lado precisa aceitar **TCP 2000**.\n\n## Cuidados\nMedir o enlace satura o enlace: rode em janela combinada e com duração curta.\n",
+  "script": "// OpenWrt (SSH) – papéis no teste de enlace (ADR 015).\n//\n// Serve iperf3 (`iperf3 -s` em segundo plano, encerrado pelo PID) e dirige\n// iperf3 ou btest — este pelo `mikrotik_btest`, o cliente do pacote oficial\n// `mikrotik-btest`, que só fala com servidor sem autenticação e recusa\n// `-t` ≥ 30. O `tp_check` só confere o que falta; o `tp_prepare` instala pelo\n// Gerenciador de pacotes (`openwrt-packages`, que já sabe opkg × apk) quando o\n// operador aceita a instalação no plano do teste — nunca no meio do teste.\n\nfn pid_dir() {\n    \"/var/run\"\n}\n\n// ---------------------------------------------------------------- utilitários\n\nfn or_default(value, fallback) {\n    if value == () { fallback } else { value }\n}\n\n// Ação de papel chamada sem os parâmetros do teste (pela aba, à mão): recusa\n// antes de mexer em qualquer coisa.\nfn require_link_test(params, key) {\n    if params[key] == () {\n        throw \"Esta ação faz parte do teste de enlace e recebe os parâmetros dele: rode o teste pela topologia.\";\n    }\n}\n\n// Mensagem de um erro pego por `catch` (texto do `throw` ou erro do sistema).\nfn error_text(err) {\n    if type_of(err) == \"map\" && err.message != () { err.message } else { err.to_string() }\n}\n\nfn has_binary(device, name) {\n    trimmed(device.ssh(\"command -v \" + name + \" >/dev/null 2>&1 && echo yes || echo no\").stdout) == \"yes\"\n}\n\n// Teto de banda em kbit/s (inteiro), ou `()` sem limite.\nfn limit_kbps(limit) {\n    if limit == () { return (); }\n    let mbps = if type_of(limit) == \"f64\" { limit } else { limit.to_float() };\n    let kbps = (mbps * 1000.0).round().to_int();\n    if kbps > 0 { kbps } else { () }\n}\n\nfn parse_handle(text) {\n    let handle = ();\n    try {\n        handle = json_parse(text);\n    } catch (err) {\n        handle = ();\n    }\n    if type_of(handle) != \"map\" {\n        throw \"O `handle` do teste de enlace não é o que o tp_serve devolveu.\";\n    }\n    handle\n}\n\nfn empty_report(engine) {\n    #{ engine: engine, txBps: (), rxBps: (), txBytes: 0, rxBytes: 0, retransmits: (), samples: [] }\n}\n\n// -------------------------------------------------------------------- iperf3\n\nfn iperf3_pidfile(port) {\n    pid_dir() + \"/nm-iperf3-\" + port + \".pid\"\n}\n\nfn is_iperf3(device, pid) {\n    device.ssh(\"cat /proc/\" + pid + \"/cmdline 2>/dev/null | tr '\\\\000' ' '\").stdout.contains(\"iperf3\")\n}\n\n// `iperf3 -s` em segundo plano, com o PID num arquivo para o `tp_stop`.\nfn iperf3_serve(device, params) {\n    let port = or_default(params.port, 5201);\n    let pidfile = iperf3_pidfile(port);\n    let r = device.ssh(\"iperf3 -s -D -p \" + port + \" -I \" + pidfile + \" >/dev/null 2>&1; sleep 1; cat \" + pidfile + \" 2>/dev/null\");\n    let pid = regex_capture(r.stdout, \"([0-9]+)\");\n    if pid == () || !is_iperf3(device, pid) {\n        throw \"O iperf3 não ficou de pé na porta \" + port + \" (porta ocupada?). \" + trimmed(r.stdout + \" \" + r.stderr);\n    }\n    #{ port: port, handle: json_encode(#{ engine: \"iperf3\", pid: parse_int(pid), port: port }) }\n}\n\n// Encerra o servidor pelo PID do `handle` — só se ainda for um iperf3.\nfn iperf3_stop(device, handle) {\n    let pid = handle.pid;\n    let port = handle.port;\n    if type_of(pid) != \"i64\" || pid < 2 || type_of(port) != \"i64\" || port < 1 || port > 65535 {\n        throw \"O `handle` não traz o PID e a porta do iperf3 que o tp_serve subiu.\";\n    }\n    if is_iperf3(device, pid) {\n        device.run(\"kill \" + pid);\n    }\n    device.run(\"rm -f \" + iperf3_pidfile(port));\n    #{ stopped: true }\n}\n\n// \"56.0\" + \"M\" (de MBytes) → bytes; o iperf3 conta bytes em potências de 1024.\nfn iperf3_bytes(value, prefix) {\n    let factor = if prefix == \"K\" { 1024.0 } else if prefix == \"M\" { 1048576.0 } else if prefix == \"G\" { 1073741824.0 } else if prefix == \"T\" { 1099511627776.0 } else { 1.0 };\n    (parse_float(value) * factor).round().to_int()\n}\n\n// \"94.0\" + \"M\" (de Mbits/sec) → bits por segundo (potências de 1000).\nfn iperf3_bps(value, prefix) {\n    let factor = if prefix == \"K\" { 1000.0 } else if prefix == \"M\" { 1000000.0 } else if prefix == \"G\" { 1000000000.0 } else if prefix == \"T\" { 1000000000000.0 } else { 1.0 };\n    parse_float(value) * factor\n}\n\n// O resumo final (`sender`/`receiver`). Vale o `receiver` (o que chegou);\n// as retransmissões vêm do `sender`.\nfn iperf3_summary(stdout, stderr, streams) {\n    let text = stdout + \"\\n\" + stderr;\n    let failure = regex_capture(text, \"iperf3: error - ([^\\\\n]+)\");\n    if failure != () {\n        throw \"O iperf3 falhou: \" + trimmed(failure);\n    }\n    let id = if streams > 1 { \"SUM\" } else { \"\\\\s*[0-9]+\" };\n    let pattern = \"^\\\\[\" + id + \"\\\\]\\\\s+[0-9.]+-[0-9.]+\\\\s+sec\\\\s+([0-9.]+)\\\\s+([KMGT]?)Bytes\\\\s+([0-9.]+)\\\\s+([KMGT]?)bits/sec(?:\\\\s+([0-9]+))?\\\\s+(sender|receiver)$\";\n    let sender = ();\n    let receiver = ();\n    for line in lines(text) {\n        let g = regex_groups(line, pattern);\n        if g == () { continue; }\n        let entry = #{\n            bytes: iperf3_bytes(g[0], g[1]),\n            bps: iperf3_bps(g[2], g[3]),\n            retransmits: if g[4] == () { () } else { parse_int(g[4]) }\n        };\n        if g[5] == \"sender\" { sender = entry; } else { receiver = entry; }\n    }\n    if sender == () && receiver == () {\n        throw \"O iperf3 terminou sem o resumo final: \" + trimmed(text);\n    }\n    let best = if receiver != () { receiver } else { sender };\n    #{ bps: best.bps, bytes: best.bytes, retransmits: if sender == () { () } else { sender.retransmits } }\n}\n\n// Um sentido do teste, com as linhas de 1 s viradas amostras ao vivo (o\n// resumo final, que termina em sender/receiver, fica de fora).\nfn iperf3_leg(device, command, duration, streams, flow) {\n    let id = if streams > 1 { \"\\\\[SUM\\\\]\" } else { \"\\\\[\\\\s*[0-9]+\\\\]\" };\n    let r = device.ssh_live(command, #{\n        timeout_ms: duration * 1000 + 20000,\n        progress: #{\n            pattern: \"^\" + id + \"\\\\s+[0-9.]+-[0-9.]+\\\\s+sec\\\\s+[0-9.]+\\\\s+[KMGT]?Bytes\\\\s+(?<value>[0-9.]+)\\\\s*(?<unit>[KMGT]?bits/sec)(?:\\\\s+[0-9]+(?:\\\\s+[0-9.]+\\\\s+[KMGT]?Bytes)?)?\\\\s*$\",\n            flow: flow\n        }\n    });\n    iperf3_summary(r.stdout, r.stderr, streams)\n}\n\nfn add_retransmits(total, more) {\n    if more == () { total } else if total == () { more } else { total + more }\n}\n\n// `send` mede este equipamento enviando; `receive`, recebendo (`-R`); `both`,\n// os dois em sequência.\nfn iperf3_run(device, params) {\n    let port = or_default(params.port, 5201);\n    let duration = or_default(params.durationS, 5);\n    let streams = or_default(params.streams, 1);\n    let direction = or_default(params.direction, \"both\");\n    let command = \"iperf3 -c \" + shell_quote(params.target) + \" -p \" + port + \" -t \" + duration + \" -P \" + streams;\n    let limit = limit_kbps(params.limitMbps);\n    if limit != () {\n        let per_stream = limit / streams;\n        if per_stream < 1 { per_stream = 1; }\n        command += \" -b \" + per_stream + \"K\";\n    }\n    command += \" --forceflush -i 1 -f m\";\n    let report = empty_report(\"iperf3\");\n    if direction != \"receive\" {\n        let leg = iperf3_leg(device, command, duration, streams, \"tx\");\n        report.txBps = leg.bps;\n        report.txBytes = leg.bytes;\n        report.retransmits = add_retransmits(report.retransmits, leg.retransmits);\n    }\n    if direction != \"send\" {\n        let leg = iperf3_leg(device, command + \" -R\", duration, streams, \"rx\");\n        report.rxBps = leg.bps;\n        report.rxBytes = leg.bytes;\n        report.retransmits = add_retransmits(report.retransmits, leg.retransmits);\n    }\n    report\n}\n\n// --------------------------------------------------------------------- btest\n\n// Teto do `mikrotik_btest` por sentido: ele recusa `-t` de 30 em diante.\nfn btest_max_duration() {\n    29\n}\n\n// \"Rx:   94.50 Mb/s\\tTx:   93.20 Mb/s\" — o `mikrotik_btest` divide por\n// 1048576 (Mibit/s), apesar do rótulo; a última linha é o resumo.\nfn btest_run(device, params) {\n    let duration = or_default(params.durationS, 5);\n    if duration > btest_max_duration() { duration = btest_max_duration(); }\n    let port = or_default(params.port, 2000);\n    let direction = or_default(params.direction, \"both\");\n    let command = \"mikrotik_btest -t \" + duration + \" -d \" + direction + \" \" + shell_quote(params.target + \":\" + port);\n    let r = device.ssh_live(command, #{\n        timeout_ms: duration * 1000 + 20000,\n        progress: #{ pattern: \"(?<flow>Rx|Tx):\\\\s*(?<value>[0-9.]+)\\\\s*(?<unit>Mb/s)\" }\n    });\n    let text = r.stdout + \"\\n\" + r.stderr;\n    if text.contains(\"Auth failed\") {\n        throw \"O servidor btest pediu autenticação, e o cliente do OpenWrt só fala com servidor sem autenticação (Auth failed).\";\n    }\n    if text.contains(\"failed to connect\") || text.contains(\"Invalid host\") {\n        throw \"O mikrotik_btest não conectou em \" + params.target + \":\" + port + \": \" + trimmed(text);\n    }\n    // Um quadro por segundo separado por \\r e o resumo no fim. O transporte\n    // tira o \\r, e os quadros chegam colados numa linha só: o resumo é o\n    // ÚLTIMO valor de cada sentido, onde quer que ele esteja.\n    let rxs = regex_captures(text, \"Rx:\\\\s*([0-9.]+)\\\\s*Mb/s\");\n    let txs = regex_captures(text, \"Tx:\\\\s*([0-9.]+)\\\\s*Mb/s\");\n    if rxs.len() == 0 && txs.len() == 0 {\n        throw \"O mikrotik_btest terminou sem resultado: \" + trimmed(text);\n    }\n    let rx = if rxs.len() > 0 { rxs[rxs.len() - 1] } else { () };\n    let tx = if txs.len() > 0 { txs[txs.len() - 1] } else { () };\n    let report = empty_report(\"btest\");\n    if direction != \"receive\" && tx != () { report.txBps = parse_float(tx) * 1048576.0; }\n    if direction != \"send\" && rx != () { report.rxBps = parse_float(rx) * 1048576.0; }\n    report\n}\n\n// -------------------------------------------------------------------- ações\n\nfn detect(device, params) {\n    let release = parse_kv(device.run(\"cat /etc/openwrt_release\"), \"=\");\n    #{\n        firmware: release.DISTRIB_RELEASE,\n        target: release.DISTRIB_TARGET,\n        iperf3: has_binary(device, \"iperf3\"),\n        btest: has_binary(device, \"mikrotik_btest\")\n    }\n}\n\n// O programa e o pacote do papel pedido; `()` quando o OpenWrt não faz o\n// papel (servir btest).\nfn tool_for(params) {\n    let role = or_default(params.role, \"drive\");\n    if params.engine == \"btest\" && role == \"serve\" { return (); }\n    if params.engine == \"btest\" {\n        #{ binary: \"mikrotik_btest\", pkg: \"mikrotik-btest\" }\n    } else {\n        #{ binary: \"iperf3\", pkg: \"iperf3\" }\n    }\n}\n\nfn no_btest_server() {\n    \"O OpenWrt não tem servidor btest: aqui o btest só dirige (cliente).\"\n}\n\n// Só confere: nada é instalado aqui.\nfn tp_check(device, params) {\n    require_link_test(params, \"engine\");\n    let tool = tool_for(params);\n    if tool == () {\n        return #{ ready: false, missing: [], canInstall: false, message: no_btest_server() };\n    }\n    if has_binary(device, tool.binary) {\n        return #{ ready: true, missing: [], canInstall: true, message: \"O \" + tool.binary + \" já está instalado.\" };\n    }\n    #{ ready: false, missing: [tool.pkg], canInstall: true, message: device.info.name + \" não tem o \" + tool.pkg }\n}\n\nfn tp_prepare(device, params) {\n    require_link_test(params, \"engine\");\n    let tool = tool_for(params);\n    if tool == () {\n        return #{ ready: false, installed: [], message: no_btest_server() };\n    }\n    let pkg_name = tool.pkg;\n    let binary = tool.binary;\n    if has_binary(device, binary) {\n        return #{ ready: true, installed: [], message: \"O \" + binary + \" já está instalado.\" };\n    }\n    let failure = ();\n    let output = \"\";\n    try {\n        output = device.use_plugin(\"openwrt-packages\", \"install_package\", #{ name: pkg_name });\n    } catch (err) {\n        failure = error_text(err);\n    }\n    if failure != () {\n        let hint = if pkg_name == \"mikrotik-btest\" { \" (ele só existe nos repositórios a partir do OpenWrt 23.05)\" } else { \"\" };\n        return #{\n            ready: false,\n            installed: [],\n            message: \"Não deu para instalar o \" + pkg_name + hint + \". \" + failure\n        };\n    }\n    if !has_binary(device, binary) {\n        return #{ ready: false, installed: [pkg_name], message: \"O pacote \" + pkg_name + \" foi instalado, mas o \" + binary + \" não apareceu no PATH.\" };\n    }\n    let done = #{ ready: true, installed: [pkg_name], message: \"Pacote \" + pkg_name + \" instalado.\" };\n    let warning = install_warning(output);\n    if warning != () { done.warning = warning; }\n    done\n}\n\n// O aviso que o openwrt-packages deixa no último parágrafo (\"Atenção: …\"),\n// sem o rótulo — instalou, mas o operador precisa saber de algo.\nfn install_warning(output) {\n    let text = \"\" + output;\n    let at = text.index_of(\"\\n\\nAtenção: \");\n    if at < 0 { return (); }\n    trimmed(text.sub_string(at + 11))\n}\n\nfn tp_serve(device, params) {\n    require_link_test(params, \"engine\");\n    if params.engine != \"iperf3\" {\n        throw \"O OpenWrt só serve iperf3; o btest aqui só dirige.\";\n    }\n    iperf3_serve(device, params)\n}\n\nfn tp_stop(device, params) {\n    require_link_test(params, \"handle\");\n    iperf3_stop(device, parse_handle(params.handle))\n}\n\nfn tp_run(device, params) {\n    require_link_test(params, \"target\");\n    if or_default(params.engine, \"iperf3\") == \"btest\" {\n        btest_run(device, params)\n    } else {\n        iperf3_run(device, params)\n    }\n}\n",
+  "usage": "# OpenWrt – teste de enlace\n\nDá ao roteador OpenWrt os papéis do **teste de enlace** da topologia, por SSH:\n\n- **serve** iperf3 (o outro lado é um OpenWrt, um Linux ou o NetMonitor);\n- **dirige** iperf3, ou Bandwidth Test contra um MikroTik ou o servidor btest do\n  NetMonitor, pelo `mikrotik_btest` (pacote oficial `mikrotik-btest`). Esse\n  cliente só fala com servidor **sem autenticação** e no máximo **29 s** por\n  sentido.\n\nPrecisa de uma credencial SSH (usuário `root`, normalmente) e do plugin\n**Gerenciador de pacotes** ativo — é ele que instala o que falta.\n\n## Detectar OpenWrt\nLê `/etc/openwrt_release` e confere se o `iperf3` e o `mikrotik_btest` estão\ninstalados. Não altera nada.\n\n## Teste de enlace\n\nAs ações abaixo são chamadas pelo teste de enlace, que passa os parâmetros,\ngrava o que precisa ser desfeito antes de usar o servidor e desfaz em toda\nsaída. Pela aba do equipamento só faz sentido a medição.\n\n### Conferir teste de enlace\nSó **lê**: `command -v iperf3` (ou `mikrotik_btest`). Faltando, responde\n*não pronto* com o pacote que falta, e o plano do teste mostra o passo\n**Instalar o iperf3 em …** — nada é instalado sem o aceite do operador.\n\n### Instalar o que o teste de enlace precisa\n**Altera o roteador:** roda quando o operador aceita a instalação no plano do\nteste. Se faltar o programa do papel pedido, instala o\npacote pelo Gerenciador de pacotes (`opkg` até o 24.10, `apk` a partir do 25):\n`iperf3` para o iperf3, `mikrotik-btest` para dirigir o btest. O\n`mikrotik-btest` só existe nos repositórios a partir do OpenWrt 23.05; sem ele\n(ou sem internet, ou sem espaço na flash), a resposta é *não pronto* com o\nmotivo, e o plano do teste avisa. O pacote instalado **fica** no roteador.\n\n### Ligar servidor de teste de vazão\n**Altera o roteador enquanto o teste dura:** sobe `iperf3 -s -D` na porta\nescolhida pelo teste (5201–5299), com o PID em\n`/var/run/nm-iperf3-<porta>.pid`. Devolve a porta e um `handle` com PID e porta.\nPorta ocupada vira erro.\n\n### Desligar servidor de teste de vazão\nEncerra o servidor pelo PID do `handle` — só se aquele PID ainda for um\n`iperf3` (`/proc/<pid>/cmdline`) — e apaga o arquivo do PID. Rodar de novo não\nmuda nada.\n\n### Medir vazão até outro equipamento\n- **iperf3:** `iperf3 -c <destino> -p <porta> -t <s> -P <fluxos> --forceflush\n  -i 1 -f m` (`-b` divide o limite entre os fluxos). *Os dois sentidos* roda o\n  envio e depois o `-R` (recepção). Vale o resumo `receiver`; as\n  retransmissões vêm do `sender`. \"unable to connect\" e saída sem resumo viram\n  erro.\n- **btest:** `mikrotik_btest -t <s> -d <send|receive|both> <destino>:<porta>`\n  (porta 2000 por padrão; duração limitada a 29 s). O programa mede em Mibit/s\n  (divide por 1 048 576), e o resultado é convertido para bit/s; o andamento ao\n  vivo usa o número impresso. Servidor que exige senha responde \"Auth failed\".\n\n## Requisitos de rede\n- Quem testa contra este roteador precisa alcançar a porta do iperf3\n  (**TCP 5201–5299**): libere no firewall (zona de origem → *input*).\n- Para dirigir o btest, o servidor do outro lado precisa aceitar **TCP 2000**.\n\n## Cuidados\nMedir o enlace satura o enlace: rode em janela combinada e com duração curta.\n",
   "compatibility": [],
   "tests": {
     "unit": [
@@ -357,6 +408,94 @@
           "iperf3": true,
           "btest": false
         }
+      },
+      {
+        "name": "conferir: iperf3 presente, pronto",
+        "action": "tp_check",
+        "params": {
+          "engine": "iperf3",
+          "role": "serve"
+        },
+        "fixtures": [
+          {
+            "ssh": "command -v iperf3 >/dev/null 2>&1 && echo yes || echo no",
+            "stdout": "yes\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expect": {
+          "ready": true,
+          "missing": [],
+          "canInstall": true
+        }
+      },
+      {
+        "name": "conferir: sem iperf3, diz o que falta e não instala",
+        "action": "tp_check",
+        "firmware": "25.12.5",
+        "params": {
+          "engine": "iperf3",
+          "role": "serve"
+        },
+        "fixtures": [
+          {
+            "ssh": "command -v iperf3 >/dev/null 2>&1 && echo yes || echo no",
+            "stdout": "no\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expect": {
+          "ready": false,
+          "missing": [
+            "iperf3"
+          ],
+          "canInstall": true
+        },
+        "expectContains": "não tem o iperf3"
+      },
+      {
+        "name": "conferir: sem mikrotik_btest para dirigir o btest",
+        "action": "tp_check",
+        "params": {
+          "engine": "btest",
+          "role": "drive"
+        },
+        "fixtures": [
+          {
+            "ssh": "command -v mikrotik_btest >/dev/null 2>&1 && echo yes || echo no",
+            "stdout": "no\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expect": {
+          "ready": false,
+          "missing": [
+            "mikrotik-btest"
+          ],
+          "canInstall": true
+        },
+        "expectContains": "não tem o mikrotik-btest"
+      },
+      {
+        "name": "conferir: o OpenWrt não serve btest (nada a instalar)",
+        "action": "tp_check",
+        "params": {
+          "engine": "btest",
+          "role": "serve"
+        },
+        "expect": {
+          "ready": false,
+          "missing": [],
+          "canInstall": false
+        }
+      },
+      {
+        "name": "conferir pela aba, sem os parâmetros do teste",
+        "action": "tp_check",
+        "expectError": "rode o teste pela topologia"
       },
       {
         "name": "iperf3 já instalado: nada a fazer",
@@ -522,7 +661,7 @@
           "ready": false,
           "installed": []
         },
-        "expectContains": "Unknown package 'mikrotik-btest'"
+        "expectContains": "O pacote mikrotik-btest não existe nos repositórios"
       },
       {
         "name": "OpenWrt não serve btest",
@@ -905,6 +1044,66 @@
           "retransmits": null,
           "samples": []
         }
+      },
+      {
+        "name": "instalou pelo espelho HTTP: pronto, com o aviso do NTP",
+        "action": "tp_prepare",
+        "firmware": "25.12.5",
+        "params": {
+          "engine": "iperf3",
+          "role": "drive"
+        },
+        "fixtures": [
+          {
+            "ssh": "command -v iperf3 >/dev/null 2>&1 && echo yes || echo no",
+            "stdout": "no\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "apk list --installed",
+            "stdout": "base-files-1666-r1 aarch64 {base-files} (GPL-2.0-only) [installed]\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "apk update",
+            "stdout": "",
+            "stderr": "wgetSSL verify error: unknown error\nERROR: wget: exited with error 5\n",
+            "exit": 1
+          },
+          {
+            "ssh": "apk add 'iperf3'",
+            "stdout": "",
+            "stderr": "wgetSSL verify error: unknown error\nERROR: wget: exited with error 5\n",
+            "exit": 3
+          },
+          {
+            "ssh": "cat /etc/apk/repositories.d/*.list /etc/apk/repositories 2>/dev/null | grep '^https://' | sed 's#^https://#http://#' > /tmp/nm-repos-http.list && apk --repositories-file /tmp/nm-repos-http.list add 'iperf3'; status=$?; rm -f /tmp/nm-repos-http.list; exit $status",
+            "stdout": "OK: 29 MiB in 202 packages\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "apk list --installed",
+            "stdout": "base-files-1666-r1 aarch64 {base-files} (GPL-2.0-only) [installed]\niperf3-3.20-r1 aarch64 {iperf} (BSD-3-Clause) [installed]\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "date",
+            "stdout": "Sun Sep  6 00:46:51 -03 2026\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "command -v iperf3 >/dev/null 2>&1 && echo yes || echo no",
+            "stdout": "yes\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expectContains": "Recomendo acertar o NTP"
       }
     ],
     "functional": [
@@ -912,6 +1111,18 @@
         "action": "detect",
         "expectKeys": [
           "firmware"
+        ]
+      },
+      {
+        "action": "tp_check",
+        "params": {
+          "engine": "iperf3",
+          "role": "serve"
+        },
+        "expectKeys": [
+          "ready",
+          "canInstall",
+          "message"
         ]
       }
     ]

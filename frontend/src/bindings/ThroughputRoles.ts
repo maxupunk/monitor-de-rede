@@ -10,8 +10,8 @@ import type { ThroughputServe } from "./ThroughputServe";
  */
 export type ThroughputRoles = { serve?: Array<ThroughputServe>, drive?: Array<ThroughputDrive>, actions: ThroughputActions, 
 /**
- * `true`: o `prepare` só **confere** o que falta e não instala nada (o
- * Linux, onde o NetMonitor não instala pacote em servidor). O plano não
- * promete instalação nem conta o tempo dela.
+ * `true`: o `prepare` só **confere** o que falta e não instala nada.
+ * Legado de antes do `check` (que é o jeito certo de conferir): o plano
+ * não avisa instalação nem conta o tempo dela.
  */
 prepareChecksOnly: boolean, };

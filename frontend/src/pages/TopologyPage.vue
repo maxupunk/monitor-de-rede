@@ -112,6 +112,7 @@
           @all-sites="prefs.siteId = null"
         />
         <TopologyLinkTestLayer ref="linkTestLayer" :fit-nodes="fitMap" :narrow="smAndDown" />
+        <TopologyQuickPingLayer />
       </div>
 
       <TopologyInspector
@@ -215,6 +216,7 @@ import TopologyDialogs from '@/components/topology/TopologyDialogs.vue'
 import TopologyPluginRunner from '@/components/topology/TopologyPluginRunner.vue'
 import TopologyFeedback from '@/components/topology/TopologyFeedback.vue'
 import TopologyLinkTestLayer from '@/components/topology/linkTests/TopologyLinkTestLayer.vue'
+import TopologyQuickPingLayer from '@/components/topology/quickPing/TopologyQuickPingLayer.vue'
 import TopologyTips from '@/components/topology/TopologyTips.vue'
 import TopologyEdgeQuickTest from '@/components/topology/TopologyEdgeQuickTest.vue'
 

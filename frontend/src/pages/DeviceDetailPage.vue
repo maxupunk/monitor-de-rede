@@ -116,6 +116,18 @@
             </v-btn>
 
             <v-btn
+              v-if="detailStore.device?.ipAddress && !can.isSystem && auth.canWrite"
+              prepend-icon="mdi-pulse"
+              aria-label="Diagnóstico rápido (ping)"
+              @click="quickPingOpen = true"
+            >
+              <span class="hidden-md-and-down">Ping rápido</span>
+              <v-tooltip activator="parent" location="bottom"
+                >Latência, perda e fila em ~4 s (estimativa de baixa precisão)</v-tooltip
+              >
+            </v-btn>
+
+            <v-btn
               v-if="detailStore.device?.ipAddress"
               prepend-icon="mdi-stethoscope"
               aria-label="Diagnóstico"
@@ -796,6 +808,13 @@
       :device-name="detailStore.device?.name"
     />
 
+    <QuickPingDialog
+      v-model="quickPingOpen"
+      :device-id="Number(deviceId)"
+      :device-name="detailStore.device?.name"
+      :ip-address="detailStore.device?.ipAddress"
+    />
+
     <!-- Modal de Playbook de Diagnóstico -->
     <DiagnosticPlaybookDialog
       v-model="playbookOpen"
@@ -843,6 +862,8 @@ import VpnFirewallHintsDialog from '@/components/VpnFirewallHintsDialog.vue'
 import PortScanDialog from '@/components/PortScanDialog.vue'
 import TracerouteDialog from '@/components/TracerouteDialog.vue'
 import DiagnosticPlaybookDialog from '@/components/DiagnosticPlaybookDialog.vue'
+import QuickPingDialog from '@/components/diagnostics/QuickPingDialog.vue'
+import { useAuthStore } from '@/stores/auth'
 import AiAskButton from '@/components/ai/AiAskButton.vue'
 import MonitorFormDialog from '@/components/MonitorFormDialog.vue'
 import DeviceDialog from '@/components/DeviceDialog.vue'
@@ -927,6 +948,8 @@ const scanModalOpen = ref(false)
 const savingMonitors = ref(false)
 const portScanOpen = ref(false)
 const tracerouteOpen = ref(false)
+const quickPingOpen = ref(false)
+const auth = useAuthStore()
 const playbookOpen = ref(false)
 const editDeviceDialog = ref(false)
 

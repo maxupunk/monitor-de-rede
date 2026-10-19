@@ -81,6 +81,32 @@ describe('plugins store', () => {
     expect(current.firmware).toBe('23.05.2')
   })
 
+  it('esperar o fim: chega pelo SSE, com uma leitura só (sem consultar de novo)', async () => {
+    const get = vi.spyOn(apiService, 'get').mockResolvedValue(run({ id: 21 }))
+    const store = usePluginsStore()
+    let resolved: PluginRunView | null = null
+    const waiting = store.waitForRun(21).then((finished) => {
+      resolved = finished
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(resolved).toBeNull()
+    store.applyRunFinished({ run: run({ id: 21, status: 'succeeded', pluginName: null }) })
+    await waiting
+    expect(resolved).toMatchObject({ id: 21, status: 'succeeded', pluginName: 'OpenWrt – pacotes' })
+    expect(get).toHaveBeenCalledTimes(1)
+    expect(get).toHaveBeenCalledWith('/plugin-runs/21')
+
+    // O fim que chegou antes da espera já resolve, sem ir à API.
+    store.applyRunFinished({ run: run({ id: 22, status: 'failed', error: 'sem internet' }) })
+    await expect(store.waitForRun(22)).resolves.toMatchObject({ status: 'failed' })
+    expect(get).toHaveBeenCalledTimes(1)
+
+    // Já terminada quando a leitura chega: resolve com ela.
+    get.mockResolvedValueOnce(run({ id: 23, status: 'succeeded' }))
+    await expect(store.waitForRun(23)).resolves.toMatchObject({ id: 23, status: 'succeeded' })
+  })
+
   it('pedido de aprovação chega pelo SSE e sai da fila ao ser resolvido', () => {
     const store = usePluginsStore()
     const pedido = {

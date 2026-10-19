@@ -69,6 +69,14 @@ const PROGRESS_LIMIT = 120
 /** De quantas execuções as amostras ficam em memória. */
 const PROGRESS_RUNS_LIMIT = 20
 
+/** Fins recentes guardados para quem começa a esperar depois do SSE. */
+const RECENT_FINISHED_LIMIT = 20
+
+/** A execução terminou (sucesso, falha ou cancelada)? */
+export function isFinishedRun(run: Pick<PluginRunView, 'status'>): boolean {
+  return run.status !== 'running' && run.status !== 'queued'
+}
+
 /** Ações de plugin no nó da topologia, por equipamento. */
 export type TopologyActionsByDevice = Record<number, TopologyNodeAction[]>
 
@@ -87,6 +95,10 @@ export const usePluginsStore = defineStore('plugins', () => {
   const looseRuns = ref<Record<number, PluginRunView>>({})
   /** Últimas amostras de andamento de cada execução (`plugin:run_progress`). */
   const runProgress = ref<Record<number, ProgressSample[]>>({})
+  /** Quem espera o fim de cada execução (`waitForRun`), resolvido pelo SSE. */
+  const finishWaiters = new Map<number, Array<(run: PluginRunView) => void>>()
+  /** Fins recentes: o SSE pode chegar antes de quem iniciou começar a esperar. */
+  const recentFinished = new Map<number, PluginRunView>()
   const error = ref<string | null>(null)
 
   const nextApproval = computed(() => pendingApprovals.value[0] ?? null)
@@ -342,6 +354,34 @@ export const usePluginsStore = defineStore('plugins', () => {
     return run
   }
 
+  /**
+   * Espera a execução terminar: o fim chega pelo SSE (`plugin:run_finished`),
+   * sem consultar a API de novo. Uma leitura única (`fetchRun`) cobre o fim
+   * que chegou antes de a espera começar.
+   */
+  async function waitForRun(runId: number): Promise<PluginRunView> {
+    const known = recentFinished.get(runId)
+    if (known) return known
+    const finished = new Promise<PluginRunView>((resolve) => {
+      finishWaiters.set(runId, [...(finishWaiters.get(runId) ?? []), resolve])
+    })
+    const current = await fetchRun(runId)
+    if (isFinishedRun(current)) settleRun(current)
+    return finished
+  }
+
+  /** Entrega o fim a quem espera e o guarda (com teto) para quem chegar depois. */
+  function settleRun(run: PluginRunView) {
+    const waiters = finishWaiters.get(run.id) ?? []
+    finishWaiters.delete(run.id)
+    for (const resolve of waiters) resolve(run)
+    recentFinished.set(run.id, run)
+    for (const id of recentFinished.keys()) {
+      if (recentFinished.size <= RECENT_FINISHED_LIMIT) break
+      recentFinished.delete(id)
+    }
+  }
+
   async function runAction(
     deviceId: number,
     pluginId: number,
@@ -460,7 +500,9 @@ export const usePluginsStore = defineStore('plugins', () => {
     const previous =
       view?.runs.find((item) => item.id === finished.id) ?? looseRuns.value[finished.id]
     // O nome do plugin só vem no início; o fim pode chegar sem ele.
-    upsertRun({ ...finished, pluginName: finished.pluginName ?? previous?.pluginName ?? null })
+    const run = { ...finished, pluginName: finished.pluginName ?? previous?.pluginName ?? null }
+    upsertRun(run)
+    settleRun(run)
     // O `detect` pode ter lido o firmware: a compatibilidade depende dele.
     if (view && finished.status === 'succeeded') {
       const firmware = finished.output
@@ -537,6 +579,7 @@ export const usePluginsStore = defineStore('plugins', () => {
     saveDeviceSettings,
     runById,
     fetchRun,
+    waitForRun,
     validatePlugin,
     fetchTopologyActions,
     cancelRun,

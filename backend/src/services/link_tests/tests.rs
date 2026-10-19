@@ -4,6 +4,7 @@
 //! btest do "MikroTik" discando no servidor armado da central.
 
 use std::{
+    collections::VecDeque,
     net::SocketAddr,
     sync::{
         atomic::{AtomicI64, Ordering},
@@ -26,8 +27,8 @@ use super::{
     events, guard, janitor,
     model::{
         as_db, LinkTest, LinkTestFix, LinkTestKind, LinkTestLegKind, LinkTestOrigin, LinkTestQuery,
-        LinkTestRequest, LinkTestScheduleInput, LinkTestSide, LinkTestSpecInput, LinkTestStageKey,
-        LinkTestStatus, LinkTestStepStatus,
+        LinkTestRequest, LinkTestRole, LinkTestScheduleInput, LinkTestSide, LinkTestSpecInput,
+        LinkTestStageKey, LinkTestStatus, LinkTestStepStatus,
     },
     plan, repository,
     repository::Requester,
@@ -69,9 +70,24 @@ struct FakePlugins {
     serve_port: Option<u16>,
     /// `tp_run` só volta quando o teste é cancelado.
     block_run: bool,
+    /// `tp_prepare` responde "não ficou pronto" com este motivo.
+    not_ready: Option<&'static str>,
+    /// Respostas do `tp_check`, uma por chamada, na ordem; acabou a fila,
+    /// "pronto".
+    checks: Mutex<VecDeque<Value>>,
+}
+
+/// Resposta do `check` com o pacote faltando (o OpenWrt: instala).
+fn missing(device: &str, package: &str) -> Value {
+    json!({ "ready": false, "missing": [package], "canInstall": true,
+            "message": format!("{device} não tem o {package}") })
 }
 
 impl FakePlugins {
+    fn answer_checks(&self, answers: impl IntoIterator<Item = Value>) {
+        self.checks.lock().unwrap().extend(answers);
+    }
+
     fn calls(&self, action: &str) -> Vec<(i64, Value)> {
         self.calls
             .lock()
@@ -132,9 +148,21 @@ impl PluginInvoker for FakePlugins {
         };
         let cancel = request.cancel.clone().unwrap_or_default();
         match request.action.as_str() {
+            "tp_check" => {
+                let answer = self.checks.lock().unwrap().pop_front();
+                done(
+                    RunStatus::Succeeded,
+                    Some(answer.unwrap_or_else(|| {
+                        json!({ "ready": true, "missing": [], "canInstall": true, "message": "" })
+                    })),
+                )
+            }
             "tp_prepare" => done(
                 RunStatus::Succeeded,
-                Some(json!({ "ready": true, "installed": ["iperf3"] })),
+                Some(match self.not_ready {
+                    Some(reason) => json!({ "ready": false, "installed": [], "message": reason }),
+                    None => json!({ "ready": true, "installed": ["iperf3"] }),
+                }),
             ),
             "tp_serve" => done(
                 RunStatus::Succeeded,
@@ -289,6 +317,16 @@ fn manifest(slug: &str, serve: &[&str], drive: Value) -> Value {
     })
 }
 
+/// O mesmo manifesto, com a conferência (`check`) declarada.
+fn with_check(mut manifest: Value) -> Value {
+    manifest["actions"].as_array_mut().unwrap().push(
+        json!({ "id": "tp_check", "title": "Conferir", "effect": "read",
+        "params": { "type": "object", "properties": { "engine": text(), "role": text() } } }),
+    );
+    manifest["throughput"]["actions"]["check"] = json!("tp_check");
+    manifest
+}
+
 async fn plugin(db: &DatabaseConnection, manifest: Value) -> plugins::Model {
     let package: PluginPackage = serde_json::from_value(json!({
         "manifest": manifest, "script": "", "usage": "## Teste de enlace"
@@ -421,7 +459,16 @@ async fn plano_de_enlace_entre_dois_openwrt() {
     assert_eq!((leg.a.device_id, leg.b.device_id), (Some(a.id), Some(b.id)));
     assert_eq!(leg.edge_id, Some(link_id));
     assert!(leg.runnable);
-    assert_eq!(view.will_install.len(), 2, "o prepare pode instalar iperf3");
+    // Plugin sem `check`: o `prepare` dele pode instalar — o plano avisa.
+    assert_eq!(
+        view.warnings
+            .iter()
+            .filter(|warning| warning.contains("não confere antes do teste"))
+            .count(),
+        2,
+        "{:?}",
+        view.warnings
+    );
     assert!(view.estimated_seconds > 0);
     assert_eq!(built.device_ids().len(), 2);
 
@@ -892,7 +939,8 @@ fn ssh(secret: &str) -> CredentialInput {
 #[tokio::test]
 #[serial(link_tests)]
 async fn plano_oferece_instalar_o_plugin_e_cadastrar_o_acesso() {
-    let env = env_with(db().await, Arc::default(), None);
+    let plugins = Arc::new(FakePlugins::default());
+    let env = env_with(db().await, Arc::clone(&plugins), None);
     let ap = openwrt_sem_plugin(&env.db, "AP-terraço").await;
     let pedido = LinkTestRequest {
         target_device_id: Some(ap.id),
@@ -948,10 +996,61 @@ async fn plano_oferece_instalar_o_plugin_e_cadastrar_o_acesso() {
     ));
     assert!(built.view.blocking.is_empty(), "{:?}", built.view.blocking);
 
-    // Com o acesso, a perna roda.
+    // Sem acesso, nada foi conferido: o passo do acesso vem antes.
+    assert!(plugins.calls("tp_check").is_empty());
+
+    // Com o acesso, o plano confere o equipamento: falta o iperf3 — é o
+    // terceiro passo, e só ele (plugin → acesso → pacote).
     credentials::upsert(&env.db, ap.id, ssh("segredo"))
         .await
         .unwrap();
+    plugins.answer_checks([missing("AP-terraço", "iperf3")]);
+    let built = plan::build(&env, &pedido).await.unwrap();
+    let checks = plugins.calls("tp_check");
+    assert_eq!(checks.len(), 1, "{checks:?}");
+    assert_eq!(checks[0].1, json!({ "engine": "iperf3", "role": "serve" }));
+    assert!(built.view.blocking.is_empty(), "{:?}", built.view.blocking);
+    assert!(!built.view.legs[0].runnable, "falta aceitar a instalação");
+    let [LinkTestFix::InstallPackage {
+        device_id,
+        plugin_slug,
+        action,
+        engine,
+        role,
+        packages,
+        message,
+        ..
+    }] = built.view.fixes.as_slice()
+    else {
+        panic!("instalar o pacote: {:?}", built.view.fixes)
+    };
+    assert_eq!(*device_id, ap.id);
+    assert_eq!(plugin_slug, "openwrt-link-test");
+    assert_eq!(
+        action, "tp_prepare",
+        "quem instala é o `prepare`, com aceite"
+    );
+    assert_eq!(
+        (*engine, *role),
+        (ThroughputEngine::Iperf3, LinkTestRole::Serve)
+    );
+    assert_eq!(packages, &["iperf3".to_owned()]);
+    assert_eq!(message, "AP-terraço não tem o iperf3");
+    // O `start` refaz o plano (e a conferência): continua faltando.
+    plugins.answer_checks([missing("AP-terraço", "iperf3")]);
+    let erro = service::start(Arc::clone(&env), &built.request, user())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&erro, AppError::BusinessRule(text) if text.contains("AP-terraço não tem o iperf3")),
+        "{erro:?}"
+    );
+    assert!(
+        plugins.calls("tp_prepare").is_empty(),
+        "o plano nunca instala"
+    );
+
+    // Instalado (a conferência agora diz "pronto"), a perna roda.
     let built = plan::build(&env, &pedido).await.unwrap();
     assert!(built.view.fixes.is_empty(), "{:?}", built.view.fixes);
     assert!(
@@ -1043,6 +1142,9 @@ async fn executa_enlace_entre_equipamentos_e_traduz_os_sentidos() {
     assert!(runs[0].1.get("limitMbps").is_none(), "sem limite, omitido");
     let stop = plugins.calls("tp_stop");
     assert_eq!(stop[0].1["handle"], "pid:4242");
+    // Plugin sem `check` (o contrato de antes): a primeira etapa é o `prepare`.
+    assert!(plugins.calls("tp_check").is_empty());
+    assert_eq!(plugins.calls("tp_prepare").len(), 2);
 
     // Limpeza feita: nada pendente; amostras guardadas no sentido do enlace.
     assert!(repository::pending_cleanups(&env.db)
@@ -1476,4 +1578,143 @@ async fn lista_filtra_por_dispositivo_enlace_e_estado() {
     })
     .await;
     assert_eq!(falhos.total, 0);
+}
+
+#[tokio::test]
+#[serial(link_tests)]
+async fn preparar_que_falha_mostra_o_motivo_do_plugin() {
+    let plugins = Arc::new(FakePlugins {
+        not_ready: Some("o roteador não alcança o repositório de pacotes"),
+        ..FakePlugins::default()
+    });
+    let env = env_with(db().await, Arc::clone(&plugins), None);
+    let (_, _, link_id) = dois_openwrt(&env.db).await;
+    let started = service::start(
+        Arc::clone(&env),
+        &LinkTestRequest {
+            link_id: Some(link_id),
+            ..request(LinkTestKind::Link)
+        },
+        user(),
+    )
+    .await
+    .unwrap();
+    let test = finished(&env, started.id).await;
+    assert_eq!(test.status, LinkTestStatus::Failed, "{test:#?}");
+    let failed = test.legs[0]
+        .stages
+        .iter()
+        .find(|stage| stage.status == LinkTestStepStatus::Failed)
+        .expect("uma etapa falhou");
+    let message = failed.message.clone().unwrap_or_default();
+    // Antes só dizia "não ficou pronto": o motivo do plugin tem de chegar à tela.
+    assert!(message.contains("não ficou pronto"), "{message}");
+    assert!(
+        message.contains("o roteador não alcança o repositório"),
+        "{message}"
+    );
+}
+
+/// Dois OpenWrt cujo plugin confere antes (`check`).
+async fn dois_openwrt_que_conferem(db: &DatabaseConnection) -> i64 {
+    let p = plugin(
+        db,
+        with_check(manifest(
+            "lt-openwrt-check",
+            &["iperf3"],
+            json!([{ "engine": "iperf3", "auth": false }]),
+        )),
+    )
+    .await;
+    let a = device(db, "AP-assistencia", "10.0.0.1", false).await;
+    let b = device(db, "AP-terraço", "10.0.0.2", false).await;
+    install(db, &a, &p).await;
+    install(db, &b, &p).await;
+    link(db, a.id, b.id).await
+}
+
+#[tokio::test]
+#[serial(link_tests)]
+async fn conferir_que_falha_para_a_perna_e_nunca_instala() {
+    let plugins = Arc::new(FakePlugins::default());
+    // O plano confere as duas pontas (prontas); entre o plano e a etapa, o
+    // iperf3 sumiu de A.
+    plugins.answer_checks([
+        json!({ "ready": true }),
+        json!({ "ready": true }),
+        missing("AP-assistencia", "iperf3"),
+    ]);
+    let env = env_with(db().await, Arc::clone(&plugins), None);
+    let link_id = dois_openwrt_que_conferem(&env.db).await;
+    let started = service::start(
+        Arc::clone(&env),
+        &LinkTestRequest {
+            link_id: Some(link_id),
+            ..request(LinkTestKind::Link)
+        },
+        user(),
+    )
+    .await
+    .unwrap();
+    let test = finished(&env, started.id).await;
+    assert_eq!(test.status, LinkTestStatus::Failed, "{test:#?}");
+    let stage = test.legs[0]
+        .stages
+        .iter()
+        .find(|stage| stage.key == LinkTestStageKey::PrepareA)
+        .unwrap();
+    assert_eq!(stage.status, LinkTestStepStatus::Failed);
+    assert_eq!(stage.label, "Conferir A");
+    assert_eq!(
+        stage.message.as_deref(),
+        Some("AP-assistencia não tem o iperf3 — aceite a instalação no plano do teste")
+    );
+    assert!(stage.run_id.is_some(), "o transcript da conferência");
+    assert_eq!(plugins.calls("tp_check").len(), 3);
+    assert!(
+        plugins.calls("tp_prepare").is_empty(),
+        "o teste nunca instala sozinho"
+    );
+    assert!(plugins.calls("tp_serve").is_empty(), "a perna parou");
+}
+
+#[tokio::test]
+#[serial(link_tests)]
+async fn conferido_e_pronto_o_teste_mede_sem_preparar() {
+    let plugins = Arc::new(FakePlugins::default());
+    let env = env_with(db().await, Arc::clone(&plugins), None);
+    let link_id = dois_openwrt_que_conferem(&env.db).await;
+    let built = plan::build(
+        &env,
+        &LinkTestRequest {
+            link_id: Some(link_id),
+            ..request(LinkTestKind::Link)
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        !built
+            .view
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("não confere antes do teste")),
+        "quem confere não ganha o aviso de instalação: {:?}",
+        built.view.warnings
+    );
+    let started = service::start(Arc::clone(&env), &built.request, user())
+        .await
+        .unwrap();
+    let test = finished(&env, started.id).await;
+    assert_eq!(test.status, LinkTestStatus::Succeeded, "{test:#?}");
+    let checks = plugins.calls("tp_check");
+    // Duas no plano mostrado, duas no plano refeito pelo `start`, duas nas
+    // etapas.
+    assert_eq!(checks.len(), 6, "{checks:?}");
+    assert!(plugins.calls("tp_prepare").is_empty());
+    let stage = &test.legs[0].stages[0];
+    assert_eq!(
+        (stage.status, stage.message.as_deref()),
+        (LinkTestStepStatus::Succeeded, Some("pronto"))
+    );
 }

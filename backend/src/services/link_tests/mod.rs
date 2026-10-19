@@ -13,6 +13,7 @@
 //! | [`plan`] | o plano antes de rodar |
 //! | [`transparent`] | equipamento sem IP: o teste passa por ele, não para nele |
 //! | [`fixes`] | os passos que o plano oferece (instalar o plugin, cadastrar o acesso) |
+//! | [`readiness`] | a conferência (`check`) do que cada ponta precisa, sem instalar nada |
 //! | [`guard`] | um teste por dispositivo, no máximo dois no sistema |
 //! | [`runner`] | a máquina de estados (pernas e etapas, cancelamento, limpeza) |
 //! | [`outcome`] | desfecho de perna e teste, gargalo |
@@ -33,6 +34,7 @@ pub mod model;
 pub mod negotiate;
 pub mod outcome;
 pub mod plan;
+pub mod readiness;
 pub mod repository;
 pub mod runner;
 pub mod schedules;

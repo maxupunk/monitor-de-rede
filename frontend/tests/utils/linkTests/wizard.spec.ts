@@ -12,8 +12,11 @@ import {
   fixLabel,
   legNeedsSteps,
   legOpenIssues,
+  installPackageConfirmText,
+  packageInstallResult,
+  packagesText,
 } from '@/utils/linkTests/wizard'
-import { accessFix, endpoint, installFix, plan } from './fixtures'
+import { accessFix, endpoint, installFix, packageFix, plan } from './fixtures'
 
 describe('assistente do teste de enlace', () => {
   it('rascunho a partir do pedido do mapa (ou vazio)', () => {
@@ -118,6 +121,50 @@ describe('assistente do teste de enlace', () => {
     waiting.legs[0].issues.push('AP-terraço não tem IP cadastrado')
     expect(legOpenIssues(waiting.legs[0])).toEqual(['AP-terraço não tem IP cadastrado'])
     expect(legNeedsSteps(waiting.legs[0])).toBe(false)
+  })
+
+  it('pacote que falta: rótulo, identidade e o que a confirmação explica', () => {
+    const fix = packageFix()
+    expect(fixLabel(fix)).toBe('Instalar o iperf3 em AP-terraço')
+    expect(fixKey(fix)).toBe('package:7:iperf3')
+    expect(packagesText({ packages: ['iperf3', 'mikrotik-btest', 'x'], engine: 'iperf3' })).toBe(
+      'iperf3, mikrotik-btest e x'
+    )
+    expect(packagesText({ packages: [], engine: 'btest' })).toBe('btest')
+    const text = installPackageConfirmText(fix)
+    expect(text).toContain('Instala o pacote iperf3 em AP-terraço')
+    expect(text).toContain('gerenciador de pacotes')
+    expect(text).toContain('não altera a configuração')
+
+    const waiting = plan({ fixes: [fix] })
+    waiting.legs[0].runnable = false
+    waiting.legs[0].issues = [fix.message]
+    waiting.legs[0].fixes = [fix]
+    expect(legNeedsSteps(waiting.legs[0])).toBe(true)
+  })
+
+  it('desfecho da instalação: pronto (com aviso), falha da execução ou "não pronto" com o motivo', () => {
+    expect(
+      packageInstallResult({ status: 'succeeded', output: { ready: true }, error: null })
+    ).toEqual({ ok: true, message: null, warning: null })
+    expect(
+      packageInstallResult({
+        status: 'succeeded',
+        output: { ready: true, warning: ' Recomendo acertar o NTP do roteador. ' },
+        error: null,
+      })
+    ).toEqual({ ok: true, message: null, warning: 'Recomendo acertar o NTP do roteador.' })
+    expect(
+      packageInstallResult({
+        status: 'succeeded',
+        output: { ready: false, message: ' Sem internet no roteador ' },
+        error: null,
+      })
+    ).toEqual({ ok: false, message: 'Sem internet no roteador', warning: null })
+    expect(
+      packageInstallResult({ status: 'failed', output: null, error: 'Unknown package' })
+    ).toEqual({ ok: false, message: 'Unknown package', warning: null })
+    expect(packageInstallResult({ status: 'cancelled', output: null, error: null }).ok).toBe(false)
   })
 })
 

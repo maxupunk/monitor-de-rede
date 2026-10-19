@@ -4,9 +4,11 @@
  * pedido enviado à API, o que impede rodar, os passos que faltam e a dica
  * de cada problema do plano.
  */
+import type { PluginRunView } from '@/bindings/PluginRunView'
 import type {
   LinkTestEndpoint,
   LinkTestFix,
+  LinkTestInstallPackageFix,
   LinkTestKind,
   LinkTestPlan,
   LinkTestPlanLeg,
@@ -111,16 +113,81 @@ export function runBlockers(plan: LinkTestPlan | null, canWrite: boolean): strin
 
 /** Identidade de um passo, estável entre um plano e o seguinte. */
 export function fixKey(fix: LinkTestFix): string {
-  return fix.kind === 'install_plugin'
-    ? `install:${fix.deviceId}:${fix.pluginId}`
-    : `access:${fix.deviceId}:${fix.transport}`
+  switch (fix.kind) {
+    case 'install_plugin':
+      return `install:${fix.deviceId}:${fix.pluginId}`
+    case 'add_credential':
+      return `access:${fix.deviceId}:${fix.transport}`
+    case 'install_package':
+      return `package:${fix.deviceId}:${packagesText(fix)}`
+  }
+}
+
+/** O que o passo instala: "iperf3", "iperf3 e mikrotik-btest" (ou o motor). */
+export function packagesText(fix: Pick<LinkTestInstallPackageFix, 'packages' | 'engine'>): string {
+  const names = fix.packages.length > 0 ? fix.packages : [fix.engine]
+  return names.length > 1
+    ? `${names.slice(0, -1).join(', ')} e ${names[names.length - 1]}`
+    : names[0]
 }
 
 /** O passo, como item da lista "Antes de testar, falta". */
 export function fixLabel(fix: LinkTestFix): string {
-  return fix.kind === 'install_plugin'
-    ? `Instalar o plugin «${fix.pluginName}» em ${fix.deviceName}`
-    : `Cadastrar o acesso ${transportLabel(fix.transport)} de ${fix.deviceName}`
+  switch (fix.kind) {
+    case 'install_plugin':
+      return `Instalar o plugin «${fix.pluginName}» em ${fix.deviceName}`
+    case 'add_credential':
+      return `Cadastrar o acesso ${transportLabel(fix.transport)} de ${fix.deviceName}`
+    case 'install_package':
+      return `Instalar o ${packagesText(fix)} em ${fix.deviceName}`
+  }
+}
+
+/** A pergunta antes de instalar: o que acontece no equipamento. */
+export function installPackageConfirmText(fix: LinkTestInstallPackageFix): string {
+  const what = packagesText(fix)
+  const plural = fix.packages.length > 1
+  return (
+    `Instala ${plural ? 'os pacotes' : 'o pacote'} ${what} em ${fix.deviceName} pelo ` +
+    'gerenciador de pacotes do equipamento (apk/opkg, no OpenWrt). Grava cerca de 1 MB na ' +
+    `flash e não altera a configuração. ${plural ? 'Os pacotes ficam instalados' : 'O pacote fica instalado'} ` +
+    'para os próximos testes.'
+  )
+}
+
+export interface PackageInstallResult {
+  ok: boolean
+  /** Por que não instalou (sem internet, pacote fora do repositório…). */
+  message: string | null
+  /** Instalou, mas o operador precisa saber de algo (`warning` do plugin). */
+  warning: string | null
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * O desfecho da instalação (`prepare` do plugin): terminou bem e o
+ * equipamento ficou pronto. O motivo da falha vem do plugin quando ele diz.
+ */
+export function packageInstallResult(
+  run: Pick<PluginRunView, 'status' | 'output' | 'error'>
+): PackageInstallResult {
+  if (run.status !== 'succeeded') {
+    return { ok: false, message: run.error || 'A instalação terminou com falha.', warning: null }
+  }
+  const output = isRecord(run.output) ? run.output : {}
+  if (output.ready === false) {
+    const reason = typeof output.message === 'string' ? output.message.trim() : ''
+    return {
+      ok: false,
+      message: reason || 'O equipamento não ficou pronto para o teste.',
+      warning: null,
+    }
+  }
+  const warning = typeof output.warning === 'string' ? output.warning.trim() : ''
+  return { ok: true, message: null, warning: warning || null }
 }
 
 /** Os problemas da perna que nenhum passo resolve ali mesmo. */
@@ -128,7 +195,7 @@ export function legOpenIssues(leg: Pick<LinkTestPlanLeg, 'issues' | 'fixes'>): s
   return leg.issues.filter((issue) => !leg.fixes.some((fix) => fix.message === issue))
 }
 
-/** A perna só espera um passo (instalar, cadastrar o acesso) — não é erro. */
+/** A perna só espera um passo (instalar, cadastrar o acesso, aceitar um pacote) — não é erro. */
 export function legNeedsSteps(leg: LinkTestPlanLeg): boolean {
   return !leg.runnable && leg.fixes.length > 0 && legOpenIssues(leg).length === 0
 }

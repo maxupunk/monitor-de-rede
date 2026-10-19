@@ -39,7 +39,15 @@ async fn session_with_role(request: &mut loco_rs::TestServer, ctx: &AppContext, 
 
 const SCRIPT: &str = r#"
 fn detect(device, params) { #{ firmware: "1.0" } }
-fn tp_prepare(device, params) { #{ ready: true, installed: [] } }
+fn tp_prepare(device, params) { #{ ready: true, installed: ["iperf3"] } }
+fn tp_check(device, params) {
+    let name = device.info.name;
+    if name.contains("sem iperf3") {
+        #{ ready: false, missing: ["iperf3"], canInstall: true, message: name + " não tem o iperf3" }
+    } else {
+        #{ ready: true, missing: [], canInstall: true, message: "" }
+    }
+}
 fn tp_serve(device, params) { #{ port: params.port, handle: "pid:4242" } }
 fn tp_stop(device, params) { #{ stopped: true } }
 fn tp_run(device, params) {
@@ -61,6 +69,8 @@ fn manifest() -> Value {
             { "id": "detect", "title": "Detectar", "effect": "read", "output": "kv" },
             { "id": "tp_prepare", "title": "Preparar", "effect": "write",
               "params": { "type": "object", "properties": { "engine": text, "role": text } } },
+            { "id": "tp_check", "title": "Conferir", "effect": "read",
+              "params": { "type": "object", "properties": { "engine": text, "role": text } } },
             { "id": "tp_serve", "title": "Servir", "effect": "write",
               "params": { "type": "object", "properties": {
                   "engine": text, "port": number, "peer": text, "user": text,
@@ -76,7 +86,8 @@ fn manifest() -> Value {
         "throughput": {
             "serve": [{ "engine": "iperf3" }],
             "drive": [{ "engine": "iperf3", "auth": false }],
-            "actions": { "prepare": "tp_prepare", "serve": "tp_serve", "stop": "tp_stop", "run": "tp_run" }
+            "actions": { "prepare": "tp_prepare", "check": "tp_check", "serve": "tp_serve",
+                         "stop": "tp_stop", "run": "tp_run" }
         }
     })
 }
@@ -404,6 +415,114 @@ async fn plano_traz_os_passos_que_faltam_e_eles_se_resolvem_pela_api() {
         );
         assert_eq!(plano["fixes"], json!([]), "{plano}");
         assert_eq!(plano["legs"][0]["runnable"], true, "{plano}");
+    })
+    .await;
+}
+
+/// Espera a execução do plugin terminar (ela roda em segundo plano).
+async fn run_finished(request: &loco_rs::TestServer, id: i64) -> Value {
+    for _ in 0..200 {
+        let run = json_of(&request.get(&format!("/api/plugin-runs/{id}")).await.text());
+        if run["status"] != "running" && run["status"] != "queued" {
+            return run;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("a execução {id} não terminou em 10 s");
+}
+
+#[tokio::test]
+#[serial]
+async fn pacote_que_falta_vira_passo_aceito_pelo_administrador() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        session_with_role(&mut request, &ctx, Role::Admin).await;
+        let (_, b, link_id) = cenario(&ctx).await;
+        let mut sem = devices::Entity::find_by_id(b)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap()
+            .into_active_model();
+        sem.name = Set("Roteador B sem iperf3".into());
+        sem.update(&ctx.db).await.unwrap();
+
+        // O plano confere (pelo runtime de verdade) e oferece o passo.
+        let plano = json_of(
+            &request
+                .post("/api/link-tests/plan")
+                .json(&pedido(link_id))
+                .await
+                .text(),
+        );
+        assert_eq!(plano["blocking"], json!([]), "{plano}");
+        assert_eq!(plano["legs"][0]["runnable"], false, "{plano}");
+        let fix = &plano["fixes"][0];
+        assert_eq!(fix["kind"], "install_package", "{plano}");
+        assert_eq!(fix["deviceId"], b);
+        assert_eq!(fix["action"], "tp_prepare");
+        assert_eq!(fix["engine"], "iperf3");
+        assert_eq!(fix["role"], "serve");
+        assert_eq!(fix["packages"], json!(["iperf3"]));
+        assert_eq!(fix["message"], "Roteador B sem iperf3 não tem o iperf3");
+
+        // Rodar sem aceitar a instalação não passa.
+        let mut confirmado = pedido(link_id);
+        confirmado["confirm"] = json!(true);
+        let recusado = request.post("/api/link-tests").json(&confirmado).await;
+        recusado.assert_status(StatusCode::BAD_REQUEST);
+        assert!(
+            recusado.text().contains("não tem o iperf3"),
+            "{}",
+            recusado.text()
+        );
+
+        // "Instalar": a ação de sempre, com a confirmação explícita da escrita.
+        let plugin_id = fix["pluginId"].as_i64().unwrap();
+        let rota = format!("/api/devices/{b}/plugins/{plugin_id}/actions/tp_prepare");
+        let params = json!({ "engine": fix["engine"], "role": fix["role"] });
+        request
+            .post(&rota)
+            .json(&json!({ "params": params, "confirmWrite": false }))
+            .await
+            .assert_status(StatusCode::BAD_REQUEST);
+        let iniciado = request
+            .post(&rota)
+            .json(&json!({ "params": params, "confirmWrite": true }))
+            .await;
+        iniciado.assert_status(StatusCode::ACCEPTED);
+        let run_id = json_of(&iniciado.text())["runId"].as_i64().unwrap();
+        let run = run_finished(&request, run_id).await;
+        assert_eq!(run["status"], "succeeded", "{run}");
+        assert_eq!(run["output"]["installed"], json!(["iperf3"]));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn operador_nao_instala_pacote() {
+    request_with_config::<App, _, _>(RequestConfig::default(), |mut request, ctx| async move {
+        session_with_role(&mut request, &ctx, Role::Operator).await;
+        let (a, _, _) = cenario(&ctx).await;
+        let plugin_id = plugins::Entity::find()
+            .all(&ctx.db)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|plugin| plugin.slug == "lt-teste")
+            .unwrap()
+            .id;
+        // Instalar é escrita de plugin: só o administrador (a tela mostra a
+        // quem pedir).
+        request
+            .post(&format!(
+                "/api/devices/{a}/plugins/{plugin_id}/actions/tp_prepare"
+            ))
+            .json(
+                &json!({ "params": { "engine": "iperf3", "role": "serve" }, "confirmWrite": true }),
+            )
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
     })
     .await;
 }

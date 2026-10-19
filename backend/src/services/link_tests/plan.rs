@@ -1,10 +1,13 @@
 //! O plano antes de rodar (ADR 015 §5): as pernas, o motor de cada uma, o que
-//! será instalado, o que falta e quanto tempo leva.
+//! falta (com o passo que resolve) e quanto tempo leva. O que cada ponta
+//! precisa instalar sai da conferência do plugin (`check`, ver
+//! [`readiness`]): instalar é um passo que o operador aceita, nunca uma
+//! surpresa no meio do teste.
 //!
 //! O mesmo plano é refeito no `POST /api/link-tests`: o que roda é sempre o
 //! estado do momento da confirmação, nunca um plano antigo guardado na tela.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap};
 
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
@@ -13,11 +16,11 @@ use super::{
     env::LinkTestEnv,
     guard,
     model::{
-        LinkTestDirection, LinkTestEndpointKind, LinkTestFix, LinkTestInstall, LinkTestKind,
-        LinkTestLegKind, LinkTestPlan, LinkTestPlanLeg, LinkTestRequest, LinkTestSide,
-        LinkTestSpec,
+        LinkTestDirection, LinkTestEndpointKind, LinkTestFix, LinkTestKind, LinkTestLegKind,
+        LinkTestPlan, LinkTestPlanLeg, LinkTestRequest, LinkTestRole, LinkTestSide, LinkTestSpec,
     },
     negotiate::{negotiate, Capabilities, Negotiation, Party},
+    readiness::{self, CheckOutcome, CheckTarget},
     transparent::{self, Hop},
 };
 use crate::{
@@ -35,9 +38,9 @@ use crate::{
 
 /// Folga fixa de uma perna (conexões, relatórios), em segundos.
 const LEG_OVERHEAD_S: u32 = 4;
-/// Folga de um `prepare` (pode instalar pacote).
+/// Folga de um `prepare` legado (sem `check`: pode instalar pacote).
 const PREPARE_S: u32 = 20;
-/// Folga de um `prepare` que só confere (`prepareChecksOnly`).
+/// Folga de uma conferência (`check`, ou `prepare` que só confere).
 const CHECK_S: u32 = 2;
 /// Folga de `serve` + `stop` num equipamento.
 const SERVE_STOP_S: u32 = 8;
@@ -493,12 +496,14 @@ fn estimated_seconds(leg: &PlannedLeg, spec: &LinkTestSpec) -> u32 {
     let prepare_s: u32 = [&leg.a, &leg.b]
         .into_iter()
         .filter_map(|endpoint| endpoint.plugin())
-        .filter(|plugin| plugin.roles.actions.prepare.is_some())
         .map(|plugin| {
-            if plugin.roles.prepare_checks_only {
+            let actions = &plugin.roles.actions;
+            if actions.check.is_some() || plugin.roles.prepare_checks_only {
                 CHECK_S
-            } else {
+            } else if actions.prepare.is_some() {
                 PREPARE_S
+            } else {
+                0
             }
         })
         .sum();
@@ -622,38 +627,158 @@ fn evaluate(env: &LinkTestEnv, seq: u32, raw: RawLeg, spec: &LinkTestSpec) -> Pl
     }
 }
 
-fn will_install(legs: &[PlannedLeg]) -> Vec<LinkTestInstall> {
-    let mut by_device: BTreeMap<i64, (String, BTreeSet<String>)> = BTreeMap::new();
+/// Plugin sem `check` cujo `prepare` instala (o contrato de antes): o teste
+/// ainda roda o `prepare` na primeira etapa — o plano avisa, para não haver
+/// instalação sem aviso.
+fn legacy_install_warnings(legs: &[PlannedLeg]) -> Vec<String> {
+    let mut warnings = Vec::new();
     for leg in legs.iter().filter(|leg| leg.view.runnable) {
         let Some(n) = &leg.negotiation else { continue };
-        for side in [LinkTestSide::A, LinkTestSide::B] {
-            let endpoint = leg.endpoint(side);
-            let (Some(device_id), Some(plugin)) = (endpoint.device_id(), endpoint.plugin()) else {
+        for endpoint in [&leg.a, &leg.b] {
+            let Some(plugin) = endpoint.plugin() else {
                 continue;
             };
-            // Só confere (Linux): não há o que prometer instalar.
-            if plugin.roles.actions.prepare.is_none() || plugin.roles.prepare_checks_only {
+            let actions = &plugin.roles.actions;
+            if actions.check.is_some()
+                || actions.prepare.is_none()
+                || plugin.roles.prepare_checks_only
+            {
                 continue;
             }
-            let packages = endpoint::packages_for(n.engine, side == n.server);
-            if packages.is_empty() {
-                continue;
+            let text = format!(
+                "{}: o plugin «{}» não confere antes do teste — o preparo dele pode instalar o \
+                 que faltar para o {}",
+                endpoint.view.name,
+                plugin.name,
+                n.engine.as_str()
+            );
+            if !warnings.contains(&text) {
+                warnings.push(text);
             }
-            by_device
-                .entry(device_id)
-                .or_insert_with(|| (endpoint.view.name.clone(), BTreeSet::new()))
-                .1
-                .extend(packages);
         }
     }
-    by_device
+    warnings
+}
+
+/// O que conferir em cada lado da perna: o `check` do plugin, para o papel
+/// que a negociação deu ao lado. Ponta com problema de acesso (ou sem IP)
+/// fica de fora: o passo que já existe vem antes — plugin, acesso, pacote.
+fn leg_targets(leg: &PlannedLeg) -> Vec<CheckTarget> {
+    let (Some(engine), Some(server)) = (leg.view.engine, leg.view.server_side) else {
+        return Vec::new();
+    };
+    [LinkTestSide::A, LinkTestSide::B]
         .into_iter()
-        .map(|(device_id, (device_name, packages))| LinkTestInstall {
-            device_id,
-            device_name,
-            packages: packages.into_iter().collect(),
+        .filter_map(|side| {
+            let endpoint = leg.endpoint(side);
+            if !endpoint.issues.is_empty() {
+                return None;
+            }
+            let (device_id, plugin) = (endpoint.device_id()?, endpoint.plugin()?);
+            Some(CheckTarget {
+                device_id,
+                device_name: endpoint.view.name.clone(),
+                plugin_id: plugin.id,
+                plugin_slug: plugin.slug.clone(),
+                action: plugin.roles.actions.check.clone()?,
+                install_action: plugin.roles.actions.prepare.clone(),
+                engine,
+                role: LinkTestRole::of(side == server),
+            })
         })
         .collect()
+}
+
+/// O mesmo pacote no mesmo equipamento é um passo só, ainda que dois papéis
+/// (ou duas pernas) peçam.
+fn same_install(a: &LinkTestFix, b: &LinkTestFix) -> bool {
+    match (a, b) {
+        (
+            LinkTestFix::InstallPackage {
+                device_id: da,
+                packages: pa,
+                ..
+            },
+            LinkTestFix::InstallPackage {
+                device_id: db,
+                packages: pb,
+                ..
+            },
+        ) => da == db && pa == pb,
+        _ => false,
+    }
+}
+
+/// Aplica o resultado das conferências às pernas: o que falta e tem
+/// instalação vira o passo `install_package`; o que falta sem instalação
+/// (o Linux) é motivo por extenso; o que não deu para conferir é aviso — a
+/// primeira etapa da perna confere de novo.
+fn apply_checks(
+    legs: &mut [PlannedLeg],
+    results: &[(CheckTarget, CheckOutcome)],
+    warnings: &mut Vec<String>,
+) {
+    for (target, outcome) in results {
+        if let CheckOutcome::Unknown(error) = outcome {
+            let text = format!(
+                "Não deu para conferir {} antes do teste ({error}): a primeira etapa confere de \
+                 novo",
+                target.device_name
+            );
+            if !warnings.contains(&text) {
+                warnings.push(text);
+            }
+        }
+    }
+    let mut known: Vec<LinkTestFix> = Vec::new();
+    for leg in legs.iter_mut() {
+        for target in leg_targets(leg) {
+            let Some(CheckOutcome::NotReady(readiness)) = results
+                .iter()
+                .find(|(checked, _)| *checked == target)
+                .map(|(_, outcome)| outcome)
+            else {
+                continue;
+            };
+            let Some(fix) = target.install_fix(readiness) else {
+                let reason = readiness.reason(&target.device_name, target.engine);
+                if !leg.view.issues.contains(&reason) {
+                    leg.view.issues.push(reason);
+                }
+                continue;
+            };
+            let fix = match known.iter().find(|other| same_install(other, &fix)) {
+                Some(other) => other.clone(),
+                None => {
+                    known.push(fix.clone());
+                    fix
+                }
+            };
+            if !leg.view.fixes.contains(&fix) {
+                leg.view.issues.push(fix.message().to_owned());
+                leg.view.fixes.push(fix);
+            }
+        }
+        leg.view.runnable = leg.negotiation.is_some() && leg.view.issues.is_empty();
+    }
+}
+
+/// Confere as pontas das pernas (em paralelo, sem repetir equipamento, motor
+/// e papel) e aplica o resultado.
+async fn check_legs(env: &LinkTestEnv, legs: &mut [PlannedLeg], warnings: &mut Vec<String>) {
+    let mut targets: Vec<CheckTarget> = Vec::new();
+    for target in legs.iter().flat_map(leg_targets) {
+        if !targets.contains(&target) {
+            targets.push(target);
+        }
+    }
+    if targets.is_empty() {
+        return;
+    }
+    let outcomes =
+        readiness::check_all(env.plugins.as_ref(), &targets, readiness::CHECK_TIMEOUT).await;
+    let results: Vec<_> = targets.into_iter().zip(outcomes).collect();
+    apply_checks(legs, &results, warnings);
 }
 
 fn describe(leg: &PlannedLeg) -> String {
@@ -704,12 +829,14 @@ pub async fn build(env: &LinkTestEnv, request: &LinkTestRequest) -> AppResult<Bu
     };
     let mut warnings = draft.warnings;
     let mut blocking = draft.blocking;
-    let legs: Vec<PlannedLeg> = draft
+    let mut legs: Vec<PlannedLeg> = draft
         .legs
         .into_iter()
         .zip(1u32..)
         .map(|(raw, seq)| evaluate(env, seq, raw, &spec))
         .collect();
+    check_legs(env, &mut legs, &mut warnings).await;
+    warnings.extend(legacy_install_warnings(&legs));
 
     for leg in &legs {
         if let Some(n) = &leg.negotiation {
@@ -759,7 +886,6 @@ pub async fn build(env: &LinkTestEnv, request: &LinkTestRequest) -> AppResult<Bu
             estimated_seconds: legs.iter().map(|leg| estimated_seconds(leg, &spec)).sum(),
             warnings: Vec::new(),
             blocking: Vec::new(),
-            will_install: will_install(&legs),
             fixes: plan_fixes(&legs),
         },
         legs,
@@ -810,7 +936,8 @@ mod tests {
             },
             role: Role::Device {
                 device: Box::new(device),
-                plugin: Some(endpoint::DevicePlugin {
+                plugin: Some(Box::new(endpoint::DevicePlugin {
+                    id: 100 + id,
                     slug: "p".into(),
                     name: "P".into(),
                     roles: ThroughputRoles {
@@ -822,7 +949,7 @@ mod tests {
                         },
                         prepare_checks_only: false,
                     },
-                }),
+                })),
             },
             caps,
             issues: Vec::new(),
@@ -962,35 +1089,156 @@ mod tests {
         );
     }
 
+    /// Ponta cujo plugin declara a conferência (`check`).
+    fn with_check(mut endpoint: Endpoint) -> Endpoint {
+        if let Role::Device {
+            plugin: Some(plugin),
+            ..
+        } = &mut endpoint.role
+        {
+            plugin.roles.actions.check = Some("tp_check".to_owned());
+        }
+        endpoint
+    }
+
     #[test]
-    fn lista_o_que_sera_instalado() {
+    fn conferencia_conta_como_conferir_no_tempo() {
+        let spec = LinkTestSpec::default();
+        let conferida = leg(
+            with_check(device_endpoint(1, iperf3(), true)),
+            with_check(device_endpoint(2, iperf3(), true)),
+            negotiation(ThroughputEngine::Iperf3, LinkTestSide::B),
+        );
+        assert_eq!(
+            estimated_seconds(&conferida, &spec),
+            LEG_OVERHEAD_S + 2 * CHECK_S + SERVE_STOP_S + 2 * (5 + MEASURE_OVERHEAD_S)
+        );
+    }
+
+    #[test]
+    fn plugin_sem_check_que_instala_ganha_aviso() {
         let legs = vec![leg(
+            device_endpoint(1, iperf3(), true),
+            with_check(device_endpoint(2, iperf3(), true)),
+            negotiation(ThroughputEngine::Iperf3, LinkTestSide::B),
+        )];
+        let warnings = legacy_install_warnings(&legs);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].starts_with("D1: o plugin «P» não confere"),
+            "{warnings:?}"
+        );
+
+        // Sem `prepare`, ou com `prepare` que só confere: nada a avisar.
+        let legs = vec![leg(
+            device_endpoint(3, iperf3(), false),
+            checks_only(device_endpoint(4, iperf3(), true)),
+            negotiation(ThroughputEngine::Iperf3, LinkTestSide::B),
+        )];
+        assert!(legacy_install_warnings(&legs).is_empty());
+    }
+
+    #[test]
+    fn so_confere_quem_tem_check_e_acesso() {
+        let mut sem_acesso = with_check(device_endpoint(2, iperf3(), true));
+        sem_acesso.issues.push("D2 está sem acesso SSH".into());
+        let planned = leg(
+            with_check(device_endpoint(1, iperf3(), true)),
+            sem_acesso,
+            negotiation(ThroughputEngine::Iperf3, LinkTestSide::B),
+        );
+        let targets = leg_targets(&planned);
+        assert_eq!(targets.len(), 1, "o acesso vem antes da conferência");
+        assert_eq!(targets[0].device_id, 1);
+        assert_eq!(targets[0].role, LinkTestRole::Drive);
+        assert_eq!(targets[0].plugin_id, 101);
+        assert_eq!(targets[0].install_action.as_deref(), Some("tp_prepare"));
+
+        // Plugin sem `check` não é conferido no plano.
+        let legado = leg(
             device_endpoint(1, iperf3(), true),
             device_endpoint(2, iperf3(), true),
             negotiation(ThroughputEngine::Iperf3, LinkTestSide::B),
-        )];
-        let install = will_install(&legs);
-        assert_eq!(install.len(), 2);
-        assert_eq!(install[0].device_name, "D1");
-        assert_eq!(install[0].packages, ["iperf3"]);
+        );
+        assert!(leg_targets(&legado).is_empty());
+    }
 
-        let legs = vec![leg(
-            device_endpoint(4, iperf3(), true),
-            device_endpoint(5, iperf3(), false),
-            negotiation(ThroughputEngine::Btest, LinkTestSide::B),
-        )];
-        let install = will_install(&legs);
-        assert_eq!(install.len(), 1, "só quem declara prepare");
-        assert_eq!(install[0].packages, ["mikrotik-btest"], "o cliente btest");
+    fn falta(missing: &[&str], can_install: bool, message: &str) -> CheckOutcome {
+        CheckOutcome::NotReady(readiness::Readiness {
+            ready: false,
+            missing: missing.iter().map(|name| (*name).to_owned()).collect(),
+            can_install,
+            message: message.to_owned(),
+        })
+    }
 
-        // Linux: o `prepare` só confere — o plano não promete instalar nada.
-        let legs = vec![leg(
-            checks_only(device_endpoint(6, iperf3(), true)),
-            device_endpoint(7, iperf3(), true),
+    #[test]
+    fn o_que_falta_vira_passo_de_instalar_ou_motivo() {
+        let mut legs = vec![
+            leg(
+                with_check(device_endpoint(1, iperf3(), true)),
+                with_check(device_endpoint(2, iperf3(), true)),
+                negotiation(ThroughputEngine::Iperf3, LinkTestSide::B),
+            ),
+            // O mesmo D2, agora dirigindo: o mesmo pacote é um passo só.
+            leg(
+                with_check(device_endpoint(2, iperf3(), true)),
+                with_check(device_endpoint(3, iperf3(), true)),
+                negotiation(ThroughputEngine::Iperf3, LinkTestSide::B),
+            ),
+        ];
+        let targets: Vec<CheckTarget> = legs.iter().flat_map(leg_targets).collect();
+        let results: Vec<(CheckTarget, CheckOutcome)> = targets
+            .into_iter()
+            .map(|target| {
+                let outcome = match (target.device_id, target.role) {
+                    (1, _) => CheckOutcome::Ready,
+                    (2, _) => falta(&["iperf3"], true, "D2 não tem o iperf3"),
+                    _ => falta(&["iperf3"], false, "Instale o iperf3 no servidor"),
+                };
+                (target, outcome)
+            })
+            .collect();
+        let mut warnings = Vec::new();
+        apply_checks(&mut legs, &results, &mut warnings);
+        assert!(warnings.is_empty(), "{warnings:?}");
+
+        let first = &legs[0].view;
+        assert!(!first.runnable, "falta um passo");
+        assert_eq!(first.issues, ["D2 não tem o iperf3"]);
+        assert!(matches!(
+            first.fixes.as_slice(),
+            [LinkTestFix::InstallPackage { device_id: 2, role: LinkTestRole::Serve, packages, .. }]
+                if packages == &["iperf3".to_owned()]
+        ));
+        assert!(open_issues(first).is_empty(), "o passo resolve o problema");
+
+        let second = &legs[1].view;
+        assert_eq!(second.fixes, first.fixes, "mesmo pacote, mesmo passo");
+        assert_eq!(
+            open_issues(second),
+            ["Instale o iperf3 no servidor"],
+            "sem instalação, o motivo fica por extenso"
+        );
+        let fixes = plan_fixes(&legs);
+        assert_eq!(fixes.len(), 1, "{fixes:?}");
+    }
+
+    #[test]
+    fn conferencia_sem_resposta_e_aviso_e_nao_bloqueia() {
+        let mut legs = vec![leg(
+            with_check(device_endpoint(1, iperf3(), true)),
+            with_check(device_endpoint(2, iperf3(), true)),
             negotiation(ThroughputEngine::Iperf3, LinkTestSide::B),
         )];
-        let install = will_install(&legs);
-        assert_eq!(install.len(), 1, "{install:?}");
-        assert_eq!(install[0].device_name, "D7");
+        let results: Vec<_> = leg_targets(&legs[0])
+            .into_iter()
+            .map(|target| (target, CheckOutcome::Unknown("sem resposta em 10 s".into())))
+            .collect();
+        let mut warnings = Vec::new();
+        apply_checks(&mut legs, &results, &mut warnings);
+        assert!(legs[0].view.runnable);
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
+        assert!(warnings[0].starts_with("Não deu para conferir D1 antes do teste (sem resposta"));
     }
 }

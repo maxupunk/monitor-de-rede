@@ -843,8 +843,32 @@ pub async fn install<C: ConnectionTrait>(
     } else {
         model
     };
+    enable_dependencies(db, &model).await?;
     record_install(db, device.id, model.id, user_id).await?;
     Ok(model)
+}
+
+/// Liga os plugins de que este depende (`uses`). O `device.use_plugin` só
+/// enxerga dependência **ativa**: instalar o "teste de enlace" do OpenWrt sem
+/// ligar o "pacotes" deixava o preparo falhando na hora de instalar o iperf3.
+/// Dependência em quarentena não é ligada à força — a revisão continua
+/// obrigatória, e o erro do `use_plugin` explica o que falta.
+async fn enable_dependencies<C: ConnectionTrait>(db: &C, model: &plugins::Model) -> AppResult<()> {
+    let package = package_of(model)?;
+    for slug in &package.manifest.uses {
+        let dependency = plugins::Entity::find()
+            .filter(plugins::Column::Slug.eq(slug.clone()))
+            .filter(plugins::Column::DeviceId.is_null())
+            .order_by_desc(plugins::Column::Id)
+            .one(db)
+            .await?;
+        if let Some(dependency) = dependency {
+            if dependency.status == status::DISABLED {
+                set_enabled(db, dependency.id, true).await?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Tira a aba do plugin do equipamento. O histórico de execuções fica.
@@ -1133,6 +1157,34 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(instalado.status, status::ACTIVE);
+    }
+
+    #[tokio::test]
+    async fn instalar_liga_as_dependencias_do_plugin() {
+        // Achado num OpenWrt 25.12 real: "Instalar agora" ligava só o teste de
+        // enlace; o `use_plugin("openwrt-packages", …)` do preparo falhava
+        // porque o "pacotes" (a dependência) continuava desligado.
+        let db = db().await;
+        ensure_builtins(&db).await.unwrap();
+        let device = openwrt(&db, "25.12.5").await;
+        let all = list(&db).await.unwrap();
+        let by_slug = |slug: &str| all.iter().find(|p| p.slug == slug).unwrap().clone();
+        let pacotes = by_slug("openwrt-packages");
+        set_enabled(&db, pacotes.id, false).await.unwrap();
+        let teste = by_slug("openwrt-link-test");
+
+        install(&db, &device, teste.id, None).await.unwrap();
+
+        let pacotes = find(&db, pacotes.id).await.unwrap();
+        assert_eq!(
+            pacotes.status,
+            status::ACTIVE,
+            "a dependência tem de ficar ativa"
+        );
+        let library = super::super::runs::load_library(&db, &["openwrt-packages".to_owned()])
+            .await
+            .unwrap();
+        assert_eq!(library.len(), 1, "o use_plugin passa a enxergar o pacotes");
     }
 
     #[tokio::test]

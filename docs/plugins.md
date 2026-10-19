@@ -257,7 +257,11 @@ O manifesto diz onde o plugin aparece (`surfaces`):
   interrompe a chamada em andamento.
 - **Papéis no teste de enlace** (`throughput`): o que o equipamento serve e
   dirige (`iperf3`, `btest`) e as ações `prepare` (opcional), `serve`, `stop`
-  (escrita) e `run` (leitura), com os parâmetros fixos do ADR 015 §3 — a
+  (escrita), `check` (opcional) e `run` (leitura), com os parâmetros fixos do
+  ADR 015 §3. O `check` confere, sem alterar nada, se o programa do papel
+  existe (`{ ready, missing, canInstall, message }`); o plano o roda e, faltando
+  algo instalável, oferece o passo **Instalar** — o `prepare` só roda com o
+  aceite do operador, nunca no meio do teste — a
   validação do manifesto recusa parâmetro faltando, a mais, de outro tipo ou
   senha sem `secret: true`. Detalhes na skill de autoria. A ação `run` não
   precisa de teste funcional (ela exige um servidor do outro lado; o próprio
@@ -271,9 +275,10 @@ O manifesto diz onde o plugin aparece (`surfaces`):
     conexão, porta 2000). Também lê estado do sistema e interfaces.
   - `openwrt-link-test` — serve `iperf3` (`iperf3 -s -D`, encerrado pelo PID)
     e dirige `iperf3` ou `btest` sem autenticação (`mikrotik_btest`, até 29 s);
-    `tp_prepare` instala `iperf3`/`mikrotik-btest` pelo `openwrt-packages`.
-  - `linux-link-test` — serve e dirige `iperf3`; `tp_prepare` só confere se o
-    `iperf3` existe (não instala pacote em servidor).
+    `tp_check` confere o `iperf3`/`mikrotik_btest` e `tp_prepare` instala
+    `iperf3`/`mikrotik-btest` pelo `openwrt-packages` quando o operador aceita.
+  - `linux-link-test` — serve e dirige `iperf3`; `tp_check` só confere se o
+    `iperf3` existe (`canInstall: false`: não instala pacote em servidor).
 - **Execução por outro serviço**: o orquestrador chama uma ação sem HTTP por
   `plugins::invoke` (`prepare` → `run_id`, `finish` → desfecho, ou
   `execute`), com origem `link_test`, amostras num canal e cancelamento por

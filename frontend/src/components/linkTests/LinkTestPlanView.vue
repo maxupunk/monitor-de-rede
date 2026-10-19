@@ -76,21 +76,6 @@
       </ul>
     </v-alert>
 
-    <v-alert
-      v-if="plan.willInstall.length > 0"
-      type="info"
-      variant="tonal"
-      icon="mdi-package-down"
-      class="mb-3"
-      title="Vai instalar"
-    >
-      <ul class="issues">
-        <li v-for="item in plan.willInstall" :key="item.deviceId">
-          <strong>{{ item.packages.join(', ') }}</strong> em {{ item.deviceName }}
-        </li>
-      </ul>
-    </v-alert>
-
     <div class="text-title-small font-weight-bold mb-2">Ordem das medições</div>
     <ol class="plan-legs">
       <li
@@ -177,8 +162,9 @@
 
 <script setup lang="ts">
 /**
- * O plano do backend, legível: o que falta fazer (com o botão de cada passo),
- * tempo, avisos, bloqueios e pernas.
+ * O plano do backend, legível: o que falta fazer (com o botão de cada passo —
+ * inclusive aceitar a instalação de um pacote que a conferência achou
+ * faltando), tempo, avisos, bloqueios e pernas.
  */
 import { computed } from 'vue'
 import type { LinkTestPlan, LinkTestPlanLeg, LinkTestSpec } from '@/types/linkTests'

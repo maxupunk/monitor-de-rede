@@ -2,6 +2,7 @@ import type {
   LinkTest,
   LinkTestEndpoint,
   LinkTestFix,
+  LinkTestInstallPackageFix,
   LinkTestLeg,
   LinkTestPlan,
   LinkTestStage,
@@ -100,7 +101,6 @@ export function plan(patch: Partial<LinkTestPlan> = {}): LinkTestPlan {
     estimatedSeconds: 16,
     warnings: [],
     blocking: [],
-    willInstall: [],
     fixes: [],
     ...patch,
   }
@@ -125,5 +125,20 @@ export function accessFix(): LinkTestFix {
     deviceName: 'AP-terraço',
     transport: 'ssh',
     message: 'AP-terraço está sem acesso SSH',
+  }
+}
+
+export function packageFix(): LinkTestInstallPackageFix {
+  return {
+    kind: 'install_package',
+    deviceId: 7,
+    deviceName: 'AP-terraço',
+    pluginId: 30,
+    pluginSlug: 'openwrt-link-test',
+    action: 'tp_prepare',
+    engine: 'iperf3',
+    role: 'serve',
+    packages: ['iperf3'],
+    message: 'AP-terraço não tem o iperf3',
   }
 }

@@ -15,7 +15,6 @@ use crate::{
     models::{device_credentials, devices, plugins, probes},
     services::{
         devices::system_device::NETMONITOR_DEFAULT_NAME,
-        network_tools::throughput::ThroughputEngine,
         plugins::{credentials, manifest::ThroughputRoles, service},
         shared::errors::{AppError, AppResult},
     },
@@ -24,6 +23,7 @@ use crate::{
 /// O plugin que faz os papéis de teste num equipamento.
 #[derive(Debug, Clone)]
 pub struct DevicePlugin {
+    pub id: i64,
     pub slug: String,
     pub name: String,
     pub roles: ThroughputRoles,
@@ -34,7 +34,7 @@ pub struct DevicePlugin {
 pub enum Role {
     Device {
         device: Box<devices::Model>,
-        plugin: Option<DevicePlugin>,
+        plugin: Option<Box<DevicePlugin>>,
     },
     Central {
         /// O dispositivo do sistema, quando cadastrado.
@@ -93,7 +93,7 @@ impl Endpoint {
     #[must_use]
     pub fn plugin(&self) -> Option<&DevicePlugin> {
         match &self.role {
-            Role::Device { plugin, .. } => plugin.as_ref(),
+            Role::Device { plugin, .. } => plugin.as_deref(),
             _ => None,
         }
     }
@@ -136,6 +136,7 @@ pub async fn device_plugin<C: ConnectionTrait>(
                 plugin.device_id.is_none(),
                 plugin.clone(),
                 DevicePlugin {
+                    id: plugin.id,
                     slug: plugin.slug.clone(),
                     name: plugin.name.clone(),
                     roles,
@@ -200,7 +201,7 @@ pub async fn device_endpoint<C: ConnectionTrait>(
         view,
         role: Role::Device {
             device: Box::new(device),
-            plugin,
+            plugin: plugin.map(Box::new),
         },
         caps,
         issues,
@@ -285,31 +286,10 @@ pub async fn agent_of<C: ConnectionTrait>(db: &C, device_id: i64) -> AppResult<O
         .find_map(|credential| credential.via_probe_id))
 }
 
-/// Pacotes que o `prepare` instala para o papel — o que a tela avisa antes
-/// de rodar ("pode instalar").
-#[must_use]
-pub fn packages_for(engine: ThroughputEngine, serves: bool) -> Vec<String> {
-    match (engine, serves) {
-        (ThroughputEngine::Iperf3, _) => vec!["iperf3".to_owned()],
-        (ThroughputEngine::Btest, false) => vec!["mikrotik-btest".to_owned()],
-        (ThroughputEngine::Btest, true) => Vec::new(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn pacotes_por_motor_e_papel() {
-        assert_eq!(packages_for(ThroughputEngine::Iperf3, true), ["iperf3"]);
-        assert_eq!(packages_for(ThroughputEngine::Iperf3, false), ["iperf3"]);
-        assert_eq!(
-            packages_for(ThroughputEngine::Btest, false),
-            ["mikrotik-btest"]
-        );
-        assert!(packages_for(ThroughputEngine::Btest, true).is_empty());
-    }
+    use crate::services::network_tools::throughput::ThroughputEngine;
 
     #[test]
     fn central_sem_dispositivo_do_sistema_tem_nome_padrao() {

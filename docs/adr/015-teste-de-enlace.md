@@ -29,7 +29,7 @@ OpenWrt↔OpenWrt, MikroTik↔OpenWrt e Linux. Escala: 150–800 nós por mapa.
 | Par | Ferramenta | Instala algo? |
 |---|---|---|
 | MikroTik ↔ MikroTik | `btest` nativo do RouterOS (`/tool bandwidth-test` + `bandwidth-server`) | não |
-| OpenWrt ↔ OpenWrt | `iperf3` (pacote oficial) | sim, sob demanda, pelo `openwrt-packages` |
+| OpenWrt ↔ OpenWrt | `iperf3` (pacote oficial) | sim, com o aceite do operador no plano, pelo `openwrt-packages` |
 | OpenWrt → MikroTik | `mikrotik-btest` (pacote **oficial** do OpenWrt 23.05/24.10, cliente) contra o `bandwidth-server` | sim, no OpenWrt |
 | Linux ↔ OpenWrt/Linux | `iperf3` | Linux: precisa existir (não instalamos pacote em servidor) |
 | central ↔ OpenWrt/Linux | central é **cliente iperf3 nativo** (Rust); o equipamento sobe `iperf3 -s` | OpenWrt: iperf3 |
@@ -109,7 +109,7 @@ sessão é de uso único e expira (TTL padrão 90 s). O compose publica
 "throughput": {
   "serve": [{ "engine": "btest" }],
   "drive": [{ "engine": "btest", "auth": true }],
-  "actions": { "prepare": "tp_prepare", "serve": "tp_serve", "stop": "tp_stop", "run": "tp_run" }
+  "actions": { "prepare": "tp_prepare", "check": "tp_check", "serve": "tp_serve", "stop": "tp_stop", "run": "tp_run" }
 }
 ```
 
@@ -120,15 +120,30 @@ sessão é de uso único e expira (TTL padrão 90 s). O compose publica
   sentido: o `mikrotik_btest` recusa `-t` ≥ 30, então declara `29`; o plano
   limita a duração pedida e avisa.
 - As ações referenciadas existem no manifesto; `prepare`, `serve` e `stop` são
-  `write`; `run` é `read`. `prepare` é opcional (só quem instala algo).
-- `"prepareChecksOnly": true` declara um `prepare` que só **confere** o que
-  falta (o Linux: o NetMonitor não instala pacote em servidor). O plano não o
-  lista em `willInstall` nem conta o tempo de instalar.
+  `write`; `run` e `check` são `read`. `prepare` e `check` são opcionais.
+- **Nunca instalar sem aceite** (decisão do dono do produto, 2026-10-19).
+  `check` só **confere** se o equipamento tem o programa do papel
+  (`command -v iperf3`). O plano roda o `check` de cada ponta (em paralelo,
+  10 s de prazo, sempre leitura) e, faltando algo que o plugin instala
+  (`canInstall: true`), mostra o passo **Instalar o iperf3 em …**
+  (`install_package`): o operador aceita numa confirmação e só então o
+  `prepare` roda, pela mesma rota de ação de plugin da tela
+  (`POST /api/devices/{id}/plugins/{pluginId}/actions/{prepare}` com
+  `confirmWrite: true` — administrador). Sem instalação possível
+  (`canInstall: false`, o Linux), o motivo vai por extenso e a perna não roda.
+  A primeira etapa da perna (`prepare_a`/`prepare_b`, "Conferir A/B") roda o
+  `check` de novo e, faltando, para com a frase do plugin — **nunca** chama o
+  `prepare`.
+- Plugin sem `check` (o contrato de antes) continua rodando o `prepare` na
+  primeira etapa; o plano avisa em `warnings` que ele pode instalar.
+  `"prepareChecksOnly": true` (legado) declara um `prepare` que só confere: sem
+  aviso de instalação e com o tempo de conferir. Plugin novo usa `check`.
 - **Parâmetros fixos** (validados pela plataforma, o script não inventa):
 
 | Ação | Parâmetros | Devolve |
 |---|---|---|
-| `prepare` | `{ engine, role: "serve"\|"drive" }` | `{ ready: bool, installed: [nomes] }` |
+| `prepare` | `{ engine, role: "serve"\|"drive" }` | `{ ready: bool, installed: [nomes], message?, warning? }` |
+| `check` | `{ engine, role: "serve"\|"drive" }` | `{ ready: bool, missing: [pacotes], canInstall: bool, message: string }` |
 | `serve` | `{ engine, port, peer, user, password (secret), requireAuth }` | `{ port, handle }` — `handle` é opaco e volta intacto no `stop` |
 | `stop` | `{ engine, handle }` | `{ stopped: bool }` |
 | `run` | `{ engine, target, port, direction, durationS, streams, limitMbps, user, password (secret) }` | `ThroughputReport` em JSON (camelCase) |
@@ -171,8 +186,8 @@ prefere `iperf3`, depois `btest`; o servidor é quem sabe servir; `auth` vem do
 `drive` do cliente. Sem combinação → a perna fica `skipped` com o motivo.
 
 Plano antes de rodar (`POST /api/link-tests/plan`): pernas, motor de cada uma,
-o que será instalado, o que falta (credencial, plugin ativo) e quanto tempo
-leva. A tela mostra o plano e pede confirmação; só então
+o que falta (plugin ativo, credencial, pacote que a conferência achou
+faltando) e quanto tempo leva. A tela mostra o plano e pede confirmação; só então
 `POST /api/link-tests` com `confirm: true`.
 
 O que falta e tem conserto ali mesmo vira **passo** (`fixes`), não erro:
@@ -181,12 +196,19 @@ bloco `throughput`, fica ativo ao instalar e casa com o sistema dele pela
 mesma régua que liga um embutido sozinho no cadastro
 (`compat::fits_platform`; o exclusivo do equipamento vem antes) e cujos papéis
 fecham a negociação com a outra ponta; equipamento sem o acesso que o plugin
-usa ganha "cadastrar o acesso" (`credentials::access_gap`). Sistema
+usa ganha "cadastrar o acesso" (`credentials::access_gap`); equipamento cujo
+`check` diz que falta um pacote instalável ganha "instalar o pacote"
+(`link_tests::readiness`). A ordem é sempre plugin → acesso → pacote: ponta
+sem acesso não é conferida (o passo do acesso vem antes), e conferência que
+não responde vira aviso (a primeira etapa confere de novo). Sistema
 desconhecido não ganha sugestão: o motivo segue por extenso em `blocking`. A
-tela mostra "Antes de testar, falta" com **Instalar agora** e **Cadastrar
-acesso** (o formulário único do acesso, sem sair do assistente) e refaz o
-plano depois de cada passo. Instalar e cadastrar o acesso são de
-administrador; o operador vê a quem pedir.
+tela mostra "Antes de testar, falta" com **Instalar agora**, **Cadastrar
+acesso** (o formulário único do acesso, sem sair do assistente) e
+**Instalar** (o pacote, depois da confirmação que explica o que acontece no
+equipamento; o fim chega pelo SSE `plugin:run_finished`, e a falha mostra o
+motivo do plugin com a execução a um clique) e refaz o plano depois de cada
+passo. Instalar e cadastrar o acesso são de administrador; o operador vê a
+quem pedir.
 
 Limites: duração padrão 5 s por sentido (1–60), um teste por dispositivo por
 vez, no máximo 2 testes simultâneos no sistema, sempre cancelável.
@@ -236,8 +258,9 @@ type LinkTestEndpoint = { kind: 'device' | 'central' | 'agent', deviceId: number
 
 type LinkTestPlan = { kind: LinkTestKind, legs: LinkTestPlanLeg[], estimatedSeconds: number,
                       warnings: string[], blocking: string[] /* o que impede e não tem passo */,
-                      willInstall: { deviceId: number, deviceName: string, packages: string[] }[],
                       fixes: LinkTestFix[] /* roda: blocking vazio e alguma perna runnable */ }
+// `willInstall` (o palpite de pacotes por motor) saiu: o que falta instalar vem
+// da conferência de verdade (`check`), como o passo `install_package`.
 type LinkTestPlanLeg = { seq: number, kind: 'link' | 'end_to_end', a: LinkTestEndpoint, b: LinkTestEndpoint,
                          edgeId: number | null /* a aresta quando é uma só */,
                          edgeIds: number[] /* todas, em ordem de A a B (§5.2); vazia na ponta a ponta */,
@@ -250,7 +273,12 @@ type LinkTestFix =
       pluginSlug: string, pluginName: string, message: string }
   | { kind: 'add_credential', deviceId: number, deviceName: string,
       transport: 'ssh' | 'telnet' | 'http', message: string }
+  | { kind: 'install_package', deviceId: number, deviceName: string, pluginId: number,
+      pluginSlug: string, action: string /* o `prepare` */, engine: 'iperf3' | 'btest',
+      role: 'serve' | 'drive', packages: string[], message: string }
 
+// `prepare_a`/`prepare_b` aparecem como "Conferir A/B": rodam o `check` (ou o
+// `prepare`, em plugin sem `check`).
 type LinkTestStage = { key: 'prepare_a' | 'prepare_b' | 'serve' | 'forward' | 'reverse' | 'stop',
                        label: string, status: LinkTestStepStatus, message: string | null,
                        runId: number | null, startedAt: string | null, finishedAt: string | null }
@@ -389,6 +417,89 @@ Com um **OpenWrt 24.10.4** real (imagem oficial `openwrt/rootfs`):
 - Teste de enlace central↔OpenWrt pelo orquestrador, com iperf3 real: instala,
   sobe o servidor na 5201, mede os dois sentidos e encerra sem sobras.
 
+Com **dois OpenWrt 25.12.5 em produção** (apk) e um switch sem IP entre eles
+(2026-10-19, sem mudar configuração dos equipamentos — só o iperf3 instalado,
+com o aceite no plano):
+
+- O plano mostrou "Instalar o iperf3 em …" (`tp_check`, nada instalado sem
+  aceite); o "Instalar" rodou o `tp_prepare` e o plano foi refeito pelo SSE.
+- Achado: instalar o `openwrt-link-test` não ligava o `openwrt-packages`, de
+  que ele depende (`uses`) — agora `install` liga as dependências desligadas.
+- Achado: um roteador com o **relógio 43 dias atrasado** não valida o HTTPS
+  do repositório (`wgetSSL verify error`, o certificado "ainda não vale"). O
+  `install_package` tenta **uma vez** o espelho HTTP do mesmo repositório,
+  com a lista num arquivo de `/tmp` passado em `--repositories-file` e
+  apagado em seguida (a configuração não muda); o apk confere a assinatura do
+  OpenWrt no índice e em cada pacote, qualquer que seja o transporte. O aviso
+  ("Atenção: … acerte o NTP") chega ao plano como `warning` do `tp_prepare`.
+  Falhas viram uma frase (relógio/HTTPS com a data do roteador, sem internet,
+  sem espaço, pacote inexistente); a saída inteira fica em "Ver execução".
+- Medido: AP↔AP pelo switch 363 / 235 Mbit/s; central→AP 252 / 243 e
+  306 / 483 Mbit/s. Nenhum `iperf3 -s` nem arquivo de `/tmp` sobrou.
+- OpenWrt↔MikroTik **não** foi rodado: o OpenWrt só dirige btest, e servir no
+  RouterOS (`tp_serve`) cria um usuário temporário e restringe o
+  `bandwidth-server` — mudança de configuração, que o dono vetou em produção.
+
+### 9. Diagnóstico rápido por ping (adendo, 2026-10-19)
+
+**Pergunta.** Equipamento desconhecido, sem SSH nem plugin de teste, não roda
+o teste de velocidade. Dá para estimar a banda só com ping?
+
+**Método** (spike `backend/examples/spikes/ping_capacity.rs`): ecos ICMP
+pequenos (56 B) e grandes (1472 B, o MTU Ethernet) **intercalados**, um a cada
+20 ms, 80 pares (~3,5 s, ~100 pacotes/s, ~70 kbit/s). O RTT do grande é o do
+pequeno mais o tempo de serializar a diferença nos dois sentidos; com os
+**mínimos** (o menor ruído de fila):
+
+```text
+capacidade ≈ 2 · (1472 − 56) · 8 bits / (RTTmin_grande − RTTmin_pequeno)
+```
+
+**Evidência** (equipamento real, três rodadas cada):
+
+| Equipamento | Banda real (btest) | Δmin | Estimativa por ping |
+|---|---|---|---|
+| MikroTik | 135,7 / 175 Mbit/s | 0,16–0,24 ms | 135, 142, 94 Mbit/s |
+| OpenWrt BPI-R3 | — | 0,04–0,09 ms | 256, 243, 588 Mbit/s (ruído) |
+| OpenWrt RB922 | — | 0,15–0,20 ms | 156, 126, 116 Mbit/s |
+
+O p95 dos pacotes grandes chegou a ~5 ms sobre ~1 ms de mínimo: a fila
+aparece. Abaixo de ~0,1 ms o Δmin é do tamanho do ruído de relógio e de
+agendamento do sistema, e a conta explode (588 Mbit/s no BPI-R3).
+
+**Limites.** Mede o **caminho todo** da central até o equipamento, não um
+enlace; inclui a CPU do equipamento respondendo ao ICMP (que pode ser
+priorizado ou limitado); a precisão some acima de ~190 Mbit/s; filtro de ICMP
+ou MTU menor no caminho tiram os pacotes grandes.
+
+**Decisão.** É um **diagnóstico**, nunca uma medida de banda:
+`POST /api/diagnostics/quick-ping` (`{ deviceId }` ou `{ ip }` de rede
+privada, pela régua `plugins::transport::is_reachable_target`; escrita pela
+regra padrão — operador e administrador; um por endereço, 409 no segundo)
+devolve `QuickPingReport` com latência (mín/p50/p95 dos dois tamanhos),
+jitter, perda, sinal de fila e — só quando o sinal passa do ruído — uma
+**faixa** da capacidade com confiança "baixa" ou "muito baixa". A regra é
+pura (`services/network_tools/ping_capacity/estimator.rs`); a coleta usa o
+socket ICMP DGRAM do processo (`PingClientCell`, ADR 003) com **um** pinger
+por rodada.
+
+| Regra | Limiar | Por quê |
+|---|---|---|
+| Piso de ruído do Δmin | 0,12 ms (teto ≈ 190 Mbit/s) | BPI-R3 (0,04–0,09 ms) é ruído; MikroTik e RB922 (≥ 0,15 ms) ficam na ordem certa |
+| Consistência | 3 lotes contíguos; maior/menor ≤ 2× | uma rodada que não concorda consigo mesma não dá número |
+| Faixa | estimativas dos lotes e do total, alargadas ±20% | a variação entre rodadas do spike foi de ~1,5× |
+| Confiança "muito baixa" | lotes > 1,5×, perda ≥ 5% ou fila alta | o número ainda sai, com o aviso |
+| Respostas mínimas | 15 por tamanho, 3 por tamanho em cada lote | abaixo disso o mínimo não é mínimo |
+| Fila moderada / alta | p95 − mín ≥ máx(2 ms; 0,5×mín) / ≥ máx(10 ms; 2×mín) | os ~4 ms do spike são fila visível; caminho longo tolera mais |
+| Perda moderada / alta | ≥ 1% / ≥ 5% | uma perda em 160 ecos ainda é "ok" |
+
+Sem resposta aos grandes (MTU/filtro), a nota diz isso e a perda passa a
+contar só os pequenos. Abaixo do piso: "Acima de ~190 Mbit/s — rápido demais
+para estimar por ping". Na tela, a ação "Diagnóstico rápido (ping)" entra no
+mapa pelo registro de ações (todo nó com IP, inclusive desconhecido) e na
+ficha do dispositivo; o diálogo diz o que o número é e oferece "Fazer o teste
+de velocidade completo".
+
 ## Consequências
 
 - Porta nova publicada na central (2000/TCP), fechada a quem não tem sessão
@@ -402,3 +513,5 @@ Com um **OpenWrt 24.10.4** real (imagem oficial `openwrt/rootfs`):
   cancelamento sempre à vista.
 - UDP, jitter e perda ficam para uma segunda etapa (o contrato já reserva
   `TestProtocol`).
+- O diagnóstico rápido por ping (§9) cobre o equipamento que não roda o
+  teste — e nunca se apresenta como medida de banda.

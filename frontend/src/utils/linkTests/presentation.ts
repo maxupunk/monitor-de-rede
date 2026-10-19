@@ -81,8 +81,8 @@ export const KIND_OPTIONS: ReadonlyArray<{ value: LinkTestKind } & KindPresentat
 ).map((value) => ({ value, ...TEST_KINDS[value] }))
 
 export const STAGES: Record<LinkTestStageKey, { label: string; icon: string }> = {
-  prepare_a: { label: 'Preparar A', icon: 'mdi-package-down' },
-  prepare_b: { label: 'Preparar B', icon: 'mdi-package-down' },
+  prepare_a: { label: 'Conferir A', icon: 'mdi-clipboard-check-outline' },
+  prepare_b: { label: 'Conferir B', icon: 'mdi-clipboard-check-outline' },
   serve: { label: 'Subir servidor', icon: 'mdi-server' },
   forward: { label: 'Ida (A → B)', icon: 'mdi-arrow-right-bold' },
   reverse: { label: 'Volta (B → A)', icon: 'mdi-arrow-left-bold' },

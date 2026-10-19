@@ -38,10 +38,38 @@
           </span>
           <div class="fix-text">
             <div class="font-weight-bold">{{ item.label }}</div>
-            <div v-if="item.state === 'error'" class="text-body-small text-error">
-              {{ item.error }}
+            <div
+              v-if="item.state === 'error' || item.warning"
+              class="text-body-small"
+              :class="{ 'text-error': item.state === 'error' }"
+            >
+              <v-icon v-if="item.warning" size="16" color="warning" class="mr-1">
+                mdi-alert
+              </v-icon>
+              {{ item.state === 'error' ? item.error : item.warning }}
+              <v-btn
+                v-if="item.runId !== null"
+                variant="text"
+                color="primary"
+                size="x-small"
+                prepend-icon="mdi-text-box-search-outline"
+                class="ml-1"
+                @click="openRun(item.runId, item.label, item.fix.deviceName)"
+              >
+                Ver execução
+              </v-btn>
             </div>
             <div v-else-if="item.state === 'done'" class="text-body-small">Feito.</div>
+            <div v-else-if="item.state === 'working'" class="text-body-small">
+              {{
+                item.fix.kind === 'install_package'
+                  ? 'Instalando… pode levar até um minuto.'
+                  : 'Instalando…'
+              }}
+            </div>
+            <div v-else-if="item.fix.kind === 'install_package'" class="text-body-small">
+              {{ item.fix.message }}
+            </div>
           </div>
         </div>
         <template v-if="item.state !== 'done'">
@@ -56,7 +84,7 @@
             @failed="(message) => fail(item.fix, message)"
           />
           <DeviceAccessButton
-            v-else
+            v-else-if="item.fix.kind === 'add_credential'"
             :device-id="item.fix.deviceId"
             :transport="item.fix.transport"
             :reason="item.fix.message"
@@ -64,23 +92,36 @@
             :disabled="refreshing"
             @saved="finish(item.fix)"
           />
+          <LinkTestPackageInstallButton
+            v-else
+            :fix="item.fix"
+            :disabled="refreshing || item.state === 'working'"
+            @started="setState(item.fix, 'working')"
+            @installed="(warning, runId) => finish(item.fix, warning, runId)"
+            @failed="(message, runId) => fail(item.fix, message, runId)"
+          />
         </template>
       </li>
     </ul>
+    <LinkTestStageRun ref="runView" />
   </section>
 </template>
 
 <script setup lang="ts">
 /**
  * "Antes de testar, falta": os passos do plano (instalar o plugin, cadastrar
- * o acesso), cada um com o botão que o resolve ali mesmo. Feito o passo, o
- * assistente refaz o plano (`fixed`); o feito fica marcado na lista.
+ * o acesso, aceitar a instalação de um pacote), cada um com o botão que o
+ * resolve ali mesmo. Feito o passo, o assistente refaz o plano (`fixed`); o
+ * feito fica marcado na lista. Falhou, o motivo fica na linha, com a
+ * execução a um clique.
  */
-import { computed, reactive } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import type { LinkTestFix } from '@/types/linkTests'
 import { fixKey, fixLabel } from '@/utils/linkTests/wizard'
 import DeviceAccessButton from '@/components/devices/access/DeviceAccessButton.vue'
 import PluginInstallButton from '@/components/plugins/PluginInstallButton.vue'
+import LinkTestPackageInstallButton from './LinkTestPackageInstallButton.vue'
+import LinkTestStageRun from './LinkTestStageRun.vue'
 
 type FixState = 'pending' | 'working' | 'done' | 'error'
 
@@ -92,7 +133,16 @@ const props = defineProps<{
 
 const emit = defineEmits<{ fixed: [fix: LinkTestFix] }>()
 
-const states = reactive<Record<string, { state: FixState; error: string }>>({})
+interface FixStatus {
+  state: FixState
+  error: string
+  /** Feito, mas com algo a saber (instalou por um caminho alternativo…). */
+  warning: string
+  runId: number | null
+}
+
+const states = reactive<Record<string, FixStatus>>({})
+const runView = ref<InstanceType<typeof LinkTestStageRun> | null>(null)
 /** Os feitos, para continuarem marcados depois que o plano novo os tira. */
 const completed = reactive<LinkTestFix[]>([])
 
@@ -109,6 +159,8 @@ const items = computed(() => {
       label: fixLabel(fix),
       state: current?.state ?? 'pending',
       error: current?.error ?? '',
+      warning: current?.warning ?? '',
+      runId: current?.runId ?? null,
     }
   })
 })
@@ -117,18 +169,26 @@ const allDone = computed(
   () => items.value.length > 0 && items.value.every((item) => item.state === 'done')
 )
 
-function setState(fix: LinkTestFix, state: FixState, error = '') {
-  states[fixKey(fix)] = { state, error }
+function setState(
+  fix: LinkTestFix,
+  state: FixState,
+  { error = '', warning = '', runId = null }: Partial<Omit<FixStatus, 'state'>> = {}
+) {
+  states[fixKey(fix)] = { state, error, warning, runId }
 }
 
-function finish(fix: LinkTestFix) {
-  setState(fix, 'done')
+function finish(fix: LinkTestFix, warning: string | null = null, runId: number | null = null) {
+  setState(fix, 'done', { warning: warning ?? '', runId })
   completed.push(fix)
   emit('fixed', fix)
 }
 
-function fail(fix: LinkTestFix, message: string) {
-  setState(fix, 'error', message)
+function fail(fix: LinkTestFix, message: string, runId: number | null = null) {
+  setState(fix, 'error', { error: message, runId })
+}
+
+function openRun(runId: number | null, title: string, deviceName: string) {
+  if (runId !== null) void runView.value?.open(runId, title, deviceName)
 }
 </script>
 

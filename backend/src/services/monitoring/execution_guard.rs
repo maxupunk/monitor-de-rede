@@ -30,6 +30,11 @@ fn in_flight_traceroutes() -> &'static Mutex<HashSet<IpAddr>> {
     SET.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
+fn in_flight_quick_pings() -> &'static Mutex<HashSet<IpAddr>> {
+    static SET: OnceLock<Mutex<HashSet<IpAddr>>> = OnceLock::new();
+    SET.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
 fn in_flight_speedtest() -> &'static Mutex<bool> {
     static FLAG: OnceLock<Mutex<bool>> = OnceLock::new();
     FLAG.get_or_init(|| Mutex::new(false))
@@ -120,6 +125,28 @@ pub fn try_acquire_traceroute(ip: IpAddr) -> Option<TracerouteExecutionGuard> {
     let mut set = in_flight_traceroutes().lock().ok()?;
     if set.insert(ip) {
         Some(TracerouteExecutionGuard(ip))
+    } else {
+        None
+    }
+}
+
+/// Guarda RAII que sinaliza o diagnóstico rápido por ping em curso para um IP.
+#[derive(Debug)]
+pub struct QuickPingExecutionGuard(IpAddr);
+
+impl Drop for QuickPingExecutionGuard {
+    fn drop(&mut self) {
+        if let Ok(mut set) = in_flight_quick_pings().lock() {
+            set.remove(&self.0);
+        }
+    }
+}
+
+/// Tenta adquirir a trava do diagnóstico rápido para o IP informado.
+pub fn try_acquire_quick_ping(ip: IpAddr) -> Option<QuickPingExecutionGuard> {
+    let mut set = in_flight_quick_pings().lock().ok()?;
+    if set.insert(ip) {
+        Some(QuickPingExecutionGuard(ip))
     } else {
         None
     }
@@ -224,6 +251,17 @@ mod tests {
 
         drop(guard);
         assert!(try_acquire_port_scan(ip).is_some());
+    }
+
+    #[test]
+    fn quick_ping_guard_adquire_e_libera() {
+        let ip = IpAddr::V4(Ipv4Addr::new(192, 168, 100, 51));
+        let guard = try_acquire_quick_ping(ip);
+        assert!(guard.is_some());
+        assert!(try_acquire_quick_ping(ip).is_none());
+
+        drop(guard);
+        assert!(try_acquire_quick_ping(ip).is_some());
     }
 
     #[test]

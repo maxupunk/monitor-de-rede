@@ -238,15 +238,34 @@ pub struct LinkTestEndpoint {
     pub platform: Option<String>,
 }
 
-/// Pacote que o plano instala num equipamento.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
+/// O papel de um equipamento numa perna: hospeda o servidor ou dirige o
+/// cliente. É o `role` que o `check` e o `prepare` do plugin recebem.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
-pub struct LinkTestInstall {
-    #[ts(type = "number")]
-    pub device_id: i64,
-    pub device_name: String,
-    pub packages: Vec<String>,
+pub enum LinkTestRole {
+    Serve,
+    Drive,
+}
+
+impl LinkTestRole {
+    /// O papel de quem serve (`true`) ou dirige.
+    #[must_use]
+    pub const fn of(serves: bool) -> Self {
+        if serves {
+            Self::Serve
+        } else {
+            Self::Drive
+        }
+    }
+
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Serve => "serve",
+            Self::Drive => "drive",
+        }
+    }
 }
 
 /// Um passo que o operador faz ali mesmo para a perna poder rodar. `message`
@@ -276,13 +295,35 @@ pub enum LinkTestFix {
         transport: TransportKind,
         message: String,
     },
+    /// Instalar o programa que o papel precisa (o `iperf3`, o
+    /// `mikrotik-btest`), com o aceite explícito do operador: roda a ação
+    /// `action` (o `prepare` do plugin) com `{ engine, role }`. O `check` do
+    /// plugin é quem diz o que falta — o teste nunca instala sozinho.
+    #[serde(rename_all = "camelCase")]
+    InstallPackage {
+        #[ts(type = "number")]
+        device_id: i64,
+        device_name: String,
+        #[ts(type = "number")]
+        plugin_id: i64,
+        plugin_slug: String,
+        /// A ação que instala (o `throughput.actions.prepare`).
+        action: String,
+        engine: ThroughputEngine,
+        role: LinkTestRole,
+        /// Os pacotes que faltam, como o plugin os nomeia.
+        packages: Vec<String>,
+        message: String,
+    },
 }
 
 impl LinkTestFix {
     #[must_use]
     pub fn message(&self) -> &str {
         match self {
-            Self::InstallPlugin { message, .. } | Self::AddCredential { message, .. } => message,
+            Self::InstallPlugin { message, .. }
+            | Self::AddCredential { message, .. }
+            | Self::InstallPackage { message, .. } => message,
         }
     }
 }
@@ -357,13 +398,13 @@ pub struct LinkTestPlanLeg {
     pub runnable: bool,
     pub issues: Vec<String>,
     /// Os passos que resolvem parte de `issues` ali mesmo (instalar o
-    /// plugin, cadastrar o acesso). Só no plano.
+    /// plugin, cadastrar o acesso, instalar o pacote). Só no plano.
     #[serde(default)]
     pub fixes: Vec<LinkTestFix>,
 }
 
-/// O plano antes de rodar: pernas, motores, o que será instalado, o que
-/// falta e quanto tempo leva.
+/// O plano antes de rodar: pernas, motores, o que falta (instalar o plugin,
+/// cadastrar o acesso, aceitar a instalação de um pacote) e quanto tempo leva.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
@@ -374,7 +415,6 @@ pub struct LinkTestPlan {
     pub warnings: Vec<String>,
     /// O que impede de rodar e não se resolve com um dos `fixes`.
     pub blocking: Vec<String>,
-    pub will_install: Vec<LinkTestInstall>,
     /// Os passos que faltam, sem repetição. Enquanto nenhuma perna roda, eles
     /// também impedem o teste: roda quando `blocking` está vazio e há perna
     /// executável.
@@ -409,8 +449,8 @@ impl LinkTestStageKey {
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
-            Self::PrepareA => "Preparar A",
-            Self::PrepareB => "Preparar B",
+            Self::PrepareA => "Conferir A",
+            Self::PrepareB => "Conferir B",
             Self::Serve => "Subir servidor",
             Self::Forward => "A → B",
             Self::Reverse => "B → A",
@@ -820,6 +860,26 @@ mod tests {
             json!({ "kind": "add_credential", "deviceId": 2, "deviceName": "R1",
                     "transport": "ssh", "message": "R1 está sem acesso SSH" })
         );
+
+        let pacote = LinkTestFix::InstallPackage {
+            device_id: 3,
+            device_name: "AP-x".into(),
+            plugin_id: 7,
+            plugin_slug: "openwrt-link-test".into(),
+            action: "tp_prepare".into(),
+            engine: ThroughputEngine::Iperf3,
+            role: LinkTestRole::Serve,
+            packages: vec!["iperf3".into()],
+            message: "AP-x não tem o iperf3".into(),
+        };
+        assert_eq!(
+            serde_json::to_value(&pacote).unwrap(),
+            json!({ "kind": "install_package", "deviceId": 3, "deviceName": "AP-x",
+                    "pluginId": 7, "pluginSlug": "openwrt-link-test", "action": "tp_prepare",
+                    "engine": "iperf3", "role": "serve", "packages": ["iperf3"],
+                    "message": "AP-x não tem o iperf3" })
+        );
+        assert_eq!(pacote.message(), "AP-x não tem o iperf3");
     }
 
     #[test]

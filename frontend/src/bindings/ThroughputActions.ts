@@ -5,9 +5,16 @@
  */
 export type ThroughputActions = { 
 /**
- * Instala o que falta (escrita, opcional).
+ * Instala o que falta (escrita, opcional). Com `check` declarado, só
+ * roda quando o operador aceita a instalação no plano — nunca no meio do
+ * teste.
  */
 prepare?: string, 
+/**
+ * Confere, sem alterar nada, se o equipamento tem o que o papel precisa
+ * (leitura, opcional). Devolve `{ ready, missing, canInstall, message }`.
+ */
+check?: string, 
 /**
  * Sobe o servidor (escrita).
  */

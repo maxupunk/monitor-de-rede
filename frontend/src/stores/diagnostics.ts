@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { apiService } from '@/services/apiService'
+import type { QuickPingInput } from '@/bindings/QuickPingInput'
+import type { QuickPingReport } from '@/bindings/QuickPingReport'
 import { drainNdjson } from '@/services/ndjson'
 import { getStoredToken } from '@/utils/authStorage'
 
@@ -52,6 +54,9 @@ export interface PlaybookSummary {
   recommendations: string[]
   steps: PlaybookStepResult[]
 }
+
+/** A rodada leva ~3,5 s; com perda alta o backend corta em 15 s. */
+const QUICK_PING_TIMEOUT_MS = 25_000
 
 export const useDiagnosticsStore = defineStore('diagnostics', () => {
   // Traceroute State
@@ -557,6 +562,31 @@ export const useDiagnosticsStore = defineStore('diagnostics', () => {
     activePlaybookController?.abort()
   }
 
+  // Diagnóstico rápido por ping (ADR 015 §9)
+  const quickPingRunning = ref(false)
+  const quickPingError = ref<string | null>(null)
+
+  /**
+   * Latência, perda, fila e — quando o sinal passa do ruído — uma ordem de
+   * grandeza da capacidade do caminho até o dispositivo. Resposta única.
+   */
+  async function quickPing(deviceId: number): Promise<QuickPingReport | null> {
+    quickPingRunning.value = true
+    quickPingError.value = null
+    try {
+      const input: QuickPingInput = { deviceId }
+      return await apiService.post<QuickPingReport>('/diagnostics/quick-ping', input, {
+        timeoutMs: QUICK_PING_TIMEOUT_MS,
+      })
+    } catch (err: unknown) {
+      quickPingError.value =
+        err instanceof Error ? err.message : 'Erro ao executar o diagnóstico rápido'
+      return null
+    } finally {
+      quickPingRunning.value = false
+    }
+  }
+
   return {
     tracerouteRunning,
     tracerouteError,
@@ -571,5 +601,8 @@ export const useDiagnosticsStore = defineStore('diagnostics', () => {
     playbookError,
     runPlaybook,
     cancelPlaybook,
+    quickPingRunning,
+    quickPingError,
+    quickPing,
   }
 })

@@ -1,9 +1,11 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { ApiError, apiService } from '@/services/apiService'
+import { usePluginsStore } from '@/stores/plugins'
 import type {
   LinkTest,
   LinkTestFlow,
+  LinkTestInstallPackageFix,
   LinkTestKind,
   LinkTestPage,
   LinkTestPlan,
@@ -15,6 +17,7 @@ import type {
   LinkTestStatus,
 } from '@/types/linkTests'
 import { isActiveStatus, legEdgeIds } from '@/utils/linkTests/presentation'
+import { packageInstallResult, type PackageInstallResult } from '@/utils/linkTests/wizard'
 
 /**
  * Teste de enlace (ADR 015 §5): toda a conversa HTTP da funcionalidade mora
@@ -48,6 +51,11 @@ export interface LinkTestFilters {
 
 export interface LinkTestStarted {
   id: number
+}
+
+/** Desfecho do passo "instalar o pacote", com a execução para a transcrição. */
+export interface PackageInstallOutcome extends PackageInstallResult {
+  runId: number
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -310,6 +318,25 @@ export const useLinkTestsStore = defineStore('linkTests', () => {
     return started.id
   }
 
+  /**
+   * "Instalar o iperf3 em …" (passo `install_package` do plano), já aceito
+   * pelo operador: roda o `prepare` do plugin com a confirmação de escrita
+   * (`POST /api/devices/{id}/plugins/{pluginId}/actions/{action}`) e espera o
+   * fim pelo SSE. Quem chamou refaz o plano depois.
+   */
+  async function installPackage(fix: LinkTestInstallPackageFix): Promise<PackageInstallOutcome> {
+    const plugins = usePluginsStore()
+    const runId = await plugins.runAction(
+      fix.deviceId,
+      fix.pluginId,
+      fix.action,
+      { engine: fix.engine, role: fix.role },
+      true
+    )
+    const run = await plugins.waitForRun(runId)
+    return { ...packageInstallResult(run), runId }
+  }
+
   async function cancel(id: number): Promise<void> {
     try {
       await apiService.post(`/link-tests/${id}/cancel`, {})
@@ -478,6 +505,7 @@ export const useLinkTestsStore = defineStore('linkTests', () => {
     lastActivityAt,
     plan,
     start,
+    installPackage,
     cancel,
     fetchPage,
     fetchRecent,

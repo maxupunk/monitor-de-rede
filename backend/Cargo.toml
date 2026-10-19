@@ -196,6 +196,9 @@ path = "examples/spikes/async_snmp.rs"
 name = "spike_dns_wire"
 path = "examples/spikes/dns_wire.rs"
 [[example]]
+name = "spike_ping_capacity"
+path = "examples/spikes/ping_capacity.rs"
+[[example]]
 name = "spike_syslog_parse"
 path = "examples/spikes/syslog_parse.rs"
 

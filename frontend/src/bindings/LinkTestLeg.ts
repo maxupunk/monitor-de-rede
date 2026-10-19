@@ -37,6 +37,6 @@ viaDeviceIds: number[],
 viaNames: Array<string>, engine: ThroughputEngine | null, serverSide: LinkTestSide | null, durationS: number, runnable: boolean, issues: Array<string>, 
 /**
  * Os passos que resolvem parte de `issues` ali mesmo (instalar o
- * plugin, cadastrar o acesso). Só no plano.
+ * plugin, cadastrar o acesso, instalar o pacote). Só no plano.
  */
 fixes: Array<LinkTestFix>, };

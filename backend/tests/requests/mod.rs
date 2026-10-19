@@ -53,6 +53,7 @@ mod plugin_fleet;
 mod prepare_data;
 mod process_deps;
 mod push;
+mod quick_ping;
 mod reach_monitors;
 mod root;
 mod saas_monitoring;

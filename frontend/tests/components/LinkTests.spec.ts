@@ -18,11 +18,15 @@ import { useTopologyStore } from '@/stores/topology'
 import { edge, node } from '../utils/topology/fixtures'
 import DeviceAccessHost from '@/components/devices/access/DeviceAccessHost.vue'
 import { settleAccess } from '@/composables/useDeviceAccess'
+import { useConfirm } from '@/composables/useConfirm'
+import { usePluginsStore } from '@/stores/plugins'
+import type { PluginRunView } from '@/bindings/PluginRunView'
 import {
   accessFix,
   endpoint,
   installFix,
   leg,
+  packageFix,
   plan,
   stage,
   test,
@@ -149,11 +153,11 @@ describe('telas do teste de enlace', () => {
     expect(wrapper.findAll('.gauge .v-chip')).toHaveLength(0)
   })
 
-  it('plano: bloqueio com dica acionável, aviso de saturação e o que vai instalar', async () => {
+  it('plano: bloqueio com dica acionável, aviso de saturação e o pacote que falta', async () => {
     setRole('admin')
     const p = plan({
       blocking: ['MikroTik-Torre não tem IP cadastrado'],
-      willInstall: [{ deviceId: 1, deviceName: 'OpenWrt-Sala', packages: ['iperf3'] }],
+      fixes: [{ ...packageFix(), deviceId: 1, deviceName: 'OpenWrt-Sala' }],
       warnings: ['O cliente btest limita a 29 s por sentido.'],
     })
     p.legs[0].a = endpoint(1, 'OpenWrt-Sala')
@@ -166,7 +170,7 @@ describe('telas do teste de enlace', () => {
     const text = wrapper.text()
     expect(text).toContain('O teste não pode rodar assim')
     expect(text).toContain('satura o enlace durante a medição')
-    expect(text).toContain('iperf3 em OpenWrt-Sala')
+    expect(text).toContain('Instalar o iperf3 em OpenWrt-Sala')
     expect(text).toContain('29 s por sentido')
     expect(wrapper.find('a[href="/devices/2"]').exists()).toBe(true)
   })
@@ -419,9 +423,143 @@ describe('telas do teste de enlace', () => {
     settleAccess(null)
   })
 
+  function packageRun(patch: Partial<PluginRunView> = {}): PluginRunView {
+    return {
+      id: 55,
+      pluginId: 30,
+      pluginName: 'OpenWrt – teste de enlace',
+      deviceId: 7,
+      action: 'tp_prepare',
+      origin: 'user',
+      status: 'running',
+      params: { engine: 'iperf3', role: 'serve' },
+      output: null,
+      transcript: [],
+      error: null,
+      createdAt: '2026-10-19T12:00:00Z',
+      finishedAt: null,
+      ...patch,
+    }
+  }
+
+  function waitingForPackage() {
+    const p = plan({ fixes: [packageFix()] })
+    p.legs[0].runnable = false
+    p.legs[0].b = endpoint(7, 'AP-terraço')
+    p.legs[0].issues = [packageFix().message]
+    p.legs[0].fixes = [packageFix()]
+    return p
+  }
+
+  it('assistente: pacote que falta pede aceite, instala com confirmação, espera o SSE e refaz o plano', async () => {
+    setRole('admin')
+    const get = vi.spyOn(apiService, 'get').mockImplementation(async (path: string) => {
+      if (path === '/plugin-runs/55') return packageRun()
+      throw new Error(`inesperado: ${path}`)
+    })
+    const post = vi.spyOn(apiService, 'post').mockImplementation(async (path: string) => {
+      throw new Error(`inesperado: ${path}`)
+    })
+    post
+      .mockResolvedValueOnce(waitingForPackage())
+      .mockResolvedValueOnce({ runId: 55 })
+      .mockResolvedValueOnce(plan())
+    mountWith(LinkTestWizard, { modelValue: true, request: { kind: 'server', targetDeviceId: 7 } })
+    await flushPromises()
+    const body = () => document.body.textContent ?? ''
+    const button = (label: string) =>
+      [...document.body.querySelectorAll('button')].find((b) => b.textContent?.trim() === label)
+
+    button('Ver o plano')?.click()
+    await flushPromises()
+    expect(body()).toContain('Antes de testar, falta')
+    expect(body()).toContain('Instalar o iperf3 em AP-terraço')
+    expect(body()).toContain('AP-terraço não tem o iperf3')
+    expect(body()).toContain('Falta um passo')
+    expect(button('Iniciar teste')?.hasAttribute('disabled')).toBe(true)
+
+    // Nada roda sem o aceite: a pergunta explica o que acontece no roteador.
+    const dialog = useConfirm()
+    button('Instalar')?.click()
+    await flushPromises()
+    expect(dialog.state.isOpen).toBe(true)
+    expect(dialog.state.options.title).toBe('Instalar o iperf3 em AP-terraço?')
+    expect(dialog.state.options.message).toContain('Instala o pacote iperf3 em AP-terraço')
+    expect(dialog.state.options.message).toContain('não altera a configuração')
+    expect(post).toHaveBeenCalledTimes(1)
+    dialog.handleConfirm()
+    await flushPromises()
+    expect(post).toHaveBeenCalledWith('/devices/7/plugins/30/actions/tp_prepare', {
+      params: { engine: 'iperf3', role: 'serve' },
+      confirmWrite: true,
+    })
+    expect(body()).toContain('Instalando… pode levar até um minuto.')
+
+    // O fim chega pelo SSE; o plano é refeito uma vez, sem consultas repetidas.
+    usePluginsStore().applyRunFinished({
+      run: packageRun({
+        status: 'succeeded',
+        output: {
+          ready: true,
+          installed: ['iperf3'],
+          warning: 'Instalado pelo espelho HTTP. Recomendo acertar o NTP do roteador.',
+        },
+      }),
+    })
+    await flushPromises()
+    expect(get).toHaveBeenCalledTimes(1)
+    expect(post).toHaveBeenCalledTimes(3)
+    expect(body()).toContain('Pronto: o que faltava foi feito')
+    // Instalou por um caminho alternativo: o aviso fica no passo, com a execução.
+    expect(body()).toContain('Recomendo acertar o NTP do roteador.')
+    expect(button('Ver execução')).toBeDefined()
+    expect(button('Iniciar teste')?.hasAttribute('disabled')).toBe(false)
+  })
+
+  it('assistente: instalação que falha mostra o motivo do plugin e a execução, sem refazer o plano', async () => {
+    setRole('admin')
+    vi.spyOn(apiService, 'get').mockImplementation(async (path: string) => {
+      if (path === '/plugin-runs/55') return packageRun()
+      throw new Error(`inesperado: ${path}`)
+    })
+    const post = vi.spyOn(apiService, 'post')
+    post.mockResolvedValueOnce(waitingForPackage()).mockResolvedValueOnce({ runId: 55 })
+    mountWith(LinkTestWizard, { modelValue: true, request: { kind: 'server', targetDeviceId: 7 } })
+    await flushPromises()
+    const body = () => document.body.textContent ?? ''
+    const button = (label: string) =>
+      [...document.body.querySelectorAll('button')].find((b) => b.textContent?.trim() === label)
+    button('Ver o plano')?.click()
+    await flushPromises()
+
+    // Desistir na pergunta não roda nada.
+    const dialog = useConfirm()
+    button('Instalar')?.click()
+    await flushPromises()
+    dialog.handleCancel()
+    await flushPromises()
+    expect(post).toHaveBeenCalledTimes(1)
+
+    button('Instalar')?.click()
+    await flushPromises()
+    dialog.handleConfirm()
+    await flushPromises()
+    usePluginsStore().applyRunFinished({
+      run: packageRun({
+        status: 'succeeded',
+        output: { ready: false, installed: [], message: 'O roteador não alcança o repositório' },
+      }),
+    })
+    await flushPromises()
+    expect(body()).toContain('O roteador não alcança o repositório')
+    expect(button('Ver execução')).toBeDefined()
+    expect(post).toHaveBeenCalledTimes(2)
+    expect(body()).not.toContain('Feito.')
+  })
+
   it('plano visto por operador: os passos dizem quem pode fazê-los', async () => {
     setRole('operator')
-    const p = plan({ fixes: [installFix(), accessFix()] })
+    const p = plan({ fixes: [installFix(), accessFix(), packageFix()] })
     p.legs[0].runnable = false
     const wrapper = mountWith(LinkTestPlanView, {
       plan: p,
@@ -431,6 +569,7 @@ describe('telas do teste de enlace', () => {
     const text = wrapper.text()
     expect(text).toContain('Peça a um administrador para instalar «OpenWrt — teste de enlace»')
     expect(text).toContain('Peça a um administrador para cadastrar o acesso SSH')
-    expect(wrapper.findAll('button').some((b) => b.text().includes('Instalar agora'))).toBe(false)
+    expect(text).toContain('Peça a um administrador para instalar o iperf3 em AP-terraço')
+    expect(wrapper.findAll('button').some((b) => b.text().includes('Instalar'))).toBe(false)
   })
 })

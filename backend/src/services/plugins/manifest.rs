@@ -313,10 +313,17 @@ pub struct ThroughputDrive {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub struct ThroughputActions {
-    /// Instala o que falta (escrita, opcional).
+    /// Instala o que falta (escrita, opcional). Com `check` declarado, só
+    /// roda quando o operador aceita a instalação no plano — nunca no meio do
+    /// teste.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub prepare: Option<String>,
+    /// Confere, sem alterar nada, se o equipamento tem o que o papel precisa
+    /// (leitura, opcional). Devolve `{ ready, missing, canInstall, message }`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub check: Option<String>,
     /// Sobe o servidor (escrita).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -343,9 +350,9 @@ pub struct ThroughputRoles {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub drive: Vec<ThroughputDrive>,
     pub actions: ThroughputActions,
-    /// `true`: o `prepare` só **confere** o que falta e não instala nada (o
-    /// Linux, onde o NetMonitor não instala pacote em servidor). O plano não
-    /// promete instalação nem conta o tempo dela.
+    /// `true`: o `prepare` só **confere** o que falta e não instala nada.
+    /// Legado de antes do `check` (que é o jeito certo de conferir): o plano
+    /// não avisa instalação nem conta o tempo dela.
     #[serde(default)]
     pub prepare_checks_only: bool,
 }
@@ -362,10 +369,14 @@ pub enum ContractType {
 }
 
 /// Os parâmetros que a plataforma passa a cada papel — o script não inventa
-/// outros. Ordem: `prepare`, `serve`, `stop`, `run`.
-pub const THROUGHPUT_CONTRACTS: [(&str, &[(&str, ContractType)]); 4] = [
+/// outros. Ordem: `prepare`, `check`, `serve`, `stop`, `run`.
+pub const THROUGHPUT_CONTRACTS: [(&str, &[(&str, ContractType)]); 5] = [
     (
         "prepare",
+        &[("engine", ContractType::Text), ("role", ContractType::Text)],
+    ),
+    (
+        "check",
         &[("engine", ContractType::Text), ("role", ContractType::Text)],
     ),
     (
@@ -407,6 +418,7 @@ impl ThroughputActions {
     fn declared(&self) -> impl Iterator<Item = (&'static str, &str)> {
         [
             ("prepare", &self.prepare),
+            ("check", &self.check),
             ("serve", &self.serve),
             ("stop", &self.stop),
             ("run", &self.run),
@@ -900,7 +912,8 @@ fn validate_throughput(
             ));
             continue;
         };
-        let expected = if role == "run" {
+        // Medir e conferir só leem; o resto altera o equipamento.
+        let expected = if matches!(role, "run" | "check") {
             Effect::Read
         } else {
             Effect::Write
@@ -1560,6 +1573,53 @@ mod tests {
         assert!(validate(&vazio)
             .iter()
             .any(|p| p.contains("ao menos um motor")));
+    }
+
+    #[test]
+    fn conferencia_e_leitura_com_o_contrato_do_prepare() {
+        let text = json!({ "type": "string" });
+        let check = |effect: &str, params: Value| -> PluginAction {
+            serde_json::from_value(json!({
+                "id": "tp_check", "title": "Conferir", "effect": effect, "params": params
+            }))
+            .unwrap()
+        };
+        let contrato = json!({ "type": "object", "properties": { "engine": text, "role": text } });
+        let mut manifesto = com_teste_de_enlace();
+        manifesto.actions.push(check("read", contrato.clone()));
+        manifesto.throughput.as_mut().unwrap().actions.check = Some("tp_check".into());
+        assert!(
+            validate(&manifesto).is_empty(),
+            "{:?}",
+            validate(&manifesto)
+        );
+
+        // Conferir não pode alterar o equipamento.
+        let mut escrita = com_teste_de_enlace();
+        escrita.actions.push(check("write", contrato));
+        escrita.throughput.as_mut().unwrap().actions.check = Some("tp_check".into());
+        assert!(
+            validate(&escrita)
+                .iter()
+                .any(|p| p
+                    .contains("`throughput.actions.check` (`tp_check`) precisa ser de leitura")),
+            "{:?}",
+            validate(&escrita)
+        );
+
+        // Os mesmos parâmetros do `prepare`: `engine` e `role`.
+        let mut sem_papel = com_teste_de_enlace();
+        sem_papel.actions.push(check(
+            "read",
+            json!({ "type": "object", "properties": { "engine": { "type": "string" } } }),
+        ));
+        sem_papel.throughput.as_mut().unwrap().actions.check = Some("tp_check".into());
+        assert!(
+            validate(&sem_papel).iter().any(|p| p
+                .contains("`throughput.actions.check` (`tp_check`) precisa do parâmetro `role`")),
+            "{:?}",
+            validate(&sem_papel)
+        );
     }
 
     #[test]

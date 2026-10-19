@@ -23,6 +23,12 @@ plugin nem rode `opkg`/`apk` à mão**: use o plugin embutido
 Ele escolhe o gerenciador pela versão: **OpenWrt 24.10 e anteriores usam
 `opkg`; 25.x em diante usam `apk`** (sem versão, o binário que existir).
 
+Se o `install_package` falhar por certificado HTTPS, o motivo quase sempre é o
+**relógio do roteador** fora da hora: no `apk` ele já tenta sozinho o espelho
+HTTP do mesmo repositório (os pacotes são conferidos pela assinatura do
+OpenWrt) e avisa para acertar o NTP. Não mude a data nem os repositórios do
+roteador por conta própria — diga ao usuário.
+
 ## Você pode alucinar — e o equipamento é real
 
 - Nunca invente comando, caminho, parâmetro ou formato de saída. **Descubra** no
@@ -497,21 +503,27 @@ Plugin que participa do teste de enlace declara o que o equipamento **serve**
 "throughput": {
   "serve": [{ "engine": "btest" }],
   "drive": [{ "engine": "btest", "auth": true }],
-  "actions": { "prepare": "tp_prepare", "serve": "tp_serve", "stop": "tp_stop", "run": "tp_run" }
+  "actions": { "prepare": "tp_prepare", "check": "tp_check", "serve": "tp_serve", "stop": "tp_stop", "run": "tp_run" }
 }
 ```
 
 - Motores: `iperf3`, `btest`. `auth: false` = o cliente só fala com servidor
   sem autenticação. Com `serve`, `actions.serve` e `actions.stop` são
-  obrigatórias; com `drive`, `actions.run`. `prepare` (instalar o que falta) é
-  opcional.
-- `prepare`, `serve` e `stop` são `write`; `run` é `read`.
+  obrigatórias; com `drive`, `actions.run`. `check` (conferir o que falta) e
+  `prepare` (instalar) são opcionais — quem instala algo declara **os dois**.
+- `prepare`, `serve` e `stop` são `write`; `run` e `check` são `read`.
+- **Nunca instale sem aceite.** O `check` só confere (`command -v iperf3`) e
+  devolve o que falta; o plano mostra o passo "Instalar o iperf3 em …" e o
+  `prepare` só roda quando o operador aceita. O teste não chama o `prepare`
+  quando o plugin declara `check`. Sem instalação possível (servidor Linux),
+  `canInstall: false` e a `message` diz como resolver.
 - Os parâmetros são **fixos** — a plataforma passa estes e só estes (sem
   `required`: o que não se aplica não vem):
 
 | Papel | Parâmetros | Devolve |
 |---|---|---|
-| `prepare` | `engine`, `role` (`serve`/`drive`) | `#{ ready, installed: [...] }` |
+| `check` | `engine`, `role` (`serve`/`drive`) | `#{ ready, missing: [pacotes], canInstall, message }` — `message` é a frase da tela ("AP-x não tem o iperf3", com `device.info.name`) |
+| `prepare` | `engine`, `role` (`serve`/`drive`) | `#{ ready, installed: [...], message, warning? }` (`warning`: instalou, mas o operador precisa saber de algo) |
 | `serve` | `engine`, `port` (número), `peer`, `user`, `password` (`secret: true`), `requireAuth` (boolean) | `#{ port, handle }` — `handle` é texto opaco (use `json_encode`), volta intacto no `stop` |
 | `stop` | `engine`, `handle` | `#{ stopped }` |
 | `run` | `engine`, `target`, `port`, `direction`, `durationS`, `streams`, `limitMbps` (números), `user`, `password` (`secret: true`) | `#{ engine, txBps, rxBps, txBytes, rxBytes, retransmits, samples }` |
@@ -522,8 +534,9 @@ Plugin que participa do teste de enlace declara o que o equipamento **serve**
   `authenticate` anterior, o PID do `iperf3 -s`).
 - A ação `run` dispensa teste funcional (precisa de um servidor do outro lado);
   cubra-a com testes unitários. Modelos prontos: `mikrotik-routeros` (btest),
-  `openwrt-link-test` (iperf3 + `mikrotik_btest`, `prepare` com `use_plugin`) e
-  `linux-link-test` (iperf3).
+  `openwrt-link-test` (iperf3 + `mikrotik_btest`, `check` + `prepare` com
+  `use_plugin`) e `linux-link-test` (iperf3, só `check`). O `check` é leitura:
+  precisa de teste funcional como qualquer leitura.
 
 ## Topologia (`topology`)
 
