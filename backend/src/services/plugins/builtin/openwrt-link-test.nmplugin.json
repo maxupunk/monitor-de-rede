@@ -551,6 +551,12 @@
             "exit": 0
           },
           {
+            "ssh": "u=$(cat /etc/opkg/distfeeds.conf /etc/opkg/customfeeds.conf 2>/dev/null | grep -E '^src' | awk '{ print $3 \"/Packages.gz\" }' | head -n 1); [ -n \"$u\" ] || { echo sem-repositorio; exit 2; }; h=${u#*://}; h=${h%%/*}; nslookup \"$h\" >/dev/null 2>&1 || { echo \"dns $h\"; exit 3; }; wget -q -T 10 --spider \"$u\" 2>&1 || { echo \"falhou $u\"; exit 4; }; echo ok",
+            "stdout": "ok\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
             "ssh": "opkg update",
             "stdout": "Updated list of available packages in /var/opkg-lists/openwrt_packages\n",
             "stderr": "",
@@ -604,6 +610,12 @@
             "exit": 0
           },
           {
+            "ssh": "u=$(cat /etc/apk/repositories.d/*.list /etc/apk/repositories 2>/dev/null | grep -E '^https?://' | head -n 1); [ -n \"$u\" ] || { echo sem-repositorio; exit 2; }; h=${u#*://}; h=${h%%/*}; nslookup \"$h\" >/dev/null 2>&1 || { echo \"dns $h\"; exit 3; }; wget -q -T 10 --spider \"$u\" 2>&1 || { echo \"falhou $u\"; exit 4; }; echo ok",
+            "stdout": "ok\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
             "ssh": "apk update",
             "stdout": "OK: 4321 distinct packages available\n",
             "stderr": "",
@@ -641,6 +653,12 @@
           {
             "ssh": "opkg list-installed",
             "stdout": "base-files - 1554-r23630\nbusybox - 1.36.1-1\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "u=$(cat /etc/opkg/distfeeds.conf /etc/opkg/customfeeds.conf 2>/dev/null | grep -E '^src' | awk '{ print $3 \"/Packages.gz\" }' | head -n 1); [ -n \"$u\" ] || { echo sem-repositorio; exit 2; }; h=${u#*://}; h=${h%%/*}; nslookup \"$h\" >/dev/null 2>&1 || { echo \"dns $h\"; exit 3; }; wget -q -T 10 --spider \"$u\" 2>&1 || { echo \"falhou $u\"; exit 4; }; echo ok",
+            "stdout": "ok\n",
             "stderr": "",
             "exit": 0
           },
@@ -1065,6 +1083,12 @@
             "stdout": "base-files-1666-r1 aarch64 {base-files} (GPL-2.0-only) [installed]\n",
             "stderr": "",
             "exit": 0
+          },
+          {
+            "ssh": "u=$(cat /etc/apk/repositories.d/*.list /etc/apk/repositories 2>/dev/null | grep -E '^https?://' | head -n 1); [ -n \"$u\" ] || { echo sem-repositorio; exit 2; }; h=${u#*://}; h=${h%%/*}; nslookup \"$h\" >/dev/null 2>&1 || { echo \"dns $h\"; exit 3; }; wget -q -T 10 --spider \"$u\" 2>&1 || { echo \"falhou $u\"; exit 4; }; echo ok",
+            "stdout": "falhou https://downloads.openwrt.org/releases/25.12.5/packages/aarch64_cortex-a53/base/packages.adb\n",
+            "stderr": "wgetSSL verify error: unknown error\n",
+            "exit": 4
           },
           {
             "ssh": "apk update",

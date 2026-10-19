@@ -23,11 +23,14 @@ plugin nem rode `opkg`/`apk` à mão**: use o plugin embutido
 Ele escolhe o gerenciador pela versão: **OpenWrt 24.10 e anteriores usam
 `opkg`; 25.x em diante usam `apk`** (sem versão, o binário que existir).
 
-Se o `install_package` falhar por certificado HTTPS, o motivo quase sempre é o
-**relógio do roteador** fora da hora: no `apk` ele já tenta sozinho o espelho
-HTTP do mesmo repositório (os pacotes são conferidos pela assinatura do
-OpenWrt) e avisa para acertar o NTP. Não mude a data nem os repositórios do
-roteador por conta própria — diga ao usuário.
+O `install_package` confere antes se o roteador baixa direto do repositório
+(DNS e um índice, 10 s cada). Se não baixa — **DNS do próprio roteador
+quebrado, relógio atrasado invalidando o HTTPS, sem internet** —, ele instala
+**pela central** (espelho de pacotes, os mesmos arquivos oficiais; o
+gerenciador confere a assinatura do OpenWrt) e devolve um aviso "Atenção: …"
+dizendo o motivo e o que corrigir. Se nem pela central der, a falha diz o
+caminho tentado. Não mude DNS, data ou repositórios do roteador por conta
+própria — diga ao usuário o que a mensagem recomenda.
 
 ## Você pode alucinar — e o equipamento é real
 
@@ -141,6 +144,7 @@ texto). Erro: `throw "mensagem"`.
 | `device.ssh(cmd)` | `#{ stdout, stderr, exit }` — não lança |
 | `device.ssh_live(cmd, #{ timeout_ms, progress })` | igual a `ssh`, para comando longo (teste de vazão): prazo próprio (padrão 30 000, de 1 000 a 300 000 ms) e, com `progress: #{ pattern, flow }`, cada linha da saída que casa vira amostra ao vivo (ver "Andamento ao vivo") |
 | `device.progress(#{ flow, bps })` | emite uma amostra à mão (`flow`: `tx`/`rx`; `bps` em bits/s) |
+| `device.package_mirror()` | `#{ port, path }` do espelho de pacotes do OpenWrt na central (o roteador monta `http://<IP de $SSH_CLIENT>:port` + `path` + `/releases/…`), ou `()` quando o equipamento é alcançado por um agente remoto; cada chamada emite um token de 20 min. Use só para índices e pacotes do repositório oficial — o `openwrt-packages` já faz isso sozinho |
 | `device.telnet(cmd)` | saída (texto) |
 | `device.get(path)` | `#{ status, headers, body }` |
 | `device.post_form(path, #{ campo: valor })` | idem |

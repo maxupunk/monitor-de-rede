@@ -20,6 +20,11 @@ expectError?: string,
  */
 firmware?: string, 
 /**
+ * O espelho de pacotes da central está disponível
+ * (`device.package_mirror()` devolve a porta 3333 e o token `TOKEN`).
+ */
+packageMirror?: boolean, 
+/**
  * Configuração simulada, `{ "fleet": {…}, "device": {…} }` — os padrões
  * do esquema são aplicados como na produção.
  */

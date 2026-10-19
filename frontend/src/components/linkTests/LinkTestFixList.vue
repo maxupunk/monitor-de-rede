@@ -63,7 +63,7 @@
             <div v-else-if="item.state === 'working'" class="text-body-small">
               {{
                 item.fix.kind === 'install_package'
-                  ? 'Instalando… pode levar até um minuto.'
+                  ? 'Instalando… o roteador baixa e instala o pacote; pode levar alguns minutos.'
                   : 'Instalando…'
               }}
             </div>

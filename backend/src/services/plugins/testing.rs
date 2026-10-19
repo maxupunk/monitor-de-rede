@@ -28,6 +28,11 @@ use super::{
     transport::{fake::FakeTransport, Login},
     ux_lint::{self, UxHint},
 };
+use crate::services::package_mirror::MirrorAccess;
+
+/// Porta e token do espelho de pacotes nos testes com `packageMirror`.
+pub const TEST_MIRROR_PORT: u16 = 3333;
+pub const TEST_MIRROR_TOKEN: &str = "TOKEN";
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -191,6 +196,10 @@ async fn run_unit_test(
             settings: effective.value,
             secrets,
             library: library.to_vec(),
+            package_mirror: test.package_mirror.then(|| MirrorAccess {
+                port: TEST_MIRROR_PORT,
+                fixed_token: Some(TEST_MIRROR_TOKEN.into()),
+            }),
         },
         device: DeviceInfo {
             id: 0,

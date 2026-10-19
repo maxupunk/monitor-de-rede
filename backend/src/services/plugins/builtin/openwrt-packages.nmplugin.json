@@ -3,7 +3,7 @@
   "manifest": {
     "slug": "openwrt-packages",
     "name": "Gerenciador de pacotes",
-    "version": "1.2.1",
+    "version": "1.3.0",
     "description": "Mostra, procura, instala e remove programas (pacotes) do roteador OpenWrt por SSH. Instalar e remover alteram o roteador. Usa opkg até a versão 24.10 e apk a partir da 25.",
     "author": "NetMonitor",
     "transports": [
@@ -60,7 +60,7 @@
         "title": "Instalar pacote",
         "effect": "write",
         "output": "text",
-        "description": "Atualiza a lista e instala o pacote, se ainda não estiver instalado.",
+        "description": "Atualiza a lista e instala o pacote, se ainda não estiver instalado. Se o roteador não baixa direto (DNS, relógio, internet), instala pela central.",
         "params": {
           "type": "object",
           "properties": {
@@ -151,7 +151,7 @@
       ]
     }
   },
-  "script": "// OpenWrt – Gerenciador de pacotes.\n//\n// OpenWrt 24.10 e anteriores usam `opkg`; 25.x em diante usam `apk`. A versão\n// decide (firmware lido pelo `detect`); sem versão numérica (SNAPSHOT, nunca\n// detectado), vale o binário que existir no roteador.\n\n// Gerenciador para um firmware conhecido; `()` quando a versão não decide.\nfn manager_for_release(firmware) {\n    if firmware == () { return (); }\n    let major = regex_capture(firmware, \"^(\\\\d+)\\\\.\");\n    if major == () { return (); }\n    if parse_int(major) >= 25 { \"apk\" } else { \"opkg\" }\n}\n\nfn manager_from(device, firmware) {\n    let by_release = manager_for_release(firmware);\n    if by_release != () { return by_release; }\n    let found = device.ssh(\"command -v apk >/dev/null 2>&1 && echo apk || echo opkg\");\n    if trimmed(found.stdout) == \"apk\" { \"apk\" } else { \"opkg\" }\n}\n\nfn manager(device) {\n    manager_from(device, device.info.firmware)\n}\n\n// `busybox-1.36.1-r2` → [nome, versão] (formato do apk).\nfn split_apk(token) {\n    let name = regex_capture(token, \"^(.+)-[^-]+-r\\\\d+$\");\n    if name == () { name = regex_capture(token, \"^(.+?)-\\\\d\"); }\n    if name == () { return [token, \"\"]; }\n    [name, token.sub_string(name.len() + 1)]\n}\n\n// Pacotes instalados: nome → versão.\nfn installed_map(device, mgr) {\n    let found = #{};\n    if mgr == \"apk\" {\n        for line in lines(device.run(\"apk list --installed\")) {\n            let parts = split_apk(words(line)[0]);\n            found[parts[0]] = parts[1];\n        }\n    } else {\n        for line in lines(device.run(\"opkg list-installed\")) {\n            let parts = line.split(\" - \");\n            if parts.len() >= 2 { found[parts[0]] = parts[1]; }\n        }\n    }\n    found\n}\n\nfn row(name, version, description, installed) {\n    #{ name: name, version: version, description: description, installed: installed }\n}\n\n// Roda e devolve o que o roteador respondeu, com o comando na frente.\nfn shown(device, command) {\n    let r = device.ssh(command);\n    let text = \"$ \" + command + \"\\n\" + r.stdout;\n    if trimmed(r.stderr) != \"\" { text += \"\\n\" + r.stderr; }\n    #{ text: text, exit: r.exit }\n}\n\nfn detect(device, params) {\n    let release = parse_kv(device.run(\"cat /etc/openwrt_release\"), \"=\");\n    let board = device.ssh(\"ubus call system board\");\n    let model = ();\n    if board.exit == 0 { model = json_parse(board.stdout).model; }\n    let firmware = release.DISTRIB_RELEASE;\n    #{\n        firmware: firmware,\n        target: release.DISTRIB_TARGET,\n        description: release.DISTRIB_DESCRIPTION,\n        model: model,\n        package_manager: manager_from(device, firmware)\n    }\n}\n\nfn list_packages(device, params) {\n    let mgr = manager(device);\n    let installed = installed_map(device, mgr);\n    let query = params.query;\n    let rows = [];\n    if query == () || trimmed(query) == \"\" {\n        for name in installed.keys() {\n            rows.push(row(name, installed[name], \"\", true));\n        }\n        return rows;\n    }\n    let filter = \" | grep -i -- \" + shell_quote(query) + \" | head -n 200\";\n    if mgr == \"apk\" {\n        for line in lines(device.run(\"apk list\" + filter)) {\n            let parts = split_apk(words(line)[0]);\n            rows.push(row(parts[0], parts[1], \"\", installed.contains(parts[0])));\n        }\n    } else {\n        for line in lines(device.run(\"opkg list\" + filter)) {\n            let parts = line.split(\" - \");\n            let description = if parts.len() >= 3 { parts[2] } else { \"\" };\n            let version = if parts.len() >= 2 { parts[1] } else { \"\" };\n            rows.push(row(parts[0], version, description, installed.contains(parts[0])));\n        }\n    }\n    rows\n}\n\nfn update_index(device, params) {\n    let mgr = manager(device);\n    let result = shown(device, mgr + \" update\");\n    if result.exit != 0 { throw result.text; }\n    result.text\n}\n\n// Falha de HTTPS ao baixar do repositório: quase sempre o relógio do\n// roteador fora da hora (o certificado parece \"ainda não válido\") ou CA.\nfn tls_failure(text) {\n    text.contains(\"verify error\") || text.contains(\"certificate\") || text.contains(\"CERT\")\n}\n\n// O motivo numa frase — a saída inteira do gerenciador continua no\n// registro da execução (\"Ver execução\").\nfn install_failure(device, mgr, name, text) {\n    if tls_failure(text) {\n        let clock = trimmed(device.run(\"date\"));\n        return \"O roteador não validou o certificado HTTPS do repositório de pacotes. O relógio dele marca \" + clock + \" — com a data errada, o certificado parece ainda não valer. Acerte o NTP do roteador e tente de novo.\";\n    }\n    if text.contains(\"No space left\") {\n        return \"Falta espaço na flash do roteador para instalar \" + name + \".\";\n    }\n    if text.contains(\"resolve\") || text.contains(\"temporary error\") || text.contains(\"Network unreachable\") || text.contains(\"Connection refused\") || text.contains(\"timed out\") {\n        return \"O roteador não alcançou o repositório de pacotes (sem internet ou sem DNS). Confira a saída dele para a internet.\";\n    }\n    if text.contains(\"unable to select\") || text.contains(\"Unknown package\") || text.contains(\"not found\") {\n        return \"O pacote \" + name + \" não existe nos repositórios configurados neste roteador.\";\n    }\n    \"O gerenciador de pacotes (\" + mgr + \") não conseguiu instalar \" + name + \". A saída completa está em \\\"Ver execução\\\".\"\n}\n\nfn install_package(device, params) {\n    let mgr = manager(device);\n    let name = shell_quote(params.name);\n    if installed_map(device, mgr).contains(params.name) {\n        return \"O pacote \" + params.name + \" já está instalado. Nada foi alterado.\";\n    }\n    let update = shown(device, mgr + \" update\");\n    let command = if mgr == \"apk\" { \"apk add \" + name } else { \"opkg install \" + name };\n    let install = shown(device, command);\n    let text = update.text + \"\\n\" + install.text;\n    if install.exit != 0 && mgr == \"apk\" && tls_failure(text) {\n        // Espelho HTTP do MESMO repositório, só nesta execução: a lista vai\n        // para /tmp (RAM) e é apagada no fim — a configuração do roteador não\n        // muda. Seguro: o apk confere a assinatura do OpenWrt no índice e em\n        // cada pacote, qualquer que seja o transporte.\n        let list = \"/tmp/nm-repos-http.list\";\n        let retry = shown(device, \"cat /etc/apk/repositories.d/*.list /etc/apk/repositories 2>/dev/null | grep '^https://' | sed 's#^https://#http://#' > \" + list + \" && apk --repositories-file \" + list + \" add \" + name + \"; status=$?; rm -f \" + list + \"; exit $status\");\n        text += \"\\n\" + retry.text;\n        if retry.exit == 0 && installed_map(device, mgr).contains(params.name) {\n            let clock = trimmed(device.run(\"date\"));\n            // Último parágrafo \"Atenção: …\": quem usa esta ação (o teste de\n            // enlace) o mostra ao operador como aviso.\n            return text + \"\\n\\nAtenção: Instalado pelo espelho HTTP do repositório, porque o roteador não validou o HTTPS (o relógio dele marca \" + clock + \"). Os pacotes foram conferidos pela assinatura do OpenWrt. Recomendo acertar o NTP do roteador.\";\n        }\n    }\n    if install.exit != 0 { throw install_failure(device, mgr, params.name, text); }\n    if !installed_map(device, mgr).contains(params.name) {\n        throw \"O gerenciador terminou sem o pacote \" + params.name + \" aparecer como instalado. A saída completa está em \\\"Ver execução\\\".\";\n    }\n    text\n}\n\nfn remove_package(device, params) {\n    let mgr = manager(device);\n    if !installed_map(device, mgr).contains(params.name) {\n        return \"O pacote \" + params.name + \" não está instalado. Nada foi alterado.\";\n    }\n    let name = shell_quote(params.name);\n    let command = if mgr == \"apk\" { \"apk del \" + name } else { \"opkg remove \" + name };\n    let result = shown(device, command);\n    if result.exit != 0 { throw result.text; }\n    result.text\n}\n",
+  "script": "// OpenWrt – Gerenciador de pacotes.\n//\n// OpenWrt 24.10 e anteriores usam `opkg`; 25.x em diante usam `apk`. A versão\n// decide (firmware lido pelo `detect`); sem versão numérica (SNAPSHOT, nunca\n// detectado), vale o binário que existir no roteador.\n\n// Gerenciador para um firmware conhecido; `()` quando a versão não decide.\nfn manager_for_release(firmware) {\n    if firmware == () { return (); }\n    let major = regex_capture(firmware, \"^(\\\\d+)\\\\.\");\n    if major == () { return (); }\n    if parse_int(major) >= 25 { \"apk\" } else { \"opkg\" }\n}\n\nfn manager_from(device, firmware) {\n    let by_release = manager_for_release(firmware);\n    if by_release != () { return by_release; }\n    let found = device.ssh(\"command -v apk >/dev/null 2>&1 && echo apk || echo opkg\");\n    if trimmed(found.stdout) == \"apk\" { \"apk\" } else { \"opkg\" }\n}\n\nfn manager(device) {\n    manager_from(device, device.info.firmware)\n}\n\n// `busybox-1.36.1-r2` → [nome, versão] (formato do apk).\nfn split_apk(token) {\n    let name = regex_capture(token, \"^(.+)-[^-]+-r\\\\d+$\");\n    if name == () { name = regex_capture(token, \"^(.+?)-\\\\d\"); }\n    if name == () { return [token, \"\"]; }\n    [name, token.sub_string(name.len() + 1)]\n}\n\n// Pacotes instalados: nome → versão.\nfn installed_map(device, mgr) {\n    let found = #{};\n    if mgr == \"apk\" {\n        for line in lines(device.run(\"apk list --installed\")) {\n            let parts = split_apk(words(line)[0]);\n            found[parts[0]] = parts[1];\n        }\n    } else {\n        for line in lines(device.run(\"opkg list-installed\")) {\n            let parts = line.split(\" - \");\n            if parts.len() >= 2 { found[parts[0]] = parts[1]; }\n        }\n    }\n    found\n}\n\nfn row(name, version, description, installed) {\n    #{ name: name, version: version, description: description, installed: installed }\n}\n\n// Roda e devolve o que o roteador respondeu, com o comando na frente.\nfn shown(device, command) {\n    let r = device.ssh(command);\n    let text = \"$ \" + command + \"\\n\" + r.stdout;\n    if trimmed(r.stderr) != \"\" { text += \"\\n\" + r.stderr; }\n    #{ text: text, exit: r.exit }\n}\n\nfn detect(device, params) {\n    let release = parse_kv(device.run(\"cat /etc/openwrt_release\"), \"=\");\n    let board = device.ssh(\"ubus call system board\");\n    let model = ();\n    if board.exit == 0 { model = json_parse(board.stdout).model; }\n    let firmware = release.DISTRIB_RELEASE;\n    #{\n        firmware: firmware,\n        target: release.DISTRIB_TARGET,\n        description: release.DISTRIB_DESCRIPTION,\n        model: model,\n        package_manager: manager_from(device, firmware)\n    }\n}\n\nfn list_packages(device, params) {\n    let mgr = manager(device);\n    let installed = installed_map(device, mgr);\n    let query = params.query;\n    let rows = [];\n    if query == () || trimmed(query) == \"\" {\n        for name in installed.keys() {\n            rows.push(row(name, installed[name], \"\", true));\n        }\n        return rows;\n    }\n    let filter = \" | grep -i -- \" + shell_quote(query) + \" | head -n 200\";\n    if mgr == \"apk\" {\n        for line in lines(device.run(\"apk list\" + filter)) {\n            let parts = split_apk(words(line)[0]);\n            rows.push(row(parts[0], parts[1], \"\", installed.contains(parts[0])));\n        }\n    } else {\n        for line in lines(device.run(\"opkg list\" + filter)) {\n            let parts = line.split(\" - \");\n            let description = if parts.len() >= 3 { parts[2] } else { \"\" };\n            let version = if parts.len() >= 2 { parts[1] } else { \"\" };\n            rows.push(row(parts[0], version, description, installed.contains(parts[0])));\n        }\n    }\n    rows\n}\n\n// Prazos dos comandos que baixam do repositório: o índice num roteador lento\n// ou num link ruim passa fácil dos 30 s do `device.ssh`.\nfn update_timeout() { 180000 }\nfn install_timeout() { 240000 }\nfn mirror_timeout() { 300000 }\n\n// Mensagem de um erro pego por `catch` (texto do `throw` ou erro do sistema).\nfn error_text(err) {\n    if type_of(err) == \"map\" && err.message != () { err.message } else { err.to_string() }\n}\n\n// Como `shown`, com prazo próprio. O prazo estourado vira resultado (`exit`\n// -1, `timeout`) em vez de derrubar a ação: quem chama escolhe a frase. O\n// cancelamento pelo operador continua derrubando.\nfn shown_live(device, command, timeout_ms) {\n    let r = ();\n    try {\n        r = device.ssh_live(command, #{ timeout_ms: timeout_ms });\n    } catch (err) {\n        let message = error_text(err);\n        if message.contains(\"cancelada\") { throw message; }\n        return #{ text: \"$ \" + command + \"\\n\" + message, exit: -1, timeout: true };\n    }\n    let text = \"$ \" + command + \"\\n\" + r.stdout;\n    if trimmed(r.stderr) != \"\" { text += \"\\n\" + r.stderr; }\n    #{ text: text, exit: r.exit, timeout: false }\n}\n\nfn add_command(mgr, name) {\n    if mgr == \"apk\" { \"apk add \" + name } else { \"opkg install \" + name }\n}\n\n// Os índices dos repositórios configurados, um por linha.\nfn repo_index_cmd(mgr) {\n    if mgr == \"apk\" {\n        \"cat /etc/apk/repositories.d/*.list /etc/apk/repositories 2>/dev/null | grep -E '^https?://'\"\n    } else {\n        \"cat /etc/opkg/distfeeds.conf /etc/opkg/customfeeds.conf 2>/dev/null | grep -E '^src' | awk '{ print $3 \\\"/Packages.gz\\\" }'\"\n    }\n}\n\n// O roteador baixa direto do repositório? Confere o DNS e um índice (10 s\n// cada) antes de instalar: com o DNS quebrado, o gerenciador esperaria\n// repositório por repositório e a instalação estouraria o prazo.\nfn reach_repository(device, mgr) {\n    let command = \"u=$(\" + repo_index_cmd(mgr) + \" | head -n 1); [ -n \\\"$u\\\" ] || { echo sem-repositorio; exit 2; }; h=${u#*://}; h=${h%%/*}; nslookup \\\"$h\\\" >/dev/null 2>&1 || { echo \\\"dns $h\\\"; exit 3; }; wget -q -T 10 --spider \\\"$u\\\" 2>&1 || { echo \\\"falhou $u\\\"; exit 4; }; echo ok\";\n    let r = shown_live(device, command, 60000);\n    let reason = if r.exit == 0 { \"ok\" } else if r.exit == 2 { \"none\" } else if r.exit == 3 { \"dns\" } else if r.exit == 4 && tls_failure(r.text) { \"tls\" } else { \"net\" };\n    #{ reason: reason, text: r.text }\n}\n\n// Por que o roteador não baixou direto, numa frase.\nfn reach_reason(device, reach) {\n    if reach.reason == \"dns\" {\n        let host = regex_capture(reach.text, \"(?m)^dns (\\\\S+)\");\n        if host == () { host = \"o repositório\"; }\n        return \"o roteador não resolve nomes: o DNS que ele mesmo usa (/etc/resolv.conf) não respondeu para \" + host;\n    }\n    if reach.reason == \"tls\" {\n        return \"o roteador não validou o HTTPS do repositório (o relógio dele marca \" + trimmed(device.run(\"date\")) + \")\";\n    }\n    \"o roteador não alcançou o repositório (sem saída para a internet?)\"\n}\n\nfn reach_fix(reach) {\n    if reach.reason == \"dns\" { return \"Corrija o DNS do próprio roteador\"; }\n    if reach.reason == \"tls\" { return \"Acerte o NTP do roteador\"; }\n    \"Confira a saída do roteador para a internet\"\n}\n\n// Instala pelo espelho da central (`device.package_mirror()`): os\n// repositórios oficiais apontando para ela, num arquivo de /tmp (RAM) apagado\n// no fim — a configuração do roteador não muda. O endereço é o da central\n// vista pelo roteador ($SSH_CLIENT). O gerenciador continua conferindo a\n// assinatura do OpenWrt no índice e em cada pacote. Saída 5: o roteador não\n// alcança a central; 2: nenhum repositório oficial para espelhar.\nfn mirror_command(mgr, mirror, name) {\n    let head = \"ip=${SSH_CLIENT%% *}; case \\\"$ip\\\" in *:*) ip=\\\"[$ip]\\\";; esac; b=http://$ip:\" + mirror.port + mirror.path + \"; \";\n    let rewrite = \"sed -E \\\"s#https?://downloads\\\\.openwrt\\\\.org#$b#\\\"\";\n    if mgr == \"apk\" {\n        return head + \"L=/tmp/nm-mirror.list; \" + repo_index_cmd(mgr) + \" | grep -F '://downloads.openwrt.org/' | \" + rewrite + \" > $L; [ -s $L ] || { echo sem-repositorio-oficial; rm -f $L; exit 2; }; wget -q -T 10 --spider \\\"$(head -n 1 $L)\\\" 2>&1 || { echo \\\"central-inalcancavel $b\\\"; rm -f $L; exit 5; }; apk --repositories-file $L add \" + name + \"; s=$?; rm -f $L; exit $s\";\n    }\n    head + \"C=/tmp/nm-mirror-opkg.conf; grep -v '^src' /etc/opkg.conf > $C; cat /etc/opkg/distfeeds.conf /etc/opkg/customfeeds.conf 2>/dev/null | grep -E '^src' | grep -F '://downloads.openwrt.org/' | sed -E 's#^(src[^ ]*) +#\\\\1 nm_#' | \" + rewrite + \" >> $C; grep -q '^src' $C || { echo sem-repositorio-oficial; rm -f $C; exit 2; }; u=$(grep -m 1 '^src' $C | awk '{ print $3 \\\"/Packages.gz\\\" }'); wget -q -T 10 --spider \\\"$u\\\" 2>&1 || { echo \\\"central-inalcancavel $b\\\"; rm -f $C; exit 5; }; opkg -f $C update; opkg -f $C install \" + name + \"; s=$?; rm -f $C /var/opkg-lists/nm_*; exit $s\"\n}\n\n// O pacote apareceu como instalado? O aviso, quando houver, vira o último\n// parágrafo \"Atenção: …\" — quem usa esta ação (o teste de enlace) o mostra\n// ao operador.\nfn confirmed(device, mgr, pkg, text, warning) {\n    if !installed_map(device, mgr).contains(pkg) {\n        throw \"O gerenciador terminou sem o pacote \" + pkg + \" aparecer como instalado. A saída completa está em \\\"Ver execução\\\".\";\n    }\n    if warning == () { text } else { text + \"\\n\\nAtenção: \" + warning }\n}\n\nfn update_index(device, params) {\n    let mgr = manager(device);\n    let result = shown_live(device, mgr + \" update\", update_timeout());\n    if result.timeout {\n        throw \"O roteador não terminou de baixar a lista de pacotes em \" + update_timeout() / 60000 + \" minutos (link lento ou repositório inalcançável).\";\n    }\n    if result.exit != 0 { throw result.text; }\n    result.text\n}\n\n// Falha de HTTPS ao baixar do repositório: quase sempre o relógio do\n// roteador fora da hora (o certificado parece \"ainda não válido\") ou CA.\nfn tls_failure(text) {\n    text.contains(\"verify error\") || text.contains(\"certificate\") || text.contains(\"CERT\")\n}\n\n// O motivo numa frase — a saída inteira do gerenciador continua no\n// registro da execução (\"Ver execução\").\nfn install_failure(device, mgr, name, text, timed_out) {\n    if text.contains(\"Could not lock\") || text.contains(\"Unable to lock\") {\n        return \"Outro gerenciador de pacotes está rodando no roteador (talvez uma instalação anterior que ainda não terminou). Espere um minuto e tente de novo.\";\n    }\n    if timed_out {\n        return \"O roteador não terminou a instalação de \" + name + \" no prazo (link lento ou roteador sobrecarregado). Ela pode continuar rodando nele: espere um pouco e tente de novo — se o pacote já tiver entrado, nada é refeito.\";\n    }\n    if tls_failure(text) {\n        let clock = trimmed(device.run(\"date\"));\n        return \"O roteador não validou o certificado HTTPS do repositório de pacotes. O relógio dele marca \" + clock + \" — com a data errada, o certificado parece ainda não valer. Acerte o NTP do roteador e tente de novo.\";\n    }\n    if text.contains(\"No space left\") {\n        return \"Falta espaço na flash do roteador para instalar \" + name + \".\";\n    }\n    if text.contains(\"unable to select\") || text.contains(\"Unknown package\") || text.contains(\"not found\") {\n        return \"O pacote \" + name + \" não existe nos repositórios configurados neste roteador.\";\n    }\n    if text.contains(\"resolve\") || text.contains(\"temporary error\") || text.contains(\"Network unreachable\") || text.contains(\"Connection refused\") || text.contains(\"timed out\") {\n        return \"O roteador não alcançou o repositório de pacotes (sem internet ou sem DNS). Confira a saída dele para a internet.\";\n    }\n    \"O gerenciador de pacotes (\" + mgr + \") não conseguiu instalar \" + name + \". A saída completa está em \\\"Ver execução\\\".\"\n}\n\nfn install_package(device, params) {\n    let mgr = manager(device);\n    let name = shell_quote(params.name);\n    if installed_map(device, mgr).contains(params.name) {\n        return \"O pacote \" + params.name + \" já está instalado. Nada foi alterado.\";\n    }\n    let reach = reach_repository(device, mgr);\n    if reach.reason == \"none\" {\n        throw \"O roteador não tem nenhum repositório de pacotes configurado.\";\n    }\n    if reach.reason == \"ok\" {\n        let update = shown_live(device, mgr + \" update\", update_timeout());\n        let install = shown_live(device, add_command(mgr, name), install_timeout());\n        let text = reach.text + \"\\n\" + update.text + \"\\n\" + install.text;\n        if install.exit != 0 { throw install_failure(device, mgr, params.name, text, install.timeout); }\n        return confirmed(device, mgr, params.name, text, ());\n    }\n\n    // O roteador não baixa direto: pela central, que tem DNS, relógio e\n    // saída para a internet.\n    let why = reach_reason(device, reach);\n    let text = reach.text;\n    let central = \"\";\n    let mirror = device.package_mirror();\n    if mirror == () {\n        central = \" A central não pode servir os pacotes a este equipamento (ele é alcançado por um agente remoto).\";\n    } else {\n        let via = shown_live(device, mirror_command(mgr, mirror, name), mirror_timeout());\n        text += \"\\n\" + via.text;\n        if via.exit == 0 {\n            return confirmed(device, mgr, params.name, text, \"Instalado pela central (espelho de pacotes), porque \" + why + \". Os pacotes foram conferidos pela assinatura do OpenWrt. \" + reach_fix(reach) + \" para ele voltar a instalar sozinho.\");\n        }\n        if via.exit == 5 {\n            let address = regex_capture(via.text, \"(?m)^central-inalcancavel (\\\\S+)\");\n            if address == () { address = \"a central\"; }\n            central = \" Pela central também não deu: o roteador não alcançou \" + address + \" (firewall entre o roteador e a central, ou a porta da API não publicada).\";\n        } else if via.exit != 2 {\n            // Chegou ao gerenciador: pacote inexistente, espaço, trava ou\n            // prazo — o motivo dele vale mais que o do caminho.\n            throw install_failure(device, mgr, params.name, via.text, via.timeout);\n        }\n    }\n\n    // Último recurso para o HTTPS recusado: o espelho HTTP do próprio\n    // repositório, com a lista em /tmp apagada no fim.\n    if mgr == \"apk\" && reach.reason == \"tls\" {\n        let list = \"/tmp/nm-repos-http.list\";\n        let retry = shown_live(device, \"cat /etc/apk/repositories.d/*.list /etc/apk/repositories 2>/dev/null | grep '^https://' | sed 's#^https://#http://#' > \" + list + \" && apk --repositories-file \" + list + \" add \" + name + \"; status=$?; rm -f \" + list + \"; exit $status\", install_timeout());\n        text += \"\\n\" + retry.text;\n        if retry.exit == 0 {\n            return confirmed(device, mgr, params.name, text, \"Instalado pelo espelho HTTP do repositório, porque \" + why + \". Os pacotes foram conferidos pela assinatura do OpenWrt. Recomendo acertar o NTP do roteador.\");\n        }\n    }\n    throw \"Não deu para baixar o \" + params.name + \": \" + why + \".\" + central + \" \" + reach_fix(reach) + \" e tente de novo.\";\n}\n\nfn remove_package(device, params) {\n    let mgr = manager(device);\n    if !installed_map(device, mgr).contains(params.name) {\n        return \"O pacote \" + params.name + \" não está instalado. Nada foi alterado.\";\n    }\n    let name = shell_quote(params.name);\n    let command = if mgr == \"apk\" { \"apk del \" + name } else { \"opkg remove \" + name };\n    let result = shown(device, command);\n    if result.exit != 0 { throw result.text; }\n    result.text\n}\n",
   "usage": "# Gerenciador de pacotes (OpenWrt)\n\nInstala programas no roteador OpenWrt pelo gerenciador de pacotes, por SSH.\nPrecisa de uma credencial SSH cadastrada (usuário `root`, normalmente).\n\n- **OpenWrt 24.10 e anteriores:** `opkg`.\n- **OpenWrt 25.x em diante:** `apk`.\n\nA versão vem do **Detectar versão**; sem ela, o plugin usa o gerenciador que\nexistir no roteador.\n\n## Detectar versão\nLê `/etc/openwrt_release` e `ubus call system board`: versão, alvo, modelo e\ngerenciador de pacotes. Não altera nada.\n\n## Listar pacotes\nSem busca, mostra os pacotes instalados. Com busca, procura nos disponíveis\n(até 200 resultados) e marca os já instalados. Não altera nada. Lista de\ndisponíveis vazia? Rode **Atualizar lista de pacotes** primeiro — no opkg ela\nfica em memória e some ao reiniciar.\n\n## Atualizar lista de pacotes\n`opkg update` / `apk update`. Baixa o índice dos repositórios; precisa de\ninternet a partir do roteador.\n\n## Instalar pacote\nAtualiza a lista e roda `opkg install` / `apk add`. **Altera o equipamento.**\nSe o pacote já estiver instalado, nada é feito. Devolve o que o roteador\nrespondeu. Pacotes ocupam a flash: em equipamentos de 8 MB confira o espaço\nlivre antes.\n\n## Remover pacote\n`opkg remove` / `apk del`. **Altera o equipamento.** Remover pacote do sistema\n(ex.: `dropbear`, `uhttpd`) pode cortar o acesso.\n\n## Cuidados\nPacotes instalados não sobrevivem a um upgrade de firmware. Mantenha backup da\nconfiguração (`sysupgrade -b`) antes de mudanças.\n",
   "compatibility": [],
   "tests": {
@@ -363,160 +363,6 @@
         "expectContains": "4321 distinct packages"
       },
       {
-        "name": "instala com opkg e devolve a saída",
-        "action": "install_package",
-        "firmware": "24.10.0",
-        "params": {
-          "name": "luci-app-sqm"
-        },
-        "fixtures": [
-          {
-            "ssh": "opkg list-installed",
-            "stdout": "base-files - 1554-r23630\nbusybox - 1.36.1-1\n",
-            "stderr": "",
-            "exit": 0
-          },
-          {
-            "ssh": "opkg update",
-            "stdout": "Updated list of available packages in /var/opkg-lists/openwrt_core\n",
-            "stderr": "",
-            "exit": 0
-          },
-          {
-            "ssh": "opkg install 'luci-app-sqm'",
-            "stdout": "Installing luci-app-sqm (1.6.0) to root...\nConfiguring luci-app-sqm.\n",
-            "stderr": "",
-            "exit": 0
-          },
-          {
-            "ssh": "opkg list-installed",
-            "stdout": "base-files - 1554-r23630\nbusybox - 1.36.1-1\nluci-app-sqm - 1.6.0\n",
-            "stderr": "",
-            "exit": 0
-          }
-        ],
-        "expectContains": "Installing luci-app-sqm"
-      },
-      {
-        "name": "instala com apk (25.12)",
-        "action": "install_package",
-        "firmware": "25.12.0",
-        "params": {
-          "name": "luci-app-sqm"
-        },
-        "fixtures": [
-          {
-            "ssh": "apk list --installed",
-            "stdout": "base-files-1666-r1 x86_64 {base-files} (GPL-2.0-only) [installed]\nbusybox-1.37.0-r5 x86_64 {busybox} (GPL-2.0-only) [installed]\n",
-            "stderr": "",
-            "exit": 0
-          },
-          {
-            "ssh": "apk update",
-            "stdout": "OK: 4321 distinct packages available\n",
-            "stderr": "",
-            "exit": 0
-          },
-          {
-            "ssh": "apk add 'luci-app-sqm'",
-            "stdout": "(1/2) Installing sqm-scripts (1.6.0-r2)\n(2/2) Installing luci-app-sqm (1.6.0-r1)\nOK: 12 MiB in 150 packages\n",
-            "stderr": "",
-            "exit": 0
-          },
-          {
-            "ssh": "apk list --installed",
-            "stdout": "base-files-1666-r1 x86_64 {base-files} (GPL-2.0-only) [installed]\nbusybox-1.37.0-r5 x86_64 {busybox} (GPL-2.0-only) [installed]\nluci-app-sqm-1.6.0-r1 noarch {luci-app-sqm} (GPL-2.0) [installed]\n",
-            "stderr": "",
-            "exit": 0
-          }
-        ],
-        "expectContains": "Installing luci-app-sqm (1.6.0-r1)"
-      },
-      {
-        "name": "instalação sem confirmação vira erro",
-        "action": "install_package",
-        "firmware": "24.10.0",
-        "params": {
-          "name": "luci-app-sqm"
-        },
-        "fixtures": [
-          {
-            "ssh": "opkg list-installed",
-            "stdout": "base-files - 1554-r23630\nbusybox - 1.36.1-1\n",
-            "stderr": "",
-            "exit": 0
-          },
-          {
-            "ssh": "opkg update",
-            "stdout": "Updated list\n",
-            "stderr": "",
-            "exit": 0
-          },
-          {
-            "ssh": "opkg install 'luci-app-sqm'",
-            "stdout": "Installing luci-app-sqm (1.6.0) to root...\n",
-            "stderr": "",
-            "exit": 0
-          }
-        ],
-        "expectError": "aparecer como instalado"
-      },
-      {
-        "name": "não reinstala o que já existe",
-        "action": "install_package",
-        "firmware": "24.10.0",
-        "params": {
-          "name": "busybox"
-        },
-        "fixtures": [
-          {
-            "ssh": "opkg list-installed",
-            "stdout": "base-files - 1554-r23630\nbusybox - 1.36.1-1\n",
-            "stderr": "",
-            "exit": 0
-          }
-        ],
-        "expectContains": "já está instalado"
-      },
-      {
-        "name": "falha do gerenciador volta como erro com a saída",
-        "action": "install_package",
-        "firmware": "24.10.0",
-        "params": {
-          "name": "inexistente"
-        },
-        "fixtures": [
-          {
-            "ssh": "opkg list-installed",
-            "stdout": "base-files - 1554-r23630\nbusybox - 1.36.1-1\n",
-            "stderr": "",
-            "exit": 0
-          },
-          {
-            "ssh": "opkg update",
-            "stdout": "Updated list\n",
-            "stderr": "",
-            "exit": 0
-          },
-          {
-            "ssh": "opkg install 'inexistente'",
-            "stdout": "",
-            "stderr": "Unknown package 'inexistente'.\n",
-            "exit": 255
-          }
-        ],
-        "expectError": "não existe nos repositórios"
-      },
-      {
-        "name": "nome com injeção é recusado antes do roteador",
-        "action": "install_package",
-        "params": {
-          "name": "x; reboot"
-        },
-        "fixtures": [],
-        "expectError": "formato inválido"
-      },
-      {
         "name": "remove com opkg",
         "action": "remove_package",
         "firmware": "24.10.0",
@@ -557,7 +403,217 @@
         "expectContains": "não está instalado"
       },
       {
-        "name": "relógio errado (HTTPS recusado): instala pelo espelho HTTP e avisa do NTP",
+        "name": "instala com opkg e devolve a saída",
+        "action": "install_package",
+        "firmware": "24.10.0",
+        "params": {
+          "name": "luci-app-sqm"
+        },
+        "fixtures": [
+          {
+            "ssh": "opkg list-installed",
+            "stdout": "base-files - 1554-r23630\nbusybox - 1.36.1-1\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "u=$(cat /etc/opkg/distfeeds.conf /etc/opkg/customfeeds.conf 2>/dev/null | grep -E '^src' | awk '{ print $3 \"/Packages.gz\" }' | head -n 1); [ -n \"$u\" ] || { echo sem-repositorio; exit 2; }; h=${u#*://}; h=${h%%/*}; nslookup \"$h\" >/dev/null 2>&1 || { echo \"dns $h\"; exit 3; }; wget -q -T 10 --spider \"$u\" 2>&1 || { echo \"falhou $u\"; exit 4; }; echo ok",
+            "stdout": "ok\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "opkg update",
+            "stdout": "Updated list of available packages in /var/opkg-lists/openwrt_core\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "opkg install 'luci-app-sqm'",
+            "stdout": "Installing luci-app-sqm (1.6.0-1) to root...\nConfiguring luci-app-sqm.\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "opkg list-installed",
+            "stdout": "base-files - 1554-r23630\nbusybox - 1.36.1-1\nluci-app-sqm - 1.6.0-1\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expectContains": "Installing luci-app-sqm"
+      },
+      {
+        "name": "instala com apk (25.12)",
+        "action": "install_package",
+        "firmware": "25.12.0",
+        "params": {
+          "name": "luci-app-sqm"
+        },
+        "fixtures": [
+          {
+            "ssh": "apk list --installed",
+            "stdout": "base-files-1666-r1 aarch64 {base-files} (GPL-2.0-only) [installed]\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "u=$(cat /etc/apk/repositories.d/*.list /etc/apk/repositories 2>/dev/null | grep -E '^https?://' | head -n 1); [ -n \"$u\" ] || { echo sem-repositorio; exit 2; }; h=${u#*://}; h=${h%%/*}; nslookup \"$h\" >/dev/null 2>&1 || { echo \"dns $h\"; exit 3; }; wget -q -T 10 --spider \"$u\" 2>&1 || { echo \"falhou $u\"; exit 4; }; echo ok",
+            "stdout": "ok\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "apk update",
+            "stdout": "OK: 4321 distinct packages available\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "apk add 'luci-app-sqm'",
+            "stdout": "(1/1) Installing luci-app-sqm (1.6.0-r1)\nOK: 30 MiB in 200 packages\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "apk list --installed",
+            "stdout": "base-files-1666-r1 aarch64 {base-files} (GPL-2.0-only) [installed]\nluci-app-sqm-1.6.0-r1 noarch {luci-app-sqm} (GPL-2.0) [installed]\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expectContains": "Installing luci-app-sqm (1.6.0-r1)"
+      },
+      {
+        "name": "instalação sem o pacote aparecer vira erro",
+        "action": "install_package",
+        "firmware": "24.10.0",
+        "params": {
+          "name": "luci-app-sqm"
+        },
+        "fixtures": [
+          {
+            "ssh": "opkg list-installed",
+            "stdout": "base-files - 1554-r23630\nbusybox - 1.36.1-1\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "u=$(cat /etc/opkg/distfeeds.conf /etc/opkg/customfeeds.conf 2>/dev/null | grep -E '^src' | awk '{ print $3 \"/Packages.gz\" }' | head -n 1); [ -n \"$u\" ] || { echo sem-repositorio; exit 2; }; h=${u#*://}; h=${h%%/*}; nslookup \"$h\" >/dev/null 2>&1 || { echo \"dns $h\"; exit 3; }; wget -q -T 10 --spider \"$u\" 2>&1 || { echo \"falhou $u\"; exit 4; }; echo ok",
+            "stdout": "ok\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "opkg update",
+            "stdout": "Updated list\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "opkg install 'luci-app-sqm'",
+            "stdout": "Installing luci-app-sqm\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "opkg list-installed",
+            "stdout": "base-files - 1554-r23630\nbusybox - 1.36.1-1\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expectError": "aparecer como instalado"
+      },
+      {
+        "name": "não reinstala o que já existe",
+        "action": "install_package",
+        "firmware": "24.10.0",
+        "params": {
+          "name": "luci-app-sqm"
+        },
+        "fixtures": [
+          {
+            "ssh": "opkg list-installed",
+            "stdout": "base-files - 1554-r23630\nbusybox - 1.36.1-1\nluci-app-sqm - 1.6.0-1\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "expectContains": "já está instalado"
+      },
+      {
+        "name": "pacote inexistente: motivo curto",
+        "action": "install_package",
+        "firmware": "24.10.0",
+        "params": {
+          "name": "inexistente"
+        },
+        "fixtures": [
+          {
+            "ssh": "opkg list-installed",
+            "stdout": "base-files - 1554-r23630\nbusybox - 1.36.1-1\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "u=$(cat /etc/opkg/distfeeds.conf /etc/opkg/customfeeds.conf 2>/dev/null | grep -E '^src' | awk '{ print $3 \"/Packages.gz\" }' | head -n 1); [ -n \"$u\" ] || { echo sem-repositorio; exit 2; }; h=${u#*://}; h=${h%%/*}; nslookup \"$h\" >/dev/null 2>&1 || { echo \"dns $h\"; exit 3; }; wget -q -T 10 --spider \"$u\" 2>&1 || { echo \"falhou $u\"; exit 4; }; echo ok",
+            "stdout": "ok\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "opkg update",
+            "stdout": "Updated list\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "opkg install 'inexistente'",
+            "stdout": "",
+            "stderr": "Unknown package 'inexistente'.\nCollected errors:\n * opkg_install_cmd: Cannot install package inexistente.\n",
+            "exit": 255
+          }
+        ],
+        "expectError": "não existe nos repositórios"
+      },
+      {
+        "name": "outro opkg rodando (trava): pede para esperar",
+        "action": "install_package",
+        "firmware": "24.10.0",
+        "params": {
+          "name": "luci-app-sqm"
+        },
+        "fixtures": [
+          {
+            "ssh": "opkg list-installed",
+            "stdout": "base-files - 1554-r23630\nbusybox - 1.36.1-1\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "u=$(cat /etc/opkg/distfeeds.conf /etc/opkg/customfeeds.conf 2>/dev/null | grep -E '^src' | awk '{ print $3 \"/Packages.gz\" }' | head -n 1); [ -n \"$u\" ] || { echo sem-repositorio; exit 2; }; h=${u#*://}; h=${h%%/*}; nslookup \"$h\" >/dev/null 2>&1 || { echo \"dns $h\"; exit 3; }; wget -q -T 10 --spider \"$u\" 2>&1 || { echo \"falhou $u\"; exit 4; }; echo ok",
+            "stdout": "ok\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "opkg update",
+            "stdout": "",
+            "stderr": "Could not lock /var/lock/opkg.lock: Resource temporarily unavailable.\n",
+            "exit": 255
+          },
+          {
+            "ssh": "opkg install 'luci-app-sqm'",
+            "stdout": "",
+            "stderr": "Could not lock /var/lock/opkg.lock: Resource temporarily unavailable.\n",
+            "exit": 255
+          }
+        ],
+        "expectError": "Outro gerenciador de pacotes está rodando"
+      },
+      {
+        "name": "apk travado (temporary error) não vira 'sem internet'",
         "action": "install_package",
         "firmware": "25.12.5",
         "params": {
@@ -571,19 +627,58 @@
             "exit": 0
           },
           {
+            "ssh": "u=$(cat /etc/apk/repositories.d/*.list /etc/apk/repositories 2>/dev/null | grep -E '^https?://' | head -n 1); [ -n \"$u\" ] || { echo sem-repositorio; exit 2; }; h=${u#*://}; h=${h%%/*}; nslookup \"$h\" >/dev/null 2>&1 || { echo \"dns $h\"; exit 3; }; wget -q -T 10 --spider \"$u\" 2>&1 || { echo \"falhou $u\"; exit 4; }; echo ok",
+            "stdout": "ok\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
             "ssh": "apk update",
             "stdout": "",
-            "stderr": "WARNING: updating https://downloads.openwrt.org/releases/25.12.5/packages/aarch64_cortex-a53/base/packages.adb: unexpected end of file wgetSSL verify error: unknown error ERROR: wget: exited with error 5\n",
-            "exit": 1
+            "stderr": "ERROR: Unable to lock database: temporary error (try again later)\n",
+            "exit": 99
           },
           {
             "ssh": "apk add 'iperf3'",
-            "stdout": "(1/3) Installing libatomic1 (14.3.0-r5)\n",
-            "stderr": "WARNING: updating https://downloads.openwrt.org/releases/25.12.5/packages/aarch64_cortex-a53/base/packages.adb: unexpected end of file wgetSSL verify error: unknown error ERROR: wget: exited with error 5\n3 errors; 28.7 MiB in 199 packages\n",
+            "stdout": "",
+            "stderr": "ERROR: Unable to lock database: temporary error (try again later)\n",
+            "exit": 99
+          }
+        ],
+        "expectError": "Outro gerenciador de pacotes está rodando"
+      },
+      {
+        "name": "nome com injeção é recusado antes do roteador",
+        "action": "install_package",
+        "firmware": "24.10.0",
+        "params": {
+          "name": "x; reboot"
+        },
+        "fixtures": [],
+        "expectError": "formato inválido"
+      },
+      {
+        "name": "DNS do roteador quebrado: instala pela central e avisa",
+        "action": "install_package",
+        "firmware": "25.12.5",
+        "params": {
+          "name": "iperf3"
+        },
+        "fixtures": [
+          {
+            "ssh": "apk list --installed",
+            "stdout": "base-files-1666-r1 aarch64 {base-files} (GPL-2.0-only) [installed]\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "u=$(cat /etc/apk/repositories.d/*.list /etc/apk/repositories 2>/dev/null | grep -E '^https?://' | head -n 1); [ -n \"$u\" ] || { echo sem-repositorio; exit 2; }; h=${u#*://}; h=${h%%/*}; nslookup \"$h\" >/dev/null 2>&1 || { echo \"dns $h\"; exit 3; }; wget -q -T 10 --spider \"$u\" 2>&1 || { echo \"falhou $u\"; exit 4; }; echo ok",
+            "stdout": "dns downloads.openwrt.org\n",
+            "stderr": "",
             "exit": 3
           },
           {
-            "ssh": "cat /etc/apk/repositories.d/*.list /etc/apk/repositories 2>/dev/null | grep '^https://' | sed 's#^https://#http://#' > /tmp/nm-repos-http.list && apk --repositories-file /tmp/nm-repos-http.list add 'iperf3'; status=$?; rm -f /tmp/nm-repos-http.list; exit $status",
+            "ssh": "ip=${SSH_CLIENT%% *}; case \"$ip\" in *:*) ip=\"[$ip]\";; esac; b=http://$ip:3333/api/package-mirror/openwrt/TOKEN; L=/tmp/nm-mirror.list; cat /etc/apk/repositories.d/*.list /etc/apk/repositories 2>/dev/null | grep -E '^https?://' | grep -F '://downloads.openwrt.org/' | sed -E \"s#https?://downloads\\.openwrt\\.org#$b#\" > $L; [ -s $L ] || { echo sem-repositorio-oficial; rm -f $L; exit 2; }; wget -q -T 10 --spider \"$(head -n 1 $L)\" 2>&1 || { echo \"central-inalcancavel $b\"; rm -f $L; exit 5; }; apk --repositories-file $L add 'iperf3'; s=$?; rm -f $L; exit $s",
             "stdout": "(1/3) Installing libatomic1 (14.3.0-r5)\n(2/3) Installing libiperf3 (3.20-r1)\n(3/3) Installing iperf3 (3.20-r1)\nOK: 29 MiB in 202 packages\n",
             "stderr": "",
             "exit": 0
@@ -593,10 +688,207 @@
             "stdout": "base-files-1666-r1 aarch64 {base-files} (GPL-2.0-only) [installed]\niperf3-3.20-r1 aarch64 {iperf} (BSD-3-Clause) [installed]\n",
             "stderr": "",
             "exit": 0
+          }
+        ],
+        "packageMirror": true,
+        "expectContains": "Atenção: Instalado pela central (espelho de pacotes), porque o roteador não resolve nomes"
+      },
+      {
+        "name": "relógio errado (HTTPS recusado): pela central, com a data do roteador",
+        "action": "install_package",
+        "firmware": "25.12.5",
+        "params": {
+          "name": "iperf3"
+        },
+        "fixtures": [
+          {
+            "ssh": "apk list --installed",
+            "stdout": "base-files-1666-r1 aarch64 {base-files} (GPL-2.0-only) [installed]\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "u=$(cat /etc/apk/repositories.d/*.list /etc/apk/repositories 2>/dev/null | grep -E '^https?://' | head -n 1); [ -n \"$u\" ] || { echo sem-repositorio; exit 2; }; h=${u#*://}; h=${h%%/*}; nslookup \"$h\" >/dev/null 2>&1 || { echo \"dns $h\"; exit 3; }; wget -q -T 10 --spider \"$u\" 2>&1 || { echo \"falhou $u\"; exit 4; }; echo ok",
+            "stdout": "falhou https://downloads.openwrt.org/releases/25.12.5/targets/x/packages/packages.adb\n",
+            "stderr": "wgetSSL verify error: unknown error\nERROR: wget: exited with error 5\n",
+            "exit": 4
           },
           {
             "ssh": "date",
             "stdout": "Sun Sep  6 00:35:30 -03 2026\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "ip=${SSH_CLIENT%% *}; case \"$ip\" in *:*) ip=\"[$ip]\";; esac; b=http://$ip:3333/api/package-mirror/openwrt/TOKEN; L=/tmp/nm-mirror.list; cat /etc/apk/repositories.d/*.list /etc/apk/repositories 2>/dev/null | grep -E '^https?://' | grep -F '://downloads.openwrt.org/' | sed -E \"s#https?://downloads\\.openwrt\\.org#$b#\" > $L; [ -s $L ] || { echo sem-repositorio-oficial; rm -f $L; exit 2; }; wget -q -T 10 --spider \"$(head -n 1 $L)\" 2>&1 || { echo \"central-inalcancavel $b\"; rm -f $L; exit 5; }; apk --repositories-file $L add 'iperf3'; s=$?; rm -f $L; exit $s",
+            "stdout": "OK: 29 MiB in 202 packages\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "apk list --installed",
+            "stdout": "base-files-1666-r1 aarch64 {base-files} (GPL-2.0-only) [installed]\niperf3-3.20-r1 aarch64 {iperf} (BSD-3-Clause) [installed]\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "packageMirror": true,
+        "expectContains": "o relógio dele marca Sun Sep  6 00:35:30 -03 2026"
+      },
+      {
+        "name": "opkg pela central (24.10, DNS quebrado)",
+        "action": "install_package",
+        "firmware": "24.10.0",
+        "params": {
+          "name": "luci-app-sqm"
+        },
+        "fixtures": [
+          {
+            "ssh": "opkg list-installed",
+            "stdout": "base-files - 1554-r23630\nbusybox - 1.36.1-1\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "u=$(cat /etc/opkg/distfeeds.conf /etc/opkg/customfeeds.conf 2>/dev/null | grep -E '^src' | awk '{ print $3 \"/Packages.gz\" }' | head -n 1); [ -n \"$u\" ] || { echo sem-repositorio; exit 2; }; h=${u#*://}; h=${h%%/*}; nslookup \"$h\" >/dev/null 2>&1 || { echo \"dns $h\"; exit 3; }; wget -q -T 10 --spider \"$u\" 2>&1 || { echo \"falhou $u\"; exit 4; }; echo ok",
+            "stdout": "dns downloads.openwrt.org\n",
+            "stderr": "",
+            "exit": 3
+          },
+          {
+            "ssh": "ip=${SSH_CLIENT%% *}; case \"$ip\" in *:*) ip=\"[$ip]\";; esac; b=http://$ip:3333/api/package-mirror/openwrt/TOKEN; C=/tmp/nm-mirror-opkg.conf; grep -v '^src' /etc/opkg.conf > $C; cat /etc/opkg/distfeeds.conf /etc/opkg/customfeeds.conf 2>/dev/null | grep -E '^src' | grep -F '://downloads.openwrt.org/' | sed -E 's#^(src[^ ]*) +#\\1 nm_#' | sed -E \"s#https?://downloads\\.openwrt\\.org#$b#\" >> $C; grep -q '^src' $C || { echo sem-repositorio-oficial; rm -f $C; exit 2; }; u=$(grep -m 1 '^src' $C | awk '{ print $3 \"/Packages.gz\" }'); wget -q -T 10 --spider \"$u\" 2>&1 || { echo \"central-inalcancavel $b\"; rm -f $C; exit 5; }; opkg -f $C update; opkg -f $C install 'luci-app-sqm'; s=$?; rm -f $C /var/opkg-lists/nm_*; exit $s",
+            "stdout": "Installing luci-app-sqm (1.6.0-1) to root...\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "opkg list-installed",
+            "stdout": "base-files - 1554-r23630\nbusybox - 1.36.1-1\nluci-app-sqm - 1.6.0-1\n",
+            "stderr": "",
+            "exit": 0
+          }
+        ],
+        "packageMirror": true,
+        "expectContains": "Instalado pela central"
+      },
+      {
+        "name": "sem DNS e a central inalcançável: diz o caminho e o que corrigir",
+        "action": "install_package",
+        "firmware": "25.12.5",
+        "params": {
+          "name": "iperf3"
+        },
+        "fixtures": [
+          {
+            "ssh": "apk list --installed",
+            "stdout": "base-files-1666-r1 aarch64 {base-files} (GPL-2.0-only) [installed]\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "u=$(cat /etc/apk/repositories.d/*.list /etc/apk/repositories 2>/dev/null | grep -E '^https?://' | head -n 1); [ -n \"$u\" ] || { echo sem-repositorio; exit 2; }; h=${u#*://}; h=${h%%/*}; nslookup \"$h\" >/dev/null 2>&1 || { echo \"dns $h\"; exit 3; }; wget -q -T 10 --spider \"$u\" 2>&1 || { echo \"falhou $u\"; exit 4; }; echo ok",
+            "stdout": "dns downloads.openwrt.org\n",
+            "stderr": "",
+            "exit": 3
+          },
+          {
+            "ssh": "ip=${SSH_CLIENT%% *}; case \"$ip\" in *:*) ip=\"[$ip]\";; esac; b=http://$ip:3333/api/package-mirror/openwrt/TOKEN; L=/tmp/nm-mirror.list; cat /etc/apk/repositories.d/*.list /etc/apk/repositories 2>/dev/null | grep -E '^https?://' | grep -F '://downloads.openwrt.org/' | sed -E \"s#https?://downloads\\.openwrt\\.org#$b#\" > $L; [ -s $L ] || { echo sem-repositorio-oficial; rm -f $L; exit 2; }; wget -q -T 10 --spider \"$(head -n 1 $L)\" 2>&1 || { echo \"central-inalcancavel $b\"; rm -f $L; exit 5; }; apk --repositories-file $L add 'iperf3'; s=$?; rm -f $L; exit $s",
+            "stdout": "central-inalcancavel http://10.0.0.170:3333/api/package-mirror/openwrt/TOKEN\n",
+            "stderr": "Connection refused\n",
+            "exit": 5
+          }
+        ],
+        "packageMirror": true,
+        "expectError": "o roteador não alcançou http://10.0.0.170:3333"
+      },
+      {
+        "name": "pela central o pacote não existe: motivo do gerenciador",
+        "action": "install_package",
+        "firmware": "25.12.5",
+        "params": {
+          "name": "inexistente"
+        },
+        "fixtures": [
+          {
+            "ssh": "apk list --installed",
+            "stdout": "base-files-1666-r1 aarch64 {base-files} (GPL-2.0-only) [installed]\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "u=$(cat /etc/apk/repositories.d/*.list /etc/apk/repositories 2>/dev/null | grep -E '^https?://' | head -n 1); [ -n \"$u\" ] || { echo sem-repositorio; exit 2; }; h=${u#*://}; h=${h%%/*}; nslookup \"$h\" >/dev/null 2>&1 || { echo \"dns $h\"; exit 3; }; wget -q -T 10 --spider \"$u\" 2>&1 || { echo \"falhou $u\"; exit 4; }; echo ok",
+            "stdout": "dns downloads.openwrt.org\n",
+            "stderr": "",
+            "exit": 3
+          },
+          {
+            "ssh": "ip=${SSH_CLIENT%% *}; case \"$ip\" in *:*) ip=\"[$ip]\";; esac; b=http://$ip:3333/api/package-mirror/openwrt/TOKEN; L=/tmp/nm-mirror.list; cat /etc/apk/repositories.d/*.list /etc/apk/repositories 2>/dev/null | grep -E '^https?://' | grep -F '://downloads.openwrt.org/' | sed -E \"s#https?://downloads\\.openwrt\\.org#$b#\" > $L; [ -s $L ] || { echo sem-repositorio-oficial; rm -f $L; exit 2; }; wget -q -T 10 --spider \"$(head -n 1 $L)\" 2>&1 || { echo \"central-inalcancavel $b\"; rm -f $L; exit 5; }; apk --repositories-file $L add 'inexistente'; s=$?; rm -f $L; exit $s",
+            "stdout": "",
+            "stderr": "ERROR: unable to select packages:\n  inexistente (no such package)\n",
+            "exit": 1
+          }
+        ],
+        "packageMirror": true,
+        "expectError": "não existe nos repositórios"
+      },
+      {
+        "name": "sem DNS e sem espelho (agente remoto): frase com a correção",
+        "action": "install_package",
+        "firmware": "25.12.5",
+        "params": {
+          "name": "iperf3"
+        },
+        "fixtures": [
+          {
+            "ssh": "apk list --installed",
+            "stdout": "base-files-1666-r1 aarch64 {base-files} (GPL-2.0-only) [installed]\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "u=$(cat /etc/apk/repositories.d/*.list /etc/apk/repositories 2>/dev/null | grep -E '^https?://' | head -n 1); [ -n \"$u\" ] || { echo sem-repositorio; exit 2; }; h=${u#*://}; h=${h%%/*}; nslookup \"$h\" >/dev/null 2>&1 || { echo \"dns $h\"; exit 3; }; wget -q -T 10 --spider \"$u\" 2>&1 || { echo \"falhou $u\"; exit 4; }; echo ok",
+            "stdout": "dns downloads.openwrt.org\n",
+            "stderr": "",
+            "exit": 3
+          }
+        ],
+        "expectError": "Corrija o DNS do próprio roteador e tente de novo"
+      },
+      {
+        "name": "relógio errado sem espelho: espelho HTTP do repositório e aviso do NTP",
+        "action": "install_package",
+        "firmware": "25.12.5",
+        "params": {
+          "name": "iperf3"
+        },
+        "fixtures": [
+          {
+            "ssh": "apk list --installed",
+            "stdout": "base-files-1666-r1 aarch64 {base-files} (GPL-2.0-only) [installed]\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "u=$(cat /etc/apk/repositories.d/*.list /etc/apk/repositories 2>/dev/null | grep -E '^https?://' | head -n 1); [ -n \"$u\" ] || { echo sem-repositorio; exit 2; }; h=${u#*://}; h=${h%%/*}; nslookup \"$h\" >/dev/null 2>&1 || { echo \"dns $h\"; exit 3; }; wget -q -T 10 --spider \"$u\" 2>&1 || { echo \"falhou $u\"; exit 4; }; echo ok",
+            "stdout": "falhou https://x/packages.adb\n",
+            "stderr": "wgetSSL verify error: unknown error\nERROR: wget: exited with error 5\n",
+            "exit": 4
+          },
+          {
+            "ssh": "date",
+            "stdout": "Sun Sep  6 00:35:30 -03 2026\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "cat /etc/apk/repositories.d/*.list /etc/apk/repositories 2>/dev/null | grep '^https://' | sed 's#^https://#http://#' > /tmp/nm-repos-http.list && apk --repositories-file /tmp/nm-repos-http.list add 'iperf3'; status=$?; rm -f /tmp/nm-repos-http.list; exit $status",
+            "stdout": "OK: 29 MiB in 202 packages\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
+            "ssh": "apk list --installed",
+            "stdout": "base-files-1666-r1 aarch64 {base-files} (GPL-2.0-only) [installed]\niperf3-3.20-r1 aarch64 {iperf} (BSD-3-Clause) [installed]\n",
             "stderr": "",
             "exit": 0
           }
@@ -604,7 +896,7 @@
         "expectContains": "Recomendo acertar o NTP"
       },
       {
-        "name": "relógio errado e espelho também falha: motivo curto com a data do roteador",
+        "name": "relógio errado, sem espelho e o HTTP também falha: data do roteador",
         "action": "install_package",
         "firmware": "25.12.5",
         "params": {
@@ -618,34 +910,28 @@
             "exit": 0
           },
           {
-            "ssh": "apk update",
-            "stdout": "",
-            "stderr": "WARNING: updating https://downloads.openwrt.org/releases/25.12.5/packages/aarch64_cortex-a53/base/packages.adb: unexpected end of file wgetSSL verify error: unknown error ERROR: wget: exited with error 5\n",
-            "exit": 1
-          },
-          {
-            "ssh": "apk add 'iperf3'",
-            "stdout": "",
-            "stderr": "WARNING: updating https://downloads.openwrt.org/releases/25.12.5/packages/aarch64_cortex-a53/base/packages.adb: unexpected end of file wgetSSL verify error: unknown error ERROR: wget: exited with error 5\n",
-            "exit": 3
-          },
-          {
-            "ssh": "cat /etc/apk/repositories.d/*.list /etc/apk/repositories 2>/dev/null | grep '^https://' | sed 's#^https://#http://#' > /tmp/nm-repos-http.list && apk --repositories-file /tmp/nm-repos-http.list add 'iperf3'; status=$?; rm -f /tmp/nm-repos-http.list; exit $status",
-            "stdout": "",
-            "stderr": "ERROR: unable to select packages:\n",
-            "exit": 1
+            "ssh": "u=$(cat /etc/apk/repositories.d/*.list /etc/apk/repositories 2>/dev/null | grep -E '^https?://' | head -n 1); [ -n \"$u\" ] || { echo sem-repositorio; exit 2; }; h=${u#*://}; h=${h%%/*}; nslookup \"$h\" >/dev/null 2>&1 || { echo \"dns $h\"; exit 3; }; wget -q -T 10 --spider \"$u\" 2>&1 || { echo \"falhou $u\"; exit 4; }; echo ok",
+            "stdout": "falhou https://x/packages.adb\n",
+            "stderr": "wgetSSL verify error: unknown error\nERROR: wget: exited with error 5\n",
+            "exit": 4
           },
           {
             "ssh": "date",
             "stdout": "Sun Sep  6 00:35:30 -03 2026\n",
             "stderr": "",
             "exit": 0
+          },
+          {
+            "ssh": "cat /etc/apk/repositories.d/*.list /etc/apk/repositories 2>/dev/null | grep '^https://' | sed 's#^https://#http://#' > /tmp/nm-repos-http.list && apk --repositories-file /tmp/nm-repos-http.list add 'iperf3'; status=$?; rm -f /tmp/nm-repos-http.list; exit $status",
+            "stdout": "",
+            "stderr": "ERROR: unable to select packages\n",
+            "exit": 1
           }
         ],
-        "expectError": "O relógio dele marca Sun Sep  6 00:35:30 -03 2026"
+        "expectError": "o relógio dele marca Sun Sep  6 00:35:30 -03 2026"
       },
       {
-        "name": "sem internet: motivo curto, sem despejar a saída",
+        "name": "sem repositório configurado",
         "action": "install_package",
         "firmware": "25.12.5",
         "params": {
@@ -659,19 +945,13 @@
             "exit": 0
           },
           {
-            "ssh": "apk update",
-            "stdout": "",
-            "stderr": "ERROR: https://downloads.openwrt.org/...: temporary error (try again later)\n",
-            "exit": 1
-          },
-          {
-            "ssh": "apk add 'iperf3'",
-            "stdout": "",
-            "stderr": "ERROR: unable to resolve host\n",
-            "exit": 1
+            "ssh": "u=$(cat /etc/apk/repositories.d/*.list /etc/apk/repositories 2>/dev/null | grep -E '^https?://' | head -n 1); [ -n \"$u\" ] || { echo sem-repositorio; exit 2; }; h=${u#*://}; h=${h%%/*}; nslookup \"$h\" >/dev/null 2>&1 || { echo \"dns $h\"; exit 3; }; wget -q -T 10 --spider \"$u\" 2>&1 || { echo \"falhou $u\"; exit 4; }; echo ok",
+            "stdout": "sem-repositorio\n",
+            "stderr": "",
+            "exit": 2
           }
         ],
-        "expectError": "não alcançou o repositório de pacotes"
+        "expectError": "nenhum repositório de pacotes configurado"
       }
     ],
     "functional": [

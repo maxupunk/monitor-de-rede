@@ -47,10 +47,11 @@ use crate::{
     dtos::plugins::PluginRunView,
     models::{devices, plugin_runs, plugins},
     services::{
-        agents::hub::AgentHub,
+        agents::{hub::AgentHub, install_address},
         audit::{AuditAction, AuditActor, AuditEntryInput, AuditService, ResourceType},
         devices::systems,
         events::EventBus,
+        package_mirror::MirrorAccess,
         shared::errors::{AppError, AppResult},
     },
 };
@@ -273,6 +274,12 @@ pub async fn prepare(ctx: &AppContext, spec: RunSpec) -> AppResult<Prepared> {
     let transport = transport_for(ctx, resolved.via_probe_id).await?;
     let mut extras = load_extras(&ctx.db, &spec.plugin, &package, spec.device.id).await?;
     extras.secrets.extend(secret_params);
+    // A central fala direto com o equipamento: ele a alcança de volta pela
+    // porta publicada da API, e o espelho de pacotes fica à disposição do
+    // script. Pelo agente remoto, o roteador do outro site não chega aqui.
+    if resolved.via_probe_id.is_none() {
+        extras.package_mirror = Some(MirrorAccess::new(install_address::ports(ctx).1));
+    }
 
     let run = insert_run(
         &ctx.db,

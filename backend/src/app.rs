@@ -173,6 +173,9 @@ impl Hooks for App {
             // Idem para o agente remoto (ADR 011): código de enrollment ou
             // token, validados no handler; o canal é um WebSocket de saída.
             .add_route(controllers::agents::agent_routes())
+            // O gerenciador de pacotes do roteador não tem sessão: o espelho
+            // (ADR 015 §10) confere o token da execução do plugin no handler.
+            .add_route(controllers::package_mirror::routes())
             .add_route(controllers::dashboard::routes().layer(business_auth.clone()))
             .add_route(controllers::backup::routes().layer(business_auth.clone()))
             .add_route(controllers::storages::routes().layer(business_auth.clone()))

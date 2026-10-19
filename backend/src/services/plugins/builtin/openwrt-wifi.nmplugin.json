@@ -2682,6 +2682,12 @@
             "exit": 0
           },
           {
+            "ssh": "u=$(cat /etc/opkg/distfeeds.conf /etc/opkg/customfeeds.conf 2>/dev/null | grep -E '^src' | awk '{ print $3 \"/Packages.gz\" }' | head -n 1); [ -n \"$u\" ] || { echo sem-repositorio; exit 2; }; h=${u#*://}; h=${h%%/*}; nslookup \"$h\" >/dev/null 2>&1 || { echo \"dns $h\"; exit 3; }; wget -q -T 10 --spider \"$u\" 2>&1 || { echo \"falhou $u\"; exit 4; }; echo ok",
+            "stdout": "ok\n",
+            "stderr": "",
+            "exit": 0
+          },
+          {
             "ssh": "opkg update",
             "stdout": "Updated list\n",
             "exit": 0

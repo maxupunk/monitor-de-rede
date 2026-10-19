@@ -49,6 +49,7 @@ mod link_tests;
 mod local_agent;
 mod maintenance_windows;
 mod monitor_interface_binding;
+mod package_mirror;
 mod plugin_fleet;
 mod prepare_data;
 mod process_deps;

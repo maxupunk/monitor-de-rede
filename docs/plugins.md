@@ -245,6 +245,13 @@ O manifesto diz onde o plugin aparece (`surfaces`):
   `GET /api/plugins/topology-actions?deviceIds=1,2` →
   `{ "<deviceId>": [{ pluginId, pluginSlug, pluginName, action, title, effect,
   hasParams, definition }] }`.
+- **Espelho de pacotes**: `device.package_mirror()` devolve `#{ port, path }`
+  do espelho do repositório oficial do OpenWrt na central
+  (`GET /api/package-mirror/openwrt/{token}/{releases|snapshots}/…`, sem JWT,
+  token de 20 min por chamada, só índices e pacotes) — ou `()` quando o
+  equipamento é alcançado por um agente remoto. O roteador monta a URL com o
+  IP de `$SSH_CLIENT`; o `openwrt-packages` usa isso quando o roteador não
+  baixa direto (ADR 015 §10).
 - **Andamento ao vivo**: `device.ssh_live(cmd, #{ timeout_ms, progress })` é o
   `ssh` com prazo próprio (até 300 s; a execução estica o prazo para caber a
   chamada, até o teto de 10 min) e, com `progress: #{ pattern, flow }`, cada

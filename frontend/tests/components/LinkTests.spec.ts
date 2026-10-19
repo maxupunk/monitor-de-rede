@@ -493,7 +493,9 @@ describe('telas do teste de enlace', () => {
       params: { engine: 'iperf3', role: 'serve' },
       confirmWrite: true,
     })
-    expect(body()).toContain('Instalando… pode levar até um minuto.')
+    expect(body()).toContain(
+      'Instalando… o roteador baixa e instala o pacote; pode levar alguns minutos.'
+    )
 
     // O fim chega pelo SSE; o plano é refeito uma vez, sem consultas repetidas.
     usePluginsStore().applyRunFinished({

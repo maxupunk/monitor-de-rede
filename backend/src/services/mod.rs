@@ -22,6 +22,7 @@ pub mod monitoring;
 pub mod network_tools;
 pub mod notifications;
 pub mod onboarding;
+pub mod package_mirror;
 pub mod plugins;
 pub mod preferences;
 pub mod probes;

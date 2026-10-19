@@ -98,6 +98,11 @@ pub struct UnitTest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub firmware: Option<String>,
+    /// O espelho de pacotes da central está disponível
+    /// (`device.package_mirror()` devolve a porta 3333 e o token `TOKEN`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[ts(optional, as = "Option<bool>")]
+    pub package_mirror: bool,
     /// Configuração simulada, `{ "fleet": {…}, "device": {…} }` — os padrões
     /// do esquema são aplicados como na produção.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -436,6 +441,7 @@ mod tests {
             expect_contains: None,
             expect_error: None,
             firmware: None,
+            package_mirror: false,
             settings: None,
             input: None,
         });

@@ -510,6 +510,58 @@ mapa pelo registro de ações (todo nó com IP, inclusive desconhecido) e na
 ficha do dispositivo; o diálogo diz o que o número é e oferece "Fazer o teste
 de velocidade completo".
 
+### 10. Instalar pacote quando o roteador não baixa sozinho (adendo, 2026-10-19)
+
+**Problema.** Na BORDA (Bananapi BPI-R3, OpenWrt 25.12.5) o "Instalar o
+iperf3" falhava sempre com "O equipamento não respondeu em 30 s". Causa real,
+lida no aparelho: o AdGuardHome dela atende a LAN (10.0.0.1) mas **não o
+próprio roteador** (127.0.0.1/::1 esperam 5 s e falham), então o `apk` não
+resolve `downloads.openwrt.org` e o `apk update` esperava o DNS repositório
+por repositório até o `device.ssh` estourar os 30 s. O relógio dela também
+estava 34 dias atrasado (o HTTPS falharia mesmo com DNS). E o `opkg`/`apk`
+cortado pelo prazo continua rodando no roteador, segurando a trava para a
+próxima tentativa.
+
+**Decisão.** O `install_package` do `openwrt-packages` (1.3.0):
+
+1. **Confere antes** se o roteador baixa direto: DNS do host do primeiro
+   repositório e um `wget --spider` do índice, 10 s cada. Um DNS quebrado custa
+   ~10 s, não minutos.
+2. Baixando direto: `update` e `add`/`install` por `ssh_live` com prazo de 3 e
+   4 min (o índice num link lento passa dos 30 s do `ssh`).
+3. Não baixando: instala **pela central**. A central serve o repositório
+   oficial em `GET /api/package-mirror/openwrt/{token}/{caminho}`
+   (`services/package_mirror/`): sem JWT — quem chama é o gerenciador do
+   roteador —, com token de 20 min emitido para a execução
+   (`device.package_mirror()`), só `releases/`/`snapshots/` e só índices e
+   pacotes (`.adb`, `.apk`, `.ipk`, `Packages*`, `index.json`). Não é proxy
+   aberto, e o gerenciador do roteador continua conferindo a assinatura do
+   OpenWrt: a central não consegue trocar um pacote. O roteador alcança a
+   central pelo IP de `$SSH_CLIENT` (o endereço pelo qual a central chegou a
+   ele) e pela porta publicada da API (`APP_EXTERNAL_PORT`) — a mesma premissa
+   do servidor btest. A lista (apk) ou a conf (opkg) apontando para a central
+   vai para `/tmp` e é apagada no fim: a configuração do roteador não muda.
+   Pelo agente remoto não há espelho (o roteador do outro site não alcança
+   esta porta).
+4. Último recurso para o HTTPS recusado sem espelho: o espelho HTTP do próprio
+   repositório (como antes).
+5. Falha vira uma frase: trava de outro gerenciador ("espere um minuto"),
+   prazo estourado, relógio/HTTPS com a data do roteador, sem espaço, pacote
+   inexistente, central inalcançável (com o endereço tentado) — e o que
+   corrigir no roteador.
+
+**Evidência real.** BORDA: plano pediu o aceite; a checagem acusou
+`dns downloads.openwrt.org` em 10 s, o iperf3 entrou pela central em 5 s, o
+aviso "Instalado pela central… Corrija o DNS do próprio roteador" apareceu no
+passo, e o teste central→BORDA mediu 349 / 425 Mbit/s. Nada ficou em `/tmp`
+e os repositórios dela continuaram os oficiais. OpenWrt 24.10.4 (`opkg`, em
+container, DNS quebrado de propósito): o mesmo comando gerado instalou o
+iperf3 3.17.1 baixando os `.ipk` pela central. Achado: o `opkg -f <conf>`
+**também lê `/etc/opkg/*.conf`** — tenta os feeds originais antes (cada um
+espera o DNS, ~40 s no total) e depois instala pelos `nm_*`; funciona, mais
+devagar. No container o SSH chega pelo NAT do Docker (172.17.0.1), endereço
+que não leva de volta à central — a falha disse exatamente isso.
+
 ## Consequências
 
 - Porta nova publicada na central (2000/TCP), fechada a quem não tem sessão

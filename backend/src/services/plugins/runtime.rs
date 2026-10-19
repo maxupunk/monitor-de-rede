@@ -259,6 +259,9 @@ pub struct Extras {
     /// Segredos da configuração (senha do Wi-Fi), mascarados na saída.
     pub secrets: Vec<String>,
     pub library: Vec<LibraryPlugin>,
+    /// Espelho de pacotes da central (`device.package_mirror()`, ADR 015 §10).
+    /// `None` quando o equipamento não alcança a central (agente remoto).
+    pub package_mirror: Option<crate::services::package_mirror::MirrorAccess>,
 }
 
 pub struct ExecutionContext {
@@ -462,6 +465,7 @@ fn sandboxed_engine(limits: Limits, inner: Option<Arc<Inner>>) -> Engine {
         .register_fn("post_json", DeviceHandle::post_json)
         .register_get("settings", DeviceHandle::settings)
         .register_fn("use_plugin", DeviceHandle::use_plugin)
+        .register_fn("package_mirror", DeviceHandle::package_mirror)
         .register_fn("log", DeviceHandle::log);
     engine
 }
@@ -1320,6 +1324,23 @@ impl DeviceHandle {
 
     fn ssh_live_default(&mut self, command: &str) -> RhaiResult<Map> {
         self.ssh_live(command, Map::new())
+    }
+
+    /// `device.package_mirror()`: `#{ port, path }` do espelho de pacotes da
+    /// central para este pedido (o roteador monta `http://<IP da central>:port`
+    /// com o `$SSH_CLIENT` dele), ou `()` quando o equipamento não alcança a
+    /// central. Cada chamada emite um token novo, de vida curta.
+    fn package_mirror(&mut self) -> Dynamic {
+        let Some(access) = self.0.context.extras.package_mirror.as_ref() else {
+            return Dynamic::UNIT;
+        };
+        let mut map = Map::new();
+        map.insert("port".into(), Dynamic::from(i64::from(access.port)));
+        map.insert(
+            "path".into(),
+            Dynamic::from(format!("/api/package-mirror/openwrt/{}", access.token())),
+        );
+        Dynamic::from_map(map)
     }
 
     /// `device.progress(#{ flow, bps })`: uma amostra à mão.
