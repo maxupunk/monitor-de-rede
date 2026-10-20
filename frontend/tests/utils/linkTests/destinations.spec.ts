@@ -7,10 +7,11 @@ import {
   type DestinationNode,
 } from '@/utils/linkTests/destinations'
 import {
-  COLUMN_SPACING,
   LINE_SPACING,
+  pathMapHeight,
   pathMapPositions,
-  verticalMapHeight,
+  lightUp,
+  pickerPositions,
 } from '@/utils/linkTests/pathMap'
 import { edge, node } from '../topology/fixtures'
 
@@ -77,22 +78,66 @@ describe('De / Até do teste de velocidade', () => {
   })
 })
 
-describe('mini mapa do teste', () => {
-  it('o caminho vai em linha, na ordem medida, com espaço para o resultado', () => {
-    expect(pathMapPositions([5, 6, 7])).toEqual({
-      5: { x: 0, y: 0 },
-      6: { x: LINE_SPACING, y: 0 },
-      7: { x: 2 * LINE_SPACING, y: 0 },
+describe('mapas do teste', () => {
+  it('recorte: as posições do mapa, crescidas por igual até cada par ter folga no seu eixo', () => {
+    // Um abaixo do outro a 100 px: basta a folga vertical (150) — cresce 1,5×.
+    expect(
+      pathMapPositions([1, 2, 3], { 1: { x: 0, y: 0 }, 2: { x: 0, y: 100 }, 3: { x: 400, y: 100 } })
+    ).toEqual({
+      1: { x: 0, y: 0 },
+      2: { x: 0, y: 150 },
+      3: { x: 600, y: 150 },
     })
-    expect(pathMapPositions([])).toEqual({})
+    // Lado a lado a 115 px: a pílula pede largura (230) — cresce 2×.
+    expect(pathMapPositions([1, 2], { 1: { x: 0, y: 0 }, 2: { x: 115, y: 0 } })).toEqual({
+      1: { x: 0, y: 0 },
+      2: { x: 230, y: 0 },
+    })
+    // Já afastados: ficam como estão.
+    expect(pathMapPositions([1, 2], { 1: { x: 0, y: 0 }, 2: { x: 600, y: 0 } })).toEqual({
+      1: { x: 0, y: 0 },
+      2: { x: 600, y: 0 },
+    })
   })
 
-  it('no celular o caminho vai em pé, com a altura acompanhando', () => {
-    expect(pathMapPositions([5, 6], true)).toEqual({
+  it('altura do recorte acompanha o caminho, entre o piso e o teto', () => {
+    expect(pathMapHeight({ 1: { x: 0, y: 0 }, 2: { x: 300, y: 0 } })).toBe(240)
+    expect(pathMapHeight({ 1: { x: 0, y: 0 }, 2: { x: 0, y: 300 } })).toBe(450)
+    expect(pathMapHeight({ 1: { x: 0, y: 0 }, 2: { x: 0, y: 2000 } })).toBe(560)
+  })
+
+  it('recorte sem posição de alguém vai em linha', () => {
+    expect(pathMapPositions([5, 6], { 5: { x: 1, y: 1 } })).toEqual({
       5: { x: 0, y: 0 },
-      6: { x: 0, y: COLUMN_SPACING },
+      6: { x: LINE_SPACING, y: 0 },
     })
-    expect(verticalMapHeight(2)).toBeLessThan(verticalMapHeight(4))
-    expect(verticalMapHeight(40)).toBe(460)
+    expect(pathMapPositions([], {})).toEqual({})
+  })
+
+  it('mapa de escolha: destino possível fica aceso fora do caminho', () => {
+    const el = (id: string, classes: string, group: 'nodes' | 'edges' = 'nodes') => ({
+      group,
+      data: { id },
+      classes,
+    })
+    const lit = lightUp(
+      [
+        el('n4', 'device path-dimmed rank-core'),
+        el('n5', 'device path-dimmed'),
+        el('e4', 'path-dimmed', 'edges'),
+      ],
+      new Set([4])
+    )
+    expect(lit.map((item) => item.classes)).toEqual([
+      'device rank-core',
+      'device path-dimmed',
+      'path-dimmed',
+    ])
+  })
+
+  it('mapa de escolha: quem não tem posição vai numa fileira abaixo', () => {
+    const positions = pickerPositions([1, 2, 3], { 1: { x: 50, y: 0 }, 2: { x: 300, y: 400 } })
+    expect(positions[1]).toEqual({ x: 50, y: 0 })
+    expect(positions[3]).toEqual({ x: 50, y: 600 })
   })
 })

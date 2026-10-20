@@ -1,7 +1,7 @@
 <template>
   <v-dialog
     :model-value="modelValue"
-    :fullscreen="smAndDown"
+    :fullscreen="smAndDown || maximized"
     max-width="860"
     scrollable
     persistent
@@ -12,6 +12,7 @@
       <v-card-title class="d-flex align-center ga-2 pt-4">
         <v-icon color="primary">mdi-speedometer</v-icon>
         <span class="flex-grow-1">Novo teste de velocidade</span>
+        <MaximizeToggle v-if="!smAndDown" v-model="maximized" />
         <v-btn
           icon="mdi-close"
           variant="text"
@@ -185,6 +186,7 @@ import {
   targetErrors,
   type LinkTestTargetDraft,
 } from '@/utils/linkTests/wizard'
+import MaximizeToggle from '@/components/MaximizeToggle.vue'
 import LinkTestPlanView from './LinkTestPlanView.vue'
 import LinkTestSpecFields from './LinkTestSpecFields.vue'
 import LinkTestTargetFields from './LinkTestTargetFields.vue'
@@ -212,6 +214,7 @@ const { smAndDown } = useDisplay()
 const auth = useAuthStore()
 const store = useLinkTestsStore()
 
+const maximized = ref(false)
 const step = ref(1)
 const draft = ref<LinkTestTargetDraft>(draftFromRequest(null))
 const spec = ref<LinkTestSpec>(normalizeSpec())

@@ -586,11 +586,19 @@ enlace por enlace — muita informação de uma vez.
   ("Enlace direto" → `link`, inclusive atrás de switch sem IP) e o resto da
   rede ("Ponta a ponta · N saltos · por …"), com "Ponta a ponta / Enlace por
   enlace" para quem não é vizinho. O tipo sai da escolha, não de um cartão.
-- **Tela do teste em tela cheia** (`LinkTestRunDialog` + `LinkTestRunView`),
+- **Tela do teste em tela cheia no PC** (`LinkTestRunDialog` +
+  `LinkTestRunView`), com "Restaurar/Maximizar" (`MaximizeToggle`) e
   minimizável para uma pílula no mapa (`LinkTestMiniCard`); a mesma tela no
-  histórico. Em cima, o **mini mapa** (`LinkTestPathMap`): o caminho em
-  linha, com os elementos, o estilo e a animação do mapa (extraídos para
+  histórico. O assistente abre em janela, com "Maximizar". Em cima, o
+  **recorte do mapa** (`LinkTestPathMap`): o caminho **nas posições do
+  próprio mapa** (escolha do dono), crescido por igual até cada par de
+  vizinhos ter folga no seu eixo para a pílula dos Mbps (230 lado a lado, 150
+  um abaixo do outro) e com a altura acompanhando a forma — os elementos, o
+  estilo e a animação são os do mapa (`useMiniTopology`, sobre
   `utils/topology/elementSync.ts` e `ants.ts`, usados também pelo canvas).
+- **Mapa de escolha no assistente** (`LinkTestPickerMap`): a rede nas
+  posições do mapa, com a origem e o caminho escolhido em destaque; tocar num
+  equipamento que pode ser destino o escolhe (a lista "Até" continua).
   Durante a medição: a etapa atual, os números grandes e o gráfico. No fim,
   **resumo primeiro** (`LinkTestResultView`): números, gargalo numa frase, uma
   linha por enlace, o que não rodou com o motivo, e os próximos passos.

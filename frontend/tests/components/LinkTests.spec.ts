@@ -13,6 +13,7 @@ import { useLinkTestRequestsStore } from '@/stores/linkTestRequests'
 import LinkTestPlanView from '@/components/linkTests/LinkTestPlanView.vue'
 import LinkTestWizard from '@/components/linkTests/LinkTestWizard.vue'
 import LinkTestTargetFields from '@/components/linkTests/LinkTestTargetFields.vue'
+import LinkTestPickerMap from '@/components/linkTests/LinkTestPickerMap.vue'
 import LinkTestViaChip from '@/components/linkTests/LinkTestViaChip.vue'
 import { useDevicesStore } from '@/stores/devices'
 import { useTopologyStore } from '@/stores/topology'
@@ -62,7 +63,10 @@ function mountWith<T>(component: T, props: Record<string, unknown>) {
     props,
     attachTo: document.body,
     // O mini mapa desenha num canvas (Cytoscape), que o jsdom não tem.
-    global: { plugins: [pinia, vuetify(), router()], stubs: { LinkTestPathMap: true } },
+    global: {
+      plugins: [pinia, vuetify(), router()],
+      stubs: { LinkTestPathMap: true, LinkTestPickerMap: true },
+    },
   })
 }
 
@@ -321,6 +325,15 @@ describe('telas do teste de enlace', () => {
     await flushPromises()
     expect(wrapper.emitted('update:modelValue')!.at(-1)).toEqual([
       { kind: 'link', linkId: null, sourceDeviceId: 1, targetDeviceId: 3 },
+    ])
+
+    // Tocar no destino pelo mapa escolhe o mesmo que a lista.
+    const map = wrapper.findComponent(LinkTestPickerMap)
+    expect(map.props('pickableIds')).toEqual([3, 4])
+    map.vm.$emit('pick', 4)
+    await flushPromises()
+    expect(wrapper.emitted('update:modelValue')!.at(-1)).toEqual([
+      { kind: 'path', linkId: null, sourceDeviceId: 1, targetDeviceId: 4 },
     ])
   })
 

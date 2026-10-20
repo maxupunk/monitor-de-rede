@@ -72,7 +72,7 @@
       </div>
 
       <section class="what mt-4" aria-live="polite">
-        <div class="d-flex align-start ga-3 mb-3">
+        <div class="d-flex align-start ga-3">
           <v-avatar :color="kindInfo.color" size="36" rounded="lg">
             <v-icon color="white" size="20">{{ kindInfo.icon }}</v-icon>
           </v-avatar>
@@ -81,14 +81,19 @@
             <div class="text-body-medium">{{ explanation }}</div>
           </div>
         </div>
-        <LinkTestPathMap
-          :node-ids="destination.deviceIds"
-          :edge-ids="destination.edgeIds"
-          :height="smAndDown ? verticalMapHeight(destination.deviceIds.length) : 220"
-          :vertical="smAndDown"
-        />
       </section>
     </template>
+
+    <LinkTestPickerMap
+      v-if="source !== null && !readonly"
+      class="mt-4"
+      :source-id="source"
+      :route-device-ids="destination?.deviceIds ?? []"
+      :route-edge-ids="destination?.edgeIds ?? []"
+      :pickable-ids="pickableIds"
+      :height="smAndDown ? 280 : 320"
+      @pick="pickOnMap"
+    />
   </div>
 </template>
 
@@ -113,11 +118,10 @@ import {
   type DestinationNode,
   type MeasureMode,
 } from '@/utils/linkTests/destinations'
-import { verticalMapHeight } from '@/utils/linkTests/pathMap'
 import { TEST_KINDS, viaText } from '@/utils/linkTests/presentation'
 import { TRANSPARENT_HINT, isLinkTestEndpoint } from '@/utils/linkTests/targets'
 import type { LinkTestTargetDraft } from '@/utils/linkTests/wizard'
-import LinkTestPathMap from './LinkTestPathMap.vue'
+import LinkTestPickerMap from './LinkTestPickerMap.vue'
 
 const props = defineProps<{
   modelValue: LinkTestTargetDraft
@@ -275,6 +279,18 @@ function setSource(value: number | null) {
 function chooseDestination(key: string | null) {
   const chosen = destinationItems.value.findIndex((item) => item.value === key)
   update(draftFor(source.value, chosen >= 0 ? destinations.value[chosen] : null))
+}
+
+/** Destinos que o mapa deixa escolher (os mesmos da lista "Até"). */
+const pickableIds = computed(() => destinations.value.map((item) => item.deviceId))
+
+/** Toque no mapa: o vizinho direto vence (mede o enlace), como na lista. */
+function pickOnMap(deviceId: number) {
+  const chosen =
+    destinations.value.find((item) => item.deviceId === deviceId && item.direct) ??
+    destinations.value.find((item) => item.deviceId === deviceId) ??
+    null
+  if (chosen) update(draftFor(source.value, chosen))
 }
 
 function setMode(value: MeasureMode) {

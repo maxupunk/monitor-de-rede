@@ -1,5 +1,5 @@
 <template>
-  <div class="path-map" :style="{ height: `${height}px` }">
+  <div class="path-map" :style="{ height: `${mapHeight}px` }">
     <div ref="container" class="canvas" role="img" :aria-label="ariaLabel"></div>
     <div v-if="missing" class="missing text-body-small">
       <v-icon size="18" color="info">mdi-map-marker-question-outline</v-icon>
@@ -10,22 +10,17 @@
 
 <script setup lang="ts">
 /**
- * Mini mapa do teste: o caminho medido em linha, da origem ao destino — os
- * mesmos elementos (`buildElements`), o mesmo estilo e a mesma animação do
- * enlace em teste (`antsAnimator`) do mapa de topologia. Só leitura: sem zoom, arraste nem
- * seleção. Usado no assistente (o caminho escolhido) e na tela do teste
- * (pendente → medindo, com o fluxo animado → resultado em cada enlace).
+ * Recorte do mapa com o caminho do teste: os equipamentos nas posições do
+ * próprio mapa (com folga para os Mbps, `pathMapPositions`), o mesmo desenho
+ * e a mesma animação (`useMiniTopology`). Só leitura. Na tela do teste:
+ * pendente → medindo, com o fluxo animado → resultado em cada enlace.
  */
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
-import type { Core } from 'cytoscape'
-import { useTopologyPalette } from '@/composables/topology/useTopologyPalette'
+import { computed, onMounted, ref } from 'vue'
+import { useMiniTopology } from '@/composables/linkTests/useMiniTopology'
 import { useTopologyStore } from '@/stores/topology'
 import type { LinkTestOverlay } from '@/utils/linkTests/overlay'
-import { pathMapPositions } from '@/utils/linkTests/pathMap'
-import { antsAnimator } from '@/utils/topology/ants'
-import { syncElements } from '@/utils/topology/elementSync'
+import { pathMapHeight, pathMapPositions } from '@/utils/linkTests/pathMap'
 import { buildElements } from '@/utils/topology/elements'
-import { buildStylesheet, type TopologyPalette } from '@/utils/topology/style'
 
 const props = withDefaults(
   defineProps<{
@@ -34,35 +29,14 @@ const props = withDefaults(
     edgeIds: number[]
     /** Estado do teste em cada enlace/ponta; `null` desenha só o caminho. */
     overlay?: LinkTestOverlay | null
-    height?: number
-    /** Tela estreita: o caminho em pé, de cima para baixo. */
-    vertical?: boolean
+    /** Teto da altura; o recorte cresce com o caminho até ele. */
+    maxHeight?: number
   }>(),
-  { overlay: null, height: 220, vertical: false }
+  { overlay: null, maxHeight: 560 }
 )
 
-/** Nem o zoom do recorte passa disto: dois equipamentos não viram gigantes. */
-const MAX_ZOOM = 1.8
-const PADDING = 28
-
-/**
- * O estilo do mapa, com os nomes sempre visíveis: no mapa inteiro o rótulo
- * pequeno demais some (não polui), mas no recorte o nome é a informação.
- */
-function stylesheet(value: TopologyPalette) {
-  return [
-    ...buildStylesheet(value),
-    { selector: 'node, edge', style: { 'min-zoomed-font-size': 0 } },
-  ]
-}
-
 const topology = useTopologyStore()
-const palette = useTopologyPalette()
 const container = ref<HTMLDivElement | null>(null)
-const cy = shallowRef<Core | null>(null)
-let destroyed = false
-let resizeObserver: ResizeObserver | null = null
-const ants = antsAnimator(() => (destroyed ? null : cy.value))
 
 const nodes = computed(() =>
   props.nodeIds.flatMap((id) => {
@@ -77,14 +51,19 @@ const edges = computed(() =>
   })
 )
 
+const positions = computed(() =>
+  pathMapPositions(
+    nodes.value.map((node) => node.id),
+    topology.layout
+  )
+)
+const mapHeight = computed(() => pathMapHeight(positions.value, 240, props.maxHeight))
+
 const elements = computed(() =>
   buildElements({
     nodes: nodes.value,
     edges: edges.value,
-    positions: pathMapPositions(
-      nodes.value.map((node) => node.id),
-      props.vertical
-    ),
+    positions: positions.value,
     overlay: {
       highlight: null,
       edgeOverlays: props.overlay?.edges ?? {},
@@ -93,95 +72,23 @@ const elements = computed(() =>
   })
 )
 
+useMiniTopology(container, elements)
+
 const ariaLabel = computed(() => {
   const names = nodes.value.map((node) => node.name)
   return names.length > 0 ? `Caminho do teste: ${names.join(' → ')}` : 'Caminho do teste'
 })
 
-/** Sem o mapa carregado ainda, ou caminho que o mapa não conhece. */
+/** Caminho que o mapa não conhece, ou equipamentos fora dele. */
 const missing = computed(() => {
   if (props.nodeIds.length === 0) return 'O mapa não conhece o caminho entre as pontas.'
   if (topology.loaded && nodes.value.length === 0) return 'Estes equipamentos não estão no mapa.'
   return null
 })
 
-function fit() {
-  const core = cy.value
-  if (!core || core.elements().empty()) return
-  core.resize()
-  core.fit(undefined, PADDING)
-  if (core.zoom() > MAX_ZOOM) {
-    core.zoom(MAX_ZOOM)
-    core.center()
-  }
-}
-
-function render() {
-  const core = cy.value
-  if (!core) return
-  const before = core
-    .nodes()
-    .map((node) => node.id())
-    .join(',')
-  syncElements(core, elements.value)
-  // Posição vem do mapa: reaplica e enquadra quando o caminho muda.
-  core.batch(() => {
-    for (const el of elements.value) {
-      if (el.group === 'nodes' && el.position) core.getElementById(el.data.id).position(el.position)
-    }
-  })
-  if (
-    core
-      .nodes()
-      .map((node) => node.id())
-      .join(',') !== before
-  )
-    fit()
-  ants.update()
-}
-
-async function init() {
-  const { default: cytoscape } = await import('cytoscape')
-  if (destroyed || !container.value) return
-  const core = cytoscape({
-    container: container.value,
-    style: stylesheet(palette.value),
-    userZoomingEnabled: false,
-    userPanningEnabled: false,
-    boxSelectionEnabled: false,
-    autoungrabify: true,
-    autounselectify: true,
-    motionBlur: false,
-  })
-  cy.value = core
-  render()
-  fit()
-  resizeObserver = new ResizeObserver(() => fit())
-  resizeObserver.observe(container.value)
-}
-
-watch(elements, render)
-watch(palette, (value) => cy.value?.style(stylesheet(value)))
-watch(
-  () => props.vertical,
-  () => {
-    render()
-    fit()
-  }
-)
-
 /** Fora da topologia (histórico), o mapa vem sob demanda. */
 onMounted(() => {
   if (!topology.loaded) void topology.fetchTopology(null, false)
-  void init()
-})
-
-onBeforeUnmount(() => {
-  destroyed = true
-  ants.stop()
-  resizeObserver?.disconnect()
-  cy.value?.destroy()
-  cy.value = null
 })
 </script>
 

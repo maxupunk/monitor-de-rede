@@ -4,8 +4,7 @@
       :node-ids="path.nodeIds"
       :edge-ids="path.edgeIds"
       :overlay="overlay"
-      :height="mapHeight"
-      :vertical="smAndDown"
+      :max-height="mapHeight"
     />
 
     <div class="sr-only" aria-live="polite" aria-atomic="true">{{ announcement }}</div>
@@ -152,7 +151,6 @@ import type { LinkTest, LinkTestStageKey } from '@/types/linkTests'
 import { formatDateTime } from '@/utils/formatters'
 import { legGauges } from '@/utils/linkTests/gauges'
 import { overlayForTest, pathOf } from '@/utils/linkTests/overlay'
-import { verticalMapHeight } from '@/utils/linkTests/pathMap'
 import {
   STAGES,
   compactBps,
@@ -180,9 +178,7 @@ const stageRun = ref<InstanceType<typeof LinkTestStageRun> | null>(null)
 const detailsOpen = ref<string[] | string | null>(null)
 
 const active = computed(() => isActiveStatus(props.test.status))
-const mapHeight = computed(() =>
-  smAndDown.value ? verticalMapHeight(path.value.nodeIds.length) : 300
-)
+const mapHeight = computed(() => (smAndDown.value ? 420 : 560))
 const path = computed(() => pathOf(props.test.legs))
 const overlay = computed(() =>
   overlayForTest(props.test, ctx.liveRate(props.test.id), ctx.edgeSource)

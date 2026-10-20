@@ -1,7 +1,7 @@
 <template>
   <v-dialog
     :model-value="modelValue"
-    :fullscreen="smAndDown"
+    :fullscreen="smAndDown || maximized"
     max-width="1100"
     scrollable
     @update:model-value="(open) => !open && dismiss()"
@@ -46,6 +46,7 @@
                 </span>
               </template>
             </v-tooltip>
+            <MaximizeToggle v-if="!smAndDown" v-model="maximized" />
             <v-btn
               v-if="minimizable"
               icon="mdi-window-minimize"
@@ -103,6 +104,7 @@ import { formatElapsedMs, formatShortDateTime } from '@/utils/formatters'
 import { TEST_KINDS, isActiveStatus, testRouteTitle } from '@/utils/linkTests/presentation'
 import { testElapsedMs, testProgress, testRemainingMs } from '@/utils/linkTests/progress'
 import { READ_ONLY_REASON } from '@/utils/topology/inspectorRegistry'
+import MaximizeToggle from '@/components/MaximizeToggle.vue'
 import LinkTestRunView from './LinkTestRunView.vue'
 import LinkTestStatusChip from './LinkTestStatusChip.vue'
 
@@ -123,6 +125,8 @@ const { smAndDown } = useDisplay()
 const auth = useAuthStore()
 const store = useLinkTestsStore()
 const ctx = useLinkTestContext()
+/** Tela cheia no PC (o pedido do dono); "Restaurar" vira janela. */
+const maximized = ref(true)
 const cancelling = ref(false)
 const cancelError = ref<string | null>(null)
 
