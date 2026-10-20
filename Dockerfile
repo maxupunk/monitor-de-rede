@@ -46,6 +46,14 @@ FROM rust:slim-bookworm@sha256:94e9efa4033213dbb70d4f665527e7ece3944ddb7ba1dd2e4
 
 WORKDIR /usr/src/app
 
+# Compilações em paralelo. Sem limite o cargo usa todos os núcleos, e no crate
+# `backend` (grande) cada um vira um fio de otimização do LLVM com a sua
+# memória: num Docker Desktop de 8 GB dividido com outros containers o build
+# morre com "cannot allocate memory". 4 cabe com folga; com pouca memória livre,
+# `CARGO_BUILD_JOBS=2` no `.env` (o compose repassa).
+ARG CARGO_BUILD_JOBS=4
+ENV CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS}
+
 # `pkg-config`/`libssl-dev` para as crates que compilam contra o sistema;
 # `ca-certificates` para o DoH do checker de DNS funcionar já no build de teste.
 RUN apt-get update \

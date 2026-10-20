@@ -8,6 +8,9 @@ services:
     build:
       context: .
       target: runtime
+      # Compilações em paralelo no build (memória): ver o `.env.example`.
+      args:
+        CARGO_BUILD_JOBS: ${CARGO_BUILD_JOBS:-4}
     image: netmonitor:latest
     # A interface não para, remove nem recria este container: o agente local
     # recusa ação sobre quem tem esta label (derrubaria a própria tela).
@@ -211,6 +214,8 @@ services:
     build:
       context: .
       target: agent
+      args:
+        CARGO_BUILD_JOBS: ${CARGO_BUILD_JOBS:-4}
     image: netmonitor-agent:latest
     # Parar o agente cortaria o Docker da tela sem volta: ele mesmo recusa,
     # e a label o marca para a tela não oferecer o botão.
