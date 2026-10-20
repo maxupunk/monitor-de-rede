@@ -25,6 +25,8 @@ import type {
   NodeSingular,
 } from 'cytoscape'
 import type { TopologyPosition } from '@/stores/topology'
+import { antsAnimator } from '@/utils/topology/ants'
+import { syncElements as applyElements } from '@/utils/topology/elementSync'
 import { parseElementId, type TopologyElement } from '@/utils/topology/elements'
 import {
   polylineBoxes,
@@ -88,15 +90,12 @@ const cy = shallowRef<Core | null>(null)
 const sceneListeners = new Set<() => void>()
 let resizeObserver: ResizeObserver | null = null
 let sceneFrame = 0
-let antsFrame = 0
-let antsOffset = 0
 let trafficOn = false
 let lod: LodLevel = 'near'
 let draggedBatch: Record<number, TopologyPosition> = {}
 let dragFlushQueued = false
 let destroyed = false
 
-const BASE_CLASSES = 'baseClasses'
 const GHOST_NODE = '__ghost-node'
 const GHOST_EDGE = '__ghost-edge'
 
@@ -146,57 +145,10 @@ function anchorOf(ele: NodeSingular | EdgeSingular): { x: number; y: number } {
 // --- Sincronização de elementos ----------------------------------------------
 
 function syncElements(core: Core, elements: TopologyElement[]) {
-  core.batch(() => {
-    const nextIds = new Set(elements.map((el) => el.data.id))
-    const toAdd: TopologyElement[] = []
-
-    for (const el of elements) {
-      const existing = core.getElementById(el.data.id)
-      if (existing.empty()) {
-        toAdd.push(el)
-        continue
-      }
-      const current = existing.data() as Record<string, unknown>
-      const patch: Record<string, unknown> = {}
-      let changed = false
-      for (const [key, value] of Object.entries(el.data)) {
-        if (key === 'parent' || key === 'source' || key === 'target') continue
-        if (current[key] !== value) {
-          patch[key] = value
-          changed = true
-        }
-      }
-      if (changed) existing.data(patch)
-      if (existing.isNode()) {
-        const wanted = (el.data.parent as string | undefined) ?? null
-        const now = (existing.data('parent') as string | undefined) ?? null
-        if (wanted !== now) (existing as NodeSingular).move({ parent: wanted })
-      }
-      const previous = (existing.scratch(BASE_CLASSES) as string | undefined) ?? ''
-      if (previous !== el.classes) {
-        existing.removeClass(previous)
-        existing.addClass(el.classes)
-        existing.scratch(BASE_CLASSES, el.classes)
-      }
-    }
-
-    if (toAdd.length > 0) {
-      const added = core.add(toAdd.map((el) => ({ ...el, data: { ...el.data } })))
-      added.forEach((ele) => {
-        const def = toAdd.find((item) => item.data.id === ele.id())
-        ele.scratch(BASE_CLASSES, def?.classes ?? '')
-      })
-      if (trafficOn) added.edges().addClass('lod-detail')
-      if (lod !== 'near') added.filter('[deviceId], [edgeId]').addClass(`lod-${lod}`)
-      routeEdges(core, added.edges().union(added.nodes().connectedEdges()))
-    }
-
-    // Remoção por último: um site (nó composto) só sai depois que os filhos
-    // já foram movidos para fora dele.
-    core
-      .elements()
-      .filter((ele) => !nextIds.has(ele.id()) && !ele.id().startsWith('__'))
-      .remove()
+  applyElements(core, elements, (added) => {
+    if (trafficOn) added.edges().addClass('lod-detail')
+    if (lod !== 'near') added.filter('[deviceId], [edgeId]').addClass(`lod-${lod}`)
+    routeEdges(core, added.edges().union(added.nodes().connectedEdges()))
   })
   updateAnts()
   scheduleScene()
@@ -351,34 +303,10 @@ function scheduleScene() {
 
 // --- "Formigas" do enlace em teste (animação, não consulta) --------------------
 
+const ants = antsAnimator(() => (destroyed ? null : cy.value))
+
 function updateAnts() {
-  const core = cy.value
-  if (!core) return
-  const running = core.edges('.ov-running')
-  if (running.empty()) {
-    if (antsFrame) cancelAnimationFrame(antsFrame)
-    antsFrame = 0
-    core.edges().removeStyle('line-dash-offset')
-    return
-  }
-  if (antsFrame) return
-  const step = () => {
-    const current = cy.value
-    if (!current || destroyed) return
-    const edges = current.edges('.ov-running')
-    if (edges.empty()) {
-      antsFrame = 0
-      return
-    }
-    antsOffset = (antsOffset + 1.2) % 1000
-    current.batch(() => {
-      edges.forEach((edge) => {
-        edge.style('line-dash-offset', edge.hasClass('flow-reverse') ? antsOffset : -antsOffset)
-      })
-    })
-    antsFrame = requestAnimationFrame(step)
-  }
-  antsFrame = requestAnimationFrame(step)
+  ants.update()
 }
 
 // --- Cabo em andamento (modo conectar) -------------------------------------------
@@ -566,7 +494,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   destroyed = true
   if (sceneFrame) cancelAnimationFrame(sceneFrame)
-  if (antsFrame) cancelAnimationFrame(antsFrame)
+  ants.stop()
   if (labelsFrame) cancelAnimationFrame(labelsFrame)
   resizeObserver?.disconnect()
   sceneListeners.clear()

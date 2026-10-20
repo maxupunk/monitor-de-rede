@@ -47,22 +47,20 @@ describe('painéis flutuantes e enquadramento', () => {
     legendOpen: false,
     minimap: false,
     sheetHeight: 0,
-    panelRight: 0,
   }
 
-  it('desconta legenda aberta, minimapa, barra de edição e painel do teste', () => {
+  it('desconta legenda aberta, minimapa e barra de edição', () => {
     expect(mapInsets(base)).toEqual({ top: 44, right: 64, bottom: 60, left: 0 })
     const busy = mapInsets({
       ...base,
       legendOpen: true,
       minimap: true,
       editMode: true,
-      panelRight: 516,
     })
     expect(busy.left).toBe(TOPOLOGY_LEGEND_WIDTH + 20)
     expect(busy.bottom).toBeGreaterThan(60)
     expect(busy.top).toBeGreaterThan(44)
-    expect(busy.right).toBe(516)
+    expect(busy.right).toBe(64)
   })
 
   it('no celular, só a folha de baixo (ou o resumo) conta', () => {

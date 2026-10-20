@@ -95,12 +95,9 @@ describe('registro de ações e abas da topologia', () => {
       targetDeviceId: 3,
     })
     const nodeEntries = linkTestActions(nodeTarget, h)
-    void nodeEntries.find((a) => a.id === 'test.path')!.run()
-    expect(h.requestLinkTest).toHaveBeenCalledWith({
-      kind: 'path',
-      targetDeviceId: 5,
-      sourceDeviceId: 9,
-    })
+    // "Testar daqui até…": o equipamento é a origem; o destino é escolhido.
+    void nodeEntries.find((a) => a.id === 'test.from')!.run()
+    expect(h.requestLinkTest).toHaveBeenCalledWith({ kind: 'end_to_end', sourceDeviceId: 5 })
     void nodeEntries.find((a) => a.id === 'test.server')!.run()
     expect(h.requestLinkTest).toHaveBeenCalledWith({
       kind: 'server',

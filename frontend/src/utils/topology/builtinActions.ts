@@ -255,22 +255,18 @@ export const linkTestActions: TopologyActionProvider = (target, host) => {
   if (target.kind !== 'node') return []
   const node = target.node
   const actions: TopologyAction[] = []
-  const origin = host.selectedNodeId !== node.id ? host.selectedNodeId : null
+  // De qualquer equipamento: o assistente abre com ele em "De" e oferece os
+  // vizinhos (enlace) e o resto da rede (ponta a ponta).
   actions.push({
-    id: 'test.path',
-    title: 'Testar caminho até aqui',
-    subtitle: origin ? 'A partir do nó selecionado' : 'Escolha a origem no assistente',
-    icon: 'mdi-transit-connection-variant',
+    id: 'test.from',
+    title: 'Testar daqui até…',
+    subtitle: 'Um enlace ou ponta a ponta até qualquer equipamento',
+    icon: 'mdi-ray-start-arrow',
     color: 'info',
     group: 'test',
     order: 10,
     requiresWrite: true,
-    run: () =>
-      host.requestLinkTest({
-        kind: 'path',
-        targetDeviceId: node.id,
-        ...(origin !== null ? { sourceDeviceId: origin } : {}),
-      }),
+    run: () => host.requestLinkTest({ kind: 'end_to_end', sourceDeviceId: node.id }),
   })
   if (host.systemNodeId !== node.id) {
     actions.push({

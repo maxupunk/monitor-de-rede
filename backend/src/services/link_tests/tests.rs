@@ -16,7 +16,10 @@ use std::{
 use async_trait::async_trait;
 use chrono::Utc;
 use migration::{Migrator, MigratorTrait};
-use sea_orm::{ActiveModelTrait, Database, DatabaseConnection, IntoActiveModel, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, Database, DatabaseConnection, EntityTrait, IntoActiveModel,
+    QueryFilter, Set,
+};
 use serde_json::{json, Value};
 use serial_test::serial;
 use tokio::sync::oneshot;
@@ -866,47 +869,137 @@ async fn hierarquia_e_enlace_direto_e_atravessa_o_switch() {
 
 #[tokio::test]
 #[serial(link_tests)]
-async fn servidor_ate_a_borda_passa_pelo_switch() {
+async fn servidor_ate_a_borda_e_uma_perna_ponta_a_ponta_pelo_caminho_todo() {
     let env = env_with(db().await, Arc::default(), None);
     let (ap, switch, borda, l1, l2) = ap_switch_borda(&env.db).await;
     let central = device(&env.db, "NetMonitor", "10.0.0.9", true).await;
     let l0 = link(&env.db, central.id, ap.id).await;
+    let pelo_servidor = LinkTestRequest {
+        target_device_id: Some(borda.id),
+        ..request(LinkTestKind::Server)
+    };
+    // "De" = o próprio servidor no assistente unificado: o mesmo teste.
+    let pela_origem = LinkTestRequest {
+        source_device_id: Some(central.id),
+        target_device_id: Some(borda.id),
+        ..request(LinkTestKind::EndToEnd)
+    };
+    for pedido in [pelo_servidor, pela_origem] {
+        let built = plan::build(&env, &pedido).await.unwrap();
+        let legs = &built.view.legs;
+        assert_eq!(
+            legs.len(),
+            1,
+            "um número só, sem pernas misturadas: {legs:?}"
+        );
+        let leg = &legs[0];
+        assert_eq!(leg.kind, LinkTestLegKind::EndToEnd);
+        assert_eq!(leg.a.kind, super::model::LinkTestEndpointKind::Central);
+        assert_eq!(leg.b.device_id, Some(borda.id));
+        // O mapa desenha a perna pelo caminho inteiro.
+        assert_eq!(leg.edge_id, None);
+        assert_eq!(leg.edge_ids, [l0, l1, l2]);
+        assert_eq!(leg.via_device_ids, [ap.id, switch.id]);
+        assert_eq!(leg.via_names, ["AP-terraço", "switch-assistencia"]);
+    }
+
+    // O gargalo é o "salto por salto", a partir do servidor também.
     let built = plan::build(
         &env,
         &LinkTestRequest {
+            source_device_id: Some(central.id),
             target_device_id: Some(borda.id),
-            ..request(LinkTestKind::Server)
+            ..request(LinkTestKind::Path)
         },
     )
     .await
     .unwrap();
     let legs = &built.view.legs;
-    assert_eq!(legs.len(), 3, "{legs:?}");
-    assert_eq!(legs[0].kind, LinkTestLegKind::EndToEnd);
-    assert!(legs[0].edge_ids.is_empty());
+    assert_eq!(legs.len(), 2, "{legs:?}");
+    assert_eq!(legs[0].a.kind, super::model::LinkTestEndpointKind::Central);
+    assert_eq!(legs[0].edge_ids, [l0]);
     assert_eq!(
-        (legs[1].edge_id, legs[1].edge_ids.clone()),
-        (Some(l0), vec![l0])
+        (legs[1].edge_ids.clone(), legs[1].via_device_ids.clone()),
+        (vec![l1, l2], vec![switch.id])
     );
-    assert_eq!(legs[2].edge_ids, [l1, l2]);
-    assert_eq!(legs[2].via_device_ids, [switch.id]);
-    assert_eq!(legs[2].a.device_id, Some(ap.id));
+}
 
-    // Só o switch entre a central e o destino: a perna ponta a ponta basta.
-    let direto = device(&env.db, "R-direto", "10.0.0.20", false).await;
-    let outro = switch_sem_ip(&env.db, "switch-2").await;
-    link(&env.db, central.id, outro.id).await;
-    link(&env.db, outro.id, direto.id).await;
+#[tokio::test]
+#[serial(link_tests)]
+async fn ponta_a_ponta_entre_dois_equipamentos_atravessa_quem_tem_ip() {
+    let env = env_with(db().await, Arc::default(), None);
+    let (ap, switch, borda, l1, l2) = ap_switch_borda(&env.db).await;
+    let openwrt = plugins::Entity::find()
+        .filter(plugins::Column::Slug.eq("lt-openwrt"))
+        .one(&env.db)
+        .await
+        .unwrap()
+        .expect("o plugin do cenário");
+    let mikrotik = device(&env.db, "RB2011", "10.0.0.242", false).await;
+    install(&env.db, &mikrotik, &openwrt).await;
+    let l3 = link(&env.db, borda.id, mikrotik.id).await;
+
     let built = plan::build(
         &env,
         &LinkTestRequest {
-            target_device_id: Some(direto.id),
-            ..request(LinkTestKind::Server)
+            source_device_id: Some(ap.id),
+            target_device_id: Some(mikrotik.id),
+            ..request(LinkTestKind::EndToEnd)
         },
     )
     .await
     .unwrap();
-    assert_eq!(built.view.legs.len(), 1, "{:?}", built.view.legs);
+    let view = &built.view;
+    assert!(view.blocking.is_empty(), "{:?}", view.blocking);
+    assert_eq!(view.kind, LinkTestKind::EndToEnd);
+    assert_eq!(view.legs.len(), 1, "{:?}", view.legs);
+    let leg = &view.legs[0];
+    assert_eq!(leg.kind, LinkTestLegKind::EndToEnd);
+    assert_eq!(
+        (leg.a.device_id, leg.b.device_id),
+        (Some(ap.id), Some(mikrotik.id))
+    );
+    assert_eq!(leg.edge_ids, [l1, l2, l3]);
+    // A BORDA tem IP e fica no meio: na ponta a ponta ela é atravessada.
+    assert_eq!(leg.via_device_ids, [switch.id, borda.id]);
+
+    // Sem caminho no mapa a medição roda assim mesmo, com o aviso.
+    let ilhado = device(&env.db, "R-ilhado", "10.0.0.77", false).await;
+    install(&env.db, &ilhado, &openwrt).await;
+    let built = plan::build(
+        &env,
+        &LinkTestRequest {
+            source_device_id: Some(ap.id),
+            target_device_id: Some(ilhado.id),
+            ..request(LinkTestKind::EndToEnd)
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(built.view.legs.len(), 1);
+    assert!(built.view.legs[0].edge_ids.is_empty());
+    assert!(
+        built
+            .view
+            .warnings
+            .iter()
+            .any(|w| w.contains("sem o desenho do caminho")),
+        "{:?}",
+        built.view.warnings
+    );
+
+    // Origem e destino iguais não é teste.
+    let erro = plan::build(
+        &env,
+        &LinkTestRequest {
+            source_device_id: Some(ap.id),
+            target_device_id: Some(ap.id),
+            ..request(LinkTestKind::EndToEnd)
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(erro, AppError::Validation(_)), "{erro:?}");
 }
 
 /// Um OpenWrt identificado (sistema escolhido no cadastro), sem plugin.

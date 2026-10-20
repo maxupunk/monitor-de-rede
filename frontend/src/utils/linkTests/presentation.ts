@@ -59,20 +59,27 @@ export const TEST_KINDS: Record<LinkTestKind, KindPresentation> = {
     label: 'Enlace',
     icon: 'mdi-swap-horizontal-bold',
     color: 'primary',
-    description: 'Mede um enlace entre dois equipamentos vizinhos.',
+    description: 'Mede só o enlace entre dois equipamentos vizinhos.',
   },
-  path: {
-    label: 'Caminho completo',
-    icon: 'mdi-transit-connection-variant',
-    color: 'secondary',
-    description: 'Mede, um de cada vez e em ordem, cada enlace do caminho entre dois equipamentos.',
-  },
-  server: {
-    label: 'Do servidor até…',
-    icon: 'mdi-server-network',
+  end_to_end: {
+    label: 'Ponta a ponta',
+    icon: 'mdi-arrow-expand-horizontal',
     color: 'info',
     description:
-      'Mede do servidor NetMonitor até o equipamento: ponta a ponta e, depois, enlace por enlace.',
+      'Uma medição de um equipamento até o outro, atravessando o caminho inteiro — a velocidade que quem usa a rede sente.',
+  },
+  path: {
+    label: 'Enlace por enlace',
+    icon: 'mdi-transit-connection-variant',
+    color: 'secondary',
+    description:
+      'Mede, um de cada vez e em ordem, cada enlace do caminho — mostra onde está o gargalo.',
+  },
+  server: {
+    label: 'Do servidor',
+    icon: 'mdi-server-network',
+    color: 'info',
+    description: 'Ponta a ponta do servidor NetMonitor até o equipamento.',
   },
 }
 
@@ -152,9 +159,14 @@ export function legViaLabel(leg: Pick<LinkTestPlanLeg, 'viaNames'>): string | nu
 }
 
 /** A explicação completa do chip "via" (dica e leitor de tela). */
-export function legViaDescription(leg: Pick<LinkTestPlanLeg, 'viaNames'>): string | null {
+export function legViaDescription(
+  leg: Pick<LinkTestPlanLeg, 'viaNames'> & Partial<Pick<LinkTestPlanLeg, 'kind'>>
+): string | null {
   const via = viaText(leg.viaNames)
-  return via ? `Passa por ${via} (sem IP): a perna mede os cabos entre as duas pontas` : null
+  if (!via) return null
+  return leg.kind === 'end_to_end'
+    ? `Passa por ${via}: mede de uma ponta à outra, atravessando todos eles`
+    : `Passa por ${via} (sem IP): a perna mede os cabos entre as duas pontas`
 }
 
 /** "OpenWrt-Sala → MikroTik-Torre". */
@@ -208,18 +220,19 @@ export function requestTargetLabel(
   return `${source} → ${destination}`
 }
 
-/** Título curto do teste: "Enlace · A → B", "Caminho completo · A → Z". */
+/** Título curto do teste: "Enlace · A → B", "Ponta a ponta · A → Z". */
 export function testTitle(test: Pick<LinkTest, 'id' | 'kind' | 'legs'>): string {
   const kind = TEST_KINDS[test.kind]?.label ?? 'Teste'
-  const linkLegs = test.legs.filter((leg) => leg.kind === 'link')
-  const legs = linkLegs.length > 0 ? linkLegs : test.legs
-  if (legs.length === 0) return `${kind} · teste #${test.id}`
-  const first = legs[0]
-  const last = legs[legs.length - 1]
-  if (test.kind === 'server') {
-    return `${kind.replace('…', '')} ${endpointLabel(test.legs[test.legs.length - 1].b)}`.trim()
-  }
+  if (test.legs.length === 0) return `${kind} · teste #${test.id}`
+  const first = test.legs[0]
+  const last = test.legs[test.legs.length - 1]
   return `${kind} · ${endpointLabel(first.a)} → ${endpointLabel(last.b)}`
+}
+
+/** As pontas do teste, sem o tipo: "AP-assistencia → BORDA". */
+export function testRouteTitle(test: Pick<LinkTest, 'id' | 'legs'>): string {
+  if (test.legs.length === 0) return `Teste #${test.id}`
+  return `${endpointLabel(test.legs[0].a)} → ${endpointLabel(test.legs[test.legs.length - 1].b)}`
 }
 
 /**

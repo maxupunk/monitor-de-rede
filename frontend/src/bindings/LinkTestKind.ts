@@ -3,4 +3,4 @@
 /**
  * O que se mede.
  */
-export type LinkTestKind = "link" | "path" | "server";
+export type LinkTestKind = "link" | "path" | "server" | "end_to_end";

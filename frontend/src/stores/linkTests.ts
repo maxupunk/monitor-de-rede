@@ -174,6 +174,11 @@ export const useLinkTestsStore = defineStore('linkTests', () => {
    * flutuante e o histórico — quem fecha o painel limpa.
    */
   const focusedId = ref<number | null>(null)
+  /**
+   * Conta cada pedido de abrir um teste — focar de novo o mesmo teste (a
+   * pílula do mapa, a aba) também reabre a tela dele.
+   */
+  const focusSeq = ref(0)
 
   const all = computed(() => Object.values(tests.value).sort(byNewest))
   const active = computed(() => all.value.filter((test) => isActiveStatus(test.status)))
@@ -446,6 +451,7 @@ export const useLinkTestsStore = defineStore('linkTests', () => {
 
   function focus(id: number | null) {
     focusedId.value = id
+    focusSeq.value += 1
   }
 
   // --- Tempo real (SSE) ---------------------------------------------------------
@@ -492,6 +498,7 @@ export const useLinkTestsStore = defineStore('linkTests', () => {
     schedulesLoading,
     schedulesError,
     focusedId,
+    focusSeq,
     focused,
     all,
     active,

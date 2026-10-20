@@ -8,6 +8,7 @@ import { useLinkTestsStore } from '@/stores/linkTests'
 import type { LinkTest } from '@/types/linkTests'
 import { formatRelativeTime } from '@/utils/formatters'
 import { TEST_KINDS, testStatusPresentation } from '@/utils/linkTests/presentation'
+import { repeatRequest } from '@/utils/linkTests/resultView'
 import { specSummary } from '@/utils/linkTests/spec'
 import {
   registerActionProvider,
@@ -51,14 +52,7 @@ export function linkTestHistoryActions(
         group: 'test',
         order: 30,
         requiresWrite: true,
-        run: () =>
-          host.requestLinkTest({
-            kind: test.kind,
-            ...(test.linkId !== null ? { linkId: test.linkId } : {}),
-            ...(test.sourceDeviceId !== null ? { sourceDeviceId: test.sourceDeviceId } : {}),
-            ...(test.targetDeviceId !== null ? { targetDeviceId: test.targetDeviceId } : {}),
-            spec: test.spec,
-          }),
+        run: () => host.requestLinkTest(repeatRequest(test)),
       },
     ]
     return actions

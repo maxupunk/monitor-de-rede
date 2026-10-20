@@ -10,6 +10,7 @@ import {
   stageEndpoint,
   stepStatusPresentation,
   testStatusPresentation,
+  testRouteTitle,
   testTitle,
 } from '@/utils/linkTests/presentation'
 import { endpoint, leg, stage, test } from './fixtures'
@@ -36,7 +37,7 @@ describe('apresentação do teste de enlace', () => {
   it('título do teste por tipo', () => {
     expect(testTitle(test(1))).toBe('Enlace · Dev-1 → Dev-2')
     expect(testTitle(test(2, { kind: 'path', legs: [leg(1), leg(2), leg(3)] }))).toBe(
-      'Caminho completo · Dev-1 → Dev-4'
+      'Enlace por enlace · Dev-1 → Dev-4'
     )
     const server = test(3, {
       kind: 'server',
@@ -47,10 +48,13 @@ describe('apresentação do teste de enlace', () => {
           a: endpoint(null, 'NetMonitor', { kind: 'central' }),
           b: endpoint(9, 'Torre'),
         }),
-        leg(2, { b: endpoint(9, 'Torre') }),
       ],
     })
-    expect(testTitle(server)).toBe('Do servidor até Torre')
+    expect(testTitle(server)).toBe('Do servidor · NetMonitor → Torre')
+    expect(testRouteTitle(server)).toBe('NetMonitor → Torre')
+    expect(testTitle(test(5, { kind: 'end_to_end', legs: [leg(1, { kind: 'end_to_end' })] }))).toBe(
+      'Ponta a ponta · Dev-1 → Dev-2'
+    )
     expect(testTitle(test(4, { legs: [] }))).toBe('Enlace · teste #4')
   })
 

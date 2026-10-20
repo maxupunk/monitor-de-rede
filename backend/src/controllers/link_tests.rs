@@ -29,6 +29,7 @@ fn kind_label(request: &LinkTestRequest) -> &'static str {
         crate::services::link_tests::model::LinkTestKind::Link => "do enlace",
         crate::services::link_tests::model::LinkTestKind::Path => "do caminho",
         crate::services::link_tests::model::LinkTestKind::Server => "do servidor ao equipamento",
+        crate::services::link_tests::model::LinkTestKind::EndToEnd => "ponta a ponta",
     }
 }
 

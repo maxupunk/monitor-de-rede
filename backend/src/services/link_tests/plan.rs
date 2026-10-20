@@ -204,16 +204,14 @@ async fn transparent_names(env: &LinkTestEnv, ids: &[i64]) -> AppResult<HashMap<
 }
 
 /// O caminho em pernas entre equipamentos com IP: cada sequência de
-/// equipamentos sem IP vira uma perna só. `origin` (a central, o agente)
-/// nunca é transparente.
+/// equipamentos sem IP vira uma perna só.
 async fn hops_of(
     env: &LinkTestEnv,
     path: &TopologyPath,
-    origin: Option<i64>,
 ) -> AppResult<(Vec<Hop>, HashMap<i64, String>)> {
     let names = transparent_names(env, &path.device_ids).await?;
     let hops = transparent::collapse(&path.device_ids, &path.edge_ids, |id| {
-        Some(id) != origin && names.contains_key(&id)
+        names.contains_key(&id)
     })
     .map_err(|id| {
         transparent::not_an_endpoint(names.get(&id).map_or("O equipamento", String::as_str))
@@ -365,7 +363,7 @@ async fn draft_path(env: &LinkTestEnv, request: &LinkTestRequest) -> AppResult<D
             from.view.name, to.view.name
         )),
         Some(path) => {
-            let (hops, names) = hops_of(env, &path, None).await?;
+            let (hops, names) = hops_of(env, &path).await?;
             for hop in hops {
                 draft.legs.push(RawLeg {
                     kind: LinkTestLegKind::Link,
@@ -379,24 +377,78 @@ async fn draft_path(env: &LinkTestEnv, request: &LinkTestRequest) -> AppResult<D
     Ok(draft)
 }
 
-/// Ponta de um salto do caminho: o dispositivo de onde o teste parte vira a
-/// própria origem (a central ou o agente), não um plugin nele.
-async fn hop(
-    endpoints: &mut Endpoints<'_>,
-    id: i64,
-    from: i64,
-    origin: &Endpoint,
-) -> AppResult<Endpoint> {
-    if id == from {
-        Ok(origin.clone())
-    } else {
-        endpoints.device(id).await
-    }
+/// O caminho inteiro de uma perna ponta a ponta: todas as arestas e todos os
+/// equipamentos do meio (com ou sem IP) — o mapa desenha e anima a perna por
+/// eles.
+async fn full_route(env: &LinkTestEnv, path: &TopologyPath) -> AppResult<Route> {
+    let middle = match path.device_ids.as_slice() {
+        [_, middle @ .., _] => middle.to_vec(),
+        _ => Vec::new(),
+    };
+    let names: HashMap<i64, String> = devices::Entity::find()
+        .filter(devices::Column::Id.is_in(middle.iter().copied()))
+        .all(&env.db)
+        .await?
+        .into_iter()
+        .map(|device| (device.id, device.name))
+        .collect();
+    Ok(Route {
+        edge_ids: path.edge_ids.clone(),
+        via_names: middle
+            .iter()
+            .map(|id| names.get(id).cloned().unwrap_or_else(|| format!("#{id}")))
+            .collect(),
+        via_device_ids: middle,
+    })
 }
 
-async fn draft_server(env: &LinkTestEnv, request: &LinkTestRequest) -> AppResult<Draft> {
-    let target = required(request.target_device_id, "o destino (targetDeviceId)")?;
-    let system = SystemDeviceService::new(&env.db).find().await?;
+/// Uma perna só, de `origin` a `destination`: a medição ponta a ponta. O
+/// caminho do mapa só desenha a perna — sem ele, a medição roda do mesmo
+/// jeito (o IP alcança), com o aviso.
+async fn end_to_end(
+    env: &LinkTestEnv,
+    origin: Endpoint,
+    destination: Endpoint,
+) -> AppResult<Draft> {
+    let mut warnings = Vec::new();
+    let route = match (origin.view.device_id, destination.view.device_id) {
+        (Some(from), Some(to)) => match find_path(&env.db, from, to).await? {
+            Some(path) => full_route(env, &path).await?,
+            None => {
+                warnings.push(format!(
+                    "Não há caminho conhecido no mapa entre {} e {}: a medição roda assim mesmo,                      sem o desenho do caminho",
+                    origin.view.name, destination.view.name
+                ));
+                Route::default()
+            }
+        },
+        _ => {
+            warnings.push(format!(
+                "{} não está no mapa: a medição roda, sem o desenho do caminho",
+                origin.view.name
+            ));
+            Route::default()
+        }
+    };
+    Ok(Draft {
+        legs: vec![RawLeg {
+            kind: LinkTestLegKind::EndToEnd,
+            a: origin,
+            b: destination,
+            route,
+        }],
+        warnings,
+        blocking: Vec::new(),
+    })
+}
+
+/// Do servidor até `target`. Destino alcançado só pelo agente do site: o
+/// teste parte dele.
+async fn from_server(
+    env: &LinkTestEnv,
+    target: i64,
+    system: Option<devices::Model>,
+) -> AppResult<Draft> {
     if system.as_ref().is_some_and(|device| device.id == target) {
         return Err(AppError::validation(
             "O destino precisa ser outro equipamento que não o próprio servidor",
@@ -407,51 +459,43 @@ async fn draft_server(env: &LinkTestEnv, request: &LinkTestRequest) -> AppResult
         cache: HashMap::new(),
     };
     let destination = endpoints.device(target).await?;
-    // Destino alcançado só pelo agente do site: o teste parte dele.
     let origin = match endpoint::agent_of(&env.db, target).await? {
         Some(agent_id) => endpoint::agent_endpoint(&env.db, agent_id).await?,
         None => endpoint::central_endpoint(system),
     };
-    let mut draft = Draft {
-        legs: vec![RawLeg {
-            kind: LinkTestLegKind::EndToEnd,
-            a: origin.clone(),
-            b: destination.clone(),
-            route: Route::default(),
-        }],
-        warnings: Vec::new(),
-        blocking: Vec::new(),
-    };
-    let Some(from) = origin.view.device_id else {
-        draft.warnings.push(format!(
-            "{} não está no mapa: o caminho enlace por enlace fica de fora e só a perna ponta a \
-             ponta roda",
-            origin.view.name
+    end_to_end(env, origin, destination).await
+}
+
+/// Ponta a ponta do servidor. Achar o gargalo é o "salto por salto"
+/// (`Path`), pedido à parte — o resultado fica um só número, sem pernas
+/// misturadas.
+async fn draft_server(env: &LinkTestEnv, request: &LinkTestRequest) -> AppResult<Draft> {
+    let target = required(request.target_device_id, "o destino (targetDeviceId)")?;
+    let system = SystemDeviceService::new(&env.db).find().await?;
+    from_server(env, target, system).await
+}
+
+/// Ponta a ponta entre dois equipamentos quaisquer. Com a origem no próprio
+/// servidor, é o teste do servidor.
+async fn draft_end_to_end(env: &LinkTestEnv, request: &LinkTestRequest) -> AppResult<Draft> {
+    let source = required(request.source_device_id, "a origem (sourceDeviceId)")?;
+    let target = required(request.target_device_id, "o destino (targetDeviceId)")?;
+    if source == target {
+        return Err(AppError::validation(
+            "A origem e o destino precisam ser dispositivos diferentes",
         ));
-        return Ok(draft);
-    };
-    match find_path(&env.db, from, target).await? {
-        None => draft.warnings.push(format!(
-            "Não há caminho conhecido na topologia entre {} e {}: só a perna ponta a ponta roda",
-            origin.view.name, destination.view.name
-        )),
-        Some(path) => {
-            let (hops, names) = hops_of(env, &path, Some(from)).await?;
-            // Uma perna só (um salto, ou só switches sem IP no meio) é a
-            // própria perna ponta a ponta.
-            if hops.len() >= 2 {
-                for leg in hops {
-                    draft.legs.push(RawLeg {
-                        kind: LinkTestLegKind::Link,
-                        a: hop(&mut endpoints, leg.a, from, &origin).await?,
-                        b: hop(&mut endpoints, leg.b, from, &origin).await?,
-                        route: Route::of(&leg, &names),
-                    });
-                }
-            }
-        }
     }
-    Ok(draft)
+    let system = SystemDeviceService::new(&env.db).find().await?;
+    if system.as_ref().is_some_and(|device| device.id == source) {
+        return from_server(env, target, system).await;
+    }
+    let mut endpoints = Endpoints {
+        env,
+        cache: HashMap::new(),
+    };
+    let origin = endpoints.device(source).await?;
+    let destination = endpoints.device(target).await?;
+    end_to_end(env, origin, destination).await
 }
 
 /// Problemas de execução que a negociação não enxerga.
@@ -826,6 +870,7 @@ pub async fn build(env: &LinkTestEnv, request: &LinkTestRequest) -> AppResult<Bu
         LinkTestKind::Link => draft_link(env, request).await?,
         LinkTestKind::Path => draft_path(env, request).await?,
         LinkTestKind::Server => draft_server(env, request).await?,
+        LinkTestKind::EndToEnd => draft_end_to_end(env, request).await?,
     };
     let mut warnings = draft.warnings;
     let mut blocking = draft.blocking;

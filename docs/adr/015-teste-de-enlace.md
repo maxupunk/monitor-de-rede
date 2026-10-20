@@ -241,7 +241,7 @@ Escrita (rodar, cancelar, agendar) é de `operator`/`admin`; leitura de todos.
 `forward` é sempre o sentido **A→B** da perna; `reverse`, B→A.
 
 ```ts
-type LinkTestKind = 'link' | 'path' | 'server'
+type LinkTestKind = 'link' | 'path' | 'server' | 'end_to_end' // §11
 type LinkTestStatus = 'queued' | 'running' | 'succeeded' | 'partial' | 'failed' | 'cancelled'
 type LinkTestStepStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'skipped' | 'cancelled'
 type LinkTestFlow = 'forward' | 'reverse'
@@ -561,6 +561,57 @@ iperf3 3.17.1 baixando os `.ipk` pela central. Achado: o `opkg -f <conf>`
 espera o DNS, ~40 s no total) e depois instala pelos `nm_*`; funciona, mais
 devagar. No container o SSH chega pelo NAT do Docker (172.17.0.1), endereço
 que não leva de volta à central — a falha disse exatamente isso.
+
+### 11. Testar de qualquer equipamento, numa tela só (adendo, 2026-10-19)
+
+**Problema.** Na aba "Testes" do equipamento só havia "Testar caminho até
+aqui"; não dava para medir de AP-assistencia até RB2011 sem sair do
+servidor. O painel do teste ficava espremido entre o inspetor e o mapa, e o
+resultado "do servidor" misturava a perna ponta a ponta com todas as pernas
+enlace por enlace — muita informação de uma vez.
+
+**Decisão** (com o dono do produto, em entrevista):
+
+- **`end_to_end`** (novo `LinkTestKind`): de um equipamento até outro numa
+  medição só, atravessando o caminho inteiro. A perna leva o caminho do mapa
+  (`edgeIds` e `viaDeviceIds`/`viaNames` com **todos** os equipamentos do
+  meio) — o mapa desenha e anima a perna por eles. Sem caminho conhecido, a
+  medição roda do mesmo jeito, com aviso. Com a origem no próprio servidor, é
+  o `server`.
+- **`server` passa a ser só ponta a ponta.** Achar o gargalo é pedido à
+  parte: "Medir enlace por enlace" (`path`, inclusive a partir do servidor),
+  oferecido no resultado quando há outro equipamento com IP no meio.
+- **Assistente "De / Até"** (`utils/linkTests/destinations.ts`): "De" vem com
+  o equipamento aberto (ou o servidor); "Até" lista os vizinhos diretos
+  ("Enlace direto" → `link`, inclusive atrás de switch sem IP) e o resto da
+  rede ("Ponta a ponta · N saltos · por …"), com "Ponta a ponta / Enlace por
+  enlace" para quem não é vizinho. O tipo sai da escolha, não de um cartão.
+- **Tela do teste em tela cheia** (`LinkTestRunDialog` + `LinkTestRunView`),
+  minimizável para uma pílula no mapa (`LinkTestMiniCard`); a mesma tela no
+  histórico. Em cima, o **mini mapa** (`LinkTestPathMap`): o caminho em
+  linha, com os elementos, o estilo e a animação do mapa (extraídos para
+  `utils/topology/elementSync.ts` e `ants.ts`, usados também pelo canvas).
+  Durante a medição: a etapa atual, os números grandes e o gráfico. No fim,
+  **resumo primeiro** (`LinkTestResultView`): números, gargalo numa frase, uma
+  linha por enlace, o que não rodou com o motivo, e os próximos passos.
+  Pernas, etapas e transcrições ficam em "Detalhes técnicos".
+- **Aba "Testes"** mostra as ações de teste do registro (`resolveActions`,
+  grupo "Testes"): "Testar daqui até…", "Testar do servidor até aqui",
+  "Diagnóstico rápido (ping)", "Repetir último teste".
+
+**Achado em equipamento real.** "Do servidor até AP-assistencia" falhava às
+vezes na volta com "O servidor iperf3 encerrou a conexão de controle" (a
+mesma falha da captura do dono). O `iperf3 -s` do OpenWrt 25.12 (3.20), ainda
+liberando a ida, fecha sem resposta a conexão que chega cedo — além do
+`ACCESS_DENIED` que o cliente já tratava. Antes do `TEST_RUNNING`, nada foi
+medido: o cliente nativo agora trata esse fechamento como "ocupado" e tenta
+de novo (`closed_early`, teste `servidor_que_fecha_antes_de_comecar_…`).
+
+**Evidência (rede real, pela tela).** AP-assistencia → AP-terraço (enlace
+pelo switch): 366–367 / 223–236 Mbit/s. Servidor → AP-assistencia (ponta a
+ponta, atravessando BORDA e o switch): 303–323 / 518–535 Mbit/s. Enlace por
+enlace do mesmo par: Servidor → BORDA 300–363 / 563–659 e BORDA →
+AP-assistencia 937 / 926 Mbit/s — o gargalo é o trecho até a BORDA.
 
 ## Consequências
 

@@ -19,9 +19,9 @@ import {
 import { accessFix, endpoint, installFix, packageFix, plan } from './fixtures'
 
 describe('assistente do teste de enlace', () => {
-  it('rascunho a partir do pedido do mapa (ou vazio)', () => {
+  it('rascunho a partir do pedido do mapa (ou vazio: ponta a ponta)', () => {
     expect(draftFromRequest(null)).toEqual({
-      kind: 'link',
+      kind: 'end_to_end',
       linkId: null,
       sourceDeviceId: null,
       targetDeviceId: null,
@@ -49,14 +49,18 @@ describe('assistente do teste de enlace', () => {
       requestFromDraft({ kind: 'link', linkId: null, sourceDeviceId: 3, targetDeviceId: 9 })
     ).not.toHaveProperty('linkId')
     expect(targetErrors(draftFromRequest({ kind: 'path', sourceDeviceId: 3 }))).toEqual([
-      'Escolha o destino do caminho.',
+      'Escolha até onde medir.',
     ])
+    expect(targetErrors(draftFromRequest({ kind: 'end_to_end', targetDeviceId: 4 }))).toEqual([
+      'Escolha de onde medir.',
+    ])
+    expect(
+      requestFromDraft({ kind: 'end_to_end', linkId: null, sourceDeviceId: 3, targetDeviceId: 9 })
+    ).toMatchObject({ kind: 'end_to_end', sourceDeviceId: 3, targetDeviceId: 9 })
     expect(
       targetErrors(draftFromRequest({ kind: 'path', sourceDeviceId: 3, targetDeviceId: 3 }))
     ).toEqual(['Origem e destino precisam ser equipamentos diferentes.'])
-    expect(targetErrors(draftFromRequest({ kind: 'server' }))).toEqual([
-      'Escolha até qual equipamento medir.',
-    ])
+    expect(targetErrors(draftFromRequest({ kind: 'server' }))).toEqual(['Escolha até onde medir.'])
   })
 
   it('pedido só com os campos do tipo e a especificação completa', () => {

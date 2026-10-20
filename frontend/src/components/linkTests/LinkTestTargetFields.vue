@@ -1,171 +1,123 @@
 <template>
   <div class="target-fields">
-    <div id="lt-kind-label" class="field-label text-title-small font-weight-bold mb-2">
-      O que medir
-    </div>
-    <v-item-group
-      :model-value="modelValue.kind"
-      mandatory
-      class="kinds mb-4"
-      role="radiogroup"
-      aria-labelledby="lt-kind-label"
-      @update:model-value="setKind"
-    >
-      <v-item v-for="option in KIND_OPTIONS" :key="option.value" :value="option.value">
-        <template #default="{ isSelected, toggle }">
-          <v-card
-            class="kind-card"
-            :class="{ selected: isSelected }"
-            :color="isSelected ? option.color : undefined"
-            :variant="isSelected ? 'flat' : 'outlined'"
-            role="radio"
-            :aria-checked="isSelected"
-            :disabled="readonly"
-            @click="toggle"
-          >
-            <v-card-text class="d-flex align-start ga-3">
-              <v-icon size="28" :color="isSelected ? 'white' : option.color">
-                {{ option.icon }}
-              </v-icon>
-              <div>
-                <div class="text-title-small font-weight-bold">{{ option.label }}</div>
-                <div class="text-body-small mt-1">{{ option.description }}</div>
-              </div>
-            </v-card-text>
-          </v-card>
-        </template>
-      </v-item>
-    </v-item-group>
-
-    <p v-if="hiddenCount > 0" class="transparent-hint text-body-small mb-3">
-      <v-icon size="16" color="info">mdi-information</v-icon>
-      <span>{{ TRANSPARENT_HINT }}</span>
-    </p>
-
-    <template v-if="modelValue.kind === 'link'">
+    <div class="ends">
       <v-autocomplete
-        :model-value="modelValue.sourceDeviceId"
-        :items="deviceItems"
+        :model-value="source"
+        :items="sourceItems"
         item-props
-        label="Equipamento de uma das pontas"
-        prepend-inner-icon="mdi-router-network"
+        label="De"
+        prepend-inner-icon="mdi-ray-start"
         variant="outlined"
         density="comfortable"
         :readonly="readonly"
-        clearable
-        @update:model-value="setLinkDevice"
+        hide-details
+        class="end"
+        @update:model-value="setSource"
       ></v-autocomplete>
-      <v-select
-        :model-value="selectedKey"
-        :items="edgeItems"
-        item-props
-        label="Enlace"
-        prepend-inner-icon="mdi-lan"
-        variant="outlined"
-        density="comfortable"
-        :readonly="readonly"
-        :disabled="modelValue.sourceDeviceId === null"
-        :loading="topologyLoading"
-        :no-data-text="
-          modelValue.sourceDeviceId === null
-            ? 'Escolha o equipamento primeiro'
-            : 'Este equipamento não tem enlaces testáveis no mapa'
-        "
-        :hint="linkHint"
-        persistent-hint
-        :list-props="TARGET_LIST_PROPS"
-        @update:model-value="chooseTarget"
-      ></v-select>
-    </template>
-
-    <template v-else-if="modelValue.kind === 'path'">
-      <div class="d-flex align-start ga-2 flex-wrap flex-sm-nowrap">
-        <v-autocomplete
-          :model-value="modelValue.sourceDeviceId"
-          :items="deviceItems"
-          item-props
-          label="Origem"
-          prepend-inner-icon="mdi-ray-start"
-          variant="outlined"
-          density="comfortable"
-          :readonly="readonly"
-          clearable
-          class="flex-1-1-0"
-          @update:model-value="(value) => patch({ sourceDeviceId: value ?? null })"
-        ></v-autocomplete>
-        <v-btn
-          icon="mdi-swap-horizontal"
-          color="primary"
-          variant="flat"
-          size="small"
-          class="mt-2 swap"
-          aria-label="Inverter origem e destino"
-          :disabled="readonly"
-          @click="swap"
-        ></v-btn>
-        <v-autocomplete
-          :model-value="modelValue.targetDeviceId"
-          :items="deviceItems"
-          item-props
-          label="Destino"
-          prepend-inner-icon="mdi-ray-end"
-          variant="outlined"
-          density="comfortable"
-          :readonly="readonly"
-          clearable
-          class="flex-1-1-0"
-          @update:model-value="(value) => patch({ targetDeviceId: value ?? null })"
-        ></v-autocomplete>
-      </div>
-    </template>
-
-    <template v-else>
-      <div class="origin mb-4">
-        <v-icon color="info">mdi-monitor-dashboard</v-icon>
-        <div>
-          <div class="text-title-small font-weight-bold">Origem: servidor NetMonitor</div>
-          <div class="text-body-small">
-            Quando o destino só é alcançável por um agente remoto, o agente do site mede no lugar do
-            servidor.
-          </div>
-        </div>
-      </div>
+      <v-btn
+        icon="mdi-swap-horizontal"
+        color="primary"
+        variant="flat"
+        size="small"
+        class="swap"
+        aria-label="Inverter origem e destino"
+        :disabled="readonly || source === null || modelValue.targetDeviceId === null"
+        @click="swap"
+      ></v-btn>
       <v-autocomplete
-        :model-value="modelValue.targetDeviceId"
-        :items="deviceItems.filter((item) => !item.system)"
+        :model-value="selectedKey"
+        :items="destinationItems"
         item-props
-        label="Até qual equipamento"
+        label="Até"
         prepend-inner-icon="mdi-ray-end"
         variant="outlined"
         density="comfortable"
         :readonly="readonly"
-        clearable
-        @update:model-value="(value) => patch({ targetDeviceId: value ?? null })"
+        :disabled="source === null"
+        :loading="topologyLoading"
+        :no-data-text="
+          source === null ? 'Escolha de onde medir primeiro' : 'Nenhum equipamento para medir daqui'
+        "
+        :list-props="LIST_PROPS"
+        hide-details
+        class="end"
+        @update:model-value="chooseDestination"
       ></v-autocomplete>
+    </div>
+
+    <p v-if="hiddenCount > 0" class="hint text-body-small mt-2">
+      <v-icon size="16" color="info">mdi-information</v-icon>
+      <span>{{ TRANSPARENT_HINT }}</span>
+    </p>
+
+    <template v-if="destination">
+      <div v-if="!destination.direct" class="mode mt-4">
+        <span id="lt-mode-label" class="text-title-small font-weight-bold">Como medir</span>
+        <v-btn-toggle
+          :model-value="mode"
+          mandatory
+          color="primary"
+          variant="outlined"
+          density="comfortable"
+          divided
+          aria-labelledby="lt-mode-label"
+          :disabled="readonly"
+          @update:model-value="setMode"
+        >
+          <v-btn value="end_to_end" prepend-icon="mdi-arrow-expand-horizontal">Ponta a ponta</v-btn>
+          <v-btn value="per_hop" prepend-icon="mdi-transit-connection-variant">
+            Enlace por enlace
+          </v-btn>
+        </v-btn-toggle>
+      </div>
+
+      <section class="what mt-4" aria-live="polite">
+        <div class="d-flex align-start ga-3 mb-3">
+          <v-avatar :color="kindInfo.color" size="36" rounded="lg">
+            <v-icon color="white" size="20">{{ kindInfo.icon }}</v-icon>
+          </v-avatar>
+          <div>
+            <div class="text-title-small font-weight-bold">{{ kindInfo.label }}</div>
+            <div class="text-body-medium">{{ explanation }}</div>
+          </div>
+        </div>
+        <LinkTestPathMap
+          :node-ids="destination.deviceIds"
+          :edge-ids="destination.edgeIds"
+          :height="smAndDown ? verticalMapHeight(destination.deviceIds.length) : 220"
+          :vertical="smAndDown"
+        />
+      </section>
     </template>
   </div>
 </template>
 
 <script setup lang="ts">
 /**
- * Passo "O que testar": tipo do teste e as pontas. Usado pelo assistente e
- * pelo diálogo de agendamento (mesmo alvo, mesmas regras).
+ * Passo "O que testar": **De** e **Até**. O vizinho direto mede o enlace; os
+ * demais, ponta a ponta (ou enlace por enlace, para achar o gargalo). O tipo
+ * do teste sai da escolha (`utils/linkTests/destinations`), nunca de um
+ * cartão a mais. Usado pelo assistente e pelo agendamento (mesmo alvo,
+ * mesmas regras).
  */
 import { computed, onMounted, ref, watch } from 'vue'
+import { useDisplay } from 'vuetify'
 import { useDevicesStore } from '@/stores/devices'
-import { useTopologyStore, type TopologyEdge } from '@/stores/topology'
-import type { LinkTestKind } from '@/types/linkTests'
-import { formatLinkSpeed } from '@/utils/formatters'
-import { KIND_OPTIONS, viaText } from '@/utils/linkTests/presentation'
+import { useTopologyStore } from '@/stores/topology'
 import {
-  TRANSPARENT_HINT,
-  isLinkTestEndpoint,
-  linkTargets,
-  selectedTargetKey,
-  type LinkTarget,
-} from '@/utils/linkTests/targets'
-import { linkOptionSubtitle, type LinkTestTargetDraft } from '@/utils/linkTests/wizard'
-import { edgeEndpoints, edgeSpeed } from '@/utils/topology/presentation'
+  destinationSubtitle,
+  destinationsFrom,
+  measureKind,
+  modeOfKind,
+  type Destination,
+  type DestinationNode,
+  type MeasureMode,
+} from '@/utils/linkTests/destinations'
+import { verticalMapHeight } from '@/utils/linkTests/pathMap'
+import { TEST_KINDS, viaText } from '@/utils/linkTests/presentation'
+import { TRANSPARENT_HINT, isLinkTestEndpoint } from '@/utils/linkTests/targets'
+import type { LinkTestTargetDraft } from '@/utils/linkTests/wizard'
+import LinkTestPathMap from './LinkTestPathMap.vue'
 
 const props = defineProps<{
   modelValue: LinkTestTargetDraft
@@ -174,120 +126,179 @@ const props = defineProps<{
 
 const emit = defineEmits<{ 'update:modelValue': [value: LinkTestTargetDraft] }>()
 
+/** O subtítulo (enlace direto, saltos, por onde passa) é parte da escolha. */
+const LIST_PROPS = { style: { '--v-list-item-subtitle-opacity': '1' } }
+
+const { smAndDown } = useDisplay()
 const devices = useDevicesStore()
 const topology = useTopologyStore()
 const topologyLoading = ref(false)
+const mode = ref<MeasureMode>(modeOfKind(props.modelValue.kind))
 
-function patch(change: Partial<LinkTestTargetDraft>) {
-  emit('update:modelValue', { ...props.modelValue, ...change })
-}
+const systemId = computed(
+  () =>
+    devices.devices.find((device) => device.isSystem)?.id ??
+    topology.nodes.find((node) => node.isSystem)?.id ??
+    null
+)
 
-function setKind(kind: unknown) {
-  if (kind !== 'link' && kind !== 'path' && kind !== 'server') return
-  const next: LinkTestKind = kind
-  if (next === props.modelValue.kind) return
-  // O destino escolhido continua valendo entre caminho e servidor.
-  patch({ kind: next, linkId: null })
-}
+/** O teste do servidor não guarda a origem: ela é o próprio servidor. */
+const source = computed(() =>
+  props.modelValue.sourceDeviceId !== null
+    ? props.modelValue.sourceDeviceId
+    : props.modelValue.kind === 'server'
+      ? systemId.value
+      : null
+)
 
-function swap() {
-  patch({
-    sourceDeviceId: props.modelValue.targetDeviceId,
-    targetDeviceId: props.modelValue.sourceDeviceId,
-  })
-}
-
-/**
- * O subtítulo da opção ("passando por switch-a › switch-b") é parte da
- * escolha, não um detalhe: opacidade cheia, e ele quebra linha em vez de
- * sumir na tela estreita.
- */
-const TARGET_LIST_PROPS = { style: { '--v-list-item-subtitle-opacity': '1' } }
+const endpoints = computed<Array<DestinationNode & { type: string }>>(() =>
+  devices.devices.filter(isLinkTestEndpoint).map((device) => ({
+    id: device.id,
+    name: device.name,
+    ipAddress: device.ipAddress,
+    isSystem: device.isSystem,
+    type: device.type,
+  }))
+)
 
 const hiddenCount = computed(
   () => devices.devices.filter((device) => !isLinkTestEndpoint(device)).length
 )
 
-const deviceItems = computed(() =>
-  devices.devices
-    .filter(isLinkTestEndpoint)
-    .map((device) => ({
-      title: device.name,
-      subtitle: device.isSystem ? 'Servidor NetMonitor' : (device.ipAddress ?? ''),
-      value: device.id,
-      system: Boolean(device.isSystem),
-    }))
-    .sort((a, b) => a.title.localeCompare(b.title, 'pt-BR'))
-)
-
-function deviceName(id: number): string {
-  return (
-    topology.nodesById.get(id)?.name ??
-    devices.devices.find((device) => device.id === id)?.name ??
-    `#${id}`
+const sourceItems = computed(() => {
+  const items = endpoints.value.map((device) => ({
+    title: device.isSystem ? 'Servidor NetMonitor' : device.name,
+    subtitle: device.isSystem ? device.name : (device.ipAddress ?? ''),
+    value: device.id,
+    prependIcon: device.isSystem ? 'mdi-monitor-dashboard' : 'mdi-router-network',
+    system: Boolean(device.isSystem),
+  }))
+  return items.sort(
+    (a, b) => Number(b.system) - Number(a.system) || a.title.localeCompare(b.title, 'pt-BR')
   )
-}
-
-function edgeSubtitle(edge: TopologyEdge): string {
-  const speed = edgeSpeed(edge)
-  return linkOptionSubtitle(
-    edge.sourceInterfaceName,
-    edge.targetInterfaceName,
-    speed ? formatLinkSpeed(speed) : null
-  )
-}
-
-/** Vizinhos com IP e, atrás de switches sem IP, os equipamentos com IP. */
-const targets = computed<LinkTarget[]>(() => {
-  const from = props.modelValue.sourceDeviceId
-  if (from === null) return []
-  return linkTargets(from, (id) => topology.nodesById.get(id), topology.edges)
 })
 
-function targetSubtitle(target: LinkTarget): string {
-  const via = viaText(target.viaNames)
-  if (via) return `passando por ${via}`
-  const edge = target.linkId !== null ? topology.edgesById.get(target.linkId) : undefined
-  return edge ? edgeSubtitle(edge) : ''
+function nodeOf(id: number): DestinationNode | undefined {
+  return topology.nodesById.get(id) ?? endpoints.value.find((device) => device.id === id)
 }
 
-const edgeItems = computed(() =>
-  targets.value.map((target) => ({
-    title: `até ${target.name}`,
-    subtitle: targetSubtitle(target),
-    value: target.key,
-    prependIcon: target.viaNames.length > 0 ? 'mdi-switch' : 'mdi-lan',
+function canBeEndpoint(node: DestinationNode): boolean {
+  const device = devices.devices.find((item) => item.id === node.id)
+  return device ? isLinkTestEndpoint(device) : !node.isSystem && Boolean(node.ipAddress)
+}
+
+function destinationsOf(from: number | null): Destination[] {
+  if (from === null) return []
+  return destinationsFrom(from, nodeOf, topology.edges, endpoints.value, canBeEndpoint)
+}
+
+const destinations = computed(() => destinationsOf(source.value))
+
+function keyOf(destination: Pick<Destination, 'direct' | 'linkId' | 'deviceId'>): string {
+  return destination.direct && destination.linkId !== null
+    ? `edge:${destination.linkId}`
+    : `device:${destination.deviceId}`
+}
+
+const destinationItems = computed(() =>
+  destinations.value.map((destination) => ({
+    title: destination.name,
+    subtitle: destinationSubtitle(destination, (names) => viaText(names) ?? ''),
+    value: keyOf(destination),
+    prependIcon: destination.direct ? 'mdi-lan' : 'mdi-arrow-expand-horizontal',
   }))
 )
 
-const selectedKey = computed(() => selectedTargetKey(props.modelValue, targets.value))
-
-const linkHint = computed(() => {
-  if (props.modelValue.sourceDeviceId === null) {
-    return 'Escolha o equipamento para ver os enlaces dele.'
+/** A opção escolhida: o enlace, quando o pedido traz um; senão, o destino. */
+const destination = computed<Destination | null>(() => {
+  const { linkId, targetDeviceId } = props.modelValue
+  if (linkId !== null) {
+    const byEdge = destinations.value.find((item) => item.direct && item.linkId === linkId)
+    if (byEdge) return byEdge
   }
-  const chosen = targets.value.find((target) => target.key === selectedKey.value)
-  const via = chosen ? viaText(chosen.viaNames) : null
-  return via
-    ? `Mede os cabos entre ${deviceName(props.modelValue.sourceDeviceId)} e ${chosen?.name}, passando por ${via} (sem IP).`
-    : ''
+  if (targetDeviceId === null) return null
+  return (
+    destinations.value.find((item) => item.deviceId === targetDeviceId && item.direct) ??
+    destinations.value.find((item) => item.deviceId === targetDeviceId) ??
+    null
+  )
 })
 
-function setLinkDevice(value: number | null) {
-  patch({ sourceDeviceId: value ?? null, targetDeviceId: null, linkId: null })
+const selectedKey = computed(() => (destination.value ? keyOf(destination.value) : null))
+
+const kindInfo = computed(() => TEST_KINDS[props.modelValue.kind])
+
+function nameOf(id: number | null): string {
+  if (id === null) return '?'
+  if (id === systemId.value) return 'o servidor NetMonitor'
+  return nodeOf(id)?.name ?? `#${id}`
 }
 
-function chooseTarget(key: string | null) {
-  const from = props.modelValue.sourceDeviceId
-  const chosen = key !== null ? targets.value.find((target) => target.key === key) : undefined
-  if (!chosen || from === null) {
-    patch({ linkId: null, targetDeviceId: null })
-    return
+const explanation = computed(() => {
+  const chosen = destination.value
+  if (!chosen) return ''
+  const from = nameOf(source.value)
+  const via = viaText(chosen.viaNames)
+  if (chosen.direct) {
+    return via
+      ? `Mede só o enlace entre ${from} e ${chosen.name}, passando por ${via} (sem IP).`
+      : `Mede só o enlace entre ${from} e ${chosen.name}.`
   }
-  patch({ linkId: chosen.linkId, sourceDeviceId: from, targetDeviceId: chosen.deviceId })
+  if (props.modelValue.kind === 'path') {
+    return `Mede, um de cada vez, os ${chosen.edgeIds.length} enlaces entre ${from} e ${chosen.name} — mostra onde está o gargalo.`
+  }
+  const through = via ? `, atravessando ${via}` : ''
+  return `Uma medição de ${from} até ${chosen.name}${through} — a velocidade que quem usa a rede sente.`
+})
+
+function draftFor(from: number | null, chosen: Destination | null): LinkTestTargetDraft {
+  if (from === null || !chosen) {
+    return {
+      kind: from !== null && from === systemId.value ? 'server' : 'end_to_end',
+      linkId: null,
+      sourceDeviceId: from,
+      targetDeviceId: null,
+    }
+  }
+  const { kind, linkId } = measureKind(chosen, from === systemId.value, mode.value)
+  return { kind, linkId, sourceDeviceId: from, targetDeviceId: chosen.deviceId }
 }
 
-/** Os enlaces vêm do mapa: fora da topologia, carrega o grafo sob demanda. */
+function update(next: LinkTestTargetDraft) {
+  emit('update:modelValue', next)
+}
+
+function setSource(value: number | null) {
+  update(draftFor(value ?? null, null))
+}
+
+function chooseDestination(key: string | null) {
+  const chosen = destinationItems.value.findIndex((item) => item.value === key)
+  update(draftFor(source.value, chosen >= 0 ? destinations.value[chosen] : null))
+}
+
+function setMode(value: MeasureMode) {
+  mode.value = value
+  update(draftFor(source.value, destination.value))
+}
+
+/** Inverte as pontas: o destino vira origem e o caminho é recalculado. */
+function swap() {
+  const from = props.modelValue.targetDeviceId
+  const to = source.value
+  if (from === null || to === null) return
+  const chosen = destinationsOf(from).find((item) => item.deviceId === to) ?? null
+  update(draftFor(from, chosen))
+}
+
+watch(
+  () => props.modelValue.kind,
+  (kind) => {
+    if (kind === 'path' || kind === 'end_to_end' || kind === 'server') mode.value = modeOfKind(kind)
+  }
+)
+
+/** Os destinos vêm do mapa: fora da topologia, carrega o grafo sob demanda. */
 async function ensureTopology() {
   if (topology.loaded || topologyLoading.value) return
   topologyLoading.value = true
@@ -298,58 +309,42 @@ async function ensureTopology() {
   }
 }
 
-/** Pedido só com o enlace (ex.: "repetir"): completa a ponta pelo mapa. */
-function completeFromLink() {
-  const { linkId, sourceDeviceId } = props.modelValue
-  if (linkId === null || sourceDeviceId !== null) return
-  const edge = topology.edgesById.get(linkId)
-  if (!edge) return
-  const { source, target } = edgeEndpoints(edge)
-  patch({ sourceDeviceId: source, targetDeviceId: target })
-}
-
-watch(
-  () => props.modelValue.kind,
-  (kind) => {
-    if (kind === 'link') void ensureTopology().then(completeFromLink)
-  },
-  { immediate: true }
-)
-
 onMounted(() => {
   if (devices.devices.length === 0) void devices.fetchDevices()
+  void ensureTopology()
 })
 </script>
 
 <style scoped>
-.kinds {
+.ends {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
 }
-.kind-card {
-  cursor: pointer;
-  height: 100%;
+@media (max-width: 600px) {
+  .ends {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .swap {
+    justify-self: center;
+    transform: rotate(90deg);
+  }
 }
-.kind-card:not(.selected) {
-  border-color: rgba(var(--v-theme-on-surface), 0.3);
-}
-.field-label {
-  color: rgb(var(--v-theme-on-surface));
-}
-.origin {
+.mode {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
-  padding: 12px;
-  border-radius: 10px;
-  border: 1px solid rgb(var(--v-theme-info));
   color: rgb(var(--v-theme-on-surface));
 }
-.swap {
-  align-self: flex-start;
+.what {
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgb(var(--v-theme-primary));
+  color: rgb(var(--v-theme-on-surface));
 }
-.transparent-hint {
+.hint {
   display: flex;
   align-items: center;
   gap: 6px;

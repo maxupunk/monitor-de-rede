@@ -8,7 +8,8 @@ import * as directives from 'vuetify/directives'
 import { apiService } from '@/services/apiService'
 import { useAuthStore } from '@/stores/auth'
 import { useLinkTestsStore } from '@/stores/linkTests'
-import LinkTestRunPanel from '@/components/linkTests/LinkTestRunPanel.vue'
+import LinkTestRunDialog from '@/components/linkTests/LinkTestRunDialog.vue'
+import { useLinkTestRequestsStore } from '@/stores/linkTestRequests'
 import LinkTestPlanView from '@/components/linkTests/LinkTestPlanView.vue'
 import LinkTestWizard from '@/components/linkTests/LinkTestWizard.vue'
 import LinkTestTargetFields from '@/components/linkTests/LinkTestTargetFields.vue'
@@ -60,7 +61,8 @@ function mountWith<T>(component: T, props: Record<string, unknown>) {
   return mount(component as never, {
     props,
     attachTo: document.body,
-    global: { plugins: [pinia, vuetify(), router()] },
+    // O mini mapa desenha num canvas (Cytoscape), que o jsdom não tem.
+    global: { plugins: [pinia, vuetify(), router()], stubs: { LinkTestPathMap: true } },
   })
 }
 
@@ -95,7 +97,7 @@ describe('telas do teste de enlace', () => {
     vi.restoreAllMocks()
   })
 
-  it('painel ao vivo: etapas, Mbps da amostra e "Cancelar teste" à vista', async () => {
+  it('tela do teste ao vivo: etapa atual, Mbps da amostra e "Cancelar teste" à vista', async () => {
     setRole('admin')
     const store = useLinkTestsStore()
     const running = test(1, {
@@ -112,45 +114,80 @@ describe('telas do teste de enlace', () => {
     })
     store.applyUpdated(running)
     store.applySample({ testId: 1, legSeq: 1, flow: 'forward', bps: 487e6, tMs: 1000 })
-    const wrapper = mountWith(LinkTestRunPanel, { test: store.byId(1) })
+    mountWith(LinkTestRunDialog, { modelValue: true, test: store.byId(1), minimizable: true })
     await flushPromises()
-    const text = wrapper.text()
-    expect(text).toContain('Em andamento')
+    const text = document.body.textContent ?? ''
     expect(text).toContain('Dev-1 → Dev-2')
+    expect(text).toContain('Em andamento')
     expect(text).toContain('487 Mbps')
-    expect(text).toContain('Subir servidor')
+    expect(text).toContain('Servidor')
     expect(text).toContain('O enlace fica saturado')
-    const cancel = wrapper.findAll('button').find((b) => b.text().includes('Cancelar teste'))
-    expect(cancel?.attributes('disabled')).toBeUndefined()
+    // Pernas e etapas completas ficam nos detalhes, recolhidos.
+    expect(text).toContain('Detalhes técnicos')
+    const button = (label: string) =>
+      [...document.body.querySelectorAll('button')].find(
+        (b) => b.textContent?.includes(label) || b.getAttribute('aria-label')?.includes(label)
+      )
+    expect(button('Cancelar teste')?.hasAttribute('disabled')).toBe(false)
+    expect(button('Minimizar')).toBeDefined()
     // Anúncio acessível da etapa atual.
-    expect(wrapper.find('[aria-live="polite"]').text()).toContain('perna 1 de 1')
+    const live = [...document.body.querySelectorAll('[aria-live="polite"]')].map(
+      (el) => el.textContent
+    )
+    expect(live.join(' ')).toContain('Em andamento: Ida')
   })
 
-  it('painel concluído: gargalo explicado e tabela por perna', async () => {
-    setRole('viewer')
+  it('tela do teste concluído: resumo primeiro e "Medir enlace por enlace"', async () => {
+    setRole('admin')
+    const devices = useDevicesStore()
+    devices.devices = [
+      { id: 1, name: 'Dev-1', type: 'router', ipAddress: '10.0.0.1' },
+      { id: 5, name: 'BORDA', type: 'router', ipAddress: '10.0.0.5' },
+      { id: 2, name: 'Dev-2', type: 'router', ipAddress: '10.0.0.2' },
+    ] as never
     const done = test(2, {
-      kind: 'path',
+      kind: 'end_to_end',
       status: 'succeeded',
       finishedAt: '2026-10-16T12:00:40Z',
+      sourceDeviceId: 1,
+      targetDeviceId: 2,
       legs: [
-        leg(1, { status: 'succeeded', forwardBps: 900e6, reverseBps: 880e6 }),
-        leg(2, { status: 'succeeded', forwardBps: 87e6, reverseBps: 85e6 }),
+        leg(1, {
+          kind: 'end_to_end',
+          status: 'succeeded',
+          forwardBps: 366e6,
+          reverseBps: 236e6,
+          edgeId: null,
+          edgeIds: [11, 12],
+          viaDeviceIds: [5],
+          viaNames: ['BORDA'],
+        }),
       ],
-      summary: { bottleneckLegSeq: 2, minForwardBps: 87e6, minReverseBps: 85e6 },
+      summary: { bottleneckLegSeq: 1, minForwardBps: 366e6, minReverseBps: 236e6 },
     })
-    const wrapper = mountWith(LinkTestRunPanel, { test: done })
+    mountWith(LinkTestRunDialog, { modelValue: true, test: done })
     await flushPromises()
-    const text = wrapper.text()
+    const text = document.body.textContent ?? ''
     expect(text).toContain('Teste concluído')
-    expect(text).toContain('O gargalo é Dev-2 → Dev-3')
-    expect(wrapper.findAll('tbody tr')).toHaveLength(2)
-    expect(wrapper.find('tr.bottleneck').text()).toContain('Dev-2 → Dev-3')
+    expect(text).toContain('366 Mbps')
+    expect(text).toContain('236 Mbps')
+    expect(text).toContain('Ponta a ponta')
     expect(text).not.toContain('Cancelar teste')
     // Hora absoluta (sem relógio, um "há 0s" ficaria congelado).
     expect(text).toContain('terminou em')
     expect(text).not.toContain('há 0s')
-    // Sem a velocidade da porta, nenhum selo repete o número do medidor.
-    expect(wrapper.findAll('.gauge .v-chip')).toHaveLength(0)
+
+    // Com outro equipamento com IP no meio, dá para achar o gargalo.
+    const perHop = [...document.body.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('Medir enlace por enlace')
+    ) as HTMLElement
+    perHop.click()
+    await flushPromises()
+    expect(useLinkTestRequestsStore().pending).toMatchObject({
+      kind: 'path',
+      sourceDeviceId: 1,
+      targetDeviceId: 2,
+    })
   })
 
   it('plano: bloqueio com dica acionável, aviso de saturação e o pacote que falta', async () => {
@@ -217,7 +254,7 @@ describe('telas do teste de enlace', () => {
     ).toBe(false)
   })
 
-  it('"Enlace": o switch sem IP some do seletor e vira "até BORDA, passando por…"', async () => {
+  it('De / Até: vizinho atrás do switch sem IP é enlace direto; o resto é ponta a ponta', async () => {
     setRole('admin')
     vi.spyOn(apiService, 'get').mockResolvedValue([])
     const topology = useTopologyStore()
@@ -225,38 +262,64 @@ describe('telas do teste de enlace', () => {
       node(1, { name: 'AP-terraço', ipAddress: '10.0.0.3' }),
       node(2, { name: 'switch-assistencia', type: 'unmanaged_switch', ipAddress: null }),
       node(3, { name: 'BORDA', ipAddress: '10.0.0.1' }),
+      node(4, { name: 'RB2011', ipAddress: '10.0.0.242' }),
     ]
-    topology.edges = [edge(11, 1, 2), edge(12, 2, 3)]
+    topology.edges = [edge(11, 1, 2), edge(12, 2, 3), edge(13, 3, 4)]
     topology.loaded = true
     const devices = useDevicesStore()
     devices.devices = [
       { id: 1, name: 'AP-terraço', type: 'router', ipAddress: '10.0.0.3' },
       { id: 2, name: 'switch-assistencia', type: 'unmanaged_switch' },
       { id: 3, name: 'BORDA', type: 'router', ipAddress: '10.0.0.1' },
+      { id: 4, name: 'RB2011', type: 'router', ipAddress: '10.0.0.242' },
     ] as never
     const wrapper = mountWith(LinkTestTargetFields, {
-      modelValue: { kind: 'link', linkId: null, sourceDeviceId: 1, targetDeviceId: null },
+      modelValue: { kind: 'end_to_end', linkId: null, sourceDeviceId: 1, targetDeviceId: null },
     })
     await flushPromises()
     expect(wrapper.text()).toContain('Switches sem IP não entram no teste')
 
-    const select = wrapper.findAll('.v-select .v-field')
-    await select[0].trigger('mousedown')
+    const fields = wrapper.findAll('.v-autocomplete .v-field')
+    await fields[1].trigger('mousedown')
     await flushPromises()
-    const body = document.body.textContent ?? ''
-    expect(body).toContain('até BORDA')
-    expect(body).toContain('passando por switch-assistencia')
-    expect(body).not.toContain('até switch-assistencia')
+    const options = () => [...document.body.querySelectorAll('.v-overlay-container .v-list-item')]
+    const texts = options().map((item) => item.textContent ?? '')
+    expect(texts.some((t) => t.includes('BORDA') && t.includes('Enlace direto'))).toBe(true)
+    expect(texts.some((t) => t.includes('passando por switch-assistencia'))).toBe(true)
+    expect(texts.some((t) => t.includes('RB2011') && t.includes('Ponta a ponta'))).toBe(true)
+    expect(texts.some((t) => t.startsWith('switch-assistencia'))).toBe(false)
     // O "passando por…" é parte da escolha: opacidade cheia no subtítulo.
     const list = document.body.querySelector('.v-overlay-container .v-list') as HTMLElement
     expect(list.style.getPropertyValue('--v-list-item-subtitle-opacity')).toBe('1')
 
-    const option = [...document.body.querySelectorAll('.v-list-item')].find((item) =>
-      item.textContent?.includes('até BORDA')
-    ) as HTMLElement
-    option.click()
+    const rb = options().find((item) => item.textContent?.includes('RB2011')) as HTMLElement
+    rb.click()
     await flushPromises()
-    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([
+    const chosen = wrapper.emitted('update:modelValue')!.at(-1)![0]
+    expect(chosen).toEqual({
+      kind: 'end_to_end',
+      linkId: null,
+      sourceDeviceId: 1,
+      targetDeviceId: 4,
+    })
+    await wrapper.setProps({ modelValue: chosen })
+    expect(wrapper.text()).toContain('Uma medição de AP-terraço até RB2011')
+    expect(wrapper.text()).toContain('atravessando switch-assistencia › BORDA')
+
+    // "Enlace por enlace" troca o tipo, mantendo as pontas.
+    const perHop = wrapper.findAll('button').find((b) => b.text().includes('Enlace por enlace'))!
+    await perHop.trigger('click')
+    expect(wrapper.emitted('update:modelValue')!.at(-1)).toEqual([
+      { kind: 'path', linkId: null, sourceDeviceId: 1, targetDeviceId: 4 },
+    ])
+
+    // O vizinho além do switch é um enlace só.
+    await fields[1].trigger('mousedown')
+    await flushPromises()
+    const borda = options().find((item) => item.textContent?.includes('BORDA')) as HTMLElement
+    borda.click()
+    await flushPromises()
+    expect(wrapper.emitted('update:modelValue')!.at(-1)).toEqual([
       { kind: 'link', linkId: null, sourceDeviceId: 1, targetDeviceId: 3 },
     ])
   })

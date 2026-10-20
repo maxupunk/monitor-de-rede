@@ -39,7 +39,7 @@ export function draftFromRequest(
   > | null
 ): LinkTestTargetDraft {
   return {
-    kind: request?.kind ?? 'link',
+    kind: request?.kind ?? 'end_to_end',
     linkId: id(request?.linkId),
     sourceDeviceId: id(request?.sourceDeviceId),
     targetDeviceId: id(request?.targetDeviceId),
@@ -59,16 +59,16 @@ export function targetErrors(draft: LinkTestTargetDraft): string[] {
       ? ['As pontas do enlace precisam ser equipamentos diferentes.']
       : []
   }
-  if (draft.kind === 'path') {
+  if (draft.kind === 'path' || draft.kind === 'end_to_end') {
     const errors: string[] = []
-    if (draft.sourceDeviceId === null) errors.push('Escolha a origem do caminho.')
-    if (draft.targetDeviceId === null) errors.push('Escolha o destino do caminho.')
+    if (draft.sourceDeviceId === null) errors.push('Escolha de onde medir.')
+    if (draft.targetDeviceId === null) errors.push('Escolha até onde medir.')
     if (draft.sourceDeviceId !== null && draft.sourceDeviceId === draft.targetDeviceId) {
       errors.push('Origem e destino precisam ser equipamentos diferentes.')
     }
     return errors
   }
-  return draft.targetDeviceId === null ? ['Escolha até qual equipamento medir.'] : []
+  return draft.targetDeviceId === null ? ['Escolha até onde medir.'] : []
 }
 
 /** O pedido enviado à API: só os campos que o tipo usa. */
@@ -83,7 +83,7 @@ export function requestFromDraft(
     if (draft.sourceDeviceId !== null) request.sourceDeviceId = draft.sourceDeviceId
     if (draft.targetDeviceId !== null) request.targetDeviceId = draft.targetDeviceId
   } else {
-    if (draft.kind === 'path' && draft.sourceDeviceId !== null) {
+    if ((draft.kind === 'path' || draft.kind === 'end_to_end') && draft.sourceDeviceId !== null) {
       request.sourceDeviceId = draft.sourceDeviceId
     }
     if (draft.targetDeviceId !== null) request.targetDeviceId = draft.targetDeviceId

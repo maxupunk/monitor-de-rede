@@ -138,7 +138,7 @@
 <script setup lang="ts">
 /** Uma perna do teste: pontas, motor, medidores ao vivo, gráfico e etapas. */
 import { computed } from 'vue'
-import type { LinkTestFlow, LinkTestLeg, LinkTestSample, LinkTestStage } from '@/types/linkTests'
+import type { LinkTestLeg, LinkTestSample, LinkTestStage } from '@/types/linkTests'
 import {
   ENGINES,
   STAGES,
@@ -152,8 +152,7 @@ import {
   stageEndpoint,
   stepStatusPresentation,
 } from '@/utils/linkTests/presentation'
-import { resultVsSpeed, type SpeedComparison } from '@/utils/linkTests/results'
-import { runningLegFlow } from '@/utils/linkTests/overlay'
+import { legGauges } from '@/utils/linkTests/gauges'
 import MonitorSparkline from '@/components/MonitorSparkline.vue'
 import LinkTestStatusChip from './LinkTestStatusChip.vue'
 import LinkTestViaChip from './LinkTestViaChip.vue'
@@ -176,50 +175,10 @@ const status = computed(() => stepStatusPresentation(props.leg.status))
 const title = computed(() => legTitle(props.leg))
 const viaLabel = computed(() => legViaLabel(props.leg))
 const serverText = computed(() => serverSideLabel(props.leg))
-const runningFlow = computed(() =>
-  props.leg.status === 'running' ? runningLegFlow(props.leg) : null
+
+const gauges = computed(() =>
+  legGauges(props.leg, props.direction, props.forwardSamples, props.reverseSamples, props.speedBps)
 )
-
-function lastBps(list: LinkTestSample[]): number | null {
-  return list.length > 0 ? list[list.length - 1].bps : null
-}
-
-interface Gauge {
-  flow: LinkTestFlow
-  label: string
-  icon: string
-  value: string
-  active: boolean
-  comparison: SpeedComparison | null
-}
-
-const gauges = computed<Gauge[]>(() => {
-  const leg = props.leg
-  const running = leg.status === 'running'
-  if (!running && leg.forwardBps === null && leg.reverseBps === null) return []
-  const flows: LinkTestFlow[] =
-    props.direction === 'both' ? ['forward', 'reverse'] : [props.direction]
-  return flows.map((flow) => {
-    const final = flow === 'forward' ? leg.forwardBps : leg.reverseBps
-    const live = lastBps(flow === 'forward' ? props.forwardSamples : props.reverseSamples)
-    const active = runningFlow.value === flow
-    const shown = active ? (live ?? final) : (final ?? (running ? live : null))
-    return {
-      flow,
-      label:
-        flow === 'forward'
-          ? `↓ Ida · ${endpointLabel(leg.a)} → ${endpointLabel(leg.b)}`
-          : `↑ Volta · ${endpointLabel(leg.b)} → ${endpointLabel(leg.a)}`,
-      icon: flow === 'forward' ? 'mdi-arrow-right-bold' : 'mdi-arrow-left-bold',
-      value:
-        shown !== null ? compactBps(shown) : active ? 'medindo…' : running ? 'aguardando' : '—',
-      active,
-      // Sem a velocidade da porta, a comparação só repetiria o número grande.
-      comparison:
-        !running && final !== null && props.speedBps ? resultVsSpeed(final, props.speedBps) : null,
-    }
-  })
-})
 
 const hasSamples = computed(
   () => props.forwardSamples.length > 0 || props.reverseSamples.length > 0

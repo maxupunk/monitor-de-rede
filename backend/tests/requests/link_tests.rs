@@ -327,6 +327,22 @@ async fn enlace_atraves_do_switch_sem_ip_pela_api() {
         assert_eq!(perna["viaNames"], json!(["switch-assistencia"]));
         assert_eq!(perna["runnable"], true);
 
+        // O mesmo par, ponta a ponta: uma perna com o caminho inteiro.
+        let ponta = request
+            .post("/api/link-tests/plan")
+            .json(
+                &json!({ "kind": "end_to_end", "sourceDeviceId": a, "targetDeviceId": b,
+                           "spec": { "durationS": 1 } }),
+            )
+            .await;
+        ponta.assert_status_ok();
+        let ponta = json_of(&ponta.text());
+        assert_eq!(ponta["kind"], "end_to_end", "{ponta}");
+        assert_eq!(ponta["legs"].as_array().unwrap().len(), 1, "{ponta}");
+        assert_eq!(ponta["legs"][0]["kind"], "end_to_end");
+        assert_eq!(ponta["legs"][0]["edgeIds"], json!(cabos));
+        assert_eq!(ponta["legs"][0]["viaNames"], json!(["switch-assistencia"]));
+
         // O cabo que encosta no switch não é um enlace testável sozinho.
         let recusado = request
             .post("/api/link-tests/plan")

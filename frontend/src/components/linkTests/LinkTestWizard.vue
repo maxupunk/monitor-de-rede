@@ -73,8 +73,13 @@
             <LinkTestSpecFields v-model="spec" />
             <div class="estimate text-body-medium mt-2">
               <v-icon size="18" color="primary">mdi-timer-outline</v-icon>
-              Cada enlace leva {{ estimatedDurationText(estimateSeconds(spec)) }}.
-              {{ draft.kind === 'link' ? '' : 'O caminho mede um enlace de cada vez.' }}
+              <template v-if="draft.kind === 'path'">
+                Cada enlace leva {{ estimatedDurationText(estimateSeconds(spec)) }}; eles são
+                medidos um de cada vez.
+              </template>
+              <template v-else>
+                A medição leva {{ estimatedDurationText(estimateSeconds(spec)) }}.
+              </template>
             </div>
           </v-window-item>
 

@@ -65,40 +65,37 @@
     </v-card>
 
     <v-dialog
-      :model-value="detailId !== null"
-      :fullscreen="smAndDown"
-      max-width="780"
-      scrollable
+      :model-value="detailId !== null && !detail"
+      max-width="480"
       @update:model-value="(open) => !open && closeTest()"
     >
-      <v-card :rounded="smAndDown ? 0 : 'lg'">
-        <div v-if="detailLoading && !detail" class="d-flex align-center ga-3 pa-8 justify-center">
+      <v-card rounded="lg">
+        <div v-if="detailLoading" class="d-flex align-center ga-3 pa-8 justify-center">
           <v-progress-circular indeterminate color="primary"></v-progress-circular>
           <span>Carregando o teste…</span>
         </div>
-        <div v-else-if="detailError && !detail" class="pa-4">
+        <div v-else-if="detailError" class="pa-4">
           <v-alert type="error" variant="tonal" class="mb-3">{{ detailError }}</v-alert>
           <div class="d-flex justify-end">
             <v-btn color="primary" variant="flat" @click="closeTest">Fechar</v-btn>
           </div>
         </div>
-        <v-card-text v-else-if="detail" class="pa-0">
-          <LinkTestRunPanel :test="detail" closable @close="closeTest">
-            <template #actions>
-              <v-btn
-                color="secondary"
-                variant="flat"
-                size="small"
-                prepend-icon="mdi-sitemap"
-                @click="showOnMap(detail.id)"
-              >
-                Ver no mapa
-              </v-btn>
-            </template>
-          </LinkTestRunPanel>
-        </v-card-text>
       </v-card>
     </v-dialog>
+
+    <LinkTestRunDialog :model-value="detail !== null" :test="detail" @close="closeTest">
+      <template #actions="{ test }">
+        <v-btn
+          color="secondary"
+          variant="flat"
+          size="small"
+          prepend-icon="mdi-sitemap"
+          @click="showOnMap(test.id)"
+        >
+          Ver no mapa
+        </v-btn>
+      </template>
+    </LinkTestRunDialog>
 
     <LinkTestWizard v-model="wizardOpen" @started="openTest" />
   </div>
@@ -112,7 +109,6 @@
  */
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useDisplay } from 'vuetify'
 import { useAuthStore } from '@/stores/auth'
 import { useLinkTestsStore } from '@/stores/linkTests'
 import type { LinkTest } from '@/types/linkTests'
@@ -121,14 +117,13 @@ import { currentLeg, legsDone } from '@/utils/linkTests/progress'
 import { READ_ONLY_REASON } from '@/utils/topology/inspectorRegistry'
 import PageHeader from '@/components/PageHeader.vue'
 import LinkTestHistoryPanel from '@/components/linkTests/LinkTestHistoryPanel.vue'
-import LinkTestRunPanel from '@/components/linkTests/LinkTestRunPanel.vue'
+import LinkTestRunDialog from '@/components/linkTests/LinkTestRunDialog.vue'
 import LinkTestSchedulesPanel from '@/components/linkTests/LinkTestSchedulesPanel.vue'
 import LinkTestStatusChip from '@/components/linkTests/LinkTestStatusChip.vue'
 import LinkTestWizard from '@/components/linkTests/LinkTestWizard.vue'
 
 const route = useRoute()
 const router = useRouter()
-const { smAndDown } = useDisplay()
 const store = useLinkTestsStore()
 const auth = useAuthStore()
 

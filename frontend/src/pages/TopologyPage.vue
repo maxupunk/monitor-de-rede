@@ -262,8 +262,6 @@ const insets = computed(() =>
     minimap: minimapOpen.value,
     // No celular a folha de cima cobre a parte de baixo do mapa.
     sheetHeight: sheets.top && sheets.top !== 'options' ? Math.round(height.value * 0.6) : 0,
-    // O painel do teste de velocidade, aberto, tira espaço à direita.
-    panelRight: linkTestLayer.value?.occupiedRight ?? 0,
   })
 )
 

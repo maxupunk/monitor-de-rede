@@ -193,6 +193,21 @@ async fn step<T>(future: impl std::future::Future<Output = AppResult<T>>) -> App
     })?
 }
 
+/// Antes do `TEST_RUNNING`, o servidor que fecha o controle sem dizer nada é
+/// o mesmo "ocupado" do `ACCESS_DENIED`: o `iperf3 -s` (OpenWrt 25.12, iperf3
+/// 3.20) ainda liberando a fase anterior derruba a conexão que chegou cedo —
+/// visto em equipamento real na volta, logo depois da ida. Nada foi medido:
+/// tentar de novo é seguro. O prazo estourado continua sendo erro (servidor
+/// mudo, não ocupado).
+fn closed_early(error: AppError) -> AppError {
+    match error {
+        AppError::ServiceUnavailable(_) => AppError::conflict(
+            "O servidor iperf3 fechou a conexão antes de começar o teste (ainda liberando o anterior)",
+        ),
+        other => other,
+    }
+}
+
 /// Estados de erro que podem chegar a qualquer momento.
 async fn state_error(ctrl: &mut TcpStream, state: State) -> AppError {
     match state {
@@ -226,7 +241,7 @@ async fn drive(
     // 1. Handshake até o TEST_RUNNING.
     let mut streams: Vec<TcpStream> = Vec::with_capacity(usize::from(spec.streams));
     loop {
-        match step(wire::read_state(ctrl)).await? {
+        match step(async { wire::read_state(ctrl).await.map_err(closed_early) }).await? {
             State::ParamExchange => {
                 let params =
                     wire::params_json(spec.duration_s, spec.streams, reverse, spec.limit_bps());
@@ -490,6 +505,16 @@ mod tests {
         let report = run(&server, &spec(TestDirection::Both, 1))
             .await
             .expect("tenta de novo depois do ocupado");
+        assert_eq!(server.tests().await, 2);
+        assert!(report.tx_bps.is_some() && report.rx_bps.is_some());
+    }
+
+    #[tokio::test]
+    async fn servidor_que_fecha_antes_de_comecar_e_tentado_de_novo() {
+        let server = FakeServer::start(Behavior::ClosedOnce).await;
+        let report = run(&server, &spec(TestDirection::Both, 1))
+            .await
+            .expect("a volta tenta de novo depois do fechamento");
         assert_eq!(server.tests().await, 2);
         assert!(report.tx_bps.is_some() && report.rx_bps.is_some());
     }

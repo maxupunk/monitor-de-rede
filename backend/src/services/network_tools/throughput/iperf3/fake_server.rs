@@ -31,6 +31,9 @@ pub(crate) enum Behavior {
     /// Recusa (`ACCESS_DENIED`) a primeira conexão e atende as seguintes —
     /// o servidor que ainda não liberou a vaga da fase anterior.
     BusyOnce,
+    /// Fecha o controle sem responder na primeira conexão da volta e atende
+    /// as seguintes — o `iperf3 -s` real ainda liberando a ida.
+    ClosedOnce,
     ServerError,
     MalformedResults,
     BogusState,
@@ -122,6 +125,14 @@ async fn handle(
             if state.denied == 0 {
                 state.denied += 1;
                 return ctrl.write_i8(-1).await;
+            }
+        }
+        Behavior::ClosedOnce => {
+            let mut state = shared.lock().await;
+            // Depois da ida (um teste completo), a primeira conexão cai.
+            if state.denied == 0 && !state.tests.is_empty() {
+                state.denied += 1;
+                return Ok(());
             }
         }
         _ => {}

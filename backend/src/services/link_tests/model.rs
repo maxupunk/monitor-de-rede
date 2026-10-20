@@ -27,10 +27,14 @@ pub enum LinkTestKind {
     /// Um enlace (dois dispositivos).
     #[default]
     Link,
-    /// O caminho da origem ao destino, um enlace por vez.
+    /// O caminho da origem ao destino, um enlace por vez ("salto por salto").
     Path,
-    /// Do servidor (ou do agente do site) até o destino.
+    /// Do servidor (ou do agente do site) até o destino, ponta a ponta.
     Server,
+    /// De um equipamento até outro numa medição só, atravessando o caminho
+    /// inteiro — a velocidade que quem usa a rede sente. Com a origem no
+    /// próprio servidor, é o mesmo que `Server`.
+    EndToEnd,
 }
 
 /// Estado de um teste.
@@ -380,12 +384,13 @@ pub struct LinkTestPlanLeg {
     #[ts(type = "number | null")]
     pub edge_id: Option<i64>,
     /// Todas as arestas da perna, em ordem de A a B. Mais de uma quando ela
-    /// passa por equipamentos sem IP (switch não gerenciável); vazia na
-    /// ponta a ponta.
+    /// passa por equipamentos sem IP (switch não gerenciável) e, na ponta a
+    /// ponta, o caminho inteiro do mapa (vazia quando o mapa não o conhece).
     #[serde(default)]
     #[ts(type = "number[]")]
     pub edge_ids: Vec<i64>,
-    /// Os equipamentos sem IP que a perna atravessa, em ordem de A a B.
+    /// Os equipamentos que a perna atravessa, em ordem de A a B: os sem IP
+    /// numa perna de enlace; todos os do meio numa ponta a ponta.
     #[serde(default)]
     #[ts(type = "number[]")]
     pub via_device_ids: Vec<i64>,
