@@ -125,8 +125,8 @@ const { smAndDown } = useDisplay()
 const auth = useAuthStore()
 const store = useLinkTestsStore()
 const ctx = useLinkTestContext()
-/** Tela cheia no PC (o pedido do dono); "Restaurar" vira janela. */
-const maximized = ref(true)
+/** Abre em janela, no meio (pedido do dono); "Maximizar" ocupa a tela toda. */
+const maximized = ref(false)
 const cancelling = ref(false)
 const cancelError = ref<string | null>(null)
 

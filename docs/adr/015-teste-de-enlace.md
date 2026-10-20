@@ -586,10 +586,11 @@ enlace por enlace — muita informação de uma vez.
   ("Enlace direto" → `link`, inclusive atrás de switch sem IP) e o resto da
   rede ("Ponta a ponta · N saltos · por …"), com "Ponta a ponta / Enlace por
   enlace" para quem não é vizinho. O tipo sai da escolha, não de um cartão.
-- **Tela do teste em tela cheia no PC** (`LinkTestRunDialog` +
-  `LinkTestRunView`), com "Restaurar/Maximizar" (`MaximizeToggle`) e
-  minimizável para uma pílula no mapa (`LinkTestMiniCard`); a mesma tela no
-  histórico. O assistente abre em janela, com "Maximizar". Em cima, o
+- **Tela do teste** (`LinkTestRunDialog` + `LinkTestRunView`): abre em
+  janela, no meio (nem maximizada nem minimizada, pedido do dono), com
+  "Maximizar/Restaurar" (`MaximizeToggle`) e minimizável para uma pílula no
+  mapa (`LinkTestMiniCard`); a mesma tela no histórico. O assistente também
+  abre em janela, com "Maximizar". Em cima, o
   **recorte do mapa** (`LinkTestPathMap`): o caminho **nas posições do
   próprio mapa** (escolha do dono), crescido por igual até cada par de
   vizinhos ter folga no seu eixo para a pílula dos Mbps (230 lado a lado, 150
