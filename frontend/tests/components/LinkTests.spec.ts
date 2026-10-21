@@ -194,7 +194,7 @@ describe('telas do teste de enlace', () => {
     })
   })
 
-  it('resultado: CPU/RAM das pontas no gráfico com a vazão e a frase do processador', async () => {
+  it('resultado: CPU/RAM antes e no teste, em faixas junto da vazão, e a frase do processador', async () => {
     setRole('admin')
     const store = useLinkTestsStore()
     const done = test(3, {
@@ -211,17 +211,22 @@ describe('telas do teste de enlace', () => {
       summary: { bottleneckLegSeq: 1, minForwardBps: 249e6, minReverseBps: 382e6 },
     })
     store.applyUpdated(done)
-    store.applySample({ testId: 3, legSeq: 1, flow: 'forward', bps: 249e6, tMs: 1000, atMs: 1000 })
-    store.applyHealth({ testId: 3, legSeq: 1, deviceId: 3, atMs: 1000, cpu: 97, memory: 68 })
-    store.applyHealth({ testId: 3, legSeq: 1, deviceId: 4, atMs: 1000, cpu: 21, memory: 7 })
+    store.applySample({ testId: 3, legSeq: 1, flow: 'forward', bps: 249e6, tMs: 1000, atMs: 6000 })
+    for (const [deviceId, atMs, phase, cpu, memory] of [
+      [3, 0, 'before', 10, 68],
+      [4, 0, 'before', 2, 7],
+      [3, 6000, 'during', 97, 69],
+      [4, 6000, 'during', 21, 7],
+    ] as const)
+      store.applyHealth({ testId: 3, legSeq: 1, deviceId, atMs, cpu, memory, phase })
     mountWith(LinkTestRunDialog, { modelValue: true, test: store.byId(3) })
     await flushPromises()
     const text = document.body.textContent ?? ''
-    expect(text).toContain('CPU do AP-Terraço chegou a 97% durante a medição')
-    // Legenda do gráfico: pico de CPU e RAM de cada ponta, sem cartão próprio.
-    expect(text).toContain('CPU máx 97% · RAM 68%')
-    expect(text).toContain('CPU máx 21% · RAM 7%')
-    expect(text).toContain('tracejado = CPU')
+    expect(text).toContain('A CPU do AP-Terraço subiu de 10% para 97% no teste')
+    // Uma faixa por equipamento, com o antes → no teste, sem cartão próprio.
+    expect(text).toContain('CPU · AP-Terraço')
+    expect(text).toContain('CPU 10% → 97% no teste · RAM 69%')
+    expect(text).toContain('CPU 2% → 21% no teste · RAM 7%')
   })
 
   it('plano: bloqueio com dica acionável, aviso de saturação e o pacote que falta', async () => {

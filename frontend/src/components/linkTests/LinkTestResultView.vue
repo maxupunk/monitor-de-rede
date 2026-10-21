@@ -134,7 +134,7 @@ import {
   resultVsSpeed,
 } from '@/utils/linkTests/results'
 import { missedLegs, perHopRequest, repeatRequest } from '@/utils/linkTests/resultView'
-import { cpuVerdict, healthSeries } from '@/utils/linkTests/health'
+import { cpuVerdict, deviceHealth } from '@/utils/linkTests/health'
 import { HEALTH_HIGH_PERCENT } from '@/utils/topology/presentation'
 import LinkTestTrafficChart from './LinkTestTrafficChart.vue'
 
@@ -232,7 +232,7 @@ const chart = computed(() => {
 
 /** O processador explica o resultado? (CPU lido em todas as pernas.) */
 const cpuSeries = computed(() =>
-  healthSeries(
+  deviceHealth(
     props.test.legs.flatMap((leg) => linkTests.healthFor(props.test.id, leg.seq)),
     props.names,
     props.order
@@ -240,7 +240,7 @@ const cpuSeries = computed(() =>
 )
 const cpuText = computed(() => cpuVerdict(cpuSeries.value))
 const cpuHigh = computed(() =>
-  cpuSeries.value.some((item) => (item.peakCpu ?? 0) >= HEALTH_HIGH_PERCENT)
+  cpuSeries.value.some((item) => (item.peak.cpu ?? 0) >= HEALTH_HIGH_PERCENT)
 )
 
 const missed = computed(() => missedLegs(props.test))

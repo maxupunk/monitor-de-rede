@@ -28,7 +28,7 @@ use tokio_util::sync::CancellationToken;
 use super::{
     env::{BtestArmer, CentralAddress, DriverResolver, LinkTestEnv, PluginInvoker, ServerArmer},
     events, guard,
-    health::{HealthReader, HealthReaders, HealthReading, HealthTarget},
+    health::{HealthReader, HealthReaders, HealthReading, HealthTarget, LinkTestHealthPhase},
     janitor,
     model::{
         as_db, LinkTest, LinkTestFix, LinkTestKind, LinkTestLegKind, LinkTestOrigin, LinkTestQuery,
@@ -240,6 +240,10 @@ impl HealthReader for FixedReading {
 impl HealthReaders for FakeHealth {
     async fn reader_for(&self, _target: HealthTarget<'_>) -> Option<Box<dyn HealthReader>> {
         Some(Box::new(FixedReading))
+    }
+
+    fn after_window(&self) -> Duration {
+        Duration::from_millis(20)
     }
 }
 
@@ -1282,6 +1286,8 @@ async fn executa_enlace_entre_equipamentos_e_traduz_os_sentidos() {
         assert_eq!(lida.cpu, Some(55.0));
         assert_eq!(lida.memory, Some(40.0));
     }
+    // A primeira leitura sai antes do tráfego: é o "antes" do equipamento.
+    assert_eq!(health[0].phase, LinkTestHealthPhase::Before);
 
     // SSE: snapshot ao vivo, amostras e o estado final.
     let mut tipos = Vec::new();

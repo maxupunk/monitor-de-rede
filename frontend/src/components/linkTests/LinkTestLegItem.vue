@@ -82,7 +82,6 @@
           :health="health"
           :names="names"
           :order="order"
-          :height="110"
         />
       </div>
 

@@ -137,8 +137,17 @@ function block(selector: string, style: StylesheetStyle['style']): StylesheetSty
   return { selector, style }
 }
 
-/** Rótulo de uma linha (só o nome) num tamanho de fonte, para cada forma de nó. */
-function nameLabel(selector: string, fontSize: number, maxWidth: number): StylesheetStyle[] {
+/**
+ * Rótulo curto num tamanho de fonte, para cada forma de nó: só o nome, ou
+ * (`midLabel`, duas linhas) o nome e o CPU/memória.
+ */
+function nameLabel(
+  selector: string,
+  fontSize: number,
+  maxWidth: number,
+  text: 'name' | 'midLabel' = 'name'
+): StylesheetStyle[] {
+  const lines = text === 'name' ? 1 : 2
   const sizes: Array<[string, number]> = [
     ['', 46],
     ['.unmanaged', 40],
@@ -151,10 +160,10 @@ function nameLabel(selector: string, fontSize: number, maxWidth: number): Styles
         .map((part) => `${part.trim()}${shape}`)
         .join(', '),
       {
-        label: 'data(name)',
+        label: `data(${text})`,
         'font-size': fontSize,
         'text-max-width': `${maxWidth}px`,
-        'text-margin-y': labelOffset(size, 1, fontSize),
+        'text-margin-y': labelOffset(size, lines, fontSize),
       }
     )
   )
@@ -164,6 +173,7 @@ function nameLabel(selector: string, fontSize: number, maxWidth: number): Styles
 function lodBlocks(): StylesheetStyle[] {
   return [
     ...nameLabel('node.lod-mid', 14, 170),
+    ...nameLabel('node.lod-mid.has-health', 14, 220, 'midLabel'),
     block('node.lod-far, node.lod-xfar', { label: '' }),
     ...nameLabel(
       'node.lod-far.rank-core, node.lod-far.rank-infra, node.lod-far.status-offline, node.lod-far.status-warning, node.lod-far.path-highlight, node.lod-far:selected',

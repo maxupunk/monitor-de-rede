@@ -109,7 +109,8 @@ export function isHealthEvent(value: unknown): value is LinkTestHealthEvent {
     typeof value.deviceId === 'number' &&
     typeof value.atMs === 'number' &&
     isPercent(value.cpu) &&
-    isPercent(value.memory)
+    isPercent(value.memory) &&
+    (value.phase === 'before' || value.phase === 'during' || value.phase === 'after')
   )
 }
 
@@ -533,6 +534,7 @@ export const useLinkTestsStore = defineStore('linkTests', () => {
       atMs: data.atMs,
       cpu: data.cpu,
       memory: data.memory,
+      phase: data.phase,
     }
     health.value = limitSampleTests({
       ...health.value,

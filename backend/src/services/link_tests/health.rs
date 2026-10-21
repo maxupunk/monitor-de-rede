@@ -1,9 +1,12 @@
-//! CPU e memória das pontas **durante** a medição (ADR 015 §12).
+//! CPU e memória das pontas **antes, durante e depois** da medição (ADR 015 §12).
 //!
 //! Vazão baixa com o processador no teto é outra conversa que vazão baixa com
 //! o processador folgado — e a coleta periódica (minutos, ou a média de 1 min
 //! do `hrProcessorLoad`) não enxerga um teste de 5 s. Aqui cada ponta é lida a
-//! cada segundo enquanto a perna mede, no mesmo relógio das amostras de vazão:
+//! cada segundo desde o começo da perna (o "antes": a primeira leitura é a
+//! média de 1 min do equipamento, ainda sem o teste) até alguns segundos depois
+//! do fim da medição, no mesmo relógio das amostras de vazão e marcada com a
+//! [`LinkTestHealthPhase`]:
 //!
 //! * equipamento com SNMP — os contadores brutos da UCD-SNMP-MIB
 //!   (`ssCpuRaw*`, a diferença entre duas leituras dá o uso daquele segundo,
@@ -47,8 +50,27 @@ const READ_TIMEOUT: Duration = Duration::from_millis(900);
 /// Leituras guardadas por ponta numa perna (2 min a 1 por segundo).
 pub const MAX_HEALTH_PER_DEVICE: usize = 120;
 
+/// Quando a leitura foi feita em relação à medição.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub enum LinkTestHealthPhase {
+    /// Antes do tráfego (preparação): a carga de sempre do equipamento.
+    Before,
+    /// Com o tráfego do teste passando.
+    #[default]
+    During,
+    /// Depois do fim da medição.
+    After,
+}
+
+/// Quanto o amostrador continua depois da medição — o contador do net-snmp
+/// renova a cada ~5 s, então isto basta para uma leitura "depois".
+pub const AFTER_WINDOW: Duration = Duration::from_secs(7);
+
 /// Uma leitura de uma ponta: uso de CPU e de memória (%), no relógio da
-/// perna (`atMs`, o mesmo de [`super::model::LinkTestSample::at_ms`]).
+/// perna (`atMs`, o mesmo de [`super::model::LinkTestSample::at_ms`]: desde o
+/// começo da perna).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
@@ -59,6 +81,8 @@ pub struct LinkTestHealthSample {
     pub at_ms: u64,
     pub cpu: Option<f64>,
     pub memory: Option<f64>,
+    #[serde(default)]
+    pub phase: LinkTestHealthPhase,
 }
 
 /// Evento efêmero `link_test:health`.
@@ -120,6 +144,11 @@ impl<'a> HealthTarget<'a> {
 pub trait HealthReaders: Send + Sync {
     /// `None` quando não há como ler (sem SNMP, sem IP).
     async fn reader_for(&self, target: HealthTarget<'_>) -> Option<Box<dyn HealthReader>>;
+
+    /// Quanto continuar lendo depois da medição.
+    fn after_window(&self) -> Duration {
+        AFTER_WINDOW
+    }
 }
 
 // --- Contadores da UCD-SNMP-MIB ------------------------------------------------
@@ -254,13 +283,14 @@ impl HealthReader for SnmpHealth {
                 None
             }
         };
-        let cpu = if self.host_resources {
-            collectors::collect_cpu(&self.client)
+        // Sem a UCD, ou ainda sem dois contadores diferentes (o começo da
+        // perna): a carga da HOST-RESOURCES, média de 1 min — o "antes".
+        let cpu = match cpu {
+            Some(cpu) if !self.host_resources => Some(cpu),
+            _ => collectors::collect_cpu(&self.client)
                 .await
                 .ok()
-                .and_then(|info| info.usage_percent)
-        } else {
-            cpu
+                .and_then(|info| info.usage_percent),
         };
         HealthReading { cpu, memory }
     }
@@ -375,6 +405,7 @@ impl HealthSampler {
                             at_ms,
                             cpu: reading.cpu,
                             memory: reading.memory,
+                            phase: LinkTestHealthPhase::default(),
                         });
                     }
                 }
@@ -384,6 +415,17 @@ impl HealthSampler {
             stop,
             task: Some(task),
         }
+    }
+
+    /// Continua lendo até `remaining` passar (o "depois") e para.
+    pub async fn stop_after(self, remaining: Duration) {
+        if !remaining.is_zero() {
+            tokio::select! {
+                () = self.stop.cancelled() => {}
+                () = tokio::time::sleep(remaining) => {}
+            }
+        }
+        self.stop().await;
     }
 
     /// Para de ler e espera a última leitura em curso.
@@ -527,6 +569,7 @@ mod tests {
                 at_ms: 1_000,
                 cpu: Some(42.0),
                 memory: Some(60.0),
+                phase: LinkTestHealthPhase::During,
             }
         );
     }

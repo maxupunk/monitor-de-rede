@@ -98,6 +98,7 @@ export function nodeElement(
     `rank-${nodeRank(node)}`,
     lines.length === 2 ? 'two-line' : null,
     lines.length === 3 ? 'three-line' : null,
+    health ? 'has-health' : null,
     isUnmanagedSwitch(node) ? 'unmanaged' : null,
     filterClass(input.filter, input.filter?.nodes, node.id),
     highlightClass(overlay.highlight, 'node', node.id),
@@ -113,6 +114,9 @@ export function nodeElement(
     // Cytoscape com a caixa antiga (corta a 2ª linha).
     label: lines.join('\n'),
     name: node.name,
+    // No nível médio (`lod-mid`) o IP sai, mas CPU/memória ficam: é a parte
+    // que importa enquanto um teste enquadra o caminho.
+    midLabel: health ? `${node.name}\n${health}` : node.name,
     iconKey: nodeIconKey(node),
   }
   if (input.groupBySite) data.parent = siteElementId(node.siteId)

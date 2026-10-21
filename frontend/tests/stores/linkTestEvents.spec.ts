@@ -57,6 +57,7 @@ describe('SSE do teste de enlace', () => {
       atMs: 1000,
       cpu: 93,
       memory: 61,
+      phase: 'during',
     })
     // Repetida (reconexão) e payload inválido: ignorados.
     emit('link_test:health', {
@@ -66,13 +67,16 @@ describe('SSE do teste de enlace', () => {
       atMs: 1000,
       cpu: 10,
       memory: 61,
+      phase: 'during',
     })
     emit('link_test:health', { testId: 11, legSeq: 1, deviceId: 2, atMs: 2000, cpu: 'alto' })
     emit('link_test_schedule:updated', { id: 3 })
 
     expect(store.active.map((item) => item.id)).toEqual([11])
     expect(store.liveBps(11, 1, 'forward')).toBe(4.8e8)
-    expect(store.healthFor(11, 1)).toEqual([{ deviceId: 2, atMs: 1000, cpu: 93, memory: 61 }])
+    expect(store.healthFor(11, 1)).toEqual([
+      { deviceId: 2, atMs: 1000, cpu: 93, memory: 61, phase: 'during' },
+    ])
     // Lista de agendamentos nunca aberta: nada a reler.
     expect(get).not.toHaveBeenCalled()
     expect(events.recentEvents.map((event) => event.type)).toEqual(['link_test_schedule:updated'])

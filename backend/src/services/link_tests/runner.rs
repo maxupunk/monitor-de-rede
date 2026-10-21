@@ -38,7 +38,10 @@ use super::{
     env::LinkTestEnv,
     events,
     guard::Reservation,
-    health::{HealthSampler, HealthTarget, LinkTestHealthEvent, MAX_HEALTH_PER_DEVICE},
+    health::{
+        HealthSampler, HealthTarget, LinkTestHealthEvent, LinkTestHealthPhase,
+        MAX_HEALTH_PER_DEVICE,
+    },
     model::{
         as_db, LinkTestFlow, LinkTestHealthSample, LinkTestLegKind, LinkTestRole, LinkTestSample,
         LinkTestSampleEvent, LinkTestSide, LinkTestSpec, LinkTestStage, LinkTestStageKey,
@@ -130,8 +133,12 @@ struct SampleBook {
 struct BookInner {
     by_leg: HashMap<u32, Vec<LinkTestSample>>,
     health: HashMap<u32, Vec<LinkTestHealthSample>>,
-    /// Início da medição de cada perna: o relógio comum de vazão e CPU.
+    /// Começo de cada perna: o relógio comum de vazão e CPU.
     clocks: HashMap<u32, Instant>,
+    /// Em que ponto a perna está (antes, medindo, depois) e quando a medição
+    /// terminou.
+    phases: HashMap<u32, LinkTestHealthPhase>,
+    measured_until: HashMap<u32, Instant>,
     published: HashMap<(u32, LinkTestFlow), Instant>,
 }
 
@@ -144,12 +151,30 @@ impl SampleBook {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Zera o relógio da perna (o início da medição).
+    /// Zera o relógio da perna (o começo dela, antes do tráfego).
     fn start_clock(&self, seq: u32) {
-        self.lock().clocks.entry(seq).or_insert_with(Instant::now);
+        let mut inner = self.lock();
+        inner.clocks.entry(seq).or_insert_with(Instant::now);
+        inner.phases.insert(seq, LinkTestHealthPhase::Before);
     }
 
-    /// Milissegundos desde o início da medição da perna.
+    fn set_phase(&self, seq: u32, phase: LinkTestHealthPhase) {
+        let mut inner = self.lock();
+        inner.phases.insert(seq, phase);
+        if phase == LinkTestHealthPhase::After {
+            inner.measured_until.insert(seq, Instant::now());
+        }
+    }
+
+    /// Quanto falta da janela "depois" (zero se a perna não mediu).
+    fn after_remaining(&self, seq: u32, window: Duration) -> Duration {
+        self.lock()
+            .measured_until
+            .get(&seq)
+            .map_or(Duration::ZERO, |end| window.saturating_sub(end.elapsed()))
+    }
+
+    /// Milissegundos desde o começo da perna.
     fn clock(&self, seq: u32) -> Option<u64> {
         self.lock().clocks.get(&seq).copied().map(millis_since)
     }
@@ -198,9 +223,10 @@ impl SampleBook {
 
     /// Uma leitura de CPU/memória: guardada (com teto por equipamento) e
     /// publicada — uma por segundo por equipamento, sem ritmo a aplicar.
-    fn push_health(&self, seq: u32, sample: LinkTestHealthSample) {
+    fn push_health(&self, seq: u32, mut sample: LinkTestHealthSample) {
         {
             let mut inner = self.lock();
+            sample.phase = inner.phases.get(&seq).copied().unwrap_or_default();
             let list = inner.health.entry(seq).or_default();
             let of_device = list
                 .iter()
@@ -672,6 +698,11 @@ impl Job {
         self.rows[idx].started_at = Some(Utc::now().into());
         self.persist(idx).await;
 
+        // CPU/memória desde já: a preparação é o "antes".
+        let seq = planned.view.seq;
+        self.book.start_clock(seq);
+        let health = self.start_health(&planned, seq).await;
+
         let auth = n.require_auth.then(TestAuth::generate);
         let mut served = Served::Nothing;
         if self.prepare(idx, &planned, &n).await {
@@ -702,6 +733,14 @@ impl Job {
             }
         }
         self.stop(idx, &n, served).await;
+        // O "depois": o que falta da janela, a não ser que tenham cancelado.
+        let remaining = if self.cancelled() {
+            Duration::ZERO
+        } else {
+            self.book
+                .after_remaining(seq, self.env.health.after_window())
+        };
+        health.stop_after(remaining).await;
 
         let stages = &self.stages[idx];
         let status = outcome::leg_status(stages);
@@ -950,8 +989,7 @@ impl Job {
             }
         }
         let seq = planned.view.seq;
-        self.book.start_clock(seq);
-        let health = self.start_health(planned, seq).await;
+        self.book.set_phase(seq, LinkTestHealthPhase::During);
         // Um sentido por vez, em todo motor. O btest até aceita os dois ao
         // mesmo tempo, mas num RouterOS real o "both" em TCP não devolve o
         // envio (tx 0) — e um sentido de cada vez mede melhor roteador de CPU
@@ -977,7 +1015,7 @@ impl Job {
             self.measure_call(idx, planned, n, served, target, auth, direction, &[flow])
                 .await;
         }
-        health.stop().await;
+        self.book.set_phase(seq, LinkTestHealthPhase::After);
     }
 
     /// Começa a ler CPU/memória das pontas e dos equipamentos do caminho

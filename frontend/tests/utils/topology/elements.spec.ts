@@ -35,6 +35,10 @@ describe('buildElements', () => {
     const on = buildElements({ nodes: withHealth, edges: [], positions: {}, showHealth: true })
     expect(byId(on, 'n1').data.label).toBe('BORDA\n10.0.0.1\n⚠ CPU 37% · RAM 91%')
     expect(classesOf(on, 'n1')).toContain('three-line')
+    // No nível médio o IP sai e a saúde fica (`midLabel` + classe `has-health`).
+    expect(byId(on, 'n1').data.midLabel).toBe('BORDA\n⚠ CPU 37% · RAM 91%')
+    expect(classesOf(on, 'n1')).toContain('has-health')
+    expect(classesOf(on, 'n2')).not.toContain('has-health')
     expect(classesOf(on, 'n1')).not.toContain('two-line')
     // Sem coleta: nada a mais.
     expect(byId(on, 'n2').data.label).toBe('AP\n10.0.0.2')

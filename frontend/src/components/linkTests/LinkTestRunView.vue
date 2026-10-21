@@ -229,16 +229,16 @@ const hasSamples = computed(
 const liveHealth = computed(() => (leg.value ? store.healthFor(props.test.id, leg.value.seq) : []))
 const names = computed(() => testDeviceNames(props.test))
 /**
- * CPU/RAM no recorte do mapa: ao vivo, a leitura da perna que mede; no fim, o
- * pico de todas as pernas (sem leitura, o equipamento mostra a do mapa).
+ * CPU/RAM no recorte do mapa, de todas as pernas: ao vivo, a leitura mais
+ * recente de cada equipamento (não some entre uma perna e outra); no fim, o
+ * antes e o pico (sem leitura, o equipamento mostra a do mapa).
  */
-const healthLabels = computed(() => {
-  if (active.value) return testHealthLabels(liveHealth.value, true)
-  return testHealthLabels(
+const healthLabels = computed(() =>
+  testHealthLabels(
     props.test.legs.flatMap((item) => store.healthFor(props.test.id, item.seq)),
-    false
+    active.value
   )
-})
+)
 
 const bottleneckSeq = computed(() => bottleneckLeg(props.test)?.seq ?? null)
 const specText = computed(() => specSummary(props.test.spec))

@@ -79,8 +79,8 @@ describe('store do teste de enlace', () => {
             { flow: 'reverse', bps: 3, tMs: 1000 },
           ],
           health: [
-            { deviceId: 2, atMs: 2000, cpu: 80, memory: 50 },
-            { deviceId: 2, atMs: 1000, cpu: 20, memory: 50 },
+            { deviceId: 2, atMs: 2000, cpu: 80, memory: 50, phase: 'during' },
+            { deviceId: 2, atMs: 1000, cpu: 20, memory: 50, phase: 'before' },
           ],
         }),
       ],

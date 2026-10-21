@@ -1,139 +1,145 @@
 <template>
-  <figure class="traffic-chart" :aria-label="summary">
-    <div ref="box" class="plot" :style="{ minHeight: `${height}px` }">
-      <svg
-        v-if="width > 0"
-        :width="width"
-        :height="height"
-        role="img"
-        :aria-label="summary"
-        @pointerdown="hover"
-        @pointermove="hover"
-        @pointerleave="cursor = null"
-      >
-        <!-- Grade: vazão à esquerda, % à direita. -->
-        <g class="grid">
-          <line
-            v-for="tick in leftTicks"
-            :key="`l${tick.value}`"
-            :x1="PAD.left"
-            :x2="width - PAD.right"
-            :y1="tick.y"
-            :y2="tick.y"
-          />
-        </g>
-        <g class="axis-text">
-          <text
-            v-for="tick in leftTicks"
-            :key="`lt${tick.value}`"
-            :x="PAD.left - 6"
-            :y="tick.y + 4"
-            text-anchor="end"
-          >
-            {{ tick.label }}
+  <figure class="timeline" :aria-label="summary">
+    <!-- Faixas no mesmo eixo de tempo: a vazão em cima, o CPU de cada equipamento embaixo. -->
+    <div class="lane">
+      <div class="lane-label">
+        <strong>Vazão</strong>
+        <span class="lane-story">
+          <span v-if="points.forward.length > 0" class="flow">
+            <span class="swatch" :style="{ background: FORWARD_COLOR }"></span>Ida
+            {{ compactBps(peakOf(points.forward)) }}
+          </span>
+          <span v-if="points.reverse.length > 0" class="flow">
+            <span class="swatch" :style="{ background: REVERSE_COLOR }"></span>Volta
+            {{ compactBps(peakOf(points.reverse)) }}
+          </span>
+        </span>
+      </div>
+      <div ref="plot" class="lane-plot">
+        <svg
+          v-if="width > 0"
+          :width="width"
+          :height="TRAFFIC_HEIGHT"
+          @pointerdown="hover"
+          @pointermove="hover"
+          @pointerleave="cursor = null"
+        >
+          <rect v-if="testBox" class="test-window" v-bind="testBox" :height="TRAFFIC_HEIGHT" />
+          <text v-if="phaseLabels.before !== null" class="phase" :x="phaseLabels.before" y="11">
+            antes
           </text>
-          <template v-if="lines.length > 0">
-            <text
-              v-for="tick in rightTicks"
-              :key="`rt${tick.value}`"
-              :x="width - PAD.right + 6"
-              :y="tick.y + 4"
-            >
-              {{ tick.label }}
-            </text>
+          <text v-if="phaseLabels.test !== null" class="phase" :x="phaseLabels.test" y="11">
+            teste
+          </text>
+          <text v-if="phaseLabels.after !== null" class="phase" :x="phaseLabels.after" y="11">
+            depois
+          </text>
+          <line class="base" x1="0" :x2="width" :y1="TRAFFIC_HEIGHT - 1" :y2="TRAFFIC_HEIGHT - 1" />
+          <template v-for="flow in flowPaths" :key="flow.key">
+            <path v-if="flow.area" :d="flow.area" :style="{ fill: flow.color }" class="area" />
+            <path v-if="flow.line" :d="flow.line" :style="{ stroke: flow.color }" class="line" />
           </template>
-          <text
-            v-for="tick in timeTicks"
-            :key="`tt${tick.value}`"
-            :x="tick.x"
-            :y="height - 4"
-            text-anchor="middle"
-          >
-            {{ tick.label }}
-          </text>
-        </g>
-        <line
-          v-if="lines.length > 0"
-          class="limit"
-          :x1="PAD.left"
-          :x2="width - PAD.right"
-          :y1="yPercent(HEALTH_HIGH_PERCENT)"
-          :y2="yPercent(HEALTH_HIGH_PERCENT)"
-        />
-
-        <!-- Vazão: área + linha. -->
-        <template v-for="flow in flows" :key="flow.key">
-          <path v-if="flow.area" :d="flow.area" :fill="flow.color" fill-opacity="0.16" />
-          <path v-if="flow.line" :d="flow.line" :stroke="flow.color" class="flow-line" />
-        </template>
-
-        <!-- CPU (tracejado) e RAM (pontilhado) de cada equipamento. -->
-        <template v-for="item in lines" :key="item.deviceId">
-          <path v-if="item.memory" :d="item.memory" :stroke="item.color" class="memory-line" />
-          <path v-if="item.cpu" :d="item.cpu" :stroke="item.color" class="cpu-line" />
-        </template>
-
-        <line
-          v-if="cursor"
-          class="cursor"
-          :x1="cursor.x"
-          :x2="cursor.x"
-          :y1="PAD.top"
-          :y2="height - PAD.bottom"
-        />
-      </svg>
-      <div
-        v-if="cursor && readout.length > 0"
-        class="readout"
-        :class="{ flip: cursor.x > width / 2, docked: narrow }"
-        :style="narrow ? undefined : { left: `${cursor.x}px` }"
-        role="status"
-      >
-        <div class="readout-time">{{ formatElapsedMs(cursor.t) }}</div>
-        <div v-for="row in readout" :key="row.key" class="readout-row">
-          <span class="swatch" :style="{ background: row.color }"></span>
-          <span>{{ row.label }}</span>
-          <strong>{{ row.value }}</strong>
-        </div>
+          <line
+            v-if="cursorX !== null"
+            class="cursor"
+            :x1="cursorX"
+            :x2="cursorX"
+            y1="0"
+            :y2="TRAFFIC_HEIGHT"
+          />
+        </svg>
       </div>
     </div>
 
-    <figcaption class="legend">
-      <span v-if="forward.length > 0" class="legend-item">
-        <span class="key key-flow" :style="{ borderColor: FORWARD_COLOR }"></span>Ida
-      </span>
-      <span v-if="reverse.length > 0" class="legend-item">
-        <span class="key key-flow" :style="{ borderColor: REVERSE_COLOR }"></span>Volta
-      </span>
-      <span v-for="item in series" :key="item.deviceId" class="legend-item">
-        <span class="key key-cpu" :style="{ borderColor: item.color }"></span>
-        <strong>{{ item.name }}</strong>
-        <span :class="{ high: (item.peakCpu ?? 0) >= HEALTH_HIGH_PERCENT }">
-          {{ legendText(item) }}
+    <div v-for="lane in lanes" :key="lane.deviceId" class="lane">
+      <div class="lane-label">
+        <strong>CPU · {{ lane.name }}</strong>
+        <span class="lane-story" :class="{ high: lane.high }">{{ lane.story }}</span>
+      </div>
+      <div class="lane-plot">
+        <svg
+          v-if="width > 0"
+          :width="width"
+          :height="CPU_HEIGHT"
+          @pointerdown="hover"
+          @pointermove="hover"
+          @pointerleave="cursor = null"
+        >
+          <rect v-if="testBox" class="test-window" v-bind="testBox" :height="CPU_HEIGHT" />
+          <line
+            class="limit"
+            x1="0"
+            :x2="width"
+            :y1="yCpu(HEALTH_HIGH_PERCENT)"
+            :y2="yCpu(HEALTH_HIGH_PERCENT)"
+          />
+          <line class="base" x1="0" :x2="width" :y1="CPU_HEIGHT - 1" :y2="CPU_HEIGHT - 1" />
+          <path v-if="lane.area" :d="lane.area" :style="{ fill: lane.color }" class="area" />
+          <path v-if="lane.line" :d="lane.line" :style="{ stroke: lane.color }" class="line" />
+          <line
+            v-if="cursorX !== null"
+            class="cursor"
+            :x1="cursorX"
+            :x2="cursorX"
+            y1="0"
+            :y2="CPU_HEIGHT"
+          />
+        </svg>
+      </div>
+    </div>
+
+    <div class="lane axis-lane">
+      <div class="lane-label"></div>
+      <div class="lane-plot axis">
+        <span v-for="tick in timeTicks" :key="tick.t" class="tick" :style="tick.style">
+          {{ tick.label }}
+        </span>
+      </div>
+    </div>
+
+    <figcaption class="readout" role="status">
+      <template v-if="readout">
+        <strong>{{ readout.time }}</strong>
+        <span v-for="row in readout.rows" :key="row.key" class="readout-item">
+          <span class="swatch" :style="{ background: row.color }"></span>{{ row.label }}
+          <strong>{{ row.value }}</strong>
+        </span>
+      </template>
+      <span v-else class="hint">
+        <v-icon size="16" color="primary">mdi-gesture-tap</v-icon>
+        Passe o mouse ou toque no gráfico para ver cada segundo.
+        <span v-if="lanes.length > 0">
+          A faixa marcada é o teste; a linha tracejada, 90% de CPU.
         </span>
       </span>
-      <span v-if="series.length > 0" class="legend-hint"> tracejado = CPU · pontilhado = RAM </span>
     </figcaption>
   </figure>
 </template>
 
 <script setup lang="ts">
 /**
- * "Vazão × CPU" de uma perna do teste de velocidade: ida e volta (eixo da
- * esquerda) e o CPU/RAM de cada equipamento lido (eixo da direita, 0–100%),
- * no mesmo relógio. Passar o ponteiro mostra os valores daquele segundo.
- * Sem leitura de CPU, é só o gráfico de vazão.
+ * A linha do tempo de uma perna do teste de velocidade: a vazão (ida e volta)
+ * numa faixa e o CPU de cada equipamento lido numa faixa própria, todas no
+ * mesmo eixo de tempo — antes do tráfego, durante (faixa marcada) e depois.
+ * Uma série por faixa, com a mesma cor na faixa e na leitura do instante; a
+ * memória vai no texto de cada faixa e na leitura do instante.
  */
 import { computed, ref } from 'vue'
 import { useElementWidth } from '@/composables/useElementWidth'
 import type { LinkTestHealthSample, LinkTestSample } from '@/types/linkTests'
-import { formatElapsedMs, formatPercent } from '@/utils/formatters'
+import { formatPercent } from '@/utils/formatters'
 import {
-  healthSeries,
+  BEFORE_SHOWN_MS,
+  deviceHealth,
+  measuredSteps,
+  relativeTime,
+  stepValueAt,
+  testWindow,
   trafficPoints,
+  usageStory,
   valueAt,
   type ChartPoint,
-  type DeviceHealthSeries,
+  type MeasuredStep,
 } from '@/utils/linkTests/health'
 import { compactBps } from '@/utils/linkTests/presentation'
 import { HEALTH_HIGH_PERCENT } from '@/utils/topology/presentation'
@@ -145,119 +151,171 @@ const props = withDefaults(
     health?: readonly LinkTestHealthSample[]
     /** Nome de cada equipamento lido. */
     names?: Readonly<Record<number, string>>
-    /** Ordem do caminho (define as cores). */
+    /** Ordem do caminho. */
     order?: readonly number[]
-    height?: number
   }>(),
-  { health: () => [], names: () => ({}), order: () => [], height: 140 }
+  { health: () => [], names: () => ({}), order: () => [] }
 )
 
 const FORWARD_COLOR = '#4ade80'
 const REVERSE_COLOR = '#38bdf8'
-const PAD = { top: 8, right: 40, bottom: 20, left: 56 }
+const TRAFFIC_HEIGHT = 72
+const CPU_HEIGHT = 36
+/** CPU a partir do qual a faixa fica amarela (o vermelho é o `HEALTH_HIGH_PERCENT`). */
+const CPU_WARNING_PERCENT = 70
 
-const box = ref<HTMLElement | null>(null)
-const width = useElementWidth(box)
-/** Tela estreita: a leitura do instante vai para baixo do gráfico, inteira. */
-const NARROW_WIDTH = 480
-const narrow = computed(() => width.value > 0 && width.value < NARROW_WIDTH)
+const plot = ref<HTMLElement | null>(null)
+const width = useElementWidth(plot)
 
 const points = computed(() => trafficPoints(props.forward, props.reverse))
-const series = computed(() => healthSeries(props.health, props.names, props.order))
+const devices = computed(() => deviceHealth(props.health, props.names, props.order))
+const test = computed(() => testWindow(points.value.forward, points.value.reverse, props.health))
 
+/** O trecho mostrado: um pouco do antes, o teste e o depois. */
 const span = computed(() => {
-  const all = [
+  const times = [
     ...points.value.forward,
     ...points.value.reverse,
-    ...series.value.flatMap((item) => [...item.cpu, ...item.memory]),
+    ...devices.value.flatMap((device) => [...device.cpu, ...device.memory]),
   ].map((point) => point.t)
-  const start = all.length > 0 ? Math.min(...all) : 0
-  const end = all.length > 0 ? Math.max(...all) : 1000
+  let start = times.length > 0 ? Math.min(...times) : 0
+  if (test.value) start = Math.max(start, test.value.start - BEFORE_SHOWN_MS)
+  const end = times.length > 0 ? Math.max(...times) : start + 1000
   return { start, end: Math.max(end, start + 1000) }
 })
-const maxBps = computed(() => {
-  const peak = Math.max(0, ...[...points.value.forward, ...points.value.reverse].map((p) => p.v))
-  return peak > 0 ? peak * 1.15 : 1
-})
-
-const plotWidth = computed(() => Math.max(1, width.value - PAD.left - PAD.right))
-const plotHeight = computed(() => Math.max(1, props.height - PAD.top - PAD.bottom))
 
 function x(t: number): number {
-  return PAD.left + ((t - span.value.start) / (span.value.end - span.value.start)) * plotWidth.value
+  return ((t - span.value.start) / (span.value.end - span.value.start)) * width.value
 }
+const maxBps = computed(
+  () => Math.max(1, ...[...points.value.forward, ...points.value.reverse].map((p) => p.v)) * 1.1
+)
 function yBps(v: number): number {
-  return PAD.top + plotHeight.value * (1 - v / maxBps.value)
+  return TRAFFIC_HEIGHT - 1 - (v / maxBps.value) * (TRAFFIC_HEIGHT - 16)
 }
-function yPercent(v: number): number {
-  return PAD.top + plotHeight.value * (1 - Math.min(Math.max(v, 0), 100) / 100)
+function yCpu(v: number): number {
+  return CPU_HEIGHT - 1 - (Math.min(Math.max(v, 0), 100) / 100) * (CPU_HEIGHT - 4)
 }
 
-function linePath(list: readonly ChartPoint[], y: (v: number) => number): string | null {
+/** Degraus no trecho que cada leitura mediu (`measuredSteps`). */
+function stepPath(steps: readonly MeasuredStep[]): string | null {
+  const shown = steps.filter((step) => step.to >= span.value.start)
+  if (shown.length === 0) return null
+  return shown
+    .map((step, i) => {
+      const from = x(Math.max(step.from, span.value.start))
+      const y = yCpu(step.v)
+      return `${i === 0 ? 'M' : 'L'}${from},${y}L${x(step.to)},${y}`
+    })
+    .join('')
+}
+function stepArea(line: string | null, steps: readonly MeasuredStep[]): string | null {
+  const shown = steps.filter((step) => step.to >= span.value.start)
+  if (!line || shown.length === 0) return null
+  const base = CPU_HEIGHT - 1
+  const first = x(Math.max(shown[0].from, span.value.start))
+  return `${line}L${x(shown[shown.length - 1].to)},${base}L${first},${base}Z`
+}
+function linePath(list: readonly ChartPoint[]): string | null {
   if (list.length === 0) return null
-  if (list.length === 1) {
-    const py = y(list[0].v)
-    return `M${x(list[0].t) - 3},${py}L${x(list[0].t) + 3},${py}`
-  }
-  return list.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(p.t)},${y(p.v)}`).join('')
+  if (list.length === 1) return `M${x(list[0].t) - 3},${yBps(list[0].v)}h6`
+  return list.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(p.t)},${yBps(p.v)}`).join('')
 }
-function areaPath(list: readonly ChartPoint[]): string | null {
-  const line = linePath(list, yBps)
+function closed(line: string | null, list: readonly ChartPoint[], base: number): string | null {
   if (!line || list.length < 2) return null
-  const base = PAD.top + plotHeight.value
-  return `${line}L${x(list[list.length - 1].t)},${base}L${x(list[0].t)},${base}Z`
+  const first = Math.max(list[0].t, span.value.start)
+  return `${line}L${x(list[list.length - 1].t)},${base}L${x(first)},${base}Z`
 }
 
-const flows = computed(() =>
+const flowPaths = computed(() =>
   [
     { key: 'forward', color: FORWARD_COLOR, list: points.value.forward },
     { key: 'reverse', color: REVERSE_COLOR, list: points.value.reverse },
-  ].map((flow) => ({ ...flow, line: linePath(flow.list, yBps), area: areaPath(flow.list) }))
-)
-const lines = computed(() =>
-  series.value.map((item) => ({
-    deviceId: item.deviceId,
-    color: item.color,
-    cpu: linePath(item.cpu, yPercent),
-    memory: linePath(item.memory, yPercent),
-  }))
-)
-
-/** As linhas da grade valem para os dois eixos: 0, metade e topo. */
-const leftTicks = computed(() =>
-  [0, 0.5, 1].map((fraction) => {
-    const value = maxBps.value * fraction
-    return { value, y: yBps(value), label: fraction === 0 ? '0' : compactBps(value) }
+  ].map((flow) => {
+    const line = linePath(flow.list)
+    return { ...flow, line, area: closed(line, flow.list, TRAFFIC_HEIGHT - 1) }
   })
 )
-const rightTicks = computed(() =>
-  [0, 50, 100].map((value) => ({ value, y: yPercent(value), label: `${value}%` }))
+
+/**
+ * Cor da faixa pelo pico no teste: verde folgado, amarelo alto, vermelho no
+ * teto — as cores do tema, as mesmas na faixa e na leitura do instante.
+ */
+function levelColor(peak: number | null): string {
+  if (peak !== null && peak >= HEALTH_HIGH_PERCENT) return 'rgb(var(--v-theme-error))'
+  if (peak !== null && peak >= CPU_WARNING_PERCENT) return 'rgb(var(--v-theme-warning))'
+  return 'rgb(var(--v-theme-success))'
+}
+
+const lanes = computed(() =>
+  devices.value.map((device) => {
+    const cpuSteps = measuredSteps(device.cpu)
+    const line = stepPath(cpuSteps)
+    return {
+      ...device,
+      cpuSteps,
+      memorySteps: measuredSteps(device.memory),
+      color: levelColor(device.peak.cpu ?? device.before.cpu),
+      high: (device.peak.cpu ?? 0) >= HEALTH_HIGH_PERCENT,
+      story: usageStory(device) ?? 'sem leitura de CPU',
+      line,
+      area: stepArea(line, cpuSteps),
+    }
+  })
 )
-const timeTicks = computed(() => {
-  const { start, end } = span.value
-  return [start, (start + end) / 2, end].map((value) => ({
-    value,
-    x: x(value),
-    label: formatElapsedMs(value - start),
-  }))
+
+const testBox = computed(() => {
+  if (!test.value) return null
+  const from = x(Math.max(test.value.start, span.value.start))
+  return { x: from, y: 0, width: Math.max(2, x(test.value.end) - from) }
 })
 
-const cursor = ref<{ x: number; t: number } | null>(null)
+const phaseLabels = computed(() => {
+  if (!test.value || width.value === 0) return { before: null, test: null, after: null }
+  const from = x(test.value.start)
+  const to = x(test.value.end)
+  return {
+    before: from > 48 ? 4 : null,
+    test: to - from > 40 ? from + 4 : null,
+    after: width.value - to > 52 ? to + 4 : null,
+  }
+})
+
+/** Começo do trecho, começo e fim do teste, fim do trecho — sem marcas encavaladas. */
+const timeTicks = computed(() => {
+  if (width.value === 0) return []
+  const zero = test.value?.start ?? span.value.start
+  const candidates = [span.value.start, zero, test.value?.end, span.value.end].filter(
+    (t): t is number => t !== undefined
+  )
+  const kept: number[] = []
+  for (const t of candidates) {
+    if (kept.every((other) => Math.abs(x(other) - x(t)) >= 56)) kept.push(t)
+  }
+  return kept.map((t) => {
+    const px = x(t)
+    const shift = px < 20 ? '0' : px > width.value - 20 ? '-100%' : '-50%'
+    return {
+      t,
+      label: relativeTime(t - zero),
+      style: { left: `${px}px`, transform: `translateX(${shift})` },
+    }
+  })
+})
+
+const cursor = ref<number | null>(null)
+const cursorX = computed(() => (cursor.value === null ? null : x(cursor.value)))
 function hover(event: PointerEvent) {
   const target = event.currentTarget as SVGElement
-  const px = event.clientX - target.getBoundingClientRect().left
-  const clamped = Math.min(Math.max(px, PAD.left), width.value - PAD.right)
-  const t =
-    span.value.start +
-    ((clamped - PAD.left) / plotWidth.value) * (span.value.end - span.value.start)
-  cursor.value = { x: clamped, t }
+  const px = Math.min(Math.max(event.clientX - target.getBoundingClientRect().left, 0), width.value)
+  cursor.value = span.value.start + (px / width.value) * (span.value.end - span.value.start)
 }
 
 const readout = computed(() => {
-  const at = cursor.value?.t
-  if (at === undefined) return []
+  const at = cursor.value
+  if (at === null) return null
   const rows: { key: string; color: string; label: string; value: string }[] = []
-  for (const flow of flows.value) {
+  for (const flow of flowPaths.value) {
     const value = valueAt(flow.list, at)
     if (value !== null)
       rows.push({
@@ -267,14 +325,14 @@ const readout = computed(() => {
         value: compactBps(value),
       })
   }
-  for (const item of series.value) {
-    const cpu = valueAt(item.cpu, at)
-    const memory = valueAt(item.memory, at)
+  for (const lane of lanes.value) {
+    const cpu = stepValueAt(lane.cpuSteps, at)
+    const memory = stepValueAt(lane.memorySteps, at)
     if (cpu === null && memory === null) continue
     rows.push({
-      key: `d${item.deviceId}`,
-      color: item.color,
-      label: item.name,
+      key: `d${lane.deviceId}`,
+      color: lane.color,
+      label: lane.name,
       value: [
         cpu !== null ? `CPU ${formatPercent(cpu, 0)}` : null,
         memory !== null ? `RAM ${formatPercent(memory, 0)}` : null,
@@ -283,135 +341,135 @@ const readout = computed(() => {
         .join(' · '),
     })
   }
-  return rows
+  return { time: relativeTime(at - (test.value?.start ?? span.value.start)), rows }
 })
 
-function legendText(item: DeviceHealthSeries): string {
-  return [
-    item.peakCpu !== null ? `CPU máx ${formatPercent(item.peakCpu, 0)}` : null,
-    item.lastMemory !== null ? `RAM ${formatPercent(item.lastMemory, 0)}` : null,
-  ]
-    .filter(Boolean)
-    .join(' · ')
+function peakOf(list: readonly ChartPoint[]): number {
+  return Math.max(...list.map((p) => p.v))
 }
 
 const summary = computed(() => {
   const parts: string[] = []
-  const peak = (list: ChartPoint[]) => Math.max(...list.map((p) => p.v))
   if (points.value.forward.length > 0)
-    parts.push(`ida até ${compactBps(peak(points.value.forward))}`)
+    parts.push(`ida até ${compactBps(peakOf(points.value.forward))}`)
   if (points.value.reverse.length > 0)
-    parts.push(`volta até ${compactBps(peak(points.value.reverse))}`)
-  for (const item of series.value) {
-    const text = legendText(item)
-    if (text) parts.push(`${item.name}: ${text}`)
-  }
-  return `Vazão e CPU durante a medição — ${parts.join('; ') || 'sem amostras'}`
+    parts.push(`volta até ${compactBps(peakOf(points.value.reverse))}`)
+  for (const lane of lanes.value) parts.push(`${lane.name}: ${lane.story}`)
+  return `Vazão e CPU antes, durante e depois do teste — ${parts.join('; ') || 'sem amostras'}`
 })
 </script>
 
 <style scoped>
-.traffic-chart {
+.timeline {
   margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: rgb(var(--v-theme-on-surface));
 }
-.plot {
+.lane {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+.lane-label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-size: 0.8rem;
+  line-height: 1.3;
+}
+.lane-label strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lane-story {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  font-size: 0.75rem;
+}
+.lane-story.high {
+  color: rgb(var(--v-theme-error));
+  font-weight: 700;
+}
+.flow {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.lane-plot {
   position: relative;
-  width: 100%;
+  min-width: 0;
 }
 svg {
   display: block;
   touch-action: pan-y;
+  border-radius: 4px;
+  background: rgba(var(--v-theme-on-surface), 0.04);
 }
-.grid line {
-  stroke: rgba(var(--v-theme-on-surface), 0.14);
-  stroke-width: 1;
+.test-window {
+  fill: rgb(var(--v-theme-primary));
+  fill-opacity: 0.12;
 }
-.axis-text text {
+.phase {
   fill: rgb(var(--v-theme-on-surface));
   font-size: 10px;
-  font-weight: 600;
+  font-weight: 700;
+}
+.base {
+  stroke: rgba(var(--v-theme-on-surface), 0.25);
 }
 .limit {
   stroke: rgb(var(--v-theme-error));
-  stroke-width: 1;
-  stroke-dasharray: 2 4;
-  opacity: 0.7;
+  stroke-dasharray: 3 3;
+  opacity: 0.6;
 }
-.flow-line {
+.area {
+  fill-opacity: 0.22;
+}
+.line {
   fill: none;
   stroke-width: 2;
   stroke-linejoin: round;
-  stroke-linecap: round;
-}
-.cpu-line {
-  fill: none;
-  stroke-width: 2;
-  stroke-dasharray: 6 4;
-  stroke-linejoin: round;
-}
-.memory-line {
-  fill: none;
-  stroke-width: 1.5;
-  stroke-dasharray: 1 4;
-  stroke-linecap: round;
 }
 .cursor {
   stroke: rgb(var(--v-theme-on-surface));
   stroke-width: 1;
-  opacity: 0.5;
+}
+.axis {
+  height: 14px;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+.tick {
+  position: absolute;
+  top: 0;
+  white-space: nowrap;
 }
 .readout {
-  position: absolute;
-  top: 4px;
-  transform: translateX(10px);
-  padding: 6px 8px;
-  border-radius: 6px;
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.3);
-  background: rgb(var(--v-theme-surface));
-  color: rgb(var(--v-theme-on-surface));
-  font-size: 0.75rem;
-  pointer-events: none;
-  white-space: nowrap;
-  z-index: 1;
-}
-.readout.flip {
-  transform: translateX(calc(-100% - 10px));
-}
-.readout.docked {
-  position: static;
-  transform: none;
-  margin-top: 4px;
-  white-space: normal;
-}
-.readout-time {
-  font-weight: 700;
-  margin-bottom: 2px;
-}
-.readout-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.legend {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 14px;
-  margin-top: 4px;
-  font-size: 0.75rem;
-  color: rgb(var(--v-theme-on-surface));
+  min-height: 30px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.2);
+  font-size: 0.78rem;
 }
-.legend-item {
+.readout-item {
   display: inline-flex;
   align-items: center;
   gap: 5px;
 }
-.legend-hint {
-  font-style: italic;
-}
-.high {
-  color: rgb(var(--v-theme-error));
-  font-weight: 700;
+.hint {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
 }
 .swatch {
   width: 10px;
@@ -419,15 +477,13 @@ svg {
   border-radius: 2px;
   flex-shrink: 0;
 }
-.key {
-  width: 16px;
-  height: 0;
-  border-top-width: 2px;
-}
-.key-flow {
-  border-top-style: solid;
-}
-.key-cpu {
-  border-top-style: dashed;
+@media (max-width: 599px) {
+  .lane {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+  .axis-lane .lane-label {
+    display: none;
+  }
 }
 </style>
