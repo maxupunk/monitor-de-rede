@@ -333,3 +333,29 @@ export function edgeEndpoints(
     target: edge.targetDeviceId ?? edge.target,
   }
 }
+
+/** Uso a partir do qual a linha de saúde do nó ganha o alerta. */
+export const HEALTH_HIGH_PERCENT = 90
+
+/**
+ * A linha de saúde sob o nome do nó: "CPU 37% · RAM 62%" (só o que há de
+ * coleta recente). Uso alto ganha "⚠ " na frente — o anel do nó continua sendo
+ * o estado do dispositivo. `null` sem coleta.
+ */
+export function nodeHealthText(
+  node: Partial<Pick<TopologyNode, 'cpuPercent' | 'memoryPercent'>>
+): string | null {
+  const parts: string[] = []
+  const values: number[] = []
+  if (typeof node.cpuPercent === 'number') {
+    parts.push(`CPU ${Math.round(node.cpuPercent)}%`)
+    values.push(node.cpuPercent)
+  }
+  if (typeof node.memoryPercent === 'number') {
+    parts.push(`RAM ${Math.round(node.memoryPercent)}%`)
+    values.push(node.memoryPercent)
+  }
+  if (parts.length === 0) return null
+  const high = values.some((value) => value >= HEALTH_HIGH_PERCENT)
+  return `${high ? '⚠ ' : ''}${parts.join(' · ')}`
+}

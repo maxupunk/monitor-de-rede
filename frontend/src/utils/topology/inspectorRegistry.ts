@@ -70,6 +70,8 @@ export interface TopologyHost {
   addUnmanagedSwitch(): void
   discoverLinks(): void
   addLink(): void
+  /** Cadastra um dispositivo novo sobre o mapa. */
+  addDevice(): void
   fit(): void
 }
 

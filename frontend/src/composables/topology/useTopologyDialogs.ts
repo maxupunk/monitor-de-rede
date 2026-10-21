@@ -58,6 +58,12 @@ export function useTopologyDialogs() {
     unmanagedSwitch.open = true
   }
 
+  /** Cadastro de um dispositivo novo sobre o mapa (o mesmo formulário da tela). */
+  function openNewDevice() {
+    device.toEdit = null
+    device.open = true
+  }
+
   async function openDevice(deviceId: number) {
     let found = devicesStore.devices.find((item) => item.id === deviceId)
     if (!found) {
@@ -69,7 +75,16 @@ export function useTopologyDialogs() {
     return Boolean(found)
   }
 
-  return { link, unmanagedSwitch, device, openNewLink, openEditLink, openSwitch, openDevice }
+  return {
+    link,
+    unmanagedSwitch,
+    device,
+    openNewLink,
+    openEditLink,
+    openSwitch,
+    openDevice,
+    openNewDevice,
+  }
 }
 
 export type TopologyDialogs = ReturnType<typeof useTopologyDialogs>

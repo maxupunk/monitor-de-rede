@@ -19,11 +19,11 @@ use crate::{
         _entities::{
             device_interfaces as device_interfaces_entity, device_links as device_links_entity,
         },
-        device_interfaces, device_links, devices, monitors, sites,
+        device_interfaces, device_links, devices, metrics, monitors, sites,
     },
     services::{
         devices::system_device::NETMONITOR_KEY,
-        monitoring::metrics_repository,
+        monitoring::{health::series, metrics_repository},
         shared::{
             errors::{AppError, AppResult},
             transaction::begin_write,
@@ -67,6 +67,52 @@ pub struct TopologyNode {
     pub is_system: bool,
     /// Monitores habilitados deste dispositivo que estão `down` agora.
     pub monitors_down: usize,
+    /// Uso de CPU (%) na última coleta (`cpu_usage`) — `null` sem coleta ou
+    /// com a última mais velha que [`HEALTH_MAX_AGE`]: número velho no mapa
+    /// pareceria atual. O resto chega pelo SSE (`monitor:result`).
+    pub cpu_percent: Option<f64>,
+    /// Uso de memória (%) na última coleta (`memory_usage`), com a mesma regra.
+    pub memory_percent: Option<f64>,
+}
+
+/// Até quando uma coleta de CPU/memória ainda vale para o mapa.
+pub const HEALTH_MAX_AGE: chrono::Duration = chrono::Duration::minutes(15);
+
+/// CPU e memória recentes por dispositivo, a partir das últimas amostras.
+/// Puro: o relógio vem de quem chama.
+#[must_use]
+pub fn fresh_health(
+    samples: &[metrics::Model],
+    now: chrono::DateTime<Utc>,
+) -> BTreeMap<i64, (Option<f64>, Option<f64>)> {
+    let mut health: BTreeMap<i64, (Option<f64>, Option<f64>)> = BTreeMap::new();
+    for sample in samples {
+        if now.signed_duration_since(sample.recorded_at.with_timezone(&Utc)) > HEALTH_MAX_AGE {
+            continue;
+        }
+        let value = sample.value.clamp(0.0, 100.0);
+        let entry = health.entry(sample.device_id).or_insert((None, None));
+        match sample.name.as_str() {
+            series::CPU_USAGE => entry.0 = Some(value),
+            series::MEMORY_USAGE => entry.1 = Some(value),
+            _ => {}
+        }
+    }
+    health
+}
+
+async fn device_health(
+    db: &sea_orm::DatabaseConnection,
+    device_ids: &BTreeSet<i64>,
+) -> AppResult<BTreeMap<i64, (Option<f64>, Option<f64>)>> {
+    let ids: Vec<i64> = device_ids.iter().copied().collect();
+    let samples = metrics_repository::latest_for_devices(
+        db,
+        &ids,
+        &[series::CPU_USAGE, series::MEMORY_USAGE],
+    )
+    .await?;
+    Ok(fresh_health(&samples, Utc::now()))
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, TS)]
@@ -364,6 +410,7 @@ pub async fn get_topology(
         .collect();
     let interfaces = interfaces_by_ids(db, &interface_ids).await?;
     let traffic = latest_traffic(db, &interface_ids).await?;
+    let health = device_health(db, &ids).await?;
     let site_names: BTreeMap<i64, String> = sites::Entity::find()
         .all(db)
         .await?
@@ -397,6 +444,8 @@ pub async fn get_topology(
                 .and_then(|site| site_names.get(&site).cloned()),
             interface_count: count(&interface_counts, device.id),
             monitors_down: count(&monitors_down, device.id),
+            cpu_percent: health.get(&device.id).and_then(|h| h.0),
+            memory_percent: health.get(&device.id).and_then(|h| h.1),
             is_system: device.system_key.as_deref() == Some(NETMONITOR_KEY),
             name: device.name,
             device_type: device.r#type,
@@ -890,6 +939,40 @@ pub async fn resolve_discovered_neighbors(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn amostra(device_id: i64, name: &str, value: f64, minutos_atras: i64) -> metrics::Model {
+        let quando = (Utc::now() - chrono::Duration::minutes(minutos_atras)).into();
+        metrics::Model {
+            id: 0,
+            device_id,
+            interface_id: None,
+            monitor_id: None,
+            name: name.into(),
+            value,
+            unit: "%".into(),
+            recorded_at: quando,
+            created_at: quando,
+        }
+    }
+
+    #[test]
+    fn cpu_e_memoria_recentes_por_dispositivo_e_velho_fica_de_fora() {
+        let saude = fresh_health(
+            &[
+                amostra(1, series::CPU_USAGE, 37.5, 1),
+                amostra(1, series::MEMORY_USAGE, 62.0, 2),
+                amostra(2, series::CPU_USAGE, 90.0, 40),
+                amostra(3, series::MEMORY_USAGE, 140.0, 0),
+                amostra(3, "uptime_seconds", 10.0, 0),
+            ],
+            Utc::now(),
+        );
+        assert_eq!(saude.get(&1), Some(&(Some(37.5), Some(62.0))));
+        // Coleta de 40 min atrás: o mapa não mostra número velho como atual.
+        assert_eq!(saude.get(&2), None);
+        // Valor fora da faixa é limitado; série que não é saúde é ignorada.
+        assert_eq!(saude.get(&3), Some(&(None, Some(100.0))));
+    }
 
     fn dispositivo(id: i64, parent_id: Option<i64>) -> devices::Model {
         devices::Model {

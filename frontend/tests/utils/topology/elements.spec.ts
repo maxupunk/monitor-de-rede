@@ -26,6 +26,27 @@ describe('buildElements', () => {
     node(3, { name: 'Hub', type: 'unmanaged_switch', status: 'warning' }),
   ]
 
+  it('CPU e memória: terceira linha só com a opção ligada e coleta recente', () => {
+    const withHealth = [
+      node(1, { name: 'BORDA', ipAddress: '10.0.0.1', cpuPercent: 37.4, memoryPercent: 91 }),
+      node(2, { name: 'AP', ipAddress: '10.0.0.2' }),
+      node(3, { name: 'Hub', type: 'unmanaged_switch', cpuPercent: 5 }),
+    ]
+    const on = buildElements({ nodes: withHealth, edges: [], positions: {}, showHealth: true })
+    expect(byId(on, 'n1').data.label).toBe('BORDA\n10.0.0.1\n⚠ CPU 37% · RAM 91%')
+    expect(classesOf(on, 'n1')).toContain('three-line')
+    expect(classesOf(on, 'n1')).not.toContain('two-line')
+    // Sem coleta: nada a mais.
+    expect(byId(on, 'n2').data.label).toBe('AP\n10.0.0.2')
+    expect(classesOf(on, 'n2')).toContain('two-line')
+    // Sem IP, a saúde é a segunda linha.
+    expect(byId(on, 'n3').data.label).toBe('Hub\nCPU 5%')
+
+    const off = buildElements({ nodes: withHealth, edges: [], positions: {}, showHealth: false })
+    expect(byId(off, 'n1').data.label).toBe('BORDA\n10.0.0.1')
+    expect(classesOf(off, 'n1')).toContain('two-line')
+  })
+
   it('mapeia nó com status, tipo, sistema e rótulo de duas linhas quando há IP', () => {
     const elements = buildElements({ nodes, edges: [], positions: { 1: { x: 10, y: 20 } } })
     const core = byId(elements, nodeElementId(1))

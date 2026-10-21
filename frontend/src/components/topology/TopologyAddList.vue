@@ -17,6 +17,12 @@ export type AddKind = 'link' | 'switch' | 'discover' | 'device'
 
 const ITEMS: ReadonlyArray<{ kind: AddKind; title: string; subtitle: string; icon: string }> = [
   {
+    kind: 'device',
+    title: 'Cadastrar dispositivo',
+    subtitle: 'Cadastra aqui; ele aparece no mapa ao salvar',
+    icon: 'mdi-plus-network',
+  },
+  {
     kind: 'link',
     title: 'Enlace entre dispositivos',
     subtitle: 'Escolha as portas de cada ponta',
@@ -33,12 +39,6 @@ const ITEMS: ReadonlyArray<{ kind: AddKind; title: string; subtitle: string; ico
     title: 'Descobrir enlaces',
     subtitle: 'LLDP/CDP e inferência por sub-rede',
     icon: 'mdi-radar',
-  },
-  {
-    kind: 'device',
-    title: 'Cadastrar dispositivo',
-    subtitle: 'Abre a tela de dispositivos',
-    icon: 'mdi-plus-network',
   },
 ]
 </script>

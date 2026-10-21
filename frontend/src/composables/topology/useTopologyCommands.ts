@@ -1,5 +1,4 @@
 import { onBeforeUnmount, onMounted, reactive, ref, type Ref } from 'vue'
-import { useRouter } from 'vue-router'
 import { confirm } from '@/composables/useConfirm'
 import { useAuthStore } from '@/stores/auth'
 import { useTopologyStore } from '@/stores/topology'
@@ -43,7 +42,6 @@ export function useTopologyCommands(deps: Deps) {
   const store = useTopologyStore()
   const overlay = useTopologyOverlayStore()
   const auth = useAuthStore()
-  const router = useRouter()
 
   const cable = reactive({ active: false, source: null as number | null })
   const context = reactive({ open: false, x: 0, y: 0, target: null as TopologyTarget | null })
@@ -105,7 +103,7 @@ export function useTopologyCommands(deps: Deps) {
     if (kind === 'link') host.addLink()
     else if (kind === 'switch') host.addUnmanagedSwitch()
     else if (kind === 'discover') host.discoverLinks()
-    else void router.push('/devices')
+    else host.addDevice()
   }
 
   async function exportPng() {

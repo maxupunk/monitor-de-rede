@@ -395,6 +395,23 @@ export const useTopologyStore = defineStore('topology', () => {
     if (typeof data.ipAddress === 'string' && data.ipAddress) node.ipAddress = data.ipAddress
   }
 
+  /**
+   * CPU e memória do nó a partir do `monitor:result` (séries `cpu_usage` e
+   * `memory_usage` do dispositivo) — o valor chega pelo SSE, sem consultar a API.
+   */
+  function applyRealtimeHealth(data: Record<string, unknown>) {
+    const node = nodesById.value.get(Number(data.deviceId))
+    if (!node || !Array.isArray(data.metrics)) return
+    for (const metric of data.metrics as Array<Record<string, unknown>>) {
+      if (metric.interfaceId !== null && metric.interfaceId !== undefined) continue
+      const value = Number(metric.value)
+      if (!Number.isFinite(value)) continue
+      const percent = Math.min(Math.max(value, 0), 100)
+      if (metric.name === 'cpu_usage') node.cpuPercent = percent
+      else if (metric.name === 'memory_usage') node.memoryPercent = percent
+    }
+  }
+
   /** Atualiza tráfego e estado operacional das interfaces e enlaces em tempo real. */
   function applyRealtimeTraffic(data: Record<string, unknown>) {
     const deviceId = Number(data.deviceId)
@@ -547,6 +564,7 @@ export const useTopologyStore = defineStore('topology', () => {
     fetchPath,
     setPluginActions,
     applyRealtimeStatus,
+    applyRealtimeHealth,
     applyRealtimeTraffic,
     applyInterfaceChange,
   }

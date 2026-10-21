@@ -26,6 +26,8 @@ export interface TopologyPrefs {
   alwaysDetail: boolean
   /** Enlaces em ângulo reto (árvore) em vez de curvas. */
   orthogonalEdges: boolean
+  /** CPU e memória sob o nome do dispositivo (de perto). */
+  showHealth: boolean
   minimap: MinimapPref
   /** Fechou a dica de primeiro uso do mapa. */
   tipsDismissed: boolean
@@ -40,6 +42,7 @@ export const DEFAULT_PREFS: TopologyPrefs = {
   groupBySite: false,
   alwaysDetail: false,
   orthogonalEdges: true,
+  showHealth: true,
   minimap: 'auto',
   tipsDismissed: false,
 }
@@ -87,6 +90,7 @@ export function parsePrefs(raw: string | null): TopologyPrefs {
       groupBySite: record.groupBySite === true,
       alwaysDetail: record.alwaysDetail === true,
       orthogonalEdges: record.orthogonalEdges !== false,
+      showHealth: record.showHealth !== false,
       minimap: MINIMAP_PREFS.includes(record.minimap as MinimapPref)
         ? (record.minimap as MinimapPref)
         : 'auto',

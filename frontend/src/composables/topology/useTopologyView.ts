@@ -50,6 +50,7 @@ export function useTopologyView(prefs: TopologyPrefs) {
       },
       groupBySite: prefs.groupBySite,
       siteNames: siteNames.value,
+      showHealth: prefs.showHealth,
     })
   )
 

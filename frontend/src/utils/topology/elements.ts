@@ -17,6 +17,7 @@ import {
   isUnmanagedSwitch,
   linkKind,
   nodeIconKey,
+  nodeHealthText,
   nodeIp,
   nodeStatusKey,
   speedTier,
@@ -49,6 +50,8 @@ export interface ElementsInput {
   groupBySite?: boolean
   /** Nomes de site para as caixas quando o nó não traz `siteName`. */
   siteNames?: Readonly<Record<number, string>>
+  /** Linha de CPU/memória sob o nome (preferência "Exibir"). */
+  showHealth?: boolean
 }
 
 export const nodeElementId = (deviceId: number) => `n${deviceId}`
@@ -77,16 +80,19 @@ function filterClass(
 
 export function nodeElement(
   node: TopologyNode,
-  input: Pick<ElementsInput, 'filter' | 'overlay' | 'groupBySite' | 'positions'>
+  input: Pick<ElementsInput, 'filter' | 'overlay' | 'groupBySite' | 'positions' | 'showHealth'>
 ): TopologyElement {
   const overlay = input.overlay ?? EMPTY_OVERLAY
   const ip = nodeIp(node)
+  const health = input.showHealth ? nodeHealthText(node) : null
+  const lines = [node.name, ip, health].filter((line): line is string => Boolean(line))
   const nodeOverlay = overlay.nodeOverlays[node.id]
   const classes = [
     `status-${nodeStatusKey(node.status)}`,
     node.isSystem ? 'system' : null,
     `rank-${nodeRank(node)}`,
-    ip ? 'two-line' : null,
+    lines.length === 2 ? 'two-line' : null,
+    lines.length === 3 ? 'three-line' : null,
     isUnmanagedSwitch(node) ? 'unmanaged' : null,
     filterClass(input.filter, input.filter?.nodes, node.id),
     highlightClass(overlay.highlight, 'node', node.id),
@@ -100,7 +106,7 @@ export function nodeElement(
     // CLASSE do nó (`lod-mid`/`lod-far`) e a folha de estilo escolhe qual
     // dado vira rótulo — trocar o texto de um rótulo já desenhado deixa o
     // Cytoscape com a caixa antiga (corta a 2ª linha).
-    label: ip ? `${node.name}\n${ip}` : node.name,
+    label: lines.join('\n'),
     name: node.name,
     iconKey: nodeIconKey(node),
   }

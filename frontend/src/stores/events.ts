@@ -209,6 +209,7 @@ export const useEventsStore = defineStore('events', () => {
         monitorsStore.applyRealtimeMetrics(data)
         deviceDetailStore.applyMonitorResult(data)
         deviceDetailStore.applyRecordedMetrics(data)
+        useTopologyStore().applyRealtimeHealth(data)
         break
       }
 

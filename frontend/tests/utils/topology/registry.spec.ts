@@ -12,6 +12,7 @@ import {
   type TopologyTarget,
 } from '@/utils/topology/inspectorRegistry'
 import {
+  backgroundActions,
   edgeActions,
   edgeLinkTestRequest,
   linkTestActions,
@@ -44,6 +45,7 @@ function host(patch: Partial<TopologyHost> = {}): TopologyHost {
     addUnmanagedSwitch: vi.fn(),
     discoverLinks: vi.fn(),
     addLink: vi.fn(),
+    addDevice: vi.fn(),
     fit: vi.fn(),
     ...patch,
   }
@@ -175,6 +177,18 @@ describe('registro de ações e abas da topologia', () => {
     expect(action.subtitle).toBe('OpenWrt')
     void action.run()
     expect(h.runPluginAction).toHaveBeenCalled()
+  })
+
+  it('fundo do mapa: "Cadastrar dispositivo…" primeiro, cadastrando no próprio mapa', () => {
+    const h = host()
+    const actions = backgroundActions({ kind: 'background' }, h)
+    const edits = actions
+      .filter((a) => a.group === 'edit')
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    expect(edits[0].id).toBe('map.add-device')
+    expect(edits[0].requiresWrite).toBe(true)
+    void edits[0].run()
+    expect(h.addDevice).toHaveBeenCalledOnce()
   })
 
   it('abas: extensão entra na ordem e só para o tipo pedido', () => {

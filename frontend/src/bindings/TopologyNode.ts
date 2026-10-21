@@ -9,4 +9,14 @@ isSystem: boolean,
 /**
  * Monitores habilitados deste dispositivo que estão `down` agora.
  */
-monitorsDown: number, };
+monitorsDown: number, 
+/**
+ * Uso de CPU (%) na última coleta (`cpu_usage`) — `null` sem coleta ou
+ * com a última mais velha que [`HEALTH_MAX_AGE`]: número velho no mapa
+ * pareceria atual. O resto chega pelo SSE (`monitor:result`).
+ */
+cpuPercent: number | null, 
+/**
+ * Uso de memória (%) na última coleta (`memory_usage`), com a mesma regra.
+ */
+memoryPercent: number | null, };

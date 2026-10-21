@@ -17,6 +17,7 @@ import {
   nodeTypeLabel,
   speedTier,
   utilizationLevel,
+  nodeHealthText,
 } from '@/utils/topology/presentation'
 import { edge, node } from './fixtures'
 
@@ -98,5 +99,15 @@ describe('apresentação da topologia', () => {
     expect(confidencePercent(95)).toBe(95)
     expect(confidencePercent(0.6)).toBe(60)
     expect(confidencePercent(null)).toBeNull()
+  })
+})
+
+describe('linha de saúde do nó', () => {
+  it('mostra o que há de coleta, arredondado, e alerta o uso alto', () => {
+    expect(nodeHealthText({ cpuPercent: 12.6, memoryPercent: 40.2 })).toBe('CPU 13% · RAM 40%')
+    expect(nodeHealthText({ memoryPercent: 95 })).toBe('⚠ RAM 95%')
+    expect(nodeHealthText({ cpuPercent: 90 })).toBe('⚠ CPU 90%')
+    expect(nodeHealthText({})).toBeNull()
+    expect(nodeHealthText({ cpuPercent: null, memoryPercent: null })).toBeNull()
   })
 })

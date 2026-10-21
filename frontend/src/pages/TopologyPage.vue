@@ -7,6 +7,7 @@
       v-model:group-by-site="prefs.groupBySite"
       v-model:always-detail="prefs.alwaysDetail"
       v-model:orthogonal-edges="prefs.orthogonalEdges"
+      v-model:show-health="prefs.showHealth"
       :edit-mode="editMode"
       :sites="sites.sites"
       :nodes="store.nodes"
@@ -15,7 +16,7 @@
       :computing="layout.computing.value"
       :new-count="layout.autoPlaced.value.size"
       :fullscreen="cmd.fullscreen.value"
-      :compact="mdAndDown"
+      :compact="compact"
       @update:edit-mode="cmd.setEditMode"
       @search="cmd.searchOpen.value = true"
       @layout="cmd.runLayout"
@@ -146,19 +147,15 @@
     <TopologySearch v-model="cmd.searchOpen.value" :nodes="store.nodes" @select="host.focusNode" />
     <TopologyShortcutsDialog v-model="cmd.shortcutsOpen.value" />
     <TopologyMobileSheet
-      v-if="mdAndDown"
+      v-if="compact"
       v-model="moreOpen"
       v-model:filters="prefs.filters"
       v-model:legend-open="prefs.legendOpen"
       v-model:group-by-site="prefs.groupBySite"
       v-model:always-detail="prefs.alwaysDetail"
       v-model:orthogonal-edges="prefs.orthogonalEdges"
+      v-model:show-health="prefs.showHealth"
       :nodes="store.nodes"
-      :can-write="auth.canWrite"
-      :new-count="layout.autoPlaced.value.size"
-      @layout="cmd.runLayout"
-      @arrange-new="layout.arrangeNew"
-      @add="cmd.onAdd"
       @export="cmd.exportPng"
     />
     <TopologyDialogs :site-id="prefs.siteId" @saved="notify" />
@@ -175,6 +172,7 @@
  */
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useDisplay } from 'vuetify'
+import { useElementWidth } from '@/composables/useElementWidth'
 import { useAuthStore } from '@/stores/auth'
 import { useDevicesStore } from '@/stores/devices'
 import { useSitesStore } from '@/stores/sites'
@@ -233,6 +231,12 @@ const pluginActions = useTopologyPluginActions()
 const { smAndDown, mdAndDown, height } = useDisplay()
 
 const root = ref<HTMLElement | null>(null)
+/** Abaixo disso a barra larga espreme site e busca — vale o espaço da página, não da janela. */
+const FULL_TOOLBAR_MIN_WIDTH = 1100
+const pageWidth = useElementWidth(root)
+const compact = computed(
+  () => mdAndDown.value || (pageWidth.value > 0 && pageWidth.value < FULL_TOOLBAR_MIN_WIDTH)
+)
 const canvas = ref<InstanceType<typeof TopologyCanvas> | null>(null)
 const pluginRunner = ref<InstanceType<typeof TopologyPluginRunner> | null>(null)
 const linkTestLayer = ref<InstanceType<typeof TopologyLinkTestLayer> | null>(null)

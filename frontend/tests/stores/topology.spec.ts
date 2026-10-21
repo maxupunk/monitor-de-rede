@@ -39,6 +39,30 @@ describe('store da topologia', () => {
     expect(get).toHaveBeenLastCalledWith('/topology?siteId=2')
   })
 
+  it('CPU e memória do nó chegam pelo monitor:result, sem consultar a API', () => {
+    const get = vi.spyOn(apiService, 'get')
+    const store = useTopologyStore()
+    store.nodes = [node(1), node(2)]
+    store.applyRealtimeHealth({
+      deviceId: 1,
+      metrics: [
+        { name: 'cpu_usage', value: 42.5, interfaceId: null },
+        { name: 'memory_usage', value: 130, interfaceId: null },
+        // Série de interface não é a saúde do dispositivo.
+        { name: 'cpu_usage', value: 99, interfaceId: 7 },
+        { name: 'inBps', value: 1000, interfaceId: null },
+      ],
+    })
+    expect(store.nodes[0].cpuPercent).toBe(42.5)
+    expect(store.nodes[0].memoryPercent).toBe(100)
+    expect(store.nodes[1].cpuPercent).toBeUndefined()
+    // Dispositivo fora do mapa ou payload sem métricas: nada muda.
+    store.applyRealtimeHealth({ deviceId: 9, metrics: [{ name: 'cpu_usage', value: 1 }] })
+    store.applyRealtimeHealth({ deviceId: 1 })
+    expect(store.nodes[0].cpuPercent).toBe(42.5)
+    expect(get).not.toHaveBeenCalled()
+  })
+
   it('aplica status, tráfego e mudança de interface em memória, sem consultar a API', () => {
     const get = vi.spyOn(apiService, 'get')
     const store = useTopologyStore()

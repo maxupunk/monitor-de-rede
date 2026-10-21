@@ -218,6 +218,9 @@ export function useTopologyHost(deps: HostDeps) {
     addLink() {
       deps.dialogs.openNewLink()
     },
+    addDevice() {
+      deps.dialogs.openNewDevice()
+    },
     fit() {
       deps.fit()
     },

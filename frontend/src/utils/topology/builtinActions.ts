@@ -175,6 +175,16 @@ export const backgroundActions: TopologyActionProvider = (target, host) => {
       run: () => host.fit(),
     },
     {
+      id: 'map.add-device',
+      title: 'Cadastrar dispositivo…',
+      icon: 'mdi-plus-network',
+      color: 'primary',
+      group: 'edit',
+      order: 5,
+      requiresWrite: true,
+      run: () => host.addDevice(),
+    },
+    {
       id: 'map.add-link',
       title: 'Adicionar enlace…',
       icon: 'mdi-vector-polyline-plus',

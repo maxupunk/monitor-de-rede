@@ -114,3 +114,93 @@ async fn latest_for_interface_batch(
             .await?,
     )
 }
+
+/// Busca a última amostra de cada série **do dispositivo** (sem interface)
+/// por `(device_id, name)` — CPU e memória no mapa. Mesma régua do
+/// [`latest_for_interfaces`]: um `ORDER BY ... LIMIT 1` por par, apoiado no
+/// índice `(device_id, name, recorded_at)`.
+pub async fn latest_for_devices(
+    db: &DatabaseConnection,
+    device_ids: &[i64],
+    names: &[&str],
+) -> AppResult<Vec<metrics::Model>> {
+    let device_ids = device_ids
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let names = names
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    if device_ids.is_empty() || names.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut latest = Vec::with_capacity(device_ids.len().saturating_mul(names.len()));
+    for batch in device_ids.chunks(INTERFACES_PER_QUERY) {
+        latest.extend(latest_for_device_batch(db, batch, &names).await?);
+    }
+    Ok(latest)
+}
+
+async fn latest_for_device_batch(
+    db: &DatabaseConnection,
+    device_ids: &[i64],
+    names: &[&str],
+) -> AppResult<Vec<metrics::Model>> {
+    let backend = db.get_database_backend();
+    let marker = |position: usize| match backend {
+        DatabaseBackend::Postgres => format!("${position}"),
+        _ => "?".to_string(),
+    };
+    let mut values = Vec::<Value>::new();
+    let mut next_position = 1;
+    let device_markers = device_ids
+        .iter()
+        .map(|id| {
+            let current = marker(next_position);
+            next_position += 1;
+            values.push((*id).into());
+            format!("(CAST({current} AS BIGINT))")
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let name_markers = names
+        .iter()
+        .map(|name| {
+            let current = marker(next_position);
+            next_position += 1;
+            values.push((*name).to_owned().into());
+            format!("(CAST({current} AS TEXT))")
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let sql = format!(
+        "WITH requested_devices(device_id) AS (VALUES {device_markers}), \
+              requested_names(name) AS (VALUES {name_markers}) \
+         SELECT m.id, m.device_id, m.interface_id, m.monitor_id, m.name, m.value, m.unit, \
+                m.recorded_at, m.created_at \
+           FROM requested_devices requested_device \
+          CROSS JOIN requested_names requested_name \
+           JOIN metrics m ON m.id = (\
+                SELECT candidate.id \
+                  FROM metrics candidate \
+                 WHERE candidate.device_id = requested_device.device_id \
+                   AND candidate.interface_id IS NULL \
+                   AND candidate.name = requested_name.name \
+                 ORDER BY candidate.recorded_at DESC, candidate.id DESC \
+                 LIMIT 1\
+           ) \
+          ORDER BY m.device_id ASC, m.name ASC"
+    );
+
+    Ok(
+        metrics::Model::find_by_statement(Statement::from_sql_and_values(backend, sql, values))
+            .all(db)
+            .await?,
+    )
+}

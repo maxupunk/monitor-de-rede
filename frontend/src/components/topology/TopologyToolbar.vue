@@ -19,7 +19,12 @@
       @update:model-value="$emit('update:siteId', $event ?? null)"
     ></v-select>
 
-    <button type="button" class="search-trigger" @click="$emit('search')">
+    <button
+      type="button"
+      class="search-trigger"
+      aria-label="Buscar dispositivo, IP…"
+      @click="$emit('search')"
+    >
       <v-icon size="18" color="primary">mdi-magnify</v-icon>
       <span class="search-text">Buscar dispositivo, IP…</span>
       <kbd class="d-none d-md-inline">Ctrl K</kbd>
@@ -48,26 +53,6 @@
         </v-card>
       </v-menu>
 
-      <v-menu location="bottom start">
-        <template #activator="{ props: menu }">
-          <v-btn
-            v-bind="menu"
-            color="primary"
-            variant="tonal"
-            :prepend-icon="computing ? undefined : 'mdi-auto-fix'"
-            :loading="computing !== null"
-          >
-            Organizar
-          </v-btn>
-        </template>
-        <TopologyLayoutList
-          :can-write="canWrite"
-          :new-count="newCount"
-          @layout="$emit('layout', $event)"
-          @arrange-new="$emit('arrange-new')"
-        />
-      </v-menu>
-
       <v-menu :close-on-content-click="false" location="bottom start">
         <template #activator="{ props: menu }">
           <v-btn v-bind="menu" color="primary" variant="tonal" prepend-icon="mdi-eye-settings">
@@ -79,31 +64,81 @@
           :group-by-site="groupBySite"
           :always-detail="alwaysDetail"
           :orthogonal-edges="orthogonalEdges"
+          :show-health="showHealth"
+          @update:show-health="$emit('update:showHealth', $event)"
           @update:legend-open="$emit('update:legendOpen', $event)"
           @update:group-by-site="$emit('update:groupBySite', $event)"
           @update:always-detail="$emit('update:alwaysDetail', $event)"
           @update:orthogonal-edges="$emit('update:orthogonalEdges', $event)"
         />
       </v-menu>
-
-      <v-menu v-if="canWrite" location="bottom start">
-        <template #activator="{ props: menu }">
-          <v-btn v-bind="menu" color="primary" variant="tonal" prepend-icon="mdi-plus">
-            Adicionar
-          </v-btn>
-        </template>
-        <TopologyAddList @add="$emit('add', $event)" />
-      </v-menu>
-      <v-tooltip v-else :text="READ_ONLY_REASON" location="bottom">
-        <template #activator="{ props: tip }">
-          <span v-bind="tip">
-            <v-btn color="primary" variant="tonal" prepend-icon="mdi-plus" disabled>
-              Adicionar
-            </v-btn>
-          </span>
-        </template>
-      </v-tooltip>
     </template>
+
+    <!-- Montar o mapa fica sempre à vista, em qualquer largura (no estreito, só o ícone). -->
+    <v-menu location="bottom start">
+      <template #activator="{ props: menu }">
+        <v-tooltip text="Organizar o mapa" location="bottom" :disabled="!compact">
+          <template #activator="{ props: tip }">
+            <v-btn
+              v-bind="{ ...menu, ...tip }"
+              color="primary"
+              :variant="compact ? 'flat' : 'tonal'"
+              :icon="compact"
+              :prepend-icon="compact || computing ? undefined : 'mdi-auto-fix'"
+              :loading="computing !== null"
+              aria-label="Organizar o mapa"
+            >
+              <v-icon v-if="compact">mdi-auto-fix</v-icon>
+              <template v-else>Organizar</template>
+            </v-btn>
+          </template>
+        </v-tooltip>
+      </template>
+      <TopologyLayoutList
+        :can-write="canWrite"
+        :new-count="newCount"
+        @layout="$emit('layout', $event)"
+        @arrange-new="$emit('arrange-new')"
+      />
+    </v-menu>
+
+    <v-menu v-if="canWrite" location="bottom start">
+      <template #activator="{ props: menu }">
+        <v-tooltip text="Adicionar ao mapa" location="bottom" :disabled="!compact">
+          <template #activator="{ props: tip }">
+            <v-btn
+              v-bind="{ ...menu, ...tip }"
+              color="primary"
+              variant="flat"
+              :icon="compact"
+              :prepend-icon="compact ? undefined : 'mdi-plus'"
+              aria-label="Adicionar ao mapa: dispositivo, switch, enlace"
+            >
+              <v-icon v-if="compact">mdi-plus</v-icon>
+              <template v-else>Adicionar</template>
+            </v-btn>
+          </template>
+        </v-tooltip>
+      </template>
+      <TopologyAddList @add="$emit('add', $event)" />
+    </v-menu>
+    <v-tooltip v-else :text="READ_ONLY_REASON" location="bottom">
+      <template #activator="{ props: tip }">
+        <span v-bind="tip">
+          <v-btn
+            color="primary"
+            variant="flat"
+            :icon="compact"
+            :prepend-icon="compact ? undefined : 'mdi-plus'"
+            aria-label="Adicionar ao mapa"
+            disabled
+          >
+            <v-icon v-if="compact">mdi-plus</v-icon>
+            <template v-else>Adicionar</template>
+          </v-btn>
+        </span>
+      </template>
+    </v-tooltip>
 
     <v-spacer></v-spacer>
 
@@ -209,10 +244,11 @@ const props = defineProps<{
   groupBySite: boolean
   alwaysDetail: boolean
   orthogonalEdges: boolean
+  showHealth: boolean
   computing: LayoutKind | null
   newCount: number
   fullscreen: boolean
-  /** Celular/tablet estreito: o resto vai para a folha "Mais opções". */
+  /** Tela estreita: Filtros e Exibir vão para a folha "Opções do mapa". */
   compact: boolean
 }>()
 
@@ -224,6 +260,7 @@ defineEmits<{
   'update:groupBySite': [value: boolean]
   'update:alwaysDetail': [value: boolean]
   'update:orthogonalEdges': [value: boolean]
+  'update:showHealth': [value: boolean]
   search: []
   layout: [kind: LayoutKind]
   'arrange-new': []
@@ -303,13 +340,28 @@ kbd {
     flex: 1 1 auto;
   }
 }
+/* Celular: a busca vira só a lupa (abre o mesmo diálogo) e os ícones encolhem,
+   para Organizar e Adicionar caberem na barra sem espremer o site. */
 @media (max-width: 599px) {
+  .topology-toolbar {
+    gap: 6px;
+  }
   .site-select {
-    flex-basis: 128px;
-    min-width: 112px;
+    flex: 1 1 auto;
+    min-width: 0;
   }
   .search-trigger {
+    flex: 0 0 40px;
     min-width: 0;
+    justify-content: center;
+    padding: 0;
+  }
+  .search-text {
+    display: none;
+  }
+  .topology-toolbar :deep(.v-btn--icon) {
+    width: 40px;
+    height: 40px;
   }
 }
 </style>
