@@ -29,6 +29,7 @@ pub mod env;
 pub mod events;
 pub mod fixes;
 pub mod guard;
+pub mod health;
 pub mod janitor;
 pub mod model;
 pub mod negotiate;

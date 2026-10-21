@@ -27,7 +27,9 @@ use tokio_util::sync::CancellationToken;
 
 use super::{
     env::{BtestArmer, CentralAddress, DriverResolver, LinkTestEnv, PluginInvoker, ServerArmer},
-    events, guard, janitor,
+    events, guard,
+    health::{HealthReader, HealthReaders, HealthReading, HealthTarget},
+    janitor,
     model::{
         as_db, LinkTest, LinkTestFix, LinkTestKind, LinkTestLegKind, LinkTestOrigin, LinkTestQuery,
         LinkTestRequest, LinkTestRole, LinkTestScheduleInput, LinkTestSide, LinkTestSpecInput,
@@ -219,6 +221,28 @@ impl DriverResolver for Drivers {
     }
 }
 
+/// CPU/memória fixos em toda ponta com equipamento (sem SNMP).
+struct FakeHealth;
+
+struct FixedReading;
+
+#[async_trait]
+impl HealthReader for FixedReading {
+    async fn read(&mut self) -> HealthReading {
+        HealthReading {
+            cpu: Some(55.0),
+            memory: Some(40.0),
+        }
+    }
+}
+
+#[async_trait]
+impl HealthReaders for FakeHealth {
+    async fn reader_for(&self, _target: HealthTarget<'_>) -> Option<Box<dyn HealthReader>> {
+        Some(Box::new(FixedReading))
+    }
+}
+
 struct Loopback;
 
 #[async_trait]
@@ -248,6 +272,7 @@ fn env_with(
         drivers: Arc::new(Drivers),
         btest: Arc::new(ServerArmer(btest)) as Arc<dyn BtestArmer>,
         central: Arc::new(Loopback),
+        health: Arc::new(FakeHealth),
     })
 }
 
@@ -1246,6 +1271,17 @@ async fn executa_enlace_entre_equipamentos_e_traduz_os_sentidos() {
         .is_empty());
     let samples = leg.samples.as_ref().unwrap();
     assert!(!samples.is_empty());
+    // Vazão e CPU no mesmo relógio da perna.
+    assert!(samples.iter().all(|sample| sample.at_ms.is_some()));
+    let health = leg.health.as_ref().unwrap();
+    for device in [a.id, b.id] {
+        let lida = health
+            .iter()
+            .find(|sample| sample.device_id == device)
+            .expect("CPU/memória de cada ponta durante a medição");
+        assert_eq!(lida.cpu, Some(55.0));
+        assert_eq!(lida.memory, Some(40.0));
+    }
 
     // SSE: snapshot ao vivo, amostras e o estado final.
     let mut tipos = Vec::new();
@@ -1253,6 +1289,7 @@ async fn executa_enlace_entre_equipamentos_e_traduz_os_sentidos() {
         tipos.push((event.event_type.clone(), event.payload["status"].clone()));
     }
     assert!(tipos.iter().any(|(t, _)| t == events::SAMPLE_EVENT));
+    assert!(tipos.iter().any(|(t, _)| t == events::HEALTH_EVENT));
     assert!(tipos
         .iter()
         .any(|(t, s)| t == events::UPDATED_EVENT && s == "running"));

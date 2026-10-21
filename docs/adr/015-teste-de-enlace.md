@@ -622,6 +622,46 @@ ponta, atravessando BORDA e o switch): 303–323 / 518–535 Mbit/s. Enlace por
 enlace do mesmo par: Servidor → BORDA 300–363 / 563–659 e BORDA →
 AP-assistencia 937 / 926 Mbit/s — o gargalo é o trecho até a BORDA.
 
+### 12. CPU e memória durante a medição (adendo, 2026-10-21)
+
+Vazão baixa com o processador no teto é outro diagnóstico que vazão baixa com
+ele folgado — e a coleta periódica não vê um teste de 5 s (o `hrProcessorLoad`
+do net-snmp é média de 1 min; o monitor roda de minuto em minuto).
+
+- **Quem é lido:** as duas pontas da perna e os equipamentos do caminho
+  (`viaDeviceIds`) que têm SNMP ligado e IP; a central pelo próprio `/proc`.
+  Agente remoto não é lido. Só leitura, sempre.
+- **Como:** `services/link_tests/health.rs`. Um `GET` por segundo com os
+  contadores brutos da UCD-SNMP-MIB (`ssCpuRawUser/Nice/System/Idle/Wait` —
+  no Linux o `System` já soma interrupção e softirq, onde o tráfego pesa) e a
+  memória da mesma MIB; sem a UCD (RouterOS), o `hrProcessorLoad`. O uso vale
+  **entre duas leituras diferentes do contador** (`CpuWindow`): o net-snmp
+  renova os `ssCpuRaw*` a cada ~5 s, e repetir o último uso medido enquanto o
+  contador não anda é mais honesto que zerar. Contrato `HealthReaders` no
+  `LinkTestEnv` (o teste do orquestrador usa um dublê).
+- **Relógio comum:** a perna zera um relógio ao começar a medir; vazão
+  (`samples[].atMs`) e CPU/memória (`health[].atMs`) usam o mesmo, e o
+  gráfico os desenha juntos. Perna antiga (sem `atMs`) cai no tempo de cada
+  sentido.
+- **Contrato:** evento efêmero `link_test:health` `{ testId, legSeq, deviceId,
+  atMs, cpu, memory }`; coluna `link_test_legs.health` (migração
+  `m20261021_000001`), com teto de 120 leituras por equipamento, só no `GET`
+  de detalhe.
+- **Tela:** sem cartão novo. No recorte do mapa, a linha sob o nome mostra o
+  lido no teste (ao vivo, a última leitura; no fim, "CPU máx 97% · RAM 68%");
+  sem leitura, a do mapa. O gráfico (`LinkTestTrafficChart`) junta ida/volta
+  (eixo da esquerda) e CPU tracejado / RAM pontilhado de cada equipamento
+  (eixo da direita, 0–100%, com a linha de 90%); passar o ponteiro (ou tocar)
+  mostra os valores daquele segundo. O resumo ganha uma frase:
+  "CPU do AP-Terraço chegou a 97% durante a medição — o processador é o
+  provável limite" (≥ 90%) ou "…ficou em no máximo 40% — não é o
+  processador" (< 60%).
+
+**Evidência (rede real, leitura SNMP).** BORDA, AP-assistencia e AP-terraço
+(OpenWrt, net-snmp) respondem os `ssCpuRaw*` e a memória; o contador anda a
+cada ~5 s. O MikroTik (10.0.0.242) não tem a UCD e responde pelo
+`hrProcessorLoad`.
+
 ## Consequências
 
 - Porta nova publicada na central (2000/TCP), fechada a quem não tem sessão

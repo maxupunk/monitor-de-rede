@@ -5,6 +5,7 @@
       :edge-ids="path.edgeIds"
       :overlay="overlay"
       :max-height="mapHeight"
+      :health-labels="healthLabels"
     />
 
     <div class="sr-only" aria-live="polite" aria-atomic="true">{{ announcement }}</div>
@@ -73,18 +74,13 @@
           </div>
         </div>
 
-        <MonitorSparkline
-          v-if="hasSamples"
-          :in-data="forwardSeries"
-          :out-data="reverseSeries"
-          in-label="Ida"
-          out-label="Volta"
-          in-color="#4ade80"
-          out-color="#38bdf8"
-          width="100%"
-          :height="96"
-          unit="bps"
-          :format-value="compactBps"
+        <LinkTestTrafficChart
+          v-if="hasSamples || liveHealth.length > 0"
+          :forward="forwardSamples"
+          :reverse="reverseSamples"
+          :health="liveHealth"
+          :names="names"
+          :order="path.nodeIds"
         />
       </template>
       <p v-else class="text-body-medium">Montando o plano do teste…</p>
@@ -98,6 +94,8 @@
       v-else
       :test="test"
       :speed-of="ctx.speedOf"
+      :names="names"
+      :order="path.nodeIds"
       @requested="$emit('requested')"
     />
 
@@ -120,6 +118,9 @@
               :direction="test.spec.direction"
               :forward-samples="store.samplesFor(test.id, item.seq, 'forward')"
               :reverse-samples="store.samplesFor(test.id, item.seq, 'reverse')"
+              :health="store.healthFor(test.id, item.seq)"
+              :names="names"
+              :order="path.nodeIds"
               :speed-bps="legSpeedBps(item, ctx.speedOf)"
               :bottleneck="!active && bottleneckSeq === item.seq && test.legs.length > 1"
               :last="index === test.legs.length - 1"
@@ -151,9 +152,9 @@ import type { LinkTest, LinkTestStageKey } from '@/types/linkTests'
 import { formatDateTime } from '@/utils/formatters'
 import { legGauges } from '@/utils/linkTests/gauges'
 import { overlayForTest, pathOf } from '@/utils/linkTests/overlay'
+import { testDeviceNames, testHealthLabels } from '@/utils/linkTests/health'
 import {
   STAGES,
-  compactBps,
   isActiveStatus,
   legTitle,
   stepStatusPresentation,
@@ -162,11 +163,11 @@ import {
 import { currentLeg, legsDone } from '@/utils/linkTests/progress'
 import { bottleneckLeg, legSpeedBps } from '@/utils/linkTests/results'
 import { specSummary } from '@/utils/linkTests/spec'
-import MonitorSparkline from '@/components/MonitorSparkline.vue'
 import LinkTestLegItem from './LinkTestLegItem.vue'
 import LinkTestPathMap from './LinkTestPathMap.vue'
 import LinkTestResultView from './LinkTestResultView.vue'
 import LinkTestStageRun from './LinkTestStageRun.vue'
+import LinkTestTrafficChart from './LinkTestTrafficChart.vue'
 
 const props = defineProps<{ test: LinkTest }>()
 defineEmits<{ requested: [] }>()
@@ -225,12 +226,19 @@ const gauges = computed(() =>
 const hasSamples = computed(
   () => forwardSamples.value.length > 0 || reverseSamples.value.length > 0
 )
-const forwardSeries = computed(() =>
-  forwardSamples.value.map((sample) => ({ value: sample.bps, recordedAt: '' }))
-)
-const reverseSeries = computed(() =>
-  reverseSamples.value.map((sample) => ({ value: sample.bps, recordedAt: '' }))
-)
+const liveHealth = computed(() => (leg.value ? store.healthFor(props.test.id, leg.value.seq) : []))
+const names = computed(() => testDeviceNames(props.test))
+/**
+ * CPU/RAM no recorte do mapa: ao vivo, a leitura da perna que mede; no fim, o
+ * pico de todas as pernas (sem leitura, o equipamento mostra a do mapa).
+ */
+const healthLabels = computed(() => {
+  if (active.value) return testHealthLabels(liveHealth.value, true)
+  return testHealthLabels(
+    props.test.legs.flatMap((item) => store.healthFor(props.test.id, item.seq)),
+    false
+  )
+})
 
 const bottleneckSeq = computed(() => bottleneckLeg(props.test)?.seq ?? null)
 const specText = computed(() => specSummary(props.test.spec))

@@ -41,7 +41,7 @@ describe('SSE do teste de enlace', () => {
     vi.restoreAllMocks()
   })
 
-  it('roteia os três eventos para o store, sem consultar a API e fora do feed', () => {
+  it('roteia os quatro eventos para o store, sem consultar a API e fora do feed', () => {
     const get = vi.spyOn(apiService, 'get')
     const events = useEventsStore()
     const store = useLinkTestsStore()
@@ -50,10 +50,29 @@ describe('SSE do teste de enlace', () => {
     // Snapshot inicial dos testes ativos ao conectar.
     emit('link_test:updated', test(11, { status: 'running' }))
     emit('link_test:sample', { testId: 11, legSeq: 1, flow: 'forward', bps: 4.8e8, tMs: 1000 })
+    emit('link_test:health', {
+      testId: 11,
+      legSeq: 1,
+      deviceId: 2,
+      atMs: 1000,
+      cpu: 93,
+      memory: 61,
+    })
+    // Repetida (reconexão) e payload inválido: ignorados.
+    emit('link_test:health', {
+      testId: 11,
+      legSeq: 1,
+      deviceId: 2,
+      atMs: 1000,
+      cpu: 10,
+      memory: 61,
+    })
+    emit('link_test:health', { testId: 11, legSeq: 1, deviceId: 2, atMs: 2000, cpu: 'alto' })
     emit('link_test_schedule:updated', { id: 3 })
 
     expect(store.active.map((item) => item.id)).toEqual([11])
     expect(store.liveBps(11, 1, 'forward')).toBe(4.8e8)
+    expect(store.healthFor(11, 1)).toEqual([{ deviceId: 2, atMs: 1000, cpu: 93, memory: 61 }])
     // Lista de agendamentos nunca aberta: nada a reler.
     expect(get).not.toHaveBeenCalled()
     expect(events.recentEvents.map((event) => event.type)).toEqual(['link_test_schedule:updated'])

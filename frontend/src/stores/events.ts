@@ -191,7 +191,8 @@ export const useEventsStore = defineStore('events', () => {
       // O teste de enlace publica um snapshot por etapa e uma amostra por
       // segundo: estado ao vivo, não notícia para o feed.
       payload.type === 'link_test:updated' ||
-      payload.type === 'link_test:sample'
+      payload.type === 'link_test:sample' ||
+      payload.type === 'link_test:health'
     if (payload.type !== 'stream:connected' && !isEphemeralTelemetry) {
       recentEvents.value.unshift(payload)
       if (recentEvents.value.length > FEED_LIMIT) {
@@ -499,6 +500,11 @@ export const useEventsStore = defineStore('events', () => {
 
       case 'link_test:sample': {
         useLinkTestsStore().applySample(data)
+        break
+      }
+
+      case 'link_test:health': {
+        useLinkTestsStore().applyHealth(data)
         break
       }
 

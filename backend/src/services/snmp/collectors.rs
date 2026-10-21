@@ -491,11 +491,11 @@ pub struct SnmpMemoryInfo {
     pub used_percent: Option<f64>,
 }
 
-const OID_MEM_TOTAL_REAL: &str = "1.3.6.1.4.1.2021.4.5.0";
-const OID_MEM_AVAIL_REAL: &str = "1.3.6.1.4.1.2021.4.6.0";
-const OID_MEM_BUFFER: &str = "1.3.6.1.4.1.2021.4.14.0";
-const OID_MEM_CACHED: &str = "1.3.6.1.4.1.2021.4.15.0";
-const OID_MEM_SYS_AVAILABLE: &str = "1.3.6.1.4.1.2021.4.27.0";
+pub const OID_MEM_TOTAL_REAL: &str = "1.3.6.1.4.1.2021.4.5.0";
+pub const OID_MEM_AVAIL_REAL: &str = "1.3.6.1.4.1.2021.4.6.0";
+pub const OID_MEM_BUFFER: &str = "1.3.6.1.4.1.2021.4.14.0";
+pub const OID_MEM_CACHED: &str = "1.3.6.1.4.1.2021.4.15.0";
+pub const OID_MEM_SYS_AVAILABLE: &str = "1.3.6.1.4.1.2021.4.27.0";
 
 pub async fn collect_memory(client: &SnmpClient) -> Result<SnmpMemoryInfo, SnmpError> {
     let values = client
@@ -516,7 +516,7 @@ pub async fn collect_memory(client: &SnmpClient) -> Result<SnmpMemoryInfo, SnmpE
     ))
 }
 
-fn memory_info(
+pub fn memory_info(
     total: Option<u64>,
     system_available: Option<u64>,
     free: Option<u64>,

@@ -64,6 +64,7 @@ mod m20261010_000001_interface_counters;
 mod m20261012_000001_decider_os_source;
 mod m20261016_000001_link_tests;
 mod m20261018_000001_link_test_legs_via;
+mod m20261021_000001_link_test_legs_health;
 
 pub struct Migrator;
 
@@ -195,6 +196,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261012_000001_decider_os_source::Migration),
             Box::new(m20261016_000001_link_tests::Migration),
             Box::new(m20261018_000001_link_test_legs_via::Migration),
+            Box::new(m20261021_000001_link_test_legs_health::Migration),
             // inject-above (do not remove this comment)
         ]
     }

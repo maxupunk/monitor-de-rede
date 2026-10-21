@@ -76,17 +76,13 @@
       </div>
 
       <div v-if="!compact && hasSamples" class="spark mt-2">
-        <MonitorSparkline
-          :in-data="forwardSeries"
-          :out-data="reverseSeries"
-          in-label="Ida"
-          out-label="Volta"
-          in-color="#4ade80"
-          out-color="#38bdf8"
-          width="100%"
-          :height="44"
-          unit="bps"
-          :format-value="compactBps"
+        <LinkTestTrafficChart
+          :forward="forwardSamples"
+          :reverse="reverseSamples"
+          :health="health"
+          :names="names"
+          :order="order"
+          :height="110"
         />
       </div>
 
@@ -138,11 +134,15 @@
 <script setup lang="ts">
 /** Uma perna do teste: pontas, motor, medidores ao vivo, gráfico e etapas. */
 import { computed } from 'vue'
-import type { LinkTestLeg, LinkTestSample, LinkTestStage } from '@/types/linkTests'
+import type {
+  LinkTestHealthSample,
+  LinkTestLeg,
+  LinkTestSample,
+  LinkTestStage,
+} from '@/types/linkTests'
 import {
   ENGINES,
   STAGES,
-  compactBps,
   endpointLabel,
   engineLabel,
   legNotes,
@@ -153,8 +153,8 @@ import {
   stepStatusPresentation,
 } from '@/utils/linkTests/presentation'
 import { legGauges } from '@/utils/linkTests/gauges'
-import MonitorSparkline from '@/components/MonitorSparkline.vue'
 import LinkTestStatusChip from './LinkTestStatusChip.vue'
+import LinkTestTrafficChart from './LinkTestTrafficChart.vue'
 import LinkTestViaChip from './LinkTestViaChip.vue'
 
 const props = defineProps<{
@@ -163,6 +163,10 @@ const props = defineProps<{
   direction: 'both' | 'forward' | 'reverse'
   forwardSamples: LinkTestSample[]
   reverseSamples: LinkTestSample[]
+  /** CPU/RAM dos equipamentos enquanto a perna mediu. */
+  health?: LinkTestHealthSample[]
+  names?: Readonly<Record<number, string>>
+  order?: readonly number[]
   speedBps: number | null
   bottleneck?: boolean
   last?: boolean
@@ -182,12 +186,6 @@ const gauges = computed(() =>
 
 const hasSamples = computed(
   () => props.forwardSamples.length > 0 || props.reverseSamples.length > 0
-)
-const forwardSeries = computed(() =>
-  props.forwardSamples.map((sample) => ({ value: sample.bps, recordedAt: '' }))
-)
-const reverseSeries = computed(() =>
-  props.reverseSamples.map((sample) => ({ value: sample.bps, recordedAt: '' }))
 )
 
 function stageIcon(key: LinkTestStage['key']): string {

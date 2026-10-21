@@ -4,4 +4,4 @@ import type { LinkTestFlow } from "./LinkTestFlow";
 /**
  * Evento efêmero `link_test:sample`.
  */
-export type LinkTestSampleEvent = { testId: number, legSeq: number, flow: LinkTestFlow, bps: number, tMs: number, };
+export type LinkTestSampleEvent = { testId: number, legSeq: number, flow: LinkTestFlow, bps: number, tMs: number, atMs?: number, };

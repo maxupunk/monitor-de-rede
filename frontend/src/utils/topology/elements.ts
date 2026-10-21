@@ -52,6 +52,8 @@ export interface ElementsInput {
   siteNames?: Readonly<Record<number, string>>
   /** Linha de CPU/memória sob o nome (preferência "Exibir"). */
   showHealth?: boolean
+  /** Linha de saúde já pronta por dispositivo (a do teste de velocidade), no lugar da do mapa. */
+  healthLabels?: Readonly<Record<number, string>>
 }
 
 export const nodeElementId = (deviceId: number) => `n${deviceId}`
@@ -80,11 +82,14 @@ function filterClass(
 
 export function nodeElement(
   node: TopologyNode,
-  input: Pick<ElementsInput, 'filter' | 'overlay' | 'groupBySite' | 'positions' | 'showHealth'>
+  input: Pick<
+    ElementsInput,
+    'filter' | 'overlay' | 'groupBySite' | 'positions' | 'showHealth' | 'healthLabels'
+  >
 ): TopologyElement {
   const overlay = input.overlay ?? EMPTY_OVERLAY
   const ip = nodeIp(node)
-  const health = input.showHealth ? nodeHealthText(node) : null
+  const health = input.healthLabels?.[node.id] ?? (input.showHealth ? nodeHealthText(node) : null)
   const lines = [node.name, ip, health].filter((line): line is string => Boolean(line))
   const nodeOverlay = overlay.nodeOverlays[node.id]
   const classes = [

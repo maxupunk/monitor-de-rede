@@ -4,4 +4,10 @@ import type { LinkTestFlow } from "./LinkTestFlow";
 /**
  * Uma amostra de vazão, no sentido do enlace.
  */
-export type LinkTestSample = { flow: LinkTestFlow, bps: number, tMs: number, };
+export type LinkTestSample = { flow: LinkTestFlow, bps: number, tMs: number, 
+/**
+ * Instante no relógio da perna (desde o início da medição) — o mesmo de
+ * `health[].atMs`, para desenhar vazão e CPU juntos. Ausente nas pernas
+ * gravadas antes dele.
+ */
+atMs?: number, };

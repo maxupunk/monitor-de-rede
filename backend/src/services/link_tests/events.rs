@@ -4,16 +4,22 @@
 //!   mudança. Enquanto o teste roda, é o **snapshot** do barramento: quem abre
 //!   a tela depois recebe o estado atual logo ao conectar, sem HTTP. No fim, o
 //!   snapshot é esquecido e o estado final sai como evento comum.
-//! * `link_test:sample` — efêmero, `{ testId, legSeq, flow, bps, tMs }`.
+//! * `link_test:sample` — efêmero, `{ testId, legSeq, flow, bps, tMs, atMs }`.
+//! * `link_test:health` — efêmero, `{ testId, legSeq, deviceId, atMs, cpu,
+//!   memory }`: CPU e memória de uma ponta durante a medição.
 //! * `link_test_schedule:updated` — `{ id }`; a tela relê a lista.
 
 use serde_json::json;
 
-use super::model::{LinkTest, LinkTestSampleEvent, LinkTestScheduleEvent};
+use super::{
+    health::LinkTestHealthEvent,
+    model::{LinkTest, LinkTestSampleEvent, LinkTestScheduleEvent},
+};
 use crate::services::events::EventBus;
 
 pub const UPDATED_EVENT: &str = "link_test:updated";
 pub const SAMPLE_EVENT: &str = "link_test:sample";
+pub const HEALTH_EVENT: &str = "link_test:health";
 pub const SCHEDULE_EVENT: &str = "link_test_schedule:updated";
 
 /// Chave do snapshot de um teste no barramento.
@@ -28,6 +34,7 @@ pub fn publish_test(bus: Option<&EventBus>, test: &LinkTest) {
     let mut payload = test.clone();
     for leg in &mut payload.legs {
         leg.samples = None;
+        leg.health = None;
     }
     let payload = json!(payload);
     let key = snapshot_key(test.id);
@@ -43,6 +50,13 @@ pub fn publish_test(bus: Option<&EventBus>, test: &LinkTest) {
 pub fn publish_sample(bus: Option<&EventBus>, sample: LinkTestSampleEvent) {
     if let Some(bus) = bus {
         bus.publish_ephemeral(SAMPLE_EVENT, json!(sample));
+    }
+}
+
+/// Publica CPU/memória de uma ponta ao vivo.
+pub fn publish_health(bus: Option<&EventBus>, event: LinkTestHealthEvent) {
+    if let Some(bus) = bus {
+        bus.publish_ephemeral(HEALTH_EVENT, json!(event));
     }
 }
 

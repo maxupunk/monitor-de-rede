@@ -10,7 +10,10 @@
 //!
 //! Toda mudança de etapa é gravada e publicada (`link_test:updated`); as
 //! amostras de 1 s saem como `link_test:sample` (no máximo duas por segundo
-//! por sentido) e ficam na perna, com teto, para o `GET` de detalhe.
+//! por sentido) e ficam na perna, com teto, para o `GET` de detalhe. Enquanto
+//! a perna mede, CPU e memória das pontas e dos equipamentos do caminho são
+//! lidos a cada segundo ([`super::health`]) no mesmo relógio da vazão e saem
+//! como `link_test:health`.
 
 use std::{
     collections::HashMap,
@@ -21,6 +24,7 @@ use std::{
 
 use chrono::Utc;
 use rand::{distributions::Alphanumeric, Rng};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::{
@@ -34,10 +38,11 @@ use super::{
     env::LinkTestEnv,
     events,
     guard::Reservation,
+    health::{HealthSampler, HealthTarget, LinkTestHealthEvent, MAX_HEALTH_PER_DEVICE},
     model::{
-        as_db, LinkTestFlow, LinkTestLegKind, LinkTestRole, LinkTestSample, LinkTestSampleEvent,
-        LinkTestSide, LinkTestSpec, LinkTestStage, LinkTestStageKey, LinkTestStatus,
-        LinkTestStepStatus, LinkTestUserRef,
+        as_db, LinkTestFlow, LinkTestHealthSample, LinkTestLegKind, LinkTestRole, LinkTestSample,
+        LinkTestSampleEvent, LinkTestSide, LinkTestSpec, LinkTestStage, LinkTestStageKey,
+        LinkTestStatus, LinkTestStepStatus, LinkTestUserRef,
     },
     negotiate::{driver_direction, link_flow, link_rates, Negotiation},
     outcome,
@@ -46,7 +51,7 @@ use super::{
     repository, schedules, view,
 };
 use crate::{
-    models::{link_test_legs, link_tests},
+    models::{devices, link_test_legs, link_tests},
     services::{
         events::EventBus,
         network_tools::throughput::{
@@ -124,16 +129,43 @@ struct SampleBook {
 #[derive(Default)]
 struct BookInner {
     by_leg: HashMap<u32, Vec<LinkTestSample>>,
+    health: HashMap<u32, Vec<LinkTestHealthSample>>,
+    /// Início da medição de cada perna: o relógio comum de vazão e CPU.
+    clocks: HashMap<u32, Instant>,
     published: HashMap<(u32, LinkTestFlow), Instant>,
 }
 
+fn millis_since(start: Instant) -> u64 {
+    u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX)
+}
+
 impl SampleBook {
+    fn lock(&self) -> std::sync::MutexGuard<'_, BookInner> {
+        self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Zera o relógio da perna (o início da medição).
+    fn start_clock(&self, seq: u32) {
+        self.lock().clocks.entry(seq).or_insert_with(Instant::now);
+    }
+
+    /// Milissegundos desde o início da medição da perna.
+    fn clock(&self, seq: u32) -> Option<u64> {
+        self.lock().clocks.get(&seq).copied().map(millis_since)
+    }
+
     fn push(&self, seq: u32, flow: LinkTestFlow, bps: f64, t_ms: u64) {
+        let at_ms = self.clock(seq);
         let publish = {
-            let mut inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut inner = self.lock();
             let samples = inner.by_leg.entry(seq).or_default();
             if samples.iter().filter(|sample| sample.flow == flow).count() < MAX_SAMPLES_PER_FLOW {
-                samples.push(LinkTestSample { flow, bps, t_ms });
+                samples.push(LinkTestSample {
+                    flow,
+                    bps,
+                    t_ms,
+                    at_ms,
+                });
             }
             let now = Instant::now();
             let due = inner
@@ -154,19 +186,42 @@ impl SampleBook {
                     flow,
                     bps,
                     t_ms,
+                    at_ms,
                 },
             );
         }
     }
 
     fn of(&self, seq: u32) -> Vec<LinkTestSample> {
-        self.inner
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .by_leg
-            .get(&seq)
-            .cloned()
-            .unwrap_or_default()
+        self.lock().by_leg.get(&seq).cloned().unwrap_or_default()
+    }
+
+    /// Uma leitura de CPU/memória: guardada (com teto por equipamento) e
+    /// publicada — uma por segundo por equipamento, sem ritmo a aplicar.
+    fn push_health(&self, seq: u32, sample: LinkTestHealthSample) {
+        {
+            let mut inner = self.lock();
+            let list = inner.health.entry(seq).or_default();
+            let of_device = list
+                .iter()
+                .filter(|kept| kept.device_id == sample.device_id)
+                .count();
+            if of_device < MAX_HEALTH_PER_DEVICE {
+                list.push(sample);
+            }
+        }
+        events::publish_health(
+            self.bus.as_ref(),
+            LinkTestHealthEvent {
+                test_id: self.test_id,
+                leg_seq: seq,
+                sample,
+            },
+        );
+    }
+
+    fn health_of(&self, seq: u32) -> Vec<LinkTestHealthSample> {
+        self.lock().health.get(&seq).cloned().unwrap_or_default()
     }
 }
 
@@ -431,9 +486,11 @@ impl Job {
     async fn persist(&mut self, idx: usize) {
         let seq = self.plan[idx].view.seq;
         let samples = self.book.of(seq);
+        let health = self.book.health_of(seq);
         let row = &mut self.rows[idx];
         row.stages = json!(self.stages[idx]);
         row.samples = (!samples.is_empty()).then(|| json!(samples));
+        row.health = (!health.is_empty()).then(|| json!(health));
         match repository::save_leg(&self.env.db, row).await {
             Ok(saved) => *row = saved,
             Err(error) => {
@@ -892,13 +949,16 @@ impl Job {
                 );
             }
         }
+        let seq = planned.view.seq;
+        self.book.start_clock(seq);
+        let health = self.start_health(planned, seq).await;
         // Um sentido por vez, em todo motor. O btest até aceita os dois ao
         // mesmo tempo, mas num RouterOS real o "both" em TCP não devolve o
         // envio (tx 0) — e um sentido de cada vez mede melhor roteador de CPU
         // fraca, sem um sentido roubar CPU do outro.
         for (index, flow) in flows.into_iter().enumerate() {
             if self.cancelled() {
-                return;
+                break;
             }
             // A sessão armada da central é de uso único: o segundo sentido
             // arma outra para o mesmo equipamento.
@@ -917,6 +977,49 @@ impl Job {
             self.measure_call(idx, planned, n, served, target, auth, direction, &[flow])
                 .await;
         }
+        health.stop().await;
+    }
+
+    /// Começa a ler CPU/memória das pontas e dos equipamentos do caminho
+    /// (os que têm como ser lidos — SNMP ligado, ou a central).
+    async fn start_health(&self, planned: &PlannedLeg, seq: u32) -> HealthSampler {
+        let via = if planned.view.via_device_ids.is_empty() {
+            Vec::new()
+        } else {
+            devices::Entity::find()
+                .filter(devices::Column::Id.is_in(planned.view.via_device_ids.clone()))
+                .all(&self.env.db)
+                .await
+                .unwrap_or_default()
+        };
+        let mut targets: Vec<(i64, HealthTarget<'_>)> = Vec::new();
+        for endpoint in [&planned.a, &planned.b] {
+            if let (Some(device), Some(target)) =
+                (endpoint.device(), HealthTarget::of_endpoint(endpoint))
+            {
+                targets.push((device.id, target));
+            }
+        }
+        targets.extend(
+            via.iter()
+                .map(|device| (device.id, HealthTarget::Device(device))),
+        );
+        let mut readers = Vec::new();
+        for (device_id, target) in targets {
+            if readers.iter().any(|(id, _)| *id == device_id) {
+                continue;
+            }
+            if let Some(reader) = self.env.health.reader_for(target).await {
+                readers.push((device_id, reader));
+            }
+        }
+        let clock = Arc::clone(&self.book);
+        let sink = Arc::clone(&self.book);
+        HealthSampler::start(
+            readers,
+            move || clock.clock(seq).unwrap_or_default(),
+            Arc::new(move |sample| sink.push_health(seq, sample)),
+        )
     }
 
     /// Troca a sessão btest já usada por uma nova, para o mesmo IP. Outros

@@ -5,6 +5,10 @@
       <div>
         <div class="text-title-medium font-weight-bold">{{ headline }}</div>
         <div v-if="explanation" class="text-body-medium">{{ explanation }}</div>
+        <div v-if="cpuText" class="text-body-medium cpu-verdict">
+          <v-icon size="16" :color="cpuHigh ? 'warning' : 'success'">mdi-chip</v-icon>
+          {{ cpuText }}
+        </div>
       </div>
     </div>
 
@@ -23,6 +27,17 @@
         <strong>{{ compactBps(totals.reverse) }}</strong>
         <span class="total-sub">{{ reverseLabel }}</span>
       </div>
+    </div>
+
+    <div v-if="chart" class="chart">
+      <div v-if="chart.title" class="text-body-small font-weight-bold mb-1">{{ chart.title }}</div>
+      <LinkTestTrafficChart
+        :forward="chart.forward"
+        :reverse="chart.reverse"
+        :health="chart.health"
+        :names="names"
+        :order="order"
+      />
     </div>
 
     <ul v-if="rows.length > 1" class="rows" aria-label="Resultado por enlace">
@@ -101,6 +116,7 @@ import { computed } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useDevicesStore } from '@/stores/devices'
 import { useLinkTestRequestsStore, type LinkTestRequest } from '@/stores/linkTestRequests'
+import { useLinkTestsStore } from '@/stores/linkTests'
 import type { LinkTest } from '@/types/linkTests'
 import { formatPercent } from '@/utils/formatters'
 import {
@@ -118,10 +134,16 @@ import {
   resultVsSpeed,
 } from '@/utils/linkTests/results'
 import { missedLegs, perHopRequest, repeatRequest } from '@/utils/linkTests/resultView'
+import { cpuVerdict, healthSeries } from '@/utils/linkTests/health'
+import { HEALTH_HIGH_PERCENT } from '@/utils/topology/presentation'
+import LinkTestTrafficChart from './LinkTestTrafficChart.vue'
 
 const props = defineProps<{
   test: LinkTest
   speedOf: (edgeId: number) => number | null
+  /** Nome de cada equipamento do teste e a ordem do caminho (o gráfico). */
+  names: Readonly<Record<number, string>>
+  order: readonly number[]
 }>()
 
 const emit = defineEmits<{
@@ -132,6 +154,7 @@ const emit = defineEmits<{
 const auth = useAuthStore()
 const devices = useDevicesStore()
 const requests = useLinkTestRequestsStore()
+const linkTests = useLinkTestsStore()
 
 const status = computed(() => testStatusPresentation(props.test.status))
 
@@ -187,6 +210,39 @@ const rows = computed(() =>
     })
 )
 
+/**
+ * Vazão × CPU da perna que conta: a única, ou a do gargalo (com o nome dela).
+ * Sem amostra nenhuma (teste antigo, ou que não chegou a medir), nada.
+ */
+const chart = computed(() => {
+  const legs = props.test.legs
+  const leg = legs.length === 1 ? legs[0] : worst.value
+  if (!leg) return null
+  const forward = linkTests.samplesFor(props.test.id, leg.seq, 'forward')
+  const reverse = linkTests.samplesFor(props.test.id, leg.seq, 'reverse')
+  const health = linkTests.healthFor(props.test.id, leg.seq)
+  if (forward.length + reverse.length + health.length === 0) return null
+  return {
+    title: legs.length > 1 ? `Enlace mais lento: ${legTitle(leg)}` : null,
+    forward,
+    reverse,
+    health,
+  }
+})
+
+/** O processador explica o resultado? (CPU lido em todas as pernas.) */
+const cpuSeries = computed(() =>
+  healthSeries(
+    props.test.legs.flatMap((leg) => linkTests.healthFor(props.test.id, leg.seq)),
+    props.names,
+    props.order
+  )
+)
+const cpuText = computed(() => cpuVerdict(cpuSeries.value))
+const cpuHigh = computed(() =>
+  cpuSeries.value.some((item) => (item.peakCpu ?? 0) >= HEALTH_HIGH_PERCENT)
+)
+
 const missed = computed(() => missedLegs(props.test))
 /** O erro do teste, só quando as linhas do que não rodou não o dizem já. */
 const generalError = computed(() => {
@@ -221,6 +277,16 @@ function request(next: LinkTestRequest) {
   display: flex;
   align-items: flex-start;
   gap: 10px;
+}
+.cpu-verdict {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  margin-top: 2px;
+}
+.cpu-verdict .v-icon {
+  flex-shrink: 0;
+  margin-top: 3px;
 }
 .totals {
   display: grid;

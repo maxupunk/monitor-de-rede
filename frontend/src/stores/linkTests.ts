@@ -5,6 +5,8 @@ import { usePluginsStore } from '@/stores/plugins'
 import type {
   LinkTest,
   LinkTestFlow,
+  LinkTestHealthEvent,
+  LinkTestHealthSample,
   LinkTestInstallPackageFix,
   LinkTestKind,
   LinkTestPage,
@@ -24,11 +26,14 @@ import { packageInstallResult, type PackageInstallResult } from '@/utils/linkTes
  * aqui (plano, início, cancelamento, histórico, detalhe e agendamentos), e o
  * estado ao vivo chega só pelo SSE — `link_test:updated` (snapshot completo,
  * inclusive o inicial dos testes ativos), `link_test:sample` (amostra
- * efêmera) e `link_test_schedule:updated`. Nada aqui consulta a API sozinho.
+ * efêmera), `link_test:health` (CPU/memória das pontas enquanto mede) e
+ * `link_test_schedule:updated`. Nada aqui consulta a API sozinho.
  */
 
 /** Amostras guardadas por perna e sentido (2 min a uma por segundo). */
 export const SAMPLE_LIMIT = 120
+/** Leituras de CPU/memória guardadas por perna (todas as pontas juntas). */
+export const HEALTH_LIMIT = 480
 /** De quantos testes as amostras ficam em memória. */
 const SAMPLE_TESTS_LIMIT = 12
 /** Testes mantidos no cache (os ativos nunca saem). */
@@ -93,6 +98,25 @@ export function sampleKey(testId: number, legSeq: number, flow: LinkTestFlow): s
   return `${testId}:${legSeq}:${flow}`
 }
 
+const isPercent = (value: unknown) =>
+  value === null || (typeof value === 'number' && Number.isFinite(value))
+
+export function isHealthEvent(value: unknown): value is LinkTestHealthEvent {
+  return (
+    isRecord(value) &&
+    typeof value.testId === 'number' &&
+    typeof value.legSeq === 'number' &&
+    typeof value.deviceId === 'number' &&
+    typeof value.atMs === 'number' &&
+    isPercent(value.cpu) &&
+    isPercent(value.memory)
+  )
+}
+
+export function healthKey(testId: number, legSeq: number): string {
+  return `${testId}:${legSeq}`
+}
+
 /** Teste envolve o dispositivo (pedido ou ponta de alguma perna)? */
 export function involvesDevice(test: LinkTest, deviceId: number): boolean {
   return (
@@ -139,12 +163,13 @@ function queryOf(filters: LinkTestFilters): string {
 
 /** O snapshot do SSE não traz amostras; o detalhe traz. Não perde as que já temos. */
 function withoutSamples(test: LinkTest): LinkTest {
-  if (!test.legs.some((leg) => leg.samples !== undefined)) return test
+  if (!test.legs.some((leg) => leg.samples !== undefined || leg.health !== undefined)) return test
   return {
     ...test,
     legs: test.legs.map((leg) => {
       const copy = { ...leg }
       delete copy.samples
+      delete copy.health
       return copy
     }),
   }
@@ -155,6 +180,8 @@ export const useLinkTestsStore = defineStore('linkTests', () => {
   const tests = ref<Record<number, LinkTest>>({})
   /** Amostras ao vivo por `testId:legSeq:flow` (anel de `SAMPLE_LIMIT`). */
   const samples = ref<Record<string, LinkTestSample[]>>({})
+  /** CPU/memória ao vivo por `testId:legSeq` (todas as pontas da perna). */
+  const health = ref<Record<string, LinkTestHealthSample[]>>({})
   /** Momento (ms) da última notícia de cada teste — o "agora" do painel. */
   const lastActivity = ref<Record<number, number>>({})
 
@@ -208,6 +235,10 @@ export const useLinkTestsStore = defineStore('linkTests', () => {
 
   function samplesFor(testId: number, legSeq: number, flow: LinkTestFlow): LinkTestSample[] {
     return samples.value[sampleKey(testId, legSeq, flow)] ?? []
+  }
+
+  function healthFor(testId: number, legSeq: number): LinkTestHealthSample[] {
+    return health.value[healthKey(testId, legSeq)] ?? []
   }
 
   /** Último valor ao vivo do sentido, ou `null`. */
@@ -267,9 +298,17 @@ export const useLinkTestsStore = defineStore('linkTests', () => {
       }
     }
     samples.value = limitSampleTests(next)
+    const nextHealth = { ...health.value }
+    for (const leg of test.legs) {
+      if (!leg.health?.length) continue
+      nextHealth[healthKey(test.id, leg.seq)] = [...leg.health]
+        .sort((a, b) => a.atMs - b.atMs)
+        .slice(-HEALTH_LIMIT)
+    }
+    health.value = limitSampleTests(nextHealth)
   }
 
-  function limitSampleTests(next: Record<string, LinkTestSample[]>) {
+  function limitSampleTests<T>(next: Record<string, T>) {
     const testIds = [...new Set(Object.keys(next).map((key) => Number(key.split(':')[0])))].sort(
       (a, b) => a - b
     )
@@ -474,9 +513,31 @@ export const useLinkTestsStore = defineStore('linkTests', () => {
     if (last && data.tMs <= last.tMs) return
     const next = {
       ...samples.value,
-      [key]: [...list, { flow: data.flow, bps: data.bps, tMs: data.tMs }].slice(-SAMPLE_LIMIT),
+      [key]: [...list, { flow: data.flow, bps: data.bps, tMs: data.tMs, atMs: data.atMs }].slice(
+        -SAMPLE_LIMIT
+      ),
     }
     samples.value = limitSampleTests(next)
+    touch(data.testId)
+  }
+
+  /** `link_test:health` — CPU/memória de uma ponta enquanto a perna mede. */
+  function applyHealth(data: unknown) {
+    if (!isHealthEvent(data)) return
+    const key = healthKey(data.testId, data.legSeq)
+    const list = health.value[key] ?? []
+    // Repetida (reconexão): ignora.
+    if (list.some((kept) => kept.deviceId === data.deviceId && kept.atMs >= data.atMs)) return
+    const sample: LinkTestHealthSample = {
+      deviceId: data.deviceId,
+      atMs: data.atMs,
+      cpu: data.cpu,
+      memory: data.memory,
+    }
+    health.value = limitSampleTests({
+      ...health.value,
+      [key]: [...list, sample].slice(-HEALTH_LIMIT),
+    })
     touch(data.testId)
   }
 
@@ -489,6 +550,7 @@ export const useLinkTestsStore = defineStore('linkTests', () => {
   return {
     tests,
     samples,
+    health,
     page,
     pageFilters,
     pageLoading,
@@ -508,6 +570,7 @@ export const useLinkTestsStore = defineStore('linkTests', () => {
     latestForEdge,
     latestForDevice,
     samplesFor,
+    healthFor,
     liveBps,
     lastActivityAt,
     plan,
@@ -525,6 +588,7 @@ export const useLinkTestsStore = defineStore('linkTests', () => {
     focus,
     applyUpdated,
     applySample,
+    applyHealth,
     applyScheduleUpdated,
   }
 })

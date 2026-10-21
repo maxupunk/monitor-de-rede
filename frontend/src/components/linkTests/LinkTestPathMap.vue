@@ -13,7 +13,8 @@
  * Recorte do mapa com o caminho do teste: os equipamentos nas posições do
  * próprio mapa (com folga para os Mbps, `pathMapPositions`), o mesmo desenho
  * e a mesma animação (`useMiniTopology`). Só leitura. Na tela do teste:
- * pendente → medindo, com o fluxo animado → resultado em cada enlace.
+ * pendente → medindo, com o fluxo animado → resultado em cada enlace; sob o
+ * nome de cada equipamento, o CPU/RAM (o lido no teste, senão o do mapa).
  */
 import { computed, onMounted, ref } from 'vue'
 import { useMiniTopology } from '@/composables/linkTests/useMiniTopology'
@@ -31,8 +32,10 @@ const props = withDefaults(
     overlay?: LinkTestOverlay | null
     /** Teto da altura; o recorte cresce com o caminho até ele. */
     maxHeight?: number
+    /** CPU/RAM lidos no teste, por equipamento (no lugar da coleta do mapa). */
+    healthLabels?: Readonly<Record<number, string>>
   }>(),
-  { overlay: null, maxHeight: 560 }
+  { overlay: null, maxHeight: 560, healthLabels: () => ({}) }
 )
 
 const topology = useTopologyStore()
@@ -64,6 +67,8 @@ const elements = computed(() =>
     nodes: nodes.value,
     edges: edges.value,
     positions: positions.value,
+    showHealth: true,
+    healthLabels: props.healthLabels,
     overlay: {
       highlight: null,
       edgeOverlays: props.overlay?.edges ?? {},

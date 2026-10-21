@@ -78,6 +78,10 @@ describe('store do teste de enlace', () => {
             { flow: 'forward', bps: 1, tMs: 1000 },
             { flow: 'reverse', bps: 3, tMs: 1000 },
           ],
+          health: [
+            { deviceId: 2, atMs: 2000, cpu: 80, memory: 50 },
+            { deviceId: 2, atMs: 1000, cpu: 20, memory: 50 },
+          ],
         }),
       ],
     })
@@ -87,6 +91,9 @@ describe('store do teste de enlace', () => {
     expect(store.samplesFor(5, 1, 'forward').map((s) => s.bps)).toEqual([1, 2])
     expect(store.samplesFor(5, 1, 'reverse')).toHaveLength(1)
     expect(store.byId(5)?.legs[0].samples).toBeUndefined()
+    // CPU/RAM gravados semeiam o gráfico, em ordem; o cache fica sem eles.
+    expect(store.healthFor(5, 1).map((h) => h.cpu)).toEqual([20, 80])
+    expect(store.byId(5)?.legs[0].health).toBeUndefined()
   })
 
   it('SSE: link_test:updated atualiza o estado SEM consultar a API de novo', () => {

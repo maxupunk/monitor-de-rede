@@ -16,6 +16,7 @@ use loco_rs::app::AppContext;
 use sea_orm::DatabaseConnection;
 use tokio::sync::oneshot;
 
+use super::health::{DefaultHealthReaders, HealthReaders};
 use crate::{
     models::devices,
     services::{
@@ -181,6 +182,8 @@ pub struct LinkTestEnv {
     pub drivers: Arc<dyn DriverResolver>,
     pub btest: Arc<dyn BtestArmer>,
     pub central: Arc<dyn CentralAddress>,
+    /// CPU e memória das pontas durante a medição.
+    pub health: Arc<dyn HealthReaders>,
 }
 
 impl LinkTestEnv {
@@ -194,6 +197,7 @@ impl LinkTestEnv {
             drivers: Arc::new(DefaultDrivers { ctx: ctx.clone() }),
             btest: Arc::new(ServerArmer(BtestServer::from_context(ctx).ok())),
             central: Arc::new(ServerAddresses { ctx: ctx.clone() }),
+            health: Arc::new(DefaultHealthReaders::new(ctx.db.clone())),
         })
     }
 }

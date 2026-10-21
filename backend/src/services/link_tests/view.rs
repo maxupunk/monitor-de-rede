@@ -4,11 +4,14 @@
 use sea_orm::prelude::DateTimeWithTimeZone;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use super::model::{
-    from_db, LinkTest, LinkTestEndpoint, LinkTestEndpointKind, LinkTestKind, LinkTestLeg,
-    LinkTestLegKind, LinkTestOrigin, LinkTestPlanLeg, LinkTestSample, LinkTestSchedule,
-    LinkTestSide, LinkTestSpec, LinkTestStage, LinkTestStatus, LinkTestStepStatus, LinkTestSummary,
-    LinkTestUserRef,
+use super::{
+    health::LinkTestHealthSample,
+    model::{
+        from_db, LinkTest, LinkTestEndpoint, LinkTestEndpointKind, LinkTestKind, LinkTestLeg,
+        LinkTestLegKind, LinkTestOrigin, LinkTestPlanLeg, LinkTestSample, LinkTestSchedule,
+        LinkTestSide, LinkTestSpec, LinkTestStage, LinkTestStatus, LinkTestStepStatus,
+        LinkTestSummary, LinkTestUserRef,
+    },
 };
 use crate::models::{link_test_legs, link_test_schedules, link_tests};
 
@@ -127,6 +130,12 @@ pub fn leg(row: &link_test_legs::Model, with_samples: bool) -> LinkTestLeg {
             row.samples
                 .as_ref()
                 .map(|samples| json_or::<Vec<LinkTestSample>>(samples, Vec::new()))
+                .unwrap_or_default()
+        }),
+        health: with_samples.then(|| {
+            row.health
+                .as_ref()
+                .map(|health| json_or::<Vec<LinkTestHealthSample>>(health, Vec::new()))
                 .unwrap_or_default()
         }),
     }

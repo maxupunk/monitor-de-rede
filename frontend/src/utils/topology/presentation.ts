@@ -340,15 +340,17 @@ export const HEALTH_HIGH_PERCENT = 90
 /**
  * A linha de saúde sob o nome do nó: "CPU 37% · RAM 62%" (só o que há de
  * coleta recente). Uso alto ganha "⚠ " na frente — o anel do nó continua sendo
- * o estado do dispositivo. `null` sem coleta.
+ * o estado do dispositivo. `null` sem coleta. `peak`: o CPU é o máximo de um
+ * período (o teste de velocidade), "CPU máx 97%".
  */
 export function nodeHealthText(
-  node: Partial<Pick<TopologyNode, 'cpuPercent' | 'memoryPercent'>>
+  node: Partial<Pick<TopologyNode, 'cpuPercent' | 'memoryPercent'>>,
+  options: { peak?: boolean } = {}
 ): string | null {
   const parts: string[] = []
   const values: number[] = []
   if (typeof node.cpuPercent === 'number') {
-    parts.push(`CPU ${Math.round(node.cpuPercent)}%`)
+    parts.push(`CPU${options.peak ? ' máx' : ''} ${Math.round(node.cpuPercent)}%`)
     values.push(node.cpuPercent)
   }
   if (typeof node.memoryPercent === 'number') {

@@ -6,6 +6,8 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+pub use super::health::LinkTestHealthSample;
+
 use crate::services::{
     network_tools::throughput::{
         ThroughputEngine, MAX_DURATION_S, MAX_STREAMS, MIN_DURATION_S, MIN_STREAMS,
@@ -531,6 +533,12 @@ pub struct LinkTestSample {
     pub bps: f64,
     #[ts(type = "number")]
     pub t_ms: u64,
+    /// Instante no relógio da perna (desde o início da medição) — o mesmo de
+    /// `health[].atMs`, para desenhar vazão e CPU juntos. Ausente nas pernas
+    /// gravadas antes dele.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub at_ms: Option<u64>,
 }
 
 /// Uma perna com o andamento.
@@ -554,6 +562,10 @@ pub struct LinkTestLeg {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub samples: Option<Vec<LinkTestSample>>,
+    /// CPU e memória das pontas durante a medição. Só no `GET` de detalhe.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub health: Option<Vec<LinkTestHealthSample>>,
 }
 
 /// Resumo: o gargalo é a perna com a menor vazão entre as que mediram.
@@ -732,6 +744,9 @@ pub struct LinkTestSampleEvent {
     pub bps: f64,
     #[ts(type = "number")]
     pub t_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub at_ms: Option<u64>,
 }
 
 /// Evento `link_test_schedule:updated` — a tela relê a lista.
@@ -843,6 +858,7 @@ mod tests {
             started_at: None,
             finished_at: None,
             samples: None,
+            health: None,
         };
         let valor = serde_json::to_value(&perna).unwrap();
         assert_eq!(valor["kind"], "end_to_end");
