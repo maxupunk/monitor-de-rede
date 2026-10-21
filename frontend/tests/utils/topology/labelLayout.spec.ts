@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
-import { polylineBoxes, resolveLabelOverlaps, type LabelRect } from '@/utils/topology/labelLayout'
+import {
+  pathAnchors,
+  polylineBoxes,
+  quadraticPoints,
+  resolveLabelOverlaps,
+  type LabelRect,
+  type LabelShift,
+} from '@/utils/topology/labelLayout'
 
 const rect = (id: string, x: number, y: number, w = 120, h = 18): LabelRect => ({
   id,
@@ -14,18 +21,20 @@ function intersects(a: LabelRect, b: LabelRect): boolean {
   return a.x1 < b.x2 && b.x1 < a.x2 && a.y1 < b.y2 && b.y1 < a.y2
 }
 
-function apply(labels: LabelRect[], shifts: Map<string, number>): LabelRect[] {
+const STILL: LabelShift = { dx: 0, dy: 0 }
+
+function apply(labels: LabelRect[], shifts: Map<string, LabelShift>): LabelRect[] {
   return labels.map((l) => {
-    const dy = shifts.get(l.id) ?? 0
-    return { ...l, y1: l.y1 + dy, y2: l.y2 + dy }
+    const { dx, dy } = shifts.get(l.id) ?? STILL
+    return { ...l, x1: l.x1 + dx, x2: l.x2 + dx, y1: l.y1 + dy, y2: l.y2 + dy }
   })
 }
 
 describe('rótulos de enlace sem sobreposição', () => {
   it('rótulos que já não se tocam ficam onde estão', () => {
     const shifts = resolveLabelOverlaps([rect('a', 0, 0), rect('b', 300, 0)])
-    expect(shifts.get('a')).toBe(0)
-    expect(shifts.get('b')).toBe(0)
+    expect(shifts.get('a')).toEqual(STILL)
+    expect(shifts.get('b')).toEqual(STILL)
   })
 
   it('irmãos no mesmo barramento (o caso do mapa) se afastam e nenhum cobre o outro', () => {
@@ -35,8 +44,8 @@ describe('rótulos de enlace sem sobreposição', () => {
     const [a, b] = apply(labels, shifts)
     expect(intersects(a, b)).toBe(false)
     // O primeiro do aglomerado fica no lugar; o outro anda o mínimo (um passo).
-    expect(shifts.get('online')).toBe(0)
-    expect(Math.abs(shifts.get('assist') ?? 0)).toBeLessThanOrEqual(21)
+    expect(shifts.get('online')).toEqual(STILL)
+    expect(Math.abs(shifts.get('assist')?.dy ?? 0)).toBeLessThanOrEqual(21)
   })
 
   it('três empilhados viram uma coluna legível', () => {
@@ -69,7 +78,7 @@ describe('rótulos de enlace sem sobreposição', () => {
       y2: -400 + i * 20 + 20,
     }))
     const shifts = resolveLabelOverlaps([rect('preso', 10, 0)], wall)
-    expect(shifts.get('preso')).toBe(0)
+    expect(shifts.get('preso')).toEqual(STILL)
   })
 })
 
@@ -130,5 +139,93 @@ describe('escala do mapa', () => {
       for (let j = i + 1; j < Math.min(placed.length, i + 60); j++)
         if (intersects(placed[i], placed[j])) collisions++
     expect(collisions).toBeLessThan(placed.length * 0.05)
+  })
+})
+
+describe('rótulo desliza sobre o próprio enlace', () => {
+  /** Rótulo de 120×18 centrado em `center`, com os lugares ao longo de `path`. */
+  function onPath(id: string, path: { x: number; y: number }[], center: { x: number; y: number }) {
+    const label = rect(id, center.x - 60, center.y - 9)
+    return { ...label, along: pathAnchors(path, center) }
+  }
+  const centerOf = (l: LabelRect) => ({ x: (l.x1 + l.x2) / 2, y: (l.y1 + l.y2) / 2 })
+
+  it('pontos ao longo do traçado: o lugar atual primeiro, depois do meio para as pontas', () => {
+    const anchors = pathAnchors(
+      [
+        { x: 0, y: 0 },
+        { x: 100, y: 0 },
+      ],
+      { x: 50, y: 0 }
+    )
+    expect(anchors[0]).toEqual(STILL)
+    expect(anchors[1]).toEqual(STILL)
+    expect(anchors[2]).toEqual({ dx: -10, dy: 0 })
+    expect(anchors[3]).toEqual({ dx: 10, dy: 0 })
+    // Linha quebrada (barramento): o meio é pelo comprimento, não pelas pontas.
+    const bus = pathAnchors(
+      [
+        { x: 0, y: 0 },
+        { x: 0, y: 100 },
+        { x: 100, y: 100 },
+      ],
+      { x: 0, y: 0 }
+    )
+    expect(bus[1]).toEqual({ dx: 0, dy: 100 })
+  })
+
+  it('enlace horizontal com o meio coberto (BORDA → switch): anda na linha, não sai dela', () => {
+    // O rótulo de três linhas de um nó cobre o meio do enlace.
+    const path = [
+      { x: 0, y: 300 },
+      { x: 400, y: 300 },
+    ]
+    const nodeLabel = { x1: 140, x2: 260, y1: 280, y2: 340 }
+    const label = onPath('borda-switch', path, { x: 200, y: 300 })
+    const [moved] = apply([label], resolveLabelOverlaps([label], [nodeLabel]))
+    const at = centerOf(moved)
+    expect(at.y).toBe(300)
+    expect(moved.x2 <= nodeLabel.x1 || moved.x1 >= nodeLabel.x2).toBe(true)
+  })
+
+  it('barramento que passa sob o rótulo do nó (VM → BORDA): fica no traçado, não abaixo do outro nó', () => {
+    // BORDA em cima, VM embaixo à esquerda; o meio cai junto ao rótulo da BORDA.
+    const path = [
+      { x: 250, y: 345 },
+      { x: 250, y: 432 },
+      { x: 140, y: 432 },
+      { x: 140, y: 465 },
+    ]
+    const bordaLabel = { x1: 170, x2: 330, y1: 360, y2: 428 }
+    const vm = { x1: 60, x2: 225, y1: 465, y2: 585 }
+    const label = onPath('vm-borda', path, { x: 195, y: 432 })
+    const [moved] = apply([label], resolveLabelOverlaps([label], [bordaLabel, vm]))
+    const at = centerOf(moved)
+    const onLine =
+      (Math.abs(at.y - 432) < 0.01 && at.x >= 140 && at.x <= 250) ||
+      (Math.abs(at.x - 250) < 0.01 && at.y >= 345 && at.y <= 432) ||
+      (Math.abs(at.x - 140) < 0.01 && at.y >= 432 && at.y <= 465)
+    expect(onLine).toBe(true)
+    // Nunca abaixo do nó da VM, como acontecia com o deslize vertical.
+    expect(at.y).toBeLessThan(vm.y2)
+  })
+
+  it('sem lugar livre no traçado, fica no meio do enlace', () => {
+    const path = [
+      { x: 0, y: 0 },
+      { x: 200, y: 0 },
+    ]
+    const wall = { x1: -100, x2: 300, y1: -50, y2: 50 }
+    const label = onPath('preso', path, { x: 100, y: 0 })
+    expect(resolveLabelOverlaps([label], [wall]).get('preso')).toEqual(STILL)
+  })
+
+  it('curva amostrada passa pelas pontas e pelo meio da quadrática', () => {
+    const points = quadraticPoints({ x: 0, y: 0 }, { x: 50, y: 100 }, { x: 100, y: 0 }, 2)
+    expect(points).toEqual([
+      { x: 0, y: 0 },
+      { x: 50, y: 50 },
+      { x: 100, y: 0 },
+    ])
   })
 })

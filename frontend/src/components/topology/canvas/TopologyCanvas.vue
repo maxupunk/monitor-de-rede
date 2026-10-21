@@ -29,10 +29,14 @@ import { antsAnimator } from '@/utils/topology/ants'
 import { syncElements as applyElements } from '@/utils/topology/elementSync'
 import { parseElementId, type TopologyElement } from '@/utils/topology/elements'
 import {
+  pathAnchors,
   polylineBoxes,
+  quadraticPoints,
   resolveLabelOverlaps,
   type LabelRect,
+  type LabelShift,
   type Obstacle,
+  type Point,
 } from '@/utils/topology/labelLayout'
 import {
   buildStylesheet,
@@ -211,8 +215,8 @@ function routeEdges(core: Core, edges: EdgeCollection = core.edges()) {
 
 // --- Rótulos de enlace sem sobreposição ------------------------------------------
 
-/** Deslocamento vertical que o arranjo deu ao rótulo de um enlace. */
-const LABEL_DY = '_labelDy'
+/** Deslocamento que o arranjo deu ao rótulo de um enlace. */
+const LABEL_SHIFT = '_labelShift'
 let labelsFrame = 0
 
 /**
@@ -228,29 +232,50 @@ function scheduleLabels() {
   })
 }
 
-function labelDy(edge: EdgeSingular): number {
-  return (edge.scratch(LABEL_DY) as number | undefined) ?? 0
+function labelShift(edge: EdgeSingular): LabelShift {
+  return (edge.scratch(LABEL_SHIFT) as LabelShift | undefined) ?? { dx: 0, dy: 0 }
 }
 
-function setLabelDy(edge: EdgeSingular, dy: number) {
-  if (labelDy(edge) === dy) return
-  if (dy === 0) {
-    edge.removeStyle('text-margin-y')
-    edge.removeScratch(LABEL_DY)
+function setLabelShift(edge: EdgeSingular, shift: LabelShift) {
+  const current = labelShift(edge)
+  if (current.dx === shift.dx && current.dy === shift.dy) return
+  if (shift.dx === 0 && shift.dy === 0) {
+    edge.removeStyle('text-margin-x text-margin-y')
+    edge.removeScratch(LABEL_SHIFT)
   } else {
-    edge.style('text-margin-y', dy)
-    edge.scratch(LABEL_DY, dy)
+    edge.style({ 'text-margin-x': shift.dx, 'text-margin-y': shift.dy })
+    edge.scratch(LABEL_SHIFT, shift)
   }
 }
 
-/** Afasta os rótulos de enlace que se cobrem (ver `utils/topology/labelLayout`). */
+/** O traçado do enlace como linha quebrada: pontas, dobras ou a curva amostrada. */
+function edgePath(edge: EdgeSingular): Point[] {
+  const source = edge.sourceEndpoint()
+  const target = edge.targetEndpoint()
+  const bends = edge.segmentPoints()
+  if (bends?.length) return [source, ...bends, target]
+  const controls = edge.controlPoints()
+  if (controls?.length === 1) return quadraticPoints(source, controls[0], target)
+  return [source, ...(controls ?? []), target]
+}
+
+/**
+ * Afasta os rótulos de enlace que se cobrem, deslizando cada um sobre o
+ * próprio traçado (ver `utils/topology/labelLayout`).
+ */
 function layoutEdgeLabels(core: Core) {
   const labels: LabelRect[] = []
+  const paths = new Map<string, Point[]>()
+  core.edges().forEach((edge) => {
+    if (edge.id().startsWith('__') || !edge.visible()) return
+    paths.set(edge.id(), edgePath(edge))
+  })
   core.edges().forEach((edge) => {
     if (edge.id().startsWith('__')) return
     const text = String(edge.style('label') ?? '')
-    if (!text || !edge.visible()) {
-      setLabelDy(edge, 0)
+    const path = paths.get(edge.id())
+    if (!text || !path) {
+      setLabelShift(edge, { dx: 0, dy: 0 })
       return
     }
     const box = edge.boundingBox({
@@ -264,8 +289,10 @@ function layoutEdgeLabels(core: Core) {
     })
     if (!(box.w > 0)) return
     // A caixa já está deslocada pelo arranjo anterior: volta à posição base.
-    const dy = labelDy(edge)
-    labels.push({ id: edge.id(), x1: box.x1, x2: box.x2, y1: box.y1 - dy, y2: box.y2 - dy })
+    const { dx, dy } = labelShift(edge)
+    const base = { x1: box.x1 - dx, x2: box.x2 - dx, y1: box.y1 - dy, y2: box.y2 - dy }
+    const center = { x: (base.x1 + base.x2) / 2, y: (base.y1 + base.y2) / 2 }
+    labels.push({ id: edge.id(), ...base, along: pathAnchors(path, center) })
   })
   if (labels.length === 0) return
   const obstacles: Obstacle[] = core
@@ -275,17 +302,12 @@ function layoutEdgeLabels(core: Core) {
       const b = node.boundingBox({ includeLabels: true, includeOverlays: false })
       return { x1: b.x1, x2: b.x2, y1: b.y1, y2: b.y2 }
     })
-  // O traçado de cada enlace (pontas e dobras): um rótulo não fica sobre a
-  // linha de outro enlace — no barramento da árvore, a linha riscaria o texto.
-  core.edges().forEach((edge) => {
-    if (edge.id().startsWith('__') || !edge.visible()) return
-    const bends = edge.segmentPoints() ?? []
-    const points = [edge.sourceEndpoint(), ...bends, edge.targetEndpoint()]
-    obstacles.push(...polylineBoxes(points, edge.id()))
-  })
+  // O traçado de cada enlace: um rótulo não fica sobre a linha de outro
+  // enlace — no barramento da árvore, a linha riscaria o texto.
+  paths.forEach((points, id) => obstacles.push(...polylineBoxes(points, id)))
   const shifts = resolveLabelOverlaps(labels, obstacles)
   core.batch(() => {
-    shifts.forEach((dy, id) => setLabelDy(core.getElementById(id) as EdgeSingular, dy))
+    shifts.forEach((shift, id) => setLabelShift(core.getElementById(id) as EdgeSingular, shift))
   })
 }
 
