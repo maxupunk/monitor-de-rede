@@ -243,6 +243,13 @@ impl<'a> DeciderClient<'a> {
     /// Baixa o modelo configurado (o roteador `laya` baixa as duas variantes).
     pub async fn pull(&self) -> AppResult<ReceiverStream<ModelPullProgress>> {
         self.ensure_manages_models()?;
+        if catalog::is_bundled(&self.settings.model) {
+            return Err(AppError::validation(format!(
+                "{} não está no registro do Ollaya. {}",
+                self.settings.model,
+                catalog::BUNDLED_HINT
+            )));
+        }
         let key = self.settings.effective_api_key();
         local_models::stream_pull(PullTarget {
             url: self.url("/api/pull"),

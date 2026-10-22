@@ -7,8 +7,11 @@ import {
   isLocalOllaya,
   memoryLabel,
   benchmarkFact,
+  decisionsFact,
   isNearChance,
   modelFacts,
+  primaryScore,
+  RECOMMENDED_CPU_MODEL,
   providerMissing,
   timeoutForModel,
   usesCustomUrl,
@@ -40,6 +43,7 @@ const decider: DeciderModelSpecView = {
   accuracy: 0.361,
   suggestedTimeoutMs: 1500,
   recommended: true,
+  bundled: false,
 }
 
 const kev4b: DeciderModelSpecView = {
@@ -52,6 +56,7 @@ const kev4b: DeciderModelSpecView = {
   accuracy: 0.669,
   suggestedTimeoutMs: 2500,
   recommended: false,
+  bundled: false,
 }
 
 /** Publicado sem memória nem acerto (como o decision:eos). */
@@ -63,6 +68,7 @@ const semNumeros: DeciderModelSpecView = {
   gpuRecommended: false,
   suggestedTimeoutMs: 6000,
   recommended: false,
+  bundled: false,
 }
 
 describe('ficha do modelo', () => {
@@ -211,13 +217,32 @@ describe('teste público', () => {
   })
 
   it('perto do chute só abaixo de 60%', () => {
-    expect(isNearChance(laya)).toBe(true)
-    expect(isNearChance(kev08)).toBe(false)
+    expect(isNearChance(primaryScore(laya, null))).toBe(true)
+    expect(isNearChance(primaryScore(kev08, null))).toBe(false)
     expect(isNearChance(null)).toBe(false)
   })
+})
 
-  it('o padrão novo é o Kev 0.8B com o tempo dele', () => {
-    expect(defaultDeciderSettings().model).toBe('kev:0.8b')
+describe('benchmark do NetMonitor', () => {
+  const network = { overall: 0.919, p95Ms: 664 }
+  const kev08 = { accuracy: 0.631, portuguese: 0.619, latencyMs: 86 }
+
+  it('a nota das decisões do NetMonitor vale antes do teste público', () => {
+    expect(primaryScore(kev08, { overall: 0.693, p95Ms: 11052 })).toBe(0.693)
+    expect(primaryScore(kev08, null)).toBe(0.631)
+    expect(primaryScore(null, null)).toBeNull()
+  })
+
+  it('vira o primeiro chip da ficha, com a cor da régua', () => {
+    const facts = modelFacts(null, null, network)
+    expect(facts[0]?.label).toBe('NetMonitor 92% · 664 ms (p95, CPU)')
+    expect(decisionsFact(network).color).toBe('success')
+    expect(decisionsFact(network).short).toBe('92%')
+  })
+
+  it('o padrão é o Decima Network, que vem com o NetMonitor', () => {
+    expect(defaultDeciderSettings().model).toBe(RECOMMENDED_CPU_MODEL)
+    expect(RECOMMENDED_CPU_MODEL).toBe('netmonitor/decima-network:v4f')
     expect(defaultDeciderSettings().timeoutMs).toBe(4000)
   })
 })

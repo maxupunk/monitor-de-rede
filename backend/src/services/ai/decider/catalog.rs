@@ -21,9 +21,14 @@
 //! aqui, sem número solto por modelo. Nenhuma página cita português: "100+
 //! línguas" é o que separa multilíngue de inglês.
 
-use std::time::Duration;
+use std::{cmp::Reverse, time::Duration};
 
-use super::{benchmark::Benchmark, client::DeciderClient, config::AiDeciderSettings};
+use super::{
+    benchmark::{Benchmark, USEFUL_PERMILLE},
+    client::DeciderClient,
+    config::AiDeciderSettings,
+    decisions_benchmark,
+};
 use crate::{
     dtos::ai::{
         DeciderModelLanguage::{self, English, Multilingual},
@@ -68,6 +73,9 @@ pub struct ModelSpec {
     pub benchmark: Option<Benchmark>,
     /// Recomendado para o NetMonitor (um em CPU, um em GPU).
     pub recommended: bool,
+    /// Vem instalado com o NetMonitor (serviço `ollaya-models` do compose): não
+    /// está no registro do Ollaya, então não se baixa pela tela.
+    pub bundled: bool,
 }
 
 /// O que não muda de um modelo para outro; cada entrada diz só o que é dela.
@@ -85,6 +93,7 @@ const BASE: ModelSpec = ModelSpec {
     max_choice_options: None,
     benchmark: None,
     recommended: false,
+    bundled: false,
 };
 
 /// Medido em CPU pelo NetMonitor: com um modelo Laya carregado, de 3 a 4 GB.
@@ -130,18 +139,32 @@ impl ModelSpec {
         Duration::from_secs(secs.clamp(120, 900))
     }
 
-    /// Posição na lista, do menor e mais eficiente ao maior e menos
-    /// eficiente: primeiro os que o teste público aprovou (acima do chute),
-    /// do menor para o maior; depois os não avaliados; por fim os que ficaram
-    /// perto do chute.
+    /// A nota que recomenda e ordena, em milésimos: a do benchmark das
+    /// decisões do NetMonitor quando o modelo foi medido nele (as perguntas
+    /// reais, em CPU); senão a do teste público.
     #[must_use]
-    pub fn rank(&self) -> (u8, u32) {
-        let tier = match self.benchmark {
-            Some(benchmark) if benchmark.is_useful() => 0,
+    pub fn score_permille(&self) -> Option<u16> {
+        decisions_benchmark::result(self.name)
+            .map(decisions_benchmark::ModelResult::permille)
+            .or(self.benchmark.map(|benchmark| benchmark.accuracy_permille))
+    }
+
+    /// Posição na lista: primeiro os aprovados (nota acima do chute), da
+    /// maior nota para a menor; depois os não avaliados; por fim os que ficaram
+    /// perto do chute. Empate fica com o menor download.
+    #[must_use]
+    pub fn rank(&self) -> (u8, Reverse<u16>, u32) {
+        let score = self.score_permille();
+        let tier = match score {
+            Some(permille) if permille >= USEFUL_PERMILLE => 0,
             None => 1,
             Some(_) => 2,
         };
-        (tier, self.download_mb.unwrap_or(u32::MAX))
+        (
+            tier,
+            Reverse(score.unwrap_or(0)),
+            self.download_mb.unwrap_or(u32::MAX),
+        )
     }
 
     fn answers_to(&self, name: &str) -> bool {
@@ -162,6 +185,7 @@ impl ModelSpec {
             max_choice_options: self.max_choice_options,
             suggested_timeout_ms: self.suggested_timeout_ms(),
             recommended: self.recommended,
+            bundled: self.bundled,
         }
     }
 }
@@ -300,6 +324,19 @@ pub const KNOWN_MODELS: &[ModelSpec] = &[
         max_choice_options: Some(16),
         ..BASE
     },
+    // ── NetMonitor: ajustado nas decisões dele, o padrão ──
+    ModelSpec {
+        name: "netmonitor/decima-network:v4f",
+        aliases: &["decima-network", "netmonitor/decima-network"],
+        family: "Decima Network",
+        description: "Decima Network (NetMonitor): o decima:small ajustado nas decisões de rede do NetMonitor — 92% no benchmark dele, em português, e 0,3 s por decisão em CPU. Vem instalado com o NetMonitor",
+        language: Multilingual,
+        download_mb: Some(510),
+        latency_ms: 306,
+        recommended: true,
+        bundled: true,
+        ..BASE
+    },
     // ── Multilíngues leves para CPU ──
     ModelSpec {
         name: "decima:base",
@@ -332,11 +369,20 @@ pub const KNOWN_MODELS: &[ModelSpec] = &[
         accuracy_permille: Some(432),
         ..BASE
     },
+    ModelSpec {
+        name: "largha:150m-fp32",
+        aliases: &["largha"],
+        family: "Largha",
+        description: "Largha: mmBERT-small (144M), multilíngue e rápido em CPU, mas perto do chute nas decisões do NetMonitor",
+        language: Multilingual,
+        download_mb: Some(600),
+        latency_ms: 174,
+        ..BASE
+    },
     // ── Em inglês, leves para CPU ──
     ModelSpec {
         name: "kev:0.8b",
         benchmark: Some(Benchmark::new(631, 619, 86)),
-        recommended: true,
         family: "Kev",
         description: "Kev (Jared Palmer): Qwen3.5 0,8B — o melhor custo-benefício em CPU: o mais preciso abaixo de 1B no teste público, também em português",
         download_mb: Some(1_800),
@@ -587,6 +633,15 @@ fn same_tag(a: &str, b: &str) -> bool {
     normalize(a) == normalize(b)
 }
 
+/// O que fazer quando falta um modelo que vem com o NetMonitor.
+pub const BUNDLED_HINT: &str = "Ele vem com o NetMonitor e é instalado pelo serviço `ollaya-models`: rode `docker compose up -d ollaya-models` no servidor.";
+
+/// Vem instalado com o NetMonitor: não está no registro do Ollaya.
+#[must_use]
+pub fn is_bundled(model: &str) -> bool {
+    spec(model).is_some_and(|spec| spec.bundled)
+}
+
 /// A ficha do modelo, pelo nome ou por um apelido.
 #[must_use]
 pub fn spec(model: &str) -> Option<&'static ModelSpec> {
@@ -637,6 +692,7 @@ fn cloud_models(settings: &AiDeciderSettings) -> DeciderModelsResponse {
             installed: true,
             spec: None,
             benchmark: model.benchmark.map(|benchmark| benchmark.view()),
+            decisions: None,
         })
         .collect();
     if !settings.model.is_empty() && !options.iter().any(|option| option.name == settings.model) {
@@ -646,6 +702,7 @@ fn cloud_models(settings: &AiDeciderSettings) -> DeciderModelsResponse {
             installed: true,
             spec: None,
             benchmark: None,
+            decisions: None,
         });
     }
     DeciderModelsResponse {
@@ -685,6 +742,8 @@ pub async fn list(settings: &AiDeciderSettings) -> DeciderModelsResponse {
             installed: is_available(&installed, spec.name),
             spec: Some(spec.view()),
             benchmark: spec.benchmark.map(|benchmark| benchmark.view()),
+            decisions: decisions_benchmark::result(spec.name)
+                .map(decisions_benchmark::ModelResult::score_view),
         })
         .collect();
     options.sort_by_key(|option| spec(&option.name).map(ModelSpec::rank));
@@ -697,6 +756,8 @@ pub async fn list(settings: &AiDeciderSettings) -> DeciderModelsResponse {
                 installed: true,
                 spec: None,
                 benchmark: None,
+                decisions: decisions_benchmark::result(name)
+                    .map(decisions_benchmark::ModelResult::score_view),
             });
         }
     }
@@ -753,18 +814,20 @@ mod tests {
     }
 
     #[test]
-    fn padrao_e_o_kev_08b_em_cpu() {
+    fn padrao_e_o_decima_network_em_cpu_e_vem_instalado() {
         let padrao = spec(super::super::config::DEFAULT_DECIDER_MODEL).unwrap();
-        assert_eq!(padrao.name, "kev:0.8b");
-        assert!(padrao.recommended);
+        assert_eq!(padrao.name, "netmonitor/decima-network:v4f");
+        assert!(padrao.recommended && padrao.bundled);
         assert!(!padrao.gpu_recommended());
-        assert!(padrao
-            .benchmark
-            .is_some_and(|benchmark| benchmark.is_useful()));
-        assert_eq!(
-            padrao.suggested_timeout_ms(),
-            super::super::config::DEFAULT_DECIDER_TIMEOUT_MS,
-            "o tempo padrão da configuração é o sugerido para o padrão"
+        assert!(
+            padrao
+                .score_permille()
+                .is_some_and(|permille| permille >= 900),
+            "nota do benchmark das decisões do NetMonitor"
+        );
+        assert!(
+            padrao.suggested_timeout_ms() <= super::super::config::DEFAULT_DECIDER_TIMEOUT_MS,
+            "o padrão cabe no tempo padrão da configuração"
         );
     }
 
@@ -779,32 +842,46 @@ mod tests {
         assert!(recomendados.iter().any(|spec| spec.gpu_recommended()));
         assert!(
             recomendados.iter().all(|spec| spec
-                .benchmark
-                .is_some_and(|benchmark| benchmark.portuguese_permille >= 600)),
-            "recomendado acerta também em português no teste público"
+                .score_permille()
+                .is_some_and(|permille| permille >= 850)),
+            "recomendado tem nota alta (benchmark do NetMonitor ou teste público)"
+        );
+        assert!(
+            recomendados.iter().all(|spec| spec.language == Multilingual
+                || spec
+                    .benchmark
+                    .is_some_and(|benchmark| benchmark.portuguese_permille >= 600)),
+            "recomendado atende português"
         );
     }
 
     #[test]
-    fn lista_vai_do_menor_e_mais_eficiente_ao_maior_e_menos_eficiente() {
-        let mut nomes: Vec<&str> = KNOWN_MODELS.iter().map(|spec| spec.name).collect();
-        nomes.sort_by_key(|name| spec(name).map(ModelSpec::rank));
+    fn lista_vai_da_maior_nota_a_menor_e_os_perto_do_chute_no_fim() {
+        let mut ordem: Vec<&ModelSpec> = KNOWN_MODELS.iter().collect();
+        ordem.sort_by_key(|spec| spec.rank());
+        let nomes: Vec<&str> = ordem.iter().map(|spec| spec.name).collect();
         assert_eq!(
-            &nomes[..6],
-            [
-                "kev:0.8b",
-                "jeb:4b",
-                "decider:4b",
-                "kev:4b",
-                "clef:flash",
-                "kev:9b"
-            ],
-            "aprovados no teste, do menor ao maior"
+            &nomes[..2],
+            ["netmonitor/decima-network:v4f", "jeb:4b"],
+            "os recomendados abrem a lista"
         );
+        let aprovados: Vec<u16> = ordem
+            .iter()
+            .filter_map(|spec| spec.score_permille())
+            .take_while(|permille| *permille >= USEFUL_PERMILLE)
+            .collect();
         assert!(
-            nomes[nomes.len() - 4..]
+            aprovados.windows(2).all(|par| par[0] >= par[1]),
+            "aprovados da maior nota para a menor: {nomes:?}"
+        );
+        let primeiro_perto_do_chute = ordem
+            .iter()
+            .position(|spec| spec.score_permille().is_some_and(|p| p < USEFUL_PERMILLE))
+            .expect("há modelos perto do chute");
+        assert!(
+            ordem[primeiro_perto_do_chute..]
                 .iter()
-                .all(|name| name.starts_with("laya")),
+                .all(|spec| spec.score_permille().is_some_and(|p| p < USEFUL_PERMILLE)),
             "os perto do chute vão para o fim: {nomes:?}"
         );
     }

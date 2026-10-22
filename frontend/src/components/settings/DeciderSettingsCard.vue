@@ -90,7 +90,17 @@
                       recomendado
                     </v-chip>
                     <v-chip
-                      v-if="item.benchmark"
+                      v-if="item.decisions"
+                      size="x-small"
+                      variant="tonal"
+                      :color="decisionsFact(item.decisions).color"
+                      :title="`${decisionsFact(item.decisions).label} no benchmark do NetMonitor`"
+                      prepend-icon="mdi-podium"
+                    >
+                      {{ decisionsFact(item.decisions).short }}
+                    </v-chip>
+                    <v-chip
+                      v-else-if="item.benchmark"
                       size="x-small"
                       variant="tonal"
                       :color="benchmarkFact(item.benchmark).color"
@@ -155,6 +165,14 @@
               Carregar agora
             </v-btn>
           </template>
+          <v-chip
+            v-else-if="selectedSpec?.bundled"
+            color="warning"
+            variant="tonal"
+            prepend-icon="mdi-package-variant-closed"
+          >
+            Vem com o NetMonitor
+          </v-chip>
           <v-btn
             v-else-if="serverOnline && !deciderStore.pulling"
             color="warning"
@@ -167,9 +185,19 @@
           </v-btn>
         </v-col>
       </v-row>
+      <v-btn
+        variant="text"
+        color="primary"
+        size="small"
+        prepend-icon="mdi-podium"
+        class="mt-1 px-1"
+        :to="{ name: 'decider-benchmark' }"
+      >
+        Comparar os modelos no benchmark do NetMonitor
+      </v-btn>
 
       <!-- Ficha do modelo escolhido: o que pesa na escolha -->
-      <template v-if="selectedSpec || selectedBenchmark">
+      <template v-if="selectedSpec || selectedBenchmark || selectedDecisions">
         <div class="d-flex flex-wrap ga-1 mt-2">
           <v-chip
             v-for="fact in selectedFacts"
@@ -183,31 +211,51 @@
           </v-chip>
         </div>
         <v-alert
+          v-if="managesModels && serverOnline && selectedSpec?.bundled && !modelReady"
+          type="warning"
+          variant="tonal"
+          density="compact"
+          class="mt-2 text-body-2"
+        >
+          Este modelo vem com o NetMonitor e não está no registro do Ollaya: quem o instala é o
+          serviço <code>ollaya-models</code> do compose. No servidor, rode
+          <code>docker compose up -d ollaya-models</code> e atualize esta tela.
+        </v-alert>
+        <v-alert
           v-if="nearChance"
           type="warning"
           variant="tonal"
           density="compact"
           class="mt-2 text-body-2"
         >
-          No
-          <a :href="BENCHMARK_URL" target="_blank" rel="noopener" class="text-primary"
-            >teste público</a
-          >
-          (23 modelos, em inglês e português), este modelo acertou
-          {{ nearChance }} — perto de escolher no chute (~31%). Prefira <strong>kev:0.8b</strong> em
-          CPU ou <strong>jeb:4b</strong> com GPU.
+          <template v-if="selectedDecisions">
+            No benchmark das decisões do NetMonitor, este modelo fez
+          </template>
+          <template v-else>
+            No
+            <a :href="BENCHMARK_URL" target="_blank" rel="noopener" class="text-primary"
+              >teste público</a
+            >
+            (23 modelos, em inglês e português), este modelo acertou
+          </template>
+          {{ nearChance }} — perto de escolher no chute (~31%). Prefira
+          <strong>{{ RECOMMENDED_CPU_MODEL }}</strong> em CPU ou
+          <strong>{{ RECOMMENDED_GPU_MODEL }}</strong> com GPU.
         </v-alert>
         <v-alert
-          v-else-if="selectedSpec?.language === 'english' && !selectedBenchmark"
+          v-else-if="
+            selectedSpec?.language === 'english' && !selectedBenchmark && !selectedDecisions
+          "
           type="info"
           variant="tonal"
           density="compact"
           class="mt-2 text-body-2"
         >
-          Este modelo não declara português e não foi avaliado no teste público. O texto analisado
-          (perguntas do chat, logs, nomes) costuma estar em português: prefira um avaliado —
-          <strong>kev:0.8b</strong> em CPU ou <strong>jeb:4b</strong> com GPU — ou experimente com
-          perguntas reais em Avançado › Experimentar antes de ligar.
+          Este modelo não declara português e não foi avaliado. O texto analisado (perguntas do
+          chat, logs, nomes) costuma estar em português: prefira um avaliado —
+          <strong>{{ RECOMMENDED_CPU_MODEL }}</strong> em CPU ou
+          <strong>{{ RECOMMENDED_GPU_MODEL }}</strong> com GPU — ou experimente com perguntas reais
+          em Avançado › Experimentar antes de ligar.
         </v-alert>
         <v-alert
           v-if="selectedSpec?.gpuRecommended"
@@ -481,9 +529,14 @@ import type { DeciderTriageMode } from '@/bindings/DeciderTriageMode'
 import { formatElapsedMs, formatLatency, formatPercent } from '@/utils/formatters'
 import {
   BENCHMARK_URL,
+  RECOMMENDED_CPU_MODEL,
+  RECOMMENDED_GPU_MODEL,
   benchmarkFact,
+  decisionsFact,
   isLocalOllaya,
   isNearChance,
+  percent,
+  primaryScore,
   languageFact,
   memoryLabel,
   modelFacts,
@@ -622,11 +675,15 @@ const status = computed(() => {
 /** A ficha do modelo do formulário; `null` para um fora do catálogo. */
 const selectedSpec = computed(() => deciderStore.spec(form.value.model ?? ''))
 const selectedBenchmark = computed(() => deciderStore.benchmark(form.value.model ?? ''))
-const selectedFacts = computed(() => modelFacts(selectedSpec.value, selectedBenchmark.value))
-/** O acerto do modelo escolhido quando ele fica perto do chute; `null` quando não. */
-const nearChance = computed(() =>
-  isNearChance(selectedBenchmark.value) ? benchmarkFact(selectedBenchmark.value).short : null
+const selectedDecisions = computed(() => deciderStore.decisions(form.value.model ?? ''))
+const selectedFacts = computed(() =>
+  modelFacts(selectedSpec.value, selectedBenchmark.value, selectedDecisions.value)
 )
+/** O acerto do modelo escolhido quando ele fica perto do chute; `null` quando não. */
+const nearChance = computed(() => {
+  const score = primaryScore(selectedBenchmark.value, selectedDecisions.value)
+  return isNearChance(score) ? percent(score) : null
+})
 
 /** Avisa quando trocar de modelo mexeu no tempo máximo por pergunta. */
 const timeoutNote = ref<string | null>(null)

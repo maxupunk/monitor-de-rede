@@ -123,6 +123,11 @@ const routes = [
       },
       { path: 'settings', name: 'settings', component: () => import('../pages/SettingsPage.vue') },
       {
+        path: 'ai-benchmark',
+        name: 'decider-benchmark',
+        component: () => import('../pages/DeciderBenchmarkPage.vue'),
+      },
+      {
         path: 'users',
         name: 'users',
         component: () => import('../pages/UsersPage.vue'),

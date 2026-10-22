@@ -56,11 +56,16 @@ pub async fn test(
             Err(error) => return failure(false, false, error.to_string()),
         };
         if !catalog::is_available(&installed, &settings.model) {
+            let next_step = if catalog::is_bundled(&settings.model) {
+                catalog::BUNDLED_HINT
+            } else {
+                "Use \"Baixar modelo\"."
+            };
             return failure(
                 true,
                 false,
                 format!(
-                    "O Ollaya respondeu, mas o modelo '{}' não está instalado. Use \"Baixar modelo\".",
+                    "O Ollaya respondeu, mas o modelo '{}' não está instalado. {next_step}",
                     settings.model
                 ),
             );

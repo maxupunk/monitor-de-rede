@@ -1,9 +1,10 @@
 import type { AiDeciderSettings } from '@/bindings/AiDeciderSettings'
 import type { DeciderBenchmarkView } from '@/bindings/DeciderBenchmarkView'
+import type { DeciderDecisionsScoreView } from '@/bindings/DeciderDecisionsScoreView'
 import type { DeciderModelLanguage } from '@/bindings/DeciderModelLanguage'
 import type { DeciderProviderView } from '@/bindings/DeciderProviderView'
 import type { DeciderModelSpecView } from '@/bindings/DeciderModelSpecView'
-import { formatDecimalBytes, formatElapsedMs, formatPercent } from './formatters'
+import { formatDecimalBytes, formatElapsedMs, formatLatency, formatPercent } from './formatters'
 
 /**
  * Hosts que significam "o Ollaya roda nesta mesma máquina": o serviço do
@@ -50,32 +51,59 @@ export interface ModelFact {
 export const BENCHMARK_URL =
   'https://akitaonrails.com/2026/10/10/qual-modelo-de-decisao-classificador-de-ia-tipo-jev-e-melhor/'
 
+/** Os recomendados (`recommended` no catálogo do backend): um em CPU, um com GPU. */
+export const RECOMMENDED_CPU_MODEL = 'netmonitor/decima-network:v4f'
+export const RECOMMENDED_GPU_MODEL = 'jeb:4b'
+
 /** Abaixo disso o modelo fica perto do chute (~31% no teste) — mesma régua do backend. */
 const USEFUL_ACCURACY = 0.6
 const GOOD_ACCURACY = 0.85
 
-function percent(value: number): string {
+export function percent(value: number): string {
   return formatPercent(value * 100, 0)
+}
+
+/** A cor de uma nota (0–1): verde a partir de 85%, azul acima do chute, vermelho perto dele. */
+export function accuracyColor(value: number): ModelFact['color'] {
+  if (value >= GOOD_ACCURACY) return 'success'
+  if (value >= USEFUL_ACCURACY) return 'info'
+  return 'error'
 }
 
 /** O resultado no teste público: acerto geral e em português, com a sigla para a lista. */
 export function benchmarkFact(benchmark: DeciderBenchmarkView): ModelFact & { short: string } {
-  let color: ModelFact['color'] = 'error'
-  if (benchmark.accuracy >= GOOD_ACCURACY) color = 'success'
-  else if (benchmark.accuracy >= USEFUL_ACCURACY) color = 'info'
   return {
     label: `Acerto ${percent(benchmark.accuracy)} · PT ${percent(benchmark.portuguese)}`,
     short: percent(benchmark.accuracy),
-    color,
+    color: accuracyColor(benchmark.accuracy),
     icon: 'mdi-target',
   }
 }
 
-/** Acertou tão pouco no teste público que fica perto de escolher no chute. */
-export function isNearChance(
-  benchmark: DeciderBenchmarkView | null | undefined
-): benchmark is DeciderBenchmarkView {
-  return benchmark != null && benchmark.accuracy < USEFUL_ACCURACY
+/** A nota no benchmark das decisões do NetMonitor, com a sigla para a lista. */
+export function decisionsFact(score: DeciderDecisionsScoreView): ModelFact & { short: string } {
+  return {
+    label: `NetMonitor ${percent(score.overall)} · ${formatLatency(score.p95Ms)} (p95, CPU)`,
+    short: percent(score.overall),
+    color: accuracyColor(score.overall),
+    icon: 'mdi-podium',
+  }
+}
+
+/**
+ * A nota que vale para a escolha: a das decisões do NetMonitor quando o modelo
+ * foi medido nelas, senão a do teste público — a mesma regra do backend.
+ */
+export function primaryScore(
+  benchmark: DeciderBenchmarkView | null | undefined,
+  decisions: DeciderDecisionsScoreView | null | undefined
+): number | null {
+  return decisions?.overall ?? benchmark?.accuracy ?? null
+}
+
+/** A nota fica tão baixa que o modelo está perto de escolher no chute. */
+export function isNearChance(score: number | null | undefined): score is number {
+  return score != null && score < USEFUL_ACCURACY
 }
 
 /** A língua do modelo, com a sigla curta para a lista. */
@@ -92,13 +120,18 @@ export function languageFact(language: DeciderModelLanguage): ModelFact & { shor
  */
 export function modelFacts(
   spec: DeciderModelSpecView | null,
-  benchmark?: DeciderBenchmarkView | null
+  benchmark?: DeciderBenchmarkView | null,
+  decisions?: DeciderDecisionsScoreView | null
 ): ModelFact[] {
   const facts: ModelFact[] = []
+  if (decisions) {
+    const { label, color, icon } = decisionsFact(decisions)
+    facts.push({ label, color, icon })
+  }
   if (benchmark) {
     const { label, color, icon } = benchmarkFact(benchmark)
     facts.push({ label, color, icon })
-  } else if (spec) {
+  } else if (spec && !decisions) {
     const { label, color, icon } = languageFact(spec.language)
     facts.push({ label, color, icon })
     if (spec.accuracy != null) {

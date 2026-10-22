@@ -384,6 +384,11 @@ const navItems = computed<NavItem[]>(() => [
         to: '/ai-chat',
       },
       {
+        title: 'Benchmark dos modelos',
+        icon: 'mdi-podium',
+        to: '/ai-benchmark',
+      },
+      {
         title: 'Playbooks',
         icon: 'mdi-clipboard-play-outline',
         click: () => {

@@ -7,9 +7,10 @@ use super::providers::{self, DeciderProvider, DecisionProtocol, ProviderPreset};
 
 /// O serviço `ollaya` do `docker-compose.yml`, na rede interna.
 pub const DEFAULT_DECIDER_BASE_URL: &str = "http://ollaya:11435";
-/// O roteador: escolhe `laya:en` ou `laya:multilingual` pela língua da pergunta.
-/// O melhor custo-benefício em CPU no teste público (`decider::benchmark`).
-pub const DEFAULT_DECIDER_MODEL: &str = "kev:0.8b";
+/// O ajustado nas decisões do NetMonitor: a maior nota no benchmark delas
+/// (`decider::decisions_benchmark`) e 0,3 s por decisão em CPU. Vem instalado
+/// com o NetMonitor (serviço `ollaya-models` do compose).
+pub const DEFAULT_DECIDER_MODEL: &str = "netmonitor/decima-network:v4f";
 /// Probabilidade mínima (%) para um grupo de ferramentas entrar.
 pub const DEFAULT_DECIDER_MIN_CONFIDENCE: u8 = 60;
 /// Tempo máximo de uma decisão. Estourou, o chat segue sem ela.

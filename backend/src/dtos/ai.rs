@@ -299,6 +299,89 @@ pub struct DeciderModelOption {
     #[serde(default)]
     #[ts(optional)]
     pub benchmark: Option<DeciderBenchmarkView>,
+    /// Nota no benchmark das decisões do NetMonitor, quando medido nele.
+    #[serde(default)]
+    #[ts(optional)]
+    pub decisions: Option<DeciderDecisionsScoreView>,
+}
+
+/// Nota de um modelo no benchmark das decisões do NetMonitor
+/// (`decider::decisions_benchmark`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeciderDecisionsScoreView {
+    /// Nota geral (0–1): média das seis decisões, cada uma pesando igual.
+    pub overall: f64,
+    /// 95% das decisões responderam até aqui, em CPU.
+    pub p95_ms: f64,
+}
+
+/// Uma decisão do NetMonitor avaliada no benchmark.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeciderBenchmarkTask {
+    pub id: String,
+    pub label: String,
+}
+
+/// A nota de um modelo numa decisão.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeciderBenchmarkTaskScore {
+    pub task: String,
+    /// 0–1.
+    pub score: f64,
+}
+
+/// Um modelo na página de benchmark.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeciderBenchmarkRow {
+    pub model: String,
+    /// Da ficha do catálogo; `None` para um modelo fora dele.
+    #[serde(default)]
+    #[ts(optional)]
+    pub family: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub description: Option<String>,
+    pub recommended: bool,
+    pub gpu_recommended: bool,
+    /// Vem instalado com o NetMonitor (serviço `ollaya-models`).
+    pub bundled: bool,
+    /// Nota geral (0–1) e o intervalo de confiança de 90%.
+    pub overall: f64,
+    pub overall_low: f64,
+    pub overall_high: f64,
+    /// Nota contando só as sugestões que a tela mostra (confiança mínima).
+    pub screen: f64,
+    pub tasks: Vec<DeciderBenchmarkTaskScore>,
+    pub p50_ms: f64,
+    pub p95_ms: f64,
+    /// Fração das decisões acima do tempo máximo (0–1): nelas o NetMonitor
+    /// segue sem a decisão.
+    pub over_timeout: f64,
+}
+
+/// `GET /api/ai/decider/benchmark` — os modelos medidos nas decisões do
+/// NetMonitor, do mais preciso ao menos.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../frontend/src/bindings/")]
+pub struct DeciderBenchmarkReport {
+    /// Data da medição (AAAA-MM-DD).
+    pub measured_on: String,
+    pub hardware: String,
+    /// Casos (perguntas reais do NetMonitor) em que todos foram medidos.
+    pub cases: u32,
+    /// Tempo máximo por decisão usado na medição.
+    pub timeout_ms: u32,
+    pub tasks: Vec<DeciderBenchmarkTask>,
+    pub models: Vec<DeciderBenchmarkRow>,
 }
 
 /// Resultado no teste público (`decider::benchmark`).
@@ -360,6 +443,10 @@ pub struct DeciderModelSpecView {
     pub suggested_timeout_ms: u32,
     /// O recomendado da família.
     pub recommended: bool,
+    /// Vem instalado com o NetMonitor (serviço `ollaya-models`): não se baixa
+    /// do registro do Ollaya.
+    #[serde(default)]
+    pub bundled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

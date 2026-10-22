@@ -42,4 +42,9 @@ suggestedTimeoutMs: number,
 /**
  * O recomendado da família.
  */
-recommended: boolean, };
+recommended: boolean, 
+/**
+ * Vem instalado com o NetMonitor (serviço `ollaya-models`): não se baixa
+ * do registro do Ollaya.
+ */
+bundled: boolean, };

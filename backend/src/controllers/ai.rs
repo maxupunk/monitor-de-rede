@@ -23,8 +23,8 @@ use crate::{
     services::{
         ai::{
             decider::{
-                catalog, client::DeciderClient, config::AiDeciderSettings, diagnostics, providers,
-                runtime::DeciderRuntime,
+                catalog, client::DeciderClient, config::AiDeciderSettings, decisions_benchmark,
+                diagnostics, providers, runtime::DeciderRuntime,
             },
             drivers::{create_driver, openai_compatible::OpenAiCompatibleDriver, traits::AiDriver},
             harness::{
@@ -397,6 +397,14 @@ async fn list_decider_models(
     Ok(format::json(catalog::list(&decider).await)?)
 }
 
+/// `GET /api/ai/decider/benchmark` — os modelos medidos nas decisões do
+/// NetMonitor, para a página de benchmark.
+async fn show_decider_benchmark() -> AppResult<Response> {
+    let report = decisions_benchmark::report()
+        .ok_or_else(|| AppError::NotFound("benchmark dos modelos indisponível".into()))?;
+    Ok(format::json(report)?)
+}
+
 /// `POST /api/ai/decider/test` — o Ollaya responde, o modelo está lá, e o que ele
 /// decide para a pergunta de exemplo.
 async fn test_decider(
@@ -497,6 +505,7 @@ pub fn routes() -> Routes {
         .add("/decider", get(show_decider).put(update_decider))
         .add("/decider/providers", get(list_decider_providers))
         .add("/decider/models", post(list_decider_models))
+        .add("/decider/benchmark", get(show_decider_benchmark))
         .add("/decider/test", post(test_decider))
         .add("/decider/pull", post(pull_decider_model))
         .add("/decider/load", post(load_decider_model))

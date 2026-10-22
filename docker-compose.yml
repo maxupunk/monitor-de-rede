@@ -265,9 +265,13 @@ services:
   # sem tokens). Sobe sempre junto — parado, sem modelo carregado, ocupa
   # ~150 MB. Só pesa quando o Decisor é ligado em Configurações → IA e um
   # modelo é carregado; `OLLAYA_KEEP_ALIVE` o descarrega depois do tempo
-  # ocioso. Quanto pesa depende do modelo, que a tela lista do menor e mais
-  # eficiente ao maior, pelo teste público de 10/10/2026. Em resumo:
-  #   - kev:0.8b (padrão): 1,8 GB, o melhor custo-benefício em CPU (63%);
+  # ocioso. Quanto pesa depende do modelo, que a tela lista pela nota no
+  # benchmark do NetMonitor (página Benchmark dos modelos) e, sem ela, pelo
+  # teste público de 10/10/2026. Em resumo:
+  #   - netmonitor/decima-network:v4f (padrão): 0,5 GB, ajustado nas decisões
+  #     do NetMonitor — 92% no benchmark dele, 0,3 s por decisão em CPU. Vem
+  #     instalado pelo serviço `ollaya-models` (abaixo);
+  #   - kev:0.8b: 1,8 GB, 69% no benchmark do NetMonitor, segundos em CPU;
   #   - jeb:4b: 4,6 GB, o melhor com GPU (90,5%, 89% em português);
   #   - kev:4b, decider:4b, kev:9b…: de 8 a 20 GB e GPU — em CPU cada pergunta
   #     do chat espera segundos;
@@ -300,6 +304,26 @@ services:
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+
+  # Instala no volume do Ollaya os modelos que vêm com o NetMonitor
+  # (`docker/ollaya-models/`, hoje o netmonitor/decima-network:v4f) e sai. Roda
+  # a cada `up`: modelo já instalado não baixa nada, todo blob é conferido pelo
+  # sha256 e o manifesto vai por último — o Ollaya só lista modelo completo.
+  # Os pesos vêm de `docker/ollaya-models/<modelo>/blobs/` quando estão lá
+  # (instalação sem internet) ou de `DECIDER_MODELS_URL`.
+  ollaya-models:
+    build: ./docker/ollaya-models
+    image: netmonitor-ollaya-models:latest
+    environment:
+      DECIDER_MODELS_URL: ${DECIDER_MODELS_URL:-https://github.com/maxupunk/monitor-de-rede/releases/download/decider-models}
+    volumes:
+      - ollaya-models:/ollaya
+    restart: 'no'
     logging:
       driver: json-file
       options:

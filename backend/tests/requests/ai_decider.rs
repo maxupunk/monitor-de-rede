@@ -84,11 +84,15 @@ async fn autocomplete_junta_catalogo_e_instalados() {
             .map(|option| option.name.as_str())
             .collect();
         // O roteador `laya` casa com a variante instalada; os dois vão para o
-        // fim da lista (perto do chute no teste público), do menor ao maior.
+        // fim da lista (perto do chute), da maior nota para a menor.
         assert_eq!(installed, ["laya:multilingual", "laya"]);
         assert_eq!(
-            models.options[0].name, "kev:0.8b",
+            models.options[0].name, "netmonitor/decima-network:v4f",
             "o recomendado em CPU abre a lista"
+        );
+        assert!(
+            models.options[0].decisions.is_some(),
+            "com a nota do benchmark do NetMonitor"
         );
         assert!(models
             .options

@@ -5,14 +5,16 @@ import type { AiDeciderSettings } from '@/bindings/AiDeciderSettings'
 import type { DeciderModelOption } from '@/bindings/DeciderModelOption'
 import type { DeciderProvider } from '@/bindings/DeciderProvider'
 import type { DeciderProviderView } from '@/bindings/DeciderProviderView'
+import type { DeciderBenchmarkReport } from '@/bindings/DeciderBenchmarkReport'
 import type { DeciderBenchmarkView } from '@/bindings/DeciderBenchmarkView'
+import type { DeciderDecisionsScoreView } from '@/bindings/DeciderDecisionsScoreView'
 import type { DeciderModelSpecView } from '@/bindings/DeciderModelSpecView'
 import type { DeciderModelsResponse } from '@/bindings/DeciderModelsResponse'
 import type { ModelPullProgress } from '@/bindings/ModelPullProgress'
 import type { TestDeciderResponse } from '@/bindings/TestDeciderResponse'
 import { streamModelPull } from '@/utils/modelPull'
 
-export type { AiDeciderSettings, DeciderModelOption, TestDeciderResponse }
+export type { AiDeciderSettings, DeciderBenchmarkReport, DeciderModelOption, TestDeciderResponse }
 
 /**
  * Estado do modelo na memória do Ollaya, pelo evento `laya:model_state`.
@@ -44,7 +46,7 @@ export function defaultDeciderSettings(): AiDeciderSettings {
     provider: 'ollaya',
     customProtocol: 'systemone',
     baseUrl: 'http://ollaya:11435',
-    model: 'kev:0.8b',
+    model: 'netmonitor/decima-network:v4f',
     minConfidence: 60,
     timeoutMs: 4000,
     features: {
@@ -165,6 +167,30 @@ export const useAiDeciderStore = defineStore('aiDecider', () => {
   /** O resultado no teste público; `null` para quem não foi avaliado. */
   function benchmark(model: string): DeciderBenchmarkView | null {
     return option(model)?.benchmark ?? null
+  }
+
+  /** A nota no benchmark das decisões do NetMonitor; `null` para quem não foi medido. */
+  function decisions(model: string): DeciderDecisionsScoreView | null {
+    return option(model)?.decisions ?? null
+  }
+
+  /** A página de benchmark: os modelos medidos nas decisões do NetMonitor. */
+  const benchmarkReport = ref<DeciderBenchmarkReport | null>(null)
+  const loadingBenchmark = ref(false)
+  const benchmarkError = ref<string | null>(null)
+
+  /** Consulta pontual ao abrir a página; o resultado não muda sem nova versão. */
+  async function loadBenchmark(): Promise<void> {
+    if (benchmarkReport.value || loadingBenchmark.value) return
+    loadingBenchmark.value = true
+    benchmarkError.value = null
+    try {
+      benchmarkReport.value = await apiService.get<DeciderBenchmarkReport>('/ai/decider/benchmark')
+    } catch (err) {
+      benchmarkError.value = errorMessage(err, 'Falha ao carregar o benchmark dos modelos')
+    } finally {
+      loadingBenchmark.value = false
+    }
   }
 
   /**
@@ -292,6 +318,11 @@ export const useAiDeciderStore = defineStore('aiDecider', () => {
     installed,
     spec,
     benchmark,
+    decisions,
+    benchmarkReport,
+    loadingBenchmark,
+    benchmarkError,
+    loadBenchmark,
     modelState,
     inMemory,
     applyModelState,
