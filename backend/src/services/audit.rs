@@ -7,8 +7,8 @@
 use axum::http::HeaderMap;
 use chrono::{DateTime, Utc};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter,
-    QueryOrder, Set,
+    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DatabaseConnection, EntityTrait,
+    QueryFilter, QueryOrder, Set,
 };
 use serde_json::Value;
 
@@ -18,6 +18,7 @@ use crate::{
     services::shared::{
         errors::{AppError, AppResult},
         pagination::{normalize_limit, normalize_page, paginate, PaginatedResponse},
+        sql_like,
     },
 };
 
@@ -271,6 +272,8 @@ pub struct AuditFilters {
     pub action: Option<String>,
     pub from: Option<DateTime<Utc>>,
     pub to: Option<DateTime<Utc>>,
+    /// Texto na descrição ou no nome do recurso, sem caixa (exato para ASCII).
+    pub search: Option<String>,
 }
 
 /// Service de auditoria.
@@ -353,6 +356,19 @@ impl<'a, C: ConnectionTrait> AuditService<'a, C> {
         }
         if let Some(to) = filters.to {
             query = query.filter(audit_logs::Column::CreatedAt.lte(to));
+        }
+        if let Some(search) = filters.search.as_deref().filter(|text| !text.is_empty()) {
+            query = query.filter(
+                Condition::any()
+                    .add(sql_like::contains_ignore_case(
+                        audit_logs::Column::Description,
+                        search,
+                    ))
+                    .add(sql_like::contains_ignore_case(
+                        audit_logs::Column::ResourceLabel,
+                        search,
+                    )),
+            );
         }
 
         query = query.order_by_desc(audit_logs::Column::CreatedAt);

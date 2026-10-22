@@ -18,7 +18,9 @@
 //! - [`docker`]: containers da central e dos agentes remotos (estado e
 //!   consumo, sem variáveis de ambiente).
 //! - [`platform`]: o próprio NetMonitor — agentes, VPN, topologia, descoberta,
-//!   redes, manutenção, auditoria e notificações.
+//!   redes, manutenção e notificações.
+//! - [`audit`]: a trilha de auditoria — quem mudou o quê e quando, com o
+//!   antes/depois, para achar a alteração que precedeu um problema.
 //! - [`ask`]: a IA pergunta ao usuário antes de prosseguir.
 //! - [`plugins`]: plugins de dispositivo — acessar o equipamento (SSH/HTTP),
 //!   criar, testar e executar scripts. Todo acesso passa pelo usuário.
@@ -30,6 +32,7 @@ mod alert_rules;
 mod analysis;
 mod args;
 mod ask;
+mod audit;
 mod charts;
 mod diagnostics;
 mod docker;
@@ -108,11 +111,12 @@ pub enum ToolGroup {
     AlertRules,
     Platform,
     Devices,
+    Audit,
 }
 
 impl ToolGroup {
     /// Os grupos que podem ser carregados sob demanda, na ordem do catálogo.
-    pub const DEFERRED: [Self; 10] = [
+    pub const DEFERRED: [Self; 11] = [
         Self::History,
         Self::Analysis,
         Self::Charts,
@@ -123,6 +127,7 @@ impl ToolGroup {
         Self::Actions,
         Self::AlertRules,
         Self::Devices,
+        Self::Audit,
     ];
 
     #[must_use]
@@ -139,6 +144,7 @@ impl ToolGroup {
             Self::AlertRules => "alert_rules",
             Self::Platform => "platform",
             Self::Devices => "devices",
+            Self::Audit => "audit",
         }
     }
 
@@ -157,6 +163,7 @@ impl ToolGroup {
             Self::AlertRules => "regras de alerta",
             Self::Platform => "agentes, VPN, topologia, descoberta e redes",
             Self::Devices => "equipamento por SSH/HTTP e plugins",
+            Self::Audit => "auditoria: quem mudou o quê",
         }
     }
 
@@ -176,7 +183,8 @@ impl ToolGroup {
             Self::Actions => "The user wants to change something: acknowledge or silence an alert, schedule maintenance or create a monitor.",
             Self::AlertRules => "The message is about alert rules: where an alert comes from, thresholds, or creating, deleting or toggling a rule.",
             Self::Platform => "The message is about monitoring agents, the VPN, network topology, discovery or networks.",
-            Self::Devices => "The user wants to access a device over SSH or its web interface, run a command or change a setting on it, install a package, or create, test or use a device plugin, driver or script.",
+            Self::Devices => "The user wants to access a device over SSH or its web interface, run a command or change a setting on it, install a package, or list, create, test or use a device plugin, app, driver or script.",
+            Self::Audit => "The message is about the audit log: who changed what and when, or which configuration change came before a problem.",
         }
     }
 
@@ -511,6 +519,7 @@ fn all_handlers() -> Vec<Box<dyn AiToolHandler>> {
         Box::new(docker::DockerContainerAction),
         Box::new(platform::PlatformStatus),
         Box::new(platform::Topology),
+        Box::new(audit::AuditLog),
         Box::new(inventory::SearchDocs),
         Box::new(diagnostics::Ping),
         Box::new(diagnostics::Traceroute),
@@ -529,6 +538,7 @@ fn all_handlers() -> Vec<Box<dyn AiToolHandler>> {
         Box::new(alert_rules::ToggleAlertRule),
         Box::new(plugins::AuthoringGuide),
         Box::new(plugins::ListDevicePlugins),
+        Box::new(plugins::ListPluginApps),
         Box::new(plugins::GetPlugin),
         Box::new(plugins::RunPluginTests),
         Box::new(plugins::FingerprintDevice),

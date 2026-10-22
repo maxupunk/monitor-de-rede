@@ -48,6 +48,7 @@ async fn index(
         action: query.action,
         from: query.from,
         to: query.to,
+        search: None,
     };
 
     let page = AuditService::new(&ctx.db)

@@ -9,5 +9,6 @@ pub mod pagination;
 pub mod run_guard;
 pub mod runtime;
 pub mod secret_file;
+pub mod sql_like;
 pub mod text;
 pub mod transaction;

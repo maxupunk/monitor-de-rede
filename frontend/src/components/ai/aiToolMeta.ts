@@ -152,6 +152,7 @@ const TOOL_META: Record<string, AiToolLook> = {
     color: 'blue-grey',
   },
   get_topology: { label: 'Topologia', icon: 'mdi-sitemap-outline', color: 'blue-grey' },
+  get_audit_log: { label: 'Auditoria', icon: 'mdi-history', color: 'blue-grey' },
   get_plugin_authoring_guide: {
     label: 'Guia de Plugins',
     icon: 'mdi-book-cog-outline',
@@ -162,6 +163,7 @@ const TOOL_META: Record<string, AiToolLook> = {
     icon: 'mdi-puzzle-outline',
     color: 'primary',
   },
+  list_plugin_apps: { label: 'Aplicativos e Plugins', icon: 'mdi-apps', color: 'primary' },
   get_plugin: { label: 'Leitura de Plugin', icon: 'mdi-puzzle-outline', color: 'primary' },
   run_plugin_tests: { label: 'Testes do Plugin', icon: 'mdi-test-tube', color: 'info' },
   fingerprint_device: {

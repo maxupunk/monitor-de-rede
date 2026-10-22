@@ -138,7 +138,6 @@ const HINTS: &[(ToolGroup, &[&str])] = &[
             "cidr",
             "vlan",
             "site",
-            "auditor",
             "notifica",
             "telegram",
             "email",
@@ -212,7 +211,13 @@ const HINTS: &[(ToolGroup, &[&str])] = &[
             "credencia",
             "http",
             "web",
+            "aplicativ",
+            "apps",
         ],
+    ),
+    (
+        ToolGroup::Audit,
+        &["auditor", "audit", "alterac", "alterou", "alterad"],
     ),
 ];
 
@@ -455,6 +460,18 @@ mod tests {
         assert!(preselect_groups("o agente da filial está conectado?", &[])
             .contains(&ToolGroup::Platform));
         assert!(preselect_groups("quais dispositivos estão offline?", &[]).is_empty());
+        let auditoria = preselect_groups(
+            "verifica na auditoria se após alguma alteração começou o AP-STA-DISCONNECTED",
+            &[],
+        );
+        assert!(auditoria.contains(&ToolGroup::Audit));
+        assert!(
+            !auditoria.contains(&ToolGroup::Platform),
+            "auditoria tem grupo próprio"
+        );
+        assert!(
+            preselect_groups("lista de aplicativos no sistema", &[]).contains(&ToolGroup::Devices)
+        );
 
         let container = AiMention {
             kind: AiMentionKind::Container,

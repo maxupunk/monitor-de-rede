@@ -26,11 +26,11 @@
 
 use async_trait::async_trait;
 use sea_orm::{
-    sea_query::{Expr, ExprTrait, Func, LikeExpr, SimpleExpr},
+    sea_query::{Expr, ExprTrait, SimpleExpr},
     ConnectionTrait, DatabaseBackend, DatabaseConnection, Statement,
 };
 
-use crate::models::logs::device_logs;
+use crate::{models::logs::device_logs, services::shared::sql_like};
 
 /// Acima de quantos casamentos o termo é considerado denso.
 ///
@@ -56,33 +56,19 @@ pub trait LogSearch: Send + Sync {
 pub struct LikeSearch;
 
 impl LikeSearch {
-    /// `%` e `_` do usuário são escapados: sem isso, procurar `pppoe_client`
-    /// casaria com `pppoe-client` e `pppoeXclient`, porque o `_` do SQL vale
-    /// por qualquer caractere — e sublinhado é corriqueiro em texto de log.
+    /// A mensagem contém o termo, com `%` e `_` do usuário escapados
+    /// ([`sql_like::contains`]).
     #[must_use]
     pub fn expr(termo: &str) -> SimpleExpr {
-        let escapado = termo
-            .replace('\\', "\\\\")
-            .replace('%', "\\%")
-            .replace('_', "\\_");
-        Expr::col(device_logs::Column::Message)
-            .like(LikeExpr::new(format!("%{escapado}%")).escape('\\'))
+        sql_like::contains(device_logs::Column::Message, termo)
     }
 
-    /// Substring sem caixa, com o mesmo resultado em SQLite e PostgreSQL:
-    /// `LOWER(message) LIKE '%termo%'`. O `LIKE` puro difere entre eles (o do
-    /// SQLite ignora caixa ASCII, o do Postgres não). Só é exato para termo
-    /// ASCII — o `LOWER` do SQLite não dobra acentos —, então quem chama deve
-    /// usá-lo como pré-filtro apenas nesse caso.
+    /// Substring sem caixa na mensagem ([`sql_like::contains_ignore_case`]).
+    /// Só é exata para termo ASCII, então quem chama deve usá-la como
+    /// pré-filtro apenas nesse caso.
     #[must_use]
     pub fn contains_ignore_case(termo: &str) -> SimpleExpr {
-        let escapado = termo
-            .to_lowercase()
-            .replace('\\', "\\\\")
-            .replace('%', "\\%")
-            .replace('_', "\\_");
-        Expr::expr(Func::lower(Expr::col(device_logs::Column::Message)))
-            .like(LikeExpr::new(format!("%{escapado}%")).escape('\\'))
+        sql_like::contains_ignore_case(device_logs::Column::Message, termo)
     }
 }
 

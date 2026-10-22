@@ -26,7 +26,7 @@ use crate::{
         plugins::{
             actions, auto_accept,
             effect::{self, Effect},
-            fingerprint,
+            fingerprint, fleet,
             package::PluginPackage,
             runs::{self, AdHocRequest, AdHocSpec, Origin, RunSpec, VALIDATION_ACTION},
             service::{self, source},
@@ -284,6 +284,74 @@ impl AiToolHandler for ListDevicePlugins {
                 "ready": credential.has_stored_secret || credential.session_active,
             })).collect::<Vec<_>>(),
             "agents": view.agents,
+        })))
+    }
+}
+
+pub struct ListPluginApps;
+
+/// Descrição de plugin na lista: o bastante para escolher, sem o manifesto.
+const LIST_DESCRIPTION_CHARS: usize = 160;
+
+#[async_trait]
+impl AiToolHandler for ListPluginApps {
+    fn name(&self) -> &'static str {
+        "list_plugin_apps"
+    }
+
+    fn description(&self) -> &'static str {
+        "Aplicativos e plugins do sistema: os aplicativos (páginas /apps/{id}, plugins de frota que agem em vários equipamentos, com quantos membros) e todos os plugins cadastrados (/plugins: versão, status, escopo, origem e ações). 'search' filtra por nome, slug ou descrição. O conteúdo de um plugin (manifesto e script) vem de get_plugin."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "search": { "type": "string", "description": "Parte do nome, slug ou descrição" }
+            }
+        })
+    }
+
+    fn group(&self) -> ToolGroup {
+        ToolGroup::Devices
+    }
+
+    async fn execute(&self, ctx: &AppContext, args: &ToolArgs) -> AppResult<ToolOutput> {
+        let needle = args.text("search").map(|text| text.to_lowercase());
+        let wanted = |texts: &[Option<&str>]| {
+            needle.as_deref().is_none_or(|needle| {
+                texts
+                    .iter()
+                    .flatten()
+                    .any(|text| text.to_lowercase().contains(needle))
+            })
+        };
+        let apps = fleet::apps(&ctx.db).await?;
+        let plugins = service::list(&ctx.db).await?;
+        Ok(ToolOutput::data(json!({
+            "apps": apps.iter()
+                .filter(|app| wanted(&[Some(&app.title), Some(&app.slug), app.description.as_deref()]))
+                .map(|app| json!({
+                    "id": app.id,
+                    "slug": app.slug,
+                    "title": app.title,
+                    "description": app.description.as_deref().map(|text| truncate_chars(text, LIST_DESCRIPTION_CHARS)),
+                    "members": app.members,
+                    "page": format!("/apps/{}", app.id),
+                })).collect::<Vec<_>>(),
+            "plugins": plugins.iter()
+                .filter(|plugin| wanted(&[Some(&plugin.name), Some(&plugin.slug), plugin.description.as_deref()]))
+                .map(|plugin| json!({
+                    "id": plugin.id,
+                    "slug": plugin.slug,
+                    "name": plugin.name,
+                    "version": plugin.version,
+                    "status": plugin.status,
+                    "scope": plugin.scope,
+                    "source": plugin.source,
+                    "description": plugin.description.as_deref().map(|text| truncate_chars(text, LIST_DESCRIPTION_CHARS)),
+                    "actions": plugin.actions.iter().map(|action| action.id.as_str()).collect::<Vec<_>>(),
+                })).collect::<Vec<_>>(),
         })))
     }
 }

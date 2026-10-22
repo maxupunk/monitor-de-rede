@@ -313,12 +313,14 @@ mod tests {
     use crate::services::ai::harness::{compaction::estimate_tokens, tools::ToolGroups};
 
     /// O que toda pergunta de verdade paga em cada rodada, antes de qualquer
-    /// dado: o system prompt e o núcleo de ferramentas. Medido em 2.589
-    /// tokens (era 3.038, depois 2.795). Subir o teto é decisão, não acidente:
-    /// cada token a mais aqui se paga em toda rodada de toda pergunta.
+    /// dado: o system prompt e o núcleo de ferramentas. Medido em 2.675
+    /// tokens (era 3.038, depois 2.795 e 2.589). Subir o teto é decisão, não
+    /// acidente: cada token a mais aqui se paga em toda rodada de toda
+    /// pergunta. Última subida (2.650 → 2.700): o grupo `audit` e a
+    /// `list_plugin_apps` no catálogo, ~25 tokens.
     #[test]
     fn custo_fixo_por_rodada_cabe_no_orcamento() {
-        const BUDGET: u64 = 2_650;
+        const BUDGET: u64 = 2_700;
         let settings = AiSettings {
             action_mode: AiAutomationMode::Auto,
             container_actions: AiAutomationMode::Auto,

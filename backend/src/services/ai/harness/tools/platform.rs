@@ -1,10 +1,10 @@
 //! O próprio NetMonitor como objeto de diagnóstico: agentes remotos, VPN,
-//! topologia, descoberta, redes, janelas de manutenção, auditoria e
-//! notificações.
+//! topologia, descoberta, redes, janelas de manutenção e notificações. A
+//! trilha de auditoria tem grupo próprio ([`super::audit`]).
 //!
 //! Uma ferramenta com `area` em vez de uma por domínio: cada schema vai em
-//! toda rodada depois de carregado, e oito contratos quase iguais custariam
-//! oito vezes mais para a IA escolher entre eles. Tudo é leitura, e nada que
+//! toda rodada depois de carregado, e sete contratos quase iguais custariam
+//! sete vezes mais para a IA escolher entre eles. Tudo é leitura, e nada que
 //! seja segredo sai daqui (token, chave privada, senha de canal).
 
 use std::collections::HashMap;
@@ -21,14 +21,13 @@ use super::{
 };
 use crate::{
     models::_entities::{
-        discovery_results, discovery_runs, dns_servers, networks, notification_outbox, sites, users,
+        discovery_results, discovery_runs, dns_servers, networks, notification_outbox, sites,
     },
     services::{
         agents::{
             hub::AgentHub,
             service::{to_view, AgentService},
         },
-        audit::{AuditFilters, AuditService},
         discovery::service::ScanSessionService,
         maintenance_windows,
         shared::errors::AppResult,
@@ -37,13 +36,12 @@ use crate::{
     },
 };
 
-const AREAS: [&str; 7] = [
+const AREAS: [&str; 6] = [
     "agents",
     "vpn",
     "discovery",
     "networks",
     "maintenance",
-    "audit",
     "notifications",
 ];
 const DEFAULT_LIMIT: i64 = 20;
@@ -77,7 +75,7 @@ impl AiToolHandler for PlatformStatus {
     fn description(&self) -> &'static str {
         "Estado do próprio NetMonitor por área: 'agents' (agentes remotos: conexão, versão, host), 'vpn' (servidor WireGuard e peers: handshake, tráfego), \
 'discovery' (varreduras recentes e em andamento), 'networks' (redes/CIDR, sites e servidores DNS), 'maintenance' (janelas ativas e futuras), \
-'audit' (quem mudou o quê, com hours) e 'notifications' (envios recentes, pendentes e suprimidos, com hours)."
+e 'notifications' (envios recentes, pendentes e suprimidos, com hours)."
     }
 
     fn parameters(&self) -> Value {
@@ -85,7 +83,7 @@ impl AiToolHandler for PlatformStatus {
             "type": "object",
             "properties": {
                 "area": { "type": "string", "enum": AREAS },
-                "hours": { "type": "integer", "description": "Janela para audit, notifications e discovery (1 a 720, padrão 24)" },
+                "hours": { "type": "integer", "description": "Janela para notifications e discovery (1 a 720, padrão 24)" },
                 "limit": { "type": "integer", "description": "Itens na lista (1 a 50, padrão 20)" }
             },
             "required": ["area"]
@@ -104,7 +102,6 @@ impl AiToolHandler for PlatformStatus {
             "discovery" => discovery(ctx, since, limit).await?,
             "networks" => networks_overview(ctx, limit).await?,
             "maintenance" => maintenance(ctx, limit).await?,
-            "audit" => audit(ctx, since, limit).await?,
             "notifications" => notifications(ctx, since, limit).await?,
             _ => {
                 return Ok(ToolOutput::not_found(format!(
@@ -311,38 +308,6 @@ async fn maintenance(ctx: &AppContext, limit: usize) -> AppResult<Value> {
     Ok(json!({
         "active": active.iter().take(limit).map(row).collect::<Vec<_>>(),
         "upcoming": upcoming.iter().take(limit).map(row).collect::<Vec<_>>(),
-    }))
-}
-
-async fn audit(ctx: &AppContext, since: DateTime<Utc>, limit: usize) -> AppResult<Value> {
-    let page = AuditService::new(&ctx.db)
-        .list(
-            AuditFilters {
-                from: Some(since),
-                ..AuditFilters::default()
-            },
-            Some(1),
-            Some(limit as u64),
-        )
-        .await?;
-    let user_ids: Vec<i64> = page.data.iter().filter_map(|entry| entry.user_id).collect();
-    let user_names: HashMap<i64, String> = users::Entity::find()
-        .filter(users::Column::Id.is_in(user_ids))
-        .all(&ctx.db)
-        .await?
-        .into_iter()
-        .map(|user| (user.id, user.name))
-        .collect();
-    Ok(json!({
-        "total": page.meta.total,
-        "entries": page.data.iter().map(|entry| json!({
-            "at": rfc3339(&entry.created_at),
-            "user": entry.user_id.and_then(|id| user_names.get(&id)),
-            "action": entry.action,
-            "resource": entry.resource_type,
-            "target": entry.resource_label,
-            "description": entry.description,
-        })).collect::<Vec<_>>(),
     }))
 }
 
