@@ -242,7 +242,7 @@ describe('benchmark do NetMonitor', () => {
 
   it('o padrão é o Decima Network, que vem com o NetMonitor', () => {
     expect(defaultDeciderSettings().model).toBe(RECOMMENDED_CPU_MODEL)
-    expect(RECOMMENDED_CPU_MODEL).toBe('netmonitor/decima-network:v4f')
+    expect(RECOMMENDED_CPU_MODEL).toBe('netmonitor/decima-network:v5')
     expect(defaultDeciderSettings().timeoutMs).toBe(4000)
   })
 })

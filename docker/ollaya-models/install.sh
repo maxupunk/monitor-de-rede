@@ -2,7 +2,7 @@
 # Instala no volume do Ollaya os modelos de decisão que vêm com o NetMonitor.
 #
 # Cada pasta aqui é um modelo, como o Laya-tuning o empacota (`laya-tuning bundle`):
-#   model          nome no Ollaya (`ollaya.dev/netmonitor/decima-network:v4f`)
+#   model          nome no Ollaya (`ollaya.dev/netmonitor/decima-network:v5`)
 #   manifest.json  o manifesto, gravado por último — o Ollaya só lista modelo completo
 #   layers.tsv     `digest<TAB>tamanho<TAB>url` de cada blob (config + camadas)
 #   blobs/         opcional: os blobs sem URL (os pesos ajustados), para instalar

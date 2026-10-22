@@ -268,10 +268,10 @@ services:
   # ocioso. Quanto pesa depende do modelo, que a tela lista pela nota no
   # benchmark do NetMonitor (página Benchmark dos modelos) e, sem ela, pelo
   # teste público de 10/10/2026. Em resumo:
-  #   - netmonitor/decima-network:v4f (padrão): 0,5 GB, ajustado nas decisões
-  #     do NetMonitor — 92% no benchmark dele, 0,3 s por decisão em CPU. Vem
+  #   - netmonitor/decima-network:v5 (padrão): 0,5 GB, ajustado nas decisões
+  #     do NetMonitor — 92% no benchmark dele, 0,5 s por decisão em CPU. Vem
   #     instalado pelo serviço `ollaya-models` (abaixo);
-  #   - kev:0.8b: 1,8 GB, 69% no benchmark do NetMonitor, segundos em CPU;
+  #   - kev:0.8b: 1,8 GB, 68% no benchmark do NetMonitor, segundos em CPU;
   #   - jeb:4b: 4,6 GB, o melhor com GPU (90,5%, 89% em português);
   #   - kev:4b, decider:4b, kev:9b…: de 8 a 20 GB e GPU — em CPU cada pergunta
   #     do chat espera segundos;
@@ -311,7 +311,7 @@ services:
         max-file: '3'
 
   # Instala no volume do Ollaya os modelos que vêm com o NetMonitor
-  # (`docker/ollaya-models/`, hoje o netmonitor/decima-network:v4f) e sai. Roda
+  # (`docker/ollaya-models/`, hoje o netmonitor/decima-network:v5) e sai. Roda
   # a cada `up`: modelo já instalado não baixa nada, todo blob é conferido pelo
   # sha256 e o manifesto vai por último — o Ollaya só lista modelo completo.
   # Os pesos vêm de `docker/ollaya-models/<modelo>/blobs/` quando estão lá

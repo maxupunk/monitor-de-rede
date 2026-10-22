@@ -52,7 +52,7 @@ export const BENCHMARK_URL =
   'https://akitaonrails.com/2026/10/10/qual-modelo-de-decisao-classificador-de-ia-tipo-jev-e-melhor/'
 
 /** Os recomendados (`recommended` no catálogo do backend): um em CPU, um com GPU. */
-export const RECOMMENDED_CPU_MODEL = 'netmonitor/decima-network:v4f'
+export const RECOMMENDED_CPU_MODEL = 'netmonitor/decima-network:v5'
 export const RECOMMENDED_GPU_MODEL = 'jeb:4b'
 
 /** Abaixo disso o modelo fica perto do chute (~31% no teste) — mesma régua do backend. */

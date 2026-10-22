@@ -745,9 +745,9 @@ texto. Ele roda no container opcional `ollaya` (que sobe com o
 `docker compose up`; o peso depende do modelo e a tela avisa ao ligar), num
 Ollaya em outra máquina ou num serviço na nuvem (TypeSafe, OpenRouter,
 Cloudflare, OpenAI; ver `providers.rs`). O padrão é o
-`netmonitor/decima-network:v4f`: o `decima:small` ajustado nas decisões do
-NetMonitor (projeto Laya-tuning), com 92% no benchmark delas e 0,3 s por
-decisão em CPU. Ele não está no registro do Ollaya: vem no pacote
+`netmonitor/decima-network:v5`: o `decima:small` ajustado nas decisões do
+NetMonitor e nas perguntas reais do chat (projeto Laya-tuning), com 92% no
+benchmark delas e 0,5 s por decisão em CPU. Ele não está no registro do Ollaya: vem no pacote
 `docker/ollaya-models/` e o serviço `ollaya-models` do compose o instala no
 volume do Ollaya a cada `up` (sha256 conferido, manifesto por último). A ordem
 e a recomendação da tela usam primeiro a nota no benchmark das decisões do

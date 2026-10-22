@@ -326,13 +326,13 @@ pub const KNOWN_MODELS: &[ModelSpec] = &[
     },
     // ── NetMonitor: ajustado nas decisões dele, o padrão ──
     ModelSpec {
-        name: "netmonitor/decima-network:v4f",
+        name: "netmonitor/decima-network:v5",
         aliases: &["decima-network", "netmonitor/decima-network"],
         family: "Decima Network",
-        description: "Decima Network (NetMonitor): o decima:small ajustado nas decisões de rede do NetMonitor — 92% no benchmark dele, em português, e 0,3 s por decisão em CPU. Vem instalado com o NetMonitor",
+        description: "Decima Network (NetMonitor): o decima:small ajustado nas decisões de rede do NetMonitor e nas perguntas reais do chat — 92% no benchmark dele, em português, e 0,5 s por decisão em CPU. Vem instalado com o NetMonitor",
         language: Multilingual,
         download_mb: Some(510),
-        latency_ms: 306,
+        latency_ms: 521,
         recommended: true,
         bundled: true,
         ..BASE
@@ -816,7 +816,7 @@ mod tests {
     #[test]
     fn padrao_e_o_decima_network_em_cpu_e_vem_instalado() {
         let padrao = spec(super::super::config::DEFAULT_DECIDER_MODEL).unwrap();
-        assert_eq!(padrao.name, "netmonitor/decima-network:v4f");
+        assert_eq!(padrao.name, "netmonitor/decima-network:v5");
         assert!(padrao.recommended && padrao.bundled);
         assert!(!padrao.gpu_recommended());
         assert!(
@@ -862,7 +862,7 @@ mod tests {
         let nomes: Vec<&str> = ordem.iter().map(|spec| spec.name).collect();
         assert_eq!(
             &nomes[..2],
-            ["netmonitor/decima-network:v4f", "jeb:4b"],
+            ["netmonitor/decima-network:v5", "jeb:4b"],
             "os recomendados abrem a lista"
         );
         let aprovados: Vec<u16> = ordem
