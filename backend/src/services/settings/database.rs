@@ -304,6 +304,9 @@ pub async fn clear_all_items(
 
     realign_sequences_after_clear(&txn).await?;
     txn.commit().await?;
+    // Os ids recomeçam: a linha de base guardada do monitor 1 de antes não
+    // pode valer para o monitor 1 que vier depois.
+    crate::services::alerts::baseline::clear_cache();
 
     devolver_disco_sqlite(db).await;
     if let Some(logs) = logs_db {

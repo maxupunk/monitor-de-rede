@@ -240,6 +240,9 @@ async fn analises_sem_historico_respondem_sem_inventar() {
         let mon = ping(&ctx, dev.id).await;
         checagem(&ctx, mon.id, 1, "up").await;
 
+        // A linha de base fica num cache do processo, por id de monitor: o
+        // monitor 1 deste teste não pode herdar a de outro teste do mesmo id.
+        backend::services::alerts::baseline::clear_cache();
         let registro = ToolRegistry::new(LEITURA);
         let baseline = registro
             .execute(&ctx, "compare_with_baseline", r#"{"device": "borda"}"#)
