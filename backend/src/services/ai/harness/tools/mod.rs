@@ -27,6 +27,7 @@
 //! - [`risk`]: o risco de cada chamada, que decide se o modo automático roda
 //!   ou pergunta.
 
+mod access;
 mod actions;
 mod alert_rules;
 mod analysis;

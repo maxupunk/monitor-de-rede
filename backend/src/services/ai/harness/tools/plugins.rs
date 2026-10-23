@@ -11,16 +11,16 @@
 //! Operar plugin é coisa de administrador (a mesma régua das rotas HTTP);
 //! quem conversa sem esse perfil recebe o motivo como dado.
 
-use std::str::FromStr;
-
 use async_trait::async_trait;
 use loco_rs::prelude::AppContext;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use serde_json::{json, Value};
 
-use super::{lookup::find_device, AiToolHandler, ToolArgs, ToolGroup, ToolKind, ToolOutput};
+use super::{
+    access, lookup::find_device, AiToolHandler, ToolArgs, ToolGroup, ToolKind, ToolOutput,
+};
 use crate::{
-    models::{devices, plugins as plugin_rows, users},
+    models::{devices, plugins as plugin_rows},
     services::{
         ai::knowledge::PLUGIN_AUTHORING_GUIDE,
         plugins::{
@@ -110,22 +110,13 @@ fn declared_effect(args: &ToolArgs) -> Effect {
 
 /// Só administrador opera plugin — a mesma regra das rotas HTTP.
 async fn require_admin(ctx: &AppContext, args: &ToolArgs) -> AppResult<i64> {
-    let user_id = args
-        .actor()
-        .user_id
-        .ok_or_else(|| AppError::forbidden("Usuário não identificado."))?;
-    let user = users::Entity::find_by_id(user_id)
-        .one(&ctx.db)
-        .await?
-        .ok_or_else(|| AppError::forbidden("Usuário não encontrado."))?;
-    let role = Role::from_str(&user.role)?;
-    if role.can_manage_plugins() {
-        Ok(user_id)
-    } else {
-        Err(AppError::forbidden(
-            "Só administradores acessam equipamentos e operam plugins.",
-        ))
-    }
+    access::require_role(
+        ctx,
+        args,
+        Role::can_manage_plugins,
+        "Só administradores acessam equipamentos e operam plugins.",
+    )
+    .await
 }
 
 async fn auto_accept_active(ctx: &AppContext, args: &ToolArgs, device_id: i64) -> bool {

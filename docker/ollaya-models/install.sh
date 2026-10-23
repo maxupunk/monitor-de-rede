@@ -14,6 +14,8 @@ set -eu
 
 STORE=/ollaya/models
 OWNER=${OLLAYA_UID:-1000}:${OLLAYA_GID:-1000}
+# Vazio ou ausente: a release do projeto, onde os pesos de cada versão ficam.
+MODELS_URL=${DECIDER_MODELS_URL:-https://github.com/maxupunk/monitor-de-rede/releases/download/decider-models}
 TAB=$(printf '\t')
 
 sha256_of() { sha256sum "$1" | cut -c1-64; }
@@ -30,7 +32,7 @@ install_blob() { # pasta digest url
   if [ -f "$1/blobs/sha256-$hex" ]; then
     cp "$1/blobs/sha256-$hex" "$partial"
   else
-    source=${3:-${DECIDER_MODELS_URL%/}/sha256-$hex}
+    source=${3:-${MODELS_URL%/}/sha256-$hex}
     echo "  baixando sha256-$(printf %.12s "$hex") de $source"
     fetch "$source" "$partial" || { rm -f "$partial"; echo "  falhou: $source" >&2; return 1; }
   fi

@@ -2,8 +2,9 @@
 //!
 //! Responde "o que mudou antes de o problema começar?": a IA acha no log o
 //! primeiro sinal do problema (grep, logs) e pergunta aqui pelas alterações
-//! na janela anterior a ele (`until` + `hours`). Só leitura; IP e navegador de
-//! quem alterou não saem daqui.
+//! na janela anterior a ele (`until` + `hours`). Só leitura, só para
+//! administrador (como a tela `/audit`); IP e navegador de quem alterou não
+//! saem daqui.
 
 use std::collections::HashMap;
 
@@ -13,12 +14,13 @@ use loco_rs::prelude::AppContext;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::{json, Value};
 
-use super::{AiToolHandler, ToolArgs, ToolGroup, ToolOutput};
+use super::{access, AiToolHandler, ToolArgs, ToolGroup, ToolOutput};
 use crate::{
     models::_entities::users,
     services::{
         audit::{AuditFilters, AuditService},
         shared::{errors::AppResult, text::truncate_chars},
+        users::Role,
     },
 };
 
@@ -62,6 +64,14 @@ e no nome do recurso; 'resource_type' (device, monitor, alert_rule, plugin, syst
     }
 
     async fn execute(&self, ctx: &AppContext, args: &ToolArgs) -> AppResult<ToolOutput> {
+        // A tela /audit é só de administrador; o chat segue a mesma regra.
+        access::require_role(
+            ctx,
+            args,
+            Role::can_manage_users,
+            "Só administradores consultam a trilha de auditoria.",
+        )
+        .await?;
         let until = match args.text("until") {
             Some(raw) => match DateTime::parse_from_rfc3339(&raw) {
                 Ok(at) => at.with_timezone(&Utc),

@@ -320,7 +320,8 @@ services:
     build: ./docker/ollaya-models
     image: netmonitor-ollaya-models:latest
     environment:
-      DECIDER_MODELS_URL: ${DECIDER_MODELS_URL:-https://github.com/maxupunk/monitor-de-rede/releases/download/decider-models}
+      # Vazio: a release do projeto (o padrão fica no install.sh).
+      DECIDER_MODELS_URL: ${DECIDER_MODELS_URL:-}
     volumes:
       - ollaya-models:/ollaya
     restart: 'no'
