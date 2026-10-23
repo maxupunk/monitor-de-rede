@@ -12,7 +12,7 @@
   "layers": [
     {
       "mediaType": "application/vnd.ollaya.graph.onnx",
-      "digest": "sha256:1abda00a9c61a9eb20cc13c3b7506236a0b69be36f364144f0742dcb2b035e36",
+      "digest": "sha256:0bea6f7fbb6a97b928b8af11dc0e29f150bc4cbd46defaa43161aeecdb8837b9",
       "size": 3340536,
       "annotations": {
         "org.ollaya.precision": "fp32"
@@ -20,12 +20,12 @@
     },
     {
       "mediaType": "application/vnd.ollaya.weights",
-      "digest": "sha256:6ba38f77764e09f0c87ba479834bb09c83940caa55dc05e541c490ad2871f6cc",
+      "digest": "sha256:1bf9e8189a6362fca621776b5fed08801b0f91e7b8b3792f9e48ef46ff441b8d",
       "size": 470637416
     },
     {
       "mediaType": "application/vnd.ollaya.weights",
-      "digest": "sha256:56ec2e36319ef8da6a74fd8141a4bb5a37ac274574a1289d02743d62d25a908e",
+      "digest": "sha256:00341d5256b491e665be8d6063f4e384f4c125d054af025b871e4905f33970be",
       "size": 18945996
     },
     {

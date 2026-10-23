@@ -46,7 +46,7 @@ export function defaultDeciderSettings(): AiDeciderSettings {
     provider: 'ollaya',
     customProtocol: 'systemone',
     baseUrl: 'http://ollaya:11435',
-    model: 'netmonitor/decima-network:v5',
+    model: 'netmonitor/decima-network:v9',
     minConfidence: 60,
     timeoutMs: 4000,
     features: {

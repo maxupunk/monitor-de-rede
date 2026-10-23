@@ -87,7 +87,7 @@ async fn autocomplete_junta_catalogo_e_instalados() {
         // fim da lista (perto do chute), da maior nota para a menor.
         assert_eq!(installed, ["laya:multilingual", "laya"]);
         assert_eq!(
-            models.options[0].name, "netmonitor/decima-network:v5",
+            models.options[0].name, "netmonitor/decima-network:v9",
             "o recomendado em CPU abre a lista"
         );
         assert!(
