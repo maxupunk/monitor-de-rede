@@ -1,44 +1,28 @@
-//! Configuração do Decisor: onde está o Ollama e quão seguro ele precisa estar.
+//! Configuração do Decisor: onde está o Ollaya e quão seguro ele precisa estar.
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use super::providers::{self, DeciderProvider, DecisionProtocol, ProviderPreset};
 
-/// O serviço `ollama` do `docker-compose.yml`, na rede interna — o mesmo que
-/// atende o chat.
-pub const DEFAULT_DECIDER_BASE_URL: &str = crate::services::ai::settings::DEFAULT_OLLAMA_URL;
-/// O ajustado nas decisões do NetMonitor (`decider::decisions_benchmark`). Vem
-/// com o NetMonitor: o próprio servidor o instala no Ollama
-/// (`decider::bundled`).
-pub const DEFAULT_DECIDER_MODEL: &str = "netmonitor/laya-network:v2";
+/// O serviço `ollaya` do `docker-compose.yml`, na rede interna.
+pub const DEFAULT_DECIDER_BASE_URL: &str = "http://ollaya:11435";
+/// O ajustado nas decisões do NetMonitor: a maior nota no benchmark delas
+/// (`decider::decisions_benchmark`) e 0,6 s por decisão em CPU. Vem instalado
+/// com o NetMonitor (serviço `ollaya-models` do compose).
+pub const DEFAULT_DECIDER_MODEL: &str = "netmonitor/decima-network:v9";
 /// Probabilidade mínima (%) para um grupo de ferramentas entrar.
 pub const DEFAULT_DECIDER_MIN_CONFIDENCE: u8 = 60;
 /// Tempo máximo de uma decisão. Estourou, o chat segue sem ela.
 pub const DEFAULT_DECIDER_TIMEOUT_MS: u32 = 4_000;
+/// A mesma variável que o Ollaya lê: o compose entrega o mesmo valor aos dois
+/// containers, e ninguém precisa copiá-la para a tela.
+pub const API_KEY_ENV: &str = "OLLAYA_API_KEY";
 
-/// Campo que tolera valor desconhecido (gravado por outra versão do NetMonitor):
-/// ele vira o padrão do tipo em vez de invalidar a configuração inteira — o
-/// `settings::load` cai nos padrões quando o JSON não deserializa, e levaria
-/// junto o resto do Decisor e as chaves do chat.
-mod tolerant {
-    use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize, Serializer};
-
-    pub fn serialize<T: Serialize, S: Serializer>(
-        value: &T,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        value.serialize(serializer)
-    }
-
-    pub fn deserialize<'de, T, D>(deserializer: D) -> Result<T, D::Error>
-    where
-        T: DeserializeOwned + Default,
-        D: Deserializer<'de>,
-    {
-        let value = serde_json::Value::deserialize(deserializer)?;
-        Ok(T::deserialize(value).unwrap_or_default())
-    }
+/// A chave do Ollaya do compose, lida no ponto de uso. Vazia = servidor sem
+/// autenticação.
+fn env_api_key() -> Option<String> {
+    trimmed(std::env::var(API_KEY_ENV).ok())
 }
 
 fn trimmed(value: Option<String>) -> Option<String> {
@@ -113,19 +97,13 @@ pub enum DeciderFeature {
 pub struct AiDeciderSettings {
     /// Chave mestra: desligado, nenhuma frente consulta o Decisor.
     pub enabled: bool,
-    /// Quem responde: o Ollama (padrão) ou um serviço na nuvem. Desconhecido
-    /// vira o padrão.
-    #[serde(with = "tolerant")]
-    #[ts(as = "DeciderProvider")]
+    /// Quem responde: o Ollaya (padrão) ou um serviço na nuvem.
     pub provider: DeciderProvider,
-    /// Formato da API no provedor "Outro"; os demais têm o seu. Desconhecido
-    /// vira o padrão.
-    #[serde(with = "tolerant")]
-    #[ts(as = "DecisionProtocol")]
+    /// Formato da API no provedor "Outro"; os demais têm o seu.
     pub custom_protocol: DecisionProtocol,
     pub base_url: String,
-    /// Chave do provedor. Vai mascarada à tela (como as chaves do chat). O
-    /// Ollama local não pede; um atrás de proxy com autenticação, sim.
+    /// Chave do provedor. Vai mascarada à tela (como as chaves do chat). No
+    /// Ollaya, vazia usa a `OLLAYA_API_KEY` do compose.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub api_key: Option<String>,
@@ -145,7 +123,7 @@ impl Default for AiDeciderSettings {
     fn default() -> Self {
         Self {
             enabled: false,
-            provider: DeciderProvider::Ollama,
+            provider: DeciderProvider::Ollaya,
             custom_protocol: DecisionProtocol::Systemone,
             base_url: DEFAULT_DECIDER_BASE_URL.to_string(),
             api_key: None,
@@ -175,8 +153,8 @@ impl AiDeciderSettings {
         } else {
             model.to_string()
         };
-        // O Ollama gerencia modelos; o "Outro" escolhe entre os formatos de nuvem.
-        if self.custom_protocol == DecisionProtocol::Ollama {
+        // O Ollaya fala o próprio formato; o "Outro" escolhe entre os de nuvem.
+        if self.custom_protocol == DecisionProtocol::Ollaya {
             self.custom_protocol = DecisionProtocol::Systemone;
         }
         self.api_key = trimmed(self.api_key);
@@ -214,16 +192,22 @@ impl AiDeciderSettings {
         self.preset().protocol.unwrap_or(self.custom_protocol)
     }
 
-    /// Baixa e carrega modelos (só o Ollama).
+    /// Baixa e carrega modelos (só o Ollaya).
     #[must_use]
     pub fn manages_models(&self) -> bool {
-        self.protocol() == DecisionProtocol::Ollama
+        self.protocol() == DecisionProtocol::Ollaya
     }
 
-    /// A chave a usar, se houver.
+    /// A chave a usar: a da tela ou, no Ollaya, a do compose.
     #[must_use]
     pub fn effective_api_key(&self) -> Option<String> {
-        trimmed(self.api_key.clone())
+        trimmed(self.api_key.clone()).or_else(|| {
+            if self.provider == DeciderProvider::Ollaya {
+                env_api_key()
+            } else {
+                None
+            }
+        })
     }
 
     /// Limiar como probabilidade (0–1).
@@ -241,7 +225,7 @@ mod tests {
     fn normaliza_valores_vazios_e_fora_da_faixa() {
         let settings = AiDeciderSettings {
             enabled: true,
-            base_url: " http://ollama:11434/ ".into(),
+            base_url: " http://ollaya:11435/ ".into(),
             model: String::new(),
             min_confidence: 0,
             timeout_ms: 50_000,
@@ -250,7 +234,7 @@ mod tests {
         }
         .normalized();
         assert_eq!(settings.api_key, None);
-        assert_eq!(settings.base_url, "http://ollama:11434");
+        assert_eq!(settings.base_url, "http://ollaya:11435");
         assert_eq!(settings.model, DEFAULT_DECIDER_MODEL);
         assert_eq!(settings.min_confidence, 1);
         assert_eq!(settings.timeout_ms, 10_000);
@@ -272,10 +256,10 @@ mod tests {
     }
 
     #[test]
-    fn outro_usa_o_formato_escolhido_e_nunca_o_do_ollama() {
+    fn outro_usa_o_formato_escolhido_e_nunca_o_do_ollaya() {
         let settings = AiDeciderSettings {
             provider: DeciderProvider::Custom,
-            custom_protocol: DecisionProtocol::Ollama,
+            custom_protocol: DecisionProtocol::Ollaya,
             ..AiDeciderSettings::default()
         }
         .normalized();
@@ -288,49 +272,24 @@ mod tests {
     }
 
     #[test]
-    fn configuracao_antiga_e_ollama() {
+    fn configuracao_antiga_e_ollaya() {
         let settings: AiDeciderSettings = serde_json::from_str(r#"{"enabled":true}"#).unwrap();
-        assert_eq!(settings.provider, DeciderProvider::Ollama);
+        assert_eq!(settings.provider, DeciderProvider::Ollaya);
         assert!(settings.manages_models());
     }
 
     #[test]
-    fn provedor_ou_formato_desconhecido_vira_o_padrao_sem_perder_o_resto() {
-        let settings: AiDeciderSettings = serde_json::from_str(
-            r#"{"enabled":true,"provider":"desconhecido","customProtocol":"desconhecido","model":"laya:322m-multilingual-bf16","minConfidence":70}"#,
-        )
-        .unwrap();
-        assert_eq!(settings.provider, DeciderProvider::default());
-        assert_eq!(settings.custom_protocol, DecisionProtocol::default());
-        assert!(settings.enabled);
-        assert_eq!(settings.min_confidence, 70);
-        assert_eq!(settings.model, "laya:322m-multilingual-bf16");
-
-        let gravada = serde_json::to_value(&settings).unwrap();
-        assert_eq!(gravada["provider"], "ollama");
-        assert_eq!(gravada["customProtocol"], "systemone");
-    }
-
-    #[test]
-    fn ollama_em_outra_maquina_mantem_url_e_modelo() {
-        let outra_maquina = AiDeciderSettings {
-            base_url: "http://10.0.0.5:11434".into(),
-            model: "laya:322m-multilingual-bf16".into(),
-            ..AiDeciderSettings::default()
-        }
-        .normalized();
-        assert_eq!(outra_maquina.base_url, "http://10.0.0.5:11434");
-        assert_eq!(outra_maquina.model, "laya:322m-multilingual-bf16");
-    }
-
-    #[test]
-    fn so_a_chave_da_tela_vale() {
+    fn chave_da_tela_vale_antes_da_do_compose_e_so_o_ollaya_usa_o_compose() {
         let tela = AiDeciderSettings {
-            api_key: Some(" da-tela ".into()),
+            api_key: Some("da-tela".into()),
             ..AiDeciderSettings::default()
         };
         assert_eq!(tela.effective_api_key().as_deref(), Some("da-tela"));
-        assert_eq!(AiDeciderSettings::default().effective_api_key(), None);
+        let nuvem = AiDeciderSettings {
+            provider: DeciderProvider::Typesafe,
+            ..AiDeciderSettings::default()
+        };
+        assert_eq!(nuvem.effective_api_key(), None);
     }
 
     #[test]

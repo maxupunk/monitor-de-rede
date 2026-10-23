@@ -1,7 +1,7 @@
-//! O que é comum ao download de modelos no Ollama — que serve o LLM do chat e
-//! os modelos de decisão do Decisor.
+//! O que é comum aos servidores locais de modelos no molde do Ollama — o
+//! próprio Ollama (LLM do chat) e o Ollaya (modelos de decisão do Decisor).
 //!
-//! Os dois usam o mesmo `/api/pull` (NDJSON com `status`, `digest`,
+//! Os dois falam o mesmo `/api/pull` (NDJSON com `status`, `digest`,
 //! `total`, `completed`) e o mesmo `/api/tags`; só muda o nome do campo do
 //! modelo no corpo do pull e a autenticação.
 
@@ -64,7 +64,7 @@ fn percentage(completed: Option<u64>, total: Option<u64>) -> Option<f64> {
 }
 
 /// O erro do servidor, com o que fazer quando ele é velho demais para o
-/// modelo ("… which this version of ollama cannot run; upgrade ollama"): a
+/// modelo ("… which this version of ollaya cannot run; upgrade ollaya"): a
 /// imagem do compose é `:latest`, mas só muda com um `pull` explícito.
 fn explain_pull_error(service: &str, error: String) -> String {
     if error.to_lowercase().contains("upgrade") {
@@ -195,22 +195,22 @@ mod tests {
     #[test]
     fn converte_linhas_do_pull() {
         let line = r#"{"status":"pulling 8d32","digest":"sha256:8d32","total":200,"completed":50}"#;
-        let progress = parse_line(line, "Ollama").expect("linha válida");
+        let progress = parse_line(line, "Ollaya").expect("linha válida");
         assert_eq!(progress.percentage, Some(25.0));
         assert!(!progress.done);
 
-        assert!(parse_line(r#"{"status":"success"}"#, "Ollama").is_some_and(|p| p.done));
+        assert!(parse_line(r#"{"status":"success"}"#, "Ollaya").is_some_and(|p| p.done));
 
-        let failed = parse_line(r#"{"error":"model not found"}"#, "Ollama").expect("erro");
+        let failed = parse_line(r#"{"error":"model not found"}"#, "Ollaya").expect("erro");
         assert!(failed.done);
         assert_eq!(failed.error.as_deref(), Some("model not found"));
 
-        assert!(parse_line("", "Ollama").is_none());
-        assert!(parse_line("keep-alive", "Ollama").is_none());
+        assert!(parse_line("", "Ollaya").is_none());
+        assert!(parse_line("keep-alive", "Ollaya").is_none());
 
         let old = parse_line(
-            r#"{"error":"tev1:4b requires a newer version of ollama; upgrade ollama"}"#,
-            "Ollama",
+            r#"{"error":"jeb:4b uses the jebadiah-v1 layout, which this version of ollaya cannot run; upgrade ollaya"}"#,
+            "Ollaya",
         )
         .expect("erro");
         assert!(old

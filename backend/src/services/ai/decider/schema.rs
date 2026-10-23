@@ -1,4 +1,4 @@
-//! Contrato HTTP das decisões: o System One (`POST /v1/systemone`), que o Ollama serve localmente e a TypeSafe na nuvem.
+//! Contrato HTTP do Ollaya (`POST /api/decide`, compatível com TypeSafe).
 //!
 //! Só o que o NetMonitor usa. Um tipo de resposta desconhecido vira
 //! [`Answer::Other`] em vez de derrubar a decisão inteira.
@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum Question {
     /// Escolher um rótulo: `criteria` mapeia rótulo → descrição. As
-    /// instruções dizem o que se escolhe — alguns modelos do Ollama (decider,
+    /// instruções dizem o que se escolhe — alguns modelos do Ollaya (decider,
     /// clef, jeb) recusam a pergunta sem elas, e para os outros elas ajudam.
     Choice {
         instructions: String,
@@ -100,7 +100,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn serializa_pergunta_sim_nao_no_formato_do_ollama() {
+    fn serializa_pergunta_sim_nao_no_formato_do_ollaya() {
         let questions = BTreeMap::from([(
             "history".to_string(),
             Question::Noul {

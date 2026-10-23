@@ -28,7 +28,7 @@ use crate::{
 pub const DECIDER_KEY: &str = "decider";
 /// A mesma chave em varreduras gravadas antes do renome para Decisor.
 pub const LEGACY_DECIDER_KEY: &str = "laya";
-/// Uma rede grande não vira uma fila de minutos no Ollama.
+/// Uma rede grande não vira uma fila de minutos no Ollaya.
 const MAX_HOSTS_PER_RUN: usize = 64;
 
 fn type_is_uncertain(device_type: Option<&str>) -> bool {

@@ -12,7 +12,7 @@ function isPullProgress(event: unknown): event is ModelPullProgress {
 }
 
 /**
- * Acompanha o download de um modelo num servidor local (Ollama: o modelo do chat ou o do Decisor)
+ * Acompanha o download de um modelo num servidor local (Ollama ou Ollaya)
  * pelo SSE do backend. Cada evento vai para `onProgress`; um evento com erro
  * rejeita a promessa com a mensagem dele.
  */

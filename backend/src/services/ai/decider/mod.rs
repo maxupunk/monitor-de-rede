@@ -1,17 +1,15 @@
-//! Decisor: decisões tipadas (sim/não, escolha, escala) servidas pelo Ollama
-//! (`POST /v1/systemone`) — o mesmo container que atende o chat.
+//! Decisor: decisões tipadas (sim/não, escolha, escala) servidas pelo Ollaya.
 //!
 //! Não é um LLM — é um classificador que responde várias perguntas numa
 //! passada só, em dezenas de milissegundos. O NetMonitor o usa para decidir
 //! antes do LLM do chat o que mandar para ele, deixando o chat focado no
 //! conteúdo. Cada decisão implementa [`decision::Decision`].
 //!
-//! É opcional e nunca obrigatório: desligado ou fora do ar, o chat recebe
-//! todas as ferramentas e as outras frentes seguem sem sugestão.
+//! É opcional e nunca obrigatório: desligado ou fora do ar, o chat segue com
+//! as heurísticas de sempre.
 
 pub mod action_review;
 pub mod benchmark;
-pub mod bundled;
 pub mod catalog;
 pub mod client;
 pub mod config;

@@ -51,9 +51,9 @@ services:
       APP_EXTERNAL_PORT: ${APP_PORT:-3333}
       # No modo host, a porta anunciada para a VPN é a própria porta de escuta do WireGuard.
       WG_EXTERNAL_PORT: ${WG_LISTEN_PORT:-51820}
-      # Fora da rede do compose o nome `ollama` não resolve: a API alcança o
-      # Ollama no loopback do host, logo abaixo.
-      OLLAMA_URL: http://127.0.0.1:${OLLAMA_HOST_PORT:-11434}
+      # Fora da rede do compose o nome `ollaya` não resolve: a API alcança o
+      # Ollaya no loopback do host, logo abaixo.
+      OLLAYA_URL: http://127.0.0.1:${OLLAYA_HOST_PORT:-11435}
 
   # Com a API na rede do host o nome `netmonitor` não resolve: o agente local
   # vai junto para a rede do host e a alcança no loopback, sem publicação no
@@ -63,13 +63,13 @@ services:
     environment:
       AGENT_SERVER_URL: http://127.0.0.1:${APP_PORT:-3333}
 
-  # O Ollama também na rede do host, escutando só no loopback: continua
+  # O Ollaya também na rede do host, escutando só no loopback: continua
   # invisível para a rede, e a API — que no modo host *é* o host — o encontra
   # em 127.0.0.1 sem publicação de porta no meio. Publicar em `127.0.0.1`
   # dependia do docker-proxy/NAT do Docker para o loopback, que alguns hosts
   # (NAS, `userland-proxy: false`) não fazem: a porta aparecia no `docker ps`
   # e a conexão era recusada.
-  ollama:
+  ollaya:
     network_mode: host
     environment:
-      OLLAMA_HOST: 127.0.0.1:${OLLAMA_HOST_PORT:-11434}
+      OLLAYA_HOST: 127.0.0.1:${OLLAYA_HOST_PORT:-11435}

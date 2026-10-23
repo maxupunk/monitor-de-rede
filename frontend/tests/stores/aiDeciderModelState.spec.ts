@@ -23,7 +23,7 @@ describe('estado do modelo do Decisor pelo SSE', () => {
       loaded: [],
       options: [],
     }
-    const base = { model: 'laya:multilingual', baseUrl: 'http://ollama:11434' }
+    const base = { model: 'laya:multilingual', baseUrl: 'http://ollaya:11435' }
 
     store.applyModelState({ ...base, state: 'loading' })
     expect(store.inMemory('laya:multilingual')).toBe(false)

@@ -1,13 +1,13 @@
 # Laya — plano de treinamento da identificação de dispositivos
 
-> Para quem mantém o NetMonitor e o modelo de decisão. Explica por que o Laya
+> Para quem mantém o NetMonitor e o modelo do Ollaya. Explica por que o Laya
 > errou, o que já foi corrigido e como fazê-lo aprender com a rede de cada
 > instalação — medindo antes de mudar.
 
 ## 1. Como o Laya decide hoje
 
 O Laya é um **classificador**, não um gerador de texto. A descoberta manda ao
-Ollama (`POST /v1/systemone`):
+Ollaya (`POST /api/decide`):
 
 - um **estado**: os fatos do host em JSON (`DeviceFacts`, em
   `services/ai/laya/decisions/device_identity.rs`) — nome, fabricante, portas,
@@ -111,9 +111,9 @@ confiança dele.
    - os casos deste documento (bpi-r3, RB922 com OpenWrt, câmeras XMEye, IoT
      Tuya/ESPHome, MikroTik, nobreak Volt).
    Anonimizar: trocar IP, MAC e nomes próprios por marcadores.
-2. Teste ignorado por padrão que roda o conjunto contra um Ollama real:
-   `cargo test -- --ignored laya_avaliacao` (com `OLLAMA_URL`). No CI fica só o
-   teste com o Ollama falso, que garante o formato.
+2. Teste ignorado por padrão que roda o conjunto contra um Ollaya real:
+   `cargo test -- --ignored laya_avaliacao` (com `OLLAYA_URL`). No CI fica só o
+   teste com o Ollaya falso, que garante o formato.
 3. Métricas, gravadas a cada rodada:
    - **acurácia** geral e por tipo;
    - **cobertura**: quantos hosts em dúvida recebem palpite acima do mínimo;
@@ -125,11 +125,13 @@ confiança dele.
 **Critério de aceite:** relatório com as quatro métricas para o modelo atual.
 É a linha de base das fases seguintes.
 
-O mesmo conjunto mede os outros modelos de decisão que a tela já oferece
-(`decider/catalog.rs`): os Laya da biblioteca do Ollama e os decodificadores
-(Tev, Kev, D3), que pedem GPU. Os só em inglês precisam provar que a
-precisão compensa o estado em português — só os números da avaliação
-decidem se algum vira o padrão no lugar do `netmonitor/laya-network`.
+O mesmo conjunto mede os outros modelos compatíveis do Ollaya, que a tela já
+oferece (`laya/catalog.rs`). Os candidatos naturais são os multilíngues mais
+precisos (`winnow:e4b`, `credence:e4b`, ~0,72 contra ~0,36 do Laya no
+typed-decisions, mas pedem GPU) e, em CPU, o `decima:base`. Os só em inglês
+(Kev, Decider, Jeb…) precisam provar que a precisão compensa o estado em
+português — só os números da avaliação decidem se algum vira o padrão no
+lugar do `laya`.
 
 ### 5.2 Fase 1 — Estado e critérios (sem mexer no modelo) — ✅ iniciada
 
@@ -188,7 +190,7 @@ explicitamente:
    UPnP, OIDs. Mínimo de ~50 exemplos reais por tipo, com as classes
    balanceadas.
 2. **Treino:** adaptador (LoRA) ou cabeça de classificação sobre o
-   `laya:multilingual`, conforme o Ollama suportar. Separar 20% para
+   `laya:multilingual`, conforme o Ollaya suportar. Separar 20% para
    validação.
 3. **Publicação:** um modelo próprio (`laya:netmonitor-device`), escolhido nas
    configurações da IA, com o atual como reserva.

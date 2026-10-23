@@ -30,7 +30,7 @@
     </v-card-title>
 
     <v-card-subtitle class="text-wrap">
-      Um modelo de decisão — no Ollama desta máquina, em outra da sua rede ou na nuvem — que decide
+      Um modelo de decisão — no Ollaya desta máquina, em outra da sua rede ou na nuvem — que decide
       em milissegundos, sem gastar tokens do chat: quais ferramentas a IA recebe, que tipo de
       aparelho a descoberta achou, qual interface é o uplink, o que cada log significa e quais
       alertas merecem resumo. É opcional — fora do ar, tudo segue como antes.
@@ -55,7 +55,7 @@
         v-if="managesModels && deciderStore.models && !serverOnline"
         class="text-body-2 text-warning mb-2"
       >
-        Conecte o Ollama (passo 1) para ver o que está baixado e baixar o modelo.
+        Conecte o Ollaya (passo 1) para ver o que está baixado e baixar o modelo.
       </div>
       <v-row dense>
         <v-col cols="12" md="6">
@@ -77,7 +77,7 @@
               <v-list-item
                 v-bind="itemProps"
                 :title="item.name"
-                :subtitle="item.description ?? 'Instalado no Ollama'"
+                :subtitle="item.description ?? 'Instalado no Ollaya'"
               >
                 <template #append>
                   <div class="d-flex ga-1">
@@ -142,11 +142,7 @@
         <v-col v-if="managesModels" cols="12" md="6" class="d-flex align-center ga-2">
           <template v-if="modelReady">
             <v-chip color="success" variant="tonal" prepend-icon="mdi-check-circle">Baixado</v-chip>
-            <v-chip v-if="modelInstalling" color="info" variant="tonal">
-              <v-progress-circular indeterminate size="14" width="2" class="me-2" />
-              Instalando no Ollama… {{ modelStateHere?.percentage ?? 0 }}%
-            </v-chip>
-            <v-chip v-else-if="modelLoading" color="info" variant="tonal">
+            <v-chip v-if="modelLoading" color="info" variant="tonal">
               <v-progress-circular indeterminate size="14" width="2" class="me-2" />
               Carregando na memória…
             </v-chip>
@@ -216,14 +212,14 @@
         </div>
         <v-alert
           v-if="managesModels && serverOnline && selectedSpec?.bundled && !modelReady"
-          type="info"
+          type="warning"
           variant="tonal"
           density="compact"
           class="mt-2 text-body-2"
         >
-          Este modelo vem com o NetMonitor: <strong>Baixar modelo</strong> o instala no Ollama a
-          partir da release do projeto (<code>DECIDER_MODELS_URL</code> no servidor, para usar um
-          espelho). Ligar o Decisor também instala, se ainda faltar.
+          Este modelo vem com o NetMonitor e não está no registro do Ollaya: quem o instala é o
+          serviço <code>ollaya-models</code> do compose. No servidor, rode
+          <code>docker compose up -d ollaya-models</code> e atualize esta tela.
         </v-alert>
         <v-alert
           v-if="nearChance"
@@ -243,8 +239,8 @@
             (23 modelos, em inglês e português), este modelo acertou
           </template>
           {{ nearChance }} — perto de escolher no chute (~31%). Prefira
-          <strong>{{ RECOMMENDED_MODEL }}</strong
-          >, ajustado nas decisões do NetMonitor.
+          <strong>{{ RECOMMENDED_CPU_MODEL }}</strong> em CPU ou
+          <strong>{{ RECOMMENDED_GPU_MODEL }}</strong> com GPU.
         </v-alert>
         <v-alert
           v-else-if="
@@ -257,8 +253,9 @@
         >
           Este modelo não declara português e não foi avaliado. O texto analisado (perguntas do
           chat, logs, nomes) costuma estar em português: prefira um avaliado —
-          <strong>{{ RECOMMENDED_MODEL }}</strong> — ou experimente com perguntas reais em Avançado
-          › Experimentar antes de ligar.
+          <strong>{{ RECOMMENDED_CPU_MODEL }}</strong> em CPU ou
+          <strong>{{ RECOMMENDED_GPU_MODEL }}</strong> com GPU — ou experimente com perguntas reais
+          em Avançado › Experimentar antes de ligar.
         </v-alert>
         <v-alert
           v-if="selectedSpec?.gpuRecommended"
@@ -268,8 +265,8 @@
           class="mt-2 text-body-2"
         >
           Em CPU, cada pergunta do chat pode esperar alguns segundos por este modelo. Para o dia a
-          dia, dê a GPU ao Ollama (<code>gpus: all</code> no serviço <code>ollama</code> do compose)
-          ou aponte o passo 1 para um Ollama numa máquina com GPU.
+          dia, rode o Ollaya com GPU (imagem <code>ollaya:cuda</code>) ou aponte o passo 1 para um
+          Ollaya numa máquina com GPU.
         </v-alert>
         <div v-if="timeoutNote" class="d-flex align-center ga-1 mt-2 text-body-2">
           <v-icon size="16" color="info">mdi-timer-cog-outline</v-icon>
@@ -493,6 +490,11 @@
               prepend-inner-icon="mdi-timer-outline"
               class="mb-3"
             />
+            <div class="text-body-2">
+              A chave de acesso não fica na tela: a API usa a variável
+              <code>OLLAYA_API_KEY</code> do servidor, a mesma que o compose entrega ao serviço
+              <code>ollaya</code>.
+            </div>
           </v-expansion-panel-text>
         </v-expansion-panel>
       </v-expansion-panels>
@@ -527,10 +529,11 @@ import type { DeciderTriageMode } from '@/bindings/DeciderTriageMode'
 import { formatElapsedMs, formatLatency, formatPercent } from '@/utils/formatters'
 import {
   BENCHMARK_URL,
-  RECOMMENDED_MODEL,
+  RECOMMENDED_CPU_MODEL,
+  RECOMMENDED_GPU_MODEL,
   benchmarkFact,
   decisionsFact,
-  isLocalOllama,
+  isLocalOllaya,
   isNearChance,
   percent,
   primaryScore,
@@ -593,11 +596,11 @@ const question = ref('')
 
 /** O provedor do formulário e o que falta para ele responder. */
 const currentProvider = computed(() => deciderStore.provider(form.value.provider))
-/** Só o Ollama baixa e carrega modelos; na nuvem eles já estão prontos. */
+/** Só o Ollaya baixa e carrega modelos; na nuvem eles já estão prontos. */
 const managesModels = computed(() => currentProvider.value?.managesModels ?? true)
 const providerGap = computed(() => providerMissing(form.value, currentProvider.value))
 const serverOnline = computed(() => !!deciderStore.models?.online)
-/** Passo 1 pronto: Ollama respondendo, ou nuvem com tudo preenchido. */
+/** Passo 1 pronto: Ollaya respondendo, ou nuvem com tudo preenchido. */
 const providerReady = computed(() =>
   managesModels.value ? serverOnline.value : !providerGap.value
 )
@@ -605,7 +608,7 @@ const providerReady = computed(() =>
 const modelPlaceholder = computed(
   () => `Escolha ou digite, ex.: ${currentProvider.value?.defaultModel || 'jev-latest'}`
 )
-/** Testar e ativar: no Ollama, com o modelo baixado; na nuvem, com o passo 1 completo. */
+/** Testar e ativar: no Ollaya, com o modelo baixado; na nuvem, com o passo 1 completo. */
 const modelReady = computed(() =>
   managesModels.value
     ? serverOnline.value && deciderStore.installed(form.value.model ?? '')
@@ -643,7 +646,6 @@ const pullErrorHere = computed(() => {
   return deciderStore.pullProgress?.error ?? null
 })
 const modelLoading = computed(() => modelStateHere.value?.state === 'loading')
-const modelInstalling = computed(() => modelStateHere.value?.state === 'installing')
 const modelLoadFailed = computed(() => modelStateHere.value?.state === 'failed')
 const modelInMemory = computed(
   () => modelStateHere.value?.state === 'ready' || deciderStore.inMemory(form.value.model ?? '')
@@ -662,7 +664,7 @@ const status = computed(() => {
   if (!managesModels.value && providerGap.value)
     return { label: providerGap.value, color: 'warning', icon: 'mdi-key-alert-outline' }
   if (!serverOnline.value)
-    return { label: 'Ollama fora do ar', color: 'error', icon: 'mdi-lan-disconnect' }
+    return { label: 'Ollaya fora do ar', color: 'error', icon: 'mdi-lan-disconnect' }
   if (!modelReady.value)
     return { label: 'Modelo não baixado', color: 'warning', icon: 'mdi-download' }
   if (!deciderStore.saved?.enabled)
@@ -751,7 +753,7 @@ const loadedMemory = computed(() =>
 
 /**
  * Ligar avisa o que custa: na nuvem, os textos saem da rede e o uso é cobrado;
- * com o Ollama nesta máquina, RAM do servidor. Com o Ollama em outra máquina
+ * com o Ollaya nesta máquina, RAM do servidor. Com o Ollaya em outra máquina
  * não há o que avisar — a memória gasta é a dela.
  */
 async function toggleEnabled(value: boolean | null) {
@@ -762,20 +764,20 @@ async function toggleEnabled(value: boolean | null) {
       message:
         `Cada decisão manda a ${provider.label} o texto que ela analisa: perguntas do chat, ` +
         'mensagens de log, nomes, IPs e descrições de dispositivos e interfaces. O uso é ' +
-        'cobrado na sua conta, por token de entrada. Para nada sair da rede, use o Ollama.',
+        'cobrado na sua conta, por token de entrada. Para nada sair da rede, use o Ollaya.',
       confirmText: 'Ligar e enviar',
       confirmColor: 'warning',
       icon: 'mdi-cloud-alert-outline',
       iconColor: 'warning',
     })
     if (!ok) return
-  } else if (value && isLocalOllama(form.value.baseUrl)) {
+  } else if (value && isLocalOllaya(form.value.baseUrl)) {
     const ok = await confirm({
       title: 'Ligar o Decisor neste servidor?',
       message:
-        'O Ollama roda nesta mesma máquina. Enquanto o modelo ' +
+        'O Ollaya roda nesta mesma máquina. Enquanto o modelo ' +
         `${form.value.model} estiver carregado, ele usa ${loadedMemory.value} de memória. ` +
-        'Sem uso, o modelo é descarregado e o serviço volta a ocupar cerca de 50 MB.',
+        'Sem uso, o modelo é descarregado e o serviço volta a ocupar cerca de 150 MB.',
       confirmText: 'Ligar mesmo assim',
       confirmColor: 'warning',
       icon: 'mdi-memory',

@@ -278,7 +278,7 @@ async fn nuvem_lista_os_modelos_do_preset_sem_download() {
         assert_eq!(
             ids,
             [
-                "ollama",
+                "ollaya",
                 "typesafe",
                 "openrouter",
                 "cloudflare",

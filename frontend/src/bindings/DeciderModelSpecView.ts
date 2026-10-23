@@ -19,14 +19,18 @@ downloadMb?: number,
  */
 memoryMb?: number, 
 /**
- * Mediana de uma decisão em CPU no benchmark do NetMonitor; ausente
- * quando não houve rodada em CPU.
+ * Mediana publicada para cinco perguntas: em CPU, ou numa RTX 4090 quando
+ * `gpu_recommended`.
  */
-latencyMs?: number, 
+latencyMs: number, 
 /**
  * Em CPU responde devagar demais para o chat.
  */
 gpuRecommended: boolean, 
+/**
+ * Acerto no typed-decisions (0–1), quando comparável.
+ */
+accuracy?: number, 
 /**
  * Teto de opções por escolha, quando o modelo tem um.
  */
@@ -40,7 +44,7 @@ suggestedTimeoutMs: number,
  */
 recommended: boolean, 
 /**
- * Vem com o NetMonitor: a própria API o instala no Ollama a partir da
- * release `decider-models` (`decider::bundled`), não do registro do Ollama.
+ * Vem instalado com o NetMonitor (serviço `ollaya-models`): não se baixa
+ * do registro do Ollaya.
  */
 bundled: boolean, };

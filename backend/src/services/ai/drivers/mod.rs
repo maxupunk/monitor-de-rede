@@ -95,9 +95,7 @@ pub fn create_driver(settings: &AiSettings) -> AppResult<Box<dyn AiDriver>> {
                 .ollama_base_url
                 .clone()
                 .filter(|u| !u.trim().is_empty())
-                .unwrap_or_else(|| {
-                    crate::services::ai::settings::DEFAULT_OLLAMA_BASE_URL.to_string()
-                });
+                .unwrap_or_else(|| "http://localhost:11434/v1".to_string());
 
             let model = settings
                 .ollama_model

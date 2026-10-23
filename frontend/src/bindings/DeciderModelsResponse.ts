@@ -8,12 +8,12 @@ export type DeciderModelsResponse = {
  */
 online: boolean, 
 /**
- * O provedor baixa e carrega modelos (só o Ollama): a tela mostra
+ * O provedor baixa e carrega modelos (só o Ollaya): a tela mostra
  * download, memória e "carregar agora".
  */
 managesModels: boolean, errorMessage: string | null, 
 /**
- * Nomes como o Ollama os lista (`netmonitor/laya-network:v2`…).
+ * Nomes como o Ollaya os lista (`laya:multilingual`…).
  */
 installed: Array<string>, 
 /**

@@ -9,10 +9,7 @@ use std::time::Duration;
 use serde::Deserialize;
 use tokio_stream::wrappers::ReceiverStream;
 
-use super::{
-    local_models::{self, PullTarget},
-    settings::DEFAULT_OLLAMA_URL,
-};
+use super::local_models::{self, PullTarget};
 use crate::{
     dtos::ai::{ModelPullProgress, OllamaModelItem, OllamaModelsResponse, OllamaRecommendedModel},
     services::shared::errors::{AppError, AppResult},
@@ -131,14 +128,14 @@ pub static RECOMMENDED_MODELS: &[(&str, &str, &str, &str, bool)] = &[
 pub fn normalize_ollama_base_url(raw: &str) -> String {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return DEFAULT_OLLAMA_URL.to_string();
+        return "http://localhost:11434".to_string();
     }
     let mut url = trimmed.trim_end_matches('/').to_string();
     if url.ends_with("/v1") {
         url = url[..url.len() - 3].trim_end_matches('/').to_string();
     }
     if url.is_empty() {
-        DEFAULT_OLLAMA_URL.to_string()
+        "http://localhost:11434".to_string()
     } else {
         url
     }
@@ -262,7 +259,7 @@ mod tests {
 
     #[test]
     fn testa_normalizacao_de_url_do_ollama() {
-        assert_eq!(normalize_ollama_base_url(""), DEFAULT_OLLAMA_URL);
+        assert_eq!(normalize_ollama_base_url(""), "http://localhost:11434");
         assert_eq!(
             normalize_ollama_base_url("http://localhost:11434/v1"),
             "http://localhost:11434"

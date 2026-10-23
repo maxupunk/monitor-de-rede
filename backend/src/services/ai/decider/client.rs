@@ -5,7 +5,7 @@
 //! limite vai por requisição, porque vem da configuração.
 //!
 //! A decisão vale para todo provedor (o formato vem de `decider::protocols`);
-//! listar, baixar, instalar e carregar modelos é só do Ollama.
+//! listar, baixar e carregar modelos é só do Ollaya.
 
 use std::{
     borrow::Cow,
@@ -18,7 +18,7 @@ use reqwest::{RequestBuilder, StatusCode};
 use tokio_stream::wrappers::ReceiverStream;
 
 use super::{
-    bundled, catalog,
+    catalog,
     config::AiDeciderSettings,
     locate::{self, Located},
     protocols::{self, wire_for},
@@ -59,7 +59,7 @@ pub struct Decided {
 
 pub struct DeciderClient<'a> {
     settings: Cow<'a, AiDeciderSettings>,
-    /// Onde o Ollama foi procurado sem responder — vai na mensagem de erro.
+    /// Onde o Ollaya foi procurado sem responder — vai na mensagem de erro.
     tried: Vec<String>,
 }
 
@@ -73,7 +73,7 @@ impl<'a> DeciderClient<'a> {
         }
     }
 
-    /// Fala com o Ollama onde ele de fato está, quando a URL é a padrão do
+    /// Fala com o Ollaya onde ele de fato está, quando a URL é a padrão do
     /// compose — ver [`locate`].
     pub async fn connect(settings: &'a AiDeciderSettings) -> Self {
         match locate::resolve(settings).await {
@@ -89,16 +89,10 @@ impl<'a> DeciderClient<'a> {
     }
 
     fn url(&self, path: &str) -> String {
-        format!("{}{path}", self.base_url())
+        format!("{}{path}", self.settings.base_url.trim_end_matches('/'))
     }
 
-    /// Onde ele de fato respondeu (o que o [`locate`] achou).
-    #[must_use]
-    pub fn base_url(&self) -> &str {
-        self.settings.base_url.trim_end_matches('/')
-    }
-
-    /// Quem responde, para as mensagens ("TypeSafe (Jev)", "Ollama"…).
+    /// Quem responde, para as mensagens ("TypeSafe (Jev)", "Ollaya"…).
     fn service(&self) -> &'static str {
         self.settings.preset().label
     }
@@ -110,7 +104,7 @@ impl<'a> DeciderClient<'a> {
         }
     }
 
-    /// Listar, baixar e carregar modelos só existe no Ollama.
+    /// Listar, baixar e carregar modelos só existe no Ollaya.
     fn ensure_manages_models(&self) -> AppResult<()> {
         if self.settings.manages_models() {
             return Ok(());
@@ -203,9 +197,8 @@ impl<'a> DeciderClient<'a> {
         Ok(loaded.models.into_iter().map(|tag| tag.name).collect())
     }
 
-    /// Carrega o modelo na memória: uma pergunta de aquecimento no
-    /// `/v1/systemone` (o Ollama recusa decisão sem pergunta e não carrega
-    /// modelo de decisão pelo `/api/generate`). Devolve quanto levou.
+    /// Carrega o modelo na memória sem responder nada: `/api/decide` sem
+    /// `state` nem perguntas (contrato do Ollaya). Devolve quanto levou.
     ///
     /// O prazo é o do modelo ([`catalog::load_timeout`]), não o "tempo máximo
     /// por pergunta": um Decisor sai do disco em 5 a 20 s em CPU, um Kev 9B
@@ -215,13 +208,9 @@ impl<'a> DeciderClient<'a> {
         let started = Instant::now();
         let load_timeout = catalog::load_timeout(&self.settings.model);
         let request = http()
-            .post(self.url("/v1/systemone"))
+            .post(self.url("/api/decide"))
             .timeout(load_timeout)
-            .json(&serde_json::json!({
-                "model": self.settings.model,
-                "state": "ok",
-                "questions": { "warmup": { "type": "noul", "instructions": "ok" } },
-            }));
+            .json(&serde_json::json!({ "model": self.settings.model }));
         let res = self
             .authorized(request)
             .send()
@@ -251,14 +240,17 @@ impl<'a> DeciderClient<'a> {
         Ok(tags.models.into_iter().map(|tag| tag.name).collect())
     }
 
-    /// Baixa o modelo configurado: do registro do Ollama, ou — o que vem com o
-    /// NetMonitor — da release do projeto ([`bundled`]).
+    /// Baixa o modelo configurado (o roteador `laya` baixa as duas variantes).
     pub async fn pull(&self) -> AppResult<ReceiverStream<ModelPullProgress>> {
         self.ensure_manages_models()?;
-        let key = self.settings.effective_api_key();
-        if let Some(model) = bundled::find(&self.settings.model) {
-            return bundled::install(model, self.base_url(), key);
+        if catalog::is_bundled(&self.settings.model) {
+            return Err(AppError::validation(format!(
+                "{} não está no registro do Ollaya. {}",
+                self.settings.model,
+                catalog::BUNDLED_HINT
+            )));
         }
+        let key = self.settings.effective_api_key();
         local_models::stream_pull(PullTarget {
             url: self.url("/api/pull"),
             body: serde_json::json!({ "model": self.settings.model, "stream": true }),
@@ -271,7 +263,7 @@ impl<'a> DeciderClient<'a> {
 
 /// A mensagem de uma resposta de erro. Num provedor de nuvem com a URL fora
 /// do padrão, quem respondeu foi esse endereço, não o provedor: a mensagem diz
-/// qual e aponta o padrão — o caso clássico é a URL do Ollama esquecida no
+/// qual e aponta o padrão — o caso clássico é a URL do Ollaya esquecida no
 /// OpenRouter.
 fn failure_message(
     settings: &AiDeciderSettings,
@@ -334,10 +326,10 @@ mod tests {
 
     #[test]
     fn url_esquecida_de_outro_provedor_e_apontada_no_404() {
-        let settings = openrouter_at("http://127.0.0.1:11434");
+        let settings = openrouter_at("http://127.0.0.1:11435");
         let message = failure_message(&settings, StatusCode::NOT_FOUND, "à decisão", "not found");
         assert!(
-            message.starts_with("O endereço 'http://127.0.0.1:11434' respondeu 404 Not Found"),
+            message.starts_with("O endereço 'http://127.0.0.1:11435' respondeu 404 Not Found"),
             "{message}"
         );
         assert!(message.contains("https://openrouter.ai/api"), "{message}");
@@ -355,12 +347,12 @@ mod tests {
     }
 
     #[test]
-    fn ollama_achado_fora_da_url_padrao_continua_sendo_o_ollama() {
+    fn ollaya_achado_fora_da_url_padrao_continua_sendo_o_ollaya() {
         let settings = AiDeciderSettings {
-            base_url: "http://127.0.0.1:11434".into(),
+            base_url: "http://127.0.0.1:11435".into(),
             ..AiDeciderSettings::default()
         };
         let message = failure_message(&settings, StatusCode::NOT_FOUND, "à decisão", "x");
-        assert!(message.starts_with("Ollama respondeu"), "{message}");
+        assert!(message.starts_with("Ollaya respondeu"), "{message}");
     }
 }

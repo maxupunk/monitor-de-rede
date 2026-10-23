@@ -6,7 +6,7 @@
 //!   de logs consultaria o banco a cada padrão novo.
 //! - **Duas filas.** O que alguém espera na tela (chat, identificar, sugerir
 //!   interfaces) passa direto; o que roda sozinho (descoberta, logs, triagem)
-//!   entra um de cada vez — o Ollama em CPU faz uma inferência por vez, e um
+//!   entra um de cada vez — o Ollaya em CPU faz uma inferência por vez, e um
 //!   lote de logs não pode empurrar o chat para além do tempo limite.
 //! - **Modelo frio.** Tirar o modelo do disco leva de 5 a 20 s; o tempo
 //!   máximo por pergunta vale só para a inferência. Quem está na tela
@@ -33,7 +33,7 @@ use serde_json::json;
 use tokio::sync::Semaphore;
 
 use super::{
-    bundled, catalog,
+    catalog,
     client::DeciderClient,
     config::{AiDeciderSettings, DeciderFeature},
     decision::{self, Decision, Outcome},
@@ -46,8 +46,8 @@ use crate::services::{
 
 /// Evento SSE com o estado do modelo: `loading`, `ready` ou `failed`.
 pub const MODEL_STATE_EVENT: &str = "decider:model_state";
-/// Por quanto tempo "está na memória" vale sem perguntar de novo ao Ollama.
-/// Curto: o `OLLAMA_KEEP_ALIVE` pode descarregar o modelo a qualquer momento.
+/// Por quanto tempo "está na memória" vale sem perguntar de novo ao Ollaya.
+/// Curto: o `OLLAYA_KEEP_ALIVE` pode descarregar o modelo a qualquer momento.
 const LOADED_TTL: Duration = Duration::from_secs(20);
 
 const SETTINGS_TTL: Duration = Duration::from_secs(30);
@@ -262,8 +262,8 @@ impl DeciderRuntime {
         })
     }
 
-    /// O modelo está fora da memória? Na dúvida (erro no `/api/ps`),
-    /// responde que não — e a consulta segue como antes.
+    /// O modelo está fora da memória? Na dúvida (Ollaya antigo sem
+    /// `/api/ps`, erro), responde que não — e a consulta segue como antes.
     async fn is_cold(&self, settings: &AiDeciderSettings) -> bool {
         // Na nuvem o modelo está sempre pronto.
         if !settings.manages_models() || self.recently_warm(settings) {
@@ -295,46 +295,12 @@ impl DeciderRuntime {
         }
     }
 
-    /// O modelo que vem com o NetMonitor e ainda não está no Ollama: instala
-    /// antes de carregar, avisando o andamento pelo SSE (`installing`).
-    async fn install_if_missing(
-        &self,
-        settings: &AiDeciderSettings,
-        client: &DeciderClient<'_>,
-    ) -> AppResult<()> {
-        let Some(model) = bundled::find(&settings.model) else {
-            return Ok(());
-        };
-        let installed = client.installed_models().await?;
-        if catalog::is_available(&installed, &settings.model) {
-            return Ok(());
-        }
-        tracing::info!(model = %settings.model, "decisor: instalando no Ollama o modelo que vem com o NetMonitor");
-        self.publish_state(settings, "installing", json!({ "percentage": 0 }));
-        bundled::install_and_wait(
-            model,
-            client.base_url(),
-            settings.effective_api_key(),
-            |progress| {
-                if let Some(percentage) = progress.percentage {
-                    self.publish_state(
-                        settings,
-                        "installing",
-                        json!({ "percentage": percentage.round() }),
-                    );
-                }
-            },
-        )
-        .await
-    }
-
-    /// Garante o modelo na memória antes de perguntar — e, sendo o que vem
-    /// com o NetMonitor, instalado no Ollama. Um carregamento por vez; quem
-    /// espera na fila reconfere e, em geral, já encontra quente.
+    /// Garante o modelo na memória antes de perguntar. Um carregamento por
+    /// vez; quem espera na fila reconfere e, em geral, já encontra quente.
     ///
     /// # Errors
     ///
-    /// O Ollama não conseguiu instalar ou carregar o modelo no prazo.
+    /// O Ollaya não conseguiu carregar o modelo no prazo de carregamento.
     pub async fn ensure_loaded(&self, settings: &AiDeciderSettings) -> AppResult<()> {
         if !self.is_cold(settings).await {
             return Ok(());
@@ -343,14 +309,9 @@ impl DeciderRuntime {
         if !self.is_cold(settings).await {
             return Ok(());
         }
-        let client = DeciderClient::connect(settings).await;
-        if let Err(error) = self.install_if_missing(settings, &client).await {
-            self.publish_state(settings, "failed", json!({ "message": error.to_string() }));
-            return Err(error);
-        }
         self.publish_state(settings, "loading", json!({}));
         tracing::info!(model = %settings.model, "decisor: carregando o modelo na memória");
-        match client.load().await {
+        match DeciderClient::connect(settings).await.load().await {
             Ok(load_ms) => {
                 self.mark_warm(settings);
                 self.publish_state(settings, "ready", json!({ "loadMs": load_ms }));
@@ -433,7 +394,7 @@ mod tests {
     }
 
     fn unreachable_settings() -> AiDeciderSettings {
-        // "Outro compatível": no Ollama, o loopback dispararia a procura do
+        // "Outro compatível": no Ollaya, o loopback dispararia a procura do
         // `locate`, e o teste mediria as sondas, não a fila.
         AiDeciderSettings {
             enabled: true,

@@ -2,10 +2,9 @@
 //!
 //! Um "oi" já custou 22 mil tokens: o método mandava começar consultando e o
 //! catálogo inteiro ia em cada uma das quatro rodadas. O que se afirma aqui:
-//! cortesia vai sem ferramenta e com prompt curto; com o Decisor no ar, a
-//! pergunta de verdade leva o núcleo e o que ele escolheu, e o resto chega com
-//! `load_tools`, sem aparecer na tela; rotina automática (e o chat sem
-//! Decisor, em `ai_decider.rs`) recebe o catálogo inteiro.
+//! cortesia vai sem ferramenta e com prompt curto; pergunta de verdade leva só
+//! o núcleo e o que ela obviamente pede, e o resto chega com `load_tools`, sem
+//! aparecer na tela; rotina automática continua com o catálogo inteiro.
 
 use std::sync::{Arc, Mutex};
 
@@ -15,7 +14,6 @@ use backend::{
     dtos::ai::{ChatMessageInput, TestConnectionResponse},
     services::{
         ai::{
-            decider::config::AiDeciderSettings,
             drivers::traits::{
                 AiChatChunk, AiChatOptions, AiChunkStream, AiDriver, AiMessage, AiTool, AiToolCall,
             },
@@ -35,8 +33,6 @@ use futures::StreamExt;
 use loco_rs::{prelude::AppContext, testing::prelude::*};
 use serde_json::json;
 use serial_test::serial;
-
-use super::fake_ollama::{self, by_keyword};
 
 /// O que o provedor recebeu numa rodada.
 #[derive(Debug, Clone)]
@@ -131,18 +127,7 @@ async fn conversar(
     carga: ToolLoading,
 ) -> (Vec<Rodada>, Vec<HarnessEvent>) {
     let (driver, rodadas) = Gravador::novo(roteiro);
-    // O Decisor de teste só reconhece gráfico; o resto fica para o `load_tools`.
-    let decisor = fake_ollama::start(by_keyword(&[("gráfico", "charts")])).await;
-    let settings = AiSettings {
-        decider: AiDeciderSettings {
-            enabled: true,
-            base_url: decisor.base_url.clone(),
-            model: "laya:322m-multilingual-bf16".into(),
-            timeout_ms: 5_000,
-            ..AiDeciderSettings::default()
-        },
-        ..AiSettings::default()
-    };
+    let settings = AiSettings::default();
     let eventos: Vec<HarnessEvent> = run_agent_loop(
         ctx.clone(),
         settings.clone(),

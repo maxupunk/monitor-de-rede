@@ -1,8 +1,8 @@
-//! Onde o Decisor pede as decisões: o Ollama (nesta máquina ou em outra) ou um
+//! Onde o Decisor pede as decisões: o Ollaya (nesta máquina ou em outra) ou um
 //! serviço de modelos de decisão na nuvem.
 //!
-//! Por trás de todos há só dois formatos de API ([`DecisionProtocol`], ver
-//! `decider::protocols`): o System One da TypeSafe (que o Ollama, Jev,
+//! Por trás de todos há só três formatos de API ([`DecisionProtocol`], ver
+//! `decider::protocols`): o nativo do Ollaya, o System One da TypeSafe (que Jev,
 //! OpenRouter, Vercel, LiteLLM e o Clef da Cloudflare seguem) e o Decisions
 //! da OpenAI. Cada provedor aqui é um preset — formato, endereço padrão,
 //! modelos conhecidos e o que a tela precisa pedir (chave, ID da conta) —
@@ -19,10 +19,9 @@ use crate::dtos::ai::{DeciderProviderModel, DeciderProviderView};
 #[serde(rename_all = "lowercase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub enum DeciderProvider {
-    /// Ollama nesta máquina (o serviço do compose, o mesmo do chat) ou em
-    /// outra.
+    /// Ollaya nesta máquina (o serviço do compose) ou em outra.
     #[default]
-    Ollama,
+    Ollaya,
     /// Jev, da TypeSafe.
     Typesafe,
     /// OpenRouter: Microsoft Decision-1, Perplexity Decider e Jev numa conta só.
@@ -40,10 +39,8 @@ pub enum DeciderProvider {
 #[serde(rename_all = "lowercase")]
 #[ts(export, export_to = "../../frontend/src/bindings/")]
 pub enum DecisionProtocol {
-    /// `POST /v1/systemone` do Ollama, com download, criação e carga de
-    /// modelos pela API nativa (`/api/tags`, `/api/ps`, `/api/pull`,
-    /// `/api/create`).
-    Ollama,
+    /// `POST /api/decide`, com download e carga de modelos.
+    Ollaya,
     /// `POST /v1/systemone` — o formato da TypeSafe.
     #[default]
     Systemone,
@@ -95,16 +92,16 @@ pub struct ProviderPreset {
     pub key_url: Option<&'static str>,
     /// Os textos saem da rede: a tela avisa antes de ligar.
     pub cloud: bool,
-    /// Tempo máximo por pergunta sugerido (rede incluída). No Ollama vale o
+    /// Tempo máximo por pergunta sugerido (rede incluída). No Ollaya vale o
     /// do modelo (`decider::catalog`).
     pub suggested_timeout_ms: u32,
 }
 
 impl ProviderPreset {
-    /// Baixa, lista e carrega modelos na memória — só o Ollama.
+    /// Baixa, lista e carrega modelos na memória — só o Ollaya.
     #[must_use]
     pub fn manages_models(&self) -> bool {
-        self.protocol == Some(DecisionProtocol::Ollama)
+        self.protocol == Some(DecisionProtocol::Ollaya)
     }
 
     #[must_use]
@@ -140,10 +137,10 @@ const CLOUD_TIMEOUT_MS: u32 = 3_000;
 
 pub const PRESETS: &[ProviderPreset] = &[
     ProviderPreset {
-        provider: DeciderProvider::Ollama,
-        label: "Ollama",
-        description: "Modelos abertos no Ollama desta máquina (o mesmo serviço que atende o chat) ou de outra da sua rede. Nada sai da rede.",
-        protocol: Some(DecisionProtocol::Ollama),
+        provider: DeciderProvider::Ollaya,
+        label: "Ollaya",
+        description: "Modelos abertos rodando nesta máquina (o serviço do compose) ou em outra da sua rede. Nada sai da rede.",
+        protocol: Some(DecisionProtocol::Ollaya),
         default_base_url: super::config::DEFAULT_DECIDER_BASE_URL,
         default_model: super::config::DEFAULT_DECIDER_MODEL,
         models: &[],
@@ -284,7 +281,7 @@ mod tests {
     #[test]
     fn todo_provedor_tem_preset() {
         for provider in [
-            DeciderProvider::Ollama,
+            DeciderProvider::Ollaya,
             DeciderProvider::Typesafe,
             DeciderProvider::Openrouter,
             DeciderProvider::Cloudflare,
@@ -296,15 +293,15 @@ mod tests {
     }
 
     #[test]
-    fn so_o_ollama_baixa_modelos_e_so_ele_fica_na_rede() {
+    fn so_o_ollaya_baixa_modelos_e_so_ele_fica_na_rede() {
         for preset in PRESETS {
             assert_eq!(
                 preset.manages_models(),
-                preset.provider == DeciderProvider::Ollama,
+                preset.provider == DeciderProvider::Ollaya,
                 "{}",
                 preset.label
             );
-            assert_eq!(preset.cloud, preset.provider != DeciderProvider::Ollama);
+            assert_eq!(preset.cloud, preset.provider != DeciderProvider::Ollaya);
         }
     }
 

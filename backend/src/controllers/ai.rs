@@ -125,7 +125,7 @@ async fn test_connection(
             let base_url = input
                 .base_url
                 .filter(|u| !u.trim().is_empty())
-                .unwrap_or_else(|| settings::DEFAULT_OLLAMA_BASE_URL.to_string());
+                .unwrap_or_else(|| "http://localhost:11434/v1".to_string());
             Box::new(OpenAiCompatibleDriver::new(
                 "ollama",
                 "Ollama Local",
@@ -306,7 +306,7 @@ async fn list_ollama_models(
         .base_url
         .filter(|u| !u.trim().is_empty())
         .or(settings.ollama_base_url)
-        .unwrap_or_else(|| settings::DEFAULT_OLLAMA_URL.to_string());
+        .unwrap_or_else(|| "http://localhost:11434".to_string());
 
     let models = ollama::list_models(&base_url).await?;
     Ok(format::json(models)?)
@@ -322,7 +322,7 @@ async fn pull_ollama_model(
         .base_url
         .filter(|u| !u.trim().is_empty())
         .or(settings.ollama_base_url)
-        .unwrap_or_else(|| settings::DEFAULT_OLLAMA_URL.to_string());
+        .unwrap_or_else(|| "http://localhost:11434".to_string());
 
     let progress_stream = ollama::pull_model_stream(&base_url, &input.model).await?;
     Ok(pull_progress_sse(progress_stream))
@@ -388,7 +388,7 @@ async fn update_decider(
 }
 
 /// `POST /api/ai/decider/models` — os modelos do provedor do formulário: no
-/// Ollama, o catálogo e o que ele já tem instalado; na nuvem, os do preset.
+/// Ollaya, o catálogo e o que ele já tem instalado; na nuvem, os do preset.
 async fn list_decider_models(
     State(ctx): State<AppContext>,
     Json(input): Json<DeciderFormInput>,
@@ -405,8 +405,8 @@ async fn show_decider_benchmark() -> AppResult<Response> {
     Ok(format::json(report)?)
 }
 
-/// `POST /api/ai/decider/test` — o servidor responde, o modelo está lá, e o que
-/// ele decide para a pergunta de exemplo.
+/// `POST /api/ai/decider/test` — o Ollaya responde, o modelo está lá, e o que ele
+/// decide para a pergunta de exemplo.
 async fn test_decider(
     State(ctx): State<AppContext>,
     Json(input): Json<TestDeciderInput>,

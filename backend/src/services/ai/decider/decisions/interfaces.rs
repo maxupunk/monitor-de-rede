@@ -22,8 +22,7 @@ use crate::services::{
 };
 
 pub const UPLINK: &str = "uplink";
-/// Teto de opções de uma pergunta `choice`: o System One do Ollama aceita de 2
-/// a 255.
+/// Limite de opções de uma pergunta de escolha no Ollaya.
 const MAX_CHOICE_OPTIONS: usize = 254;
 /// Perguntas sim/não por chamada: o resto do limite de 256 fica livre, e a
 /// latência cresce com o número de perguntas.
@@ -136,7 +135,7 @@ fn scaled(value: u64, step: u64, units: &[&str]) -> String {
 }
 
 /// As interfaces que vale perguntar: sem loopback, as ativas e com mais
-/// tráfego primeiro, até o limite de opções de uma escolha — o do Ollama ou,
+/// tráfego primeiro, até o limite de opções de uma escolha — o do Ollaya ou,
 /// se menor, o do modelo (`max_options`, ver `decider::catalog`). Como a lista
 /// já vem por relevância, o corte tira só as menos prováveis de ser o uplink.
 #[must_use]
@@ -291,7 +290,7 @@ mod tests {
     }
 
     #[test]
-    fn respeita_os_limites_do_ollama() {
+    fn respeita_os_limites_do_ollaya() {
         let list: Vec<InterfaceCandidate> = (1..=400)
             .map(|n| iface(n, &format!("p{n}"), 0, true))
             .collect();

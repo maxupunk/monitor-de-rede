@@ -1,6 +1,6 @@
 //! Categoria de eventos de log pelo Decisor, e o filtro que ela habilita.
 //!
-//! O que se afirma aqui, contra o Ollama falso: cada padrão é classificado uma
+//! O que se afirma aqui, contra o Ollaya falso: cada padrão é classificado uma
 //! vez (duas linhas de "login failure" com IPs diferentes são uma pergunta
 //! só); `GET /api/logs?category=` filtra por ela e a página traz o padrão com
 //! o modelo de alerta que o cobre; e a correção do operador vence o palpite.
@@ -25,7 +25,7 @@ use serde_json::json;
 use serial_test::serial;
 
 use super::{
-    fake_ollama::{self, by_keyword},
+    fake_ollaya::{self, by_keyword, with_key},
     prepare_data,
 };
 
@@ -63,7 +63,8 @@ async fn line(logs: &DatabaseConnection, message: &str) -> i64 {
 #[serial]
 async fn classifica_por_padrao_filtra_e_respeita_a_correcao() {
     request_with_config::<App, _, _>(RequestConfig::default(), |request, ctx| async move {
-        let fake = fake_ollama::start(by_keyword(&[
+        with_key();
+        let fake = fake_ollaya::start(by_keyword(&[
             ("login failure", "auth_failure"),
             ("link down", "link_change"),
         ]))
@@ -147,7 +148,8 @@ async fn classifica_por_padrao_filtra_e_respeita_a_correcao() {
 #[serial]
 async fn frente_desligada_nao_classifica() {
     request_with_config::<App, _, _>(RequestConfig::default(), |_request, ctx| async move {
-        let fake = fake_ollama::start(by_keyword(&[("login failure", "auth_failure")])).await;
+        with_key();
+        let fake = fake_ollaya::start(by_keyword(&[("login failure", "auth_failure")])).await;
         // O padrão já sai com `log_events: false`.
         settings::save_decider(&ctx.db, fake.settings())
             .await

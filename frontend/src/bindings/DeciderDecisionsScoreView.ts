@@ -10,7 +10,6 @@ export type DeciderDecisionsScoreView = {
  */
 overall: number, 
 /**
- * 95% das decisões responderam até aqui, em CPU; `None` quando o modelo
- * foi medido só na GPU.
+ * 95% das decisões responderam até aqui, em CPU.
  */
-p95Ms: number | null, };
+p95Ms: number, };
